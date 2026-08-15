@@ -25,6 +25,9 @@ interface CajonResponse {
 interface Member {
   usuarioId: string;
 }
+interface AltaResponse {
+  usuarioId: string;
+}
 
 async function login(
   app: INestApplication<App>,
@@ -172,6 +175,7 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
   describe('allow-list de usuarios por cajón', () => {
     let cajonId: string;
     let miembros: string[];
+    let usuarioIdFalabella: string;
 
     beforeAll(async () => {
       const resMiembros = await request(app.getHttpServer())
@@ -183,6 +187,37 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
       expect(Array.isArray(resMiembros.body)).toBe(true);
       miembros = (resMiembros.body as Member[]).map((m) => m.usuarioId);
       expect(miembros.length).toBeGreaterThanOrEqual(2);
+
+      // Un usuario REAL de Falabella (no un uuid inventado) para el caso de
+      // "ajeno al tenant": la validación de `setUsuarios` cuenta
+      // `where: { tenantId, usuarioId: In(ids) }`, que da 0 tanto para un id
+      // inexistente como para uno que existe pero es de otro tenant. Un uuid
+      // fabricado no distingue esas dos causas.
+      //
+      // ⚠️ No sirve tomar el primer miembro de `GET /tenants/members` de
+      // Falabella: su único miembro sembrado es `admin@sistema.com`, que
+      // también es miembro de Paris (superadmin en los dos tenants — ver
+      // `seedUsuariosTenants`). Ese id SÍ pasaría la validación en Paris, y el
+      // 400 esperado no ocurriría. Por eso se da de alta una cuenta nueva
+      // dentro de Falabella (mismo fixture que usa
+      // `alta-usuarios-tenant.e2e-spec.ts` para el mismo problema): esa sí es
+      // miembro de Falabella exclusivamente.
+      const resRolesFalabella = await request(app.getHttpServer())
+        .get('/api/roles')
+        .set('Authorization', `Bearer ${tokenFalabella}`);
+      expect(resRolesFalabella.status).toBe(200);
+      const rolIdFalabella = (resRolesFalabella.body as { id: string }[])[0].id;
+
+      const resAltaFalabella = await request(app.getHttpServer())
+        .post('/api/tenants/usuarios')
+        .set('Authorization', `Bearer ${tokenFalabella}`)
+        .send({
+          nombre: 'E2E Cajones Ajeno',
+          correo: `e2e-cajones-ajeno-${Date.now()}@falabella.cl`,
+          rolIds: [rolIdFalabella],
+        });
+      expect(resAltaFalabella.status).toBe(201);
+      usuarioIdFalabella = (resAltaFalabella.body as AltaResponse).usuarioId;
 
       const resCajon = await request(app.getHttpServer())
         .post('/api/cajones')
@@ -224,7 +259,7 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
       const resPut = await request(app.getHttpServer())
         .put(`/api/cajones/${cajonId}/usuarios`)
         .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({ usuarioIds: ['00000000-0000-4000-8000-000000000000'] });
+        .send({ usuarioIds: [usuarioIdFalabella] });
       expect(resPut.status).toBe(400);
     });
 

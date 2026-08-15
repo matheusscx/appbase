@@ -20,6 +20,7 @@ import { RolesService } from './roles.service';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
 import { AssignUserDto } from './dto/assign-user.dto';
+import { SetPermissionsDto } from './dto/set-permissions.dto';
 import { JwtUser } from '../../common/interfaces/jwt-user.interface';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -100,14 +101,14 @@ export class RolesController {
     @Param('id') id: string,
     @Param('moduloTenantId') moduloTenantId: string,
     @Req() req: Request,
-    @Body() body: { moduloAppPermisoIds: string[] },
+    @Body() dto: SetPermissionsDto,
   ) {
     const user = req.user as JwtUser;
     return this.rolesService.setPermissions(
       id,
       moduloTenantId,
       user.tenantId!,
-      body.moduloAppPermisoIds,
+      dto.moduloAppPermisoIds,
     );
   }
 }

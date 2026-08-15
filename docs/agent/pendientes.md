@@ -267,169 +267,9 @@ el único Postgres y por lo tanto va **en serie**.
 `resueltos.md`: reparte por **dueño de archivo y recurso compartido**, no por cantidad; los
 agentes corren solo su propio spec; el gate completo lo corre el principal al final.
 
-- [ ] **Queda un tercer gemelo del criterio de permisos sin atar el tenant: `findMembers`**
-  (backend, **hallado por la revisión independiente el 2026-08-15**) —
-  `tenants.service.ts:338` hace `LEFT JOIN roles r ON r.rol_id = ru.rol_id AND
-  r.eliminado_el IS NULL`, **sin `r.tenant_id = ru.tenant_id`**. Es el mismo patrón que ya
-  se corrigió en `rbac.service.ts` (cinco consultas) y en `garzones.service.ts`
-  (`assertVinculable`) — ver [`resueltos.md`](resueltos.md). Se deja aparte y no de arrastre
-  porque **acá el JOIN es `LEFT`, y ahí `ON` y `WHERE` NO son intercambiables**: puesto en
-  el `ON` deja la fila del miembro y anula el nombre del rol; puesto en el `WHERE` haría
-  desaparecer al miembro entero de la lista. Elegir cuál es la conducta correcta es una
-  decisión, no un copy-paste de las otras dos.
-  ⚠️ **Impacto bajo:** es de lectura y solo muestra el nombre del rol en el roster de
-  miembros; no gatea ningún acceso. Pero mientras siga así, "el criterio de permisos ata el
-  tenant en todos lados" es falso, y la próxima búsqueda por el patrón lo va a volver a
-  encontrar.
-  ℹ️ **Lección del método, ya aplicada dos veces esta semana:** los tres aparecieron
-  grepeando **el repo entero**, no la carpeta del módulo. Buscar por conducta
-  (`roles_usuarios` unido a `roles`), no por el archivo donde se sospecha.
-
-- [ ] **A `roles.service.ts` le falta cobertura en todo lo que no es `assignUser`**
-  (backend/tests, **reducida el 2026-08-15**) — la entrada original decía *"`roles` y `rbac`
-  no tienen un solo test unitario"*; los dos módulos ya tienen spec (ver
-  [`resueltos.md`](resueltos.md)). `rbac.service.ts` quedó cubierto entero —sus cinco
-  consultas y los caminos que conceden y niegan—. Lo que sigue sin nada que se ponga rojo es
-  el resto de `RolesService`: **`setPermissions`, `findPermissions`, `create`, `update` y
-  `remove`**. `setPermissions` es el más caro de los cinco: tiene su propia entrada acá abajo
-  (no es transaccional y su body no se valida), y cerrarla sin test la deja igual de
-  desprotegida que antes. Los e2e que rozan roles (`alta-usuarios-tenant`,
-  `invitacion-y-reset`, `garzon-modo-personal`) los ejercitan de costado, no como sujeto.
-  Sigue valiendo la prioridad: los tests que **conceden** acceso antes que los que lo niegan.
-
-- [ ] **Un `nombre: null` en los catálogos revienta con 500 en vez de 400** (backend,
-  **hallado por la revisión independiente el 2026-08-15**) — `@IsOptional()` de
-  `class-validator` trata `null` igual que `undefined`, así que un
-  `PATCH {"nombre": null}` **pasa la validación**; después el service hace
-  `dto.nombre.trim()` sobre `null` y sale un `TypeError` sin controlar. Afecta a los tres
-  services de catálogos (`causas-merma`, `motivos-diferencia`,
-  `motivos-diferencia-inventario`).
-  ⚠️ **Es preexistente, no lo introdujo el `@Transform`** que se agregó el 2026-08-15 (ver
-  [`resueltos.md`](resueltos.md)): `@IsOptional()` ya se comportaba así antes. Se separa
-  porque el arreglo no es el mismo —hay que decidir entre `@IsNotIn([null])`, cambiar el
-  `if (dto.nombre !== undefined)` de los tres services por un chequeo de `!= null`, o
-  ambos— y porque el impacto es distinto: acá no queda un dato corrupto, queda un 500 feo.
-
-- [ ] **El tenant puede dejarse sin nombre a sí mismo** (backend, **medido el 2026-08-15 al
-  cerrar la entrada gemela de causas y motivos**) — `update-my-tenant.dto.ts` declara
-  `nombre?: string` con `@IsString() @IsOptional() @MaxLength(...)` y **sin `@IsNotEmpty()`**:
-  exactamente el mismo hueco que se acaba de cerrar en los tres DTOs de catálogos (ver
-  [`resueltos.md`](resueltos.md)). Un `PATCH /tenants/me` con `{"nombre": ""}` pasa la
-  validación.
-  🔎 **Cómo apareció, que es la parte que vale:** no estaba en ninguna lista. Salió de buscar
-  **por conducta** en todo `src/**/dto/` —campos `string` opcionales con `@MaxLength` y sin
-  `@IsNotEmpty()`— en vez de por el nombre de archivo. Ese barrido dio **9 sitios**; siete son
-  `comentario`, `apellido` y `telefono`, donde vacío es legítimo y **no hay que tocarlos**.
-  Los únicos dos que son identidad son `nombre`, y éste es el que quedó afuera del alcance de
-  aquella entrada.
-  ⚠️ **Y el barrido tenía un punto ciego**, señalado por la revisión: filtraba por
-  `@MaxLength`, así que **no vio `me/dto/update-perfil.dto.ts`** (`nombre?: string` con solo
-  `@IsString() @IsOptional()`, sin `@MaxLength` ni `@IsNotEmpty()`). Es el mismo patrón y
-  entra en esta entrada: son **dos** campos de identidad a revisar, el del tenant y el del
-  perfil del usuario.
-  ⚠️ **Y el arreglo no es solo `@IsNotEmpty()`**: ése rechaza `''` pero no `'   '`. El patrón
-  correcto del repo es el `@Transform` que trimea antes de validar (`RestaurarDto`, y ahora
-  los tres DTOs de catálogos). Ese detalle costó un BLOQUEA en la revisión.
-  Se deja aparte porque no es un catálogo: el nombre del tenant sale en documentos y hay que
-  mirar si el service ya lo defiende por otro lado antes de sumar el decorador.
-
-- [ ] **Dos tests de aislamiento por tenant que no aíslan nada** (backend/tests, auditoría
-  RBAC/auth 2026-08-15) — los dos prometen en el nombre lo que su aserción no sostiene, y en los
-  dos **el mutante sobrevive** (verificado):
-  1. **Razones sociales** — `tenants.service.spec.ts` → *"lanza NotFoundException si no pertenece
-     al tenant"* hace `razonSocialRepo.findOne.mockResolvedValue(null)` y **nunca mira con qué
-     `where` lo llamaron**. Cambiar `where: { id, tenantId }` por `where: { id }` en las tres
-     funciones (`updateRazonSocial`, `removeRazonSocial`, `setPreferida`) deja los tres tests en
-     verde. Y **no hay red de e2e: cero specs ejercitan razones sociales** (medido). Detrás hay
-     RUT, dirección y banderas fiscales de otra empresa.
-  2. **Cajones** — `cajones.e2e-spec.ts` → *"un usuarioId ajeno al tenant devuelve 400"* manda
-     un UUID **inexistente** (`00000000-…`), no un usuario real de otro tenant. La validación
-     cuenta `where: { tenantId, usuarioId: In(ids) }`, que da 0 con o sin el filtro de tenant:
-     el test no distingue las dos causas.
-  ⚠️ **Severidad media, no alta: el código está bien hoy.** Lo que falta es la red que avisaría
-  si mañana alguien toca esa línea. Pero **entre los huecos de test estos dos van primero**,
-  porque son los únicos que *pretenden* cubrir un aislamiento y no lo cubren — un hueco
-  declarado es peor que uno conocido.
-  ℹ️ El proyecto **ya sabe** escribir el test correcto: `recuentos.e2e-spec.ts` arma el mismo
-  caso con un id real de otro tenant y lo comenta (*"no un uuid inventado"*). No falta el
-  criterio; faltó aplicarlo acá.
-
-- [ ] **`setPermissions` no es atómico y su body no se valida** (backend, auditoría RBAC/auth
-  2026-08-15) — dos defectos del mismo método, se arreglan juntos:
-  1. **No es transaccional.** `roles.service.ts` → `setPermissions` hace `delete` de todos los
-     permisos del par (rol, módulo) y **después** `save` de los nuevos, sin
-     `dataSource.transaction`. **No hace falta concurrencia:** si el `save` falla por cualquier
-     motivo, el `delete` ya commiteó y **el rol se queda sin ningún permiso en ese módulo**. La
-     carrera entre dos admins —que también existe, y repone un permiso que uno revocó con los
-     dos `PUT` devolviendo 200— es una consecuencia de la misma falta de atomicidad, no la causa.
-  2. **El `@Body()` está tipado con una interfaz TS inline**, no con una clase de
-     `class-validator` (`roles.controller.ts:103`). En runtime el `metatype` reflejado es
-     `Object`, que `ValidationPipe` **excluye**: el pipe no corre en absoluto sobre este
-     endpoint. Un `PUT {}` llega a `moduloAppPermisoIds.length` sobre `undefined` → 500; un
-     `PUT {"moduloAppPermisoIds": []}` cae en la rama `else` y **desvincula el rol del módulo**,
-     destructivo por default. Es admin-only, así que no es agujero de seguridad: es un 500 y un
-     borrado que nadie pidió.
-  Ningún test ejercita este endpoint, y `roles.service.ts` no tiene spec.
-
-- [ ] **Dos descuidos chicos de membresía, con el arreglo ya escrito en su hermano** (backend,
-  auditoría RBAC/auth 2026-08-15):
-  1. **`switchTenant` no mira si el tenant destino está borrado.** Solo chequea
-     `usuarios_tenants`, nunca `tenants.eliminado_el` — a diferencia de su hermano
-     `getMyTenants`, que sí. Con un tenant soft-borrado por el superadmin y una membresía viva,
-     responde 200 con un token para un tenant muerto. El daño está acotado porque `TenantGuard`
-     corta en la ruta siguiente; el problema es que promete algo que no existe.
-  2. **Re-agregar a alguien le resucita `es_totem`.** `addMember`/`crearUsuario` restauran la
-     fila soft-borrada de `usuarios_tenants` limpiando solo `eliminadoEl`, sin resetear
-     `esTotem`. Una cuenta que era tótem vuelve a serlo sin que el admin lo pida — y eso puede
-     **bloquear en silencio** un intento posterior de vincularle un garzón personal, porque el
-     tótem es override duro. Es la misma familia que el `addMember` que devuelve roles viejos,
-     que está en Vigilancia como decisión deliberada; **este no lo es**: nadie decidió que el
-     tótem sobreviviera a la baja.
-
-- [ ] **El alta de usuario no traduce la colisión y devuelve un 500 crudo** (backend, auditoría
-  RBAC/auth 2026-08-15) — `tenants.service.ts` → `crearUsuario` hace check-then-act (SELECT por
-  correo y membresía, después INSERT) **sin `catch` del `23505`**, a diferencia de `updateMine()`
-  sesenta líneas más abajo en el mismo archivo y del patrón repetido en 9+ módulos del repo.
-  Los índices únicos existen en los tres lugares, así que **la carrera no duplica datos** — el
-  perdedor simplemente ve un 500 genérico donde correspondía un 409 accionable. `tenants.service.spec.ts`
-  cubre la atomicidad y el rollback de este método, pero ningún test dispara el `23505` acá.
-
-- [ ] **Ningún e2e asierta el efecto de invalidar al vincular** (backend, **medido 2026-08-15**)
-  — el mutante que quita `garzon.pinHash = PIN_INUTILIZABLE` de la rama `vincular` de
-  `actualizar()` **no pone nada en rojo en el e2e**. La transición sí se recorre —
-  `caja-testigo.e2e-spec.ts:383-387` vincula al garzón B por `PATCH` después de abrirle sesión
-  con su PIN vivo, y `:771` hace lo mismo con D — así que **falta la aserción, no el escenario**:
-  alcanza con un `expect` sobre ese PIN después del PATCH. En unit sí está cubierto.
-
-- [ ] **`miPin` hace cuatro consultas donde alcanzan tres** (backend, **medido 2026-08-15**) —
-  `GarzonesService.miPin()` (`garzones.service.ts:688-697`) llama `miGarzonOrThrow()`, que ya
-  hace dos consultas (`garzonPersonalDe` para resolver el `garzonId` + `findOneOrFail` para
-  traer la fila completa del garzón, con su `pinHash`). Después llama
-  `listarEventosPin(tenantId, garzon.id)`, que **vuelve a buscar el mismo garzón**
-  (`getOrThrow`, `garzones.service.ts:1037-1043`) antes de traer los eventos. La cuarta consulta
-  es redundante: el garzón que `getOrThrow` re-busca es el mismo que `miGarzonOrThrow` ya tiene
-  en memoria. No es el N+1 que preocupa la tanda 🔴 (es una sola llamada, no una por fila), pero
-  es una consulta de más en una ruta que golpea cada carga del perfil y de `/salones` en modo
-  personal.
-
-- [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
-  (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
-  de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
-  `LIMIT`/paginación. Hoy con pocos eventos por garzón no se nota, pero es una tabla que solo
-  crece —el diseño explícitamente decidió guardar todo, no solo el último cambio— y la alimentan
-  dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
-  /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
-  garzón activo, la consulta y el payload crecen sin techo.
-
-- [ ] **Una venta con un ítem en moneda extranjera no está cubierta en ningún nivel**
-  (backend/tests, medido 2026-08-11) — `ventas.service.spec.ts` tiene una sola moneda con
-  `valor_del_dia = '1'`, así que multiplicar o dividir por la tasa da lo mismo y el test no
-  distingue; el e2e tampoco lo ejercita. **Ya era ciego antes** del arreglo del redondeo (con
-  la conversión inline pasaba igual), pero ahora esa ceguera es permanente desde ventas: el
-  spec mockea `convertirAMonedaOficial`, así que un fixture en moneda extranjera ejercitaría
-  el mock y no el código. La cobertura tiene que venir de un e2e con un ítem en otra moneda.
-
----
+✅ **Vacía desde el 2026-08-15.** Las 22 entradas que tenía salieron en dos tandas
+paralelizadas (ver [`resueltos.md`](resueltos.md)); una se elevó a la sección 4 porque no era
+mecánica. Lo que caiga acá de ahora en más es material nuevo.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1435,6 +1275,31 @@ encontrar**: dependencias entre entradas, carreras adentro del arreglo, docs que
 corregir en el mismo commit, y costos que el owner asumió explícitamente.
 La única que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
 una respuesta.
+
+- [ ] 🔵 **¿El historial de PIN se pagina o se topea?** (backend + frontend, **elevado desde
+  la sección mecánica el 2026-08-15**) — se intentó cerrar como mecánica y **no lo es**: las
+  dos salidas cambian cosas distintas y ninguna es neutral.
+  · **Topear con un `LIMIT` fijo** no toca el contrato, pero **recorta la historia sin
+    decirlo**: las dos pantallas muestran menos eventos y nada avisa que hay más.
+  · **Paginar de verdad** con el patrón que el repo ya usa en 8+ módulos
+    (`PaginationQueryDto` + `resolvePagination`/`buildPaginationMeta`) cambia el shape de la
+    respuesta a `{ data, meta }`, así que toca el controller y **las dos pantallas** que lo
+    consumen (la ficha del encargado y el perfil del garzón).
+  **La pregunta concreta: ¿alguien necesita ver el historial completo de PIN de un garzón, o
+  con los últimos N alcanza?** Si alcanza, ¿cuántos? La respuesta decide cuál de las dos.
+
+  <details><summary>Lo medido cuando era mecánica (histórico)</summary>
+
+- [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
+  (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
+  de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
+  `LIMIT`/paginación. Hoy con pocos eventos por garzón no se nota, pero es una tabla que solo
+  crece —el diseño explícitamente decidió guardar todo, no solo el último cambio— y la alimentan
+  dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
+  /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
+  garzón activo, la consulta y el payload crecen sin techo.
+
+  </details>
 
 - [ ] **La barrida del `expect` en el login dejó una pregunta abierta que no es mecánica:
   ¿el arranque debe negarse a levantar sin `SMTP_HOST` en producción?** (backend + producto,

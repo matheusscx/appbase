@@ -174,6 +174,62 @@ describe('TenantsService', () => {
     });
   });
 
+  describe('addMember', () => {
+    it('revive la membresía soft-borrada sin arrastrar el tótem viejo', async () => {
+      // El tótem es override duro: revivir en silencio con `es_totem` en
+      // `true` bloquea sin explicación un vínculo de garzón posterior.
+      // Nadie pidió que sobreviviera a la baja — ver docs/agent/pendientes.md.
+      const existente = {
+        tenantId: 'tenant-uuid',
+        usuarioId: 'usuario-uuid',
+        esTotem: true,
+        eliminadoEl: new Date(),
+      };
+      usuarioTenantRepo.findOne.mockResolvedValue(existente);
+      usuarioTenantRepo.save.mockImplementation((row: unknown) =>
+        Promise.resolve(row),
+      );
+
+      const result = await service.addMember('tenant-uuid', 'usuario-uuid');
+
+      expect(usuarioTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ eliminadoEl: null, esTotem: false }),
+      );
+      expect(result).toMatchObject({ eliminadoEl: null, esTotem: false });
+    });
+
+    it('una membresía viva (no borrada) no se reescribe', async () => {
+      const viva = {
+        tenantId: 'tenant-uuid',
+        usuarioId: 'usuario-uuid',
+        esTotem: true,
+        eliminadoEl: null,
+      };
+      usuarioTenantRepo.findOne.mockResolvedValue(viva);
+
+      await service.addMember('tenant-uuid', 'usuario-uuid');
+
+      expect(usuarioTenantRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findMembers', () => {
+    it('el JOIN a roles ata también el tenant_id, no solo el rol_id', async () => {
+      // El `LEFT JOIN roles_usuarios` ya filtra por `ru.tenant_id = ut.tenant_id`,
+      // pero el `LEFT JOIN roles` siguiente unía solo por `rol_id` — un
+      // `roles_usuarios` corrupto que apuntara a un rol de otro tenant mostraría
+      // ese nombre de rol ajeno en el roster. Va en el `ON`, no en el `WHERE`:
+      // con `LEFT JOIN` puesto en el `WHERE` haría desaparecer al miembro entero
+      // cuando no tiene rol asignado (r todo NULL), no solo el nombre del rol.
+      dataSource.query.mockResolvedValue([]);
+      await service.findMembers('tenant-uuid');
+      const [sql] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(
+        /LEFT JOIN roles r ON r\.rol_id = ru\.rol_id AND r\.tenant_id = ru\.tenant_id/,
+      );
+    });
+  });
+
   const mockRazonSocial: RazonSocial = {
     id: 'rs-uuid',
     tenantId: 'tenant-uuid',
@@ -233,6 +289,12 @@ describe('TenantsService', () => {
       await expect(
         service.updateRazonSocial('tenant-uuid', 'otro-id', { nombre: 'X' }),
       ).rejects.toThrow(NotFoundException);
+      // No alcanza con que la excepción salga: el mock devuelve `null` pase lo
+      // que pase, así que sin esto el test seguía en verde aunque el `where`
+      // dejara de filtrar por tenant (mutante verificado).
+      expect(razonSocialRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'otro-id', tenantId: 'tenant-uuid' },
+      });
     });
   });
 
@@ -252,6 +314,11 @@ describe('TenantsService', () => {
       await expect(
         service.removeRazonSocial('tenant-uuid', 'no-existe'),
       ).rejects.toThrow(NotFoundException);
+      // Misma razón que en `updateRazonSocial`: sin verificar el `where`, el
+      // mock (`null` fijo) deja pasar un filtro que perdió `tenantId`.
+      expect(razonSocialRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'no-existe', tenantId: 'tenant-uuid' },
+      });
     });
   });
 
@@ -293,6 +360,12 @@ describe('TenantsService', () => {
         service.setPreferida('tenant-uuid', 'no-existe'),
       ).rejects.toThrow(NotFoundException);
       expect(mockManager.query).not.toHaveBeenCalled();
+      // Misma razón que en `updateRazonSocial`/`removeRazonSocial`: el mock
+      // devuelve `null` sin mirar los argumentos, así que sin esto el `where`
+      // podía perder `tenantId` y el test seguía en verde.
+      expect(mockManager.findOne).toHaveBeenCalledWith(RazonSocial, {
+        where: { id: 'no-existe', tenantId: 'tenant-uuid' },
+      });
     });
 
     it('lanza BadRequestException si la razón social está deshabilitada', async () => {
@@ -574,6 +647,90 @@ describe('TenantsService', () => {
       // de la transacción, así que cualquier throw ya lo saltea. Se afirma para
       // que quede escrito que un alta sin commit no manda link.
       expect(mail.enviar).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Camino 2 del alta ("el correo existe pero no es miembro"): revive una
+   * `UsuarioTenant` soft-borrada. Mismo motivo que el test de `addMember` de
+   * más arriba — nadie pidió que el tótem sobreviviera a la baja.
+   */
+  describe('crearUsuario — revive membresía sin arrastrar el tótem', () => {
+    it('el `miembro` revivido pierde `esTotem`, no solo `eliminadoEl`', async () => {
+      const miembroBorrado = {
+        usuarioId: 'usuario-previo',
+        tenantId: 'tenant-uuid',
+        esTotem: true,
+        eliminadoEl: new Date(),
+      };
+      const rolId = '550e8400-e29b-41d4-a716-446655440001';
+      const managerCamino2 = {
+        query: jest.fn((sql: string) =>
+          Promise.resolve(
+            sql.includes('FROM roles') ? [{ rol_id: rolId }] : [],
+          ),
+        ),
+        // `usuarioPrevio` no-null: el correo YA tiene una cuenta.
+        createQueryBuilder: jest.fn(() => ({
+          select: () => ({
+            where: () => ({
+              getOne: () => Promise.resolve({ id: 'usuario-previo' }),
+            }),
+          }),
+        })),
+        findOne: jest.fn().mockResolvedValue(miembroBorrado),
+        save: jest.fn((_entidad: unknown, fila: object) =>
+          Promise.resolve(fila),
+        ),
+      };
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof managerCamino2) => unknown) => cb(managerCamino2),
+      );
+
+      await service.crearUsuario('tenant-uuid', {
+        nombre: 'Ana',
+        correo: 'ana@paris.cl',
+        rolIds: [rolId],
+      });
+
+      expect(managerCamino2.save).toHaveBeenCalledWith(
+        UsuarioTenant,
+        expect.objectContaining({ eliminadoEl: null, esTotem: false }),
+      );
+    });
+  });
+
+  /**
+   * `crearUsuario` hace check-then-act (SELECT por correo, después INSERT) y
+   * hasta acá no traducía la carrera: el perdedor de dos altas concurrentes
+   * con el mismo correo recibía el `23505` crudo de Postgres — un 500 donde
+   * correspondía el mismo 409 que ya tira el chequeo deliberado ("ese correo
+   * ya es miembro de este tenant"). Mismo patrón que `updateMine`, sesenta
+   * líneas más arriba en este archivo.
+   */
+  describe('crearUsuario — traduce el 23505 de la carrera', () => {
+    it('el perdedor de la carrera recibe ConflictException, no el 500 crudo', async () => {
+      dataSource.transaction.mockRejectedValue({ code: '23505' });
+
+      await expect(
+        service.crearUsuario('tenant-uuid', {
+          nombre: 'Ana',
+          correo: 'ana@paris.cl',
+          rolIds: ['550e8400-e29b-41d4-a716-446655440001'],
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('otros errores de la transacción NO se disfrazan de conflicto', async () => {
+      dataSource.transaction.mockRejectedValue(new Error('deadlock detected'));
+
+      await expect(
+        service.crearUsuario('tenant-uuid', {
+          nombre: 'Ana',
+          correo: 'ana@paris.cl',
+          rolIds: ['550e8400-e29b-41d4-a716-446655440001'],
+        }),
+      ).rejects.toThrow('deadlock detected');
     });
   });
 });

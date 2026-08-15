@@ -335,7 +335,8 @@ export class TenantsService {
        JOIN usuarios u ON u.usuario_id = ut.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN roles_usuarios ru ON ru.usuario_id = ut.usuario_id
             AND ru.tenant_id = ut.tenant_id AND ru.eliminado_el IS NULL
-       LEFT JOIN roles r ON r.rol_id = ru.rol_id AND r.eliminado_el IS NULL
+       LEFT JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
+            AND r.eliminado_el IS NULL
        WHERE ut.tenant_id = $1
          AND ut.eliminado_el IS NULL
        ORDER BY u.nombre, u.apellido`,
@@ -409,7 +410,14 @@ export class TenantsService {
 
     if (existing) {
       if (existing.eliminadoEl) {
+        // El tótem es override duro: si esta cuenta lo era antes de la baja,
+        // resucitarla en silencio con `es_totem` todavía en `true` bloquea
+        // sin explicación un intento posterior de vincularle un garzón
+        // personal. Nadie decidió que el tótem sobreviviera a la baja — el
+        // admin que vuelve a sumar a alguien está dando de alta una cuenta
+        // normal, no restaurando la configuración vieja.
         existing.eliminadoEl = null;
+        existing.esTotem = false;
         return this.usuarioTenantRepo.save(existing);
       }
       return existing;
@@ -461,125 +469,150 @@ export class TenantsService {
     invitado: boolean;
   }> {
     let invitacion: string | undefined;
-    const resultado = await this.dataSource.transaction(async (manager) => {
-      // Los roles se validan contra ESTE tenant: no hay roles globales
-      // (verificado), así que sin este chequeo un admin podría asignar el rol de
-      // otra empresa pasando su id.
-      const rolesDelTenant = await manager.query<{ rol_id: string }[]>(
-        `SELECT rol_id FROM roles
+    let resultado: { usuarioId: string; correo: string };
+    try {
+      resultado = await this.dataSource.transaction(async (manager) => {
+        // Los roles se validan contra ESTE tenant: no hay roles globales
+        // (verificado), así que sin este chequeo un admin podría asignar el rol de
+        // otra empresa pasando su id.
+        const rolesDelTenant = await manager.query<{ rol_id: string }[]>(
+          `SELECT rol_id FROM roles
           WHERE rol_id = ANY($1::uuid[]) AND tenant_id = $2
             AND eliminado_el IS NULL`,
-        [dto.rolIds, tenantId],
-      );
-      if (rolesDelTenant.length !== dto.rolIds.length) {
-        throw new BadRequestException(
-          'Alguno de los roles no existe en este tenant',
+          [dto.rolIds, tenantId],
         );
-      }
-
-      // El correo se normaliza ANTES de buscar y de guardar, no solo al
-      // comparar. Buscar en minúsculas y guardar como vino tapaba la mitad del
-      // problema: no se duplicaba la cuenta, pero el admin que tipea
-      // `Juan.Perez@x.cl` dejaba dos formas del mismo correo dando vueltas: una
-      // en la base y otra en el mail de invitación. Con el login ya
-      // case-insensitive (`UsersService.findByEmail`), guardar normalizado deja
-      // una sola forma canónica.
-      const correo = dto.correo.trim().toLowerCase();
-
-      // Solo el id: el resto del `Usuario` —incluido el hash— no se usa.
-      const usuarioPrevio = await manager
-        .createQueryBuilder(Usuario, 'u')
-        .select('u.id')
-        .where('LOWER(u.correo) = :correo', { correo })
-        .getOne();
-
-      let usuarioId: string;
-
-      if (usuarioPrevio) {
-        // ⚠️ `withDeleted` es obligatorio: `UsuarioTenant` tiene
-        // `@DeleteDateColumn`, así que sin esto TypeORM filtra las borradas, la
-        // rama de revivir queda INALCANZABLE y volver a dar de alta a alguien
-        // que se eliminó del tenant respondía 201 sin asociarlo — el admin veía
-        // éxito y la persona seguía afuera. Mismo recurso que `addMember`.
-        const miembro = await manager.findOne(UsuarioTenant, {
-          where: { usuarioId: usuarioPrevio.id, tenantId },
-          withDeleted: true,
-        });
-        if (miembro && !miembro.eliminadoEl) {
-          throw new ConflictException(
-            'Ese correo ya es miembro de este tenant. Editá sus roles desde la tabla.',
+        if (rolesDelTenant.length !== dto.rolIds.length) {
+          throw new BadRequestException(
+            'Alguno de los roles no existe en este tenant',
           );
         }
-        usuarioId = usuarioPrevio.id;
-        if (miembro) {
-          miembro.eliminadoEl = null;
-          await manager.save(UsuarioTenant, miembro);
+
+        // El correo se normaliza ANTES de buscar y de guardar, no solo al
+        // comparar. Buscar en minúsculas y guardar como vino tapaba la mitad del
+        // problema: no se duplicaba la cuenta, pero el admin que tipea
+        // `Juan.Perez@x.cl` dejaba dos formas del mismo correo dando vueltas: una
+        // en la base y otra en el mail de invitación. Con el login ya
+        // case-insensitive (`UsersService.findByEmail`), guardar normalizado deja
+        // una sola forma canónica.
+        const correo = dto.correo.trim().toLowerCase();
+
+        // Solo el id: el resto del `Usuario` —incluido el hash— no se usa.
+        const usuarioPrevio = await manager
+          .createQueryBuilder(Usuario, 'u')
+          .select('u.id')
+          .where('LOWER(u.correo) = :correo', { correo })
+          .getOne();
+
+        let usuarioId: string;
+
+        if (usuarioPrevio) {
+          // ⚠️ `withDeleted` es obligatorio: `UsuarioTenant` tiene
+          // `@DeleteDateColumn`, así que sin esto TypeORM filtra las borradas, la
+          // rama de revivir queda INALCANZABLE y volver a dar de alta a alguien
+          // que se eliminó del tenant respondía 201 sin asociarlo — el admin veía
+          // éxito y la persona seguía afuera. Mismo recurso que `addMember`.
+          const miembro = await manager.findOne(UsuarioTenant, {
+            where: { usuarioId: usuarioPrevio.id, tenantId },
+            withDeleted: true,
+          });
+          if (miembro && !miembro.eliminadoEl) {
+            throw new ConflictException(
+              'Ese correo ya es miembro de este tenant. Editá sus roles desde la tabla.',
+            );
+          }
+          usuarioId = usuarioPrevio.id;
+          if (miembro) {
+            // Mismo motivo que `addMember`: revivir la membresía no puede
+            // resucitar en silencio un `es_totem` de una configuración
+            // anterior — nadie lo pidió, y un tótem fantasma bloquea sin
+            // explicación un vínculo de garzón personal más tarde.
+            miembro.eliminadoEl = null;
+            miembro.esTotem = false;
+            await manager.save(UsuarioTenant, miembro);
+          } else {
+            await manager.save(
+              UsuarioTenant,
+              manager.create(UsuarioTenant, { tenantId, usuarioId }),
+            );
+          }
         } else {
+          // La cuenta se crea **sin contraseña** (`contrasena` es nullable) y la
+          // persona la elige desde el link de invitación. Así nadie más que ella
+          // conoce jamás una credencial suya — antes el admin dictaba una
+          // temporal, y todo el andamiaje de "cambio obligatorio" existía solo
+          // por eso.
+          const creado = await manager.save(
+            Usuario,
+            manager.create(Usuario, {
+              nombre: dto.nombre,
+              apellido: dto.apellido ?? null,
+              correo,
+              telefono: dto.telefono ?? null,
+              contrasena: null,
+            }),
+          );
+          usuarioId = creado.id;
           await manager.save(
             UsuarioTenant,
             manager.create(UsuarioTenant, { tenantId, usuarioId }),
           );
+          // Dentro de la transacción: si el alta falla, no puede quedar una
+          // invitación viva apuntando a un usuario que no existe.
+          invitacion = await this.tokensAcceso.emitir(
+            usuarioId,
+            TipoTokenAcceso.INVITACION,
+            manager,
+          );
         }
-      } else {
-        // La cuenta se crea **sin contraseña** (`contrasena` es nullable) y la
-        // persona la elige desde el link de invitación. Así nadie más que ella
-        // conoce jamás una credencial suya — antes el admin dictaba una
-        // temporal, y todo el andamiaje de "cambio obligatorio" existía solo
-        // por eso.
-        const creado = await manager.save(
-          Usuario,
-          manager.create(Usuario, {
-            nombre: dto.nombre,
-            apellido: dto.apellido ?? null,
-            correo,
-            telefono: dto.telefono ?? null,
-            contrasena: null,
-          }),
-        );
-        usuarioId = creado.id;
-        await manager.save(
-          UsuarioTenant,
-          manager.create(UsuarioTenant, { tenantId, usuarioId }),
-        );
-        // Dentro de la transacción: si el alta falla, no puede quedar una
-        // invitación viva apuntando a un usuario que no existe.
-        invitacion = await this.tokensAcceso.emitir(
-          usuarioId,
-          TipoTokenAcceso.INVITACION,
-          manager,
-        );
-      }
 
-      // Los roles se insertan en UNA sentencia, no una por rol: son pocos, pero
-      // un loop de inserts acá es el patrón que después se copia donde N no es
-      // chico.
-      await manager.query(
-        `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+        // Los roles se insertan en UNA sentencia, no una por rol: son pocos, pero
+        // un loop de inserts acá es el patrón que después se copia donde N no es
+        // chico.
+        await manager.query(
+          `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
          SELECT $1, $2, r, NOW(), NOW() FROM unnest($3::uuid[]) AS r
          ON CONFLICT (usuario_id, tenant_id, rol_id)
          DO UPDATE SET eliminado_el = NULL, actualizado_el = NOW()`,
-        [usuarioId, tenantId, dto.rolIds],
-      );
+          [usuarioId, tenantId, dto.rolIds],
+        );
 
-      // ⚠️ Y se dan de baja los que NO vinieron en el alta. Sin esto, el alta
-      // solo suma: `removeMember` da de baja la membresía pero **deja vivas** las
-      // filas de `roles_usuarios`, así que re-dar de alta a alguien eliminado le
-      // restituía en silencio sus roles viejos —incluido `Administrador`— además
-      // de los que el admin acababa de elegir. Es justo lo que el 409 de más
-      // arriba existe para evitar: que un alta le cambie los permisos a alguien
-      // sin que nadie lo pida. Lo que el admin elige en el alta **es** el
-      // conjunto de roles, no un agregado. Una sola sentencia, no una por rol.
-      await manager.query(
-        `UPDATE roles_usuarios SET eliminado_el = NOW(), actualizado_el = NOW()
+        // ⚠️ Y se dan de baja los que NO vinieron en el alta. Sin esto, el alta
+        // solo suma: `removeMember` da de baja la membresía pero **deja vivas** las
+        // filas de `roles_usuarios`, así que re-dar de alta a alguien eliminado le
+        // restituía en silencio sus roles viejos —incluido `Administrador`— además
+        // de los que el admin acababa de elegir. Es justo lo que el 409 de más
+        // arriba existe para evitar: que un alta le cambie los permisos a alguien
+        // sin que nadie lo pida. Lo que el admin elige en el alta **es** el
+        // conjunto de roles, no un agregado. Una sola sentencia, no una por rol.
+        await manager.query(
+          `UPDATE roles_usuarios SET eliminado_el = NOW(), actualizado_el = NOW()
           WHERE usuario_id = $1 AND tenant_id = $2
             AND rol_id <> ALL($3::uuid[]) AND eliminado_el IS NULL`,
-        [usuarioId, tenantId, dto.rolIds],
-      );
+          [usuarioId, tenantId, dto.rolIds],
+        );
 
-      // Se devuelve el correo normalizado, no el tipeado: es el que la persona
-      // tiene que usar para entrar.
-      return { usuarioId, correo };
-    });
+        // Se devuelve el correo normalizado, no el tipeado: es el que la persona
+        // tiene que usar para entrar.
+        return { usuarioId, correo };
+      });
+    } catch (err: unknown) {
+      // Check-then-act: el `SELECT` de arriba no ve la fila que otro request
+      // concurrente todavía no comiteó, así que sin este `catch` el perdedor de
+      // la carrera revienta con un 500 crudo donde correspondía el mismo 409 que
+      // ya tira el chequeo deliberado un poco más arriba. Dos índices únicos
+      // pueden dispararlo: `usuarios.correo` (dos altas con el mismo correo
+      // nuevo) y la PK de `usuarios_tenants` (el mismo correo existente
+      // asociándose dos veces al mismo tenant). Los índices evitan que la
+      // carrera duplique datos; esto solo traduce el error que le llega al
+      // perdedor.
+      const pg = err as { code?: string };
+      if (pg.code === '23505') {
+        throw new ConflictException(
+          'Ese correo ya es miembro de este tenant. Editá sus roles desde la tabla.',
+        );
+      }
+      throw err;
+    }
 
     // El mail sale DESPUÉS de commitear, nunca adentro: mandar dentro de la
     // transacción manda un link que apunta a filas que todavía pueden

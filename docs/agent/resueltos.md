@@ -149,6 +149,78 @@ criterio de permisos ya ata el tenant en todos lados: todavía no.** La adverten
 no solo allá porque `resueltos.md` es el archivo que se consulta para dar algo por cerrado, y
 el link entre los dos archivos era de una sola dirección.
 
+## La sección mecánica queda vacía: segunda tanda, once entradas más (2026-08-15)
+
+Segunda tanda paralelizada, con la regla que salió de la primera: **repartir por dueño de
+archivo, no por cantidad**. Los grupos fueron `tenants` (5 entradas, todas sobre
+`tenants.service.ts`), `garzones` (2 sobre el mismo archivo), `roles` (2, porque la segunda
+tiene que cubrir a la primera) y uno de **cobertura e2e pura** (2). El principal tomó la que
+cruzaba módulos.
+
+### Lo que se cerró
+
+- **El tercer gemelo del criterio de permisos** (`findMembers`): atado en el `ON` y no en el
+  `WHERE`, porque el JOIN es `LEFT` y ponerlo en el `WHERE` **haría desaparecer del roster** a
+  cualquier miembro sin rol.
+- **`switchTenant` no miraba si el tenant estaba borrado.** Su hermano `getMyTenants` sí.
+  Devolvía 200 y un token para un tenant muerto; `TenantGuard` cortaba en la ruta siguiente,
+  así que el usuario se enteraba un request después y con otro error.
+- **Re-agregar a alguien le resucitaba `es_totem`**, en los dos caminos de revival.
+- **El alta de usuario devolvía un 500 crudo** en la carrera del `23505`, en vez del 409
+  accionable que ya tiraba el chequeo deliberado.
+- **`setPermissions` no era transaccional** —si el `save` fallaba, el `delete` ya había
+  commiteado y el rol quedaba sin permisos— **y su body no lo validaba nadie**: el `@Body()`
+  estaba tipado con una interfaz inline, cuyo `metatype` reflejado es `Object`, que
+  `ValidationPipe` excluye. Ahora hay una clase DTO.
+- **`miPin` hacía cuatro consultas**: `listarEventosPin` volvía a buscar el garzón que el
+  llamador ya tenía en memoria. Se partió en el método público (que sigue validando, porque su
+  otro llamador recibe el id por URL sin validar) y un privado con solo la query.
+- **Dos tests de aislamiento que no aislaban** y **dos coberturas e2e que no existían**: el
+  efecto de invalidar el PIN al vincular, y una venta con un ítem en moneda extranjera.
+- **`nombre: null` reventaba con 500** en los tres catálogos, más el nombre del **tenant** y el
+  del **perfil**.
+
+### Los tres errores que cazó el trabajo, no la lectura
+
+1. **Una trampa del seed que habría hecho pasar un test falso.** Para probar "un `usuarioId`
+   ajeno al tenant devuelve 400", el primer intento iba a usar el único miembro de Falabella
+   — que es el superadmin, y **también es miembro real de Paris**. Habría devuelto 200 y el
+   test habría "pasado" sin probar nada. Se corrigió creando un usuario propio de Falabella,
+   siguiendo el patrón que `alta-usuarios-tenant.e2e-spec.ts` ya usa para el mismo problema.
+2. **Una entrada del backlog se puso obsoleta a mitad de la tanda.** El agente de `tenants`
+   estaba copiando el patrón de `UpdateCausaMermaDto` cuando el principal, en paralelo, le
+   agregó un tercer decorador a ese mismo archivo. Lo detectó releyendo y **lo verificó
+   empíricamente** —escribió un spec descartable para confirmar que `@IsOptional()` deja pasar
+   `null`— en vez de confiar en el texto de la entrada o en su primera lectura.
+3. **Un mutante mal aplicado dio un falso "test decorativo".** Al verificar la cobertura de
+   moneda extranjera, el primer `perl -0pi -e "s/\.times\(tasa\)/…/"` **sin `/g`** reemplazó
+   la primera ocurrencia, que estaba **en el docblock**, no en el código. El test pasó y
+   parecía inútil. Repetido sobre la línea real: `Expected "9500.0000", Received "0.0105"`.
+   Es la misma trampa que el repo ya tiene anotada para las aserciones sobre SQL, esta vez
+   del lado del mutante.
+
+### Y un cuarto error, cazado por la revisión en el archivo del propio fix
+
+`update-my-tenant.dto.ts` blindó `nombre` con el trío de decoradores **y dejó `correo` y
+`provinciaId` con `@IsOptional()` puro** — las dos columnas son igual de `NOT NULL`, así que
+seguían con el mismo 500 que el cambio decía cerrar. Mismo archivo, mismo commit, misma
+motivación escrita arriba. Cerrado con su mutante; `telefono` y `direccion` sí conservan
+`@IsOptional()` a propósito, porque sus columnas son nullables y ahí `null` es la forma
+legítima de **borrar** el dato.
+
+### Y una que se elevó en vez de cerrarse
+
+El `LIMIT` de `listarEventosPin` **no era mecánica**. Topear recorta la historia sin decirlo;
+paginar con el patrón que el repo ya usa en 8+ módulos cambia el shape de la respuesta y toca
+las dos pantallas que la consumen. Pasó a la sección 4 con la pregunta concreta.
+
+### La decisión que no se tomó sola
+
+Ante el array vacío en `setPermissions` —¿bug o función?— el agente **buscó precedente en vez
+de decidir**: `cajones` tiene el mismo patrón con el comentario *"array vacío es válido: deja
+el cajón sin asignados"*, dentro de una transacción. Lo trató como decisión ya tomada por el
+proyecto y lo dejó marcado por si ese precedente no aplica a permisos.
+
 ## Once entradas mecánicas en paralelo, y los dos huecos que la paralelización destapó (2026-08-15)
 
 Primera tanda corrida con **cinco agentes en paralelo**. Lo que decidió la partición no fue

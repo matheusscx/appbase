@@ -4,7 +4,7 @@ import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -33,8 +33,11 @@ describe('AuthService', () => {
     findOne: jest.Mock;
     delete: jest.Mock;
   };
+  let dataSource: { query: jest.Mock };
+  let usersService: { findById: jest.Mock; [k: string]: jest.Mock };
 
   beforeEach(async () => {
+    dataSource = { query: jest.fn().mockResolvedValue([]) };
     refreshRepo = {
       save: jest.fn().mockResolvedValue({}),
       findOne: jest.fn(),
@@ -75,13 +78,13 @@ describe('AuthService', () => {
         },
         {
           provide: UsersService,
-          useValue: {
+          useValue: (usersService = {
             findByEmail: jest.fn(),
             findById: jest.fn(),
             create: jest.fn(),
             linkGoogleId: jest.fn(),
             findByGoogleId: jest.fn(),
-          },
+          }),
         },
         {
           provide: getRepositoryToken(RefreshToken),
@@ -89,7 +92,7 @@ describe('AuthService', () => {
         },
         {
           provide: getDataSourceToken(),
-          useValue: { query: jest.fn().mockResolvedValue([]) },
+          useValue: dataSource,
         },
       ],
     }).compile();
@@ -168,6 +171,40 @@ describe('AuthService', () => {
       refreshRepo.delete.mockResolvedValue({ affected: 0 });
 
       await expect(service.logout('nonexistent')).resolves.not.toThrow();
+    });
+  });
+
+  describe('switchTenant', () => {
+    // Su hermano `getMyTenants` ya filtraba tenants borrados; éste no. Con un
+    // tenant soft-borrado y una membresía viva devolvía 200 y un token para un
+    // tenant muerto. `TenantGuard` cortaba en la ruta SIGUIENTE, así que el
+    // usuario se enteraba un request después y con otro error.
+    it('exige que el tenant no esté borrado, no solo que exista la membresía', async () => {
+      dataSource.query.mockResolvedValue([{ '?column?': 1 }]);
+      usersService.findById.mockResolvedValue({ id: 'usuario-uuid' });
+
+      await service.switchTenant('usuario-uuid', 'tenant-uuid');
+
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      const plano = sql.replace(/\s+/g, ' ');
+      expect(plano).toContain(
+        'JOIN tenants t ON t.tenant_id = ut.tenant_id AND t.eliminado_el IS NULL',
+      );
+      // Y la membresía sigue filtrando su propio borrado, con el alias puesto:
+      // sin `ut.`, `eliminado_el` quedaba ambiguo entre las dos tablas.
+      expect(plano).toContain('ut.eliminado_el IS NULL');
+      expect(params).toEqual(['usuario-uuid', 'tenant-uuid']);
+    });
+
+    it('rechaza con Forbidden cuando la consulta no devuelve filas', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await expect(
+        service.switchTenant('usuario-uuid', 'tenant-uuid'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 });

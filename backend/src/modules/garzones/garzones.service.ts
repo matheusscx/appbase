@@ -656,6 +656,12 @@ export class GarzonesService {
   /**
    * La historia de PIN de un garzón, más nueva primero.
    *
+   * Confirma que el garzón existe en el tenant antes de traer su historia —
+   * necesario acá porque `garzonId` llega de la URL (`GET
+   * /garzones/:id/pin-eventos`) y todavía no se validó. `miPin()` ya validó
+   * lo mismo (`miGarzonOrThrow`) antes de llamar, así que ese camino usa
+   * `eventosPinDe` directo y se ahorra la re-confirmación.
+   *
    * Una sola consulta con `JOIN` a `usuarios`: resolver el nombre del actor
    * fila por fila sería un N+1 exacto. El `JOIN` **no** filtra `eliminado_el`
    * de `usuarios` — misma excepción documentada que el autor de un borrado en
@@ -667,6 +673,19 @@ export class GarzonesService {
     garzonId: string,
   ): Promise<EventoPinPublico[]> {
     await this.getOrThrow(tenantId, garzonId);
+    return this.eventosPinDe(tenantId, garzonId);
+  }
+
+  /**
+   * La consulta pelada de `listarEventosPin`, sin la confirmación de
+   * existencia — para cuando quien llama ya tiene el garzón en memoria
+   * (`miPin()`) y esa confirmación sería una cuarta consulta redundante
+   * sobre la misma fila que `miGarzonOrThrow` ya resolvió.
+   */
+  private async eventosPinDe(
+    tenantId: string,
+    garzonId: string,
+  ): Promise<EventoPinPublico[]> {
     return this.garzonRepo.manager.query<EventoPinPublico[]>(
       `SELECT e.garzon_pin_evento_id AS id,
               e.tipo,
@@ -726,7 +745,10 @@ export class GarzonesService {
     const garzon = await this.miGarzonOrThrow(tenantId, usuarioId);
     return {
       fijado: garzon.pinHash !== PIN_INUTILIZABLE,
-      eventos: await this.listarEventosPin(tenantId, garzon.id),
+      // `eventosPinDe`, no `listarEventosPin`: `miGarzonOrThrow` ya confirmó
+      // que este garzón existe en el tenant — reconfirmarlo acá sería la
+      // cuarta consulta redundante que este método existe para evitar.
+      eventos: await this.eventosPinDe(tenantId, garzon.id),
     };
   }
 

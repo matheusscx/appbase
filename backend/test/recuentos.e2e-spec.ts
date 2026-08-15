@@ -216,7 +216,7 @@ describe('Recuentos — catálogo de motivos de diferencia (e2e)', () => {
       .expect(201);
     const custom = creado as MotivoDiferenciaInventarioItem;
 
-    for (const nombreInvalido of ['', '   ']) {
+    for (const nombreInvalido of ['', '   ', null]) {
       await request(app.getHttpServer())
         .patch(`/api/motivos-diferencia-inventario/${custom.id}`)
         .set('Authorization', `Bearer ${token}`)

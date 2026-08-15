@@ -134,19 +134,14 @@ describe('Motivos de diferencia (e2e) — CRUD admin-only + reglas de es_fijo', 
   // el override de línea de `recuentos/[id].vue`. Lo rechaza el
   // `ValidationPipe`, que en unit no corre — por eso va acá.
   it('PATCH de un motivo custom con el nombre vacío → 400, y no lo deja sin nombre', async () => {
-    const res = await request(app.getHttpServer())
-      .patch(`/api/motivos-diferencia/${customId}`)
-      .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: '' });
-
-    expect(res.status).toBe(400);
-
-    // Y solo espacios también: ver el comentario del gemelo en `mermas`.
-    const resEspacios = await request(app.getHttpServer())
-      .patch(`/api/motivos-diferencia/${customId}`)
-      .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: '   ' });
-    expect(resEspacios.status).toBe(400);
+    // Vacío, solo espacios y null: ver el comentario del gemelo en `mermas`.
+    for (const invalido of ['', '   ', null]) {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/motivos-diferencia/${customId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ nombre: invalido });
+      expect(res.status).toBe(400);
+    }
 
     const resLista = await request(app.getHttpServer())
       .get('/api/motivos-diferencia')

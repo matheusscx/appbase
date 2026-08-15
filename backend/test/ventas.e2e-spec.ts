@@ -11,6 +11,10 @@ const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Smartphone (stock = 1
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+// USD — seedTenantMonedas(): habilitada para Paris con valor_del_dia '950'
+// (CLP, la oficial, es '1'). Entrada 12 de `docs/agent/pendientes.md`: la
+// única moneda con tasa != 1 disponible en el seed además de UF.
+const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
 // "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
 const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
 // IVA (sistema, Chile) — seedImpuestos(): tipo='iva', porcentaje '0.19'.
@@ -35,6 +39,12 @@ interface VentaResponse {
   pagos: unknown[];
   customer: unknown;
   advertencias?: string[];
+}
+interface VentaDetalleResponse {
+  monedaIdOrigen: string;
+  precioUnitarioOrigen: string;
+  tasaCambio: string;
+  precioUnitario: string;
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -431,6 +441,55 @@ describe('Ventas (e2e)', () => {
       const venta = res.body as VentaResponse & { totalFinal: string };
       expect(venta.estado).toBe('pagada');
       expect(Number(venta.totalFinal)).toBeCloseTo(5950, 4); // 5000 + 19% IVA
+    });
+
+    // Entrada 12 de `docs/agent/pendientes.md` (grupo e2e): ningún nivel
+    // ejercitaba una venta con un ítem en moneda extranjera —
+    // `ventas.service.spec.ts` mockea `convertirAMonedaOficial` (el mock
+    // decide el resultado, no el código) y el resto de este archivo vende
+    // siempre en CLP con `valor_del_dia = '1'`, donde multiplicar o dividir
+    // por la tasa da lo mismo. USD tiene tasa `950` (`seedTenantMonedas`):
+    // multiplicar y dividir divergen en tres órdenes de magnitud, así que
+    // este caso SÍ distingue.
+    it('un ítem con precio en USD se convierte multiplicando por la tasa del día, no dividiendo', async () => {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio en USD E2E ${Date.now()}`,
+          precioBase: '10',
+          monedaId: USD_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'afecto',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioUsdId = (resItem.body as { id: string }).id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: servicioUsdId, cantidad: '1' }],
+          // 10 USD * 950 = 9500 CLP (moneda oficial) + 19% IVA = 11305.
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '11305.0000' }],
+        });
+
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse & { totalFinal: string };
+      expect(venta.estado).toBe('pagada');
+
+      const detalle = venta.detalles[0] as VentaDetalleResponse;
+      expect(detalle.monedaIdOrigen).toBe(USD_MONEDA_ID);
+      // El precio ORIGEN queda congelado en USD, sin convertir.
+      expect(detalle.precioUnitarioOrigen).toBe('10.0000');
+      expect(detalle.tasaCambio).toBe('950.000000');
+      // El precio que persiste la venta SÍ está convertido — y multiplicado,
+      // no dividido: 10 * 950 = 9500, contra 10 / 950 ≈ 0.0105, a años luz
+      // de distancia. Es la aserción que un mutante `dividedBy` en
+      // `calculo-precios.service.ts` → `convertirAMonedaOficial` pone en rojo.
+      expect(detalle.precioUnitario).toBe('9500.0000');
+      // Y el total cobrado arrastra la conversión: 9500 + 19% IVA = 11305.
+      expect(Number(venta.totalFinal)).toBeCloseTo(11305, 4);
     });
   });
 

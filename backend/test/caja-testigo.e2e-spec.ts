@@ -680,6 +680,27 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
       );
     });
 
+    it('el PIN QUE B TENÍA antes de vincularse ya no sirve ni para él mismo', async () => {
+      // Entrada 9 de `docs/agent/pendientes.md` (grupo e2e): el caso de
+      // arriba usa el PIN de A contra B, que fallaría igual aunque B nunca
+      // se hubiera vinculado — es un PIN ajeno, nunca coincidió con el hash
+      // de B. Este usa `pinB`, el PIN que SÍ era correcto para garzonBId
+      // hasta el `PATCH` de vínculo en `beforeAll` (`garzones.service.ts` →
+      // `actualizar()`, rama `vincular`: `garzon.pinHash =
+      // PIN_INUTILIZABLE`). Si esa línea no corriera, `bcrypt.compare(pinB,
+      // garzon.pinHash)` seguiría dando `true` y `pendientesDeGarzon` no
+      // tiraría 400 acá — es el ángulo que el docblock de "vía cuenta en
+      // positivo" (más abajo, con D) deja anotado como sin caso dedicado.
+      const res = await pendientes(tokenTotem, {
+        garzonId: garzonBId,
+        pin: pinB,
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'PIN inválido',
+      );
+    });
+
     it('caso 2 — el encargado con el PIN que emitió para B (vinculado) recibe 403', async () => {
       // `pinB` ya NO es "el PIN correcto de B" — B está vinculado
       // (`beforeAll`) y su `pinHash` quedó en `PIN_INUTILIZABLE`, así que

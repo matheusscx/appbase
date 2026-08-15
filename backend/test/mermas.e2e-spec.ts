@@ -190,21 +190,18 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
   // selector de `mermas.vue`. Va a nivel e2e porque el que rechaza es el
   // `ValidationPipe`, que en unit no corre.
   it('PATCH de una causa con el nombre vacío devuelve 400 y no la deja sin nombre', async () => {
-    const res = await request(app.getHttpServer())
-      .patch(`/api/causas-merma/${roturaCausaId}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: '' });
-
-    expect(res.status).toBe(400);
-
-    // Y un nombre de SOLO ESPACIOS también: `@IsNotEmpty()` solo rechaza `''`
-    // exacto, así que sin el `@Transform` que trimea antes de validar, `'   '`
-    // pasaba y el service lo persistía trimeado — el mismo bug con otra ropa.
-    const resEspacios = await request(app.getHttpServer())
-      .patch(`/api/causas-merma/${roturaCausaId}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: '   ' });
-    expect(resEspacios.status).toBe(400);
+    // Los tres valores que rompían de tres formas distintas, y cada uno lo
+    // ataja un decorador distinto del DTO: `''` el `@IsNotEmpty()`, `'   '` el
+    // `@Transform` que trimea antes de validar, y `null` el `@ValidateIf` que
+    // reemplazó al `@IsOptional()` (que trataba null como ausente y se salteaba
+    // todo, dejando que el service hiciera `.trim()` sobre null → 500 crudo).
+    for (const invalido of ['', '   ', null]) {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/causas-merma/${roturaCausaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: invalido });
+      expect(res.status).toBe(400);
+    }
 
     // Y la fila sigue con su nombre: el rechazo ocurrió antes de escribir.
     const resLista = await request(app.getHttpServer())

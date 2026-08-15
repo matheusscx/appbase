@@ -1,9 +1,9 @@
 import {
   IsBoolean,
   IsNotEmpty,
-  IsOptional,
   IsString,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
@@ -16,13 +16,21 @@ export class UpdateMotivoDiferenciaInventarioDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )
+  // `@ValidateIf(v !== undefined)` en vez de `@IsOptional()`: para
+  // `class-validator`, `IsOptional` trata `null` **igual que ausente** y se
+  // saltea TODOS los validadores. Con eso, un `{"nombre": null}` pasaba la
+  // validación y el service —que pregunta `!== undefined`— entraba a hacer
+  // `.trim()` sobre `null`: TypeError y 500 crudo. Con `ValidateIf`, ausente
+  // sigue siendo opcional, pero `null` llega a `@IsString()` y sale 400.
+  // Las dos columnas son NOT NULL, así que `activo: null` tenía el mismo
+  // final por el lado de Postgres.
+  @ValidateIf((_o, v) => v !== undefined)
   @IsString()
   @IsNotEmpty()
-  @IsOptional()
   @MaxLength(120)
   nombre?: string;
 
+  @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
-  @IsOptional()
   activo?: boolean;
 }

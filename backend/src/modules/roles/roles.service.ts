@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Rol } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
 import { ModuloRol } from './entities/modulo-rol.entity';
@@ -150,34 +150,41 @@ export class RolesService {
     if (!tenantModulo)
       throw new BadRequestException('El módulo no pertenece a este tenant');
 
-    // Delete all existing permissions for (rolId, moduloTenantId)
-    await this.rolPermisoModuloRepo.delete({ rolId, moduloTenantId });
+    // Borrar los permisos existentes y escribir los nuevos en una sola
+    // transacción: si el `save` de más abajo falla, el `delete` no debe
+    // quedar commiteado — si no, el rol se queda sin ningún permiso en este
+    // módulo hasta el próximo PUT exitoso.
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(RolPermisoModulo, { rolId, moduloTenantId });
 
-    if (moduloAppPermisoIds.length > 0) {
-      // El chequeo de permisos (RbacService) hace JOIN por modulos_roles, así que
-      // el rol debe estar vinculado al módulo del tenant para que los permisos
-      // surtan efecto. Asegurar la fila (crear o restaurar si está soft-deleted).
-      await this.ensureModuloRol(rolId, moduloTenantId);
+      if (moduloAppPermisoIds.length > 0) {
+        // El chequeo de permisos (RbacService) hace JOIN por modulos_roles, así
+        // que el rol debe estar vinculado al módulo del tenant para que los
+        // permisos surtan efecto. Asegurar la fila (crear o restaurar si está
+        // soft-deleted).
+        await this.ensureModuloRol(manager, rolId, moduloTenantId);
 
-      const entries = moduloAppPermisoIds.map((moduloAppPermisoId) =>
-        this.rolPermisoModuloRepo.create({
-          rolId,
-          moduloTenantId,
-          moduloAppPermisoId,
-        }),
-      );
-      await this.rolPermisoModuloRepo.save(entries);
-    } else {
-      // Sin permisos en este módulo → quitar el vínculo rol↔módulo.
-      await this.moduloRolRepo.softDelete({ rolId, moduloTenantId });
-    }
+        const entries = moduloAppPermisoIds.map((moduloAppPermisoId) =>
+          manager.create(RolPermisoModulo, {
+            rolId,
+            moduloTenantId,
+            moduloAppPermisoId,
+          }),
+        );
+        await manager.save(entries);
+      } else {
+        // Sin permisos en este módulo → quitar el vínculo rol↔módulo.
+        await manager.softDelete(ModuloRol, { rolId, moduloTenantId });
+      }
+    });
   }
 
   private async ensureModuloRol(
+    manager: EntityManager,
     rolId: string,
     moduloTenantId: string,
   ): Promise<void> {
-    const existing = await this.moduloRolRepo.findOne({
+    const existing = await manager.findOne(ModuloRol, {
       where: { rolId, moduloTenantId },
       withDeleted: true,
     });
@@ -185,13 +192,14 @@ export class RolesService {
     if (existing) {
       if (existing.eliminadoEl) {
         existing.eliminadoEl = null;
-        await this.moduloRolRepo.save(existing);
+        await manager.save(ModuloRol, existing);
       }
       return;
     }
 
-    await this.moduloRolRepo.save(
-      this.moduloRolRepo.create({ rolId, moduloTenantId }),
+    await manager.save(
+      ModuloRol,
+      manager.create(ModuloRol, { rolId, moduloTenantId }),
     );
   }
 

@@ -1309,8 +1309,11 @@ describe('GarzonesService', () => {
       repo.findOneOrFail.mockResolvedValue(
         garzon({ id: 'g1', usuarioId: CUENTA, pin: undefined }),
       );
-      // `miPin` delega en `listarEventosPin` (Task 3), que reconfirma el
-      // garzón vía `getOrThrow` → `repo.findOne` antes de la query cruda.
+      // `repo.findOne` NO participa del camino de `miPin`: `miGarzonOrThrow`
+      // ya resuelve el garzón por `findOneOrFail`, y `miPin` llama
+      // `eventosPinDe` directo (sin la re-confirmación de `getOrThrow`, que
+      // es lo único que usa `repo.findOne`). Se deja mockeado igual como
+      // default inofensivo por si algún test de este describe lo necesitara.
       repo.findOne.mockResolvedValue(garzon({ id: 'g1', usuarioId: CUENTA }));
     });
 
@@ -1403,6 +1406,19 @@ describe('GarzonesService', () => {
       const res = await service.miPin(TENANT, CUENTA);
 
       expect(res.fijado).toBe(false);
+    });
+
+    // El garzón que `miGarzonOrThrow` ya resolvió es el mismo que la ruta
+    // vieja volvía a buscar dentro de `listarEventosPin` (vía `getOrThrow`,
+    // que usa `repo.findOne`). Esa cuarta consulta era redundante: sin
+    // `repo.findOne` en el camino, `miPin` queda en tres.
+    it('no vuelve a buscar el garzón que miGarzonOrThrow ya tiene en memoria', async () => {
+      await service.miPin(TENANT, CUENTA);
+
+      expect(repo.findOne).not.toHaveBeenCalled();
+      // Las dos que sí corresponden: `garzonPersonalDe` (resolver el vínculo)
+      // y la query cruda de eventos — ninguna de las dos es `repo.findOne`.
+      expect(repo.manager.query).toHaveBeenCalledTimes(2);
     });
   });
 

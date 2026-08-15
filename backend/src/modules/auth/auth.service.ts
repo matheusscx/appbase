@@ -269,9 +269,19 @@ export class AuthService {
     userId: string,
     tenantId: string,
   ): Promise<{ access_token: string; refresh_token: string }> {
+    // El JOIN a `tenants` con su `eliminado_el IS NULL` es lo que iguala este
+    // método con su hermano `getMyTenants`, que ya lo hacía. Sin él, un tenant
+    // soft-borrado por el superadmin con una membresía viva devolvía **200 y un
+    // token** para un tenant muerto: el daño quedaba acotado porque
+    // `TenantGuard` corta en la ruta siguiente, pero prometía algo que no
+    // existe, y el usuario se enteraba un request más tarde y con otro error.
+    // Ojo con el alias: acá `eliminado_el` a secas era de `usuarios_tenants`.
     const rows = await this.dataSource.query<unknown[]>(
-      `SELECT 1 FROM usuarios_tenants
-       WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      `SELECT 1 FROM usuarios_tenants ut
+       JOIN tenants t ON t.tenant_id = ut.tenant_id AND t.eliminado_el IS NULL
+       WHERE ut.usuario_id = $1
+         AND ut.tenant_id = $2
+         AND ut.eliminado_el IS NULL`,
       [userId, tenantId],
     );
     if (rows.length === 0)
