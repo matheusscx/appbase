@@ -14,7 +14,7 @@ import {
   type CuentaAsignacionDetalle,
   type MotivoCuentaAsignacion,
 } from '~/composables/useSalones'
-import type { Garzon } from '~/composables/useGarzones'
+import type { EventoPin, Garzon, MiPinEstado } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
@@ -159,6 +159,63 @@ let accionPendiente: (() => void) | null = null
  * trip por operación en el camino caliente.
  */
 const garzonPersonal = ref<{ garzonId: string, nombre: string } | null>(null)
+
+/**
+ * Mi propio estado de PIN, solo relevante en modo personal. `null` hasta que
+ * carga o si esta cuenta no es garzón en el tenant activo (404 de `miPin()`,
+ * el caso normal para casi todos los que abren esta pantalla).
+ */
+const miPinEstado = ref<MiPinEstado | null>(null)
+
+/**
+ * Los dos tipos de invalidación dicen cosas distintas a propósito — mismo
+ * criterio y misma redacción base que `PinEventosLista.vue`, que ya las
+ * distingue: `invalidado_por_encargado` es "te corté el PIN",
+ * `invalidado_por_vinculo` es "te di una cuenta y el PIN viejo quedó sin
+ * efecto". Separarlos acá importa porque el segundo es el disparador
+ * DOMINANTE de este aviso en producción —este bloque solo se muestra en
+ * modo personal, y vincular la cuenta es justamente lo que emite
+ * `invalidado_por_vinculo` (`garzones.service.ts` → `actualizar`)—, así que
+ * fusionar los dos bajo "el encargado te cortó el PIN" le mentiría a la
+ * mayoría de quienes lo ven.
+ */
+const TEXTO_INVALIDACION: Record<
+  'invalidado_por_encargado' | 'invalidado_por_vinculo',
+  (quien: string, cuando: string) => string
+> = {
+  invalidado_por_encargado: (quien, cuando) => `${quien} invalidó tu PIN (${cuando})`,
+  invalidado_por_vinculo: (quien, cuando) => `Tu PIN quedó sin efecto al vincular esta cuenta (${quien}, ${cuando})`,
+}
+
+/**
+ * Sin PIN usable no puede operar desde un TÓTEM COMPARTIDO — pero sí desde
+ * ESTE dispositivo: en modo personal `solicitarPin` no pide PIN (bypass por
+ * JWT, ver más abajo), así que este aviso no describe un bloqueo, solo el
+ * límite del tótem. Los dos textos lo dicen explícito, mismo criterio que
+ * `MiPinForm.vue` ("Desde el tuyo trabajás normal").
+ *
+ * La **condición** es el estado (`fijado`), no una comparación de fechas
+ * entre eventos. El texto sale del PRIMER evento de invalidación de la
+ * lista — que es el más reciente porque el backend la trae
+ * `ORDER BY e.creado_el DESC` (`garzones.service.ts` → `listarEventosPin`);
+ * si ese orden cambiara, este `.find()` dejaría de traer el último evento
+ * real y el aviso nombraría a la persona y la fecha equivocadas.
+ */
+const avisoPin = computed(() => {
+  if (!garzonPersonal.value || !miPinEstado.value || miPinEstado.value.fijado) return null
+  const ultima = miPinEstado.value.eventos.find(
+    (e): e is EventoPin & { tipo: 'invalidado_por_encargado' | 'invalidado_por_vinculo' } =>
+      e.tipo === 'invalidado_por_encargado' || e.tipo === 'invalidado_por_vinculo',
+  )
+  const sufijo = 'Desde este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu perfil.'
+  if (!ultima) return `Todavía no tenés PIN. ${sufijo}`
+  // `null` = la cuenta que hizo el cambio ya se dio de baja: mismo fallback
+  // que usa `PinEventosLista.vue` para el mismo dato, no un rol inventado
+  // ("el encargado") que ya no está respaldado.
+  const quien = ultima.usuarioNombre ?? 'Una cuenta dada de baja'
+  const cuando = formatFecha(ultima.creadoEl)
+  return `${TEXTO_INVALIDACION[ultima.tipo](quien, cuando)}. ${sufijo}`
+})
 
 /**
  * Embudo único de los 6 puntos que piden PIN. En modo personal **no abre el
@@ -532,7 +589,7 @@ onMounted(async () => {
   // El vínculo va en el mismo `Promise.all` y no en una llamada aparte: es una
   // más de las cargas iniciales, y encadenarla sumaría un round trip antes de
   // que la pantalla sirva.
-  const [, , , , sugerido, , vinculo] = await Promise.all([
+  const [, , , , sugerido, , vinculo, miPin] = await Promise.all([
     // ⚠️ Con `catch` propio, por el mismo motivo que `miVinculo` más abajo, y
     // medido en el smoke de navegador del testigo (2026-08-13): `GET
     // /caja/activa` pide `MiCaja:Leer`, y **un garzón no lo tiene**. Ese 403
@@ -556,11 +613,17 @@ onMounted(async () => {
     // rompía una pantalla que antes cargaba bien. Sin vínculo = se pide PIN,
     // que es el camino correcto para quien no puede operar.
     garzonesApi.miVinculo().catch(() => null),
+    // `.catch` obligatorio: un 404 (esta cuenta no es garzón acá) es la
+    // respuesta normal para la mayoría de quienes abren esta pantalla —mismo
+    // motivo que `miVinculo` arriba—. Sin él ese 404 voltea el `Promise.all`
+    // entero y el salón no vuelve a aparecer.
+    garzonesApi.miPin().catch(() => null),
   ])
   // Se mira `garzonId`, no la verdad del objeto: "sin vínculo" puede llegar como
   // `null`, `''` o `{}` según cómo se serialice un body vacío, y `{}` es
   // **truthy**. Confiar en la truthiness apagaría el PIN para TODOS.
   garzonPersonal.value = vinculo?.garzonId ? vinculo : null
+  miPinEstado.value = miPin
   propinaPorcentaje.value = sugerido.porcentajeSugerido
   propinaHabilitada.value = sugerido.habilitado
 
@@ -1188,6 +1251,25 @@ async function cerrarCuentaConPin(
 
     <template #body>
       <div class="space-y-4 p-4">
+        <!-- Solo modo personal: un tótem compartido no tiene "mi PIN". Fuera
+             del `v-else` de abajo a propósito: no depende de que haya salones
+             configurados, así que un tenant sin salones igual se lo muestra a
+             quien lo necesita. -->
+        <UAlert
+          v-if="avisoPin"
+          color="warning"
+          variant="soft"
+          icon="i-lucide-key-round"
+          title="Tu PIN no está listo"
+          :description="avisoPin"
+        >
+          <template #actions>
+            <UButton to="/configuracion/perfil" color="warning" variant="solid" size="sm">
+              Ir a mi perfil
+            </UButton>
+          </template>
+        </UAlert>
+
         <div v-if="loading" class="flex justify-center py-12">
           <UIcon name="i-lucide-loader" class="h-8 w-8 animate-spin text-muted" />
         </div>

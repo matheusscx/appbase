@@ -100,6 +100,20 @@ let bodiesPendientesTestigo: Record<string, unknown>[] = []
 let resolucionesTestigo: { testigoId: string, body: Record<string, unknown> }[] = []
 /** Fuerza el resolver a rechazar con el 403 "vinculado a una cuenta" del backend. */
 let resolverRechazaVinculo = false
+/** Lo que devuelve `GET /garzones/mi-pin`. `null` = sin datos (dispositivo compartido). */
+let miPinMock: { fijado: boolean, eventos: unknown[] } | null = null
+/**
+ * Lo que devuelve `GET /salones/operacion`. Por defecto un salón con una
+ * mesa (lo que casi todos los tests de este archivo necesitan); un `[]`
+ * prueba que el aviso de PIN no depende de que existan salones.
+ */
+let salonesMock: unknown[] = [{ id: 'salon-1', nombre: 'Principal', mesas: [mesa()] }]
+/**
+ * Fuerza el rechazo de `GET /garzones/mi-pin` (el 404 real de una cuenta que
+ * no es garzón, o cualquier otra falla). Solo sirve para probar que el
+ * `.catch(() => null)` de la llamada nueva no deja caer el resto del arranque.
+ */
+let miPinRechaza = false
 
 mockNuxtImport('useApiFetch', () => {
   return (
@@ -210,11 +224,19 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/garzones/mi-vinculo')) {
       return Promise.resolve(vinculoPersonal)
     }
+    if (ruta.endsWith('/garzones/mi-pin')) {
+      if (miPinRechaza) {
+        const err = new Error('x') as Error & { status?: number }
+        err.status = 404
+        return Promise.reject(err)
+      }
+      return Promise.resolve(miPinMock)
+    }
     if (ruta.endsWith('/garzones/verificar-pin')) {
       return Promise.resolve({ garzonId: 'g1', nombre: 'Ana' })
     }
     if (ruta.endsWith('/salones/operacion')) {
-      return Promise.resolve([{ id: 'salon-1', nombre: 'Principal', mesas: [mesa()] }])
+      return Promise.resolve(salonesMock)
     }
     if (ruta.endsWith('/propinas/porcentaje-sugerido')) {
       return Promise.resolve({ porcentajeSugerido: '0.1', habilitado: true })
@@ -289,6 +311,9 @@ function reiniciarMock() {
   bodiesPendientesTestigo = []
   resolucionesTestigo = []
   resolverRechazaVinculo = false
+  miPinMock = null
+  miPinRechaza = false
+  salonesMock = [{ id: 'salon-1', nombre: 'Principal', mesas: [mesa()] }]
 }
 
 afterEach(() => {
@@ -955,5 +980,163 @@ describe('salones — testigo del cierre forzado (el garzón da fe)', () => {
     await esperar(20)
 
     expect(modalTestigo()?.textContent).toContain('vinculado a una cuenta')
+  })
+})
+
+/**
+ * El aviso de PIN invalidado: vive en el cuerpo de la página (no en un
+ * diálogo), así que se busca en el wrapper directo, a diferencia de
+ * `dialogos()` que barre `document.body`.
+ */
+describe('salones — aviso de PIN invalidado (modo personal)', () => {
+  beforeEach(reiniciarMock)
+
+  function botonPerfilEnAviso(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper.findAll('a').find(a => a.text().trim() === 'Ir a mi perfil')
+  }
+
+  it('con el PIN invalidado por el encargado, avisa quién, cuándo, y que NO bloquea este dispositivo', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = {
+      fijado: false,
+      eventos: [
+        { id: 'ev-1', tipo: 'invalidado_por_encargado', usuarioNombre: 'Bruno', creadoEl: '2026-08-10T12:00:00.000Z' },
+      ],
+    }
+
+    const wrapper = await montar()
+    const texto = wrapper.text()
+
+    expect(texto).toContain('Bruno invalidó tu PIN (')
+    // No bloquea: el bypass de modo personal sigue funcionando en ESTE
+    // dispositivo, y el aviso no puede leerse como una alarma de que no se
+    // puede trabajar.
+    expect(texto).toContain('Desde este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu perfil.')
+    // Guarda contra la puntuación doble: `formatFecha` termina en "a. m." /
+    // "p. m." (con punto), así que pegarle un "." directo sin envolver la
+    // fecha entre paréntesis deja "a. m..".
+    expect(texto).not.toMatch(/\.\./)
+    expect(botonPerfilEnAviso(wrapper)?.attributes('href')).toBe('/configuracion/perfil')
+  })
+
+  // El disparador DOMINANTE en producción: este aviso solo vive en modo
+  // personal, y entrar a modo personal (vincular la cuenta) es justo lo que
+  // emite este tipo de evento. Fusionarlo con el texto de "el encargado te
+  // cortó el PIN" sería la mentira más frecuente que podría contar el aviso.
+  it('con el PIN invalidado por VINCULAR la cuenta, usa el texto de vínculo, no el de "invalidó"', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = {
+      fijado: false,
+      eventos: [
+        { id: 'ev-1', tipo: 'invalidado_por_vinculo', usuarioNombre: 'Bruno', creadoEl: '2026-08-10T12:00:00.000Z' },
+      ],
+    }
+
+    const wrapper = await montar()
+    const texto = wrapper.text()
+
+    expect(texto).toContain('Tu PIN quedó sin efecto al vincular esta cuenta (Bruno,')
+    expect(texto).not.toContain('Bruno invalidó tu PIN')
+    expect(texto).not.toMatch(/\.\./)
+  })
+
+  // El fallback de `usuarioNombre === null` (la cuenta que hizo el cambio ya
+  // se dio de baja) tiene que decir lo mismo que `PinEventosLista.vue` para
+  // el mismo dato — no inventar un rol ("el encargado") que ya no respalda.
+  it('si la cuenta que invalidó ya se dio de baja, dice "Una cuenta dada de baja", no "El encargado"', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = {
+      fijado: false,
+      eventos: [
+        { id: 'ev-1', tipo: 'invalidado_por_encargado', usuarioNombre: null, creadoEl: '2026-08-10T12:00:00.000Z' },
+      ],
+    }
+
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Una cuenta dada de baja invalidó tu PIN')
+    expect(wrapper.text()).not.toContain('El encargado invalidó')
+  })
+
+  it('sin ningún evento de invalidación (recién dado de alta), avisa el genérico "todavía no tenés PIN" y que no bloquea', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = { fijado: false, eventos: [] }
+
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain(
+      'Todavía no tenés PIN. Desde este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu perfil.',
+    )
+  })
+
+  // El aviso no depende de que existan salones — vive fuera de esa rama del
+  // template a propósito.
+  it('avisa aunque el tenant no tenga ningún salón configurado', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = { fijado: false, eventos: [] }
+    salonesMock = []
+
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('No hay salones configurados')
+    expect(wrapper.text()).toContain('Todavía no tenés PIN')
+  })
+
+  // Contraejemplo del mutante "el aviso también con fijado: true": con el PIN
+  // ya puesto no hay nada que avisar, aunque el historial conserve un evento
+  // de invalidación viejo (el garzón ya se puso uno nuevo después de ese
+  // evento). La condición es el ESTADO, no la presencia de eventos viejos.
+  it('con el PIN ya fijado, no avisa aunque el historial tenga una invalidación vieja', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = {
+      fijado: true,
+      eventos: [
+        { id: 'ev-1', tipo: 'invalidado_por_encargado', usuarioNombre: 'Bruno', creadoEl: '2026-08-10T12:00:00.000Z' },
+      ],
+    }
+
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('invalidó tu PIN')
+    expect(wrapper.text()).not.toContain('Todavía no tenés PIN')
+    expect(botonPerfilEnAviso(wrapper)).toBeUndefined()
+  })
+
+  // Un tótem compartido no tiene "mi PIN": sin vínculo el aviso no puede
+  // aparecer, ni siquiera si el backend (por lo que sea) devolviera un estado
+  // sin fijar para la cuenta que está logueada en el dispositivo.
+  it('en el tótem compartido (sin vínculo) el aviso nunca aparece', async () => {
+    vinculoPersonal = null
+    miPinMock = { fijado: false, eventos: [] }
+
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Todavía no tenés PIN')
+    expect(botonPerfilEnAviso(wrapper)).toBeUndefined()
+  })
+
+  // El mutante obligatorio del `.catch`: sacarlo deja que el rechazo de
+  // `miPin()` voltee el `Promise.all` entero, y todo lo que se asigna
+  // DESPUÉS —incluido `garzonPersonal`— nunca corre. La cuenta sigue
+  // vinculada según el backend (`vinculoPersonal`), pero la pantalla vuelve a
+  // pedir PIN por teclado como si fuera un dispositivo compartido: mismo bug
+  // documentado arriba para `miVinculo`/`caja/activa`, esta vez en la llamada
+  // nueva.
+  it('un 404 de mi-pin no le pide PIN por teclado a quien SÍ tiene cuenta vinculada (el `.catch` no es opcional)', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinRechaza = true
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    const boton = botonEn(drawerMesa(), 'Nueva cuenta')
+    expect(boton).toBeTruthy()
+    boton!.click()
+    await esperar(30)
+
+    // Sin teclado: el modal de PIN no llegó a existir porque el modo personal
+    // se activó igual — la prueba de que `garzonPersonal` SÍ se terminó de
+    // asignar pese al 404 de `miPin()`.
+    expect(tecladoPin()).toBeUndefined()
+    expect(postsAbrirCuenta).toHaveLength(1)
   })
 })
