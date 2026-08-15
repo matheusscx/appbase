@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-07-25
+**Last Updated**: 2026-08-15
 
 ---
 
@@ -920,6 +920,14 @@ request (`resuelta_por_usuario_id`). Un registro que dice "firmó por PIN desde 
 honesto; uno que solo dijera "firmó" no lo sería.
 
 Consecuencia práctica: **si los testigos tienen cuenta propia, la firma prueba mucho más**.
+
+**El PIN propio (2026-08-14) no cambia nada de esto.** La vía `'pin'` del testigo **no
+cambia de fuerza** con esa feature. Quien tiene cuenta ya firma por la vía `'cuenta'` —
+`CajaTestigoService.resolver` ni siquiera mira `dto.pin` en ese caso—; la vía `'pin'` la
+usan **por construcción** los garzones **sin** cuenta, a quienes el encargado les sigue
+emitiendo el PIN. Ninguna firma ya guardada cambia de significado. Lo que sí gana con esa
+feature es otra cosa, más ancha que el testigo: el **tótem compartido**. Detalle en
+[la spec](../superpowers/specs/2026-08-14-pin-propio-garzon-design.md#lo-que-esta-feature-gana--y-lo-que-no).
 
 ### Sin firma, hay que explicar
 

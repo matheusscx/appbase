@@ -57,48 +57,66 @@ momento; lo que se difiere es abrir estos tres frentes.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] 🔴 **El PIN del garzón no es suyo: lo emite el encargado y lo ve en claro** (backend,
-  **medido 2026-08-12 al implementar el testigo del cierre**) — `garzones.service.ts` devuelve
-  el PIN en texto plano al **crear** y al **regenerar** un garzón, y **no existe ningún flujo
-  para que el garzón lo cambie**. Consecuencia: el PIN **identifica pero no prueba** que actuó
-  esa persona — quien lo emitió puede tecleárselo, y en un local la pantalla del garzón es un
-  **tótem compartido**, así que ni siquiera hace falta usar la cuenta propia.
-  **Alcance:** no es un tema del testigo. El mismo PIN abre sesiones, manda comandas y atribuye
-  propinas — o sea que hoy **ninguna** de esas acciones prueba quién la hizo.
-  **El arreglo, como lo quiere el owner (2026-08-12):**
-  - **Lo teclea el garzón**, no se lo dan hecho. El encargado nunca lo ve.
-  - **En caso de olvido se puede emitir uno nuevo — pero con log.** Queda registrado quién lo
-    regeneró, para quién y cuándo. Sin eso, "olvidé mi PIN" es la puerta de atrás: el encargado
-    regenera, ve el nuevo, y vuelve al mismo problema sin dejar rastro.
-  - Sigue de eso que el flujo de olvido debería **obligar al garzón a fijar uno nuevo**, no
-    entregarle uno legible al encargado.
+- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
+  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
+  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
+  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
+  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
+  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
+  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
+  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
+  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
+  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
+  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
+  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
+  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
+  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
+  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
 
-  ⚠️ **Ojo con el orden respecto del testigo:** si esto se hace **antes**, la doble vía de firma
-  (cuenta vs PIN) puede volverse innecesaria — la vía PIN dejaría de ser "solo identifica",
-  porque el encargado ya no conocería el PIN por construcción. Hacerlo **después** significa
-  construir la doble vía y probablemente simplificarla más adelante. No es dinero perdido —el
-  token propio sigue siendo más fuerte que un PIN tecleado en un tótem compartido— pero conviene
-  decidirlo a ojos abiertos y no por inercia.
-  💡 **Refinamiento del owner (2026-08-12), que hace el arreglo mucho más chico:** si el garzón
-  **tiene cuenta**, fija su propio PIN **desde su cuenta**. La cuenta es el ancla de
-  autenticación, así que no hace falta inventar ningún mecanismo nuevo para dejarlo elegir un
-  secreto: ya está autenticado cuando lo hace.
-  Eso parte el problema en dos, y la primera mitad es barata:
-  - **Con cuenta** → el garzón fija su PIN, el encargado nunca lo ve. **Prueba.**
-  - **Sin cuenta** → el encargado sigue emitiéndolo. Identifica, no prueba.
+- [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
+  (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
+  de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
+  `LIMIT`/paginación. Hoy con pocos eventos por garzón no se nota, pero es una tabla que solo
+  crece —el diseño explícitamente decidió guardar todo, no solo el último cambio— y la alimentan
+  dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
+  /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
+  garzón activo, la consulta y el payload crecen sin techo.
 
-  El principio que queda, y conviene decirlo así en producto: **la fuerza del registro escala
-  con si la persona tiene cuenta.** No es una limitación escondida, es una elección del local —
-  y el escenario ideal, dicho por el owner, es que **los testigos tengan cuenta**.
+- [ ] **`miPin` hace cuatro consultas donde alcanzan tres** (backend, **medido 2026-08-15**) —
+  `GarzonesService.miPin()` (`garzones.service.ts:688-697`) llama `miGarzonOrThrow()`, que ya
+  hace dos consultas (`garzonPersonalDe` para resolver el `garzonId` + `findOneOrFail` para
+  traer la fila completa del garzón, con su `pinHash`). Después llama
+  `listarEventosPin(tenantId, garzon.id)`, que **vuelve a buscar el mismo garzón**
+  (`getOrThrow`, `garzones.service.ts:1037-1043`) antes de traer los eventos. La cuarta consulta
+  es redundante: el garzón que `getOrThrow` re-busca es el mismo que `miGarzonOrThrow` ya tiene
+  en memoria. No es el N+1 que preocupa la tanda 🔴 (es una sola llamada, no una por fila), pero
+  es una consulta de más en una ruta que golpea cada carga del perfil y de `/salones` en modo
+  personal.
 
-  ✅ **Decidido (owner, 2026-08-12): primero se termina el testigo, después esto.** La doble vía
-  no se tira aunque el PIN mejore: un token propio sigue siendo más fuerte que un PIN tecleado en
-  un tótem compartido. Y este cambio toca sesiones, comandas y propinas — merece su propio
-  diseño, no entrar de arrastre en una feature de caja.
-  Se difirió a propósito: la feature del testigo lo esquiva con la **doble vía** (garzón
-  vinculado a una cuenta firma con su token = prueba; sin vincular firma con PIN = identifica),
-  ver [la spec](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md). Eso tapa el
-  caso del testigo, **no el de propinas ni el de comandas**.
+- [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
+  selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
+  hueco preexistente a esta feature**) — el paso 4 de
+  [`garzones.md` → Testing → Manual](../features/garzones.md#manual-frontend) dice "Salones →
+  abrir cuenta: PIN correcto abre la cuenta" sin mencionar antes "entrar a turno". Pero
+  `GarzonPinModal` pide el selector con `garzonesApi.paraSelector(props.enTurno)`, y "abrir
+  cuenta" usa el default `enTurno: true` (`GarzonPinModal.vue:19`) — o sea que solo lista
+  garzones **con sesión de turno abierta**. Si nadie entró a turno todavía (el seed no abre
+  sesiones), el selector sale vacío y el paso no se puede completar tal como está escrito. **No
+  hay mitigación:** `toastErrorOperativo` (`salones/index.vue:308-325`) solo reacciona a un
+  request que vuelve con el error "sesión de trabajo" — y con el selector vacío no hay garzón
+  que elegir, así que no se dispara ningún request y ese fallback nunca corre. El paso 4 queda
+  bloqueado sin salida hasta que alguien edite el manual (agregar "entrar a turno" antes) o
+  entre a turno por su cuenta antes de seguirlo.
+
+- [ ] **El hook de pre-commit valida enlaces de markdown pero no que una tabla siga siendo
+  tabla** (tooling, **medido 2026-08-15, pasó de verdad en esta entrega**) —
+  `.githooks/pre-commit` (Guard 5) corre `check-docs-links.mjs` sobre `.md` staged, pero no hay
+  ningún guard que valide la sintaxis de una tabla GFM. Insertar un párrafo entre dos filas de
+  una tabla markdown (falta una línea en blanco antes/después, o el párrafo no empieza con `|`)
+  hace que **todo lo que sigue** deje de renderizarse como tabla — visualmente desaparece — y ni
+  el hook ni el CI lo detectan, porque ninguno de los dos parsea markdown como markdown, solo
+  greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
+  una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
 
 - [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
   frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya

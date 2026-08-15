@@ -4749,3 +4749,72 @@ umbral de diferencia, el texto de la spec que promete un ciego sin excepciones, 
   Sigue sin migrar a `resueltos.md` por dos motivos: el ítem de abajo (aprobación por umbral)
   todavía referencia el cruce sin resolver contra este, y **falta la pantalla del garzón**
   (Task 7) — hasta que exista, la firma se puede pedir pero no completar desde la UI.
+
+## El PIN del garzón no es suyo: lo emite el encargado y lo ve en claro (cerrado 2026-08-15)
+
+**Entrada original (verbatim):** *"El PIN del garzón no es suyo: lo emite el encargado y lo ve
+en claro (backend, medido 2026-08-12 al implementar el testigo del cierre) —
+`garzones.service.ts` devuelve el PIN en texto plano al crear y al regenerar un garzón, y no
+existe ningún flujo para que el garzón lo cambie. Consecuencia: el PIN identifica pero no
+prueba que actuó esa persona — quien lo emitió puede tecleárselo, y en un local la pantalla
+del garzón es un tótem compartido, así que ni siquiera hace falta usar la cuenta propia. [...]
+Ojo con el orden respecto del testigo: si esto se hace antes, la doble vía de firma (cuenta vs
+PIN) puede volverse innecesaria — la vía PIN dejaría de ser 'solo identifica', porque el
+encargado ya no conocería el PIN por construcción."*
+
+⚠️ **Corrección al encuadre, medida el 2026-08-14 al diseñar el arreglo** (spec
+[`2026-08-14-pin-propio-garzon-design.md`](../superpowers/specs/2026-08-14-pin-propio-garzon-design.md),
+sección *"Lo que esta feature gana — y lo que NO"*): la entrada original especulaba que
+arreglar el PIN **convertiría la vía `'pin'` del testigo en prueba real**. Medido contra
+`CajaTestigoService.resolver` (`caja-testigo.service.ts:351-378`), **no es así**: el garzón
+**con cuenta** ya firmaba por la vía fuerte (`via_firma='cuenta'`, exige el JWT de esa cuenta;
+el PIN ni se mira) desde que existe el testigo. La vía `'pin'` la usan **por construcción**
+los garzones **sin** cuenta —`esVinculacionValida` decide cuál rama toca—, y a esos el
+encargado les sigue emitiendo el PIN exactamente igual que antes. **La vía débil del testigo
+queda exactamente igual de débil**, y está bien: escribir lo contrario en la documentación
+habría sido peor que no escribirlo. Detalle: [`gestion-cajas.md`](../features/gestion-cajas.md#las-dos-vías-de-firma-y-por-qué-no-son-equivalentes).
+
+**Lo que sí gana, que es otra cosa y es más ancho: el tótem compartido.** Antes de esto, una
+persona con cuenta que operaba desde el tótem compartido no probaba nada —el encargado conocía
+su PIN—. Con el arreglo, el garzón con cuenta fija su propio PIN y el encargado nunca lo ve, así
+que operar desde el tótem con ese PIN sí prueba identidad. Eso alcanza **mesas, comandas, inicio
+y cierre de turno, y la atribución de propinas** — todo lo que pasa por ese teclado, que es el
+alcance que la entrada original ya señalaba correctamente.
+
+**Qué se hizo** (plan `pin-propio-garzon`, 9 tareas, 2026-08-14/15):
+
+- El disparador es **vincular** una cuenta, no el alta: la transición `usuarioId: null → uuid`
+  pone `pin_hash` en el centinela `'!'` (medido: `bcrypt.compare` contra ese valor da `false` y
+  no tira), así que el encargado nunca llega a ver un PIN de alguien con cuenta. El alta admite
+  `usuarioId` directamente, con el mismo efecto.
+- `PATCH /garzones/mi-pin` (JWT + tenant, sin permiso de módulo — `PermisosGuard` es
+  `return true` sin el decorador) deja al garzón fijar su PIN **sin pedir el anterior**: el caso
+  principal es el olvido, y exigirlo habría dejado a la persona sin salida.
+- La unicidad se cae **solo para el PIN elegido** — rechazar la colisión lo habría convertido en
+  oráculo de PIN ajenos, ya que siempre se elige a la persona antes de teclear — pero se conserva
+  donde el sistema genera el PIN (alta sin cuenta, regeneración). Se rechazan PIN obvios
+  (repetidos y escaleras de 6 dígitos).
+- `PATCH /garzones/:id/pin` (la que ya existía) se parte según el garzón, no según la ruta: con
+  cuenta **invalida sin revelar nada** (`pin: null`); sin cuenta **regenera y revela**, como
+  siempre. Una sola ruta, porque el encargado no puede elegir mal — manda el estado del garzón.
+- Historial completo (no solo el último cambio) en la tabla nueva `garzon_pin_evento`, cinco
+  tipos de evento, escrito en la misma transacción que el cambio de `pin_hash`. Nunca guarda el
+  PIN, solo el hecho de que cambió. Visible para el encargado (ficha) y el propio garzón (perfil,
+  `GET /garzones/mi-pin`).
+- Aviso en `/salones`, modo personal, cuando el garzón no tiene PIN usable. Dos ramas con texto
+  distinto según `tipo` (`TEXTO_INVALIDACION`, `index.vue:182-188`) — invalidado por el
+  encargado: *"Bruno invalidó tu PIN (10-08-2026, 8:00 a. m.)"*; invalidado por vincular una
+  cuenta: *"Tu PIN quedó sin efecto al vincular esta cuenta (Bruno, 10-08-2026, 8:00 a. m.)"* —
+  y en las dos, el mismo sufijo que aclara que **no** es un bloqueo de este dispositivo: *"Desde
+  este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu
+  perfil."* Fijado por test (`index.nuxt.spec.ts:998-1020`) y explicado en el docblock de
+  `avisoPin` (`index.vue:190-195`).
+
+**Mutantes que fijan el comportamiento** (cada uno revierte al comportamiento anterior, no solo
+rompe algo): quitar la invalidación al vincular, devolver el PIN en la rama de invalidación,
+saltear la escritura del evento — cubiertos en `garzones.service.spec.ts` y el e2e de
+`garzon-modo-personal.e2e-spec.ts` / `garzones-selector.e2e-spec.ts`.
+
+Detalle funcional completo: [`garzones.md`](../features/garzones.md). Spec de diseño con las
+decisiones del owner y las alternativas descartadas:
+[`2026-08-14-pin-propio-garzon-design.md`](../superpowers/specs/2026-08-14-pin-propio-garzon-design.md).

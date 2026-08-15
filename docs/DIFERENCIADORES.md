@@ -66,6 +66,11 @@ firma **por PIN identifica al garzón, no prueba quién lo tecleó** —el PIN l
 encargado y lo ve en claro—. Lo que sí es prueba fuerte es la firma **desde la cuenta** del
 garzón. Se puede decir "queda registrado quién dio fe y por qué vía"; **no** se puede decir
 "nadie puede firmar por otro" sin la aclaración, porque en la vía PIN sí podría.
+⚠️ **El PIN propio (2026-08-14) no levanta esta advertencia**, y no es un olvido: quien
+tiene cuenta ya firma por la vía fuerte (`via_firma='cuenta'`); la vía PIN la usan **por
+construcción** los garzones **sin** cuenta, a quienes el encargado les sigue emitiendo el
+PIN y viéndolo en claro. La vía débil queda exactamente igual de débil. Detalle en
+[la spec](superpowers/specs/2026-08-14-pin-propio-garzon-design.md#lo-que-esta-feature-gana--y-lo-que-no).
 
 ### Costeo por promedio ponderado móvil, y no "último costo"
 
