@@ -1709,6 +1709,17 @@ y viaja con ella.
   producto, abierto por el owner el 2026-08-15) — **el tema activo.** Es la tercera pata de la
   tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido.
 
+  > 🛑 **DÓNDE QUEDÓ (2026-08-15).** La investigación está **corrida, cerrada y commiteada**;
+  > el cruce contra el código también. **El owner la pausó acá para analizarla mejor antes de
+  > decidir** — no es un bloqueo del trabajo, es una pausa pedida.
+  > **Al retomar:** leer
+  > [`investigaciones/2026-08-15-decimales-y-redondeo.md`](investigaciones/2026-08-15-decimales-y-redondeo.md)
+  > entero y arrancar por **las cinco preguntas de su §9**. Hasta que estén contestadas **no
+  > se escribe spec ni se toca código**: esto es el motor de precios e impuestos, y `CLAUDE.md`
+  > obliga a consultar. La primera pregunta destraba a las otras cuatro.
+  > Lo de abajo es el material que la investigación usó como punto de partida; lo que la
+  > investigación **corrigió o agregó** está más abajo, en el bloque ✅ de resultados.
+
   **El criterio del owner:** *"los redondeos son para montos; hay cosas que no se deben redondear
   con la configuración"*, y **tiene que ser un solo criterio para todo el sistema**, contemplando
   que es multi-país y multi-moneda.
@@ -1769,8 +1780,45 @@ y viaja con ella.
   - **Los ERP** (SAP, Oracle, Odoo) modelan moneda de cuenta vs moneda de transacción vs moneda
     de presentación hace décadas. La UF entra ahí, no en "una moneda rara de Chile".
 
-  🔎 **Investigación pedida por el owner (2026-08-15), acordada y pendiente de lanzar.**
-  Lo que tiene que traer: (a) **redondeo** — en qué momento exacto los POS maduros llevan un monto
+  ✅ **INVESTIGACIÓN CORRIDA Y CERRADA (2026-08-15) →
+  [`docs/agent/investigaciones/2026-08-15-decimales-y-redondeo.md`](investigaciones/2026-08-15-decimales-y-redondeo.md).**
+  Seis lentes ciegas entre sí (ISO 4217 · redes de pago · patrón Money · autoridades
+  tributarias · unidades indexadas · ERP), cada hallazgo etiquetado NORMA / PRÁCTICA /
+  INFERENCIA. **Leer ese documento antes de escribir una línea de spec.** Lo que cambió
+  respecto de lo que esta entrada asumía:
+  - ⭐ **No hay "cuántos decimales tiene una moneda": hay CUATRO respuestas y no coinciden**
+    (minor unit ISO / CLDR para mostrar / la del gateway para cobrar / la de la tasa
+    publicada). Convergencia de tres lentes ciegas. `moneda.decimales` es una sola columna.
+  - ⭐ **El SII SÍ permite emitir un DTE en UF**, con el total en pesos enteros y el bloque
+    `<OtraMoneda>`. El documento fiscal lleva **dos montos**. La pregunta ya no es si se
+    prohíbe la UF: es cómo se representan denominación y liquidación por separado.
+  - ⭐ **La UF tiene código ISO 4217: `CLF` (990)** — y el seed ya lo sabe a medias
+    (`codigoNumero: '990'` correcto, `codigoIso: 'UF'` no es ISO). Tiene hermanas (COU, UYI,
+    MXV) con **minor units distintos entre sí**: no vale "unidad indexada ⇒ 4 decimales".
+  - ⭐ **No existe respuesta universal a "¿por línea o por total?"** — el TJUE lo declaró
+    discreción nacional (C‑484/06), y UK (por línea) y México (solo al total) son opuestos.
+    Tiene que ser configurable por país.
+  - **La UTM no va en la misma tabla**: mensual, para multas y tramos, sin código ISO.
+  - **El redondeo de efectivo nunca toca el impuesto** — norma en Chile, Canadá y Argentina.
+  - ✅ Ya tienen respaldo normativo y no se tocan: moneda oficial derivada del país (IAS 21),
+    congelar la tasa por línea (política de SAP y Odoo), `modo_redondeo` configurable
+    (las normas que fijan modo exigen half-up, no half-even), y `Decimal.js` sobre `NUMERIC`
+    (el argumento del entero es contra el binario, no contra el decimal exacto).
+  - ⭐ **Propinas ya tiene el enfoque completo, sin nombre**: unidades mínimas enteras
+    (`mayores-restos.ts:41`), reparto por mayores restos (= método Hamilton), y
+    **`decimales_moneda` congelado en el documento** (`liquidacion-propinas.entity.ts:57`).
+    La decisión pendiente es si se generaliza a ventas y pagos.
+  - **Medido en el código:** la escala 4 está escrita a mano en **97 sitios de 17 archivos**;
+    `ESCALA_PERSISTIDA` tiene **3 usos**, los tres en un solo archivo; y `moneda.decimales`
+    **no tiene ningún consumidor fuera de propinas**.
+  ❓ **Cinco preguntas abiertas para el owner en §9 del documento** — la primera es si
+  *"un solo criterio"* significa un solo criterio o un solo número (ningún ERP relevado tiene
+  redondeo global: SAP lo pone por empresa+moneda, Odoo por moneda). **No resolverlas solo:**
+  esto es el motor de precios e impuestos, y `CLAUDE.md` obliga a consultar.
+
+  <details><summary>Lo que se le pidió a la investigación (histórico)</summary>
+
+  Lo que tenía que traer: (a) **redondeo** — en qué momento exacto los POS maduros llevan un monto
   a la unidad de la moneda, si redondean por línea o solo el total, y qué hacen los países sin
   decimales (hay reglas fiscales, no es solo criterio); (b) **unidades de cuenta** — cómo modelan
   una unidad indexada (UF chilena, UVR colombiana, UI uruguaya) separada de la moneda de cobro, y
@@ -1790,11 +1838,15 @@ y viaja con ella.
   - **Unidades de cuenta indexadas**: UF chilena, UVR colombiana, UI uruguaya.
   - **Operación multi-moneda de verdad**: cotizar en una moneda y cobrar en otra, que es el caso
     que la UF y el USD tienen en común y el que el sistema ya intenta con `convertirAMonedaOficial`.
-  ⚠️ **Consecuencia de diseño que ya se puede anticipar:** con 0, 2, 3 y 4 decimales en juego, la
-  cantidad de decimales **no puede quedar hardcodeada en ningún lado** —ni en un `toFixed(4)`, ni
-  en `ESCALA_PERSISTIDA`— sin decidir antes qué pasa cuando la moneda tiene más decimales que la
-  columna. `NUMERIC(18,4)` alcanza para UF (4) y sobra para CLP (0), pero es una restricción que
-  hoy nadie eligió a conciencia: quedó.
+
+  </details>
+
+  ⚠️ **Consecuencia de diseño que ya se puede anticipar, y que la investigación agravó:** con
+  0, 2, 3 y 4 decimales en juego, la cantidad de decimales **no puede quedar hardcodeada en
+  ningún lado** —ni en un `toFixed(4)`, ni en `ESCALA_PERSISTIDA`— sin decidir antes qué pasa
+  cuando la moneda tiene más decimales que la columna. `NUMERIC(18,4)` alcanza para UF (4) y
+  sobra para CLP (0), pero es una restricción que hoy nadie eligió a conciencia: quedó. Y ahora
+  se sabe que son **97 sitios en 17 archivos** los que repiten el 4 a mano, no un par.
 
 - [ ] 🔵 **Manejo de fechas y zonas horarias — tema propio, EN COLA detrás de decimales**
   (backend, medido el 2026-08-15) — **el owner lo puso explícitamente después de decimales.**

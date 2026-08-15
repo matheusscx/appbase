@@ -161,6 +161,31 @@ Resolución 154 del SII · Bsale lo implementa así.
 stock ya se revendió, ni sobre anulación concurrente.
 **Evidencia:** [investigación 2026-07-27](agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md).
 
+### El descuadre de 1 peso al despejar la base desde un precio con impuesto incluido
+
+**El hueco:** cuando el precio de góndola **incluye** el impuesto y hay que despejar la base
+imponible, "base + impuesto" redondeados pueden no dar exactamente el precio mostrado. La
+diferencia es de una unidad mínima de la moneda y aparece siempre, en cualquier sistema.
+**Ninguna de las cinco autoridades tributarias relevadas lo legisla** — ni el SII de Chile,
+ni HMRC del Reino Unido, ni la DIAN de Colombia, ni el SAT de México, ni la NTA de Japón. Se
+relevó buscando la regla explícita en cada una; las cinco norman **otras** cosas del redondeo
+(por línea vs total, precisión de campos, criterio del algoritmo) y ninguna aborda ésta.
+**Y no es que el problema sea desconocido**: UBL / EN 16931 tiene un campo estándar para la
+diferencia (`cbc:PayableRoundingAmount`, BT‑114) que Colombia reutiliza. O sea, el formato lo
+reconoce; la autoridad no dice qué hacer con él en este caso puntual. ⚠️ El DTE chileno
+**no** parece tener ese campo, y la normativa de 2017 prohíbe expresamente aplicar el ajuste
+como un descuento que afecte la base del IVA — así que en Chile la diferencia **no tiene
+dónde ir dentro del documento**.
+**Por qué le importa:** es plata que aparece o desaparece en cada boleta con precio final
+redondo, que es el caso normal de un restaurante o un minimarket. Quien lo resuelva de forma
+explícita y auditable puede explicar sus totales; quien no, tiene un descuadre que nadie sabe
+de dónde sale.
+**Estado del producto:** 💡 hallazgo. **Todavía no hay decisión ni diseño** — el tema entero
+(decimales y redondeo) está en investigación cerrada y pendiente de spec con el owner.
+**Evidencia:** [investigación 2026-08-15 §6 y §8](agent/investigaciones/2026-08-15-decimales-y-redondeo.md) ·
+TJUE C‑484/06 (*Ahold*) · HMRC VATREC12020 · SAT Anexo 20 · DIAN Anexo Técnico v1.9 ·
+NTA (facturas calificadas) · Peppol BIS `PayableRoundingAmount`.
+
 ---
 
 ## Cómo se agrega una entrada
