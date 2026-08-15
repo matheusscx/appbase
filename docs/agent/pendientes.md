@@ -1705,6 +1705,84 @@ y viaja con ella.
   ⚠️ Y queda igual la corrección barata que da la mitad del beneficio si esto se demora: que la
   merma **rechace** serie/lote en vez de aceptar y descontar la unidad equivocada en silencio.
 
+- [ ] 🔵 **Decimales, redondeo y unidades de cuenta — tema propio, EN CURSO** (backend + BD +
+  producto, abierto por el owner el 2026-08-15) — **el tema activo.** Es la tercera pata de la
+  tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido.
+
+  **El criterio del owner:** *"los redondeos son para montos; hay cosas que no se deben redondear
+  con la configuración"*, y **tiene que ser un solo criterio para todo el sistema**, contemplando
+  que es multi-país y multi-moneda.
+
+  **Los TRES momentos donde un número se recorta, medidos:**
+
+  | Momento | Quién lo gobierna hoy | Estado |
+  |---|---|---|
+  | Cálculo intermedio | `tenants.escala_calculo` (smallint, hoy **6**) | ✅ Definido: el esquema lo llama *"decimales para cálculos intermedios"* — el borrador con el que el motor arrastra reglas sin acumular error |
+  | Lo que se persiste | `ESCALA_PERSISTIDA = 4` + `tenants.modo_redondeo` | ⚠️ Aplicado **solo** en `convertirAMonedaOficial`. `subtotal` y `total_linea` salen del motor con 6 decimales y entran a `NUMERIC(18,4)`: **lo recorta Postgres**, con su regla, fuera de la config del tenant |
+  | **Lo cobrable** | **nadie** | ❌ `moneda.decimales` existe y solo lo usa propinas. Webpay y Oneclick **rechazan** (*"CLP no admite decimales en el monto"*) en vez de que el sistema redondee |
+
+  ✅ **Lo que ya está bien y no hay que tocar:** `redondear()` se usa **exactamente 3 veces** en el
+  motor (`calculo-precios.engine.ts:453, 520, 581`) y las tres son **montos** —el monto de una
+  regla, el subtotal neto, el monto de un impuesto—. No toca porcentajes, ni tasas, ni cantidades.
+  El criterio del owner **ya se respeta ahí**; lo que falta es el tercer momento.
+
+  ✅ **Y el argumento que hay que conservar** (docblock de `convertirAMonedaOficial`): redondear a
+  `escalaCalculo` en vez de a la escala persistida **no evita el recorte, lo mueve al `INSERT`**,
+  donde lo hace Postgres sin que ningún test lo vea. Vale para `subtotal`/`total_linea` igual que
+  para `precio × tasa`, y ahí no se aplicó.
+
+  **Lo que el catálogo tiene hoy** (medido contra la base): tres monedas, **`CLP` 0 decimales,
+  `USD` 2, `UF` 4**, las tres mapeadas a Chile. Un solo país sembrado.
+
+  ⚠️ **La UF abre un problema de modelo, no de redondeo.** Está en la misma tabla que CLP y USD,
+  **sin nada que la distinga** — pero no son la misma clase de cosa: en UF se **cotiza**, en pesos
+  se **cobra**, y nadie paga en UF. Hoy nada impide ponerla como moneda oficial de un tenant, y
+  ahí los totales se persistirían en una unidad en la que la pasarela no puede cobrar.
+
+  ⚠️ **Y `tenant_moneda` no puede representar "la tasa de hoy".** La tabla es PK
+  `(tenant_id, moneda_id)` + `valor_del_dia numeric(18,6)`, **sin ninguna columna de fecha**
+  (verificado con `\d`): una sola tasa por moneda, que se pisa. La UF cambia **todos los días** y
+  la publica el Banco Central, así que un tenant que cotice en UF tendría que actualizarla a mano
+  cada mañana sin nada que le avise que quedó vieja.
+  ✅ **Lo que sí está a salvo:** la venta **congela `tasa_cambio` por línea**, así que una venta
+  vieja sabe con qué tasa se hizo. Lo que no se puede contestar es *"cuánto valía la UF el 1 de
+  agosto"* para algo que no sea una venta ya registrada — un reporte, una nota de crédito, la
+  renovación de una suscripción.
+
+  🔎 **Investigación de mercado pedida por el owner (2026-08-15), acordada y pendiente de lanzar.**
+  Lo que tiene que traer: (a) **redondeo** — en qué momento exacto los POS maduros llevan un monto
+  a la unidad de la moneda, si redondean por línea o solo el total, y qué hacen los países sin
+  decimales (hay reglas fiscales, no es solo criterio); (b) **unidades de cuenta** — cómo modelan
+  una unidad indexada (UF chilena, UVR colombiana, UI uruguaya) separada de la moneda de cobro, y
+  en qué momento se congela la tasa: al cotizar, al emitir o al cobrar; (c) **tasas con fecha** —
+  si guardan historial con vigencia y de dónde las toman.
+  ⚠️ Regla del cruce: insumo para adaptar, **no verdad a copiar**.
+  ❓ **Sin acordar todavía:** si la investigación se acota a Chile o abre a México (2 decimales),
+  Paraguay (sin decimales) y Colombia (UVR).
+
+- [ ] 🔵 **Manejo de fechas y zonas horarias — tema propio, EN COLA detrás de decimales**
+  (backend, medido el 2026-08-15) — **el owner lo puso explícitamente después de decimales.**
+  No es un bug suelto: es que **no existe un solo lugar que conteste "qué significa *desde el 1 de
+  agosto* para esta empresa"**.
+
+  **Lo medido:**
+  - **La zona horaria no está en el tenant.** Vive en `provincia.zona_horaria`, con
+    `pais.zona_horaria_principal` de respaldo — se **deriva** igual que la moneda oficial y el IVA.
+  - **El almacenamiento está resuelto:** [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md)
+    dejó toda columna de fecha en `timestamptz`.
+  - **La entrada no.** **11 DTOs** usan `@IsDateString()`, que acepta tanto `2026-08-01` como un
+    timestamp completo. Y **solo 3 archivos** en todo el backend usan la zona del tenant
+    (`sesiones-garzon.service.ts`, `propina-reportes.service.ts`, el seeder).
+  - Los filtros que no normalizan heredan la zona de la sesión de Postgres — hoy UTC, **porque
+    nadie la fija**: ni el compose ni la config del pool.
+
+  🔗 **La decisión ya tomada dispara la reapertura de una entrada archivada.** El owner decidió el
+  2026-08-15 que *"desde el 1 de agosto"* es la **medianoche del local** para los tres filtros de
+  mermas, inventario y cobros (ver esa entrada en "Ya decidido"). Pero la entrada del JOIN del país
+  —hoy en Vigilancia— dice textual: *"si aparece una tercera copia del helper de zona, ahí sí
+  conviene la vista"*. **Hoy hay dos copias; aplicar la decisión crea tres más.** O sea que ese
+  trabajo no son "tres servicios copiando un molde": es el momento de decidir dónde vive el helper.
+
 - [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
   frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
   admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,
