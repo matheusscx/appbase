@@ -62,6 +62,7 @@ async function loginSuelto(
   const res = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email, password });
+  expect(res.status).toBe(200);
   return (res.body as TokenResponse).access_token;
 }
 
@@ -90,6 +91,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       .post('/api/auth/switch-tenant')
       .set('Authorization', `Bearer ${suelto}`)
       .send({ tenantId: PARIS_TENANT_ID });
+    expect(conTenant.status).toBe(200);
     tokenAdmin = (conTenant.body as TokenResponse).access_token;
 
     const roles = await request(app.getHttpServer())
@@ -106,6 +108,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       .post('/api/auth/switch-tenant')
       .set('Authorization', `Bearer ${sueltoSistema}`)
       .send({ tenantId: FALABELLA_TENANT_ID });
+    expect(enFalabella.status).toBe(200);
     tokenFalabella = (enFalabella.body as TokenResponse).access_token;
 
     const rolesFalabella = await request(app.getHttpServer())
@@ -345,6 +348,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
         .post('/api/auth/switch-tenant')
         .set('Authorization', `Bearer ${suelto}`)
         .send({ tenantId: PARIS_TENANT_ID });
+      expect(conTenant.status).toBe(200);
 
       const res = await request(app.getHttpServer())
         .post('/api/tenants/usuarios')

@@ -41,6 +41,7 @@ async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email: ADMIN_EMAIL, password: ADMIN_PASS });
+  expect(resLogin.status).toBe(200);
   const initialToken = (resLogin.body as TokenResponse).access_token;
 
   // Switch to Paris tenant so token carries tenant_id
@@ -48,6 +49,7 @@ async function login(app: INestApplication<App>): Promise<string> {
     .post('/api/auth/switch-tenant')
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
+  expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
 }
 

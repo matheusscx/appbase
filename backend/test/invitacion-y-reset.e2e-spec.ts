@@ -49,6 +49,7 @@ describe('Invitación y reset (e2e)', () => {
     const login = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: ADMIN_PARIS.email, password: ADMIN_PARIS.pass });
+    expect(login.status).toBe(200);
     const conTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set(
@@ -56,6 +57,7 @@ describe('Invitación y reset (e2e)', () => {
         `Bearer ${(login.body as TokenResponse).access_token}`,
       )
       .send({ tenantId: PARIS_TENANT_ID });
+    expect(conTenant.status).toBe(200);
     tokenAdmin = (conTenant.body as TokenResponse).access_token;
 
     const roles = await request(app.getHttpServer())

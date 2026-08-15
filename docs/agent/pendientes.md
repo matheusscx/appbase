@@ -348,40 +348,23 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   `invitacion-y-reset`, `garzon-modo-personal`) los ejercitan de costado, no como sujeto.
   Sigue valiendo la prioridad: los tests que **conceden** acceso antes que los que lo niegan.
 
-- [ ] 🚩 **Los 23 helpers de login del e2e no afirman su status, y eso fabrica el 401
-  intermitente** (backend/tests, auditoría RBAC/auth 2026-08-15) — **esto explica la forma de
-  los cuatro avistajes** de la entrada del flaky (sección 2). Medido: 23 de los 32
-  `*.e2e-spec.ts` leen `resLogin.body.access_token` / `resTenant.body.access_token` **sin
-  verificar `.status`**. Si el login o el `switch-tenant` fallan una vez, `token` queda
-  `undefined` en silencio y todo el resto del `describe` manda `Authorization: Bearer
-  undefined` — que `JwtAuthGuard` rechaza con **401 en la siguiente ruta que se pida, no en la
-  que falló**. Un solo test por corrida, siempre otra ruta, nunca reproduce: la firma exacta.
-  ⚠️ **Explica la propagación, no el disparador:** sigue sin saberse por qué el login falla esa
-  vez. Lo que cambia es que deja de ser un misterio — con el `expect` puesto, el próximo rojo
-  cae en el login y dice qué contestó. Misma higiene que ya se aplicó a `/tenants/members`.
-
-- [ ] 🚩 **Sin `SMTP_HOST`, los links de reset e invitación quedan en el log en texto plano — y
-  nada lo impide en producción** (backend, auditoría RBAC/auth 2026-08-15) —
-  `mail.service.ts` → `enviar()`: si no hay transporte, hace `logger.log()` con el **cuerpo
-  completo** del mail, que es el que lleva la URL con el token en claro. **Grep de
-  `NODE_ENV`/`production` en ese archivo: cero** (medido). `.env.example:49` trae `SMTP_HOST=`
-  vacío por default.
-  ⚠️ **Loguear en vez de mandar es una decisión cerrada y documentada** (hace falta para no
-  disparar mails reales en cada corrida de CI; ver [`resueltos.md`](resueltos.md)). Lo que no
-  existe es el **gate de producción**: el sistema degrada en silencio a "escribir el secreto en
-  el log" en vez de fallar fuerte.
-  Tiene su ironía: `TokenAcceso` guarda solo el hash SHA-256 justamente para que el texto plano
-  exista **una sola vez**, en el link del mail. Este log lo reintroduce en el lugar que más
-  gente puede leer.
-  🔎 **Falta un dato que decide la urgencia y que no consulté a propósito** (listar variables de
-  Railway expone credenciales): **¿el deploy de producción tiene `SMTP_HOST` seteado?** Se ve en
-  el dashboard en un clic. Si está: hoy el impacto es cero pero queda una mina — una variable
-  que falte en un redeploy y todos los links de reset se van al log. Si no está: es toma de
-  cuentas para cualquiera con lectura de logs.
-  El arreglo es correcto en los dos casos y no depende de la respuesta: en producción, fallar en
-  vez de loguear (o como mínimo no escribir nunca el cuerpo). Ojo con un detalle que lo hace más
-  urgente: `invitacion-y-reset.e2e-spec.ts` corre justamente con `SMTP_HOST` vacío, así que **la
-  rama peligrosa es la que se ejercita todo el tiempo** y ningún test mira qué queda escrito.
+- [ ] **La barrida del `expect` en el login dejó una pregunta abierta que no es mecánica:
+  ¿el arranque debe negarse a levantar sin `SMTP_HOST` en producción?** (backend + producto,
+  **abierta el 2026-08-15 al cerrar la entrada del log en texto plano**) — el agujero en sí ya
+  está cerrado: en producción el cuerpo del mail **nunca** se escribe en el log (ver
+  [`resueltos.md`](resueltos.md)). Lo que queda es la otra mitad, que **es decisión de producto
+  y por eso no se resolvió sola**: hoy, sin SMTP configurado, el sistema arranca igual y
+  registra un `error` diciendo que ningún mail va a salir. La alternativa —tirar en el
+  constructor y no levantar— es *fallar fuerte* de verdad, pero **deja el POS entero caído
+  porque el mail no está configurado**. Nadie puede vender porque nadie puede invitar usuarios.
+  ⚖️ El precedente del repo apunta al arranque tolerante: `MailService` **nunca lanza hacia
+  arriba** por decisión explícita y documentada (un mail que no sale no puede tumbar la
+  operación que lo originó). Negarse a arrancar es coherente con "configuración obligatoria" y
+  contradictorio con ese docblock. **Es del owner, no del agente.**
+  🔎 **Y sigue faltando el dato que decide la urgencia, que no se consultó a propósito**
+  (listar variables de Railway expone credenciales): **¿el deploy de producción tiene
+  `SMTP_HOST` seteado?** Se ve en el dashboard en un clic. Con el arreglo puesto ya no hay fuga
+  en ninguno de los dos casos; lo que cambia es si hoy los mails llegan o no llegan.
 
 - [ ] **Dos tests de aislamiento por tenant que no aíslan nada** (backend/tests, auditoría
   RBAC/auth 2026-08-15) — los dos prometen en el nombre lo que su aserción no sostiene, y en los

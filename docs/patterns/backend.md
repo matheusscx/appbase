@@ -278,6 +278,40 @@ defensa entre los llamadores funciona hasta que aparece el que se olvida.
 
 Correr: `cd backend && npm test`. Antes de cerrar: `npm test`, `tsc` limpio, `npm run lint`.
 
+### E2E de API: todo `.body` del que se saca un valor lleva su `expect(...status)` al lado
+
+En `test/*.e2e-spec.ts`, **leer un campo de una respuesta sin haber afirmado su status
+fabrica fallos que aparecen en otro lado.** El caso que lo enseñó fue el helper de login,
+replicado en 29 de los 33 specs:
+
+```ts
+// ❌ MAL — si el login falla una vez, `token` queda `undefined` en silencio
+const resLogin = await request(app.getHttpServer())
+  .post('/api/auth/login')
+  .send({ email, password });
+const initialToken = (resLogin.body as TokenResponse).access_token;
+
+// ✅ BIEN
+const resLogin = await request(app.getHttpServer())
+  .post('/api/auth/login')
+  .send({ email, password });
+expect(resLogin.status).toBe(200);
+const initialToken = (resLogin.body as TokenResponse).access_token;
+```
+
+Sin el `expect`, todo el resto del `describe` manda `Authorization: Bearer undefined`, que
+`JwtAuthGuard` rechaza con **401 en la siguiente ruta que se pida, no en la que falló**. Un
+test rojo por corrida, siempre otra ruta, nunca reproducible: era la firma exacta del flaky
+que se persiguió durante semanas. Con el `expect` puesto, el rojo cae en el login y dice qué
+contestó.
+
+⚠️ **`/auth/login` y `/auth/switch-tenant` devuelven 200, no 201**: los dos llevan
+`@HttpCode(HttpStatus.OK)` explícito. `/auth/register` sí devuelve 201.
+
+La regla es más ancha que el login —vale para cualquier `.body` del que se extrae un id o un
+token para usarlo después—, pero el login es donde más caro sale, porque contamina todo el
+archivo en vez de un test.
+
 ---
 
 ## 8. Seeding

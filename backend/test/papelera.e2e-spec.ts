@@ -67,12 +67,14 @@ async function login(
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email, password });
+  expect(resLogin.status).toBe(200);
   const initialToken = (resLogin.body as TokenResponse).access_token;
 
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
+  expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
 }
 
@@ -2156,11 +2158,13 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     const resLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: ADMIN_FALABELLA_EMAIL, password: ADMIN_FALABELLA_PASS });
+    expect(resLogin.status).toBe(200);
     const initialToken = (resLogin.body as TokenResponse).access_token;
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set('Authorization', `Bearer ${initialToken}`)
       .send({ tenantId: FALABELLA_TENANT_ID });
+    expect(resTenant.status).toBe(200);
     return (resTenant.body as TokenResponse).access_token;
   }
 

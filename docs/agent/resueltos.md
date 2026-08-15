@@ -149,6 +149,76 @@ criterio de permisos ya ata el tenant en todos lados: todavía no.** La adverten
 no solo allá porque `resueltos.md` es el archivo que se consulta para dar algo por cerrado, y
 el link entre los dos archivos era de una sola dirección.
 
+## El log que reintroducía el token en claro, y el arranque que se dejó como está (2026-08-15)
+
+**Entrada original (verbatim):** *"🚩 **Sin `SMTP_HOST`, los links de reset e invitación
+quedan en el log en texto plano — y nada lo impide en producción** (backend, auditoría
+RBAC/auth 2026-08-15) — `mail.service.ts` → `enviar()`: si no hay transporte, hace
+`logger.log()` con el **cuerpo completo** del mail, que es el que lleva la URL con el token
+en claro. **Grep de `NODE_ENV`/`production` en ese archivo: cero** (medido). `.env.example:49`
+trae `SMTP_HOST=` vacío por default. ⚠️ **Loguear en vez de mandar es una decisión cerrada y
+documentada** (hace falta para no disparar mails reales en cada corrida de CI). Lo que no
+existe es el **gate de producción**: el sistema degrada en silencio a 'escribir el secreto en
+el log' en vez de fallar fuerte. Tiene su ironía: `TokenAcceso` guarda solo el hash SHA-256
+justamente para que el texto plano exista **una sola vez**, en el link del mail. Este log lo
+reintroduce en el lugar que más gente puede leer."*
+
+**El fix:** con `NODE_ENV=production` y sin `SMTP_HOST`, `enviar()` registra un `error` con
+**destinatario y asunto** —lo necesario para reenviar a mano— y **ni una línea del cuerpo**.
+El aviso de arranque también sube de `warn` a `error`. Fuera de producción no cambia nada: el
+fallback con el link clickeable en el log es el loop de desarrollo y es deliberado.
+
+**Lo que NO se hizo, y por qué:** negarse a arrancar sin SMTP en producción. Sería *fallar
+fuerte* de verdad, pero deja el POS entero caído porque el mail no está configurado, y
+contradice el docblock de la clase, que dice explícitamente que **este service nunca lanza
+hacia arriba**. Es decisión de producto: quedó como entrada abierta en
+[`pendientes.md`](pendientes.md), no resuelta por cuenta propia.
+
+**Lo fija:** `mail.service.spec.ts`, que no existía. Ocho tests, y el que importa es el que
+mete un token reconocible en el cuerpo y afirma que **no aparece en ninguno de los tres
+niveles de log**. Mutante verificado: quitar el guard de producción deja
+`TOKEN-EN-CLARO-abc123` escrito y dos tests en rojo por su aserción.
+
+## El `expect` que faltaba en 29 specs destapó un test que nunca había probado nada (2026-08-15)
+
+**Entrada original (verbatim):** *"🚩 **Los 23 helpers de login del e2e no afirman su status,
+y eso fabrica el 401 intermitente** (backend/tests, auditoría RBAC/auth 2026-08-15) — **esto
+explica la forma de los cuatro avistajes** de la entrada del flaky. Medido: 23 de los 32
+`*.e2e-spec.ts` leen `resLogin.body.access_token` / `resTenant.body.access_token` **sin
+verificar `.status`**. Si el login o el `switch-tenant` fallan una vez, `token` queda
+`undefined` en silencio y todo el resto del `describe` manda `Authorization: Bearer undefined`
+— que `JwtAuthGuard` rechaza con **401 en la siguiente ruta que se pida, no en la que falló**.
+Un solo test por corrida, siempre otra ruta, nunca reproduce: la firma exacta."*
+
+**La entrada subcontaba otra vez: son 29 archivos, no 23** — y **71 sitios**, no uno por
+archivo (`recuentos` tenía seis, `caja`/`papelera`/`recetas`/`alta-usuarios` cuatro cada uno).
+Se midió por **conducta**, no por forma: cualquier `const <var> = await request(...)` cuya
+`<var>.body` alimente un `access_token`, sin `expect(<var>.status)` cerca. Las siete formas
+distintas de helper que hay en el repo hacían inútil buscar por texto.
+
+⚠️ **Dato que se cobró en el momento: `/auth/login` y `/auth/switch-tenant` devuelven 200, no
+201** — los dos llevan `@HttpCode(HttpStatus.OK)`. El primer intento asumió 201 y puso cuatro
+specs en rojo.
+
+**Y lo que la barrida destapó, que es el verdadero valor:**
+`ventas.e2e-spec.ts` → *"retorna 400 si no hay caja abierta para el usuario"* **estaba verde
+sin ejercitar nada**. Logueaba con `password: 'Vendedor1234!'` cuando el seed usa `'admin'`
+—como los otros seis specs que usan esa cuenta—, así que el login devolvía 401, el token
+quedaba `undefined`, y un `if (!vendedorToken) return` con el comentario *"si el usuario
+vendedor no existe en seed, saltear"* **salía del test antes de pedir nada**. El escape existía
+para tolerar un seed que sí tiene esa cuenta hace tiempo.
+Se corrigió la contraseña, se agregó el `switch-tenant` que faltaba, se borró el escape, y se
+apretó la aserción: ahora además del 400 comprueba el mensaje `'No tienes una caja abierta'`,
+porque cualquier fallo de validación del body daría 400 igual y el test dice cubrir la caja.
+
+⚠️ **Lo que esto NO resuelve:** por qué el login falla esa vez. La entrada ya lo decía y sigue
+siendo cierto — esto explica la **propagación**, no el disparador. Lo que cambia es que el
+próximo rojo cae en el login y dice qué contestó, en vez de aparecer dos rutas más tarde.
+
+**El porqué quedó en un solo lugar**, no replicado en 29 archivos: `docs/patterns/backend.md`
+§7. No se agregó a `anti-patterns.md` porque ese archivo está en su tope de 20 entradas y su
+propia regla 3 pide hacer lugar antes de sumar, que es trabajo aparte.
+
 ---
 
 ## El redondeo de la conversión de moneda: dos sitios, y el que importaba no era el anotado (2026-08-11)

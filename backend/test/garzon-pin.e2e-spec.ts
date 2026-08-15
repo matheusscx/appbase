@@ -66,11 +66,13 @@ describe('PIN propio del garzón (e2e)', () => {
     const resLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email, password });
+    expect(resLogin.status).toBe(200);
     const initialToken = (resLogin.body as TokenResponse).access_token;
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set('Authorization', `Bearer ${initialToken}`)
       .send({ tenantId });
+    expect(resTenant.status).toBe(200);
     return (resTenant.body as TokenResponse).access_token;
   }
 

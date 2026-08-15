@@ -34,11 +34,13 @@ async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email: ADMIN_EMAIL, password: ADMIN_PASS });
+  expect(resLogin.status).toBe(200);
   const initialToken = (resLogin.body as TokenResponse).access_token;
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
+  expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
 }
 
@@ -616,11 +618,13 @@ describe('Recetas — flujo completo (e2e)', () => {
     const resLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: 'vendedor@paris.cl', password: 'admin' });
+    expect(resLogin.status).toBe(200);
     const initialToken = (resLogin.body as TokenResponse).access_token;
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set('Authorization', `Bearer ${initialToken}`)
       .send({ tenantId: PARIS_TENANT_ID });
+    expect(resTenant.status).toBe(200);
     const tokenVendedor = (resTenant.body as TokenResponse).access_token;
 
     // vendedor@paris.cl (rol Vendedor) tiene Items:Leer (sembrado en

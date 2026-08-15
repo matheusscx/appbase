@@ -29,23 +29,54 @@ export interface Mail {
  * porque el SMTP está caído, el admin vería un error y la cuenta habría quedado
  * creada igual. Se loguea el fallo y se sigue; el token ya está emitido, así
  * que el link se puede volver a mandar.
+ *
+ * 🚩 **En producción el cuerpo NUNCA se escribe en el log.** El fallback de
+ * arriba es correcto en desarrollo y en CI, pero el cuerpo es justamente el que
+ * lleva la URL con el token **en claro**: un reset de contraseña o una
+ * invitación, servidos a cualquiera con lectura de logs. Tiene su ironía —
+ * `TokenAcceso` guarda solo el hash SHA-256 precisamente para que el texto plano
+ * exista **una sola vez**, en el link del mail, y este log lo reintroducía en el
+ * lugar que más gente puede leer.
+ *
+ * Con `NODE_ENV=production` y sin `SMTP_HOST`, entonces: se registra un `error`
+ * con destinatario y asunto —lo necesario para reenviar a mano— y **sin una
+ * línea del cuerpo**. El sistema degrada a "el mail no salió", que es un
+ * problema visible, en vez de a "el secreto quedó escrito", que no lo es.
+ *
+ * ⚠️ **Lo que esto NO hace: tumbar el arranque.** Sería la otra opción —negarse
+ * a levantar sin SMTP en producción— y es una decisión de producto abierta, no
+ * un detalle: dejaría el POS entero caído porque el mail no está configurado.
+ * Queda anotada en `docs/agent/pendientes.md`. El cierre del agujero de arriba
+ * no depende de esa respuesta.
  */
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private readonly transporter: Transporter | null;
   private readonly remitente: string;
+  private readonly esProduccion: boolean;
 
   constructor(private readonly config: ConfigService) {
     const host = this.config.get<string>('SMTP_HOST');
+    this.esProduccion = this.config.get<string>('NODE_ENV') === 'production';
     this.remitente =
       this.config.get<string>('SMTP_FROM') ?? 'no-reply@startup-pos.local';
 
     if (!host) {
       this.transporter = null;
-      this.logger.warn(
-        'SMTP_HOST vacío: los mails se escriben en el log y NO se envían.',
-      );
+      if (this.esProduccion) {
+        // `error`, no `warn`: en producción esto no es una comodidad, es que
+        // ningún link de invitación ni de reset va a llegar a nadie.
+        this.logger.error(
+          'SMTP_HOST vacío en producción: NINGÚN mail se va a enviar. ' +
+            'Los links de invitación y de reset no llegan, y no se escriben ' +
+            'en el log a propósito (llevan el token en claro).',
+        );
+      } else {
+        this.logger.warn(
+          'SMTP_HOST vacío: los mails se escriben en el log y NO se envían.',
+        );
+      }
       return;
     }
 
@@ -71,6 +102,15 @@ export class MailService {
 
   async enviar(mail: Mail): Promise<void> {
     if (!this.transporter) {
+      if (this.esProduccion) {
+        // Sin `mail.cuerpo`: ahí vive la URL con el token en claro.
+        this.logger.error(
+          `[MAIL NO ENVIADO — SMTP_HOST vacío en producción] ` +
+            `"${mail.asunto}" para ${mail.para}. El cuerpo NO se loguea: ` +
+            `lleva el token en claro. Reenviar desde la app.`,
+        );
+        return;
+      }
       this.logger.log(
         `[MAIL NO ENVIADO — SMTP_HOST vacío]\n` +
           `Para: ${mail.para}\n` +

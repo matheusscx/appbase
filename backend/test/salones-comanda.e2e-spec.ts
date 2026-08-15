@@ -127,6 +127,7 @@ describe('Salones — comanda a cocina (e2e)', () => {
     const resLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: ADMIN_EMAIL, password: ADMIN_PASS });
+    expect(resLogin.status).toBe(200);
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set(
@@ -134,6 +135,7 @@ describe('Salones — comanda a cocina (e2e)', () => {
         `Bearer ${(resLogin.body as TokenResponse).access_token}`,
       )
       .send({ tenantId: PARIS_TENANT_ID });
+    expect(resTenant.status).toBe(200);
     token = (resTenant.body as TokenResponse).access_token;
 
     const marca = Date.now();

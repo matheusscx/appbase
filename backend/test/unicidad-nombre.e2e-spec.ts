@@ -60,11 +60,13 @@ async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email: ADMIN_PARIS.email, password: ADMIN_PARIS.pass });
+  expect(resLogin.status).toBe(200);
   const initialToken = (resLogin.body as TokenResponse).access_token;
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
+  expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
 }
 

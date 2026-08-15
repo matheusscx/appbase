@@ -41,6 +41,7 @@ async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email: ADMIN_EMAIL, password: ADMIN_PASS });
+  expect(resLogin.status).toBe(200);
   const initialToken = (resLogin.body as TokenResponse).access_token;
 
   // Switch to Paris tenant so token carries tenant_id
@@ -48,6 +49,7 @@ async function login(app: INestApplication<App>): Promise<string> {
     .post('/api/auth/switch-tenant')
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
+  expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
 }
 
@@ -223,27 +225,40 @@ describe('Ventas (e2e)', () => {
       expect((res.body as VentaResponse).estado).toBe('pagada_parcial');
     });
 
+    // ⚠️ Este test estuvo verde sin ejercitar nada. La contraseña era
+    // `'Vendedor1234!'` —el seed usa `'admin'`, como los otros seis specs que
+    // loguean con esta cuenta—, así que el login devolvía 401, el token quedaba
+    // `undefined` y el `if (!vendedorToken) return` de abajo salía del test
+    // antes de pedir nada. Lo destapó agregarle el `expect` al status del login.
     it('retorna 400 si no hay caja abierta para el usuario', async () => {
       // Login como usuario sin caja abierta
       const resLogin = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ email: 'vendedor@paris.cl', password: 'Vendedor1234!' });
+        .send({ email: 'vendedor@paris.cl', password: 'admin' });
+      expect(resLogin.status).toBe(200);
       const vendedorToken = (resLogin.body as TokenResponse).access_token;
 
-      if (!vendedorToken) {
-        // Si el usuario vendedor no existe en seed, saltear
-        return;
-      }
+      const resTenant = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set('Authorization', `Bearer ${vendedorToken}`)
+        .send({ tenantId: PARIS_TENANT_ID });
+      expect(resTenant.status).toBe(200);
+      const tokenConTenant = (resTenant.body as TokenResponse).access_token;
 
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
-        .set('Authorization', `Bearer ${vendedorToken}`)
+        .set('Authorization', `Bearer ${tokenConTenant}`)
         .send({
           lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '119.0000' }],
         });
 
       expect(res.status).toBe(400);
+      // Sobre el mensaje y no solo sobre el 400: cualquier fallo de validación
+      // del body daría 400 igual, y este test dice cubrir la caja cerrada.
+      expect((res.body as { message: string }).message).toContain(
+        'No tienes una caja abierta',
+      );
     });
 
     it('retorna 400 cuando el excedente existe pero no hay método con vuelto', async () => {

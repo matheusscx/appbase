@@ -45,6 +45,7 @@ describe('Modo personal del garzón (e2e)', () => {
     const login = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email, password });
+    expect(login.status).toBe(200);
     const res = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set(
@@ -52,6 +53,7 @@ describe('Modo personal del garzón (e2e)', () => {
         `Bearer ${(login.body as TokenResponse).access_token}`,
       )
       .send({ tenantId: PARIS_TENANT_ID });
+    expect(res.status).toBe(200);
     return (res.body as TokenResponse).access_token;
   }
 
