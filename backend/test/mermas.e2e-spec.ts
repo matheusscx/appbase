@@ -58,6 +58,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
   let itemId: string;
   let roturaCausaId: string;
   let mermaMovimientoId: string;
+  let stockAntesDeLaMerma: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -113,6 +114,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     itemId = CARNE_MOLIDA_ID;
     expect(res.body.costoActual).toBeTruthy();
     expect(parseFloat(res.body.stock as string)).toBeGreaterThan(0);
+    stockAntesDeLaMerma = res.body.stock as string;
   });
 
   it('POST /mermas registra merma con Vencimiento y costoPerdido', async () => {
@@ -133,6 +135,25 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     expect(body.costoUnitario).toBeTruthy();
     expect(body.costoPerdido).toBeTruthy();
     expect(parseFloat(body.costoPerdido)).toBeGreaterThan(0);
+
+    // El efecto de una merma sobre el saldo no lo fijaba NADA de extremo a
+    // extremo, y ésta es la única capa que corre contra Postgres real. La
+    // respuesta ya traía `stockResultante` y el test no lo miraba.
+    expect(parseFloat(body.stockResultante)).toBeCloseTo(
+      parseFloat(stockAntesDeLaMerma) - 1,
+      4,
+    );
+
+    // Y contra la base, no solo contra lo que el POST dice de sí mismo: un
+    // `stockResultante` bien calculado y mal persistido pasaría lo de arriba.
+    const resItem = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resItem.status).toBe(200);
+    expect(parseFloat(resItem.body.stock as string)).toBeCloseTo(
+      parseFloat(body.stockResultante),
+      4,
+    );
   });
 
   it('GET /mermas incluye causaNombre y costoPerdido', async () => {
@@ -161,6 +182,39 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       });
 
     expect(res.status).toBe(400);
+  });
+
+  // El `@IsOptional()` sin `@IsNotEmpty()` dejaba pasar `''`: el service solo
+  // mira `if (dto.nombre !== undefined)`, así que persistía el `.trim()` y la
+  // causa quedaba sin nombre, apareciendo como una opción en blanco en el
+  // selector de `mermas.vue`. Va a nivel e2e porque el que rechaza es el
+  // `ValidationPipe`, que en unit no corre.
+  it('PATCH de una causa con el nombre vacío devuelve 400 y no la deja sin nombre', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/causas-merma/${roturaCausaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: '' });
+
+    expect(res.status).toBe(400);
+
+    // Y un nombre de SOLO ESPACIOS también: `@IsNotEmpty()` solo rechaza `''`
+    // exacto, así que sin el `@Transform` que trimea antes de validar, `'   '`
+    // pasaba y el service lo persistía trimeado — el mismo bug con otra ropa.
+    const resEspacios = await request(app.getHttpServer())
+      .patch(`/api/causas-merma/${roturaCausaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: '   ' });
+    expect(resEspacios.status).toBe(400);
+
+    // Y la fila sigue con su nombre: el rechazo ocurrió antes de escribir.
+    const resLista = await request(app.getHttpServer())
+      .get('/api/causas-merma')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resLista.status).toBe(200);
+    const causa = (resLista.body as { id: string; nombre: string }[]).find(
+      (c) => c.id === roturaCausaId,
+    );
+    expect(causa?.nombre).toBeTruthy();
   });
 
   it('PATCH causa fija y DELETE causa en uso devuelven 400', async () => {

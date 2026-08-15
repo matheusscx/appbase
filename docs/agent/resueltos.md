@@ -149,6 +149,92 @@ criterio de permisos ya ata el tenant en todos lados: todavía no.** La adverten
 no solo allá porque `resueltos.md` es el archivo que se consulta para dar algo por cerrado, y
 el link entre los dos archivos era de una sola dirección.
 
+## Once entradas mecánicas en paralelo, y los dos huecos que la paralelización destapó (2026-08-15)
+
+Primera tanda corrida con **cinco agentes en paralelo**. Lo que decidió la partición no fue
+el conflicto de archivos sino **los recursos compartidos**: hay un solo Postgres y
+`reset-db.sh` hace `docker-compose down -v`, así que un agente que lo corra le vuela la base
+a los otros cuatro; y el backend bind-montea el fuente, así que editar un `.ts` recompila y
+**re-siembra** el contenedor de todos. Los worktrees no lo arreglan, lo empeoran: el stack de
+compose no ve los archivos del worktree, así que un e2e ahí correría contra el código viejo y
+volvería verde sin probar nada.
+
+**La regla que salió, y que conviene sostener:** los agentes **escriben y corren solo su
+propio spec**; el gate completo lo corre el principal, **en serie**, al final. Dos
+`nuxt build` concurrentes también se pisan el `.nuxt/`.
+
+### Lo que se cerró
+
+- **La moneda del ítem no llegaba a la pantalla de mermas.** `inventario` ya traía
+  `i.moneda_id` en el kardex; `mermas` tenía **cero** ocurrencias, así que un ítem importado
+  en USD mostraba su merma como si fueran pesos. ⚠️ La entrada decía *"los dos `SELECT`"* y en
+  realidad el `COUNT(*)` no selecciona columnas: los que había que tocar eran **el de `findAll`
+  y el del `POST`**, que arma su propia fila y la inserta en el listado sin refetch — sin eso,
+  la merma recién creada quedaba con el bug hasta recargar. Ese segundo no estaba en la entrada.
+- **Se podía dejar sin nombre una causa de merma o un motivo de diferencia.** Esta entrada se
+  equivocó **dos veces** antes de cerrar, y las dos las cazó algo distinto:
+  1. ⚠️ **Eran tres DTOs, no dos.** Existen dos módulos vivos con rutas distintas
+     —`/motivos-diferencia` y `/motivos-diferencia-inventario`— y la entrada nombraba solo el
+     segundo, que **no** es el que sirve la ruta que el test nuevo golpea. Lo cazó el e2e:
+     `Expected 400, Received 200` con el DTO "arreglado".
+  2. ⚠️⚠️ **Y `@IsNotEmpty()` no cerraba el hueco.** Rechaza `''` exacto, **no `'   '`**; y
+     como el service hace su `.trim()` **después** de validar, un nombre de solo espacios
+     reproducía el bug entero. Los tres e2e probaban `''` y ninguno `'   '`, así que el gate
+     pasaba en verde sobre un arreglo que no arreglaba. Lo cazó la **revisión independiente**,
+     que lo verificó corriendo `class-validator` de verdad en vez de razonarlo.
+     El arreglo correcto ya existía en el repo y no lo busqué: `RestaurarDto` tiene un
+     `@Transform` que trimea **antes** de validar, con un comentario que dice literalmente
+     *"`" "` tiene que fallar el `@IsNotEmpty` igual que `""`"*. Se copió a los tres.
+  Los tres quedan cubiertos por e2e —`causas-merma`, `motivos-diferencia` y
+  `motivos-diferencia-inventario`, este último dentro de `recuentos.e2e-spec.ts`— con los dos
+  casos, `''` y `'   '`, porque quien rechaza es el `ValidationPipe` y en unit no corre.
+  Mutante verificado: sacar el `@Transform` devuelve 200 y pone el test rojo.
+  🔎 Al buscar el resto **por conducta y no por nombre** (campos `string` opcionales con
+  `@MaxLength` y sin `@IsNotEmpty()`, en todo `src/**/dto/`) aparecieron **9 sitios**: siete son
+  `comentario`/`apellido`/`telefono`, donde vacío es legítimo, y uno es el nombre del **tenant**,
+  que quedó como entrada nueva en `pendientes.md`.
+- **El e2e del simulador de costos comparaba contra el valor viejo.** `not.toBe('1200.0000')`
+  pasaba con cualquier recálculo equivocado. Ahora compara contra `costoPropuesto` y
+  `precioSugerido`, que **la propia bandeja devuelve**: sin números hardcodeados que se
+  desincronicen si cambia la fórmula del CPP.
+- **El e2e de mermas no miraba el stock.** La respuesta ya traía `stockResultante` y nadie lo
+  leía. Se afirma contra el stock previo **y** contra la base con un `GET` posterior: un
+  `stockResultante` bien calculado y mal persistido pasaba lo primero.
+- **El reintento por deadlock de `RecuentosService.aplicar` no lo ejercitaba nada** (cero
+  ocurrencias de `40P01` en 754 líneas de spec). Cuatro tests: reintenta y sale bien, no
+  reintenta con otro `code`, no reintenta si no es `QueryFailedError`, y si el reintento
+  también falla el error que se propaga es **el del segundo intento** (`toBe` por referencia).
+- **Las dos barreras de tenant de serie y lote no tenían test.** ⚠️ Las líneas de la entrada
+  habían derivado. Y el primer intento cayó justo en la trampa que el brief advertía: con el
+  mock incompleto, el mutante fallaba por `TypeError` de una query no mockeada en vez de por la
+  aserción; se completó la cadena de mocks hasta el final del camino feliz.
+- **`/admin` era la única página sin guard de cliente.** El middleware correcto es `auth`, no
+  `admin`: `middleware/auth.ts:27-31` tiene un branch propio para `/admin` que chequea
+  `isSuperadmin`, mientras que `admin.ts` chequea `esAdmin` **del tenant** y redirige a
+  `/configuracion`. Eran ejes distintos.
+- **El garzón veía un toast rojo de permiso en la carga inicial de `/salones`.** Se silenciaron
+  las cuatro llamadas de fondo (`/items` ×3 y `/tipos-documento`) **una por una y no en
+  bloque**: `cargarCatalogo` incluye `/metodos-pago`, que el garzón **sí** puede leer, y un
+  `.catch` en el call-site habría tapado un fallo real de esa. Hay un segundo test de
+  contraejemplo que lo prueba.
+- **Tres pantallas sin spec** (`ventas/pos.vue`, `tienda/index.vue`,
+  `tienda/suscripciones.vue`): borrar `&activo=true` de una URL dejaba la suite en verde. El
+  arnés se copió del spec de `salones/index.vue`. La de suscripciones resultó distinta: su
+  consulta no sale en `onMounted` sino al abrir el drawer, gateado por permisos.
+- **Dos de documentación.** El paso 4 de la prueba manual de `garzones.md` no se podía
+  completar al pie de la letra —el selector solo lista garzones **con turno abierto** y el seed
+  no abre ninguno, así que salía vacío y sin ningún mensaje que lo explicara—, y la spec del
+  testigo prometía conteo a ciegas *"sin excepciones"* cuando el admin del tenant sí ve lo
+  esperado (decisión del owner del 2026-08-13).
+
+### Los mutantes
+
+**Once entradas, once verificaciones.** Todos los agentes reportaron el mutante aplicado, el
+test que se puso rojo **por su aserción** y el `git diff` vacío del archivo restaurado. Dos
+merecen mención: el de `/salones` reprodujo el síntoma exacto del reporte (*"No tienes permiso
+para esta acción"* en el array de toasts capturados), y el de serie/lote hubo que rehacerlo
+porque el primero moría por `TypeError`.
+
 ## El log que reintroducía el token en claro, y el arranque que se dejó como está (2026-08-15)
 
 **Entrada original (verbatim):** *"🚩 **Sin `SMTP_HOST`, los links de reset e invitación

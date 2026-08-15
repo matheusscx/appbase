@@ -114,6 +114,29 @@ let salonesMock: unknown[] = [{ id: 'salon-1', nombre: 'Principal', mesas: [mesa
  * `.catch(() => null)` de la llamada nueva no deja caer el resto del arranque.
  */
 let miPinRechaza = false
+/**
+ * Fuerza `/items` (×3) y `/tipos-documento` a rechazar con el 403 real de un
+ * rol sin permiso de catálogo (dato del POS que un garzón no ve).
+ */
+let catalogoRechaza403 = false
+/** Fuerza `/metodos-pago` a rechazar con un error genérico — NO un 403 de permiso. */
+let metodosPagoRechaza = false
+
+/**
+ * Los toasts no se pueden leer del DOM sin montar `UApp`, así que se captura
+ * el composable — mismo patrón que `configuracion/garzones.nuxt.spec.ts`. Es
+ * lo único que permite afirmar el COLOR: un toast que saliera con otro color
+ * se vería igual en un assert sobre el texto del wrapper.
+ */
+let toasts: { title?: string, color?: string }[] = []
+
+mockNuxtImport('useToast', () => {
+  return () => ({
+    add: (t: { title?: string, color?: string }) => {
+      toasts.push(t)
+    },
+  })
+})
 
 mockNuxtImport('useApiFetch', () => {
   return (
@@ -246,7 +269,28 @@ mockNuxtImport('useApiFetch', () => {
       // que dejó de hacerse en el cliente, y si el mock cortara en el `?` se
       // podría borrar con la suite en verde. Mismo motivo que `urlsSelector`.
       urlsCatalogo.push(url)
+      if (catalogoRechaza403) {
+        const err = new Error('x') as Error & { data?: unknown }
+        err.data = { message: 'No tienes permiso para esta acción' }
+        return Promise.reject(err)
+      }
       return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
+    }
+    if (ruta.endsWith('/tipos-documento')) {
+      if (catalogoRechaza403) {
+        const err = new Error('x') as Error & { data?: unknown }
+        err.data = { message: 'No tienes permiso para esta acción' }
+        return Promise.reject(err)
+      }
+      return Promise.resolve([{ id: 'tipo-1', nombre: 'Boleta', customerRequerido: false }])
+    }
+    if (ruta.endsWith('/metodos-pago')) {
+      if (metodosPagoRechaza) {
+        const err = new Error('x') as Error & { data?: unknown }
+        err.data = { message: 'Error al leer métodos de pago' }
+        return Promise.reject(err)
+      }
+      return Promise.resolve([{ metodoPagoId: 'mp-1', nombre: 'Efectivo', permiteVuelto: true, habilitada: true }])
     }
     if (ruta.endsWith('/caja/testigos/pendientes')) {
       bodiesPendientesTestigo.push(opts?.body ?? {})
@@ -269,8 +313,7 @@ mockNuxtImport('useApiFetch', () => {
         estado: (body as { firma?: boolean }).firma ? 'firmada' : 'rechazada',
       })
     }
-    // El resto del arranque (métodos de pago, tipos de documento, unidades,
-    // caja, emisor) no interviene en este flujo.
+    // El resto del arranque (unidades, caja, emisor) no interviene en este flujo.
     return Promise.resolve([])
   }
 })
@@ -314,6 +357,9 @@ function reiniciarMock() {
   miPinMock = null
   miPinRechaza = false
   salonesMock = [{ id: 'salon-1', nombre: 'Principal', mesas: [mesa()] }]
+  catalogoRechaza403 = false
+  metodosPagoRechaza = false
+  toasts = []
 }
 
 afterEach(() => {
@@ -695,6 +741,46 @@ describe('salones — el catálogo pide solo ítems vendibles', () => {
       'producto',
       'receta',
     ])
+  })
+})
+
+/**
+ * `/items` (×3) y `/tipos-documento` son carga DE FONDO al montar la pantalla
+ * (`cargarCatalogo`, llamada una sola vez desde `onMounted`): un garzón no
+ * tiene permiso de catálogo (dato del POS que ese rol no ve) y esas cuatro
+ * rutas responden 403. Medido en el smoke del 2026-08-15 con la cuenta
+ * `garzon.pin@paris.cl`: el toast rojo "No tienes permiso para esta acción"
+ * salía apenas se abría `/salones`, sin que el garzón hubiera pedido nada —
+ * misma familia que el `.catch(() => null)` que ya lleva `cargarActiva`
+ * (`onMounted` más arriba), acá aplicado a las cuatro llamadas de
+ * `cargarCatalogo` que también fallan para ese rol.
+ *
+ * `/metodos-pago` es la QUINTA llamada del mismo `Promise.all` y se queda
+ * sin `.catch` propio a propósito: para un garzón esa sí resuelve, así que si
+ * falla es un error real y tiene que seguir avisando — es el contraejemplo
+ * del segundo test, que prueba que no se silenció de más.
+ */
+describe('salones — el catálogo silencia el 403 de carga inicial, no cualquier error', () => {
+  beforeEach(reiniciarMock)
+
+  it('un 403 de /items o /tipos-documento en el montaje no dispara ningún toast', async () => {
+    catalogoRechaza403 = true
+
+    await montar()
+
+    expect(toasts).toEqual([])
+  })
+
+  // El contraejemplo obligatorio: si silenciáramos el `Promise.all` entero de
+  // `cargarCatalogo` (en vez de cada llamada que sabemos que puede 403 para
+  // este rol), un error real de `/metodos-pago` se perdería en silencio.
+  it('un error real de /metodos-pago (no un 403 de permiso) sigue avisando', async () => {
+    metodosPagoRechaza = true
+
+    await montar()
+
+    const errorToast = toasts.find(t => t.color === 'error')
+    expect(errorToast?.title).toBe('Error al leer métodos de pago')
   })
 })
 

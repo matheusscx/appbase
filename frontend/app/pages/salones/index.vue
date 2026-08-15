@@ -575,19 +575,28 @@ async function cargarCatalogo() {
   loadingCatalogo.value = true
   try {
     // Solo tipos vendibles (producto + receta + combo). Los ingredientes (y resto) no van al catálogo.
+    // `/items` (×3) y `/tipos-documento` llevan `.catch(() => null)` propio,
+    // mismo motivo que `cargarActiva` en `onMounted`: son datos del POS que un
+    // garzón no tiene permiso de leer, y esta carga es de fondo — no una acción
+    // que el garzón haya pedido. Sin el catch, ese 403 volteaba el `Promise.all`
+    // entero (incluido `/metodos-pago`, que SÍ pasa para ese rol) y el catch de
+    // abajo lo mostraba como "No tienes permiso para esta acción" en rojo apenas
+    // se abría la pantalla (medido en el smoke del 2026-08-15). `/metodos-pago`
+    // se queda SIN catch propio a propósito: si esa sí falla, es un error real
+    // y tiene que avisar.
     const [productosRes, recetasRes, combosRes, metodosRes, tiposRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=producto&activo=true&pageSize=100`),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=receta&activo=true&pageSize=100`),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=combo&activo=true&pageSize=100`),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=producto&activo=true&pageSize=100`).catch(() => null),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=receta&activo=true&pageSize=100`).catch(() => null),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=combo&activo=true&pageSize=100`).catch(() => null),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
-      useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
+      useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`).catch(() => null),
     ])
     // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
     // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
     // así que en un catálogo grande empujaba fuera del salón a uno vendible—.
-    items.value = [...productosRes.data, ...recetasRes.data, ...combosRes.data]
+    items.value = [...(productosRes?.data ?? []), ...(recetasRes?.data ?? []), ...(combosRes?.data ?? [])]
     metodos.value = metodosRes
-    tiposDocumento.value = tiposRes
+    tiposDocumento.value = tiposRes ?? []
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar el catálogo'), color: 'error' })

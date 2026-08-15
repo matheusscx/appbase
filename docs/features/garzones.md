@@ -427,10 +427,18 @@ correcto.
    (revela uno nuevo) y *"Invalidar PIN"* en uno con cuenta (no muestra ningún número). La
    ficha muestra el historial de PIN de **cualquier** garzón; el badge de PIN, siempre que no
    haya PIN usable (con cuenta o sin ella) más el caso *"con cuenta y PIN puesto"*.
-4. Salones → abrir cuenta: PIN correcto abre la cuenta (apertura + responsable vigente
-   inicial visibles); PIN incorrecto muestra "PIN inválido" (sin cerrar sesión). Cerrar y
-   cobrar pide el PIN del garzón que cierra (auditoría; puede diferir del responsable
-   vigente).
+4. **Primero, entrar a turno con el garzón que vas a usar.** ⚠️ Sin esto el paso no se puede
+   completar y no hay mensaje que lo explique: el selector de PIN pide la lista con
+   `garzonesApi.paraSelector(enTurno)` y *"abrir cuenta"* usa el default `enTurno: true`
+   (`GarzonPinModal.vue:19`), o sea que **solo lista garzones con sesión de turno abierta**.
+   El seed no abre ninguna sesión, así que si nadie entró a turno el selector sale **vacío**
+   — y como sin garzón no se dispara ningún request, el toast de *"sesión de trabajo"* de
+   `salones/index.vue` tampoco aparece. Queda una pantalla muda.
+
+   Recién entonces: Salones → abrir cuenta: PIN correcto abre la cuenta (apertura +
+   responsable vigente inicial visibles); PIN incorrecto muestra "PIN inválido" (sin cerrar
+   sesión). Cerrar y cobrar pide el PIN del garzón que cierra (auditoría; puede diferir del
+   responsable vigente).
 5. Entrando con la cuenta de Ana (`ana.torres`): Configuración → Perfil → **Mi PIN**, fijar
    uno propio (dos veces, sin pedir el anterior). El encargado, en la ficha, ve el evento
    `fijado_por_garzon` — pero **no el PIN**.

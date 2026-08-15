@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { getDataSourceToken } from '@nestjs/typeorm';
+import { QueryFailedError } from 'typeorm';
 import { RecuentosService } from './recuentos.service';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
 import { InventarioService } from '../inventario/inventario.service';
@@ -749,6 +750,73 @@ describe('RecuentosService', () => {
       await expect(
         service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
       ).rejects.toThrow('Error de conexión inesperado');
+    });
+  });
+
+  describe('RecuentosService — aplicar, reintento por deadlock (40P01)', () => {
+    const resultadoExitoso = {
+      recuentoId: RECUENTO_ID,
+      lineasAplicadas: 1,
+      lineasDescartadas: [],
+    };
+
+    function buildQueryFailedError(code: string): QueryFailedError {
+      const error = new QueryFailedError(
+        'UPDATE item_producto SET stock = stock + $1 WHERE item_id = $2',
+        [],
+        new Error('deadlock detected'),
+      );
+      (error as unknown as { code: string }).code = code;
+      return error;
+    }
+
+    it('reintenta una vez cuando la transacción aborta por deadlock y el reintento sale bien', async () => {
+      const spy = jest
+        .spyOn(service as any, 'aplicarEnTransaccion')
+        .mockRejectedValueOnce(buildQueryFailedError('40P01'))
+        .mockResolvedValueOnce(resultadoExitoso);
+
+      const res = await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(res).toBe(resultadoExitoso);
+      expect(spy).toHaveBeenCalledTimes(2);
+    });
+
+    it('no reintenta ante un QueryFailedError con un code distinto de 40P01', async () => {
+      const otroError = buildQueryFailedError('23505');
+      const spy = jest
+        .spyOn(service as any, 'aplicarEnTransaccion')
+        .mockRejectedValueOnce(otroError);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toBe(otroError);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('no reintenta ante un error que no es QueryFailedError', async () => {
+      const otroError = new Error('lo que sea');
+      const spy = jest
+        .spyOn(service as any, 'aplicarEnTransaccion')
+        .mockRejectedValueOnce(otroError);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toBe(otroError);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('si el reintento también falla, el error se propaga sin encubrirlo', async () => {
+      const segundoError = buildQueryFailedError('40P01');
+      const spy = jest
+        .spyOn(service as any, 'aplicarEnTransaccion')
+        .mockRejectedValueOnce(buildQueryFailedError('40P01'))
+        .mockRejectedValueOnce(segundoError);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toBe(segundoError);
+      expect(spy).toHaveBeenCalledTimes(2);
     });
   });
 });

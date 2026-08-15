@@ -200,6 +200,35 @@ describe('Recuentos — catálogo de motivos de diferencia (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(204);
   });
+
+  // El tercero de los tres DTOs gemelos que dejaban dejar un catálogo sin
+  // nombre. `@IsNotEmpty()` caza `''` pero no `'   '`; el `@Transform` que
+  // trimea antes de validar caza los dos. Sin esto, el motivo quedaba con el
+  // nombre en blanco en el override de línea de `recuentos/[id].vue`.
+  // Va en su propio `it` —con su propio motivo— en vez de colgarse del de
+  // arriba: un `it` que afirma creación, validación y borrado no dice cuál de
+  // las tres se rompió cuando se pone rojo.
+  it('PATCH de un motivo con nombre vacío o de solo espacios → 400', async () => {
+    const { body: creado } = await request(app.getHttpServer())
+      .post('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: `Motivo nombre vacío E2E ${Date.now()}` })
+      .expect(201);
+    const custom = creado as MotivoDiferenciaInventarioItem;
+
+    for (const nombreInvalido of ['', '   ']) {
+      await request(app.getHttpServer())
+        .patch(`/api/motivos-diferencia-inventario/${custom.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: nombreInvalido })
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .delete(`/api/motivos-diferencia-inventario/${custom.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(204);
+  });
 });
 
 describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {

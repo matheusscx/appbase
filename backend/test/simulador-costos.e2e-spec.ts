@@ -15,6 +15,8 @@ interface TokenResponse {
 
 interface DesfaseRecetaResponse {
   recetaItemId: string;
+  /** El costo recalculado que la bandeja propone: el esperado tras aplicar. */
+  costoPropuesto: string;
   precioSugerido: string | null;
 }
 
@@ -149,6 +151,17 @@ describe('Simulador impacto costos (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const body = detalle.body as ItemDetalleResponse;
+    // Contra el valor ESPERADO, no contra el viejo. Un `not.toBe('1200.0000')`
+    // pasaba con cualquier número recalculado mal: la única forma de ponerlo
+    // rojo era que el valor no cambiara en absoluto. Los dos esperados salen
+    // de la propia bandeja —`costoPropuesto` es el costo que propuso, y
+    // `precioSugerido` es literalmente el `precioBase` que este test mandó a
+    // aplicar unas líneas más arriba—, así que no hay número hardcodeado que
+    // se desincronice si cambia la fórmula del CPP.
+    expect(fila?.costoPropuesto).toBeDefined();
+    expect(body.costoActual).toBe(fila!.costoPropuesto);
+    expect(body.precioBase).toBe(fila!.precioSugerido);
+    // Y siguen sin ser los de antes: el test original afirmaba solo esto.
     expect(body.costoActual).not.toBe('1200.0000');
     expect(body.precioBase).not.toBe('3500.0000');
   });

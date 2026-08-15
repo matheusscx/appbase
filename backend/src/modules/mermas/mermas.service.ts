@@ -41,6 +41,14 @@ export interface MermaListItem {
   creadoEl: Date;
   usuarioNombre: string | null;
   unidadMedida: string | null;
+  /**
+   * Moneda del ítem, no la oficial del tenant. El listado de mermas mezcla
+   * ítems de distintas monedas igual que el kardex global: sin esto la UI
+   * formatea todo costo con la oficial y un ítem importado en USD se lee como
+   * si fueran pesos. Mismo motivo y misma solución que
+   * `InventarioService` (kardex).
+   */
+  monedaId: string;
 }
 
 interface MermaRow {
@@ -55,6 +63,7 @@ interface MermaRow {
   creado_el: Date;
   usuario_nombre: string | null;
   unidad_medida: string | null;
+  moneda_id: string;
 }
 
 @Injectable()
@@ -79,8 +88,14 @@ export class MermasService {
         modo_inventario: string | null;
         costo_actual: string | null;
         nombre: string;
+        moneda_id: string;
       }[] = await manager.query(
-        `SELECT i.tipo, i.nombre, p.unidad_medida, p.modo_inventario, p.costo_actual
+        // `i.moneda_id`: la fila que este POST devuelve se inserta en el
+        // listado sin refetch, así que sin la moneda del ítem la merma recién
+        // creada se formatea con la oficial del tenant hasta que alguien
+        // recargue. Mismo motivo que en el SELECT de `findAll`.
+        `SELECT i.tipo, i.nombre, p.unidad_medida, p.modo_inventario, p.costo_actual,
+                i.moneda_id
          FROM items i
          LEFT JOIN item_producto p ON p.item_id = i.item_id
          WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL
@@ -195,6 +210,7 @@ export class MermasService {
           creadoEl: new Date(),
           usuarioNombre: null,
           unidadMedida: itemRows[0].unidad_medida,
+          monedaId: itemRows[0].moneda_id,
         },
       };
     });
@@ -228,7 +244,7 @@ export class MermasService {
          mv.cantidad, mv.costo_unitario,
          mv.causa_merma_id, cm.nombre AS causa_nombre,
          mv.comentario, mv.creado_el, u.nombre AS usuario_nombre,
-         p.unidad_medida
+         p.unidad_medida, i.moneda_id
        FROM movimientos_inventario mv
        JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
@@ -293,6 +309,7 @@ export class MermasService {
       creadoEl: r.creado_el,
       usuarioNombre: r.usuario_nombre,
       unidadMedida: r.unidad_medida,
+      monedaId: r.moneda_id,
     };
   }
 }

@@ -356,6 +356,81 @@ describe('InventarioService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('salida serie: lanza BadRequest si la unidad no pertenece al tenant', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          // La unidad existe y está disponible, pero es de otro tenant: el
+          // `unidadId` llega del body del cliente, así que este `if` es la
+          // única defensa contra pedir la baja de una unidad ajena.
+          {
+            estado: 'disponible',
+            item_id: ITEM_ID,
+            tenant_id: 'otro-tenant-uuid',
+          },
+        ])
+        // El resto de la cadena queda mockeada por si la validación de
+        // pertenencia desaparece: así el test rojo lo dice la propia
+        // aserción `rejects.toThrow` (nunca lanzó) y no un TypeError de un
+        // mock incompleto más adelante en el flujo.
+        .mockResolvedValueOnce(undefined) // UPDATE unidad
+        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-tenant-mutant' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          unidadIds: [UNIDAD_1],
+          causaMermaId: CAUSA_MERMA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al tenant`),
+      );
+    });
+
+    it('salida serie: lanza BadRequest si la unidad no pertenece al item', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          // Mismo tenant, pero la unidad es de otro ítem.
+          {
+            estado: 'disponible',
+            item_id: 'otro-item-uuid',
+            tenant_id: TENANT,
+          },
+        ])
+        // Igual que arriba: cadena completa para que un mutante que borre
+        // esta validación falle por la propia aserción, no por un
+        // TypeError río abajo.
+        .mockResolvedValueOnce(undefined) // UPDATE unidad
+        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-item-mutant' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          unidadIds: [UNIDAD_1],
+          causaMermaId: CAUSA_MERMA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al item`),
+      );
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -487,6 +562,40 @@ describe('InventarioService', () => {
           causaMermaId: CAUSA_MERMA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('salida lote: lanza BadRequest si el lote no pertenece al tenant', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '50', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          // El lote existe con disponibilidad suficiente, pero es de otro
+          // tenant: `loteId` llega del body del cliente, así que este `if` es
+          // la única defensa contra descontar el lote de otro tenant.
+          { cantidad_disponible: '50', tenant_id: 'otro-tenant-uuid' },
+        ])
+        // Cadena completa por si la validación de pertenencia desaparece: el
+        // rojo lo tiene que dar la propia aserción `rejects.toThrow`, no un
+        // TypeError de un mock incompleto más adelante en el flujo.
+        .mockResolvedValueOnce(undefined) // UPDATE lote
+        .mockResolvedValueOnce([{ total: '40' }]) // SUM
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-lote-tenant-mutant' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '10',
+          usuarioId: USER_ID,
+          loteId: LOTE_ID,
+          causaMermaId: CAUSA_MERMA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('El lote no pertenece al tenant'),
+      );
     });
   });
 

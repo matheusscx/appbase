@@ -255,68 +255,17 @@ el orden de la tabla de arriba.
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
-respuesta del owner.** Ordenadas de más barata a más cara — las dos primeras son una
-edición de texto; **las dos últimas no son teclear**, son escribir tests que hoy no existen
-(un e2e con un ítem en otra moneda, y el arnés de tres specs de página). El material para
-una tanda de una sentada empieza arriba, y **va después de la 🔴**.
+respuesta del owner.**
 
-- [ ] **`mermas` nunca recibió el fix de moneda que su gemelo `inventario` sí tiene: el mismo
-  monto se lee distinto según la pantalla** (backend + frontend, auditoría `inventario`
-  2026-08-15) — `inventario.service.ts:752` trae `i.moneda_id` en el `SELECT` del kardex, con un
-  comentario que explica el porqué (*"el kardex global mezcla ítems de distintas monedas: sin
-  esto la UI formatea todo costo con la moneda oficial del tenant"*), y `inventario/index.vue`
-  lo consume pasando `row.original.monedaId` como segundo argumento de `formatMonto`.
-  `mermas.service.ts` tiene **cero ocurrencias** de `moneda_id` (medido) y `mermas.vue:336,338`
-  llama `formatMonto(...)` con un solo argumento, así que cae en la moneda oficial del tenant.
-  **Lo mismo, medido:** `inventario/index.vue:273` formatea `costoPerdido` —un campo de merma—
-  **con** la moneda del ítem; `/mermas` formatea **ese mismo campo** sin ella. Un ítem importado
-  en USD muestra su merma como si fueran pesos en una pantalla y no en la otra.
-  Es mecánica porque **el fix ya está escrito en el módulo gemelo**: agregar `i.moneda_id` a los
-  dos `SELECT`, el campo a `MermaListItem`, y el segundo argumento en las tres llamadas del
-  `.vue`. Sin decisión de por medio.
+📉 **Once salieron el 2026-08-15** en una tanda de cinco agentes en paralelo (ver
+[`resueltos.md`](resueltos.md)). Las que quedan son las que **no** se podían paralelizar, y
+por eso sobrevivieron: cinco se pisan entre sí sobre el mismo archivo —**tres** tocan
+`tenants.service.ts` y **dos** `garzones.service.ts`—, y el resto necesita e2e, que comparte
+el único Postgres y por lo tanto va **en serie**.
 
-- [ ] **Se puede dejar sin nombre una causa de merma o un motivo de diferencia editándolos**
-  (backend, auditoría `inventario` 2026-08-15) — `update-causa-merma.dto.ts` y
-  `update-motivo-diferencia-inventario.dto.ts` declaran `@IsString() @IsOptional()
-  @MaxLength(120)` **sin `@IsNotEmpty()`**, que sus DTOs de creación hermanos sí tienen. Los
-  services solo hacen `if (dto.nombre !== undefined)` —verdadero para `''`— y persisten el
-  `.trim()`. El `required` del `UFormField` en las dos pantallas es cosmético: el `UForm` no
-  recibe `:schema` ni `:validate`, así que no bloquea el submit. Resultado: la fila queda con
-  nombre vacío y aparece como una opción sin etiqueta en el selector de causa de `mermas.vue` y
-  en el override de línea de `recuentos/[id].vue`. Dos DTOs gemelos, un decorador cada uno.
-
-- [ ] **El e2e del simulador de costos acepta cualquier precio con tal de que no sea el viejo**
-  (backend/tests, auditoría `inventario` 2026-08-15) —
-  `simulador-costos.e2e-spec.ts:150-151` cierra con `expect(body.costoActual).not.toBe('1200.0000')`
-  y `expect(body.precioBase).not.toBe('3500.0000')`. Un precio recalculado mal pasa igual: la
-  única forma de fallar es que el valor no haya cambiado en absoluto. El test ya tiene a mano el
-  valor esperado; falta compararlo contra él en vez de contra el anterior.
-
-- [ ] **El e2e de mermas nunca comprueba que el stock haya bajado** (backend/tests, auditoría
-  `inventario` 2026-08-15) — `mermas.e2e-spec.ts:116-135` afirma `causaNombre`, `costoUnitario` y
-  `costoPerdido > 0` sobre la respuesta del `POST`, y ningún `GET` posterior vuelve a leer el
-  stock. Es la única capa que corre contra Postgres real, así que el efecto de una merma sobre el
-  saldo no está fijado por nada de extremo a extremo. **El arreglo es un `expect`, no un
-  escenario nuevo:** la respuesta ya trae `stockResultante` (está en el tipo `MermaResponse` del
-  propio spec, línea 24) y el test no lo mira.
-
-- [ ] **El reintento por deadlock de `RecuentosService.aplicar` no lo ejercita ningún test**
-  (backend/tests, auditoría `inventario` 2026-08-15) — `recuentos.service.ts:478-489` atrapa
-  `QueryFailedError` con `code === '40P01'` y reintenta una vez. Medido: **cero** ocurrencias de
-  `40P01`, `QueryFailedError` o `deadlock` en las 754 líneas de `recuentos.service.spec.ts`, así
-  que borrar el `try/catch` entero deja la suite en verde. A diferencia de casi todo lo demás de
-  concurrencia, este **no necesita concurrencia real** para cubrirse: alcanza con mockear
-  `aplicarEnTransaccion` para que lance un `QueryFailedError` con ese code en la primera llamada.
-
-- [ ] **La única barrera de tenant de las salidas por serie y lote no tiene ningún test**
-  (backend/tests, auditoría `inventario` 2026-08-15) — `inventario.service.ts:463-468` rechaza una
-  unidad que no pertenece al tenant o al ítem, y `:611-613` hace lo propio con el lote. Los
-  `unidadIds`/`loteId` llegan del body del cliente, así que esos `if` son la defensa, no una
-  redundancia. `inventario.service.spec.ts` ejercita el camino de serie (FIFO automático,
-  disponibilidad insuficiente) pero **ninguna de las dos validaciones de pertenencia**.
-  ℹ️ No contradice a la lente de multi-tenant, que salió limpia: ahí se verificó que los 16
-  llamadores de `registrarMovimiento` validan el ítem antes. Esto es el escalón de adentro, que
-  existe justamente porque el `unidadId` no pasa por esa validación.
+⚠️ **Antes de repartirlas, leer la regla que salió de esa tanda**, en la entrada de
+`resueltos.md`: reparte por **dueño de archivo y recurso compartido**, no por cantidad; los
+agentes corren solo su propio spec; el gate completo lo corre el principal al final.
 
 - [ ] **Queda un tercer gemelo del criterio de permisos sin atar el tenant: `findMembers`**
   (backend, **hallado por la revisión independiente el 2026-08-15**) —
@@ -348,23 +297,41 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   `invitacion-y-reset`, `garzon-modo-personal`) los ejercitan de costado, no como sujeto.
   Sigue valiendo la prioridad: los tests que **conceden** acceso antes que los que lo niegan.
 
-- [ ] **La barrida del `expect` en el login dejó una pregunta abierta que no es mecánica:
-  ¿el arranque debe negarse a levantar sin `SMTP_HOST` en producción?** (backend + producto,
-  **abierta el 2026-08-15 al cerrar la entrada del log en texto plano**) — el agujero en sí ya
-  está cerrado: en producción el cuerpo del mail **nunca** se escribe en el log (ver
-  [`resueltos.md`](resueltos.md)). Lo que queda es la otra mitad, que **es decisión de producto
-  y por eso no se resolvió sola**: hoy, sin SMTP configurado, el sistema arranca igual y
-  registra un `error` diciendo que ningún mail va a salir. La alternativa —tirar en el
-  constructor y no levantar— es *fallar fuerte* de verdad, pero **deja el POS entero caído
-  porque el mail no está configurado**. Nadie puede vender porque nadie puede invitar usuarios.
-  ⚖️ El precedente del repo apunta al arranque tolerante: `MailService` **nunca lanza hacia
-  arriba** por decisión explícita y documentada (un mail que no sale no puede tumbar la
-  operación que lo originó). Negarse a arrancar es coherente con "configuración obligatoria" y
-  contradictorio con ese docblock. **Es del owner, no del agente.**
-  🔎 **Y sigue faltando el dato que decide la urgencia, que no se consultó a propósito**
-  (listar variables de Railway expone credenciales): **¿el deploy de producción tiene
-  `SMTP_HOST` seteado?** Se ve en el dashboard en un clic. Con el arreglo puesto ya no hay fuga
-  en ninguno de los dos casos; lo que cambia es si hoy los mails llegan o no llegan.
+- [ ] **Un `nombre: null` en los catálogos revienta con 500 en vez de 400** (backend,
+  **hallado por la revisión independiente el 2026-08-15**) — `@IsOptional()` de
+  `class-validator` trata `null` igual que `undefined`, así que un
+  `PATCH {"nombre": null}` **pasa la validación**; después el service hace
+  `dto.nombre.trim()` sobre `null` y sale un `TypeError` sin controlar. Afecta a los tres
+  services de catálogos (`causas-merma`, `motivos-diferencia`,
+  `motivos-diferencia-inventario`).
+  ⚠️ **Es preexistente, no lo introdujo el `@Transform`** que se agregó el 2026-08-15 (ver
+  [`resueltos.md`](resueltos.md)): `@IsOptional()` ya se comportaba así antes. Se separa
+  porque el arreglo no es el mismo —hay que decidir entre `@IsNotIn([null])`, cambiar el
+  `if (dto.nombre !== undefined)` de los tres services por un chequeo de `!= null`, o
+  ambos— y porque el impacto es distinto: acá no queda un dato corrupto, queda un 500 feo.
+
+- [ ] **El tenant puede dejarse sin nombre a sí mismo** (backend, **medido el 2026-08-15 al
+  cerrar la entrada gemela de causas y motivos**) — `update-my-tenant.dto.ts` declara
+  `nombre?: string` con `@IsString() @IsOptional() @MaxLength(...)` y **sin `@IsNotEmpty()`**:
+  exactamente el mismo hueco que se acaba de cerrar en los tres DTOs de catálogos (ver
+  [`resueltos.md`](resueltos.md)). Un `PATCH /tenants/me` con `{"nombre": ""}` pasa la
+  validación.
+  🔎 **Cómo apareció, que es la parte que vale:** no estaba en ninguna lista. Salió de buscar
+  **por conducta** en todo `src/**/dto/` —campos `string` opcionales con `@MaxLength` y sin
+  `@IsNotEmpty()`— en vez de por el nombre de archivo. Ese barrido dio **9 sitios**; siete son
+  `comentario`, `apellido` y `telefono`, donde vacío es legítimo y **no hay que tocarlos**.
+  Los únicos dos que son identidad son `nombre`, y éste es el que quedó afuera del alcance de
+  aquella entrada.
+  ⚠️ **Y el barrido tenía un punto ciego**, señalado por la revisión: filtraba por
+  `@MaxLength`, así que **no vio `me/dto/update-perfil.dto.ts`** (`nombre?: string` con solo
+  `@IsString() @IsOptional()`, sin `@MaxLength` ni `@IsNotEmpty()`). Es el mismo patrón y
+  entra en esta entrada: son **dos** campos de identidad a revisar, el del tenant y el del
+  perfil del usuario.
+  ⚠️ **Y el arreglo no es solo `@IsNotEmpty()`**: ése rechaza `''` pero no `'   '`. El patrón
+  correcto del repo es el `@Transform` que trimea antes de validar (`RestaurarDto`, y ahora
+  los tres DTOs de catálogos). Ese detalle costó un BLOQUEA en la revisión.
+  Se deja aparte porque no es un catálogo: el nombre del tenant sale en documentos y hay que
+  mirar si el service ya lo defiende por otro lado antes de sumar el decorador.
 
 - [ ] **Dos tests de aislamiento por tenant que no aíslan nada** (backend/tests, auditoría
   RBAC/auth 2026-08-15) — los dos prometen en el nombre lo que su aserción no sostiene, y en los
@@ -404,18 +371,6 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
      borrado que nadie pidió.
   Ningún test ejercita este endpoint, y `roles.service.ts` no tiene spec.
 
-- [ ] **`/admin` es la única página sin guard de cliente, y su middleware existe** (frontend,
-  auditoría RBAC/auth 2026-08-15) — `pages/admin.vue` declara solo
-  `definePageMeta({ layout: 'dashboard' })`. **Existe `middleware/admin.ts` y la página no lo
-  usa.** El contraste está medido: `pages/configuracion.vue` sí declara `middleware: 'auth'`, y
-  por eso roles y usuarios quedan cubiertos por herencia. No hay ningún middleware `.global.ts`
-  ni `router.beforeEach`, así que el gateo depende 100% de que cada página lo declare — y el
-  chequeo de superadmin que vive dentro de `auth.ts` nunca corre para esta ruta.
-  Un visitante sin token que navegue a `/admin` monta el layout completo sin redirigir. Hoy el
-  contenido es un placeholder, pero es **la única puerta a `/admin/*`** y el candado documentado
-  está muerto. Los specs de middleware prueban la función aislada, nunca si la página la tiene
-  enganchada — por eso nada se pone rojo.
-
 - [ ] **Dos descuidos chicos de membresía, con el arreglo ya escrito en su hermano** (backend,
   auditoría RBAC/auth 2026-08-15):
   1. **`switchTenant` no mira si el tenant destino está borrado.** Solo chequea
@@ -439,31 +394,6 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   perdedor simplemente ve un 500 genérico donde correspondía un 409 accionable. `tenants.service.spec.ts`
   cubre la atomicidad y el rollback de este método, pero ningún test dispara el `23505` acá.
 
-- [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
-  selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
-  hueco preexistente a esta feature**) — el paso 4 de
-  [`garzones.md` → Testing → Manual](../features/garzones.md#manual-frontend) dice "Salones →
-  abrir cuenta: PIN correcto abre la cuenta" sin mencionar antes "entrar a turno". Pero
-  `GarzonPinModal` pide el selector con `garzonesApi.paraSelector(props.enTurno)`, y "abrir
-  cuenta" usa el default `enTurno: true` (`GarzonPinModal.vue:19`) — o sea que solo lista
-  garzones **con sesión de turno abierta**. Si nadie entró a turno todavía (el seed no abre
-  sesiones), el selector sale vacío y el paso no se puede completar tal como está escrito. **No
-  hay mitigación:** `toastErrorOperativo` (`salones/index.vue:308-325`) solo reacciona a un
-  request que vuelve con el error "sesión de trabajo" — y con el selector vacío no hay garzón
-  que elegir, así que no se dispara ningún request y ese fallback nunca corre. El paso 4 queda
-  bloqueado sin salida hasta que alguien edite el manual (agregar "entrar a turno" antes) o
-  entre a turno por su cuenta antes de seguirlo.
-
-- [ ] **La spec del testigo promete un conteo a ciegas sin excepciones, y el producto tiene una**
-  — cola de la entrada cerrada por la task 6b (ver `resueltos.md`). El admin del tenant sigue
-  exento del ciego incluso forzando el cierre de una caja ajena (decisión explícita del owner
-  2026-08-13), pero
-  [`2026-08-11-testigo-cierre-forzado-design.md`](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
-  sigue diciendo *"cuenta a ciegas: sin ver lo esperado"* a secas. Es un ajuste de texto, no de
-  código: la spec tiene que decir *"salvo el admin del tenant, que nunca es el objetivo del
-  anti-fraude"*. Se abre como entrada propia porque la entrada que lo detectó se cerró y el
-  arreglo quedaba huérfano.
-
 - [ ] **Ningún e2e asierta el efecto de invalidar al vincular** (backend, **medido 2026-08-15**)
   — el mutante que quita `garzon.pinHash = PIN_INUTILIZABLE` de la rama `vincular` de
   `actualizar()` **no pone nada en rojo en el e2e**. La transición sí se recorre —
@@ -482,14 +412,6 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   es una consulta de más en una ruta que golpea cada carga del perfil y de `/salones` en modo
   personal.
 
-- [ ] **El garzón que abre `/salones` ve un toast rojo de permiso que no le corresponde**
-  (frontend, **medido en el smoke del 2026-08-15**) — con la cuenta `garzon.pin@paris.cl`, la
-  carga inicial de la pantalla del salón dispara cinco 403 (`/caja/activa`, `/items` ×3,
-  `/tipos-documento`: datos del POS que el rol de garzón no ve) y al menos uno sale como
-  *"No tienes permiso para esta acción"* en rojo, arriba a la derecha. **Preexistente**, no lo
-  introdujo el PIN propio: `/garzones/mi-pin` devolvió 200 en la misma corrida. Es la misma
-  familia que el `.catch(() => null)` que ya lleva `cargarActiva`, aplicada a medias.
-
 - [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
   (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
   de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
@@ -498,14 +420,6 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
   /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
   garzón activo, la consulta y el payload crecen sin techo.
-
-- [ ] **`ventas/pos.vue`, `tienda/index.vue` y `tienda/suscripciones.vue` no tienen
-  `.nuxt.spec.ts`.** El filtro de pausados que vivía en esas tres pantallas se movió a la
-  query el 2026-08-09 (`activo=true`, ver [`resueltos.md`](resueltos.md)), y el endpoint sí
-  quedó cubierto por e2e; lo que **no** sostiene nada es que cada pantalla lo pida — borrar
-  `&activo=true` de una URL deja la suite en verde. En `salones/index.vue` eso ya tiene test,
-  porque ahí el spec existe. Montar las otras tres exige stores de caja, unidades e
-  impresoras: es el arnés, no el `it`.
 
 - [ ] **Una venta con un ítem en moneda extranjera no está cubierta en ningún nivel**
   (backend/tests, medido 2026-08-11) — `ventas.service.spec.ts` tiene una sola moneda con
@@ -1521,6 +1435,24 @@ encontrar**: dependencias entre entradas, carreras adentro del arreglo, docs que
 corregir en el mismo commit, y costos que el owner asumió explícitamente.
 La única que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
 una respuesta.
+
+- [ ] **La barrida del `expect` en el login dejó una pregunta abierta que no es mecánica:
+  ¿el arranque debe negarse a levantar sin `SMTP_HOST` en producción?** (backend + producto,
+  **abierta el 2026-08-15 al cerrar la entrada del log en texto plano**) — el agujero en sí ya
+  está cerrado: en producción el cuerpo del mail **nunca** se escribe en el log (ver
+  [`resueltos.md`](resueltos.md)). Lo que queda es la otra mitad, que **es decisión de producto
+  y por eso no se resolvió sola**: hoy, sin SMTP configurado, el sistema arranca igual y
+  registra un `error` diciendo que ningún mail va a salir. La alternativa —tirar en el
+  constructor y no levantar— es *fallar fuerte* de verdad, pero **deja el POS entero caído
+  porque el mail no está configurado**. Nadie puede vender porque nadie puede invitar usuarios.
+  ⚖️ El precedente del repo apunta al arranque tolerante: `MailService` **nunca lanza hacia
+  arriba** por decisión explícita y documentada (un mail que no sale no puede tumbar la
+  operación que lo originó). Negarse a arrancar es coherente con "configuración obligatoria" y
+  contradictorio con ese docblock. **Es del owner, no del agente.**
+  🔎 **Y sigue faltando el dato que decide la urgencia, que no se consultó a propósito**
+  (listar variables de Railway expone credenciales): **¿el deploy de producción tiene
+  `SMTP_HOST` seteado?** Se ve en el dashboard en un clic. Con el arreglo puesto ya no hay fuga
+  en ninguno de los dos casos; lo que cambia es si hoy los mails llegan o no llegan.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —

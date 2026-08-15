@@ -17,6 +17,8 @@ interface MermaListItem {
   creadoEl: string
   usuarioNombre: string | null
   unidadMedida: string | null
+  /** Moneda del ítem: el listado mezcla ítems de distintas monedas. */
+  monedaId: string
 }
 
 interface ProductoOpt {
@@ -241,7 +243,7 @@ async function registrar() {
       }
     }
     toast.add({
-      title: `Merma registrada · costo perdido ${formatMonto(res.costoPerdido)}`,
+      title: `Merma registrada · costo perdido ${formatMonto(res.costoPerdido, res.merma.monedaId)}`,
       color: 'success',
     })
     drawerOpen.value = false
@@ -333,14 +335,14 @@ const columns: TableColumn<MermaListItem>[] = [
         />
       </template>
       <template #costoUnitario-cell="{ row }">
-        {{ row.original.costoUnitario != null ? formatMonto(row.original.costoUnitario) : '—' }}
+        {{ row.original.costoUnitario != null ? formatMonto(row.original.costoUnitario, row.original.monedaId) : '—' }}
       </template>
       <template #costoPerdido-cell="{ row }">
         <span
           v-if="row.original.costoPerdido != null"
           class="font-medium text-error"
         >
-          {{ formatMonto(row.original.costoPerdido) }}
+          {{ formatMonto(row.original.costoPerdido, row.original.monedaId) }}
         </span>
         <span v-else class="text-muted">—</span>
       </template>

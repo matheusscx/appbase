@@ -183,6 +183,13 @@ abierta ahora** — o avisa que no hay ninguno.
 
 Sin ver lo esperado, igual que el cierre ciego que ya existe.
 
+⚠️ **Con una excepción, decidida por el owner el 2026-08-13: el admin del tenant.** Sigue
+viendo lo esperado aunque esté forzando el cierre de una caja ajena. No es un olvido del
+ciego: el anti-fraude apunta al cajero que cuenta su propia caja, y **el admin nunca es su
+objetivo** — ya tiene acceso a los reportes que muestran ese mismo número. Esta línea se
+agregó después de que la spec dijera *"sin ver lo esperado"* a secas y el producto tuviera la
+excepción igual; la spec describe el sistema, no al revés.
+
 ### 3 · Se congela el conteo — **antes** de pedir la firma
 
 ⚠️ **El orden importa y es lo único que hace que la firma valga.** Si el garzón firmara

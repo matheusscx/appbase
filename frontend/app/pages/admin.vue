@@ -1,5 +1,9 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'dashboard' })
+// `auth.ts` (línea 27-31) trae su propio branch para `/admin`: exige
+// `isSuperadmin` y redirige a `/` si no lo es. `middleware: 'admin'` NO sirve
+// acá — chequea `esAdmin` (admin del tenant activo), un eje distinto al
+// superadmin, y contra el store equivocado.
+definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 </script>
 
 <template>
