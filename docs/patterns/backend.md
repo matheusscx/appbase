@@ -196,12 +196,17 @@ ya tiene deadlocks: el de fila está descrito en el comentario de `ventas.servic
 `crear()` (por eso ese método ordena por `itemId` y reintenta), y las tres entradas abiertas
 del mismo molde están en `docs/agent/pendientes.md` § "Carreras de concurrencia".
 
-⚠️ **Este molde NO trae `eliminado_el IS NULL`, y es a propósito.** La invariante del
-proyecto es que toda lectura lo filtra; acá el `JOIN` al padre existe **solo para acotar el
-tenant**, y agregarle el filtro cambiaría la conducta del kardex: anular una venta de un
-ítem borrado después dejaría de reponer stock. **Si copiás este bloque para una lectura de
-catálogo, agregale el filtro.** El día que se decida qué hace el kardex con un ítem
-borrado, esta nota se actualiza.
+⚠️ **Este molde NO trae `eliminado_el IS NULL`, y es una decisión, no un olvido.** La
+invariante del proyecto es que toda lectura lo filtra; acá el `JOIN` al padre existe **solo
+para acotar el tenant**. Decisión del owner (2026-08-15): **lo que está en el kardex queda
+en el kardex** — borrar un ítem no borra ni esconde sus movimientos, y anular una venta suya
+tiene que poder reponer stock, así que el filtro rompería la conducta correcta.
+**Si copiás este bloque para una lectura de catálogo, agregale el filtro:** la excepción vale
+para el kardex, no para el molde.
+> La otra mitad de esa decisión —qué movimientos **nuevos** acepta un ítem ya eliminado— está
+> tomada y sin construir: solo los que deshacen algo (anulación, devolución); compra, merma,
+> ajuste y recuento se rechazan. Ver `docs/agent/pendientes.md` § "Ya decidido, falta
+> construir".
 
 **Dónde ponerlo:** en el **chokepoint**, no en cada llamador. `InventarioService.registrarMovimiento`
 es el ejemplo vivo — todo movimiento de stock del sistema pasa por ahí, así que un `JOIN` en
