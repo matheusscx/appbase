@@ -318,44 +318,35 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   llamadores de `registrarMovimiento` validan el ítem antes. Esto es el escalón de adentro, que
   existe justamente porque el `unidadId` no pasa por esa validación.
 
-- [ ] 🚩 **Cambiar la contraseña desde el perfil no cierra las sesiones vivas** (backend,
-  auditoría RBAC/auth 2026-08-15) — `me.service.ts` → `updateContrasena` valida la contraseña
-  actual, hashea la nueva, hace `repo.update` y devuelve. **No toca `refresh_tokens`.** Su
-  flujo hermano sí: `auth.service.ts:134` (`elegirContrasena`, el reset por link) hace
-  `refreshRepo.delete({ userId })` con comentario explicando por qué hace falta.
-  **Escenario:** a alguien le roban la sesión, se da cuenta, entra y cambia su contraseña
-  desde el perfil. El atacante **sigue adentro** hasta que su refresh token expire, y puede
-  renovarlo indefinidamente. Es exactamente lo que la persona creyó estar cortando.
-  Mecánica porque **el arreglo ya está escrito en el hermano**: una línea. Al hacerlo, ojo con
-  cerrar también la sesión propia de quien cambia la contraseña (o reemitirle tokens), o el
-  usuario se autodeslogea al cambiarla — decidir eso es parte del fix, no una pregunta aparte.
+- [ ] **Queda un tercer gemelo del criterio de permisos sin atar el tenant: `findMembers`**
+  (backend, **hallado por la revisión independiente el 2026-08-15**) —
+  `tenants.service.ts:338` hace `LEFT JOIN roles r ON r.rol_id = ru.rol_id AND
+  r.eliminado_el IS NULL`, **sin `r.tenant_id = ru.tenant_id`**. Es el mismo patrón que ya
+  se corrigió en `rbac.service.ts` (cinco consultas) y en `garzones.service.ts`
+  (`assertVinculable`) — ver [`resueltos.md`](resueltos.md). Se deja aparte y no de arrastre
+  porque **acá el JOIN es `LEFT`, y ahí `ON` y `WHERE` NO son intercambiables**: puesto en
+  el `ON` deja la fila del miembro y anula el nombre del rol; puesto en el `WHERE` haría
+  desaparecer al miembro entero de la lista. Elegir cuál es la conducta correcta es una
+  decisión, no un copy-paste de las otras dos.
+  ⚠️ **Impacto bajo:** es de lectura y solo muestra el nombre del rol en el roster de
+  miembros; no gatea ningún acceso. Pero mientras siga así, "el criterio de permisos ata el
+  tenant en todos lados" es falso, y la próxima búsqueda por el patrón lo va a volver a
+  encontrar.
+  ℹ️ **Lección del método, ya aplicada dos veces esta semana:** los tres aparecieron
+  grepeando **el repo entero**, no la carpeta del módulo. Buscar por conducta
+  (`roles_usuarios` unido a `roles`), no por el archivo donde se sospecha.
 
-- [ ] 🚩 **El motor de permisos y `assignUser` no atan el rol a su tenant** (backend,
-  auditoría RBAC/auth 2026-08-15; **lo vieron dos lentes ciegas entre sí**) — dos mitades que
-  van juntas o el arreglo queda a medias:
-  1. `roles.service.ts` → `assignUser` valida que el **usuario** sea miembro del tenant, pero
-     nunca que el **`rolId`** pertenezca a ese tenant. Sus hermanos del mismo archivo
-     (`update`, `remove`, `findPermissions`, `setPermissions`) sí lo hacen.
-  2. Peor y más de fondo: **las tres consultas de `rbac.service.ts` unen
-     `JOIN roles r ON r.rol_id = ru.rol_id` sin `r.tenant_id = ru.tenant_id`** (verificado
-     abriendo el archivo), y la del permiso completo tampoco ata `tenant_modulos` al tenant.
-     O sea que una fila cruzada **se evalúa de verdad**: no es una fila inerte.
-  ⚠️ **Severidad media, no alta, y el encuadre importa:** la ruta exige `TenantAdminGuard`, así
-  que el actor ya es admin de su tenant; `ru.tenant_id` es siempre el del token, así que **no
-  hay acceso a datos de otro tenant**; y hace falta conocer el UUID de un rol ajeno (trivial en
-  el seed, no adivinable en prod). Lo que se cruza es el borde de módulos contratados — ver la
-  entrada de ese tema en la sección 4.
-  **Arreglar solo `assignUser` deja el motor confiando** en cualquier fila que entre por otro
-  camino. Es el patrón de "fix a medias" que este método ya cobró una vez.
-
-- [ ] **`roles` y `rbac` no tienen un solo test unitario** (backend/tests, medido 2026-08-15)
-  — cero `*.spec.ts` en los dos módulos (verificado). **El motor de permisos del sistema no
-  tiene cobertura propia**, y eso explica por qué la entrada de acá arriba sobrevivió: no hay
-  nada que se ponga rojo. Los e2e que rozan roles
-  (`alta-usuarios-tenant`, `invitacion-y-reset`, `garzon-modo-personal`) los ejercitan de
-  costado, no como sujeto.
-  Prioridad dentro de la lista: los tests que **conceden** acceso antes que los que lo niegan
-  — un `return true` sin test es el peor de los dos.
+- [ ] **A `roles.service.ts` le falta cobertura en todo lo que no es `assignUser`**
+  (backend/tests, **reducida el 2026-08-15**) — la entrada original decía *"`roles` y `rbac`
+  no tienen un solo test unitario"*; los dos módulos ya tienen spec (ver
+  [`resueltos.md`](resueltos.md)). `rbac.service.ts` quedó cubierto entero —sus cinco
+  consultas y los caminos que conceden y niegan—. Lo que sigue sin nada que se ponga rojo es
+  el resto de `RolesService`: **`setPermissions`, `findPermissions`, `create`, `update` y
+  `remove`**. `setPermissions` es el más caro de los cinco: tiene su propia entrada acá abajo
+  (no es transaccional y su body no se valida), y cerrarla sin test la deja igual de
+  desprotegida que antes. Los e2e que rozan roles (`alta-usuarios-tenant`,
+  `invitacion-y-reset`, `garzon-modo-personal`) los ejercitan de costado, no como sujeto.
+  Sigue valiendo la prioridad: los tests que **conceden** acceso antes que los que lo niegan.
 
 - [ ] 🚩 **Los 23 helpers de login del e2e no afirman su status, y eso fabrica el 401
   intermitente** (backend/tests, auditoría RBAC/auth 2026-08-15) — **esto explica la forma de

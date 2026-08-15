@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const toast = useToast()
 const config = useRuntimeConfig()
+const authStore = useAuthStore()
 
 const loading = ref(false)
 const form = reactive({
@@ -20,10 +21,20 @@ async function guardar() {
       `${config.public.apiUrl}/me/contrasena`,
       { method: 'PATCH', body: { ...form } },
     )
-    toast.add({ title: 'Contraseña actualizada', color: 'success' })
     form.contrasenaActual = ''
     form.contrasenaNueva = ''
     form.confirmarContrasena = ''
+    // El backend borra TODOS los refresh tokens de la cuenta, incluido el de
+    // esta pestaña: cambiar la contraseña tiene que echar a un intruso, y no
+    // hay forma de distinguir su sesión de la propia. Así que se desloguea acá,
+    // avisando — si no, `useApiFetch` expulsa sin explicación en cuanto vence
+    // el access token, hasta 15 minutos después y en cualquier pantalla.
+    toast.add({
+      title: 'Contraseña actualizada',
+      description: 'Se cerraron todas las sesiones. Entrá de nuevo con tu contraseña nueva.',
+      color: 'success',
+    })
+    await authStore.logout()
   } catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cambiar contraseña')
     toast.add({ title: msg, color: 'error' })

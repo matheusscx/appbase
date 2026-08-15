@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { Usuario } from '../users/usuario.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { UpdatePerfilDto } from './dto/update-perfil.dto';
 import { UpdateContrasenaDto } from './dto/update-contrasena.dto';
 import { UpdatePreferenciasDto } from './dto/update-preferencias.dto';
@@ -18,6 +19,8 @@ export class MeService {
   constructor(
     @InjectRepository(Usuario)
     private readonly repo: Repository<Usuario>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshRepo: Repository<RefreshToken>,
   ) {}
 
   async updatePerfil(userId: string, dto: UpdatePerfilDto): Promise<Usuario> {
@@ -25,6 +28,33 @@ export class MeService {
     return this.repo.findOneOrFail({ where: { id: userId } });
   }
 
+  /**
+   * Cambiar la contraseña **cierra todas las sesiones vivas**, incluida la de
+   * quien la cambia. Sin esto, alguien que se dio cuenta de que le tomaron la
+   * cuenta y entra a cambiar su contraseña deja al intruso adentro: su refresh
+   * token sigue vivo y lo puede renovar indefinidamente. Es exactamente lo que
+   * la persona creyó estar cortando.
+   *
+   * Misma decisión que su flujo hermano `AuthService.elegirContrasena` (el
+   * reset por link), que ya borra los refresh tokens por el mismo motivo.
+   *
+   * **Por qué también cae la sesión propia.** "Todos menos el mío" ES
+   * representable: la cookie `refresh_token` viaja en cada request al mismo
+   * origen —`AuthController` ya la lee en `/auth/refresh` y `/auth/logout`—,
+   * así que un `WHERE user_id = $1 AND token <> $2` habría preservado esta
+   * pestaña. Se eligió no hacerlo, y la razón es simplicidad y robustez, no
+   * una imposibilidad: el borrado total no depende de que la cookie llegue
+   * intacta, y ante la duda de si echar al intruso, echa a todos. El costo es
+   * que quien cambia su contraseña vuelve a entrar.
+   *
+   * (La comparación con `elegirContrasena` no alcanza para justificarlo: ese
+   * flujo es **no autenticado** y no tiene la cookie propia disponible del
+   * mismo modo, así que ahí el borrado total es la única opción, no una
+   * elección.)
+   *
+   * El front lo hace explícito: avisa y desloguea en el momento, en vez de
+   * dejar que la sesión muera sola cuando venza el access token.
+   */
   async updateContrasena(
     userId: string,
     dto: UpdateContrasenaDto,
@@ -42,6 +72,7 @@ export class MeService {
     if (!valid) throw new UnauthorizedException('Contraseña actual incorrecta');
     const hashed = await bcrypt.hash(dto.contrasenaNueva, 10);
     await this.repo.update(userId, { contrasena: hashed });
+    await this.refreshRepo.delete({ userId });
     return { message: 'Contraseña actualizada' };
   }
 

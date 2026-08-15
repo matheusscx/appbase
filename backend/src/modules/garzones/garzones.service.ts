@@ -466,6 +466,11 @@ export class GarzonesService {
    * JOIN completo de rol → módulo del tenant → permiso) para `Salones:Operar`
    * puntual: duplicarla acá, en vez de inyectar `RbacService` y pagar su
    * propia consulta aparte, es lo que permite que siga siendo UNA sola query.
+   *
+   * ⚠️ **Al ser una copia, se desincroniza sola.** Ya pasó: cuando `RbacService`
+   * ató el tenant en sus JOIN (`r.tenant_id = ru.tenant_id`,
+   * `tm.tenant_id = ru.tenant_id`), esta copia quedó atrás y hubo que traerla a
+   * mano. Si se toca el criterio allá, se toca acá.
    */
   private async assertVinculable(
     tenantId: string,
@@ -485,7 +490,7 @@ export class GarzonesService {
                 EXISTS (
                   SELECT 1
                     FROM roles_usuarios ru
-                    JOIN roles r ON r.rol_id = ru.rol_id
+                    JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
                    WHERE ru.usuario_id = ut.usuario_id
                      AND ru.tenant_id = ut.tenant_id
                      AND r.es_fijo = true
@@ -495,9 +500,9 @@ export class GarzonesService {
                 OR EXISTS (
                   SELECT 1
                     FROM roles_usuarios ru
-                    JOIN roles r ON r.rol_id = ru.rol_id AND r.eliminado_el IS NULL
+                    JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id AND r.eliminado_el IS NULL
                     JOIN modulos_roles mr ON mr.rol_id = r.rol_id AND mr.eliminado_el IS NULL
-                    JOIN tenant_modulos tm ON tm.modulo_tenant_id = mr.modulo_tenant_id AND tm.eliminado_el IS NULL
+                    JOIN tenant_modulos tm ON tm.modulo_tenant_id = mr.modulo_tenant_id AND tm.tenant_id = ru.tenant_id AND tm.eliminado_el IS NULL
                     JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id AND ma.eliminado_el IS NULL
                     JOIN roles_permisos_modulos rpm ON rpm.rol_id = r.rol_id AND rpm.modulo_tenant_id = tm.modulo_tenant_id
                     JOIN modulo_app_permisos map ON map.modulo_app_permiso_id = rpm.modulo_app_permiso_id AND map.eliminado_el IS NULL

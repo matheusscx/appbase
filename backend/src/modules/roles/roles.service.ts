@@ -75,6 +75,15 @@ export class RolesService {
     tenantId: string,
     usuarioId: string,
   ): Promise<RolUsuario> {
+    // El rol tiene que ser de este tenant. Sus hermanos de este mismo archivo
+    // (`update`, `remove`, `findPermissions`, `setPermissions`) ya lo validan;
+    // acá faltaba, y era el único método que escribía en `roles_usuarios` una
+    // fila que podía apuntar a un rol ajeno. El motor de permisos ahora ata el
+    // tenant en el JOIN (ver `RbacService`), así que la fila cruzada no
+    // concedería nada — pero escribirla sigue siendo un dato mentiroso.
+    const rol = await this.rolRepo.findOne({ where: { id: rolId, tenantId } });
+    if (!rol) throw new NotFoundException(`Rol ${rolId} no encontrado`);
+
     // Verify the target user belongs to this tenant
     const esMiembro = await this.dataSource.query<unknown[]>(
       `SELECT 1 FROM usuarios_tenants

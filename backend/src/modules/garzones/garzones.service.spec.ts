@@ -932,6 +932,35 @@ describe('GarzonesService', () => {
       ]);
     });
 
+    // La subconsulta de `puede_operar_salon` es una COPIA a mano del criterio
+    // de `RbacService.userHasPermiso`, y por ser copia ya se desincronizó una
+    // vez: cuando `RbacService` ató el tenant en sus JOIN, ésta quedó atrás y
+    // hubo que traerla a mano (lo cazó una revisión, no un test). Esto es el
+    // test que faltaba para que la próxima desincronización se ponga roja.
+    it('la subconsulta de permisos ata `roles` y `tenant_modulos` al mismo tenant', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: true },
+      ]);
+
+      await service.crear(TENANT, ACTOR, {
+        nombre: 'Ana',
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      const [sql] = repo.manager.query.mock.calls[0] as [string];
+      const plano = sql.replace(/\s+/g, ' ');
+      // Las DOS subconsultas de `roles` (la del rol fijo y la del JOIN
+      // completo), no una: `-g` cuenta todas las ocurrencias.
+      expect(
+        plano.match(
+          /JOIN roles r ON r\.rol_id = ru\.rol_id AND r\.tenant_id = ru\.tenant_id/g,
+        ),
+      ).toHaveLength(2);
+      expect(plano).toMatch(
+        /JOIN tenant_modulos tm ON tm\.modulo_tenant_id = mr\.modulo_tenant_id AND tm\.tenant_id = ru\.tenant_id/,
+      );
+    });
+
     it('vincular una cuenta invalida el PIN y lo registra', async () => {
       repo.findOne.mockResolvedValue(
         garzon({ id: 'g1', pin: '111111', usuarioId: null }),

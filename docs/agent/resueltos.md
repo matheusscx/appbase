@@ -17,6 +17,140 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cambiar la contraseña desde el perfil ahora sí echa al intruso (2026-08-15)
+
+**Entrada original (verbatim):** *"🚩 **Cambiar la contraseña desde el perfil no cierra las
+sesiones vivas** (backend, auditoría RBAC/auth 2026-08-15) — `me.service.ts` →
+`updateContrasena` valida la contraseña actual, hashea la nueva, hace `repo.update` y
+devuelve. **No toca `refresh_tokens`.** Su flujo hermano sí: `auth.service.ts:134`
+(`elegirContrasena`, el reset por link) hace `refreshRepo.delete({ userId })` con comentario
+explicando por qué hace falta. **Escenario:** a alguien le roban la sesión, se da cuenta,
+entra y cambia su contraseña desde el perfil. El atacante **sigue adentro** hasta que su
+refresh token expire, y puede renovarlo indefinidamente. Es exactamente lo que la persona
+creyó estar cortando. Mecánica porque **el arreglo ya está escrito en el hermano**: una
+línea. Al hacerlo, ojo con cerrar también la sesión propia de quien cambia la contraseña (o
+reemitirle tokens), o el usuario se autodeslogea al cambiarla — decidir eso es parte del
+fix, no una pregunta aparte."*
+
+**El fix es la línea del hermano**, con `RefreshToken` agregado al `MeModule`:
+`await this.refreshRepo.delete({ userId })` después de guardar el hash.
+
+**La decisión que la entrada dejaba abierta: cae también la sesión propia.**
+
+⚠️ **Y acá el primer intento se escudó en una invariante que no aplicaba.** El docblock
+decía que *"todos menos el mío"* no era representable sin tocar el sistema de tokens
+(`CLAUDE.md` #4). **Es falso, y lo cazó la revisión independiente:** la cookie
+`refresh_token` viaja en cada request al mismo origen —`AuthController` ya la lee en
+`/auth/refresh` y `/auth/logout`—, así que un `WHERE user_id = $1 AND token <> $2` habría
+preservado la pestaña propia sin tocar nada del sistema de tokens.
+
+La decisión **se mantiene**, pero por su razón verdadera: el borrado total no depende de que
+la cookie llegue intacta, y ante la duda de si echar al intruso, echa a todos. Simplicidad y
+robustez, no imposibilidad. También se corrigió la analogía: la comparación con
+`elegirContrasena` no alcanzaba para justificarlo, porque ese flujo es **no autenticado** y
+ahí el borrado total es la única opción, no una elección.
+
+**Y por eso el fix tocó también el frontend**, que si no quedaba peor que antes:
+`ContrasenaForm.vue` ahora avisa (*"Se cerraron todas las sesiones"*) y llama a
+`authStore.logout()` en el momento. Sin eso, `useApiFetch` expulsa **sin explicación** en
+cuanto vence el access token —hasta 15 minutos después, en cualquier pantalla—, porque su
+rama de refresh fallido hace `clearAuth()` + `navigateTo('/login')` en silencio.
+
+**Lo fija:** `me.service.spec.ts`, que no existía (el módulo `me` no tenía ningún test).
+Mutante verificado: sacar el `delete` deja el test rojo **por su aserción**
+(`Number of calls: 0`), no por un `TypeError` del mock. Se descartó un segundo test que
+afirmaba sobre las claves del criterio: era redundante, porque `toHaveBeenCalledWith` ya
+compara el objeto entero, y con el mutante fallaba por `TypeError`.
+
+## El motor de permisos ataba el rol al usuario, pero no al tenant — y eran cinco consultas, no tres (2026-08-15)
+
+**Entrada original (verbatim):** *"🚩 **El motor de permisos y `assignUser` no atan el rol a
+su tenant** (backend, auditoría RBAC/auth 2026-08-15; **lo vieron dos lentes ciegas entre
+sí**) — dos mitades que van juntas o el arreglo queda a medias: 1. `roles.service.ts` →
+`assignUser` valida que el **usuario** sea miembro del tenant, pero nunca que el **`rolId`**
+pertenezca a ese tenant. Sus hermanos del mismo archivo (`update`, `remove`,
+`findPermissions`, `setPermissions`) sí lo hacen. 2. Peor y más de fondo: **las tres
+consultas de `rbac.service.ts` unen `JOIN roles r ON r.rol_id = ru.rol_id` sin
+`r.tenant_id = ru.tenant_id`** (verificado abriendo el archivo), y la del permiso completo
+tampoco ata `tenant_modulos` al tenant. O sea que una fila cruzada **se evalúa de verdad**:
+no es una fila inerte. ⚠️ **Severidad media, no alta, y el encuadre importa:** la ruta exige
+`TenantAdminGuard`, así que el actor ya es admin de su tenant; `ru.tenant_id` es siempre el
+del token, así que **no hay acceso a datos de otro tenant**; y hace falta conocer el UUID de
+un rol ajeno (trivial en el seed, no adivinable en prod). Lo que se cruza es el borde de
+módulos contratados — ver la entrada de ese tema en la sección 4. **Arreglar solo
+`assignUser` deja el motor confiando** en cualquier fila que entre por otro camino. Es el
+patrón de 'fix a medias' que este método ya cobró una vez."*
+
+**La entrada subcontaba: son cinco consultas, no tres.** Medido abriendo el archivo — las
+dos de `userHasPermiso`, la de `userIsTenantAdmin` y las dos de `getMisPermisos` unen
+`roles` por `rol_id` a secas. Las cinco llevan ahora
+`AND r.tenant_id = ru.tenant_id` **en el JOIN**, no en el `WHERE`, para que el invariante se
+lea donde se une.
+
+**`tenant_modulos`:** el JOIN de `userHasPermiso` no ataba el tenant; el de `getMisPermisos`
+sí, pero por `WHERE tm.tenant_id = $2`. Se unificó: los dos lo atan en el JOIN
+(`tm.tenant_id = ru.tenant_id`) y se sacó el `WHERE` duplicado. En un archivo que decide
+accesos, que dos consultas gemelas se escriban distinto es peor que la línea de más.
+
+**Lo que hubo que verificar antes de tocar nada: `roles.tenant_id` es nullable**, así que
+atar el JOIN dejaría afuera cualquier rol global. Medido: **cero filas con `tenant_id`
+NULL** en la base, y los seis `INSERT INTO roles` del seeder más `RolesService.create` lo
+setean siempre. La columna nullable es herencia, no una función. Queda anotado en el
+docblock: si algún día se quiere un rol global, que conceda permisos en todos los tenants
+tiene que ser una decisión de producto, no la herencia de un JOIN sin atar.
+
+**La otra mitad:** `assignUser` ahora busca el rol con `findOne({ where: { id, tenantId } })`
+y tira `NotFoundException`, igual que sus cuatro hermanos del mismo archivo. Valida el rol
+**antes** de consultar la membresía del usuario.
+
+**Lo fija:** dos specs que no existían — `rbac.service.spec.ts` (10 tests) y
+`roles.service.spec.ts` (6). Cubren primero **lo que concede** acceso, no lo que lo niega,
+porque un `return true` sin test es peor que un `return false` sin test. Las aserciones de
+SQL corren sobre las consultas **efectivamente ejecutadas** (`dataSource.query.mock.calls`),
+no sobre el texto del archivo, así que el docblock que menciona la misma cláusula no las
+puede satisfacer por accidente. Tres mutantes verificados, los tres rojos por aserción:
+quitar la atadura de `roles` en una sola consulta, quitar la de `tenant_modulos`, y quitar
+la validación de rol de `assignUser` (mata 3 tests).
+
+**El gemelo que no busqué, y lo encontró la revisión independiente.** Grepeé la carpeta de
+cada módulo, no el repo entero — el error que este método ya cobró antes.
+`garzones.service.ts` → `assertVinculable` lleva **la misma consulta duplicada a mano**, y su
+propio docblock dice que *"replica el criterio de `RbacService.userHasPermiso`"*. Había
+quedado desincronizada. Se le aplicaron las mismas tres ataduras (las dos subconsultas de
+`roles`, más `tenant_modulos`), y se le agregó al docblock la advertencia de que **por ser
+copia se desincroniza sola**, con este caso como precedente. Mitigante que igual conviene
+saber: `puede_operar_salon` es dato advisorio, no gatea acceso.
+
+**Y el gate estaba verde sobre líneas que nadie ejecutaba.** Segundo hallazgo de la revisión:
+los unit corren con `DataSource`/`Repository` mockeados, y **ningún e2e pegaba a
+`/rbac/mis-permisos`, `/rbac/es-admin` ni `PATCH /me/contrasena`**. O sea que el SQL
+reescrito nunca había tocado Postgres. Se agregó `test/rbac-y-contrasena.e2e-spec.ts`
+(7 tests): el caso 2 de `getMisPermisos` con `vendedor@paris.cl` —el único actor sin rol
+fijo—, el contraste admin vs vendedor, y la muerte del refresh token al cambiar la
+contraseña **con un control positivo al lado**, para que el 401 no pueda venir de que el
+refresh nunca funcione en e2e. Cuenta registrada por test, no del seed: cambiarle la
+contraseña a `vendedor@paris.cl` la rompería para las otras seis specs que loguean con ella.
+Mutante verificado contra la base real: romper la atadura del caso 2 deja al vendedor con
+**cero** permisos y el test rojo — o sea que el e2e ejercita la consulta, no la mira.
+
+⚠️ **Lo que NO cierra:** la cobertura de `roles.service.ts` es solo de `assignUser`.
+`setPermissions`, `findPermissions`, `create`, `update` y `remove` siguen sin test — ver la
+entrada reducida en `pendientes.md`.
+⚠️ **Y lo que el e2e NO prueba:** el aislamiento entre tenants propiamente dicho. Montar una
+fila de `roles_usuarios` apuntando a un rol ajeno **ya no es posible por API** —era la mitad
+del fix—, y armarla con SQL directo probaría un estado inalcanzable. Esa mitad la fijan los
+unit, que afirman sobre la forma del SQL ejecutado.
+
+🚨 **Y lo más importante: este frente NO está cerrado.** Queda vivo un **tercer gemelo** —
+`tenants.service.ts:338`, en `findMembers`— con el mismo `JOIN roles` sin atar el tenant. Se
+dejó afuera a propósito, porque ahí el JOIN es `LEFT` y la decisión no es un copy-paste; la
+entrada está en [`pendientes.md`](pendientes.md). **Si estás leyendo esto para saber si el
+criterio de permisos ya ata el tenant en todos lados: todavía no.** La advertencia va acá y
+no solo allá porque `resueltos.md` es el archivo que se consulta para dar algo por cerrado, y
+el link entre los dos archivos era de una sola dirección.
+
+---
+
 ## El redondeo de la conversión de moneda: dos sitios, y el que importaba no era el anotado (2026-08-11)
 
 **Entrada original (verbatim):** *"**`convertirAMonedaOficial` redondea a 4 fijo** (backend,
