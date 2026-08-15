@@ -1017,6 +1017,345 @@ empezarlas.
   liquidada y pagada** es otro y sigue con su decisión propia (saldo en contra del garzón), en
   la sección de proyectos que van solos.
 
+- [ ] **`POST /auth/register` dice si un correo ya está registrado** (backend, auditoría
+  RBAC/auth 2026-08-15) — responde `409 "El correo ya esta registrado"` vs `201`, así que
+  cualquiera puede confirmar qué correos tienen cuenta. **Lo llamativo es la asimetría interna:**
+  `recuperar()` fue escrito explícitamente para NO hacer esto (responde igual exista o no), y ese
+  criterio no se replicó en `register`.
+  **La decisión es un trade real, no un bug obvio:** si el registro deja de distinguir, quien se
+  registra con un correo ya tomado no se entera y queda sin saber por qué no puede entrar. El
+  patrón habitual es responder igual y mandar un mail explicando — que exige el correo verificado
+  de la entrada de arriba.
+  ✅ **DECIDIDO (owner, 2026-08-15): responde igual exista o no, y a quien ya tiene la cuenta le
+  llega un mail** diciendo que alguien intentó registrarse con su correo. Es el mismo patrón que
+  `recuperar()` ya usa acá, así que no se inventa nada.
+  🔗 **Depende del correo verificado** que se decidió el mismo día: sin verificación, el mail de
+  aviso va a una dirección que nadie probó. Van en el mismo trabajo.
+
+- [ ] **El refresh token rota pero no detecta reuso** (backend, auditoría RBAC/auth 2026-08-15)
+  — ⛔ **TOCA JWT: no se toca sin decisión del owner** (`CLAUDE.md`, invariante 4).
+  `auth.service.ts` → `refresh` rota el token, pero si el viejo —ya borrado— se vuelve a
+  presentar, la única respuesta es un 401 genérico: no se revoca la sesión ni queda registro. El
+  reuso de un refresh token rotado es la señal clásica de que alguien copió la sesión, y hoy se
+  descarta como un error cualquiera.
+  El arreglo toca la lógica de rotación del sistema ya implementado, por eso queda acá y no en
+  la sección 1.
+  ✅ **DECIDIDO (owner, 2026-08-15): se endurece con las dos piezas** — el canje atómico (la
+  entrada hermana de esta sección) **y** la detección de reuso: presentar un token ya rotado
+  corta la sesión entera, no devuelve un 401 y sigue.
+  ⛔ **Sigue tocando el sistema JWT**, así que el diseño se confirma antes de escribir; lo que la
+  decisión fija es el QUÉ, no que esté libre de revisión.
+
+- [ ] **`refresh()` no reclama el token de forma atómica: dos pestañas pueden canjearlo las dos**
+  (backend, auditoría RBAC/auth 2026-08-15) — ⛔ **Adyacente al sistema JWT: confirmar antes de
+  tocar** (`CLAUDE.md`, invariante 4).
+  `auth.service.ts` → `refresh` hace `findOne` y después `delete({ id })`, sin transacción ni
+  condición atómica, y no mira `affected`. Dos requests simultáneos con la misma cookie **pueden
+  ganar los dos** — no es "uno gana y otro pierde".
+  **Disparador realista, medido:** el frontend serializa el refresh **por pestaña**
+  (`useApiFetch.ts`, variable de módulo), pero **no entre pestañas**. Dos tabs del mismo usuario
+  despertando de standby a la vez alcanzan.
+  ℹ️ **Es distinto del reuso secuencial** que anota la otra entrada: aquel es presentar un token
+  ya rotado; este es doble uso simultáneo del token vigente. Se arreglan en el mismo lugar y
+  conviene decidirlos juntos.
+  ✅ **DECIDIDO (owner, 2026-08-15): el canje pasa a ser atómico — un solo ganador.** Va junto
+  con la detección de reuso de la entrada hermana: son el mismo lugar del código y la misma
+  conversación con el owner.
+  ⚠️ **El orden importa:** si se implementa la detección de reuso SIN el canje atómico, las dos
+  pestañas legítimas que hoy ganan las dos pasarían a verse como reuso y **cortarían la sesión
+  de un usuario que no hizo nada malo**. Atómico primero, detección después.
+
+- [ ] **Dar de baja una membresía deja al garzón vinculado sin ninguna credencial, y en
+  silencio** (backend + frontend, auditoría RBAC/auth 2026-08-15) — **lo creó la entrega del PIN
+  propio del 2026-08-15**, y por eso ninguna revisión de aquel diff podía verlo: nadie mira la
+  transición "dar de baja a alguien" mientras revisa la feature del PIN.
+  Medido: `removeMember` son **dos líneas** (`softDelete({ tenantId, usuarioId })`) y no toca
+  `garzones`. Un garzón dado de alta con cuenta nace con `pinHash = PIN_INUTILIZABLE` — vincular
+  mata el PIN a propósito, porque la cuenta pasa a ser la credencial. Al bajar la membresía,
+  `garzonPersonalDe` deja de resolver el modo personal (filtra la membresía viva) **y el PIN
+  sigue muerto**: el garzón se queda sin ninguna forma de operar, y `toPublico` no muestra
+  ninguna señal de que su cuenta ya no es miembro.
+  🔗 **Engancha con un cabo ya abierto:** la recuperación sería *desvincular + regenerar PIN*,
+  pero **no sabemos si desvincular es posible desde el formulario** — esa es la entrada de la
+  sección 2. Si no se puede, el garzón queda muerto sin salida por UI. Las dos se resuelven
+  juntas, y esa medición ahora tiene una razón concreta para ir primero.
+  **La decisión:** ¿la baja de membresía **desvincula** el garzón automáticamente (y le devuelve
+  un PIN usable), **avisa** al admin de que va a dejar a alguien sin operar, o **bloquea** hasta
+  que se resuelva? La primera es la más amable y la que menos estados raros deja.
+  ✅ **DECIDIDO (owner, 2026-08-15): el sistema pregunta en el momento.** Al dar de baja a
+  alguien con garzón vinculado, un paso dice que existe ese vínculo y ofrece las dos salidas:
+  **sigue trabajando** → se desvincula y se le genera un PIN usable; **no sigue** → el garzón
+  queda `activo = false`.
+  ⚠️ **Descartada la salida automática que se había propuesto primero** (desvincular y dar PIN
+  siempre), y vale escribir por qué: asume que el garzón debe seguir operando, y el motivo más
+  común de una baja es que **la persona se fue** — darle un PIN funcional a alguien que se fue le
+  deja abrir mesas y tomar comandas desde el tótem. **El sistema no puede adivinar la intención**,
+  porque dar de baja la cuenta y "ya no trabaja acá" no son lo mismo: un garzón normal existe sin
+  cuenta y se identifica por PIN.
+  ℹ️ Las dos salidas son reversibles: `activo` se vuelve a prender y el vínculo se puede rehacer.
+
+- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
+  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
+  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
+  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
+  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
+  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
+  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
+  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
+  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
+  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
+  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
+  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
+  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
+  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
+  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
+  ✅ **DECIDIDO (owner, 2026-08-15): se abre el permiso, no se corrige el texto.** Quien puede
+  dar de alta y vincular garzones (`Salones:Actualizar`) pasa a poder otorgar `Salones:Operar` a
+  esa cuenta, sin necesidad de ser admin del tenant.
+  ℹ️ **Con eso el texto actual pasa a ser verdadero**, así que los tres avisos quedan como están:
+  el trabajo es de permisos, no de redacción.
+  ⚠️ **Toca el modelo de permisos y hay que acotarlo bien:** no es "el encargado puede editar
+  roles" —eso sigue siendo admin— sino un camino puntual para conceder **ese** permiso **a esa
+  cuenta**. Si se implementa como acceso a `PATCH /roles/:id`, el encargado queda pudiendo editar
+  cualquier rol del tenant, que es escalada de privilegios y no es lo que se decidió.
+
+- [ ] **El detalle de un recuento esconde una línea que el listado sigue contando** (backend,
+  auditoría `inventario` 2026-08-15) — `findOne` arma el detalle con `INNER JOIN items` filtrando
+  `eliminado_el`, así que si un ítem se borra mientras la sesión sigue en `borrador` su línea
+  desaparece del detalle sin aviso; `findAll` sigue incluyéndola en `cantidadLineas`. El listado
+  dice 12 líneas y el detalle muestra 11, hasta que al aplicar aparece en `lineasDescartadas`.
+  **La decisión es cuál de las dos vistas está bien:** que el detalle muestre la línea marcada
+  como descartada (coherente con lo que hace `aplicar`) o que el listado deje de contarla.
+  ✅ **DECIDIDO (owner, 2026-08-15): el detalle muestra la línea, marcada como producto
+  eliminado.** El listado no cambia. Es coherente con lo que el sistema ya hace al aplicar —la
+  descarta y lo informa en `lineasDescartadas`—, y el que está contando ve por qué le sobra una.
+
+- [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
+  (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
+  (`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
+  explícitamente `componentes`. No hay disparador cuando cambia el costo de un componente, ni un
+  equivalente de la bandeja `recetas/desfases` para combos. El costo obsoleto se sigue exponiendo
+  en cada listado igual que el de un producto o una receta, así que el margen que muestra la
+  pantalla es incorrecto por tiempo indefinido.
+  ⚠️ `simulador-impacto-costos.md` **no declara esta exclusión** en su lista de lo que no cubre,
+  así que hoy no es una limitación conocida sino un hueco silencioso.
+  **La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
+  documenta explícitamente que su costo es manual?
+  ✅ **DECIDIDO (owner, 2026-08-15): los combos entran a la misma bandeja de desfases que las
+  recetas.** Un solo lugar donde mirar, y el margen que muestra el listado deja de mentir.
+  ℹ️ Con esto **no** hay que tocar `simulador-impacto-costos.md` para declarar una exclusión: la
+  exclusión desaparece.
+
+- [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
+  no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
+  `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
+  `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
+  en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
+  sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
+  Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
+  serlo en cuanto exista un productor.
+  Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
+  (línea vs venta), que hoy no distingue.
+  ✅ **DECIDIDO (owner, 2026-08-15): el modelo distingue el nivel de la regla** — si aplica por
+  línea o por venta— y el modal dice lo que corresponde en cada caso, en vez de "afecta 0 ítems".
+  ⚠️ **Es un campo nuevo en `descuentos`/`recargos`, así que arrastra más de lo que parece:** el
+  motor tiene que respetarlo (una regla de venta no debería poder asociarse a un ítem, ni al
+  revés), el seeder tiene que declararlo en cada fila, y las pantallas de administración tienen
+  que ofrecerlo. **Hoy es teórico** —ninguna pantalla manda reglas a nivel venta, medido— así que
+  se puede planificar sin apuro; lo que no conviene es construir el productor antes que el campo.
+
+- [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
+  (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
+  `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
+  `pasarela/services/cobros.service.ts:593,597` (este último sobre `pasarela_ordenes`, alias `o`) filtran `creado_el >= $N` / `<= $N` con
+  valores que vienen de DTOs validados con `@IsDateString()`, **que acepta una fecha pura**
+  (`2026-08-01`) además de un timestamp completo. Con la columna sin zona, Postgres tomaba
+  los dígitos literales; con `timestamptz` interpreta esa fecha en el `TimeZone` de la
+  sesión antes de convertir. Hoy no cambia nada —`SHOW TimeZone` da `UTC`, medido— pero es
+  una dependencia que antes no existía, y el default del server no lo fija nadie
+  explícitamente (ni el compose ni la config del pool).
+  **Cierre posible:** el patrón ya resuelto está en `propina-reportes.service.ts:264-266`,
+  que castea explícito con la zona del tenant (`$2::date::timestamp AT TIME ZONE $4`). Son
+  tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
+  un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
+  medianoche del local?), no una migración de tipos.
+  ⛔ **Corrección al "cierre posible" (2026-08-11): ese molde NO es copiable tal cual, y
+  copiarlo introduce un bug peor que el que arregla.** Medido en Postgres:
+  `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` — **el `::date` descarta la hora en
+  silencio**. El molde funciona en `propina-reportes` porque ahí el rango llega ya
+  normalizado a fechas puras (`RangoReporteNormalizado`); estos tres DTOs validan con
+  `@IsDateString()`, que **acepta las dos formas**, así que un llamador que hoy manda
+  `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la medianoche de ese día. Un
+  filtro que se ensancha sin avisar es peor que uno con la zona ambigua.
+  Lo que el cierre necesita entonces, además del cast: decidir si estos endpoints aceptan
+  timestamp o solo fecha pura, y si aceptan las dos, normalizar en el service —expandir la
+  fecha pura a medianoche del tenant y dejar pasar el timestamp tal cual— en vez de castear
+  en el SQL. Eso ya no son "tres servicios copiando un molde".
+  (Verificado también el lado bueno del molde: `'2026-08-01'::date::timestamp AT TIME ZONE
+  'America/Santiago'` da `2026-08-01 04:00:00+00`, que es la medianoche local correcta.)
+  ✅ **DECIDIDO (owner, 2026-08-15): "desde el 1 de agosto" es la medianoche del LOCAL**, o sea
+  de la zona horaria del tenant. Es lo que espera quien mira el reporte, y el patrón ya está
+  resuelto en `propina-reportes.service.ts`.
+  ⚠️ **Pero el molde no se copia tal cual** — la corrección de arriba sigue vigente y es la parte
+  que hace este trabajo más que un find-and-replace: estos tres DTOs validan con `@IsDateString()`,
+  que **acepta fecha pura Y timestamp**. Castear con `::date` descarta la hora en silencio, así
+  que un llamador que hoy manda `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la
+  medianoche. **La normalización va en el service**, no en el SQL: expandir la fecha pura a
+  medianoche del tenant y dejar pasar el timestamp tal cual.
+
+- [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
+  criterios distintos para "esta personalización cambia el precio"** (frontend, medido
+  2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
+  si guardan y si mandan `precioUnitarioOverride` con `if (precioOverride)`. Es un
+  **string**, así que `'0'` es truthy y el cero viaja igual: el filtro no filtra lo único
+  que podría querer filtrar. Hoy no rompe nada —`calcular` acepta el 0 a propósito, ver
+  `calcular.dto.ts`— pero es la clase de chequeo que se cae sola cuando alguien endurece
+  el DTO, que es exactamente lo que casi pasa.
+  Al lado: **el POS y salones no coinciden en cuándo hay recargo.** `personalizacionVacia`
+  (`useRecetaPersonalizacion.ts:154`) es falso con solo `omitidos` —un "sin cebolla" ya
+  cuenta—, mientras que `tienePersonalizacionConRecargo` (`useSalones.ts:182`) exige
+  `extras`/`grupos`/`componentes` e ignora `omitidos`. Los dos alimentan el mismo
+  endpoint con el mismo campo. Ninguno de los dos es obviamente el correcto, y esa es la
+  entrada: decidir cuál es el criterio y dejar uno solo.
+  ✅ **DECIDIDO (owner, 2026-08-15): sacar no cobra, agregar sí.** Quitar un ingrediente nunca
+  genera recargo ni marca la línea como personalizada **a efectos de precio**; agregar extras,
+  cambiar opciones o sumar componentes sí. Ese es el criterio único para los dos lados, y
+  resuelve la divergencia entre `useRecetaPersonalizacion` (para el que un "sin cebolla" ya
+  cuenta) y `useSalones` (que lo ignora): **gana el segundo**.
+  ⚠️ **Ojo con no aplanar dos cosas distintas al implementarlo:** "no afecta el precio" no es "no
+  se registra". El *sin cebolla* **tiene que seguir viajando a la comanda de cocina** — ahí sí
+  importa. Lo que se unifica es el criterio de **recargo**, no el de trazabilidad.
+  ℹ️ La otra mitad de la entrada —el truthy sobre un string, donde `'0'` pasa el filtro— es
+  mecánica y no dependía de esta decisión.
+
+- [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
+  si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
+  aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
+  fiel al mercado; mayor alcance. Ya no depende de resolver el modelo del esperado (§3,
+  **resuelto** por el sub-proyecto A) — el umbral se evaluaría sobre la
+  diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
+  inflaba cualquier diferencia.
+  ✅ **Decidido por el owner (2026-08-11): sí, con umbral configurable por tenant, y el
+  cierre queda esperando aprobación.** Bloqueante, no aviso.
+  ⚠️ **Cruce sin resolver con el cierre forzado**, que ya se entregó (2026-08-13, ver
+  [`resueltos.md`](resueltos.md)) — así que este cruce dejó de ser hipotético: si el encargado
+  cierra la caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
+  mismo anula el control; que lo apruebe un tercero puede no haber a esa hora. Hay que
+  contestarlo antes de escribir el flujo, no durante.
+  🔶 **Pieza que aportó la investigación (§10.6) y todavía no está decidida:** el precedente
+  bancario no es binario — bajo el umbral se ajusta sin avisar; **sobre** el umbral, dos
+  personas reverifican **y se le avisa al dueño de la plata**. Ese aviso al cajero no estaba
+  en la decisión del umbral y encaja con que la diferencia sea un incidente, no su faltante.
+  ✅ **DECIDIDO (owner, 2026-08-15) el cruce que faltaba: quien cerró PUEDE aprobar su propio
+  cierre, y queda registrado quién aprobó qué.** El razonamiento del owner: el control existe
+  para auditoría, no para impedir — frenar un cierre a las 2 de la mañana porque no hay un
+  tercero disponible detiene la operación.
+  ⚠️ **Cómo convive con la decisión del 2026-08-11, que sigue vigente:** el cierre por umbral
+  **sigue siendo bloqueante** en el caso normal (el cajero cierra su caja y espera al encargado).
+  Lo que esta decisión resuelve es solo el cruce con el **cierre forzado**: cuando el encargado
+  ya cerró la caja de otro, es él quien aprueba, y el registro es el control. **No son
+  contradictorias, pero quien lo construya tiene que ver las dos** o va a implementar un bloqueo
+  que en ese camino nunca se puede levantar.
+  ⚠️ **Costo asumido, dicho explícito:** en el camino del cierre forzado el umbral deja de ser un
+  control preventivo y pasa a ser un rastro. Que el registro exista y sea legible **es** el
+  control ahí; si el evento no queda o nadie lo mira, no queda nada.
+
+- [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
+  de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
+  pendiente de §5 es exclusivamente el conteo por denominación de billetes/monedas, sin
+  tracking más detallado que [`investigaciones/2026-07-23-gestion-caja.md
+  §9`](investigaciones/2026-07-23-gestion-caja.md).
+  ✅ **Decidido por el owner (2026-08-11): configurable por tenant** — un negocio chico carga
+  un total, uno grande el desglose.
+  ⚠️ Lo que compra la config es lo que hay que sostener: **dos caminos en la pantalla de
+  arqueo**, y los dos tienen que producir el mismo dato para el umbral de arriba. Antes de
+  implementarlo hay que definir si el desglose se **persiste** (y entonces es una tabla
+  nueva) o si solo asiste la suma en pantalla y se guarda el total — no es lo mismo para
+  auditoría, y la decisión de arriba (revelación solo al supervisor) sugiere que el
+  desglose es evidencia, no una calculadora.
+  ✅ **DECIDIDO (owner, 2026-08-15): el desglose se GUARDA**, no solo asiste la suma. Es
+  evidencia del arqueo, no una calculadora — coherente con que la diferencia la vea solo el
+  supervisor.
+  ⚠️ **Es una tabla nueva, y con eso se resuelve la duda que la entrada dejaba abierta.** Al
+  diseñarla: tiene que producir el mismo total que el camino sin desglose, porque los dos
+  alimentan el umbral de aprobación de la entrada de arriba — si divergen, el umbral se dispara
+  distinto según cómo contó el cajero.
+
+- [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
+  medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
+  tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
+  Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
+  (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
+  fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
+  pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
+  tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
+  automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
+  la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
+  así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
+  desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
+  `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
+  ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
+  1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
+     `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
+     Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
+     medios de pago online; hay una pasarela real y lo que sobra cuando falta.
+  2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
+     `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
+     `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
+     contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
+     tenant que entre sin pasarela conectada tiene una tienda online que entrega
+     mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
+     donde debería quedar.
+  **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
+  tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
+  retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
+  toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
+  defecto que existe igual, se configure o no.
+  ✅ **DECIDIDO (owner, 2026-08-15): sin cobro real, la venta queda `pendiente`, no `pagada`.**
+  Es el punto 2 de esta entrada —el defecto que existe se configure o no la pasarela— y se
+  arregla ya: el estado `pendiente` ya lo soporta el modelo.
+  ℹ️ **No se saca el camino simulado** (dejaría sin tienda a cualquier tenant que todavía no
+  configuró nada) ni se encara todavía la configuración de medios online, que sigue siendo
+  feature con spec propia.
+  ⚠️ Al hacerlo, mirar el `metodoTarjeta()` que hoy elige método buscando "crédito" en el nombre
+  y **agarra `metodos[0]` si no encuentra**: con la venta en `pendiente` puede que ni corresponda
+  registrar un método. Y la pregunta de cobertura e2e de esta entrada sigue abierta: la pantalla
+  no la alcanza nada automático.
+
+- [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
+  — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
+  de cada familia** (`Descuento (base) → Recargo (cascada) → Impuesto`), que es lo que
+  explicaba los montos. Quedan los dos campos de redondeo, que solo importan cuando un
+  centavo no cuadra: son los que explican una diferencia de $1 entre lo que el lector calcula
+  a mano y lo que muestra la fila. Cierre posible: una línea plegable en la tarjeta de
+  Totales. **Prioridad baja** — no hay un caso reportado de descuadre.
+  ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
+  (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
+  tenant se considera información de administración, hay que separar el guard.
+  ✅ **DECIDIDO (owner, 2026-08-15): se agregan, visibles con el mismo permiso que el resto del
+  drawer.** Una línea plegable en la tarjeta de Totales; **no** se separa el guard — la
+  configuración de cálculo no se trata como información de administración.
+  ℹ️ **Prioridad baja igual**: no hay ningún caso reportado de descuadre de $1 que alguien no
+  haya podido explicar. La decisión saca la pregunta del medio, no sube la urgencia.
+
+- [ ] **El hook de pre-commit valida enlaces de markdown pero no que una tabla siga siendo
+  tabla** (tooling, **medido 2026-08-15, pasó de verdad en esta entrega**) —
+  `.githooks/pre-commit` (Guard 5) corre `check-docs-links.mjs` sobre `.md` staged, pero no hay
+  ningún guard que valide la sintaxis de una tabla GFM. Insertar un párrafo entre dos filas de
+  una tabla markdown (falta una línea en blanco antes/después, o el párrafo no empieza con `|`)
+  hace que **todo lo que sigue** deje de renderizarse como tabla — visualmente desaparece — y ni
+  el hook ni el CI lo detectan, porque ninguno de los dos parsea markdown como markdown, solo
+  greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
+  una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
+
+---
+  ✅ **DECIDIDO (owner, 2026-08-15): chequeo propio, sin dependencia nueva.** Un script corto
+  en el hook que verifique lo que de verdad rompe: **toda línea que empieza con `|` tiene que
+  estar precedida por otra fila de tabla o por una línea en blanco**. Esa es exactamente la
+  regla que se rompió, y se detecta sin traer un linter de markdown entero.
+  ℹ️ El chequeo ya existe como script suelto —se usó a mano en cada commit de documentación de
+  esta sesión— así que el trabajo es moverlo al hook, no escribirlo de cero.
+
 - [ ] **El kardex conserva todo pero las pantallas lo esconden, y hasta el total miente**
   (backend + frontend, auditoría `inventario` 2026-08-15; **decidido por el owner el mismo
   día**) — **lo medido, que es mejor de lo que la entrada original decía por un lado y peor
@@ -1201,117 +1540,13 @@ Cada una lleva su pregunta concreta adentro. Mientras no se conteste **no se emp
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-- [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
-  corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
-  agrupadas porque se deciden juntas:
-  1. **La merma acepta y descuenta la unidad equivocada.** `CreateMermaDto` no tiene
-     `unidadIds`/`loteId` y `mermas.service.ts` no chequea `modo_inventario`, a diferencia de
-     `recuentos.service.ts:566-569` y `ventas.service.ts:856-858,1316-1318`, que **sí rechazan
-     limpio**. Como `moverSerie` auto-selecciona FIFO cuando no le pasan unidades (hay un test
-     que lo fija), mermar un producto serializado da de baja **la unidad más vieja, no la que se
-     rompió**: se destruye la trazabilidad por IMEI que es la razón de ser de ADR-007. El
-     selector de `mermas.vue:161-165` tampoco filtra esos productos.
-  2. **Los índices únicos que la doc promete no existen en ninguna parte.**
-     `inventario-serializado.md` documenta únicos parciales `(tenant_id, serie)` y
-     `(item_id, codigo_lote)`; `item-unidad.entity.ts` e `item-lote.entity.ts` no declaran
-     `@Index`. **Busqué la refutación donde este proyecto suele esconderla** —los únicos
-     parciales los crea el seeder, no `synchronize`— y no está: el seeder crea once índices y
-     ninguno es de esas dos tablas (medido). Sin chequeo en código tampoco: `moverSerie` inserta
-     sin buscar duplicados y `moverLote` tiene un check-then-insert. Se puede cargar el mismo
-     IMEI dos veces.
-  3. **`fecha_vencimiento` se guarda, se expone y no se compara con nada.** Cero comparaciones
-     contra `NOW()` en todo `backend/src` (medido). La salida automática es FIFO por `creado_el`,
-     no FEFO por vencimiento.
-  **Lo que hay que decidir antes de tocar nada:** ¿se cierra la puerta (rechazar serie/lote en
-  merma, como ya hacen venta y recuento) o se construye el soporte? La primera mitad es barata y
-  para la sangría; la segunda es una feature. Y aparte: **¿un lote vencido se puede vender y
-  mermar, o se bloquea?** Eso es regla de negocio y no está en `PRODUCTO.md`.
-
-- [ ] **El detalle de un recuento esconde una línea que el listado sigue contando** (backend,
-  auditoría `inventario` 2026-08-15) — `findOne` arma el detalle con `INNER JOIN items` filtrando
-  `eliminado_el`, así que si un ítem se borra mientras la sesión sigue en `borrador` su línea
-  desaparece del detalle sin aviso; `findAll` sigue incluyéndola en `cantidadLineas`. El listado
-  dice 12 líneas y el detalle muestra 11, hasta que al aplicar aparece en `lineasDescartadas`.
-  **La decisión es cuál de las dos vistas está bien:** que el detalle muestre la línea marcada
-  como descartada (coherente con lo que hace `aplicar`) o que el listado deje de contarla.
-
-- [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
-  (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
-  (`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
-  explícitamente `componentes`. No hay disparador cuando cambia el costo de un componente, ni un
-  equivalente de la bandeja `recetas/desfases` para combos. El costo obsoleto se sigue exponiendo
-  en cada listado igual que el de un producto o una receta, así que el margen que muestra la
-  pantalla es incorrecto por tiempo indefinido.
-  ⚠️ `simulador-impacto-costos.md` **no declara esta exclusión** en su lista de lo que no cubre,
-  así que hoy no es una limitación conocida sino un hueco silencioso.
-  **La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
-  documenta explícitamente que su costo es manual?
-
-- [ ] **`POST /auth/register` dice si un correo ya está registrado** (backend, auditoría
-  RBAC/auth 2026-08-15) — responde `409 "El correo ya esta registrado"` vs `201`, así que
-  cualquiera puede confirmar qué correos tienen cuenta. **Lo llamativo es la asimetría interna:**
-  `recuperar()` fue escrito explícitamente para NO hacer esto (responde igual exista o no), y ese
-  criterio no se replicó en `register`.
-  **La decisión es un trade real, no un bug obvio:** si el registro deja de distinguir, quien se
-  registra con un correo ya tomado no se entera y queda sin saber por qué no puede entrar. El
-  patrón habitual es responder igual y mandar un mail explicando — que exige el correo verificado
-  de la entrada de arriba.
-
-- [ ] **El refresh token rota pero no detecta reuso** (backend, auditoría RBAC/auth 2026-08-15)
-  — ⛔ **TOCA JWT: no se toca sin decisión del owner** (`CLAUDE.md`, invariante 4).
-  `auth.service.ts` → `refresh` rota el token, pero si el viejo —ya borrado— se vuelve a
-  presentar, la única respuesta es un 401 genérico: no se revoca la sesión ni queda registro. El
-  reuso de un refresh token rotado es la señal clásica de que alguien copió la sesión, y hoy se
-  descarta como un error cualquiera.
-  El arreglo toca la lógica de rotación del sistema ya implementado, por eso queda acá y no en
-  la sección 1.
-
-- [ ] **Dar de baja una membresía deja al garzón vinculado sin ninguna credencial, y en
-  silencio** (backend + frontend, auditoría RBAC/auth 2026-08-15) — **lo creó la entrega del PIN
-  propio del 2026-08-15**, y por eso ninguna revisión de aquel diff podía verlo: nadie mira la
-  transición "dar de baja a alguien" mientras revisa la feature del PIN.
-  Medido: `removeMember` son **dos líneas** (`softDelete({ tenantId, usuarioId })`) y no toca
-  `garzones`. Un garzón dado de alta con cuenta nace con `pinHash = PIN_INUTILIZABLE` — vincular
-  mata el PIN a propósito, porque la cuenta pasa a ser la credencial. Al bajar la membresía,
-  `garzonPersonalDe` deja de resolver el modo personal (filtra la membresía viva) **y el PIN
-  sigue muerto**: el garzón se queda sin ninguna forma de operar, y `toPublico` no muestra
-  ninguna señal de que su cuenta ya no es miembro.
-  🔗 **Engancha con un cabo ya abierto:** la recuperación sería *desvincular + regenerar PIN*,
-  pero **no sabemos si desvincular es posible desde el formulario** — esa es la entrada de la
-  sección 2. Si no se puede, el garzón queda muerto sin salida por UI. Las dos se resuelven
-  juntas, y esa medición ahora tiene una razón concreta para ir primero.
-  **La decisión:** ¿la baja de membresía **desvincula** el garzón automáticamente (y le devuelve
-  un PIN usable), **avisa** al admin de que va a dejar a alguien sin operar, o **bloquea** hasta
-  que se resuelva? La primera es la más amable y la que menos estados raros deja.
-
-- [ ] **`refresh()` no reclama el token de forma atómica: dos pestañas pueden canjearlo las dos**
-  (backend, auditoría RBAC/auth 2026-08-15) — ⛔ **Adyacente al sistema JWT: confirmar antes de
-  tocar** (`CLAUDE.md`, invariante 4).
-  `auth.service.ts` → `refresh` hace `findOne` y después `delete({ id })`, sin transacción ni
-  condición atómica, y no mira `affected`. Dos requests simultáneos con la misma cookie **pueden
-  ganar los dos** — no es "uno gana y otro pierde".
-  **Disparador realista, medido:** el frontend serializa el refresh **por pestaña**
-  (`useApiFetch.ts`, variable de módulo), pero **no entre pestañas**. Dos tabs del mismo usuario
-  despertando de standby a la vez alcanzan.
-  ℹ️ **Es distinto del reuso secuencial** que anota la otra entrada: aquel es presentar un token
-  ya rotado; este es doble uso simultáneo del token vigente. Se arreglan en el mismo lugar y
-  conviene decidirlos juntos.
-
-- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
-  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
-  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
-  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
-  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
-  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
-  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
-  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
-  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
-  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
-  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
-  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
-  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
-  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
-  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
+✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner.
+Las 28 restantes se mudaron a la sección 3 —o a la 6, cuando la respuesta las convirtió en
+feature— **cada una con su decisión escrita y con las trampas que el que la tome se iba a
+encontrar**: dependencias entre entradas, carreras adentro del arreglo, docs que hay que
+corregir en el mismo commit, y costos que el owner asumió explícitamente.
+La única que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
+una respuesta.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
@@ -1344,149 +1579,6 @@ prohíbe.
   de una NC emitida **por monto** y no por líneas — que es la forma que este sistema usa y la
   que hace la pregunta difícil.
   ⚠️ Regla del cruce: lo que traiga es **insumo para adaptar, no verdad a copiar**.
-
-- [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
-  medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
-  tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
-  Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
-  (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
-  fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
-  pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
-  tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
-  automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
-  la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
-  así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
-  desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
-  `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
-  ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
-  1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
-     `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
-     Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
-     medios de pago online; hay una pasarela real y lo que sobra cuando falta.
-  2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
-     `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
-     `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
-     contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
-     tenant que entre sin pasarela conectada tiene una tienda online que entrega
-     mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
-     donde debería quedar.
-  **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
-  tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
-  retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
-  toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
-  defecto que existe igual, se configure o no.
-
-- [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
-  criterios distintos para "esta personalización cambia el precio"** (frontend, medido
-  2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
-  si guardan y si mandan `precioUnitarioOverride` con `if (precioOverride)`. Es un
-  **string**, así que `'0'` es truthy y el cero viaja igual: el filtro no filtra lo único
-  que podría querer filtrar. Hoy no rompe nada —`calcular` acepta el 0 a propósito, ver
-  `calcular.dto.ts`— pero es la clase de chequeo que se cae sola cuando alguien endurece
-  el DTO, que es exactamente lo que casi pasa.
-  Al lado: **el POS y salones no coinciden en cuándo hay recargo.** `personalizacionVacia`
-  (`useRecetaPersonalizacion.ts:154`) es falso con solo `omitidos` —un "sin cebolla" ya
-  cuenta—, mientras que `tienePersonalizacionConRecargo` (`useSalones.ts:182`) exige
-  `extras`/`grupos`/`componentes` e ignora `omitidos`. Los dos alimentan el mismo
-  endpoint con el mismo campo. Ninguno de los dos es obviamente el correcto, y esa es la
-  entrada: decidir cuál es el criterio y dejar uno solo.
-
-- [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
-  (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
-  `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
-  `pasarela/services/cobros.service.ts:593,597` (este último sobre `pasarela_ordenes`, alias `o`) filtran `creado_el >= $N` / `<= $N` con
-  valores que vienen de DTOs validados con `@IsDateString()`, **que acepta una fecha pura**
-  (`2026-08-01`) además de un timestamp completo. Con la columna sin zona, Postgres tomaba
-  los dígitos literales; con `timestamptz` interpreta esa fecha en el `TimeZone` de la
-  sesión antes de convertir. Hoy no cambia nada —`SHOW TimeZone` da `UTC`, medido— pero es
-  una dependencia que antes no existía, y el default del server no lo fija nadie
-  explícitamente (ni el compose ni la config del pool).
-  **Cierre posible:** el patrón ya resuelto está en `propina-reportes.service.ts:264-266`,
-  que castea explícito con la zona del tenant (`$2::date::timestamp AT TIME ZONE $4`). Son
-  tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
-  un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
-  medianoche del local?), no una migración de tipos.
-  ⛔ **Corrección al "cierre posible" (2026-08-11): ese molde NO es copiable tal cual, y
-  copiarlo introduce un bug peor que el que arregla.** Medido en Postgres:
-  `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` — **el `::date` descarta la hora en
-  silencio**. El molde funciona en `propina-reportes` porque ahí el rango llega ya
-  normalizado a fechas puras (`RangoReporteNormalizado`); estos tres DTOs validan con
-  `@IsDateString()`, que **acepta las dos formas**, así que un llamador que hoy manda
-  `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la medianoche de ese día. Un
-  filtro que se ensancha sin avisar es peor que uno con la zona ambigua.
-  Lo que el cierre necesita entonces, además del cast: decidir si estos endpoints aceptan
-  timestamp o solo fecha pura, y si aceptan las dos, normalizar en el service —expandir la
-  fecha pura a medianoche del tenant y dejar pasar el timestamp tal cual— en vez de castear
-  en el SQL. Eso ya no son "tres servicios copiando un molde".
-  (Verificado también el lado bueno del molde: `'2026-08-01'::date::timestamp AT TIME ZONE
-  'America/Santiago'` da `2026-08-01 04:00:00+00`, que es la medianoche local correcta.)
-
-- [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
-  — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
-  de cada familia** (`Descuento (base) → Recargo (cascada) → Impuesto`), que es lo que
-  explicaba los montos. Quedan los dos campos de redondeo, que solo importan cuando un
-  centavo no cuadra: son los que explican una diferencia de $1 entre lo que el lector calcula
-  a mano y lo que muestra la fila. Cierre posible: una línea plegable en la tarjeta de
-  Totales. **Prioridad baja** — no hay un caso reportado de descuadre.
-  ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
-  (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
-  tenant se considera información de administración, hay que separar el guard.
-
-- [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
-  no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
-  `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
-  `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
-  en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
-  sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
-  Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
-  serlo en cuanto exista un productor.
-  Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
-  (línea vs venta), que hoy no distingue.
-
-- [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
-  si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
-  aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
-  fiel al mercado; mayor alcance. Ya no depende de resolver el modelo del esperado (§3,
-  **resuelto** por el sub-proyecto A) — el umbral se evaluaría sobre la
-  diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
-  inflaba cualquier diferencia.
-  ✅ **Decidido por el owner (2026-08-11): sí, con umbral configurable por tenant, y el
-  cierre queda esperando aprobación.** Bloqueante, no aviso.
-  ⚠️ **Cruce sin resolver con el cierre forzado**, que ya se entregó (2026-08-13, ver
-  [`resueltos.md`](resueltos.md)) — así que este cruce dejó de ser hipotético: si el encargado
-  cierra la caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
-  mismo anula el control; que lo apruebe un tercero puede no haber a esa hora. Hay que
-  contestarlo antes de escribir el flujo, no durante.
-  🔶 **Pieza que aportó la investigación (§10.6) y todavía no está decidida:** el precedente
-  bancario no es binario — bajo el umbral se ajusta sin avisar; **sobre** el umbral, dos
-  personas reverifican **y se le avisa al dueño de la plata**. Ese aviso al cajero no estaba
-  en la decisión del umbral y encaja con que la diferencia sea un incidente, no su faltante.
-
-- [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
-  de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
-  pendiente de §5 es exclusivamente el conteo por denominación de billetes/monedas, sin
-  tracking más detallado que [`investigaciones/2026-07-23-gestion-caja.md
-  §9`](investigaciones/2026-07-23-gestion-caja.md).
-  ✅ **Decidido por el owner (2026-08-11): configurable por tenant** — un negocio chico carga
-  un total, uno grande el desglose.
-  ⚠️ Lo que compra la config es lo que hay que sostener: **dos caminos en la pantalla de
-  arqueo**, y los dos tienen que producir el mismo dato para el umbral de arriba. Antes de
-  implementarlo hay que definir si el desglose se **persiste** (y entonces es una tabla
-  nueva) o si solo asiste la suma en pantalla y se guarda el total — no es lo mismo para
-  auditoría, y la decisión de arriba (revelación solo al supervisor) sugiere que el
-  desglose es evidencia, no una calculadora.
-
-- [ ] **El hook de pre-commit valida enlaces de markdown pero no que una tabla siga siendo
-  tabla** (tooling, **medido 2026-08-15, pasó de verdad en esta entrega**) —
-  `.githooks/pre-commit` (Guard 5) corre `check-docs-links.mjs` sobre `.md` staged, pero no hay
-  ningún guard que valide la sintaxis de una tabla GFM. Insertar un párrafo entre dos filas de
-  una tabla markdown (falta una línea en blanco antes/después, o el párrafo no empieza con `|`)
-  hace que **todo lo que sigue** deje de renderizarse como tabla — visualmente desaparece — y ni
-  el hook ni el CI lo detectan, porque ninguno de los dos parsea markdown como markdown, solo
-  greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
-  una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
-
----
 
 ## 5. Carreras de concurrencia
 
@@ -1571,6 +1663,47 @@ Las cuatro últimas **no son correcciones ni deuda**: son funcionalidad que toda
 existe. Se listan acá, y no en la 4, porque la pregunta del owner es solo el primer paso
 —después queda la spec entera—; el contexto de dónde salió cada una es parte del enunciado
 y viaja con ella.
+
+- [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
+  corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
+  agrupadas porque se deciden juntas:
+  1. **La merma acepta y descuenta la unidad equivocada.** `CreateMermaDto` no tiene
+     `unidadIds`/`loteId` y `mermas.service.ts` no chequea `modo_inventario`, a diferencia de
+     `recuentos.service.ts:566-569` y `ventas.service.ts:856-858,1316-1318`, que **sí rechazan
+     limpio**. Como `moverSerie` auto-selecciona FIFO cuando no le pasan unidades (hay un test
+     que lo fija), mermar un producto serializado da de baja **la unidad más vieja, no la que se
+     rompió**: se destruye la trazabilidad por IMEI que es la razón de ser de ADR-007. El
+     selector de `mermas.vue:161-165` tampoco filtra esos productos.
+  2. **Los índices únicos que la doc promete no existen en ninguna parte.**
+     `inventario-serializado.md` documenta únicos parciales `(tenant_id, serie)` y
+     `(item_id, codigo_lote)`; `item-unidad.entity.ts` e `item-lote.entity.ts` no declaran
+     `@Index`. **Busqué la refutación donde este proyecto suele esconderla** —los únicos
+     parciales los crea el seeder, no `synchronize`— y no está: el seeder crea once índices y
+     ninguno es de esas dos tablas (medido). Sin chequeo en código tampoco: `moverSerie` inserta
+     sin buscar duplicados y `moverLote` tiene un check-then-insert. Se puede cargar el mismo
+     IMEI dos veces.
+  3. **`fecha_vencimiento` se guarda, se expone y no se compara con nada.** Cero comparaciones
+     contra `NOW()` en todo `backend/src` (medido). La salida automática es FIFO por `creado_el`,
+     no FEFO por vencimiento.
+  **Lo que hay que decidir antes de tocar nada:** ¿se cierra la puerta (rechazar serie/lote en
+  merma, como ya hacen venta y recuento) o se construye el soporte? La primera mitad es barata y
+  para la sangría; la segunda es una feature. Y aparte: **¿un lote vencido se puede vender y
+  mermar, o se bloquea?** Eso es regla de negocio y no está en `PRODUCTO.md`.
+  ✅ **DECIDIDO (owner, 2026-08-15): se construye el soporte, no se cierra la puerta.** La merma
+  pasa a pedir **qué unidad o qué lote** se da de baja, igual que ya hacen la venta y el
+  recuento con lo suyo. Por eso esta entrada **se mudó a "proyectos que van solos"**: dejó de ser
+  una corrección y pasó a ser feature con pantalla, DTO y spec propia.
+  **Lo que la spec tiene que resolver, y que no hace falta contestar ahora:**
+  - El **selector** en la pantalla de mermas: qué se muestra para elegir una serie entre muchas.
+  - Los **índices únicos** que la doc promete y no existen en ningún lado (ni entidad, ni seeder)
+    — sin ellos se puede cargar el mismo IMEI dos veces, y eso hay que cerrarlo antes de que la
+    merma dependa de elegir una serie concreta.
+  - **`fecha_vencimiento`**: hoy se guarda, se expone y no se compara con nada; la salida
+    automática es FIFO por antigüedad, no FEFO por vencimiento. **¿Un lote vencido se puede
+    vender y mermar, o se bloquea?** Es regla de negocio y no está en `PRODUCTO.md` — la spec la
+    plantea, no la asume.
+  ⚠️ Y queda igual la corrección barata que da la mitad del beneficio si esto se demora: que la
+  merma **rechace** serie/lote en vez de aceptar y descontar la unidad equivocada en silencio.
 
 - [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
   frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya

@@ -237,6 +237,15 @@ produce inventario, no confianza — que es la regla de este mismo método aplic
 a un tamaño donde se pueda leer entera de una sentada. La 5 es además la de menor riesgo
 declarado (*"CRUD admin-only con lectura abierta"*), así que es la que menos cuesta diferir.
 
+✅ **CONDICIÓN CUMPLIDA el mismo día.** La sección de decisiones bajó de **29 a 1** en una tanda
+del owner; la única que queda espera una investigación de mercado, no una respuesta. **La pasada
+5 queda habilitada.**
+⚠️ Pero el número que ahora manda es el otro: `pendientes.md` sigue en **96 entradas**, con 35
+decididas esperando construcción y 24 mecánicas. **Antes de lanzar la 5 conviene mirar si
+corresponde bajar ese stock primero** — la 5 es la de menor riesgo del programa y no hay
+urgencia en ella. Decidirlo es del owner; lo que este archivo aporta es que el freno ya no es
+el que había.
+
 ⚠️ **Lección para el umbral, que a partir de ahora se mide con dos números y no con uno:** el
 tope de ~25 entradas por pasada no alcanza. Una pasada puede quedar cómodamente abajo y aun así
 tapar el proceso, si lo que suma son **decisiones** en vez de correcciones. **Antes de lanzar
