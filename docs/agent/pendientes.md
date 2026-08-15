@@ -369,6 +369,102 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   vez. Lo que cambia es que deja de ser un misterio — con el `expect` puesto, el próximo rojo
   cae en el login y dice qué contestó. Misma higiene que ya se aplicó a `/tenants/members`.
 
+- [ ] 🚩 **Sin `SMTP_HOST`, los links de reset e invitación quedan en el log en texto plano — y
+  nada lo impide en producción** (backend, auditoría RBAC/auth 2026-08-15) —
+  `mail.service.ts` → `enviar()`: si no hay transporte, hace `logger.log()` con el **cuerpo
+  completo** del mail, que es el que lleva la URL con el token en claro. **Grep de
+  `NODE_ENV`/`production` en ese archivo: cero** (medido). `.env.example:49` trae `SMTP_HOST=`
+  vacío por default.
+  ⚠️ **Loguear en vez de mandar es una decisión cerrada y documentada** (hace falta para no
+  disparar mails reales en cada corrida de CI; ver [`resueltos.md`](resueltos.md)). Lo que no
+  existe es el **gate de producción**: el sistema degrada en silencio a "escribir el secreto en
+  el log" en vez de fallar fuerte.
+  Tiene su ironía: `TokenAcceso` guarda solo el hash SHA-256 justamente para que el texto plano
+  exista **una sola vez**, en el link del mail. Este log lo reintroduce en el lugar que más
+  gente puede leer.
+  🔎 **Falta un dato que decide la urgencia y que no consulté a propósito** (listar variables de
+  Railway expone credenciales): **¿el deploy de producción tiene `SMTP_HOST` seteado?** Se ve en
+  el dashboard en un clic. Si está: hoy el impacto es cero pero queda una mina — una variable
+  que falte en un redeploy y todos los links de reset se van al log. Si no está: es toma de
+  cuentas para cualquiera con lectura de logs.
+  El arreglo es correcto en los dos casos y no depende de la respuesta: en producción, fallar en
+  vez de loguear (o como mínimo no escribir nunca el cuerpo). Ojo con un detalle que lo hace más
+  urgente: `invitacion-y-reset.e2e-spec.ts` corre justamente con `SMTP_HOST` vacío, así que **la
+  rama peligrosa es la que se ejercita todo el tiempo** y ningún test mira qué queda escrito.
+
+- [ ] **Dos tests de aislamiento por tenant que no aíslan nada** (backend/tests, auditoría
+  RBAC/auth 2026-08-15) — los dos prometen en el nombre lo que su aserción no sostiene, y en los
+  dos **el mutante sobrevive** (verificado):
+  1. **Razones sociales** — `tenants.service.spec.ts` → *"lanza NotFoundException si no pertenece
+     al tenant"* hace `razonSocialRepo.findOne.mockResolvedValue(null)` y **nunca mira con qué
+     `where` lo llamaron**. Cambiar `where: { id, tenantId }` por `where: { id }` en las tres
+     funciones (`updateRazonSocial`, `removeRazonSocial`, `setPreferida`) deja los tres tests en
+     verde. Y **no hay red de e2e: cero specs ejercitan razones sociales** (medido). Detrás hay
+     RUT, dirección y banderas fiscales de otra empresa.
+  2. **Cajones** — `cajones.e2e-spec.ts` → *"un usuarioId ajeno al tenant devuelve 400"* manda
+     un UUID **inexistente** (`00000000-…`), no un usuario real de otro tenant. La validación
+     cuenta `where: { tenantId, usuarioId: In(ids) }`, que da 0 con o sin el filtro de tenant:
+     el test no distingue las dos causas.
+  ⚠️ **Severidad media, no alta: el código está bien hoy.** Lo que falta es la red que avisaría
+  si mañana alguien toca esa línea. Pero **entre los huecos de test estos dos van primero**,
+  porque son los únicos que *pretenden* cubrir un aislamiento y no lo cubren — un hueco
+  declarado es peor que uno conocido.
+  ℹ️ El proyecto **ya sabe** escribir el test correcto: `recuentos.e2e-spec.ts` arma el mismo
+  caso con un id real de otro tenant y lo comenta (*"no un uuid inventado"*). No falta el
+  criterio; faltó aplicarlo acá.
+
+- [ ] **`setPermissions` no es atómico y su body no se valida** (backend, auditoría RBAC/auth
+  2026-08-15) — dos defectos del mismo método, se arreglan juntos:
+  1. **No es transaccional.** `roles.service.ts` → `setPermissions` hace `delete` de todos los
+     permisos del par (rol, módulo) y **después** `save` de los nuevos, sin
+     `dataSource.transaction`. **No hace falta concurrencia:** si el `save` falla por cualquier
+     motivo, el `delete` ya commiteó y **el rol se queda sin ningún permiso en ese módulo**. La
+     carrera entre dos admins —que también existe, y repone un permiso que uno revocó con los
+     dos `PUT` devolviendo 200— es una consecuencia de la misma falta de atomicidad, no la causa.
+  2. **El `@Body()` está tipado con una interfaz TS inline**, no con una clase de
+     `class-validator` (`roles.controller.ts:103`). En runtime el `metatype` reflejado es
+     `Object`, que `ValidationPipe` **excluye**: el pipe no corre en absoluto sobre este
+     endpoint. Un `PUT {}` llega a `moduloAppPermisoIds.length` sobre `undefined` → 500; un
+     `PUT {"moduloAppPermisoIds": []}` cae en la rama `else` y **desvincula el rol del módulo**,
+     destructivo por default. Es admin-only, así que no es agujero de seguridad: es un 500 y un
+     borrado que nadie pidió.
+  Ningún test ejercita este endpoint, y `roles.service.ts` no tiene spec.
+
+- [ ] **`/admin` es la única página sin guard de cliente, y su middleware existe** (frontend,
+  auditoría RBAC/auth 2026-08-15) — `pages/admin.vue` declara solo
+  `definePageMeta({ layout: 'dashboard' })`. **Existe `middleware/admin.ts` y la página no lo
+  usa.** El contraste está medido: `pages/configuracion.vue` sí declara `middleware: 'auth'`, y
+  por eso roles y usuarios quedan cubiertos por herencia. No hay ningún middleware `.global.ts`
+  ni `router.beforeEach`, así que el gateo depende 100% de que cada página lo declare — y el
+  chequeo de superadmin que vive dentro de `auth.ts` nunca corre para esta ruta.
+  Un visitante sin token que navegue a `/admin` monta el layout completo sin redirigir. Hoy el
+  contenido es un placeholder, pero es **la única puerta a `/admin/*`** y el candado documentado
+  está muerto. Los specs de middleware prueban la función aislada, nunca si la página la tiene
+  enganchada — por eso nada se pone rojo.
+
+- [ ] **Dos descuidos chicos de membresía, con el arreglo ya escrito en su hermano** (backend,
+  auditoría RBAC/auth 2026-08-15):
+  1. **`switchTenant` no mira si el tenant destino está borrado.** Solo chequea
+     `usuarios_tenants`, nunca `tenants.eliminado_el` — a diferencia de su hermano
+     `getMyTenants`, que sí. Con un tenant soft-borrado por el superadmin y una membresía viva,
+     responde 200 con un token para un tenant muerto. El daño está acotado porque `TenantGuard`
+     corta en la ruta siguiente; el problema es que promete algo que no existe.
+  2. **Re-agregar a alguien le resucita `es_totem`.** `addMember`/`crearUsuario` restauran la
+     fila soft-borrada de `usuarios_tenants` limpiando solo `eliminadoEl`, sin resetear
+     `esTotem`. Una cuenta que era tótem vuelve a serlo sin que el admin lo pida — y eso puede
+     **bloquear en silencio** un intento posterior de vincularle un garzón personal, porque el
+     tótem es override duro. Es la misma familia que el `addMember` que devuelve roles viejos,
+     que está en Vigilancia como decisión deliberada; **este no lo es**: nadie decidió que el
+     tótem sobreviviera a la baja.
+
+- [ ] **El alta de usuario no traduce la colisión y devuelve un 500 crudo** (backend, auditoría
+  RBAC/auth 2026-08-15) — `tenants.service.ts` → `crearUsuario` hace check-then-act (SELECT por
+  correo y membresía, después INSERT) **sin `catch` del `23505`**, a diferencia de `updateMine()`
+  sesenta líneas más abajo en el mismo archivo y del patrón repetido en 9+ módulos del repo.
+  Los índices únicos existen en los tres lugares, así que **la carrera no duplica datos** — el
+  perdedor simplemente ve un 500 genérico donde correspondía un 409 accionable. `tenants.service.spec.ts`
+  cubre la atomicidad y el rollback de este método, pero ningún test dispara el `23505` acá.
+
 - [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
   selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
   hueco preexistente a esta feature**) — el paso 4 de
@@ -996,6 +1092,37 @@ prohíbe.
   Es la **misma familia** que la adopción de cuenta por correo del alta de usuarios (arriba):
   las dos tratan "el correo coincide" como prueba de identidad. Conviene decidirlas juntas, con
   un solo criterio para todo el sistema.
+
+- [ ] **Dar de baja una membresía deja al garzón vinculado sin ninguna credencial, y en
+  silencio** (backend + frontend, auditoría RBAC/auth 2026-08-15) — **lo creó la entrega del PIN
+  propio del 2026-08-15**, y por eso ninguna revisión de aquel diff podía verlo: nadie mira la
+  transición "dar de baja a alguien" mientras revisa la feature del PIN.
+  Medido: `removeMember` son **dos líneas** (`softDelete({ tenantId, usuarioId })`) y no toca
+  `garzones`. Un garzón dado de alta con cuenta nace con `pinHash = PIN_INUTILIZABLE` — vincular
+  mata el PIN a propósito, porque la cuenta pasa a ser la credencial. Al bajar la membresía,
+  `garzonPersonalDe` deja de resolver el modo personal (filtra la membresía viva) **y el PIN
+  sigue muerto**: el garzón se queda sin ninguna forma de operar, y `toPublico` no muestra
+  ninguna señal de que su cuenta ya no es miembro.
+  🔗 **Engancha con un cabo ya abierto:** la recuperación sería *desvincular + regenerar PIN*,
+  pero **no sabemos si desvincular es posible desde el formulario** — esa es la entrada de la
+  sección 2. Si no se puede, el garzón queda muerto sin salida por UI. Las dos se resuelven
+  juntas, y esa medición ahora tiene una razón concreta para ir primero.
+  **La decisión:** ¿la baja de membresía **desvincula** el garzón automáticamente (y le devuelve
+  un PIN usable), **avisa** al admin de que va a dejar a alguien sin operar, o **bloquea** hasta
+  que se resuelva? La primera es la más amable y la que menos estados raros deja.
+
+- [ ] **`refresh()` no reclama el token de forma atómica: dos pestañas pueden canjearlo las dos**
+  (backend, auditoría RBAC/auth 2026-08-15) — ⛔ **Adyacente al sistema JWT: confirmar antes de
+  tocar** (`CLAUDE.md`, invariante 4).
+  `auth.service.ts` → `refresh` hace `findOne` y después `delete({ id })`, sin transacción ni
+  condición atómica, y no mira `affected`. Dos requests simultáneos con la misma cookie **pueden
+  ganar los dos** — no es "uno gana y otro pierde".
+  **Disparador realista, medido:** el frontend serializa el refresh **por pestaña**
+  (`useApiFetch.ts`, variable de módulo), pero **no entre pestañas**. Dos tabs del mismo usuario
+  despertando de standby a la vez alcanzan.
+  ℹ️ **Es distinto del reuso secuencial** que anota la otra entrada: aquel es presentar un token
+  ya rotado; este es doble uso simultáneo del token vigente. Se arreglan en el mismo lugar y
+  conviene decidirlos juntos.
 
 - [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
   puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan

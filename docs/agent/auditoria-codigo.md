@@ -84,6 +84,33 @@ deja de leer el reporte. Ese paso no es opcional.
 
 ---
 
+## El brief puede estar mal, y la regla que lo salva
+
+**Dos veces en la pasada de RBAC un buscador refutó al brief en vez de al código, y las dos
+tenía razón.** Vale registrarlo porque el brief lo escribe el mismo que después refuta, y es el
+único insumo que nadie audita.
+
+1. **Una hipótesis mía, falsa.** El brief decía que sospechaba del pool de conexiones agotado
+   *disfrazado* de 401. La lente lo midió: `jwt.strategy.ts` → `validate()` **no toca la base**,
+   y ningún guard tiene `try/catch` que traduzca un error a 401. Un fallo de base ahí da 500. La
+   hipótesis murió y en su lugar apareció la causa real, que era otra.
+2. **Una cita mía a un documento que no dice eso.** El brief afirmaba que `usuarios`,
+   `refresh_tokens` y `tokens_acceso` no tienen `eliminado_el`, citando la sección de
+   `patterns/backend.md` que censa las tablas **sin `tenant_id`** — otra columna. Medido:
+   `usuarios` y `tokens_acceso` **sí** la tienen. El agente no paró la pasada porque ya venía
+   abriendo cada entidad antes de afirmar, así que la discrepancia no contaminó ningún hallazgo.
+
+**La regla que convirtió las dos en anécdotas y no en hallazgos falsos es la misma:** *todo
+hallazgo trae `archivo:línea` verificado abriendo el archivo*. Un buscador que tiene que abrir el
+archivo descarta solo sus corazonadas **y también las del brief**. Aflojá esa regla y el brief
+pasa de insumo a verdad.
+
+Corolario operativo: **pedirle explícitamente al buscador que reporte `BLOCKED` si un dato del
+brief no cierra**, y decirle que un BLOCKED es señal, no fricción. Las dos veces que pasó, el
+reporte llegó igual y con la corrección adentro.
+
+---
+
 ## Decomponer por invariante, no por archivo
 
 "Leé todos los archivos" es la partición equivocada: gasta tokens en código trivial y
@@ -156,6 +183,7 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 | `items` + `calculo-precios` (backend completo + las 2 pantallas del módulo) | 2026-07-28 | 8 | 21 | 21 | **Ninguno se cayó entero** — 6 bajaron de severidad, 3 perdieron la mitad de la afirmación, 2 se reclasificaron como decisión de owner, y el refutador sumó 1 que ninguna lente vio. **Soft delete limpio: 0 sobre 98 queries** revisadas una por una; multi-tenant limpio en los 63 JOIN (su único hallazgo es defensa en profundidad no explotable). El hilo que dejó la pasada de `ventas` cerró con un matiz: el N+1 de `findOne` sobrevivía **del lado del precio**, no del de la persistencia que `cargarBasePorIds` ya había resuelto |
 | `turnos` + `salones` + `garzones` (backend completo + las 6 pantallas) | 2026-08-06 | 8 | 24 | 22 | Dos lentes independientes cayeron sobre el mismo bug de la línea que se cuela → se contó una vez. **Multi-tenant limpio ruta por ruta** en los 4 controllers, y **soft delete limpio: 0 sobre ~65 queries**. Solo 1 se cayó entero (un deadlock refutado por cómo lockea un `SELECT … IN (…) FOR UPDATE`), y **una fuerza bruta se refutó midiendo, no argumentando**: 14 días de CPU saturada. El refutador sumó el hallazgo más caro de la pasada — el fix de las dos altas **estaba a medias** y movía el bug al ticket de cocina. El hilo de `tipo_garzon` cerró con matiz: propinas ya bloquea el reparto corrupto, falta el aviso al editar |
 | `inventario` + `recuentos` + `mermas` + conversión de unidades (backend + 5 pantallas + 3 composables) | 2026-08-15 | **12** | 20 | 16 | Primera pasada con 12 lentes. **Tres salieron limpias** —multi-tenant (21 rutas verbo por verbo, 17 DTOs), soft delete (~48 queries) y dinero/Decimal— y el chokepoint del kardex se verificó sólido por dos lentes independientes. **Dos lentes ciegas entre sí cayeron sobre el mismo bug** (reingresar al CPP de hoy y no al costo de salida): se contó una vez. El refutador **bajó 2 severidades** —el deadlock de los caminos inversos, porque su consecuencia peor ya estaba asumida por diseño en el docblock del registry de reembolsos; y la falta de reconciliación saldo↔kardex, que no tenía escenario reproducible— y **fusionó 3 hallazgos en 1** (serie/lote a medias). El hallazgo más caro: **la doc del recuento anticipó el doble conteo y lo dio por mitigado con un razonamiento que no cierra** |
+| RBAC + `auth` + `tenants` (backend + middlewares y pantallas del frontend) | 2026-08-15 | 12 | 25 | 22 | **El eje más sensible y el único que ninguna pasada había tocado.** Se corrió en dos tandas de 6 tras morir entera la primera vez por límite de sesión. **Convergencias fuertes:** *tres* lentes ciegas cayeron sobre el mismo borde (módulos contratados sin enforcement consistente) y *dos* sobre el token de Google en la query string — una con la mitad que la otra no tenía. **El refutador bajó 4 severidades** (el `assignUser` de alta a media al ver que exige `TenantAdminGuard` y no cruza datos; los dos huecos de test de alta a media porque el código está bien y lo que falta es la red) y **reencuadró 1** (en `setPermissions` el titular no es la carrera sino que no es atómico: un solo request que falle deja el rol sin permisos). **Dos refutaciones fueron contra el brief, no contra el código** — ver abajo |
 
 ### Orden propuesto para lo que falta
 
@@ -168,7 +196,7 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 | ~~1~~ | ~~`items` (motor de precios)~~ | ✅ Hecho 2026-07-28 |
 | ~~2~~ | ~~`turnos` + `salones`~~ | ✅ Hecho 2026-08-06. ⚠️ **La razón que decía esta fila estaba vieja:** los cinco `LEFT JOIN garzones` ya llevaban `g.tenant_id` (con tests que lo asertan) desde una pasada intermedia; se verificó abriendo los archivos antes de lanzar. El hilo que sí seguía vivo era el de `tipo_garzon`, y cerró con matiz |
 | ~~3~~ | ~~`inventario` fuera de lo ya auditado~~ | ✅ Hecho 2026-08-15. La razón de la fila se cumplió: kardex, mermas y conversión de unidades produjeron 4 de los 6 hallazgos altos |
-| 4 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
+| ~~4~~ | ~~RBAC, auth y tenants~~ | ✅ Hecho 2026-08-15. La razón de la fila se confirmó: 22 hallazgos, tres de ellos con impacto directo sobre credenciales |
 | 5 | Catálogos y configuración | Bajo riesgo: CRUD admin-only con lectura abierta |
 
 Cerrar cada pasada actualizando **las dos tablas**: la de cobertura con lo hecho, y esta
