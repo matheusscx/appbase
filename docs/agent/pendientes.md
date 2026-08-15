@@ -231,6 +231,11 @@ el orden de la tabla de arriba.
   - `items.service.ts` → `costoPropuesto` de una receta (`ROUND_HALF_UP` explícito).
   - `propinas/utils/mayores-restos.ts` → el reparto de propina entre garzones.
   - `mermas.service.ts` (dos sitios) → costo × cantidad.
+  - `inventario.service.ts:818-821` → `cantidad × costoUnitario` del kardex. **Agregado el
+    2026-08-15 por la lente de dinero de la auditoría de `inventario`**, que lo encontró
+    buscando otra cosa. Es el mismo mecanismo sin consecuencia nueva, así que no abre entrada
+    propia — pero el título de arriba dice "cuatro" y **son cinco**: quien tome esta entrada
+    tiene que barrer, no ir a la lista.
 
   Antes de replicar el arreglo: **el criterio no es obvio y puede no ser el mismo**. El de
   la conversión se decidió porque el valor se persiste en `NUMERIC(18,4)`; el reparto de
@@ -254,6 +259,64 @@ respuesta del owner.** Ordenadas de más barata a más cara — las dos primeras
 edición de texto; **las dos últimas no son teclear**, son escribir tests que hoy no existen
 (un e2e con un ítem en otra moneda, y el arnés de tres specs de página). El material para
 una tanda de una sentada empieza arriba, y **va después de la 🔴**.
+
+- [ ] **`mermas` nunca recibió el fix de moneda que su gemelo `inventario` sí tiene: el mismo
+  monto se lee distinto según la pantalla** (backend + frontend, auditoría `inventario`
+  2026-08-15) — `inventario.service.ts:752` trae `i.moneda_id` en el `SELECT` del kardex, con un
+  comentario que explica el porqué (*"el kardex global mezcla ítems de distintas monedas: sin
+  esto la UI formatea todo costo con la moneda oficial del tenant"*), y `inventario/index.vue`
+  lo consume pasando `row.original.monedaId` como segundo argumento de `formatMonto`.
+  `mermas.service.ts` tiene **cero ocurrencias** de `moneda_id` (medido) y `mermas.vue:336,338`
+  llama `formatMonto(...)` con un solo argumento, así que cae en la moneda oficial del tenant.
+  **Lo mismo, medido:** `inventario/index.vue:273` formatea `costoPerdido` —un campo de merma—
+  **con** la moneda del ítem; `/mermas` formatea **ese mismo campo** sin ella. Un ítem importado
+  en USD muestra su merma como si fueran pesos en una pantalla y no en la otra.
+  Es mecánica porque **el fix ya está escrito en el módulo gemelo**: agregar `i.moneda_id` a los
+  dos `SELECT`, el campo a `MermaListItem`, y el segundo argumento en las tres llamadas del
+  `.vue`. Sin decisión de por medio.
+
+- [ ] **Se puede dejar sin nombre una causa de merma o un motivo de diferencia editándolos**
+  (backend, auditoría `inventario` 2026-08-15) — `update-causa-merma.dto.ts` y
+  `update-motivo-diferencia-inventario.dto.ts` declaran `@IsString() @IsOptional()
+  @MaxLength(120)` **sin `@IsNotEmpty()`**, que sus DTOs de creación hermanos sí tienen. Los
+  services solo hacen `if (dto.nombre !== undefined)` —verdadero para `''`— y persisten el
+  `.trim()`. El `required` del `UFormField` en las dos pantallas es cosmético: el `UForm` no
+  recibe `:schema` ni `:validate`, así que no bloquea el submit. Resultado: la fila queda con
+  nombre vacío y aparece como una opción sin etiqueta en el selector de causa de `mermas.vue` y
+  en el override de línea de `recuentos/[id].vue`. Dos DTOs gemelos, un decorador cada uno.
+
+- [ ] **El e2e del simulador de costos acepta cualquier precio con tal de que no sea el viejo**
+  (backend/tests, auditoría `inventario` 2026-08-15) —
+  `simulador-costos.e2e-spec.ts:150-151` cierra con `expect(body.costoActual).not.toBe('1200.0000')`
+  y `expect(body.precioBase).not.toBe('3500.0000')`. Un precio recalculado mal pasa igual: la
+  única forma de fallar es que el valor no haya cambiado en absoluto. El test ya tiene a mano el
+  valor esperado; falta compararlo contra él en vez de contra el anterior.
+
+- [ ] **El e2e de mermas nunca comprueba que el stock haya bajado** (backend/tests, auditoría
+  `inventario` 2026-08-15) — `mermas.e2e-spec.ts:116-135` afirma `causaNombre`, `costoUnitario` y
+  `costoPerdido > 0` sobre la respuesta del `POST`, y ningún `GET` posterior vuelve a leer el
+  stock. Es la única capa que corre contra Postgres real, así que el efecto de una merma sobre el
+  saldo no está fijado por nada de extremo a extremo. **El arreglo es un `expect`, no un
+  escenario nuevo:** la respuesta ya trae `stockResultante` (está en el tipo `MermaResponse` del
+  propio spec, línea 24) y el test no lo mira.
+
+- [ ] **El reintento por deadlock de `RecuentosService.aplicar` no lo ejercita ningún test**
+  (backend/tests, auditoría `inventario` 2026-08-15) — `recuentos.service.ts:478-489` atrapa
+  `QueryFailedError` con `code === '40P01'` y reintenta una vez. Medido: **cero** ocurrencias de
+  `40P01`, `QueryFailedError` o `deadlock` en las 754 líneas de `recuentos.service.spec.ts`, así
+  que borrar el `try/catch` entero deja la suite en verde. A diferencia de casi todo lo demás de
+  concurrencia, este **no necesita concurrencia real** para cubrirse: alcanza con mockear
+  `aplicarEnTransaccion` para que lance un `QueryFailedError` con ese code en la primera llamada.
+
+- [ ] **La única barrera de tenant de las salidas por serie y lote no tiene ningún test**
+  (backend/tests, auditoría `inventario` 2026-08-15) — `inventario.service.ts:463-468` rechaza una
+  unidad que no pertenece al tenant o al ítem, y `:611-613` hace lo propio con el lote. Los
+  `unidadIds`/`loteId` llegan del body del cliente, así que esos `if` son la defensa, no una
+  redundancia. `inventario.service.spec.ts` ejercita el camino de serie (FIFO automático,
+  disponibilidad insuficiente) pero **ninguna de las dos validaciones de pertenencia**.
+  ℹ️ No contradice a la lente de multi-tenant, que salió limpia: ahí se verificó que los 16
+  llamadores de `registrarMovimiento` validan el ítem antes. Esto es el escalón de adentro, que
+  existe justamente porque el `unidadId` no pasa por esa validación.
 
 - [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
   selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
@@ -338,6 +401,23 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
+
+- [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
+  saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
+  del proyecto dice que `movimientos_inventario` es la fuente de verdad y `item_producto.stock`
+  un saldo materializado. En modo `serie`/`lote` eso se autocorrige: `recalcularStockSerie/Lote`
+  (`inventario.service.ts:640-675`) recalcula el saldo desde `item_unidad`/`item_lote` en cada
+  movimiento. En modo `cantidad` —el default— solo hay un `UPDATE` incremental, y no existe
+  función ni endpoint que sume el kardex y lo compare.
+  ⚠️ **Severidad baja a propósito, y el reencuadre importa**: la lente lo reportó como alta, pero
+  **no hay ninguna divergencia medida**. El chokepoint (`registrarMovimiento`) se verificó sólido
+  por dos lentes independientes: todo camino de producción pasa por ahí y escribe movimiento y
+  saldo en la misma transacción. El escenario que ofrecía era un bug futuro hipotético, que no
+  es un escenario reproducible.
+  **Por eso está acá y no en 1:** lo primero es una query que compare las dos cosas sobre la base
+  de dev y diga si el drift existe. Si da cero, esto es defensa en profundidad y puede quedar
+  anotado; si da distinto de cero, cambia de sección y de prioridad. Construir un reconciliador
+  antes de esa medición es construir sin evidencia.
 
 - [ ] **¿Se puede desvincular una cuenta desde el formulario?** (frontend, **duda medida en el
   smoke del 2026-08-15, sin resolver**) — el `USelectMenu` de "Cuenta vinculada" muestra
@@ -590,6 +670,143 @@ Cada una lleva su pregunta concreta adentro. Mientras no se conteste **no se emp
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+- [ ] 🚩 **Dos recuentos abiertos sobre el mismo producto descuentan el faltante dos veces**
+  (backend + producto, auditoría `inventario` 2026-08-15) — **el hallazgo más caro de la pasada.**
+  `RecuentosService.create()` hace un `INSERT INTO recuento_inventario` sin mirar si el tenant ya
+  tiene una sesión en `borrador` que incluya esos ítems (verificado abriendo el método: no hay
+  guard, y el único índice único es `(recuento_id, item_id)`, o sea **dentro** de una sesión).
+  Cada línea congela su `stock_sistema` al crearse y el ajuste se aplica como **delta relativo**
+  sobre el stock vigente.
+  **Escenario:** stock de sistema 10. Dos personas abren su propia sesión y las dos cuentan 8.
+  Cada sesión guarda delta −2. Aplicadas las dos, el stock queda en **6**, no en 8. El faltante
+  real se descuenta dos veces y se genera un faltante que no existió.
+  ⚠️ **La doc anticipó este riesgo y lo descartó con un razonamiento que no cierra.**
+  [`recuento-inventario.md`](../features/recuento-inventario.md) lo lista en su tabla de riesgos
+  y lo da por mitigado: *"cada línea congela su propio `stock_sistema`; el delta se calcula contra
+  ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final"*. Es cierto
+  y es irrelevante — la independencia del orden no es corrección: da el mismo resultado
+  equivocado. **Eso es peor que un hueco no considerado**, porque el próximo que lo mire va a
+  encontrar la fila de la tabla y creer que está resuelto.
+  **La pregunta para el owner:** ¿la segunda sesión sobre un ítem ya en borrador se **bloquea**
+  (400 nombrando la sesión abierta), se **avisa** y se deja seguir, o el ajuste se recalcula
+  contra el stock del momento de aplicar en vez del congelado? Las tres son defendibles y
+  cambian el modelo. La tercera además contradice el comentario que llama al delta *"el corazón
+  del diseño"*.
+
+- [ ] 🚩 **Cambiar la unidad de un ingrediente puede tirar abajo el listado entero del catálogo**
+  (backend, auditoría `inventario` 2026-08-15) — el guard que bloquea cambiar `unidadMedida`
+  (`items.service.ts:1391-1418`) solo mira si el ítem tiene **movimientos propios**; no mira si
+  una `receta_ingredientes` o una opción de grupo ya lo referencia con una unidad fijada. Un
+  ingrediente sin costo ni movimientos puede pasar de `kg` a `l` sin fricción.
+  **Verificado el mecanismo del daño:** `catalog.service.ts` → `convertirUnidades` hace
+  `conversiones.map(c => this.convertirConMapa(...))` **sin aislar fila por fila**, así que una
+  sola conversión imposible hace fallar el lote completo. Como `calcularDisponibilidadBatch` lo
+  usa desde `findAll` y ni el service ni el controller lo atrapan, **`GET /items` deja de
+  responder para todo el tenant** —el menú del POS incluido— hasta arreglar la fila a mano.
+  **La decisión:** ¿el guard se amplía para bloquear el cambio cuando hay referencias (y el
+  usuario tiene que desarmar la receta primero), o el batch se vuelve tolerante fila por fila
+  (devolviendo la que no se puede convertir marcada, en vez de tirar todo)? No son excluyentes,
+  y la segunda protege también contra el resto de las filas corruptas que ya puedan existir.
+
+- [ ] 🚩 **Anular una venta reingresa la mercadería al costo de hoy, no al que salió — y el
+  inventario se infla solo** (backend + contabilidad, auditoría `inventario` 2026-08-15) —
+  **lo encontraron dos lentes ciegas entre sí** (costeo CPP y devoluciones), por caminos
+  distintos; se cuenta una vez.
+  Medido en el código: `registrarMovimiento` recalcula el promedio ponderado **solo** cuando
+  `tipo='entrada' && motivo='compra'`, y los tres call sites de reversión
+  (`ventas.service.ts:862` anulación, `:1006` y `:1153` devolución) **no pasan `costoUnitario`**.
+  Con eso, `costoUnitarioCongelado` cae en la rama `: costoActualPrevio` —el CPP vigente al
+  momento del reingreso— y `costo_actual` queda intacto.
+  **La aritmética, con números concretos:** vender 1 unidad a costo $50, comprar 5 a $70 (el CPP
+  pasa a $57,1429), y anular la venta original deja el inventario valorizado en **$857,14** en
+  vez de **$850,00**. Son $7,14 que no entraron por ninguna compra, y que además contaminan cada
+  CPP posterior.
+  ℹ️ El costo real de esa salida **existe y no se lee**: el kardex lo congeló ligado a la
+  `venta_id` del movimiento original.
+  ⛔ **La pregunta es contable y no me corresponde:** ¿una devolución reingresa al costo con el
+  que la unidad salió (y entonces hay que recalcular el promedio incluyéndola), o al costo
+  vigente (y el desfase se asume)? Los dos criterios existen en el mercado. Lo que hoy hay no es
+  ninguno de los dos elegido: es la ausencia de decisión.
+  **Ningún test lo cubre:** `ventas.service.spec.ts` mockea `registrarMovimiento` entero en el
+  bloque de anulación.
+
+- [ ] 🚩 **Anular una venta con recetas o combos no repone los ingredientes, y responde que sí
+  repuso** (backend, auditoría `inventario` 2026-08-15) — `cancelar` arma la lista a reponer con
+  `JOIN item_producto ip ON ip.item_id = d.item_id` (`ventas.service.ts:848`, **INNER**). Una
+  línea de receta o de combo **no tiene fila en `item_producto`** —la tienen sus ingredientes—,
+  así que la línea desaparece del `SELECT` sin error y sin aviso, y la respuesta igual dice
+  `stockRepuesto: true` (el frontend muestra *"Venta anulada y stock repuesto"*).
+  **La asimetría está medida:** el camino de la nota de crédito usa `LEFT JOIN` en la misma
+  consulta (`:1280`) y cae en la rama de `modo_inventario === null`, que responde *"no maneja
+  stock (servicio): no admite devolución a inventario"* (`:1314`) — un mensaje que para una
+  receta es falso.
+  **Escenario:** se vende una pizza, la venta se anula reponiendo stock, y el queso y la harina
+  que salieron del inventario al venderla **no vuelven nunca**. No hay ningún camino que los
+  reponga: ni la anulación, ni la NC, ni un endpoint manual de entrada.
+  **La decisión:** ¿la anulación expande la receta y repone los ingredientes (simétrico con lo
+  que hace la venta), o rechaza explícitamente las ventas con recetas/combos como ya rechaza
+  serie y lote? Lo que no puede seguir es la tercera opción actual: no reponer y decir que sí.
+
+- [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
+  corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
+  agrupadas porque se deciden juntas:
+  1. **La merma acepta y descuenta la unidad equivocada.** `CreateMermaDto` no tiene
+     `unidadIds`/`loteId` y `mermas.service.ts` no chequea `modo_inventario`, a diferencia de
+     `recuentos.service.ts:566-569` y `ventas.service.ts:856-858,1316-1318`, que **sí rechazan
+     limpio**. Como `moverSerie` auto-selecciona FIFO cuando no le pasan unidades (hay un test
+     que lo fija), mermar un producto serializado da de baja **la unidad más vieja, no la que se
+     rompió**: se destruye la trazabilidad por IMEI que es la razón de ser de ADR-007. El
+     selector de `mermas.vue:161-165` tampoco filtra esos productos.
+  2. **Los índices únicos que la doc promete no existen en ninguna parte.**
+     `inventario-serializado.md` documenta únicos parciales `(tenant_id, serie)` y
+     `(item_id, codigo_lote)`; `item-unidad.entity.ts` e `item-lote.entity.ts` no declaran
+     `@Index`. **Busqué la refutación donde este proyecto suele esconderla** —los únicos
+     parciales los crea el seeder, no `synchronize`— y no está: el seeder crea once índices y
+     ninguno es de esas dos tablas (medido). Sin chequeo en código tampoco: `moverSerie` inserta
+     sin buscar duplicados y `moverLote` tiene un check-then-insert. Se puede cargar el mismo
+     IMEI dos veces.
+  3. **`fecha_vencimiento` se guarda, se expone y no se compara con nada.** Cero comparaciones
+     contra `NOW()` en todo `backend/src` (medido). La salida automática es FIFO por `creado_el`,
+     no FEFO por vencimiento.
+  **Lo que hay que decidir antes de tocar nada:** ¿se cierra la puerta (rechazar serie/lote en
+  merma, como ya hacen venta y recuento) o se construye el soporte? La primera mitad es barata y
+  para la sangría; la segunda es una feature. Y aparte: **¿un lote vencido se puede vender y
+  mermar, o se bloquea?** Eso es regla de negocio y no está en `PRODUCTO.md`.
+
+- [ ] **Borrar un ítem borra su historial de auditoría de la vista, sin decirlo** (backend,
+  auditoría `inventario` 2026-08-15) — las dos pantallas de auditoría filtran con
+  `JOIN items ... AND i.eliminado_el IS NULL` (`inventario.service.ts:729,754` y
+  `mermas.service.ts:213,233`), y el guard de borrado de `items.service.ts:1834-1849` bloquea por
+  cuenta abierta, ingrediente, combo y opción — **pero no por tener movimientos de kardex**.
+  Discontinuar un producto es entonces trivial, y al hacerlo **todas** sus filas de Movimientos y
+  de Mermas —compras, ventas, mermas con su costo perdido— desaparecen de las dos pantallas sin
+  ningún indicador de que faltan. Los datos siguen en la tabla: lo que se pierde es la vista.
+  **Escenario:** un producto con mermas valorizadas del mes se discontinúa; el reporte de mermas
+  del período queda incompleto y cuadra mal, sin que nada avise.
+  **La decisión:** ¿el borrado se bloquea si hay movimientos (como se bloquea por receta), o las
+  dos consultas pasan a `LEFT JOIN` y muestran el ítem marcado como eliminado? La segunda es más
+  fiel a que un kardex es un log auditable; la primera es más simple.
+
+- [ ] **El detalle de un recuento esconde una línea que el listado sigue contando** (backend,
+  auditoría `inventario` 2026-08-15) — `findOne` arma el detalle con `INNER JOIN items` filtrando
+  `eliminado_el`, así que si un ítem se borra mientras la sesión sigue en `borrador` su línea
+  desaparece del detalle sin aviso; `findAll` sigue incluyéndola en `cantidadLineas`. El listado
+  dice 12 líneas y el detalle muestra 11, hasta que al aplicar aparece en `lineasDescartadas`.
+  **La decisión es cuál de las dos vistas está bien:** que el detalle muestre la línea marcada
+  como descartada (coherente con lo que hace `aplicar`) o que el listado deje de contarla.
+
+- [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
+  (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
+  (`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
+  explícitamente `componentes`. No hay disparador cuando cambia el costo de un componente, ni un
+  equivalente de la bandeja `recetas/desfases` para combos. El costo obsoleto se sigue exponiendo
+  en cada listado igual que el de un producto o una receta, así que el margen que muestra la
+  pantalla es incorrecto por tiempo indefinido.
+  ⚠️ `simulador-impacto-costos.md` **no declara esta exclusión** en su lista de lo que no cubre,
+  así que hoy no es una limitación conocida sino un hueco silencioso.
+  **La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
+  documenta explícitamente que su costo es manual?
+
 - [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
   puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
   `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
@@ -830,12 +1047,46 @@ prohíbe.
 
 ---
 
-## 5. Carreras de concurrencia — tres del mismo molde
+## 5. Carreras de concurrencia
 
-Las tres son la misma forma, y las tres entradas ya lo dicen por su cuenta: un `SELECT` de
-validación que **no toma lock**, y otra transacción que escribe entre el chequeo y el
-commit. Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila
-se bloquea y en qué orden en cada camino que crea una referencia—, no tres parches.
+Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
+bloquea y en qué orden en cada camino—, no cuatro parches. Son **dos moldes distintos**, y
+conviene no confundirlos:
+
+- **Tres del molde "no toma lock"** (las tres primeras, y las tres entradas ya lo dicen por
+  su cuenta): un `SELECT` de validación sin lock, y otra transacción que escribe entre el
+  chequeo y el commit.
+- **Una del molde "lockea en orden no determinista"** (la última, de la auditoría de
+  `inventario`): el lock sí se toma, pero el orden lo decide el cliente. El arreglo es el
+  contrario —no agregar un lock sino fijar un orden—, y las piezas ya existen en el repo.
+
+⚠️ Ninguno de estos moldes es el de la 🔴 del principio del archivo, que es **agotamiento
+del pool de conexiones**, no locks de fila. Son tres cosas distintas que se llaman igual.
+
+- [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
+  `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es otro molde que los tres
+  de arriba: acá el lock **sí** se toma, lo que no es determinista es **el orden**.
+  `registrarMovimiento` toma un `FOR UPDATE` sobre `item_producto` **por ítem**, o sea N
+  statements separados. `crear()` lo sabe y lo resuelve con dos capas —orden determinista por
+  `itemId` (`ventas.service.ts:618-626`) y reintento ante `40P01`
+  (`MAX_REINTENTOS_DEADLOCK`)—, y su propio comentario explica que el deadlock era real.
+  Los tres caminos inversos no tienen ninguna de las dos: `cancelar` (`:845`) hace un `SELECT`
+  **sin `ORDER BY`** y recorre lo que devuelva Postgres; `crearNotaCredito` (`:984`) y
+  `registrarDevolucionesPorReembolso` (`:1152`) iteran el resultado de
+  `validarDevolucionesReembolso`, que es un `devoluciones.map(...)` — **el orden del array del
+  cliente**.
+  ℹ️ La refutación que mató el deadlock de `fusionarCuentas` en la pasada de `turnos`+`salones`
+  (un solo `SELECT … IN (…) FOR UPDATE` lockea en orden de plan, igual para las dos
+  transacciones) **acá no aplica**: son statements separados.
+  ⚠️ **Severidad bajada de alta a media al refutar.** La lente cerraba con "stock desincronizado
+  permanentemente" y esa mitad no se sostiene *como consecuencia del deadlock*: el `40P01` aborta
+  la transacción y revierte todo, así que en `cancelar` y en la NC directa el daño es un error
+  opaco sin corrupción. La divergencia real solo existe por el camino del reembolso, y ahí ya
+  está **asumida por diseño**: `reembolso-callback.registry.ts` dice que los errores del handler
+  los captura el caller y *"el reembolso nunca se revierte"*. Ese agujero lo abre cualquier
+  error; el deadlock solo agrega una forma evitable más de caer en él.
+  **El arreglo es barato:** las dos piezas ya existen en el mismo archivo (el `sort` por `itemId`
+  y el wrapper `esDeadlock`). `RecuentosService.aplicar` ya hace exactamente esto.
 
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras

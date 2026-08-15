@@ -155,6 +155,7 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 | `caja` + `propinas` (backend completo + pantallas de los dos módulos) | 2026-07-27 | 8 | 25 | 20 | 3 hallazgos los vieron dos lentes cada uno → se contaron una vez. **La máquina de estados de caja salió limpia** (12 transiciones, las 11 inválidas bloqueadas), igual que la inmutabilidad del arqueo congelado y el anti-doble-pago de liquidaciones. Los 2 hilos que dejó la pasada de `ventas` cerraron: defendidos en el endpoint HTTP, **no** en el método compartido ni en ningún test |
 | `items` + `calculo-precios` (backend completo + las 2 pantallas del módulo) | 2026-07-28 | 8 | 21 | 21 | **Ninguno se cayó entero** — 6 bajaron de severidad, 3 perdieron la mitad de la afirmación, 2 se reclasificaron como decisión de owner, y el refutador sumó 1 que ninguna lente vio. **Soft delete limpio: 0 sobre 98 queries** revisadas una por una; multi-tenant limpio en los 63 JOIN (su único hallazgo es defensa en profundidad no explotable). El hilo que dejó la pasada de `ventas` cerró con un matiz: el N+1 de `findOne` sobrevivía **del lado del precio**, no del de la persistencia que `cargarBasePorIds` ya había resuelto |
 | `turnos` + `salones` + `garzones` (backend completo + las 6 pantallas) | 2026-08-06 | 8 | 24 | 22 | Dos lentes independientes cayeron sobre el mismo bug de la línea que se cuela → se contó una vez. **Multi-tenant limpio ruta por ruta** en los 4 controllers, y **soft delete limpio: 0 sobre ~65 queries**. Solo 1 se cayó entero (un deadlock refutado por cómo lockea un `SELECT … IN (…) FOR UPDATE`), y **una fuerza bruta se refutó midiendo, no argumentando**: 14 días de CPU saturada. El refutador sumó el hallazgo más caro de la pasada — el fix de las dos altas **estaba a medias** y movía el bug al ticket de cocina. El hilo de `tipo_garzon` cerró con matiz: propinas ya bloquea el reparto corrupto, falta el aviso al editar |
+| `inventario` + `recuentos` + `mermas` + conversión de unidades (backend + 5 pantallas + 3 composables) | 2026-08-15 | **12** | 20 | 16 | Primera pasada con 12 lentes. **Tres salieron limpias** —multi-tenant (21 rutas verbo por verbo, 17 DTOs), soft delete (~48 queries) y dinero/Decimal— y el chokepoint del kardex se verificó sólido por dos lentes independientes. **Dos lentes ciegas entre sí cayeron sobre el mismo bug** (reingresar al CPP de hoy y no al costo de salida): se contó una vez. El refutador **bajó 2 severidades** —el deadlock de los caminos inversos, porque su consecuencia peor ya estaba asumida por diseño en el docblock del registry de reembolsos; y la falta de reconciliación saldo↔kardex, que no tenía escenario reproducible— y **fusionó 3 hallazgos en 1** (serie/lote a medias). El hallazgo más caro: **la doc del recuento anticipó el doble conteo y lo dio por mitigado con un razonamiento que no cierra** |
 
 ### Orden propuesto para lo que falta
 
@@ -166,7 +167,7 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 | ~~1~~ | ~~`caja` + `propinas`/liquidación~~ | ✅ Hecho 2026-07-27 |
 | ~~1~~ | ~~`items` (motor de precios)~~ | ✅ Hecho 2026-07-28 |
 | ~~2~~ | ~~`turnos` + `salones`~~ | ✅ Hecho 2026-08-06. ⚠️ **La razón que decía esta fila estaba vieja:** los cinco `LEFT JOIN garzones` ya llevaban `g.tenant_id` (con tests que lo asertan) desde una pasada intermedia; se verificó abriendo los archivos antes de lanzar. El hilo que sí seguía vivo era el de `tipo_garzon`, y cerró con matiz |
-| 3 | `inventario` fuera de lo ya auditado | Kardex, mermas, conversión de unidades |
+| ~~3~~ | ~~`inventario` fuera de lo ya auditado~~ | ✅ Hecho 2026-08-15. La razón de la fila se cumplió: kardex, mermas y conversión de unidades produjeron 4 de los 6 hallazgos altos |
 | 4 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
 | 5 | Catálogos y configuración | Bajo riesgo: CRUD admin-only con lectura abierta |
 
@@ -194,6 +195,9 @@ hueco de test que vivía como nota suelta dentro de un bloque de contexto. Reord
 nada; lo que hace es que el tamaño real sea visible.
 
 ⚠️ **La condición sigue siendo la misma para la próxima pausa:** si una pasada vuelve a
-sumar ~25 entradas, el programa se detiene otra vez. El orden de arriba sigue siendo el
+sumar ~25 entradas, el programa se detiene otra vez. **La pasada 3 sumó 16** (`pendientes.md`
+pasó de 60 a 76): por debajo del umbral, así que el programa sigue. Las pasadas 4 (RBAC/auth)
+y 5 (catálogos) quedan habilitadas — pero el umbral se mide **antes** de lanzar la 5, no
+después de las dos. El orden de arriba sigue siendo el
 correcto: `inventario` primero por riesgo, y **RBAC/auth/tenants es el único eje sensible
 que ninguna pasada tocó todavía**.
