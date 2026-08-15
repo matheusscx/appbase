@@ -257,19 +257,29 @@ el orden de la tabla de arriba.
 El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
 respuesta del owner.**
 
-📉 **Once salieron el 2026-08-15** en una tanda de cinco agentes en paralelo (ver
-[`resueltos.md`](resueltos.md)). Las que quedan son las que **no** se podían paralelizar, y
-por eso sobrevivieron: cinco se pisan entre sí sobre el mismo archivo —**tres** tocan
-`tenants.service.ts` y **dos** `garzones.service.ts`—, y el resto necesita e2e, que comparte
-el único Postgres y por lo tanto va **en serie**.
+✅ **Vacía desde el 2026-08-15.** Tenía **22 entradas** y salieron en dos tandas
+paralelizadas: **21 arregladas** y **1 elevada a la sección 4**, porque al abrirla resultó ser
+una decisión de producto y no una mecánica (el `LIMIT` del historial de PIN). El detalle de
+las dos tandas, con los errores que se cometieron en el camino, está en
+[`resueltos.md`](resueltos.md).
 
-⚠️ **Antes de repartirlas, leer la regla que salió de esa tanda**, en la entrada de
-`resueltos.md`: reparte por **dueño de archivo y recurso compartido**, no por cantidad; los
-agentes corren solo su propio spec; el gate completo lo corre el principal al final.
+⚠️ **Antes de repartir la próxima tanda, leer la regla que salió de éstas** (misma entrada de
+`resueltos.md`), porque no es la que uno esperaría:
 
-✅ **Vacía desde el 2026-08-15.** Las 22 entradas que tenía salieron en dos tandas
-paralelizadas (ver [`resueltos.md`](resueltos.md)); una se elevó a la sección 4 porque no era
-mecánica. Lo que caiga acá de ahora en más es material nuevo.
+- **Se reparte por dueño de archivo y por recurso compartido, no por cantidad.** Hay **un
+  solo Postgres** y `reset-db.sh` hace `docker-compose down -v`: un agente que lo corra le
+  vuela la base a todos los demás. Y el backend bind-montea el fuente, así que editar un
+  `.ts` re-siembra el contenedor de todos.
+- **Los worktrees no lo arreglan, lo empeoran**: compose no ve sus archivos, así que un e2e
+  ahí corre contra el código viejo y vuelve **verde sin haber probado nada**.
+- **Los agentes escriben y corren solo su propio spec**; el gate completo lo corre el
+  principal, en serie, al final. Dos `nuxt build` concurrentes se pisan el `.nuxt/`.
+
+📌 **Y lo que las dos tandas dejaron como lección de fondo:** de las 22 entradas, **cuatro
+subcontaban o describían mal el hueco** —decía "tres consultas" y eran cinco, "dos DTOs" y
+eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó leyendo: se
+detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
+de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
