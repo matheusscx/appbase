@@ -930,6 +930,93 @@ empezarlas.
   sin exponerlo al cliente**, que es lo que aquella entrada necesita también. Se hacen juntas o
   la segunda paga el costo de la primera.
 
+- [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
+  **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
+  suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
+  `item.precioBase`, que es el precio **neto** del catálogo. El backend, en cambio, le
+  autoriza a la tarjeta `resultado.totales.totalFinal`, que sale del motor con impuestos,
+  descuentos y recargos aplicados.
+  **La medición, contra el stack real (tenant Paris, ítem de suscripción a $30.000):** el
+  drawer dice `30000` y a Transbank se le cobran **`35700`** — los $5.700 son el IVA al 19%
+  (`550e8400-…-440280`). El cliente confirma un número y se le cobra otro un 19% mayor, sin
+  ningún paso intermedio que se lo muestre.
+  Ojo con reproducirlo: **el seed no trae ningún ítem `tipo='suscripcion'`**, así que la
+  pantalla se ve vacía a menos que se cree uno (así se midió esto).
+  Por qué no se arregló junto con las advertencias: ahí lo que faltaba era devolver un campo;
+  esto es una **previsualización de precio antes de cobrar** —qué se muestra, si frena el
+  alta, si reusa `AdvertenciasPrecio` como ya hacen el carrito y la pasarela— y eso es
+  decisión de producto, no una corrección. Las advertencias que ahora sí llegan
+  (`POST /suscripciones` → `advertencias`) explican el monto **después** del cobro; no lo
+  reemplazan.
+  ✅ **DECIDIDO (owner, 2026-08-15): la pantalla muestra el total que se va a cobrar, con el
+  desglose debajo.** El monto grande pasa a ser `resultado.totales.totalFinal` —lo que de verdad
+  se le autoriza a la tarjeta— y debajo va el neto y el impuesto.
+  ℹ️ **No se inventa un componente nuevo:** el carrito y la pasarela ya muestran ese desglose, y
+  `AdvertenciasPrecio` ya existe. Se reusa.
+  ⚠️ **Para reproducirlo y testearlo:** el seed **no trae ningún ítem `tipo='suscripcion'`**
+  (medido), así que la pantalla se ve vacía hasta crear uno. Sembrar uno es parte del trabajo, o
+  el test no se puede escribir.
+
+- [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
+  frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
+  total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay
+  corta en `pagos-redirect.service.ts:86` ("El monto debe ser mayor a cero"), y el flujo
+  simulado tampoco puede porque `pasarela.vue:68` manda siempre
+  `monto: totales.totalFinal` y `PagoVentaDto.monto` lleva `@IsDecimalPositivo()`
+  (`create-venta.dto.ts:73-76`), así que `POST /ventas` lo rechaza más tarde.
+  ⚠️ **No hay asimetría con el POS** — la primera redacción de esta entrada decía que el
+  POS sí cerraba estas ventas "porque omite la línea de pago", y es falso:
+  `CobroModal.vue:99-101` exige `pagosValidos.length > 0` y el botón queda `:disabled`
+  (`:189`), así que con total `0` el POS tampoco confirma. El comentario de
+  `create-venta.dto.ts:73` ("el POS ya los omite al confirmar") habla de descartar las
+  líneas en `$0` dentro de un pago **dividido** que sí tiene alguna con monto
+  (`CobroModal.vue:95-97`), no de confirmar sin ninguna. **No hay un comportamiento del POS
+  que copiar.**
+  **Lo que la restricción realmente es:** de **UI en los dos lados**. La API sí acepta una
+  venta sin pagos —`CreateVentaDto.pagos` es `@IsOptional()` (`create-venta.dto.ts:130-134`),
+  por eso existen las ventas `pendiente`—, pero `ventas.service.ts:676` solo llama a
+  `calcularEstadoVenta` `if (saved.pagos.length > 0)`, así que una venta de `$0` sin pagos
+  quedaría **`pendiente` con saldo `$0`**, arrastrándose en los listados de deuda. O sea que
+  "crearla sin pago" tampoco es un modelo limpio: es una segunda decisión.
+  **La pregunta para el owner:** ¿una venta de total `$0` es una venta **pagada**, una venta
+  **pendiente**, o algo que se prohíbe antes de llegar al cobro? Es un caso real de
+  promociones, no un borde teórico. Relacionado con la entrada de `precioUnitario` de abajo:
+  es la misma pregunta de si el `0` es un monto válido, en otra capa.
+  ✅ **DECIDIDO (owner, 2026-08-15): una venta de total $0 es una venta PAGADA, sin línea de
+  pago.** Queda registrada, descuenta stock, emite su documento, y **no** aparece como deuda. Es
+  lo que se espera de una promoción: la venta existió y no hay nada que cobrar.
+  ⚠️ **Son tres sitios, no uno** — la entrada ya los tiene medidos y conviene no descubrirlos al
+  implementar: (a) el backend, porque `ventas.service.ts:676` solo llama a `calcularEstadoVenta`
+  `if (saved.pagos.length > 0)`, así que hoy una venta sin pagos quedaría **`pendiente` con saldo
+  $0** — justo lo que la decisión rechaza; (b) el POS, que exige `pagosValidos.length > 0` y deja
+  el botón deshabilitado; (c) la tienda, que manda siempre `monto: totales.totalFinal` contra un
+  DTO con `@IsDecimalPositivo()`.
+  🔗 Relacionada con la entrada del `precioUnitario` en `0`: es la misma pregunta de si el cero
+  es un monto válido, en otra capa. Conviene mirarlas juntas.
+
+- [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
+  `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
+  `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
+  ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
+  `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,
+  `CANTIDAD_CUENTAS`). Lo encontró la revisión independiente del 2026-07-27.
+  ⛔ **No es copiar la línea del hermano.** El `poolTotal` se congela al crear el borrador e
+  **incluye** esa propina: filtrar solo acá le saca el peso al garzón pero deja su plata en
+  el pool, o sea la redistribuye entre los demás. Decidir eso es la misma pregunta de
+  reconciliación del ítem de abajo (¿la plata de una venta anulada sale del pool, se
+  redistribuye, o queda como saldo?), así que va con esa spec y no antes.
+  ✅ **DECIDIDO (owner, 2026-08-15): la propina de una venta anulada sale del pool Y del peso
+  del garzón.** La venta no existió, así que su propina tampoco: se descuenta del total a
+  repartir y deja de contar para el peso. **Nadie cobra plata de una venta anulada**, ni el que
+  la generó ni los demás por redistribución.
+  ⚠️ **Eso desbloquea la entrada, que estaba frenada justo por esta pregunta.** El texto anterior
+  decía que filtrar solo acá "le saca el peso al garzón pero deja su plata en el pool, o sea la
+  redistribuye entre los demás" — con la decisión tomada, el arreglo es **filtrar en los dos
+  lados**: el peso en `buscarTipsPorFuentes` y el `poolTotal` congelado al crear el borrador.
+  🔗 **Ojo con el límite:** esto cubre el borrador **abierto**. El caso de la propina **ya
+  liquidada y pagada** es otro y sigue con su decisión propia (saldo en contra del garzón), en
+  la sección de proyectos que van solos.
+
 - [ ] **El kardex conserva todo pero las pantallas lo esconden, y hasta el total miente**
   (backend + frontend, auditoría `inventario` 2026-08-15; **decidido por el owner el mismo
   día**) — **lo medido, que es mejor de lo que la entrada original decía por un lado y peor
@@ -1226,25 +1313,6 @@ prohíbe.
   ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
   o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
 
-- [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
-  **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
-  suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
-  `item.precioBase`, que es el precio **neto** del catálogo. El backend, en cambio, le
-  autoriza a la tarjeta `resultado.totales.totalFinal`, que sale del motor con impuestos,
-  descuentos y recargos aplicados.
-  **La medición, contra el stack real (tenant Paris, ítem de suscripción a $30.000):** el
-  drawer dice `30000` y a Transbank se le cobran **`35700`** — los $5.700 son el IVA al 19%
-  (`550e8400-…-440280`). El cliente confirma un número y se le cobra otro un 19% mayor, sin
-  ningún paso intermedio que se lo muestre.
-  Ojo con reproducirlo: **el seed no trae ningún ítem `tipo='suscripcion'`**, así que la
-  pantalla se ve vacía a menos que se cree uno (así se midió esto).
-  Por qué no se arregló junto con las advertencias: ahí lo que faltaba era devolver un campo;
-  esto es una **previsualización de precio antes de cobrar** —qué se muestra, si frena el
-  alta, si reusa `AdvertenciasPrecio` como ya hacen el carrito y la pasarela— y eso es
-  decisión de producto, no una corrección. Las advertencias que ahora sí llegan
-  (`POST /suscripciones` → `advertencias`) explican el monto **después** del cobro; no lo
-  reemplazan.
-
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
   **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
@@ -1268,32 +1336,14 @@ prohíbe.
   con devoluciones de línea opcionales y sueltas del monto), así que "descomponer" exige
   primero definir contra qué —¿prorrateo sobre el total original? ¿solo sobre las líneas
   devueltas?—, y eso es regla de negocio, no implementación.
-
-- [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
-  frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
-  total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay
-  corta en `pagos-redirect.service.ts:86` ("El monto debe ser mayor a cero"), y el flujo
-  simulado tampoco puede porque `pasarela.vue:68` manda siempre
-  `monto: totales.totalFinal` y `PagoVentaDto.monto` lleva `@IsDecimalPositivo()`
-  (`create-venta.dto.ts:73-76`), así que `POST /ventas` lo rechaza más tarde.
-  ⚠️ **No hay asimetría con el POS** — la primera redacción de esta entrada decía que el
-  POS sí cerraba estas ventas "porque omite la línea de pago", y es falso:
-  `CobroModal.vue:99-101` exige `pagosValidos.length > 0` y el botón queda `:disabled`
-  (`:189`), así que con total `0` el POS tampoco confirma. El comentario de
-  `create-venta.dto.ts:73` ("el POS ya los omite al confirmar") habla de descartar las
-  líneas en `$0` dentro de un pago **dividido** que sí tiene alguna con monto
-  (`CobroModal.vue:95-97`), no de confirmar sin ninguna. **No hay un comportamiento del POS
-  que copiar.**
-  **Lo que la restricción realmente es:** de **UI en los dos lados**. La API sí acepta una
-  venta sin pagos —`CreateVentaDto.pagos` es `@IsOptional()` (`create-venta.dto.ts:130-134`),
-  por eso existen las ventas `pendiente`—, pero `ventas.service.ts:676` solo llama a
-  `calcularEstadoVenta` `if (saved.pagos.length > 0)`, así que una venta de `$0` sin pagos
-  quedaría **`pendiente` con saldo `$0`**, arrastrándose en los listados de deuda. O sea que
-  "crearla sin pago" tampoco es un modelo limpio: es una segunda decisión.
-  **La pregunta para el owner:** ¿una venta de total `$0` es una venta **pagada**, una venta
-  **pendiente**, o algo que se prohíbe antes de llegar al cobro? Es un caso real de
-  promociones, no un borde teórico. Relacionado con la entrada de `precioUnitario` de abajo:
-  es la misma pregunta de si el `0` es un monto válido, en otra capa.
+  🔎 **El owner pidió una investigación de mercado antes de decidir (2026-08-15).** Es materia
+  fiscal, no es obvia, y el owner no es experto del dominio — el caso exacto que
+  [`investigacion-mercado.md`](investigacion-mercado.md) contempla. **Pedida, todavía no
+  ejecutada.** Lo que tiene que traer: qué exige el SII para un DTE 61 en cuanto a
+  `MntNeto`/`IVA`/`MntTotal` propios, y cómo resuelven Toast/Square/Lightspeed la descomposición
+  de una NC emitida **por monto** y no por líneas — que es la forma que este sistema usa y la
+  que hace la pregunta difícil.
+  ⚠️ Regla del cruce: lo que traiga es **insumo para adaptar, no verdad a copiar**.
 
 - [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
   medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
@@ -1392,18 +1442,6 @@ prohíbe.
   serlo en cuanto exista un productor.
   Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
   (línea vs venta), que hoy no distingue.
-
-- [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
-  `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
-  `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
-  ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
-  `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,
-  `CANTIDAD_CUENTAS`). Lo encontró la revisión independiente del 2026-07-27.
-  ⛔ **No es copiar la línea del hermano.** El `poolTotal` se congela al crear el borrador e
-  **incluye** esa propina: filtrar solo acá le saca el peso al garzón pero deja su plata en
-  el pool, o sea la redistribuye entre los demás. Decidir eso es la misma pregunta de
-  reconciliación del ítem de abajo (¿la plata de una venta anulada sale del pool, se
-  redistribuye, o queda como saldo?), así que va con esa spec y no antes.
 
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
