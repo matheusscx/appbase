@@ -7,6 +7,7 @@ import { RolUsuario } from './entities/rol-usuario.entity';
 import { ModuloRol } from './entities/modulo-rol.entity';
 import { RolPermisoModulo } from './entities/rol-permiso-modulo.entity';
 import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
+import { RbacService } from '../rbac/rbac.service';
 
 const ROL = 'rol-uuid';
 const TENANT = 'tenant-uuid';
@@ -121,6 +122,11 @@ describe('RolesService', () => {
   let rolPermisoModuloRepo: { find: jest.Mock };
   let tenantModuloRepo: { findOne: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
+  let rbac: { administradoresDe: jest.Mock };
+  // El manager que `transaction` le pasa al service, para poder afirmar sobre
+  // lo que se escribió DENTRO (y no sobre un repositorio inyectado, que sería
+  // justo el error que se quiere impedir).
+  let managerDeLaTx: ReturnType<typeof crearManagerFalso> | null;
   // Estado "commiteado" para las pruebas de setPermissions: sólo se actualiza
   // cuando el `transaction` falso completa sin errores.
   let store: { permisos: PermisoRow[]; modulosRol: ModuloRolRow[] };
@@ -144,6 +150,7 @@ describe('RolesService', () => {
         .mockResolvedValue({ moduloTenantId: MODULO, tenantId: TENANT }),
     };
     store = { permisos: [], modulosRol: [] };
+    managerDeLaTx = null;
     // Por defecto el usuario SÍ es miembro del tenant.
     dataSource = {
       query: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
@@ -154,6 +161,7 @@ describe('RolesService', () => {
             modulosRol: store.modulosRol.map((m) => ({ ...m })),
           };
           const manager = crearManagerFalso(draft);
+          managerDeLaTx = manager;
           const result = await work(manager);
           store.permisos = draft.permisos;
           store.modulosRol = draft.modulosRol;
@@ -161,10 +169,14 @@ describe('RolesService', () => {
         },
       ),
     };
+    // Por defecto el tenant tiene OTRO admin además del que se toca: el camino
+    // normal de `removeUser` no debe bloquearse.
+    rbac = { administradoresDe: jest.fn().mockResolvedValue(['otro-admin']) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RolesService,
+        { provide: RbacService, useValue: rbac },
         { provide: getRepositoryToken(Rol), useValue: rolRepo },
         { provide: getRepositoryToken(RolUsuario), useValue: rolUsuarioRepo },
         { provide: getRepositoryToken(ModuloRol), useValue: {} },
@@ -245,6 +257,57 @@ describe('RolesService', () => {
 
       expect(res.eliminadoEl).toBeNull();
       expect(rolUsuarioRepo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeUser — no puede dejar al tenant sin administradores', () => {
+    it('desasigna normalmente mientras quede algún administrador', async () => {
+      await expect(
+        service.removeUser(ROL, TENANT, USUARIO),
+      ).resolves.toBeUndefined();
+
+      expect(managerDeLaTx?.softDelete).toHaveBeenCalledWith(RolUsuario, {
+        rolId: ROL,
+        tenantId: TENANT,
+        usuarioId: USUARIO,
+      });
+    });
+
+    // "tira" y no "no commitea": el rollback lo hace Postgres al propagar el
+    // throw, y el `transaction` falso de este spec no lo modela. Lo cubre el
+    // e2e (`membresia-ultimo-admin.e2e-spec.ts`).
+    it('si la desasignación deja al tenant sin ningún admin, tira', async () => {
+      // Nadie queda después del borrado. El primer llamado es el del lock, el
+      // segundo la verificación: se responde por posición para que el test
+      // distinga los dos y no pase por dar siempre lo mismo.
+      rbac.administradoresDe
+        .mockResolvedValueOnce([USUARIO])
+        .mockResolvedValueOnce([]);
+
+      await expect(service.removeUser(ROL, TENANT, USUARIO)).rejects.toThrow(
+        /sin ningún administrador/,
+      );
+    });
+
+    it('el conteo toma lock ANTES de borrar, y la verificación posterior no', async () => {
+      // El orden es la mitad de la corrección: contar sin `FOR UPDATE`, o
+      // contar después de que la otra transacción ya commiteó, deja pasar a
+      // los dos requests que sacan a los dos últimos admins.
+      await service.removeUser(ROL, TENANT, USUARIO);
+
+      const llamadas = rbac.administradoresDe.mock.calls as [
+        unknown,
+        string,
+        boolean,
+      ][];
+      expect(llamadas).toHaveLength(2);
+      expect(llamadas[0][2]).toBe(true);
+      expect(llamadas[1][2]).toBe(false);
+      // Y las dos con el manager de la transacción, no por fuera: contar en
+      // otra conexión no ve el borrado propio y además toma una segunda del
+      // pool mientras esta transacción retiene la primera.
+      expect(llamadas[0][0]).toBe(managerDeLaTx);
+      expect(llamadas[1][0]).toBe(managerDeLaTx);
     });
   });
 

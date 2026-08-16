@@ -33,7 +33,7 @@ const { formatFecha } = useFormatters()
  * garzón sobre sí mismo). Tutear lo dejaría mal en una de las dos.
  * (`pages/salones/index.vue` **no** lo monta: solo lo cita en comentarios
  * como precedente de redacción.) La lista es un **registro**, no un
- * mensaje: dice quién hizo qué y cuándo, y por eso las cinco líneas tienen
+ * mensaje: dice quién hizo qué y cuándo, y por eso las seis líneas tienen
  * la misma forma. Los avisos SÍ tutean (`avisoPin` en el salón, "Todavía no
  * tenés PIN" en el perfil) porque son otra cosa: le hablan al lector.
  *
@@ -47,6 +47,10 @@ const { formatFecha } = useFormatters()
 const TEXTO: Record<TipoEventoPin, (quien: string) => string> = {
   emitido_en_alta: quien => `${quien} emitió el PIN al dar de alta`,
   regenerado_por_encargado: quien => `${quien} generó un PIN nuevo`,
+  // El actor entre paréntesis y no adelante, igual que su espejo
+  // `invalidado_por_vinculo`: en los dos el sujeto de la frase es lo que le
+  // pasó al PIN, y quien lo ejecutó es el dato secundario.
+  regenerado_por_baja_de_cuenta: quien => `Recuperó un PIN propio al darse de baja su cuenta (${quien})`,
   invalidado_por_encargado: quien => `${quien} invalidó el PIN`,
   invalidado_por_vinculo: quien => `El PIN quedó sin efecto al vincular la cuenta (${quien})`,
   fijado_por_garzon: quien => `${quien} puso su propio PIN`,

@@ -70,10 +70,16 @@ export interface GarzonPinRegenerado extends GarzonConPin {
  * Qué le pasó al PIN. Los dos de invalidación se distinguen porque dicen
  * cosas distintas: `invalidado_por_vinculo` es "te di una cuenta, tu PIN
  * viejo ya no hace falta"; `invalidado_por_encargado` es "te corté el PIN".
+ *
+ * `regenerado_por_baja_de_cuenta` es el espejo de `invalidado_por_vinculo`:
+ * la cuenta que era la credencial dejó de ser miembro y el garzón recupera un
+ * PIN propio. Espeja `garzon-pin-evento.entity.ts` — si allá se agrega uno,
+ * acá también, o `PinEventosLista` cae en su rama de tipo desconocido.
  */
 export type TipoEventoPin =
   | 'emitido_en_alta'
   | 'regenerado_por_encargado'
+  | 'regenerado_por_baja_de_cuenta'
   | 'invalidado_por_encargado'
   | 'invalidado_por_vinculo'
   | 'fijado_por_garzon'

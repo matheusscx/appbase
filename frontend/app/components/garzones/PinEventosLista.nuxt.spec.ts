@@ -29,6 +29,7 @@ describe('PinEventosLista', () => {
       // `usuarioId` del token), así que acá va un nombre, no `null`: el
       // fallback de la cuenta dada de baja lo cubre el test de abajo.
       { id: 'e5', tipo: 'fijado_por_garzon', usuarioNombre: 'ana.torres', creadoEl: '2026-08-05T10:00:00.000Z' },
+      { id: 'e6', tipo: 'regenerado_por_baja_de_cuenta', usuarioNombre: 'admin.paris', creadoEl: '2026-08-06T10:00:00.000Z' },
     ]
 
     const wrapper = await mountSuspended(PinEventosLista, { props: { eventos } })
@@ -42,6 +43,10 @@ describe('PinEventosLista', () => {
     // (perfil y salón), así que la lista no tutea a nadie — ver el docblock
     // de `TEXTO`.
     expect(wrapper.text()).toContain('ana.torres puso su propio PIN')
+    // Lo escribe la baja de membresía, no esta pantalla. Va con el actor entre
+    // paréntesis como su espejo `invalidado_por_vinculo`: el sujeto es lo que
+    // le pasó al PIN.
+    expect(wrapper.text()).toContain('Recuperó un PIN propio al darse de baja su cuenta (admin.paris)')
   })
 
   it('usuarioNombre null en un evento de encargado se lee como cuenta dada de baja', async () => {

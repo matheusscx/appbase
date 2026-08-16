@@ -7,6 +7,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Req,
   UseGuards,
   HttpCode,
@@ -24,6 +25,7 @@ import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { MarcarTotemDto } from './dto/marcar-totem.dto';
+import { BajaMiembroDto } from './dto/baja-miembro.dto';
 import { AddModuleDto } from './dto/add-module.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
@@ -213,12 +215,29 @@ export class TenantsController {
     return this.tenantsService.marcarTotem(user.tenantId, userId, dto.esTotem);
   }
 
+  /**
+   * Da de baja una membresía.
+   *
+   * Devuelve `200` con cuerpo y no `204`: cuando la cuenta era la credencial
+   * de un garzón que sigue trabajando, la respuesta trae el **PIN nuevo en
+   * claro**, y es la única vez que existe fuera de la base. Sin eso, "se le
+   * genera un PIN usable" no le sirve a nadie. Con `garzon: null` no pasó nada
+   * de eso y el cuerpo es solo la confirmación.
+   */
   @UseGuards(TenantAdminGuard)
   @Delete('members/:userId')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  removeMember(@Req() req: Request, @Param('userId') userId: string) {
-    const user = req.user as { tenantId: string };
-    return this.tenantsService.removeMember(user.tenantId, userId);
+  removeMember(
+    @Req() req: Request,
+    @Param('userId') userId: string,
+    @Query() dto: BajaMiembroDto,
+  ) {
+    const user = req.user as { id: string; tenantId: string };
+    return this.tenantsService.removeMember(
+      user.tenantId,
+      userId,
+      user.id,
+      dto.garzon,
+    );
   }
 
   @Get('modules')

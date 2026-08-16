@@ -14,6 +14,7 @@ import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { RazonSocial } from './entities/razon-social.entity';
 import { GarzonesService } from '../garzones/garzones.service';
+import { RbacService } from '../rbac/rbac.service';
 import { TokensAccesoService } from '../auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../auth/entities/token-acceso.entity';
 import { MailService } from '../mail/mail.service';
@@ -78,6 +79,13 @@ describe('TenantsService', () => {
     quemar: jest.Mock;
   };
   let mail: { enviar: jest.Mock };
+  let garzones: {
+    asegurarMostrador: jest.Mock;
+    vinculadoA: jest.Mock;
+    prepararPinPorBajaDeCuenta: jest.Mock;
+    aplicarBajaDeCuenta: jest.Mock;
+  };
+  let rbac: { administradoresDe: jest.Mock };
 
   beforeEach(async () => {
     tenantRepo = {
@@ -117,6 +125,18 @@ describe('TenantsService', () => {
       quemar: jest.fn(),
     };
     mail = { enviar: jest.fn() };
+    garzones = {
+      asegurarMostrador: jest.fn(),
+      // Por defecto la cuenta que se da de baja NO es credencial de ningún
+      // garzón: es el caso normal y el que no debe pedir ninguna decisión.
+      vinculadoA: jest.fn().mockResolvedValue(null),
+      prepararPinPorBajaDeCuenta: jest
+        .fn()
+        .mockResolvedValue({ pin: '424242', hash: 'hash-424242' }),
+      aplicarBajaDeCuenta: jest.fn().mockResolvedValue(true),
+    };
+    // Por defecto queda otro admin: la baja normal no se bloquea.
+    rbac = { administradoresDe: jest.fn().mockResolvedValue(['otro-admin']) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -142,8 +162,9 @@ describe('TenantsService', () => {
         { provide: getDataSourceToken(), useValue: dataSource },
         {
           provide: GarzonesService,
-          useValue: { asegurarMostrador: jest.fn() },
+          useValue: garzones,
         },
+        { provide: RbacService, useValue: rbac },
         { provide: TokensAccesoService, useValue: tokensAcceso },
         // ⚠️ Mockeado, no real: un unit que mandara mail de verdad sería
         // exactamente lo que el fallback de `MailService` existe para evitar.
@@ -1203,6 +1224,162 @@ describe('TenantsService', () => {
       expect(res).toHaveLength(1);
       expect(res[0].pendienteConfirmacion).toBe(false);
       expect(res[0].roles).toEqual([{ rolId: 'rol-1', nombre: 'Cajero' }]);
+    });
+  });
+
+  describe('removeMember', () => {
+    const TENANT = 'tenant-uuid';
+    const BAJA = 'usuario-que-se-va';
+    const ACTOR = 'admin-que-la-da';
+
+    /** El manager de la transacción, para afirmar quién escribió qué. */
+    let managerTx: { softDelete: jest.Mock; findOne: jest.Mock };
+
+    beforeEach(() => {
+      managerTx = {
+        softDelete: jest.fn(),
+        // Por defecto la persona SÍ es miembro vivo: es el caso normal.
+        findOne: jest
+          .fn()
+          .mockResolvedValue({ tenantId: TENANT, usuarioId: BAJA }),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb(managerTx),
+      );
+    });
+
+    it('la baja normal (sin garzón vinculado) borra la membresía y no pregunta nada', async () => {
+      const res = await service.removeMember(TENANT, BAJA, ACTOR);
+
+      expect(managerTx.softDelete).toHaveBeenCalledWith(UsuarioTenant, {
+        tenantId: TENANT,
+        usuarioId: BAJA,
+      });
+      expect(res).toEqual({ garzon: null });
+      // Con el manager de la transacción, no con el repositorio inyectado:
+      // borrar por fuera commitea suelto y el `throw` de "último admin" ya no
+      // lo deshace.
+      expect(usuarioTenantRepo.softDelete).not.toHaveBeenCalled();
+    });
+
+    // "tira" y no "no commitea": el `transaction` de este spec es un mock que
+    // solo invoca el callback, así que el rollback no se puede afirmar acá.
+    // Lo cubre el e2e, que corre contra Postgres.
+    it('si la baja deja al tenant sin ningún admin, tira', async () => {
+      rbac.administradoresDe
+        .mockResolvedValueOnce([BAJA])
+        .mockResolvedValueOnce([]);
+
+      await expect(service.removeMember(TENANT, BAJA, ACTOR)).rejects.toThrow(
+        /última con rol de administrador/,
+      );
+    });
+
+    it('con garzón vinculado y sin decisión, rechaza nombrando al garzón y NO borra nada', async () => {
+      garzones.vinculadoA.mockResolvedValue({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+      });
+
+      await expect(service.removeMember(TENANT, BAJA, ACTOR)).rejects.toThrow(
+        /Ana Torres/,
+      );
+      // Antes del BEGIN: la baja no puede quedar hecha a medias mientras se
+      // espera la respuesta del encargado.
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('"sigue trabajando" desvincula, devuelve el PIN nuevo, y lo prepara FUERA de la transacción', async () => {
+      garzones.vinculadoA.mockResolvedValue({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+      });
+
+      const res = await service.removeMember(TENANT, BAJA, ACTOR, 'sigue');
+
+      expect(res.garzon).toEqual({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+        accion: 'desvinculado',
+        pin: '424242',
+      });
+      // `BAJA` entre medio: es la cuenta sobre la que se tomó la decisión, y
+      // sin pasarla la escritura no puede detectar que el garzón se
+      // re-vinculó a OTRA persona mientras tanto.
+      expect(garzones.aplicarBajaDeCuenta).toHaveBeenCalledWith(
+        managerTx,
+        TENANT,
+        'g-1',
+        BAJA,
+        ACTOR,
+        { pin: '424242', hash: 'hash-424242' },
+      );
+      // El PIN cuesta un `bcrypt.hash` más un `compare` por garzón del tenant.
+      // Generarlo con la transacción abierta retendría esa conexión durante
+      // todo ese CPU, que es el frente 🔴 de conexiones del repo.
+      expect(
+        garzones.prepararPinPorBajaDeCuenta.mock.invocationCallOrder[0],
+      ).toBeLessThan(dataSource.transaction.mock.invocationCallOrder[0]);
+    });
+
+    it('"no sigue" desactiva al garzón y no promete ningún PIN', async () => {
+      garzones.vinculadoA.mockResolvedValue({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+      });
+
+      const res = await service.removeMember(TENANT, BAJA, ACTOR, 'no-sigue');
+
+      expect(res.garzon).toEqual({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+        accion: 'desactivado',
+        pin: null,
+      });
+      // Ni siquiera se genera: un PIN emitido y no entregado le quedaría al
+      // garzón como credencial viva sin que nadie lo sepa.
+      expect(garzones.prepararPinPorBajaDeCuenta).not.toHaveBeenCalled();
+      expect(garzones.aplicarBajaDeCuenta).toHaveBeenCalledWith(
+        managerTx,
+        TENANT,
+        'g-1',
+        BAJA,
+        ACTOR,
+        null,
+      );
+    });
+
+    it('dar de baja a quien ya no es miembro es 404, y NO vuelve a ejecutar la decisión del garzón', async () => {
+      // El agujero que esto cierra: `softDelete` no filtra `eliminado_el IS
+      // NULL`, así que sin el chequeo repetir el DELETE respondía 200 y
+      // convertía una baja `no-sigue` vieja en un `sigue` —desvinculando y
+      // emitiendo un PIN— sin ninguna membresía que dar de baja.
+      managerTx.findOne.mockResolvedValue(null);
+      garzones.vinculadoA.mockResolvedValue({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+      });
+
+      await expect(
+        service.removeMember(TENANT, BAJA, ACTOR, 'sigue'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(garzones.aplicarBajaDeCuenta).not.toHaveBeenCalled();
+      expect(managerTx.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('si el vínculo desapareció entre la lectura previa y el BEGIN, la baja se hace pero no promete PIN', async () => {
+      garzones.vinculadoA.mockResolvedValue({
+        id: 'g-1',
+        nombre: 'Ana Torres',
+      });
+      garzones.aplicarBajaDeCuenta.mockResolvedValue(false);
+
+      const res = await service.removeMember(TENANT, BAJA, ACTOR, 'sigue');
+
+      expect(managerTx.softDelete).toHaveBeenCalled();
+      // Devolver el PIN preparado sería mentir: nunca se escribió.
+      expect(res).toEqual({ garzon: null });
     });
   });
 });

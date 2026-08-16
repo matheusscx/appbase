@@ -1565,8 +1565,8 @@ CREATE TABLE garzon_pin_evento (
   actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   eliminado_el TIMESTAMPTZ,
   CONSTRAINT chk_garzon_pin_evento_tipo CHECK (tipo IN (
-    'emitido_en_alta','regenerado_por_encargado','invalidado_por_encargado',
-    'invalidado_por_vinculo','fijado_por_garzon'
+    'emitido_en_alta','regenerado_por_encargado','regenerado_por_baja_de_cuenta',
+    'invalidado_por_encargado','invalidado_por_vinculo','fijado_por_garzon'
   ))
 );
 CREATE INDEX idx_garzon_pin_evento_garzon

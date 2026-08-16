@@ -87,6 +87,16 @@ vinculación invalida el PIN de alguien con una sesión abierta ahora mismo, `ac
 lo **advierte, no bloquea** — mismo criterio que cambiar el tipo (decisión del owner,
 2026-08-07, extendida el 2026-08-14 a este caso).
 
+⚠️ **La única excepción a "desvincular no toca el PIN" es la baja de la membresía**, y es
+justamente porque ahí el garzón no eligió nada: su cuenta era la credencial y se va con la
+membresía. Esa ruta sí le escribe un PIN nuevo, y **pregunta antes** si la persona sigue
+trabajando — ver [roles y permisos](roles-permisos.md#la-baja-de-una-membresía-2026-08-16).
+
+Y desvincular desde el formulario **se puede desde el 2026-08-16**: el `USelectMenu` de
+"Cuenta vinculada" no llevaba `clear` (el prop viene en `false` por defecto), así que una
+vez elegida una cuenta no había forma de volver a "sin vincular" y el `null` de
+`UpdateGarzonDto` quedaba alcanzable solo por API.
+
 **El alta acepta la cuenta directamente** (`CreateGarzonDto.usuarioId`, y el formulario de
 `configuracion/garzones.vue` la manda): así el encargado **nunca llega a ver un PIN** del
 personal con cuenta, en vez de ver uno que muere al vincular un minuto después. `crear()` con
@@ -262,7 +272,7 @@ La historia de cada PIN. Mismo patrón que `liquidacion_propinas_evento`.
 |---|---|---|
 | `garzon_pin_evento_id` | UUID PK | |
 | `tenant_id` / `garzon_id` | UUID | |
-| `tipo` | TEXT | `emitido_en_alta` \| `regenerado_por_encargado` \| `invalidado_por_encargado` \| `invalidado_por_vinculo` \| `fijado_por_garzon` |
+| `tipo` | TEXT | `emitido_en_alta` \| `regenerado_por_encargado` \| `regenerado_por_baja_de_cuenta` \| `invalidado_por_encargado` \| `invalidado_por_vinculo` \| `fijado_por_garzon` |
 | `usuario_id` | UUID | Quién lo hizo — el encargado o el propio garzón |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | soft delete |
 
@@ -270,6 +280,13 @@ Los dos tipos de invalidación se distinguen porque **dicen cosas distintas**:
 `invalidado_por_vinculo` es *"te di una cuenta"*, `invalidado_por_encargado` es *"te corté el
 PIN"*. El alta **con** cuenta no escribe evento: no emite ningún PIN, así que la historia de
 ese garzón empieza el día que él fija el suyo.
+
+`regenerado_por_baja_de_cuenta` (2026-08-16) es el espejo de `invalidado_por_vinculo`: la
+cuenta que era la credencial dejó de ser miembro y el garzón recupera un PIN propio. Lo
+escribe la baja de membresía, no esta pantalla — ver
+[roles y permisos](roles-permisos.md#la-baja-de-una-membresía-2026-08-16). No se colapsa
+con `regenerado_por_encargado` aunque el actor sea el mismo: lo que esta tabla hace legible
+es el patrón, y se pierde si dos motivos comparten etiqueta.
 
 `cuentas` tiene tres FKs a `garzones`: `garzon_apertura_id` y `garzon_cierre_id`
 (auditoría de quién abrió/cerró) y `garzon_responsable_id` (vigente; cambia con

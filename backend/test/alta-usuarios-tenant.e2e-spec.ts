@@ -259,7 +259,10 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       const baja = await request(app.getHttpServer())
         .delete(`/api/tenants/members/${usuarioId}`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
-      expect(baja.status).toBe(204);
+      // `200` y no `204` desde el 2026-08-16: la baja devuelve cuerpo porque
+      // cuando la cuenta era la credencial de un garzón, ahí viaja el PIN
+      // nuevo. Sin garzón vinculado, como acá, el cuerpo es `{ garzon: null }`.
+      expect(baja.status).toBe(200);
 
       // Vuelve con OTRO rol, no con el mismo: si volviera con el mismo, el test
       // no puede distinguir "quedaron los que elegí" de "se sumaron a los viejos".

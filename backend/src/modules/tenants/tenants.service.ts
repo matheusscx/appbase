@@ -21,6 +21,7 @@ import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { GarzonesService } from '../garzones/garzones.service';
+import { RbacService } from '../rbac/rbac.service';
 import { TokensAccesoService } from '../auth/tokens-acceso.service';
 import {
   TipoTokenAcceso,
@@ -70,6 +71,29 @@ export interface TenantMemberSelector {
   nombre: string;
   apellido: string;
   esTotem: boolean;
+}
+
+/**
+ * Qué pasa con el garzón cuya credencial era la cuenta que se da de baja.
+ * `'sigue'` desvincula y le devuelve un PIN usable; `'no-sigue'` lo deja
+ * `activo = false`. Las dos son reversibles: `activo` se vuelve a prender y el
+ * vínculo se puede rehacer.
+ */
+export type DecisionGarzonBaja = 'sigue' | 'no-sigue';
+
+export interface BajaMiembroResultado {
+  /** `null` cuando esa cuenta no era la credencial de ningún garzón vivo. */
+  garzon: {
+    id: string;
+    nombre: string;
+    accion: 'desvinculado' | 'desactivado';
+    /**
+     * El PIN nuevo, en claro y **una sola vez** — igual que el de
+     * `regenerarPin`. Sin esto "se le genera un PIN usable" no sirve de nada:
+     * nadie lo conoce. `null` cuando el garzón no sigue trabajando.
+     */
+    pin: string | null;
+  } | null;
 }
 
 /**
@@ -144,6 +168,7 @@ export class TenantsService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly garzonesService: GarzonesService,
+    private readonly rbacService: RbacService,
     private readonly tokensAcceso: TokensAccesoService,
     private readonly mail: MailService,
     // Por `ConfigService` y no `process.env`: `process.env` no se puede mockear.
@@ -1140,8 +1165,112 @@ export class TenantsService {
     return { usuarioId, esTotem };
   }
 
-  async removeMember(tenantId: string, usuarioId: string): Promise<void> {
-    await this.usuarioTenantRepo.softDelete({ tenantId, usuarioId });
+  /**
+   * Da de baja una membresía. Dos cosas que la baja de dos líneas que había
+   * acá no hacía, y las dos por el mismo motivo —que nadie mira lo que la
+   * transición deja atrás—:
+   *
+   * **1. No deja al tenant sin administradores.** Mismo criterio y mismo lock
+   * que `RolesService.removeUser`: se borra, se cuenta cómo quedó, y el
+   * `throw` deshace el borrado. Ver `RbacService.administradoresDe`.
+   *
+   * **2. No deja a un garzón vinculado sin credencial y en silencio.** Un
+   * garzón con cuenta nace con `pinHash = PIN_INUTILIZABLE` —vincular mata el
+   * PIN a propósito, porque la cuenta pasa a ser la credencial—, y al bajar la
+   * membresía `garzonPersonalDe` deja de resolver el modo personal. Sin
+   * decisión explícita, esa persona se queda sin ninguna forma de operar y sin
+   * ninguna señal de que pasó.
+   *
+   * Por eso `decisionGarzon` es **obligatoria cuando hay vínculo**: el sistema
+   * no puede adivinarla. Desvincular y dar PIN siempre —la salida automática
+   * que se descartó (owner, 2026-08-15)— asume que el garzón debe seguir
+   * operando, y el motivo más común de una baja es que la persona se fue:
+   * darle un PIN funcional a alguien que se fue le deja abrir mesas desde el
+   * tótem. Dar de baja la cuenta y "ya no trabaja acá" no son lo mismo.
+   *
+   * El vínculo se lee **antes** de abrir la transacción, junto con el PIN
+   * nuevo si corresponde: los dos cuestan CPU y consultas que no deben correr
+   * con la conexión tomada (ver `GarzonesService.prepararPinPorBajaDeCuenta`).
+   * Que ese dato envejezca no rompe nada — `aplicarBajaDeCuenta` relee con el
+   * `manager` y avisa si ya no había qué aplicar.
+   */
+  async removeMember(
+    tenantId: string,
+    usuarioId: string,
+    usuarioActorId: string,
+    decisionGarzon?: DecisionGarzonBaja,
+  ): Promise<BajaMiembroResultado> {
+    const garzon = await this.garzonesService.vinculadoA(tenantId, usuarioId);
+    if (garzon && !decisionGarzon) {
+      throw new BadRequestException(
+        `Esa cuenta es la credencial del garzón ${garzon.nombre}: al darla de ` +
+          `baja se queda sin ninguna forma de operar. Decidí si ${garzon.nombre} ` +
+          `sigue trabajando (se le genera un PIN propio) o no sigue (queda ` +
+          `inactivo).`,
+      );
+    }
+    const pinPreparado =
+      garzon && decisionGarzon === 'sigue'
+        ? await this.garzonesService.prepararPinPorBajaDeCuenta(
+            tenantId,
+            garzon.id,
+          )
+        : null;
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.rbacService.administradoresDe(manager, tenantId, true);
+      // La membresía viva se confirma a mano y no por el `affected` del
+      // `softDelete`: TypeORM no le agrega `eliminado_el IS NULL` al `WHERE`,
+      // así que re-borrar una baja vieja afecta 1 fila y solo le pisa la fecha.
+      // Sin este chequeo, repetir el `DELETE` sobre alguien que ya no es
+      // miembro responde 200 y **vuelve a ejecutar la decisión del garzón** —
+      // que es como una baja `no-sigue` se podía convertir después en `sigue`,
+      // desvinculando y emitiendo un PIN sin ninguna membresía que dar de baja.
+      const miembro = await manager.findOne(UsuarioTenant, {
+        where: { tenantId, usuarioId, eliminadoEl: IsNull() },
+      });
+      if (!miembro) {
+        throw new NotFoundException('Esa persona no es miembro de la empresa');
+      }
+      await manager.softDelete(UsuarioTenant, { tenantId, usuarioId });
+      const quedan = await this.rbacService.administradoresDe(
+        manager,
+        tenantId,
+        false,
+      );
+      if (quedan.length === 0) {
+        throw new BadRequestException(
+          'No se puede dar de baja a esa persona: es la última con rol de ' +
+            'administrador, y no hay forma de volver a asignar uno desde la ' +
+            'aplicación. Dale el rol de administrador a otra persona primero.',
+        );
+      }
+
+      if (!garzon) return { garzon: null };
+      const aplicado = await this.garzonesService.aplicarBajaDeCuenta(
+        manager,
+        tenantId,
+        garzon.id,
+        usuarioId,
+        usuarioActorId,
+        pinPreparado,
+      );
+      // El garzón ya no está vinculado a ESTA cuenta entre la lectura previa y
+      // el BEGIN —lo desvincularon, lo borraron, o lo re-vincularon a otra—:
+      // la baja se hizo igual, pero prometer un PIN que no se escribió sería
+      // peor que no mencionar el garzón.
+      if (!aplicado) return { garzon: null };
+      return {
+        garzon: {
+          id: garzon.id,
+          nombre: garzon.nombre,
+          accion: pinPreparado
+            ? ('desvinculado' as const)
+            : ('desactivado' as const),
+          pin: pinPreparado?.pin ?? null,
+        },
+      };
+    });
   }
 
   async findModules(tenantId: string): Promise<TenantModulo[]> {

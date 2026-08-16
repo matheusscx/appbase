@@ -1270,3 +1270,70 @@ describe('garzones — el alta manda la cuenta elegida', () => {
     expect(wrapper.text()).not.toContain('para que se lo entregues')
   })
 })
+
+describe('garzones — desvincular la cuenta desde el formulario', () => {
+  // Desmontaje en `afterEach` por la razón del encabezado del archivo.
+  let montado: Awaited<ReturnType<typeof montarConDrawerStub>> | null = null
+
+  beforeEach(() => {
+    // Vinculado y sin PIN usable: el estado exacto en que queda un garzón dado
+    // de alta CON cuenta, y el único desde el que desvincular significa algo.
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+    reset()
+    esAdmin = true
+    miembrosBackend = [
+      { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
+    ]
+  })
+
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
+  async function abrirEdicion() {
+    const wrapper = (montado = await montarConDrawerStub())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    return wrapper
+  }
+
+  function selectorCuenta(wrapper: Awaited<ReturnType<typeof montarConDrawerStub>>) {
+    const selector = wrapper
+      .findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('placeholder') === 'Sin vincular (usa PIN)')
+    expect(selector, 'selector "Cuenta vinculada"').toBeTruthy()
+    return selector!
+  }
+
+  it('el selector ofrece con qué volver a "sin vincular"', async () => {
+    const wrapper = await abrirEdicion()
+
+    // Se afirma sobre el AFORDANCE y no sobre el modelo, porque el test de
+    // abajo emite el `null` a mano y pasaría en verde aunque el encargado no
+    // tuviera con qué emitirlo: la lista solo trae cuentas y `clear` viene en
+    // `false` por defecto. Ese era el hueco — el `null` de `UpdateGarzonDto`
+    // solo se alcanzaba por API.
+    expect(selectorCuenta(wrapper).props('clear')).toBeTruthy()
+  })
+
+  it('vaciar el selector y guardar desvincula de verdad (manda `null`, no ausencia)', async () => {
+    const wrapper = await abrirEdicion()
+
+    // Se emite sobre el componente por el mismo motivo que `elegirCuenta`: el
+    // combobox de reka-ui vive en un portal. Lo que se mira acá es qué hace la
+    // pantalla con el valor, no el widget de la librería.
+    selectorCuenta(wrapper).vm.$emit('update:modelValue', null)
+    await new Promise(r => setTimeout(r, 0))
+
+    const guardar = wrapper.findAll('button').find(b => b.text().trim() === 'Guardar')
+    expect(guardar, 'botón "Guardar" en el drawer').toBeTruthy()
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // `null` estricto: en el DTO, ausente significa "no toques el vínculo" y
+    // solo `null` desvincula, así que un `undefined` acá sería un guardado que
+    // deja el vínculo intacto y no se nota en pantalla.
+    expect(garzonesBackend[0]?.usuarioId).toBeNull()
+  })
+})

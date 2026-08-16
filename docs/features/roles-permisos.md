@@ -214,6 +214,70 @@ para todos, así que llamarlo con un array vacío borraría todos los roles de e
 persona en el tenant. `addMember` nunca tocó `roles_usuarios` y sigue sin
 tocarlos.
 
+### La baja de una membresía (2026-08-16)
+
+Dar de baja a alguien es la transición que nadie mira: hasta el 2026-08-16 eran dos líneas
+(`softDelete({ tenantId, usuarioId })`) y podían dejar dos cosas rotas y en silencio.
+
+**1. El tenant sin ningún administrador.** `TenantAdminGuard` verifica que quien llama
+**sea** admin en ese instante, nunca que la acción deje al tenant con alguno, así que el
+último admin podía sacarse a sí mismo — por la baja o quitándose el rol. Y no hay vuelta:
+`/admin/tenants` expone crear, listar, ver, editar, borrar y agregar módulos, y **ninguna
+ruta para asignar un rol ni sumar un miembro**. Un tenant sin admin solo se arregla con SQL
+directo. Desde el 2026-08-16 las dos puertas —`DELETE /tenants/members/:userId` y
+`DELETE /roles/:id/users/:userId`— **bloquean con `400`**.
+
+El criterio de "quién administra" vive en un solo lugar, `RbacService.administradoresDe`,
+y tiene un `JOIN` que su vecino `userIsTenantAdmin` no necesita: **`usuarios_tenants`**. La
+baja deja vivas las filas de `roles_usuarios` (ver arriba), así que contar solo por ahí
+cuenta gente que ya no es miembro — con dos admins, dar de baja a uno y volver a contar
+daría 2, y el bloqueo dejaría pasar justo el caso que existe para atajar.
+`userIsTenantAdmin` puede prescindir del `JOIN` porque corre detrás de `TenantGuard`, que
+ya exigió membresía viva; un conteo no tiene ese guard delante.
+
+Las dos rutas **borran primero y cuentan después**, y el `throw` deshace el borrado con la
+transacción. Quitarle un rol fijo a alguien que tiene dos no lo saca del conjunto, y esa
+aritmética es donde se cuelan los casos raros: preguntarle a la base cómo quedó el tenant
+no tiene ese problema. El conteo previo toma **`FOR UPDATE OF ut, ru`** con un `ORDER BY`
+fijo — sin el lock, dos bajas simultáneas de los dos últimos admins pasan los dos chequeos
+y el tenant queda huérfano igual; con el mismo `ORDER BY` en los dos caminos, tampoco
+pueden deadlockearse entre sí.
+
+**2. El garzón vinculado, sin ninguna credencial.** Un garzón con cuenta nace con
+`pinHash = PIN_INUTILIZABLE`: vincular mata el PIN a propósito porque la cuenta pasa a ser
+la credencial. Al bajar la membresía, `garzonPersonalDe` deja de resolver el modo personal
+**y el PIN sigue muerto**. Desde el 2026-08-16 la baja **exige una decisión explícita**
+cuando hay vínculo (`400` nombrando al garzón si no viene):
+
+| `?garzon=` | Qué hace | Respuesta |
+|---|---|---|
+| `sigue` | Desvincula y le escribe un PIN nuevo usable, con evento `regenerado_por_baja_de_cuenta` | `{ garzon: { accion: 'desvinculado', pin } }` — el PIN en claro, **una sola vez** |
+| `no-sigue` | Deja el garzón `activo = false`, con el vínculo intacto | `{ garzon: { accion: 'desactivado', pin: null } }` |
+
+Las dos son reversibles, pero **no cuestan lo mismo**: `sigue` deja al garzón operando ya
+mismo, y `no-sigue` lo deja en un estado que necesita **dos** cosas para volver — prender
+`activo` **y** resolverle la credencial, porque su cuenta ya no es miembro y sin membresía
+no puede entrar a fijarse un PIN. Volver a sumar a la persona, o desvincular y generarle
+un PIN, son las dos salidas. ⚠️ Y mientras tanto la ficha lo rotula *"Sin PIN todavía"*,
+que promete que él lo resuelve — anotado en `pendientes.md`, es lo que falta para que esa
+pantalla no mienta.
+
+**Se descartó la salida automática** (desvincular y dar PIN siempre): asume que el garzón debe seguir operando, y el motivo más común de una baja es
+que la persona se fue — darle un PIN funcional a alguien que se fue le deja abrir mesas
+desde el tótem. Dar de baja la cuenta y *"ya no trabaja acá"* no son lo mismo.
+
+El vínculo y el PIN se resuelven **antes** de abrir la transacción: generar el PIN cuesta
+un `bcrypt.hash` más un `compare` por garzón del tenant, y hacerlo con el BEGIN abierto
+retendría la conexión durante todo ese CPU. Que el dato envejezca no rompe nada — la
+escritura relee con el `manager` y, si el vínculo ya no está, la baja se hace pero no
+promete ningún PIN.
+
+Por eso la ruta devuelve **`200` con cuerpo y no `204`**: sin cuerpo no hay dónde entregar
+el PIN, y *"se le genera un PIN usable"* que nadie ve no le sirve a nadie.
+
+⚠️ **Hoy ninguna pantalla llama a esta ruta**: no existe la baja de membresía por UI
+(verificado el 2026-08-16). El contrato está listo para cuando se construya.
+
 ### Reset de contraseña
 
 `POST /auth/recuperar` manda un link de **1 hora**. Es público, así que **responde
@@ -241,8 +305,9 @@ Las **mutaciones** agregan `TenantAdminGuard` (requiere rol `es_fijo = true` en 
 | GET | `/roles/:id/permissions` | — | `roles_permisos_modulos` del rol |
 | PUT | `/roles/:id/modules/:moduloTenantId/permissions` | TenantAdmin | Setear permisos del rol en un módulo |
 | POST | `/roles/:id/users` | TenantAdmin | Asignar rol a un usuario |
-| DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario |
+| DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario. `400` si dejaría al tenant sin admin |
 | GET | `/tenants/members` | TenantAdmin | Miembros con correo + roles asignados |
+| DELETE | `/tenants/members/:userId` | TenantAdmin | Baja de membresía. `?garzon=sigue\|no-sigue` obligatorio si esa cuenta es la credencial de un garzón. `400` si dejaría al tenant sin admin. Devuelve `200 { garzon }` — ver [La baja de una membresía](#la-baja-de-una-membresía-2026-08-16) |
 | GET | `/tenants/members/para-selector` | — | Solo nombres, para los selectores de cuenta |
 | GET/POST | `/auth/invitacion/:token` | público | Verifica el link / fija la contraseña y lo quema |
 | POST | `/auth/recuperar` | público | Pide el link de reset. **Misma respuesta exista o no el correo** |

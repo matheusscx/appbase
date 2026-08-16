@@ -1,6 +1,43 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
+
+/**
+ * Quiénes administran el tenant **de verdad**: membresía viva y algún rol
+ * `es_fijo` vivo asignado.
+ *
+ * ⚠️ **El `JOIN` a `usuarios_tenants` no es decorativo, y es la diferencia con
+ * `userIsTenantAdmin`.** `TenantsService.removeMember` da de baja la membresía
+ * y **deja vivas** las filas de `roles_usuarios` a propósito (ver el docblock
+ * de `fijarRolesExactos`), así que contar solo por `roles_usuarios` cuenta
+ * gente que ya no es miembro. Con dos admins, dar de baja a uno y después
+ * contar daría 2, y una validación de "no dejes al tenant sin admin" apoyada
+ * en ese número dejaría pasar justo el caso que existe para atajar.
+ *
+ * `userIsTenantAdmin` puede prescindir del `JOIN` porque corre detrás de
+ * `TenantGuard`, que ya exigió membresía viva. Un conteo no tiene ese guard
+ * delante: cuenta a terceros.
+ *
+ * Una fila por (usuario, rol fijo): quien tenga dos roles fijos aparece dos
+ * veces. `DISTINCT` no se puede combinar con `FOR UPDATE`, así que la
+ * deduplicación la hace quien llama — a nadie le importa el número exacto,
+ * solo si es cero.
+ */
+const ADMINISTRADORES_SQL = `
+  SELECT ut.usuario_id
+    FROM usuarios_tenants ut
+    JOIN roles_usuarios ru
+      ON ru.usuario_id = ut.usuario_id
+     AND ru.tenant_id = ut.tenant_id
+     AND ru.eliminado_el IS NULL
+    JOIN roles r
+      ON r.rol_id = ru.rol_id
+     AND r.tenant_id = ru.tenant_id
+     AND r.es_fijo = true
+     AND r.eliminado_el IS NULL
+   WHERE ut.tenant_id = $1
+     AND ut.eliminado_el IS NULL
+   ORDER BY ut.usuario_id, ru.rol_id`;
 
 /**
  * Motor de permisos. Todas las consultas de acá parten de `roles_usuarios`
@@ -82,6 +119,47 @@ export class RbacService {
       [userId, tenantId],
     );
     return rows.length > 0;
+  }
+
+  /**
+   * Los administradores del tenant, para decidir si una acción lo dejaría sin
+   * ninguno. Criterio en `ADMINISTRADORES_SQL`.
+   *
+   * `manager` obligatorio y no opcional: las dos acciones que preguntan esto
+   * —quitarle el rol a alguien y darlo de baja— tienen que contar y mutar en
+   * la MISMA transacción, o el conteo no vale nada. Pedirlo por parámetro
+   * hace imposible el descuido de contar por fuera con un repositorio
+   * inyectado, que además sería una segunda conexión del pool tomada mientras
+   * la transacción retiene la primera.
+   *
+   * **`lock: true` en la primera llamada de la transacción, `false` en la
+   * verificación posterior.** El `FOR UPDATE` es lo que hace que la
+   * validación valga bajo concurrencia: sin él, dos requests que sacan a los
+   * dos últimos admins pasan los dos chequeos —cada transacción no ve el
+   * borrado no commiteado de la otra— y el tenant queda huérfano igual.
+   * Bloqueadas las filas, la segunda espera, y al reevaluar la calificación
+   * ve el `eliminado_el` de la primera y cuenta uno menos.
+   *
+   * `FOR UPDATE OF ut, ru` y no a secas: sin el `OF`, Postgres también
+   * bloquearía `roles`, que es catálogo compartido del tenant y no tiene por
+   * qué serializarse acá (mismo criterio que `inventario.service.ts:94`).
+   * El `ORDER BY` del SQL importa por lo mismo: los dos caminos que toman
+   * este lock —`RolesService.removeUser` y `TenantsService.removeMember`—
+   * usan esta única consulta, así que piden las filas en el mismo orden y no
+   * pueden deadlockearse entre sí.
+   */
+  async administradoresDe(
+    manager: EntityManager,
+    tenantId: string,
+    lock: boolean,
+  ): Promise<string[]> {
+    const filas: { usuario_id: string }[] = await manager.query(
+      lock
+        ? `${ADMINISTRADORES_SQL} FOR UPDATE OF ut, ru`
+        : ADMINISTRADORES_SQL,
+      [tenantId],
+    );
+    return [...new Set(filas.map((f) => f.usuario_id))];
   }
 
   async getMisPermisos(userId: string, tenantId: string): Promise<string[]> {

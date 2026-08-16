@@ -17,6 +17,143 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El cluster de membresía: la baja deja de romper dos cosas en silencio (2026-08-16)
+
+Tres entradas que eran la misma transición mirada desde tres lados: **nadie mira lo que
+"dar de baja a alguien" deja atrás.** Dos de la sección 3 y una de la sección 2, que iba
+primero porque la salida "sigue trabajando" de la segunda dependía de que desvincular
+fuera alcanzable por pantalla.
+
+**Lo que se construyó**
+
+- `RbacService.administradoresDe(manager, tenantId, lock)` — criterio único de "quién
+  administra el tenant". `RolesService.removeUser` y `TenantsService.removeMember`
+  **borran, cuentan cómo quedó el tenant, y el `throw` deshace el borrado**.
+- `DELETE /tenants/members/:userId?garzon=sigue|no-sigue`, con la decisión **obligatoria
+  cuando hay vínculo**, y `200` con cuerpo (antes `204`) para poder entregar el PIN nuevo.
+- `clear` en el `USelectMenu` de "Cuenta vinculada".
+
+**Las cuatro cosas que la entrada no decía y salieron de abrir el código**
+
+1. **El conteo tenía fantasmas.** `userIsTenantAdmin` no une `usuarios_tenants`, y
+   `removeMember` deja vivas las filas de `roles_usuarios` (a propósito, ver
+   `fijarRolesExactos`). Un bloqueo apoyado en esa query contaba a ex-miembros: con dos
+   admins, dar de baja a uno y volver a contar daba 2, y el tenant quedaba huérfano igual.
+   El `JOIN` a `usuarios_tenants` es la diferencia entre el bloqueo y el teatro.
+2. **No se podía desvincular desde el formulario, y un comentario del propio `.vue`
+   afirmaba que sí.** El prop `clear` de `USelectMenu` viene en `false` por defecto y nadie
+   lo pasaba; el `null` de `UpdateGarzonDto` quedaba alcanzable solo por API. El resto del
+   camino ya estaba (`ValidateIf` en el DTO, el `null` crudo en el PATCH de `guardar()`).
+3. **No existe pantalla de baja de membresía.** La entrada estaba tageada "backend +
+   frontend" y la decisión decía *"el sistema pregunta en el momento"*, pero no hay
+   momento: `DELETE /tenants/members/:userId` no lo llama ninguna pantalla y su único uso
+   vivo era un teardown de e2e. Decisión del owner (2026-08-16): **solo el contrato de
+   backend**; la pantalla, cuando se construya.
+4. **Los permisos son por rol, no por usuario** — eso salió mirando la tercera entrada del
+   cluster (`Salones:Operar`), que por eso no entró acá: necesitaba decidir con qué se
+   concede. Queda en la sección 3 con la medición escrita.
+
+**Qué fija cada cosa**
+
+- El lock: `membresia-ultimo-admin.e2e-spec.ts` → *"el conteo de admins TOMA LOCK"*.
+  ⚠️ **Dos versiones anteriores de ese test no probaban nada y por eso el test final mide
+  otra cosa.** Dos bajas por HTTP en `Promise.all` (con supertest y con `fetch` real contra
+  un puerto) dan `[200, 403]`: la segunda request empieza cuando la primera ya commiteó y
+  su `TenantGuard` corta antes del service. Y dos llamadas concurrentes al service tampoco
+  alcanzan: **el mutante que saca el `FOR UPDATE` sobrevive**, porque sin lock las dos
+  transacciones igual se serializan de hecho y la ventana real del bug es de microsegundos.
+  El test que quedó retiene el lock desde afuera sobre las filas de un admin que la baja
+  **no** toca —acotarlo es lo que lo hace concluyente— y afirma que la baja queda esperando.
+  Ese sí muere con el mutante.
+- El `clear`: `garzones.nuxt.spec.ts` afirma sobre el **prop**, no sobre el modelo: el test
+  de al lado emite el `null` a mano y pasaría en verde aunque el encargado no tuviera con
+  qué emitirlo. Mutante verificado. Y smoke en el navegador: el PATCH sale con
+  `{"usuarioId":null}` y la respuesta vuelve desvinculada.
+
+**Lo que encontró la revisión independiente, y se arregló en el mismo commit**
+
+- 🔴 `aplicarBajaDeCuenta` releía el garzón dentro de la transacción pero **no comparaba
+  contra la cuenta que se estaba dando de baja**, y el `usuarioId` ni siquiera le llegaba.
+  Si entre la lectura previa y el `BEGIN` alguien re-vinculaba el garzón a otra persona
+  —camino normal de `actualizar()`—, la baja le rompía el vínculo a un tercero y le
+  entregaba su PIN en claro a quien pidió otra cosa. Cubierto por un e2e propio.
+- `removeMember` no verificaba membresía viva. `softDelete` de TypeORM **no** agrega
+  `eliminado_el IS NULL` al `WHERE`, así que repetir el `DELETE` respondía 200 y volvía a
+  ejecutar la decisión del garzón: una baja `no-sigue` se podía convertir después en
+  `sigue`, desvinculando y emitiendo un PIN sin ninguna membresía que dar de baja. Ahora
+  404.
+- Dos unit se llamaban *"tira y no commitea"* sobre un `transaction` mockeado que no
+  modela rollback. Renombrados a lo que afirman; el rollback lo cubre el e2e.
+- El test del lock no soltaba el lock si su `expect` fallaba: un rojo puntual trababa el
+  gate entero. Va en `finally`.
+
+---
+
+### Las tres entradas, verbatim
+
+- [ ] **¿Se puede desvincular una cuenta desde el formulario?** (frontend, **duda medida en el
+  smoke del 2026-08-15, sin resolver**) — el `USelectMenu` de "Cuenta vinculada" muestra
+  `Sin vincular (usa PIN)` como *placeholder*, pero **con una cuenta ya elegida no se vio una
+  opción para volver a ese estado**: la lista solo trae cuentas. Si no se puede, el `null`
+  explícito de `UpdateGarzonDto` solo es alcanzable por API. Importa porque el estado
+  *"desvinculado y sin PIN usable"* —que la ficha ahora señala en rojo— se produce justamente
+  por ese camino. **Verificar antes de asumir cualquiera de las dos cosas.**
+
+- [ ] **El último admin puede dejarse afuera, y el tenant no se recupera por ninguna API**
+  (backend, auditoría RBAC/auth 2026-08-15) — `roles.service.ts` → `removeUser` desasigna a una
+  persona de un rol sin mirar si es el último `es_fijo` del tenant, y `tenants.service.ts` →
+  `removeMember` deja auto-eliminarse. `TenantAdminGuard` solo verifica que quien llama **sea**
+  admin en ese instante, nunca que la acción deje al tenant con alguno. (`RolesService.remove`
+  —borrar el rol— sí bloquea `esFijo`; desasignar a la persona, no.)
+  ⚠️ **Verificado lo que decide la severidad:** `/admin/tenants` con `SuperadminGuard` expone
+  crear, listar, ver, editar, borrar y agregar módulos — **ninguna ruta para asignar un rol ni
+  sumar un miembro**. Un tenant que se queda sin admin **solo se arregla con SQL directo**.
+  **La decisión:** ¿se bloquea la acción cuando dejaría el tenant sin admin, o se agrega una
+  ruta de recuperación del superadmin? La primera es más barata; la segunda cubre también los
+  casos que la validación no anticipe.
+  ✅ **DECIDIDO (owner, 2026-08-15): se bloquea la acción.** Ni `removeUser` ni `removeMember`
+  dejan hacer el cambio si dejaría al tenant sin ningún rol `es_fijo` asignado. Sin ruta de
+  recuperación del superadmin por ahora — la decisión fue el bloqueo, que es lo que ataja el
+  caso común.
+  ⚠️ **El bloqueo tiene una carrera adentro y hay que resolverla en el mismo trabajo:** dos
+  requests simultáneos que sacan a los dos últimos admins pueden pasar los dos chequeos y dejar
+  el tenant huérfano igual. El conteo tiene que tomar lock, o la validación no vale bajo
+  concurrencia. Va con la sección 5.
+  ℹ️ Queda anotado, sin decidir, lo que el bloqueo no cubre: **hoy un tenant sin admin solo se
+  arregla con SQL directo**, porque `/admin/tenants` no tiene ruta para asignar roles ni sumar
+  miembros (verificado). Si alguna vez pasa por otro camino, no hay salida por pantalla.
+
+- [ ] **Dar de baja una membresía deja al garzón vinculado sin ninguna credencial, y en
+  silencio** (backend + frontend, auditoría RBAC/auth 2026-08-15) — **lo creó la entrega del PIN
+  propio del 2026-08-15**, y por eso ninguna revisión de aquel diff podía verlo: nadie mira la
+  transición "dar de baja a alguien" mientras revisa la feature del PIN.
+  Medido: `removeMember` son **dos líneas** (`softDelete({ tenantId, usuarioId })`) y no toca
+  `garzones`. Un garzón dado de alta con cuenta nace con `pinHash = PIN_INUTILIZABLE` — vincular
+  mata el PIN a propósito, porque la cuenta pasa a ser la credencial. Al bajar la membresía,
+  `garzonPersonalDe` deja de resolver el modo personal (filtra la membresía viva) **y el PIN
+  sigue muerto**: el garzón se queda sin ninguna forma de operar, y `toPublico` no muestra
+  ninguna señal de que su cuenta ya no es miembro.
+  🔗 **Engancha con un cabo ya abierto:** la recuperación sería *desvincular + regenerar PIN*,
+  pero **no sabemos si desvincular es posible desde el formulario** — esa es la entrada de la
+  sección 2. Si no se puede, el garzón queda muerto sin salida por UI. Las dos se resuelven
+  juntas, y esa medición ahora tiene una razón concreta para ir primero.
+  **La decisión:** ¿la baja de membresía **desvincula** el garzón automáticamente (y le devuelve
+  un PIN usable), **avisa** al admin de que va a dejar a alguien sin operar, o **bloquea** hasta
+  que se resuelva? La primera es la más amable y la que menos estados raros deja.
+  ✅ **DECIDIDO (owner, 2026-08-15): el sistema pregunta en el momento.** Al dar de baja a
+  alguien con garzón vinculado, un paso dice que existe ese vínculo y ofrece las dos salidas:
+  **sigue trabajando** → se desvincula y se le genera un PIN usable; **no sigue** → el garzón
+  queda `activo = false`.
+  ⚠️ **Descartada la salida automática que se había propuesto primero** (desvincular y dar PIN
+  siempre), y vale escribir por qué: asume que el garzón debe seguir operando, y el motivo más
+  común de una baja es que **la persona se fue** — darle un PIN funcional a alguien que se fue le
+  deja abrir mesas y tomar comandas desde el tótem. **El sistema no puede adivinar la intención**,
+  porque dar de baja la cuenta y "ya no trabaja acá" no son lo mismo: un garzón normal existe sin
+  cuenta y se identifica por PIN.
+  ℹ️ Las dos salidas son reversibles: `activo` se vuelve a prender y el vínculo se puede rehacer.
+
+---
+
 ## "El correo coincide" deja de ser prueba de identidad: seis entradas de la sección 3, más una que apareció haciéndolas (2026-08-15)
 
 Primera tanda de la sección 3 (*"Ya decidido, falta construir"*). Se eligió el **cluster de

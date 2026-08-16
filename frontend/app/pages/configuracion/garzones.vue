@@ -143,13 +143,19 @@ const form = ref<{
 const miembros = ref<{ usuarioId: string, nombre: string, apellido: string, esTotem: boolean }[]>([])
 
 /**
- * Proxy entre el `undefined` que usa `USelectMenu` para "nada elegido" y el
- * `null` que el backend necesita para **desvincular**.
+ * Proxy entre el "nada elegido" que usa `USelectMenu` y el `null` que el
+ * backend necesita para **desvincular**.
  *
  * No son sinónimos en el DTO: ausente significa "no toques el vínculo" y `null`
  * es "sacalo". Sin esta traducción, vaciar el selector no desvincularía nada.
+ *
+ * Dos tipos y no uno: el selector entrega `undefined` cuando nunca se eligió
+ * nada y `null` cuando se aprieta la ✕ (`resetModelValueOnClear`), y los dos
+ * caen en el mismo `?? null`. Escribirlo con un solo genérico obligaba al
+ * `v-model` a prometer que el `null` no llega, que es justo el caso que este
+ * proxy existe para atender.
  */
-const usuarioVinculado = computed<string | undefined>({
+const usuarioVinculado = computed<string | undefined, string | null | undefined>({
   get: () => form.value.usuarioId ?? undefined,
   set: (v) => { form.value.usuarioId = v ?? null },
 })
@@ -785,11 +791,18 @@ const columns: TableColumn<Garzon>[] = [
             hint="Opcional"
             description="Si opera desde su propia tablet, entra con su cuenta y no teclea PIN. Sin vincular, se identifica con PIN como siempre."
           >
+            <!-- `clear`: sin él, el `USelectMenu` es de una sola dirección —una
+                 vez elegida una cuenta no hay forma de volver a "sin vincular",
+                 porque la lista solo trae cuentas y el prop viene en `false` por
+                 defecto—. El `null` de `UpdateGarzonDto` quedaba alcanzable solo
+                 por API, y con él el único camino para desvincular. Medido el
+                 2026-08-16 (era la duda abierta del smoke del 2026-08-15). -->
             <USelectMenu
               v-model="usuarioVinculado"
               :items="miembrosVinculables"
               value-key="value"
               placeholder="Sin vincular (usa PIN)"
+              clear
               class="w-full"
             />
           </UFormField>

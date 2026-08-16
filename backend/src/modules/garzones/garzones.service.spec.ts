@@ -1533,6 +1533,143 @@ describe('GarzonesService', () => {
       expect(result.pinFijado).toBe(false);
     });
   });
+
+  /**
+   * Lo que ejecuta la decisión que el encargado tomó al dar de baja la cuenta
+   * vinculada, dentro de la transacción de `TenantsService.removeMember`.
+   *
+   * ⚠️ **Estos casos NO se pueden montar desde un e2e**, y por eso viven acá.
+   * La ventana que la relectura existe para cerrar es la que va entre la
+   * lectura previa —que corre **fuera** de la transacción, para no retener la
+   * conexión mientras se hashea el PIN— y el `BEGIN`. Un e2e que re-vincule el
+   * garzón antes del `DELETE` no entra a esa ventana: `vinculadoA` devuelve
+   * `null` y `removeMember` corta antes de llegar acá, así que el test pasa
+   * con el bug puesto. Medido el 2026-08-16, escribiendo exactamente ese e2e.
+   * Acá el `manager` es falso y el estado "el mundo se movió" se monta
+   * directo, que es la única forma de ejercer la comparación.
+   */
+  describe('aplicarBajaDeCuenta — la relectura dentro de la transacción', () => {
+    const OTRA_CUENTA = 'usuario-de-otra-persona';
+    const PIN = { hash: 'hash-nuevo' };
+
+    /** El `manager` que entrega `dataSource.transaction`, mínimo y observable. */
+    function managerFalso(encontrado: Garzon | null) {
+      return {
+        findOne: jest.fn().mockResolvedValue(encontrado),
+        save: jest.fn((_entidad: unknown, fila: unknown) =>
+          Promise.resolve(fila),
+        ),
+        create: jest.fn((_entidad: unknown, fila: unknown) => fila),
+      };
+    }
+
+    it('el garzón se re-vinculó a OTRA cuenta: no lo toca y avisa que no aplicó', async () => {
+      // El caso que obliga a comparar en vez de solo mirar si hay vínculo, y
+      // el más caro si se escapa: sin la comparación esta baja le arranca el
+      // vínculo a un tercero y le entrega su PIN, en claro, a quien pidió la
+      // baja de otra persona.
+      const m = managerFalso(garzon({ id: 'g1', usuarioId: OTRA_CUENTA }));
+
+      const aplicado = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        PIN,
+      );
+
+      expect(aplicado).toBe(false);
+      expect(m.save).not.toHaveBeenCalled();
+    });
+
+    it('lo desvincularon en el medio: tampoco aplica', async () => {
+      const m = managerFalso(garzon({ id: 'g1', usuarioId: null }));
+
+      const aplicado = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        PIN,
+      );
+
+      expect(aplicado).toBe(false);
+      expect(m.save).not.toHaveBeenCalled();
+    });
+
+    it('lo borraron en el medio: tampoco aplica', async () => {
+      const m = managerFalso(null);
+
+      const aplicado = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        PIN,
+      );
+
+      expect(aplicado).toBe(false);
+      expect(m.save).not.toHaveBeenCalled();
+    });
+
+    it('sigue vinculado a ESA cuenta: desvincula, escribe el PIN y registra el evento', async () => {
+      // El camino feliz, que es lo que hace falsables a los tres de arriba: sin
+      // esto, un `return false` incondicional los pasaría a los tres.
+      const m = managerFalso(garzon({ id: 'g1', usuarioId: USUARIO_ID }));
+
+      const aplicado = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        PIN,
+      );
+
+      expect(aplicado).toBe(true);
+      const guardado = m.save.mock.calls.find(
+        ([entidad]: [unknown, unknown]) => entidad === Garzon,
+      )?.[1] as Garzon;
+      expect(guardado.usuarioId).toBeNull();
+      expect(guardado.pinHash).toBe('hash-nuevo');
+      const evento = m.save.mock.calls.find(
+        ([entidad]: [unknown, unknown]) => entidad === GarzonPinEvento,
+      )?.[1] as { tipo: string; usuarioId: string };
+      expect(evento.tipo).toBe('regenerado_por_baja_de_cuenta');
+      expect(evento.usuarioId).toBe('actor');
+    });
+
+    it('"no sigue" desactiva sin tocar el vínculo ni el PIN, y sin escribir evento', async () => {
+      // El vínculo sobrevive a propósito: es lo que hace reversible la salida.
+      const m = managerFalso(
+        garzon({ id: 'g1', usuarioId: USUARIO_ID, pin: '123456' }),
+      );
+
+      const aplicado = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        null,
+      );
+
+      expect(aplicado).toBe(true);
+      const guardado = m.save.mock.calls[0][1] as Garzon;
+      expect(guardado.activo).toBe(false);
+      expect(guardado.usuarioId).toBe(USUARIO_ID);
+      // Sin cambio de PIN no hay nada que registrar: el historial es de PIN, no
+      // de altas y bajas.
+      expect(
+        m.save.mock.calls.some(
+          ([entidad]: [unknown, unknown]) => entidad === GarzonPinEvento,
+        ),
+      ).toBe(false);
+    });
+  });
 });
 
 describe('GarzonesService.asegurarMostrador', () => {

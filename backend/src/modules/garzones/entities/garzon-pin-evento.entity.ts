@@ -13,10 +13,18 @@ import {
  * Qué le pasó al PIN. Los dos de invalidación se distinguen porque dicen cosas
  * distintas: `invalidado_por_vinculo` es "te di una cuenta, tu PIN viejo ya no
  * hace falta"; `invalidado_por_encargado` es "te corté el PIN".
+ *
+ * `regenerado_por_baja_de_cuenta` no se colapsa con
+ * `regenerado_por_encargado` por la misma razón: el actor es el mismo, pero la
+ * historia no. Ese PIN aparece porque la cuenta de esa persona dejó de ser
+ * miembro y el vínculo era su única credencial — y lo que esta tabla existe
+ * para hacer legible es el patrón, que se pierde si dos motivos distintos
+ * comparten etiqueta.
  */
 export type TipoEventoPin =
   | 'emitido_en_alta'
   | 'regenerado_por_encargado'
+  | 'regenerado_por_baja_de_cuenta'
   | 'invalidado_por_encargado'
   | 'invalidado_por_vinculo'
   | 'fijado_por_garzon';
@@ -41,7 +49,7 @@ export type TipoEventoPin =
 @Index('idx_garzon_pin_evento_garzon', ['tenantId', 'garzonId', 'creadoEl'])
 @Check(
   'chk_garzon_pin_evento_tipo',
-  `"tipo" IN ('emitido_en_alta','regenerado_por_encargado','invalidado_por_encargado','invalidado_por_vinculo','fijado_por_garzon')`,
+  `"tipo" IN ('emitido_en_alta','regenerado_por_encargado','regenerado_por_baja_de_cuenta','invalidado_por_encargado','invalidado_por_vinculo','fijado_por_garzon')`,
 )
 export class GarzonPinEvento {
   @PrimaryGeneratedColumn('uuid', { name: 'garzon_pin_evento_id' })

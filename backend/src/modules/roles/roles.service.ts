@@ -13,6 +13,7 @@ import { RolPermisoModulo } from './entities/rol-permiso-modulo.entity';
 import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
+import { RbacService } from '../rbac/rbac.service';
 
 export interface ModuloDisponible {
   moduloTenantId: string;
@@ -37,6 +38,7 @@ export class RolesService {
     private readonly tenantModuloRepo: Repository<TenantModulo>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly rbacService: RbacService,
   ) {}
 
   async findAll(tenantId: string): Promise<Rol[]> {
@@ -115,12 +117,44 @@ export class RolesService {
     return this.rolUsuarioRepo.save(assignment);
   }
 
+  /**
+   * Desasigna a una persona de un rol, **salvo que eso deje al tenant sin
+   * ningún administrador**.
+   *
+   * `TenantAdminGuard` solo verifica que quien llama sea admin en ese
+   * instante, nunca que la acción deje al tenant con alguno: el último admin
+   * podía sacarse el rol a sí mismo, y `/admin/tenants` no tiene ninguna ruta
+   * para asignar un rol ni sumar un miembro, así que salir de ahí requiere
+   * SQL directo. (Su hermano `remove` —borrar el rol— sí bloqueaba `esFijo`;
+   * desasignar a la persona, no.)
+   *
+   * **Se borra y después se cuenta, en vez de calcular si el borrado
+   * sobraría.** Quitarle UN rol fijo a alguien que tiene dos no lo saca del
+   * conjunto, y esa aritmética es justo donde se cuelan los casos raros.
+   * Preguntarle a la base cómo quedó el tenant no tiene ese problema, y el
+   * `throw` deshace el borrado con la transacción.
+   */
   async removeUser(
     rolId: string,
     tenantId: string,
     usuarioId: string,
   ): Promise<void> {
-    await this.rolUsuarioRepo.softDelete({ rolId, tenantId, usuarioId });
+    await this.dataSource.transaction(async (manager) => {
+      await this.rbacService.administradoresDe(manager, tenantId, true);
+      await manager.softDelete(RolUsuario, { rolId, tenantId, usuarioId });
+      const quedan = await this.rbacService.administradoresDe(
+        manager,
+        tenantId,
+        false,
+      );
+      if (quedan.length === 0) {
+        throw new BadRequestException(
+          'No se puede quitar ese rol: dejaría a la empresa sin ningún ' +
+            'administrador, y no hay forma de volver a asignar uno desde la ' +
+            'aplicación. Dale el rol de administrador a otra persona primero.',
+        );
+      }
+    });
   }
 
   async findPermissions(

@@ -673,6 +673,105 @@ export class GarzonesService {
   }
 
   /**
+   * El garzón vivo del tenant vinculado a esa cuenta, si lo hay. Es la
+   * pregunta que `TenantsService.removeMember` tiene que hacerse antes de dar
+   * de baja a alguien: sin esto, la baja deja al garzón sin credencial y en
+   * silencio.
+   *
+   * Corre **fuera** de la transacción de la baja a propósito —la decisión y el
+   * PIN se preparan antes de abrir el BEGIN— y por eso es repo-bound. Quien
+   * escribe vuelve a leer adentro (`aplicarBajaDeCuenta`), que es lo que hace
+   * que este resultado pueda envejecer sin consecuencias.
+   */
+  async vinculadoA(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<{ id: string; nombre: string } | null> {
+    const garzon = await this.garzonRepo.findOne({
+      where: { tenantId, usuarioId, eliminadoEl: IsNull() },
+    });
+    return garzon ? { id: garzon.id, nombre: garzon.nombre } : null;
+  }
+
+  /**
+   * Prepara el PIN con el que un garzón sobrevive a la baja de su cuenta:
+   * lo genera, chequea unicidad y lo hashea, **sin escribir nada**.
+   *
+   * Separado de la escritura por el pool: generar el PIN cuesta una consulta
+   * por intento más un `bcrypt.compare` por garzón del tenant, y `bcrypt.hash`
+   * arriba. Hacerlo con la transacción de la baja abierta retendría esa
+   * conexión durante todo ese CPU —la firma `idle in transaction` que agota el
+   * pool—, y es exactamente el frente 🔴 que el repo tiene abierto. La
+   * unicidad no pierde nada por resolverse afuera: ya era best-effort (no hay
+   * índice único posible sobre un hash bcrypt) y así la resuelve también
+   * `regenerarPin`.
+   */
+  async prepararPinPorBajaDeCuenta(
+    tenantId: string,
+    garzonId: string,
+  ): Promise<{ pin: string; hash: string }> {
+    const pin = await this.generarPinUnico(tenantId, garzonId);
+    return { pin, hash: await bcrypt.hash(pin, BCRYPT_COST) };
+  }
+
+  /**
+   * Aplica al garzón la decisión que el encargado tomó al dar de baja la
+   * cuenta vinculada, **dentro de la transacción de la baja**: o el garzón
+   * sigue trabajando (se desvincula y recibe el PIN preparado) o no sigue
+   * (`activo = false`).
+   *
+   * ⚠️ **Acá desvincular SÍ toca el PIN, al revés que en `actualizar()`.** Allá
+   * el garzón conserva el PIN que él eligió y el encargado no conoce. Acá su
+   * cuenta era la credencial —vincular la mató (`PIN_INUTILIZABLE`)— y se va
+   * con la membresía: sin un PIN nuevo la persona queda sin ninguna forma de
+   * operar, que es el bug que esto cierra.
+   *
+   * Vuelve a leer el garzón con el `manager` y **exige que siga vinculado a
+   * `usuarioId`**, la misma cuenta sobre la que se tomó la decisión. Lo que
+   * eligió el encargado se eligió sobre una lectura previa a la transacción, y
+   * en el medio el mundo se pudo mover de tres formas: que lo desvincularan,
+   * que lo borraran, o —la que obliga a comparar y no solo a mirar si hay
+   * vínculo— **que lo re-vincularan a OTRA cuenta**. Ese tercer caso es un
+   * camino normal de `actualizar()`, y sin la comparación esta baja le rompería
+   * el vínculo a un tercero y le entregaría su PIN, en claro, a quien pidió
+   * otra cosa. Devuelve `false` en los tres casos, para que quien llama no
+   * prometa nada que no se escribió.
+   */
+  async aplicarBajaDeCuenta(
+    manager: EntityManager,
+    tenantId: string,
+    garzonId: string,
+    usuarioId: string,
+    usuarioActorId: string,
+    pinPreparado: { hash: string } | null,
+  ): Promise<boolean> {
+    const garzon = await manager.findOne(Garzon, {
+      where: { id: garzonId, tenantId, eliminadoEl: IsNull() },
+    });
+    if (!garzon || garzon.usuarioId !== usuarioId) return false;
+
+    if (!pinPreparado) {
+      garzon.activo = false;
+      await manager.save(Garzon, garzon);
+      return true;
+    }
+
+    garzon.usuarioId = null;
+    garzon.pinHash = pinPreparado.hash;
+    await manager.save(Garzon, garzon);
+    await manager.save(
+      GarzonPinEvento,
+      manager.create(GarzonPinEvento, {
+        tenantId,
+        garzonId,
+        tipo: 'regenerado_por_baja_de_cuenta',
+        usuarioId: usuarioActorId,
+      }),
+    );
+    return true;
+  }
+
+  /**
    * La historia de PIN de un garzón, más nueva primero.
    *
    * Confirma que el garzón existe en el tenant antes de traer su historia —
