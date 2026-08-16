@@ -112,6 +112,10 @@ kardex: ver [`inventario-kardex.md`](./inventario-kardex.md) §"Producto elimina
 Registrar una merma **nueva** sobre un producto eliminado sí se rechaza (`404`,
 desde el propio `POST`): no hay operación real detrás.
 
+`desde`/`hasta` siguen el criterio compartido de rangos por fecha: la fecha pura se expande a
+la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
+[`inventario-kardex.md`](./inventario-kardex.md) §`GET /inventario/movimientos`.
+
 ---
 
 ## Backend

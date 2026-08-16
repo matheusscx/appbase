@@ -131,7 +131,8 @@ primera pregunta la contesta `./scripts/reset-db.sh --verificar`.
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
 pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 `tenant_id`, `DELETE` físico, errores de `lint:check` (backend), tokens de diseño
-hardcodeados (`.vue`) y enlaces internos de docs rotos (`.md`). N+1 y el filtro de
+hardcodeados (`.vue`), enlaces internos de docs rotos y tablas GFM partidas por un
+párrafo pegado (`.md`). N+1 y el filtro de
 borrado son juicio y un hook no los puede evaluar, pero **sí exige la revisión que
 los cubre**: si el diff toca services de backend o `.vue` de `pages`/`components`,
 bloquea hasta que exista el recibo de la revisión independiente de `verify-feature`

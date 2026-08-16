@@ -25,6 +25,11 @@ import {
 } from '../providers/payment-provider.interface';
 import type { PaginatedResponse } from '../../../common/interfaces/paginated-response.interface';
 import {
+  bordeFechaSql,
+  requiereZonaTenant,
+  zonaHorariaTenant,
+} from '../../../common/utils/rango-fecha.util';
+import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../../common/utils/pagination.util';
@@ -541,7 +546,15 @@ export class CobrosService {
     query: QueryOrdenesDto,
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    const { filters, params } = this.buildListarOrdenesFilters(tenantId, query);
+    // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
+    const zona = requiereZonaTenant(query.fechaDesde, query.fechaHasta)
+      ? await zonaHorariaTenant(this.dataSource, tenantId)
+      : null;
+    const { filters, params } = this.buildListarOrdenesFilters(
+      tenantId,
+      query,
+      zona,
+    );
 
     const countRows: { total: number }[] = await this.dataSource.query(
       `SELECT COUNT(*)::int AS total
@@ -576,31 +589,49 @@ export class CobrosService {
   private buildListarOrdenesFilters(
     tenantId: string,
     query: QueryOrdenesDto,
+    zona: string | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
-    let idx = 2;
     let filters = '';
 
+    let idxZona = 0;
+    if (zona != null) {
+      params.push(zona);
+      idxZona = params.length;
+    }
+
     if (query.estado) {
-      filters += ` AND o.estado = $${idx++}`;
       params.push(query.estado);
+      filters += ` AND o.estado = $${params.length}`;
     }
     if (query.origen) {
-      filters += ` AND o.origen = $${idx++}`;
       params.push(query.origen);
+      filters += ` AND o.origen = $${params.length}`;
     }
     if (query.fechaDesde) {
-      filters += ` AND o.creado_el >= $${idx++}`;
       params.push(query.fechaDesde);
+      filters += bordeFechaSql(
+        'o.creado_el',
+        '>=',
+        query.fechaDesde,
+        params.length,
+        idxZona,
+      );
     }
     if (query.fechaHasta) {
-      filters += ` AND o.creado_el <= $${idx++}`;
       params.push(query.fechaHasta);
+      filters += bordeFechaSql(
+        'o.creado_el',
+        '<=',
+        query.fechaHasta,
+        params.length,
+        idxZona,
+      );
     }
     if (query.search) {
-      filters += ` AND (o.codigo_orden ILIKE $${idx} OR o.descripcion ILIKE $${idx} OR o.referencia_externa ILIKE $${idx} OR o.pagador_ref ILIKE $${idx})`;
       params.push(`%${query.search}%`);
-      idx++;
+      const idx = params.length;
+      filters += ` AND (o.codigo_orden ILIKE $${idx} OR o.descripcion ILIKE $${idx} OR o.referencia_externa ILIKE $${idx} OR o.pagador_ref ILIKE $${idx})`;
     }
 
     return { filters, params };

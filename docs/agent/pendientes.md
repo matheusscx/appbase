@@ -789,45 +789,6 @@ empezarlas.
   que ofrecerlo. **Hoy es teórico** —ninguna pantalla manda reglas a nivel venta, medido— así que
   se puede planificar sin apuro; lo que no conviene es construir el productor antes que el campo.
 
-- [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
-  (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
-  `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
-  `pasarela/services/cobros.service.ts:593,597` (este último sobre `pasarela_ordenes`, alias `o`) filtran `creado_el >= $N` / `<= $N` con
-  valores que vienen de DTOs validados con `@IsDateString()`, **que acepta una fecha pura**
-  (`2026-08-01`) además de un timestamp completo. Con la columna sin zona, Postgres tomaba
-  los dígitos literales; con `timestamptz` interpreta esa fecha en el `TimeZone` de la
-  sesión antes de convertir. Hoy no cambia nada —`SHOW TimeZone` da `UTC`, medido— pero es
-  una dependencia que antes no existía, y el default del server no lo fija nadie
-  explícitamente (ni el compose ni la config del pool).
-  **Cierre posible:** el patrón ya resuelto está en `propina-reportes.service.ts:264-266`,
-  que castea explícito con la zona del tenant (`$2::date::timestamp AT TIME ZONE $4`). Son
-  tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
-  un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
-  medianoche del local?), no una migración de tipos.
-  ⛔ **Corrección al "cierre posible" (2026-08-11): ese molde NO es copiable tal cual, y
-  copiarlo introduce un bug peor que el que arregla.** Medido en Postgres:
-  `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` — **el `::date` descarta la hora en
-  silencio**. El molde funciona en `propina-reportes` porque ahí el rango llega ya
-  normalizado a fechas puras (`RangoReporteNormalizado`); estos tres DTOs validan con
-  `@IsDateString()`, que **acepta las dos formas**, así que un llamador que hoy manda
-  `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la medianoche de ese día. Un
-  filtro que se ensancha sin avisar es peor que uno con la zona ambigua.
-  Lo que el cierre necesita entonces, además del cast: decidir si estos endpoints aceptan
-  timestamp o solo fecha pura, y si aceptan las dos, normalizar en el service —expandir la
-  fecha pura a medianoche del tenant y dejar pasar el timestamp tal cual— en vez de castear
-  en el SQL. Eso ya no son "tres servicios copiando un molde".
-  (Verificado también el lado bueno del molde: `'2026-08-01'::date::timestamp AT TIME ZONE
-  'America/Santiago'` da `2026-08-01 04:00:00+00`, que es la medianoche local correcta.)
-  ✅ **DECIDIDO (owner, 2026-08-15): "desde el 1 de agosto" es la medianoche del LOCAL**, o sea
-  de la zona horaria del tenant. Es lo que espera quien mira el reporte, y el patrón ya está
-  resuelto en `propina-reportes.service.ts`.
-  ⚠️ **Pero el molde no se copia tal cual** — la corrección de arriba sigue vigente y es la parte
-  que hace este trabajo más que un find-and-replace: estos tres DTOs validan con `@IsDateString()`,
-  que **acepta fecha pura Y timestamp**. Castear con `::date` descarta la hora en silencio, así
-  que un llamador que hoy manda `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la
-  medianoche. **La normalización va en el service**, no en el SQL: expandir la fecha pura a
-  medianoche del tenant y dejar pasar el timestamp tal cual.
-
 - [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
   criterios distintos para "esta personalización cambia el precio"** (frontend, medido
   2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
@@ -962,24 +923,6 @@ empezarlas.
   configuración de cálculo no se trata como información de administración.
   ℹ️ **Prioridad baja igual**: no hay ningún caso reportado de descuadre de $1 que alguien no
   haya podido explicar. La decisión saca la pregunta del medio, no sube la urgencia.
-
-- [ ] **El hook de pre-commit valida enlaces de markdown pero no que una tabla siga siendo
-  tabla** (tooling, **medido 2026-08-15, pasó de verdad en esta entrega**) —
-  `.githooks/pre-commit` (Guard 5) corre `check-docs-links.mjs` sobre `.md` staged, pero no hay
-  ningún guard que valide la sintaxis de una tabla GFM. Insertar un párrafo entre dos filas de
-  una tabla markdown (falta una línea en blanco antes/después, o el párrafo no empieza con `|`)
-  hace que **todo lo que sigue** deje de renderizarse como tabla — visualmente desaparece — y ni
-  el hook ni el CI lo detectan, porque ninguno de los dos parsea markdown como markdown, solo
-  greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
-  una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
-
----
-  ✅ **DECIDIDO (owner, 2026-08-15): chequeo propio, sin dependencia nueva.** Un script corto
-  en el hook que verifique lo que de verdad rompe: **toda línea que empieza con `|` tiene que
-  estar precedida por otra fila de tabla o por una línea en blanco**. Esa es exactamente la
-  regla que se rompió, y se detecta sin traer un linter de markdown entero.
-  ℹ️ El chequeo ya existe como script suelto —se usó a mano en cada commit de documentación de
-  esta sesión— así que el trabajo es moverlo al hook, no escribirlo de cero.
 
 - [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
   (backend) — `create()`/`update()` persisten `dto.tramos` y
@@ -1130,6 +1073,27 @@ PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
 
 ⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
 identidad de ese día. Ninguna bloquea nada que esté en curso.
+
+- [ ] **"Hasta el 16 de agosto" deja fuera todo el 16** (backend + producto, **medido
+  2026-08-16** al normalizar la zona de los filtros de fecha) — es un off-by-one **distinto**
+  del huso, y anterior: los tres filtros comparan `creado_el <= $hasta`, y con una fecha pura
+  eso es *menor o igual a la medianoche* de ese día, no *al final* del día. Medido contra la
+  base viva: con `hasta=2026-08-16` y `now()` a las 17:09 UTC, `now() <= ('2026-08-16'::date::
+  timestamp AT TIME ZONE 'America/Santiago')` da **`f`** — la medianoche local es
+  `2026-08-16 04:00+00`, así que el día entero queda afuera.
+  **Ya pasaba antes del cambio de zona** (con `TimeZone` en UTC el borde era
+  `2026-08-16 00:00+00`, igual de excluyente): normalizar a medianoche local movió el borde
+  cuatro horas, no lo creó.
+  **Lo alcanza cualquiera:** `mermas.vue` y el kardex mandan la fecha pura que el usuario
+  eligió en el calendario, sin sumarle nada — verificado, `AppDateInput` emite `YYYY-MM-DD`.
+  **La pregunta para el owner:** ¿el borde `hasta` es **inclusivo del día** (y entonces el
+  backend filtra `< hasta + 1 día`, y quien elige "16" ve el 16 completo) o **exclusivo** (y
+  entonces lo compensa el frontend)? Las dos existen en el repo: `propina-reportes` ya usa
+  `< hasta` exclusivo, y `frontend/app/utils/date-value.ts` tiene un `finDiaExclusivoIso`
+  escrito para esto — **con cero llamadores hoy** (medido), o sea que alguien vio el problema
+  y la pieza quedó sin conectar.
+  ℹ️ No se tocó al normalizar la zona a propósito: cambiar qué filas devuelve un filtro es
+  decisión de producto, no parte de la corrección del huso.
 
 - [ ] **La pasada de auditoría de las dos lentes nuevas está escrita y sin lanzar — falta el
   presupuesto** (owner) — el brief completo vive en

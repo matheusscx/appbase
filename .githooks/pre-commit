@@ -82,6 +82,16 @@ if [ -n "$staged_md" ]; then
     red "✗ Enlaces de docs rotos en .md staged (ver arriba)."
     fail=1
   fi
+
+  # ── Guard 6: tablas GFM rotas por un párrafo pegado ────────────────────────
+  # Pasó de verdad (2026-08-15): un párrafo insertado entre dos filas hizo que
+  # todo lo que seguía dejara de renderizarse como tabla, y ni el hook ni el CI
+  # lo vieron. Es un chequeo propio de una sola regla, no un linter de markdown
+  # (dependencia nueva descartada).
+  if ! node scripts/check-md-tables.mjs --staged ; then
+    red "✗ Tabla de markdown rota en .md staged (ver arriba)."
+    fail=1
+  fi
 fi
 
 # ── Gate: revisión independiente sobre este diff exacto ──────────────────────

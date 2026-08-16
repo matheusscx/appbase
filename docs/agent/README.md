@@ -125,6 +125,11 @@ primero, por definición, nunca mira lo que ya está.
   - [x] tipo `uuid` explícito → test `src/common/invariants/uuid-columns.invariant.spec.ts`.
   - [x] Tailwind hardcoded fuera de Caja → `frontend/scripts/check-design-tokens.mjs`
     (`npm run design:check` en el gate + `--staged` en el pre-commit).
+  - [x] Tabla GFM rota por un párrafo pegado → `scripts/check-md-tables.mjs`
+    (Guard 6 del pre-commit). **Una sola regla, no un linter de markdown**: toda
+    línea que empieza con `|` va precedida por otra fila, una línea en blanco o el
+    principio del archivo. Es exactamente lo que se rompió; traer un linter entero
+    era una dependencia nueva para eso.
   - [~] `number` en campos de monto → **deliberadamente NO automatizada.** Estáticamente
     no se sabe qué valor es dinero: el monto se tipa como `string` (columna `numeric`) y
     `precio * tasa` es indistinguible de `ms = 2 * 60 * 1000`. Un lint daría una avalancha

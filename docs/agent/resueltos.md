@@ -17,6 +17,48 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los filtros de fecha ya no dependen del `TimeZone` de sesión, y el hook mira las tablas (2026-08-16)
+
+Dos entradas mecánicas de la sección 3, cerradas juntas por tamaño.
+
+**Tablas GFM en el pre-commit (Guard 6).** `scripts/check-md-tables.mjs`, una sola regla y
+sin dependencia nueva: toda línea que empieza con `|` va precedida por otra fila, una línea
+en blanco o el principio del archivo.
+⚠️ **La entrada decía que el script "ya existe como script suelto" y hay que "moverlo al
+hook". No existía en el repo** —se buscó en `scripts/`— así que se escribió de cero.
+Al correrlo sobre los 252 `.md` apareció **un falso positivo** que obligó a afinar la regla:
+`docs/features/garzones.md:169` es un renglón de continuación de un ítem de lista que
+arranca con `|` porque un inline code (`` `garzon` | `cocina` | `barra` ``) quedó partido al
+envolver. Por eso una fila exige **dos** `|`, no uno. Verificado con un mutante: un párrafo
+insertado entre dos filas se detecta; el archivo de garzones pasa.
+ℹ️ De paso, sacar la entrada del backlog eliminó el `---` suelto que la partía en dos —la
+misma clase de rotura de markdown que la entrada describe.
+
+**Los tres filtros de fecha.** `mermas`, `inventario` y `pasarela/cobros` filtraban
+`creado_el >= $N` con valores de DTOs validados con `@IsDateString()`, que acepta fecha pura
+**y** timestamp. Ahora la decisión de qué forma tiene el valor vive en el service
+(`src/common/utils/rango-fecha.util.ts`): la fecha pura se expande a la medianoche **local
+del tenant**, el timestamp pasa tal cual.
+⚠️ **No se copió el molde de `propina-reportes`**, y esa es la parte que hacía a esto más que
+un find-and-replace: `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` —el `::date`
+descarta la hora en silencio—, así que aplicarlo a ciegas habría ensanchado el filtro de
+cualquier llamador que mande hora. La aritmética de la zona sí la sigue haciendo Postgres:
+es DST-correcta sin traer una librería.
+
+**Un bug que el e2e encontró en el propio arreglo.** La primera versión resolvía la zona
+apenas hubiera algún borde de fecha y la pasaba como parámetro siempre. Con los dos bordes
+en timestamp el SQL no la nombra, y **Postgres rechaza el bind con un parámetro de más**:
+500. De ahí salió `requiereZonaTenant`, que la pide solo si algún borde es fecha pura. No es
+una optimización, es corrección — y está dicho así en el código para que nadie lo "simplifique".
+
+**Lo que se midió y NO se tocó:** `hasta` es un off-by-one propio, anterior y distinto del
+huso — `creado_el <= medianoche` deja fuera el día entero que el usuario eligió. Se verificó
+contra la base (`now() <= ('2026-08-16'::date::timestamp AT TIME ZONE 'America/Santiago')`
+da `f`) y se abrió como entrada nueva en la sección 4: inclusivo vs exclusivo es decisión de
+producto, no parte de la corrección del huso.
+
+---
+
 ## El ítem eliminado deja de esconder su kardex y de aceptar movimientos nuevos (2026-08-16)
 
 Las tres entradas de la sección 3 que eran la misma idea —qué pasa con un producto dado de

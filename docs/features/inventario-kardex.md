@@ -49,6 +49,14 @@ Nota: el costeo por promedio ponderado móvil (CPP) de `item_producto.costo_actu
 
 Lista todos los movimientos de inventario del tenant actual, con opciones de filtro.
 
+**`desde`/`hasta` aceptan fecha pura o timestamp, y no significan lo mismo.** Una fecha pura
+(`2026-08-01`) se expande a la **medianoche de la zona horaria del tenant** —la que sale del
+país—, que es lo que espera quien mira el reporte; un timestamp completo
+(`2026-08-01T15:30:00Z`) se respeta tal cual, al segundo. La lógica es compartida
+(`src/common/utils/rango-fecha.util.ts`) con el listado de mermas y el de órdenes de
+pasarela. Nunca castear el valor con `::date` para "normalizarlo": descarta la hora en
+silencio y ensancha el filtro de cualquier llamador que sí la mande.
+
 ```
 GET /api/inventario/movimientos?itemId=<uuid>&motivo=<string>&desde=<ISO-8601>&hasta=<ISO-8601>&skip=0&take=50
 

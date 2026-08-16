@@ -12,6 +12,11 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
+import {
+  bordeFechaSql,
+  requiereZonaTenant,
+  zonaHorariaTenant,
+} from '../../common/utils/rango-fecha.util';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CausasMermaService } from './causas-merma.service';
@@ -230,7 +235,11 @@ export class MermasService {
     query: FindMermasDto,
   ): Promise<PaginatedResponse<MermaListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    const { filters, params } = this.buildFilters(tenantId, query);
+    // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
+    const zona = requiereZonaTenant(query.desde, query.hasta)
+      ? await zonaHorariaTenant(this.dataSource, tenantId)
+      : null;
+    const { filters, params } = this.buildFilters(tenantId, query, zona);
 
     // Sin filtro de borrado del ítem, y en las DOS consultas: una merma
     // registrada es plata perdida que ya ocurrió, así que dar de baja el
@@ -281,26 +290,44 @@ export class MermasService {
   private buildFilters(
     tenantId: string,
     query: FindMermasDto,
+    zona: string | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
-    let paramIdx = 2;
     let filters = '';
 
+    let idxZona = 0;
+    if (zona != null) {
+      params.push(zona);
+      idxZona = params.length;
+    }
+
     if (query.itemId) {
-      filters += ` AND mv.item_id = $${paramIdx++}`;
       params.push(query.itemId);
+      filters += ` AND mv.item_id = $${params.length}`;
     }
     if (query.causaMermaId) {
-      filters += ` AND mv.causa_merma_id = $${paramIdx++}`;
       params.push(query.causaMermaId);
+      filters += ` AND mv.causa_merma_id = $${params.length}`;
     }
     if (query.desde) {
-      filters += ` AND mv.creado_el >= $${paramIdx++}`;
       params.push(query.desde);
+      filters += bordeFechaSql(
+        'mv.creado_el',
+        '>=',
+        query.desde,
+        params.length,
+        idxZona,
+      );
     }
     if (query.hasta) {
-      filters += ` AND mv.creado_el <= $${paramIdx++}`;
       params.push(query.hasta);
+      filters += bordeFechaSql(
+        'mv.creado_el',
+        '<=',
+        query.hasta,
+        params.length,
+        idxZona,
+      );
     }
 
     return { filters, params };

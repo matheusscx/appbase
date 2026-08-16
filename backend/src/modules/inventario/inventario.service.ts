@@ -15,6 +15,11 @@ import {
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
+import {
+  bordeFechaSql,
+  requiereZonaTenant,
+  zonaHorariaTenant,
+} from '../../common/utils/rango-fecha.util';
 
 export interface SerieInput {
   serie: string;
@@ -775,7 +780,16 @@ export class InventarioService {
     query: FindMovimientosDto,
   ): Promise<PaginatedResponse<MovimientoListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    const { filters, params } = this.buildMovimientosFilters(tenantId, query);
+    // La zona solo se consulta si hay filtro de fecha: sin bordes que expandir
+    // es una query de más en el listado más caliente del módulo.
+    const zona = requiereZonaTenant(query.desde, query.hasta)
+      ? await zonaHorariaTenant(this.dataSource, tenantId)
+      : null;
+    const { filters, params } = this.buildMovimientosFilters(
+      tenantId,
+      query,
+      zona,
+    );
 
     // Lo que está en el kardex queda en el kardex: el JOIN no filtra
     // `i.eliminado_el` y la fila se muestra marcada. Filtrarlo acá no dejaba la
@@ -831,26 +845,46 @@ export class InventarioService {
   private buildMovimientosFilters(
     tenantId: string,
     query: FindMovimientosDto,
+    zona: string | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
-    let paramIdx = 2;
     let filters = '';
 
+    // La zona ocupa una posición fija apenas hay algún borde de fecha: los dos
+    // bordes la comparten.
+    let idxZona = 0;
+    if (zona != null) {
+      params.push(zona);
+      idxZona = params.length;
+    }
+
     if (query.itemId) {
-      filters += ` AND mv.item_id = $${paramIdx++}`;
       params.push(query.itemId);
+      filters += ` AND mv.item_id = $${params.length}`;
     }
     if (query.motivo) {
-      filters += ` AND mv.motivo = $${paramIdx++}`;
       params.push(query.motivo);
+      filters += ` AND mv.motivo = $${params.length}`;
     }
     if (query.desde) {
-      filters += ` AND mv.creado_el >= $${paramIdx++}`;
       params.push(query.desde);
+      filters += bordeFechaSql(
+        'mv.creado_el',
+        '>=',
+        query.desde,
+        params.length,
+        idxZona,
+      );
     }
     if (query.hasta) {
-      filters += ` AND mv.creado_el <= $${paramIdx++}`;
       params.push(query.hasta);
+      filters += bordeFechaSql(
+        'mv.creado_el',
+        '<=',
+        query.hasta,
+        params.length,
+        idxZona,
+      );
     }
 
     return { filters, params };

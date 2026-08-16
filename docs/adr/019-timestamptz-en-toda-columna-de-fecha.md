@@ -61,10 +61,14 @@ de la columna, no una verdad permanente.** Si el tipo cambia, el cast se relee.
 
 **En contra / a tener en cuenta**
 
-- Un filtro de rango contra una fecha pura (`WHERE creado_el >= '2026-08-01'`) ahora se
-  interpreta en el `TimeZone` de sesión. Hoy la sesión es UTC y el comportamiento no cambió,
-  pero es una dependencia que antes no existía — ver la entrada abierta en
-  [`pendientes.md`](../agent/pendientes.md).
+- Un filtro de rango contra una fecha pura (`WHERE creado_el >= '2026-08-01'`) pasaba a
+  interpretarse en el `TimeZone` de sesión — una dependencia que antes no existía, y que
+  nadie fijaba explícitamente (ni el compose ni la config del pool).
+  ✅ **Cerrado el 2026-08-16** (ver [`resueltos.md`](../agent/resueltos.md)): los tres
+  filtros afectados —`mermas`, `inventario` y `pasarela/cobros`— normalizan en el service con
+  `src/common/utils/rango-fecha.util.ts`. La fecha pura se expande a la medianoche de la zona
+  **del tenant**; el timestamp pasa tal cual, sin `::date` que le descarte la hora. Ya no
+  dependen del `TimeZone` de sesión.
 - Migrar el esquema es cambiar entidades y resetear: el proyecto no tiene datos productivos
   y no hay migraciones TypeORM. En producción `synchronize` está en `false`, así que el día
   que haya datos reales esto necesita un `ALTER COLUMN` escrito a mano.
