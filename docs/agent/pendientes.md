@@ -813,6 +813,32 @@ empezarlas.
   la decisión no existe.
   ⚠️ Costo aceptado explícitamente: un error de conteo de buena fe ya no se corrige en el
   momento — hay que volver a llamar a la persona.
+  ⛔ **INTENTADA Y REVERTIDA el 2026-08-16. Son CINCO superficies, no dos, y cerrarlas deja
+  al cajero sin poder cerrar su propia caja.** Se implementó, se corrió el gate en verde y la
+  revisión independiente encontró que faltaba justo la superficie principal. Lo medido:
+
+  | Superficie | Qué revela | ¿La entrada la nombraba? |
+  |---|---|---|
+  | `obtenerArqueo` | `esperado` y `diferencia` por línea | sí |
+  | `resumenMovimientos` | `saldoEsperado` del turno | sí |
+  | `listarMovimientos` | las filas con las que se **reconstruye** el esperado sumando | no |
+  | `enviarConteo` (`POST /:id/conteo`) | devuelve `arqueo` con `esperado`/`diferencia` reales | no |
+  | `cerrar` (`POST /:id/cerrar`) | llama a `obtenerArqueo` **hardcodeando `tieneVerTodas: true`** | no |
+
+  Y una sexta a mirar: `cajonesEstado` revela `saldoEsperado` en cuanto el estado deja de ser
+  `abierta`. Hoy es inalcanzable para un cajero puro porque `MiCaja` y `Cajas` son
+  mutuamente excluyentes por convención del seed, pero nada impide un rol que combine los dos.
+  🔴 **El bloqueo real, que es una decisión de producto y no un detalle de implementación:**
+  la **fase 2 del cierre** exige un motivo por cada línea descuadrada, y el selector de motivo
+  de la pantalla se renderiza solo `if (l.diferencia != null && !isZero())`. Si al cajero se
+  le oculta la diferencia, **no puede completar el cierre de su propia caja** — y hoy sí
+  puede: `cerrar` exime del chequeo de `puedeForzar` cuando `caja.usuarioId === usuarioId`.
+  **La pregunta para el owner:** ¿la fase 2 pasa a ser trabajo del supervisor (y el cajero
+  termina al enviar el conteo), o el cajero sigue justificando pero **a ciegas** —viendo qué
+  línea necesita motivo, sin el monto—? Las dos son defendibles y cambian quién opera el
+  cierre, no solo qué se muestra.
+  ℹ️ Paradoja que conviene no perder: hoy el cajero **no queda atrapado precisamente porque la
+  fuga sigue abierta**. Cerrarla sin contestar esto lo deja sin salida.
 
 - [ ] **Un correo de usuario soft-borrado hace explotar el alta con un 500** (backend,
   `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08 contra la
