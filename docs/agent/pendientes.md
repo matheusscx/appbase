@@ -336,6 +336,26 @@ decisión que no es mía).
   anotado; si da distinto de cero, cambia de sección y de prioridad. Construir un reconciliador
   antes de esa medición es construir sin evidencia.
 
+  ✅ **MEDIDO el 2026-08-16: el drift es CERO, por tres caminos independientes.** Sobre la base de
+  dev **después de una suite e2e completa** —o sea con tráfico de escritura de todos los caminos
+  de producción—, 87 productos en modo `cantidad` y 175 movimientos:
+
+  | Medición | Resultado |
+  |---|---|
+  | `SUM(stock_resultante - stock_anterior)` vs `item_producto.stock` | 0 ítems con drift |
+  | `stock_resultante` del último movimiento vs el saldo | 0 ítems con drift |
+  | Cortes de cadena (`stock_anterior` de N ≠ `stock_resultante` de N-1) | 0 |
+
+  ⚠️ **La primera pasada dio 28 falsos positivos** y vale anotarlo: sumaba `cantidad` sin signo.
+  Las `salida` se guardan **positivas** (`tipo` es la que lleva el signo), y las `ajuste` guardan
+  `cantidad = 0` con el delta en `stock_anterior`/`stock_resultante`. Cualquier consulta futura
+  sobre el kardex tiene que sumar el **delta**, nunca `cantidad`.
+
+  ➡️ **Por su propio criterio, esto NO escala**: queda como defensa en profundidad anotada. Que
+  el drift no exista hoy no dice que un bug futuro no lo produzca — dice que **construir un
+  reconciliador ahora sería construir sin evidencia**, que es justo lo que la entrada quería
+  evitar. Si alguna vez se quiere igual, es una decisión nueva del owner y no un arreglo.
+
 - [ ] **`impuestos` no tiene índice único de nombre por tenant, y sus hermanas sí**
   (backend/BD, encontrado 2026-08-11 por la revisión del cierre de las advertencias
   repetidas) — `descuentos` y `recargos` tienen `uq_descuentos_tenant_nombre_vivo` y
@@ -349,6 +369,27 @@ decisión que no es mía).
   Antes de agregar el índice hay que mirar dos cosas: si hay filas del catálogo del país
   (`tenant_id` nulo) que romperían un índice por tenant, y si la unicidad debe incluir o no
   al IVA, que es del país y no del tenant (ADR-018).
+
+  ✅ **MEDIDO el 2026-08-16. Las dos preguntas están contestadas, y aparece una tercera que
+  esta entrada no veía y que es la que la hace cara.**
+
+  - *¿Filas de país romperían el índice?* **No.** `CHK_impuestos_scope` fuerza `tenant_id` XOR
+    `pais_id`, así que las de país tienen `tenant_id` nulo y en Postgres los NULL no colisionan
+    entre sí en un índice único. El índice se puede crear **idéntico** al de las hermanas.
+    Estado de la base de dev: 2 filas de tenant (`tipo='otro'`), 1 de país (el IVA), 0
+    duplicados.
+  - *¿La unicidad incluye al IVA?* **No puede**, por el mismo CHECK: el IVA es de país, no de
+    tenant. No hay decisión que tomar acá.
+  - 🆕 **Lo que la entrada no dice: el índice solo es la quinta parte del trabajo.**
+    `impuestos.service.ts` **no tiene nada** de lo que sus hermanas sí: ni pre-chequeo de nombre
+    en `create()`/`update()` (`descuentos` tiene `validarNombreUnico`), ni `catch` del `23505` en
+    `restaurar()` con nombre sugerido (`errorDeColisionNombre`), ni endpoint
+    `GET /impuestos/nombre-disponible`, ni frontend que lo consuma (`descuentos.vue` y
+    `recargos.vue` son los únicos dos que llaman a `nombre-disponible`). Agregar el índice a
+    secas convierte **tres** caminos hoy silenciosos en **500 crudos**.
+
+  ➡️ Sigue abierta, pero ya no es *"medir primero"*: está medida. Es una tanda propia de cinco
+  piezas sobre un catálogo fiscal, no una línea de SQL en el seeder.
 
 - [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
   test** (backend) — el e2e nuevo prueba que la escritura ajena no prospera y que la caja
