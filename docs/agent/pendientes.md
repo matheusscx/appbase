@@ -106,6 +106,17 @@ el orden de la tabla de arriba.
   revirtió.
   ⚠️ **Subir el pool NO lo arregla**: solo mueve el umbral.
   ⚠️ **Batchear el N+1 tampoco lo arregla:** son conexiones, no queries.
+  🔁 **REINCIDIÓ el 2026-08-15, en código nuevo, cuatro días después de documentarse acá.**
+  `auth.service.ts` → `refresh` estrenó una transacción y dejó adentro un
+  `usersService.findById`: mismo deadlock, umbral medido en 20 concurrentes, API muerta
+  hasta reiniciar. Se arregló en el momento y **no suma una fila a la tabla de abajo** —
+  pero dice tres cosas para quien tome esta entrada: (a) la vía nueva es **envolver código
+  viejo en una transacción nueva**, que es lo contrario de lo que la tabla describe y por
+  eso ningún grep de "llamada agregada" la ve; (b) lo cazó una **ráfaga de 15 requests
+  independientes** —un test de carrera de 2 nunca llega al tamaño del pool—, y ese test ya
+  vive en `rbac-y-contrasena.e2e-spec.ts` como detector reutilizable; (c) documentar la
+  causa **no alcanzó** para evitar la reincidencia, así que al cerrar esta entrada conviene
+  dejar una regla automatizada y no sólo los sitios arreglados.
 
   **⚠️ No es un bug de ventas: el patrón está en 7 módulos.** Barrido del 2026-08-11 sobre
   todo `backend/src`. Y como **el pool es uno solo para toda la app**, no hacen falta diez

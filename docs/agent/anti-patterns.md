@@ -67,6 +67,39 @@ Cualquier cliente puede enviar otro `tenant_id` en el body y leer o escribir dat
 de otro tenant. Es una fuga multi-tenant, no un descuido de estilo. Ojo con el casing:
 `req.user.tenant_id` es `undefined` — el campo decodificado es `tenantId`.
 
+### ❌ Recurso indexado por usuario que una acción de un tenant borra en otro
+
+El `tenant_id` puede salir del token, todas las lecturas pueden filtrar bien, y aun así la
+acción de un tenant **destruir estado observable de otro** — si por el medio hay un recurso
+cuya clave es el **usuario** y no el par usuario+tenant. Una persona existe en varios
+tenants; sus tokens, preferencias y vínculos, no necesariamente.
+
+```ts
+// MAL — el criterio es (usuario, tipo): quema el alta pendiente que otro tenant
+// le había emitido a la misma persona.
+.where('usuario_id = :usuarioId AND tipo = :tipo AND usado_el IS NULL', { usuarioId, tipo })
+
+// MAL, la otra cara — barrer "todos los tokens del usuario" cuando sólo se quería
+// matar las credenciales: se lleva puestos los de otros tenants y otros propósitos.
+invalidarTodos(usuarioId)
+
+// BIEN — el par completo, y el tipo acotado a lo que la acción realmente invalida
+.andWhere(`datos ->> 'tenantId' = :tenantId`, { tenantId })
+.where('usuario_id = :u AND tipo IN (:...tipos)', { tipos: [INVITACION, RESET] })
+```
+
+**Lo caro no es el borrado: es que no deja rastro.** En el caso real (ago-2026, `tokens_acceso`)
+la persona **desaparecía del roster del otro tenant** —la lista de pendientes exige
+`usado_el IS NULL`— y su link dejaba de servir, sin ningún evento que lo explicara para
+nadie. Y era accionable a repetición: cualquier admin podía mantener bloqueadas las altas
+pendientes de un correo ajeno repitiendo la suya.
+
+**Cómo se caza en una auditoría:** listar las tablas cuya PK o criterio de búsqueda es
+`usuario_id` **sin** `tenant_id` al lado, y para cada una preguntar *¿puede una acción de un
+tenant escribir acá?*. El grep por `tenant_id` no lo encuentra —justamente porque no está—,
+así que se busca por la ausencia. Ojo también con los `invalidarTodos` / `deleteAll` /
+`revokeAll` por usuario: el barrido total casi siempre es más ancho que la intención.
+
 ### ❌ `number` nativo para dinero o porcentajes
 
 ```ts
@@ -250,6 +283,62 @@ solo manager mockeado y el e2e es secuencial. Lo cazó la revisión independient
 otros locks toma ese método —incluidos los implícitos de cada `UPDATE`— y en qué orden, y
 cruzarlo con los demás métodos que tocan esas mismas tablas. La pregunta no es "¿qué
 protege esta línea?" sino "¿en qué orden quedan **todos** los locks de este camino?".
+
+### ❌ Llamada repo-bound adentro de una transacción — deadlock del pool
+
+> 🔴 **Este patrón ya es el riesgo #1 abierto del repo**, con causa confirmada, umbral
+> medido y tabla de sitios en 7 módulos: ver *"Diez ventas simultáneas cuelgan la API para
+> siempre"* en [`pendientes.md`](pendientes.md). Esta entrada existe porque **se
+> reintrodujo en código nuevo el 2026-08-15**, cuatro días después de documentarlo — que es
+> exactamente el criterio de "bug de patrón que se repitió".
+
+Adentro de un `dataSource.transaction`, **todo** tiene que ir por el `manager`. Una sola
+llamada que use el repositorio inyectado pide una **segunda conexión del mismo pool**
+mientras retiene la primera con la transacción abierta: con tantas requests en vuelo como
+tamaño tenga el pool, todas retienen una y esperan otra que sólo otra de ellas podría
+soltar.
+
+```ts
+await this.dataSource.transaction(async (manager) => {
+  await manager.update(RefreshToken, id, { … })          // BIEN
+  // MAL — `usersService.findById` va por SU repositorio, no por este manager
+  const user = await this.usersService.findById(fila.user_id)
+  // BIEN — o `manager.findOne(Usuario, …)`, o sacarlo afuera del bloque
+})
+```
+
+**Lo que lo vuelve peligroso es que no falla: cuelga, y para siempre.** No hay ciclo de
+locks de base, así que `deadlock_timeout` **nunca dispara** y Postgres no aborta a nadie;
+sin `connectionTimeoutMillis`, la espera es infinita. La API entera muere —para todos los
+tenants, incluso en rutas que no tocan la base— hasta reiniciar el proceso. Medido
+(ago-2026, `auth.service.ts` → `refresh`, pool default de 10): 8 concurrentes OK, **20
+concurrentes = colgado**, recuperable sólo con `docker restart`. Subir el pool sólo mueve
+el umbral, no arregla nada.
+
+⚠️ **Lo que hace falta aprender no es la causa —ya estaba escrita— sino por qué volvió a
+pasar.** Se reintrodujo *arreglando otra cosa*: la transacción se agregó para cerrar un
+problema de ordenamiento, y la llamada que ya estaba en el método quedó adentro sin que
+nadie la mirara con esta lente. **Meter código existente adentro de una transacción nueva
+es tan riesgoso como escribir la llamada nueva**, y no se parece a lo que la entrada del
+backlog describe (ahí la llamada se agregó adentro; acá la transacción se agregó alrededor).
+
+La firma en `pg_stat_activity`, con el backend colgado, es inequívoca:
+
+```
+active              | Lock: transactionid | x5   ← esperando el lock de fila
+idle in transaction | ClientRead          | x5   ← reteniendo, esperando conexión del pool
+```
+
+**Cómo se caza en una auditoría:** por cada `dataSource.transaction`, recorrer el cuerpo y
+marcar toda llamada `this.algo(...)` que **no** reciba `manager` entre sus argumentos. Es
+mecánico y da falsos positivos baratos de descartar. Ojo con las que parecen inocentes
+—un `findById`, un `config.get` que golpea la base, un service de otro módulo—: la que
+rompió esto era una búsqueda de una fila por PK.
+
+⚠️ **Y ningún test de carrera lo caza.** Un test de dos requests concurrentes nunca pasa de
+2 transacciones en vuelo sobre un pool de 10. Hace falta una **ráfaga** —15 requests
+independientes, que no compiten por nada— y afirmar que todas responden. Es un test
+binario: con el bug se cuelga hasta el timeout, sin el bug tarda milisegundos.
 
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 
@@ -590,49 +679,89 @@ La misma aserción pasaba en verde sobre `aplicar()`, que **sí** mueve stock: b
 string que el código bajo prueba no puede producir. Antes de asertar la ausencia de algo,
 verificar que ese algo podría aparecer si el bug existiera.
 
-### ❌ Test cuyo resultado lo decide el mock
+### ❌ Test verde que no ejerce lo que dice probar
+
+Tres caras del mismo error, todas descubiertas **apagando el fix a mano**, nunca leyendo el
+test. Si con el fix apagado sigue verde, no prueba lo que dice: son treinta segundos y es lo
+único que separa un test real de uno decorativo.
+
+**(a) El mock ya trae la respuesta**, así que el branch del título nunca se ejerce.
 
 ```ts
-// MAL — el mock ya trae la respuesta; el branch que el título dice probar
-// ("referenciado solo por un recuento") nunca se ejerce.
+// MAL — el branch que el título promete ("referenciado solo por un recuento") no corre
 queryMock.mockResolvedValueOnce([{ existe: true }])
-await expect(service.remove(TENANT, ID)).rejects.toThrow('en uso')
 expect(sql).toContain('recuento_inventario_linea') // sobrevive aunque el WHERE esté roto
 
-// BIEN — en unit, solo lo que el mock NO decide…
+// BIEN — en unit, sólo lo que el mock NO decide…
 expect(queryMock).toHaveBeenCalledTimes(2) // una query, no tres: sin N+1
-expect(
-  queryMock.mock.calls.some((c) => String(c[0]).includes('eliminado_el = NOW()')),
-).toBe(false) // no borró
 // …y el branch real, contra la BD, en el e2e.
 ```
 
-Dos tests con títulos distintos y setup idéntico son un solo test. Un branch de SQL
-(columna equivocada, `WHERE` que nunca matchea) solo lo prueba la base real.
+⚠️ **La variante peor: el mock precocina la condición que el código debería garantizar.**
+(ago-2026, `refresh`) El test fijaba `reemplazadoPor: 'rt-nueva'` en la fila mockeada, o sea
+daba por resuelto **el ordenamiento que fallaba**. El mutante "no escribir el puntero" moría
+—el test sí probaba que se escribe— pero nadie probaba que se escribiera **a tiempo**, que
+era la propiedad real. En producción el caso feliz ocurría 1 de cada 8 veces. Un mock que
+establece un estado que el código tiene que producir convierte al test en una tautología.
 
-### ❌ Un mutante que muere por `TypeError` no prueba lo que el test dice
+**(b) Otra regla dispara antes** que la que se quería cubrir.
 
 ```ts
-// El test dice "rechaza propina negativa". Con el mutante puesto pasa de largo,
-// sigue hasta `crearEnTransaccion` —que el mock deja en `undefined`— y muere en
-// `.id`. El test se pone rojo, sí: por la razón equivocada.
-//   Received message: "Cannot read properties of undefined (reading 'id')"
-// Lo que se busca es esto, que ES la propiedad:
-//   Received promise resolved instead of rejected
+// MAL — "rechaza el método de pago no contratado": 400 verde… emitido por la regla del
+// vuelto, porque 10000 supera el total de 5950. El gate del método nunca corrió.
+// MAL — "rechaza un garzón de otro tenant" con un UUID inexistente: pasa por
+// "garzón no encontrado" sin tocar el chequeo de tenant.
 ```
 
-Un mutante que rompe la ejecución antes de llegar a la aserción **da un falso verde de
-cobertura**: el día que alguien complete ese mock, el test deja de discriminar sin que
-nada avise. Medir el mutante no alcanza — hay que leer **por qué** murió.
+**(c) El fixture no puede aislar el criterio.** Con **dos** elementos, el ganador es a la vez
+"el último", "el de id mayor" y "el de monto mayor": el test no distingue entre las tres
+heurísticas. Hacen falta **tres**, con el caso correcto en el **medio** de cada dimensión que
+podría confundirse. Y para una *elección* entre candidatos, un mutante no alcanza: hay que
+enumerar todas las heurísticas alternativas que el fixture no descarta y correr una por cada
+una.
 
-El arreglo es que el camino feliz pueda completarse. Y va **local al test que lo
-necesita, no como default del harness**: eso último tiene un precio medido (ago-2026,
-`salones.service.spec.ts`). Con `manager.query` resolviendo `[]` por default, el mutante
-que borra `getMesaOrThrow` de `abrirCuenta` pasó de cazado a **sobreviviente** — sin el
-guard, la ejecución llega a un `if (!locked.length) throw` de más abajo que tira la misma
-excepción, y el test ya no distingue "corrió el chequeo de tenant" de "el lock volvió
-vacío". Un default de harness apaga como red incidental **todos** los `if (!rows.length)`
-del service (cinco, en ese archivo).
+**Regla:** construir el escenario de modo que **la regla bajo prueba sea la única que puede
+fallar**, y aseverar el mensaje, no sólo el status. Dos tests con títulos distintos y setup
+idéntico son un solo test.
+
+### ❌ Leer el número de un mutante sin leer por qué murió
+
+Un mutante da un número —cuántos tests se pusieron rojos— y ese número miente de tres
+formas distintas. **Medirlo no alcanza: hay que leer el mensaje de cada fallo.**
+
+**(a) Murió por `TypeError`, no por la aserción.**
+
+```ts
+// El test dice "rechaza propina negativa". Con el mutante puesto pasa de largo, sigue
+// hasta `crearEnTransaccion` —que el mock deja en `undefined`— y muere en `.id`.
+//   Received message: "Cannot read properties of undefined (reading 'id')"   ← falso rojo
+//   Received promise resolved instead of rejected                            ← la propiedad
+```
+
+Da un **falso verde de cobertura**: el día que alguien complete ese mock, el test deja de
+discriminar y nada avisa. El arreglo es que el camino feliz pueda completarse, y va **local
+al test que lo necesita, no como default del harness**: con `manager.query` resolviendo `[]`
+por default, el mutante que borra `getMesaOrThrow` pasó de cazado a **sobreviviente**, porque
+un `if (!locked.length) throw` de más abajo tira la misma excepción. Un default de harness
+apaga como red incidental todos los `if (!rows.length)` del service.
+
+**(b) Mató más tests de los que su alcance explica** — y eso *es* el hallazgo. (2026-08-07)
+Un mutante mató 2: el legítimo y uno sin relación. La causa era aislamiento, no cobertura —
+los tests hacían `wrapper.unmount()` al final del cuerpo, así que el primero en fallar dejaba
+diálogos viejos en `document.body`. Con `afterEach` da 1. **Si un test lee `document.body`
+—modal, drawer, tooltip—, el desmontaje va en `afterEach`.** Primero se arregla el
+aislamiento, después se leen los mutantes.
+
+**(c) Murió, pero probando una propiedad más débil que la del título.** (ago-2026, `refresh`)
+El mutante "no escribir el puntero" moría, o sea que el test sí probaba que se escribe —
+pero la propiedad real era que se escribiera **a tiempo**, y de eso no había cobertura. Ver
+*Test verde que no ejerce lo que dice probar*, variante (a).
+
+⚠️ **Y el mutante mismo puede estar mal aplicado.** Un `perl -0pi -e "s/…/…/"` **sin `/g`**
+reemplaza la primera ocurrencia, que puede estar **en el docblock** en vez del código: dio
+un falso "test decorativo" sobre un test que era bueno. Verificar siempre que el fuente
+mutado sea el que se cree — y, con el watcher de Docker corriendo, que el proceso haya
+tomado el revert y no sólo el archivo.
 
 ### ❌ Rotular "medido" algo que no se midió
 
@@ -692,48 +821,6 @@ módulo) y clasificar cada consumidor en dos grupos, porque no todos van:
 Un valor nuevo que se escribe pero no se puede consultar deja media feature invisible, y
 la doc del mismo commit suele afirmar que funciona.
 
-### ❌ Test que pasa por una razón distinta de la que dice probar
-
-Un test verde no prueba nada si el escenario dispara **otra** regla antes de llegar a la
-que se quería cubrir. Pasó tres veces en jul-2026, y las tres fueron descubiertas
-apagando el fix a mano, nunca leyendo el test.
-
-```ts
-// MAL — "rechaza el método de pago no contratado": 400 verde… emitido por la regla
-// del vuelto, porque 10000 supera el total. El gate del método nunca se ejecutó.
-pagos: [{ metodoPagoId: METODO_AJENO, monto: '10000.0000' }]   // total = 5950
-  .expect(400)
-
-// MAL — "el vuelto va al método que lo permite": el método con vuelto era el primero
-// del array Y el primero por orden de id, así que elegir-por-permiso, elegir-el-primero
-// y elegir-por-id dan lo mismo. El test no distingue entre las tres.
-
-// PEOR — el 2º intento del mismo test, con el orden dado vuelta. Con SOLO DOS
-// elementos el ganador es inevitablemente "el último", "el de id mayor" y "el de
-// monto mayor" a la vez: es imposible aislar el criterio. Hacen falta TRES, con el
-// caso correcto en el MEDIO de cada dimensión que podría confundirse.
-
-// MAL — "rechaza un garzón de otro tenant" con un UUID inexistente: pasa por
-// "garzón no encontrado" sin tocar nunca el chequeo de tenant.
-```
-
-**Regla:** construir el escenario de modo que **la regla bajo prueba sea la única que
-puede fallar** —monto por debajo del total, el caso correcto en la posición que ninguna
-heurística acierta, un garzón real de otro tenant sembrado a propósito— y **aseverar el
-mensaje**, no solo el status.
-
-**Cómo se detecta, siempre igual:** apagar el fix en el código de producción y correr el
-test. Si sigue verde, no prueba lo que dice. Son treinta segundos y es lo único que
-separa un test real de uno decorativo.
-
-⚠️ **Un solo mutante no alcanza cuando lo que se prueba es una *elección* entre
-candidatos.** El 2º intento del test del vuelto sobrevivió al mutante obvio (el bug
-histórico: "elegir el primero") y aun así no probaba nada, porque otras tres heurísticas
-igual de plausibles daban el mismo resultado. Para una elección hay que enumerar **todas
-las heurísticas alternativas que el fixture no descarta** —posición, orden de id, monto,
-cantidad— y correr un mutante por cada una. Si con dos elementos alguna es indistinguible,
-el fixture necesita un tercero.
-
 ### ❌ Leer el resultado de un test suite sin mirar el exit code
 
 **Qué pasó (2026-08-07).** Cerrando la ronda de decisiones reporté el gate del frontend en
@@ -753,34 +840,6 @@ npm test; echo "EXIT: $?"
 **Por qué importa acá.** El gate de `CLAUDE.md` dice *"Ejecutar, no afirmar"*, y CI corre el
 mismo comando: un exit 1 rompe el push aunque ningún test esté en rojo. El resumen humano de
 una herramienta **no es** su valor de retorno.
-
-### ❌ Sacar conclusiones de un mutante sin aislar los tests entre sí
-
-**Qué pasó (2026-08-07).** Un mutante que solo debía matar 1 test mató **2**: el legítimo y
-uno sin relación con el código mutado. La causa no era cobertura: los tests hacían
-`wrapper.unmount()` **al final del test**, así que el primero en fallar dejaba el componente
-montado y el siguiente encontraba diálogos viejos en `document.body`. La señal del mutante
-era en parte cascada.
-
-Reproducible: mutar `revelarPin(res.nombre, res.pin, res.advertencias)` a
-`revelarPin(res.nombre, res.pin)` en `configuracion/garzones.vue` da **2** fallidos con el
-`unmount()` al final del test y **1** con `afterEach`.
-
-⚠️ La primera vez reporté **4**, que era la cuenta de una configuración distinta —sin el
-stub del drawer, donde los tests además emitían unhandled rejections— y que ya no se
-reproduce. Medir de nuevo antes de citar un número viejo.
-
-**La regla.** Si un test lee `document.body` —cualquier cosa teletransportada: modal,
-drawer, tooltip—, el desmontaje va en `afterEach`, nunca al final del cuerpo del test. Y si
-un mutante mata más tests de los que su alcance explica, **eso es el hallazgo**: primero se
-arregla el aislamiento, después se leen los mutantes.
-
-⚠️ La regla queda **contradicha en el archivo que la originó**: de los cuatro `describe`
-preexistentes de `configuracion/garzones.nuxt.spec.ts`, **dos** leen `document.body`
-—"eliminar respeta el toggle" y "restaurar"— y siguen con el `unmount()` al final del
-cuerpo. Los otros dos solo consultan el wrapper, así que la contaminación no los alcanza. Convertirlos era refactor fuera del alcance
-de ese commit, así que conservan el modo de falla descrito acá — anotado en
-`pendientes.md`, no resuelto.
 
 ## Pruebas E2E de navegador
 

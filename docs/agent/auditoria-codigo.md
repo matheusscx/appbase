@@ -121,14 +121,64 @@ Lentes base (ajustar al módulo):
 | Lente | Qué caza |
 |---|---|
 | **Dinero y Decimal** | aritmética con `number` nativo, redondeos inconsistentes, agregaciones SQL sin normalizar, signos sin validar, división por cero |
-| **Multi-tenant y permisos** | `tenant_id` que no sale del token, guards faltantes, JOINs que cruzan tenants, permiso equivocado por ruta |
+| **Multi-tenant y permisos** | `tenant_id` que no sale del token, guards faltantes, JOINs que cruzan tenants, permiso equivocado por ruta, **recursos indexados por `usuario_id` sin `tenant_id`** (ver abajo) |
 | **Soft delete y consultas** | `SELECT`/`JOIN` sin `eliminado_el IS NULL`, N+1, `SELECT *` en tablas anchas |
-| **Concurrencia y transacciones** | check-then-act, lecturas sin `FOR UPDATE` que luego escriben, orden de locks no determinista, atomicidad rota |
+| **Concurrencia y transacciones** | check-then-act, lecturas sin `FOR UPDATE` que luego escriben, orden de locks no determinista, atomicidad rota, **llamadas repo-bound adentro de una transacción** (ver abajo) |
 | **Contratos back↔front** | campos que un lado consume y el otro no expone; `whitelist: true` sin `forbidNonWhitelisted` descarta en silencio (200, no 400) |
 | **Tests que no prueban nada** | mocks que deciden el resultado, aserciones que no pueden fallar, comportamiento sin cobertura real |
 
 Para módulos de dominio, sumar la lente específica: motor de precios e impuestos, kardex
 y costeo, cuadratura de caja, ciclo de vida de la venta.
+
+### Dos formas que el grep no encuentra (ago-2026)
+
+Las dos salieron de la misma tanda y ninguna la habría encontrado un buscador leyendo
+"¿está bien esta función?". Las dos se buscan **por la ausencia de algo**, y las dos se
+confirman **midiendo contra Postgres**, no razonando. Detalle y ejemplos ❌/✅ en
+[`anti-patterns.md`](anti-patterns.md).
+
+**1. Recurso por usuario que cruza tenants.** El `tenant_id` sale del token, las lecturas
+filtran bien, y aun así una acción de un tenant destruye estado observable de otro — porque
+el recurso del medio está indexado por `usuario_id` **sin** `tenant_id` al lado. Una persona
+existe en varios tenants; sus tokens y vínculos, no.
+*Cómo buscarlo:* listar tablas cuyo criterio de búsqueda sea sólo `usuario_id`, y por cada
+una preguntar si una acción de un tenant puede escribir ahí. Sumar los barridos totales
+—`invalidarTodos`, `deleteAll`, `revokeAll` por usuario—, que casi siempre son más anchos
+que su intención.
+*Cómo se confirma:* montar el mismo usuario en dos tenants y ejercer la acción desde uno.
+
+**2. Deadlock del pool por una llamada repo-bound en una transacción.** Adentro de un
+`dataSource.transaction`, una sola llamada que use el repositorio inyectado en vez del
+`manager` pide una segunda conexión reteniendo la primera. Con tantas requests en vuelo
+como tamaño tenga el pool, se traban entre sí — y como el ciclo no es de locks de base,
+`deadlock_timeout` **nunca dispara**: no falla, cuelga, y la API muere para todos los
+tenants hasta reiniciar el proceso.
+*Cómo buscarlo:* por cada `dataSource.transaction`, marcar toda llamada `this.algo(...)`
+que no reciba `manager` entre sus argumentos. Es mecánico y los falsos positivos son
+baratos.
+*Cómo se confirma:* una **ráfaga** de ~15 requests independientes (no una carrera: un test
+de 2 concurrentes nunca pasa de 2 transacciones en vuelo). Con el bug se cuelga; sin él,
+milisegundos. La firma en `pg_stat_activity` es `idle in transaction / ClientRead`
+acumulándose hasta el tamaño del pool.
+
+⚠️ **Esta lente NO es nueva y su barrido YA se hizo**: el 2026-08-11 sobre todo
+`backend/src`, con umbral medido y **tabla de sitios en 7 módulos** — está en la entrada
+🔴 *"Diez ventas simultáneas cuelgan la API para siempre"* de `pendientes.md`, que es el
+riesgo más grave abierto. Correrla de nuevo como pasada de auditoría es redundante; lo que
+falta es **arreglar los sitios ya listados**, y eso es el frente 🔴, que va con decisión del
+owner.
+
+**Lo que sí agrega ago-2026, y es lo único nuevo:** el patrón **se reintrodujo en código
+nuevo cuatro días después de documentarlo**, y por una vía que la entrada no describe — ahí
+la llamada se agregó adentro de una transacción existente; acá la **transacción se agregó
+alrededor** de una llamada que ya estaba. La lección para el auditor: revisar también los
+diffs que *envuelven* código viejo en una transacción nueva, no sólo los que agregan
+llamadas.
+
+Y la conclusión de método: **una entrada de backlog no previene una reincidencia.** El
+barrido de agosto documentó causa, umbral y sitios, y aun así el patrón volvió. Lo que lo
+habría cazado es un test de ráfaga en la suite —hoy existe uno para `refresh`— o una regla
+automatizada. Candidato claro para `### ✅ AUTOMATIZADO` de `anti-patterns.md`.
 
 ---
 
