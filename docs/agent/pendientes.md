@@ -517,39 +517,6 @@ empezarlas.
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-- [ ] 🚩 **Dos recuentos abiertos sobre el mismo producto descuentan el faltante dos veces**
-  (backend + producto, auditoría `inventario` 2026-08-15) — **el hallazgo más caro de la pasada.**
-  `RecuentosService.create()` hace un `INSERT INTO recuento_inventario` sin mirar si el tenant ya
-  tiene una sesión en `borrador` que incluya esos ítems (verificado abriendo el método: no hay
-  guard, y el único índice único es `(recuento_id, item_id)`, o sea **dentro** de una sesión).
-  Cada línea congela su `stock_sistema` al crearse y el ajuste se aplica como **delta relativo**
-  sobre el stock vigente.
-  **Escenario:** stock de sistema 10. Dos personas abren su propia sesión y las dos cuentan 8.
-  Cada sesión guarda delta −2. Aplicadas las dos, el stock queda en **6**, no en 8. El faltante
-  real se descuenta dos veces y se genera un faltante que no existió.
-  ⚠️ **La doc anticipó este riesgo y lo descartó con un razonamiento que no cierra.**
-  [`recuento-inventario.md`](../features/recuento-inventario.md) lo lista en su tabla de riesgos
-  y lo da por mitigado: *"cada línea congela su propio `stock_sistema`; el delta se calcula contra
-  ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final"*. Es cierto
-  y es irrelevante — la independencia del orden no es corrección: da el mismo resultado
-  equivocado. **Eso es peor que un hueco no considerado**, porque el próximo que lo mire va a
-  encontrar la fila de la tabla y creer que está resuelto.
-  **La pregunta para el owner:** ¿la segunda sesión sobre un ítem ya en borrador se **bloquea**
-  (400 nombrando la sesión abierta), se **avisa** y se deja seguir, o el ajuste se recalcula
-  contra el stock del momento de aplicar en vez del congelado? Las tres son defendibles y
-  cambian el modelo. La tercera además contradice el comentario que llama al delta *"el corazón
-  del diseño"*.
-  ✅ **DECIDIDO (owner, 2026-08-15): se bloquea la segunda sesión.** Si un producto ya está en
-  un recuento en `borrador`, no se puede incluir en otro; el 400 nombra la sesión que lo tiene.
-  Dos conteos simultáneos del mismo producto no tienen sentido operativo.
-  ⚠️ **El delta congelado NO se toca** — se descartó recalcular al aplicar. El comentario que lo
-  llama *"el corazón del diseño"* sigue vigente.
-  ⚠️ **Al construirlo:** el chequeo es un `SELECT` de "¿está en otra sesión abierta?" seguido de
-  un `INSERT`, o sea check-then-act — sin índice ni lock que lo respalde, dos `create()`
-  simultáneos lo pasan los dos. Va con la sección 5.
-  ⚠️ **Y la doc se arregla en el mismo commit:** `recuento-inventario.md` da este riesgo por
-  mitigado con un razonamiento que no cierra. Esa fila cambia, o queda diciendo que no existía.
-
 - [ ] 🚩 **Anular una venta reingresa la mercadería al costo de hoy, no al que salió — y el
   inventario se infla solo** (backend + contabilidad, auditoría `inventario` 2026-08-15) —
   **lo encontraron dos lentes ciegas entre sí** (costeo CPP y devoluciones), por caminos
@@ -616,33 +583,6 @@ empezarlas.
   conoce ese campo — cero ocurrencias en `frontend/app`**. Esta decisión **no se puede construir
   sin exponerlo al cliente**, que es lo que aquella entrada necesita también. Se hacen juntas o
   la segunda paga el costo de la primera.
-
-- [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
-  **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
-  suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
-  `item.precioBase`, que es el precio **neto** del catálogo. El backend, en cambio, le
-  autoriza a la tarjeta `resultado.totales.totalFinal`, que sale del motor con impuestos,
-  descuentos y recargos aplicados.
-  **La medición, contra el stack real (tenant Paris, ítem de suscripción a $30.000):** el
-  drawer dice `30000` y a Transbank se le cobran **`35700`** — los $5.700 son el IVA al 19%
-  (`550e8400-…-440280`). El cliente confirma un número y se le cobra otro un 19% mayor, sin
-  ningún paso intermedio que se lo muestre.
-  Ojo con reproducirlo: **el seed no trae ningún ítem `tipo='suscripcion'`**, así que la
-  pantalla se ve vacía a menos que se cree uno (así se midió esto).
-  Por qué no se arregló junto con las advertencias: ahí lo que faltaba era devolver un campo;
-  esto es una **previsualización de precio antes de cobrar** —qué se muestra, si frena el
-  alta, si reusa `AdvertenciasPrecio` como ya hacen el carrito y la pasarela— y eso es
-  decisión de producto, no una corrección. Las advertencias que ahora sí llegan
-  (`POST /suscripciones` → `advertencias`) explican el monto **después** del cobro; no lo
-  reemplazan.
-  ✅ **DECIDIDO (owner, 2026-08-15): la pantalla muestra el total que se va a cobrar, con el
-  desglose debajo.** El monto grande pasa a ser `resultado.totales.totalFinal` —lo que de verdad
-  se le autoriza a la tarjeta— y debajo va el neto y el impuesto.
-  ℹ️ **No se inventa un componente nuevo:** el carrito y la pasarela ya muestran ese desglose, y
-  `AdvertenciasPrecio` ya existe. Se reusa.
-  ⚠️ **Para reproducirlo y testearlo:** el seed **no trae ningún ítem `tipo='suscripcion'`**
-  (medido), así que la pantalla se ve vacía hasta crear uno. Sembrar uno es parte del trabajo, o
-  el test no se puede escribir.
 
 - [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
   (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`

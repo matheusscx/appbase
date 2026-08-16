@@ -145,6 +145,32 @@ const itemSeleccionado = computed(
   () => itemsSuscribibles.value.find((i) => i.id === form.value.itemId) ?? null,
 )
 
+/**
+ * El drawer rotulaba "Precio del período" con `item.precioBase`, que es el
+ * precio **neto** del catálogo — pero el backend le autoriza a la tarjeta
+ * `resultado.totales.totalFinal`, que sale del motor con impuestos, descuentos y
+ * recargos aplicados. Medido contra el stack real: el drawer decía `30.000` y a
+ * Transbank se le cobraban `35.700` (IVA 19%). El cliente confirmaba un número y
+ * se le cobraba otro un 19% mayor, sin ningún paso intermedio que se lo mostrara.
+ *
+ * Se reusa el mismo motor y el mismo componente de advertencias que el carrito y
+ * la pasarela, en vez de inventar una previsualización propia. Las advertencias
+ * que ya llegan en `POST /suscripciones` explican el monto **después** del cobro:
+ * no reemplazan mostrarlo antes.
+ */
+const calculoInput = computed(() =>
+  itemSeleccionado.value
+    ? { lineas: [{ itemId: itemSeleccionado.value.id, cantidad: '1' }] }
+    : null,
+)
+const { resultado: calculo, vigente: calculoVigente, loading: calculando }
+  = useResultadoCalculado(() => calculoInput.value, { debounceMs: 250 })
+
+/** El total que se le va a cobrar. `null` mientras el cálculo no esté vigente. */
+const totalACobrar = computed(() =>
+  calculoVigente.value ? (calculo.value?.totales.totalFinal ?? null) : null,
+)
+
 const itemsSuscribiblesOpts = computed(() =>
   itemsSuscribibles.value.map((i) => ({
     label: `${i.nombre} — ${formatMonto(i.precioBase, i.monedaId)} / ${frecuenciaLabel[i.frecuencia]}`,
@@ -529,11 +555,31 @@ onMounted(async () => {
                 </div>
 
                 <div class="text-sm space-y-1">
-                  <div class="flex justify-between text-muted">
-                    <span>Precio del período</span>
-                    <span>{{ formatMonto(itemSeleccionado.precioBase, itemSeleccionado.monedaId) }}</span>
+                  <!-- El monto grande es lo que de verdad se le autoriza a la
+                       tarjeta (`totalFinal`), no el neto del catálogo. El
+                       desglose va debajo para que el 19% no aparezca recién en
+                       el resumen de la tarjeta. -->
+                  <div class="flex justify-between font-semibold text-default text-base">
+                    <span>Total a cobrar por período</span>
+                    <span v-if="totalACobrar">{{ formatMonto(totalACobrar, itemSeleccionado.monedaId) }}</span>
+                    <span v-else class="text-muted font-normal">
+                      {{ calculando ? 'Calculando…' : '—' }}
+                    </span>
                   </div>
-                  <div class="flex justify-between font-semibold text-default text-base pt-1 border-t border-default">
+                  <div v-if="calculo && calculoVigente" class="flex justify-between text-muted">
+                    <span>Neto</span>
+                    <span>{{ formatMonto(calculo.totales.subtotalNeto, itemSeleccionado.monedaId) }}</span>
+                  </div>
+                  <div v-if="calculo && calculoVigente" class="flex justify-between text-muted">
+                    <span>Impuestos</span>
+                    <span>{{ formatMonto(calculo.totales.totalImpuestos, itemSeleccionado.monedaId) }}</span>
+                  </div>
+                  <AdvertenciasPrecio
+                    v-if="calculoVigente"
+                    :advertencias="calculo?.advertencias ?? []"
+                    class="pt-1"
+                  />
+                  <div class="flex justify-between text-muted pt-1 border-t border-default">
                     <span>Frecuencia</span>
                     <span>{{ frecuenciaLabel[itemSeleccionado.frecuencia] }}</span>
                   </div>

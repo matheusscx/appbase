@@ -453,6 +453,126 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     expect(filaConConteo.diferenciaNeta).toBe('5.0000');
   });
 
+  /**
+   * El hallazgo más caro de la auditoría de inventario, con su escenario
+   * numérico: stock de sistema 10, dos personas abren su propia sesión y las dos
+   * cuentan 8. Cada línea congela su `stock_sistema` al crearse y el ajuste se
+   * aplica como **delta relativo**, así que cada sesión guarda −2 y aplicar las
+   * dos deja el stock en **6**, no en 8 — el faltante real se descuenta dos
+   * veces y se inventa uno que no existió.
+   *
+   * La doc daba el riesgo por mitigado con un razonamiento que no cierra ("el
+   * delta se calcula contra el congelado, así que aplicar ambas en cualquier
+   * orden da el mismo resultado"): es cierto y es irrelevante, porque la
+   * independencia del orden no es corrección — da el mismo resultado
+   * equivocado.
+   */
+  it('un producto ya en un recuento en borrador no entra en otro', async () => {
+    const resItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto doble recuento E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    expect(resItem.status).toBe(201);
+    const itemId = (resItem.body as ItemResponse).id;
+
+    const resStock = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'entrada', motivo: 'compra', cantidad: '10' });
+    expect(resStock.status).toBe(200);
+
+    const primera = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    expect(primera.status).toBe(201);
+    const primeraId = (primera.body as RecuentoCreateResponse).id;
+
+    const segunda = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    expect(segunda.status).toBe(400);
+    // El 400 nombra el producto y la sesión que lo tiene: sin eso el usuario no
+    // sabe qué sacar de la lista ni cuál sesión aplicar o cancelar.
+    const mensaje = (segunda.body as { message: string }).message;
+    expect(mensaje).toContain(primeraId);
+    expect(mensaje).toContain('Producto doble recuento E2E');
+
+    // Y la segunda sesión NO se creó a medias.
+    const listado = await request(app.getHttpServer())
+      .get('/api/recuentos?estado=borrador&pageSize=100')
+      .set('Authorization', `Bearer ${token}`);
+    expect(listado.status).toBe(200);
+    const conEseItem = (listado.body as { data: { id: string }[] }).data.filter(
+      (r) => r.id === primeraId,
+    );
+    expect(conEseItem).toHaveLength(1);
+
+    // Cancelada la primera, el producto vuelve a estar disponible: el bloqueo es
+    // por sesión ABIERTA, no un veto permanente.
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${primeraId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const tercera = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    expect(tercera.status).toBe(201);
+  });
+
+  /**
+   * Con varios productos en conflicto el mensaje los lista **todos**. Quedarse
+   * con el primero que devuelva Postgres nombra uno arbitrario, y el usuario lo
+   * saca de la lista para chocar de nuevo con el siguiente: el `400` sería
+   * correcto y aun así inservible.
+   */
+  it('con varios productos en conflicto, el 400 los nombra a todos', async () => {
+    const crearProducto = async (nombre: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `${nombre} ${Date.now()}`,
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+        });
+      expect(res.status).toBe(201);
+      return (res.body as ItemResponse).id;
+    };
+
+    const itemA = await crearProducto('Conflicto multiple A E2E');
+    const itemB = await crearProducto('Conflicto multiple B E2E');
+
+    // Cada uno en su propia sesión abierta: el conflicto viene de DOS sesiones
+    // distintas, que es donde quedarse con una sola es más engañoso.
+    for (const id of [itemA, itemB]) {
+      const res = await request(app.getHttpServer())
+        .post('/api/recuentos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ itemIds: [id] });
+      expect(res.status).toBe(201);
+    }
+
+    const res = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemA, itemB] });
+    expect(res.status).toBe(400);
+
+    const mensaje = (res.body as { message: string }).message;
+    expect(mensaje).toContain('Conflicto multiple A E2E');
+    expect(mensaje).toContain('Conflicto multiple B E2E');
+  });
+
   it('GET /recuentos?estado filtra por estado y descarta el resto', async () => {
     const resCreateItem = await request(app.getHttpServer())
       .post('/api/items')
@@ -471,10 +591,25 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
       .send({ itemIds: [itemId] });
     const recuentoBorradorId = (resBorrador.body as RecuentoCreateResponse).id;
 
+    // Ítem propio para la sesión que se cancela: un producto no puede estar en
+    // dos recuentos en `borrador` a la vez (dos deltas relativos sobre el mismo
+    // stock congelado descuentan el faltante dos veces). Este caso prueba el
+    // filtro por estado, no esa regla, así que no necesita compartir el ítem.
+    const resItemCancelado = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto filtro-estado cancelado E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    const itemCanceladoId = (resItemCancelado.body as ItemResponse).id;
+
     const resParaCancelar = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ itemIds: [itemCanceladoId] });
     const recuentoCanceladoId = (resParaCancelar.body as RecuentoCreateResponse)
       .id;
     await request(app.getHttpServer())

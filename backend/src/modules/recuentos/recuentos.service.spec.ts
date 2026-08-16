@@ -67,6 +67,10 @@ describe('RecuentosService', () => {
             unidad_medida: 'un',
           },
         ])
+        // Ningún recuento en `borrador` con este producto: un producto no puede
+        // estar en dos sesiones abiertas a la vez, así que `create` lo consulta
+        // antes de insertar.
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ recuento_id: 'recuento-1' }])
         .mockResolvedValueOnce(undefined);
 

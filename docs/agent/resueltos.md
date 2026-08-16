@@ -17,6 +17,48 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El alta de suscripción muestra lo que cobra, y un producto no entra en dos recuentos (2026-08-16)
+
+**El precio de la suscripción.** El drawer rotulaba *"Precio del período"* con
+`item.precioBase` —el neto del catálogo— mientras el backend le autorizaba a la tarjeta
+`resultado.totales.totalFinal`. Medido: decía `30.000` y se cobraban `35.700`. Ahora el monto
+grande es el `totalFinal`, con el neto y el impuesto debajo, y reusa el mismo motor
+(`useResultadoCalculado`) y el mismo `AdvertenciasPrecio` que el carrito y la pasarela — no se
+inventó una previsualización propia.
+
+⚠️ **Se sembró el ítem de suscripción que faltaba.** Sin él la pantalla se ve **vacía** —no
+hay a qué suscribirse—, así que no se podía mirar ni testear, y el bug original hubo que
+medirlo creando el ítem a mano. `Plan mensual demo`, afecto y con
+`precio_incluye_impuesto = false`: justo la combinación que hace visible la diferencia.
+
+**Dos recuentos sobre el mismo producto.** `create` ahora bloquea con `400` nombrando la
+sesión abierta. El escenario que lo justifica, con números: stock 10, dos personas cuentan 8
+cada una en su sesión, cada una guarda delta −2, y aplicadas las dos el stock queda en **6**.
+
+⚠️ **La doc daba este riesgo por mitigado con un razonamiento que no cierra**, y eso es peor
+que un hueco no considerado: decía que *"aplicar ambas en cualquier orden da el mismo
+resultado final"*. Es cierto y es irrelevante — la independencia del orden no es corrección,
+da el mismo resultado **equivocado**. Esa fila de la tabla de riesgos se reescribió, con la
+explicación completa debajo para que nadie vuelva a leerla como resuelta.
+
+⚠️ **El delta congelado no se tocó** (recalcular al aplicar se descartó), y **el guard es
+check-then-act sin índice que lo respalde**: dos `create()` simultáneos lo pasan los dos. El
+único índice único es `(recuento_id, item_id)`, o sea dentro de una sesión. Queda dicho en el
+código y en la doc, y es trabajo de la §5.
+
+**Un test existente cambió de fixture, no de intención.** `GET /recuentos?estado` creaba dos
+borradores sobre el mismo ítem solo para tener uno de cada estado; ahora la sesión que se
+cancela usa un ítem propio. El caso prueba el filtro por estado, no la regla nueva.
+
+**Qué fija cada una.** Suscripciones: un e2e que pide el cálculo del ítem sembrado y fija los
+dos números de la medición (`30.000` neto → `35.700` cobrado), más una aserción de que **no
+son iguales** — si el ítem del seed dejara de ser afecto, el spec pasaría en verde sin probar
+nada. Recuentos: la segunda sesión da `400` nombrando la primera, la segunda no queda creada a
+medias, y cancelada la primera el producto vuelve a estar disponible (el bloqueo es por sesión
+abierta, no un veto permanente).
+
+---
+
 ## La propina de una venta anulada sale del pool, y el plano avisa el solapamiento (2026-08-16)
 
 Dos entradas independientes, chicas y de módulos distintos, cerradas juntas.

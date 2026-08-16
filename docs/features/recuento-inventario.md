@@ -201,6 +201,11 @@ nombrar). Si el item existe pero su `modo_inventario` no es `'cantidad'`, el 400
 nombra el producto. Congela `stock_sistema` de cada línea con una sola query batcheada
 (`WHERE item_id = ANY($1)`), nunca una por item.
 
+**Rechaza con `400` si alguno de los productos ya está en otra sesión en
+`borrador`**, nombrando esa sesión: dos conteos simultáneos del mismo producto
+descuentan el faltante dos veces (ver §"Por qué la mitigación anterior del doble
+conteo no servía"). El bloqueo es por sesión abierta, no permanente.
+
 ### PATCH /api/recuentos/:id/lineas/:lineaId
 
 ```
@@ -448,8 +453,37 @@ tras adoptar `unwrap()` compartido.
 | Producto que cambia de `modo_inventario` mientras la sesión está en borrador | El kardex rechazaría la línea con "faltan las series", sin decir cuál | `aplicar` revalida `modo_inventario = 'cantidad'` por línea y nombra el producto. Pasa con productos sin movimientos, que sí admiten el cambio de modo |
 | Deadlock contra una venta simultánea | Postgres aborta una de las dos (40P01) y el usuario ve un 500 | `aplicar` lockea por `item_id` ascendente, pero una venta lockea en el orden del carrito, que arma el cliente — y sus recetas y combos no pueden garantizar ningún orden. En vez de imponérselo a ventas, `aplicar` **reintenta una vez** ante 40P01: el rollback dejó la transacción sin efecto, así que el reintento es seguro |
 | Producto eliminado entre contar y aplicar | Fallaría toda la sesión | La línea se descarta (`lineasDescartadas` en la respuesta) y el resto se aplica igual. El detalle la **muestra** con `itemEliminado: true` en vez de esconderla: filtrarla ahí la hacía desaparecer sin aviso mientras `findAll` la seguía contando en `cantidadLineas` —el listado decía 12 y el detalle mostraba 11—, y el que cuenta no veía por qué le sobraba una |
-| Dos sesiones en `borrador` sobre el mismo producto | Doble conteo pisándose | Cada línea congela su propio `stock_sistema`; el delta se calcula contra ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final |
+| Dos sesiones en `borrador` sobre el mismo producto | **El faltante se descuenta dos veces** | `create` lo **bloquea**: si el producto ya está en una sesión en `borrador`, el `400` nombra esa sesión. Ver abajo por qué la mitigación anterior no servía |
 | Delta dejaría stock negativo | Saldo inconsistente | Rechazo con el producto nombrado — misma invariante que cualquier salida del kardex |
+
+### Por qué la mitigación anterior del doble conteo no servía
+
+Esta tabla decía, sobre dos sesiones en `borrador` con el mismo producto: *"cada
+línea congela su propio `stock_sistema`; el delta se calcula contra ese
+congelado, así que aplicar ambas en cualquier orden da el mismo resultado
+final"*. **Es cierto y es irrelevante:** la independencia del orden no es
+corrección — da el mismo resultado *equivocado*.
+
+Con números: stock de sistema 10, dos personas cuentan 8 cada una en su propia
+sesión. Cada una guarda delta −2, y aplicadas las dos el stock queda en **6**, no
+en 8. El faltante real se descuenta dos veces y se genera uno que no existió.
+
+Eso es peor que un hueco no considerado: el próximo que lo mirara encontraba la
+fila de la tabla y creía que estaba resuelto.
+
+⚠️ **El delta congelado no se tocó.** Recalcular el ajuste contra el stock del
+momento de aplicar era la otra salida posible y **se descartó**: contradice el
+comentario que llama al delta *"el corazón del diseño"*. Lo que se bloquea es la
+segunda sesión.
+
+⚠️ **El guard es check-then-act y ningún índice lo respalda.** Dos `create()`
+simultáneos con el mismo ítem lo pasan los dos: el único índice único es
+`(recuento_id, item_id)`, o sea **dentro** de una sesión. Cerrar esa carrera es
+trabajo de la tanda de concurrencia (§5 de `docs/agent/pendientes.md`); el guard
+cubre el caso real, que es una persona abriendo una sesión cuando ya hay otra.
+
+El bloqueo es por sesión **abierta**, no un veto permanente: aplicada o cancelada
+la primera, el producto vuelve a estar disponible.
 
 ---
 

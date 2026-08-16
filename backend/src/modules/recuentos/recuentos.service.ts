@@ -193,6 +193,60 @@ export class RecuentosService {
         }
       }
 
+      // Un producto no puede estar en dos recuentos en `borrador` a la vez.
+      //
+      // **El escenario, con números:** stock de sistema 10. Dos personas abren
+      // su propia sesión y las dos cuentan 8. Cada línea congela su
+      // `stock_sistema` al crearse y el ajuste se aplica como delta relativo,
+      // así que cada sesión guarda −2 y aplicar las dos deja el stock en 6, no
+      // en 8: el faltante real se descuenta dos veces y se inventa uno que no
+      // existió. Dos conteos simultáneos del mismo producto no tienen sentido
+      // operativo.
+      //
+      // ⚠️ El delta congelado NO se toca: recalcular contra el stock del momento
+      // de aplicar se descartó, y el comentario que llama al delta "el corazón
+      // del diseño" sigue vigente. Lo que se bloquea es la segunda sesión.
+      //
+      // ⚠️ **Esto es check-then-act y no lo respalda ningún índice**: dos
+      // `create()` simultáneos con el mismo ítem pasan los dos. El único índice
+      // único que existe es `(recuento_id, item_id)`, o sea DENTRO de una
+      // sesión. Cerrar esa carrera es trabajo de la tanda de concurrencia
+      // (sección 5 de `pendientes.md`), no de acá — pero el guard cubre el caso
+      // real, que es una persona abriendo una sesión cuando ya hay otra.
+      const enBorrador: {
+        item_id: string;
+        nombre: string;
+        recuento_id: string;
+      }[] = await manager.query(
+        `SELECT l.item_id, i.nombre, l.recuento_id
+             FROM recuento_inventario_linea l
+             JOIN recuento_inventario r
+               ON r.recuento_id = l.recuento_id
+              AND r.tenant_id = l.tenant_id
+              AND r.estado = 'borrador'
+              AND r.eliminado_el IS NULL
+             JOIN items i
+               ON i.item_id = l.item_id
+              AND i.tenant_id = l.tenant_id
+              AND i.eliminado_el IS NULL
+            WHERE l.item_id = ANY($1) AND l.tenant_id = $2
+              AND l.eliminado_el IS NULL
+            ORDER BY i.nombre ASC`,
+        [dto.itemIds, tenantId],
+      );
+      // Sin `LIMIT 1`: con varios productos en conflicto, quedarse con el
+      // primero que devuelva Postgres nombra uno arbitrario y el usuario saca
+      // ese de la lista para chocar de nuevo con el siguiente. Se listan todos.
+      if (enBorrador.length) {
+        const detalle = enBorrador
+          .map((c) => `${c.nombre} (recuento ${c.recuento_id})`)
+          .join(', ');
+        throw new BadRequestException(
+          `Estos productos ya están en un recuento en borrador: ${detalle}. ` +
+            'Aplicá o cancelá esa(s) sesión(es) antes de incluirlos en otra.',
+        );
+      }
+
       const sesionRows = unwrap<{ recuento_id: string }>(
         await manager.query(
           `INSERT INTO recuento_inventario (tenant_id, usuario_creador_id, comentario)

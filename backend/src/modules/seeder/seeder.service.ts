@@ -3040,10 +3040,49 @@ export class SeederService implements OnApplicationBootstrap {
 
   private async seedItems(): Promise<void> {
     await this.seedProductoDemoVentas();
+    await this.seedSuscripcionDemo();
     await this.seedIngredientesBase();
     await this.seedPapasFritas();
     await this.seedGruposModificadores();
     await this.seedComboEspecial();
+  }
+
+  /**
+   * Un ítem `tipo='suscripcion'`, que el seed no tenía.
+   *
+   * Sin él, `/tienda/suscripciones` se ve **vacía**: no hay nada a lo que
+   * suscribirse, así que la pantalla no se puede mirar ni testear, y el bug de
+   * que el drawer mostrara el neto mientras se cobraba el total con IVA hubo que
+   * medirlo creando el ítem a mano.
+   *
+   * `afecto` y `precio_incluye_impuesto = false` a propósito: es justo la
+   * combinación que hace visible la diferencia entre el neto del catálogo y lo
+   * que se le autoriza a la tarjeta (30.000 → 35.700 con IVA 19%).
+   */
+  private async seedSuscripcionDemo(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
+    const ITEM_ID = '550e8400-e29b-41d4-a716-446655440352';
+
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [ITEM_ID],
+    );
+    if (exists.length) {
+      return;
+    }
+
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
+                          precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+       VALUES ($1,$2,$3,$4,'Plan mensual demo','Item de desarrollo: suscripción mensual afecta a IVA','30000',false,true,'suscripcion','afecto')`,
+      [ITEM_ID, PARIS, CLP, ELECTRONICA],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_suscripcion (item_id, frecuencia) VALUES ($1,'mensual')`,
+      [ITEM_ID],
+    );
   }
 
   /**
