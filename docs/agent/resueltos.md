@@ -102,6 +102,29 @@ igual ofrecería dar un permiso que la cuenta quizá ya tiene. Mutante verificad
   cuenta**. Si se implementa como acceso a `PATCH /roles/:id`, el encargado queda pudiendo editar
   cualquier rol del tenant, que es escalada de privilegios y no es lo que se decidió.
 
+### ⚠️ El mensaje del commit `a351b5f7` tiene un aviso de despliegue FALSO
+
+Ese commit cierra con *"`synchronize` está apagado en producción. Hasta que se resetee la
+base de Railway, cualquier lectura de `roles` por TypeORM revienta"*. **No es cierto, y no
+hay que actuar sobre eso.** Se corrige acá y no reescribiendo el mensaje porque el commit
+ya está en `main`, y reescribir la historia compartida es peor que el error.
+
+Lo que pasó: se leyó `synchronize: config.get('NODE_ENV') !== 'production'`
+(`app.module.ts:263`) y se dio por hecho que en Railway `NODE_ENV=production`. **Nadie lo
+midió.** El propio `docs/ARCHITECTURE.md` decía lo contrario —*"hoy eso está tapado por
+`synchronize` + reset"*— y también la skill `railway-sync-db`, que arranca con *"el backend
+corre con `synchronize` activo"*.
+
+**Medido, esta vez de verdad:** el deployment de `a351b5f7` quedó en `SUCCESS` con
+`roles.es_sistema` en la entidad, y el smoke de producción pasó las tres verificaciones. Si
+la columna no se hubiera creado, el healthcheck —que consulta la base— no habría promovido
+el deploy.
+
+La lección no es sobre Railway: **una condición leída en el código no dice qué valor tiene
+la variable en el entorno**, y este backlog tiene una regla escrita para exactamente eso
+("buscar por conducta, no por mecanismo"). El costo fue pedirle al owner un paso urgente
+que no lo era, sobre una premisa que dos archivos del propio repo desmentían.
+
 ---
 
 ## El cluster de membresía: la baja deja de romper dos cosas en silencio (2026-08-16)
