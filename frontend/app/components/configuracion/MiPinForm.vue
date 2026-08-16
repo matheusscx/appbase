@@ -112,7 +112,7 @@ onMounted(async () => {
       <p class="mb-2 text-sm font-medium text-default">
         Historial
       </p>
-      <GarzonesPinEventosLista :eventos="estado.eventos" />
+      <GarzonesPinEventosLista :eventos="estado.eventos" :total="estado.total" />
     </div>
   </AppCard>
 </template>

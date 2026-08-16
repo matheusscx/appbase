@@ -651,12 +651,15 @@ describe('GarzonesService', () => {
           creadoEl: new Date(),
         },
       ];
-      repo.manager.query.mockResolvedValue(filas);
+      // Dos consultas ahora: la página y el total. Van en paralelo.
+      repo.manager.query
+        .mockResolvedValueOnce(filas)
+        .mockResolvedValueOnce([{ total: 87 }]);
 
       const result = await service.listarEventosPin(TENANT, 'g1');
 
-      expect(result).toEqual(filas);
-      expect(repo.manager.query).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ eventos: filas, total: 87 });
+      expect(repo.manager.query).toHaveBeenCalledTimes(2);
       const [sql, params] = repo.manager.query.mock.calls[0] as [
         string,
         unknown[],
@@ -664,7 +667,35 @@ describe('GarzonesService', () => {
       expect(sql).toContain('LEFT JOIN usuarios');
       expect(sql).toContain('e.tenant_id = $1');
       expect(sql).toContain('e.eliminado_el IS NULL');
-      expect(params).toEqual([TENANT, 'g1']);
+      expect(params).toEqual([TENANT, 'g1', 50]);
+    });
+
+    // `garzon_pin_evento` solo crece y el diseño decidió guardar TODOS los
+    // cambios, no solo el último. Sin tope, dos pantallas traían la tabla
+    // entera en cada carga.
+    it('topea la página con LIMIT y trae el total por separado', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1' }));
+      repo.manager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ total: 200 }]);
+
+      const result = await service.listarEventosPin(TENANT, 'g1');
+
+      const [sqlPagina, paramsPagina] = repo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sqlPagina.replace(/\s+/g, ' ')).toContain(
+        'ORDER BY e.creado_el DESC LIMIT $3',
+      );
+      expect(paramsPagina[2]).toBe(50);
+
+      // El total es una consulta aparte y NO lleva el LIMIT: si lo llevara,
+      // toparía en 50 y el aviso de la UI mentiría diciendo "50 de 50".
+      const [sqlTotal] = repo.manager.query.mock.calls[1] as [string];
+      expect(sqlTotal).toContain('COUNT(*)');
+      expect(sqlTotal).not.toContain('LIMIT');
+      expect(result.total).toBe(200);
     });
 
     it('lanza NotFound si el garzón no existe en el tenant', async () => {
@@ -1416,9 +1447,12 @@ describe('GarzonesService', () => {
       await service.miPin(TENANT, CUENTA);
 
       expect(repo.findOne).not.toHaveBeenCalled();
-      // Las dos que sí corresponden: `garzonPersonalDe` (resolver el vínculo)
-      // y la query cruda de eventos — ninguna de las dos es `repo.findOne`.
-      expect(repo.manager.query).toHaveBeenCalledTimes(2);
+      // Las tres que sí corresponden: `garzonPersonalDe` (resolver el vínculo),
+      // la página de eventos y su total. Ninguna de las tres es `repo.findOne`,
+      // que es la que este cambio sacó del camino. Eran dos antes de que el
+      // historial se topeara: el total es una consulta nueva y deliberada — sin
+      // ella, la UI no puede decir "los últimos N de M" y recorta en silencio.
+      expect(repo.manager.query).toHaveBeenCalledTimes(3);
     });
   });
 

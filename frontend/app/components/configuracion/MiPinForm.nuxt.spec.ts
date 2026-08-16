@@ -96,7 +96,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
   })
 
   it('avisa cuando todavía no hay PIN fijado', async () => {
-    miPinRespuesta = { fijado: false, eventos: [] }
+    miPinRespuesta = { fijado: false, eventos: [], total: 0 }
 
     const wrapper = await montar()
 
@@ -115,7 +115,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
   })
 
   it('no avisa cuando ya está fijado', async () => {
-    miPinRespuesta = { fijado: true, eventos: [] }
+    miPinRespuesta = { fijado: true, eventos: [], total: 0 }
 
     const wrapper = await montar()
 
@@ -129,6 +129,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
       eventos: [
         { id: 'e1', tipo: 'fijado_por_garzon', usuarioNombre: 'ana.torres', creadoEl: '2026-08-10T12:00:00.000Z' },
       ],
+      total: 1,
     }
 
     const wrapper = await montar()
@@ -140,7 +141,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
   })
 
   it('sin eventos, el historial dice que todavía no hubo cambios', async () => {
-    miPinRespuesta = { fijado: true, eventos: [] }
+    miPinRespuesta = { fijado: true, eventos: [], total: 0 }
 
     const wrapper = await montar()
 
@@ -148,7 +149,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
   })
 
   it('guardar manda pin y confirmarPin, avisa por toast y recarga el estado', async () => {
-    miPinRespuesta = { fijado: false, eventos: [] }
+    miPinRespuesta = { fijado: false, eventos: [], total: 0 }
 
     const wrapper = await montar()
     await wrapper.find('input[type="password"]').setValue('135790')
@@ -157,7 +158,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
 
     // Tras guardar, el mock pasa a reportar el PIN fijado — así la aserción
     // de recarga es observable (el aviso de "todavía no tenés PIN" desaparece).
-    miPinRespuesta = { fijado: true, eventos: [] }
+    miPinRespuesta = { fijado: true, eventos: [], total: 0 }
 
     await wrapper.find('form').trigger('submit')
     await new Promise(r => setTimeout(r, 0))
@@ -168,7 +169,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
   })
 
   it('un error al guardar (ej: PIN obvio) se muestra con el mensaje que vuelve del backend', async () => {
-    miPinRespuesta = { fijado: false, eventos: [] }
+    miPinRespuesta = { fijado: false, eventos: [], total: 0 }
     fijarMiPinError = 'Ese PIN es demasiado previsible. Elegí uno que no sea todo el mismo dígito ni una secuencia.'
 
     const wrapper = await montar()

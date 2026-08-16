@@ -120,6 +120,25 @@ export interface EventoPinPublico {
   creadoEl: Date;
 }
 
+/**
+ * Última página del historial de PIN, con **el total** al lado.
+ *
+ * El total no es decorativo: sin él, topear la lista recorta la historia en
+ * silencio, que es justo lo que la decisión del owner (2026-08-15) descartó.
+ * La UI muestra *"los últimos N de M"*.
+ */
+export interface EventosPinPagina {
+  eventos: EventoPinPublico[];
+  total: number;
+}
+
+/**
+ * Cuántos eventos de PIN se traen por consulta. 50 es holgado para lo que estas
+ * dos pantallas hacen —mirar los últimos cambios— y acota una tabla que solo
+ * crece. No se paginó de verdad porque nadie pidió navegar el historial.
+ */
+const TOPE_EVENTOS_PIN = 50;
+
 @Injectable()
 export class GarzonesService {
   constructor(
@@ -671,7 +690,7 @@ export class GarzonesService {
   async listarEventosPin(
     tenantId: string,
     garzonId: string,
-  ): Promise<EventoPinPublico[]> {
+  ): Promise<EventosPinPagina> {
     await this.getOrThrow(tenantId, garzonId);
     return this.eventosPinDe(tenantId, garzonId);
   }
@@ -682,23 +701,48 @@ export class GarzonesService {
    * (`miPin()`) y esa confirmación sería una cuarta consulta redundante
    * sobre la misma fila que `miGarzonOrThrow` ya resolvió.
    */
+  /**
+   * Últimos `TOPE_EVENTOS_PIN` eventos **y el total**, no la tabla entera.
+   *
+   * `garzon_pin_evento` solo crece: el diseño decidió guardar todos los cambios
+   * de PIN, no solo el último. Sin tope, con años de regeneraciones para un
+   * garzón activo la consulta y el payload crecían sin techo, y las dos
+   * pantallas que la consumen los traían enteros en cada carga.
+   *
+   * **Se devuelve el total además de la página** (decisión del owner,
+   * 2026-08-15). Topear sin el total era lo barato, pero **recorta la historia
+   * sin decirlo**: la pantalla muestra menos eventos y nada avisa que existen
+   * más.
+   */
   private async eventosPinDe(
     tenantId: string,
     garzonId: string,
-  ): Promise<EventoPinPublico[]> {
-    return this.garzonRepo.manager.query<EventoPinPublico[]>(
-      `SELECT e.garzon_pin_evento_id AS id,
-              e.tipo,
-              u.nombre_usuario AS "usuarioNombre",
-              e.creado_el AS "creadoEl"
-         FROM garzon_pin_evento e
-         LEFT JOIN usuarios u ON u.usuario_id = e.usuario_id
-        WHERE e.tenant_id = $1
-          AND e.garzon_id = $2
-          AND e.eliminado_el IS NULL
-        ORDER BY e.creado_el DESC`,
-      [tenantId, garzonId],
-    );
+  ): Promise<EventosPinPagina> {
+    const [eventos, filas] = await Promise.all([
+      this.garzonRepo.manager.query<EventoPinPublico[]>(
+        `SELECT e.garzon_pin_evento_id AS id,
+                e.tipo,
+                u.nombre_usuario AS "usuarioNombre",
+                e.creado_el AS "creadoEl"
+           FROM garzon_pin_evento e
+           LEFT JOIN usuarios u ON u.usuario_id = e.usuario_id
+          WHERE e.tenant_id = $1
+            AND e.garzon_id = $2
+            AND e.eliminado_el IS NULL
+          ORDER BY e.creado_el DESC
+          LIMIT $3`,
+        [tenantId, garzonId, TOPE_EVENTOS_PIN],
+      ),
+      this.garzonRepo.manager.query<{ total: number }[]>(
+        `SELECT COUNT(*)::int AS total
+           FROM garzon_pin_evento e
+          WHERE e.tenant_id = $1
+            AND e.garzon_id = $2
+            AND e.eliminado_el IS NULL`,
+        [tenantId, garzonId],
+      ),
+    ]);
+    return { eventos, total: Number(filas[0]?.total ?? 0) };
   }
 
   /**
@@ -741,14 +785,14 @@ export class GarzonesService {
   async miPin(
     tenantId: string,
     usuarioId: string,
-  ): Promise<{ fijado: boolean; eventos: EventoPinPublico[] }> {
+  ): Promise<{ fijado: boolean } & EventosPinPagina> {
     const garzon = await this.miGarzonOrThrow(tenantId, usuarioId);
     return {
       fijado: garzon.pinHash !== PIN_INUTILIZABLE,
       // `eventosPinDe`, no `listarEventosPin`: `miGarzonOrThrow` ya confirmó
       // que este garzón existe en el tenant — reconfirmarlo acá sería la
       // cuarta consulta redundante que este método existe para evitar.
-      eventos: await this.eventosPinDe(tenantId, garzon.id),
+      ...(await this.eventosPinDe(tenantId, garzon.id)),
     };
   }
 

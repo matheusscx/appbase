@@ -1283,51 +1283,11 @@ Las 28 restantes se mudaron a la sección 3 —o a la 6, cuando la respuesta las
 feature— **cada una con su decisión escrita y con las trampas que el que la tome se iba a
 encontrar**: dependencias entre entradas, carreras adentro del arreglo, docs que hay que
 corregir en el mismo commit, y costos que el owner asumió explícitamente.
+✅ **Y las dos que se abrieron el 2026-08-15 se contestaron el mismo día** (el historial de
+PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
+
 La única que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
 una respuesta.
-
-- [ ] 🔵 **¿El historial de PIN se pagina o se topea?** (backend + frontend, **elevado desde
-  la sección mecánica el 2026-08-15**) — se intentó cerrar como mecánica y **no lo es**: las
-  dos salidas cambian cosas distintas y ninguna es neutral.
-  · **Topear con un `LIMIT` fijo** no toca el contrato, pero **recorta la historia sin
-    decirlo**: las dos pantallas muestran menos eventos y nada avisa que hay más.
-  · **Paginar de verdad** con el patrón que el repo ya usa en 8+ módulos
-    (`PaginationQueryDto` + `resolvePagination`/`buildPaginationMeta`) cambia el shape de la
-    respuesta a `{ data, meta }`, así que toca el controller y **las dos pantallas** que lo
-    consumen (la ficha del encargado y el perfil del garzón).
-  **La pregunta concreta: ¿alguien necesita ver el historial completo de PIN de un garzón, o
-  con los últimos N alcanza?** Si alcanza, ¿cuántos? La respuesta decide cuál de las dos.
-
-  <details><summary>Lo medido cuando era mecánica (histórico)</summary>
-
-- [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
-  (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
-  de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
-  `LIMIT`/paginación. Hoy con pocos eventos por garzón no se nota, pero es una tabla que solo
-  crece —el diseño explícitamente decidió guardar todo, no solo el último cambio— y la alimentan
-  dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
-  /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
-  garzón activo, la consulta y el payload crecen sin techo.
-
-  </details>
-
-- [ ] **La barrida del `expect` en el login dejó una pregunta abierta que no es mecánica:
-  ¿el arranque debe negarse a levantar sin `SMTP_HOST` en producción?** (backend + producto,
-  **abierta el 2026-08-15 al cerrar la entrada del log en texto plano**) — el agujero en sí ya
-  está cerrado: en producción el cuerpo del mail **nunca** se escribe en el log (ver
-  [`resueltos.md`](resueltos.md)). Lo que queda es la otra mitad, que **es decisión de producto
-  y por eso no se resolvió sola**: hoy, sin SMTP configurado, el sistema arranca igual y
-  registra un `error` diciendo que ningún mail va a salir. La alternativa —tirar en el
-  constructor y no levantar— es *fallar fuerte* de verdad, pero **deja el POS entero caído
-  porque el mail no está configurado**. Nadie puede vender porque nadie puede invitar usuarios.
-  ⚖️ El precedente del repo apunta al arranque tolerante: `MailService` **nunca lanza hacia
-  arriba** por decisión explícita y documentada (un mail que no sale no puede tumbar la
-  operación que lo originó). Negarse a arrancar es coherente con "configuración obligatoria" y
-  contradictorio con ese docblock. **Es del owner, no del agente.**
-  🔎 **Y sigue faltando el dato que decide la urgencia, que no se consultó a propósito**
-  (listar variables de Railway expone credenciales): **¿el deploy de producción tiene
-  `SMTP_HOST` seteado?** Se ve en el dashboard en un clic. Con el arreglo puesto ya no hay fuga
-  en ninguno de los dos casos; lo que cambia es si hoy los mails llegan o no llegan.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —

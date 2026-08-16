@@ -149,6 +149,54 @@ criterio de permisos ya ata el tenant en todos lados: todavía no.** La adverten
 no solo allá porque `resueltos.md` es el archivo que se consulta para dar algo por cerrado, y
 el link entre los dos archivos era de una sola dirección.
 
+## Las dos preguntas que abrió el día, contestadas el mismo día (2026-08-15)
+
+Las dos nacieron al cerrar entradas mecánicas: al abrirlas resultó que no lo eran, y se
+elevaron en vez de resolverse solas. El owner las contestó y quedan cerradas.
+
+### El historial de PIN: se topea, **con aviso**
+
+**La pregunta:** `garzon_pin_evento` solo crece —el diseño decidió guardar todos los cambios
+de PIN, no solo el último— y dos pantallas lo traían entero en cada carga. ¿Alguien necesita
+verlo completo, o con los últimos N alcanza?
+
+**La respuesta del owner: topear, pero que se note.** Ni paginar de verdad (nadie pidió
+navegar el historial: se mira el final) ni topear a secas, que **recorta la historia en
+silencio** — la pantalla muestra menos y nada avisa que hay más.
+
+**Cómo quedó:** `eventosPinDe` devuelve `{ eventos, total }` — los últimos **50** más el
+conteo completo, en dos consultas paralelas. El total **no lleva el `LIMIT`**: si lo llevara
+toparía en 50 y el aviso diría *"50 de 50"*, o sea mentiría con más pasos.
+El aviso vive en `PinEventosLista.vue` y no en cada pantalla, porque ese componente lo montan
+**las dos** (la ficha del encargado y el perfil del garzón): *"Mostrando los últimos N de M"*,
+y solo cuando efectivamente hay más.
+
+⚠️ **Es un cambio de contrato**, y se llevó puesto lo que tenía que llevarse: el spec de la
+ficha, el de `MiPinForm`, y un e2e que trataba la respuesta como array. Los tres se
+actualizaron; que se pusieran rojos es exactamente lo que se esperaba de ellos.
+**Mutantes:** sacar el `LIMIT` deja el test rojo por su aserción, y sacar el cartel del
+componente también.
+
+### Sin `SMTP_HOST` en producción: el sistema **sigue arrancando**
+
+**La pregunta:** el agujero de la fuga ya estaba cerrado (el cuerpo del mail nunca se escribe
+en el log). Lo que quedaba era si el arranque debía **negarse a levantar** sin SMTP.
+
+**La respuesta del owner: no.** Se queda como está — arranca y registra un `error` diciendo
+que ningún mail va a salir.
+
+**Por qué es la correcta, y no solo la cómoda:** negarse a arrancar deja el **POS entero
+caído** porque el mail no está configurado — nadie vende porque nadie puede invitar usuarios.
+Y contradice el docblock de `MailService`, que dice explícitamente que este service **nunca
+lanza hacia arriba**: un mail que no sale no puede tumbar la operación que lo originó.
+**No hubo cambio de código**: la decisión confirma el comportamiento vigente. Lo que cambia
+es que deja de ser un default accidental y pasa a ser una decisión registrada.
+
+🔎 **Sigue pendiente el dato que decide la urgencia**, que no se consultó a propósito porque
+listar variables de Railway expone credenciales: **¿el deploy de producción tiene `SMTP_HOST`
+seteado?** Un clic en el dashboard. Ya no hay fuga en ninguno de los dos casos; lo que cambia
+es si hoy los mails llegan o no llegan.
+
 ## La sección mecánica queda vacía: segunda tanda, once entradas más (2026-08-15)
 
 Segunda tanda paralelizada, con la regla que salió de la primera: **repartir por dueño de

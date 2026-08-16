@@ -87,10 +87,22 @@ export interface EventoPin {
   creadoEl: string
 }
 
-/** Mi propio estado de PIN, tal como lo ve el garzón dueño de la cuenta. */
-export interface MiPinEstado {
-  fijado: boolean
+/**
+ * Una página del historial de PIN: los últimos N eventos **y el total**.
+ *
+ * El `total` no es decorativo. El backend topea la lista porque
+ * `garzon_pin_evento` solo crece, y sin este número la pantalla recortaría la
+ * historia en silencio — que es justo lo que la decisión del owner
+ * (2026-08-15) descartó. Con él puede decir "los últimos N de M".
+ */
+export interface EventosPinPagina {
   eventos: EventoPin[]
+  total: number
+}
+
+/** Mi propio estado de PIN, tal como lo ve el garzón dueño de la cuenta. */
+export interface MiPinEstado extends EventosPinPagina {
+  fijado: boolean
 }
 
 export function useGarzones() {
@@ -177,9 +189,9 @@ export function useGarzones() {
       body: { pin, confirmarPin },
     })
 
-  /** La historia de PIN de un garzón, para la ficha. */
+  /** La historia de PIN de un garzón, para la ficha. Topeada, con el total. */
   const listarEventosPin = (id: string) =>
-    useApiFetch<EventoPin[]>(`${apiUrl}/garzones/${id}/pin-eventos`)
+    useApiFetch<EventosPinPagina>(`${apiUrl}/garzones/${id}/pin-eventos`)
 
   return {
     listar,

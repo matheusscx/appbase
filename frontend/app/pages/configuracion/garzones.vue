@@ -212,6 +212,10 @@ const garzonEnEdicion = computed(() =>
   editingId.value ? garzones.value.find(g => g.id === editingId.value) ?? null : null,
 )
 const eventosPin = ref<EventoPin[]>([])
+// El total del servidor, no `eventosPin.length`: el backend topea la lista, así
+// que derivarlo del array diría "5 de 5" cuando hay 200. Ese silencio es
+// exactamente lo que la decisión del owner descartó al elegir "topear con aviso".
+const totalEventosPin = ref(0)
 const cargandoEventosPin = ref(false)
 // Distingue "cargó y no hay eventos" (real: un garzón creado YA vinculado
 // por API —`crear()` con `usuarioId`— no emite PIN y por lo tanto no
@@ -257,7 +261,9 @@ async function cargarEventosPin(id: string) {
   cargandoEventosPin.value = true
   errorEventosPin.value = false
   try {
-    eventosPin.value = await garzonesApi.listarEventosPin(id)
+    const pagina = await garzonesApi.listarEventosPin(id)
+    eventosPin.value = pagina.eventos
+    totalEventosPin.value = pagina.total
   }
   catch (e: unknown) {
     errorEventosPin.value = true
@@ -839,7 +845,7 @@ const columns: TableColumn<Garzon>[] = [
               <p v-else-if="errorEventosPin" class="text-sm text-error">
                 No se pudo cargar el historial del PIN.
               </p>
-              <GarzonesPinEventosLista v-else :eventos="eventosPin" />
+              <GarzonesPinEventosLista v-else :eventos="eventosPin" :total="totalEventosPin" />
             </div>
           </div>
         </template>

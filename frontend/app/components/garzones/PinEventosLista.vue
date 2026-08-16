@@ -1,7 +1,24 @@
 <script setup lang="ts">
 import type { EventoPin, TipoEventoPin } from '~/composables/useGarzones'
 
-const props = defineProps<{ eventos: EventoPin[] }>()
+const props = defineProps<{
+  eventos: EventoPin[]
+  /**
+   * Cuántos eventos hay **en total**, que puede ser más que los recibidos: el
+   * backend topea la lista porque `garzon_pin_evento` solo crece.
+   *
+   * Sin este número la pantalla recortaría la historia **en silencio**, que es
+   * justo lo que la decisión del owner (2026-08-15) descartó al elegir "topear
+   * con aviso" sobre "topear a secas". Por eso el aviso vive acá y no en cada
+   * pantalla: este componente lo montan las dos.
+   */
+  total?: number
+}>()
+
+/** Hay más historia de la que se está mostrando. */
+const hayMas = computed(
+  () => props.total !== undefined && props.total > props.eventos.length,
+)
 
 const { formatFecha } = useFormatters()
 
@@ -55,14 +72,19 @@ function texto(e: EventoPin): string {
   <p v-if="props.eventos.length === 0" class="text-sm text-muted">
     Todavía no hubo cambios de PIN.
   </p>
-  <ul v-else class="divide-y divide-default">
-    <li
-      v-for="e in props.eventos"
-      :key="e.id"
-      class="flex items-center justify-between gap-3 py-2 text-sm"
-    >
-      <span class="text-default">{{ texto(e) }}</span>
-      <span class="shrink-0 text-xs text-muted">{{ formatFecha(e.creadoEl) }}</span>
-    </li>
-  </ul>
+  <template v-else>
+    <p v-if="hayMas" class="pb-2 text-xs text-muted">
+      Mostrando los últimos {{ props.eventos.length }} de {{ props.total }} cambios.
+    </p>
+    <ul class="divide-y divide-default">
+      <li
+        v-for="e in props.eventos"
+        :key="e.id"
+        class="flex items-center justify-between gap-3 py-2 text-sm"
+      >
+        <span class="text-default">{{ texto(e) }}</span>
+        <span class="shrink-0 text-xs text-muted">{{ formatFecha(e.creadoEl) }}</span>
+      </li>
+    </ul>
+  </template>
 </template>

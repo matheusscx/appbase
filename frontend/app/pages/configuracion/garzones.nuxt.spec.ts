@@ -187,7 +187,12 @@ mockNuxtImport('useApiFetch', () => {
       if (eventosPinRechaza) {
         return Promise.reject(errorApi('No se pudo cargar el historial'))
       }
-      return Promise.resolve(eventosPinBackend[id] ?? [])
+      // `{ eventos, total }`, no un array: el backend topea el historial
+      // porque `garzon_pin_evento` solo crece, y manda el total al lado para
+      // que la UI pueda decir "los últimos N de M" en vez de recortar en
+      // silencio (decisión del owner, 2026-08-15).
+      const eventos = eventosPinBackend[id] ?? []
+      return Promise.resolve({ eventos, total: eventos.length })
     }
     if (method === 'DELETE') {
       const id = url.split('/').pop()

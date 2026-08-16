@@ -205,11 +205,11 @@ el corte lo hace el token, que decide de qué garzón se está hablando.
 | POST | `/garzones` | `Crear` | Crea `{ nombre, activo?, tipo?, usuarioId? }` → el garzón + `advertencias` + `pin`: **sin** `usuarioId` el generado (una vez), **con** cuenta `null` (no se emite ninguno) |
 | PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo?, tipo?, usuarioId? }` → el garzón + `advertencias`. `usuarioId: null` desvincula; **ausente** no toca el vínculo |
 | PATCH | `/garzones/:id/pin` | `Actualizar` | Sin body. **Sin cuenta** regenera y devuelve el `pin` nuevo (una vez); **con cuenta** invalida y devuelve `pin: null`. Suma `habiaPin`: si había uno usable antes de este PATCH |
-| GET | `/garzones/:id/pin-eventos` | `Leer` | La historia de PIN del garzón, más nueva primero. **Nunca** el PIN |
+| GET | `/garzones/:id/pin-eventos` | `Leer` | `{ eventos, total }`: los **últimos 50**, más nuevos primero, y cuántos hay en total. **Nunca** el PIN |
 | DELETE | `/garzones/:id` | `Eliminar` | Soft delete |
 | POST | `/garzones/:id/restaurar` | `Eliminar` | Saca de la papelera |
 | PATCH | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ pin, confirmarPin }` → `204`. El garzón fija el suyo; **no pide el anterior**. `404` si esa cuenta no es garzón en este tenant |
-| GET | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ fijado, eventos }`: alimenta el bloque "Mi PIN" del perfil |
+| GET | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ fijado, eventos, total }`: alimenta el bloque "Mi PIN" del perfil. `eventos`/`total`, igual que arriba |
 | GET | `/garzones/mi-vinculo` | `Operar` | El garzón que "es" esta cuenta, o `null` si hay que pedir PIN |
 | GET | `/garzones/para-selector?enTurno=` | `Operar` | Las dos listas del selector → `{ garzonId, nombre }[]`. `enTurno` **obligatorio** |
 | POST | `/garzones/verificar-pin` | `Operar` | `{ garzonId, pin }` → `{ garzonId, nombre }` (o 400), **sin ejecutar nada** |

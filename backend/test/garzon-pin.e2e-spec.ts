@@ -255,8 +255,18 @@ describe('PIN propio del garzón (e2e)', () => {
     // anteriores sin `reset-db.sh` — se afirma el PREFIJO exacto y el total
     // relativo a `eventosBase`, no la lista entera (ver docblock del
     // `afterAll`: el historial no se limpia ni se debería limpiar).
-    const eventos = res.body as { tipo: string; usuarioNombre: string }[];
+    // `{ eventos, total }`, no un array: el historial se topea (50) y viene
+    // con el total al lado, para que la UI diga "los últimos N de M" en vez de
+    // recortar en silencio (decisión del owner, 2026-08-15).
+    const body = res.body as {
+      eventos: { tipo: string; usuarioNombre: string }[];
+      total: number;
+    };
+    const eventos = body.eventos;
     expect(eventos.length).toBe(eventosBase + 2);
+    // El total NO lleva el LIMIT: cuenta todo lo que hay, aunque la página
+    // esté topeada. Con esta fixture coinciden porque son pocos eventos.
+    expect(body.total).toBe(eventosBase + 2);
     expect(eventos.slice(0, 2).map((e) => e.tipo)).toEqual([
       'invalidado_por_encargado',
       'fijado_por_garzon',

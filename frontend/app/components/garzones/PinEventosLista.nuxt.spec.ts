@@ -68,4 +68,49 @@ describe('PinEventosLista', () => {
 
     expect(wrapper.text()).toContain('Hubo un cambio en el PIN')
   })
+
+  // La decisión del owner (2026-08-15) fue "topear CON aviso", no topear a
+  // secas: el backend acota el historial porque `garzon_pin_evento` solo crece,
+  // y sin este cartel la pantalla recortaría la historia en silencio. El aviso
+  // vive acá, no en cada pantalla, porque este componente lo montan las dos.
+  describe('aviso de historial topeado', () => {
+    const unEvento: EventoPin[] = [
+      { id: 'e1', tipo: 'emitido_en_alta', usuarioNombre: 'admin.paris', creadoEl: '2026-08-01T10:00:00.000Z' },
+    ]
+
+    it('avisa cuando hay más eventos de los que recibió', async () => {
+      const wrapper = await mountSuspended(PinEventosLista, {
+        props: { eventos: unEvento, total: 87 },
+      })
+
+      expect(wrapper.text()).toContain('Mostrando los últimos 1 de 87 cambios')
+    })
+
+    it('NO avisa cuando los recibidos son todos los que hay', async () => {
+      const wrapper = await mountSuspended(PinEventosLista, {
+        props: { eventos: unEvento, total: 1 },
+      })
+
+      expect(wrapper.text()).not.toContain('Mostrando los últimos')
+    })
+
+    // `total` es opcional: un llamador que no lo pase no tiene que ver un
+    // cartel a medias con `undefined` adentro.
+    it('NO avisa si no le pasan el total', async () => {
+      const wrapper = await mountSuspended(PinEventosLista, {
+        props: { eventos: unEvento },
+      })
+
+      expect(wrapper.text()).not.toContain('Mostrando los últimos')
+    })
+
+    it('sin eventos no avisa nada, aunque el total venga en cero', async () => {
+      const wrapper = await mountSuspended(PinEventosLista, {
+        props: { eventos: [], total: 0 },
+      })
+
+      expect(wrapper.text()).toContain('Todavía no hubo cambios de PIN')
+      expect(wrapper.text()).not.toContain('Mostrando los últimos')
+    })
+  })
 })
