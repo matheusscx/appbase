@@ -462,6 +462,13 @@ empezarlas.
   redirect a `/auth/callback?token=…` sigue dejándolo en el historial del navegador y en los
   logs de acceso del frontend, y `callback.vue` sigue sin `replace: true`. Se paga **antes de
   habilitar Google**.
+  ➕ **Y con él se paga otra cosa que el mismo día dejó a medias (2026-08-16):** al cortar la
+  vinculación por coincidencia de correo, entrar con Google teniendo ya una cuenta local
+  devuelve `409` y manda a usar la contraseña — **pero no existe ningún camino para vincular
+  Google a esa cuenta después**. Es deliberado: hacerlo implícito en el login era el agujero,
+  y la acción correcta —vincular desde adentro de la sesión, en el perfil— es una feature que
+  nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
+  habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
 - [ ] **Contratar un módulo, ¿es un borde duro o solo decide qué se ve en el menú?** (backend +
   producto, auditoría RBAC/auth 2026-08-15) — **tres lentes ciegas entre sí cayeron sobre el
@@ -1208,7 +1215,42 @@ corregir en el mismo commit, y costos que el owner asumió explícitamente.
 ✅ **Y las dos que se abrieron el 2026-08-15 se contestaron el mismo día** (el historial de
 PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
 
-La única que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
+⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
+identidad de ese día. Ninguna bloquea nada que esté en curso.
+
+- [ ] **La pasada de auditoría de las dos lentes nuevas está escrita y sin lanzar — falta el
+  presupuesto** (owner) — el brief completo vive en
+  [`2026-08-15-auditoria-cross-tenant-y-pool.md`](../superpowers/plans/2026-08-15-auditoria-cross-tenant-y-pool.md);
+  pasarle esa ruta al agente cuando se decida disparar. Las dos decisiones de diseño ya están
+  tomadas: la lente del pool va en **modo delta** (se le pasa la tabla del 2026-08-11 como
+  contexto conocido, redescubrir 7 módulos ya documentados es pagar dos veces) y **no se
+  arregla nada**, todo va al backlog.
+  **Lo único que falta es el número.** El método exige fijarlo antes —*"si no se fija antes,
+  la pasada crece hasta donde alcance"*—; la referencia medida es ~1.4M tokens para 5 lentes
+  y la estimación para estas dos, con una en delta, es **300-500k**.
+  ℹ️ **Línea base ya medida** (2026-08-16, conteo mecánico, en el plan): lente del pool ~20
+  candidatos en 7 archivos, con cinco sitios de `ventas.service.ts` verificados a mano y
+  **todavía sin arreglar** → ahí lo pendiente es arreglar, no encontrar, y eso es el frente
+  🔴. Lente cross-tenant ~23 candidatos en 8 archivos, pero **la mayoría son legítimos**
+  (sesiones y perfil propio son por-usuario a propósito): ésa es la que necesita la pasada,
+  porque distinguir el caso legítimo del bug es juicio por sitio y no grep.
+  ⚠️ Al leer el resultado, tener presente lo que el propio método advierte: se decidió
+  reportar sin arreglar, así que **el backlog va a subir, no bajar**.
+
+- [ ] **¿El admin puede editar los roles de un alta pendiente antes de que la persona
+  confirme?** (producto + backend, 2026-08-16) — hoy **no**, y la pantalla lo refleja: las
+  acciones de fila están deshabilitadas para los pendientes, con el motivo escrito. No es una
+  omisión de UI: los roles quedan **congelados en el token** (`tokens_acceso.datos`) hasta que
+  se confirma, y la persona todavía no tiene fila en `usuarios_tenants`, así que
+  `roles.service.ts` → `assignUser` la rechaza con *"El usuario no pertenece a este tenant"*.
+  El admin que se equivocó de roles hoy tiene una sola salida: repetir el alta, que emite un
+  token nuevo y quema el anterior.
+  **La pregunta:** ¿alcanza con eso, o el alta pendiente tiene que ser editable? Lo segundo
+  necesita un endpoint que reescriba `datos.rolIds` del token vivo, y es decisión de producto
+  —no un ajuste de pantalla—. Lo levantó el agente de frontend al construirlo, y se dejó en el
+  camino barato a propósito.
+
+La otra que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
 una respuesta.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
@@ -1811,6 +1853,22 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 hallazgos refutados, y ramas de test que se descartaron con su motivo. Viven acá para no
 volver a descubrirlas desde cero, y **no cuentan** cuando se mide el tamaño del backlog.
 La que tiene condición de reapertura la dice adentro.
+
+- [ ] **Un refresh token robado y replayado dentro de los 30 s de la rotación obtiene la
+  sesión sin disparar la detección de reuso** (backend, `auth.service.ts` →
+  `resolverCanjePerdido`, 2026-08-16) — **es el residuo inherente a la ventana de gracia, no
+  un descuido.** Adentro de esa ventana el sistema no puede distinguir al atacante del
+  perdedor legítimo de una carrera: son el mismo hecho visto a la misma distancia temporal.
+  Y el ping-pong se puede sostener —si el atacante rota, la víctima cae en la gracia y recibe
+  la del atacante, y así— sin que la detección corte nunca.
+  **Por qué se acepta:** la alternativa es no tener gracia, y eso deslogueaba de todos sus
+  dispositivos a cualquiera con dos pestañas abiertas o un reintento de red. Se eligió el
+  residuo chico sobre el daño rutinario, con el owner decidiéndolo (ver `resueltos.md`).
+  No se acumula solo: el `usado_el` de la fila es fijo, no deslizante, así que la ventana no
+  se extiende sola. Verificado que pasados los 30 s la detección sí corta todo.
+  🔓 **Condición de reapertura:** si algún día hay datos productivos y el modelo de amenaza
+  sube, la salida conocida es acortar la ventana o mover la detección a familias de tokens.
+  Hoy sería complejidad sin beneficio.
 
 - [ ] **El país del tenant se deriva con el mismo JOIN en 12 queries** (backend, ocho
   módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
