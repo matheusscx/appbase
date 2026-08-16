@@ -170,7 +170,7 @@ admin-only con lectura abierta; las features operativas usan `@RequiresPermiso`.
 |---|---|---|
 | `POST /api/recuentos` | Crea la sesión en `borrador` con sus líneas; congela `stock_sistema` de cada una | `Inventario/Crear` |
 | `GET /api/recuentos` | Lista sesiones (paginado) con estado, fecha y diferencia neta | `Inventario/Leer` |
-| `GET /api/recuentos/:id` | Detalle con líneas: stock del sistema, contado y diferencia | `Inventario/Leer` |
+| `GET /api/recuentos/:id` | Detalle con líneas: stock del sistema, contado y diferencia. Incluye las de productos eliminados con la sesión abierta, marcadas con `itemEliminado` — el detalle y `cantidadLineas` del listado cuentan lo mismo | `Inventario/Leer` |
 | `PATCH /api/recuentos/:id/lineas/:lineaId` | Carga `cantidadContada` y/o override `motivoDiferenciaId` de una línea | `Inventario/Crear` |
 | `PATCH /api/recuentos/:id` | Cambia `motivoDiferenciaDefaultId` y/o `comentario` de la sesión | `Inventario/Crear` |
 | `POST /api/recuentos/:id/cancelar` | Pasa a `cancelado` sin tocar stock | `Inventario/Crear` |
@@ -447,7 +447,7 @@ tras adoptar `unwrap()` compartido.
 | Aplicar una sesión con causa desactivada entre la carga y el aplicar | Movimiento quedaría con causa muerta en el kardex | `aplicar` revalida `activo=true` de todas las causas resueltas justo antes de mover stock, en una sola query batcheada y **con `FOR SHARE`**: sin el lock, un `DELETE` o una desactivación se cuela entre la validación y los `INSERT` (el `EXISTS` del catálogo no ve movimientos sin commitear). Del otro lado, `remove`/`update` del catálogo corren en transacción y toman la fila `FOR UPDATE`, así que esperan el commit |
 | Producto que cambia de `modo_inventario` mientras la sesión está en borrador | El kardex rechazaría la línea con "faltan las series", sin decir cuál | `aplicar` revalida `modo_inventario = 'cantidad'` por línea y nombra el producto. Pasa con productos sin movimientos, que sí admiten el cambio de modo |
 | Deadlock contra una venta simultánea | Postgres aborta una de las dos (40P01) y el usuario ve un 500 | `aplicar` lockea por `item_id` ascendente, pero una venta lockea en el orden del carrito, que arma el cliente — y sus recetas y combos no pueden garantizar ningún orden. En vez de imponérselo a ventas, `aplicar` **reintenta una vez** ante 40P01: el rollback dejó la transacción sin efecto, así que el reintento es seguro |
-| Producto eliminado entre contar y aplicar | Fallaría toda la sesión | La línea se descarta (`lineasDescartadas` en la respuesta) y el resto se aplica igual |
+| Producto eliminado entre contar y aplicar | Fallaría toda la sesión | La línea se descarta (`lineasDescartadas` en la respuesta) y el resto se aplica igual. El detalle la **muestra** con `itemEliminado: true` en vez de esconderla: filtrarla ahí la hacía desaparecer sin aviso mientras `findAll` la seguía contando en `cantidadLineas` —el listado decía 12 y el detalle mostraba 11—, y el que cuenta no veía por qué le sobraba una |
 | Dos sesiones en `borrador` sobre el mismo producto | Doble conteo pisándose | Cada línea congela su propio `stock_sistema`; el delta se calcula contra ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final |
 | Delta dejaría stock negativo | Saldo inconsistente | Rechazo con el producto nombrado — misma invariante que cualquier salida del kardex |
 

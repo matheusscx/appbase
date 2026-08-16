@@ -59,6 +59,18 @@ interface MoverResult {
   loteConsumos?: { loteId: string; cantidad: string }[];
 }
 
+/**
+ * Los únicos motivos que un ítem eliminado sigue aceptando: los que **deshacen**
+ * algo. Anular una venta o recibir una devolución cierran una operación que
+ * existió y cuya plata ya se movió, así que tienen que poder ejecutarse aunque
+ * el producto se haya discontinuado después. Comprar, mermar, ajustar costo,
+ * contar o vender un producto eliminado no tiene operación real detrás.
+ *
+ * Es una allowlist y no una lista de rechazos a propósito: un motivo nuevo nace
+ * rechazado sobre un eliminado, que es el lado seguro del default.
+ */
+const MOTIVOS_SOBRE_ITEM_ELIMINADO = ['anulacion', 'devolucion'];
+
 @Injectable()
 export class InventarioService {
   constructor(
@@ -96,15 +108,19 @@ export class InventarioService {
     // caliente del sistema — exactamente donde la auditoría del 2026-08-15 encontró
     // deadlocks por orden de bloqueo.
     //
-    // No filtra `i.eliminado_el IS NULL` a propósito: eso cambiaría la semántica de
-    // las reposiciones (anular una venta de un ítem borrado después dejaría de
-    // reponer), que es otra decisión y no la que este cambio vino a tomar.
+    // No filtra `i.eliminado_el IS NULL` a propósito, y ahora con una regla
+    // explícita detrás en vez de una omisión: filtrarlo haría que anular una
+    // venta de un ítem borrado después dejara de reponer. Lo que decide qué
+    // pasa sobre un eliminado es el guard de abajo, no la ausencia del filtro.
     const productoRows: {
       stock: string;
       modo_inventario: string;
       costo_actual: string | null;
+      item_nombre: string;
+      item_eliminado_el: Date | null;
     }[] = await manager.query(
-      `SELECT ip.stock, ip.modo_inventario, ip.costo_actual
+      `SELECT ip.stock, ip.modo_inventario, ip.costo_actual,
+              i.nombre AS item_nombre, i.eliminado_el AS item_eliminado_el
          FROM item_producto ip
          JOIN items i ON i.item_id = ip.item_id
         WHERE ip.item_id = $1 AND i.tenant_id = $2
@@ -116,6 +132,21 @@ export class InventarioService {
     // un oráculo que confirma qué ítems existen en otros tenants.
     if (!productoRows.length) {
       throw new BadRequestException('El item no tiene control de stock');
+    }
+
+    // El mensaje nombra el producto y dice que está eliminado, en vez de caer en
+    // el genérico de arriba: ese es deliberadamente opaco porque protege el
+    // acote por tenant, y significa otra cosa. Acá no hay nada que ocultar —
+    // quien llama ya sabe que el ítem existe— y confundirlos manda a buscar un
+    // problema de permisos donde hay un producto discontinuado.
+    if (
+      productoRows[0].item_eliminado_el != null &&
+      !MOTIVOS_SOBRE_ITEM_ELIMINADO.includes(params.motivo)
+    ) {
+      throw new BadRequestException(
+        `El producto "${productoRows[0].item_nombre}" está eliminado: ` +
+          'solo admite movimientos de anulación o devolución',
+      );
     }
 
     const modo = productoRows[0].modo_inventario;
@@ -746,10 +777,15 @@ export class InventarioService {
     const { page, pageSize, offset } = resolvePagination(query);
     const { filters, params } = this.buildMovimientosFilters(tenantId, query);
 
+    // Lo que está en el kardex queda en el kardex: el JOIN no filtra
+    // `i.eliminado_el` y la fila se muestra marcada. Filtrarlo acá no dejaba la
+    // fila vacía ni tachada — bajaba el `COUNT`, así que la pantalla informaba
+    // menos movimientos de los que hay sin decir que ocultaba nada. El filtro va
+    // en las DOS consultas o el total vuelve a mentir.
     const countRows: { total: number }[] = await this.dataSource.query(
       `SELECT COUNT(*)::int AS total
        FROM movimientos_inventario mv
-       JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN items i ON i.item_id = mv.item_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          ${filters}`,
       params,
@@ -772,9 +808,10 @@ export class InventarioService {
          p.unidad_medida,
          -- El kardex global mezcla ítems de distintas monedas: sin esto la UI
          -- formatea todo costo con la moneda oficial del tenant.
-         i.moneda_id
+         i.moneda_id,
+         (i.eliminado_el IS NOT NULL) AS item_eliminado
        FROM movimientos_inventario mv
-       JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
@@ -844,6 +881,7 @@ export class InventarioService {
           : null,
       unidadMedida: r.unidad_medida,
       monedaId: r.moneda_id,
+      itemEliminado: r.item_eliminado,
     };
   }
 }
@@ -869,11 +907,21 @@ export interface MovimientoListItem {
   costoPerdido: string | null;
   unidadMedida: string | null;
   monedaId: string;
+  /**
+   * El producto fue dado de baja después de este movimiento. El kardex lo
+   * conserva igual (nada en el backend escribe `movimientos_inventario.
+   * eliminado_el`); la pantalla lo marca para que el que audita entienda por
+   * qué ese producto ya no aparece en el catálogo.
+   */
+  itemEliminado: boolean;
 }
 
 interface MovimientoRow {
   movimiento_id: string;
   item_id: string;
+  // `LEFT JOIN items` pero no nullable: `movimientos_inventario.item_id` es
+  // `NOT NULL REFERENCES items`, así que la fila padre siempre está. El LEFT
+  // solo saca de la ecuación el filtro de borrado, no la existencia.
   item_nombre: string;
   tipo: string;
   motivo: string;
@@ -891,4 +939,5 @@ interface MovimientoRow {
   motivo_diferencia_id: string | null;
   unidad_medida: string | null;
   moneda_id: string;
+  item_eliminado: boolean;
 }

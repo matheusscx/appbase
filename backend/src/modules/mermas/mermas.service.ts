@@ -49,11 +49,15 @@ export interface MermaListItem {
    * `InventarioService` (kardex).
    */
   monedaId: string;
+  /** El producto fue dado de baja después de esta merma. La fila se conserva. */
+  itemEliminado: boolean;
 }
 
 interface MermaRow {
   movimiento_id: string;
   item_id: string;
+  // No nullable pese al `LEFT JOIN`: `movimientos_inventario.item_id` es
+  // `NOT NULL REFERENCES items`. El LEFT solo saca el filtro de borrado.
   item_nombre: string;
   cantidad: string;
   costo_unitario: string | null;
@@ -64,6 +68,7 @@ interface MermaRow {
   usuario_nombre: string | null;
   unidad_medida: string | null;
   moneda_id: string;
+  item_eliminado: boolean;
 }
 
 @Injectable()
@@ -211,6 +216,10 @@ export class MermasService {
           usuarioNombre: null,
           unidadMedida: itemRows[0].unidad_medida,
           monedaId: itemRows[0].moneda_id,
+          // El SELECT de arriba exige `eliminado_el IS NULL`: no se puede mermar
+          // un producto dado de baja, así que la fila recién creada nunca nace
+          // marcada. Solo llega a `true` releyendo el listado tras la baja.
+          itemEliminado: false,
         },
       };
     });
@@ -223,10 +232,14 @@ export class MermasService {
     const { page, pageSize, offset } = resolvePagination(query);
     const { filters, params } = this.buildFilters(tenantId, query);
 
+    // Sin filtro de borrado del ítem, y en las DOS consultas: una merma
+    // registrada es plata perdida que ya ocurrió, así que dar de baja el
+    // producto después no puede borrarla del informe ni —peor— bajar el total
+    // sin avisar. Mismo criterio que el kardex (`InventarioService`).
     const countRows: { total: number }[] = await this.dataSource.query(
       `SELECT COUNT(*)::int AS total
        FROM movimientos_inventario mv
-       JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN items i ON i.item_id = mv.item_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          AND mv.motivo = 'merma'
          ${filters}`,
@@ -244,9 +257,10 @@ export class MermasService {
          mv.cantidad, mv.costo_unitario,
          mv.causa_merma_id, cm.nombre AS causa_nombre,
          mv.comentario, mv.creado_el, u.nombre AS usuario_nombre,
-         p.unidad_medida, i.moneda_id
+         p.unidad_medida, i.moneda_id,
+         (i.eliminado_el IS NOT NULL) AS item_eliminado
        FROM movimientos_inventario mv
-       JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
@@ -310,6 +324,7 @@ export class MermasService {
       usuarioNombre: r.usuario_nombre,
       unidadMedida: r.unidad_medida,
       monedaId: r.moneda_id,
+      itemEliminado: r.item_eliminado,
     };
   }
 }

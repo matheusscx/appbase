@@ -755,17 +755,6 @@ empezarlas.
   liquidada y pagada** es otro y sigue con su decisión propia (saldo en contra del garzón), en
   la sección de proyectos que van solos.
 
-- [ ] **El detalle de un recuento esconde una línea que el listado sigue contando** (backend,
-  auditoría `inventario` 2026-08-15) — `findOne` arma el detalle con `INNER JOIN items` filtrando
-  `eliminado_el`, así que si un ítem se borra mientras la sesión sigue en `borrador` su línea
-  desaparece del detalle sin aviso; `findAll` sigue incluyéndola en `cantidadLineas`. El listado
-  dice 12 líneas y el detalle muestra 11, hasta que al aplicar aparece en `lineasDescartadas`.
-  **La decisión es cuál de las dos vistas está bien:** que el detalle muestre la línea marcada
-  como descartada (coherente con lo que hace `aplicar`) o que el listado deje de contarla.
-  ✅ **DECIDIDO (owner, 2026-08-15): el detalle muestra la línea, marcada como producto
-  eliminado.** El listado no cambia. Es coherente con lo que el sistema ya hace al aplicar —la
-  descarta y lo informa en `lineasDescartadas`—, y el que está contando ve por qué le sobra una.
-
 - [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
   (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
   (`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
@@ -991,51 +980,6 @@ empezarlas.
   regla que se rompió, y se detecta sin traer un linter de markdown entero.
   ℹ️ El chequeo ya existe como script suelto —se usó a mano en cada commit de documentación de
   esta sesión— así que el trabajo es moverlo al hook, no escribirlo de cero.
-
-- [ ] **El kardex conserva todo pero las pantallas lo esconden, y hasta el total miente**
-  (backend + frontend, auditoría `inventario` 2026-08-15; **decidido por el owner el mismo
-  día**) — **lo medido, que es mejor de lo que la entrada original decía por un lado y peor
-  por el otro.**
-  **Mejor:** los datos nunca se pierden. `movimientos_inventario` tiene columna
-  `eliminado_el`, pero **nada en todo el backend la escribe** (medido: cero `softDelete`,
-  cero `UPDATE`, cero `DELETE` físico sobre esa tabla). Borrar un ítem hace soft delete sobre
-  `items` y no toca un solo movimiento.
-  **Peor:** las cuatro consultas de las dos pantallas de auditoría unen con
-  `JOIN items … AND i.eliminado_el IS NULL` —`inventario.service.ts:752` y `:777`,
-  `mermas.service.ts:213` y `:233`— y **el filtro está también en el `COUNT(*)`**, no solo en
-  el listado. O sea que las filas no aparecen tachadas ni vacías: **el total baja**. La
-  pantalla no dice "hay N movimientos ocultos"; informa menos movimientos de los que hay. Y
-  el guard de borrado (`items.service.ts:1834-1849`) bloquea por cuenta, ingrediente, combo y
-  opción, pero **no** por tener kardex, así que discontinuar un producto es trivial.
-  ✅ **Decisión del owner (2026-08-15): lo que está en el kardex queda en el kardex.** Las
-  pantallas pasan a `LEFT JOIN` en las **cuatro** consultas —listado y `COUNT` de kardex, y
-  listado y `COUNT` de mermas— y la fila se muestra con el ítem **marcado como eliminado**.
-  **No se bloquea el borrado**: impedir discontinuar un producto que alguna vez se movió
-  equivale a no poder discontinuar casi ninguno.
-  ⚠️ Al construirlo: el `LEFT JOIN` deja el nombre del ítem en `null`, así que el frontend
-  necesita qué mostrar en esa celda además del marcador. Y el mutante que fija esto tiene que
-  atacar el **`COUNT`**, no solo el listado — si solo se corrige el listado, el total sigue
-  mintiendo y ningún test que cuente filas de la tabla lo nota.
-
-- [ ] **Un ítem eliminado sigue aceptando cualquier movimiento nuevo, no solo los que
-  deshacen algo** (backend, medido 2026-08-15; **decidido por el owner el mismo día**) —
-  hoy `registrarMovimiento` no mira `items.eliminado_el`, así que sobre un producto
-  discontinuado se puede registrar una **compra**, una **merma** o un **ajuste de costo**
-  igual que antes de borrarlo. Es la otra mitad de la decisión de arriba: *"lo que está queda"*
-  habla de los movimientos viejos y no dice nada de los nuevos.
-  ✅ **Decisión del owner (2026-08-15): solo los movimientos que deshacen algo.** Anulación y
-  devolución **sí** —esa venta existió y su plata ya se movió, hay que poder cerrarla—;
-  compra, merma, ajuste de costo y recuento **se rechazan** sobre un ítem eliminado, porque no
-  hay operación real detrás.
-  **Dónde va, y por qué ahí:** en `registrarMovimiento`, que ya es el chokepoint por el que
-  pasa todo movimiento y que desde el 2026-08-15 ya trae `items` en su consulta de lock
-  (`inventario.service.ts:106-113`) — el dato de si está eliminado **ya está a mano**, falta
-  ramificar por `motivo`. Hoy esa consulta **no** filtra `eliminado_el` justamente para no
-  romper las reposiciones; esta entrada es la que convierte esa ausencia en una regla
-  explícita en vez de una omisión.
-  ⚠️ El rechazo tiene que nombrar el producto y decir que está eliminado, no caer en el
-  genérico *"El item no tiene control de stock"* — que es el mensaje deliberadamente opaco
-  del acote por tenant y significa otra cosa.
 
 - [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
   (backend) — `create()`/`update()` persisten `dto.tramos` y

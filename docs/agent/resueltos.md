@@ -17,6 +17,55 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El ítem eliminado deja de esconder su kardex y de aceptar movimientos nuevos (2026-08-16)
+
+Las tres entradas de la sección 3 que eran la misma idea —qué pasa con un producto dado de
+baja— cerradas juntas porque separarlas dejaba el criterio partido en tres archivos.
+
+**Lectura: el filtro se saca de las CINCO consultas, no de las cuatro anunciadas.** Kardex
+(listado + `COUNT`), mermas (listado + `COUNT`) y el detalle del recuento. Las cuatro
+primeras pasan a `LEFT JOIN items` sin condición de borrado y exponen
+`(i.eliminado_el IS NOT NULL) AS item_eliminado`; el detalle del recuento pasa a espejar
+**exactamente** la consulta que `aplicar` ya usaba en el mismo archivo —`LEFT JOIN` con
+condición de tenant— en vez de inventar una forma nueva. En pantalla, badge `Eliminado`
+junto al nombre, con el mismo `UBadge neutral/subtle` que ya usa `terceros`; en el recuento
+suma *"Se va a descartar al aplicar"*.
+
+**Escritura:** allowlist `MOTIVOS_SOBRE_ITEM_ELIMINADO = ['anulacion', 'devolucion']` en
+`registrarMovimiento`, justo después del lock. Allowlist y no lista de rechazos: un motivo
+nuevo nace rechazado, que es el lado seguro. El mensaje nombra el producto y dice que está
+eliminado, sin caer en el genérico del acote por tenant.
+
+**Las tres cosas que salieron de medir, y que las entradas decían distinto**
+
+1. **El guard NO tapa un agujero alcanzable: es defensa en profundidad.** La entrada
+   afirmaba que *"sobre un producto discontinuado se puede registrar una compra, una merma o
+   un ajuste de costo igual que antes de borrarlo"*, y es **falso**. Se recorrieron los 19
+   call sites: `items.ajustarStock`, `items.create`/`update`,
+   `inventario.registrarAjusteCosto` y `mermas.registrar` filtran `eliminado_el IS NULL` y
+   cortan con `404`; `recuentos.aplicar` descarta la línea antes de llamar; y
+   `venderIngredientesReceta` / `venderComponentesCombo` / `venderOpcionesGrupos` excluyen al
+   ingrediente borrado en la expansión. Por eso el guard se cubre con **unit tests** y no con
+   un e2e: montar el escenario por API es imposible, y un e2e que lo fabricara con SQL
+   directo probaría un estado inalcanzable.
+2. **El `LEFT JOIN` NO deja el nombre en `null`.** La entrada avisaba que el frontend
+   necesitaba "qué mostrar en esa celda además del marcador". No hace falta: el soft delete
+   deja la fila en `items`, así que sacar el filtro del `ON` devuelve el nombre igual. El
+   único `null` posible es el del detalle del recuento, y solo si el ítem fuera de otro
+   tenant —que el modelo no permite—; se tipó nullable con `?? '—'` por espejar `aplicar`.
+3. **La consulta de lock traía `items` pero no la columna.** La entrada decía que el dato
+   *"ya está a mano"*. El `JOIN` estaba; `i.eliminado_el` y `i.nombre` había que agregarlos
+   al `SELECT`.
+
+**Qué lo fija.** El e2e `kardex-item-eliminado.e2e-spec.ts` compara `meta.total` antes y
+después de eliminar el producto —no `data.length`—, que es el mutante que la entrada pedía:
+corregir solo el listado deja el total mintiendo y ningún test que cuente filas lo nota. Más
+el caso de que el detalle del recuento y `cantidadLineas` del listado coincidan, que era
+justo la discrepancia 12-vs-11. En unit, la allowlist con los dos lados: cinco motivos
+rechazados sin llegar a tocar el kardex, y anulación/devolución pasando.
+
+---
+
 ## El encargado ya puede dar el permiso que el aviso le pedía dar (2026-08-16)
 
 La tercera entrada del cluster de membresía, separada de las otras dos porque **no tenía

@@ -224,6 +224,43 @@ dentro de una transacción: no repite sus validaciones ni escribe
 
 ---
 
+## Producto eliminado: lo que está en el kardex queda en el kardex
+
+Dar de baja un producto **no se bloquea** aunque tenga movimientos: impedir
+discontinuar lo que alguna vez se movió equivale a no poder discontinuar casi
+nada. Lo que se conserva es el rastro.
+
+**Lectura — la baja no borra ni descuenta.** Nada en el backend escribe
+`movimientos_inventario.eliminado_el`, así que los movimientos nunca se pierden.
+Las consultas de las pantallas de auditoría (kardex y mermas) **no filtran
+`items.eliminado_el`**, ni en el listado ni en el `COUNT(*)`, y devuelven
+`itemEliminado: true` para que la fila se muestre marcada. El filtro tiene que
+estar ausente en **las dos** consultas de cada pantalla: cuando estaba solo en el
+listado, el total seguía bajando y la pantalla informaba menos movimientos de los
+que hay sin decir que ocultaba nada.
+
+**Escritura — solo lo que deshace algo.** Sobre un ítem eliminado,
+`registrarMovimiento` acepta únicamente `motivo='anulacion'` y
+`motivo='devolucion'`: esas ventas existieron y su plata ya se movió, así que hay
+que poder cerrarlas. Todo el resto —compra, merma, ajuste de costo, recuento,
+venta— se rechaza con un mensaje que **nombra el producto** y dice que está
+eliminado, y no con el genérico `El item no tiene control de stock`, que es
+deliberadamente opaco porque protege el acote por tenant y significa otra cosa.
+
+Es una allowlist (`MOTIVOS_SOBRE_ITEM_ELIMINADO`) y no una lista de rechazos: un
+motivo nuevo nace rechazado sobre un eliminado, que es el lado seguro del
+default.
+
+⚠️ **Hoy el guard es defensa en profundidad, no un agujero que se tapa.** Se midió
+llamador por llamador: los seis caminos que no son anulación/devolución ya filtran
+`eliminado_el IS NULL` aguas arriba —`items.ajustarStock`, `items.create`/`update`
+e `inventario.registrarAjusteCosto` y `mermas.registrar` cortan con `404`;
+`recuentos.aplicar` descarta la línea; recetas y combos excluyen al ingrediente
+borrado de la expansión—. La regla vive en el chokepoint para el llamador que se
+agregue mañana sin ese filtro.
+
+---
+
 ## Backend
 
 ### Module & Services

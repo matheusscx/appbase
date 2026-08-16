@@ -51,7 +51,12 @@ interface RecuentoRow {
 interface RecuentoLineaRow {
   linea_id: string;
   item_id: string;
-  item_nombre: string;
+  // Nullable por el `LEFT JOIN` con condición de tenant, igual que en `aplicar`:
+  // el nombre falta solo si el ítem no es del tenant de la línea, que el modelo
+  // no permite. La línea del ítem eliminado SÍ trae nombre — el LEFT saca el
+  // filtro de borrado, no la fila.
+  item_nombre: string | null;
+  item_eliminado: boolean;
   unidad_medida: string | null;
   stock_sistema: string;
   cantidad_contada: string | null;
@@ -98,7 +103,13 @@ export interface RecuentoListItem {
 export interface RecuentoLinea {
   lineaId: string;
   itemId: string;
-  itemNombre: string;
+  itemNombre: string | null;
+  /**
+   * El producto se eliminó con la sesión abierta. La línea se muestra igual,
+   * marcada: `aplicar` la va a descartar e informar en `lineasDescartadas`, y el
+   * que está contando ve por qué le sobra una respecto del listado.
+   */
+  itemEliminado: boolean;
   unidadMedida: string | null;
   stockSistema: string;
   cantidadContada: string | null;
@@ -285,11 +296,18 @@ export class RecuentosService {
     }
     const sesion = sesionRows[0];
 
+    // Mismo `LEFT JOIN` sin filtro de borrado que usa `aplicar`, y por la misma
+    // razón: si el ítem se elimina con la sesión en `borrador`, filtrarlo acá
+    // hacía desaparecer la línea del detalle sin aviso mientras `findAll` la
+    // seguía contando en `cantidadLineas` — el listado decía 12 y el detalle
+    // mostraba 11. La línea se muestra marcada, que es lo que `aplicar` ya hace
+    // al descartarla e informarla en `lineasDescartadas`.
     const lineaRows: RecuentoLineaRow[] = await this.dataSource.query(
       `SELECT l.linea_id, l.item_id, i.nombre AS item_nombre, p.unidad_medida,
+              (i.eliminado_el IS NOT NULL) AS item_eliminado,
               l.stock_sistema, l.cantidad_contada, l.motivo_diferencia_id
          FROM recuento_inventario_linea l
-         JOIN items i ON i.item_id = l.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
          LEFT JOIN item_producto p ON p.item_id = l.item_id
         WHERE l.recuento_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
         ORDER BY i.nombre ASC`,
@@ -307,6 +325,7 @@ export class RecuentosService {
         lineaId: l.linea_id,
         itemId: l.item_id,
         itemNombre: l.item_nombre,
+        itemEliminado: l.item_eliminado,
         unidadMedida: l.unidad_medida,
         stockSistema: l.stock_sistema,
         cantidadContada: l.cantidad_contada,

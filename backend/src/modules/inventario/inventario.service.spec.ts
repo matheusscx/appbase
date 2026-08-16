@@ -204,6 +204,141 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Ítem eliminado: solo lo que deshace algo
+  //
+  // Como los tests del acote por tenant de más arriba, esto es **defensa en
+  // profundidad y no un bug alcanzable hoy**: se midió caller por caller y los
+  // seis caminos que no son anulación/devolución ya filtran `eliminado_el IS
+  // NULL` aguas arriba —`items.ajustarStock` y `create`/`update`,
+  // `inventario.registrarAjusteCosto` y `mermas.registrar` cortan con 404;
+  // `recuentos.aplicar` descarta la línea; las recetas y combos excluyen al
+  // ingrediente borrado de la expansión—. Lo que fijan estos tests es la regla
+  // en el chokepoint, para el llamador que se agregue mañana sin ese filtro.
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — ítem eliminado', () => {
+    const BORRADO_EL = new Date('2026-08-16T10:00:00Z');
+
+    function lockRowEliminado() {
+      return [
+        {
+          stock: '10',
+          modo_inventario: 'cantidad',
+          costo_actual: '100',
+          item_nombre: 'Queso mantecoso',
+          item_eliminado_el: BORRADO_EL,
+        },
+      ];
+    }
+
+    it.each(['compra', 'merma', 'recuento', 'ajuste_manual', 'venta'])(
+      "rechaza el motivo '%s' sobre un ítem eliminado",
+      async (motivo) => {
+        managerMock.query.mockResolvedValueOnce(lockRowEliminado());
+
+        await expect(
+          service.registrarMovimiento(managerMock as unknown as EntityManager, {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            tipo: 'entrada',
+            motivo,
+            cantidad: '5',
+            usuarioId: USER_ID,
+            causaMermaId: motivo === 'merma' ? CAUSA_MERMA_ID : undefined,
+            motivoDiferenciaId:
+              motivo === 'recuento' ? MOTIVO_DIFERENCIA_ID : undefined,
+          }),
+        ).rejects.toThrow(BadRequestException);
+
+        // No llegó a mover stock ni a insertar en el kardex: el guard corta
+        // justo después del lock.
+        expect(managerMock.query).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('el rechazo nombra el producto y dice que está eliminado, no el genérico del acote por tenant', async () => {
+      managerMock.query.mockResolvedValueOnce(lockRowEliminado());
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.toThrow(/Queso mantecoso.*eliminado/s);
+
+      // El genérico existe para que un id de otro tenant sea indistinguible de
+      // uno inexistente. Reusarlo acá mandaría a buscar un problema de permisos
+      // donde hay un producto discontinuado.
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.not.toThrow('El item no tiene control de stock');
+    });
+
+    it.each(['anulacion', 'devolucion'])(
+      "acepta el motivo '%s' sobre un ítem eliminado: la venta existió y hay que poder cerrarla",
+      async (motivo) => {
+        managerMock.query
+          .mockResolvedValueOnce(lockRowEliminado())
+          .mockResolvedValueOnce(undefined) // UPDATE item_producto
+          .mockResolvedValueOnce([{ movimiento_id: 'mov-repo' }]); // INSERT kardex
+
+        const res = await service.registrarMovimiento(
+          managerMock as unknown as EntityManager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            tipo: 'entrada',
+            motivo,
+            cantidad: '2',
+            usuarioId: USER_ID,
+          },
+        );
+
+        expect(res.stockResultante).toBe('12');
+      },
+    );
+
+    it('un ítem vivo no cambia: el guard solo mira `eliminado_el`', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            stock: '10',
+            modo_inventario: 'cantidad',
+            costo_actual: null,
+            item_nombre: 'Queso mantecoso',
+            item_eliminado_el: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-ok' }]);
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+        },
+      );
+
+      expect(res.stockResultante).toBe('15');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Modo 'serie'
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — modo serie', () => {

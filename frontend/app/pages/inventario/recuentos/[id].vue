@@ -13,7 +13,9 @@ interface MotivoOpt {
 interface RecuentoLineaApi {
   lineaId: string
   itemId: string
-  itemNombre: string
+  itemNombre: string | null
+  /** El producto se eliminó con la sesión abierta: `aplicar` va a descartar la línea. */
+  itemEliminado: boolean
   unidadMedida: string | null
   stockSistema: string
   cantidadContada: string | null
@@ -431,7 +433,19 @@ const columns: TableColumn<LineaRow>[] = [
             :columns="columns"
           >
             <template #itemNombre-cell="{ row }">
-              <span class="font-medium text-default">{{ row.original.itemNombre }}</span>
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-default">{{ row.original.itemNombre ?? '—' }}</span>
+                <UBadge
+                  v-if="row.original.itemEliminado"
+                  label="Eliminado"
+                  color="neutral"
+                  variant="subtle"
+                  size="sm"
+                />
+              </div>
+              <p v-if="row.original.itemEliminado" class="text-xs text-muted">
+                Se va a descartar al aplicar
+              </p>
             </template>
 
             <template #stockSistema-cell="{ row }">

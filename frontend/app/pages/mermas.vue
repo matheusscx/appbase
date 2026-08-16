@@ -19,6 +19,8 @@ interface MermaListItem {
   unidadMedida: string | null
   /** Moneda del ítem: el listado mezcla ítems de distintas monedas. */
   monedaId: string
+  /** El producto se dio de baja después de esta merma; la fila se conserva. */
+  itemEliminado: boolean
 }
 
 interface ProductoOpt {
@@ -321,7 +323,16 @@ const columns: TableColumn<MermaListItem>[] = [
         <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
       </template>
       <template #itemNombre-cell="{ row }">
-        <span class="font-medium text-default">{{ row.original.itemNombre }}</span>
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-default">{{ row.original.itemNombre }}</span>
+          <UBadge
+            v-if="row.original.itemEliminado"
+            label="Eliminado"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+        </div>
       </template>
       <template #cantidad-cell="{ row }">
         <span class="text-warning">{{ formatStock(row.original.cantidad, row.original.unidadMedida) }}</span>

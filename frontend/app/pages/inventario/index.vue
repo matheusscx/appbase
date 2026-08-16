@@ -31,6 +31,8 @@ interface Movimiento {
   costoPerdido?: string | null
   unidadMedida: string | null
   monedaId: string
+  /** El producto se dio de baja después de este movimiento; el kardex lo conserva. */
+  itemEliminado: boolean
 }
 
 interface ProductoCosto {
@@ -230,7 +232,16 @@ async function registrarAjusteCosto() {
             <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
           </template>
           <template #itemNombre-cell="{ row }">
-            <span class="font-medium">{{ row.original.itemNombre }}</span>
+            <div class="flex items-center gap-2">
+              <span class="font-medium">{{ row.original.itemNombre }}</span>
+              <UBadge
+                v-if="row.original.itemEliminado"
+                label="Eliminado"
+                color="neutral"
+                variant="subtle"
+                size="sm"
+              />
+            </div>
           </template>
           <template #tipo-cell="{ row }">
             <UBadge

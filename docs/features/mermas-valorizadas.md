@@ -102,6 +102,16 @@ Request (CreateMermaDto):
 
 Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `causaMermaId`, `desde`, `hasta`. Cada fila incluye `causaNombre` y `costoPerdido`.
 
+**El listado sobrevive a la baja del producto.** Una merma registrada es plata
+perdida que ya ocurrió, así que dar de baja el producto después no la saca del
+informe: la consulta no filtra `items.eliminado_el` —ni en el listado ni en el
+`COUNT(*)`, o el total bajaría sin avisar— y la fila viaja con
+`itemEliminado: true` para mostrarse marcada. Mismo criterio y misma razón que el
+kardex: ver [`inventario-kardex.md`](./inventario-kardex.md) §"Producto eliminado".
+
+Registrar una merma **nueva** sobre un producto eliminado sí se rechaza (`404`,
+desde el propio `POST`): no hay operación real detrás.
+
 ---
 
 ## Backend
