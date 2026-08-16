@@ -17,6 +17,46 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La venta de $0, el criterio único de personalización y el redondeo en el drawer (2026-08-16)
+
+Tres entradas chicas de ventas/precios, cerradas juntas. Una cuarta de la misma tanda —la
+pasarela simulada— **quedó bloqueada** y sigue en `pendientes.md`; el porqué está abajo.
+
+**Venta de total $0 = PAGADA, sin línea de pago.** El estado se deriva siempre de lo
+aplicado: se sacó el `if (saved.pagos.length > 0)` que envolvía a `calcularEstadoVenta`, que
+ya devolvía `pagada` para `('0','0')` — lo que faltaba era llamarla. Los tres sitios que la
+entrada tenía medidos: backend, el `puedeConfirmar` del `CobroModal` (que además muestra *"no
+hay nada que cobrar"* en vez de una línea de pago en $0), y la tienda, que ahora **omite**
+`pagos` en vez de mandar `monto: '0'` contra `@IsDecimalPositivo`.
+
+**Criterio único de personalización: "sacar no cobra, agregar sí".** Vivía duplicado y
+divergente: `personalizacionVacia` (POS) contaba un "sin cebolla" como personalización a
+efectos de precio, `tienePersonalizacionConRecargo` (salones) lo ignoraba, y los dos
+alimentaban el mismo campo del mismo endpoint. Ganó el segundo, y ahora hay una sola función
+(`personalizacionAfectaPrecio`) que usan los dos.
+⚠️ **No se aplanaron las dos preguntas**, que era el riesgo: qué se **registra** y qué se
+**cobra** siguen separadas. El *sin cebolla* sigue viajando a la comanda de cocina — eso lo
+decide `personalizacionVacia`, que no se tocó. Hay un test por cada mitad.
+ℹ️ La otra mitad de la entrada era mecánica: `if (precioOverride)` sobre un **string**, donde
+`'0'` es truthy y el filtro no filtraba lo único que podría querer filtrar. Ahora dice lo que
+quiere decir (`!= null && !== ''`), con su test.
+
+**`escalaCalculo` y `modoRedondeo` en el drawer.** Plegable al pie de Totales, con el mismo
+permiso que el resto (`Ventas:Leer`): la configuración de cálculo no se trata como
+información de administración. Medido de paso: el backend **ya los congelaba** —
+`configCalculo: resultado.config` guarda el `ConfigCalculo` entero y `findOne` lo devuelve
+verbatim—, así que era un hueco de presentación, no de datos.
+
+**Lo que bloqueó a la cuarta, y por qué se revirtió.** La decisión era *"sin cobro real, la
+venta queda `pendiente`, no `pagada`"*. Se implementó, y **todo checkout simulado empezó a
+fallar con 400**: `ventas.service.ts:387-395` rechaza cualquier venta `online` cuyos pagos no
+cubran el total (*"online no admite cuenta por cobrar"*, dice el comentario). O sea que una
+venta online no puede quedar `pendiente` hoy **por diseño**. Aflojar esa regla habilitaría
+ventas online impagas por cualquier camino, incluido el de la pasarela real. Es producto, no
+corrección: se revirtió la pantalla y la entrada quedó abierta con las alternativas medidas.
+
+---
+
 ## El módulo contratado pasa a ser un borde duro, también para el admin (2026-08-16)
 
 **Decisión del owner (2026-08-15):** el admin del tenant también respeta los módulos

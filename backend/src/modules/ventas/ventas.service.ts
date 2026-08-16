@@ -769,17 +769,25 @@ export class VentasService {
     });
 
     // 7i. Actualizar estado de la venta según montos aplicados a la venta
-    if (saved.pagos.length > 0) {
-      const estadoFinal = calcularEstadoVenta(
-        resultado.totales.totalFinal,
-        saved.montoAplicadoVenta,
-      );
-      await manager.query(
-        `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
-        [estadoFinal, venta.id],
-      );
-      venta.estado = estadoFinal;
-    }
+    //
+    // Sin el `if (saved.pagos.length > 0)` que tenía antes: una venta de total
+    // $0 —una promoción que descuenta el 100%— es una venta **pagada**, y no
+    // lleva línea de pago porque no hay nada que cobrar. Con el guard quedaba
+    // `pendiente` con saldo $0 y se arrastraba en los listados de deuda.
+    // `calcularEstadoVenta('0', '0')` ya devolvía `pagada` (aplicado ≥ total);
+    // lo que faltaba era llamarla.
+    //
+    // Para el resto no cambia nada: sin pagos y con total > 0, `aplicado ≤ 0`
+    // da `pendiente`, que es el estado con el que la venta ya nacía.
+    const estadoFinal = calcularEstadoVenta(
+      resultado.totales.totalFinal,
+      saved.montoAplicadoVenta,
+    );
+    await manager.query(
+      `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
+      [estadoFinal, venta.id],
+    );
+    venta.estado = estadoFinal;
 
     return { ...venta, detalles, advertencias };
   }

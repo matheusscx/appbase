@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import type { CheckoutResponse } from '~/composables/useTiendaCarrito'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -50,10 +51,24 @@ function metodoTarjeta(): MetodoPago | undefined {
     ?? metodos.value[0]
 }
 
+/**
+ * Un carrito con 100% de descuento suma $0, y ahí no hay pago que registrar: una
+ * venta de total $0 es una venta PAGADA **sin línea de pago**. Mandar
+ * `monto: '0'` la rebotaba con 400 (`@IsDecimalPositivo` en `PagoVentaDto`), así
+ * que la promoción no tenía ningún camino a venta.
+ *
+ * El backend deriva el estado de lo aplicado: con total 0 y nada aplicado da
+ * `pagada`, y el guard de "las ventas online requieren el pago completo" pasa
+ * igual porque 0 ≥ 0.
+ */
+const sinCobro = computed(
+  () => new Decimal(resumen.value?.resultado.totales.totalFinal ?? '0').lte(0),
+)
+
 async function aprobar() {
   if (!resumen.value) return
-  const metodo = metodoTarjeta()
-  if (!metodo) {
+  const metodo = sinCobro.value ? undefined : metodoTarjeta()
+  if (!sinCobro.value && !metodo) {
     toast.add({ title: 'No hay métodos de pago configurados', color: 'error' })
     return
   }
@@ -65,7 +80,14 @@ async function aprobar() {
       body: {
         canal: 'online',
         lineas: lineasSnapshot.value,
-        pagos: [{ metodoPagoId: metodo.metodoPagoId, monto: resumen.value.resultado.totales.totalFinal }],
+        ...(metodo
+          ? {
+              pagos: [{
+                metodoPagoId: metodo.metodoPagoId,
+                monto: resumen.value.resultado.totales.totalFinal,
+              }],
+            }
+          : {}),
         customer: { nombre: authStore.user?.nombre ?? 'Cliente online' },
       },
     })
@@ -135,7 +157,9 @@ async function rechazar() {
                  usar las dos granularidades por separado duplicaría las de venta. -->
             <AdvertenciasPrecio :advertencias="resumen.resultado.advertencias" />
 
-            <div class="border border-default rounded-lg p-3">
+            <!-- Sin cobro no hay medio que mostrar: enseñar la tarjeta sugeriría
+                 un cargo que no va a ocurrir. -->
+            <div v-if="!sinCobro" class="border border-default rounded-lg p-3">
               <p class="text-xs text-muted mb-1">Medio de pago</p>
               <div v-if="tarjetaPreferida" class="flex items-center gap-2">
                 <UIcon name="i-lucide-credit-card" class="text-muted" />
@@ -162,7 +186,7 @@ async function rechazar() {
                 @click="rechazar"
               />
               <UButton
-                label="Aprobar pago"
+                :label="sinCobro ? 'Confirmar pedido' : 'Aprobar pago'"
                 color="primary"
                 block
                 :loading="estado === 'procesando'"

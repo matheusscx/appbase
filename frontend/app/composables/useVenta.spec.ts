@@ -38,6 +38,82 @@ const item = (id: string, precio = '100'): ItemCatalogo => ({
   activo: true,
 })
 
+// ── Criterio único de precio: "sacar no cobra, agregar sí" ──────────────────
+//
+// Había DOS criterios distintos alimentando el mismo campo del mismo endpoint:
+// `personalizacionVacia` (para la que un "sin cebolla" ya contaba) en el POS, y
+// `tienePersonalizacionConRecargo` en salones (que lo ignoraba). Ganó el
+// segundo. Lo que estos casos fijan es que la unificación **no aplanó** las dos
+// preguntas: qué se registra y qué se cobra son cosas distintas.
+describe('personalización: qué se registra vs qué cambia el precio', () => {
+  const receta = (): ItemCatalogo => ({ ...item('receta-1'), tipo: 'receta' })
+
+  it('solo omitidos: la personalización viaja, el override de precio NO', () => {
+    const pers: PersonalizacionPayload = {
+      omitidos: ['ingrediente-cebolla'],
+      extras: [],
+    }
+    const r = agregarLinea([], receta(), CAT, pers, 'Sin cebolla', '999')
+
+    // Trazabilidad: el "sin cebolla" tiene que llegar a la comanda de cocina.
+    expect(r[0]!.personalizacion).toEqual(pers)
+    expect(r[0]!.personalizacionResumen).toBe('Sin cebolla')
+    // Precio: sacar no cobra, así que no se fija precio de línea.
+    expect(r[0]!.precioUnitarioOverride).toBeUndefined()
+    expect(toCalcularInput(r).lineas[0]).not.toHaveProperty('precioUnitario')
+  })
+
+  it('un comentario tampoco cambia el precio, pero también viaja', () => {
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      comentario: 'Bien cocido',
+    }
+    const r = agregarLinea([], receta(), CAT, pers, 'Bien cocido', '999')
+
+    expect(r[0]!.personalizacion).toEqual(pers)
+    expect(r[0]!.precioUnitarioOverride).toBeUndefined()
+  })
+
+  it('con extras sí se fija el precio de la línea', () => {
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
+    }
+    const r = agregarLinea([], receta(), CAT, pers, '+ Queso', '150')
+
+    expect(r[0]!.precioUnitarioOverride).toBe('150')
+    expect(toCalcularInput(r).lineas[0]).toMatchObject({ precioUnitario: '150' })
+  })
+
+  it('un override de "0" viaja, antes y ahora: el truthy sobre un string no filtraba nada', () => {
+    // `'0'` es truthy en JS, así que el chequeo viejo (`if (precioOverride)`) ya
+    // dejaba pasar el cero: la condición nueva NO cambia la conducta, solo dice
+    // lo que quiere decir. Lo que este caso fija es que el cero siga siendo un
+    // monto válido —`calcular` lo acepta a propósito— el día que alguien
+    // "arregle" el filtro creyendo que filtraba algo.
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
+    }
+    const r = agregarLinea([], receta(), CAT, pers, '+ Queso', '0')
+
+    expect(r[0]!.precioUnitarioOverride).toBe('0')
+    expect(toCalcularInput(r).lineas[0]).toMatchObject({ precioUnitario: '0' })
+  })
+
+  it('un override vacío no viaja', () => {
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
+    }
+    const r = agregarLinea([], receta(), CAT, pers, '+ Queso', '')
+
+    expect(r[0]!.precioUnitarioOverride).toBeUndefined()
+    expect(toCalcularInput(r).lineas[0]).not.toHaveProperty('precioUnitario')
+  })
+})
+
 describe('carrito helpers', () => {
   it('agregarLinea agrega una línea nueva con cantidad "1" y presentación en unidad base', () => {
     const r = agregarLinea([], item('a'), CAT)

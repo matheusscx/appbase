@@ -2,7 +2,11 @@ import { ref } from 'vue'
 import Decimal from 'decimal.js'
 import { useResultadoCalculado, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
-import { personalizacionVacia, type PersonalizacionPayload } from './useRecetaPersonalizacion'
+import {
+  personalizacionAfectaPrecio,
+  personalizacionVacia,
+  type PersonalizacionPayload,
+} from './useRecetaPersonalizacion'
 import {
   aCantidadCanonica,
   desdeCantidadCanonica,
@@ -101,7 +105,12 @@ export function agregarLinea(
 ): CarritoLinea[] {
   const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
   const resumen = pers ? personalizacionResumen : undefined
-  const precioOverride = pers ? precioUnitarioOverride : undefined
+  // El override de precio se rige por el criterio de RECARGO, no por el de
+  // trazabilidad: una línea con solo "sin cebolla" viaja a la comanda pero no
+  // fija precio. Ver `personalizacionAfectaPrecio`.
+  const precioOverride = personalizacionAfectaPrecio(pers)
+    ? precioUnitarioOverride
+    : undefined
   const detalle = pers ? personalizacionDetalle : undefined
   const unidadBase = unidadBaseItem(item)
 
@@ -143,7 +152,14 @@ export function agregarLinea(
   if (pers) {
     nueva.personalizacion = pers
     if (resumen) nueva.personalizacionResumen = resumen
-    if (precioOverride) nueva.precioUnitarioOverride = precioOverride
+    // `!= null` y no truthy. **No cambia la conducta**: `precioOverride` es un
+    // STRING y `'0'` ya era truthy, así que el cero viajaba antes y viaja ahora.
+    // Lo que cambia es que la condición diga lo que quiere decir — el truthy
+    // sobre un string parecía filtrar el cero y no filtraba nada, y es la clase
+    // de chequeo que se cae solo el día que alguien endurece el DTO.
+    if (precioOverride != null && precioOverride !== '') {
+      nueva.precioUnitarioOverride = precioOverride
+    }
     if (detalle) nueva.personalizacionDetalle = detalle
   }
   return [...lineas, nueva]
@@ -194,7 +210,7 @@ export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
             unidadCodigoPresentacion: l.unidadCodigoPresentacion,
           }
         : {}),
-      ...(l.precioUnitarioOverride
+      ...(l.precioUnitarioOverride != null && l.precioUnitarioOverride !== ''
         ? { precioUnitario: l.precioUnitarioOverride }
         : {}),
     })),

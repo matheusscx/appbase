@@ -119,6 +119,9 @@ interface VentaDetalle {
     formula: string[]
     calculoDescuentos: string
     calculoRecargos: string
+    /** Decimales con los que se calculó, y cómo se redondeó el último. */
+    escalaCalculo: number
+    modoRedondeo: string
   } | null
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
@@ -310,6 +313,18 @@ const PASO_A_TIPO: Record<string, string> = {
   descuentos: 'Descuento',
   recargos: 'Recargo',
   impuestos: 'Impuesto',
+}
+
+/**
+ * El código crudo más una frase corta. El código se muestra igual porque es lo
+ * que dice Preferencias financieras, que es donde se configura: quien viene a
+ * explicar un descuadre tiene que poder cruzar las dos pantallas sin traducir.
+ */
+const MODO_REDONDEO_LABEL: Record<string, string> = {
+  HALF_UP: 'HALF_UP · en empate, hacia arriba',
+  HALF_EVEN: 'HALF_EVEN · en empate, al par (bancario)',
+  FLOOR: 'FLOOR · siempre hacia abajo',
+  CEIL: 'CEIL · siempre hacia arriba',
 }
 
 function filaDeRegla(familia: string, r: ReglaCongelada): FilaDetalle {
@@ -820,6 +835,36 @@ function onNcSuccess(payload: {
                 </dd>
               </div>
             </dl>
+
+            <!-- Plegable y al pie: la escala y el redondeo solo importan cuando
+                 un centavo no cuadra, y son exactamente lo que explica una
+                 diferencia de $1 entre lo que el lector suma a mano y lo que
+                 muestra la fila. Mismo permiso que el resto del drawer
+                 (`Ventas:Leer`): la configuración de cálculo no se trata como
+                 información de administración. -->
+            <details v-if="venta.configCalculo" class="mt-3 border-t border-default pt-2 text-xs">
+              <summary class="cursor-pointer text-muted">
+                Cómo se redondeó
+              </summary>
+              <dl class="mt-2 space-y-1">
+                <div class="flex justify-between">
+                  <dt class="text-muted">
+                    Decimales de cálculo
+                  </dt>
+                  <dd class="font-mono">
+                    {{ venta.configCalculo.escalaCalculo }}
+                  </dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-muted">
+                    Redondeo
+                  </dt>
+                  <dd class="font-mono">
+                    {{ MODO_REDONDEO_LABEL[venta.configCalculo.modoRedondeo] ?? venta.configCalculo.modoRedondeo }}
+                  </dd>
+                </div>
+              </dl>
+            </details>
           </UCard>
 
           <UCard v-if="venta.propina">

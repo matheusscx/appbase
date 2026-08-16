@@ -96,8 +96,23 @@ const pagosValidos = computed(() =>
   pagos.value.filter((p) => new Decimal(p.monto || '0').gt(0)),
 )
 
+/**
+ * Una venta de total $0 —una promoción que descuenta el 100%— es una venta
+ * PAGADA y **no lleva línea de pago**: no hay nada que cobrar. Sin esto el
+ * botón quedaba deshabilitado para siempre y esa venta no tenía ningún camino a
+ * confirmarse, ni acá ni en la tienda.
+ *
+ * En modo propina el total incluye la propina, así que un total 0 significa que
+ * tampoco se dejó propina: sigue sin haber nada que cobrar.
+ */
+const nadaQueCobrar = computed(() =>
+  new Decimal(totalAPagar.value || '0').lte(0),
+)
+
 const puedeConfirmar = computed(
-  () => pagosValidos.value.length > 0 && !resumen.value.excedenteSinVuelto,
+  () =>
+    (nadaQueCobrar.value || pagosValidos.value.length > 0) &&
+    !resumen.value.excedenteSinVuelto,
 )
 
 function confirmar() {
@@ -134,7 +149,12 @@ function confirmar() {
           <span>{{ formatMonto(totalAPagar) }}</span>
         </div>
 
-        <div class="flex flex-col gap-2">
+        <div v-if="nadaQueCobrar" data-qa="nada-que-cobrar" class="text-sm text-muted">
+          No hay nada que cobrar: la venta queda registrada como pagada, sin
+          línea de pago.
+        </div>
+
+        <div v-else class="flex flex-col gap-2">
           <div
             v-for="(pago, i) in pagos"
             :key="i"
@@ -173,7 +193,7 @@ function confirmar() {
           />
         </div>
 
-        <div class="text-sm space-y-1 border-t border-default pt-2">
+        <div v-if="!nadaQueCobrar" class="text-sm space-y-1 border-t border-default pt-2">
           <div class="flex justify-between text-muted"><span>Pagado</span><span>{{ formatMonto(suma) }}</span></div>
           <div class="flex justify-between text-muted"><span>Restante</span><span>{{ formatMonto(resumen.restante) }}</span></div>
           <div class="flex justify-between font-medium text-default"><span>Vuelto</span><span>{{ formatMonto(resumen.vuelto) }}</span></div>

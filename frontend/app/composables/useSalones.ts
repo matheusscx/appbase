@@ -1,7 +1,10 @@
 import Decimal from 'decimal.js'
 import { useApiFetch } from './useApiFetch'
 import type { CalcularVentaInput } from './useCalculoPrecios'
-import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
+import {
+  personalizacionAfectaPrecio,
+  type PersonalizacionPayload,
+} from './useRecetaPersonalizacion'
 import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
 /** Snapshot congelado de un grupo de modificadores en una línea de cuenta (espejo de `SnapshotGrupo` del backend). */
@@ -199,12 +202,13 @@ export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
     .toString()
 }
 
+/**
+ * Criterio único del proyecto ("sacar no cobra, agregar sí"), compartido con el
+ * POS. Vivía duplicado acá y en `personalizacionVacia`, con criterios distintos
+ * alimentando el mismo campo del mismo endpoint.
+ */
 function tienePersonalizacionConRecargo(l: CuentaLineaDetalle): boolean {
-  return Boolean(
-    l.personalizacion?.extras?.length
-    || l.personalizacion?.grupos?.length
-    || l.personalizacion?.componentes?.length,
-  )
+  return personalizacionAfectaPrecio(l.personalizacion)
 }
 
 /** Mapea las líneas de una cuenta a la entrada del motor de precios. */

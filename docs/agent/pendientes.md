@@ -665,43 +665,6 @@ empezarlas.
   (medido), así que la pantalla se ve vacía hasta crear uno. Sembrar uno es parte del trabajo, o
   el test no se puede escribir.
 
-- [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
-  frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
-  total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay
-  corta en `pagos-redirect.service.ts:86` ("El monto debe ser mayor a cero"), y el flujo
-  simulado tampoco puede porque `pasarela.vue:68` manda siempre
-  `monto: totales.totalFinal` y `PagoVentaDto.monto` lleva `@IsDecimalPositivo()`
-  (`create-venta.dto.ts:73-76`), así que `POST /ventas` lo rechaza más tarde.
-  ⚠️ **No hay asimetría con el POS** — la primera redacción de esta entrada decía que el
-  POS sí cerraba estas ventas "porque omite la línea de pago", y es falso:
-  `CobroModal.vue:99-101` exige `pagosValidos.length > 0` y el botón queda `:disabled`
-  (`:189`), así que con total `0` el POS tampoco confirma. El comentario de
-  `create-venta.dto.ts:73` ("el POS ya los omite al confirmar") habla de descartar las
-  líneas en `$0` dentro de un pago **dividido** que sí tiene alguna con monto
-  (`CobroModal.vue:95-97`), no de confirmar sin ninguna. **No hay un comportamiento del POS
-  que copiar.**
-  **Lo que la restricción realmente es:** de **UI en los dos lados**. La API sí acepta una
-  venta sin pagos —`CreateVentaDto.pagos` es `@IsOptional()` (`create-venta.dto.ts:130-134`),
-  por eso existen las ventas `pendiente`—, pero `ventas.service.ts:676` solo llama a
-  `calcularEstadoVenta` `if (saved.pagos.length > 0)`, así que una venta de `$0` sin pagos
-  quedaría **`pendiente` con saldo `$0`**, arrastrándose en los listados de deuda. O sea que
-  "crearla sin pago" tampoco es un modelo limpio: es una segunda decisión.
-  **La pregunta para el owner:** ¿una venta de total `$0` es una venta **pagada**, una venta
-  **pendiente**, o algo que se prohíbe antes de llegar al cobro? Es un caso real de
-  promociones, no un borde teórico. Relacionado con la entrada de `precioUnitario` de abajo:
-  es la misma pregunta de si el `0` es un monto válido, en otra capa.
-  ✅ **DECIDIDO (owner, 2026-08-15): una venta de total $0 es una venta PAGADA, sin línea de
-  pago.** Queda registrada, descuenta stock, emite su documento, y **no** aparece como deuda. Es
-  lo que se espera de una promoción: la venta existió y no hay nada que cobrar.
-  ⚠️ **Son tres sitios, no uno** — la entrada ya los tiene medidos y conviene no descubrirlos al
-  implementar: (a) el backend, porque `ventas.service.ts:676` solo llama a `calcularEstadoVenta`
-  `if (saved.pagos.length > 0)`, así que hoy una venta sin pagos quedaría **`pendiente` con saldo
-  $0** — justo lo que la decisión rechaza; (b) el POS, que exige `pagosValidos.length > 0` y deja
-  el botón deshabilitado; (c) la tienda, que manda siempre `monto: totales.totalFinal` contra un
-  DTO con `@IsDecimalPositivo()`.
-  🔗 Relacionada con la entrada del `precioUnitario` en `0`: es la misma pregunta de si el cero
-  es un monto válido, en otra capa. Conviene mirarlas juntas.
-
 - [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
   `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
   `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
@@ -758,31 +721,6 @@ empezarlas.
   revés), el seeder tiene que declararlo en cada fila, y las pantallas de administración tienen
   que ofrecerlo. **Hoy es teórico** —ninguna pantalla manda reglas a nivel venta, medido— así que
   se puede planificar sin apuro; lo que no conviene es construir el productor antes que el campo.
-
-- [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
-  criterios distintos para "esta personalización cambia el precio"** (frontend, medido
-  2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
-  si guardan y si mandan `precioUnitarioOverride` con `if (precioOverride)`. Es un
-  **string**, así que `'0'` es truthy y el cero viaja igual: el filtro no filtra lo único
-  que podría querer filtrar. Hoy no rompe nada —`calcular` acepta el 0 a propósito, ver
-  `calcular.dto.ts`— pero es la clase de chequeo que se cae sola cuando alguien endurece
-  el DTO, que es exactamente lo que casi pasa.
-  Al lado: **el POS y salones no coinciden en cuándo hay recargo.** `personalizacionVacia`
-  (`useRecetaPersonalizacion.ts:154`) es falso con solo `omitidos` —un "sin cebolla" ya
-  cuenta—, mientras que `tienePersonalizacionConRecargo` (`useSalones.ts:182`) exige
-  `extras`/`grupos`/`componentes` e ignora `omitidos`. Los dos alimentan el mismo
-  endpoint con el mismo campo. Ninguno de los dos es obviamente el correcto, y esa es la
-  entrada: decidir cuál es el criterio y dejar uno solo.
-  ✅ **DECIDIDO (owner, 2026-08-15): sacar no cobra, agregar sí.** Quitar un ingrediente nunca
-  genera recargo ni marca la línea como personalizada **a efectos de precio**; agregar extras,
-  cambiar opciones o sumar componentes sí. Ese es el criterio único para los dos lados, y
-  resuelve la divergencia entre `useRecetaPersonalizacion` (para el que un "sin cebolla" ya
-  cuenta) y `useSalones` (que lo ignora): **gana el segundo**.
-  ⚠️ **Ojo con no aplanar dos cosas distintas al implementarlo:** "no afecta el precio" no es "no
-  se registra". El *sin cebolla* **tiene que seguir viajando a la comanda de cocina** — ahí sí
-  importa. Lo que se unifica es el criterio de **recargo**, no el de trazabilidad.
-  ℹ️ La otra mitad de la entrada —el truthy sobre un string, donde `'0'` pasa el filtro— es
-  mecánica y no dependía de esta decisión.
 
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
@@ -877,22 +815,24 @@ empezarlas.
   y **agarra `metodos[0]` si no encuentra**: con la venta en `pendiente` puede que ni corresponda
   registrar un método. Y la pregunta de cobertura e2e de esta entrada sigue abierta: la pantalla
   no la alcanza nada automático.
-
-- [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
-  — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
-  de cada familia** (`Descuento (base) → Recargo (cascada) → Impuesto`), que es lo que
-  explicaba los montos. Quedan los dos campos de redondeo, que solo importan cuando un
-  centavo no cuadra: son los que explican una diferencia de $1 entre lo que el lector calcula
-  a mano y lo que muestra la fila. Cierre posible: una línea plegable en la tarjeta de
-  Totales. **Prioridad baja** — no hay un caso reportado de descuadre.
-  ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
-  (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
-  tenant se considera información de administración, hay que separar el guard.
-  ✅ **DECIDIDO (owner, 2026-08-15): se agregan, visibles con el mismo permiso que el resto del
-  drawer.** Una línea plegable en la tarjeta de Totales; **no** se separa el guard — la
-  configuración de cálculo no se trata como información de administración.
-  ℹ️ **Prioridad baja igual**: no hay ningún caso reportado de descuadre de $1 que alguien no
-  haya podido explicar. La decisión saca la pregunta del medio, no sube la urgencia.
+  ⛔ **BLOQUEADA al intentar construirla (2026-08-16): la decisión choca con un invariante que
+  ya existe, y hay que resolver el choque antes de escribir nada.** `ventas.service.ts:387-395`
+  rechaza con `400` *"Las ventas online requieren el pago completo"* cualquier venta
+  `canal='online'` cuyos pagos no cubran el `totalFinal`. O sea que **una venta online no puede
+  quedar `pendiente` hoy, por diseño** — el comentario de la línea 385 lo dice con todas las
+  letras: *"online no admite cuenta por cobrar"*.
+  Se implementó la pantalla mandando la venta sin pagos, y **todo checkout simulado pasó a
+  fallar con ese 400** (medido, no deducido). Se revirtió.
+  **Lo que hay que decidir antes de retomarla:** ¿se afloja la regla para que una venta online
+  pueda nacer `pendiente`? Aflojarla de plano habilita crear ventas online impagas **por
+  cualquier camino**, incluido el de la pasarela real — que es justo lo que la regla protege.
+  Las alternativas que se ven: (a) un estado/flag propio para "pedido sin pasarela conectada",
+  (b) que el backend distinga el caso por config del tenant en vez de que lo decida el
+  frontend, o (c) asumir que sin pasarela conectada la tienda online no debería estar
+  disponible. Ninguna es una corrección: las tres son producto.
+  ℹ️ **Lo único de esta entrada que sí se cerró** (2026-08-16, con la entrada de la venta de
+  total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
+  pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
 
 - [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
   (backend) — `create()`/`update()` persisten `dto.tramos` y

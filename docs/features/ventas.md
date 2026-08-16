@@ -263,10 +263,21 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 
 | Estado | Cuándo se asigna |
 |--------|-----------------|
-| `pendiente` | La venta se crea sin pagos, o el total pagado es 0 |
+| `pendiente` | La venta se crea sin pagos y con total > 0 |
 | `pagada_parcial` | Al registrar un abono parcial: saldo > 0 pero < total_final |
-| `pagada` | El saldo llega a 0 (lo aplicado a la venta ≥ total_final) |
+| `pagada` | El saldo llega a 0 (lo aplicado a la venta ≥ total_final), **incluido el caso de total $0 sin ninguna línea de pago** |
 | `cancelada` | Anulación explícita |
+
+**Una venta de total $0 es una venta PAGADA, sin línea de pago.** Es el caso real de una
+promoción que descuenta el 100%: la venta existió, descuenta stock, emite su documento y
+**no** aparece como deuda. El estado se deriva siempre de lo aplicado
+(`calcularEstadoVenta`), sin condicionarlo a que existan pagos — condicionarlo dejaba esa
+venta en `pendiente` con saldo $0, arrastrándose en los listados de deuda. Ni el POS ni la
+tienda registran un pago de $0 con un método elegido a dedo: simplemente no mandan pagos.
+
+⚠️ Esto **no** afloja la regla de que *"las ventas online requieren el pago completo"*, que
+es anterior e independiente: una venta `online` con total > 0 y sin pagos sigue rechazándose
+con `400`. Lo que cambió es qué estado se calcula, no quién puede crear una venta sin pagar.
 
 **No existe `borrador`** (eliminado del enum el 2026-07-27): la venta en construcción vive
 en `cuenta`/`cuenta_lineas` de salones, que es el *open ticket* del dominio; un estado
