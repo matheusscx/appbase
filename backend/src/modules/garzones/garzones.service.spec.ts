@@ -1538,6 +1538,112 @@ describe('GarzonesService', () => {
     });
   });
 
+  /**
+   * Los dos hechos de la CUENTA que la ficha necesita para no mentir. Lo que
+   * fijan estos tests no es el valor sino las tres decisiones que lo rodean:
+   * que sin pedirlo no se paga, que pedirlo cuesta UNA query y no N, y que
+   * "no se preguntó" (`null`) no se confunda con "se preguntó y da que no".
+   */
+  describe('listar con conPermisos', () => {
+    it('SIN el flag no dispara ninguna consulta extra: las otras 5 pantallas que cargan este listado no lo pagan', async () => {
+      repo.find.mockResolvedValue([
+        garzon({ id: 'g1', usuarioId: 'u1' }),
+        garzon({ id: 'g2', usuarioId: 'u2' }),
+      ]);
+
+      const result = await service.listar(TENANT);
+
+      expect(repo.manager.query).not.toHaveBeenCalled();
+      // Y los campos no viajan: `undefined` es "no se preguntó". Si salieran
+      // en `false`, la ficha acusaría a una cuenta sana de no ser miembro.
+      expect(result[0].cuentaEsMiembro).toBeUndefined();
+      expect(result[0].puedeOperarSalon).toBeUndefined();
+    });
+
+    it('CON el flag son 2 consultas para N garzones, no N: los usuarios van en UN solo `unnest`', async () => {
+      repo.find.mockResolvedValue([
+        garzon({ id: 'g1', usuarioId: 'u1' }),
+        garzon({ id: 'g2', usuarioId: 'u2' }),
+        garzon({ id: 'g3', usuarioId: 'u3' }),
+      ]);
+      repo.manager.query.mockResolvedValue([
+        { usuario_id: 'u1', es_miembro: true, puede_operar: true },
+        { usuario_id: 'u2', es_miembro: true, puede_operar: false },
+        { usuario_id: 'u3', es_miembro: true, puede_operar: true },
+      ]);
+
+      await service.listar(TENANT, false, true);
+
+      // UNA sola llamada aunque sean tres garzones — es la aserción que cae si
+      // alguien "simplifica" esto a un `for` con una consulta por fila.
+      expect(repo.manager.query).toHaveBeenCalledTimes(1);
+      const [, params] = repo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params[1]).toEqual(['u1', 'u2', 'u3']);
+    });
+
+    it('una cuenta que YA NO ES MIEMBRO vuelve en false, no ausente: es el estado que produce la baja "no sigue"', async () => {
+      repo.find.mockResolvedValue([garzon({ id: 'g1', usuarioId: 'u1' })]);
+      // `usuarios_tenants` no tiene fila viva para esa cuenta, así que el
+      // EXISTS da false. La consulta igual devuelve la fila porque parte de
+      // `unnest`, no de un JOIN contra la membresía.
+      repo.manager.query.mockResolvedValue([
+        { usuario_id: 'u1', es_miembro: false, puede_operar: false },
+      ]);
+
+      const [result] = await service.listar(TENANT, false, true);
+
+      expect(result.cuentaEsMiembro).toBe(false);
+    });
+
+    it('un garzón SIN cuenta queda en null (no en false) y no entra en la consulta: no hay a quién preguntarle', async () => {
+      repo.find.mockResolvedValue([
+        garzon({ id: 'g1', usuarioId: null }),
+        garzon({ id: 'g2', usuarioId: 'u2' }),
+      ]);
+      repo.manager.query.mockResolvedValue([
+        { usuario_id: 'u2', es_miembro: true, puede_operar: true },
+      ]);
+
+      const [sinCuenta, conCuenta] = await service.listar(TENANT, false, true);
+
+      expect(sinCuenta.cuentaEsMiembro).toBeNull();
+      expect(sinCuenta.puedeOperarSalon).toBeNull();
+      expect(conCuenta.cuentaEsMiembro).toBe(true);
+      // El `null` no viaja al `unnest`: `uuid[]` lo rechazaría de plano.
+      const [, params] = repo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params[1]).toEqual(['u2']);
+    });
+
+    it('el flag vale también con incluirEliminados: la papelera es donde más cae el garzón dado de baja', async () => {
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawAndEntities: jest.fn().mockResolvedValue({
+          entities: [garzon({ id: 'g1', usuarioId: 'u1' })],
+          raw: [{ g_eliminado_por_nombre: null }],
+        }),
+      };
+      repo.createQueryBuilder.mockReturnValue(qbMock);
+      repo.manager.query.mockResolvedValue([
+        { usuario_id: 'u1', es_miembro: false, puede_operar: false },
+      ]);
+
+      const [result] = await service.listar(TENANT, true, true);
+
+      expect(result.cuentaEsMiembro).toBe(false);
+    });
+  });
+
   describe('otorgarPermisoOperar', () => {
     it('le concede el permiso a la cuenta del garzón, y esa cuenta sale de la FILA, no del request', async () => {
       // El acotamiento de la ruta es justamente ese: el encargado dice a qué

@@ -43,6 +43,12 @@ interface GarzonFake {
   actualizadoEl: string
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
+  // Los dos solo llegan con `?conPermisos=true`, que esta pantalla siempre
+  // pide. `cuentaEsMiembro: false` es el garzón que quedó vinculado a una
+  // cuenta dada de baja con "no sigue": no puede fijar su PIN ni operar, y es
+  // el caso que el badge rotulaba como una espera normal.
+  cuentaEsMiembro?: boolean | null
+  puedeOperarSalon?: boolean | null
 }
 
 function garzon(over: Partial<GarzonFake> = {}): GarzonFake {
@@ -150,6 +156,9 @@ let eventosPinRechaza = false
 let miembrosBackend: { usuarioId: string, nombre: string, apellido: string, esTotem: boolean }[] = []
 /** El body de cada `POST /garzones` recibido: la sonda del alta. */
 let postsCrear: Record<string, unknown>[] = []
+
+/** Cada URL con la que se pidió el LISTADO: la sonda de qué se pidió y qué no. */
+let urlsListado: string[] = []
 
 /** Ids que recibió `POST /garzones/:id/permiso-operar`. */
 let postsPermisoOperar: string[] = []
@@ -281,12 +290,25 @@ mockNuxtImport('useApiFetch', () => {
       })
     }
     const incluirEliminados = url.includes('incluirEliminados=true')
+    urlsListado.push(url)
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
     const data = incluirEliminados
       ? garzonesBackend
       : garzonesBackend.filter(g => !g.eliminadoEl)
-    return Promise.resolve(data.map(g => ({ ...g })))
+    // Se espeja el backend: los dos campos existen SOLO si se pidieron, y con
+    // cuenta el default es "miembro vivo sin el permiso" — el estado normal de
+    // un garzón recién vinculado. Un test que quiera otro lo pone en su
+    // fixture. Sin esto, todo garzón con cuenta llegaría con `undefined` y la
+    // fila de "Modo personal" no aparecería nunca.
+    if (!url.includes('conPermisos=true')) {
+      return Promise.resolve(data.map(({ cuentaEsMiembro: _m, puedeOperarSalon: _p, ...g }) => ({ ...g })))
+    }
+    return Promise.resolve(data.map(g => ({
+      ...g,
+      cuentaEsMiembro: g.usuarioId ? g.cuentaEsMiembro ?? true : null,
+      puedeOperarSalon: g.usuarioId ? g.puedeOperarSalon ?? false : null,
+    })))
   }
 })
 
@@ -427,6 +449,7 @@ function reset() {
   eventosPinRechaza = false
   miembrosBackend = []
   postsCrear = []
+  urlsListado = []
   postsPermisoOperar = []
   permisoOperarRechaza = false
   puedeOperarSalonBackend = null
@@ -1399,6 +1422,122 @@ describe('garzones — el aviso de "no puede operar el salón" trae con qué res
     await editarYGuardar()
 
     expect(avisoDelPermiso()).toBeUndefined()
+  })
+})
+
+/**
+ * Los dos huecos que cerró la medición del 2026-08-16, y que son el mismo
+ * hueco: **la ficha no sabía algo que necesitaba para no mentir**.
+ *
+ * 1. El único afordance para dar `Salones:Operar` vivía en un toast que se
+ *    auto-cierra. Quien no llegaba a apretarlo volvía al mismo problema.
+ * 2. El badge rotulaba "Sin PIN todavía" —*"la persona lo resuelve desde su
+ *    perfil"*— a garzones cuya cuenta ya no es miembro, que no pueden.
+ */
+describe('garzones — la ficha sabe lo que la cuenta puede y lo que no', () => {
+  let montado: Awaited<ReturnType<typeof montarConDrawerStub>> | null = null
+
+  beforeEach(() => {
+    reset()
+    esAdmin = true
+    miembrosBackend = [
+      { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
+    ]
+  })
+
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
+  async function abrirFicha() {
+    const wrapper = (montado = await montarConDrawerStub())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    return wrapper
+  }
+
+  it('el listado se pide CON los permisos: sin eso la ficha no tiene con qué decidir nada de lo de abajo', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+
+    await abrirFicha()
+
+    expect(urlsListado.length).toBeGreaterThan(0)
+    expect(urlsListado.every(u => u.includes('conPermisos=true'))).toBe(true)
+  })
+
+  it('cuenta que ya NO es miembro: el badge deja de prometer que la persona lo resuelve sola', async () => {
+    garzonesBackend = [garzon({
+      usuarioId: 'user-1',
+      pinFijado: false,
+      cuentaEsMiembro: false,
+      activo: false,
+    })]
+
+    const wrapper = await abrirFicha()
+
+    expect(wrapper.text()).toContain('Sin PIN: su cuenta ya no es miembro')
+    // El rótulo de la espera normal sería mentira acá: `fijarMiPin` resuelve
+    // por `garzonPersonalDe`, que filtra la membresía viva → 404.
+    expect(wrapper.text()).not.toContain('Sin PIN todavía')
+  })
+
+  it('cuenta viva sin PIN: sigue diciendo "todavía", que ahí sí es cierto', async () => {
+    garzonesBackend = [garzon({
+      usuarioId: 'user-1',
+      pinFijado: false,
+      cuentaEsMiembro: true,
+    })]
+
+    const wrapper = await abrirFicha()
+
+    expect(wrapper.text()).toContain('Sin PIN todavía')
+    expect(wrapper.text()).not.toContain('ya no es miembro')
+  })
+
+  it('sin el permiso, la ficha lo dice y ofrece el botón — sin temporizador', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', puedeOperarSalon: false })]
+
+    const wrapper = await abrirFicha()
+
+    expect(wrapper.text()).toContain('Le falta el permiso')
+    const boton = wrapper.findAll('button').find(b => b.text().trim() === 'Dárselo ahora')
+    expect(boton, 'botón "Dárselo ahora" EN LA FICHA, no en un toast').toBeTruthy()
+  })
+
+  it('el botón de la ficha otorga a ESE garzón, y la ficha se actualiza sin recargar', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', puedeOperarSalon: false })]
+    const wrapper = await abrirFicha()
+
+    const boton = wrapper.findAll('button').find(b => b.text().trim() === 'Dárselo ahora')
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(postsPermisoOperar).toEqual([GARZON_ID])
+    // El estado nuevo se ve YA: si el botón siguiera ahí, el encargado no
+    // tendría cómo saber si funcionó salvo por el toast, que se va.
+    expect(wrapper.text()).toContain('Puede operar el salón')
+    expect(wrapper.findAll('button').some(b => b.text().trim() === 'Dárselo ahora')).toBe(false)
+  })
+
+  it('con el permiso puesto no se ofrece nada que hacer', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', puedeOperarSalon: true })]
+
+    const wrapper = await abrirFicha()
+
+    expect(wrapper.text()).toContain('Puede operar el salón')
+    expect(wrapper.text()).not.toContain('Le falta el permiso')
+  })
+
+  it('un garzón SIN cuenta no muestra la fila: no hay a quién darle el permiso', async () => {
+    garzonesBackend = [garzon({ usuarioId: null })]
+
+    const wrapper = await abrirFicha()
+
+    // `otorgarPermisoOperar` responde 400 a esto, así que ofrecerlo sería
+    // ofrecer un error.
+    expect(wrapper.text()).not.toContain('Modo personal')
+    expect(wrapper.text()).not.toContain('Le falta el permiso')
   })
 })
 

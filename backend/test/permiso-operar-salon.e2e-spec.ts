@@ -29,6 +29,7 @@ interface GarzonResponse {
   usuarioId: string | null;
   advertencias?: string[];
   puedeOperarSalon?: boolean | null;
+  cuentaEsMiembro?: boolean | null;
 }
 
 async function entrar(
@@ -322,4 +323,106 @@ describe('Salones (e2e): el encargado puede dar el permiso de operar, y solo ese
         .expect(403);
     });
   });
+
+  /**
+   * El listado con `conPermisos`, contra la API real. Lo que ningún unit ve:
+   * que el `unnest($2::uuid[])` y los EXISTS de RBAC sean SQL válida (los
+   * tests unitarios mockean `manager.query` y pasarían con la consulta rota),
+   * y que el DTO transforme el `'true'` del query string — sin el
+   * `@Transform`, `@IsBoolean` lo rechaza y el flag queda inutilizable.
+   *
+   * Los dos campos existen por dos huecos medidos el 2026-08-16:
+   * - la ficha rotulaba *"Sin PIN todavía"* —cuyo significado es *"la persona
+   *   lo resuelve desde su perfil"*— a garzones cuya cuenta ya no es miembro y
+   *   que por lo tanto **no pueden** (`fijarMiPin` les da 404);
+   * - el único botón para dar `Salones:Operar` vivía en un toast que se
+   *   auto-cierra, y sin este dato la ficha no podía ofrecer otro.
+   */
+  describe('el listado sabe lo que la ficha necesita para no mentir', () => {
+    it('SIN el flag los campos no viajan: `undefined` es "no se preguntó", no "la cuenta está mal"', async () => {
+      const { garzon } = await garzonConCuentaSinPermiso();
+
+      const res = await request(app.getHttpServer())
+        .get('/api/garzones')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(res.status).toBe(200);
+      const fila = (res.body as GarzonResponse[]).find(
+        (g) => g.id === garzon.id,
+      );
+      expect(fila).toBeTruthy();
+      // Las otras cinco pantallas que cargan este listado no piden el flag y
+      // no deben pagar el RBAC. Si esto empezara a venir definido, lo están
+      // pagando.
+      expect(fila!.cuentaEsMiembro).toBeUndefined();
+      expect(fila!.puedeOperarSalon).toBeUndefined();
+    });
+
+    it('CON el flag: cuenta viva sin el permiso → miembro sí, operar no', async () => {
+      const { garzon } = await garzonConCuentaSinPermiso();
+
+      const fila = await filaConPermisos(garzon.id);
+
+      expect(fila.cuentaEsMiembro).toBe(true);
+      expect(fila.puedeOperarSalon).toBe(false);
+    });
+
+    it('otorgar el permiso se ve en el listado: es lo que le apaga el botón a la ficha', async () => {
+      const { garzon } = await garzonConCuentaSinPermiso();
+
+      await request(app.getHttpServer())
+        .post(`/api/garzones/${garzon.id}/permiso-operar`)
+        .set('Authorization', `Bearer ${tokenEncargado}`)
+        .expect(201);
+
+      expect((await filaConPermisos(garzon.id)).puedeOperarSalon).toBe(true);
+    });
+
+    it('la baja "no sigue" deja el garzón con `cuentaEsMiembro: false` — el estado que el badge rotulaba mal', async () => {
+      const { usuarioId, garzon } = await garzonConCuentaSinPermiso();
+      // Estado de partida: la cuenta ES miembro. Sin esta línea el test pasaría
+      // igual con un `cuentaEsMiembro` clavado en `false`.
+      expect((await filaConPermisos(garzon.id)).cuentaEsMiembro).toBe(true);
+
+      await request(app.getHttpServer())
+        .delete(`/api/tenants/members/${usuarioId}?garzon=no-sigue`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .expect(200);
+
+      const fila = await filaConPermisos(garzon.id);
+      // El vínculo SIGUE (es lo que "no sigue" produce a propósito), pero la
+      // cuenta ya no es miembro. Ese par es exactamente el caso que la ficha
+      // no sabía distinguir de "todavía no lo fijó".
+      expect(fila.usuarioId).toBe(usuarioId);
+      expect(fila.cuentaEsMiembro).toBe(false);
+    });
+
+    it('un garzón SIN cuenta queda en null, no en false: no hay a quién preguntarle', async () => {
+      const creado = await request(app.getHttpServer())
+        .post('/api/garzones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `E2E Sin cuenta ${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+        });
+      expect(creado.status).toBe(201);
+
+      const fila = await filaConPermisos((creado.body as GarzonResponse).id);
+
+      expect(fila.cuentaEsMiembro).toBeNull();
+      expect(fila.puedeOperarSalon).toBeNull();
+    });
+  });
+
+  /** La fila de ese garzón en el listado pedido CON los permisos. */
+  async function filaConPermisos(garzonId: string): Promise<GarzonResponse> {
+    const res = await request(app.getHttpServer())
+      .get('/api/garzones?conPermisos=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    // Antes de castear: un 401 devuelve un objeto, y `.find` sobre un objeto
+    // es un `TypeError` que no dice qué contestó el servidor (ver el
+    // intermitente de auth en `docs/agent/pendientes.md`).
+    expect(res.status).toBe(200);
+    const fila = (res.body as GarzonResponse[]).find((g) => g.id === garzonId);
+    expect(fila).toBeTruthy();
+    return fila!;
+  }
 });

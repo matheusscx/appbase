@@ -329,9 +329,11 @@ Las dos son reversibles, pero **no cuestan lo mismo**: `sigue` deja al garzón o
 mismo, y `no-sigue` lo deja en un estado que necesita **dos** cosas para volver — prender
 `activo` **y** resolverle la credencial, porque su cuenta ya no es miembro y sin membresía
 no puede entrar a fijarse un PIN. Volver a sumar a la persona, o desvincular y generarle
-un PIN, son las dos salidas. ⚠️ Y mientras tanto la ficha lo rotula *"Sin PIN todavía"*,
-que promete que él lo resuelve — anotado en `pendientes.md`, es lo que falta para que esa
-pantalla no mienta.
+un PIN, son las dos salidas. ✅ **Y la ficha ya lo dice bien** (2026-08-16): rotulaba
+*"Sin PIN todavía"* —que promete que él lo resuelve— y ahora, cuando la cuenta vinculada
+ya no es miembro, dice *"Sin PIN: su cuenta ya no es miembro"*. El dato es
+`cuentaEsMiembro`, que el listado trae con `?conPermisos=true` — ver
+[garzones](garzones.md).
 
 **Se descartó la salida automática** (desvincular y dar PIN siempre): asume que el garzón debe seguir operando, y el motivo más común de una baja es
 que la persona se fue — darle un PIN funcional a alguien que se fue le deja abrir mesas

@@ -298,40 +298,6 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **El único botón para dar el permiso de operar vive en un toast que se auto-cierra**
-  (frontend, **hallazgo de la revisión de la pieza 3, 2026-08-16**) — el aviso *"…todavía no
-  puede entrar en modo personal"* trae el botón *"Dárselo ahora"*, y es el **único**
-  afordance que existe: si el encargado no llega a apretarlo antes de que el toast se
-  cierre, vuelve a quedar frente al mismo problema. **No es un callejón** —apretar Guardar
-  de nuevo re-dispara el aviso, porque el PATCH manda `usuarioId` y `assertVinculable`
-  vuelve a correr—, pero para una pieza cuyo objetivo declarado es *"que la instrucción se
-  pueda ejecutar"*, un botón con temporizador es la forma más frágil de ofrecerla.
-  **Qué medir antes de decidir:** el lugar natural sería la ficha del garzón (el drawer),
-  que es adonde el encargado vuelve. El problema es que ahí no se sabe si el permiso hace
-  falta: `puedeOperarSalon` viaja en la respuesta de las **mutaciones**, no en el listado, y
-  ponerlo en el listado serían N subqueries de RBAC en una ruta caliente. Hay que ver si el
-  dato se puede traer al abrir la ficha (una consulta, no N) o si conviene otra cosa.
-  🔗 Toca lo mismo que la entrada del badge de acá abajo: las dos son "la ficha no sabe algo
-  que necesita para no mentir", y probablemente se resuelvan con la misma consulta.
-
-- [ ] **La ficha rotula "Sin PIN todavía" a un garzón que no puede resolverlo solo**
-  (frontend, **hallazgo de la revisión del cluster de membresía, 2026-08-16**) — el badge
-  de `configuracion/garzones.vue` se decide por `garzonEnEdicion.usuarioId`: con vínculo
-  dice *"Sin PIN todavía"* (`warning`), cuyo significado documentado es *"la persona lo
-  resuelve desde su perfil"*. Desde el 2026-08-16 la salida **"no sigue"** de la baja de
-  membresía produce a propósito un garzón `activo = false` **vinculado a una cuenta que ya
-  no es miembro**: esa persona no puede entrar a fijarse el PIN —`fijarMiPin` resuelve por
-  `garzonPersonalDe`, que filtra la membresía viva— y el badge le está prometiendo lo
-  contrario al encargado. (El estado ya era alcanzable antes por el propio bug que la baja
-  cerró; lo nuevo es que ahora se produce **por diseño**.)
-  **Qué medir antes de tocar nada:** el badge sale de `GarzonPublico`, que hoy no dice si la
-  cuenta vinculada sigue siendo miembro. Hay que ver si ese dato ya viaja por algún lado
-  (`toPublico`, el listado) o si agregarlo cuesta una consulta más en una ruta caliente —
-  de eso depende si es un `if` o una decisión.
-  🔗 Junto con esto conviene mirar el otro rótulo que quedó impreciso: `docs` ya dice que
-  `no-sigue` necesita **dos** cosas para revertirse (prender `activo` y resolver la
-  credencial), no solo la primera.
-
 - [ ] **La salida "sigue" de la baja devuelve un PIN que puede no servir**
   (backend, **hallazgo de la revisión del cluster de membresía, 2026-08-16**) —
   `aplicarBajaDeCuenta` desvincula y escribe el PIN sin mirar `garzon.activo`. Si el garzón

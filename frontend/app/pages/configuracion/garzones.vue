@@ -63,7 +63,10 @@ async function cargar() {
     await previa
     loading.value = true
     try {
-      garzones.value = await garzonesApi.listar(verEliminados.value)
+      // `true`: esta es la única de las seis pantallas que carga el listado
+      // que usa `cuentaEsMiembro` / `puedeOperarSalon` — el badge de PIN y la
+      // fila de permiso de la ficha. Ver `useGarzones.listar`.
+      garzones.value = await garzonesApi.listar(verEliminados.value, true)
     }
     catch (e: unknown) {
       toast.add({ title: apiErrorMsg(e, 'Error al cargar garzones'), color: 'error' })
@@ -246,8 +249,16 @@ const pinFijado = computed(() => garzonEnEdicion.value?.pinFijado ?? false)
  * uno es distinta, y el rótulo tiene que apuntar a quién la ejecuta:
  *
  * - **con cuenta + PIN puesto** → nada que hacer.
- * - **con cuenta + sin PIN** → lo pone la persona desde su perfil. "todavía"
- *   es correcto: se está esperando algo que sí va a poder hacer sola.
+ * - **con cuenta VIVA + sin PIN** → lo pone la persona desde su perfil.
+ *   "todavía" es correcto: se está esperando algo que sí va a poder hacer sola.
+ * - **con cuenta que YA NO ES MIEMBRO + sin PIN** → "todavía" es mentira. Esa
+ *   persona no puede entrar a fijarlo: `fijarMiPin` resuelve por
+ *   `garzonPersonalDe`, que filtra la membresía viva, así que le da 404. Es el
+ *   estado que produce **a propósito** la salida "no sigue" de la baja de
+ *   membresía (2026-08-16): garzón `activo = false` con la cuenta ya fuera.
+ *   Medido sobre la base de dev: 3 de 13 garzones vinculados están así, y los
+ *   tres recibían el rótulo de la espera normal. Sale de ahí resolviendo la
+ *   credencial —vincular otra cuenta o generarle un PIN—, no esperando.
  * - **sin cuenta + sin PIN** → la persona **no puede hacer nada**
  *   (`fijarMiPin` resuelve por `usuario_id` y le da 404) y **no puede
  *   operar por ningún lado**: el tótem compara su PIN contra el centinela y
@@ -259,8 +270,31 @@ const pinFijado = computed(() => garzonEnEdicion.value?.pinFijado ?? false)
  */
 const badgePin = computed<{ color: 'success' | 'warning' | 'error', label: string }>(() => {
   if (pinFijado.value) return { color: 'success', label: 'PIN puesto' }
-  if (garzonEnEdicion.value?.usuarioId) return { color: 'warning', label: 'Sin PIN todavía' }
+  if (garzonEnEdicion.value?.usuarioId) {
+    // `=== false` y no `!cuentaEsMiembro`: `undefined` es "no se preguntó"
+    // (un listado sin `conPermisos`) y ahí NO corresponde acusar a la cuenta
+    // de nada — se cae al rótulo de la espera normal, que es el de antes.
+    return garzonEnEdicion.value.cuentaEsMiembro === false
+      ? { color: 'error', label: 'Sin PIN: su cuenta ya no es miembro' }
+      : { color: 'warning', label: 'Sin PIN todavía' }
+  }
   return { color: 'error', label: 'Sin PIN: no puede operar' }
+})
+
+/**
+ * El permiso de operar el salón, para la ficha. `null` = no hay nada que
+ * decir (garzón sin cuenta, o listado sin `conPermisos`).
+ *
+ * Existe porque hasta el 2026-08-16 el **único** afordance para darlo vivía en
+ * un toast que se auto-cierra: si el encargado no llegaba a apretarlo, volvía
+ * a quedar frente al mismo problema. El toast sigue —es la respuesta inmediata
+ * a lo que acaba de guardar—, pero deja de ser el único: la ficha es adonde
+ * vuelve, y ahora ahí está el estado y el botón, sin temporizador.
+ */
+const permisoOperar = computed<boolean | null>(() => {
+  const g = garzonEnEdicion.value
+  if (!g?.usuarioId) return null
+  return g.puedeOperarSalon ?? null
 })
 
 async function cargarEventosPin(id: string) {
@@ -356,9 +390,21 @@ function avisar(
   }
 }
 
+const dandoPermiso = ref(false)
+
 async function darPermisoOperar(garzonId: string, nombre: string) {
+  dandoPermiso.value = true
   try {
     await garzonesApi.otorgarPermisoOperar(garzonId)
+    // El endpoint devuelve el garzón, pero NO recalcula `puedeOperarSalon`
+    // (`otorgarPermisoOperar` cierra con `toPublico(garzon)`, sobre la fila
+    // que leyó ANTES de otorgar). Se fija acá el hecho que la llamada
+    // acaba de producir, en vez de recargar el listado entero: es el único
+    // efecto, y ya sabemos cuál es porque no hubo excepción.
+    const idx = garzones.value.findIndex(g => g.id === garzonId)
+    if (idx >= 0) {
+      garzones.value[idx] = { ...garzones.value[idx]!, puedeOperarSalon: true }
+    }
     toast.add({
       title: `${nombre} ya puede entrar en modo personal`,
       color: 'success',
@@ -370,6 +416,36 @@ async function darPermisoOperar(garzonId: string, nombre: string) {
       color: 'error',
     })
   }
+  finally {
+    dandoPermiso.value = false
+  }
+}
+
+/**
+ * Los dos hechos de la cuenta **después** de una mutación que pudo mover el
+ * vínculo.
+ *
+ * Hace falta porque `upsertLocal` fusiona (`{ ...anterior, ...saved }`) y
+ * `saved` no trae estos campos: sin esto, desvincular dejaría en pantalla el
+ * `cuentaEsMiembro` de la cuenta anterior, que ya no es de nadie.
+ *
+ * - **Sin cuenta** → los dos `null`: no hay a quién preguntarle.
+ * - **Con cuenta y la mutación tocó el vínculo** (`puedeOperarSalon !== null`,
+ *   que es exactamente cuando `assertVinculable` corrió) → `esMiembro` es
+ *   `true` **por construcción**: `assertVinculable` tira 400 *"Esa cuenta no
+ *   es miembro de este tenant"* antes de llegar acá, así que si estamos en
+ *   esta línea la cuenta es miembro.
+ * - **Con cuenta y el vínculo no se tocó** → `undefined` en los dos, para que
+ *   el spread de `upsertLocal` deje pasar lo que ya había, que sigue siendo
+ *   cierto.
+ */
+function factsTrasMutacion(
+  usuarioId: string | null,
+  puedeOperarSalon: boolean | null,
+): Partial<Pick<Garzon, 'cuentaEsMiembro' | 'puedeOperarSalon'>> {
+  if (usuarioId === null) return { cuentaEsMiembro: null, puedeOperarSalon: null }
+  if (puedeOperarSalon === null) return {}
+  return { cuentaEsMiembro: true, puedeOperarSalon }
 }
 
 async function guardar() {
@@ -385,7 +461,10 @@ async function guardar() {
         // selector se vacía dejaría el vínculo vivo.
         usuarioId: form.value.usuarioId,
       })
-      upsertLocal(saved)
+      upsertLocal({
+        ...saved,
+        ...factsTrasMutacion(saved.usuarioId, puedeOperarSalon),
+      })
       toast.add({ title: 'Garzón actualizado', color: 'success' })
       // El cambio se guardó; lo que la advertencia dice es que puede no regir
       // todavía (sesión abierta con el tipo congelado). Mismo patrón que el POS
@@ -405,11 +484,17 @@ async function guardar() {
         // selector de abajo.
         usuarioId: form.value.usuarioId ?? undefined,
       })
-      // `puedeOperarSalon` se saca acá y no viaja a `upsertLocal`: es un dato
-      // del momento de la mutación, no del garzón — guardarlo en el listado
-      // sería un caché que envejece sin que nadie lo refresque.
+      // `puedeOperarSalon` se saca del spread porque el de la mutación
+      // significa otra cosa que el del listado (ver `useGarzones`), pero desde
+      // el 2026-08-16 **sí** se guarda: el listado ya trae el campo, y dejar la
+      // fila recién creada sin él haría que la ficha del garzón que acabás de
+      // dar de alta sea la única que no sabe si le falta el permiso. La
+      // conversión de un significado al otro la hace `factsTrasMutacion`.
       const { pin, advertencias, puedeOperarSalon, ...garzon } = creado
-      upsertLocal(garzon)
+      upsertLocal({
+        ...garzon,
+        ...factsTrasMutacion(garzon.usuarioId, puedeOperarSalon),
+      })
       drawerOpen.value = false
       // `pin: null` = se creó CON cuenta y el backend no emitió ninguno: lo
       // fija la persona desde su perfil. Abrir el modal de revelado con un
@@ -897,6 +982,29 @@ const columns: TableColumn<Garzon>[] = [
               <UBadge :color="badgePin.color" variant="subtle">
                 {{ badgePin.label }}
               </UBadge>
+            </div>
+            <!-- El permiso de operar el salón, con su botón, EN LA FICHA.
+                 Hasta el 2026-08-16 el único lugar donde se podía dar era un
+                 toast que se auto-cierra: quien no llegaba a apretarlo volvía
+                 al mismo problema. El toast sigue existiendo (es la respuesta
+                 a lo que acabás de guardar), pero ya no es el único.
+                 `v-if="permisoOperar !== null"`: sin cuenta no hay permiso
+                 que dar — `otorgarPermisoOperar` responde 400 a eso. -->
+            <div v-if="permisoOperar !== null" class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium text-default">Modo personal</span>
+              <UBadge :color="permisoOperar ? 'success' : 'warning'" variant="subtle">
+                {{ permisoOperar ? 'Puede operar el salón' : 'Le falta el permiso' }}
+              </UBadge>
+              <UButton
+                v-if="!permisoOperar && puedeActualizar"
+                size="xs"
+                color="neutral"
+                variant="outline"
+                :loading="dandoPermiso"
+                @click="() => darPermisoOperar(garzonEnEdicion!.id, garzonEnEdicion!.nombre)"
+              >
+                Dárselo ahora
+              </UButton>
             </div>
             <div>
               <p class="mb-2 text-sm font-medium text-default">

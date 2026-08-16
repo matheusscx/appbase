@@ -38,6 +38,54 @@ const PIN_MAX_EXCLUSIVO = 1_000_000; // 000000..999999
 export const PIN_INUTILIZABLE = '!';
 
 /**
+ * El criterio de `Salones:Operar` para UNA cuenta, como fragmento SQL
+ * correlacionable: rol `es_fijo` (acceso total) **o** el JOIN completo de
+ * rol → módulo contratado del tenant → permiso.
+ *
+ * Está acá y no inline en cada consulta porque el proyecto ya lo tenía escrito
+ * **dos** veces —`RbacService.userHasPermiso` y la copia de
+ * `assertVinculable`— y esa copia ya se desincronizó una vez (cuando
+ * `RbacService` ató el tenant en sus JOIN). Al necesitarlo también el listado,
+ * la opción era una tercera copia: esto la evita. Sigue siendo una copia de
+ * `RbacService` —duplicarla es lo que permite que cada consulta sea UNA sola
+ * query en vez de inyectar el service y pagar la suya— pero ahora hay **un**
+ * lugar donde traerla al día si allá cambia el criterio.
+ *
+ * Los dos parámetros son **expresiones SQL, nunca entrada de usuario**: las
+ * llama el propio service con nombres de columna o placeholders (`$1`).
+ */
+function sqlPuedeOperarSalon(usuarioExpr: string, tenantExpr: string): string {
+  return `(
+    EXISTS (
+      SELECT 1
+        FROM roles_usuarios ru
+        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
+       WHERE ru.usuario_id = ${usuarioExpr}
+         AND ru.tenant_id = ${tenantExpr}
+         AND r.es_fijo = true
+         AND ru.eliminado_el IS NULL
+         AND r.eliminado_el IS NULL
+    )
+    OR EXISTS (
+      SELECT 1
+        FROM roles_usuarios ru
+        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id AND r.eliminado_el IS NULL
+        JOIN modulos_roles mr ON mr.rol_id = r.rol_id AND mr.eliminado_el IS NULL
+        JOIN tenant_modulos tm ON tm.modulo_tenant_id = mr.modulo_tenant_id AND tm.tenant_id = ru.tenant_id AND tm.eliminado_el IS NULL
+        JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id AND ma.eliminado_el IS NULL
+        JOIN roles_permisos_modulos rpm ON rpm.rol_id = r.rol_id AND rpm.modulo_tenant_id = tm.modulo_tenant_id
+        JOIN modulo_app_permisos map ON map.modulo_app_permiso_id = rpm.modulo_app_permiso_id AND map.eliminado_el IS NULL
+        JOIN permisos p ON p.permiso_id = map.permiso_id AND p.eliminado_el IS NULL
+       WHERE ru.usuario_id = ${usuarioExpr}
+         AND ru.tenant_id = ${tenantExpr}
+         AND ma.nombre = 'Salones'
+         AND p.nombre = 'Operar'
+         AND ru.eliminado_el IS NULL
+    )
+  )`;
+}
+
+/**
  * Los PIN que no protegen nada: 6 dígitos repetidos y las escaleras de 6 en el
  * orden natural, para arriba y para abajo. Son 20 en total y son los primeros
  * que prueba cualquiera que quiera hacerse pasar por otro.
@@ -73,6 +121,26 @@ export interface GarzonPublico {
   // Opcional: el listado sin `incluirEliminados` no hace el JOIN a `usuarios`
   // (N+1 si lo forzáramos ahí).
   eliminadoPorNombre?: string | null;
+  /**
+   * Si la cuenta vinculada **sigue siendo miembro** del tenant. `null` cuando
+   * la pregunta no se hizo: el garzón no tiene cuenta, o el listado se pidió
+   * sin `conPermisos`.
+   *
+   * Existe porque la ficha rotulaba "Sin PIN todavía" —cuyo significado es *"la
+   * persona lo resuelve desde su perfil"*— a un garzón cuya cuenta ya no es
+   * miembro. Esa persona **no puede** resolverlo: `fijarMiPin` resuelve por
+   * `garzonPersonalDe`, que filtra la membresía viva, así que le da 404. Es el
+   * estado que produce a propósito la salida **"no sigue"** de la baja de
+   * membresía (2026-08-16): garzón `activo = false` con la cuenta ya fuera.
+   */
+  cuentaEsMiembro?: boolean | null;
+  /**
+   * Si la cuenta vinculada puede operar el salón **hoy** — el mismo dato que
+   * `GarzonConAdvertencias`, acá para quien mira la ficha en vez de para quien
+   * acaba de guardar. `null` cuando la pregunta no se hizo (sin cuenta, o
+   * listado sin `conPermisos`).
+   */
+  puedeOperarSalon?: boolean | null;
 }
 
 /**
@@ -99,9 +167,14 @@ export interface GarzonConAdvertencias extends GarzonPublico {
    * (`POST /garzones/:id/permiso-operar`). No cuesta nada — sale de la misma
    * consulta que ya decide la advertencia.
    *
-   * ⚠️ **No está en el listado y no debería estarlo**: ahí serían N subqueries
-   * de RBAC en una ruta caliente. Acá viaja solo en la respuesta de la mutación
-   * que ya la calculó.
+   * ⚠️ Este comentario decía que en el listado *"serían N subqueries de RBAC en
+   * una ruta caliente"*, y eso **se midió y es falso como consecuencia**
+   * (2026-08-16): Postgres las resuelve como subplanes correlacionados en UNA
+   * query — 2,05 ms contra 0,118 ms del listado pelado, sobre los 22 garzones
+   * del tenant más grande, todo index scan y todo shared hit. No es un N+1: es
+   * una sola ida y vuelta. Lo que sí es cierto es que `GET /garzones` lo
+   * cargan **6 páginas** y 5 no usan el dato, y por eso el listado lo trae solo
+   * con `conPermisos` — ver `listar()`.
    */
   puedeOperarSalon: boolean | null;
 }
@@ -185,16 +258,78 @@ export class GarzonesService {
     };
   }
 
+  /**
+   * Los dos hechos de la CUENTA que la ficha del garzón necesita para no
+   * mentir, resueltos para todas las cuentas de una vez.
+   *
+   * **Una query, no N**: `unnest($2::uuid[])` arma la lista y los `EXISTS`
+   * corren como subplanes correlacionados dentro de la misma ida y vuelta —
+   * el patrón `WHERE id = ANY($1)` de `docs/patterns/backend.md`, con la
+   * forma que además permite devolver una fila por cuenta pedida. Medido
+   * sobre los 22 garzones del tenant más grande: 2,05 ms, todo index scan.
+   *
+   * `esMiembro` se pregunta con un `EXISTS` sobre `usuarios_tenants` y no con
+   * un JOIN desde ahí, a propósito: si la cuenta dejó de ser miembro no hay
+   * fila que traer, y un JOIN devolvería la cuenta ausente en vez de
+   * `false` — que es exactamente el caso que esta consulta existe para
+   * detectar.
+   */
+  private async factsDeCuentas(
+    tenantId: string,
+    usuarioIds: string[],
+  ): Promise<Map<string, { esMiembro: boolean; puedeOperar: boolean }>> {
+    const mapa = new Map<
+      string,
+      { esMiembro: boolean; puedeOperar: boolean }
+    >();
+    if (usuarioIds.length === 0) return mapa;
+    const filas = await this.garzonRepo.manager.query<
+      { usuario_id: string; es_miembro: boolean; puede_operar: boolean }[]
+    >(
+      `SELECT c.usuario_id,
+              EXISTS (
+                SELECT 1
+                  FROM usuarios_tenants ut
+                 WHERE ut.usuario_id = c.usuario_id
+                   AND ut.tenant_id = $1::uuid
+                   AND ut.eliminado_el IS NULL
+              ) AS es_miembro,
+              ${sqlPuedeOperarSalon('c.usuario_id', '$1::uuid')} AS puede_operar
+         FROM unnest($2::uuid[]) AS c(usuario_id)`,
+      [tenantId, usuarioIds],
+    );
+    for (const f of filas) {
+      mapa.set(f.usuario_id, {
+        esMiembro: f.es_miembro,
+        puedeOperar: f.puede_operar,
+      });
+    }
+    return mapa;
+  }
+
+  /**
+   * `conPermisos` es **opt-in** y no el default por una razón medida
+   * (2026-08-16), no por precaución: `GET /garzones` lo cargan seis pantallas
+   * —entre ellas `salones/index.vue`, que es la operación— y solo la ficha de
+   * `configuracion/garzones.vue` usa `cuentaEsMiembro` / `puedeOperarSalon`.
+   * Traerlos siempre le sumaría ~1,9 ms de RBAC a cinco pantallas que no los
+   * miran. **No es por N+1**: son 2 queries en total, no N — ver
+   * `factsDeCuentas`.
+   */
   async listar(
     tenantId: string,
     incluirEliminados = false,
+    conPermisos = false,
   ): Promise<GarzonPublico[]> {
     if (!incluirEliminados) {
       const garzones = await this.garzonRepo.find({
         where: { tenantId, esPlaceholder: false },
         order: { nombre: 'ASC' },
       });
-      return garzones.map((g) => this.toPublico(g));
+      const publicos = garzones.map((g) => this.toPublico(g));
+      return conPermisos
+        ? await this.conFactsDeCuenta(tenantId, publicos)
+        : publicos;
     }
     // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
     // los `addSelect` que no mapean a una columna de la entity, así que hay
@@ -216,9 +351,49 @@ export class GarzonesService {
       .orderBy('g.nombre', 'ASC')
       .getRawAndEntities<{ g_eliminado_por_nombre: string | null }>();
 
-    return entities.map((g, i) =>
+    const publicos = entities.map((g, i) =>
       this.toPublico(g, raw[i].g_eliminado_por_nombre),
     );
+    return conPermisos
+      ? await this.conFactsDeCuenta(tenantId, publicos)
+      : publicos;
+  }
+
+  /**
+   * Pega los hechos de la cuenta sobre los garzones ya mapeados. Los que no
+   * tienen cuenta quedan en `null` —no en `false`— porque la pregunta no se
+   * les hizo: es la misma convención que `GarzonConAdvertencias`, y el
+   * frontend la usa para distinguir "no aplica" de "aplica y da que no".
+   *
+   * Una cuenta que ya no es miembro cae en el `?? { … false, false }`: no
+   * vuelve fila para ella, y eso es precisamente lo que significa.
+   */
+  private async conFactsDeCuenta(
+    tenantId: string,
+    garzones: GarzonPublico[],
+  ): Promise<GarzonPublico[]> {
+    const usuarioIds = [
+      ...new Set(
+        garzones
+          .map((g) => g.usuarioId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+    const facts = await this.factsDeCuentas(tenantId, usuarioIds);
+    return garzones.map((g) => {
+      if (g.usuarioId === null) {
+        return { ...g, cuentaEsMiembro: null, puedeOperarSalon: null };
+      }
+      const f = facts.get(g.usuarioId) ?? {
+        esMiembro: false,
+        puedeOperar: false,
+      };
+      return {
+        ...g,
+        cuentaEsMiembro: f.esMiembro,
+        puedeOperarSalon: f.puedeOperar,
+      };
+    });
   }
 
   async crear(
@@ -510,16 +685,19 @@ export class GarzonesService {
    * `puedeOperarSalon` (en el resultado, cuando no tira): NO es una cuarta
    * condición que bloquee — vincular hoy y dar el permiso mañana es un flujo
    * legítimo (decisión del owner, 2026-08-14) — es solo el dato para que
-   * quien llama decida si advierte. La subquery replica el criterio de
+   * quien llama decida si advierte. La subquery sale de
+   * `sqlPuedeOperarSalon()`, que replica el criterio de
    * `RbacService.userHasPermiso` (rol `es_fijo` = acceso total, si no, el
    * JOIN completo de rol → módulo del tenant → permiso) para `Salones:Operar`
-   * puntual: duplicarla acá, en vez de inyectar `RbacService` y pagar su
-   * propia consulta aparte, es lo que permite que siga siendo UNA sola query.
+   * puntual: duplicarlo, en vez de inyectar `RbacService` y pagar su propia
+   * consulta aparte, es lo que permite que siga siendo UNA sola query.
    *
    * ⚠️ **Al ser una copia, se desincroniza sola.** Ya pasó: cuando `RbacService`
    * ató el tenant en sus JOIN (`r.tenant_id = ru.tenant_id`,
    * `tm.tenant_id = ru.tenant_id`), esta copia quedó atrás y hubo que traerla a
-   * mano. Si se toca el criterio allá, se toca acá.
+   * mano. Si se toca el criterio allá, se toca en `sqlPuedeOperarSalon()` — que
+   * desde el 2026-08-16 es **el único** lugar donde vive la copia, para que
+   * traerla al día siga siendo un solo cambio y no tres.
    */
   private async assertVinculable(
     tenantId: string,
@@ -535,34 +713,7 @@ export class GarzonesService {
     >(
       `SELECT ut.es_totem,
               g.nombre AS garzon_nombre,
-              (
-                EXISTS (
-                  SELECT 1
-                    FROM roles_usuarios ru
-                    JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
-                   WHERE ru.usuario_id = ut.usuario_id
-                     AND ru.tenant_id = ut.tenant_id
-                     AND r.es_fijo = true
-                     AND ru.eliminado_el IS NULL
-                     AND r.eliminado_el IS NULL
-                )
-                OR EXISTS (
-                  SELECT 1
-                    FROM roles_usuarios ru
-                    JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id AND r.eliminado_el IS NULL
-                    JOIN modulos_roles mr ON mr.rol_id = r.rol_id AND mr.eliminado_el IS NULL
-                    JOIN tenant_modulos tm ON tm.modulo_tenant_id = mr.modulo_tenant_id AND tm.tenant_id = ru.tenant_id AND tm.eliminado_el IS NULL
-                    JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id AND ma.eliminado_el IS NULL
-                    JOIN roles_permisos_modulos rpm ON rpm.rol_id = r.rol_id AND rpm.modulo_tenant_id = tm.modulo_tenant_id
-                    JOIN modulo_app_permisos map ON map.modulo_app_permiso_id = rpm.modulo_app_permiso_id AND map.eliminado_el IS NULL
-                    JOIN permisos p ON p.permiso_id = map.permiso_id AND p.eliminado_el IS NULL
-                   WHERE ru.usuario_id = ut.usuario_id
-                     AND ru.tenant_id = ut.tenant_id
-                     AND ma.nombre = 'Salones'
-                     AND p.nombre = 'Operar'
-                     AND ru.eliminado_el IS NULL
-                )
-              ) AS puede_operar_salon
+              ${sqlPuedeOperarSalon('ut.usuario_id', 'ut.tenant_id')} AS puede_operar_salon
          FROM usuarios_tenants ut
          LEFT JOIN garzones g
            ON g.usuario_id = ut.usuario_id

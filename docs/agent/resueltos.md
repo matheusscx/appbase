@@ -17,6 +17,65 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La ficha del garzón deja de mentir sobre lo que la cuenta puede (2026-08-16)
+
+Dos entradas de la sección *"Medir primero"*, cerradas juntas porque la propia entrada ya lo
+decía: *"las dos son 'la ficha no sabe algo que necesita para no mentir', y probablemente se
+resuelvan con la misma consulta"*. Lo eran.
+
+**Lo que la medición contradijo.** Las dos entradas proponían colgar el dato *"al abrir la
+ficha (una consulta, no N)"*, y descartaban el listado porque *"serían N subqueries de RBAC en
+una ruta caliente"*. Las dos premisas resultaron falsas, cada una por su lado:
+
+- **No hay dónde colgarlo al abrir la ficha:** `GET /garzones/:id` **no existe**. El drawer se
+  alimenta de la lista ya cargada (`garzonEnEdicion` es un `computed` sobre ella), así que
+  abrirlo no hace ninguna request.
+- **El listado no es un N+1.** Medido con `EXPLAIN (ANALYZE, BUFFERS)` sobre los 22 garzones
+  del tenant más grande: Postgres resuelve los `EXISTS` como subplanes correlacionados dentro
+  de **una** ida y vuelta — **2,05 ms** contra **0,118 ms** del listado pelado, todo index scan
+  y todo shared hit. Son N subplanes, sí; no son N round-trips, que es lo que el proyecto llama
+  N+1.
+
+Lo que **sí** resultó cierto, y es la razón real del diseño elegido: `GET /garzones` lo cargan
+**seis** pantallas (`salones/index.vue`, `sesiones-garzon`, dos de propinas,
+`propinas-distribucion` y esta), y **solo esta** usa los campos. Por eso son **opt-in**
+(`?conPermisos=true`) y no default: no por N+1, sino por no cobrarle ~1,9 ms de RBAC a la
+operación del salón para nada.
+
+**El rótulo que mentía no era teórico.** La salida `no-sigue` de la baja de membresía produce
+**a propósito** un garzón `activo = false` vinculado a una cuenta que ya no es miembro. Esa
+persona no puede entrar a fijarse el PIN —`fijarMiPin` resuelve por `garzonPersonalDe`, que
+filtra la membresía viva → 404— y el badge le decía al encargado *"Sin PIN todavía"*, cuyo
+significado documentado es *"la persona lo resuelve desde su perfil"*. Contado sobre la base de
+dev: **3 de 13** garzones vinculados estaban en ese estado, los tres con el rótulo de la espera
+normal. Ahora dicen *"Sin PIN: su cuenta ya no es miembro"* (`error`).
+
+**El botón que se iba solo.** El único afordance para dar `Salones:Operar` vivía en un toast
+con temporizador. Sigue existiendo —es la respuesta a lo que se acaba de guardar— pero la ficha
+ahora tiene una fila *"Modo personal"* con el estado y el mismo botón, sin temporizador, que
+además se actualiza en el acto sin recargar el listado.
+
+**Qué se construyó.** `GarzonPublico` suma `cuentaEsMiembro` y `puedeOperarSalon`, los dos
+`null` cuando no hay cuenta (la convención que ya usaba `GarzonConAdvertencias`: `null` es *"la
+pregunta no se hizo"*, distinto de *"se hizo y da que no"*). Los resuelve `factsDeCuentas()` en
+**una** query con `unnest($2::uuid[])`. `esMiembro` se pregunta con un `EXISTS` y no con un
+`JOIN` desde `usuarios_tenants` a propósito: si la cuenta dejó de ser miembro no hay fila que
+traer, y un `JOIN` la haría desaparecer del resultado en vez de devolver `false` — que es
+exactamente el caso a detectar.
+
+De paso, el criterio de `Salones:Operar` quedó en **un solo lugar** (`sqlPuedeOperarSalon()`).
+Era una copia de `RbacService.userHasPermiso` que ya se había desincronizado una vez, y este
+cambio iba a agregar una tercera; ahora hay un único sitio donde traerla al día.
+
+**Los mutantes.** Tres, todos revirtiendo al código anterior, no rompiéndolo:
+
+| Mutante | Qué cae |
+|---|---|
+| `badgePin` sin el chequeo de `cuentaEsMiembro` | 1 test: *"cuenta que ya NO es miembro…"* |
+| La fila *"Modo personal"* fuera de la ficha | 3 tests de la ficha |
+| `listar()` ignorando `conPermisos` | 4 de los 5 e2e nuevos — y **no** el que afirma que sin el flag los campos no viajan, que es lo correcto |
+
+
 ## El alta de suscripción muestra lo que cobra, y un producto no entra en dos recuentos (2026-08-16)
 
 **El precio de la suscripción.** El drawer rotulaba *"Precio del período"* con

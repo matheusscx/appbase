@@ -17,7 +17,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
-import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
+import { QueryListarGarzonesDto } from './dto/query-listar-garzones.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GarzonesService } from './garzones.service';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
@@ -69,9 +69,13 @@ export class GarzonesController {
 
   @Get()
   @RequiresPermiso('Salones', 'Leer')
-  listar(@Req() req: Request, @Query() query: QueryIncluirEliminadosDto) {
+  listar(@Req() req: Request, @Query() query: QueryListarGarzonesDto) {
     const user = req.user as { tenantId: string };
-    return this.garzonesService.listar(user.tenantId, query.incluirEliminados);
+    return this.garzonesService.listar(
+      user.tenantId,
+      query.incluirEliminados,
+      query.conPermisos,
+    );
   }
 
   @Post()

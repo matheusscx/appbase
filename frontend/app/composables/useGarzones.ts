@@ -23,6 +23,22 @@ export interface Garzon {
   // `listar()` (POS, identificación por PIN) nunca los piden.
   eliminadoEl?: string | null
   eliminadoPorNombre?: string | null
+  /**
+   * Si la cuenta vinculada **sigue siendo miembro** del tenant. Solo llega con
+   * `listar(_, true)`; `null` cuando el garzón no tiene cuenta.
+   *
+   * Lo mira el badge de PIN: sin este dato rotulaba "Sin PIN todavía" —*"la
+   * persona lo resuelve desde su perfil"*— a alguien cuya cuenta ya no es
+   * miembro y que por lo tanto **no puede** resolverlo (`fijarMiPin` le da
+   * 404). Es el estado que produce la salida "no sigue" de la baja de
+   * membresía.
+   */
+  cuentaEsMiembro?: boolean | null
+  /**
+   * Si la cuenta vinculada puede operar el salón hoy. Solo llega con
+   * `listar(_, true)`; `null` cuando el garzón no tiene cuenta.
+   */
+  puedeOperarSalon?: boolean | null
 }
 
 /**
@@ -53,8 +69,12 @@ export interface GarzonConAdvertencias extends Garzon {
    * se hizo (el garzón no tiene cuenta, o esta mutación no tocó el vínculo).
    *
    * Es lo que vuelve **accionable** al aviso de "…hasta que se lo des": con
-   * `false` la pantalla ofrece el botón que se lo da. No sale del listado —
-   * ahí serían N subqueries de RBAC— sino de la mutación que ya lo calculó.
+   * `false` la pantalla ofrece el botón que se lo da.
+   *
+   * Desde el 2026-08-16 el listado también lo trae, pero **solo si se lo
+   * pide** (`listar(_, true)`). Este campo sigue existiendo aparte porque
+   * significa otra cosa: acá es *"cómo quedó después de lo que acabás de
+   * guardar"*, y por eso es `null` cuando la mutación no tocó el vínculo.
    */
   puedeOperarSalon: boolean | null
 }
@@ -123,13 +143,24 @@ export interface MiPinEstado extends EventosPinPagina {
 export function useGarzones() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
-  /** `incluirEliminados` es opcional y por default `false`: el POS y la
-   *  identificación por PIN también llaman `listar()` y no deben empezar a
-   *  ver garzones borrados. */
-  const listar = (incluirEliminados = false) =>
-    useApiFetch<Garzon[]>(
-      `${apiUrl}/garzones${incluirEliminados ? '?incluirEliminados=true' : ''}`,
-    )
+  /**
+   * `incluirEliminados` es opcional y por default `false`: el POS y la
+   * identificación por PIN también llaman `listar()` y no deben empezar a
+   * ver garzones borrados.
+   *
+   * `conPermisos` es opt-in por el mismo motivo, medido: este listado lo
+   * cargan **seis** pantallas y solo la ficha de `configuracion/garzones.vue`
+   * usa `cuentaEsMiembro` / `puedeOperarSalon`. No es por N+1 —el backend los
+   * resuelve en una sola query de más—, es por no cobrarle ~1,9 ms de RBAC a
+   * `salones/index.vue`, que es la operación.
+   */
+  const listar = (incluirEliminados = false, conPermisos = false) => {
+    const params = new URLSearchParams()
+    if (incluirEliminados) params.set('incluirEliminados', 'true')
+    if (conPermisos) params.set('conPermisos', 'true')
+    const qs = params.toString()
+    return useApiFetch<Garzon[]>(`${apiUrl}/garzones${qs ? `?${qs}` : ''}`)
+  }
 
   /**
    * Crea el garzón. **Sin** `usuarioId` el backend genera el PIN y lo devuelve

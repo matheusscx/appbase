@@ -97,6 +97,22 @@ vínculo y por lo tanto la pregunta no se hizo—, y **no** buscando el texto de
 advertencia. El detalle del acotamiento, en
 [roles y permisos](roles-permisos.md#roles-de-sistema-es_sistema-2026-08-16).
 
+**Y ese botón dejó de vivir solo en un toast** (2026-08-16). El aviso se auto-cierra: quien
+no llegaba a apretarlo volvía al mismo problema. Ahora la ficha del garzón —adonde el
+encargado vuelve— muestra una fila *"Modo personal"* con el estado y, si falta, el mismo
+botón sin temporizador. El toast sigue, porque es la respuesta a lo que se acaba de
+guardar; lo que cambió es que ya no es el único camino.
+
+El dato lo trae el **listado**, no una consulta al abrir la ficha: `GET /garzones/:id` no
+existe y la ficha se alimenta de la lista ya cargada. Es **opt-in** (`?conPermisos=true`)
+por una razón medida, no por precaución: son 2 queries en total y no N —los `EXISTS` de
+RBAC corren como subplanes correlacionados dentro de un `unnest`, 2,05 ms contra 0,118 ms
+del listado pelado sobre 22 garzones—, pero este listado lo cargan **seis** pantallas y
+solo esta usa los campos. Cobrarle ese RBAC a `salones/index.vue`, que es la operación,
+sería pagar por nada. El criterio de `Salones:Operar` vive en un solo lugar
+(`sqlPuedeOperarSalon()`), que es una copia de `RbacService` y ya se desincronizó una vez:
+si allá cambia, se toca ahí.
+
 ⚠️ **La única excepción a "desvincular no toca el PIN" es la baja de la membresía**, y es
 justamente porque ahí el garzón no eligió nada: su cuenta era la credencial y se va con la
 membresía. Esa ruta sí le escribe un PIN nuevo, y **pregunta antes** si la persona sigue
@@ -221,7 +237,7 @@ el corte lo hace el token, que decide de qué garzón se está hablando.
 
 | Método | Ruta | Permiso (`Salones`) | Descripción |
 |---|---|---|---|
-| GET | `/garzones` | `Leer` | Lista garzones del tenant (sin `pin_hash`); `?incluirEliminados=true` suma la papelera |
+| GET | `/garzones` | `Leer` | Lista garzones del tenant (sin `pin_hash`); `?incluirEliminados=true` suma la papelera; `?conPermisos=true` suma `cuentaEsMiembro` y `puedeOperarSalon` |
 | POST | `/garzones` | `Crear` | Crea `{ nombre, activo?, tipo?, usuarioId? }` → el garzón + `advertencias` + `pin`: **sin** `usuarioId` el generado (una vez), **con** cuenta `null` (no se emite ninguno) |
 | PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo?, tipo?, usuarioId? }` → el garzón + `advertencias`. `usuarioId: null` desvincula; **ausente** no toca el vínculo |
 | PATCH | `/garzones/:id/pin` | `Actualizar` | Sin body. **Sin cuenta** regenera y devuelve el `pin` nuevo (una vez); **con cuenta** invalida y devuelve `pin: null`. Suma `habiaPin`: si había uno usable antes de este PATCH |
@@ -375,12 +391,19 @@ transferencias — ver Salones).
   | Estado | Badge | Quién lo resuelve |
   |---|---|---|
   | Con cuenta, PIN puesto | *"PIN puesto"* (`success`) | nada que hacer |
-  | Con cuenta, sin PIN | *"Sin PIN todavía"* (`warning`) | la persona, desde su perfil |
+  | Con cuenta **viva**, sin PIN | *"Sin PIN todavía"* (`warning`) | la persona, desde su perfil |
+  | **Con cuenta que ya no es miembro**, sin PIN | *"Sin PIN: su cuenta ya no es miembro"* (`error`) | **el encargado**, resolviéndole la credencial |
   | **Sin cuenta, sin PIN** | *"Sin PIN: no puede operar"* (`error`) | **el encargado**, generándole uno |
   | Sin cuenta, con PIN | *(sin badge)* | — |
 
   El último caso se esconde porque ahí *"PIN puesto"* significaría *"lo puso la persona"*, que
-  es lo que un garzón sin cuenta nunca hizo. El tercero, en cambio, **no es un caso teórico**:
+  es lo que un garzón sin cuenta nunca hizo. El **segundo error** salió de medir (2026-08-16)
+  que *"todavía"* mentía: la salida `no-sigue` de la baja de membresía produce **a propósito**
+  un garzón vinculado a una cuenta que ya no es miembro, y esa persona **no puede** entrar a
+  fijarse el PIN (`fijarMiPin` resuelve por `garzonPersonalDe`, que filtra la membresía viva →
+  404). Sobre la base de dev eran **3 de 13** garzones vinculados, y los tres recibían el
+  rótulo de la espera normal. El dato sale de `cuentaEsMiembro`, que el listado trae **solo si
+  se lo pide** (ver más abajo). El tercero, en cambio, **no es un caso teórico**:
   se llega **desvinculando** desde este mismo formulario. `actualizar()` pisa `pin_hash` solo en
   la transición `null → uuid`, así que un garzón dado de alta **con** cuenta y después
   desvinculado queda sin vínculo **y** sin PIN usable — no puede operar por ningún lado ni
