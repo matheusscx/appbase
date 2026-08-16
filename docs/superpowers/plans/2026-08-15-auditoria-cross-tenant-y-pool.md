@@ -106,6 +106,47 @@ positivo.
 
 ---
 
+## Línea base medida (2026-08-16, conteo mecánico previo a la pasada)
+
+No es la auditoría: es **contar el pajar**, para que la pasada tenga contra qué comparar y
+para responder "¿quedan más casos?" sin gastar la pasada entera. Hecho con grep + script,
+con falsos positivos y negativos **confirmados** (ver abajo).
+
+| Lente | Candidatos | Archivos | Qué se sabe con certeza |
+|---|---|---|---|
+| A — cross-tenant | ~23 | 8 | La **mayoría son legítimos**: sesiones y perfil propio son por-usuario a propósito. El conteo NO responde la pregunta; cada sitio necesita el juicio *"¿puede una acción de un tenant escribir acá?"* |
+| B — pool | ~20 | 7 | Consistente con la tabla del 2026-08-11. **Verificados a mano y todavía sin arreglar:** `ventas.service.ts` 156, 157, 186, 649, 714 |
+
+**Conclusión para la lente B:** la tabla está esencialmente vigente y **los sitios siguen
+ahí**. Confirma que el trabajo pendiente es arreglar, no encontrar.
+
+**Conclusión para la lente A:** el pajar es chico y acotado, pero el conteo no distingue el
+caso legítimo del bug. Es exactamente el tipo de pregunta que necesita buscador + refutador.
+
+### ⚠️ Tres bugs de detección, para que el script de la pasada no los repita
+
+Los tres se cometieron haciendo este conteo, y los tres daban números que parecían buenos:
+
+1. **Contar llaves desde la firma de un método da bloques vacíos.** Al detectar
+   transacciones por `manager: EntityManager` en la firma, la profundidad arranca en 0 y el
+   bucle corta antes de que el cuerpo abra. Resultado: **11 candidatos en vez de 20**, y
+   `ventas.service.ts` reportaba 1 sitio de 8. Hay que esperar la primera `{` antes de
+   contar.
+2. **"¿Aparece `manager` cerca?" no sirve como heurística.** Con una ventana de líneas, los
+   sitios 649 y 714 de `ventas.service.ts` se perdían porque la llamada *siguiente* sí pasa
+   `manager`. Hay que mirar **la lista de argumentos de esa llamada**, no un entorno.
+3. **La lente A no se puede buscar sólo en SQL crudo.** Un primer conteo sobre plantillas
+   con backticks dio 6 sitios y **no habría encontrado el bug real de ayer**: QueryBuilder
+   usa comillas simples y `refreshRepo.delete({ userId })` es repositorio. Hay que cubrir
+   las tres formas: SQL crudo, QueryBuilder y repositorio.
+
+**Y la lección de método que esto deja:** en un rato de grep aparecieron falsos positivos
+*y* falsos negativos en las dos lentes, con dos correcciones al script sobre la marcha. Un
+barrido mecánico solo **no alcanza** — el paso del refutador no es ceremonia, es lo que
+separa 11 de 20.
+
+---
+
 ## Reglas de esta pasada
 
 - **Buscadores ciegos entre sí**, uno por lente, con tope de hallazgos y schema estructurado.
