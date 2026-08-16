@@ -19,6 +19,13 @@ interface Member {
   correo: string
   /** La cuenta se usa como tótem compartido: en el salón siempre se pide PIN. */
   esTotem: boolean
+  /**
+   * El correo ya tenía cuenta, así que el alta **no la adopta**: le llegó un
+   * mail y la persona todavía no aceptó sumarse. Hasta que acepte **no es
+   * miembro** — aparece en la tabla igual porque, si no, el admin ve que el
+   * alta "no hizo nada" y la repite.
+   */
+  pendienteConfirmacion: boolean
   roles: { rolId: string, nombre: string }[]
 }
 
@@ -37,6 +44,16 @@ const seleccion = ref<string[]>([])
 
 const roleItems = computed(() =>
   roles.value.map(r => ({ label: r.nombre, value: r.id })),
+)
+
+/**
+ * Cuántas altas están esperando que la persona acepte. El badge por fila dice
+ * *cuál*; este contador existe para el admin que acaba de dar de alta y busca
+ * al usuario en la tabla: sin un aviso arriba, "está pero raro" se lee como
+ * "el alta falló".
+ */
+const pendientes = computed(
+  () => members.value.filter(m => m.pendienteConfirmacion).length,
 )
 
 async function cargar() {
@@ -122,6 +139,7 @@ async function crearUsuario() {
       usuarioId: string
       correo: string
       invitado: boolean
+      pendienteConfirmacion: boolean
     }>(`${apiUrl}/tenants/usuarios`, {
       method: 'POST',
       // `apellido` vacío se omite: `@IsOptional` no filtra el string vacío, así
@@ -132,16 +150,22 @@ async function crearUsuario() {
     altaOpen.value = false
     await cargar()
 
-    // El admin ya no ve ninguna credencial: la persona elige la suya desde el
-    // link. `invitado: false` significa que el correo ya tenía cuenta, así que
-    // no hay invitación que mandar.
+    // Tres desenlaces, no dos. El admin nunca ve una credencial: la persona
+    // elige la suya desde el link (`invitado`) o ya tenía cuenta
+    // (`pendienteConfirmacion`), y en ese caso el alta **no la adopta** —
+    // queda esperando que ella acepte. El tercer caso es el alta que quedó
+    // resuelta en el acto, sin mail de por medio.
     toast.add({
       title: res.invitado
         ? `Invitación enviada a ${res.correo}`
-        : 'Usuario agregado al tenant',
+        : res.pendienteConfirmacion
+          ? `Falta que ${res.correo} acepte`
+          : 'Usuario agregado al tenant',
       description: res.invitado
         ? 'Le llega un link para elegir su contraseña. Vence en 7 días.'
-        : 'Ya tenía cuenta: entra con su contraseña de siempre.',
+        : res.pendienteConfirmacion
+          ? 'Ese correo ya tenía cuenta. Le mandamos un mail avisándole que lo estás sumando: se suma cuando acepte, no antes.'
+          : 'Ya tenía cuenta: entra con su contraseña de siempre.',
       color: 'success',
     })
   }
@@ -211,6 +235,21 @@ const columns: TableColumn<Member>[] = [
       </template>
     </CrudPageHeader>
 
+    <!-- El alta que espera confirmación es el único caso en que la tabla no
+         refleja lo que el admin acaba de hacer. Sin decirlo acá arriba —donde
+         se mira después de crear— el badge de la fila llega tarde: para
+         entonces ya repitió el alta o dio por hecho que falló. -->
+    <UAlert
+      v-if="pendientes"
+      color="info"
+      variant="subtle"
+      icon="i-lucide-mail-check"
+      :title="pendientes === 1
+        ? 'Falta que 1 persona acepte sumarse'
+        : `Falta que ${pendientes} personas acepten sumarse`"
+      description="El alta salió bien: ya les llegó un mail avisando que las estás sumando a esta empresa. Recién cuando aceptan pasan a ser miembros y sus roles empiezan a valer."
+    />
+
     <CrudTable :data="members" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
         <div class="flex items-center gap-2">
@@ -229,6 +268,19 @@ const columns: TableColumn<Member>[] = [
             icon="i-lucide-monitor"
           >
             Tótem
+          </UBadge>
+          <!-- Va pegado al nombre y no en una columna aparte: lo que el admin
+               necesita saber es que ESA persona todavía no entra, y lo busca
+               por nombre. -->
+          <UBadge
+            v-if="row.original.pendienteConfirmacion"
+            color="info"
+            variant="subtle"
+            size="xs"
+            icon="i-lucide-clock"
+            title="Le llegó un mail avisándole que la estás sumando. Todavía no aceptó, así que aún no es miembro."
+          >
+            Falta que acepte
           </UBadge>
         </div>
       </template>
@@ -253,6 +305,10 @@ const columns: TableColumn<Member>[] = [
           </div>
         </template>
 
+        <!-- Las dos acciones escriben sobre la membresía, y quien todavía no
+             aceptó no la tiene: el backend rechaza ambas. Se deshabilitan con
+             el motivo a la vista en vez de dejar que el admin las apriete para
+             recibir un error que no explica nada. -->
         <template #acciones-cell="{ row }">
           <div class="flex items-center justify-end gap-1">
             <UButton
@@ -260,15 +316,22 @@ const columns: TableColumn<Member>[] = [
               color="neutral"
               variant="ghost"
               :loading="marcandoTotem === row.original.usuarioId"
-              :title="row.original.esTotem
-                ? 'Dejar de usarla como tótem compartido'
-                : 'Usar esta cuenta como tótem compartido'"
+              :disabled="row.original.pendienteConfirmacion"
+              :title="row.original.pendienteConfirmacion
+                ? 'Se puede configurar cuando acepte sumarse'
+                : row.original.esTotem
+                  ? 'Dejar de usarla como tótem compartido'
+                  : 'Usar esta cuenta como tótem compartido'"
               @click="alternarTotem(row.original)"
             />
             <UButton
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
+              :disabled="row.original.pendienteConfirmacion"
+              :title="row.original.pendienteConfirmacion
+                ? 'Sus roles se pueden editar cuando acepte sumarse'
+                : 'Editar roles'"
               @click="abrirEdicion(row.original)"
             />
           </div>
@@ -305,10 +368,12 @@ const columns: TableColumn<Member>[] = [
             />
           </UFormField>
           <p class="text-sm text-muted">
-            Si el correo ya tiene cuenta, se suma a este tenant conservando su
-            contraseña, y le quedan <strong>los roles que elijas acá</strong>.
-            Si no, le llega un <strong>link por mail</strong> para que elija su
-            contraseña. Vos no la ves nunca.
+            Si el correo <strong>ya tiene cuenta</strong>, le llega un mail
+            avisándole que la estás sumando: se suma
+            <strong>recién cuando acepta</strong>, con los roles que elijas acá.
+            Si <strong>no tiene cuenta</strong>, le llega un
+            <strong>link por mail</strong> para que elija su contraseña. Vos no
+            la ves nunca.
           </p>
         </UForm>
       </template>

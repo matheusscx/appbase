@@ -113,9 +113,30 @@ describe('useAuthStore — mensajes de error del login público', () => {
 
     const ok = await store.register('Ana', 'a@b.com', 'secreta')
 
-    expect(ok).toBe(false)
+    // `null` y no `false`: el registro devuelve el mensaje del backend, y ya
+    // no un booleano. No abre sesión — la cuenta no sirve hasta verificar el
+    // correo—, así que no hay nada que ramificar salvo "salió" o "falló".
+    expect(ok).toBeNull()
     expect(store.error).toBe('Error al registrarse')
     expect(store.error).not.toContain('http')
+  })
+
+  it('un registro exitoso NO abre sesión: devuelve el mensaje y nada más', async () => {
+    // La cuenta nace sin el correo verificado y no se puede usar hasta abrir
+    // el link del mail. Si acá quedara un token, la pantalla entraría a una
+    // sesión que el backend va a rechazar en la request siguiente — y peor,
+    // haría distinguible el caso "el correo ya existía", que es justo lo que
+    // el endpoint dejó de revelar.
+    const store = useAuthStore()
+    $fetchMock.mockResolvedValueOnce({
+      message: 'Si ese correo no tenía cuenta, te llega un link para verificarlo y entrar.',
+    })
+
+    const mensaje = await store.register('Ana', 'a@b.com', 'secreta')
+
+    expect(mensaje).toContain('te llega un link')
+    expect(store.token).toBeNull()
+    expect(store.user).toBeNull()
   })
 
   it('sigue mostrando el mensaje del backend cuando responde con error', async () => {

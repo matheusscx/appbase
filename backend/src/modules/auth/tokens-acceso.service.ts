@@ -8,6 +8,13 @@ import { TipoTokenAcceso, TokenAcceso } from './entities/token-acceso.entity';
 const VIGENCIA_INVITACION_DIAS = 7;
 /** Reset: lo dispara cualquiera que sepa un correo, así que la ventana es corta. */
 const VIGENCIA_RESET_HORAS = 1;
+/**
+ * Confirmación y verificación: los dos esperan a que una persona lea un mail
+ * que no estaba esperando, así que la ventana corta del reset no sirve. Que
+ * venza no deja a nadie afuera: repetir el alta emite otro token, y volver a
+ * registrarse reenvía el link.
+ */
+const VIGENCIA_CONFIRMACION_DIAS = 7;
 
 @Injectable()
 export class TokensAccesoService {
@@ -37,18 +44,35 @@ export class TokensAccesoService {
     usuarioId: string,
     tipo: TipoTokenAcceso,
     manager?: EntityManager,
+    datos?: { tenantId: string; rolIds: string[] },
   ): Promise<string> {
     // 32 bytes = 256 bits de entropía. `base64url` para que entre en una URL
     // sin escapar nada.
     const token = randomBytes(32).toString('base64url');
     const expiraEl = new Date();
-    if (tipo === TipoTokenAcceso.INVITACION) {
-      expiraEl.setDate(expiraEl.getDate() + VIGENCIA_INVITACION_DIAS);
-    } else {
-      expiraEl.setHours(expiraEl.getHours() + VIGENCIA_RESET_HORAS);
+    // `switch` exhaustivo y no `if/else`: con el `else` que había, un tipo
+    // nuevo caía en silencio en la ventana de una hora del reset. La ventana de
+    // un token es una decisión de seguridad, no un default.
+    switch (tipo) {
+      case TipoTokenAcceso.INVITACION:
+        expiraEl.setDate(expiraEl.getDate() + VIGENCIA_INVITACION_DIAS);
+        break;
+      case TipoTokenAcceso.CONFIRMACION:
+      case TipoTokenAcceso.VERIFICACION:
+        expiraEl.setDate(expiraEl.getDate() + VIGENCIA_CONFIRMACION_DIAS);
+        break;
+      case TipoTokenAcceso.RESET:
+        expiraEl.setHours(expiraEl.getHours() + VIGENCIA_RESET_HORAS);
+        break;
     }
 
-    const fila = { tokenHash: this.hash(token), tipo, usuarioId, expiraEl };
+    const fila = {
+      tokenHash: this.hash(token),
+      tipo,
+      usuarioId,
+      expiraEl,
+      datos: datos ?? null,
+    };
     if (manager) {
       await manager.save(TokenAcceso, manager.create(TokenAcceso, fila));
     } else {
@@ -99,7 +123,9 @@ export class TokensAccesoService {
   }
 
   /**
-   * Da de baja **todos** los tokens vivos de un usuario, de cualquier tipo.
+   * Da de baja los tokens vivos de un usuario que son una **credencial**:
+   * `INVITACION` y `RESET`, o sea los dos que terminan fijando una contraseña.
+   * `CONFIRMACION` y `VERIFICACION` sobreviven — ver el comentario del `where`.
    *
    * ⚠️ Se llama al fijar una contraseña, y es una condición de seguridad, no
    * higiene. Sin esto, el link de invitación —que vive 7 días y queda en la
@@ -118,8 +144,19 @@ export class TokensAccesoService {
       .update(TokenAcceso)
       .set({ usadoEl: () => 'NOW()' })
       .where(
-        'usuario_id = :usuarioId AND usado_el IS NULL AND eliminado_el IS NULL',
-        { usuarioId },
+        // ⚠️ **Sólo los tipos que son una CREDENCIAL.** El motivo de arriba es
+        // que un link vivo es una llave de reentrada, y eso vale para
+        // invitación y reset —los dos terminan fijando una contraseña—, no para
+        // `CONFIRMACION`, que sólo asocia a un tenant y no puede abrir ninguna
+        // sesión. Sin este filtro, pedir "olvidé mi contraseña" mataba en
+        // silencio un alta pendiente: la persona quedaba fuera del tenant y el
+        // admin la veía desaparecer del roster sin ninguna señal.
+        `usuario_id = :usuarioId AND tipo IN (:...tipos)
+           AND usado_el IS NULL AND eliminado_el IS NULL`,
+        {
+          usuarioId,
+          tipos: [TipoTokenAcceso.INVITACION, TipoTokenAcceso.RESET],
+        },
       )
       .execute();
   }
@@ -129,21 +166,34 @@ export class TokensAccesoService {
    * emitir uno nuevo: pedir el reset dos veces tiene que dejar **un** link
    * válido, el último, y no una colección de links vivos repartidos por la
    * casilla.
+   *
+   * @param tenantId acota además al tenant que emitió el token, leyendo
+   * `datos ->> 'tenantId'`. **Obligatorio para `CONFIRMACION`**, donde el mismo
+   * usuario puede tener un alta pendiente en varias empresas a la vez: sin
+   * acotar, el alta del tenant B quemaba la del tenant A, el link de A dejaba de
+   * servir y la persona **desaparecía del roster de A** —la mitad pendiente del
+   * `UNION ALL` de `findMembers` exige `usado_el IS NULL`— sin ningún evento que
+   * lo explicara. Peor: cualquier admin podía bloquear indefinidamente las altas
+   * pendientes de un correo ajeno repitiendo la suya.
    */
   async invalidarAnteriores(
     usuarioId: string,
     tipo: TipoTokenAcceso,
     manager?: EntityManager,
+    tenantId?: string,
   ): Promise<void> {
     const repo = manager ? manager.getRepository(TokenAcceso) : this.repo;
-    await repo
+    const qb = repo
       .createQueryBuilder()
       .update(TokenAcceso)
       .set({ usadoEl: () => 'NOW()' })
       .where(
         'usuario_id = :usuarioId AND tipo = :tipo AND usado_el IS NULL AND eliminado_el IS NULL',
         { usuarioId, tipo },
-      )
-      .execute();
+      );
+    if (tenantId !== undefined) {
+      qb.andWhere(`datos ->> 'tenantId' = :tenantId`, { tenantId });
+    }
+    await qb.execute();
   }
 }

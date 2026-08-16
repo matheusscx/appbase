@@ -104,7 +104,8 @@ al tenant y asignarle los roles.
 | caso | qué pasa |
 |---|---|
 | El correo **no existe** | Se crea **sin contraseña**, se asocia, se le asignan los roles y le llega una **invitación por mail** para que elija la suya |
-| Existe pero **no es miembro** de este tenant | Se asocia y le quedan **exactamente** los roles del alta **en este tenant** (los que tenga en otros no se tocan). **No se toca su contraseña**: la cuenta es de esa persona, no del admin que la suma, y no le llega invitación |
+| Existe, **no es miembro** y **no tiene contraseña** (la invitaron en otro lado y nunca la eligió) | Se asocia y le quedan **exactamente** los roles del alta **en este tenant** (los que tenga en otros no se tocan). No hay a quién pedirle permiso: **nadie controla esa cuenta todavía** |
+| Existe, **no es miembro** y **sí tiene contraseña** | **No se asocia nada.** Sale un mail *"te están sumando a X"* y la membresía la crea la persona al entrar al link. Ver [Confirmación](#la-confirmación-cuando-la-cuenta-ya-existe) |
 | Existe **y ya es miembro** | `409`. **No es idempotente a propósito**, a diferencia de `addMember`: acá vienen roles, y un 200 en silencio tendría dos lecturas —no hice nada, o le pisé los roles que ya tenía— y la segunda le cambia los permisos a alguien sin que nadie lo pida |
 
 **El correo se guarda normalizado** (minúsculas, sin espacios al principio ni al final) y la respuesta devuelve esa
@@ -136,9 +137,82 @@ hasta que use el link no hay con qué entrar. El token vence a los **7 días**.
 De regalo resuelve la verificación de correo del invitado: si hizo clic, la
 dirección existe y es suya. Queda pendiente solo para el auto-registro público.
 
-⚠️ **Sigue sin haber confirmación de correo en el alta**: un admin puede mandar
-una invitación a cualquier dirección. El daño está acotado —sumarte a mi
-restaurante no me da acceso a tus datos— pero le llega un mail que no pidió.
+⚠️ Un admin puede mandar una invitación a cualquier dirección, así que al dueño
+de esa casilla le llega un mail que no pidió. Eso queda asumido: el daño está
+acotado y sin el link no se puede usar la cuenta.
+
+### La confirmación (cuando la cuenta ya existe)
+
+**Decisión del owner, 2026-08-15: el alta no adopta una cuenta que ya tiene
+contraseña puesta.**
+
+Hasta acá el alta adoptaba cualquier cuenta cuyo correo coincidiera. Alguien
+podía pre-registrar `futuro.empleado@empresa.cl` con una contraseña suya y, el
+día que el admin diera de alta a esa persona, **el sistema le entregaba la
+cuenta del atacante los roles que el admin eligió** — sin una sola señal para
+nadie. La premisa era que "el correo coincide" prueba de quién es la cuenta, y
+no lo prueba. Lo prueba el clic de quien lee esa casilla.
+
+Ahora ese caso manda un mail y **la persona confirma antes de quedar asociada**.
+Dos cosas que definen la forma:
+
+1. **El texto dice "te están sumando a X", no "confirmá tu correo".** El caso
+   legítimo más común no es alguien probando su dirección: es alguien que ya
+   trabaja en otra empresa del sistema y a quien esta suma. Para esa persona
+   "confirmá tu correo" no describe nada —su correo funciona hace meses— y el
+   dato que necesita para decidir es **quién la está sumando y a dónde**. Nombrar
+   al tenant sirve también por el otro lado: si el alta la disparó alguien que no
+   debía, el mail es la única señal que recibe el dueño de la casilla, y una
+   señal sin nombre no se puede accionar.
+2. **Mientras está pendiente NO es miembro, y el admin lo ve.** Sin eso el admin
+   da el alta, no ve nada y cree que falló. Los pendientes salen en
+   `GET /tenants/members` marcados con `pendienteConfirmacion: true`, y sus
+   `roles` son los que **va a recibir**, no los que tiene.
+
+**Dónde vive el estado "pendiente": en el token, no en `usuarios_tenants`.** La
+alternativa era crear la membresía marcada como pendiente, y eso obligaba a que
+las **nueve** lecturas de membresía del backend (`TenantGuard`, `switchTenant`,
+`getMyTenants`, roles, garzones ×2, cajones, tenants ×2) filtraran el estado
+nuevo: un solo olvido deja operar a alguien que nunca confirmó. Guardando la
+intención en `tokens_acceso.datos` (`{ tenantId, rolIds }`), quien no confirmó
+**no es miembro por construcción** y no hubo que tocar ninguna de las nueve.
+
+Los `rolIds` se congelan al momento del alta y **se revalidan al confirmar**: el
+token vive 7 días y en esa semana el admin pudo borrar un rol. Se entra con los
+que sobrevivieron; si no sobrevivió ninguno se rechaza el link —entrar sin rol es
+entrar y no ver nada— y el admin repite el alta.
+
+#### La otra puerta: `POST /tenants/members`
+
+⚠️ **El mismo criterio rige acá** (owner, 2026-08-15). `addMember` asocia por
+`usuarioId` en vez de por correo, pero el efecto es idéntico —una cuenta ajena
+entra al tenant— y cerrar sólo el alta dejaba el invariante a medias: el alta
+**devuelve el `usuarioId` incluso cuando deja la confirmación pendiente**, así
+que el camino completo eran dos requests. Se encontró buscando por conducta
+("asociar una cuenta a un tenant"), no por nombre de método.
+
+Con contraseña puesta → no asocia, manda el mismo mail y devuelve
+`{ usuarioId, pendienteConfirmacion: true }`. Sin contraseña, o ya miembro vivo
+→ conducta de siempre (sigue siendo idempotente).
+
+Se diferencia del alta en una sola cosa: **por acá no vienen roles**, así que el
+token viaja con `rolIds: []`.
+
+⚠️ Y eso obliga a distinguir dos vacíos que no son lo mismo:
+
+| `datos.rolIds` | Significa | Al confirmar |
+|---|---|---|
+| `[]` de origen (`addMember`) | Esta puerta no asigna roles | Entra sin roles, y **no** se toca `roles_usuarios` |
+| No vacío, pero ninguno sobrevive al revalidar | Los roles se borraron en la semana | `400`: entrar sin rol es entrar y no ver nada |
+
+El segundo caso no puede disfrazarse del primero porque `CrearUsuarioTenantDto`
+tiene `@ArrayMinSize(1)`: el alta nunca emite un array vacío.
+
+Y el salteo de `fijarRolesExactos` en el primer caso **no es una optimización**:
+ese método da de baja los roles que no vinieron, y `rol_id <> ALL('{}')` es TRUE
+para todos, así que llamarlo con un array vacío borraría todos los roles de esa
+persona en el tenant. `addMember` nunca tocó `roles_usuarios` y sigue sin
+tocarlos.
 
 ### Reset de contraseña
 
@@ -174,6 +248,8 @@ Las **mutaciones** agregan `TenantAdminGuard` (requiere rol `es_fijo = true` en 
 | POST | `/auth/recuperar` | público | Pide el link de reset. **Misma respuesta exista o no el correo** |
 | GET/POST | `/auth/recuperar/:token` | público | Verifica el link / fija la contraseña y lo quema |
 | POST | `/tenants/usuarios` | TenantAdmin | Alta: crea-o-asocia el usuario, lo suma al tenant y le asigna roles |
+| GET | `/tenants/confirmacion/:token` | público | Datos para la pantalla del link: `{ correo, tenant }`. **No quema el token** |
+| POST | `/tenants/confirmacion/:token` | público | El sí: crea la membresía, asigna los roles revalidados y quema el link |
 | GET | `/rbac/es-admin` | — | `{ esAdmin: boolean }` para gating del frontend |
 
 ### Formas relevantes
@@ -184,14 +260,25 @@ GET /roles/modulos-disponibles →
     permisos: [ { moduloAppPermisoId, permisoNombre } ] } ]
 
 GET /tenants/members →
-[ { usuarioId, nombre, apellido, correo, esTotem, roles: [ { rolId, nombre } ] } ]
+[ { usuarioId, nombre, apellido, correo, esTotem, roles: [ { rolId, nombre } ],
+    pendienteConfirmacion } ]
+// pendienteConfirmacion=true → TODAVÍA NO es miembro (no tiene fila en
+// usuarios_tenants) y `roles` son los que va a recibir. Van al final de la lista.
 
 GET /tenants/members/para-selector →
 [ { usuarioId, nombre, apellido, esTotem } ]     // sin correo y sin roles
+// Solo miembros de verdad: un pendiente no puede abrir un cajón ni ser garzón.
 
 POST /tenants/usuarios
 body: { nombre, apellido?, correo, telefono?, rolIds: string[] }   // rolIds: al menos 1
-→ { usuarioId, correo, invitado }   // invitado=false → el correo ya tenía cuenta
+→ { usuarioId, correo, invitado, pendienteConfirmacion }
+// invitado=true              → cuenta nueva, salió el link para elegir contraseña
+// pendienteConfirmacion=true → la cuenta ya existía CON contraseña: no se asoció
+//                              nada y salió el mail "te están sumando a X"
+// las dos en false           → cuenta preexistente sin contraseña: se adoptó
+
+GET /tenants/confirmacion/:token → { correo, tenant }
+POST /tenants/confirmacion/:token → { message }
 
 PUT /roles/:id/modules/:moduloTenantId/permissions
 body: { moduloAppPermisoIds: string[] }
@@ -212,7 +299,16 @@ body: { moduloAppPermisoIds: string[] }
   controller expone `GET /rbac/es-admin`.
 - **Guard**: `backend/src/common/guards/tenant-admin.guard.ts` — verifica rol fijo;
   registrado en `common.module.ts`.
-- **Tenants**: `tenants.service.ts` — `findMembers` enriquecido con nombre + roles.
+- **Tenants**: `tenants.service.ts` — `findMembers` enriquecido con nombre + roles, y
+  con los pendientes de confirmación en la **misma** consulta (`UNION ALL` contra
+  `tokens_acceso`, con los `rolIds` del token expandidos por `jsonb_array_elements_text`;
+  dos consultas mergeadas en JS serían dos round-trips para una sola pantalla).
+  `crearUsuario` + `confirmarIngreso` comparten `fijarRolesExactos`, que es el par
+  INSERT/baja que deja al usuario con **exactamente** los roles elegidos.
+- **Confirmación**: `TenantsConfirmacionController` (mismo archivo que
+  `TenantsController`) tiene controller propio porque aquel lleva
+  `JwtAuthGuard + TenantGuard` **a nivel de clase** y estas rutas las usa
+  justamente quien todavía no es miembro. Mismo patrón que `/auth/invitacion/:token`.
 
 ---
 

@@ -36,13 +36,27 @@ export class UsersService {
     return this.repo.findOne({ where: { googleId } });
   }
 
-  create(dto: CreateUserDto): Promise<Usuario> {
-    const user = this.repo.create(dto);
+  /**
+   * `interno` va aparte del DTO **a propósito**: `correo_verificado_el` decide
+   * si una cuenta puede entrar, así que no puede vivir en un objeto que
+   * `class-validator` puebla desde un body. Hoy `CreateUserDto` no está atado a
+   * ninguna ruta y `whitelist: true` limpiaría el campo de todos modos, pero
+   * las dos cosas son ciertas *hoy*: el día que alguien exponga este DTO, un
+   * `correoVerificadoEl` en el body sería auto-verificarse. Separado, no hay
+   * ese día.
+   */
+  create(
+    dto: CreateUserDto,
+    interno?: { correoVerificadoEl?: Date },
+  ): Promise<Usuario> {
+    const user = this.repo.create({ ...dto, ...interno });
     return this.repo.save(user);
   }
 
-  async linkGoogleId(userId: string, googleId: string): Promise<Usuario> {
-    await this.repo.update(userId, { googleId });
-    return this.repo.findOneOrFail({ where: { id: userId } });
-  }
+  // `linkGoogleId` se borró el 2026-08-15 con su único llamador. Era el
+  // mecanismo del agujero que se cerró ese día —atar un `googleId` a una cuenta
+  // local porque el correo coincidía— y dejarlo vivo sin llamadores era dejar el
+  // gatillo cargado para el próximo que buscara "cómo vinculo un googleId".
+  // Vincular Google a una cuenta existente es una acción deliberada desde
+  // adentro de la sesión, y ese método todavía no existe.
 }

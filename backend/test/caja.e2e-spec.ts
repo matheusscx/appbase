@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
@@ -79,6 +80,10 @@ async function login(
   // Switch a tenant Paris para que el token cargue tenant_id
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
+    .set(
+      'Cookie',
+      (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+    )
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
   expect(resTenant.status).toBe(200);
@@ -266,6 +271,9 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1423,6 +1431,9 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1543,6 +1554,9 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1651,6 +1665,9 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1805,6 +1822,10 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
     const res = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
       .set(
+        'Cookie',
+        (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+      )
+      .set(
         'Authorization',
         `Bearer ${(resLogin.body as TokenResponse).access_token}`,
       )
@@ -1820,6 +1841,9 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1951,6 +1975,9 @@ describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cie
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -2060,6 +2087,9 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );

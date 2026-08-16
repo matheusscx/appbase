@@ -3,7 +3,12 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
+import type { Server } from 'http';
+import type { AddressInfo } from 'net';
 import { AppModule } from '../src/app.module';
+import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
+import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 
 /**
  * Las dos rutas que el gate daba por verdes sin haberlas ejecutado nunca contra
@@ -57,6 +62,10 @@ async function login(
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
     .set(
+      'Cookie',
+      (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+    )
+    .set(
       'Authorization',
       `Bearer ${(resLogin.body as TokenResponse).access_token}`,
     )
@@ -68,6 +77,8 @@ async function login(
 
 describe('RBAC y cambio de contraseña (e2e)', () => {
   let app: INestApplication<App>;
+  let dataSource: DataSource;
+  let tokens: TokensAccesoService;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -84,6 +95,8 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    dataSource = app.get(DataSource);
+    tokens = app.get(TokensAccesoService);
   }, 60000);
 
   afterAll(async () => {
@@ -181,24 +194,213 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
       token: string;
       cookie: string;
     }> {
+      const correo = `cambio.contrasena.${sufijo}.${Date.now()}@e2e.test`;
+      const contrasena = 'la-vieja-1234';
+
+      // `200` y **sin sesión**: el registro responde lo mismo exista o no el
+      // correo, así que no puede devolver tokens —cuando la dirección es de
+      // otra persona no hay cuenta propia a la cual entrar—. La sesión llega
+      // recién después de verificar.
       const res = await request(app.getHttpServer())
         .post('/api/auth/register')
-        .send({
-          nombre: 'Cambio Contraseña E2E',
-          correo: `cambio.contrasena.${sufijo}.${Date.now()}@e2e.test`,
-          contrasena: 'la-vieja-1234',
-        });
-      expect(res.status).toBe(201);
+        .send({ nombre: 'Cambio Contraseña E2E', correo, contrasena });
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty('access_token');
 
-      const cookies = res.headers['set-cookie'] as unknown as string[];
+      // El token en claro NO sale por la API —ese es justamente el punto: en la
+      // base sólo queda el hash SHA-256—, así que se emite uno por el service,
+      // igual que hace `invitacion-y-reset.e2e-spec.ts`. Lo que se ejercita es
+      // el endpoint de verificación, que es lo que importa acá.
+      const filas = await dataSource.query<{ usuario_id: string }[]>(
+        `SELECT usuario_id FROM usuarios WHERE correo = $1`,
+        [correo],
+      );
+      expect(filas).toHaveLength(1);
+      const verificacion = await tokens.emitir(
+        filas[0].usuario_id,
+        TipoTokenAcceso.VERIFICACION,
+      );
+      const resVerif = await request(app.getHttpServer()).post(
+        `/api/auth/verificar/${verificacion}`,
+      );
+      expect(resVerif.status).toBe(200);
+
+      // Y recién ahora entra. Sin el paso de arriba el login corta con 401:
+      // ése es el control de que la verificación no es decorativa.
+      const resLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: correo, password: contrasena });
+      expect(resLogin.status).toBe(200);
+
+      const cookies = resLogin.headers['set-cookie'] as unknown as string[];
       const refresh = cookies.find((c) => c.startsWith('refresh_token='));
-      if (!refresh) throw new Error('El registro no devolvió refresh_token');
+      if (!refresh) throw new Error('El login no devolvió refresh_token');
 
       return {
-        token: (res.body as TokenResponse).access_token,
+        token: (resLogin.body as TokenResponse).access_token,
         cookie: refresh.split(';')[0],
       };
     }
+
+    it('sin verificar el correo, la cuenta recién registrada no entra', async () => {
+      // El control negativo del helper de arriba: si el login funcionara sin
+      // verificar, todos los `expect` que dependen de la verificación pasarían
+      // sin probar nada.
+      const correo = `sin.verificar.${Date.now()}@e2e.test`;
+      const contrasena = 'la-vieja-1234';
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ nombre: 'Sin Verificar', correo, contrasena });
+      expect(res.status).toBe(200);
+
+      const resLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: correo, password: contrasena });
+
+      expect(resLogin.status).toBe(401);
+    });
+
+    /**
+     * ⚠️ **La carrera de dos pestañas, medida de verdad.**
+     *
+     * Este test existe porque el unit equivalente **no puede** probar esto: fija
+     * `reemplazado_por` en el mock, o sea que da por resuelto exactamente el
+     * ordenamiento que fallaba. La primera versión del arreglo escribía el
+     * puntero fuera de la transacción, y entonces el `UPDATE` del perdedor se
+     * desbloqueaba al PRINCIPIO de la rotación —no en el commit—, leía
+     * `reemplazado_por = NULL` y se comía un 401: medido contra Postgres, **7 de
+     * cada 8 veces**. El unit pasaba igual.
+     *
+     * En el navegador ese 401 no es inocuo: `useApiFetch` hace `clearAuth()` +
+     * `navigateTo('/login')`, así que la pestaña perdedora se iba al login.
+     *
+     * ℹ️ El bucle reusa la cookie **original**, no la rotada: la ronda 1 es la
+     * carrera concurrente y las 2 a 5 ejercitan el **replay dentro de la
+     * gracia**. Las dos cosas hay que cubrirlas, pero no son la misma, y decir
+     * "más rondas = más muestras de la carrera" sería falso.
+     */
+    it('dos refresh simultáneos con la misma cookie: los DOS siguen andando', async () => {
+      const { cookie } = await registrar('carrera');
+
+      for (let ronda = 0; ronda < 5; ronda++) {
+        const [a, b] = await Promise.all([
+          request(app.getHttpServer())
+            .post('/api/auth/refresh')
+            .set('Cookie', cookie),
+          request(app.getHttpServer())
+            .post('/api/auth/refresh')
+            .set('Cookie', cookie),
+        ]);
+
+        // Ninguno puede quedar afuera: el perdedor del canje recibe el mismo
+        // token que ganó el otro.
+        expect([a.status, b.status]).toEqual([200, 200]);
+        const tokenA = (a.body as TokenResponse).access_token;
+        const tokenB = (b.body as TokenResponse).access_token;
+        expect(tokenA).toBeDefined();
+        expect(tokenB).toBeDefined();
+
+        // Y la cookie del ganador queda viva para la ronda siguiente: si la
+        // detección de reuso hubiera revocado, esto daría 401 en la ronda 2.
+        const cookies = (a.headers['set-cookie'] ??
+          b.headers['set-cookie']) as unknown as string[];
+        const nueva = cookies?.find((c) => c.startsWith('refresh_token='));
+        expect(nueva).toBeDefined();
+      }
+    });
+
+    /**
+     * ⚠️ **Ráfaga: 15 sesiones distintas refrescando a la vez.**
+     *
+     * No es una carrera —cada una tiene su propia cookie— y ese es el punto: lo
+     * que mide es que `refresh` **no agote el pool de conexiones**. Una versión
+     * de este código hacía `usersService.findById` (repo-bound, o sea una
+     * conexión nueva) **adentro** de la transacción: cada request retenía una
+     * conexión y pedía una segunda, y con ~10 en vuelo el pool de 10 se
+     * bloqueaba contra sí mismo. La API quedaba muerta para todos los tenants
+     * hasta reiniciar el contenedor, y Postgres no lo abortaba porque el ciclo
+     * es del pool y no de locks de base.
+     *
+     * El test de la carrera de acá arriba **no podía cazarlo**: manda 2 requests
+     * y repite en serie, así que nunca pasa de 2 transacciones en vuelo.
+     *
+     * El `timeout` de Jest es la aserción real: si el pool se traba, esto no
+     * falla con un status feo, se **cuelga**.
+     */
+    it('una ráfaga de 15 refresh simultáneos no traba el pool de conexiones', async () => {
+      // ⚠️ El armado va en SERIE a propósito. Montar las 15 sesiones en
+      // paralelo satura el listener efímero que supertest levanta por request y
+      // revienta con `ECONNRESET` — un rojo que no dice nada del pool y que
+      // volvería este test flaky. Lo que tiene que ser simultáneo es la ráfaga
+      // de abajo, no la preparación.
+      const sesiones: { cookie: string }[] = [];
+      for (let i = 0; i < 15; i++) {
+        sesiones.push(await registrar(`rafaga-${i}`));
+      }
+
+      // ⚠️ **HTTP real contra un puerto, no supertest.** `request(server)`
+      // levanta un listener efímero por llamada, y quince a la vez lo tumban
+      // con `ECONNRESET` antes de que el pool llegue a importar: el test
+      // fallaría siempre, por la razón equivocada. Con el server escuchando de
+      // verdad, las quince requests comparten el mismo proceso y lo que se mide
+      // es lo que se quiere medir.
+      const server = app.getHttpServer() as Server;
+      if (!server.listening) {
+        await new Promise<void>((resolve) => server.listen(0, resolve));
+      }
+      const { port } = server.address() as AddressInfo;
+
+      const respuestas = await Promise.all(
+        sesiones.map(({ cookie }) =>
+          fetch(`http://127.0.0.1:${port}/api/auth/refresh`, {
+            method: 'POST',
+            headers: { Cookie: cookie },
+          }),
+        ),
+      );
+
+      expect(respuestas.map((r) => r.status)).toEqual(
+        Array.from({ length: 15 }, () => 200),
+      );
+
+      // Y el backend sigue vivo después: con el pool agotado esto se colgaba
+      // aunque la ruta casi no toque la base.
+      const despues = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: ADMIN.email, password: ADMIN.pass }),
+      });
+      expect(despues.status).toBe(200);
+    }, 60_000);
+
+    it('un refresh token ya rotado y presentado de nuevo NO deja a nadie afuera dentro de la gracia', async () => {
+      // El complemento del de arriba, secuencial en vez de concurrente: es el
+      // reintento de red (la request llegó, la respuesta se perdió).
+      const { cookie } = await registrar('reintento');
+
+      const primera = await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .set('Cookie', cookie);
+      expect(primera.status).toBe(200);
+
+      // El mismo token viejo, otra vez: está dentro de los 30 s de gracia.
+      const reintento = await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .set('Cookie', cookie);
+      expect(reintento.status).toBe(200);
+
+      // Y la sesión del ganador sigue viva: no se revocó nada.
+      const cookiesGanador = primera.headers['set-cookie'] as unknown as
+        | string[]
+        | undefined;
+      const refreshGanador = cookiesGanador
+        ?.find((c) => c.startsWith('refresh_token='))
+        ?.split(';')[0];
+      const tercera = await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .set('Cookie', refreshGanador ?? '');
+      expect(tercera.status).toBe(200);
+    });
 
     // Control positivo: sin esto, el 401 del test de abajo podría venir de que
     // el refresh nunca funcione en e2e, y el test pasaría sin probar nada.

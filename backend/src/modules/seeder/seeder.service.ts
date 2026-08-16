@@ -918,6 +918,8 @@ export class SeederService implements OnApplicationBootstrap {
           telefono: '123456789',
           correo,
           esSuperadmin: true,
+          // Ver el comentario gemelo en `seedUsuariosAdicionales`.
+          correoVerificadoEl: new Date(),
         }),
       );
     }
@@ -1046,7 +1048,13 @@ export class SeederService implements OnApplicationBootstrap {
         where: { correo: data.correo },
       });
       if (!exists) {
-        await this.usuarioRepo.save(this.usuarioRepo.create(data));
+        // `correoVerificadoEl` sellado: sin esto `validateUser` corta el login
+        // de TODAS las cuentas del seed —el correo sin verificar no entra— y se
+        // caen los cientos de e2e que arrancan logueándose. Las direcciones del
+        // seed son ficticias y no hay ningún mail que abrir.
+        await this.usuarioRepo.save(
+          this.usuarioRepo.create({ ...data, correoVerificadoEl: new Date() }),
+        );
       }
     }
   }

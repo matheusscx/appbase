@@ -71,6 +71,33 @@ export class AdminTenantsController {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Rutas públicas — /tenants/confirmacion
+//
+// Controller propio y no dos handlers en `TenantsController`: aquel lleva
+// `@UseGuards(JwtAuthGuard, TenantGuard)` **a nivel de clase**, y estas dos las
+// usa justamente alguien que todavía no es miembro de ese tenant —así que no
+// tiene un JWT que lo pruebe—. La prueba de identidad acá es el token del link,
+// como en `/auth/invitacion/:token`.
+// ─────────────────────────────────────────────────────────────────────────────
+@Controller('tenants/confirmacion')
+export class TenantsConfirmacionController {
+  constructor(private readonly tenantsService: TenantsService) {}
+
+  /** Lo que necesita la pantalla para preguntar "¿entrás a X?". No quema nada. */
+  @Get(':token')
+  verificar(@Param('token') token: string) {
+    return this.tenantsService.verificarConfirmacion(token);
+  }
+
+  /** El sí: crea la membresía, asigna los roles congelados y quema el link. */
+  @Post(':token')
+  @HttpCode(HttpStatus.OK)
+  confirmar(@Param('token') token: string) {
+    return this.tenantsService.confirmarIngreso(token);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tenant-active routes — /tenants
 // ─────────────────────────────────────────────────────────────────────────────
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -145,9 +172,21 @@ export class TenantsController {
    * Alta de un usuario del tenant. Mismo guard que `members` —es administración
    * del tenant— y por eso **no** lleva `@RequiresPermiso`.
    *
-   * Devuelve `invitado: true` **solo** cuando la cuenta se creó y salió el mail
-   * con el link. Si el correo ya existía, la cuenta es de esa persona: no se le
-   * toca la contraseña ni se le manda nada.
+   * Dos banderas en la respuesta, y **las dos pueden venir en `false`**:
+   * - `invitado: true` — la cuenta se creó y salió el mail con el link para que
+   *   elija contraseña.
+   * - `pendienteConfirmacion: true` — el correo ya tenía una cuenta **con
+   *   contraseña**, así que no se asoció nada: salió un mail "te están sumando a
+   *   X" y la persona **todavía no es miembro**. Aparece igual en
+   *   `GET /tenants/members`, marcada, para que el admin no crea que el alta
+   *   falló.
+   * - las dos en `false` — el correo tenía una cuenta invitada en otro lado que
+   *   nunca eligió contraseña: se adopta y queda adentro sin mail.
+   *
+   * ⚠️ Hasta el 2026-08-15 esto afirmaba *"si el correo ya existía, la cuenta es
+   * de esa persona"*, y esa premisa era falsa: cualquiera podía pre-registrar el
+   * correo de un futuro empleado y heredar los roles del alta. Que el correo
+   * coincida no prueba de quién es la cuenta — lo prueba el clic en el link.
    */
   @UseGuards(TenantAdminGuard)
   @Post('usuarios')

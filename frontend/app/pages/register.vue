@@ -10,9 +10,19 @@ const state = reactive({
 })
 const showPassword = ref(false)
 
+/**
+ * El mensaje del backend, y la señal de que ya se envió el formulario.
+ *
+ * El registro **no abre sesión**: la cuenta no se puede usar hasta verificar el
+ * correo desde el link del mail. Y como el backend responde lo mismo exista o
+ * no la dirección —para no ser un enumerador público de cuentas—, esta pantalla
+ * tampoco puede decir si la cuenta se creó. De ahí que el texto hable de "si
+ * ese correo no tenía cuenta" en vez de afirmar un alta.
+ */
+const enviado = ref<string | null>(null)
+
 async function onRegister() {
-  const ok = await store.register(state.nombre, state.correo, state.password)
-  if (ok) await store.handlePostLogin()
+  enviado.value = await store.register(state.nombre, state.correo, state.password)
 }
 
 async function onGoogle() {
@@ -37,6 +47,22 @@ async function onGoogle() {
       <!-- Card -->
       <div class="bg-default rounded-2xl shadow-sm border border-default p-8 space-y-5">
 
+        <!-- Enviado: reemplaza al formulario, no lo acompaña. Volver a
+             mandarlo sólo reenviaría el mismo link. -->
+        <div v-if="enviado" class="space-y-4 text-center">
+          <UIcon name="i-lucide-mail-check" class="w-10 h-10 text-primary" />
+          <p class="text-sm text-default">
+            {{ enviado }}
+          </p>
+          <p class="text-xs text-muted">
+            Abrí el link para verificar tu correo. Sin ese paso la cuenta todavía no se puede usar.
+          </p>
+          <UButton to="/login" block variant="outline" color="neutral">
+            Ir a iniciar sesión
+          </UButton>
+        </div>
+
+        <template v-else>
         <!-- Error -->
         <UAlert
           v-if="store.error"
@@ -123,6 +149,7 @@ async function onGoogle() {
             Crear cuenta
           </UButton>
         </UForm>
+        </template>
       </div>
 
       <!-- Login link -->

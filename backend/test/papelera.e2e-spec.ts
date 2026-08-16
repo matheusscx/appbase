@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
@@ -72,6 +73,10 @@ async function login(
 
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
+    .set(
+      'Cookie',
+      (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+    )
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
   expect(resTenant.status).toBe(200);
@@ -91,6 +96,9 @@ describe('Papelera (e2e) — categorías, patrón de referencia', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -218,6 +226,9 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -648,6 +659,9 @@ describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', 
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -807,6 +821,9 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1085,6 +1102,9 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -1350,6 +1370,9 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -2162,6 +2185,10 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     const initialToken = (resLogin.body as TokenResponse).access_token;
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
+      .set(
+        'Cookie',
+        (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+      )
       .set('Authorization', `Bearer ${initialToken}`)
       .send({ tenantId: FALABELLA_TENANT_ID });
     expect(resTenant.status).toBe(200);
@@ -2175,6 +2202,9 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -2373,6 +2403,9 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );

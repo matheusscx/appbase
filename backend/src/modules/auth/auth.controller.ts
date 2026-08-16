@@ -53,14 +53,23 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
+  /**
+   * ⚠️ Responde **lo mismo** exista o no el correo, igual que `recuperar` acá
+   * abajo (ver `AuthService.register`). El `200` fijo y sin tokens es parte del
+   * contrato: un `409` acá —lo que había— convertía el endpoint en un
+   * enumerador público de cuentas, y devolver sesión haría distinguibles los
+   * casos por la sola presencia del token.
+   */
   @Post('register')
-  async register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const { refresh_token, ...response } = await this.authService.register(dto);
-    res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
-    return response;
+  @HttpCode(HttpStatus.OK)
+  register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
+  }
+
+  @Post('verificar/:token')
+  @HttpCode(HttpStatus.OK)
+  verificarCorreo(@Param('token') token: string) {
+    return this.authService.verificarCorreo(token);
   }
 
   /**
@@ -188,9 +197,17 @@ export class AuthController {
     @Body() dto: SwitchTenantDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // Ver el docblock de `AuthService.switchTenant`: esta ruta emite un refresh
+    // nuevo, así que no alcanza con estar autenticado. El access token solo
+    // convertía una filtración en sesión renovable.
+    const refreshToken = (req.cookies as Record<string, string>)?.[
+      REFRESH_COOKIE
+    ];
+    if (!refreshToken) throw new UnauthorizedException('No refresh token');
     const { access_token, refresh_token } = await this.authService.switchTenant(
       req.user.id,
       dto.tenantId,
+      refreshToken,
     );
     res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
     return { access_token };

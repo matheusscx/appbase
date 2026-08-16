@@ -73,6 +73,35 @@ describe('TokensAccesoService', () => {
       expect(invitacion / HORA).toBeCloseTo(24 * 7, 0);
       expect(reset / HORA).toBeCloseTo(1, 0);
     });
+
+    // El `if/else` que había mandaba al `else` —la hora del reset— a cualquier
+    // tipo que no fuera invitación. Los dos tipos nuevos habrían caído ahí en
+    // silencio, y la ventana de un token es una decisión de seguridad, no un
+    // default. Por eso hoy es un `switch` sin rama por omisión.
+    it.each([TipoTokenAcceso.CONFIRMACION, TipoTokenAcceso.VERIFICACION])(
+      '%s espera a que alguien lea un mail: 7 días, no la hora del reset',
+      async (tipo) => {
+        const antes = Date.now();
+        await service.emitir(USUARIO, tipo);
+
+        const dias = (guardado.expiraEl!.getTime() - antes) / 86_400_000;
+        expect(dias).toBeCloseTo(7, 0);
+      },
+    );
+
+    it('guarda los datos del token de confirmación, y null cuando no vienen', async () => {
+      const datos = { tenantId: 'tenant-uuid', rolIds: ['rol-uuid'] };
+      await service.emitir(
+        USUARIO,
+        TipoTokenAcceso.CONFIRMACION,
+        undefined,
+        datos,
+      );
+      expect(guardado.datos).toEqual(datos);
+
+      await service.emitir(USUARIO, TipoTokenAcceso.RESET);
+      expect(guardado.datos).toBeNull();
+    });
   });
 
   describe('buscarVigente', () => {
@@ -84,6 +113,7 @@ describe('TokensAccesoService', () => {
         usuarioId: USUARIO,
         expiraEl: new Date(Date.now() + 60_000),
         usadoEl: null,
+        datos: null,
         creadoEl: new Date(),
         actualizadoEl: new Date(),
         eliminadoEl: null,

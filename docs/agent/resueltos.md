@@ -17,6 +17,194 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## "El correo coincide" deja de ser prueba de identidad: seis entradas de la sección 3, más una que apareció haciéndolas (2026-08-15)
+
+Primera tanda de la sección 3 (*"Ya decidido, falta construir"*). Se eligió el **cluster de
+identidad** y no las entradas sueltas más baratas, porque las seis son **la misma decisión
+del owner** aplicada en seis lugares: tratar la coincidencia de correo como prueba de que
+alguien es quien dice.
+
+**El alcance que se propuso al empezar era más grande que el trabajo real**, y eso se
+descubrió abriendo el código, no leyendo el backlog. De las siete entradas que se iban a
+tomar, dos salieron: el token de Google en la URL (el propio owner ya le había bajado la
+prioridad ese mismo día — se paga antes de habilitar Google) y el 500 con correo
+soft-borrado (la entrada dice explícitamente que **no se arregla**: nada en `backend/src`
+soft-borra un `Usuario`, y se verificó que `removeMember` sólo da de baja la membresía).
+
+### Lo que se cerró
+
+- **El alta adoptaba la cuenta de quien pre-registrara el correo de un futuro empleado.**
+  Ahora una cuenta **con contraseña puesta** no se asocia sin que la persona confirme por
+  mail. El estado pendiente vive en `tokens_acceso` (tipo nuevo `CONFIRMACION`, con los
+  roles congelados en `datos`) y **no** en `usuarios_tenants`: se midió que la membresía se
+  lee en **nueve** lugares del backend, y una columna "pendiente" habría obligado a que las
+  nueve la filtraran — un solo olvido deja operar a quien nunca confirmó. Sin fila, no es
+  miembro por construcción.
+- **Google vinculaba el `googleId` a una cuenta local que coincidía por correo.** Ahora eso
+  es un `409`; y se lee `email_verified`, que `passport-google-oauth20` exponía y la
+  interfaz `GoogleProfile` **ni siquiera declaraba** — TypeScript no podía avisar de un dato
+  que el tipo negaba.
+- **`POST /auth/register` distinguía el correo tomado del libre** (`409` vs `201`), o sea
+  que era un enumerador público de cuentas. Ahora responde igual en las tres ramas.
+- **El auto-registro creaba cuentas con un correo que nadie probó.** Columna
+  `usuarios.correo_verificado_el`: sin verificar no se entra, y el corte va **después** de
+  comprobar la contraseña — antes habría sido el mismo oráculo que se acababa de cerrar.
+- **`refresh` no era atómico y no detectaba reuso.** El canje es
+  `UPDATE … WHERE token = $1 AND usado_el IS NULL RETURNING …`, y la fila **se marca, no se
+  borra** (patrón `TokensAccesoService.quemar()`, que ya resolvía esto al lado): esa lápida
+  convierte un 401 indistinguible en "alguien copió la sesión".
+  ⚠️ **Pero el canje atómico no elimina la carrera, sólo elige un perdedor**, y la primera
+  versión trataba a ese perdedor como atacante: dos pestañas despertando juntas deslogueaban
+  a la persona de todos sus dispositivos. Ver más abajo. Lo cierra `reemplazado_por` + una
+  ventana de gracia de 30 s, dentro de la cual el perdedor recibe **el mismo token que ganó
+  el otro**.
+- **`switch-tenant` emitía un refresh nuevo con sólo el access token.** Ahora exige también
+  la cookie, y de una sesión viva **del mismo usuario** — sin el `userId` en el criterio, el
+  refresh de otra cuenta servía de segundo factor para el token robado. Cierra la mitad de
+  la entrada del token de Google que **no** bajaba de prioridad.
+
+### Las tres consecuencias que el backlog no anotaba
+
+1. **`register` dejó de devolver sesión, y no es un extra.** Para responder igual exista o
+   no el correo no puede haber tokens: cuando la dirección es de otra persona no hay cuenta
+   propia a la cual entrar. Arrastró el store de auth, `register.vue` y una pantalla nueva.
+2. **`switch-tenant` tocó los 30 specs e2e** que hacen login, más `cookieParser` en 29 de
+   ellos.
+3. **El seed sella `correo_verificado_el` sólo en filas nuevas.** Sobre una base sin
+   resetear, ningún login funciona — vale para el Docker local y para Railway.
+
+### La entrada que apareció haciendo las otras, y las tres pifias propias
+
+**`POST /tenants/members` era la misma puerta con otro nombre.** Lo levantó el sub-agente de
+`tenants`: `addMember` asocia por `usuarioId` sin confirmación, y el alta **devuelve el
+`usuarioId` incluso cuando deja la confirmación pendiente**, así que el camino completo eran
+dos requests. Se verificó y se cerró con el mismo criterio (owner). Es literalmente la
+lección de *buscar por conducta, no por nombre de método*: nadie la habría encontrado
+grepeando "adopción de cuenta".
+
+Al cerrarla apareció un borde que casi se rompe solo: `fijarRolesExactos` da de baja los
+roles que no vinieron, y `rol_id <> ALL('{}')` es TRUE para todos, así que llamarlo con el
+`rolIds: []` de `addMember` **habría borrado todos los roles de esa persona en el tenant**.
+Se saltea, y `datos.rolIds.length === 0` distingue "sin roles por diseño" de "los roles se
+murieron" — que no se pueden confundir porque `CrearUsuarioTenantDto` tiene
+`@ArrayMinSize(1)`.
+
+Tres errores propios, los tres cazados ejecutando y no leyendo:
+
+1. **El e2e entero se cayó al pedir la cookie en `switch-tenant`.** `cookieParser` vive en
+   `main.ts`, que el e2e no ejecuta, y **un solo spec de 30** lo instalaba —con un comentario
+   que lo explicaba, escrito para el mismo problema en `/auth/refresh`—. Se leyó el
+   comentario recién cuando 114 tests estaban en rojo.
+2. **La corrección de eso salió a medias por un `replace` sin `/g`.** Quedaron cuatro specs
+   con **varios `beforeAll`** donde sólo el primer `app` recibió el `cookieParser`. Es la
+   misma trampa del mutante sin `/g` que ya había costado un falso "test decorativo", ahora
+   por el otro lado: no un falso verde, un rojo parcial que parecía otra causa.
+3. **Un script de edición masiva se comió su propio texto por el comillado del shell:** las
+   comillas simples de `'supertest'` dentro de un `node -e '…'` cerraron la cadena, y la
+   inserción del `import` se perdió en la mitad de los archivos. Lo delató el typecheck, no
+   la lectura del script.
+
+### La revisión independiente BLOQUEÓ, y tenía razón en lo que más importaba
+
+Siete hallazgos. El que bloqueaba **no lo habría encontrado ningún test de los escritos**,
+porque el test estaba escrito desde la misma premisa equivocada:
+
+1. 🔴 **La detección de reuso deslogueaba de todos sus dispositivos a un usuario legítimo.**
+   Dos tabs comparten la cookie del navegador y el frontend serializa el refresh **por
+   pestaña**: las dos canjean el mismo token, una gana, y la otra llegaba a un token ya
+   rotado — la firma exacta de una sesión copiada. Un reintento de red (request que llegó,
+   respuesta que se perdió) hace lo mismo. **Es literalmente el falso positivo que la
+   entrada del backlog decía que había que evitar**, y el test lo llamaba "corta todas las
+   sesiones" como si fuera el ataque. Se cerró con `reemplazado_por` + ventana de gracia
+   (decisión del owner).
+2. 🔴 **`invalidarAnteriores` de `CONFIRMACION` era por usuario, no por tenant.** El alta del
+   tenant B quemaba el alta pendiente del tenant A: el link de A dejaba de servir y la
+   persona **desaparecía del roster de A** sin ninguna señal. Accionable: cualquier admin
+   podía bloquear indefinidamente las altas pendientes de un correo ajeno.
+3. **Un reset de contraseña mataba una confirmación pendiente.** `invalidarTodos` barría
+   todos los tipos; ahora sólo los que son una **credencial** (invitación y reset). Un token
+   de confirmación no abre ninguna sesión.
+4. **`switchTenant` borraba las lápidas** y apagaba la detección de reuso después de cada
+   cambio de tenant. Ahora borra sólo las filas vivas.
+5. **`confirmarIngreso` escribía sobre `usuarios` sin `eliminado_el IS NULL`.**
+   `EntityManager.update` no aplica el filtro de `@DeleteDateColumn` —sólo los `SELECT` lo
+   hacen—; funcionaba por el orden de dos sentencias, no por el criterio del `UPDATE`.
+6. **Siete líneas de doc mintiendo** en `auth.md` y `patterns/backend.md`, incluidas
+   *"Email verification (not implemented)"* y *"`/auth/register` sí devuelve 201"*.
+7. **`linkGoogleId` quedó sin llamadores** y era el mecanismo del agujero cerrado. Se borró.
+
+**Lo fija:** 9 mutantes en `auth.service.spec.ts` (canje sin `usado_el IS NULL`, sin el
+guard del token vencido, sin el corte por contraseña mala, con el `409` de vuelta, sin el
+`userId` en el criterio de la cookie, **gracia en 0 ms**, **sin el puntero
+`reemplazado_por`**, **`switchTenant` borrando lápidas**), 1 en `tenants.service.spec.ts`
+(`addMember` volviendo a asociar sin confirmar, que mata 3 tests) y 1 en el frontend
+(`verificar/[token]` verificando en `onMounted`).
+
+⚠️ Dos de esos mutantes se escribieron **porque el primero sobrevivió**: el arreglo de las
+lápidas en `switchTenant` no tenía ningún test hasta que el mutante lo mostró. Todos
+verificados fallando **por su aserción**, no por un `TypeError` del mock.
+
+### Y bloqueó una segunda vez, por el arreglo del primer bloqueo
+
+La ventana de gracia cerraba lo grave —la revocación total desapareció, medida contra el
+stack real— **pero su camino feliz casi nunca se alcanzaba**: el perdedor recibía 401 en
+**7 de cada 8 carreras**, o sea que el caso que justificaba toda la columna nueva era el
+excepcional.
+
+La causa es de ordenamiento y no se ve leyendo el código: la rotación eran cuatro viajes en
+autocommit, así que el lock de la fila se soltaba en el `UPDATE` de marcado —**al
+principio**— y el perdedor leía `reemplazado_por` tres viajes antes de que se escribiera.
+Encontraba `NULL` y caía en la rama del 401. Y un 401 de `/auth/refresh` no es inocuo:
+`useApiFetch` hace `clearAuth()` + `navigateTo('/login')`.
+
+Se cierra envolviendo **marcar + insertar + apuntar en una transacción**: el lock se suelta
+recién en el commit y para entonces el puntero ya está. La poda queda afuera, para no
+alargar el lock que el perdedor está esperando.
+
+**Lo que hace esto valioso de recordar no es el bug, es cómo se escondía.** El código, el
+docblock de la entidad, la tabla de `auth.md`, la entrada de este archivo **y el nombre del
+test** afirmaban que funcionaba — y el unit pasaba porque **fijaba `reemplazado_por` en el
+mock**, o sea daba por resuelto exactamente el ordenamiento que fallaba. Testeaba la
+intención, no el hecho. Ningún mutante sobre el código lo habría mostrado; hizo falta correr
+dos requests concurrentes contra Postgres.
+
+### Y bloqueó una tercera vez: el arreglo del arreglo deadlockeaba el pool
+
+La transacción cerró el ordenamiento —medido, de 1 de 8 a 8 de 8, y 15 de 15 con cuatro
+pestañas— **pero metió adentro una llamada que no usaba el `manager`**:
+`usersService.findById` va por el repositorio inyectado, o sea que pedía una **segunda
+conexión del pool** mientras retenía la primera con la transacción abierta y el lock de la
+fila tomado.
+
+Con ~10 refresh en vuelo —el pool son 10— los ganadores quedan `idle in transaction`
+esperando una conexión que sólo otro de ellos podría soltar. **La API entera muere, para
+todos los tenants, hasta reiniciar el contenedor.** Postgres no lo aborta: el ciclo no es de
+locks de base sino del pool, así que `deadlock_timeout` nunca dispara. Es peor que el bug
+que la transacción venía a arreglar — aquel deslogueaba una pestaña, éste tira el backend.
+
+El fix es sacar la búsqueda del usuario afuera del bloque: sólo se usa para firmar el access
+token y nada adentro depende de ella. La regla que queda escrita en el código es más
+general: **adentro de esa transacción no puede ir nada que use el repositorio inyectado en
+vez del `manager`.**
+
+⚠️ **El e2e de la carrera no podía cazarlo**: manda 2 requests y repite en serie, así que
+nunca pasa de 2 transacciones en vuelo sobre un pool de 10. Hizo falta un test distinto —una
+**ráfaga de 15 sesiones refrescando a la vez**, que no es una carrera— y armarlo tuvo dos
+vueltas propias: montar las 15 sesiones en paralelo revienta con `ECONNRESET`, y disparar la
+ráfaga por supertest también, porque levanta un listener efímero por request. Va con el
+server escuchando en un puerto y `fetch` real. Su mutante es concluyente: con el `findById`
+adentro, el test pasa de 6 s a **colgarse hasta el timeout de 60 s** y se lleva puestos otros
+cuatro tests.
+
+Por eso el arreglo trae **un e2e que corre la carrera de verdad**
+(`rbac-y-contrasena.e2e-spec.ts`, cinco rondas de dos `/auth/refresh` simultáneos con la
+misma cookie, más el reintento secuencial). Y su mutante tiene un matiz que conviene anotar:
+sacar sólo el `update` del puntero fuera de la transacción **NO** lo hace fallar —esa carrera
+queda tan ajustada que casi siempre gana—; hay que revertir la transacción entera, que es la
+conducta que se midió. El test caza la regresión real, no cualquier variante intermedia.
+
+---
+
 ## Cambiar la contraseña desde el perfil ahora sí echa al intruso (2026-08-15)
 
 **Entrada original (verbatim):** *"🚩 **Cambiar la contraseña desde el perfil no cierra las

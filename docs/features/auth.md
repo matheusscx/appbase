@@ -1,7 +1,7 @@
 # Feature: Authentication
 
 **Status**: Complete  
-**Last Updated**: 2026-06-13
+**Last Updated**: 2026-08-15
 
 ---
 
@@ -27,8 +27,8 @@ Essential for any app that needs to identify users, protect data, and restrict a
 - ✅ JWT token generation and validation
 - ✅ Protected routes (API + frontend)
 - ✅ User session management
-- ❌ Password reset (not implemented)
-- ❌ Email verification (not implemented)
+- ✅ Password reset self-service (`/auth/recuperar`, link de 1 hora)
+- ✅ Verificación de correo: sin verificar **no se puede entrar** (2026-08-15)
 - ❌ 2FA / MFA (not implemented)
 
 ---
@@ -42,20 +42,52 @@ POST /api/auth/register
 
 Request:
 {
-  "name": "John Doe",
-  "email": "john@example.com",
-  "password": "SecurePass123"  (min 6 chars)
+  "nombre": "John Doe",
+  "correo": "john@example.com",
+  "contrasena": "SecurePass123"  (min 6 chars)
 }
 
-Response (201):
+Response (200) — SIEMPRE la misma, exista o no el correo:
 {
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "John Doe",
-  "email": "john@example.com",
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "created_at": "2026-06-13T10:00:00Z"
+  "message": "Si ese correo no tenía cuenta, te llega un link para verificarlo y entrar."
 }
 ```
+
+⚠️ **Responde lo mismo exista o no el correo, y no devuelve sesión.** Las dos
+cosas son la misma decisión (owner, 2026-08-15): antes devolvía `409 "El correo
+ya esta registrado"` contra un `201`, o sea que cualquiera podía **enumerar qué
+direcciones tienen cuenta**. Para que las dos respuestas sean indistinguibles no
+puede haber tokens: cuando el correo es de otra persona no hay cuenta propia a
+la cual entrar.
+
+Es el mismo criterio que `POST /auth/recuperar` ya usaba. La asimetría entre los
+dos era interna y no deliberada.
+
+Las tres ramas, indistinguibles desde afuera:
+
+| Estado del correo | Qué pasa | Qué recibe |
+|---|---|---|
+| Libre | Se crea la cuenta **sin verificar** | Link de verificación |
+| Existe, sin verificar | No se crea nada; se reenvía el link | Link de verificación |
+| Existe y verificada | No se toca nada | Aviso de que alguien intentó registrarse con su correo |
+
+El reenvío de la segunda fila no es cortesía: la `unique` de `usuarios.correo`
+reserva la dirección y el token vence a los 7 días, así que sin reenvío alguien
+que tipeó mal su propio correo se quedaba con la dirección trabada para siempre.
+
+### Verificar el correo
+
+```
+POST /api/auth/verificar/:token   → { "message": "..." }
+```
+
+Sella `usuarios.correo_verificado_el`. **Una cuenta sin verificar no puede
+entrar** (`validateUser`), y el corte va **después** de comprobar la contraseña:
+si fuera antes, sería el mismo oráculo de enumeración que se acaba de cerrar.
+
+El correo se sella por tres caminos, y ninguno es el registro: este link, aceptar
+una invitación (llegó al mail y lo abrió), y Google **sólo** si el perfil trae
+`email_verified`.
 
 ### Login (Email + Password)
 
@@ -93,6 +125,66 @@ GET /api/auth/google/callback?code=...
 
 Response: Redirects to http://localhost:5173/auth/callback?token=<jwt>
 ```
+
+⚠️ **"El correo coincide" no vincula.** Si el `googleId` no está registrado pero
+existe una cuenta local con ese correo, se responde `409` y se manda a la persona
+a entrar con su contraseña. Antes se **ataba el `googleId` a esa cuenta local**
+sin probar que la dirección fuera de quien entraba — con el registro público sin
+verificar, era una vía directa a la cuenta de otro.
+
+Vincular Google a una cuenta que ya existe es una acción deliberada desde adentro
+de la sesión; **no existe todavía** y hacerla implícita en el login era el
+agujero. Y se exige `email_verified` del perfil: sin eso, un Workspace mal
+configurado alcanzaba para crear una cuenta a nombre de cualquier dirección.
+
+### Refresh y cambio de tenant
+
+```
+POST /api/auth/refresh         (cookie httpOnly)
+POST /api/auth/switch-tenant   (Bearer + cookie httpOnly)
+```
+
+**El canje del refresh token es atómico y el reuso corta la sesión.** La fila no
+se borra al rotar: se marca `usado_el` —mismo patrón que
+`TokensAccesoService.quemar()`— y esa sola sentencia resuelve las dos mitades:
+
+- `UPDATE ... WHERE token = $1 AND usado_el IS NULL` ⇒ **un solo ganador**. Antes
+  eran `findOne` + `delete` sin mirar `affected`, y dos pestañas despertando de
+  standby a la vez **podían ganar las dos** (el frontend serializa el refresh por
+  pestaña, no entre pestañas).
+- La fila marcada queda de lápida ⇒ presentar un token **ya rotado** deja de ser
+  un 401 indistinguible de un token inventado.
+
+⚠️ **Pero el canje atómico NO elimina la carrera: sólo elige un perdedor**, y ese
+perdedor es indistinguible de un atacante. Sin nada más, dos pestañas despertando
+juntas —o un reintento de red— deslogueaban de **todos** sus dispositivos a
+alguien que no hizo nada. La primera versión de este cambio tenía ese agujero y
+lo cazó la revisión independiente.
+
+Lo resuelve `reemplazado_por` + una **ventana de gracia de 30 s**:
+
+| Qué presenta | Cuándo | Qué pasa |
+|---|---|---|
+| Token inexistente | — | 401. No revoca |
+| Token vencido | — | 401. No revoca |
+| Token rotado, con reemplazo vivo | dentro de 30 s | **Se le devuelve el mismo token que ganó el otro.** Las dos pestañas siguen vivas |
+| Token rotado, sin reemplazo utilizable | dentro de 30 s | 401. **No revoca**: revocar volvería a castigar la carrera |
+| Token rotado | pasados 30 s | Sesión copiada: **revoca todas las sesiones** |
+
+Los dos últimos son el mismo hecho visto a distinta distancia temporal y no hay
+forma de separarlos por otra vía: se elige un umbral y se documenta. 30 s cubre
+de sobra dos tabs y un reintento, y deja la utilidad de un token robado en casi
+nada.
+
+⚠️ Las revocaciones deliberadas (`switch-tenant`, cambio de contraseña) borran
+sólo las filas **vivas** (`usado_el IS NULL`). Llevarse las lápidas apagaba la
+detección de reuso después de cada cambio de tenant.
+
+**`switch-tenant` exige también la cookie de refresh**, no sólo el `JwtAuthGuard`.
+La ruta emite un refresh token nuevo, así que con el access token solo cualquier
+filtración —historial, log del hosting, XSS— se volvía **sesión renovable**. La
+cookie tiene que ser de una sesión viva **del mismo usuario**: sin eso, el refresh
+de otra cuenta serviría de segundo factor para el token robado.
 
 ### Get Current User
 
@@ -132,9 +224,9 @@ Response (401): Unauthorized (missing/invalid token)
 
 **Service**: `src/modules/auth/auth.service.ts`
 - `validateUser(email, password)` — Check password via bcrypt
-- `register(dto)` — Hash password, create user, issue JWT
+- `register(dto)` — Responde **lo mismo exista o no el correo** y **no emite sesión**: crea la cuenta sin verificar y manda el link, o avisa al dueño real. Ver "Register"
 - `login(user)` — Issue JWT for existing user
-- `googleLogin(profile)` — Find-or-create user by Google ID / email
+- `googleLogin(profile)` — Find-or-create **sólo por Google ID**. La coincidencia de correo con una cuenta local es `409`, no un vínculo. Exige `email_verified`
 - `generateToken(user)` — Sign JWT with sub + email
 - `getMe(userId)` — Fetch user by ID (protected endpoint)
 
@@ -177,8 +269,13 @@ Response (401): Unauthorized (missing/invalid token)
 | `email` | varchar(255) | UNIQUE, NOT NULL | Login identifier |
 | `password` | varchar(255) | nullable | Bcrypt hash; null if OAuth-only user |
 | `google_id` | varchar(255) | nullable, UNIQUE | Google OAuth ID |
+| `correo_verificado_el` | timestamptz | nullable | `NULL` = la dirección no está probada, y **la cuenta no puede entrar**. Ver "Verificar el correo" |
 | `created_at` | timestamp | DEFAULT now() | Account creation time |
 | `updated_at` | timestamp | DEFAULT now() | Last update time |
+
+> ⚠️ Esta tabla arrastra nombres viejos (`users`, `name`, `email`, `password`).
+> En la base son `usuarios`, `nombre`, `correo`, `contrasena`. La fila nueva va
+> con su nombre real; corregir las otras es una pasada aparte.
 
 ### DTOs
 
@@ -441,10 +538,10 @@ Open http://localhost:3000/api/docs, click "Authorize" button (top-right), enter
 
 ## Known Issues & TODOs
 
-- [ ] Password reset flow not implemented
-- [ ] Email verification not implemented
+- [x] Password reset — implementado (`/auth/recuperar`, ver arriba)
+- [x] Email verification — implementada el 2026-08-15 (`correo_verificado_el`)
 - [ ] "Keep session" checkbox on login page has no effect (always persists to localStorage)
-- [ ] No refresh token rotation (tokens are long-lived)
+- [x] Rotación de refresh token — rota desde antes, y desde el 2026-08-15 con canje atómico, lápidas y detección de reuso con ventana de gracia
 - [ ] Google OAuth env vars not in docker-compose.yml (must set in `.env` manually)
 
 ---

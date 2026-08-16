@@ -427,51 +427,6 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
-- [ ] 🚩 **Se puede pre-registrar el correo de un futuro empleado y heredar sus roles**
-  (backend + producto, auditoría RBAC/auth 2026-08-15) — **el hallazgo más feo de la pasada.**
-  `tenants.service.ts` → `crearUsuario` busca el correo y, si **ya existe** un `Usuario`,
-  **adopta esa cuenta tal cual**. El comentario del propio código lo dice: *"Solo el id: el
-  resto del `Usuario` —incluido el hash— no se usa"*. Si el correo **no** existe, en cambio, la
-  cuenta se crea **sin contraseña** y la persona la elige desde el link de invitación — *"así
-  nadie más que ella"*. **Esa asimetría es el agujero.**
-  **Escenario, encadenado con el registro público que no verifica correos** (ya anotado, pero
-  por otra razón): alguien registra `futuro.empleado@empresa.cl` con una contraseña suya. Cuando
-  el admin da de alta a esa persona de verdad, el sistema **adopta la cuenta del atacante** y le
-  asigna los roles que el admin eligió. No se manda ningún mail y la respuesta dice
-  `invitado: false`, así que **el admin no recibe ninguna señal**. El empleado real nunca recibe
-  invitación — la única pista, y tardía.
-  El docblock del método asume que "si el correo ya existía, la cuenta es de esa persona".
-  Ninguna de las dos entradas por separado mostraba esto: hizo falta cruzarlas.
-  **Las opciones, y la decisión es tuya:** (a) verificar el correo en el registro público —
-  cierra la raíz pero es la entrada ya anotada y más cara; (b) que el alta **nunca** adopte una
-  cuenta con contraseña ya puesta sin que la persona confirme por mail; (c) avisarle al admin
-  que está adoptando una cuenta preexistente en vez de crear una, y que decida.
-  ✅ **DECIDIDO (owner, 2026-08-15): el alta no adopta una cuenta que ya tiene contraseña
-  puesta.** Manda un mail y la persona confirma que ese correo es suyo antes de quedar asociada
-  a la empresa. Con eso el pre-registro deja de servir: quien registró el correo ajeno no puede
-  confirmar por la persona real.
-  ⚠️ **Al construirlo, dos cosas que no son obvias:** (a) el caso legítimo —alguien que ya tiene
-  cuenta en OTRA empresa y se suma a esta— pasa por el mismo mail, así que el texto tiene que
-  decir "te están sumando a X", no "confirmá tu correo"; (b) mientras la confirmación está
-  pendiente, la persona **no** es miembro todavía, así que el admin necesita ver ese estado en
-  la tabla o va a creer que el alta falló.
-
-- [ ] **El login con Google ignora si el correo está verificado y vincula por coincidencia**
-  (backend, auditoría RBAC/auth 2026-08-15) — `google.strategy.ts` no lee el campo `verified`
-  que `passport-google-oauth20` sí expone, y `auth.service.ts` → `googleLogin` vincula el
-  `googleId` a cualquier cuenta local que coincida **por correo**, sin probar que esa dirección
-  sea de quien entra.
-  Es la **misma familia** que la adopción de cuenta por correo del alta de usuarios (arriba):
-  las dos tratan "el correo coincide" como prueba de identidad. Conviene decidirlas juntas, con
-  un solo criterio para todo el sistema.
-  ✅ **DECIDIDO (owner, 2026-08-15): mismo criterio que el alta de usuarios.** "El correo
-  coincide" deja de ser prueba de identidad en todo el sistema: vincular un `googleId` a una
-  cuenta local existente exige confirmación, no solo coincidencia. Y se pasa a leer el campo
-  `verified` que la librería ya expone.
-  ℹ️ **Prioridad baja por ahora:** el owner confirmó que **el login con Google no lo usa nadie
-  todavía** (2026-08-15). Es deuda a saldar **antes de habilitarlo**, no un incendio. Si algún
-  día se habilita, esta entrada sube sola.
-
 - [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
   persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
   sí lo vieron**) — `auth.controller.ts` → `googleCallback` redirige a
@@ -488,10 +443,14 @@ empezarlas.
   ✅ **Prioridad decidida (owner, 2026-08-15): baja, porque el login con Google no está en
   uso.** No cambia que sea deuda —el token en la query string queda en historial y logs— pero sí
   cuándo se paga: **antes de habilitar Google**, no ahora.
-  ⚠️ La mitad que NO baja de prioridad es la otra: que `POST /auth/switch-tenant` devuelva un
-  refresh token nuevo exigiendo solo `JwtAuthGuard`. Eso convierte **cualquier** filtración de
-  access token —venga de Google o no— en una sesión renovable, y esa ruta sí está en uso.
-  Conviene mirarla junto con las dos entradas de `refresh` de esta misma sección.
+  ✅ **La otra mitad ya está cerrada (2026-08-15, ver `resueltos.md`):**
+  `POST /auth/switch-tenant` exige ahora también la cookie de refresh, y de una sesión viva
+  del mismo usuario, así que un access token filtrado —venga de Google o no— dejó de poder
+  convertirse en sesión renovable.
+  **Lo que queda abierto acá es sólo el token en la query string**, con su prioridad baja: el
+  redirect a `/auth/callback?token=…` sigue dejándolo en el historial del navegador y en los
+  logs de acceso del frontend, y `callback.vue` sigue sin `replace: true`. Se paga **antes de
+  habilitar Google**.
 
 - [ ] **Contratar un módulo, ¿es un borde duro o solo decide qué se ve en el menú?** (backend +
   producto, auditoría RBAC/auth 2026-08-15) — **tres lentes ciegas entre sí cayeron sobre el
@@ -754,54 +713,6 @@ empezarlas.
   🔗 **Ojo con el límite:** esto cubre el borrador **abierto**. El caso de la propina **ya
   liquidada y pagada** es otro y sigue con su decisión propia (saldo en contra del garzón), en
   la sección de proyectos que van solos.
-
-- [ ] **`POST /auth/register` dice si un correo ya está registrado** (backend, auditoría
-  RBAC/auth 2026-08-15) — responde `409 "El correo ya esta registrado"` vs `201`, así que
-  cualquiera puede confirmar qué correos tienen cuenta. **Lo llamativo es la asimetría interna:**
-  `recuperar()` fue escrito explícitamente para NO hacer esto (responde igual exista o no), y ese
-  criterio no se replicó en `register`.
-  **La decisión es un trade real, no un bug obvio:** si el registro deja de distinguir, quien se
-  registra con un correo ya tomado no se entera y queda sin saber por qué no puede entrar. El
-  patrón habitual es responder igual y mandar un mail explicando — que exige el correo verificado
-  de la entrada de arriba.
-  ✅ **DECIDIDO (owner, 2026-08-15): responde igual exista o no, y a quien ya tiene la cuenta le
-  llega un mail** diciendo que alguien intentó registrarse con su correo. Es el mismo patrón que
-  `recuperar()` ya usa acá, así que no se inventa nada.
-  🔗 **Depende del correo verificado** que se decidió el mismo día: sin verificación, el mail de
-  aviso va a una dirección que nadie probó. Van en el mismo trabajo.
-
-- [ ] **El refresh token rota pero no detecta reuso** (backend, auditoría RBAC/auth 2026-08-15)
-  — ⛔ **TOCA JWT: no se toca sin decisión del owner** (`CLAUDE.md`, invariante 4).
-  `auth.service.ts` → `refresh` rota el token, pero si el viejo —ya borrado— se vuelve a
-  presentar, la única respuesta es un 401 genérico: no se revoca la sesión ni queda registro. El
-  reuso de un refresh token rotado es la señal clásica de que alguien copió la sesión, y hoy se
-  descarta como un error cualquiera.
-  El arreglo toca la lógica de rotación del sistema ya implementado, por eso queda acá y no en
-  la sección 1.
-  ✅ **DECIDIDO (owner, 2026-08-15): se endurece con las dos piezas** — el canje atómico (la
-  entrada hermana de esta sección) **y** la detección de reuso: presentar un token ya rotado
-  corta la sesión entera, no devuelve un 401 y sigue.
-  ⛔ **Sigue tocando el sistema JWT**, así que el diseño se confirma antes de escribir; lo que la
-  decisión fija es el QUÉ, no que esté libre de revisión.
-
-- [ ] **`refresh()` no reclama el token de forma atómica: dos pestañas pueden canjearlo las dos**
-  (backend, auditoría RBAC/auth 2026-08-15) — ⛔ **Adyacente al sistema JWT: confirmar antes de
-  tocar** (`CLAUDE.md`, invariante 4).
-  `auth.service.ts` → `refresh` hace `findOne` y después `delete({ id })`, sin transacción ni
-  condición atómica, y no mira `affected`. Dos requests simultáneos con la misma cookie **pueden
-  ganar los dos** — no es "uno gana y otro pierde".
-  **Disparador realista, medido:** el frontend serializa el refresh **por pestaña**
-  (`useApiFetch.ts`, variable de módulo), pero **no entre pestañas**. Dos tabs del mismo usuario
-  despertando de standby a la vez alcanzan.
-  ℹ️ **Es distinto del reuso secuencial** que anota la otra entrada: aquel es presentar un token
-  ya rotado; este es doble uso simultáneo del token vigente. Se arreglan en el mismo lugar y
-  conviene decidirlos juntos.
-  ✅ **DECIDIDO (owner, 2026-08-15): el canje pasa a ser atómico — un solo ganador.** Va junto
-  con la detección de reuso de la entrada hermana: son el mismo lugar del código y la misma
-  conversación con el owner.
-  ⚠️ **El orden importa:** si se implementa la detección de reuso SIN el canje atómico, las dos
-  pestañas legítimas que hoy ganan las dos pasarían a verse como reuso y **cortarían la sesión
-  de un usuario que no hizo nada malo**. Atómico primero, detección después.
 
 - [ ] **Dar de baja una membresía deja al garzón vinculado sin ninguna credencial, y en
   silencio** (backend + frontend, auditoría RBAC/auth 2026-08-15) — **lo creó la entrega del PIN
@@ -1245,12 +1156,6 @@ empezarlas.
   ⚠️ Costo aceptado explícitamente: un error de conteo de buena fe ya no se corrige en el
   momento — hay que volver a llamar a la persona.
 
-- [ ] **Verificación de correo del auto-registro público** (backend) — lo único que
-  quedó abierto de la entrada de mail, que se cerró el 2026-08-09 (ver
-  `resueltos.md`). La invitación resuelve la verificación **del invitado**: si hizo
-  clic en el link, la dirección existe y alguien la lee. Falta el otro camino:
-  `POST /auth/register` sigue creando cuentas con un correo que nadie probó.
-
 - [ ] **Un correo de usuario soft-borrado hace explotar el alta con un 500** (backend,
   `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08 contra la
   base viva: la búsqueda de `usuarioPrevio` corre con el filtro de soft delete, pero la
@@ -1269,6 +1174,12 @@ empezarlas.
   Sigue sin implementarse por lo mismo de antes: **nada soft-borra un `Usuario`**, así que
   el escenario es inalcanzable. Lo que la decisión fija es la forma del fix el día que
   exista la baja — y que la unique de `usuarios.correo` va a tener que ser parcial.
+  ➕ **Ganó un segundo llamador el 2026-08-15** (lo levantó la revisión independiente):
+  `auth.service.ts` → `register` tiene el mismo hueco —`findByEmail` filtra borrados, así
+  que `existing` da `null` y el `create` choca contra la unique—, y ahí duele más: ese
+  endpoint acaba de pasar a **responder siempre lo mismo** para no ser un enumerador de
+  cuentas, y un `500` vuelve a distinguir un caso desde afuera. Sigue inalcanzable por la
+  misma razón, y se arregla en el mismo momento y con la misma decisión.
 
 ---
 

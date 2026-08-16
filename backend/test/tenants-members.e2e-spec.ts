@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
@@ -37,6 +38,10 @@ async function login(
 
   const resTenant = await request(app.getHttpServer())
     .post('/api/auth/switch-tenant')
+    .set(
+      'Cookie',
+      (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+    )
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
   expect(resTenant.status).toBe(200);
@@ -70,6 +75,9 @@ describe('Tenants — miembros (e2e): el roster es admin-only', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );

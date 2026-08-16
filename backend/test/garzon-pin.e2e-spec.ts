@@ -1,8 +1,11 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
+import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 
 /**
  * SDD `2026-08-14-pin-propio-garzon`, Task 5: el ciclo entero del PIN propio,
@@ -70,6 +73,10 @@ describe('PIN propio del garzón (e2e)', () => {
     const initialToken = (resLogin.body as TokenResponse).access_token;
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
+      .set(
+        'Cookie',
+        (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+      )
       .set('Authorization', `Bearer ${initialToken}`)
       .send({ tenantId });
     expect(resTenant.status).toBe(200);
@@ -80,6 +87,8 @@ describe('PIN propio del garzón (e2e)', () => {
     return loginConTenant(email, password, PARIS_TENANT_ID);
   }
 
+  let tokens: TokensAccesoService;
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -87,10 +96,14 @@ describe('PIN propio del garzón (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    tokens = app.get(TokensAccesoService);
 
     tokenAdmin = await login(ADMIN.email, ADMIN.pass);
     tokenGarzon = await login(GARZON.email, GARZON.pass);
@@ -303,11 +316,33 @@ describe('PIN propio del garzón (e2e)', () => {
     );
 
     try {
-      await request(app.getHttpServer())
+      // ⚠️ `POST /tenants/members` ya NO asocia sola a una cuenta con
+      // contraseña puesta: deja la confirmación pendiente y manda un mail
+      // (mismo criterio que el alta, owner 2026-08-15). La fixture del garzón
+      // tiene contraseña, así que este paso ahora responde `pendiente` y hay
+      // que recorrer el link para que sea miembro de verdad.
+      const alta = await request(app.getHttpServer())
         .post('/api/tenants/members')
         .set('Authorization', `Bearer ${tokenAdminFalabella}`)
         .send({ usuarioId: GARZON_USUARIO_ID })
         .expect(201);
+      expect(
+        (alta.body as { pendienteConfirmacion: boolean }).pendienteConfirmacion,
+      ).toBe(true);
+
+      // El token en claro no sale por la API —en la base solo queda el hash—,
+      // así que se emite uno por el service, como hace
+      // `invitacion-y-reset.e2e-spec.ts`. Lo que se ejercita es el endpoint de
+      // confirmación, que es el que crea la membresía.
+      const confirmacion = await tokens.emitir(
+        GARZON_USUARIO_ID,
+        TipoTokenAcceso.CONFIRMACION,
+        undefined,
+        { tenantId: FALABELLA_TENANT_ID, rolIds: [] },
+      );
+      await request(app.getHttpServer())
+        .post(`/api/tenants/confirmacion/${confirmacion}`)
+        .expect(200);
 
       const tokenGarzonFalabella = await loginConTenant(
         GARZON.email,

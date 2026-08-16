@@ -14,6 +14,7 @@ import { GarzonesModule } from '../garzones/garzones.module';
 import { TenantsService } from './tenants.service';
 import {
   AdminTenantsController,
+  TenantsConfirmacionController,
   TenantsController,
 } from './tenants.controller';
 
@@ -34,7 +35,13 @@ import {
     // propia transacción. `MailService` no se importa — su módulo es `@Global`.
     forwardRef(() => AuthModule),
   ],
-  controllers: [AdminTenantsController, TenantsController],
+  controllers: [
+    AdminTenantsController,
+    // Antes que `TenantsController` para que las dos rutas públicas se resuelvan
+    // sin depender de que aquel nunca gane un `:param` en el primer segmento.
+    TenantsConfirmacionController,
+    TenantsController,
+  ],
   providers: [TenantsService],
   exports: [TenantsService],
 })

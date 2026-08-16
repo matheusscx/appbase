@@ -7,7 +7,12 @@ import { AuthService } from '../auth.service';
 interface GoogleProfile {
   id: string;
   displayName: string;
-  emails: Array<{ value: string }>;
+  /**
+   * `verified` lo expone `passport-google-oauth20` desde siempre y esta
+   * interfaz **no lo declaraba**, así que el campo se perdía antes de llegar al
+   * service: TypeScript no podía avisar de un dato que el tipo negaba.
+   */
+  emails: Array<{ value: string; verified?: boolean }>;
 }
 
 @Injectable()
@@ -40,6 +45,10 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       googleId: id,
       name: displayName,
       email: emails[0].value,
+      // `=== true` y no un truthy: si el proveedor omite el campo, el default
+      // seguro es "no verificado". Un `?? true` acá invertiría el sentido del
+      // arreglo.
+      emailVerificado: emails[0].verified === true,
     });
     done(null, user);
   }

@@ -1,7 +1,9 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
@@ -53,21 +55,31 @@ async function listarMiembros(
   return res.body as Member[];
 }
 
-/** Login sin elegir tenant: devuelve el token "suelto". */
+/**
+ * Login sin elegir tenant: devuelve el token "suelto" **y la cookie**.
+ *
+ * La cookie porque `switch-tenant` pasa a exigir el refresh
+ * token, no sólo el access token, porque emite una sesión nueva y con el access
+ * token solo cualquier filtración se volvía sesión renovable.
+ */
 async function loginSuelto(
   app: INestApplication<App>,
   email: string,
   password: string,
-): Promise<string> {
+): Promise<{ token: string; cookie: string[] }> {
   const res = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email, password });
   expect(res.status).toBe(200);
-  return (res.body as TokenResponse).access_token;
+  return {
+    token: (res.body as TokenResponse).access_token,
+    cookie: (res.headers['set-cookie'] as unknown as string[]) ?? [],
+  };
 }
 
 describe('Alta de usuarios del tenant (e2e)', () => {
   let app: INestApplication<App>;
+  let dataSource: DataSource;
   let tokenAdmin: string;
   let rolIdParis: string;
   /** Un segundo rol, para poder distinguir "quedaron estos" de "se sumaron". */
@@ -81,15 +93,20 @@ describe('Alta de usuarios del tenant (e2e)', () => {
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    dataSource = app.get(DataSource);
 
     const suelto = await loginSuelto(app, ADMIN_PARIS.email, ADMIN_PARIS.pass);
     const conTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
-      .set('Authorization', `Bearer ${suelto}`)
+      .set('Cookie', suelto.cookie)
+      .set('Authorization', `Bearer ${suelto.token}`)
       .send({ tenantId: PARIS_TENANT_ID });
     expect(conTenant.status).toBe(200);
     tokenAdmin = (conTenant.body as TokenResponse).access_token;
@@ -106,7 +123,8 @@ describe('Alta de usuarios del tenant (e2e)', () => {
     const sueltoSistema = await loginSuelto(app, 'admin@sistema.com', 'admin');
     const enFalabella = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
-      .set('Authorization', `Bearer ${sueltoSistema}`)
+      .set('Cookie', sueltoSistema.cookie)
+      .set('Authorization', `Bearer ${sueltoSistema.token}`)
       .send({ tenantId: FALABELLA_TENANT_ID });
     expect(enFalabella.status).toBe(200);
     tokenFalabella = (enFalabella.body as TokenResponse).access_token;
@@ -313,7 +331,43 @@ describe('Alta de usuarios del tenant (e2e)', () => {
           contrasena: 'una-clave-larga-123',
         });
 
-      expect(res.status).toBe(409);
+      // ⚠️ El `409` que este test afirmaba **era el bug**: distinguir el correo
+      // tomado del libre convertía el registro en un enumerador público de
+      // cuentas. Hoy responde igual en los dos casos, así que la ausencia del
+      // duplicado ya no se puede leer del status y se comprueba donde de verdad
+      // importa: en la base.
+      expect(res.status).toBe(200);
+
+      const filas = await dataSource.query<{ n: string }[]>(
+        `SELECT COUNT(*)::text AS n FROM usuarios WHERE LOWER(correo) = LOWER($1)`,
+        [VENDEDOR_PARIS.email],
+      );
+      expect(filas[0].n).toBe('1');
+    });
+
+    it('el registro responde lo mismo con un correo tomado que con uno libre', async () => {
+      // La razón de ser del cambio, y lo único que un atacante puede observar.
+      // Si estas dos respuestas divergieran —status, cuerpo o cookie— el
+      // endpoint volvería a decir qué direcciones tienen cuenta.
+      const tomado = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({
+          nombre: 'Colado',
+          correo: VENDEDOR_PARIS.email,
+          contrasena: 'una-clave-larga-123',
+        });
+      const libre = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({
+          nombre: 'Nadie',
+          correo: `libre-${Date.now()}@e2e.test`,
+          contrasena: 'una-clave-larga-123',
+        });
+
+      expect(tomado.status).toBe(libre.status);
+      expect(tomado.body).toEqual(libre.body);
+      expect(tomado.headers['set-cookie']).toBeUndefined();
+      expect(libre.headers['set-cookie']).toBeUndefined();
     });
   });
 
@@ -346,7 +400,8 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       );
       const conTenant = await request(app.getHttpServer())
         .post('/api/auth/switch-tenant')
-        .set('Authorization', `Bearer ${suelto}`)
+        .set('Cookie', suelto.cookie)
+        .set('Authorization', `Bearer ${suelto.token}`)
         .send({ tenantId: PARIS_TENANT_ID });
       expect(conTenant.status).toBe(200);
 

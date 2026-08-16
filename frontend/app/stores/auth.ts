@@ -69,21 +69,28 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function register(nombre: string, correo: string, contrasena: string): Promise<boolean> {
+  /**
+   * Registro público. **No abre sesión**, y devuelve el mensaje a mostrar en
+   * vez de un booleano.
+   *
+   * El backend responde lo mismo exista o no el correo —si distinguiera sería
+   * un enumerador público de cuentas— así que acá tampoco hay nada que
+   * ramificar: no se puede saber si la cuenta se creó. La sesión llega recién
+   * después de verificar el correo desde el link del mail.
+   */
+  async function register(nombre: string, correo: string, contrasena: string): Promise<string | null> {
     loading.value = true
     error.value = null
     try {
-      const data = await $fetch<{ access_token: string; user: User }>(
+      const data = await $fetch<{ message: string }>(
         `${apiUrl}/auth/register`,
         { method: 'POST', body: { nombre, correo, contrasena }, credentials: 'include' },
       )
-      setToken(data.access_token)
-      user.value = data.user
-      return true
+      return data.message
     } catch (e: unknown) {
       // Misma razón que en `login`: pantalla sin sesión.
       error.value = apiErrorMsg(e, 'Error al registrarse', { detalleLocal: false })
-      return false
+      return null
     } finally {
       loading.value = false
     }

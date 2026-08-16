@@ -306,7 +306,8 @@ que se persiguió durante semanas. Con el `expect` puesto, el rojo cae en el log
 contestó.
 
 ⚠️ **`/auth/login` y `/auth/switch-tenant` devuelven 200, no 201**: los dos llevan
-`@HttpCode(HttpStatus.OK)` explícito. `/auth/register` sí devuelve 201.
+`@HttpCode(HttpStatus.OK)` explícito. **`/auth/register` también devuelve 200** desde el
+2026-08-15: dejó de emitir sesión para poder responder igual exista o no el correo.
 
 La regla es más ancha que el login —vale para cualquier `.body` del que se extrae un id o un
 token para usarlo después—, pero el login es donde más caro sale, porque contamina todo el
