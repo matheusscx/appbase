@@ -550,27 +550,6 @@ empezarlas.
   ⚠️ **Y la doc se arregla en el mismo commit:** `recuento-inventario.md` da este riesgo por
   mitigado con un razonamiento que no cierra. Esa fila cambia, o queda diciendo que no existía.
 
-- [ ] 🚩 **Cambiar la unidad de un ingrediente puede tirar abajo el listado entero del catálogo**
-  (backend, auditoría `inventario` 2026-08-15) — el guard que bloquea cambiar `unidadMedida`
-  (`items.service.ts:1391-1418`) solo mira si el ítem tiene **movimientos propios**; no mira si
-  una `receta_ingredientes` o una opción de grupo ya lo referencia con una unidad fijada. Un
-  ingrediente sin costo ni movimientos puede pasar de `kg` a `l` sin fricción.
-  **Verificado el mecanismo del daño:** `catalog.service.ts` → `convertirUnidades` hace
-  `conversiones.map(c => this.convertirConMapa(...))` **sin aislar fila por fila**, así que una
-  sola conversión imposible hace fallar el lote completo. Como `calcularDisponibilidadBatch` lo
-  usa desde `findAll` y ni el service ni el controller lo atrapan, **`GET /items` deja de
-  responder para todo el tenant** —el menú del POS incluido— hasta arreglar la fila a mano.
-  **La decisión:** ¿el guard se amplía para bloquear el cambio cuando hay referencias (y el
-  usuario tiene que desarmar la receta primero), o el batch se vuelve tolerante fila por fila
-  (devolviendo la que no se puede convertir marcada, en vez de tirar todo)? No son excluyentes,
-  y la segunda protege también contra el resto de las filas corruptas que ya puedan existir.
-  ✅ **DECIDIDO (owner, 2026-08-15): las dos mitades.** (a) El guard se amplía para bloquear el
-  cambio si alguna receta u opción de grupo ya referencia el ítem; (b) el batch de conversión
-  tolera la fila que no puede convertir —marcándola— en vez de tirar el lote entero.
-  **La segunda importa más de lo que parece:** protege también contra las filas ya rotas que
-  puedan existir hoy. Sin ella, el bloqueo evita el problema nuevo y deja el catálogo caído
-  donde ya pasó.
-
 - [ ] 🚩 **Anular una venta reingresa la mercadería al costo de hoy, no al que salió — y el
   inventario se infla solo** (backend + contabilidad, auditoría `inventario` 2026-08-15) —
   **lo encontraron dos lentes ciegas entre sí** (costeo CPP y devoluciones), por caminos

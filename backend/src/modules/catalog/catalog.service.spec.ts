@@ -189,4 +189,41 @@ describe('CatalogService', () => {
       );
     });
   });
+
+  // ── El batch aísla fila por fila ──────────────────────────────────────────
+  //
+  // Antes era un `.map` pelado, así que **una** conversión imposible hacía
+  // fallar el lote entero. Como el único llamador cuelga de `findAll`, el efecto
+  // medido era que `GET /items` dejaba de responder para todo el tenant —el menú
+  // del POS incluido— por una sola fila con la unidad rota.
+  describe('convertirUnidades (batch)', () => {
+    it('una conversión imposible devuelve null y NO tumba las demás', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadKg, unidadL]);
+
+      const r = await service.convertirUnidades([
+        { cantidad: '2', desde: 'kg', hacia: 'g' },
+        // volumen → masa: la fila rota, en el medio a propósito
+        { cantidad: '1', desde: 'l', hacia: 'kg' },
+        { cantidad: '500', desde: 'g', hacia: 'kg' },
+      ]);
+
+      expect(r).toEqual(['2000', null, '0.5']);
+    });
+
+    it('una unidad desconocida también sale como null, no como excepción', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadKg, unidadG]);
+
+      const r = await service.convertirUnidades([
+        { cantidad: '1', desde: 'inventada', hacia: 'kg' },
+        { cantidad: '1', desde: 'kg', hacia: 'g' },
+      ]);
+
+      expect(r).toEqual([null, '1000']);
+    });
+
+    it('sin conversiones no consulta el catálogo', async () => {
+      expect(await service.convertirUnidades([])).toEqual([]);
+      expect(unidadMedidaRepo.find).not.toHaveBeenCalled();
+    });
+  });
 });

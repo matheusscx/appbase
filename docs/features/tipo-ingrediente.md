@@ -86,6 +86,33 @@ El backend persiste `precio_base = '0'` aunque llegue `precioBase` distinto. Rec
 
 Actualiza campos de `item_producto` (costo, unidad, stock directo) como producto cantidad. Si llega `precioBase`, se fuerza `0`. No permite cambiar `tipo` (`UpdateItemDto` no incluye `tipo`).
 
+#### La unidad de un ingrediente referenciado no se cambia
+
+`unidadMedida` se rechaza con `400` si **alguna fila viva ya fijó una cantidad contra ese
+ítem en la unidad actual**. Son cuatro tablas, no las dos obvias — se buscó por conducta
+(*"¿qué tabla fija una unidad contra un `item_id`?"*), no por nombre:
+
+| Tabla | Campo que apunta al ítem |
+|---|---|
+| `receta_ingredientes` | `ingrediente_item_id` |
+| `receta_extras_permitidos` | `ingrediente_item_id` |
+| `grupo_modificador_opciones` | `item_id` (solo si tiene `unidad_codigo`) |
+| `item_grupo_modificador_opciones` | vía `grupo_opcion_id` (solo si tiene `unidad_codigo`) |
+
+**Por qué importa:** la receta dice *"150 g de carne"*; si la carne pasa a medirse en litros,
+esa fila no se puede convertir nunca más. El guard anterior solo miraba **movimientos
+propios** del ítem, así que un ingrediente sin costo ni movimientos cambiaba de `kg` a `l`
+sin fricción, y el listado del catálogo se caía entero después.
+
+**Bloquea ante cualquier referencia, aunque la unidad nueva sea convertible** (`kg` → `g`).
+Es la decisión del owner: la alternativa —permitir solo los cambios compatibles— exige
+razonar la magnitud fila por fila y deja al usuario sin señal de qué recetas dependen del
+ítem. El camino es desarmar la referencia primero. El mensaje nombra qué lo referencia.
+
+ℹ️ El guard evita el caso nuevo; lo que protege contra las filas **ya rotas** es que las dos
+conversiones batch toleren la fila que no pueden convertir en vez de tirar el lote — ver
+`CatalogService.convertirUnidades` y [`simulador-impacto-costos.md`](./simulador-impacto-costos.md).
+
 ### GET /items?tipo=ingrediente
 
 Lista solo insumos del tenant. Incluye `stock`, `unidadMedida`, `costoActual` como productos cantidad. `disponible` es `null` (solo aplica a recetas).

@@ -1417,6 +1417,59 @@ export class ItemsService {
             }
           }
 
+          // Cambiar la unidad de un ítem que otra fila ya referencia CON una
+          // unidad fijada rompe esa fila: la receta dice "200 g de queso" y el
+          // queso pasa a medirse en litros, así que `convertirUnidad` deja de
+          // poder resolverla. El guard de movimientos no lo cubre — un
+          // ingrediente sin costo ni movimientos pasaba de kg a l sin fricción.
+          //
+          // Son CUATRO tablas, no las dos que se ven a simple vista: además de
+          // las recetas y las opciones de grupo están los extras permitidos y
+          // los overrides por ítem↔grupo. Se buscó por conducta ("¿qué tabla
+          // fija una unidad contra un item_id?") y no por el nombre de las dos
+          // conocidas. Una sola query con `UNION ALL`, no una por tabla.
+          //
+          // Bloquea ante CUALQUIER referencia, aunque la unidad nueva sea
+          // convertible (kg → g): es lo que decidió el owner, y la alternativa
+          // —permitir solo los cambios compatibles— exige razonar la magnitud
+          // por fila y deja al usuario sin señal de qué recetas dependen de esto.
+          // El camino es desarmar la receta primero.
+          if (unidadCambia) {
+            const refRows: { origen: string }[] = await manager.query(
+              `SELECT 'receta' AS origen
+                 FROM receta_ingredientes
+                WHERE ingrediente_item_id = $1 AND tenant_id = $2
+                  AND eliminado_el IS NULL
+               UNION ALL
+               SELECT 'extra permitido de una receta'
+                 FROM receta_extras_permitidos
+                WHERE ingrediente_item_id = $1 AND tenant_id = $2
+                  AND eliminado_el IS NULL
+               UNION ALL
+               SELECT 'opción de un grupo de modificadores'
+                 FROM grupo_modificador_opciones
+                WHERE item_id = $1 AND tenant_id = $2
+                  AND unidad_codigo IS NOT NULL AND eliminado_el IS NULL
+               UNION ALL
+               SELECT 'override de una opción de grupo'
+                 FROM item_grupo_modificador_opciones igo
+                 JOIN grupo_modificador_opciones go
+                   ON go.grupo_opcion_id = igo.grupo_opcion_id
+                  AND go.eliminado_el IS NULL
+                WHERE go.item_id = $1 AND igo.tenant_id = $2
+                  AND go.tenant_id = $2
+                  AND igo.unidad_codigo IS NOT NULL AND igo.eliminado_el IS NULL
+               LIMIT 1`,
+              [itemId, tenantId],
+            );
+            if (refRows.length > 0) {
+              throw new BadRequestException(
+                `No se puede cambiar la unidad de medida: el producto ya está referenciado por una ${refRows[0].origen}, ` +
+                  'con su cantidad fijada en la unidad actual. Quitá esa referencia primero.',
+              );
+            }
+          }
+
           // `costo_actual` es "costo por unidad_medida": si la unidad cambia y
           // el costo se queda, pasa a significar otra cosa (5.000 por kg leído
           // como 5.000 por gramo, error de 1000×). El guard de arriba no cubre
@@ -3169,7 +3222,17 @@ export class ItemsService {
     const dispReceta = new Map<string, Decimal | null>();
     for (const id of todasRecetas) dispReceta.set(id, null);
     ingRows.forEach((r, i) => {
-      const posibles = new Decimal(r.stock).div(cantidadesBase[i]).floor();
+      const cantidadBase = cantidadesBase[i];
+      // `null` = la unidad de la receta y la del ingrediente ya no se pueden
+      // convertir entre sí (alguien cambió la unidad del ingrediente cuando
+      // todavía se podía). La receta queda en 0 —no se puede producir— en vez
+      // de tirar abajo el listado entero, que es lo que pasaba antes. 0 y no
+      // `null`: `null` acá significa "sin límite" y mostraría como disponible
+      // algo que no se puede preparar.
+      const posibles =
+        cantidadBase === null
+          ? new Decimal(0)
+          : new Decimal(r.stock).div(cantidadBase).floor();
       const actual = dispReceta.get(r.receta_item_id) ?? null;
       if (actual === null || posibles.lessThan(actual)) {
         dispReceta.set(r.receta_item_id, posibles);
@@ -3629,6 +3692,18 @@ export class ItemsService {
    * conversión —que puede lanzar— sigue ocurriendo dentro del loop del llamador,
    * sin adelantar sus errores por encima de las otras validaciones.
    */
+  /**
+   * `null` = alguno de los ingredientes tiene la unidad rota (la receta pide
+   * gramos de algo que hoy se mide en litros), así que no hay costo que
+   * proponer para esa receta.
+   *
+   * Devolver `null` en vez de dejar propagar la excepción es el mismo criterio
+   * que `convertirUnidades`, y por la misma razón medida: acá `construirFilasDesfase`
+   * recorre **todas** las recetas del tenant, así que una sola fila rota hacía
+   * responder `400` a `GET /recetas/desfases` entero. Es un segundo sitio con la
+   * misma fragilidad que el listado de items, y se encontró porque el e2e del
+   * guard de unidad dejó una fila así en la base.
+   */
   private costoPropuesto(
     convertir: (cantidad: string, desde: string, hacia: string) => string,
     ings: {
@@ -3637,13 +3712,24 @@ export class ItemsService {
       unidad_base: string;
       costo_actual: string | null;
     }[],
-  ): string {
+  ): string | null {
     let total = new Decimal(0);
     for (const ing of ings) {
+      let cantidadBase: string;
+      try {
+        cantidadBase = convertir(
+          ing.cantidad,
+          ing.unidad_codigo,
+          ing.unidad_base,
+        );
+      } catch (e) {
+        // Mismo criterio acotado que `convertirUnidades`: solo el error
+        // esperado de conversión se traduce a "sin costo proponible".
+        if (e instanceof BadRequestException) return null;
+        throw e;
+      }
       total = total.plus(
-        new Decimal(ing.costo_actual ?? '0').mul(
-          convertir(ing.cantidad, ing.unidad_codigo, ing.unidad_base),
-        ),
+        new Decimal(ing.costo_actual ?? '0').mul(cantidadBase),
       );
     }
     return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
@@ -3714,6 +3800,9 @@ export class ItemsService {
       const lista = byReceta.get(cab.receta_item_id) ?? [];
       if (!lista.length) continue;
       const propuesto = this.costoPropuesto(convertir, lista);
+      // Sin costo proponible (unidad rota en algún ingrediente) la receta se
+      // omite de la bandeja, en vez de tumbar la respuesta para todas.
+      if (propuesto === null) continue;
       const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(4);
       if (this.eq4(propuesto, cacheado)) continue;
       if (
@@ -3839,6 +3928,19 @@ export class ItemsService {
           convertir,
           ingsPorReceta.get(it.recetaItemId)!,
         );
+        // La bandeja LEE tolerante (omite la receta sin costo proponible), pero
+        // ESCRIBIR es otra cosa: `costo_actual` es dinero y la columna es
+        // nullable, así que un `null` acá se persistiría en silencio y después
+        // se leería como costo 0 al costear un combo que use esta receta.
+        // Falla ruidoso, como fallaba antes de que `costoPropuesto` dejara de
+        // propagar la excepción — pero nombrando la receta y la causa.
+        if (propuesto === null) {
+          throw new BadRequestException(
+            `No se puede calcular el costo de la receta ${it.recetaItemId}: ` +
+              'alguno de sus ingredientes tiene una unidad incompatible con la ' +
+              'que la receta declara. Corregí esa unidad antes de aplicar.',
+          );
+        }
         await manager.query(
           `UPDATE item_receta
            SET costo_actual = $1, costo_propuesto_omitido = NULL
@@ -3892,6 +3994,17 @@ export class ItemsService {
           convertir,
           ingsPorReceta.get(recetaItemId)!,
         );
+        // Mismo criterio que `aplicarDesfases`: sin costo proponible no hay nada
+        // que descartar, y escribir `null` en `costo_propuesto_omitido` lo
+        // volvería "sin omisión" — la receta reaparecería en la bandeja en la
+        // siguiente lectura, con el usuario creyendo que la descartó.
+        if (propuesto === null) {
+          throw new BadRequestException(
+            `No se puede calcular el costo de la receta ${recetaItemId}: ` +
+              'alguno de sus ingredientes tiene una unidad incompatible con la ' +
+              'que la receta declara. Corregí esa unidad antes de descartar.',
+          );
+        }
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuesto, recetaItemId],

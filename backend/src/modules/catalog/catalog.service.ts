@@ -71,12 +71,22 @@ export class CatalogService {
 
   /**
    * Versión batch: convierte muchas cantidades cargando las unidades en UNA sola
-   * query (evita el N+1 de llamar `convertirUnidad` por cada fila). Preserva la
-   * misma semántica de error, unidad por unidad.
+   * query (evita el N+1 de llamar `convertirUnidad` por cada fila).
+   *
+   * **Aísla fila por fila: una conversión imposible devuelve `null`, no tira el
+   * lote.** Antes era un `.map` pelado, así que un solo ingrediente con la
+   * unidad rota —una receta que pide gramos de algo que pasó a medirse en
+   * litros— hacía fallar la llamada entera. Como el único llamador es
+   * `calcularDisponibilidadBatch`, y ese cuelga de `findAll`, el efecto medido
+   * era que **`GET /items` dejaba de responder para todo el tenant**, el menú
+   * del POS incluido, hasta arreglar la fila a mano.
+   *
+   * Que sea tolerante importa más que el guard que evita el caso nuevo: protege
+   * también contra las filas que ya puedan estar rotas hoy.
    */
   async convertirUnidades(
     conversiones: { cantidad: string; desde: string; hacia: string }[],
-  ): Promise<string[]> {
+  ): Promise<(string | null)[]> {
     const codigos = [
       ...new Set(conversiones.flatMap((c) => [c.desde, c.hacia])),
     ];
@@ -84,9 +94,19 @@ export class CatalogService {
       ? await this.unidadMedidaRepo.find({ where: { codigo: In(codigos) } })
       : [];
     const mapa = new Map(unidades.map((u) => [u.codigo, u]));
-    return conversiones.map((c) =>
-      this.convertirConMapa(c.cantidad, c.desde, c.hacia, mapa),
-    );
+    return conversiones.map((c) => {
+      try {
+        return this.convertirConMapa(c.cantidad, c.desde, c.hacia, mapa);
+      } catch (e) {
+        // Acotado al error esperado —unidad desconocida, magnitud incompatible,
+        // cantidad bajo la precisión— y no un `catch {}` pelado: un fallo
+        // inesperado acá alimenta disponibilidad y costo, así que tiene que
+        // seguir saliendo como 500 ruidoso en vez de disfrazarse de "unidad
+        // rota" y devolver un dato de negocio equivocado en silencio.
+        if (e instanceof BadRequestException) return null;
+        throw e;
+      }
+    });
   }
 
   /**

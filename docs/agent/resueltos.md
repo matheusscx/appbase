@@ -17,6 +17,57 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La unidad de un ingrediente referenciado se congela, y el batch deja de tirar el lote (2026-08-16)
+
+**Decisión del owner (2026-08-15): las dos mitades.** (a) El guard se amplía para bloquear el
+cambio si alguna receta u opción de grupo ya referencia el ítem; (b) el batch de conversión
+tolera la fila que no puede convertir en vez de tirar el lote entero.
+
+**Lo que salió distinto al medir**
+
+1. **Son CUATRO tablas que fijan una unidad contra un ítem, no las dos que nombraba la
+   entrada.** Además de `receta_ingredientes` y `grupo_modificador_opciones` están
+   `receta_extras_permitidos` y `item_grupo_modificador_opciones`. Se buscaron por conducta
+   —*"¿qué tabla tiene un `unidad_codigo` apuntando a un `item_id`?"*— y no por el nombre de
+   las dos conocidas. Una sola query con `UNION ALL … LIMIT 1`, que además nombra cuál lo
+   referencia.
+2. **Son DOS sitios con la misma fragilidad, no uno.** La entrada medía
+   `catalog.service.ts → convertirUnidades` (que cuelga de `GET /items`). Al correr la suite
+   apareció el segundo: `ItemsService.costoPropuesto` convierte con otro conversor y
+   `construirFilasDesfase` lo llama para **todas** las recetas del tenant, así que una sola
+   fila rota hacía responder `400` a `GET /recetas/desfases` entero. Se endureció igual: esa
+   receta se omite de la bandeja en vez de tumbar la respuesta.
+   ℹ️ **Cómo apareció, que vale más que el hallazgo:** el e2e nuevo dejaba la fila rota en la
+   base y la suite del simulador —otra— empezó a fallar. El spec ahora limpia lo que ensucia.
+   ⛔ **Y ese arreglo estaba a medias: lo cazó la revisión independiente.** `costoPropuesto`
+   tiene **tres** llamadores, no uno. Hacerlo devolver `null` blindó la lectura
+   (`construirFilasDesfase`) y dejó los dos de **escritura** —`aplicarDesfases` y
+   `descartarDesfases`— pasando ese `null` directo a un `UPDATE` sobre columnas de dinero
+   nullables: donde antes había un `400` ruidoso quedaba un `200` que persistía
+   `costo_actual = NULL` en silencio, y ese null se lee después como **costo 0** al costear un
+   combo que use la receta. Los dos endpoints reciben el `recetaItemId` por body, sin pasar
+   por la bandeja, así que la fila rota les es alcanzable aunque el listado la omita.
+   **Leer tolerante y escribir tolerante no son lo mismo:** los dos caminos de escritura ahora
+   fallan con `400` nombrando la receta y la causa, y hay un caso e2e que además verifica que
+   `costo_actual` no quedó en `null`.
+3. **La receta con unidad rota queda en `disponible: 0`, no en `null`.** `null` significa "sin
+   límite" en este contrato, así que habría mostrado como disponible algo que no se puede
+   preparar.
+
+⚠️ **Costo asumido, dicho explícito:** el guard bloquea ante **cualquier** referencia, incluso
+si la unidad nueva es convertible (`kg` → `g`). Es lo que decidió el owner; permitir solo los
+cambios compatibles exige razonar la magnitud fila por fila y deja al usuario sin señal de qué
+recetas dependen del ítem. Hay un test que fija esa estrictez a propósito, para que no se
+"arregle" sin decidirlo.
+
+**Qué lo fija.** `unidad-ingrediente-referenciado.e2e-spec.ts`: el ingrediente sin referencias
+sigue pudiendo cambiar (contrapunto), el referenciado no puede ni con una unidad compatible, y
+con una fila ya rota —montada por SQL porque el guard la hace inalcanzable por API— tanto
+`GET /items` como `GET /recetas/desfases` siguen respondiendo `200`. Más tres casos unitarios
+del batch, con la fila rota **en el medio** para probar que no corta las que la siguen.
+
+---
+
 ## La venta de $0, el criterio único de personalización y el redondeo en el drawer (2026-08-16)
 
 Tres entradas chicas de ventas/precios, cerradas juntas. Una cuarta de la misma tanda —la

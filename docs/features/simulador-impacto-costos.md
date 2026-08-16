@@ -55,6 +55,19 @@ desfasada =
 - Comparación con Decimal.js a **4 decimales** (`NUMERIC(18,4)`).
 - Ingrediente sin `costo_actual` aporta `0` (mismo criterio que el costeo al armar receta).
 - Solo ingredientes y recetas con `eliminado_el IS NULL`.
+- **Receta con un ingrediente de unidad incompatible: se omite de la bandeja, no rompe la
+  respuesta.** Si la receta pide gramos de algo que hoy se mide en litros, no hay costo que
+  proponer para ella. La bandeja recorre **todas** las recetas del tenant, así que dejar
+  propagar esa excepción hacía responder `400` a `GET /recetas/desfases` entero por una sola
+  fila rota. Desde el 2026-08-16 un `PATCH` no puede crear ese estado (ver
+  [`tipo-ingrediente.md`](./tipo-ingrediente.md) §"La unidad de un ingrediente referenciado
+  no se cambia"), pero la tolerancia protege contra las filas que ya existan.
+- ⚠️ **La tolerancia es solo de LECTURA.** `POST /recetas/desfases/aplicar` y
+  `.../descartar` sobre una receta sin costo proponible fallan con `400` nombrando la receta.
+  `item_receta.costo_actual` es dinero y la columna es nullable: persistir ahí un costo "no
+  calculable" no daría error y se leería después como **costo 0** al costear un combo que use
+  la receta. Los dos endpoints reciben el id por body, sin pasar por la bandeja, así que la
+  fila rota les es alcanzable aunque el listado la omita.
 
 ### Margen y precio sugerido
 
