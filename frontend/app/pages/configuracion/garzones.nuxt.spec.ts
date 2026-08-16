@@ -105,11 +105,18 @@ mockNuxtImport('usePermissionsStore', () => {
  * composable. Es lo único que permite afirmar el COLOR: una advertencia que
  * saliera como `success` se vería igual en un assert sobre el texto.
  */
-let toasts: { title?: string, color?: string }[] = []
+interface ToastCapturado {
+  title?: string
+  description?: string
+  color?: string
+  /** El aviso de "todavía no puede operar" trae el botón que lo resuelve. */
+  actions?: { label?: string, onClick?: () => void }[]
+}
+let toasts: ToastCapturado[] = []
 
 mockNuxtImport('useToast', () => {
   return () => ({
-    add: (t: { title?: string, color?: string }) => {
+    add: (t: ToastCapturado) => {
       toasts.push(t)
     },
   })
@@ -144,6 +151,18 @@ let miembrosBackend: { usuarioId: string, nombre: string, apellido: string, esTo
 /** El body de cada `POST /garzones` recibido: la sonda del alta. */
 let postsCrear: Record<string, unknown>[] = []
 
+/** Ids que recibió `POST /garzones/:id/permiso-operar`. */
+let postsPermisoOperar: string[] = []
+let permisoOperarRechaza = false
+
+/**
+ * Lo que el backend contesta en `puedeOperarSalon` para las mutaciones de esta
+ * corrida. `null` = "la pregunta no se hizo" (el default del backend cuando el
+ * PATCH no toca el vínculo), y es también el default acá para que los tests
+ * viejos no empiecen a ver el aviso nuevo.
+ */
+let puedeOperarSalonBackend: boolean | null = null
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     // Alimenta el selector "Cuenta vinculada" del drawer. Sin esto no hay
@@ -157,6 +176,15 @@ mockNuxtImport('useApiFetch', () => {
     const method = opts?.method ?? 'GET'
     // El backend devuelve `advertencias` en los dos PATCH: el del garzón y el
     // del PIN. Siempre presente, vacío cuando no hay nada que decir.
+    if (method === 'POST' && url.endsWith('/permiso-operar')) {
+      const id = url.split('/').slice(-2)[0] ?? ''
+      postsPermisoOperar.push(id)
+      if (permisoOperarRechaza) {
+        return Promise.reject(errorApi('No se pudo dar el permiso'))
+      }
+      const g = garzonesBackend.find(x => x.id === id)
+      return Promise.resolve(g ? { ...g } : undefined)
+    }
     if (method === 'PATCH') {
       const esPin = url.endsWith('/pin')
       const id = esPin ? (url.split('/').slice(-2)[0] ?? '') : (url.split('/').pop() ?? '')
@@ -179,7 +207,11 @@ mockNuxtImport('useApiFetch', () => {
         return Promise.resolve({ ...g, pin, advertencias: advertenciasBackend, habiaPin })
       }
       Object.assign(g, opts?.body ?? {})
-      return Promise.resolve({ ...g, advertencias: advertenciasBackend })
+      return Promise.resolve({
+        ...g,
+        advertencias: advertenciasBackend,
+        puedeOperarSalon: puedeOperarSalonBackend,
+      })
     }
     if (method === 'GET' && url.includes('/pin-eventos')) {
       const id = url.split('/').slice(-2)[0] ?? ''
@@ -245,6 +277,7 @@ mockNuxtImport('useApiFetch', () => {
         ...creado,
         pin: usuarioId ? null : '424242',
         advertencias: advertenciasBackend,
+        puedeOperarSalon: puedeOperarSalonBackend,
       })
     }
     const incluirEliminados = url.includes('incluirEliminados=true')
@@ -394,6 +427,9 @@ function reset() {
   eventosPinRechaza = false
   miembrosBackend = []
   postsCrear = []
+  postsPermisoOperar = []
+  permisoOperarRechaza = false
+  puedeOperarSalonBackend = null
   toasts = []
 }
 
@@ -1268,6 +1304,101 @@ describe('garzones — el alta manda la cuenta elegida', () => {
     // existe para cubrir— no puede quedar en pantalla con una cuenta elegida.
     expect(wrapper.text()).not.toContain('automáticamente un PIN de 6 dígitos')
     expect(wrapper.text()).not.toContain('para que se lo entregues')
+  })
+})
+
+/**
+ * El aviso *"…hasta que se lo des"* era una instrucción que su lector podía no
+ * poder ejecutar: otorgar `Salones:Operar` significaba editar un rol, y eso es
+ * admin-only, mientras que el aviso se le muestra a cualquiera con
+ * `Salones:Actualizar`. Decisión del owner (2026-08-15): se abre el permiso.
+ * Acá se prueba que el encargado tiene con qué darlo, no solo que se lo pidan.
+ */
+describe('garzones — el aviso de "no puede operar el salón" trae con qué resolverlo', () => {
+  let montado: Awaited<ReturnType<typeof montarConDrawerStub>> | null = null
+
+  beforeEach(() => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+    reset()
+    esAdmin = true
+    miembrosBackend = [
+      { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
+    ]
+  })
+
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
+  /** Edita y guarda sin cambiar nada: alcanza para que vuelva la respuesta. */
+  async function editarYGuardar() {
+    const wrapper = (montado = await montarConDrawerStub())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    const guardar = wrapper.findAll('button').find(b => b.text().trim() === 'Guardar')
+    expect(guardar, 'botón "Guardar" en el drawer').toBeTruthy()
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  function avisoDelPermiso() {
+    return toasts.find(t => t.title?.includes('no puede entrar en modo personal'))
+  }
+
+  it('con la cuenta sin el permiso, el aviso trae el botón que lo da', async () => {
+    puedeOperarSalonBackend = false
+
+    await editarYGuardar()
+
+    const aviso = avisoDelPermiso()
+    expect(aviso, 'aviso de que todavía no puede operar').toBeTruthy()
+    expect(aviso!.actions?.[0]?.label).toBe('Dárselo ahora')
+  })
+
+  it('el botón llama al otorgamiento de ESE garzón y confirma que ya puede', async () => {
+    puedeOperarSalonBackend = false
+    await editarYGuardar()
+
+    avisoDelPermiso()!.actions![0]!.onClick!()
+    await new Promise(r => setTimeout(r, 20))
+
+    // El id del garzón, no un usuarioId: la ruta acotada resuelve la cuenta
+    // desde la fila, que es lo que impide que esto sea "dale el permiso a
+    // quien quieras".
+    expect(postsPermisoOperar).toEqual([GARZON_ID])
+    expect(toasts.some(t => t.title?.includes('ya puede entrar en modo personal'))).toBe(true)
+  })
+
+  it('si el otorgamiento falla, lo dice y no promete nada', async () => {
+    puedeOperarSalonBackend = false
+    permisoOperarRechaza = true
+    await editarYGuardar()
+
+    avisoDelPermiso()!.actions![0]!.onClick!()
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(toasts.some(t => t.color === 'error')).toBe(true)
+    expect(toasts.some(t => t.title?.includes('ya puede entrar'))).toBe(false)
+  })
+
+  it('si la cuenta YA puede operar, no se ofrece nada', async () => {
+    puedeOperarSalonBackend = true
+
+    await editarYGuardar()
+
+    expect(avisoDelPermiso()).toBeUndefined()
+  })
+
+  it('si la mutación no tocó el vínculo (`null`), tampoco: no se inventa un estado', async () => {
+    // `null` es "la pregunta no se hizo". Tratarlo como `false` ofrecería dar
+    // un permiso que la cuenta quizá ya tiene, y el encargado no tendría cómo
+    // saber que el botón no hacía falta.
+    puedeOperarSalonBackend = null
+
+    await editarYGuardar()
+
+    expect(avisoDelPermiso()).toBeUndefined()
   })
 })
 

@@ -21,6 +21,7 @@ import {
   EstadoSesionGarzon,
   SesionGarzon,
 } from '../turnos/entities/sesion-garzon.entity';
+import { RolesService } from '../roles/roles.service';
 
 const BCRYPT_COST = 10;
 // El PIN se genera automáticamente; estos acotan la generación única.
@@ -88,6 +89,21 @@ export interface GarzonPublico {
  */
 export interface GarzonConAdvertencias extends GarzonPublico {
   advertencias: string[];
+  /**
+   * Si la cuenta vinculada puede operar el salón **hoy**. `null` cuando la
+   * pregunta no se hizo: el garzón no tiene cuenta, o este PATCH no tocó el
+   * vínculo y por lo tanto `assertVinculable` no corrió.
+   *
+   * Existe para que el aviso *"…hasta que se lo des"* sea **accionable**: es lo
+   * que le dice al frontend si ofrecer el botón que se lo da
+   * (`POST /garzones/:id/permiso-operar`). No cuesta nada — sale de la misma
+   * consulta que ya decide la advertencia.
+   *
+   * ⚠️ **No está en el listado y no debería estarlo**: ahí serían N subqueries
+   * de RBAC en una ruta caliente. Acá viaja solo en la respuesta de la mutación
+   * que ya la calculó.
+   */
+  puedeOperarSalon: boolean | null;
 }
 
 /**
@@ -148,6 +164,7 @@ export class GarzonesService {
     private readonly sesionRepo: Repository<SesionGarzon>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly rolesService: RolesService,
   ) {}
 
   private toPublico(
@@ -252,7 +269,12 @@ export class GarzonesService {
           `el tótem, fijando un PIN propio.`,
       );
     }
-    return { ...this.toPublico(guardado), pin, advertencias };
+    return {
+      ...this.toPublico(guardado),
+      pin,
+      advertencias,
+      puedeOperarSalon: dto.usuarioId ? puedeOperarSalon : null,
+    };
   }
 
   async actualizar(
@@ -448,6 +470,14 @@ export class GarzonesService {
     return {
       ...this.toPublico(await this.guardarConEvento(garzon, eventoPin)),
       advertencias,
+      // `null` cuando este PATCH no tocó el vínculo: ahí `assertVinculable` no
+      // corrió y `puedeOperarSalon` sigue en su `false` inicial, que sería una
+      // respuesta inventada — y la peor de las dos, porque el frontend
+      // ofrecería dar un permiso que la cuenta quizá ya tiene.
+      puedeOperarSalon:
+        dto.usuarioId !== undefined && dto.usuarioId !== null
+          ? puedeOperarSalon
+          : null,
     };
   }
 
@@ -669,7 +699,52 @@ export class GarzonesService {
         : 'regenerado_por_encargado',
       usuarioId: usuarioActorId,
     });
-    return { ...this.toPublico(guardado), pin, advertencias, habiaPin };
+    return {
+      ...this.toPublico(guardado),
+      pin,
+      advertencias,
+      habiaPin,
+      // Regenerar el PIN no toca permisos ni vínculo, así que acá la pregunta
+      // no se hizo — y contestarla costaría la consulta de RBAC que el
+      // docblock de arriba explica que esta ruta no paga.
+      puedeOperarSalon: null,
+    };
+  }
+
+  /**
+   * Le da a la cuenta vinculada el permiso de operar el salón, que es lo que
+   * los tres avisos de `crear()` y `actualizar()` le dicen al encargado que
+   * haga (*"…hasta que se lo des"*).
+   *
+   * ⚠️ **Existe porque ese aviso era una instrucción que quien lo lee podía no
+   * poder ejecutar.** Otorgar `Salones:Operar` significaba editar un rol
+   * (`PATCH /roles/:id`, `TenantAdminGuard`), y el aviso se le muestra a
+   * cualquiera con `Salones:Actualizar` — un encargado sin permisos de Roles.
+   * Decisión del owner (2026-08-15): **se abre el permiso, no se corrige el
+   * texto**.
+   *
+   * ⚠️ **Y se abre por un camino puntual, NO dándole acceso a
+   * `PATCH /roles/:id`**: eso lo dejaría editando cualquier rol del tenant, que
+   * es escalada de privilegios y no es lo que se decidió. Acá solo se puede
+   * conceder **ese** permiso, y solo a la cuenta de **ese** garzón — el
+   * `usuarioId` no viene del request, sale de la fila del garzón.
+   */
+  async otorgarPermisoOperar(
+    tenantId: string,
+    id: string,
+  ): Promise<GarzonPublico> {
+    const garzon = await this.getOrThrow(tenantId, id);
+    if (garzon.usuarioId === null) {
+      throw new BadRequestException(
+        `${garzon.nombre} no tiene ninguna cuenta vinculada: el permiso de ` +
+          `operar el salón se le da a una cuenta, no a un PIN.`,
+      );
+    }
+    const usuarioId = garzon.usuarioId;
+    await this.dataSource.transaction((manager) =>
+      this.rolesService.otorgarOperarSalon(manager, tenantId, usuarioId),
+    );
+    return this.toPublico(garzon);
   }
 
   /**

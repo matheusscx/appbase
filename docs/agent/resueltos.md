@@ -17,6 +17,93 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El encargado ya puede dar el permiso que el aviso le pedía dar (2026-08-16)
+
+La tercera entrada del cluster de membresía, separada de las otras dos porque **no tenía
+vehículo**: la decisión decía *"se abre el permiso"* y al abrir el código apareció que el
+motor concede permisos **por rol** (`roles_permisos_modulos`), no por usuario, y que
+`TenantsService.create` siembra **un solo rol** por tenant (`Administrador`, `es_fijo`). No
+existía ningún rol de operador al que enganchar nada.
+
+**Decisión del owner (2026-08-16), sobre tres opciones: rol de sistema no editable.** Las
+otras dos eran un rol común sembrado —más barato, pero si el admin le agrega permisos el
+encargado pasa a repartir eso también sin enterarse: una trampa para el admin, no una
+escalada contra él— y una tabla de permisos directos por usuario, que toca las cinco
+consultas de `RbacService`.
+
+**Lo que se construyó**
+
+- `roles.es_sistema`, **eje distinto de `es_fijo`**: aquel es "admin, acceso total"; éste es
+  "lo puede repartir alguien que no es admin, así que su alcance está fijado por
+  construcción". Con unique parcial `uq_roles_sistema_tenant_nombre`, que solo alcanza a los
+  roles de sistema y por eso no puede chocar con nada existente.
+- `RolesService.otorgarOperarSalon(manager, tenantId, usuarioId)` — encuentra-o-crea
+  `Operador de salón` con exactamente `Salones:Operar` y se lo asigna a la cuenta.
+- `POST /garzones/:id/permiso-operar` con `@RequiresPermiso('Salones','Actualizar')`.
+- Los tres bloqueos de `RolesService` (`update`, `remove`, **`setPermissions`**).
+- En pantalla: badge *"De la aplicación"* y edición cerrada en la pantalla de roles; y el
+  aviso *"…hasta que se lo des"* pasa a traer el botón que lo da.
+
+**Las tres cosas que salieron de medir, y que la entrada no decía**
+
+1. **Los permisos son por rol.** Ver arriba — es lo que obligó a preguntarle al owner con
+   qué se concede, en vez de "abrir la ruta".
+2. **El rol no se puede sembrar al crear el tenant.** El permiso solo existe colgado del
+   módulo contratado, y `TenantsService.create` no siembra ningún `tenant_modulos` (la
+   entrada abierta de *"contratar un módulo, ¿es un borde duro?"*). Al nacer el tenant no
+   hay a qué colgarlo, así que el rol se crea en el primer otorgamiento y, sin `Salones`
+   contratado, el otorgamiento corta con 400.
+3. **No había fixture con la que probarlo.** Ningún usuario sembrado tenía
+   `Salones:Actualizar` sin ser admin: `admin.paris` short-circuita todo por `es_fijo` y
+   `ana.torres` tiene `Operar` pero no `Actualizar`. Se sembró
+   `encargado.salon@paris.cl` + rol `Salones · Encargado`
+   (`Leer`+`Crear`+`Actualizar`) — con `Crear` porque la decisión describe a *"quien puede
+   dar de alta y vincular garzones"*, y sin él la mitad del caso no se puede ejercer
+   (medido: el e2e daba 403 al crear el garzón).
+
+**Qué fija el acotamiento, que es la parte que el ⚠️ de la entrada exigía**
+
+`permiso-operar-salon.e2e-spec.ts` prueba las dos mitades: que el encargado **puede** —y que
+el permiso **rige de verdad**, afirmado sobre `puedeOperarSalon`, que sale de la consulta de
+RBAC completa y no de las filas escritas: un cableado a medias dejaría las filas y seguiría
+en `false`— y que lo que puede está **acotado**: ni el admin puede agregarle permisos al rol
+(mutante verificado sobre ese bloqueo), ni renombrarlo, ni borrarlo, y el encargado sigue
+comiendo 403 en `PATCH /roles/:id`.
+
+En el frontend, el botón del aviso se decide por `puedeOperarSalon` y **no** buscando el
+texto de la advertencia — matchear substrings ata la pantalla a una redacción que cambia
+sola. El `null` ("la pregunta no se hizo") se distingue de `false` a propósito: tratarlos
+igual ofrecería dar un permiso que la cuenta quizá ya tiene. Mutante verificado.
+
+### La entrada, verbatim
+
+- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
+  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
+  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
+  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
+  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
+  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
+  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
+  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
+  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
+  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
+  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
+  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
+  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
+  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
+  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
+  ✅ **DECIDIDO (owner, 2026-08-15): se abre el permiso, no se corrige el texto.** Quien puede
+  dar de alta y vincular garzones (`Salones:Actualizar`) pasa a poder otorgar `Salones:Operar` a
+  esa cuenta, sin necesidad de ser admin del tenant.
+  ℹ️ **Con eso el texto actual pasa a ser verdadero**, así que los tres avisos quedan como están:
+  el trabajo es de permisos, no de redacción.
+  ⚠️ **Toca el modelo de permisos y hay que acotarlo bien:** no es "el encargado puede editar
+  roles" —eso sigue siendo admin— sino un camino puntual para conceder **ese** permiso **a esa
+  cuenta**. Si se implementa como acceso a `PATCH /roles/:id`, el encargado queda pudiendo editar
+  cualquier rol del tenant, que es escalada de privilegios y no es lo que se decidió.
+
+---
+
 ## El cluster de membresía: la baja deja de romper dos cosas en silencio (2026-08-16)
 
 Tres entradas que eran la misma transición mirada desde tres lados: **nadie mira lo que

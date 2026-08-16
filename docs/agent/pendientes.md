@@ -298,6 +298,22 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **El único botón para dar el permiso de operar vive en un toast que se auto-cierra**
+  (frontend, **hallazgo de la revisión de la pieza 3, 2026-08-16**) — el aviso *"…todavía no
+  puede entrar en modo personal"* trae el botón *"Dárselo ahora"*, y es el **único**
+  afordance que existe: si el encargado no llega a apretarlo antes de que el toast se
+  cierre, vuelve a quedar frente al mismo problema. **No es un callejón** —apretar Guardar
+  de nuevo re-dispara el aviso, porque el PATCH manda `usuarioId` y `assertVinculable`
+  vuelve a correr—, pero para una pieza cuyo objetivo declarado es *"que la instrucción se
+  pueda ejecutar"*, un botón con temporizador es la forma más frágil de ofrecerla.
+  **Qué medir antes de decidir:** el lugar natural sería la ficha del garzón (el drawer),
+  que es adonde el encargado vuelve. El problema es que ahí no se sabe si el permiso hace
+  falta: `puedeOperarSalon` viaja en la respuesta de las **mutaciones**, no en el listado, y
+  ponerlo en el listado serían N subqueries de RBAC en una ruta caliente. Hay que ver si el
+  dato se puede traer al abrir la ficha (una consulta, no N) o si conviene otra cosa.
+  🔗 Toca lo mismo que la entrada del badge de acá abajo: las dos son "la ficha no sabe algo
+  que necesita para no mentir", y probablemente se resuelvan con la misma consulta.
+
 - [ ] **La ficha rotula "Sin PIN todavía" a un garzón que no puede resolverlo solo**
   (frontend, **hallazgo de la revisión del cluster de membresía, 2026-08-16**) — el badge
   de `configuracion/garzones.vue` se decide por `garzonEnEdicion.usuarioId`: con vínculo
@@ -738,31 +754,6 @@ empezarlas.
   🔗 **Ojo con el límite:** esto cubre el borrador **abierto**. El caso de la propina **ya
   liquidada y pagada** es otro y sigue con su decisión propia (saldo en contra del garzón), en
   la sección de proyectos que van solos.
-
-- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
-  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
-  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
-  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
-  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
-  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
-  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
-  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
-  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
-  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
-  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
-  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
-  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
-  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
-  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
-  ✅ **DECIDIDO (owner, 2026-08-15): se abre el permiso, no se corrige el texto.** Quien puede
-  dar de alta y vincular garzones (`Salones:Actualizar`) pasa a poder otorgar `Salones:Operar` a
-  esa cuenta, sin necesidad de ser admin del tenant.
-  ℹ️ **Con eso el texto actual pasa a ser verdadero**, así que los tres avisos quedan como están:
-  el trabajo es de permisos, no de redacción.
-  ⚠️ **Toca el modelo de permisos y hay que acotarlo bien:** no es "el encargado puede editar
-  roles" —eso sigue siendo admin— sino un camino puntual para conceder **ese** permiso **a esa
-  cuenta**. Si se implementa como acceso a `PATCH /roles/:id`, el encargado queda pudiendo editar
-  cualquier rol del tenant, que es escalada de privilegios y no es lo que se decidió.
 
 - [ ] **El detalle de un recuento esconde una línea que el listado sigue contando** (backend,
   auditoría `inventario` 2026-08-15) — `findOne` arma el detalle con `INNER JOIN items` filtrando

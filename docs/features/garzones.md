@@ -87,6 +87,16 @@ vinculación invalida el PIN de alguien con una sesión abierta ahora mismo, `ac
 lo **advierte, no bloquea** — mismo criterio que cambiar el tipo (decisión del owner,
 2026-08-07, extendida el 2026-08-14 a este caso).
 
+**El aviso de "…hasta que se lo des" ya se puede ejecutar** (2026-08-16). Hasta entonces
+otorgar `Salones:Operar` era editar un rol —admin-only—, y el aviso se le muestra a
+cualquiera con `Salones:Actualizar`: una instrucción que su lector podía no poder cumplir.
+Ahora `POST /garzones/:id/permiso-operar` lo concede por un camino acotado, y la pantalla
+lo ofrece como botón dentro del propio aviso. Se decide por `puedeOperarSalon`, que las
+respuestas de `crear()` y `actualizar()` traen —`null` cuando la mutación no tocó el
+vínculo y por lo tanto la pregunta no se hizo—, y **no** buscando el texto de la
+advertencia. El detalle del acotamiento, en
+[roles y permisos](roles-permisos.md#roles-de-sistema-es_sistema-2026-08-16).
+
 ⚠️ **La única excepción a "desvincular no toca el PIN" es la baja de la membresía**, y es
 justamente porque ahí el garzón no eligió nada: su cuenta era la credencial y se va con la
 membresía. Esa ruta sí le escribe un PIN nuevo, y **pregunta antes** si la persona sigue
@@ -217,6 +227,7 @@ el corte lo hace el token, que decide de qué garzón se está hablando.
 | PATCH | `/garzones/:id/pin` | `Actualizar` | Sin body. **Sin cuenta** regenera y devuelve el `pin` nuevo (una vez); **con cuenta** invalida y devuelve `pin: null`. Suma `habiaPin`: si había uno usable antes de este PATCH |
 | GET | `/garzones/:id/pin-eventos` | `Leer` | `{ eventos, total }`: los **últimos 50**, más nuevos primero, y cuántos hay en total. **Nunca** el PIN |
 | DELETE | `/garzones/:id` | `Eliminar` | Soft delete |
+| POST | `/garzones/:id/permiso-operar` | `Actualizar` | Le da `Salones:Operar` a la cuenta vinculada, **sin ser admin**. La cuenta sale de la fila del garzón, no del request — ver [roles y permisos](roles-permisos.md#roles-de-sistema-es_sistema-2026-08-16) |
 | POST | `/garzones/:id/restaurar` | `Eliminar` | Saca de la papelera |
 | PATCH | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ pin, confirmarPin }` → `204`. El garzón fija el suyo; **no pide el anterior**. `404` si esa cuenta no es garzón en este tenant |
 | GET | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ fijado, eventos, total }`: alimenta el bloque "Mi PIN" del perfil. `eventos`/`total`, igual que arriba |

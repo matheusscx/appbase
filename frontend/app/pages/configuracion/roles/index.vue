@@ -13,6 +13,14 @@ interface Rol {
   nombre: string
   descripcion: string | null
   esFijo: boolean
+  /**
+   * La definición del rol es de la aplicación. Distinto de `esFijo`: aquel es
+   * "admin, acceso total"; éste es "lo puede repartir alguien que no es admin,
+   * así que su alcance está fijado por construcción". Hoy solo `Operador de
+   * salón`, que un encargado con `Salones:Actualizar` le concede a la cuenta
+   * de un garzón.
+   */
+  esSistema: boolean
 }
 
 interface RolPermisoModulo {
@@ -42,6 +50,23 @@ const drawerTitle = computed(() =>
 )
 
 const esFijo = computed(() => editandoRol.value?.esFijo ?? false)
+const esSistema = computed(() => editandoRol.value?.esSistema ?? false)
+
+/**
+ * Los dos casos que el backend rechaza al editar, agrupados porque en pantalla
+ * se ven igual: los campos van deshabilitados y no hay botón de guardar.
+ * Separados quedan solo el **badge** y el **mensaje** — el motivo es distinto y
+ * decirlo mal deja al admin buscando un permiso que no existe.
+ */
+const soloLectura = computed(() => esFijo.value || esSistema.value)
+
+const mensajePermisosBloqueados = computed(() =>
+  esSistema.value
+    ? 'Este rol lo define la aplicación: alguien que no es administrador puede '
+      + 'concedérselo a una cuenta, así que su lista de permisos no se edita. '
+      + 'Si necesitás otra combinación, creá un rol propio.'
+    : 'El rol Administrador tiene acceso completo a todos los módulos contratados; sus permisos no se editan.',
+)
 
 const submitLabel = computed(() =>
   drawerMode.value === 'create' ? 'Crear' : 'Guardar',
@@ -176,7 +201,10 @@ async function guardar() {
       toast.add({ title: 'Rol creado', color: 'success' })
     }
     else if (editandoRol.value) {
-      if (!editandoRol.value.esFijo) {
+      // Mismo par que `soloLectura`: sin `esSistema` acá, el PATCH sale igual
+      // y come el 400 del backend. Hoy el botón de guardar ni se renderiza en
+      // ese caso, pero la condición tiene que decir lo mismo en los dos lados.
+      if (!editandoRol.value.esFijo && !editandoRol.value.esSistema) {
         const saved = await useApiFetch<Rol>(`${apiUrl}/roles/${editandoRol.value.id}`, {
           method: 'PATCH',
           body: { nombre: form.nombre.trim(), descripcion: form.descripcion.trim() || null },
@@ -203,7 +231,7 @@ async function guardar() {
 }
 
 async function eliminar(rol: Rol) {
-  if (rol.esFijo) return
+  if (rol.esFijo || rol.esSistema) return
   if (!confirm(`¿Eliminar el rol "${rol.nombre}"?`)) return
   try {
     await useApiFetch(`${apiUrl}/roles/${rol.id}`, { method: 'DELETE' })
@@ -250,6 +278,17 @@ const columns: TableColumn<Rol>[] = [
             >
               Fijo
             </UBadge>
+            <!-- Rótulo propio y no "Fijo": lo que el admin necesita saber de
+                 este rol no es que no lo puede tocar, sino POR QUÉ — alguien
+                 que no es admin lo reparte. -->
+            <UBadge
+              v-else-if="row.original.esSistema"
+              color="neutral"
+              variant="subtle"
+              size="xs"
+            >
+              De la aplicación
+            </UBadge>
           </div>
         </template>
 
@@ -269,7 +308,7 @@ const columns: TableColumn<Rol>[] = [
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
-              :disabled="row.original.esFijo"
+              :disabled="row.original.esFijo || row.original.esSistema"
               @click="eliminar(row.original)"
             />
           </div>
@@ -294,6 +333,14 @@ const columns: TableColumn<Rol>[] = [
           >
             Fijo
           </UBadge>
+          <UBadge
+            v-else-if="esSistema"
+            color="neutral"
+            variant="subtle"
+            size="xs"
+          >
+            De la aplicación
+          </UBadge>
         </div>
       </template>
 
@@ -317,15 +364,15 @@ const columns: TableColumn<Rol>[] = [
               <UInput
                 v-model="form.nombre"
                 placeholder="Ej: Cajero"
-                :disabled="esFijo"
-                :autofocus="!esFijo"
+                :disabled="soloLectura"
+                :autofocus="!soloLectura"
               />
             </UFormField>
             <UFormField label="Descripción">
               <UInput
                 v-model="form.descripcion"
                 placeholder="Opcional"
-                :disabled="esFijo"
+                :disabled="soloLectura"
               />
             </UFormField>
           </div>
@@ -337,8 +384,8 @@ const columns: TableColumn<Rol>[] = [
             <RolPermisosPorModulo
               :modulos="modulos"
               :seleccionados="seleccionados"
-              :disabled="esFijo"
-              disabled-message="El rol Administrador tiene acceso completo a todos los módulos contratados; sus permisos no se editan."
+              :disabled="soloLectura"
+              :disabled-message="mensajePermisosBloqueados"
               @toggle="togglePermiso"
             />
           </div>
@@ -354,7 +401,7 @@ const columns: TableColumn<Rol>[] = [
           Cancelar
         </UButton>
         <UButton
-          v-if="!esFijo"
+          v-if="!soloLectura"
           type="submit"
           form="rol-form"
           :loading="saving"

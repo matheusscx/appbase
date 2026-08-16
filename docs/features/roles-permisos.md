@@ -214,6 +214,53 @@ para todos, así que llamarlo con un array vacío borraría todos los roles de e
 persona en el tenant. `addMember` nunca tocó `roles_usuarios` y sigue sin
 tocarlos.
 
+### Roles de sistema: `es_sistema` (2026-08-16)
+
+Un rol **de sistema** es aquel cuya definición es de la aplicación y no del tenant: su
+nombre, su descripción y —sobre todo— **su lista de permisos** no se editan, y el rol no se
+borra. Hoy hay exactamente uno: **`Operador de salón`**, con `Salones:Operar` y nada más.
+
+⚠️ **`es_sistema` no es una variante de `es_fijo`, es otro eje.** `es_fijo` significa
+"admin, y por eso acceso total"; `es_sistema` significa "**alguien que no es admin puede
+repartir este rol**, así que su alcance tiene que estar fijado por construcción". Un rol de
+sistema no da acceso total y no cuenta como administrador.
+
+**Por qué existe.** `garzones.service.ts` avisa en tres sitios que la cuenta recién
+vinculada *"no va a poder entrar en modo personal … hasta que se lo des"*, y ese aviso se le
+muestra a cualquiera con `Salones:Actualizar`. Pero otorgar `Salones:Operar` significaba
+editar un rol (`PATCH /roles/:id`, admin-only): una instrucción que su lector podía no poder
+ejecutar. **Decisión del owner (2026-08-15): se abre el permiso, no se corrige el texto.**
+
+**Y se abre acotado**, que es la parte que importa. `POST /garzones/:id/permiso-operar` pide
+`Salones:Actualizar` y **no** `TenantAdminGuard`. Tres cosas fijan su alcance:
+
+1. **El permiso que concede es uno solo**, porque el rol que lo transporta tiene uno solo.
+2. **Nadie puede ampliarlo** — `setPermissions` rechaza los roles de sistema, y eso incluye
+   al admin del tenant. Sin ese bloqueo, el admin le agrega `Ventas:Crear` al rol y el
+   encargado pasa a repartir eso también sin que ninguno de los dos se entere: la escalada
+   indirecta que la decisión descartó.
+3. **La cuenta que lo recibe sale de la fila del garzón, no del request**, y tiene que ser
+   **miembro vivo** — mismo chequeo que `assignUser`, y no es teórico: la salida `no-sigue`
+   de la baja de membresía deja garzones vinculados a cuentas que ya no son miembros.
+
+⚠️ **Lo que el punto 3 NO dice, y conviene no leer de más:** el encargado dice *a qué
+garzón*, pero **también elige de quién es esa fila** — vincular una cuenta pide el mismo
+`Salones:Actualizar`. O sea que el conjunto alcanzable en dos llamadas es *cualquier miembro
+vivo del tenant*, no *la cuenta de ese garzón*. No es escalada —el permiso concedido sigue
+siendo el mínimo, y ese actor ya controlaba el vínculo—, pero la contención real es esa.
+
+**El rol se crea en el primer otorgamiento, no al crear el tenant.** El permiso solo existe
+colgado del módulo contratado (`modulos_roles` → `roles_permisos_modulos` →
+`tenant_modulos`), y `TenantsService.create` **no siembra ningún `tenant_modulos`**: al
+nacer el tenant no hay a qué colgarlo. Si la empresa no tiene `Salones` contratado, el
+otorgamiento corta con `400`, que es la respuesta honesta. La unique parcial
+`uq_roles_sistema_tenant_nombre` —solo entre roles de sistema, así que no puede chocar con
+nada existente— hace segura la creación perezosa bajo concurrencia.
+
+En pantalla el rol aparece con el badge **"De la aplicación"** (distinto de "Fijo": lo que
+el admin necesita saber no es que no lo puede tocar, sino por qué), con los campos y los
+permisos deshabilitados y sin botón de guardar.
+
 ### La baja de una membresía (2026-08-16)
 
 Dar de baja a alguien es la transición que nadie mira: hasta el 2026-08-16 eran dos líneas
@@ -299,11 +346,11 @@ Las **mutaciones** agregan `TenantAdminGuard` (requiere rol `es_fijo = true` en 
 |---|---|---|---|
 | GET | `/roles` | — | Lista de roles del tenant |
 | POST | `/roles` | TenantAdmin | Crear rol |
-| PATCH | `/roles/:id` | TenantAdmin | Editar nombre/descripción (bloquea `esFijo`) |
-| DELETE | `/roles/:id` | TenantAdmin | Soft-delete (bloquea `esFijo`) |
+| PATCH | `/roles/:id` | TenantAdmin | Editar nombre/descripción (bloquea `esFijo` y `esSistema`) |
+| DELETE | `/roles/:id` | TenantAdmin | Soft-delete (bloquea `esFijo` y `esSistema`) |
 | GET | `/roles/modulos-disponibles` | — | Módulos contratados activos + sus permisos |
 | GET | `/roles/:id/permissions` | — | `roles_permisos_modulos` del rol |
-| PUT | `/roles/:id/modules/:moduloTenantId/permissions` | TenantAdmin | Setear permisos del rol en un módulo |
+| PUT | `/roles/:id/modules/:moduloTenantId/permissions` | TenantAdmin | Setear permisos del rol en un módulo. **Rechaza los roles de sistema** — ver [Roles de sistema](#roles-de-sistema-es_sistema-2026-08-16) |
 | POST | `/roles/:id/users` | TenantAdmin | Asignar rol a un usuario |
 | DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario. `400` si dejaría al tenant sin admin |
 | GET | `/tenants/members` | TenantAdmin | Miembros con correo + roles asignados |

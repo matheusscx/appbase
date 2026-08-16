@@ -359,6 +359,23 @@ describe('RolesService', () => {
       expect(rolRepo.save).not.toHaveBeenCalled();
     });
 
+    it('rechaza modificar un rol de sistema (que NO es fijo)', async () => {
+      // `esFijo: false` explícito: si el bloqueo se apoyara en `esFijo`, este
+      // test pasaría por la razón equivocada y el rol de sistema quedaría
+      // editable. Son dos ejes distintos.
+      rolRepo.findOne.mockResolvedValue({
+        id: ROL,
+        tenantId: TENANT,
+        esFijo: false,
+        esSistema: true,
+      });
+
+      await expect(
+        service.update(ROL, TENANT, { nombre: 'Operador de todo' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(rolRepo.save).not.toHaveBeenCalled();
+    });
+
     it('aplica los cambios del dto sobre el rol existente', async () => {
       rolRepo.findOne.mockResolvedValue({
         id: ROL,
@@ -390,6 +407,20 @@ describe('RolesService', () => {
         id: ROL,
         tenantId: TENANT,
         esFijo: true,
+      });
+
+      await expect(service.remove(ROL, TENANT)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(rolRepo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('rechaza eliminar un rol de sistema (que NO es fijo)', async () => {
+      rolRepo.findOne.mockResolvedValue({
+        id: ROL,
+        tenantId: TENANT,
+        esFijo: false,
+        esSistema: true,
       });
 
       await expect(service.remove(ROL, TENANT)).rejects.toBeInstanceOf(
@@ -448,6 +479,26 @@ describe('RolesService', () => {
 
     it('rechaza un módulo que no pertenece a este tenant', async () => {
       tenantModuloRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setPermissions(ROL, MODULO, TENANT, ['permiso-1']),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza tocarle los permisos a un rol de sistema — es lo que sostiene el otorgamiento acotado', async () => {
+      // El más importante de los tres bloqueos. `Operador de salón` lo puede
+      // repartir alguien que NO es admin (`Salones:Actualizar`), así que su
+      // lista de permisos tiene que estar fijada por construcción: si el admin
+      // le agrega `Ventas:Crear`, el encargado pasa a repartir eso también sin
+      // que ninguno de los dos se entere. `esFijo: false` a propósito — el
+      // bloqueo no puede venir de ahí.
+      rolRepo.findOne.mockResolvedValue({
+        id: ROL,
+        tenantId: TENANT,
+        esFijo: false,
+        esSistema: true,
+      });
 
       await expect(
         service.setPermissions(ROL, MODULO, TENANT, ['permiso-1']),

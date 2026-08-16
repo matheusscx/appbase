@@ -48,6 +48,15 @@ export interface GarzonParaSelector {
  */
 export interface GarzonConAdvertencias extends Garzon {
   advertencias: string[]
+  /**
+   * Si la cuenta vinculada puede operar el salón HOY. `null` = la pregunta no
+   * se hizo (el garzón no tiene cuenta, o esta mutación no tocó el vínculo).
+   *
+   * Es lo que vuelve **accionable** al aviso de "…hasta que se lo des": con
+   * `false` la pantalla ofrece el botón que se lo da. No sale del listado —
+   * ahí serían N subqueries de RBAC— sino de la mutación que ya lo calculó.
+   */
+  puedeOperarSalon: boolean | null
 }
 
 /** Respuesta de crear/regenerar: incluye el PIN en claro una sola vez. */
@@ -148,6 +157,19 @@ export function useGarzones() {
       method: 'PATCH',
     })
 
+  /**
+   * Le da a la cuenta vinculada el permiso de operar el salón.
+   *
+   * `Salones:Actualizar`, no admin: es el mismo permiso con el que se vincula
+   * la cuenta. El alcance está acotado en el backend —un permiso, un rol de
+   * sistema que nadie puede ampliar, y la cuenta sale de la fila del garzón—,
+   * así que esto NO es "el encargado puede editar roles".
+   */
+  const otorgarPermisoOperar = (id: string) =>
+    useApiFetch<Garzon>(`${apiUrl}/garzones/${id}/permiso-operar`, {
+      method: 'POST',
+    })
+
   const eliminar = (id: string) =>
     useApiFetch(`${apiUrl}/garzones/${id}`, { method: 'DELETE' })
 
@@ -204,6 +226,7 @@ export function useGarzones() {
     crear,
     actualizar,
     regenerarPin,
+    otorgarPermisoOperar,
     eliminar,
     paraSelector,
     miVinculo,

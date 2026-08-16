@@ -284,10 +284,22 @@ CREATE TABLE "roles" (
   "nombre"         VARCHAR(50) NOT NULL,
   "descripcion"    TEXT,
   "es_fijo"        BOOLEAN     NOT NULL DEFAULT false,  -- true para el rol 'admin' del sistema
+  -- Eje distinto de `es_fijo`: la definición del rol es de la APP, no del
+  -- tenant. Existe porque un rol de sistema lo puede repartir alguien que no es
+  -- admin (`Salones:Actualizar` → `Operador de salón`), así que su lista de
+  -- permisos tiene que estar fijada por construcción. No da acceso total.
+  "es_sistema"     BOOLEAN     NOT NULL DEFAULT false,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
+
+-- Unique SOLO entre roles de sistema: es lo que hace segura la creación
+-- perezosa del rol en el primer otorgamiento. Los roles normales siguen sin
+-- unique de nombre.
+CREATE UNIQUE INDEX "uq_roles_sistema_tenant_nombre"
+  ON "roles" ("tenant_id", "nombre")
+  WHERE "es_sistema" = true AND "eliminado_el" IS NULL;
 
 CREATE TABLE "roles_usuarios" (
   "usuario_id"     UUID NOT NULL REFERENCES "usuarios" ("usuario_id"),

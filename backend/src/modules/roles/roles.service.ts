@@ -1,12 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
-import { Rol } from './entities/rol.entity';
+import { Rol, ROL_OPERADOR_SALON } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
 import { ModuloRol } from './entities/modulo-rol.entity';
 import { RolPermisoModulo } from './entities/rol-permiso-modulo.entity';
@@ -14,6 +15,15 @@ import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
 import { RbacService } from '../rbac/rbac.service';
+
+/**
+ * Un solo texto para los tres bloqueos (`update`, `remove`, `setPermissions`):
+ * son la misma regla y divergirían si se escribieran tres veces.
+ */
+const MENSAJE_ROL_DE_SISTEMA =
+  'Ese rol lo define la aplicación y no se puede modificar ni eliminar: su ' +
+  'lista de permisos es lo que acota a quién puede repartirlo sin ser ' +
+  'administrador. Si necesitás otra combinación, creá un rol propio.';
 
 export interface ModuloDisponible {
   moduloTenantId: string;
@@ -60,6 +70,7 @@ export class RolesService {
     if (!rol) throw new NotFoundException(`Rol ${id} no encontrado`);
     if (rol.esFijo)
       throw new BadRequestException('No se puede modificar un rol fijo');
+    if (rol.esSistema) throw new BadRequestException(MENSAJE_ROL_DE_SISTEMA);
     Object.assign(rol, dto);
     return this.rolRepo.save(rol);
   }
@@ -69,6 +80,7 @@ export class RolesService {
     if (!rol) throw new NotFoundException(`Rol ${id} no encontrado`);
     if (rol.esFijo)
       throw new BadRequestException('No se puede eliminar un rol fijo');
+    if (rol.esSistema) throw new BadRequestException(MENSAJE_ROL_DE_SISTEMA);
     await this.rolRepo.softDelete({ id });
   }
 
@@ -176,6 +188,14 @@ export class RolesService {
     // Verify the rol belongs to this tenant
     const rol = await this.rolRepo.findOne({ where: { id: rolId, tenantId } });
     if (!rol) throw new NotFoundException(`Rol ${rolId} no encontrado`);
+    // ⚠️ **Este chequeo es el que sostiene toda la decisión de "abrir el
+    // permiso".** Un rol de sistema lo puede repartir alguien que NO es admin
+    // del tenant (`Salones:Actualizar` → `Operador de salón`), así que su
+    // alcance tiene que estar fijado por construcción. Sin esto, el admin le
+    // agrega `Ventas:Crear` al rol y el encargado pasa a repartir eso también,
+    // sin enterarse ninguno de los dos — la escalada indirecta que la decisión
+    // del owner (2026-08-15) descartó explícitamente.
+    if (rol.esSistema) throw new BadRequestException(MENSAJE_ROL_DE_SISTEMA);
 
     // Verify that moduloTenantId belongs to this tenant
     const tenantModulo = await this.tenantModuloRepo.findOne({
@@ -211,6 +231,124 @@ export class RolesService {
         await manager.softDelete(ModuloRol, { rolId, moduloTenantId });
       }
     });
+  }
+
+  /**
+   * Le concede `Salones:Operar` a una cuenta **sin pasar por la edición de
+   * roles**, que es admin-only. Lo llama `GarzonesService` cuando el encargado
+   * —`Salones:Actualizar`, no admin— quiere habilitar el modo personal de la
+   * cuenta que acaba de vincular a un garzón (decisión del owner, 2026-08-15).
+   *
+   * ⚠️ **Por qué es un rol y no un permiso suelto:** el motor concede permisos
+   * **por rol** (`roles_permisos_modulos`), no por usuario. No hay tabla de
+   * permisos directos, y agregarla sería tocar las cinco consultas de
+   * `RbacService`. El vehículo es entonces un rol dedicado, y como lo reparte
+   * alguien que no es admin, tiene que ser **de sistema**: su lista de
+   * permisos no la puede tocar nadie, ni siquiera el admin del tenant.
+   *
+   * ⚠️ **Y por eso se crea acá y no al crear el tenant:** el permiso solo
+   * existe colgado del módulo contratado (`modulos_roles` →
+   * `roles_permisos_modulos` → `tenant_modulos`), y `TenantsService.create` no
+   * siembra ningún `tenant_modulos`. Al nacer el tenant no hay a qué colgarlo.
+   * Si la empresa no tiene `Salones` contratado, esto corta con `400`, que es
+   * la respuesta honesta: no se puede conceder un permiso de un módulo que no
+   * se tiene.
+   *
+   * Idempotente: dos otorgamientos sobre la misma cuenta no duplican nada, y
+   * dos simultáneos sobre un tenant que todavía no tiene el rol chocan contra
+   * `uq_roles_sistema_tenant_nombre` y el segundo no inserta.
+   */
+  async otorgarOperarSalon(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<void> {
+    const [modulo]: { modulo_tenant_id: string; permiso_id: string }[] =
+      await manager.query(
+        `SELECT tm.modulo_tenant_id, map.modulo_app_permiso_id AS permiso_id
+           FROM tenant_modulos tm
+           JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id
+                              AND ma.eliminado_el IS NULL
+           JOIN modulo_app_permisos map ON map.modulo_app_id = ma.modulo_app_id
+                                       AND map.eliminado_el IS NULL
+           JOIN permisos p ON p.permiso_id = map.permiso_id
+                          AND p.eliminado_el IS NULL
+          WHERE tm.tenant_id = $1
+            AND tm.eliminado_el IS NULL
+            AND ma.nombre = 'Salones'
+            AND p.nombre = 'Operar'`,
+        [tenantId],
+      );
+    if (!modulo) {
+      throw new BadRequestException(
+        'Esta empresa no tiene contratado el módulo Salones, así que no hay ' +
+          'permiso de operar el salón que dar.',
+      );
+    }
+
+    // Mismo chequeo que `assignUser` hace para esta misma escritura, y no es
+    // teórico acá: la salida "no sigue" de la baja de membresía deja al garzón
+    // **vinculado a una cuenta que ya no es miembro**, así que sin esto el
+    // encargado escribe una fila de `roles_usuarios` para un no-miembro. Hoy no
+    // concede nada —sin membresía no hay token del tenant— pero si a esa
+    // persona la vuelven a sumar por `POST /tenants/members`, que nunca toca
+    // `roles_usuarios`, recupera el rol sin que nadie lo haya decidido: la
+    // restitución silenciosa contra la que advierte `fijarRolesExactos`.
+    const miembro: unknown[] = await manager.query(
+      `SELECT 1 FROM usuarios_tenants
+        WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [usuarioId, tenantId],
+    );
+    if (miembro.length === 0) {
+      throw new BadRequestException(
+        'Esa cuenta ya no es miembro de la empresa, así que el permiso no le ' +
+          'serviría de nada. Volvé a sumarla desde Configuración → Usuarios.',
+      );
+    }
+
+    await manager.query(
+      `INSERT INTO roles (tenant_id, nombre, descripcion, es_fijo, es_sistema,
+                          creado_el, actualizado_el)
+       VALUES ($1, $2, $3, false, true, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [
+        tenantId,
+        ROL_OPERADOR_SALON,
+        'Deja entrar al salón en modo personal, desde la propia cuenta y sin PIN. Lo define la aplicación.',
+      ],
+    );
+    const [rol]: { rol_id: string }[] = await manager.query(
+      `SELECT rol_id FROM roles
+        WHERE tenant_id = $1 AND nombre = $2
+          AND es_sistema = true AND eliminado_el IS NULL`,
+      [tenantId, ROL_OPERADOR_SALON],
+    );
+    // Solo si alguien soft-borra el rol por SQL entre las dos sentencias.
+    // Patológico, pero sin la guarda sale un `TypeError` y un 500 crudo en
+    // lugar de algo que se pueda leer.
+    if (!rol) {
+      throw new ConflictException(
+        'El rol de operador de salón cambió mientras se otorgaba el permiso; ' +
+          'intentá de nuevo.',
+      );
+    }
+
+    await this.ensureModuloRol(manager, rol.rol_id, modulo.modulo_tenant_id);
+    await manager.query(
+      `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [rol.rol_id, modulo.modulo_tenant_id, modulo.permiso_id],
+    );
+    // `DO UPDATE` y no `DO NOTHING`: si la asignación existe pero está
+    // soft-borrada —le sacaron el permiso y se lo vuelven a dar— hay que
+    // revivirla, igual que hace `assignUser`.
+    await manager.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       ON CONFLICT (usuario_id, tenant_id, rol_id)
+       DO UPDATE SET eliminado_el = NULL, actualizado_el = NOW()`,
+      [usuarioId, tenantId, rol.rol_id],
+    );
   }
 
   private async ensureModuloRol(

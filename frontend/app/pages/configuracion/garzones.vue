@@ -319,11 +319,64 @@ function abrirEditar(garzon: Garzon) {
   drawerOpen.value = true
 }
 
+/**
+ * Emite las advertencias del backend, y **le da salida** a la única que es una
+ * instrucción: *"…hasta que se lo des"*.
+ *
+ * Hasta el 2026-08-16 ese aviso le pedía al encargado algo que podía no estar
+ * en su mano: otorgar `Salones:Operar` era editar un rol, y editar roles es
+ * admin-only. Ahora hay una ruta acotada (`POST /garzones/:id/permiso-operar`)
+ * y el aviso viene con el botón que la llama.
+ *
+ * Se decide por `puedeOperarSalon === false` y **no** buscando el texto de la
+ * advertencia: el backend ya manda el dato, y matchear substrings ata esta
+ * pantalla a una redacción que cambia sola.
+ */
+function avisar(
+  garzonId: string,
+  nombre: string,
+  advertencias: string[],
+  puedeOperarSalon: boolean | null,
+) {
+  for (const advertencia of advertencias) {
+    toast.add({ title: advertencia, color: 'warning' })
+  }
+  if (puedeOperarSalon === false) {
+    toast.add({
+      title: `${nombre} todavía no puede entrar en modo personal`,
+      description: 'Le falta el permiso para operar el salón. Se lo podés dar desde acá.',
+      color: 'warning',
+      actions: [{
+        label: 'Dárselo ahora',
+        color: 'neutral',
+        variant: 'outline',
+        onClick: () => { void darPermisoOperar(garzonId, nombre) },
+      }],
+    })
+  }
+}
+
+async function darPermisoOperar(garzonId: string, nombre: string) {
+  try {
+    await garzonesApi.otorgarPermisoOperar(garzonId)
+    toast.add({
+      title: `${nombre} ya puede entrar en modo personal`,
+      color: 'success',
+    })
+  }
+  catch (e: unknown) {
+    toast.add({
+      title: apiErrorMsg(e, 'No se pudo dar el permiso'),
+      color: 'error',
+    })
+  }
+}
+
 async function guardar() {
   saving.value = true
   try {
     if (editingId.value) {
-      const { advertencias, ...saved } = await garzonesApi.actualizar(editingId.value, {
+      const { advertencias, puedeOperarSalon, ...saved } = await garzonesApi.actualizar(editingId.value, {
         nombre: form.value.nombre,
         activo: form.value.activo,
         tipo: form.value.tipo,
@@ -337,9 +390,7 @@ async function guardar() {
       // El cambio se guardó; lo que la advertencia dice es que puede no regir
       // todavía (sesión abierta con el tipo congelado). Mismo patrón que el POS
       // con las advertencias de la venta: éxito primero, avisos después.
-      for (const advertencia of advertencias) {
-        toast.add({ title: advertencia, color: 'warning' })
-      }
+      avisar(saved.id, saved.nombre, advertencias, puedeOperarSalon)
       drawerOpen.value = false
     }
     else {
@@ -354,7 +405,10 @@ async function guardar() {
         // selector de abajo.
         usuarioId: form.value.usuarioId ?? undefined,
       })
-      const { pin, advertencias, ...garzon } = creado
+      // `puedeOperarSalon` se saca acá y no viaja a `upsertLocal`: es un dato
+      // del momento de la mutación, no del garzón — guardarlo en el listado
+      // sería un caché que envejece sin que nadie lo refresque.
+      const { pin, advertencias, puedeOperarSalon, ...garzon } = creado
       upsertLocal(garzon)
       drawerOpen.value = false
       // `pin: null` = se creó CON cuenta y el backend no emitió ninguno: lo
@@ -377,9 +431,7 @@ async function guardar() {
           title: `${creado.nombre} quedó vinculado a su cuenta: pone su propio PIN desde su perfil`,
           color: 'success',
         })
-        for (const advertencia of advertencias) {
-          toast.add({ title: advertencia, color: 'warning' })
-        }
+        avisar(garzon.id, creado.nombre, advertencias, puedeOperarSalon)
       }
     }
   }

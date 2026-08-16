@@ -92,6 +92,27 @@ export class GarzonesController {
     return this.garzonesService.actualizar(user.tenantId!, user.id, id, dto);
   }
 
+  /**
+   * Le da a la cuenta vinculada el permiso de operar el salón.
+   *
+   * `Salones:Actualizar` y **no** `TenantAdminGuard`: es el mismo permiso con
+   * el que se vincula la cuenta, y el aviso que dice *"…hasta que se lo des"*
+   * se le muestra exactamente a quien tiene este permiso. Que ese aviso fuera
+   * una instrucción que su lector podía no poder ejecutar es lo que esta ruta
+   * cierra (decisión del owner, 2026-08-15).
+   *
+   * ⚠️ **No es "el encargado puede editar roles".** El alcance está fijado por
+   * construcción: el permiso que se concede es uno solo, el rol que lo
+   * transporta es de sistema —nadie puede agregarle nada, ni el admin— y la
+   * cuenta que lo recibe sale de la fila del garzón, no del request.
+   */
+  @Post(':id/permiso-operar')
+  @RequiresPermiso('Salones', 'Actualizar')
+  otorgarPermisoOperar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.otorgarPermisoOperar(user.tenantId!, id);
+  }
+
   /** Regenera el PIN del garzón y lo devuelve una sola vez. */
   @Patch(':id/pin')
   @RequiresPermiso('Salones', 'Actualizar')

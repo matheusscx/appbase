@@ -9,6 +9,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { GarzonesService } from './garzones.service';
+import { RolesService } from '../roles/roles.service';
 import { Garzon } from './entities/garzon.entity';
 import { GarzonPinEvento } from './entities/garzon-pin-evento.entity';
 import { TipoGarzon } from './enums/tipo-garzon.enum';
@@ -124,10 +125,12 @@ describe('GarzonesService', () => {
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let manager: { save: jest.Mock; create: jest.Mock };
   let eventos: Record<string, unknown>[];
+  let roles: { otorgarOperarSalon: jest.Mock };
 
   beforeEach(async () => {
     repo = makeRepo();
     sesionRepo = makeSesionRepo();
+    roles = { otorgarOperarSalon: jest.fn() };
     ({ dataSource, manager, eventos } = makeDataSource());
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -135,6 +138,7 @@ describe('GarzonesService', () => {
         { provide: getRepositoryToken(Garzon), useValue: repo },
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
         { provide: DataSource, useValue: dataSource },
+        { provide: RolesService, useValue: roles },
       ],
     }).compile();
     service = module.get<GarzonesService>(GarzonesService);
@@ -1534,6 +1538,58 @@ describe('GarzonesService', () => {
     });
   });
 
+  describe('otorgarPermisoOperar', () => {
+    it('le concede el permiso a la cuenta del garzón, y esa cuenta sale de la FILA, no del request', async () => {
+      // El acotamiento de la ruta es justamente ese: el encargado dice a qué
+      // garzón, no a qué usuario. Si el `usuarioId` viniera del request, el
+      // camino puntual se volvería "conceder Salones:Operar a quien quieras".
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', usuarioId: 'cuenta-del-garzon' }),
+      );
+
+      await service.otorgarPermisoOperar(TENANT, 'g1');
+
+      expect(roles.otorgarOperarSalon).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        'cuenta-del-garzon',
+      );
+    });
+
+    it('escribe DENTRO de una transacción', async () => {
+      // Son cuatro escrituras (rol, modulos_roles, permiso, asignación) y a
+      // medias no sirven: un rol de sistema sin su permiso es un rol que
+      // concede nada, y el encargado creería que lo dio.
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', usuarioId: 'cuenta-del-garzon' }),
+      );
+
+      await service.otorgarPermisoOperar(TENANT, 'g1');
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('un garzón sin cuenta vinculada no tiene a quién darle nada', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', usuarioId: null }));
+
+      await expect(
+        service.otorgarPermisoOperar(TENANT, 'g1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(roles.otorgarOperarSalon).not.toHaveBeenCalled();
+    });
+
+    it('un garzón de otro tenant es 404, no un otorgamiento cruzado', async () => {
+      // `getOrThrow` acota por tenant; el mock devuelve null como lo haría el
+      // repo real con el `where` del otro tenant.
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.otorgarPermisoOperar(TENANT, 'g-ajeno'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(roles.otorgarOperarSalon).not.toHaveBeenCalled();
+    });
+  });
+
   /**
    * Lo que ejecuta la decisión que el encargado tomó al dar de baja la cuenta
    * vinculada, dentro de la transacción de `TenantsService.removeMember`.
@@ -1689,6 +1745,9 @@ describe('GarzonesService.asegurarMostrador', () => {
         { provide: getRepositoryToken(Garzon), useValue: repo },
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
         { provide: DataSource, useValue: dataSource },
+        // Solo para satisfacer la inyección: ningún test de este describe
+        // otorga permisos.
+        { provide: RolesService, useValue: { otorgarOperarSalon: jest.fn() } },
       ],
     }).compile();
     service = module.get(GarzonesService);
