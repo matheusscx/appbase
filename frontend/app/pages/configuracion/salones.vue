@@ -112,6 +112,25 @@ function onMove(mesaId: string, posX: number, posY: number) {
   mesa.posY = posY.toFixed(5)
 }
 
+/**
+ * Avisa, no impide: el plano solapado no corrompe nada —cada mesa sigue siendo
+ * direccionable por su id— pero se lee mal. La distribución se guarda igual.
+ *
+ * ⚠️ **Limitación asumida:** el chequeo vive en el frontend porque es el único
+ * lugar donde los píxeles existen (la posición se guarda como fracción, el
+ * tamaño se dibuja en px fijos). Depende del tamaño de pantalla de quien acomodó
+ * el plano: dos mesas que no se pisan en 1920 px sí se pisan en 1024.
+ */
+function avisarSolape(_mesaId: string, nombres: string[]) {
+  toast.add({
+    title: nombres.length === 1
+      ? `Quedó encima de "${nombres[0]}"`
+      : `Quedó encima de ${nombres.length} mesas`,
+    description: 'Se guardó igual, pero el plano se lee mejor sin mesas superpuestas.',
+    color: 'warning',
+  })
+}
+
 async function guardarDistribucion() {
   if (!selectedSalonId.value || selectedSalon.value?.eliminadoEl) return
   savingLayout.value = true
@@ -552,6 +571,7 @@ async function restaurarMesaSeleccionada(id: string) {
           @move="onMove"
           @edit="abrirEditarMesa"
           @dragend="guardarDistribucion"
+          @solape="avisarSolape"
         />
       </div>
 

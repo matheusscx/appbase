@@ -17,6 +17,49 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La propina de una venta anulada sale del pool, y el plano avisa el solapamiento (2026-08-16)
+
+Dos entradas independientes, chicas y de módulos distintos, cerradas juntas.
+
+**Propina de una venta anulada (`buscarTipsPorFuentes`).** La entrada estaba frenada por una
+pregunta que el owner ya había contestado: *"la propina de una venta anulada sale del pool Y
+del peso"*. Filtrar solo el peso —que es lo que la entrada original proponía— **le saca el
+peso al garzón y deja su plata en el `poolTotal` congelado, o sea que la redistribuye entre
+los demás**, que es exactamente lo que la decisión rechaza. Por eso van las dos mitades:
+`buscarTipsPorFuentes` filtra `estado <> 'cancelada'` como su hermana `buscarTipsElegibles`, y
+`actualizarConfig` **recalcula** el pool sobre las fuentes vivas en vez de reusar el
+congelado.
+
+El recálculo es idempotente en el caso normal —las fuentes son las mismas filas que se
+congelaron, así que la suma da igual— y solo baja cuando una de esas ventas se anuló con el
+borrador abierto. La fila de `fuentes` no se borra: queda como registro de lo congelado; lo
+que cambia es cuánto aporta.
+
+ℹ️ El caso hermano que **sigue abierto** es otro: la venta anulada *después* de liquidar y
+pagar, que el owner decidió resolver con un saldo en contra y necesita spec propia.
+
+**Solapamiento de mesas.** Se valida en el frontend al soltar, que es el único lugar donde los
+píxeles existen: la posición se guarda como fracción `0..1` y el tamaño se dibuja en px fijos,
+así que el mismo par de mesas se pisa en un plano de 1024 y no en uno de 1920 — el `PATCH
+:id/layout`, al que apuntaba la entrada, es justamente donde **no** se puede resolver.
+**Avisa, no impide:** el plano solapado no corrompe nada, solo se lee mal, y frenar el
+arrastre en un lienzo libre pelea con el usuario.
+
+⚠️ **La tabla de tamaños se extrajo a `app/utils/mesa-dimensiones.ts`.** Estaba dentro de
+`MesaNode.vue` y el plano la necesitaba para medir: dos tablas de píxeles que tienen que
+coincidir y viven en archivos distintos divergen, y el aviso marcaría una cosa mientras el ojo
+ve otra. Es el mismo patrón que la tanda anterior corrigió con el criterio de personalización.
+
+**Qué fija cada una.** Propinas: un e2e que crea el borrador, anula la venta por SQL y
+verifica que el pool baja **exactamente** esa propina y que lo repartido sigue cuadrando con
+el pool nuevo (si solo se filtrara el peso, el pool no bajaría y la plata se repartiría entre
+los demás). El mutante que revierte las dos mitades lo pasa de `9000` a `0`. Mesas: nueve
+casos de geometría, incluidos el borde exacto —dos mesas pegadas lado a lado **no** avisan,
+o el aviso se vuelve ruido— y el par que se pisa en un plano angosto y no en uno ancho, que
+es la razón por la que esto no puede vivir en el backend.
+
+---
+
 ## La unidad de un ingrediente referenciado se congela, y el batch deja de tirar el lote (2026-08-16)
 
 **Decisión del owner (2026-08-15): las dos mitades.** (a) El guard se amplía para bloquear el

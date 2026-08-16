@@ -184,6 +184,27 @@ normal (se reinicia en 1 cuando esa cuenta también se cierre).
 (`pequeno|mediano|grande|extra_grande`, default `mediano`). El estado libre/ocupada es
 **derivado** (cuentas abiertas), no se almacena.
 
+**Solapamiento: se avisa en el frontend al soltar, y no se valida en el backend.**
+Dos mesas pueden guardarse en la misma posición: no corrompe datos ni bloquea nada
+—cada mesa sigue siendo direccionable por su id—, solo queda un plano confuso.
+
+⚠️ **El servidor no puede evaluarlo.** La posición se persiste como fracción
+`0..1` de un contenedor responsivo, pero el tamaño se dibuja en **píxeles fijos**
+(`app/utils/mesa-dimensiones.ts`: 64/80/96/112, ×1,5 de ancho si es rectangular),
+y el alto del plano lo redimensiona el usuario y se guarda en `localStorage`. Dos
+mesas que no se pisan en 1920 px sí se pisan en 1024, así que el `PATCH :id/layout`
+es justamente el único lugar donde **no** se puede resolver.
+
+El chequeo vive en `SalonPlano.vue` (evento `solape`) y la pantalla muestra un
+aviso: **avisa, no impide**, porque frenar el arrastre en un lienzo libre pelea
+con el usuario por algo que no rompe nada. Dos mesas pegadas por el borde exacto
+no cuentan como solape — es una distribución legítima y avisar ahí volvería el
+aviso ruido.
+
+**Limitación asumida:** el aviso depende del tamaño de pantalla de quien acomodó
+el plano. La alternativa que la sacaría —guardar el tamaño también en fracciones—
+se evaluó y se descartó por costo (toca esquema, render y editor).
+
 **`cuentas`**: `cuenta_id` PK, `tenant_id`, `mesa_id`, `numero int` (correlativo por
 **mesa**, calculado solo entre las cuentas actualmente `abierta` de esa mesa → se
 reinicia en 1 cuando la mesa queda completamente libre, no es un correlativo

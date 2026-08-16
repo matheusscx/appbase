@@ -390,6 +390,54 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
     );
   });
 
+  /**
+   * El caso hermano del de arriba, y el que estaba abierto: ahí la venta se
+   * anula ANTES de que exista el borrador, así que `buscarTipsElegibles` —que sí
+   * filtraba `estado <> 'cancelada'`— la deja afuera sola. Acá se anula **con el
+   * borrador ya creado**, y el recálculo de config pasa por
+   * `buscarTipsPorFuentes`, que trabaja sobre las fuentes ya congeladas.
+   *
+   * Filtrar solo el peso no alcanzaba: le sacaba el peso al garzón y dejaba su
+   * plata en el `poolTotal` congelado, o sea que la redistribuía entre los
+   * demás. Por eso este caso mira **el pool**, que es la mitad que faltaba.
+   */
+  it('anular una venta con el borrador ABIERTO le saca la propina del pool, no la redistribuye', async () => {
+    const ventaId = await crearVentaConPropina('9000');
+
+    const resCrear = await request(app.getHttpServer())
+      .post('/api/propinas/liquidaciones')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ fechaDesde, fechaHasta })
+      .expect(201);
+    const liquidacionId = (resCrear.body as { id: string }).id;
+    const poolConLaVenta = (resCrear.body as { poolTotal: string }).poolTotal;
+
+    await ds.query(
+      `UPDATE ventas SET estado = 'cancelada' WHERE venta_id = $1`,
+      [ventaId],
+    );
+
+    const resConfig = await request(app.getHttpServer())
+      .post(`/api/propinas/liquidaciones/${liquidacionId}/actualizar-config`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    const detalle = resConfig.body as {
+      poolTotal: string;
+      participantes: Participante[];
+    };
+
+    // El pool baja exactamente la propina de la venta anulada.
+    expect(
+      new Decimal(poolConLaVenta).minus(detalle.poolTotal).toString(),
+    ).toBe('9000');
+
+    // Y lo repartido sigue cuadrando con el pool nuevo: la plata no se quedó
+    // colgada ni se repartió entre los demás.
+    expect(suma(incluidos(detalle.participantes))).toBe(
+      new Decimal(detalle.poolTotal).toFixed(4),
+    );
+  });
+
   it('excluir un garzón lo saca del reparto y redistribuye el pool entre el resto', async () => {
     const base = await preview();
     const conExclusion = await preview({ exclusiones: [ANA_ID] });

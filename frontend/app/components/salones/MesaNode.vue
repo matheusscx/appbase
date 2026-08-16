@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { MesaResumen } from '~/composables/useSalones'
+import { dimensionesMesaPx } from '~/utils/mesa-dimensiones'
 
 const props = withDefaults(
   defineProps<{
@@ -10,18 +11,11 @@ const props = withDefaults(
   { editable: false, selected: false },
 )
 
-// Tamaño base (px) por tamaño de mesa; rectangular multiplica el ancho.
-const TAMANO_PX: Record<MesaResumen['tamano'], number> = {
-  pequeno: 64,
-  mediano: 80,
-  grande: 96,
-  extra_grande: 112,
-}
-
+// La tabla de tamaños vive en `~/utils/mesa-dimensiones`: la comparte el plano,
+// que la necesita para detectar si una mesa se soltó encima de otra.
 const dimensiones = computed(() => {
-  const base = TAMANO_PX[props.mesa.tamano]
-  const width = props.mesa.forma === 'rectangular' ? base * 1.5 : base
-  return { width: `${width}px`, height: `${base}px` }
+  const { width, height } = dimensionesMesaPx(props.mesa.forma, props.mesa.tamano)
+  return { width: `${width}px`, height: `${height}px` }
 })
 
 const formaClass = computed(() =>

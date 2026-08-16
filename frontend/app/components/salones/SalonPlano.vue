@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { MesaResumen } from '~/composables/useSalones'
+import { mesasSePisan } from '~/utils/mesa-dimensiones'
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +20,13 @@ const emit = defineEmits<{
   edit: [mesa: MesaResumen]
   /** Se soltó una mesa tras arrastrarla (hubo movimiento real). */
   dragend: [mesaId: string]
+  /**
+   * La mesa quedó encima de al menos otra. **Avisa, no impide**: el plano no se
+   * corrompe ni bloquea nada —cada mesa sigue siendo direccionable por su id—,
+   * solo queda confuso, y frenar el arrastre en un lienzo libre pelea con el
+   * usuario. Quien escucha decide cómo mostrarlo.
+   */
+  solape: [mesaId: string, nombres: string[]]
 }>()
 
 const plano = ref<HTMLElement | null>(null)
@@ -73,10 +81,34 @@ function onPointerMove(e: PointerEvent) {
   }
 }
 
+/**
+ * Nombres de las mesas que la recién soltada está pisando.
+ *
+ * Se evalúa acá y no en el backend porque **el servidor no tiene los píxeles**:
+ * la posición se persiste como fracción del contenedor y el tamaño se dibuja en
+ * px fijos, así que el solapamiento depende del ancho real del plano. Ver
+ * `~/utils/mesa-dimensiones`.
+ */
+function mesasPisadas(mesaId: string): string[] {
+  const el = plano.value
+  if (!el) return []
+  const rect = el.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return []
+  const movida = props.mesas.find((m) => m.id === mesaId)
+  if (!movida) return []
+  return props.mesas
+    .filter((m) => m.id !== mesaId && mesasSePisan(movida, m, rect))
+    .map((m) => m.nombre)
+}
+
 function onPointerUp() {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
-  if (draggingId.value && dragMoved.value) emit('dragend', draggingId.value)
+  if (draggingId.value && dragMoved.value) {
+    const pisadas = mesasPisadas(draggingId.value)
+    if (pisadas.length) emit('solape', draggingId.value, pisadas)
+    emit('dragend', draggingId.value)
+  }
   draggingId.value = null
   dragMoved.value = false
 }

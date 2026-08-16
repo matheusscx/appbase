@@ -115,11 +115,29 @@ Que la persona **sí** cobre en los dos grupos es la otra salida posible y es un
 modelo (el índice más los ajustes, que hoy se identifican solo por `garzonId`): queda
 anotado en `docs/agent/pendientes.md` con su costo, para encararlo si el caso aparece.
 
-**3. La propina de una venta anulada no se reparte.** `buscarTipsElegibles`
-excluye las ventas `cancelada`: esa plata nunca se cobró. Ver en
-`docs/agent/pendientes.md` el caso todavía abierto —la venta se anula **después**
-de que la propina ya se liquidó y se pagó—, que el owner decidió resolver con un
-saldo en contra descontado de la próxima liquidación y necesita spec propia.
+**3. La propina de una venta anulada no se reparte, y eso vale también con el
+borrador ya abierto.** Son dos caminos y los dos filtran `estado <> 'cancelada'`:
+
+| Cuándo se anula | Qué la deja afuera |
+|---|---|
+| Antes de crear el borrador | `buscarTipsElegibles`, al armar el pool |
+| Con el borrador **abierto**, al recalcular la config | `buscarTipsPorFuentes`, sobre las fuentes ya congeladas |
+
+En el segundo caso **no alcanza con filtrar el peso**: el `poolTotal` se congela
+al crear el borrador e incluye esa propina, así que sacarle el peso al garzón y
+dejar la plata en el pool la redistribuye entre los demás. Por eso
+`actualizarConfig` **recalcula** el pool sobre las fuentes que siguen vivas. Es
+idempotente en el caso normal —las fuentes son las mismas filas congeladas, la
+suma da igual— y solo baja cuando una de esas ventas se anuló. Nadie cobra plata
+de una venta anulada, ni el que la generó ni el resto.
+
+ℹ️ La fila de `liquidacion_propinas_fuente` **no** se borra: queda como registro
+de lo que se congeló. Lo que cambia es cuánto aporta, que es cero.
+
+Sigue abierto en `docs/agent/pendientes.md` el caso distinto —la venta se anula
+**después** de que la propina ya se liquidó y se pagó—, que el owner decidió
+resolver con un saldo en contra descontado de la próxima liquidación y necesita
+spec propia.
 
 ---
 

@@ -644,29 +644,6 @@ empezarlas.
   (medido), así que la pantalla se ve vacía hasta crear uno. Sembrar uno es parte del trabajo, o
   el test no se puede escribir.
 
-- [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
-  `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
-  `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
-  ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
-  `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,
-  `CANTIDAD_CUENTAS`). Lo encontró la revisión independiente del 2026-07-27.
-  ⛔ **No es copiar la línea del hermano.** El `poolTotal` se congela al crear el borrador e
-  **incluye** esa propina: filtrar solo acá le saca el peso al garzón pero deja su plata en
-  el pool, o sea la redistribuye entre los demás. Decidir eso es la misma pregunta de
-  reconciliación del ítem de abajo (¿la plata de una venta anulada sale del pool, se
-  redistribuye, o queda como saldo?), así que va con esa spec y no antes.
-  ✅ **DECIDIDO (owner, 2026-08-15): la propina de una venta anulada sale del pool Y del peso
-  del garzón.** La venta no existió, así que su propina tampoco: se descuenta del total a
-  repartir y deja de contar para el peso. **Nadie cobra plata de una venta anulada**, ni el que
-  la generó ni los demás por redistribución.
-  ⚠️ **Eso desbloquea la entrada, que estaba frenada justo por esta pregunta.** El texto anterior
-  decía que filtrar solo acá "le saca el peso al garzón pero deja su plata en el pool, o sea la
-  redistribuye entre los demás" — con la decisión tomada, el arreglo es **filtrar en los dos
-  lados**: el peso en `buscarTipsPorFuentes` y el `poolTotal` congelado al crear el borrador.
-  🔗 **Ojo con el límite:** esto cubre el borrador **abierto**. El caso de la propina **ya
-  liquidada y pagada** es otro y sigue con su decisión propia (saldo en contra del garzón), en
-  la sección de proyectos que van solos.
-
 - [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
   (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
   (`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
@@ -883,28 +860,6 @@ empezarlas.
   (merma o cortesía), no un borrado silencioso — ese camino es lo que falta diseñar, y ahí
   sí entra la investigación de mercado. **No es simétrico con las advertencias de
   `garzones`**: allá el costo era un aviso tardío, acá es plata que sale sin rastro.
-
-- [ ] **El layout de mesas no valida solapamiento** (backend,
-  `salones/dto/update-layout.dto.ts`) — dos mesas del mismo salón pueden guardarse en la
-  misma posición. No corrompe datos ni bloquea nada: cada mesa sigue siendo direccionable
-  por su id, solo queda un plano confuso. No está documentado como regla en
-  `docs/features/salones-mesas.md` ni en `docs/PRODUCTO.md`, y definirla exige decidir
-  tolerancia o tamaño de mesa. **Prioridad baja.**
-  ⚠️ **Corrección al encuadre (medido 2026-08-08): el backend NO puede evaluarlo.** La
-  posición se guarda como fracción 0..1 de un contenedor responsivo
-  (`salones/entities/mesa.entity.ts` → `posX`/`posY`, `numeric(6,5)`), pero el tamaño se
-  dibuja en **píxeles fijos** en el front (`components/salones/MesaNode.vue` → `TAMANO_PX`:
-  64/80/96/112, ×1,5 de ancho si es rectangular). El servidor no tiene dimensiones, y el
-  solapamiento depende del ancho real del plano: dos mesas que no se pisan en 1920 px sí se
-  pisan en 1024. El alto además lo redimensiona el usuario y se persiste en `localStorage`.
-  Por eso la entrada apuntaba al DTO (`update-layout.dto.ts`), que es el único lugar donde
-  **no** se puede resolver.
-  **Decisión del owner (2026-08-08): validar en el frontend, al arrastrar.** Es el único
-  lugar donde los píxeles existen. Al soltar una mesa sobre otra, avisar o impedir. Sin
-  cambio de esquema ni de contrato. **Limitación asumida:** sigue dependiendo del tamaño de
-  pantalla de quien acomodó el plano. La alternativa que la sacaría —guardar el tamaño
-  también en fracciones del plano— se evaluó y se descartó por costo (toca esquema, render y
-  editor).
 
 - [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
   ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la

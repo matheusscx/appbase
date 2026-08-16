@@ -462,7 +462,6 @@ export class LiquidacionPropinasService {
       await manager.softDelete(LiquidacionPropinasGrupo, { liquidacionId: id });
 
       detalle.liquidacion.configuracionVersion = config.version;
-      await manager.save(LiquidacionPropinas, detalle.liquidacion);
 
       // tips y sesiones se cargan ANTES del snapshot: de ellos sale qué grupos
       // pueden recibir, y eso decide cómo se reparte el pool entre los grupos.
@@ -471,6 +470,21 @@ export class LiquidacionPropinasService {
         tenantId,
         detalle.fuentes.map((f) => f.ventaPropinaId),
       );
+
+      // El pool se recalcula sobre las fuentes que SIGUEN vivas, no se reusa el
+      // congelado. Es idempotente en el caso normal —las fuentes son las mismas
+      // filas que se congelaron, así que la suma da igual— y solo cambia cuando
+      // una de esas ventas se anuló con el borrador abierto: ahí su propina
+      // tiene que salir del total a repartir, no redistribuirse entre los demás.
+      // Nadie cobra plata de una venta anulada, ni el que la generó ni el resto.
+      //
+      // La fila de `fuentes` NO se borra: queda como registro de lo que se
+      // congeló al crear el borrador. Lo que cambia es cuánto aporta, que es
+      // cero.
+      detalle.liquidacion.poolTotal = tips
+        .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
+        .toFixed(4);
+      await manager.save(LiquidacionPropinas, detalle.liquidacion);
       const sesiones = await this.buscarSesionesPeriodo(
         manager,
         tenantId,
@@ -1200,6 +1214,17 @@ export class LiquidacionPropinasService {
        JOIN ventas v ON v.venta_id = vp.venta_id AND v.eliminado_el IS NULL
        WHERE vp.tenant_id = $1
          AND vp.eliminado_el IS NULL
+         -- La venta no existió, así que su propina tampoco. Espeja el filtro de
+         -- buscarTipsElegibles: si la venta se anula con el borrador YA
+         -- abierto, sus datos seguían pesando en el reparto (VENTAS_NETAS,
+         -- CANTIDAD_CUENTAS) al recalcular la config.
+         --
+         -- Filtrar solo acá no alcanzaba, y por eso la entrada estuvo frenada:
+         -- le sacaba el peso al garzón pero dejaba su plata en el poolTotal
+         -- congelado, o sea que la redistribuía entre los demás. El llamador
+         -- recalcula el pool con estas mismas filas: las dos mitades juntas o
+         -- ninguna.
+         AND v.estado <> 'cancelada'
          AND vp.venta_propina_id = ANY($2::uuid[])
        ORDER BY vp.creado_el ASC`,
       [tenantId, ventaPropinaIds],
