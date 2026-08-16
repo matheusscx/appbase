@@ -1443,6 +1443,35 @@ export class SeederService implements OnApplicationBootstrap {
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
       {
+        // Falabella → Ventas. Faltaba, y el hueco recién se vio el 2026-08-16 al
+        // cerrar el short-circuit de `es_fijo`: mientras el admin llegaba a
+        // cualquier módulo, tener o no contratado `Ventas` no cambiaba nada.
+        // Un tenant con MiCaja, Cajas, Pagos y Tienda Online que no puede
+        // registrar una venta no es un tenant que compró menos: es un seed
+        // incoherente.
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440350',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440058',
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        // Falabella → Salones, por el mismo motivo y con la misma fecha. No es
+        // que la bodega tenga mesas: `TenantsService.create` le crea a TODO
+        // tenant un garzón placeholder "Mostrador" (`asegurarMostrador`), y las
+        // rutas que lo gestionan piden el módulo `Salones`. Un tenant que cobra
+        // propina directa tiene garzón sí o sí, así que sin esto no puede
+        // administrar algo que el propio alta le creó.
+        // ⚠️ Ese acoplamiento —placeholder para tenants SIN salones, gestionado
+        // detrás del módulo Salones— quedó anotado en `pendientes.md`: taparlo
+        // con seed es lo correcto para el demo, no el arreglo del diseño.
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440351',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440222',
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440284',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Paris → Cajas

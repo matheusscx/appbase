@@ -70,17 +70,38 @@ export class RbacService {
     moduloNombre: string,
     permisoNombre: string,
   ): Promise<boolean> {
-    // Short-circuit: si el usuario tiene algún rol es_fijo=true en este tenant → acceso total
+    // Short-circuit del rol fijo: el admin del tenant tiene TODOS los permisos…
+    // **dentro de los módulos que la empresa contrató**. Los módulos son lo que
+    // se vende, así que el borde es duro y también aplica al admin — antes esta
+    // consulta no miraba `tenant_modulos` y el admin llegaba a cualquier ruta de
+    // negocio con 200 mientras el frontend, que sí filtra por `getMisPermisos`,
+    // ni le mostraba el link. `PRODUCTO.md` ya decía lo correcto ("cada ruta
+    // valida rol + módulo contratado + permiso"); lo que no lo sostenía era esto.
+    //
+    // ⚠️ **No es un borde de aislamiento sino comercial:** nadie veía datos de
+    // otro tenant, veía módulos que no pagó. Conviene no confundirlos.
+    //
+    // Lo que sigue diferenciando al admin del resto: no necesita que el módulo
+    // esté colgado de su rol (`modulos_roles`) ni tener el permiso concreto
+    // asignado (`roles_permisos_modulos`). Le basta con que el tenant lo tenga
+    // contratado.
+    //
+    // `tm.estado` y `tm.expira_en` no se miran acá **a propósito**: la consulta
+    // completa de abajo tampoco los mira, y hacer que la contratación caduque es
+    // otra decisión. Que las dos ramas coincidan importa más que adivinarla.
     const fixedRole: unknown[] = await this.dataSource.query(
       `SELECT 1
        FROM roles_usuarios ru
        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
+       JOIN tenant_modulos tm ON tm.tenant_id = ru.tenant_id AND tm.eliminado_el IS NULL
+       JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id AND ma.eliminado_el IS NULL
        WHERE ru.usuario_id = $1
          AND ru.tenant_id = $2
+         AND ma.nombre = $3
          AND r.es_fijo = true
          AND ru.eliminado_el IS NULL
          AND r.eliminado_el IS NULL`,
-      [userId, tenantId],
+      [userId, tenantId, moduloNombre],
     );
     if (fixedRole.length > 0) return true;
 

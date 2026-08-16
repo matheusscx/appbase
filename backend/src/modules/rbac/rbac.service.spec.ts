@@ -31,7 +31,7 @@ describe('RbacService', () => {
   // ── Lo que CONCEDE acceso va primero: un `return true` sin test es peor que
   // un `return false` sin test.
   describe('conceder acceso', () => {
-    it('userHasPermiso corta en true si el usuario tiene un rol fijo', async () => {
+    it('userHasPermiso corta en true si el usuario tiene un rol fijo Y el módulo está contratado', async () => {
       dataSource.query.mockResolvedValueOnce([{ '?column?': 1 }]);
 
       await expect(
@@ -39,6 +39,11 @@ describe('RbacService', () => {
       ).resolves.toBe(true);
       // Corta: no llega a hacer el JOIN completo.
       expect(dataSource.query).toHaveBeenCalledTimes(1);
+
+      // El módulo pedido viaja en el short-circuit: sin esto la consulta
+      // concedería sobre cualquier módulo, contratado o no.
+      const [, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual([USER, TENANT, 'ventas']);
     });
 
     it('userHasPermiso concede si el JOIN completo devuelve una fila', async () => {
@@ -95,6 +100,25 @@ describe('RbacService', () => {
         false,
       );
     });
+
+    // El borde comercial: el admin del tenant NO llega a un módulo que la
+    // empresa no contrató. Los módulos son lo que se vende, así que el borde es
+    // duro también para él. Antes el short-circuit no miraba `tenant_modulos` y
+    // esto respondía 200.
+    it('el admin sin el módulo contratado no pasa por el short-circuit ni por el JOIN completo', async () => {
+      // El short-circuit no encuentra fila (no hay `tenant_modulos` del módulo)
+      // y el JOIN completo tampoco (el admin no tiene el permiso asignado a su
+      // rol: nunca le hizo falta).
+      dataSource.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      await expect(
+        service.userHasPermiso(USER, TENANT, 'salones', 'operar'),
+      ).resolves.toBe(false);
+
+      // Sigue siendo admin: lo que se le niega es el módulo, no la condición.
+      dataSource.query.mockResolvedValueOnce([{ '?column?': 1 }]);
+      await expect(service.userIsTenantAdmin(USER, TENANT)).resolves.toBe(true);
+    });
   });
 
   // ── El invariante que sostiene el aislamiento entre tenants. `roles_usuarios`
@@ -115,19 +139,32 @@ describe('RbacService', () => {
       }
     });
 
-    it('los dos JOIN de `tenant_modulos` que cuelgan del rol atan el tenant', async () => {
+    it('los tres JOIN de `tenant_modulos` atan el tenant, cuelguen o no del rol', async () => {
       await service.userHasPermiso(USER, TENANT, 'ventas', 'crear');
       await service.getMisPermisos(USER, TENANT);
 
       const conModulos = sqls().filter((sql) =>
         /JOIN tenant_modulos tm ON/.test(sql),
       );
-      expect(conModulos).toHaveLength(2);
+      // Tres desde que el short-circuit del rol fijo también mira los módulos
+      // contratados: el admin tiene todos los permisos, pero solo dentro de lo
+      // que la empresa pagó.
+      expect(conModulos).toHaveLength(3);
+
+      // El invariante es la atadura al tenant, y lo cumplen las tres.
       for (const sql of conModulos) {
         expect(sql).toMatch(
-          /JOIN tenant_modulos tm ON tm\.modulo_tenant_id = mr\.modulo_tenant_id AND tm\.tenant_id = ru\.tenant_id/,
+          /JOIN tenant_modulos tm ON[^|]*?tm\.tenant_id = ru\.tenant_id/,
         );
       }
+
+      // Las dos que evalúan un permiso concreto además cuelgan el módulo del
+      // rol (`modulos_roles`). La del short-circuit no lo hace a propósito: al
+      // admin no hay que asignarle el módulo, le basta que esté contratado.
+      const colgadasDelRol = conModulos.filter((sql) =>
+        /tm\.modulo_tenant_id = mr\.modulo_tenant_id/.test(sql),
+      );
+      expect(colgadasDelRol).toHaveLength(2);
     });
 
     it('todas parten de `roles_usuarios` acotado por el tenant del token', async () => {

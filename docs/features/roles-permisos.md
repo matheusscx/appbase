@@ -53,6 +53,30 @@ a seguir si otro módulo necesita separar "operar lo propio" de "supervisar todo
 de seguir sobrecargando `Ver todas`. Detalle funcional y de permisos:
 [`docs/features/gestion-cajas.md`](./gestion-cajas.md#modelo-de-acceso-por-permiso).
 
+### El módulo contratado es un borde duro, también para el admin
+
+El rol `es_fijo` (admin del tenant) tiene **todos los permisos, dentro de los módulos que la
+empresa contrató**. El short-circuit de `RbacService.userHasPermiso` une `tenant_modulos`
+igual que la consulta larga: sin eso el admin llegaba con `200` a cualquier ruta de negocio
+mientras el frontend —que usa `getMisPermisos`, sí filtrado— ni le mostraba el link.
+
+⚠️ **No es un borde de aislamiento sino comercial.** Nadie veía datos de otro tenant: veía
+módulos que no pagó. Conviene no confundir los dos bordes al razonar sobre esto.
+
+Lo que sigue distinguiendo al admin: **no** necesita que el módulo esté colgado de su rol
+(`modulos_roles`) ni tener el permiso concreto asignado (`roles_permisos_modulos`). Le basta
+con que el tenant lo tenga contratado.
+
+`tm.estado` y `tm.expira_en` **no** se miran, ni acá ni en la consulta larga: que una
+contratación caduque sola es otra decisión, y lo que importa es que las dos ramas coincidan.
+
+**Quién contrata:** el superadmin, con `POST /admin/tenants/:id/modules`
+(`PRODUCTO.md`: *"El tenant no puede gestionar sus propios módulos"*). `TenantsService.create`
+**no siembra ninguno a propósito**: un tenant nace sin módulos y el superadmin le contrata lo
+que compró. Como corolario, el admin de un tenant recién creado puede configurarlo —las rutas
+admin-only pasan por `TenantAdminGuard`, no por el motor de módulos— pero no operar ningún
+módulo hasta que se le contrate.
+
 ### Admin-only vs permiso de módulo — cuándo cada uno
 
 Dos mecanismos de autorización conviven, y la elección **no es por pantalla sino por la

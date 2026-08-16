@@ -17,6 +17,53 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El módulo contratado pasa a ser un borde duro, también para el admin (2026-08-16)
+
+**Decisión del owner (2026-08-15):** el admin del tenant también respeta los módulos
+contratados. Se arregla el motor, no la documentación — `PRODUCTO.md:127` ya decía lo
+correcto.
+
+**Lo que se construyó** es más chico que lo que la entrada anticipaba: el short-circuit de
+`es_fijo` en `RbacService.userHasPermiso` ahora une `tenant_modulos` + `modulos_app` y recibe
+el módulo como `$3`. Nada más. `userIsTenantAdmin` no se toca: responde otra pregunta (si es
+admin), no si puede entrar a un módulo.
+
+**La segunda pieza que la entrada daba por necesaria NO se construyó, y por qué.** Decía:
+*"el fix probablemente son dos piezas: sembrar los módulos al crear el tenant, y recién
+después cerrar el short-circuit"*. Medido:
+
+1. `POST /admin/tenants` es **superadmin-only**, y ya existe `POST /admin/tenants/:id/modules`
+   (`TenantsService.addModule`). O sea que el camino para contratar ya está construido.
+2. `PRODUCTO.md:112` dice explícitamente: *"Superadmin del SaaS — contrata/desactiva módulos
+   por tenant. **El tenant no puede gestionar sus propios módulos**"*. Sembrar un set por
+   defecto al crear contradiría eso, y **cuál** sería ese set es una decisión comercial que
+   nadie tomó.
+3. Un tenant recién creado sin módulos no queda inutilizable: las rutas admin-only pasan por
+   `TenantAdminGuard`, no por el motor de módulos, así que su admin puede configurarlo. Lo que
+   no puede es operar módulos que no compró, que es exactamente la decisión.
+
+Inventar el set por defecto habría sido elegir una regla de negocio no documentada.
+
+**Dos cosas que apareció al correr el e2e, y que el short-circuit venía tapando**
+
+- **Demo Bodega no tenía `Ventas` contratado.** Un tenant con MiCaja, Cajas, Pagos y Tienda
+  Online que no puede registrar una venta no es un tenant que compró menos: es un seed
+  incoherente. Se sembró.
+- **El garzón "Mostrador" está acoplado al módulo `Salones`.** `TenantsService.create` le crea
+  uno a **todo** tenant, pero las 10 rutas de `garzones.controller.ts` piden
+  `@RequiresPermiso('Salones', …)`, así que un tenant sin salones no puede administrar la fila
+  que el sistema le creó. Se parcheó en el seed para que la suite corra y **se abrió entrada
+  propia**: qué módulo debería gatear el Mostrador es decisión del owner, no un efecto lateral.
+
+**Qué lo fija.** `modulo-contratado-borde-duro.e2e-spec.ts` usa el **mismo usuario con el
+mismo rol** (`admin@sistema.com`, `es_fijo` en los dos tenants del seed) contra los dos
+tenants: lo único que cambia es qué contrató la empresa. Con `Propinas`, 200; sin `Propinas`,
+403; y el tercer caso verifica que lo negado es el módulo y no la condición de admin
+(`/api/roles` y `/api/items` le siguen respondiendo 200). El mutante —volver el short-circuit
+a como estaba— pasa ese 403 a 200 y tumba dos unit tests.
+
+---
+
 ## Los filtros de fecha ya no dependen del `TimeZone` de sesión, y el hook mira las tablas (2026-08-16)
 
 Dos entradas mecánicas de la sección 3, cerradas juntas por tamaño.

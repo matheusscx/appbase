@@ -517,36 +517,6 @@ empezarlas.
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-- [ ] **Contratar un módulo, ¿es un borde duro o solo decide qué se ve en el menú?** (backend +
-  producto, auditoría RBAC/auth 2026-08-15) — **tres lentes ciegas entre sí cayeron sobre el
-  mismo borde**; se cuenta una vez porque se decide una vez.
-  `docs/PRODUCTO.md:127` dice: *"Cada ruta valida rol + **módulo contratado** + permiso"*. El
-  código no lo sostiene de forma consistente:
-
-  | Camino | Qué hace hoy |
-  |---|---|
-  | Short-circuit `es_fijo` de `RbacService.userHasPermiso` | **No mira `tenant_modulos`.** El admin llega a cualquier módulo |
-  | `assignUser` con un rol de otro tenant | Permisos atados a los módulos de **ese otro** tenant |
-  | `RolesService.setPermissions` | **Sí valida** que el módulo sea del tenant |
-
-  Y `TenantsService.create()` **no siembra ningún `tenant_modulos`** (verificado): un tenant
-  recién creado tiene cero módulos contratados y su admin igual le pega con 200 a cualquier ruta
-  de negocio, mientras el frontend —que usa `getMisPermisos`, sí filtrado— ni le muestra el link.
-  ⚠️ **No es un problema de aislamiento sino comercial**: nadie ve datos de otro tenant, pero el
-  admin llega a módulos que no pagó, y los módulos son lo que se vende. Conviene no confundir
-  los dos bordes.
-  El tercer camino prueba que la regla existe y que alguien la escribió a conciencia. **La
-  pregunta es cuál de las dos conductas es la correcta**, y de ahí sale si se arregla el motor o
-  se corrige la doc.
-  ✅ **DECIDIDO (owner, 2026-08-15): es un borde duro.** El admin también respeta los módulos
-  contratados. Se arregla el motor (`RbacService`), no la documentación — `PRODUCTO.md:127` ya
-  dice lo correcto.
-  ⚠️ **Antes de tocar el short-circuit, medir a quién le cambia el acceso.** `TenantsService.create()`
-  **no siembra ningún `tenant_modulos`** (medido), así que hoy un tenant nace con cero módulos
-  contratados: aplicar el borde duro de golpe puede dejar sin acceso al admin de cada tenant
-  creado por la app, incluido el demo. **El fix probablemente son dos piezas, no una:** sembrar
-  los módulos al crear el tenant, y recién después cerrar el short-circuit.
-
 - [ ] 🚩 **Dos recuentos abiertos sobre el mismo producto descuentan el faltante dos veces**
   (backend + producto, auditoría `inventario` 2026-08-15) — **el hallazgo más caro de la pasada.**
   `RecuentosService.create()` hace un `INSERT INTO recuento_inventario` sin mirar si el tenant ya
@@ -1073,6 +1043,23 @@ PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
 
 ⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
 identidad de ese día. Ninguna bloquea nada que esté en curso.
+
+- [ ] **El garzón "Mostrador" existe para tenants SIN salones, y gestionarlo exige el módulo
+  `Salones`** (backend + producto, **medido 2026-08-16** al cerrar el borde duro de módulos) —
+  `TenantsService.create:244` llama a `asegurarMostrador` para **todo** tenant nuevo, y
+  `ventas.service.ts:733` lo vuelve a asegurar cuando una venta trae `propinaDirecta`. O sea
+  que un tenant que nunca va a tener mesas igual tiene un garzón. Pero **las 10 rutas de
+  `garzones.controller.ts` piden `@RequiresPermiso('Salones', …)`**, así que ese tenant no
+  puede listar, editar ni borrar la fila que el propio sistema le creó.
+  **Estuvo tapado hasta ahora:** mientras el short-circuit de `es_fijo` no miraba
+  `tenant_modulos`, el admin entraba igual y el acoplamiento no se veía. Se destapó al cerrar
+  ese borde: el e2e de papelera empezó a dar `403` en `DELETE /garzones/:id` para Demo Bodega.
+  **Parcheado en el seed, no en el diseño:** se le contrató `Salones` a Demo Bodega para que
+  la suite corra. Es lo correcto para el demo y **no** es el arreglo.
+  **La pregunta para el owner:** ¿el Mostrador y las propinas directas deberían colgar de
+  `Propinas` (o de `Ventas`) en vez de `Salones`, o un tenant que cobra propina directa tiene
+  que contratar `Salones` aunque no tenga una sola mesa? Lo segundo es defendible pero hay que
+  decirlo, porque hoy es un efecto lateral y no una regla.
 
 - [ ] **"Hasta el 16 de agosto" deja fuera todo el 16** (backend + producto, **medido
   2026-08-16** al normalizar la zona de los filtros de fecha) — es un off-by-one **distinto**
