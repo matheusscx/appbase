@@ -322,8 +322,17 @@ cuando hay vínculo (`400` nombrando al garzón si no viene):
 
 | `?garzon=` | Qué hace | Respuesta |
 |---|---|---|
-| `sigue` | Desvincula y le escribe un PIN nuevo usable, con evento `regenerado_por_baja_de_cuenta` | `{ garzon: { accion: 'desvinculado', pin } }` — el PIN en claro, **una sola vez** |
-| `no-sigue` | Deja el garzón `activo = false`, con el vínculo intacto | `{ garzon: { accion: 'desactivado', pin: null } }` |
+| `sigue` | Desvincula y le escribe un PIN nuevo usable, con evento `regenerado_por_baja_de_cuenta` | `{ garzon: { accion: 'desvinculado', pin, advertencias } }` — el PIN en claro, **una sola vez** |
+| `no-sigue` | Deja el garzón `activo = false`, con el vínculo intacto | `{ garzon: { accion: 'desactivado', pin: null, advertencias: [] } }` |
+
+⚠️ **`advertencias` trae una sola cosa hoy, y solo en `sigue`: que el garzón ya estaba
+desactivado** (2026-08-16). `verificarPin` filtra `activo: true`, así que ese PIN de 6
+dígitos —la única vez que existe fuera de la base— **no opera** hasta que alguien lo
+reactive. Es alcanzable sin nada raro: `PATCH /garzones/:id` deja desactivar un garzón
+vinculado, sin guard. **Advierte y no bloquea**, como las de `actualizar()`: quien da la
+baja puede querer el PIN igual porque va a reactivarlo después. El dato se lee **antes** de
+escribir, porque `no-sigue` desactiva como su efecto y leerlo después haría que toda baja
+`no-sigue` se reportara como aviso.
 
 Las dos son reversibles, pero **no cuestan lo mismo**: `sigue` deja al garzón operando ya
 mismo, y `no-sigue` lo deja en un estado que necesita **dos** cosas para volver — prender

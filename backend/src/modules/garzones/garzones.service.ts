@@ -960,8 +960,18 @@ export class GarzonesService {
    * vínculo— **que lo re-vincularan a OTRA cuenta**. Ese tercer caso es un
    * camino normal de `actualizar()`, y sin la comparación esta baja le rompería
    * el vínculo a un tercero y le entregaría su PIN, en claro, a quien pidió
-   * otra cosa. Devuelve `false` en los tres casos, para que quien llama no
-   * prometa nada que no se escribió.
+   * otra cosa. Devuelve `aplicado: false` en los tres casos, para que quien
+   * llama no prometa nada que no se escribió.
+   *
+   * `garzonActivo` sale de la relectura de adentro y **solo importa en la
+   * salida "sigue"**: `verificarPin` filtra `activo: true`, así que un garzón
+   * desactivado no opera con ningún PIN. Sin este dato la respuesta decía
+   * `accion: 'desvinculado'` con un PIN de 6 dígitos en claro —la única vez que
+   * existe fuera de la base— que no iba a funcionar, y nadie se enteraba hasta
+   * que la persona lo tecleaba. No bloquea: desactivar un garzón vinculado es
+   * un camino normal de `actualizar()` (no hay guard que lo impida), así que la
+   * combinación es alcanzable sin que nadie haya hecho nada raro, y quien da la
+   * baja puede tener razones para querer el PIN igual.
    */
   async aplicarBajaDeCuenta(
     manager: EntityManager,
@@ -970,16 +980,22 @@ export class GarzonesService {
     usuarioId: string,
     usuarioActorId: string,
     pinPreparado: { hash: string } | null,
-  ): Promise<boolean> {
+  ): Promise<{ aplicado: boolean; garzonActivo: boolean }> {
     const garzon = await manager.findOne(Garzon, {
       where: { id: garzonId, tenantId, eliminadoEl: IsNull() },
     });
-    if (!garzon || garzon.usuarioId !== usuarioId) return false;
+    if (!garzon || garzon.usuarioId !== usuarioId) {
+      return { aplicado: false, garzonActivo: false };
+    }
+    // ANTES de tocar nada: la rama `no-sigue` de abajo lo pone en `false`, y
+    // leerlo después haría que toda baja `no-sigue` se reportara como
+    // "desactivado" — que es su efecto, no un aviso.
+    const garzonActivo = garzon.activo;
 
     if (!pinPreparado) {
       garzon.activo = false;
       await manager.save(Garzon, garzon);
-      return true;
+      return { aplicado: true, garzonActivo };
     }
 
     garzon.usuarioId = null;
@@ -994,7 +1010,7 @@ export class GarzonesService {
         usuarioId: usuarioActorId,
       }),
     );
-    return true;
+    return { aplicado: true, garzonActivo };
   }
 
   /**

@@ -91,32 +91,54 @@ async function guardar() {
   const agregar = [...nuevos].filter(id => !actuales.has(id))
   const quitar = [...actuales].filter(id => !nuevos.has(id))
 
+  // Lo que el BACKEND tiene, que se va moviendo con cada request que sale
+  // bien. No son N requests atómicas —no hay endpoint que las agrupe— así que
+  // lo único honesto es no adelantarse: la pantalla muestra lo aplicado, no lo
+  // pedido.
+  const aplicados = new Set(actuales)
+
   saving.value = true
   try {
+    // ⚠️ QUITAR primero, y el orden es la corrección. Desde el 2026-08-16
+    // `DELETE /roles/:id/users/:userId` puede responder 400 (dejaría al tenant
+    // sin ningún administrador), y ese 400 es alcanzable desde ESTA pantalla:
+    // el único admin se edita a sí mismo y se destilda "Administrador".
+    // Agregando primero, ese guardado dejaba los agregados aplicados y el
+    // quitado no. Quitando primero, el camino que falla es el primero que
+    // corre, así que lo normal es que NO quede nada a medias.
+    for (const rolId of quitar) {
+      await useApiFetch(`${apiUrl}/roles/${rolId}/users/${member.usuarioId}`, {
+        method: 'DELETE',
+      })
+      aplicados.delete(rolId)
+    }
     for (const rolId of agregar) {
       await useApiFetch(`${apiUrl}/roles/${rolId}/users`, {
         method: 'POST',
         body: { usuarioId: member.usuarioId },
       })
+      aplicados.add(rolId)
     }
-    for (const rolId of quitar) {
-      await useApiFetch(`${apiUrl}/roles/${rolId}/users/${member.usuarioId}`, {
-        method: 'DELETE',
-      })
-    }
-    const byId = new Map(roles.value.map(r => [r.id, r.nombre]))
-    member.roles = seleccion.value.map(rolId => ({
-      rolId,
-      nombre: byId.get(rolId) ?? rolId,
-    }))
     toast.add({ title: 'Roles actualizados', color: 'success' })
     modalOpen.value = false
   }
   catch (e: unknown) {
+    // El mensaje del backend llega tal cual: nombra la razón (el último admin)
+    // y qué hacer antes de reintentar.
     const msg = apiErrorMsg(e, 'Error al guardar roles')
     toast.add({ title: msg, color: 'error' })
   }
   finally {
+    // En los DOS caminos, y por eso va en el `finally`: si algo quedó a medias,
+    // la fila tiene que mostrar lo que el backend tiene y no lo que se pidió.
+    // También hace correcto el REINTENTO: `guardar()` recalcula `actuales`
+    // desde `member.roles`, así que apretar Guardar de nuevo manda el diff que
+    // falta y no el que ya se aplicó.
+    const byId = new Map(roles.value.map(r => [r.id, r.nombre]))
+    member.roles = [...aplicados].map(rolId => ({
+      rolId,
+      nombre: byId.get(rolId) ?? rolId,
+    }))
     saving.value = false
   }
 }

@@ -17,6 +17,79 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El PIN que no servía y el guardado de roles a medias (2026-08-16)
+
+Dos entradas de *"Medir primero"*. Una tercera —el scoping de escritura de caja— se midió en
+la misma pasada y **no se construyó**: sigue abierta y reescrita, ver más abajo.
+
+### La baja "sigue" avisa cuando el PIN que entrega no va a funcionar
+
+`aplicarBajaDeCuenta` desvinculaba y escribía el PIN sin mirar `garzon.activo`. Si el garzón
+ya estaba desactivado, la respuesta decía `accion: 'desvinculado'` con un PIN de 6 dígitos en
+claro —la única vez que ese PIN existe fuera de la base— que **no opera**, porque
+`verificarPin` filtra `activo: true`. Nadie se enteraba hasta que la persona lo tecleaba.
+
+**Medido: es alcanzable sin que nadie haga nada raro.** `PATCH /garzones/:id` deja desactivar
+un garzón vinculado, sin ningún guard que lo impida, y quien da de baja la cuenta no
+necesariamente sabe en qué estado quedó el garzón.
+
+Ahora `aplicarBajaDeCuenta` devuelve `{ aplicado, garzonActivo }` y la respuesta de la baja
+suma `advertencias`. **Advierte y no bloquea**, mismo criterio que las de `actualizar()`:
+quien da la baja puede querer el PIN igual porque va a reactivar al garzón después, y
+negárselo lo dejaría sin ninguna credencial que entregar.
+
+`garzonActivo` se lee **antes** de escribir, y ese orden es la conducta: la rama `no-sigue`
+pone `activo = false` como su efecto, así que leyéndolo después toda baja `no-sigue` se
+reportaría como "desactivado" y el aviso perdería el significado. Hay un test dedicado a eso.
+
+⚠️ **Anotado porque cambia cómo leer esto: `DELETE /tenants/members/:userId` no tiene
+pantalla.** El único `DELETE` de `configuracion/usuarios/index.vue` es el de roles. El flujo
+entero de la baja —incluido el PIN en claro "una sola vez"— es API pura hoy. El arreglo va
+igual en la respuesta, que es el contrato y donde lo va a leer la pantalla cuando exista,
+pero **no hay usuario que vea esta advertencia todavía**.
+
+### El editor de roles ya no deja el backend y la pantalla diciendo cosas distintas
+
+`configuracion/usuarios/index.vue` agregaba los roles nuevos en un loop y quitaba los sacados
+en otro, y desde el 2026-08-16 `DELETE /roles/:id/users/:userId` puede responder 400 (dejaría
+al tenant sin ningún administrador). **Medido: ese 400 es alcanzable desde esa misma
+pantalla** — el único admin se edita a sí mismo y se destilda "Administrador".
+
+Se arreglaron las dos mitades:
+
+- **Quitar corre primero.** El camino que puede fallar es el primero que sale, así que lo
+  normal es que un guardado rechazado **no deje nada aplicado**. Antes, agregando primero,
+  los agregados quedaban escritos y el quitado no.
+- **El estado local sale de lo APLICADO, no de lo pedido**, y se recalcula en el `finally`.
+  Eso cubre lo que el orden solo no arregla —dos bajas donde la segunda falla— y de paso hace
+  correcto el reintento: `guardar()` recalcula el diff desde `member.roles`, así que apretar
+  Guardar de nuevo manda lo que falta y no lo que ya se aplicó.
+
+**No se construyó el endpoint transaccional** que la entrada dejaba como opción. Son N
+requests que no se pueden agrupar desde el cliente, sí, pero inventar una ruta nueva para
+esto es la arquitectura nueva para un problema chico que `CLAUDE.md` descarta. Lo que el
+usuario necesita —que la pantalla no mienta y que reintentar funcione— se resuelve sin ella.
+
+### Los mutantes
+
+| Mutante | Qué cae |
+|---|---|
+| `garzonActivo` leído después de escribir | 1 unit: `no-sigue` reportaría "desactivado" siempre |
+| Agregar antes que quitar (el orden viejo) | 2 tests del editor de roles |
+| Estado local desde `seleccion` en vez de lo aplicado | 1 test: el de la baja parcial |
+
+### Lo que NO se construyó, y por qué
+
+La entrada del **scoping por tenant de la escritura de caja** afirmaba que sacar el filtro
+*"cuelga la corrida"*. Se midió y **es falso**: el spec da 35/35 en 8,5 s con el filtro
+sacado. Lo que pasa es que **el mutante sobrevive**, porque las tres defensas son redundantes
+en la dimensión del tenant. Lo único que la primera aporta sola es no tomar un `FOR UPDATE`
+sobre la fila de otro tenant antes de rechazar — y fijar eso pide mirar `pg_locks`, o sea el
+frente 🔴 de conexiones/deadlock, que va aislado. La entrada quedó **reescrita, no cerrada**,
+y el docblock de `caja.e2e-spec.ts` corregido para que nadie vuelva a planificar sobre un
+cuelgue que no existe.
+
+
 ## `impuestos` entra a la familia de la unicidad de nombre, y eran cinco piezas (2026-08-16)
 
 Era la única de los nueve catálogos sin índice único de nombre por tenant. Ahora lo tiene,

@@ -133,7 +133,9 @@ describe('TenantsService', () => {
       prepararPinPorBajaDeCuenta: jest
         .fn()
         .mockResolvedValue({ pin: '424242', hash: 'hash-424242' }),
-      aplicarBajaDeCuenta: jest.fn().mockResolvedValue(true),
+      aplicarBajaDeCuenta: jest
+        .fn()
+        .mockResolvedValue({ aplicado: true, garzonActivo: true }),
     };
     // Por defecto queda otro admin: la baja normal no se bloquea.
     rbac = { administradoresDe: jest.fn().mockResolvedValue(['otro-admin']) };
@@ -1302,6 +1304,8 @@ describe('TenantsService', () => {
         nombre: 'Ana Torres',
         accion: 'desvinculado',
         pin: '424242',
+        // Vacío: el garzón estaba ACTIVO, así que el PIN va a operar.
+        advertencias: [],
       });
       // `BAJA` entre medio: es la cuenta sobre la que se tomó la decisión, y
       // sin pasarla la escritura no puede detectar que el garzón se
@@ -1335,6 +1339,9 @@ describe('TenantsService', () => {
         nombre: 'Ana Torres',
         accion: 'desactivado',
         pin: null,
+        // `no-sigue` desactiva: que quede desactivado es su EFECTO, no un
+        // aviso. La advertencia es solo de la salida "sigue".
+        advertencias: [],
       });
       // Ni siquiera se genera: un PIN emitido y no entregado le quedaría al
       // garzón como credencial viva sin que nadie lo sepa.
@@ -1373,7 +1380,10 @@ describe('TenantsService', () => {
         id: 'g-1',
         nombre: 'Ana Torres',
       });
-      garzones.aplicarBajaDeCuenta.mockResolvedValue(false);
+      garzones.aplicarBajaDeCuenta.mockResolvedValue({
+        aplicado: false,
+        garzonActivo: false,
+      });
 
       const res = await service.removeMember(TENANT, BAJA, ACTOR, 'sigue');
 

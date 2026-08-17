@@ -1914,14 +1914,27 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
   });
 
   /**
-   * ⚠️ Este test NO fija el scoping por tenant del camino de escritura, y el
-   * matiz es medido, no una precaución.
+   * ⚠️ Este test NO aísla el filtro de tenant de `bloquearCajaAbierta`, y la
+   * razón se midió el 2026-08-16 — **corrigiendo lo que este comentario decía
+   * antes**.
    *
-   * La escritura tiene tres defensas apiladas —`bloquearCajaAbierta` con
-   * `FOR UPDATE`, el `findOne` acotado y el chequeo de dueño— y no se pudo
-   * construir un mutante que aislara la del tenant: sacándola, la request del
-   * otro tenant llega al `FOR UPDATE` y la corrida se cuelga, o sea que no hay
-   * aserción posible sobre el resultado. Queda anotado en `pendientes.md`.
+   * Decía que el mutante "cuelga la corrida". **Es falso.** Sacándole el
+   * `AND tenant_id = $2` a `bloquearCajaAbierta`: este test solo corre en 3,7 s
+   * y **pasa**, y el spec entero da **35/35 en 8,5 s**. No hay ningún cuelgue.
+   *
+   * Lo que pasa de verdad es más ordinario y peor: **el mutante SOBREVIVE**. Las
+   * tres defensas de la escritura —`bloquearCajaAbierta`, el `findOne` acotado
+   * (`caja.service.ts`, justo debajo del lock) y el chequeo de dueño— son
+   * redundantes en la dimensión del tenant, así que sacar la primera deja que
+   * la segunda produzca exactamente el mismo no-201 y ninguna aserción cambia.
+   *
+   * Lo único que el filtro de la PRIMERA aporta por su cuenta es **no tomar un
+   * `FOR UPDATE` sobre la fila de otro tenant antes de rechazar**. Eso no es un
+   * agujero de datos —el `findOne` frena igual— pero sí deja que un tenant
+   * bloquee la caja de otro mientras dura la transacción. Observarlo pide mirar
+   * `pg_locks`, o sea el frente 🔴 de conexiones/deadlock, que en este proyecto
+   * va aislado y nunca de arrastre (`CLAUDE.md`). Por eso sigue sin test y por
+   * eso la entrada de `pendientes.md` quedó reescrita en vez de cerrada.
    *
    * Lo que sí fija, y es lo que importa: la escritura **no prospera** y la caja
    * del otro tenant **queda intacta**. Un conteo ajeno le congelaría el arqueo

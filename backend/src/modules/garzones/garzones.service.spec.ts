@@ -1741,7 +1741,7 @@ describe('GarzonesService', () => {
         PIN,
       );
 
-      expect(aplicado).toBe(false);
+      expect(aplicado.aplicado).toBe(false);
       expect(m.save).not.toHaveBeenCalled();
     });
 
@@ -1757,7 +1757,7 @@ describe('GarzonesService', () => {
         PIN,
       );
 
-      expect(aplicado).toBe(false);
+      expect(aplicado.aplicado).toBe(false);
       expect(m.save).not.toHaveBeenCalled();
     });
 
@@ -1773,7 +1773,7 @@ describe('GarzonesService', () => {
         PIN,
       );
 
-      expect(aplicado).toBe(false);
+      expect(aplicado.aplicado).toBe(false);
       expect(m.save).not.toHaveBeenCalled();
     });
 
@@ -1791,7 +1791,7 @@ describe('GarzonesService', () => {
         PIN,
       );
 
-      expect(aplicado).toBe(true);
+      expect(aplicado.aplicado).toBe(true);
       const guardado = m.save.mock.calls.find(
         ([entidad]: [unknown, unknown]) => entidad === Garzon,
       )?.[1] as Garzon;
@@ -1802,6 +1802,49 @@ describe('GarzonesService', () => {
       )?.[1] as { tipo: string; usuarioId: string };
       expect(evento.tipo).toBe('regenerado_por_baja_de_cuenta');
       expect(evento.usuarioId).toBe('actor');
+    });
+
+    it('devuelve `garzonActivo: false` si el garzón ya estaba desactivado: ese PIN no va a operar', async () => {
+      // Alcanzable sin nada raro: `actualizar()` deja desactivar un garzón
+      // vinculado (no hay guard), y `verificarPin` filtra `activo: true`. Sin
+      // este dato la baja devolvía un PIN en claro —la única vez que existe
+      // fuera de la base— que no servía, y nadie se enteraba hasta tecleárselo.
+      const m = managerFalso(
+        garzon({ id: 'g1', usuarioId: USUARIO_ID, activo: false }),
+      );
+
+      const res = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        PIN,
+      );
+
+      expect(res.aplicado).toBe(true);
+      expect(res.garzonActivo).toBe(false);
+    });
+
+    it('se lee ANTES de escribir: `no-sigue` desactiva, y reportarlo después haría que toda baja avisara', async () => {
+      // El orden es la conducta: `no-sigue` pone `activo = false` como su
+      // efecto. Leyendo después, `garzonActivo` sería `false` SIEMPRE en esa
+      // rama y el aviso perdería todo su significado.
+      const m = managerFalso(
+        garzon({ id: 'g1', usuarioId: USUARIO_ID, activo: true }),
+      );
+
+      const res = await service.aplicarBajaDeCuenta(
+        m as never,
+        TENANT,
+        'g1',
+        USUARIO_ID,
+        'actor',
+        null,
+      );
+
+      expect(res.garzonActivo).toBe(true);
+      expect((m.save.mock.calls[0][1] as Garzon).activo).toBe(false);
     });
 
     it('"no sigue" desactiva sin tocar el vínculo ni el PIN, y sin escribir evento', async () => {
@@ -1819,7 +1862,7 @@ describe('GarzonesService', () => {
         null,
       );
 
-      expect(aplicado).toBe(true);
+      expect(aplicado.aplicado).toBe(true);
       const guardado = m.save.mock.calls[0][1] as Garzon;
       expect(guardado.activo).toBe(false);
       expect(guardado.usuarioId).toBe(USUARIO_ID);

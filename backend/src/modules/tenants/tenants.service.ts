@@ -93,6 +93,16 @@ export interface BajaMiembroResultado {
      * nadie lo conoce. `null` cuando el garzón no sigue trabajando.
      */
     pin: string | null;
+    /**
+     * Efectos que quien da la baja no anticipa. Viene siempre —vacío cuando no
+     * hay nada que decir—, igual que en `GarzonConAdvertencias`.
+     *
+     * Hoy trae una sola, y solo en la salida `sigue`: que el garzón ya estaba
+     * **desactivado**, así que el PIN de arriba no va a operar hasta que
+     * alguien lo reactive (`verificarPin` y `garzonPersonalDe` filtran los dos
+     * `activo = true`). Advierte y no bloquea.
+     */
+    advertencias: string[];
   } | null;
 }
 
@@ -1247,14 +1257,15 @@ export class TenantsService {
       }
 
       if (!garzon) return { garzon: null };
-      const aplicado = await this.garzonesService.aplicarBajaDeCuenta(
-        manager,
-        tenantId,
-        garzon.id,
-        usuarioId,
-        usuarioActorId,
-        pinPreparado,
-      );
+      const { aplicado, garzonActivo } =
+        await this.garzonesService.aplicarBajaDeCuenta(
+          manager,
+          tenantId,
+          garzon.id,
+          usuarioId,
+          usuarioActorId,
+          pinPreparado,
+        );
       // El garzón ya no está vinculado a ESTA cuenta entre la lectura previa y
       // el BEGIN —lo desvincularon, lo borraron, o lo re-vincularon a otra—:
       // la baja se hizo igual, pero prometer un PIN que no se escribió sería
@@ -1268,6 +1279,20 @@ export class TenantsService {
             ? ('desvinculado' as const)
             : ('desactivado' as const),
           pin: pinPreparado?.pin ?? null,
+          // Solo en la salida "sigue", y solo si el garzón ya estaba
+          // desactivado: el PIN que va en `pin` no va a operar
+          // (`verificarPin` filtra `activo: true`) hasta que alguien lo
+          // reactive. Advierte y no bloquea, mismo criterio que las
+          // advertencias de `actualizar()`. Siempre presente —vacío cuando no
+          // hay nada que decir— para que quien consuma no tenga que
+          // distinguir "sin advertencias" de "el endpoint no las manda".
+          advertencias:
+            pinPreparado && !garzonActivo
+              ? [
+                  `${garzon.nombre} está desactivado: el PIN nuevo no va a ` +
+                    `funcionar hasta que lo reactives desde Configuración → Garzones.`,
+                ]
+              : [],
         },
       };
     });

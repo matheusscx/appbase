@@ -37,6 +37,7 @@ interface BajaResponse {
     nombre: string;
     accion: 'desvinculado' | 'desactivado';
     pin: string | null;
+    advertencias: string[];
   } | null;
 }
 
@@ -595,5 +596,67 @@ describe('Membresía (e2e): la baja pregunta por el garzón vinculado', () => {
     const despues = await ficha(garzon.id);
     expect(despues.usuarioId).toBe(usuarioId);
     expect(despues.pinFijado).toBe(false);
+  });
+
+  /**
+   * La salida "sigue" sobre un garzón DESACTIVADO. Alcanzable sin que nadie
+   * haya hecho nada raro: `PATCH /garzones/:id` deja desactivar un garzón
+   * vinculado (no hay guard que lo impida), y quien da la baja de la cuenta no
+   * necesariamente sabe en qué estado quedó el garzón.
+   *
+   * Hasta el 2026-08-16 la respuesta decía `accion: 'desvinculado'` con un PIN
+   * de 6 dígitos en claro —la única vez que existe fuera de la base— que **no
+   * opera**, porque `verificarPin` filtra `activo: true`. Nadie se enteraba
+   * hasta que la persona lo tecleaba.
+   */
+  it('"sigue" sobre un garzón DESACTIVADO devuelve el PIN igual, pero avisa que no va a funcionar', async () => {
+    const { usuarioId, garzon } = await miembroConGarzon();
+
+    await request(app.getHttpServer())
+      .patch(`/api/garzones/${garzon.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activo: false })
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .delete(`/api/tenants/members/${usuarioId}?garzon=sigue`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const baja = (res.body as BajaResponse).garzon;
+    expect(baja).toBeTruthy();
+
+    // Advierte, NO bloquea: el PIN se emite igual. Quien da la baja puede
+    // tener razones para quererlo —va a reactivar al garzón después—, y
+    // negárselo lo dejaría sin ninguna credencial que entregar.
+    expect(baja!.accion).toBe('desvinculado');
+    expect(baja!.pin).toMatch(/^\d{6}$/);
+    expect(baja!.advertencias.join(' ')).toContain('desactivado');
+
+    // Y la advertencia es CIERTA, que es lo que la hace algo más que un texto:
+    // ese PIN no abre nada mientras el garzón siga desactivado.
+    const intento = await request(app.getHttpServer())
+      .post('/api/garzones/verificar-pin')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: garzon.id, pin: baja!.pin });
+    expect(intento.status).toBe(400);
+  });
+
+  it('"sigue" sobre un garzón ACTIVO no advierte nada: ahí el PIN sí opera', async () => {
+    // El contraste que hace falsable al de arriba: sin esto, un `advertencias`
+    // con el texto puesto siempre pasaría los dos.
+    const { usuarioId, garzon } = await miembroConGarzon();
+
+    const res = await request(app.getHttpServer())
+      .delete(`/api/tenants/members/${usuarioId}?garzon=sigue`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const baja = (res.body as BajaResponse).garzon;
+    expect(baja!.advertencias).toEqual([]);
+
+    const intento = await request(app.getHttpServer())
+      .post('/api/garzones/verificar-pin')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: garzon.id, pin: baja!.pin });
+    expect(intento.status).toBe(200);
   });
 });

@@ -35,6 +35,22 @@ let respuestaAlta = {
 }
 let toasts: { title?: string, description?: string, color?: string }[] = []
 
+// ── Editor de roles ─────────────────────────────────────────────────────────
+/** Los roles que ofrece `GET /roles`. */
+let rolesBackend = [{ id: 'r-1', nombre: 'Cajero' }]
+/** Cada asignación/desasignación recibida, EN ORDEN: la sonda del bug. */
+let opsRoles: { metodo: 'POST' | 'DELETE', rolId: string }[] = []
+/**
+ * Los `rolId` cuyo `DELETE` responde 400 — el guard del último administrador
+ * (`roles.service.ts` → `removeUser`), alcanzable desde esta pantalla cuando el
+ * único admin se destilda a sí mismo.
+ */
+let deleteRechaza = new Set<string>()
+
+function errorApi(message: string): Error {
+  return Object.assign(new Error('Request failed'), { data: { message } })
+}
+
 mockNuxtImport('useToast', () => {
   return () => ({
     add: (t: { title?: string, description?: string, color?: string }) => {
@@ -49,7 +65,24 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/tenants/usuarios') && opts?.method === 'POST')
       return Promise.resolve(respuestaAlta)
     if (url.includes('/tenants/members')) return Promise.resolve(membersBackend)
-    if (url.includes('/roles')) return Promise.resolve([{ id: 'r-1', nombre: 'Cajero' }])
+    // ANTES del `/roles` genérico: `/roles/r-1/users` también lo contiene, y
+    // sin esta rama las escrituras "salían bien" devolviendo el listado.
+    if (url.includes('/roles/') && url.includes('/users')) {
+      const rolId = url.split('/roles/')[1]?.split('/')[0] ?? ''
+      const metodo = opts?.method === 'DELETE' ? 'DELETE' : 'POST'
+      opsRoles.push({ metodo, rolId })
+      if (metodo === 'DELETE' && deleteRechaza.has(rolId)) {
+        return Promise.reject(
+          errorApi(
+            'No se puede quitar ese rol: dejaría a la empresa sin ningún '
+            + 'administrador, y no hay forma de volver a asignar uno desde la '
+            + 'aplicación. Dale el rol de administrador a otra persona primero.',
+          ),
+        )
+      }
+      return Promise.resolve({})
+    }
+    if (url.includes('/roles')) return Promise.resolve(rolesBackend)
     return Promise.resolve([])
   }
 })
@@ -72,6 +105,9 @@ let montado: { unmount: () => void } | null = null
 beforeEach(() => {
   membersBackend = []
   toasts = []
+  rolesBackend = [{ id: 'r-1', nombre: 'Cajero' }]
+  opsRoles = []
+  deleteRechaza = new Set()
   respuestaAlta = {
     usuarioId: 'u-nuevo',
     correo: 'nuevo@example.com',
@@ -209,5 +245,107 @@ describe('configuracion/usuarios — el alta avisa cuál de los tres desenlaces 
 
     expect(toasts.at(-1)?.title).toContain('Invitación enviada')
     expect(toasts.at(-1)?.description).toContain('elegir su contraseña')
+  })
+})
+
+/**
+ * El editor de roles aplica N requests que **no son atómicas** —no hay endpoint
+ * que las agrupe— y desde el 2026-08-16 una de ellas puede fallar:
+ * `DELETE /roles/:id/users/:userId` responde 400 si dejaría al tenant sin
+ * ningún administrador, y ese 400 es alcanzable desde acá (el único admin se
+ * edita a sí mismo y se destilda "Administrador").
+ *
+ * Lo que estos tests fijan es que un guardado a medias no mienta: la fila
+ * muestra lo que el backend TIENE, no lo que se pidió.
+ */
+describe('configuracion/usuarios — un guardado de roles a medias no miente', () => {
+  /** Abre el editor de roles del primer miembro y devuelve el `<form>`. */
+  async function abrirEditor(wrapper: Awaited<ReturnType<typeof montar>>) {
+    const boton = wrapper.findAll('button')
+      .find(b => b.attributes('title') === 'Editar roles')
+    expect(boton, 'botón "Editar roles"').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    const form = document.body.querySelector('#usuario-roles-form')
+    expect(form, 'formulario de roles en el body').toBeTruthy()
+    return form as HTMLFormElement
+  }
+
+  /** Elige exactamente estos roles en el `USelectMenu` y guarda. */
+  async function elegirYGuardar(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    nombres: string[],
+  ) {
+    const form = await abrirEditor(wrapper)
+    const trigger = form.querySelector('button')
+    expect(trigger, 'trigger del selector de roles').toBeTruthy()
+    trigger!.click()
+    await new Promise(r => setTimeout(r, 40))
+
+    for (const nombre of nombres) {
+      const opcion = [...document.body.querySelectorAll('[role="option"]')]
+        .find(o => o.textContent?.trim() === nombre)
+      expect(opcion, `opción "${nombre}" en el selector`).toBeTruthy()
+      ;(opcion as HTMLElement).click()
+      await new Promise(r => setTimeout(r, 20))
+    }
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await new Promise(r => setTimeout(r, 60))
+  }
+
+  it('quita ANTES de agregar: el camino que puede fallar corre primero', async () => {
+    rolesBackend = [{ id: 'r-1', nombre: 'Cajero' }, { id: 'r-2', nombre: 'Supervisor' }]
+    membersBackend = [miembro()]
+    const wrapper = await montar()
+
+    // Destilda Cajero y tilda Supervisor en el mismo guardado.
+    await elegirYGuardar(wrapper, ['Cajero', 'Supervisor'])
+
+    expect(opsRoles).toEqual([
+      { metodo: 'DELETE', rolId: 'r-1' },
+      { metodo: 'POST', rolId: 'r-2' },
+    ])
+  })
+
+  it('si el DELETE falla, el POST no llega a salir y la fila sigue mostrando el rol viejo', async () => {
+    rolesBackend = [{ id: 'r-1', nombre: 'Cajero' }, { id: 'r-2', nombre: 'Supervisor' }]
+    membersBackend = [miembro()]
+    deleteRechaza = new Set(['r-1'])
+    const wrapper = await montar()
+
+    await elegirYGuardar(wrapper, ['Cajero', 'Supervisor'])
+
+    // Nada quedó a medias: el 400 cortó antes de agregar nada.
+    expect(opsRoles).toEqual([{ metodo: 'DELETE', rolId: 'r-1' }])
+    // Y la fila dice la verdad. Antes del 2026-08-16 el orden era el inverso y
+    // "Supervisor" quedaba aplicado en el backend sin que la pantalla lo
+    // mostrara nunca.
+    expect(wrapper.text()).toContain('Cajero')
+    expect(wrapper.text()).not.toContain('Supervisor')
+    // El mensaje del backend llega tal cual: dice la razón y qué hacer.
+    expect(toasts.some(t => t.color === 'error' && t.title?.includes('sin ningún administrador'))).toBe(true)
+  })
+
+  it('si una baja pasa y la siguiente falla, la fila muestra EXACTAMENTE lo que quedó', async () => {
+    // El caso que el reordenamiento solo no arregla, y que obliga a que el
+    // estado local salga de lo aplicado y no de lo pedido.
+    rolesBackend = [{ id: 'r-1', nombre: 'Cajero' }, { id: 'r-2', nombre: 'Supervisor' }]
+    membersBackend = [miembro({
+      roles: [{ rolId: 'r-1', nombre: 'Cajero' }, { rolId: 'r-2', nombre: 'Supervisor' }],
+    })]
+    deleteRechaza = new Set(['r-2'])
+    const wrapper = await montar()
+
+    // Destilda los dos.
+    await elegirYGuardar(wrapper, ['Cajero', 'Supervisor'])
+
+    expect(opsRoles).toEqual([
+      { metodo: 'DELETE', rolId: 'r-1' },
+      { metodo: 'DELETE', rolId: 'r-2' },
+    ])
+    // Cajero se fue, Supervisor no: eso es lo que la fila tiene que decir.
+    expect(wrapper.text()).not.toContain('Cajero')
+    expect(wrapper.text()).toContain('Supervisor')
   })
 })

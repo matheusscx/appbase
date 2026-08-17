@@ -298,27 +298,6 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **La salida "sigue" de la baja devuelve un PIN que puede no servir**
-  (backend, **hallazgo de la revisión del cluster de membresía, 2026-08-16**) —
-  `aplicarBajaDeCuenta` desvincula y escribe el PIN sin mirar `garzon.activo`. Si el garzón
-  ya estaba inactivo, la respuesta dice `accion: 'desvinculado'` con un PIN de 6 dígitos
-  que no opera, y nadie se entera hasta que la persona lo teclea.
-  **Qué medir:** cuán alcanzable es la combinación (¿un garzón inactivo con cuenta
-  vinculada es un estado normal o un residuo?). De ahí sale si corresponde una advertencia
-  en la respuesta —como las de `actualizar()`— o si el caso no vale el código.
-
-- [ ] **El editor de roles de la pantalla de usuarios aplica en dos loops y el 400 nuevo lo
-  parte al medio** (frontend, **hallazgo de la revisión del cluster de membresía,
-  2026-08-16**) — `configuracion/usuarios/index.vue` agrega los roles nuevos en un loop y
-  después quita los sacados en otro. Desde el 2026-08-16 `DELETE /roles/:id/users/:userId`
-  puede responder 400 (dejaría al tenant sin admin), así que un guardado que agrega y quita
-  a la vez puede dejar los agregados aplicados y los quitados no: el backend queda en un
-  estado que el modal no muestra, y el toast dice otra cosa.
-  **Qué medir:** si el 400 es alcanzable desde esa pantalla en la práctica (¿deja sacarse
-  el propio rol de admin?) y si conviene un solo endpoint transaccional en vez de N
-  requests. El mensaje del backend sí le llega al usuario por `apiErrorMsg`, así que no
-  queda mudo — queda inconsistente.
-
 - [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
   saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
   del proyecto dice que `movimientos_inventario` es la fuente de verdad y `item_producto.stock`
@@ -357,12 +336,27 @@ decisión que no es mía).
   evitar. Si alguna vez se quiere igual, es una decisión nueva del owner y no un arreglo.
 
 - [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
-  test** (backend) — el e2e nuevo prueba que la escritura ajena no prospera y que la caja
-  queda intacta, pero no aísla cuál de las tres defensas la frena
-  (`bloquearCajaAbierta` + `findOne` acotado + chequeo de dueño). Medido: sacando la de
-  tenant, la request del otro tenant llega al `FOR UPDATE` y la corrida **se cuelga**, así
-  que no hay aserción posible sobre el resultado. Encararlo probablemente pida un timeout
-  explícito en la query o mirar el lock, no un `expect` de status.
+  test** (backend) — el e2e prueba que la escritura ajena no prospera y que la caja queda
+  intacta, pero no aísla cuál de las tres defensas la frena (`bloquearCajaAbierta` +
+  `findOne` acotado + chequeo de dueño).
+
+  ⛔ **CORRECCIÓN medida el 2026-08-16: esta entrada afirmaba algo falso.** Decía que
+  sacando el filtro de tenant *"la corrida se cuelga"*. **No se cuelga.** Con el
+  `AND tenant_id = $2` sacado de `bloquearCajaAbierta`, el test solo corre en **3,7 s y
+  pasa**, y el spec entero da **35/35 en 8,5 s**. Nunca hubo cuelgue que esquivar.
+
+  ✅ **Lo que pasa de verdad, y es más ordinario:** el mutante **sobrevive**. Las tres
+  defensas son redundantes en la dimensión del tenant, así que sacar la primera deja que el
+  `findOne` acotado produzca el mismo no-201 y ninguna aserción se mueve. No es que no se
+  pueda medir el resultado: es que el resultado no cambia.
+
+  🔴 **Y por eso lo que queda ES el frente prohibido.** Lo único que el filtro de la primera
+  defensa aporta por su cuenta es **no tomar un `FOR UPDATE` sobre la fila de otro tenant
+  antes de rechazar**. No es un agujero de datos —el `findOne` frena igual— pero deja que un
+  tenant bloquee la caja de otro mientras dura la transacción. Fijarlo con un test pide
+  mirar `pg_locks`, o sea abrir **conexiones/deadlock**, que va aislado y nunca de arrastre.
+  ➡️ **No se toca hasta que se abra esa tanda.** El docblock de `caja.e2e-spec.ts` ya quedó
+  corregido para que nadie vuelva a planificar sobre el cuelgue que no existe.
 
 - [ ] **Un flaky del e2e de caja, y seis lecturas de `/tenants/members` que esconden su
   causa** (backend/tests, visto el 2026-08-11) — son dos cosas y la segunda es la que se
