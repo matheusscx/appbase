@@ -6,6 +6,7 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
+import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Impuesto } from './entities/impuesto.entity';
 import { CreateImpuestoDto } from './dto/create-impuesto.dto';
 import { UpdateImpuestoDto } from './dto/update-impuesto.dto';
@@ -109,8 +110,55 @@ export class ImpuestosService {
     }));
   }
 
+  /**
+   * Si el nombre está libre para ESTE tenant. Espeja
+   * `descuentos.service.ts → nombreDisponible()`, y como allá la comparación es
+   * `LOWER() = LOWER()` para que coincida con el índice
+   * `uq_impuestos_tenant_nombre_vivo`, que es sobre `lower(nombre)`: con una
+   * comparación exacta el endpoint diría "libre" y el guardado fallaría 23505.
+   *
+   * `tenant_id = :tenantId` deja **afuera al catálogo del país** —sus filas
+   * tienen `tenant_id` nulo— y eso es deliberado: el índice tampoco las cubre.
+   * Un tenant puede llamar "IVA" a un impuesto propio aunque el país tenga el
+   * suyo; en el listado se distinguen por el badge Sistema/Personalizado, que
+   * `findAll` alimenta con `origen`.
+   */
+  async nombreDisponible(
+    tenantId: string,
+    nombre: string,
+    excludeId?: string,
+  ): Promise<{ disponible: boolean }> {
+    const qb = this.impuestoRepo
+      .createQueryBuilder('i')
+      .where('i.tenant_id = :tenantId', { tenantId })
+      .andWhere('LOWER(i.nombre) = LOWER(:nombre)', { nombre })
+      .andWhere('i.eliminado_el IS NULL');
+    if (excludeId) {
+      qb.andWhere('i.impuesto_id != :excludeId', { excludeId });
+    }
+    return { disponible: (await qb.getCount()) === 0 };
+  }
+
+  private async validarNombreUnico(
+    tenantId: string,
+    nombre: string,
+    excludeId?: string,
+  ): Promise<void> {
+    const { disponible } = await this.nombreDisponible(
+      tenantId,
+      nombre,
+      excludeId,
+    );
+    if (!disponible) {
+      throw new BadRequestException(
+        `Ya existe un impuesto con el nombre "${nombre}"`,
+      );
+    }
+  }
+
   async create(tenantId: string, dto: CreateImpuestoDto): Promise<Impuesto> {
     this.validarPorcentaje(dto.porcentaje);
+    await this.validarNombreUnico(tenantId, dto.nombre);
     const impuesto = this.impuestoRepo.create({
       tenantId,
       nombre: dto.nombre,
@@ -134,6 +182,11 @@ export class ImpuestosService {
     }
     if (dto.porcentaje !== undefined) {
       this.validarPorcentaje(dto.porcentaje);
+    }
+    // `excludeId`: renombrar un impuesto dejándole el mismo nombre no puede
+    // chocar contra sí mismo.
+    if (dto.nombre !== undefined) {
+      await this.validarNombreUnico(tenantId, dto.nombre, id);
     }
     Object.assign(impuesto, dto);
     return this.impuestoRepo.save(impuesto);
@@ -187,7 +240,11 @@ export class ImpuestosService {
     return { items };
   }
 
-  async restaurar(tenantId: string, id: string): Promise<Impuesto> {
+  async restaurar(
+    tenantId: string,
+    id: string,
+    nombreNuevo?: string,
+  ): Promise<Impuesto> {
     // Una sola regla para los tres casos —no existe, existe y está viva, o
     // la borró el sistema (`eliminadoPor` nulo, p.ej. un duplicado de IVA
     // que remapImpuestosOficialesDuplicados soft-deleteó — ver ADR-018)—:
@@ -207,10 +264,43 @@ export class ImpuestosService {
     // disfrazaría es el de `remapImpuestosOficialesDuplicados`, o sea
     // restaurar el duplicado de IVA reabre la doble tributación del 38%
     // (ADR-018).
-    await this.impuestoRepo.update(
-      { id, tenantId },
-      { eliminadoEl: null, eliminadoPor: null },
-    );
+    const nombre = nombreNuevo ?? impuesto.nombre;
+    try {
+      // Revivir y renombrar van en la MISMA escritura: dos sentencias dejarían
+      // una ventana con la fila viva y el nombre en colisión.
+      await this.impuestoRepo.update(
+        { id, tenantId },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+        },
+      );
+    } catch (e) {
+      // 23505 = unique_violation. `uq_impuestos_tenant_nombre_vivo` es parcial
+      // (WHERE eliminado_el IS NULL): mientras el impuesto estaba borrado nadie
+      // competía por el nombre, pero al revivirlo vuelve a competir. Se capta el
+      // código de Postgres —no el nombre del índice— para que valga también
+      // donde no lo enumeramos. Mismo patrón que descuentos, recargos y cajones.
+      if ((e as { code?: string }).code === '23505') {
+        // La sugerencia se calcula ACÁ y no antes del `UPDATE` a propósito: con
+        // índice único el `catch` hace falta igual —entre consultar y escribir
+        // otra transacción puede tomar el nombre—, así que pre-consultar
+        // agregaría una query en TODOS los restaurar sin poder sacar este
+        // bloque.
+        throw new BadRequestException(
+          await errorDeColisionNombre(
+            this.impuestoRepo,
+            'i',
+            'un impuesto activo',
+            tenantId,
+            nombre,
+            { ignorarMayusculas: true },
+          ),
+        );
+      }
+      throw e;
+    }
     return this.impuestoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 }

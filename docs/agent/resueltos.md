@@ -17,6 +17,57 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `impuestos` entra a la familia de la unicidad de nombre, y eran cinco piezas (2026-08-16)
+
+Era la única de los nueve catálogos sin índice único de nombre por tenant. Ahora lo tiene,
+con la misma forma que sus ocho hermanas: `ON (tenant_id, lower(nombre)) WHERE eliminado_el
+IS NULL`.
+
+**Lo que la entrada subcontaba, y por eso vale anotarlo.** La entrada pedía un índice y
+dejaba abiertas dos preguntas. Las dos se contestaron y ninguna era el problema:
+
+- *¿Las filas del catálogo del país romperían un índice por tenant?* **No.**
+  `CHK_impuestos_scope` fuerza `tenant_id` XOR `pais_id`, las de país tienen `tenant_id`
+  nulo, y en Postgres dos NULL nunca colisionan en un índice único.
+- *¿La unicidad debe incluir al IVA?* **No puede**, por ese mismo CHECK: el IVA es de país.
+
+Lo que sí era el problema no estaba en la entrada: **`impuestos.service.ts` no tenía nada
+de lo que las hermanas sí**. Ni pre-chequeo de nombre en `create`/`update`, ni `catch` del
+`23505` en `restaurar()`, ni `GET /nombre-disponible`, ni frontend que lo consuma. El
+índice solo —que era lo que la entrada pedía— **convertía tres caminos silenciosos en tres
+500 crudos**. Se construyeron las cinco piezas.
+
+**La consecuencia que justificaba la entrada, verificada y no solo citada.** El motor de
+precios emite un aviso por impuesto pausado con el nombre en el título (`Impuesto
+"<nombre>"`, `calculo-precios.engine.ts`), y `sinRepetidas()` deduplica por
+`JSON.stringify([titulo, detalle])`. Dos impuestos pausados distintos con el mismo nombre
+colapsaban en un solo aviso. El mismo archivo ya deduplica el aviso de *ítem* pausado por
+`itemId` y no por texto, con el comentario *"dos ítems distintos pueden llamarse igual, y
+acá el id está a mano"* — o sea que el codebase ya sabía que deduplicar por texto está mal
+donde podía evitarlo.
+
+**Una decisión que no hizo falta llevarle al owner, porque medirla la cerró.** El índice no
+cruza tenant y país: un tenant puede llamar "IVA" a un impuesto propio. Antes de tratarlo
+como regla de negocio pendiente se midió la pantalla: `impuestos.vue` ya rinde un badge
+**Sistema / Personalizado** por fila (`origen`), así que las dos filas homónimas no son
+indistinguibles — que era el problema que esta entrada venía a cerrar. El aviso de doble
+tributación de ADR-018 sigue siendo aviso y no bloqueo, como el owner decidió.
+
+**El orden del índice en el seeder no es cosmético.** Va **después** de
+`remapImpuestosOficialesDuplicados()`, no al principio de la función como en las hermanas:
+ese barrido soft-deletea los duplicados de IVA del tenant, y el índice es parcial. Creándolo
+antes, una base con un duplicado vivo haría fallar el `CREATE UNIQUE INDEX` y **el backend
+no arrancaría**.
+
+**Los mutantes.** Tres, todos revirtiendo al código anterior:
+
+| Mutante | Qué cae |
+|---|---|
+| Sin el índice (seeder + `DROP INDEX`) | 2 e2e: la forma del índice y el restaurar con colisión |
+| Sin el `catch` del `23505` en `restaurar()` | 1 e2e: el 400 con `nombreSugerido` |
+| Sin el pre-chequeo en `create()` | 1 unit y 1 e2e — y este es el que **demuestra el punto de la tanda**: el e2e recibe **500 en vez de 400**, que es exactamente lo que habría pasado agregando el índice solo |
+
+
 ## La ficha del garzón deja de mentir sobre lo que la cuenta puede (2026-08-16)
 
 Dos entradas de la sección *"Medir primero"*, cerradas juntas porque la propia entrada ya lo

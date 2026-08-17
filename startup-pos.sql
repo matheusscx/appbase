@@ -417,6 +417,17 @@ CREATE TABLE "impuestos" (
   CONSTRAINT "CHK_impuestos_scope" CHECK (("tenant_id" IS NULL) <> ("pais_id" IS NULL))
 );
 
+-- Ver la nota de `uq_recargos_tenant_nombre_vivo`: misma regla.
+-- La diferencia con las hermanas es que acá `tenant_id` es NULLABLE, y eso es
+-- lo que deja al catálogo del país FUERA del índice sin ninguna cláusula extra:
+-- `CHK_impuestos_scope` fuerza tenant XOR país, las filas del país tienen
+-- `tenant_id` nulo, y en Postgres dos NULL nunca colisionan en un índice único.
+-- O sea: la unicidad es por tenant, y el IVA del país no entra ni puede entrar
+-- (ADR-018).
+CREATE UNIQUE INDEX "uq_impuestos_tenant_nombre_vivo"
+  ON "impuestos" ("tenant_id", LOWER("nombre"))
+  WHERE "eliminado_el" IS NULL;
+
 -- Catálogo GLOBAL de tipos de regla (sembrado por el sistema). Una sola tabla con
 -- columna discriminadora `clase`. El `codigo` es estable para que el motor de precios
 -- (fase 9) ramifique su cálculo. Descuentos/recargos referencian su tipo (FK NOT NULL).

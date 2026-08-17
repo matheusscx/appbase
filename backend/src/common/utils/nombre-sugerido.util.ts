@@ -107,10 +107,18 @@ export function patronLikeNombre(base: string): string {
  * `base` y cualquier `"<base> …"`); numerar es después aritmética en memoria.
  * Un `SELECT` por candidato sería un N+1 disfrazado de bucle.
  *
- * Sirve para cualquier recurso de la papelera porque las 8 tablas con unicidad
+ * Sirve para cualquier recurso de la papelera porque las 9 tablas con unicidad
  * de nombre comparten exactamente las tres columnas que toca —`tenant_id`,
  * `nombre`, `eliminado_el`— **verificado contra `information_schema` el
  * 2026-08-01**, no asumido por parecido de nombre.
+ *
+ * La novena (`impuestos`, 2026-08-16) tiene las tres, con una diferencia que
+ * NO rompe nada y conviene saber: su `tenant_id` es **nullable** (las otras 8
+ * lo tienen `NOT NULL`), porque ahí conviven el catálogo del país y el del
+ * tenant. El `WHERE tenant_id = :tenantId` de acá abajo deja fuera las filas
+ * del país —`NULL = valor` no matchea— y eso es exactamente lo que se quiere:
+ * el índice tampoco las cubre, así que sugerir contra ellas propondría nombres
+ * "tomados" que en realidad están libres.
  *
  * Extraído acá al aparecer el TERCER consumidor (`turnos`), que es la regla del
  * proyecto (`CLAUDE.md` → Convenciones → Archivos: duplicar dos veces es

@@ -91,9 +91,14 @@ Response (200):
 ```
 
 ```
+GET    /impuestos/nombre-disponible?nombre=X&excludeId=Y
+                            (TenantAdminGuard) — { "disponible": true }
 POST   /impuestos          (TenantAdminGuard) — crea impuesto PERSONALIZADO del tenant
 PATCH  /impuestos/:id       (TenantAdminGuard) — 404 si :id es del sistema (tenant_id NULL no matchea el WHERE)
 DELETE /impuestos/:id       (TenantAdminGuard) — idem, soft delete
+POST   /impuestos/:id/restaurar
+                            (TenantAdminGuard) — body opcional { "nombre": "..." }
+                            400 con `nombreSugerido` si el nombre lo tomó otro mientras estaba en la papelera
 
 Request (POST/PATCH):
 {
@@ -131,7 +136,7 @@ No existe endpoint para crear impuestos del sistema — se siembran solo vía
 | `pais_id` | UUID | nullable, FK `pais` | `NULL` en filas personalizadas |
 | — | — | `CHECK (tenant_id IS NULL) <> (pais_id IS NULL)` | exactamente uno de los dos |
 | `tipo` | TEXT | default `'otro'` | `'iva'` \| `'otro'` |
-| `nombre` | TEXT | | |
+| `nombre` | TEXT | `uq_impuestos_tenant_nombre_vivo` | único por tenant, case-insensitive, solo entre los vivos |
 | `porcentaje` | NUMERIC(7,4) | | decimal: `0.19` = 19% |
 | `activo` | BOOLEAN | default `true` | pausa. **No aplica al IVA** — ver abajo |
 | `creado_el`/`actualizado_el`/`eliminado_el` | TIMESTAMPTZ | | soft delete estándar |
@@ -139,6 +144,52 @@ No existe endpoint para crear impuestos del sistema — se siembran solo vía
 **Sistema**: `(tenant_id NULL, pais_id set)` — ej. IVA Chile, id fijo del seeder
 `550e8400-e29b-41d4-a716-446655440280`, `tipo='iva'`, `porcentaje='0.19'`.
 **Personalizado**: `(tenant_id set, pais_id NULL)`.
+
+### Unicidad de nombre por tenant (2026-08-16)
+
+`impuestos` era **la única** de la familia de catálogos sin índice único de nombre:
+`descuentos`, `recargos`, `turnos`, `cajones`, `causas_merma`, los dos
+`motivo_diferencia` y `grupos_modificadores` ya lo tenían. Ahora son **nueve**, con la
+misma forma: `ON (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL` — case-insensitive
+porque *"Impuesto verde"* e *"impuesto verde"* son el mismo para quien elige de una lista,
+y parcial para que borrar y volver a crear con el mismo nombre funcione.
+
+**Lo que se rompía sin él, medido:** el motor de precios emite un aviso por impuesto
+pausado con el nombre en el título (`Impuesto "<nombre>"`), y `sinRepetidas()` deduplica
+por `[titulo, detalle]`. Dos impuestos pausados distintos con el mismo nombre colapsaban
+en **un solo aviso**: no se perdía nada accionable —los dos mensajes eran idénticos— pero
+el aviso dejaba de contar cuántos hay. El mismo motor ya deduplica el aviso de *ítem*
+pausado por `itemId` y no por texto, precisamente porque *"dos ítems distintos pueden
+llamarse igual"*.
+
+⚠️ **El índice NO cruza tenant y país, y es correcto que no lo haga.** `tenant_id` es
+nullable acá (en las otras ocho es `NOT NULL`), `CHK_impuestos_scope` fuerza tenant XOR
+país, y en Postgres dos `NULL` nunca colisionan en un índice único. O sea: **un tenant
+puede llamar "IVA" a un impuesto propio** aunque el país tenga el suyo. No es un descuido:
+en el listado las dos filas se distinguen por el badge Sistema/Personalizado que alimenta
+`origen`, y el aviso de doble tributación de ADR-018 sigue siendo un aviso y no un bloqueo
+—decisión del owner, el tenant es dueño de su catálogo y la heurística de nombre tiene
+falsos positivos—.
+
+El índice lo crea el seeder **después** de `remapImpuestosOficialesDuplicados()`, y el
+orden no es cosmético: ese barrido soft-deletea los duplicados de IVA del tenant, así que
+creándolo antes una base con uno vivo haría fallar el `CREATE UNIQUE INDEX` y el backend
+no arrancaría.
+
+📌 **Hueco conocido y hoy inalcanzable, anotado para cuando deje de serlo:** por la misma
+razón que el índice no cruza scopes, tampoco impide **dos filas de país con el mismo
+nombre**. No es alcanzable hoy —no existe endpoint que escriba filas con `tenant_id NULL`;
+`create()` siempre setea el tenant, y el seeder inserta el IVA oficial chequeando por `id`,
+no por nombre—, así que no hay nada que arreglar. Vuelve a importar el día que se siembre
+un segundo país o se abra una escritura del catálogo oficial: ahí hace falta un índice
+propio `(pais_id, lower(nombre))`.
+
+Con el índice vinieron las otras cuatro piezas que las hermanas ya tenían y `impuestos`
+no: pre-chequeo en `create`/`update` (400 con texto en vez del 500 crudo de Postgres),
+`catch` del `23505` en `restaurar()` con nombre libre sugerido,
+`GET /impuestos/nombre-disponible` y el formulario que lo consume. **Sin ellas el índice
+solo,** que era lo que la entrada del backlog pedía, **convertía tres caminos silenciosos
+en tres 500.**
 
 ### El IVA no se pausa: se es afecto o exento (2026-08-03)
 

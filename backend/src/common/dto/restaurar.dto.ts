@@ -5,12 +5,13 @@ import { Transform } from 'class-transformer';
  * Body opcional de `POST /<recurso>/:id/restaurar` en los recursos con
  * unicidad de nombre por tenant.
  *
- * Lo usan los **8 controllers** de recursos con unicidad de nombre por tenant
+ * Lo usan los **9 controllers** de recursos con unicidad de nombre por tenant
  * (`descuentos`, `recargos`, `turnos`, `cajones`, `causas-merma`,
  * `motivos-diferencia`, `motivos-diferencia-inventario`,
- * `grupos-modificadores`). Vive en `common/` por la misma razón que
+ * `grupos-modificadores` y, desde el 2026-08-16, `impuestos`). Vive en
+ * `common/` por la misma razón que
  * [`QueryIncluirEliminadosDto`](./query-incluir-eliminados.dto.ts): el nombre
- * del campo es contrato entre esos 8 y las pantallas que los llaman, y si cada
+ * del campo es contrato entre esos 9 y las pantallas que los llaman, y si cada
  * módulo lo escribiera por su cuenta, dos podrían discrepar sin error visible.
  *
  * **Sin body, o sin `nombre`, el comportamiento es el de siempre**: se

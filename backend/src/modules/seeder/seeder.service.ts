@@ -2713,6 +2713,28 @@ export class SeederService implements OnApplicationBootstrap {
     }
 
     await this.remapImpuestosOficialesDuplicados();
+
+    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity
+    // (el índice va sobre `lower(nombre)` y TypeORM no puede expresarlo en
+    // `@Index`).
+    //
+    // ⚠️ Va DESPUÉS del remap y no al principio de la función como en las
+    // hermanas, y la diferencia no es cosmética: `remapImpuestosOficialesDuplicados`
+    // soft-deletea los impuestos del tenant que duplican el IVA oficial, y el
+    // índice es parcial (`WHERE eliminado_el IS NULL`). Creándolo antes, una
+    // base con ese duplicado vivo haría fallar el `CREATE UNIQUE INDEX` y el
+    // backend no arrancaría; creándolo después, el remap ya despejó el caso.
+    //
+    // `tenant_id` es NULLABLE acá (en `descuentos`/`recargos` no lo es), y eso
+    // es justamente lo que deja al catálogo del país fuera del índice sin
+    // ninguna cláusula extra: `CHK_impuestos_scope` fuerza `tenant_id` XOR
+    // `pais_id`, las filas del país tienen `tenant_id` nulo, y en Postgres dos
+    // NULL nunca colisionan en un índice único. La unicidad es por tenant y el
+    // IVA del país no entra — no puede, por el CHECK (ADR-018).
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_impuestos_tenant_nombre_vivo
+      ON impuestos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
   }
 
   /**

@@ -356,41 +356,6 @@ decisión que no es mía).
   reconciliador ahora sería construir sin evidencia**, que es justo lo que la entrada quería
   evitar. Si alguna vez se quiere igual, es una decisión nueva del owner y no un arreglo.
 
-- [ ] **`impuestos` no tiene índice único de nombre por tenant, y sus hermanas sí**
-  (backend/BD, encontrado 2026-08-11 por la revisión del cierre de las advertencias
-  repetidas) — `descuentos` y `recargos` tienen `uq_descuentos_tenant_nombre_vivo` y
-  `uq_recargos_tenant_nombre_vivo` (`startup-pos.sql:442,471`), que además cubren las filas
-  pausadas porque solo excluyen `eliminado_el IS NULL`. `impuestos` no tiene el equivalente,
-  así que un tenant puede tener dos impuestos distintos con el mismo nombre.
-  **Consecuencia medida:** la deduplicación de advertencias (2026-08-11) los colapsa en un
-  solo aviso. No se pierde nada accionable —los dos mensajes serían idénticos y el lector
-  tampoco podría distinguirlos— pero el aviso deja de contar cuántos hay, y la causa de
-  fondo es la unicidad que falta, no la deduplicación.
-  Antes de agregar el índice hay que mirar dos cosas: si hay filas del catálogo del país
-  (`tenant_id` nulo) que romperían un índice por tenant, y si la unicidad debe incluir o no
-  al IVA, que es del país y no del tenant (ADR-018).
-
-  ✅ **MEDIDO el 2026-08-16. Las dos preguntas están contestadas, y aparece una tercera que
-  esta entrada no veía y que es la que la hace cara.**
-
-  - *¿Filas de país romperían el índice?* **No.** `CHK_impuestos_scope` fuerza `tenant_id` XOR
-    `pais_id`, así que las de país tienen `tenant_id` nulo y en Postgres los NULL no colisionan
-    entre sí en un índice único. El índice se puede crear **idéntico** al de las hermanas.
-    Estado de la base de dev: 2 filas de tenant (`tipo='otro'`), 1 de país (el IVA), 0
-    duplicados.
-  - *¿La unicidad incluye al IVA?* **No puede**, por el mismo CHECK: el IVA es de país, no de
-    tenant. No hay decisión que tomar acá.
-  - 🆕 **Lo que la entrada no dice: el índice solo es la quinta parte del trabajo.**
-    `impuestos.service.ts` **no tiene nada** de lo que sus hermanas sí: ni pre-chequeo de nombre
-    en `create()`/`update()` (`descuentos` tiene `validarNombreUnico`), ni `catch` del `23505` en
-    `restaurar()` con nombre sugerido (`errorDeColisionNombre`), ni endpoint
-    `GET /impuestos/nombre-disponible`, ni frontend que lo consuma (`descuentos.vue` y
-    `recargos.vue` son los únicos dos que llaman a `nombre-disponible`). Agregar el índice a
-    secas convierte **tres** caminos hoy silenciosos en **500 crudos**.
-
-  ➡️ Sigue abierta, pero ya no es *"medir primero"*: está medida. Es una tanda propia de cinco
-  piezas sobre un catálogo fiscal, no una línea de SQL en el seeder.
-
 - [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
   test** (backend) — el e2e nuevo prueba que la escritura ajena no prospera y que la caja
   queda intacta, pero no aísla cuál de las tres defensas la frena

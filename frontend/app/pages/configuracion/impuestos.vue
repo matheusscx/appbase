@@ -33,6 +33,13 @@ const confirmModalOpen = ref(false)
 const confirmRestaurarId = ref<string | null>(null)
 const confirmRestaurarModalOpen = ref(false)
 const restaurando = ref(false)
+// Segundo paso del restaurar, solo cuando el backend contesta 400 de colisión:
+// el mensaje que explica cuál nombre está tomado y el nombre libre —editable—
+// con el que se reintenta. Mismo molde que `descuentos.vue`.
+const colisionModalOpen = ref(false)
+const colisionMensaje = ref('')
+const nombrePropuesto = ref('')
+const nombreError = ref<string | null>(null)
 
 // ── Pausar: confirmación con el alcance ─────────────────────────────────────
 const {
@@ -71,6 +78,35 @@ const submitLabel = computed(() =>
 function resetDrawer() {
   editingId.value = null
   form.value = emptyForm()
+  nombreError.value = null
+}
+
+/**
+ * Valida el nombre contra el backend antes de mandar el guardado.
+ *
+ * Existe desde el 2026-08-16, junto con `uq_impuestos_tenant_nombre_vivo`: sin
+ * esto el usuario descubría la colisión recién al apretar Guardar. La consulta
+ * es `LOWER() = LOWER()` del lado del service para que coincida con el índice,
+ * que es sobre `lower(nombre)` — si comparara exacto, diría "libre" y el
+ * guardado fallaría igual.
+ *
+ * **No bloquea el formulario si la consulta falla**: es una ayuda, y el que
+ * decide es el índice. `guardar()` la corre igual antes de mandar, y si aun así
+ * hay carrera el backend responde 400 con el texto que se muestra en el toast.
+ */
+async function checkNombre() {
+  if (!form.value.nombre) { nombreError.value = null; return }
+  try {
+    const params = new URLSearchParams({ nombre: form.value.nombre })
+    if (editingId.value) params.append('excludeId', editingId.value)
+    const res = await useApiFetch<{ disponible: boolean }>(
+      `${apiUrl}/impuestos/nombre-disponible?${params}`,
+    )
+    nombreError.value = res.disponible ? null : 'Ya existe un impuesto con este nombre'
+  }
+  catch {
+    // No bloquear el formulario porque la verificación no pudo correr.
+  }
 }
 
 watch(drawerOpen, (open) => {
@@ -143,6 +179,11 @@ function abrirEditar(imp: Impuesto) {
 }
 
 async function guardar() {
+  // Se revalida acá y no solo en el blur: el usuario puede haber editado el
+  // campo y mandado el form sin que el `@blur` llegara a correr.
+  await checkNombre()
+  if (nombreError.value) return
+
   saving.value = true
   try {
     const body = {
@@ -206,7 +247,22 @@ async function eliminar(id: string) {
   }
 }
 
-async function restaurarImpuesto(id: string) {
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+  colisionModalOpen.value = false
+  colisionMensaje.value = ''
+  nombrePropuesto.value = ''
+}
+
+function confirmarColision() {
+  const id = confirmRestaurarId.value
+  const nombre = nombrePropuesto.value.trim()
+  if (!id || !nombre) return
+  restaurarImpuesto(id, nombre)
+}
+
+async function restaurarImpuesto(id: string, nombreNuevo?: string) {
   // Mismo guard de `origen` que editar/eliminar/togglear: el catálogo oficial
   // del país no es del tenant, y el listado de la papelera SÍ devuelve esas
   // filas (vienen por la rama `pais_id` del `OR`), así que sin el guard la UI
@@ -235,21 +291,40 @@ async function restaurarImpuesto(id: string) {
   if (restaurando.value) return
   restaurando.value = true
   try {
-    await restaurar(id)
+    await restaurar(id, nombreNuevo)
     imp.eliminadoEl = null
     imp.eliminadoPorNombre = null
+    if (nombreNuevo) {
+      // El backend solo devuelve 2xx si aplicó ESE nombre, así que el patch
+      // local no adivina. Reordenar hace falta porque el listado viene
+      // ordenado por nombre y el renombre lo puede mover de lugar.
+      imp.nombre = nombreNuevo
+      impuestos.value = [...impuestos.value].sort((a, b) =>
+        a.nombre.localeCompare(b.nombre, 'es'),
+      )
+    }
     toast.add({ title: 'Impuesto restaurado', color: 'success' })
+    cerrarRestaurar()
   }
   catch (e: unknown) {
-    // El error del backend sube tal cual (404 "no está en la papelera"): trae
-    // más información que un genérico.
-    const msg = apiErrorMsg(e, 'Error al restaurar')
-    toast.add({ title: msg, color: 'error' })
+    const sugerido = nombreSugeridoDe(e)
+    if (sugerido) {
+      // Se reabre con la sugerencia NUEVA: si el usuario editó a un nombre que
+      // también estaba tomado, el backend ya calculó el siguiente libre.
+      colisionMensaje.value = apiErrorMsg(e, 'Ese nombre ya está en uso.')
+      nombrePropuesto.value = sugerido
+      confirmRestaurarModalOpen.value = false
+      colisionModalOpen.value = true
+    }
+    else {
+      // El error del backend sube tal cual (404 "no está en la papelera"): trae
+      // más información que un genérico.
+      toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+      cerrarRestaurar()
+    }
   }
   finally {
     restaurando.value = false
-    confirmRestaurarId.value = null
-    confirmRestaurarModalOpen.value = false
   }
 }
 
@@ -381,7 +456,7 @@ const columns: TableColumn<Impuesto>[] = [
                impuesto propio lo suma al IVA automático (38%). No se bloquea la
                creación —el tenant es dueño de su catálogo y la heurística de
                nombre tiene falsos positivos—, se avisa. Ver ADR-018. -->
-          <UFormField required>
+          <UFormField required :error="nombreError ?? undefined">
             <template #label>
               <span class="inline-flex items-center gap-1">
                 Nombre
@@ -409,6 +484,7 @@ const columns: TableColumn<Impuesto>[] = [
               v-model="form.nombre"
               placeholder="Impuesto verde"
               autofocus
+              @blur="checkNombre"
             />
           </UFormField>
           <UFormField label="Porcentaje (decimal)" required>
@@ -465,8 +541,33 @@ const columns: TableColumn<Impuesto>[] = [
       confirm-label="Restaurar"
       confirm-color="neutral"
       :loading="restaurando"
-      @cancel="confirmRestaurarId = null"
+      @cancel="cerrarRestaurar"
       @confirm="confirmRestaurarId && restaurarImpuesto(confirmRestaurarId)"
     />
+
+    <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo
+         viene precargado con la sugerencia pero es editable: el usuario
+         confirma o escribe el suyo (mismo criterio que descuentos/recargos). -->
+    <CrudModal
+      v-model:open="colisionModalOpen"
+      title="No se puede restaurar con ese nombre"
+      :message="colisionMensaje"
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      :confirm-disabled="!nombrePropuesto.trim()"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmarColision"
+    >
+      <template #detalle>
+        <UFormField label="Restaurar como" class="mt-4">
+          <UInput
+            v-model="nombrePropuesto"
+            aria-label="Restaurar como"
+            autofocus
+          />
+        </UFormField>
+      </template>
+    </CrudModal>
   </div>
 </template>

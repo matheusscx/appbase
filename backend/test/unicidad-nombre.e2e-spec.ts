@@ -7,7 +7,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 /**
- * La unicidad de nombre por tenant es CASE-INSENSITIVE en los 8 recursos que la
+ * La unicidad de nombre por tenant es CASE-INSENSITIVE en los 9 recursos que la
  * tienen. Decisión del owner (2026-08-01): *"Extras" y "extras" son el mismo
  * nombre* — en una lista de catálogo que alguien elige a ojo, dos entradas que
  * solo difieren en mayúsculas son un error de tipeo, no dos cosas distintas.
@@ -38,7 +38,7 @@ const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
 
-/** Las 8 tablas con unicidad de nombre por tenant. */
+/** Las 9 tablas con unicidad de nombre por tenant. */
 const TABLAS_CON_NOMBRE_UNICO = [
   'descuentos',
   'recargos',
@@ -48,6 +48,17 @@ const TABLAS_CON_NOMBRE_UNICO = [
   'motivo_diferencia_caja',
   'motivo_diferencia_inventario',
   'grupos_modificadores',
+  // La novena desde el 2026-08-16. Era la única de la familia sin índice: un
+  // tenant podía tener dos impuestos con el mismo nombre, y la deduplicación
+  // de advertencias del motor de precios —que agrupa por `[titulo, detalle]`,
+  // y el título es `Impuesto "<nombre>"`— los colapsaba en un solo aviso.
+  //
+  // Es también la única con `tenant_id` NULLABLE, y esa diferencia es lo que
+  // deja al catálogo del país fuera del índice sin ninguna cláusula extra:
+  // `CHK_impuestos_scope` fuerza tenant XOR país, y en Postgres dos NULL nunca
+  // colisionan en un índice único. La unicidad es por tenant; el IVA del país
+  // no entra ni puede entrar (ADR-018).
+  'impuestos',
 ];
 
 interface TokenResponse {
@@ -75,7 +86,7 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-describe('Unicidad de nombre (e2e) — case-insensitive en los 8', () => {
+describe('Unicidad de nombre (e2e) — case-insensitive en los 9', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
@@ -210,6 +221,54 @@ describe('Unicidad de nombre (e2e) — case-insensitive en los 8', () => {
     expect(segundo.status).toBe(409);
   });
 
+  it('crear un impuesto que solo difiere en mayúsculas es rechazado', async () => {
+    const base = `Impuesto CI E2E ${sufijo()}`;
+    const primero = await request(app.getHttpServer())
+      .post('/api/impuestos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: base, porcentaje: '0.05' });
+    expect(primero.status).toBe(201);
+
+    const segundo = await request(app.getHttpServer())
+      .post('/api/impuestos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: base.toUpperCase(), porcentaje: '0.07' });
+    expect(segundo.status).toBe(400);
+  });
+
+  it('un impuesto del tenant SÍ puede llamarse EXACTAMENTE como el del país: el índice no cruza los scopes', async () => {
+    // El nombre se lee de la base, no se escribe a mano: el test tiene que
+    // chocar contra el nombre REAL del catálogo oficial, o no prueba nada.
+    const [oficial] = await ds.query(
+      `SELECT nombre FROM impuestos
+        WHERE tenant_id IS NULL AND eliminado_el IS NULL
+        LIMIT 1`,
+    );
+    expect(oficial).toBeTruthy();
+
+    // El porcentaje NO es el oficial (0.19) a propósito: con el mismo,
+    // `remapImpuestosOficialesDuplicados` soft-detearía esta fila en el próximo
+    // arranque del seeder — y el test dejaría basura que cambia de estado sola.
+    const res = await request(app.getHttpServer())
+      .post('/api/impuestos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: oficial.nombre, porcentaje: '0.02' });
+
+    // 201 y no 400: el índice es `(tenant_id, lower(nombre))` y las filas del
+    // país tienen `tenant_id` nulo, que en Postgres nunca colisiona. En el
+    // listado las dos se distinguen por el badge Sistema/Personalizado que
+    // alimenta `origen`. El aviso de doble tributación de ADR-018 sigue siendo
+    // un aviso y no un bloqueo — decisión del owner.
+    expect(res.status).toBe(201);
+
+    // Higiene: sin esto queda un impuesto del tenant llamado como el oficial,
+    // y el siguiente spec que liste impuestos de Paris lo ve.
+    await request(app.getHttpServer())
+      .delete(`/api/impuestos/${(res.body as ConId).id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+  });
+
   // ─── Conducta: restaurar ──────────────────────────────────────────────────
   // El camino que NO pasa por la validación de código: escribe directo y lo
   // único que lo frena es el índice. Es el que prueba que el índice existe y
@@ -248,6 +307,11 @@ describe('Unicidad de nombre (e2e) — case-insensitive en los 8', () => {
     {
       recurso: 'cajones',
       crear: (nombre: string) => ({ nombre }),
+      statusDelete: 200,
+    },
+    {
+      recurso: 'impuestos',
+      crear: (nombre: string) => ({ nombre, porcentaje: '0.05' }),
       statusDelete: 200,
     },
   ])(

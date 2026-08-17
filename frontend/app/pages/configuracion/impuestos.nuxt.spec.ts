@@ -68,8 +68,29 @@ let overrideSinEliminados: Promise<unknown[]> | null = null
 
 /** Ids de cada `POST .../restaurar` recibido: el contador del doble submit. */
 let postsRestaurar: string[] = []
+/** El `nombre` que viajó en el body de cada `POST .../restaurar`. */
+let nombresRestaurar: (string | undefined)[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
+
+// ── Unicidad de nombre (2026-08-16) ─────────────────────────────────────────
+/** Lo que contesta `GET /impuestos/nombre-disponible`. */
+let nombreDisponibleBackend = true
+/** Hace fallar esa consulta, para el caso "no bloquea el formulario". */
+let nombreDisponibleFalla = false
+/** Cada `nombre` con el que se consultó la disponibilidad. */
+let consultasNombre: string[] = []
+/**
+ * Cuando no es `null`, el PRIMER `POST .../restaurar` sin `nombre` en el body
+ * rechaza con el 400 de colisión del backend (`message` + `nombreSugerido`).
+ * El reintento CON nombre pasa, que es el flujo que el modal existe para dar.
+ */
+let restaurarColision: { message: string, nombreSugerido: string } | null = null
+
+/** El error tal como lo arma ofetch: el cuerpo del backend va en `.data`. */
+function errorApi(data: Record<string, unknown>): Error {
+  return Object.assign(new Error('Request failed'), { data })
+}
 
 // ── Pausar ──────────────────────────────────────────────────────────────────
 /** Ítems que `GET /impuestos/:id/uso` devuelve por id. Ausente = ninguno. */
@@ -90,11 +111,22 @@ function itemsUso(n: number) {
 }
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string, body?: { activo?: boolean } }) => {
+  return (url: string, opts?: { method?: string, body?: { activo?: boolean, nombre?: string } }) => {
     if (typeof url !== 'string' || !url.includes('/impuestos')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    // ANTES de la rama del listado: sin querystring propio, `nombre-disponible`
+    // caería en el `GET` genérico y devolvería el array de impuestos.
+    if (method === 'GET' && url.includes('/nombre-disponible')) {
+      consultasNombre.push(
+        new URLSearchParams(url.split('?')[1] ?? '').get('nombre') ?? '',
+      )
+      if (nombreDisponibleFalla) {
+        return Promise.reject(new Error('no se pudo verificar'))
+      }
+      return Promise.resolve({ disponible: nombreDisponibleBackend })
+    }
     if (method === 'GET' && url.endsWith('/uso')) {
       const id = url.split('/').slice(-2)[0] ?? ''
       getsUso.push(id)
@@ -123,6 +155,12 @@ mockNuxtImport('useApiFetch', () => {
     if (method === 'POST' && url.endsWith('/restaurar')) {
       const id = url.split('/').slice(-2)[0] ?? ''
       postsRestaurar.push(id)
+      nombresRestaurar.push(opts?.body?.nombre)
+      // El 400 de colisión del índice: solo el intento SIN nombre nuevo. El
+      // reintento con nombre es el que el modal manda, y tiene que pasar.
+      if (restaurarColision && !opts?.body?.nombre) {
+        return Promise.reject(errorApi({ ...restaurarColision }))
+      }
       const imp = impuestosBackend.find(i => i.id === id)
       // El backend real da 404 si la fila ya no está en la papelera: un
       // segundo POST sobre la misma fila NO es inocuo, es el toast de error
@@ -165,6 +203,43 @@ async function activarVerEliminados(wrapper: Awaited<ReturnType<typeof montar>>)
  * comparten el texto "Restaurar", así que buscar en todo el body encontraría
  * el de la fila y el test "confirmaría" sin haber abierto nada.
  */
+/**
+ * Montaje para lo que pasa por el DRAWER (alta/edición). Mismo molde y mismos
+ * dos motivos que `garzones.nuxt.spec.ts` → `montarConDrawerStub()`:
+ *
+ * 1. **`AppDrawer` stubeado**: su root es `UDrawer` (reka-ui) y CERRARLO
+ *    revienta bajo happy-dom —la transición de salida lee `style.display` de un
+ *    nodo ya desprendido—, así que `vitest run` sale con exit 1 aunque los
+ *    tests pasen. Va en `global.stubs` para quedar acotado a ESTE mount y no
+ *    alcanzar a los describes de papelera y pausar.
+ * 2. **`attachTo: document.body`**: el botón es
+ *    `type="submit" form="impuesto-form"`, y esa asociación por id la resuelve
+ *    el DOCUMENTO. Con el wrapper desprendido el submit no dispara y el test
+ *    pasaría sin haber guardado nada.
+ */
+async function montarConDrawerStub() {
+  const wrapper = await mountSuspended(Impuestos, {
+    attachTo: document.body,
+    global: {
+      stubs: {
+        AppDrawer: {
+          name: 'AppDrawer',
+          props: ['open'],
+          template: `
+            <div v-if="open" role="dialog">
+              <slot name="header" />
+              <slot name="body" />
+              <slot name="actions" />
+            </div>
+          `,
+        },
+      },
+    },
+  })
+  await new Promise(r => setTimeout(r, 0))
+  return wrapper
+}
+
 async function confirmarEnModal(texto: string) {
   const dialogo = document.body.querySelector('[role="dialog"]')
   expect(dialogo, `modal abierto para confirmar "${texto}"`).toBeTruthy()
@@ -219,7 +294,12 @@ function resetPausar() {
   overrideConEliminados = null
   overrideSinEliminados = null
   postsRestaurar = []
+  nombresRestaurar = []
   restaurarRetenido = null
+  restaurarColision = null
+  nombreDisponibleBackend = true
+  nombreDisponibleFalla = false
+  consultasNombre = []
   usoPorId = {}
   usoFalla = false
   getsUso = []
@@ -567,6 +647,129 @@ describe('configuracion/impuestos — pausar: confirmación con el alcance', () 
     expect(patchesActivo).toEqual([])
     expect(impuestosBackend[0]!.activo).toBe(true)
     expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * La unicidad de nombre por tenant, que `descuentos` y `recargos` ya tenían y
+ * `impuestos` no hasta el 2026-08-16. El que decide es el índice
+ * `uq_impuestos_tenant_nombre_vivo`; esto es lo que hace que el usuario lo vea
+ * antes de guardar, y que restaurar de la papelera tenga salida en vez de un
+ * error sin remedio.
+ */
+describe('configuracion/impuestos — unicidad de nombre', () => {
+  beforeEach(() => {
+    impuestosBackend = [impuestoPropio()]
+    resetPausar()
+  })
+
+  function campoNombre(wrapper: Awaited<ReturnType<typeof montarConDrawerStub>>) {
+    const input = wrapper.findAll('input').find(i => i.attributes('placeholder') === 'Impuesto verde')
+    expect(input, 'campo Nombre en el drawer').toBeTruthy()
+    return input!
+  }
+
+  async function abrirAltaYEscribir(nombre: string) {
+    const wrapper = await montarConDrawerStub()
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo impuesto'))
+    expect(nuevo, 'botón "Nuevo impuesto"').toBeTruthy()
+    await nuevo!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    await campoNombre(wrapper).setValue(nombre)
+    return wrapper
+  }
+
+  it('el nombre se verifica al salir del campo y el error se muestra ahí, no en un toast', async () => {
+    nombreDisponibleBackend = false
+    const wrapper = await abrirAltaYEscribir('Impuesto verde')
+
+    await campoNombre(wrapper).trigger('blur')
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(consultasNombre).toContain('Impuesto verde')
+    expect(wrapper.text()).toContain('Ya existe un impuesto con este nombre')
+
+    wrapper.unmount()
+  })
+
+  it('con el nombre tomado, guardar no manda nada al backend', async () => {
+    nombreDisponibleBackend = false
+    const wrapper = await abrirAltaYEscribir('Impuesto verde')
+
+    const guardar = wrapper.findAll('button').find(b => b.text().trim() === 'Crear')
+    expect(guardar, 'botón "Crear"').toBeTruthy()
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // El listado sigue con la fila que ya tenía: no se creó nada. Es la
+    // aserción que cae si `guardar()` deja de revalidar antes de mandar — sin
+    // ese `await checkNombre()`, un usuario que escribe y manda sin salir del
+    // campo se salta la verificación entera.
+    expect(impuestosBackend).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
+  it('si la verificación no puede correr, NO bloquea el formulario: la decide el índice, no esta ayuda', async () => {
+    nombreDisponibleFalla = true
+    const wrapper = await abrirAltaYEscribir('Impuesto nuevo')
+
+    const guardar = wrapper.findAll('button').find(b => b.text().trim() === 'Crear')
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // Se guardó igual. Si un fallo de red dejara el formulario trabado, el
+    // usuario no tendría forma de crear un impuesto con un nombre libre.
+    expect(wrapper.text()).not.toContain('Ya existe un impuesto con este nombre')
+
+    wrapper.unmount()
+  })
+
+  it('restaurar con el nombre tomado ofrece uno libre y editable en vez de un toast rojo', async () => {
+    impuestosBackend = [{ ...impuestoPropio(), eliminadoEl: '2026-08-01T21:00:00.000Z', eliminadoPorNombre: 'admin.paris' }]
+    restaurarColision = {
+      message: 'Ya existe un impuesto activo con el nombre "Impuesto verde".',
+      nombreSugerido: 'Impuesto verde 2',
+    }
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+
+    await abrirRestaurarDeLaFila(wrapper)
+    await confirmarEnModal('Restaurar')
+
+    const modal = [...document.body.querySelectorAll('[role="dialog"]')]
+      .find(d => d.textContent?.includes('No se puede restaurar con ese nombre'))
+    expect(modal, 'segundo paso: el modal de colisión').toBeTruthy()
+    // Precargado con la sugerencia del backend, y editable: el usuario confirma
+    // o escribe el suyo.
+    const input = modal!.querySelector('input[aria-label="Restaurar como"]') as HTMLInputElement | null
+    expect(input).toBeTruthy()
+    expect(input!.value).toBe('Impuesto verde 2')
+
+    wrapper.unmount()
+  })
+
+  it('al confirmar el nombre nuevo, el restaurar viaja CON ese nombre y la fila queda renombrada', async () => {
+    impuestosBackend = [{ ...impuestoPropio(), eliminadoEl: '2026-08-01T21:00:00.000Z', eliminadoPorNombre: 'admin.paris' }]
+    restaurarColision = {
+      message: 'Ya existe un impuesto activo con el nombre "Impuesto verde".',
+      nombreSugerido: 'Impuesto verde 2',
+    }
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+    await abrirRestaurarDeLaFila(wrapper)
+    await confirmarEnModal('Restaurar')
+
+    // Segundo paso: confirmar la sugerencia.
+    await confirmarEnModal('Restaurar')
+
+    // Dos POST: el que chocó (sin nombre) y el que resolvió (con nombre).
+    expect(nombresRestaurar).toEqual([undefined, 'Impuesto verde 2'])
+    // El patch local no adivina: solo se renombra porque el backend contestó
+    // 2xx a ESE nombre.
+    expect(wrapper.text()).toContain('Impuesto verde 2')
 
     wrapper.unmount()
   })

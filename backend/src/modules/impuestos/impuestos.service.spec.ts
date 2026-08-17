@@ -27,9 +27,12 @@ describe('ImpuestosService', () => {
     andWhere: jest.Mock;
     leftJoin: jest.Mock;
     addSelect: jest.Mock;
+    select: jest.Mock;
     withDeleted: jest.Mock;
     orderBy: jest.Mock;
     getRawAndEntities: jest.Mock;
+    getCount: jest.Mock;
+    getRawMany: jest.Mock;
   };
   let dataSource: { query: jest.Mock };
 
@@ -40,8 +43,14 @@ describe('ImpuestosService', () => {
       leftJoin: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       withDeleted: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
+      // `0` = nombre libre: es el default de `nombreDisponible`, así que los
+      // tests que no hablan de unicidad siguen pasando por `create`/`update`
+      // sin tener que declarar nada.
+      getCount: jest.fn().mockResolvedValue(0),
+      getRawMany: jest.fn().mockResolvedValue([]),
     };
     repo = {
       find: jest.fn(),
@@ -283,6 +292,143 @@ describe('ImpuestosService', () => {
         NotFoundException,
       );
       expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() con el nombre tomado NO revienta con 500: es un 400 con sugerencia', async () => {
+      repo.findOne.mockResolvedValue({
+        id: IMP,
+        tenantId: TENANT,
+        nombre: 'Impuesto verde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      // 23505 del índice parcial: mientras estaba borrado nadie competía por el
+      // nombre, y al revivirlo vuelve a competir. Antes del 2026-08-16 esto
+      // subía crudo y el usuario veía un 500.
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+      qbMock.getRawMany.mockResolvedValue([{ nombre: 'Impuesto verde' }]);
+
+      await expect(service.restaurar(TENANT, IMP)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('restaurar() con nombre nuevo revive y renombra en UNA sola escritura', async () => {
+      repo.findOne.mockResolvedValue({
+        id: IMP,
+        tenantId: TENANT,
+        nombre: 'Impuesto verde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      repo.findOneOrFail.mockResolvedValue({ id: IMP, tenantId: TENANT });
+
+      await service.restaurar(TENANT, IMP, 'Impuesto verde 2');
+
+      // Las tres columnas en el MISMO update: partirlo dejaría una ventana con
+      // la fila viva y el nombre todavía en colisión.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: IMP, tenantId: TENANT },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          nombre: 'Impuesto verde 2',
+        },
+      );
+      expect(repo.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('un error que NO es 23505 sube tal cual: no se disfraza de colisión de nombre', async () => {
+      repo.findOne.mockResolvedValue({
+        id: IMP,
+        tenantId: TENANT,
+        nombre: 'Impuesto verde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('conexión caída'), { code: '08006' }),
+      );
+
+      await expect(service.restaurar(TENANT, IMP)).rejects.toThrow(
+        'conexión caída',
+      );
+    });
+  });
+
+  /**
+   * La unicidad de nombre por tenant, que `descuentos` y `recargos` ya tenían y
+   * `impuestos` no (2026-08-16). El índice
+   * `uq_impuestos_tenant_nombre_vivo` es quien decide; esto es lo que hace que
+   * el usuario lea un 400 con texto en vez de un 500 de Postgres.
+   */
+  describe('unicidad de nombre por tenant', () => {
+    it('crear con un nombre ya usado es 400 y no llega a guardar', async () => {
+      qbMock.getCount.mockResolvedValue(1);
+
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Impuesto verde',
+          porcentaje: '0.05',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('editar con un nombre ya usado es 400 y no llega a guardar', async () => {
+      repo.findOne.mockResolvedValue({ id: IMP, tenantId: TENANT });
+      qbMock.getCount.mockResolvedValue(1);
+
+      await expect(
+        service.update(TENANT, IMP, { nombre: 'Impuesto verde' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('editar SIN tocar el nombre no consulta la unicidad: no hay nombre nuevo que validar', async () => {
+      repo.findOne.mockResolvedValue({ id: IMP, tenantId: TENANT });
+
+      await service.update(TENANT, IMP, { porcentaje: '0.07' });
+
+      expect(qbMock.getCount).not.toHaveBeenCalled();
+    });
+
+    it('editar dejándose el MISMO nombre se excluye a sí mismo del chequeo', async () => {
+      repo.findOne.mockResolvedValue({ id: IMP, tenantId: TENANT });
+
+      await service.update(TENANT, IMP, { nombre: 'Impuesto verde' });
+
+      // Sin el `excludeId` la fila chocaría contra sí misma y editar el
+      // porcentaje de un impuesto sería imposible.
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        'i.impuesto_id != :excludeId',
+        { excludeId: IMP },
+      );
+    });
+
+    it('compara en minúsculas, como el índice: si no, diría "libre" y el guardado fallaría 23505', async () => {
+      await service.nombreDisponible(TENANT, 'Impuesto Verde');
+
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        'LOWER(i.nombre) = LOWER(:nombre)',
+        { nombre: 'Impuesto Verde' },
+      );
+    });
+
+    it('acota por tenant y por vivo: el catálogo del país no compite y la papelera tampoco', async () => {
+      await service.nombreDisponible(TENANT, 'IVA');
+
+      // `tenant_id = :tenantId` deja afuera las filas del país (`tenant_id`
+      // nulo), igual que el índice — que no las cubre porque en Postgres dos
+      // NULL nunca colisionan. Un tenant PUEDE llamar "IVA" al suyo.
+      expect(qbMock.where).toHaveBeenCalledWith('i.tenant_id = :tenantId', {
+        tenantId: TENANT,
+      });
+      // Y el índice es parcial: borrar y volver a crear con el mismo nombre
+      // tiene que funcionar.
+      expect(qbMock.andWhere).toHaveBeenCalledWith('i.eliminado_el IS NULL');
     });
   });
 
