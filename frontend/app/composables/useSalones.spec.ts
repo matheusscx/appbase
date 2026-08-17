@@ -9,6 +9,7 @@ function linea(personalizacion: CuentaLineaDetalle['personalizacion']): CuentaLi
     precioBase: '4300',
     monedaId: 'clp',
     cantidad: '1',
+    cantidadEnviada: '0',
     personalizacion,
   }
 }

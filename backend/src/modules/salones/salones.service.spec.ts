@@ -1245,6 +1245,9 @@ describe('SalonesService', () => {
                 tenantId: TENANT,
                 cuentaId: CUENTA,
                 itemId: ITEM,
+                // Nada despachado: el guard de "no bajar de lo enviado" no
+                // aplica y estos tests siguen midiendo lo suyo.
+                cantidadEnviada: '0',
               },
         ),
       );
@@ -1393,6 +1396,59 @@ describe('SalonesService', () => {
       ).rejects.toThrow(/Línea .* no encontrada/);
     });
 
+    /**
+     * El otro camino del mismo bug. `actualizarLinea` recibe un valor
+     * ABSOLUTO, no un delta, así que bajar de 2 a 1 sobre una línea con 2
+     * despachados regalaba un plato sin dejar rastro — y se veía igual que
+     * cualquier corrección de tipeo.
+     */
+    it('no deja bajar la cantidad por debajo de lo ya despachado', async () => {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+            : {
+                id: 'linea-1',
+                tenantId: TENANT,
+                cuentaId: CUENTA,
+                itemId: ITEM,
+                cantidadEnviada: '2',
+              },
+        ),
+      );
+
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '1' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.save).not.toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.anything(),
+      );
+    });
+
+    it('SUBIR la cantidad sigue libre, y bajar hasta lo despachado también', async () => {
+      // El contraste que hace falsable al de arriba: un guard escrito con `lte`
+      // en vez de `lessThan` bloquearía dejarla en 2, que es legítimo —no se
+      // regala nada— y este test lo caza.
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+            : {
+                id: 'linea-1',
+                tenantId: TENANT,
+                cuentaId: CUENTA,
+                itemId: ITEM,
+                cantidadEnviada: '2',
+              },
+        ),
+      );
+
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '2' }),
+      ).resolves.toBeDefined();
+    });
+
     it('rechaza operar sobre una cuenta no abierta', async () => {
       manager.findOne.mockResolvedValue({
         id: CUENTA,
@@ -1408,11 +1464,18 @@ describe('SalonesService', () => {
 
   describe('quitarLinea', () => {
     beforeEach(() => {
-      manager.findOne.mockResolvedValue({
-        id: CUENTA,
-        tenantId: TENANT,
-        estado: EstadoCuenta.ABIERTA,
-      });
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+            : {
+                id: 'linea-1',
+                tenantId: TENANT,
+                cuentaId: CUENTA,
+                cantidadEnviada: '0',
+              },
+        ),
+      );
       manager.query.mockImplementation((sql: string) =>
         Promise.resolve(
           sql.includes('cl.cuenta_linea_id')
@@ -1428,6 +1491,7 @@ describe('SalonesService', () => {
                   precio_base: '1000',
                   moneda_id: 'moneda-1',
                   personalizacion: null,
+                  cantidad_enviada: '0',
                 },
               ]
             : [],
@@ -1471,6 +1535,41 @@ describe('SalonesService', () => {
       await expect(
         service.quitarLinea(TENANT, CUENTA, 'linea-1'),
       ).rejects.toThrow(/Línea .* no encontrada/);
+    });
+
+    /**
+     * Decisión del owner (2026-08-08). La comida ya se hizo: quitar la línea
+     * del sistema la regala **sin registro**. Hasta el 2026-08-16 `quitarLinea`
+     * ni siquiera leía la fila —hacía `softDelete` por criterio— así que una
+     * línea despachada se borraba en silencio.
+     */
+    it('una línea ya despachada a cocina NO se puede quitar', async () => {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+            : {
+                id: 'linea-1',
+                tenantId: TENANT,
+                cuentaId: CUENTA,
+                cantidadEnviada: '2',
+              },
+        ),
+      );
+
+      await expect(
+        service.quitarLinea(TENANT, CUENTA, 'linea-1'),
+      ).rejects.toThrow(BadRequestException);
+      // Y no llega a borrar: el guard corre ANTES del `softDelete`, no
+      // después. Sin esta aserción, moverlo abajo dejaría el test en verde con
+      // la línea ya borrada.
+      expect(manager.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('sin nada despachado se quita como siempre: el guard no rompe el caso normal', async () => {
+      await service.quitarLinea(TENANT, CUENTA, 'linea-1');
+
+      expect(manager.softDelete).toHaveBeenCalled();
     });
 
     it('rechaza operar sobre una cuenta no abierta', async () => {

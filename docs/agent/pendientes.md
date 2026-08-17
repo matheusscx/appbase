@@ -564,13 +564,14 @@ empezarlas.
 
   | Pieza | Qué es | ¿Toca `movimientos_inventario`? |
   |---|---|---|
-  | **A** | Exponer `cantidadEnviada` en `CuentaLineaDetalle` | No |
-  | **B** | El guard de *"anular o reducir una línea ya enviada a cocina"* (ya decidido) | No |
+  | **A** | ~~Exponer `cantidadEnviada` en `CuentaLineaDetalle`~~ ✅ hecho 2026-08-16 | No |
+  | **B** | ~~El guard de *"anular o reducir una línea ya enviada a cocina"*~~ ✅ hecho 2026-08-16 | No |
   | **C** | El default destildado de la Decisión 2 cuando la línea se despachó | No |
   | **D** | Expandir receta/combo al reponer (Decisión 1) | **Sí** |
 
-  **A+B+C** son una tanda coherente que cierra la entrada de cocina entera más la mitad de
-  esta, sin tocar inventario ni pedir permiso. **D** es la única que lo necesita.
+  **A y B se construyeron el 2026-08-16** y el campo ya viaja al cliente, así que **C quedó
+  barata**: es solo el default del checkbox. **D** sigue siendo la única que necesita permiso
+  para tocar `movimientos_inventario`.
 
 - [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
   (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
@@ -789,14 +790,22 @@ empezarlas.
   sí entra la investigación de mercado. **No es simétrico con las advertencias de
   `garzones`**: allá el costo era un aviso tardío, acá es plata que sale sin rastro.
 
-  🔗 **Comparte prerequisito con la entrada de anular con recetas/combos, y la partición
-  A/B/C/D está anotada allá.** El guard de acá es la pieza **B** y **no** toca
-  `movimientos_inventario`, así que se puede tomar sin pedir permiso; lo que necesita antes es
-  la **A** — exponer `cantidadEnviada` en `CuentaLineaDetalle`.
+  ✅ **PIEZAS A y B CONSTRUIDAS el 2026-08-16.** `CuentaLineaDetalle` ya expone
+  `cantidadEnviada`, y los dos caminos están bloqueados con `400`: `quitarLinea` rechaza si
+  `cantidad_enviada > 0` —antes hacía `softDelete` por criterio, sin leer la fila— y
+  `actualizarLinea` rechaza bajar por debajo de lo despachado. Subir sigue libre, y bajar
+  hasta lo despachado también. En la pantalla el tacho queda deshabilitado con el motivo.
+  Detalle en [`features/salones-mesas.md`](../features/salones-mesas.md).
 
-  ⚠️ **Medido el 2026-08-16:** el frontend **sí** conoce el campo, pero solo en el preview de
-  comanda (`ComandaEstacionItem`, `useImpresoras.ts`); la línea de la cuenta no. El
-  prerequisito es copiar un campo que el backend ya sabe emitir, no diseñar nada nuevo.
+  ⏳ **Lo que sigue abierto es lo que esta entrada siempre dijo que faltaba: el camino con
+  motivo.** Bloquear evita la pérdida silenciosa; **no da la salida legítima**. Un plato que
+  se quemó o que se regala tiene que poder salir de la cuenta **con motivo** (merma o
+  cortesía), y eso es lo que falta diseñar — ahí sí entra la investigación de mercado
+  (Toast, Square y Lightspeed manejan *voids* de ítems despachados). Sin eso, hoy el garzón
+  que se equivocó de plato después de mandar la comanda no tiene ninguna salida.
+
+  🔗 Queda además la pieza **C** de la partición (el default destildado del modal de
+  anulación), que ahora es barata: el campo ya viaja al cliente.
 
 - [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
   ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la

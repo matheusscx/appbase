@@ -686,6 +686,41 @@ describe('salones — cuenta con un ítem eliminado del catálogo', () => {
     return etiqueta?.nextElementSibling?.textContent?.trim() ?? ''
   }
 
+  /**
+   * Decisión del owner (2026-08-08): lo ya despachado a cocina no se quita en
+   * silencio — el plato se hizo, así que sacarlo del sistema lo regala sin
+   * registro. El backend lo rechaza con 400; la pantalla no ofrece el botón,
+   * para no mandar al garzón contra un error evitable.
+   */
+  it('el tacho de una línea ya despachada a cocina queda deshabilitado, con el motivo', async () => {
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '2' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    const tacho = drawerMesa()?.querySelector<HTMLButtonElement>(
+      'button[title*="cocina"]',
+    )
+    expect(tacho).toBeTruthy()
+    expect(tacho!.disabled).toBe(true)
+    expect(tacho!.title).toContain('merma o cortesía')
+  })
+
+  it('sin nada despachado el tacho sigue habilitado: el garzón se puede corregir', async () => {
+    // El contraste que hace falsable al de arriba: un `disabled` fijo lo
+    // dejaría pasar igual.
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, cantidadEnviada: '0' })]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    const tacho = drawerMesa()?.querySelector<HTMLButtonElement>(
+      'button[title="Quitar"]',
+    )
+    expect(tacho).toBeTruthy()
+    expect(tacho!.disabled).toBe(false)
+  })
+
   it('avisa, tapa el total y deshabilita el cobro', async () => {
     cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, itemEliminado: true })]
     calculoFalla = true

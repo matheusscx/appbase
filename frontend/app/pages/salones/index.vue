@@ -1024,6 +1024,21 @@ async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string
 }
 
 
+/**
+ * Si esta línea ya salió a cocina. Desde el 2026-08-16 el backend **rechaza**
+ * quitarla o bajarla por debajo de lo despachado (decisión del owner,
+ * 2026-08-08: el plato ya se hizo, sacarlo del sistema lo regala sin
+ * registro). La pantalla no ofrece el tacho en vez de dejar que el garzón lo
+ * apriete y coma un 400 — mismo criterio que el resto del proyecto con las
+ * acciones que terminan en error.
+ *
+ * `> 0` sobre el string tal cual: `cantidadEnviada` viaja como decimal en
+ * texto, así que se compara con Decimal y no con `Number`.
+ */
+function yaEnviadaACocina(linea: CuentaLineaDetalle): boolean {
+  return new Decimal(linea.cantidadEnviada || '0').greaterThan(0)
+}
+
 async function quitarLinea(linea: CuentaLineaDetalle) {
   if (!activeCuenta.value) return
   try {
@@ -1537,6 +1552,10 @@ async function cerrarCuentaConPin(
                       color="error"
                       variant="ghost"
                       size="xs"
+                      :disabled="yaEnviadaACocina(linea)"
+                      :title="yaEnviadaACocina(linea)
+                        ? 'Ya se despachó a cocina: registralo como merma o cortesía para que quede el rastro'
+                        : 'Quitar'"
                       @click="quitarLinea(linea)"
                     />
                   </div>

@@ -278,6 +278,36 @@ desaparecía del ticket de cocina sin ningún aviso —"Enviar a cocina" respond
 `cantidad_enviada` no avanzaba nunca—, que es el mismo bug de la pantalla movido de
 lugar.
 
+### Lo ya despachado a cocina no se borra ni se reduce en silencio (2026-08-16)
+
+**Decisión del owner (2026-08-08).** El plato ya se hizo, así que sacar la línea del
+sistema lo **regala sin registro**: se sirvieron 2 y se cobra 1, y no queda rastro de que
+había comanda despachada. Los dos caminos quedan bloqueados con un `400`:
+
+| Camino | Regla |
+|---|---|
+| `DELETE /cuentas/:id/lineas/:lineaId` | rechaza si `cantidad_enviada > 0` |
+| `PATCH /cuentas/:id/lineas/:lineaId` | rechaza si la cantidad nueva es **menor** que `cantidad_enviada` |
+
+**Subir sigue libre, y bajar hasta lo despachado también** — ahí no se regala nada. El
+operador es `<` y no `<=` a propósito, y hay un test que lo fija: con `<=` no se podría
+dejar la línea en exactamente lo que salió, que es legítimo.
+
+⚠️ `actualizarLinea` recibe un valor **absoluto**, no un delta, así que sin este guard
+"2 → 1" sobre una línea con 2 despachados se veía igual que cualquier corrección de tipeo.
+Y `quitarLinea` hasta el 2026-08-16 ni siquiera leía la fila: hacía `softDelete` por
+criterio, así que borraba sin mirar nada.
+
+**Lo que falta, y por qué esto no lo reemplaza:** para anular de verdad tiene que existir
+un camino **con motivo** (merma o cortesía). Bloquear evita la pérdida silenciosa; no da
+la salida legítima. Ese camino sigue en `docs/agent/pendientes.md` y ahí entra la
+investigación de mercado.
+
+Para que la pantalla no ofrezca un tacho que termina en `400`, el detalle de la cuenta
+ahora **expone `cantidadEnviada`** por línea. El backend ya lo emitía, pero solo dentro
+del preview de comanda (`ComandaEstacion`), que es otro flujo: la línea que el garzón ve
+no lo conocía.
+
 En el frontend, una cuenta con una línea así **no se puede cotizar**: el motor de precios
 resuelve los ítems contra el catálogo vivo y devuelve `404`. En vez de mostrar un total
 de `$0` —que es peor que no mostrar nada—, el total aparece como `—`, un aviso explica

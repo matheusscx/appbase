@@ -124,6 +124,7 @@ interface LineaDetalleRow {
   precio_base: string;
   moneda_id: string;
   personalizacion: PersonalizacionRecetaSnapshot | null;
+  cantidad_enviada: string;
   item_eliminado: boolean;
 }
 
@@ -139,6 +140,14 @@ export interface CuentaLineaDetalle {
   personalizacion?: PersonalizacionRecetaSnapshot | null;
   personalizacionTexto?: string;
   personalizacionDetalle?: PersonalizacionDetalleLinea[];
+  /**
+   * Cuánto de esta línea YA se despachó a cocina. Viaja al cliente desde el
+   * 2026-08-16: la pantalla necesita saberlo para no ofrecer un tacho que el
+   * backend rechaza, y el modal de anulación lo va a necesitar para nacer
+   * destildado (ver `docs/agent/pendientes.md`). El backend ya lo emitía, pero
+   * solo dentro del preview de comanda (`ComandaEstacion`), que es otro flujo.
+   */
+  cantidadEnviada: string;
   /**
    * El ítem se eliminó del catálogo con la cuenta ya abierta. La línea se
    * sigue mostrando —esconderla dejaba la cuenta imposible de cobrar y de
@@ -741,6 +750,20 @@ export class SalonesService {
       if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
         throw new BadRequestException('La cantidad debe ser mayor a cero');
       }
+      // Mismo motivo que el guard de `quitarLinea`, por el otro camino: bajar
+      // la cantidad por debajo de lo ya despachado regala la diferencia sin
+      // registro. `actualizarLinea` recibe un valor ABSOLUTO, no un delta, así
+      // que sin este chequeo "2 → 1" sobre una línea con 2 enviados pasa igual
+      // que cualquier corrección. Subirla sigue siendo libre.
+      if (
+        new Decimal(resuelta.cantidadCanonica).lessThan(linea.cantidadEnviada)
+      ) {
+        throw new BadRequestException(
+          `Ya se despacharon ${linea.cantidadEnviada} a cocina: no se puede ` +
+            `bajar la cantidad por debajo de eso. Si lo despachado no se va a ` +
+            `cobrar, registralo como merma o cortesía para que quede el rastro.`,
+        );
+      }
 
       linea.cantidad = resuelta.cantidadCanonica;
       linea.cantidadPresentacion = resuelta.cantidadPresentacion;
@@ -761,6 +784,30 @@ export class SalonesService {
         tenantId,
         cuentaId,
       );
+      // Se lee ANTES de borrar. Hasta el 2026-08-16 esto era un `softDelete`
+      // por criterio, sin mirar la fila: una línea ya despachada a cocina se
+      // borraba en silencio. La comida ya se hizo, así que quitarla del
+      // sistema la regala **sin registro** — decisión del owner (2026-08-08):
+      // se bloquea. Para anular de verdad tiene que existir un camino con
+      // motivo (merma o cortesía), que es lo que falta diseñar.
+      //
+      // ℹ️ Efecto colateral de leer primero, anotado porque es un cambio real:
+      // repetir el DELETE sobre una línea YA borrada ahora da 404. Antes el
+      // `softDelete` por criterio no filtraba `eliminado_el`, así que el
+      // segundo intento respondía 200 sin hacer nada. El 404 es más honesto.
+      const linea = await manager.findOne(CuentaLinea, {
+        where: { id: lineaId, tenantId, cuentaId },
+      });
+      if (!linea) {
+        throw new NotFoundException(`Línea ${lineaId} no encontrada`);
+      }
+      if (new Decimal(linea.cantidadEnviada).greaterThan(0)) {
+        throw new BadRequestException(
+          `Esa línea ya se despachó a cocina (${linea.cantidadEnviada}): no se ` +
+            `puede quitar. Si el plato no se va a cobrar, registralo como merma ` +
+            `o cortesía para que quede el rastro.`,
+        );
+      }
       const res = await manager.softDelete(CuentaLinea, {
         id: lineaId,
         tenantId,
@@ -1404,7 +1451,7 @@ export class SalonesService {
       // `lineaId` de algo que no se renderizaba. Ahora se muestra marcada.
       `SELECT cl.cuenta_id, cl.cuenta_linea_id, cl.item_id, cl.cantidad,
               cl.cantidad_presentacion, cl.unidad_codigo_presentacion,
-              cl.personalizacion,
+              cl.personalizacion, cl.cantidad_enviada,
               i.nombre, i.precio_base, i.moneda_id,
               i.eliminado_el IS NOT NULL AS item_eliminado
          FROM cuenta_lineas cl
@@ -1493,6 +1540,7 @@ export class SalonesService {
               }
             : {}),
           personalizacion: l.personalizacion,
+          cantidadEnviada: l.cantidad_enviada,
           ...(personalizacionTexto ? { personalizacionTexto } : {}),
           ...(personalizacionDetalle.length ? { personalizacionDetalle } : {}),
           ...(l.item_eliminado ? { itemEliminado: true as const } : {}),

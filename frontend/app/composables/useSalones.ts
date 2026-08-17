@@ -86,6 +86,14 @@ export interface CuentaLineaDetalle {
   cantidad: string
   cantidadPresentacion?: string | null
   unidadCodigoPresentacion?: string | null
+  /**
+   * Cuánto de esta línea ya se despachó a cocina. Desde el 2026-08-16 el
+   * backend **bloquea** quitarla o bajarla por debajo de esto: el plato ya se
+   * hizo, así que sacarlo del sistema lo regala sin registro (decisión del
+   * owner, 2026-08-08). La pantalla lo usa para no ofrecer un tacho que
+   * termina en 400.
+   */
+  cantidadEnviada: string
   personalizacion?: {
     omitidos: string[]
     extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string, unidades: string }[]

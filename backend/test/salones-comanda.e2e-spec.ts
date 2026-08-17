@@ -307,4 +307,116 @@ describe('Salones — comanda a cocina (e2e)', () => {
     // `numeric` crudo de la fila ('3.0000'): se comparan como número.
     expect(Number(pendiente[0].items[0].cantidadEnviada)).toBe(3);
   });
+
+  /**
+   * Decisión del owner (2026-08-08): lo despachado no se borra ni se reduce en
+   * silencio. La comida ya se hizo, así que sacarla del sistema la regala **sin
+   * registro** — se sirvieron 2 platos, se cobra 1, y no queda rastro de que
+   * había comanda despachada. Para anular de verdad tiene que existir un camino
+   * con motivo (merma o cortesía), que es lo que falta diseñar.
+   *
+   * Va como e2e y no solo como unit porque lo que se está fijando es que
+   * `cantidad_enviada` la escriba el flujo REAL de la comanda y que los dos
+   * guards la lean de la base, no de un mock.
+   */
+  describe('lo ya despachado a cocina no se borra ni se reduce en silencio', () => {
+    /** Una cuenta con `cantidad` pedida y todo reclamado a cocina. */
+    async function cuentaConDespacho(cantidad: string): Promise<CuentaDetalle> {
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad }]);
+      const claim = await post<ComandaResponse>(
+        `/api/cuentas/${cuenta.id}/comanda/reclamar`,
+        {},
+      );
+      // Sin esto el test podría pasar por no haber despachado nada.
+      expect(claim.estaciones[0].items[0].cantidad).toBe(cantidad);
+      return cuenta;
+    }
+
+    /** La línea viva de esa cuenta, releída del detalle. */
+    async function primeraLinea(
+      cuentaId: string,
+    ): Promise<{ id: string; cantidad: string; cantidadEnviada: string }> {
+      // No hay `GET /cuentas/:id`: el detalle se relee por la mesa.
+      const res = await request(app.getHttpServer())
+        .get(`/api/mesas/${mesaId}/cuentas`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const cuenta = (
+        res.body as {
+          id: string;
+          lineas: { id: string; cantidad: string; cantidadEnviada: string }[];
+        }[]
+      ).find((c) => c.id === cuentaId);
+      // Jest no acepta mensaje en `expect` (eso es Vitest): el contexto va en
+      // el comentario.
+      expect(cuenta).toBeTruthy();
+      expect(cuenta!.lineas).toHaveLength(1);
+      return cuenta!.lineas[0];
+    }
+
+    it('el detalle de la cuenta expone `cantidadEnviada`: sin eso la pantalla no puede apagar el tacho', async () => {
+      const cuenta = await cuentaConDespacho('2');
+
+      const linea = await primeraLinea(cuenta.id);
+
+      // El campo viajaba solo en el preview de comanda hasta el 2026-08-16.
+      expect(Number(linea.cantidadEnviada)).toBe(2);
+    });
+
+    it('quitar una línea ya despachada es 400, y la línea sigue ahí', async () => {
+      const cuenta = await cuentaConDespacho('2');
+      const linea = await primeraLinea(cuenta.id);
+
+      const res = await request(app.getHttpServer())
+        .delete(`/api/cuentas/${cuenta.id}/lineas/${linea.id}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toMatch(/cocina/i);
+
+      // Y no se borró a medias: el guard corre antes del softDelete.
+      const despues = await primeraLinea(cuenta.id);
+      expect(despues.id).toBe(linea.id);
+    });
+
+    it('bajar la cantidad por debajo de lo despachado es 400, y la cantidad no se mueve', async () => {
+      const cuenta = await cuentaConDespacho('2');
+      const linea = await primeraLinea(cuenta.id);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/cuentas/${cuenta.id}/lineas/${linea.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ cantidad: '1' });
+      expect(res.status).toBe(400);
+
+      const despues = await primeraLinea(cuenta.id);
+      expect(Number(despues.cantidad)).toBe(2);
+    });
+
+    it('SUBIR la cantidad sigue funcionando: el guard no traba la operación normal', async () => {
+      // El contraste que hace falsables a los dos de arriba: si el guard
+      // bloqueara todo cambio sobre una línea despachada, este caería.
+      const cuenta = await cuentaConDespacho('2');
+      const linea = await primeraLinea(cuenta.id);
+
+      await request(app.getHttpServer())
+        .patch(`/api/cuentas/${cuenta.id}/lineas/${linea.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ cantidad: '3' })
+        .expect(200);
+
+      expect(Number((await primeraLinea(cuenta.id)).cantidad)).toBe(3);
+    });
+
+    it('una línea NUNCA despachada se sigue pudiendo quitar', async () => {
+      // El caso normal del garzón que se equivocó de plato antes de mandar la
+      // comanda. Si esto cayera, el guard sería un bloqueo total.
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      const linea = await primeraLinea(cuenta.id);
+
+      await request(app.getHttpServer())
+        .delete(`/api/cuentas/${cuenta.id}/lineas/${linea.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+    });
+  });
 });
