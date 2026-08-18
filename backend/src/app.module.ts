@@ -155,6 +155,14 @@ import { RecuentosModule } from './modules/recuentos/recuentos.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.get<string>('DATABASE_URL'),
+        // Pool explícito: el default mudo de pg (10) es exactamente lo que el
+        // deadlock de conexiones explotaba sin que nadie supiera el número.
+        poolSize: Number(config.get<string>('DB_POOL_SIZE') ?? 10),
+        // Defensa en profundidad, NO el fix: si algún día algo vuelve a pedir
+        // una segunda conexión dentro de una transacción, esto lo convierte en
+        // un 500 ruidoso con stack trace en vez de una API muerta hasta
+        // reiniciar (pendientes.md, entrada del deadlock).
+        connectTimeoutMS: 5000,
         // dev: schema managed by TypeORM synchronize; prod: use migrations
         entities: [
           Usuario,
