@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
+import { Db } from '../../common/db/db.service';
 import { VentasService } from './ventas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { CajaService } from '../caja/caja.service';
@@ -200,6 +200,11 @@ describe('VentasService', () => {
       // dataSource.query used OUTSIDE transaction for moneda rows only
       query: jest.fn().mockResolvedValue(MONEDA_ROWS),
     };
+    const dbMock = {
+      transaccion: dataSourceMock.transaction,
+      query: dataSourceMock.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -285,8 +290,8 @@ describe('VentasService', () => {
           useValue: garzonesServiceMock,
         },
         {
-          provide: getDataSourceToken(),
-          useValue: dataSourceMock,
+          provide: Db,
+          useValue: dbMock,
         },
       ],
     }).compile();

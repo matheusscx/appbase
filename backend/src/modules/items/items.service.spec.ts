@@ -1,8 +1,8 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { ItemsService } from './items.service';
 import { Item } from './entities/item.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
@@ -27,6 +27,11 @@ describe('ItemsService', () => {
     transaction: jest.Mock;
     manager: { query: jest.Mock };
   };
+  let dbMock: {
+    transaccion: jest.Mock;
+    query: jest.Mock;
+    sinTransaccion: (fn: () => unknown) => unknown;
+  };
   let inventarioServiceMock: { registrarMovimiento: jest.Mock };
   let catalogServiceMock: {
     findAllUnidadesMedida: jest.Mock;
@@ -44,6 +49,11 @@ describe('ItemsService', () => {
       transaction: jest.fn((cb: (m: typeof managerMock) => unknown) =>
         cb(managerMock),
       ),
+    };
+    dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
     };
     itemRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
@@ -87,7 +97,7 @@ describe('ItemsService', () => {
           provide: getRepositoryToken(ItemServicio),
           useValue: itemServicioRepo,
         },
-        { provide: DataSource, useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         { provide: InventarioService, useValue: inventarioServiceMock },
         { provide: CatalogService, useValue: catalogServiceMock },
       ],

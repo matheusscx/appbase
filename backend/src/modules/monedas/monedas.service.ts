@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { TenantMoneda } from './entities/tenant-moneda.entity';
 import { UpdateTenantMonedaDto } from './dto/update-tenant-moneda.dto';
 
@@ -33,8 +34,15 @@ export class MonedasService {
   constructor(
     @InjectRepository(TenantMoneda)
     private readonly tenantMonedaRepo: Repository<TenantMoneda>,
+    // `dataSource` sigue acá SOLO por `updateMoneda` → `upsertRow`: necesita un
+    // `EntityManager` completo (`findOne`/`create`), no solo `.query`, y corre
+    // fuera de cualquier transacción (nunca anidado — solo lo llama el
+    // controller). La fachada `Db` no expone eso, así que no hay deadlock que
+    // evitar acá: no hay una segunda conexión disputándose con una transacción
+    // abierta.
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -55,7 +63,7 @@ export class MonedasService {
       es_default: boolean;
       habilitada: boolean;
       valor_del_dia: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT m.moneda_id,
               m.nombre,
               m.codigo_iso,
@@ -110,11 +118,7 @@ export class MonedasService {
     monedaId: string,
     dto: UpdateTenantMonedaDto,
   ): Promise<TenantMoneda> {
-    const ctx = await this.resolveContexto(
-      this.dataSource.manager,
-      tenantId,
-      monedaId,
-    );
+    const ctx = await this.resolveContexto(this.db, tenantId, monedaId);
     const esOficial = monedaId === ctx.monedaOficialId;
 
     if (esOficial) {
@@ -149,7 +153,7 @@ export class MonedasService {
   }
 
   async setDefault(tenantId: string, monedaId: string): Promise<TenantMoneda> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const ctx = await this.resolveContexto(manager, tenantId, monedaId);
       const esOficial = monedaId === ctx.monedaOficialId;
 
@@ -180,7 +184,7 @@ export class MonedasService {
   // ───────────────────────────────────────────────────────────────────────────
 
   private async resolveContexto(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     monedaId: string,
   ): Promise<ContextoMoneda> {

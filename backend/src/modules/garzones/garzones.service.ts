@@ -4,10 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository, type EntityManager } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { IsNull, Repository, type EntityManager } from 'typeorm';
 import { randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
+import { Db } from '../../common/db/db.service';
 import { Garzon } from './entities/garzon.entity';
 import {
   GarzonPinEvento,
@@ -235,8 +236,7 @@ export class GarzonesService {
     private readonly garzonRepo: Repository<Garzon>,
     @InjectRepository(SesionGarzon)
     private readonly sesionRepo: Repository<SesionGarzon>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly rolesService: RolesService,
   ) {}
 
@@ -763,7 +763,7 @@ export class GarzonesService {
     if (!evento) {
       return this.garzonRepo.save(garzon);
     }
-    return this.dataSource.transaction(async (m) => {
+    return this.db.transaccion(async (m) => {
       const guardado = await m.save(Garzon, garzon);
       await m.save(
         GarzonPinEvento,
@@ -892,7 +892,7 @@ export class GarzonesService {
       );
     }
     const usuarioId = garzon.usuarioId;
-    await this.dataSource.transaction((manager) =>
+    await this.db.transaccion((manager) =>
       this.rolesService.otorgarOperarSalon(manager, tenantId, usuarioId),
     );
     return this.toPublico(garzon);

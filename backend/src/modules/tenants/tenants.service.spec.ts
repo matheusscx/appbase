@@ -1,10 +1,11 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { TenantsService } from './tenants.service';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
@@ -112,6 +113,11 @@ describe('TenantsService', () => {
       query: jest.fn(),
       manager: { query: jest.fn(), save: jest.fn() },
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
     usuarioTenantRepo = {
       findOne: jest.fn(),
       save: jest.fn(),
@@ -161,7 +167,7 @@ describe('TenantsService', () => {
           useValue: { create: jest.fn(), save: jest.fn() },
         },
         { provide: getRepositoryToken(RazonSocial), useValue: razonSocialRepo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         {
           provide: GarzonesService,
           useValue: garzones,
@@ -1144,9 +1150,9 @@ describe('TenantsService', () => {
         usuarioId: 'usuario-previo',
         datos: { tenantId: 'tenant-uuid', rolIds: ['r'] },
       });
-      dataSource.manager.query = jest
-        .fn()
-        .mockResolvedValue([{ correo: 'ana@paris.cl', tenant: 'Paris' }]);
+      dataSource.query.mockResolvedValue([
+        { correo: 'ana@paris.cl', tenant: 'Paris' },
+      ]);
 
       const res = await service.verificarConfirmacion('tok');
 

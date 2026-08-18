@@ -5,9 +5,10 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, type EntityManager } from 'typeorm';
+import { type EntityManager } from 'typeorm';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
+import { Db } from '../../common/db/db.service';
 import { GarzonesService } from './garzones.service';
 import { RolesService } from '../roles/roles.service';
 import { Garzon } from './entities/garzon.entity';
@@ -78,6 +79,11 @@ function makeSesionRepo(): SesionRepo {
  */
 function makeDataSource(): {
   dataSource: { query: jest.Mock; transaction: jest.Mock };
+  db: {
+    transaccion: jest.Mock;
+    query: jest.Mock;
+    sinTransaccion: (fn: () => unknown) => unknown;
+  };
   manager: { save: jest.Mock; create: jest.Mock };
   eventos: Record<string, unknown>[];
 } {
@@ -95,7 +101,12 @@ function makeDataSource(): {
     query: jest.fn().mockResolvedValue([]),
     transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
   };
-  return { dataSource, manager, eventos };
+  const db = {
+    transaccion: dataSource.transaction,
+    query: dataSource.query,
+    sinTransaccion: (fn: () => unknown) => fn(),
+  };
+  return { dataSource, db, manager, eventos };
 }
 
 /** Construye un garzón de prueba con el PIN ya hasheado. */
@@ -131,13 +142,14 @@ describe('GarzonesService', () => {
     repo = makeRepo();
     sesionRepo = makeSesionRepo();
     roles = { otorgarOperarSalon: jest.fn() };
-    ({ dataSource, manager, eventos } = makeDataSource());
+    let db: ReturnType<typeof makeDataSource>['db'];
+    ({ dataSource, db, manager, eventos } = makeDataSource());
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GarzonesService,
         { provide: getRepositoryToken(Garzon), useValue: repo },
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
-        { provide: DataSource, useValue: dataSource },
+        { provide: Db, useValue: db },
         { provide: RolesService, useValue: roles },
       ],
     }).compile();
@@ -1884,16 +1896,16 @@ describe('GarzonesService.asegurarMostrador', () => {
     const repo = makeRepo();
     const sesionRepo = makeSesionRepo();
     // `asegurarMostrador` no pasa por `guardarConEvento`: recibe su propio
-    // `manager` de transacción como parámetro. El `DataSource` mockeado acá
+    // `manager` de transacción como parámetro. El `Db` mockeado acá
     // solo satisface la inyección del constructor, no lo usa ningún test de
     // este describe.
-    const { dataSource } = makeDataSource();
+    const { db } = makeDataSource();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GarzonesService,
         { provide: getRepositoryToken(Garzon), useValue: repo },
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
-        { provide: DataSource, useValue: dataSource },
+        { provide: Db, useValue: db },
         // Solo para satisfacer la inyección: ningún test de este describe
         // otorga permisos.
         { provide: RolesService, useValue: { otorgarOperarSalon: jest.fn() } },

@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { DescuentosService } from './descuentos.service';
 import { Descuento } from './entities/descuento.entity';
 import { DescuentoTramo } from './entities/descuento-tramo.entity';
@@ -79,6 +80,11 @@ describe('DescuentosService', () => {
       ),
       query: jest.fn().mockResolvedValue([]),
     };
+    const dbMock = {
+      transaccion: dataSourceMock.transaction,
+      query: dataSourceMock.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     descuentoRepoMock = {
       find: jest.fn().mockResolvedValue([]),
@@ -112,7 +118,7 @@ describe('DescuentosService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DescuentosService,
-        { provide: getDataSourceToken(), useValue: dataSourceMock },
+        { provide: Db, useValue: dbMock },
         { provide: getRepositoryToken(Descuento), useValue: descuentoRepoMock },
         { provide: getRepositoryToken(TipoRegla), useValue: tipoReglaRepoMock },
         {

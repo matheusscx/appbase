@@ -6,9 +6,8 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
 import {
-  DataSource,
   EntityManager,
   In,
   IsNull,
@@ -16,6 +15,7 @@ import {
   Repository,
 } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
@@ -115,8 +115,7 @@ export class CajaService {
     private readonly movimientoCajaRepo: Repository<MovimientoCaja>,
     @InjectRepository(CajaArqueoMedio)
     private readonly arqueoMedioRepo: Repository<CajaArqueoMedio>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly motivosService: MotivosDiferenciaService,
     private readonly sesionesGarzonService: SesionesGarzonService,
     private readonly cajaTestigoService: CajaTestigoService,
@@ -151,9 +150,8 @@ export class CajaService {
     tenantId: string,
     usuarioId: string,
   ): Promise<{ cajonId: string; nombre: string }[]> {
-    const rows: { cajon_id: string; nombre: string }[] =
-      await this.dataSource.query(
-        `SELECT cj.cajon_id, cj.nombre
+    const rows: { cajon_id: string; nombre: string }[] = await this.db.query(
+      `SELECT cj.cajon_id, cj.nombre
            FROM cajones cj
           WHERE cj.tenant_id = $1
             AND cj.activo = true
@@ -177,8 +175,8 @@ export class CajaService {
                  AND c.estado IN ('abierta', 'en_conciliacion') AND c.eliminado_el IS NULL
             )
           ORDER BY cj.nombre ASC`,
-        [tenantId, usuarioId],
-      );
+      [tenantId, usuarioId],
+    );
     return rows.map((r) => ({ cajonId: r.cajon_id, nombre: r.nombre }));
   }
 
@@ -193,7 +191,7 @@ export class CajaService {
     }
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      return await this.db.transaccion(async (manager) => {
         // 2. Cajón válido + activo (del tenant, no borrado)
         const cajonRows: { cajon_id: string; activo: boolean }[] =
           await manager.query(
@@ -421,7 +419,7 @@ export class CajaService {
    * escritura por query raw parametrizada; tenant del token; filtra soft-delete.
    */
   async getArqueoCiego(tenantId: string): Promise<boolean> {
-    const rows: { arqueo_ciego: boolean }[] = await this.dataSource.query(
+    const rows: { arqueo_ciego: boolean }[] = await this.db.query(
       `SELECT arqueo_ciego FROM tenants
         WHERE tenant_id = $1 AND eliminado_el IS NULL`,
       [tenantId],
@@ -430,7 +428,7 @@ export class CajaService {
   }
 
   async setArqueoCiego(tenantId: string, valor: boolean): Promise<void> {
-    await this.dataSource.query(
+    await this.db.query(
       `UPDATE tenants SET arqueo_ciego = $1
         WHERE tenant_id = $2 AND eliminado_el IS NULL`,
       [valor, tenantId],
@@ -458,7 +456,7 @@ export class CajaService {
     );
 
     if (caja.estado === 'abierta') {
-      const lineas = await this.dataSource.transaction((manager) =>
+      const lineas = await this.db.transaccion((manager) =>
         this.calcularArqueo(cajaId, tenantId, manager),
       );
       // El ciego no aplica al admin del tenant ni al superadmin (§3.4): el dueño
@@ -486,7 +484,7 @@ export class CajaService {
       motivo_nombre: string | null;
       motivo_diferencia_id: string | null;
       comentario_diferencia: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT am.metodo_pago_id,
               COALESCE(mp.nombre, 'Efectivo') AS nombre,
               am.es_efectivo,
@@ -630,7 +628,7 @@ export class CajaService {
       comentarioDiferencia?: string;
     }[],
   ): Promise<{ ciego: boolean; lineas: LineaArqueo[] }> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       const caja = await manager.findOne(Caja, {
         where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
       });
@@ -677,7 +675,7 @@ export class CajaService {
     dto: CerrarCajaDto,
     puedeForzar = false,
   ): Promise<{ estado: 'cerrada' | 'en_conciliacion'; arqueo: LineaArqueo[] }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
 
       const caja = await manager.findOne(Caja, {
@@ -820,7 +818,7 @@ export class CajaService {
     puedeForzar: boolean,
     dto: FinalizarCierreDto,
   ): Promise<{ caja: Caja; arqueo: LineaArqueo[] }> {
-    const caja = await this.dataSource.transaction(async (manager) => {
+    const caja = await this.db.transaccion(async (manager) => {
       await this.bloquearCajaEnConciliacion(manager, cajaId, tenantId);
       const caja = await manager.findOne(Caja, {
         where: {
@@ -958,7 +956,7 @@ export class CajaService {
     cajaId: string,
     dto: CrearMovimientoDto,
   ): Promise<MovimientoCaja> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
 
       const caja = await manager.findOne(Caja, {
@@ -1020,7 +1018,7 @@ export class CajaService {
       tieneVerTodas,
     );
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM cajas c
        WHERE c.tenant_id = $1
@@ -1049,7 +1047,7 @@ export class CajaService {
       fecha_cierre: Date | null;
       comentario: string | null;
       cajon_nombre: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT c.caja_id,
               c.tenant_id,
               c.usuario_id,
@@ -1178,7 +1176,7 @@ export class CajaService {
       fecha_apertura: Date | null;
       total_entradas: string | null;
       total_salidas: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT cj.cajon_id,
               cj.nombre,
               c.caja_id,
@@ -1273,7 +1271,7 @@ export class CajaService {
         cajon_nombre: string | null;
         usuario_nombre: string | null;
         usuario_apellido: string | null;
-      }[] = await this.dataSource.query(
+      }[] = await this.db.query(
         `SELECT cj.nombre AS cajon_nombre, u.nombre AS usuario_nombre, u.apellido AS usuario_apellido
            FROM (SELECT $1::uuid AS cajon_id, $2::uuid AS usuario_id) x
            LEFT JOIN cajones cj ON cj.cajon_id = x.cajon_id
@@ -1307,7 +1305,7 @@ export class CajaService {
       total_entradas: string;
       total_salidas: string;
       total_movimientos: number;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT c.saldo_inicial,
               c.estado,
               COALESCE(SUM(m.monto) FILTER (
@@ -1393,7 +1391,7 @@ export class CajaService {
     const { page, pageSize, offset } = resolvePagination(query);
     const { filters, params } = this.buildMovimientosFilters(cajaId, query);
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM movimientos_caja m
        WHERE m.caja_id = $1
@@ -1417,7 +1415,7 @@ export class CajaService {
       referencia: string | null;
       fecha: Date;
       venta_id: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT m.movimiento_id,
               m.caja_id,
               m.tipo,

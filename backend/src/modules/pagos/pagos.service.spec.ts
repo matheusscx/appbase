@@ -1,8 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { PagosService, calcularEstadoVenta } from './pagos.service';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
@@ -116,6 +116,11 @@ describe('PagosService', () => {
         ),
       query: jest.fn().mockResolvedValue([]),
     };
+    const dbMock = {
+      transaccion: dataSourceMock.transaction,
+      query: dataSourceMock.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     return Test.createTestingModule({
       providers: [
@@ -129,8 +134,8 @@ describe('PagosService', () => {
           },
         },
         {
-          provide: getDataSourceToken(),
-          useValue: dataSourceMock,
+          provide: Db,
+          useValue: dbMock,
         },
       ],
     }).compile();

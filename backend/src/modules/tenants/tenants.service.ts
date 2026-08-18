@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, IsNull, type EntityManager } from 'typeorm';
+import { Repository, IsNull, type EntityManager } from 'typeorm';
 import { randomUUID } from 'crypto';
+import { Db } from '../../common/db/db.service';
 import { Usuario } from '../users/usuario.entity';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
@@ -175,8 +175,7 @@ export class TenantsService {
     private readonly cajaRepo: Repository<Caja>,
     @InjectRepository(RazonSocial)
     private readonly razonSocialRepo: Repository<RazonSocial>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly garzonesService: GarzonesService,
     private readonly rbacService: RbacService,
     private readonly tokensAcceso: TokensAccesoService,
@@ -190,7 +189,7 @@ export class TenantsService {
   // ─────────────────────────────────────────────────────────────────────────
 
   async create(dto: CreateTenantDto, creadorId: string): Promise<Tenant> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // 1. Create tenant
       const tenant = manager.create(Tenant, {
         provinciaId: dto.provinciaId,
@@ -418,7 +417,7 @@ export class TenantsService {
       rol_id: string | null;
       rol_nombre: string | null;
       pendiente: boolean;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT u.usuario_id,
               u.nombre,
               u.apellido,
@@ -519,7 +518,7 @@ export class TenantsService {
       nombre: string;
       apellido: string;
       es_totem: boolean;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT u.usuario_id,
               u.nombre,
               u.apellido,
@@ -633,7 +632,7 @@ export class TenantsService {
   private async cuentaParaAsociar(
     usuarioId: string,
   ): Promise<{ correo: string; contrasena: string | null }> {
-    const filas = await this.dataSource.query<
+    const filas = await this.db.query<
       { correo: string; contrasena: string | null }[]
     >(
       `SELECT correo, contrasena FROM usuarios
@@ -706,7 +705,7 @@ export class TenantsService {
     let confirmacion: { token: string; tenant: string } | undefined;
     let resultado: { usuarioId: string; correo: string };
     try {
-      resultado = await this.dataSource.transaction(async (manager) => {
+      resultado = await this.db.transaccion(async (manager) => {
         // Los roles se validan contra ESTE tenant: no hay roles globales
         // (verificado), así que sin este chequeo un admin podría asignar el rol de
         // otra empresa pasando su id.
@@ -951,11 +950,7 @@ export class TenantsService {
     token: string,
   ): Promise<{ correo: string; tenant: string }> {
     const { fila, datos } = await this.confirmacionVigente(token);
-    return this.cuentaYTenantDelLink(
-      this.dataSource.manager,
-      fila.usuarioId,
-      datos.tenantId,
-    );
+    return this.cuentaYTenantDelLink(this.db, fila.usuarioId, datos.tenantId);
   }
 
   /**
@@ -968,7 +963,7 @@ export class TenantsService {
    * motivo exacto no es asunto de quien recibió el link.
    */
   private async cuentaYTenantDelLink(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     usuarioId: string,
     tenantId: string,
   ): Promise<{ correo: string; tenant: string }> {
@@ -1002,7 +997,7 @@ export class TenantsService {
   async confirmarIngreso(token: string): Promise<{ message: string }> {
     const { fila, datos } = await this.confirmacionVigente(token);
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       await this.tokensAcceso.quemar(fila.id, manager);
 
       // Haber abierto este link **prueba la dirección**, igual que aceptar una
@@ -1157,7 +1152,7 @@ export class TenantsService {
     }
 
     if (esTotem) {
-      const [vinculado] = await this.dataSource.query<{ nombre: string }[]>(
+      const [vinculado] = await this.db.query<{ nombre: string }[]>(
         `SELECT nombre FROM garzones
           WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
         [usuarioId, tenantId],
@@ -1227,7 +1222,7 @@ export class TenantsService {
           )
         : null;
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       await this.rbacService.administradoresDe(manager, tenantId, true);
       // La membresía viva se confirma a mano y no por el `affected` del
       // `softDelete`: TypeORM no le agrega `eliminado_el IS NULL` al `WHERE`,
@@ -1364,7 +1359,7 @@ export class TenantsService {
   }
 
   async setPreferida(tenantId: string, id: string): Promise<RazonSocial> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const rs = await manager.findOne(RazonSocial, {
         where: { id, tenantId },
       });
@@ -1437,7 +1432,7 @@ export class TenantsService {
       );
     }
 
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await manager.query(
         `UPDATE tenants
          SET calculo_descuentos = $1, calculo_recargos = $2,

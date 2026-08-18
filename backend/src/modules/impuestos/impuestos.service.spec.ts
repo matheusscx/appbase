@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { ImpuestosService } from './impuestos.service';
 import { Impuesto } from './entities/impuesto.entity';
 import type { CreateImpuestoDto } from './dto/create-impuesto.dto';
@@ -65,12 +66,17 @@ describe('ImpuestosService', () => {
     dataSource = {
       query: jest.fn().mockResolvedValue([{ pais_id: PAIS }]),
     };
+    const dbMock = {
+      transaccion: jest.fn(),
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ImpuestosService,
         { provide: getRepositoryToken(Impuesto), useValue: repo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
 

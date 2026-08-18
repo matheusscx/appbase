@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { RecargosService } from './recargos.service';
 import { Recargo } from './entities/recargo.entity';
 import { RecargoTramo } from './entities/recargo-tramo.entity';
@@ -79,6 +80,11 @@ describe('RecargosService', () => {
       ),
       query: jest.fn().mockResolvedValue([]),
     };
+    const dbMock = {
+      transaccion: dataSourceMock.transaction,
+      query: dataSourceMock.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     recargoRepoMock = {
       find: jest.fn().mockResolvedValue([]),
@@ -112,7 +118,7 @@ describe('RecargosService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RecargosService,
-        { provide: getDataSourceToken(), useValue: dataSourceMock },
+        { provide: Db, useValue: dbMock },
         { provide: getRepositoryToken(Recargo), useValue: recargoRepoMock },
         { provide: getRepositoryToken(TipoRegla), useValue: tipoReglaRepoMock },
         {

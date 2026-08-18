@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import {
   errorDeColisionNombre,
   traducirColisionDeNombre,
@@ -54,8 +55,7 @@ export type RecargoConAuditoria = Recargo & {
 @Injectable()
 export class RecargosService {
   constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     @InjectRepository(Recargo)
     private readonly recargoRepo: Repository<Recargo>,
     @InjectRepository(TipoRegla)
@@ -135,7 +135,7 @@ export class RecargosService {
     await this.validarNombreUnico(tenantId, dto.nombre);
     this.validarSegunTipoCreate(tipoRegla.codigo, dto);
 
-    const escritura = this.dataSource.transaction(async (manager) => {
+    const escritura = this.db.transaccion(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
       const condicionValor =
         dto.diasVencimiento != null ? String(dto.diasVencimiento) : null;
@@ -219,7 +219,7 @@ export class RecargosService {
     this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
     await this.validarEstadoResultante(tipoRegla.codigo, recargo, dto);
 
-    const escritura = this.dataSource.transaction(async (manager) => {
+    const escritura = this.db.transaccion(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
       const tiposConDias = ['pronto_pago', 'mora'];
       const condicionValor =
@@ -397,7 +397,7 @@ export class RecargosService {
     });
     if (!recargo) throw new NotFoundException(`Recargo ${id} no encontrado`);
 
-    const items: { id: string; nombre: string }[] = await this.dataSource.query(
+    const items: { id: string; nombre: string }[] = await this.db.query(
       `SELECT i.item_id AS id, i.nombre
          FROM item_recargos ir
          JOIN items i ON i.item_id = ir.item_id

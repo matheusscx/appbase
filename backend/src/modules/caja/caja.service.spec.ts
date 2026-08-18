@@ -1,5 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   ConflictException,
@@ -8,6 +8,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { In, IsNull, QueryFailedError } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { CajaService } from './caja.service';
 import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
@@ -94,6 +95,11 @@ describe('CajaService', () => {
       ),
       query: jest.fn(),
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     motivosService.assertMotivoValido.mockReset();
     motivosService.hayMotivosActivos.mockReset();
@@ -116,7 +122,7 @@ describe('CajaService', () => {
           provide: getRepositoryToken(CajaArqueoMedio),
           useValue: { create: jest.fn((x) => x), save: jest.fn() },
         },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         { provide: MotivosDiferenciaService, useValue: motivosService },
         {
           provide: SesionesGarzonService,
@@ -2121,6 +2127,11 @@ describe('CajaService.abrir', () => {
   beforeEach(async () => {
     cajaRepo = { findOne: jest.fn() };
     dataSource = { transaction: jest.fn(), query: jest.fn() };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CajaService,
@@ -2130,7 +2141,7 @@ describe('CajaService.abrir', () => {
           provide: getRepositoryToken(CajaArqueoMedio),
           useValue: { create: jest.fn((x) => x), save: jest.fn() },
         },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         {
           provide: MotivosDiferenciaService,
           useValue: {

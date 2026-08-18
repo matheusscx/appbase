@@ -3,9 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { Item } from './entities/item.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import {
@@ -149,8 +150,7 @@ export class ItemsService {
     private readonly itemRepo: Repository<Item>,
     @InjectRepository(ItemServicio)
     private readonly itemServicioRepo: Repository<ItemServicio>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly inventarioService: InventarioService,
     private readonly catalogService: CatalogService,
   ) {}
@@ -271,7 +271,7 @@ export class ItemsService {
     const { page, pageSize, offset } = resolvePagination(query);
     const { where, params } = this.buildFindAllFilters(tenantId, query);
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total FROM items i${where}`,
       params,
     );
@@ -281,7 +281,7 @@ export class ItemsService {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
 
-    const rows: ItemRow[] = await this.dataSource.query(
+    const rows: ItemRow[] = await this.db.query(
       this.BASE_QUERY +
         where +
         ` ORDER BY i.nombre ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -292,7 +292,7 @@ export class ItemsService {
     // N queries extra (una por combo) al calcular disponibleCondicional.
     let comboIdsConGrupos = new Set<string>();
     if (rows.some((r) => r.tipo === 'combo')) {
-      const grupoItemRows: { item_id: string }[] = await this.dataSource.query(
+      const grupoItemRows: { item_id: string }[] = await this.db.query(
         `SELECT DISTINCT item_id FROM item_grupos_modificadores
          WHERE tenant_id = $1 AND eliminado_el IS NULL
          UNION
@@ -339,7 +339,7 @@ export class ItemsService {
         eliminado_el: string | null;
         eliminado_por: string | null;
         eliminado_por_nombre: string | null;
-      }[] = await this.dataSource.query(
+      }[] = await this.db.query(
         `SELECT i.item_id, i.eliminado_el, i.eliminado_por,
                 u.nombre_usuario AS eliminado_por_nombre
            FROM items i
@@ -398,7 +398,7 @@ export class ItemsService {
       min: number;
       max: number;
       orden: number;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT igm.item_id, igm.grupo_modificador_id, igm.item_grupo_id,
               g.nombre, igm.min, igm.max, igm.orden
        FROM item_grupos_modificadores igm
@@ -423,7 +423,7 @@ export class ItemsService {
       precio_extra: string;
       orden: number;
       stock: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT igm.item_grupo_id, o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
               COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
               o.cantidad AS cantidad_default,
@@ -497,7 +497,7 @@ export class ItemsService {
     const unicos = [...new Set(itemIds.map((id) => id.toLowerCase()))];
     if (unicos.length === 0) return new Map();
 
-    const rows: ItemRow[] = await this.dataSource.query(
+    const rows: ItemRow[] = await this.db.query(
       this.BASE_QUERY +
         ` WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
       [unicos, tenantId],
@@ -585,7 +585,7 @@ export class ItemsService {
     // tienen `tenant_id` propio y dejar la lectura sin acotar es la defensa
     // que ya faltó en otros lados de este archivo.
     const rows: { clase: string; item_id: string; regla_id: string }[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT 'impuesto' AS clase, ii.item_id, ii.impuesto_id AS regla_id
            FROM item_impuestos ii
            JOIN items i ON i.item_id = ii.item_id
@@ -625,27 +625,25 @@ export class ItemsService {
   }
 
   async findOne(tenantId: string, itemId: string) {
-    const rows: ItemRow[] = await this.dataSource.query(
+    const rows: ItemRow[] = await this.db.query(
       this.BASE_QUERY +
         ` WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
       [itemId, tenantId],
     );
     if (!rows.length) throw new NotFoundException('Item no encontrado');
 
-    const impuestosRows: { impuesto_id: string }[] =
-      await this.dataSource.query(
-        `SELECT impuesto_id FROM item_impuestos WHERE item_id = $1`,
-        [itemId],
-      );
-    const recargosRows: { recargo_id: string }[] = await this.dataSource.query(
+    const impuestosRows: { impuesto_id: string }[] = await this.db.query(
+      `SELECT impuesto_id FROM item_impuestos WHERE item_id = $1`,
+      [itemId],
+    );
+    const recargosRows: { recargo_id: string }[] = await this.db.query(
       `SELECT recargo_id FROM item_recargos WHERE item_id = $1`,
       [itemId],
     );
-    const descuentosRows: { descuento_id: string }[] =
-      await this.dataSource.query(
-        `SELECT descuento_id FROM item_descuentos WHERE item_id = $1`,
-        [itemId],
-      );
+    const descuentosRows: { descuento_id: string }[] = await this.db.query(
+      `SELECT descuento_id FROM item_descuentos WHERE item_id = $1`,
+      [itemId],
+    );
 
     let ingredientes: {
       ingredienteItemId: string;
@@ -680,7 +678,7 @@ export class ItemsService {
         unidad_codigo: string;
         bloqueante: boolean;
         stock: string;
-      }[] = await this.dataSource.query(
+      }[] = await this.db.query(
         `SELECT ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
                 ri.cantidad, ri.unidad_codigo, ri.bloqueante, ip.stock
          FROM receta_ingredientes ri
@@ -705,7 +703,7 @@ export class ItemsService {
         unidad_codigo: string;
         precio_extra: string;
         stock: string;
-      }[] = await this.dataSource.query(
+      }[] = await this.db.query(
         `SELECT re.ingrediente_item_id, i.nombre AS ingrediente_nombre,
                 re.cantidad, re.unidad_codigo, re.precio_extra, ip.stock
          FROM receta_extras_permitidos re
@@ -732,7 +730,7 @@ export class ItemsService {
         cantidad: string;
         bloqueante: boolean;
         stock: string | null;
-      }[] = await this.dataSource.query(
+      }[] = await this.db.query(
         `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
                 cc.cantidad, cc.bloqueante, ip.stock
          FROM combo_componentes cc
@@ -840,7 +838,7 @@ export class ItemsService {
     }
     // Respuesta armada con RETURNING + valores ya conocidos en la mutación
     // (sin findOne post-write = sin refetch en el servidor).
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const moneda = await this.validarMoneda(manager, tenantId, dto.monedaId);
       const categoriaNombre = dto.categoriaId
         ? await this.validarCategoria(manager, tenantId, dto.categoriaId)
@@ -1201,7 +1199,7 @@ export class ItemsService {
   ) {
     // Patch mergeable: solo campos tocados + RETURNING de columnas UPDATE.
     // El front hace `{ ...prev, ...saved }` — sin findOne post-write.
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const existingRows: { item_id: string; tipo: string }[] =
         await manager.query(
           `SELECT item_id, tipo FROM items
@@ -1811,7 +1809,7 @@ export class ItemsService {
    * no contar cuentas o mesas en la papelera.
    */
   private async obtenerUsoItem(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     itemId: string,
   ): Promise<UsoItem> {
@@ -1870,7 +1868,7 @@ export class ItemsService {
     });
     if (!item) throw new NotFoundException('Item no encontrado');
 
-    return this.obtenerUsoItem(this.dataSource.manager, tenantId, itemId);
+    return this.obtenerUsoItem(this.db, tenantId, itemId);
   }
 
   async remove(
@@ -1883,7 +1881,7 @@ export class ItemsService {
     });
     if (!item) throw new NotFoundException('Item no encontrado');
 
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       const { bloqueos } = await this.obtenerUsoItem(manager, tenantId, itemId);
 
       // Mismo orden de prioridad que las tres queries que esto reemplaza: la
@@ -2027,7 +2025,7 @@ export class ItemsService {
     // (`eliminado_por IS NULL`) da el mismo 404 "no está en la papelera" que
     // uno que nunca existió, sin rama especial (docs/features/papelera.md).
     const rows = unwrap<{ item_id: string }>(
-      await this.dataSource.query(
+      await this.db.query(
         `WITH restaurado AS (
            UPDATE items
               SET eliminado_el = NULL, eliminado_por = NULL,
@@ -2066,7 +2064,7 @@ export class ItemsService {
     itemId: string,
     dto: AjusteStockDto,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const itemRows: { tipo: string }[] = await manager.query(
         `SELECT tipo FROM items
          WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -2148,7 +2146,7 @@ export class ItemsService {
       codigo_lote: string | null;
       venta_id: string | null;
       creado_el: Date;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT
          u.unidad_id, u.serie, u.estado, u.condicion, u.garantia_hasta,
          u.lote_id, l.codigo_lote, u.venta_id, u.creado_el
@@ -2182,7 +2180,7 @@ export class ItemsService {
       cantidad_inicial: string;
       cantidad_disponible: string;
       creado_el: Date;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT
          lote_id, codigo_lote, fecha_elaboracion, fecha_vencimiento,
          cantidad_inicial, cantidad_disponible, creado_el
@@ -3134,7 +3132,7 @@ export class ItemsService {
       unidad_codigo: string;
       ingrediente_unidad_medida: string;
       stock: string;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
        FROM receta_ingredientes ri
        JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
@@ -3179,7 +3177,7 @@ export class ItemsService {
       cantidad: string;
       stock: string | null;
     }[] = comboIds.length
-      ? await this.dataSource.query(
+      ? await this.db.query(
           `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, cc.cantidad, ip.stock
            FROM combo_componentes cc
            JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
@@ -3205,7 +3203,7 @@ export class ItemsService {
       ingrediente_unidad_medida: string;
       stock: string;
     }[] = todasRecetas.length
-      ? await this.dataSource.query(
+      ? await this.db.query(
           `SELECT ri.receta_item_id, ri.cantidad, ri.unidad_codigo,
                   ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
            FROM receta_ingredientes ri
@@ -3811,7 +3809,7 @@ export class ItemsService {
       costo_actual: string;
       costo_propuesto_omitido: string | null;
       precio_base: string;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       insumoItemId
         ? `SELECT DISTINCT i.item_id AS receta_item_id, i.nombre,
                 ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
@@ -3841,7 +3839,7 @@ export class ItemsService {
       unidad_codigo: string;
       unidad_base: string;
       costo_actual: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT ri.receta_item_id, ri.ingrediente_item_id, ing.nombre AS ingrediente_nombre,
             ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
      FROM receta_ingredientes ri
@@ -3914,7 +3912,7 @@ export class ItemsService {
     // combo se arma con los costos YA cacheados de sus componentes, así que no
     // hace falta expandir nada.
     const recetas = await this.filasDesfaseRecetas(tenantId, insumoItemId);
-    const combos = await this.filasDesfaseCombos(this.dataSource, tenantId, {
+    const combos = await this.filasDesfaseCombos(this.db, tenantId, {
       insumoItemId,
     });
     return [...recetas, ...combos].sort((a, b) =>
@@ -3940,11 +3938,11 @@ export class ItemsService {
   }
 
   /**
-   * `runner` es el `DataSource` en la lectura y el `EntityManager` de la
+   * `runner` es la fachada `Db` en la lectura y el `EntityManager` de la
    * transacción cuando `aplicarDesfases` necesita ver sus propias escrituras.
    */
   private async filasDesfaseCombos(
-    runner: DataSource | EntityManager,
+    runner: Db | EntityManager,
     tenantId: string,
     opts: { insumoItemId?: string; comboItemIds?: string[] },
   ): Promise<DesfaseItemDto[]> {
@@ -4071,7 +4069,7 @@ export class ItemsService {
     // ser producto, receta o servicio. Con el guard viejo (`= 'ingrediente'`)
     // comprar un producto devolvía 404 y el frontend se lo tragaba: ningún
     // modal se abría nunca para un componente de combo.
-    const exists: unknown[] = await this.dataSource.query(
+    const exists: unknown[] = await this.db.query(
       `SELECT 1 FROM items
      WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
        AND tipo IN ('ingrediente', 'producto')`,
@@ -4109,7 +4107,7 @@ export class ItemsService {
       }
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // Cabeceras e ingredientes de TODAS las recetas del lote en 2 queries.
       // El loop de abajo se conserva —y con él el orden exacto en que fallan
       // las validaciones— pero ya no consulta: antes eran 2 lecturas por receta
@@ -4286,7 +4284,7 @@ export class ItemsService {
     tenantId: string,
     itemIds: string[],
   ): Promise<{ descartados: number }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // Mismo batch que `aplicarDesfases`: 2 lecturas para todo el lote, loop
       // conservado para no alterar el orden de las validaciones.
       const ids = [...new Set(itemIds)];

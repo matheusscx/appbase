@@ -3,9 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
 import { Pago } from './entities/pago.entity';
@@ -87,8 +87,7 @@ interface PagoListRow {
 @Injectable()
 export class PagosService {
   constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly cajaService: CajaService,
   ) {}
 
@@ -318,7 +317,7 @@ export class PagosService {
     pagos: Pago[];
     venta: { id: string; estado: EstadoVenta; saldo: string };
   }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // Cargar venta
       const ventaRows: {
         venta_id: string;
@@ -434,7 +433,7 @@ export class PagosService {
       monto_cobrado: string;
       pagos_hoy: number;
       monto_hoy: string;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total_pagos,
               COALESCE(SUM(p.monto - p.vuelto), 0)::text AS monto_cobrado,
               COUNT(*) FILTER (WHERE p.fecha::date = CURRENT_DATE)::int AS pagos_hoy,
@@ -467,7 +466,7 @@ export class PagosService {
     const { page, pageSize, offset } = resolvePagination(query);
     const { filters, params } = this.buildListarFilters(tenantId, query);
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM pagos p
        JOIN ventas v
@@ -485,7 +484,7 @@ export class PagosService {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
 
-    const rows: PagoListRow[] = await this.dataSource.query(
+    const rows: PagoListRow[] = await this.db.query(
       `SELECT p.pago_id,
               p.venta_id,
               p.monto,

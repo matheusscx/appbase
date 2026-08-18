@@ -3,9 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Impuesto } from './entities/impuesto.entity';
 import { CreateImpuestoDto } from './dto/create-impuesto.dto';
@@ -21,8 +22,7 @@ export class ImpuestosService {
   constructor(
     @InjectRepository(Impuesto)
     private readonly impuestoRepo: Repository<Impuesto>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   private validarPorcentaje(porcentaje: string): void {
@@ -39,7 +39,7 @@ export class ImpuestosService {
 
   /** País del tenant: tenants.provincia_id → provincia.pais_id. */
   private async paisIdDeTenant(tenantId: string): Promise<string | null> {
-    const rows: { pais_id: string }[] = await this.dataSource.query(
+    const rows: { pais_id: string }[] = await this.db.query(
       `SELECT p.pais_id
          FROM tenants t
          JOIN provincia p ON p.provincia_id = t.provincia_id AND p.eliminado_el IS NULL
@@ -227,7 +227,7 @@ export class ImpuestosService {
     });
     if (!impuesto) throw new NotFoundException(`Impuesto ${id} no encontrado`);
 
-    const items: { id: string; nombre: string }[] = await this.dataSource.query(
+    const items: { id: string; nombre: string }[] = await this.db.query(
       `SELECT i.item_id AS id, i.nombre
          FROM item_impuestos ii
          JOIN items i ON i.item_id = ii.item_id

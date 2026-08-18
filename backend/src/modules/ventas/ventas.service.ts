@@ -4,9 +4,9 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull } from 'typeorm';
+import { EntityManager, IsNull } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type {
   ConfigCalculo,
@@ -97,7 +97,7 @@ export interface TipoDocumentoResponse {
 @Injectable()
 export class VentasService {
   constructor(
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly calculoPreciosService: CalculoPreciosService,
     private readonly cajaService: CajaService,
     private readonly inventarioService: InventarioService,
@@ -132,7 +132,7 @@ export class VentasService {
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
     for (let intento = 0; ; intento++) {
       try {
-        return await this.dataSource.transaction((manager) =>
+        return await this.db.transaccion((manager) =>
           this.crearEnTransaccion(manager, tenantId, usuarioId, dto),
         );
       } catch (error) {
@@ -257,7 +257,7 @@ export class VentasService {
       moneda_id: string;
       valor_del_dia: string;
       es_default: boolean;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT moneda_id, valor_del_dia, es_default
          FROM tenant_moneda
          WHERE tenant_id = $1 AND eliminado_el IS NULL`,
@@ -816,7 +816,7 @@ export class VentasService {
     stockRepuesto: boolean;
     motivo: string;
   }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const venta = await this.lockVentaOriginal(
         manager,
         params.tenantId,
@@ -931,7 +931,7 @@ export class VentasService {
     if (new Decimal(params.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const original = await this.lockVentaOriginal(
         manager,
         params.tenantId,
@@ -1146,7 +1146,7 @@ export class VentasService {
   }): Promise<void> {
     if (!params.devoluciones.length) return;
 
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await this.lockVentaOriginal(
         manager,
         params.tenantId,
@@ -1358,7 +1358,7 @@ export class VentasService {
       nombre: string;
       codigo: string | null;
       customer_requerido: boolean;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT td.tipo_documento_id,
               td.nombre,
               td.codigo,
@@ -1387,7 +1387,7 @@ export class VentasService {
       total_ventas: number;
       total_facturado: string;
       saldo_pendiente: string;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total_ventas,
               COALESCE(SUM(v.total_final), 0)::text AS total_facturado,
               COALESCE(SUM(
@@ -1420,7 +1420,7 @@ export class VentasService {
     const { page, pageSize, offset } = resolvePagination(query);
     const { filters, params } = this.buildListarFilters(tenantId, query);
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM ventas v
        WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
@@ -1444,7 +1444,7 @@ export class VentasService {
       monto_pagado: string;
       total_reembolsado: string;
       tipo_documento_id: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT v.venta_id, v.canal, v.estado, v.total_final, v.fecha, v.creado_el,
               v.tipo_documento_id,
               COALESCE((
@@ -1545,7 +1545,7 @@ export class VentasService {
       venta_referencia_id: string | null;
       tipo_documento_codigo: string | null;
       tipo_documento_nombre: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
               v.total_bruto, v.total_descuentos, v.total_recargos, v.total_impuestos, v.total_final,
               v.base_ventas_total_final, v.base_ventas_sin_impuestos,
@@ -1563,7 +1563,7 @@ export class VentasService {
     const v = rows[0];
 
     type Row = Record<string, unknown>;
-    const detalles: Row[] = await this.dataSource.query(
+    const detalles: Row[] = await this.db.query(
       `SELECT d.detalle_id, d.item_id, d.descripcion, d.cantidad, d.precio_unitario,
               d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
               d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.impuesto_aplicado,
@@ -1578,7 +1578,7 @@ export class VentasService {
     // Ya devuelto por ítem (movimientos 'devolucion' de esta venta o de sus NCs
     // hijas): el modal de reembolso lo usa para capear las cantidades.
     const devueltos: { item_id: string; devuelto: string }[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT m.item_id, COALESCE(SUM(m.cantidad), 0) AS devuelto
          FROM movimientos_inventario m
          WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
@@ -1592,7 +1592,7 @@ export class VentasService {
       devueltos.map((d) => [d.item_id, d.devuelto]),
     );
     // Reembolsos de la(s) orden(es) de pasarela vinculadas a esta venta.
-    const reembolsos: Row[] = await this.dataSource.query(
+    const reembolsos: Row[] = await this.db.query(
       `SELECT t.transaccion_id, t.monto, t.estado, t.fecha_transaccion,
               o.orden_id, o.codigo_orden
        FROM pasarela_ordenes o
@@ -1603,7 +1603,7 @@ export class VentasService {
       [ventaId, tenantId],
     );
     // Notas de crédito hijas (documentos que referencian esta venta).
-    const notasCredito: Row[] = await this.dataSource.query(
+    const notasCredito: Row[] = await this.db.query(
       `SELECT venta_id, total_final, fecha, comentario
        FROM ventas
        WHERE venta_referencia_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
@@ -1613,30 +1613,30 @@ export class VentasService {
     // Las tres traen lo congelado (`nombre_regla`, `modo`, `valor_solicitado`)
     // además del monto: el catálogo vivo pudo cambiar o desaparecer desde que
     // se cobró, así que la fila tiene que bastarse sola.
-    const descuentos: Row[] = await this.dataSource.query(
+    const descuentos: Row[] = await this.db.query(
       `SELECT venta_descuento_id, descuento_id, detalle_id, nombre_regla, modo,
               valor_aplicado, valor_solicitado, porcentaje_aplicado, aplicado_en
        FROM ventas_descuentos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
-    const recargos: Row[] = await this.dataSource.query(
+    const recargos: Row[] = await this.db.query(
       `SELECT venta_recargo_id, recargo_id, detalle_id, nombre_regla, modo,
               valor_aplicado, porcentaje_aplicado, aplicado_en
        FROM ventas_recargos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
-    const impuestos: Row[] = await this.dataSource.query(
+    const impuestos: Row[] = await this.db.query(
       `SELECT venta_impuesto_id, impuesto_id, detalle_id, nombre_regla,
               valor_aplicado, porcentaje_aplicado, aplicado_en
        FROM ventas_impuestos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
-    const customerRows: Row[] = await this.dataSource.query(
+    const customerRows: Row[] = await this.db.query(
       `SELECT customer_id, tercero_id, nombre, rut, direccion, telefono, email
        FROM venta_customer WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
-    const pagos: Row[] = await this.dataSource.query(
+    const pagos: Row[] = await this.db.query(
       `SELECT pago_id, metodo_pago_id, moneda_oficial_id, caja_id, monto, vuelto, fecha, referencia
        FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL ORDER BY creado_el ASC`,
       [ventaId],
@@ -1651,7 +1651,7 @@ export class VentasService {
       monto: string;
     }[] =
       pagoIds.length > 0
-        ? await this.dataSource.query(
+        ? await this.db.query(
             `SELECT pago_aplicacion_id, pago_id, tipo, referencia_id, monto
              FROM pago_aplicaciones
              WHERE pago_id = ANY($1::uuid[]) AND eliminado_el IS NULL
@@ -1679,7 +1679,7 @@ export class VentasService {
       turno_id: string | null;
       tipo_garzon: string | null;
       liquidacion_id: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT vp.venta_propina_id, vp.porcentaje_sugerido, vp.monto_sugerido, vp.monto_pagado,
               vp.tipo, vp.estado, vp.garzon_id, g.nombre AS garzon_nombre,
               vp.sesion_garzon_id, vp.turno_id, vp.tipo_garzon, vp.liquidacion_id

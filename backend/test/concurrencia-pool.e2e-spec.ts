@@ -121,6 +121,31 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
       Array.from({ length: RAFAGA }, () => 201),
     );
 
+    // El 201 solo no alcanza: un arreglo que respondiera OK sin escribir nada
+    // pasaría igual el `expect` de arriba. Cada venta trae su `id`, los 10 son
+    // distintos (nada de responder 201 repitiendo la misma fila) y al menos
+    // una resuelve por GET — la prueba de que quedó persistida de verdad, no
+    // solo devuelta en memoria.
+    const cuerpos = (await Promise.all(respuestas.map((r) => r.json()))) as {
+      id: string;
+    }[];
+    const ids = cuerpos.map((v) => v.id);
+    expect(ids).toHaveLength(RAFAGA);
+    expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(
+      true,
+    );
+    expect(new Set(ids).size).toBe(RAFAGA);
+
+    const detalle = await fetch(
+      `http://127.0.0.1:${port}/api/ventas/${ids[0]}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    expect(detalle.status).toBe(200);
+    const ventaDetalle = (await detalle.json()) as { id: string };
+    expect(ventaDetalle.id).toBe(ids[0]);
+
     // Y el proceso no quedó envenenado: la request siguiente también responde.
     const despues = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
       method: 'POST',

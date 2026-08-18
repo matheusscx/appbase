@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { MonedasService } from './monedas.service';
 import { TenantMoneda } from './entities/tenant-moneda.entity';
 
@@ -40,6 +41,11 @@ describe('MonedasService', () => {
       ),
       manager: managerMock,
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -48,7 +54,11 @@ describe('MonedasService', () => {
           provide: getRepositoryToken(TenantMoneda),
           useValue: tenantMonedaRepo,
         },
+        // `dataSource` sigue provisto: `updateMoneda` → `upsertRow` todavía
+        // necesita el `EntityManager` completo del pool (ver comentario en
+        // `monedas.service.ts`).
         { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
 
@@ -113,7 +123,7 @@ describe('MonedasService', () => {
 
   describe('updateMoneda', () => {
     it('rechaza deshabilitar la moneda oficial', async () => {
-      managerMock.query.mockResolvedValue([
+      dataSource.query.mockResolvedValue([
         { moneda_oficial_id: OFICIAL, en_pais: true },
       ]);
       await expect(
@@ -122,7 +132,7 @@ describe('MonedasService', () => {
     });
 
     it('rechaza cambiar la tasa de la moneda oficial', async () => {
-      managerMock.query.mockResolvedValue([
+      dataSource.query.mockResolvedValue([
         { moneda_oficial_id: OFICIAL, en_pais: true },
       ]);
       await expect(
@@ -131,7 +141,7 @@ describe('MonedasService', () => {
     });
 
     it('lanza NotFound si la moneda no pertenece al país del tenant', async () => {
-      managerMock.query.mockResolvedValue([
+      dataSource.query.mockResolvedValue([
         { moneda_oficial_id: OFICIAL, en_pais: false },
       ]);
       await expect(
@@ -140,7 +150,7 @@ describe('MonedasService', () => {
     });
 
     it('rechaza deshabilitar la moneda predeterminada', async () => {
-      managerMock.query.mockResolvedValue([
+      dataSource.query.mockResolvedValue([
         { moneda_oficial_id: OFICIAL, en_pais: true },
       ]);
       managerMock.findOne.mockResolvedValue({
@@ -157,7 +167,7 @@ describe('MonedasService', () => {
     });
 
     it('habilita una moneda creando la fila si no existe (upsert)', async () => {
-      managerMock.query.mockResolvedValue([
+      dataSource.query.mockResolvedValue([
         { moneda_oficial_id: OFICIAL, en_pais: true },
       ]);
       managerMock.findOne.mockResolvedValue(null);
