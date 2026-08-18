@@ -12,7 +12,7 @@ import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.de
 
 export class AplicarDesfaseItemDto {
   @IsUUID()
-  recetaItemId: string;
+  itemId: string;
 
   @IsBoolean()
   @IsOptional()

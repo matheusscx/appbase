@@ -14,8 +14,8 @@ interface TokenResponse {
   access_token: string;
 }
 
-interface DesfaseRecetaResponse {
-  recetaItemId: string;
+interface DesfaseItemResponse {
+  itemId: string;
   /** El costo recalculado que la bandeja propone: el esperado tras aplicar. */
   costoPropuesto: string;
   precioSugerido: string | null;
@@ -118,25 +118,25 @@ describe('Simulador impacto costos (e2e)', () => {
       .expect(200);
 
     const afectadas = await request(app.getHttpServer())
-      .get(`/api/items/${carneId}/recetas-afectadas`)
+      .get(`/api/items/${carneId}/afectados`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(
-      (afectadas.body as DesfaseRecetaResponse[]).some(
-        (r) => r.recetaItemId === recetaId,
+      (afectadas.body as DesfaseItemResponse[]).some(
+        (r) => r.itemId === recetaId,
       ),
     ).toBe(true);
 
-    const fila = (afectadas.body as DesfaseRecetaResponse[]).find(
-      (r) => r.recetaItemId === recetaId,
+    const fila = (afectadas.body as DesfaseItemResponse[]).find(
+      (r) => r.itemId === recetaId,
     );
     await request(app.getHttpServer())
-      .post('/api/recetas/desfases/aplicar')
+      .post('/api/desfases/aplicar')
       .set('Authorization', `Bearer ${token}`)
       .send({
         items: [
           {
-            recetaItemId: recetaId,
+            itemId: recetaId,
             actualizarPrecio: true,
             precioBase: fila?.precioSugerido ?? '4000',
           },
@@ -145,12 +145,12 @@ describe('Simulador impacto costos (e2e)', () => {
       .expect(201);
 
     const bandeja = await request(app.getHttpServer())
-      .get('/api/recetas/desfases')
+      .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(
-      (bandeja.body as DesfaseRecetaResponse[]).some(
-        (r) => r.recetaItemId === recetaId,
+      (bandeja.body as DesfaseItemResponse[]).some(
+        (r) => r.itemId === recetaId,
       ),
     ).toBe(false);
 
@@ -217,17 +217,17 @@ describe('Simulador impacto costos (e2e)', () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post('/api/recetas/desfases/descartar')
+      .post('/api/desfases/descartar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ recetaItemIds: [recetaId] })
+      .send({ itemIds: [recetaId] })
       .expect(201);
 
     let bandeja = await request(app.getHttpServer())
-      .get('/api/recetas/desfases')
+      .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
     expect(
-      (bandeja.body as DesfaseRecetaResponse[]).some(
-        (r) => r.recetaItemId === recetaId,
+      (bandeja.body as DesfaseItemResponse[]).some(
+        (r) => r.itemId === recetaId,
       ),
     ).toBe(false);
 
@@ -238,11 +238,11 @@ describe('Simulador impacto costos (e2e)', () => {
       .expect(201);
 
     bandeja = await request(app.getHttpServer())
-      .get('/api/recetas/desfases')
+      .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
     expect(
-      (bandeja.body as DesfaseRecetaResponse[]).some(
-        (r) => r.recetaItemId === recetaId,
+      (bandeja.body as DesfaseItemResponse[]).some(
+        (r) => r.itemId === recetaId,
       ),
     ).toBe(true);
   });
@@ -290,9 +290,9 @@ describe('Simulador impacto costos (e2e)', () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .post('/api/recetas/desfases/aplicar')
+      .post('/api/desfases/aplicar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ items: [{ recetaItemId: recetaId, actualizarPrecio: false }] })
+      .send({ items: [{ itemId: recetaId, actualizarPrecio: false }] })
       .expect(201);
 
     const detalle = await request(app.getHttpServer())

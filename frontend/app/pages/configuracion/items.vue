@@ -4,7 +4,7 @@ import type { Row } from '@tanstack/vue-table'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type {
   AplicarDesfaseItem,
-  DesfaseRecetaDto,
+  DesfaseItemDto,
 } from '~/components/RecetasDesfasesPanel.vue'
 import Decimal from 'decimal.js'
 
@@ -985,8 +985,8 @@ async function abrirEditar(item: Item) {
 }
 
 /** Refleja en la lista local el costo/precio que acaba de aplicar el simulador. */
-function syncDesfaseEnLista(fila: DesfaseRecetaDto, aplicado: AplicarDesfaseItem) {
-  const row = items.value.find(i => i.id === fila.recetaItemId)
+function syncDesfaseEnLista(fila: DesfaseItemDto, aplicado: AplicarDesfaseItem) {
+  const row = items.value.find(i => i.id === fila.itemId)
   if (!row) return
   row.costoActual = fila.costoPropuesto
   if (aplicado.actualizarPrecio && aplicado.precioBase) {

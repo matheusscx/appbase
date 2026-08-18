@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type {
   AplicarDesfaseItem,
-  DesfaseRecetaDto,
+  DesfaseItemDto,
 } from '~/components/RecetasDesfasesPanel.vue'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -9,14 +9,14 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 
-const filas = ref<DesfaseRecetaDto[]>([])
+const filas = ref<DesfaseItemDto[]>([])
 const loading = ref(false)
 const actionLoading = ref(false)
 
 async function cargar() {
   loading.value = true
   try {
-    filas.value = await useApiFetch<DesfaseRecetaDto[]>(`${apiUrl}/recetas/desfases`)
+    filas.value = await useApiFetch<DesfaseItemDto[]>(`${apiUrl}/desfases`)
   }
   catch (e) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar recetas desfasadas'), color: 'error' })
@@ -31,12 +31,12 @@ onMounted(cargar)
 async function onAplicar(items: AplicarDesfaseItem[]) {
   actionLoading.value = true
   try {
-    await useApiFetch(`${apiUrl}/recetas/desfases/aplicar`, {
+    await useApiFetch(`${apiUrl}/desfases/aplicar`, {
       method: 'POST',
       body: { items },
     })
-    const aplicados = new Set(items.map(i => i.recetaItemId))
-    filas.value = filas.value.filter(f => !aplicados.has(f.recetaItemId))
+    const aplicados = new Set(items.map(i => i.itemId))
+    filas.value = filas.value.filter(f => !aplicados.has(f.itemId))
     toast.add({ title: 'Costos de recetas actualizados', color: 'success' })
   }
   catch (e) {
@@ -47,15 +47,15 @@ async function onAplicar(items: AplicarDesfaseItem[]) {
   }
 }
 
-async function onDescartar(recetaItemIds: string[]) {
+async function onDescartar(itemIds: string[]) {
   actionLoading.value = true
   try {
-    await useApiFetch(`${apiUrl}/recetas/desfases/descartar`, {
+    await useApiFetch(`${apiUrl}/desfases/descartar`, {
       method: 'POST',
-      body: { recetaItemIds },
+      body: { itemIds },
     })
-    const ids = new Set(recetaItemIds)
-    filas.value = filas.value.filter(f => !ids.has(f.recetaItemId))
+    const ids = new Set(itemIds)
+    filas.value = filas.value.filter(f => !ids.has(f.itemId))
     toast.add({ title: 'Avisos descartados', color: 'success' })
   }
   catch (e) {

@@ -82,14 +82,14 @@ type GrupoDetalle = {
   }[];
 };
 
-export interface DesfaseIngredienteDto {
+export interface DesfaseInsumoDto {
   itemId: string;
   nombre: string;
   costoActual: string | null;
 }
 
-export interface DesfaseRecetaDto {
-  recetaItemId: string;
+export interface DesfaseItemDto {
+  itemId: string;
   nombre: string;
   costoActual: string;
   costoPropuesto: string;
@@ -98,7 +98,7 @@ export interface DesfaseRecetaDto {
   margenPctActual: string | null;
   margenPctPropuesto: string | null;
   precioSugerido: string | null;
-  ingredientesAfectados: DesfaseIngredienteDto[];
+  afectados: DesfaseInsumoDto[];
 }
 
 /**
@@ -3700,7 +3700,7 @@ export class ItemsService {
    * Devolver `null` en vez de dejar propagar la excepción es el mismo criterio
    * que `convertirUnidades`, y por la misma razón medida: acá `construirFilasDesfase`
    * recorre **todas** las recetas del tenant, así que una sola fila rota hacía
-   * responder `400` a `GET /recetas/desfases` entero. Es un segundo sitio con la
+   * responder `400` a `GET /desfases` entero. Es un segundo sitio con la
    * misma fragilidad que el listado de items, y se encontró porque el e2e del
    * guard de unidad dejó una fila así en la base.
    */
@@ -3737,8 +3737,8 @@ export class ItemsService {
 
   private async construirFilasDesfase(
     tenantId: string,
-    ingredienteItemId?: string,
-  ): Promise<DesfaseRecetaDto[]> {
+    insumoItemId?: string,
+  ): Promise<DesfaseItemDto[]> {
     const cabeceras: {
       receta_item_id: string;
       nombre: string;
@@ -3746,7 +3746,7 @@ export class ItemsService {
       costo_propuesto_omitido: string | null;
       precio_base: string;
     }[] = await this.dataSource.query(
-      ingredienteItemId
+      insumoItemId
         ? `SELECT DISTINCT i.item_id AS receta_item_id, i.nombre,
                 ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
          FROM items i
@@ -3762,7 +3762,7 @@ export class ItemsService {
          JOIN item_receta ir ON ir.item_id = i.item_id
          WHERE i.tenant_id = $1 AND i.tipo = 'receta' AND i.eliminado_el IS NULL
          ORDER BY i.nombre`,
-      ingredienteItemId ? [tenantId, ingredienteItemId] : [tenantId],
+      insumoItemId ? [tenantId, insumoItemId] : [tenantId],
     );
     if (!cabeceras.length) return [];
 
@@ -3795,7 +3795,7 @@ export class ItemsService {
 
     const convertir = await this.catalogService.crearConversor();
 
-    const out: DesfaseRecetaDto[] = [];
+    const out: DesfaseItemDto[] = [];
     for (const cab of cabeceras) {
       const lista = byReceta.get(cab.receta_item_id) ?? [];
       if (!lista.length) continue;
@@ -3820,7 +3820,7 @@ export class ItemsService {
       const sug = this.precioSugerido(precio, costoActualD, costoPropD);
 
       out.push({
-        recetaItemId: cab.receta_item_id,
+        itemId: cab.receta_item_id,
         nombre: cab.nombre,
         costoActual: cacheado,
         costoPropuesto: propuesto,
@@ -3829,7 +3829,7 @@ export class ItemsService {
         margenPctActual: mAct?.toFixed(4) ?? null,
         margenPctPropuesto: mProp?.toFixed(4) ?? null,
         precioSugerido: sug?.toFixed(4) ?? null,
-        ingredientesAfectados: lista.map((i) => ({
+        afectados: lista.map((i) => ({
           itemId: i.ingrediente_item_id,
           nombre: i.ingrediente_nombre,
           costoActual: i.costo_actual,
@@ -3841,29 +3841,29 @@ export class ItemsService {
 
   async listarDesfases(
     tenantId: string,
-    ingredienteItemId?: string,
-  ): Promise<DesfaseRecetaDto[]> {
-    return this.construirFilasDesfase(tenantId, ingredienteItemId);
+    insumoItemId?: string,
+  ): Promise<DesfaseItemDto[]> {
+    return this.construirFilasDesfase(tenantId, insumoItemId);
   }
 
-  async recetasAfectadasPorIngrediente(
+  async itemsAfectadosPorInsumo(
     tenantId: string,
-    ingredienteItemId: string,
-  ): Promise<DesfaseRecetaDto[]> {
+    insumoItemId: string,
+  ): Promise<DesfaseItemDto[]> {
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM items
      WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
        AND tipo = 'ingrediente'`,
-      [ingredienteItemId, tenantId],
+      [insumoItemId, tenantId],
     );
     if (!exists.length) throw new NotFoundException('Item no encontrado');
-    return this.construirFilasDesfase(tenantId, ingredienteItemId);
+    return this.construirFilasDesfase(tenantId, insumoItemId);
   }
 
   async aplicarDesfases(
     tenantId: string,
     items: {
-      recetaItemId: string;
+      itemId: string;
       actualizarPrecio?: boolean;
       precioBase?: string;
     }[],
@@ -3889,7 +3889,7 @@ export class ItemsService {
       // El loop de abajo se conserva —y con él el orden exacto en que fallan
       // las validaciones— pero ya no consulta: antes eran 2 lecturas por receta
       // más una por ingrediente adentro del cálculo del costo.
-      const ids = [...new Set(items.map((i) => i.recetaItemId))];
+      const ids = [...new Set(items.map((i) => i.itemId))];
       // Los locks van ANTES de leer los ingredientes, no antes de escribir: si
       // se toman después, otra transacción alcanza a cambiar la receta entre la
       // lectura y el lock y el costo se calcula sobre ingredientes viejos.
@@ -3913,20 +3913,18 @@ export class ItemsService {
 
       let aplicados = 0;
       for (const it of items) {
-        if (cabPorId.get(it.recetaItemId) !== 'receta') {
-          throw new NotFoundException(
-            `Receta ${it.recetaItemId} no encontrada`,
-          );
+        if (cabPorId.get(it.itemId) !== 'receta') {
+          throw new NotFoundException(`Receta ${it.itemId} no encontrada`);
         }
-        if (!ingsPorReceta.get(it.recetaItemId)?.length) {
+        if (!ingsPorReceta.get(it.itemId)?.length) {
           throw new BadRequestException(
-            `La receta ${it.recetaItemId} no tiene ingredientes`,
+            `La receta ${it.itemId} no tiene ingredientes`,
           );
         }
 
         const propuesto = this.costoPropuesto(
           convertir,
-          ingsPorReceta.get(it.recetaItemId)!,
+          ingsPorReceta.get(it.itemId)!,
         );
         // La bandeja LEE tolerante (omite la receta sin costo proponible), pero
         // ESCRIBIR es otra cosa: `costo_actual` es dinero y la columna es
@@ -3936,7 +3934,7 @@ export class ItemsService {
         // propagar la excepción — pero nombrando la receta y la causa.
         if (propuesto === null) {
           throw new BadRequestException(
-            `No se puede calcular el costo de la receta ${it.recetaItemId}: ` +
+            `No se puede calcular el costo de la receta ${it.itemId}: ` +
               'alguno de sus ingredientes tiene una unidad incompatible con la ' +
               'que la receta declara. Corregí esa unidad antes de aplicar.',
           );
@@ -3945,7 +3943,7 @@ export class ItemsService {
           `UPDATE item_receta
            SET costo_actual = $1, costo_propuesto_omitido = NULL
            WHERE item_id = $2`,
-          [propuesto, it.recetaItemId],
+          [propuesto, it.itemId],
         );
 
         if (it.actualizarPrecio && it.precioBase) {
@@ -3955,7 +3953,7 @@ export class ItemsService {
           await manager.query(
             `UPDATE items SET precio_base = $1
              WHERE item_id = $2 AND tenant_id = $3 AND eliminado_el IS NULL`,
-            [precio, it.recetaItemId, tenantId],
+            [precio, it.itemId, tenantId],
           );
         }
         aplicados += 1;
@@ -3966,12 +3964,12 @@ export class ItemsService {
 
   async descartarDesfases(
     tenantId: string,
-    recetaItemIds: string[],
+    itemIds: string[],
   ): Promise<{ descartados: number }> {
     return this.dataSource.transaction(async (manager) => {
       // Mismo batch que `aplicarDesfases`: 2 lecturas para todo el lote, loop
       // conservado para no alterar el orden de las validaciones.
-      const ids = [...new Set(recetaItemIds)];
+      const ids = [...new Set(itemIds)];
       const cabPorId = await this.cabecerasReceta(manager, tenantId, ids);
       const ingsPorReceta = await this.ingredientesPorReceta(
         manager,
@@ -3981,18 +3979,18 @@ export class ItemsService {
       const convertir = await this.catalogService.crearConversor();
 
       let descartados = 0;
-      for (const recetaItemId of recetaItemIds) {
-        if (cabPorId.get(recetaItemId) !== 'receta') {
-          throw new NotFoundException(`Receta ${recetaItemId} no encontrada`);
+      for (const itemId of itemIds) {
+        if (cabPorId.get(itemId) !== 'receta') {
+          throw new NotFoundException(`Receta ${itemId} no encontrada`);
         }
-        if (!ingsPorReceta.get(recetaItemId)?.length) {
+        if (!ingsPorReceta.get(itemId)?.length) {
           throw new BadRequestException(
-            `La receta ${recetaItemId} no tiene ingredientes`,
+            `La receta ${itemId} no tiene ingredientes`,
           );
         }
         const propuesto = this.costoPropuesto(
           convertir,
-          ingsPorReceta.get(recetaItemId)!,
+          ingsPorReceta.get(itemId)!,
         );
         // Mismo criterio que `aplicarDesfases`: sin costo proponible no hay nada
         // que descartar, y escribir `null` en `costo_propuesto_omitido` lo
@@ -4000,14 +3998,14 @@ export class ItemsService {
         // siguiente lectura, con el usuario creyendo que la descartó.
         if (propuesto === null) {
           throw new BadRequestException(
-            `No se puede calcular el costo de la receta ${recetaItemId}: ` +
+            `No se puede calcular el costo de la receta ${itemId}: ` +
               'alguno de sus ingredientes tiene una unidad incompatible con la ' +
               'que la receta declara. Corregí esa unidad antes de descartar.',
           );
         }
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
-          [propuesto, recetaItemId],
+          [propuesto, itemId],
         );
         descartados += 1;
       }

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 
-export interface DesfaseIngredienteDto {
+export interface DesfaseInsumoDto {
   itemId: string
   nombre: string
   costoActual: string | null
 }
 
-export interface DesfaseRecetaDto {
-  recetaItemId: string
+export interface DesfaseItemDto {
+  itemId: string
   nombre: string
   costoActual: string
   costoPropuesto: string
@@ -17,18 +17,18 @@ export interface DesfaseRecetaDto {
   margenPctActual: string | null
   margenPctPropuesto: string | null
   precioSugerido: string | null
-  ingredientesAfectados: DesfaseIngredienteDto[]
+  afectados: DesfaseInsumoDto[]
 }
 
 export interface AplicarDesfaseItem {
-  recetaItemId: string
+  itemId: string
   actualizarPrecio?: boolean
   precioBase?: string
 }
 
 const props = withDefaults(
   defineProps<{
-    filas: DesfaseRecetaDto[]
+    filas: DesfaseItemDto[]
     highlightIngredienteId?: string | null
     loading?: boolean
   }>(),
@@ -40,11 +40,11 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   aplicar: [items: AplicarDesfaseItem[]]
-  descartar: [recetaItemIds: string[]]
+  descartar: [itemIds: string[]]
   cerrar: []
 }>()
 
-// Aplicar y descartar pegan a `POST /recetas/desfases/*`, que exige
+// Aplicar y descartar pegan a `POST /desfases/*`, que exige
 // `Items:Actualizar`. El gate vive acá y no en cada página porque el panel lo
 // usan tres (`recetas-desfases`, `configuracion/items`, `inventario`) y las
 // tres necesitan el mismo permiso: repetirlo en cada una es una copia que se
@@ -61,12 +61,12 @@ interface RowState {
 const selected = ref<Set<string>>(new Set())
 const rowState = ref<Record<string, RowState>>({})
 
-function initFromFilas(filas: DesfaseRecetaDto[]) {
+function initFromFilas(filas: DesfaseItemDto[]) {
   const nextSelected = new Set<string>()
   const nextState: Record<string, RowState> = {}
   for (const f of filas) {
-    nextSelected.add(f.recetaItemId)
-    nextState[f.recetaItemId] = {
+    nextSelected.add(f.itemId)
+    nextState[f.itemId] = {
       actualizarPrecio: false,
       precioEditado: f.precioSugerido ?? f.precioBase,
     }
@@ -82,16 +82,16 @@ watch(
 )
 
 const allSelected = computed(
-  () => props.filas.length > 0 && props.filas.every((f) => selected.value.has(f.recetaItemId)),
+  () => props.filas.length > 0 && props.filas.every((f) => selected.value.has(f.itemId)),
 )
 
 const someSelected = computed(() =>
-  props.filas.some((f) => selected.value.has(f.recetaItemId)),
+  props.filas.some((f) => selected.value.has(f.itemId)),
 )
 
 function toggleAll(value: boolean | 'indeterminate') {
   if (value === true) {
-    selected.value = new Set(props.filas.map((f) => f.recetaItemId))
+    selected.value = new Set(props.filas.map((f) => f.itemId))
   } else {
     selected.value = new Set()
   }
@@ -104,10 +104,10 @@ function toggleOne(id: string, value: boolean | 'indeterminate') {
   selected.value = next
 }
 
-function isHighlighted(fila: DesfaseRecetaDto): boolean {
+function isHighlighted(fila: DesfaseItemDto): boolean {
   const hid = props.highlightIngredienteId
   if (!hid) return false
-  return fila.ingredientesAfectados.some((i) => i.itemId === hid)
+  return fila.afectados.some((i) => i.itemId === hid)
 }
 
 function deltaClass(delta: string): string {
@@ -122,10 +122,10 @@ function deltaClass(delta: string): string {
 
 function onAplicar() {
   const items: AplicarDesfaseItem[] = props.filas
-    .filter((f) => selected.value.has(f.recetaItemId))
+    .filter((f) => selected.value.has(f.itemId))
     .map((f) => {
-      const st = rowState.value[f.recetaItemId]
-      const item: AplicarDesfaseItem = { recetaItemId: f.recetaItemId }
+      const st = rowState.value[f.itemId]
+      const item: AplicarDesfaseItem = { itemId: f.itemId }
       if (st?.actualizarPrecio) {
         item.actualizarPrecio = true
         item.precioBase = st.precioEditado
@@ -138,8 +138,8 @@ function onAplicar() {
 
 function onDescartar() {
   const ids = props.filas
-    .filter((f) => selected.value.has(f.recetaItemId))
-    .map((f) => f.recetaItemId)
+    .filter((f) => selected.value.has(f.itemId))
+    .map((f) => f.itemId)
   if (!ids.length) return
   emit('descartar', ids)
 }
@@ -179,23 +179,23 @@ function onDescartar() {
           <tr
             v-for="fila in filas"
             v-else
-            :key="fila.recetaItemId"
+            :key="fila.itemId"
             :class="isHighlighted(fila) ? 'bg-elevated' : 'bg-default'"
           >
             <td class="px-3 py-3 align-top">
               <UCheckbox
-                :model-value="selected.has(fila.recetaItemId)"
+                :model-value="selected.has(fila.itemId)"
                 :aria-label="`Seleccionar ${fila.nombre}`"
-                @update:model-value="(v) => toggleOne(fila.recetaItemId, v)"
+                @update:model-value="(v) => toggleOne(fila.itemId, v)"
               />
             </td>
             <td class="px-3 py-3 align-top">
               <div class="font-medium text-default">{{ fila.nombre }}</div>
               <div
-                v-if="fila.ingredientesAfectados.length"
+                v-if="fila.afectados.length"
                 class="mt-1 text-xs text-muted"
               >
-                {{ fila.ingredientesAfectados.map((i) => i.nombre).join(', ') }}
+                {{ fila.afectados.map((i) => i.nombre).join(', ') }}
               </div>
             </td>
             <td class="px-3 py-3 align-top text-right font-mono tabular-nums">
@@ -216,16 +216,16 @@ function onDescartar() {
             <td class="px-3 py-3 align-top">
               <div class="flex min-w-40 flex-col gap-2">
                 <MoneyInput
-                  v-if="rowState[fila.recetaItemId]"
-                  v-model="rowState[fila.recetaItemId]!.precioEditado"
+                  v-if="rowState[fila.itemId]"
+                  v-model="rowState[fila.itemId]!.precioEditado"
                   oficial
                   size="sm"
                   class="w-full"
-                  :disabled="!rowState[fila.recetaItemId]?.actualizarPrecio"
+                  :disabled="!rowState[fila.itemId]?.actualizarPrecio"
                 />
                 <UCheckbox
-                  v-if="rowState[fila.recetaItemId]"
-                  v-model="rowState[fila.recetaItemId]!.actualizarPrecio"
+                  v-if="rowState[fila.itemId]"
+                  v-model="rowState[fila.itemId]!.actualizarPrecio"
                   label="Actualizar precio"
                 />
               </div>

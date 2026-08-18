@@ -23,7 +23,7 @@ mockNuxtImport('usePermissionsStore', () => {
 
 const FILAS = [
   {
-    recetaItemId: 'receta-1',
+    itemId: 'receta-1',
     nombre: 'Hamburguesa',
     costoActual: '1000.0000',
     costoPropuesto: '1200.0000',
@@ -32,7 +32,7 @@ const FILAS = [
     margenPctActual: '0.6667',
     margenPctPropuesto: '0.6000',
     precioSugerido: null,
-    ingredientesAfectados: [],
+    afectados: [],
   },
 ]
 

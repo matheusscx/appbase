@@ -225,7 +225,7 @@ describe('AplicarDesfaseItemDto.precioBase — signo', () => {
 
   it('acepta precioBase en 0 sin actualizarPrecio (el service lo ignora)', async () => {
     const dto = plainToInstance(AplicarDesfaseItemDto, {
-      recetaItemId: RECETA_ID,
+      itemId: RECETA_ID,
       actualizarPrecio: false,
       precioBase: '0',
     });
@@ -235,7 +235,7 @@ describe('AplicarDesfaseItemDto.precioBase — signo', () => {
 
   it('acepta precioBase ausente (solo recalcular costo)', async () => {
     const dto = plainToInstance(AplicarDesfaseItemDto, {
-      recetaItemId: RECETA_ID,
+      itemId: RECETA_ID,
     });
     const errores = await validate(dto);
     expect(errores).toHaveLength(0);
@@ -243,7 +243,7 @@ describe('AplicarDesfaseItemDto.precioBase — signo', () => {
 
   it('rechaza precioBase negativo', async () => {
     const dto = plainToInstance(AplicarDesfaseItemDto, {
-      recetaItemId: RECETA_ID,
+      itemId: RECETA_ID,
       actualizarPrecio: true,
       precioBase: '-1000',
     });

@@ -4512,7 +4512,7 @@ describe('ItemsService', () => {
     });
   });
 
-  describe('desfases de costo de recetas', () => {
+  describe('desfases de costo', () => {
     const RECETA_ID = 'receta-1';
     const CARNE_ID = 'carne-1';
 
@@ -4637,7 +4637,7 @@ describe('ItemsService', () => {
       expect(rows[0].precioSugerido).toBeNull();
     });
 
-    it('recetasAfectadasPorIngrediente filtra por ingrediente', async () => {
+    it('itemsAfectadosPorInsumo filtra por insumo', async () => {
       dataSource.query.mockResolvedValueOnce([{ '?column?': 1 }]);
       mockRecetaConIngredientes({
         costoCacheado: '100.0000',
@@ -4654,10 +4654,7 @@ describe('ItemsService', () => {
           },
         ],
       });
-      const rows = await service.recetasAfectadasPorIngrediente(
-        TENANT,
-        CARNE_ID,
-      );
+      const rows = await service.itemsAfectadosPorInsumo(TENANT, CARNE_ID);
       expect(rows).toHaveLength(1);
       // calls[0] = exists check; calls[1] = cabeceras filtradas por ingrediente
       expect(dataSource.query.mock.calls[0][0]).toContain(
@@ -4695,7 +4692,7 @@ describe('ItemsService', () => {
 
         const result = await service.aplicarDesfases(TENANT, [
           {
-            recetaItemId: RECETA_ID,
+            itemId: RECETA_ID,
             actualizarPrecio: true,
             precioBase: '600.0000',
           },
@@ -4729,7 +4726,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([]);
 
         await service.aplicarDesfases(TENANT, [
-          { recetaItemId: RECETA_ID, actualizarPrecio: false },
+          { itemId: RECETA_ID, actualizarPrecio: false },
         ]);
         const sqls = managerMock.query.mock.calls.map(
           (c: unknown[]) => c[0] as string,
@@ -4743,7 +4740,7 @@ describe('ItemsService', () => {
         await expect(
           service.aplicarDesfases(TENANT, [
             {
-              recetaItemId: RECETA_ID,
+              itemId: RECETA_ID,
               actualizarPrecio: true,
               precioBase: '0',
             },
@@ -4795,7 +4792,7 @@ describe('ItemsService', () => {
 
         const result = await service.aplicarDesfases(
           TENANT,
-          IDS.map((id) => ({ recetaItemId: id })),
+          IDS.map((id) => ({ itemId: id })),
         );
 
         expect(result.aplicados).toBe(3);

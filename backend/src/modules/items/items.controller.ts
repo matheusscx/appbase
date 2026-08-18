@@ -33,11 +33,11 @@ export class ItemsController {
     return this.itemsService.findAll(tenantId, query);
   }
 
-  @Get(':id/recetas-afectadas')
+  @Get(':id/afectados')
   @RequiresPermiso('Items', 'Leer')
-  recetasAfectadas(@Req() req: Request, @Param('id') id: string) {
+  afectados(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.recetasAfectadasPorIngrediente(tenantId, id);
+    return this.itemsService.itemsAfectadosPorInsumo(tenantId, id);
   }
 
   @Get(':id')
@@ -73,7 +73,7 @@ export class ItemsController {
 
   /**
    * `Items:Eliminar` y no `Items:Leer`, a diferencia de su ruta hermana
-   * `:id/recetas-afectadas`. **Es deliberado, no una asimetría olvidada:** este
+   * `:id/afectados`. **Es deliberado, no una asimetría olvidada:** este
    * endpoint existe para mostrar el impacto de un borrado, así que lo pide quien
    * puede borrar.
    *

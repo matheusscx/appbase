@@ -14,7 +14,7 @@ import { ItemGrupoModificador } from './entities/item-grupo-modificador.entity';
 import { ItemGrupoModificadorOpcion } from './entities/item-grupo-modificador-opcion.entity';
 import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
-import { RecetasDesfasesController } from './recetas-desfases.controller';
+import { DesfasesController } from './desfases.controller';
 import { InventarioModule } from '../inventario/inventario.module';
 import { CatalogModule } from '../catalog/catalog.module';
 
@@ -37,7 +37,7 @@ import { CatalogModule } from '../catalog/catalog.module';
     InventarioModule,
     CatalogModule,
   ],
-  controllers: [ItemsController, RecetasDesfasesController],
+  controllers: [ItemsController, DesfasesController],
   providers: [ItemsService],
   exports: [ItemsService],
 })

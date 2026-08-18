@@ -1,4 +1,4 @@
-import type { AplicarDesfaseItem, DesfaseRecetaDto } from '~/components/RecetasDesfasesPanel.vue'
+import type { AplicarDesfaseItem, DesfaseItemDto } from '~/components/RecetasDesfasesPanel.vue'
 
 /**
  * Estado y lógica del simulador de impacto de costos en recetas ("desfases").
@@ -15,13 +15,13 @@ export function useSimuladorDesfases() {
 
   const desfasesOpen = ref(false)
   const desfasesLoading = ref(false)
-  const desfasesFilas = ref<DesfaseRecetaDto[]>([])
+  const desfasesFilas = ref<DesfaseItemDto[]>([])
   const desfasesHighlightId = ref<string | null>(null)
 
   async function maybeAbrirDesfases(productoId: string) {
     try {
-      const filas = await useApiFetch<DesfaseRecetaDto[]>(
-        `${apiUrl}/items/${productoId}/recetas-afectadas`,
+      const filas = await useApiFetch<DesfaseItemDto[]>(
+        `${apiUrl}/items/${productoId}/afectados`,
       )
       if (filas.length) {
         desfasesFilas.value = filas
@@ -38,18 +38,18 @@ export function useSimuladorDesfases() {
    */
   async function onAplicarDesfases(
     aplicados: AplicarDesfaseItem[],
-    onAplicado?: (fila: DesfaseRecetaDto, aplicado: AplicarDesfaseItem) => void,
+    onAplicado?: (fila: DesfaseItemDto, aplicado: AplicarDesfaseItem) => void,
   ) {
     desfasesLoading.value = true
     try {
-      await useApiFetch(`${apiUrl}/recetas/desfases/aplicar`, {
+      await useApiFetch(`${apiUrl}/desfases/aplicar`, {
         method: 'POST',
         body: { items: aplicados },
       })
       if (onAplicado) {
-        const byId = new Map(aplicados.map(a => [a.recetaItemId, a]))
+        const byId = new Map(aplicados.map(a => [a.itemId, a]))
         for (const fila of desfasesFilas.value) {
-          const aplicado = byId.get(fila.recetaItemId)
+          const aplicado = byId.get(fila.itemId)
           if (aplicado) onAplicado(fila, aplicado)
         }
       }
@@ -62,12 +62,12 @@ export function useSimuladorDesfases() {
     }
   }
 
-  async function onDescartarDesfases(recetaItemIds: string[]) {
+  async function onDescartarDesfases(itemIds: string[]) {
     desfasesLoading.value = true
     try {
-      await useApiFetch(`${apiUrl}/recetas/desfases/descartar`, {
+      await useApiFetch(`${apiUrl}/desfases/descartar`, {
         method: 'POST',
-        body: { recetaItemIds },
+        body: { itemIds },
       })
       toast.add({ title: 'Avisos descartados', color: 'success' })
       desfasesOpen.value = false

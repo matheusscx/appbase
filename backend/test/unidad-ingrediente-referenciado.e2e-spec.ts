@@ -241,7 +241,7 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
     // responder 400 entera. Se descubrió porque este spec dejaba la fila rota y
     // la suite del simulador empezó a fallar.
     const resDesfases = await request(app.getHttpServer())
-      .get('/api/recetas/desfases')
+      .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
     expect(resDesfases.status).toBe(200);
   });
@@ -252,7 +252,7 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
    * costo "no calculable" persistido como `null` no falla — se lee después como
    * costo 0 al costear un combo que use esta receta.
    *
-   * Estos dos endpoints reciben el `recetaItemId` por body, sin pasar por la
+   * Estos dos endpoints reciben el `itemId` por body, sin pasar por la
    * bandeja, así que la fila rota es alcanzable por ellos aunque el listado la
    * omita.
    */
@@ -270,18 +270,18 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
     );
 
     const resAplicar = await request(app.getHttpServer())
-      .post('/api/recetas/desfases/aplicar')
+      .post('/api/desfases/aplicar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ items: [{ recetaItemId: recetaId }] });
+      .send({ items: [{ itemId: recetaId }] });
     expect(resAplicar.status).toBe(400);
     expect((resAplicar.body as { message: string }).message).toContain(
       'unidad incompatible',
     );
 
     const resDescartar = await request(app.getHttpServer())
-      .post('/api/recetas/desfases/descartar')
+      .post('/api/desfases/descartar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ recetaItemIds: [recetaId] });
+      .send({ itemIds: [recetaId] });
     expect(resDescartar.status).toBe(400);
 
     // Lo que importa de verdad: ninguna de las dos columnas de dinero quedó

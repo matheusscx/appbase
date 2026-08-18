@@ -18,28 +18,28 @@ import { AplicarDesfasesDto } from './dto/aplicar-desfases.dto';
 import { DescartarDesfasesDto } from './dto/descartar-desfases.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
-@Controller('recetas')
-export class RecetasDesfasesController {
+@Controller('desfases')
+export class DesfasesController {
   constructor(private readonly itemsService: ItemsService) {}
 
-  @Get('desfases')
+  @Get()
   @RequiresPermiso('Items', 'Leer')
   listar(@Req() req: Request, @Query() query: QueryDesfasesDto) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.listarDesfases(tenantId, query.ingredienteItemId);
+    return this.itemsService.listarDesfases(tenantId, query.insumoItemId);
   }
 
-  @Post('desfases/aplicar')
+  @Post('aplicar')
   @RequiresPermiso('Items', 'Actualizar')
   aplicar(@Req() req: Request, @Body() dto: AplicarDesfasesDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.aplicarDesfases(tenantId, dto.items);
   }
 
-  @Post('desfases/descartar')
+  @Post('descartar')
   @RequiresPermiso('Items', 'Actualizar')
   descartar(@Req() req: Request, @Body() dto: DescartarDesfasesDto) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.descartarDesfases(tenantId, dto.recetaItemIds);
+    return this.itemsService.descartarDesfases(tenantId, dto.itemIds);
   }
 }
