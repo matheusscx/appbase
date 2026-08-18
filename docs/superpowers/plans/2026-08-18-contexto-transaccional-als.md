@@ -107,6 +107,7 @@ import { AppModule } from '../src/app.module';
 // Seed (IDs fijos, ver seeder.service.ts)
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 
@@ -130,11 +131,22 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
     app.use(cookieParser());
     await app.init();
 
-    const login = await request(app.getHttpServer())
+    // Login en DOS pasos: el token de `/auth/login` de un usuario multi-tenant
+    // sale con `tenant_id: null` y PermisosGuard lo rechaza con 403. El tenant
+    // activo se fija con `switch-tenant`, que además exige la cookie de refresh
+    // (mismo patrón que rbac-y-contrasena.e2e-spec.ts:47 y papelera:63).
+    const resLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: ADMIN_EMAIL, password: ADMIN_PASS });
-    expect(login.status).toBe(200);
-    token = (login.body as { access_token: string }).access_token;
+    expect(resLogin.status).toBe(200);
+
+    const resTenant = await request(app.getHttpServer())
+      .post('/api/auth/switch-tenant')
+      .set('Cookie', (resLogin.headers['set-cookie'] as unknown as string[]) ?? [])
+      .set('Authorization', `Bearer ${(resLogin.body as { access_token: string }).access_token}`)
+      .send({ tenantId: PARIS_TENANT_ID });
+    expect(resTenant.status).toBe(200);
+    token = (resTenant.body as { access_token: string }).access_token;
 
     // Ítem propio, tipo servicio: sin stock → sin contaminación acumulativa
     // entre corridas locales, y sin locks de inventario que ensucien la medición.
