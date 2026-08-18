@@ -34,6 +34,29 @@ export default tseslint.config(
     },
   },
   {
+    // El acceso directo al DataSource ignora el contexto transaccional (ALS) y
+    // reabre el deadlock del pool (ADR-020). Toda query/transacción pasa por la
+    // fachada Db. Excepciones: la propia fachada, y el seeder (corre al boot,
+    // sin concurrencia).
+    files: ['src/**/*.ts'],
+    ignores: [
+      'src/common/db/**',
+      'src/modules/seeder/**',
+      'src/**/*.spec.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'MemberExpression[object.property.name="dataSource"][property.name=/^(query|transaction|manager|createQueryRunner)$/]',
+          message:
+            'dataSource directo ignora la transacción en contexto y reabre el deadlock del pool. Usar Db.query / Db.transaccion (src/common/db) — ver docs/patterns/backend.md.',
+        },
+      ],
+    },
+  },
+  {
     // Archivos de test: acceder a `any` de mocks y respuestas HTTP (res.body.x,
     // spies de jest) es uso legítimo, no deuda de tipos. Relajamos la familia
     // no-unsafe y unbound-method solo aquí; el código de producción sí las exige.

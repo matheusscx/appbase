@@ -54,9 +54,9 @@ describe('MonedasService', () => {
           provide: getRepositoryToken(TenantMoneda),
           useValue: tenantMonedaRepo,
         },
-        // `dataSource` sigue provisto: `updateMoneda` → `upsertRow` todavía
-        // necesita el `EntityManager` completo del pool (ver comentario en
-        // `monedas.service.ts`).
+        // `dataSource` sigue provisto para armar `dbMock` (que reenvía a
+        // `dataSource.transaction`/`.query`) — `MonedasService` ya no lo
+        // inyecta directo, solo usa `Db`.
         { provide: getDataSourceToken(), useValue: dataSource },
         { provide: Db, useValue: dbMock },
       ],

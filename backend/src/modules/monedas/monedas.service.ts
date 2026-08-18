@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { TenantMoneda } from './entities/tenant-moneda.entity';
 import { UpdateTenantMonedaDto } from './dto/update-tenant-moneda.dto';
@@ -34,14 +34,6 @@ export class MonedasService {
   constructor(
     @InjectRepository(TenantMoneda)
     private readonly tenantMonedaRepo: Repository<TenantMoneda>,
-    // `dataSource` sigue acá SOLO por `updateMoneda` → `upsertRow`: necesita un
-    // `EntityManager` completo (`findOne`/`create`), no solo `.query`, y corre
-    // fuera de cualquier transacción (nunca anidado — solo lo llama el
-    // controller). La fachada `Db` no expone eso, así que no hay deadlock que
-    // evitar acá: no hay una segunda conexión disputándose con una transacción
-    // abierta.
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
     private readonly db: Db,
   ) {}
 
@@ -134,10 +126,12 @@ export class MonedasService {
       }
     }
 
-    const row = await this.upsertRow(
-      this.dataSource.manager,
-      tenantId,
-      monedaId,
+    // `upsertRow` necesita un `EntityManager` completo (`findOne`/`create`),
+    // no solo `.query`. `db.transaccion` se lo da a través de la fachada:
+    // abre una transacción propia (o reusa la del contexto si hubiera una) en
+    // vez de tomar `dataSource.manager` directo.
+    const row = await this.db.transaccion((manager) =>
+      this.upsertRow(manager, tenantId, monedaId),
     );
 
     if (dto.habilitada === false && row.esDefault) {

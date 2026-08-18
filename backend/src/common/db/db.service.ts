@@ -6,8 +6,7 @@ import { TxContext } from './tx-context';
 /**
  * La única puerta al acceso a datos fuera de los repos. El acceso directo al
  * `DataSource` ignora el contexto transaccional y reabre el deadlock del
- * pool; la regla de lint que lo prohíbe en los services se construye en la
- * Task 8 del plan (ver ADR-020).
+ * pool; una regla de lint lo prohíbe en los services (ver ADR-020).
  */
 @Injectable()
 export class Db {
