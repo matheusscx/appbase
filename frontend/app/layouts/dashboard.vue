@@ -135,9 +135,9 @@ const items = computed<NavigationMenuItem[]>(() => {
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     base.push({
-      label: 'Recetas desfasadas',
+      label: 'Costos desfasados',
       icon: 'i-lucide-scale',
-      to: '/recetas-desfases',
+      to: '/desfases',
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')) {

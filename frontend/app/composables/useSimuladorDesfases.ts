@@ -1,4 +1,4 @@
-import type { AplicarDesfaseItem, DesfaseItemDto } from '~/components/RecetasDesfasesPanel.vue'
+import type { AplicarDesfaseItem, DesfaseItemDto } from '~/components/DesfasesPanel.vue'
 
 /**
  * Estado y lógica del simulador de impacto de costos en recetas ("desfases").
@@ -31,6 +31,12 @@ export function useSimuladorDesfases() {
     } catch { /* no bloquear el flujo que disparó el chequeo */ }
   }
 
+  interface AplicarResponse {
+    aplicados: number
+    omitidos: { itemId: string, nombre: string, motivo: string }[]
+    afectados: DesfaseItemDto[]
+  }
+
   /**
    * `onAplicado` es opcional: lo usan las páginas que mantienen una lista local
    * de items (p. ej. `configuracion/items.vue`) para reflejar el costo/precio
@@ -42,19 +48,42 @@ export function useSimuladorDesfases() {
   ) {
     desfasesLoading.value = true
     try {
-      await useApiFetch(`${apiUrl}/desfases/aplicar`, {
+      const res = await useApiFetch<AplicarResponse>(`${apiUrl}/desfases/aplicar`, {
         method: 'POST',
         body: { items: aplicados },
       })
+      // Un combo del lote puede volver en `omitidos` (dependía de una receta
+      // del mismo lote): el backend no lo escribió, así que `onAplicado` no se
+      // llama para él — reflejar ese costo localmente sería mentir sobre lo
+      // que quedó persistido.
+      const omitidosIds = new Set(res.omitidos.map(o => o.itemId))
       if (onAplicado) {
         const byId = new Map(aplicados.map(a => [a.itemId, a]))
         for (const fila of desfasesFilas.value) {
+          if (omitidosIds.has(fila.itemId)) continue
           const aplicado = byId.get(fila.itemId)
           if (aplicado) onAplicado(fila, aplicado)
         }
       }
-      toast.add({ title: 'Costos de recetas actualizados', color: 'success' })
-      desfasesOpen.value = false
+      if (res.omitidos.length) {
+        toast.add({
+          title: `${res.omitidos.length} combo(s) se recalcularon y vuelven a proponerse`,
+          color: 'warning',
+        })
+      }
+      if (res.afectados.length) {
+        // Segunda pasada: el costo de estos combos cambió porque se aplicaron
+        // las recetas que contienen. Se resuelven acá mismo en vez de dejarlos
+        // esperando en la bandeja.
+        desfasesFilas.value = res.afectados
+        toast.add({
+          title: `${res.afectados.length} combo(s) quedaron desfasados por este cambio`,
+          color: 'info',
+        })
+      } else {
+        toast.add({ title: 'Costos actualizados', color: 'success' })
+        desfasesOpen.value = false
+      }
     } catch (e) {
       toast.add({ title: apiErrorMsg(e, 'Error al aplicar desfases'), color: 'error' })
     } finally {

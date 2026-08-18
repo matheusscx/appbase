@@ -5,7 +5,7 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type {
   AplicarDesfaseItem,
   DesfaseItemDto,
-} from '~/components/RecetasDesfasesPanel.vue'
+} from '~/components/DesfasesPanel.vue'
 import Decimal from 'decimal.js'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -2612,7 +2612,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       description="El costo del producto cambió; estas recetas quedaron desfasadas."
     >
       <template #body>
-        <RecetasDesfasesPanel
+        <DesfasesPanel
           :filas="desfasesFilas"
           :highlight-ingrediente-id="desfasesHighlightId"
           :loading="desfasesLoading"

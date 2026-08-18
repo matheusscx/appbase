@@ -7,7 +7,7 @@
 // (o visible) por dónde está colgado.
 import { describe, it, expect, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import RecetasDesfasesPanel from './RecetasDesfasesPanel.vue'
+import DesfasesPanel from './DesfasesPanel.vue'
 
 let esAdmin = false
 let permisos: string[] = []
@@ -24,6 +24,7 @@ mockNuxtImport('usePermissionsStore', () => {
 const FILAS = [
   {
     itemId: 'receta-1',
+    tipo: 'receta',
     nombre: 'Hamburguesa',
     costoActual: '1000.0000',
     costoPropuesto: '1200.0000',
@@ -40,12 +41,12 @@ function textos(wrapper: { findAll: (s: string) => { text: () => string }[] }) {
   return wrapper.findAll('button').map(b => b.text())
 }
 
-describe('RecetasDesfasesPanel — gate de Items:Actualizar', () => {
+describe('DesfasesPanel — gate de Items:Actualizar', () => {
   it('sin el permiso NO muestra aplicar ni descartar', async () => {
     esAdmin = false
     permisos = ['Items:Leer']
 
-    const wrapper = await mountSuspended(RecetasDesfasesPanel, {
+    const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: FILAS as never },
     })
 
@@ -60,7 +61,7 @@ describe('RecetasDesfasesPanel — gate de Items:Actualizar', () => {
     esAdmin = false
     permisos = ['Items:Leer', 'Items:Actualizar']
 
-    const wrapper = await mountSuspended(RecetasDesfasesPanel, {
+    const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: FILAS as never },
     })
 
@@ -73,7 +74,7 @@ describe('RecetasDesfasesPanel — gate de Items:Actualizar', () => {
     esAdmin = true
     permisos = []
 
-    const wrapper = await mountSuspended(RecetasDesfasesPanel, {
+    const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: FILAS as never },
     })
 
@@ -84,11 +85,61 @@ describe('RecetasDesfasesPanel — gate de Items:Actualizar', () => {
     esAdmin = false
     permisos = ['Items:Leer']
 
-    const wrapper = await mountSuspended(RecetasDesfasesPanel, {
+    const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: FILAS as never },
     })
 
     expect(textos(wrapper).some(t => t.includes('Después'))).toBe(true)
+  })
+})
+
+describe('DesfasesPanel — columna Tipo', () => {
+  it('una fila de combo se distingue de una de receta', async () => {
+    // `nombre: 'Combo Clásico'` ya contiene la palabra "Combo": un
+    // `wrapper.text()).toContain('Combo')` pasaría igual sin columna Tipo ni
+    // badge. La aserción va acotada a la celda de Tipo (índice 1: checkbox,
+    // Tipo, nombre, costo, margen, precio), y con una fila de receta al lado
+    // para probar que de verdad distingue una de la otra.
+    const wrapper = await mountSuspended(DesfasesPanel, {
+      props: {
+        filas: [
+          {
+            itemId: 'combo-1',
+            tipo: 'combo',
+            nombre: 'Combo Clásico',
+            costoActual: '1700.0000',
+            costoPropuesto: '1800.0000',
+            deltaCosto: '100.0000',
+            precioBase: '4200.0000',
+            margenPctActual: '0.5952',
+            margenPctPropuesto: '0.5714',
+            precioSugerido: '4447.0588',
+            afectados: [
+              { itemId: 'papas-1', nombre: 'Papas fritas', costoActual: '600.0000' },
+            ],
+          },
+          {
+            itemId: 'receta-1',
+            tipo: 'receta',
+            nombre: 'Hamburguesa Clásica',
+            costoActual: '1000.0000',
+            costoPropuesto: '1200.0000',
+            deltaCosto: '200.0000',
+            precioBase: '3000.0000',
+            margenPctActual: '0.6667',
+            margenPctPropuesto: '0.6000',
+            precioSugerido: null,
+            afectados: [],
+          },
+        ],
+      },
+    })
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+    const [comboRow, recetaRow] = filas
+    expect(comboRow!.findAll('td')[1]?.text()).toBe('Combo')
+    expect(recetaRow!.findAll('td')[1]?.text()).toBe('Receta')
   })
 })
 

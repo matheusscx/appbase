@@ -9,6 +9,7 @@ export interface DesfaseInsumoDto {
 
 export interface DesfaseItemDto {
   itemId: string
+  tipo: 'receta' | 'combo'
   nombre: string
   costoActual: string
   costoPropuesto: string
@@ -46,7 +47,7 @@ const emit = defineEmits<{
 
 // Aplicar y descartar pegan a `POST /desfases/*`, que exige
 // `Items:Actualizar`. El gate vive acá y no en cada página porque el panel lo
-// usan tres (`recetas-desfases`, `configuracion/items`, `inventario`) y las
+// usan tres (`desfases`, `configuracion/items`, `inventario`) y las
 // tres necesitan el mismo permiso: repetirlo en cada una es una copia que se
 // desincroniza. "Después" no escribe, así que no se gatea.
 const { puedeActualizar: puedeAplicar } = usePermisosCrud('Items')
@@ -148,7 +149,7 @@ function onDescartar() {
 <template>
   <div class="flex flex-col gap-4">
     <p class="text-sm text-muted">
-      Estas recetas tienen un costo de insumos distinto al registrado. Puedes aplicar el nuevo costo,
+      Estos items tienen un costo distinto al registrado. Puedes aplicar el nuevo costo,
       descartar el aviso o revisar más tarde.
     </p>
 
@@ -163,7 +164,8 @@ function onDescartar() {
                 @update:model-value="toggleAll"
               />
             </th>
-            <th class="px-3 py-2 font-medium">Receta</th>
+            <th class="px-3 py-2 font-medium">Tipo</th>
+            <th class="px-3 py-2 font-medium">Item</th>
             <th class="px-3 py-2 font-medium text-right">Costo</th>
             <th class="px-3 py-2 font-medium text-right">Margen</th>
             <th class="px-3 py-2 font-medium">Precio</th>
@@ -171,10 +173,10 @@ function onDescartar() {
         </thead>
         <tbody class="divide-y divide-default">
           <tr v-if="loading">
-            <td colspan="5" class="px-3 py-8 text-center text-muted">Cargando…</td>
+            <td colspan="6" class="px-3 py-8 text-center text-muted">Cargando…</td>
           </tr>
           <tr v-else-if="!filas.length">
-            <td colspan="5" class="px-3 py-8 text-center text-muted">Sin recetas desfasadas.</td>
+            <td colspan="6" class="px-3 py-8 text-center text-muted">Sin costos desfasados.</td>
           </tr>
           <tr
             v-for="fila in filas"
@@ -188,6 +190,15 @@ function onDescartar() {
                 :aria-label="`Seleccionar ${fila.nombre}`"
                 @update:model-value="(v) => toggleOne(fila.itemId, v)"
               />
+            </td>
+            <td class="px-3 py-3 align-top">
+              <UBadge
+                :color="fila.tipo === 'combo' ? 'primary' : 'neutral'"
+                variant="subtle"
+                size="sm"
+              >
+                {{ fila.tipo === 'combo' ? 'Combo' : 'Receta' }}
+              </UBadge>
             </td>
             <td class="px-3 py-3 align-top">
               <div class="font-medium text-default">{{ fila.nombre }}</div>

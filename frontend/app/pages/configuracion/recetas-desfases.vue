@@ -1,6 +1,6 @@
 <script setup lang="ts">
-/** Compatibilidad: módulo movido a /recetas-desfases */
+/** Compatibilidad: módulo movido a /desfases */
 definePageMeta({
-  middleware: () => navigateTo('/recetas-desfases', { replace: true }),
+  middleware: () => navigateTo('/desfases', { replace: true }),
 })
 </script>

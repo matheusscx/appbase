@@ -1,6 +1,6 @@
 // @vitest-environment nuxt
 //
-// Ver `RecetasDesfasesPanel.nuxt.spec.ts` para por qué el entorno va por
+// Ver `DesfasesPanel.nuxt.spec.ts` para por qué el entorno va por
 // archivo. Este spec cubre DOS cosas separadas:
 //   1. Los tres permisos de `terceros` son SEPARADOS en el backend, y el modo
 //      de falla es colapsarlos —esconderle el botón de editar a quien solo

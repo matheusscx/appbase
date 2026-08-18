@@ -388,7 +388,7 @@ async function registrarAjusteCosto() {
           description="El costo del producto cambió; estas recetas quedaron desfasadas."
         >
           <template #body>
-            <RecetasDesfasesPanel
+            <DesfasesPanel
               :filas="desfasesFilas"
               :highlight-ingrediente-id="desfasesHighlightId"
               :loading="desfasesLoading"
