@@ -3612,23 +3612,81 @@ export class ItemsService {
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
   }
 
-  /** `item_id → tipo` de las recetas pedidas, en una query. Ausente = no existe. */
-  private async cabecerasReceta(
+  /**
+   * `item_id → { tipo, nombre }` de los items compuestos pedidos, en una query.
+   * Ausente = no existe. El nombre viene de acá y no de una query aparte porque
+   * lo necesita el motivo de `omitidos`.
+   */
+  private async cabecerasCompuestas(
     manager: EntityManager,
     tenantId: string,
-    recetaItemIds: string[],
-  ): Promise<Map<string, string>> {
-    if (!recetaItemIds.length) return new Map();
-    const rows: { receta_item_id: string; tipo: string }[] =
-      await manager.query(
-        `SELECT i.item_id AS receta_item_id, i.tipo
+    ids: string[],
+  ): Promise<Map<string, { tipo: 'receta' | 'combo'; nombre: string }>> {
+    if (!ids.length) return new Map();
+    const rows: {
+      item_id: string;
+      tipo: 'receta' | 'combo';
+      nombre: string;
+    }[] = await manager.query(
+      `SELECT i.item_id, i.tipo, i.nombre
            FROM items i
-           JOIN item_receta ir ON ir.item_id = i.item_id
           WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
-            AND i.eliminado_el IS NULL`,
-        [recetaItemIds, tenantId],
-      );
-    return new Map(rows.map((r) => [r.receta_item_id, r.tipo]));
+            AND i.eliminado_el IS NULL
+            AND i.tipo IN ('receta', 'combo')`,
+      [ids, tenantId],
+    );
+    return new Map(
+      rows.map((r) => [r.item_id, { tipo: r.tipo, nombre: r.nombre }]),
+    );
+  }
+
+  /** Componentes vivos de varios combos, agrupados por combo, en una query. */
+  private async componentesPorCombo(
+    manager: EntityManager,
+    tenantId: string,
+    comboIds: string[],
+  ): Promise<
+    Map<
+      string,
+      {
+        componente_item_id: string;
+        cantidad: string;
+        costo_actual: string | null;
+      }[]
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        componente_item_id: string;
+        cantidad: string;
+        costo_actual: string | null;
+      }[]
+    >();
+    if (!comboIds.length) return out;
+    const rows: {
+      combo_item_id: string;
+      componente_item_id: string;
+      cantidad: string;
+      costo_actual: string | null;
+    }[] = await manager.query(
+      `SELECT cc.combo_item_id, cc.componente_item_id, cc.cantidad,
+              COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual
+         FROM combo_componentes cc
+         JOIN items comp ON comp.item_id = cc.componente_item_id
+          AND comp.eliminado_el IS NULL
+         LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+         LEFT JOIN item_receta ir ON ir.item_id = cc.componente_item_id
+        WHERE cc.combo_item_id = ANY($1::uuid[]) AND cc.tenant_id = $2
+          AND cc.eliminado_el IS NULL`,
+      [comboIds, tenantId],
+    );
+    for (const r of rows) {
+      const arr = out.get(r.combo_item_id) ?? [];
+      arr.push(r);
+      out.set(r.combo_item_id, arr);
+    }
+    return out;
   }
 
   /** Ingredientes vivos de varias recetas, agrupados por receta, en una query. */
@@ -4023,7 +4081,11 @@ export class ItemsService {
       actualizarPrecio?: boolean;
       precioBase?: string;
     }[],
-  ): Promise<{ aplicados: number }> {
+  ): Promise<{
+    aplicados: number;
+    omitidos: { itemId: string; nombre: string; motivo: string }[];
+    afectados: DesfaseItemDto[];
+  }> {
     for (const it of items) {
       if (it.actualizarPrecio) {
         let p: Decimal;
@@ -4054,32 +4116,57 @@ export class ItemsService {
       // plan, y dos lotes con recetas en común se toman las filas en órdenes
       // distintos y se abrazan. El orden del lote lo pone el cliente — es
       // exactamente el caso que hay que neutralizar.
+      //
+      // Y el orden ENTRE las dos tablas es siempre el mismo —`item_receta`
+      // primero, `item_combo` después— por la misma razón: un lote mixto y otro
+      // que las tomara al revés cerrarían el ciclo A→B / B→A.
       await manager.query(
         `SELECT item_id FROM item_receta
           WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
         [ids],
       );
-      const cabPorId = await this.cabecerasReceta(manager, tenantId, ids);
+      await manager.query(
+        `SELECT item_id FROM item_combo
+          WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
+        [ids],
+      );
+
+      const cabPorId = await this.cabecerasCompuestas(manager, tenantId, ids);
+      for (const it of items) {
+        if (!cabPorId.has(it.itemId)) {
+          throw new NotFoundException(`Item ${it.itemId} no encontrado`);
+        }
+      }
+      const recetasDelLote = items.filter(
+        (i) => cabPorId.get(i.itemId)!.tipo === 'receta',
+      );
+      const combosDelLote = items.filter(
+        (i) => cabPorId.get(i.itemId)!.tipo === 'combo',
+      );
+
       const ingsPorReceta = await this.ingredientesPorReceta(
         manager,
         tenantId,
-        ids,
+        recetasDelLote.map((r) => r.itemId),
       );
-      const convertir = await this.catalogService.crearConversor();
 
       let aplicados = 0;
-      for (const it of items) {
-        if (cabPorId.get(it.itemId) !== 'receta') {
-          throw new NotFoundException(`Receta ${it.itemId} no encontrada`);
-        }
+      // El catálogo de unidades solo lo necesitan las recetas: un lote de solo
+      // combos no lo carga.
+      const convertir = recetasDelLote.length
+        ? await this.catalogService.crearConversor()
+        : null;
+      for (const it of recetasDelLote) {
         if (!ingsPorReceta.get(it.itemId)?.length) {
           throw new BadRequestException(
             `La receta ${it.itemId} no tiene ingredientes`,
           );
         }
 
+        // `convertir` no es null acá: el loop solo corre si hay recetas, que es
+        // exactamente la condición con la que se cargó el catálogo.
         const propuesto = this.costoPropuesto(
-          convertir,
+          convertir!,
           ingsPorReceta.get(it.itemId)!,
         );
         // La bandeja LEE tolerante (omite la receta sin costo proponible), pero
@@ -4114,7 +4201,77 @@ export class ItemsService {
         }
         aplicados += 1;
       }
-      return { aplicados };
+
+      const compsPorCombo = await this.componentesPorCombo(
+        manager,
+        tenantId,
+        combosDelLote.map((c) => c.itemId),
+      );
+      const recetasAplicadas = new Set(recetasDelLote.map((r) => r.itemId));
+      const omitidos: { itemId: string; nombre: string; motivo: string }[] = [];
+
+      for (const it of combosDelLote) {
+        const comps = compsPorCombo.get(it.itemId) ?? [];
+        if (!comps.length) {
+          throw new BadRequestException(
+            `El combo ${it.itemId} no tiene componentes`,
+          );
+        }
+        // El lote que se pisa a sí mismo: si una receta de este mismo lote es
+        // componente de este combo, aplicarlo lo escribiría con un costo
+        // distinto del que el usuario aprobó, y con un precio calculado para el
+        // número viejo. Se omite y vuelve en `afectados` con el costo nuevo.
+        const dependiente = comps.find((c) =>
+          recetasAplicadas.has(c.componente_item_id),
+        );
+        if (dependiente) {
+          omitidos.push({
+            itemId: it.itemId,
+            nombre: cabPorId.get(it.itemId)!.nombre,
+            motivo:
+              'Depende de una receta de este mismo lote: se recalcula y vuelve a proponerse.',
+          });
+          continue;
+        }
+
+        const propuesto = this.costoPropuestoCombo(comps);
+        await manager.query(
+          `UPDATE item_combo
+             SET costo_actual = $1, costo_propuesto_omitido = NULL
+           WHERE item_id = $2`,
+          [propuesto, it.itemId],
+        );
+        if (it.actualizarPrecio && it.precioBase) {
+          const precio = new Decimal(it.precioBase)
+            .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+            .toFixed(4);
+          await manager.query(
+            `UPDATE items SET precio_base = $1
+             WHERE item_id = $2 AND tenant_id = $3 AND eliminado_el IS NULL`,
+            [precio, it.itemId, tenantId],
+          );
+        }
+        aplicados += 1;
+      }
+
+      // Los combos que contienen alguna de las recetas recién aplicadas y que
+      // quedaron desfasados. Se lee con `manager` —no con `dataSource`— para
+      // ver las escrituras de esta misma transacción antes del commit.
+      let afectados: DesfaseItemDto[] = [];
+      if (recetasAplicadas.size) {
+        const combosCandidatos: { combo_item_id: string }[] =
+          await manager.query(
+            `SELECT DISTINCT cc.combo_item_id
+               FROM combo_componentes cc
+              WHERE cc.tenant_id = $1 AND cc.eliminado_el IS NULL
+                AND cc.componente_item_id = ANY($2::uuid[])`,
+            [tenantId, [...recetasAplicadas]],
+          );
+        afectados = await this.filasDesfaseCombos(manager, tenantId, {
+          comboItemIds: combosCandidatos.map((c) => c.combo_item_id),
+        });
+      }
+      return { aplicados, omitidos, afectados };
     });
   }
 
@@ -4126,18 +4283,47 @@ export class ItemsService {
       // Mismo batch que `aplicarDesfases`: 2 lecturas para todo el lote, loop
       // conservado para no alterar el orden de las validaciones.
       const ids = [...new Set(itemIds)];
-      const cabPorId = await this.cabecerasReceta(manager, tenantId, ids);
+      const cabPorId = await this.cabecerasCompuestas(manager, tenantId, ids);
+      for (const itemId of itemIds) {
+        if (!cabPorId.has(itemId)) {
+          throw new NotFoundException(`Item ${itemId} no encontrado`);
+        }
+      }
+      // Cada helper recibe solo los ids de su tipo: con un lote de un solo tipo
+      // el otro retorna sin consultar.
       const ingsPorReceta = await this.ingredientesPorReceta(
         manager,
         tenantId,
-        ids,
+        ids.filter((id) => cabPorId.get(id)!.tipo === 'receta'),
       );
-      const convertir = await this.catalogService.crearConversor();
+      const compsPorCombo = await this.componentesPorCombo(
+        manager,
+        tenantId,
+        ids.filter((id) => cabPorId.get(id)!.tipo === 'combo'),
+      );
+      // El catálogo de unidades solo lo necesitan las recetas.
+      const convertir = ids.some((id) => cabPorId.get(id)!.tipo === 'receta')
+        ? await this.catalogService.crearConversor()
+        : null;
 
       let descartados = 0;
       for (const itemId of itemIds) {
-        if (cabPorId.get(itemId) !== 'receta') {
-          throw new NotFoundException(`Receta ${itemId} no encontrada`);
+        if (cabPorId.get(itemId)!.tipo === 'combo') {
+          const comps = compsPorCombo.get(itemId) ?? [];
+          if (!comps.length) {
+            throw new BadRequestException(
+              `El combo ${itemId} no tiene componentes`,
+            );
+          }
+          // Sin caso de error propio: `costoPropuestoCombo` nunca devuelve
+          // null, así que el 400 de unidad incompatible no aplica acá.
+          const propuestoCombo = this.costoPropuestoCombo(comps);
+          await manager.query(
+            `UPDATE item_combo SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
+            [propuestoCombo, itemId],
+          );
+          descartados += 1;
+          continue;
         }
         if (!ingsPorReceta.get(itemId)?.length) {
           throw new BadRequestException(
@@ -4145,7 +4331,7 @@ export class ItemsService {
           );
         }
         const propuesto = this.costoPropuesto(
-          convertir,
+          convertir!,
           ingsPorReceta.get(itemId)!,
         );
         // Mismo criterio que `aplicarDesfases`: sin costo proponible no hay nada

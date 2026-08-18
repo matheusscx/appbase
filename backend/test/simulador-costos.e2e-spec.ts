@@ -28,6 +28,13 @@ interface ItemDetalleResponse {
   precioBase: string;
 }
 
+interface AplicarDesfasesResponse {
+  aplicados: number;
+  omitidos: { itemId: string; nombre: string; motivo: string }[];
+  /** La segunda pasada: los combos que la receta recién aplicada movió. */
+  afectados: DesfaseItemResponse[];
+}
+
 async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
@@ -365,5 +372,228 @@ describe('Simulador impacto costos (e2e)', () => {
     expect(
       (bandeja.body as DesfaseItemResponse[]).some((r) => r.itemId === comboId),
     ).toBe(true);
+  });
+
+  it('aplicar la receta devuelve el combo en afectados, y aplicarlo escribe ese mismo costo', async () => {
+    const sufijo = Date.now();
+    const resIng = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Carne Combo E2E ${sufijo}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'kg',
+        stock: '10',
+        costo: '8000',
+      });
+    expect(resIng.status).toBe(201);
+    const carneId = resIng.body.id as string;
+
+    const resRec = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Burger Combo E2E ${sufijo}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: carneId,
+            cantidad: '150',
+            unidadCodigo: 'g',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resRec.status).toBe(201);
+    const recetaId = resRec.body.id as string;
+    // costo cacheado de la receta ≈ 8000 × 0,15 = 1200
+
+    const resCombo = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo Burger E2E ${sufijo}`,
+        precioBase: '4200',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: recetaId, cantidad: '1', bloqueante: true },
+        ],
+      });
+    expect(resCombo.status).toBe(201);
+    const comboId = resCombo.body.id as string;
+    // costo cacheado del combo = el CACHEADO de la receta × 1 = 1200
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId: carneId, costoNuevo: '10000', comentario: 'Ajuste E2E' })
+      .expect(201);
+
+    // Primera pasada: solo la receta. El combo NO aparece todavía porque su Σ
+    // usa el costo CACHEADO de la receta, que sigue en 1200.
+    const bandeja1 = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const filaReceta = (bandeja1.body as DesfaseItemResponse[]).find(
+      (r) => r.itemId === recetaId,
+    );
+    expect(filaReceta).toBeDefined();
+    expect(
+      (bandeja1.body as DesfaseItemResponse[]).some(
+        (r) => r.itemId === comboId,
+      ),
+    ).toBe(false);
+
+    // Aplicar la receta: la respuesta trae el combo en `afectados`, ya
+    // recalculado contra el costo que esta misma transacción acaba de escribir.
+    const resAplicarReceta = await request(app.getHttpServer())
+      .post('/api/desfases/aplicar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ itemId: recetaId }] })
+      .expect(201);
+    const aplicarReceta = resAplicarReceta.body as AplicarDesfasesResponse;
+    expect(aplicarReceta.aplicados).toBe(1);
+    const filaCombo = aplicarReceta.afectados.find((r) => r.itemId === comboId);
+    expect(filaCombo).toBeDefined();
+    expect(filaCombo!.tipo).toBe('combo');
+    // El propuesto del combo es el costo RECIÉN aplicado de la receta.
+    expect(filaCombo!.costoPropuesto).toBe(filaReceta!.costoPropuesto);
+
+    const resAplicarCombo = await request(app.getHttpServer())
+      .post('/api/desfases/aplicar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ itemId: comboId }] })
+      .expect(201);
+    expect((resAplicarCombo.body as AplicarDesfasesResponse).aplicados).toBe(1);
+
+    // Contra el valor ESPERADO que devolvió la propia bandeja, nunca contra un
+    // `not.toBe(<viejo>)`: ese patrón pasa con cualquier número mal recalculado.
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/items/${comboId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((detalle.body as ItemDetalleResponse).costoActual).toBe(
+      filaCombo!.costoPropuesto,
+    );
+
+    // Y el combo ya no está desfasado.
+    const bandeja2 = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      (bandeja2.body as DesfaseItemResponse[]).some(
+        (r) => r.itemId === comboId,
+      ),
+    ).toBe(false);
+  });
+
+  it('el lote que mezcla una receta con el combo que la contiene omite el combo', async () => {
+    const sufijo = Date.now();
+    const resIng = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Carne Mixta E2E ${sufijo}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'kg',
+        stock: '10',
+        costo: '8000',
+      });
+    expect(resIng.status).toBe(201);
+    const carneId = resIng.body.id as string;
+
+    const resRec = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Burger Mixta E2E ${sufijo}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: carneId,
+            cantidad: '150',
+            unidadCodigo: 'g',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resRec.status).toBe(201);
+    const recetaId = resRec.body.id as string;
+
+    const resCombo = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo Mixto E2E ${sufijo}`,
+        precioBase: '4200',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: recetaId, cantidad: '1', bloqueante: true },
+        ],
+      });
+    expect(resCombo.status).toBe(201);
+    const comboId = resCombo.body.id as string;
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId: carneId, costoNuevo: '10000', comentario: 'Ajuste E2E' })
+      .expect(201);
+
+    // El costo del combo ANTES de aplicar: el esperado de "no se movió". Se lee
+    // del mismo GET que la aserción de después —y no del POST de creación—
+    // porque el POST devuelve el costo sin escalar (`1200`) y el GET lo
+    // devuelve como lo guardó la columna (`1200.0000`).
+    const antes = await request(app.getHttpServer())
+      .get(`/api/items/${comboId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const costoComboInicial = (antes.body as ItemDetalleResponse).costoActual;
+
+    // El combo entra al lote aunque hoy no esté en la bandeja: el body lo acepta
+    // sin pasar por el listado, que es justo el caso que hay que neutralizar.
+    const res = await request(app.getHttpServer())
+      .post('/api/desfases/aplicar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ itemId: recetaId }, { itemId: comboId }] })
+      .expect(201);
+    const body = res.body as AplicarDesfasesResponse;
+
+    // Solo la receta se aplicó; el combo se omitió y volvió con el número nuevo.
+    expect(body.aplicados).toBe(1);
+    expect(body.omitidos.map((o) => o.itemId)).toEqual([comboId]);
+    const filaCombo = body.afectados.find((r) => r.itemId === comboId);
+    expect(filaCombo).toBeDefined();
+
+    // Y el costo del combo NO se movió: sigue el cacheado con el que nació.
+    const detalleCombo = await request(app.getHttpServer())
+      .get(`/api/items/${comboId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((detalleCombo.body as ItemDetalleResponse).costoActual).toBe(
+      costoComboInicial,
+    );
+
+    // El propuesto que se le ofrece al usuario es el costo que la receta acaba
+    // de tomar, no el viejo: contra el ESPERADO, no contra un `not.toBe`.
+    const detalleReceta = await request(app.getHttpServer())
+      .get(`/api/items/${recetaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(filaCombo!.costoPropuesto).toBe(
+      (detalleReceta.body as ItemDetalleResponse).costoActual,
+    );
   });
 });

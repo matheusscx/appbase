@@ -179,6 +179,30 @@ el orden de la tabla de arriba.
   fix necesita un test de concurrencia que dispare N operaciones simultáneas con N ≥ tamaño
   del pool — sin él, el bug vuelve sin que nadie se entere.
 
+  ➕ **Dos ciclos de orden de lock más, introducidos el 2026-08-18 al meter los combos en la
+  bandeja de desfases** (decisión del owner ese día: van acá, con esta tanda, no de arrastre).
+  Los dos son el gemelo exacto del ciclo que el comentario de `items.service.ts:1330-1338`
+  dice haber neutralizado para recetas, y ninguno existía antes del commit de esa tarea —
+  hasta entonces ningún camino de desfases tocaba `item_combo`:
+  1. **`items` ↔ `item_combo`.** `aplicarDesfases` toma `item_combo … FOR UPDATE` y después
+     `UPDATE items SET precio_base`; `update()` de un combo con `dto.componentes` hace lo
+     inverso —`UPDATE items` y después `UPDATE item_combo`— porque su lock previo está
+     guardado por `tipo === 'receta'`. **Disparo:** un `PATCH` de combo (nombre +
+     componentes) concurrente con un "aplicar desfase de ese combo" con `actualizarPrecio`.
+     **Fix identificado:** extender ese guard para que un `PATCH` de combo tome
+     `item_combo FOR UPDATE` antes del `UPDATE items`. Mueve la secuencia de queries de
+     `update()`, así que arrastra los tests posicionales de `update`/`remove` de combo.
+  2. **`item_receta` ↔ `item_combo`.** `descartarDesfases` no toma ningún lock y escribe las
+     dos tablas en el orden que manda el cliente, mientras `aplicarDesfases` las ordena
+     siempre receta → combo. **Disparo:** `descartar([combo, receta])` contra
+     `aplicar([receta, combo])`, o dos `descartar` con las mismas filas en orden distinto.
+     Es el más alcanzable de los dos: se dispara entre dos operaciones de la propia bandeja,
+     o sea con dos personas resolviéndola a la vez. **Fix identificado:** que el loop de
+     `descartarDesfases` procese las recetas antes que los combos, igual que aplicar. No
+     necesita locks nuevos ni toca ningún camino preexistente.
+  **Ninguno de los dos lo ve un test**: el e2e corre con `maxWorkers: 1`, la misma razón por
+  la que el deadlock de arriba pasó desapercibido.
+
 - [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la segunda de esta
   sección) — parcialmente cerrado
   2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
