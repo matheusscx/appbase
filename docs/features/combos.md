@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-07-22
+**Last Updated**: 2026-08-18
 
 ---
 
@@ -54,8 +54,11 @@ de 5), reutilizando el costeo y la venta de productos/recetas ya existentes.
   sus componentes **receta** (no solo los grupos propios del combo) — ver
   "Grupos anidados en combos (un nivel)" en `grupos-modificadores.md`.
 - Combos anidados (un combo como componente de otro combo).
-- Recálculo silencioso de `costo_actual` cuando cambia el costo de un componente
-  (mismo trato que recetas — ver [simulador-impacto-costos.md](./simulador-impacto-costos.md)).
+
+El desfase de `costo_actual` cuando cambia el costo de un componente **ya no es una
+exclusión**: desde el 2026-08-18 el combo entra a la misma bandeja que las recetas — ver
+[simulador-impacto-costos.md](./simulador-impacto-costos.md) § "Reglas de desfase de un
+combo".
 
 ---
 
@@ -67,6 +70,7 @@ de 5), reutilizando el costeo y la venta de productos/recetas ya existentes.
 |--------|------|-------|
 | `item_id` | UUID PK/FK → items | |
 | `costo_actual` | NUMERIC(18,4) | Σ(costo componente × cantidad); cacheado al crear/editar, no se recalcula solo |
+| `costo_propuesto_omitido` | NUMERIC(18,4) NULL | Snapshot del costo propuesto descartado en la bandeja de desfases; `NULL` = sin omisión activa. Ver [simulador-impacto-costos.md](./simulador-impacto-costos.md) |
 
 ### `combo_componentes`
 
@@ -200,16 +204,18 @@ cd backend && npm test -- items.service.spec.ts ventas.service.spec.ts
 cd backend && npm run test:e2e -- combos.e2e-spec.ts
 ```
 
-Seed demo: `550e8400-e29b-41d4-a716-446655440283` ("Combo Clásico") tras
-arrancar el backend, con componentes Hamburguesa Clásica (receta,
-`550e8400-e29b-41d4-a716-446655440259`) y Papas fritas (producto,
-`550e8400-e29b-41d4-a716-446655440281`).
-
-Seed demo (2026-07-22): `550e8400-e29b-41d4-a716-446655440313` ("Combo
-Especial") — componentes Hamburguesa Especial (receta con el grupo "Proteína"
-propio, `…440294`) + Papas fritas (`…440281`, reutilizada). Demuestra grupos
-anidados en combos: ver
+Seed demo (`seedComboEspecial`, 2026-07-22): `550e8400-e29b-41d4-a716-446655440313`
+("Combo Especial") — precio propio `$4300`, `costo_actual` cacheado `$1420`
+(Hamburguesa Especial, receta `…440294`, `$620` + Papas fritas, producto
+`…440281`, `$800`). Componentes con el grupo "Proteína" propio de la
+Hamburguesa Especial. Demuestra grupos anidados en combos: ver
 [grupos-modificadores.md](./grupos-modificadores.md).
+
+⚠️ No hay un "Combo Clásico" sembrado — `seedComboEspecial` es el único combo
+que crea el seeder. El ejemplo numérico de Hamburguesa `$1.200` + Papas `$500`
+= `$1.700` que aparece en [simulador-impacto-costos.md](./simulador-impacto-costos.md)
+§ "Reglas de desfase de un combo" es un mock de `items.service.spec.ts`, no
+datos sembrados — no confundir uno con otro al reproducir un caso a mano.
 
 ---
 
@@ -229,6 +235,8 @@ anidados en combos: ver
 
 - [recetas.md](./recetas.md) — item compuesto que descuenta ingredientes (un
   componente de combo puede ser una receta)
+- [simulador-impacto-costos.md](./simulador-impacto-costos.md) — bandeja de desfases de
+  costo; el combo se desfasa contra el costo cacheado de sus componentes
 - [grupos-modificadores.md](./grupos-modificadores.md) — combos con elección
   del customer (Ticket B): grupos reutilizables asociables a un combo,
   `disponibleCondicional` cuando el combo tiene ≥1 grupo

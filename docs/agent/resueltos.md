@@ -17,6 +17,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas (2026-08-18)
+
+**El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
+(backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
+(`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
+explícitamente `componentes`. No hay disparador cuando cambia el costo de un componente, ni un
+equivalente de la bandeja `recetas/desfases` para combos. El costo obsoleto se sigue exponiendo
+en cada listado igual que el de un producto o una receta, así que el margen que muestra la
+pantalla es incorrecto por tiempo indefinido.
+⚠️ `simulador-impacto-costos.md` **no declara esta exclusión** en su lista de lo que no cubre,
+así que hoy no es una limitación conocida sino un hueco silencioso.
+**La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
+documenta explícitamente que su costo es manual?
+✅ **DECIDIDO (owner, 2026-08-15): los combos entran a la misma bandeja de desfases que las
+recetas.** Un solo lugar donde mirar, y el margen que muestra el listado deja de mentir.
+ℹ️ Con esto **no** hay que tocar `simulador-impacto-costos.md` para declarar una exclusión: la
+exclusión desaparece.
+
+**Construido el 2026-08-18, en cuatro commits.** Primero un renombre sin cambio de
+comportamiento —la bandeja de recetas pasó a hablar de "items compuestos" (`/desfases`,
+`DesfaseItemDto` con `itemId`/`tipo`/`afectados`, `itemsAfectadosPorInsumo`)— y recién
+sobre esa base entró el combo:
+
+- **El costo propuesto de un combo es `Σ(costo_actual CACHEADO del componente × cantidad)`**,
+  la misma fórmula del alta/edición. **No** se expande la receta hasta sus ingredientes.
+  Consecuencia deliberada: si sube un ingrediente de una receta que el combo contiene, la
+  receta aparece desfasada y **el combo no**, hasta que se aplique el desfase de esa receta —
+  dos pasadas, no un bug. A diferencia de una receta, un combo **nunca** tiene el caso "sin
+  costo proponible": no hay conversión de unidades en la fórmula.
+- **Segunda pasada resuelta por el propio endpoint:** `POST /desfases/aplicar` devuelve
+  `{ aplicados, omitidos, afectados }`. `afectados` son los combos que quedaron desfasados por
+  las recetas de ese mismo lote, leídos con el `EntityManager` de la transacción (ven la
+  escritura antes del commit). El panel no se cierra: los muestra como filas nuevas.
+- **Lote mixto:** si un lote trae una receta y el combo que la contiene, el combo se omite
+  (no se aplica con el costo viejo de la receta) y vuelve en `afectados` con el número
+  correcto para que el usuario lo confirme.
+
+**Hallazgo que esta entrada no nombraba, y que bloqueaba el modal para cualquier combo:**
+`itemsAfectadosPorInsumo` (entonces `recetasAfectadasPorIngrediente`) exigía
+`tipo='ingrediente'` en el item consultado. Comprar un **producto** —el tipo que sí puede ser
+componente de un combo— devolvía `404`, y `useSimuladorDesfases.maybeAbrirDesfases` se lo
+tragaba en un `catch` vacío ("no bloquear el flujo que disparó el chequeo"). Resultado: ningún
+modal se abría nunca para un componente de combo, en ningún escenario, y nada lo hacía
+visible porque el error no llegaba a ningún toast. Ahora el guard acepta
+`tipo IN ('ingrediente', 'producto')`.
+
+**Costo aislado del riesgo de concurrencia que esto introdujo:** un lote mixto obliga a
+bloquear `item_receta` y `item_combo` en el mismo `aplicarDesfases`, y eso abre dos ciclos de
+orden de lock nuevos. Por decisión del owner (2026-08-18) **no se arreglaron acá**: quedaron
+documentados dentro de *"Diez ventas simultáneas cuelgan la API para siempre"* en
+[`pendientes.md`](pendientes.md) (buscar "Dos ciclos de orden de lock"), con la tanda 🔴 de
+prioridad máxima — conexiones, rendimiento y redondeo de plata — juntas y aisladas.
+
+**Qué lo fija:** `items.service.spec.ts` — `costoPropuestoCombo` con componente `servicio`
+(aporta 0), el ejemplo numérico del efecto cascada (Hamburguesa `1200→1350`, combo
+`1700→1850`), el lote mixto que omite el combo y lo devuelve en `afectados`, y
+`itemsAfectadosPorInsumo` aceptando un `producto`. E2E en `simulador-costos.e2e-spec.ts`.
+Documentación: [`simulador-impacto-costos.md`](../features/simulador-impacto-costos.md) §
+"Reglas de desfase de un combo", y [`combos.md`](../features/combos.md) ya no lista el
+recálculo silencioso como exclusión.
+
+---
+
 ## El PIN que no servía y el guardado de roles a medias (2026-08-16)
 
 Dos entradas de *"Medir primero"*. Una tercera —el scoping de escritura de caja— se midió en

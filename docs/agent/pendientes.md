@@ -597,22 +597,6 @@ empezarlas.
   barata**: es solo el default del checkbox. **D** sigue siendo la única que necesita permiso
   para tocar `movimientos_inventario`.
 
-- [ ] **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**
-  (backend, auditoría `inventario` 2026-08-15) — `item_combo.costo_actual`
-  (`items.service.ts:1610-1646`) solo se recalcula si el `PATCH /items/:id` reenvía
-  explícitamente `componentes`. No hay disparador cuando cambia el costo de un componente, ni un
-  equivalente de la bandeja `recetas/desfases` para combos. El costo obsoleto se sigue exponiendo
-  en cada listado igual que el de un producto o una receta, así que el margen que muestra la
-  pantalla es incorrecto por tiempo indefinido.
-  ⚠️ `simulador-impacto-costos.md` **no declara esta exclusión** en su lista de lo que no cubre,
-  así que hoy no es una limitación conocida sino un hueco silencioso.
-  **La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
-  documenta explícitamente que su costo es manual?
-  ✅ **DECIDIDO (owner, 2026-08-15): los combos entran a la misma bandeja de desfases que las
-  recetas.** Un solo lugar donde mirar, y el margen que muestra el listado deja de mentir.
-  ℹ️ Con esto **no** hay que tocar `simulador-impacto-costos.md` para declarar una exclusión: la
-  exclusión desaparece.
-
 - [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
   no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
   `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por

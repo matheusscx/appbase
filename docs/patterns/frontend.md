@@ -74,7 +74,7 @@ El corte, a jul-2026 (la fuente de verdad es el controller, no esta lista):
 | Clase | Pantallas | Gate |
 |---|---|---|
 | Catálogos y config del tenant | 15 de `configuracion/` (categorías, impuestos, monedas, roles, usuarios…) | `TenantAdminGuard` → middleware `admin` |
-| Features operativas | `items`, `terceros`, POS, `recetas-desfases`, inventario, recuentos, mermas… y, dentro de `configuracion/`, `garzones`, `impresoras`, `salones` y `turnos` | `@RequiresPermiso` → gate por control |
+| Features operativas | `items`, `terceros`, POS, `desfases`, inventario, recuentos, mermas… y, dentro de `configuracion/`, `garzones`, `impresoras`, `salones` y `turnos` | `@RequiresPermiso` → gate por control |
 
 **Y no colapsar permisos distintos en un `puedeEscribir` único.** Si el backend
 separa `Crear`, `Actualizar` y `Eliminar`, la pantalla los separa: hay roles con

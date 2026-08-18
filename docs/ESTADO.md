@@ -36,7 +36,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Personalización de recetas antes del carrito (omitir, extras, comentario; POS + Salones) | ✅ Implementado (2026-07-16) |
 | Cantidad con unidad de presentación en carrito (POS / Salones / Online; `AppCantidadInput`, tickets e historial) | ✅ Implementado (2026-07-16) |
 | Mermas tipificadas y valorizadas | ✅ Implementado (2026-07-15) |
-| Simulador de impacto de costos (desfase recetas, aplicar/descartar) | ✅ Implementado (2026-07-15) |
+| Simulador de impacto de costos (desfase recetas y combos, aplicar/descartar, bandeja `/desfases`) | ✅ Implementado (2026-07-15, combos 2026-08-18) |
 | Motor de cálculo de precios | ✅ Implementado (2026-06-28) |
 | Advertencias del motor de precios en la previsualización del carrito (POS, Salones, Tienda) y en la confirmación de la Tienda | ✅ Implementado (2026-07-28, confirmación 2026-08-02) |
 | Congelado de las reglas aplicadas en la venta (nombre, modo, valor y config del cálculo) + desglose en el detalle de venta | ✅ Implementado (2026-08-02) — falta mostrar `config_calculo`, ver `docs/agent/pendientes.md` |
