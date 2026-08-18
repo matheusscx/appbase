@@ -914,6 +914,20 @@ git commit --no-verify -m "chore(lint): dataSource directo prohibido en services
 - Modify: `docs/patterns/backend.md` (sección nueva)
 - Modify: `docs/ARCHITECTURE.md` (el contexto transaccional como pieza transversal, 2-4 líneas donde se describe el flujo de un request)
 - Modify: `docs/agent/pendientes.md` + `docs/agent/resueltos.md` (mudanza parcial)
+- Modify: `docs/agent/anti-patterns.md` (una entrada nueva, ver Step 5)
+- Modify: `backend/src/common/db/repositorios.module.ts` (solo docblock, ver Step 5)
+
+📋 **Deuda de la revisión de la Task 4 que se paga acá** (todas verificadas con grep como
+latentes: cero consumidores hoy, ninguna bloquea):
+
+| Qué | Dónde va |
+|---|---|
+| `RepositoriosModule.forFeature` no cubre `getTreeRepository` (entidades `@Tree`) | ADR-020, Consequences |
+| No alimenta `EntitiesMetadataStorage` → `autoLoadEntities` no funcionaría | ADR-020, Consequences |
+| No pasa `targetEntitySchema` (workaround de Nest para nombres de clase duplicados) | ADR-020, Consequences |
+| No acepta el 2º parámetro `dataSource` (data sources con nombre) | ADR-020, Consequences |
+| El docblock de `repositorios.module.ts` afirma en pasado que tomar una 2ª conexión "dejó de ser posible" — hoy nadie registra en el ALS, y aun tras T5 la garantía cubre acceso por repo, no `dataSource.query` directo | Reformular a futuro + alcance explícito |
+| `repositorios.module.ts` depende de que `TxContext` y `DataSource` vengan de módulos `@Global`; si `TxContext` alguna vez inyectara algo no global, el lazo se rompe al arrancar | Comentario en el propio archivo |
 
 - [ ] **Step 1: Escribir el ADR-020** con este contenido (formato de los ADR existentes: Status/Context/Decision/Consequences):
 
@@ -929,7 +943,15 @@ git commit --no-verify -m "chore(lint): dataSource directo prohibido en services
   - En la sección 6 (proyectos que van solos), una línea nueva: *"Si algún día se evalúa cambiar el ORM, el candidato es MikroORM (resuelve el contexto transaccional nativo, con ALS — ADR-020); Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM."*
   - La fila "Conexiones / deadlock" de la tabla de la tanda pasa a apuntar a la entrada residual de locks.
 
-- [ ] **Step 4: Verificar links y tablas (el pre-commit los chequea igual)**
+- [ ] **Step 5: Entrada nueva en `docs/agent/anti-patterns.md`** — *guardar una referencia a un
+método de repo y llamarla después*. `const find = repo.find` tomado fuera de una transacción
+y llamado adentro usa el repo del pool: el proxy resuelve el manager **en el acceso a la
+propiedad**, no en la llamada, así que una referencia cacheada se lleva el repo equivocado y
+reabre exactamente el deadlock que este trabajo cierra. Medido en la revisión de la Task 4:
+**cero ocurrencias hoy** en `backend/src` (tres greps distintos), por eso es prevención y no
+un arreglo.
+
+- [ ] **Step 6: Verificar links y tablas (el pre-commit los chequea igual)**
 
 ```bash
 cd .. && git add docs/ && git commit -m "docs(db): ADR-020 contexto transaccional ALS + patrón Db + mudanza parcial del deadlock"
