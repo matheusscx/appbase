@@ -696,14 +696,16 @@ Expected: PASS.
 npm test -- <nombre>.service && npm run typecheck
 ```
 
-- [ ] **Step 3: Suite unit completa**
+- [ ] **Step 3: Suite unit completa + lint + typecheck**
 
 ```bash
-npm test
+npm test && npm run typecheck && npm run lint:check
 echo "exit: $?"
 ```
 
-Expected: PASS completo.
+Expected: PASS completo, exit 0. **`lint:check` va en el mismo paso a propósito**: la Task 2
+commiteó 3 errores de prettier que nadie vio hasta dos tasks después, porque su checklist no
+lo incluía. Todo archivo nuevo o tocado pasa por lint antes del commit.
 
 - [ ] **Step 4: El burst pasa a GREEN**
 
@@ -714,6 +716,13 @@ echo "exit: $?"
 ```
 
 Expected: **PASS** — las 10 dan 201 y el login posterior 200. Si sigue rojo: algún service del camino quedó tomando pool; el error de timeout dice qué query — buscar su archivo y convertirlo.
+
+⚠️ **El verde de status no alcanza como criterio** (lo levantó la revisión de la Task 2): las
+aserciones actuales distinguen un arreglo parcial, pero **no cazarían 201 falsos sin
+persistencia real**. Antes de dar la task por hecha, sumar al test la verificación de que las
+10 ventas existen de verdad: cada respuesta trae un `id`, los 10 ids son distintos, y un
+`GET /api/ventas/:id` sobre uno de ellos devuelve 200 con su detalle. Sin esto, un arreglo que
+devolviera 201 sin escribir pasaría el gate.
 
 Verificación adicional del criterio de éxito del spec (una vez, mientras el burst corre en otra terminal o repitiéndolo):
 
