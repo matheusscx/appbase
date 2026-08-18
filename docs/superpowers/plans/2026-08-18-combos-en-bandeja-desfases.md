@@ -3,9 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Status:** Draft
-**Date:** 2026-08-17
+**Date:** 2026-08-18
 **Owner:** Cesar Matheus
-**Spec:** [`2026-08-17-combos-en-bandeja-desfases-design.md`](../specs/2026-08-17-combos-en-bandeja-desfases-design.md)
+**Spec:** [`2026-08-18-combos-en-bandeja-desfases-design.md`](../specs/2026-08-18-combos-en-bandeja-desfases-design.md)
 
 **Goal:** Que un combo cuyo costo de componentes cambió aparezca en la misma bandeja de desfases que
 las recetas, con aplicar y descartar, en vez de quedarse con un costo viejo que nadie avisa.
@@ -1528,7 +1528,7 @@ entrada del backlog tiene que mudarse para que la lista siga siendo legible.
 - Modify: `docs/features/combos.md`
 - Modify: `docs/ESTADO.md`
 - Modify: `docs/agent/pendientes.md`, `docs/agent/resueltos.md`
-- Delete: `docs/superpowers/plans/2026-08-17-combos-en-bandeja-desfases.md`, `docs/superpowers/specs/2026-08-17-combos-en-bandeja-desfases-design.md`
+- Delete: `docs/superpowers/plans/2026-08-18-combos-en-bandeja-desfases.md`, `docs/superpowers/specs/2026-08-18-combos-en-bandeja-desfases-design.md`
 
 - [ ] **Step 1: Actualizar `simulador-impacto-costos.md`**
 
@@ -1546,7 +1546,7 @@ columna `costo_propuesto_omitido` en la tabla de `item_combo`.
 
 - [ ] **Step 3: Actualizar `ESTADO.md`**
 
-Fila de la funcionalidad con la fecha 2026-08-17.
+Fila de la funcionalidad con la fecha 2026-08-18.
 
 - [ ] **Step 4: Mudar la entrada del backlog**
 

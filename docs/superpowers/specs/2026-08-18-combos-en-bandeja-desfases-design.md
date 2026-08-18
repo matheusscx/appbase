@@ -1,6 +1,6 @@
 # Los combos entran a la bandeja de desfases — Design Spec
 
-**Fecha:** 2026-08-17
+**Fecha:** 2026-08-18
 **Estado:** 📐 Aprobado por el owner — listo para plan de implementación
 **Origen:** [`docs/agent/pendientes.md`](../../agent/pendientes.md) — entrada *"El costo de un combo
 se queda viejo y nadie avisa, a diferencia de las recetas"* (auditoría `inventario` 2026-08-15)
