@@ -90,6 +90,7 @@ export interface DesfaseInsumoDto {
 
 export interface DesfaseItemDto {
   itemId: string;
+  tipo: 'receta' | 'combo';
   nombre: string;
   costoActual: string;
   costoPropuesto: string;
@@ -3735,7 +3736,7 @@ export class ItemsService {
     return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
   }
 
-  private async construirFilasDesfase(
+  private async filasDesfaseRecetas(
     tenantId: string,
     insumoItemId?: string,
   ): Promise<DesfaseItemDto[]> {
@@ -3821,6 +3822,7 @@ export class ItemsService {
 
       out.push({
         itemId: cab.receta_item_id,
+        tipo: 'receta',
         nombre: cab.nombre,
         costoActual: cacheado,
         costoPropuesto: propuesto,
@@ -3839,6 +3841,155 @@ export class ItemsService {
     return out;
   }
 
+  private async construirFilasDesfase(
+    tenantId: string,
+    insumoItemId?: string,
+  ): Promise<DesfaseItemDto[]> {
+    // Dos bloques de 2 queries cada uno, no una query por item: el costo de un
+    // combo se arma con los costos YA cacheados de sus componentes, así que no
+    // hace falta expandir nada.
+    const recetas = await this.filasDesfaseRecetas(tenantId, insumoItemId);
+    const combos = await this.filasDesfaseCombos(this.dataSource, tenantId, {
+      insumoItemId,
+    });
+    return [...recetas, ...combos].sort((a, b) =>
+      a.nombre.localeCompare(b.nombre),
+    );
+  }
+
+  /**
+   * Costo propuesto de un combo: Σ(costo cacheado del componente × cantidad),
+   * la misma fórmula de `validarYCostearComponentes`. A diferencia de
+   * `costoPropuesto` (recetas) **nunca devuelve null**: no hay conversión de
+   * unidades acá, así que el caso "sin costo proponible" no existe. Un
+   * componente `servicio` no tiene costo y aporta 0, igual que al armar el combo.
+   */
+  private costoPropuestoCombo(
+    comps: { cantidad: string; costo_actual: string | null }[],
+  ): string {
+    let total = new Decimal(0);
+    for (const c of comps) {
+      total = total.plus(new Decimal(c.costo_actual ?? '0').mul(c.cantidad));
+    }
+    return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
+  }
+
+  /**
+   * `runner` es el `DataSource` en la lectura y el `EntityManager` de la
+   * transacción cuando `aplicarDesfases` necesita ver sus propias escrituras.
+   */
+  private async filasDesfaseCombos(
+    runner: DataSource | EntityManager,
+    tenantId: string,
+    opts: { insumoItemId?: string; comboItemIds?: string[] },
+  ): Promise<DesfaseItemDto[]> {
+    const filtros: string[] = [];
+    const params: unknown[] = [tenantId];
+    let join = '';
+    if (opts.insumoItemId) {
+      join = `JOIN combo_componentes cc ON cc.combo_item_id = i.item_id
+                AND cc.eliminado_el IS NULL`;
+      params.push(opts.insumoItemId);
+      filtros.push(`cc.componente_item_id = $${params.length}`);
+    }
+    if (opts.comboItemIds) {
+      if (!opts.comboItemIds.length) return [];
+      params.push(opts.comboItemIds);
+      filtros.push(`i.item_id = ANY($${params.length}::uuid[])`);
+    }
+
+    const cabeceras: {
+      combo_item_id: string;
+      nombre: string;
+      costo_actual: string | null;
+      costo_propuesto_omitido: string | null;
+      precio_base: string;
+    }[] = await runner.query(
+      `SELECT DISTINCT i.item_id AS combo_item_id, i.nombre,
+              ic.costo_actual, ic.costo_propuesto_omitido, i.precio_base
+         FROM items i
+         JOIN item_combo ic ON ic.item_id = i.item_id
+         ${join}
+        WHERE i.tenant_id = $1 AND i.tipo = 'combo' AND i.eliminado_el IS NULL
+          ${filtros.length ? `AND ${filtros.join(' AND ')}` : ''}
+        ORDER BY i.nombre`,
+      params,
+    );
+    if (!cabeceras.length) return [];
+
+    const ids = cabeceras.map((c) => c.combo_item_id);
+    const comps: {
+      combo_item_id: string;
+      componente_item_id: string;
+      componente_nombre: string;
+      cantidad: string;
+      costo_actual: string | null;
+    }[] = await runner.query(
+      `SELECT cc.combo_item_id, cc.componente_item_id,
+              comp.nombre AS componente_nombre, cc.cantidad,
+              COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual
+         FROM combo_componentes cc
+         JOIN items comp ON comp.item_id = cc.componente_item_id
+          AND comp.eliminado_el IS NULL
+         LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+         LEFT JOIN item_receta ir ON ir.item_id = cc.componente_item_id
+        WHERE cc.tenant_id = $1 AND cc.eliminado_el IS NULL
+          AND cc.combo_item_id = ANY($2::uuid[])`,
+      [tenantId, ids],
+    );
+
+    const porCombo = new Map<string, typeof comps>();
+    for (const row of comps) {
+      const list = porCombo.get(row.combo_item_id) ?? [];
+      list.push(row);
+      porCombo.set(row.combo_item_id, list);
+    }
+
+    const out: DesfaseItemDto[] = [];
+    for (const cab of cabeceras) {
+      const lista = porCombo.get(cab.combo_item_id) ?? [];
+      // Mismo guard que las recetas sin ingredientes: un combo sin componentes
+      // vivos no tiene costo que proponer.
+      if (!lista.length) continue;
+      const propuesto = this.costoPropuestoCombo(lista);
+      const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(4);
+      if (this.eq4(propuesto, cacheado)) continue;
+      if (
+        cab.costo_propuesto_omitido != null &&
+        this.eq4(propuesto, cab.costo_propuesto_omitido)
+      ) {
+        continue;
+      }
+
+      const precio = new Decimal(cab.precio_base);
+      const costoActualD = new Decimal(cacheado);
+      const costoPropD = new Decimal(propuesto);
+
+      out.push({
+        itemId: cab.combo_item_id,
+        tipo: 'combo',
+        nombre: cab.nombre,
+        costoActual: cacheado,
+        costoPropuesto: propuesto,
+        deltaCosto: costoPropD.minus(costoActualD).toFixed(4),
+        precioBase: precio.toFixed(4),
+        margenPctActual:
+          this.margenPct(precio, costoActualD)?.toFixed(4) ?? null,
+        margenPctPropuesto:
+          this.margenPct(precio, costoPropD)?.toFixed(4) ?? null,
+        precioSugerido:
+          this.precioSugerido(precio, costoActualD, costoPropD)?.toFixed(4) ??
+          null,
+        afectados: lista.map((c) => ({
+          itemId: c.componente_item_id,
+          nombre: c.componente_nombre,
+          costoActual: c.costo_actual,
+        })),
+      });
+    }
+    return out;
+  }
+
   async listarDesfases(
     tenantId: string,
     insumoItemId?: string,
@@ -3850,10 +4001,15 @@ export class ItemsService {
     tenantId: string,
     insumoItemId: string,
   ): Promise<DesfaseItemDto[]> {
+    // `ingrediente` y `producto` son tipos distintos y sus caminos no se cruzan:
+    // una receta solo lleva ingredientes, y un componente de combo solo puede
+    // ser producto, receta o servicio. Con el guard viejo (`= 'ingrediente'`)
+    // comprar un producto devolvía 404 y el frontend se lo tragaba: ningún
+    // modal se abría nunca para un componente de combo.
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM items
      WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-       AND tipo = 'ingrediente'`,
+       AND tipo IN ('ingrediente', 'producto')`,
       [insumoItemId, tenantId],
     );
     if (!exists.length) throw new NotFoundException('Item no encontrado');

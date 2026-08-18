@@ -16,6 +16,7 @@ interface TokenResponse {
 
 interface DesfaseItemResponse {
   itemId: string;
+  tipo: 'receta' | 'combo';
   /** El costo recalculado que la bandeja propone: el esperado tras aplicar. */
   costoPropuesto: string;
   precioSugerido: string | null;
@@ -300,5 +301,69 @@ describe('Simulador impacto costos (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect((detalle.body as ItemDetalleResponse).precioBase).toBe('2500.0000');
+  });
+
+  it('combo: sube un componente producto → aparece en afectados y en la bandeja', async () => {
+    const sufijo = Date.now();
+    const resProd = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Papas E2E ${sufijo}`,
+        precioBase: '1500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '10',
+        costo: '500',
+      });
+    expect(resProd.status).toBe(201);
+    const papasId = resProd.body.id as string;
+
+    const resCombo = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo E2E ${sufijo}`,
+        precioBase: '4200',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: papasId, cantidad: '1', bloqueante: true },
+        ],
+      });
+    expect(resCombo.status).toBe(201);
+    const comboId = resCombo.body.id as string;
+    // costo cacheado = 500
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${papasId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: '10',
+        costoUnitario: '700',
+      })
+      .expect(200);
+
+    // Antes de esta tarea este GET respondía 404: `papasId` es `tipo='producto'`.
+    const afectados = await request(app.getHttpServer())
+      .get(`/api/items/${papasId}/afectados`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const fila = (afectados.body as DesfaseItemResponse[]).find(
+      (r) => r.itemId === comboId,
+    );
+    expect(fila).toBeDefined();
+    expect(fila!.tipo).toBe('combo');
+
+    const bandeja = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      (bandeja.body as DesfaseItemResponse[]).some((r) => r.itemId === comboId),
+    ).toBe(true);
   });
 });

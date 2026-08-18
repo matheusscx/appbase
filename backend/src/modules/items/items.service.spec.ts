@@ -4549,6 +4549,9 @@ describe('ItemsService', () => {
           costo_actual: i.costoActual,
         })),
       );
+      // Bloque de combos: sin cabeceras, así que `filasDesfaseCombos` no
+      // aporta filas y no dispara la 2ª query de componentes.
+      dataSource.query.mockResolvedValueOnce([]);
     }
 
     it('listarDesfases incluye receta cuando propuesto ≠ cacheado', async () => {
@@ -4658,7 +4661,7 @@ describe('ItemsService', () => {
       expect(rows).toHaveLength(1);
       // calls[0] = exists check; calls[1] = cabeceras filtradas por ingrediente
       expect(dataSource.query.mock.calls[0][0]).toContain(
-        "tipo = 'ingrediente'",
+        "tipo IN ('ingrediente', 'producto')",
       );
       expect(dataSource.query.mock.calls[1][0]).toContain(
         'ingrediente_item_id',
@@ -4666,6 +4669,131 @@ describe('ItemsService', () => {
       expect(dataSource.query.mock.calls[1][1]).toEqual(
         expect.arrayContaining([TENANT, CARNE_ID]),
       );
+    });
+
+    const COMBO_ID = 'combo-1';
+    const PAPAS_ID = 'papas-1';
+
+    /** El combo del seed: 1 Hamburguesa (receta, $1.200) + 1 Papas (producto). */
+    function mockComboConComponentes(opts: {
+      costoCacheado: string;
+      omitido: string | null;
+      precioBase: string;
+      costoPapas: string;
+    }) {
+      // 1) cabeceras de recetas: vacío, así el bloque de recetas no aporta filas
+      dataSource.query.mockResolvedValueOnce([]);
+      // 2) cabeceras de combos
+      dataSource.query.mockResolvedValueOnce([
+        {
+          combo_item_id: COMBO_ID,
+          nombre: 'Combo Clásico',
+          costo_actual: opts.costoCacheado,
+          costo_propuesto_omitido: opts.omitido,
+          precio_base: opts.precioBase,
+        },
+      ]);
+      // 3) componentes del combo
+      dataSource.query.mockResolvedValueOnce([
+        {
+          combo_item_id: COMBO_ID,
+          componente_item_id: RECETA_ID,
+          componente_nombre: 'Hamburguesa',
+          cantidad: '1',
+          costo_actual: '1200.0000',
+        },
+        {
+          combo_item_id: COMBO_ID,
+          componente_item_id: PAPAS_ID,
+          componente_nombre: 'Papas fritas',
+          cantidad: '1',
+          costo_actual: opts.costoPapas,
+        },
+      ]);
+    }
+
+    it('listarDesfases incluye el combo cuando sube un componente producto', async () => {
+      mockComboConComponentes({
+        costoCacheado: '1700.0000',
+        omitido: null,
+        precioBase: '4200.0000',
+        costoPapas: '600.0000',
+      });
+
+      const rows = await service.listarDesfases(TENANT);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].itemId).toBe(COMBO_ID);
+      expect(rows[0].tipo).toBe('combo');
+      expect(rows[0].costoActual).toBe('1700.0000');
+      expect(rows[0].costoPropuesto).toBe('1800.0000');
+      expect(rows[0].deltaCosto).toBe('100.0000');
+      expect(rows[0].afectados.map((a) => a.itemId)).toEqual([
+        RECETA_ID,
+        PAPAS_ID,
+      ]);
+    });
+
+    it('listarDesfases NO incluye el combo mientras la receta que contiene sigue sin aplicarse', async () => {
+      // La carne subió: la Hamburguesa propone 1350, pero su CACHEADO sigue en
+      // 1200, así que la Σ del combo no se movió. Es la Decisión 1 del spec.
+      mockComboConComponentes({
+        costoCacheado: '1700.0000',
+        omitido: null,
+        precioBase: '4200.0000',
+        costoPapas: '500.0000',
+      });
+
+      const rows = await service.listarDesfases(TENANT);
+
+      expect(rows).toHaveLength(0);
+    });
+
+    it('listarDesfases omite el combo cuando propuesto == costo_propuesto_omitido', async () => {
+      mockComboConComponentes({
+        costoCacheado: '1700.0000',
+        omitido: '1800.0000',
+        precioBase: '4200.0000',
+        costoPapas: '600.0000',
+      });
+
+      const rows = await service.listarDesfases(TENANT);
+
+      expect(rows).toHaveLength(0);
+    });
+
+    it('un componente servicio aporta 0 y no rompe la fila', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+      dataSource.query.mockResolvedValueOnce([
+        {
+          combo_item_id: COMBO_ID,
+          nombre: 'Combo con servicio',
+          costo_actual: '500.0000',
+          costo_propuesto_omitido: null,
+          precio_base: '4200.0000',
+        },
+      ]);
+      dataSource.query.mockResolvedValueOnce([
+        {
+          combo_item_id: COMBO_ID,
+          componente_item_id: PAPAS_ID,
+          componente_nombre: 'Papas fritas',
+          cantidad: '1',
+          costo_actual: '600.0000',
+        },
+        {
+          combo_item_id: COMBO_ID,
+          componente_item_id: 'servicio-1',
+          componente_nombre: 'Delivery',
+          cantidad: '1',
+          costo_actual: null,
+        },
+      ]);
+
+      const rows = await service.listarDesfases(TENANT);
+
+      expect(rows[0].costoPropuesto).toBe('600.0000');
+      expect(rows[0].afectados[1].costoActual).toBeNull();
     });
 
     describe('aplicarDesfases / descartarDesfases', () => {

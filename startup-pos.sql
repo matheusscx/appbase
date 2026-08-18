@@ -639,7 +639,11 @@ CREATE UNIQUE INDEX "uq_receta_extra_vivo"
 -- Extensión 1:1 para tipo 'combo' (item vendible sin stock propio; descuenta el de sus componentes)
 CREATE TABLE "item_combo" (
   "item_id"      UUID PRIMARY KEY REFERENCES "items" ("item_id"),
-  "costo_actual" NUMERIC(18,4)  -- Σ(costo componente × cantidad); cacheado, no se recalcula solo
+  "costo_actual" NUMERIC(18,4),  -- Σ(costo componente × cantidad); cacheado, no se recalcula solo
+  "costo_propuesto_omitido" NUMERIC(18,4)
+  -- Snapshot del costo propuesto descartado por el usuario; NULL = sin omisión.
+  -- Espejo de la columna homónima de `item_receta`: la bandeja oculta el combo
+  -- mientras el propuesto actual == este valor.
 );
 
 -- Componentes fijos de un combo (N por combo)
