@@ -6,16 +6,27 @@ import { TenantGuard } from './guards/tenant.guard';
 import { SuperadminGuard } from './guards/superadmin.guard';
 import { PermisosGuard } from './guards/permisos.guard';
 import { TenantAdminGuard } from './guards/tenant-admin.guard';
+import { TxContext } from './db/tx-context';
+import { Db } from './db/db.service';
 
 @Global()
 @Module({
   imports: [TypeOrmModule.forFeature([UsuarioTenant, Tenant])],
-  providers: [TenantGuard, SuperadminGuard, PermisosGuard, TenantAdminGuard],
+  providers: [
+    TenantGuard,
+    SuperadminGuard,
+    PermisosGuard,
+    TenantAdminGuard,
+    TxContext,
+    Db,
+  ],
   exports: [
     TenantGuard,
     SuperadminGuard,
     PermisosGuard,
     TenantAdminGuard,
+    TxContext,
+    Db,
     TypeOrmModule,
   ],
 })
