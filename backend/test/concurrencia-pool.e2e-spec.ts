@@ -28,7 +28,9 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
     }).compile();
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     app.use(cookieParser());
     await app.init();
 
@@ -43,8 +45,14 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
 
     const resTenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
-      .set('Cookie', (resLogin.headers['set-cookie'] as unknown as string[]) ?? [])
-      .set('Authorization', `Bearer ${(resLogin.body as { access_token: string }).access_token}`)
+      .set(
+        'Cookie',
+        (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+      )
+      .set(
+        'Authorization',
+        `Bearer ${(resLogin.body as { access_token: string }).access_token}`,
+      )
       .send({ tenantId: PARIS_TENANT_ID });
     expect(resTenant.status).toBe(200);
     token = (resTenant.body as { access_token: string }).access_token;
