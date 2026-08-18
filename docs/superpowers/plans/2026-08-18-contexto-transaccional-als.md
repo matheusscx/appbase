@@ -820,6 +820,9 @@ Expected: working tree limpio y burst PASS de nuevo. (El e2e compila desde el fu
 
 **Files:**
 - Modify: `backend/eslint.config.mjs`
+- Modify: `backend/src/common/db/db.service.ts` (docblock de la clase `Db`)
+
+⚠️ **Deuda de la Task 3 que se paga acá:** el docblock de `Db` dice hoy que la regla de lint "se construye en la Task 8". Al crear la regla en esta task, pasarlo a presente — es la frase que vuelve verdadera este cambio.
 
 **Por qué `no-restricted-syntax` y no `no-restricted-properties`:** la forma del repo es `this.dataSource.query(...)` — el objeto del member expression es `this.dataSource` (otro member expression), que `no-restricted-properties` no matchea (solo matchea objetos identificador).
 
