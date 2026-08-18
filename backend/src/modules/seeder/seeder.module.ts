@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { SeederService } from './seeder.service';
 import { Moneda } from '../catalog/entities/moneda.entity';
 import { Pais } from '../catalog/entities/pais.entity';
@@ -46,7 +46,7 @@ import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-dis
 @Module({
   imports: [
     PasarelaModule,
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       Moneda,
       UnidadMedida,
       Pais,

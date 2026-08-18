@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from './db/repositorios.module';
 import { UsuarioTenant } from '../modules/tenants/entities/usuario-tenant.entity';
 import { Tenant } from '../modules/tenants/entities/tenant.entity';
 import { TenantGuard } from './guards/tenant.guard';
@@ -11,7 +11,7 @@ import { Db } from './db/db.service';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([UsuarioTenant, Tenant])],
+  imports: [RepositoriosModule.forFeature([UsuarioTenant, Tenant])],
   providers: [
     TenantGuard,
     SuperadminGuard,
@@ -27,7 +27,7 @@ import { Db } from './db/db.service';
     TenantAdminGuard,
     TxContext,
     Db,
-    TypeOrmModule,
+    RepositoriosModule,
   ],
 })
 export class CommonModule {}

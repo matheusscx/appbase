@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { ModuloApp } from './entities/modulo-app.entity';
 import { Permiso } from './entities/permiso.entity';
 import { Pais } from './entities/pais.entity';
@@ -10,7 +10,7 @@ import { CatalogService } from './catalog.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       ModuloApp,
       Permiso,
       Pais,

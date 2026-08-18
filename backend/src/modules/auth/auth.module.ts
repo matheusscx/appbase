@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -17,7 +17,7 @@ import { TokensAccesoService } from './tokens-acceso.service';
   imports: [
     UsersModule,
     PassportModule,
-    TypeOrmModule.forFeature([RefreshToken, TokenAcceso]),
+    RepositoriosModule.forFeature([RefreshToken, TokenAcceso]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

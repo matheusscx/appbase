@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { SalonesService } from './salones.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import {
@@ -19,7 +19,7 @@ import { TurnosModule } from '../turnos/turnos.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Salon, Mesa, Cuenta, CuentaAsignacion]),
+    RepositoriosModule.forFeature([Salon, Mesa, Cuenta, CuentaAsignacion]),
     VentasModule,
     GarzonesModule,
     ItemsModule,

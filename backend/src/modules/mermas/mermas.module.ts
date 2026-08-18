@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { CausaMerma } from './entities/causa-merma.entity';
 import { CausasMermaService } from './causas-merma.service';
 import { CausasMermaController } from './causas-merma.controller';
@@ -10,7 +10,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([CausaMerma]),
+    RepositoriosModule.forFeature([CausaMerma]),
     InventarioModule,
     CatalogModule,
   ],

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
 import { CajaModule } from '../caja/caja.module';
 import { InventarioModule } from '../inventario/inventario.module';
@@ -25,7 +25,7 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       Venta,
       VentaDetalle,
       VentaDescuento,

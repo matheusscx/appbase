@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { MotivosDiferenciaInventarioModule } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { RecuentoInventario } from './entities/recuento-inventario.entity';
@@ -9,7 +9,10 @@ import { RecuentosController } from './recuentos.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RecuentoInventario, RecuentoInventarioLinea]),
+    RepositoriosModule.forFeature([
+      RecuentoInventario,
+      RecuentoInventarioLinea,
+    ]),
     MotivosDiferenciaInventarioModule,
     InventarioModule,
   ],

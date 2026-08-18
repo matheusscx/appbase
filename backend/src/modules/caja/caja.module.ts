@@ -1,5 +1,5 @@
 import { forwardRef, Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
@@ -13,7 +13,7 @@ import { GarzonesModule } from '../garzones/garzones.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       Caja,
       MovimientoCaja,
       CajaArqueoMedio,

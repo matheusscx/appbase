@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { GrupoModificador } from './entities/grupo-modificador.entity';
 import { GrupoModificadorOpcion } from './entities/grupo-modificador-opcion.entity';
 import { GruposModificadoresService } from './grupos-modificadores.service';
@@ -8,7 +8,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([GrupoModificador, GrupoModificadorOpcion]),
+    RepositoriosModule.forFeature([GrupoModificador, GrupoModificadorOpcion]),
     CatalogModule,
   ],
   controllers: [GruposModificadoresController],

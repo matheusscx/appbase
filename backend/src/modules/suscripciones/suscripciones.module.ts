@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Suscripcion } from './entities/suscripcion.entity';
 import { SuscripcionesService } from './suscripciones.service';
 import { SuscripcionesController } from './suscripciones.controller';
@@ -11,7 +11,7 @@ import { PasarelaModule } from '../pasarela/pasarela.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Suscripcion]),
+    RepositoriosModule.forFeature([Suscripcion]),
     ItemsModule,
     CalculoPreciosModule,
     VentasModule, // exporta VentasService

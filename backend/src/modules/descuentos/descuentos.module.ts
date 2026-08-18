@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Descuento } from './entities/descuento.entity';
 import { DescuentoTramo } from './entities/descuento-tramo.entity';
 import { DescuentoMetodoPago } from './entities/descuento-metodo-pago.entity';
@@ -9,7 +9,7 @@ import { DescuentosController } from './descuentos.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       Descuento,
       DescuentoTramo,
       DescuentoMetodoPago,

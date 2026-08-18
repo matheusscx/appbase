@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Pasarela } from './entities/pasarela.entity';
 import { TenantPasarela } from './entities/tenant-pasarela.entity';
 import { PasarelaApiKey } from './entities/pasarela-api-key.entity';
@@ -33,7 +33,7 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       Pasarela,
       TenantPasarela,
       PasarelaApiKey,

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
 import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
@@ -9,7 +9,7 @@ import { CajonesController } from './cajones.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Cajon, CajonUsuario, UsuarioTenant, Caja]),
+    RepositoriosModule.forFeature([Cajon, CajonUsuario, UsuarioTenant, Caja]),
   ],
   controllers: [CajonesController],
   providers: [CajonesService],

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { VentaPropina } from './entities/venta-propina.entity';
 import { PropinaConfiguracion } from './entities/propina-configuracion.entity';
@@ -21,7 +21,7 @@ import { PropinaReportesService } from './propina-reportes.service';
 @Module({
   imports: [
     GarzonesModule,
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       VentaPropina,
       PropinaConfiguracion,
       PropinaGrupoDistribucion,

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
 import { TenantModulo } from './entities/tenant-modulo.entity';
@@ -20,7 +20,7 @@ import {
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    RepositoriosModule.forFeature([
       Tenant,
       UsuarioTenant,
       TenantModulo,

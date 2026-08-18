@@ -1,5 +1,5 @@
 import { forwardRef, Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Turno } from './entities/turno.entity';
 import { SesionGarzon } from './entities/sesion-garzon.entity';
 import { TurnosService } from './turnos.service';
@@ -11,7 +11,7 @@ import { CajaModule } from '../caja/caja.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Turno, SesionGarzon]),
+    RepositoriosModule.forFeature([Turno, SesionGarzon]),
     GarzonesModule,
     // `SesionesGarzonService` caduca las solicitudes de testigo al cerrar una
     // sesión (`CajaTestigoService.caducarPorSesion`, Task 4). `CajaModule` ya

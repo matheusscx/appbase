@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { CronEjecucion } from './entities/cron-ejecucion.entity';
 import { CronRunnerService } from './cron-runner.service';
 import { ExpirarOrdenesJob } from './jobs/expirar-ordenes.job';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CronEjecucion])],
+  imports: [RepositoriosModule.forFeature([CronEjecucion])],
   providers: [CronRunnerService, ExpirarOrdenesJob],
   exports: [CronRunnerService],
 })

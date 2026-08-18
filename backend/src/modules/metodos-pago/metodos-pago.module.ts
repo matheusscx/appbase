@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { MetodoPago } from './entities/metodo-pago.entity';
 import { MetodoPagoPais } from './entities/metodo-pago-pais.entity';
 import { TenantMetodoPago } from './entities/tenant-metodo-pago.entity';
@@ -8,7 +8,11 @@ import { MetodosPagoController } from './metodos-pago.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([MetodoPago, MetodoPagoPais, TenantMetodoPago]),
+    RepositoriosModule.forFeature([
+      MetodoPago,
+      MetodoPagoPais,
+      TenantMetodoPago,
+    ]),
   ],
   controllers: [MetodosPagoController],
   providers: [MetodosPagoService],
