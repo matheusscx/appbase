@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
@@ -188,16 +188,6 @@ export interface CuentaDetalle {
 @Injectable()
 export class SalonesService {
   constructor(
-    // `dataSource` sigue acá SOLO por `agregarLinea` → `resolverPersonalizacionCombo`/
-    // `resolverPersonalizacionReceta` (líneas de abajo): esos métodos de
-    // `ItemsService` piden un `EntityManager` completo y corren ANTES de abrir
-    // la transacción de `agregarLinea` (a propósito, ver el comentario ahí) —
-    // nunca anidados dentro de una transacción abierta, así que no hay una
-    // segunda conexión disputándose con una ya tomada. Ensancharles el tipo a
-    // `ItemsService` para aceptar `Db` es un refactor de otro archivo que no
-    // está en el barrido de esta tarea (`items.service.ts` no tiene acceso
-    // directo al `DataSource` — ya lo convirtió la Task 5 por completo).
-    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly db: Db,
     @InjectRepository(Salon) private readonly salonRepo: Repository<Salon>,
     @InjectRepository(Mesa) private readonly mesaRepo: Repository<Mesa>,
@@ -666,13 +656,13 @@ export class SalonesService {
       const resolved =
         item.tipo === 'combo'
           ? await this.itemsService.resolverPersonalizacionCombo(
-              this.dataSource.manager,
+              this.db,
               tenantId,
               dto.itemId,
               dto.personalizacion,
             )
           : await this.itemsService.resolverPersonalizacionReceta(
-              this.dataSource.manager,
+              this.db,
               tenantId,
               dto.itemId,
               dto.personalizacion,
@@ -1621,7 +1611,7 @@ export class SalonesService {
    * `reclamarComanda` exigen ABIERTA): queda invisible para todos.
    */
   private async getCuentaAbiertaConLock(
-    manager: DataSource['manager'],
+    manager: EntityManager,
     tenantId: string,
     id: string,
   ): Promise<Cuenta> {

@@ -769,9 +769,11 @@ export class CajaService {
       // Cuenta sesiones abiertas, que es lo único que el sistema sabe de "quién
       // está en turno" (los usuarios no tienen sesión de turno). Corre con
       // `manager` (la transacción en curso, con el `FOR UPDATE` de
-      // `bloquearCajaAbierta` todavía vivo) — NO con `listarAbiertas`, que sale
-      // por `this.dataSource.query` y pediría una segunda conexión del pool
-      // mientras esta retiene la suya (ver docblock de `contarAbiertas`).
+      // `bloquearCajaAbierta` todavía vivo) explícito, documentando a simple
+      // vista el alcance del lock sin depender de que el lector sepa que hay
+      // un ALS activo — NO con `listarAbiertas`, que hoy resuelve el manager
+      // del contexto vía `this.db.query` pero está pensado para leer fuera de
+      // cualquier transacción (ver docblock de `contarAbiertas`).
       caja.testigosDisponibles =
         await this.sesionesGarzonService.contarAbiertas(manager, tenantId);
 

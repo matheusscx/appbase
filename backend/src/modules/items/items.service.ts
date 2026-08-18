@@ -2202,7 +2202,7 @@ export class ItemsService {
   }
 
   async obtenerIngredientesReceta(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     recetaItemId: string,
   ): Promise<
@@ -2244,7 +2244,7 @@ export class ItemsService {
   }
 
   async obtenerExtrasPermitidos(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     recetaItemId: string,
   ): Promise<
@@ -2285,7 +2285,7 @@ export class ItemsService {
   }
 
   async resolverPersonalizacionReceta(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     recetaItemId: string,
     dto?: PersonalizacionRecetaDto,
@@ -2381,7 +2381,7 @@ export class ItemsService {
    * calcula el recargo total (Σ precioExtra × unidades).
    */
   async resolverGruposDeItem(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     itemId: string,
     gruposDto: PersonalizacionGrupoInputDto[] | undefined,
@@ -2524,7 +2524,7 @@ export class ItemsService {
    * modificadores (sin ingredientes/extras, esos son propios de receta).
    */
   async resolverPersonalizacionCombo(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     comboItemId: string,
     dto?: PersonalizacionRecetaDto,

@@ -165,14 +165,24 @@ export async function errorDeColisionNombre<T extends ObjectLiteral>(
  * Igual que `errorDeColisionNombre` pero para los services que hablan SQL
  * cruda y **no tienen repositorio** (`causas-merma`, `motivos-diferencia`,
  * `motivos-diferencia-inventario`, `grupos-modificadores`: los cuatro
- * resuelven el restaurar con un `UPDATE … RETURNING` sobre `dataSource`).
+ * resuelven el restaurar con un `UPDATE … RETURNING` sobre `ds`).
  *
  * Existe como gemela y no como parámetro opcional de la otra porque lo que
  * cambia es el motor de la query, no un detalle: `Repository.createQueryBuilder`
- * y `DataSource.query` no se sustituyen entre sí. El cálculo lo comparten.
+ * y `.query()` (`DataSource`/`Db`) no se sustituyen entre sí. El cálculo lo
+ * comparten.
  *
  * `tabla` se interpola en el SQL: **constante del código, nunca dato de
  * request**. Los valores van parametrizados (`$1`, `$2`).
+ *
+ * ⚠️ **Precondición del `ds: Db`:** los cuatro llamadores actuales lo pasan
+ * desde el `catch` de un `restaurar()` que corre en autocommit (el `UPDATE …
+ * RETURNING` de arriba no vive dentro de un `db.transaccion(...)`), así que
+ * `Db.query()` resuelve al pool sin depender de contexto. Si algún día se
+ * llama desde DENTRO de una transacción que ya abortó, `Db.query()` reusaría
+ * ese manager muerto y el `SELECT` de acá fallaría con `25P02` ("current
+ * transaction is aborted") en vez de correr limpio — pasar `Db` desde ese
+ * escenario es un error de uso, no algo que esta función pueda detectar sola.
  */
 export async function errorDeColisionNombreSQL(
   ds: DataSource | Db,

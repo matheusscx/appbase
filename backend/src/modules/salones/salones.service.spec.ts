@@ -1,5 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
@@ -142,6 +142,11 @@ describe('SalonesService', () => {
     transaction: jest.Mock;
     manager: { query: jest.Mock };
   };
+  let db: {
+    query: jest.Mock;
+    transaccion: jest.Mock;
+    sinTransaccion: (fn: () => unknown) => unknown;
+  };
 
   beforeEach(async () => {
     salonRepo = makeRepo();
@@ -200,7 +205,7 @@ describe('SalonesService', () => {
       transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
       manager: { query: jest.fn().mockResolvedValue([]) },
     };
-    const dbMock = {
+    db = {
       transaccion: dataSource.transaction,
       query: dataSource.query,
       sinTransaccion: (fn: () => unknown) => fn(),
@@ -212,8 +217,7 @@ describe('SalonesService', () => {
         { provide: getRepositoryToken(Salon), useValue: salonRepo },
         { provide: getRepositoryToken(Mesa), useValue: mesaRepo },
         { provide: getRepositoryToken(Cuenta), useValue: cuentaRepo },
-        { provide: getDataSourceToken(), useValue: dataSource },
-        { provide: Db, useValue: dbMock },
+        { provide: Db, useValue: db },
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
         { provide: SesionesGarzonService, useValue: sesiones },
@@ -1108,9 +1112,11 @@ describe('SalonesService', () => {
       // un `toHaveBeenCalled()` pelado pasa igual aunque se ignore lo que el
       // mesero pidió y se mande `{}`.
       expect(items.resolverPersonalizacionReceta).toHaveBeenCalledWith(
-        // El manager RAÍZ, no el de la transacción: resolver la personalización
-        // no debe pedir una segunda conexión con un `FOR UPDATE` tomado.
-        dataSource.manager,
+        // `db`, no el manager de la transacción: resolver la personalización
+        // no debe pedir una segunda conexión con un `FOR UPDATE` tomado —y
+        // `db.query` resuelve el manager del contexto ALS si algún día
+        // corriera anidado, sin depender de un `dataSource` crudo.
+        db,
         TENANT,
         RECETA,
         { omitidos: [ING], comentario: 'sin cebolla' },
@@ -1145,7 +1151,7 @@ describe('SalonesService', () => {
       });
 
       expect(items.resolverPersonalizacionCombo).toHaveBeenCalledWith(
-        dataSource.manager,
+        db,
         TENANT,
         COMBO,
         {
