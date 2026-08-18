@@ -755,6 +755,24 @@ grep -rln 'this\.dataSource\.' src --include='*.ts' | grep -v seeder | grep -v s
 **Interfaces:**
 - Consumes: el patrón de conversión de Task 5, aplicado idéntico.
 
+🔴 **Dos cosas que la revisión de la Task 5 dejó para esta task, y una es una mina.**
+
+1. **`salones.service.ts` y `suscripciones.service.ts` son PRIORITARIOS.** Los dos abren
+   `dataSource.transaction` crudo y adentro llaman `ventasService.crearEnTransaccion(manager, …)`.
+   Como el `TxContext` solo lo puebla `Db.transaccion`, ahí **no hay contexto**: todos los
+   colaboradores ya convertidos vuelven a pedir conexión al pool con la transacción externa
+   abierta. No es regresión —era así antes—, pero es la firma exacta del deadlock en el flujo
+   de mesa de un POS de restaurante, y el burst de la Task 2 no lo cubre porque entra por
+   `POST /ventas` directo.
+2. ⚠️ **El loop de reintento de `ventas.service.ts:132-141` es una trampa.** Reintenta
+   `this.db.transaccion(...)`, y `Db.transaccion` **reusa** la transacción si ya hay uno en
+   contexto. Hoy es inofensivo (verificado: los únicos llamadores de `crear()` son el
+   controller y `online-callback.handler.ts`, ninguno con transacción envolvente). Pero **en
+   cuanto esta task convierta un llamador aguas arriba a `db.transaccion`, el reintento va a
+   correr dentro de la MISMA transacción ya abortada**: tres fallos garantizados (`25P02`) en
+   vez de un reintento. Antes de convertir un llamador de `crear()`, resolver esto —y dejar
+   la precondición escrita en un comentario de `crear()`.
+
 ⚠️ Auditoría obligada en esta task (sitios con semántica deliberada, identificados 2026-08-18):
 - `cobros.service.ts` — el `catch` que registra el intento de reembolso **después del rollback** (`:367`): está fuera del callback → sin contexto → `db.query`/repo van al pool. Correcto sin cambios. Preservar el comentario.
 - `auth.service.ts:493` — la poda fuera de la transacción: ídem.
