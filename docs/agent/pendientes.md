@@ -1017,6 +1017,38 @@ una respuesta.
   que hace la pregunta difícil.
   ⚠️ Regla del cruce: lo que traiga es **insumo para adaptar, no verdad a copiar**.
 
+- [ ] **Dos `Promise.all` del motor de precios corren en serie por una vía que pg va a
+  eliminar** (backend, medido 2026-08-18 al cerrar la Task 5 del contexto transaccional ALS)
+  — **⛔ Toca el motor de cálculo de precios: no avanzar sin decisión del owner** (`CLAUDE.md`
+  → detenerse ante el motor de precios).
+  **Los dos sitios exactos:** `calculo-precios.service.ts` ~línea 90
+  (`Promise.all([impuestosService.findAll, descuentosService.findAll, recargosService.findAll])`)
+  y ~línea 163 (`Promise.all([itemsService.cargarBasePorIds, itemsService.cargarReglasPorIds])`).
+  **El mecanismo:** `calcular()` corre dentro de `crearEnTransaccion`, que corre dentro de
+  `this.db.transaccion(...)` (Task 5) — así que los cinco callees resuelven contra el MISMO
+  `EntityManager` del contexto ALS, o sea un único `pg.Client`. El `Promise.all` los dispara
+  concurrentes sobre ese cliente, y node-postgres los encola en vez de correrlos en paralelo,
+  emitiendo `DeprecationWarning: Calling client.query() when the client is already executing a
+  query is deprecated and will be removed in pg@9.0`. Antes de la Task 5 cada llamada tomaba su
+  propia conexión del pool (sin `EntityManager` compartido), así que la contención no existía.
+  **El disparador:** un upgrade mayor de `pg` (a `pg@9`). No es una bomba de tiempo, es un break
+  con puerta — requiere una acción deliberada (subir esa dependencia) para activarse.
+  **El alcance del daño si pasa:** el camino caliente completo, cada `POST /ventas` — hoy el
+  encolado es silencioso (solo el warning); en `pg@9` la segunda `client.query()` concurrente
+  tira en vez de esperar.
+  **El arreglo conocido:** reemplazar los dos `Promise.all` por `await` secuenciales. Cero
+  cambio de resultado — hoy ya corren en serie, encolados por el driver; el arreglo solo cambia
+  la vía por la que corren en serie, de una que se anuncia removida a una soportada.
+  **La pregunta para el owner:** ¿cuándo se autoriza tocar `calculo-precios.service.ts` para
+  aplicar ese `await` secuencial? Es el único cambio que pide esta entrada —ninguna regla de
+  cálculo, redondeo u orden de operaciones se toca—, pero el archivo es zona de "detenerse y
+  preguntar" y la Task 5 (2026-08-18) tenía permiso explícito solo para cambiar toma de
+  conexión, no orden de llamadas — el owner decidió esa fecha anotarlo acá en vez de tocarlo
+  dentro de esa tanda.
+  ℹ️ La salida de `npm run test:e2e -- concurrencia-pool` **no está limpia** por este mismo
+  motivo: imprime el `DeprecationWarning` de arriba en cada corrida (el test igual pasa). No es
+  una regresión nueva si alguien lo redescubre — es este pendiente, ya conocido.
+
 ## 5. Carreras de concurrencia
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
