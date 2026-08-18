@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { SesionesGarzonService } from './sesiones-garzon.service';
 import {
   EstadoSesionGarzon,
@@ -121,6 +121,11 @@ describe('SesionesGarzonService', () => {
         cb(managerMock),
       ),
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
     cajaTestigoServiceMock.caducarPorSesion
       .mockReset()
       .mockResolvedValue(undefined);
@@ -131,7 +136,7 @@ describe('SesionesGarzonService', () => {
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
         { provide: GarzonesService, useValue: garzones },
         { provide: TurnosService, useValue: turnos },
-        { provide: DataSource, useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         { provide: CajaTestigoService, useValue: cajaTestigoServiceMock },
       ],
     }).compile();

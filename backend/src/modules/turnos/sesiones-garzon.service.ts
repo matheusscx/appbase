@@ -5,8 +5,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { TurnosService } from './turnos.service';
@@ -98,8 +99,7 @@ export class SesionesGarzonService {
     private readonly sesionRepo: Repository<SesionGarzon>,
     private readonly garzones: GarzonesService,
     private readonly turnos: TurnosService,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     @Inject(forwardRef(() => CajaTestigoService))
     private readonly cajaTestigoService: CajaTestigoService,
   ) {}
@@ -175,7 +175,7 @@ export class SesionesGarzonService {
     abierta.estado = EstadoSesionGarzon.CERRADA;
     abierta.origenCierre = OrigenCierreSesion.PIN;
     abierta.cerradaPorUsuarioId = null;
-    const guardada = await this.dataSource.transaction(async (manager) => {
+    const guardada = await this.db.transaccion(async (manager) => {
       const guardada = await manager.save(SesionGarzon, abierta);
       // Una solicitud viva contra una sesión cerrada es un estado imposible
       // de honrar: la firma se valida contra esa sesión. Mismo `manager` que
@@ -238,7 +238,7 @@ export class SesionesGarzonService {
       estado: EstadoSesionGarzon;
       origen_cierre: OrigenCierreSesion | null;
       cerrada_por_usuario_id: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT s.sesion_garzon_id,
               s.garzon_id,
               g.nombre AS garzon_nombre,
@@ -268,13 +268,13 @@ export class SesionesGarzonService {
   /**
    * Cuenta de sesiones abiertas del tenant — corre sobre el `runner` que le
    * pasen, típicamente el `EntityManager` de una transacción en curso (ver
-   * `CajaService.enviarConteo`). NO usa `this.dataSource` a propósito:
-   * `listarAbiertas` sale por `this.dataSource.query`, que abre otra conexión
-   * del pool — pedir una segunda conexión mientras la del caller retiene un
-   * `FOR UPDATE` es el patrón que `docs/agent/pendientes.md` marca como el
-   * hallazgo abierto más grave (agotamiento del pool bajo carga). Mismo
-   * filtro que `listarAbiertas`, sin los JOIN de nombres: acá solo importa
-   * el número.
+   * `CajaService.enviarConteo`). Toma el manager explícito en vez de `this.db`
+   * (que hoy resolvería el mismo manager solo, vía el contexto ALS que puebla
+   * `Db.transaccion`) porque esa firma es preexistente al mecanismo de
+   * contexto — documenta a simple vista, sin depender de que el lector sepa
+   * que hay un ALS activo, que esta lectura corre bajo el mismo `FOR UPDATE`
+   * que el caller ya sostiene. Mismo filtro que `listarAbiertas`, sin los JOIN
+   * de nombres: acá solo importa el número.
    */
   async contarAbiertas(runner: Runner, tenantId: string): Promise<number> {
     const rows = (await runner.query(
@@ -303,7 +303,7 @@ export class SesionesGarzonService {
       zona,
     );
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM sesiones_garzon s
        WHERE s.tenant_id = $1
@@ -329,7 +329,7 @@ export class SesionesGarzonService {
       estado: EstadoSesionGarzon;
       origen_cierre: OrigenCierreSesion | null;
       cerrada_por_usuario_id: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT s.sesion_garzon_id,
               s.garzon_id,
               g.nombre AS garzon_nombre,
@@ -379,7 +379,7 @@ export class SesionesGarzonService {
     sesion.estado = EstadoSesionGarzon.CERRADA;
     sesion.origenCierre = OrigenCierreSesion.ADMIN;
     sesion.cerradaPorUsuarioId = usuarioId;
-    const guardada = await this.dataSource.transaction(async (manager) => {
+    const guardada = await this.db.transaccion(async (manager) => {
       const guardada = await manager.save(SesionGarzon, sesion);
       // Mismo motivo que en `cerrarPropia`: las dos vías de cierre de sesión
       // tienen que caducar las pendientes, o quedan vivas contra una sesión
@@ -447,7 +447,7 @@ export class SesionesGarzonService {
       numero: number;
       mesa_nombre: string | null;
       salon_nombre: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT c.cuenta_id,
               c.numero,
               m.nombre AS mesa_nombre,
@@ -527,7 +527,7 @@ export class SesionesGarzonService {
     turnoId: string,
   ): Promise<{ garzonNombre: string; turnoNombre: string }> {
     const rows: { garzon_nombre: string; turno_nombre: string }[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT g.nombre AS garzon_nombre, t.nombre AS turno_nombre
          FROM garzones g
          CROSS JOIN turnos t
@@ -555,7 +555,7 @@ export class SesionesGarzonService {
    * advierte que un módulo nuevo puede olvidar.
    */
   private async zonaHoraria(tenantId: string): Promise<string> {
-    const rows: { zona_horaria: string }[] = await this.dataSource.query(
+    const rows: { zona_horaria: string }[] = await this.db.query(
       `SELECT p.zona_horaria_principal AS zona_horaria
          FROM tenants t
          JOIN provincia pr

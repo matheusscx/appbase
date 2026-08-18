@@ -1,6 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
-import { getDataSourceToken } from '@nestjs/typeorm';
+import { Db } from './common/db/db.service';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -14,7 +14,14 @@ describe('AppController', () => {
       controllers: [AppController],
       providers: [
         AppService,
-        { provide: getDataSourceToken(), useValue: { query } },
+        {
+          provide: Db,
+          useValue: {
+            query,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
       ],
     }).compile();
 

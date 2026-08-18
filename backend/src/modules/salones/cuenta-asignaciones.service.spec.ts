@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { IsNull } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import {
   CuentaAsignacion,
@@ -58,11 +58,16 @@ describe('CuentaAsignacionesService', () => {
       transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
       query: jest.fn().mockResolvedValue([]),
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CuentaAsignacionesService,
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         { provide: GarzonesService, useValue: garzones },
         { provide: SesionesGarzonService, useValue: sesiones },
       ],

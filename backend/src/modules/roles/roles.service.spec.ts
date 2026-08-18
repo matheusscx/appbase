@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { RolesService } from './roles.service';
 import { Rol } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
@@ -172,6 +173,17 @@ describe('RolesService', () => {
     // Por defecto el tenant tiene OTRO admin además del que se toca: el camino
     // normal de `removeUser` no debe bloquearse.
     rbac = { administradoresDe: jest.fn().mockResolvedValue(['otro-admin']) };
+    // Delega en `dataSource.*` en el momento de la llamada, no en la
+    // referencia capturada al construir el mock: un test reasigna
+    // `dataSource.transaction` a mitad de camino (ver "si el save de los
+    // permisos nuevos falla...") y necesita que `Db.transaccion` vea ese
+    // reemplazo.
+    const dbMock = {
+      transaccion: (work: (manager: unknown) => unknown) =>
+        dataSource.transaction(work),
+      query: (sql: string, params?: unknown[]) => dataSource.query(sql, params),
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -188,7 +200,7 @@ describe('RolesService', () => {
           provide: getRepositoryToken(TenantModulo),
           useValue: tenantModuloRepo,
         },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
 

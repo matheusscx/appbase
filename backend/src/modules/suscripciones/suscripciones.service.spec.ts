@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Db } from '../../common/db/db.service';
 import { SuscripcionesService } from './suscripciones.service';
 import { Suscripcion } from './entities/suscripcion.entity';
 import { ItemsService } from '../items/items.service';
@@ -117,6 +118,11 @@ describe('SuscripcionesService', () => {
         ),
       query: jest.fn().mockResolvedValue([{ nombre: 'Juan Perez' }]),
     };
+    const dbMock = {
+      transaccion: dataSourceMock.transaction,
+      query: dataSourceMock.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -125,7 +131,7 @@ describe('SuscripcionesService', () => {
           provide: getRepositoryToken(Suscripcion),
           useValue: suscripcionRepoMock,
         },
-        { provide: getDataSourceToken(), useValue: dataSourceMock },
+        { provide: Db, useValue: dbMock },
         { provide: ItemsService, useValue: itemsServiceMock },
         { provide: CalculoPreciosService, useValue: calculoPreciosServiceMock },
         { provide: VentasService, useValue: ventasServiceMock },

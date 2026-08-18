@@ -1,11 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { IsNull, type EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { CajaTestigoService } from './caja-testigo.service';
 import { CajaTestigo } from './entities/caja-testigo.entity';
 import { Caja } from './entities/caja.entity';
@@ -117,7 +118,14 @@ describe('CajaTestigoService', () => {
         CajaTestigoService,
         { provide: getRepositoryToken(CajaTestigo), useValue: testigoRepo },
         { provide: getRepositoryToken(Caja), useValue: cajaRepo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        {
+          provide: Db,
+          useValue: {
+            query: dataSource.query,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
         {
           provide: SesionesGarzonService,
           useValue: sesionesGarzonServiceMock,

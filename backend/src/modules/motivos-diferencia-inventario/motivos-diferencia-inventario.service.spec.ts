@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { MotivosDiferenciaInventarioService } from './motivos-diferencia-inventario.service';
 import { MotivoDiferenciaInventario } from './entities/motivo-diferencia-inventario.entity';
 
@@ -25,14 +26,15 @@ describe('MotivosDiferenciaInventarioService', () => {
           useValue: {},
         },
         {
-          provide: getDataSourceToken(),
+          provide: Db,
           // `update` y `remove` corren en transacción (lockean la fila del
           // motivo); el manager comparte el mismo queryMock para que el orden
           // de respuestas siga siendo el de las llamadas.
           useValue: {
             query: queryMock,
-            transaction: (cb: (m: { query: jest.Mock }) => unknown) =>
+            transaccion: (cb: (m: { query: jest.Mock }) => unknown) =>
               cb({ query: queryMock }),
+            sinTransaccion: (fn: () => unknown) => fn(),
           },
         },
       ],

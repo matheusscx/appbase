@@ -9,10 +9,10 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository, type EntityManager } from 'typeorm';
-import { InjectDataSource } from '@nestjs/typeorm';
+import { IsNull, Repository, type EntityManager } from 'typeorm';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
+import { Db } from '../../common/db/db.service';
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { Usuario } from '../users/usuario.entity';
@@ -94,8 +94,7 @@ export class AuthService {
     private readonly config: ConfigService,
     @InjectRepository(RefreshToken)
     private readonly refreshRepo: Repository<RefreshToken>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly tokens: TokensAccesoService,
     private readonly mail: MailService,
   ) {}
@@ -197,7 +196,7 @@ export class AuthService {
         'Ese link ya no sirve: puede estar vencido o ya usado. Volvé a registrarte y te mandamos uno nuevo.',
       );
     }
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await this.tokens.quemar(fila.id, manager);
       const res = await manager.update(
         Usuario,
@@ -255,7 +254,7 @@ export class AuthService {
       );
     }
     const hashed = await bcrypt.hash(contrasena, 10);
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await this.tokens.quemar(fila.id, manager);
       // Y se matan TODOS los links vivos de esa cuenta, no solo el usado. Un
       // link de invitación vive 7 días: sin esto sobrevive al reset y quien
@@ -436,7 +435,7 @@ export class AuthService {
     // de cada 8 veces**, así que el camino feliz de la gracia era el
     // excepcional. Dentro de la transacción el lock se suelta recién en el
     // commit, y para entonces el puntero ya está.
-    const rotado = await this.dataSource.transaction(async (manager) => {
+    const rotado = await this.db.transaccion(async (manager) => {
       const canje = await manager
         .createQueryBuilder()
         .update(RefreshToken)
@@ -597,7 +596,7 @@ export class AuthService {
   async getMyTenants(
     userId: string,
   ): Promise<{ tenantId: string; nombre: string }[]> {
-    return this.dataSource.query<{ tenantId: string; nombre: string }[]>(
+    return this.db.query<{ tenantId: string; nombre: string }[]>(
       `SELECT t.tenant_id as "tenantId", t.nombre
        FROM usuarios_tenants ut
        JOIN tenants t ON t.tenant_id = ut.tenant_id
@@ -647,7 +646,7 @@ export class AuthService {
     // `TenantGuard` corta en la ruta siguiente, pero prometía algo que no
     // existe, y el usuario se enteraba un request más tarde y con otro error.
     // Ojo con el alias: acá `eliminado_el` a secas era de `usuarios_tenants`.
-    const rows = await this.dataSource.query<unknown[]>(
+    const rows = await this.db.query<unknown[]>(
       `SELECT 1 FROM usuarios_tenants ut
        JOIN tenants t ON t.tenant_id = ut.tenant_id AND t.eliminado_el IS NULL
        WHERE ut.usuario_id = $1

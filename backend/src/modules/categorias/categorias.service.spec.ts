@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { CategoriasService } from './categorias.service';
 import { Categoria } from './entities/categoria.entity';
 
@@ -42,7 +43,14 @@ describe('CategoriasService', () => {
       providers: [
         CategoriasService,
         { provide: getRepositoryToken(Categoria), useValue: repo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        {
+          provide: Db,
+          useValue: {
+            query: dataSource.query,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
       ],
     }).compile();
 

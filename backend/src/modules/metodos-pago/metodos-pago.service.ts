@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { TenantMetodoPago } from './entities/tenant-metodo-pago.entity';
 import { UpdateTenantMetodoPagoDto } from './dto/update-tenant-metodo-pago.dto';
 
@@ -21,8 +22,7 @@ export class MetodosPagoService {
   constructor(
     @InjectRepository(TenantMetodoPago)
     private readonly tenantMetodoPagoRepo: Repository<TenantMetodoPago>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ export class MetodosPagoService {
       abreviatura: string | null;
       habilitada: boolean;
       permite_vuelto: boolean;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT mp.metodo_pago_id,
               mp.nombre,
               mp.abreviatura,
@@ -97,7 +97,7 @@ export class MetodosPagoService {
     metodoPagoId: string,
     dto: UpdateTenantMetodoPagoDto,
   ): Promise<TenantMetodoPago> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       await this.assertDisponible(manager, tenantId, metodoPagoId);
 
       const row = await this.upsertRow(manager, tenantId, metodoPagoId);

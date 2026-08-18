@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { MotivosDiferenciaService } from './motivos-diferencia.service';
 
 const TENANT = 't1';
@@ -16,7 +16,14 @@ describe('MotivosDiferenciaService', () => {
     const mod = await Test.createTestingModule({
       providers: [
         MotivosDiferenciaService,
-        { provide: getDataSourceToken(), useValue: { query } },
+        {
+          provide: Db,
+          useValue: {
+            query,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
       ],
     }).compile();
     service = mod.get(MotivosDiferenciaService);

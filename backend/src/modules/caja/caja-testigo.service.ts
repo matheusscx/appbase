@@ -6,14 +6,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import {
-  DataSource,
-  EntityManager,
-  IsNull,
-  QueryFailedError,
-  Repository,
-} from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, IsNull, QueryFailedError, Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import {
   CajaTestigo,
@@ -80,8 +75,7 @@ export class CajaTestigoService {
     private readonly testigoRepo: Repository<CajaTestigo>,
     @InjectRepository(Caja)
     private readonly cajaRepo: Repository<Caja>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     // `forwardRef`: desde Task 4, `SesionesGarzonService` también inyecta
     // `CajaTestigoService` (para `caducarPorSesion` al cerrar una sesión) —
     // sin `forwardRef` en los dos extremos del ciclo, ninguno de los dos
@@ -199,7 +193,7 @@ export class CajaTestigoService {
       resuelta_el: Date | null;
       comentario_garzon: string | null;
       via_firma: ViaFirma | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT ct.caja_testigo_id,
               ct.garzon_id,
               g.nombre AS garzon_nombre,
@@ -489,7 +483,7 @@ export class CajaTestigoService {
       nombre: string | null;
       es_efectivo: boolean;
       contado: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT am.caja_id,
               am.metodo_pago_id,
               COALESCE(mp.nombre, 'Efectivo') AS nombre,

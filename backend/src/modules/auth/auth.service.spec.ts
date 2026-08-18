@@ -3,7 +3,7 @@ import { TokensAccesoService } from './tokens-acceso.service';
 import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   ConflictException,
   ForbiddenException,
@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { IsNull } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -91,6 +92,11 @@ describe('AuthService', () => {
     dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
       cb(managerTx),
     );
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -138,8 +144,8 @@ describe('AuthService', () => {
           useValue: refreshRepo,
         },
         {
-          provide: getDataSourceToken(),
-          useValue: dataSource,
+          provide: Db,
+          useValue: dbMock,
         },
       ],
     }).compile();

@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Db } from '../../../common/db/db.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { CredencialesService } from './credenciales.service';
 import { TenantPasarela } from '../entities/tenant-pasarela.entity';
@@ -29,7 +30,14 @@ describe('TenantPasarelaService', () => {
         TenantPasarelaService,
         { provide: getRepositoryToken(TenantPasarela), useValue: tpRepo },
         { provide: getRepositoryToken(Pasarela), useValue: pasarelaRepo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        {
+          provide: Db,
+          useValue: {
+            query: dataSource.query,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
         { provide: CredencialesService, useValue: credenciales },
       ],
     }).compile();

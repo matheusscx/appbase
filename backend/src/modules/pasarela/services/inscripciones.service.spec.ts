@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { Db } from '../../../common/db/db.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
@@ -62,6 +63,11 @@ describe('InscripcionesService', () => {
       cb(managerMock),
     ),
   };
+  const dbMock = {
+    transaccion: dataSource.transaction,
+    query: jest.fn(),
+    sinTransaccion: (fn: () => unknown) => fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -84,7 +90,7 @@ describe('InscripcionesService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('http://localhost:3000') },
         },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
     service = module.get(InscripcionesService);

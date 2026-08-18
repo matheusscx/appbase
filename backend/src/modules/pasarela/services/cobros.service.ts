@@ -5,8 +5,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Db } from '../../../common/db/db.service';
 import Decimal from 'decimal.js';
 import { randomBytes } from 'crypto';
 import { PasarelaOrden } from '../entities/pasarela-orden.entity';
@@ -67,7 +68,7 @@ export class CobrosService {
   constructor(
     @InjectRepository(PasarelaOrden)
     private readonly ordenRepo: Repository<PasarelaOrden>,
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly inscripciones: InscripcionesService,
     private readonly tenantPasarelaService: TenantPasarelaService,
     private readonly transacciones: TransaccionesService,
@@ -250,7 +251,7 @@ export class CobrosService {
     let ctxHook: { orden: PasarelaOrden; aprobada: boolean } | undefined;
 
     try {
-      const publico = await this.dataSource.transaction(async (manager) => {
+      const publico = await this.db.transaccion(async (manager) => {
         const orden = await manager.findOne(PasarelaOrden, {
           where: { ordenId, tenantId },
           lock: { mode: 'pessimistic_write' },
@@ -548,7 +549,7 @@ export class CobrosService {
     const { page, pageSize, offset } = resolvePagination(query);
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
     const zona = requiereZonaTenant(query.fechaDesde, query.fechaHasta)
-      ? await zonaHorariaTenant(this.dataSource, tenantId)
+      ? await zonaHorariaTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildListarOrdenesFilters(
       tenantId,
@@ -556,7 +557,7 @@ export class CobrosService {
       zona,
     );
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM pasarela_ordenes o
        WHERE o.tenant_id = $1 AND o.eliminado_el IS NULL
@@ -569,7 +570,7 @@ export class CobrosService {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
 
-    const rows: OrdenListRow[] = await this.dataSource.query(
+    const rows: OrdenListRow[] = await this.db.query(
       `SELECT o.orden_id, o.codigo_orden, o.pagador_ref, o.referencia_externa, o.venta_id,
               o.descripcion, o.monto, o.moneda, o.estado, o.origen, o.creado_el
        FROM pasarela_ordenes o

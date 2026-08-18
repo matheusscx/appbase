@@ -1,4 +1,5 @@
 import type { DataSource, ObjectLiteral, Repository } from 'typeorm';
+import type { Db } from '../db/db.service';
 
 /**
  * Sufijo numérico para proponer un nombre libre cuando restaurar una fila de
@@ -174,7 +175,7 @@ export async function errorDeColisionNombre<T extends ObjectLiteral>(
  * request**. Los valores van parametrizados (`$1`, `$2`).
  */
 export async function errorDeColisionNombreSQL(
-  ds: DataSource,
+  ds: DataSource | Db,
   tabla: string,
   sujeto: string,
   tenantId: string,

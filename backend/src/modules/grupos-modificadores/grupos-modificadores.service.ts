@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import {
@@ -46,8 +46,7 @@ interface OpcionRow {
 @Injectable()
 export class GruposModificadoresService {
   constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly catalogService: CatalogService,
   ) {}
 
@@ -202,7 +201,7 @@ export class GruposModificadoresService {
   }
 
   private async assertNombreLibre(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     nombre: string,
     exceptoId?: string,
@@ -221,7 +220,7 @@ export class GruposModificadoresService {
   }
 
   async create(tenantId: string, dto: CreateGrupoModificadorDto) {
-    const escritura = this.dataSource.transaction(async (manager) => {
+    const escritura = this.db.transaccion(async (manager) => {
       await this.assertNombreLibre(manager, tenantId, dto.nombre);
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `INSERT INTO grupos_modificadores (tenant_id, nombre)
@@ -264,7 +263,7 @@ export class GruposModificadoresService {
       };
     });
     return traducirColisionDeNombre(escritura, () =>
-      this.assertNombreLibre(this.dataSource.manager, tenantId, dto.nombre),
+      this.assertNombreLibre(this.db, tenantId, dto.nombre),
     );
   }
 
@@ -338,7 +337,7 @@ export class GruposModificadoresService {
       eliminado_por?: string | null;
       eliminado_por_nombre?: string | null;
     }[] = incluirEliminados
-      ? await this.dataSource.query(
+      ? await this.db.query(
           // Solo lo que borró una persona: `eliminado_por IS NULL` es un
           // borrado del sistema, no restaurable ni visible — decisión del
           // owner, docs/features/papelera.md.
@@ -351,7 +350,7 @@ export class GruposModificadoresService {
             ORDER BY g.nombre ASC`,
           [tenantId],
         )
-      : await this.dataSource.query(
+      : await this.db.query(
           `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
            WHERE tenant_id = $1 AND eliminado_el IS NULL ORDER BY nombre ASC`,
           [tenantId],
@@ -360,7 +359,7 @@ export class GruposModificadoresService {
     const ids = grupoRows.map((g) => g.grupo_modificador_id);
 
     const opRows: (OpcionRow & { grupo_modificador_id: string })[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT o.grupo_modificador_id, o.grupo_opcion_id, o.item_id,
                 i.nombre AS item_nombre, i.tipo, o.cantidad, o.unidad_codigo,
                 o.precio_extra, o.orden, ip.stock
@@ -374,7 +373,7 @@ export class GruposModificadoresService {
       );
 
     const usoRows: { grupo_modificador_id: string; total: number }[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT igm.grupo_modificador_id, COUNT(*)::int AS total
          FROM item_grupos_modificadores igm
          JOIN items i ON i.item_id = igm.item_id AND i.eliminado_el IS NULL
@@ -413,7 +412,7 @@ export class GruposModificadoresService {
   }
 
   async findOne(tenantId: string, grupoId: string) {
-    const grupo = await this.cargarGrupo(this.dataSource, tenantId, grupoId);
+    const grupo = await this.cargarGrupo(this.db, tenantId, grupoId);
     if (!grupo)
       throw new NotFoundException('Grupo de modificadores no encontrado');
     return grupo;
@@ -434,7 +433,7 @@ export class GruposModificadoresService {
     grupoId: string,
     dto: UpdateGrupoModificadorDto,
   ) {
-    const escritura = this.dataSource.transaction(async (manager) => {
+    const escritura = this.db.transaccion(async (manager) => {
       const grupoRows: { grupo_modificador_id: string; nombre: string }[] =
         await manager.query(
           `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
@@ -555,12 +554,7 @@ export class GruposModificadoresService {
       escritura,
       async () => {
         if (dto.nombre !== undefined) {
-          await this.assertNombreLibre(
-            this.dataSource.manager,
-            tenantId,
-            dto.nombre,
-            grupoId,
-          );
+          await this.assertNombreLibre(this.db, tenantId, dto.nombre, grupoId);
         }
       },
       { soloConstraint: 'uq_grupo_modificador_nombre_vivo' },
@@ -590,7 +584,7 @@ export class GruposModificadoresService {
     usuarioId: string,
     grupoId: string,
   ): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
            WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -649,7 +643,7 @@ export class GruposModificadoresService {
   async restaurar(tenantId: string, grupoId: string, nombreNuevo?: string) {
     try {
       const rows = unwrap<{ grupo_modificador_id: string }>(
-        await this.dataSource.query(
+        await this.db.query(
           `WITH restaurado AS (
              UPDATE grupos_modificadores
                 SET eliminado_el = NULL, eliminado_por = NULL,
@@ -684,7 +678,7 @@ export class GruposModificadoresService {
       // El UPDATE ya commiteó: cargarGrupo ve el estado final, sin ventana
       // de visibilidad entre conexiones. El grupo se acaba de confirmar
       // vivo arriba, así que no puede devolver null.
-      return (await this.cargarGrupo(this.dataSource, tenantId, grupoId))!;
+      return (await this.cargarGrupo(this.db, tenantId, grupoId))!;
     } catch (e) {
       // 23505 = unique_violation, pero de DOS índices únicos distintos
       // conviven en esta única sentencia: `uq_grupo_modificador_nombre_vivo`
@@ -722,7 +716,7 @@ export class GruposModificadoresService {
         // el motivo, no.
         throw new BadRequestException(
           await errorDeColisionNombreSQL(
-            this.dataSource,
+            this.db,
             'grupos_modificadores',
             'un grupo de modificadores activo',
             tenantId,
@@ -747,7 +741,7 @@ export class GruposModificadoresService {
       item_id: string;
       item_nombre: string;
       tipo: string;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT igm.item_grupo_id, i.item_id, i.nombre AS item_nombre, i.tipo
        FROM item_grupos_modificadores igm
        JOIN items i ON i.item_id = igm.item_id AND i.eliminado_el IS NULL
@@ -767,7 +761,7 @@ export class GruposModificadoresService {
       unidad_codigo: string | null;
       precio_extra: string;
       orden: number;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT igm.item_grupo_id, o.grupo_opcion_id, i.nombre AS item_nombre,
               COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
               o.cantidad AS cantidad_default,
@@ -823,7 +817,7 @@ export class GruposModificadoresService {
     grupoId: string,
     dto: AplicarOverridesDto,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
            WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -959,7 +953,7 @@ export class GruposModificadoresService {
     tenantId: string,
     grupoId: string,
   ): Promise<string> {
-    const filas: { nombre: string }[] = await this.dataSource.query(
+    const filas: { nombre: string }[] = await this.db.query(
       `SELECT nombre FROM grupos_modificadores
         WHERE grupo_modificador_id = $1 AND tenant_id = $2`,
       [grupoId, tenantId],

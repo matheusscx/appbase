@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Db } from '../../../common/db/db.service';
 import { CredencialesService } from './credenciales.service';
 import { Pasarela } from '../entities/pasarela.entity';
 import { TenantPasarela } from '../entities/tenant-pasarela.entity';
@@ -18,7 +19,7 @@ export class TenantPasarelaService {
     private readonly tpRepo: Repository<TenantPasarela>,
     @InjectRepository(Pasarela)
     private readonly pasarelaRepo: Repository<Pasarela>,
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly credenciales: CredencialesService,
   ) {}
 
@@ -34,7 +35,7 @@ export class TenantPasarelaService {
       prioridad: number;
       tiene_credenciales: boolean;
       creado_el: Date;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT tp.tenant_pasarela_id, tp.pasarela_id, p.codigo, p.nombre,
               tp.ambiente, tp.modo_integracion, tp.activo, tp.prioridad,
               (tp.configuracion IS NOT NULL) AS tiene_credenciales, tp.creado_el
@@ -154,7 +155,7 @@ export class TenantPasarelaService {
 
   /** Config activa del tenant para una pasarela por código + credenciales resueltas. */
   async resolverConfiguracionActiva(tenantId: string, codigoPasarela: string) {
-    const rows: { tenant_pasarela_id: string }[] = await this.dataSource.query(
+    const rows: { tenant_pasarela_id: string }[] = await this.db.query(
       `SELECT tp.tenant_pasarela_id
        FROM tenant_pasarela tp
        JOIN pasarelas p ON p.pasarela_id = tp.pasarela_id

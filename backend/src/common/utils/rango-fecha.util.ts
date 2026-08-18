@@ -1,5 +1,6 @@
 import type { DataSource, EntityManager } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
+import type { Db } from '../db/db.service';
 
 /**
  * Bordes de rango por fecha en filtros de listado.
@@ -75,7 +76,7 @@ export function bordeFechaSql(
  * tenant — misma fuente y misma consulta que usa el reporte de propinas.
  */
 export async function zonaHorariaTenant(
-  db: DataSource | EntityManager,
+  db: DataSource | EntityManager | Db,
   tenantId: string,
 ): Promise<string> {
   const rows: { zona_horaria: string }[] = await db.query(

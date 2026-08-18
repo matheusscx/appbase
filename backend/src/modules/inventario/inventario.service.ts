@@ -4,8 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
@@ -81,8 +82,7 @@ export class InventarioService {
   constructor(
     @InjectRepository(MovimientoInventario)
     private readonly movimientoRepo: Repository<MovimientoInventario>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   async registrarMovimiento(
@@ -327,7 +327,7 @@ export class InventarioService {
     // decimales, que es el que entra al kardex.
     const costoNuevo = new Decimal(dto.costoNuevo);
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const rows: { tipo: string; costo_actual: string | null }[] =
         await manager.query(
           `SELECT i.tipo, p.costo_actual
@@ -783,7 +783,7 @@ export class InventarioService {
     // La zona solo se consulta si hay filtro de fecha: sin bordes que expandir
     // es una query de más en el listado más caliente del módulo.
     const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.dataSource, tenantId)
+      ? await zonaHorariaTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildMovimientosFilters(
       tenantId,
@@ -796,7 +796,7 @@ export class InventarioService {
     // fila vacía ni tachada — bajaba el `COUNT`, así que la pantalla informaba
     // menos movimientos de los que hay sin decir que ocultaba nada. El filtro va
     // en las DOS consultas o el total vuelve a mentir.
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM movimientos_inventario mv
        LEFT JOIN items i ON i.item_id = mv.item_id
@@ -810,7 +810,7 @@ export class InventarioService {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
 
-    const rows: MovimientoRow[] = await this.dataSource.query(
+    const rows: MovimientoRow[] = await this.db.query(
       `SELECT
          mv.movimiento_id, mv.item_id, i.nombre AS item_nombre,
          mv.tipo, mv.motivo, mv.cantidad,

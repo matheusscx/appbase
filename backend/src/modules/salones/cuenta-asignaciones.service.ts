@@ -4,8 +4,8 @@ import {
   NotFoundException,
   OnApplicationBootstrap,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull } from 'typeorm';
+import { EntityManager, IsNull } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import {
   CuentaAsignacion,
   MotivoCuentaAsignacion,
@@ -30,7 +30,7 @@ export interface CuentaAsignacionDetalle {
 @Injectable()
 export class CuentaAsignacionesService implements OnApplicationBootstrap {
   constructor(
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly garzones: GarzonesService,
     private readonly sesiones: SesionesGarzonService,
   ) {}
@@ -127,7 +127,7 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
       origen_garzon_nombre: string | null;
       actor_usuario_id: string | null;
       actor_usuario_nombre: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT ca.cuenta_asignacion_id,
               ca.garzon_id,
               g.nombre AS garzon_nombre,
@@ -169,7 +169,7 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
   }
 
   async onApplicationBootstrap(): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await manager.query(`
       UPDATE cuentas
          SET garzon_responsable_id = garzon_apertura_id
@@ -207,7 +207,7 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
     motivo: MotivoCuentaAsignacion,
     actorUsuarioId: string | null,
   ): Promise<Cuenta> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
         lock: { mode: 'pessimistic_write' },

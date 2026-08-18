@@ -1,6 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { MermasService } from './mermas.service';
 import { CausasMermaService } from './causas-merma.service';
 import { InventarioService } from '../inventario/inventario.service';
@@ -44,10 +44,11 @@ describe('MermasService', () => {
       providers: [
         MermasService,
         {
-          provide: getDataSourceToken(),
+          provide: Db,
           useValue: {
-            transaction: transactionMock,
+            transaccion: transactionMock,
             query: dataSourceQueryMock,
+            sinTransaccion: (fn: () => unknown) => fn(),
           },
         },
         { provide: InventarioService, useValue: inventarioService },

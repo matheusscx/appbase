@@ -3,8 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   errorDeColisionNombreSQL,
@@ -67,10 +66,7 @@ function toItemConEliminado(r: RowConEliminado): MotivoDiferenciaListItem {
 
 @Injectable()
 export class MotivosDiferenciaService {
-  constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
-  ) {}
+  constructor(private readonly db: Db) {}
 
   async findAll(
     tenantId: string,
@@ -78,7 +74,7 @@ export class MotivosDiferenciaService {
     incluirEliminados = false,
   ): Promise<MotivoDiferenciaListItem[]> {
     if (!incluirEliminados) {
-      const rows: Row[] = await this.dataSource.query(
+      const rows: Row[] = await this.db.query(
         `SELECT ${COLS} FROM motivo_diferencia_caja
          WHERE tenant_id = $1 AND eliminado_el IS NULL
            ${soloActivas ? 'AND activo = true' : ''}
@@ -96,7 +92,7 @@ export class MotivosDiferenciaService {
     // Solo lo que borró una persona: `eliminado_por IS NULL` es un borrado
     // del sistema, no restaurable ni visible — decisión del owner,
     // docs/features/papelera.md.
-    const rows: RowConEliminado[] = await this.dataSource.query(
+    const rows: RowConEliminado[] = await this.db.query(
       `SELECT m.motivo_diferencia_id, m.nombre, m.activo, m.requiere_comentario, m.es_fijo,
               m.eliminado_el, m.eliminado_por,
               u.nombre_usuario AS eliminado_por_nombre
@@ -119,7 +115,7 @@ export class MotivosDiferenciaService {
     await this.assertNombreUnico(tenantId, nombre);
     const rows = unwrap<Row>(
       await traducirColisionDeNombre(
-        this.dataSource.query(
+        this.db.query(
           `INSERT INTO motivo_diferencia_caja
            (tenant_id, nombre, activo, requiere_comentario, es_fijo)
          VALUES ($1, $2, $3, $4, false)
@@ -172,7 +168,7 @@ export class MotivosDiferenciaService {
     params.push(id, tenantId);
     const rows = unwrap<Row>(
       await traducirColisionDeNombre(
-        this.dataSource.query(
+        this.db.query(
           `UPDATE motivo_diferencia_caja SET ${sets.join(', ')}
          WHERE motivo_diferencia_id = $${idx++} AND tenant_id = $${idx}
            AND eliminado_el IS NULL
@@ -203,7 +199,7 @@ export class MotivosDiferenciaService {
     }
     // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
     // una fila borrada sin autor.
-    await this.dataSource.query(
+    await this.db.query(
       `UPDATE motivo_diferencia_caja
           SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
         WHERE motivo_diferencia_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -221,7 +217,7 @@ export class MotivosDiferenciaService {
       // búsqueda y escritura en una sentencia: no hay ventana entre leer y
       // escribir.
       const rows = unwrap<RowConEliminado>(
-        await this.dataSource.query(
+        await this.db.query(
           `UPDATE motivo_diferencia_caja
               SET eliminado_el = NULL, eliminado_por = NULL,
                   nombre = COALESCE($3, nombre),
@@ -258,7 +254,7 @@ export class MotivosDiferenciaService {
         // el usuario recibiría el mismo 400 tras confirmar el modal.
         throw new BadRequestException(
           await errorDeColisionNombreSQL(
-            this.dataSource,
+            this.db,
             'motivo_diferencia_caja',
             'un motivo activo',
             tenantId,
@@ -313,7 +309,7 @@ export class MotivosDiferenciaService {
     tenantId: string,
     id: string,
   ): Promise<MotivoDiferenciaListItem> {
-    const rows: Row[] = await this.dataSource.query(
+    const rows: Row[] = await this.db.query(
       `SELECT ${COLS} FROM motivo_diferencia_caja
        WHERE motivo_diferencia_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [id, tenantId],
@@ -336,7 +332,7 @@ export class MotivosDiferenciaService {
       params.push(excludeId);
       sql += ` AND motivo_diferencia_id <> $3`;
     }
-    const rows: unknown[] = await this.dataSource.query(sql, params);
+    const rows: unknown[] = await this.db.query(sql, params);
     if (rows.length) {
       throw new BadRequestException(
         `Ya existe un motivo con el nombre "${nombre}"`,
@@ -351,7 +347,7 @@ export class MotivosDiferenciaService {
    * únicamente en el camino de error.
    */
   private async nombreActual(tenantId: string, id: string): Promise<string> {
-    const filas: { nombre: string }[] = await this.dataSource.query(
+    const filas: { nombre: string }[] = await this.db.query(
       `SELECT nombre FROM motivo_diferencia_caja WHERE motivo_diferencia_id = $1 AND tenant_id = $2`,
       [id, tenantId],
     );

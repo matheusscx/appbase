@@ -1,8 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
 import { IsNull } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { PropinaConfiguracion } from './entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from './entities/propina-grupo-distribucion.entity';
 import { PropinaGrupoPesoManual } from './entities/propina-grupo-peso-manual.entity';
@@ -64,6 +65,11 @@ describe('PropinaDistribucionService', () => {
         cb(manager),
       ),
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: jest.fn(),
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     garzonesService = {
       obtenerActivoPorId: jest.fn().mockResolvedValue({ id: 'g1' }),
@@ -84,7 +90,7 @@ describe('PropinaDistribucionService', () => {
           provide: getRepositoryToken(PropinaGrupoPesoManual),
           useValue: pesoRepo,
         },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         // Los pesos manuales resuelven el garzón contra el tenant.
         { provide: GarzonesService, useValue: garzonesService },
       ],

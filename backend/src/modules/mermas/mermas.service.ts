@@ -3,9 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
@@ -79,8 +78,7 @@ interface MermaRow {
 @Injectable()
 export class MermasService {
   constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly inventarioService: InventarioService,
     private readonly catalogService: CatalogService,
     private readonly causasService: CausasMermaService,
@@ -91,7 +89,7 @@ export class MermasService {
     usuarioId: string,
     dto: CreateMermaDto,
   ): Promise<MermaResponse> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const itemRows: {
         tipo: string;
         unidad_medida: string | null;
@@ -237,7 +235,7 @@ export class MermasService {
     const { page, pageSize, offset } = resolvePagination(query);
     // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
     const zona = requiereZonaTenant(query.desde, query.hasta)
-      ? await zonaHorariaTenant(this.dataSource, tenantId)
+      ? await zonaHorariaTenant(this.db, tenantId)
       : null;
     const { filters, params } = this.buildFilters(tenantId, query, zona);
 
@@ -245,7 +243,7 @@ export class MermasService {
     // registrada es plata perdida que ya ocurrió, así que dar de baja el
     // producto después no puede borrarla del informe ni —peor— bajar el total
     // sin avisar. Mismo criterio que el kardex (`InventarioService`).
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
        FROM movimientos_inventario mv
        LEFT JOIN items i ON i.item_id = mv.item_id
@@ -260,7 +258,7 @@ export class MermasService {
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
 
-    const rows: MermaRow[] = await this.dataSource.query(
+    const rows: MermaRow[] = await this.db.query(
       `SELECT
          mv.movimiento_id, mv.item_id, i.nombre AS item_nombre,
          mv.cantidad, mv.costo_unitario,

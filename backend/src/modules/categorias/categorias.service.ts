@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { Categoria } from './entities/categoria.entity';
 import { CreateCategoriaDto } from './dto/create-categoria.dto';
 import { UpdateCategoriaDto } from './dto/update-categoria.dto';
@@ -20,8 +21,7 @@ export class CategoriasService {
   constructor(
     @InjectRepository(Categoria)
     private readonly categoriaRepo: Repository<Categoria>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   async findAll(
@@ -135,7 +135,7 @@ export class CategoriasService {
     tenantId: string,
     impresoraId: string,
   ): Promise<void> {
-    const rows: { impresora_id: string }[] = await this.dataSource.query(
+    const rows: { impresora_id: string }[] = await this.db.query(
       `SELECT impresora_id FROM impresoras
         WHERE impresora_id = $1 AND tenant_id = $2 AND rol = 'comanda'
           AND activo = true AND eliminado_el IS NULL`,

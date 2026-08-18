@@ -1,10 +1,11 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { CajonesService } from './cajones.service';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
@@ -86,6 +87,11 @@ describe('CajonesService', () => {
     dataSource = {
       transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: jest.fn(),
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -94,7 +100,7 @@ describe('CajonesService', () => {
         { provide: getRepositoryToken(CajonUsuario), useValue: cuRepo },
         { provide: getRepositoryToken(UsuarioTenant), useValue: utRepo },
         { provide: getRepositoryToken(Caja), useValue: cajaRepo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
 

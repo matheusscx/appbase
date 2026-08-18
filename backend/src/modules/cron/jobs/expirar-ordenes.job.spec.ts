@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
+import { Db } from '../../../common/db/db.service';
 import { CronRunnerService } from '../cron-runner.service';
 import { ExpirarOrdenesJob, JOB_EXPIRAR_ORDENES } from './expirar-ordenes.job';
 
@@ -17,7 +17,14 @@ describe('ExpirarOrdenesJob', () => {
       providers: [
         ExpirarOrdenesJob,
         { provide: CronRunnerService, useValue: runnerMock },
-        { provide: getDataSourceToken(), useValue: { query: queryMock } },
+        {
+          provide: Db,
+          useValue: {
+            query: queryMock,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
       ],
     }).compile();
     job = module.get(ExpirarOrdenesJob);

@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Db } from '../../../common/db/db.service';
 import { CobrosService } from './cobros.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
@@ -28,8 +29,9 @@ describe('CobrosService', () => {
     findOne: jest.fn(),
     findAndCount: jest.fn().mockResolvedValue([[], 0]),
   };
-  // reembolsar() corre dentro de dataSource.transaction; el manager delega en
-  // los mismos mocks de ordenRepo para que los tests de reembolso no cambien.
+  // reembolsar() corre dentro de db.transaccion (antes dataSource.transaction);
+  // el manager delega en los mismos mocks de ordenRepo para que los tests de
+  // reembolso no cambien.
   const manager = {
     findOne: jest.fn(
       (_entity: unknown, opts: unknown) =>
@@ -41,6 +43,11 @@ describe('CobrosService', () => {
     transaction: jest.fn((cb: (m: typeof manager) => Promise<unknown>) =>
       cb(manager),
     ),
+  };
+  const dbMock = {
+    transaccion: dataSource.transaction,
+    query: jest.fn(),
+    sinTransaccion: (fn: () => unknown) => fn(),
   };
   const provider = {
     autorizarCobro: jest.fn(),
@@ -84,7 +91,7 @@ describe('CobrosService', () => {
       providers: [
         CobrosService,
         { provide: getRepositoryToken(PasarelaOrden), useValue: ordenRepo },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         { provide: InscripcionesService, useValue: deps.inscripciones },
         { provide: TenantPasarelaService, useValue: deps.tenantPasarela },
         { provide: TransaccionesService, useValue: deps.transacciones },

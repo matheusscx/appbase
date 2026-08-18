@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { IsNull } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { BaseVentasGrupo } from './enums/base-ventas-grupo.enum';
 import { CriterioDistribucion } from './enums/criterio-distribucion.enum';
@@ -129,6 +130,11 @@ describe('LiquidacionPropinasService', () => {
       ),
       manager,
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: manager.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
     liquidacionRepo = { find: jest.fn(), findOne: jest.fn() };
     grupoRepo = { find: jest.fn() };
     participanteRepo = { find: jest.fn() };
@@ -141,7 +147,7 @@ describe('LiquidacionPropinasService', () => {
         { provide: PropinaDistribucionService, useValue: distribucion },
         // El alta manual de participante resuelve el garzón contra el tenant.
         { provide: GarzonesService, useValue: garzonesService },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         {
           provide: getRepositoryToken(LiquidacionPropinas),
           useValue: liquidacionRepo,

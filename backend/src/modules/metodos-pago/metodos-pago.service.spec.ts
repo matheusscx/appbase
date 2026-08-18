@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { MetodosPagoService } from './metodos-pago.service';
 import { TenantMetodoPago } from './entities/tenant-metodo-pago.entity';
 
@@ -40,6 +41,11 @@ describe('MetodosPagoService', () => {
       ),
       manager: managerMock,
     };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -48,7 +54,7 @@ describe('MetodosPagoService', () => {
           provide: getRepositoryToken(TenantMetodoPago),
           useValue: tenantMetodoPagoRepo,
         },
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
 

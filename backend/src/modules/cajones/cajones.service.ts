@@ -4,8 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import {
   errorDeColisionNombre,
   traducirColisionDeNombre,
@@ -34,8 +35,7 @@ export class CajonesService {
     private readonly usuarioTenantRepo: Repository<UsuarioTenant>,
     @InjectRepository(Caja)
     private readonly cajaRepo: Repository<Caja>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   async findAll(
@@ -209,7 +209,7 @@ export class CajonesService {
     const quitar = vivos.filter((r) => !querido.has(r.usuarioId));
     const agregar = ids.filter((id) => !vivosIds.has(id));
 
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       if (quitar.length > 0) {
         await manager.softDelete(CajonUsuario, {
           id: In(quitar.map((r) => r.id)),

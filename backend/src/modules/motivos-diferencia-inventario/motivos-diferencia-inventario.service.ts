@@ -3,8 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   errorDeColisionNombreSQL,
@@ -46,10 +45,7 @@ interface MotivoDiferenciaInventarioRowConEliminado extends MotivoDiferenciaInve
 
 @Injectable()
 export class MotivosDiferenciaInventarioService {
-  constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
-  ) {}
+  constructor(private readonly db: Db) {}
 
   async findAll(
     tenantId: string,
@@ -57,7 +53,7 @@ export class MotivosDiferenciaInventarioService {
     incluirEliminados = false,
   ): Promise<MotivoDiferenciaInventarioListItem[]> {
     if (!incluirEliminados) {
-      const rows: MotivoDiferenciaInventarioRow[] = await this.dataSource.query(
+      const rows: MotivoDiferenciaInventarioRow[] = await this.db.query(
         `SELECT motivo_diferencia_inventario_id, nombre, activo, es_fijo
            FROM motivo_diferencia_inventario
            WHERE tenant_id = $1 AND eliminado_el IS NULL
@@ -82,7 +78,7 @@ export class MotivosDiferenciaInventarioService {
     // del sistema, no restaurable ni visible — decisión del owner,
     // docs/features/papelera.md.
     const rows: MotivoDiferenciaInventarioRowConEliminado[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT m.motivo_diferencia_inventario_id, m.nombre, m.activo, m.es_fijo,
                 m.eliminado_el, m.eliminado_por,
                 u.nombre_usuario AS eliminado_por_nombre
@@ -113,7 +109,7 @@ export class MotivosDiferenciaInventarioService {
     await this.assertNombreUnico(tenantId, nombre);
     const rows = unwrap<MotivoDiferenciaInventarioRow>(
       await traducirColisionDeNombre(
-        this.dataSource.query(
+        this.db.query(
           `INSERT INTO motivo_diferencia_inventario (tenant_id, nombre, activo, es_fijo)
          VALUES ($1, $2, $3, false)
          RETURNING motivo_diferencia_inventario_id, nombre, activo, es_fijo`,
@@ -138,7 +134,7 @@ export class MotivosDiferenciaInventarioService {
     id: string,
     dto: UpdateMotivoDiferenciaInventarioDto,
   ): Promise<MotivoDiferenciaInventarioListItem> {
-    const escritura = this.dataSource.transaction(async (manager) => {
+    const escritura = this.db.transaccion(async (manager) => {
       const motivo = await this.findOneOrFail(tenantId, id, manager, true);
       if (motivo.esFijo) {
         throw new BadRequestException(
@@ -197,7 +193,7 @@ export class MotivosDiferenciaInventarioService {
   // la toma con FOR SHARE mientras revalida, este FOR UPDATE espera a que
   // commitee y recién entonces el EXISTS ve los movimientos.
   async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       const motivo = await this.findOneOrFail(tenantId, id, manager, true);
       if (motivo.esFijo) {
         throw new BadRequestException(
@@ -248,7 +244,7 @@ export class MotivosDiferenciaInventarioService {
       // búsqueda y escritura en una sentencia: no hay ventana entre leer y
       // escribir.
       const rows = unwrap<MotivoDiferenciaInventarioRowConEliminado>(
-        await this.dataSource.query(
+        await this.db.query(
           `UPDATE motivo_diferencia_inventario
               SET eliminado_el = NULL, eliminado_por = NULL,
                   nombre = COALESCE($3, nombre),
@@ -295,7 +291,7 @@ export class MotivosDiferenciaInventarioService {
         // el usuario recibiría el mismo 400 tras confirmar el modal.
         throw new BadRequestException(
           await errorDeColisionNombreSQL(
-            this.dataSource,
+            this.db,
             'motivo_diferencia_inventario',
             'un motivo de diferencia activo',
             tenantId,
@@ -334,7 +330,7 @@ export class MotivosDiferenciaInventarioService {
   private async findOneOrFail(
     tenantId: string,
     id: string,
-    runner: SqlRunner = this.dataSource,
+    runner: SqlRunner = this.db,
     bloquear = false,
   ): Promise<MotivoDiferenciaInventarioListItem> {
     const rows = (await runner.query(
@@ -359,7 +355,7 @@ export class MotivosDiferenciaInventarioService {
     tenantId: string,
     nombre: string,
     excludeId?: string,
-    runner: SqlRunner = this.dataSource,
+    runner: SqlRunner = this.db,
   ): Promise<void> {
     const params: unknown[] = [tenantId, nombre];
     let sql = `
@@ -384,7 +380,7 @@ export class MotivosDiferenciaInventarioService {
    * únicamente en el camino de error.
    */
   private async nombreActual(tenantId: string, id: string): Promise<string> {
-    const filas: { nombre: string }[] = await this.dataSource.query(
+    const filas: { nombre: string }[] = await this.db.query(
       `SELECT nombre FROM motivo_diferencia_inventario WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2`,
       [id, tenantId],
     );

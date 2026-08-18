@@ -1,7 +1,6 @@
 import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Db } from '../../../common/db/db.service';
 import { CronRunnerService } from '../cron-runner.service';
 
 export const JOB_EXPIRAR_ORDENES = 'expirar-ordenes';
@@ -17,7 +16,7 @@ export const JOB_EXPIRAR_ORDENES = 'expirar-ordenes';
 export class ExpirarOrdenesJob implements OnApplicationBootstrap {
   constructor(
     private readonly runner: CronRunnerService,
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   // Tick inicial al arrancar: limpia el backlog acumulado si el backend
@@ -34,8 +33,8 @@ export class ExpirarOrdenesJob implements OnApplicationBootstrap {
   }
 
   async expirarOrdenesVencidas(): Promise<string> {
-    // pg: UPDATE vía dataSource.query devuelve [rows, rowCount]
-    const resultado = await this.dataSource.query<[unknown[], number]>(
+    // pg: UPDATE vía db.query devuelve [rows, rowCount]
+    const resultado = await this.db.query<[unknown[], number]>(
       `UPDATE pasarela_ordenes o
        SET estado = 'expirada', actualizado_el = now()
        WHERE o.estado IN ('creada', 'en_proceso')

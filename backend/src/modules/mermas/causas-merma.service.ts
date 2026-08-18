@@ -3,8 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   errorDeColisionNombreSQL,
@@ -41,10 +40,7 @@ interface CausaMermaRowConEliminado extends CausaMermaRow {
 
 @Injectable()
 export class CausasMermaService {
-  constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
-  ) {}
+  constructor(private readonly db: Db) {}
 
   async findAll(
     tenantId: string,
@@ -52,7 +48,7 @@ export class CausasMermaService {
     incluirEliminados = false,
   ): Promise<CausaMermaListItem[]> {
     if (!incluirEliminados) {
-      const rows: CausaMermaRow[] = await this.dataSource.query(
+      const rows: CausaMermaRow[] = await this.db.query(
         `SELECT causa_merma_id, nombre, activo, es_fijo
          FROM causas_merma
          WHERE tenant_id = $1 AND eliminado_el IS NULL
@@ -76,7 +72,7 @@ export class CausasMermaService {
     // Solo lo que borró una persona: `eliminado_por IS NULL` es un borrado
     // del sistema, no restaurable ni visible — decisión del owner,
     // docs/features/papelera.md.
-    const rows: CausaMermaRowConEliminado[] = await this.dataSource.query(
+    const rows: CausaMermaRowConEliminado[] = await this.db.query(
       `SELECT cm.causa_merma_id, cm.nombre, cm.activo, cm.es_fijo,
               cm.eliminado_el, cm.eliminado_por,
               u.nombre_usuario AS eliminado_por_nombre
@@ -107,7 +103,7 @@ export class CausasMermaService {
     await this.assertNombreUnico(tenantId, nombre);
     const rows = unwrap<CausaMermaRow>(
       await traducirColisionDeNombre(
-        this.dataSource.query(
+        this.db.query(
           `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
          VALUES ($1, $2, $3, false)
          RETURNING causa_merma_id, nombre, activo, es_fijo`,
@@ -155,7 +151,7 @@ export class CausasMermaService {
     params.push(id, tenantId);
     const rows = unwrap<CausaMermaRow>(
       await traducirColisionDeNombre(
-        this.dataSource.query(
+        this.db.query(
           `UPDATE causas_merma SET ${sets.join(', ')}
          WHERE causa_merma_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
          RETURNING causa_merma_id, nombre, activo, es_fijo`,
@@ -188,7 +184,7 @@ export class CausasMermaService {
         'No se puede eliminar una causa fija del sistema',
       );
     }
-    const uso: { cnt: string }[] = await this.dataSource.query(
+    const uso: { cnt: string }[] = await this.db.query(
       `SELECT COUNT(*)::text AS cnt FROM movimientos_inventario
        WHERE causa_merma_id = $1 AND eliminado_el IS NULL`,
       [id],
@@ -200,7 +196,7 @@ export class CausasMermaService {
     }
     // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
     // una fila borrada sin autor.
-    await this.dataSource.query(
+    await this.db.query(
       `UPDATE causas_merma
           SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
         WHERE causa_merma_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -218,7 +214,7 @@ export class CausasMermaService {
       // búsqueda y escritura en una sentencia: no hay ventana entre leer y
       // escribir.
       const rows = unwrap<CausaMermaRowConEliminado>(
-        await this.dataSource.query(
+        await this.db.query(
           `UPDATE causas_merma
               SET eliminado_el = NULL, eliminado_por = NULL,
                   nombre = COALESCE($3, nombre),
@@ -265,7 +261,7 @@ export class CausasMermaService {
         // el usuario recibiría el mismo 400 tras confirmar el modal.
         throw new BadRequestException(
           await errorDeColisionNombreSQL(
-            this.dataSource,
+            this.db,
             'causas_merma',
             'una causa de merma activa',
             tenantId,
@@ -299,7 +295,7 @@ export class CausasMermaService {
     tenantId: string,
     id: string,
   ): Promise<CausaMermaListItem> {
-    const rows: CausaMermaRow[] = await this.dataSource.query(
+    const rows: CausaMermaRow[] = await this.db.query(
       `SELECT causa_merma_id, nombre, activo, es_fijo
        FROM causas_merma
        WHERE causa_merma_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -329,7 +325,7 @@ export class CausasMermaService {
       params.push(excludeId);
       sql += ` AND causa_merma_id <> $3`;
     }
-    const rows: unknown[] = await this.dataSource.query(sql, params);
+    const rows: unknown[] = await this.db.query(sql, params);
     if (rows.length) {
       throw new BadRequestException(
         `Ya existe una causa de merma con el nombre "${nombre}"`,
@@ -344,7 +340,7 @@ export class CausasMermaService {
    * únicamente en el camino de error.
    */
   private async nombreActual(tenantId: string, id: string): Promise<string> {
-    const filas: { nombre: string }[] = await this.dataSource.query(
+    const filas: { nombre: string }[] = await this.db.query(
       `SELECT nombre FROM causas_merma WHERE causa_merma_id = $1 AND tenant_id = $2`,
       [id, tenantId],
     );

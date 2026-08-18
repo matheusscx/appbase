@@ -3,9 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { BaseVentasGrupo } from './enums/base-ventas-grupo.enum';
 import { CriterioDistribucion } from './enums/criterio-distribucion.enum';
@@ -144,8 +145,7 @@ export class LiquidacionPropinasService {
     private readonly fuenteRepo: Repository<LiquidacionPropinasFuente>,
     @InjectRepository(LiquidacionPropinasEvento)
     private readonly eventoRepo: Repository<LiquidacionPropinasEvento>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly distribucion: PropinaDistribucionService,
     private readonly garzones: GarzonesService,
   ) {}
@@ -167,7 +167,7 @@ export class LiquidacionPropinasService {
     }
     const turnoIds = dto.turnoIds ?? [];
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const {
         liquidacion,
         grupos,
@@ -224,7 +224,7 @@ export class LiquidacionPropinasService {
       throw new BadRequestException('No hay grupos activos para liquidar');
     }
 
-    const manager = this.dataSource.manager;
+    const manager = this.db;
     const moneda = await this.resolverMonedaOficial(manager, tenantId);
     const tips = await this.buscarTipsElegibles(
       manager,
@@ -378,7 +378,7 @@ export class LiquidacionPropinasService {
     id: string,
     dto: UpdateLiquidacionDto,
   ): Promise<LiquidacionDetalle> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const detalle = await this.cargarDetalleManager(
         manager,
         tenantId,
@@ -438,7 +438,7 @@ export class LiquidacionPropinasService {
   > {
     const config = await this.distribucion.obtener(tenantId);
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const detalle = await this.cargarDetalleManager(
         manager,
         tenantId,
@@ -563,7 +563,7 @@ export class LiquidacionPropinasService {
     usuarioId: string,
     id: string,
   ): Promise<LiquidacionDetalle> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const detalle = await this.cargarDetalleManager(
         manager,
         tenantId,
@@ -607,7 +607,7 @@ export class LiquidacionPropinasService {
     }
     const turnoIds = dto.turnoIds ?? [];
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const {
         liquidacion,
         grupos,
@@ -660,7 +660,7 @@ export class LiquidacionPropinasService {
     id: string,
     dto: AnularLiquidacionDto,
   ): Promise<LiquidacionDetalle> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const detalle = await this.cargarDetalleManager(
         manager,
         tenantId,
@@ -1117,7 +1117,7 @@ export class LiquidacionPropinasService {
   }
 
   private async resolverMonedaOficial(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
   ): Promise<{ monedaId: string; decimales: number }> {
     const rows: MonedaOficialRow[] = await manager.query(
@@ -1141,7 +1141,7 @@ export class LiquidacionPropinasService {
   }
 
   private async buscarTipsElegibles(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     fechaDesde: Date,
     fechaHasta: Date,
@@ -1175,7 +1175,7 @@ export class LiquidacionPropinasService {
   }
 
   private async buscarSesionesPeriodo(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     fechaDesde: Date,
     fechaHasta: Date,
@@ -1302,7 +1302,7 @@ export class LiquidacionPropinasService {
    * `garzonId`): queda anotado en `docs/agent/pendientes.md`.
    */
   private async assertGarzonEnUnSoloGrupo(
-    manager: EntityManager,
+    manager: EntityManager | Db,
     tenantId: string,
     gruposConfig: GrupoDistribucionPublico[],
     tips: TipElegibleRow[],

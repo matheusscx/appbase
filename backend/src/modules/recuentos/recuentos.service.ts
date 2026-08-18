@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { EntityManager, QueryFailedError } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -151,8 +151,7 @@ export interface RecuentoAplicarResultado {
 @Injectable()
 export class RecuentosService {
   constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly motivosDiferenciaInventarioService: MotivosDiferenciaInventarioService,
     private readonly inventarioService: InventarioService,
   ) {}
@@ -168,7 +167,7 @@ export class RecuentosService {
       );
     }
 
-    return this.dataSource.transaction(async (manager: EntityManager) => {
+    return this.db.transaccion(async (manager: EntityManager) => {
       // Una sola query trae todos los items pedidos con su stock vigente —
       // nunca una query por item.
       const rows: ItemParaRecuentoRow[] = await manager.query(
@@ -285,7 +284,7 @@ export class RecuentosService {
     const estadoFilter = query.estado ? ' AND r.estado = $2' : '';
     const countParams = query.estado ? [tenantId, query.estado] : [tenantId];
 
-    const countRows: { total: number }[] = await this.dataSource.query(
+    const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total FROM recuento_inventario r
         WHERE r.tenant_id = $1 AND r.eliminado_el IS NULL${estadoFilter}`,
       countParams,
@@ -298,7 +297,7 @@ export class RecuentosService {
     const limitIdx = query.estado ? 3 : 2;
     const offsetIdx = query.estado ? 4 : 3;
 
-    const rows: RecuentoListRow[] = await this.dataSource.query(
+    const rows: RecuentoListRow[] = await this.db.query(
       `SELECT r.recuento_id, r.estado, r.comentario, r.creado_el, r.aplicado_el,
               u.nombre AS usuario_creador_nombre,
               COUNT(l.linea_id)::int AS cantidad_lineas,
@@ -339,7 +338,7 @@ export class RecuentosService {
     tenantId: string,
     recuentoId: string,
   ): Promise<RecuentoDetalle> {
-    const sesionRows: RecuentoRow[] = await this.dataSource.query(
+    const sesionRows: RecuentoRow[] = await this.db.query(
       `SELECT recuento_id, estado, motivo_diferencia_default_id, comentario, creado_el, aplicado_el
          FROM recuento_inventario
         WHERE recuento_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -356,7 +355,7 @@ export class RecuentosService {
     // seguía contando en `cantidadLineas` — el listado decía 12 y el detalle
     // mostraba 11. La línea se muestra marcada, que es lo que `aplicar` ya hace
     // al descartarla e informarla en `lineasDescartadas`.
-    const lineaRows: RecuentoLineaRow[] = await this.dataSource.query(
+    const lineaRows: RecuentoLineaRow[] = await this.db.query(
       `SELECT l.linea_id, l.item_id, i.nombre AS item_nombre, p.unidad_medida,
               (i.eliminado_el IS NOT NULL) AS item_eliminado,
               l.stock_sistema, l.cantidad_contada, l.motivo_diferencia_id
@@ -408,7 +407,7 @@ export class RecuentosService {
       );
     }
 
-    return this.dataSource.transaction(async (manager: EntityManager) => {
+    return this.db.transaccion(async (manager: EntityManager) => {
       await this.assertBorrador(manager, tenantId, recuentoId);
 
       // null explícito significa "limpiar el override de línea" — solo se
@@ -476,7 +475,7 @@ export class RecuentosService {
     recuentoId: string,
     dto: UpdateRecuentoDto,
   ): Promise<{ id: string }> {
-    return this.dataSource.transaction(async (manager: EntityManager) => {
+    return this.db.transaccion(async (manager: EntityManager) => {
       await this.assertBorrador(manager, tenantId, recuentoId);
 
       // Mismo criterio que updateLinea: null explícito limpia la causa por
@@ -522,7 +521,7 @@ export class RecuentosService {
     tenantId: string,
     recuentoId: string,
   ): Promise<{ id: string; estado: string }> {
-    return this.dataSource.transaction(async (manager: EntityManager) => {
+    return this.db.transaccion(async (manager: EntityManager) => {
       await this.assertBorrador(manager, tenantId, recuentoId);
 
       const rows = unwrap<{ recuento_id: string; estado: string }>(
@@ -572,7 +571,7 @@ export class RecuentosService {
     usuarioId: string,
     recuentoId: string,
   ): Promise<RecuentoAplicarResultado> {
-    return this.dataSource.transaction(async (manager: EntityManager) => {
+    return this.db.transaccion(async (manager: EntityManager) => {
       const sesionRows: RecuentoAplicarSesionRow[] = await manager.query(
         `SELECT recuento_id, estado, motivo_diferencia_default_id, comentario
            FROM recuento_inventario

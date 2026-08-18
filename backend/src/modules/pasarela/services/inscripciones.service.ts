@@ -5,8 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Db } from '../../../common/db/db.service';
 import { randomUUID } from 'crypto';
 import { PasarelaInscripcion } from '../entities/pasarela-inscripcion.entity';
 import { PasarelaMedioPago } from '../entities/pasarela-medio-pago.entity';
@@ -32,7 +33,7 @@ export class InscripcionesService {
     private readonly credenciales: CredencialesService,
     private readonly providerFactory: ProviderFactory,
     private readonly config: ConfigService,
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
   ) {}
 
   private toPublico(i: PasarelaInscripcion, medios: PasarelaMedioPago[] = []) {
@@ -256,7 +257,7 @@ export class InscripcionesService {
       throw new NotFoundException('Inscripción activa no encontrada');
 
     // Regla "solo una": limpiar el flag del pagador y marcar la nueva, atómico.
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await manager.update(
         PasarelaInscripcion,
         { tenantId, pagadorRef: inscripcion.pagadorRef, preferida: true },

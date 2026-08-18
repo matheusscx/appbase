@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, type EntityManager } from 'typeorm';
+import { type EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 
 /**
  * Quiénes administran el tenant **de verdad**: membresía viva y algún rol
@@ -59,10 +59,7 @@ const ADMINISTRADORES_SQL = `
  */
 @Injectable()
 export class RbacService {
-  constructor(
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
-  ) {}
+  constructor(private readonly db: Db) {}
 
   async userHasPermiso(
     userId: string,
@@ -89,7 +86,7 @@ export class RbacService {
     // `tm.estado` y `tm.expira_en` no se miran acá **a propósito**: la consulta
     // completa de abajo tampoco los mira, y hacer que la contratación caduque es
     // otra decisión. Que las dos ramas coincidan importa más que adivinarla.
-    const fixedRole: unknown[] = await this.dataSource.query(
+    const fixedRole: unknown[] = await this.db.query(
       `SELECT 1
        FROM roles_usuarios ru
        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
@@ -106,7 +103,7 @@ export class RbacService {
     if (fixedRole.length > 0) return true;
 
     // JOIN completo para verificar permiso específico
-    const result: unknown[] = await this.dataSource.query(
+    const result: unknown[] = await this.db.query(
       `SELECT 1
        FROM roles_usuarios ru
        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id AND r.eliminado_el IS NULL
@@ -127,7 +124,7 @@ export class RbacService {
   }
 
   async userIsTenantAdmin(userId: string, tenantId: string): Promise<boolean> {
-    const rows: unknown[] = await this.dataSource.query(
+    const rows: unknown[] = await this.db.query(
       `SELECT 1
        FROM roles_usuarios ru
        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
@@ -185,7 +182,7 @@ export class RbacService {
 
   async getMisPermisos(userId: string, tenantId: string): Promise<string[]> {
     // Caso 1: usuario tiene rol es_fijo = true → devolver TODOS los permisos del tenant
-    const hasFixedRole: unknown[] = await this.dataSource.query(
+    const hasFixedRole: unknown[] = await this.db.query(
       `SELECT 1
        FROM roles_usuarios ru
        JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id
@@ -200,9 +197,8 @@ export class RbacService {
 
     if (hasFixedRole.length > 0) {
       // Devolver todos los permisos de los módulos contratados por el tenant
-      const rows: { modulo: string; permiso: string }[] =
-        await this.dataSource.query(
-          `SELECT DISTINCT ma.nombre AS modulo, p.nombre AS permiso
+      const rows: { modulo: string; permiso: string }[] = await this.db.query(
+        `SELECT DISTINCT ma.nombre AS modulo, p.nombre AS permiso
            FROM tenant_modulos tm
            JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id
            JOIN modulo_app_permisos map ON map.modulo_app_id = ma.modulo_app_id
@@ -212,15 +208,14 @@ export class RbacService {
              AND ma.eliminado_el IS NULL
              AND map.eliminado_el IS NULL
              AND p.eliminado_el IS NULL`,
-          [tenantId],
-        );
+        [tenantId],
+      );
       return rows.map((r) => `${r.modulo}:${r.permiso}`);
     }
 
     // Caso 2: usuario sin rol fijo → devolver solo permisos asignados
-    const rows: { modulo: string; permiso: string }[] =
-      await this.dataSource.query(
-        `SELECT DISTINCT ma.nombre AS modulo, p.nombre AS permiso
+    const rows: { modulo: string; permiso: string }[] = await this.db.query(
+      `SELECT DISTINCT ma.nombre AS modulo, p.nombre AS permiso
          FROM roles_usuarios ru
          JOIN roles r ON r.rol_id = ru.rol_id AND r.tenant_id = ru.tenant_id AND r.eliminado_el IS NULL
          JOIN modulos_roles mr ON mr.rol_id = r.rol_id AND mr.eliminado_el IS NULL
@@ -232,8 +227,8 @@ export class RbacService {
          WHERE ru.usuario_id = $1
            AND ru.tenant_id = $2
            AND ru.eliminado_el IS NULL`,
-        [userId, tenantId],
-      );
+      [userId, tenantId],
+    );
 
     return rows.map((r) => `${r.modulo}:${r.permiso}`);
   }

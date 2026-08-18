@@ -5,8 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { Rol, ROL_OPERADOR_SALON } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
 import { ModuloRol } from './entities/modulo-rol.entity';
@@ -46,8 +46,7 @@ export class RolesService {
     private readonly rolPermisoModuloRepo: Repository<RolPermisoModulo>,
     @InjectRepository(TenantModulo)
     private readonly tenantModuloRepo: Repository<TenantModulo>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly rbacService: RbacService,
   ) {}
 
@@ -99,7 +98,7 @@ export class RolesService {
     if (!rol) throw new NotFoundException(`Rol ${rolId} no encontrado`);
 
     // Verify the target user belongs to this tenant
-    const esMiembro = await this.dataSource.query<unknown[]>(
+    const esMiembro = await this.db.query<unknown[]>(
       `SELECT 1 FROM usuarios_tenants
        WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [usuarioId, tenantId],
@@ -151,7 +150,7 @@ export class RolesService {
     tenantId: string,
     usuarioId: string,
   ): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await this.rbacService.administradoresDe(manager, tenantId, true);
       await manager.softDelete(RolUsuario, { rolId, tenantId, usuarioId });
       const quedan = await this.rbacService.administradoresDe(
@@ -208,7 +207,7 @@ export class RolesService {
     // transacción: si el `save` de más abajo falla, el `delete` no debe
     // quedar commiteado — si no, el rol se queda sin ningún permiso en este
     // módulo hasta el próximo PUT exitoso.
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await manager.delete(RolPermisoModulo, { rolId, moduloTenantId });
 
       if (moduloAppPermisoIds.length > 0) {
@@ -383,7 +382,7 @@ export class RolesService {
       icono: string | null;
       modulo_app_permiso_id: string;
       permiso_nombre: string;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT tm.modulo_tenant_id,
               ma.modulo_app_id,
               ma.nombre,

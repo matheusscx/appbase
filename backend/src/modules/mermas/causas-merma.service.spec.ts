@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { CausasMermaService } from './causas-merma.service';
 import { CausaMerma } from './entities/causa-merma.entity';
 
@@ -19,7 +20,14 @@ describe('CausasMermaService', () => {
       providers: [
         CausasMermaService,
         { provide: getRepositoryToken(CausaMerma), useValue: {} },
-        { provide: getDataSourceToken(), useValue: { query: queryMock } },
+        {
+          provide: Db,
+          useValue: {
+            query: queryMock,
+            transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+            sinTransaccion: (fn: () => unknown) => fn(),
+          },
+        },
       ],
     }).compile();
 

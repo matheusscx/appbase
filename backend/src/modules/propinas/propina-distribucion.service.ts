@@ -1,6 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, QueryFailedError, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import {
+  EntityManager,
+  In,
+  IsNull,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
@@ -50,8 +57,7 @@ export class PropinaDistribucionService {
     private readonly grupoRepo: Repository<PropinaGrupoDistribucion>,
     @InjectRepository(PropinaGrupoPesoManual)
     private readonly pesoRepo: Repository<PropinaGrupoPesoManual>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly garzones: GarzonesService,
   ) {}
 
@@ -88,7 +94,7 @@ export class PropinaDistribucionService {
   }
 
   private async crearDefault(tenantId: string): Promise<PropinaConfiguracion> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const race = await manager.findOne(PropinaConfiguracion, {
         where: { tenantId, eliminadoEl: IsNull() },
         lock: { mode: 'pessimistic_write' },
@@ -141,7 +147,7 @@ export class PropinaDistribucionService {
     this.validarPorcentajeSugerido(dto.porcentajeSugerido);
     this.validarGrupos(dto.grupos);
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       let config = await manager.findOne(PropinaConfiguracion, {
         where: { tenantId, eliminadoEl: IsNull() },
         lock: { mode: 'pessimistic_write' },
@@ -290,7 +296,7 @@ export class PropinaDistribucionService {
 
   private async cargarPublica(
     tenantId: string,
-    manager?: DataSource['manager'],
+    manager?: EntityManager,
   ): Promise<DistribucionPublica> {
     const repoConfig = manager
       ? manager.getRepository(PropinaConfiguracion)

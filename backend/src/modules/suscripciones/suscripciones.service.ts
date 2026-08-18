@@ -4,8 +4,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { Suscripcion } from './entities/suscripcion.entity';
 import { CreateSuscripcionDto } from './dto/create-suscripcion.dto';
 import { UpdateSuscripcionDto } from './dto/update-suscripcion.dto';
@@ -33,7 +34,7 @@ export class SuscripcionesService {
   constructor(
     @InjectRepository(Suscripcion)
     private readonly suscripcionRepo: Repository<Suscripcion>,
-    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
     private readonly itemsService: ItemsService,
     private readonly calculoPreciosService: CalculoPreciosService,
     private readonly ventasService: VentasService,
@@ -139,7 +140,7 @@ export class SuscripcionesService {
     const ordenId = orden.ordenId as string;
 
     // 8. Nombre del usuario para el customer de la venta
-    const usuarioRows: { nombre: string }[] = await this.dataSource.query(
+    const usuarioRows: { nombre: string }[] = await this.db.query(
       `SELECT nombre FROM usuarios WHERE usuario_id = $1 AND eliminado_el IS NULL`,
       [usuarioId],
     );
@@ -179,7 +180,7 @@ export class SuscripcionesService {
       advertencias: string[];
     };
     try {
-      salida = await this.dataSource.transaction(async (manager) => {
+      salida = await this.db.transaccion(async (manager) => {
         const venta = await this.ventasService.crearEnTransaccion(
           manager,
           tenantId,
@@ -290,7 +291,7 @@ export class SuscripcionesService {
       tarjeta_last4: string | null;
       venta_inicial_id: string | null;
       creado_el: Date;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT s.suscripcion_id, s.item_id, i.nombre AS item_nombre,
               i.precio_base, i.moneda_id,
               s.frecuencia, s.dia_mes, s.dia_semana, s.estado,
@@ -346,7 +347,7 @@ export class SuscripcionesService {
       tarjeta_last4: string | null;
       venta_inicial_id: string | null;
       creado_el: Date;
-    }[] = await this.dataSource.query(
+    }[] = await this.db.query(
       `SELECT s.suscripcion_id, s.item_id, i.nombre AS item_nombre,
               i.precio_base, i.moneda_id,
               s.usuario_id, u.nombre AS usuario_nombre, u.correo AS usuario_email,
@@ -475,7 +476,7 @@ export class SuscripcionesService {
     usuarioId: string,
   ): Promise<Record<string, number>> {
     const rows: { inscripcion_id: string; total: number }[] =
-      await this.dataSource.query(
+      await this.db.query(
         `SELECT inscripcion_id, COUNT(*)::int AS total
          FROM suscripciones
          WHERE tenant_id = $1 AND usuario_id = $2 AND eliminado_el IS NULL

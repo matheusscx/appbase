@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { SalonesService } from './salones.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import { Salon } from './entities/salon.entity';
@@ -195,9 +196,14 @@ describe('SalonesService', () => {
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
     };
     dataSource = {
-      query: jest.fn(),
+      query: jest.fn().mockResolvedValue([]),
       transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
       manager: { query: jest.fn().mockResolvedValue([]) },
+    };
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -207,6 +213,7 @@ describe('SalonesService', () => {
         { provide: getRepositoryToken(Mesa), useValue: mesaRepo },
         { provide: getRepositoryToken(Cuenta), useValue: cuentaRepo },
         { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
         { provide: SesionesGarzonService, useValue: sesiones },
@@ -1327,7 +1334,7 @@ describe('SalonesService', () => {
     });
 
     it('el detalle devuelto se arma dentro de la transacción', async () => {
-      // `dataSource.manager.query` está mockeado a `[]`: si `armarDetalle` se
+      // `dataSource.query` está mockeado a `[]`: si `armarDetalle` se
       // llamara sin el manager, leería por fuera y `lineas` vendría vacío.
       const detalle = await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
         cantidad: '3',
@@ -2074,7 +2081,7 @@ describe('SalonesService', () => {
       cuentaRepo.find.mockResolvedValue(
         Array.from({ length: cuentas }, (_, i) => cuentaAbierta(i + 1)),
       );
-      dataSource.manager.query.mockImplementation((sql: string) => {
+      dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM cuenta_lineas')) {
           // Una línea por cuenta, cada una con personalización: es el caso que
           // dispara las tres consultas de `armarDetalle`.
@@ -2096,7 +2103,7 @@ describe('SalonesService', () => {
         }
         return Promise.resolve([]);
       });
-      return dataSource.manager.query;
+      return dataSource.query;
     }
 
     it('el costo en queries no crece con la cantidad de cuentas de la mesa', async () => {
@@ -2138,7 +2145,7 @@ describe('SalonesService', () => {
         { id: CUENTA, numero: 1, estado: EstadoCuenta.ABIERTA, mesaId: MESA },
       ]);
       const sqls: string[] = [];
-      dataSource.manager.query.mockImplementation((sql: string) => {
+      dataSource.query.mockImplementation((sql: string) => {
         sqls.push(sql);
         return Promise.resolve([]);
       });
@@ -2203,7 +2210,7 @@ describe('SalonesService', () => {
           garzonCierreId: null,
         },
       ]);
-      dataSource.manager.query.mockImplementation((sql: string) => {
+      dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM cuenta_lineas')) return Promise.resolve([]);
         if (sql.includes('FROM garzones')) {
           expect(sql).not.toMatch(/eliminado_el\s+IS\s+NULL/i);
@@ -2233,7 +2240,7 @@ describe('SalonesService', () => {
           garzonCierreId: null,
         },
       ]);
-      dataSource.manager.query.mockImplementation((sql: string) => {
+      dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM cuenta_lineas')) {
           // El JOIN a `items` NO debe filtrar lo eliminado: filtrarlo hacía
           // desaparecer la línea de la pantalla mientras `cerrarCuenta`, que
@@ -2282,7 +2289,7 @@ describe('SalonesService', () => {
           garzonCierreId: null,
         },
       ]);
-      dataSource.manager.query.mockImplementation((sql: string) =>
+      dataSource.query.mockImplementation((sql: string) =>
         Promise.resolve(
           sql.includes('FROM cuenta_lineas')
             ? [
@@ -2779,7 +2786,7 @@ describe('SalonesService', () => {
         garzonCierreId: null,
       };
       asignaciones.transferirPorPin.mockResolvedValue(cuentaTransferida);
-      dataSource.manager.query.mockImplementation((sql: string) => {
+      dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM cuenta_lineas')) return Promise.resolve([]);
         if (sql.includes('FROM garzones')) {
           return Promise.resolve([
@@ -2823,7 +2830,7 @@ describe('SalonesService', () => {
         garzonCierreId: null,
       };
       asignaciones.transferirAdmin.mockResolvedValue(cuentaTransferida);
-      dataSource.manager.query.mockImplementation((sql: string) => {
+      dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM cuenta_lineas')) return Promise.resolve([]);
         if (sql.includes('FROM garzones')) {
           return Promise.resolve([

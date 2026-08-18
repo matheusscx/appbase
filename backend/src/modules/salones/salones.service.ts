@@ -4,7 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import { Salon } from './entities/salon.entity';
@@ -187,7 +188,17 @@ export interface CuentaDetalle {
 @Injectable()
 export class SalonesService {
   constructor(
+    // `dataSource` sigue acá SOLO por `agregarLinea` → `resolverPersonalizacionCombo`/
+    // `resolverPersonalizacionReceta` (líneas de abajo): esos métodos de
+    // `ItemsService` piden un `EntityManager` completo y corren ANTES de abrir
+    // la transacción de `agregarLinea` (a propósito, ver el comentario ahí) —
+    // nunca anidados dentro de una transacción abierta, así que no hay una
+    // segunda conexión disputándose con una ya tomada. Ensancharles el tipo a
+    // `ItemsService` para aceptar `Db` es un refactor de otro archivo que no
+    // está en el barrido de esta tarea (`items.service.ts` no tiene acceso
+    // directo al `DataSource` — ya lo convirtió la Task 5 por completo).
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly db: Db,
     @InjectRepository(Salon) private readonly salonRepo: Repository<Salon>,
     @InjectRepository(Mesa) private readonly mesaRepo: Repository<Mesa>,
     @InjectRepository(Cuenta) private readonly cuentaRepo: Repository<Cuenta>,
@@ -207,7 +218,7 @@ export class SalonesService {
     incluirEliminados = false,
   ): Promise<SalonConMesas[]> {
     if (!incluirEliminados) {
-      const rows: SalonMesaRow[] = await this.dataSource.query(
+      const rows: SalonMesaRow[] = await this.db.query(
         `SELECT s.salon_id, s.nombre AS salon_nombre,
                 m.mesa_id, m.nombre AS mesa_nombre, m.pos_x, m.pos_y,
                 m.forma, m.tamano,
@@ -242,7 +253,7 @@ export class SalonesService {
     // debe colarse (y viceversa), así que el filtro de la mesa va en el
     // JOIN (para no perder el salón cuando la mesa queda afuera) y el del
     // salón en el WHERE.
-    const rows: SalonMesaRow[] = await this.dataSource.query(
+    const rows: SalonMesaRow[] = await this.db.query(
       `SELECT s.salon_id, s.nombre AS salon_nombre,
               s.eliminado_el AS salon_eliminado_el,
               us.nombre_usuario AS salon_eliminado_por_nombre,
@@ -374,7 +385,7 @@ export class SalonesService {
     // otro motivo: sin él, este borrado le robaría su timestamp original y
     // `restaurarSalon` la revivería por error.
     const ahora = new Date();
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       await manager.update(
         Mesa,
         { salonId: id, tenantId, eliminadoEl: IsNull() },
@@ -411,7 +422,7 @@ export class SalonesService {
    */
   async restaurarSalon(tenantId: string, id: string): Promise<Salon> {
     const rows = unwrap<{ salon_id: string }>(
-      await this.dataSource.query(
+      await this.db.query(
         `WITH restaurado AS (
            UPDATE salones
               SET eliminado_el = NULL, eliminado_por = NULL,
@@ -510,7 +521,7 @@ export class SalonesService {
    */
   async restaurarMesa(tenantId: string, id: string): Promise<Mesa> {
     const rows = unwrap<{ mesa_id: string }>(
-      await this.dataSource.query(
+      await this.db.query(
         `UPDATE mesas
             SET eliminado_el = NULL, eliminado_por = NULL,
                 actualizado_el = NOW()
@@ -535,7 +546,7 @@ export class SalonesService {
     dto: UpdateLayoutDto,
   ): Promise<void> {
     await this.getSalonOrThrow(tenantId, salonId);
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       for (const m of dto.mesas) {
         const res = await manager.update(
           Mesa,
@@ -580,7 +591,7 @@ export class SalonesService {
       dto,
     );
     await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
-    const cuenta = await this.dataSource.transaction(async (manager) => {
+    const cuenta = await this.db.transaccion(async (manager) => {
       // Ancla de serialización por mesa: sin este lock, dos aperturas concurrentes
       // pueden calcular el mismo MAX(numero)+1.
       const locked: { mesa_id: string }[] = await manager.query(
@@ -671,7 +682,7 @@ export class SalonesService {
 
     const hash = hashPersonalizacion(snapshot);
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const cuenta = await this.getCuentaAbiertaConLock(
         manager,
         tenantId,
@@ -723,7 +734,7 @@ export class SalonesService {
     // manager de la transacción: pedir una segunda conexión del pool mientras
     // se sostiene el `FOR UPDATE` es un doble checkout que puede estancarse.
     const catalogo = await this.loadCatalogoUnidades();
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const cuenta = await this.getCuentaAbiertaConLock(
         manager,
         tenantId,
@@ -778,7 +789,7 @@ export class SalonesService {
     cuentaId: string,
     lineaId: string,
   ): Promise<CuentaDetalle> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const cuenta = await this.getCuentaAbiertaConLock(
         manager,
         tenantId,
@@ -824,7 +835,7 @@ export class SalonesService {
     tenantId: string,
     cuentaId: string,
   ): Promise<CuentaDetalle> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
         lock: { mode: 'pessimistic_write' },
@@ -870,7 +881,7 @@ export class SalonesService {
         'Selecciona al menos dos cuentas para fusionar',
       );
     }
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // Lock pesimista sobre todas las cuentas: serializa fusión↔transferencia
       // y doble fusión concurrente antes de validar/mover líneas/cancelar.
       const cuentas = await manager.find(Cuenta, {
@@ -1028,7 +1039,7 @@ export class SalonesService {
       dto,
     );
     await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       // Lock pesimista: evita doble cierre / doble venta concurrente.
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
@@ -1213,10 +1224,7 @@ export class SalonesService {
       impresora_id: string | null;
       impresora_nombre: string | null;
       personalizacion: PersonalizacionRecetaSnapshot | null;
-    }[] = await this.dataSource.query(this.sqlLineasComanda(), [
-      cuentaId,
-      tenantId,
-    ]);
+    }[] = await this.db.query(this.sqlLineasComanda(), [cuentaId, tenantId]);
     const nombres = await this.nombresIngredientesPersonalizacion(
       tenantId,
       rows,
@@ -1233,7 +1241,7 @@ export class SalonesService {
     tenantId: string,
     cuentaId: string,
   ): Promise<{ estaciones: ComandaEstacion[] }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.db.transaccion(async (manager) => {
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
         lock: { mode: 'pessimistic_write' },
@@ -1259,10 +1267,12 @@ export class SalonesService {
         [cuentaId, tenantId],
       );
 
-      // Con el `manager` de la transacción: salir por `this.dataSource` acá
-      // pide una segunda conexión del pool con el `FOR UPDATE` ya tomado.
-      // `previewComanda` no está en transacción, así que ahí la global es
-      // inofensiva.
+      // Con el `manager` de la transacción explícito, igual que las demás
+      // lecturas de este bloque. El fallback a `this.db` (cuando no se pasa
+      // `runner`, como en `previewComanda`) también resuelve el manager del
+      // contexto si hay uno activo — pero pasarlo acá deja explícito que esta
+      // lectura corre bajo el mismo `FOR UPDATE` ya tomado, sin depender del
+      // ALS.
       const nombres = await this.nombresIngredientesPersonalizacion(
         tenantId,
         rows,
@@ -1396,7 +1406,7 @@ export class SalonesService {
     cuentaId: string,
     dto: ConfirmarComandaDto,
   ): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+    await this.db.transaccion(async (manager) => {
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
       });
@@ -1421,7 +1431,7 @@ export class SalonesService {
   private async armarDetalle(
     tenantId: string,
     cuenta: Cuenta,
-    manager?: DataSource['manager'],
+    manager?: EntityManager | Db,
   ): Promise<CuentaDetalle> {
     const [detalle] = await this.armarDetalles(tenantId, [cuenta], manager);
     return detalle;
@@ -1438,10 +1448,10 @@ export class SalonesService {
   private async armarDetalles(
     tenantId: string,
     cuentas: Cuenta[],
-    manager?: DataSource['manager'],
+    manager?: EntityManager | Db,
   ): Promise<CuentaDetalle[]> {
     if (cuentas.length === 0) return [];
-    const runner = manager ?? this.dataSource.manager;
+    const runner = manager ?? this.db;
     const lineas: LineaDetalleRow[] = await runner.query(
       // El JOIN NO filtra `i.eliminado_el IS NULL`, y es a propósito: la fila
       // de `items` sobrevive al soft delete, así que filtrarla hacía
@@ -1552,7 +1562,7 @@ export class SalonesService {
   private async nombresIngredientesPersonalizacion(
     tenantId: string,
     rows: { personalizacion?: PersonalizacionRecetaSnapshot | null }[],
-    runner?: DataSource['manager'],
+    runner?: EntityManager | Db,
   ): Promise<Map<string, string>> {
     const ids = new Set<string>();
     for (const row of rows) {
@@ -1563,7 +1573,7 @@ export class SalonesService {
     }
     if (ids.size === 0) return new Map();
     const nameRows: { item_id: string; nombre: string }[] = await (
-      runner ?? this.dataSource
+      runner ?? this.db
     ).query(
       `SELECT item_id, nombre FROM items
           WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -1574,7 +1584,7 @@ export class SalonesService {
 
   /** Resuelve los nombres de los garzones de apertura/cierre en una query. */
   private async nombresGarzon(
-    runner: DataSource['manager'],
+    runner: EntityManager | Db,
     ids: (string | null)[],
   ): Promise<Record<string, string>> {
     const garzonIds = [...new Set(ids.filter((id): id is string => !!id))];
@@ -1727,13 +1737,13 @@ export class SalonesService {
   private async getItemVendibleOrThrow(
     tenantId: string,
     itemId: string,
-    runner?: DataSource['manager'],
+    runner?: EntityManager | Db,
   ): Promise<{ itemId: string; tipo: string; unidadMedida: string | null }> {
     const rows: {
       item_id: string;
       tipo: string;
       unidad_medida: string | null;
-    }[] = await (runner ?? this.dataSource).query(
+    }[] = await (runner ?? this.db).query(
       `SELECT i.item_id, i.tipo, ip.unidad_medida
          FROM items i
          LEFT JOIN item_producto ip ON ip.item_id = i.item_id

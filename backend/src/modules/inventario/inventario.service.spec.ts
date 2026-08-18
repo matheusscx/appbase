@@ -1,9 +1,10 @@
 // backend/src/modules/inventario/inventario.service.spec.ts
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource, type EntityManager } from 'typeorm';
+import { type EntityManager } from 'typeorm';
 import { BadRequestException } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { Db } from '../../common/db/db.service';
 import { InventarioService } from './inventario.service';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 
@@ -19,17 +20,26 @@ const MOTIVO_DIFERENCIA_ID = 'motivo-diferencia-uuid';
 describe('InventarioService', () => {
   let service: InventarioService;
   let managerMock: { query: jest.Mock };
-  let dataSource: { query: jest.Mock };
+  let dataSource: { query: jest.Mock; transaction: jest.Mock };
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
-    dataSource = { query: jest.fn() };
+    dataSource = { query: jest.fn(), transaction: jest.fn() };
+    // Delega en `dataSource.*` en el momento de la llamada: varios tests de
+    // `registrarAjusteCosto` reasignan `dataSource.transaction` DESPUÉS de
+    // compilar el módulo, y `Db.transaccion` tiene que ver ese reemplazo.
+    const dbMock = {
+      transaccion: (work: (m: unknown) => unknown) =>
+        dataSource.transaction(work),
+      query: (sql: string, params?: unknown[]) => dataSource.query(sql, params),
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventarioService,
         { provide: getRepositoryToken(MovimientoInventario), useValue: {} },
-        { provide: DataSource, useValue: dataSource },
+        { provide: Db, useValue: dbMock },
       ],
     }).compile();
 
@@ -1152,8 +1162,9 @@ describe('InventarioService', () => {
   // ---------------------------------------------------------------------------
   describe('registrarAjusteCosto', () => {
     it('responde con el costoAnterior leído dentro del FOR UPDATE, no el del pre-check', async () => {
-      (dataSource as unknown as { transaction: jest.Mock }).transaction =
-        jest.fn((cb: (m: typeof managerMock) => unknown) => cb(managerMock));
+      dataSource.transaction = jest.fn(
+        (cb: (m: typeof managerMock) => unknown) => cb(managerMock),
+      );
 
       managerMock.query
         // Pre-check (fuera del lock): ve un costo desactualizado, como si una
@@ -1177,8 +1188,9 @@ describe('InventarioService', () => {
     });
 
     it('rechaza un costo que solo difiere más allá del 4º decimal', async () => {
-      (dataSource as unknown as { transaction: jest.Mock }).transaction =
-        jest.fn((cb: (m: typeof managerMock) => unknown) => cb(managerMock));
+      dataSource.transaction = jest.fn(
+        (cb: (m: typeof managerMock) => unknown) => cb(managerMock),
+      );
 
       managerMock.query.mockResolvedValueOnce([
         { tipo: 'producto', costo_actual: '5000.0000' },

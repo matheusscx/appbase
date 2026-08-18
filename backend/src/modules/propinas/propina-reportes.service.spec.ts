@@ -1,4 +1,4 @@
-import { type DataSource } from 'typeorm';
+import type { Db } from '../../common/db/db.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { PropinaReportesService } from './propina-reportes.service';
 
@@ -14,7 +14,7 @@ describe('PropinaReportesService', () => {
 
   beforeEach(() => {
     query = jest.fn();
-    service = new PropinaReportesService({ query } as unknown as DataSource);
+    service = new PropinaReportesService({ query } as unknown as Db);
   });
 
   function prepararResumenVacio() {

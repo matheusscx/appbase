@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Db } from '../../common/db/db.service';
 import { GruposModificadoresService } from './grupos-modificadores.service';
 import { CatalogService } from '../catalog/catalog.service';
 
@@ -28,10 +28,15 @@ describe('GruposModificadoresService', () => {
       ),
       query: jest.fn(),
     };
+    const dbMock = {
+      transaccion: dataSourceMock.transaction,
+      query: dataSourceMock.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
     const moduleRef = await Test.createTestingModule({
       providers: [
         GruposModificadoresService,
-        { provide: getDataSourceToken(), useValue: dataSourceMock },
+        { provide: Db, useValue: dbMock },
         { provide: CatalogService, useValue: { convertirUnidad } },
       ],
     }).compile();
@@ -207,14 +212,13 @@ describe('GruposModificadoresService', () => {
     // INSERT y el índice frena al segundo. Ese 23505 NO es de nombre, y
     // renombrar el grupo no lo resuelve.
     it('un 23505 del índice de OPCIONES no se disfraza de nombre repetido', async () => {
-      // `revalidar` corre FUERA de la transacción y usa `this.dataSource.manager`,
-      // que el harness no define. Sin esta línea el mutante moriría con
-      // `Cannot read properties of undefined (reading 'query')` en vez de por la
-      // aserción — el falso verde que documenta `anti-patterns.md`.
-      // Va local y no en el `beforeEach` por la regla del mismo archivo (un
-      // default de harness apaga redes incidentales en TODOS los tests); acá no
-      // medí que apague ninguna, pero el test que lo necesita es uno solo.
-      (dataSourceMock as unknown as { manager: unknown }).manager = managerMock;
+      // `revalidar` corre FUERA de la transacción, vía `this.db` (que resuelve
+      // al pool, no al manager abortado). Se le da una respuesta funcional acá
+      // —no el default `undefined` de `dataSourceMock.query`— para que, si el
+      // gate de `soloConstraint` se rompiera (mutante), `revalidar` SÍ corra y
+      // el test falle por la aserción de abajo, no por un
+      // `Cannot read properties of undefined (reading 'query')` incidental —
+      // el falso verde que documenta `anti-patterns.md`.
       managerMock.query
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
@@ -233,12 +237,15 @@ describe('GruposModificadoresService', () => {
             code: '23505',
             constraint: 'uq_grupo_opcion_item_vivo',
           }),
-        ) // INSERT opción: perdió la carrera contra otra transacción
-        // ⚠️ La segunda mitad de la doble carrera: si `revalidar` llegara a
-        // correr, encontraría el nombre TOMADO por una tercera transacción y
-        // saldría "Ya existe un grupo con el nombre…". Es exactamente la
-        // salida equivocada que este test fija que no ocurre.
-        .mockResolvedValueOnce([{ grupo_modificador_id: 'OTRO' }]);
+        ); // INSERT opción: perdió la carrera contra otra transacción
+      // ⚠️ La segunda mitad de la doble carrera: si `revalidar` llegara a
+      // correr (vía `this.db.query`, fuera del manager de la transacción),
+      // encontraría el nombre TOMADO por una tercera transacción y saldría
+      // "Ya existe un grupo con el nombre…". Es exactamente la salida
+      // equivocada que este test fija que no ocurre.
+      dataSourceMock.query.mockResolvedValueOnce([
+        { grupo_modificador_id: 'OTRO' },
+      ]);
 
       const error: unknown = await service
         .update(TENANT_ID, 'G1', {

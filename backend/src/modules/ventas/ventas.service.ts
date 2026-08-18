@@ -128,6 +128,19 @@ export class VentasService {
    * Cubre además los ciclos que no vienen de la expansión (series, lotes,
    * caja). Solo `40P01`: cualquier otro error se propaga sin reintentar, para
    * no convertir un fallo de negocio en tres intentos silenciosos.
+   *
+   * ⚠️ Precondición: **nunca llamar a `crear()` desde dentro de una
+   * transacción ya abierta.** `Db.transaccion` reusa el manager si ya hay uno
+   * en contexto (ver `db.service.ts`), así que un `crear()` anidado NO abre
+   * una transacción nueva que reintentar — reintentaría sobre la MISMA
+   * transacción externa, y si esa transacción abortó (deadlock), los tres
+   * intentos fallarían igual con `25P02` ("current transaction is aborted")
+   * en vez de un reintento útil. Verificado 2026-08-18: los únicos
+   * llamadores son `VentasController` y `OnlineCallbackHandler`, ninguno con
+   * transacción envolvente. Un caller que SÍ corre dentro de una transacción
+   * (p.ej. `SalonesService`/`SuscripcionesService` al cerrar una cuenta) debe
+   * llamar a `crearEnTransaccion(manager, …)` directamente, saltándose este
+   * loop — exactamente lo que hacen hoy.
    */
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
     for (let intento = 0; ; intento++) {

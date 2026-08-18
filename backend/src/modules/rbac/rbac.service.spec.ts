@@ -1,5 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
+import { Db } from '../../common/db/db.service';
 import { RbacService } from './rbac.service';
 
 const USER = 'usuario-uuid';
@@ -17,12 +17,14 @@ describe('RbacService', () => {
 
   beforeEach(async () => {
     dataSource = { query: jest.fn().mockResolvedValue([]) };
+    const dbMock = {
+      transaccion: (fn: (m: unknown) => unknown) => fn(undefined),
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        RbacService,
-        { provide: getDataSourceToken(), useValue: dataSource },
-      ],
+      providers: [RbacService, { provide: Db, useValue: dbMock }],
     }).compile();
 
     service = module.get<RbacService>(RbacService);

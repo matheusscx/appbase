@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
 import Decimal from 'decimal.js';
-import { DataSource } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import {
   normalizarRangoReporte,
@@ -91,7 +90,7 @@ const decimal = (value: string | null): string => value ?? '0';
 
 @Injectable()
 export class PropinaReportesService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(private readonly db: Db) {}
 
   async resumen(
     tenantId: string,
@@ -276,7 +275,7 @@ export class PropinaReportesService {
   }
 
   private async zonaHoraria(tenantId: string): Promise<string> {
-    const rows = await this.dataSource.query<Array<{ zona_horaria: string }>>(
+    const rows = await this.db.query<Array<{ zona_horaria: string }>>(
       `SELECT p.zona_horaria_principal AS zona_horaria
        FROM tenants t
        JOIN provincia pr
@@ -301,7 +300,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<CobranzaRow> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    const rows = await this.dataSource.query<CobranzaRow[]>(
+    const rows = await this.db.query<CobranzaRow[]>(
       `WITH base AS (
          SELECT vp.*
          FROM venta_propina vp
@@ -400,7 +399,7 @@ export class PropinaReportesService {
       filtroTurno = ` AND cardinality(l.turno_ids) > 0
         AND l.turno_ids <@ $${params.length}::uuid[]`;
     }
-    const rows = await this.dataSource.query<AnulacionRow[]>(
+    const rows = await this.db.query<AnulacionRow[]>(
       `SELECT
          COUNT(DISTINCT l.liquidacion_propinas_id)::text AS liquidaciones,
          COALESCE(SUM(f.monto_pagado), 0)::text AS monto_liberado
@@ -426,7 +425,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<TendenciaRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return await this.dataSource.query<TendenciaRow[]>(
+    return await this.db.query<TendenciaRow[]>(
       `WITH dias AS (
          SELECT generate_series(
            $2::date,
@@ -462,7 +461,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<TurnoRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return await this.dataSource.query<TurnoRow[]>(
+    return await this.db.query<TurnoRow[]>(
       `SELECT
          vp.turno_id,
          MAX(t.nombre) AS turno_nombre,
@@ -487,7 +486,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<TipoRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return await this.dataSource.query<TipoRow[]>(
+    return await this.db.query<TipoRow[]>(
       `SELECT
          vp.tipo_garzon,
          COUNT(*)::text AS cierres,
@@ -513,7 +512,7 @@ export class PropinaReportesService {
       filtroTurno = ` AND cardinality(l.turno_ids) > 0
         AND l.turno_ids <@ $${params.length}::uuid[]`;
     }
-    const rows = await this.dataSource.query<Array<{ cantidad: NumericValue }>>(
+    const rows = await this.db.query<Array<{ cantidad: NumericValue }>>(
       `SELECT COUNT(*)::text AS cantidad
        FROM liquidacion_propinas l
        WHERE l.tenant_id = $1
@@ -537,7 +536,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<OrigenTrabajadorRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return await this.dataSource.query<OrigenTrabajadorRow[]>(
+    return await this.db.query<OrigenTrabajadorRow[]>(
       `SELECT
          vp.garzon_id,
          MAX(vp.tipo_garzon) AS tipo_garzon,
@@ -567,7 +566,7 @@ export class PropinaReportesService {
       filtros += ` AND cardinality(l.turno_ids) > 0
         AND l.turno_ids <@ $${params.length}::uuid[]`;
     }
-    return await this.dataSource.query<AsignacionTrabajadorRow[]>(
+    return await this.db.query<AsignacionTrabajadorRow[]>(
       `SELECT
          p.garzon_id,
          MAX(p.tipo_garzon) AS tipo_garzon,
@@ -619,7 +618,7 @@ export class PropinaReportesService {
           AND p.tipo_garzon = $${params.length}
       )`;
     }
-    const rows = await this.dataSource.query<Array<{ cantidad: NumericValue }>>(
+    const rows = await this.db.query<Array<{ cantidad: NumericValue }>>(
       `SELECT COUNT(*)::text AS cantidad
        FROM liquidacion_propinas l
        WHERE l.tenant_id = $1
@@ -640,7 +639,7 @@ export class PropinaReportesService {
     ids: string[],
   ): Promise<GarzonEtiquetaRow[]> {
     if (!ids.length) return [];
-    return await this.dataSource.query<GarzonEtiquetaRow[]>(
+    return await this.db.query<GarzonEtiquetaRow[]>(
       `SELECT
          g.garzon_id,
          g.nombre,

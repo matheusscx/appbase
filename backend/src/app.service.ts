@@ -3,8 +3,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { Db } from './common/db/db.service';
 
 @Injectable()
 export class AppService {
@@ -27,7 +26,7 @@ export class AppService {
    */
   private sondaEnVuelo: Promise<void> | null = null;
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(private readonly db: Db) {}
 
   getHello(): string {
     return 'Hello World!';
@@ -74,7 +73,7 @@ export class AppService {
 
   private async sondear(): Promise<void> {
     try {
-      await this.dataSource.query(
+      await this.db.query(
         'SELECT 1 FROM usuarios WHERE eliminado_el IS NULL LIMIT 1',
       );
     } catch (error) {

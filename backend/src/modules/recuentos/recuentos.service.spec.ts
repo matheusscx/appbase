@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
+import { Db } from '../../common/db/db.service';
 import { RecuentosService } from './recuentos.service';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
 import { InventarioService } from '../inventario/inventario.service';
@@ -39,10 +39,16 @@ describe('RecuentosService', () => {
       }),
     };
 
+    const dbMock = {
+      transaccion: dataSource.transaction,
+      query: dataSource.query,
+      sinTransaccion: (fn: () => unknown) => fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RecuentosService,
-        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: Db, useValue: dbMock },
         {
           provide: MotivosDiferenciaInventarioService,
           useValue: motivosService,
