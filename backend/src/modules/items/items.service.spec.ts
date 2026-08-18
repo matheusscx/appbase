@@ -2098,6 +2098,44 @@ describe('ItemsService', () => {
         expect(patch.componentes).toHaveLength(1);
       });
 
+      it('limpia `costo_propuesto_omitido` al reemplazar componentes', async () => {
+        // El snapshot descartado es de la lista vieja. Combo = 1×Papas($500),
+        // Papas sube a $600 y el usuario descarta (omitido = 600); después
+        // edita el combo a 2×Papas (cacheado 1.200) y Papas baja a $300: el
+        // propuesto vuelve a dar 600 y coincide con el omitido stale, así que
+        // el combo desaparece de la bandeja con 1.200 cacheado contra 600
+        // reales. Limpiar la columna en esta misma sentencia lo cierra.
+        managerMock.query
+          .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([
+            {
+              item_id: PROD_ID,
+              nombre: 'Papas fritas',
+              tipo: 'producto',
+              costo_actual: '600',
+            },
+          ]) // lookup batch de componentes
+          .mockResolvedValueOnce([]) // soft-delete combo_componentes
+          .mockResolvedValueOnce([]) // INSERT combo_componentes
+          .mockResolvedValueOnce([]) // UPDATE item_combo
+          .mockResolvedValueOnce([{ componentes: '1', grupos: '0' }]); // conteo vivos post-cambio
+
+        await service.update(TENANT, USUARIO, COMBO_ID, {
+          componentes: [
+            { componenteItemId: PROD_ID, cantidad: '2', bloqueante: true },
+          ],
+        });
+
+        const updateCombo = managerMock.query.mock.calls.find(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' &&
+            c[0].includes('UPDATE item_combo') &&
+            c[0].includes('costo_actual'),
+        );
+        expect(updateCombo?.[0]).toContain('costo_propuesto_omitido = NULL');
+        expect(updateCombo?.[1]).toEqual(['1200', COMBO_ID]); // 600 × 2
+      });
+
       it('permite vaciar los componentes si el combo conserva un grupo vivo (solo-grupos, costo 0)', async () => {
         // Simétrico con create(): un combo puede quedar solo-grupos vía PATCH
         // `componentes: []` mientras sobreviva ≥1 grupo. No debe llamar a
@@ -4674,7 +4712,13 @@ describe('ItemsService', () => {
     const COMBO_ID = 'combo-1';
     const PAPAS_ID = 'papas-1';
 
-    /** El combo del seed: 1 Hamburguesa (receta, $1.200) + 1 Papas (producto). */
+    /**
+     * Fixture de este test, NO un combo del seed: 1 Hamburguesa (receta,
+     * $1.200) + 1 Papas (producto). El único combo que siembra el seeder es
+     * "Combo Especial" (Hamburguesa Especial $620 + Papas fritas $800 =
+     * $1.420) y no es este — confundirlos ya mandó una cifra equivocada a
+     * `combos.md`.
+     */
     function mockComboConComponentes(opts: {
       costoCacheado: string;
       omitido: string | null;

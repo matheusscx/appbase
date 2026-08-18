@@ -1,7 +1,8 @@
 import type { AplicarDesfaseItem, DesfaseItemDto } from '~/components/DesfasesPanel.vue'
 
 /**
- * Estado y lógica del simulador de impacto de costos en recetas ("desfases").
+ * Estado y lógica del simulador de impacto de costos en recetas y combos
+ * ("desfases").
  * Se dispara tras cualquier movimiento que cambie el costo de un producto o
  * ingrediente — una entrada por compra o un ajuste de costo — nunca desde la
  * edición manual del item (el costo ya no se edita ahí).
@@ -65,6 +66,22 @@ export function useSimuladorDesfases() {
           if (aplicado) onAplicado(fila, aplicado)
         }
       }
+      // Mismo criterio que la bandeja (`pages/desfases.vue`): se sacan solo las
+      // filas que el backend efectivamente escribió, y las que el usuario
+      // deseleccionó se conservan. Pisar la lista con `afectados` las hacía
+      // desaparecer de la vista sin haberse resuelto ni descartado.
+      const aplicadosIds = new Set(
+        aplicados.map(a => a.itemId).filter(id => !omitidosIds.has(id)),
+      )
+      const afectadosIds = new Set(res.afectados.map(f => f.itemId))
+      // Segunda pasada: los combos que quedaron desfasados por las recetas
+      // recién aplicadas se resuelven acá mismo en vez de esperar en la bandeja.
+      desfasesFilas.value = [
+        ...desfasesFilas.value.filter(
+          f => !aplicadosIds.has(f.itemId) && !afectadosIds.has(f.itemId),
+        ),
+        ...res.afectados,
+      ]
       if (res.omitidos.length) {
         toast.add({
           title: `${res.omitidos.length} combo(s) se recalcularon y vuelven a proponerse`,
@@ -72,10 +89,6 @@ export function useSimuladorDesfases() {
         })
       }
       if (res.afectados.length) {
-        // Segunda pasada: el costo de estos combos cambió porque se aplicaron
-        // las recetas que contienen. Se resuelven acá mismo en vez de dejarlos
-        // esperando en la bandeja.
-        desfasesFilas.value = res.afectados
         toast.add({
           title: `${res.afectados.length} combo(s) quedaron desfasados por este cambio`,
           color: 'info',

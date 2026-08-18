@@ -142,7 +142,7 @@ const productoAjusteSeleccionado = computed(() =>
   productos.value.find(p => p.id === ajusteCostoForm.value.itemId) ?? null,
 )
 
-// Simulador de impacto de costos en recetas: se dispara tras un ajuste de
+// Simulador de impacto de costos en recetas y combos: se dispara tras un ajuste de
 // costo exitoso, igual que tras una compra en configuracion/items.vue.
 const { desfasesOpen, desfasesLoading, desfasesFilas, desfasesHighlightId, maybeAbrirDesfases, onAplicarDesfases, onDescartarDesfases } =
   useSimuladorDesfases()
@@ -380,12 +380,12 @@ async function registrarAjusteCosto() {
           </template>
         </AppDrawer>
 
-        <!-- Impacto de costos en recetas tras el ajuste -->
+        <!-- Impacto de costos en recetas y combos tras el ajuste -->
         <AppDrawer
           v-model:open="desfasesOpen"
           width="75%"
-          title="Impacto en recetas"
-          description="El costo del producto cambió; estas recetas quedaron desfasadas."
+          title="Impacto en recetas y combos"
+          description="El costo del producto cambió; estas recetas y combos quedaron desfasados."
         >
           <template #body>
             <DesfasesPanel

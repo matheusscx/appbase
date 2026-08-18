@@ -220,7 +220,7 @@ const eliminarMensaje = computed(() => {
   return `¿Eliminar ${item}? Podés recuperarlo desde «Ver eliminados».`
 })
 
-// Simulador de impacto de costos en recetas: se dispara tras una compra
+// Simulador de impacto de costos en recetas y combos: se dispara tras una compra
 // (ejecutarAjusteStock) — la edición manual del item ya no cambia el costo.
 const {
   desfasesOpen,
@@ -2604,12 +2604,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </template>
     </UModal>
 
-    <!-- Impacto de costos en recetas tras cambiar insumo -->
+    <!-- Impacto de costos en recetas y combos tras cambiar insumo -->
     <AppDrawer
       v-model:open="desfasesOpen"
       width="75%"
-      title="Impacto en recetas"
-      description="El costo del producto cambió; estas recetas quedaron desfasadas."
+      title="Impacto en recetas y combos"
+      description="El costo del producto cambió; estas recetas y combos quedaron desfasados."
     >
       <template #body>
         <DesfasesPanel

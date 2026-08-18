@@ -1692,8 +1692,15 @@ export class ItemsService {
             ],
           );
         }
+        // Limpia el omitido igual que la receta de arriba: el snapshot
+        // descartado corresponde a la lista de componentes anterior, y si
+        // sobrevive al cambio de lista puede volver a coincidir con el
+        // propuesto nuevo por casualidad — el combo desaparecería de la
+        // bandeja con el costo cacheado equivocado.
         await manager.query(
-          `UPDATE item_combo SET costo_actual = $1 WHERE item_id = $2`,
+          `UPDATE item_combo
+           SET costo_actual = $1, costo_propuesto_omitido = NULL
+           WHERE item_id = $2`,
           [costeo.costoActual, itemId],
         );
         patch.costoActual = costeo.costoActual;

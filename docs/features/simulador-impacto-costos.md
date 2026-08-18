@@ -146,7 +146,7 @@ Si `precioBase = 0` → márgenes y precio sugerido son `null`.
 | **Aplicar** | Recomputa y persiste `costoPropuesto` en servidor | `NULL` | Solo si checkbox `actualizarPrecio` + `precioBase > 0` |
 | **Descartar** | Sin cambio | `costoPropuesto` actual | Sin cambio |
 
-Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. La batch de aplicar/descartar es atómica (una transacción), con lock `FOR UPDATE` ordenado (`item_receta` antes que `item_combo`, e `id` ascendente dentro de cada tabla) para no abrir ciclos nuevos con lotes concurrentes que comparten filas.
+Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una), pero solo **aplicar** toma lock: `FOR UPDATE` ordenado (`item_receta` antes que `item_combo`, e `id` ascendente dentro de cada tabla). **Descartar no toma ningún lock** y escribe las dos tablas en el orden que manda el cliente, así que `descartar([combo, receta])` contra `aplicar([receta, combo])` sí puede deadlockear — es el ciclo #2 anotado en la entrada 🔴 *"Diez ventas simultáneas cuelgan la API para siempre"* de `docs/agent/pendientes.md`, abierto por decisión del owner.
 
 ---
 
@@ -167,8 +167,10 @@ Prefijo `/api`. Lecturas en replica; escrituras en db (transacción).
 ### `GET /api/desfases`
 
 Permiso: **Items:Leer**. Query opcional `?insumoItemId=<uuid>` — filtra a los items
-compuestos (receta o combo) que usan ese producto/ingrediente, directa o indirectamente
-como componente.
+compuestos (receta o combo) que usan ese producto/ingrediente **directamente**: la receta
+que lo lista como ingrediente, el combo que lo lista como componente fijo. El combo que lo
+usa a través de una receta **no** entra en ese filtro — es la Decisión 1: el combo se
+desfasa contra el costo cacheado de la receta, no contra sus ingredientes.
 
 Respuesta: array de `DesfaseItemDto`:
 

@@ -203,6 +203,20 @@ el orden de la tabla de arriba.
   **Ninguno de los dos lo ve un test**: el e2e corre con `maxWorkers: 1`, la misma razón por
   la que el deadlock de arriba pasó desapercibido.
 
+  ➕ **Los locks de `aplicarDesfases` se toman antes de validar el tenant** (visto el
+  2026-08-18, en la revisión final de esa misma tarea). `cabecerasCompuestas` valida
+  `tenant_id` **después** de los dos `FOR UPDATE`, así que un usuario autenticado que mande
+  ids de otro tenant bloquea esas filas hasta el rollback del 404. No hay fuga de datos: el
+  404 sale igual y no devuelve nada del otro tenant. Es forma **preexistente** para
+  `item_receta` que ese día se extendió a `item_combo`. Va acá y no suelto porque el fix
+  —validar el tenant antes de tomar el lock— mueve el lugar de los locks, que es el mismo
+  frente que esta tanda difiere.
+
+  ➕ **No hay test de lecturas constantes para N combos** (visto el 2026-08-18, misma
+  revisión). El gemelo de recetas existe y es fuerte (`items.service.spec.ts`, caso
+  "aplicar sobre N recetas hace lecturas CONSTANTES", 5 SELECT fijos), pero la rama de
+  combos solo se ejercita con **un** combo: un N+1 futuro ahí no lo caza nadie.
+
 - [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la segunda de esta
   sección) — parcialmente cerrado
   2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
