@@ -508,11 +508,26 @@ describe('RepositoriosModule.forFeature (proxy context-aware)', () => {
   let tx: TxContext;
   let repo: { find: () => Promise<string>; metadata: { name: string } };
 
+  // `RepositoriosModule.forFeature` es un dynamic module sin `imports` propios,
+  // así que sus providers solo ven lo que venga de un módulo `@Global`. En
+  // producción eso se cumple solo: `TypeOrmCoreModule` (token `DataSource`) y
+  // `CommonModule` (`TxContext`) son los dos globales. El test lo espeja en vez
+  // de inyectar los dos como providers sueltos del módulo raíz, que quedarían
+  // invisibles adentro del dynamic module (`UnknownDependenciesException`).
+  @Global()
+  @Module({
+    providers: [TxContext, { provide: DataSource, useValue: dataSource }],
+    exports: [TxContext, DataSource],
+  })
+  class ContextoGlobalDePrueba {}
+
   beforeEach(async () => {
     jest.clearAllMocks();
     const module = await Test.createTestingModule({
-      imports: [RepositoriosModule.forFeature([EntidadDePrueba])],
-      providers: [TxContext, { provide: DataSource, useValue: dataSource }],
+      imports: [
+        ContextoGlobalDePrueba,
+        RepositoriosModule.forFeature([EntidadDePrueba]),
+      ],
     }).compile();
     tx = module.get(TxContext);
     repo = module.get(getRepositoryToken(EntidadDePrueba));
