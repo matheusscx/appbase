@@ -397,6 +397,51 @@ decisión que no es mía).
   limpieza, cerrar la app en un `finally`, y afirmar **después**. Mismo diagnóstico, 4,4 s en
   vez de colgarse. Los `afterAll` de los otros specs siguen con la forma vieja.
 
+- [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local, con cinco
+  causas ya descartadas** (backend/tests, visto y medido el 2026-08-18 en el cierre del
+  contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
+  reportó 10 tests en rojo. **Los 10 son un solo fallo**: la aserción está en un `beforeAll`
+  (`items-pausados.e2e-spec.ts:224`, un `POST /calculo-precios/calcular` que devolvió 500), y
+  jest lo imputa a cada test del `describe`. El `Error: timeout exceeded when trying to connect`
+  de `pg-pool` aparece **una sola vez** en todo el log.
+
+  **No reproduce.** Tres suites completas posteriores, todas en verde (511/513).
+
+  ✅ **Lo descartado, con evidencia y no con argumentos:**
+
+  | Causa candidata | Cómo se descartó |
+  |---|---|
+  | Agotamiento de conexiones en Postgres | Pico medido de **16** sobre `max_connections = 100` |
+  | Fuga de conexiones entre specs | Serie plana de punta a punta, sin crecer a lo largo de la suite |
+  | Postgres rechazando conexiones | **Cero** `FATAL` / `too many connections` en su log; los únicos errores son violaciones de unique de los casos negativos de los propios tests |
+  | Re-seed a mitad de suite | `reset-db.sh --verificar` limpio dos veces |
+  | El contexto transaccional ALS (ADR-020) | `calcular` corre **fuera** de transacción —el controller llama al service directo—, así que ese camino no cambió con esa tanda |
+
+  **Lo que queda en pie:** una demora transitoria **del lado del cliente** al establecer la
+  conexión, que el `connectTimeoutMillis` de 5 s (ADR-020) convierte en error en vez de en
+  espera. Es familia de causas, **no causa raíz confirmada**. No se pudo peritar el fallo
+  original porque `reset-db.sh` hace `down -v` y el contenedor y sus logs ya no existían.
+
+  ⚠️ **Dos notas de método, que valen más que la entrada:**
+  - **Un muestreo de 1 segundo NO alcanza.** Dio pico 9; a 200 ms el mismo escenario dio **16**.
+    Una medición de conexiones con resolución de segundo lleva a conclusiones equivocadas sobre
+    cuánto margen hay. El comando, para repetirlo:
+    ```bash
+    while :; do docker exec tecnica_postgres psql -U dev_user -d tecnica_db -t -A -F'|' \
+      -c "SELECT now()::time(3), count(*), count(*) FILTER (WHERE state='active') FROM pg_stat_activity;"; sleep 0.2; done
+    ```
+  - **`concurrencia-pool.e2e-spec.ts` corre al límite exacto del pool, por diseño** (N = tamaño
+    del pool). Un test que se sienta en 10/10 está a un hipo de un rojo falso. Es propiedad
+    conocida, no regresión.
+
+  ⛔ **Lo que NO hay que hacer: subir el `connectTimeoutMillis`.** Haría desaparecer el síntoma
+  y debilitaría la defensa que ADR-020 puso a propósito — que un agotamiento futuro del pool
+  falle ruidoso en vez de dejar la API muerta hasta reiniciar.
+
+  🔗 Puede ser pariente del intermitente de autenticación de la entrada de arriba (cuatro
+  avistajes): los dos son intermitentes del e2e local, un solo test por corrida, verde al
+  repetir. Nada lo prueba todavía.
+
 ---
 
 ## 3. Ya decidido, falta construir
