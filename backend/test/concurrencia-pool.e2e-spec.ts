@@ -12,9 +12,12 @@ const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 
-// = poolSize default de app.module.ts (DB_POOL_SIZE). El umbral medido del
-// deadlock era exactamente N = tamaño del pool: 9 ok / 10 cuelga.
-const RAFAGA = 10;
+// N = tamaño del pool, leído de la MISMA fuente que `app.module.ts` (`?? 10`
+// incluido). Fijarlo en 10 lo volvía mudo: con `DB_POOL_SIZE=20` la ráfaga
+// quedaba por debajo del pool y el test pasaba sin ejercitar nada. El umbral
+// medido del deadlock era exactamente N = tamaño del pool: 9 ok / 10 cuelga.
+// `test/setup-env.ts` corre en `setupFiles`, así que `.env` ya está cargado acá.
+const RAFAGA = Number(process.env.DB_POOL_SIZE ?? 10);
 
 describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
   let app: INestApplication;
