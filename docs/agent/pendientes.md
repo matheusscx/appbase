@@ -55,7 +55,7 @@ Qué agrupa:
 
 | Tema | Entrada |
 |---|---|
-| Conexiones / deadlock | 🚩 *"Diez ventas simultáneas cuelgan la API para siempre"* (más abajo) |
+| Conexiones / deadlock | ✅ Cerrado el 2026-08-18 (ADR-020, ver `resueltos.md`). Queda abierto lo residual: *"Dos ciclos de orden de lock en la bandeja de desfases de combos…"* (más abajo) |
 | Rendimiento | *"N+1 al resolver personalización de recetas/combos"* `[~]`, y lo que aparezca al medir |
 | Redondeo de plata | *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* (abajo), con su sub-punto de `subtotal`/`total_linea` entrando a `NUMERIC(18,4)` |
 
@@ -82,109 +82,20 @@ momento; lo que se difiere es abrir estos tres frentes.
 Estaban repartidas por el archivo con punteros cruzados entre sí. Acá están las tres, en
 el orden de la tabla de arriba.
 
-- [ ] 🚩 **Diez ventas simultáneas cuelgan la API para siempre** (backend, medido
-  2026-08-11) — **el hallazgo más grave abierto hoy.**
-  🧱 Va con las otras dos de esta sección: rendimiento y redondeo.
-  No es lentitud: las requests no vuelven nunca y el proceso queda envenenado (las
-  siguientes también cuelgan, aunque el cliente corte). Se descubrió midiendo otra cosa
-  —el N+1 de recetas, la entrada de más abajo— y no lo veía ningún test porque el e2e
-  corre con `maxWorkers: 1`.
-  **Causa, confirmada por experimento y no por lectura:** `crearEnTransaccion` abre la
-  transacción y **adentro llama a servicios que piden una conexión NUEVA al pool** en vez
-  de usar el `manager`. O sea que **cada venta necesita dos conexiones a la vez**. El pool
-  de `pg` no está configurado (`app.module.ts`), así que son 10 — con N ventas simultáneas
-  y N = tamaño del pool, las N transacciones toman una conexión cada una y las N esperan
-  una segunda que no existe. Deadlock permanente, no un timeout.
-  Los cuatro llamadores sin `manager`, cualquiera de ellos suficiente:
-  `cajaService.findActiva`/`findVirtual` (paso 1), `itemsService.cargarBasePorIds`,
-  `catalogService.findAllUnidadesMedida` y `calculoPreciosService.calcular`.
-  **Cómo se probó** (no se dedujo): (a) umbral exacto en 9 ok / 10 cuelga con producto
-  simple, sin recetas; (b) `pg_stat_activity` durante el cuelgue muestra 4 conexiones
-  `idle in transaction` esperando `ClientRead` —transacción abierta y el JS esperando otra
-  conexión— más 5 en `Lock: tuple`; (c) **se subió el pool a 20 y el umbral se movió a 19
-  ok / 20 cuelga**, o sea que el número de conexiones ES la variable. El cambio de pool se
-  revirtió.
-  ⚠️ **Subir el pool NO lo arregla**: solo mueve el umbral.
-  ⚠️ **Batchear el N+1 tampoco lo arregla:** son conexiones, no queries.
-  🔁 **REINCIDIÓ el 2026-08-15, en código nuevo, cuatro días después de documentarse acá.**
-  `auth.service.ts` → `refresh` estrenó una transacción y dejó adentro un
-  `usersService.findById`: mismo deadlock, umbral medido en 20 concurrentes, API muerta
-  hasta reiniciar. Se arregló en el momento y **no suma una fila a la tabla de abajo** —
-  pero dice tres cosas para quien tome esta entrada: (a) la vía nueva es **envolver código
-  viejo en una transacción nueva**, que es lo contrario de lo que la tabla describe y por
-  eso ningún grep de "llamada agregada" la ve; (b) lo cazó una **ráfaga de 15 requests
-  independientes** —un test de carrera de 2 nunca llega al tamaño del pool—, y ese test ya
-  vive en `rbac-y-contrasena.e2e-spec.ts` como detector reutilizable; (c) documentar la
-  causa **no alcanzó** para evitar la reincidencia, así que al cerrar esta entrada conviene
-  dejar una regla automatizada y no sólo los sitios arreglados.
+- [ ] 🧱 **Dos ciclos de orden de lock en la bandeja de desfases de combos, los `FOR
+  UPDATE` que se toman antes de validar el tenant, y el test de lecturas constantes que
+  falta para N combos** (backend, visto el 2026-08-18 al meter los combos en la bandeja de
+  desfases — pieza residual de "Diez ventas simultáneas cuelgan la API para siempre", cuyo
+  agotamiento de pool **se cerró** el mismo día con contexto transaccional ALS: ver
+  [`resueltos.md`](resueltos.md) y [ADR-020](../adr/020-contexto-transaccional-als.md)).
+  Va con las otras dos de esta sección: rendimiento y redondeo. **Mecanismo distinto al
+  deadlock ya cerrado**: esto es orden de locks de fila entre dos tablas, no agotamiento del
+  pool de conexiones — ADR-020 no lo toca ni lo arregla.
 
-  **⚠️ No es un bug de ventas: el patrón está en 7 módulos.** Barrido del 2026-08-11 sobre
-  todo `backend/src`. Y como **el pool es uno solo para toda la app**, no hacen falta diez
-  ventas: diez operaciones cualesquiera de esta lista se traban igual entre sí —tres
-  ventas, dos mermas, un cobro y cuatro ediciones de ítem alcanzan—.
-
-  | Archivo | Línea | Llamada sin `manager` |
-  |---|---|---|
-  | `ventas.service.ts` | 156, 157 | `cajaService.findVirtual` / `findActiva` |
-  | `ventas.service.ts` | 186 | `itemsService.cargarBasePorIds` |
-  | `ventas.service.ts` | 212 | `catalogService.findAllUnidadesMedida` |
-  | `ventas.service.ts` | 260 | `this.dataSource.query` (directo) |
-  | `ventas.service.ts` | 310 | `calculoPreciosService.cargarConfig` |
-  | `ventas.service.ts` | 379 | `calculoPreciosService.calcular` |
-  | `ventas.service.ts` | 649, 663 | `catalogService.crearConversor` |
-  | `ventas.service.ts` | 714 | `garzonesService.obtenerActivoPorId` |
-  | `ventas.service.ts` | 1020 | `cajaService.findActiva` (otra transacción) |
-  | `items.service.ts` | 1477, 2044 | `catalogService.convertirUnidad` |
-  | `items.service.ts` | 3823, 3879, 4117 | `catalogService.crearConversor` |
-  | `salones.service.ts` | 1013 | `sesionesGarzonService.buscarSesionAbierta` |
-  | `pagos.service.ts` | 356 | `cajaService.findActiva` |
-  | `mermas.service.ts` | 124 | `catalogService.convertirUnidad` |
-  | `grupos-modificadores.service.ts` | 910 | `catalogService.convertirUnidad` |
-  | `cobros.service.ts` (pasarela) | 289 | `tenantPasarelaService.resolverPorId` — **pide dos** |
-
-  ⚠️ **Las líneas de `ventas.service.ts` se corrigieron el 2026-08-11** (el arreglo del
-  redondeo de moneda las corrió) y se sumó `cargarConfig`, que es una toma más pero **no
-  sube el pico**: reemplaza a la que `calcular` hacía por dentro. Son 21 sitios.
-  Se corrigieron **dos veces ese mismo día**: la primera tanda quedó stale enseguida porque
-  el arreglo siguiente agregó comentarios encima. Si tocás `ventas.service.ts`, revisá esta
-  tabla al final, no al principio — una cita stale que además se anuncia como verificada es
-  peor que una stale a secas.
-
-  Los 21 se verificaron uno por uno contra el destino: todos terminan en un
-  `repo.findOne/find` o un `dataSource.query`. Ninguno es un service puro.
-
-  **Cómo se detectó, para poder repetirlo después del fix.** Un script recorre
-  `backend/src` y, dentro de cada bloque que corre en transacción —métodos con
-  `manager: EntityManager` en la firma, y callbacks de `.transaction(…)`—, marca tres
-  cosas: `this.dataSource.*`, `this.<x>Repo.*`, y `this.<x>Service.<m>(…)` **cuyos
-  argumentos no incluyan el manager**. Ese último chequeo tiene que mirar la lista
-  **completa** de argumentos: la primera versión miraba solo el primero y marcó como falso
-  positivo `cajaService.calcularEsperadoEfectivo(cajaId, manager)`, que recibe el manager
-  segundo y es correcto.
-
-  **Dos formas de arreglarlo, y no son excluyentes** (owner 2026-08-11: *"esto hay que
-  verlo con más calma"*, queda sin decidir):
-  1. **Pasar el `manager`** a las llamadas: cada service que hoy usa su repo pasa a aceptar
-     un `manager?: EntityManager` opcional y elige `manager.getRepository(X)` o el repo
-     propio. Uniforme para los 20, pero toca las firmas de ~6 services.
-  2. **Para el catálogo de unidades, cargarlo en memoria una sola vez** — cubre **7 de los
-     20** (`convertirUnidad` ×3, `crearConversor` ×3, `findAllUnidadesMedida`). Medido: la
-     tabla `unidad_medida` **solo la escribe el seeder al arrancar**, no hay ningún camino
-     de API que la modifique, así que no hay invalidación que diseñar. De paso saca una
-     query de cada venta, merma y edición de ítem — hoy se lee varias veces dentro de la
-     misma venta.
-
-  **Ningún test lo veía y hay que arreglar eso también:** el e2e corre con
-  `maxWorkers: 1` (`test/jest-e2e.json`), así que nunca hay dos transacciones a la vez. El
-  fix necesita un test de concurrencia que dispare N operaciones simultáneas con N ≥ tamaño
-  del pool — sin él, el bug vuelve sin que nadie se entere.
-
-  ➕ **Dos ciclos de orden de lock más, introducidos el 2026-08-18 al meter los combos en la
-  bandeja de desfases** (decisión del owner ese día: van acá, con esta tanda, no de arrastre).
-  Los dos son el gemelo exacto del ciclo que el comentario de `items.service.ts:1330-1338`
-  dice haber neutralizado para recetas, y ninguno existía antes del commit de esa tarea —
-  hasta entonces ningún camino de desfases tocaba `item_combo`:
-  1. **`items` ↔ `item_combo`.** `aplicarDesfases` toma `item_combo … FOR UPDATE` y después
+  1. **`items` ↔ `item_combo`.** Los dos son el gemelo exacto del ciclo que el comentario de
+     `items.service.ts:1330-1338` dice haber neutralizado para recetas, y ninguno existía
+     antes del commit del 2026-08-18 — hasta entonces ningún camino de desfases tocaba
+     `item_combo`. `aplicarDesfases` toma `item_combo … FOR UPDATE` y después
      `UPDATE items SET precio_base`; `update()` de un combo con `dto.componentes` hace lo
      inverso —`UPDATE items` y después `UPDATE item_combo`— porque su lock previo está
      guardado por `tipo === 'receta'`. **Disparo:** un `PATCH` de combo (nombre +
@@ -200,22 +111,22 @@ el orden de la tabla de arriba.
      o sea con dos personas resolviéndola a la vez. **Fix identificado:** que el loop de
      `descartarDesfases` procese las recetas antes que los combos, igual que aplicar. No
      necesita locks nuevos ni toca ningún camino preexistente.
-  **Ninguno de los dos lo ve un test**: el e2e corre con `maxWorkers: 1`, la misma razón por
-  la que el deadlock de arriba pasó desapercibido.
+  3. **Los locks de `aplicarDesfases` se toman antes de validar el tenant** (visto el
+     2026-08-18, en la revisión final de esa misma tarea). `cabecerasCompuestas` valida
+     `tenant_id` **después** de los dos `FOR UPDATE`, así que un usuario autenticado que
+     mande ids de otro tenant bloquea esas filas hasta el rollback del 404. No hay fuga de
+     datos: el 404 sale igual y no devuelve nada del otro tenant. Es forma **preexistente**
+     para `item_receta` que ese día se extendió a `item_combo`. Va acá y no suelto porque el
+     fix —validar el tenant antes de tomar el lock— mueve el lugar de los locks, que es el
+     mismo frente que esta tanda difiere.
+  4. **No hay test de lecturas constantes para N combos** (visto el 2026-08-18, misma
+     revisión). El gemelo de recetas existe y es fuerte (`items.service.spec.ts`, caso
+     "aplicar sobre N recetas hace lecturas CONSTANTES", 5 SELECT fijos), pero la rama de
+     combos solo se ejercita con **un** combo: un N+1 futuro ahí no lo caza nadie.
 
-  ➕ **Los locks de `aplicarDesfases` se toman antes de validar el tenant** (visto el
-  2026-08-18, en la revisión final de esa misma tarea). `cabecerasCompuestas` valida
-  `tenant_id` **después** de los dos `FOR UPDATE`, así que un usuario autenticado que mande
-  ids de otro tenant bloquea esas filas hasta el rollback del 404. No hay fuga de datos: el
-  404 sale igual y no devuelve nada del otro tenant. Es forma **preexistente** para
-  `item_receta` que ese día se extendió a `item_combo`. Va acá y no suelto porque el fix
-  —validar el tenant antes de tomar el lock— mueve el lugar de los locks, que es el mismo
-  frente que esta tanda difiere.
-
-  ➕ **No hay test de lecturas constantes para N combos** (visto el 2026-08-18, misma
-  revisión). El gemelo de recetas existe y es fuerte (`items.service.spec.ts`, caso
-  "aplicar sobre N recetas hace lecturas CONSTANTES", 5 SELECT fijos), pero la rama de
-  combos solo se ejercita con **un** combo: un N+1 futuro ahí no lo caza nadie.
+  **Ninguno de los cuatro lo ve un test**: el e2e corre con `maxWorkers: 1`
+  (`test/jest-e2e.json`), la misma razón por la que el deadlock de conexiones pasó
+  desapercibido antes de esta tanda.
 
 - [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la segunda de esta
   sección) — parcialmente cerrado
@@ -1132,6 +1043,11 @@ Las cuatro últimas **no son correcciones ni deuda**: son funcionalidad que toda
 existe. Se listan acá, y no en la 4, porque la pregunta del owner es solo el primer paso
 —después queda la spec entera—; el contexto de dónde salió cada una es parte del enunciado
 y viaja con ella.
+
+ℹ️ Si algún día se evalúa cambiar el ORM, el candidato es MikroORM (resuelve el contexto
+transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-als.md));
+Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
+pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,

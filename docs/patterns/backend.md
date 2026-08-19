@@ -233,14 +233,15 @@ defensa entre los llamadores funciona hasta que aparece el que se olvida.
 
 ## 6. Service
 
-- **Lectura con SQL raw (joins multi-tabla):** `this.dataSource.query` con
-  parámetros posicionales (`$1`), filtrando `eliminado_el IS NULL` **en cada join**,
-  y mapeo de filas `snake_case` → objeto `camelCase`. Ver
-  `monedas.service.ts → findMonedas`.
+- **Lectura con SQL raw (joins multi-tabla):** `this.db.query` (nunca
+  `this.dataSource.query` — ver §9) con parámetros posicionales (`$1`), filtrando
+  `eliminado_el IS NULL` **en cada join**, y mapeo de filas `snake_case` → objeto
+  `camelCase`. Ver `monedas.service.ts → findMonedas`.
 - **Mutación con transacción (regla "solo uno"):** dentro de
-  `dataSource.transaction`, limpiar el flag de todos
-  (`UPDATE ... SET x = false WHERE tenant_id = $1 AND eliminado_el IS NULL`) y
-  marcar el nuevo. Validar precondiciones antes. Ver `setDefault` en `monedas.service.ts`.
+  `this.db.transaccion` (nunca `dataSource.transaction` — ver §9), limpiar el
+  flag de todos (`UPDATE ... SET x = false WHERE tenant_id = $1 AND
+  eliminado_el IS NULL`) y marcar el nuevo. Validar precondiciones antes. Ver
+  `setDefault` en `monedas.service.ts`.
 - **Upsert con restauración de soft-deleted:** buscar con `withDeleted: true`; si
   existe, `existing.eliminadoEl = null` (restaurar); si no, `manager.create(...)`.
 - **Errores de negocio:** `BadRequestException` con mensaje en español (el frontend
@@ -269,11 +270,14 @@ defensa entre los llamadores funciona hasta que aparece el que se olvida.
 
 ## 7. Tests (TDD, junto al service)
 
-`<feature>.service.spec.ts` con mocks de repositorio + `DataSource`
-(ver `monedas.service.spec.ts`):
-- `getRepositoryToken(Entity)` para el repo, `getDataSourceToken()` para el DataSource.
-- Mockear `dataSource.query` **y** `dataSource.manager.*`; `transaction` se mockea
-  como `(cb) => cb(managerMock)`.
+`<feature>.service.spec.ts` con mocks de repositorio + `Db`
+(ver `auth.service.spec.ts`, `monedas.service.spec.ts`):
+- `getRepositoryToken(Entity)` para cada repo. **Nunca `getDataSourceToken()`**: el
+  service ya no inyecta `DataSource` (§9, ADR-020) — se mockea `Db` directo.
+- `{ provide: Db, useValue: dbMock }` con `dbMock = { transaccion: jest.fn((cb) =>
+  cb(managerMock)), query: jest.fn(), sinTransaccion: (fn) => fn() }`. `managerMock`
+  lleva los métodos que el código bajo test use dentro de la transacción
+  (`createQueryBuilder`, `save`, `update`, `getRepository`, …).
 - Un test por regla de negocio (rechazos incluidos) + happy path del upsert.
 
 Correr: `cd backend && npm test`. Antes de cerrar: `npm test`, `tsc` limpio, `npm run lint`.
@@ -350,6 +354,64 @@ Dos lugares, ambos en el **mismo commit**:
       + 1, y dejar un comentario en el código (como el de
       `seedMotivosDiferenciaInventario`) explicando qué rangos dinámicos ya estaban
       ocupados, para que el próximo no repita el grep ingenuo.
+
+---
+
+## 9. Contexto transaccional (ALS) — `Db`, nunca `DataSource` directo
+
+Todo acceso a datos fuera de un repositorio pasa por `Db`
+(`src/common/db/db.service.ts`), inyectado en el constructor como cualquier otro
+provider. **Inyectar `DataSource` directo está prohibido por lint** en
+`src/**/*.ts` (excepciones: la propia fachada y el seeder) — el porqué completo,
+con el deadlock que motivó esto y las alternativas descartadas, está en
+[ADR-020](../adr/020-contexto-transaccional-als.md).
+
+- **Transacciones: `db.transaccion(fn)`, nunca `dataSource.transaction(...)`.**
+  Abre la transacción y ata su `EntityManager` al contexto (`AsyncLocalStorage`);
+  todo repo inyectado (`@InjectRepository`) y todo `db.query(...)` que corra
+  dentro de `fn` resuelve ese manager **automáticamente**, sin que el callback
+  necesite pasarlo a mano. Si `fn` llama a otro service que a su vez abre
+  `db.transaccion(...)`, esa segunda llamada **reusa** la transacción activa en
+  vez de anidar — es lo que hace seguro envolver código preexistente en una
+  transacción nueva, en vez de reabrir el deadlock que ADR-020 describe.
+  ```ts
+  await this.db.transaccion(async () => {
+    await this.tenantMonedaRepo.update(...);   // mismo manager, sin pasarlo
+    await this.catalogoService.algo(tenantId);  // idem, aunque no reciba manager
+  });
+  ```
+- **Queries crudas: `db.query(sql, params)`, nunca `dataSource.query(...)`.**
+  Usa el manager del contexto si hay una transacción activa, el pool si no.
+  Mismas reglas de siempre: parámetros posicionales, `eliminado_el IS NULL` en
+  cada join, `RETURNING` por `unwrap()` (§6).
+- **`db.sinTransaccion(fn)` — salida explícita, para semántica deliberada de
+  fuera-de-transacción.** Corre `fn` con el contexto vaciado: una conexión
+  propia del pool aunque haya una transacción activa alrededor. Dos ejemplos
+  reales de **por qué** se necesita, no solo de sintaxis:
+  - **Auditoría que debe sobrevivir a un rollback** (`cobros.service.ts`): un
+    registro que tiene que quedar escrito aunque la operación que audita
+    termine deshaciéndose no puede compartir el manager de esa operación —si
+    comparte transacción, el rollback se lo lleva puesto.
+  - **Poda de housekeeping sin atadura de atomicidad** (`auth.service.ts`, la
+    limpieza de refresh tokens vencidos tras rotar uno): no necesita ser
+    atómica con la rotación del token —el resultado de la poda no afecta si la
+    rotación tuvo éxito— así que alargar el lock de la transacción principal
+    para incluirla sería costo sin beneficio.
+  ⚠️ Auditado el 2026-08-18: ningún sitio de hoy **necesita** `sinTransaccion`
+  para estar fuera de contexto — los dos ejemplos de arriba ya están
+  lexicalmente fuera del callback de `db.transaccion`, así que el ALS los deja
+  solos en el pool sin pedirlo. `sinTransaccion` existe para el día que el
+  código fuera-de-transacción tenga que vivir **dentro** de un callback que
+  por lo demás sí está en transacción.
+- **El `manager: EntityManager` explícito en una firma preexistente sigue
+  siendo válido — no migrar por migrar.** Donde ya se enhebra a mano
+  (`calcularEsperadoEfectivo(cajaId, manager)` y similares) es correcto y el
+  explícito gana: agrandar el diff sacándolo no aporta nada. El mecanismo de
+  `Db` existe para el código que **no** enhebraba manager y por eso deadlockeaba
+  (ADR-020) — no para reemplazar el enhebrado que ya funcionaba.
+- **Guardar una referencia a un método de repo y llamarla después pierde el
+  contexto.** Ver `docs/agent/anti-patterns.md` — el proxy resuelve el manager
+  en el acceso a la propiedad, no en la invocación.
 
 ---
 

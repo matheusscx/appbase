@@ -147,33 +147,31 @@ una preguntar si una acción de un tenant puede escribir ahí. Sumar los barrido
 que su intención.
 *Cómo se confirma:* montar el mismo usuario en dos tenants y ejercer la acción desde uno.
 
-**2. Deadlock del pool por una llamada repo-bound en una transacción.** Adentro de un
-`dataSource.transaction`, una sola llamada que use el repositorio inyectado en vez del
-`manager` pide una segunda conexión reteniendo la primera. Con tantas requests en vuelo
-como tamaño tenga el pool, se traban entre sí — y como el ciclo no es de locks de base,
-`deadlock_timeout` **nunca dispara**: no falla, cuelga, y la API muere para todos los
-tenants hasta reiniciar el proceso.
-*Cómo buscarlo:* por cada `dataSource.transaction`, marcar toda llamada `this.algo(...)`
-que no reciba `manager` entre sus argumentos. Es mecánico y los falsos positivos son
-baratos.
-*Cómo se confirma:* una **ráfaga** de ~15 requests independientes (no una carrera: un test
-de 2 concurrentes nunca pasa de 2 transacciones en vuelo). Con el bug se cuelga; sin él,
-milisegundos. La firma en `pg_stat_activity` es `idle in transaction / ClientRead`
-acumulándose hasta el tamaño del pool.
+**2. Deadlock del pool por una llamada repo-bound en una transacción — ✅ CERRADO POR
+CONSTRUCCIÓN el 2026-08-18.** Adentro de un `dataSource.transaction`, una sola llamada que
+usara el repositorio inyectado en vez del `manager` pedía una segunda conexión reteniendo
+la primera. Con tantas requests en vuelo como tamaño tuviera el pool, se trababan entre sí
+— y como el ciclo no era de locks de base, `deadlock_timeout` **nunca disparaba**: no
+fallaba, colgaba, y la API moría para todos los tenants hasta reiniciar el proceso. El
+patrón se reintrodujo en código nuevo cuatro días después de documentarse la primera vez
+(`auth.service.ts` → `refresh`), y por una vía que ningún grep de "llamada agregada"
+detectaba — la **transacción** se agregó alrededor de una llamada que ya estaba, no al
+revés.
 
-⚠️ **Esta lente NO es nueva y su barrido YA se hizo**: el 2026-08-11 sobre todo
-`backend/src`, con umbral medido y **tabla de sitios en 7 módulos** — está en la entrada
-🔴 *"Diez ventas simultáneas cuelgan la API para siempre"* de `pendientes.md`, que es el
-riesgo más grave abierto. Correrla de nuevo como pasada de auditoría es redundante; lo que
-falta es **arreglar los sitios ya listados**, y eso es el frente 🔴, que va con decisión del
-owner.
+`TxContext` + la fachada `Db` + los repos como proxies context-aware
+(`backend/src/common/db/`) eliminan el mecanismo **por construcción**: un repositorio
+inyectado resuelve solo el manager de la transacción activa, sin enhebrado manual, y una
+regla de lint prohíbe reintroducir el acceso directo a `DataSource`. **Esta lente ya no
+aplica hacia adelante** — no hay `this.algo(...)` sin `manager` que buscar, porque ya no
+hay `manager` que pasar. Detalle completo, alternativas descartadas y límites conocidos del
+enforcement: [ADR-020](../adr/020-contexto-transaccional-als.md); cierre del backlog en
+[`resueltos.md`](resueltos.md).
 
-**Lo que sí agrega ago-2026, y es lo único nuevo:** el patrón **se reintrodujo en código
-nuevo cuatro días después de documentarlo**, y por una vía que la entrada no describe — ahí
-la llamada se agregó adentro de una transacción existente; acá la **transacción se agregó
-alrededor** de una llamada que ya estaba. La lección para el auditor: revisar también los
-diffs que *envuelven* código viejo en una transacción nueva, no sólo los que agregan
-llamadas.
+⚠️ **Lo que sobrevive, y es la lente que reemplaza a esta:** guardar la referencia a un
+método de repo (`const find = this.itemsRepo.find`) y llamarla después, fuera del contexto
+donde se resolvió — el proxy resuelve el manager en el acceso a la propiedad, no en la
+invocación. Cero ocurrencias verificadas en `backend/src` al cerrar (Task 4, tres greps
+distintos); ningún lint lo caza. Ver `anti-patterns.md`.
 
 Y la conclusión de método: **una entrada de backlog no previene una reincidencia.** El
 barrido de agosto documentó causa, umbral y sitios, y aun así el patrón volvió. Lo que lo

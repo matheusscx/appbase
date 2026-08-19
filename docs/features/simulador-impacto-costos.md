@@ -121,9 +121,11 @@ vuelta más.
 
 ⚠️ Esto introdujo dos ciclos de orden de lock nuevos (`items` ↔ `item_combo` y
 `item_receta` ↔ `item_combo`). Por decisión del owner quedaron documentados, **no
-arreglados**, dentro de la entrada *"Diez ventas simultáneas cuelgan la API para siempre"*
-en [`docs/agent/pendientes.md`](../agent/pendientes.md) (buscar "Dos ciclos de orden de
-lock") — van con la tanda 🔴 de prioridad máxima, no de arrastre en esta feature.
+arreglados**, dentro de la entrada *"Dos ciclos de orden de lock en la bandeja de desfases
+de combos…"* en [`docs/agent/pendientes.md`](../agent/pendientes.md) — van con la tanda 🔴
+de prioridad máxima, no de arrastre en esta feature. (Es la pieza residual del agotamiento
+de pool de "Diez ventas simultáneas…", que se cerró el 2026-08-18 — ver
+[ADR-020](../adr/020-contexto-transaccional-als.md).)
 
 ### Margen y precio sugerido
 
@@ -146,7 +148,7 @@ Si `precioBase = 0` → márgenes y precio sugerido son `null`.
 | **Aplicar** | Recomputa y persiste `costoPropuesto` en servidor | `NULL` | Solo si checkbox `actualizarPrecio` + `precioBase > 0` |
 | **Descartar** | Sin cambio | `costoPropuesto` actual | Sin cambio |
 
-Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una), pero solo **aplicar** toma lock: `FOR UPDATE` ordenado (`item_receta` antes que `item_combo`, e `id` ascendente dentro de cada tabla). **Descartar no toma ningún lock** y escribe las dos tablas en el orden que manda el cliente, así que `descartar([combo, receta])` contra `aplicar([receta, combo])` sí puede deadlockear — es el ciclo #2 anotado en la entrada 🔴 *"Diez ventas simultáneas cuelgan la API para siempre"* de `docs/agent/pendientes.md`, abierto por decisión del owner.
+Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una), pero solo **aplicar** toma lock: `FOR UPDATE` ordenado (`item_receta` antes que `item_combo`, e `id` ascendente dentro de cada tabla). **Descartar no toma ningún lock** y escribe las dos tablas en el orden que manda el cliente, así que `descartar([combo, receta])` contra `aplicar([receta, combo])` sí puede deadlockear — es el ciclo #2 anotado en la entrada 🔴 *"Dos ciclos de orden de lock en la bandeja de desfases de combos…"* de `docs/agent/pendientes.md`, abierto por decisión del owner.
 
 ---
 

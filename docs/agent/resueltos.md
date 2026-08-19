@@ -17,6 +17,82 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Diez ventas simultáneas cuelgan la API para siempre: el pool de conexiones deja de agotarse (2026-08-18)
+
+**Diez ventas simultáneas cuelgan la API para siempre** (backend, medido 2026-08-11) —
+dentro de una transacción abierta, `crearEnTransaccion` y otros 20 sitios llamaban a
+services que tomaban una conexión **nueva** del pool en vez de usar el `manager` de esa
+transacción. Cada operación necesitaba dos conexiones a la vez; con N operaciones
+simultáneas y N = tamaño del pool, deadlock **permanente** — no un timeout, las requests no
+vuelven nunca y el proceso queda envenenado hasta reiniciar. Medido por experimento: 9 ok /
+10 cuelga con el pool en 10; subiendo el pool a 20, 19 ok / 20 cuelga — el número de
+conexiones ES la variable, subir el pool solo mueve el umbral. **REINCIDIÓ el 2026-08-15**,
+en código nuevo (`auth.service.ts → refresh`), cuatro días después de documentarse la causa
+acá: la vía fue envolver código viejo en una transacción nueva, invisible a cualquier grep
+de "llamada agregada". Documentar la causa no bastó para evitar la reincidencia.
+
+**Cerrado el 2026-08-18, en diez tareas** (spec
+[`2026-08-18-contexto-transaccional-als-design.md`](../superpowers/specs/2026-08-18-contexto-transaccional-als-design.md),
+plan homónimo en `docs/superpowers/plans/`). El fix elimina el patrón **por construcción**,
+no por disciplina — el detalle completo, con las alternativas descartadas y sus porqués, en
+[ADR-020](../adr/020-contexto-transaccional-als.md):
+
+- **`TxContext`** (`backend/src/common/db/tx-context.ts`): un
+  `AsyncLocalStorage<EntityManager>` que ata el manager de la transacción activa a la
+  operación en vuelo — al árbol async de esa request, no a un campo compartido.
+- **`Db`** (`db.service.ts`): única puerta al acceso a datos fuera de repos —
+  `transaccion(fn)` (abre la transacción la primera vez, **reusa** el manager si ya hay una
+  activa), `query(sql, params)`, `sinTransaccion(fn)` (salida explícita para lo que necesite
+  deliberadamente una conexión propia).
+- **Repos como proxies context-aware** (`repositorios.module.ts`, reemplazo drop-in de
+  `TypeOrmModule.forFeature`): bajo el **mismo token** de `@InjectRepository`, resuelven el
+  manager del contexto en cada acceso a propiedad. Los ~441 accesos a repos en 38 services
+  **no se editaron** — motor de precios incluido.
+- **Barrido mecánico** sobre todo `backend/src`: 76 `dataSource.transaction(...)` →
+  `db.transaccion`, 153 `dataSource.query(...)` → `db.query` (el seeder, con 99 más, quedó
+  afuera a propósito: corre al boot, sin concurrencia). Los **21 sitios** de la tabla
+  original quedaron cubiertos sin tocarlos: en cuanto la transacción que los envuelve
+  registra su manager, cada uno lo resuelve solo.
+- **Defensa en profundidad**: pool explícito + `connectTimeoutMS` en `app.module.ts` (un
+  fallo futuro da 500 ruidoso con stack trace, no cuelgue silencioso) y una regla de lint
+  (`no-restricted-syntax`, `eslint.config.mjs`) que prohíbe inyectar `DataSource` o acceder
+  a `.query`/`.transaction`/`.manager`/`.createQueryRunner` fuera de la fachada `Db` y el
+  seeder. Vive en `lint:check`: gate local, pre-commit y CI.
+- **Test de ráfaga** (`test/concurrencia-pool.e2e-spec.ts`, N=10=tamaño del pool contra
+  `POST /ventas` por HTTP real, no `supertest` sin listener): RED antes del fix (colgaba
+  indefinido), GREEN después. **Mutante que lo fija** (revertir el proxy a ignorar el
+  `TxContext`, sin commit — no deja rastro en el árbol): la ráfaga dio **10/10 en 500 en
+  ~6.87 s** — el pool timeout de la defensa en profundidad convierte el deadlock en un fallo
+  rápido y ruidoso, no en un cuelgue indefinido; revertido el mutante, verde en 1.9 s.
+
+⚠️ **Lo que este cierre NO incluye, y sigue abierto en `pendientes.md` § 🔴:** los dos ciclos
+de orden de lock de la bandeja de desfases de combos (`items` ↔ `item_combo`, `item_receta`
+↔ `item_combo`), los `FOR UPDATE` de `aplicarDesfases` que se toman antes de validar el
+tenant, y el hueco de test de lecturas constantes para N combos — mecanismo distinto (orden
+de locks de fila entre tablas, no agotamiento del pool de conexiones), que este trabajo no
+toca ni arregla. Ver la entrada *"Dos ciclos de orden de lock en la bandeja de desfases de
+combos…"* en `pendientes.md`.
+
+**Límites conocidos del mecanismo** (declarados en el ADR desde el cierre, no descubiertos
+después — detalle completo en ADR-020 § Consequences): el proxy de repos no cubre
+`getTreeRepository`/`autoLoadEntities`/`targetEntitySchema`/un segundo `dataSource`; la
+regla de lint es *name-based* (un alias de importación la esquiva) y ataca el chokepoint de
+**inyección**, no cada uso (una función libre que recibe `DataSource` por parámetro, como
+`nombre-sugerido.util.ts`, queda fuera por diseño); ningún e2e ejercita `suscripciones` ni
+`pasarela` contra el camino ALS, solo los unit tests de esos services; y los `Promise.all` de
+lecturas dentro de una transacción se serializan sobre un único `pg.Client` y emiten un
+`DeprecationWarning` de `pg` (`calculo-precios.service.ts`, dos sitios) — anotado como
+pendiente propio en `pendientes.md` § "Necesita que el owner conteste", porque tocar el
+motor de cálculo de precios exige autorización explícita del owner y no se resolvió en esta
+tanda.
+
+Commits principales: `ba9e08d8` (pool explícito + `connectTimeoutMS`), `6f2e5238` (burst
+e2e RED), `6b12e09d` (`TxContext` + `Db`), `270391c2` (proxy de repos), `33d3a7b3` (camino
+de la venta, burst GREEN), `ec2e3d7b`/`9f025fb6` (barrido del resto del backend),
+`6f26016f`/`19fc8d00`/`b06dbfdd` (regla de lint, endurecida en dos rondas).
+
+---
+
 ## El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas (2026-08-18)
 
 **El costo de un combo se queda viejo y nadie avisa, a diferencia de las recetas**

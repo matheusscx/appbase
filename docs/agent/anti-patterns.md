@@ -284,61 +284,65 @@ otros locks toma ese método —incluidos los implícitos de cada `UPDATE`— y 
 cruzarlo con los demás métodos que tocan esas mismas tablas. La pregunta no es "¿qué
 protege esta línea?" sino "¿en qué orden quedan **todos** los locks de este camino?".
 
-### ❌ Llamada repo-bound adentro de una transacción — deadlock del pool
+### ✅ Llamada repo-bound adentro de una transacción — deadlock del pool — AUTOMATIZADO
 
-> 🔴 **Este patrón ya es el riesgo #1 abierto del repo**, con causa confirmada, umbral
-> medido y tabla de sitios en 7 módulos: ver *"Diez ventas simultáneas cuelgan la API para
-> siempre"* en [`pendientes.md`](pendientes.md). Esta entrada existe porque **se
-> reintrodujo en código nuevo el 2026-08-15**, cuatro días después de documentarlo — que es
-> exactamente el criterio de "bug de patrón que se repitió".
+Ya no es posible **por construcción**, no solo detectado. Hasta el 2026-08-18 este era el
+riesgo #1 abierto del repo: adentro de un `dataSource.transaction`, una llamada que usara
+el repositorio inyectado en vez del `manager` pedía una **segunda conexión del mismo pool**
+mientras la transacción retenía la primera. Con tantas requests en vuelo como tamaño
+tuviera el pool, todas retenían una conexión y esperaban una segunda que solo otra de ellas
+podría soltar — **deadlock permanente**, no un timeout: no hay ciclo de locks de fila, así
+que `deadlock_timeout` nunca dispara y Postgres no aborta a nadie. La API entera moría hasta
+reiniciar el contenedor. Se reintrodujo en código nuevo el 2026-08-15 (`auth.service.ts` →
+`refresh`), cuatro días después de documentarse la primera vez: documentar la causa no
+bastó para evitar que volviera a pasar.
 
-Adentro de un `dataSource.transaction`, **todo** tiene que ir por el `manager`. Una sola
-llamada que use el repositorio inyectado pide una **segunda conexión del mismo pool**
-mientras retiene la primera con la transacción abierta: con tantas requests en vuelo como
-tamaño tenga el pool, todas retienen una y esperan otra que sólo otra de ellas podría
-soltar.
+`TxContext` + la fachada `Db` + los repos como proxies context-aware
+(`backend/src/common/db/`) cierran el mecanismo por construcción: un repositorio inyectado
+resuelve **solo** el manager de la transacción activa, sin que el service lo enhebre a
+mano. Ya no existe "llamar sin pasar el manager" — no hay manager que pasar. Una regla de
+lint (`no-restricted-syntax`, `eslint.config.mjs`) prohíbe además inyectar `DataSource`
+directo fuera de esa fachada y el seeder, así que tampoco se puede reintroducir el
+mecanismo original por otra vía. El experimento que midió el umbral (9 ok / 10 cuelga),
+la reincidencia y las alternativas descartadas antes de esta solución están en
+[ADR-020](../adr/020-contexto-transaccional-als.md) y su cierre en
+[`resueltos.md`](resueltos.md).
+
+Lo único que sobrevive de este riesgo, y que el proxy no cierra: guardar la referencia a un
+método de repo y llamarla después, fuera del contexto donde se resolvió. Ver la entrada
+siguiente.
+
+### ❌ Guardar una referencia a un método de repo y llamarla después
 
 ```ts
-await this.dataSource.transaction(async (manager) => {
-  await manager.update(RefreshToken, id, { … })          // BIEN
-  // MAL — `usersService.findById` va por SU repositorio, no por este manager
-  const user = await this.usersService.findById(fila.user_id)
-  // BIEN — o `manager.findOne(Usuario, …)`, o sacarlo afuera del bloque
-})
+// MAL — el proxy resuelve el manager EN EL ACCESO A LA PROPIEDAD (`repo.find`), no en
+// la invocación (`find(...)`). Guardar la referencia fuera de una transacción la
+// congela con el repo del pool; llamarla adentro de una transacción usa ese repo
+// congelado, no el de la transacción.
+const find = this.itemsRepo.find;
+await this.db.transaccion(async () => {
+  const items = await find({ where: { tenantId } }); // repo del POOL, no de la tx
+});
+
+// BIEN — acceder a la propiedad DENTRO del contexto en que se usa
+await this.db.transaccion(async () => {
+  const items = await this.itemsRepo.find({ where: { tenantId } }); // repo de la tx
+});
 ```
 
-**Lo que lo vuelve peligroso es que no falla: cuelga, y para siempre.** No hay ciclo de
-locks de base, así que `deadlock_timeout` **nunca dispara** y Postgres no aborta a nadie;
-sin `connectionTimeoutMillis`, la espera es infinita. La API entera muere —para todos los
-tenants, incluso en rutas que no tocan la base— hasta reiniciar el proceso. Medido
-(ago-2026, `auth.service.ts` → `refresh`, pool default de 10): 8 concurrentes OK, **20
-concurrentes = colgado**, recuperable sólo con `docker restart`. Subir el pool sólo mueve
-el umbral, no arregla nada.
+Reabre exactamente el deadlock del pool que el proxy de repos (entrada anterior, ADR-020)
+cierra por construcción: la operación queda usando una conexión del pool mientras la
+transacción que la envuelve retiene otra, dos conexiones a la vez. El proxy
+(`backend/src/common/db/repositorios.module.ts`) resuelve `TxContext.managerActivo()` en
+cada `get` de una propiedad — si la referencia se cachea antes de ese acceso (fuera de la
+transacción, o en una transacción distinta), el manager que quedó atado es el de ese
+momento, no el de cuando se invoca.
 
-⚠️ **Lo que hace falta aprender no es la causa —ya estaba escrita— sino por qué volvió a
-pasar.** Se reintrodujo *arreglando otra cosa*: la transacción se agregó para cerrar un
-problema de ordenamiento, y la llamada que ya estaba en el método quedó adentro sin que
-nadie la mirara con esta lente. **Meter código existente adentro de una transacción nueva
-es tan riesgoso como escribir la llamada nueva**, y no se parece a lo que la entrada del
-backlog describe (ahí la llamada se agregó adentro; acá la transacción se agregó alrededor).
-
-La firma en `pg_stat_activity`, con el backend colgado, es inequívoca:
-
-```
-active              | Lock: transactionid | x5   ← esperando el lock de fila
-idle in transaction | ClientRead          | x5   ← reteniendo, esperando conexión del pool
-```
-
-**Cómo se caza en una auditoría:** por cada `dataSource.transaction`, recorrer el cuerpo y
-marcar toda llamada `this.algo(...)` que **no** reciba `manager` entre sus argumentos. Es
-mecánico y da falsos positivos baratos de descartar. Ojo con las que parecen inocentes
-—un `findById`, un `config.get` que golpea la base, un service de otro módulo—: la que
-rompió esto era una búsqueda de una fila por PK.
-
-⚠️ **Y ningún test de carrera lo caza.** Un test de dos requests concurrentes nunca pasa de
-2 transacciones en vuelo sobre un pool de 10. Hace falta una **ráfaga** —15 requests
-independientes, que no compiten por nada— y afirmar que todas responden. Es un test
-binario: con el bug se cuelga hasta el timeout, sin el bug tarda milisegundos.
+**Verificado el 2026-08-18, en la revisión de la Task 4: cero ocurrencias hoy** en
+`backend/src` (tres greps distintos sobre el patrón `= this.<x>Repo.<método>` sin invocar).
+Por eso esta entrada es prevención, no un arreglo — el patrón nunca se cometió en este
+repo, pero el proxy lo hace posible y no hay ningún lint que lo cace (el `Proxy` es
+indistinguible de un repo real para un analizador estático).
 
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 

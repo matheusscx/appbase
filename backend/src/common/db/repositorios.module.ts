@@ -9,8 +9,26 @@ import { TxContext } from './tx-context';
  * de `@InjectRepository` un proxy que resuelve el repo del manager en contexto
  * (TxContext) si hay transacción en curso, o el repo del pool si no. Así los
  * services no enhebran el manager: la conexión correcta se resuelve sola, y
- * tomar una segunda conexión dentro de una transacción dejó de ser posible
- * por olvido.
+ * tomar una segunda conexión dentro de una transacción **por un repo inyectado**
+ * deja de ser posible por olvido. Alcance explícito: la garantía cubre el
+ * acceso vía repositorio y `Db.query`/`Db.transaccion` — no `dataSource.query`
+ * directo, que sigue siendo posible si alguien lo inyecta (por eso existe
+ * además la regla de lint sobre `DataSource`, ver ADR-020).
+ *
+ * Límites conocidos (verificados con grep el 2026-08-18, cero consumidores
+ * hoy — documentados en detalle en ADR-020 § Consequences): no cubre
+ * `getTreeRepository` (entidades `@Tree`), no alimenta `EntitiesMetadataStorage`
+ * (así que `autoLoadEntities` no vería estas entidades), no pasa
+ * `targetEntitySchema` (el workaround de Nest para nombres de clase
+ * duplicados) y `forFeature` no acepta un segundo parámetro `dataSource`
+ * (conexiones con nombre).
+ *
+ * Acoplamiento a tener en cuenta si este módulo se toca: `crearRepoProxy` se
+ * inyecta con `dataSource: DataSource` y `tx: TxContext`, y depende de que
+ * ambos los resuelva Nest desde módulos `@Global` (hoy `TypeOrmCoreModule` +
+ * `CommonModule`) — `RepositoriosModule.forFeature` es un dynamic module sin
+ * `imports` propios. Si `TxContext` alguna vez pasara a depender de algo que
+ * no sea `@Global`, la resolución se rompe al arrancar la app, no en un test.
  */
 function crearRepoProxy(
   entidad: EntityClassOrSchema,

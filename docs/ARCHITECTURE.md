@@ -93,6 +93,13 @@ startup-app/
 [HTTP Response JSON]
 ```
 
+**Contexto transaccional (transversal, no un paso del diagrama):** dentro de una
+transacción abierta con `Db.transaccion` (`src/common/db/`), el `EntityManager` viaja
+atado a la request vía `AsyncLocalStorage`, no por parámetro. Todo repo inyectado y todo
+`Db.query` resuelven ese manager solos, así que el Service no necesita saber si está
+dentro de una transacción o no. `DataSource` directo está prohibido por lint fuera de esa
+fachada — ver [ADR-020](./adr/020-contexto-transaccional-als.md).
+
 ### Bootstrap (`main.ts`)
 
 1. **CORS** — origen `FRONTEND_URL` (dev: `http://localhost:5173`)
