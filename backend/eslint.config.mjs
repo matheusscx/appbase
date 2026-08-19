@@ -38,6 +38,14 @@ export default tseslint.config(
     // reabre el deadlock del pool (ADR-020). Toda query/transacción pasa por la
     // fachada Db. Excepciones: la propia fachada, y el seeder (corre al boot,
     // sin concurrencia).
+    //
+    // No alcanza con prohibir `dataSource.query/.transaction/.manager`: un
+    // campo renombrado, un `getRepository`, una desestructuración o un alias
+    // local lo esquivan en un refactor trivial. Por eso además se ataca el
+    // chokepoint — inyectar `DataSource` — con dos selectores más: el
+    // decorador `@InjectDataSource()` y el tipo `DataSource` en un parámetro
+    // de constructor (Nest también resuelve por tipo, sin decorador). Sin
+    // `DataSource` inyectado no hay campo que renombrar ni aliasear.
     files: ['src/**/*.ts'],
     ignores: [
       'src/common/db/**',
@@ -52,6 +60,17 @@ export default tseslint.config(
             'MemberExpression[object.property.name="dataSource"][property.name=/^(query|transaction|manager|createQueryRunner)$/]',
           message:
             'dataSource directo ignora la transacción en contexto y reabre el deadlock del pool. Usar Db.query / Db.transaccion (src/common/db) — ver docs/patterns/backend.md.',
+        },
+        {
+          selector: 'Decorator[expression.callee.name="InjectDataSource"]',
+          message:
+            'No inyectar DataSource directo. Inyectar Db (src/common/db) — es la única puerta al acceso a datos fuera de los repos.',
+        },
+        {
+          selector:
+            'MethodDefinition[kind="constructor"] TSParameterProperty > Identifier[typeAnnotation.typeAnnotation.typeName.name="DataSource"]',
+          message:
+            'No inyectar DataSource directo. Inyectar Db (src/common/db) — es la única puerta al acceso a datos fuera de los repos.',
         },
       ],
     },
