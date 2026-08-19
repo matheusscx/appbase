@@ -406,8 +406,9 @@ mismo motivo — el `Proxy` es indistinguible de un repo real para un analizador
 **Verificado el 2026-08-19: cero llamadores vivos que dependan de esto.** El único caso real
 (`cobros.service.ts`, el `catch` del timeout de reembolso) ya quedó *léxicamente* fuera del
 callback de `db.transaccion`, así que el ALS lo deja solo en el pool sin pedirlo. La entrada
-es prevención para el llamador siguiente, no un arreglo. Los 8 sitios llevan la nota en el
-código; la regla general está en `docs/patterns/backend.md` §9.
+es prevención para el llamador siguiente, no un arreglo. Los tres archivos con el idioma llevan la
+nota, cada uno declarando que vale para todas sus apariciones; la regla general
+está en `docs/patterns/backend.md` §9.
 
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 

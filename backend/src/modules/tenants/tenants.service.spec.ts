@@ -707,7 +707,9 @@ describe('TenantsService', () => {
       expect(managerTx.save).toHaveBeenCalled();
       expect(managerTx.query).toHaveBeenCalled();
       // La otra mitad del mutante: sin `transaccion` cada sentencia commitea
-      // sola. `db.query` fuera de la transacción es esa fuga por SQL crudo.
+      // sola. La aserción de abajo es más ancha que eso —el mock no modela el
+      // ALS, así que caza cualquier `db.query` de este camino, dentro o fuera
+      // del callback—, y alcanza igual: acá no debe haber ninguno.
       // (Las aserciones sobre `dataSource.manager` se sacaron: el service ya no
       // inyecta `DataSource`, el mock no lo cablea en `dbMock` y por lo tanto
       // no podían fallar.)

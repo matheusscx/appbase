@@ -51,6 +51,7 @@ export class TransaccionesService {
   // explícito: `db.sinTransaccion(() => ...)`. El único llamador que lo
   // necesita (`cobros.service.ts`, el `catch` del timeout de reembolso) ya
   // quedó léxicamente fuera del callback de la transacción.
+  // Vale para las dos apariciones de este idioma en el archivo.
   registrar(
     datos: Partial<PasarelaTransaccion>,
     manager?: EntityManager,

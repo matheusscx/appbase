@@ -720,9 +720,11 @@ export class SalonesService {
   ): Promise<CuentaDetalle> {
     // El catálogo de unidades es global: no depende de la cuenta ni de la
     // línea, así que se carga fuera del lock. El ítem no puede salir de acá
-    // —depende de `linea.itemId`, que se lee bajo lock— y por eso va con el
-    // manager de la transacción: tiene que ver las escrituras no commiteadas de
-    // esta misma transacción. (El riesgo original de esta línea —una segunda
+    // —depende de `linea.itemId`, que se lee bajo lock— y va con el manager
+    // explícito porque la firma ya lo pedía: no hay ninguna escritura previa en
+    // esta transacción que ese SELECT necesite ver; post-ADR-020 el proxy
+    // resolvería el mismo manager solo, y el explícito se queda donde ya estaba
+    // (`docs/patterns/backend.md` §9). (El riesgo original de esta línea —una segunda
     // conexión del pool tomada mientras se sostiene el `FOR UPDATE`— lo cerró
     // ADR-020: el contexto ALS ya no deja tomarla por olvido.)
     const catalogo = await this.loadCatalogoUnidades();

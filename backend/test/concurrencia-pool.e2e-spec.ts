@@ -12,12 +12,17 @@ const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 
-// N = tamaño del pool, leído de la MISMA fuente que `app.module.ts` (`?? 10`
-// incluido). Fijarlo en 10 lo volvía mudo: con `DB_POOL_SIZE=20` la ráfaga
-// quedaba por debajo del pool y el test pasaba sin ejercitar nada. El umbral
-// medido del deadlock era exactamente N = tamaño del pool: 9 ok / 10 cuelga.
+// N = tamaño del pool, leído de la misma env que `app.module.ts:160`. Fijarlo
+// en 10 lo volvía mudo: con `DB_POOL_SIZE=20` la ráfaga quedaba por debajo del
+// pool y el test pasaba sin ejercitar nada. El umbral medido del deadlock era
+// exactamente N = tamaño del pool: 9 ok / 10 cuelga.
+// `|| 10` y no `?? 10` a propósito: con `DB_POOL_SIZE=` vacío, `Number('')` es
+// 0 y la ráfaga sería de cero requests — el detector mudo otra vez, por la otra
+// puerta. `app.module.ts` usa `??` y en ese caso pide `poolSize: 0`, pero
+// pg-pool hace `max || poolSize || 10` (`node_modules/pg-pool/index.js:89`), o
+// sea que el pool efectivo sigue siendo 10: este `|| 10` espeja el pool REAL.
 // `test/setup-env.ts` corre en `setupFiles`, así que `.env` ya está cargado acá.
-const RAFAGA = Number(process.env.DB_POOL_SIZE ?? 10);
+const RAFAGA = Number(process.env.DB_POOL_SIZE || 10);
 
 describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
   let app: INestApplication;
