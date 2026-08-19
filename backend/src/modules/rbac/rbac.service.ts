@@ -147,8 +147,9 @@ export class RbacService {
    * —quitarle el rol a alguien y darlo de baja— tienen que contar y mutar en
    * la MISMA transacción, o el conteo no vale nada. Pedirlo por parámetro
    * hace imposible el descuido de contar por fuera con un repositorio
-   * inyectado, que además sería una segunda conexión del pool tomada mientras
-   * la transacción retiene la primera.
+   * inyectado. (Desde ADR-020 ese descuido ya no toma una segunda conexión del
+   * pool —el repo inyectado resuelve el manager del contexto—, pero el conteo
+   * seguiría sin `FOR UPDATE`, que es lo que acá importa.)
    *
    * **`lock: true` en la primera llamada de la transacción, `false` en la
    * verificación posterior.** El `FOR UPDATE` es lo que hace que la

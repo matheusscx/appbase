@@ -721,8 +721,10 @@ export class SalonesService {
     // El catálogo de unidades es global: no depende de la cuenta ni de la
     // línea, así que se carga fuera del lock. El ítem no puede salir de acá
     // —depende de `linea.itemId`, que se lee bajo lock— y por eso va con el
-    // manager de la transacción: pedir una segunda conexión del pool mientras
-    // se sostiene el `FOR UPDATE` es un doble checkout que puede estancarse.
+    // manager de la transacción: tiene que ver las escrituras no commiteadas de
+    // esta misma transacción. (El riesgo original de esta línea —una segunda
+    // conexión del pool tomada mientras se sostiene el `FOR UPDATE`— lo cerró
+    // ADR-020: el contexto ALS ya no deja tomarla por olvido.)
     const catalogo = await this.loadCatalogoUnidades();
     return this.db.transaccion(async (manager) => {
       const cuenta = await this.getCuentaAbiertaConLock(

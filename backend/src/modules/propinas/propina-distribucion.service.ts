@@ -298,6 +298,10 @@ export class PropinaDistribucionService {
     tenantId: string,
     manager?: EntityManager,
   ): Promise<DistribucionPublica> {
+    // ⚠️ Omitir `manager` NO es leer fuera de la transacción: los tres repos
+    // inyectados son proxies context-aware de `RepositoriosModule` (ADR-020) y
+    // resuelven la transacción ambiente del contexto ALS si la hay. El
+    // parámetro sigue existiendo por los llamadores que ya lo enhebraban.
     const repoConfig = manager
       ? manager.getRepository(PropinaConfiguracion)
       : this.configRepo;

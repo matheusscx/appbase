@@ -224,17 +224,20 @@ export class LiquidacionPropinasService {
       throw new BadRequestException('No hay grupos activos para liquidar');
     }
 
-    const manager = this.db;
-    const moneda = await this.resolverMonedaOficial(manager, tenantId);
+    // Preview de solo lectura: sin transacción propia. Los helpers reciben
+    // `EntityManager | Db` porque los comparten los caminos transaccionales;
+    // acá va la fachada `Db`, que no es un manager (por eso no se llama así).
+    const db = this.db;
+    const moneda = await this.resolverMonedaOficial(db, tenantId);
     const tips = await this.buscarTipsElegibles(
-      manager,
+      db,
       tenantId,
       fechaDesde,
       fechaHasta,
       turnoIds,
     );
     const sesiones = await this.buscarSesionesPeriodo(
-      manager,
+      db,
       tenantId,
       fechaDesde,
       fechaHasta,
@@ -245,7 +248,7 @@ export class LiquidacionPropinasService {
       .toFixed(4);
 
     await this.assertGarzonEnUnSoloGrupo(
-      manager,
+      db,
       tenantId,
       gruposConfig,
       tips,

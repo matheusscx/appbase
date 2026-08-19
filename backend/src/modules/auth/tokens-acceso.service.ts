@@ -108,6 +108,11 @@ export class TokensAccesoService {
    * contraseña dos veces y el "un solo uso" sería decorativo.
    */
   async quemar(id: string, manager?: EntityManager): Promise<void> {
+    // ⚠️ Vale para las tres apariciones de este idioma en el archivo: omitir
+    // `manager` NO corre fuera de la transacción. `this.repo` es el proxy
+    // context-aware de `RepositoriosModule` (ADR-020) y resuelve la transacción
+    // ambiente del contexto ALS si la hay, así que un rollback también se lleva
+    // esta escritura. Para fuera-de-transacción deliberado: `db.sinTransaccion`.
     const repo = manager ? manager.getRepository(TokenAcceso) : this.repo;
     const res = await repo
       .createQueryBuilder()

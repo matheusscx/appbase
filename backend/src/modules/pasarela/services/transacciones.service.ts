@@ -40,7 +40,17 @@ export class TransaccionesService {
 
   // `manager` opcional: cuando se pasa, la operación corre dentro de esa
   // transacción (necesario para que el lock pesimista del reembolso proteja
-  // también la escritura de la transacción REFUND). Sin él, usa el repo normal.
+  // también la escritura de la transacción REFUND).
+  //
+  // ⚠️ Omitirlo NO significa "fuera de la transacción" — el contrato se dio
+  // vuelta con ADR-020. `this.repo` es el proxy context-aware de
+  // `RepositoriosModule`: sin `manager` participa de la transacción ambiente
+  // que haya en el contexto ALS, y un rollback se lleva puesta la fila. Antes
+  // la rama `else` sí era una conexión propia — por eso el rastro de auditoría
+  // de un timeout se registraba así. Hoy correr deliberadamente fuera se pide
+  // explícito: `db.sinTransaccion(() => ...)`. El único llamador que lo
+  // necesita (`cobros.service.ts`, el `catch` del timeout de reembolso) ya
+  // quedó léxicamente fuera del callback de la transacción.
   registrar(
     datos: Partial<PasarelaTransaccion>,
     manager?: EntityManager,

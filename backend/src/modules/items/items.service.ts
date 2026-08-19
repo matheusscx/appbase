@@ -4260,8 +4260,9 @@ export class ItemsService {
       }
 
       // Los combos que contienen alguna de las recetas recién aplicadas y que
-      // quedaron desfasados. Se lee con `manager` —no con `dataSource`— para
-      // ver las escrituras de esta misma transacción antes del commit.
+      // quedaron desfasados. Se lee con el `manager` de la transacción para ver
+      // sus escrituras antes del commit. (Desde ADR-020 `db.query` resolvería el
+      // mismo manager; el explícito se queda porque no depende del contexto.)
       let afectados: DesfaseItemDto[] = [];
       if (recetasAplicadas.size) {
         const combosCandidatos: { combo_item_id: string }[] =

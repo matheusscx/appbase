@@ -180,9 +180,10 @@ export class VentasService {
         'La caja está en conciliación y no admite ventas',
       );
     }
-    // Lock pesimista sostenido hasta el commit. `findActiva` lee por repositorio,
-    // FUERA del manager transaccional y sin lock, así que el chequeo de arriba no
-    // garantiza nada: un cierre puede commitear mientras se procesan ítems,
+    // Lock pesimista sostenido hasta el commit. `findActiva` lee por repositorio
+    // —desde ADR-020 eso ES el manager de esta transacción— pero SIN lock, y
+    // bajo READ COMMITTED un cierre que commitea después no se ve: el chequeo de
+    // arriba no garantiza nada. Un cierre puede commitear mientras se procesan ítems,
     // precios e inventario, y el INSERT en `movimientos_caja` del final no
     // revalida el estado — el movimiento caería en una caja ya cerrada cuyo
     // arqueo ya quedó congelado. La caja virtual NO se bloquea: nunca se cierra
