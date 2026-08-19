@@ -956,6 +956,17 @@ latentes: cero consumidores hoy, ninguna bloquea):
 | El docblock de `repositorios.module.ts` afirma en pasado que tomar una 2ª conexión "dejó de ser posible" — hoy nadie registra en el ALS, y aun tras T5 la garantía cubre acceso por repo, no `dataSource.query` directo | Reformular a futuro + alcance explícito |
 | `repositorios.module.ts` depende de que `TxContext` y `DataSource` vengan de módulos `@Global`; si `TxContext` alguna vez inyectara algo no global, el lazo se rompe al arrancar | Comentario en el propio archivo |
 
+📋 **Y lo que dejaron las revisiones de las Tasks 5, 6 y 8** — los límites conocidos del
+enforcement y de la evidencia, que el ADR tiene que decir en voz alta para que nadie los
+redescubra como si fueran nuevos:
+
+| Qué | Dónde va |
+|---|---|
+| La regla de lint es **name-based**: un alias de importación (`import { DataSource as DS }`) la esquiva. Cero instancias hoy, realismo bajo, pero es un límite real | ADR-020, Consequences |
+| La regla ataca el **chokepoint de inyección**, no cada uso: un `DataSource` recibido como parámetro de función libre (`nombre-sugerido.util.ts`, `rango-fecha.util.ts`) queda fuera por diseño — esas funciones no pasan por DI | ADR-020, Consequences |
+| **Ningún e2e toca `suscripciones` ni `pasarela`** (la suite de pasarela es la única skipped): esa mitad del barrido la sostienen los unit tests, no el e2e | ADR-020, Consequences |
+| Dentro de una transacción, un `Promise.all` de lecturas ya no da paralelismo real y dispara la deprecación de pg. Ya anotado en `pendientes.md` por la Task 5 — acá solo el puntero | ADR-020 + `anti-patterns.md` |
+
 - [ ] **Step 1: Escribir el ADR-020** con este contenido (formato de los ADR existentes: Status/Context/Decision/Consequences):
 
   - **Context:** el deadlock medido (2 conexiones por operación, umbral N = pool, experimento del 2026-08-11) y la reincidencia del 2026-08-15 que probó que documentar no alcanza.
