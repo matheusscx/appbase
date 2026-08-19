@@ -45,7 +45,11 @@ export default tseslint.config(
     // chokepoint — inyectar `DataSource` — con dos selectores más: el
     // decorador `@InjectDataSource()` y el tipo `DataSource` en un parámetro
     // de constructor (Nest también resuelve por tipo, sin decorador). Sin
-    // `DataSource` inyectado no hay campo que renombrar ni aliasear.
+    // `DataSource` inyectado no hay campo que renombrar ni aliasear. El
+    // selector de tipo cubre las dos formas de parámetro de constructor —
+    // parámetro-propiedad (`private readonly x: DataSource`) y parámetro
+    // plano (`x: DataSource`) — porque Nest inyecta por tipo reflejado
+    // (`design:paramtypes`) sin que la propiedad de acceso importe.
     files: ['src/**/*.ts'],
     ignores: [
       'src/common/db/**',
@@ -68,7 +72,7 @@ export default tseslint.config(
         },
         {
           selector:
-            'MethodDefinition[kind="constructor"] TSParameterProperty > Identifier[typeAnnotation.typeAnnotation.typeName.name="DataSource"]',
+            'MethodDefinition[kind="constructor"] TSParameterProperty > Identifier[typeAnnotation.typeAnnotation.typeName.name="DataSource"], MethodDefinition[kind="constructor"] > FunctionExpression > Identifier[typeAnnotation.typeAnnotation.typeName.name="DataSource"]',
           message:
             'No inyectar DataSource directo. Inyectar Db (src/common/db) — es la única puerta al acceso a datos fuera de los repos.',
         },
