@@ -334,9 +334,10 @@ inyección (le entrega `Db`, no `DataSource`, salvo que decida lo contrario) —
 que el lint no puede *forzar* esa elección en un parámetro de función libre como sí la
 fuerza en un constructor.
 
-Lo único que sobrevive de este riesgo, y que el proxy no cierra: guardar la referencia a un
-método de repo y llamarla después, fuera del contexto donde se resolvió. Ver la entrada
-siguiente.
+Lo que sobrevive de este riesgo, y que el proxy no cierra, son dos vueltas de tuerca del
+mismo mecanismo: guardar la referencia a un método de repo y llamarla después (el contexto
+se pierde de más), y leer un `manager?` opcional como si omitirlo significara "fuera de la
+transacción" (el contexto se aplica de más). Las dos entradas siguientes.
 
 ### ❌ Guardar una referencia a un método de repo y llamarla después
 
@@ -369,6 +370,44 @@ momento, no el de cuando se invoca.
 Por eso esta entrada es prevención, no un arreglo — el patrón nunca se cometió en este
 repo, pero el proxy lo hace posible y no hay ningún lint que lo cace (el `Proxy` es
 indistinguible de un repo real para un analizador estático).
+
+### ❌ Omitir un `manager?` opcional creyendo que eso corre fuera de la transacción
+
+```ts
+// El idioma, en 8 sitios del repo (transacciones/tokens-acceso/propina-distribucion):
+const repo = manager ? manager.getRepository(X) : this.repo;
+
+// MAL — el llamador quiere que el rastro sobreviva al rollback y omite el manager
+// creyendo que así toma una conexión propia. `this.repo` es el proxy context-aware:
+// sin manager resuelve la transacción AMBIENTE del contexto ALS, así que el rollback
+// se lleva puesta la fila de auditoría — justo lo contrario de lo que se pidió.
+await this.db.transaccion(async (manager) => {
+  await this.pasarela.cobrar(...);            // falla y hace rollback
+  await this.transacciones.registrar(datos);  // sin manager → MISMA transacción
+});
+
+// BIEN — pedir el afuera explícitamente
+await this.db.transaccion(async (manager) => {
+  await this.pasarela.cobrar(...);
+  await this.db.sinTransaccion(() => this.transacciones.registrar(datos));
+});
+```
+
+**El contrato se dio vuelta y el código no cambió.** Antes de ADR-020 la rama `else` de ese
+idioma era literalmente una conexión propia del pool —por eso existía: la auditoría de un
+reembolso con timeout tenía que sobrevivir al rollback—. Con los repos convertidos en
+proxies context-aware, `this.repo` pasó a ser "la transacción que haya en contexto". El
+parámetro sigue ahí, con la misma firma y la misma pinta, significando lo contrario.
+
+Gemelo exacto de la entrada anterior, por la puerta opuesta: allá el contexto se pierde de
+más (referencia cacheada), acá se conserva de más. Ninguna de las dos la ve un lint, por el
+mismo motivo — el `Proxy` es indistinguible de un repo real para un analizador estático.
+
+**Verificado el 2026-08-19: cero llamadores vivos que dependan de esto.** El único caso real
+(`cobros.service.ts`, el `catch` del timeout de reembolso) ya quedó *léxicamente* fuera del
+callback de `db.transaccion`, así que el ALS lo deja solo en el pool sin pedirlo. La entrada
+es prevención para el llamador siguiente, no un arreglo. Los 8 sitios llevan la nota en el
+código; la regla general está en `docs/patterns/backend.md` §9.
 
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 

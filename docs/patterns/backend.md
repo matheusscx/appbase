@@ -416,6 +416,13 @@ con el deadlock que motivó esto y las alternativas descartadas, está en
   explícito gana: agrandar el diff sacándolo no aporta nada. El mecanismo de
   `Db` existe para el código que **no** enhebraba manager y por eso deadlockeaba
   (ADR-020) — no para reemplazar el enhebrado que ya funcionaba.
+- **Un `manager?: EntityManager` OPCIONAL ya no significa "fuera de la
+  transacción" si se omite.** El idioma
+  `const repo = manager ? manager.getRepository(X) : this.repo` sobrevive en 8
+  sitios y su contrato se dio vuelta: `this.repo` es el proxy context-aware, así
+  que la rama sin `manager` participa de la transacción ambiente y el rollback
+  se lleva lo escrito. Antes de ADR-020 esa rama era una conexión propia. Para
+  correr deliberadamente fuera está `db.sinTransaccion`, y solo eso.
 - **Guardar una referencia a un método de repo y llamarla después pierde el
   contexto.** Ver `docs/agent/anti-patterns.md` — el proxy resuelve el manager
   en el acceso a la propiedad, no en la invocación.

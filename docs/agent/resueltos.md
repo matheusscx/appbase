@@ -49,15 +49,21 @@ no por disciplina — el detalle completo, con las alternativas descartadas y su
   manager del contexto en cada acceso a propiedad. Los ~441 accesos a repos en 38 services
   **no se editaron** — motor de precios incluido.
 - **Barrido mecánico** sobre todo `backend/src`: 76 `dataSource.transaction(...)` →
-  `db.transaccion`, 153 `dataSource.query(...)` → `db.query` (el seeder, con 99 más, quedó
+  `db.transaccion`, 134 `dataSource.query(...)` → `db.query` (el seeder, con 99 más, quedó
   afuera a propósito: corre al boot, sin concurrencia). Los **21 sitios** de la tabla
   original quedaron cubiertos sin tocarlos: en cuanto la transacción que los envuelve
   registra su manager, cada uno lo resuelve solo.
 - **Defensa en profundidad**: pool explícito + `connectTimeoutMS` en `app.module.ts` (un
-  fallo futuro da 500 ruidoso con stack trace, no cuelgue silencioso) y una regla de lint
-  (`no-restricted-syntax`, `eslint.config.mjs`) que prohíbe inyectar `DataSource` o acceder
-  a `.query`/`.transaction`/`.manager`/`.createQueryRunner` fuera de la fachada `Db` y el
-  seeder. Vive en `lint:check`: gate local, pre-commit y CI.
+  fallo futuro da 500 ruidoso con stack trace, no cuelgue silencioso) y una familia de
+  **cuatro** selectores de lint (`no-restricted-syntax`, `eslint.config.mjs`) sobre
+  `src/**/*.ts`, con `src/common/db/**`, el seeder y `*.spec.ts` afuera: acceder a
+  `dataSource.query`/`.transaction`/`.manager`/`.createQueryRunner`, inyectar con
+  `@InjectDataSource()`, declarar un parámetro de constructor tipado `DataSource`, y
+  **registrar un módulo con `TypeOrmModule.forFeature`** en vez de
+  `RepositoriosModule.forFeature`. Este último llegó último y es el que más pesa: es la
+  precondición del mecanismo —sin ese registro el proxy no aplica y no hay nada que el
+  resto de la regla proteja—, y fue el hallazgo Critical de la revisión independiente de la
+  Task 9. Vive en `lint:check`: gate local, pre-commit y CI.
 - **Test de ráfaga** (`test/concurrencia-pool.e2e-spec.ts`, N=10=tamaño del pool contra
   `POST /ventas` por HTTP real, no `supertest` sin listener): RED antes del fix (colgaba
   indefinido), GREEN después. **Mutante que lo fija** (revertir el proxy a ignorar el
@@ -89,7 +95,8 @@ tanda.
 Commits principales: `ba9e08d8` (pool explícito + `connectTimeoutMS`), `6f2e5238` (burst
 e2e RED), `6b12e09d` (`TxContext` + `Db`), `270391c2` (proxy de repos), `33d3a7b3` (camino
 de la venta, burst GREEN), `ec2e3d7b`/`9f025fb6` (barrido del resto del backend),
-`6f26016f`/`19fc8d00`/`b06dbfdd` (regla de lint, endurecida en dos rondas).
+`6f26016f`/`19fc8d00`/`b06dbfdd` (regla de lint, endurecida en dos rondas) y `440c3364`
+(el cuarto selector: `TypeOrmModule.forFeature`, que reabría el chokepoint de registro).
 
 ---
 

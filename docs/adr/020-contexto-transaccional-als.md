@@ -76,7 +76,7 @@ mención de `TypeOrmModule.forFeature` que queda es el docblock de
 `repositorios.module.ts`, describiendo a qué reemplaza.
 
 Barrido mecánico sobre `backend/src`: 76 `dataSource.transaction(...)` → `db.transaccion`,
-153 `dataSource.query(...)` → `db.query` (el seeder, con 99 más, no se tocó — corre al boot,
+134 `dataSource.query(...)` → `db.query` (el seeder, con 99 más, no se tocó — corre al boot,
 sin concurrencia). Los sitios con `manager` explícito preexistente quedaron como estaban: son
 correctos y el explícito gana donde ya está.
 
@@ -117,10 +117,19 @@ correctos y el explícito gana donde ya está.
   pasa de deadlock a no-op seguro (`Db.transaccion` reusa el manager si ya hay uno activo).
 - Los repos no cambian de API ni de token de inyección: cero ediciones en los 38 services
   que los consumen, cero riesgo de regresión por refactor masivo.
-- Los 37 archivos de spec que mockean con `getRepositoryToken` quedan intactos: el mock
-  reemplaza el provider entero y el proxy nunca entra en juego.
-- Un futuro descuido similar al de `auth.service.ts` (2026-08-15) ahora falla en `lint:check`
-  antes de llegar a producción, en vez de esperar a que alguien lo mida con una ráfaga.
+- **El enfoque de mockeo no cambia**: los 37 specs que inyectan con
+  `getRepositoryToken` siguen sirviendo tal cual, porque el mock reemplaza el provider
+  entero y el proxy nunca entra en juego. Ojo con el número: 37 archivos de spec **sí**
+  fueron editados por este trabajo (los que mockeaban `DataSource` y ahora mockean `Db`),
+  y la coincidencia es casualidad — son dos conjuntos distintos, se solapan en 26.
+- **El descuido de 2026-08-15 (`auth.service.ts`) queda cubierto por el mecanismo, no por
+  el lint** — son dos protecciones distintas y conviene no confundirlas:
+  - *El mecanismo* neutraliza la conducta: envolver código viejo en una transacción nueva,
+    hoy escrito con `db.transaccion`, es un no-op seguro (reusa el manager activo). No
+    falla lint, y **no necesita fallar**: ya no rompe nada.
+  - *El lint* cierra las puertas que esquivarían el mecanismo — la grafía literal
+    `dataSource.query/.transaction/.manager/.createQueryRunner`, la inyección de
+    `DataSource` y `TypeOrmModule.forFeature`. Eso, y solo eso, falla en `lint:check`.
 
 ### Negativo
 
@@ -164,10 +173,18 @@ correctos y el explícito gana donde ya está.
 **Del enforcement de lint, verificados contra revisiones independientes de las Tasks 5, 6 y
 8 — límites reales del enforcement automatizado, no del mecanismo en sí:**
 
-- **La regla es *name-based*.** Un alias de importación (`import { DataSource as DS } from
-  'typeorm'`) la esquiva: el selector busca el identificador `DataSource` en el tipo
-  anotado, no resuelve el símbolo importado. Cero instancias hoy, realismo bajo — pero es un
-  límite real de un `no-restricted-syntax` sobre AST sintáctico, no semántico.
+- **La regla es *name-based*, y un alias la esquiva por completo: la cobertura residual es
+  CERO, no parcial.** Con `import { DataSource as DS } from 'typeorm'` y
+  `constructor(private ds: DS)`, Nest inyecta igual —resuelve por `design:paramtypes`, y el
+  metadata emitido apunta a la clase `DataSource`, que es lo que devuelve
+  `getDataSourceToken()`— pero ningún selector dispara. Medido el 2026-08-19 corriendo los
+  4 selectores del `eslint.config.mjs` real contra tres variantes: la canónica da 2 errores,
+  el alias con la propiedad renombrada da **0**, y el alias conservando el nombre
+  `dataSource` da 1 (sobrevive solo el selector de uso, que matchea el nombre de la
+  propiedad, no el tipo). O sea: un solo alias derrota a la vez el selector de tipo y el de
+  `.query/.transaction/.manager`; el de `@InjectDataSource` no aplica porque el decorador es
+  opcional. Cero instancias hoy y realismo bajo, pero el límite es total, no de impacto
+  bajo.
 - **El selector de `TypeOrmModule.forFeature` es *name-based* también — y este pesa más,
   porque es el que sostiene la PRECONDICIÓN de todo el mecanismo** (ver más arriba: sin ese
   registro, el proxy no aplica y no hay nada que el resto de la regla proteja). Verificado
@@ -175,11 +192,10 @@ correctos y el explícito gana donde ya está.
   (`TypeOrmModule as TOM`), un namespace (`import * as typeorm from '@nestjs/typeorm'`), un
   acceso computado (`TypeOrmModule['forFeature']`) y una const local
   (`const TOM = TypeOrmModule`) esquivan el selector, los cuatro con exit 0. Cero instancias
-  hoy — pero a diferencia del límite de `DataSource` (bajo impacto si se esquiva: sigue
-  habiendo otros dos selectores sobre la inyección), esquivar este deja un módulo entero
-  **sin ninguna de las garantías de este ADR**, indistinguible en runtime de un módulo bien
-  registrado. Un lector que no vivió esto puede asumir que el registro está cerrado del
-  todo — no lo está: es AST sintáctico, no semántico, igual que el resto de la familia.
+  hoy — pero esquivar este deja un módulo entero **sin ninguna de las garantías de este
+  ADR**, indistinguible en runtime de un módulo bien registrado. Un lector que no vivió
+  esto puede asumir que el registro está cerrado del todo — no lo está: es AST sintáctico,
+  no semántico, igual que el resto de la familia.
 - **La regla ataca el chokepoint de *inyección* de `DataSource`, no cada *uso*.** Un
   `DataSource` recibido como parámetro de una **función libre** (no un constructor con DI de
   Nest) queda fuera por diseño: `nombre-sugerido.util.ts:188` y `rango-fecha.util.ts:79`
@@ -206,6 +222,17 @@ hereda de algo previo:**
   indistinguible de un repo real para un analizador estático). Cero ocurrencias verificadas
   en `backend/src` (Task 4, tres greps distintos) — es prevención, no un arreglo. Detalle y
   ejemplo MAL/BIEN en `docs/agent/anti-patterns.md`.
+- **El contexto se propaga a las continuaciones diferidas, y eso puede sobrevivir al
+  commit.** Es el gemelo del límite anterior, por la puerta opuesta: ahí el contexto se
+  pierde de más, acá se conserva de más. `callback-dispatcher.service.ts:70-78` hace
+  `void fetch(url, ...).then(async (res) => { ... await this.ordenRepo.save(orden); })`:
+  el `.then` hereda el store del ALS de quien lo encoló, así que si algún día `dispatch()`
+  se llamara desde adentro de un `db.transaccion`, ese `save` correría contra un manager ya
+  commiteado — el `fetch` puede tardar más que la transacción. **Hoy es inalcanzable**
+  (verificado el 2026-08-19: el único llamador es `pagos-redirect.service.ts:237`, en
+  `confirmarRetorno`, y ese archivo no tiene ni un `db.transaccion`). La condición que lo
+  volvería alcanzable es exactamente esa: envolver la llamada a `dispatch()` en una
+  transacción. Si hace falta, la escritura diferida va dentro de `db.sinTransaccion`.
 
 ## Enforcement
 
