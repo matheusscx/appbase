@@ -61,6 +61,20 @@ Node — sin dependencia nueva):
   `service.repo.findOne(...)` ya existente resuelve ese manager sin saberlo, motor de
   precios incluido.
 
+⚠️ **La garantía completa depende de CÓMO se registra el módulo, y hay que decirlo en voz
+alta: es la precondición de todo lo anterior.** Un módulo que declare sus entities con
+`TypeOrmModule.forFeature([...])` en vez de `RepositoriosModule.forFeature([...])` recibe
+repos atados al `DataSource` del pool — sin proxy, sin resolución de contexto — y un
+service que los use adentro de `db.transaccion` reabre el deadlock exacto que este ADR
+cierra, sin que ningún selector de lint sobre `DataSource` lo vea (no hay `DataSource`
+inyectado ahí: el registro pasa por el `Module` decorator, no por el constructor). Por eso
+`docs/patterns/backend.md` §5 manda `RepositoriosModule.forFeature` como el único registro
+válido, y `eslint.config.mjs` prohíbe además el propio `TypeOrmModule.forFeature` en
+`src/**` (mismas exclusiones que el resto de esta regla). Verificado el 2026-08-18: 36 de
+36 módulos de `backend/src` registran con `RepositoriosModule.forFeature`; la única
+mención de `TypeOrmModule.forFeature` que queda es el docblock de
+`repositorios.module.ts`, describiendo a qué reemplaza.
+
 Barrido mecánico sobre `backend/src`: 76 `dataSource.transaction(...)` → `db.transaccion`,
 153 `dataSource.query(...)` → `db.query` (el seeder, con 99 más, no se tocó — corre al boot,
 sin concurrencia). Los sitios con `manager` explícito preexistente quedaron como estaban: son
@@ -75,11 +89,12 @@ correctos y el explícito gana donde ya está.
   revertido a ignorar el contexto): la ráfaga de 10 dio **10/10 en 500, en ~6.87 s** — falla
   rápido y ruidoso, no cuelga sin límite.
 - **Regla de lint** (`eslint.config.mjs`, `no-restricted-syntax`) que prohíbe, en
-  `src/**/*.ts` fuera de `src/common/db/**` y el seeder: acceder a `dataSource.query` /
-  `.transaction` / `.manager` / `.createQueryRunner`, inyectar `DataSource` con
-  `@InjectDataSource()`, o declarar un parámetro de constructor (propiedad o plano) tipado
-  `DataSource`. Vive en `lint:check`, que ya corre en gate, pre-commit y CI — sin escáner
-  nuevo que mantener.
+  `src/**/*.ts` fuera de `src/common/db/**`, el seeder y `*.spec.ts`: acceder a
+  `dataSource.query` / `.transaction` / `.manager` / `.createQueryRunner`, inyectar
+  `DataSource` con `@InjectDataSource()`, declarar un parámetro de constructor (propiedad o
+  plano) tipado `DataSource`, o registrar un módulo con `TypeOrmModule.forFeature` en vez
+  de `RepositoriosModule.forFeature`. Vive en `lint:check`, que ya corre en gate,
+  pre-commit y CI — sin escáner nuevo que mantener.
 - **E2E de ráfaga** (`test/concurrencia-pool.e2e-spec.ts`): N = tamaño del pool de
   `POST /ventas` simultáneas, por HTTP real contra un puerto (no `supertest` sin listener,
   que revienta antes de que el pool importe). Antes del fix este test colgaba; con el fix
@@ -124,9 +139,10 @@ correctos y el explícito gana donde ya está.
   de "detenerse y preguntar" (motor de cálculo de precios).
 - Una pieza de infraestructura propia que mantener (`TxContext` + `Db` + el proxy de repos,
   ~200 líneas) en vez de delegar en una librería.
-- `dataSource` directo queda prohibido por lint en todo `src/**` salvo la fachada `Db` y el
-  seeder — cualquier necesidad legítima futura de acceso directo (poco probable, pero no
-  imposible) exige una excepción explícita en `eslint.config.mjs`, no un import silencioso.
+- `dataSource` directo queda prohibido por lint en todo `src/**` salvo la fachada `Db`, el
+  seeder y `*.spec.ts` — cualquier necesidad legítima futura de acceso directo (poco
+  probable, pero no imposible) exige una excepción explícita en `eslint.config.mjs`, no un
+  import silencioso.
 
 ### Límites conocidos — declarados a propósito, para que nadie los redescubra como si fueran nuevos
 
@@ -162,6 +178,18 @@ correctos y el explícito gana donde ya está.
   llame (la única suite de pasarela existente, `pasarela-oneclick`, está *skipped*). Esa
   mitad del barrido está sostenida por los unit tests de esos services, no por el e2e de
   ráfaga — evidencia más débil que la que cubre ventas, salones y caja.
+
+**Del uso del proxy en código consumidor — un límite que este mecanismo introduce, no que
+hereda de algo previo:**
+
+- **Guardar la referencia a un método de repo y llamarla después pierde el contexto.** El
+  proxy resuelve `TxContext.managerActivo()` en el **acceso a la propiedad**
+  (`this.repo.find`), no en la invocación (`find(...)`). `const find = this.repo.find`
+  tomado fuera de una transacción y llamado adentro usa el repo del pool, no el de la
+  transacción — reabre el mismo deadlock por una vía que ningún lint detecta (el `Proxy` es
+  indistinguible de un repo real para un analizador estático). Cero ocurrencias verificadas
+  en `backend/src` (Task 4, tres greps distintos) — es prevención, no un arreglo. Detalle y
+  ejemplo MAL/BIEN en `docs/agent/anti-patterns.md`.
 
 ## Enforcement
 

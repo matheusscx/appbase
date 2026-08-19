@@ -175,8 +175,9 @@ distintos); ningún lint lo caza. Ver `anti-patterns.md`.
 
 Y la conclusión de método: **una entrada de backlog no previene una reincidencia.** El
 barrido de agosto documentó causa, umbral y sitios, y aun así el patrón volvió. Lo que lo
-habría cazado es un test de ráfaga en la suite —hoy existe uno para `refresh`— o una regla
-automatizada. Candidato claro para `### ✅ AUTOMATIZADO` de `anti-patterns.md`.
+cazó fue un test de ráfaga en la suite (`test/concurrencia-pool.e2e-spec.ts`) más el
+mecanismo por construcción de ADR-020 — ✅ hecho el 2026-08-18: la entrada de
+`anti-patterns.md` que describía este bug pasó a `### ✅ AUTOMATIZADO`.
 
 ---
 

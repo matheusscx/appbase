@@ -139,7 +139,7 @@ registros borrados en listados y reportes.
 
 ```ts
 // MAL — 1 query para la lista + 1 query por fila (N+1)
-const rows = await this.dataSource.query(`SELECT ... FROM items WHERE ...`, [p]);
+const rows = await this.db.query(`SELECT ... FROM items WHERE ...`, [p]);
 const data = await Promise.all(
   rows.map(async (r) => ({
     ...this.mapRow(r),
@@ -149,7 +149,7 @@ const data = await Promise.all(
 
 // BIEN — resolver el dato derivado para todas las filas en una sola query
 const ids = rows.map((r) => r.id);
-const dispRows = await this.dataSource.query(
+const dispRows = await this.db.query(
   `SELECT item_id, ... FROM ... WHERE item_id = ANY($1) AND eliminado_el IS NULL
    GROUP BY item_id`,
   [ids],
@@ -165,6 +165,15 @@ igual a `Promise.all` sobre queries: sigue siendo N round-trips.
 → *Instancia real (deuda viva, aún sin corregir): `items.service.ts` `findAll` llama
 `calcularDisponibleReceta`/`Combo` por fila. Difícil de detectar por lint → se revisa en
 el cierre con el sub-agente independiente de `verify-feature`.*
+
+⚠️ **Matiz post-ADR-020: dentro de una transacción, `Promise.all` de lecturas deja de
+paralelizar.** Todas resuelven contra el mismo `EntityManager` del contexto ALS — un único
+`pg.Client` — así que `node-postgres` las encola en vez de correrlas en paralelo (y emite
+`DeprecationWarning: Calling client.query() when the client is already executing a query`).
+No es un N+1 nuevo ni el resultado cambia, pero el `Promise.all` deja de comprar el
+paralelismo que parece prometer una vez que corre en transacción. Instancia real:
+`calculo-precios.service.ts`, dos sitios — ver `docs/agent/pendientes.md` § "Necesita que
+el owner conteste" (toca el motor de cálculo de precios, requiere autorización del owner).
 
 **Tres variantes que cuestan más que el N+1 de manual** (las dos primeras encontradas en
 jul-2026 en el camino caliente del POS, corregidas en la auditoría de `ventas`+`pagos`):
@@ -300,13 +309,22 @@ bastó para evitar que volviera a pasar.
 `TxContext` + la fachada `Db` + los repos como proxies context-aware
 (`backend/src/common/db/`) cierran el mecanismo por construcción: un repositorio inyectado
 resuelve **solo** el manager de la transacción activa, sin que el service lo enhebre a
-mano. Ya no existe "llamar sin pasar el manager" — no hay manager que pasar. Una regla de
-lint (`no-restricted-syntax`, `eslint.config.mjs`) prohíbe además inyectar `DataSource`
-directo fuera de esa fachada y el seeder, así que tampoco se puede reintroducir el
-mecanismo original por otra vía. El experimento que midió el umbral (9 ok / 10 cuelga),
-la reincidencia y las alternativas descartadas antes de esta solución están en
+mano. Ya no existe "llamar sin pasar el manager" — no hay manager que pasar. Una familia de
+reglas de lint (`no-restricted-syntax`, `eslint.config.mjs`) cierra el chokepoint de
+**inyección**: prohíbe `DataSource` directo fuera de la fachada y el seeder, y prohíbe
+registrar repos con `TypeOrmModule.forFeature` en vez de `RepositoriosModule.forFeature`
+(el registro es la otra mitad de la precondición — sin él, un módulo entero queda con repos
+del pool aunque nadie inyecte `DataSource`). El experimento que midió el umbral (9 ok / 10
+cuelga), la reincidencia y las alternativas descartadas antes de esta solución están en
 [ADR-020](../adr/020-contexto-transaccional-als.md) y su cierre en
 [`resueltos.md`](resueltos.md).
+
+⚠️ **La cobertura del lint tiene límites propios, declarados en detalle en
+[ADR-020](../adr/020-contexto-transaccional-als.md) § Límites conocidos:** es
+*name-based* (un alias de importación como `DataSource as DS` lo esquiva) y ataca el
+chokepoint de inyección/registro, no cada uso — un `DataSource` recibido por parámetro de
+una función libre (fuera de DI de Nest) queda fuera por diseño. Cero instancias hoy de
+ninguno de los dos.
 
 Lo único que sobrevive de este riesgo, y que el proxy no cierra: guardar la referencia a un
 método de repo y llamarla después, fuera del contexto donde se resolvió. Ver la entrada

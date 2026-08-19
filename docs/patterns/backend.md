@@ -225,7 +225,11 @@ defensa entre los llamadores funciona hasta que aparece el que se olvida.
 
 ## 5. Module
 
-`TypeOrmModule.forFeature([...])` con las entities que el service inyecta;
+`RepositoriosModule.forFeature([...])` (`src/common/db`) con las entities que el
+service inyecta — **nunca `TypeOrmModule.forFeature`**: ese registra repos del
+pool, sin los proxies context-aware que resuelven el manager de una transacción
+activa (ADR-020), así que un service que los use adentro de `db.transaccion`
+reabre el deadlock del pool. Prohibido por lint (`eslint.config.mjs`).
 `exports: [<Feature>Service]` si otro módulo lo usa. No importar `RbacModule` ni
 `CommonModule` (los guards son globales). Ej.: `monedas.module.ts`.
 
@@ -260,7 +264,7 @@ defensa entre los llamadores funciona hasta que aparece el que se olvida.
   "50%" cargado como `50` (ago-2026, `3de96d28`). El costo de la duplicación no
   fue que las copias divergieran, sino que *nadie podía ver de un vistazo si
   todos los caminos la usaban*. Hoy: `common/utils/monto-regla.util.ts`.
-- **`RETURNING` con `dataSource.query` siempre pasa por `unwrap()`:** TypeORM +
+- **`RETURNING` con `db.query` siempre pasa por `unwrap()`:** TypeORM +
   pg devuelve `INSERT/UPDATE ... RETURNING` como `[rows, rowCount]`, no como
   `rows` — tipar el resultado directo compila pero trae la forma equivocada en
   runtime. Usar `unwrap<T>(...)` de `common/utils/pg-returning.util.ts` sobre

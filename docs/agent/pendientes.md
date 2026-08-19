@@ -44,9 +44,14 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 > 🔴 **Lo más importante que hay abierto en este backlog.** Decisión del owner
 > (2026-08-11). Está primero en el archivo a propósito: **cuando se retome el backlog, esto
-> va antes que cualquier otra entrada**, incluidas las 🚩 de producción de más abajo. Una de
-> las tres —el deadlock de conexiones— es la única entrada del repo que puede dejar la API
-> muerta con diez operaciones simultáneas.
+> va antes que cualquier otra entrada**, incluidas las 🚩 de producción de más abajo.
+> ⚠️ **Corregido el 2026-08-18:** la razón original de esta frase —el agotamiento del pool de
+> conexiones, que dejaba la API muerta con diez operaciones simultáneas— está **cerrada**
+> (ADR-020, ver `resueltos.md`). Lo que hoy sostiene la prioridad de la sección: la pieza
+> residual de orden de locks en la bandeja de desfases (tema "Conexiones / deadlock" de la
+> tabla de abajo) sigue siendo un deadlock real de fila, aunque más acotado que N=pool, más
+> rendimiento y redondeo de plata — las tres siguen midiéndose juntas por lo que dice "Por
+> qué juntas" más abajo.
 
 **Estas tres NO se tocan de a pedazos ni de arrastre dentro de otra tarea. Van juntas, en
 una pasada dedicada, con el sistema quieto.**
@@ -973,8 +978,12 @@ conviene no confundirlos:
   `inventario`): el lock sí se toma, pero el orden lo decide el cliente. El arreglo es el
   contrario —no agregar un lock sino fijar un orden—, y las piezas ya existen en el repo.
 
-⚠️ Ninguno de estos moldes es el de la 🔴 del principio del archivo, que es **agotamiento
-del pool de conexiones**, no locks de fila. Son tres cosas distintas que se llaman igual.
+⚠️ **Corregido el 2026-08-18:** ninguno de estos moldes es el de la entrada residual 🔴 del
+principio del archivo ("Dos ciclos de orden de lock en la bandeja de desfases de combos…").
+Esa entrada también es orden de locks de fila —no agotamiento de pool, que ya se cerró
+(ADR-020)—, pero son tablas y disparadores distintos: acá es caja/inventario/stock; ahí es
+`items`/`item_receta`/`item_combo` en la bandeja de desfases. Cuatro cosas separadas que
+comparten familia de bug, no la misma entrada.
 
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es otro molde que los tres

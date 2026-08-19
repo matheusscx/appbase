@@ -15,6 +15,16 @@ import { TxContext } from './tx-context';
  * directo, que sigue siendo posible si alguien lo inyecta (por eso existe
  * además la regla de lint sobre `DataSource`, ver ADR-020).
  *
+ * ⚠️ PRECONDICIÓN de todo lo anterior, no un detalle: la garantía existe SOLO
+ * si el módulo feature registra sus entities con `RepositoriosModule.forFeature`
+ * (esta clase), nunca con `TypeOrmModule.forFeature`. Un módulo que use ese
+ * último recibe repos atados al `DataSource` del pool sin pasar por este
+ * proxy — mismo deadlock si se usan dentro de `db.transaccion`, y sin que la
+ * regla de lint sobre `DataSource` lo vea (acá no hay `DataSource` inyectado
+ * en ningún constructor; el registro pasa por el `Module` decorator). Por eso
+ * `eslint.config.mjs` prohíbe además `TypeOrmModule.forFeature` en `src/**`
+ * fuera de este módulo, el seeder y los specs.
+ *
  * Límites conocidos (verificados con grep el 2026-08-18, cero consumidores
  * hoy — documentados en detalle en ADR-020 § Consequences): no cubre
  * `getTreeRepository` (entidades `@Tree`), no alimenta `EntitiesMetadataStorage`
