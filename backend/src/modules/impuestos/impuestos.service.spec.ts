@@ -67,7 +67,6 @@ describe('ImpuestosService', () => {
       query: jest.fn().mockResolvedValue([{ pais_id: PAIS }]),
     };
     const dbMock = {
-      transaccion: jest.fn(),
       query: dataSource.query,
       sinTransaccion: (fn: () => unknown) => fn(),
     };

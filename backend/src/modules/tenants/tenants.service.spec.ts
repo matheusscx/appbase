@@ -64,8 +64,6 @@ describe('TenantsService', () => {
   let dataSource: {
     transaction: jest.Mock;
     query: jest.Mock;
-    /** El manager de FUERA de la transacción. Ver `crearUsuario — atomicidad`. */
-    manager: { query: jest.Mock; save: jest.Mock };
   };
   let usuarioTenantRepo: {
     findOne: jest.Mock;
@@ -111,7 +109,6 @@ describe('TenantsService', () => {
     dataSource = {
       transaction: jest.fn(),
       query: jest.fn(),
-      manager: { query: jest.fn(), save: jest.fn() },
     };
     const dbMock = {
       transaccion: dataSource.transaction,
@@ -698,9 +695,6 @@ describe('TenantsService', () => {
 
     beforeEach(() => {
       managerTx = managerFake();
-      // El manager de fuera de la transacción: si alguna escritura cae acá, el
-      // alta dejó de ser atómica.
-      dataSource.manager = managerFake();
       dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
         cb(managerTx),
       );
@@ -712,13 +706,11 @@ describe('TenantsService', () => {
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(managerTx.save).toHaveBeenCalled();
       expect(managerTx.query).toHaveBeenCalled();
-      // Las dos mitades del mutante: sin `transaction` no hay rollback, y con
-      // `dataSource.manager` cada sentencia commitea sola.
-      expect(dataSource.manager.save).not.toHaveBeenCalled();
-      expect(dataSource.manager.query).not.toHaveBeenCalled();
-      // La otra puerta de la misma fuga, que no es el mutante medido: escribir
-      // con un repositorio inyectado en vez del manager commitea igual de
-      // suelto, y `managerTx.save` seguiría llamándose por las otras filas.
+      // La otra mitad del mutante: sin `transaccion` cada sentencia commitea
+      // sola. `db.query` fuera de la transacción es esa fuga por SQL crudo.
+      // (Las aserciones sobre `dataSource.manager` se sacaron: el service ya no
+      // inyecta `DataSource`, el mock no lo cablea en `dbMock` y por lo tanto
+      // no podían fallar.)
       expect(usuarioTenantRepo.save).not.toHaveBeenCalled();
       expect(tenantRepo.save).not.toHaveBeenCalled();
       expect(dataSource.query).not.toHaveBeenCalled();

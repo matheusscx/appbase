@@ -197,7 +197,9 @@ describe('VentasService', () => {
         .mockImplementation((cb: (m: typeof manager) => unknown) =>
           cb(manager),
         ),
-      // dataSource.query used OUTSIDE transaction for moneda rows only
+      // `db.query` para las filas de moneda. Ojo: el nombre `dataSourceMock`
+      // es histórico — el service inyecta `Db`, y `db.query` resuelve el
+      // manager de la transacción si hay una en contexto (ADR-020).
       query: jest.fn().mockResolvedValue(MONEDA_ROWS),
     };
     const dbMock = {

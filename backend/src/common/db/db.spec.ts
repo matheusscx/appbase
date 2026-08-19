@@ -69,6 +69,23 @@ describe('TxContext + Db', () => {
     });
   });
 
+  it('si fn rechaza, propaga el error Y libera el contexto', async () => {
+    // Propiedad de la que dependen todos los `catch` que corren después de una
+    // transacción fallida (el rastro de auditoría del timeout de reembolso, por
+    // ejemplo): si el store del ALS sobreviviera al rechazo, esas escrituras se
+    // irían contra un manager ya abortado. `dataSource.transaction` propaga el
+    // rechazo, así que `als.run` termina y el store se destruye con él.
+    await expect(
+      db.transaccion(async () => {
+        expect(tx.managerActivo()).toBe(managerTx);
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(tx.managerActivo()).toBeUndefined();
+    await expect(db.query('SELECT 1')).resolves.toEqual(['desde-pool']);
+  });
+
   it('sinTransaccion() escapa del contexto: query vuelve al pool', async () => {
     await db.transaccion(async () => {
       await db.sinTransaccion(async () => {
@@ -95,20 +112,31 @@ describe('TxContext + Db', () => {
 });
 
 describe('RepositoriosModule.forFeature (proxy context-aware)', () => {
+  const managerDelPool = { query: jest.fn() } as unknown as EntityManager;
   const repoBase = {
     find: jest.fn().mockResolvedValue('base'),
     metadata: { name: 'EntidadDePrueba' },
+    manager: managerDelPool,
   };
-  const repoDeTx = { find: jest.fn().mockResolvedValue('tx') };
+  const repoDeTx: { find: jest.Mock; manager: EntityManager } = {
+    find: jest.fn().mockResolvedValue('tx'),
+    manager: undefined as unknown as EntityManager,
+  };
   const managerTx = {
     getRepository: jest.fn().mockReturnValue(repoDeTx),
   } as unknown as EntityManager;
+  // Como en TypeORM real: el repo que devuelve un manager apunta a ese manager.
+  repoDeTx.manager = managerTx;
   const dataSource = {
     getRepository: jest.fn().mockReturnValue(repoBase),
   } as unknown as DataSource;
 
   let tx: TxContext;
-  let repo: { find: () => Promise<string>; metadata: { name: string } };
+  let repo: {
+    find: () => Promise<string>;
+    metadata: { name: string };
+    manager: EntityManager;
+  };
 
   // `RepositoriosModule.forFeature` es un dynamic module sin `imports` propios,
   // así que sus providers solo ven lo que venga de un módulo `@Global`. En
@@ -148,5 +176,16 @@ describe('RepositoriosModule.forFeature (proxy context-aware)', () => {
 
   it('reenvía propiedades no-método (metadata)', () => {
     expect(repo.metadata.name).toBe('EntidadDePrueba');
+  });
+
+  it('`repo.manager` bajo contexto es el manager de la transacción', () => {
+    // No es teórico: `garzones.service.ts` usa `garzonRepo.manager.query(...)`
+    // en producción. Si el proxy devolviera el `manager` del repo del pool,
+    // ese `query` saldría por una SEGUNDA conexión desde adentro de la
+    // transacción — el deadlock exacto que este mecanismo cierra.
+    expect(repo.manager).toBe(managerDelPool);
+    return tx.correrCon(managerTx, async () => {
+      expect(repo.manager).toBe(managerTx);
+    });
   });
 });
