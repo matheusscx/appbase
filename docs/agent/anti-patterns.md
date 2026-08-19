@@ -311,7 +311,7 @@ bastó para evitar que volviera a pasar.
 resuelve **solo** el manager de la transacción activa, sin que el service lo enhebre a
 mano. Ya no existe "llamar sin pasar el manager" — no hay manager que pasar. Una familia de
 reglas de lint (`no-restricted-syntax`, `eslint.config.mjs`) cierra el chokepoint de
-**inyección**: prohíbe `DataSource` directo fuera de la fachada y el seeder, y prohíbe
+**inyección**: prohíbe `DataSource` directo fuera de la fachada, el seeder y `*.spec.ts`, y prohíbe
 registrar repos con `TypeOrmModule.forFeature` en vez de `RepositoriosModule.forFeature`
 (el registro es la otra mitad de la precondición — sin él, un módulo entero queda con repos
 del pool aunque nadie inyecte `DataSource`). El experimento que midió el umbral (9 ok / 10
@@ -321,10 +321,18 @@ cuelga), la reincidencia y las alternativas descartadas antes de esta solución 
 
 ⚠️ **La cobertura del lint tiene límites propios, declarados en detalle en
 [ADR-020](../adr/020-contexto-transaccional-als.md) § Límites conocidos:** es
-*name-based* (un alias de importación como `DataSource as DS` lo esquiva) y ataca el
-chokepoint de inyección/registro, no cada uso — un `DataSource` recibido por parámetro de
-una función libre (fuera de DI de Nest) queda fuera por diseño. Cero instancias hoy de
-ninguno de los dos.
+*name-based* (un alias de importación como `DataSource as DS` lo esquiva, y lo mismo un
+alias/namespace/acceso computado sobre `TypeOrmModule`) y ataca el chokepoint de
+inyección/registro, no cada uso — un `DataSource` recibido por parámetro de una función
+libre (fuera de DI de Nest) queda fuera por diseño: no pasa por el constructor que
+resuelven los selectores, recibe el valor a mano desde quien la llama. **Cero instancias
+del alias — dos reales de la función libre**, y son las que el propio ADR nombra:
+`common/utils/nombre-sugerido.util.ts:188` (`ds: DataSource | Db`) y
+`common/utils/rango-fecha.util.ts:79` (`db: DataSource | EntityManager | Db`). No son un
+agujero nuevo: siguen protegidas porque quien las llama ya pasó por el chokepoint de
+inyección (le entrega `Db`, no `DataSource`, salvo que decida lo contrario) — el límite es
+que el lint no puede *forzar* esa elección en un parámetro de función libre como sí la
+fuerza en un constructor.
 
 Lo único que sobrevive de este riesgo, y que el proxy no cierra: guardar la referencia a un
 método de repo y llamarla después, fuera del contexto donde se resolvió. Ver la entrada

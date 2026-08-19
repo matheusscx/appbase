@@ -366,7 +366,10 @@ Dos lugares, ambos en el **mismo commit**:
 Todo acceso a datos fuera de un repositorio pasa por `Db`
 (`src/common/db/db.service.ts`), inyectado en el constructor como cualquier otro
 provider. **Inyectar `DataSource` directo está prohibido por lint** en
-`src/**/*.ts` (excepciones: la propia fachada y el seeder) — el porqué completo,
+`src/**/*.ts` (excepciones: la propia fachada, el seeder y `*.spec.ts`) — mismo
+lint que prohíbe **registrar** un módulo con `TypeOrmModule.forFeature` en vez
+de `RepositoriosModule.forFeature` (§5): ese registro es la precondición de
+todo este mecanismo, sin ella el proxy de repos no aplica. El porqué completo,
 con el deadlock que motivó esto y las alternativas descartadas, está en
 [ADR-020](../adr/020-contexto-transaccional-als.md).
 

@@ -168,11 +168,27 @@ correctos y el explícito gana donde ya está.
   'typeorm'`) la esquiva: el selector busca el identificador `DataSource` en el tipo
   anotado, no resuelve el símbolo importado. Cero instancias hoy, realismo bajo — pero es un
   límite real de un `no-restricted-syntax` sobre AST sintáctico, no semántico.
+- **El selector de `TypeOrmModule.forFeature` es *name-based* también — y este pesa más,
+  porque es el que sostiene la PRECONDICIÓN de todo el mecanismo** (ver más arriba: sin ese
+  registro, el proxy no aplica y no hay nada que el resto de la regla proteja). Verificado
+  con cuatro mutantes (Task 9, revisión independiente): un alias de import
+  (`TypeOrmModule as TOM`), un namespace (`import * as typeorm from '@nestjs/typeorm'`), un
+  acceso computado (`TypeOrmModule['forFeature']`) y una const local
+  (`const TOM = TypeOrmModule`) esquivan el selector, los cuatro con exit 0. Cero instancias
+  hoy — pero a diferencia del límite de `DataSource` (bajo impacto si se esquiva: sigue
+  habiendo otros dos selectores sobre la inyección), esquivar este deja un módulo entero
+  **sin ninguna de las garantías de este ADR**, indistinguible en runtime de un módulo bien
+  registrado. Un lector que no vivió esto puede asumir que el registro está cerrado del
+  todo — no lo está: es AST sintáctico, no semántico, igual que el resto de la familia.
 - **La regla ataca el chokepoint de *inyección* de `DataSource`, no cada *uso*.** Un
   `DataSource` recibido como parámetro de una **función libre** (no un constructor con DI de
-  Nest) queda fuera por diseño: `nombre-sugerido.util.ts` y `rango-fecha.util.ts` reciben
-  parámetros tipados así y no pasan por inyección de dependencias, así que ningún selector
-  de constructor los alcanza. Es una decisión de alcance, no un agujero descubierto tarde.
+  Nest) queda fuera por diseño: `nombre-sugerido.util.ts:188` y `rango-fecha.util.ts:79`
+  reciben parámetros tipados así (`DataSource | Db` y `DataSource | EntityManager | Db`
+  respectivamente) y no pasan por inyección de dependencias, así que ningún selector de
+  constructor los alcanza. **Dos instancias reales, no cero** — siguen protegidas porque
+  quien las llama ya pasó por el chokepoint de inyección (recibe `Db` y decide qué pasar),
+  no porque el lint las cubra directamente. Es una decisión de alcance, no un agujero
+  descubierto tarde.
 - **Ningún e2e ejercita `suscripciones` ni `pasarela`** contra el camino ALS — son los dos
   módulos que el barrido de la Task 6 tocó sin que ninguna spec de `test/*.e2e-spec.ts` los
   llame (la única suite de pasarela existente, `pasarela-oneclick`, está *skipped*). Esa

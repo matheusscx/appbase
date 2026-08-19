@@ -978,12 +978,17 @@ conviene no confundirlos:
   `inventario`): el lock sí se toma, pero el orden lo decide el cliente. El arreglo es el
   contrario —no agregar un lock sino fijar un orden—, y las piezas ya existen en el repo.
 
-⚠️ **Corregido el 2026-08-18:** ninguno de estos moldes es el de la entrada residual 🔴 del
-principio del archivo ("Dos ciclos de orden de lock en la bandeja de desfases de combos…").
-Esa entrada también es orden de locks de fila —no agotamiento de pool, que ya se cerró
-(ADR-020)—, pero son tablas y disparadores distintos: acá es caja/inventario/stock; ahí es
-`items`/`item_receta`/`item_combo` en la bandeja de desfases. Cuatro cosas separadas que
-comparten familia de bug, no la misma entrada.
+⚠️ **Corregido el 2026-08-18** (la versión anterior de esta nota se contradecía sola —
+decía "ninguno de estos moldes" y dos líneas después describía uno de ellos): los dos
+ciclos de la entrada residual 🔴 del principio del archivo ("Dos ciclos de orden de lock en
+la bandeja de desfases de combos…") **son estos mismos dos moldes**, no uno nuevo — el
+ciclo `item_receta` ↔ `item_combo` es "no toma lock" (`descartarDesfases` no bloquea nada) y
+el ciclo `items` ↔ `item_combo` es "lockea en orden no determinista" (`aplicarDesfases` y
+`update()` de un combo toman los mismos locks en orden inverso). Lo que separa a esa entrada
+de las cuatro de acá **no es la familia de bug — es la tabla y el disparador**: acá es
+caja/inventario/stock; ahí es `items`/`item_receta`/`item_combo` en la bandeja de desfases.
+(Los otros dos puntos de esa entrada residual —el `FOR UPDATE` antes de validar tenant, y el
+hueco de test de N combos— no son de ninguno de los dos moldes.)
 
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es otro molde que los tres
