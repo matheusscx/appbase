@@ -4313,24 +4313,24 @@ export class ItemsService {
         : null;
 
       let descartados = 0;
-      for (const itemId of itemIds) {
-        if (cabPorId.get(itemId)!.tipo === 'combo') {
-          const comps = compsPorCombo.get(itemId) ?? [];
-          if (!comps.length) {
-            throw new BadRequestException(
-              `El combo ${itemId} no tiene componentes`,
-            );
-          }
-          // Sin caso de error propio: `costoPropuestoCombo` nunca devuelve
-          // null, así que el 400 de unidad incompatible no aplica acá.
-          const propuestoCombo = this.costoPropuestoCombo(comps);
-          await manager.query(
-            `UPDATE item_combo SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
-            [propuestoCombo, itemId],
-          );
-          descartados += 1;
-          continue;
-        }
+      // Orden de bloqueo declarado (`docs/patterns/backend.md`): item_receta →
+      // item_combo → items. Los UPDATE de acá abajo toman lock de fila igual
+      // que un FOR UPDATE, así que recorrer el lote en el orden que manda el
+      // cliente dejaba que dos `descartar` con las mismas filas en orden
+      // distinto se abrazaran (40P01). `aplicarDesfases` ya ordena receta →
+      // combo; esto alinea los dos caminos de la bandeja.
+      //
+      // Efecto observable asumido: en un lote mixto con errores en los dos
+      // tipos, ahora falla primero el de la receta. Es la misma precedencia
+      // que ya tenía `aplicarDesfases`.
+      const recetasDelLote = itemIds.filter(
+        (id) => cabPorId.get(id)!.tipo === 'receta',
+      );
+      const combosDelLote = itemIds.filter(
+        (id) => cabPorId.get(id)!.tipo === 'combo',
+      );
+
+      for (const itemId of recetasDelLote) {
         if (!ingsPorReceta.get(itemId)?.length) {
           throw new BadRequestException(
             `La receta ${itemId} no tiene ingredientes`,
@@ -4354,6 +4354,23 @@ export class ItemsService {
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuesto, itemId],
+        );
+        descartados += 1;
+      }
+
+      for (const itemId of combosDelLote) {
+        const comps = compsPorCombo.get(itemId) ?? [];
+        if (!comps.length) {
+          throw new BadRequestException(
+            `El combo ${itemId} no tiene componentes`,
+          );
+        }
+        // Sin caso de error propio: `costoPropuestoCombo` nunca devuelve
+        // null, así que el 400 de unidad incompatible no aplica acá.
+        const propuestoCombo = this.costoPropuestoCombo(comps);
+        await manager.query(
+          `UPDATE item_combo SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
+          [propuestoCombo, itemId],
         );
         descartados += 1;
       }

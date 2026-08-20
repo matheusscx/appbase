@@ -4959,6 +4959,51 @@ describe('ItemsService', () => {
         );
       });
 
+      it('descartar escribe `item_receta` ANTES que `item_combo` aunque el lote venga al revés', async () => {
+        // Orden de bloqueo declarado: item_receta → item_combo → items. Los UPDATE
+        // toman lock de fila igual que un FOR UPDATE, así que recorrer el lote en el
+        // orden del cliente dejaba que `descartar([combo, receta])` y
+        // `descartar([receta, combo])` se abrazaran (40P01). `aplicarDesfases` ya
+        // ordena receta → combo.
+        managerMock.query
+          .mockResolvedValueOnce([
+            { item_id: 'combo-x', tipo: 'combo', nombre: 'Combo X' },
+            { item_id: 'receta-y', tipo: 'receta', nombre: 'Receta Y' },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: 'receta-y',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              combo_item_id: 'combo-x',
+              componente_item_id: 'ingrediente-z',
+              cantidad: '1',
+              costo_actual: '100',
+            },
+          ])
+          .mockResolvedValue([]);
+
+        // El lote viene combo PRIMERO: es el orden que hoy se respeta y que abraza.
+        await service.descartarDesfases(TENANT, ['combo-x', 'receta-y']);
+
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        const updReceta = sqls.findIndex((s) =>
+          s.includes('UPDATE item_receta'),
+        );
+        const updCombo = sqls.findIndex((s) => s.includes('UPDATE item_combo'));
+        expect(updReceta).toBeGreaterThan(-1);
+        expect(updCombo).toBeGreaterThan(-1);
+        expect(updReceta).toBeLessThan(updCombo);
+      });
+
       it('aplicar sobre N recetas hace lecturas CONSTANTES, no por receta', async () => {
         const IDS = ['receta-a', 'receta-b', 'receta-c'];
         managerMock.query
