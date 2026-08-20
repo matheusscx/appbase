@@ -124,6 +124,16 @@ Se descartó meter el tenant en la propia query de lock con un `JOIN`: sin `FOR 
 explícito, el `JOIN` reservaría **también** la fila de `items`, y reservar `items` antes que
 `item_combo` crea exactamente el ciclo que este trabajo cierra.
 
+**Divergencia contra lo implementado:** el filtro "solo los ids que la validación devolvió"
+(`idsValidados = ids.filter(...)`) salió del código en el commit `437c467c`. Los dos
+`FOR UPDATE` bloquean `ids` directamente. No es un cambio de conducta: el loop de validación
+tira `NotFoundException` ante el primer id ausente en `cabPorId`, así que llegar a la línea
+del filtro ya implica que `ids` y `idsValidados` son el mismo conjunto — filtrar era la
+identidad, y `CLAUDE.md` pide no dejar código muerto. El comentario que queda en
+`items.service.ts` (junto a la declaración de `ids`) deja escrito el acoplamiento: si la
+validación alguna vez pasa de tirar a saltear ids ajenos, hay que reintroducir el filtro antes
+de lockear.
+
 ### 3. Cambios de comportamiento asumidos
 
 - **Precedencia de errores de `descartarDesfases`** en lotes mixtos: pasa de orden-del-cliente

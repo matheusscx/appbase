@@ -221,8 +221,8 @@ de orden de lock de la bandeja de desfases de combos (`items` ↔ `item_combo`, 
 ↔ `item_combo`), los `FOR UPDATE` de `aplicarDesfases` que se toman antes de validar el
 tenant, y el hueco de test de lecturas constantes para N combos — mecanismo distinto (orden
 de locks de fila entre tablas, no agotamiento del pool de conexiones), que este trabajo no
-toca ni arregla. Ver la entrada *"Dos ciclos de orden de lock en la bandeja de desfases de
-combos…"* en `pendientes.md`.
+toca ni arregla. Ver más abajo en este mismo archivo § "El orden de bloqueo de filas de la
+bandeja de desfases", que es donde se cerró.
 
 **Límites conocidos del mecanismo** (declarados en el ADR desde el cierre, no descubiertos
 después — detalle completo en ADR-020 § Consequences): el proxy de repos no cubre

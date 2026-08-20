@@ -19,7 +19,7 @@
 - **Commits intermedios con `git commit --no-verify`** (el pre-commit exige el recibo de revisión que la tarea todavía no tiene); los de solo-docs sin él.
 - **Invariantes del proyecto** (`CLAUDE.md`): `tenant_id` sale siempre del token; dinero y porcentajes con `Decimal.js`; soft delete en todo y toda lectura filtra `eliminado_el IS NULL`; nunca una query por iteración (N+1).
 - **No tocar el motor de cálculo de precios** ni la semántica de `movimientos_inventario`. Este trabajo mueve **el orden en que se piden filas**, no qué se calcula.
-- El orden declarado es: **`item_receta` → `item_combo` → `items`**. Un camino puede saltear tablas; no puede invertirlas.
+- El orden declarado es: **`item_receta` → `item_combo` → `items`**. Un camino puede saltear tablas; no puede invertirlas. **El alta no participa**: un `INSERT` de filas nuevas no compite con nadie —nadie más puede tener ni pedir una fila que todavía no existe—, así que `create()` inserta `items` antes que `item_receta`/`item_combo` sin violar la regla.
 
 ---
 

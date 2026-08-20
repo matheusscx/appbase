@@ -151,7 +151,7 @@ Si `precioBase = 0` → márgenes y precio sugerido son `null`.
 | **Aplicar** | Recomputa y persiste `costoPropuesto` en servidor | `NULL` | Solo si checkbox `actualizarPrecio` + `precioBase > 0` |
 | **Descartar** | Sin cambio | `costoPropuesto` actual | Sin cambio |
 
-Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una), pero solo **aplicar** toma lock: `FOR UPDATE` ordenado (`item_receta` antes que `item_combo`, e `id` ascendente dentro de cada tabla). **Descartar no toma ningún lock** y escribe las dos tablas en el orden que manda el cliente, así que `descartar([combo, receta])` contra `aplicar([receta, combo])` sí puede deadlockear — es el ciclo #2 anotado en la entrada 🔴 *"Dos ciclos de orden de lock en la bandeja de desfases de combos…"* de `docs/agent/pendientes.md`, abierto por decisión del owner.
+Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una). **Descartar no toma un `FOR UPDATE` explícito** — el lock lo toma cada `UPDATE`, en el orden en que se ejecuta — pero desde el cierre del 2026-08-20 ese orden ya no es "el que manda el cliente": `descartarDesfases` parte el lote en dos pasadas (`item_receta` antes que `item_combo`) y ordena cada una por `item_id`, igual que los dos `FOR UPDATE` de `aplicar`. Regla completa y por qué existe: [`docs/patterns/backend.md`](../patterns/backend.md) § "Orden de bloqueo de filas en ítems compuestos".
 
 ---
 

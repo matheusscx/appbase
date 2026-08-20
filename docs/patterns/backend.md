@@ -528,7 +528,8 @@ de `item_receta`); lo que no puede es **invertirlas**.
 **Por qué.** Dos transacciones que piden las mismas filas al revés se abrazan, y
 Postgres mata a una con `40P01`. El usuario ve un 500: nada queda corrupto —la
 transacción víctima se revierte entera— pero su operación no se hizo, y acá nadie
-reintenta el `40P01` (a diferencia de `ventas.crear()`). El orden **entre** tablas
+reintenta el `40P01` (a diferencia de `ventas.crear()` y `recuentos.service.ts` §
+`aplicar()`, que sí reintentan una vez). El orden **entre** tablas
 no alcanza por sí solo: dos lotes que traigan las mismas dos recetas en sentidos
 opuestos cierran el mismo ciclo **dentro** de una tabla. Por eso el orden por
 `item_id` es parte de la regla, no un detalle del `ORDER BY`.
