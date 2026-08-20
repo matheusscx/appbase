@@ -2967,11 +2967,19 @@ describe('ItemsService', () => {
     it('congela opciones y suma precioExtra × unidades; valida min/max', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+          {
+            item_id: ITEM_ID,
+            grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
+            nombre: 'Tamaño',
+            min: 1,
+            max: 1,
+          },
         ])
         .mockResolvedValueOnce([
           {
             grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -2998,12 +3006,27 @@ describe('ItemsService', () => {
       const OPCION_B = 'opcion-b-uuid';
       managerMock.query
         .mockResolvedValueOnce([
-          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
-          { grupo_modificador_id: GRUPO_B, nombre: 'Salsa', min: 1, max: 1 },
+          {
+            item_id: ITEM_ID,
+            grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
+            nombre: 'Tamaño',
+            min: 1,
+            max: 1,
+          },
+          {
+            item_id: ITEM_ID,
+            grupo_modificador_id: GRUPO_B,
+            item_grupo_id: 'ig-salsa',
+            nombre: 'Salsa',
+            min: 1,
+            max: 1,
+          },
         ])
         .mockResolvedValueOnce([
           {
             grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -3012,6 +3035,7 @@ describe('ItemsService', () => {
           },
           {
             grupo_modificador_id: GRUPO_B,
+            item_grupo_id: 'ig-salsa',
             item_id: OPCION_B,
             nombre: 'BBQ',
             cantidad: '1',
@@ -3039,11 +3063,19 @@ describe('ItemsService', () => {
     it('rechaza Σ unidades fuera de [min, max]', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+          {
+            item_id: ITEM_ID,
+            grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
+            nombre: 'Tamaño',
+            min: 1,
+            max: 1,
+          },
         ])
         .mockResolvedValueOnce([
           {
             grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -3062,11 +3094,19 @@ describe('ItemsService', () => {
     it('rechaza una opción que no pertenece al grupo', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+          {
+            item_id: ITEM_ID,
+            grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
+            nombre: 'Tamaño',
+            min: 1,
+            max: 1,
+          },
         ])
         .mockResolvedValueOnce([
           {
             grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: 'ig-tamano',
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -3094,50 +3134,51 @@ describe('ItemsService', () => {
     const CARNE_ID = 'carne-uuid';
     const ITEM_AJENO_ID = 'item-ajeno-uuid';
 
-    function mockAsociadosYOpcionesProteina() {
-      managerMock.query
-        .mockResolvedValueOnce([
-          {
-            grupo_modificador_id: PROTEINA_ID,
-            item_grupo_id: ITEM_GRUPO_ID,
-            nombre: 'Proteína',
-            min: 1,
-            max: 1,
-          },
-        ])
-        .mockResolvedValueOnce([
-          {
-            grupo_modificador_id: PROTEINA_ID,
-            item_id: CHULETA_ID,
-            nombre: 'Chuleta',
-            cantidad: '1',
-            unidad_codigo: null,
-            precio_extra: '1500.0000',
-          },
-          {
-            grupo_modificador_id: PROTEINA_ID,
-            item_id: CARNE_ID,
-            nombre: 'Carne',
-            cantidad: '1',
-            unidad_codigo: null,
-            precio_extra: '0.0000',
-          },
-        ]);
-    }
+    // El catálogo de grupos se pide UNA vez por lote para el combo y sus
+    // componentes, así que estas son las filas de esas dos consultas —no una
+    // pareja de respuestas por unidad, como cuando cada unidad releía todo.
+    const ASOCIADOS_PROTEINA = [
+      {
+        item_id: RECETA_ID,
+        grupo_modificador_id: PROTEINA_ID,
+        item_grupo_id: ITEM_GRUPO_ID,
+        nombre: 'Proteína',
+        min: 1,
+        max: 1,
+      },
+    ];
+    const OPCIONES_PROTEINA = [
+      {
+        grupo_modificador_id: PROTEINA_ID,
+        item_grupo_id: ITEM_GRUPO_ID,
+        item_id: CHULETA_ID,
+        nombre: 'Chuleta',
+        cantidad: '1',
+        unidad_codigo: null,
+        precio_extra: '1500.0000',
+      },
+      {
+        grupo_modificador_id: PROTEINA_ID,
+        item_grupo_id: ITEM_GRUPO_ID,
+        item_id: CARNE_ID,
+        nombre: 'Carne',
+        cantidad: '1',
+        unidad_codigo: null,
+        precio_extra: '0.0000',
+      },
+    ];
 
     it('resuelve los grupos de un componente receta por unidad y suma el recargo', async () => {
       managerMock.query
-        .mockResolvedValueOnce([]) // resolverGruposDeItem del combo: sin grupos propios
         .mockResolvedValueOnce([
           {
             componente_item_id: RECETA_ID,
             nombre: 'Hamburguesa',
             cantidad: '2',
           },
-        ]) // combo_componentes receta con cantidad 2
-        .mockResolvedValueOnce([{ item_id: RECETA_ID }]); // batch: componentes con ≥1 grupo asociado
-      mockAsociadosYOpcionesProteina(); // resolverGruposDeItem(RECETA_ID) — unidad 1
-      mockAsociadosYOpcionesProteina(); // resolverGruposDeItem(RECETA_ID) — unidad 2
+        ]) // 1. combo_componentes receta con cantidad 2
+        .mockResolvedValueOnce(ASOCIADOS_PROTEINA) // 2. catálogo por lote: asociaciones
+        .mockResolvedValueOnce(OPCIONES_PROTEINA); // 3. catálogo por lote: opciones
 
       const dto = {
         componentes: [
@@ -3183,17 +3224,113 @@ describe('ItemsService', () => {
       });
     });
 
+    it('el catálogo de grupos se lee por lote: el conteo no crece ni con las unidades ni con los componentes', async () => {
+      // Guarda contra la regresión al N+1: antes esto costaba dos consultas por
+      // CADA (componente con grupos × unidad) —acá serían 12— más una tercera
+      // para averiguar qué componentes tenían grupos. Las dos dimensiones van
+      // juntas a propósito: un combo de UN componente con cantidad 1 no
+      // distingue el arreglo del bug.
+      const RECETA_B_ID = 'receta-b-uuid';
+      const ITEM_GRUPO_B_ID = 'item-grupo-b-uuid';
+      // El mock contesta por el SQL y no por el orden de llamada, a propósito:
+      // así una consulta de más devuelve datos válidos y lo ÚNICO que puede
+      // fallar es el conteo. Con una cadena de `mockResolvedValueOnce`, el
+      // regreso al N+1 reventaba con un mock agotado y el error no decía nada
+      // de lo que este test protege.
+      const componentes = [
+        { componente_item_id: RECETA_ID, nombre: 'Hamburguesa', cantidad: '3' },
+        { componente_item_id: RECETA_B_ID, nombre: 'Pizza', cantidad: '3' },
+      ];
+      const asociados = [
+        {
+          item_id: RECETA_ID,
+          grupo_modificador_id: PROTEINA_ID,
+          item_grupo_id: ITEM_GRUPO_ID,
+          nombre: 'Proteína',
+          min: 0, // opcional: solo una de las tres unidades elige
+          max: 1,
+        },
+        {
+          item_id: RECETA_B_ID,
+          grupo_modificador_id: PROTEINA_ID,
+          item_grupo_id: ITEM_GRUPO_B_ID,
+          nombre: 'Proteína',
+          min: 0,
+          max: 1,
+        },
+      ];
+      const opciones = [
+        ...OPCIONES_PROTEINA,
+        {
+          grupo_modificador_id: PROTEINA_ID,
+          item_grupo_id: ITEM_GRUPO_B_ID,
+          item_id: CHULETA_ID,
+          nombre: 'Chuleta',
+          cantidad: '1',
+          unidad_codigo: null,
+          precio_extra: '900.0000', // override propio del componente B
+        },
+      ];
+      managerMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('combo_componentes'))
+          return Promise.resolve(componentes);
+        if (sql.includes('item_grupos_modificadores'))
+          return Promise.resolve(asociados);
+        if (sql.includes('grupo_modificador_opciones'))
+          return Promise.resolve(opciones);
+        return Promise.resolve([]);
+      });
+
+      const res = await service.resolverPersonalizacionCombo(
+        managerMock as any,
+        TENANT,
+        COMBO_ID,
+        {
+          componentes: [
+            {
+              componenteItemId: RECETA_ID,
+              unidad: 2,
+              grupos: [
+                {
+                  grupoId: PROTEINA_ID,
+                  opciones: [{ itemId: CHULETA_ID, unidades: 1 }],
+                },
+              ],
+            },
+            {
+              componenteItemId: RECETA_B_ID,
+              unidad: 3,
+              grupos: [
+                {
+                  grupoId: PROTEINA_ID,
+                  opciones: [{ itemId: CHULETA_ID, unidades: 1 }],
+                },
+              ],
+            },
+          ],
+        },
+      );
+
+      // Componentes y combo_componentes + las dos del catálogo. Nada más.
+      expect(managerMock.query).toHaveBeenCalledTimes(3);
+      // Y el catálogo compartido resuelve de verdad: el override del componente
+      // B (900) es distinto del de A (1500), así que si el lote se repartiera
+      // mal entre items este total no daría.
+      expect(res.precioExtraTotal).toBe('2400.0000');
+      expect(res.snapshot.componentes).toHaveLength(2);
+    });
+
     it('rechaza un componenteItemId que no es componente vivo del combo', async () => {
       managerMock.query
-        .mockResolvedValueOnce([]) // resolverGruposDeItem del combo: sin grupos propios
         .mockResolvedValueOnce([
           {
             componente_item_id: RECETA_ID,
             nombre: 'Hamburguesa',
             cantidad: '2',
           },
-        ]) // combo_componentes
-        .mockResolvedValueOnce([{ item_id: RECETA_ID }]); // batch componentes con grupos
+        ]) // 1. combo_componentes
+        .mockResolvedValueOnce(ASOCIADOS_PROTEINA) // 2. catálogo por lote: asociaciones
+        .mockResolvedValueOnce(OPCIONES_PROTEINA); // 3. catálogo por lote: opciones
 
       const dto = {
         componentes: [
@@ -3213,15 +3350,15 @@ describe('ItemsService', () => {
 
     it('rechaza una unidad fuera del rango 1..cantidad del componente', async () => {
       managerMock.query
-        .mockResolvedValueOnce([]) // resolverGruposDeItem del combo: sin grupos propios
         .mockResolvedValueOnce([
           {
             componente_item_id: RECETA_ID,
             nombre: 'Hamburguesa',
             cantidad: '2',
           },
-        ]) // combo_componentes
-        .mockResolvedValueOnce([{ item_id: RECETA_ID }]); // batch componentes con grupos
+        ]) // 1. combo_componentes
+        .mockResolvedValueOnce(ASOCIADOS_PROTEINA) // 2. catálogo por lote: asociaciones
+        .mockResolvedValueOnce(OPCIONES_PROTEINA); // 3. catálogo por lote: opciones
 
       const dto = {
         componentes: [{ componenteItemId: RECETA_ID, unidad: 3, grupos: [] }], // cantidad = 2
@@ -3245,6 +3382,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_ID,
             grupo_modificador_id: 'G1',
             item_grupo_id: 'IG1',
             nombre: 'Proteína',
@@ -3255,6 +3393,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([
           {
             grupo_modificador_id: 'G1',
+            item_grupo_id: 'IG1',
             item_id: ITEM_OPCION,
             nombre: 'Carne',
             cantidad: '250',
@@ -3279,6 +3418,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_ID,
             grupo_modificador_id: 'G1',
             item_grupo_id: 'IG1',
             nombre: 'Proteína',
@@ -3289,6 +3429,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([
           {
             grupo_modificador_id: 'G1',
+            item_grupo_id: 'IG1',
             item_id: ITEM_OPCION,
             nombre: 'Carne',
             cantidad: null,

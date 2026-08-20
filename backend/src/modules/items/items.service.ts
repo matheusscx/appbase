@@ -83,6 +83,34 @@ type GrupoDetalle = {
   }[];
 };
 
+/**
+ * Catálogo de grupos de modificadores de UN item: qué grupos tiene asociados y
+ * qué opciones ofrece cada uno, con el override por `item_grupo_id` ya aplicado.
+ * Es lo único que `resolverGruposDeItem` necesita leer de la base, y por eso se
+ * puede precargar por lote: un combo resuelve la misma elección para cada unidad
+ * de cada componente, y sin esto releía el catálogo entero una vez por unidad.
+ */
+interface CatalogoGrupos {
+  asociados: {
+    grupo_modificador_id: string;
+    item_grupo_id: string;
+    nombre: string;
+    min: number;
+    max: number;
+  }[];
+  opcionesPorGrupo: Map<
+    string,
+    {
+      grupo_modificador_id: string;
+      item_id: string;
+      nombre: string;
+      cantidad: string | null;
+      unidad_codigo: string | null;
+      precio_extra: string;
+    }[]
+  >;
+}
+
 export interface DesfaseInsumoDto {
   itemId: string;
   nombre: string;
@@ -2386,31 +2414,110 @@ export class ItemsService {
   }
 
   /**
+   * Catálogo de grupos + opciones de N items, en **dos** consultas fijas: una
+   * por los grupos asociados y otra por las opciones de todos esos grupos. El
+   * costo no crece con la cantidad de items ni con las veces que se resuelva
+   * cada uno.
+   */
+  private async cargarCatalogoGrupos(
+    manager: EntityManager | Db,
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<Map<string, CatalogoGrupos>> {
+    const ids = [...new Set(itemIds)];
+    const catalogo = new Map<string, CatalogoGrupos>(
+      ids.map((id) => [id, { asociados: [], opcionesPorGrupo: new Map() }]),
+    );
+    if (!ids.length) return catalogo;
+
+    const asociados: ({
+      item_id: string;
+    } & CatalogoGrupos['asociados'][number])[] = await manager.query(
+      `SELECT igm.item_id, igm.grupo_modificador_id, igm.item_grupo_id, g.nombre, igm.min, igm.max
+       FROM item_grupos_modificadores igm
+       JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
+         AND g.eliminado_el IS NULL
+       WHERE igm.item_id = ANY($1) AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL`,
+      [ids, tenantId],
+    );
+    for (const a of asociados) catalogo.get(a.item_id)?.asociados.push(a);
+    if (!asociados.length) return catalogo;
+
+    // Opciones de TODOS los grupos asociados en una sola query. El override
+    // (`item_grupo_modificador_opciones`) es por par grupo↔item_grupo, así que
+    // los pares viajan como dos arrays paralelos y se unen con `unnest`: usar
+    // `item_grupo_id = ANY(...)` traería el override de otro grupo.
+    // `item_grupo_id` vuelve en el SELECT porque es lo único que devuelve cada
+    // fila a SU item: dos items distintos pueden compartir grupo, y entonces
+    // `grupo_modificador_id` solo ya no alcanza para repartirlas.
+    const filas: {
+      grupo_modificador_id: string;
+      item_grupo_id: string;
+      item_id: string;
+      nombre: string;
+      cantidad: string | null;
+      unidad_codigo: string | null;
+      precio_extra: string;
+    }[] = await manager.query(
+      `SELECT a.grupo_modificador_id, a.item_grupo_id, o.item_id, i.nombre,
+              COALESCE(ovr.cantidad, o.cantidad) AS cantidad,
+              COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
+              COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra
+       FROM unnest($2::uuid[], $3::uuid[])
+              AS a(grupo_modificador_id, item_grupo_id)
+       JOIN grupo_modificador_opciones o
+         ON o.grupo_modificador_id = a.grupo_modificador_id
+        AND o.tenant_id = $1
+        AND o.eliminado_el IS NULL
+       JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_grupo_modificador_opciones ovr
+         ON ovr.grupo_opcion_id = o.grupo_opcion_id
+        AND ovr.item_grupo_id = a.item_grupo_id
+        AND ovr.eliminado_el IS NULL`,
+      [
+        tenantId,
+        asociados.map((a) => a.grupo_modificador_id),
+        asociados.map((a) => a.item_grupo_id),
+      ],
+    );
+
+    const itemPorItemGrupo = new Map(
+      asociados.map((a) => [a.item_grupo_id, a.item_id]),
+    );
+    for (const o of filas) {
+      const cat = catalogo.get(itemPorItemGrupo.get(o.item_grupo_id) ?? '');
+      if (!cat) continue;
+      const lista = cat.opcionesPorGrupo.get(o.grupo_modificador_id) ?? [];
+      lista.push(o);
+      cat.opcionesPorGrupo.set(o.grupo_modificador_id, lista);
+    }
+    return catalogo;
+  }
+
+  /**
    * Resuelve y congela la selección de grupos de modificadores de un item
    * (receta o combo): valida que cada opción elegida pertenezca al grupo,
    * que la suma de unidades elegidas por grupo esté entre min y max, y
    * calcula el recargo total (Σ precioExtra × unidades).
+   *
+   * @param catalogoPrecargado El de ESTE `itemId`. Si viene, no se lee la base.
    */
   async resolverGruposDeItem(
     manager: EntityManager | Db,
     tenantId: string,
     itemId: string,
     gruposDto: PersonalizacionGrupoInputDto[] | undefined,
+    catalogoPrecargado?: CatalogoGrupos,
   ): Promise<{ grupos: SnapshotGrupo[]; precioExtraTotal: string }> {
-    const asociados: {
-      grupo_modificador_id: string;
-      item_grupo_id: string;
-      nombre: string;
-      min: number;
-      max: number;
-    }[] = await manager.query(
-      `SELECT igm.grupo_modificador_id, igm.item_grupo_id, g.nombre, igm.min, igm.max
-       FROM item_grupos_modificadores igm
-       JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
-         AND g.eliminado_el IS NULL
-       WHERE igm.item_id = $1 AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL`,
-      [itemId, tenantId],
-    );
+    // El catálogo llega precargado cuando el llamador ya lo pidió por lote
+    // (`resolverPersonalizacionCombo`, que resuelve una elección por unidad de
+    // cada componente). Sin él, se carga acá para este item: mismo par de
+    // consultas de siempre, movidas al helper.
+    const { asociados, opcionesPorGrupo } =
+      catalogoPrecargado ??
+      (await this.cargarCatalogoGrupos(manager, tenantId, [itemId])).get(
+        itemId,
+      )!;
 
     const elegidosPorGrupo = new Map(
       (gruposDto ?? []).map((g) => [g.grupoId, g.opciones]),
@@ -2426,49 +2533,6 @@ export class ItemsService {
 
     const snapshotGrupos: SnapshotGrupo[] = [];
     let precioExtraTotal = new Decimal(0);
-
-    // Opciones de TODOS los grupos asociados en una sola query. El override
-    // (`item_grupo_modificador_opciones`) es por par grupo↔item_grupo, así que
-    // los pares viajan como dos arrays paralelos y se unen con `unnest`: usar
-    // `item_grupo_id = ANY(...)` traería el override de otro grupo.
-    const opcionesRows: {
-      grupo_modificador_id: string;
-      item_id: string;
-      nombre: string;
-      cantidad: string | null;
-      unidad_codigo: string | null;
-      precio_extra: string;
-    }[] = asociados.length
-      ? await manager.query(
-          `SELECT a.grupo_modificador_id, o.item_id, i.nombre,
-                  COALESCE(ovr.cantidad, o.cantidad) AS cantidad,
-                  COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
-                  COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra
-           FROM unnest($2::uuid[], $3::uuid[])
-                  AS a(grupo_modificador_id, item_grupo_id)
-           JOIN grupo_modificador_opciones o
-             ON o.grupo_modificador_id = a.grupo_modificador_id
-            AND o.tenant_id = $1
-            AND o.eliminado_el IS NULL
-           JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
-           LEFT JOIN item_grupo_modificador_opciones ovr
-             ON ovr.grupo_opcion_id = o.grupo_opcion_id
-            AND ovr.item_grupo_id = a.item_grupo_id
-            AND ovr.eliminado_el IS NULL`,
-          [
-            tenantId,
-            asociados.map((a) => a.grupo_modificador_id),
-            asociados.map((a) => a.item_grupo_id),
-          ],
-        )
-      : [];
-
-    const opcionesPorGrupo = new Map<string, typeof opcionesRows>();
-    for (const o of opcionesRows) {
-      const lista = opcionesPorGrupo.get(o.grupo_modificador_id) ?? [];
-      lista.push(o);
-      opcionesPorGrupo.set(o.grupo_modificador_id, lista);
-    }
 
     for (const asoc of asociados) {
       const opcionesCat = opcionesPorGrupo.get(asoc.grupo_modificador_id) ?? [];
@@ -2543,16 +2607,7 @@ export class ItemsService {
     snapshot: PersonalizacionRecetaSnapshot;
     precioExtraTotal: string;
   }> {
-    // 1. Grupos propios del combo (comportamiento existente).
-    const propios = await this.resolverGruposDeItem(
-      manager,
-      tenantId,
-      comboItemId,
-      dto?.grupos,
-    );
-    let precioExtraTotal = new Decimal(propios.precioExtraTotal);
-
-    // 2. Componentes receta del combo con sus cantidades (para validar
+    // 1. Componentes receta del combo con sus cantidades (para validar
     //    pertenencia y rango de unidad, y saber cuántas unidades esperar).
     const compRows: {
       componente_item_id: string;
@@ -2568,17 +2623,29 @@ export class ItemsService {
     );
     const compById = new Map(compRows.map((c) => [c.componente_item_id, c]));
 
-    // 3. Qué componentes receta tienen ≥1 grupo asociado (batch, sin N+1).
+    // 2. El catálogo de grupos del combo Y de sus componentes receta, de una.
+    //    Antes esto eran dos cosas distintas: un `SELECT DISTINCT` para saber
+    //    quién tenía grupos, y después el catálogo releído entero una vez por
+    //    (componente × unidad). El lote contesta las dos con dos consultas
+    //    fijas: quien no aparece con grupos asociados, no tiene.
     const recetaIds = compRows.map((c) => c.componente_item_id);
-    const conGrupos = new Set<string>();
-    if (recetaIds.length) {
-      const rows: { item_id: string }[] = await manager.query(
-        `SELECT DISTINCT item_id FROM item_grupos_modificadores
-         WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
-        [recetaIds, tenantId],
-      );
-      for (const r of rows) conGrupos.add(r.item_id);
-    }
+    const catalogos = await this.cargarCatalogoGrupos(manager, tenantId, [
+      comboItemId,
+      ...recetaIds,
+    ]);
+    const catalogoDe = (itemId: string): CatalogoGrupos =>
+      catalogos.get(itemId) ?? { asociados: [], opcionesPorGrupo: new Map() };
+
+    // 3. Grupos propios del combo. Va antes de validar `componentes` porque un
+    //    `grupoId` propio inválido tiene que seguir tirando primero.
+    const propios = await this.resolverGruposDeItem(
+      manager,
+      tenantId,
+      comboItemId,
+      dto?.grupos,
+      catalogoDe(comboItemId),
+    );
+    let precioExtraTotal = new Decimal(propios.precioExtraTotal);
 
     // 4. Validar las entradas que mandó el front: componente vivo + unidad en rango + sin duplicar.
     const elegidasPorClave = new Map<string, PersonalizacionGrupoInputDto[]>();
@@ -2614,7 +2681,8 @@ export class ItemsService {
       PersonalizacionRecetaSnapshot['componentes']
     > = [];
     for (const comp of compRows) {
-      if (!conGrupos.has(comp.componente_item_id)) continue;
+      const catalogo = catalogoDe(comp.componente_item_id);
+      if (!catalogo.asociados.length) continue;
       const unidades = new Decimal(comp.cantidad).toNumber();
       for (let u = 1; u <= unidades; u++) {
         const grupos = elegidasPorClave.get(`${comp.componente_item_id}#${u}`);
@@ -2623,6 +2691,7 @@ export class ItemsService {
           tenantId,
           comp.componente_item_id,
           grupos,
+          catalogo,
         );
         precioExtraTotal = precioExtraTotal.plus(resuelto.precioExtraTotal);
         if (resuelto.grupos.length) {
