@@ -210,8 +210,11 @@ esto **no es unánime**. Es una decisión, no un hecho.
 ## 6. Preguntas abiertas — para el owner
 
 1. **¿El nivel de redondeo (línea vs documento) es configurable, o se deriva del país?**
-   ⏳ **Abierta.** El owner respondió "por configuración" el 2026-08-20 y **reabrió la pregunta
-   el mismo día**: puede ser más práctico por país. Queda el contexto para decidirla con calma,
+   ✅ **CERRADA el 2026-08-20 (decisión c):** perilla configurable, ahora. El detalle y el
+   *"qué obliga"* están en
+   [`…-decisiones.md`](../../superpowers/specs/2026-08-20-redondeo-de-plata-decisiones.md).
+   El recorrido —respondida, reabierta el mismo día y cerrada al final— queda abajo porque el
+   contexto es el que la sostiene. Queda el contexto para decidirla con calma,
    porque las dos respuestas son defendibles:
 
    - **Lo que separa este caso del de la moneda.** La moneda oficial se deriva del país porque

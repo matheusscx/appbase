@@ -15,6 +15,23 @@ el código y mide.
 > contra el código en `ccd08aef` y contra la base de dev. Cada afirmación trae cómo
 > reproducirla (§7): si envejece, que se note.
 
+> ⛔ **AUDITADO Y CORREGIDO el 2026-08-20 por
+> [`…-lectura-independiente.md`](2026-08-20-redondeo-de-plata-lectura-independiente.md).**
+> Este documento se sostuvo en casi todo —el cast de Postgres, los dos totales en CLP-0,
+> `ESCALA_PERSISTIDA`, los defaults, los espejos del frontend y las once líneas de la tabla
+> reprodujeron exactas— y **perdió en tres puntos**, marcados abajo donde aparecen:
+> 1. **"113 apariciones en 17 archivos"** no reproduce: son **106 líneas / 108 ocurrencias**,
+>    los mismos 17 archivos.
+> 2. **"se activa con un `PATCH`"**: es un **`PUT`**.
+> 3. **"19 sitios matchean; 11 son plata"**: con el grep ampliado son **128 hits en 20
+>    archivos**, y por la conducta que este mismo documento declara los sitios de plata son
+>    **≥13** — faltaban los gemelos de escritura `items.service.ts:3508` y `:3580`. El patrón
+>    "cuatro→once" del backlog se repitió en chico, ahora conmigo.
+>
+> **Dónde manda cuál:** para el estado del código manda la lectura independiente; para qué se
+> decidió manda [`…-decisiones.md`](2026-08-20-redondeo-de-plata-decisiones.md). Este queda
+> como el relevamiento original, con sus correcciones a la vista.
+
 ---
 
 ## 1. Las tres capas, y cuál obedece al tenant
@@ -53,6 +70,9 @@ criterio: hay que aplicarlo donde no está.
 
 Barrido **por conducta** —toda multiplicación o división de plata seguida de un redondeo—,
 no por la lista de la entrada. 19 sitios matchean; 11 son plata.
+⛔ **Corregido:** son **≥13** — faltan los gemelos de escritura `items.service.ts:3508` y
+`:3580`, y el grep ampliado (`Math.*`, `.round(`, `.floor(`, `.ceil(`, `.trunc(`) da 128 hits
+en 20 archivos. Ver §2.2 de la lectura independiente.
 
 | # | Sitio | Qué redondea | Destino | En la entrada |
 |---|---|---|---|---|
@@ -92,7 +112,7 @@ barrido sería el error contrario: conversión de cantidades (`cantidad-presenta
 porcentaje (`items.service.ts:3680`) y un `toFixed(2)` que solo arma un mensaje de error
 (`propina-distribucion.service.ts:269`).
 
-**Y la escala 4 escrita a mano:** 113 apariciones en 17 archivos (`toFixed(4)`,
+**Y la escala 4 escrita a mano:** ~~113 apariciones~~ **106 líneas / 108 ocurrencias** en 17 archivos (`toFixed(4)`,
 `toDecimalPlaces(4`). `ESCALA_PERSISTIDA` existe, tiene 3 usos y los tres viven en
 `calculo-precios.service.ts`. La investigación del 2026-08-15 midió 97 en 17 archivos: el
 número creció, la forma no.
@@ -130,7 +150,8 @@ inventarlo.
 (`tenants.service.ts:203`). Mientras ningún tenant lo cambie, los once sitios y el recorte de
 Postgres **coinciden** con lo que el tenant eligió: hoy ninguno produce un número distinto
 del esperado. Pero el DTO ya acepta `HALF_UP | HALF_EVEN | FLOOR | CEIL`
-(`update-preferencias-financieras.dto.ts:30`), así que se activa con un `PATCH`.
+(`update-preferencias-financieras.dto.ts:30`), así que se activa con un `PUT` (~~`PATCH`~~,
+corregido: `tenants.controller.ts:296`).
 
 **Activo:** la escala de la moneda (§3). Esa produce importes mal formados hoy, con todos los
 tenants en el default.
@@ -148,16 +169,12 @@ entre backend y frontend en este repo.
 
 ---
 
-## 5. Lo que el owner ya contestó (2026-08-20)
+## 5. Lo que el owner ya contestó → se mudó
 
-> **La escala de la moneda manda al cerrar la venta.** El importe cobrable se redondea a los
-> decimales de su moneda (CLP → entero), y lo persistido no puede tener decimales que la
-> moneda no tiene. Es el criterio que propinas ya aplica.
-
-Eso contesta, del §9 de la investigación, la 1 (*"un solo criterio con valor variable por
-moneda"*) y en buena parte la 4 (*"¿se generaliza el patrón de propinas?"*).
-
----
+⛔ **Las decisiones NO viven acá.** Están, las once, en
+[`2026-08-20-redondeo-de-plata-decisiones.md`](2026-08-20-redondeo-de-plata-decisiones.md),
+cada una con su *qué se decidió · por qué · qué obliga*. Este documento tenía dos de ellas
+anotadas al vuelo y mantenerlas en dos lugares es cómo se desincronizan.
 
 ## 6. Lo que falta contestar antes de escribir la spec
 
