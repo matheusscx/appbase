@@ -408,14 +408,22 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
   // `receta primero`, donde cada request sostiene una fila distinta mientras
   // espera y aun así no se cierra el ciclo; en `combo primero` las dos hacen cola
   // en C sin sostener nada, que es el caso trivial.
+  //
+  // El orden del lote se DERIVA de la etiqueta, no se escribe al lado: escritos
+  // por separado se desincronizaron (una tabla de índices `[1,0]`/`[0,1]` sobre
+  // el par dejó cada etiqueta corriendo el caso contrario), y como los dos casos
+  // afirman lo mismo el pass/fail no lo delataba. Con una sola fuente de verdad
+  // el error deja de ser posible: para que el lote cambie hay que cambiar el
+  // nombre del caso.
   it.each([
-    ['receta primero (cada una sostiene una fila distinta)', [1, 0]],
-    ['combo primero (las dos encolan en C, sin sostener nada)', [0, 1]],
+    'receta primero (cada una sostiene una fila distinta)',
+    'combo primero (las dos encolan en C, sin sostener nada)',
   ])(
-    'CONTROL: con los dos lotes en el MISMO orden (%s) la compuerta no produce deadlock',
-    async (_etiqueta, indices) => {
-      const par = [recetaId, comboId];
-      const lote = indices.map((i) => par[i]);
+    'CONTROL: con los dos lotes en el MISMO orden — %s — la compuerta no produce deadlock',
+    async (etiqueta) => {
+      const lote = etiqueta.startsWith('receta')
+        ? [recetaId, comboId]
+        : [comboId, recetaId];
       const medido = await conCompuerta(descartar(lote), descartar(lote));
       expect(medido).toEqual(SIN_ABRAZO);
     },
