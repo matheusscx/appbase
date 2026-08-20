@@ -5043,17 +5043,14 @@ describe('ItemsService', () => {
         expect(updReceta).toBeLessThan(updCombo);
       });
 
-      it('descartar ordena por `item_id` DENTRO de la pasada de recetas, aunque el lote venga al revés', async () => {
-        // `descartarDesfases` no toma ningún FOR UPDATE: el lock lo toma cada
-        // UPDATE, en el orden en que se ejecuta. Sin ordenar dentro de la
-        // pasada, dos recetas (sin ningún combo de por medio) todavía podían
-        // abrazarse si dos lotes las traían en sentidos opuestos.
-        managerMock.query
-          .mockResolvedValueOnce([
-            { item_id: 'receta-b', tipo: 'receta', nombre: 'Receta B' },
-            { item_id: 'receta-a', tipo: 'receta', nombre: 'Receta A' },
-          ]) // cabecerasCompuestas
-          .mockResolvedValueOnce([
+      it.each([
+        {
+          tipo: 'receta' as const,
+          idMenor: 'receta-a',
+          idMayor: 'receta-b',
+          // ingredientesPorReceta: misma unidad en ambos lados, sin
+          // conversión real (crearConversor ya tiene default en beforeEach).
+          datosDelTipo: [
             {
               receta_item_id: 'receta-b',
               cantidad: '1',
@@ -5068,21 +5065,63 @@ describe('ItemsService', () => {
               unidad_base: 'kg',
               costo_actual: '150',
             },
-          ]) // ingredientesPorReceta
-          .mockResolvedValue([]); // UPDATE item_receta x2
+          ],
+          updateSql: 'UPDATE item_receta',
+        },
+        {
+          tipo: 'combo' as const,
+          idMenor: 'combo-a',
+          idMayor: 'combo-b',
+          // componentesPorCombo: mismo shape que en el test del ciclo
+          // item_receta ↔ item_combo de más arriba.
+          datosDelTipo: [
+            {
+              combo_item_id: 'combo-b',
+              componente_item_id: 'ingrediente-z',
+              cantidad: '1',
+              costo_actual: '100',
+            },
+            {
+              combo_item_id: 'combo-a',
+              componente_item_id: 'ingrediente-z',
+              cantidad: '1',
+              costo_actual: '80',
+            },
+          ],
+          updateSql: 'UPDATE item_combo',
+        },
+      ])(
+        'descartar ordena por `item_id` DENTRO de la pasada de $tipo, aunque el lote venga al revés',
+        async ({ tipo, idMenor, idMayor, datosDelTipo, updateSql }) => {
+          // `descartarDesfases` no toma ningún FOR UPDATE: el lock lo toma cada
+          // UPDATE, en el orden en que se ejecuta. Sin ordenar DENTRO de la
+          // pasada, dos filas del mismo tipo (sin ningún ítem del otro tipo de
+          // por medio) todavía podían abrazarse si dos lotes las traían en
+          // sentidos opuestos. El `.sort()` está en las dos pasadas
+          // (`items.service.ts:4361-4366`); el reproductor e2e usa una sola
+          // receta y un solo combo, así que el orden intra-tabla de la pasada
+          // de combos no lo cubría ningún test hasta acá.
+          managerMock.query
+            .mockResolvedValueOnce([
+              { item_id: idMayor, tipo, nombre: `${tipo} mayor` },
+              { item_id: idMenor, tipo, nombre: `${tipo} menor` },
+            ]) // cabecerasCompuestas
+            .mockResolvedValueOnce(datosDelTipo) // ingredientesPorReceta o componentesPorCombo, según el tipo
+            .mockResolvedValue([]); // UPDATE item_receta/item_combo x2
 
-        // El lote viene receta-b PRIMERO (orden descendente): es el orden que
-        // hoy se respeta y que abraza.
-        await service.descartarDesfases(TENANT, ['receta-b', 'receta-a']);
+          // El lote viene el id MAYOR primero (orden descendente): es el orden
+          // que hoy se respeta y que abraza.
+          await service.descartarDesfases(TENANT, [idMayor, idMenor]);
 
-        const updates = managerMock.query.mock.calls.filter(
-          (c: unknown[]) =>
-            typeof c[0] === 'string' && c[0].includes('UPDATE item_receta'),
-        ) as [string, unknown[]][];
-        expect(updates).toHaveLength(2);
-        expect(updates[0][1][1]).toBe('receta-a');
-        expect(updates[1][1][1]).toBe('receta-b');
-      });
+          const updates = managerMock.query.mock.calls.filter(
+            (c: unknown[]) =>
+              typeof c[0] === 'string' && c[0].includes(updateSql),
+          ) as [string, unknown[]][];
+          expect(updates).toHaveLength(2);
+          expect(updates[0][1][1]).toBe(idMenor);
+          expect(updates[1][1][1]).toBe(idMayor);
+        },
+      );
 
       it('aplicar sobre N recetas hace lecturas CONSTANTES, no por receta', async () => {
         const IDS = ['receta-a', 'receta-b', 'receta-c'];
