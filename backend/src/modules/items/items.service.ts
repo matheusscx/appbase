@@ -1338,6 +1338,17 @@ export class ItemsService {
           `SELECT item_id FROM item_receta WHERE item_id = $1 FOR UPDATE`,
           [itemId],
         );
+      } else if (tipo === 'combo' && dto.componentes !== undefined) {
+        // Gemelo del lock de arriba, por el otro ciclo: `aplicarDesfases`
+        // bloquea `item_combo` y después escribe `items` (el precio). El
+        // `UPDATE items` que sigue toma lock sobre `items`, así que sin este
+        // lock los dos caminos se toman las filas en orden inverso y se
+        // abrazan (40P01) — con un PATCH de combo (nombre + componentes)
+        // corriendo contra un "aplicar desfase con actualizar precio".
+        await manager.query(
+          `SELECT item_id FROM item_combo WHERE item_id = $1 FOR UPDATE`,
+          [itemId],
+        );
       }
 
       if (setClauses.length) {

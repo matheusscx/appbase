@@ -1967,6 +1967,42 @@ describe('ItemsService', () => {
       expect(lockReceta).toBeLessThan(updateItems);
     });
 
+    it('toma `item_combo` ANTES del UPDATE items — orden de locks contra aplicarDesfases', async () => {
+      // Gemelo del test de recetas de más arriba, por el otro ciclo:
+      // `aplicarDesfases` bloquea `item_combo` y después escribe `items` (el
+      // precio). Si el PATCH de combo los toma al revés, las dos se abrazan
+      // (40P01) con un "editar combo" corriendo contra un "aplicar desfase
+      // con actualizar precio".
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'combo' }])
+        .mockResolvedValue([
+          {
+            item_id: 'producto-queso',
+            nombre: 'Queso',
+            tipo: 'producto',
+            costo_actual: '500',
+          },
+        ]);
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        nombre: 'Combo renombrado',
+        componentes: [{ componenteItemId: 'producto-queso', cantidad: '1' }],
+      });
+
+      const sqls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      const lockCombo = sqls.findIndex((sql) =>
+        sql.includes('FROM item_combo WHERE item_id = $1 FOR UPDATE'),
+      );
+      const updateItems = sqls.findIndex((sql) =>
+        sql.includes('UPDATE items SET'),
+      );
+      expect(lockCombo).toBeGreaterThan(-1);
+      expect(updateItems).toBeGreaterThan(-1);
+      expect(lockCombo).toBeLessThan(updateItems);
+    });
+
     it('extrasPermitidos: update soft-deletea extras previos e inserta nuevos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
@@ -2086,6 +2122,7 @@ describe('ItemsService', () => {
       it('reemplaza componentes y recalcula costo en update', async () => {
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
           .mockResolvedValueOnce([
             {
               item_id: PROD_ID,
@@ -2117,6 +2154,7 @@ describe('ItemsService', () => {
         // reales. Limpiar la columna en esta misma sentencia lo cierra.
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
           .mockResolvedValueOnce([
             {
               item_id: PROD_ID,
@@ -2152,6 +2190,7 @@ describe('ItemsService', () => {
         // validarYCostearComponentes (que rechaza []) y su costo se vuelve 0.
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
           .mockResolvedValueOnce([]) // soft-delete combo_componentes
           .mockResolvedValueOnce([]) // UPDATE item_combo costo_actual = 0
           .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
