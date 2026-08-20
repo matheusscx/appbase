@@ -5,7 +5,7 @@ harness, para no mezclar el meta-trabajo (reglas, gates, docs) con cambios de c�
 producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra.
 
 > 🔴 **Antes de tomar cualquier entrada de este archivo, leé la sección
-> ([🧱 tanda propia](#-prioridad-máxima--tanda-propia-conexiones-rendimiento-y-redondeo-de-plata)).**
+> ([🧱 tanda propia](#-prioridad-máxima--tanda-propia-rendimiento-y-redondeo-de-plata)).**
 > Es prioridad máxima y agrupa los temas que solo se pueden resolver juntos y aislados.
 
 Regla de este archivo: **acá solo vive lo que falta hacer.** Cuando una entrada se cierra,
@@ -40,7 +40,7 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 ---
 
-## 🧱🔴 PRIORIDAD MÁXIMA — tanda propia: conexiones, rendimiento y redondeo de plata
+## 🧱🔴 PRIORIDAD MÁXIMA — tanda propia: rendimiento y redondeo de plata
 
 > 🔴 **Lo más importante que hay abierto en este backlog.** Decisión del owner
 > (2026-08-11). Está primero en el archivo a propósito: **cuando se retome el backlog, esto
@@ -53,11 +53,12 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 > rendimiento y redondeo de plata — las tres siguen midiéndose juntas por lo que dice "Por
 > qué juntas" más abajo.
 > ⚠️ **Corregido otra vez el 2026-08-20:** esa pieza residual **también se cerró** (ver
-> `resueltos.md` § "Los dos ciclos de orden de lock de la bandeja de desfases"), así que
-> el tema "Conexiones / deadlock" ya no sostiene nada: quedan **dos**, rendimiento y
-> redondeo de plata. El título de la sección conserva las tres palabras a propósito —hay
-> un enlace al ancla desde el encabezado del archivo, y el nombre es cómo se la conoce en
-> `CLAUDE.md`—, pero lo que hay abierto son dos.
+> `resueltos.md` § "El orden de bloqueo de filas de la bandeja de desfases"), así que el
+> tema "Conexiones / deadlock" ya no sostiene nada: quedan **dos**, rendimiento y redondeo
+> de plata. Por decisión del owner el título de la sección dejó de nombrarlo —una doc que
+> sigue nombrando un frente cerrado hace frenar al próximo agente por algo que no existe—,
+> y con él se actualizaron el enlace al ancla de acá arriba y la lista de "🛑 Detenerse y
+> preguntar" de `CLAUDE.md`.
 
 **Estas NO se tocan de a pedazos ni de arrastre dentro de otra tarea. Van juntas, en
 una pasada dedicada, con el sistema quieto.**
@@ -272,6 +273,13 @@ decisión que no es mía).
   mirar `pg_locks`, o sea abrir **conexiones/deadlock**, que va aislado y nunca de arrastre.
   ➡️ **No se toca hasta que se abra esa tanda.** El docblock de `caja.e2e-spec.ts` ya quedó
   corregido para que nadie vuelva a planificar sobre el cuelgue que no existe.
+  ℹ️ **2026-08-20: la tanda que estaba esperando se cerró** (ver `resueltos.md` § "El orden
+  de bloqueo de filas de la bandeja de desfases"), así que el motivo del diferimiento ya no
+  existe. Y hay precedente exacto: el sub-punto *"los `FOR UPDATE` antes de validar el
+  tenant"* de esa entrada era **esta misma forma** —bloquear la fila de otro tenant antes de
+  rechazar— y se cerró subiendo la validación arriba del lock, con un unit test, **sin
+  mirar `pg_locks`**. Quién retome esto decide si lo toma; lo que ya no vale es dejarlo
+  quieto porque el frente esté cerrado.
 
 - [ ] **Un flaky del e2e de caja, y seis lecturas de `/tenants/members` que esconden su
   causa** (backend/tests, visto el 2026-08-11) — son dos cosas y la segunda es la que se
@@ -1012,8 +1020,9 @@ conviene no confundirlos:
 
 ⚠️ **Corregido el 2026-08-18** (la versión anterior de esta nota se contradecía sola —
 decía "ninguno de estos moldes" y dos líneas después describía uno de ellos): los dos
-ciclos de la entrada residual 🔴 del principio del archivo ("Dos ciclos de orden de lock en
-la bandeja de desfases de combos…") **son estos mismos dos moldes**, no uno nuevo — el
+ciclos de la entrada residual que entonces vivía al principio del archivo ("Dos ciclos de
+orden de lock en la bandeja de desfases de combos…", hoy cerrada y mudada a
+[`resueltos.md`](resueltos.md)) **son estos mismos dos moldes**, no uno nuevo — el
 ciclo `item_receta` ↔ `item_combo` es "no toma lock" (`descartarDesfases` no bloquea nada) y
 el ciclo `items` ↔ `item_combo` es "lockea en orden no determinista" (`aplicarDesfases` y
 `update()` de un combo toman los mismos locks en orden inverso). Lo que separa a esa entrada
@@ -1023,7 +1032,7 @@ caja/inventario/stock; ahí es `items`/`item_receta`/`item_combo` en la bandeja 
 hueco de test de N combos— no son de ninguno de los dos moldes.)
 
 ℹ️ **2026-08-20:** esa entrada residual **se cerró** y vive en
-[`resueltos.md`](resueltos.md) § "Los dos ciclos de orden de lock de la bandeja de
+[`resueltos.md`](resueltos.md) § "El orden de bloqueo de filas de la bandeja de
 desfases". Lo de arriba se conserva porque la clasificación por moldes sigue siendo cierta
 y es la que hay que aplicarle a las cuatro de acá. Cómo quedó el "no toma lock" del molde
 2: `descartarDesfases` sigue sin tomar un solo `FOR UPDATE` —el arreglo no fue agregar

@@ -17,7 +17,7 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
-## Los dos ciclos de orden de lock de la bandeja de desfases (2026-08-20)
+## El orden de bloqueo de filas de la bandeja de desfases: los dos ciclos, los `FOR UPDATE` antes de validar el tenant, el test de N combos y el orden intra-tabla (2026-08-20)
 
 Cierra el ⚠️ *"Lo que este cierre NO incluye"* de la entrada de acá abajo (*"Diez ventas
 simultáneas cuelgan la API para siempre"*): los cuatro puntos que ADR-020 no tocaba, más
@@ -214,7 +214,9 @@ no por disciplina — el detalle completo, con las alternativas descartadas y su
   ~6.87 s** — el pool timeout de la defensa en profundidad convierte el deadlock en un fallo
   rápido y ruidoso, no en un cuelgue indefinido; revertido el mutante, verde en 1.9 s.
 
-⚠️ **Lo que este cierre NO incluye, y sigue abierto en `pendientes.md` § 🔴:** los dos ciclos
+⚠️ **Lo que este cierre NO incluye** (decía además "y sigue abierto en `pendientes.md` § 🔴"
+hasta el 2026-08-20, cuando se cerró — está arriba en este mismo archivo, § "El orden de
+bloqueo de filas de la bandeja de desfases")**:** los dos ciclos
 de orden de lock de la bandeja de desfases de combos (`items` ↔ `item_combo`, `item_receta`
 ↔ `item_combo`), los `FOR UPDATE` de `aplicarDesfases` que se toman antes de validar el
 tenant, y el hueco de test de lecturas constantes para N combos — mecanismo distinto (orden

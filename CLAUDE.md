@@ -34,10 +34,12 @@ No asumir reglas de negocio. Detenerse y consultar al usuario si la tarea:
 - rompe compatibilidad **multi-tenant**, **multi-moneda**, **fiscal (SII)** o de
   **auditoría**;
 - exige una **dependencia nueva** (verificar antes si el stack actual la resuelve);
-- 🔴 abre alguno de los tres frentes de la **tanda propia** —**conexiones/deadlock,
-  rendimiento (N+1) o redondeo de plata**—, que son prioridad máxima y van **juntos y
-  aislados**, nunca de arrastre dentro de otra tarea (sección 🔴 de
-  `docs/agent/pendientes.md`). Un N+1 **nuevo** que introduzca la tarea sí se saca en el
+- 🔴 abre alguno de los dos frentes de la **tanda propia** —**rendimiento (N+1) o
+  redondeo de plata**—, que son prioridad máxima y van **juntos y aislados**, nunca de
+  arrastre dentro de otra tarea (sección 🔴 de `docs/agent/pendientes.md`).
+  Conexiones/deadlock **salió** de esta lista el 2026-08-20: se cerró entero (pool de
+  conexiones + orden de bloqueo de filas, los dos en `docs/agent/resueltos.md`) y
+  nombrarlo acá hacía frenar por un frente que ya no existe. Un N+1 **nuevo** que introduzca la tarea sí se saca en el
   momento: lo que se consulta es abrir el frente, no arreglar lo que uno rompió.
 
 **Investigación de mercado (al detenerse por una regla de negocio no documentada):** si

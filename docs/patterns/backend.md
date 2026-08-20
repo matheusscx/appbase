@@ -549,21 +549,32 @@ la insertó la misma transacción. Por eso `create()` inserta `items` antes que
 
 | Camino | Cómo toma el orden | Test que lo fija (`items.service.spec.ts`) |
 |---|---|---|
-| `aplicarDesfases` | dos `SELECT … ORDER BY item_id FOR UPDATE`, `item_receta` y después `item_combo`, antes de leer ingredientes; el `UPDATE items` del precio va al final | `aplicar sobre N recetas hace lecturas CONSTANTES…` (afirma las dos tablas y sus `ORDER BY`), `valida el tenant ANTES de tomar los locks` |
+| `aplicarDesfases` | dos `SELECT … ORDER BY item_id FOR UPDATE`, `item_receta` y después `item_combo`, antes de leer ingredientes; los `UPDATE items` del precio van después de los dos locks | `aplicar sobre N recetas hace lecturas CONSTANTES…` (afirma las dos tablas y sus `ORDER BY`), `aplicar sobre N combos hace lecturas CONSTANTES…`, `valida el tenant ANTES de tomar los locks` |
 | `descartarDesfases` | dos pasadas ordenadas, sin locks explícitos | `descartar escribe item_receta ANTES que item_combo…`, `descartar ordena por item_id DENTRO de la pasada de recetas…` |
 | `update()` de un ítem compuesto | `FOR UPDATE` sobre `item_receta`/`item_combo` **antes** del `UPDATE items`, bajo el mismo guard que el branch que después escribe esa tabla | `toma item_combo ANTES del UPDATE items — orden de locks contra aplicarDesfases` |
+
+**El orden es el de adquisición del lock, no el de la escritura.** En un lote mixto
+`aplicarDesfases` hace el `UPDATE items` del precio de una receta **antes** del
+`UPDATE item_combo` de un combo del mismo lote, y no viola nada: la fila de
+`item_combo` ya quedó bloqueada por el `FOR UPDATE` del principio, y un lock que ya
+se tiene no se vuelve a pedir. Lo que la regla ordena es el momento en que cada fila
+se **toma** por primera vez. De ahí que un camino que no tome locks explícitos
+—`descartarDesfases`— tenga que ordenar sus `UPDATE`: ahí el momento de la escritura
+**es** el momento de la toma.
 
 Y un reproductor de deadlock real, `backend/test/orden-locks-desfases.e2e-spec.ts`:
 dos requests HTTP con el mismo par receta/combo en órdenes opuestos, con el
 interleaving forzado por una compuerta. **Su alcance es angosto y su encabezado lo
 declara:** cubre `descartar` contra `descartar` y `descartar` contra `aplicar`, con
 exactamente una receta y un combo. No dice nada del alta ni de la edición de ítems
-compuestos, ni del orden intra-tabla —eso lo cubren los unit tests de arriba—. Leer
-ese encabezado antes de citarlo como evidencia de algo más ancho.
+compuestos, ni del orden intra-tabla. La edición y el orden intra-tabla los cubren los
+unit tests de la tabla de arriba; **el alta no tiene test de orden de locks y no lo
+necesita** —no participa del orden, por lo dicho más arriba—. Leer ese encabezado antes
+de citarlo como evidencia de algo más ancho.
 
 El porqué completo, con los ciclos que se cerraron y el que quedó abierto, en
-[`agent/resueltos.md`](../agent/resueltos.md) § "Los dos ciclos de orden de lock de
-la bandeja de desfases".
+[`agent/resueltos.md`](../agent/resueltos.md) § "El orden de bloqueo de filas de la
+bandeja de desfases".
 
 ---
 
