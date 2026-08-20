@@ -4892,15 +4892,15 @@ describe('ItemsService', () => {
     describe('aplicarDesfases / descartarDesfases', () => {
       it('aplicar recomputa costo, limpia omitido y actualiza precio si checkbox', async () => {
         managerMock.query
-          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
-          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([
             {
               item_id: RECETA_ID,
               tipo: 'receta',
               nombre: 'Hamburguesa',
             },
-          ])
+          ]) // cabecerasCompuestas
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
+          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([
             {
               receta_item_id: RECETA_ID,
@@ -4934,11 +4934,11 @@ describe('ItemsService', () => {
 
       it('aplicar sin checkbox no toca precio_base', async () => {
         managerMock.query
-          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
-          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([
             { item_id: RECETA_ID, tipo: 'receta', nombre: 'Hamburguesa' },
-          ])
+          ]) // cabecerasCompuestas
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
+          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([
             {
               receta_item_id: RECETA_ID,
@@ -5087,15 +5087,15 @@ describe('ItemsService', () => {
       it('aplicar sobre N recetas hace lecturas CONSTANTES, no por receta', async () => {
         const IDS = ['receta-a', 'receta-b', 'receta-c'];
         managerMock.query
-          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
-          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce(
             IDS.map((id) => ({
               item_id: id,
               tipo: 'receta',
               nombre: `Receta ${id}`,
             })),
-          )
+          ) // cabecerasCompuestas
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
+          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce(
             IDS.map((id) => ({
               receta_item_id: id,
@@ -5143,6 +5143,21 @@ describe('ItemsService', () => {
         expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
       });
 
+      it('valida el tenant ANTES de tomar los locks', async () => {
+        // Con los locks primero, un id de otro tenant bloquea filas ajenas hasta el
+        // rollback del 404. La lectura de cabeceras es la que filtra tenant_id.
+        managerMock.query.mockResolvedValueOnce([]).mockResolvedValue([]);
+
+        await expect(
+          service.aplicarDesfases(TENANT, [{ itemId: 'de-otro-tenant' }]),
+        ).rejects.toThrow(NotFoundException);
+
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        expect(sqls.some((s) => s.includes('FOR UPDATE'))).toBe(false);
+      });
+
       it('descartar sin ingredientes vivos lanza BadRequest', async () => {
         managerMock.query
           .mockResolvedValueOnce([
@@ -5163,11 +5178,11 @@ describe('ItemsService', () => {
 
       it('aplicar un combo escribe Σ de los costos cacheados de sus componentes', async () => {
         managerMock.query
-          .mockResolvedValueOnce([]) // 1) lock item_receta
-          .mockResolvedValueOnce([]) // 2) lock item_combo
           .mockResolvedValueOnce([
             { item_id: COMBO_ID, tipo: 'combo', nombre: 'Combo Clásico' },
-          ]) // 3) cabecerasCompuestas
+          ]) // 1) cabecerasCompuestas
+          .mockResolvedValueOnce([]) // 2) lock item_receta
+          .mockResolvedValueOnce([]) // 3) lock item_combo
           // sin recetas en el lote: `ingredientesPorReceta` retorna sin consultar
           .mockResolvedValueOnce([
             {
@@ -5197,12 +5212,12 @@ describe('ItemsService', () => {
 
       it('el lote que mezcla una receta con el combo que la contiene omite el combo', async () => {
         managerMock.query
-          .mockResolvedValueOnce([]) // 1) lock item_receta
-          .mockResolvedValueOnce([]) // 2) lock item_combo
           .mockResolvedValueOnce([
             { item_id: RECETA_ID, tipo: 'receta', nombre: 'Hamburguesa' },
             { item_id: COMBO_ID, tipo: 'combo', nombre: 'Combo Clásico' },
-          ]) // 3) cabecerasCompuestas
+          ]) // 1) cabecerasCompuestas
+          .mockResolvedValueOnce([]) // 2) lock item_receta
+          .mockResolvedValueOnce([]) // 3) lock item_combo
           .mockResolvedValueOnce([
             {
               receta_item_id: RECETA_ID,
@@ -5274,11 +5289,11 @@ describe('ItemsService', () => {
 
       it('aplicar una receta devuelve en afectados los combos que la contienen', async () => {
         managerMock.query
-          .mockResolvedValueOnce([]) // 1) lock item_receta
-          .mockResolvedValueOnce([]) // 2) lock item_combo
           .mockResolvedValueOnce([
             { item_id: RECETA_ID, tipo: 'receta', nombre: 'Hamburguesa' },
-          ]) // 3) cabecerasCompuestas
+          ]) // 1) cabecerasCompuestas
+          .mockResolvedValueOnce([]) // 2) lock item_receta
+          .mockResolvedValueOnce([]) // 3) lock item_combo
           .mockResolvedValueOnce([
             {
               receta_item_id: RECETA_ID,

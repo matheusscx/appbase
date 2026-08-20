@@ -4124,6 +4124,19 @@ export class ItemsService {
       // las validaciones— pero ya no consulta: antes eran 2 lecturas por receta
       // más una por ingrediente adentro del cálculo del costo.
       const ids = [...new Set(items.map((i) => i.itemId))];
+
+      // La validación de tenant va ANTES de los locks: `cabecerasCompuestas`
+      // es quien filtra `tenant_id`, y con los locks primero un id ajeno
+      // bloqueaba filas de otro tenant hasta el rollback del 404. Lee `items`
+      // sin lock, así que subirla no toma nada por adelantado.
+      const cabPorId = await this.cabecerasCompuestas(manager, tenantId, ids);
+      for (const it of items) {
+        if (!cabPorId.has(it.itemId)) {
+          throw new NotFoundException(`Item ${it.itemId} no encontrado`);
+        }
+      }
+      const idsValidados = ids.filter((id) => cabPorId.has(id));
+
       // Los locks van ANTES de leer los ingredientes, no antes de escribir: si
       // se toman después, otra transacción alcanza a cambiar la receta entre la
       // lectura y el lock y el costo se calcula sobre ingredientes viejos.
@@ -4139,20 +4152,14 @@ export class ItemsService {
       await manager.query(
         `SELECT item_id FROM item_receta
           WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
-        [ids],
+        [idsValidados],
       );
       await manager.query(
         `SELECT item_id FROM item_combo
           WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
-        [ids],
+        [idsValidados],
       );
 
-      const cabPorId = await this.cabecerasCompuestas(manager, tenantId, ids);
-      for (const it of items) {
-        if (!cabPorId.has(it.itemId)) {
-          throw new NotFoundException(`Item ${it.itemId} no encontrado`);
-        }
-      }
       const recetasDelLote = items.filter(
         (i) => cabPorId.get(i.itemId)!.tipo === 'receta',
       );
