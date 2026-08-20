@@ -80,13 +80,13 @@ Actualizá los mocks de `items.service.spec.ts:3089+` (`describe('resolverPerson
 
 **Contexto:** el archivo ya tiene el patrón de test de conteo (buscá los que cuentan `managerMock.query.mock.calls` para la bandeja de desfases). `resueltos.md` dejó anotado que los combos se ejercitaban **con un solo combo**, así que un N+1 ahí no lo cazaba nadie: este test es esa red.
 
-- [ ] **Step 1: Conteo constante en las dos dimensiones**
+- [x] **Step 1: Conteo constante en las dos dimensiones**
 
 Un combo con **dos** componentes receta con grupos y `cantidad = 3` cada uno (6 unidades) tiene que costar el **mismo** número de consultas que uno con `cantidad = 1` — y el test tiene que decir el número exacto, no "menos que antes". Contá contra el mock y afirmá el total.
 
 Las dos dimensiones importan: `cantidad` (unidades del mismo componente) y cantidad de componentes distintos. Un test que solo mueva una deja la otra sin red.
 
-- [ ] **Step 2: Mutante que REVIERTE**
+- [x] **Step 2: Mutante que REVIERTE**
 
 Revertí el cuerpo del `for` al código anterior —volver a llamar `resolverGruposDeItem` sin catálogo precargado por cada unidad— y verificá que el test de la Task 2 **falla**. No alcanza con un mutante que rompa: tiene que ser el código de antes, porque lo que se prueba es que el test habría cazado el bug.
 
@@ -101,11 +101,17 @@ Revertí el mutante y verificá con `git status --porcelain` **vacío** (ojo: `g
 
 **Contexto:** el script de medición vive en el scratchpad de la sesión (`bench-personalizacion.mjs`) y corre contra el stack de docker-compose sin tocar `backend/src` (no re-siembra). Los números de "antes" están en el encabezado de este plan.
 
-- [ ] **Step 1: Correr la misma medición sobre el código nuevo**
+- [x] **Step 1: Correr la misma medición sobre el código nuevo**
 
 `./scripts/reset-db.sh` primero. Mismos parámetros (`SLOTS=10 REPS=30`). Lo que se compara es la fila del combo: 34.0 ms secuencial y 84.2 / 91.3 ms con 10 en paralelo, 112 ventas/s.
 
 Y el conteo de consultas por el log de Postgres: **61** consultas para una venta de 1 línea de combo, **173** para 5 líneas. Si el conteo no baja, el cambio no sirvió y hay que decirlo, no maquillarlo.
+
+**Medido el 2026-08-20, después del cambio:** combo de 1 línea **61 → 57** consultas, de 5
+líneas **173 → 153**. Las otras tres formas quedaron **idénticas al dígito** (35/47, 40/68,
+49/113), que es la prueba de que el cambio tocó solo el camino del combo. En tiempo: 5×combo
+de 34.0 → 30.9 ms secuencial y de 84.2/91.3 → 78.3/88.7 ms con diez en paralelo (112 → 119
+ventas/s). El resto de las filas se movió dentro del ruido, como corresponde.
 
 ---
 
@@ -125,7 +131,7 @@ Además: lo que domina el costo por venta **no es la personalización**. De las 
 
 Anotá también, con el mismo criterio: `SELECT Tenant` sale **dos veces con el mismo parámetro** en cada venta (`TenantGuard` valida que el tenant existe; `getPreferenciasFinancieras` lo relee para las preferencias). Se dejó: sacarlo exige que el guard le pase la fila al service, o sea acoplar el servicio al estado del request por dos consultas. Y el par de `TipoRegla` que aparece seguido **no** es un duplicado: verifiqué los parámetros y son conjuntos distintos (descuentos por un lado, recargos e impuestos por el otro).
 
-- [ ] **Step 1: Mudar la entrada y dejar la sección 🔴 con un solo frente**
+- [x] **Step 1: Mudar la entrada y dejar la sección 🔴 con un solo frente**
 
 La entrada sale de `pendientes.md` y entra a `resueltos.md` con su cierre. La sección 🔴 queda con **redondeo de plata** como único frente abierto: revisá el título de la sección, el ancla del enlace de arriba del archivo y la lista de *"🛑 Detenerse y preguntar"* de `CLAUDE.md`, que nombra "rendimiento (N+1) o redondeo de plata" como par. Es el mismo barrido que hubo que hacer cuando salió conexiones: buscá **por contenido**, no por la forma del enlace.
 

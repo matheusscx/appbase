@@ -214,6 +214,19 @@ jul-2026 en el camino caliente del POS, corregidas en la auditoría de `ventas`+
    una vez y no actualizarlo duplica líneas en vez de acumularlas — es la conducta que la
    consulta repetida daba gratis.
 
+5. **La misma query, con los mismos parámetros, repetida por unidad.** No hay iteración
+   sobre filas distintas: `resolverPersonalizacionCombo` resolvía la elección de grupos por
+   cada **(componente × unidad)** del combo, y cada llamada releía el catálogo entero del
+   mismo item — dos consultas idénticas, tantas veces como unidades. Es el N+1 más fácil de
+   no ver, porque el bucle no *parece* recorrer un resultado: recorre una cantidad. La
+   pregunta que lo destapa es *"¿los parámetros de esta query cambian entre vueltas?"*. El
+   arreglo separa **cargar el catálogo** de **resolver la elección**, y la carga se hace por
+   lote para todos los items de una; el parámetro del catálogo entra **opcional y último**,
+   así los llamadores que no batchean no se tocan (ago-2026, `items.service.ts`).
+   De paso desapareció una tercera consulta —un `SELECT DISTINCT` que solo servía para saber
+   *qué* items tenían grupos—: el propio lote ya lo contesta. Cuando batchees, revisá si
+   alguna consulta previa existía únicamente para decidir a quién consultar.
+
 **Medir el N+1 en las dos dimensiones, no en una.** Este tenía la forma "una lectura por
 línea, dentro de una lectura por origen". Un test que varía solo las líneas pasa en verde
 con el bucle por origen intacto: lo comprobamos midiendo el mutante, que sobrevivió. El

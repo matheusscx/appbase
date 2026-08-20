@@ -34,13 +34,14 @@ No asumir reglas de negocio. Detenerse y consultar al usuario si la tarea:
 - rompe compatibilidad **multi-tenant**, **multi-moneda**, **fiscal (SII)** o de
   **auditoría**;
 - exige una **dependencia nueva** (verificar antes si el stack actual la resuelve);
-- 🔴 abre alguno de los dos frentes de la **tanda propia** —**rendimiento (N+1) o
-  redondeo de plata**—, que son prioridad máxima y van **juntos y aislados**, nunca de
-  arrastre dentro de otra tarea (sección 🔴 de `docs/agent/pendientes.md`).
-  Conexiones/deadlock **salió** de esta lista el 2026-08-20: se cerró entero (pool de
-  conexiones + orden de bloqueo de filas, los dos en `docs/agent/resueltos.md`) y
-  nombrarlo acá hacía frenar por un frente que ya no existe. Un N+1 **nuevo** que introduzca la tarea sí se saca en el
-  momento: lo que se consulta es abrir el frente, no arreglar lo que uno rompió.
+- 🔴 abre el frente del **redondeo de plata**, prioridad máxima, que va **solo y aislado**,
+  nunca de arrastre dentro de otra tarea (sección 🔴 de `docs/agent/pendientes.md`).
+  Los otros dos que esta lista nombraba **salieron** el 2026-08-20, cerrados y en
+  `docs/agent/resueltos.md`: conexiones/deadlock (pool + orden de bloqueo de filas) y
+  rendimiento (el N+1 de la personalización, medido con carga concurrente). Nombrar acá un
+  frente cerrado hace frenar por algo que ya no existe. Un N+1 **nuevo** que introduzca la
+  tarea sí se saca en el momento: lo que se consulta es abrir el frente, no arreglar lo que
+  uno rompió.
 
 **Investigación de mercado (al detenerse por una regla de negocio no documentada):** si
 además el mercado ya resolvió el tema (POS maduros: Toast/Square/Lightspeed…) y el owner
@@ -281,7 +282,7 @@ Procedimiento completo: skill `verify-feature`.
 |---|---|
 | `docs/patterns/` | **Playbook backend/frontend — leer ANTES de planificar una feature** |
 | `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
-| `docs/agent/pendientes.md` | Backlog de correcciones diferidas, **ordenado por lo que hace falta para tomar cada entrada** (mecánico → medir → ya decidido → necesita respuesta del owner). Arriba de todo, la 🔴 prioridad máxima (rendimiento + redondeo de plata): van juntas y aisladas, nunca de arrastre |
+| `docs/agent/pendientes.md` | Backlog de correcciones diferidas, **ordenado por lo que hace falta para tomar cada entrada** (mecánico → medir → ya decidido → necesita respuesta del owner). Arriba de todo, la 🔴 prioridad máxima (redondeo de plata): va sola y aislada, nunca de arrastre |
 | `docs/agent/resueltos.md` | Archivo de las entradas de `pendientes.md` ya cerradas, con el detalle de cada fix |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
 | `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |

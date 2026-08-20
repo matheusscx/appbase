@@ -5,8 +5,8 @@ harness, para no mezclar el meta-trabajo (reglas, gates, docs) con cambios de c�
 producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra.
 
 > 🔴 **Antes de tomar cualquier entrada de este archivo, leé la sección
-> ([🧱 tanda propia](#-prioridad-máxima--tanda-propia-rendimiento-y-redondeo-de-plata)).**
-> Es prioridad máxima y agrupa los temas que solo se pueden resolver juntos y aislados.
+> ([🧱 redondeo de plata](#-prioridad-máxima--redondeo-de-plata)).** Es prioridad máxima y
+> va sola y aislada: los otros dos temas que agrupaba se cerraron el 2026-08-20.
 
 Regla de este archivo: **acá solo vive lo que falta hacer.** Cuando una entrada se cierra,
 en el mismo commit se muda —con el texto de su cierre— a
@@ -23,7 +23,7 @@ saber cuáles se podían tomar sin preguntar nada.
 
 | Sección | Qué hace falta para tomarla |
 |---|---|
-| 🔴 Tanda propia | Nada, pero van las tres juntas y con el sistema quieto |
+| 🔴 Redondeo de plata | Nada, pero va sola y con el sistema quieto |
 | 1. Mecánico | Nada: el arreglo ya está decidido y escrito en la entrada |
 | 2. Medir primero | Abrir un archivo o correr algo. No es una pregunta para el owner |
 | 3. Ya decidido, falta construir | Nada del owner: ya contestó. Es trabajo con diseño adentro |
@@ -40,113 +40,57 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 ---
 
-## 🧱🔴 PRIORIDAD MÁXIMA — tanda propia: rendimiento y redondeo de plata
+## 🧱🔴 PRIORIDAD MÁXIMA — redondeo de plata
 
 > 🔴 **Lo más importante que hay abierto en este backlog.** Decisión del owner
 > (2026-08-11). Está primero en el archivo a propósito: **cuando se retome el backlog, esto
 > va antes que cualquier otra entrada**, incluidas las 🚩 de producción de más abajo.
 > ⚠️ **Corregido el 2026-08-18:** la razón original de esta frase —el agotamiento del pool de
 > conexiones, que dejaba la API muerta con diez operaciones simultáneas— está **cerrada**
-> (ADR-020, ver `resueltos.md`). Lo que hoy sostiene la prioridad de la sección: la pieza
-> residual de orden de locks en la bandeja de desfases (tema "Conexiones / deadlock" de la
-> tabla de abajo) sigue siendo un deadlock real de fila, aunque más acotado que N=pool, más
-> rendimiento y redondeo de plata — las tres siguen midiéndose juntas por lo que dice "Por
-> qué juntas" más abajo.
-> ⚠️ **Corregido otra vez el 2026-08-20:** esa pieza residual **también se cerró** (ver
-> `resueltos.md` § "El orden de bloqueo de filas de la bandeja de desfases"), así que el
-> tema "Conexiones / deadlock" ya no sostiene nada: quedan **dos**, rendimiento y redondeo
-> de plata. Por decisión del owner el título de la sección dejó de nombrarlo —una doc que
-> sigue nombrando un frente cerrado hace frenar al próximo agente por algo que no existe—,
-> y con él se actualizaron el enlace al ancla de acá arriba y la lista de "🛑 Detenerse y
-> preguntar" de `CLAUDE.md`.
+> (ADR-020, ver `resueltos.md`).
+> ⚠️ **Corregido otra vez el 2026-08-20:** la pieza residual de orden de locks de fila
+> **también se cerró** (ver `resueltos.md` § "El orden de bloqueo de filas de la bandeja de
+> desfases"), así que el tema "Conexiones / deadlock" ya no sostiene nada. Por decisión del
+> owner el título de la sección dejó de nombrarlo —una doc que sigue nombrando un frente
+> cerrado hace frenar al próximo agente por algo que no existe—, y con él se actualizaron el
+> enlace al ancla de acá arriba y la lista de "🛑 Detenerse y preguntar" de `CLAUDE.md`.
+> ⚠️ **Y una tercera vez, el mismo 2026-08-20: rendimiento también se cerró** (ver
+> `resueltos.md` § "El N+1 de la personalización de recetas y combos"). Queda **una** entrada:
+> redondeo de plata. Con eso se cae la premisa de *"van juntas"* —no hay con qué juntarla—
+> pero **no** la del aislamiento, que tiene evidencia propia y sigue más abajo.
 
-**Estas NO se tocan de a pedazos ni de arrastre dentro de otra tarea. Van juntas, en
-una pasada dedicada, con el sistema quieto.**
-
-Qué agrupa:
+**Esto NO se toca de a pedazos ni de arrastre dentro de otra tarea: va en una pasada
+dedicada, con el sistema quieto.**
 
 | Tema | Entrada |
 |---|---|
 | ~~Conexiones / deadlock~~ | ✅ **Cerrado del todo.** El agotamiento del pool, el 2026-08-18 (ADR-020); los dos ciclos de orden de lock de la bandeja de desfases, el 2026-08-20. Los dos en [`resueltos.md`](resueltos.md) |
-| Rendimiento | *"N+1 al resolver personalización de recetas/combos"* `[~]`, y lo que aparezca al medir |
+| ~~Rendimiento~~ | ✅ **Cerrado el 2026-08-20**, medido con carga concurrente y en las cuatro formas de línea, no solo en la más barata. En [`resueltos.md`](resueltos.md) |
 | Redondeo de plata | *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* (abajo), con su sub-punto de `subtotal`/`total_linea` entrando a `NUMERIC(18,4)` |
 
-**Por qué juntas, y no cada una cuando toque.** Las tres viven en la misma superficie —el
-camino caliente de la venta y el motor de precios— y las tres se miden de la misma forma:
-con carga real, no leyendo código. El deadlock **se descubrió midiendo el N+1**, no
-buscándolo. Y decidir el redondeo de un total exige saber antes en qué orden y con qué
-escala se acumulan las líneas, que es la misma pregunta que responde el análisis de
-rendimiento.
-
-**Por qué en aislamiento, con evidencia de este mismo día:**
+**Por qué en aislamiento, con la evidencia que lo originó:**
 - El arreglo del redondeo se hizo **por partes** y hubo que revertirlo: cubría el precio que
   se muestra y no el que se guarda, y de paso abría una divergencia entre lo cobrado a la
   tarjeta y lo persistido que antes no existía (ver [`resueltos.md`](resueltos.md)).
 - La tabla de sitios del deadlock quedó **stale dos veces en el mismo día**, las dos porque
   una tarea de feature corrió las líneas de `ventas.service.ts` por encima.
 
+**Lo que el cierre de rendimiento le dejó servido a esta entrada** (2026-08-20): *"en qué
+orden y con qué escala se acumulan las líneas"* —la pregunta por la que rendimiento iba
+primero— ya está medida. Una venta de 5 líneas de receta con grupos son **113 consultas** a
+la base y **todas salen por la misma conexión**: el `Promise.all` del carrito corre sobre el
+manager de la transacción, así que las líneas se resuelven en serie y en el orden del
+carrito, no en paralelo. El detalle está en [`resueltos.md`](resueltos.md).
+
 Mientras tanto: si una tarea de producto **necesita** tocar algo de esta lista, se anota acá
 y se consulta — no se resuelve de paso. Un N+1 nuevo que se introduzca sí se saca en el
-momento; lo que se difiere es abrir estos frentes.
+momento; lo que se difiere es abrir este frente.
 
-### Las entradas, íntegras
+### La entrada, íntegra
 
-Estaban repartidas por el archivo con punteros cruzados entre sí. Acá están, en el orden
-de la tabla de arriba. La de "Conexiones / deadlock" ya no está: se cerró y se mudó a
+Estaba repartida por el archivo con punteros cruzados. Acá está. Las de "Conexiones /
+deadlock" y "Rendimiento" ya no están: se cerraron y se mudaron a
 [`resueltos.md`](resueltos.md).
-
-- [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la primera de las dos que
-  quedan en esta sección) — parcialmente cerrado
-  2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
-  `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
-  Ese se cerró (`unnest` de pares grupo↔item_grupo en una sola query) y beneficia a los
-  **tres** llamadores —ventas, salones y combos— sin cambiar ninguna firma.
-  **Queda abierto lo reportado originalmente:** batchear *entre líneas*, es decir precargar
-  los catálogos de las recetas/combos distintos del carrito en vez de resolver cada línea
-  por su cuenta. Hoy cada línea `receta`/`combo` cuesta 3 queries fijas (ingredientes,
-  extras, grupos+opciones). Batchearlo exige pasar los catálogos precargados por parámetro
-  a `resolverPersonalizacionReceta`/`Combo` y `resolverGruposDeItem`, que tienen 3
-  llamadores incluido `salones.service.ts` — más riesgo y menos ganancia que lo ya hecho.
-  **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
-  líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
-  a ~3.
-  **Decisión del owner (2026-08-11): medir antes de decidir.** El conteo de queries no es
-  tiempo: falta el número en milisegundos de un carrito cargado —el caso real es varias
-  cajas concurrentes, no una— y recién con eso se elige entre encararlo y cerrar la
-  entrada. La medición va primero **porque el arreglo toca `resolverPersonalizacion*` y
-  `resolverGruposDeItem`, con tres llamadores** (ventas, salones, combos): hoy tiene más
-  riesgo que ganancia demostrada.
-
-  ✅ **Medido el 2026-08-11** contra el stack de docker-compose con la base recién
-  sembrada, ingredientes propios con stock alto (los del seed se agotan y la medición se
-  vuelve una carrera contra el stock), 30 repeticiones tras 3 de calentamiento:
-
-  | Carrito (`POST /ventas`) | p50 | p95 |
-  |---|---|---|
-  | 1 producto simple | 10.7 ms | 12.7 ms |
-  | 5 productos simples | 12.1 ms | 15.7 ms |
-  | 1 receta | 11.2 ms | 13.0 ms |
-  | 3 recetas distintas | 15.0 ms | 16.6 ms |
-  | 5 recetas distintas | 19.2 ms | 34.7 ms |
-  | 8 recetas distintas | 23.6 ms | 37.3 ms |
-
-  **Lectura: ~1,8 ms por línea de receta.** Un carrito de 5 recetas cuesta 19,2 ms contra
-  12,1 ms de 5 productos simples: **~7 ms atribuibles** a resolver recetas, que es lo que
-  batchear recuperaría. Sobre una venta que el cajero dispara una vez, 19 ms contra 12 ms
-  no se percibe.
-  ⚠️ **Dos correcciones a la entrada original, medidas:**
-  - **El N+1 no está en `/calculo-precios/calcular`** —ahí el tiempo es plano entre 1 y 8
-    recetas— sino en `POST /ventas` (`ventas.service.ts:280`). La primera pasada de
-    medición apuntó al endpoint equivocado y dio 6 ms constantes.
-  - **Las llamadas por línea corren dentro de un `Promise.all`**, o sea **en paralelo**.
-    "15 queries" no son 15 viajes en serie, que es lo que la cifra sugería.
-  **Recomendación: no encararlo.** 7 ms de ganancia contra un refactor que toca tres
-  llamadores. Se reabre si aparece un carrito mucho más grande o si el endpoint sale en
-  una traza lenta.
-  ⛔ **Lo que sí salió de esta medición y hay que mirar es otra cosa:** ver la entrada del
-  deadlock de diez ventas simultáneas, acá arriba en esta misma sección. Batchear no lo
-  arregla.
-
 - [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
   (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
   — 🧱 **la segunda de las dos que quedan en esta sección: no se toca suelta.**

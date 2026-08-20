@@ -17,6 +17,95 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El N+1 de la personalización de recetas y combos: medido en las cuatro formas, y el que faltaba (2026-08-20)
+
+Cierra la entrada *"N+1 al resolver personalización de recetas/combos"*, que estaba `[~]`
+desde el 2026-07-27 y era la segunda de las tres de la tanda 🔴. **Se cerró midiendo**, que
+es lo que la entrada pedía; el arreglo que salió de la medición no es el que la entrada
+proponía.
+
+**La medición** (stack de docker-compose, base recién sembrada, 30 repeticiones tras 3 de
+calentamiento, fixtures propias por cliente concurrente para que la concurrencia no midiera
+contención de stock):
+
+| Carrito de 5 líneas | 1 cliente (p50) | 10 en paralelo (p50 / p95) | throughput |
+|---|---|---|---|
+| producto simple | 13.8 ms | 38.4 / 45.7 ms | 236 ventas/s |
+| receta sin grupos | 16.9 ms | 47.5 / 52.7 ms | 197 ventas/s |
+| receta con 2 grupos | 25.4 ms | 65.1 / 72.0 ms | 145 ventas/s |
+| combo (1 receta ×2 unidades, 2 grupos c/u) | 34.0 ms | 84.2 / 91.3 ms | 112 ventas/s |
+
+Y el conteo real de consultas por venta, leído del log de Postgres (`log_statement='all'`,
+cada venta acotada entre dos `SELECT` de marca disparados por `psql`), 1 línea / 5 líneas:
+simple 35/47, receta 40/68, receta con grupos 49/113, combo 61/173.
+
+**Veredicto sobre lo que la entrada dejaba abierto —batchear *entre* líneas— : no se
+encara.** Con diez cajas en paralelo y carritos de cinco combos, el peor caso realista, la
+venta responde en 84 ms p50 y el sistema sostiene 112 ventas/s. Batchear entre líneas toca
+~4 de las ~13 consultas extra por línea (el resto son escrituras de inventario, que no son
+N+1), o sea ~11 ms de los 46 que separan ese carrito del de cinco productos simples — a
+cambio de cambiar la firma de tres llamadores.
+
+**Las tres afirmaciones de la entrada que la medición contradijo.** Van acá porque son el
+rastro del error, no para reescribir la historia:
+
+1. *"Las llamadas por línea corren dentro de un `Promise.all`, o sea en paralelo"* —
+   **falso**. Las 68 sentencias de una venta de 5 recetas salieron **todas por el mismo
+   backend de Postgres** (un único PID en el log): el `Promise.all` corre sobre el manager de
+   la transacción, o sea una sola conexión, y `pg` las encola. Son viajes en serie. El propio
+   driver lo dice en el e2e: *"Calling client.query() when the client is already executing a
+   query is deprecated"*. ⚠️ Y lo más incómodo: esto **ya estaba escrito** en
+   [`anti-patterns.md`](anti-patterns.md) § N+1 desde ADR-020 (*"dentro de una transacción,
+   `Promise.all` de lecturas deja de paralelizar"*). La entrada del backlog siguió afirmando
+   lo contrario nueve días — dos docs vivas con la misma afirmación en sentidos opuestos, y
+   ningún gate que las cruce.
+2. *"Hoy cada línea receta/combo cuesta 3 queries fijas"* — es el **piso**. Son 3 solo si el
+   ítem no tiene grupos de modificadores asociados; con grupos son 4. La medición del
+   2026-08-11 usó justamente la forma más barata.
+3. **El combo nunca se midió**, y tenía un N+1 propio que la entrada no nombra: el que se
+   cierra acá.
+
+**Lo que sí se arregló** (`55c1cd5a`): `resolverPersonalizacionCombo` llamaba a
+`resolverGruposDeItem` una vez por **(componente con grupos × unidad)**, y cada llamada
+releía el catálogo entero — las mismas dos consultas con los mismos parámetros, tantas veces
+como unidades tuviera el combo—, más una tercera consulta (`SELECT DISTINCT`) solo para
+saber qué componentes tenían grupos. Ahora un helper carga el catálogo de N items en dos
+consultas fijas y la resolución por unidad ocurre en memoria; el `SELECT DISTINCT`
+desapareció porque el lote ya dice quién tiene grupos. `resolverGruposDeItem` recibe el
+catálogo por un parámetro **opcional al final**, así ventas y salones no se tocaron — que era
+exactamente el riesgo por el que la entrada se había frenado.
+
+Medido después del cambio, con el mismo instrumento: un combo de una línea pasó de **61 a
+57** consultas y uno de cinco líneas de **173 a 153**; las otras tres formas quedaron en el
+mismo número al dígito, que es la prueba de que el cambio tocó solo el camino del combo. En
+tiempo: 5×combo de 34.0 a 30.9 ms secuencial, y de 84.2 a 78.3 ms p50 con diez en paralelo
+(112 → 119 ventas/s). La ganancia crece con las unidades del combo: el costo pasó de
+`3 + 2 × Σunidades` consultas a **3 fijas**.
+
+**Qué lo fija:** `items.service.spec.ts` → *"el catálogo de grupos se lee por lote: el conteo
+no crece ni con las unidades ni con los componentes"*, sobre un combo de dos componentes con
+tres unidades cada uno. El mutante que revierte el cuerpo del bucle al código anterior lo
+pone rojo con **15 consultas contra 3**. El mock de ese test contesta **por el SQL y no por
+el orden de llamada** a propósito: con una cadena de `mockResolvedValueOnce`, el regreso al
+N+1 reventaba con un mock agotado y el error no decía nada de lo que el test protege.
+
+**Frentes medidos y NO tomados**, con su número, para que el próximo no tenga que volver a
+medirlos:
+
+- **La configuración del tenant se relee entera en cada venta: ~17 consultas fijas**
+  (unidades de medida, monedas, tenant, fórmula de precio, país, descuentos, recargos,
+  impuestos, sus tramos, métodos de pago, tipos de regla). En una venta de una línea de
+  producto simple son 17 de 35: **más de la mitad**, y no dependen del carrito. Es el lever
+  más grande que apareció, y también el más caro: cachear config de tenant es diseño nuevo
+  (invalidación, staleness) y va con spec propia, no de arrastre.
+- **`SELECT Tenant` sale dos veces con el mismo parámetro en cada venta**: `TenantGuard`
+  valida que el tenant existe y `getPreferenciasFinancieras` lo relee para las preferencias.
+  Se dejó: sacarlo exige que el guard le pase la fila al service, o sea acoplar el servicio al
+  estado del request para ahorrar dos consultas.
+- ⚠️ **Lo que NO es un duplicado, para no volver a reportarlo:** los dos `SELECT TipoRegla`
+  que salen seguidos. Se verificaron los parámetros y son conjuntos de ids distintos
+  (descuentos por un lado, recargos e impuestos por el otro).
+
 ## El orden de bloqueo de filas de la bandeja de desfases: los dos ciclos, los `FOR UPDATE` antes de validar el tenant, el test de N combos y el orden intra-tabla (2026-08-20)
 
 Cierra el ⚠️ *"Lo que este cierre NO incluye"* de la entrada de acá abajo (*"Diez ventas
