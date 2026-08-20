@@ -5004,6 +5004,47 @@ describe('ItemsService', () => {
         expect(updReceta).toBeLessThan(updCombo);
       });
 
+      it('descartar ordena por `item_id` DENTRO de la pasada de recetas, aunque el lote venga al revés', async () => {
+        // `descartarDesfases` no toma ningún FOR UPDATE: el lock lo toma cada
+        // UPDATE, en el orden en que se ejecuta. Sin ordenar dentro de la
+        // pasada, dos recetas (sin ningún combo de por medio) todavía podían
+        // abrazarse si dos lotes las traían en sentidos opuestos.
+        managerMock.query
+          .mockResolvedValueOnce([
+            { item_id: 'receta-b', tipo: 'receta', nombre: 'Receta B' },
+            { item_id: 'receta-a', tipo: 'receta', nombre: 'Receta A' },
+          ]) // cabecerasCompuestas
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: 'receta-b',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+            {
+              receta_item_id: 'receta-a',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '150',
+            },
+          ]) // ingredientesPorReceta
+          .mockResolvedValue([]); // UPDATE item_receta x2
+
+        // El lote viene receta-b PRIMERO (orden descendente): es el orden que
+        // hoy se respeta y que abraza.
+        await service.descartarDesfases(TENANT, ['receta-b', 'receta-a']);
+
+        const updates = managerMock.query.mock.calls.filter(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' && c[0].includes('UPDATE item_receta'),
+        ) as [string, unknown[]][];
+        expect(updates).toHaveLength(2);
+        expect(updates[0][1][1]).toBe('receta-a');
+        expect(updates[1][1][1]).toBe('receta-b');
+      });
+
       it('aplicar sobre N recetas hace lecturas CONSTANTES, no por receta', async () => {
         const IDS = ['receta-a', 'receta-b', 'receta-c'];
         managerMock.query

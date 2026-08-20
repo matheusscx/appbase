@@ -4318,17 +4318,28 @@ export class ItemsService {
       // que un FOR UPDATE, así que recorrer el lote en el orden que manda el
       // cliente dejaba que dos `descartar` con las mismas filas en orden
       // distinto se abrazaran (40P01). `aplicarDesfases` ya ordena receta →
-      // combo; esto alinea los dos caminos de la bandeja.
+      // combo; esto alinea los dos caminos de la bandeja. Dentro de cada
+      // pasada, además, se ordena por `item_id` — igual que el
+      // `ORDER BY item_id` de los `FOR UPDATE` de `aplicarDesfases`
+      // (`:4130`, `:4135`) — porque `descartarDesfases` no toma ningún lock
+      // explícito: el lock lo toma cada `UPDATE`, en el orden en que se
+      // ejecuta. Sin este segundo orden, dos recetas (o dos combos) sin
+      // ningún ítem del otro tipo de por medio seguían pudiendo abrazarse si
+      // dos lotes las traían en sentidos opuestos. `Array.prototype.sort` es
+      // estable, así que un id duplicado en el lote no cambia de posición
+      // relativa entre sí y `descartados` sigue contando cada ocurrencia.
       //
       // Efecto observable asumido: en un lote mixto con errores en los dos
-      // tipos, ahora falla primero el de la receta. Es la misma precedencia
-      // que ya tenía `aplicarDesfases`.
-      const recetasDelLote = itemIds.filter(
-        (id) => cabPorId.get(id)!.tipo === 'receta',
-      );
-      const combosDelLote = itemIds.filter(
-        (id) => cabPorId.get(id)!.tipo === 'combo',
-      );
+      // tipos, ahora falla primero el de la receta (misma precedencia que ya
+      // tenía `aplicarDesfases`); y dentro de una misma pasada, si hay
+      // errores en más de un id, ahora sale primero el de `item_id` menor,
+      // no el que vino primero en el lote del cliente.
+      const recetasDelLote = itemIds
+        .filter((id) => cabPorId.get(id)!.tipo === 'receta')
+        .sort();
+      const combosDelLote = itemIds
+        .filter((id) => cabPorId.get(id)!.tipo === 'combo')
+        .sort();
 
       for (const itemId of recetasDelLote) {
         if (!ingsPorReceta.get(itemId)?.length) {
