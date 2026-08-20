@@ -209,10 +209,34 @@ esto **no es unánime**. Es una decisión, no un hecho.
 
 ## 6. Preguntas abiertas — para el owner
 
-1. **¿El nivel de redondeo (línea vs documento) es configurable, o fijamos uno?** El mercado
-   dice setting, y el proyecto ya tiene dónde ponerlo (preferencias financieras por tenant).
-   Pero nadie lo deriva del país, y nuestro modelo **sí** deriva la moneda oficial del país —
-   hay una asimetría para decidir a propósito, no por inercia.
+1. **¿El nivel de redondeo (línea vs documento) es configurable, o se deriva del país?**
+   ⏳ **Abierta.** El owner respondió "por configuración" el 2026-08-20 y **reabrió la pregunta
+   el mismo día**: puede ser más práctico por país. Queda el contexto para decidirla con calma,
+   porque las dos respuestas son defendibles:
+
+   - **Lo que separa este caso del de la moneda.** La moneda oficial se deriva del país porque
+     es un **hecho**: en Chile se cobra en pesos, no hay nada que elegir. El nivel de redondeo
+     es una **regla que solo algunas jurisdicciones fijan**: el Reino Unido obliga por línea,
+     México obliga al total, y **Chile no lo fija** (el SII estandariza campos y fórmulas, no el
+     algoritmo — y la circular que lo fijaría no apareció en dos pasadas de búsqueda). Derivar
+     hechos y configurar reglas-que-no-todos-fijan es un corte distinto del "todo se deriva".
+   - **Hoy la derivación no tendría de dónde derivar.** El único país en producción es Chile, y
+     ahí la tabla país→nivel diría "no lo fija" y caeríamos igual a un default. La derivación
+     empieza a pagar recién con un tenant en un país que **sí** lo manda, y ahí lo correcto no
+     sería un default sino un **candado** (el tenant no debería poder elegir mal en UK).
+   - **Por eso el default importa más que la opción.** Sea configurable o derivado, el 100% de
+     los tenants de hoy va a quedarse con lo que venga de fábrica. Un dueño de restaurante no
+     tiene por qué saber contestar "¿por línea o por documento?".
+   - **Recomendación:** configurable, con **por línea** de default, y la derivación por país
+     diferida hasta que exista un tenant en una jurisdicción que la mande. Tres razones para ese
+     default: por línea hace que Σ líneas = total **por construcción**, que es lo que el formato
+     del DTE espera campo por campo; es la regla general de UK y la que usan los POS más
+     parecidos a este caso (Square, Lightspeed); y es la única verificable por el cliente
+     sumando el ticket impreso. El contra honesto: es la que más se aleja del total exacto, y
+     México legisla al revés.
+   - **Lo que sí conviene dejar preparado:** que el campo pueda quedar **fijado desde afuera**
+     el día que exista la tabla por país, en vez de nacer como una preferencia libre que después
+     haya que empezar a ignorar en algunos países.
 2. **¿Los costos quedan fuera del alcance?** Cinco de los once sitios dependen de esta
    respuesta.
 3. **La línea de ajuste no facturable, ¿se construye ahora o se difiere?** ADR-010 es explícito
