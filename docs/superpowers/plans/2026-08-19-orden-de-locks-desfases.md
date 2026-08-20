@@ -385,7 +385,9 @@ git commit --no-verify -m "fix(items): aplicar desfases valida el tenant antes d
 
 - [ ] **Step 1: Escribir el test**
 
-Copiá la forma del de recetas y adaptala a combos. Antes de escribirlo, **contá leyendo `aplicarDesfases` cuántos SELECT hace un lote de solo combos** (el catálogo de unidades no se carga: `:4161` lo condiciona a que haya recetas). El número va fijo y con el comentario que explica por qué es fijo, igual que el gemelo.
+Copiá la forma del de recetas y adaptala a combos. **El número es 4**, contado sobre el código (no copiado de una corrida): cabeceras, lock de `item_receta`, lock de `item_combo`, y `componentesPorCombo`. `ingredientesPorReceta` corta en seco con lista vacía (`if (!recetaItemIds.length) return out`), el catálogo de unidades no se carga porque `:4161` lo condiciona a que haya recetas, y el bloque de `afectados` (`:4262-4279`) se saltea entero porque `recetasAplicadas.size` es 0.
+
+Verificá ese 4 vos mismo antes de escribirlo. Si te da otro número, **el plan está mal y hay que decirlo** — no ajustes el número a lo que salga sin explicar de dónde sale la diferencia.
 
 ```typescript
 it('aplicar sobre N combos hace lecturas CONSTANTES, no por combo', async () => {
@@ -398,7 +400,10 @@ it('aplicar sobre N combos hace lecturas CONSTANTES, no por combo', async () => 
   const sqls = managerMock.query.mock.calls.map((c: unknown[]) => c[0] as string);
   // El número exacto sale de contar sobre el código, no de correr y copiar lo
   // que dé: si lo copiás de la corrida, el test fija el N+1 en vez de cazarlo.
-  expect(sqls.filter((s) => s.trim().startsWith('SELECT'))).toHaveLength(/* contado */);
+  // 4 lecturas para el lote entero: cabeceras, los 2 locks y los componentes.
+  // Fijo a propósito: con 3 combos, si alguien vuelve a leer o a bloquear POR
+  // COMBO, los SELECT se multiplican y este número lo caza.
+  expect(sqls.filter((s) => s.trim().startsWith('SELECT'))).toHaveLength(4);
   expect(sqls.filter((s) => s.includes('UPDATE item_combo'))).toHaveLength(3);
   expect(catalogServiceMock.crearConversor).not.toHaveBeenCalled();
 });
@@ -440,7 +445,11 @@ Actualizá también la tabla de la sección 🔴 (*"Qué agrupa"*): la fila "Con
 
 Entrada nueva en `pendientes.md` (sección 2, "Medir primero"): `descartarDesfases` lee cabeceras, ingredientes y componentes, calcula el costo propuesto y recién ahí escribe `costo_propuesto_omitido`, **sin lock**. Un `aplicar` concurrente puede mover el costo en el medio, y descartar archivaría como "omitido" un número que ya no es el propuesto. Decisión del owner 2026-08-19: se anota, no se arregla en esta pasada. Poné el `archivo:línea` medido.
 
-- [ ] **Step 4: Commit (sin `--no-verify`: son solo docs)**
+- [ ] **Step 4: `anti-patterns.md`, solo si hace falta**
+
+Únicamente si el spike de la Task 1 descubrió una forma de romper el orden que la regla no cubre. Si no descubrió ninguna, **no inventes una entrada**: el archivo es de errores reales ya cometidos acá.
+
+- [ ] **Step 5: Commit (sin `--no-verify`: son solo docs)**
 
 ```bash
 git add docs/
@@ -476,10 +485,24 @@ cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run
 
 Por cada uno de los tres cambios de código, revertilo a su forma vieja y confirmá que **su** test lo caza. Después de cada revert, verificá `git status --porcelain` vacío **y la hora del restart del contenedor en los logs** — el fuente limpio no prueba que el proceso lo esté.
 
-- [ ] **Step 5: Revisión independiente**
+- [ ] **Step 5: Verificar el criterio de éxito del spec por grep**
+
+*"Ningún camino del repo adquiere las tres tablas en un orden distinto al declarado."* Los escritores son un solo archivo, así que es barato y hay que hacerlo:
+
+```bash
+cd backend && grep -n "item_receta\|item_combo\|UPDATE items" src/modules/items/items.service.ts
+```
+
+Recorré cada camino que toque más de una de las tres tablas y confirmá el orden `item_receta → item_combo → items`. Reportá la lista de caminos revisados, no solo la conclusión. Confirmá también que fuera de `items.service.ts` el único que las escribe sigue siendo el seeder:
+
+```bash
+grep -rn --include='*.ts' "UPDATE item_combo\|UPDATE item_receta\|INSERT INTO item_combo\|INSERT INTO item_receta" src | grep -v "items.service.ts" | grep -v "\.spec\.ts"
+```
+
+- [ ] **Step 6: Revisión independiente**
 
 `domain-reviewer` sobre el diff completo de la rama. Es el paso 7 de `verify-feature` y lo que el pre-commit exige para levantar el bloqueo sobre services de backend.
 
-- [ ] **Step 6: Push**
+- [ ] **Step 7: Push**
 
 Recién con todo lo anterior en verde. El push **despliega en Railway**: revisar el deployment además del CI (`railway deployment list --service backend --json` → `SUCCESS` para el commit exacto) y correr `./scripts/smoke-produccion.sh`.
