@@ -17,6 +17,149 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos ciclos de orden de lock de la bandeja de desfases (2026-08-20)
+
+Cierra el ⚠️ *"Lo que este cierre NO incluye"* de la entrada de acá abajo (*"Diez ventas
+simultáneas cuelgan la API para siempre"*): los cuatro puntos que ADR-020 no tocaba, más
+un quinto que apareció revisando el arreglo del segundo.
+
+**Cerrado el 2026-08-20, en seis tareas** (spec
+[`2026-08-19-orden-de-locks-desfases-design.md`](../superpowers/specs/2026-08-19-orden-de-locks-desfases-design.md),
+plan homónimo en `docs/superpowers/plans/`).
+
+**Lo que quedó escrito como regla, y es lo que hay que leer antes de volver a tocar estas
+tablas:** el orden de bloqueo es `item_receta` → `item_combo` → `items`, y **dentro de cada
+tabla las filas se piden ordenadas por `item_id`**. Un camino puede saltear tablas; no puede
+invertirlas. Vive en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de bloqueo
+de filas en ítems compuestos", con la tabla de qué test fija cada camino.
+
+- **`items` ↔ `item_combo`** (`32297901`) — `update()` de un combo toma
+  `SELECT item_id FROM item_combo … FOR UPDATE` **antes** del `UPDATE items`, bajo el guard
+  idéntico al del branch que después escribe `item_combo`
+  (`tipo === 'combo' && dto.componentes !== undefined`). Es el gemelo exacto del lock de
+  receta que ya existía. **Qué lo fija:** `items.service.spec.ts` → *"toma `item_combo`
+  ANTES del UPDATE items — orden de locks contra aplicarDesfases"*, y tres mutantes del
+  revisor: sacar el lock (archivo byte-idéntico al commit anterior, o sea revert real y no
+  "romper algo"), moverlo **después** del `UPDATE items` (typecheck limpio, test rojo → el
+  test fija la dirección, no la mera presencia) y ensanchar el guard a `tipo === 'combo'`
+  (dos tests rojos → el ancho tampoco puede derivar en silencio).
+- **`item_receta` ↔ `item_combo`** (`ecf7332e` + `27323a25`) — `descartarDesfases` pasó de
+  un loop único en el orden del cliente a **dos pasadas, recetas primero**, y **cada pasada
+  ordenada por `item_id`**. No toma ni un `FOR UPDATE`: el arreglo no fue agregar locks sino
+  fijar el orden en que sus `UPDATE` los toman solos.
+  ⚠️ **El `.sort()` no estaba en el plan.** Salió de la revisión de esa tarea: alinear el
+  orden **entre** tablas dejaba vivo el ciclo **dentro** de una tabla —dos recetas, sin
+  ningún combo de por medio, en lotes con sentidos opuestos—, que el reproductor e2e no
+  cubre porque usa exactamente una receta y un combo. Decisión del owner (2026-08-19):
+  cerrarlo ahí mismo, contra la línea del brief que pedía conservar el orden de `itemIds`.
+  **Qué lo fija:** los dos `it` de `items.service.spec.ts` —*"descartar escribe
+  `item_receta` ANTES que `item_combo`…"* y *"descartar ordena por `item_id` DENTRO de la
+  pasada de recetas…"*— más los dos `it` del reproductor e2e. **Efecto observable
+  deliberado:** en un lote mixto con errores en los dos tipos ahora falla primero el de la
+  receta, y dentro de una pasada sale primero el error del `item_id` menor, no el del que
+  vino primero en el lote.
+- **Los `FOR UPDATE` antes de validar el tenant** (`15a557cf`) — `cabecerasCompuestas`, que
+  es quien filtra `tenant_id`, subió **arriba** de los dos locks de `aplicarDesfases`. Lee
+  `items` sin lock, así que subirla no toma nada por adelantado. Un id de otro tenant deja
+  de bloquear filas ajenas hasta el rollback del 404. **Qué lo fija:** *"valida el tenant
+  ANTES de tomar los locks"*, y el mutante del revisor (volver el service a la versión
+  anterior) que lo pone rojo.
+- **El test de lecturas constantes para N combos** (`4895ec78`) — la rama de combos se
+  ejercitaba con **un** combo. Ahora *"aplicar sobre N combos hace lecturas CONSTANTES, no
+  por combo"* fija **4 SELECT** para un lote de 3 combos (cabeceras, los dos locks y los
+  componentes), el gemelo del de recetas que fija 5. El revisor contó las queries por su
+  cuenta, escribió un mutante N+1 distinto al del reporte (7 vs 4) y verificó que el loop de
+  combos **se ejecuta** —`aplicados = 3` y tres `UPDATE item_combo`—, o sea que el test no
+  pasa en verde por abortar antes.
+
+**El reproductor, y qué reportó el spike que lo eligió** (`b49b4fe1` rojo, `08926ffe` y
+`cbc5fc45` las dos rondas de revisión —
+`backend/test/orden-locks-desfases.e2e-spec.ts`, 4 `it`):
+
+- **El mecanismo elegido es determinista, no una ráfaga.** Una compuerta (un `QueryRunner`
+  propio con un `FOR UPDATE` sobre la fila del combo) retiene esa fila mientras entran las
+  dos requests y recién después la suelta. Las dos puntas del abrazo son transacciones
+  reales del service por HTTP, ninguna es una réplica a mano de su SQL. Medido: 10 de 10
+  corridas, exactamente 1 deadlock y 1 víctima. La alternativa —ráfaga de 8 requests en
+  órdenes alternados— también reproducía 10/10, pero con 4 a 6 víctimas por corrida y sin
+  distinguir "se abrazaron por orden opuesto" de contención bruta; quedó descartada con su
+  medición.
+- **El spike refutó la hipótesis con la que se escribió el plan:** la cola FIFO de Postgres
+  no impide el ciclo — **lo construye**, si se la usa para ordenar la **entrada** de las dos
+  requests en vez de su salida.
+- **Y corrigió un dato falso del brief:** no hace falta un desfase pendiente para que el
+  lock se tome. `descartarDesfases` escribe `costo_propuesto_omitido` de forma
+  **incondicional**; solo exige que la receta tenga ingredientes y el combo componentes.
+- **Dos hallazgos de revisión que cambiaron el spec, no el código.** (a) `{statuses:[201,201],
+  deadlocksNuevos:0}` es también la salida exacta de una compuerta que no engancha, así que
+  el verde no era falsable: se agregó `esperandoLockEnLaCompuerta`, que cuenta los esperadores
+  en `pg_stat_activity` justo antes de soltar la compuerta y afirma **2**. (b) El spec no
+  fijaba la **dirección** del orden: un fix que bloqueara `item_combo` antes que
+  `item_receta` lo ponía entero en verde. Se agregó el `it` **cruzado** —`descartar([combo,
+  receta])` contra `aplicar` del mismo par—, que solo se apaga con el orden canónico porque
+  el `FOR UPDATE` de `aplicarDesfases` no depende del orden del cliente.
+- **Su alcance es angosto y el encabezado lo declara:** cubre `descartar` contra `descartar`
+  y `descartar` contra `aplicar`, con una receta y un combo. No dice nada del alta ni de la
+  edición de ítems compuestos, ni del orden intra-tabla. Leerlo antes de citarlo como
+  evidencia de algo más ancho.
+
+⚠️ **Lo que este cierre NO incluye:** `descartarDesfases` calcula el costo propuesto con
+lecturas **sin lock** y recién después escribe `costo_propuesto_omitido`, así que un
+`aplicar` concurrente puede mover el número en el medio. No es un deadlock —no abraza a
+nadie, escribe tranquilo un valor viejo—; por decisión del owner (2026-08-19) se anota y no
+se arregla en esta pasada. Queda abierto en [`pendientes.md`](pendientes.md) § 2, "Medir
+primero".
+
+### La entrada, verbatim
+
+- [ ] 🧱 **Dos ciclos de orden de lock en la bandeja de desfases de combos, los `FOR
+  UPDATE` que se toman antes de validar el tenant, y el test de lecturas constantes que
+  falta para N combos** (backend, visto el 2026-08-18 al meter los combos en la bandeja de
+  desfases — pieza residual de "Diez ventas simultáneas cuelgan la API para siempre", cuyo
+  agotamiento de pool **se cerró** el mismo día con contexto transaccional ALS: ver
+  [`resueltos.md`](resueltos.md) y [ADR-020](../adr/020-contexto-transaccional-als.md)).
+  Va con las otras dos de esta sección: rendimiento y redondeo. **Mecanismo distinto al
+  deadlock ya cerrado**: esto es orden de locks de fila entre dos tablas, no agotamiento del
+  pool de conexiones — ADR-020 no lo toca ni lo arregla.
+
+  1. **`items` ↔ `item_combo`.** Los dos son el gemelo exacto del ciclo que el comentario de
+     `items.service.ts:1330-1338` dice haber neutralizado para recetas, y ninguno existía
+     antes del commit del 2026-08-18 — hasta entonces ningún camino de desfases tocaba
+     `item_combo`. `aplicarDesfases` toma `item_combo … FOR UPDATE` y después
+     `UPDATE items SET precio_base`; `update()` de un combo con `dto.componentes` hace lo
+     inverso —`UPDATE items` y después `UPDATE item_combo`— porque su lock previo está
+     guardado por `tipo === 'receta'`. **Disparo:** un `PATCH` de combo (nombre +
+     componentes) concurrente con un "aplicar desfase de ese combo" con `actualizarPrecio`.
+     **Fix identificado:** extender ese guard para que un `PATCH` de combo tome
+     `item_combo FOR UPDATE` antes del `UPDATE items`. Mueve la secuencia de queries de
+     `update()`, así que arrastra los tests posicionales de `update`/`remove` de combo.
+  2. **`item_receta` ↔ `item_combo`.** `descartarDesfases` no toma ningún lock y escribe las
+     dos tablas en el orden que manda el cliente, mientras `aplicarDesfases` las ordena
+     siempre receta → combo. **Disparo:** `descartar([combo, receta])` contra
+     `aplicar([receta, combo])`, o dos `descartar` con las mismas filas en orden distinto.
+     Es el más alcanzable de los dos: se dispara entre dos operaciones de la propia bandeja,
+     o sea con dos personas resolviéndola a la vez. **Fix identificado:** que el loop de
+     `descartarDesfases` procese las recetas antes que los combos, igual que aplicar. No
+     necesita locks nuevos ni toca ningún camino preexistente.
+  3. **Los locks de `aplicarDesfases` se toman antes de validar el tenant** (visto el
+     2026-08-18, en la revisión final de esa misma tarea). `cabecerasCompuestas` valida
+     `tenant_id` **después** de los dos `FOR UPDATE`, así que un usuario autenticado que
+     mande ids de otro tenant bloquea esas filas hasta el rollback del 404. No hay fuga de
+     datos: el 404 sale igual y no devuelve nada del otro tenant. Es forma **preexistente**
+     para `item_receta` que ese día se extendió a `item_combo`. Va acá y no suelto porque el
+     fix —validar el tenant antes de tomar el lock— mueve el lugar de los locks, que es el
+     mismo frente que esta tanda difiere.
+  4. **No hay test de lecturas constantes para N combos** (visto el 2026-08-18, misma
+     revisión). El gemelo de recetas existe y es fuerte (`items.service.spec.ts`, caso
+     "aplicar sobre N recetas hace lecturas CONSTANTES", 5 SELECT fijos), pero la rama de
+     combos solo se ejercita con **un** combo: un N+1 futuro ahí no lo caza nadie.
+
+  **Ninguno de los cuatro lo ve un test**: el e2e corre con `maxWorkers: 1`
+  (`test/jest-e2e.json`), la misma razón por la que el deadlock de conexiones pasó
+  desapercibido antes de esta tanda.
+
+---
+
 ## Diez ventas simultáneas cuelgan la API para siempre: el pool de conexiones deja de agotarse (2026-08-18)
 
 **Diez ventas simultáneas cuelgan la API para siempre** (backend, medido 2026-08-11) —

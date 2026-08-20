@@ -513,6 +513,60 @@ entrante "es" cuál existente, y forzar el upsert arriesga más que soft-delete
 
 ---
 
+## 15. Orden de bloqueo de filas en ítems compuestos
+
+Toda transacción que escriba más de una de estas tablas las toma **en este orden**,
+y dentro de cada tabla pide las filas **ordenadas por `item_id`**:
+
+```
+item_receta  →  item_combo  →  items
+```
+
+Un camino puede **saltear** tablas (un lote de solo combos no escribe ninguna fila
+de `item_receta`); lo que no puede es **invertirlas**.
+
+**Por qué.** Dos transacciones que piden las mismas filas al revés se abrazan, y
+Postgres mata a una con `40P01`. El usuario ve un 500: nada queda corrupto —la
+transacción víctima se revierte entera— pero su operación no se hizo, y acá nadie
+reintenta el `40P01` (a diferencia de `ventas.crear()`). El orden **entre** tablas
+no alcanza por sí solo: dos lotes que traigan las mismas dos recetas en sentidos
+opuestos cierran el mismo ciclo **dentro** de una tabla. Por eso el orden por
+`item_id` es parte de la regla, no un detalle del `ORDER BY`.
+
+**Un `UPDATE` cuenta como lock.** No hace falta un `FOR UPDATE` explícito para
+participar del orden: el `UPDATE` toma el lock de la fila cuando se ejecuta, así
+que el orden de bloqueo de un camino sin locks explícitos es simplemente el orden
+en que itera. `descartarDesfases` es exactamente ese caso —no toma un solo
+`FOR UPDATE`— y aun así tiene que respetar la regla: la cumple partiendo el lote
+en dos pasadas, recetas primero, cada una ordenada por `item_id`.
+
+**El alta no participa.** Un `INSERT` de filas nuevas no compite con nadie: nadie
+más puede tener ni pedir una fila que todavía no existe, y la fila padre de `items`
+la insertó la misma transacción. Por eso `create()` inserta `items` antes que
+`item_receta`/`item_combo` sin violar nada.
+
+**Dónde se fija** (todo en `backend/src/modules/items/`):
+
+| Camino | Cómo toma el orden | Test que lo fija (`items.service.spec.ts`) |
+|---|---|---|
+| `aplicarDesfases` | dos `SELECT … ORDER BY item_id FOR UPDATE`, `item_receta` y después `item_combo`, antes de leer ingredientes; el `UPDATE items` del precio va al final | `aplicar sobre N recetas hace lecturas CONSTANTES…` (afirma las dos tablas y sus `ORDER BY`), `valida el tenant ANTES de tomar los locks` |
+| `descartarDesfases` | dos pasadas ordenadas, sin locks explícitos | `descartar escribe item_receta ANTES que item_combo…`, `descartar ordena por item_id DENTRO de la pasada de recetas…` |
+| `update()` de un ítem compuesto | `FOR UPDATE` sobre `item_receta`/`item_combo` **antes** del `UPDATE items`, bajo el mismo guard que el branch que después escribe esa tabla | `toma item_combo ANTES del UPDATE items — orden de locks contra aplicarDesfases` |
+
+Y un reproductor de deadlock real, `backend/test/orden-locks-desfases.e2e-spec.ts`:
+dos requests HTTP con el mismo par receta/combo en órdenes opuestos, con el
+interleaving forzado por una compuerta. **Su alcance es angosto y su encabezado lo
+declara:** cubre `descartar` contra `descartar` y `descartar` contra `aplicar`, con
+exactamente una receta y un combo. No dice nada del alta ni de la edición de ítems
+compuestos, ni del orden intra-tabla —eso lo cubren los unit tests de arriba—. Leer
+ese encabezado antes de citarlo como evidencia de algo más ancho.
+
+El porqué completo, con los ciclos que se cerraron y el que quedó abierto, en
+[`agent/resueltos.md`](../agent/resueltos.md) § "Los dos ciclos de orden de lock de
+la bandeja de desfases".
+
+---
+
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.

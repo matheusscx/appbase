@@ -6,7 +6,7 @@ producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra
 
 > 🔴 **Antes de tomar cualquier entrada de este archivo, leé la sección
 > ([🧱 tanda propia](#-prioridad-máxima--tanda-propia-conexiones-rendimiento-y-redondeo-de-plata)).**
-> Es prioridad máxima y agrupa tres temas que solo se pueden resolver juntos y aislados.
+> Es prioridad máxima y agrupa los temas que solo se pueden resolver juntos y aislados.
 
 Regla de este archivo: **acá solo vive lo que falta hacer.** Cuando una entrada se cierra,
 en el mismo commit se muda —con el texto de su cierre— a
@@ -52,15 +52,21 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 > tabla de abajo) sigue siendo un deadlock real de fila, aunque más acotado que N=pool, más
 > rendimiento y redondeo de plata — las tres siguen midiéndose juntas por lo que dice "Por
 > qué juntas" más abajo.
+> ⚠️ **Corregido otra vez el 2026-08-20:** esa pieza residual **también se cerró** (ver
+> `resueltos.md` § "Los dos ciclos de orden de lock de la bandeja de desfases"), así que
+> el tema "Conexiones / deadlock" ya no sostiene nada: quedan **dos**, rendimiento y
+> redondeo de plata. El título de la sección conserva las tres palabras a propósito —hay
+> un enlace al ancla desde el encabezado del archivo, y el nombre es cómo se la conoce en
+> `CLAUDE.md`—, pero lo que hay abierto son dos.
 
-**Estas tres NO se tocan de a pedazos ni de arrastre dentro de otra tarea. Van juntas, en
+**Estas NO se tocan de a pedazos ni de arrastre dentro de otra tarea. Van juntas, en
 una pasada dedicada, con el sistema quieto.**
 
 Qué agrupa:
 
 | Tema | Entrada |
 |---|---|
-| Conexiones / deadlock | ✅ Cerrado el 2026-08-18 (ADR-020, ver `resueltos.md`). Queda abierto lo residual: *"Dos ciclos de orden de lock en la bandeja de desfases de combos…"* (más abajo) |
+| ~~Conexiones / deadlock~~ | ✅ **Cerrado del todo.** El agotamiento del pool, el 2026-08-18 (ADR-020); los dos ciclos de orden de lock de la bandeja de desfases, el 2026-08-20. Los dos en [`resueltos.md`](resueltos.md) |
 | Rendimiento | *"N+1 al resolver personalización de recetas/combos"* `[~]`, y lo que aparezca al medir |
 | Redondeo de plata | *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* (abajo), con su sub-punto de `subtotal`/`total_linea` entrando a `NUMERIC(18,4)` |
 
@@ -80,61 +86,16 @@ rendimiento.
 
 Mientras tanto: si una tarea de producto **necesita** tocar algo de esta lista, se anota acá
 y se consulta — no se resuelve de paso. Un N+1 nuevo que se introduzca sí se saca en el
-momento; lo que se difiere es abrir estos tres frentes.
+momento; lo que se difiere es abrir estos frentes.
 
-### Las tres entradas, íntegras
+### Las entradas, íntegras
 
-Estaban repartidas por el archivo con punteros cruzados entre sí. Acá están las tres, en
-el orden de la tabla de arriba.
+Estaban repartidas por el archivo con punteros cruzados entre sí. Acá están, en el orden
+de la tabla de arriba. La de "Conexiones / deadlock" ya no está: se cerró y se mudó a
+[`resueltos.md`](resueltos.md).
 
-- [ ] 🧱 **Dos ciclos de orden de lock en la bandeja de desfases de combos, los `FOR
-  UPDATE` que se toman antes de validar el tenant, y el test de lecturas constantes que
-  falta para N combos** (backend, visto el 2026-08-18 al meter los combos en la bandeja de
-  desfases — pieza residual de "Diez ventas simultáneas cuelgan la API para siempre", cuyo
-  agotamiento de pool **se cerró** el mismo día con contexto transaccional ALS: ver
-  [`resueltos.md`](resueltos.md) y [ADR-020](../adr/020-contexto-transaccional-als.md)).
-  Va con las otras dos de esta sección: rendimiento y redondeo. **Mecanismo distinto al
-  deadlock ya cerrado**: esto es orden de locks de fila entre dos tablas, no agotamiento del
-  pool de conexiones — ADR-020 no lo toca ni lo arregla.
-
-  1. **`items` ↔ `item_combo`.** Los dos son el gemelo exacto del ciclo que el comentario de
-     `items.service.ts:1330-1338` dice haber neutralizado para recetas, y ninguno existía
-     antes del commit del 2026-08-18 — hasta entonces ningún camino de desfases tocaba
-     `item_combo`. `aplicarDesfases` toma `item_combo … FOR UPDATE` y después
-     `UPDATE items SET precio_base`; `update()` de un combo con `dto.componentes` hace lo
-     inverso —`UPDATE items` y después `UPDATE item_combo`— porque su lock previo está
-     guardado por `tipo === 'receta'`. **Disparo:** un `PATCH` de combo (nombre +
-     componentes) concurrente con un "aplicar desfase de ese combo" con `actualizarPrecio`.
-     **Fix identificado:** extender ese guard para que un `PATCH` de combo tome
-     `item_combo FOR UPDATE` antes del `UPDATE items`. Mueve la secuencia de queries de
-     `update()`, así que arrastra los tests posicionales de `update`/`remove` de combo.
-  2. **`item_receta` ↔ `item_combo`.** `descartarDesfases` no toma ningún lock y escribe las
-     dos tablas en el orden que manda el cliente, mientras `aplicarDesfases` las ordena
-     siempre receta → combo. **Disparo:** `descartar([combo, receta])` contra
-     `aplicar([receta, combo])`, o dos `descartar` con las mismas filas en orden distinto.
-     Es el más alcanzable de los dos: se dispara entre dos operaciones de la propia bandeja,
-     o sea con dos personas resolviéndola a la vez. **Fix identificado:** que el loop de
-     `descartarDesfases` procese las recetas antes que los combos, igual que aplicar. No
-     necesita locks nuevos ni toca ningún camino preexistente.
-  3. **Los locks de `aplicarDesfases` se toman antes de validar el tenant** (visto el
-     2026-08-18, en la revisión final de esa misma tarea). `cabecerasCompuestas` valida
-     `tenant_id` **después** de los dos `FOR UPDATE`, así que un usuario autenticado que
-     mande ids de otro tenant bloquea esas filas hasta el rollback del 404. No hay fuga de
-     datos: el 404 sale igual y no devuelve nada del otro tenant. Es forma **preexistente**
-     para `item_receta` que ese día se extendió a `item_combo`. Va acá y no suelto porque el
-     fix —validar el tenant antes de tomar el lock— mueve el lugar de los locks, que es el
-     mismo frente que esta tanda difiere.
-  4. **No hay test de lecturas constantes para N combos** (visto el 2026-08-18, misma
-     revisión). El gemelo de recetas existe y es fuerte (`items.service.spec.ts`, caso
-     "aplicar sobre N recetas hace lecturas CONSTANTES", 5 SELECT fijos), pero la rama de
-     combos solo se ejercita con **un** combo: un N+1 futuro ahí no lo caza nadie.
-
-  **Ninguno de los cuatro lo ve un test**: el e2e corre con `maxWorkers: 1`
-  (`test/jest-e2e.json`), la misma razón por la que el deadlock de conexiones pasó
-  desapercibido antes de esta tanda.
-
-- [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la segunda de esta
-  sección) — parcialmente cerrado
+- [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la primera de las dos que
+  quedan en esta sección) — parcialmente cerrado
   2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
   `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
   Ese se cerró (`unnest` de pares grupo↔item_grupo en una sola query) y beneficia a los
@@ -187,7 +148,7 @@ el orden de la tabla de arriba.
 
 - [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
   (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
-  — 🧱 **la tercera de esta sección: no se toca suelta.**
+  — 🧱 **la segunda de las dos que quedan en esta sección: no se toca suelta.**
   se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
   arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
   - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
@@ -441,6 +402,32 @@ decisión que no es mía).
   🔗 Puede ser pariente del intermitente de autenticación de la entrada de arriba (cuatro
   avistajes): los dos son intermitentes del e2e local, un solo test por corrida, verde al
   repetir. Nada lo prueba todavía.
+
+- [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
+  como "omitido" cuando ya puede no ser el propuesto** (backend,
+  `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
+  cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
+  (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
+  (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
+  (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
+  `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
+  concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
+  descarte archiva un propuesto que ya no lo es.
+  ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
+  es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
+  (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
+  ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
+  lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
+  frente que la tanda 🔴 mandaba aislar.
+  **Por qué está en esta sección y no en la 1:** falta medir **qué se ve**. De leer
+  `filasDesfaseRecetas` / `filasDesfaseCombos` —que ocultan la fila solo si el propuesto
+  recalculado coincide (`eq4`) con `costo_propuesto_omitido`— sale que un omitido viejo
+  hace que el ítem **reaparezca** en la bandeja, no que un desfase real quede silenciado.
+  O sea: el síntoma probable es "el descarte no pega", que es molesto y no peligroso. Eso
+  está **deducido del código, no medido**: montar las dos transacciones y mirar qué queda
+  en `costo_propuesto_omitido` es lo primero. Si el síntoma es ese, el arreglo puede ser
+  tan barato como releer bajo lock; si aparece un caso donde el desfase se silencia, sube
+  de sección y de prioridad.
 
 ---
 
@@ -1034,6 +1021,16 @@ de las cuatro de acá **no es la familia de bug — es la tabla y el disparador*
 caja/inventario/stock; ahí es `items`/`item_receta`/`item_combo` en la bandeja de desfases.
 (Los otros dos puntos de esa entrada residual —el `FOR UPDATE` antes de validar tenant, y el
 hueco de test de N combos— no son de ninguno de los dos moldes.)
+
+ℹ️ **2026-08-20:** esa entrada residual **se cerró** y vive en
+[`resueltos.md`](resueltos.md) § "Los dos ciclos de orden de lock de la bandeja de
+desfases". Lo de arriba se conserva porque la clasificación por moldes sigue siendo cierta
+y es la que hay que aplicarle a las cuatro de acá. Cómo quedó el "no toma lock" del molde
+2: `descartarDesfases` sigue sin tomar un solo `FOR UPDATE` —el arreglo no fue agregar
+locks sino **fijar el orden en que sus `UPDATE` los toman solos**—, y el orden canónico del
+proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de
+bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cuatro
+entradas de esta sección.
 
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es otro molde que los tres
