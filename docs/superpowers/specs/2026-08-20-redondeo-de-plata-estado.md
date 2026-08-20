@@ -71,6 +71,21 @@ no por la lista de la entrada. 19 sitios matchean; 11 son plata.
 Los once usan HALF_UP: explícito (`ROUND_HALF_UP`) o implícito (`toFixed`, cuyo default es
 HALF_UP). Ninguno mira `modo_redondeo`.
 
+⚠️ **Esta tabla localiza, no juzga.** Decisión del owner (2026-08-20): **ninguno de los once
+se da por bueno ni por malo de entrada**. Cada uno pide su propio análisis de contexto —qué
+representa el número, quién lo consume, si es tasa o monto, si se persiste o se proyecta— y
+termina en un **veredicto explícito**, incluido *"queda como está"*.
+
+**Y el veredicto se escribe en el código, no solo acá.** Cada sitio queda con un comentario
+que diga por qué redondea como redondea. Hoy los once están mudos, y ese silencio es
+exactamente lo que hizo falta reconstruir midiendo: sin la nota, dentro de seis meses cada
+`toFixed(4)` vuelve a ser sospechoso y alguien lo analiza otra vez desde cero.
+
+📌 **Contexto del owner que reencuadra la tabla entera:** los once no son once decisiones
+tomadas. Quedaron en HALF_UP porque **el motor de cálculo no llegaba hasta ahí** — están
+fuera de su alcance, no en desacuerdo con él. No hay que buscar la razón por la que se eligió
+HALF_UP en cada uno: probablemente no hubo elección.
+
 **Quedan fuera a propósito, aunque el grep los trae** — no son plata, y meterlos en el
 barrido sería el error contrario: conversión de cantidades (`cantidad-presentacion.util.ts`
 `:165` y `:247`, `catalog.service.ts:177`), horas (`horas-interseccion.ts:16`), el margen en
