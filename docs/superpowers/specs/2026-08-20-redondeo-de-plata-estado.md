@@ -156,8 +156,10 @@ En orden de cuánto bloquea:
    líneas y reparte la diferencia por mayores restos, cuadran las dos cosas y una línea puede
    mostrar una unidad más que su propia cuenta. **No hay respuesta universal**: el TJUE lo
    declaró discreción nacional y UK y México legislaron al revés uno del otro (§6 de la
-   investigación). Chile exige montos enteros en cada campo de línea **y** de total, sin fijar
-   el algoritmo.
+   investigación). ⛔ **Corregido el mismo día:** Chile **no** exige enteros en cada campo — el
+   precio unitario y la cantidad admiten 6 decimales explícitos; que los totales vayan enteros
+   es inferencia desde el silencio del formato. Ver
+   [`2026-08-20-redondeo-por-linea-o-por-total.md`](../../agent/investigaciones/2026-08-20-redondeo-por-linea-o-por-total.md).
 2. **¿Los costos siguen el mismo criterio que los precios?** Un CPP o un costo por unidad base
    llevado a la escala de CLP sería 0 o 1 peso por gramo. La investigación trae respaldo para
    tratarlos distinto (Zuora no redondea el precio unitario; el combustible se cotiza en

@@ -250,7 +250,15 @@ Y lo que cada país decidió **sí difiere**:
 | **México** (SAT, Anexo 20) | Sumar líneas a **hasta 6 decimales** y redondear **una sola vez al total** |
 | **Colombia** (DIAN) | **half-to-even** (NTC 3711), con tolerancias de ±$5 en IVA y ±2.00 en montos |
 | **Japón** (NTA) | Una sola vez **por tasa de impuesto, por factura**. Método a elección — pero **exige consistencia** |
-| **Chile** (SII) | Montos **enteros en CLP** en cada campo de línea y de total. **No fija el algoritmo** |
+| **Chile** (SII) | Montos **enteros en CLP** en cada campo de línea y de total. **No fija el algoritmo** ⛔ ver corrección abajo |
+
+⛔ **CORREGIDO el 2026-08-20.** La fila de Chile es **falsa para dos campos**: `PrcItem`
+(precio unitario) y `QtyItem` (cantidad) admiten **12 enteros y 6 decimales**, anotado
+literalmente en las dos especificaciones oficiales del SII —verificado extrayendo el texto de
+los PDF, no de un snippet—. Que los **totales** vayan enteros en CLP es **[INFERENCIA]** desde
+el silencio del formato más la nota de `<OtraMoneda>`, no una frase literal: esta pasada lo
+anotó como [NORMA] y no lo era. Detalle en
+[`2026-08-20-redondeo-por-linea-o-por-total.md`](2026-08-20-redondeo-por-linea-o-por-total.md).
 
 ⭐ Nótese que UK y México son **opuestos**: uno obliga por línea, el otro obliga al total.
 Un sistema multi-país no puede elegir uno y llamarlo "el correcto".
