@@ -135,7 +135,7 @@ Anotá también, con el mismo criterio: `SELECT Tenant` sale **dos veces con el 
 
 La entrada sale de `pendientes.md` y entra a `resueltos.md` con su cierre. La sección 🔴 queda con **redondeo de plata** como único frente abierto: revisá el título de la sección, el ancla del enlace de arriba del archivo y la lista de *"🛑 Detenerse y preguntar"* de `CLAUDE.md`, que nombra "rendimiento (N+1) o redondeo de plata" como par. Es el mismo barrido que hubo que hacer cuando salió conexiones: buscá **por contenido**, no por la forma del enlace.
 
-- [ ] **Step 2: Gate completo y revisión independiente**
+- [x] **Step 2: Gate completo y revisión independiente**
 
 ```bash
 cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
@@ -143,3 +143,12 @@ cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run
 ```
 
 Con `reset-db.sh` antes del e2e y el e2e corriendo solo. Después, la revisión independiente del diff completo (`verify-feature` paso 7) — el pre-commit la exige porque el diff toca un service de backend.
+
+**Cerrado el 2026-08-20.** Gate completo en verde con exit code comprobado: backend
+`lint:check` 0, `typecheck` 0, unit 0 (108 suites / 1937 tests), `test:e2e` 0 (515 pasan, 2
+skip preexistentes, corrido solo y con `reset-db.sh` antes; `--verificar` después confirmó
+que la base no se re-sembró); frontend `build`/`test`/`typecheck:ratchet`/`design:check` 0.
+Revisión independiente: **LIMPIO**, sin hallazgos bloqueantes — el revisor reprodujo el
+mutante por su cuenta (revirtiendo al código de `origin/main`, que además restaura el
+`SELECT DISTINCT`: 16 consultas contra las 3 esperadas, una más que las 15 de mi mutante,
+que solo sacaba el catálogo precargado).
