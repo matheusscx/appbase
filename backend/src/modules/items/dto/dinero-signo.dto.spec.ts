@@ -214,8 +214,9 @@ describe('precioExtra — signo', () => {
 
 /**
  * `AplicarDesfaseItemDto.precioBase` no era un agujero funcional: el service ya
- * rechaza `<= 0` a mano (`items.service.ts:3443-3455`). Pero ese chequeo **es
- * condicional a `actualizarPrecio`**, así que el decorador acá no puede ser
+ * rechaza `<= 0` a mano, en la validación de `precioBase` con la que abre
+ * `ItemsService.aplicarDesfases`. Pero ese chequeo **es condicional a
+ * `actualizarPrecio`**, así que el decorador acá no puede ser
  * `IsDecimalPositivo`: rechazaría `{ precioBase: '0', actualizarPrecio: false }`,
  * que hoy se acepta y se ignora. `NoNegativo` mata el negativo sin cambiar el
  * contrato; el `> 0` sigue viviendo en el service, que es quien ve el otro campo.

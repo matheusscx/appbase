@@ -77,9 +77,9 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *   Por sí solo NO fija la DIRECCIÓN del orden canónico: un `descartarDesfases`
  *   que bloqueara `item_combo` ANTES que `item_receta` lo pondría en verde igual,
  *   y sería una regresión. El proyecto ya declaró la dirección
- *   `item_receta → item_combo` y `aplicarDesfases` la implementa
- *   (`items.service.ts:4128-4137`); un `descartar` invertido cerraría un ciclo
- *   NUEVO, `aplicar` ↔ `descartar`, sobre el mismo par.
+ *   `item_receta → item_combo` y `ItemsService.aplicarDesfases` la implementa en
+ *   sus dos `SELECT … ORDER BY item_id FOR UPDATE`; un `descartar` invertido
+ *   cerraría un ciclo NUEVO, `aplicar` ↔ `descartar`, sobre el mismo par.
  * - Por eso el `it` CRUZADO —`descartar([combo, receta])` contra
  *   `aplicar([receta, combo])`— es el que sí fija la dirección: `aplicarDesfases`
  *   toma R→C pase lo que pase (su `FOR UPDATE` no depende del orden del cliente),
