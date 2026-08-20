@@ -120,12 +120,15 @@ confirme viendo el número correcto. No es un `409`: el lote sigue, solo ese com
 vuelta más.
 
 ⚠️ Esto introdujo dos ciclos de orden de lock nuevos (`items` ↔ `item_combo` y
-`item_receta` ↔ `item_combo`). Por decisión del owner quedaron documentados, **no
-arreglados**, dentro de la entrada *"Dos ciclos de orden de lock en la bandeja de desfases
-de combos…"* en [`docs/agent/pendientes.md`](../agent/pendientes.md) — van con la tanda 🔴
-de prioridad máxima, no de arrastre en esta feature. (Es la pieza residual del agotamiento
-de pool de "Diez ventas simultáneas…", que se cerró el 2026-08-18 — ver
-[ADR-020](../adr/020-contexto-transaccional-als.md).)
+`item_receta` ↔ `item_combo`), que por decisión del owner quedaron documentados y **no
+arreglados** en su momento. **Se cerraron el 2026-08-20**, en una tanda propia: ver
+[`docs/agent/resueltos.md`](../agent/resueltos.md) § "El orden de bloqueo de filas de la
+bandeja de desfases". La regla que salió de ahí —el orden `item_receta` → `item_combo` →
+`items`, y dentro de cada tabla por `item_id`— vive en
+[`docs/patterns/backend.md`](../patterns/backend.md) § "Orden de bloqueo de filas en ítems
+compuestos", y **hay que leerla antes de tocar cualquier camino que escriba estas tablas**.
+Lo único que sigue abierto de ese frente es una carrera sin lock de `descartarDesfases`, en
+[`docs/agent/pendientes.md`](../agent/pendientes.md) § 2.
 
 ### Margen y precio sugerido
 

@@ -274,12 +274,19 @@ decisión que no es mía).
   ➡️ **No se toca hasta que se abra esa tanda.** El docblock de `caja.e2e-spec.ts` ya quedó
   corregido para que nadie vuelva a planificar sobre el cuelgue que no existe.
   ℹ️ **2026-08-20: la tanda que estaba esperando se cerró** (ver `resueltos.md` § "El orden
-  de bloqueo de filas de la bandeja de desfases"), así que el motivo del diferimiento ya no
-  existe. Y hay precedente exacto: el sub-punto *"los `FOR UPDATE` antes de validar el
-  tenant"* de esa entrada era **esta misma forma** —bloquear la fila de otro tenant antes de
-  rechazar— y se cerró subiendo la validación arriba del lock, con un unit test, **sin
-  mirar `pg_locks`**. Quién retome esto decide si lo toma; lo que ya no vale es dejarlo
-  quieto porque el frente esté cerrado.
+  de bloqueo de filas de la bandeja de desfases"), así que **el motivo del diferimiento ya
+  no existe**. Lo que sigue en pie es todo lo demás: sigue haciendo falta `pg_locks` para
+  fijarlo, por lo que esta misma entrada explica arriba (el mutante sobrevive: las otras
+  defensas son redundantes en el resultado).
+  ⚠️ **Y NO es la misma forma que el sub-punto de tenant que se cerró en esa tanda**, aunque
+  se parezcan de lejos — la comparación estaba escrita al revés en la primera versión de
+  esta nota. En `aplicarDesfases` el `FOR UPDATE` era `WHERE item_id = ANY($1)` **sin filtro
+  de tenant**, con la validación en un `SELECT` aparte que corría después: había algo que
+  subir. Acá el `SELECT … FOR UPDATE` de `bloquearCajaAbierta` (`caja.service.ts`) ya lleva
+  `AND tenant_id = $2` **dentro de la misma sentencia que toma el lock**, y Postgres no
+  bloquea una fila que no matchea el `WHERE`. No hay validación separada que mover: el
+  arreglo de allá no se transfiere. Quién retome esto decide si lo toma; lo único que
+  cambió es que ya no hay tanda cerrada que esperar.
 
 - [ ] **Un flaky del e2e de caja, y seis lecturas de `/tenants/members` que esconden su
   causa** (backend/tests, visto el 2026-08-11) — son dos cosas y la segunda es la que se
