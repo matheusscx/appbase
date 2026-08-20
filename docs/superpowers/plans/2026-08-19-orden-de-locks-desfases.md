@@ -40,23 +40,23 @@ El spec deja este mecanismo **sin fijar a propósito**: un interleaving determin
 
 Endpoints (ver `backend/src/modules/items/desfases.controller.ts`): el descarte es un `POST` con el body que ese controller declara — **leelo, no lo adivines**.
 
-- [ ] **Step 1: Montar el escenario y confirmar que hay desfase pendiente**
+- [x] **Step 1: Montar el escenario y confirmar que hay desfase pendiente**
 
 Creá en el tenant de París (`550e8400-e29b-41d4-a716-446655440007`) una receta y un combo propios, con un desfase pendiente cada uno (o sea: `listarDesfases` los devuelve). Hacelo **en serie**, con el patrón de login + `POST /auth/switch-tenant` de `concurrencia-pool.e2e-spec.ts` — el token multi-tenant sale con `tenant_id: null` y sin el switch cualquier ruta con permisos da 403.
 
 Verificá con un `GET` de la bandeja que los dos aparecen. Si no aparecen, **parate**: sin desfase pendiente el `descartar` no escribe nada y el reproductor no puede abrazar nada.
 
-- [ ] **Step 2: Probar el mecanismo A — interleaving forzado con un cliente crudo**
+- [x] **Step 2: Probar el mecanismo A — interleaving forzado con un cliente crudo**
 
 Hipótesis: con un cliente `pg` aparte sosteniendo una de las dos filas se puede ordenar quién llega primero.
 
 Escribilo, corrilo, y **medí si el deadlock aparece de forma determinista** (5 corridas seguidas). Postgres concede los locks en cola FIFO, así que es muy posible que el primer esperador gane siempre y **no haya ciclo**. Si pasa eso, escribilo como resultado: es información, no un fracaso.
 
-- [ ] **Step 3: Probar el mecanismo B — ráfaga de pares en orden opuesto**
+- [x] **Step 3: Probar el mecanismo B — ráfaga de pares en orden opuesto**
 
 N pares concurrentes de `descartar([receta, combo])` contra `descartar([combo, receta])`, por HTTP real contra un puerto bindeado (supertest levanta un listener efímero por request y revienta con `ECONNRESET`; ver el comentario de `concurrencia-pool.e2e-spec.ts`). Medí en 5 corridas **con qué frecuencia** aparece el 500 / el `40P01`.
 
-- [ ] **Step 4: Elegir, y declarar qué prueba y qué no**
+- [x] **Step 4: Elegir, y declarar qué prueba y qué no**
 
 Criterio de aceptación del spec, en orden:
 1. da **rojo** contra el código de hoy y verde después del fix;
@@ -65,7 +65,7 @@ Criterio de aceptación del spec, en orden:
 
 Si elegís el mecanismo B (probabilístico), el comentario tiene que decir la tasa medida y por qué N alcanza. Un test que a veces no reproduce es honesto si lo dice; uno que se presenta como determinista sin serlo, no.
 
-- [ ] **Step 5: Dejarlo en ROJO y commitear**
+- [x] **Step 5: Dejarlo en ROJO y commitear**
 
 Corré `./scripts/reset-db.sh` y después **solo este spec** (acá sí, es el spike: `npx jest --config test/jest-e2e.json test/orden-locks-desfases.e2e-spec.ts`). Guardá la salida del rojo: es la evidencia del RED que la Task 2 tiene que dar vuelta.
 
@@ -89,7 +89,7 @@ git commit --no-verify -m "test(e2e): reproductor del ciclo item_receta ↔ item
 - Consumes: el spec e2e de la Task 1, que debe pasar de rojo a verde sin editarlo.
 - Produces: nada que otra tarea consuma.
 
-- [ ] **Step 1: Escribir el test de orden que falla**
+- [x] **Step 1: Escribir el test de orden que falla**
 
 Va al lado de los otros de ese `describe`. El patrón —posiciones relativas de SQL sobre el mock— es el de `items.service.spec.ts:1925`.
 
@@ -138,14 +138,14 @@ it('descartar escribe `item_receta` ANTES que `item_combo` aunque el lote venga 
 
 ⚠️ Los `mockResolvedValueOnce` de arriba asumen el orden de lecturas que hace `descartarDesfases` hoy: cabeceras, después ingredientes de las recetas, después componentes de los combos. **Verificalo leyendo `:4288-4315` antes de correr** — si el orden real difiere, ajustá el mock, no el service.
 
-- [ ] **Step 2: Correr el test y verlo fallar**
+- [x] **Step 2: Correr el test y verlo fallar**
 
 ```bash
 cd backend && npx jest src/modules/items/items.service.spec.ts -t "ANTES que" 2>&1 | tail -20
 ```
 Esperado: FAIL — hoy `updCombo` es menor que `updReceta`.
 
-- [ ] **Step 3: Implementar las dos pasadas**
+- [x] **Step 3: Implementar las dos pasadas**
 
 En `descartarDesfases`, reemplazá el `for (const itemId of itemIds)` por dos pasadas. **Conservá `itemIds` (no `ids`)** en los filtros: el lote puede traer duplicados y `descartados` los cuenta.
 
@@ -178,14 +178,14 @@ En `descartarDesfases`, reemplazá el `for (const itemId of itemIds)` por dos pa
 
 No cambies ni un carácter de los dos cuerpos: mismos mensajes de error, mismas queries, mismo `descartados += 1`.
 
-- [ ] **Step 4: Correr los tests y verlos pasar**
+- [x] **Step 4: Correr los tests y verlos pasar**
 
 ```bash
 cd backend && npm test 2>&1 | tail -8
 ```
 Esperado: PASS, 1931 tests. Si algún test viejo de `descartarDesfases` se rompe por la precedencia de errores en lotes mixtos, **ese test estaba fijando la conducta vieja**: actualizalo y decilo en el reporte, no lo borres.
 
-- [ ] **Step 5: Poner el reproductor en VERDE**
+- [x] **Step 5: Poner el reproductor en VERDE**
 
 ```bash
 cd /Users/m2pro/cmatheus/startup-app && ./scripts/reset-db.sh
@@ -193,7 +193,7 @@ cd backend && npx jest --config test/jest-e2e.json test/orden-locks-desfases.e2e
 ```
 Esperado: PASS. Si el mecanismo elegido en la Task 1 era probabilístico, corrélo **5 veces** y reportá las 5.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck
@@ -215,7 +215,7 @@ git commit --no-verify -m "fix(items): descartar desfases toma las filas en el o
 
 **Contexto:** hoy `update()` de un combo va `UPDATE items` (`:1343-1352`) → `UPDATE item_combo` (`:1699`), y `aplicarDesfases` va `item_combo FOR UPDATE` (`:4133`) → `UPDATE items SET precio_base`. Ciclo A→B / B→A. El guard del branch que escribe `item_combo` ya existe y es `tipo === 'combo' && dto.componentes !== undefined` (`:1662`) — el lock usa **esa misma condición**.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```typescript
 it('toma `item_combo` ANTES del UPDATE items — orden de locks contra aplicarDesfases', async () => {
@@ -245,14 +245,14 @@ it('toma `item_combo` ANTES del UPDATE items — orden de locks contra aplicarDe
 
 ⚠️ El `dto` de arriba tiene que ser un `UpdateItemDto` válido para un combo. **Leé `backend/src/modules/items/dto/update-item.dto.ts` y los tests de combo que ya existen** y copiá la forma real de `componentes` — si el mock del costeo necesita más `mockResolvedValueOnce`, agregalos. No inventes campos.
 
-- [ ] **Step 2: Correr el test y verlo fallar**
+- [x] **Step 2: Correr el test y verlo fallar**
 
 ```bash
 cd backend && npx jest src/modules/items/items.service.spec.ts -t "item_combo` ANTES" 2>&1 | tail -20
 ```
 Esperado: FAIL con `lockCombo` en `-1` (hoy no existe ese lock).
 
-- [ ] **Step 3: Implementar el lock**
+- [x] **Step 3: Implementar el lock**
 
 Justo después del `if` de receta de `:1336-1341`, como rama alternativa:
 
@@ -271,14 +271,14 @@ Justo después del `if` de receta de `:1336-1341`, como rama alternativa:
       }
 ```
 
-- [ ] **Step 4: Correr los tests y verlos pasar**
+- [x] **Step 4: Correr los tests y verlos pasar**
 
 ```bash
 cd backend && npm test 2>&1 | tail -8
 ```
 Esperado: PASS. **Se espera que se rompan los tests posicionales de `update`/`remove` de combo**: el lock nuevo mete una query y los índices se corren. Arreglá los índices; no toques lo que esos tests afirman.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck
@@ -296,7 +296,7 @@ git commit --no-verify -m "fix(items): el PATCH de un combo bloquea item_combo a
 
 **Contexto:** los dos `FOR UPDATE` se toman en `:4128-4137` y `cabecerasCompuestas` —que es quien filtra `tenant_id`— corre recién en `:4139`. Un usuario autenticado que mande ids de otro tenant bloquea esas filas hasta el rollback del 404. No hay fuga de datos: el 404 sale igual y no devuelve nada del otro tenant.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```typescript
 it('valida el tenant ANTES de tomar los locks', async () => {
@@ -313,14 +313,14 @@ it('valida el tenant ANTES de tomar los locks', async () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verlo fallar**
+- [x] **Step 2: Correr el test y verlo fallar**
 
 ```bash
 cd backend && npx jest src/modules/items/items.service.spec.ts -t "ANTES de tomar los locks" 2>&1 | tail -20
 ```
 Esperado: FAIL — hoy los dos `FOR UPDATE` salen antes del 404.
 
-- [ ] **Step 3: Subir la validación y lockear solo lo validado**
+- [x] **Step 3: Subir la validación y lockear solo lo validado**
 
 Movés el bloque de `cabecerasCompuestas` + el loop de `NotFoundException` (`:4139-4144`) **arriba** de los dos `await manager.query(... FOR UPDATE)`, y los locks pasan a usar los ids validados:
 
@@ -355,18 +355,18 @@ Movés el bloque de `cabecerasCompuestas` + el loop de `NotFoundException` (`:41
 
 **El comentario de `:4116-4127` se conserva íntegro** y se mueve con los locks: sigue siendo cierto y explica el `ORDER BY` y el orden entre tablas. El invariante que declara —los locks antes de leer los ingredientes— se mantiene, porque `ingredientesPorReceta` y `componentesPorCombo` siguen después.
 
-- [ ] **Step 4: Arreglar el mock del test de lecturas constantes**
+- [x] **Step 4: Arreglar el mock del test de lecturas constantes**
 
 `items.service.spec.ts:4962` encadena `mockResolvedValueOnce` en el orden viejo (los dos locks, después las cabeceras). Ahora las cabeceras van primero. Reordenalo. **No toques ninguna de sus aserciones**: siguen siendo válidas y son las que fijan que hay 5 SELECT y 2 locks en el orden `item_receta` → `item_combo`.
 
-- [ ] **Step 5: Correr los tests y verlos pasar**
+- [x] **Step 5: Correr los tests y verlos pasar**
 
 ```bash
 cd backend && npm test 2>&1 | tail -8
 ```
 Esperado: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck
@@ -383,7 +383,7 @@ git commit --no-verify -m "fix(items): aplicar desfases valida el tenant antes d
 
 **Contexto:** el de recetas es fuerte (5 SELECT fijos para el lote entero). La rama de combos solo se ejercita con **un** combo, así que un N+1 futuro ahí no lo caza nadie.
 
-- [ ] **Step 1: Escribir el test**
+- [x] **Step 1: Escribir el test**
 
 Copiá la forma del de recetas y adaptala a combos. **El número es 4**, contado sobre el código (no copiado de una corrida): cabeceras, lock de `item_receta`, lock de `item_combo`, y `componentesPorCombo`. `ingredientesPorReceta` corta en seco con lista vacía (`if (!recetaItemIds.length) return out`), el catálogo de unidades no se carga porque `:4161` lo condiciona a que haya recetas, y el bloque de `afectados` (`:4262-4279`) se saltea entero porque `recetasAplicadas.size` es 0.
 
@@ -409,11 +409,11 @@ it('aplicar sobre N combos hace lecturas CONSTANTES, no por combo', async () => 
 });
 ```
 
-- [ ] **Step 2: Verificar que caza el mutante**
+- [x] **Step 2: Verificar que caza el mutante**
 
 Meté un N+1 a mano en la rama de combos (una lectura por combo dentro del loop), confirmá que el test falla, y **revertilo verificando `git status --porcelain` vacío**. Un test de lecturas constantes que no falla con un N+1 no sirve.
 
-- [ ] **Step 3: Correr los tests y commitear**
+- [x] **Step 3: Correr los tests y commitear**
 
 ```bash
 cd backend && npm test 2>&1 | tail -8 && npm run lint:check && npm run typecheck
@@ -431,25 +431,25 @@ git commit --no-verify -m "test(items): lecturas constantes para N combos"
 - Modify: `docs/agent/resueltos.md`
 - Modify: `docs/ESTADO.md` (solo si alguna fila cambia de estado; si no, no lo toques)
 
-- [ ] **Step 1: La regla, donde se lee antes de romperla**
+- [x] **Step 1: La regla, donde se lee antes de romperla**
 
 En `docs/patterns/backend.md`, sección de backend, una entrada corta: el orden `item_receta → item_combo → items`, por qué existe (dos transacciones que piden las mismas filas al revés se abrazan y Postgres mata una con `40P01`), que un camino puede saltear tablas pero no invertirlas, y el puntero a los tests que lo fijan. Sin repetir el código.
 
-- [ ] **Step 2: Cerrar la entrada del backlog**
+- [x] **Step 2: Cerrar la entrada del backlog**
 
 La entrada *"Dos ciclos de orden de lock en la bandeja de desfases de combos…"* se muda **entera** de `pendientes.md` a `resueltos.md`, con el texto de su cierre: qué se arregló, con qué evidencia, y qué reportó el spike de la Task 1 sobre el reproductor.
 
 Actualizá también la tabla de la sección 🔴 (*"Qué agrupa"*): la fila "Conexiones / deadlock" queda **cerrada del todo**; siguen abiertas rendimiento y redondeo de plata.
 
-- [ ] **Step 3: Abrir la entrada de la carrera que NO se arregló**
+- [x] **Step 3: Abrir la entrada de la carrera que NO se arregló**
 
 Entrada nueva en `pendientes.md` (sección 2, "Medir primero"): `descartarDesfases` lee cabeceras, ingredientes y componentes, calcula el costo propuesto y recién ahí escribe `costo_propuesto_omitido`, **sin lock**. Un `aplicar` concurrente puede mover el costo en el medio, y descartar archivaría como "omitido" un número que ya no es el propuesto. Decisión del owner 2026-08-19: se anota, no se arregla en esta pasada. Poné el `archivo:línea` medido.
 
-- [ ] **Step 4: `anti-patterns.md`, solo si hace falta**
+- [x] **Step 4: `anti-patterns.md`, solo si hace falta**
 
 Únicamente si el spike de la Task 1 descubrió una forma de romper el orden que la regla no cubre. Si no descubrió ninguna, **no inventes una entrada**: el archivo es de errores reales ya cometidos acá.
 
-- [ ] **Step 5: Commit (sin `--no-verify`: son solo docs)**
+- [x] **Step 5: Commit (sin `--no-verify`: son solo docs)**
 
 ```bash
 git add docs/
