@@ -5143,6 +5143,54 @@ describe('ItemsService', () => {
         expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
       });
 
+      it('aplicar sobre N combos hace lecturas CONSTANTES, no por combo', async () => {
+        const IDS = ['combo-a', 'combo-b', 'combo-c'];
+        managerMock.query
+          .mockResolvedValueOnce(
+            IDS.map((id) => ({
+              item_id: id,
+              tipo: 'combo',
+              nombre: `Combo ${id}`,
+            })),
+          ) // cabecerasCompuestas
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
+          .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
+          .mockResolvedValueOnce(
+            IDS.map((id) => ({
+              combo_item_id: id,
+              componente_item_id: `ingrediente-${id}`,
+              cantidad: '2',
+              costo_actual: '600.0000',
+            })),
+          ) // componentesPorCombo
+          .mockResolvedValue([]); // los UPDATE
+
+        const result = await service.aplicarDesfases(
+          TENANT,
+          IDS.map((id) => ({ itemId: id })),
+        );
+
+        expect(result.aplicados).toBe(3);
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        // 4 lecturas para el lote entero —cabeceras, los 2 locks y los
+        // componentes— aunque el lote tenga 3 combos: `ingredientesPorReceta`
+        // corta en seco con lista vacía (recetasDelLote.length === 0), el
+        // catálogo de unidades no se carga (solo lo piden las recetas) y el
+        // bloque de `afectados` se saltea entero porque `recetasAplicadas.size`
+        // es 0. El número es fijo a propósito: con 3 combos, si alguien vuelve
+        // a leer o a bloquear POR COMBO, los SELECT se multiplican y este
+        // número lo caza.
+        expect(sqls.filter((s) => s.trim().startsWith('SELECT'))).toHaveLength(
+          4,
+        );
+        expect(
+          sqls.filter((s) => s.includes('UPDATE item_combo')),
+        ).toHaveLength(3);
+        expect(catalogServiceMock.crearConversor).not.toHaveBeenCalled();
+      });
+
       it('valida el tenant ANTES de tomar los locks', async () => {
         // Con los locks primero, un id de otro tenant bloquea filas ajenas hasta el
         // rollback del 404. La lectura de cabeceras es la que filtra tenant_id.
