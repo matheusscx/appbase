@@ -209,15 +209,10 @@ esto **no es unánime**. Es una decisión, no un hecho.
 
 ## 6. Preguntas abiertas — para el owner
 
-1. ✅ **CONTESTADA el 2026-08-20: va por configuración.** Línea vs documento se elige, no se
-   deriva del país. El lugar natural son las preferencias financieras del tenant, donde ya
-   viven `modo_redondeo` y `escala_calculo`.
-   ⛔ **Con eso se cae el diferenciador que esta misma investigación había abierto** ("el nivel
-   de redondeo lo decide el país, no el usuario"). Se sacó de
-   [`DIFERENCIADORES.md`](../../DIFERENCIADORES.md) el mismo día: ese archivo lista lo que el
-   producto hace o va a hacer, y esto ya no va a hacerlo. **El hallazgo de mercado sigue siendo
-   cierto y sigue acá arriba (§1): ninguno de los once productos relevados lo deriva de la
-   jurisdicción.** Queda anotado para no volver a proponerlo como novedad.
+1. **¿El nivel de redondeo (línea vs documento) es configurable, o fijamos uno?** El mercado
+   dice setting, y el proyecto ya tiene dónde ponerlo (preferencias financieras por tenant).
+   Pero nadie lo deriva del país, y nuestro modelo **sí** deriva la moneda oficial del país —
+   hay una asimetría para decidir a propósito, no por inercia.
 2. **¿Los costos quedan fuera del alcance?** Cinco de los once sitios dependen de esta
    respuesta.
 3. **La línea de ajuste no facturable, ¿se construye ahora o se difiere?** ADR-010 es explícito

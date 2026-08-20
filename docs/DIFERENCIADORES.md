@@ -186,6 +186,30 @@ de dónde sale.
 TJUE C‑484/06 (*Ahold*) · HMRC VATREC12020 · SAT Anexo 20 · DIAN Anexo Técnico v1.9 ·
 NTA (facturas calificadas) · Peppol BIS `PayableRoundingAmount`.
 
+### El nivel de redondeo lo decide el país, no el usuario
+
+**El hueco:** *"¿el impuesto se redondea por línea o al total del documento?"* tiene respuesta
+legal distinta según el país —el Reino Unido obliga por línea y declara redondear el total
+*"inapropiado para minoristas"*; México obliga exactamente al revés— y **ninguno de los once
+productos relevados lo deriva de la jurisdicción**: Odoo, Avalara, Stripe (tasas manuales),
+NetSuite, Zuora y Toast lo exponen como **setting**, y el usuario tiene que saber la norma de
+su país para elegir bien. Square, Lightspeed, Clover y SAP directamente fijan uno. La única
+excepción es Stripe Tax automático, que fija *suma-y-redondea-una-vez* — pero para **evitar**
+la pregunta, no para resolverla por país.
+**Por qué nos importa:** el producto es multi-tenant y multi-país, y ya deriva del país la
+moneda oficial en vez de dejarla elegir. Aplicar el mismo criterio al nivel de redondeo es
+coherente con el modelo que ya existe — y le saca de encima al dueño de un restaurante una
+decisión tributaria que no tiene por qué saber contestar.
+**Qué se relevó:** once productos (Toast, Square, Lightspeed, Clover, Odoo, SAP, NetSuite,
+Zuora, Stripe, Avalara, Vertex) y cinco autoridades tributarias.
+⚠️ **Ausencia de documentación pública no es ausencia de la función**: lo medido es que ninguno
+lo **documenta** como derivación automática del país.
+**Estado del producto:** 💡 hallazgo. No hay decisión ni diseño: es una de las preguntas
+abiertas de la investigación.
+**Evidencia:** [investigación 2026-08-20 §1](agent/investigaciones/2026-08-20-redondeo-por-linea-o-por-total.md) ·
+[docs.stripe.com — tax rate rounding](https://docs.stripe.com/billing/taxes/tax-rates) ·
+Avalara `RoundingLevelId` · NetSuite Tax Rounding Levels · TJUE C‑484/06.
+
 ---
 
 ## Cómo se agrega una entrada

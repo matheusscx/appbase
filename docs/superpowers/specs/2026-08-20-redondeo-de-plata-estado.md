@@ -142,12 +142,6 @@ entre backend y frontend en este repo.
 Eso contesta, del §9 de la investigación, la 1 (*"un solo criterio con valor variable por
 moneda"*) y en buena parte la 4 (*"¿se generaliza el patrón de propinas?"*).
 
-**Y el nivel de redondeo va por configuración** (decisión del 2026-08-20, sobre la pregunta 2
-de la investigación del mismo día): línea vs documento se elige, no se deriva del país. Es lo
-que hace el mercado —6 de 11 productos lo exponen como setting— y descarta la alternativa que
-la investigación había marcado como oportunidad. El lugar natural es el mismo que ya tiene
-`modo_redondeo` y `escala_calculo`: las preferencias financieras del tenant.
-
 ---
 
 ## 6. Lo que falta contestar antes de escribir la spec
