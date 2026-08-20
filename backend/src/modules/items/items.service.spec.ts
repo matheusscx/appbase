@@ -5153,6 +5153,9 @@ describe('ItemsService', () => {
               nombre: `Combo ${id}`,
             })),
           ) // cabecerasCompuestas
+          // El lock de `item_receta` se toma igual —siempre, primero y para
+          // todo el lote— pero devuelve `[]` porque este lote es puro combos:
+          // no hay ninguna fila de `item_receta` que bloquear.
           .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce(

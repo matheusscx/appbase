@@ -4135,7 +4135,13 @@ export class ItemsService {
           throw new NotFoundException(`Item ${it.itemId} no encontrado`);
         }
       }
-      const idsValidados = ids.filter((id) => cabPorId.has(id));
+      // Los locks de abajo bloquean `ids` y no un subconjunto "ya validado":
+      // el loop de arriba tira ante el PRIMER id que no esté en `cabPorId`, así
+      // que llegar hasta acá significa que los dos conjuntos son el mismo y
+      // filtrar sería la identidad. El acoplamiento sí importa: si algún día la
+      // validación pasa a saltear los ids ajenos en vez de tirar, hay que
+      // filtrar acá antes de bloquear — bloquear un id sin validar es
+      // exactamente el bug que subir `cabecerasCompuestas` vino a cerrar.
 
       // Los locks van ANTES de leer los ingredientes, no antes de escribir: si
       // se toman después, otra transacción alcanza a cambiar la receta entre la
@@ -4152,12 +4158,12 @@ export class ItemsService {
       await manager.query(
         `SELECT item_id FROM item_receta
           WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
-        [idsValidados],
+        [ids],
       );
       await manager.query(
         `SELECT item_id FROM item_combo
           WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
-        [idsValidados],
+        [ids],
       );
 
       const recetasDelLote = items.filter(
@@ -4338,8 +4344,8 @@ export class ItemsService {
       // distinto se abrazaran (40P01). `aplicarDesfases` ya ordena receta →
       // combo; esto alinea los dos caminos de la bandeja. Dentro de cada
       // pasada, además, se ordena por `item_id` — igual que el
-      // `ORDER BY item_id` de los `FOR UPDATE` de `aplicarDesfases`
-      // (`:4130`, `:4135`) — porque `descartarDesfases` no toma ningún lock
+      // `ORDER BY item_id` de los dos `SELECT … FOR UPDATE` de
+      // `aplicarDesfases` — porque `descartarDesfases` no toma ningún lock
       // explícito: el lock lo toma cada `UPDATE`, en el orden en que se
       // ejecuta. Sin este segundo orden, dos recetas (o dos combos) sin
       // ningún ítem del otro tipo de por medio seguían pudiendo abrazarse si
