@@ -61,20 +61,49 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * service de verdad, ninguna es una réplica a mano de su SQL. Medido: 10 de 10
  * corridas, exactamente 1 deadlock y exactamente 1 víctima.
  *
+ * `esperandoLockEnLaCompuerta` NO es decorativo: es lo único que separa este
+ * verde del verde de un test mudo. `{statuses:[201,201], deadlocksNuevos:0}` es
+ * TAMBIÉN la salida exacta de una compuerta que no enganchó — si el `FOR UPDATE`
+ * no retuvo nada, o si los 600 ms no alcanzaron y las requests pasaron de largo,
+ * el spec daría verde sin haber ejercitado nada. Es el modo de falla que
+ * `concurrencia-pool.e2e-spec.ts:15-18` ya documenta en un test hermano que
+ * "pasaba sin ejercitar nada". Contar los esperadores
+ * (`pg_stat_activity.wait_event_type = 'Lock'`) justo ANTES de soltar la
+ * compuerta afirma que las dos requests estaban de verdad encoladas. Medido: 2,
+ * en los cuatro casos.
+ *
+ * QUÉ FIJA CADA `it`:
+ * - El `it` principal fija que dos `descartar` en órdenes opuestos no se abrazan.
+ *   Por sí solo NO fija la DIRECCIÓN del orden canónico: un `descartarDesfases`
+ *   que bloqueara `item_combo` ANTES que `item_receta` lo pondría en verde igual,
+ *   y sería una regresión. El proyecto ya declaró la dirección
+ *   `item_receta → item_combo` y `aplicarDesfases` la implementa
+ *   (`items.service.ts:4128-4137`); un `descartar` invertido cerraría un ciclo
+ *   NUEVO, `aplicar` ↔ `descartar`, sobre el mismo par.
+ * - Por eso el `it` CRUZADO —`descartar([combo, receta])` contra
+ *   `aplicar([receta, combo])`— es el que sí fija la dirección: `aplicarDesfases`
+ *   toma R→C pase lo que pase (su `FOR UPDATE` no depende del orden del cliente),
+ *   así que solo un `descartar` que también tome R→C lo apaga. Con el orden
+ *   canónico invertido este `it` seguiría rojo.
+ * - Los dos CONTROL (los dos lotes en el MISMO orden) son el piso: miden que la
+ *   compuerta, sin desacuerdo de orden, no produce nada. NO son equivalentes
+ *   entre sí. En `receta primero` cada request sostiene una fila distinta
+ *   mientras espera — es el que se parece al caso real y aun así no cierra el
+ *   ciclo, y es el que aporta. En `combo primero` las dos hacen cola en C sin
+ *   sostener nada: es el escenario trivial, y está solo para cerrar la simetría.
+ *
  * NO PRUEBA:
- * - No prueba nada sobre los otros tres caminos que escriben estas tablas
- *   (`aplicarDesfases`, alta/edición de ítems compuestos). Cubre uno solo.
- * - No prueba que el orden canónico elegido sea uno en particular. Los dos
- *   CONTROL de abajo miden que con CUALQUIER orden común —los dos lotes
- *   `[receta, combo]`, o los dos `[combo, receta]`— la misma compuerta da 201/201
- *   y cero deadlocks. Es la evidencia de que lo único que produce el 500 es el
- *   desacuerdo de orden, y de que ordenar canónicamente en cualquiera de las dos
- *   direcciones lo apaga. Si alguna vez los CONTROL se ponen rojos, el `it`
- *   principal deja de significar lo que dice acá.
- * - `deadlocksNuevos` sale de `pg_stat_database`, que es de toda la base: cuenta
- *   deadlocks de cualquier sesión. Vale porque el e2e corre solo. Se afirma
- *   además del status para que un "arreglo" que reintente el `40P01` y devuelva
- *   201 no pase por bueno: la tarea es no cerrar el ciclo, no absorberlo.
+ * - No prueba nada sobre los otros dos caminos que escriben estas tablas (alta y
+ *   edición de ítems compuestos). Cubre `descartar` y su cruce con `aplicar`.
+ * - `deadlocksNuevos` sale de `pg_stat_database`, que cuenta los deadlocks de
+ *   TODA la base, de cualquier sesión: `maxWorkers: 1` serializa los workers de
+ *   jest, no las sesiones de Postgres, y el contenedor `tecnica_backend` está
+ *   levantado contra el mismo `DATABASE_URL`. El argumento no es "el e2e corre
+ *   solo" —no lo hace—: es que ningún otro spec provoca `40P01` y que el contador
+ *   SOLO SUBE, así que una sesión ajena contamina hacia el rojo falso, nunca
+ *   hacia el verde falso. Se afirma además del status para que un "arreglo" que
+ *   reintente el `40P01` y devuelva 201 no pase por bueno: la tarea es no cerrar
+ *   el ciclo, no absorberlo.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
@@ -256,14 +285,28 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
     expect(fallos).toEqual([]);
   });
 
-  const descartar = (itemIds: string[]) =>
-    fetch(`http://127.0.0.1:${port}/api/desfases/descartar`, {
+  const postear = (ruta: string, cuerpo: unknown) =>
+    fetch(`http://127.0.0.1:${port}${ruta}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ itemIds }),
+      body: JSON.stringify(cuerpo),
+    });
+
+  const descartar = (itemIds: string[]) => () =>
+    postear('/api/desfases/descartar', { itemIds });
+
+  /**
+   * `aplicarDesfases` NO respeta el orden del cliente: su `FOR UPDATE` es
+   * `item_receta` y después `item_combo`, siempre. El arreglo lo recibe igual
+   * para que el `it` cruzado se lea como el caso de uso real (dos usuarios
+   * mandando el mismo par), no como un detalle de implementación.
+   */
+  const aplicar = (itemIds: string[]) => () =>
+    postear('/api/desfases/aplicar', {
+      items: itemIds.map((itemId) => ({ itemId })),
     });
 
   const deadlocks = async (): Promise<number> => {
@@ -273,52 +316,108 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
     return Number(filas[0].deadlocks);
   };
 
+  /** Sesiones frenadas en un lock ahora mismo. Ver el header: es lo que separa
+   * el verde real del verde de una compuerta que no enganchó. */
+  const esperandoLock = async (): Promise<number> => {
+    const filas: { count: string }[] = await ds.query(
+      `SELECT count(*) FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+    );
+    return Number(filas[0].count);
+  };
+
   /**
    * Corre el protocolo de la compuerta: retiene la fila del combo, deja entrar
-   * `lotePrimero` y después `loteSegundo`, y recién ahí suelta.
+   * `primerLote` y después `segundoLote`, cuenta los esperadores y recién ahí
+   * suelta.
    */
-  const conCompuerta = async (lotePrimero: string[], loteSegundo: string[]) => {
+  const conCompuerta = async (
+    primerLote: () => Promise<Response>,
+    segundoLote: () => Promise<Response>,
+  ) => {
     const antes = await deadlocks();
     const compuerta = ds.createQueryRunner();
-    await compuerta.connect();
-    await compuerta.startTransaction();
-    await compuerta.query(
-      `SELECT item_id FROM item_combo WHERE item_id = $1 FOR UPDATE`,
-      [comboId],
-    );
+    let esperandoLockEnLaCompuerta = -1;
+    let statuses: number[] = [];
+    try {
+      await compuerta.connect();
+      await compuerta.startTransaction();
+      await compuerta.query(
+        `SELECT item_id FROM item_combo WHERE item_id = $1 FOR UPDATE`,
+        [comboId],
+      );
 
-    const primera = descartar(lotePrimero);
-    // 600 ms: sobra para que la request llegue al primer UPDATE y se encole.
-    // Es el único punto sensible al tiempo, y solo puede fallar de más (si no
-    // llegó a encolarse no hay ciclo y el test daría verde de mentira) — por
-    // eso el CONTROL de abajo, que fija el piso de lo que significa el verde.
-    await dormir(600);
-    const segunda = descartar(loteSegundo);
-    await dormir(600);
+      const primera = primerLote();
+      // 600 ms: sobra para que la request llegue a su primer lock y se encole.
+      // Es el único punto sensible al tiempo, y solo puede fallar de más (si no
+      // llegó a encolarse no hay ciclo y el test daría verde de mentira) — por
+      // eso se cuentan los esperadores antes de soltar.
+      await dormir(600);
+      const segunda = segundoLote();
+      await dormir(600);
 
-    await compuerta.rollbackTransaction();
-    await compuerta.release();
+      esperandoLockEnLaCompuerta = await esperandoLock();
+      await compuerta.rollbackTransaction();
 
-    const [rPrimera, rSegunda] = await Promise.all([primera, segunda]);
+      const [rPrimera, rSegunda] = await Promise.all([primera, segunda]);
+      statuses = [rPrimera.status, rSegunda.status];
+    } finally {
+      // Sin esto, un throw arriba (el `FOR UPDATE`, un `fetch`) se lleva el
+      // `release()` puesto y deja la conexión colgada: una falla ruidosa se
+      // convertiría en el cuelgue que documenta el `afterAll`.
+      if (compuerta.isTransactionActive) await compuerta.rollbackTransaction();
+      await compuerta.release();
+    }
     return {
-      statuses: [rPrimera.status, rSegunda.status],
+      esperandoLockEnLaCompuerta,
+      statuses,
       deadlocksNuevos: (await deadlocks()) - antes,
     };
   };
 
+  const SIN_ABRAZO = {
+    esperandoLockEnLaCompuerta: 2,
+    statuses: [201, 201],
+    deadlocksNuevos: 0,
+  };
+
   it('dos descartes del mismo par receta/combo en ORDEN OPUESTO no se abrazan', async () => {
-    const medido = await conCompuerta([comboId, recetaId], [recetaId, comboId]);
-    expect(medido).toEqual({ statuses: [201, 201], deadlocksNuevos: 0 });
+    const medido = await conCompuerta(
+      descartar([comboId, recetaId]),
+      descartar([recetaId, comboId]),
+    );
+    expect(medido).toEqual(SIN_ABRAZO);
   }, 60000);
 
+  /**
+   * El que fija la DIRECCIÓN del orden canónico, no solo que haya uno.
+   * `aplicarDesfases` toma `item_receta` y después `item_combo` pase lo que pase,
+   * así que entra segundo sosteniendo R y encolado en C; el `descartar` que entró
+   * primero se lleva C y va por R. Solo un `descartarDesfases` que también tome
+   * R→C lo apaga: con la dirección invertida este `it` seguiría rojo.
+   */
+  it('descartar([combo, receta]) contra aplicar del mismo par no se abrazan', async () => {
+    const medido = await conCompuerta(
+      descartar([comboId, recetaId]),
+      aplicar([recetaId, comboId]),
+    );
+    expect(medido).toEqual(SIN_ABRAZO);
+  }, 60000);
+
+  // El piso. Ojo: los dos NO son equivalentes (ver el header). El que aporta es
+  // `receta primero`, donde cada request sostiene una fila distinta mientras
+  // espera y aun así no se cierra el ciclo; en `combo primero` las dos hacen cola
+  // en C sin sostener nada, que es el caso trivial.
   it.each([
-    ['receta primero', () => [recetaId, comboId]],
-    ['combo primero', () => [comboId, recetaId]],
+    ['receta primero (cada una sostiene una fila distinta)', [1, 0]],
+    ['combo primero (las dos encolan en C, sin sostener nada)', [0, 1]],
   ])(
     'CONTROL: con los dos lotes en el MISMO orden (%s) la compuerta no produce deadlock',
-    async (_etiqueta, lote) => {
-      const medido = await conCompuerta(lote(), lote());
-      expect(medido).toEqual({ statuses: [201, 201], deadlocksNuevos: 0 });
+    async (_etiqueta, indices) => {
+      const par = [recetaId, comboId];
+      const lote = indices.map((i) => par[i]);
+      const medido = await conCompuerta(descartar(lote), descartar(lote));
+      expect(medido).toEqual(SIN_ABRAZO);
     },
     60000,
   );
