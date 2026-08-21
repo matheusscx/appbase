@@ -63,7 +63,7 @@ export class ItemsController {
   update(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: UpdateItemDto,
+    @Body(EscalaMonedaPipe) dto: UpdateItemDto,
   ) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;

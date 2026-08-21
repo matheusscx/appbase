@@ -24,6 +24,7 @@ import {
   ItemGrupoModificadorInputDto,
 } from './create-item.dto';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 @ValidatorConstraint({ name: 'costoNoEditable', async: false })
 export class CostoNoEditableConstraint implements ValidatorConstraintInterface {
@@ -57,9 +58,15 @@ export class UpdateItemDto {
   @IsOptional()
   descripcion?: string;
 
-  // Mismo criterio que en `CreateItemDto`: no negativo, con el `0` válido.
+  // Mismo criterio que en `CreateItemDto`: no negativo, con el `0` válido, y
+  // `@EsCosto()` porque el precio de lista es dinero por unidad (una tasa).
+  // La marca acá no es redundante con la de `CreateItemDto`: hasta que el
+  // `PATCH` se colgó del pipe, el precio se validaba al crear el ítem y **no**
+  // al editarlo, que es peor que no validarlo en ningún lado — daba cobertura
+  // aparente y el atajo era crear y después editar.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsCosto()
   @IsOptional()
   precioBase?: string;
 

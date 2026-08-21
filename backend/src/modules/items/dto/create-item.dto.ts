@@ -77,8 +77,11 @@ export class RecetaExtraInputDto {
   unidadCodigo: string;
 
   // Dinero: se suma al precio de la línea. `>= 0` — un extra gratis es legítimo.
+  // `@EsCosto()` (escala 4): mismo lado que `precioBase`, es precio por unidad
+  // del extra y el monto sale de multiplicarlo, no de este campo.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsCosto()
   precioExtra: string;
 }
 
@@ -115,6 +118,7 @@ export class ItemGrupoOpcionOverrideInputDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsCosto()
   precioExtra?: string;
 }
 

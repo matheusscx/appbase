@@ -14,7 +14,10 @@ import {
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCosto,
+  EsMontoCobrado,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 
@@ -42,10 +45,16 @@ export class LineaVentaDto {
    * sin él el precio sale de `item.precioBase` (`ventas.service.ts`), que puede
    * ser 0; y un regalo puntual se modela con un descuento, que sí deja traza.
    */
+  //
+  // `@EsCosto()` (escala 4) y no `@EsMontoCobrado()`: es el precio **por
+  // unidad** de la línea, o sea una tasa. El monto aparece recién cuando el
+  // motor lo multiplica por `cantidad`, que es donde se cruza la frontera
+  // tasa→monto. Tratarlo como monto cobrado significaría que en CLP no se
+  // puede vender nada a un precio con decimales, cuando la columna persiste 4.
   @IsOptional()
   @IsNumberString()
   @IsDecimalPositivo()
-  @EsMontoCobrado()
+  @EsCosto()
   precioUnitario?: string;
 
   @IsOptional()
