@@ -1571,6 +1571,51 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(aplicado.lessThanOrEqualTo(disponibleReal)).toBe(true);
       expect(new Decimal(r.totales.totalFinal).isNegative()).toBe(false);
       expect(new Decimal(r.totales.totalFinal).isInteger()).toBe(true);
+      // Σ trazas = total: si se cuantizara CADA traza por fuera en vez de
+      // adentro de `procesarReglas`, 50,5 topeado a 49,5 (fino) redondearía a
+      // 51 + 50 = 101 mientras el agregado seguiría dando 100 — el mutante
+      // del `.map` sobrevive exactamente a esta aserción si falta.
+      const sumaTrazas = r.trazasVenta.descuentos.reduce(
+        (acc, t) => acc.plus(t.monto),
+        new Decimal(0),
+      );
+      expect(sumaTrazas.eq(r.totales.totalDescuentos)).toBe(true);
+    });
+
+    it('el recargo de nivel venta también cuantiza: medio peso no sobrevive en CLP', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          recargosVenta: [
+            regla({ id: 'rv1', nombre: 'Recargo 7%', valor: '0.07' }),
+          ],
+          // Netos 3.000 + 1.550 = 4.550, y 7% de 4.550 = 318,5 → el mismo
+          // medio peso del test del descuento global, pero del lado del
+          // recargo. Con `cuantizar` solo en la llamada de descuentos y no
+          // en la de recargos, esta traza queda en '318.500000' y la
+          // identidad de abajo no cierra.
+          lineas: [
+            linea({
+              itemId: 'i1',
+              precioUnitario: '3000',
+              impuestos: [impuesto()],
+            }),
+            linea({
+              itemId: 'i2',
+              precioUnitario: '1550',
+              impuestos: [impuesto()],
+            }),
+          ],
+        }),
+      );
+      const sumaLineas = r.lineas.reduce(
+        (acc, l) => acc.plus(l.totalLinea),
+        new Decimal(0),
+      );
+      const rv = new Decimal(r.trazasVenta.recargos[0].monto);
+
+      expect(rv.isInteger()).toBe(true);
+      expect(sumaLineas.plus(rv).eq(r.totales.totalFinal)).toBe(true);
     });
   });
 });
