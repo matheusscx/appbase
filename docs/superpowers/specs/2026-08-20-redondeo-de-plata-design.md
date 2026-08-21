@@ -376,7 +376,8 @@ services no se tocan.
 
 | Familia | Escala | Sitios |
 |---|---|---|
-| Montos cobrados | `moneda.decimales` | `pagos.monto`, monto de NC, movimientos de caja, `saldoInicial`, `montoContado` del cierre, propinas (sugerida, pagada, montos manuales de liquidación), `precioBase` al aplicar desfase |
+| Montos cobrados | `moneda.decimales` | `pagos.monto`, monto de NC, movimientos de caja, `saldoInicial`, `montoContado` del cierre, propinas (sugerida, pagada, montos manuales de liquidación) |
+| Precios de lista | 4 (escala de **tasa**) | `precioBase` al aplicar desfase y al crear/editar un ítem — ⚠️ **corregido el 2026-08-20 durante la ejecución**: esta tabla lo listaba como monto cobrado y **se contradecía con la tabla de las tres escalas de arriba**, que pone `precio_unitario` del lado tasa. Un precio de lista es dinero **por unidad**: cruza a monto recién al multiplicarse por una cantidad. Marcarlo como monto cobrado hacía que **la API rechazara su propia sugerencia de precio** — el `precioSugerido` que el backend devuelve con 4 decimales volvía como 400 y moría la bandeja de desfases |
 | Costos | 4 | ajuste de costo, costo de compra, costo por unidad de mermas y compras |
 | `montoTolerancia` | `moneda.decimales` | decisión **P7** — además suma validación de **signo**: una tolerancia negativa no significa nada |
 
