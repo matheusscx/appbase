@@ -1,10 +1,12 @@
 import Decimal from 'decimal.js';
 import {
   calcularVenta,
+  cuantizar,
   type ConfigCalculo,
   type ImpuestoResuelto,
   type LineaResuelta,
   type ReglaResuelta,
+  type ResultadoLinea,
   type VentaResuelta,
 } from './calculo-precios.engine';
 
@@ -26,6 +28,9 @@ const config = (over: Partial<ConfigCalculo> = {}): ConfigCalculo => ({
   ...over,
 });
 
+/** CLP: sin centavos. `escalaCalculo` sigue en 6 — cuantizar no es formatear. */
+const cfgCLP = config({ decimalesMoneda: 0 });
+
 const regla = (over: Partial<ReglaResuelta> = {}): ReglaResuelta => ({
   id: 'r1',
   nombre: 'Regla',
@@ -43,6 +48,7 @@ const impuesto = (over: Partial<ImpuestoResuelto> = {}): ImpuestoResuelto => ({
   nombre: 'IVA',
   porcentaje: '0.19',
   activo: true,
+  tipo: 'iva',
   ...over,
 });
 
@@ -1247,9 +1253,6 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
   });
 
   describe('cuantización a la escala de la moneda', () => {
-    /** CLP: sin centavos. `escalaCalculo` sigue en 6 — cuantizar no es formatear. */
-    const cfgCLP = config({ decimalesMoneda: 0 });
-
     /** El caso medido en dev: 15.000 − 5% = 14.250; IVA 19% = 2.707,5. */
     const ventaDelMedioPeso = () =>
       venta({
@@ -1616,6 +1619,189 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
       expect(rv.isInteger()).toBe(true);
       expect(sumaLineas.plus(rv).eq(r.totales.totalFinal)).toBe(true);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Desbruteo: cuando el precio ya incluye impuesto, la etiqueta manda
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('desbruteo: el total cierra a góndola', () => {
+    const IVA = impuesto({ id: 'iva', nombre: 'IVA', porcentaje: '0.19' });
+    const ILA = impuesto({
+      id: 'ila',
+      nombre: 'ILA',
+      porcentaje: '0.10',
+      tipo: 'otro',
+    });
+    const OTRO = impuesto({
+      id: 'o2',
+      nombre: 'Otro',
+      porcentaje: '0.05',
+      tipo: 'otro',
+    });
+
+    /** Línea con precio de góndola en CLP: bruto-inclusiva y sin reglas. */
+    const gondola = (precio: string, impuestos: ImpuestoResuelto[]) =>
+      venta({
+        config: cfgCLP,
+        lineas: [
+          linea({
+            precioUnitario: precio,
+            precioIncluyeImpuesto: true,
+            impuestos,
+          }),
+        ],
+      });
+
+    const sumaTrazas = (l: ResultadoLinea) =>
+      l.trazas.impuestos.reduce((acc, t) => acc.plus(t.monto), new Decimal(0));
+
+    // El caso que motivó la decisión: con `tasa × base` el IVA daba 158 y la
+    // línea cerraba en 992 — un peso menos que la etiqueta que el cliente vio.
+    it('góndola 993 en CLP da 834 + 159 y total 993', () => {
+      const l = calcularVenta(gondola('993', [IVA])).lineas[0];
+
+      expect(new Decimal(l.subtotalNeto).eq(834)).toBe(true);
+      expect(new Decimal(l.impuestoAplicado).eq(159)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(993)).toBe(true);
+      // El impuesto derivado sigue siendo UNA línea declarada del documento.
+      expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
+    });
+
+    it.each(['995', '997', '1000', '1990'])(
+      'los precios que ya cerraban siguen cerrando: %s',
+      (precio) => {
+        const l = calcularVenta(gondola(precio, [IVA])).lineas[0];
+        expect(new Decimal(l.totalLinea).eq(precio)).toBe(true);
+      },
+    );
+
+    // ⚠️ El test que impide generalizar la resta a toda la rama desbruteada.
+    // "La etiqueta manda" vale mientras el cliente pague la etiqueta: con un
+    // descuento ya no la paga, así que no hay góndola que cerrar y lo que el
+    // documento tiene que declarar es el IVA de la base realmente cobrada.
+    // Medido: restar contra la góndola daría 242 (cobra la etiqueta entera e
+    // ignora el descuento) y contra góndola−descuento, 159. El correcto es 143.
+    it('con descuento en la línea el IVA vuelve a ser tasa × base, no la resta', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              descuentos: [regla({ id: 'd1', nombre: '10%', valor: '0.10' })],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+
+      // neto 834 − descuento 83 = base 751; 751 × 0.19 = 142,69 → 143.
+      expect(new Decimal(l.subtotalNeto).eq(834)).toBe(true);
+      expect(new Decimal(l.descuentoAplicado).eq(83)).toBe(true);
+      expect(new Decimal(l.impuestoAplicado).eq(143)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(894)).toBe(true);
+    });
+
+    it('con IVA + adicional, el adicional queda exacto y el IVA absorbe', () => {
+      const l = calcularVenta(gondola('1995', [IVA, ILA])).lineas[0];
+      const neto = new Decimal(l.subtotalNeto);
+      const ila = new Decimal(
+        l.trazas.impuestos.find((t) => t.id === 'ila')!.monto,
+      );
+      const iva = new Decimal(
+        l.trazas.impuestos.find((t) => t.id === 'iva')!.monto,
+      );
+
+      // 1995 / 1.29 = 1546,51… → neto 1547; residuo 448. El ILA queda exacto
+      // (154,7 → 155) y el IVA absorbe 293, no los 294 de su fórmula: con
+      // 294 la línea cerraría en 1.996, un peso POR ENCIMA de la etiqueta.
+      expect(neto.eq(1547)).toBe(true);
+      expect(ila.eq(cuantizar(neto.times('0.10'), cfgCLP))).toBe(true);
+      expect(iva.eq(293)).toBe(true);
+      expect(iva.plus(ila).eq(new Decimal(1995).minus(neto))).toBe(true);
+      expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(1995)).toBe(true);
+      // Absorber no reordena las líneas de impuesto del documento.
+      expect(l.trazas.impuestos.map((t) => t.id)).toEqual(['iva', 'ila']);
+    });
+
+    // Los 'otro' se aplican también en líneas exentas (DL 825 / IndExe del
+    // DTE), así que el borde es real: sin IVA que ceda, absorbe el adicional
+    // de mayor tasa.
+    it('línea exenta con dos adicionales: absorbe el de mayor tasa', () => {
+      const l = calcularVenta(gondola('993', [OTRO, ILA])).lineas[0];
+      const ila = new Decimal(
+        l.trazas.impuestos.find((t) => t.id === 'ila')!.monto,
+      );
+      const otro = new Decimal(
+        l.trazas.impuestos.find((t) => t.id === 'o2')!.monto,
+      );
+
+      // 993 / 1.15 = 863,47… → neto 863; residuo 130. El 5% queda exacto
+      // (43,15 → 43) y el ILA absorbe 87, no los 86 de su fórmula.
+      expect(new Decimal(l.subtotalNeto).eq(863)).toBe(true);
+      expect(otro.eq(cuantizar(new Decimal(863).times('0.05'), cfgCLP))).toBe(
+        true,
+      );
+      expect(ila.eq(87)).toBe(true);
+      expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(993)).toBe(true);
+    });
+
+    it('empatadas las tasas, el absorbente se desempata por id', () => {
+      const a = impuesto({
+        id: 'a-otro',
+        nombre: 'A',
+        porcentaje: '0.05',
+        tipo: 'otro',
+      });
+      const b = impuesto({
+        id: 'b-otro',
+        nombre: 'B',
+        porcentaje: '0.05',
+        tipo: 'otro',
+      });
+      const conB = calcularVenta(gondola('997', [b, a])).lineas[0];
+      const conA = calcularVenta(gondola('997', [a, b])).lineas[0];
+
+      // Mismo resultado sin importar el orden de entrada: absorbe 'a-otro'.
+      for (const l of [conA, conB]) {
+        const trazaA = l.trazas.impuestos.find((t) => t.id === 'a-otro')!;
+        const trazaB = l.trazas.impuestos.find((t) => t.id === 'b-otro')!;
+        // 997 / 1.10 = 906,36… → neto 906; residuo 91. B exacto: 45,3 → 45,
+        // y el peso que sobra se lo lleva A, el primero por id.
+        expect(new Decimal(trazaB.monto).eq(45)).toBe(true);
+        expect(new Decimal(trazaA.monto).eq(46)).toBe(true);
+        expect(new Decimal(l.totalLinea).eq(997)).toBe(true);
+      }
+    });
+
+    // La góndola que tiene que cerrar es la de la LÍNEA (bruto × cantidad), no
+    // la unitaria: el neto se cuantiza una sola vez sobre el total de la línea.
+    it('con cantidad, cierra al bruto de la línea completa', () => {
+      const l = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              cantidad: '3',
+              precioUnitario: '903',
+              precioIncluyeImpuesto: true,
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      ).lineas[0];
+
+      // 903 / 1.19 × 3 = 2.276,47 → neto 2.276; el IVA por fórmula daría 432
+      // (2.708) y por resta da 433, que cierra en los 2.709 de la etiqueta.
+      expect(new Decimal(l.subtotalNeto).eq(2276)).toBe(true);
+      expect(new Decimal(l.impuestoAplicado).eq(433)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(2709)).toBe(true);
+      expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
     });
   });
 });

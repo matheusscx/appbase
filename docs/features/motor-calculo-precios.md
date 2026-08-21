@@ -205,6 +205,26 @@ pasó. La alternativa —bajar el precio final para preservar el neto— se desc
 dejaba lo cobrado sin coincidir con el precio impreso en góndola.
 Lo fija el test *"el desbruteo no usa la tasa del impuesto pausado"*.
 
+**Y el total cierra a la etiqueta.** La misma decisión gobierna el redondeo: con precio
+bruto-inclusivo y **sin descuentos ni recargos aplicados** en la línea, el impuesto no es
+`tasa × base` sino lo que sobra — `q(bruto × cantidad) − neto` —, porque el cliente paga
+exactamente lo que vio en la góndola. Con `tasa × base` no cerraba: góndola $993 → neto
+834, IVA 158, total **992**. Los impuestos **adicionales** (`tipo = 'otro'`, el ILA) van
+por su fórmula y el **IVA absorbe el residuo**; si la línea es exenta —sin IVA que ceda—
+lo absorbe el adicional de mayor tasa, con desempate por `id` para que la traza no dependa
+del orden en que llegó la lista. La traza del absorbente declara **lo que absorbió**, no su
+fórmula: `Σ trazas = impuesto_aplicado` sigue valiendo, que es lo que hace que cada
+impuesto sea una línea del documento.
+
+**Con descuentos o recargos aplicados vuelve la fórmula normal**, y no es un parche:
+"la etiqueta manda" vale mientras el cliente pague la etiqueta. Con un descuento ya no la
+paga, así que no hay góndola que cerrar y lo que el documento tiene que declarar es el
+impuesto de la base realmente cobrada. Medido sobre esa misma línea con un 10% (base 751):
+restar contra la góndola da un IVA de 242 —cobra la etiqueta entera e ignora el
+descuento— y contra góndola−descuento da 159, cuando el correcto es **143**, que es lo que
+da `tasa × base`. Lo fija el test *"con descuento en la línea el IVA vuelve a ser
+tasa × base, no la resta"*.
+
 Por línea: neto unitario (desbruteo si incluye impuesto) × cantidad → recorrer la
 fórmula (`paso 1,2,3`) sobre un acumulador. Descuentos restan, recargos suman;
 el `%` se calcula sobre el neto (`base`) o sobre el acumulado (`compuesto`).

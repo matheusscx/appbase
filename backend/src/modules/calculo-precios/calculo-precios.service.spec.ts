@@ -639,9 +639,15 @@ describe('CalculoPreciosService', () => {
       // `escalaCalculo: 6`, que sumaba 99.999999 y dejaba el último redondeo en
       // manos del cast a NUMERIC(18,4) de Postgres—. La moneda de este mock
       // tiene 4 decimales (`decimalesOficiales` mockeado en 4), así que el neto
-      // cierra en 84.0336 y el IVA en 84.0336 × 0.19 = 15.966384 → 15.9664. La
-      // cuantización cambia el VALOR, no el formato: los strings siguen
-      // teniendo los 6 decimales de `escalaCalculo`.
+      // cierra en 84.0336. La cuantización cambia el VALOR, no el formato: los
+      // strings siguen teniendo los 6 decimales de `escalaCalculo`.
+      //
+      // El IVA ya NO sale de 84.0336 × 0.19: desde que el desbruteo cierra a
+      // góndola, la línea sin reglas declara como impuesto lo que sobra sobre
+      // el neto (100 − 84.0336). Acá el número no se movió —las dos cuentas dan
+      // 15.9664— y por eso el esperado sigue igual; lo que cambió es de dónde
+      // viene. El caso donde sí difieren es CLP sin centavos ($993 → IVA 159 y
+      // no 158), y lo cubre `calculo-precios.engine.spec.ts`.
       expect(r.lineas[0].subtotalNeto).toBe('84.033600');
       expect(r.lineas[0].impuestoAplicado).toBe('15.966400');
       // Y ahora el desbruteo cierra: neto + IVA = el bruto que entró.

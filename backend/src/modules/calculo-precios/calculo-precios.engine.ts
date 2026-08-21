@@ -47,6 +47,16 @@ export interface ImpuestoResuelto {
    * tributaria del ítem (afecto/exento). Lo fuerza el service, ver ADR-018.
    */
   activo: boolean;
+  /**
+   * `'iva'` | `'otro'` (`impuestos.tipo`). Lo necesita el desbruteo: cuando el
+   * precio ya incluye impuesto y la línea no lleva reglas, el total cierra al
+   * precio de góndola y los adicionales se calculan por su fórmula mientras el
+   * IVA se queda con el residuo. Ver `calcularLinea`.
+   *
+   * Requerido a propósito, igual que `activo`: el service ya lo manda, y dejarlo
+   * opcional haría que olvidarse de mapearlo eligiera absorbente en silencio.
+   */
+  tipo: string;
 }
 
 export interface LineaResuelta {
@@ -563,6 +573,29 @@ function procesarReglas(
   return { acc, total, trazas, advertencias };
 }
 
+/**
+ * Quién absorbe el residuo del desbruteo: el **IVA** si la línea es afecta.
+ *
+ * Si es exenta —no hay ningún `tipo === 'iva'` en la lista— absorbe el
+ * adicional de **mayor tasa**, que es el que menos se distorsiona en términos
+ * relativos al comerse un peso. Ese borde es real: los `'otro'` se aplican
+ * también en líneas exentas (DL 825 / `IndExe` del DTE).
+ *
+ * El desempate por `id` no es cosmético: sin él, dos adicionales de la misma
+ * tasa harían depender la traza del orden en que el service devolvió la lista,
+ * y la misma venta declararía montos distintos según la consulta.
+ *
+ * Se copia el array antes de ordenar: la lista es del llamador.
+ */
+function elegirAbsorbente(impuestos: ImpuestoResuelto[]): string {
+  const iva = impuestos.find((i) => i.tipo === 'iva');
+  if (iva) return iva.id;
+  return [...impuestos].sort((a, b) => {
+    const cmp = new Decimal(b.porcentaje).comparedTo(a.porcentaje);
+    return cmp !== 0 ? cmp : a.id.localeCompare(b.id);
+  })[0].id;
+}
+
 // ── Cálculo por línea ───────────────────────────────────────────────────────
 
 function calcularLinea(
@@ -642,6 +675,23 @@ function calcularLinea(
     impuestos: [] as TrazaImpuesto[],
   };
 
+  /**
+   * ¿Quedan reglas por aplicar DESPUÉS del paso de impuestos? Con la fórmula
+   * default (descuentos → recargos → impuestos) nunca, y ahí el cierre a
+   * góndola se decide con lo REALMENTE aplicado —una regla pausada, sin tramo
+   * o de otro método de pago aporta 0 y la línea sigue cerrando a la etiqueta—.
+   * Si el tenant puso los impuestos primero, lo aplicado todavía no se conoce:
+   * con reglas en la lista se asume que van a mover el monto y se usa la
+   * fórmula normal, que es la rama segura.
+   */
+  const hayReglasDespuesDelImpuesto = cfg.formula
+    .slice(cfg.formula.indexOf('impuestos') + 1)
+    .some((p) =>
+      p === 'descuentos'
+        ? linea.descuentos.length > 0
+        : p === 'recargos' && linea.recargos.length > 0,
+    );
+
   for (const paso of cfg.formula) {
     if (paso === 'descuentos') {
       const alAbrir = acc;
@@ -686,19 +736,80 @@ function calcularLinea(
       // impuesto), ya cuantizado por el cierre del paso anterior: el impuesto
       // declarado es `tasa ×` la base que el documento muestra.
       const baseImponible = acc;
-      for (const imp of impuestosVigentes) {
-        // Cada impuesto se cuantiza por separado porque cada uno es una línea
-        // declarada del documento, y todos salen de la MISMA base: acá no hay
-        // cascada que componer, así que `Σ trazas = impuestoAplicado`.
-        const monto = q(redondear(baseImponible.times(imp.porcentaje), cfg));
-        impuestoAplicado = impuestoAplicado.plus(monto);
-        acc = acc.plus(monto);
-        trazas.impuestos.push({
-          id: imp.id,
-          nombre: imp.nombre,
-          tasa: imp.porcentaje,
-          monto: fmt(monto, cfg),
-        });
+
+      /**
+       * **La etiqueta manda** (decisión del owner, 2026-08-04): cuando el
+       * precio ya incluye impuesto y a la línea no se le aplicó ninguna regla,
+       * el cliente paga exactamente lo que vio en la góndola, así que el total
+       * es el bruto y el impuesto es lo que sobra sobre el neto declarado. Con
+       * `tasa × base` no cierra: góndola 993 → neto 834, IVA 158, total 992.
+       *
+       * **No se generaliza a la línea con reglas, y está medido:** con un 10%
+       * de descuento sobre esa misma línea (base 751), restar contra la góndola
+       * da un IVA de 242 —cobra la etiqueta entera e ignora el descuento— y
+       * restar contra góndola−descuento da 159, cuando el correcto es 143. La
+       * razón es la decisión misma: con un descuento el cliente ya no paga la
+       * etiqueta, no hay góndola que cerrar, y lo que el documento tiene que
+       * declarar es el impuesto de la base realmente cobrada.
+       */
+      const cierraAGondola =
+        linea.precioIncluyeImpuesto &&
+        impuestosVigentes.length > 0 &&
+        descuentoAplicado.isZero() &&
+        recargoAplicado.isZero() &&
+        !hayReglasDespuesDelImpuesto;
+
+      if (cierraAGondola) {
+        const residuo = q(redondear(bruto.times(cantidad), cfg)).minus(
+          subtotalNeto,
+        );
+        // Los adicionales van por su fórmula y el IVA se queda con el residuo:
+        // el ILA de una botella es una línea del DTE con su tasa, mientras que
+        // el peso del redondeo tiene que caer en algún lado. Ver
+        // `elegirAbsorbente` para la línea exenta, que no tiene IVA que ceda.
+        const absorbeId = elegirAbsorbente(impuestosVigentes);
+        let repartido = ZERO;
+
+        // Se recorre en el orden de entrada —el absorbente se completa después—
+        // para que las líneas de impuesto del documento salgan como llegaron:
+        // el orden de las trazas es parte de lo que el comprobante imprime.
+        for (const imp of impuestosVigentes) {
+          const monto =
+            imp.id === absorbeId
+              ? ZERO
+              : q(redondear(baseImponible.times(imp.porcentaje), cfg));
+          repartido = repartido.plus(monto);
+          trazas.impuestos.push({
+            id: imp.id,
+            nombre: imp.nombre,
+            tasa: imp.porcentaje,
+            monto: fmt(monto, cfg),
+          });
+        }
+
+        // La traza del absorbente dice lo que REALMENTE absorbió, no
+        // `tasa × base`: cada impuesto es una línea declarada del documento y
+        // `Σ trazas = impuestoAplicado` tiene que seguir valiendo.
+        const traza = trazas.impuestos.find((t) => t.id === absorbeId)!;
+        traza.monto = fmt(residuo.minus(repartido), cfg);
+
+        impuestoAplicado = residuo;
+        acc = acc.plus(residuo);
+      } else {
+        for (const imp of impuestosVigentes) {
+          // Cada impuesto se cuantiza por separado porque cada uno es una línea
+          // declarada del documento, y todos salen de la MISMA base: acá no hay
+          // cascada que componer, así que `Σ trazas = impuestoAplicado`.
+          const monto = q(redondear(baseImponible.times(imp.porcentaje), cfg));
+          impuestoAplicado = impuestoAplicado.plus(monto);
+          acc = acc.plus(monto);
+          trazas.impuestos.push({
+            id: imp.id,
+            nombre: imp.nombre,
+            tasa: imp.porcentaje,
+            monto: fmt(monto, cfg),
+          });
+        }
       }
     }
   }
