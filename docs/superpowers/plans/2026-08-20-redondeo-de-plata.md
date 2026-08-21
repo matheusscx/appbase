@@ -163,9 +163,10 @@ git commit -m "refactor(redondeo): la escala de costo tiene nombre y cada sitio 
 > (`movimiento-caja.entity.ts:19`). El mismo criterio vale para la Task 3.
 
 **Files:**
-- Modify: `backend/src/modules/monedas/entities/moneda.entity.ts` (decorador `@Check`),
-  `startup-pos.sql` (tabla `moneda`, **como documentación de referencia**, para que no
-  quede describiendo un esquema que no es)
+- Modify: `backend/src/modules/catalog/entities/moneda.entity.ts` (decorador `@Check`) —
+  ⚠️ la entity vive en el módulo `catalog`, **no** en `monedas` (donde sí viven el service
+  y el controller); `startup-pos.sql` (tabla `moneda`, **como documentación de
+  referencia**, para que no quede describiendo un esquema que no es)
 - Test: `backend/test/esquema.e2e-spec.ts` — el spec que ya mide invariantes del esquema
   contra Postgres. **No crear un archivo nuevo**: el repo prohíbe crear uno si la
   implementación cabe en uno existente.
@@ -262,21 +263,36 @@ git commit -m "feat(redondeo): ninguna moneda puede declarar más decimales de l
 
 - [ ] **Step 1: Escribir el test que falla**
 
+⚠️ **`tenants.service.spec.ts` es unit con mocks** (`getRepositoryToken`, `dataSource.query`
+mockeado): **no hay base**. El test verifica lo que `create()` le pasa al manager, no una
+fila. `create(dto, creadorId)` corre dentro de `this.db.transaccion` y arma el tenant con
+`manager.create(Tenant, {...})` (`tenants.service.ts:194-205`), así que el spy va sobre el
+`manager` que el mock de `transaccion` entrega.
+
 ```typescript
 // tenants.service.spec.ts
-it('un tenant nuevo nace con nivel de redondeo por línea', async () => {
-  const creado = await service.create({ nombre: 'Tenant nuevo', paisId: PAIS_ID });
-  const row = await db.query(
-    `SELECT nivel_redondeo FROM tenants WHERE tenant_id = $1`, [creado.id],
+it('el alta de un tenant fija el nivel de redondeo por línea', async () => {
+  await service.create(
+    { provinciaId: PROVINCIA_ID, nombre: 'Tenant nuevo', correo: 'a@b.cl' } as CreateTenantDto,
+    CREADOR_ID,
   );
-  expect(row[0].nivel_redondeo).toBe('linea');
+
+  // manager.create(Tenant, {...}) — el objeto con el que nace el tenant
+  const [, datos] = manager.create.mock.calls.find(
+    ([entidad]) => entidad === Tenant,
+  )!;
+  expect(datos).toMatchObject({
+    nivelRedondeo: 'linea',
+    modoRedondeo: 'HALF_UP',   // el vecino que ya existía: si este falla, el mock cambió
+  });
 });
 ```
 
 - [ ] **Step 2: Correr y verificar que falla**
 
-Run: `cd backend && npm test -- tenants.service.spec.ts -t "nivel de redondeo por línea"`
-Expected: FAIL — la columna no existe.
+Run: `cd backend && npm test -- tenants.service.spec.ts -t "nivel de redondeo"`
+Expected: FAIL — `nivelRedondeo` no está en el objeto (`tenants.service.ts:194-205` hoy
+enumera cinco campos y ese no está).
 
 - [ ] **Step 3: Agregar la columna en los cuatro lugares que la declaran**
 
