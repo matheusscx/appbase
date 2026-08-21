@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import {
   calcularVenta,
   type ConfigCalculo,
@@ -18,8 +19,9 @@ const config = (over: Partial<ConfigCalculo> = {}): ConfigCalculo => ({
   escalaCalculo: 6,
   modoRedondeo: 'HALF_UP',
   nivelRedondeo: 'linea',
-  // 4 = el máximo que admite el sistema (UF). El motor todavía no cuantiza
-  // con este valor (Task 5); acá solo viaja congelado.
+  // 4 = el máximo que admite el sistema (UF). Con `escalaCalculo: 6`, cuantizar
+  // a 4 y formatear a 6 deja igual a casi todos los casos de este archivo: por
+  // eso las cifras siguen siendo las de antes de que el motor cuantizara.
   decimalesMoneda: 4,
   ...over,
 });
@@ -1241,6 +1243,184 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       const t = r.trazasVenta.descuentos[0];
       expect(t.modo).toBe('porcentaje');
       expect(t.valorEfectivo).toBe('0.10');
+    });
+  });
+
+  describe('cuantización a la escala de la moneda', () => {
+    /** CLP: sin centavos. `escalaCalculo` sigue en 6 — cuantizar no es formatear. */
+    const cfgCLP = config({ decimalesMoneda: 0 });
+
+    /** El caso medido en dev: 15.000 − 5% = 14.250; IVA 19% = 2.707,5. */
+    const ventaDelMedioPeso = () =>
+      venta({
+        config: cfgCLP,
+        lineas: [
+          linea({
+            precioUnitario: '15000',
+            descuentos: [regla({ id: 'd1', nombre: '5%', valor: '0.05' })],
+            impuestos: [impuesto()],
+          }),
+        ],
+      });
+
+    it('en CLP ninguna salida de línea queda con decimales', () => {
+      const r = calcularVenta(ventaDelMedioPeso());
+      const l = r.lineas[0];
+      for (const v of [
+        l.subtotalNeto,
+        l.descuentoAplicado,
+        l.recargoAplicado,
+        l.impuestoAplicado,
+        l.totalLinea,
+      ]) {
+        expect(new Decimal(v).isInteger()).toBe(true);
+      }
+      expect(new Decimal(r.totales.totalFinal).isInteger()).toBe(true);
+    });
+
+    it('el medio peso desaparece: 2.707,5 de IVA cierra en 2.708', () => {
+      const r = calcularVenta(ventaDelMedioPeso());
+      const l = r.lineas[0];
+      // El string sigue teniendo `escalaCalculo` decimales: cambió el VALOR,
+      // no el formato. Antes: impuesto 2707.500000, total 16957.500000.
+      expect(l.subtotalNeto).toBe('15000.000000');
+      expect(l.descuentoAplicado).toBe('750.000000');
+      expect(l.impuestoAplicado).toBe('2708.000000');
+      expect(l.totalLinea).toBe('16958.000000');
+    });
+
+    it('el total de línea es la suma de sus componentes ya cuantizados', () => {
+      const r = calcularVenta(ventaDelMedioPeso());
+      const l = r.lineas[0];
+      const esperado = new Decimal(l.subtotalNeto)
+        .minus(l.descuentoAplicado)
+        .plus(l.recargoAplicado)
+        .plus(l.impuestoAplicado);
+      expect(new Decimal(l.totalLinea).eq(esperado)).toBe(true);
+    });
+
+    it('la suma de las trazas de descuento da el descuento aplicado', () => {
+      const r = calcularVenta(ventaDelMedioPeso());
+      const l = r.lineas[0];
+      const suma = l.trazas.descuentos.reduce(
+        (acc, t) => acc.plus(t.monto),
+        new Decimal(0),
+      );
+      expect(suma.eq(l.descuentoAplicado)).toBe(true);
+    });
+
+    it('la suma de las trazas de impuesto da el impuesto aplicado', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              precioUnitario: '999',
+              impuestos: [
+                impuesto(),
+                impuesto({ id: 't2', nombre: 'Extra', porcentaje: '0.035' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+      const suma = l.trazas.impuestos.reduce(
+        (acc, t) => acc.plus(t.monto),
+        new Decimal(0),
+      );
+      // 999 × 19% = 189,81 → 190 ; 999 × 3,5% = 34,965 → 35. Cada impuesto es
+      // una línea declarada del documento, así que se cuantiza por separado y
+      // el total es su suma: 225, no 224,775 redondeado (225 también, pero por
+      // otro camino — lo que se fija acá es que Σ trazas = impuestoAplicado).
+      expect(l.trazas.impuestos.map((t) => t.monto)).toEqual([
+        '190.000000',
+        '35.000000',
+      ]);
+      expect(suma.eq(l.impuestoAplicado)).toBe(true);
+      expect(l.totalLinea).toBe('1224.000000');
+    });
+
+    it('la base imponible es el acumulado YA cuantizado al cerrar el paso anterior', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              // 100 − 7,5% = 92,5 fino. El paso cierra en 92 (el descuento
+              // cuantizado es 8), así que el IVA sale de 92, no de 92,5.
+              descuentos: [regla({ valor: '0.075' })],
+              impuestos: [impuesto()],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+      expect(l.descuentoAplicado).toBe('8.000000');
+      // 92 × 0,19 = 17,48 → 17. Sobre 92,5 daría 17,575 → 18, y el documento
+      // declararía un IVA que no es la tasa por la base que muestra.
+      expect(l.impuestoAplicado).toBe('17.000000');
+      expect(l.totalLinea).toBe('109.000000');
+      const base = new Decimal(l.subtotalNeto).minus(l.descuentoAplicado);
+      expect(
+        new Decimal(l.impuestoAplicado).eq(
+          base.times('0.19').toDecimalPlaces(0, Decimal.ROUND_HALF_UP),
+        ),
+      ).toBe(true);
+    });
+
+    it('DENTRO de un paso el acumulado corre fino: no se cuantiza regla por regla', () => {
+      const r = calcularVenta(
+        venta({
+          config: config({
+            decimalesMoneda: 0,
+            formula: ['recargos'],
+            calculoRecargos: 'compuesto',
+          }),
+          lineas: [
+            linea({
+              recargos: [
+                regla({ id: 'r1', modo: 'porcentaje', valor: '0.005' }),
+                regla({ id: 'r2', modo: 'porcentaje', valor: '0.50' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+      // 100 + 0,5% = 100,5 (acumulado FINO) ; 50% de 100,5 = 50,25 → 50.
+      // Cuantizando regla por regla el acumulado sería 101 y el segundo
+      // recargo 50,5 → 51: un peso de más, compuesto por el paso anterior.
+      // Es el error del Vancouver Stock Exchange en chico.
+      expect(l.trazas.recargos.map((t) => t.monto)).toEqual([
+        '1.000000',
+        '50.000000',
+      ]);
+      expect(l.recargoAplicado).toBe('51.000000');
+      expect(l.totalLinea).toBe('151.000000');
+    });
+
+    it('el piso en cero aguanta la cuantización: el total no queda negativo', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              // Dos fijos de 50,5 sobre 100: la suma fina (101) ya excede el
+              // neto, y si cada uno se cuantizara sin mirar lo que queda
+              // disponible darían 51 + 51 = 102 sobre un neto de 100.
+              descuentos: [
+                regla({ id: 'f1', modo: 'monto_fijo', valor: '50.5' }),
+                regla({ id: 'f2', modo: 'monto_fijo', valor: '50.5' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+      expect(l.descuentoAplicado).toBe('100.000000');
+      expect(l.totalLinea).toBe('0.000000');
+      expect(new Decimal(l.totalLinea).isNegative()).toBe(false);
     });
   });
 });

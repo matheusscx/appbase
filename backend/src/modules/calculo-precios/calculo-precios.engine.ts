@@ -231,6 +231,39 @@ function redondear(d: Decimal, cfg: ConfigCalculo): Decimal {
   return d.toDecimalPlaces(cfg.escalaCalculo, modoToRounding(cfg.modoRedondeo));
 }
 
+/**
+ * Lleva un MONTO a la escala de la moneda (`decimalesMoneda`) con el modo de
+ * redondeo del tenant. Es el paso de **CIERRE**, no un redondeo más: `redondear`
+ * mantiene el cálculo intermedio a `escala_calculo`, y esto decide la plata que
+ * el documento declara.
+ *
+ * Existe porque sin ella el último redondeo lo hacía el cast a `NUMERIC(18,4)`
+ * de Postgres — con su propia regla y sin mirar la configuración del tenant.
+ * Medido en dev: ventas en CLP con `total_final = 16957.5000`, medio peso en una
+ * moneda sin centavos que la pasarela rechaza.
+ *
+ * ⚠️ **Cambia el VALOR, no el formato.** `fmt` sigue emitiendo strings con
+ * `escala_calculo` decimales (contrato de la API), así que un neto de 84 en CLP
+ * sale como `'84.000000'`.
+ *
+ * Se aplica **una sola vez por monto declarado**, nunca en cascada sobre el
+ * acumulado de cada regla: componer redondeos es el caso del Vancouver Stock
+ * Exchange, y la norma (SAT, IRS) instruye lo contrario. Dónde se aplica exacto:
+ * ver `calcularLinea`.
+ */
+export function cuantizar(d: Decimal, cfg: ConfigCalculo): Decimal {
+  return d.toDecimalPlaces(
+    cfg.decimalesMoneda,
+    modoToRounding(cfg.modoRedondeo),
+  );
+}
+
+/** Cuantiza o no según el nivel de redondeo del tenant. Ver `calcularLinea`. */
+type Cuantizador = (d: Decimal) => Decimal;
+
+/** Identidad: el monto queda a `escala_calculo`, como antes de que esto existiera. */
+const SIN_CUANTIZAR: Cuantizador = (d) => d;
+
 function fmt(d: Decimal, cfg: ConfigCalculo): string {
   return d.toFixed(cfg.escalaCalculo);
 }
@@ -326,7 +359,13 @@ function evaluarRegla(
 // ── Procesamiento de un conjunto de descuentos/recargos ─────────────────────
 
 interface ResultadoPaso {
+  /** Acumulado con los montos **finos** (a `escala_calculo`) ya aplicados. */
   acc: Decimal;
+  /**
+   * Suma de los montos tal como quedaron en las trazas. Con cuantización es
+   * `Σ trazas_Q`, que es justo lo que el documento declara; sin ella coincide
+   * con `acc − acc_inicial` (con signo).
+   */
   total: Decimal;
   trazas: TrazaRegla[];
   advertencias: AdvertenciaPrecio[];
@@ -433,9 +472,22 @@ function procesarReglas(
     modoCalculo: string;
     metodoPagoId: string | null;
     cfg: ConfigCalculo;
+    /**
+     * Cierra cada monto declarado en la escala de la moneda. Por defecto no
+     * cuantiza —así se comporta el nivel `documento`, que redondea recién al
+     * final—; el nivel `linea` lo pasa desde `calcularLinea`.
+     *
+     * Va acá adentro y no en un `.map` sobre las trazas de vuelta porque el
+     * **tope contra `disponible`** tiene que mirar plata real: con dos fijos de
+     * 50,5 sobre un neto de 100 en CLP, cuantizar las trazas después daría
+     * 51 + 51 = 102 y una línea de −2. Cuantizando acá, el segundo se topea
+     * contra lo que de verdad queda (49) y el piso en cero se sostiene.
+     */
+    cuantizar?: Cuantizador;
   },
 ): ResultadoPaso {
   let { acc } = params;
+  const q = params.cuantizar ?? SIN_CUANTIZAR;
   let disponible = params.disponible ?? params.acc;
   let total = ZERO;
   const trazas: TrazaRegla[] = [];
@@ -472,10 +524,13 @@ function procesarReglas(
 
     // Lo que la regla pidió, capturado ANTES del piso: abajo `monto` puede
     // recortarse al disponible, y sin esta línea la traza pierde para siempre
-    // cuánto valía la regla que se topeó.
-    const solicitado = monto;
+    // cuánto valía la regla que se topeó. Se cuantiza porque también es plata
+    // que el ticket muestra ("el descuento de 1.200 aplicó 1.000").
+    const solicitado = q(monto);
 
     if (params.signo === -1) {
+      // El tope es plata real, o sea ya cuantizada: `disponible` se mueve con
+      // los montos cuantizados, no con los finos.
       const tope = Decimal.max(disponible, ZERO);
       if (monto.greaterThan(tope)) {
         advertencias.push({
@@ -486,13 +541,19 @@ function procesarReglas(
       }
     }
 
+    const montoQ = q(monto);
+
+    // `acc` sigue FINO dentro del paso: es la base de las reglas en modo
+    // `compuesto`, y cuantizarla acá compondría el redondeo regla por regla.
+    // El cierre del paso lo hace el llamador con `total`, que sí es la suma de
+    // los montos cuantizados. Ver el bloque de `calcularLinea`.
     acc = acc.plus(monto.times(params.signo));
-    disponible = disponible.plus(monto.times(params.signo));
-    total = total.plus(monto);
+    disponible = disponible.plus(montoQ.times(params.signo));
+    total = total.plus(montoQ);
     trazas.push({
       id: regla.id,
       nombre: regla.nombre,
-      monto: fmt(monto, params.cfg),
+      monto: fmt(montoQ, params.cfg),
       modo: regla.modo,
       valorEfectivo: evaluacion.valorEfectivo,
       valorSolicitado: fmt(solicitado, params.cfg),
@@ -512,6 +573,32 @@ function calcularLinea(
   const cantidad = new Decimal(linea.cantidad);
   const bruto = new Decimal(linea.precioUnitario);
 
+  /**
+   * **Dónde se cuantiza — la precisión que decide si el documento cuadra.**
+   *
+   * Con `nivelRedondeo === 'linea'` (el default de todos los tenants) cada
+   * monto que la línea declara cierra en la escala de la moneda. La regla es:
+   * se cuantiza al cerrar cada **PASO** de la fórmula, no en cada regla.
+   *
+   * - **Dentro** de un paso —varias reglas encadenadas en modo `compuesto`— el
+   *   acumulado corre fino a `escala_calculo`. Cuantizar regla por regla
+   *   compondría el error, que es el caso del Vancouver Stock Exchange.
+   * - **Al cerrar el paso**, el acumulado pasa a ser el que el documento
+   *   declara: `neto_Q − Σ descuentos_Q + Σ recargos_Q`. El paso siguiente
+   *   parte de ahí.
+   *
+   * Esto importa por el IVA: la base imponible es el acumulado al inicio del
+   * paso `impuestos`. Si se calculara sobre el acumulado fino, el impuesto
+   * declarado no sería `tasa ×` la base que la boleta muestra — que es la
+   * relación que un documento tributario espera. Como hay tres pasos como
+   * máximo, el error queda acotado a tres redondeos, no a uno por regla.
+   *
+   * `'documento'` (redondear recién sobre el total de la venta) todavía no está
+   * implementado: se comporta como antes de que esto existiera.
+   */
+  const q: Cuantizador =
+    cfg.nivelRedondeo === 'linea' ? (d) => cuantizar(d, cfg) : SIN_CUANTIZAR;
+
   // Los impuestos pausados salen de la lista ACÁ, antes del desbruteo. Si se
   // filtraran recién al aplicarlos, su tasa seguiría inflando el divisor de
   // abajo y el neto quedaría mal aunque el impuesto no se cobrara.
@@ -526,7 +613,9 @@ function calcularLinea(
     );
     netoUnitario = bruto.dividedBy(new Decimal(1).plus(sumaTasas));
   }
-  const subtotalNeto = redondear(netoUnitario.times(cantidad), cfg);
+  // El primer monto de la cadena nace ya cuantizado: es el neto que el
+  // documento declara, y la base de todo lo que sigue.
+  const subtotalNeto = q(redondear(netoUnitario.times(cantidad), cfg));
 
   let acc = subtotalNeto;
   let descuentoAplicado = ZERO;
@@ -553,6 +642,7 @@ function calcularLinea(
 
   for (const paso of cfg.formula) {
     if (paso === 'descuentos') {
+      const alAbrir = acc;
       const r = procesarReglas(linea.descuentos, {
         neto: subtotalNeto,
         acc,
@@ -561,12 +651,17 @@ function calcularLinea(
         modoCalculo: cfg.calculoDescuentos,
         metodoPagoId,
         cfg,
+        cuantizar: q,
       });
-      acc = r.acc;
       descuentoAplicado = r.total;
+      // Cierre del paso: el acumulado se rearma con el total DECLARADO, no con
+      // `r.acc` (que trae los montos finos que se usaron de base adentro del
+      // paso). Sin cuantizar los dos valores coinciden exactamente.
+      acc = alAbrir.minus(descuentoAplicado);
       trazas.descuentos = r.trazas;
       advertencias.push(...r.advertencias);
     } else if (paso === 'recargos') {
+      const alAbrir = acc;
       const r = procesarReglas(linea.recargos, {
         neto: subtotalNeto,
         acc,
@@ -575,19 +670,25 @@ function calcularLinea(
         modoCalculo: cfg.calculoRecargos,
         metodoPagoId,
         cfg,
+        cuantizar: q,
       });
-      acc = r.acc;
       recargoAplicado = r.total;
+      acc = alAbrir.plus(recargoAplicado); // cierre del paso, ver arriba
       trazas.recargos = r.trazas;
       // Hasta que existieron las reglas pausadas, un recargo no podía generar
       // advertencias —el tope solo avisa en descuentos— y esta línea no hacía
       // falta. Ahora sí: sin ella, el aviso del recargo pausado se perdía acá.
       advertencias.push(...r.advertencias);
     } else if (paso === 'impuestos') {
-      // Base imponible = acumulado al inicio del paso (no hay impuesto sobre impuesto).
+      // Base imponible = acumulado al inicio del paso (no hay impuesto sobre
+      // impuesto), ya cuantizado por el cierre del paso anterior: el impuesto
+      // declarado es `tasa ×` la base que el documento muestra.
       const baseImponible = acc;
       for (const imp of impuestosVigentes) {
-        const monto = redondear(baseImponible.times(imp.porcentaje), cfg);
+        // Cada impuesto se cuantiza por separado porque cada uno es una línea
+        // declarada del documento, y todos salen de la MISMA base: acá no hay
+        // cascada que componer, así que `Σ trazas = impuestoAplicado`.
+        const monto = q(redondear(baseImponible.times(imp.porcentaje), cfg));
         impuestoAplicado = impuestoAplicado.plus(monto);
         acc = acc.plus(monto);
         trazas.impuestos.push({
@@ -600,6 +701,16 @@ function calcularLinea(
     }
   }
 
+  // El total NO se cuantiza aparte: se DERIVA de sus partes, que ya lo están.
+  // Cuantizar el total además de sus componentes es lo que rompe la identidad
+  // aditiva del comprobante (`subtotal − descuentos + recargos + impuestos`).
+  // Coincide con `acc` —los pasos cierran con estos mismos totales— pero se
+  // escribe explícito porque la identidad es lo que el documento promete.
+  const totalLinea = subtotalNeto
+    .minus(descuentoAplicado)
+    .plus(recargoAplicado)
+    .plus(impuestoAplicado);
+
   return {
     itemId: linea.itemId,
     cantidad: linea.cantidad,
@@ -608,7 +719,7 @@ function calcularLinea(
     descuentoAplicado: fmt(descuentoAplicado, cfg),
     recargoAplicado: fmt(recargoAplicado, cfg),
     impuestoAplicado: fmt(impuestoAplicado, cfg),
-    totalLinea: fmt(acc, cfg),
+    totalLinea: fmt(totalLinea, cfg),
     trazas,
     advertencias,
   };

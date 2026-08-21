@@ -633,8 +633,19 @@ describe('CalculoPreciosService', () => {
         lineas: [{ itemId: 'item-1', cantidad: '1' }],
       });
       // precioBase 100, bruto-inclusivo, IVA 0.19 derivado: neto = 100/1.19.
-      expect(r.lineas[0].subtotalNeto).toBe('84.033613');
-      expect(r.lineas[0].impuestoAplicado).toBe('15.966386');
+      //
+      // Los valores cambiaron cuando el motor empezó a cuantizar en la escala
+      // de la moneda: antes eran '84.033613' y '15.966386' —el cálculo crudo a
+      // `escalaCalculo: 6`, que sumaba 99.999999 y dejaba el último redondeo en
+      // manos del cast a NUMERIC(18,4) de Postgres—. La moneda de este mock
+      // tiene 4 decimales (`decimalesOficiales` mockeado en 4), así que el neto
+      // cierra en 84.0336 y el IVA en 84.0336 × 0.19 = 15.966384 → 15.9664. La
+      // cuantización cambia el VALOR, no el formato: los strings siguen
+      // teniendo los 6 decimales de `escalaCalculo`.
+      expect(r.lineas[0].subtotalNeto).toBe('84.033600');
+      expect(r.lineas[0].impuestoAplicado).toBe('15.966400');
+      // Y ahora el desbruteo cierra: neto + IVA = el bruto que entró.
+      expect(r.lineas[0].totalLinea).toBe('100.000000');
       expect(r.lineas[0].trazas.impuestos).toEqual([
         expect.objectContaining({ id: 'imp-1', tasa: '0.19' }),
       ]);
