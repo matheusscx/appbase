@@ -128,6 +128,25 @@ describe('EscalaMonedaPipe', () => {
     expect(decimalesOficiales).toHaveBeenNthCalledWith(2, 'tenant-usd');
   });
 
+  it('deja pasar un valor que no es un número, en vez de romperse', async () => {
+    // Rama load-bearing y no cosmética: `precioExtra` usa el string VACÍO como
+    // "no tocar este override" —`items/dto/create-item.dto.ts` y
+    // `grupos-modificadores/dto/aplicar-overrides.dto.ts`, los dos con
+    // `@ValidateIf(o => o.precioExtra !== '')`— y el pipe NO lee `@ValidateIf`:
+    // el vacío le llega igual. Lo salva el `catch` de `new Decimal('')`. Si esa
+    // rama pasara a tirar, se caerían los overrides en producción con un 500 y
+    // ningún otro test lo diría: los dos casos que mandan `''` van por
+    // `validate()`, que no ejerce el pipe.
+    const { pipe } = armar(0); // CLP
+
+    await expect(
+      pipe.transform({ monto: '' }, meta(DtoDeMonto)),
+    ).resolves.toEqual({ monto: '' });
+    await expect(
+      pipe.transform({ costoUnitario: 'no-es-un-numero' }, meta(DtoDeCosto)),
+    ).resolves.toEqual({ costoUnitario: 'no-es-un-numero' });
+  });
+
   it('deja pasar intacto un DTO sin campos marcados', async () => {
     const { pipe, decimalesOficiales } = armar(0);
 

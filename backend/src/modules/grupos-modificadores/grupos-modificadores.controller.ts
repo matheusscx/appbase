@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GruposModificadoresService } from './grupos-modificadores.service';
@@ -30,7 +31,10 @@ export class GruposModificadoresController {
 
   @Post()
   @UseGuards(TenantAdminGuard)
-  create(@Req() req: Request, @Body() dto: CreateGrupoModificadorDto) {
+  create(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: CreateGrupoModificadorDto,
+  ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.service.create(tenantId, dto);
   }
@@ -58,7 +62,7 @@ export class GruposModificadoresController {
   aplicarOverrides(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: AplicarOverridesDto,
+    @Body(EscalaMonedaPipe) dto: AplicarOverridesDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.service.aplicarOverrides(tenantId, id, dto);
@@ -69,7 +73,7 @@ export class GruposModificadoresController {
   update(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: UpdateGrupoModificadorDto,
+    @Body(EscalaMonedaPipe) dto: UpdateGrupoModificadorDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.service.update(tenantId, id, dto);

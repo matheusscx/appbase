@@ -13,6 +13,7 @@ import type { Request } from 'express';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
@@ -39,7 +40,10 @@ export class LiquidacionPropinasController {
 
   @Post('preview')
   @RequiresPermiso('Propinas', 'Leer')
-  preview(@Req() req: Request, @Body() dto: PreviewLiquidacionDto) {
+  preview(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: PreviewLiquidacionDto,
+  ) {
     const user = req.user as JwtUser;
     const { fechaDesde, fechaHasta } = rangoLiquidacionDesde(
       dto.fechaDesde,
@@ -56,7 +60,7 @@ export class LiquidacionPropinasController {
 
   @Post('liquidar')
   @RequiresPermiso('Propinas', 'Liquidar')
-  liquidar(@Req() req: Request, @Body() dto: LiquidarDto) {
+  liquidar(@Req() req: Request, @Body(EscalaMonedaPipe) dto: LiquidarDto) {
     const user = req.user as JwtUser;
     return this.liquidaciones.liquidar(user.tenantId!, user.id, dto);
   }
@@ -80,7 +84,7 @@ export class LiquidacionPropinasController {
   actualizar(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: UpdateLiquidacionDto,
+    @Body(EscalaMonedaPipe) dto: UpdateLiquidacionDto,
   ) {
     const user = req.user as JwtUser;
     return this.liquidaciones.actualizar(user.tenantId!, user.id, id, dto);

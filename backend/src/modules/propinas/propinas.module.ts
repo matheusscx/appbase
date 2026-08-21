@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { GarzonesModule } from '../garzones/garzones.module';
+import { MonedasModule } from '../monedas/monedas.module';
 import { VentaPropina } from './entities/venta-propina.entity';
 import { PropinaConfiguracion } from './entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from './entities/propina-grupo-distribucion.entity';
@@ -32,6 +33,9 @@ import { PropinaReportesService } from './propina-reportes.service';
       LiquidacionPropinasFuente,
       LiquidacionPropinasEvento,
     ]),
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [
     PropinaDistribucionController,
