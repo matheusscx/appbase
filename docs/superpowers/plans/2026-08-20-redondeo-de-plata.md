@@ -1559,11 +1559,25 @@ SELECT venta_id, caja_id, moneda_id, canal, total_final, estado, tipo_documento_
 config_calculo: ConfigCalculo | null;
 ```
 
+> ⚠️ **Corregido el 2026-08-20, durante la ejecución.** Este guard, tal como estaba
+> escrito, **anulaba el fix de la Task 12**: el webhook de reembolso llama a
+> `crearNotaCredito` con el mismo `ventaId`, así que un `throw` incondicional acá haría
+> perder un evento de plata **que la pasarela ya movió** — exactamente lo que la decisión
+> **P3** prohíbe. Las dos decisiones conviven, y el flag que ya existe las separa:
+> **P5 (fallar ruidoso) es del camino manual** —una persona emitiendo la NC, que puede
+> corregir— y **P3 (no perder el hecho consumado) es del webhook**. Por eso el guard va
+> **detrás de `validarVentaElegible`**, que solo pasa el endpoint manual
+> (`ventas.service.ts:1146`); el webhook llama directo, sin ese flag. Lo levantó la revisión
+> de la Task 12, antes de que esta tarea se escribiera.
+
 ```typescript
-// crearNotaCredito, después de lockVentaOriginal
+// crearNotaCredito, DENTRO del bloque `if (params.validarVentaElegible)`
 // La NC corrige aquel documento: hereda su criterio, no el vigente (decisión g).
 // Un null acá no es un caso histórico —después del reset toda venta tiene
 // config— sino que algo se rompió aguas arriba: se falla ruidoso (decisión P5).
+// Pero SOLO en el camino manual: el webhook de reembolso (P3) no puede perder un
+// hecho ya consumado por un dato de configuración faltante, y cuantiza con su
+// propio fallback documentado.
 if (!original.config_calculo) {
   throw new BadRequestException(
     `La venta ${params.ventaOriginalId} no tiene config_calculo congelada: no se ` +
