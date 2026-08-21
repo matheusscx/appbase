@@ -1,7 +1,8 @@
 # Redondeo de plata: la moneda manda al cerrar el documento — Design Spec
 
 **Fecha:** 2026-08-20
-**Estado:** 📐 Borrador para revisión del owner — **no toca código**
+**Estado:** 📐 Revisada y aprobada por el owner (2026-08-20) — lista para plan de
+implementación. **No toca código.**
 **Decisiones que honra:**
 [once decisiones](2026-08-20-redondeo-de-plata-decisiones.md) ·
 [segunda ronda](2026-08-20-redondeo-de-plata-segunda-ronda.md)
@@ -268,10 +269,32 @@ El caso que la decisión nombra: góndola **993**, IVA 19%. `N = Q(993/1.19) = Q
 daba `Q(834 × 0.19) = 158` y total **992**, un peso menos que la góndola.
 
 **Con varios impuestos** (el caso de la botella con ILA, que el motor ya contempla al
-dividir por `1 + Σ tasas`), el residuo `T − N` se reparte **proporcional a la tasa, y la
-unidad sobrante va al impuesto de mayor tasa**; con tasas iguales, desempate determinista
-por id. 🔶 **Esta parte es propuesta, no decisión tomada** — (e) habla del IVA en singular
-y no dice qué pasa con dos impuestos. Es lo primero a confirmar al revisar.
+dividir por `1 + Σ tasas`) — ✅ **decidido el 2026-08-20: el IVA absorbe el residuo y los
+adicionales quedan exactos.**
+
+```
+adicionales = Q(tasa × base)  cada uno, por su fórmula
+IVA         = (T − N) − Σ adicionales      ← absorbe el residuo
+```
+
+**Por qué:** extiende la regla que (e) ya fijó —*"cede el IVA"*— en vez de inventar una
+segunda regla de redondeo para el mismo fenómeno. Un reparto proporcional dejaría al IVA
+inexacto incluso cuando un adicional podía absorber; y "el de mayor tasa absorbe" cambia
+de protagonista según el caso (el IVA manda sobre un ILA del 10%, pero un licor al 31,5%
+manda sobre el IVA), lo que vuelve la boleta difícil de anticipar.
+
+**Es barato: el dato ya viaja.** El service tipa su mapa como
+`ImpuestoResuelto & { tipo: string }` (`calculo-precios.service.ts:95`) y agrega el IVA
+explícitamente como `ivaDelPais` (`:343`), así que los objetos que llegan al motor **ya
+llevan `tipo`** — falta declararlo en la interfaz `ImpuestoResuelto`
+(`calculo-precios.engine.ts:39-50`), que hoy solo tiene `id`, `nombre`, `porcentaje` y
+`activo`.
+
+⚠️ **El borde a cubrir: una línea exenta con adicionales no tiene IVA que absorba.** Si
+`clasificacion_tributaria !== 'afecto'` el motor no agrega `ivaDelPais` (`:337-344`), pero
+los `'otro'` aplican igual (DL 825 / `IndExe` del DTE). Ahí absorbe **el adicional de
+mayor tasa**, con desempate determinista por id. Va con test propio: es el caso que una
+implementación apurada deja tirando una excepción o repartiendo mal.
 
 **No toca el nivel venta.** Verificado: `calcularLinea` (`:498-606`) y el bloque de reglas
 de venta (`:624-685`) son disjuntos, y el paso `impuestos` **no existe** a nivel venta
@@ -357,11 +380,31 @@ services no se tocan.
 | Costos | 4 | ajuste de costo, costo de compra, costo por unidad de mermas y compras |
 | `montoTolerancia` | `moneda.decimales` | decisión **P7** — además suma validación de **signo**: una tolerancia negativa no significa nada |
 
-⚠️ **La escala de los montos cobrados es dinámica** (depende de la moneda oficial del
-tenant), y un decorador de `class-validator` es estático: no la conoce. La de costos (4)
-sí es estática y puede vivir en el DTO como los demás decoradores. 🔶 **A resolver al
-revisar:** un pipe con acceso al tenant, o un decorador que reciba la escala resuelta.
-Es la única pieza de mecánica que la spec no cierra.
+### Cómo se implementa, con la escala dinámica
+
+La escala de los montos cobrados **depende de la moneda oficial del tenant**, y un
+decorador de `class-validator` es estático: no la conoce. La de costos (4) sí es estática y
+vive en el DTO como los demás decoradores.
+
+✅ **Decidido el 2026-08-20: decorador de metadata + pipe con contexto del tenant.** El
+campo se marca declarativamente (`@EsMontoCobrado()`), y un pipe resuelve la escala a
+partir del tenant del token y valida.
+
+**Por qué:** el DTO sigue siendo el contrato, y el próximo endpoint que reciba plata no se
+puede olvidar de validar — que es exactamente cómo aparecieron los huecos que este frente
+encontró (`pagos.monto` y el movimiento de caja entran crudos hoy). Un helper llamado a
+mano en cada controller es más simple pero se dispersa, y la dispersión es el defecto que
+estamos cerrando.
+
+**El costo, dicho:** infraestructura nueva (el pipe y su decorador) y **una consulta
+indexada por request que traiga plata**, para resolver la moneda oficial del tenant. **Sin
+caché al principio**: una venta ya hace 113 consultas, así que una más no mueve la aguja, y
+un caché exigiría invalidarlo cuando el admin cambia la moneda oficial
+(`PATCH /api/monedas/:id/default`) — complejidad que conviene pagar solo si la medición la
+justifica.
+
+⚠️ **`tenant_id` sale del token, nunca del body** (invariante de `CLAUDE.md`): el pipe lee
+el mismo contexto que los guards, no un campo del payload.
 
 **El webhook de reembolso queda afuera del 400** (decisión P3): cuantiza y **registra el
 valor original**. Validar una intención y registrar un hecho ya consumado no son la misma
@@ -550,9 +593,9 @@ hasta esta spec, lo persistido lo decidía el cast de Postgres.
   cerraban (995, 997, 1000, 1990), para que la rama nueva no rompa lo que andaba.
 - Desbruteo con dos impuestos (IVA + ILA): la suma de impuestos es exactamente `T − N`.
 
-**Unit — bordes:** cada familia de DTO rechaza un decimal de más y acepta el borde exacto
-(`'100.00'` en CLP-0 debería… 🔶 ver "abierto"). Los nueve tests de aceptación existentes
-se actualizan.
+**Unit — bordes:** cada familia de DTO rechaza un decimal de más, y **acepta un entero
+escrito con ceros a la derecha** (`'1000.00'` en CLP-0 es válido, decisión de abajo). Los
+nueve tests de aceptación existentes se actualizan.
 
 **Unit — matriz:** las dos combinaciones prohibidas devuelven 400; las permitidas, 200.
 
@@ -579,20 +622,18 @@ un cambio de validación en DTOs compartidos rompe specs lejanas, y ya pasó ac�
 
 ---
 
-## Lo que queda abierto para la revisión
+## Lo que se cerró al revisar, y lo que queda
 
-> ✅ **La premisa 0 —qué representa `moneda.decimales`— se cerró el 2026-08-20**: es el
-> minor unit. Estaba acá y se movió arriba, a su propia sección, con el porqué y lo que
-> obliga.
+**Cerrado el 2026-08-20**, en la revisión de este borrador con el owner:
 
-1. **El reparto del residuo del desbruteo entre varios impuestos** — (e) habla del IVA en
-   singular. La spec propone proporcional a la tasa con el sobrante al mayor; falta
-   confirmarlo.
-2. **La mecánica del rechazo con escala dinámica** — pipe con acceso al tenant, o
-   decorador que reciba la escala resuelta. Es la única pieza que la spec no cierra.
-3. **¿El rechazo de `documento` + CLP es 400 duro o aviso aceptable?** — la spec propone
-   400 duro.
-4. **El borde exacto de la validación:** en CLP-0, ¿`'1000.00'` es válido (valor entero
-   escrito con decimales) o se rechaza por forma? La spec propone **aceptarlo**: el valor
-   es entero, y rechazarlo castigaría un formato, no un número — pero un cliente que manda
-   `'1000.00'` es indistinguible de uno que redondeó mal, y esa es la contra.
+| # | Pregunta | Decisión | Dónde vive |
+|---|---|---|---|
+| 0 | ¿Qué representa `moneda.decimales`? | **El minor unit**, no presentación | §"Qué representa `moneda.decimales`" |
+| 1 | El residuo del desbruteo con varios impuestos | **El IVA absorbe; los adicionales exactos** | §"El camino desbruteado" |
+| 2 | La mecánica del rechazo con escala dinámica | **Decorador de metadata + pipe con contexto**, sin caché al principio | §"Cómo se implementa, con la escala dinámica" |
+| 3 | `'1000.00'` en CLP-0 | **Válido**: la regla es sobre el valor, no sobre la cadena | §"Los bordes de entrada" |
+
+**Queda una, chica:** ¿el rechazo de `nivel = documento` + moneda de 0 decimales es un
+**400 duro** o un **aviso que el admin puede aceptar**? La spec propone 400 duro —
+coherente con que la perilla no ofrezca el bug como opción—, pero un aviso deja salida a un
+caso que no previmos. No bloquea el plan: cambia una rama de validación y su test.
