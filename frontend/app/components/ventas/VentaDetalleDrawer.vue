@@ -113,7 +113,8 @@ interface VentaDetalle {
    * La config con la que se calculó, congelada. `formula` es el orden en que se
    * aplicaron los pasos y es lo que ordena el desglose; los dos `calculo*` son
    * `'base' | 'compuesto'` y explican por qué un mismo porcentaje da montos
-   * distintos. `null` en las ventas anteriores al congelado y en las NCs.
+   * distintos. `null` en las ventas anteriores al congelado. Las notas de
+   * crédito congelan la suya propia, heredada de la venta que corrigen.
    */
   configCalculo: {
     formula: string[]

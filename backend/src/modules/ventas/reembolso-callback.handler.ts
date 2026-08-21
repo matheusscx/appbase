@@ -11,15 +11,21 @@ import { MonedasService } from '../monedas/monedas.service';
 
 /**
  * Fallback de `modoRedondeo` cuando la venta referenciada no tiene
- * `config_calculo` congelada (hoy: toda nota de crédito nace así — ver
- * `MonedasService.decimalesDeLaVenta`). Deliberadamente el mismo default que
- * ya usa `modoToRounding` para un modo desconocido (HALF_UP), y NO un fallo
- * ruidoso: ese es el criterio correcto para `crearNotaCredito` cuando lo
- * llama una PERSONA (decisión P5 de la Fase 5 de este plan — ahí sí conviene
- * rechazar y pedir que se arregle el dato), pero acá el llamador es el
- * webhook de la pasarela, gobernado por la decisión P3: un hecho ya
- * consumado no se puede perder por un dato de configuración ausente —
- * fallar acá sería el mismo error que P3 prohíbe, solo que por otra puerta.
+ * `config_calculo` congelada — ver `MonedasService.decimalesDeLaVenta`. Ya
+ * no es el caso general de toda NC: desde la Fase 5 de este plan,
+ * `crearNotaCredito` congela `config_calculo` en la NC que crea, heredado de
+ * la venta que corrige, y el camino manual (`validarVentaElegible: true`,
+ * una PERSONA pidiéndola) falla ruidoso si esa venta no lo tiene (decisión
+ * P5). Acá sigue siendo alcanzable porque este handler es el OTRO llamador
+ * de `crearNotaCredito` —el webhook de la pasarela, sin ese flag— y
+ * `evento.ventaId` es la venta ORIGINAL que se reembolsa: si esa venta
+ * particular no tiene `config_calculo` congelada (dato roto aguas arriba,
+ * no un caso esperado), este fallback es lo que evita perder el evento.
+ * Deliberadamente el mismo default que ya usa `modoToRounding` para un modo
+ * desconocido (HALF_UP), y NO un fallo ruidoso: la decisión P5 es del
+ * camino manual, y acá gobierna la P3 — un hecho ya consumado no se puede
+ * perder por un dato de configuración ausente; fallar acá sería el mismo
+ * error que P3 prohíbe, solo que por otra puerta.
  */
 const MODO_REDONDEO_FALLBACK = 'HALF_UP';
 

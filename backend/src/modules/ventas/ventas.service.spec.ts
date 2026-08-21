@@ -1526,6 +1526,15 @@ describe('VentasService', () => {
       total_final: '11305.0000',
       estado: 'pagada',
       tipo_documento_id: 'tipo-doc-boleta-uuid',
+      config_calculo: {
+        formula: ['descuentos', 'recargos', 'impuestos'],
+        calculoDescuentos: 'base',
+        calculoRecargos: 'base',
+        escalaCalculo: 4,
+        modoRedondeo: 'HALF_UP',
+        nivelRedondeo: 'linea',
+        decimalesMoneda: 4,
+      },
     };
     const detallesRows = [
       {

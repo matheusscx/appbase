@@ -4,7 +4,9 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
+import { VentasService } from '../src/modules/ventas/ventas.service';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
@@ -1369,6 +1371,193 @@ describe('Ventas (e2e)', () => {
         nivelRedondeo: 'linea',
         decimalesMoneda: 0, // el tenant del seed (Paris) opera en CLP
       });
+    });
+  });
+
+  describe('la nota de crédito hereda el criterio congelado (NC)', () => {
+    interface PreferenciasFinancieras {
+      calculoDescuentos: string;
+      calculoRecargos: string;
+      formula: string[];
+      escalaCalculo: number;
+      modoRedondeo: string;
+      nivelRedondeo: string;
+      montoTolerancia: string;
+    }
+    interface VentaDetalleConConfig {
+      configCalculo: { modoRedondeo: string } | null;
+    }
+
+    const crearItemGranel = async (precioBase: string): Promise<string> => {
+      const sufijo = `E2E ${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Granel NC ${sufijo}`,
+          precioBase,
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          clasificacionTributaria: 'exento',
+          modoInventario: 'cantidad',
+          unidadMedida: 'kg',
+          stock: '50',
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+
+    // Precio con 4 decimales × cantidad fraccionaria: sin cuantizar a la
+    // moneda, el `precio_unitario` congelado en la línea original ya trae
+    // más decimales de los que el peso admite.
+    const crearVentaConCantidadFraccionaria = async (): Promise<{
+      ventaId: string;
+      itemId: string;
+    }> => {
+      const itemId = await crearItemGranel('1234.5678');
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId, cantidad: '1.5' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      return { ventaId: (venta.body as VentaResponse).id, itemId };
+    };
+
+    const crearVentaSimple = async (): Promise<string> => {
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      return (venta.body as VentaResponse).id;
+    };
+
+    const emitirNotaCredito = async (
+      ventaId: string,
+      body: {
+        monto: string;
+        devoluciones?: { itemId: string; cantidad: string }[];
+      },
+    ): Promise<{ id: string }> => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+      expect(res.status).toBe(201);
+      return res.body as { id: string };
+    };
+
+    const getVenta = (ventaId: string) =>
+      request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+
+    const getPreferenciasFinancieras = () =>
+      request(app.getHttpServer())
+        .get('/api/tenants/preferencias-financieras')
+        .set('Authorization', `Bearer ${token}`);
+
+    const putPreferenciasFinancieras = (body: PreferenciasFinancieras) =>
+      request(app.getHttpServer())
+        .put('/api/tenants/preferencias-financieras')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+
+    it('la línea de la NC no persiste decimales que la moneda no tiene', async () => {
+      const { ventaId, itemId } = await crearVentaConCantidadFraccionaria();
+      const nc = await emitirNotaCredito(ventaId, {
+        monto: '1000.0000',
+        devoluciones: [{ itemId, cantidad: '1' }],
+      });
+
+      const lineas: { total_linea: string }[] = await ds.query(
+        `SELECT total_linea FROM venta_detalles WHERE venta_id = $1`,
+        [nc.id],
+      );
+      expect(lineas).toHaveLength(1);
+      // El precio unitario congelado (1234.5678) × 1 no es un peso entero:
+      // sin cuantizar al criterio heredado, esto fallaba.
+      expect(new Decimal(lineas[0].total_linea).isInteger()).toBe(true);
+    });
+
+    it('la NC hereda el modo congelado de la venta original, no el vigente', async () => {
+      const original = await getPreferenciasFinancieras();
+      expect(original.status).toBe(200);
+      const originalBody = original.body as PreferenciasFinancieras;
+      // Ancla: si el seed cambiara el default, este test dejaría de probar
+      // lo que dice probar (que la NC ignora el cambio POSTERIOR).
+      expect(originalBody.modoRedondeo).toBe('HALF_UP');
+
+      const ventaId = await crearVentaSimple();
+      try {
+        const putRes = await putPreferenciasFinancieras({
+          ...originalBody,
+          modoRedondeo: 'FLOOR',
+        });
+        expect(putRes.status).toBe(200);
+
+        const nc = await emitirNotaCredito(ventaId, { monto: '1000.0000' });
+
+        const detalle = await getVenta(nc.id);
+        expect(detalle.status).toBe(200);
+        expect(
+          (detalle.body as VentaDetalleConConfig).configCalculo?.modoRedondeo,
+        ).toBe('HALF_UP');
+      } finally {
+        // El tenant es compartido por toda la suite: sin este restore, los
+        // tests que corren después heredan FLOOR en silencio.
+        const restore = await putPreferenciasFinancieras(originalBody);
+        expect(restore.status).toBe(200);
+      }
+    });
+
+    it('la NC congela su propia config', async () => {
+      const ventaId = await crearVentaSimple();
+      const nc = await emitirNotaCredito(ventaId, { monto: '1000.0000' });
+      const detalle = await getVenta(nc.id);
+      expect(detalle.status).toBe(200);
+      expect(
+        (detalle.body as VentaDetalleConConfig).configCalculo,
+      ).not.toBeNull();
+    });
+
+    /**
+     * El camino del webhook de reembolso llama a `VentasService.crearNotaCredito`
+     * directo, sin `validarVentaElegible: true` (ver `ReembolsoCallbackHandler`,
+     * que no pasa por HTTP) — así que el guard de `config_calculo` faltante NO lo
+     * alcanza (decisión P3: un reembolso ya aprobado por la pasarela no se puede
+     * perder por un dato de configuración ausente). Sin la venta original
+     * forzada a `config_calculo = NULL` este test no prueba nada: el guard
+     * solo se activa cuando falta.
+     */
+    it('el webhook de reembolso sigue funcionando con una venta sin config_calculo', async () => {
+      const ventaId = await crearVentaSimple();
+      await ds.query(
+        `UPDATE ventas SET config_calculo = NULL WHERE venta_id = $1`,
+        [ventaId],
+      );
+
+      const ventasService = app.get(VentasService);
+      const usuarioId = await getUsuarioId(ds);
+      const nc = await ventasService.crearNotaCredito({
+        tenantId: PARIS_TENANT_ID,
+        usuarioId,
+        ventaOriginalId: ventaId,
+        monto: '1000.0000',
+      });
+      expect(nc.totalFinal).toBe('1000.0000');
+
+      // Congeló lo que heredó (P4): heredó null, así que congela null. No
+      // truena, que es exactamente lo que este test protege.
+      const detalle = await getVenta(nc.id);
+      expect(detalle.status).toBe(200);
+      expect((detalle.body as VentaDetalleConConfig).configCalculo).toBeNull();
     });
   });
 

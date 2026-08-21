@@ -12,6 +12,7 @@ import type {
   ConfigCalculo,
   TrazaRegla,
 } from '../calculo-precios/calculo-precios.engine';
+import { cuantizar } from '../calculo-precios/calculo-precios.engine';
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
@@ -967,7 +968,22 @@ export class VentasService {
           throw new BadRequestException(
             'Solo se puede emitir nota de crédito de ventas pagadas o pagadas parcialmente',
           );
+        // La NC corrige aquel documento: hereda su criterio, no el vigente
+        // (decisión g). Un null acá no es un caso histórico —después del
+        // reset toda venta tiene config— sino que algo se rompió aguas
+        // arriba: se falla ruidoso (decisión P5). Pero SOLO en el camino
+        // manual: el webhook de reembolso (P3) no puede perder un hecho ya
+        // consumado por un dato de configuración faltante, así que no pasa
+        // por acá —no manda `validarVentaElegible`— y cuantiza más abajo
+        // con su propio fallback documentado.
+        if (!original.config_calculo) {
+          throw new BadRequestException(
+            `La venta ${params.ventaOriginalId} no tiene config_calculo congelada: no se ` +
+              `puede emitir una nota de crédito heredando su criterio de redondeo.`,
+          );
+        }
       }
+      const cfgOriginal = original.config_calculo;
 
       // Σ NCs previas bajo el lock: dos NCs concurrentes sobre la misma venta
       // se serializan y no pueden exceder el total juntas.
@@ -1007,13 +1023,27 @@ export class VentasService {
           totalImpuestos: '0',
           totalFinal: params.monto,
           comentario: params.comentario ?? null,
+          // La NC congela lo que heredó (decisión P4): así puede leerse
+          // sola, sin ir a buscar la venta que corrige.
+          configCalculo: cfgOriginal,
         }),
       );
 
       for (const linea of lineas) {
-        const totalLinea = new Decimal(linea.precioUnitario)
-          .times(linea.cantidad)
-          .toFixed(4);
+        // El VALOR se cuantiza al criterio heredado, con la misma `cuantizar`
+        // que usa el motor de precios (no una fórmula propia): el string
+        // sigue formateándose a 4 decimales, la escala de la columna
+        // (`venta_detalles.total_linea` es NUMERIC(18,4)). Sin
+        // `config_calculo` congelada —solo alcanzable acá vía el webhook,
+        // ver el guard arriba— no hay criterio que heredar: se persiste
+        // igual que antes de este fix, sin cuantizar a la escala de la
+        // moneda, para no perder el evento (decisión P3).
+        const bruto = new Decimal(linea.precioUnitario).times(linea.cantidad);
+        const totalLinea = (
+          cfgOriginal
+            ? cuantizar(bruto, cfgOriginal)
+            : bruto.toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+        ).toFixed(4);
         await manager.save(
           VentaDetalle,
           manager.create(VentaDetalle, {
@@ -1242,6 +1272,7 @@ export class VentasService {
     total_final: string;
     estado: string;
     tipo_documento_id: string | null;
+    config_calculo: ConfigCalculo | null;
   }> {
     const rows: {
       venta_id: string;
@@ -1251,8 +1282,10 @@ export class VentasService {
       total_final: string;
       estado: string;
       tipo_documento_id: string | null;
+      config_calculo: ConfigCalculo | null;
     }[] = await manager.query(
-      `SELECT venta_id, caja_id, moneda_id, canal, total_final, estado, tipo_documento_id
+      `SELECT venta_id, caja_id, moneda_id, canal, total_final, estado, tipo_documento_id,
+              config_calculo
        FROM ventas
        WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
        FOR UPDATE`,
@@ -1743,7 +1776,8 @@ export class VentasService {
       baseVentasSinImpuestos: v.base_ventas_sin_impuestos,
       // Sin esto el desglose congelado no se puede ORDENAR como se aplicó: el
       // orden de los pasos es del tenant y editable. `null` en las ventas
-      // anteriores al congelado y en las notas de crédito.
+      // anteriores al congelado; las notas de crédito congelan la suya
+      // propia —heredada de la venta que corrigen— desde esta tarea.
       configCalculo: v.config_calculo,
       comentario: v.comentario,
       fecha: v.fecha,
