@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import { ESCALA_COSTO } from '../../common/constants/escalas';
 import Decimal from 'decimal.js';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
@@ -224,7 +225,12 @@ export class InventarioService {
         params.costoUnitario,
       );
     } else if (esAjusteCosto) {
-      costoActualNuevo = new Decimal(params.costoUnitario!).toFixed(4);
+      // Escala de captura: el número lo tipeó una persona en el ajuste manual
+      // y se lleva a la escala de costo (ESCALA_COSTO). No mira modo_redondeo
+      // a propósito — esa perilla es la política de lo cobrado, no de captura.
+      costoActualNuevo = new Decimal(params.costoUnitario!).toFixed(
+        ESCALA_COSTO,
+      );
     }
 
     // El kardex congela lo que se PAGÓ en este movimiento, no el promedio.
@@ -350,10 +356,13 @@ export class InventarioService {
       // difiere más allá del 4º decimal se persiste idéntico al vigente y
       // dejaría en el kardex un ajuste que no cambió nada.
       const costoAnterior = rows[0].costo_actual;
-      const costoNuevo4 = costoNuevo.toFixed(4);
+      // Escala de captura: el número lo tipeó una persona en este ajuste y se
+      // lleva a la escala de costo (ESCALA_COSTO). No mira modo_redondeo a
+      // propósito — esa perilla es la política de lo cobrado, no de captura.
+      const costoNuevo4 = costoNuevo.toFixed(ESCALA_COSTO);
       if (
         costoAnterior != null &&
-        costoNuevo4 === new Decimal(costoAnterior).toFixed(4)
+        costoNuevo4 === new Decimal(costoAnterior).toFixed(ESCALA_COSTO)
       ) {
         throw new BadRequestException(
           'El costo nuevo es igual al vigente: no hay nada que ajustar',
@@ -378,7 +387,7 @@ export class InventarioService {
       return {
         movimientoId: mov.movimientoId,
         costoAnterior: mov.costoActualPrevio,
-        costoNuevo: costoNuevo.toFixed(4),
+        costoNuevo: costoNuevo4,
       };
     });
   }
@@ -400,14 +409,21 @@ export class InventarioService {
   ): string {
     const compra = new Decimal(costoCompra);
     if (stockAnterior.lessThanOrEqualTo(0) || costoActualPrevio == null) {
-      return compra.toFixed(4);
+      // Misma escala y mismo criterio que el CPP de abajo: el comentario de
+      // ese `toFixed` cubre el método entero, esta rama incluida.
+      return compra.toFixed(ESCALA_COSTO);
     }
     const valorPrevio = stockAnterior.mul(new Decimal(costoActualPrevio));
     const valorEntrante = cantidad.mul(compra);
+    // HALF_UP fijo a escala de costo (4): el CPP es una tasa interna —dinero por
+    // unidad base de stock—, no un monto cobrable, y por eso no mira modo_redondeo:
+    // esa perilla es la política de lo que se le cobra al cliente. Un tenant en
+    // FLOOR/CEIL sesgaría acá la valorización en cada compra, compuesto en cada
+    // promedio. La escala de la moneda tampoco aplica: hay costos por gramo (< $1).
     return valorPrevio
       .plus(valorEntrante)
       .div(stockAnterior.plus(cantidad))
-      .toFixed(4);
+      .toFixed(ESCALA_COSTO);
   }
 
   // ---------------------------------------------------------------------------
@@ -909,9 +925,13 @@ export class InventarioService {
       causaMermaId: r.causa_merma_id,
       causaNombre: r.causa_nombre,
       motivoDiferenciaId: r.motivo_diferencia_id,
+      // Proyección de lectura: cantidad × costo congelado del kardex, a escala de
+      // costo (4). Nadie paga este número y no se persiste. Redondearlo con la config
+      // vigente haría que el historial cambie al cambiar la preferencia del tenant;
+      // el formateo a moneda es de presentación, no de acá.
       costoPerdido:
         r.motivo === 'merma' && r.costo_unitario != null
-          ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(4)
+          ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(ESCALA_COSTO)
           : null,
       unidadMedida: r.unidad_medida,
       monedaId: r.moneda_id,

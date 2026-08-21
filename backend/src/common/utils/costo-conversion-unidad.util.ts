@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { ESCALA_COSTO } from '../constants/escalas';
 
 /**
  * Convierte un `costoUnitario` ingresado en una unidad distinta a la base,
@@ -22,8 +23,10 @@ export function convertirCostoUnitario(
   costoUnitario: string,
   cantidadConvertidaABase: string,
 ): string {
+  // Escala de costo (4), HALF_UP fijo: tasa interna, misma familia que el CPP —
+  // no mira modo_redondeo ni la escala de la moneda (hay costos por gramo).
   return new Decimal(cantidadIngresada)
     .mul(costoUnitario)
     .div(cantidadConvertidaABase)
-    .toFixed(4);
+    .toFixed(ESCALA_COSTO);
 }

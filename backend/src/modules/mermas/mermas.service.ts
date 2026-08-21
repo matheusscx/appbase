@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
+import { ESCALA_COSTO } from '../../common/constants/escalas';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
@@ -195,9 +196,13 @@ export class MermasService {
       });
 
       const costoCongelado = costoUnitarioParam ?? costoActual!;
+      // Proyección de lectura: cantidad × costo congelado del kardex, a escala de
+      // costo (4). Nadie paga este número y no se persiste. Redondearlo con la config
+      // vigente haría que el historial cambie al cambiar la preferencia del tenant;
+      // el formateo a moneda es de presentación, no de acá.
       const costoPerdido = new Decimal(cantidadStr)
         .mul(costoCongelado)
-        .toFixed(4);
+        .toFixed(ESCALA_COSTO);
 
       return {
         movimientoId: mov.movimientoId,
@@ -338,9 +343,13 @@ export class MermasService {
       itemNombre: r.item_nombre,
       cantidad: r.cantidad,
       costoUnitario: r.costo_unitario,
+      // Proyección de lectura: cantidad × costo congelado del kardex, a escala de
+      // costo (4). Nadie paga este número y no se persiste. Redondearlo con la config
+      // vigente haría que el historial cambie al cambiar la preferencia del tenant;
+      // el formateo a moneda es de presentación, no de acá.
       costoPerdido:
         r.costo_unitario != null
-          ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(4)
+          ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(ESCALA_COSTO)
           : null,
       causaMermaId: r.causa_merma_id,
       causaNombre: r.causa_nombre,

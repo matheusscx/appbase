@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
+import { ESCALA_COSTO } from '../../common/constants/escalas';
 import { Item } from './entities/item.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import {
@@ -3503,9 +3504,15 @@ export class ItemsService {
         bloqueante: ing.bloqueante ?? true,
       });
     }
+    // Costo por unidad de receta/combo: tasa interna a escala de costo (4), HALF_UP
+    // fijo — mismo criterio que el CPP. La MISMA cuenta vive dos veces: acá y en
+    // validarYCostear{Ingredientes,Componentes} (el camino de escritura al crear o
+    // editar). Si cambiás el criterio en una, cambialo en la otra: la bandeja de
+    // desfases compara ambos resultados con eq4 y un criterio distinto la hace
+    // proponer o esconder desfases fantasma.
     return {
       costoActual: costoTotal
-        .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+        .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
         .toString(),
       ingredientes: detalle,
     };
@@ -3576,8 +3583,16 @@ export class ItemsService {
         bloqueante: c.bloqueante ?? true,
       });
     }
+    // Costo por unidad de receta/combo: tasa interna a escala de costo (4), HALF_UP
+    // fijo — mismo criterio que el CPP. La MISMA cuenta vive dos veces: acá y en
+    // validarYCostear{Ingredientes,Componentes} (el camino de escritura al crear o
+    // editar). Si cambiás el criterio en una, cambialo en la otra: la bandeja de
+    // desfases compara ambos resultados con eq4 y un criterio distinto la hace
+    // proponer o esconder desfases fantasma.
     return {
-      costoActual: costoTotal.toDecimalPlaces(4).toString(),
+      costoActual: costoTotal
+        .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
+        .toString(),
       componentes: detalle,
     };
   }
@@ -3691,10 +3706,15 @@ export class ItemsService {
     // Preserva margen %: costoNuevo × precioViejo / costoViejo
     // (= costoNuevo / (1 − margenViejo)). Null si costoViejo ≤ 0.
     if (costoViejo.lessThanOrEqualTo(0)) return null;
+    // Propuesta de precio de lista que preserva el margen: tasa, no monto (el
+    // precio unitario tiene decimales propios — el propio SII da 6 a PrcItem).
+    // Escala 4 solo para viajar en el DTO; el precio real lo decide el usuario al
+    // aplicar el desfase. Cuantizarlo a la escala de la moneda sería UX del
+    // prefill, no una corrección.
     return costoNuevo
       .mul(precioViejo)
       .div(costoViejo)
-      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+      .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP);
   }
 
   /**
@@ -3876,7 +3896,15 @@ export class ItemsService {
         new Decimal(ing.costo_actual ?? '0').mul(cantidadBase),
       );
     }
-    return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
+    // Costo por unidad de receta/combo: tasa interna a escala de costo (4), HALF_UP
+    // fijo — mismo criterio que el CPP. La MISMA cuenta vive dos veces: acá y en
+    // validarYCostear{Ingredientes,Componentes} (el camino de escritura al crear o
+    // editar). Si cambiás el criterio en una, cambialo en la otra: la bandeja de
+    // desfases compara ambos resultados con eq4 y un criterio distinto la hace
+    // proponer o esconder desfases fantasma.
+    return total
+      .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
+      .toFixed(ESCALA_COSTO);
   }
 
   private async filasDesfaseRecetas(
@@ -4014,7 +4042,15 @@ export class ItemsService {
     for (const c of comps) {
       total = total.plus(new Decimal(c.costo_actual ?? '0').mul(c.cantidad));
     }
-    return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
+    // Costo por unidad de receta/combo: tasa interna a escala de costo (4), HALF_UP
+    // fijo — mismo criterio que el CPP. La MISMA cuenta vive dos veces: acá y en
+    // validarYCostear{Ingredientes,Componentes} (el camino de escritura al crear o
+    // editar). Si cambiás el criterio en una, cambialo en la otra: la bandeja de
+    // desfases compara ambos resultados con eq4 y un criterio distinto la hace
+    // proponer o esconder desfases fantasma.
+    return total
+      .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
+      .toFixed(ESCALA_COSTO);
   }
 
   /**

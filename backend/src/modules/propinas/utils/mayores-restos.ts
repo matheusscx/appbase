@@ -39,6 +39,11 @@ export function repartirMayoresRestos(
   }
 
   const factor = new Decimal(10).pow(decimales);
+  // El monto del grupo se lleva a unidades mínimas ENTERAS de la moneda
+  // (decimales congelados en la liquidación) con HALF_UP fijo, y recién ahí se
+  // reparte. El reparto (floor + mayores restos) garantiza Σ partes = total con
+  // cualquier modo: modo_redondeo no entra acá a propósito — en un apportionment
+  // no hay "modo" que elegir, solo el desempate, que es determinista por id.
   const unidades = new Decimal(montoGrupo || '0')
     .times(factor)
     .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
