@@ -7,6 +7,10 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import type {
+  ModoRedondeo,
+  NivelRedondeo,
+} from '../../calculo-precios/calculo-precios.engine';
 
 @Entity('tenants')
 @Check(
@@ -42,7 +46,7 @@ export class Tenant {
   escalaCalculo: number;
 
   @Column({ name: 'modo_redondeo', default: 'HALF_UP' })
-  modoRedondeo: string;
+  modoRedondeo: ModoRedondeo;
 
   /**
    * Nivel al que se cuantiza a la escala de la moneda: 'linea' cuantiza cada
@@ -51,7 +55,7 @@ export class Tenant {
    * P1 del 2026-08-20: 'documento' está frenado para monedas de 0 decimales.
    */
   @Column({ name: 'nivel_redondeo', type: 'text', default: 'linea' })
-  nivelRedondeo: string;
+  nivelRedondeo: NivelRedondeo;
 
   @Column({
     name: 'monto_tolerancia',

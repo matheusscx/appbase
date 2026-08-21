@@ -8,6 +8,7 @@ import {
 import { Db } from '../../common/db/db.service';
 import { TenantsService } from './tenants.service';
 import { Tenant } from './entities/tenant.entity';
+import type { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
 import { Usuario } from '../users/usuario.entity';
 import { TenantModulo } from './entities/tenant-modulo.entity';
@@ -613,7 +614,7 @@ describe('TenantsService', () => {
   describe('updatePreferenciasFinancieras', () => {
     // Combinación válida de base para los tests de la matriz: se pisa solo el
     // campo bajo prueba en cada caso.
-    const prefsValidas = {
+    const prefsValidas: UpdatePreferenciasFinancierasDto = {
       calculoDescuentos: 'base',
       calculoRecargos: 'base',
       formula: ['descuentos', 'recargos', 'impuestos'],
@@ -634,7 +635,7 @@ describe('TenantsService', () => {
         { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
       ]);
 
-      const dto = {
+      const dto: UpdatePreferenciasFinancierasDto = {
         calculoDescuentos: 'compuesto',
         calculoRecargos: 'base',
         formula: ['recargos', 'descuentos', 'impuestos'],

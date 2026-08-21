@@ -1,6 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Decimal from 'decimal.js';
-import { modoToRounding } from '../calculo-precios/calculo-precios.engine';
+import {
+  modoToRounding,
+  type ModoRedondeo,
+} from '../calculo-precios/calculo-precios.engine';
 import {
   ReembolsoAprobadoEvento,
   ReembolsoCallbackHandler,
@@ -27,7 +30,7 @@ import { MonedasService } from '../monedas/monedas.service';
  * perder por un dato de configuración ausente; fallar acá sería el mismo
  * error que P3 prohíbe, solo que por otra puerta.
  */
-const MODO_REDONDEO_FALLBACK = 'HALF_UP';
+const MODO_REDONDEO_FALLBACK: ModoRedondeo = 'HALF_UP';
 
 /**
  * Callback in-process de reembolsos: cuando la pasarela aprueba un reembolso

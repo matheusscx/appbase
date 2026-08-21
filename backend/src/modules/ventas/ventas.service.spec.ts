@@ -8,6 +8,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { Db } from '../../common/db/db.service';
 import { VentasService } from './ventas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
+import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
@@ -70,7 +71,7 @@ const UNIDADES_CATALOGO = [
  * convertir a moneda oficial y para calcular— y si las dos copias derivaran, el
  * test estaría probando un escenario que no existe.
  */
-const mockConfigCalculo = {
+const mockConfigCalculo: ConfigCalculo = {
   formula: ['descuentos', 'recargos', 'impuestos'],
   calculoDescuentos: 'base',
   calculoRecargos: 'base',

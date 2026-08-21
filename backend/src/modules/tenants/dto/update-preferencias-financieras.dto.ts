@@ -10,6 +10,10 @@ import {
 } from 'class-validator';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import type {
+  ModoRedondeo,
+  NivelRedondeo,
+} from '../../calculo-precios/calculo-precios.engine';
 
 export class UpdatePreferenciasFinancierasDto {
   @IsIn(['base', 'compuesto'])
@@ -30,7 +34,7 @@ export class UpdatePreferenciasFinancierasDto {
   escalaCalculo: number;
 
   @IsIn(['HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL'])
-  modoRedondeo: string;
+  modoRedondeo: ModoRedondeo;
 
   /**
    * 'linea' cuantiza cada línea y el total es suma de enteros; 'documento' deja
@@ -39,7 +43,7 @@ export class UpdatePreferenciasFinancierasDto {
    * decimales — ver `TenantsService.updatePreferenciasFinancieras`.
    */
   @IsIn(['linea', 'documento'])
-  nivelRedondeo: string;
+  nivelRedondeo: NivelRedondeo;
 
   /**
    * Tolerancia de descuadre del arqueo. Nunca negativa: una tolerancia negativa

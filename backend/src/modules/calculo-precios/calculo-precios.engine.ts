@@ -70,15 +70,31 @@ export interface LineaResuelta {
   impuestos: ImpuestoResuelto[];
 }
 
+/**
+ * Los cuatro modos que `modoToRounding` sabe traducir. Es unión y no `string`
+ * porque el `default:` de esa traducción cae a `HALF_UP`: escrito como `string`,
+ * un typo no falla en compilación ni en runtime — redondea distinto, en silencio,
+ * y sobre plata. La misma razón vale para `NivelRedondeo`, donde el typo cae al
+ * comportamiento de `'linea'`.
+ *
+ * El valor entra por `UpdatePreferenciasFinancierasDto` (`@IsIn`) y `nivel_redondeo`
+ * tiene además un CHECK en la tabla. Lo que la unión agrega es el tramo interno: de
+ * la preferencia del tenant hasta el motor, nadie puede inventar un quinto modo sin
+ * que el compilador lo diga.
+ */
+export type ModoRedondeo = 'HALF_UP' | 'HALF_EVEN' | 'FLOOR' | 'CEIL';
+
+/** Ver `ModoRedondeo`. `'documento'` es la regla mexicana; ADR/spec de redondeo. */
+export type NivelRedondeo = 'linea' | 'documento';
+
 export interface ConfigCalculo {
   /** Orden de los tres pasos, p.ej. ['descuentos','recargos','impuestos']. */
   formula: string[];
   calculoDescuentos: string; // 'base' | 'compuesto'
   calculoRecargos: string; // 'base' | 'compuesto'
   escalaCalculo: number;
-  modoRedondeo: string; // 'HALF_UP' | 'HALF_EVEN' | 'FLOOR' | 'CEIL'
-  /** 'linea' | 'documento'. Ver ADR/spec de redondeo. */
-  nivelRedondeo: string;
+  modoRedondeo: ModoRedondeo;
+  nivelRedondeo: NivelRedondeo;
   /**
    * Minor unit de la moneda OFICIAL del tenant: la escala a la que se cuantiza
    * todo monto cobrado al cerrar el documento. Es dato derivado congelado, no
@@ -223,7 +239,7 @@ const ZERO = new Decimal(0);
  * un solo lugar: duplicado el `switch`, el modo nuevo andaría en el cálculo y se
  * caería al default en la conversión.
  */
-export function modoToRounding(modo: string): Decimal.Rounding {
+export function modoToRounding(modo: ModoRedondeo): Decimal.Rounding {
   switch (modo) {
     case 'HALF_EVEN':
       return Decimal.ROUND_HALF_EVEN;

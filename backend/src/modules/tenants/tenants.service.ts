@@ -12,6 +12,10 @@ import { Db } from '../../common/db/db.service';
 import { Usuario } from '../users/usuario.entity';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
+import type {
+  ModoRedondeo,
+  NivelRedondeo,
+} from '../calculo-precios/calculo-precios.engine';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
 import { TenantModulo } from './entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
@@ -1396,8 +1400,8 @@ export class TenantsService {
     calculoRecargos: string;
     formula: string[];
     escalaCalculo: number;
-    modoRedondeo: string;
-    nivelRedondeo: string;
+    modoRedondeo: ModoRedondeo;
+    nivelRedondeo: NivelRedondeo;
     montoTolerancia: string;
   }> {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
@@ -1426,8 +1430,8 @@ export class TenantsService {
     calculoRecargos: string;
     formula: string[];
     escalaCalculo: number;
-    modoRedondeo: string;
-    nivelRedondeo: string;
+    modoRedondeo: ModoRedondeo;
+    nivelRedondeo: NivelRedondeo;
     montoTolerancia: string;
   }> {
     // Validate no duplicates (DTO only validates each element is valid, not uniqueness)

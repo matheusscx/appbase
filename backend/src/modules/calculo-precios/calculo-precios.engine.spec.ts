@@ -1474,7 +1474,10 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     });
 
     it('con nivel documento las líneas conservan decimales y solo el total se cuantiza', () => {
-      const cfgDocumento = { ...cfgCLP, nivelRedondeo: 'documento' };
+      const cfgDocumento: ConfigCalculo = {
+        ...cfgCLP,
+        nivelRedondeo: 'documento',
+      };
       const r = calcularVenta({ ...ventaDelMedioPeso(), config: cfgDocumento });
       // La línea sigue fina: 14.250 × 19% = 2.707,5, sin cuantizar.
       expect(new Decimal(r.lineas[0].impuestoAplicado).eq('2707.5')).toBe(true);
@@ -1494,7 +1497,10 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       // (3.000,5 → 3.001) distinto de sus propias partes ya cuantizadas
       // (3.000 − 0 + 0 + 0 = 3.000): la identidad del documento se rompería.
       // Derivado da 3.000, que es lo correcto.
-      const cfgDocumento = { ...cfgCLP, nivelRedondeo: 'documento' };
+      const cfgDocumento: ConfigCalculo = {
+        ...cfgCLP,
+        nivelRedondeo: 'documento',
+      };
       const r = calcularVenta({
         config: cfgDocumento,
         metodoPagoId: null,

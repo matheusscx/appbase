@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import type { ModoRedondeo } from '../calculo-precios/calculo-precios.engine';
 import { TenantMoneda } from './entities/tenant-moneda.entity';
 import { UpdateTenantMonedaDto } from './dto/update-tenant-moneda.dto';
 
@@ -149,10 +150,14 @@ export class MonedasService {
   async decimalesDeLaVenta(
     ventaId: string,
     tenantId: string,
-  ): Promise<{ decimales: number; modoRedondeo: string | null }> {
+  ): Promise<{ decimales: number; modoRedondeo: ModoRedondeo | null }> {
     const rows: {
       decimales: number | string;
-      config_calculo: { modoRedondeo?: string } | null;
+      // `config_calculo` es JSONB: lo que vuelve de la base no lo garantiza
+      // ningún tipo, se relee casteado. El cast vive acá —una vez, en el borde—
+      // y no repartido como `string` aguas abajo, que era lo que dejaba a un
+      // modo inventado viajar hasta el motor sin que nadie lo notara.
+      config_calculo: { modoRedondeo?: ModoRedondeo } | null;
     }[] = await this.db.query(
       `SELECT m.decimales, v.config_calculo
          FROM ventas v

@@ -13,6 +13,7 @@ import {
   type AdvertenciaPrecio,
   type ConfigCalculo,
   type ImpuestoResuelto,
+  type ModoRedondeo,
   type LineaResuelta,
   type ReglaResuelta,
   type ResultadoVenta,
@@ -311,7 +312,7 @@ export class CalculoPreciosService {
     descuentoMap: Map<string, ReglaResuelta>,
     recargoMap: Map<string, ReglaResuelta>,
     tasaMap: Map<string, string>,
-    modoRedondeo: string,
+    modoRedondeo: ModoRedondeo,
   ): LineaResuelta {
     // La cantidad ya se validó en `calcular()`, antes de cargar nada.
     // `cargarBasePorIds` ya validó pertenencia al tenant (404 si falta), así
@@ -407,7 +408,7 @@ export class CalculoPreciosService {
     precio: string,
     monedaId: string,
     tasaMap: Map<string, string>,
-    modoRedondeo: string,
+    modoRedondeo: ModoRedondeo,
   ): string {
     const tasa = new Decimal(tasaMap.get(monedaId) ?? '1');
     return new Decimal(precio)
