@@ -88,7 +88,7 @@ esquema.
 
 ## Backend
 
-- [ ] **1. Spike medido — dónde encaja el prorrateo.** Tres cruces que el diseño no puede
+- [x] **1. Spike medido — dónde encaja el prorrateo.** ✅ **corrido el 2026-08-21; resultados abajo.** Tres cruces que el diseño no puede
       suponer, y cada respuesta va con **el número medido**, no con prosa:
       - `nivelRedondeo` `'linea'` vs `'documento'`: ¿el prorrateo cuantiza al repartir, o
         reparte fino y cuantiza al cerrar? El motor ya tiene el invariante *"el total se
@@ -102,6 +102,73 @@ esquema.
         (894 / 751 / 143); falta el caso de monto fijo**, que es donde (a) muerde.
       - **Salida del spike:** las tres respuestas escritas, con sus números. Si alguna
         contradice una decisión de la spec → **parar y preguntar.**
+
+### Resultado del spike (2026-08-21)
+
+Medido corriendo el motor real sobre escenarios armados, más un barrido. El scratch no se
+commiteó; lo que importa son los números.
+
+**Línea base — el bug con número.** Dos líneas afectas de neto `1.000` en CLP, IVA 19%,
+descuento global del 10%:
+
+| | |
+|---|---|
+| `subtotalNeto` | 2.000 |
+| `totalDescuentos` | 200 |
+| `totalImpuestos` | **380** |
+| `totalFinal` | 2.180 |
+| IVA de la base realmente cobrada (1.800) | **342** |
+
+38 pesos declarados de más sobre una venta de 2.180.
+
+**Cruce 1 — el prorrateo tiene que repartir el residuo, no es opcional.** Netos
+`333 / 333 / 334`, descuento global de `100`:
+
+- cuantizando cada parte: `33 + 33 + 33 = 99` → **falta 1**
+- repartiendo fino y cuantizando al cerrar: `33,3 + 33,3 + 33,4 = 100`
+
+Da igual con `nivelRedondeo` en `'linea'` o en `'documento'`. O sea: **la regla del residuo
+(decisión d) no es un refinamiento, es lo que hace que el reparto sume el descuento.**
+
+**Cruce 2 — el tope funciona, y muestra el bug en su forma extrema.** Una línea de neto
+`1.000` (total con IVA `1.190`) con un descuento fijo de `2.000`: el tope lo recorta a `1.190`
+y avisa (*"no se aplicó completo porque superaba el monto disponible"*), `totalFinal` queda en
+`0` — **y `totalImpuestos` queda en `190`.** La venta cobra cero y declara 190 de IVA. El tope
+no hay que tocarlo; lo que falta es que el impuesto siga al descuento.
+
+**Cruce 3 — acá el spike contradice la spec.** ⛔ Ver el bloque de abajo.
+
+### ⛔ Bloqueante: las decisiones (a) y (e) se contradicen
+
+La spec dice, en el "qué obliga" de (e): *"Verificado que no hay contradicción con (a): con un
+`%`, derivar por resta desde la góndola descontada y aplicar `tasa × base` dan el mismo número
+(894 / 751 / 143)."* **Eso era cierto para ese caso y falso en general** — se generalizó desde
+un ejemplo sin contar, que es un error que este repo ya tiene documentado.
+
+Barrido de brutos `100..3000` × descuentos fijos `{1, 7, 100, 333}` = **11.604 casos**:
+**1.815 difieren (15,6%).** Ejemplos:
+
+```
+bruto 104 − 1 = 103  → base 87; por resta = 16, tasa × base = 17
+bruto 104 − 7 =  97  → base 82; por resta = 15, tasa × base = 16
+bruto 103 − 100 = 3  → base  3; por resta =  0, tasa × base =  1
+```
+
+**Por qué importa:** la decisión (a) **ancla** lo que el cliente paga. En una línea con
+`precio_incluye_impuesto`, el anclado es el bruto. Derivar el IVA por resta da
+`base + IVA = total` **siempre, por construcción**. Aplicar `tasa × base` —que es lo que la
+decisión (e) llama "el camino normal"— rompe esa identidad en el 15,6% de los casos:
+`87 + 17 = 104`, sobre un total de `103`.
+
+Y esa identidad es justo la que el cierre del documento protege hoy (*"el total NO se cuantiza
+aparte, se DERIVA de sus componentes ya cuantizados"*).
+
+**Lo que el spike sugiere, y que el owner tiene que confirmar:** en (e) el cierre a góndola no
+se *apaga*, se le **mueve el ancla** — de "el precio de etiqueta" a "el precio de etiqueta
+menos la parte prorrateada del descuento". El mecanismo de derivar el IVA por resta se
+mantiene; lo que cambia es contra qué se resta. **No se toca código hasta que esto esté
+decidido.**
+
 - [ ] **2. El descuento global se prorratea por peso a las líneas** y el impuesto se recalcula
       por línea sobre la base nueva — decisión (b). No agregar un paso `impuestos` a nivel
       documento: no existe una tasa única para el neto agregado cuando las líneas llevan IVA
