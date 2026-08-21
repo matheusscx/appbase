@@ -153,9 +153,22 @@ git commit -m "refactor(redondeo): la escala de costo tiene nombre y cada sitio 
 
 ### Task 2: CHECK en `moneda.decimales`
 
+> ⚠️ **Corregido el 2026-08-20, antes de ejecutar.** La primera versión de esta tarea
+> pedía el CHECK en `startup-pos.sql`. **Eso no habría hecho nada:** el esquema real lo
+> construye TypeORM con `synchronize` desde las entities (`app.module.ts:271`), y
+> `startup-pos.sql` es documentación de referencia que **no ejecuta nadie** — ni el compose
+> ni `reset-db.sh` (así lo dice el docblock de `backend/test/esquema.e2e-spec.ts`). Los
+> CHECK del repo se declaran con `@Check` en la entity: hay 5, y
+> `chk_movimientos_caja_monto_no_negativo` está en la base por esa vía
+> (`movimiento-caja.entity.ts:19`). El mismo criterio vale para la Task 3.
+
 **Files:**
-- Modify: `startup-pos.sql` (tabla `moneda`)
-- Test: `backend/test/monedas.e2e-spec.ts` (o el spec de monedas existente)
+- Modify: `backend/src/modules/monedas/entities/moneda.entity.ts` (decorador `@Check`),
+  `startup-pos.sql` (tabla `moneda`, **como documentación de referencia**, para que no
+  quede describiendo un esquema que no es)
+- Test: `backend/test/esquema.e2e-spec.ts` — el spec que ya mide invariantes del esquema
+  contra Postgres. **No crear un archivo nuevo**: el repo prohíbe crear uno si la
+  implementación cabe en uno existente.
 
 **Interfaces:**
 - Produces: la garantía `0 ≤ moneda.decimales ≤ 4`, de la que depende toda la Fase 2 — si
@@ -164,51 +177,72 @@ git commit -m "refactor(redondeo): la escala de costo tiene nombre y cada sitio 
 
 - [ ] **Step 1: Escribir el test que falla**
 
+En `backend/test/esquema.e2e-spec.ts`, junto a las invariantes que ya viven ahí:
+
 ```typescript
-// backend/test/monedas.e2e-spec.ts
-it('la base rechaza una moneda con más decimales que la escala persistida', async () => {
+it('ninguna moneda puede tener más decimales de los que la columna de dinero guarda', async () => {
+  // Toda columna de dinero es NUMERIC(18,4). Una moneda con más decimales
+  // devolvería el recorte final al cast de Postgres —su regla, fuera de
+  // modo_redondeo—, que es justo lo que el frente de redondeo vino a cerrar.
   await expect(
-    dataSource.query(
+    ds.query(
       `INSERT INTO moneda (nombre, codigo_iso, codigo_numero, simbolo, decimales)
-       VALUES ('Dinar de prueba', 'BHD', '048', 'BD', 3 + 3)`,
+       VALUES ('Moneda de prueba', 'XTS', '963', 'X', 6)`,
     ),
   ).rejects.toThrow(/chk_moneda_decimales/);
+
+  // Y las sembradas cumplen: si alguna no cumpliera, el CHECK no habría podido
+  // crearse y este test pasaría por el motivo equivocado.
+  const fuera = await ds.query(
+    `SELECT codigo_iso FROM moneda WHERE decimales < 0 OR decimales > 4`,
+  );
+  expect(fuera).toEqual([]);
 });
 ```
 
 - [ ] **Step 2: Correr el test y verificar que falla**
 
-Run: `cd backend && npx jest --config test/jest-e2e.json test/monedas.e2e-spec.ts -t "más decimales"`
+Run: `cd backend && npx jest --config test/jest-e2e.json test/esquema.e2e-spec.ts -t "más decimales de los que la columna"`
 Expected: FAIL — hoy el INSERT entra sin error.
 
-- [ ] **Step 3: Agregar el CHECK**
+- [ ] **Step 3: Agregar el CHECK en la entity**
+
+```typescript
+// backend/src/modules/monedas/entities/moneda.entity.ts, sobre la clase
+// junto a @Entity(), igual que movimiento-caja.entity.ts:19
+/**
+ * El tope es 4 porque toda columna de dinero es NUMERIC(18,4): una moneda con
+ * más decimales haría que el recorte final lo decidiera el cast de Postgres,
+ * con su propia regla y fuera de modo_redondeo. Las 3 sembradas cumplen
+ * (CLP 0, USD 2, UF 4). Subir el tope exige subir la escala de las columnas.
+ */
+@Check('chk_moneda_decimales', '"decimales" BETWEEN 0 AND 4')
+```
+
+Y reflejarlo en `startup-pos.sql` (tabla `moneda`), que es **documentación de
+referencia**: no lo ejecuta nadie, pero si no se actualiza queda describiendo un esquema
+que no existe.
 
 ```sql
--- startup-pos.sql, tabla moneda
 CONSTRAINT chk_moneda_decimales CHECK ("decimales" BETWEEN 0 AND 4),
-```
-
-```
--- Comentario sobre la restricción, en el mismo archivo:
--- El tope es 4 porque toda columna de dinero es NUMERIC(18,4): una moneda con
--- más decimales haría que el recorte final lo decidiera el cast de Postgres,
--- con su propia regla y fuera de modo_redondeo. Las 3 sembradas cumplen
--- (CLP 0, USD 2, UF 4). Subir el tope exige subir la escala de las columnas.
 ```
 
 - [ ] **Step 4: Resetear la base y correr el test**
 
+⚠️ Guardá el `.ts` **antes** de resetear y esperá a que el backend recompile: el compose
+tiene el fuente bind-mounteado y `synchronize` aplica el CHECK al arrancar.
+
 ```bash
 ./scripts/reset-db.sh
-cd backend && npx jest --config test/jest-e2e.json test/monedas.e2e-spec.ts -t "más decimales"
+cd backend && npx jest --config test/jest-e2e.json test/esquema.e2e-spec.ts
 ```
-Expected: PASS.
+Expected: PASS — el test nuevo y **los dos que ya vivían en ese archivo**.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add startup-pos.sql backend/test/monedas.e2e-spec.ts
-git commit -m "feat(redondeo): la base no acepta una moneda con más decimales de los que la columna guarda"
+git add backend/src/modules/monedas startup-pos.sql backend/test/esquema.e2e-spec.ts
+git commit -m "feat(redondeo): ninguna moneda puede declarar más decimales de los que la columna guarda"
 ```
 
 ---
@@ -246,10 +280,19 @@ Expected: FAIL — la columna no existe.
 
 - [ ] **Step 3: Agregar la columna en los cuatro lugares que la declaran**
 
+⚠️ **Igual que en la Task 2: la entity es la que crea el esquema** (`synchronize`), y
+`startup-pos.sql` es documentación que se actualiza para no quedar mintiendo. El CHECK del
+dominio de valores va con `@Check` en la entity, no solo en el SQL.
+
 ```sql
--- startup-pos.sql, tabla tenants, junto a modo_redondeo
+-- startup-pos.sql, tabla tenants, junto a modo_redondeo (DOCUMENTACIÓN)
 "nivel_redondeo" TEXT NOT NULL DEFAULT 'linea',
 CONSTRAINT chk_tenants_nivel_redondeo CHECK ("nivel_redondeo" IN ('linea','documento')),
+```
+
+```typescript
+// tenant.entity.ts, sobre la clase, junto a los demás decoradores de la entity
+@Check('chk_tenants_nivel_redondeo', `"nivel_redondeo" IN ('linea','documento')`)
 ```
 
 ```typescript
