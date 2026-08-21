@@ -65,6 +65,8 @@ export class MonedasService {
               m.separador_decimal,
               m.separador_miles,
               m.locale,
+              -- La moneda del PAIS. No es la misma nocion que es_default, que
+              -- es la que decide la escala de la plata: ver decimalesOficiales.
               (m.moneda_id = p.moneda_oficial_id) AS es_oficial,
               COALESCE(tm.es_default, false) AS es_default,
               COALESCE(tm.habilitada, false) AS habilitada,
@@ -108,6 +110,21 @@ export class MonedasService {
    * cabecera). El motor de precios la usa para congelar la escala a la que se
    * cuantiza el documento (`ConfigCalculo.decimalesMoneda`). Una consulta, no una
    * por línea: se llama una vez por request, no por ítem.
+   *
+   * ⚠️ **En este service "oficial" nombra DOS cosas distintas, y ésta es la que
+   * decide el redondeo de la plata.** La otra es `pais.moneda_oficial_id` —la
+   * moneda del país, que el tenant no elige— y con ella trabajan `listar()` (la
+   * columna `es_oficial`) y los guards de `updateMoneda`. **Pueden diferir:**
+   * `setDefault` acepta cualquier moneda disponible en el país, no solo la
+   * oficial de ese país, así que un tenant puede quedar con `es_default` en una
+   * y `moneda_oficial_id` en otra.
+   *
+   * Que acá gobierne `es_default` es deliberado y consistente con el resto del
+   * camino de la plata: es la misma moneda a la que `ventas` convierte y
+   * persiste los totales, así que la escala de cuantización y la moneda de los
+   * montos persistidos son siempre la misma. Lo que NO está resuelto es si el
+   * producto quiere que las dos nociones puedan divergir — es decisión del owner
+   * y vive en `docs/agent/pendientes.md`; no se cambia de arrastre acá.
    */
   async decimalesOficiales(tenantId: string): Promise<number> {
     const rows: { decimales: number | string }[] = await this.db.query(

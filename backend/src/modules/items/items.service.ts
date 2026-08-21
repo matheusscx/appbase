@@ -3683,16 +3683,19 @@ export class ItemsService {
 
   private eq4(a: string | Decimal, b: string | Decimal): boolean {
     return new Decimal(a)
-      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
-      .eq(new Decimal(b).toDecimalPlaces(4, Decimal.ROUND_HALF_UP));
+      .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
+      .eq(new Decimal(b).toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP));
   }
 
   private margenPct(precio: Decimal, costo: Decimal): Decimal | null {
     if (precio.lessThanOrEqualTo(0)) return null;
+    // Un margen es un RATIO, no plata: toma `ESCALA_COSTO` porque se deriva del
+    // costo y la bandeja lo muestra al lado del costo del que sale, no porque
+    // sea un monto costeado.
     return precio
       .minus(costo)
       .div(precio)
-      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+      .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP);
   }
 
   private precioSugerido(
@@ -3975,7 +3978,9 @@ export class ItemsService {
       // Sin costo proponible (unidad rota en algún ingrediente) la receta se
       // omite de la bandeja, en vez de tumbar la respuesta para todas.
       if (propuesto === null) continue;
-      const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(4);
+      const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(
+        ESCALA_COSTO,
+      );
       if (this.eq4(propuesto, cacheado)) continue;
       if (
         cab.costo_propuesto_omitido != null &&
@@ -3997,10 +4002,10 @@ export class ItemsService {
         nombre: cab.nombre,
         costoActual: cacheado,
         costoPropuesto: propuesto,
-        deltaCosto: costoPropD.minus(costoActualD).toFixed(4),
+        deltaCosto: costoPropD.minus(costoActualD).toFixed(ESCALA_COSTO),
         precioBase: precio.toFixed(4),
-        margenPctActual: mAct?.toFixed(4) ?? null,
-        margenPctPropuesto: mProp?.toFixed(4) ?? null,
+        margenPctActual: mAct?.toFixed(ESCALA_COSTO) ?? null,
+        margenPctPropuesto: mProp?.toFixed(ESCALA_COSTO) ?? null,
         precioSugerido: sug?.toFixed(4) ?? null,
         afectados: lista.map((i) => ({
           itemId: i.ingrediente_item_id,
@@ -4131,7 +4136,9 @@ export class ItemsService {
       // vivos no tiene costo que proponer.
       if (!lista.length) continue;
       const propuesto = this.costoPropuestoCombo(lista);
-      const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(4);
+      const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(
+        ESCALA_COSTO,
+      );
       if (this.eq4(propuesto, cacheado)) continue;
       if (
         cab.costo_propuesto_omitido != null &&
@@ -4150,12 +4157,12 @@ export class ItemsService {
         nombre: cab.nombre,
         costoActual: cacheado,
         costoPropuesto: propuesto,
-        deltaCosto: costoPropD.minus(costoActualD).toFixed(4),
+        deltaCosto: costoPropD.minus(costoActualD).toFixed(ESCALA_COSTO),
         precioBase: precio.toFixed(4),
         margenPctActual:
-          this.margenPct(precio, costoActualD)?.toFixed(4) ?? null,
+          this.margenPct(precio, costoActualD)?.toFixed(ESCALA_COSTO) ?? null,
         margenPctPropuesto:
-          this.margenPct(precio, costoPropD)?.toFixed(4) ?? null,
+          this.margenPct(precio, costoPropD)?.toFixed(ESCALA_COSTO) ?? null,
         precioSugerido:
           this.precioSugerido(precio, costoActualD, costoPropD)?.toFixed(4) ??
           null,

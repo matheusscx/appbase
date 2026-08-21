@@ -238,19 +238,30 @@ const ZERO = new Decimal(0);
  * el motor vea la línea. Vive acá igual para que agregar un modo nuevo se haga en
  * un solo lugar: duplicado el `switch`, el modo nuevo andaría en el cálculo y se
  * caería al default en la conversión.
+ *
+ * Es un `Record` y no un `switch` con `default:` para que esa promesa la sostenga
+ * el compilador: sumar un modo a `ModoRedondeo` sin mapearlo acá NO compila,
+ * mientras que un `default:` se lo tragaba redondeando distinto en silencio.
  */
+const ROUNDING_POR_MODO: Record<ModoRedondeo, Decimal.Rounding> = {
+  HALF_UP: Decimal.ROUND_HALF_UP,
+  HALF_EVEN: Decimal.ROUND_HALF_EVEN,
+  FLOOR: Decimal.ROUND_FLOOR,
+  CEIL: Decimal.ROUND_CEIL,
+};
+
+/**
+ * El modo que gobierna cuando NO hay uno que elegir. Dos casos, y los dos apuntan
+ * acá a propósito: un `config_calculo` ausente en la venta que un reembolso
+ * corrige (ver `VentasReembolsoHandler`), y un valor que el tipo no puede
+ * garantizar en runtime porque salió del JSONB. Antes el segundo vivía en el
+ * `default:` de la función y el primero en una constante del handler: mismo valor,
+ * dos lugares, y nada que los mantuviera sincronizados.
+ */
+export const MODO_REDONDEO_DEFAULT: ModoRedondeo = 'HALF_UP';
+
 export function modoToRounding(modo: ModoRedondeo): Decimal.Rounding {
-  switch (modo) {
-    case 'HALF_EVEN':
-      return Decimal.ROUND_HALF_EVEN;
-    case 'FLOOR':
-      return Decimal.ROUND_FLOOR;
-    case 'CEIL':
-      return Decimal.ROUND_CEIL;
-    case 'HALF_UP':
-    default:
-      return Decimal.ROUND_HALF_UP;
-  }
+  return ROUNDING_POR_MODO[modo] ?? ROUNDING_POR_MODO[MODO_REDONDEO_DEFAULT];
 }
 
 function redondear(d: Decimal, cfg: ConfigCalculo): Decimal {
