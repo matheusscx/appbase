@@ -681,23 +681,53 @@ Expected: FAIL — hoy `nivelRedondeo` no se lee en `calcularVenta`.
 
 - [ ] **Step 3: Implementar**
 
+> ⚠️ **Corregido el 2026-08-20, durante la ejecución.** La primera versión cuantizaba los
+> **cinco** totales por separado, incluido `totalFinal`. **Eso rompe la identidad**
+> `MntTotal = MntNeto − Descuentos + Recargos + IVA`: el implementador lo frenó con un
+> contraejemplo (dos líneas, un recargo fijo de `0,1` y un impuesto que aporta `0,4`: los
+> cuatro componentes cuantizados suman 3000 y `totalFinal` cuantizado aparte da 3001) y una
+> búsqueda combinatoria donde **3.965 de 10.000 casos** rompen. Además contradecía el
+> invariante que la Task 5 dejó escrito en el propio motor: *"el total NO se cuantiza
+> aparte: se DERIVA de sus partes"*.
+
+**La regla, igual que a nivel línea:** se cuantizan los **componentes** y `totalFinal` se
+**deriva** de ellos.
+
 ```typescript
 // calcularVenta, al armar los totales (:687-695)
+// Con nivel 'documento' las líneas quedan finas y el cierre ocurre acá: se
+// cuantizan los cuatro componentes que el documento declara y el total se DERIVA
+// de ellos — cuantizarlo aparte rompe MntTotal = MntNeto − Desc + Rec + IVA.
+// Con nivel 'linea' los totales ya son suma de valores cuantizados: cuantizar de
+// nuevo sería redundante y taparía el día que dejaran de serlo.
 const alDocumento = cfg.nivelRedondeo === 'documento';
 const cierre = (d: Decimal) => (alDocumento ? cuantizar(d, cfg) : d);
+
+const netoFinal = cierre(subtotalNeto);
+const descFinal = cierre(totalDescuentos);
+const recFinal = cierre(totalRecargos);
+const impFinal = cierre(totalImpuestos);
+const finalDerivado = alDocumento
+  ? netoFinal.minus(descFinal).plus(recFinal).plus(impFinal)
+  : totalFinal;
 
 return {
   lineas,
   totales: {
-    subtotalNeto: fmt(cierre(subtotalNeto), cfg),
-    totalDescuentos: fmt(cierre(totalDescuentos), cfg),
-    totalRecargos: fmt(cierre(totalRecargos), cfg),
-    totalImpuestos: fmt(cierre(totalImpuestos), cfg),
-    totalFinal: fmt(cierre(totalFinal), cfg),
+    subtotalNeto: fmt(netoFinal, cfg),
+    totalDescuentos: fmt(descFinal, cfg),
+    totalRecargos: fmt(recFinal, cfg),
+    totalImpuestos: fmt(impFinal, cfg),
+    totalFinal: fmt(finalDerivado, cfg),
   },
   // …
 };
 ```
+
+⚠️ **El test tiene que discriminar entre las dos resoluciones.** Un carrito con **un solo**
+término fraccionario da el mismo resultado por los dos caminos: hace falta un caso con
+**al menos dos** componentes fraccionarios (por ejemplo un recargo y un impuesto que
+aporten cada uno su fracción) para que cuantizar-aparte y derivar difieran.
 
 - [ ] **Step 4: Correr los tests**
 
