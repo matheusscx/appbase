@@ -393,6 +393,32 @@ Reglas:
   Vacío / `null` → `'—'`.
 - `MoneyInput` NO se usa para stock, cantidades, porcentajes ni `valorDelDia`
   (ahí va `UInput inputmode="decimal"`, ver §7).
+- `MoneyInput` bloquea tipear más decimales de los que la moneda resuelta admite
+  (`number.fraction` de maska) — la contraparte en pantalla del rechazo 400 del backend
+  (`EscalaMonedaPipe`).
+  ⚠️ **Limitación conocida:** en una moneda de 0 decimales, maska lee cualquier
+  separador como agrupador de miles, así que teclear `1000.5` en CLP da `10005`. NO
+  intentar taparlo desde el input: ya se probó con un `preProcess` con memoria de la
+  última tecla y salió peor (rompía el caso chileno normal `1.500` → `1`, o sea montos
+  válidos y MENORES guardados en silencio, en vez del 400 visible que da hoy). El
+  contrato exacto está fijado en `MoneyInput.spec.ts`, describe "limitación conocida".
+  🛑 **Limitación grave: `MoneyInput` NO sirve hoy para monedas de más de 0 decimales.**
+  Con `v-model` y `decimals > 0` (o con el prop `decimales`), el input queda en **punto
+  fijo tras la primera tecla**: el `watch` de `props.modelValue` reformatea con
+  `toFixed(decimales)` —rellenando la parte decimal completa, `currency-format.ts`— y la
+  tecla siguiente cae al final, donde `number.fraction` la trunca de vuelta. Medido en
+  USD: teclear `1` `2` `.` `5` `0` deja `1.00`. Con 0 decimales no pasa (`toFixed(0)` es
+  idempotente), y la moneda oficial del seed es CLP (0 decimales), que es por qué el bug
+  no se ve en las pantallas que usan `oficial`.
+  **Por eso los campos costo/tasa (escala 4) siguen con `UInput inputmode="decimal"`** —
+  `mermas.vue` (`costoUnitario`), `grupos-modificadores.vue` (`precioExtra`,
+  `lotePrecio`): se migraron a `MoneyInput :decimales="4"` y se revirtieron al medir que
+  quedaban muertos. La escala la valida el backend con `@EsCosto()`; se resigna la ayuda
+  visual, no el control. **No los re-migres sin arreglar antes el punto fijo.**
+  El prop `decimales` existe y su contrato es correcto (`ESCALA_COSTO = 4` fijo,
+  independiente de la moneda del ítem), pero **hoy ningún campo lo usa** por lo de
+  arriba. Los dos describes "limitación conocida" de `MoneyInput.spec.ts` fijan las dos
+  limitaciones: si alguien las arregla, esos tests fallan y ahí se migran los campos.
 
 Archivos: `app/stores/monedas.ts`, `app/types/moneda.ts`,
 `app/utils/currency-format.ts` (+ `.spec.ts`), `app/composables/useCurrency.ts`,

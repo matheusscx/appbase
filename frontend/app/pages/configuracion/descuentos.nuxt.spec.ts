@@ -122,11 +122,42 @@ function itemsUso(n: number) {
   }))
 }
 
+/**
+ * `directo` es de `modo: 'libre'` con `campoValor` (ver `reglas-form-config.ts`):
+ * es el tipo que hace rendir el radio Porcentaje/Monto fijo y el campo `valor`
+ * compartido por los dos modos. Sin tipos, `config` queda en `null` y el drawer no
+ * muestra ninguno de los dos.
+ */
+const TIPOS_REGLA = [
+  { id: 'tipo-1', nombre: 'Directo', codigo: 'directo', descripcion: null },
+]
+
+/** La moneda oficial del tenant: sin ella `MoneyInput` no resuelve config y se
+ *  rinde deshabilitado y vacío, con lo que el test pasaría por el motivo
+ *  equivocado (vacío por apagado, no vacío por reseteado). */
+const MONEDA_CLP = {
+  monedaId: 'clp-1',
+  nombre: 'Peso chileno',
+  codigoIso: 'CLP',
+  simbolo: '$',
+  decimales: 0,
+  separadorDecimal: ',',
+  separadorMiles: '.',
+  locale: 'es-CL',
+  habilitada: true,
+  esDefault: true,
+  esOficial: true,
+  valorDelDia: null,
+}
+
 mockNuxtImport('useApiFetch', () => {
   return (
     url: string,
     opts?: { method?: string, body?: { nombre?: string, activo?: boolean } },
   ) => {
+    if (typeof url === 'string' && url.includes('/tipos-regla')) {
+      return Promise.resolve(TIPOS_REGLA)
+    }
     if (typeof url !== 'string' || !url.includes('/descuentos')) {
       return Promise.resolve([])
     }
@@ -696,5 +727,83 @@ describe('configuracion/descuentos — pausar: confirmación con el alcance', ()
     expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
 
     wrapper.unmount()
+  })
+})
+
+/**
+ * `valor` es UN campo del form que las dos ramas del `v-if` del drawer se reparten
+ * según `form.modo`: monto fijo lo rinde con `MoneyInput` (plata, escala de la
+ * moneda) y porcentaje con un `UInput` en decimal (`0.10` = 10%). No comparten ni
+ * escala ni significado.
+ *
+ * El bug que este describe fija: al pasar de porcentaje a monto fijo, el input
+ * mostraba `0` —`MoneyInput` trunca a los 0 decimales del CLP solo para MOSTRAR—
+ * mientras `form.valor` seguía valiendo `0.10`. El usuario veía un número y
+ * guardaba otro. Medido revirtiendo el fix: el campo queda en `'0'` y el modelo en
+ * `'0.10'`. Es de RUNTIME: ni el build ni el typecheck lo ven.
+ */
+describe('configuracion/descuentos — cambiar de modo no deja un valor de la otra escala', () => {
+  beforeEach(() => {
+    descuentosBackend = [descuento({ modo: 'porcentaje', valor: '0.10' })]
+    reset()
+  })
+
+  /** El input del campo "Valor" dentro del drawer, sea la rama MoneyInput o la de
+   *  porcentaje: las dos rinden un `<input>` y solo una está montada a la vez. */
+  function inputValor(): HTMLInputElement {
+    const campos = [...(dialogo()?.querySelectorAll<HTMLInputElement>('input') ?? [])]
+    const input = campos.find(i => i.getAttribute('inputmode') === 'decimal')
+    expect(input, 'campo "Valor" dentro del drawer').toBeTruthy()
+    return input!
+  }
+
+  async function abrirEdicion(wrapper: Awaited<ReturnType<typeof montar>>) {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    const boton = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+    expect(boton, 'botón "Editar" en la fila').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  /** El radio de un modo, dentro del drawer. Reka UI los rinde como
+   *  `button[role="radio"]` con el `value` del item, no como `<input type=radio>`. */
+  async function clickModo(valor: string) {
+    const radio = dialogo()?.querySelector<HTMLElement>(`[role="radio"][value="${valor}"]`)
+    expect(radio, `radio de modo "${valor}"`).toBeTruthy()
+    radio!.click()
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  it('de porcentaje a monto fijo, el campo queda vacío en vez de mostrar 0 con 0.10 adentro', async () => {
+    const wrapper = await montar()
+    await abrirEdicion(wrapper)
+
+    // Punto de partida: el porcentaje guardado, tal cual.
+    expect(inputValor().value).toBe('0.10')
+
+    await clickModo('monto_fijo')
+
+    const campo = inputValor()
+    // Vacío por RESETEADO, no por apagado: si `MoneyInput` no hubiera resuelto la
+    // moneda se rendiría deshabilitado y también vacío, y el test pasaría por el
+    // motivo equivocado.
+    expect(campo.disabled).toBe(false)
+    expect(campo.value).toBe('')
+  })
+
+  it('volver a porcentaje tampoco arrastra el monto fijo que se haya tipeado', async () => {
+    const wrapper = await montar()
+    await abrirEdicion(wrapper)
+    await clickModo('monto_fijo')
+
+    const campo = inputValor()
+    campo.value = '5000'
+    campo.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 20))
+    expect(inputValor().value).toBe('5.000')
+
+    await clickModo('porcentaje')
+
+    expect(inputValor().value).toBe('')
   })
 })

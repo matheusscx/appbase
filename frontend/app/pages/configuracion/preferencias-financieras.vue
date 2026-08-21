@@ -96,6 +96,10 @@ async function guardar() {
         montoTolerancia: montoTolerancia.value,
       },
     })
+    // El admin puede acabar de cambiar `modoRedondeo`: sin esto, `useMonedaConversion`
+    // (usada en catálogo/carrito para la vista previa "≈ $X c/u") seguiría mostrando
+    // el modo viejo cacheado por el resto de la sesión SPA.
+    resetModoRedondeoTenant()
     toast.add({ title: 'Preferencias actualizadas', color: 'success' })
   }
   catch (e: unknown) {

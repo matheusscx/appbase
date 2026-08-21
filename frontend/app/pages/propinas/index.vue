@@ -327,11 +327,12 @@ onMounted(async () => {
                         </p>
                       </div>
                       <div v-if="grupo.criterio === 'MANUAL' && puedeLiquidar" class="flex items-end gap-2">
-                        <UInput
-                          v-model="montosManuales[p.garzonId]"
+                        <MoneyInput
+                          :model-value="montosManuales[p.garzonId] ?? ''"
+                          :moneda-id="reparto.monedaId"
                           size="sm"
-                          inputmode="decimal"
                           placeholder="Monto manual"
+                          @update:model-value="(v: string) => { montosManuales[p.garzonId] = v }"
                           @keyup.enter="guardarMonto"
                         />
                         <UButton

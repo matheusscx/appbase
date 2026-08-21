@@ -120,6 +120,24 @@ function onTipoChange(value: string) {
   form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'
 }
 
+// Mismo criterio que `onTipoChange`: solo en un cambio REAL del usuario (bindeado al
+// evento del radio, no un watch), para no pisar la población programática de
+// `abrirEditar`.
+//
+// `valor` es un campo compartido por las dos ramas del `v-if` de abajo —monto fijo
+// (MoneyInput, plata) y porcentaje (UInput, decimal 0.10 = 10%)— y los dos modos NO
+// comparten escala ni significado. Sin este reset, escribir `0.10` como porcentaje y
+// pasar a monto fijo dejaba el input mostrando `0` (MoneyInput trunca a los decimales
+// de la moneda para MOSTRAR) mientras `form.valor` seguía valiendo `0.10`: el usuario
+// veía un número y guardaba otro. Vaciar es la salida honesta — no hay conversión
+// sensata de "10%" a un monto.
+function onModoChange(value: string) {
+  if (value === form.value.modo) return
+  form.value.modo = value
+  form.value.valor = ''
+  for (const tramo of form.value.tramos) tramo.valor = ''
+}
+
 // Cola serial, mismo patrón que `configuracion/impuestos.vue` → `cargar()`:
 // `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
 // sin encadenarlas la respuesta que llega segunda pisa `descuentos.value` sin
@@ -561,15 +579,29 @@ const columns: TableColumn<Regla>[] = [
           <template v-if="config">
             <!-- Modo — only when libre -->
             <UFormField v-if="config.modo === 'libre'" label="Modo" required>
-              <URadioGroup v-model="form.modo" :items="modoOptions" orientation="horizontal" />
+              <URadioGroup
+                :model-value="form.modo"
+                :items="modoOptions"
+                orientation="horizontal"
+                @update:model-value="onModoChange"
+              />
             </UFormField>
 
-            <!-- Valor — when campoValor -->
+            <!-- Valor — when campoValor. El campo es monto fijo O porcentaje según
+                 `form.modo`: el backend no puede validar la escala (decorador/pipe no
+                 leen el campo hermano `modo`), así que acá es la única capa que puede
+                 distinguirlos. Porcentaje sigue sin máscara de moneda: no es plata. -->
             <UFormField v-if="config.campoValor" :label="config.labelValor ?? 'Valor'" required>
+              <MoneyInput
+                v-if="form.modo === 'monto_fijo'"
+                v-model="form.valor"
+                oficial
+              />
               <UInput
+                v-else
                 v-model="form.valor"
                 inputmode="decimal"
-                :placeholder="form.modo === 'porcentaje' ? '0.10 (= 10%)' : 'monto fijo'"
+                placeholder="0.10 (= 10%)"
               />
               <template v-if="form.modo === 'porcentaje'" #hint>
                 Expresar en decimal: 0.10 = 10%
@@ -618,10 +650,16 @@ const columns: TableColumn<Regla>[] = [
                 <tbody>
                   <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-default">
                     <td class="py-1 pr-2">
-                      <UInput v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
+                      <!-- "Mínimo" es plata SOLO en `por_monto_venta` (el propio
+                           `labelTramos` lo dice: "Monto mínimo"); en `por_mayor` es
+                           una cantidad ("Cantidad mínima"). El código del tipo, no el
+                           label de UI, decide la máscara. -->
+                      <MoneyInput v-if="tipoSeleccionado?.codigo === 'por_monto_venta'" v-model="tramo.minimo" oficial class="w-full" />
+                      <UInput v-else v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
                     </td>
                     <td class="py-1 pr-2">
-                      <UInput v-model="tramo.valor" inputmode="decimal" :placeholder="form.modo === 'porcentaje' ? '0.10 (= 10%)' : '0'" class="w-full" />
+                      <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valor" oficial class="w-full" />
+                      <UInput v-else v-model="tramo.valor" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
                     </td>
                     <td class="py-1">
                       <UButton
