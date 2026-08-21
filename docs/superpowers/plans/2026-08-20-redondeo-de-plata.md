@@ -1005,9 +1005,30 @@ function elegirAbsorbente(impuestos: ImpuestoResuelto[]): string {
 }
 ```
 
-⚠️ **Con descuentos o recargos en la línea, `totalObjetivo` ya no es la góndola pura**: la
-identidad que se preserva es *lo cobrado = neto + impuestos ± reglas*. El test del caso con
-descuento va en el mismo commit.
+> ⚠️ **Corregido el 2026-08-20, antes de ejecutar, con la aritmética medida.** La primera
+> versión decía que con reglas *"`totalObjetivo` ya no es la góndola pura"* y dejaba la
+> resolución al implementador. **Medido, ninguna variante de la resta funciona con
+> descuento:** góndola 993, IVA 19%, descuento del 10% sobre el neto (neto 834, descuento
+> 83, base 751) — restar contra la góndola da un IVA de **242** (cobra la etiqueta entera e
+> ignora el descuento), y restar contra góndola−descuento da **159** cuando el correcto es
+> **143**. La fórmula normal, en cambio, da 143 exacto.
+
+**La regla, precisada:** la derivación por resta aplica **solo cuando la línea no tiene
+descuentos ni recargos aplicados**. Con reglas se usa la fórmula normal `tasa × base`.
+
+```
+sin reglas:  Σ impuestos = q(bruto × cantidad) − subtotalNeto     ← cierra a góndola
+con reglas:  cada impuesto = q(tasa × baseImponible)              ← como hoy
+```
+
+**Por qué es correcto y no un parche:** *"la etiqueta manda"* vale cuando el cliente paga
+la etiqueta. Con un descuento ya no la está pagando, así que no hay góndola que cerrar — y
+lo que el documento tiene que declarar es el IVA de la base realmente cobrada. Medido:
+sin reglas la resta da 159 y cierra en 993, mientras la fórmula daría 158 y cerraría en 992
+(el peso perdido que motivó la decisión); con descuento la fórmula da 143 y cierra bien.
+
+⚠️ **Los dos casos van con test en el mismo commit**, y el del descuento es el que impide
+que alguien "generalice" la resta a toda la rama desbruteada.
 
 - [ ] **Step 4: Correr los tests**
 
