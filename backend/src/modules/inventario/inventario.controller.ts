@@ -11,6 +11,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { InventarioService } from './inventario.service';
 import { FindMovimientosDto } from './dto/find-movimientos.dto';
@@ -30,7 +31,10 @@ export class InventarioController {
 
   @Post('ajustes-costo')
   @RequiresPermiso('Inventario', 'Actualizar')
-  registrarAjusteCosto(@Req() req: Request, @Body() dto: AjusteCostoDto) {
+  registrarAjusteCosto(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: AjusteCostoDto,
+  ) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
       id: string;

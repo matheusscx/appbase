@@ -16,6 +16,7 @@ import { GarzonesModule } from '../garzones/garzones.module';
 import { ItemsModule } from '../items/items.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { TurnosModule } from '../turnos/turnos.module';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -25,6 +26,9 @@ import { TurnosModule } from '../turnos/turnos.module';
     ItemsModule,
     CatalogModule,
     TurnosModule,
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService, CuentaAsignacionesService],

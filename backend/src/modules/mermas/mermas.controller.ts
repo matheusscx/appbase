@@ -11,6 +11,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { MermasService } from './mermas.service';
 import { CreateMermaDto } from './dto/create-merma.dto';
@@ -30,7 +31,7 @@ export class MermasController {
 
   @Post()
   @RequiresPermiso('Inventario', 'Crear')
-  create(@Req() req: Request, @Body() dto: CreateMermaDto) {
+  create(@Req() req: Request, @Body(EscalaMonedaPipe) dto: CreateMermaDto) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
       id: string;

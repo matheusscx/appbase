@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
 
@@ -77,6 +78,7 @@ export class AjusteStockDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPositivo()
+  @EsCosto()
   costoUnitario?: string;
 
   // Modo 'serie' — entrada: series a registrar

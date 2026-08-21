@@ -8,17 +8,20 @@ import {
 import { EstrategiaAsignacionPropina } from '../../propinas/enums/estrategia-asignacion-propina.enum';
 import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class PropinaCierreMesaDto {
   // 0 es un estado real ("sin propina" al cerrar mesa, ver
   // venta-propina.service.ts EstadoVentaPropina.SIN_PROPINA), nunca negativo.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsMontoCobrado()
   montoPagado: string;
 
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsMontoCobrado()
   montoSugerido?: string;
 
   @IsOptional()

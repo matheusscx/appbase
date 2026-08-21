@@ -30,6 +30,7 @@ import { AddModuleDto } from './dto/add-module.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin routes — /admin/tenants
@@ -296,7 +297,7 @@ export class TenantsController {
   @Put('preferencias-financieras')
   updatePreferenciasFinancieras(
     @Req() req: Request,
-    @Body() dto: UpdatePreferenciasFinancierasDto,
+    @Body(EscalaMonedaPipe) dto: UpdatePreferenciasFinancierasDto,
   ) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.updatePreferenciasFinancieras(

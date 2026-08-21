@@ -1,5 +1,6 @@
 import { IsNumberString, IsUUID, ValidateIf } from 'class-validator';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class LineaCierreDto {
   // null = la línea de efectivo agregada.
@@ -12,5 +13,6 @@ export class LineaCierreDto {
   // 0 es legítimo (ese método no tuvo movimiento); nunca negativo.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsMontoCobrado()
   montoContado: string;
 }

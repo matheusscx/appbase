@@ -10,6 +10,7 @@ import { CajaTestigoService } from './caja-testigo.service';
 import { MotivosDiferenciaModule } from '../motivos-diferencia/motivos-diferencia.module';
 import { TurnosModule } from '../turnos/turnos.module';
 import { GarzonesModule } from '../garzones/garzones.module';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -31,6 +32,9 @@ import { GarzonesModule } from '../garzones/garzones.module';
     // `GarzonesService` (solo `TurnosService`/`SesionesGarzonService`), así
     // que hace falta importar el módulo directo.
     GarzonesModule,
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [CajaController],
   providers: [CajaService, CajaTestigoService],

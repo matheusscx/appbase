@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
@@ -262,7 +263,7 @@ export class CuentasController {
   cerrar(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: CerrarCuentaDto,
+    @Body(EscalaMonedaPipe) dto: CerrarCuentaDto,
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.cerrarCuenta(u.tenantId ?? '', u.id, id, dto);

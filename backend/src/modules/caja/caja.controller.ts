@@ -16,6 +16,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
@@ -201,7 +202,7 @@ export class CajaController {
 
   @Post('abrir')
   @RequiresPermiso('MiCaja', 'Crear')
-  abrir(@Req() req: Request, @Body() dto: AbrirCajaDto) {
+  abrir(@Req() req: Request, @Body(EscalaMonedaPipe) dto: AbrirCajaDto) {
     const u = req.user as JwtUser;
     return this.cajaService.abrir(u.tenantId!, u.id, dto);
   }
@@ -211,7 +212,7 @@ export class CajaController {
   registrarMovimiento(
     @Req() req: Request,
     @Param('id') cajaId: string,
-    @Body() dto: CrearMovimientoDto,
+    @Body(EscalaMonedaPipe) dto: CrearMovimientoDto,
   ) {
     const u = req.user as JwtUser;
     return this.cajaService.registrarMovimiento(u.tenantId!, u.id, cajaId, dto);
@@ -230,7 +231,7 @@ export class CajaController {
   async enviarConteo(
     @Req() req: Request,
     @Param('id') cajaId: string,
-    @Body() dto: CerrarCajaDto,
+    @Body(EscalaMonedaPipe) dto: CerrarCajaDto,
   ) {
     const u = req.user as JwtUser;
     const puedeForzar = await this.resolverEscrituraCompartida(u);

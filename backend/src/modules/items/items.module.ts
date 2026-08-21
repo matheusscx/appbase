@@ -17,6 +17,7 @@ import { ItemsController } from './items.controller';
 import { DesfasesController } from './desfases.controller';
 import { InventarioModule } from '../inventario/inventario.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -36,6 +37,9 @@ import { CatalogModule } from '../catalog/catalog.module';
     ]),
     InventarioModule,
     CatalogModule,
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [ItemsController, DesfasesController],
   providers: [ItemsService],

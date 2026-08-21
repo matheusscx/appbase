@@ -10,12 +10,14 @@ import {
   Length,
   ValidateNested,
 } from 'class-validator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class PagoItemDto {
   @IsUUID()
   metodoPagoId: string;
 
   @IsNumberString()
+  @EsMontoCobrado()
   monto: string;
 
   @IsOptional()

@@ -6,6 +6,7 @@ import {
   IsString,
 } from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class CrearMovimientoDto {
   @IsIn(['entrada', 'salida'])
@@ -20,6 +21,7 @@ export class CrearMovimientoDto {
   // restar.
   @IsNumberString()
   @IsDecimalPositivo()
+  @EsMontoCobrado()
   monto: string;
 
   @IsOptional()

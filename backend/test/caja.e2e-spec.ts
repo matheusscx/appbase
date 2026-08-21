@@ -803,16 +803,48 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       );
     });
 
-    it('montoContado admite decimales', async () => {
+    /**
+     * Antes este test afirmaba lo contrario ("montoContado admite decimales",
+     * 201): la plata entraba con la escala que el cliente quisiera y el recorte
+     * lo terminaba haciendo Postgres, fuera de la configuración del tenant.
+     * Paris opera en CLP —0 decimales— así que `10000.5000` (que Decimal
+     * normaliza a **un** decimal real) no es un saldo que esa moneda pueda
+     * representar, y `EscalaMonedaPipe` lo rechaza en el borde.
+     *
+     * Es además el primer lugar del proyecto donde el pipe se ejerce **cableado
+     * de verdad**: que Nest le inyecte el `REQUEST` (de donde sale el tenant) y
+     * `MonedasService`. Si `CajaModule` dejara de importar `MonedasModule`, la
+     * resolución falla en runtime y solo este e2e se pone rojo — el typecheck y
+     * los unit tests siguen verdes, porque el lookup es por
+     * `moduleRef.injectables`, no por tipos.
+     */
+    it('rechaza un saldo inicial que la moneda del tenant no puede representar', async () => {
       const abrir = await request(app.getHttpServer())
         .post('/api/caja/abrir')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ cajonId: cajonArqueoId, saldoInicial: '10000.5000' });
+      expect(abrir.status).toBe(400);
+    });
+
+    it('rechaza un montoContado que la moneda del tenant no puede representar', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '10000.0000' });
       expect(abrir.status).toBe(201);
       const cajaId = (abrir.body as CajaResponse).id;
 
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000.5000' }] });
+      expect(conteo.status).toBe(400);
+
+      // Higiene: la caja sigue abierta (el 400 no la tocó). Se cierra con un
+      // monto representable — y de paso queda probado el camino feliz: la
+      // escala válida pasa, el pipe no rompió el cierre normal.
       const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
-        { metodoPagoId: null, montoContado: '10000.5000' },
+        { metodoPagoId: null, montoContado: '10000.0000' },
       ]);
       expect(cerrar.status).toBe(201);
     });

@@ -8,6 +8,8 @@ import {
   Max,
   IsNumberString,
 } from 'class-validator';
+import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class UpdatePreferenciasFinancierasDto {
   @IsIn(['base', 'compuesto'])
@@ -39,6 +41,12 @@ export class UpdatePreferenciasFinancierasDto {
   @IsIn(['linea', 'documento'])
   nivelRedondeo: string;
 
+  /**
+   * Tolerancia de descuadre del arqueo. Nunca negativa: una tolerancia negativa
+   * no significa nada (el `0` sí, y es el default: cero tolerancia).
+   */
   @IsNumberString()
+  @IsDecimalNoNegativo()
+  @EsMontoCobrado()
   montoTolerancia: string;
 }

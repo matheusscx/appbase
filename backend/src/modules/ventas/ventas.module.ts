@@ -8,6 +8,7 @@ import { PagosModule } from '../pagos/pagos.module';
 import { PropinasModule } from '../propinas/propinas.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { GarzonesModule } from '../garzones/garzones.module';
+import { MonedasModule } from '../monedas/monedas.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -41,6 +42,9 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     PagosModule,
     PropinasModule,
     CatalogModule,
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
     GarzonesModule,
     // Solo para registrar VentasReembolsoHandler en el ReembolsoCallbackRegistry
     // (pasarela nunca importa ventas; el borde se cruza en esta dirección).

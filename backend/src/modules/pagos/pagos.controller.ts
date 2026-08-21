@@ -12,6 +12,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { PagosService } from './pagos.service';
 import { CreatePagoDto } from './dto/create-pago.dto';
@@ -41,7 +42,10 @@ export class PagosController {
 
   @Post()
   @RequiresPermiso('Pagos', 'Crear')
-  registrarAbono(@Req() req: Request, @Body() dto: CreatePagoDto) {
+  registrarAbono(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: CreatePagoDto,
+  ) {
     const user = req.user as JwtUser;
     return this.pagosService.registrarAbono(user.tenantId!, user.id, dto);
   }

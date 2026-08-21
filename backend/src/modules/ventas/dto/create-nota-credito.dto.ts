@@ -9,6 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class DevolucionNotaCreditoDto {
   @IsUUID()
@@ -22,6 +23,7 @@ export class CreateNotaCreditoDto {
   // El service ya rechaza monto <= 0 (crearNotaCredito); se refuerza en el DTO.
   @IsNumberString()
   @IsDecimalPositivo()
+  @EsMontoCobrado()
   monto: string;
 
   @IsOptional()

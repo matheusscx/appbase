@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
@@ -49,7 +50,7 @@ export class ItemsController {
 
   @Post()
   @RequiresPermiso('Items', 'Crear')
-  create(@Req() req: Request, @Body() dto: CreateItemDto) {
+  create(@Req() req: Request, @Body(EscalaMonedaPipe) dto: CreateItemDto) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
       id: string;
@@ -116,7 +117,7 @@ export class ItemsController {
   ajustarStock(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: AjusteStockDto,
+    @Body(EscalaMonedaPipe) dto: AjusteStockDto,
   ) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;

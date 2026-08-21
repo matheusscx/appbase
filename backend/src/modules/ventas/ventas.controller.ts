@@ -13,6 +13,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { VentasService } from './ventas.service';
@@ -30,7 +31,10 @@ export class VentasController {
 
   @Post()
   @RequiresPermiso('Ventas', 'Crear')
-  async crear(@Req() req: Request, @Body() dto: CreateVentaDto) {
+  async crear(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: CreateVentaDto,
+  ) {
     const u = req.user as JwtUser;
     return this.ventasService.crear(u.tenantId ?? '', u.id, dto);
   }
@@ -40,7 +44,7 @@ export class VentasController {
   async crearNotaCredito(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() dto: CreateNotaCreditoDto,
+    @Body(EscalaMonedaPipe) dto: CreateNotaCreditoDto,
   ) {
     const u = req.user as JwtUser;
     return this.ventasService.crearNotaCreditoDesdeVenta({

@@ -1,5 +1,6 @@
 import { IsNumberString, IsOptional, IsString, IsUUID } from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 export class CreateMermaDto {
   @IsUUID()
@@ -28,5 +29,6 @@ export class CreateMermaDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPositivo()
+  @EsCosto()
   costoUnitario?: string;
 }

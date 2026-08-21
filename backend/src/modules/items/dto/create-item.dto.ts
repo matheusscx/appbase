@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 export class SerieInputDto {
   @IsString()
@@ -221,6 +222,7 @@ export class CreateItemDto {
   // hace falta: ahí el campo lo rechaza entero `CostoNoEditableConstraint`.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsCosto()
   @IsOptional()
   costo?: string;
 
