@@ -138,8 +138,10 @@ export class MonedasService {
    * datos de la misma venta para cuantizar (decisión (g) del plan de
    * redondeo: la corrección hereda el criterio del documento que corrige, no
    * el vigente). `modoRedondeo` viene `null` si la venta no tiene
-   * `config_calculo` (hoy: toda nota de crédito nace así — la Fase 5 de ese
-   * mismo plan es la que la persiste, todavía no ejecutada). Devolverlo
+   * `config_calculo`. Eso **ya no es el caso general de toda NC**:
+   * `VentasService.crearNotaCredito` congela la config heredada en la NC que
+   * crea, así que hoy solo queda `null` cuando la venta referenciada tampoco
+   * la tiene — dato roto aguas arriba, no un caso esperado. Devolverlo
    * `null` en vez de resolver un default acá es deliberado: qué hacer ante la
    * ausencia es una decisión de cada consumidor, no de este service — ver
    * `VentasReembolsoHandler.cuantizarMontoReembolso`, el único hoy.

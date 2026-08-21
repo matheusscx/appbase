@@ -410,11 +410,18 @@ Reglas:
   USD: teclear `1` `2` `.` `5` `0` deja `1.00`. Con 0 decimales no pasa (`toFixed(0)` es
   idempotente), y la moneda oficial del seed es CLP (0 decimales), que es por qué el bug
   no se ve en las pantallas que usan `oficial`.
-  **Por eso los campos costo/tasa (escala 4) siguen con `UInput inputmode="decimal"`** —
-  `mermas.vue` (`costoUnitario`), `grupos-modificadores.vue` (`precioExtra`,
-  `lotePrecio`): se migraron a `MoneyInput :decimales="4"` y se revirtieron al medir que
-  quedaban muertos. La escala la valida el backend con `@EsCosto()`; se resigna la ayuda
-  visual, no el control. **No los re-migres sin arreglar antes el punto fijo.**
+  **Por eso `mermas.vue` (`costoUnitario`) y `grupos-modificadores.vue` (`precioExtra`,
+  `lotePrecio`) usan `UInput inputmode="decimal"`**: se migraron a
+  `MoneyInput :decimales="4"` y se revirtieron al medir que quedaban muertos. La escala la
+  valida el backend con `@EsCosto()`; se resigna la ayuda visual, no el control. **No los
+  re-migres sin arreglar antes el punto fijo.**
+  ⚠️ **Eso NO es una regla que valga para todos los campos de costo, y conviene no leerlo
+  así:** `items.vue` (`precioBase`, `costo`, `precioExtra`, `costoUnitario`) e
+  `inventario/index.vue` (`costoNuevo`) siguen con `MoneyInput :moneda-id="..."` y nunca se
+  revirtieron. Son **siete inputs atados a la moneda del ítem**, no a la oficial, así que
+  **para un ítem en USD o UF están muertos hoy** — el catálogo incluido. La lista completa,
+  con línea por línea, está en la entrada de
+  [`agent/pendientes.md`](../agent/pendientes.md) de este mismo punto fijo.
   El prop `decimales` existe y su contrato es correcto (`ESCALA_COSTO = 4` fijo,
   independiente de la moneda del ítem), pero **hoy ningún campo lo usa** por lo de
   arriba. Los dos describes "limitación conocida" de `MoneyInput.spec.ts` fijan las dos

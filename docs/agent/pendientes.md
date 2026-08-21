@@ -867,18 +867,34 @@ verificaron el 2026-08-21, después del frente.
   El estado de partida está en [`patterns/backend.md` §3.1](../patterns/backend.md).
 
 - [ ] **El punto fijo de `MoneyInput` con `v-model` y monedas de más de 0 decimales**
-  (frontend) — 🔴 **hoy solo muerde en campos de costo; el día que un tenant tenga una
-  moneda de más de 0 decimales como oficial, caen TODAS las pantallas de plata.** Y el seed
-  ya trae **UF (4)** y **USD (2)**.
+  (frontend) — 🔴 **el precio del catálogo no se puede editar para un ítem en USD o UF, hoy,
+  en `main`.** No es un riesgo futuro ni un problema solo de campos de costo: hay **siete
+  `MoneyInput` atados a una moneda que NO es la oficial** (`:moneda-id` del ítem o del
+  producto), y para cualquiera de esos ítems el campo queda muerto tras la primera tecla.
+  Las dos monedas están **sembradas**: UF (4) y USD (2).
+  **Los siete, medidos el 2026-08-21:**
+  - `pages/configuracion/items.vue:1606` — `form.precioBase`, el **precio de venta** del
+    catálogo (no un costo)
+  - `pages/configuracion/items.vue:1677` y `:1809` — `form.costo`
+  - `pages/configuracion/items.vue:1955` — `form.extrasPermitidos[].precioExtra`
+  - `pages/configuracion/items.vue:2103` — `grupo.opciones[].precioExtra`
+  - `pages/configuracion/items.vue:2329` — `ajusteForm.costoUnitario`
+  - `pages/inventario/index.vue:347` — `ajusteCostoForm.costoNuevo`
+
+  El octavo (`pages/propinas/index.vue:330`) también va por `:moneda-id`, pero ese id es
+  siempre el de la moneda **oficial** (`liquidacion-propinas.service.ts`
+  → `resolverMonedaOficial`), así que hoy no muerde: cae recién el día que la oficial tenga
+  decimales, junto con todas las pantallas que usan el prop `oficial`.
   **El mecanismo, ya diagnosticado:** `formatMontoManual` (`app/utils/currency-format.ts`)
   hace `abs.toFixed(cfg.decimals)` rellenando la parte decimal completa, y la máscara trunca
   lo que sigue. En USD, teclear `1` `2` `.` `5` `0` deja `1.00`. Con 0 decimales no pasa —
   `toFixed(0)` es idempotente.
   **Está fijado por tests que afirman el comportamiento ACTUAL** (los dos `describe`
   *"limitación conocida"* de `MoneyInput.spec.ts`): quien lo arregle **tiene que ver esos
-  tests fallar**, y ahí re-migrar los tres campos de costo que se revirtieron
-  (`mermas.costoUnitario`, `items.precioBase`/`costo`, `grupos-modificadores.precioExtra` y
-  `lotePrecio`). Detalle en [`patterns/frontend.md` §8](../patterns/frontend.md).
+  tests fallar**, y ahí re-migrar los campos de costo que se revirtieron a `UInput`
+  (`mermas.costoUnitario`, `grupos-modificadores.precioExtra` y `lotePrecio`) — los de
+  `items.vue` nunca se revirtieron, están en la lista de arriba.
+  Detalle en [`patterns/frontend.md` §8](../patterns/frontend.md).
   ⚠️ **Ojo con el orden**: arreglarlo mal es peor que no arreglarlo. El primer intento de
   este frente hizo que tipear `1` `.` `5` `0` `0` en CLP guardara **1** en vez de 1500, en
   silencio — el bug original al menos lo rechazaba el backend con 400. Se reproduce **tecla

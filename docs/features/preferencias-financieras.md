@@ -15,7 +15,7 @@ Preferencias Financieras es una pantalla de configuración que permite al admini
 1. **Modo de cálculo de descuentos**: `base` (todos los descuentos se aplican sobre el precio neto) o `compuesto` (cada descuento se aplica en cascada sobre el resultado anterior).
 2. **Modo de cálculo de recargos**: `base` (todos sobre precio neto) o `compuesto` (en cascada).
 3. **Orden de la fórmula de precios**: reordenar los tres pasos (descuentos, recargos, impuestos) en la secuencia que prefiera.
-4. **Escala de cálculo** (`escalaCalculo`, default 6): la precisión del **borrador**, o sea de los cálculos intermedios. **No decide nada de lo persistido** — eso lo decide la escala de la moneda oficial.
+4. **Escala de cálculo** (`escalaCalculo`, default 6): la precisión del **borrador**, o sea de los cálculos intermedios. Con `nivelRedondeo = 'linea'` **no decide nada de lo persistido** — eso lo decide la escala de la moneda oficial. Con `'documento'` sí, porque ahí las líneas se guardan sin cuantizar: por eso esa combinación tiene tope 4 (ver la validación del service).
 5. **Modo de redondeo** (`modoRedondeo`, default `HALF_UP`): con qué criterio se redondea (`HALF_UP` | `HALF_EVEN` | `FLOOR` | `CEIL`). Es el modo que usa la cuantización final, así que hoy los cuatro producen totales distintos sobre el mismo carrito.
 6. **Nivel de redondeo** (`nivelRedondeo`, default `linea`): `linea` (cada línea de la venta se cuantiza a la escala de la moneda y el total es la suma) o `documento` (las líneas quedan a `escalaCalculo` y solo el total final se cuantiza — la regla mexicana). El motor de cálculo de precios la consume vía `ConfigCalculo`.
 7. **Tolerancia de conciliación** (`montoTolerancia`, default `'0'`): diferencia máxima permitida antes de rechazar una conciliación.
@@ -33,8 +33,9 @@ Diferentes tipos de negocio y regímenes fiscales requieren distintas estrategia
 - **Included in this version:**
   - Lectura y escritura de preferencias (`GET` y `PUT`)
   - Validación de la fórmula (contiene exactamente los 3 pasos, sin duplicados)
-  - Validación de la matriz `nivelRedondeo` × moneda oficial: rechaza `documento` con
-    moneda de 0 decimales, y `escalaCalculo` menor que los decimales de la moneda oficial
+  - Validación de la matriz `nivelRedondeo` × moneda oficial × `escalaCalculo`: rechaza
+    `documento` con moneda de 0 decimales, `escalaCalculo` menor que los decimales de la
+    moneda oficial, y `documento` con `escalaCalculo` mayor que 4
   - Persistencia en `tenants.calculo_descuentos`, `tenants.calculo_recargos`,
     `tenants.nivel_redondeo`, y tabla `tenant_formula_precio`
   - Acceso restringido a admin del tenant (guard RBAC)
@@ -87,7 +88,7 @@ Request:
   "escalaCalculo": 4,
   "modoRedondeo": "HALF_EVEN",
   "nivelRedondeo": "linea",
-  "montoTolerancia": "1.5"
+  "montoTolerancia": "1500"
 }
 
 Response (200):
@@ -98,7 +99,7 @@ Response (200):
   "escalaCalculo": 4,
   "modoRedondeo": "HALF_EVEN",
   "nivelRedondeo": "linea",
-  "montoTolerancia": "1.5"
+  "montoTolerancia": "1500"
 }
 
 Response (400):
@@ -112,7 +113,24 @@ Response (400) — matriz nivelRedondeo × moneda:
   "message": "El nivel \"documento\" deja decimales en las líneas y la moneda oficial del tenant no admite decimales. Usá \"linea\".",
   "statusCode": 400
 }
+
+Response (400) — matriz nivelRedondeo × escalaCalculo:
+{
+  "message": "El nivel \"documento\" persiste las líneas con la escala de cálculo (6 decimales) y las columnas de dinero son NUMERIC(18,4): el recorte lo terminaría decidiendo Postgres, fuera del modo de redondeo del tenant. Bajá la escala de cálculo a 4 o menos, o usá \"linea\".",
+  "statusCode": 400
+}
+
+Response (400) — escala de `montoTolerancia` (`EscalaMonedaPipe`):
+{
+  "message": "montoTolerancia tiene más decimales de los que admite la moneda (0).",
+  "statusCode": 400
+}
 ```
+
+⚠️ **`montoTolerancia` es un monto cobrado, no un número libre.** El ejemplo de arriba
+usa `"1500"` a propósito: para todo tenant sembrado la moneda oficial es CLP (0
+decimales), así que un `"1.5"` —que este documento mostraba como request válido hasta
+el 2026-08-21— hoy es un 400. En un tenant en dólares `"1.5"` sí entra.
 
 ---
 
@@ -178,7 +196,7 @@ export class UpdatePreferenciasFinancierasDto {
   escalaCalculo: number;        // @IsInt @Min(0) @Max(12)
   modoRedondeo: string;         // @IsIn(['HALF_UP','HALF_EVEN','FLOOR','CEIL'])
   nivelRedondeo: string;        // @IsIn(['linea','documento'])
-  montoTolerancia: string;      // @IsNumberString — string end-to-end
+  montoTolerancia: string;      // @IsNumberString @IsDecimalNoNegativo @EsMontoCobrado
 }
 ```
 
@@ -189,15 +207,28 @@ Validación con `class-validator`:
 - `escalaCalculo`: entero entre 0 y 12
 - `modoRedondeo`: uno de 'HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL'
 - `nivelRedondeo`: 'linea' o 'documento'
-- `montoTolerancia`: number string (p.ej. `"1.5"`) — string de punta a punta
+- `montoTolerancia`: number string, nunca negativo, y con **como mucho los decimales que
+  admite la moneda oficial del tenant** (`@EsMontoCobrado()` + `EscalaMonedaPipe`, colgado
+  del `@Body` de esta ruta). En CLP eso es cero: `"1.5"` es un 400.
 
 Validación adicional en el service (no expresable con `class-validator`, depende de la
-moneda oficial del tenant — `MonedasService.decimalesOficiales`):
+moneda oficial del tenant — `MonedasService.decimalesOficiales`). Son **tres** reglas, y
+las tres existen por la misma razón: que ninguna combinación configurable devuelva el
+último redondeo al cast de Postgres.
 - `nivelRedondeo = 'documento'` con moneda oficial de 0 decimales → 400. Las líneas
   quedarían con decimales que la moneda no puede representar; es exactamente el bug que
   el frente de redondeo de plata vino a cerrar, ofrecido como opción de configuración.
 - `escalaCalculo` menor que los decimales de la moneda oficial → 400. El borrador de los
   cálculos intermedios no puede ser más grueso que el resultado final.
+- `nivelRedondeo = 'documento'` con `escalaCalculo` mayor que **4** → 400. Con
+  `'documento'` las líneas se persisten sin cuantizar, formateadas a `escalaCalculo`, y
+  toda columna de plata de `venta_detalles` es `NUMERIC(18,4)`: una escala mayor deja el
+  recorte final en manos de Postgres y rompe la identidad `Σ totalLinea − dv + rv =
+  totalFinal` al releer las filas. El tope es la escala de la **columna**, no los
+  decimales de la moneda, porque lo que se controla es lo que entra a la columna. Con
+  `'linea'` no aplica: ahí el valor ya sale cuantizado a los decimales de la moneda (≤ 4
+  por el `@Check` de `moneda.decimales`) y lo que agrega el formateo son ceros — por eso
+  el default sembrado (escala 6, nivel `'linea'`) sigue siendo válido.
 
 ### Key Methods
 
@@ -227,7 +258,10 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
   - `URadioGroup` con 4 opciones para `modoRedondeo`
   - `URadioGroup` con 2 opciones para `nivelRedondeo` ("Por línea" / "Por documento"),
     con texto de ayuda en lenguaje de negocio, no técnico
-  - `UInput inputmode="decimal"` para `montoTolerancia` (string end-to-end, @IsNumberString)
+  - `MoneyInput oficial` para `montoTolerancia` (string end-to-end): es un monto cobrado
+    en la moneda oficial y el backend lo rechaza con 400 si trae más decimales de los que
+    ésta admite, así que el input no lo deja tipear. Era un `UInput inputmode="decimal"`
+    hasta el 2026-08-21 — mismo caso que el monto manual de propinas
 - Botón guardar
 
 ### State

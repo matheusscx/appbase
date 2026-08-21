@@ -726,7 +726,27 @@ describe('TenantsService', () => {
       expect(dataSource.transaction).not.toHaveBeenCalled();
     });
 
-    it('acepta nivel documento en una moneda con decimales', async () => {
+    /**
+     * El caso que el frente de redondeo dejó abierto: con 'documento' las
+     * líneas se persisten a `escalaCalculo` (no cuantizadas) en columnas
+     * NUMERIC(18,4). `prefsValidas` trae la escala 6 del seed, que es
+     * exactamente lo que un admin en dólares manda sin tocar nada más.
+     */
+    it('rechaza nivel documento con una escala mayor que la de las columnas', async () => {
+      monedasService.decimalesOficiales.mockResolvedValue(2); // USD
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', {
+          ...prefsValidas,
+          nivelRedondeo: 'documento',
+        }),
+      ).rejects.toThrow(/NUMERIC\(18,4\)/);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('acepta la escala 6 del seed mientras el nivel sea "linea"', async () => {
+      // El tope de 4 es de 'documento', no de la escala en general: con 'linea'
+      // el valor ya viene cuantizado a los decimales de la moneda y los que
+      // agrega `fmt` son ceros. Sin esto, la regla nueva rompería el default.
       monedasService.decimalesOficiales.mockResolvedValue(2); // USD
       const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
       dataSource.transaction.mockImplementation(
@@ -740,6 +760,30 @@ describe('TenantsService', () => {
 
       const r = await service.updatePreferenciasFinancieras('tenant-uuid', {
         ...prefsValidas,
+        escalaCalculo: 6,
+        nivelRedondeo: 'linea',
+      });
+
+      expect(r.escalaCalculo).toBe(6);
+    });
+
+    it('acepta nivel documento en una moneda con decimales', async () => {
+      monedasService.decimalesOficiales.mockResolvedValue(2); // USD
+      const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager),
+      );
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      // Escala 4: la máxima que la columna representa sin recorte. Con la 6 de
+      // `prefsValidas` esta combinación es la que rechaza el test de arriba.
+      const r = await service.updatePreferenciasFinancieras('tenant-uuid', {
+        ...prefsValidas,
+        escalaCalculo: 4,
         nivelRedondeo: 'documento',
       });
 

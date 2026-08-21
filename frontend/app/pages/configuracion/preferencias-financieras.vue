@@ -223,10 +223,15 @@ function moverAbajo(index: number) {
             </UFormField>
 
             <UFormField label="Tolerancia de conciliación" hint="Diferencia máxima permitida antes de rechazar una conciliación">
-              <UInput
+              <!--
+                Es un monto COBRADO en la moneda oficial del tenant: el backend le
+                colgó `@EsMontoCobrado()` y el pipe rechaza con 400 lo que no cabe
+                en esa escala (un `1,5` en pesos chilenos, por ejemplo). `UInput`
+                dejaba tipearlo igual y el error llegaba recién al guardar.
+              -->
+              <MoneyInput
                 v-model="montoTolerancia"
-                inputmode="decimal"
-                placeholder="0"
+                oficial
                 class="w-40"
               />
             </UFormField>

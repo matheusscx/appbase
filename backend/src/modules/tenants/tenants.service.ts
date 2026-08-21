@@ -1456,6 +1456,30 @@ export class TenantsService {
           `decimales de la moneda oficial (${decimales}).`,
       );
     }
+    // Tercera combinación prohibida, y la que sigue siendo el bug original.
+    // Con 'documento' las LÍNEAS corren sin cuantizar (`SIN_CUANTIZAR` en
+    // `calcularLinea`) y se persisten tal cual las formatea `fmt`, o sea con
+    // `escalaCalculo` decimales. Toda columna de plata de `venta_detalles` es
+    // NUMERIC(18,4): con una escala mayor, el recorte final vuelve a decidirlo
+    // el cast de Postgres —con su propia regla y fuera de `modo_redondeo`— y la
+    // identidad del documento deja de cerrar al releer las filas. Es el mismo
+    // argumento del @Check de `moneda.decimales` (`catalog/entities/
+    // moneda.entity.ts`), aplicado al otro eje que llega hasta la columna.
+    //
+    // El tope es la escala de la COLUMNA, no los decimales de la moneda: lo que
+    // importa es que lo persistido entre sin recorte. Y no aplica a 'linea',
+    // donde el valor ya viene cuantizado a los decimales de la moneda (≤ 4 por
+    // ese mismo @Check) y lo que `fmt` agrega son ceros que el cast no toca —
+    // por eso el default sembrado (escala 6, nivel 'linea') sigue siendo válido.
+    if (dto.nivelRedondeo === 'documento' && dto.escalaCalculo > 4) {
+      throw new BadRequestException(
+        `El nivel "documento" persiste las líneas con la escala de cálculo ` +
+          `(${dto.escalaCalculo} decimales) y las columnas de dinero son ` +
+          `NUMERIC(18,4): el recorte lo terminaría decidiendo Postgres, fuera ` +
+          `del modo de redondeo del tenant. Bajá la escala de cálculo a 4 o ` +
+          `menos, o usá "linea".`,
+      );
+    }
 
     await this.db.transaccion(async (manager) => {
       await manager.query(
