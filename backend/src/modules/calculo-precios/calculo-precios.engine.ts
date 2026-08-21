@@ -574,12 +574,18 @@ function procesarReglas(
 }
 
 /**
- * Quién absorbe el residuo del desbruteo: el **IVA** si la línea es afecta.
+ * Quién absorbe el residuo del desbruteo: el **IVA**, si la lista lo trae.
  *
- * Si es exenta —no hay ningún `tipo === 'iva'` en la lista— absorbe el
- * adicional de **mayor tasa**, que es el que menos se distorsiona en términos
- * relativos al comerse un peso. Ese borde es real: los `'otro'` se aplican
- * también en líneas exentas (DL 825 / `IndExe` del DTE).
+ * Si no hay ningún impuesto `tipo === 'iva'`, absorbe el adicional de **mayor
+ * tasa**, que es el que menos se distorsiona en términos relativos al comerse
+ * un peso. Ese borde es real: los `'otro'` se aplican también sin IVA (DL 825 /
+ * `IndExe` del DTE).
+ *
+ * ⚠️ Deliberadamente NO dice "línea exenta": exento es un estado fiscal
+ * explícito y el motor no lo recibe. Lo único que ve acá es una lista sin IVA,
+ * y a eso se llega de más de una forma —un ítem exento, pero también uno con
+ * `clasificacion_tributaria` nula, que es el caso de los ingredientes (ver
+ * `calculo-precios.service.ts`, donde la condición es POSITIVA por esto mismo)—.
  *
  * El desempate por `id` no es cosmético: sin él, dos adicionales de la misma
  * tasa harían depender la traza del orden en que el service devolvió la lista,

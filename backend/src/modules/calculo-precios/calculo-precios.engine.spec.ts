@@ -1728,10 +1728,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(l.trazas.impuestos.map((t) => t.id)).toEqual(['iva', 'ila']);
     });
 
-    // Los 'otro' se aplican también en líneas exentas (DL 825 / IndExe del
-    // DTE), así que el borde es real: sin IVA que ceda, absorbe el adicional
-    // de mayor tasa.
-    it('línea exenta con dos adicionales: absorbe el de mayor tasa', () => {
+    // Los 'otro' se aplican también sin IVA (DL 825 / IndExe del DTE), así que
+    // el borde es real: sin IVA que ceda, absorbe el adicional de mayor tasa.
+    // Lo que el motor ve es una lista sin IVA, no un estado fiscal: se llega
+    // igual desde un ítem exento que desde uno sin clasificación tributaria.
+    it('sin IVA en la lista, absorbe el adicional de mayor tasa', () => {
       const l = calcularVenta(gondola('993', [OTRO, ILA])).lineas[0];
       const ila = new Decimal(
         l.trazas.impuestos.find((t) => t.id === 'ila')!.monto,
@@ -1777,6 +1778,54 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         expect(new Decimal(trazaA.monto).eq(46)).toBe(true);
         expect(new Decimal(l.totalLinea).eq(997)).toBe(true);
       }
+    });
+
+    // ⚠️ El guard de `hayReglasDespuesDelImpuesto`: con los impuestos PRIMERO,
+    // cuando corre ese paso todavía no se aplicó el descuento, así que mirar
+    // solo `descuentoAplicado.isZero()` daría el cierre a góndola por bueno y
+    // declararía un IVA de 159 sobre una línea que el cliente no paga a 993.
+    // La rama segura es la fórmula: 158 sobre la base pre-descuento.
+    it('con impuestos primero, un descuento posterior devuelve la fórmula', () => {
+      const l = calcularVenta(
+        venta({
+          config: {
+            ...cfgCLP,
+            formula: ['impuestos', 'descuentos', 'recargos'],
+          },
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              descuentos: [regla({ id: 'd1', nombre: '10%', valor: '0.10' })],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      ).lineas[0];
+
+      // neto 834; IVA por fórmula sobre 834 = 158,46 → 158 (por resta daría
+      // 159). Descuento 10% del neto = 83,4 → 83. Total 834 − 83 + 158 = 909.
+      expect(new Decimal(l.subtotalNeto).eq(834)).toBe(true);
+      expect(new Decimal(l.impuestoAplicado).eq(158)).toBe(true);
+      expect(new Decimal(l.descuentoAplicado).eq(83)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(909)).toBe(true);
+    });
+
+    // Con `nivelRedondeo: 'documento'` la línea corre fina, pero la rama de
+    // góndola NO es un no-op: el impuesto sigue saliendo por resta y ahí cierra
+    // exacto, mientras que la fórmula deja el sobrante en el sexto decimal.
+    it('con nivelRedondeo documento la línea también cierra exacta', () => {
+      const l = calcularVenta({
+        ...gondola('993', [IVA]),
+        config: { ...cfgCLP, nivelRedondeo: 'documento' },
+      }).lineas[0];
+
+      // 993 / 1.19 = 834,453782 (escala 6). Por resta el IVA es 158,546218 y la
+      // línea da 993,000000; por fórmula sería 158,546219 → 993,000001.
+      expect(l.subtotalNeto).toBe('834.453782');
+      expect(l.impuestoAplicado).toBe('158.546218');
+      expect(l.totalLinea).toBe('993.000000');
+      expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
     });
 
     // La góndola que tiene que cerrar es la de la LÍNEA (bruto × cantidad), no
