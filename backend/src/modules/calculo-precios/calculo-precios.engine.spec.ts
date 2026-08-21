@@ -1422,5 +1422,48 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(l.totalLinea).toBe('0.000000');
       expect(new Decimal(l.totalLinea).isNegative()).toBe(false);
     });
+
+    it('con nivel documento las líneas conservan decimales y solo el total se cuantiza', () => {
+      const cfgDocumento = { ...cfgCLP, nivelRedondeo: 'documento' };
+      const r = calcularVenta({ ...ventaDelMedioPeso(), config: cfgDocumento });
+      // La línea sigue fina: 14.250 × 19% = 2.707,5, sin cuantizar.
+      expect(new Decimal(r.lineas[0].impuestoAplicado).eq('2707.5')).toBe(true);
+      // Solo el total del documento cierra en la escala de la moneda (CLP: 0).
+      expect(new Decimal(r.totales.totalFinal).isInteger()).toBe(true);
+    });
+
+    it('el total del documento se DERIVA de los componentes ya cuantizados, no se cuantiza aparte', () => {
+      // Discrimina de verdad entre "derivar" y "cuantizar cada total por
+      // separado": necesita DOS componentes fraccionarios que empujen para el
+      // mismo lado del redondeo, algo que el carrito de un solo término
+      // (`ventaDelMedioPeso`) no puede exponer.
+      //
+      // Línea 1: neto 1.000, recargo fijo 0,1. Línea 2: neto 2.000, impuesto
+      // 0,02% = 0,4. Fino: neto 3.000, recargos 0,1, impuestos 0,4, total
+      // 3.000,5. Cuantizando CADA total por separado, totalFinal redondearía
+      // (3.000,5 → 3.001) distinto de sus propias partes ya cuantizadas
+      // (3.000 − 0 + 0 + 0 = 3.000): la identidad del documento se rompería.
+      // Derivado da 3.000, que es lo correcto.
+      const cfgDocumento = { ...cfgCLP, nivelRedondeo: 'documento' };
+      const r = calcularVenta({
+        config: cfgDocumento,
+        metodoPagoId: null,
+        descuentosVenta: [],
+        recargosVenta: [],
+        lineas: [
+          linea({
+            precioUnitario: '1000',
+            recargos: [regla({ id: 'r1', modo: 'monto_fijo', valor: '0.1' })],
+          }),
+          linea({
+            precioUnitario: '2000',
+            impuestos: [impuesto({ porcentaje: '0.0002' })],
+          }),
+        ],
+      });
+      expect(r.totales.totalRecargos).toBe('0.000000');
+      expect(r.totales.totalImpuestos).toBe('0.000000');
+      expect(r.totales.totalFinal).toBe('3000.000000');
+    });
   });
 });

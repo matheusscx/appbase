@@ -593,8 +593,10 @@ function calcularLinea(
    * relación que un documento tributario espera. Como hay tres pasos como
    * máximo, el error queda acotado a tres redondeos, no a uno por regla.
    *
-   * `'documento'` (redondear recién sobre el total de la venta) todavía no está
-   * implementado: se comporta como antes de que esto existiera.
+   * Con `'documento'` esta función es la identidad: la línea corre fina de
+   * punta a punta, exactamente como antes de que `nivelRedondeo` existiera.
+   * El cierre pasa a `calcularVenta`, que cuantiza los totales del documento
+   * al terminar — ver el comentario ahí, antes del `return`.
    */
   const q: Cuantizador =
     cfg.nivelRedondeo === 'linea' ? (d) => cuantizar(d, cfg) : SIN_CUANTIZAR;
@@ -804,14 +806,51 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
   totalRecargos = totalRecargos.plus(rv.total);
   totalFinal = totalFinal.minus(dv.total).plus(rv.total);
 
+  /**
+   * Cierre del documento — mismo invariante que `calcularLinea` (ver el
+   * comentario ahí, arriba de `totalLinea`): el total NO se cuantiza aparte,
+   * se DERIVA de sus componentes ya cuantizados. Cuantizar `totalFinal` por
+   * separado desde su valor fino rompe la identidad aditiva del documento.
+   *
+   * Medido: neto 3.000, un recargo de línea de 0,1 y un impuesto de línea de
+   * 0,4 (fino: total 3.000,5). Cuantizar cada total por separado da
+   * `totalFinal = 3.001` (3.000,5 redondea para arriba), pero
+   * `neto − desc + rec + imp` con los cuatro YA cuantizados da `3.000` — el
+   * documento declararía un total que no es la suma de sus propias partes.
+   * Derivar evita eso siempre, por construcción.
+   *
+   * Con `nivelRedondeo === 'linea'` no cambia nada: los cuatro componentes ya
+   * son suma de valores cuantizados por línea, así que cuantizarlos de nuevo
+   * acá sería redundante — y taparía el día que dejaran de serlo.
+   */
+  const alDocumento = cfg.nivelRedondeo === 'documento';
+  const subtotalNetoQ = alDocumento
+    ? cuantizar(subtotalNeto, cfg)
+    : subtotalNeto;
+  const totalDescuentosQ = alDocumento
+    ? cuantizar(totalDescuentos, cfg)
+    : totalDescuentos;
+  const totalRecargosQ = alDocumento
+    ? cuantizar(totalRecargos, cfg)
+    : totalRecargos;
+  const totalImpuestosQ = alDocumento
+    ? cuantizar(totalImpuestos, cfg)
+    : totalImpuestos;
+  const totalFinalQ = alDocumento
+    ? subtotalNetoQ
+        .minus(totalDescuentosQ)
+        .plus(totalRecargosQ)
+        .plus(totalImpuestosQ)
+    : totalFinal;
+
   return {
     lineas,
     totales: {
-      subtotalNeto: fmt(subtotalNeto, cfg),
-      totalDescuentos: fmt(totalDescuentos, cfg),
-      totalRecargos: fmt(totalRecargos, cfg),
-      totalImpuestos: fmt(totalImpuestos, cfg),
-      totalFinal: fmt(totalFinal, cfg),
+      subtotalNeto: fmt(subtotalNetoQ, cfg),
+      totalDescuentos: fmt(totalDescuentosQ, cfg),
+      totalRecargos: fmt(totalRecargosQ, cfg),
+      totalImpuestos: fmt(totalImpuestosQ, cfg),
+      totalFinal: fmt(totalFinalQ, cfg),
     },
     trazasVenta: { descuentos: dv.trazas, recargos: rv.trazas },
     // `rv.advertencias` va junto a `dv.advertencias`, no en su lugar. Hasta que
