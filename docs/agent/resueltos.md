@@ -17,6 +17,150 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El redondeo de plata: el último decimal deja de decidirlo Postgres, y con eso cierra la tanda 🔴 (2026-08-21)
+
+Cierra la entrada *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* con su
+sub-punto ➕, que era la **última** de la sección de prioridad máxima y la que llevaba más
+tiempo abierta (owner, 2026-08-11). Con ella **la tanda 🔴 queda vacía**: conexiones/deadlock
+y rendimiento se habían cerrado el 2026-08-20.
+
+**El problema, en una frase:** el sistema persistía **medio peso chileno** en ventas y
+vueltos —una moneda que no tiene centavos— porque el último redondeo lo decidía el cast de
+Postgres al entrar a `NUMERIC(18,4)`, fuera de la configuración del tenant. Consecuencias
+medidas: `pagos.vuelto = 994942.5000` en la base de dev, y `FLOOR`, `CEIL` y `HALF_UP`
+produciendo **el mismo total** sobre el mismo carrito, porque el cast los igualaba después.
+
+Se hizo en un plan de 15 tareas con el sistema quieto, que es como la entrada exigía que se
+hiciera. El aislamiento se ganó: **la tarea 14 destapó tres bugs de plata en el frontend
+que el gate en verde no veía**, y uno de ellos lo introdujo el propio fix.
+
+### Qué cubrió
+
+- **El motor cuantiza a la escala de la moneda** (`moneda.decimales`, el minor unit) con el
+  `modo_redondeo` del tenant, **al cerrar cada paso** de la fórmula y no dentro del bucle de
+  reglas. `nivel_redondeo` (`linea` | `documento`) elige dónde cierra, con una matriz que
+  rechaza con 400 las dos combinaciones sin sentido.
+- **Los totales se derivan de sus componentes**, nunca se cuantizan aparte:
+  `Σ totalLinea − dv + rv = totalFinal` exacto. Cuantizar cada total por su cuenta rompía
+  `MntTotal = MntNeto − Desc + Rec + IVA` en **3.965 de 10.000** casos.
+- **Con precio de góndola el total cierra a la etiqueta y el IVA absorbe el residuo**:
+  993 → 834 + 159 = 993 (antes 992). Con descuentos o recargos aplicados vuelve
+  `tasa × base`, que es lo correcto cuando el cliente ya no paga la etiqueta.
+- **El borde HTTP rechaza con 400** la plata que no cabe en la moneda: decoradores
+  `@EsMontoCobrado` / `@EsCosto` + `EscalaMonedaPipe`. Contado sobre el árbol final:
+  **30 campos marcados** (17 monto cobrado / 13 tasa) en 21 DTOs, con el pipe colgado en
+  **20 handlers de 11 controllers**.
+- **La pantalla no la deja tipear** (máscara, no recorte al enviar).
+- **La nota de crédito hereda el criterio congelado** en la venta que corrige y congela el
+  suyo; el **callback de la pasarela** cuantiza y registra el valor original en vez de
+  rechazar, porque informa un hecho consumado.
+- **`ESCALA_COSTO = 4` pasa a ser un concepto nombrado** en vez de un `toFixed(4)` repetido
+  a mano en 106 líneas de 17 archivos.
+- **`CHECK (decimales BETWEEN 0 AND 4)`** en `moneda`: el único freno que impide que el
+  cast vuelva a decidir en silencio.
+
+**Lo que hereda por construcción, y era el argumento de cierre:** el vuelto quedó entero
+**sin tocar `pagos.service.ts`**. Lo que no pasa por el motor no se cuantiza solo — o se
+rechaza en el borde, o se deriva de algo que el motor ya cerró.
+
+### Qué quedó afuera, y por qué
+
+**Los cinco sitios en HALF_UP fijo de la entrada original NO cambiaron de modo, y es la
+resolución correcta.** La entrada advertía que *"el criterio no es obvio y puede no ser el
+mismo"*, y al abrirlos resultó que no lo es: el CPP de inventario, el `costoPropuesto` de
+una receta y los de mermas son **tasas internas** —dinero por unidad, con costos por gramo
+de menos de \$1—, no montos cobrables, así que la perilla del tenant (que es política de lo
+que se le cobra al cliente) sesgaría la valorización en cada compra. El reparto de propinas
+usa mayores restos justamente para que Σ partes = total, y ahí no hay "modo" que elegir,
+solo un desempate determinista. **Lo que sí se arregló es el silencio**, que era la mitad
+del problema: los cinco quedaron con el porqué escrito en el sitio, en vez de un `HALF_UP`
+mudo que el próximo lector tuviera que interpretar como descuido. (El reparto de propinas
+ya recibía los decimales de la moneda antes del frente: lo único que cambió ahí es el
+comentario.)
+
+Con entrada propia en [`pendientes.md`](pendientes.md), porque cada uno pesa por su cuenta:
+el IVA vs el descuento de nivel venta (pesa más que todo esto y ninguna cuantización lo
+arregla), la NC como documento, la denominación mínima de efectivo, los ~30 DTOs con
+`@IsNumberString` sin trazar, el punto fijo de `MoneyInput` con monedas de más de 0
+decimales, el punto ciego del `valor` de descuentos/recargos, el rename de
+`moneda.decimales` y la UF como moneda oficial.
+
+**Abierto y no bloqueante:** si `nivel = documento` + moneda de 0 decimales debe ser 400
+duro (lo implementado) o un aviso que el admin pueda aceptar.
+
+### Lo que lo fija
+
+Los cuatro mutantes del plan mueren: `totalLinea` cuantizado por su cuenta, el impuesto del
+desbruteo de vuelta a `Q(tasa × base)`, `cuantizar()` fuera del cierre de línea, y la NC
+leyendo el modo vigente en vez del congelado.
+
+### Las tres cosas que solo aparecieron ejecutando
+
+1. **Un conteo del backlog que era falso, y de forma estructural.** La decisión (d) decía
+   "8 tests de aceptación rompen": rompen **3**. Los specs de DTO usan `plainToInstance` +
+   `validate()`, que **no ejerce el pipe** — la arquitectura movió la validación al borde
+   HTTP y el conteo asumía que viviría en el decorador. Consecuencia medida, no supuesta:
+   **la validación de escala no existe fuera del borde HTTP**.
+2. **La spec se contradecía a sí misma** y solo se vio al correr: marcar `precioBase` como
+   monto cobrado hacía que **la API rechazara su propia sugerencia de precio**. Un precio de
+   lista es una **tasa**; cruza a monto cobrado recién en la multiplicación.
+3. **El fix del frontend introdujo un bug peor que el que arreglaba**: tipear `1` `.` `5`
+   `0` `0` en CLP guardaba **1** en vez de 1500, en silencio. El bug original al menos lo
+   rechazaba el backend con 400. Se revirtió la máquina de estados y las tres migraciones a
+   `decimales: 4`.
+
+### La lección de proceso
+
+**Los tests montaban `MoneyInput` sin `v-model` real**, así que ninguno de los tres bugs de
+plata del frontend era visible para el gate — build, typecheck y las revisiones de código
+pasaban en verde. Lo que los encontró fue reproducir **tecla por tecla** contra el
+componente montado. Un componente de entrada de plata sin un test que simule tipeo real no
+está probado, está compilado.
+
+### La entrada, verbatim
+
+Con la advertencia de siempre: **las citas de línea quedan como estaban** — describen el
+código en el momento en que se midió el problema, no el de hoy.
+
+> - [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
+>   (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
+>   — 🧱 **la segunda de las dos que quedan en esta sección: no se toca suelta.**
+>   se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
+>   arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
+>   - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
+>     **división**, así que redondea de verdad, y el resultado se persiste en
+>     `item_producto.costo_actual`.
+>   - `items.service.ts` → `costoPropuesto` de una receta (`ROUND_HALF_UP` explícito).
+>   - `propinas/utils/mayores-restos.ts` → el reparto de propina entre garzones.
+>   - `mermas.service.ts` (dos sitios) → costo × cantidad.
+>   - `inventario.service.ts:818-821` → `cantidad × costoUnitario` del kardex. **Agregado el
+>     2026-08-15 por la lente de dinero de la auditoría de `inventario`**, que lo encontró
+>     buscando otra cosa. Es el mismo mecanismo sin consecuencia nueva, así que no abre
+>     entrada propia — pero el título de arriba dice "cuatro" y **son cinco**: quien tome
+>     esta entrada tiene que barrer, no ir a la lista.
+>
+>   Antes de replicar el arreglo: **el criterio no es obvio y puede no ser el mismo**. El de
+>   la conversión se decidió porque el valor se persiste en `NUMERIC(18,4)`; el reparto de
+>   propinas usa mayores restos justamente para que la suma de las partes dé el total, y ahí
+>   cambiar el modo puede romper esa propiedad. Cada uno pide su análisis.
+>
+>   ➕ **En la misma familia, y más incómodo:** `subtotal`, `descuento_aplicado`,
+>   `total_linea` y los totales de cabecera llegan del motor con `escala_calculo` decimales
+>   (6 por default) y entran a columnas `NUMERIC(18,4)`. **Hoy ese recorte lo hace Postgres**
+>   — que es exactamente el escenario que el docblock de `convertirAMonedaOficial` describe
+>   como "lo que hay que evitar". Que ahí sea así y en la conversión no, es una
+>   inconsistencia real; no se tocó porque queda fuera de lo que el owner pidió ("las
+>   conversiones a moneda oficial") y porque cambiarlo mueve importes ya persistidos de forma.
+
+📌 **La entrada tenía razón en la advertencia y se equivocaba en el título, otra vez.**
+Decía "cuatro" y eran cinco —ya corregido en su propio texto el 2026-08-15— pero además
+**el sub-punto ➕, que estaba escrito como apéndice, era el problema grande**: los cinco
+sitios nombrados en el título terminaron sin cambiar de modo, y lo que rompía plata de
+verdad era el recorte que hacía Postgres. Es la tercera vez que este backlog confirma lo
+mismo: *una entrada es un punto de partida, no un enunciado verificado*.
+
+---
+
 ## El N+1 de la personalización de recetas y combos: medido en las cuatro formas, y el que faltaba (2026-08-20)
 
 Cierra la entrada *"N+1 al resolver personalización de recetas/combos"*, que estaba `[~]`

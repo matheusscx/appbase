@@ -4,9 +4,17 @@ Backlog de correcciones que se **difirieron a propósito** mientras trabajamos e
 harness, para no mezclar el meta-trabajo (reglas, gates, docs) con cambios de código de
 producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra.
 
-> 🔴 **Antes de tomar cualquier entrada de este archivo, leé la sección
-> ([🧱 redondeo de plata](#-prioridad-máxima--redondeo-de-plata)).** Es prioridad máxima y
-> va sola y aislada: los otros dos temas que agrupaba se cerraron el 2026-08-20.
+> ✅ **La tanda 🔴 se terminó el 2026-08-21.** Era la sección de prioridad máxima que
+> encabezaba este archivo y sus tres temas están cerrados: conexiones/deadlock y
+> rendimiento el 2026-08-20, **redondeo de plata el 2026-08-21**. Todo el detalle está en
+> [`resueltos.md`](resueltos.md). **Ya no hay una sección que leer antes que las demás**:
+> las entradas se toman por lo que hace falta para tomarlas, según la tabla de abajo.
+>
+> ⚠️ Este aviso reemplaza al que apuntaba a una sección que ya no existe. Es la **cuarta
+> vez** que hay que corregir un puntero a un frente cerrado de esta tanda —una doc que
+> nombra un frente que ya no está hace frenar al próximo agente por algo que no existe—,
+> así que esta vez se corrigieron en el mismo commit los tres lugares: este aviso, la tabla
+> de orden de abajo y la lista *"🛑 Detenerse y preguntar"* de `CLAUDE.md`.
 
 Regla de este archivo: **acá solo vive lo que falta hacer.** Cuando una entrada se cierra,
 en el mismo commit se muda —con el texto de su cierre— a
@@ -23,7 +31,6 @@ saber cuáles se podían tomar sin preguntar nada.
 
 | Sección | Qué hace falta para tomarla |
 |---|---|
-| 🔴 Redondeo de plata | Nada, pero va sola y con el sistema quieto |
 | 1. Mecánico | Nada: el arreglo ya está decidido y escrito en la entrada |
 | 2. Medir primero | Abrir un archivo o correr algo. No es una pregunta para el owner |
 | 3. Ya decidido, falta construir | Nada del owner: ya contestó. Es trabajo con diseño adentro |
@@ -40,99 +47,75 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 ---
 
-## 🧱🔴 PRIORIDAD MÁXIMA — redondeo de plata
-
-> 🔴 **Lo más importante que hay abierto en este backlog.** Decisión del owner
-> (2026-08-11). Está primero en el archivo a propósito: **cuando se retome el backlog, esto
-> va antes que cualquier otra entrada**, incluidas las 🚩 de producción de más abajo.
-> ⚠️ **Corregido el 2026-08-18:** la razón original de esta frase —el agotamiento del pool de
-> conexiones, que dejaba la API muerta con diez operaciones simultáneas— está **cerrada**
-> (ADR-020, ver `resueltos.md`).
-> ⚠️ **Corregido otra vez el 2026-08-20:** la pieza residual de orden de locks de fila
-> **también se cerró** (ver `resueltos.md` § "El orden de bloqueo de filas de la bandeja de
-> desfases"), así que el tema "Conexiones / deadlock" ya no sostiene nada. Por decisión del
-> owner el título de la sección dejó de nombrarlo —una doc que sigue nombrando un frente
-> cerrado hace frenar al próximo agente por algo que no existe—, y con él se actualizaron el
-> enlace al ancla de acá arriba y la lista de "🛑 Detenerse y preguntar" de `CLAUDE.md`.
-> ⚠️ **Y una tercera vez, el mismo 2026-08-20: rendimiento también se cerró** (ver
-> `resueltos.md` § "El N+1 de la personalización de recetas y combos"). Queda **una** entrada:
-> redondeo de plata. Con eso se cae la premisa de *"van juntas"* —no hay con qué juntarla—
-> pero **no** la del aislamiento, que tiene evidencia propia y sigue más abajo.
-
-**Esto NO se toca de a pedazos ni de arrastre dentro de otra tarea: va en una pasada
-dedicada, con el sistema quieto.**
-
-| Tema | Entrada |
-|---|---|
-| ~~Conexiones / deadlock~~ | ✅ **Cerrado del todo.** El agotamiento del pool, el 2026-08-18 (ADR-020); los dos ciclos de orden de lock de la bandeja de desfases, el 2026-08-20. Los dos en [`resueltos.md`](resueltos.md) |
-| ~~Rendimiento~~ | ✅ **Cerrado el 2026-08-20**, medido con carga concurrente y en las cuatro formas de línea, no solo en la más barata. En [`resueltos.md`](resueltos.md) |
-| Redondeo de plata | *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* (abajo), con su sub-punto de `subtotal`/`total_linea` entrando a `NUMERIC(18,4)` |
-
-**Por qué en aislamiento, con la evidencia que lo originó:**
-- El arreglo del redondeo se hizo **por partes** y hubo que revertirlo: cubría el precio que
-  se muestra y no el que se guarda, y de paso abría una divergencia entre lo cobrado a la
-  tarjeta y lo persistido que antes no existía (ver [`resueltos.md`](resueltos.md)).
-- La tabla de sitios del deadlock quedó **stale dos veces en el mismo día**, las dos porque
-  una tarea de feature corrió las líneas de `ventas.service.ts` por encima.
-
-**Lo que el cierre de rendimiento le dejó servido a esta entrada** (2026-08-20): *"en qué
-orden y con qué escala se acumulan las líneas"* —la pregunta por la que rendimiento iba
-primero— ya está medida. Una venta de 5 líneas de receta con grupos son **113 consultas** a
-la base y **todas salen por la misma conexión**: el `Promise.all` del carrito corre sobre el
-manager de la transacción, así que las líneas se resuelven en serie y en el orden del
-carrito, no en paralelo. El detalle está en [`resueltos.md`](resueltos.md).
-
-Mientras tanto: si una tarea de producto **necesita** tocar algo de esta lista, se anota acá
-y se consulta — no se resuelve de paso. Un N+1 nuevo que se introduzca sí se saca en el
-momento; lo que se difiere es abrir este frente.
-
-### La entrada, íntegra
-
-Estaba repartida por el archivo con punteros cruzados. Acá está. Las de "Conexiones /
-deadlock" y "Rendimiento" ya no están: se cerraron y se mudaron a
-[`resueltos.md`](resueltos.md).
-- [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
-  (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
-  — 🧱 **la segunda de las dos que quedan en esta sección: no se toca suelta.**
-  se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
-  arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
-  - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
-    **división**, así que redondea de verdad, y el resultado se persiste en
-    `item_producto.costo_actual`.
-  - `items.service.ts` → `costoPropuesto` de una receta (`ROUND_HALF_UP` explícito).
-  - `propinas/utils/mayores-restos.ts` → el reparto de propina entre garzones.
-  - `mermas.service.ts` (dos sitios) → costo × cantidad.
-  - `inventario.service.ts:818-821` → `cantidad × costoUnitario` del kardex. **Agregado el
-    2026-08-15 por la lente de dinero de la auditoría de `inventario`**, que lo encontró
-    buscando otra cosa. Es el mismo mecanismo sin consecuencia nueva, así que no abre entrada
-    propia — pero el título de arriba dice "cuatro" y **son cinco**: quien tome esta entrada
-    tiene que barrer, no ir a la lista.
-
-  Antes de replicar el arreglo: **el criterio no es obvio y puede no ser el mismo**. El de
-  la conversión se decidió porque el valor se persiste en `NUMERIC(18,4)`; el reparto de
-  propinas usa mayores restos justamente para que la suma de las partes dé el total, y ahí
-  cambiar el modo puede romper esa propiedad. Cada uno pide su análisis.
-
-  ➕ **En la misma familia, y más incómodo:** `subtotal`, `descuento_aplicado`,
-  `total_linea` y los totales de cabecera llegan del motor con `escala_calculo` decimales
-  (6 por default) y entran a columnas `NUMERIC(18,4)`. **Hoy ese recorte lo hace Postgres**
-  — que es exactamente el escenario que el docblock de `convertirAMonedaOficial` describe
-  como "lo que hay que evitar". Que ahí sea así y en la conversión no, es una inconsistencia
-  real; no se tocó porque queda fuera de lo que el owner pidió ("las conversiones a moneda
-  oficial") y porque cambiarlo mueve importes ya persistidos de forma.
-
----
-
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
 El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
 respuesta del owner.**
 
-✅ **Vacía desde el 2026-08-15.** Tenía **22 entradas** y salieron en dos tandas
-paralelizadas: **21 arregladas** y **1 elevada a la sección 4**, porque al abrirla resultó ser
-una decisión de producto y no una mecánica (el `LIMIT` del historial de PIN). El detalle de
-las dos tandas, con los errores que se cometieron en el camino, está en
-[`resueltos.md`](resueltos.md).
+✅ **Estuvo vacía del 2026-08-15 al 2026-08-21.** Tenía **22 entradas** y salieron en dos
+tandas paralelizadas: **21 arregladas** y **1 elevada a la sección 4**, porque al abrirla
+resultó ser una decisión de producto y no una mecánica (el `LIMIT` del historial de PIN). El
+detalle de las dos tandas, con los errores que se cometieron en el camino, está en
+[`resueltos.md`](resueltos.md). Volvió a poblarse con los minors del frente de redondeo, que
+son de una sola pasada y están agrupados abajo.
+
+### Los minors que dejó el frente de redondeo de plata (2026-08-21)
+
+Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tests que no
+discriminan lo que dicen fijar, y tipos flojos. Se juntaron en una entrada porque se hacen
+en una sola pasada y ninguno vale una entrada propia. **Citas verificadas el 2026-08-21.**
+
+- [ ] **Comentarios y tipos que quedaron flojos** (backend)
+  - `calculo-precios.engine.ts:493` — el docblock que existe **para que nadie revierta** la
+    cuantización al `.map` dice *"51 + 51 = 102 y una línea de −2"*, y el número real es
+    **101 / −1** (el segundo descuento se topea contra 49,5 y cuantiza a 50). Un lector que
+    verifique la cuenta va a desconfiar del resto del comentario, que es correcto.
+  - `calculo-precios.engine.ts:81` — `nivelRedondeo` es `string` y no
+    `'linea' | 'documento'`. Un typo cae **en silencio** al comportamiento de `'linea'` en
+    vez de fallar en compilación. (`modoRedondeo`, dos líneas más arriba, tiene la misma
+    forma.)
+  - `reembolso-callback.handler.ts:30` — `MODO_REDONDEO_FALLBACK = 'HALF_UP'` duplica el
+    `default:` interno de `modoToRounding`. Mismo valor hoy, nada los mantiene sincronizados.
+  - El `if` del tope compara el monto fino contra un tope ya cuantizado y emite la
+    advertencia *"no se aplicó completo"* en casos donde la traza queda **idéntica** al
+    solicitado. Aviso espurio, no es bug de plata.
+  - `items.service.ts` — `eq4`, `margenPct` y los `cacheado`/`deltaCosto` de la bandeja de
+    desfases siguen con literal `4` en vez de `ESCALA_COSTO`. Inconsistencia de forma, no de
+    valor: el propio comentario copiado nombra `eq4`, así que un lector puede esperar que ya
+    estuviera unificado.
+  - `usePropina.ts` — `sugerirPropina` redondea a **0 decimales hardcodeado**; para un
+    tenant con moneda de 2 decimales la sugerencia queda mal redondeada. Preexistente.
+
+- [ ] **Tests que no discriminan lo que dicen fijar** (backend + frontend) — cada uno
+  sobrevive a su propio mutante:
+  - `calculo-precios.engine.spec.ts` → *"la suma de las trazas de descuento da el descuento
+    aplicado"* (hoy `:1305`) usa **una sola** regla, así que no puede fallar por lo que dice
+    fijar. Con dos descuentos del 12,5% sobre 100 en CLP empieza a discriminar.
+  - Dos `expect` tautológicos en el mismo spec. ⚠️ Las líneas que el ledger del frente
+    anotaba (`:1278`, `:1423`) **ya no apuntan a ellos**: las tareas 12-14 corrieron el
+    archivo. Hay que buscarlos por conducta —un `expect` cuyo valor esperado se deriva del
+    mismo cálculo que produce el valor observado— y no por número de línea.
+  - La cuantización de `valorSolicitado` quedó **sin test**: revertirla deja la suite en
+    verde. Falta un caso topeado en CLP.
+  - `tenants.service.spec.ts` → *"acepta nivel documento en una moneda con decimales"* (hoy
+    `:729`) solo afirma `r.nivelRedondeo`, que se arma con `dto.nivelRedondeo` sin ir a la
+    base — el `manager.query` está mockeado y nadie mira qué se le pasó. **El nombre promete
+    cobertura de persistencia que no tiene**; la única prueba real contra el `SET` usa
+    `'linea'`.
+  - `montoTolerancia` es el único monto sobre `NUMERIC(18,6)` y su ruta **no tiene ni un
+    e2e**; lo único que evita el 400 es la regla valor-vs-cadena, fijada solo a nivel unit.
+  - `recargos.vue` recibió el mismo `onModoChange` que `descuentos.vue` **sin test análogo**.
+    El código es simétrico y su spec sigue verde, que es justo el problema.
+
+- [ ] **El cuaderno de anti-patrones excede su propio tope** (docs) —
+  [`anti-patterns.md`](anti-patterns.md) tiene **22 entradas `### ❌`** y su regla 3 fija el
+  tope en **20**. Ya estaba en 21 antes del frente de redondeo, que sumó una (fusionando de
+  entrada sus dos caras en vez de abrir dos).
+  **El arreglo está escrito en la propia regla 3** y en ese orden: pasar a `### ✅` lo que ya
+  esté automatizado, **fusionar** entradas que sean caras del mismo error, y recién entonces
+  eliminar la más antigua sin reincidencia. Se difiere porque aplicarlo pide juzgar bugs
+  ajenos, y hacerlo de arrastre dentro de una tarea de documentación era exactamente el
+  atajo equivocado.
 
 ⚠️ **Antes de repartir la próxima tanda, leer la regla que salió de éstas** (misma entrada de
 `resueltos.md`), porque no es la que uno esperaría:
@@ -387,6 +370,31 @@ decisión que no es mía).
   en `costo_propuesto_omitido` es lo primero. Si el síntoma es ese, el arreglo puede ser
   tan barato como releer bajo lock; si aparece un caso donde el desfase se silencia, sube
   de sección y de prioridad.
+
+- [ ] **"Moneda oficial" se resuelve por DOS criterios distintos según el método, y ahora
+  uno de ellos decide el redondeo de la plata** (backend, visto 2026-08-21 en el frente de
+  redondeo; **preexistente**) — en `MonedasService`, `decimalesOficiales` resuelve la moneda
+  oficial por `tenant_moneda.es_default = true`, y `resolverMonedaOficial` por
+  `pais.moneda_oficial_id`. Son la **misma noción** con dos fuentes.
+  **Por qué dejó de ser cosmético:** de `decimalesOficiales` sale la escala a la que se
+  cuantiza toda la plata de una venta y con la que el borde HTTP rechaza con 400. Si los dos
+  criterios pueden divergir, un tenant cuya moneda `es_default` no sea la oficial de su país
+  cierra sus ventas en una escala y valida en otra.
+  **Lo que hay que medir primero, y es barato:** ¿puede divergir hoy? El alta de tenant
+  siembra la oficial como default, y la doc dice que la oficial no se puede deshabilitar
+  —pero *"cambiar el default"* sí es una operación expuesta (`PATCH /monedas/:id/default`).
+  Si diverge, esto sube de sección; si no puede, es una unificación de nombres.
+
+- [ ] **`Scope.REQUEST` contagia el controller entero, y no está medido** (backend,
+  2026-08-21) — `EscalaMonedaPipe` es request-scoped, y Nest sube el scope al controller
+  anfitrión. Eso alcanza a `GET /items` —la lectura más caliente del POS— y al listado de
+  ventas: ahora se instancian **por request**.
+  Es el trade-off documentado y aceptado al elegir el diseño (un interceptor no servía:
+  `intercept()` no recibe `ArgumentMetadata`, y sin metatype no hay clase donde leer las
+  marcas). **Lo que falta es el número**, no la decisión: medir con la carga concurrente que
+  ya se usó para el cierre de rendimiento y comparar contra la línea de base de entonces.
+  Si no mueve la aguja, se anota y se cierra; si la mueve, la salida conocida es no colgar
+  el pipe del handler de lectura.
 
 ---
 
@@ -800,6 +808,121 @@ empezarlas.
   cuentas, y un `500` vuelve a distinguir un caso desde afuera. Sigue inalcanzable por la
   misma razón, y se arregla en el mismo momento y con la misma decisión.
 
+### Lo que el frente de redondeo de plata dejó afuera a propósito (2026-08-21)
+
+Cada uno tiene decisión tomada en
+[`specs/2026-08-20-redondeo-de-plata-decisiones.md`](../superpowers/specs/2026-08-20-redondeo-de-plata-decisiones.md)
+y quedó **fuera de la pasada** por la regla de aislamiento: dos cambios del motor en una
+misma tanda es lo que obligó a revertir el arreglo anterior. Las citas de línea se
+verificaron el 2026-08-21, después del frente.
+
+- [ ] 🔴 **Un descuento de nivel venta baja lo cobrado pero NO la base del IVA** (backend,
+  decisión f) — **el que más pesa de esta lista, y ninguna cuantización lo arregla.** El
+  bucle de pasos de nivel venta (`calculo-precios.engine.ts:901-930`) solo tiene ramas para
+  `'descuentos'` y `'recargos'`: **el paso `impuestos` no existe a nivel venta.** Con un
+  descuento global, la boleta declara más IVA del que corresponde a lo cobrado y
+  `IVA ≠ tasa × MntNeto` — que es justo la relación que un DTE con `DscRcgGlobal` afecto
+  exige.
+  ⚠️ **No confundirlo con la consecuencia elegida del desbruteo** (decisión e: con precio de
+  góndola el IVA absorbe el residuo y difiere de `tasa × base` en un peso). Están separados
+  en [`features/impuestos.md`](../features/impuestos.md) justamente porque quien audite una
+  boleta puede "arreglar" aquélla creyendo que persigue ésta. **Acá el monto persistido está
+  mal; allá está bien y lo que sobra es la multiplicación.**
+  Es un frente propio del motor: va solo, con el sistema quieto, como fue éste.
+
+- [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
+  informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
+  monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las
+  líneas no tienen relación exigida con ese monto. Falta el **desglose de IVA** y el
+  **cuadre cabecera↔líneas**.
+  ⚠️ Quien lo tome tiene que contemplar que el camino **se dispara también por el webhook de
+  reembolso** (`reembolso-callback.handler.ts`), no solo por un humano — y ahí rige la
+  excepción del hecho consumado (no se rechaza, se cuantiza y se registra). Un guard nuevo
+  que no distinga los dos caminos pierde eventos de plata: ya pasó una vez durante este
+  frente y se cazó a tiempo.
+  El redondeo de la NC **sí** se cerró: hereda el criterio congelado de la venta que corrige
+  y congela el suyo.
+
+- [ ] **Denominación mínima de efectivo (`cashRounding`)** (backend + producto, decisión h)
+  — `moneda.decimales = 0` dice que el peso chileno existe; la **moneda física más chica es
+  \$10** (Ley 20.956 + Decreto 1.266). Son dos datos distintos y CLDR los modela separados
+  (`digits` + `cashRounding`).
+  **Lo que ya está hecho: nombrar el dato** para que `moneda.decimales` no quedara siendo
+  "el número que sirve para todo" (ver [`features/configuracion-monedas.md`](../features/configuracion-monedas.md)).
+  **Lo que falta: la columna y su consumidor** — deliberadamente juntos, porque una columna
+  sin consumidor repetiría el patrón que este mismo frente documentó como problema.
+  ⚠️ Ese redondeo **no toca el documento tributario ni el impuesto**: es una diferencia de
+  caja aparte, así que su lugar en el modelo no es el mismo y hay que decidir dónde se
+  contabiliza.
+
+- [ ] **Los ~30 DTOs con `@IsNumberString` sin trazar hasta su punto de persistencia**
+  (backend, decisión d) — medidos: **66 usos, 29 evidentemente plata**. `@IsNumberString`
+  dice que es un número, no que quepa en la moneda; la misma auditoría que destapó este
+  frente podría encontrar más sitios donde el redondeo real lo sigue haciendo Postgres.
+  **Es un barrido, no un arreglo puntual**, y por eso no entró: el criterio para cada campo
+  es *monto cobrado* vs *tasa*, que es exactamente donde la spec de este frente se
+  contradijo a sí misma y hubo que corregirla al ejecutar.
+  ⚠️ **Buscar por conducta, no por decorador**: un campo puede estar sin marcar y aun así
+  cubierto porque su handler no lo persiste, y otro marcado puede no tener el pipe colgado.
+  El estado de partida está en [`patterns/backend.md` §3.1](../patterns/backend.md).
+
+- [ ] **El punto fijo de `MoneyInput` con `v-model` y monedas de más de 0 decimales**
+  (frontend) — 🔴 **hoy solo muerde en campos de costo; el día que un tenant tenga una
+  moneda de más de 0 decimales como oficial, caen TODAS las pantallas de plata.** Y el seed
+  ya trae **UF (4)** y **USD (2)**.
+  **El mecanismo, ya diagnosticado:** `formatMontoManual` (`app/utils/currency-format.ts`)
+  hace `abs.toFixed(cfg.decimals)` rellenando la parte decimal completa, y la máscara trunca
+  lo que sigue. En USD, teclear `1` `2` `.` `5` `0` deja `1.00`. Con 0 decimales no pasa —
+  `toFixed(0)` es idempotente.
+  **Está fijado por tests que afirman el comportamiento ACTUAL** (los dos `describe`
+  *"limitación conocida"* de `MoneyInput.spec.ts`): quien lo arregle **tiene que ver esos
+  tests fallar**, y ahí re-migrar los tres campos de costo que se revirtieron
+  (`mermas.costoUnitario`, `items.precioBase`/`costo`, `grupos-modificadores.precioExtra` y
+  `lotePrecio`). Detalle en [`patterns/frontend.md` §8](../patterns/frontend.md).
+  ⚠️ **Ojo con el orden**: arreglarlo mal es peor que no arreglarlo. El primer intento de
+  este frente hizo que tipear `1` `.` `5` `0` `0` en CLP guardara **1** en vez de 1500, en
+  silencio — el bug original al menos lo rechazaba el backend con 400. Se reproduce **tecla
+  por tecla** contra el componente montado o no se reproduce: el gate en verde no lo ve.
+
+- [ ] **Los tres guards de elegibilidad de la NC no corren por el webhook, y uno de ellos
+  probablemente debería** (backend, 2026-08-21) — en `VentasService.crearNotaCredito` los
+  chequeos viven dentro de `if (params.validarVentaElegible)`, flag que **solo manda el
+  camino manual**. Por el callback de la pasarela no corre ninguno: ni *"no se emite una NC
+  sobre otra NC"*, ni el de estado `pagada`/`pagada_parcial`, ni el de `config_calculo`.
+  ⚠️ **Los dos últimos están así a propósito y NO hay que "arreglarlos"**: un hecho ya
+  consumado no se rechaza por configuración faltante (es exactamente el fix que salvó este
+  frente — un guard incondicional habría hecho perder el evento). **El que queda en duda es
+  el de NC-sobre-NC**, que no es un dato faltante sino un reembolso apuntando al documento
+  equivocado, y ahí registrar en silencio puede ser peor que fallar ruidoso.
+  **Antes de tocar nada: ¿es alcanzable?** Hay que ver si una orden de pasarela puede quedar
+  vinculada a una venta que es NC. Si no lo es, esto se anota y se cierra.
+
+- [ ] **El signo del abono en `POST /pagos`** (backend, hallazgo del análisis del redondeo,
+  2026-08-21) — quedó fuera del frente porque no es escala sino signo, y el decorador de
+  signo es otra pieza. Hay que abrir el DTO y el service, medir qué pasa hoy con un monto
+  negativo, y recién entonces escribir la entrada de verdad: **ésta es un puntero, no un
+  enunciado verificado.**
+
+- [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
+  afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera
+  la spec al revés**, entendiéndolo como dato de formato de UI. Es el minor unit de la
+  moneda. Un nombre como `minor_unit` o `decimales_minor_unit` cierra la duda en el punto de
+  lectura, que es donde se produce.
+  **Por qué no entró:** toca frontend, propinas y seeder, y meterlo en el frente de redondeo
+  habría sido exactamente el arrastre que el aislamiento de la tanda 🔴 impedía.
+  **Mientras tanto el significado está escrito** en
+  [`features/configuracion-monedas.md`](../features/configuracion-monedas.md), que es el
+  documento que inducía la lectura equivocada.
+
+- [ ] **La UF como moneda oficial de un tenant** (backend + producto, hueco declarado desde
+  la investigación del 2026-08-15) — hoy nada lo impide y el seed ya trae UF con 4
+  decimales. Se persistirían totales en una unidad en la que **ninguna pasarela cobra**.
+  ⚠️ **No es un problema de redondeo**, y por eso no entró: es *unidad de cuenta vs medio de
+  pago*. La cuantización haría lo suyo correctamente y el resultado seguiría sin poder
+  cobrarse.
+  ➕ Se cruza con el punto fijo de `MoneyInput` de más arriba, que con 4 decimales rompe
+  todas las pantallas de plata. **Quien tome cualquiera de las dos tiene que mirar la otra.**
+
 ---
 
 ## 4. Necesita que el owner conteste
@@ -818,6 +941,51 @@ PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
 
 ⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
 identidad de ese día. Ninguna bloquea nada que esté en curso.
+⚠️ **Y una más el 2026-08-21**, del cierre del redondeo de plata.
+
+- [ ] **El `valor` de descuentos y recargos NO se puede validar con el diseño del borde, y
+  no es un olvido: es estructural** (backend + producto, **medido 2026-08-21** por la
+  revisión de la tarea 11 del redondeo) — el borde nuevo valida la escala de la plata con un
+  decorador por campo (`@EsMontoCobrado` / `@EsCosto`) que un pipe lee del metadata. **Ese
+  campo no se puede marcar con ninguno de los dos**: es un monto fijo **o** un porcentaje
+  según el valor del campo hermano `modo`, y **ni el decorador ni el pipe leen campos
+  hermanos**.
+  🔴 **Dónde duele:** el punto ciego cae justo en el módulo donde la confusión
+  valor-vs-porcentaje **ya produjo un bug** (un `19` leído como tasa multiplica el impuesto
+  por cien). Y alcanza también al frontend: `configuracion/descuentos.vue` y
+  `configuracion/recargos.vue` (`form.valor`, `tramo.valor`) son los únicos inputs de plata
+  del inventario que **no** pueden apoyarse en el rechazo del backend.
+  **La pregunta para el owner es cuál de estos tres costos prefiere pagar**, porque no hay
+  una cuarta:
+  1. **Un validador que lea el hermano** — `class-validator` sí puede (`@ValidateIf` /
+     validador a nivel objeto), pero el pipe de escala trabaja por campo y habría que darle
+     una segunda forma de resolver la escala. Es infraestructura nueva para un caso.
+  2. **Partir el campo en dos columnas** (`valor_monto` / `valor_porcentaje`), cada una con
+     su marca. Es el arreglo limpio y el más caro: toca esquema, DTOs, motor, seeder y las
+     dos pantallas.
+  3. **Aceptar el hueco y documentarlo**, que es lo que rige hoy de hecho.
+  ⚠️ **Sin respuesta no se empieza**, y en particular **no se elige (1) por ser la más
+  barata**: la opción (2) es la única que hace que el dato deje de ser ambiguo también para
+  quien lo lee, no solo para quien lo escribe.
+
+- [ ] **Un descuento y un recargo que se compensan cobran \$1 menos que la misma línea sin
+  reglas** (backend + producto, **medido 2026-08-21** en la tarea 8 del redondeo) — la rama
+  de "el total cierra a góndola" solo corre **sin reglas aplicadas** en la línea. Si hay un
+  descuento y un recargo que se anulan entre sí, `baseImponible == subtotalNeto` —el cliente
+  pagó exactamente la etiqueta— pero la línea cae igual a la rama de fórmula: **992 en vez
+  de 993**.
+  O sea: **dos líneas donde el cliente pagó lo mismo emiten documentos distintos**, con un
+  peso de diferencia y sin nada en el ticket que lo explique.
+  **La pregunta para el owner es cuál de las dos reglas quiere**, y son incompatibles:
+  1. *"La etiqueta manda cuando el cliente paga la etiqueta"* — la condición pasa a ser
+     `baseImponible == subtotalNeto` (lo que el cliente **pagó**) en vez de "sin reglas
+     aplicadas" (**cómo** llegó ahí). Cierra la discontinuidad.
+  2. *"La etiqueta manda solo si no se tocó nada"* — la regla actual. Más simple de explicar
+     y de auditar: una línea con reglas se calcula con la fórmula, punto.
+  ⚠️ **No es una elección técnica y no la puede tomar un agente**: cambia lo que declara un
+  documento tributario. Está acá y no en la sección 3 por eso.
+  📌 El caso es raro por construcción (exige un descuento y un recargo que se cancelen
+  exactamente) pero **no es hipotético**: lo produjo la búsqueda combinatoria del frente.
 
 - [ ] **El garzón "Mostrador" existe para tenants SIN salones, y gestionarlo exige el módulo
   `Salones`** (backend + producto, **medido 2026-08-16** al cerrar el borde duro de módulos) —

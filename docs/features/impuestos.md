@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-31
+**Last Updated**: 2026-08-21
 
 ---
 
@@ -25,6 +25,11 @@ guarda solo los **impuestos adicionales** (`tipo='otro'`) que el usuario eligió
 ese item; un item `afecto` lleva el IVA del país sí o sí, agregado por el motor al
 resolver la línea, y un item `exento` no lo lleva nunca — ver
 [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
+
+🔴 **Si venís a construir la emisión fiscal, leé primero
+[El IVA persistido y la tasa congelada](#el-iva-persistido-y-la-tasa-congelada-dos-razones-distintas-para-que-no-se-multipliquen-2026-08-21):**
+el IVA que la venta guardó puede no ser `porcentaje_aplicado × base`, por dos causas
+distintas de las cuales **solo una es un defecto**.
 
 ### Why does it exist?
 
@@ -293,6 +298,58 @@ clasificación tributaria." Omitirlo es el camino normal — con la derivación 
 que normalizar, porque el IVA ya no se guarda. Del mismo modo, mandar
 `clasificacionTributaria` junto a `tipo: 'ingrediente'` es 400: lo que no aplica no se
 acepta en silencio.
+
+### El IVA persistido y la tasa congelada: dos razones distintas para que no se multipliquen (2026-08-21)
+
+**Leer esto antes de tocar el frente fiscal.** `ventas_impuestos` guarda la **tasa**
+(`porcentaje_aplicado`) al lado del **monto** (`valor_aplicado`), y desde el cierre del
+redondeo de plata hay casos en los que **la multiplicación no reproduce el monto**. Son dos
+causas independientes. Están separadas acá a propósito: si se leen como una sola, quien
+audite una boleta va a "arreglar" la consecuencia elegida creyendo que persigue el defecto.
+
+#### (1) Consecuencia **elegida**: el precio de góndola cierra y el IVA cede
+
+En una línea con `precio_incluye_impuesto` y **sin descuentos ni recargos aplicados**, el
+impuesto no se calcula: es lo que sobra entre el bruto cuantizado y el neto cuantizado, para
+que el cliente pague exactamente el precio que vio (ver *Algoritmo* en
+[motor-calculo-precios.md](./motor-calculo-precios.md)). La fila queda así:
+
+| Góndola | `subtotal` (neto) | `valor_aplicado` | `porcentaje_aplicado` | `0,19 × 834` |
+|---|---|---|---|---|
+| 993 | 834 | **159** | `0.1900` | **158** |
+
+O sea `valor_aplicado ≠ porcentaje_aplicado × base`, por **un peso**. No es un bug: es la
+decisión del owner de que la etiqueta manda. **`valor_aplicado` es lo que se cobró y es la
+fuente de verdad**; `porcentaje_aplicado` congela con qué tasa se resolvió la línea, no una
+fórmula que se pueda re-ejecutar.
+
+⚠️ **Consecuencia concreta el día que se arme el DTE:** recomputar `MntIVA` como
+`TasaIVA × MntNeto` en vez de leer `valor_aplicado` va a dar **un peso de diferencia** por
+línea, y `MntTotal` va a dejar de cuadrar contra lo que la venta cobró. El emisor tiene que
+**leer el balde congelado, nunca recalcularlo**. Si la certificación exigiera
+`IVA = tasa × base` por línea, lo que se revierte es la decisión de cierre a góndola, no el
+redondeo — queda anotado como deuda de revisión conocida en
+[ADR-010](../adr/010-preparacion-sii-datos-fiscales.md).
+
+Dónde vive: `ventas.service.ts` persiste `porcentajeAplicado: traza.tasa` junto a
+`valorAplicado: traza.monto` para los impuestos de línea (a diferencia de descuentos y
+recargos, que guardan `null` cuando la regla era de monto fijo).
+
+#### (2) Defecto **diferido**: un descuento de nivel venta no baja la base del IVA
+
+El paso `impuestos` **no corre a nivel venta**: los pasos de línea y los de venta son
+disjuntos. Un descuento aplicado a la venta entera baja lo cobrado pero **no** la base
+imponible que las líneas ya declararon, así que el IVA persistido queda calculado sobre una
+base mayor que la realmente cobrada.
+
+Esto **sí** es un defecto, pesa más que (1) y **ninguna cuantización lo arregla** — quedó
+fuera del alcance del frente de redondeo con entrada propia en
+[`agent/pendientes.md`](../agent/pendientes.md).
+
+**La diferencia que importa:** en (1) el monto persistido es el correcto y la
+multiplicación es la que sobra; en (2) el monto persistido es el incorrecto. Tocar el
+desbruteo para "reparar" la identidad multiplicativa reintroduce el descuadre de góndola
+(993 → 992) sin mover un milímetro (2).
 
 ### `VentasService`
 

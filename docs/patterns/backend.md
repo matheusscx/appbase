@@ -101,6 +101,58 @@ update con `@IsOptional()`. Campos `numeric` con `@IsNumberString()`.
 > `inputmode="decimal"` (nunca `type="number"`) — ver [frontend.md §7](./frontend.md).
 > Mandar un `number` produce `400 "X must be a number string"`.
 
+### 3.1 Plata que entra por API: la escala la valida el borde
+
+`@IsNumberString` dice que es un número; **no** dice que quepa en la moneda. Medio peso
+chileno pasa ese validador y no existe. Todo campo de plata se marca, y el handler que lo
+recibe cuelga el pipe:
+
+```ts
+// dto — la marca dice QUÉ escala le toca
+@EsMontoCobrado() monto: string;   // escala de la moneda oficial del tenant (CLP → 0)
+@EsCosto()       precioBase: string; // ESCALA_COSTO = 4, no depende de la moneda
+
+// controller — el pipe recorre el árbol del DTO y rechaza con 400
+@Post() crear(@Body(EscalaMonedaPipe) dto: CreatePagoDto) { … }
+```
+
+**La distinción que hay que acertar antes de marcar**: `@EsMontoCobrado` es plata que
+alguien **paga o recibe**; `@EsCosto` es una **tasa** —un precio unitario, un costo, un
+extra— que después se multiplica y recién ahí cruza a monto cobrado. Marcar un precio de
+lista como monto cobrado hace que la API rechace su propia sugerencia de precio.
+
+Tres cosas que muerden y no se deducen del código:
+
+1. **Cada módulo que use `@Body(EscalaMonedaPipe)` tiene que importar `MonedasModule`.**
+   El lookup es por `moduleRef.injectables`, no por providers globales. Olvidarlo **tumba
+   el arranque entero** del backend: typecheck y unit quedan verdes, solo lo ve el e2e.
+2. **Un DTO anidado sin `@Type()` degrada a "no valida nada", en silencio.** El pipe baja
+   por el árbol, así que la marca puede estar en un hijo (`PagoItemDto.monto`).
+3. **La validación de escala existe SOLO en el borde HTTP.** Un `plainToInstance` +
+   `validate()` no ejerce el pipe, y una llamada directa al service tampoco. Un spec de
+   DTO que "prueba" la escala no está probando nada.
+
+**El contrato de las pasarelas:** todo provider **valida en su borde y nunca redondea
+ahí**. Un provider que redondee estaría cambiando lo que el documento dice que se cobró; la
+escala del cable es de cada pasarela y vive en su adaptador, no en una columna del tenant.
+
+⚠️ **Y la excepción, que es de criterio y no de implementación:** esto protege *la plata
+que una **persona** ingresa*, que es una intención corregible. Un **callback de pasarela
+informa un hecho consumado** —la plata ya se movió— y ahí rechazar no deshace nada, solo
+pierde el evento: se cuantiza y se registra el valor original en la traza. Ver
+[reembolsos-nota-credito.md](../features/reembolsos-nota-credito.md).
+
+📌 El sistema sigue cuantizando **sus propios cálculos** en silencio (el CPP de inventario
+produce más de 4 decimales y se recorta). No es incoherencia: la regla es sobre lo que
+alguien escribe.
+
+Punto ciego conocido, con entrada en [`agent/pendientes.md`](../agent/pendientes.md): el
+`valor` de descuentos y recargos **no se puede marcar** — es monto fijo o porcentaje según
+el campo hermano `modo`, y ni el decorador ni el pipe leen campos hermanos.
+
+Implementación: `common/decorators/escala-moneda.decorator.ts` y
+`common/pipes/escala-moneda.pipe.ts`.
+
 ---
 
 ## 4. Controller — guards y `tenantId` del token

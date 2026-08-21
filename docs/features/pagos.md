@@ -147,6 +147,16 @@ Response (200):
   vuelto superen el total a cobrar: ese excedente no hay con qué devolverlo. El frontend ya
   lo marcaba en `resumenCobro` (`excedenteSinVuelto`); ahora también es guard de backend.
 - Los pagos son inmutables: no hay edición ni eliminación (soft delete solo para auditoría).
+- **`monto` se rechaza con 400 si trae más decimales de los que admite la moneda oficial
+  del tenant** (`@EsMontoCobrado` + `EscalaMonedaPipe`; medio peso chileno no existe). El
+  contrato completo, incluido el de las pasarelas —**validan en su borde y nunca redondean
+  ahí**— está en [backend.md](../patterns/backend.md).
+- **`vuelto` no se cuantiza acá y no hace falta**: se deriva de un total que el motor de
+  precios ya cerró en la escala de la moneda, así que hereda enteros por construcción. Era
+  el caso medido (`pagos.vuelto = 994942.5000`) y se arregló sin tocar `pagos.service.ts`.
+- ⚠️ **La excepción a la regla del 400 es el callback de reembolso de la pasarela**, que
+  informa un hecho ya consumado: se cuantiza y se registra, no se rechaza. Vive en
+  [reembolsos-nota-credito.md](./reembolsos-nota-credito.md), que es donde está ese camino.
 
 ---
 

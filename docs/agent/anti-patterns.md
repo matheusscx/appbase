@@ -18,6 +18,12 @@ conocimiento que no se puede derivar leyendo el código correcto.
    *Aplicado el 2026-08-11, que fue la primera vez: el tope estaba en 25 y nunca se había
    ejecutado. Se fusionaron las cinco de `vue-tsc` estricto en una, y la de Tailwind pasó a
    `✅` porque `check-design-tokens.mjs` ya la enforcea. Quedó en 20 sin perder una línea.*
+
+   ⚠️ **Hoy hay 22 y el tope está excedido.** Ya estaba en 21 antes del cierre del redondeo
+   de plata (2026-08-21), que sumó una —fusionando de entrada sus dos caras en una sola
+   entrada, en vez de abrir dos—. Aplicar la regla 3 en serio pide juzgar bugs ajenos, así
+   que **quedó como entrada propia** en [`pendientes.md`](pendientes.md) en lugar de
+   resolverse de arrastre en una tarea de documentación.
 4. Formato fijo: qué pasó → ❌ mal → ✅ bien → una línea de porqué.
 
 ---
@@ -113,6 +119,45 @@ const total = new Decimal(precio).mul(new Decimal(1).plus(tasa));
 Y las tasas se guardan en decimal: `0.19`, nunca `19`. Un `19` interpretado como tasa
 multiplica el impuesto por cien.
 → *Candidato a regla de lint sobre operadores aritméticos en campos de monto.*
+
+### ❌ Redondear plata en el lugar equivocado — dos caras del mismo error
+
+Usar `Decimal` no alcanza: importa **dónde** se aplica el redondeo. El frente de redondeo
+de plata (2026-08) pagó las dos caras.
+
+**(a) Demasiado pronto — redondear dentro del bucle de reglas en vez de al cerrar el paso.**
+
+```ts
+// MAL — cuantiza regla por regla: el error se COMPONE
+for (const regla of reglas) acumulado = cuantizar(aplicar(regla, acumulado));
+
+// BIEN — fino adentro del paso, cuantizado al cerrarlo
+for (const regla of reglas) acumulado = aplicar(regla, acumulado);
+acumulado = cuantizar(acumulado);
+```
+
+Es el caso del **Vancouver Stock Exchange**: un índice que perdió la mitad de su valor en
+dos años porque redondeaba en cada operación en vez de al final. Acá el equivalente medido
+fue el piso en cero: cuantizar las trazas al volver del bucle daba
+`descuentoAplicado = 101` sobre un neto de 100, y una línea en **−1**.
+
+**(b) Demasiado tarde y por separado — cuantizar un total por su cuenta en vez de derivarlo
+de sus componentes.**
+
+```ts
+// MAL — cinco cuantizaciones independientes; la identidad se rompe
+totalFinal = cuantizar(neto.minus(desc).plus(rec).plus(iva));
+
+// BIEN — el total ES la suma de los componentes ya cuantizados
+totalFinal = netoQ.minus(descQ).plus(recQ).plus(ivaQ);
+```
+
+Rompe `MntTotal = MntNeto − Desc + Rec + IVA`, que es lo que un documento tributario tiene
+que cumplir. **Medido: 3.965 de 10.000** carritos generados quedaban descuadrados.
+
+Un total nunca se cuantiza aparte: se **deriva** de partes que ya lo están. Y si el residuo
+tiene que ir a algún lado, se decide a quién —en el desbruteo lo absorbe el IVA— en vez de
+dejarlo repartido en el último decimal de cada componente.
 
 ### ❌ Borrado físico de filas
 

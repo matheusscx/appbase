@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-06-28
+**Last Updated**: 2026-08-21
 
 ---
 
@@ -28,11 +28,14 @@ auditable. El cálculo de dinero usa **Decimal.js** en todo (nunca `number`).
 - **Incluido**: cálculo por línea y por venta; reglas planas (% o monto fijo),
   tramos (`por_mayor` por cantidad, `por_monto_venta` por monto) y filtro por
   método de pago; desbruteo cuando `precio_incluye_impuesto`; `base` vs
-  `compuesto`; orden de fórmula configurable; `escala_calculo` + `modo_redondeo`.
+  `compuesto`; orden de fórmula configurable; `escala_calculo` + `modo_redondeo`;
+  **cuantización a la escala de la moneda oficial** al cerrar cada paso, con
+  `nivel_redondeo` (`linea` | `documento`) eligiendo dónde cierra.
 - **NO incluido (futuro)**: reglas por fecha (`promocional`) y por vencimiento
   (`mora`, `pronto_pago`) — requieren datos de venta/crédito aún inexistentes;
-  condiciones `monto_minimo`/`cantidad_minima`/`customer`/`categoria`;
-  persistencia de ventas; conversión a moneda oficial.
+  condiciones `monto_minimo`/`cantidad_minima`/`customer`/`categoria`.
+  (Persistencia de ventas y conversión a moneda oficial **ya existen** desde entonces —
+  ver `convertirAMonedaOficial`, más abajo.)
 
 ---
 
@@ -129,12 +132,11 @@ propósito—, así que repetirlo no informa, solo tapa. Lo que sí distingue la
 `ResultadoLinea.advertencias`, que no se toca. El párrafo de arriba advierte que ese
 choque de textos es alcanzable: lo es, y por eso está contemplado en vez de asumido.
 
-⚠️ **Un borde donde el colapso sí esconde algo**, anotado en `docs/agent/pendientes.md`:
-`impuestos` **no tiene índice único de nombre por tenant**, a diferencia de `descuentos` y
-`recargos` (`uq_descuentos_tenant_nombre_vivo`, `uq_recargos_tenant_nombre_vivo`). Dos
-impuestos distintos con el mismo nombre, ambos pausados, dan un solo aviso. El lector no
-pierde nada accionable —los dos mensajes serían idénticos y tampoco podría distinguirlos—
-pero la causa de fondo es que falta esa unicidad, no la deduplicación.
+✅ **El borde donde el colapso escondía algo se cerró el 2026-08-16.** `impuestos` era la
+única de la familia sin índice único de nombre por tenant, así que dos impuestos distintos
+con el mismo nombre, ambos pausados, daban un solo aviso. Ahora lleva
+`uq_impuestos_tenant_nombre_vivo`, como `descuentos` y `recargos` — ver
+[impuestos.md](./impuestos.md) y `docs/agent/resueltos.md`.
 
 Va en **dos lugares y no en uno**: `sinRepetidas` en el motor, y un `Set` por `itemId` en
 `advertirItemsPausados`, porque esa advertencia se empuja **después** de que el motor
@@ -154,7 +156,12 @@ la respuesta de la venta —el mismo formato de siempre, que consumen los toasts
 POS—. Ese contrato no cambia; la partición en `titulo`/`detalle` solo viaja por el
 motor y la previsualización del carrito.
 
-Todos los montos son strings con `escala_calculo` decimales.
+Todos los montos son strings con `escala_calculo` decimales — pero eso es **formato, no
+valor**: `fmt()` hace `toFixed(escalaCalculo)` sobre un Decimal ya cuantizado a la escala
+de la moneda oficial del tenant, así que un total de CLP viaja como `"1000.000000"` y no
+como `"1000.500000"` (ver *La escala de cierre*, más abajo). Con
+`nivelRedondeo = 'documento'` las líneas llegan finas de verdad y solo los totales están
+cuantizados.
 
 ---
 
@@ -228,9 +235,60 @@ tasa × base, no la resta"*.
 Por línea: neto unitario (desbruteo si incluye impuesto) × cantidad → recorrer la
 fórmula (`paso 1,2,3`) sobre un acumulador. Descuentos restan, recargos suman;
 el `%` se calcula sobre el neto (`base`) o sobre el acumulado (`compuesto`).
-Impuestos sobre la base ya descontada/recargada (sin impuesto sobre impuesto).
-Cada paso redondea con `escala_calculo` + `modo_redondeo`. Reglas a nivel venta
-se aplican sobre el neto agregado.
+Impuestos sobre la base ya descontada/recargada (sin impuesto sobre impuesto) —
+**salvo la rama de góndola de arriba**, donde el IVA es el residuo y no una fórmula
+sobre esa base. Reglas a nivel venta se aplican sobre el neto agregado.
+
+### La escala de cierre: dónde se decide el último decimal (2026-08-21)
+
+Hasta el cierre del redondeo de plata, **el último redondeo de una venta no lo decidía
+nadie**: los montos llegaban del motor con `escala_calculo` decimales (6 por default) y
+Postgres los recortaba al castear a `NUMERIC(18,4)`. Eso persistía medio peso chileno en
+ventas y vueltos, ignoraba el `modo_redondeo` del tenant (`FLOOR`, `CEIL` y `HALF_UP`
+producían el mismo total) y ocurría fuera de toda configuración. Hoy la escala final la
+decide el motor.
+
+**Dos escalas, y no hay que confundirlas:**
+
+| | Qué es | De dónde sale | Qué decide |
+|---|---|---|---|
+| `escala_calculo` | La precisión del **borrador** | Preferencias del tenant (default 6) | **Nada de lo persistido.** Solo cuánta precisión conservan los cálculos intermedios |
+| `decimalesMoneda` | El **minor unit** de la moneda oficial | `moneda.decimales` (`CHECK 0..4`) | El valor final de todo monto que la venta guarda |
+
+La frase *"`escala_calculo` no decide nada de lo persistido"* recién ahora es verdadera.
+
+**Dónde se cuantiza — la regla que hace que el documento cuadre.** Al cerrar cada **paso**
+de la fórmula, nunca en cada regla:
+
+- **Dentro** de un paso —varias reglas encadenadas en `compuesto`— el acumulado corre fino.
+  Cuantizar regla por regla **compone** el error (es el caso del Vancouver Stock Exchange).
+- **Al cerrar el paso**, el acumulado pasa a ser el que el documento declara:
+  `neto_Q − Σ descuentos_Q + Σ recargos_Q`. El paso siguiente parte de ahí.
+
+Importa por el IVA: la base imponible es el acumulado al inicio del paso `impuestos`. Sobre
+un acumulado fino, el impuesto declarado no sería `tasa ×` la base que la boleta muestra.
+Con tres pasos como máximo, el error queda acotado a tres redondeos y no a uno por regla.
+
+**Los totales se derivan, no se cuantizan aparte.** `total_final` sale de sus componentes
+(`neto − descuentos + recargos + impuestos`); cuantizar cada total por su cuenta rompe esa
+identidad. Medido durante el frente: **3.965 de 10.000** carritos generados quedaban con
+`MntTotal ≠ MntNeto − Desc + Rec + IVA`. Lo mismo vale por línea: `Σ totalLinea − dv + rv`
+tiene que dar `totalFinal` exacto.
+
+**`nivelRedondeo` elige dónde cierra** (preferencia del tenant, default `linea`):
+
+- **`linea`** — cada línea cierra en la escala de la moneda y el total es la suma. Los
+  totales del documento ya son suma de valores cuantizados, así que no se vuelven a tocar.
+- **`documento`** — las líneas corren finas de punta a punta y **solo los totales** se
+  cuantizan al final (la regla mexicana). Rechazada por 400 con moneda oficial de 0
+  decimales: no hay nada que ganar y las líneas quedarían con decimales que la moneda no
+  tiene. Ver [preferencias-financieras.md](./preferencias-financieras.md).
+
+**Lo que hereda por construcción.** Nada fuera del motor tuvo que cambiar: el vuelto de un
+pago en efectivo (`pagos.vuelto`, que llegaba a persistir `994942.5000`) queda entero
+porque se calcula sobre un total que ya lo está. Un monto que no pasa por el motor no se
+cuantiza solo — **se rechaza en el borde HTTP** (ver
+[backend.md](../patterns/backend.md)).
 
 **La conversión a moneda oficial: el único lugar que hace `precio × tasa`.**
 Cuando el ítem está en otra moneda, su precio se convierte antes de armar la línea.
@@ -388,9 +446,18 @@ Tres decisiones que no se deducen de la tabla:
 
 **`ventas.config_calculo` (`jsonb`)** guarda la config con la que se calculó
 (`formula`, `calculoDescuentos`, `calculoRecargos`, `escalaCalculo`,
-`modoRedondeo`). Sin ella el congelado no es interpretable: el mismo 10% da un
-total distinto según el orden de la fórmula y según base|cascada, las dos cosas
-editables desde Preferencias. Va en `jsonb` y no en columnas por una razón de
+`modoRedondeo`, y desde 2026-08-21 `nivelRedondeo` y `decimalesMoneda`). Sin ella el
+congelado no es interpretable: el mismo 10% da un total distinto según el orden de la
+fórmula, según base|cascada y según con qué escala cerró, las tres cosas editables desde
+Preferencias.
+
+⚠️ **`decimalesMoneda` es dato derivado congelado, no configuración.** Sale de la moneda
+oficial del tenant —la moneda en que la venta se persiste— y va al snapshot por la misma
+razón que `tasa_cambio` se congela por línea: si mañana se corrige la moneda del tenant, la
+venta vieja tiene que seguir explicando por qué cerró donde cerró. **Quien lee una venta
+vieja lee este snapshot, nunca las preferencias vigentes** — es lo que hace que una nota de
+crédito pueda heredar el criterio del documento que corrige (ver
+[reembolsos-nota-credito.md](./reembolsos-nota-credito.md)). Va en `jsonb` y no en columnas por una razón de
 forma —`formula` es un array y el objeto se lee entero—, no por contradecir la
 decisión de columnas del resto.
 

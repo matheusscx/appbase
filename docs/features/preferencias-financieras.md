@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Desarrollo Backend/Frontend  
-**Last Updated**: 2026-06-24
+**Last Updated**: 2026-08-21
 
 ---
 
@@ -15,9 +15,14 @@ Preferencias Financieras es una pantalla de configuración que permite al admini
 1. **Modo de cálculo de descuentos**: `base` (todos los descuentos se aplican sobre el precio neto) o `compuesto` (cada descuento se aplica en cascada sobre el resultado anterior).
 2. **Modo de cálculo de recargos**: `base` (todos sobre precio neto) o `compuesto` (en cascada).
 3. **Orden de la fórmula de precios**: reordenar los tres pasos (descuentos, recargos, impuestos) en la secuencia que prefiera.
-4. **Nivel de redondeo** (`nivelRedondeo`): `linea` (cada línea de la venta se cuantiza a la escala de la moneda y el total es la suma) o `documento` (las líneas quedan a `escalaCalculo` y solo el total final se cuantiza — la regla mexicana). El motor de cálculo de precios la consume vía `ConfigCalculo`.
+4. **Escala de cálculo** (`escalaCalculo`, default 6): la precisión del **borrador**, o sea de los cálculos intermedios. **No decide nada de lo persistido** — eso lo decide la escala de la moneda oficial.
+5. **Modo de redondeo** (`modoRedondeo`, default `HALF_UP`): con qué criterio se redondea (`HALF_UP` | `HALF_EVEN` | `FLOOR` | `CEIL`). Es el modo que usa la cuantización final, así que hoy los cuatro producen totales distintos sobre el mismo carrito.
+6. **Nivel de redondeo** (`nivelRedondeo`, default `linea`): `linea` (cada línea de la venta se cuantiza a la escala de la moneda y el total es la suma) o `documento` (las líneas quedan a `escalaCalculo` y solo el total final se cuantiza — la regla mexicana). El motor de cálculo de precios la consume vía `ConfigCalculo`.
+7. **Tolerancia de conciliación** (`montoTolerancia`, default `'0'`): diferencia máxima permitida antes de rechazar una conciliación.
 
-La configuración se persiste en la base de datos y es consultada por el motor de cálculo de precios (pendiente) al procesar ventas.
+⚠️ **Esta lista enumeraba 3 campos cuando la pantalla mostraba 6.** Se corrigió el 2026-08-21, contando los controles del `.vue` en vez de asumirlos: hoy son **7**, y `nivelRedondeo` es el que agregó el frente de redondeo de plata.
+
+La configuración se persiste en la base de datos y **el motor de cálculo de precios la consume en cada venta** desde junio de 2026 (ver [motor-calculo-precios.md](./motor-calculo-precios.md)). Este documento decía *"pendiente"* hasta el 2026-08-21.
 
 ### Why does it exist?
 
@@ -35,7 +40,6 @@ Diferentes tipos de negocio y regímenes fiscales requieren distintas estrategia
   - Acceso restringido a admin del tenant (guard RBAC)
   
 - **NOT included (future):**
-  - Motor de cálculo de precios que consume estas preferencias (ver `Motor de cálculo de precios` en CLAUDE.md)
   - Interfaz gráfica de reordenamiento interactivo (drag-and-drop); la v1 espera un array en el body
   - Evaluación de condiciones de descuentos/recargos (`monto_minimo`, `cantidad_minima`, etc.)
 
@@ -351,4 +355,4 @@ npm test -- modules/tenants/tenants.controller.spec.ts
 
 - **Default al crear un tenant:** la fórmula default es `['descuentos', 'recargos', 'impuestos']` con `calculo_descuentos = 'base'` y `calculo_recargos = 'base'`. Ver seeder en `backend/src/modules/seeder/seeder.service.ts`.
 - **Moneda:** la mayoría de las preferencias son globales por tenant, independientes de la moneda. La excepción es `nivelRedondeo`: el service la valida contra `MonedasService.decimalesOficiales(tenantId)` (misma noción de "moneda oficial" que usa el motor de precios) porque 'documento' solo tiene sentido si la moneda admite decimales.
-- **Fase siguiente:** una vez que el motor de cálculo de precios esté implementado, estas prefs serán consultadas en cada línea de venta para aplicar el descuento, recargo e impuesto en el orden y modo configurado.
+- **Consumo real (desde 2026-06-28):** el motor consulta estas prefs en cada línea de venta para aplicar descuento, recargo e impuesto en el orden y modo configurado, y las **congela** en `ventas.config_calculo` — junto con `nivelRedondeo` y la escala de la moneda con la que cerró. Cambiar una preferencia no reescribe el pasado: una venta vieja se lee con su propio snapshot.

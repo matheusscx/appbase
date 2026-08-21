@@ -113,6 +113,48 @@ Response (200): orden pública + extras
 - Índices nuevos: `pasarela_ordenes(venta_id)`, `pasarela_transacciones(orden_id)`
   (para el agregado de REFUNDs del listado de ventas).
 
+## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
+
+**La regla.** Una NC no redondea con las preferencias vigentes del tenant: lee el
+`config_calculo` **congelado en la venta original** —escala de la moneda y modo de
+redondeo— y cuantiza con ése. Después **congela el suyo propio**, copiando ese mismo
+snapshot en la NC, para que pueda leerse sola sin ir a buscar la venta que corrige.
+
+**Por qué.** La NC corrige *aquel* documento. Si el admin cambió el `modo_redondeo` de
+`FLOOR` a `HALF_UP` entremedio, una NC que use el criterio de hoy puede no cuadrar contra
+la venta que dice anular. El congelado es la misma idea de
+[ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) aplicada al redondeo, y usa la
+misma función `cuantizar()` del motor de precios — no una fórmula propia, que derivaría en
+silencio el día que el helper cambie.
+
+### La excepción del webhook: un hecho consumado se registra, no se rechaza
+
+Desde el frente de redondeo, la plata que **una persona** ingresa por API se **rechaza con
+400** si trae más decimales de los que la moneda admite (ver
+[backend.md](../patterns/backend.md)). **El callback de reembolso de la pasarela queda
+afuera de esa regla, a propósito.**
+
+| | Camino manual (`POST /ventas/:id/notas-credito`) | Callback de la pasarela |
+|---|---|---|
+| Qué es el monto | Una **intención** que se puede corregir | Un **hecho consumado**: la plata ya volvió al cliente |
+| Decimales de más | **400** — el cajero corrige y reintenta | **Se cuantiza** y se sigue |
+| Sin `config_calculo` en la venta | **400 ruidoso** — algo se rompió aguas arriba | Se persiste sin cuantizar antes que perder el evento |
+| Traza | El error mismo | `logger.warn` con el **número original** que informó la pasarela |
+
+**Rechazar el callback no deshace el cobro: solo pierde el evento.** El reembolso ya
+ocurrió del lado del proveedor, así que un 400 dejaría el sistema sin registro de plata que
+sí se movió, y sin NC que la explique. Por eso se cuantiza —con el criterio congelado en la
+venta, no con el vigente— y se deja en el log el valor exacto que llegó, para poder
+reconstruirlo después. Si el monto ya venía bien no se loguea nada.
+
+⚠️ Esto es también por qué el guard de `config_calculo` faltante vive **detrás** de
+`validarVentaElegible`: ese flag solo lo manda el camino manual. Un guard incondicional
+haría que el webhook perdiera exactamente el evento que esta excepción protege.
+
+Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
+(`ventas/reembolso-callback.handler.ts`) y el cierre de línea de
+`VentasService.crearNotaCredito`.
+
 ## Frontend
 
 - `ordenes/ReembolsoModal.vue`: prop `ventaId`; con venta vinculada muestra

@@ -33,15 +33,24 @@ No asumir reglas de negocio. Detenerse y consultar al usuario si la tarea:
   ni en `docs/features/`;
 - rompe compatibilidad **multi-tenant**, **multi-moneda**, **fiscal (SII)** o de
   **auditoría**;
-- exige una **dependencia nueva** (verificar antes si el stack actual la resuelve);
-- 🔴 abre el frente del **redondeo de plata**, prioridad máxima, que va **solo y aislado**,
-  nunca de arrastre dentro de otra tarea (sección 🔴 de `docs/agent/pendientes.md`).
-  Los otros dos que esta lista nombraba **salieron** el 2026-08-20, cerrados y en
-  `docs/agent/resueltos.md`: conexiones/deadlock (pool + orden de bloqueo de filas) y
-  rendimiento (el N+1 de la personalización, medido con carga concurrente). Nombrar acá un
-  frente cerrado hace frenar por algo que ya no existe. Un N+1 **nuevo** que introduzca la
-  tarea sí se saca en el momento: lo que se consulta es abrir el frente, no arreglar lo que
-  uno rompió.
+- exige una **dependencia nueva** (verificar antes si el stack actual la resuelve).
+
+✅ **La tanda 🔴 ya no existe: sus tres frentes están cerrados** y esta lista no nombra
+ninguno. Conexiones/deadlock (pool + orden de bloqueo de filas) y rendimiento (el N+1 de la
+personalización) salieron el **2026-08-20**; el **redondeo de plata**, el **2026-08-21**
+—el motor cuantiza a la escala de la moneda, la API rechaza con 400 la plata que no cabe y
+la pantalla no la deja tipear—. Todos en `docs/agent/resueltos.md`.
+
+⚠️ **Es la cuarta corrección de este párrafo por la misma causa, así que vale la regla más
+que el dato:** *nombrar acá un frente cerrado hace frenar al próximo agente por algo que ya
+no existe*, y cuesta más que no nombrarlo. Cuando un frente se cierra, este párrafo se
+actualiza **en el mismo commit** que el backlog.
+
+📌 Lo que sobrevive de esa tanda es el criterio, no la lista: **un frente que exige tocar el
+motor de cálculo va solo y con el sistema quieto** (primer punto de arriba), porque el
+arreglo anterior del redondeo se hizo por partes y hubo que revertirlo. Un N+1 **nuevo** que
+introduzca la tarea sí se saca en el momento: lo que se consulta es abrir un frente, no
+arreglar lo que uno rompió.
 
 **Investigación de mercado (al detenerse por una regla de negocio no documentada):** si
 además el mercado ya resolvió el tema (POS maduros: Toast/Square/Lightspeed…) y el owner
@@ -174,7 +183,9 @@ Lo mínimo para decidir si hay que leer más. El detalle vive en un solo lugar.
   moneda oficial.
 - **Motor de precios** — `precioNeto → pasos según tenant_formula_precio → totalFinal`;
   cada paso aplica sobre el acumulado. Lo modulan `items.precio_incluye_impuesto` y
-  `tenants.calculo_descuentos`.
+  `tenants.calculo_descuentos`. **Cada paso cierra cuantizado a la escala de la moneda
+  oficial** (`moneda.decimales`, el minor unit) con el `modo_redondeo` del tenant; los
+  totales se **derivan** de sus componentes, nunca se cuantizan aparte.
   → Antes de tocarlo: `docs/features/motor-calculo-precios.md`.
 - **Fiscal (SII)** — la emisión electrónica llega a futuro; se diseña compatible sin
   integrarla. Regla: congelar el hecho fiscal en la transacción, diferir lo que solo
@@ -282,7 +293,7 @@ Procedimiento completo: skill `verify-feature`.
 |---|---|
 | `docs/patterns/` | **Playbook backend/frontend — leer ANTES de planificar una feature** |
 | `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
-| `docs/agent/pendientes.md` | Backlog de correcciones diferidas, **ordenado por lo que hace falta para tomar cada entrada** (mecánico → medir → ya decidido → necesita respuesta del owner). Arriba de todo, la 🔴 prioridad máxima (redondeo de plata): va sola y aislada, nunca de arrastre |
+| `docs/agent/pendientes.md` | Backlog de correcciones diferidas, **ordenado por lo que hace falta para tomar cada entrada** (mecánico → medir → ya decidido → necesita respuesta del owner). Ya no hay sección de prioridad máxima: la tanda 🔴 se cerró el 2026-08-21 |
 | `docs/agent/resueltos.md` | Archivo de las entradas de `pendientes.md` ya cerradas, con el detalle de cada fix |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
 | `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |

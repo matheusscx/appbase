@@ -22,6 +22,42 @@ se muestra con un distintivo, está siempre habilitada y su tasa es fija en `1`.
 - Para marcar una moneda como predeterminada debe estar habilitada.
 - Al crear un tenant se habilita automáticamente su moneda oficial como predeterminada (tasa 1).
 
+### 🔴 `moneda.decimales` es el **minor unit**, no un dato de formato (2026-08-21)
+
+**Es lo que la moneda puede deber y cobrar**, no cuántos decimales se dibujan. CLP vale 0
+porque el peso chileno **no tiene centavos**: medio peso no existe, ni en la caja ni en la
+boleta ni en el cable de la pasarela. La presentación **se deriva** de ese número; no al
+revés.
+
+La distinción no es académica: mientras se leyó como dato de UI, el redondeo final de una
+venta lo terminó decidiendo el **cast de Postgres** al entrar a `NUMERIC(18,4)` —fuera de
+la configuración del tenant— y el sistema persistió medio peso chileno en ventas y vueltos.
+Esa lectura confundió a quien revisó la spec del arreglo, y lo que la indujo fue esta misma
+página: las dos secciones de formato de abajo presentaban `decimales` entre los campos de
+presentación.
+
+Quién lo consume ahora, y en ese orden:
+
+| Consumidor | Qué hace con `decimales` |
+|---|---|
+| Motor de precios (`ConfigCalculo.decimalesMoneda`) | **Cuantiza** cada monto que la venta persiste, con el `modo_redondeo` del tenant |
+| Borde HTTP (`@EsMontoCobrado` + `EscalaMonedaPipe`) | **Rechaza con 400** la plata que no cabe en la moneda |
+| `MoneyInput` (frontend) | **No deja tipear** más decimales de los que la moneda admite |
+| `formatMonto` / `Intl.NumberFormat` | Presentación — el último de la fila, no el primero |
+
+**`CHECK (decimales BETWEEN 0 AND 4)`** en la tabla `moneda`: es el único freno que impide
+que un valor mayor que la escala de las columnas de plata (`NUMERIC(18,4)`) devuelva la
+decisión al cast de Postgres sin que nadie se entere.
+
+⚠️ **`decimales` no es la denominación mínima de efectivo.** CLDR las modela separadas y
+son cosas distintas: en Chile el minor unit es 0 pero la moneda física más chica es \$10
+(Ley 20.956). Ese redondeo es una diferencia de caja, no toca el documento tributario ni el
+impuesto, y **no está implementado** — tiene entrada propia en
+[`agent/pendientes.md`](../agent/pendientes.md). No usar `decimales` para resolverlo.
+
+📌 El nombre es ambiguo y se sabe: renombrarlo toca frontend, propinas y seeder, así que
+también quedó como entrada propia del backlog.
+
 ## Rutas backend
 
 | Método | Ruta | Guard | Descripción |
@@ -51,7 +87,9 @@ Respuesta de `GET /api/monedas` (por item):
 
 ### Formato numérico por moneda
 
-Cada registro del catálogo `moneda` define cómo presentar montos en el UI:
+Estos tres campos del catálogo `moneda` **sí** son de presentación pura, a diferencia de
+`decimales` (ver arriba: es el minor unit, y quien lo consume primero es el motor de
+precios):
 
 | Campo | Descripción | Ejemplo Chile (CLP) | Ejemplo México (MXN) |
 |---|---|---|---|
@@ -63,8 +101,10 @@ Ejemplos: Chile `$ 1.000,50` — México `$ 1,000.50`. Son datos de catálogo (n
 
 ## Formato de precios en UI
 
-El catálogo `moneda` define **cómo se muestran y editan** los montos. El tenant no
-configura separadores ni locale; solo habilita monedas y define tasas de cambio.
+El catálogo `moneda` define **cómo se muestran y editan** los montos: `locale` y los dos
+separadores eligen la forma, y `decimales` **acota cuánto se puede escribir** porque acota
+cuánto se puede cobrar. El tenant no configura separadores ni locale; solo habilita monedas
+y define tasas de cambio.
 
 ### Arquitectura frontend
 
@@ -125,11 +165,19 @@ de moneda.
 
 En el seeder (`seeder.service.ts` → `seedMonedas`), definir en un solo lugar:
 
-- `codigoIso`, `simbolo`, `decimales`
+- `codigoIso`, `simbolo`, `decimales` — el **minor unit** real de la moneda, no el que
+  queda lindo. `CHECK (decimales BETWEEN 0 AND 4)`
 - `separadorDecimal`, `separadorMiles`
 - `locale` (BCP 47, ej. `es-CL`, `en-US`, `de-DE`)
 
 El store y el formateo la tomarán automáticamente en el próximo `ensureLoaded()`.
+
+⚠️ **Antes de que un tenant tenga una moneda de más de 0 decimales como oficial** (el seed
+ya trae UF con 4 y USD con 2): `MoneyInput` tiene un bug de punto fijo con `v-model` y
+`decimales > 0` —la primera tecla deja el campo en `x.00`— documentado en
+[frontend.md §8](../patterns/frontend.md) y con entrada propia en
+[`agent/pendientes.md`](../agent/pendientes.md). Hoy solo muerde en campos de costo; con
+una de ésas como oficial caen **todas** las pantallas de plata.
 
 ### Documentación técnica detallada
 
@@ -155,7 +203,8 @@ Patrones de implementación, archivos y tests: [frontend.md §8](../patterns/fro
 - `pais_moneda` (nueva) — puente país ↔ monedas disponibles, soft delete.
 - `tenant_moneda` — flags `es_default`/`habilitada` + `valor_del_dia`, soft delete.
 - `moneda`, `pais` — solo lectura (catálogos). En `moneda`: `locale`, `separador_decimal` y
-  `separador_miles` (configuración de presentación numérica).
+  `separador_miles` (presentación numérica) y `decimales` (**minor unit**, con
+  `CHECK (decimales BETWEEN 0 AND 4)` — no es presentación).
 
 ## Decisiones de diseño
 
@@ -163,5 +212,7 @@ Patrones de implementación, archivos y tests: [frontend.md §8](../patterns/fro
 - `TenantAdminGuard` protege las mutaciones; GET solo requiere `TenantGuard`.
 - La oficial se deriva de `pais.moneda_oficial_id`; `tenant_moneda` no tiene `es_oficial`.
 - `valor_del_dia` con `Decimal.js`/`NUMERIC(18,6)` — nunca `number` nativo.
-- Fuera de alcance: consumo de la tasa en el motor de cálculo de ventas y proveedor
-  externo de tipos de cambio. Ver [ADR-005](../adr/005-pais-moneda-y-moneda-oficial.md).
+- Fuera de alcance **de esta pantalla**: proveedor externo de tipos de cambio. Ver
+  [ADR-005](../adr/005-pais-moneda-y-moneda-oficial.md). El consumo de la tasa por el motor
+  de ventas **ya existe** (`CalculoPreciosService.convertirAMonedaOficial`, ver
+  [motor-calculo-precios.md](./motor-calculo-precios.md)).

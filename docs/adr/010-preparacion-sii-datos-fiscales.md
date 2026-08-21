@@ -43,6 +43,16 @@ todo compatible con SII, sin integrarlo.
 - Reglas exactas de redondeo del IVA del SII (el motor ya usa Decimal.js con redondeo
   configurable; se afina en la certificación).
 
+  ⚠️ **Actualización 2026-08-21 — este diferimiento dejó de ser neutro.** El cierre del
+  redondeo de plata tuvo que decidir *una* regla ahora, y decidió que con precio de
+  góndola el total cierra a la etiqueta y **el IVA absorbe el residuo**. Consecuencia:
+  `ventas_impuestos.valor_aplicado` puede diferir de `porcentaje_aplicado × base` en un
+  peso. **El emisor del DTE tiene que leer el balde congelado, nunca recalcularlo desde la
+  tasa.** Si la certificación exige `IVA = tasa × base` por línea, esa decisión se
+  revierte: queda registrada como **deuda de revisión conocida**, con el detalle y el
+  segundo motivo —independiente— en
+  [`features/impuestos.md`](../features/impuestos.md).
+
 ## Consequences
 
 ### Positive
