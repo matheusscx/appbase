@@ -17,6 +17,70 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El punto fijo de `MoneyInput`: el catálogo vuelve a ser editable en USD y UF (2026-08-21)
+
+Cierra la parte 🔴 de la entrada *"El punto fijo de `MoneyInput` con `v-model` y monedas de
+más de 0 decimales"*. Lo que quedó abierto —re-migrar `mermas` y `grupos-modificadores`—
+sigue en `pendientes.md` **con otro motivo**, que apareció al ir a hacerlo.
+
+**El problema, en una frase:** el precio del catálogo **no se podía editar** para un ítem en
+USD o UF. El campo quedaba muerto tras la primera tecla, en siete `MoneyInput` de
+`items.vue` e `inventario/index.vue`.
+
+### La causa
+
+`display` lo escribían dos fuentes —`syncFromMaska` y el `watch` de `props.modelValue`— sin
+árbitro. Con `v-model`, el valor que el componente emitía volvía por `modelValue`, el watch
+lo reformateaba con `formatMontoDisplay` → `toFixed(decimales)` **rellenando la escala
+completa** (`"1"` → `"1.00"`), y la tecla siguiente caía al final, donde `number.fraction`
+la truncaba de vuelta. Punto fijo.
+
+Con `decimals: 0` no pasaba, porque `toFixed(0)` es idempotente. Como la moneda oficial del
+seed es CLP, el bug vivió meses sin que nadie lo viera en las pantallas de todos los días.
+
+**El arreglo es una línea**: el watch no reformatea el **eco** del propio `emit`. Un cambio
+que viene de afuera —abrir un formulario, un reset del padre— sí, que es cuando el relleno a
+la escala completa es lo que se quiere. La comparación incluye la moneda, porque cambiar de
+moneda invalida el eco.
+
+### Lo que lo fija
+
+- Los dos tests que **afirmaban el bug** (`describe` *"limitación conocida … punto fijo"*)
+  se reescribieron como la conducta deseada y se los vio **fallar con el código viejo**
+  —`'1.00'` en vez de `'12.50'`, `'5.0000'` en vez de `'5.0500'`— antes de tocar el
+  componente. Después, mutante: sacando **solo** el guard del eco, esos dos vuelven a
+  fallar con los mismos números y los otros 16 quedan verdes.
+- La otra limitación conocida —el separador leído como agrupador de miles en monedas de 0
+  decimales— **sigue intacta y sigue documentada**: sus cuatro tests pasan sin tocarse. Era
+  el riesgo real de este arreglo, porque el intento anterior de este frente rompió justo
+  eso (`1.500` en CLP emitía `1`, un monto válido y menor, guardado en silencio).
+- **Smoke en el navegador real, tecla por tecla**, que es la única forma de reproducirlo:
+  USD `1,2,.,5,0` → `12.50`; UF `5,,,0,5,0,0` → `5,0500`, guardado y leído de la base como
+  `5.0500`; CLP `1,.,5,0,0` → `1.500`, que sigue siendo mil quinientos.
+
+### Lo que la ejecución desmintió del registro
+
+La entrada decía que al arreglar el punto fijo había que *"re-migrar los campos de costo que
+se revirtieron a `UInput`"*, como si fuera mecánico. No lo es: `MoneyInput` **necesita una
+moneda** para resolver separadores y locale, y ninguna de las dos pantallas tiene una a mano
+—`ProductoOpt` de `mermas` no trae `monedaId`, y `grupos-modificadores.vue` no menciona
+moneda en ningún lado—. Usar la oficial daría los separadores equivocados para un ítem en
+moneda extranjera. Se dejó sin hacer, con el motivo nuevo escrito en la entrada.
+
+Y midiendo eso apareció otra cosa que la entrada no nombraba: los campos de costo de
+`items.vue` usan `:moneda-id` **sin** el prop `decimales`, así que para un ítem en CLP la
+pantalla admite 0 decimales mientras `@EsCosto()` admite 4.
+
+### Los punteros que quedaron mintiendo
+
+Tres lugares afirmaban el bug en presente y se corrigieron **en el mismo commit**:
+`patterns/frontend.md §8`, el aviso de `features/configuracion-monedas.md` (*"antes de que
+un tenant tenga una moneda de más de 0 decimales como oficial…"*) y el cruce ➕ de la entrada
+de la UF en `pendientes.md`. Es la regla de `CLAUDE.md`: un frente cerrado que sigue nombrado
+hace frenar al próximo agente por algo que ya no existe.
+
+---
+
 ## Los minors del redondeo de plata: los tests que no podían fallar, y una regresión que solo vio el e2e (2026-08-21)
 
 Cierra **dos de las tres** entradas del grupo *"Los minors que dejó el frente de redondeo de

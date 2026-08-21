@@ -199,43 +199,36 @@ describe('MoneyInput', () => {
   })
 
   /**
-   * 🛑 La limitación MÁS grave del componente, y la razón de que `mermas.vue` y
-   * `grupos-modificadores.vue` NO usen `MoneyInput` para sus campos de costo.
+   * El punto fijo con decimales > 0, que hasta el 2026-08-21 dejaba el input muerto
+   * tras la primera tecla y era la razón de que `mermas.vue` y
+   * `grupos-modificadores.vue` NO usaran `MoneyInput` para sus campos de costo.
    *
-   * Con `v-model` real y una moneda de más de 0 decimales (o con el prop
-   * `decimales`), el input queda en **punto fijo tras la primera tecla**: el `watch`
-   * de `props.modelValue` reformatea con `toFixed(decimales)` —rellenando la parte
-   * decimal completa— y la tecla siguiente cae al final, donde `number.fraction` la
-   * trunca de vuelta. Mecanismo completo en el docblock de `display`
-   * (`MoneyInput.vue`).
+   * La causa era la doble escritura de `display`: el `watch` de `props.modelValue`
+   * reformateaba con `toFixed(decimales)` —rellenando la parte decimal completa—
+   * también cuando el valor entrante era el **eco del propio emit**, y la tecla
+   * siguiente caía al final, donde `number.fraction` la truncaba de vuelta.
    *
-   * Estos tests **afirman el comportamiento actual, que NO es el deseable**. Están
-   * para que nadie migre un campo de costo/tasa a `MoneyInput` sin enterarse: si
-   * alguien arregla el punto fijo, estos dos tests DEBEN fallar, y ahí se borran y
-   * se migran los campos.
-   *
-   * ⚠️ Solo se ve montando con `v-model` real y tecleando: un `setValue` de una sola
-   * pasada (ver el describe de arriba) pasa perfecto, porque el valor completo ya
-   * viene con la escala llena y el reformateo es idempotente.
+   * ⚠️ Solo se ve montando con `v-model` real y **tecleando**: un `setValue` de una
+   * sola pasada pasa perfecto aun con el bug, porque el valor completo ya viene con
+   * la escala llena y el reformateo es idempotente. Si estos tests se reescriben con
+   * `setValue`, dejan de proteger nada.
    */
-  describe('limitación conocida (documentada, no resuelta): con decimales > 0 el tecleo queda en punto fijo', () => {
-    it('documenta que en USD, "1","2",".","5","0" tecla por tecla queda en 1.00 (input muerto)', async () => {
+  describe('con decimales > 0 el tecleo entra completo (era el punto fijo)', () => {
+    it('en USD, "1","2",".","5","0" tecla por tecla da 12.50', async () => {
       const { modelo, input } = montarConVModel({ monedaId: 'usd-1' })
 
       await tipear(input, ['1', '2', '.', '5', '0'])
 
-      // Lo DESEABLE sería '12.50'. Lo que hace hoy:
-      expect(modelo.value).toBe('1.00')
-      expect(input.element.value).toBe('1.00')
+      expect(modelo.value).toBe('12.50')
+      expect(input.element.value).toBe('12.50')
     })
 
-    it('documenta que el prop `decimales` cae en lo mismo: por eso costo/tasa NO lo usa', async () => {
+    it('con el prop `decimales` (costo/tasa, escala 4) también entra completo', async () => {
       const { modelo, input } = montarConVModel({ monedaId: 'clp-1', decimales: 4 })
 
       await tipear(input, ['5', ',', '0', '5', '0', '0'])
 
-      // Lo DESEABLE sería '5.0500'. Lo que hace hoy: solo entra el primer dígito.
-      expect(modelo.value).toBe('5.0000')
+      expect(modelo.value).toBe('5.0500')
     })
 
     // La contraparte que explica por qué el bug pasó desapercibido: con 0 decimales

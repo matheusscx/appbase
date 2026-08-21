@@ -805,39 +805,28 @@ verificaron el 2026-08-21, después del frente.
   cubierto porque su handler no lo persiste, y otro marcado puede no tener el pipe colgado.
   El estado de partida está en [`patterns/backend.md` §3.1](../patterns/backend.md).
 
-- [ ] **El punto fijo de `MoneyInput` con `v-model` y monedas de más de 0 decimales**
-  (frontend) — 🔴 **el precio del catálogo no se puede editar para un ítem en USD o UF, hoy,
-  en `main`.** No es un riesgo futuro ni un problema solo de campos de costo: hay **siete
-  `MoneyInput` atados a una moneda que NO es la oficial** (`:moneda-id` del ítem o del
-  producto), y para cualquiera de esos ítems el campo queda muerto tras la primera tecla.
-  Las dos monedas están **sembradas**: UF (4) y USD (2).
-  **Los siete, medidos el 2026-08-21:**
-  - `pages/configuracion/items.vue:1606` — `form.precioBase`, el **precio de venta** del
-    catálogo (no un costo)
-  - `pages/configuracion/items.vue:1677` y `:1809` — `form.costo`
-  - `pages/configuracion/items.vue:1955` — `form.extrasPermitidos[].precioExtra`
-  - `pages/configuracion/items.vue:2103` — `grupo.opciones[].precioExtra`
-  - `pages/configuracion/items.vue:2329` — `ajusteForm.costoUnitario`
-  - `pages/inventario/index.vue:347` — `ajusteCostoForm.costoNuevo`
+- [ ] **`mermas` y `grupos-modificadores` siguen sin `MoneyInput`, y re-migrarlos no es
+  mecánico** (frontend + backend chico, **medido el 2026-08-21**) — el punto fijo que los
+  había expulsado **está arreglado** (ver [`resueltos.md`](resueltos.md)), así que la razón
+  original ya no existe. Pero al ir a re-migrarlos apareció otra, que la entrada anterior no
+  contemplaba: **`MoneyInput` necesita una moneda** para resolver separadores y locale, y
+  ninguna de las dos pantallas tiene una a mano.
+  - `mermas.vue` (`costoUnitario`): su `ProductoOpt` **no trae `monedaId`** — hay que
+    agregarlo al endpoint que alimenta el selector de productos.
+  - `grupos-modificadores.vue` (`precioExtra`, `lotePrecio`): **no menciona moneda en
+    ningún lado**, y sus opciones aplican a ítems que pueden estar en monedas distintas.
 
-  El octavo (`pages/propinas/index.vue:330`) también va por `:moneda-id`, pero ese id es
-  siempre el de la moneda **oficial** (`liquidacion-propinas.service.ts`
-  → `resolverMonedaOficial`), así que hoy no muerde: cae recién el día que la oficial tenga
-  decimales, junto con todas las pantallas que usan el prop `oficial`.
-  **El mecanismo, ya diagnosticado:** `formatMontoManual` (`app/utils/currency-format.ts`)
-  hace `abs.toFixed(cfg.decimals)` rellenando la parte decimal completa, y la máscara trunca
-  lo que sigue. En USD, teclear `1` `2` `.` `5` `0` deja `1.00`. Con 0 decimales no pasa —
-  `toFixed(0)` es idempotente.
-  **Está fijado por tests que afirman el comportamiento ACTUAL** (los dos `describe`
-  *"limitación conocida"* de `MoneyInput.spec.ts`): quien lo arregle **tiene que ver esos
-  tests fallar**, y ahí re-migrar los campos de costo que se revirtieron a `UInput`
-  (`mermas.costoUnitario`, `grupos-modificadores.precioExtra` y `lotePrecio`) — los de
-  `items.vue` nunca se revirtieron, están en la lista de arriba.
-  Detalle en [`patterns/frontend.md` §8](../patterns/frontend.md).
-  ⚠️ **Ojo con el orden**: arreglarlo mal es peor que no arreglarlo. El primer intento de
-  este frente hizo que tipear `1` `.` `5` `0` `0` en CLP guardara **1** en vez de 1500, en
-  silencio — el bug original al menos lo rechazaba el backend con 400. Se reproduce **tecla
-  por tecla** contra el componente montado o no se reproduce: el gate en verde no lo ve.
+  Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
+  extranjera, que es cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
+  La escala la sigue validando el backend con `@EsCosto()` (escala 4), así que lo que falta
+  es ayuda visual, no control: **por eso no bloquea nada y no se hizo de arrastre.**
+  Quien lo tome: los tres campos van con el prop `decimales` en 4, no con los decimales de
+  la moneda, porque `@EsCosto()` es escala fija.
+  ⚠️ **De paso, algo que apareció midiendo y no es esta entrada:** los campos de costo de
+  `items.vue` (`form.costo`, `precioExtra`) usan `:moneda-id` **sin** el prop `decimales`,
+  así que para un ítem en CLP la pantalla admite 0 decimales mientras el backend admite 4 —
+  un costo de `5,0500`/g es válido y no se puede tipear. Es preexistente y del mismo tema;
+  si se toma esta entrada, se toman juntos.
 
 - [ ] **Los tres guards de elegibilidad de la NC no corren por el webhook, y uno de ellos
   probablemente debería** (backend, 2026-08-21) — en `VentasService.crearNotaCredito` los
@@ -875,8 +864,11 @@ verificaron el 2026-08-21, después del frente.
   ⚠️ **No es un problema de redondeo**, y por eso no entró: es *unidad de cuenta vs medio de
   pago*. La cuantización haría lo suyo correctamente y el resultado seguiría sin poder
   cobrarse.
-  ➕ Se cruza con el punto fijo de `MoneyInput` de más arriba, que con 4 decimales rompe
-  todas las pantallas de plata. **Quien tome cualquiera de las dos tiene que mirar la otra.**
+  ➕ **El cruce que esta entrada tenía anotado ya no aplica:** apuntaba al punto fijo de
+  `MoneyInput`, que con 4 decimales rompía todas las pantallas de plata. Se arregló el
+  2026-08-21 y se verificó tecla por tecla justo con UF (`5,0500` tipeado, `5.0500`
+  persistido). O sea que la UF como oficial ya **no** arrastra ese problema de pantalla:
+  lo que queda de esta entrada es lo suyo propio —unidad de cuenta vs medio de pago—.
 
 ---
 

@@ -16,10 +16,9 @@ const props = withDefaults(
      * ítem en CLP (0 decimales)—, a diferencia de un monto cobrado, que se valida
      * a los decimales que la moneda admite.
      *
-     * ⚠️ **Hoy NINGÚN campo lo usa**, y no es casualidad: cualquier valor > 0 mete al
-     * input en el punto fijo descrito en el docblock de `display` (queda muerto tras
-     * la primera tecla). Se deja el prop porque la necesidad es real y el contrato es
-     * correcto, pero antes de usarlo hay que arreglar ese punto fijo.
+     * Estuvo sin usar hasta el 2026-08-21 porque cualquier valor > 0 metía al input en
+     * el punto fijo (ver el docblock de `display`). Arreglado eso, es el prop que usan
+     * los campos de costo/tasa.
      */
     decimales?: number
     placeholder?: string
@@ -52,45 +51,49 @@ const cfg = computed(() => {
  *
  * 🛑 **`display` lo escriben DOS fuentes** —`syncFromMaska` (lo que maska acaba de
  * enmascarar) y el `watch` de abajo (lo que `formatMontoDisplay` arma desde
- * `props.modelValue`)— y de ahí sale la limitación más grave de este componente:
+ * `props.modelValue`)—, y arbitrar entre las dos es todo el problema de este
+ * componente. La regla es: **el watch NO pisa lo que la persona está tecleando.**
  *
- * **Con `v-model` y una moneda de MÁS de 0 decimales (o con el prop `decimales`),
- * el input queda en punto fijo tras la primera tecla.** Medido, tecla por tecla,
- * sobre el componente montado con un padre que hace `v-model` de verdad:
+ * De no arbitrarlo salía el bug más grave que tuvo: con `v-model` y una moneda de
+ * más de 0 decimales, el input quedaba en **punto fijo tras la primera tecla**.
+ * Medido entonces, tecla por tecla, en USD sobre campo vacío:
  *
  * ```
- * USD (2 decimales), campo vacío:
- *   tecla "1" -> "1.00"      tecla "2" -> "1.00"      tecla "." -> "1.00"
- *   tecla "5" -> "1.00"      tecla "0" -> "1.00"
+ *   "1" -> "1.00"   "2" -> "1.00"   "." -> "1.00"   "5" -> "1.00"   "0" -> "1.00"
  * ```
  *
- * El mecanismo: se emite `unmasked` (`"1"`), el padre lo devuelve por
- * `props.modelValue`, este `watch` escribe
- * `formatMontoDisplay("1")` y `formatMontoManual` hace `abs.toFixed(cfg.decimals)`
- * (`currency-format.ts`), o sea **rellena a la escala completa** → `"1.00"`. La
- * tecla siguiente se agrega al final (`"1.002"`) y `fraction: 2` la trunca de vuelta
- * a `"1.00"`. Punto fijo: no entra ni un dígito más.
+ * El mecanismo: se emitía `unmasked` (`"1"`), el padre lo devolvía por
+ * `props.modelValue`, el watch escribía `formatMontoDisplay("1")` y
+ * `formatMontoManual` hace `abs.toFixed(cfg.decimals)` —o sea **rellena la escala
+ * completa** → `"1.00"`—; la tecla siguiente caía al final (`"1.002"`) y
+ * `fraction: 2` la truncaba de vuelta. Con `decimals: 0` no pasaba, porque
+ * `toFixed(0)` es idempotente: por eso la moneda oficial del seed (CLP) nunca lo
+ * exhibió y el bug vivió meses sin que se viera.
  *
- * Con `decimals: 0` (CLP) no pasa, porque `toFixed(0)` es idempotente y no hay nada
- * que rellenar — por eso la moneda oficial del seed (CLP, `seeder.service.ts`) no lo
- * exhibe y el bug pasó desapercibido.
+ * Lo que lo cierra es el guard del eco en el watch: el valor que vuelve del padre
+ * después de nuestro propio `emit` **no se reformatea**. Un cambio que viene de
+ * afuera (abrir un formulario, un reset) sí, que es cuando el relleno a la escala
+ * completa es lo que se quiere.
  *
- * ⚠️ **Por eso los campos de costo/tasa (escala 4) NO usan este componente**:
- * `mermas.vue` (`costoUnitario`) y `grupos-modificadores.vue` (`precioExtra`,
- * `lotePrecio`) se migraron a `MoneyInput :decimales="4"` y se **revirtieron a
- * `UInput inputmode="decimal"`** al medir que quedaban muertos. La escala de esos
- * campos la sigue validando el backend con `@EsCosto()`; lo que se resigna es la
- * ayuda visual, no el control. **No los vuelvas a migrar sin arreglar antes este
- * punto fijo** — el describe "limitación conocida" de `MoneyInput.spec.ts` lo fija.
- *
- * Arreglarlo es su propia tarea: hay que sacar la doble escritura de `display`
- * (que el `watch` no pise lo que la persona está tecleando), y toca ~17 consumidores.
+ * ⚠️ Esto **solo se ve tecleando**, y por eso el spec tiene su helper `tipear`: un
+ * `setValue` de una sola pasada pasaba perfecto incluso con el bug vivo, porque el
+ * valor completo ya viene con la escala llena y el reformateo es idempotente. Todo
+ * test de tipeo va tecla por tecla y con `v-model` real.
  */
 const display = ref('')
 
+/**
+ * Lo último que este componente emitió, para distinguir el **eco** de nuestro propio
+ * `update:modelValue` de un cambio que viene de afuera (abrir un formulario, un
+ * reset del padre). No es estado reactivo a propósito: nadie lo lee para renderizar,
+ * solo el `watch` de abajo para decidir si le toca reformatear.
+ */
+let ultimoEmitido: string | null = null
+
 function syncFromMaska(detail: MaskaDetail) {
   display.value = detail.masked
-  emit('update:modelValue', detail.unmasked || '')
+  ultimoEmitido = detail.unmasked || ''
+  emit('update:modelValue', ultimoEmitido)
 }
 
 /**
@@ -126,17 +129,27 @@ const maskaOptions = computed(() => {
 
 watch(
   [() => props.modelValue, cfg],
-  () => {
-    const c = cfg.value
+  ([valor, c], previo) => {
     if (!c) {
       display.value = ''
       return
     }
-    if (props.modelValue === '' || props.modelValue === undefined) {
+    if (valor === '' || valor === undefined) {
       display.value = ''
       return
     }
-    display.value = formatMontoDisplay(props.modelValue, c)
+    // El eco de nuestro propio emit NO se reformatea: el texto que la persona está
+    // tecleando ya está en `display`, puesto por maska. Reformatearlo acá era el
+    // punto fijo — `formatMontoDisplay` rellena la parte decimal completa
+    // (`toFixed`), y la tecla siguiente caía al final, donde `number.fraction` la
+    // truncaba de vuelta.
+    //
+    // La comparación incluye la moneda porque **cambiar de moneda invalida el eco**:
+    // el mismo string se formatea distinto y ahí sí hay que reformatear. En la
+    // primera corrida (`immediate`) `previo` es `undefined`, así que formatea, que
+    // es lo correcto para un valor que llega de afuera.
+    if (previo && previo[1] === c && valor === ultimoEmitido) return
+    display.value = formatMontoDisplay(valor, c)
   },
   { immediate: true },
 )

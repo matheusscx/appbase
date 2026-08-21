@@ -172,12 +172,12 @@ En el seeder (`seeder.service.ts` → `seedMonedas`), definir en un solo lugar:
 
 El store y el formateo la tomarán automáticamente en el próximo `ensureLoaded()`.
 
-⚠️ **Antes de que un tenant tenga una moneda de más de 0 decimales como oficial** (el seed
-ya trae UF con 4 y USD con 2): `MoneyInput` tiene un bug de punto fijo con `v-model` y
-`decimales > 0` —la primera tecla deja el campo en `x.00`— documentado en
-[frontend.md §8](../patterns/frontend.md) y con entrada propia en
-[`agent/pendientes.md`](../agent/pendientes.md). Hoy solo muerde en campos de costo; con
-una de ésas como oficial caen **todas** las pantallas de plata.
+✅ **Una moneda de más de 0 decimales como oficial ya no rompe las pantallas de plata**
+(2026-08-21). Hasta esa fecha `MoneyInput` tenía un punto fijo con `v-model` y
+`decimales > 0` —la primera tecla dejaba el campo en `x.00`— y este aviso decía que había
+que arreglarlo antes de que un tenant tuviera UF o USD como oficial. Está arreglado:
+verificado tecla por tecla en el navegador con las dos monedas que el seed ya trae.
+Detalle en [frontend.md §8](../patterns/frontend.md).
 
 ### Documentación técnica detallada
 

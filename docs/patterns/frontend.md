@@ -402,30 +402,32 @@ Reglas:
   última tecla y salió peor (rompía el caso chileno normal `1.500` → `1`, o sea montos
   válidos y MENORES guardados en silencio, en vez del 400 visible que da hoy). El
   contrato exacto está fijado en `MoneyInput.spec.ts`, describe "limitación conocida".
-  🛑 **Limitación grave: `MoneyInput` NO sirve hoy para monedas de más de 0 decimales.**
-  Con `v-model` y `decimals > 0` (o con el prop `decimales`), el input queda en **punto
-  fijo tras la primera tecla**: el `watch` de `props.modelValue` reformatea con
-  `toFixed(decimales)` —rellenando la parte decimal completa, `currency-format.ts`— y la
-  tecla siguiente cae al final, donde `number.fraction` la trunca de vuelta. Medido en
-  USD: teclear `1` `2` `.` `5` `0` deja `1.00`. Con 0 decimales no pasa (`toFixed(0)` es
-  idempotente), y la moneda oficial del seed es CLP (0 decimales), que es por qué el bug
-  no se ve en las pantallas que usan `oficial`.
-  **Por eso `mermas.vue` (`costoUnitario`) y `grupos-modificadores.vue` (`precioExtra`,
-  `lotePrecio`) usan `UInput inputmode="decimal"`**: se migraron a
-  `MoneyInput :decimales="4"` y se revirtieron al medir que quedaban muertos. La escala la
-  valida el backend con `@EsCosto()`; se resigna la ayuda visual, no el control. **No los
-  re-migres sin arreglar antes el punto fijo.**
-  ⚠️ **Eso NO es una regla que valga para todos los campos de costo, y conviene no leerlo
-  así:** `items.vue` (`precioBase`, `costo`, `precioExtra`, `costoUnitario`) e
-  `inventario/index.vue` (`costoNuevo`) siguen con `MoneyInput :moneda-id="..."` y nunca se
-  revirtieron. Son **siete inputs atados a la moneda del ítem**, no a la oficial, así que
-  **para un ítem en USD o UF están muertos hoy** — el catálogo incluido. La lista completa,
-  con línea por línea, está en la entrada de
-  [`agent/pendientes.md`](../agent/pendientes.md) de este mismo punto fijo.
-  El prop `decimales` existe y su contrato es correcto (`ESCALA_COSTO = 4` fijo,
-  independiente de la moneda del ítem), pero **hoy ningún campo lo usa** por lo de
-  arriba. Los dos describes "limitación conocida" de `MoneyInput.spec.ts` fijan las dos
-  limitaciones: si alguien las arregla, esos tests fallan y ahí se migran los campos.
+  ✅ **El punto fijo con monedas de más de 0 decimales está arreglado (2026-08-21).**
+  Hasta entonces `MoneyInput` quedaba **muerto tras la primera tecla** con `decimals > 0`
+  (o con el prop `decimales`): el `watch` de `modelValue` reformateaba con
+  `toFixed(decimales)` —rellenando la escala completa— también cuando el valor entrante
+  era el **eco de su propio emit**, y la tecla siguiente caía al final, donde
+  `number.fraction` la truncaba de vuelta. Con `decimals: 0` no pasaba (`toFixed(0)` es
+  idempotente), y como la oficial del seed es CLP, el bug vivió sin verse.
+  Lo cierra un guard de eco en ese `watch`: lo que vuelve del padre después de nuestro
+  propio `emit` **no se reformatea**; un cambio que viene de afuera (abrir un formulario,
+  un reset) sí. Verificado tecla por tecla en el navegador: USD `12.50`, UF `5,0500`
+  —persistido `5.0500` en la base—, y CLP `1.500` sigue siendo mil quinientos.
+  ⚠️ El prop `decimales` (`ESCALA_COSTO` = 4, fijo e independiente de la moneda del ítem)
+  ya se puede usar: era el punto fijo lo que lo tenía sin usar.
+
+  **Lo que el arreglo revive solo:** los siete `MoneyInput` atados a `:moneda-id` de
+  `items.vue` e `inventario/index.vue` — el precio del catálogo de un ítem en USD o UF ya
+  se puede editar, sin tocar esas páginas.
+  **Lo que NO revive solo:** `mermas.vue` (`costoUnitario`) y `grupos-modificadores.vue`
+  (`precioExtra`, `lotePrecio`) siguen con `UInput inputmode="decimal"`. Re-migrarlos **no
+  es mecánico y por eso no se hizo de arrastre**: `MoneyInput` necesita una moneda para
+  resolver separadores y locale, y ninguna de las dos pantallas tiene una a mano —
+  `ProductoOpt` (mermas) no trae `monedaId`, y `grupos-modificadores.vue` no menciona
+  moneda en ningún lado—. Usar la oficial daría los separadores equivocados para un ítem
+  en moneda extranjera. La escala la sigue validando el backend con `@EsCosto()`, así que
+  lo que falta es ayuda visual, no control. Ver la entrada de
+  [`agent/pendientes.md`](../agent/pendientes.md).
 
 Archivos: `app/stores/monedas.ts`, `app/types/moneda.ts`,
 `app/utils/currency-format.ts` (+ `.spec.ts`), `app/composables/useCurrency.ts`,
