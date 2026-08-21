@@ -38,8 +38,8 @@ const pasoLabels: Record<string, string> = {
 }
 
 const nivelRedondeoOptions = [
-  { value: 'linea', label: 'Por línea', description: 'Cada línea de la venta se redondea por separado y el total es la suma de esos redondeos.' },
-  { value: 'documento', label: 'Por documento', description: 'Las líneas se calculan con toda su precisión y solo el total final se redondea a la moneda.' },
+  { value: 'linea', label: 'Por línea', description: 'Cada línea de la venta se redondea por separado y el total es la suma de esos redondeos. Es lo habitual: cada línea del comprobante muestra un monto que la moneda puede representar, y suman exacto.' },
+  { value: 'documento', label: 'Por documento', description: 'Las líneas se calculan con toda su precisión y solo el total final se redondea a la moneda. Elegilo si tu normativa exige que el redondeo ocurra en el total y no en cada línea (es la regla mexicana); a cambio, las líneas del comprobante pueden mostrar decimales que la moneda no tiene.' },
 ]
 
 async function cargar() {
@@ -209,7 +209,7 @@ function moverAbajo(index: number) {
 
             <UFormField
               label="Nivel de redondeo"
-              hint="Cuándo se ajustan los centavos: en cada línea de la venta, o solo una vez al final del documento."
+              hint="Cuándo se ajustan los centavos: en cada línea de la venta, o solo una vez al final del documento. Si no te lo exige una normativa, dejá «Por línea»."
             >
               <URadioGroup
                 v-model="nivelRedondeo"

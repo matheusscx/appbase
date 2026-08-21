@@ -105,6 +105,16 @@ const submitting = ref(false)
 const cancelOpen = ref(false)
 const propinaMonto = ref('0')
 const propinaSugerida = ref('0')
+
+// La menor de las dos escalas que se llaman "oficial" — el porqué, largo, está en
+// `CobroModal.vue`, que es el otro sitio que sugiere propina.
+const monedasStore = useMonedasStore()
+const decimalesPropina = computed(() =>
+  Math.min(
+    monedasStore.monedaDefault?.decimals ?? 0,
+    monedasStore.monedaOficial?.decimals ?? 0,
+  ),
+)
 const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
 const propinaHabilitada = ref(true)
 const recetaDrawerOpen = ref(false)
@@ -513,7 +523,11 @@ const cuentaConItemEliminado = computed(
 
 watch(cobroOpen, (v) => {
   if (v) {
-    propinaSugerida.value = sugerirPropina(totalFinal.value, propinaPorcentaje.value)
+    propinaSugerida.value = sugerirPropina(
+      totalFinal.value,
+      decimalesPropina.value,
+      propinaPorcentaje.value,
+    )
   }
 })
 
@@ -1135,7 +1149,13 @@ async function imprimirPrecuenta() {
       ...(propinaHabilitada.value && new Decimal(propinaPorcentaje.value || '0').gt(0)
         ? { propinaSugerida: {
             porcentaje: propinaPorcentaje.value,
-            monto: new Decimal(res.totales.totalFinal).times(propinaPorcentaje.value).toDecimalPlaces(0).toString(),
+            // Misma cuenta que la sugerencia del cobro, por la misma función: acá
+            // estaba repetida a mano y con los 0 decimales hardcodeados.
+            monto: sugerirPropina(
+              res.totales.totalFinal,
+              decimalesPropina.value,
+              propinaPorcentaje.value,
+            ),
           } }
         : {}),
       formatMonto: (v: string) => formatMonto(v),

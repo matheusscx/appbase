@@ -3,15 +3,25 @@ import { useApiFetch } from './useApiFetch'
 
 export const PROPINA_PORCENTAJE_DEFAULT = '0.10'
 
-/** half-up a 0 decimales (pesos enteros). */
+/**
+ * Propina sugerida, half-up a la escala de la MONEDA.
+ *
+ * `decimales` es obligatorio y va antes que `porcentaje` a propósito: estaba
+ * hardcodeado en 0 —pesos enteros— y para un tenant con moneda de 2 decimales la
+ * sugerencia salía redondeada a la unidad, o sea peor que el campo donde se
+ * muestra. Un default acá lo dejaría volver a pasar en silencio; que el llamador
+ * lo pase obliga a resolver la moneda, que es lo que hace el `MoneyInput` de al
+ * lado con su prop `oficial`.
+ */
 export function sugerirPropina(
   total: string,
+  decimales: number,
   porcentaje = PROPINA_PORCENTAJE_DEFAULT,
 ): string {
   return new Decimal(total || '0')
     .mul(porcentaje)
-    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
-    .toFixed(0)
+    .toDecimalPlaces(decimales, Decimal.ROUND_HALF_UP)
+    .toFixed(decimales)
 }
 
 /** UI humano (10) → API decimal (0.100000). */

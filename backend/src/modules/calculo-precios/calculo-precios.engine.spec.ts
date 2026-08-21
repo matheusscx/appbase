@@ -1447,6 +1447,75 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(l.totalLinea).toBe('0.000000');
     });
 
+    it('no avisa "no se aplicó completo" cuando el recorte desaparece al cuantizar', () => {
+      // El aviso existe para decirle al cajero que el descuento entró recortado.
+      // Con el tope comparado en fino avisaba también cuando el recorte no
+      // sobrevive a la cuantización: acá el segundo fijo pide 49,4 sobre los 49
+      // que quedan, y en CLP las dos cifras son el mismo peso. La traza queda
+      // IDÉNTICA a lo solicitado, así que el aviso no describe nada.
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              descuentos: [
+                regla({
+                  id: 'f1',
+                  nombre: 'A',
+                  modo: 'monto_fijo',
+                  valor: '50.5',
+                }),
+                regla({
+                  id: 'f2',
+                  nombre: 'B',
+                  modo: 'monto_fijo',
+                  valor: '49.4',
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const segunda = r.lineas[0].trazas.descuentos[1];
+      expect(segunda.valorSolicitado).toBe('49.000000');
+      expect(segunda.monto).toBe('49.000000');
+      expect(r.advertencias).toEqual([]);
+    });
+
+    it('sí avisa cuando el recorte sobrevive a la cuantización', () => {
+      // El gemelo del de arriba, para que el arreglo no se coma el aviso legítimo:
+      // el segundo pide 51 (cuantizado) sobre 49 disponibles y entra recortado.
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              descuentos: [
+                regla({
+                  id: 'f1',
+                  nombre: 'A',
+                  modo: 'monto_fijo',
+                  valor: '50.5',
+                }),
+                regla({
+                  id: 'f2',
+                  nombre: 'B',
+                  modo: 'monto_fijo',
+                  valor: '50.5',
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.advertencias).toEqual([
+        {
+          titulo: 'Descuento "B"',
+          detalle: 'no se aplicó completo porque superaba el monto disponible',
+        },
+      ]);
+    });
+
     it('la traza de una regla topeada declara el solicitado YA cuantizado', () => {
       // El caso topeado en CLP que le faltaba a `valorSolicitado`: el segundo
       // fijo pide 50,5 y solo entran 49. Si el solicitado no se cuantizara, la

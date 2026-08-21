@@ -572,10 +572,19 @@ function procesarReglas(
       // los montos cuantizados, no con los finos.
       const tope = Decimal.max(disponible, ZERO);
       if (monto.greaterThan(tope)) {
-        advertencias.push({
-          titulo: `Descuento "${regla.nombre}"`,
-          detalle: 'no se aplicó completo porque superaba el monto disponible',
-        });
+        // El recorte se aplica siempre —un descuento no puede pasarse de lo
+        // disponible— pero el AVISO mira plata, no el monto fino. Comparando en
+        // fino avisaba también cuando el recorte no sobrevive a la cuantización:
+        // 49,4 topeado a 49 es el mismo peso en CLP, la traza queda idéntica a lo
+        // solicitado y el cajero leía "no se aplicó completo" sobre un descuento
+        // que entró entero. Un aviso que no describe nada entrena a ignorarlos.
+        if (q(monto).greaterThan(q(tope))) {
+          advertencias.push({
+            titulo: `Descuento "${regla.nombre}"`,
+            detalle:
+              'no se aplicó completo porque superaba el monto disponible',
+          });
+        }
         monto = tope;
       }
     }
