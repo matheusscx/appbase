@@ -48,7 +48,7 @@ que el gate en verde no veía**, y uno de ellos lo introdujo el propio fix.
   `tasa × base`, que es lo correcto cuando el cliente ya no paga la etiqueta.
 - **El borde HTTP rechaza con 400** la plata que no cabe en la moneda: decoradores
   `@EsMontoCobrado` / `@EsCosto` + `EscalaMonedaPipe`. Contado sobre el árbol final:
-  **30 campos marcados** (17 monto cobrado / 13 tasa) en 21 DTOs, con el pipe colgado en
+  **27 campos marcados** (15 monto cobrado / 12 tasa) en 20 DTOs, con el pipe colgado en
   **20 handlers de 11 controllers**.
 - **La pantalla no la deja tipear** (máscara, no recorte al enviar).
 - **La nota de crédito hereda el criterio congelado** en la venta que corrige y congela el
