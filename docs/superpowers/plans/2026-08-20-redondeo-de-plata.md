@@ -768,28 +768,40 @@ Expected: FAIL — `dv.total` sale a `escala_calculo`.
 
 - [ ] **Step 3: Implementar**
 
+> ⚠️ **Corregido el 2026-08-20, con la lección de la Task 5.** La primera versión de este
+> paso cuantizaba `dv.total` **y** las trazas **por separado**, con un `.map` al volver de
+> `procesarReglas`. Eso está mal por dos razones que la Task 5 ya pagó en carne propia:
+> con dos o más reglas de nivel venta rompe `Σ trazas = total`, porque
+> `Q(a + b) ≠ Q(a) + Q(b)`; y deja el tope del piso en cero comparando contra un
+> `disponible` fino. **La forma correcta es la misma que quedó a nivel línea:** pasarle la
+> función de cuantización a `procesarReglas` y derivar los totales de lo que devuelve.
+
 ```typescript
-// calcularVenta, después del loop de reglas de venta (:683)
-// `porLinea` se declara acá también: el de la Task 5 es local a calcularLinea.
-const porLinea = cfg.nivelRedondeo === 'linea';
+// calcularVenta — las dos llamadas a procesarReglas (:656 y :669) reciben la
+// misma función de cuantización que usa calcularLinea. Las reglas de nivel venta
+// son campos de DOCUMENTO (el DscRcgGlobal del DTE): se cuantizan como cualquier
+// monto cobrado, y por eso el ticket cuadra sumando líneas y restando el
+// descuento global. El modelo ya las trata así: ventas_descuentos las persiste
+// con detalle_id null.
+//
+// Igual que a nivel línea: la cuantización va ADENTRO de procesarReglas, nunca
+// en un .map sobre las trazas de vuelta — si no, Σ trazas ≠ total con dos reglas
+// y el tope del piso en cero compara contra un disponible fino.
+dv = procesarReglas(venta.descuentosVenta, {
+  // …los mismos parámetros que ya tenía…
+  cuantizar: q,          // ← la única línea nueva
+});
+```
 
-// Las reglas de nivel venta son campos de DOCUMENTO (el DscRcgGlobal del DTE):
-// se cuantizan como cualquier monto cobrado, y por eso el ticket cuadra sumando
-// líneas y restando el descuento global. El modelo ya las trata así:
-// ventas_descuentos las persiste con detalle_id null.
-const dvTotal = porLinea ? cuantizar(dv.total, cfg) : dv.total;
-const rvTotal = porLinea ? cuantizar(rv.total, cfg) : rv.total;
+⚠️ **`disponibleVenta` va explícito acá** (`:652`, `:659`, `:667`, `:679`), a diferencia
+del nivel línea donde sale de `params.acc`: revisá que se mueva en montos **cuantizados**,
+o el tope vuelve a comparar contra plata fina.
 
-dv.trazas = dv.trazas.map((t) => ({
-  ...t, monto: fmt(porLinea ? cuantizar(new Decimal(t.monto), cfg) : new Decimal(t.monto), cfg),
-}));
-rv.trazas = rv.trazas.map((t) => ({
-  ...t, monto: fmt(porLinea ? cuantizar(new Decimal(t.monto), cfg) : new Decimal(t.monto), cfg),
-}));
-
-totalDescuentos = totalDescuentos.plus(dvTotal);
-totalRecargos = totalRecargos.plus(rvTotal);
-totalFinal = totalFinal.minus(dvTotal).plus(rvTotal);
+```typescript
+// Los totales se derivan de lo que devuelve procesarReglas, sin volver a cuantizar
+totalDescuentos = totalDescuentos.plus(dv.total);
+totalRecargos = totalRecargos.plus(rv.total);
+totalFinal = totalFinal.minus(dv.total).plus(rv.total);
 ```
 
 - [ ] **Step 4: Correr los tests**
