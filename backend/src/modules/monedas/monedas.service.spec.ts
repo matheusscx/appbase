@@ -146,16 +146,28 @@ describe('MonedasService', () => {
   describe('decimalesDeLaVenta', () => {
     const VENTA = 'venta-uuid';
 
-    it('devuelve los decimales de la moneda con la que se registró la venta, parametrizado por tenant', async () => {
-      dataSource.query.mockResolvedValue([{ decimales: 0 }]);
+    it('devuelve los decimales de la moneda y el modoRedondeo congelado, parametrizado por tenant', async () => {
+      dataSource.query.mockResolvedValue([
+        { decimales: 0, config_calculo: { modoRedondeo: 'FLOOR' } },
+      ]);
 
       const result = await service.decimalesDeLaVenta(VENTA, TENANT);
 
-      expect(result).toBe(0);
+      expect(result).toEqual({ decimales: 0, modoRedondeo: 'FLOOR' });
       expect(dataSource.query).toHaveBeenCalledWith(
         expect.stringContaining('eliminado_el IS NULL'),
         [VENTA, TENANT],
       );
+    });
+
+    it('devuelve modoRedondeo null si la venta no tiene config_calculo (p.ej. toda nota de crédito hoy)', async () => {
+      dataSource.query.mockResolvedValue([
+        { decimales: 0, config_calculo: null },
+      ]);
+
+      const result = await service.decimalesDeLaVenta(VENTA, TENANT);
+
+      expect(result).toEqual({ decimales: 0, modoRedondeo: null });
     });
 
     it('lanza NotFound si la venta no existe, está borrada o no pertenece al tenant', async () => {

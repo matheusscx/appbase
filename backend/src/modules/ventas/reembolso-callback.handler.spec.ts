@@ -32,7 +32,9 @@ describe('VentasReembolsoHandler', () => {
       registrarDevolucionesPorReembolso: jest.fn().mockResolvedValue(undefined),
     };
     monedasService = {
-      decimalesDeLaVenta: jest.fn().mockResolvedValue(0),
+      decimalesDeLaVenta: jest
+        .fn()
+        .mockResolvedValue({ decimales: 0, modoRedondeo: 'HALF_UP' }),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -151,5 +153,55 @@ describe('VentasReembolsoHandler', () => {
       expect.objectContaining({ monto: '1000' }),
     );
     expect(logger).not.toHaveBeenCalled();
+  });
+
+  it('cuantiza con el modo de redondeo CONGELADO en la venta, no con HALF_UP fijo: dos ventas con modo distinto dan resultados distintos', async () => {
+    monedasService.decimalesDeLaVenta.mockResolvedValueOnce({
+      decimales: 0,
+      modoRedondeo: 'HALF_UP',
+    });
+    await handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+      monto: '1000.5000',
+    });
+    const montoHalfUp = (
+      ventasService.crearNotaCredito.mock.calls[0] as [{ monto: string }]
+    )[0].monto;
+
+    ventasService.crearNotaCredito.mockClear();
+    monedasService.decimalesDeLaVenta.mockResolvedValueOnce({
+      decimales: 0,
+      modoRedondeo: 'FLOOR',
+    });
+    await handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+      monto: '1000.5000',
+    });
+    const montoFloor = (
+      ventasService.crearNotaCredito.mock.calls[0] as [{ monto: string }]
+    )[0].monto;
+
+    expect(montoHalfUp).toBe('1001');
+    expect(montoFloor).toBe('1000');
+    expect(montoHalfUp).not.toBe(montoFloor);
+  });
+
+  it('si la venta no tiene config_calculo (modoRedondeo null, como toda NC hoy) cuantiza con el fallback HALF_UP, sin rechazar', async () => {
+    monedasService.decimalesDeLaVenta.mockResolvedValueOnce({
+      decimales: 0,
+      modoRedondeo: null,
+    });
+
+    await handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+      monto: '1000.5000',
+    });
+
+    expect(ventasService.crearNotaCredito).toHaveBeenCalledWith(
+      expect.objectContaining({ monto: '1001' }),
+    );
   });
 });

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { modoToRounding } from '../calculo-precios/calculo-precios.engine';
 import {
   ReembolsoAprobadoEvento,
   ReembolsoCallbackHandler,
@@ -7,6 +8,20 @@ import {
 } from '../pasarela/services/reembolso-callback.registry';
 import { VentasService } from './ventas.service';
 import { MonedasService } from '../monedas/monedas.service';
+
+/**
+ * Fallback de `modoRedondeo` cuando la venta referenciada no tiene
+ * `config_calculo` congelada (hoy: toda nota de crédito nace así — ver
+ * `MonedasService.decimalesDeLaVenta`). Deliberadamente el mismo default que
+ * ya usa `modoToRounding` para un modo desconocido (HALF_UP), y NO un fallo
+ * ruidoso: ese es el criterio correcto para `crearNotaCredito` cuando lo
+ * llama una PERSONA (decisión P5 de la Fase 5 de este plan — ahí sí conviene
+ * rechazar y pedir que se arregle el dato), pero acá el llamador es el
+ * webhook de la pasarela, gobernado por la decisión P3: un hecho ya
+ * consumado no se puede perder por un dato de configuración ausente —
+ * fallar acá sería el mismo error que P3 prohíbe, solo que por otra puerta.
+ */
+const MODO_REDONDEO_FALLBACK = 'HALF_UP';
 
 /**
  * Callback in-process de reembolsos: cuando la pasarela aprueba un reembolso
@@ -64,23 +79,26 @@ export class VentasReembolsoHandler
    * La pasarela ya movió la plata: rechazar el callback por decimales de más
    * no deshace el cobro, solo pierde el evento (decisión P3 — un hecho
    * consumado se registra, no se rechaza como haría el guard de un cajero
-   * tipeando un monto). Se cuantiza a la escala de la moneda con la que se
-   * registró la venta original (no la oficial vigente del tenant, que puede
-   * haber cambiado desde entonces) y, si el valor cambió, queda una traza con
-   * el número exacto que informó la pasarela para poder reconstruirlo después.
+   * tipeando un monto). Se cuantiza a la escala Y al modo de redondeo
+   * CONGELADOS en la venta original (no los vigentes del tenant, que pueden
+   * haber cambiado desde entonces): el reembolso corrige *ese* documento —
+   * crea una nota de crédito sobre él— y tiene que heredar su criterio, no el
+   * de hoy (mismo principio que la NC hereda al arreglar su propia línea, en
+   * la Fase 5 de este plan). Si el valor cambió, queda una traza con el
+   * número exacto que informó la pasarela para poder reconstruirlo después.
    * Si ya venía bien no se loguea nada, para no llenar el log de ruido.
    */
   private async cuantizarMontoReembolso(
     evento: ReembolsoAprobadoEvento,
   ): Promise<string> {
-    const decimales = await this.monedas.decimalesDeLaVenta(
+    const { decimales, modoRedondeo } = await this.monedas.decimalesDeLaVenta(
       evento.ventaId,
       evento.tenantId,
     );
     const montoExacto = new Decimal(evento.monto);
     const montoCuantizado = montoExacto.toDecimalPlaces(
       decimales,
-      Decimal.ROUND_HALF_UP,
+      modoToRounding(modoRedondeo ?? MODO_REDONDEO_FALLBACK),
     );
     if (montoCuantizado.eq(montoExacto)) {
       return evento.monto;

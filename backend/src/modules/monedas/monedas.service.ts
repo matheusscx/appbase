@@ -132,10 +132,27 @@ export class MonedasService {
    * momento de venderse. Mismo criterio que `decimalesOficiales` — filtra
    * `eliminado_el IS NULL` en las dos tablas del JOIN y parametriza el
    * tenant — para que un reembolso no pueda leer la venta de otro tenant.
+   *
+   * Trae junto el `modoRedondeo` **congelado** en `ventas.config_calculo` de
+   * esa misma fila — no una segunda consulta: el reembolso necesita los dos
+   * datos de la misma venta para cuantizar (decisión (g) del plan de
+   * redondeo: la corrección hereda el criterio del documento que corrige, no
+   * el vigente). `modoRedondeo` viene `null` si la venta no tiene
+   * `config_calculo` (hoy: toda nota de crédito nace así — la Fase 5 de ese
+   * mismo plan es la que la persiste, todavía no ejecutada). Devolverlo
+   * `null` en vez de resolver un default acá es deliberado: qué hacer ante la
+   * ausencia es una decisión de cada consumidor, no de este service — ver
+   * `VentasReembolsoHandler.cuantizarMontoReembolso`, el único hoy.
    */
-  async decimalesDeLaVenta(ventaId: string, tenantId: string): Promise<number> {
-    const rows: { decimales: number | string }[] = await this.db.query(
-      `SELECT m.decimales
+  async decimalesDeLaVenta(
+    ventaId: string,
+    tenantId: string,
+  ): Promise<{ decimales: number; modoRedondeo: string | null }> {
+    const rows: {
+      decimales: number | string;
+      config_calculo: { modoRedondeo?: string } | null;
+    }[] = await this.db.query(
+      `SELECT m.decimales, v.config_calculo
          FROM ventas v
          JOIN moneda m ON m.moneda_id = v.moneda_id AND m.eliminado_el IS NULL
         WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
@@ -144,7 +161,10 @@ export class MonedasService {
     if (!rows.length) {
       throw new NotFoundException('Venta no encontrada');
     }
-    return Number(rows[0].decimales);
+    return {
+      decimales: Number(rows[0].decimales),
+      modoRedondeo: rows[0].config_calculo?.modoRedondeo ?? null,
+    };
   }
 
   // ───────────────────────────────────────────────────────────────────────────
