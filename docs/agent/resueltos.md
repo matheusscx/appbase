@@ -17,6 +17,96 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los minors del redondeo de plata: los tests que no podían fallar, y una regresión que solo vio el e2e (2026-08-21)
+
+Cierra **dos de las tres** entradas del grupo *"Los minors que dejó el frente de redondeo de
+plata"* (sección 1) y **las dos** de la sección 2 que pedían medir. Queda abierta la tercera
+del grupo —el cuaderno de anti-patrones sobre su propio tope—, que es la única que pide
+juzgar bugs ajenos.
+
+Cinco commits agrupados **por naturaleza y no por hallazgo**: tests / comentarios /
+tipos / duplicación / conducta. Los de conducta llevan test; los de comentarios y tipos se
+verificaron por lo contrario —que **ningún** valor esperado se moviera—.
+
+### Lo que más valía: cinco tests que pasaban sin poder fallar
+
+Cada uno se validó **mutando el código que el test dice proteger**, y el mutante es la
+reversión al comportamiento anterior, no una rotura cualquiera:
+
+- *Σ trazas de descuento = descuento aplicado* usaba **una sola** regla, o sea afirmaba
+  `Σ{a} = a`. Con dos del 12,5% sobre 100 en CLP discrimina: 13+13 = 26 contra `Q(25) = 25`.
+- La **cuantización de `valorSolicitado`** no la sostenía nada: revertirla dejaba la suite
+  entera en verde. El caso que faltaba es el topeado en CLP —el segundo fijo pide 51 y
+  aplica 49—; sin cuantizar, la traza declara 50,5.
+- **Dos `expect` tautológicos.** Sus coordenadas del ledger ya no apuntaban a ellos (las
+  tareas 12-14 corrieron el archivo) y se resolvieron **pidiéndole a git el spec del commit
+  de la Task 5**, no buscando a ojo.
+- *"Acepta nivel documento en una moneda con decimales"* prometía persistencia en el nombre
+  y solo afirmaba el objeto de retorno, que se arma con el DTO sin ir a la base.
+- `recargos.vue` tenía el mismo `onModoChange` que `descuentos.vue` **sin test análogo**.
+
+Y `montoTolerancia` —el único monto sobre `NUMERIC(18,6)`— pasó a tener e2e propio. Es la
+ruta donde el `EscalaMonedaPipe` cuelga como `@Body(...)`: un test de DTO con
+`plainToInstance` + `validate()` **no lo ejecuta**, así que mandarle `'1.5'` pasaba en verde
+sin probar nada. El mutante (sacar el pipe de la ruta) lo mata con 200 donde espera 400.
+
+### La regresión: un cambio "solo de tipos" que rompió el esquema
+
+Estrechar `Tenant.modoRedondeo` de `string` a la unión `ModoRedondeo` **rompió el arranque
+de TypeORM**: `DataTypeNotSupportedError: Data type "Object" in "Tenant.modoRedondeo"`.
+TypeORM infiere el tipo de columna del metadato `design:type`, y la unión entra por
+`import type` —la referencia se borra al compilar—, así que el metadato queda en `Object`.
+`nivel_redondeo` se salvó **por casualidad**: ya tenía su `type` declarado.
+
+Lo que hay que llevarse no es el bug sino quién lo vio. **No lo vieron** el `typecheck`, el
+`lint`, las 1996 pruebas unitarias, ni **dos revisiones independientes** —una de ellas
+afirmó explícitamente *"cambio realmente sin conducta en runtime, confirmado"*, y era
+razonable: los alias de tipo se borran en compilación—. Lo vio el **e2e**, en la primera
+línea de la primera suite. Un decorador que lee metadatos de tipo convierte un cambio de
+tipos en un cambio de runtime, y ahí la intuición de "esto no puede romper nada" falla.
+El `type: 'varchar'` quedó con esa explicación al lado, porque es una línea que parece
+redundante y no lo es.
+
+### Las dos mediciones
+
+- **`Scope.REQUEST` sobre `GET /items`.** Secuencial no se nota (los brazos se solapan);
+  con 20 concurrentes sí, y en la cola: ~7% menos req/s y ~13% más p95. La tabla está en el
+  docblock de `escala-moneda.pipe.ts`. **Subió a la sección 4** en vez de cerrarse: la
+  salida que la entrada daba por conocida —"no colgar el pipe del handler de lectura"— no
+  aplica, porque ya no cuelga de ahí; la única salida es partir el controller, y eso se
+  pregunta.
+- **"Moneda oficial" por dos criterios.** La pregunta era *"¿pueden divergir hoy?"*.
+  Pueden: `setDefault` acepta cualquier moneda disponible en el país. Y **son tres caminos,
+  no dos**: la entrada no nombraba a `LiquidacionPropinasService.resolverMonedaOficial`,
+  que es el que decide con qué escala se reparte la propina. También subió a la sección 4.
+
+### Lo que la ejecución desmintió del registro
+
+- **Un minor ya estaba arreglado.** El ledger pedía corregir
+  `motor-calculo-precios.md:231` (*"Impuestos sobre la base ya descontada/recargada"*, cierto
+  en una sola rama). El caveat *"salvo la rama de góndola de arriba"* lo había agregado
+  `a9892993`, el commit de cierre del frente, **posterior a la entrada**. No se tocó.
+- **Un minor tenía un gemelo sin nombrar.** `usePropina.ts` no era el único sitio que
+  redondeaba la propina a 0 decimales: `salones/index.vue` repetía la cuenta a mano para el
+  ticket de precuenta. Apareció grepeando por **conducta** (total × porcentaje redondeado),
+  no por el nombre de la función.
+- **Un minor no se puede cerrar con una sola fuente.** De dónde saca la escala la propina
+  sugerida costó **tres intentos, y la revisión independiente bloqueó los dos primeros**:
+  con `monedaOficial` (la del país) el backend la rechaza con 400, porque valida contra
+  `es_default`; con `es_default` el `MoneyInput` de al lado la trunca al mostrarla y se come
+  los centavos al editarla. Quedó la **menor de las dos**, que cabe en ambas por
+  construcción. Las dos fuentes estaban mal, en direcciones opuestas.
+
+### La lección de proceso
+
+La revisión independiente **bloqueó dos veces sobre el mismo punto** y las dos veces tenía
+razón; la segunda desarmó un arreglo que yo ya había aceptado como bueno. Pero también
+firmó LIMPIO el diff que rompía el esquema. Sirve para lo que puede ver —el diff— y no
+sustituye a correr el sistema: **el e2e completo no es un trámite de cierre, es el único
+que ejecuta el arranque real.**
+
+---
+
 ## El redondeo de plata: el último decimal deja de decidirlo Postgres, y con eso cierra la tanda 🔴 (2026-08-21)
 
 Cierra la entrada *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* con su

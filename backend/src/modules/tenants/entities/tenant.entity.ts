@@ -45,7 +45,17 @@ export class Tenant {
   @Column({ name: 'escala_calculo', type: 'smallint', default: 6 })
   escalaCalculo: number;
 
-  @Column({ name: 'modo_redondeo', default: 'HALF_UP' })
+  /**
+   * El `type` es explícito y NO se puede sacar. TypeORM infiere el tipo de
+   * columna del metadato `design:type`, y `ModoRedondeo` entra por `import type`:
+   * la referencia se borra al compilar, así que el metadato queda en `Object` y
+   * Postgres corta con `DataTypeNotSupportedError` al construir el esquema.
+   * Pasó de verdad al estrechar la columna de `string` a la unión — lo cazó solo
+   * el e2e: unit, typecheck, lint y dos revisiones independientes lo dieron por
+   * "cambio sin conducta". `nivel_redondeo`, abajo, se salvó por tener ya su
+   * `type` declarado.
+   */
+  @Column({ name: 'modo_redondeo', type: 'varchar', default: 'HALF_UP' })
   modoRedondeo: ModoRedondeo;
 
   /**

@@ -43,6 +43,28 @@ const PROFUNDIDAD_MAX = 20;
  * controller más chico que cubra los DTOs marcados, y por eso registrarlo
  * global le cobraría ese costo a toda la API.
  *
+ * **Cuánto cuesta, medido (2026-08-21).** Sobre `GET /items`, la lectura más
+ * caliente del POS y la que más se temía, contra el stack de compose con el
+ * catálogo del seed. Dos rondas por brazo, quitando y reponiendo el pipe de
+ * `ItemsController` (que es lo único que le sube el scope: el pipe cuelga solo de
+ * handlers de ESCRITURA, y Nest contagia igual al controller entero).
+ *
+ * | | secuencial, mediana | 20 concurrentes, mediana | p95 | req/s |
+ * |---|---|---|---|---|
+ * | con el pipe (request-scoped) | 6,86 / 6,95 ms | 40,6 / 40,0 ms | 53,0 / 50,7 | 475 / 481 |
+ * | sin el pipe (singleton) | 6,54 / 6,91 ms | 39,0 / 36,8 ms | 46,8 / 45,3 | 503 / 522 |
+ *
+ * **Secuencial no se nota** —los dos brazos se solapan, la diferencia queda bajo
+ * el ruido entre corridas—. **Concurrente sí, y en la cola:** ~7% menos req/s y
+ * ~13% más p95, sin solapamiento entre brazos en ninguna de las dos métricas.
+ *
+ * O sea: el trade-off es real pero modesto, y la salida que la doc daba por obvia
+ * —"no colgar el pipe del handler de lectura"— **no aplica**, porque ya no cuelga
+ * de ahí. La única salida sería partir el controller, y eso es una decisión de
+ * estructura con su propio costo: queda anotada, no tomada.
+ * Lo que la medición NO cubre: memoria/GC y un catálogo mucho más grande que el
+ * del seed. Si cambia alguno, se vuelve a medir.
+ *
  * Nest inscribe solo automáticamente los pipes de parámetro como injectables
  * del módulo del controller, así que ese módulo debe importar `MonedasModule`.
  *

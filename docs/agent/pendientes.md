@@ -65,47 +65,11 @@ Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tes
 discriminan lo que dicen fijar, y tipos flojos. Se juntaron en una entrada porque se hacen
 en una sola pasada y ninguno vale una entrada propia. **Citas verificadas el 2026-08-21.**
 
-- [ ] **Comentarios y tipos que quedaron flojos** (backend)
-  - `calculo-precios.engine.ts:493` — el docblock que existe **para que nadie revierta** la
-    cuantización al `.map` dice *"51 + 51 = 102 y una línea de −2"*, y el número real es
-    **101 / −1** (el segundo descuento se topea contra 49,5 y cuantiza a 50). Un lector que
-    verifique la cuenta va a desconfiar del resto del comentario, que es correcto.
-  - `calculo-precios.engine.ts:81` — `nivelRedondeo` es `string` y no
-    `'linea' | 'documento'`. Un typo cae **en silencio** al comportamiento de `'linea'` en
-    vez de fallar en compilación. (`modoRedondeo`, dos líneas más arriba, tiene la misma
-    forma.)
-  - `reembolso-callback.handler.ts:30` — `MODO_REDONDEO_FALLBACK = 'HALF_UP'` duplica el
-    `default:` interno de `modoToRounding`. Mismo valor hoy, nada los mantiene sincronizados.
-  - El `if` del tope compara el monto fino contra un tope ya cuantizado y emite la
-    advertencia *"no se aplicó completo"* en casos donde la traza queda **idéntica** al
-    solicitado. Aviso espurio, no es bug de plata.
-  - `items.service.ts` — `eq4`, `margenPct` y los `cacheado`/`deltaCosto` de la bandeja de
-    desfases siguen con literal `4` en vez de `ESCALA_COSTO`. Inconsistencia de forma, no de
-    valor: el propio comentario copiado nombra `eq4`, así que un lector puede esperar que ya
-    estuviera unificado.
-  - `usePropina.ts` — `sugerirPropina` redondea a **0 decimales hardcodeado**; para un
-    tenant con moneda de 2 decimales la sugerencia queda mal redondeada. Preexistente.
-
-- [ ] **Tests que no discriminan lo que dicen fijar** (backend + frontend) — cada uno
-  sobrevive a su propio mutante:
-  - `calculo-precios.engine.spec.ts` → *"la suma de las trazas de descuento da el descuento
-    aplicado"* (hoy `:1305`) usa **una sola** regla, así que no puede fallar por lo que dice
-    fijar. Con dos descuentos del 12,5% sobre 100 en CLP empieza a discriminar.
-  - Dos `expect` tautológicos en el mismo spec. ⚠️ Las líneas que el ledger del frente
-    anotaba (`:1278`, `:1423`) **ya no apuntan a ellos**: las tareas 12-14 corrieron el
-    archivo. Hay que buscarlos por conducta —un `expect` cuyo valor esperado se deriva del
-    mismo cálculo que produce el valor observado— y no por número de línea.
-  - La cuantización de `valorSolicitado` quedó **sin test**: revertirla deja la suite en
-    verde. Falta un caso topeado en CLP.
-  - `tenants.service.spec.ts` → *"acepta nivel documento en una moneda con decimales"* (hoy
-    `:729`) solo afirma `r.nivelRedondeo`, que se arma con `dto.nivelRedondeo` sin ir a la
-    base — el `manager.query` está mockeado y nadie mira qué se le pasó. **El nombre promete
-    cobertura de persistencia que no tiene**; la única prueba real contra el `SET` usa
-    `'linea'`.
-  - `montoTolerancia` es el único monto sobre `NUMERIC(18,6)` y su ruta **no tiene ni un
-    e2e**; lo único que evita el 400 es la regla valor-vs-cadena, fijada solo a nivel unit.
-  - `recargos.vue` recibió el mismo `onModoChange` que `descuentos.vue` **sin test análogo**.
-    El código es simétrico y su spec sigue verde, que es justo el problema.
+✅ **Dos de las tres entradas de este grupo se cerraron el 2026-08-21**, en cinco commits
+agrupados por naturaleza (tests / comentarios / tipos / duplicación / conducta). El detalle
+—incluida la regresión que el e2e cazó y que ni el typecheck ni dos revisiones
+independientes vieron— está en [`resueltos.md`](resueltos.md). Queda la tercera, que es la
+única que pide juzgar bugs ajenos:
 
 - [ ] **El cuaderno de anti-patrones excede su propio tope** (docs) —
   [`anti-patterns.md`](anti-patterns.md) tiene **22 entradas `### ❌`** y su regla 3 fija el
@@ -370,31 +334,6 @@ decisión que no es mía).
   en `costo_propuesto_omitido` es lo primero. Si el síntoma es ese, el arreglo puede ser
   tan barato como releer bajo lock; si aparece un caso donde el desfase se silencia, sube
   de sección y de prioridad.
-
-- [ ] **"Moneda oficial" se resuelve por DOS criterios distintos según el método, y ahora
-  uno de ellos decide el redondeo de la plata** (backend, visto 2026-08-21 en el frente de
-  redondeo; **preexistente**) — en `MonedasService`, `decimalesOficiales` resuelve la moneda
-  oficial por `tenant_moneda.es_default = true`, y `resolverMonedaOficial` por
-  `pais.moneda_oficial_id`. Son la **misma noción** con dos fuentes.
-  **Por qué dejó de ser cosmético:** de `decimalesOficiales` sale la escala a la que se
-  cuantiza toda la plata de una venta y con la que el borde HTTP rechaza con 400. Si los dos
-  criterios pueden divergir, un tenant cuya moneda `es_default` no sea la oficial de su país
-  cierra sus ventas en una escala y valida en otra.
-  **Lo que hay que medir primero, y es barato:** ¿puede divergir hoy? El alta de tenant
-  siembra la oficial como default, y la doc dice que la oficial no se puede deshabilitar
-  —pero *"cambiar el default"* sí es una operación expuesta (`PATCH /monedas/:id/default`).
-  Si diverge, esto sube de sección; si no puede, es una unificación de nombres.
-
-- [ ] **`Scope.REQUEST` contagia el controller entero, y no está medido** (backend,
-  2026-08-21) — `EscalaMonedaPipe` es request-scoped, y Nest sube el scope al controller
-  anfitrión. Eso alcanza a `GET /items` —la lectura más caliente del POS— y al listado de
-  ventas: ahora se instancian **por request**.
-  Es el trade-off documentado y aceptado al elegir el diseño (un interceptor no servía:
-  `intercept()` no recibe `ArgumentMetadata`, y sin metatype no hay clase donde leer las
-  marcas). **Lo que falta es el número**, no la decisión: medir con la carga concurrente que
-  ya se usó para el cierre de rendimiento y comparar contra la línea de base de entonces.
-  Si no mueve la aguja, se anota y se cierra; si la mueve, la salida conocida es no colgar
-  el pipe del handler de lectura.
 
 ---
 
@@ -957,7 +896,53 @@ PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
 
 ⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
 identidad de ese día. Ninguna bloquea nada que esté en curso.
-⚠️ **Y una más el 2026-08-21**, del cierre del redondeo de plata.
+⚠️ **Y tres más el 2026-08-21**: una del cierre del redondeo de plata, y **dos que subieron
+desde la sección 2** al medirlas —las dos primeras de abajo—. Las dos traían su propia regla
+de qué hacer con el resultado, y las dos cayeron del lado que exige respuesta: la moneda
+oficial **sí** puede divergir, y el `Scope.REQUEST` **sí** mueve la aguja bajo concurrencia.
+La medición está adentro de cada una; lo que falta es la decisión.
+
+- [ ] **"Oficial" nombra DOS monedas distintas y ya divergen tres caminos de plata**
+  (backend + producto, **medido el 2026-08-21**; preexistente) — la pregunta que esta
+  entrada traía (*"¿pueden divergir hoy?"*) **está contestada: sí.**
+  `setDefault` (`monedas.service.ts`, `PATCH /monedas/:id/default`) solo exige que la moneda
+  esté **disponible en el país** y habilitada; **no** exige que sea la oficial de ese país.
+  Así que un tenant puede quedar con `tenant_moneda.es_default` en una moneda y
+  `pais.moneda_oficial_id` en otra.
+  **Lo que cada criterio decide hoy** —y son tres caminos, no dos como decía esta entrada
+  antes de medirla:
+  1. `MonedasService.decimalesOficiales` (**es_default**) → la escala a la que el motor
+     cuantiza toda la plata de una venta, y con la que el borde HTTP rechaza con 400.
+  2. `MonedasService.listar` y los guards de `updateMoneda` (**pais.moneda_oficial_id**) →
+     qué moneda la pantalla marca como oficial y cuál no se deja deshabilitar.
+  3. `LiquidacionPropinasService.resolverMonedaOficial` (**pais.moneda_oficial_id**) → los
+     `decimales` con los que `repartirMayoresRestos` reparte la propina. **Éste no estaba
+     en la entrada** y es el que más pesa: con las dos monedas divergiendo, las propinas se
+     reparten en una escala y las ventas se cuantizan en otra, para el mismo tenant.
+  **La pregunta para el owner:** ¿la moneda en la que un tenant cierra sus ventas tiene que
+  ser por fuerza la oficial de su país —y entonces `setDefault` debe rechazar el resto— o
+  son dos cosas legítimamente distintas y hay que renombrarlas para que nadie las confunda?
+  Lo que **no** se puede dejar es el estado actual, donde el nombre es el mismo y el criterio
+  no.
+  Ya está escrito en el código que son dos nociones (`monedas.service.ts`, commit del
+  2026-08-21): lo que falta es la decisión, no la documentación.
+
+- [ ] **¿Se parte `ItemsController` para sacarle el `Scope.REQUEST` de encima?**
+  (backend, **medido el 2026-08-21**) — la entrada pedía el número y acá está.
+  `EscalaMonedaPipe` es request-scoped y Nest sube el scope al controller anfitrión entero,
+  así que `GET /items` —la lectura más caliente del POS— se instancia por request aunque el
+  pipe cuelgue solo de handlers de escritura.
+  **Medido** sobre `GET /items`, dos rondas por brazo, quitando y reponiendo el pipe:
+  secuencial **no se nota** (6,86/6,95 ms contra 6,54/6,91 — los brazos se solapan); con
+  **20 concurrentes sí**, y en la cola: **~7% menos req/s** (475/481 contra 503/522) y
+  **~13% más p95** (53,0/50,7 contra 46,8/45,3), sin solapamiento en ninguna de las dos.
+  La tabla completa vive en el docblock de `escala-moneda.pipe.ts`.
+  **Por qué sube acá en vez de cerrarse:** la salida que esta entrada daba por conocida
+  —*"no colgar el pipe del handler de lectura"*— **no aplica**, porque ya no cuelga de ahí;
+  el contagio es del controller. La única salida es **partir el controller**, y eso es una
+  decisión de estructura con su propio costo (un controller más, sus guards, sus rutas).
+  **La pregunta:** ¿vale ~7% de throughput en la lectura más caliente, o se acepta y se
+  anota? No cubre memoria/GC ni un catálogo mucho mayor que el del seed.
 
 - [ ] **El `valor` de descuentos y recargos NO se puede validar con el diseño del borde, y
   no es un olvido: es estructural** (backend + producto, **medido 2026-08-21** por la
