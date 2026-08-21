@@ -619,8 +619,23 @@ const totalLinea = subtotalNeto
   .plus(impuestoAplicado);
 ```
 
-⚠️ **`acc` sigue siendo el acumulado fino** que sirve de base a los porcentajes en modo
-`compuesto` y a la base imponible: no reemplazarlo por el derivado.
+⚠️ **Dónde exactamente se cuantiza el acumulado — la precisión que decide si el documento
+cuadra.** La regla es: **el acumulado se cuantiza al cerrar cada PASO de la fórmula, no en
+cada regla.**
+
+- **Dentro** de un paso (varias reglas encadenadas en modo `compuesto`), el acumulado corre
+  fino a `escala_calculo`. Cuantizar regla por regla compondría el error — el caso Vancouver.
+- **Al cerrar el paso**, el acumulado pasa a ser el que el documento declara:
+  `neto_Q − Σ descuentos_Q + Σ recargos_Q`. El paso siguiente parte de ahí.
+
+Esto importa por el IVA: la base imponible es el acumulado al inicio del paso `impuestos`
+(`calculo-precios.engine.ts:579`). Si se calculara sobre el acumulado fino, el IVA
+declarado no sería `tasa ×` la base que el documento muestra — que es justo la relación que
+un DTE espera. Con esta regla, el impuesto se calcula sobre la base cuantizada y el
+comprobante se puede reconstruir leyéndolo.
+
+Como máximo hay **tres pasos**, así que el error acumulado está acotado a tres redondeos,
+no a uno por regla. **Va documentado en el código**, no solo acá.
 
 - [ ] **Step 4: Correr los tests**
 
