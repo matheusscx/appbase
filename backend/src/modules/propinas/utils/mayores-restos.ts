@@ -77,6 +77,11 @@ export function repartirMayoresRestos(
   const montos = new Map(
     cuotas.map((c) => {
       const extra = idsConExtra.has(c.id) ? 1 : 0;
+      // La vuelta de unidades mínimas a decimales, exacta inversa del `× factor`
+      // de arriba: `base + extra` es entero y `factor` una potencia de diez, así
+      // que la división no pierde nada y el `toFixed` solo FORMATEA. Acá no hay
+      // decisión de redondeo, y por eso tampoco `modo_redondeo` — a diferencia
+      // del sitio de arriba, donde el HALF_UP sí es una elección fija.
       const monto = c.base.plus(extra).div(factor).toFixed(decimales);
       return [c.id, monto] as const;
     }),

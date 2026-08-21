@@ -489,9 +489,11 @@ function procesarReglas(
      *
      * Va acá adentro y no en un `.map` sobre las trazas de vuelta porque el
      * **tope contra `disponible`** tiene que mirar plata real: con dos fijos de
-     * 50,5 sobre un neto de 100 en CLP, cuantizar las trazas después daría
-     * 51 + 51 = 102 y una línea de −2. Cuantizando acá, el segundo se topea
-     * contra lo que de verdad queda (49) y el piso en cero se sostiene.
+     * 50,5 sobre un neto de 100 en CLP, el tope fino deja pasar 50,5 y 49,5, y
+     * cuantizar las trazas después daría 51 + 50 = 101 sobre un neto de 100 —
+     * una línea en −1. Cuantizando acá, el segundo se topea contra lo que de
+     * verdad queda (49) y el piso en cero se sostiene. Es el mismo número que
+     * mide `anti-patterns.md` en su entrada de cuantización.
      */
     cuantizar?: Cuantizador;
   },
