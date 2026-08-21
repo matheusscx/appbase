@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -7,7 +8,14 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+/**
+ * El tope es 4 porque toda columna de dinero es NUMERIC(18,4): una moneda con
+ * más decimales haría que el recorte final lo decidiera el cast de Postgres,
+ * con su propia regla y fuera de modo_redondeo. Las 3 sembradas cumplen
+ * (CLP 0, USD 2, UF 4). Subir el tope exige subir la escala de las columnas.
+ */
 @Entity('moneda')
+@Check('chk_moneda_decimales', '"decimales" BETWEEN 0 AND 4')
 export class Moneda {
   @PrimaryGeneratedColumn('uuid', { name: 'moneda_id' })
   monedaId: string;

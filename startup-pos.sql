@@ -74,7 +74,8 @@ CREATE TABLE "moneda" (
   "locale"             VARCHAR(10) NOT NULL DEFAULT 'es-CL',  -- BCP 47 para Intl/maska
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  CONSTRAINT chk_moneda_decimales CHECK ("decimales" BETWEEN 0 AND 4)
 );
 
 ALTER TABLE "pais" ADD FOREIGN KEY ("moneda_oficial_id") REFERENCES "moneda" ("moneda_id");

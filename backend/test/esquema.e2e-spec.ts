@@ -95,4 +95,25 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
 
     expect(total).toBeGreaterThan(200);
   });
+
+  /**
+   * Toda columna de dinero es NUMERIC(18,4). Una moneda con más decimales
+   * devolvería el recorte final al cast de Postgres —su regla, fuera de
+   * modo_redondeo—, que es justo lo que el frente de redondeo vino a cerrar.
+   */
+  it('ninguna moneda puede tener más decimales de los que la columna de dinero guarda', async () => {
+    await expect(
+      ds.query(
+        `INSERT INTO moneda (nombre, codigo_iso, codigo_numero, simbolo, decimales)
+         VALUES ('Moneda de prueba', 'XTS', '963', 'X', 6)`,
+      ),
+    ).rejects.toThrow(/chk_moneda_decimales/);
+
+    // Y las sembradas cumplen: si alguna no cumpliera, el CHECK no habría podido
+    // crearse y este test pasaría por el motivo equivocado.
+    const fuera = await ds.query(
+      `SELECT codigo_iso FROM moneda WHERE decimales < 0 OR decimales > 4`,
+    );
+    expect(fuera).toEqual([]);
+  });
 });
