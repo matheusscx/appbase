@@ -11,6 +11,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { ItemsService } from './items.service';
 import { QueryDesfasesDto } from './dto/query-desfases.dto';
@@ -31,7 +32,10 @@ export class DesfasesController {
 
   @Post('aplicar')
   @RequiresPermiso('Items', 'Actualizar')
-  aplicar(@Req() req: Request, @Body() dto: AplicarDesfasesDto) {
+  aplicar(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: AplicarDesfasesDto,
+  ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.aplicarDesfases(tenantId, dto.items);
   }

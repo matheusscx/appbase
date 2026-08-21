@@ -155,8 +155,15 @@ export class CreateItemDto {
   // barrera. `>= 0` y no `> 0`: el `0` es legítimo —el service lo fuerza para los
   // ingredientes— y el negativo no tiene lectura posible (llega a `totalFinal`
   // negativo sin que ninguna regla lo neutralice).
+  //
+  // `@EsCosto()` (escala 4) y no `@EsMontoCobrado()`: el precio de lista es
+  // dinero **por unidad** —una tasa—, y la frontera tasa→monto se cruza en la
+  // multiplicación por la cantidad, no acá. Hay ítems costeados por gramo,
+  // donde cuantizar el precio unitario a peso entero mete error ×1000 al
+  // vender un kilo. Mismo criterio que `AplicarDesfaseItemDto.precioBase`.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @EsCosto()
   precioBase: string;
 
   @IsUUID()
