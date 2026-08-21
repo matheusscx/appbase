@@ -33,6 +33,7 @@ const mockTenant: Tenant = {
   calculoRecargos: 'base',
   escalaCalculo: 6,
   modoRedondeo: 'HALF_UP',
+  nivelRedondeo: 'linea',
   montoTolerancia: '0',
   arqueoCiego: false,
   creadoEl: new Date(),
@@ -179,6 +180,47 @@ describe('TenantsService', () => {
     }).compile();
 
     service = module.get<TenantsService>(TenantsService);
+  });
+
+  describe('create', () => {
+    const PROVINCIA_ID = 'provincia-uuid';
+    const CREADOR_ID = 'creador-uuid';
+
+    /** El manager de la transacción, con lo mínimo para que `create()` no tire. */
+    function managerFake() {
+      return {
+        create: jest.fn((_entidad: unknown, datos: object) => datos),
+        save: jest.fn((_entidad: unknown, datos: object) =>
+          Promise.resolve({ id: 'tenant-nuevo', ...datos }),
+        ),
+        query: jest.fn().mockResolvedValue([]),
+      };
+    }
+
+    let manager: ReturnType<typeof managerFake>;
+
+    beforeEach(() => {
+      manager = managerFake();
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+    });
+
+    it('el alta de un tenant fija el nivel de redondeo por línea', async () => {
+      await service.create(
+        { provinciaId: PROVINCIA_ID, nombre: 'Tenant nuevo', correo: 'a@b.cl' },
+        CREADOR_ID,
+      );
+
+      // manager.create(Tenant, {...}) — el objeto con el que nace el tenant
+      const [, datos] = manager.create.mock.calls.find(
+        ([entidad]) => entidad === Tenant,
+      )!;
+      expect(datos).toMatchObject({
+        nivelRedondeo: 'linea',
+        modoRedondeo: 'HALF_UP', // el vecino que ya existía: si este falla, el mock cambió
+      });
+    });
   });
 
   describe('updateMine', () => {

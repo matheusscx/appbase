@@ -201,6 +201,7 @@ export class TenantsService {
         calculoRecargos: 'base',
         escalaCalculo: 6,
         modoRedondeo: 'HALF_UP',
+        nivelRedondeo: 'linea',
         montoTolerancia: '0',
       });
       const savedTenant = await manager.save(Tenant, tenant);

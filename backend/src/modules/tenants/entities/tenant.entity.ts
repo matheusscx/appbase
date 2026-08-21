@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -8,6 +9,10 @@ import {
 } from 'typeorm';
 
 @Entity('tenants')
+@Check(
+  'chk_tenants_nivel_redondeo',
+  `"nivel_redondeo" IN ('linea','documento')`,
+)
 export class Tenant {
   @PrimaryGeneratedColumn('uuid', { name: 'tenant_id' })
   id: string;
@@ -38,6 +43,15 @@ export class Tenant {
 
   @Column({ name: 'modo_redondeo', default: 'HALF_UP' })
   modoRedondeo: string;
+
+  /**
+   * Nivel al que se cuantiza a la escala de la moneda: 'linea' cuantiza cada
+   * línea y el total es suma de enteros; 'documento' deja las líneas a
+   * escala_calculo y cuantiza solo el total (la regla mexicana). Decisión (c) +
+   * P1 del 2026-08-20: 'documento' está frenado para monedas de 0 decimales.
+   */
+  @Column({ name: 'nivel_redondeo', type: 'text', default: 'linea' })
+  nivelRedondeo: string;
 
   @Column({
     name: 'monto_tolerancia',

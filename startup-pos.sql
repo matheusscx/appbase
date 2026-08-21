@@ -188,11 +188,13 @@ CREATE TABLE "tenants" (
   "calculo_recargos"   TEXT        NOT NULL DEFAULT 'base',  -- 'base' | 'compuesto'
   "escala_calculo"     SMALLINT    NOT NULL DEFAULT 6,        -- decimales para cálculos intermedios (0-12)
   "modo_redondeo"      TEXT        NOT NULL DEFAULT 'HALF_UP', -- HALF_UP | HALF_EVEN | FLOOR | CEIL
+  "nivel_redondeo"     TEXT        NOT NULL DEFAULT 'linea',   -- 'linea' | 'documento'
   "monto_tolerancia"   NUMERIC(18,6) NOT NULL DEFAULT 0,      -- tolerancia en conciliaciones
   "arqueo_ciego"       BOOLEAN     NOT NULL DEFAULT false,     -- cierre ciego: retiene el esperado durante el conteo
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
-  "eliminado_el"       TIMESTAMPTZ
+  "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT chk_tenants_nivel_redondeo CHECK ("nivel_redondeo" IN ('linea','documento'))
 );
 
 CREATE TABLE "razones_sociales" (

@@ -1114,6 +1114,7 @@ export class SeederService implements OnApplicationBootstrap {
             calculoRecargos: 'base',
             escalaCalculo: 6,
             modoRedondeo: 'HALF_UP',
+            nivelRedondeo: 'linea',
             montoTolerancia: '0',
           }),
         );
