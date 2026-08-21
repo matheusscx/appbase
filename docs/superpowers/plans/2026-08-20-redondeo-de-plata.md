@@ -1456,6 +1456,15 @@ Expected: FAIL — hoy pasa `'1000.5000'` tal cual.
 
 - [ ] **Step 3: Implementar**
 
+> ⚠️ **Corregido el 2026-08-20, durante la ejecución.** La Task 10 declaraba
+> `decimalesDeLaVenta` entre lo que producía, y el implementador **no lo escribió, con
+> razón**: sin consumidor habría sido código muerto, y el proyecto lo prohíbe. Así que
+> **esta tarea lo crea, con su test**, en vez de asumir que existe. La firma y el SQL están
+> en el bloque de la Task 10; el criterio es el mismo de `decimalesOficiales` (filtrar
+> `eliminado_el IS NULL` en las dos tablas del JOIN y parametrizar el tenant), con la
+> diferencia de que resuelve la moneda **de la venta referenciada**, no la vigente del
+> tenant: la NC y el reembolso corrigen *ese* documento.
+
 ```typescript
 // reembolso-callback.handler.ts, antes de crearNotaCredito
 const decimales = await this.monedas.decimalesDeLaVenta(evento.ventaId, evento.tenantId);
