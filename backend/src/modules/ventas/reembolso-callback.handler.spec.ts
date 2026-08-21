@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { VentasReembolsoHandler } from './reembolso-callback.handler';
 import { ReembolsoCallbackRegistry } from '../pasarela/services/reembolso-callback.registry';
 import { VentasService } from './ventas.service';
+import { MonedasService } from '../monedas/monedas.service';
 
 describe('VentasReembolsoHandler', () => {
   let handler: VentasReembolsoHandler;
@@ -10,6 +11,7 @@ describe('VentasReembolsoHandler', () => {
     crearNotaCredito: jest.Mock;
     registrarDevolucionesPorReembolso: jest.Mock;
   };
+  let monedasService: { decimalesDeLaVenta: jest.Mock };
 
   const eventoBase = {
     tenantId: 't-1',
@@ -29,11 +31,15 @@ describe('VentasReembolsoHandler', () => {
         .mockResolvedValue({ id: 'nc-1', totalFinal: '1100.0000' }),
       registrarDevolucionesPorReembolso: jest.fn().mockResolvedValue(undefined),
     };
+    monedasService = {
+      decimalesDeLaVenta: jest.fn().mockResolvedValue(0),
+    };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VentasReembolsoHandler,
         ReembolsoCallbackRegistry,
         { provide: VentasService, useValue: ventasService },
+        { provide: MonedasService, useValue: monedasService },
       ],
     }).compile();
 
@@ -98,5 +104,52 @@ describe('VentasReembolsoHandler', () => {
     await expect(
       handler.onReembolsoAprobado({ ...eventoBase, generarNotaCredito: true }),
     ).rejects.toThrow('boom');
+  });
+
+  it('un reembolso con decimales de más se cuantiza y se registra, no se rechaza', async () => {
+    const logger = jest.spyOn(handler['logger'], 'warn');
+
+    await handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+      monto: '1000.5000',
+    });
+
+    expect(ventasService.crearNotaCredito).toHaveBeenCalledWith(
+      expect.objectContaining({ monto: '1001' }),
+    );
+    expect(logger).toHaveBeenCalledWith(
+      expect.stringContaining('1000.5000'), // el valor original queda en la traza
+    );
+  });
+
+  it('la traza deja el número original de la pasarela, no solo un mensaje genérico', async () => {
+    const logger = jest.spyOn(handler['logger'], 'warn');
+
+    await handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+      monto: '1000.5000',
+    });
+
+    const [mensaje] = logger.mock.calls[0] as [string];
+    expect(mensaje).toContain('1000.5000');
+    expect(mensaje).toContain('1001');
+    expect(mensaje).toContain(eventoBase.ventaId);
+  });
+
+  it('un reembolso con monto ya válido para la moneda no deja traza', async () => {
+    const logger = jest.spyOn(handler['logger'], 'warn');
+
+    await handler.onReembolsoAprobado({
+      ...eventoBase,
+      generarNotaCredito: true,
+      monto: '1000',
+    });
+
+    expect(ventasService.crearNotaCredito).toHaveBeenCalledWith(
+      expect.objectContaining({ monto: '1000' }),
+    );
+    expect(logger).not.toHaveBeenCalled();
   });
 });

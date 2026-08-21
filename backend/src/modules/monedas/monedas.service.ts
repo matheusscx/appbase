@@ -124,6 +124,29 @@ export class MonedasService {
     return Number(rows[0].decimales);
   }
 
+  /**
+   * `moneda.decimales` de la moneda **con la que se registró la venta**, no la
+   * oficial vigente del tenant: una nota de crédito o un reembolso corrigen
+   * *ese* documento, y si el tenant cambia de moneda oficial después, el
+   * ajuste viejo tiene que seguir cuantizando con la escala que tenía al
+   * momento de venderse. Mismo criterio que `decimalesOficiales` — filtra
+   * `eliminado_el IS NULL` en las dos tablas del JOIN y parametriza el
+   * tenant — para que un reembolso no pueda leer la venta de otro tenant.
+   */
+  async decimalesDeLaVenta(ventaId: string, tenantId: string): Promise<number> {
+    const rows: { decimales: number | string }[] = await this.db.query(
+      `SELECT m.decimales
+         FROM ventas v
+         JOIN moneda m ON m.moneda_id = v.moneda_id AND m.eliminado_el IS NULL
+        WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
+      [ventaId, tenantId],
+    );
+    if (!rows.length) {
+      throw new NotFoundException('Venta no encontrada');
+    }
+    return Number(rows[0].decimales);
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Mutaciones
   // ───────────────────────────────────────────────────────────────────────────

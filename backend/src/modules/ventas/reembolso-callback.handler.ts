@@ -1,10 +1,12 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import {
   ReembolsoAprobadoEvento,
   ReembolsoCallbackHandler,
   ReembolsoCallbackRegistry,
 } from '../pasarela/services/reembolso-callback.registry';
 import { VentasService } from './ventas.service';
+import { MonedasService } from '../monedas/monedas.service';
 
 /**
  * Callback in-process de reembolsos: cuando la pasarela aprueba un reembolso
@@ -20,9 +22,12 @@ import { VentasService } from './ventas.service';
 export class VentasReembolsoHandler
   implements ReembolsoCallbackHandler, OnModuleInit
 {
+  private readonly logger = new Logger(VentasReembolsoHandler.name);
+
   constructor(
     private readonly registry: ReembolsoCallbackRegistry,
     private readonly ventasService: VentasService,
+    private readonly monedas: MonedasService,
   ) {}
 
   onModuleInit(): void {
@@ -37,7 +42,7 @@ export class VentasReembolsoHandler
         tenantId: evento.tenantId,
         usuarioId: evento.usuarioId,
         ventaOriginalId: evento.ventaId,
-        monto: evento.monto,
+        monto: await this.cuantizarMontoReembolso(evento),
         devoluciones: evento.devoluciones,
         comentario: `NC por reembolso orden ${evento.codigoOrden}`,
       });
@@ -53,5 +58,36 @@ export class VentasReembolsoHandler
       });
     }
     return {};
+  }
+
+  /**
+   * La pasarela ya movió la plata: rechazar el callback por decimales de más
+   * no deshace el cobro, solo pierde el evento (decisión P3 — un hecho
+   * consumado se registra, no se rechaza como haría el guard de un cajero
+   * tipeando un monto). Se cuantiza a la escala de la moneda con la que se
+   * registró la venta original (no la oficial vigente del tenant, que puede
+   * haber cambiado desde entonces) y, si el valor cambió, queda una traza con
+   * el número exacto que informó la pasarela para poder reconstruirlo después.
+   * Si ya venía bien no se loguea nada, para no llenar el log de ruido.
+   */
+  private async cuantizarMontoReembolso(
+    evento: ReembolsoAprobadoEvento,
+  ): Promise<string> {
+    const decimales = await this.monedas.decimalesDeLaVenta(
+      evento.ventaId,
+      evento.tenantId,
+    );
+    const montoExacto = new Decimal(evento.monto);
+    const montoCuantizado = montoExacto.toDecimalPlaces(
+      decimales,
+      Decimal.ROUND_HALF_UP,
+    );
+    if (montoCuantizado.eq(montoExacto)) {
+      return evento.monto;
+    }
+    this.logger.warn(
+      `Reembolso de la pasarela con más decimales que la moneda: ${evento.monto} → ${montoCuantizado.toString()} (venta ${evento.ventaId})`,
+    );
+    return montoCuantizado.toString();
   }
 }

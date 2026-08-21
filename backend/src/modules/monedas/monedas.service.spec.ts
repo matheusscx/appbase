@@ -143,6 +143,30 @@ describe('MonedasService', () => {
     });
   });
 
+  describe('decimalesDeLaVenta', () => {
+    const VENTA = 'venta-uuid';
+
+    it('devuelve los decimales de la moneda con la que se registró la venta, parametrizado por tenant', async () => {
+      dataSource.query.mockResolvedValue([{ decimales: 0 }]);
+
+      const result = await service.decimalesDeLaVenta(VENTA, TENANT);
+
+      expect(result).toBe(0);
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('eliminado_el IS NULL'),
+        [VENTA, TENANT],
+      );
+    });
+
+    it('lanza NotFound si la venta no existe, está borrada o no pertenece al tenant', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await expect(service.decimalesDeLaVenta(VENTA, TENANT)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('updateMoneda', () => {
     it('rechaza deshabilitar la moneda oficial', async () => {
       dataSource.query.mockResolvedValue([
