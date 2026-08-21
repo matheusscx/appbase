@@ -1465,5 +1465,112 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.totales.totalImpuestos).toBe('0.000000');
       expect(r.totales.totalFinal).toBe('3000.000000');
     });
+
+    it('con descuento de nivel venta, Σ líneas − descuento global = total, todo entero', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          descuentosVenta: [
+            regla({ id: 'dv1', nombre: 'Cupón 7%', valor: '0.07' }),
+          ],
+          // Netos 3.000 + 1.550 = 4.550, y 7% de 4.550 = 318,5 → el descuento
+          // global cae justo en el medio peso, el caso que la identidad tiene
+          // que cerrar.
+          lineas: [
+            linea({
+              itemId: 'i1',
+              precioUnitario: '3000',
+              impuestos: [impuesto()],
+            }),
+            linea({
+              itemId: 'i2',
+              precioUnitario: '1550',
+              impuestos: [impuesto()],
+            }),
+          ],
+        }),
+      );
+      const sumaLineas = r.lineas.reduce(
+        (acc, l) => acc.plus(l.totalLinea),
+        new Decimal(0),
+      );
+      const dv = new Decimal(r.trazasVenta.descuentos[0].monto);
+
+      expect(dv.isInteger()).toBe(true);
+      expect(sumaLineas.minus(dv).eq(r.totales.totalFinal)).toBe(true);
+    });
+
+    it('Σ trazas = total con DOS reglas de nivel venta (Q(a+b) ≠ Q(a)+Q(b))', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          descuentosVenta: [
+            regla({
+              id: 'f1',
+              nombre: 'Fijo A',
+              modo: 'monto_fijo',
+              valor: '0.5',
+            }),
+            regla({
+              id: 'f2',
+              nombre: 'Fijo B',
+              modo: 'monto_fijo',
+              valor: '0.5',
+            }),
+          ],
+          lineas: [linea({ precioUnitario: '3000' })],
+        }),
+      );
+      // Cada fijo cuantiza por separado: 0,5 → 1 (HALF_UP) dos veces = 2. La
+      // suma fina (0,5+0,5=1,0) cuantizada de una sola vez daría 1 — la
+      // discrepancia que rompía Σtrazas = total con el `.map` al volver.
+      const sumaTrazas = r.trazasVenta.descuentos.reduce(
+        (acc, t) => acc.plus(t.monto),
+        new Decimal(0),
+      );
+      expect(sumaTrazas.eq(r.totales.totalDescuentos)).toBe(true);
+      expect(r.totales.totalDescuentos).toBe('2.000000');
+      const sumaLineas = r.lineas.reduce(
+        (acc, l) => acc.plus(l.totalLinea),
+        new Decimal(0),
+      );
+      expect(sumaLineas.minus(sumaTrazas).eq(r.totales.totalFinal)).toBe(true);
+    });
+
+    it('el piso en cero a nivel venta: dos descuentos que exceden lo disponible no dejan el total negativo', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          descuentosVenta: [
+            regla({
+              id: 'f1',
+              nombre: 'Fijo A',
+              modo: 'monto_fijo',
+              valor: '50.5',
+            }),
+            regla({
+              id: 'f2',
+              nombre: 'Fijo B',
+              modo: 'monto_fijo',
+              valor: '50.5',
+            }),
+          ],
+          // Una sola línea, sin reglas propias: la plata real disponible es
+          // exactamente 100. Los dos fijos piden 101 fino entre los dos.
+          lineas: [linea({ precioUnitario: '100' })],
+        }),
+      );
+      // Cada traza cierra en pesos enteros: sin cuantizar `disponible` por
+      // dentro, el segundo fijo quedaría topeado a 49,5 (plata fina), no a 49
+      // (plata real).
+      for (const t of r.trazasVenta.descuentos) {
+        expect(new Decimal(t.monto).isInteger()).toBe(true);
+      }
+      const disponibleReal = new Decimal(100);
+      const aplicado = new Decimal(r.totales.totalDescuentos);
+      expect(aplicado.lessThanOrEqualTo(disponibleReal)).toBe(true);
+      expect(new Decimal(r.totales.totalFinal).isNegative()).toBe(false);
+      expect(new Decimal(r.totales.totalFinal).isInteger()).toBe(true);
+    });
   });
 });

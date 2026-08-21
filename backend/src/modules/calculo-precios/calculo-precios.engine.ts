@@ -732,6 +732,14 @@ function calcularLinea(
 export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
   const { config: cfg } = venta;
 
+  // Las reglas de nivel venta son campos de DOCUMENTO (el DscRcgGlobal del
+  // DTE): se cuantizan como cualquier monto cobrado, con el mismo criterio
+  // que usa `calcularLinea` — así el ticket cuadra sumando líneas y restando
+  // el descuento global. El modelo ya las trata así: `ventas_descuentos` las
+  // persiste con `detalle_id null`.
+  const q: Cuantizador =
+    cfg.nivelRedondeo === 'linea' ? (d) => cuantizar(d, cfg) : SIN_CUANTIZAR;
+
   const lineas = venta.lineas.map((l) =>
     calcularLinea(l, venta.metodoPagoId, cfg),
   );
@@ -784,6 +792,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
         modoCalculo: cfg.calculoDescuentos,
         metodoPagoId: venta.metodoPagoId,
         cfg,
+        cuantizar: q,
       });
       accVenta = dv.acc;
       disponibleVenta = disponibleVenta.minus(dv.total);
@@ -796,6 +805,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
         modoCalculo: cfg.calculoRecargos,
         metodoPagoId: venta.metodoPagoId,
         cfg,
+        cuantizar: q,
       });
       accVenta = rv.acc;
       disponibleVenta = disponibleVenta.plus(rv.total);
