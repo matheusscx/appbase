@@ -1278,7 +1278,10 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       ]) {
         expect(new Decimal(v).isInteger()).toBe(true);
       }
-      expect(new Decimal(r.totales.totalFinal).isInteger()).toBe(true);
+      // `totalFinal` NO se afirma acá: con una sola línea y sin reglas de nivel
+      // venta es el mismo número que `totalLinea`, que el loop ya cubrió. Que el
+      // total del documento cierre en la escala es una propiedad distinta y la
+      // fijan los casos de nivel `documento` y los de Σtrazas con dos reglas.
     });
 
     it('el medio peso desaparece: 2.707,5 de IVA cierra en 2.708', () => {
@@ -1302,14 +1305,31 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(new Decimal(l.totalLinea).eq(esperado)).toBe(true);
     });
 
-    it('la suma de las trazas de descuento da el descuento aplicado', () => {
-      const r = calcularVenta(ventaDelMedioPeso());
+    it('Σ trazas de descuento = descuento aplicado, con DOS reglas (Q(a)+Q(b) ≠ Q(a+b))', () => {
+      // Con UNA sola regla la identidad es Σ{a} = a y se cumple igual aunque el
+      // total se cuantizara aparte: el test no discriminaba nada. Con dos del
+      // 12,5% sobre 100 en CLP sí — cada una cuantiza a 13 (Σ = 26), mientras
+      // que cuantizar la suma fina daría Q(12,5 + 12,5) = Q(25) = 25.
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ id: 'd1', nombre: 'A', valor: '0.125' }),
+                regla({ id: 'd2', nombre: 'B', valor: '0.125' }),
+              ],
+            }),
+          ],
+        }),
+      );
       const l = r.lineas[0];
       const suma = l.trazas.descuentos.reduce(
         (acc, t) => acc.plus(t.monto),
         new Decimal(0),
       );
       expect(suma.eq(l.descuentoAplicado)).toBe(true);
+      expect(l.descuentoAplicado).toBe('26.000000');
     });
 
     it('la suma de las trazas de impuesto da el impuesto aplicado', () => {
@@ -1422,8 +1442,35 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       );
       const l = r.lineas[0];
       expect(l.descuentoAplicado).toBe('100.000000');
+      // `toBe('0.000000')` ya es la afirmación de que no quedó negativo: un
+      // `isNegative()` detrás no puede fallar sin que falle éste primero.
       expect(l.totalLinea).toBe('0.000000');
-      expect(new Decimal(l.totalLinea).isNegative()).toBe(false);
+    });
+
+    it('la traza de una regla topeada declara el solicitado YA cuantizado', () => {
+      // El caso topeado en CLP que le faltaba a `valorSolicitado`: el segundo
+      // fijo pide 50,5 y solo entran 49. Si el solicitado no se cuantizara, la
+      // traza mostraría 50,5 — plata con decimales que el peso no representa,
+      // en la misma línea del ticket donde el aplicado ya es entero.
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ id: 'f1', modo: 'monto_fijo', valor: '50.5' }),
+                regla({ id: 'f2', modo: 'monto_fijo', valor: '50.5' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const [primera, segunda] = r.lineas[0].trazas.descuentos;
+      expect(primera.valorSolicitado).toBe('51.000000');
+      expect(primera.monto).toBe('51.000000');
+      // La topeada: pidió 51 (cuantizado), aplicó 49.
+      expect(segunda.valorSolicitado).toBe('51.000000');
+      expect(segunda.monto).toBe('49.000000');
     });
 
     it('con nivel documento las líneas conservan decimales y solo el total se cuantiza', () => {

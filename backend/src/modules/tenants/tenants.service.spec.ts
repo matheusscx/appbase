@@ -787,6 +787,14 @@ describe('TenantsService', () => {
         nivelRedondeo: 'documento',
       });
 
+      // El objeto de retorno se arma con `dto.nivelRedondeo`, así que afirmarlo
+      // solo a él prueba que el service devuelve lo que le pasaron — no que
+      // 'documento' llegue a la base. La única prueba real contra el `SET` usaba
+      // 'linea'; ésta la cubre para el valor que el borde acaba de habilitar.
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('nivel_redondeo = $6'),
+        ['base', 'base', 4, 'HALF_UP', '0', 'documento', 'tenant-uuid'],
+      );
       expect(r.nivelRedondeo).toBe('documento');
     });
   });
