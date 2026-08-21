@@ -19,6 +19,7 @@ import { RbacService } from '../rbac/rbac.service';
 import { TokensAccesoService } from '../auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../auth/entities/token-acceso.entity';
 import { MailService } from '../mail/mail.service';
+import { MonedasService } from '../monedas/monedas.service';
 import { ConfigService } from '@nestjs/config';
 import type { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 
@@ -86,6 +87,7 @@ describe('TenantsService', () => {
     aplicarBajaDeCuenta: jest.Mock;
   };
   let rbac: { administradoresDe: jest.Mock };
+  let monedasService: { decimalesOficiales: jest.Mock };
 
   beforeEach(async () => {
     tenantRepo = {
@@ -143,6 +145,10 @@ describe('TenantsService', () => {
     };
     // Por defecto queda otro admin: la baja normal no se bloquea.
     rbac = { administradoresDe: jest.fn().mockResolvedValue(['otro-admin']) };
+    // Por defecto, la moneda oficial del tenant del seed (CLP, 0 decimales).
+    monedasService = {
+      decimalesOficiales: jest.fn().mockResolvedValue(0),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -176,6 +182,7 @@ describe('TenantsService', () => {
         // exactamente lo que el fallback de `MailService` existe para evitar.
         { provide: MailService, useValue: mail },
         { provide: ConfigService, useValue: { get: jest.fn() } },
+        { provide: MonedasService, useValue: monedasService },
       ],
     }).compile();
 
@@ -604,6 +611,18 @@ describe('TenantsService', () => {
   });
 
   describe('updatePreferenciasFinancieras', () => {
+    // Combinación válida de base para los tests de la matriz: se pisa solo el
+    // campo bajo prueba en cada caso.
+    const prefsValidas = {
+      calculoDescuentos: 'base',
+      calculoRecargos: 'base',
+      formula: ['descuentos', 'recargos', 'impuestos'],
+      escalaCalculo: 6,
+      modoRedondeo: 'HALF_UP',
+      montoTolerancia: '0',
+      nivelRedondeo: 'linea',
+    };
+
     it('persiste modos y reescribe la fórmula con pasos correctos', async () => {
       const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
       dataSource.transaction.mockImplementation(
@@ -622,6 +641,7 @@ describe('TenantsService', () => {
         escalaCalculo: 4,
         modoRedondeo: 'HALF_EVEN',
         montoTolerancia: '1.5',
+        nivelRedondeo: 'linea',
       };
 
       const result = await service.updatePreferenciasFinancieras(
@@ -629,9 +649,13 @@ describe('TenantsService', () => {
         dto,
       );
 
+      // La columna `nivel_redondeo` va enumerada a mano en el UPDATE (no hay
+      // ORM de por medio): afirmar solo `stringContaining('UPDATE tenants')`
+      // no detecta que alguien la haya olvidado ahí. `nivel_redondeo = $6` fija
+      // tanto el fragmento SQL como la posición del parámetro en el array.
       expect(mockManager.query).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE tenants'),
-        ['compuesto', 'base', 4, 'HALF_EVEN', '1.5', 'tenant-uuid'],
+        expect.stringContaining('nivel_redondeo = $6'),
+        ['compuesto', 'base', 4, 'HALF_EVEN', '1.5', 'linea', 'tenant-uuid'],
       );
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('DELETE FROM tenant_formula_precio'),
@@ -653,17 +677,14 @@ describe('TenantsService', () => {
       expect(result.calculoDescuentos).toBe('compuesto');
       expect(result.escalaCalculo).toBe(4);
       expect(result.modoRedondeo).toBe('HALF_EVEN');
+      expect(result.nivelRedondeo).toBe('linea');
       expect(result.montoTolerancia).toBe('1.5');
     });
 
     it('lanza BadRequestException si la fórmula tiene tipos duplicados', async () => {
       const dto = {
-        calculoDescuentos: 'base',
-        calculoRecargos: 'base',
+        ...prefsValidas,
         formula: ['descuentos', 'descuentos', 'impuestos'],
-        escalaCalculo: 6,
-        modoRedondeo: 'HALF_UP',
-        montoTolerancia: '0',
       };
       await expect(
         service.updatePreferenciasFinancieras('tenant-uuid', dto),
@@ -673,17 +694,56 @@ describe('TenantsService', () => {
 
     it('lanza BadRequestException si la fórmula tiene solo 2 tipos distintos', async () => {
       const dto = {
-        calculoDescuentos: 'base',
-        calculoRecargos: 'base',
+        ...prefsValidas,
         formula: ['descuentos', 'recargos', 'descuentos'],
-        escalaCalculo: 6,
-        modoRedondeo: 'HALF_UP',
-        montoTolerancia: '0',
       };
       await expect(
         service.updatePreferenciasFinancieras('tenant-uuid', dto),
       ).rejects.toThrow(BadRequestException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza nivel documento con una moneda oficial sin decimales', async () => {
+      // el tenant del seed opera en CLP (0 decimales) — default del mock.
+      monedasService.decimalesOficiales.mockResolvedValue(0);
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', {
+          ...prefsValidas,
+          nivelRedondeo: 'documento',
+        }),
+      ).rejects.toThrow(/no admite decimales/);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza una escala de cálculo menor que los decimales de la moneda', async () => {
+      monedasService.decimalesOficiales.mockResolvedValue(2); // USD
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', {
+          ...prefsValidas,
+          escalaCalculo: 1,
+        }),
+      ).rejects.toThrow(/escala de cálculo/);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('acepta nivel documento en una moneda con decimales', async () => {
+      monedasService.decimalesOficiales.mockResolvedValue(2); // USD
+      const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager),
+      );
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      const r = await service.updatePreferenciasFinancieras('tenant-uuid', {
+        ...prefsValidas,
+        nivelRedondeo: 'documento',
+      });
+
+      expect(r.nivelRedondeo).toBe('documento');
     });
   });
 

@@ -16,6 +16,7 @@ const calculoRecargos = ref<'base' | 'compuesto'>('base')
 const formula = ref<string[]>(['descuentos', 'recargos', 'impuestos'])
 const escalaCalculo = ref<number>(6)
 const modoRedondeo = ref<string>('HALF_UP')
+const nivelRedondeo = ref<string>('linea')
 const montoTolerancia = ref<string>('0')
 
 const calculoOptions = [
@@ -36,6 +37,11 @@ const pasoLabels: Record<string, string> = {
   impuestos: 'Impuestos',
 }
 
+const nivelRedondeoOptions = [
+  { value: 'linea', label: 'Por línea', description: 'Cada línea de la venta se redondea por separado y el total es la suma de esos redondeos.' },
+  { value: 'documento', label: 'Por documento', description: 'Las líneas se calculan con toda su precisión y solo el total final se redondea a la moneda.' },
+]
+
 async function cargar() {
   loading.value = true
   try {
@@ -45,6 +51,7 @@ async function cargar() {
       formula: string[]
       escalaCalculo: number
       modoRedondeo: string
+      nivelRedondeo: string
       montoTolerancia: string
     }>(`${apiUrl}/tenants/preferencias-financieras`)
     calculoDescuentos.value = data.calculoDescuentos as 'base' | 'compuesto'
@@ -52,6 +59,7 @@ async function cargar() {
     formula.value = data.formula
     escalaCalculo.value = data.escalaCalculo
     modoRedondeo.value = data.modoRedondeo
+    nivelRedondeo.value = data.nivelRedondeo
     montoTolerancia.value = data.montoTolerancia
   }
   catch (e: unknown) {
@@ -69,6 +77,7 @@ const formState = computed(() => ({
   formula: formula.value,
   escalaCalculo: escalaCalculo.value,
   modoRedondeo: modoRedondeo.value,
+  nivelRedondeo: nivelRedondeo.value,
   montoTolerancia: montoTolerancia.value,
 }))
 
@@ -83,6 +92,7 @@ async function guardar() {
         formula: formula.value,
         escalaCalculo: escalaCalculo.value,
         modoRedondeo: modoRedondeo.value,
+        nivelRedondeo: nivelRedondeo.value,
         montoTolerancia: montoTolerancia.value,
       },
     })
@@ -189,6 +199,21 @@ function moverAbajo(index: number) {
                 <template #description="{ item }">
                   {{ item.description }}
                   <span class="block font-mono text-xs mt-0.5 opacity-60">Ej: {{ item.example }}</span>
+                </template>
+              </URadioGroup>
+            </UFormField>
+
+            <UFormField
+              label="Nivel de redondeo"
+              hint="Cuándo se ajustan los centavos: en cada línea de la venta, o solo una vez al final del documento."
+            >
+              <URadioGroup
+                v-model="nivelRedondeo"
+                :items="nivelRedondeoOptions"
+                value-key="value"
+              >
+                <template #description="{ item }">
+                  {{ item.description }}
                 </template>
               </URadioGroup>
             </UFormField>

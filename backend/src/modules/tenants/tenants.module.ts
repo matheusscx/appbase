@@ -11,6 +11,7 @@ import { RazonSocial } from './entities/razon-social.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { GarzonesModule } from '../garzones/garzones.module';
+import { MonedasModule } from '../monedas/monedas.module';
 import { TenantsService } from './tenants.service';
 import {
   AdminTenantsController,
@@ -31,6 +32,10 @@ import {
       PropinaGrupoDistribucion,
     ]),
     GarzonesModule,
+    // Por `MonedasService.decimalesOficiales`: la matriz de preferencias
+    // financieras frena `nivelRedondeo = 'documento'` contra la moneda oficial
+    // del tenant. `MonedasModule` no importa `TenantsModule` — sin ciclo.
+    MonedasModule,
     // Por `TokensAccesoService`: el alta emite la invitación dentro de su
     // propia transacción. `MailService` no se importa — su módulo es `@Global`.
     forwardRef(() => AuthModule),

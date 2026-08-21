@@ -30,6 +30,15 @@ export class UpdatePreferenciasFinancierasDto {
   @IsIn(['HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL'])
   modoRedondeo: string;
 
+  /**
+   * 'linea' cuantiza cada línea y el total es suma de enteros; 'documento' deja
+   * las líneas a `escalaCalculo` y cuantiza solo el total (regla mexicana). El
+   * service rechaza 'documento' cuando la moneda oficial del tenant tiene 0
+   * decimales — ver `TenantsService.updatePreferenciasFinancieras`.
+   */
+  @IsIn(['linea', 'documento'])
+  nivelRedondeo: string;
+
   @IsNumberString()
   montoTolerancia: string;
 }

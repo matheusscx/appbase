@@ -15,6 +15,7 @@ Preferencias Financieras es una pantalla de configuración que permite al admini
 1. **Modo de cálculo de descuentos**: `base` (todos los descuentos se aplican sobre el precio neto) o `compuesto` (cada descuento se aplica en cascada sobre el resultado anterior).
 2. **Modo de cálculo de recargos**: `base` (todos sobre precio neto) o `compuesto` (en cascada).
 3. **Orden de la fórmula de precios**: reordenar los tres pasos (descuentos, recargos, impuestos) en la secuencia que prefiera.
+4. **Nivel de redondeo** (`nivelRedondeo`): `linea` (cada línea de la venta se cuantiza a la escala de la moneda y el total es la suma) o `documento` (las líneas quedan a `escalaCalculo` y solo el total final se cuantiza — la regla mexicana). El motor de cálculo de precios la consume vía `ConfigCalculo`.
 
 La configuración se persiste en la base de datos y es consultada por el motor de cálculo de precios (pendiente) al procesar ventas.
 
@@ -27,7 +28,10 @@ Diferentes tipos de negocio y regímenes fiscales requieren distintas estrategia
 - **Included in this version:**
   - Lectura y escritura de preferencias (`GET` y `PUT`)
   - Validación de la fórmula (contiene exactamente los 3 pasos, sin duplicados)
-  - Persistencia en `tenants.calculo_descuentos`, `tenants.calculo_recargos`, y tabla `tenant_formula_precio`
+  - Validación de la matriz `nivelRedondeo` × moneda oficial: rechaza `documento` con
+    moneda de 0 decimales, y `escalaCalculo` menor que los decimales de la moneda oficial
+  - Persistencia en `tenants.calculo_descuentos`, `tenants.calculo_recargos`,
+    `tenants.nivel_redondeo`, y tabla `tenant_formula_precio`
   - Acceso restringido a admin del tenant (guard RBAC)
   
 - **NOT included (future):**
@@ -55,6 +59,7 @@ Response (200):
   "formula": ["descuentos", "recargos", "impuestos"],
   "escalaCalculo": 6,
   "modoRedondeo": "HALF_UP",
+  "nivelRedondeo": "linea",
   "montoTolerancia": "0"
 }
 ```
@@ -77,6 +82,7 @@ Request:
   "formula": ["recargos", "descuentos", "impuestos"],
   "escalaCalculo": 4,
   "modoRedondeo": "HALF_EVEN",
+  "nivelRedondeo": "linea",
   "montoTolerancia": "1.5"
 }
 
@@ -87,12 +93,19 @@ Response (200):
   "formula": ["recargos", "descuentos", "impuestos"],
   "escalaCalculo": 4,
   "modoRedondeo": "HALF_EVEN",
+  "nivelRedondeo": "linea",
   "montoTolerancia": "1.5"
 }
 
 Response (400):
 {
   "message": "Formula debe contener exactamente ['descuentos', 'recargos', 'impuestos'] sin duplicados",
+  "statusCode": 400
+}
+
+Response (400) — matriz nivelRedondeo × moneda:
+{
+  "message": "El nivel \"documento\" deja decimales en las líneas y la moneda oficial del tenant no admite decimales. Usá \"linea\".",
   "statusCode": 400
 }
 ```
@@ -122,6 +135,7 @@ Se integra en el módulo de tenants existente (no es un módulo nuevo).
 | `calculo_recargos` | TEXT | NOT NULL, default 'base' | Valores: 'base', 'compuesto' |
 | `escala_calculo` | SMALLINT | NOT NULL, default 6 | Decimales para cálculos intermedios (0–12) |
 | `modo_redondeo` | TEXT | NOT NULL, default 'HALF_UP' | Valores: 'HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL' |
+| `nivel_redondeo` | TEXT | NOT NULL, default 'linea', CHECK IN ('linea','documento') | 'linea' cuantiza cada línea; 'documento' solo el total (regla mexicana) |
 | `monto_tolerancia` | NUMERIC(18,6) | NOT NULL, default 0 | Tolerancia máxima en conciliaciones |
 
 2. **`tenant_formula_precio`** (tabla nueva)
@@ -148,6 +162,7 @@ export class PreferenciasFinancierasDto {
   formula: ('descuentos' | 'recargos' | 'impuestos')[];
   escalaCalculo: number;        // entero 0-12
   modoRedondeo: string;         // 'HALF_UP' | 'HALF_EVEN' | 'FLOOR' | 'CEIL'
+  nivelRedondeo: string;        // 'linea' | 'documento'
   montoTolerancia: string;      // numeric como string (Decimal.js)
 }
 
@@ -158,6 +173,7 @@ export class UpdatePreferenciasFinancierasDto {
   formula: ('descuentos' | 'recargos' | 'impuestos')[];
   escalaCalculo: number;        // @IsInt @Min(0) @Max(12)
   modoRedondeo: string;         // @IsIn(['HALF_UP','HALF_EVEN','FLOOR','CEIL'])
+  nivelRedondeo: string;        // @IsIn(['linea','documento'])
   montoTolerancia: string;      // @IsNumberString — string end-to-end
 }
 ```
@@ -168,7 +184,16 @@ Validación con `class-validator`:
 - No hay duplicados
 - `escalaCalculo`: entero entre 0 y 12
 - `modoRedondeo`: uno de 'HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL'
+- `nivelRedondeo`: 'linea' o 'documento'
 - `montoTolerancia`: number string (p.ej. `"1.5"`) — string de punta a punta
+
+Validación adicional en el service (no expresable con `class-validator`, depende de la
+moneda oficial del tenant — `MonedasService.decimalesOficiales`):
+- `nivelRedondeo = 'documento'` con moneda oficial de 0 decimales → 400. Las líneas
+  quedarían con decimales que la moneda no puede representar; es exactamente el bug que
+  el frente de redondeo de plata vino a cerrar, ofrecido como opción de configuración.
+- `escalaCalculo` menor que los decimales de la moneda oficial → 400. El borrador de los
+  cálculos intermedios no puede ser más grueso que el resultado final.
 
 ### Key Methods
 
@@ -196,6 +221,8 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
 - Sección "Precisión y redondeo":
   - `UInput type="number"` para `escalaCalculo` (entero real → excepción del patrón, @IsInt)
   - `URadioGroup` con 4 opciones para `modoRedondeo`
+  - `URadioGroup` con 2 opciones para `nivelRedondeo` ("Por línea" / "Por documento"),
+    con texto de ayuda en lenguaje de negocio, no técnico
   - `UInput inputmode="decimal"` para `montoTolerancia` (string end-to-end, @IsNumberString)
 - Botón guardar
 
@@ -208,6 +235,7 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
   formula: string[]                        — ref
   escalaCalculo: number                    — ref (default 6)
   modoRedondeo: string                     — ref (default 'HALF_UP')
+  nivelRedondeo: string                    — ref (default 'linea')
   montoTolerancia: string                  — ref (default '0', string end-to-end)
 }
 ```
@@ -301,6 +329,8 @@ npm test -- modules/tenants/tenants.controller.spec.ts
 - [x] DTOs con validación
 - [x] Endpoint GET implementado
 - [x] Endpoint PUT implementado con validación de fórmula
+- [x] `nivelRedondeo` configurable, con la matriz de combinaciones prohibidas contra la
+      moneda oficial del tenant
 - [x] Guard RBAC en PUT (admin only)
 - [x] Transacción atomic en actualización
 - [x] Página frontend (form de edición)
@@ -320,5 +350,5 @@ npm test -- modules/tenants/tenants.controller.spec.ts
 ## Notes
 
 - **Default al crear un tenant:** la fórmula default es `['descuentos', 'recargos', 'impuestos']` con `calculo_descuentos = 'base'` y `calculo_recargos = 'base'`. Ver seeder en `backend/src/modules/seeder/seeder.service.ts`.
-- **Moneda:** las preferencias financieras son globales por tenant, independientes de la moneda. El cálculo se aplica al mismo monto en cualquier moneda.
+- **Moneda:** la mayoría de las preferencias son globales por tenant, independientes de la moneda. La excepción es `nivelRedondeo`: el service la valida contra `MonedasService.decimalesOficiales(tenantId)` (misma noción de "moneda oficial" que usa el motor de precios) porque 'documento' solo tiene sentido si la moneda admite decimales.
 - **Fase siguiente:** una vez que el motor de cálculo de precios esté implementado, estas prefs serán consultadas en cada línea de venta para aplicar el descuento, recargo e impuesto en el orden y modo configurado.

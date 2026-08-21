@@ -28,6 +28,7 @@ import {
   type TokenAcceso,
 } from '../auth/entities/token-acceso.entity';
 import { MailService } from '../mail/mail.service';
+import { MonedasService } from '../monedas/monedas.service';
 import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -182,6 +183,7 @@ export class TenantsService {
     private readonly mail: MailService,
     // Por `ConfigService` y no `process.env`: `process.env` no se puede mockear.
     private readonly config: ConfigService,
+    private readonly monedasService: MonedasService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1411,9 +1413,6 @@ export class TenantsService {
       formula: filas.map((f) => f.tipo),
       escalaCalculo: tenant.escalaCalculo,
       modoRedondeo: tenant.modoRedondeo,
-      // No es una preferencia editable por este método: viaja igual porque el
-      // motor la necesita para armar `ConfigCalculo`. La escritura sigue
-      // vedada a `updatePreferenciasFinancieras`, tarea aparte.
       nivelRedondeo: tenant.nivelRedondeo,
       montoTolerancia: tenant.montoTolerancia,
     };
@@ -1428,6 +1427,7 @@ export class TenantsService {
     formula: string[];
     escalaCalculo: number;
     modoRedondeo: string;
+    nivelRedondeo: string;
     montoTolerancia: string;
   }> {
     // Validate no duplicates (DTO only validates each element is valid, not uniqueness)
@@ -1438,18 +1438,39 @@ export class TenantsService {
       );
     }
 
+    // La matriz de interacción no es documentación: alguna combinación tiene
+    // que ser rechazable, o la perilla ofrece el bug que este frente entero
+    // vino a cerrar. `decimalesOficiales` ya resuelve "moneda oficial" con el
+    // mismo criterio que usa el motor de precios — no otra query.
+    const decimales = await this.monedasService.decimalesOficiales(tenantId);
+
+    if (dto.nivelRedondeo === 'documento' && decimales === 0) {
+      throw new BadRequestException(
+        'El nivel "documento" deja decimales en las líneas y la moneda oficial ' +
+          'del tenant no admite decimales. Usá "linea".',
+      );
+    }
+    if (dto.escalaCalculo < decimales) {
+      throw new BadRequestException(
+        `La escala de cálculo (${dto.escalaCalculo}) no puede ser menor que los ` +
+          `decimales de la moneda oficial (${decimales}).`,
+      );
+    }
+
     await this.db.transaccion(async (manager) => {
       await manager.query(
         `UPDATE tenants
          SET calculo_descuentos = $1, calculo_recargos = $2,
-             escala_calculo = $3, modo_redondeo = $4, monto_tolerancia = $5
-         WHERE tenant_id = $6`,
+             escala_calculo = $3, modo_redondeo = $4, monto_tolerancia = $5,
+             nivel_redondeo = $6
+         WHERE tenant_id = $7`,
         [
           dto.calculoDescuentos,
           dto.calculoRecargos,
           dto.escalaCalculo,
           dto.modoRedondeo,
           dto.montoTolerancia,
+          dto.nivelRedondeo,
           tenantId,
         ],
       );
@@ -1476,6 +1497,7 @@ export class TenantsService {
       formula: filas.map((f) => f.tipo),
       escalaCalculo: dto.escalaCalculo,
       modoRedondeo: dto.modoRedondeo,
+      nivelRedondeo: dto.nivelRedondeo,
       montoTolerancia: dto.montoTolerancia,
     };
   }
