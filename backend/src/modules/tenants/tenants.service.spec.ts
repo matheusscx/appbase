@@ -591,6 +591,7 @@ describe('TenantsService', () => {
       expect(result.formula).toEqual(['descuentos', 'recargos', 'impuestos']);
       expect(result.escalaCalculo).toBe(6);
       expect(result.modoRedondeo).toBe('HALF_UP');
+      expect(result.nivelRedondeo).toBe('linea');
       expect(result.montoTolerancia).toBe('0');
     });
 

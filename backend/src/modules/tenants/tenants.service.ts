@@ -1395,6 +1395,7 @@ export class TenantsService {
     formula: string[];
     escalaCalculo: number;
     modoRedondeo: string;
+    nivelRedondeo: string;
     montoTolerancia: string;
   }> {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
@@ -1410,6 +1411,10 @@ export class TenantsService {
       formula: filas.map((f) => f.tipo),
       escalaCalculo: tenant.escalaCalculo,
       modoRedondeo: tenant.modoRedondeo,
+      // No es una preferencia editable por este método: viaja igual porque el
+      // motor la necesita para armar `ConfigCalculo`. La escritura sigue
+      // vedada a `updatePreferenciasFinancieras`, tarea aparte.
+      nivelRedondeo: tenant.nivelRedondeo,
       montoTolerancia: tenant.montoTolerancia,
     };
   }

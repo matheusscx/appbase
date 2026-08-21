@@ -16,6 +16,7 @@ const prefs = {
   formula: ['descuentos', 'recargos', 'impuestos'],
   escalaCalculo: 6,
   modoRedondeo: 'HALF_UP',
+  nivelRedondeo: 'linea',
   montoTolerancia: '0',
 };
 
@@ -29,7 +30,7 @@ describe('CalculoPreciosService', () => {
   let descuentosService: { findAll: jest.Mock };
   let recargosService: { findAll: jest.Mock };
   let tenantsService: { getPreferenciasFinancieras: jest.Mock };
-  let monedasService: { findMonedas: jest.Mock };
+  let monedasService: { findMonedas: jest.Mock; decimalesOficiales: jest.Mock };
 
   const base = (over: Record<string, unknown> = {}) => ({
     id: 'item-1',
@@ -133,6 +134,9 @@ describe('CalculoPreciosService', () => {
           esDefault: false,
         },
       ]),
+      // 4 = el máximo que admite el sistema (UF); el motor todavía no
+      // cuantiza con este valor (Task 5).
+      decimalesOficiales: jest.fn().mockResolvedValue(4),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -239,7 +243,7 @@ describe('CalculoPreciosService', () => {
     // pagaría las dos consultas de nuevo y —peor— podría calcular con una config
     // distinta de la que usó para convertir.
     it('con config precargada no vuelve a consultar las preferencias', async () => {
-      const config = await service.cargarConfig(TENANT);
+      const config = await service.cargarConfig(TENANT, 4);
       tenantsService.getPreferenciasFinancieras.mockClear();
 
       await service.calcular(

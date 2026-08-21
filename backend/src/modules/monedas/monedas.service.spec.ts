@@ -121,6 +121,28 @@ describe('MonedasService', () => {
     });
   });
 
+  describe('decimalesOficiales', () => {
+    it('devuelve los decimales de la moneda default del tenant', async () => {
+      dataSource.query.mockResolvedValue([{ decimales: 0 }]);
+
+      const result = await service.decimalesOficiales(TENANT);
+
+      expect(result).toBe(0);
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('tm.es_default = true'),
+        [TENANT],
+      );
+    });
+
+    it('lanza BadRequestException si el tenant no tiene moneda oficial configurada', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await expect(service.decimalesOficiales(TENANT)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
   describe('updateMoneda', () => {
     it('rechaza deshabilitar la moneda oficial', async () => {
       dataSource.query.mockResolvedValue([

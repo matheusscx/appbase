@@ -1340,6 +1340,36 @@ describe('Ventas (e2e)', () => {
           .configCalculo?.formula,
       ).toEqual(fila.config_calculo?.formula);
     });
+
+    it('el config congelado incluye el nivel y los decimales de la moneda', async () => {
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${(venta.body as VentaResponse).id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(
+        (
+          detalle.body as {
+            configCalculo: {
+              nivelRedondeo: string;
+              decimalesMoneda: number;
+            } | null;
+          }
+        ).configCalculo,
+      ).toMatchObject({
+        nivelRedondeo: 'linea',
+        decimalesMoneda: 0, // el tenant del seed (Paris) opera en CLP
+      });
+    });
   });
 
   describe('GET /propinas/porcentaje-sugerido-venta', () => {

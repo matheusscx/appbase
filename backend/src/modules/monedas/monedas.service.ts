@@ -101,6 +101,29 @@ export class MonedasService {
     });
   }
 
+  /**
+   * `moneda.decimales` de la moneda oficial del tenant (`tenant_moneda.es_default`
+   * — la misma noción de "oficial" que ya resuelve `ventas.service.ts` al armar la
+   * cabecera). El motor de precios la usa para congelar la escala a la que se
+   * cuantiza el documento (`ConfigCalculo.decimalesMoneda`). Una consulta, no una
+   * por línea: se llama una vez por request, no por ítem.
+   */
+  async decimalesOficiales(tenantId: string): Promise<number> {
+    const rows: { decimales: number | string }[] = await this.db.query(
+      `SELECT m.decimales
+         FROM tenant_moneda tm
+         JOIN moneda m ON m.moneda_id = tm.moneda_id AND m.eliminado_el IS NULL
+        WHERE tm.tenant_id = $1 AND tm.eliminado_el IS NULL AND tm.es_default = true`,
+      [tenantId],
+    );
+    if (!rows.length) {
+      throw new BadRequestException(
+        'El tenant no tiene moneda oficial configurada',
+      );
+    }
+    return Number(rows[0].decimales);
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Mutaciones
   // ───────────────────────────────────────────────────────────────────────────

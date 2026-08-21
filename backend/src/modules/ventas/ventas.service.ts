@@ -271,10 +271,12 @@ export class VentasService {
       moneda_id: string;
       valor_del_dia: string;
       es_default: boolean;
+      decimales: number | string;
     }[] = await this.db.query(
-      `SELECT moneda_id, valor_del_dia, es_default
-         FROM tenant_moneda
-         WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+      `SELECT tm.moneda_id, tm.valor_del_dia, tm.es_default, m.decimales
+         FROM tenant_moneda tm
+         JOIN moneda m ON m.moneda_id = tm.moneda_id AND m.eliminado_el IS NULL
+        WHERE tm.tenant_id = $1 AND tm.eliminado_el IS NULL`,
       [tenantId],
     );
     const monedaOficial = monedaRows.find((r) => r.es_default);
@@ -319,9 +321,13 @@ export class VentasService {
     // conversión de abajo también redondea, y tiene que hacerlo con el mismo
     // `modo_redondeo` que el motor. Se le pasa después por `configPrecargada`:
     // son las mismas dos consultas de siempre, movidas unas líneas más arriba, no
-    // dos consultas nuevas.
-    const configCalculo =
-      await this.calculoPreciosService.cargarConfig(tenantId);
+    // dos consultas nuevas. `decimalesMoneda` sale del `JOIN` de arriba —tampoco
+    // es una consulta nueva—, así que `cargarConfig` no vuelve a resolver la
+    // moneda oficial por su cuenta.
+    const configCalculo = await this.calculoPreciosService.cargarConfig(
+      tenantId,
+      Number(monedaOficial.decimales),
+    );
 
     const lineasConversion = dto.lineas.map((linea, i) => {
       const item = items[i];

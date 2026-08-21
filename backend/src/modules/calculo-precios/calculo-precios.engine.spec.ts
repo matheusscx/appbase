@@ -17,6 +17,10 @@ const config = (over: Partial<ConfigCalculo> = {}): ConfigCalculo => ({
   calculoRecargos: 'base',
   escalaCalculo: 6,
   modoRedondeo: 'HALF_UP',
+  nivelRedondeo: 'linea',
+  // 4 = el máximo que admite el sistema (UF). El motor todavía no cuantiza
+  // con este valor (Task 5); acá solo viaja congelado.
+  decimalesMoneda: 4,
   ...over,
 });
 

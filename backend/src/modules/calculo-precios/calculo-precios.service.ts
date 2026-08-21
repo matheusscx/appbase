@@ -58,7 +58,10 @@ export class CalculoPreciosService {
    * venta no paga las consultas dos veces — son las mismas dos de siempre, movidas
    * un poco más arriba.
    */
-  async cargarConfig(tenantId: string): Promise<ConfigCalculo> {
+  async cargarConfig(
+    tenantId: string,
+    decimalesMoneda: number,
+  ): Promise<ConfigCalculo> {
     const prefs =
       await this.tenantsService.getPreferenciasFinancieras(tenantId);
     return {
@@ -67,6 +70,8 @@ export class CalculoPreciosService {
       calculoRecargos: prefs.calculoRecargos,
       escalaCalculo: prefs.escalaCalculo,
       modoRedondeo: prefs.modoRedondeo,
+      nivelRedondeo: prefs.nivelRedondeo,
+      decimalesMoneda,
     };
   }
 
@@ -84,7 +89,14 @@ export class CalculoPreciosService {
     dto: CalcularVentaDto,
     configPrecargada?: ConfigCalculo,
   ): Promise<ResultadoVenta> {
-    const config = configPrecargada ?? (await this.cargarConfig(tenantId));
+    // Sin `configPrecargada` (la previsualización), acá es donde se resuelve
+    // la escala de la moneda oficial: una consulta más, no una por línea.
+    const config =
+      configPrecargada ??
+      (await this.cargarConfig(
+        tenantId,
+        await this.monedasService.decimalesOficiales(tenantId),
+      ));
 
     // Catálogos del tenant cargados una vez e indexados por id.
     const [impuestos, descuentos, recargos] = await Promise.all([

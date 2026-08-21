@@ -67,6 +67,15 @@ export interface ConfigCalculo {
   calculoRecargos: string; // 'base' | 'compuesto'
   escalaCalculo: number;
   modoRedondeo: string; // 'HALF_UP' | 'HALF_EVEN' | 'FLOOR' | 'CEIL'
+  /** 'linea' | 'documento'. Ver ADR/spec de redondeo. */
+  nivelRedondeo: string;
+  /**
+   * Minor unit de la moneda OFICIAL del tenant: la escala a la que se cuantiza
+   * todo monto cobrado al cerrar el documento. Es dato derivado congelado, no
+   * configuración: si mañana cambia la moneda del tenant, una venta vieja tiene
+   * que seguir siendo interpretable con lo que valía entonces.
+   */
+  decimalesMoneda: number;
 }
 
 export interface VentaResuelta {
