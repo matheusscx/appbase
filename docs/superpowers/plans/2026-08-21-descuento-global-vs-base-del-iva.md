@@ -1,6 +1,6 @@
 # Plan: el descuento global baja la base del IVA
 
-**Status:** Draft
+**Status:** In Progress — Paso 0 entregado (2026-08-21); Paso 1 sin empezar
 **Date:** 2026-08-21
 **Owner:** Cesar Matheus
 
@@ -51,33 +51,33 @@ esquema.
 
 ## Backend
 
-- [ ] `LineaResuelta` recibe el estado fiscal de la línea, **requerido, no opcional**. Seguir
+- [x] `LineaResuelta` recibe el estado fiscal de la línea, **requerido, no opcional**. Seguir
       el patrón que ya está escrito en los docblocks de `ReglaResuelta.activo` e
       `ImpuestoResuelto.tipo`: *"requerido a propósito: si fuera opcional, olvidarse de
       mapearlo en el service haría que … en silencio"*. Mismo razonamiento, mismo texto de
       justificación.
-- [ ] Mapearlo en `resolverLinea` **desde la misma fuente que ya usa ADR-018**, con la
+- [x] Mapearlo en `resolverLinea` **desde la misma fuente que ya usa ADR-018**, con la
       condición **positiva** (`=== 'afecto'`). ⚠️ No reintroducir un `!==`: el ADR explica que
       con la columna nullable un `!==` deja pasar el `NULL` de un `tipo='ingrediente'` y le
       cobra IVA.
-- [ ] Verificar que el nuevo campo **no cambia ningún resultado**: es contrato, no lógica.
+- [x] Verificar que el nuevo campo **no cambia ningún resultado**: es contrato, no lógica.
       Ningún valor esperado de los tests existentes debe moverse. Si alguno se mueve, **parar**.
-- [ ] Test que fija el contrato + **mutante que revierte**: quitar el mapeo en el service (no
+- [x] Test que fija el contrato + **mutante que revierte**: quitar el mapeo en el service (no
       solo romper la línea nueva) tiene que hacer fallar ese test. Un mutante que solo rompe
       prueba que el test toca la línea; solo revertir prueba que habría cazado el bug.
 
 ## Verification (Paso 0)
 
-- [ ] `cd backend && npm run lint:check && npm run typecheck && npm test` — leer el **exit
+- [x] `cd backend && npm run lint:check && npm run typecheck && npm test` — leer el **exit
       code**, no la última línea.
-- [ ] `./scripts/reset-db.sh` y después **`npm run test:e2e` COMPLETO**. No es opcional aunque
+- [x] `./scripts/reset-db.sh` y después **`npm run test:e2e` COMPLETO**. No es opcional aunque
       no se toquen DTOs: cambia el contrato de entrada del motor, y el arreglo anterior enseñó
       que un cambio "solo de tipos" puede romper el arranque de TypeORM sin que lo vean
       typecheck, lint, los unit ni dos revisiones independientes.
-- [ ] `./scripts/reset-db.sh --verificar`.
-- [ ] Revisión independiente (`domain-reviewer`) sobre el diff staged; si LIMPIO, escribir el
+- [x] `./scripts/reset-db.sh --verificar`.
+- [x] Revisión independiente (`domain-reviewer`) sobre el diff staged; si LIMPIO, escribir el
       recibo. **Nunca `--no-verify`.**
-- [ ] Commit. **El Paso 1 no arranca hasta que esto esté en verde.**
+- [x] Commit. **El Paso 1 no arranca hasta que esto esté en verde.**
 
 ---
 

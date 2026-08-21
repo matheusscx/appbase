@@ -57,6 +57,7 @@ const linea = (over: Partial<LineaResuelta> = {}): LineaResuelta => ({
   cantidad: '1',
   precioUnitario: '100',
   precioIncluyeImpuesto: false,
+  clasificacionTributaria: 'afecto',
   descuentos: [],
   recargos: [],
   impuestos: [],

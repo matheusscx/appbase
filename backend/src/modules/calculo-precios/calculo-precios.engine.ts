@@ -65,6 +65,29 @@ export interface LineaResuelta {
   /** Precio unitario ya resuelto (override o precio_base del ítem). */
   precioUnitario: string;
   precioIncluyeImpuesto: boolean;
+  /**
+   * Estado fiscal de la línea (`'afecto'` | `'exento'` | `null`), tal como lo
+   * decide **ADR-018**: sale de `items.clasificacion_tributaria` y **no** se
+   * deriva de la lista de impuestos.
+   *
+   * El motor no puede reconstruirlo por su cuenta —una línea sin IVA puede ser
+   * un ítem exento, pero también un `tipo='ingrediente'` con la columna en
+   * `NULL`, que es lo que ya explica `elegirAbsorbente`— y adivinarlo violaría
+   * la invariante de que exento es un estado fiscal explícito y nunca la
+   * ausencia de impuesto.
+   *
+   * Lo consume el prorrateo del descuento de nivel venta, que reparte contra la
+   * base afecta y la exenta por separado porque el DTE las declara separadas
+   * (`MntNeto` suma solo los items con `IndExe = 0`). Llega en un cambio propio
+   * y **antes** que ese reparto para que el cambio de contrato se verifique
+   * aislado: decisiones (c) y (f) de
+   * `docs/superpowers/specs/2026-08-21-descuento-global-vs-iva-decisiones.md`.
+   *
+   * Requerido a propósito, igual que `activo` y `tipo`: si fuera opcional,
+   * olvidarse de mapearlo en el service dejaría la línea sin estado fiscal y el
+   * reparto la trataría como exenta —sin IVA que bajar— en silencio.
+   */
+  clasificacionTributaria: string | null;
   descuentos: ReglaResuelta[];
   recargos: ReglaResuelta[];
   impuestos: ImpuestoResuelto[];

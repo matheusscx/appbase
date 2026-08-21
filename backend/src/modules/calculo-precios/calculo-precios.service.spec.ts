@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CalculoPreciosService } from './calculo-precios.service';
+import * as engine from './calculo-precios.engine';
 import { ItemsService } from '../items/items.service';
 import { ImpuestosService } from '../impuestos/impuestos.service';
 import { DescuentosService } from '../descuentos/descuentos.service';
@@ -668,6 +669,75 @@ describe('CalculoPreciosService', () => {
       ).rejects.toThrow(
         'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
       );
+    });
+  });
+
+  describe('el estado fiscal de la línea viaja al motor', () => {
+    /**
+     * ADR-018 resuelve la clasificación acá y el motor **no puede
+     * reconstruirla**: una línea sin IVA puede ser un ítem exento, pero también
+     * un ingrediente con la columna en `NULL`. El prorrateo del descuento de
+     * nivel venta reparte contra la base afecta y la exenta por separado
+     * —el DTE las declara separadas— así que necesita el estado fiscal, no la
+     * lista de impuestos.
+     *
+     * El `null` se afirma explícitamente: rellenarlo con `'afecto'` es
+     * exactamente el bug que `ventas.service` ya se cuida de no cometer al
+     * escribir el snapshot de `venta_detalles`.
+     */
+    it('le pasa a calcularVenta la clasificación de cada línea, sin coercionar el null', async () => {
+      const porItem: Record<string, string | null> = {
+        'item-afecto': 'afecto',
+        'item-exento': 'exento',
+        'item-ingrediente': null,
+      };
+      itemsService.cargarBasePorIds.mockImplementation(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id) => [
+                id,
+                base({ id, clasificacionTributaria: porItem[id] }),
+              ]),
+            ),
+          ),
+      );
+      itemsService.cargarReglasPorIds.mockImplementation(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id) => [
+                id,
+                reglas({
+                  impuestosIds: [],
+                  descuentosIds: [],
+                  recargosIds: [],
+                }),
+              ]),
+            ),
+          ),
+      );
+
+      const spy = jest.spyOn(engine, 'calcularVenta');
+      await service.calcular(TENANT, {
+        lineas: Object.keys(porItem).map((itemId) => ({
+          itemId,
+          cantidad: '1',
+        })),
+      });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(
+        spy.mock.calls[0][0].lineas.map((l) => [
+          l.itemId,
+          l.clasificacionTributaria,
+        ]),
+      ).toEqual([
+        ['item-afecto', 'afecto'],
+        ['item-exento', 'exento'],
+        ['item-ingrediente', null],
+      ]);
+      spy.mockRestore();
     });
   });
 });

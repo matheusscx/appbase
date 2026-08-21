@@ -361,6 +361,7 @@ export class CalculoPreciosService {
       cantidad: linea.cantidad,
       precioUnitario,
       precioIncluyeImpuesto: item.precioIncluyeImpuesto,
+      clasificacionTributaria: item.clasificacionTributaria,
       impuestos: impuestosLinea,
       descuentos: this.resolverReglas(descuentoIds, descuentoMap, 'descuento'),
       recargos: this.resolverReglas(recargoIds, recargoMap, 'recargo'),
