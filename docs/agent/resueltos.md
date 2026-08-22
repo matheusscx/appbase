@@ -17,6 +17,40 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El cuaderno de anti-patrones vuelve a su tope, con dos fusiones y ningún borrado (2026-08-22)
+
+Cierra la entrada *"El cuaderno de anti-patrones excede su propio tope"*. `anti-patterns.md`
+tenía **22** entradas `### ❌` y su propia regla 3 fija el tope en **20**. La entrada estaba
+diferida porque aplicar esa regla pide juzgar bugs ajenos, y hacerlo de arrastre dentro de
+otra tarea era el atajo equivocado.
+
+### Lo que la regla manda, en orden, y qué dio cada paso
+
+1. **Pasar a `✅` lo automatizado** — no dio nada, y ese fue el hallazgo. El candidato obvio
+   era *"campo que escribe estado derivado sin pasar por su choke point"*, que tiene un test
+   de invariante corriendo en el gate y en CI. Pero **la propia entrada documenta el hueco**:
+   ese test es una heurística de texto sobre SQL crudo y no vería una escritura hecha vía el
+   `Repository<ItemProducto>` con la propiedad camelCase. Marcarla automatizada sería
+   sobreafirmar justo en un archivo cuyo propósito es no mentirle al que lo lee.
+   Mismo razonamiento para *"borrado físico de filas"*: el hook ataja el `DELETE FROM`, pero
+   la otra mitad —que toda lectura filtre `eliminado_el IS NULL`— es juicio, y `CLAUDE.md` ya
+   dice que un hook no la puede evaluar.
+2. **Fusionar caras del mismo error** — dio las dos que faltaban:
+   - **Las dos caras del repo proxy de ADR-020**: congelar una referencia de método (se queda
+     con el pool creyendo estar en la transacción) y omitir el `manager?` opcional (se queda
+     en la transacción creyendo estar afuera). Es el mismo malentendido —qué conexión
+     resuelve el proxy, y cuándo— en direcciones opuestas.
+   - ***"Aserción que no puede fallar"*** pasó a ser el caso **(d)** de *"test verde que no
+     ejerce lo que dice probar"*, que ya coleccionaba tres caras.
+3. **Borrar la más antigua sin reincidencia** — no hizo falta.
+
+Quedó en **20 exactas, sin perder una línea**: los cuatro ejemplos se mudaron verbatim. Es el
+mismo resultado que la primera aplicación de la regla (2026-08-11, de 25 a 20), y la nota de
+la regla 3 quedó actualizada con las dos pasadas y con el porqué de la conversión que no se
+hizo.
+
+---
+
 ## Los campos de costo dejan de mentir sobre cuántos decimales admiten (2026-08-22)
 
 Cierra dos de las tres mitades de la entrada *"`mermas` y `grupos-modificadores` siguen sin

@@ -19,11 +19,18 @@ conocimiento que no se puede derivar leyendo el código correcto.
    ejecutado. Se fusionaron las cinco de `vue-tsc` estricto en una, y la de Tailwind pasó a
    `✅` porque `check-design-tokens.mjs` ya la enforcea. Quedó en 20 sin perder una línea.*
 
-   ⚠️ **Hoy hay 22 y el tope está excedido.** Ya estaba en 21 antes del cierre del redondeo
-   de plata (2026-08-21), que sumó una —fusionando de entrada sus dos caras en una sola
-   entrada, en vez de abrir dos—. Aplicar la regla 3 en serio pide juzgar bugs ajenos, así
-   que **quedó como entrada propia** en [`pendientes.md`](pendientes.md) en lugar de
-   resolverse de arrastre en una tarea de documentación.
+   *Aplicado por segunda vez el 2026-08-22, desde 22: **dos fusiones y ningún borrado**, otra
+   vez sin perder una línea. Se juntaron las dos caras del repo proxy de ADR-020 —congelar
+   una referencia de método vs. omitir el `manager?`— porque son el mismo malentendido en
+   direcciones opuestas, y "aserción que no puede fallar" pasó a ser el caso (d) de "test
+   verde que no ejerce lo que dice probar", que ya coleccionaba caras.*
+
+   ⚠️ **Lo que NO se pudo hacer, y conviene decirlo porque parecía la salida obvia:** pasar
+   "campo que escribe estado derivado sin pasar por su choke point" a `✅` por su test de
+   invariante. **La propia entrada documenta un hueco** —el test es una heurística de texto
+   sobre SQL crudo y no vería una escritura vía el repositorio de TypeORM con la propiedad
+   camelCase—, así que marcarla como automatizada sería sobreafirmar. La regla 2 pide que el
+   patrón esté cerrado, no que tenga un test que cubre la mitad por la que se rompió.
 4. Formato fijo: qué pasó → ❌ mal → ✅ bien → una línea de porqué.
 
 ---
@@ -397,7 +404,16 @@ mismo mecanismo: guardar la referencia a un método de repo y llamarla después 
 se pierde de más), y leer un `manager?` opcional como si omitirlo significara "fuera de la
 transacción" (el contexto se aplica de más). Las dos entradas siguientes.
 
-### ❌ Guardar una referencia a un método de repo y llamarla después
+### ❌ Suponer qué conexión resuelve el repo proxy — dos caras del mismo error
+
+Las dos salen de creer que se sabe qué conexión usa un repositorio inyectado. El proxy
+context-aware de ADR-020 resuelve **en el acceso a la propiedad** y **contra la transacción
+ambiente del contexto ALS**: quien no tiene esas dos cosas presentes se equivoca en
+direcciones opuestas —una se queda con el pool creyendo estar en la transacción, la otra se
+queda en la transacción creyendo estar afuera— y las dos reabren algo que el proxy había
+cerrado.
+
+**(a) Guardar una referencia a un método de repo y llamarla después.**
 
 ```ts
 // MAL — el proxy resuelve el manager EN EL ACCESO A LA PROPIEDAD (`repo.find`), no en
@@ -429,7 +445,7 @@ Por eso esta entrada es prevención, no un arreglo — el patrón nunca se comet
 repo, pero el proxy lo hace posible y no hay ningún lint que lo cace (el `Proxy` es
 indistinguible de un repo real para un analizador estático).
 
-### ❌ Omitir un `manager?` opcional creyendo que eso corre fuera de la transacción
+**(b) Omitir un `manager?` opcional creyendo que eso corre fuera de la transacción.**
 
 ```ts
 // El idioma, en 8 sitios del repo (transacciones/tokens-acceso/propina-distribucion):
@@ -789,27 +805,9 @@ trampa: `docs/patterns/frontend.md` §1.1.
 
 ## Pruebas (unit)
 
-### ❌ Aserción que no puede fallar
-
-```ts
-// MAL — el servicio nunca emite ese SQL: todo el stock se mueve por
-// registrarMovimiento, que en esta suite está mockeado.
-const tocaStock = manager.query.mock.calls.find((c) =>
-  String(c[0]).includes('UPDATE item_producto'),
-)
-expect(tocaStock).toBeUndefined()
-
-// BIEN — asertar sobre el colaborador que haría el trabajo
-expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled()
-```
-
-La misma aserción pasaba en verde sobre `aplicar()`, que **sí** mueve stock: buscaba un
-string que el código bajo prueba no puede producir. Antes de asertar la ausencia de algo,
-verificar que ese algo podría aparecer si el bug existiera.
-
 ### ❌ Test verde que no ejerce lo que dice probar
 
-Tres caras del mismo error, todas descubiertas **apagando el fix a mano**, nunca leyendo el
+Cuatro caras del mismo error, todas descubiertas **apagando el fix a mano**, nunca leyendo el
 test. Si con el fix apagado sigue verde, no prueba lo que dice: son treinta segundos y es lo
 único que separa un test real de uno decorativo.
 
@@ -847,6 +845,24 @@ heurísticas. Hacen falta **tres**, con el caso correcto en el **medio** de cada
 podría confundirse. Y para una *elección* entre candidatos, un mutante no alcanza: hay que
 enumerar todas las heurísticas alternativas que el fixture no descarta y correr una por cada
 una.
+
+**(d) La aserción no puede fallar**, porque lo que busca no puede aparecer.
+
+```ts
+// MAL — el servicio nunca emite ese SQL: todo el stock se mueve por
+// registrarMovimiento, que en esta suite está mockeado.
+const tocaStock = manager.query.mock.calls.find((c) =>
+  String(c[0]).includes('UPDATE item_producto'),
+)
+expect(tocaStock).toBeUndefined()
+
+// BIEN — asertar sobre el colaborador que haría el trabajo
+expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled()
+```
+
+La misma aserción pasaba en verde sobre `aplicar()`, que **sí** mueve stock: buscaba un
+string que el código bajo prueba no puede producir. Antes de asertar la ausencia de algo,
+verificar que ese algo podría aparecer si el bug existiera.
 
 **Regla:** construir el escenario de modo que **la regla bajo prueba sea la única que puede
 fallar**, y aseverar el mensaje, no sólo el status. Dos tests con títulos distintos y setup

@@ -65,21 +65,12 @@ Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tes
 discriminan lo que dicen fijar, y tipos flojos. Se juntaron en una entrada porque se hacen
 en una sola pasada y ninguno vale una entrada propia. **Citas verificadas el 2026-08-21.**
 
-✅ **Dos de las tres entradas de este grupo se cerraron el 2026-08-21**, en cinco commits
+✅ **Las tres entradas de este grupo están cerradas.** Dos el 2026-08-21, en cinco commits
 agrupados por naturaleza (tests / comentarios / tipos / duplicación / conducta). El detalle
 —incluida la regresión que el e2e cazó y que ni el typecheck ni dos revisiones
-independientes vieron— está en [`resueltos.md`](resueltos.md). Queda la tercera, que es la
-única que pide juzgar bugs ajenos:
-
-- [ ] **El cuaderno de anti-patrones excede su propio tope** (docs) —
-  [`anti-patterns.md`](anti-patterns.md) tiene **22 entradas `### ❌`** y su regla 3 fija el
-  tope en **20**. Ya estaba en 21 antes del frente de redondeo, que sumó una (fusionando de
-  entrada sus dos caras en vez de abrir dos).
-  **El arreglo está escrito en la propia regla 3** y en ese orden: pasar a `### ✅` lo que ya
-  esté automatizado, **fusionar** entradas que sean caras del mismo error, y recién entonces
-  eliminar la más antigua sin reincidencia. Se difiere porque aplicarlo pide juzgar bugs
-  ajenos, y hacerlo de arrastre dentro de una tarea de documentación era exactamente el
-  atajo equivocado.
+independientes vieron— está en [`resueltos.md`](resueltos.md). La tercera —el tope del
+cuaderno de anti-patrones, la única que pedía juzgar bugs ajenos— salió el **2026-08-22**,
+también en [`resueltos.md`](resueltos.md). **La sección vuelve a quedar vacía.**
 
 ⚠️ **Antes de repartir la próxima tanda, leer la regla que salió de éstas** (misma entrada de
 `resueltos.md`), porque no es la que uno esperaría:
