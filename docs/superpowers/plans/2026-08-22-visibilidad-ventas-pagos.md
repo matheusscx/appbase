@@ -36,12 +36,20 @@ cajero; agregar una columna `creado_por` (la spec explica por qué no).
 
 ## Tareas
 
-- [ ] **1. Medir antes de escribir** — dos datos que la spec deja anotados y que cambian el
-  filtro si sorprenden:
-  - ¿Existen ventas o pagos con `caja_id` NULL? ¿De dónde salen (pasarela, importación)?
-  - ¿Algún flujo del cajero, además de `/pagos`, usa `Pagos:Leer`? El POS **no** lo usa
-    (medido: solo `items`, `metodos-pago`, `tipos-documento`, `POST /ventas`).
-  ⚠️ Reportar lo medido **antes** de seguir; si contradice la spec, se corrige la spec.
+- [x] **1. Medir antes de escribir — HECHO el 2026-08-22.** Los dos datos, medidos:
+  - **No existen ventas ni pagos sin caja.** Las dos columnas son `nullable`, pero **ningún
+    camino del código las deja en NULL**: `ventas.service.ts` resuelve la caja por canal y
+    lanza `400` si no hay (física con `findActiva`, virtual con `findVirtual`), y las tres
+    creaciones de `Pago` viven **solo** en `pagos.service.ts`, las tres con un `cajaId`
+    resuelto (el parámetro del método compartido está tipado `cajaId: string`, sin `| null`).
+    La pasarela no crea `Pago` por su cuenta.
+    ⚠️ **Aun así el filtro tiene que ser explícito con el NULL**, porque la columna lo permite
+    y un camino futuro podría introducirlo: una fila sin caja **no es de nadie**, así que no
+    debe caer en "lo mío" por omisión.
+  - **El único consumidor de `Pagos:Leer` en el frontend es la pantalla `/pagos`.** El POS solo
+    llama `items`, `metodos-pago`, `tipos-documento` y `POST /ventas`; el `AbonoModal` (que usa
+    el detalle de venta) hace `POST /pagos`, o sea `Pagos:Crear`. Sacarle `Pagos:Leer` al rol
+    `Vendedor` le cuesta exactamente esa pantalla y nada más.
 - [ ] **2. Extraer el resolvedor del eje.** `resolverLecturaCompartida` vive hoy privado en
   `caja.controller.ts`. Lo van a usar tres controllers. **Decidir al implementar** si se mueve
   a un helper compartido o se inyecta el `RbacService` en cada uno — seguir lo que el proyecto
