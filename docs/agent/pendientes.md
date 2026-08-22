@@ -419,95 +419,44 @@ empezarlas.
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-- [ ] 🚩 **Anular una venta reingresa la mercadería al costo de hoy, no al que salió — y el
-  inventario se infla solo** (backend + contabilidad, auditoría `inventario` 2026-08-15) —
-  **lo encontraron dos lentes ciegas entre sí** (costeo CPP y devoluciones), por caminos
-  distintos; se cuenta una vez.
-  Medido en el código: `registrarMovimiento` recalcula el promedio ponderado **solo** cuando
-  `tipo='entrada' && motivo='compra'`, y los tres call sites de reversión
-  (`ventas.service.ts:862` anulación, `:1006` y `:1153` devolución) **no pasan `costoUnitario`**.
-  Con eso, `costoUnitarioCongelado` cae en la rama `: costoActualPrevio` —el CPP vigente al
-  momento del reingreso— y `costo_actual` queda intacto.
-  **La aritmética, con números concretos:** vender 1 unidad a costo $50, comprar 5 a $70 (el CPP
-  pasa a $57,1429), y anular la venta original deja el inventario valorizado en **$857,14** en
-  vez de **$850,00**. Son $7,14 que no entraron por ninguna compra, y que además contaminan cada
-  CPP posterior.
-  ℹ️ El costo real de esa salida **existe y no se lee**: el kardex lo congeló ligado a la
-  `venta_id` del movimiento original.
-  ⛔ **La pregunta es contable y no me corresponde:** ¿una devolución reingresa al costo con el
-  que la unidad salió (y entonces hay que recalcular el promedio incluyéndola), o al costo
-  vigente (y el desfase se asume)? Los dos criterios existen en el mercado. Lo que hoy hay no es
-  ninguno de los dos elegido: es la ausencia de decisión.
-  **Ningún test lo cubre:** `ventas.service.spec.ts` mockea `registrarMovimiento` entero en el
-  bloque de anulación.
-  ✅ **DECIDIDO (owner, 2026-08-15): vuelve al costo con el que salió.** La reposición pasa
-  `costoUnitario` con el costo congelado del movimiento original —que **ya está en el kardex,
-  ligado a la `venta_id`, y hoy simplemente no se lee**— y el promedio se recalcula incluyéndola.
-  ⚠️ **Toca el motor de costeo: el cambio va solo, con su propio gate.** Hoy `registrarMovimiento`
-  recalcula el promedio solo en `motivo='compra'`; habilitarlo para `anulacion`/`devolucion`
-  cambia la fórmula del CPP en un camino nuevo. Necesita el caso numérico del escenario
-  ($50 / $70 → $850) como test, no solo el mutante.
-  ⚠️ **Devolución parcial:** si de 5 unidades vuelve 1, hay que tomar el costo de ESE movimiento,
-  no un promedio de la venta. Verificar que el kardex lo permita resolver por línea antes de
-  escribir.
+- [ ] **El default del checkbox de anulación cuando la línea ya se despachó a cocina**
+  (backend + frontend, decisión 2 del owner del 2026-08-15; **pieza C** de la entrada
+  *"anular una venta con recetas no repone"*, cerrada el 2026-08-22 →
+  [`resueltos.md`](resueltos.md)) — el checkbox *"Reponer el stock que la venta descontó"*
+  nace **siempre tildado** (`AnularVentaModal.vue:19`, y `:27` lo re-tilda al abrir). La
+  decisión: si la línea **ya se despachó a cocina** el plato se hizo, así que nace
+  **destildado**; si no se envió nada, sigue tildado. El aporte del owner que lo motivó:
+  reponer comida servida mete stock que físicamente no existe, y eso es peor que no
+  reponer.
+  ⚠️ **La partición de la entrada madre decía *"C quedó barata: es solo el default del
+  checkbox"*, y al abrirla el 2026-08-22 resultó falso.** El modal recibe **únicamente
+  `ventaId`** —no conoce ninguna línea— y `cantidad_enviada` existe **solo** en
+  `cuenta_lineas` (`cuenta-linea.entity.ts:55`), nunca en `venta_detalles`: grep del
+  backend entero, la única otra aparición es el DTO de comanda. Se llega por
+  `cuenta.venta_id` (`cuenta.entity.ts:40`), así que la pieza es **una lectura nueva de
+  backend + exponerla en el payload de la venta**, acoplando ventas→salones. No es un
+  `ref(false)`.
+  **Lo que falta decidir al construirla, y no está contestado:** una venta de POS no viene
+  de ninguna cuenta (no hay comanda que consultar), y una venta de salón puede tener unas
+  líneas despachadas y otras no. ¿El default es "destildado si **alguna** línea se
+  despachó", o el checkbox deja de ser uno solo para toda la venta?
 
-- [ ] 🚩 **Anular una venta con recetas o combos no repone los ingredientes, y responde que sí
-  repuso** (backend, auditoría `inventario` 2026-08-15) — `cancelar` arma la lista a reponer con
-  `JOIN item_producto ip ON ip.item_id = d.item_id` (`ventas.service.ts:848`, **INNER**). Una
-  línea de receta o de combo **no tiene fila en `item_producto`** —la tienen sus ingredientes—,
-  así que la línea desaparece del `SELECT` sin error y sin aviso, y la respuesta igual dice
-  `stockRepuesto: true` (el frontend muestra *"Venta anulada y stock repuesto"*).
-  **La asimetría está medida:** el camino de la nota de crédito usa `LEFT JOIN` en la misma
-  consulta (`:1280`) y cae en la rama de `modo_inventario === null`, que responde *"no maneja
-  stock (servicio): no admite devolución a inventario"* (`:1314`) — un mensaje que para una
-  receta es falso.
-  **Escenario:** se vende una pizza, la venta se anula reponiendo stock, y el queso y la harina
-  que salieron del inventario al venderla **no vuelven nunca**. No hay ningún camino que los
-  reponga: ni la anulación, ni la NC, ni un endpoint manual de entrada.
-  **La decisión:** ¿la anulación expande la receta y repone los ingredientes (simétrico con lo
-  que hace la venta), o rechaza explícitamente las ventas con recetas/combos como ya rechaza
-  serie y lote? Lo que no puede seguir es la tercera opción actual: no reponer y decir que sí.
-  ✅ **DECIDIDO (owner, 2026-08-15), y el encuadre cambió al medirlo.** La pantalla **ya
-  pregunta**: `AnularVentaModal` tiene el checkbox *"Reponer el stock que la venta descontó"* más
-  un motivo obligatorio, el DTO lo recibe y el service ramifica. El caso "la comida ya se sirvió,
-  no repongas" **ya se puede expresar hoy** destildando.
-  El defecto real es más chico y más feo: **para un producto simple el checkbox se respeta; para
-  una receta se ignora en silencio y el sistema igual dice que repuso.** La decisión del
-  encargado no se ejecuta y nada se lo dice.
-  **Decisión 1 — si tildó reponer, se repone:** la anulación expande la receta o el combo y
-  devuelve los ingredientes que la venta descontó, simétrico con lo que hizo la venta.
-  **Decisión 2 — el default deja de ser siempre "tildado":** si la línea **ya se despachó a
-  cocina**, el plato se hizo, así que nace **destildado**; si no se envió nada, sigue tildado.
-  El aporte del owner que lo motivó: reponer comida servida mete stock que físicamente no
-  existe, y eso es peor que no reponer.
-  🔗 **Dependencia a mirar antes de estimar:** el default depende de `cantidadEnviada`, y la
-  entrada *"Anular o reducir una línea ya enviada a cocina"* lo necesita también. Esta decisión
-  **no se puede construir sin exponerlo al cliente**. Se hacen juntas o la segunda paga el costo
-  de la primera.
-
-  ⚠️ **Corrección medida el 2026-08-16 — "cero ocurrencias en `frontend/app`" es falso.** Hay
-  **una**: `ComandaEstacionItem.cantidadEnviada` en `useImpresoras.ts`, o sea el backend **ya lo
-  manda al cliente**, pero solo dentro del payload del *preview de comanda*
-  (`salones.service.ts:1292`). Lo que sigue siendo cierto —y es lo que importa— es que
-  **`CuentaLineaDetalle` no lo declara**: la línea sobre la que se aprieta el tacho y sobre la
-  que decide el modal de anulación no lo conoce. La sustancia se sostiene, la cuenta no. Que ya
-  viaje en otro payload **abarata el prerequisito**: hay de dónde copiar, no hay que decidir
-  nada nuevo del lado del backend.
-
-  📋 **Partición propuesta (2026-08-16), por si esto se toma con poco tiempo.** Lo que separa
-  las piezas es si escriben en `movimientos_inventario`, que es lo único que exige preguntarle
-  al owner antes de empezar:
-
-  | Pieza | Qué es | ¿Toca `movimientos_inventario`? |
-  |---|---|---|
-  | **A** | ~~Exponer `cantidadEnviada` en `CuentaLineaDetalle`~~ ✅ hecho 2026-08-16 | No |
-  | **B** | ~~El guard de *"anular o reducir una línea ya enviada a cocina"*~~ ✅ hecho 2026-08-16 | No |
-  | **C** | El default destildado de la Decisión 2 cuando la línea se despachó | No |
-  | **D** | Expandir receta/combo al reponer (Decisión 1) | **Sí** |
-
-  **A y B se construyeron el 2026-08-16** y el campo ya viaja al cliente, así que **C quedó
-  barata**: es solo el default del checkbox. **D** sigue siendo la única que necesita permiso
-  para tocar `movimientos_inventario`.
+- [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
+  medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
+  arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (`ventas.service.ts:1390`,
+  y el gemelo del reembolso en `:1676`), así que la línea de receta **no** desaparece como
+  desaparecía en `cancelar`: cae en la rama `modo_inventario === null` y responde *"no
+  maneja stock (servicio): no admite devolución a inventario"*. Para una receta ese
+  mensaje es **falso** — no es un servicio, tiene ingredientes que sí salieron del
+  inventario y que hoy no vuelven por ningún camino.
+  **El arreglo ya existe del otro lado y está probado:** `cancelar` revierte leyendo las
+  salidas del kardex por `venta_id`, que cubre recetas, combos y opciones de grupo sin
+  casos especiales. La NC podría usar la misma fuente, acotada a las líneas devueltas.
+  **La pregunta para el owner:** la NC devuelve **por línea elegida** (`devoluciones`),
+  no la venta entera. Para un producto la correspondencia línea→stock es directa; para una
+  receta hay que decidir si devolver una unidad de "Hamburguesa" repone sus ingredientes
+  —simétrico con la venta— o si se rechaza explícito. **No avanzar sin esa respuesta:**
+  toca `movimientos_inventario` y el camino del reembolso de pasarela.
 
 - [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
   no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
@@ -862,19 +811,6 @@ empezarlas.
   un costo de `5,0500`/g es válido y no se puede tipear. Es preexistente y del mismo tema;
   si se toma esta entrada, se toman juntos.
 
-- [ ] **Los tres guards de elegibilidad de la NC no corren por el webhook, y uno de ellos
-  probablemente debería** (backend, 2026-08-21) — en `VentasService.crearNotaCredito` los
-  chequeos viven dentro de `if (params.validarVentaElegible)`, flag que **solo manda el
-  camino manual**. Por el callback de la pasarela no corre ninguno: ni *"no se emite una NC
-  sobre otra NC"*, ni el de estado `pagada`/`pagada_parcial`, ni el de `config_calculo`.
-  ⚠️ **Los dos últimos están así a propósito y NO hay que "arreglarlos"**: un hecho ya
-  consumado no se rechaza por configuración faltante (es exactamente el fix que salvó este
-  frente — un guard incondicional habría hecho perder el evento). **El que queda en duda es
-  el de NC-sobre-NC**, que no es un dato faltante sino un reembolso apuntando al documento
-  equivocado, y ahí registrar en silencio puede ser peor que fallar ruidoso.
-  **Antes de tocar nada: ¿es alcanzable?** Hay que ver si una orden de pasarela puede quedar
-  vinculada a una venta que es NC. Si no lo es, esto se anota y se cierra.
-
 - [ ] **El signo del abono en `POST /pagos`** (backend, hallazgo del análisis del redondeo,
   2026-08-21) — quedó fuera del frente porque no es escala sino signo, y el decorador de
   signo es otra pieza. Hay que abrir el DTO y el service, medir qué pasa hoy con un monto
@@ -1044,8 +980,13 @@ entradas de esta sección.
   statements separados. `crear()` lo sabe y lo resuelve con dos capas —orden determinista por
   `itemId` (`ventas.service.ts:618-626`) y reintento ante `40P01`
   (`MAX_REINTENTOS_DEADLOCK`)—, y su propio comentario explica que el deadlock era real.
-  Los tres caminos inversos no tienen ninguna de las dos: `cancelar` (`:845`) hace un `SELECT`
-  **sin `ORDER BY`** y recorre lo que devuelva Postgres; `crearNotaCredito` (`:984`) y
+  ✅ **`cancelar` salió el 2026-08-22**, dentro del frente de la reposición de recetas: son
+  las mismas líneas, y dejarlo para después significaba volver a tocarlas. Ordena por
+  `itemId` con `localeCompare` —el mismo comparador que `crear()`— y reintenta ante
+  `40P01`. Detalle en [`resueltos.md`](resueltos.md). **Quedan los otros dos**, y el
+  arreglo es el mismo.
+  Los caminos inversos no tenían ninguna de las dos: `cancelar` (`:845`) hacía un `SELECT`
+  **sin `ORDER BY`** y recorría lo que devolviera Postgres; `crearNotaCredito` (`:984`) y
   `registrarDevolucionesPorReembolso` (`:1152`) iteran el resultado de
   `validarDevolucionesReembolso`, que es un `devoluciones.map(...)` — **el orden del array del
   cliente**.
@@ -1060,7 +1001,10 @@ entradas de esta sección.
   los captura el caller y *"el reembolso nunca se revierte"*. Ese agujero lo abre cualquier
   error; el deadlock solo agrega una forma evitable más de caer en él.
   **El arreglo es barato:** las dos piezas ya existen en el mismo archivo (el `sort` por `itemId`
-  y el wrapper `esDeadlock`). `RecuentosService.aplicar` ya hace exactamente esto.
+  y el wrapper `esDeadlock`). `RecuentosService.aplicar` ya hace exactamente esto, y desde el
+  2026-08-22 `cancelar` también — hay de dónde copiar, con sus tests al lado.
+  ⚠️ **Al copiarlo, copiar el comparador:** `localeCompare`, no un `ORDER BY` de Postgres.
+  Si los caminos ordenan distinto entre sí, el cruce que el orden fijo evita vuelve a existir.
 
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras

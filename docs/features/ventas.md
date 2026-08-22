@@ -143,9 +143,21 @@ Todo lo demás se revierte con nota de crédito.
   **`anulacion`** — distinto de `devolucion`, porque anular una venta mal ingresada y que
   un cliente devuelva mercadería son eventos distintos. En `false` el descuento original
   queda como pérdida (equivalente a la "Anulación no Recuperable" de Toteat).
-- Reponer stock exige que **todas** las líneas sean `modo_inventario='cantidad'`; serie y
+- **Lo que se devuelve sale del kardex, no de las líneas de la venta** (2026-08-22). La
+  regla es "revertir las salidas que esta venta produjo", y quien las conoce es
+  `movimientos_inventario`. Tres consecuencias que la lista de líneas no daba:
+  una línea de **receta o combo** repone sus ingredientes/componentes (no tiene stock
+  propio: antes desaparecía en silencio y la respuesta igual decía que había repuesto);
+  un ingrediente **no bloqueante que se vendió sin stock** no vuelve, porque nunca salió;
+  y **editar la receta después de vender** no cambia lo que hay que devolver.
+- Reponer stock exige que **todo lo que salió** sea `modo_inventario='cantidad'`; serie y
   lote se rechazan con el mismo mensaje que la devolución de una NC (registrarlo a mano
   desde Inventario). Se valida antes de mover nada: no deja media reposición hecha.
+- **`stockRepuesto` dice lo que pasó, no lo que se pidió:** una venta que no movió
+  inventario (puros servicios) responde `false` aunque `reponerStock` viniera en `true`.
+- Reponer toma un `FOR UPDATE` por ítem, así que la anulación ordena por `itemId` con el
+  **mismo comparador que la venta** y reintenta ante `40P01`, igual que `crear()`. Dos
+  órdenes distintos volverían a hacer posible el cruce que el orden fijo evita.
 
 **Errores:** `400` motivo corto · `400` estado distinto de `pendiente` · `400` con pagos ·
 `400` con documento tributario · `400` reponer stock de serie/lote · `403` sin permiso.

@@ -952,6 +952,75 @@ describe('InventarioService', () => {
       expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
     });
 
+    it.each([['anulacion'], ['devolucion']])(
+      'entrada %s con costoUnitario: recalcula el promedio incluyendo la unidad que vuelve',
+      async (motivo) => {
+        // Decisión del owner (2026-08-15): la mercadería que vuelve reingresa
+        // al costo con el que SALIÓ, y el promedio se recalcula incluyéndola.
+        // Antes solo `compra` recalculaba, así que el CPP quedaba intacto y el
+        // inventario se valorizaba con unidades que nadie compró.
+        managerMock.query
+          .mockResolvedValueOnce([
+            {
+              stock: '14',
+              modo_inventario: 'cantidad',
+              costo_actual: '57.1429',
+            },
+          ])
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce([{ movimiento_id: 'mov-rev' }])
+          .mockResolvedValueOnce(undefined);
+
+        await service.registrarMovimiento(
+          managerMock as unknown as EntityManager,
+          {
+            tenantId: TENANT,
+            itemId: ITEM_ID,
+            tipo: 'entrada',
+            motivo,
+            cantidad: '1',
+            usuarioId: USER_ID,
+            costoUnitario: '50',
+          },
+        );
+
+        // El kardex congela el costo real de la reposición, no el CPP vigente.
+        expect(managerMock.query.mock.calls[2][1]).toContain('50');
+        // (14 × 57,1429 + 1 × 50) / 15 = 56,6667.
+        expect(managerMock.query).toHaveBeenNthCalledWith(
+          4,
+          expect.stringContaining('costo_actual'),
+          ['56.6667', ITEM_ID],
+        );
+      },
+    );
+
+    it('entrada por anulación SIN costoUnitario no toca el promedio', async () => {
+      // La salida original puede no tener costo congelado (un producto que
+      // nunca tuvo costo). Ahí no hay nada que promediar: se repone la
+      // cantidad y el CPP queda como estaba, en vez de inventar un número.
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '14', modo_inventario: 'cantidad', costo_actual: '57.1429' },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-rev2' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'anulacion',
+          cantidad: '1',
+          usuarioId: USER_ID,
+        },
+      );
+
+      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
+    });
+
     it('rechaza costoUnitario <= 0', async () => {
       managerMock.query.mockResolvedValueOnce([
         { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },

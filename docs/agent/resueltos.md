@@ -17,6 +17,191 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los tres guards de elegibilidad de la NC: el que estaba en duda no es alcanzable (2026-08-22)
+
+Cierra la entrada *"Los tres guards de elegibilidad de la NC no corren por el webhook, y uno
+de ellos probablemente debería"* (2026-08-21). **Sin código**: la propia entrada mandaba
+medir primero —*"antes de tocar nada: ¿es alcanzable? … si no lo es, esto se anota y se
+cierra"*— y la respuesta es que no.
+
+### La pregunta
+
+Los tres chequeos viven dentro de `if (params.validarVentaElegible)`, flag que solo manda el
+camino manual. Dos están así a propósito (un hecho ya consumado no se rechaza por
+configuración faltante). El que quedaba en duda era **NC-sobre-NC**: por el webhook no corre,
+y si una orden de pasarela pudiera apuntar a una venta que ya es NC, el reembolso registraría
+en silencio un documento sobre el documento equivocado.
+
+### Lo medido, con las citas
+
+Una venta es NC **solo** si la creó `crearNotaCredito`: es el único lugar del repo que
+escribe `tipoDocumentoId: TIPO_DOCUMENTO_NC_ID` y `ventaReferenciaId`
+(`ventas.service.ts:1176-1177`, grep de `ventaReferenciaId:` sobre `src` — los otros dos hits
+son la entidad y un mapeo de lectura).
+
+`orden.ventaId` tiene exactamente **dos** escritores (grep de `.ventaId = ` sobre `src`,
+descartando specs):
+
+| Escritor | Qué venta asigna |
+|---|---|
+| `cobros.service.ts:222` (`vincularVenta`) | `ventaInicialId` de una suscripción, creada por `ventasService.crearEnTransaccion` (`suscripciones.service.ts:182`) |
+| `online-callback.handler.ts:93` | la venta del checkout online, creada por `ventasService.crear` |
+
+Ninguno de los dos caminos de creación asigna `tipoDocumentoId`, así que **ninguna orden
+puede quedar vinculada a una NC**. `vincularVenta` además no está expuesto en ningún
+controller (un solo llamador en todo el repo) y exige orden `pagada`, dejándola `conciliada`:
+tampoco se puede re-vincular una orden ya conciliada a otra venta.
+
+### Lo que haría falta para que vuelva a importar
+
+Que aparezca un tercer escritor de `orden.ventaId`, o que `vincularVenta` se exponga a un
+cliente. Si eso pasa, el guard es barato y **fallar ruidoso ahí es seguro**: el hook corre en
+`aplicarPostReembolso`, que ya captura cualquier error y lo degrada a `warning` sin revertir
+el reembolso (`cobros.service.ts:443-452`). O sea que el reparo que dejó a los otros dos
+guards condicionales —*"perder el evento"*— no aplicaría a éste.
+
+**No se agregó el guard** porque hoy sería código muerto, y esta entrada decía explícitamente
+que si no es alcanzable se anota y se cierra.
+
+---
+
+## La mercadería que vuelve reingresa al costo con el que salió (2026-08-22)
+
+Cierra la entrada 🚩 *"Anular una venta reingresa la mercadería al costo de hoy, no al que
+salió — y el inventario se infla solo"* (auditoría `inventario` 2026-08-15, encontrada por
+dos lentes ciegas entre sí). Decisión del owner del 2026-08-15, construida entera: **los
+tres** call sites de reversión, no solo la anulación.
+
+### El dato ya existía y no se leía
+
+`registrarMovimiento` recalculaba el promedio **solo** en `tipo='entrada' && motivo='compra'`,
+y los tres reingresos no pasaban `costoUnitario`. El costo real de esa salida estaba
+congelado en el kardex desde el día de la venta, ligado a la `venta_id`. Ahora se lee:
+
+- `costosDeSalidaPorItem(manager, ventaId)` — **una** query por venta, los llamadores
+  resuelven por ítem contra un `Map` (nada de una consulta por línea).
+- `MIN(costo_unitario)` y no un promedio, con el porqué medido: dentro de una venta todas
+  las salidas de un ítem congelan el **mismo** costo, porque `costo_actual` solo lo mueven
+  `compra` y `ajuste_costo` y ninguno puede ocurrir en el medio — la venta toma `FOR UPDATE`
+  sobre el ítem en su primera salida y no lo suelta hasta commitear. **De ahí sale la
+  respuesta al reparo de la entrada sobre la devolución parcial:** si de 5 vuelve 1, el costo
+  unitario es el mismo, no hay nada que prorratear.
+- `MOTIVOS_QUE_RECALCULAN_CPP = ['compra', 'anulacion', 'devolucion']` en
+  `inventario.service.ts`. Sin costo congelado —un producto que nunca tuvo costo— no se
+  inventa uno: el promedio queda como estaba.
+
+### El comentario del código decía lo contrario, y por qué igual está bien
+
+`calcularCostoPromedio` documentaba que la devolución **no** debe recalcular *"porque
+re-promediarla metería costo de venta dentro del costo de compra"*. Ese argumento valía
+mientras el reingreso llegaba **sin costo propio**. Con el costo congelado de la salida —que
+es costo de compra, el mismo con el que la unidad había entrado— promediarlo devuelve
+exactamente la valorización previa a la venta. Lo que el comentario temía sigue prohibido:
+ningún camino pasa ahí un precio de venta. El comentario quedó reescrito con esa historia
+adentro, y `ADR-016` lleva la fila nueva más un addendum fechado.
+
+### El test es el caso numérico de la entrada, no un mutante
+
+`costeo-cpp.e2e-spec.ts`: 10 a $50 → vende 1 → compra 5 a $70 (CPP $57,1429) → anula.
+Exige `stock 15` y `costoActual 56,6667` = (14 × 57,1429 + 50) / 15. **Validado revirtiendo:
+con el código anterior devuelve `57.1429`** — el CPP intacto, las 15 unidades valorizadas
+$857,14. Además exige que el kardex congele `50.0000` en el movimiento de anulación, que es
+el dato que antes no se leía.
+
+Seis unit nuevos: los dos motivos de reversión recalculan (`it.each`), la entrada sin costo
+no toca el promedio, la anulación pasa el costo del kardex, la NC y el reembolso sin NC
+hacen lo mismo, y la devolución parcial usa el costo de la salida.
+
+⚠️ **Esta suite no abría caja**, y la venta `pendiente` que el test necesita es del canal
+físico. `online` no sirve como atajo: rechaza con *"las ventas online requieren el pago
+completo"*, y una venta pagada no es anulable. Se le agregó apertura + cierre en dos fases
+(el mismo patrón de `recetas.e2e-spec.ts`), porque cerrar mal deja el cajón ocupado y la fuga
+reaparece como un `409` críptico en otra suite.
+
+---
+
+## Anular una venta con recetas o combos ya repone los ingredientes, y deja de mentir (2026-08-22)
+
+Cierra la entrada 🚩 *"Anular una venta con recetas o combos no repone los ingredientes, y
+responde que sí repuso"* (auditoría `inventario` 2026-08-15), en el alcance que el owner
+eligió: **pieza D + el orden de locks de la sección 5**. Las piezas A y B se habían
+construido el 2026-08-16; **C —el default destildado cuando la línea ya se despachó— sigue
+abierta** y se midió que no es lo barato que la entrada decía (ver abajo).
+
+### La entrada apuntaba a `venta_detalles`, y el arreglo no fue por ahí
+
+La entrada proponía *"expandir la receta o el combo y devolver los ingredientes"*. Al
+implementarlo se vio que re-expandir la receta responde la pregunta equivocada: la receta
+dice **qué lleva el plato hoy**, no **qué salió del inventario cuando se vendió**. Se
+separan en tres casos reales:
+
+- un ingrediente **no bloqueante que se vendió sin stock** nunca salió (la venta lo omite
+  con advertencia), y re-expandir lo repondría — metiendo stock que jamás existió;
+- una receta **editada después de la venta** devolvería la composición nueva;
+- un **grupo modificador** (la proteína elegida) sale por otro camino todavía.
+
+La fuente que responde la pregunta correcta ya existía y no se leía: `movimientos_inventario`
+registra cada salida con su `venta_id`. La reposición ahora agrupa esas salidas por ítem y
+las revierte. Cubre **sin un caso especial por tipo**, porque a esa altura ya no hay tipos:
+hay ítems que movieron stock.
+El alcance se verificó por grep, no por deducción: los **cuatro** escritores del kardex en
+el camino de la venta —producto (`ventas.service.ts:711`), ingredientes de receta
+(`items.service.ts:2856`), componentes de combo (`:3020`) y opciones de grupo (`:3165`)—
+usan los tres `tipo='salida'`, `motivo='venta'` y estampan `ventaId`. Los tests cubren
+producto y receta; combo y opción de grupo quedan cubiertos por esa construcción, no por
+un test propio.
+
+### Lo construido
+
+- `cancelar` arma la lista con `SUM(cantidad)` sobre `movimientos_inventario`
+  (`tipo='salida' AND motivo='venta'`, `eliminado_el IS NULL`) en vez del
+  `venta_detalles JOIN item_producto` **INNER** que perdía la línea de receta en silencio.
+- **No filtra `eliminado_el` de `items` ni de `item_producto`**, con la misma regla
+  explícita que `InventarioService.registrarMovimiento`: filtrarlo haría que anular una
+  venta de un producto discontinuado después dejara de reponer. `anulacion` está en la
+  allowlist de motivos sobre un ítem eliminado.
+- `stockRepuesto` pasa a reportar **lo que pasó** (`salidas.length > 0`) y no lo que se
+  pidió: una venta de puros servicios ya no dice "stock repuesto" sobre un inventario que
+  nadie tocó.
+- **Orden de locks + reintento** (entrada de la sección 5, en el mismo commit porque son
+  las mismas líneas): ordena por `itemId` con `localeCompare` —el **mismo comparador que
+  `crear()`**, no el `ORDER BY` de Postgres, cuya collation puede ordenar distinto y
+  reabriría el cruce— y envuelve la transacción en el loop de `MAX_REINTENTOS_DEADLOCK`.
+  La precondición de `crear()` se verificó para este camino: el único llamador es
+  `VentasController.anular`, sin transacción envolvente.
+
+### Los tests, y cuál discrimina
+
+Dos e2e nuevos en `recetas.e2e-spec.ts`, que crean sus propios ingredientes (no dependen
+del stock del seed):
+
+- **13** vende una receta de 2 unidades, anula reponiendo y exige que pan y carne vuelvan
+  al valor previo. **Validado revirtiendo**: con el código anterior falla con
+  `Expected "10.0000", Received "8.0000"` — la venta descontó y la anulación respondió
+  `201` con `stockRepuesto: true` sin devolver nada.
+- **14** es el que discrimina las dos soluciones posibles: un ingrediente no bloqueante con
+  stock 0 se vende con advertencia, y tras anular **sigue en 0**. Una implementación que
+  re-expanda la receta lo pone en 20 g y este test la mata.
+
+Cinco unit nuevos en `ventas.service.spec.ts` (ingredientes que no son líneas, orden
+ascendente, `stockRepuesto=false` sin salidas, reintento ante `40P01`, no-reintento de un
+error de negocio). El mock de `venta_detalles` quedó devolviendo **algo distinto** a
+propósito: si el código volviera a armar la lista desde ahí, los tests lo cazan.
+
+### Lo que NO entró, por decisión del owner
+
+- **La nota de crédito**, que miente distinto sobre lo mismo: usa `LEFT JOIN`, cae en la
+  rama `modo_inventario === null` y responde *"no maneja stock (servicio)"* sobre una
+  receta. Queda como entrada propia en `pendientes.md`.
+- **La pieza C** (default destildado si la línea se despachó). Medido al abrirla: la
+  entrada decía *"es solo el default del checkbox"* y **es falso** — `AnularVentaModal`
+  recibe únicamente `ventaId` y no conoce ninguna línea, y `cantidad_enviada` existe solo
+  en `cuenta_lineas`, nunca en `venta_detalles`. Se llega por `cuenta.venta_id`, así que es
+  una lectura nueva de backend + exponerla en el payload de la venta, acoplando
+  ventas→salones. Es la quinta entrada de este backlog que subcuenta su propio hueco.
+
+---
+
 ## `register` deja de responder 500 cuando dos personas toman el mismo correo a la vez (2026-08-22)
 
 Cierra la mitad viva de la entrada *"Un correo de usuario soft-borrado hace explotar el alta

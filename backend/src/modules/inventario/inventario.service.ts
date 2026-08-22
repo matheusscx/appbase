@@ -79,6 +79,24 @@ interface MoverResult {
  */
 const MOTIVOS_SOBRE_ITEM_ELIMINADO = ['anulacion', 'devolucion'];
 
+/**
+ * Entradas que mueven el promedio ponderado. `compra` es la obvia: trae
+ * unidades nuevas con un costo nuevo.
+ *
+ * `anulacion` y `devolucion` entraron el 2026-08-22 por decisión del owner
+ * (2026-08-15): la mercadería que vuelve reingresa **al costo con el que
+ * salió** —congelado en el kardex, ligado a la venta— y el promedio se
+ * recalcula incluyéndola. Sin eso el reingreso sumaba unidades al CPP vigente
+ * sin aportar valor: vender 1 a $50, comprar 5 a $70 y anular la venta dejaba
+ * el inventario valorizado $7,14 de más, y ese sesgo contaminaba cada CPP
+ * posterior.
+ *
+ * Lo que NO recalcula sigue siendo todo lo demás (`ajuste_manual`,
+ * `inventario_inicial`, `recuento`): ahí el costo que llega es de captura, no
+ * de una operación que aporte valor conocido al inventario.
+ */
+const MOTIVOS_QUE_RECALCULAN_CPP = ['compra', 'anulacion', 'devolucion'];
+
 @Injectable()
 export class InventarioService {
   constructor(
@@ -211,13 +229,14 @@ export class InventarioService {
     }
 
     // Costo a persistir en item_producto. null = no se toca.
-    // Solo la compra lo recalcula (promedio ponderado móvil); las demás entradas
-    // pueden congelar un costoUnitario en el movimiento sin pisar el vigente.
+    // Lo recalculan (promedio ponderado móvil) los motivos de
+    // MOTIVOS_QUE_RECALCULAN_CPP; las demás entradas pueden congelar un
+    // costoUnitario en el movimiento sin pisar el vigente.
     let costoActualNuevo: string | null = null;
     if (
       params.costoUnitario != null &&
       params.tipo === 'entrada' &&
-      params.motivo === 'compra'
+      MOTIVOS_QUE_RECALCULAN_CPP.includes(params.motivo)
     ) {
       costoActualNuevo = this.calcularCostoPromedio(
         stockAnterior,
@@ -394,10 +413,17 @@ export class InventarioService {
   }
 
   /**
-   * Promedio ponderado móvil (CPP). Solo la compra lo recalcula: las salidas
-   * nunca mueven el promedio, y la devolución tampoco (la unidad que vuelve ya
-   * salió con un costo congelado; re-promediarla metería costo de venta dentro
-   * del costo de compra).
+   * Promedio ponderado móvil (CPP). Las salidas nunca lo mueven; las entradas
+   * que sí, en MOTIVOS_QUE_RECALCULAN_CPP.
+   *
+   * ⚠️ Este bloque decía hasta el 2026-08-22 que la devolución **tampoco**
+   * recalcula, *"porque re-promediarla metería costo de venta dentro del costo
+   * de compra"*. El razonamiento valía mientras el reingreso llegaba sin costo
+   * propio; ahora llega con el costo congelado de la salida original, que es
+   * costo de compra —el mismo con el que la unidad había entrado—, así que
+   * promediarlo devuelve exactamente la valorización previa a la venta. Lo que
+   * el comentario viejo temía sigue prohibido: ningún camino pasa acá un precio
+   * de venta.
    *
    * Sin stock previo o sin costo previo no hay masa que promediar: manda el
    * costo de compra. Eso además evita dividir por cero.

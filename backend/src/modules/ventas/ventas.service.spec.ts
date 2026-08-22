@@ -1618,6 +1618,8 @@ describe('VentasService', () => {
     // efectivo, así que no restringe y los tests preexistentes no cambian.
     let efectivoCobrado: string;
     let efectivoDevuelto: string;
+    // Costo congelado de las salidas de la venta original, por ítem.
+    let costosCongelados: { item_id: string; costo_unitario: string | null }[];
 
     beforeEach(() => {
       ncManager = buildManagerMock();
@@ -1626,12 +1628,15 @@ describe('VentasService', () => {
       devueltosRows = [];
       efectivoCobrado = '1100.0000';
       efectivoDevuelto = '0';
+      costosCongelados = [{ item_id: ITEM_ID, costo_unitario: '50.0000' }];
       ncManager.query.mockImplementation((sql: string) => {
         if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
         if (sql.includes('SUM(total_final)'))
           return Promise.resolve([{ total: ncPreviasTotal }]);
         if (sql.includes('FROM venta_detalles'))
           return Promise.resolve(detallesRows);
+        if (sql.includes('costo_unitario'))
+          return Promise.resolve(costosCongelados);
         if (sql.includes('FROM movimientos_inventario'))
           return Promise.resolve(devueltosRows);
         if (sql.includes('es_efectivo'))
@@ -1709,6 +1714,70 @@ describe('VentasService', () => {
           usuarioId: USUARIO_ID,
           ventaId: res.id,
         }),
+      );
+    });
+
+    it('la devolución de la NC reingresa al costo con el que la unidad salió', async () => {
+      // Misma decisión que la anulación (owner, 2026-08-15): el costo lo dice
+      // el kardex de la venta original, no el CPP del momento de devolver.
+      const res = await service.crearNotaCredito({
+        ...baseParams,
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
+      });
+
+      expect(res.id).toBeDefined();
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        ncManager,
+        expect.objectContaining({
+          motivo: 'devolucion',
+          costoUnitario: '50.0000',
+        }),
+      );
+    });
+
+    it('una devolución PARCIAL toma el costo de la salida, no un prorrateo', async () => {
+      // De 2 unidades vendidas vuelve 1: el costo unitario congelado es el
+      // mismo, porque dentro de una venta todas las salidas de un ítem se
+      // congelan contra el mismo `costo_actual`.
+      await service.crearNotaCredito({
+        ...baseParams,
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+      });
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        ncManager,
+        expect.objectContaining({ cantidad: '1', costoUnitario: '50.0000' }),
+      );
+    });
+
+    it('el reembolso sin NC también reingresa al costo de la salida', async () => {
+      await service.registrarDevolucionesPorReembolso({
+        tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
+        ventaOriginalId: VENTA_ORIG_ID,
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+      });
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        ncManager,
+        expect.objectContaining({
+          motivo: 'devolucion',
+          costoUnitario: '50.0000',
+        }),
+      );
+    });
+
+    it('sin costo congelado, la devolución no inventa uno', async () => {
+      costosCongelados = [];
+
+      await service.crearNotaCredito({
+        ...baseParams,
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
+      });
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        ncManager,
+        expect.objectContaining({ costoUnitario: null }),
       );
     });
 
@@ -2101,24 +2170,35 @@ describe('VentasService', () => {
         tipo_documento_id: null,
       };
       let conPagos: unknown[];
-      let detallesStock: unknown[];
+      // Lo que el kardex dice que SALIÓ por esta venta. Es la fuente de la
+      // reposición desde el 2026-08-22: las líneas de `venta_detalles` no
+      // sirven porque una receta o un combo no tienen fila en `item_producto`.
+      let salidasKardex: unknown[];
+      // Las líneas de la venta, que la reposición ya NO mira. Se deja
+      // devolviendo algo distinto a propósito: si el código volviera a
+      // armar la lista desde acá, los tests de abajo lo cazan.
+      let detallesVenta: unknown[];
 
       beforeEach(() => {
         conPagos = [];
-        detallesStock = [
+        salidasKardex = [
           {
             item_id: ITEM_ID,
-            cantidad: '2',
+            cantidad: '2.0000',
             descripcion: 'Smartphone',
             modo_inventario: 'cantidad',
+            costo_unitario: '50.0000',
           },
         ];
+        detallesVenta = [];
         ventaRows = [ventaAnulable];
         ncManager.query.mockImplementation((sql: string) => {
           if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
           if (sql.includes('FROM pagos')) return Promise.resolve(conPagos);
-          if (sql.includes('modo_inventario'))
-            return Promise.resolve(detallesStock);
+          if (sql.includes('movimientos_inventario'))
+            return Promise.resolve(salidasKardex);
+          if (sql.includes('venta_detalles'))
+            return Promise.resolve(detallesVenta);
           return Promise.resolve([]);
         });
       });
@@ -2134,7 +2214,7 @@ describe('VentasService', () => {
             itemId: ITEM_ID,
             tipo: 'entrada',
             motivo: 'anulacion',
-            cantidad: '2',
+            cantidad: '2.0000',
           }),
         );
         const update = ncManager.query.mock.calls.find((c) =>
@@ -2184,16 +2264,16 @@ describe('VentasService', () => {
       });
 
       it('rechaza reponer stock de un ítem serializado, antes de mover nada', async () => {
-        detallesStock = [
+        salidasKardex = [
           {
             item_id: ITEM_ID,
-            cantidad: '1',
+            cantidad: '1.0000',
             descripcion: 'Notebook',
             modo_inventario: 'serie',
           },
           {
             item_id: 'otro',
-            cantidad: '1',
+            cantidad: '1.0000',
             descripcion: 'Mouse',
             modo_inventario: 'cantidad',
           },
@@ -2203,6 +2283,147 @@ describe('VentasService', () => {
         );
         // Valida TODAS las líneas antes de mover: no deja media reposición hecha.
         expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('repone los ingredientes de una receta, que no son líneas de la venta', async () => {
+        // El bug: `venta_detalles JOIN item_producto` es INNER, y la línea de
+        // una receta no tiene fila en `item_producto` —la tienen sus
+        // ingredientes—, así que desaparecía del SELECT sin error y la
+        // anulación no reponía nada. La venta sigue teniendo UNA línea (la
+        // receta); lo que salió del inventario son DOS ingredientes.
+        detallesVenta = [
+          { item_id: 'receta-1', cantidad: '2', descripcion: 'Hamburguesa' },
+        ];
+        salidasKardex = [
+          {
+            item_id: 'ing-carne',
+            cantidad: '0.3000',
+            descripcion: 'Carne',
+            modo_inventario: 'cantidad',
+          },
+          {
+            item_id: 'ing-pan',
+            cantidad: '2.0000',
+            descripcion: 'Pan',
+            modo_inventario: 'cantidad',
+          },
+        ];
+
+        const res = await service.cancelar(cancelarParams);
+
+        expect(res.stockRepuesto).toBe(true);
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalledTimes(2);
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+          ncManager,
+          expect.objectContaining({
+            itemId: 'ing-carne',
+            tipo: 'entrada',
+            motivo: 'anulacion',
+            cantidad: '0.3000',
+          }),
+        );
+      });
+
+      it('reingresa al costo con el que la unidad salió, no al vigente', async () => {
+        // El costo real de la salida ya estaba en el kardex ligado a la venta
+        // y no se leía: el reingreso caía en el CPP del momento de anular, y
+        // el inventario se valorizaba con unidades que nadie compró.
+        await service.cancelar(cancelarParams);
+
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+          ncManager,
+          expect.objectContaining({ costoUnitario: '50.0000' }),
+        );
+      });
+
+      it('sin costo congelado en el kardex no inventa uno', async () => {
+        salidasKardex = [
+          {
+            item_id: ITEM_ID,
+            cantidad: '2.0000',
+            descripcion: 'Smartphone',
+            modo_inventario: 'cantidad',
+            costo_unitario: null,
+          },
+        ];
+
+        await service.cancelar(cancelarParams);
+
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+          ncManager,
+          expect.objectContaining({ costoUnitario: null }),
+        );
+      });
+
+      it('bloquea por itemId ascendente, no en el orden que devuelva la query', async () => {
+        // Mismo criterio que `crear()`, y con el MISMO comparador: si los dos
+        // caminos ordenaran distinto, una venta y una anulación simultáneas
+        // sobre los mismos ítems seguirían cruzándose.
+        salidasKardex = [
+          {
+            item_id: 'zzz-item',
+            cantidad: '1.0000',
+            descripcion: 'Z',
+            modo_inventario: 'cantidad',
+          },
+          {
+            item_id: 'aaa-item',
+            cantidad: '1.0000',
+            descripcion: 'A',
+            modo_inventario: 'cantidad',
+          },
+        ];
+
+        await service.cancelar(cancelarParams);
+
+        expect(
+          inventarioService.registrarMovimiento.mock.calls.map(
+            (c) => (c[1] as { itemId: string }).itemId,
+          ),
+        ).toEqual(['aaa-item', 'zzz-item']);
+      });
+
+      it('no dice que repuso cuando la venta no movió stock', async () => {
+        // Una venta de puros servicios no tiene nada que devolver. Responder
+        // `stockRepuesto: true` hace que la pantalla diga "stock repuesto"
+        // sobre un inventario que nadie tocó.
+        salidasKardex = [];
+
+        const res = await service.cancelar(cancelarParams);
+
+        expect(res.estado).toBe(EstadoVenta.CANCELADA);
+        expect(res.stockRepuesto).toBe(false);
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('reintenta ante un deadlock igual que crear()', async () => {
+        // `cancelar` toma un FOR UPDATE por ítem, así que puede cruzarse con
+        // una venta concurrente. Sin reintento, el cajero recibe un error
+        // opaco por algo que el segundo intento resuelve.
+        const deadlock = Object.assign(new Error('deadlock detected'), {
+          code: '40P01',
+        });
+        dataSourceMock.transaction
+          .mockRejectedValueOnce(deadlock)
+          .mockImplementationOnce((cb: (m: unknown) => unknown) =>
+            cb(ncManager),
+          );
+
+        const res = await service.cancelar(cancelarParams);
+
+        expect(res.estado).toBe(EstadoVenta.CANCELADA);
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('NO reintenta un error de negocio', async () => {
+        dataSourceMock.transaction.mockRejectedValueOnce(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+        await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+          'Stock insuficiente para la salida',
+        );
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
       });
     });
 

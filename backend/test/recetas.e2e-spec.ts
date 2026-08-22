@@ -137,6 +137,19 @@ async function crearIngrediente(
   return (res.body as ItemResponse).id;
 }
 
+/** Stock persistido del ítem, por el camino de la app (NUMERIC(18,4)). */
+async function stockDe(
+  app: INestApplication<App>,
+  token: string,
+  itemId: string,
+): Promise<string | null> {
+  const res = await request(app.getHttpServer())
+    .get(`/api/items/${itemId}`)
+    .set('Authorization', `Bearer ${token}`);
+  expect(res.status).toBe(200);
+  return (res.body as ItemResponse).stock;
+}
+
 describe('Recetas — flujo completo (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
@@ -649,6 +662,166 @@ describe('Recetas — flujo completo (e2e)', () => {
       .set('Authorization', `Bearer ${tokenVendedor}`);
 
     expect(res.status).toBe(403);
+  });
+
+  /**
+   * Anular una venta de receta REPONIENDO stock: los ingredientes que salieron
+   * tienen que volver. Hasta el 2026-08-22 no volvían —`cancelar` armaba la
+   * lista con `JOIN item_producto` sobre `venta_detalles`, y la línea de una
+   * receta no tiene fila ahí—, así que la línea desaparecía del SELECT sin
+   * error y la respuesta igual decía `stockRepuesto: true`.
+   */
+  it('13. anular reponiendo devuelve los ingredientes que la receta descontó', async () => {
+    const pan = await crearIngrediente(
+      app,
+      token,
+      'Pan anulacion E2E',
+      'unidad',
+      '10',
+      '500',
+    );
+    const carne = await crearIngrediente(
+      app,
+      token,
+      'Carne anulacion E2E',
+      'kg',
+      '1',
+      '8000',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa anulacion E2E ${Date.now()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: pan,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: carne,
+            cantidad: '150',
+            unidadCodigo: 'g',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    // Sin pagos: `pendiente` es el único estado anulable.
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [{ itemId: recetaId, cantidad: '2' }], pagos: [] });
+    expect(resVenta.status).toBe(201);
+    const ventaId = (resVenta.body as VentaResponse).id;
+
+    // La venta descontó: 2 panes y 300 g de carne (1 kg - 0.3).
+    expect(await stockDe(app, token, pan)).toBe('8.0000');
+    expect(await stockDe(app, token, carne)).toBe('0.7000');
+
+    const resAnular = await request(app.getHttpServer())
+      .post(`/api/ventas/${ventaId}/anular`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivo: 'Pedido cancelado antes de entrar a cocina' });
+    expect(resAnular.status).toBe(201);
+    expect((resAnular.body as { stockRepuesto: boolean }).stockRepuesto).toBe(
+      true,
+    );
+
+    // Y la anulación los devolvió: el inventario queda como antes de vender.
+    expect(await stockDe(app, token, pan)).toBe('10.0000');
+    expect(await stockDe(app, token, carne)).toBe('1.0000');
+
+    // El kardex lo registra como anulación por ingrediente, no como un
+    // movimiento de la receta —que no tiene stock propio.
+    const movs: Array<{ item_id: string; tipo: string; cantidad: string }> =
+      await ds.query(
+        `SELECT item_id, tipo, cantidad FROM movimientos_inventario
+          WHERE venta_id = $1 AND motivo = 'anulacion' AND eliminado_el IS NULL
+          ORDER BY item_id`,
+        [ventaId],
+      );
+    expect(movs).toHaveLength(2);
+    expect(movs.every((m) => m.tipo === 'entrada')).toBe(true);
+    expect(movs.map((m) => m.item_id).sort()).toEqual([pan, carne].sort());
+  });
+
+  /**
+   * El reverso se arma con lo que el kardex dice que salió, no re-expandiendo
+   * la receta: un ingrediente NO bloqueante que se vendió sin stock nunca
+   * salió del inventario, así que la anulación no puede meterlo. Re-expandir
+   * la receta lo repondría y crearía stock que nunca existió.
+   */
+  it('14. anular no repone el ingrediente no bloqueante que se vendió sin stock', async () => {
+    const pan = await crearIngrediente(
+      app,
+      token,
+      'Pan sin queso E2E',
+      'unidad',
+      '10',
+      '500',
+    );
+    // Cero stock: la venta lo omite con advertencia en vez de rechazar.
+    const queso = await crearIngrediente(
+      app,
+      token,
+      'Queso agotado E2E',
+      'kg',
+      '0',
+      '6000',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa sin queso E2E ${Date.now()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: pan,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: queso,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            bloqueante: false,
+          },
+        ],
+      });
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [{ itemId: recetaId, cantidad: '1' }], pagos: [] });
+    expect(resVenta.status).toBe(201);
+    // El queso se omitió: la venta avisa y sigue.
+    expect((resVenta.body as VentaResponse).advertencias?.length).toBe(1);
+    const ventaId = (resVenta.body as VentaResponse).id;
+
+    await request(app.getHttpServer())
+      .post(`/api/ventas/${ventaId}/anular`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivo: 'Anulada para verificar el queso que nunca salió' })
+      .expect(201);
+
+    expect(await stockDe(app, token, pan)).toBe('10.0000');
+    // El queso sigue en cero: reponerlo sería inventar stock.
+    expect(await stockDe(app, token, queso)).toBe('0.0000');
   });
 
   // La rama `'cuenta'` del UNION de `obtenerUsoItem` solo se puede verificar

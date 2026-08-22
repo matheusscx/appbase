@@ -84,7 +84,21 @@ productores, ninguno más:
 |---|---|
 | Creación del item con costo de apertura | INSERT + movimiento `inventario_inicial` (congela, no promedia) |
 | Compra con `costoUnitario` | fórmula CPP: `(stock_anterior × costo_actual + cantidad × costo_compra) / (stock_anterior + cantidad)` |
+| Reversión de una salida (`anulacion`, `devolucion`) con `costoUnitario` — **agregado 2026-08-22** | misma fórmula CPP, con el costo **congelado en el kardex por la salida original** |
 | Ajuste de costo (`motivo='ajuste_costo'`, `tipo='ajuste'`) | override directo, auditado con `costo_anterior` y comentario obligatorio |
+
+> **Addendum 2026-08-22 — la reversión entra al CPP.** Esta ADR se escribió con un solo
+> productor que promedia (la compra), y las reversiones quedaron fuera con el argumento de
+> que *"la unidad que vuelve ya salió con un costo congelado; re-promediarla metería costo de
+> venta dentro del costo de compra"*. El argumento valía mientras el reingreso llegaba **sin
+> costo propio**: lo que pasa entonces no es que el promedio quede quieto, es que las
+> unidades se suman al CPP vigente sin aportar valor, y el inventario se infla solo (vender 1
+> a $50, comprar 5 a $70 y anular deja $857,14 donde había $850). Ahora el reingreso trae el
+> costo que la salida congeló —**costo de compra**, el mismo con el que la unidad había
+> entrado, nunca un precio de venta—, así que promediarlo devuelve exactamente la
+> valorización previa. La decisión es del owner (2026-08-15) y no reemplaza esta ADR: le
+> agrega una fila a la tabla de arriba. Detalle y aritmética:
+> `docs/features/inventario-kardex.md` § Regla de costo.
 
 La puerta trasera de `PATCH /items/:id` se cierra: el campo `costo` del DTO de edición
 ahora rechaza siempre con un mensaje explícito en vez de aceptarse en silencio (ver

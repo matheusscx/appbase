@@ -302,10 +302,22 @@ agregue mañana sin ese filtro.
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |
 
 **Regla de costo:**
-- **`item_producto.costo_actual` es un promedio ponderado móvil (CPP), no el último costo.** Solo la entrada por compra lo recalcula: `(stock_anterior × costo_actual_previo + cantidad × costo_compra) / (stock_anterior + cantidad)`, redondeado a 4 decimales. Sin stock previo o sin costo previo (no hay masa que promediar, y evita dividir por cero), el costo de compra manda tal cual. Implementado en `InventarioService.calcularCostoPromedio` (privado) y cableado en `registrarMovimiento` vía la variable `costoActualNuevo` (`string | null`; `null` = no se toca `item_producto`).
+- **`item_producto.costo_actual` es un promedio ponderado móvil (CPP), no el último costo.** Lo recalculan la entrada por **compra** y —desde el 2026-08-22— las entradas que **revierten** una salida (`anulacion`, `devolucion`), con la misma fórmula: `(stock_anterior × costo_actual_previo + cantidad × costo_compra) / (stock_anterior + cantidad)`, redondeado a 4 decimales. Sin stock previo o sin costo previo (no hay masa que promediar, y evita dividir por cero), el costo de compra manda tal cual. Implementado en `InventarioService.calcularCostoPromedio` (privado) y cableado en `registrarMovimiento` vía la variable `costoActualNuevo` (`string | null`; `null` = no se toca `item_producto`).
 - **Otras entradas con `costoUnitario`:** congelan el valor en el kardex **sin** pisar `costo_actual`.
 - **Cualquier otro movimiento (sin costoUnitario):** congela el `costo_actual` vigente del momento en `costo_unitario` (snapshot del costo).
-- **El kardex (`costo_unitario` del movimiento) siempre congela lo que se PAGÓ en ese movimiento, nunca el promedio** — el promedio solo vive en `item_producto.costo_actual`. Salidas y devoluciones nunca recalculan el promedio: la unidad que sale (o vuelve) ya tiene un costo congelado; re-promediarla mezclaría costo de venta con costo de compra.
+- **El kardex (`costo_unitario` del movimiento) siempre congela lo que se PAGÓ en ese movimiento, nunca el promedio** — el promedio solo vive en `item_producto.costo_actual`. Las salidas nunca lo recalculan.
+- **La mercadería que vuelve reingresa al costo con el que salió** (decisión del owner
+  2026-08-15, construido el 2026-08-22). Anular una venta o recibir una devolución leen del
+  kardex el `costo_unitario` que la salida original congeló —ligado a la `venta_id`— y lo
+  pasan como costo del reingreso, así que el promedio se recalcula incluyéndolo.
+  **Por qué importa:** antes el reingreso no traía costo y caía en el CPP vigente *el día de
+  revertir*, sumando unidades sin aportar valor. Vender 1 a $50, comprar 5 a $70 (CPP
+  $57,1429) y anular la venta dejaba el inventario valorizado en **$857,14** en vez de
+  **$850**: $7,14 que no entraron por ninguna compra, y que contaminaban cada CPP posterior.
+  Una devolución **parcial** usa el mismo costo sin prorratear nada: dentro de una venta
+  todas las salidas de un ítem congelan el mismo costo, porque la venta tiene el ítem
+  bloqueado hasta que commitea. Sin costo congelado (un producto que nunca tuvo costo) no se
+  inventa uno: el promedio queda como estaba.
 - **`ajuste_costo` (`tipo='ajuste'`):** corrige `item_producto.costo_actual` directamente, sin
   pasar por el promedio ponderado — es para arreglar un costo mal cargado, no una compra.
   No mueve cantidad (`cantidad` debe ser `0`, `stock_resultante = stock_anterior`, no toca

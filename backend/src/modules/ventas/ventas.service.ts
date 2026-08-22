@@ -863,6 +863,41 @@ export class VentasService {
   }
 
   /**
+   * Costo con el que cada ítem SALIÓ en una venta, leído del kardex.
+   *
+   * Es el dato que hace que revertir mercadería no infle el inventario: la
+   * unidad vuelve al costo con el que se fue, no al promedio vigente el día de
+   * la reversión (decisión del owner, 2026-08-15). Ya estaba congelado en
+   * `movimientos_inventario` ligado a la venta, y hasta el 2026-08-22 no se
+   * leía.
+   *
+   * `MIN(costo_unitario)` y no un promedio: dentro de UNA venta todas las
+   * salidas de un mismo ítem congelan el mismo costo. `costo_actual` solo lo
+   * mueven `compra` y `ajuste_costo`, y ninguno de los dos puede ocurrir en el
+   * medio — la venta toma `FOR UPDATE` sobre el ítem en su primera salida y no
+   * lo suelta hasta commitear. Por eso una devolución **parcial** puede usar el
+   * mismo costo que una total sin prorratear nada.
+   *
+   * Una sola query por venta: el llamador resuelve por ítem contra el Map, sin
+   * una consulta por línea.
+   */
+  private async costosDeSalidaPorItem(
+    manager: EntityManager,
+    ventaId: string,
+  ): Promise<Map<string, string | null>> {
+    const filas: { item_id: string; costo_unitario: string | null }[] =
+      await manager.query(
+        `SELECT m.item_id, MIN(m.costo_unitario)::text AS costo_unitario
+           FROM movimientos_inventario m
+          WHERE m.venta_id = $1 AND m.tipo = 'salida' AND m.motivo = 'venta'
+            AND m.eliminado_el IS NULL
+          GROUP BY m.item_id`,
+        [ventaId],
+      );
+    return new Map(filas.map((f) => [f.item_id, f.costo_unitario]));
+  }
+
+  /**
    * Anula una venta — el `void` del dominio, distinto de la devolución.
    *
    * Acotada al subconjunto que es seguro **hoy y después de integrar el SII**:
@@ -875,6 +910,39 @@ export class VentasService {
    * `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`.
    */
   async cancelar(params: {
+    tenantId: string;
+    usuarioId: string;
+    ventaId: string;
+    motivo: string;
+    reponerStock: boolean;
+  }): Promise<{
+    id: string;
+    estado: EstadoVenta;
+    stockRepuesto: boolean;
+    motivo: string;
+  }> {
+    // Mismo loop que `crear()`, por la misma razón y con la misma
+    // precondición: reponer toma un `FOR UPDATE` por ítem, así que una
+    // anulación puede cruzarse con una venta concurrente sobre los mismos
+    // productos. El único llamador es `VentasController.anular`, sin
+    // transacción envolvente — ver la precondición documentada en `crear()`.
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.cancelarUnaVez(params);
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
+  }
+
+  /**
+   * Un intento de anulación. Nombre aparte del sufijo `EnTransaccion`, que en
+   * este código significa "recibe el `manager` de una transacción ya abierta"
+   * (`crearEnTransaccion`): éste abre la suya, que es justo lo que el loop de
+   * reintento necesita para que el segundo intento entre limpio.
+   */
+  private async cancelarUnaVez(params: {
     tenantId: string;
     usuarioId: string;
     ventaId: string;
@@ -914,40 +982,79 @@ export class VentasService {
           'La venta tiene pagos registrados: se revierte con nota de crédito, no se anula.',
         );
 
+      let repuesto = false;
       if (params.reponerStock) {
-        const detalles: {
+        // Lo que hay que devolver es lo que el kardex dice que SALIÓ, no lo
+        // que dicen las líneas de la venta. Reconstruirlo desde
+        // `venta_detalles JOIN item_producto` perdía en silencio toda línea
+        // de receta o de combo —esas no tienen fila en `item_producto`, la
+        // tienen sus ingredientes/componentes— y la anulación igual respondía
+        // que había repuesto. El kardex, además, es exacto donde la receta no
+        // lo es: un ingrediente no bloqueante que se vendió sin stock nunca
+        // salió, así que tampoco vuelve; y una receta editada después de la
+        // venta no cambia lo que hay que devolver.
+        //
+        // Sin filtrar `eliminado_el` de `items` ni de `item_producto`, y por
+        // la misma regla explícita que `InventarioService.registrarMovimiento`:
+        // filtrarlo haría que anular una venta de un producto discontinuado
+        // después dejara de reponer. El motivo `anulacion` está en la
+        // allowlist de movimientos sobre un ítem eliminado.
+        const salidas: {
           item_id: string;
           cantidad: string;
           descripcion: string | null;
           modo_inventario: string | null;
         }[] = await manager.query(
-          `SELECT d.item_id, d.cantidad, d.descripcion, ip.modo_inventario
-             FROM venta_detalles d
-             JOIN item_producto ip ON ip.item_id = d.item_id
-            WHERE d.venta_id = $1 AND d.eliminado_el IS NULL`,
+          `SELECT m.item_id,
+                  SUM(m.cantidad)::text AS cantidad,
+                  i.nombre AS descripcion,
+                  ip.modo_inventario
+             FROM movimientos_inventario m
+             JOIN items i ON i.item_id = m.item_id
+             JOIN item_producto ip ON ip.item_id = m.item_id
+            WHERE m.venta_id = $1 AND m.tipo = 'salida' AND m.motivo = 'venta'
+              AND m.eliminado_el IS NULL
+            GROUP BY m.item_id, i.nombre, ip.modo_inventario`,
           [params.ventaId],
         );
         // Solo `cantidad`: reponer serie o lote exige saber qué unidades/lotes
         // salieron y recrearlos. Misma frontera —y mismo mensaje— que la
         // devolución de una nota de crédito, para no inventar un segundo camino.
-        for (const d of detalles) {
-          if (d.modo_inventario !== 'cantidad')
+        for (const s of salidas) {
+          if (s.modo_inventario !== 'cantidad')
             throw new BadRequestException(
-              `"${d.descripcion ?? d.item_id}" usa inventario por ${d.modo_inventario}: anulá sin reponer stock y registrá el ingreso manualmente desde Inventario.`,
+              `"${s.descripcion ?? s.item_id}" usa inventario por ${s.modo_inventario}: anulá sin reponer stock y registrá el ingreso manualmente desde Inventario.`,
             );
         }
-        for (const d of detalles) {
+        // Orden determinista por `itemId`, y con el MISMO comparador que
+        // `crear()` (`localeCompare`, no el `ORDER BY` de Postgres, cuya
+        // collation puede ordenar distinto): si los dos caminos ordenaran
+        // distinto, una venta y una anulación simultáneas sobre los mismos
+        // ítems se seguirían bloqueando en cruz.
+        salidas.sort((a, b) => a.item_id.localeCompare(b.item_id));
+        // Sin salidas no hay costos que buscar: una venta de puros servicios
+        // no paga la query.
+        const costos = salidas.length
+          ? await this.costosDeSalidaPorItem(manager, params.ventaId)
+          : new Map<string, string | null>();
+        for (const s of salidas) {
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId: params.tenantId,
-            itemId: d.item_id,
+            itemId: s.item_id,
             tipo: 'entrada',
             motivo: 'anulacion',
-            cantidad: d.cantidad,
+            cantidad: s.cantidad,
+            // Vuelve al costo con el que salió, y el CPP se recalcula
+            // incluyéndola (decisión del owner, 2026-08-15). Sin costo
+            // congelado —un producto que nunca tuvo costo— no se inventa uno:
+            // `registrarMovimiento` deja el promedio como estaba.
+            costoUnitario: costos.get(s.item_id) ?? null,
             usuarioId: params.usuarioId,
             ventaId: params.ventaId,
             comentario: params.motivo,
           });
         }
+        repuesto = salidas.length > 0;
       }
 
       await manager.query(
@@ -966,7 +1073,10 @@ export class VentasService {
       return {
         id: params.ventaId,
         estado: EstadoVenta.CANCELADA,
-        stockRepuesto: params.reponerStock,
+        // Lo que de verdad pasó, no lo que se pidió: una venta de puros
+        // servicios no tiene nada que devolver, y decir que repuso hace que
+        // la pantalla afirme sobre un inventario que nadie tocó.
+        stockRepuesto: repuesto,
         motivo: params.motivo,
       };
     });
@@ -1078,6 +1188,12 @@ export class VentasService {
         }),
       );
 
+      // Una sola lectura para todas las líneas: los costos congelados son de
+      // la venta ORIGINAL, no de la NC que se está creando. La NC por monto
+      // libre —sin líneas, que es el caso más común— no paga la query.
+      const costosOriginales = lineas.length
+        ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
+        : new Map<string, string | null>();
       for (const linea of lineas) {
         // El VALOR se cuantiza al criterio heredado, con la misma `cuantizar`
         // que usa el motor de precios (no una fórmula propia): el string
@@ -1116,6 +1232,9 @@ export class VentasService {
           tipo: 'entrada',
           motivo: 'devolucion',
           cantidad: linea.cantidad,
+          // El costo sale de la venta ORIGINAL, no de esta NC: el movimiento
+          // queda ligado a `nc.id`, pero la unidad que vuelve salió allá.
+          costoUnitario: costosOriginales.get(linea.itemId) ?? null,
           usuarioId: params.usuarioId,
           ventaId: nc.id,
           comentario: params.comentario,
@@ -1256,6 +1375,10 @@ export class VentasService {
         params.ventaOriginalId,
         params.devoluciones,
       );
+      const costosOriginales = await this.costosDeSalidaPorItem(
+        manager,
+        params.ventaOriginalId,
+      );
       for (const linea of lineas) {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
@@ -1263,6 +1386,7 @@ export class VentasService {
           tipo: 'entrada',
           motivo: 'devolucion',
           cantidad: linea.cantidad,
+          costoUnitario: costosOriginales.get(linea.itemId) ?? null,
           usuarioId: params.usuarioId,
           ventaId: params.ventaOriginalId,
           comentario: params.comentario,
