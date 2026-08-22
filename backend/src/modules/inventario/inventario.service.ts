@@ -19,6 +19,7 @@ import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import {
   bordeFechaSql,
+  bordeHastaSql,
   requiereZonaTenant,
   zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
@@ -894,9 +895,8 @@ export class InventarioService {
     }
     if (query.hasta) {
       params.push(query.hasta);
-      filters += bordeFechaSql(
+      filters += bordeHastaSql(
         'mv.creado_el',
-        '<=',
         query.hasta,
         params.length,
         idxZona,

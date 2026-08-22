@@ -503,6 +503,47 @@ Para listados grandes (pagos, ventas, kardex):
 
 ---
 
+## 10b. Bordes de rango por fecha en un listado
+
+`AppDateInput` emite **fecha pura** (`YYYY-MM-DD`) y los DTOs validan con
+`@IsDateString()`, que también acepta un timestamp. Contra una columna
+`timestamptz`, una fecha pura se castea a la **medianoche**, y de ahí salen los dos
+bordes — que **no son simétricos**:
+
+| Borde | Helper | Fecha pura | Timestamp |
+|---|---|---|---|
+| Inferior (`desde`) | `bordeFechaSql(col, '>=', …)` | `>= medianoche local` | `>= $n`, tal cual |
+| Superior (`hasta`) | **`bordeHastaSql(col, …)`** | `< (día + 1) local` — **inclusivo del día** | `<= $n`, tal cual |
+
+Los dos helpers viven en `common/utils/rango-fecha.util.ts`, y la zona sale del
+**país del tenant** (`zonaHorariaTenant`), no de una preferencia.
+
+- **`hasta` es inclusivo del día** (decisión del owner, 2026-08-22): quien elige
+  "16" ve el 16 completo. Se resuelve acá y no compensando en cada pantalla, para
+  que la respuesta no dependa de qué llamador la arme. Antes era `<= hasta` y **se
+  comía el día entero**.
+- **Nunca `hasta 23:59:59`**: se come el último segundo y falla distinto según los
+  decimales del `timestamptz`. La suma la hace Postgres (`::date + 1`), que además
+  es DST-correcta sin librería de zonas.
+- **Un timestamp explícito no se expande, en ninguno de los dos bordes.** Quien
+  manda `T15:30:00Z` pidió ese instante; `::date` le comería la hora en silencio y
+  el filtro se ensancharía sin avisar.
+- **`requiereZonaTenant(...)` antes de pushear la zona al array de params:** si
+  ningún borde es fecha pura, el SQL no la nombra y Postgres **rechaza el bind**
+  con un parámetro de más (*"bind message supplies N parameters"*) → 500.
+
+⚠️ **La otra convención que convive, y por qué no se unificó:** los reportes y la
+liquidación de propinas usan un borde superior **exclusivo compensado por el
+llamador** — `propina-reportes` recibe `hasta` y filtra `< hasta`, y la pantalla le
+manda el primer día del mes siguiente (`rangoMesActual()`); la liquidación manda un
+instante ya corrido (`finDiaExclusivoIso`). **Funciona y está fuera del alcance de
+la corrección de 2026-08-22**: tocar el backend sin tocar esos dos llamadores haría
+que el resumen de agosto incluyera el 1° de septiembre. Si algún día se unifica, van
+juntos backend y llamador, y las consultas de liquidación comparan **períodos
+guardados** (`fecha_desde`/`fecha_hasta`), no eventos — es otro análisis.
+
+---
+
 ## 11. Preferencias de usuario
 
 Preferencias **personales** (UX), distintas de las financieras del tenant.

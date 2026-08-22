@@ -417,25 +417,6 @@ empezarlas.
   la fixture de `garzon-pin.e2e-spec.ts` que necesita `Salones:Operar`— hay que revisarlos
   uno por uno, o el encargado de salón pierde el garzón al mover el permiso.
 
-- [ ] **El borde `hasta` de los filtros de fecha pasa a ser inclusivo del día, en el backend**
-  (backend + frontend, medido 2026-08-16, **decidido por el owner el 2026-08-22**) — los tres
-  filtros comparan `creado_el <= $hasta`, y con una fecha pura eso es *menor o igual a la
-  medianoche* de ese día, no al final: con `hasta=2026-08-16` el día entero queda afuera
-  (medido contra la base viva). **No es el off-by-one del huso**: normalizar la zona movió ese
-  borde cuatro horas, no lo creó.
-  ✅ **Decisión: el backend filtra `< hasta + 1 día`** — quien elige "16" ve el 16 completo, y
-  el frontend sigue mandando la fecha pura que el usuario eligió (`AppDateInput` emite
-  `YYYY-MM-DD`, verificado).
-  **Dos consecuencias que son parte de la tarea, no arrastre:** (a) `propina-reportes` ya usa
-  `< hasta` **exclusivo** y hay que alinearlo, o el repo queda con dos convenciones y el
-  próximo agente elige la equivocada; (b) `frontend/app/utils/date-value.ts` tiene un
-  `finDiaExclusivoIso` escrito para compensar esto desde el frontend, hoy con **cero
-  llamadores** — con el borde inclusivo en el backend queda muerto y se borra en el mismo
-  commit.
-  ⚠️ **Trampa:** el "+1 día" se suma **en la zona del tenant**, no en UTC, y es `< hasta + 1
-  día`, nunca `<= hasta 23:59:59` — lo segundo se come el último segundo y falla distinto
-  según los decimales del timestamp.
-
 - [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
   persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
   sí lo vieron**) — `auth.controller.ts` → `googleCallback` redirige a
@@ -971,7 +952,7 @@ que el que la tome se va a encontrar**:
 | `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Sección 2** |
 | El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Sección 3** |
 | El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
-| El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Sección 3** |
+| El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Construido el 2026-08-22** ([`resueltos.md`](resueltos.md)) |
 | La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Corrida el 2026-08-22** → 0 hallazgos ([`resueltos.md`](resueltos.md)) |
 | Los roles de un alta pendiente | Siguen sin ser editables, y eso pasa a ser regla escrita | **Cerrada** → [`resueltos.md`](resueltos.md) |
 

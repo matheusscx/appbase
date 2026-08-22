@@ -237,6 +237,63 @@ describe('Filtros de rango por fecha y zona del tenant (e2e)', () => {
     expect(await kardex('2026-03-09')).toBe(1);
   });
 
+  /**
+   * El gemelo del borde de arriba, y el que **no** tenía red: `hasta` llega como
+   * fecha pura y compararla contra un `timestamptz` la castea a la MEDIANOCHE
+   * de ese día, así que `<= hasta` dejaba fuera el día entero — *"hasta hoy"* no
+   * devolvía la merma de hoy. Decisión del owner (2026-08-22): **inclusivo del
+   * día**, resuelto en el backend.
+   *
+   * Con la conducta vieja este caso da 0 y el de abajo da 1: los dos se
+   * verificaron revirtiendo la implementación, no solo rompiéndola.
+   */
+  it('el borde `hasta` incluye el día elegido completo', async () => {
+    const hoyLocal = fechaLocal(mermaCreadoEl);
+
+    // "Hasta hoy" incluye lo de hoy. Es el bug exacto que cierra la entrada.
+    const dentro = await mermas(`&hasta=${hoyLocal}`);
+    expect(dentro.meta.total).toBe(1);
+
+    // Y el borde sigue siendo un borde: "hasta ayer" no lo incluye.
+    const fuera = await mermas(`&hasta=${sumarDias(hoyLocal, -1)}`);
+    expect(fuera.meta.total).toBe(0);
+  });
+
+  /**
+   * La otra mitad, y la que impide "arreglar" esto sumándole un día a todo: un
+   * llamador que manda `T15:30:00Z` pidió **ese instante** como corte. Si el
+   * borde superior expandiera también los timestamps, este caso devolvería la
+   * merma y el filtro se habría ensanchado sin avisar — la misma trampa que el
+   * caso de `desde` ya fija para el otro extremo.
+   */
+  it('un timestamp en `hasta` corta en el instante, no al final del día', async () => {
+    const unSegundoAntes = new Date(
+      new Date(mermaCreadoEl).getTime() - 1000,
+    ).toISOString();
+    const fuera = await mermas(`&hasta=${unSegundoAntes}`);
+    expect(fuera.meta.total).toBe(0);
+
+    // Un segundo después sí la incluye: el borde con hora es inclusivo del
+    // instante (`<=`), y prueba que el cero de arriba no es un cero de cualquier
+    // motivo.
+    const unSegundoDespues = new Date(
+      new Date(mermaCreadoEl).getTime() + 1000,
+    ).toISOString();
+    const dentro = await mermas(`&hasta=${unSegundoDespues}`);
+    expect(dentro.meta.total).toBe(1);
+  });
+
+  it('el kardex hereda el `hasta` inclusivo, porque comparte el helper', async () => {
+    const hoyLocal = fechaLocal(mermaCreadoEl);
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/inventario/movimientos?itemId=${itemId}&hasta=${hoyLocal}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    // compra + merma, las dos de hoy
+    expect((res.body as Paginated<unknown>).meta.total).toBe(2);
+  });
+
   it('el mismo criterio rige en el kardex, que comparte el helper', async () => {
     const hoyLocal = fechaLocal(mermaCreadoEl);
 

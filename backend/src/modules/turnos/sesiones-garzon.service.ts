@@ -581,8 +581,13 @@ export class SesionesGarzonService {
    * "Desde hoy / Hasta hoy" no devolvía **ninguna** sesión.
    *
    * Se interpretan en la **zona del tenant** y `hasta` es inclusivo del día
-   * completo (`< hasta + 1 día`), siguiendo el patrón que `propina-reportes`
-   * ya usa para el mismo problema. La zona importa acá más que en un reporte
+   * completo (`< hasta + 1 día`). ⚠️ Esta frase decía hasta el 2026-08-22 que
+   * seguía "el patrón que `propina-reportes` ya usa": **no es cierto** —
+   * `propina-reportes` filtra `< hasta` sin sumar el día, y quien compensa es su
+   * llamador. El patrón bueno era éste, y desde el 2026-08-22 vive en
+   * `common/utils/rango-fecha.util.ts` → `bordeHastaSql`, que es lo que usan
+   * kardex, mermas y órdenes. Este método mantiene su SQL propio porque arma los
+   * params con otro esquema de índices. La zona importa acá más que en un reporte
    * de oficina: con el cast en UTC, un tenant en Chile perdía las sesiones
    * entre las 20:00 y la medianoche local, que es cuando trabaja un
    * restaurante.

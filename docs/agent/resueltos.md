@@ -17,6 +17,58 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## "Hasta el 16" ya muestra el 16 (2026-08-22)
+
+Cierra la entrada *"El borde `hasta` de los filtros de fecha pasa a ser inclusivo del
+día"*. **Construido el mismo día que se decidió.**
+
+**Qué se hizo:** `bordeHastaSql` nuevo en `common/utils/rango-fecha.util.ts` — con fecha
+pura emite `< (($n::date + 1)::timestamp AT TIME ZONE $z)`, y con un timestamp explícito
+deja `<= $n` intacto. Lo usan los tres filtros que estaban rotos: **mermas**, **kardex** y
+**órdenes de pasarela**. La convención quedó escrita en
+[`patterns/backend.md`](../patterns/backend.md) §10b, con la tabla de los dos bordes, que
+**no son simétricos**.
+
+### La entrada afirmaba tres cosas y dos eran falsas
+
+Se midió antes de escribir código, y por eso el alcance cambió **antes** y no después:
+
+1. ❌ *"`finDiaExclusivoIso` tiene cero llamadores (medido)"* — **tiene dos, vivos**:
+   `propinas/index.vue:115` y `:145`, en el preview y en la liquidación del reparto.
+   Borrarlo, como la entrada mandaba, **rompía las propinas**. No se tocó.
+2. ❌ *"alinear `propina-reportes`, que ya usa `< hasta` exclusivo"* — su llamador **ya
+   compensa**: `rangoMesActual()` manda el **1° del mes siguiente**. Hacer el backend
+   inclusivo sin tocar la pantalla habría metido el 1° de septiembre en el resumen de
+   agosto. Quedó fuera de alcance por decisión del owner, con el porqué escrito en
+   `patterns/backend.md` §10b.
+3. ✅ *"los tres filtros comparan `creado_el <= $hasta`"* — cierto, y era el bug.
+
+**Y apareció algo que la entrada no sabía:** `sesiones-garzon` **ya tenía el arreglo
+hecho**, con el mismo SQL, por el mismo motivo (*"Desde hoy / Hasta hoy" no devolvía
+ninguna sesión*). O sea que el precedente bueno del repo no era el que la entrada nombraba.
+De paso se corrigió su docblock, que decía seguir *"el patrón que `propina-reportes` ya
+usa"* — `propina-reportes` no suma el día; la cita era falsa.
+
+### El test se validó revirtiendo, no rompiendo
+
+Tres casos nuevos en `test/filtros-fecha-zona.e2e-spec.ts`, que cubría `desde` en cuatro
+casos y **`hasta` en ninguno**. Con la implementación revertida al `<=` viejo —el mutante
+es el código anterior, no una rotura cualquiera— fallan dos: *"hasta hoy"* devuelve **0**
+en vez de 1, y el kardex **0** en vez de 2.
+ℹ️ El tercero (un timestamp corta en el instante, no al final del día) **pasa igual con el
+mutante**, y se deja igual: no cubre este bug sino el arreglo equivocado de sumarle un día
+a todo, que es el ensanche mudo que el helper hermano ya evita.
+
+⚠️ **Lo que NO cubre el e2e:** las órdenes de pasarela. El tercer llamador comparte el
+helper y su SQL está fijado por unit test, pero montar una orden en el e2e es fixture de
+pasarela; se dejó afuera a propósito y se dice acá para que no se lea como cobertura
+completa.
+
+**Gate:** lint 0, typecheck limpio, 2012 unitarios, **e2e completo 43 suites / 530 tests**
+sobre base reseteada.
+
+---
+
 ## La pasada de auditoría de las dos lentes: 3 lentes, 0 hallazgos (2026-08-22)
 
 Cierra la entrada *"Disparar la pasada de auditoría de las dos lentes"* de la sección 7.

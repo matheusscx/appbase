@@ -72,6 +72,45 @@ export function bordeFechaSql(
 }
 
 /**
+ * Borde **superior** de un rango por fecha. Es un caso propio y no un
+ * `bordeFechaSql(columna, '<=', …)`, por lo que le pasa a una fecha pura.
+ *
+ * El bug que cierra (medido el 2026-08-16, decidido por el owner el
+ * 2026-08-22): `hasta` llega como `YYYY-MM-DD` —lo que emite `AppDateInput`— y
+ * compararla contra un `timestamptz` la castea a la **medianoche** de ese día.
+ * Con `<= hasta`, *"hasta el 16 de agosto"* dejaba fuera **el 16 entero**. No es
+ * el off-by-one del huso: normalizar la zona movió ese borde, no lo creó.
+ *
+ * La regla es **inclusivo del día**: quien elige "16" ve el 16 completo. Se
+ * resuelve en el backend y no compensando en cada pantalla, que es lo que el
+ * owner eligió para que la respuesta no dependa de qué llamador la arme.
+ *
+ * ⚠️ **Solo se expande la fecha pura.** Un timestamp explícito
+ * (`2026-08-16T15:30:00Z`) pidió ese instante como corte y sigue con `<=`:
+ * sumarle un día sería el mismo ensanche mudo que `bordeFechaSql` evita al no
+ * aplicarle `::date`.
+ *
+ * ⚠️ **`::date + 1` y no `23:59:59`.** El molde del "final del día" se come el
+ * último segundo, y falla distinto según los decimales del `timestamptz`. La
+ * suma la hace Postgres sobre `date`, así que es DST-correcta sin librería de
+ * zonas.
+ *
+ * El precedente probado es `sesiones-garzon.service.ts` →
+ * `buildHistorialFilters`, que ya tenía exactamente este SQL por el mismo
+ * motivo ("Desde hoy / Hasta hoy" no devolvía ninguna sesión).
+ */
+export function bordeHastaSql(
+  columna: string,
+  valor: string,
+  idxValor: number,
+  idxZona: number,
+): string {
+  return esFechaPura(valor)
+    ? ` AND ${columna} < (($${idxValor}::date + 1)::timestamp AT TIME ZONE $${idxZona})`
+    : ` AND ${columna} <= $${idxValor}`;
+}
+
+/**
  * Zona horaria del tenant, que sale del **país**, no de una preferencia del
  * tenant — misma fuente y misma consulta que usa el reporte de propinas.
  */

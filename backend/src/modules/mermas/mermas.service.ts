@@ -14,6 +14,7 @@ import {
 import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
 import {
   bordeFechaSql,
+  bordeHastaSql,
   requiereZonaTenant,
   zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
@@ -324,9 +325,8 @@ export class MermasService {
     }
     if (query.hasta) {
       params.push(query.hasta);
-      filters += bordeFechaSql(
+      filters += bordeHastaSql(
         'mv.creado_el',
-        '<=',
         query.hasta,
         params.length,
         idxZona,

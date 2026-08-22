@@ -27,6 +27,7 @@ import {
 import type { PaginatedResponse } from '../../../common/interfaces/paginated-response.interface';
 import {
   bordeFechaSql,
+  bordeHastaSql,
   requiereZonaTenant,
   zonaHorariaTenant,
 } from '../../../common/utils/rango-fecha.util';
@@ -621,9 +622,8 @@ export class CobrosService {
     }
     if (query.fechaHasta) {
       params.push(query.fechaHasta);
-      filters += bordeFechaSql(
+      filters += bordeHastaSql(
         'o.creado_el',
-        '<=',
         query.fechaHasta,
         params.length,
         idxZona,

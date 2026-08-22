@@ -1,5 +1,6 @@
 import {
   bordeFechaSql,
+  bordeHastaSql,
   esFechaPura,
   requiereZonaTenant,
 } from './rango-fecha.util';
@@ -72,6 +73,44 @@ describe('rango-fecha.util', () => {
       expect(bordeFechaSql('o.creado_el', '<=', '2026-08-31', 5, 2)).toBe(
         ' AND o.creado_el <= ($5::date::timestamp AT TIME ZONE $2)',
       );
+    });
+  });
+
+  // El bug que cierra esta función: `hasta` llega como fecha pura y compararla
+  // contra un `timestamptz` la castea a la MEDIANOCHE de ese día, así que
+  // `<= hasta` dejaba fuera el día entero — "hasta el 16" no mostraba nada del
+  // 16. El patrón es el mismo que `sesiones-garzon` ya tenía probado.
+  describe('bordeHastaSql', () => {
+    it('la fecha pura incluye el día completo: < día siguiente', () => {
+      expect(bordeHastaSql('mv.creado_el', '2026-08-16', 3, 2)).toBe(
+        ' AND mv.creado_el < (($3::date + 1)::timestamp AT TIME ZONE $2)',
+      );
+    });
+
+    // Sumar el día es correcto para una fecha pura y sería un ensanche mudo
+    // para un instante: quien manda `T15:30:00Z` pidió ese corte, no el final
+    // del día. Es la misma razón por la que `bordeFechaSql` no aplica `::date`
+    // a un timestamp.
+    it('el timestamp pasa tal cual y sigue siendo inclusivo del instante', () => {
+      const sql = bordeHastaSql('mv.creado_el', '2026-08-16T15:30:00Z', 3, 2);
+      expect(sql).toBe(' AND mv.creado_el <= $3');
+      expect(sql).not.toContain('::date');
+      expect(sql).not.toContain('+ 1');
+    });
+
+    it('respeta la columna y los índices de parámetro que le pasan', () => {
+      expect(bordeHastaSql('o.creado_el', '2026-12-31', 5, 4)).toBe(
+        ' AND o.creado_el < (($5::date + 1)::timestamp AT TIME ZONE $4)',
+      );
+    });
+
+    // Rueda de mes y de año: la aritmética la hace Postgres (`::date + 1`), no
+    // JS. Se fija acá porque es la parte que un refactor podría querer
+    // "simplificar" a `hasta 23:59:59`, que se come el último segundo.
+    it('no usa el molde 23:59:59, que pierde el último segundo del día', () => {
+      const sql = bordeHastaSql('mv.creado_el', '2026-12-31', 3, 2);
+      expect(sql).not.toContain('23:59');
+      expect(sql).toContain('::date + 1');
     });
   });
 });
