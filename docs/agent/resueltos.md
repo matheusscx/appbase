@@ -17,6 +17,83 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Ocultarle el resultado al cajero se descarta: pelea contra la aritmética, y contra el propio cierre (2026-08-22)
+
+Cierra la entrada *"Ocultar el resultado post-cierre al cajero"*. **Se cierra por descarte,
+no por implementación** — es la primera de este archivo que sale así, y por eso el
+razonamiento va completo: sin él, dentro de seis meses esto vuelve como idea nueva.
+
+### De qué venía
+
+Estaba **decidido al revés**. El 2026-08-11 el owner resolvió *"la diferencia la ve solo el
+supervisor"*, aceptando explícitamente el costo de que un error de conteo de buena fe ya no
+se corrija en el momento. Se intentó el **2026-08-16**, el gate quedó en verde, y la
+revisión independiente encontró que faltaba justo la superficie principal. **Se revirtió.**
+El intento dejó medida esta tabla, que sigue siendo el mapa correcto de por dónde se filtra:
+
+| Superficie | Qué revela | ¿La entrada la nombraba? |
+|---|---|---|
+| `obtenerArqueo` | `esperado` y `diferencia` por línea | sí |
+| `resumenMovimientos` | `saldoEsperado` del turno | sí |
+| `listarMovimientos` | las filas con las que se **reconstruye** el esperado sumando | no |
+| `enviarConteo` | devuelve `arqueo` con `esperado`/`diferencia` reales | no |
+| `cerrar` | llama a `obtenerArqueo` **hardcodeando `tieneVerTodas: true`** | no |
+
+Y quedó bloqueada en una pregunta de producto: la fase 2 exige un motivo por línea
+descuadrada, y el selector solo se renderiza `if (l.diferencia != null && !isZero())`. Si al
+cajero se le oculta la diferencia, **no puede completar el cierre de su propia caja**.
+
+### Qué cambió desde entonces
+
+**Una corrección de hecho:** la entrada afirmaba que el panel de resumen del turno seguía
+mostrando el esperado. Ya no — lo cerró `8571b8b3`. Hoy las cuatro superficies de lectura
+comparten **el mismo predicado**, `!esAdmin && estado === 'abierta' && arqueoCiego`. No queda
+ninguna fuga **antes** del conteo; lo único abierto era la revelación **después**, que es
+exactamente lo que esta entrada pedía tapar.
+
+**Y una pasada de investigación** ([§11](investigaciones/2026-07-23-gestion-caja.md#11-cuándo-se-revela-el-descuadre-y-a-quién-2026-08-22-5ª-pasada),
+doce productos relevados, internacional + CL/LatAm).
+
+### Las dos razones del descarte
+
+**1. Ocultar el resultado solo funciona si se oculta para siempre.** El esperado no es un
+secreto: es `saldo inicial + ventas en efectivo − retiros`. Cerrada la caja, el cajero lista
+los movimientos de su propio turno y **los suma** — la tercera fila de la tabla de arriba.
+Así que "solo el supervisor" no es tapar un número: es *"el cajero nunca más ve el historial
+de movimientos de su propio turno"*, mucho más grande de lo que la entrada planteó, y rompe
+algo legítimo. Y aun así, quien trabajó el turno entero puede llevar la cuenta aparte.
+**El control es evadible por aritmética.**
+
+**2. Revelar y poder cerrar son el mismo dato.** La carga que revela es la que la fase 2
+necesita para existir: sin `diferencia`, el `descuadres` del drawer queda vacío, no hay línea
+que justificar, el botón no se habilita y la caja se queda en `en_conciliacion` para siempre.
+No es un detalle de implementación — es el diseño.
+
+**El mercado converge:** Toast (`3.17 Cash Drawers (Blind)`) oculta el *expected* pero muestra
+`Cash over`/`Cash short` en el mismo Shift Review; Simphony deja que el propio operador elija
+el motivo; Square, Defontana y mySYSTEM revelan al mismo cajero. **mySYSTEM es el más
+explícito**: lo ciego es no ver el esperado **antes** de contar, no ocultar la diferencia
+después. El único precedente contrario es **Fudo**, y ahí lo distinto no es el ocultamiento
+sino el **paso de revisión** (§11.2).
+
+⚠️ **Y la teoría que sostenía la decisión del 2026-08-11 no está documentada por nadie.** El
+argumento de calibración —*"si no sabe si zafó, no puede calibrar cuánto robar"*— aparece
+**solo en marketing** (blogs de Toast y Clover), en ninguna doc de configuración de los siete
+productos con documentación accesible.
+
+### Qué sobrevive, y dónde quedó
+
+**El agujero real no era que el cajero viera su diferencia: es que su justificación no la
+revisa nadie.** Cuenta, se entera, elige el motivo, escribe la explicación y cierra — el
+descuadre queda justificado por la misma persona que lo produjo. Eso quedó como **entrada
+propia** en [`pendientes.md`](pendientes.md), con la tendencia por cajero como primer paso
+(barata, no toca el flujo de cierre, y es lo que permite elegir el número del umbral con
+fundamento en vez de a ojo).
+
+**Sin código.** El comportamiento actual ya era el correcto; lo que faltaba era saberlo.
+
+---
+
 ## El cuaderno de anti-patrones vuelve a su tope, con dos fusiones y ningún borrado (2026-08-22)
 
 Cierra la entrada *"El cuaderno de anti-patrones excede su propio tope"*. `anti-patterns.md`

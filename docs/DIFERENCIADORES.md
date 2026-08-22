@@ -72,6 +72,39 @@ construcción** los garzones **sin** cuenta, a quienes el encargado les sigue em
 PIN y viéndolo en claro. La vía débil queda exactamente igual de débil. Detalle en
 [la spec](superpowers/specs/2026-08-14-pin-propio-garzon-design.md#lo-que-esta-feature-gana--y-lo-que-no).
 
+### El cierre ciego es política del negocio, no un permiso de rol — y también tapa al supervisor
+
+**Nosotros:** `arqueo_ciego` es **config del tenant**, no un permiso que se le da o se le
+quita a un rol. Mientras la caja está abierta, el esperado no lo ve **ni el cajero dueño del
+turno ni el supervisor con `Cajas:Leer`** — solo el admin del tenant y el superadmin quedan
+exentos. Es una decisión explícita del owner, más estricta que el estándar de mercado.
+**El mercado:** en **los cinco productos que documentan el ciego con un permiso nombrado**,
+es siempre **permiso de rol o perfil**, así que por construcción hay roles que **sí** ven el
+esperado mientras el cajero cuenta: Toast (`3.17 Cash Drawers (Blind)` contra `3.18 (Full)`),
+Oracle MICROS Simphony (`25 - View Blind Totals`), Fudo (*"Ver 'Según Sistema'"*, que se le
+quita al rol Cajero), Bsale (*"Ver detalle de la caja teórica"*, por perfil) y Toteat (por
+perfil de usuario). Relevados además sin la función: Square, Lightspeed, Clover, Defontana.
+**Por qué le importa a quien compra:** un ciego que es permiso de rol **se cae con una
+conversación**. Si el supervisor ve el esperado y el cajero se lo pregunta, el control
+desapareció y no queda rastro. Que sea política del local —y no un atributo de quién está
+mirando— es lo que lo hace sobrevivir a la colusión, que es el escenario para el que se
+inventó el conteo a ciegas.
+⚠️ **Costo, y hay que decirlo al comunicarlo:** el supervisor tampoco puede despejar una duda
+en el momento. Si el cajero pregunta *"¿voy bien?"*, nadie en el local puede contestarle salvo
+el admin del tenant.
+⚠️ **Alcance exacto de la afirmación** (regla 2): son **doce** productos relevados en total,
+de los cuales **siete** documentan cierre ciego. De esos siete, **cinco** nombran el permiso y
+los cinco lo hacen por rol/perfil; Relbase documenta la función sin nombrar el permiso, y de
+Revel no se pudo leer nada (su help site bloqueó el acceso). Se comunica *"ninguno de los que
+relevamos"*, nunca *"ninguno en el mundo"*.
+⚠️ **Y esto es sobre el turno EN CURSO.** Una vez enviado el conteo, la diferencia se le
+revela al propio cajero — igual que Toast, Simphony, Square, Defontana y mySYSTEM. Eso **no**
+es un diferenciador, es el estándar, y se decidió mantenerlo así el 2026-08-22.
+**Evidencia:** [investigación §11](agent/investigaciones/2026-07-23-gestion-caja.md#11-cuándo-se-revela-el-descuadre-y-a-quién-2026-08-22-5ª-pasada) ·
+[feature](features/gestion-cajas.md#cierre-ciego-modo-anti-fraude).
+**Estado:** ✅ Implementado 2026-07-24 ([ESTADO](ESTADO.md)). El relevamiento que lo respalda
+como diferenciador es del 2026-08-22.
+
 ### Costeo por promedio ponderado móvil, y no "último costo"
 
 **Nosotros:** el costo de un producto es el promedio ponderado móvil, recalculado en cada

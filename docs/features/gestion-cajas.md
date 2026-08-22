@@ -576,12 +576,22 @@ Fuera de alcance de este sub-proyecto, siguen pendientes en
   acceso](#modelo-de-acceso-por-permiso).
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast: si el over/short supera
   un umbral configurable, requiere aprobación del supervisor).
-- **Ocultar el resultado *después* del cierre** al cajero — en el modo ciego de hoy, al
-  enviar el conteo el cajero **sí** ve su propia diferencia (la revelación es inmediata,
-  vía el detalle) aunque la caja quede `en_conciliacion`. El sub-proyecto C (ver [Cierre
-  en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c) más abajo)
-  resolvió la conciliación operador→supervisor de §6 pero no este ítem puntual — sigue
-  diferido en `docs/agent/pendientes.md`.
+- ~~**Ocultar el resultado *después* del cierre** al cajero~~ — **descartado el
+  2026-08-22, y la revelación al enviar el conteo queda como comportamiento definitivo.**
+  Estuvo decidido al revés (2026-08-11: *"la diferencia la ve solo el supervisor"*) y se
+  intentó el 2026-08-16; el intento se revirtió. Las dos razones, medidas, están en la
+  investigación
+  [§11.3](../agent/investigaciones/2026-07-23-gestion-caja.md#113-cruce-contra-nuestro-código--dos-hechos-que-el-mercado-no-podía-darnos):
+  el esperado es **reconstruible sumando** los movimientos del propio turno, así que
+  taparlo exigiría ocultarle al cajero su propio historial para siempre; y **la carga que
+  revela es la misma que la fase 2 necesita**, así que ocultarla lo deja sin poder cerrar
+  su caja. El mercado converge con eso: Toast, Simphony, Square, Defontana y mySYSTEM
+  revelan al mismo cajero en el mismo flujo
+  ([§11.1](../agent/investigaciones/2026-07-23-gestion-caja.md#111-qué-hace-cada-producto)).
+  ⚠️ **Lo que sí sobrevive de esa preocupación**, y quedó como entrada propia en
+  [`pendientes.md`](../agent/pendientes.md): el descuadre lo justifica **la misma persona
+  que lo produjo, y no lo revisa nadie**. Ese es el agujero real — y no necesita que el
+  cajero esté a ciegas para taparse.
 
 ---
 

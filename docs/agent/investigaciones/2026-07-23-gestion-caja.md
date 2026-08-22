@@ -630,6 +630,162 @@ Explícito, porque vale tanto como lo que sí:
 
 ---
 
+## 11. Cuándo se revela el descuadre, y a quién (2026-08-22, 5ª pasada)
+
+**Por qué esta pasada.** La entrada *"Ocultar el resultado post-cierre al cajero"* llevaba
+desde el 2026-08-11 con una decisión tomada (*"la diferencia la ve solo el supervisor"*) y
+desde el 2026-08-16 con un intento **revertido**. El bloqueo nunca fue técnico: la fase 2
+del cierre exige justificar cada línea descuadrada, así que ocultarle la diferencia al
+cajero lo deja **sin poder cerrar su propia caja**.
+
+Antes de decidir se relevó la pregunta fina — no *"¿existe el cierre ciego?"*, que la 2ª
+pasada (§7.4) ya había confirmado que sí, sino **¿el cajero llega a ver su propia varianza
+después de contar, y quién justifica el descuadre?** Dos pasadas en paralelo y ciegas entre
+sí: una internacional y una CL/LatAm.
+
+### 11.1 Qué hace cada producto
+
+| Producto | ¿El cajero ve su varianza después de contar? | ¿Quién justifica el descuadre? |
+|---|---|---|
+| **Toast** | **Sí.** Oculta el *expected* (`3.17 Cash Drawers (Blind)`, contra `3.18 (Full)`) pero muestra `Cash over` / `Cash short` en el mismo Shift Review | No documentado para el cierre original |
+| **Oracle MICROS Simphony** | Oculta expected **y** difference a quien no tenga `25 - View Blind Totals`. No documenta si se revela después | **El propio operador** — elige un motivo predefinido para poder completar el conteo |
+| **Square** | **Sí** — no tiene cierre ciego en absoluto; muestra el esperado al cerrar | El cajero |
+| **Lightspeed (S-Series)** | No aplica: **el cajero no cierra su propio turno**, solo un Register Manager | El manager |
+| **Clover** | No documentado (el *blind closeout* aparece solo en su blog, no como toggle) | No documentado |
+| 🇨🇱 **Defontana** | **Sí** — la diferencia se despliega en la misma pantalla al ingresar lo contado. No tiene modo ciego | El cajero |
+| 🇨🇱 **mySYSTEM** | **Sí**, y es explícito: lo ciego es no ver el esperado **antes** de contar, no ocultar la diferencia después | El cajero. Con tope configurable: si lo supera, no cierra y exige un *vale de caja contra el cajero* |
+| 🌎 **Fudo** | **Probablemente no** — ver §11.2 | **El supervisor**, en un paso aparte |
+| 🇨🇱 **Bsale** | No documentado | No documentado |
+| 🇨🇱 **Toteat** | No documentado | No documentado |
+| 🇨🇱 **Relbase** | No documentado | No documentado |
+| **Revel** | Sin acceso — su help site bloqueó el fetch. No cuenta para ningún lado | — |
+
+**Falso positivo descartado:** el *"Blind Scan"* de Revel **no es caja** — es conteo físico
+de inventario (ocultar cuántas unidades se esperan al escanear). No aplica.
+
+### 11.2 Fudo es el único precedente de la opción "solo el supervisor"
+
+Y es el competidor regional más parecido a nosotros, así que merece precisión:
+
+- Tiene **dos permisos separados**: *"Ver 'Según Sistema' en arqueo **abierto**"* y *"Ver
+  'Según Sistema' en arqueo **cerrado**"*. Que el segundo exista significa que el
+  ocultamiento **puede** persistir después del cierre. ⚠️ Esto es **lectura de los nombres
+  de los permisos, no una frase que Fudo afirme** — marcado como inferencia.
+- Tiene un paso propio, **"Conciliación de Caja"**, descrito textualmente como *esquema de
+  doble control entre operador y supervisor*: revisa y valida los cierres antes de que
+  impacten los reportes financieros, y **ahí** —si hay diferencia— se selecciona el motivo
+  con comentario obligatorio, y el supervisor confirma y cierra. Esto **sí** está documentado.
+
+**El matiz que decide el cruce:** lo que Fudo tiene y nosotros no **no es el ocultamiento —
+es el paso de revisión**. La conciliación existe en Fudo como etapa de primera clase, con el
+supervisor como su dueño. En nuestro modelo `en_conciliacion` existe pero la fase 2 está
+diseñada como **paso del cajero** (`cerrar` lo exime de `puedeForzar` cuando la caja es
+suya). Copiar el ocultamiento sin el paso de revisión copia la mitad que no sirve.
+
+### 11.3 Cruce contra nuestro código — dos hechos que el mercado no podía darnos
+
+**1. Ocultar el resultado solo funciona si se oculta para siempre.** El esperado no es un
+secreto: es `saldo inicial + ventas en efectivo − retiros`. Hoy `listarMovimientos` retiene
+los montos **solo mientras la caja está `abierta`**; una vez cerrada, el cajero lista los
+movimientos de su propio turno y **los suma**. Así que la opción "solo el supervisor" no es
+tapar un número: es *"el cajero nunca más ve el historial de movimientos de su propio
+turno"* — mucho más grande de lo que la entrada del backlog llegó a plantear, y rompe algo
+legítimo (chequear si una venta entró). Y aun cerrando esa puerta, quien trabajó el turno
+entero puede llevar la cuenta aparte. **El control es evadible por aritmética.**
+
+**2. La carga que revela es la misma que la fase 2 necesita para existir.** Si el conteo
+devuelve las líneas sin esperado ni diferencia, el `descuadres` del drawer
+—`filter(l => l.diferencia != null && !isZero())`— queda **vacío**: no hay ninguna línea que
+justificar, el botón no se habilita y la caja se queda en `en_conciliacion` para siempre.
+Eso es lo que hizo caer el intento del 2026-08-16, y no es un detalle de implementación:
+revelar y poder cerrar son, en este diseño, **el mismo dato**.
+
+### 11.4 La pata legal chilena — no manda acá, pero acota lo de más adelante
+
+**No existe norma chilena sobre la UI del arqueo.** Ni el Código del Trabajo ni los
+dictámenes de la DT relevados obligan a mostrarle al trabajador, durante su turno, cuánto
+espera el sistema. Lo regulado es el **descuento al sueldo**, que es un problema posterior y
+que hoy no tocamos (no hacemos liquidaciones):
+
+- **Art. 58** — tope de 15% de la remuneración para descuentos facultativos.
+- **Asignación de pérdida de caja** (DT ORD. N°4229/2015 y ORD. N°754/2024): el empleador
+  solo descuenta pérdidas **de esa asignación**, hasta el monto pactado. Más allá, hace
+  falta **autorización escrita del trabajador caso a caso**. Y **sin asignación pactada no
+  es procedente descontar nada** — la responsabilidad la determinan los tribunales, no el
+  empleador.
+
+⚠️ **Corrección a la 4ª pasada y al brief de esta:** el **art. 54 bis** *no* trata faltantes
+de caja — regula la irrenunciabilidad de comisiones ya devengadas. La norma pertinente es el
+**art. 58** más la jurisprudencia sobre asignación de pérdida de caja.
+
+**Lo que sí acota:** el modelo *vale de caja contra el cajero* de mySYSTEM —imputación
+automática del faltante— es difícilmente aplicable en Chile sin asignación pactada. Queda
+descartado como camino, no por diseño sino por norma.
+
+### 11.5 Qué sobrevive al cruce
+
+- **Sobrevive (mercado + código convergen):** que la revelación ocurra **al congelar el
+  conteo** es el estándar — Toast, Simphony, Square, Defontana y mySYSTEM revelan al mismo
+  cajero en el mismo flujo. Nuestro comportamiento actual ya es ese.
+- **Sobrevive como hallazgo nuevo, y es el importante:** el agujero de nuestro flujo **no es
+  que el cajero vea su diferencia — es que su justificación no la revisa nadie.** Cuenta, se
+  entera, elige el motivo, escribe la explicación y cierra: el descuadre queda justificado
+  por la misma persona que lo produjo, y nada le avisa a nadie. Eso es lo que Fudo cubre con
+  su paso de conciliación y Toast con su umbral, y **ninguno de los dos necesita que el
+  cajero esté a ciegas**.
+- **Sobrevive de Toast, y alimenta otra entrada:** `Closeout Over/Short Max` fuerza
+  *managerial override* por encima de un monto configurable, con un `Closeout Over/Short
+  Warning` que solo pide confirmación sin bloquear. Es el patrón de la entrada *"Aprobación
+  de cierre por umbral"* — que resulta no ser un tema aparte, sino la forma concreta de
+  tapar este agujero. mySYSTEM confirma el patrón con su límite máximo.
+- **Descartado:** ocultar el resultado después del conteo, en cualquiera de sus dos
+  variantes. Ver §11.3.
+
+### 11.6 Lo que la investigación NO encontró
+
+1. **Ningún manual técnico documenta el razonamiento anti-fraude** de por qué revelar o no
+   revelar después. El argumento de calibración (*"si no sabe si zafó, no puede calibrar
+   cuánto robar"*) aparece **solo en marketing** — el blog de Toast, el de Clover — y en
+   ninguna doc de configuración de los siete productos con documentación accesible. Es la
+   teoría que sostenía la decisión del 2026-08-11, y **nadie la documenta como práctica**.
+2. **Bsale, Toteat y Relbase documentan el ciego pero no su política de revelación.**
+   Confirma exactamente lo medido el 2026-08-02: los POS chilenos publican **cómo cargar el
+   dato en la UI**, no la política. No cuentan para ningún lado de la discusión.
+3. **Toast no confirma** si exige categorizar la varianza en el cierre original (solo se vio
+   el requisito para ediciones históricas posteriores, con otro permiso).
+4. **Simphony no especifica** qué dispara su prompt de aprobación al cerrar con varianza
+   (¿monto? ¿rol? ¿ambos?).
+5. **Revel quedó sin relevar** — su help site es una comunidad Salesforce que no renderiza.
+   No se afirma ni se niega que tenga la función.
+6. **Ningún producto documenta seguimiento de varianza por empleado en el tiempo** como
+   feature con nombre propio, aunque §1 ya lo había registrado como concepto de la industria
+   (*Over/Short trackeado por empleado*).
+
+### 11.7 Fuentes de esta pasada
+
+- Toast — [Access Permissions Reference](https://support.toasttab.com/en/article/Access-Permissions-Reference) ·
+  [Shift Review Overview](https://support.toasttab.com/en/article/Shift-Review-Overview) ·
+  [Cash Drawer Reports Overview](https://support.toasttab.com/en/article/Cash-Drawer-Reports-Overview) ·
+  [How to Prevent Employee Theft (blog, no doc de producto)](https://pos.toasttab.com/blog/on-the-line/how-to-prevent-employee-theft-at-your-restaurant)
+- Oracle MICROS Simphony — [Allowing Users to View Blind Totals](https://docs.oracle.com/en/industries/food-beverage/simphony/19.4/simcg/t_ecm_allow_view_blind_totals.htm) ·
+  [Counting a Receptacle Session](https://docs.oracle.com/en/industries/food-beverage/simphony/19.7/simmu/t_ecm_count_receptacle_session.htm) ·
+  [Configuring ECM Privileges](https://docs.oracle.com/en/industries/food-beverage/simphony/19.4/simcg/t_ecm_config_ecm_privileges.htm)
+- Square — [Start and end a cash drawer session](https://squareup.com/help/us/en/article/8344-start-and-end-a-cash-drawer-session)
+- Lightspeed S-Series — [Closing your shift](https://shopkeep-support.lightspeedhq.com/hc/en-us/articles/47479985122459-Closing-your-shift)
+- Fudo — [¿Cómo configurar un 'Arqueo de caja ciego'?](https://soporte.fu.do/es/articles/11730856-como-configurar-un-arqueo-de-caja-ciego) ·
+  [Conciliación de Caja](https://soporte.fu.do/es/articles/14658427-conciliacion-de-caja) ·
+  [Roles de usuario](https://soporte.fu.do/es/articles/11730991-roles-de-usuario)
+- Bsale — [Cierre de Caja Ciego](https://ayuda.bsale.com.mx/support/solutions/articles/151000212864-cierre-de-caja-ciego-o-sin-detalle)
+- Toteat — [Perfiles de usuarios y permisos](https://toteat.com/es-co/ayuda/operacion-en-restaurante/articulo-ayuda/perfiles-de-usuarios-permisos)
+- Relbase — [¿Cómo trabajar con un cierre de caja "ciego"?](https://ayuda.relbase.cl/c%C3%B3mo-trabajar-con-un-cierre-de-caja-ciego)
+- mySYSTEM — [Cierre de Turno Ciego](https://www.mysystem.cl/cierre-de-turno-ciego)
+- Defontana — [Cierre de Turno y Caja](https://intercom.help/defontanaerp/es/articles/5318588-cierre-de-turno-y-caja)
+- Dirección del Trabajo (Chile) — [ORD. N°4229 (2015)](https://www.dt.gob.cl/legislacion/1624/w3-article-107035.html) ·
+  [ORD. N°754 (2024)](https://www.dt.gob.cl/legislacion/1624/w3-article-126950.html) ·
+  [Art. 58 CdT](https://www.dt.gob.cl/legislacion/1624/w3-propertyvalue-145728.html)
+
+---
+
 ## Fuentes
 
 - Toast — [Shift Review Overview](https://support.toasttab.com/en/article/Shift-Review-Overview) ·

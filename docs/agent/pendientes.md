@@ -447,6 +447,46 @@ empezarlas.
   ⚠️ **Costo asumido, dicho explícito:** en el camino del cierre forzado el umbral deja de ser un
   control preventivo y pasa a ser un rastro. Que el registro exista y sea legible **es** el
   control ahí; si el evento no queda o nadie lo mira, no queda nada.
+  ➕ **Lo que aportó la 5ª pasada de la investigación (2026-08-22), y precisa el patrón:**
+  Toast no tiene un umbral sino **dos niveles** — `Closeout Over/Short Max` bloquea y exige
+  *managerial override*, y `Closeout Over/Short Warning` solo pide confirmación del empleado
+  **sin** bloquear. El chileno **mySYSTEM** también tiene tope configurable que impide cerrar.
+  Los nombres van acá para no volver a relevarlos.
+  🔗 **Y esta entrada resultó ser la forma concreta de tapar el agujero que dejó el cierre
+  ciego**: el descuadre lo justifica hoy la misma persona que lo produjo y no lo revisa nadie
+  (ver la entrada de abajo). El umbral es el control **agudo** de ese agujero.
+  ⚠️ **Secuencia, no orden de gusto: la tendencia por cajero va ANTES que esta entrada.** El
+  umbral necesita un número, y hoy nadie sabe si un descuadre típico de esta operación es de
+  \$200 o de \$8.000. Elegirlo a ojo falla de las dos maneras: bajo, y cada turno espera a un
+  encargado que no está; alto, y no atrapa nada. La distribución real la da la entrada de
+  abajo, que además **no toca el flujo de cierre** — a diferencia de esta.
+
+- [ ] **El descuadre lo justifica quien lo produjo, y no lo revisa nadie** (producto +
+  backend) — **abierta el 2026-08-22**, al cerrar por descarte *"Ocultar el resultado
+  post-cierre al cajero"* (ver [`resueltos.md`](resueltos.md)). Es lo que sobrevivió de esa
+  preocupación una vez descartado el ocultamiento, y **es el agujero de verdad**: hoy el
+  cajero cuenta, se entera de su diferencia, elige él mismo el motivo, escribe él mismo la
+  explicación y cierra él mismo su caja. Queda registrado — pero **registrado no es
+  revisado**: alguien tiene que ir a buscarlo al historial, y nada le avisa que vaya. Un
+  cajero que descuadra \$3.000 por turno, siempre para el mismo lado y siempre con el mismo
+  motivo, atraviesa el flujo entero sin encender nada.
+  📌 **Precedente medido:** es exactamente lo que cubre la **"Conciliación de Caja"** de Fudo
+  —*esquema de doble control entre operador y supervisor*— y lo que cubre el umbral de Toast.
+  Ninguno de los dos exige que el cajero esté a ciegas
+  ([§11.2](investigaciones/2026-07-23-gestion-caja.md#112-fudo-es-el-único-precedente-de-la-opción-solo-el-supervisor)).
+  **Lo barato y lo que va primero: la tendencia por cajero.** No es un flujo nuevo, es una
+  lectura para el supervisor, y **el dato ya está guardado**: `historial`
+  (`caja.service.ts`) ya filtra por `usuarioId`, ya devuelve `diferencia` y
+  `diferencia_total` por caja, y un supervisor con `tieneVerTodas` ya puede pedir la de
+  cualquier cajero. Falta la **señal**, no el dato ni el permiso.
+  ⚠️ **Matiz de diseño que no se puede perder: la señal es el sesgo, no el monto.** El cajero
+  de la caja más cargada va a tener más varianza siempre, y no por eso es sospechoso. Lo que
+  delata es descuadrar **siempre para el mismo lado**. Un promedio de magnitud marca al más
+  ocupado; un promedio **con signo** marca al que roba.
+  🛑 **Sin decidir, para cuando se tome:** sobre qué ventana se mide (¿últimos N cierres, o
+  un rango de fechas?), y si el cajero ve su propia tendencia o es solo del supervisor —
+  ojo que esto último **no** es la pregunta que se cerró el 2026-08-22: aquella era sobre el
+  turno en curso, esta es sobre el acumulado.
 
 - [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
   de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
@@ -598,45 +638,6 @@ empezarlas.
 
   🔗 Queda además la pieza **C** de la partición (el default destildado del modal de
   anulación), que ahora es barata: el campo ya viaja al cliente.
-
-- [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
-  ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la
-  revelación es inmediata, vía el detalle), aunque la caja quede `en_conciliacion`. El
-  sub-proyecto C resolvió la conciliación operador→supervisor de §6, pero no
-  condicionó la revelación a que solo el supervisor la vea de inmediato — sigue diferido.
-  ✅ **Decidido por el owner (2026-08-11): la diferencia la ve solo el supervisor.**
-  ⚠️ **No alcanza con tocar el detalle del arqueo.** El ocultamiento de hoy es **parcial**:
-  el **panel de resumen del turno sigue mostrando lo esperado**, así que un cajero que abra
-  esa pantalla deshace la decisión por otra puerta. Las dos superficies se cierran juntas o
-  la decisión no existe.
-  ⚠️ Costo aceptado explícitamente: un error de conteo de buena fe ya no se corrige en el
-  momento — hay que volver a llamar a la persona.
-  ⛔ **INTENTADA Y REVERTIDA el 2026-08-16. Son CINCO superficies, no dos, y cerrarlas deja
-  al cajero sin poder cerrar su propia caja.** Se implementó, se corrió el gate en verde y la
-  revisión independiente encontró que faltaba justo la superficie principal. Lo medido:
-
-  | Superficie | Qué revela | ¿La entrada la nombraba? |
-  |---|---|---|
-  | `obtenerArqueo` | `esperado` y `diferencia` por línea | sí |
-  | `resumenMovimientos` | `saldoEsperado` del turno | sí |
-  | `listarMovimientos` | las filas con las que se **reconstruye** el esperado sumando | no |
-  | `enviarConteo` (`POST /:id/conteo`) | devuelve `arqueo` con `esperado`/`diferencia` reales | no |
-  | `cerrar` (`POST /:id/cerrar`) | llama a `obtenerArqueo` **hardcodeando `tieneVerTodas: true`** | no |
-
-  Y una sexta a mirar: `cajonesEstado` revela `saldoEsperado` en cuanto el estado deja de ser
-  `abierta`. Hoy es inalcanzable para un cajero puro porque `MiCaja` y `Cajas` son
-  mutuamente excluyentes por convención del seed, pero nada impide un rol que combine los dos.
-  🔴 **El bloqueo real, que es una decisión de producto y no un detalle de implementación:**
-  la **fase 2 del cierre** exige un motivo por cada línea descuadrada, y el selector de motivo
-  de la pantalla se renderiza solo `if (l.diferencia != null && !isZero())`. Si al cajero se
-  le oculta la diferencia, **no puede completar el cierre de su propia caja** — y hoy sí
-  puede: `cerrar` exime del chequeo de `puedeForzar` cuando `caja.usuarioId === usuarioId`.
-  **La pregunta para el owner:** ¿la fase 2 pasa a ser trabajo del supervisor (y el cajero
-  termina al enviar el conteo), o el cajero sigue justificando pero **a ciegas** —viendo qué
-  línea necesita motivo, sin el monto—? Las dos son defendibles y cambian quién opera el
-  cierre, no solo qué se muestra.
-  ℹ️ Paradoja que conviene no perder: hoy el cajero **no queda atrapado precisamente porque la
-  fuga sigue abierta**. Cerrarla sin contestar esto lo deja sin salida.
 
 - [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
   de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
