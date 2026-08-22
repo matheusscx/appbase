@@ -972,7 +972,7 @@ que el que la tome se va a encontrar**:
 | El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Sección 3** |
 | El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
 | El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Sección 3** |
-| La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Sección 7** (falta el momento) |
+| La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Corrida el 2026-08-22** → 0 hallazgos ([`resueltos.md`](resueltos.md)) |
 | Los roles de un alta pendiente | Siguen sin ser editables, y eso pasa a ser regla escrita | **Cerrada** → [`resueltos.md`](resueltos.md) |
 
 ℹ️ **Dos entradas cambiaron de premisa al contestarlas, y la corrección viaja con ellas:** la
@@ -1452,31 +1452,6 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 ## 7. Acción del owner fuera del código
 
 No se resuelve programando. Está acá para que tenga quién la reclame.
-
-- [ ] **Disparar la pasada de auditoría de las dos lentes — el presupuesto ya está fijado,
-  falta el momento** (owner, **decidido el 2026-08-22**) — el brief completo vive en
-  [`2026-08-15-auditoria-cross-tenant-y-pool.md`](../superpowers/plans/2026-08-15-auditoria-cross-tenant-y-pool.md);
-  pasarle esa ruta al agente.
-  ✅ **Decisión del owner (2026-08-22): las dos lentes, tope 500k tokens.** Cross-tenant
-  completa —es descubrimiento genuino, ~23 candidatos en 8 archivos, y separar el caso
-  legítimo del bug es juicio por sitio, no grep— y la del pool **en modo delta**, con la tabla
-  del 2026-08-11 pasada como contexto conocido. **No se arregla nada:** todo va al backlog.
-  ℹ️ **Al dejar la pasada lista se corrigieron dos cosas del plan, y las dos estaban
-  vencidas** (2026-08-22): (a) mandaba a buscar la tabla de sitios del pool en la entrada 🔴 de
-  este archivo, **que ya no está acá** —vive en [`resueltos.md`](resueltos.md) § *"Diez ventas
-  simultáneas cuelgan la API para siempre"*—, y un buscador que no la encuentra redescubre los
-  siete módulos, que es justo lo que la lente B existe para no pagar; (b) daba esos ~20 sitios
-  por **vivos**, y se arreglaron **por construcción** el 2026-08-18 con
-  [ADR-020](../adr/020-contexto-transaccional-als.md) —verificado: queda **un solo**
-  `dataSource.transaction` en `backend/src`, el chokepoint de `db.service.ts:28`—.
-  **La lente B pasó de "revalidar pendientes" a "buscar residuo y delta"**, y su pajar se
-  achicó: si la pasada se acerca al tope, lo que se recorta es la B, no la A.
-  ⚠️ **Por qué esto es elegir el momento y no volver a decidir:** la lente B se confirma
-  **midiendo contra Postgres** —ráfagas de ~15 requests independientes— y **cada cuelgue deja
-  el backend envenenado hasta un `docker restart`**, así que necesita el stack levantado y la
-  máquina quieta. Un segundo experimento sobre un proceso ya trabado da un falso positivo.
-  ⚠️ Y lo que el propio plan advierte: se decidió reportar sin arreglar, así que **el backlog
-  va a subir, no bajar**.
 
 - [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
   cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída

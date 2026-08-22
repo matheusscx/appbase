@@ -17,6 +17,61 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La pasada de auditoría de las dos lentes: 3 lentes, 0 hallazgos (2026-08-22)
+
+Cierra la entrada *"Disparar la pasada de auditoría de las dos lentes"* de la sección 7.
+Corrida el mismo día en que el owner fijó el presupuesto. **~437k tokens de buscadores**,
+bajo el tope de 500k. El plan queda como registro en
+[`2026-08-15-auditoria-cross-tenant-y-pool.md`](../superpowers/plans/2026-08-15-auditoria-cross-tenant-y-pool.md);
+el resultado, con qué se verificó limpio, en la fila del 2026-08-22 del mapa de cobertura de
+[`auditoria-codigo.md`](auditoria-codigo.md).
+
+**Tres buscadores Sonnet ciegos entre sí, refutación por el principal**, como manda el
+método: (A1) recursos indexados por `usuario_id` sin `tenant_id`, en las tres formas de
+acceso; (A2) los barridos totales por usuario, buscados por verbo y no por tabla; (B) la
+**sucesora** de la lente del pool —referencia a método de repo guardada y llamada fuera del
+contexto donde se resolvió—, en modo delta.
+
+### El resultado es cero, y no por no haber buscado
+
+- **Lente A:** pisa la superficie que el barrido de identidad del 2026-08-15 ya recorrió con
+  22 hallazgos y revisión independiente encima. Lo que quedaba era residuo.
+- **Lente B:** ADR-020 la cerró **por construcción** el 2026-08-18. Revalidado con dos
+  búsquedas independientes (una del buscador, otra del refutador con otra formulación) y con
+  **93 commits** posteriores al cierre revisados en busca del vector de la reincidencia.
+- **Las dos lentes A convergieron en el mismo candidato y las dos lo refutaron solas**:
+  `invalidarTodos` sin `tenantId`. Al abrirlo, el código ya tenía la respuesta escrita —
+  `tokens-acceso.service.ts:159` **excluye `CONFIRMACION`** con el comentario que dice que
+  incluirlo *"mataba en silencio un alta pendiente: la persona quedaba fuera del tenant y el
+  admin la veía desaparecer del roster sin ninguna señal"*, que es exactamente el bug de
+  agosto.
+
+### Lo que la pasada dejó, además del cero
+
+- **Dos datos falsos del plan, corregidos en el propio plan:** la "tabla de sitios" que
+  mandaba pasarle al buscador **no existe** en ningún doc vivo, y `garzon_pin_evento` no es
+  candidato de la lente A porque ya tiene `tenant_id` propio.
+- **Una corrección de dato de un buscador:** `refresh_tokens` **sí** tiene columna de tenant
+  (`active_tenant_id`), contra lo que afirmó su reporte.
+- **Una pregunta de producto para el owner**, que ninguna lente reportó porque con su lente
+  puesta no era un bug: **una persona en dos tenants tiene una sola vida de sesión** —cambiar
+  de tenant o la contraseña revoca los refresh de todos los tenants—. Nadie ajeno puede
+  provocarlo, y la tabla sabe de qué tenant era cada sesión. Si el owner la quiere, es entrada
+  nueva; si no, se documenta y se cierra.
+- **Una regla de método nueva**, escrita en `auditoria-codigo.md`: *una pasada en cero se
+  audita a sí misma preguntando de qué afirmación depende ese cero*. Si esa afirmación no se
+  abrió y se leyó, el cero está aceptado, no verificado.
+
+### La predicción del plan no se cumplió, y conviene decirlo
+
+El plan avisaba —dos veces— que *"el backlog va a subir, no bajar"*, porque se decidió
+reportar sin arreglar. **No subió: quedó igual.** No invalida el aviso (era el resultado
+esperado dado el método), pero sí muestra que el valor de esta pasada fue **confirmar
+confianza** en dos superficies, que es literalmente para lo que el método dice que existe el
+mapa de cobertura.
+
+---
+
 ## Un alta pendiente no es editable, y eso dejó de ser efecto lateral (2026-08-22)
 
 Cierra la entrada *"¿El admin puede editar los roles de un alta pendiente antes de que la

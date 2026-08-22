@@ -4,8 +4,23 @@
 > rige por [`docs/agent/auditoria-codigo.md`](../../agent/auditoria-codigo.md): buscadores
 > baratos y ciegos entre sí, un refutador independiente por hallazgo, y triaje al final.
 
-**Estado:** ✅ **lista para lanzar** — presupuesto acordado el 2026-08-22. No lanzada
-todavía: falta elegir el momento, por lo que pide la lente B (ver §Cómo se dispara).
+**Estado:** ✅ **EJECUTADA el 2026-08-22 — 3 lentes, 0 hallazgos, ~437k tokens** (tope
+acordado: 500k). Resultado y qué se verificó limpio: fila del 2026-08-22 en el mapa de
+cobertura de [`auditoria-codigo.md`](../../agent/auditoria-codigo.md). **Este archivo queda
+como registro de la pasada**, no como trabajo pendiente.
+
+⚠️ **Dos datos de este plan resultaron falsos al correrlo, y quedan corregidos acá para que
+nadie los reuse:**
+1. **La "tabla de sitios" del barrido del 2026-08-11 no existe en ningún doc vivo.** El plan
+   mandaba pasársela al buscador de la lente B como contexto obligatorio; la sección de
+   [`resueltos.md`](../../agent/resueltos.md) § *"Diez ventas simultáneas cuelgan la API para
+   siempre"* es **narrativa**, no una lista enumerada por `archivo:línea`, y la tabla original
+   no sobrevivió al cierre. No bloqueó la pasada porque el buscador cambió de estrategia solo
+   —verificar la invariante general sobre todo `backend/src` en vez de sitio por sitio— y lo
+   reportó. **El contexto que sí hay que pasar es ADR-020 más esa narrativa.**
+2. **`garzon_pin_evento` no es candidato de la lente A.** El plan lo listaba junto a
+   `tokens_acceso`/`refresh_tokens`/`preferencias`; la entidad **ya tiene `tenant_id` propio**
+   con índice compuesto `(tenantId, garzonId, creadoEl)`.
 
 **Origen:** las dos lentes salieron de la tanda del 2026-08-15 (`resueltos.md`, *"El correo
 coincide deja de ser prueba de identidad"*), donde las dos aparecieron como bugs reales y

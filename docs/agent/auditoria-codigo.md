@@ -179,6 +179,8 @@ cazó fue un test de ráfaga en la suite (`test/concurrencia-pool.e2e-spec.ts`) 
 mecanismo por construcción de ADR-020 — ✅ hecho el 2026-08-18: la entrada de
 `anti-patterns.md` que describía este bug pasó a `### ✅ AUTOMATIZADO`.
 
+✅ **Revalidado el 2026-08-22** por la pasada delta, con dos búsquedas independientes: un solo `dataSource.transaction` de producción en todo `backend/src` (el chokepoint de `common/db/db.service.ts:28`), **cero** ocurrencias de la lente sucesora —referencia a método de repo guardada y llamada fuera de contexto—, y **93 commits** posteriores al cierre revisados buscando el vector de la reincidencia (una transacción **nueva** envolviendo código viejo): ninguna. Los límites de enforcement que el ADR declara siguen siendo los mismos dos sitios, y sus 7 llamadores pasan la fachada, no un `DataSource` crudo.
+
 ---
 
 ## Paso a paso
@@ -233,6 +235,36 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 | `turnos` + `salones` + `garzones` (backend completo + las 6 pantallas) | 2026-08-06 | 8 | 24 | 22 | Dos lentes independientes cayeron sobre el mismo bug de la línea que se cuela → se contó una vez. **Multi-tenant limpio ruta por ruta** en los 4 controllers, y **soft delete limpio: 0 sobre ~65 queries**. Solo 1 se cayó entero (un deadlock refutado por cómo lockea un `SELECT … IN (…) FOR UPDATE`), y **una fuerza bruta se refutó midiendo, no argumentando**: 14 días de CPU saturada. El refutador sumó el hallazgo más caro de la pasada — el fix de las dos altas **estaba a medias** y movía el bug al ticket de cocina. El hilo de `tipo_garzon` cerró con matiz: propinas ya bloquea el reparto corrupto, falta el aviso al editar |
 | `inventario` + `recuentos` + `mermas` + conversión de unidades (backend + 5 pantallas + 3 composables) | 2026-08-15 | **12** | 20 | 16 | Primera pasada con 12 lentes. **Tres salieron limpias** —multi-tenant (21 rutas verbo por verbo, 17 DTOs), soft delete (~48 queries) y dinero/Decimal— y el chokepoint del kardex se verificó sólido por dos lentes independientes. **Dos lentes ciegas entre sí cayeron sobre el mismo bug** (reingresar al CPP de hoy y no al costo de salida): se contó una vez. El refutador **bajó 2 severidades** —el deadlock de los caminos inversos, porque su consecuencia peor ya estaba asumida por diseño en el docblock del registry de reembolsos; y la falta de reconciliación saldo↔kardex, que no tenía escenario reproducible— y **fusionó 3 hallazgos en 1** (serie/lote a medias). El hallazgo más caro: **la doc del recuento anticipó el doble conteo y lo dio por mitigado con un razonamiento que no cierra** |
 | RBAC + `auth` + `tenants` (backend + middlewares y pantallas del frontend) | 2026-08-15 | 12 | 25 | 22 | **El eje más sensible y el único que ninguna pasada había tocado.** Se corrió en dos tandas de 6 tras morir entera la primera vez por límite de sesión. **Convergencias fuertes:** *tres* lentes ciegas cayeron sobre el mismo borde (módulos contratados sin enforcement consistente) y *dos* sobre el token de Google en la query string — una con la mitad que la otra no tenía. **El refutador bajó 4 severidades** (el `assignUser` de alta a media al ver que exige `TenantAdminGuard` y no cruza datos; los dos huecos de test de alta a media porque el código está bien y lo que falta es la red) y **reencuadró 1** (en `setPermissions` el titular no es la carrera sino que no es atómico: un solo request que falle deja el rol sin permisos). **Dos refutaciones fueron contra el brief, no contra el código** — ver abajo |
+| Lente cross-tenant (recursos por `usuario_id`) + barridos totales por usuario + sucesora del pool (delta) | 2026-08-22 | 3 | **0** | 0 | **La primera pasada que cierra en cero, y el cero ES el resultado.** ~437k tokens de buscadores, bajo el tope de 500k que fijó el owner. **Las dos lentes A, ciegas entre sí, convergieron en el mismo candidato** —`invalidarTodos` sin `tenantId`— y **las dos lo refutaron solas** al construir el escenario: la membresía ya está escrita cuando se emite la invitación, así que matar el token no saca a nadie de ningún roster. El refutador verificó ese descarte por su cuenta y encontró que el código lo dice mejor que los dos reportes: `invalidarTodos` **ya excluye `CONFIRMACION`** —`tokens-acceso.service.ts:159`— con el comentario que explica que incluirlo *"mataba en silencio un alta pendiente"*, que es exactamente el bug de agosto. **Por qué el cero no es "no buscamos bien":** la lente A pisa la superficie que el barrido de identidad del 2026-08-15 ya recorrió con 22 hallazgos y revisión encima, y la lente B la cerró ADR-020 **por construcción** el 2026-08-18. **El refutador aportó dos correcciones de dato** (ver abajo) y **una pregunta de producto que ninguna lente reportó**: una persona en dos tenants tiene una sola vida de sesión |
+
+### Qué aporta el refutador cuando la pasada da cero (2026-08-22)
+
+La pasada del 2026-08-22 cerró con 0 hallazgos en las 3 lentes, y aun así el paso de
+refutación cambió el resultado. Vale registrarlo porque el método hasta ahora solo tenía
+evidencia de refutación **sobre** hallazgos:
+
+1. **Verificar el argumento que sostiene un cero, no solo el que sostiene un hallazgo.** Los
+   dos reportes de la lente A cerraban sobre la misma afirmación de construcción —*"no puede
+   haber dos `INVITACION` vivos de tenants distintos"*—. Se abrió `tenants.service.ts` y es
+   cierta: el `INVITACION` se emite **solo** en la rama de correo nuevo (`:846`); si la
+   persona ya existe sin contraseña, el alta escribe la membresía directo y no emite token.
+   Un cero apoyado en una construcción falsa habría sido peor que un falso positivo.
+2. **Dos correcciones de dato que los buscadores no vieron o afirmaron mal.**
+   (a) Un reporte dijo que `refresh_tokens` **no tiene** columna de tenant: la tiene —
+   `active_tenant_id` (`refresh-token.entity.ts:26`)—, y es justo la que permitiría acotar
+   la revocación si algún día se quiere sesión por tenant. (b) El brief listaba
+   `garzon_pin_evento` como candidato y **no lo es**: la entidad ya tiene `tenant_id` propio
+   con índice compuesto. La segunda la cazó el buscador, no el refutador — que es para lo
+   que existe la regla de reportar `BLOCKED`.
+3. **Una pregunta de producto que ninguna lente reportó porque, con su lente puesta, no era
+   un bug:** cambiar de tenant o cambiar la contraseña revoca los refresh de **todos** los
+   tenants de esa persona. No lo puede provocar un tercero, así que no cruza la barra de la
+   lente — pero la tabla sabe de qué tenant era cada sesión, y el docblock dice *"no se toca
+   **acá**"*, o sea diferido, no defendido. Es decisión del owner, no hallazgo.
+
+**La regla que deja:** una pasada en cero se audita a sí misma preguntando *"¿de qué
+afirmación depende este cero?"*. Si esa afirmación no se abrió y se leyó, el cero no está
+verificado — está aceptado.
 
 ### Orden propuesto para lo que falta
 
