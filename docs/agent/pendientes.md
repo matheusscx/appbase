@@ -794,6 +794,14 @@ empezarlas.
      dos. Una carrera por `nombre_usuario` **sigue dando 500**: es el statu quo, no una
      regresión, y el arreglo del 2026-08-22 la deja pasar a propósito en vez de tragársela
      (tragarla le diría "revisá tu correo" a alguien que no quedó registrado).
+  3. **La rama perdedora de la carrera responde más rápido que las otras tres**, porque se
+     saltea `invalidarAnteriores` + `emitir` + `mail.enviar` (lo levantó la revisión
+     independiente del 2026-08-22, sin bloquear). Es un canal de **tiempo** en un endpoint
+     cuyo sentido es responder siempre lo mismo. ⚠️ Antes de tomarlo, tener presente el
+     alcance real: **solo lo puede observar quien induce la carrera él mismo**, con dos
+     requests concurrentes al mismo correo — no es un oráculo de una consulta suelta, que es
+     la amenaza que el endpoint dice cerrar. Cerrarlo sería igualar el trabajo de las cuatro
+     ramas, y eso cuesta más de lo que parece: implica hacer trabajo inútil a propósito.
 
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
