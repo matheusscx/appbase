@@ -59,28 +59,6 @@ detalle de las dos tandas, con los errores que se cometieron en el camino, está
 [`resueltos.md`](resueltos.md). Volvió a poblarse con los minors del frente de redondeo, que
 son de una sola pasada y están agrupados abajo.
 
-### El `Promise.all` de personalización, sobre el mismo cliente transaccional (2026-08-21)
-
-- [ ] **`ventas.service.ts:296` dispara consultas concurrentes sobre el cliente de la
-  transacción** (backend, **medido 2026-08-21** por la revisión del arreglo gemelo) — es la
-  **misma clase de defecto** que se cerró ese día en `calculo-precios.service.ts`
-  (ver [`resueltos.md`](resueltos.md)), un frame más arriba en el mismo `POST /ventas`.
-  `crearEnTransaccion` corre dentro de `db.transaccion` y ese `Promise.all` recorre
-  `dto.lineas` llamando a `resolverPersonalizacionReceta` / `resolverPersonalizacionCombo`
-  con el `manager` explícito. Con **dos o más líneas de tipo receta o combo** en la misma
-  venta, son consultas concurrentes sobre un único `pg.Client`.
-  **No es una sospecha: el propio proyecto ya lo midió** al cerrar el N+1 de la
-  personalización el 2026-08-20 —*"el `Promise.all` corre sobre el manager de la transacción,
-  o sea una sola conexión, y `pg` las encola. Son viajes en serie"*— y **dejó el `Promise.all`
-  tal cual**, porque esa tanda perseguía el conteo de consultas, no la vía.
-  **El arreglo es el mismo:** `await` secuenciales. **Costo cero**, y por la misma medición:
-  ya corren en serie, encolados por el driver. Lo único que cambia es la vía, de una que `pg`
-  anunció que va a eliminar —en `pg@9` la segunda tira en vez de esperar— a una soportada.
-  ⚠️ Al tomarlo, buscar **por conducta y no por mecanismo**: en este proyecto
-  `@InjectRepository` NO es el repo del pool (`RepositoriosModule` inyecta un Proxy que
-  resuelve el manager activo, ADR-020), así que grepear `this.db.query` deja afuera la mitad
-  de los sitios. Ese error ya se cometió una vez, el 2026-08-21, y lo cazó la revisión.
-
 ### Los minors que dejó el frente de redondeo de plata (2026-08-21)
 
 Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tests que no

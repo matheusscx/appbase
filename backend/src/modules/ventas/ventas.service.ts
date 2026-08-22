@@ -293,28 +293,52 @@ export class VentasService {
       monedaRows.map((r) => [r.moneda_id, r.valor_del_dia ?? '1']),
     );
 
-    const personalizaciones = await Promise.all(
-      dto.lineas.map(async (linea, i) => {
-        const item = items[i];
-        if (item.tipo === 'receta') {
-          return this.itemsService.resolverPersonalizacionReceta(
+    /**
+     * **Secuencial a propósito.** Los dos `resolver…` consultan con el `manager`
+     * de la transacción, o sea un único `pg.Client`: con dos o más líneas de
+     * receta o combo, un `Promise.all` dispara consultas concurrentes sobre ese
+     * cliente y node-postgres las encola igual. En `pg@9` la segunda **tira** en
+     * vez de esperar.
+     *
+     * **Costo cero, y está medido por este mismo proyecto** al cerrar el N+1 de
+     * la personalización el 2026-08-20: *"el `Promise.all` corre sobre el manager
+     * de la transacción, o sea una sola conexión, y `pg` las encola. Son viajes
+     * en serie."* Ya corrían en serie; lo único que cambia es la vía, de una
+     * anunciada como removida a una soportada. Ninguna consulta se agrega: el
+     * conteo por venta es el mismo que dejó aquella tanda.
+     *
+     * Gemelo del arreglo de `calculo-precios.service.ts` del 2026-08-21, en el
+     * mismo `POST /ventas` — ver `docs/agent/resueltos.md`.
+     */
+    const personalizaciones: (
+      | Awaited<ReturnType<ItemsService['resolverPersonalizacionReceta']>>
+      | Awaited<ReturnType<ItemsService['resolverPersonalizacionCombo']>>
+      | null
+    )[] = [];
+    for (const [i, linea] of dto.lineas.entries()) {
+      const item = items[i];
+      if (item.tipo === 'receta') {
+        personalizaciones.push(
+          await this.itemsService.resolverPersonalizacionReceta(
             manager,
             tenantId,
             item.id,
             linea.personalizacion,
-          );
-        }
-        if (item.tipo === 'combo') {
-          return this.itemsService.resolverPersonalizacionCombo(
+          ),
+        );
+      } else if (item.tipo === 'combo') {
+        personalizaciones.push(
+          await this.itemsService.resolverPersonalizacionCombo(
             manager,
             tenantId,
             item.id,
             linea.personalizacion,
-          );
-        }
-        return null;
-      }),
-    );
+          ),
+        );
+      } else {
+        personalizaciones.push(null);
+      }
+    }
 
     // 4. Construir DTO para el motor de precios con precios ya convertidos a moneda oficial
     //

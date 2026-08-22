@@ -29,6 +29,17 @@ la segunda tira en vez de esperar. Secuencial no cambia el orden real de ejecuci
 camino —ya era serie— ni ningún resultado: cambia la vía, de una anunciada como removida a una
 soportada.
 
+**El gemelo se cerró el mismo día.** `ventas.service.ts:296` tenía el mismo defecto un frame
+más arriba del mismo `POST /ventas`: un `Promise.all` sobre `dto.lineas` que resuelve la
+personalización de recetas y combos con el `manager` de la transacción. Con dos o más líneas de
+receta o combo, consultas concurrentes sobre el mismo cliente. Lo encontró la revisión al
+pedirle que buscara **por conducta y no por mecanismo**, y no era hallazgo nuevo: el propio
+proyecto ya lo había medido el 2026-08-20 al cerrar el N+1 de la personalización —*"el
+`Promise.all` corre sobre el manager de la transacción, o sea una sola conexión, y `pg` las
+encola. Son viajes en serie"*— y había dejado el `Promise.all` tal cual porque esa tanda
+perseguía el conteo de consultas, no la vía. Costo cero por esa misma medición, y el conteo por
+venta no se movió.
+
 **El costo, declarado:** hay un camino sin transacción —la previsualización de
 `POST /calculo-precios/calcular`— donde estas consultas sí corrían en paralelo real sobre
 conexiones distintas del pool. Ese camino lo pierde. Se acepta: son cinco consultas y no es el
