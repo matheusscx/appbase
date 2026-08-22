@@ -494,13 +494,27 @@ empezarlas.
   3. `GET /ventas` + `GET /ventas/:id` (`Ventas:Leer`, también del rol Vendedor): el detalle
      trae `caja_id`, `monto` y `vuelto` de cada pago. **Mismo número, más requests** — tapar
      `/pagos` sin esto no cierra nada.
-  4. `GET /pagos/resumen` devuelve `montoHoy` de todo el tenant **sin ningún parámetro**. Con un
-     cajón y un turno —el caso común— *es* el cobrado de esa caja.
-  5. Segundo oráculo en la NC con devolución en efectivo (`ventas.service.ts`). Más acotado: el
-     chequeo de `devolvibleEfectivo` corre antes y pone techo, y cada intento exitoso emite una
-     NC real.
+  4. `GET /pagos/resumen` devuelve `montoHoy` de todo el tenant **sin ningún parámetro**. Ojo con
+     qué es: `SUM(monto − vuelto)` **de todos los medios**, no solo efectivo. Con un cajón y un
+     turno —el caso común— es el **cobrado total** de esa caja; para llegar al efectivo hay que
+     restarle las líneas no-efectivo, que el punto 1 entrega.
+  5. **La NC en efectivo NO es un oráculo caro: imprime el número.** El 422 de
+     `ventas.service.ts` interpola el monto en el mensaje —*"(disponible: 1234.5600)"*—, así que
+     **un solo request rechazado** (monto = 1 sobre el techo) entrega el efectivo cobrado de esa
+     venta **sin emitir ninguna NC y sin dejar rastro**. No hace falta búsqueda binaria.
+     ⚠️ Lo que sí acota: es el efectivo de **esa venta**, no el esperado del turno — el chequeo
+     de `devolvibleEfectivo` corre **antes** del `Saldo insuficiente en caja`, así que este
+     camino no sirve para binarizar la caja entera. (Corregido el 2026-08-22 por la revisión
+     independiente: la primera redacción de esta entrada le atribuía un costo de explotación
+     mucho más alto del real, y eso la habría dejado abajo en la lista sin merecerlo.)
   6. Los `400` de `POST /caja/:id/conteo` enumeran **qué medios** participaron (no montos). Es
      la misma lista que el ciego filtra, saliendo por otra puerta. Menor.
+
+  ➕ **Anotado al pasar, para quien tome el frente** (no vale un frente propio): en
+  `caja.service.ts`, la fila cruda de la tendencia tipa `usuario_id: string` cuando
+  `Caja.usuarioId` es `nullable: true` y su vecino `historial` lo tipa `string | null`. Hoy es
+  inalcanzable porque el filtro `tipo = 'fisica'` lo impide, pero si entrara un NULL la fila
+  navegaría a `/cajas/historial?usuarioId=null` sin error visible. Una línea.
 
   🛑 **La pregunta para el owner, antes de tocar nada — y no es "arreglemos las seis":**
   el esperado **no es un secreto guardable**, es una cuenta que el sistema tiene que hacer para
