@@ -619,9 +619,18 @@ export class AuthService {
    * Lo que cierra es el camino de quien tiene **sólo** el access token.
    *
    * ℹ️ Sigue revocando **todos** los refresh del usuario, o sea que cambiar de
-   * tenant desloguea los otros dispositivos. Es la conducta que ya tenía y no
-   * se toca acá: lo que la hacía peligrosa era que un token filtrado pudiera
-   * dispararla, y eso es justamente lo que el párrafo de arriba cierra.
+   * tenant desloguea los otros dispositivos, incluidos los de otros tenants.
+   * Lo que la hacía peligrosa era que un token filtrado pudiera dispararla, y
+   * eso es justamente lo que el párrafo de arriba cierra.
+   *
+   * ✅ **Y eso ya no es "conducta heredada que no se toca acá"** (que es lo que
+   * decía este docblock hasta el 2026-08-22): el owner decidió que **la sesión
+   * es de la cuenta, no del tenant** y descartó las sesiones paralelas por
+   * tenant — regla escrita en `docs/PRODUCTO.md` §2. Acotar la revocación al
+   * tenant activo **sería posible** (`refresh_tokens.active_tenant_id` sabe de
+   * cuál era cada sesión); no se hace a propósito. Salió de la auditoría del
+   * 2026-08-22 como pregunta de producto, no como bug: nadie ajeno puede
+   * disparar esto, solo la propia persona sobre su cuenta.
    */
   async switchTenant(
     userId: string,
