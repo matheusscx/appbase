@@ -200,6 +200,39 @@ describe('RecargosService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('crea un recargo por monto de venta con tramos y sin valor único', async () => {
+      // El tipo nuevo (2026-08-22) expresa su magnitud con tramos, igual que
+      // `por_monto_venta` del lado de los descuentos: pedirle además un `valor`
+      // sería pedir dos veces lo mismo.
+      tipoReglaRepoMock.findOne.mockResolvedValue(
+        makeTipo('recargo_por_monto_venta'),
+      );
+      await service.create(TENANT, {
+        nombre: 'Recargo por pedido chico',
+        tipoReglaId: 'tipo-monto',
+        modo: 'monto_fijo',
+        tramos: [
+          { minimo: '0', valor: '2000' },
+          { minimo: '20000', valor: '500' },
+        ],
+      });
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+
+    it('rechaza un recargo por monto de venta sin tramos', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(
+        makeTipo('recargo_por_monto_venta'),
+      );
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Sin tramos',
+          tipoReglaId: 'tipo-monto',
+          modo: 'monto_fijo',
+          valor: '2000',
+        }),
+      ).rejects.toThrow(/al menos un tramo/);
+    });
+
     it('creates mora with diasVencimiento', async () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('mora'));
       await service.create(TENANT, {
@@ -366,6 +399,31 @@ describe('RecargosService', () => {
           tramos: [{ minimo: '10', valor: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
+    });
+
+    it('rechaza cambiar el tipo a por-monto-de-venta si la regla no tiene tramos', async () => {
+      // El PATCH no trae tramos: los que valen son los que la fila YA tiene.
+      // Sin esto, un cambio de `tipoReglaId` deja una regla del tipo que se
+      // expresa por tramos sin ningún tramo, y el motor no le cobra nada.
+      // (Un `tramos: []` explícito ya lo rechazaba la plomería vieja para
+      // cualquier tipo, así que ese caso NO discrimina esta regla.)
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r-general',
+        tenantId: TENANT,
+        nombre: 'Era general',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'monto_fijo',
+        valor: '3000',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(
+        makeTipo('recargo_por_monto_venta'),
+      );
+      tramoRepoMock.find.mockResolvedValue([]);
+
+      await expect(
+        service.update(TENANT, 'r-general', { tipoReglaId: 'tipo-monto' }),
+      ).rejects.toThrow(/al menos un tramo/);
     });
 
     it('replaces metodoPagoIds on update via soft-stamp', async () => {

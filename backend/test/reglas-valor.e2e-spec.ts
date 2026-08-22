@@ -35,6 +35,8 @@ const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 const TIPO_DESCUENTO_PROMOCIONAL = '550e8400-e29b-41d4-a716-446655440121';
 const TIPO_DESCUENTO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
 const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
+const TIPO_RECARGO_POR_MONTO = '550e8400-e29b-41d4-a716-446655440353';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 interface TokenResponse {
   access_token: string;
@@ -338,6 +340,86 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
 
     expect(res.status).toBe(200);
     expect((res.body as ReglaResponse).valor).toBe('5000');
+  });
+
+  // ─── Recargo por escalones de monto (tipo nuevo, 2026-08-22) ──────────────
+  // El owner decidió construir los tramos de recargo en vez de borrar la
+  // plomería muerta que los persistía sin que ningún tipo los pidiera.
+
+  it('crear un recargo por monto de venta SIN tramos es 400', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Rec por monto sin tramos E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_POR_MONTO,
+        modo: 'monto_fijo',
+        valor: '2000',
+      });
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /al menos un tramo/,
+    );
+  });
+
+  it('el motor cobra el tramo que corresponde al monto, sin haber tocado el motor', async () => {
+    // Es la prueba de que el tipo nuevo no necesitó cambios en
+    // `calculo-precios.engine.ts`: `evaluarRegla` ramifica por
+    // `tramos.length > 0` y el código nuevo no está ni en `DIFERIDAS` ni en
+    // `METODO_PAGO_CODIGOS`, así que llega a la rama de tramos con la magnitud
+    // del monto.
+    const creado = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Rec pedido chico E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_POR_MONTO,
+        modo: 'monto_fijo',
+        tramos: [
+          { minimo: '0', valor: '2000' },
+          { minimo: '20000', valor: '500' },
+        ],
+      });
+    expect(creado.status).toBe(201);
+    const recargoId = (creado.body as ReglaResponse).id;
+
+    const resItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Item con recargo por monto E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '100',
+        costo: '500',
+        recargosIds: [recargoId],
+      });
+    expect(resItem.status).toBe(201);
+    const itemId = (resItem.body as { id: string }).id;
+
+    const calcular = (cantidad: string) =>
+      request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId, cantidad }] });
+
+    // 1 × 1000 = 1000 → cae en el tramo de $0: recarga 2000.
+    const chico = await calcular('1');
+    expect(chico.status).toBe(201);
+    expect(
+      (chico.body as { totales: { totalRecargos: string } }).totales
+        .totalRecargos,
+    ).toBe('2000.000000');
+
+    // 30 × 1000 = 30.000 → cae en el tramo de $20.000: recarga 500.
+    const grande = await calcular('30');
+    expect(grande.status).toBe(201);
+    expect(
+      (grande.body as { totales: { totalRecargos: string } }).totales
+        .totalRecargos,
+    ).toBe('500.000000');
   });
 
   it('un recargo con un tramo `50` en porcentaje también es 400', async () => {

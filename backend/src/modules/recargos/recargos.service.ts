@@ -38,13 +38,22 @@ const TIPOS_CON_VALOR_UNICO = [
 /** Tipos que además exigen al menos un método de pago asociado. */
 const TIPOS_CON_METODOS = ['recargo_metodo_pago'];
 
-// ⚠️ No hay `TIPOS_CON_TRAMOS` acá a propósito: **ningún código de recargo usa
-// tramos**. `validarSegunTipoCreate` tenía una lista local con `por_mayor` y
-// `por_monto_venta` —códigos de DESCUENTO, copy-paste del módulo gemelo, que no
-// podían matchear nunca—; ya no está. Lo que sigue en pie es la plomería de
-// tramos en `create()`/`update()` y el chequeo de `validarSegunTipoUpdate`:
-// alcanzables por API pero sin sentido de negocio, porque ningún tipo de
-// recargo los pide. Sacarla es tema propio, anotado en docs/agent/pendientes.md.
+/**
+ * Tipos que expresan su monto con `tramos` en vez de con un `valor` único —
+ * espejo de `TIPOS_CON_TRAMOS` en `descuentos.service.ts`.
+ *
+ * Hasta el 2026-08-22 esta lista no existía y el comentario que ocupaba su
+ * lugar decía que ningún recargo usaba tramos: la plomería estaba
+ * (`create()`/`update()` los persisten) pero ningún tipo los pedía, así que era
+ * alcanzable por API y sin sentido de negocio. El owner decidió **construirlo
+ * en vez de borrarlo** (2026-08-11): recargos por escalones, igual que los
+ * descuentos.
+ *
+ * El motor no necesitó cambios: `evaluarRegla` ramifica por `tramos.length > 0`
+ * sin mirar la clase, y un código que no está en `DIFERIDAS` ni en
+ * `METODO_PAGO_CODIGOS` llega a esa rama con la magnitud del monto.
+ */
+const TIPOS_CON_TRAMOS = ['recargo_por_monto_venta'];
 
 // `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
 // devolviendo `Recargo[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
@@ -473,6 +482,8 @@ export class RecargosService {
     const tiposConMetodos = ['recargo_metodo_pago'];
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
 
+    if (TIPOS_CON_TRAMOS.includes(codigo) && !dto.tramos?.length)
+      throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (tiposConMetodos.includes(codigo) && !dto.metodoPagoIds?.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
     if (
@@ -511,10 +522,12 @@ export class RecargosService {
    * docblock de allá): mirar solo lo que llega deja pasar un cambio de
    * `tipoReglaId` que vuelve obligatorio un campo que la fila no tiene.
    *
-   * No hay chequeo de que EXISTAN tramos porque ningún tipo de recargo los
-   * pide. Los que haya sí se validan: la plomería de tramos es alcanzable por
-   * API y el motor los evalúa mirando `tramos.length` antes que el código del
-   * tipo, así que un recargo con tramos cargados por API se aplica por tramos.
+   * Desde el 2026-08-22 sí hay chequeo de que EXISTAN tramos, para los tipos de
+   * `TIPOS_CON_TRAMOS`: un `PATCH` que solo cambia el `tipoReglaId` puede dejar
+   * una regla que se expresa por escalones sin ningún escalón, y el motor no le
+   * cobraría nada. Los tramos que haya se siguen validando aunque el tipo no los
+   * pida: la plomería es alcanzable por API y el motor los evalúa mirando
+   * `tramos.length` antes que el código del tipo.
    */
   private async validarEstadoResultante(
     codigo: string,
@@ -531,6 +544,9 @@ export class RecargosService {
       dto.tramos !== undefined
         ? dto.tramos
         : await this.tramoRepo.find({ where: { recargoId: actual.id } });
+
+    if (TIPOS_CON_TRAMOS.includes(codigo) && !tramosFinales.length)
+      throw new BadRequestException('Este tipo requiere al menos un tramo');
 
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
     validarMontosDeRegla(

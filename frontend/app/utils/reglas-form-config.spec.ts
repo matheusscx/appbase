@@ -34,6 +34,7 @@ const CODIGOS_RECARGO_SEED = [
   'interes_simple',
   'mora',
   'recargo_metodo_pago',
+  'recargo_por_monto_venta',
 ]
 
 describe('reglas-form-config', () => {

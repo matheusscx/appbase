@@ -74,6 +74,45 @@ pausar, y se queda en su pantalla.
 **El IVA queda fuera de todo esto**: no se pausa, se es afecto o exento. Ver
 [impuestos.md](./impuestos.md).
 
+## Recargo por escalones de monto (2026-08-22)
+
+Hasta esta fecha **ningún tipo de recargo pedía tramos**, pero la plomería estaba: el
+service los persistía y el motor los evaluaba. O sea que un recargo por escalones era
+alcanzable por API y no existía en ninguna pantalla. El owner decidió **construirlo en vez
+de borrarlo**: `recargo_por_monto_venta`, espejo del `por_monto_venta` de descuentos.
+
+- **No lleva `valor` único**: el monto lo dicen los tramos, y pedir las dos cosas sería
+  pedir dos veces lo mismo. `TIPOS_CON_TRAMOS` en `recargos.service.ts` lo exige al crear y
+  también **al cambiar el tipo por `PATCH`** — sin eso, mover una regla a este tipo la
+  dejaba sin ningún escalón y el motor no le cobraba nada.
+- **El motor no necesitó cambios**, y eso se midió antes de escribir: `evaluarRegla`
+  ramifica por `tramos.length > 0` sin mirar la clase, y un código que no está en
+  `DIFERIDAS` ni en `METODO_PAGO_CODIGOS` llega a esa rama con la magnitud del monto.
+
+### Los dos límites de forma, medidos
+
+Los tramos son **abiertos hacia arriba** (solo `minimo`, sin `maximo`) y su `valor` tiene
+que ser **mayor a cero** (`validarMontosDeRegla`, compartido con descuentos). De las dos
+cosas juntas sale un límite concreto:
+
+> **"Envío gratis sobre $20.000" no se puede expresar.** Se puede hacer que el recargo
+> *baje* por escalones ($2.000 bajo $20.000 → $500 arriba), pero no que **llegue a cero**:
+> haría falta un tramo con valor 0, que la validación rechaza, o un `maximo` en el tramo,
+> que no existe en el modelo.
+
+No se tocó ninguna de las dos reglas porque las comparte el módulo de descuentos y cambiarlas
+es decisión de producto, no una corrección. Queda anotado acá para que se decida a la vista.
+
+### Lo que sigue sin salir
+
+`mora` y `recargo_metodo_pago` **no** son candidatos a tramos todavía, y no por falta de
+configuración: hoy con tramos **cobran cero en silencio** (el primero está diferido, el
+segundo retorna antes del `if` de tramos). Habilitarles el campo sin tocar el motor daría
+recargos que el admin configura, la UI muestra y la venta no cobra. Detalle y medición por
+tipo en `docs/agent/pendientes.md`.
+
+---
+
 ## API Endpoints
 
 ### Descuentos
@@ -129,7 +168,7 @@ Mismos endpoints bajo `/api/recargos`.
 
 | Tabla | Descripción |
 |-------|-------------|
-| `descuento_tramos` | Tramos de descuento (minimo, maximo nullable, valor). PK UUID, FK descuento_id |
+| `descuento_tramos` | Tramos de descuento (`minimo`, `valor`, `orden`). PK UUID, FK descuento_id |
 | `recargo_tramos` | Tramos de recargo. Misma estructura |
 | `descuento_metodo_pago` | Bridge descuento ↔ metodo_pago. PK compuesta |
 | `recargo_metodo_pago` | Bridge recargo ↔ metodo_pago. PK compuesta |
@@ -140,7 +179,10 @@ Todas con soft delete (`eliminado_el`) y timestamps.
 
 - `CreateDescuentoDto` / `UpdateDescuentoDto`: nuevos campos `metodoPagoIds?: string[]`,
   `tramos?: TramoDto[]`, `diasVencimiento?: number`, `fechaInicio?: string`, `fechaFin?: string`
-- `TramoDto`: `{ minimo: string, maximo?: string, valor: string }` (strings para `@IsNumberString`)
+- `TramoDto`: `{ minimo: string, valor: string }` (strings para `@IsNumberString`).
+  **No hay `maximo`** —este documento lo afirmaba y nunca existió, ni en las entidades ni en
+  el esquema (verificado 2026-08-22)—: los tramos son **abiertos hacia arriba** y gana el de
+  `minimo` más alto que la magnitud alcance.
 
 ### Key Methods
 

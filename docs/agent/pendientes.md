@@ -588,57 +588,40 @@ empezarlas.
   total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
   pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
 
-- [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
-  (backend) — `create()`/`update()` persisten `dto.tramos` y
-  `validarSegunTipoUpdate` valida que no venga vacío, pero **ningún código de
-  recargo usa tramos**: `RECARGO_CONFIG` (frontend) no declara `campoTramos: true`
-  en ninguno de los 5, así que la UI nunca los manda. La lista muerta de
-  `validarSegunTipoCreate` —que comparaba contra `por_mayor`/`por_monto_venta`,
-  códigos de DESCUENTO— ya se sacó (2026-08-01); esto es el resto. Sacarlo toca
-  persistencia, así que va aparte: hay que confirmar primero que no haya filas en
-  `recargo_tramos` y decidir si la tabla se va con él.
-  **Decisión del owner (2026-08-11): NO se borra — se construye.** Recargos por escalones
-  configurables, igual que los descuentos. Cambia el encuadre de la entrada: deja de ser
-  limpieza y pasa a ser feature a medias.
-  **Medido el 2026-08-11, y es menos de lo que decía la entrada:** el motor **ya los
-  aplica**. `evaluarRegla` (`calculo-precios.engine.ts:290`) ramifica por
-  `regla.tramos.length > 0` sin mirar si es descuento o recargo, y `procesarReglas` es
-  la misma función para ambos. Lo que falta es (a) un tipo de recargo con
-  `campoTramos: true` en `RECARGO_CONFIG` (`frontend/app/utils/reglas-form-config.ts`),
-  hoy ninguno de los 5 lo tiene; (b) el equivalente de `TIPOS_CON_TRAMOS` en
-  `recargos.service.ts`, que hoy no existe; (c) las filas del tipo nuevo en el seeder.
-  ✅ **Análisis por tipo, hecho el 2026-08-11 — medido contra el motor, tipo por tipo, no
-  deducido del `if`.** Se corrió el mismo recargo con tramos por monto (3% desde 0, 7%
-  desde 500) sobre un neto de 1000, cambiando solo el `codigo`:
+- [ ] **Los tramos de `mora` y `recargo_metodo_pago` cobran cero en silencio** (backend,
+  parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
+  [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
+  (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
+  queda son los dos tipos que el motor **no** lleva a la rama de tramos:
 
-  | Tipo | Resultado hoy | Por qué |
+  | Tipo | Con tramos hoy | Por qué |
   |---|---|---|
-  | `general` | ✅ **70** | cae al camino de tramos; magnitud = monto |
-  | `interes_simple` / `interes_compuesto` | ✅ **70** | mismo camino que `general` |
   | `recargo_metodo_pago` | ⚠️ **0** | la rama de `METODO_PAGO_CODIGOS` retorna **antes** del `if` de tramos, y `valor` es null |
   | `mora` | ⚠️ **0** | está en `DIFERIDAS`: el motor no la evalúa |
 
-  **Los dos ceros son trampas, no limitaciones:** no "ignoran" el tramo, **cobran cero en
-  silencio**. Habilitarles `campoTramos` sin tocar el motor produciría recargos que el
-  admin configura, la UI muestra y la venta no cobra.
-
-  **Conclusión — el trabajo se parte en dos, y la primera mitad es barata:**
-  1. **`general` (y los dos de interés) salen sin tocar el motor.** Solo falta
-     `campoTramos: true` en `RECARGO_CONFIG` (`frontend/app/utils/reglas-form-config.ts`),
-     el equivalente de `TIPOS_CON_TRAMOS` en `recargos.service.ts`, y las filas del seed.
-     Cubre el caso típico: **recargo por pedido chico o por envío que baja según el monto**.
-     A nivel venta la magnitud es el neto agregado (`subtotalNeto`, línea 616), que es
-     justo el que ese caso necesita.
-  2. **`mora` y `recargo_metodo_pago` NO salen sin motor**, y cada una por su razón
-     distinta: la primera hay que des-diferirla, la segunda necesita que la rama de método
-     de pago siga hasta los tramos en vez de retornar.
+  **No "ignoran" el tramo: cobran cero.** Habilitarles `campoTramos` sin tocar el motor
+  produciría recargos que el admin configura, la UI muestra y la venta no cobra.
+  Cada una necesita algo distinto: `mora` hay que des-diferirla; `recargo_metodo_pago`
+  necesita que su rama siga hasta los tramos en vez de retornar.
   ⚠️ **La magnitud "días de atraso" o "plazo" no existe en el motor** (`línea 291`: o
   cantidad si el código es `por_mayor`, o monto). Escalonar `mora` por días o los intereses
   por plazo es una magnitud nueva, no un tipo nuevo. Y los intereses tienen un tema previo:
   hoy el motor los aplica como **porcentaje plano de la base**, sin ninguna dimensión
   temporal, aunque la UI los etiquete "Tasa mensual".
-  ⛔ La parte 2 **toca el motor de precios**: se vuelve a confirmar con el owner antes de
-  escribir. La parte 1 no lo toca.
+  ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
+
+- [ ] **Un tramo no puede valer cero, y no hay `maximo`: "gratis sobre $X" no se expresa**
+  (backend + producto, medido el 2026-08-22 al construir el recargo por escalones) — los
+  tramos son **abiertos hacia arriba** (solo `minimo`) y `validarMontosDeRegla` exige
+  `valor > 0`. Con eso un recargo escalonado puede **bajar** ($2.000 bajo $20.000 → $500
+  arriba) pero no **llegar a cero**, que es justo la forma del caso más común —envío gratis
+  sobre cierto monto, recargo por pedido chico que desaparece—.
+  ℹ️ Este documento afirmaba que los tramos tenían `maximo` nullable: **nunca existió**, ni
+  en las entidades ni en `startup-pos.sql`. Ya se corrigió en
+  [`features/descuentos-recargos.md`](../features/descuentos-recargos.md).
+  **Las dos salidas son de producto, no correcciones:** (a) permitir `valor = 0` en un
+  tramo, o (b) agregarle `maximo` al tramo. Las dos afectan **también a descuentos**, que
+  comparten la validación y el modelo. **Pregunta para el owner antes de tocar nada.**
 
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`

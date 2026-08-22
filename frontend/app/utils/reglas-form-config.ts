@@ -46,4 +46,8 @@ export const RECARGO_CONFIG: Record<string, TipoConfig> = {
   recargo_metodo_pago: { modo: 'libre',      campoValor: true,  campoMetodos: true,  campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   interes_simple:      { modo: 'porcentaje', campoValor: true,  labelValor: 'Tasa mensual', campoMetodos: false, campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   interes_compuesto:   { modo: 'porcentaje', campoValor: true,  labelValor: 'Tasa mensual', campoMetodos: false, campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
+  // Espejo de `por_monto_venta` del lado de los descuentos: se expresa por
+  // escalones, así que no lleva `valor` único (pedirlo sería pedir dos veces lo
+  // mismo, y el backend lo rechaza).
+  recargo_por_monto_venta: { modo: 'libre', campoValor: false, campoMetodos: false, campoTramos: true, labelTramos: 'Monto mínimo', campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: true, campoFechaFin: true, fechasRequeridas: false },
 }

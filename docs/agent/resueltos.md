@@ -17,6 +17,57 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los recargos por escalones de monto existen (2026-08-22)
+
+Cierra la **parte 1** de la entrada *"La plomería de tramos en `recargos` es alcanzable y no
+significa nada"*. La parte 2 (`mora` y `recargo_metodo_pago`) sigue en
+[`pendientes.md`](pendientes.md), reescrita para ser solo eso.
+
+La entrada nació como limpieza —sacar plomería muerta— y el owner la dio vuelta el
+2026-08-11: **no se borra, se construye.** Recargos por escalones, igual que los descuentos.
+
+### Lo construido
+
+- **`recargo_por_monto_venta`**, tipo nuevo en `seedTiposRegla`
+  (`550e8400-e29b-41d4-a716-446655440353`), espejo del `por_monto_venta` de descuentos.
+- **`TIPOS_CON_TRAMOS` en `recargos.service.ts`**, donde antes había un comentario
+  explicando que a propósito no existía. Exige tramos al crear **y al cambiar el tipo por
+  `PATCH`**: sin lo segundo, mover una regla a este tipo la dejaba sin ningún escalón y el
+  motor no le cobraba nada. El tipo **no** entra en `TIPOS_CON_VALOR_UNICO` — el monto lo
+  dicen los tramos.
+- **`RECARGO_CONFIG`** en el frontend + la lista espejo de `reglas-form-config.spec.ts`, que
+  es lo único que caza que un código del seed se quede sin entrada en el mapa.
+- **Seed demo**: "Recargo por pedido chico" con dos tramos ($2.000 bajo $20.000, $500
+  arriba), sin asociar a ningún ítem para no mover ninguna venta del seed.
+
+### El motor no se tocó, y eso estaba medido antes de escribir
+
+`evaluarRegla` ramifica por `tramos.length > 0` sin mirar la clase, y un código que no está
+en `DIFERIDAS` ni en `METODO_PAGO_CODIGOS` llega a esa rama con la magnitud del monto. El
+e2e lo prueba por el camino de la app y no leyendo el `if`: el mismo ítem calcula **$2.000
+de recargo con cantidad 1** ($1.000 de monto) y **$500 con cantidad 30** ($30.000).
+
+### Lo que apareció al construirlo
+
+Dos límites de forma que la entrada no nombraba, y que juntos dejan afuera el caso más
+típico: los tramos son **abiertos hacia arriba** (solo `minimo`) y su `valor` tiene que ser
+**mayor a cero**. O sea que un recargo escalonado puede bajar pero **no llegar a cero**:
+*"envío gratis sobre $20.000"* no se puede expresar. No se tocó ninguna de las dos reglas
+—las comparte descuentos y son decisión de producto—; quedó como entrada propia.
+
+Además, `features/descuentos-recargos.md` afirmaba que los tramos tenían `maximo` nullable.
+**Nunca existió**, ni en las entidades ni en `startup-pos.sql`. Corregido.
+
+### Los tests
+
+Tres unit en `recargos.service.spec.ts` y dos e2e en `reglas-valor.e2e-spec.ts`.
+⚠️ Uno de los unit **pasaba antes de escribir el código**, y se reescribió por eso: probaba
+un `PATCH` con `tramos: []`, que la plomería vieja ya rechazaba **para cualquier tipo**. El
+que discrimina es el que cambia el `tipoReglaId` sin mandar tramos, con la fila sin tramos
+guardados.
+
+---
+
 ## El signo del abono en `POST /pagos`: el negativo estaba contenido, el cero no (2026-08-22)
 
 Cierra la entrada *"El signo del abono en `POST /pagos`"* (2026-08-21), que se declaraba a sí

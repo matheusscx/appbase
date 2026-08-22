@@ -174,6 +174,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedDescuentoTramos();
     await this.seedDescuentoMetodosPago();
     await this.seedRecargos();
+    await this.seedRecargoTramos();
     await this.seedRecargoMetodosPago();
     await this.seedItems();
     await this.seedTiposDocumentoTributario();
@@ -2528,6 +2529,15 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
       },
       {
+        id: '550e8400-e29b-41d4-a716-446655440353',
+        clase: 'recargo',
+        codigo: 'recargo_por_monto_venta',
+        nombre: 'Por monto de venta',
+        descripcion:
+          'Recargo por escalones de monto: se define por tramos de monto mínimo y se cobra el del tramo alcanzado. El caso típico es el recargo por pedido chico, que baja a medida que sube el total.',
+        activo: true,
+      },
+      {
         id: '550e8400-e29b-41d4-a716-446655440337',
         clase: 'descuento',
         codigo: 'directo',
@@ -2973,6 +2983,7 @@ export class SeederService implements OnApplicationBootstrap {
     const TIPO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
     const TIPO_MORA = '550e8400-e29b-41d4-a716-446655440123';
     const TIPO_RECARGO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440124';
+    const TIPO_POR_MONTO_VENTA = '550e8400-e29b-41d4-a716-446655440353';
     const recargos: Partial<Recargo>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440115',
@@ -3017,6 +3028,19 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
       },
       {
+        // El caso típico del tipo por escalones: recargo por pedido chico, que
+        // baja a medida que sube el total. `valor` en null a propósito — el
+        // monto lo dicen los tramos (`seedRecargoTramos`).
+        id: '550e8400-e29b-41d4-a716-446655440354',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_POR_MONTO_VENTA,
+        nombre: 'Recargo por pedido chico',
+        modo: ModoRegla.MONTO_FIJO,
+        valor: null,
+        condicionTipo: CondicionTipo.NINGUNA,
+        activo: true,
+      },
+      {
         id: '550e8400-e29b-41d4-a716-446655440132',
         tenantId: PARIS,
         tipoReglaId: TIPO_INTERES_COMPUESTO,
@@ -3034,6 +3058,43 @@ export class SeederService implements OnApplicationBootstrap {
       });
       if (!exists) {
         await this.recargoRepo.save(this.recargoRepo.create(data));
+      }
+    }
+  }
+
+  /**
+   * Tramos del recargo por escalones de monto. Espejo de
+   * `seedDescuentoTramos`: el recargo NO queda asociado a ningún ítem, así que
+   * no altera ninguna venta del seed — está para que el tipo se vea en la
+   * pantalla de recargos con datos reales.
+   */
+  private async seedRecargoTramos(): Promise<void> {
+    const POR_PEDIDO_CHICO = '550e8400-e29b-41d4-a716-446655440354';
+
+    const tramos: Partial<RecargoTramo>[] = [
+      // Bajo $20.000 recarga $2.000; de ahí en adelante, $500.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440355',
+        recargoId: POR_PEDIDO_CHICO,
+        minimo: '0',
+        valor: '2000',
+        orden: 1,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440356',
+        recargoId: POR_PEDIDO_CHICO,
+        minimo: '20000',
+        valor: '500',
+        orden: 2,
+      },
+    ];
+
+    for (const data of tramos) {
+      const exists = await this.recargoTramoRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.recargoTramoRepo.save(this.recargoTramoRepo.create(data));
       }
     }
   }
