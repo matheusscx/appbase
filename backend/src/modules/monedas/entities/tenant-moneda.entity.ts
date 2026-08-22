@@ -15,9 +15,6 @@ export class TenantMoneda {
   @PrimaryColumn({ name: 'moneda_id', type: 'uuid' })
   monedaId: string;
 
-  @Column({ name: 'es_default', default: false })
-  esDefault: boolean;
-
   @Column({ default: false })
   habilitada: boolean;
 

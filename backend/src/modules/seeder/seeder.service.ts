@@ -386,21 +386,18 @@ export class SeederService implements OnApplicationBootstrap {
         {
           tenantId,
           monedaId: CLP,
-          esDefault: true,
           habilitada: true,
           valorDelDia: '1',
         },
         {
           tenantId,
           monedaId: UF,
-          esDefault: false,
           habilitada: true,
           valorDelDia: '38000',
         },
         {
           tenantId,
           monedaId: USD,
-          esDefault: false,
           habilitada: true,
           valorDelDia: '950',
         },

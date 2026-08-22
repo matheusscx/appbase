@@ -242,7 +242,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 ### Flujo transaccional (`crear`)
 
 1. Verificar caja abierta (`cajaService.findActiva`)
-2. Cargar items + resolver moneda oficial (`tenant_moneda.es_default = true`)
+2. Cargar items + resolver moneda oficial (`pais.moneda_oficial_id` — ADR-005 y ADR-021)
 3. Convertir precios a moneda oficial (`precioOrigen × tasa_cambio`)
 4. Llamar `calculoPreciosService.calcular` → importes autoritativos
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado

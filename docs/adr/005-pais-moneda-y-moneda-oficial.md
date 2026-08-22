@@ -3,6 +3,12 @@
 **Status**: Accepted  
 **Date**: 2026-06-22
 
+> ➕ **Extendido por [ADR-021](./021-una-sola-moneda-oficial.md) (2026-08-21).** Este ADR decidió
+> que la moneda oficial se deriva del país y que el tenant no la elige, pero `tenant_moneda`
+> conservaba un flag `es_default` que en los hechos competía por el mismo nombre y terminó
+> decidiendo la escala de la plata en el camino de venta. ADR-021 elimina ese campo: hoy
+> "oficial" nombra **una sola cosa**.
+
 ## Context
 
 La funcionalidad "Configuración de monedas por tenant" (func. #6) requiere mostrar

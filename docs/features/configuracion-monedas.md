@@ -8,19 +8,34 @@
 
 Permite al administrador de un tenant gestionar las monedas que su empresa acepta:
 habilitar/deshabilitar las monedas disponibles para su país, marcar una como
-**predeterminada** (preseleccionada en el UI de ventas) y definir la **tasa de
+la **tasa de
 cambio del día** (`valor_del_dia`) usada para convertir a la moneda oficial.
 
 La **moneda oficial** se deriva de `pais.moneda_oficial_id` (no la elige el tenant):
 se muestra con un distintivo, está siempre habilitada y su tasa es fija en `1`.
 
+
+## ⚠️ "Oficial" nombra UNA sola cosa (2026-08-21)
+
+La moneda oficial es la de `pais.moneda_oficial_id` y **el tenant no la elige** (ADR-005). De
+ella salen la escala a la que se cuantiza toda la plata, la moneda a la que se convierten y
+persisten los totales, el rechazo con 400 del borde HTTP y los decimales con los que se reparte
+la propina.
+
+Hasta el 2026-08-21 existía además `tenant_moneda.es_default` con su endpoint y su estrella en
+la pantalla. **Se eliminó**: no ordenaba ningún selector —eso ya salía de `es_oficial`— y su
+única conducta real era decidir la escala y la moneda de la venta por un camino distinto al del
+resto del sistema. Un tenant que marcaba UF como predeterminada seguía cobrando en pesos pero
+cuantizados a 4 decimales. El porqué completo, con los números, en **ADR-021**.
+
+Si algún día hace falta que el tenant elija el orden de la lista, se construye como orden: un
+campo que gobierne el `ORDER BY` y no toque ninguna cuenta.
+
 ## Reglas de negocio
 
 - Solo se listan las monedas ligadas al país del tenant vía `pais_moneda`.
 - La moneda oficial no se puede deshabilitar (garantiza ≥1 habilitada) ni editar su tasa.
-- No se puede deshabilitar la moneda predeterminada (hay que cambiar el default primero).
-- Para marcar una moneda como predeterminada debe estar habilitada.
-- Al crear un tenant se habilita automáticamente su moneda oficial como predeterminada (tasa 1).
+- Al crear un tenant se habilita automáticamente su moneda oficial (tasa 1).
 
 ### 🔴 `moneda.decimales` es el **minor unit**, no un dato de formato (2026-08-21)
 
@@ -64,7 +79,6 @@ también quedó como entrada propia del backlog.
 |---|---|---|---|
 | GET | /api/monedas | JwtAuth + Tenant | Lista las monedas del país del tenant con su estado |
 | PATCH | /api/monedas/:monedaId | JwtAuth + Tenant + TenantAdmin | Habilita/deshabilita o actualiza la tasa (upsert) |
-| PATCH | /api/monedas/:monedaId/default | JwtAuth + Tenant + TenantAdmin | Marca la moneda como predeterminada |
 
 Respuesta de `GET /api/monedas` (por item):
 
@@ -79,7 +93,6 @@ Respuesta de `GET /api/monedas` (por item):
   "separadorMiles": ",",
   "locale": "en-US",
   "habilitada": true,
-  "esDefault": false,
   "esOficial": false,
   "valorDelDia": "950.000000"
 }
@@ -186,7 +199,7 @@ Patrones de implementación, archivos y tests: [frontend.md §8](../patterns/fro
 ## Páginas frontend
 
 - `/configuracion/monedas` — Lista con switch de habilitada, input de tasa,
-  estrella de predeterminada y badge "Oficial". Updates optimistas con revert.
+  badge "Oficial". Updates optimistas con revert.
   Visible solo para admins del tenant.
 
 ## Backend
@@ -201,7 +214,7 @@ Patrones de implementación, archivos y tests: [frontend.md §8](../patterns/fro
 ## Tablas DB
 
 - `pais_moneda` (nueva) — puente país ↔ monedas disponibles, soft delete.
-- `tenant_moneda` — flags `es_default`/`habilitada` + `valor_del_dia`, soft delete.
+- `tenant_moneda` — `habilitada` + `valor_del_dia`, soft delete.
 - `moneda`, `pais` — solo lectura (catálogos). En `moneda`: `locale`, `separador_decimal` y
   `separador_miles` (presentación numérica) y `decimales` (**minor unit**, con
   `CHECK (decimales BETWEEN 0 AND 4)` — no es presentación).

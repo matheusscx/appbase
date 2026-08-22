@@ -33,7 +33,6 @@ const API_MONEDA = {
   separadorMiles: '.',
   locale: 'es-CL',
   habilitada: true,
-  esDefault: true,
   esOficial: true,
   valorDelDia: '1',
 }

@@ -101,16 +101,14 @@ export class SuscripcionesService {
     //    falta), y las advertencias que la venta agrega por su cuenta son de
     //    recetas y combos, inalcanzables acá porque el paso 1 rechaza todo lo que
     //    no sea `tipo='suscripcion'`.
-    //    Que sean idénticos es una coincidencia del estado actual, no una
-    //    garantía: los dos caminos arman su mapa de tasas distinto. `ventas`
-    //    toma `tenant_moneda.valor_del_dia` crudo para **toda** moneda, la
-    //    oficial incluida; el motor pasa por `monedas.service.ts`, que **pisa**
-    //    con `'1'` la tasa de la oficial. Y "oficial" tampoco significa lo mismo
-    //    en los dos lados: ahí sale de `pais.moneda_oficial_id` y en `ventas` de
-    //    `tenant_moneda.es_default` (que ahí solo elige qué moneda se estampa en
-    //    la venta, no la tasa). Con datos sanos coinciden. Si dejaran de
-    //    coincidir, la buena sigue siendo la de la venta — que es justo por qué
-    //    se eligió esa.
+    //    Que sean idénticos ya NO es una coincidencia: desde el 2026-08-21 los
+    //    dos caminos arman el mapa de tasas igual —los dos pisan con `'1'` la
+    //    tasa de la oficial— y "oficial" significa lo mismo en los dos lados,
+    //    `pais.moneda_oficial_id` (ADR-005). Antes no: `ventas` tomaba
+    //    `valor_del_dia` crudo y resolvía la moneda por `tenant_moneda.es_default`,
+    //    un campo que ya no existe. Este comentario decía que "si dejaran de
+    //    coincidir, la buena sigue siendo la de la venta"; ya no hay dos que
+    //    puedan dejar de coincidir.
     const resultado = await this.calculoPreciosService.calcular(tenantId, {
       lineas: [{ itemId: dto.itemId, cantidad: '1' }],
     });

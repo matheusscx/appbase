@@ -800,9 +800,11 @@ async function cargarCatalogos() {
     monedasOpts.value = monedasStore.monedasHabilitadas
       .map(m => ({ label: `${m.nombre} (${m.codigoIso})`, value: m.monedaId }))
 
-    const defaultMoneda = monedasStore.monedaDefault
-    if (defaultMoneda && !form.value.monedaId) {
-      form.value.monedaId = defaultMoneda.monedaId
+    // La oficial del país: desde que se eliminó `es_default` es la única que
+    // el tenant tiene marcada, y es la que va a usar la inmensa mayoría.
+    const oficial = monedasStore.monedaOficial
+    if (oficial && !form.value.monedaId) {
+      form.value.monedaId = oficial.monedaId
     }
 
     // "Sin categoría" es una opción real, no solo el placeholder: `USelectMenu`

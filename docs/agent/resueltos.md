@@ -17,6 +17,59 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una sola moneda oficial: se eliminó `tenant_moneda.es_default` (2026-08-21)
+
+Cierra la entrada *"'Oficial' nombra DOS monedas distintas y ya divergen tres caminos de
+plata"*. **No era una decisión de producto pendiente en el sentido que la entrada suponía**: la
+decisión ya estaba tomada en **ADR-005** desde junio —la moneda oficial sale del país y el
+tenant no la elige— y lo que había era código que no la respetaba. Lo nuevo que decidió el owner
+fue **eliminar el campo**, no acotarlo. El porqué completo está en **ADR-021**.
+
+**El efecto medido:** un tenant chileno que marcaba UF como predeterminada seguía cobrando en
+pesos —la conversión multiplica por `valor_del_dia` y a la del país se le fuerza `1`— pero
+cuantizados a 4 decimales. Un ítem de 4,5674 UF a 40.860,60:
+
+| escala que gobierna | neto | IVA 19% | total |
+|---|---|---|---|
+| CLP, la del país ✅ | 186.627 | 35.459 | **222.086** |
+| UF, la del selector ❌ | 186.626,7044 | 35.459,0738 | 222.085,7822 |
+
+### Lo que costó llegar al diagnóstico, que es la parte que enseña
+
+Este frente lo diagnostiqué **mal tres veces seguidas**, y las tres me corrigió la revisión
+independiente o el owner. Las tres veces por lo mismo: concluir desde un grep parcial.
+
+1. **"Hay que hacer que `setDefault` rechace lo que no sea la oficial."** Falso: eso le sacaba
+   al tenant una función legítima para tapar un bug que vivía en otro lado. Lo corrigió el owner
+   diciendo para qué servía el campo.
+2. **"Es un cambio de una query."** Falso: `ventas.service.ts` tenía **su propia** consulta por
+   `es_default`, que decidía la escala de la venta real, la moneda estampada y la del pago. Yo
+   había arreglado solo la previsualización. Lo cazó la revisión.
+3. Y recién al barrer **todos** los consumidores apareció que el campo **no ordenaba ningún
+   selector** —eso sale de `ORDER BY es_oficial DESC`— y que ya había costado dos `Math.min`
+   defensivos en el frontend, con un comentario que pedía justamente esta decisión.
+
+**La lección:** cuando dos nombres compiten, el mapa completo de consumidores **es** el
+diagnóstico. Cualquier conclusión antes de tenerlo es una hipótesis con tono de hallazgo. Las
+tres veces creí estar mirando el problema y estaba mirando un pedazo.
+
+### Lo que lo fija
+
+- El unit de `decimalesOficiales` afirma que la consulta nombra `p.moneda_oficial_id` **y que no
+  nombra `es_default`** — la negativa es la que caza el revert.
+- Un unit nuevo en `ventas.service` afirma **qué moneda queda escrita en la venta** y con qué
+  escala se llama al motor, sobre un fixture que trae una moneda no oficial **primera** a
+  propósito. Antes nada lo afirmaba: el mutante "elegir por posición" pasaba en verde, que es
+  justo cómo la segunda noción sobrevivió meses en el camino de persistencia.
+- **No hay e2e de esto, a propósito.** Llegué a escribir uno que montaba el escenario divergente
+  con `PATCH /monedas/:id/default` y lo descarté antes de commitear, porque al eliminar el
+  endpoint ese estado dejó de ser alcanzable: un test que necesita una ruta que no existe no
+  protege nada. Lo que protege ahora es estructural —no hay forma de producir dos monedas
+  oficiales— más los dos unit de arriba. (En la historia del repo ese archivo nunca existió;
+  este párrafo decía "se eliminó", que era falso, y lo cazó la revisión.)
+
+---
+
 ## El `Promise.all` del motor sobre el cliente transaccional (2026-08-21)
 
 Cierra la entrada del backlog, **con su alcance original**: los **dos** `Promise.all` de

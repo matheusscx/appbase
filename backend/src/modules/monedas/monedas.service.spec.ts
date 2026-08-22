@@ -78,7 +78,6 @@ describe('MonedasService', () => {
           separador_miles: '.',
           locale: 'es-CL',
           es_oficial: true,
-          es_default: true,
           habilitada: false,
           valor_del_dia: null,
         },
@@ -92,7 +91,6 @@ describe('MonedasService', () => {
           separador_miles: ',',
           locale: 'en-US',
           es_oficial: false,
-          es_default: false,
           habilitada: true,
           valor_del_dia: '950.000000',
         },
@@ -122,16 +120,22 @@ describe('MonedasService', () => {
   });
 
   describe('decimalesOficiales', () => {
-    it('devuelve los decimales de la moneda default del tenant', async () => {
+    it('resuelve por la moneda del PAÍS, no por la default del tenant', async () => {
+      // La escala de la plata sale de `pais.moneda_oficial_id` (ADR-005).
+      // `tenant_moneda.es_default` es preferencia de pantalla: cuál moneda
+      // aparece primero en los selectores, y no decide ninguna cuenta.
       dataSource.query.mockResolvedValue([{ decimales: 0 }]);
 
       const result = await service.decimalesOficiales(TENANT);
 
       expect(result).toBe(0);
-      expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('tm.es_default = true'),
-        [TENANT],
-      );
+      const [sql, params] = dataSource.query.mock.calls[0] as [string, unknown];
+      expect(sql).toContain('p.moneda_oficial_id');
+      // La negativa es la que caza el revert: sin ella, una consulta que
+      // volviera a filtrar por la preferencia de pantalla pasaría en verde
+      // mientras siguiera nombrando la tabla `pais`.
+      expect(sql).not.toContain('es_default');
+      expect(params).toEqual([TENANT]);
     });
 
     it('lanza BadRequestException si el tenant no tiene moneda oficial configurada', async () => {
@@ -207,20 +211,15 @@ describe('MonedasService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('rechaza deshabilitar la moneda predeterminada', async () => {
+    it('rechaza deshabilitar la moneda OFICIAL, que es la única protegida', async () => {
+      // El guard de "no se puede deshabilitar la predeterminada" se eliminó
+      // junto con `es_default` el 2026-08-21: no protegía nada que este guard
+      // no protegiera ya, y sostenía una segunda noción de "oficial".
       dataSource.query.mockResolvedValue([
         { moneda_oficial_id: OFICIAL, en_pais: true },
       ]);
-      managerMock.findOne.mockResolvedValue({
-        tenantId: TENANT,
-        monedaId: USD,
-        habilitada: true,
-        esDefault: true,
-        valorDelDia: '950',
-        eliminadoEl: null,
-      });
       await expect(
-        service.updateMoneda(TENANT, USD, { habilitada: false }),
+        service.updateMoneda(TENANT, OFICIAL, { habilitada: false }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -239,61 +238,6 @@ describe('MonedasService', () => {
       expect(result.habilitada).toBe(true);
       expect(result.valorDelDia).toBe('900');
       expect(tenantMonedaRepo.save).toHaveBeenCalled();
-    });
-  });
-
-  describe('setDefault', () => {
-    it('limpia el default anterior y marca el nuevo', async () => {
-      managerMock.query.mockResolvedValue([
-        { moneda_oficial_id: OFICIAL, en_pais: true },
-      ]);
-      managerMock.findOne.mockResolvedValue({
-        tenantId: TENANT,
-        monedaId: USD,
-        habilitada: true,
-        esDefault: false,
-        valorDelDia: '950',
-        eliminadoEl: null,
-      });
-
-      const result = await service.setDefault(TENANT, USD);
-
-      expect(managerMock.query).toHaveBeenCalledWith(
-        expect.stringContaining('SET es_default = false'),
-        [TENANT],
-      );
-      expect(result.esDefault).toBe(true);
-    });
-
-    it('rechaza marcar como default una moneda deshabilitada', async () => {
-      managerMock.query.mockResolvedValue([
-        { moneda_oficial_id: OFICIAL, en_pais: true },
-      ]);
-      managerMock.findOne.mockResolvedValue({
-        tenantId: TENANT,
-        monedaId: USD,
-        habilitada: false,
-        esDefault: false,
-        valorDelDia: null,
-        eliminadoEl: null,
-      });
-
-      await expect(service.setDefault(TENANT, USD)).rejects.toThrow(
-        BadRequestException,
-      );
-    });
-
-    it('permite default a la oficial aunque no tenga fila previa', async () => {
-      managerMock.query.mockResolvedValue([
-        { moneda_oficial_id: OFICIAL, en_pais: true },
-      ]);
-      managerMock.findOne.mockResolvedValue(null);
-
-      const result = await service.setDefault(TENANT, OFICIAL);
-
-      expect(result.esDefault).toBe(true);
-      expect(result.habilitada).toBe(true);
-      expect(result.valorDelDia).toBe('1');
     });
   });
 });

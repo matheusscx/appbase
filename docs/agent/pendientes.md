@@ -880,31 +880,6 @@ de qué hacer con el resultado, y las dos cayeron del lado que exige respuesta: 
 oficial **sí** puede divergir, y el `Scope.REQUEST` **sí** mueve la aguja bajo concurrencia.
 La medición está adentro de cada una; lo que falta es la decisión.
 
-- [ ] **"Oficial" nombra DOS monedas distintas y ya divergen tres caminos de plata**
-  (backend + producto, **medido el 2026-08-21**; preexistente) — la pregunta que esta
-  entrada traía (*"¿pueden divergir hoy?"*) **está contestada: sí.**
-  `setDefault` (`monedas.service.ts`, `PATCH /monedas/:id/default`) solo exige que la moneda
-  esté **disponible en el país** y habilitada; **no** exige que sea la oficial de ese país.
-  Así que un tenant puede quedar con `tenant_moneda.es_default` en una moneda y
-  `pais.moneda_oficial_id` en otra.
-  **Lo que cada criterio decide hoy** —y son tres caminos, no dos como decía esta entrada
-  antes de medirla:
-  1. `MonedasService.decimalesOficiales` (**es_default**) → la escala a la que el motor
-     cuantiza toda la plata de una venta, y con la que el borde HTTP rechaza con 400.
-  2. `MonedasService.listar` y los guards de `updateMoneda` (**pais.moneda_oficial_id**) →
-     qué moneda la pantalla marca como oficial y cuál no se deja deshabilitar.
-  3. `LiquidacionPropinasService.resolverMonedaOficial` (**pais.moneda_oficial_id**) → los
-     `decimales` con los que `repartirMayoresRestos` reparte la propina. **Éste no estaba
-     en la entrada** y es el que más pesa: con las dos monedas divergiendo, las propinas se
-     reparten en una escala y las ventas se cuantizan en otra, para el mismo tenant.
-  **La pregunta para el owner:** ¿la moneda en la que un tenant cierra sus ventas tiene que
-  ser por fuerza la oficial de su país —y entonces `setDefault` debe rechazar el resto— o
-  son dos cosas legítimamente distintas y hay que renombrarlas para que nadie las confunda?
-  Lo que **no** se puede dejar es el estado actual, donde el nombre es el mismo y el criterio
-  no.
-  Ya está escrito en el código que son dos nociones (`monedas.service.ts`, commit del
-  2026-08-21): lo que falta es la decisión, no la documentación.
-
 - [ ] **¿Se parte `ItemsController` para sacarle el `Scope.REQUEST` de encima?**
   (backend, **medido el 2026-08-21**) — la entrada pedía el número y acá está.
   `EscalaMonedaPipe` es request-scoped y Nest sube el scope al controller anfitrión entero,

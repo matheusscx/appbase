@@ -35,11 +35,4 @@ export class MonedasController {
     const user = req.user as { tenantId: string };
     return this.monedasService.updateMoneda(user.tenantId, monedaId, dto);
   }
-
-  @UseGuards(TenantAdminGuard)
-  @Patch(':monedaId/default')
-  setDefault(@Req() req: Request, @Param('monedaId') monedaId: string) {
-    const user = req.user as { tenantId: string };
-    return this.monedasService.setDefault(user.tenantId, monedaId);
-  }
 }

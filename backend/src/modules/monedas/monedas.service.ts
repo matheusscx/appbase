@@ -20,7 +20,6 @@ export interface MonedaTenant {
   separadorMiles: string;
   locale: string;
   habilitada: boolean;
-  esDefault: boolean;
   esOficial: boolean;
   valorDelDia: string | null;
 }
@@ -53,7 +52,6 @@ export class MonedasService {
       separador_miles: string;
       locale: string;
       es_oficial: boolean;
-      es_default: boolean;
       habilitada: boolean;
       valor_del_dia: string | null;
     }[] = await this.db.query(
@@ -65,10 +63,11 @@ export class MonedasService {
               m.separador_decimal,
               m.separador_miles,
               m.locale,
-              -- La moneda del PAIS. No es la misma nocion que es_default, que
-              -- es la que decide la escala de la plata: ver decimalesOficiales.
+              -- La moneda del PAIS (ADR-005). Es la UNICA nocion de "oficial"
+              -- del sistema: decide la escala de toda la plata del tenant y es
+              -- la moneda a la que se convierten los totales. El orden de la
+              -- lista tambien sale de aca (ORDER BY es_oficial DESC).
               (m.moneda_id = p.moneda_oficial_id) AS es_oficial,
-              COALESCE(tm.es_default, false) AS es_default,
               COALESCE(tm.habilitada, false) AS habilitada,
               tm.valor_del_dia
        FROM tenants t
@@ -98,43 +97,52 @@ export class MonedasService {
         esOficial,
         // La oficial está siempre habilitada y su tasa es fija en 1
         habilitada: esOficial ? true : r.habilitada === true,
-        esDefault: r.es_default === true,
         valorDelDia: esOficial ? '1' : r.valor_del_dia,
       };
     });
   }
 
   /**
-   * `moneda.decimales` de la moneda oficial del tenant (`tenant_moneda.es_default`
-   * — la misma noción de "oficial" que ya resuelve `ventas.service.ts` al armar la
-   * cabecera). El motor de precios la usa para congelar la escala a la que se
-   * cuantiza el documento (`ConfigCalculo.decimalesMoneda`). Una consulta, no una
-   * por línea: se llama una vez por request, no por ítem.
+   * `moneda.decimales` de la moneda **oficial del país** del tenant. El motor de
+   * precios la usa para congelar la escala a la que cuantiza el documento
+   * (`ConfigCalculo.decimalesMoneda`) y `EscalaMonedaPipe` para rechazar en el
+   * borde la plata que no cabe. Una consulta, no una por línea.
    *
-   * ⚠️ **En este service "oficial" nombra DOS cosas distintas, y ésta es la que
-   * decide el redondeo de la plata.** La otra es `pais.moneda_oficial_id` —la
-   * moneda del país, que el tenant no elige— y con ella trabajan `listar()` (la
-   * columna `es_oficial`) y los guards de `updateMoneda`. **Pueden diferir:**
-   * `setDefault` acepta cualquier moneda disponible en el país, no solo la
-   * oficial de ese país, así que un tenant puede quedar con `es_default` en una
-   * y `moneda_oficial_id` en otra.
+   * ⚠️ **Hubo un tiempo en que esto leía otro campo, y vale saberlo.** Hasta el
+   * 2026-08-21 existía `tenant_moneda.es_default` y esta función resolvía la
+   * escala con él, con un docblock que lo justificaba diciendo *"es la misma
+   * moneda a la que `ventas` convierte y persiste los totales"*. Era falso justo
+   * cuando diferían: la conversión multiplica por `valor_del_dia` y a la moneda
+   * del **país** se le fuerza `1`, así que los totales aterrizaban en pesos
+   * mientras la escala salía de otra moneda. Medido: un ítem de 4,5674 UF daba
+   * un total de `222.085,7822` pesos en vez de `222.086`.
    *
-   * Que acá gobierne `es_default` es deliberado y consistente con el resto del
-   * camino de la plata: es la misma moneda a la que `ventas` convierte y
-   * persiste los totales, así que la escala de cuantización y la moneda de los
-   * montos persistidos son siempre la misma. Lo que NO está resuelto es si el
-   * producto quiere que las dos nociones puedan divergir — es decisión del owner
-   * y vive en `docs/agent/pendientes.md`; no se cambia de arrastre acá.
+   * **Ese campo ya no existe.** Se eliminó junto con su endpoint porque no hacía
+   * ningún trabajo de presentación —el orden de la lista sale de `es_oficial`— y
+   * su única conducta real era decidir plata por un camino distinto al del resto
+   * del sistema. Hoy "oficial" nombra **una sola cosa**.
+   *
+   * Es la misma consulta que `LiquidacionPropinasService.resolverMonedaOficial`,
+   * y eso es deliberado: la escala con la que se cuantiza una venta y la escala
+   * con la que se reparte su propina tienen que salir de la misma moneda o el
+   * reparto no puede representar lo que se cobró.
    */
   async decimalesOficiales(tenantId: string): Promise<number> {
     const rows: { decimales: number | string }[] = await this.db.query(
       `SELECT m.decimales
-         FROM tenant_moneda tm
-         JOIN moneda m ON m.moneda_id = tm.moneda_id AND m.eliminado_el IS NULL
-        WHERE tm.tenant_id = $1 AND tm.eliminado_el IS NULL AND tm.es_default = true`,
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+         JOIN moneda m ON m.moneda_id = p.moneda_oficial_id
+              AND m.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
       [tenantId],
     );
     if (!rows.length) {
+      // Sin país o sin `moneda_oficial_id` no hay escala posible: no se asume
+      // una. Es el mismo error que ya devolvía cuando faltaba la fila de
+      // `tenant_moneda`, con otra causa.
       throw new BadRequestException(
         'El tenant no tiene moneda oficial configurada',
       );
@@ -224,43 +232,10 @@ export class MonedasService {
       this.upsertRow(manager, tenantId, monedaId),
     );
 
-    if (dto.habilitada === false && row.esDefault) {
-      throw new BadRequestException(
-        'No se puede deshabilitar la moneda predeterminada',
-      );
-    }
-
     if (dto.habilitada !== undefined) row.habilitada = dto.habilitada;
     if (dto.valorDelDia !== undefined) row.valorDelDia = dto.valorDelDia;
 
     return this.tenantMonedaRepo.save(row);
-  }
-
-  async setDefault(tenantId: string, monedaId: string): Promise<TenantMoneda> {
-    return this.db.transaccion(async (manager) => {
-      const ctx = await this.resolveContexto(manager, tenantId, monedaId);
-      const esOficial = monedaId === ctx.monedaOficialId;
-
-      const row = await this.upsertRow(manager, tenantId, monedaId);
-      const habilitada = esOficial || row.habilitada;
-      if (!habilitada) {
-        throw new BadRequestException(
-          'Debes habilitar la moneda antes de marcarla como predeterminada',
-        );
-      }
-
-      await manager.query(
-        `UPDATE tenant_moneda SET es_default = false WHERE tenant_id = $1 AND eliminado_el IS NULL`,
-        [tenantId],
-      );
-
-      row.esDefault = true;
-      if (esOficial) {
-        row.habilitada = true;
-        row.valorDelDia = '1';
-      }
-      return manager.save(TenantMoneda, row);
-    });
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -315,7 +290,6 @@ export class MonedasService {
       tenantId,
       monedaId,
       habilitada: false,
-      esDefault: false,
       valorDelDia: null,
     });
   }

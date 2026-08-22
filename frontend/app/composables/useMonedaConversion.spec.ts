@@ -37,7 +37,6 @@ const CLP: MonedaTenantApi = {
   separadorMiles: '.',
   locale: 'es-CL',
   habilitada: true,
-  esDefault: true,
   esOficial: true,
   valorDelDia: null,
 }
@@ -52,7 +51,6 @@ const USD: MonedaTenantApi = {
   separadorMiles: ',',
   locale: 'en-US',
   habilitada: true,
-  esDefault: false,
   esOficial: false,
   valorDelDia: '2',
 }

@@ -352,7 +352,6 @@ CREATE TABLE "roles_permisos_modulos" (
 CREATE TABLE "tenant_moneda" (
   "tenant_id"      UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "moneda_id"      UUID          NOT NULL REFERENCES "moneda" ("moneda_id"),
-  "es_default"     BOOLEAN       DEFAULT false,   -- moneda preseleccionada en el UI
   "habilitada"     BOOLEAN       DEFAULT false,
   "valor_del_dia"  NUMERIC(18,6),                 -- tasa de cambio a la moneda oficial; actualizable en cualquier momento
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

@@ -145,7 +145,6 @@ const MONEDA_CLP = {
   separadorMiles: '.',
   locale: 'es-CL',
   habilitada: true,
-  esDefault: true,
   esOficial: true,
   valorDelDia: null,
 }

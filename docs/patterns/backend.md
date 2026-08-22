@@ -296,8 +296,13 @@ reabre el deadlock del pool. Prohibido por lint (`eslint.config.mjs`).
 - **Mutación con transacción (regla "solo uno"):** dentro de
   `this.db.transaccion` (nunca `dataSource.transaction` — ver §9), limpiar el
   flag de todos (`UPDATE ... SET x = false WHERE tenant_id = $1 AND
-  eliminado_el IS NULL`) y marcar el nuevo. Validar precondiciones antes. Ver
-  `setDefault` en `monedas.service.ts`.
+  eliminado_el IS NULL`) y marcar el nuevo. Validar precondiciones antes.
+  ⚠️ **Sin ejemplo vivo desde el 2026-08-21**: el que había (`setDefault` de
+  `monedas.service.ts`) se eliminó con su columna, porque el flag competía con
+  `pais.moneda_oficial_id` por el nombre "oficial" y terminó decidiendo plata
+  (**ADR-021**). El patrón sigue siendo válido; la lección que dejó el caso es
+  que un flag "el elegido" **no puede** gobernar una cuenta si ya hay otra
+  fuente para lo mismo.
 - **Upsert con restauración de soft-deleted:** buscar con `withDeleted: true`; si
   existe, `existing.eliminadoEl = null` (restaurar); si no, `manager.create(...)`.
 - **Errores de negocio:** `BadRequestException` con mensaje en español (el frontend

@@ -10,7 +10,6 @@ export interface MonedaDisplayConfig {
   decimals: number
   habilitada: boolean
   esOficial: boolean
-  esDefault: boolean
   valorDelDia: string | null
 }
 
@@ -25,7 +24,6 @@ export interface MonedaTenantApi {
   separadorMiles: string
   locale: string
   habilitada: boolean
-  esDefault: boolean
   esOficial: boolean
   valorDelDia: string | null
 }
@@ -42,7 +40,6 @@ export function toDisplayConfig(m: MonedaTenantApi): MonedaDisplayConfig {
     decimals: m.decimales,
     habilitada: m.habilitada,
     esOficial: m.esOficial,
-    esDefault: m.esDefault,
     valorDelDia: m.valorDelDia,
   }
 }

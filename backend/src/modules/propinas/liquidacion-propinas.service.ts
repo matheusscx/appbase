@@ -1119,6 +1119,17 @@ export class LiquidacionPropinasService {
     return recalculados;
   }
 
+  /**
+   * La moneda del **país** del tenant (ADR-005), que es de donde salen los
+   * `decimales` con los que `repartirMayoresRestos` reparte la propina.
+   *
+   * Es la misma consulta que `MonedasService.decimalesOficiales`, y tiene que
+   * seguir siéndolo: la escala con la que se cuantiza una venta y la escala con
+   * la que se reparte su propina **tienen que salir de la misma moneda**, o el
+   * reparto no puede representar lo que se cobró. Hasta el 2026-08-21 no salían:
+   * aquélla leía `tenant_moneda.es_default` —preferencia de pantalla— y ésta el
+   * país.
+   */
   private async resolverMonedaOficial(
     manager: EntityManager | Db,
     tenantId: string,

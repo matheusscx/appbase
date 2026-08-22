@@ -127,12 +127,10 @@ describe('CalculoPreciosService', () => {
         {
           monedaId: 'moneda-clp',
           valorDelDia: '1',
-          esDefault: true,
         },
         {
           monedaId: 'moneda-usd',
           valorDelDia: '950',
-          esDefault: false,
         },
       ]),
       // 4 = el máximo que admite el sistema (UF); el motor todavía no
@@ -208,8 +206,8 @@ describe('CalculoPreciosService', () => {
   describe('conversión a moneda oficial', () => {
     const conModo = async (modo: string) => {
       monedasService.findMonedas.mockResolvedValue([
-        { monedaId: 'moneda-clp', valorDelDia: '1', esDefault: true },
-        { monedaId: 'moneda-usd', valorDelDia: '950.123456', esDefault: false },
+        { monedaId: 'moneda-clp', valorDelDia: '1' },
+        { monedaId: 'moneda-usd', valorDelDia: '950.123456' },
       ]);
       mockItems({ precioBase: '19.99', monedaId: 'moneda-usd' });
       tenantsService.getPreferenciasFinancieras.mockResolvedValue({

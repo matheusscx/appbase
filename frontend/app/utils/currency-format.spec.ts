@@ -19,7 +19,6 @@ const clp: MonedaDisplayConfig = {
   decimals: 0,
   habilitada: true,
   esOficial: true,
-  esDefault: true,
   valorDelDia: '1',
 }
 
@@ -34,7 +33,6 @@ const usd: MonedaDisplayConfig = {
   decimals: 2,
   habilitada: true,
   esOficial: false,
-  esDefault: false,
   valorDelDia: '950',
 }
 
@@ -49,7 +47,6 @@ const uf: MonedaDisplayConfig = {
   decimals: 4,
   habilitada: true,
   esOficial: false,
-  esDefault: false,
   valorDelDia: null,
 }
 

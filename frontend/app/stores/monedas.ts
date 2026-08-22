@@ -37,10 +37,6 @@ export const useMonedasStore = defineStore('monedas', () => {
     monedasList.value.find(m => m.esOficial) ?? null,
   )
 
-  const monedaDefault = computed(() =>
-    monedasList.value.find(m => m.esDefault) ?? monedaOficial.value,
-  )
-
   function getById(monedaId: string): MonedaDisplayConfig | undefined {
     return monedasById.value[monedaId]
   }
@@ -100,7 +96,6 @@ export const useMonedasStore = defineStore('monedas', () => {
       separadorMiles: current.thousands,
       locale: current.locale,
       habilitada: current.habilitada,
-      esDefault: current.esDefault,
       esOficial: current.esOficial,
       valorDelDia: current.valorDelDia,
       ...partial,
@@ -113,13 +108,6 @@ export const useMonedasStore = defineStore('monedas', () => {
     monedasByCodigo.value = byCodigo
   }
 
-  function setDefaultMoneda(monedaId: string): void {
-    for (const id of Object.keys(monedasById.value)) {
-      const cfg = monedasById.value[id]!
-      patchMoneda(id, { esDefault: id === monedaId })
-    }
-  }
-
   return {
     monedasById,
     monedasByCodigo,
@@ -130,13 +118,11 @@ export const useMonedasStore = defineStore('monedas', () => {
     monedasList,
     monedasHabilitadas,
     monedaOficial,
-    monedaDefault,
     getById,
     getByCodigo,
     ensureLoaded,
     reset,
     patchMoneda,
-    setDefaultMoneda,
     hydrate,
   }
 })

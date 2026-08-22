@@ -28,23 +28,14 @@ const props = withDefaults(
 
 const emit = defineEmits<{ confirmar: [pagos: PagoInput[], vuelto: string] }>()
 
-// La sugerencia se redondea a la MENOR de las dos escalas que hoy se llaman
-// "oficial", y no a una de las dos, porque cada una gobierna una punta distinta y
-// pueden diferir:
-//   - `monedaDefault` (tenant_moneda.es_default) es contra la que el backend
-//     valida este monto (`@EsMontoCobrado` → `decimalesOficiales`): pasarse de
-//     ahí es un 400 al cerrar la cuenta.
-//   - `monedaOficial` (pais.moneda_oficial_id) es la que usa el `MoneyInput
-//     oficial` que muestra y edita este mismo monto: pasarse de ahí hace que la
-//     pantalla trunque, y que tocar el campo se coma los centavos en silencio.
-// La menor de las dos cabe en las dos. Cuando coinciden —el caso normal, y el
-// único que el seed produce— es exactamente la escala de la moneda, que es lo que
-// este arreglo vino a darle a la sugerencia en vez de los 0 fijos de antes.
-// Unificar las dos nociones es decisión del owner y vive en el backlog.
+// La sugerencia se redondea a la escala de la moneda oficial —la del país
+// (ADR-005)—, que es la única noción de "oficial" del sistema desde el
+// 2026-08-21. Antes acá había un `Math.min` de dos escalas que podían diferir:
+// el backend validaba este monto contra `tenant_moneda.es_default` y el
+// `MoneyInput` lo mostraba con la del país. Ese campo se eliminó, así que la
+// defensa quedó sin caso que defender.
 const monedas = useMonedasStore()
-const decimalesPropina = computed(() =>
-  Math.min(monedas.monedaDefault?.decimals ?? 0, monedas.monedaOficial?.decimals ?? 0),
-)
+const decimalesPropina = computed(() => monedas.monedaOficial?.decimals ?? 0)
 const open = defineModel<boolean>('open', { required: true })
 const propinaMonto = defineModel<string>('propinaMonto', { default: '0' })
 

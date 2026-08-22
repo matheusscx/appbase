@@ -113,10 +113,19 @@ const mockResultadoVenta = {
 };
 
 const MONEDA_ROWS = [
+  // Una moneda NO oficial primero, a propósito: el service tiene que elegir por
+  // `es_oficial` y no por posición ni por "la primera habilitada". Con una sola
+  // fila el fixture no distinguía entre elegir bien y elegir cualquiera.
+  {
+    moneda_id: 'moneda-extranjera',
+    valor_del_dia: '950.000000',
+    es_oficial: false,
+    decimales: 2,
+  },
   {
     moneda_id: MONEDA_OFICIAL_ID,
     valor_del_dia: '1.000000',
-    es_default: true,
+    es_oficial: true,
     // 4 = el máximo que admite el sistema (UF); el motor todavía no cuantiza
     // con este valor (Task 5).
     decimales: 4,
@@ -1223,6 +1232,33 @@ describe('VentasService', () => {
       await expect(
         service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente as any),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('estampa la moneda del PAÍS en la venta, y su escala en el cálculo', async () => {
+      // Elegir por posición, por "la primera habilitada" o por cualquier otro
+      // criterio que no sea `es_oficial` pasaba en verde hasta este test: nada
+      // afirmaba QUÉ moneda queda escrita. Es lo que dejó vivir durante meses la
+      // segunda noción de "oficial" (`tenant_moneda.es_default`, eliminada el
+      // 2026-08-21) en el camino de persistencia de la venta.
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const ventas = manager.save.mock.calls.filter(
+        (call) => call[0] === Venta,
+      );
+      expect(ventas.length).toBeGreaterThan(0);
+      const guardada = ventas[0]![1] as { monedaId: string };
+      expect(guardada.monedaId).toBe(MONEDA_OFICIAL_ID);
+
+      // Y la escala del motor sale de esa misma moneda, no de otra fila.
+      expect(calculoPreciosService.cargarConfig).toHaveBeenCalledWith(
+        TENANT_ID,
+        4,
+      );
     });
   });
 

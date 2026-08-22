@@ -106,14 +106,11 @@ const cancelOpen = ref(false)
 const propinaMonto = ref('0')
 const propinaSugerida = ref('0')
 
-// La menor de las dos escalas que se llaman "oficial" — el porqué, largo, está en
-// `CobroModal.vue`, que es el otro sitio que sugiere propina.
+// La escala de la moneda oficial — el porqué está en `CobroModal.vue`, que es el
+// otro sitio que sugiere propina.
 const monedasStore = useMonedasStore()
-const decimalesPropina = computed(() =>
-  Math.min(
-    monedasStore.monedaDefault?.decimals ?? 0,
-    monedasStore.monedaOficial?.decimals ?? 0,
-  ),
+const decimalesPropina = computed(
+  () => monedasStore.monedaOficial?.decimals ?? 0,
 )
 const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
 const propinaHabilitada = ref(true)

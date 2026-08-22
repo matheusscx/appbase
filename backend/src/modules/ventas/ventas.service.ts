@@ -267,20 +267,37 @@ export class VentasService {
       };
     });
 
-    // 3. Resolver moneda oficial del tenant (es_default = true)
+    // 3. Resolver la moneda oficial del tenant: la de su PAÍS (ADR-005). Se
+    //    trae junto con las demás para armar el mapa de tasas de una sola
+    //    consulta.
+    //
+    //    ⚠️ **La consulta arranca en `tenants`, no en `tenant_moneda`**, y es la
+    //    misma forma que `MonedasService.findMonedas`. Con un `INNER JOIN` sobre
+    //    `tenant_moneda` la venta dependía de que existiera una fila para la
+    //    oficial —que hoy siembra el alta del tenant— mientras que los otros dos
+    //    caminos que resuelven "oficial" (`decimalesOficiales` y el reparto de
+    //    propinas) no la necesitan. Esa asimetría es una versión chica del
+    //    problema que ADR-021 vino a eliminar, así que no se deja.
     const monedaRows: {
       moneda_id: string;
-      valor_del_dia: string;
-      es_default: boolean;
+      valor_del_dia: string | null;
+      es_oficial: boolean;
       decimales: number | string;
     }[] = await this.db.query(
-      `SELECT tm.moneda_id, tm.valor_del_dia, tm.es_default, m.decimales
-         FROM tenant_moneda tm
-         JOIN moneda m ON m.moneda_id = tm.moneda_id AND m.eliminado_el IS NULL
-        WHERE tm.tenant_id = $1 AND tm.eliminado_el IS NULL`,
+      `SELECT m.moneda_id, tm.valor_del_dia, m.decimales,
+              (m.moneda_id = p.moneda_oficial_id) AS es_oficial
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+         JOIN pais_moneda pm ON pm.pais_id = p.pais_id AND pm.eliminado_el IS NULL
+         JOIN moneda m ON m.moneda_id = pm.moneda_id AND m.eliminado_el IS NULL
+         LEFT JOIN tenant_moneda tm ON tm.tenant_id = t.tenant_id
+              AND tm.moneda_id = m.moneda_id AND tm.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
       [tenantId],
     );
-    const monedaOficial = monedaRows.find((r) => r.es_default);
+    const monedaOficial = monedaRows.find((r) => r.es_oficial);
     if (!monedaOficial) {
       throw new BadRequestException(
         'El tenant no tiene moneda oficial configurada',
@@ -290,7 +307,14 @@ export class VentasService {
 
     // Mapa de monedaId → valor_del_dia para conversión
     const tasaMap = new Map(
-      monedaRows.map((r) => [r.moneda_id, r.valor_del_dia ?? '1']),
+      // La tasa de la oficial se pisa con 1, igual que en `findMonedas`: es la
+      // moneda a la que se convierte, así que su tasa contra sí misma no puede
+      // ser otra cosa. Leerla cruda de la fila hacía que este camino y el del
+      // motor pudieran armar mapas distintos para la misma venta.
+      monedaRows.map((r) => [
+        r.moneda_id,
+        r.es_oficial ? '1' : (r.valor_del_dia ?? '1'),
+      ]),
     );
 
     /**

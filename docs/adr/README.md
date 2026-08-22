@@ -32,6 +32,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [018](./018-iva-derivado-de-la-clasificacion.md) | El IVA se deriva de `clasificacion_tributaria` en el motor de precios, nunca se materializa en `item_impuestos` | Accepted | 2026-07-31 |
 | [019](./019-timestamptz-en-toda-columna-de-fecha.md) | Declarar `type: 'timestamptz'` explícito en toda columna de fecha (hermano de ADR-004) | Accepted | 2026-08-06 |
 | [020](./020-contexto-transaccional-als.md) | Contexto transaccional con AsyncLocalStorage — la conexión de la transacción viaja sola | Accepted | 2026-08-18 |
+| [021](./021-una-sola-moneda-oficial.md) | Una sola noción de moneda oficial — se elimina `tenant_moneda.es_default` | Accepted | 2026-08-21 |
 
 ## Creating a New ADR
 

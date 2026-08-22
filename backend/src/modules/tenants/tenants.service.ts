@@ -314,7 +314,7 @@ export class TenantsService {
         [savedTenant.id, ...MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS],
       );
 
-      // 8. Habilitar la moneda oficial del país del tenant (default, tasa = 1)
+      // 8. Habilitar la moneda oficial del país del tenant (tasa = 1)
       const oficialRows: { moneda_oficial_id: string | null }[] =
         await manager.query(
           `SELECT p.moneda_oficial_id
@@ -327,8 +327,8 @@ export class TenantsService {
       if (monedaOficialId) {
         await manager.query(
           `INSERT INTO tenant_moneda
-             (tenant_id, moneda_id, es_default, habilitada, valor_del_dia, creado_el, actualizado_el)
-           VALUES ($1, $2, true, true, 1, NOW(), NOW())
+             (tenant_id, moneda_id, habilitada, valor_del_dia, creado_el, actualizado_el)
+           VALUES ($1, $2, true, 1, NOW(), NOW())
            ON CONFLICT (tenant_id, moneda_id) DO NOTHING`,
           [savedTenant.id, monedaOficialId],
         );

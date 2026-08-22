@@ -33,10 +33,6 @@ async function cargar() {
 
 async function toggleHabilitada(m: MonedaDisplayConfig) {
   if (m.esOficial || toggling.has(m.monedaId)) return
-  if (m.esDefault && m.habilitada) {
-    toast.add({ title: 'No se puede deshabilitar la moneda predeterminada', color: 'warning' })
-    return
-  }
   toggling.add(m.monedaId)
   const prev = m.habilitada
   m.habilitada = !prev
@@ -51,34 +47,6 @@ async function toggleHabilitada(m: MonedaDisplayConfig) {
   catch (e: unknown) {
     m.habilitada = prev
     const msg = apiErrorMsg(e, 'Error al actualizar')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    toggling.delete(m.monedaId)
-  }
-}
-
-async function setDefault(m: MonedaDisplayConfig) {
-  if (m.esDefault || toggling.has(m.monedaId)) return
-  if (!m.habilitada) {
-    toast.add({ title: 'Debes habilitar la moneda antes de marcarla como predeterminada', color: 'warning' })
-    return
-  }
-  const prev = monedas.value.find(x => x.esDefault)
-  if (prev) prev.esDefault = false
-  m.esDefault = true
-  toggling.add(m.monedaId)
-  try {
-    await useApiFetch(`${apiUrl}/monedas/${m.monedaId}/default`, {
-      method: 'PATCH',
-    })
-    monedasStore.setDefaultMoneda(m.monedaId)
-    toast.add({ title: 'Moneda predeterminada actualizada', color: 'success' })
-  }
-  catch (e: unknown) {
-    m.esDefault = false
-    if (prev) prev.esDefault = true
-    const msg = apiErrorMsg(e, 'Error al actualizar predeterminada')
     toast.add({ title: msg, color: 'error' })
   }
   finally {
@@ -124,7 +92,6 @@ onMounted(cargar)
 const columns: TableColumn<MonedaDisplayConfig>[] = [
   { accessorKey: 'nombre', header: 'Moneda' },
   { id: 'tasa', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { id: 'predeterminada', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'habilitada', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 </script>
@@ -169,24 +136,6 @@ const columns: TableColumn<MonedaDisplayConfig>[] = [
               @update:model-value="(v: string | number) => { row.original.valorDelDia = v === '' ? null : String(v) }"
               @blur="guardarTasa(row.original)"
             />
-          </div>
-        </template>
-
-        <template #predeterminada-cell="{ row }">
-          <div class="flex justify-end">
-            <button
-              type="button"
-              class="p-1 rounded transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
-              :disabled="toggling.has(row.original.monedaId)"
-              :title="row.original.esDefault ? 'Moneda predeterminada' : 'Marcar como predeterminada'"
-              @click="setDefault(row.original)"
-            >
-              <UIcon
-                :name="'i-lucide-star'"
-                class="w-5 h-5"
-                :class="row.original.esDefault ? 'text-warning fill-current' : 'text-muted'"
-              />
-            </button>
           </div>
         </template>
 
