@@ -17,6 +17,56 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un alta pendiente no es editable, y eso dejó de ser efecto lateral (2026-08-22)
+
+Cierra la entrada *"¿El admin puede editar los roles de un alta pendiente antes de que la
+persona confirme?"* de la sección 4. **El owner eligió el camino que ya regía de hecho** —no
+se construye el endpoint— y la respuesta se escribió como **regla de producto** en
+`PRODUCTO.md` § *Control de acceso (RBAC)*, que es lo que faltaba: el comportamiento existía,
+la regla no.
+
+### El texto de la entrada, como estaba
+
+- [ ] **¿El admin puede editar los roles de un alta pendiente antes de que la persona
+  confirme?** (producto + backend, 2026-08-16) — hoy **no**, y la pantalla lo refleja: las
+  acciones de fila están deshabilitadas para los pendientes, con el motivo escrito. No es una
+  omisión de UI: los roles quedan **congelados en el token** (`tokens_acceso.datos`) hasta que
+  se confirma, y la persona todavía no tiene fila en `usuarios_tenants`, así que
+  `roles.service.ts` → `assignUser` la rechaza con *"El usuario no pertenece a este tenant"*.
+  El admin que se equivocó de roles hoy tiene una sola salida: repetir el alta, que emite un
+  token nuevo y quema el anterior.
+  **La pregunta:** ¿alcanza con eso, o el alta pendiente tiene que ser editable? Lo segundo
+  necesita un endpoint que reescriba `datos.rolIds` del token vivo, y es decisión de producto
+  —no un ajuste de pantalla—. Lo levantó el agente de frontend al construirlo, y se dejó en el
+  camino barato a propósito.
+
+### Las tres afirmaciones de la entrada se verificaron antes de escribirlas como regla
+
+No se dio por buena la entrada: se abrió el código, porque una entrada de backlog puede
+sobreafirmar.
+
+1. **Roles congelados en el token** — `auth/entities/token-acceso.entity.ts:92-97`: el
+   docblock lo dice y `datos` es `{ tenantId, rolIds } | null`.
+2. **`assignUser` rechaza a quien no es miembro** — `roles/roles.service.ts:101-108`: un
+   `SELECT 1 FROM usuarios_tenants` y `BadRequestException('El usuario no pertenece a este
+   tenant')`.
+3. **Repetir el alta quema el link anterior** — `tenants/tenants.service.ts:774-795`: llama a
+   `invalidarAnteriores(...)` **antes** de `emitir(...)`, acotado al tenant, con el comentario
+   que explica por qué (*"dar de alta dos veces tiene que dejar **un** link válido, el
+   último. Si no, el mail viejo —con los roles viejos congelados adentro— sigue sirviendo"*).
+
+Esa tercera fue la que inclinó la decisión: **reemitir no es solo el camino barato, es el
+seguro.** Un endpoint que reescriba `datos.rolIds` del token vivo mantendría en circulación un
+mail cuyo contenido ya no describe lo que va a pasar.
+
+### Qué NO se construyó, a propósito
+
+El endpoint de edición del alta pendiente. Si algún día se pide, la entrada vuelve a abrirse
+como feature con su spec —no como ajuste de pantalla—, y tiene que resolver qué hace con el
+link ya enviado.
+
+---
+
 ## La etiqueta manda cuando el cliente paga la etiqueta (2026-08-21)
 
 Cierra la entrada *"Un descuento y un recargo que se compensan cobran \$1 menos que la misma

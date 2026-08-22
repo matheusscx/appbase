@@ -4,17 +4,20 @@
 > rige por [`docs/agent/auditoria-codigo.md`](../../agent/auditoria-codigo.md): buscadores
 > baratos y ciegos entre sí, un refutador independiente por hallazgo, y triaje al final.
 
-**Estado:** 📋 preparada, **NO lanzada**. Falta acordar el presupuesto (ver §Presupuesto).
+**Estado:** ✅ **lista para lanzar** — presupuesto acordado el 2026-08-22. No lanzada
+todavía: falta elegir el momento, por lo que pide la lente B (ver §Cómo se dispara).
 
 **Origen:** las dos lentes salieron de la tanda del 2026-08-15 (`resueltos.md`, *"El correo
 coincide deja de ser prueba de identidad"*), donde las dos aparecieron como bugs reales y
 ninguna la habría encontrado un buscador leyendo "¿está bien esta función?".
 
-**Decisiones del owner (2026-08-15), ya tomadas:**
+**Decisiones del owner, ya tomadas:**
 
-- Lente B (pool): **delta y revalidación, no redescubrimiento.** Se le pasa la tabla
-  existente como contexto conocido.
-- Destino de los hallazgos: **solo al backlog. NO se arregla nada en esta pasada.**
+- (2026-08-15) Lente B (pool): **delta y revalidación, no redescubrimiento.** Se le pasa la
+  tabla existente como contexto conocido.
+- (2026-08-15) Destino de los hallazgos: **solo al backlog. NO se arregla nada en esta pasada.**
+- (2026-08-22) **Alcance y presupuesto: las dos lentes, tope 500k tokens.** El owner eligió
+  las dos aun sabiendo que la premisa de la lente B cambió (ver §Presupuesto).
 
 ---
 
@@ -163,14 +166,42 @@ separa 11 de 20.
 
 ---
 
-## Presupuesto — FALTA ACORDARLO
+## Presupuesto — ✅ acordado el 2026-08-22: **500k tokens, tope duro**
 
 El método exige fijarlo antes: *"si el número no se fija antes, la pasada crece hasta donde
 alcance"*. Referencia medida: una pasada de 5 lentes sobre un módulo mediano costó **~1.4M
-tokens** de subagentes.
+tokens** de subagentes; la estimación para estas dos, con una en delta, era **300-500k**.
 
-Esta es más chica —2 lentes, una de ellas en modo delta— así que la estimación es del orden
-de **300-500k**. Confirmar antes de lanzar.
+**Decisión del owner: 500k, las dos lentes.** El tope es duro, no orientativo: si la pasada
+lo alcanza, se corta y se reporta lo que haya, con lo que quedó sin cubrir **escrito**
+—"no hay caps silenciosos" es regla del método—.
+
+⚠️ **Una premisa de este plan cambió entre que se escribió y que se fijó el número.** El texto
+de la lente B dice que arreglar sus sitios "es el frente 🔴": **ese frente cerró el
+2026-08-20** (conexiones/deadlock y rendimiento; el redondeo de plata, el 2026-08-21). Lo que
+sigue vigente de esa sección es lo demás —el barrido ya se hizo, redescubrirlo es pagar dos
+veces, y esta pasada solo actualiza el mapa—. El owner eligió igual las dos lentes: el delta
+sigue respondiendo si aparecieron sitios nuevos **después** del 2026-08-11.
+
+---
+
+## Cómo se dispara
+
+Pasarle **la ruta de este archivo** al agente. Lo que falta no es una decisión, es el momento:
+
+1. **Stack arriba y máquina quieta.** `docker-compose up` corriendo, y nada más peleando por
+   la base — la lente B mide con ráfagas de ~15 requests independientes.
+2. **Base fresca antes de empezar:** `./scripts/reset-db.sh`. Un experimento sobre estado
+   sucio hace perder tiempo en forenses inútiles.
+3. **Un `docker restart` entre experimentos de la lente B.** Cada cuelgue deja el backend
+   envenenado; el segundo experimento sobre un proceso ya trabado da un **falso positivo**.
+4. **Nadie tocando `.ts` del backend mientras corre.** El compose usa `start:dev` con el
+   fuente bind-mounteado: un cambio recompila, reinicia y **vuelve a sembrar**, y eso arruina
+   cualquier medición en curso.
+5. Al terminar: registrar la fila en el mapa de cobertura de
+   [`auditoria-codigo.md`](../../agent/auditoria-codigo.md) con fecha y números reales, y
+   volcar los sobrevivientes a [`pendientes.md`](../../agent/pendientes.md) — **sin arreglar
+   nada**.
 
 ---
 

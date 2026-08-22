@@ -105,6 +105,36 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **El contagio de `Scope.REQUEST` de `EscalaMonedaPipe` — el spike de contexto en ALS,
+  antes que partir ningún controller** (backend, **medido el 2026-08-21**, **decidido por el
+  owner el 2026-08-22**) — el pipe inyecta `@Inject(REQUEST)` para leer el tenant del token, y
+  Nest propaga el scope **hacia arriba**: el controller anfitrión entero se instancia por
+  request, también sus rutas de lectura. El scope es propiedad de la **instancia**, no del
+  handler, así que en `items.controller.ts` el pipe cuelga de tres handlers de escritura
+  (`:53`, `:66`, `:120`) y las once rutas pagan.
+  **Lo medido** sobre `GET /items`, dos rondas por brazo: secuencial no se nota —los brazos se
+  solapan—; con 20 concurrentes **~7% menos req/s y ~13% más p95**. Tabla completa en el
+  docblock de `escala-moneda.pipe.ts`.
+  ✅ **Decisión del owner (2026-08-22): primero el spike de ALS; partir `ItemsController` es el
+  plan B.** Lo que movió la decisión fue contar el pajar: el pipe cuelga de **once**
+  controllers —`ventas`, `caja`, `pagos`, `salones`, `mermas`, `inventario`,
+  `grupos-modificadores`, `propinas`, `tenants`, `desfases` e `items`—, así que partir `items`
+  arregla lo único medido y deja los otros diez igual.
+  **Qué tiene que medir el spike:** si el pipe puede leer el `tenant_id` desde un ALS de
+  request en vez de `@Inject(REQUEST)`. Si puede, vuelve a ser singleton y el contagio
+  desaparece en los once de una. El precedente del proyecto es
+  `common/db/tx-context.ts` (**ADR-020**), pero **ese ALS lleva hoy el `EntityManager`, no al
+  usuario**: habría que sembrarlo con el `JwtUser`.
+  ⚠️ **Lo primero que el spike tiene que confirmar es el orden de ejecución**, y no está
+  verificado: el middleware corre **antes** de los guards (todavía no hay `req.user`), y si lo
+  siembra un interceptor hay que probar que el pipe se ejecute dentro del `als.run()` —los
+  pipes resuelven los argumentos al suscribirse el observable de `next.handle()`—. Si el orden
+  no da, se cae al plan B sin más vueltas.
+  ⚠️ **Trampa escrita en el propio pipe:** el memo de decimales está cacheado con la clave del
+  tenant **a propósito**, para que sacarle el `Scope.REQUEST` no le sirva los decimales del
+  primer tenant a todos los demás. Al pasar a singleton esa clave deja de ser redundancia y
+  pasa a ser lo único que separa un tenant de otro. Es plata y es multi-tenant.
+
 - [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
   saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
   del proyecto dice que `movimientos_inventario` es la fuente de verdad y `item_producto.stock`
@@ -342,6 +372,69 @@ decisión que no es mía).
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
+
+- [ ] **El `valor` de descuentos y recargos se parte en dos columnas** (backend + BD +
+  frontend, medido 2026-08-21, **decidido por el owner el 2026-08-22**) — el borde de escala
+  valida la plata con un decorador por campo (`@EsMontoCobrado` / `@EsCosto`) que un pipe lee
+  del metadata, y ese campo **no se puede marcar con ninguno de los dos**: es monto fijo **o**
+  porcentaje según el valor del hermano `modo`, y ni el decorador ni el pipe leen campos
+  hermanos.
+  🔴 El punto ciego cae justo en el módulo donde la confusión valor-vs-porcentaje **ya produjo
+  un bug** (un `19` leído como tasa multiplica el impuesto por cien), y deja a
+  `configuracion/descuentos.vue` y `configuracion/recargos.vue` (`form.valor`, `tramo.valor`)
+  como los únicos inputs de plata del inventario que no pueden apoyarse en el rechazo del
+  backend.
+  ✅ **Decisión: opción (2) — `valor_monto` / `valor_porcentaje`, cada una con su marca.** El
+  owner descartó el validador que lee al hermano **aun siendo el más barato**: partir la
+  columna es lo único que hace que el dato deje de ser ambiguo también para **quien lo lee**,
+  no solo para quien lo escribe.
+  **Lo que toca:** esquema, DTOs, motor de precios, seeder y las dos pantallas. La mitad cara
+  de una migración no aplica —no hay datos productivos: se cambia el esquema, se actualiza el
+  seeder y se resetea—.
+  ⚠️ **Trampas para quien la tome:** (a) toca el **motor de cálculo de precios**, así que va
+  sola y con el sistema quieto (`CLAUDE.md` → detenerse ante el motor); (b) el campo `modo` no
+  desaparece solo — la spec tiene que decidir si sobrevive como discriminador o si manda la
+  columna llena, y **las dos formas no pueden convivir sin una invariante que impida llenar
+  las dos**; (c) `tramo.valor` vive dentro de un DTO anidado, y el pipe **no recorre anidados
+  sin `@Type()` en el padre** (limitación conocida, fijada por el test "LIMITACIÓN CONOCIDA").
+
+- [ ] **El garzón "Mostrador" pasa a colgar del módulo `Propinas`** (backend + producto,
+  medido 2026-08-16, **decidido por el owner el 2026-08-22**) — `TenantsService.create:244`
+  llama a `asegurarMostrador` para **todo** tenant nuevo y `ventas.service.ts:733` lo vuelve a
+  asegurar cuando una venta trae `propinaDirecta`, pero las 10 rutas de
+  `garzones.controller.ts` piden `@RequiresPermiso('Salones', …)`: un tenant que nunca va a
+  tener mesas no puede listar, editar ni borrar la fila que el propio sistema le creó.
+  ✅ **Decisión: la gestión del garzón deja de pedir `Salones` y pide `Propinas`.** Cobrar
+  propina directa no exige contratar salones; hoy eso era un efecto lateral y no una regla.
+  **Lo que hay que revertir en el mismo commit:** el parche del seed. A **Demo Bodega** y a
+  **Falabella** se les contrató `Salones` sólo para que la suite corriera
+  (`seeder.service.ts:1457-1464`, con el comentario que lo explica). Si el módulo cambia y el
+  parche queda, el e2e sigue verde por el motivo equivocado y nadie se entera.
+  ⚠️ **Trampas:** (a) `Propinas` existe en el catálogo (`seeder.service.ts:531`) pero **no
+  todos los tenants lo tienen contratado** — hay que decidir qué ve un tenant que no contrató
+  ninguno de los dos y sí tiene un Mostrador creado por el sistema; (b) los roles sembrados
+  que hoy llegan a garzones por `Salones` —`Salones · Encargado`, `seedRolEncargadoSalon`, y
+  la fixture de `garzon-pin.e2e-spec.ts` que necesita `Salones:Operar`— hay que revisarlos
+  uno por uno, o el encargado de salón pierde el garzón al mover el permiso.
+
+- [ ] **El borde `hasta` de los filtros de fecha pasa a ser inclusivo del día, en el backend**
+  (backend + frontend, medido 2026-08-16, **decidido por el owner el 2026-08-22**) — los tres
+  filtros comparan `creado_el <= $hasta`, y con una fecha pura eso es *menor o igual a la
+  medianoche* de ese día, no al final: con `hasta=2026-08-16` el día entero queda afuera
+  (medido contra la base viva). **No es el off-by-one del huso**: normalizar la zona movió ese
+  borde cuatro horas, no lo creó.
+  ✅ **Decisión: el backend filtra `< hasta + 1 día`** — quien elige "16" ve el 16 completo, y
+  el frontend sigue mandando la fecha pura que el usuario eligió (`AppDateInput` emite
+  `YYYY-MM-DD`, verificado).
+  **Dos consecuencias que son parte de la tarea, no arrastre:** (a) `propina-reportes` ya usa
+  `< hasta` **exclusivo** y hay que alinearlo, o el repo queda con dos convenciones y el
+  próximo agente elige la equivocada; (b) `frontend/app/utils/date-value.ts` tiene un
+  `finDiaExclusivoIso` escrito para compensar esto desde el frontend, hoy con **cero
+  llamadores** — con el borde inclusivo en el backend queda muerto y se borra en el mismo
+  commit.
+  ⚠️ **Trampa:** el "+1 día" se suma **en la zona del tenant**, no en UTC, y es `< hasta + 1
+  día`, nunca `<= hasta 23:59:59` — lo segundo se come el último segundo y falla distinto
+  según los decimales del timestamp.
 
 - [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
   persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
@@ -864,143 +957,36 @@ Cada una lleva su pregunta concreta adentro. Mientras no se conteste **no se emp
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner.
-Las 28 restantes se mudaron a la sección 3 —o a la 6, cuando la respuesta las convirtió en
-feature— **cada una con su decisión escrita y con las trampas que el que la tome se iba a
-encontrar**: dependencias entre entradas, carreras adentro del arreglo, docs que hay que
-corregir en el mismo commit, y costos que el owner asumió explícitamente.
-✅ **Y las dos que se abrieron el 2026-08-15 se contestaron el mismo día** (el historial de
-PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
+✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner;
+volvió a poblarse con lo que fueron destapando las tandas siguientes (identidad el 2026-08-16,
+redondeo de plata el 2026-08-21) y con dos entradas que **subieron desde la sección 2** al
+medirlas y caer del lado que exige respuesta.
 
-⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
-identidad de ese día. Ninguna bloquea nada que esté en curso.
-⚠️ **Y tres más el 2026-08-21**: una del cierre del redondeo de plata, y **dos que subieron
-desde la sección 2** al medirlas. Las dos traían su propia regla de qué hacer con el
-resultado, y las dos cayeron del lado que exige respuesta: la moneda oficial **sí** podía
-divergir, y el `Scope.REQUEST` **sí** mueve la aguja bajo concurrencia.
-✅ **Dos de esas tres ya se cerraron el mismo 2026-08-21**: la moneda oficial —el owner
-eliminó `es_default`, ver **ADR-021**— y el descuento con recargo que se compensaban, donde
-eligió que *la etiqueta manda cuando el cliente paga la etiqueta*. Las dos en
-[`resueltos.md`](resueltos.md). **Quedan 7 entradas.**
-La medición está adentro de cada una; lo que falta es la decisión.
+✅ **Segunda tanda completa el 2026-08-22: las 7 entradas abiertas se contestaron de una.**
+Ninguna se quedó sin destino, y cada una se mudó **con su decisión escrita y con las trampas
+que el que la tome se va a encontrar**:
 
-- [ ] **¿Se parte `ItemsController` para sacarle el `Scope.REQUEST` de encima?**
-  (backend, **medido el 2026-08-21**) — la entrada pedía el número y acá está.
-  `EscalaMonedaPipe` es request-scoped y Nest sube el scope al controller anfitrión entero,
-  así que `GET /items` —la lectura más caliente del POS— se instancia por request aunque el
-  pipe cuelgue solo de handlers de escritura.
-  **Medido** sobre `GET /items`, dos rondas por brazo, quitando y reponiendo el pipe:
-  secuencial **no se nota** (6,86/6,95 ms contra 6,54/6,91 — los brazos se solapan); con
-  **20 concurrentes sí**, y en la cola: **~7% menos req/s** (475/481 contra 503/522) y
-  **~13% más p95** (53,0/50,7 contra 46,8/45,3), sin solapamiento en ninguna de las dos.
-  La tabla completa vive en el docblock de `escala-moneda.pipe.ts`.
-  **Por qué sube acá en vez de cerrarse:** la salida que esta entrada daba por conocida
-  —*"no colgar el pipe del handler de lectura"*— **no aplica**, porque ya no cuelga de ahí;
-  el contagio es del controller. La única salida es **partir el controller**, y eso es una
-  decisión de estructura con su propio costo (un controller más, sus guards, sus rutas).
-  **La pregunta:** ¿vale ~7% de throughput en la lectura más caliente, o se acepta y se
-  anota? No cubre memoria/GC ni un catálogo mucho mayor que el del seed.
+| Entrada | Decisión | Dónde quedó |
+|---|---|---|
+| `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Sección 2** |
+| El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Sección 3** |
+| El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
+| El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Sección 3** |
+| La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Sección 7** (falta el momento) |
+| Los roles de un alta pendiente | Siguen sin ser editables, y eso pasa a ser regla escrita | **Cerrada** → [`resueltos.md`](resueltos.md) |
 
-- [ ] **El `valor` de descuentos y recargos NO se puede validar con el diseño del borde, y
-  no es un olvido: es estructural** (backend + producto, **medido 2026-08-21** por la
-  revisión de la tarea 11 del redondeo) — el borde nuevo valida la escala de la plata con un
-  decorador por campo (`@EsMontoCobrado` / `@EsCosto`) que un pipe lee del metadata. **Ese
-  campo no se puede marcar con ninguno de los dos**: es un monto fijo **o** un porcentaje
-  según el valor del campo hermano `modo`, y **ni el decorador ni el pipe leen campos
-  hermanos**.
-  🔴 **Dónde duele:** el punto ciego cae justo en el módulo donde la confusión
-  valor-vs-porcentaje **ya produjo un bug** (un `19` leído como tasa multiplica el impuesto
-  por cien). Y alcanza también al frontend: `configuracion/descuentos.vue` y
-  `configuracion/recargos.vue` (`form.valor`, `tramo.valor`) son los únicos inputs de plata
-  del inventario que **no** pueden apoyarse en el rechazo del backend.
-  **La pregunta para el owner es cuál de estos tres costos prefiere pagar**, porque no hay
-  una cuarta:
-  1. **Un validador que lea el hermano** — `class-validator` sí puede (`@ValidateIf` /
-     validador a nivel objeto), pero el pipe de escala trabaja por campo y habría que darle
-     una segunda forma de resolver la escala. Es infraestructura nueva para un caso.
-  2. **Partir el campo en dos columnas** (`valor_monto` / `valor_porcentaje`), cada una con
-     su marca. Es el arreglo limpio y el más caro: toca esquema, DTOs, motor, seeder y las
-     dos pantallas.
-  3. **Aceptar el hueco y documentarlo**, que es lo que rige hoy de hecho.
-  ⚠️ **Sin respuesta no se empieza**, y en particular **no se elige (1) por ser la más
-  barata**: la opción (2) es la única que hace que el dato deje de ser ambiguo también para
-  quien lo lee, no solo para quien lo escribe.
+ℹ️ **Dos entradas cambiaron de premisa al contestarlas, y la corrección viaja con ellas:** la
+del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del handler de lectura
+—no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
+que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
 
-- [ ] **El garzón "Mostrador" existe para tenants SIN salones, y gestionarlo exige el módulo
-  `Salones`** (backend + producto, **medido 2026-08-16** al cerrar el borde duro de módulos) —
-  `TenantsService.create:244` llama a `asegurarMostrador` para **todo** tenant nuevo, y
-  `ventas.service.ts:733` lo vuelve a asegurar cuando una venta trae `propinaDirecta`. O sea
-  que un tenant que nunca va a tener mesas igual tiene un garzón. Pero **las 10 rutas de
-  `garzones.controller.ts` piden `@RequiresPermiso('Salones', …)`**, así que ese tenant no
-  puede listar, editar ni borrar la fila que el propio sistema le creó.
-  **Estuvo tapado hasta ahora:** mientras el short-circuit de `es_fijo` no miraba
-  `tenant_modulos`, el admin entraba igual y el acoplamiento no se veía. Se destapó al cerrar
-  ese borde: el e2e de papelera empezó a dar `403` en `DELETE /garzones/:id` para Demo Bodega.
-  **Parcheado en el seed, no en el diseño:** se le contrató `Salones` a Demo Bodega para que
-  la suite corra. Es lo correcto para el demo y **no** es el arreglo.
-  **La pregunta para el owner:** ¿el Mostrador y las propinas directas deberían colgar de
-  `Propinas` (o de `Ventas`) en vez de `Salones`, o un tenant que cobra propina directa tiene
-  que contratar `Salones` aunque no tenga una sola mesa? Lo segundo es defendible pero hay que
-  decirlo, porque hoy es un efecto lateral y no una regla.
-
-- [ ] **"Hasta el 16 de agosto" deja fuera todo el 16** (backend + producto, **medido
-  2026-08-16** al normalizar la zona de los filtros de fecha) — es un off-by-one **distinto**
-  del huso, y anterior: los tres filtros comparan `creado_el <= $hasta`, y con una fecha pura
-  eso es *menor o igual a la medianoche* de ese día, no *al final* del día. Medido contra la
-  base viva: con `hasta=2026-08-16` y `now()` a las 17:09 UTC, `now() <= ('2026-08-16'::date::
-  timestamp AT TIME ZONE 'America/Santiago')` da **`f`** — la medianoche local es
-  `2026-08-16 04:00+00`, así que el día entero queda afuera.
-  **Ya pasaba antes del cambio de zona** (con `TimeZone` en UTC el borde era
-  `2026-08-16 00:00+00`, igual de excluyente): normalizar a medianoche local movió el borde
-  cuatro horas, no lo creó.
-  **Lo alcanza cualquiera:** `mermas.vue` y el kardex mandan la fecha pura que el usuario
-  eligió en el calendario, sin sumarle nada — verificado, `AppDateInput` emite `YYYY-MM-DD`.
-  **La pregunta para el owner:** ¿el borde `hasta` es **inclusivo del día** (y entonces el
-  backend filtra `< hasta + 1 día`, y quien elige "16" ve el 16 completo) o **exclusivo** (y
-  entonces lo compensa el frontend)? Las dos existen en el repo: `propina-reportes` ya usa
-  `< hasta` exclusivo, y `frontend/app/utils/date-value.ts` tiene un `finDiaExclusivoIso`
-  escrito para esto — **con cero llamadores hoy** (medido), o sea que alguien vio el problema
-  y la pieza quedó sin conectar.
-  ℹ️ No se tocó al normalizar la zona a propósito: cambiar qué filas devuelve un filtro es
-  decisión de producto, no parte de la corrección del huso.
-
-- [ ] **La pasada de auditoría de las dos lentes nuevas está escrita y sin lanzar — falta el
-  presupuesto** (owner) — el brief completo vive en
-  [`2026-08-15-auditoria-cross-tenant-y-pool.md`](../superpowers/plans/2026-08-15-auditoria-cross-tenant-y-pool.md);
-  pasarle esa ruta al agente cuando se decida disparar. Las dos decisiones de diseño ya están
-  tomadas: la lente del pool va en **modo delta** (se le pasa la tabla del 2026-08-11 como
-  contexto conocido, redescubrir 7 módulos ya documentados es pagar dos veces) y **no se
-  arregla nada**, todo va al backlog.
-  **Lo único que falta es el número.** El método exige fijarlo antes —*"si no se fija antes,
-  la pasada crece hasta donde alcance"*—; la referencia medida es ~1.4M tokens para 5 lentes
-  y la estimación para estas dos, con una en delta, es **300-500k**.
-  ℹ️ **Línea base ya medida** (2026-08-16, conteo mecánico, en el plan): lente del pool ~20
-  candidatos en 7 archivos, con cinco sitios de `ventas.service.ts` verificados a mano y
-  **todavía sin arreglar** → ahí lo pendiente es arreglar, no encontrar, y eso es el frente
-  🔴. Lente cross-tenant ~23 candidatos en 8 archivos, pero **la mayoría son legítimos**
-  (sesiones y perfil propio son por-usuario a propósito): ésa es la que necesita la pasada,
-  porque distinguir el caso legítimo del bug es juicio por sitio y no grep.
-  ⚠️ Al leer el resultado, tener presente lo que el propio método advierte: se decidió
-  reportar sin arreglar, así que **el backlog va a subir, no bajar**.
-
-- [ ] **¿El admin puede editar los roles de un alta pendiente antes de que la persona
-  confirme?** (producto + backend, 2026-08-16) — hoy **no**, y la pantalla lo refleja: las
-  acciones de fila están deshabilitadas para los pendientes, con el motivo escrito. No es una
-  omisión de UI: los roles quedan **congelados en el token** (`tokens_acceso.datos`) hasta que
-  se confirma, y la persona todavía no tiene fila en `usuarios_tenants`, así que
-  `roles.service.ts` → `assignUser` la rechaza con *"El usuario no pertenece a este tenant"*.
-  El admin que se equivocó de roles hoy tiene una sola salida: repetir el alta, que emite un
-  token nuevo y quema el anterior.
-  **La pregunta:** ¿alcanza con eso, o el alta pendiente tiene que ser editable? Lo segundo
-  necesita un endpoint que reescriba `datos.rolIds` del token vivo, y es decisión de producto
-  —no un ajuste de pantalla—. Lo levantó el agente de frontend al construirlo, y se dejó en el
-  camino barato a propósito.
-
-La otra que queda espera una **investigación de mercado pedida y todavía no ejecutada**, no
-una respuesta.
+**Queda 1 entrada**, y no espera una respuesta sino la **investigación de mercado que la
+destraba, lanzada el 2026-08-22**.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
-  (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
+  (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
+  `ventas.service.ts:982` `crearNotaCredito` — la cita vieja decía `:854`, que hoy es otra
+  cosa) —
   **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
   ante impuestos y documentos tributarios; ver **ADR-010**).
   **Lo medido, sin interpretar:** la NC construye su fila de `ventas` **directo**, no por
@@ -1008,8 +994,13 @@ una respuesta.
   `totalImpuestos: '0'`, con `totalBruto = totalFinal = params.monto`. Consecuencias
   encadenadas: (a) cero filas en `ventas_descuentos`/`ventas_recargos`/`ventas_impuestos`,
   así que la NC no dice qué reglas revierte —se llega por la venta que referencia—;
-  (b) `config_calculo` queda `null` en toda NC; (c) `base_ventas_sin_impuestos` se queda en
-  el default de la columna, y ese campo lo consume `liquidacion-propinas.service.ts`.
+  (b) ~~`config_calculo` queda `null` en toda NC~~ — **falso desde el 2026-08-21**: la NC
+  **hereda** el criterio del documento que corrige (`cfgOriginal = original.config_calculo`,
+  `:1035`), y el camino manual falla ruidoso si falta (decisiones P4/P5 del frente de
+  redondeo). Verificado el 2026-08-22, se corrige acá porque este archivo es texto vivo;
+  (c) `base_ventas_sin_impuestos` **sigue** quedándose en el default de la columna —se llena
+  solo en `crearEnTransaccion` (`:472`, `:491`), que la NC no usa—, y ese campo lo consume
+  `liquidacion-propinas.service.ts`.
   Los dos puntos de entrada (`crearNotaCreditoDesdeVenta`) desembocan en el mismo método.
   Lo que la NC **sí** congela es `descripcion` y `clasificacion_tributaria` por línea en
   `venta_detalles`, copiadas de la línea original.
@@ -1024,12 +1015,36 @@ una respuesta.
   devueltas?—, y eso es regla de negocio, no implementación.
   🔎 **El owner pidió una investigación de mercado antes de decidir (2026-08-15).** Es materia
   fiscal, no es obvia, y el owner no es experto del dominio — el caso exacto que
-  [`investigacion-mercado.md`](investigacion-mercado.md) contempla. **Pedida, todavía no
-  ejecutada.** Lo que tiene que traer: qué exige el SII para un DTE 61 en cuanto a
-  `MntNeto`/`IVA`/`MntTotal` propios, y cómo resuelven Toast/Square/Lightspeed la descomposición
-  de una NC emitida **por monto** y no por líneas — que es la forma que este sistema usa y la
-  que hace la pregunta difícil.
-  ⚠️ Regla del cruce: lo que traiga es **insumo para adaptar, no verdad a copiar**.
+  [`investigacion-mercado.md`](investigacion-mercado.md) contempla. ✅ **Corrida y cerrada el 2026-08-22**:
+  [`investigaciones/2026-08-22-descomposicion-nota-credito.md`](investigaciones/2026-08-22-descomposicion-nota-credito.md),
+  con el Formato DTE v2.5 leído completo como fuente primaria.
+
+  **Lo que trajo, y que mueve la pregunta de lugar** (insumo, no decisión — la regla del cruce
+  sigue en pie: si el mercado dice A y el owner dice B, gana B):
+  - **El SII no obliga a descomponer, pero tampoco valida.** En un DTE 61 solo `MntTotal` es
+    obligatorio incondicional; `MntNeto`/`MntExe`/`IVA` son **condicionales**, y el validador
+    del SII *"no rechaza documentos por errores de contenido… como que el IVA no sea igual a
+    la tasa por el monto neto"*. O sea: el argumento a favor de descomponer **no puede ser
+    "si no, el SII lo rechaza"** — sería declarar un documento descuadrado que se acepta igual.
+  - **Nadie en el mercado resuelve nuestro caso.** Ninguno de los 7 productos relevados
+    documenta prorrateo de un monto libre: Square y Toast lo excluyen del desglose fiscal,
+    Clover lo prohíbe por API y obliga a itemizar, Bsale se lo deja a un humano por
+    transacción. Anotado en [`DIFERENCIADORES.md`](../DIFERENCIADORES.md) como hallazgo, no
+    como logro: hoy es un hueco que compartimos.
+  - 🆕 **Un hueco que esta entrada no tenía:** la zona **Detalle es obligatoria en los diez
+    tipos de documento del DTE, NC incluida** — y hoy, con `devoluciones` vacío,
+    `crearNotaCredito` inserta **cero filas** en `venta_detalles` (verificado: las líneas
+    salen de `validarDevolucionesReembolso(..., params.devoluciones ?? [])`, `:1053`). Una NC
+    por monto puro no tendría con qué armar la zona Detalle el día que se integre el SII.
+
+  **Las 6 preguntas abiertas quedan en la §8 de la investigación** y no se copian acá para no
+  duplicar la fuente. La que las destraba a todas es la primera: **¿la NC por monto pasa a
+  declarar neto/exento/IVA, o se mantiene fuera del motor como hoy?** Las otras cinco
+  —prorrateo vs. exigir líneas, qué hacer con la zona Detalle vacía, sobre qué base prorratear,
+  quién decide si lleva IVA, y si conviene partir "NC itemizada" de "NC por monto libre"—
+  dependen de esa respuesta.
+  ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
+  parar. Lo que cambió es que ahora la decisión tiene material abajo.
 
 ## 5. Carreras de concurrencia
 
@@ -1437,6 +1452,25 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 ## 7. Acción del owner fuera del código
 
 No se resuelve programando. Está acá para que tenga quién la reclame.
+
+- [ ] **Disparar la pasada de auditoría de las dos lentes — el presupuesto ya está fijado,
+  falta el momento** (owner, **decidido el 2026-08-22**) — el brief completo vive en
+  [`2026-08-15-auditoria-cross-tenant-y-pool.md`](../superpowers/plans/2026-08-15-auditoria-cross-tenant-y-pool.md);
+  pasarle esa ruta al agente.
+  ✅ **Decisión del owner (2026-08-22): las dos lentes, tope 500k tokens.** Cross-tenant
+  completa —es descubrimiento genuino, ~23 candidatos en 8 archivos, y separar el caso
+  legítimo del bug es juicio por sitio, no grep— y la del pool **en modo delta**, con la tabla
+  del 2026-08-11 pasada como contexto conocido. **No se arregla nada:** todo va al backlog.
+  ℹ️ **Al fijar el número se corrigió una premisa que la entrada arrastraba:** decía que lo
+  pendiente de la lente del pool "es arreglar, no encontrar, y eso es el frente 🔴", y **ese
+  frente cerró el 2026-08-20**. El owner eligió igual las dos: el delta sigue respondiendo si
+  aparecieron sitios nuevos después del 2026-08-11.
+  ⚠️ **Por qué esto es elegir el momento y no volver a decidir:** la lente B se confirma
+  **midiendo contra Postgres** —ráfagas de ~15 requests independientes— y **cada cuelgue deja
+  el backend envenenado hasta un `docker restart`**, así que necesita el stack levantado y la
+  máquina quieta. Un segundo experimento sobre un proceso ya trabado da un falso positivo.
+  ⚠️ Y lo que el propio plan advierte: se decidió reportar sin arreglar, así que **el backlog
+  va a subir, no bajar**.
 
 - [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
   cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída

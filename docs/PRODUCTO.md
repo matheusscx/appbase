@@ -126,6 +126,19 @@ usuario. La administración de roles y la asignación a usuarios se hace desde
 
 **Enforcement:** real en el backend (decisión B). Cada ruta valida rol + módulo contratado + permiso del usuario sobre el tenant activo.
 
+**Un alta pendiente no es editable** (decisión del owner, 2026-08-22). Al dar de alta a
+alguien, los roles elegidos quedan **congelados en el token de confirmación**
+(`tokens_acceso.datos`) y la persona **no tiene fila en `usuarios_tenants`** hasta que
+confirma: no es miembro por construcción, y por eso ninguna lectura de membresía necesita
+conocer un estado intermedio. El admin que se equivocó de roles **repite el alta**: eso
+invalida el link anterior y emite uno nuevo con los roles corregidos —dar de alta dos veces
+deja **un** link válido, el último—.
+Se eligió eso en vez de un endpoint que reescriba los roles del token vivo: el camino barato
+ya deja el sistema consistente, y reemitir el link es además lo seguro, porque el mail viejo
+—con los roles viejos congelados adentro— deja de servir. La pantalla de Usuarios muestra las
+acciones de fila deshabilitadas para los pendientes, con el motivo escrito: **no es una
+omisión de UI, es esta regla**.
+
 ---
 
 ### 4. Gestión de tenants y razones sociales

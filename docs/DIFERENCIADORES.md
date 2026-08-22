@@ -129,6 +129,29 @@ apuntarle a un número cuando no sumás vos.
 
 > Oportunidades detectadas. No hay ni diseño.
 
+### Descomponer el IVA de una nota de crédito emitida por monto
+
+**El hueco:** **ninguno de los 7 productos relevados** —Square, Toast, Clover, Lightspeed,
+Bsale, Defontana, Nubox— documenta un algoritmo que tome un monto de nota de crédito o
+reembolso **libre, no ligado a líneas** de la venta original y lo descomponga en
+neto/exento/IVA prorrateando sobre la mezcla de tasas y exenciones de esa venta. Los tres que
+documentan algo **evitan el problema** por tres caminos distintos: Square y Toast **excluyen**
+el monto libre del desglose fiscal (*"partial refunds will not include tax and tips in
+reporting"*; *"custom amount refunds are not tied to specific items… they do not break down by
+sales category"*); Clover lo **prohíbe** por API cuando hay impuesto y obliga a itemizar; y
+Bsale se lo **delega a un humano** por transacción —el texto que su propia guía sugiere para
+la glosa es *"Verificar si lleva o no lleva IVA esta devolución"*—.
+**Por qué nos toca justo a nosotros:** la NC por monto es **nuestro camino principal**
+(`crearNotaCredito(params.monto)`, con las líneas devueltas como parámetro opcional), o sea
+que el caso que el mercado evita es el que nuestro modelo pone al frente.
+**Estado: 💡 hallazgo, sin diseño y sin decisión.** Hoy la NC declara `total_impuestos = 0`.
+Si el sistema termina resolviéndolo con un mecanismo propio, **ahí** se convierte en
+diferenciador; mientras tanto es un hueco que compartimos con el mercado, y así hay que
+decirlo.
+⚠️ Regla 3 de este archivo: lo relevado es **documentación pública**. Que Square o Toast no
+publiquen el desglose no prueba que internamente no lo calculen.
+**Evidencia:** [investigación 2026-08-22 §3, §4 y §7](agent/investigaciones/2026-08-22-descomposicion-nota-credito.md).
+
 ### Sellar y contar después
 
 **El hueco:** ningún POS de restaurante/retail chico modela *"cerré sin contar porque el
