@@ -516,6 +516,29 @@ empezarlas.
   inalcanzable porque el filtro `tipo = 'fisica'` lo impide, pero si entrara un NULL la fila
   navegaría a `/cajas/historial?usuarioId=null` sin error visible. Una línea.
 
+  📌 **Reencuadre medido el 2026-08-22, y es lo que hay que mirar antes de decidir: esto no es
+  un problema del modo ciego, es que `ventas` y `pagos` NO TIENEN NINGÚN NIVEL DE VISIBILIDAD
+  POR USUARIO.** `caja` sí tiene el modelo de dos niveles —`MiCaja` (la mía) contra `Cajas`
+  (todas), resuelto en `resolverLecturaCompartida` y con chequeos de `usuarioId` explícitos en
+  `historial`, `listarMovimientos` y `verificarAccesoCaja`—. En `ventas` y `pagos` **no existe
+  el eje**: `listar(tenantId, query)`, `findOne(tenantId, ventaId)` y `resumen(tenantId)` no
+  reciben `usuarioId` ni lo consultan. Un cajero con `Ventas:Leer` ve **todas** las ventas del
+  tenant; con `Pagos:Leer`, **todos** los pagos. El modo ciego solo hizo visible esa asimetría.
+  ⚠️ Corolario práctico: tapar el modo ciego endpoint por endpoint es tratar el síntoma. La
+  pregunta de fondo es si `ventas`/`pagos` deben tener el mismo eje "mío/todos" que `caja`.
+
+  ➕ **Dato que achica una parte del problema sin código: el POS no usa `Pagos:Leer`.**
+  `ventas/pos.vue` solo llama a `items`, `metodos-pago`, `tipos-documento` y `POST /ventas` —
+  cero llamadas a `/pagos`. O sea que `Pagos:Leer` en el rol Vendedor del seed **parece
+  incidental**, y sacarlo cerraría las fugas 1 y 4 sin tocar una línea de lógica. ⚠️ **No
+  cierra la 3**, que va por `Ventas:Leer` — permiso que el cajero sí necesita para cobrar una
+  venta pendiente. Verificar antes de sacarlo si algún otro flujo del cajero lo usa.
+
+  ℹ️ Nota sobre el frontend: `ventas/index.vue`, `ventas/pos.vue` y `pagos/index.vue` **no
+  declaran `permiso` en `definePageMeta`** —solo `middleware: 'auth'`—, así que el único gate
+  real es el guard del backend. Correcto según la invariante 6, pero significa que cualquier
+  cambio de alcance hay que hacerlo en el backend: esconder el link del nav no hace nada.
+
   🛑 **La pregunta para el owner, antes de tocar nada — y no es "arreglemos las seis":**
   el esperado **no es un secreto guardable**, es una cuenta que el sistema tiene que hacer para
   operar, y toda validación o listado que toque la plata del turno lo filtra. Taparlas de a una
@@ -529,6 +552,26 @@ empezarlas.
     cierre forzado.
   - **(c) aceptar que el ciego es fricción y no barrera**, y decirlo en la doc en vez de
     prometer un control que no se sostiene.
+
+  ✅ **DECIDIDO POR EL OWNER (2026-08-22), las dos:**
+  1. **`ventas` y `pagos` reciben el eje "mío/todos", igual que `caja`.** El cajero ve solo lo
+     suyo; el listado completo pasa a ser de supervisión. Cierra de raíz las fugas 1, 3 y 4, y
+     arregla algo más grande que el modo ciego: hoy cualquier cajero ve la facturación entera
+     del local.
+  2. **Los dos oráculos se resuelven con RASTRO, no con ocultamiento.** Se registra el intento
+     rechazado —quién, cuándo, con qué monto— y el supervisor lo ve; el chequeo de saldo
+     insuficiente queda intacto, porque existe para impedir retirar plata que no está. El
+     control pasa de preventivo a detectivo, igual que lo ya elegido para el cierre forzado.
+     Veinte retiros rechazados en dos minutos es una firma inconfundible.
+
+  ⚠️ **Restricción medida que condiciona el diseño del punto 1: ni `ventas` ni `pagos` guardan
+  quién los hizo.** `venta` tiene `caja_id` y `canal`, pero **no** un `usuario_id`/`creado_por`
+  (solo `cancelada_por_usuario_id`); `pago` tiene `caja_id` y nada más. Así que "lo mío" **se
+  deriva por la caja** (`venta.caja_id → cajas.usuario_id`), que para una venta física es
+  exacto —la caja está abierta para un solo usuario—. Lo que queda sin regla es la venta
+  **online**, que va contra la caja virtual del tenant y por lo tanto **no tiene dueño**: hay
+  que decidir si el cajero las ve, no las ve, o las ve solo quien tenga supervisión. Diseño en
+  [`specs/2026-08-22-visibilidad-ventas-pagos-design.md`](../superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md).
 
   ⚠️ **Ordena el frente del historial:** bloquear el historial de cajas del cajero (pedido el
   2026-08-22) **no compra nada mientras estas estén abiertas**. El historial es el acumulado de
