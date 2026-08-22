@@ -86,9 +86,13 @@ nombres repetidos a propósito.
 **Reglas:**
 - Dos secretos JWT distintos: uno para access (~15 min), uno para refresh (~7 días)
 - Contraseña hasheada (bcrypt)
-- Stateless: no se persisten sesiones
+- **Los refresh sí se persisten** (`refresh_tokens`): rotan en cada uso, dejan lápida
+  (`usado_el`) para detectar reuso, y se pueden revocar. El access token sigue siendo
+  stateless — se valida por firma, no contra la base.
 
-**[ PENDIENTE ]** ¿Se implementa revocación real de tokens (logout que invalide el refresh)?
+✅ **Contestado (2026-08-22): la revocación real existe**, y no solo en el logout —
+`POST /auth/logout` borra ese refresh; el reuso de un token ya rotado revoca todos los del
+usuario; y cambiar la contraseña o de tenant también revoca. Ver la regla de sesión en §2.
 
 ---
 
@@ -100,6 +104,20 @@ Flujo modular en dos pasos:
 
 1. **GET /perfil** — devuelve datos del usuario + lista de tenants a los que pertenece (solo id y nombre, para mostrar el selector)
 2. **GET /perfil/:tenant_id** — al seleccionar un tenant, carga el detalle completo: rol, módulos accesibles, permisos, monedas configuradas, razones sociales, sub-tenants
+
+**La sesión es de la cuenta, no del tenant** (decisión del owner, 2026-08-22). Una persona
+que pertenece a varios tenants tiene **una sola vida de sesión**: cambiar de tenant activo
+—o cambiar su contraseña— revoca sus refresh tokens **en todos los tenants y en todos sus
+dispositivos**, y tiene que volver a entrar.
+
+**No son sesiones paralelas por tenant, y no hacen falta.** Técnicamente podrían acotarse
+—`refresh_tokens.active_tenant_id` sabe de qué tenant era cada sesión—, pero el owner
+decidió que no: una credencial es de la persona, no del tenant, así que la revocación
+también. Quien opera en dos empresas cambia de contexto y vuelve a entrar.
+
+ℹ️ Salió de la auditoría del 2026-08-22 como pregunta abierta, no como bug: **nadie ajeno
+puede provocarlo** —solo la propia persona, actuando sobre su propia cuenta—. Se documenta
+acá para que no se vuelva a levantar como hallazgo.
 
 ---
 

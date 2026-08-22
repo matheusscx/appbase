@@ -53,11 +53,15 @@ contexto donde se resolvió—, en modo delta.
   candidato de la lente A porque ya tiene `tenant_id` propio.
 - **Una corrección de dato de un buscador:** `refresh_tokens` **sí** tiene columna de tenant
   (`active_tenant_id`), contra lo que afirmó su reporte.
-- **Una pregunta de producto para el owner**, que ninguna lente reportó porque con su lente
-  puesta no era un bug: **una persona en dos tenants tiene una sola vida de sesión** —cambiar
-  de tenant o la contraseña revoca los refresh de todos los tenants—. Nadie ajeno puede
-  provocarlo, y la tabla sabe de qué tenant era cada sesión. Si el owner la quiere, es entrada
-  nueva; si no, se documenta y se cierra.
+- **Una pregunta de producto que ninguna lente reportó** porque con su lente puesta no era un
+  bug: una persona en dos tenants tiene **una sola vida de sesión** —cambiar de tenant o la
+  contraseña revoca los refresh de todos—. ✅ **Contestada el mismo día: el owner decidió que
+  las sesiones paralelas por tenant no hacen falta.** La regla quedó escrita en `PRODUCTO.md`
+  §2 (*"la sesión es de la cuenta, no del tenant"*) y **no abrió entrada**: se documenta
+  justamente para que no se vuelva a levantar como hallazgo. De paso se corrigió en
+  `PRODUCTO.md` §1 una línea que decía *"Stateless: no se persisten sesiones"* —falso, los
+  refresh se persisten, rotan y dejan lápida— y se contestó el `[ PENDIENTE ]` sobre
+  revocación real, que existe desde hace rato.
 - **Una regla de método nueva**, escrita en `auditoria-codigo.md`: *una pasada en cero se
   audita a sí misma preguntando de qué afirmación depende ese cero*. Si esa afirmación no se
   abrió y se leyó, el cero está aceptado, no verificado.
