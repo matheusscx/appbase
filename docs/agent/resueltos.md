@@ -17,6 +17,75 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La gestión de garzones la habilitan Salones **o** Propinas (2026-08-22)
+
+Cierra la entrada *"El garzón «Mostrador» pasa a colgar del módulo `Propinas`"* (medida el
+2026-08-16, decidida el 2026-08-22). **La decisión se ejecutó con una corrección**, y el
+owner la confirmó antes de escribir código.
+
+### Por qué no se mudó a `Propinas`, que era lo decidido
+
+Mudarlo rompía el caso espejo: un tenant con mesas y **sin** el módulo de propinas dejaba de
+poder crear garzones y asignarles PIN, y el rol sembrado `Salones · Encargado` —descrito
+literalmente como *"administra garzones y salones"*— perdía la mitad. **El e2e no lo habría
+cazado**: Paris tiene los dos módulos contratados, así que la suite quedaba verde por el
+motivo equivocado, que es exactamente lo que la entrada pedía evitar con el parche del seed.
+
+El garzón no es una entidad de salones que las propinas usan de prestado: lo crea el alta de
+**todo** tenant (`asegurarMostrador`), atiende mesas y cobra propinas. Colgarlo de un solo
+módulo es lo que produjo el problema; elegir el otro lo produce al revés.
+
+### El síntoma real era peor que el de la entrada
+
+La entrada decía que el tenant no podía administrar la fila que el sistema le creó. Medido:
+`frontend/app/pages/propinas/index.vue` —la pantalla de liquidación, del módulo `Propinas`—
+llama a `GET /garzones`, que pedía `Salones:Leer`. Un tenant con Propinas y sin Salones **no
+podía abrir su propia pantalla de propinas**.
+
+### Lo construido
+
+- **`@RequiresAlgunPermiso(...)`**: alternativas, alcanza con una. La metadata de
+  `@RequiresPermiso` pasó a ser **siempre una lista** (aunque 152 de 153 rutas tengan un solo
+  par) para que el guard tenga una sola forma que leer en vez de ramificar por el shape de su
+  propia metadata. El guard corta en la primera alternativa que da.
+- **Las 10 rutas eran dos grupos, no uno.** Las 8 de administración aceptan los dos módulos;
+  `verificar-pin`, `mi-vinculo` y `para-selector` **siguen pidiendo `Salones:Operar`**: son el
+  teclado de PIN de la pantalla del salón. El POS no las usa —la propina directa no toca
+  ninguna ruta de garzones, el backend resuelve el Mostrador dentro de la venta—.
+- **`Propinas:Crear/Actualizar/Eliminar`**, que no existían: el módulo solo tenía `Leer`,
+  `Configurar` y `Liquidar`. Sin esas filas un rol no-admin no puede recibir el permiso (al
+  admin le alcanza con el módulo contratado, por el short-circuit de `es_fijo`).
+- **El parche del seed, revertido en el mismo commit**, como pedía la entrada: Demo Bodega
+  deja de contratar `Salones` —una bodega sin mesas— y pasa a contratar `Propinas`, que es lo
+  que de verdad usa.
+- **Frontend**: `usePermisosCrud` acepta una lista de módulos, con la misma semántica de
+  "alcanza con uno", y la pantalla de garzones pasa `['Salones', 'Propinas']`.
+
+### El detalle del seed que la entrada contaba mal
+
+Decía que el parche se le había puesto *"a **Demo Bodega** y a **Falabella**"*. Es **un solo
+tenant**: `550e8400-…-440040` se llama "Demo Bodega", su correo es `@falabella.cl` y la
+constante del seeder se llama `FALABELLA`. Un solo contrato que revertir, no dos.
+
+### Los tests, y el que hubo que dar vuelta
+
+- Spec nueva de `PermisosGuard` (6 casos), que **no tenía spec propia**: el guard que sostiene
+  la invariante 6 se probaba solo de rebote por e2e.
+- Dos e2e en `modulo-contratado-borde-duro.e2e-spec.ts`: el tenant con Propinas y sin Salones
+  gestiona su garzón, y —la otra mitad— el rol `Salones · Encargado`, que no tiene ningún
+  permiso de Propinas, sigue pudiendo. **Validado con mutante**: revirtiendo solo el decorador
+  de `GET /garzones` el primero falla.
+- ⚠️ **Esa suite estaba construida sobre "Demo Bodega NO tiene Propinas"**, que es justo lo
+  que este cambio da vuelta. Se le cambió el módulo de ejemplo a `Salones`, que ahora es el que
+  Demo Bodega no tiene. La propiedad que fija no cambió; cambió cuál de los dos módulos la
+  ilustra.
+- ⚠️ **Y tres asserts de `caja.controller.spec.ts` comparaban la metadata contra un objeto
+  pelado.** Con la metadata vuelta lista, el `not.toEqual({...})` de uno de ellos pasaba
+  **siempre** —una lista nunca es igual a un objeto— y dejaba de proteger nada. Se pasó a
+  `not.toContainEqual`.
+
+---
+
 ## Los recargos por escalones de monto existen (2026-08-22)
 
 Cierra la **parte 1** de la entrada *"La plomería de tramos en `recargos` es alcanzable y no

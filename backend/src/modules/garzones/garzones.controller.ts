@@ -16,7 +16,10 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
-import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import {
+  RequiresPermiso,
+  RequiresAlgunPermiso,
+} from '../../common/decorators/requires-permiso.decorator';
 import { QueryListarGarzonesDto } from './dto/query-listar-garzones.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GarzonesService } from './garzones.service';
@@ -27,9 +30,22 @@ import { QuerySelectorGarzonesDto } from './dto/query-selector-garzones.dto';
 import { CredencialGarzonDto } from '../../common/dto/credencial-garzon.dto';
 
 /**
- * Gestión de garzones. Reutiliza el módulo RBAC `Salones`: el CRUD de
- * administración usa las acciones Leer/Crear/Actualizar/Eliminar; la
- * identificación operativa por PIN usa `Operar`.
+ * Gestión de garzones. **Dos grupos de rutas con reglas distintas, y la
+ * distinción es lo que importa acá** (2026-08-22):
+ *
+ * - **Administración** (listar, crear, editar, PIN, permiso-operar, borrar,
+ *   restaurar): la habilita `Salones` **o** `Propinas`, cualquiera de los dos.
+ *   El garzón no es una entidad de salones que las propinas usan de prestado:
+ *   lo crea el alta de TODO tenant (`asegurarMostrador`), atiende mesas y cobra
+ *   propinas. Colgarlo solo de `Salones` dejaba a un tenant que solo cobra
+ *   propina directa sin poder abrir su propia pantalla de liquidación —esa
+ *   pantalla lista garzones—, y colgarlo solo de `Propinas` habría roto en
+ *   espejo al tenant con mesas y sin ese módulo.
+ * - **Operación del salón** (`verificar-pin`, `mi-vinculo`, `para-selector`):
+ *   siguen pidiendo `Salones:Operar`, y NO se les agregó la alternativa. Son el
+ *   teclado de PIN de la pantalla del salón; el POS no las usa (la propina
+ *   directa no toca ninguna ruta de garzones: el backend resuelve el Mostrador
+ *   por su cuenta dentro de la venta).
  */
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('garzones')
@@ -68,7 +84,10 @@ export class GarzonesController {
   }
 
   @Get()
-  @RequiresPermiso('Salones', 'Leer')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Leer' },
+    { modulo: 'Propinas', permiso: 'Leer' },
+  )
   listar(@Req() req: Request, @Query() query: QueryListarGarzonesDto) {
     const user = req.user as { tenantId: string };
     return this.garzonesService.listar(
@@ -79,14 +98,20 @@ export class GarzonesController {
   }
 
   @Post()
-  @RequiresPermiso('Salones', 'Crear')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Crear' },
+    { modulo: 'Propinas', permiso: 'Crear' },
+  )
   crear(@Req() req: Request, @Body() dto: CreateGarzonDto) {
     const user = req.user as JwtUser;
     return this.garzonesService.crear(user.tenantId!, user.id, dto);
   }
 
   @Patch(':id')
-  @RequiresPermiso('Salones', 'Actualizar')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Actualizar' },
+    { modulo: 'Propinas', permiso: 'Actualizar' },
+  )
   actualizar(
     @Req() req: Request,
     @Param('id') id: string,
@@ -99,8 +124,9 @@ export class GarzonesController {
   /**
    * Le da a la cuenta vinculada el permiso de operar el salón.
    *
-   * `Salones:Actualizar` y **no** `TenantAdminGuard`: es el mismo permiso con
-   * el que se vincula la cuenta, y el aviso que dice *"…hasta que se lo des"*
+   * El permiso de administración (`Salones` o `Propinas`, acción `Actualizar`)
+   * y **no** `TenantAdminGuard`: es el mismo permiso con el que se vincula la
+   * cuenta, y el aviso que dice *"…hasta que se lo des"*
    * se le muestra exactamente a quien tiene este permiso. Que ese aviso fuera
    * una instrucción que su lector podía no poder ejecutar es lo que esta ruta
    * cierra (decisión del owner, 2026-08-15).
@@ -111,7 +137,10 @@ export class GarzonesController {
    * cuenta que lo recibe sale de la fila del garzón, no del request.
    */
   @Post(':id/permiso-operar')
-  @RequiresPermiso('Salones', 'Actualizar')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Actualizar' },
+    { modulo: 'Propinas', permiso: 'Actualizar' },
+  )
   otorgarPermisoOperar(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.otorgarPermisoOperar(user.tenantId!, id);
@@ -119,7 +148,10 @@ export class GarzonesController {
 
   /** Regenera el PIN del garzón y lo devuelve una sola vez. */
   @Patch(':id/pin')
-  @RequiresPermiso('Salones', 'Actualizar')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Actualizar' },
+    { modulo: 'Propinas', permiso: 'Actualizar' },
+  )
   regenerarPin(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.regenerarPin(user.tenantId!, user.id, id);
@@ -130,21 +162,30 @@ export class GarzonesController {
    * permiso con el que se lee el resto de la ficha.
    */
   @Get(':id/pin-eventos')
-  @RequiresPermiso('Salones', 'Leer')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Leer' },
+    { modulo: 'Propinas', permiso: 'Leer' },
+  )
   listarEventosPin(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.listarEventosPin(user.tenantId!, id);
   }
 
   @Delete(':id')
-  @RequiresPermiso('Salones', 'Eliminar')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Eliminar' },
+    { modulo: 'Propinas', permiso: 'Eliminar' },
+  )
   eliminar(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.eliminar(user.tenantId!, user.id, id);
   }
 
   @Post(':id/restaurar')
-  @RequiresPermiso('Salones', 'Eliminar')
+  @RequiresAlgunPermiso(
+    { modulo: 'Salones', permiso: 'Eliminar' },
+    { modulo: 'Propinas', permiso: 'Eliminar' },
+  )
   restaurar(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.restaurar(user.tenantId!, id);

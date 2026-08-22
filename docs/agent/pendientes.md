@@ -368,25 +368,6 @@ empezarlas.
   las dos**; (c) `tramo.valor` vive dentro de un DTO anidado, y el pipe **no recorre anidados
   sin `@Type()` en el padre** (limitación conocida, fijada por el test "LIMITACIÓN CONOCIDA").
 
-- [ ] **El garzón "Mostrador" pasa a colgar del módulo `Propinas`** (backend + producto,
-  medido 2026-08-16, **decidido por el owner el 2026-08-22**) — `TenantsService.create:244`
-  llama a `asegurarMostrador` para **todo** tenant nuevo y `ventas.service.ts:733` lo vuelve a
-  asegurar cuando una venta trae `propinaDirecta`, pero las 10 rutas de
-  `garzones.controller.ts` piden `@RequiresPermiso('Salones', …)`: un tenant que nunca va a
-  tener mesas no puede listar, editar ni borrar la fila que el propio sistema le creó.
-  ✅ **Decisión: la gestión del garzón deja de pedir `Salones` y pide `Propinas`.** Cobrar
-  propina directa no exige contratar salones; hoy eso era un efecto lateral y no una regla.
-  **Lo que hay que revertir en el mismo commit:** el parche del seed. A **Demo Bodega** y a
-  **Falabella** se les contrató `Salones` sólo para que la suite corriera
-  (`seeder.service.ts:1457-1464`, con el comentario que lo explica). Si el módulo cambia y el
-  parche queda, el e2e sigue verde por el motivo equivocado y nadie se entera.
-  ⚠️ **Trampas:** (a) `Propinas` existe en el catálogo (`seeder.service.ts:531`) pero **no
-  todos los tenants lo tienen contratado** — hay que decidir qué ve un tenant que no contrató
-  ninguno de los dos y sí tiene un Mostrador creado por el sistema; (b) los roles sembrados
-  que hoy llegan a garzones por `Salones` —`Salones · Encargado`, `seedRolEncargadoSalon`, y
-  la fixture de `garzon-pin.e2e-spec.ts` que necesita `Salones:Operar`— hay que revisarlos
-  uno por uno, o el encargado de salón pierde el garzón al mover el permiso.
-
 - [ ] **El default del checkbox de anulación cuando la línea ya se despachó a cocina**
   (backend + frontend, decisión 2 del owner del 2026-08-15; **pieza C** de la entrada
   *"anular una venta con recetas no repone"*, cerrada el 2026-08-22 →

@@ -90,6 +90,10 @@ naturaleza de la acción**:
 - **`@RequiresPermiso('Modulo','Accion')` (permiso de módulo, delegable)** → **operación del
   día a día**: caja (`MiCaja`/`Cajas`), ventas, pagos, inventario, etc. Un rol custom lo puede
   recibir sin ser admin.
+- **`@RequiresAlgunPermiso(...)` (varios módulos, alcanza con uno)** → lo que **de verdad
+  comparten** dos módulos. Hoy tiene un solo uso: la administración de garzones, que habilitan
+  `Salones` **o** `Propinas` (2026-08-22, ver [garzones](garzones.md)). No es un atajo para
+  no decidir a qué módulo pertenece una ruta.
 
 **Los tres ejes de rol (no confundir):** el **admin/dueño** fija políticas; el **supervisor
 contratado** tiene permisos de módulo (`Cajas:*`), es operativo y es un posible vector de

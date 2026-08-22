@@ -25,10 +25,19 @@ export interface PermisosCrud {
  * `Actualizar`. Cada control se gatea con el permiso que exige **su** endpoint;
  * ver `docs/patterns/frontend.md` §1.1.
  */
-export function usePermisosCrud(modulo: string): PermisosCrud {
+export function usePermisosCrud(modulo: string | string[]): PermisosCrud {
   const permissionsStore = usePermissionsStore()
+  // Una lista de módulos significa "alcanza con uno", espejo exacto de
+  // `@RequiresAlgunPermiso` en el backend. Lo pide la gestión de garzones, que
+  // habilitan `Salones` o `Propinas`: si acá se gateara con uno solo, la
+  // pantalla le escondería los botones a media verdad — el backend los
+  // aceptaría igual, que es el peor de los dos errores posibles porque nadie
+  // lo reporta como bug de permisos.
+  const modulos = Array.isArray(modulo) ? modulo : [modulo]
   const puede = (permiso: string) =>
-    computed(() => permissionsStore.esAdmin || permissionsStore.can(modulo, permiso))
+    computed(() =>
+      permissionsStore.esAdmin || modulos.some(m => permissionsStore.can(m, permiso)),
+    )
 
   return {
     puedeLeer: puede('Leer'),

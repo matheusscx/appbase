@@ -888,6 +888,26 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: PROPINAS,
         permisoId: LIQUIDAR,
       },
+      // Crear/Actualizar/Eliminar de Propinas existen desde el 2026-08-22 por
+      // la gestión de garzones, que ahora habilitan `Salones` **o** `Propinas`
+      // (ver `garzones.controller.ts`). Sin estas tres filas, un tenant que
+      // contrató Propinas y no Salones podía leer la pantalla de liquidación
+      // pero no dar de alta ni editar al garzón que la propia alta le creó.
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440357',
+        moduloAppId: PROPINAS,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440358',
+        moduloAppId: PROPINAS,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440359',
+        moduloAppId: PROPINAS,
+        permisoId: ELIMINAR,
+      },
     ];
 
     for (const data of entries) {
@@ -1455,18 +1475,20 @@ export class SeederService implements OnApplicationBootstrap {
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
       {
-        // Falabella → Salones, por el mismo motivo y con la misma fecha. No es
-        // que la bodega tenga mesas: `TenantsService.create` le crea a TODO
-        // tenant un garzón placeholder "Mostrador" (`asegurarMostrador`), y las
-        // rutas que lo gestionan piden el módulo `Salones`. Un tenant que cobra
-        // propina directa tiene garzón sí o sí, así que sin esto no puede
-        // administrar algo que el propio alta le creó.
-        // ⚠️ Ese acoplamiento —placeholder para tenants SIN salones, gestionado
-        // detrás del módulo Salones— quedó anotado en `pendientes.md`: taparlo
-        // con seed es lo correcto para el demo, no el arreglo del diseño.
+        // Falabella → **Propinas**, y este contrato dice algo del negocio en vez
+        // de tapar un acoplamiento.
+        //
+        // Hasta el 2026-08-22 acá decía `Salones`, contratado a una bodega sin
+        // mesas por una sola razón: `TenantsService.create` le crea a TODO
+        // tenant el garzón placeholder "Mostrador" (`asegurarMostrador`) y las
+        // rutas que lo gestionan pedían el módulo `Salones`. Era un parche de
+        // seed, anotado como tal. Ahora la gestión del garzón la habilitan
+        // `Salones` **o** `Propinas`, así que la bodega contrata lo que de
+        // verdad usa —cobra propina directa desde el POS— y deja de figurar
+        // como un tenant con salones que no tiene.
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440351',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
-        moduloAppId: '550e8400-e29b-41d4-a716-446655440222',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440257',
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },

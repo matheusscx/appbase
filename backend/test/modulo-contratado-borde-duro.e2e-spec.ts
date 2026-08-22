@@ -17,7 +17,15 @@ import { AppModule } from '../src/app.module';
  * aislamiento sino comercial:** no veía datos ajenos, veía módulos que no pagó.
  *
  * Los dos tenants del seed sirven de fixture natural: Demo Restaurante tiene
- * `Propinas` contratado y Demo Bodega no.
+ * `Salones` contratado y Demo Bodega no.
+ *
+ * ⚠️ **El par era `Propinas` hasta el 2026-08-22 y hubo que darlo vuelta.** Ese
+ * día la gestión de garzones pasó a habilitarla `Salones` **o** `Propinas`, y
+ * con eso Demo Bodega —una bodega sin mesas que cobra propina directa— dejó de
+ * tener `Salones` contratado de mentira y pasó a contratar `Propinas`, que es lo
+ * que de verdad usa. O sea que el módulo que Demo Bodega NO tiene ahora es
+ * `Salones`. La propiedad que esta suite fija no cambió; cambió cuál de los dos
+ * módulos sirve de ejemplo.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -76,13 +84,14 @@ describe('El módulo contratado es un borde duro, también para el admin (e2e)',
     await app.close();
   });
 
-  const RUTA_PROPINAS =
-    '/api/propinas/reportes/resumen?desde=2026-08-01&hasta=2026-08-31';
+  // Una ruta del módulo `Salones` que NO sea de garzones: esas aceptan también
+  // `Propinas` desde el 2026-08-22, así que no distinguirían nada acá.
+  const RUTA_SALONES = '/api/salones';
 
   it('el admin del tenant CON el módulo contratado entra', async () => {
     const token = await loginEn(app, PARIS_TENANT_ID);
     const res = await request(app.getHttpServer())
-      .get(RUTA_PROPINAS)
+      .get(RUTA_SALONES)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
   });
@@ -90,7 +99,7 @@ describe('El módulo contratado es un borde duro, también para el admin (e2e)',
   it('el mismo admin, en el tenant SIN el módulo, recibe 403', async () => {
     const token = await loginEn(app, FALABELLA_TENANT_ID);
     const res = await request(app.getHttpServer())
-      .get(RUTA_PROPINAS)
+      .get(RUTA_SALONES)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
   });
@@ -116,5 +125,71 @@ describe('El módulo contratado es un borde duro, también para el admin (e2e)',
       .get('/api/items?pageSize=1')
       .set('Authorization', `Bearer ${token}`);
     expect(resItems.status).toBe(200);
+  });
+
+  /**
+   * El garzón le sirve a los dos módulos: lo crea el alta de TODO tenant
+   * (`asegurarMostrador`), atiende mesas en Salones y cobra propinas en
+   * Propinas. Hasta el 2026-08-22 su gestión pedía `Salones` a secas, así que
+   * una bodega que solo cobra propina directa no podía administrar el garzón
+   * que el propio alta le había creado — ni abrir su pantalla de liquidación,
+   * que lista garzones.
+   */
+  describe('la gestión de garzones la habilita Salones O Propinas', () => {
+    it('el tenant con Propinas y SIN Salones puede gestionar su garzón', async () => {
+      const token = await loginEn(app, FALABELLA_TENANT_ID);
+
+      // No tiene Salones: la prueba de que el permiso ya no sale de ahí.
+      const salones = await request(app.getHttpServer())
+        .get('/api/salones')
+        .set('Authorization', `Bearer ${token}`);
+      expect(salones.status).toBe(403);
+
+      const listado = await request(app.getHttpServer())
+        .get('/api/garzones')
+        .set('Authorization', `Bearer ${token}`);
+      expect(listado.status).toBe(200);
+
+      // Y no es solo lectura: el alta también.
+      const creado = await request(app.getHttpServer())
+        .post('/api/garzones')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `Garzón bodega E2E ${Date.now()}` });
+      expect(creado.status).toBe(201);
+    });
+
+    it('el tenant con Salones y SIN Propinas sigue pudiendo, que es la otra mitad', async () => {
+      // La mitad que se rompía si la gestión se MUDABA a Propinas en vez de
+      // aceptar los dos. Paris tiene los dos módulos, así que el fixture que
+      // discrimina no es el tenant sino el ROL: `encargado.salon@paris.cl`
+      // lleva el rol `Salones · Encargado`, con permisos de Salones y ninguno
+      // de Propinas.
+      const resLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: 'encargado.salon@paris.cl', password: 'admin' });
+      expect(resLogin.status).toBe(200);
+      const inicial = (resLogin.body as TokenResponse).access_token;
+      const resTenant = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set('Authorization', `Bearer ${inicial}`)
+        .send({ tenantId: PARIS_TENANT_ID });
+      expect(resTenant.status).toBe(200);
+      const token = (resTenant.body as TokenResponse).access_token;
+
+      // No tiene Propinas: si la gestión se hubiera mudado allá, esto sería 403.
+      const propinas = await request(app.getHttpServer())
+        .get('/api/propinas/distribucion')
+        .set('Authorization', `Bearer ${token}`);
+      expect(propinas.status).toBe(403);
+
+      const listado = await request(app.getHttpServer())
+        .get('/api/garzones')
+        .set('Authorization', `Bearer ${token}`);
+      expect(listado.status).toBe(200);
+    });
   });
 });

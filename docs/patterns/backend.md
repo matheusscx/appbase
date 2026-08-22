@@ -182,6 +182,14 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
   (ej.: `caja.controller.ts`). Un rol `es_fijo` (admin) tiene acceso total vía
   short-circuit en `RbacService.userHasPermiso`.
 
+> **Una ruta puede aceptar MÁS DE UN módulo** (`@RequiresAlgunPermiso`, 2026-08-22): alcanza
+> con tener la acción en **uno** de los declarados. Es para lo que de verdad comparten dos
+> módulos, y el caso que lo trajo es el garzón — lo crea el alta de todo tenant, atiende mesas
+> en `Salones` y cobra propinas en `Propinas`—, no para esquivar la decisión de a qué módulo
+> pertenece una ruta: si la duda es cuál de los dos corresponde, la respuesta es **elegir**.
+> Cada alternativa es una consulta más a RBAC (corta en la primera que da), y la lista la fija
+> el decorador, nunca los datos.
+>
 > **Excepción — política dentro de un módulo operativo:** una acción concreta puede ser
 > admin-only (`TenantAdminGuard`) aunque su módulo sea RBAC, cuando es una **política** que un
 > rol operativo no debería poder cambiarse a sí mismo (ej. `PUT /caja/arqueo-ciego`: apagar el

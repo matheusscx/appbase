@@ -222,8 +222,18 @@ Responsable vigente, transferencia por PIN/admin e historial:
   `pin_hash`. Si se pierde: **sin cuenta** el encargado regenera y el nuevo se muestra una
   vez; **con cuenta** la persona fija otro desde su perfil. En los dos casos el anterior
   deja de funcionar de inmediato.
-- **RBAC**: reutiliza el módulo contratado `Salones` (sin nuevo `tenant_modulos`). El
-  CRUD usa `Leer/Crear/Actualizar/Eliminar`; la identificación por PIN usa `Operar`.
+- **RBAC (cambiado el 2026-08-22)**: la administración la habilita el módulo `Salones`
+  **o** `Propinas` —cualquiera de los dos, vía `@RequiresAlgunPermiso`—, con las acciones
+  `Leer/Crear/Actualizar/Eliminar`. La identificación por PIN sigue pidiendo
+  `Salones:Operar` a secas.
+  **Por qué los dos:** el garzón no es una entidad de salones que las propinas usan de
+  prestado. Lo crea el alta de **todo** tenant (`asegurarMostrador`), atiende mesas y cobra
+  propinas. Con `Salones` a secas, un tenant que solo cobra propina directa desde el POS no
+  podía administrar el garzón que su propia alta le creó **ni abrir su pantalla de
+  liquidación**, que lista garzones; y mudarlo a `Propinas` habría roto en espejo al tenant
+  con mesas y sin ese módulo, incluido el rol sembrado `Salones · Encargado`, cuya
+  descripción dice literalmente *"administra garzones y salones"*.
+  No hay `tenant_modulos` nuevo: los dos módulos ya existían.
 
 ---
 
@@ -235,21 +245,24 @@ ruta**: `PermisosGuard` es `return true` sin el decorador. Las dos rutas de **"m
 omiten a propósito** — un garzón puede no tener ningún permiso de módulo, y su PIN es suyo;
 el corte lo hace el token, que decide de qué garzón se está hablando.
 
-| Método | Ruta | Permiso (`Salones`) | Descripción |
+En la tabla, **`Salones`/`Propinas`** significa que alcanza con tener esa acción en
+**cualquiera** de los dos módulos; **`Salones`** a secas es solo ese.
+
+| Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/garzones` | `Leer` | Lista garzones del tenant (sin `pin_hash`); `?incluirEliminados=true` suma la papelera; `?conPermisos=true` suma `cuentaEsMiembro` y `puedeOperarSalon` |
-| POST | `/garzones` | `Crear` | Crea `{ nombre, activo?, tipo?, usuarioId? }` → el garzón + `advertencias` + `pin`: **sin** `usuarioId` el generado (una vez), **con** cuenta `null` (no se emite ninguno) |
-| PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo?, tipo?, usuarioId? }` → el garzón + `advertencias`. `usuarioId: null` desvincula; **ausente** no toca el vínculo |
-| PATCH | `/garzones/:id/pin` | `Actualizar` | Sin body. **Sin cuenta** regenera y devuelve el `pin` nuevo (una vez); **con cuenta** invalida y devuelve `pin: null`. Suma `habiaPin`: si había uno usable antes de este PATCH |
-| GET | `/garzones/:id/pin-eventos` | `Leer` | `{ eventos, total }`: los **últimos 50**, más nuevos primero, y cuántos hay en total. **Nunca** el PIN |
-| DELETE | `/garzones/:id` | `Eliminar` | Soft delete |
-| POST | `/garzones/:id/permiso-operar` | `Actualizar` | Le da `Salones:Operar` a la cuenta vinculada, **sin ser admin**. La cuenta sale de la fila del garzón, no del request — ver [roles y permisos](roles-permisos.md#roles-de-sistema-es_sistema-2026-08-16) |
-| POST | `/garzones/:id/restaurar` | `Eliminar` | Saca de la papelera |
+| GET | `/garzones` | `Salones`/`Propinas` · `Leer` | Lista garzones del tenant (sin `pin_hash`); `?incluirEliminados=true` suma la papelera; `?conPermisos=true` suma `cuentaEsMiembro` y `puedeOperarSalon` |
+| POST | `/garzones` | `Salones`/`Propinas` · `Crear` | Crea `{ nombre, activo?, tipo?, usuarioId? }` → el garzón + `advertencias` + `pin`: **sin** `usuarioId` el generado (una vez), **con** cuenta `null` (no se emite ninguno) |
+| PATCH | `/garzones/:id` | `Salones`/`Propinas` · `Actualizar` | Actualiza `{ nombre?, activo?, tipo?, usuarioId? }` → el garzón + `advertencias`. `usuarioId: null` desvincula; **ausente** no toca el vínculo |
+| PATCH | `/garzones/:id/pin` | `Salones`/`Propinas` · `Actualizar` | Sin body. **Sin cuenta** regenera y devuelve el `pin` nuevo (una vez); **con cuenta** invalida y devuelve `pin: null`. Suma `habiaPin`: si había uno usable antes de este PATCH |
+| GET | `/garzones/:id/pin-eventos` | `Salones`/`Propinas` · `Leer` | `{ eventos, total }`: los **últimos 50**, más nuevos primero, y cuántos hay en total. **Nunca** el PIN |
+| DELETE | `/garzones/:id` | `Salones`/`Propinas` · `Eliminar` | Soft delete |
+| POST | `/garzones/:id/permiso-operar` | `Salones`/`Propinas` · `Actualizar` | Le da `Salones:Operar` a la cuenta vinculada, **sin ser admin**. La cuenta sale de la fila del garzón, no del request — ver [roles y permisos](roles-permisos.md#roles-de-sistema-es_sistema-2026-08-16) |
+| POST | `/garzones/:id/restaurar` | `Salones`/`Propinas` · `Eliminar` | Saca de la papelera |
 | PATCH | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ pin, confirmarPin }` → `204`. El garzón fija el suyo; **no pide el anterior**. `404` si esa cuenta no es garzón en este tenant |
 | GET | `/garzones/mi-pin` | — (solo JWT + tenant) | `{ fijado, eventos, total }`: alimenta el bloque "Mi PIN" del perfil. `eventos`/`total`, igual que arriba |
-| GET | `/garzones/mi-vinculo` | `Operar` | El garzón que "es" esta cuenta, o `null` si hay que pedir PIN |
-| GET | `/garzones/para-selector?enTurno=` | `Operar` | Las dos listas del selector → `{ garzonId, nombre }[]`. `enTurno` **obligatorio** |
-| POST | `/garzones/verificar-pin` | `Operar` | `{ garzonId, pin }` → `{ garzonId, nombre }` (o 400), **sin ejecutar nada** |
+| GET | `/garzones/mi-vinculo` | `Salones` · `Operar` | El garzón que "es" esta cuenta, o `null` si hay que pedir PIN |
+| GET | `/garzones/para-selector?enTurno=` | `Salones` · `Operar` | Las dos listas del selector → `{ garzonId, nombre }[]`. `enTurno` **obligatorio** |
+| POST | `/garzones/verificar-pin` | `Salones` · `Operar` | `{ garzonId, pin }` → `{ garzonId, nombre }` (o 400), **sin ejecutar nada** |
 
 ⚠️ `mi-pin` está declarada **antes** de `@Patch(':id')` en el controller: Nest resuelve por
 orden, así que invertirlas mandaría `PATCH /garzones/mi-pin` a `actualizar` con

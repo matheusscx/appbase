@@ -72,4 +72,15 @@ describe('usePermisosCrud', () => {
 
     expect(puedeCrear.value).toBe(true)
   })
+
+  it('con una lista de módulos alcanza con tener el permiso en UNO', () => {
+    // Espejo de `@RequiresAlgunPermiso` del backend. El caso real es la gestión
+    // de garzones, que habilitan `Salones` o `Propinas`.
+    permisos.value = ['Propinas:Crear']
+
+    const { puedeCrear, puedeEliminar } = usePermisosCrud(['Salones', 'Propinas'])
+
+    expect(puedeCrear.value).toBe(true)
+    expect(puedeEliminar.value).toBe(false)
+  })
 })

@@ -36,7 +36,9 @@ function regenerarLabel(garzon: Garzon): string {
 // con su propio `@RequiresPermiso`. Garzones NO tiene módulo propio: sus rutas
 // piden permisos de **Salones**. `Salones:Operar` no entra acá — es de la
 // operación (`garzones/verificar-pin`, cuentas), no de esta pantalla.
-const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
+// `Salones` o `Propinas`: el garzón le sirve a los dos módulos y el backend
+// acepta cualquiera de los dos (`@RequiresAlgunPermiso` en `garzones.controller.ts`).
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud(['Salones', 'Propinas'])
 
 const toast = useToast()
 const garzonesApi = useGarzones()

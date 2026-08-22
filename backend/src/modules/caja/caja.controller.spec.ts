@@ -567,24 +567,31 @@ describe('CajaController', () => {
       const permiso = Reflect.getMetadata(
         'requires_permiso',
         CajaController.prototype.resolverTestigo,
-      ) as { modulo: string; permiso: string } | undefined;
-      expect(permiso).not.toEqual({ modulo: 'Cajas', permiso: 'Actualizar' });
+      ) as { modulo: string; permiso: string }[] | undefined;
+      // `toContainEqual` y no `not.toEqual` sobre el objeto pelado: desde que
+      // la metadata es una lista, comparar contra un objeto suelto pasa
+      // siempre —una lista nunca es igual a un objeto— y el guard dejaba de
+      // guardar nada.
+      expect(permiso).not.toContainEqual({
+        modulo: 'Cajas',
+        permiso: 'Actualizar',
+      });
     });
 
     it('resolverTestigo SÍ tiene Salones:Operar — ronda 3, sin esto cualquier token del tenant llegaba al handler', () => {
       const permiso = Reflect.getMetadata(
         'requires_permiso',
         CajaController.prototype.resolverTestigo,
-      ) as { modulo: string; permiso: string } | undefined;
-      expect(permiso).toEqual({ modulo: 'Salones', permiso: 'Operar' });
+      ) as { modulo: string; permiso: string }[] | undefined;
+      expect(permiso).toEqual([{ modulo: 'Salones', permiso: 'Operar' }]);
     });
 
     it('pendientesDeGarzon tiene Salones:Operar — ronda 3, sin esto exponía montos a cualquier usuario del tenant', () => {
       const permiso = Reflect.getMetadata(
         'requires_permiso',
         CajaController.prototype.pendientesDeGarzon,
-      ) as { modulo: string; permiso: string } | undefined;
-      expect(permiso).toEqual({ modulo: 'Salones', permiso: 'Operar' });
+      ) as { modulo: string; permiso: string }[] | undefined;
+      expect(permiso).toEqual([{ modulo: 'Salones', permiso: 'Operar' }]);
     });
 
     it('pendientesDeGarzon delega en cajaTestigoService.pendientesDeGarzon con el tenant, quién llama y la credencial del body', async () => {
@@ -618,8 +625,8 @@ describe('CajaController', () => {
       const permiso = Reflect.getMetadata(
         'requires_permiso',
         CajaController.prototype.listarTestigos,
-      ) as { modulo: string; permiso: string } | undefined;
-      expect(permiso).toEqual({ modulo: 'Cajas', permiso: 'Leer' });
+      ) as { modulo: string; permiso: string }[] | undefined;
+      expect(permiso).toEqual([{ modulo: 'Cajas', permiso: 'Leer' }]);
     });
   });
 });
