@@ -1461,10 +1461,16 @@ No se resuelve programando. Está acá para que tenga quién la reclame.
   completa —es descubrimiento genuino, ~23 candidatos en 8 archivos, y separar el caso
   legítimo del bug es juicio por sitio, no grep— y la del pool **en modo delta**, con la tabla
   del 2026-08-11 pasada como contexto conocido. **No se arregla nada:** todo va al backlog.
-  ℹ️ **Al fijar el número se corrigió una premisa que la entrada arrastraba:** decía que lo
-  pendiente de la lente del pool "es arreglar, no encontrar, y eso es el frente 🔴", y **ese
-  frente cerró el 2026-08-20**. El owner eligió igual las dos: el delta sigue respondiendo si
-  aparecieron sitios nuevos después del 2026-08-11.
+  ℹ️ **Al dejar la pasada lista se corrigieron dos cosas del plan, y las dos estaban
+  vencidas** (2026-08-22): (a) mandaba a buscar la tabla de sitios del pool en la entrada 🔴 de
+  este archivo, **que ya no está acá** —vive en [`resueltos.md`](resueltos.md) § *"Diez ventas
+  simultáneas cuelgan la API para siempre"*—, y un buscador que no la encuentra redescubre los
+  siete módulos, que es justo lo que la lente B existe para no pagar; (b) daba esos ~20 sitios
+  por **vivos**, y se arreglaron **por construcción** el 2026-08-18 con
+  [ADR-020](../adr/020-contexto-transaccional-als.md) —verificado: queda **un solo**
+  `dataSource.transaction` en `backend/src`, el chokepoint de `db.service.ts:28`—.
+  **La lente B pasó de "revalidar pendientes" a "buscar residuo y delta"**, y su pajar se
+  achicó: si la pasada se acerca al tope, lo que se recorta es la B, no la A.
   ⚠️ **Por qué esto es elegir el momento y no volver a decidir:** la lente B se confirma
   **midiendo contra Postgres** —ráfagas de ~15 requests independientes— y **cada cuelgue deja
   el backend envenenado hasta un `docker restart`**, así que necesita el stack levantado y la

@@ -73,23 +73,47 @@ desaparecía del roster del otro tenant sin ningún evento que lo explicara.
 ## Lente B — Deadlock del pool (delta, no descubrimiento)
 
 ⛔ **El barrido ya se hizo el 2026-08-11** sobre todo `backend/src`, con causa confirmada por
-experimento, umbral medido y **tabla de sitios en 7 módulos**. Vive en la entrada 🔴 *"Diez
-ventas simultáneas cuelgan la API para siempre"* de `pendientes.md`. **Redescubrirlo es pagar
-dos veces.**
+experimento, umbral medido y **tabla de sitios en 7 módulos**. **Redescubrirlo es pagar dos
+veces.**
 
-⛔ **Y arreglar esos sitios NO es parte de esta pasada:** es el frente 🔴, que va con decisión
-del owner y **junto con las otras dos** (rendimiento y redondeo). Esta pasada solo actualiza
-el mapa.
+🔴 **CORREGIDO EL 2026-08-22, y cambia el trabajo de esta lente.** Este plan se escribió
+cuando los ~20 sitios estaban vivos y decía que arreglarlos "es el frente 🔴". Dos cosas
+pasaron desde entonces:
 
-**Contexto obligatorio para el buscador:** pasarle la tabla de sitios completa. Sin eso
-redescubre siete módulos y el resultado no se distingue del barrido viejo.
+1. **La entrada se movió.** Ya no está en `pendientes.md`: vive en
+   [`resueltos.md`](../../agent/resueltos.md) § *"Diez ventas simultáneas cuelgan la API para
+   siempre: el pool de conexiones deja de agotarse (2026-08-18)"*. **Ese es el contexto que
+   hay que pasarle al buscador** — el puntero viejo lo mandaba a un lugar donde ya no está
+   nada, y un buscador que no lo encuentra redescubre los siete módulos, que es justo lo que
+   esta lente existe para no pagar.
+2. **Los sitios se arreglaron, y por construcción.** La pata del pool cerró el **2026-08-18**
+   con **[ADR-020](../../adr/020-contexto-transaccional-als.md)** (contexto transaccional en
+   `AsyncLocalStorage`); el frente 🔴 entero, el 2026-08-20. Verificado el 2026-08-22: queda
+   **un solo** `dataSource.transaction` en todo `backend/src` —`common/db/db.service.ts:28`,
+   el chokepoint— y `TxContext` resuelve el manager activo para el resto.
+
+**Entonces la pregunta 1 de abajo ya NO es "¿la tabla de sitios pendientes sigue exacta?"** —
+esos sitios no están pendientes: están cerrados. **Lo que queda para esta lente es residuo y
+delta**, y así hay que briefearla. Reportar como hallazgo un sitio que ADR-020 ya resolvió es
+el fracaso más caro que puede tener esta pasada.
+
+⛔ **Y arreglar lo que aparezca NO es parte de esta pasada.** Esta pasada solo actualiza el
+mapa.
+
+**Contexto obligatorio para el buscador:** la entrada de `resueltos.md` con su tabla de
+sitios **y** ADR-020. Sin las dos, el resultado no se distingue del barrido viejo.
 
 **Las tres preguntas, y sólo estas tres:**
 
-1. **¿La tabla sigue exacta?** Verificar sitio por sitio contra el código de hoy. La propia
-   entrada avisa que **quedó stale dos veces en el mismo día**, así que esto no es trámite.
-   Reportar altas, bajas y líneas corridas.
+1. **¿La migración de ADR-020 dejó residuo?** Sitio por sitio de la tabla vieja contra el
+   código de hoy: ¿queda alguno que todavía tome conexión propia adentro de una transacción?
+   La entrada avisa que la tabla **quedó stale dos veces en el mismo día**, así que esto no es
+   trámite — pero el veredicto esperado por defecto es **cerrado**, y un "sigue vivo" hay que
+   sostenerlo con el experimento, no con lectura.
 2. **¿Hay sitios nuevos desde el 2026-08-11?** Delta acotado a lo que cambió desde esa fecha.
+   Con ADR-020 en pie esto tiene una firma barata: **cualquier `dataSource.transaction` fuera
+   de `common/db/db.service.ts` es sospechoso por sí solo** (hoy hay exactamente uno, el del
+   chokepoint). Lo mismo para cualquier camino que se saltee `TxContext`.
 3. **La vía que el barrido original NO buscaba** — y es la razón principal de esta lente.
    Aquel buscó *llamadas repo-bound agregadas adentro de una transacción existente*. El
    2026-08-15 el patrón reincidió **al revés**: la llamada ya estaba y se le agregó una
@@ -120,8 +144,13 @@ con falsos positivos y negativos **confirmados** (ver abajo).
 | A — cross-tenant | ~23 | 8 | La **mayoría son legítimos**: sesiones y perfil propio son por-usuario a propósito. El conteo NO responde la pregunta; cada sitio necesita el juicio *"¿puede una acción de un tenant escribir acá?"* |
 | B — pool | ~20 | 7 | Consistente con la tabla del 2026-08-11. **Verificados a mano y todavía sin arreglar:** `ventas.service.ts` 156, 157, 186, 649, 714 |
 
-**Conclusión para la lente B:** la tabla está esencialmente vigente y **los sitios siguen
-ahí**. Confirma que el trabajo pendiente es arreglar, no encontrar.
+**Conclusión para la lente B, tal como se escribió el 2026-08-16:** la tabla está
+esencialmente vigente y **los sitios siguen ahí**. Confirma que el trabajo pendiente es
+arreglar, no encontrar.
+⚠️ **SUPERADA el 2026-08-18:** ese conteo es de **dos días antes** de que ADR-020 cerrara la
+pata del pool. Se conserva porque es el registro de lo que se midió entonces —y sirve de
+control: los cinco sitios de `ventas.service.ts` (156, 157, 186, 649, 714) son el mejor caso
+de prueba para la pregunta 1 de la lente B—, pero **ya no describe el estado de hoy**.
 
 **Conclusión para la lente A:** el pajar es chico y acotado, pero el conteo no distingue el
 caso legítimo del bug. Es exactamente el tipo de pregunta que necesita buscador + refutador.
@@ -176,12 +205,15 @@ tokens** de subagentes; la estimación para estas dos, con una en delta, era **3
 lo alcanza, se corta y se reporta lo que haya, con lo que quedó sin cubrir **escrito**
 —"no hay caps silenciosos" es regla del método—.
 
-⚠️ **Una premisa de este plan cambió entre que se escribió y que se fijó el número.** El texto
-de la lente B dice que arreglar sus sitios "es el frente 🔴": **ese frente cerró el
-2026-08-20** (conexiones/deadlock y rendimiento; el redondeo de plata, el 2026-08-21). Lo que
-sigue vigente de esa sección es lo demás —el barrido ya se hizo, redescubrirlo es pagar dos
-veces, y esta pasada solo actualiza el mapa—. El owner eligió igual las dos lentes: el delta
-sigue respondiendo si aparecieron sitios nuevos **después** del 2026-08-11.
+⚠️ **Una premisa de este plan cambió entre que se escribió y que se fijó el número**, y la
+corrección está adentro de la §Lente B: sus ~20 sitios **ya se arreglaron** —pata del pool
+cerrada el 2026-08-18 por ADR-020, frente 🔴 entero el 2026-08-20—, así que la lente B pasó de
+*"revalidar una tabla de pendientes"* a *"buscar residuo y delta"*. El owner eligió igual las
+dos lentes sabiendo esto: la pregunta de si aparecieron sitios nuevos **después** del
+2026-08-11 sigue sin contestarse, y ahora tiene una firma barata para buscarlos.
+⚠️ **Consecuencia para el presupuesto:** la lente B debería costar **menos** que la estimación
+original, porque su pajar se achicó. Si la pasada se acerca al tope, lo que hay que recortar
+es la lente B, no la A — la A es la que nadie relevó nunca.
 
 ---
 
