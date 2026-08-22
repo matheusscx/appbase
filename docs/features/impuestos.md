@@ -309,10 +309,12 @@ audite una boleta va a "arreglar" la consecuencia elegida creyendo que persigue 
 
 #### (1) Consecuencia **elegida**: el precio de góndola cierra y el IVA cede
 
-En una línea con `precio_incluye_impuesto` y **sin descuentos ni recargos aplicados**, el
-impuesto no se calcula: es lo que sobra entre el bruto cuantizado y el neto cuantizado, para
-que el cliente pague exactamente el precio que vio (ver *Algoritmo* en
-[motor-calculo-precios.md](./motor-calculo-precios.md)). La fila queda así:
+En una línea con `precio_incluye_impuesto` cuya **base sigue siendo el neto de la
+etiqueta**, el impuesto no se calcula: es lo que sobra entre el bruto cuantizado y el neto
+cuantizado, para que el cliente pague exactamente el precio que vio (ver *Algoritmo* en
+[motor-calculo-precios.md](./motor-calculo-precios.md)). Es la base la que decide, no la
+ausencia de reglas: un descuento y un recargo que se anulan dejan al cliente pagando la
+etiqueta y la línea cierra igual (decisión del owner, 2026-08-21). La fila queda así:
 
 | Góndola | `subtotal` (neto) | `valor_aplicado` | `porcentaje_aplicado` | `0,19 × 834` |
 |---|---|---|---|---|

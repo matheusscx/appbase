@@ -479,6 +479,12 @@ Cada paso aplica sobre el resultado acumulado del paso anterior. El tenant puede
   y menos impuesto, que es exactamente lo que ocurrió— y evita que lo cobrado deje de
   coincidir con el precio impreso en góndola. Ver
   [motor-calculo-precios.md](features/motor-calculo-precios.md).
+  **La etiqueta manda cuando el cliente paga la etiqueta** (decisión del owner, 2026-08-21):
+  lo que decide es la base, no si se aplicaron reglas. Un descuento y un recargo que se anulan
+  dejan al cliente pagando el precio de góndola, y el documento tiene que declararlo — antes
+  esa línea caía a la fórmula y el 16% de los precios cobraba ±1 peso contra su propia
+  etiqueta. Las dos reglas se siguen imprimiendo en el ticket; lo que cambia es de dónde sale
+  el impuesto.
 
 **Conversión de moneda:**
 - Si la moneda del item ≠ moneda oficial → `totalConvertido = totalFinal × valor_del_dia`

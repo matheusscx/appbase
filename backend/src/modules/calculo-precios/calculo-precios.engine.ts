@@ -856,23 +856,35 @@ function calcularLinea(
       );
 
       /**
-       * **La etiqueta manda** (decisión del owner, 2026-08-04): cuando el
-       * precio ya incluye impuesto y a la línea no se le aplicó ninguna regla,
-       * el cliente paga exactamente lo que vio en la góndola, así que el total
-       * es el bruto y el impuesto es lo que sobra sobre el neto declarado. Con
-       * `tasa × base` no cierra: góndola 993 → neto 834, IVA 158, total 992.
+       * **La etiqueta manda cuando el cliente paga la etiqueta** (decisión del
+       * owner, 2026-08-04, corregida el 2026-08-21): cuando el precio ya
+       * incluye impuesto y la base volvió al neto de la góndola, el cliente
+       * paga exactamente lo que vio, así que el total es el bruto y el impuesto
+       * es lo que sobra sobre el neto declarado. Con `tasa × base` no cierra:
+       * góndola 993 → neto 834, IVA 158, total 992.
        *
-       * **No se generaliza a la línea con reglas de LÍNEA, y está medido:** con
-       * un 10% de descuento sobre esa misma línea (base 751), restar contra la
-       * góndola da un IVA de 242 —cobra la etiqueta entera e ignora el
-       * descuento— y restar contra góndola−descuento da 159, cuando el correcto
-       * es 143. Con un descuento de línea el cliente ya no paga la etiqueta.
+       * **La condición mira lo que el cliente PAGÓ, no CÓMO llegó ahí**, y esa
+       * distinción es la corrección. Preguntar `descuentoAplicado.isZero() &&
+       * recargoAplicado.isZero()` dejaba fuera a la línea con un descuento y un
+       * recargo que se anulan —la base es la misma, el cliente paga la etiqueta
+       * y el documento salía por la fórmula—. Medido: barriendo góndolas
+       * 100..3000 con IVA 19% en CLP, **463 de 2901 precios (16%) declaraban ±1
+       * peso contra su propia etiqueta** (993 → 992, pero también 103 → 104).
+       * No hacía falta un caso exótico: alcanza un descuento y un recargo del
+       * mismo porcentaje con `calculoDescuentos: 'base'`, que es el default de
+       * todo tenant, porque ahí los dos aplican sobre el neto.
+       *
+       * **Sigue sin generalizarse a la línea cuya base SÍ se movió, y está
+       * medido:** con un 10% de descuento sobre esa misma línea (base 751),
+       * restar contra la góndola da un IVA de 242 —cobra la etiqueta entera e
+       * ignora el descuento— y restar contra góndola−descuento da 159, cuando
+       * el correcto es 143. Esa línea la excluye la comparación de bases sola,
+       * sin necesitar el guard viejo.
        */
       const cierraAGondola =
         linea.precioIncluyeImpuesto &&
         impuestosVigentes.length > 0 &&
-        descuentoAplicado.isZero() &&
-        recargoAplicado.isZero() &&
+        baseSinAjuste.eq(subtotalNeto) &&
         !hayReglasDespuesDelImpuesto;
 
       /**

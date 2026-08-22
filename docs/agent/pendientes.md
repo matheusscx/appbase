@@ -875,9 +875,13 @@ PIN y el arranque sin SMTP; ver [`resueltos.md`](resueltos.md)).
 ⚠️ **Reabierta el 2026-08-16 con dos entradas nuevas**, las dos surgidas de la tanda de
 identidad de ese día. Ninguna bloquea nada que esté en curso.
 ⚠️ **Y tres más el 2026-08-21**: una del cierre del redondeo de plata, y **dos que subieron
-desde la sección 2** al medirlas —las dos primeras de abajo—. Las dos traían su propia regla
-de qué hacer con el resultado, y las dos cayeron del lado que exige respuesta: la moneda
-oficial **sí** puede divergir, y el `Scope.REQUEST` **sí** mueve la aguja bajo concurrencia.
+desde la sección 2** al medirlas. Las dos traían su propia regla de qué hacer con el
+resultado, y las dos cayeron del lado que exige respuesta: la moneda oficial **sí** podía
+divergir, y el `Scope.REQUEST` **sí** mueve la aguja bajo concurrencia.
+✅ **Dos de esas tres ya se cerraron el mismo 2026-08-21**: la moneda oficial —el owner
+eliminó `es_default`, ver **ADR-021**— y el descuento con recargo que se compensaban, donde
+eligió que *la etiqueta manda cuando el cliente paga la etiqueta*. Las dos en
+[`resueltos.md`](resueltos.md). **Quedan 7 entradas.**
 La medición está adentro de cada una; lo que falta es la decisión.
 
 - [ ] **¿Se parte `ItemsController` para sacarle el `Scope.REQUEST` de encima?**
@@ -921,25 +925,6 @@ La medición está adentro de cada una; lo que falta es la decisión.
   ⚠️ **Sin respuesta no se empieza**, y en particular **no se elige (1) por ser la más
   barata**: la opción (2) es la única que hace que el dato deje de ser ambiguo también para
   quien lo lee, no solo para quien lo escribe.
-
-- [ ] **Un descuento y un recargo que se compensan cobran \$1 menos que la misma línea sin
-  reglas** (backend + producto, **medido 2026-08-21** en la tarea 8 del redondeo) — la rama
-  de "el total cierra a góndola" solo corre **sin reglas aplicadas** en la línea. Si hay un
-  descuento y un recargo que se anulan entre sí, `baseImponible == subtotalNeto` —el cliente
-  pagó exactamente la etiqueta— pero la línea cae igual a la rama de fórmula: **992 en vez
-  de 993**.
-  O sea: **dos líneas donde el cliente pagó lo mismo emiten documentos distintos**, con un
-  peso de diferencia y sin nada en el ticket que lo explique.
-  **La pregunta para el owner es cuál de las dos reglas quiere**, y son incompatibles:
-  1. *"La etiqueta manda cuando el cliente paga la etiqueta"* — la condición pasa a ser
-     `baseImponible == subtotalNeto` (lo que el cliente **pagó**) en vez de "sin reglas
-     aplicadas" (**cómo** llegó ahí). Cierra la discontinuidad.
-  2. *"La etiqueta manda solo si no se tocó nada"* — la regla actual. Más simple de explicar
-     y de auditar: una línea con reglas se calcula con la fórmula, punto.
-  ⚠️ **No es una elección técnica y no la puede tomar un agente**: cambia lo que declara un
-  documento tributario. Está acá y no en la sección 3 por eso.
-  📌 El caso es raro por construcción (exige un descuento y un recargo que se cancelen
-  exactamente) pero **no es hipotético**: lo produjo la búsqueda combinatoria del frente.
 
 - [ ] **El garzón "Mostrador" existe para tenants SIN salones, y gestionarlo exige el módulo
   `Salones`** (backend + producto, **medido 2026-08-16** al cerrar el borde duro de módulos) —

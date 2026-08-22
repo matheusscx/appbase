@@ -1858,6 +1858,207 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(new Decimal(l.totalLinea).eq(894)).toBe(true);
     });
 
+    /**
+     * ⚠️ El complemento del test de arriba, y el que fija la CORRECCIÓN del
+     * 2026-08-21: la etiqueta manda mientras el cliente pague la etiqueta, y
+     * un descuento y un recargo que se anulan la siguen pagando. La condición
+     * mira la base —lo que se PAGÓ— y no "no se aplicó ninguna regla" —CÓMO se
+     * llegó ahí—. Con la condición vieja esta línea caía a la fórmula y el
+     * documento declaraba 992: un peso menos que la góndola que el cliente vio.
+     */
+    it('un descuento y un recargo que se anulan siguen cerrando a la etiqueta', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              descuentos: [
+                regla({
+                  id: 'd1',
+                  nombre: '-50',
+                  modo: 'monto_fijo',
+                  valor: '50',
+                }),
+              ],
+              recargos: [
+                regla({
+                  id: 'r1',
+                  nombre: '+50',
+                  modo: 'monto_fijo',
+                  valor: '50',
+                }),
+              ],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+
+      // Las dos reglas se declaran —el ticket las imprime— y la base vuelve al
+      // neto de la etiqueta, así que el IVA sale por resta: 993 − 834 = 159.
+      expect(new Decimal(l.descuentoAplicado).eq(50)).toBe(true);
+      expect(new Decimal(l.recargoAplicado).eq(50)).toBe(true);
+      expect(new Decimal(l.subtotalNeto).eq(834)).toBe(true);
+      expect(new Decimal(l.impuestoAplicado).eq(159)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(993)).toBe(true);
+      expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
+      expect(identidadDocumento(r)).toBe(true);
+    });
+
+    // El caso alcanzable de verdad: `calculoDescuentos: 'base'` es el default
+    // de todo tenant, y ahí un descuento y un recargo del MISMO porcentaje
+    // aplican los dos sobre el neto y se cancelan. No hace falta que el
+    // operador calce dos montos fijos a mano.
+    it('un 10% de descuento y un 10% de recargo sobre la base también cierran', () => {
+      const l = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              descuentos: [regla({ id: 'd1', nombre: '-10%', valor: '0.10' })],
+              recargos: [regla({ id: 'r1', nombre: '+10%', valor: '0.10' })],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      ).lineas[0];
+
+      expect(new Decimal(l.descuentoAplicado).eq(83)).toBe(true);
+      expect(new Decimal(l.recargoAplicado).eq(83)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(993)).toBe(true);
+    });
+
+    // La divergencia iba en LOS DOS SENTIDOS y la entrada del backlog solo
+    // había visto el que baja: con góndola 103 la fórmula da 104 —neto 87,
+    // IVA 16,53 → 17— y el cliente pagaba un peso MÁS que la etiqueta.
+    it('la etiqueta también manda cuando la fórmula cobraría de más', () => {
+      const l = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              precioUnitario: '103',
+              precioIncluyeImpuesto: true,
+              descuentos: [
+                regla({
+                  id: 'd1',
+                  nombre: '-5',
+                  modo: 'monto_fijo',
+                  valor: '5',
+                }),
+              ],
+              recargos: [
+                regla({
+                  id: 'r1',
+                  nombre: '+5',
+                  modo: 'monto_fijo',
+                  valor: '5',
+                }),
+              ],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      ).lineas[0];
+
+      expect(new Decimal(l.subtotalNeto).eq(87)).toBe(true);
+      expect(new Decimal(l.impuestoAplicado).eq(16)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(103)).toBe(true);
+    });
+
+    // El borde, que es lo que impide leer la regla como "cualquier par de
+    // reglas cierra": con un peso de diferencia la base YA no es la de la
+    // etiqueta, el cliente no la paga, y la línea vuelve a la fórmula.
+    it('si el recargo no compensa exacto, la línea vuelve a la fórmula', () => {
+      const l = calcularVenta(
+        venta({
+          config: cfgCLP,
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              descuentos: [
+                regla({
+                  id: 'd1',
+                  nombre: '-50',
+                  modo: 'monto_fijo',
+                  valor: '50',
+                }),
+              ],
+              recargos: [
+                regla({
+                  id: 'r1',
+                  nombre: '+49',
+                  modo: 'monto_fijo',
+                  valor: '49',
+                }),
+              ],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      ).lineas[0];
+
+      // base 834 − 50 + 49 = 833; 833 × 0.19 = 158,27 → 158. Total 991.
+      expect(new Decimal(l.impuestoAplicado).eq(158)).toBe(true);
+      expect(new Decimal(l.totalLinea).eq(991)).toBe(true);
+    });
+
+    // La composición con el ancla móvil: las reglas de LÍNEA que se anulan
+    // devuelven la etiqueta, y sobre esa etiqueta el descuento de nivel VENTA
+    // corre el ancla. Las dos mecánicas tienen que componer, no pisarse.
+    it('con reglas de línea que se anulan, el descuento de venta mueve el ancla', () => {
+      const r = calcularVenta(
+        venta({
+          config: cfgCLP,
+          descuentosVenta: [
+            regla({
+              id: 'dv',
+              nombre: '-100',
+              modo: 'monto_fijo',
+              valor: '100',
+            }),
+          ],
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              descuentos: [
+                regla({
+                  id: 'd1',
+                  nombre: '-50',
+                  modo: 'monto_fijo',
+                  valor: '50',
+                }),
+              ],
+              recargos: [
+                regla({
+                  id: 'r1',
+                  nombre: '+50',
+                  modo: 'monto_fijo',
+                  valor: '50',
+                }),
+              ],
+              impuestos: [IVA],
+            }),
+          ],
+        }),
+      );
+      const l = r.lineas[0];
+
+      // Ancla = etiqueta 993 − 100 de descuento de venta = 893, y la línea
+      // cierra exacto ahí. Con la condición vieja el ancla partía de la
+      // fórmula (992) y la línea daba 892.
+      expect(new Decimal(l.totalLinea).eq(893)).toBe(true);
+      expect(new Decimal(r.totales.totalFinal).eq(893)).toBe(true);
+      expect(identidadDocumento(r)).toBe(true);
+    });
+
     it('con IVA + adicional, el adicional queda exacto y el IVA absorbe', () => {
       const l = calcularVenta(gondola('1995', [IVA, ILA])).lineas[0];
       const neto = new Decimal(l.subtotalNeto);

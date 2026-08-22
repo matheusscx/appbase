@@ -213,7 +213,7 @@ dejaba lo cobrado sin coincidir con el precio impreso en góndola.
 Lo fija el test *"el desbruteo no usa la tasa del impuesto pausado"*.
 
 **Y el total cierra a la etiqueta.** La misma decisión gobierna el redondeo: con precio
-bruto-inclusivo y **sin descuentos ni recargos aplicados** en la línea, el impuesto no es
+bruto-inclusivo y **la base de la línea en el neto de la etiqueta**, el impuesto no es
 `tasa × base` sino lo que sobra — `q(bruto × cantidad) − neto` —, porque el cliente paga
 exactamente lo que vio en la góndola. Con `tasa × base` no cerraba: góndola $993 → neto
 834, IVA 158, total **992**. Los impuestos **adicionales** (`tipo = 'otro'`, el ILA) van
@@ -223,7 +223,7 @@ del orden en que llegó la lista. La traza del absorbente declara **lo que absor
 fórmula: `Σ trazas = impuesto_aplicado` sigue valiendo, que es lo que hace que cada
 impuesto sea una línea del documento.
 
-**Con descuentos o recargos aplicados vuelve la fórmula normal**, y no es un parche:
+**Cuando la base se mueve vuelve la fórmula normal**, y no es un parche:
 "la etiqueta manda" vale mientras el cliente pague la etiqueta. Con un descuento ya no la
 paga, así que no hay góndola que cerrar y lo que el documento tiene que declarar es el
 impuesto de la base realmente cobrada. Medido sobre esa misma línea con un 10% (base 751):
@@ -231,6 +231,33 @@ restar contra la góndola da un IVA de 242 —cobra la etiqueta entera e ignora 
 descuento— y contra góndola−descuento da 159, cuando el correcto es **143**, que es lo que
 da `tasa × base`. Lo fija el test *"con descuento en la línea el IVA vuelve a ser
 tasa × base, no la resta"*.
+
+**La condición mira lo que el cliente pagó, no cómo llegó ahí** (decisión del owner,
+2026-08-21). Hasta esa fecha la rama pedía que la línea no tuviera *ninguna regla
+aplicada*, y eso dejaba afuera un caso donde el cliente **sí** paga la etiqueta: un
+descuento y un recargo que se anulan entre sí. La base es la misma, el ticket cobra lo que
+dice la góndola, y el documento salía igual por la fórmula. Medido: barriendo góndolas
+100..3000 con IVA 19% en CLP, **463 de 2901 precios (16%) declaraban ±1 peso contra su
+propia etiqueta** —993 → 992, pero también 103 → **104**, cobrando de más—. Y no hacía
+falta un caso exótico: alcanza un descuento y un recargo del **mismo porcentaje**, porque
+con `calculo_descuentos = 'base'` —el default de todo tenant— los dos aplican sobre el
+neto y se cancelan.
+
+La condición pasó a ser `base == subtotal_neto`. Las dos reglas se siguen **declarando**
+en el documento —el ticket imprime el descuento y el recargo—; lo que cambia es de dónde
+sale el impuesto. La comparación de bases subsume al guard viejo: la línea con un 10% de
+descuento real la excluye sola, porque ahí la base no volvió. El borde queda en el peso: un
+recargo de 49 contra un descuento de 50 **no** cierra a la etiqueta, y es correcto que no
+lo haga —el cliente pagó un peso menos que la góndola—. Lo fijan los tests *"un descuento y
+un recargo que se anulan siguen cerrando a la etiqueta"*, *"la etiqueta también manda
+cuando la fórmula cobraría de más"* y *"si el recargo no compensa exacto, la línea vuelve a
+la fórmula"*.
+
+📌 **El salto de un peso no se creó ni se eliminó, se movió.** Con descuento 50 y recargos
+48→52 la línea daba `990, 991, 992, 994, 995` —el salto de 2 entre 992 y 994 ya estaba, es
+el escalón de la cuantización del IVA— y ahora da `990, 991, 993, 994, 995`. Elegir la
+regla de la etiqueta no agrega discontinuidades: elige **cuál** de las dos vecinas cae del
+lado de la góndola.
 
 Por línea: neto unitario (desbruteo si incluye impuesto) × cantidad → recorrer la
 fórmula (`paso 1,2,3`) sobre un acumulador. Descuentos restan, recargos suman;
@@ -663,7 +690,9 @@ allá el orden venía de una consulta y podía cambiar entre dos lecturas de la 
 **El ancla del cierre se mueve, no se apaga.** Una línea con precio de góndola y un descuento
 global cierra contra "etiqueta menos su parte", y el impuesto sale por resta contra ese ancla.
 Aplicar `tasa × base` en su lugar rompe que `base + impuesto` sea el total en el **15,6%** de
-los casos (barrido de 11.604): `87 + 17 = 104` sobre un total de 103.
+los casos (barrido de 11.604): `87 + 17 = 104` sobre un total de 103. Compone con la regla de
+la etiqueta: si las reglas de línea se anulan, el ancla parte de la góndola y recién ahí se
+corre por el descuento de venta.
 
 **Las reglas de documento se evalúan en plata cobrada y se declaran en neto.** `MntNeto` resta
 descuentos netos, así que las trazas y los totales se convierten con el factor agregado que las

@@ -17,6 +17,56 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La etiqueta manda cuando el cliente paga la etiqueta (2026-08-21)
+
+Cierra la entrada *"Un descuento y un recargo que se compensan cobran \$1 menos que la misma
+línea sin reglas"*. **El owner eligió la opción (1)**: la rama de cierre a góndola pregunta
+por lo que el cliente **pagó** —`baseSinAjuste.eq(subtotalNeto)`— y no por *cómo* llegó ahí
+—`descuentoAplicado.isZero() && recargoAplicado.isZero()`—.
+
+### La entrada se quedaba corta en dos cosas, y las dos se midieron antes de decidir
+
+**No era "\$1 menos", era ±1.** Con góndola 103 el par que se compensa cobraba **104**: neto
+87, IVA por fórmula 16,53 → 17. La entrada solo había visto el lado que baja.
+
+**No era raro por construcción.** Barriendo góndolas 100..3000 con IVA 19% en CLP, **463 de
+2901 precios (16,0%)** declaraban distinto que la misma línea sin reglas. Y no hacía falta
+que dos montos fijos se cancelaran a mano: alcanza **un descuento y un recargo del mismo
+porcentaje**, porque con `calculo_descuentos = 'base'` —el default de todo tenant— los dos
+aplican sobre el neto. En `compuesto` no pasa (el recargo corre sobre el acumulado: 83 y 75,
+no se compensan).
+
+### El contraargumento contra la opción (1) no se sostuvo, y también está medido
+
+La objeción natural era que anclar a la etiqueta crea un salto de dos pesos en el borde. El
+salto **ya existía**, una muesca más a la derecha — con descuento 50 y recargos 48→52:
+
+| rec | 48 | 49 | **50** | 51 | 52 |
+|---|---|---|---|---|---|
+| antes | 990 | 991 | **992** | 994 | 995 |
+| ahora | 990 | 991 | **993** | 994 | 995 |
+
+Es el escalón de la cuantización del IVA (158 → 159), no una consecuencia de la decisión.
+Elegir la regla de la etiqueta no agrega discontinuidades: elige **cuál** de las dos vecinas
+cae del lado de la góndola.
+
+### Qué costó y qué lo fija
+
+Una condición. El guard de `hayReglasDespuesDelImpuesto` sigue haciendo falta —con los
+impuestos primero lo aplicado todavía no se conoce— y queda; el guard viejo lo **subsume** la
+comparación de bases, porque la línea con un 10% de descuento real tiene la base corrida y se
+excluye sola. Ningún test existente fijaba la conducta vieja: los 2003 unitarios pasaron sin
+tocar uno.
+
+Cinco tests nuevos en `calculo-precios.engine.spec.ts`. **El mutante —revertir la condición al
+`isZero() && isZero()` anterior— mata cuatro**: el par de montos fijos que se anulan (993), el
+par de porcentajes sobre la base (el caso alcanzable de verdad), el que cobraba de más (103) y
+la composición con el ancla móvil del descuento de nivel venta (893). El quinto —*"si el
+recargo no compensa exacto, la línea vuelve a la fórmula"*— pasa con y sin mutante a propósito:
+fija que la regla **no se ensanchó** a "cualquier par de reglas cierra".
+
+---
+
 ## Una sola moneda oficial: se eliminó `tenant_moneda.es_default` (2026-08-21)
 
 Cierra la entrada *"'Oficial' nombra DOS monedas distintas y ya divergen tres caminos de
