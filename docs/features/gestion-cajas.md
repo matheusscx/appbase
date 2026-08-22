@@ -595,6 +595,120 @@ Fuera de alcance de este sub-proyecto, siguen pendientes en
 
 ---
 
+## Tendencia de descuadres por cajero
+
+**Qué problema resuelve, dicho sin vueltas:** el descuadre lo justifica **la misma persona
+que lo produjo, y no lo revisa nadie.** El cajero cuenta, se entera de su diferencia, elige
+el motivo, escribe la explicación y cierra su caja. Queda registrado — pero *registrado no
+es revisado*: alguien tiene que ir a buscarlo al historial, y nada le avisa que vaya. Un
+cajero que descuadra \$3.000 por turno, siempre para el mismo lado y siempre con el mismo
+motivo, atraviesa el flujo entero sin encender nada.
+
+Nace al **descartar** el ocultamiento del resultado post-conteo (2026-08-22, ver
+[`resueltos.md`](../agent/resueltos.md) y la investigación
+[§11](../agent/investigaciones/2026-07-23-gestion-caja.md#11-cuándo-se-revela-el-descuadre-y-a-quién-2026-08-22-5ª-pasada)):
+esto es lo que sobrevivió de esa preocupación, y ataca el agujero de verdad.
+
+### Quién la ve
+
+**Solo el supervisor** (`Cajas:Leer`). Decisión del owner 2026-08-22: el cajero **no** ve su
+propio acumulado, porque mostrarle *"venís -\$3.000 por turno"* le entrega la calibración ya
+calculada, que es justo lo que el control quiere evitar.
+
+⚠️ **Costo aceptado:** el cajero de buena fe que descuadra por un mal método de conteo no se
+entera y no corrige.
+
+⛔ **Y una precisión que hay que respetar al apoyarse en esto: es fricción, no una barrera de
+datos.** El cajero con `MiCaja:Leer` ya lista **todos sus cierres con su diferencia** en su
+propio historial, así que el acumulado le queda a una suma de distancia. Lo que esta pantalla
+le niega es el número **ya calculado**, no la información. Si en algún momento el control
+tiene que ser real, el frente no es esta pantalla sino el historial propio — y ahí vuelve a
+aparecer todo lo que hizo descartar el ocultamiento (§11.3 de la investigación). Levantado
+por la revisión independiente del 2026-08-22.
+
+ℹ️ **No contradice la revelación al enviar el conteo**, que sigue igual: aquello es el
+**turno en curso** —un dato que el cajero ya tiene— y esto es el **acumulado**, que es
+trabajo hecho.
+
+### La señal es el sesgo, no la magnitud
+
+El cajero de la caja más cargada va a tener más varianza **siempre**, y no por eso es
+sospechoso. Un promedio de magnitud marca al más ocupado; **lo que delata es descuadrar
+siempre para el mismo lado**. Por eso la fila da la **suma con signo** y los **conteos** de
+faltante / sobrante / cuadrado: *18 de 20 para abajo* es la señal, y no hace falta dividir
+nada para verla.
+
+**Sin promedio, a propósito.** Un promedio de dinero es una división de dinero, y eso
+arrastraría la cuantización por moneda (`modo_redondeo` del tenant) a un reporte, para decir
+lo que la suma y los conteos ya dicen.
+
+### Efectivo y otros medios, separados y nunca sumados
+
+Van en **dos columnas distintas**, y las dos razones empujan en direcciones opuestas:
+
+- El robo vive en el **efectivo** —una tarjeta no se guarda en el bolsillo—, así que mezclar
+  medios le mete a la señal de sesgo el ruido de la conciliación de tarjeta.
+- Pero mostrar **solo** el efectivo ya fue un bug acá: `CajaHistorial.vue` documenta que con
+  la columna sobre `diferencia` una caja cerrada con −500 en tarjeta se veía como *"+0"* en
+  la lista y como *"−500"* al abrir el detalle.
+
+Las dos cifras, entonces: el efectivo manda la lectura de sesgo y el resto queda visible
+para que ningún descuadre desaparezca de la pantalla.
+
+### Qué cierres cuentan
+
+`c.diferencia IS NOT NULL` — que significa exactamente **"el conteo se congeló"**, y no una
+lista de estados que haya que mantener. Incluye `cerrada` y `en_conciliacion` (en las dos el
+descuadre ya ocurrió), y deja afuera la caja `abierta`, donde todavía es NULL. Se arrastran
+de `historial` los dos filtros que no son opcionales: `tipo = 'fisica'` (la caja virtual no
+se cuenta físicamente) y el filtro de soft-delete en las dos tablas.
+
+**La fila se le atribuye al dueño del turno (`usuario_id`), no a quien cerró
+(`cerrada_por`).** En un cierre forzado el encargado contó, pero el descuadre es del turno
+de quien lo trabajó — si se atribuyera al que cerró, forzar cierres ajenos ensuciaría la
+tendencia del encargado y limpiaría la del cajero.
+
+**Un cajero dado de baja no desaparece del informe.** El `LEFT JOIN` a `usuarios` filtra
+`eliminado_el IS NULL`, así que pierde el nombre (aparece como *"Sin usuario"*) pero sus
+cierres **ya ocurrieron** y no pueden caerse. Mismo criterio que el ítem borrado en el
+informe de mermas.
+
+### La ventana
+
+`GET /caja/tendencia?desde=&hasta=` (`Cajas:Leer`). Fechas puras o timestamps, con
+`bordeFechaSql`/`bordeHastaSql` — ver [`patterns/backend.md`](../patterns/backend.md) §10b:
+con `<= hasta` y fecha pura, *"hasta el 16"* se come el 16 entero. La pantalla arranca en
+los últimos 30 días.
+
+⚠️ **La ventana se mide sobre `COALESCE(fecha_cierre, fecha_apertura)`.** Filtrar
+`fecha_cierre` a secas excluiría **en silencio** las cajas en `en_conciliacion` —que la
+tienen NULL y son justo las que más le importan al supervisor: descuadraron y siguen sin
+resolver—, porque toda comparación contra NULL es falsa.
+
+⚠️ **Y el precio de eso, que hay que saber al leer el informe:** una caja en
+`en_conciliacion` se ubica por su **apertura** y **se muda** a su cierre cuando alguien
+completa la fase 2. La misma ventana consultada antes y después puede dar filas y sumas
+distintas, y dos turnos comparables —uno resuelto, otro pendiente— pueden caer en meses
+distintos. Es el costo de no esconder nada; se eligió sobre la alternativa, que era que el
+descuadre sin resolver no apareciera en ningún lado.
+
+### La pantalla
+
+`/cajas/tendencia`, enlazada desde `/cajas`. Ordenada por el efectivo ascendente: **el
+faltante más grande arriba**, que es lo que el supervisor vino a ver. Cada fila navega a
+`/cajas/historial?usuarioId=<id>` — el drill-down no hubo que construirlo, esa pantalla ya
+leía `usuarioId` de la query.
+
+### Lo que esta feature NO hace
+
+- **No avisa nada.** Ni badge, ni notificación, ni bloqueo. Es lectura pura, y por eso **no
+  toca el flujo de cierre** — una propiedad buscada, después de que el intento del
+  2026-08-16 dejara al cajero sin poder cerrar su caja.
+- **No es el umbral de aprobación**, que sigue pendiente. Al contrario: **existe para poder
+  elegir ese número con fundamento**, mirando la distribución real en vez de a ojo.
+
+---
+
 ## Cierre en dos fases + motivos de diferencia (sub-proyecto C)
 
 **Sub-proyecto de negocio C**, montado sobre el arqueo multi-medio (A) y el cierre ciego

@@ -172,6 +172,28 @@ describe('useCajaStore — arqueo / cerrar', () => {
     )
   })
 
+  it('cargarTendencia arma el querystring solo con lo que vino', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValueOnce([])
+
+    await store.cargarTendencia('2026-08-01', '2026-08-16')
+
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/caja/tendencia?desde=2026-08-01&hasta=2026-08-16',
+    )
+  })
+
+  it('cargarTendencia sin fechas no manda querystring vacío', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValueOnce([])
+
+    await store.cargarTendencia()
+
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/caja/tendencia',
+    )
+  })
+
   it('guardarArqueoCiego envía PUT con { arqueoCiego }', async () => {
     mockApiFetch.mockResolvedValueOnce(undefined)
     const store = useCajaStore()

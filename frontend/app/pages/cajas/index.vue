@@ -18,13 +18,22 @@ definePageMeta({
           <p class="text-sm text-muted">
             Cajones del tenant y su estado. La apertura de caja se hace en Mi caja.
           </p>
-          <UButton
-            to="/cajas/historial"
-            variant="outline"
-            color="neutral"
-            icon="i-lucide-history"
-            label="Ver historial"
-          />
+          <div class="flex items-center gap-2">
+            <UButton
+              to="/cajas/tendencia"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-trending-down"
+              label="Tendencia de descuadres"
+            />
+            <UButton
+              to="/cajas/historial"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-history"
+              label="Ver historial"
+            />
+          </div>
         </div>
 
         <CajaCajonesGrid />

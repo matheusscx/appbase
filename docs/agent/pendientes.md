@@ -460,6 +460,66 @@ empezarlas.
   \$200 o de \$8.000. Elegirlo a ojo falla de las dos maneras: bajo, y cada turno espera a un
   encargado que no está; alto, y no atrapa nada. La distribución real la da la entrada de
   abajo, que además **no toca el flujo de cierre** — a diferencia de esta.
+  ✅ **Esa tendencia ya existe (2026-08-22): `/cajas/tendencia`.** O sea que **el bloqueo de
+  secuencia se levantó** — el número del umbral ya se puede elegir mirando la distribución
+  real en vez de a ojo. Lo que sigue faltando para tomar esta entrada es lo de siempre: el
+  cruce con el cierre forzado ya está decidido, y falta el aviso al cajero (🔶 arriba).
+
+- [ ] 🚩 **El modo ciego se evade desde afuera del módulo `caja`: seis fugas, dos demostradas
+  corriendo** (backend + producto) — **abierta el 2026-08-22** por una auditoría dirigida, el
+  mismo día en que el cierre de *"ocultar el resultado post-cierre"* afirmó —**mal**— que no
+  quedaba ninguna fuga antes del conteo (corregido en [`resueltos.md`](resueltos.md)).
+
+  **La causa raíz, que es lo que hay que decidir, no cada agujero suelto:** el predicado del
+  ciego (`!esAdmin && estado === 'abierta' && arqueoCiego`) **existe solo dentro de
+  `caja.service.ts`**. Ningún otro módulo sabe que el modo ciego existe, y `pagos` y `ventas`
+  sirven la misma plata por otro camino. El rasgo común de las seis es **no** nombrar al ciego,
+  así que grepear `getArqueoCiego` da una lista que parece exhaustiva y las deja a todas afuera.
+
+  **Demostradas contra el stack real** (no leídas):
+  1. 🔴 **`GET /pagos?cajaId=<la propia>&metodoPagoId=<efectivo>` da el esperado completo en UN
+     request.** Medido: con el ciego activo y `esperado: null` en el arqueo, el cajero sumó
+     `monto − vuelto` + el fondo y obtuvo **25.355**; el real era **25.355**. `listar` recibe
+     solo `tenantId` (`pagos.service.ts`), **no valida propiedad de la caja**, y el rol
+     `Vendedor` del seed tiene `Pagos:Leer` junto con `MiCaja` — es literalmente el cajero.
+     ⚠️ Quitar el filtro `cajaId` **no alcanza**: cada fila devuelve `cajaId`, así que se agrupa
+     del lado del cliente. Hay que decidir sobre el dato, no sobre el parámetro.
+  2. 🔴 **El 422 `"Saldo insuficiente en caja"` de `POST /caja/:id/movimientos` es un oráculo
+     exacto.** Medido: **73.450 recuperados en 20 requests** por búsqueda binaria con retiros
+     rechazados. Pide `MiCaja:Crear`, exige que la caja sea **suya** y esté **`abierta`** —la
+     ventana exacta que el ciego protege— y el rechazo aborta la transacción, así que **no deja
+     rastro**. Los intentos aceptados se compensan con una entrada del mismo monto.
+
+  **Encontradas por lectura, sin correr:**
+  3. `GET /ventas` + `GET /ventas/:id` (`Ventas:Leer`, también del rol Vendedor): el detalle
+     trae `caja_id`, `monto` y `vuelto` de cada pago. **Mismo número, más requests** — tapar
+     `/pagos` sin esto no cierra nada.
+  4. `GET /pagos/resumen` devuelve `montoHoy` de todo el tenant **sin ningún parámetro**. Con un
+     cajón y un turno —el caso común— *es* el cobrado de esa caja.
+  5. Segundo oráculo en la NC con devolución en efectivo (`ventas.service.ts`). Más acotado: el
+     chequeo de `devolvibleEfectivo` corre antes y pone techo, y cada intento exitoso emite una
+     NC real.
+  6. Los `400` de `POST /caja/:id/conteo` enumeran **qué medios** participaron (no montos). Es
+     la misma lista que el ciego filtra, saliendo por otra puerta. Menor.
+
+  🛑 **La pregunta para el owner, antes de tocar nada — y no es "arreglemos las seis":**
+  el esperado **no es un secreto guardable**, es una cuenta que el sistema tiene que hacer para
+  operar, y toda validación o listado que toque la plata del turno lo filtra. Taparlas de a una
+  es whack-a-mole. Hay que elegir qué promete el ciego:
+  - **(a) "el cajero no puede ver el número"** — exige tocar `pagos`, `ventas`, el resumen y los
+    dos oráculos. Y el oráculo del retiro **no se puede cerrar sin romper el chequeo de saldo
+    insuficiente**, que existe por una razón legítima: hoy impide retirar plata que no está.
+  - **(b) "el cajero no puede verlo sin dejar rastro"** — se resuelve con **auditoría** en vez
+    de ocultamiento: registrar quién consultó qué del turno en curso, y que el supervisor lo
+    vea. Cambia el control de preventivo a detectivo, que es lo mismo que ya se eligió para el
+    cierre forzado.
+  - **(c) aceptar que el ciego es fricción y no barrera**, y decirlo en la doc en vez de
+    prometer un control que no se sostiene.
+
+  ⚠️ **Ordena el frente del historial:** bloquear el historial de cajas del cajero (pedido el
+  2026-08-22) **no compra nada mientras estas estén abiertas**. El historial es el acumulado de
+  turnos pasados; esto es el esperado del turno **en curso**, que es lo que el ciego existe para
+  proteger. Va después de decidir (a)/(b)/(c), no antes.
 
 - [ ] **El descuadre lo justifica quien lo produjo, y no lo revisa nadie** (producto +
   backend) — **abierta el 2026-08-22**, al cerrar por descarte *"Ocultar el resultado
@@ -474,19 +534,21 @@ empezarlas.
   —*esquema de doble control entre operador y supervisor*— y lo que cubre el umbral de Toast.
   Ninguno de los dos exige que el cajero esté a ciegas
   ([§11.2](investigaciones/2026-07-23-gestion-caja.md#112-fudo-es-el-único-precedente-de-la-opción-solo-el-supervisor)).
-  **Lo barato y lo que va primero: la tendencia por cajero.** No es un flujo nuevo, es una
-  lectura para el supervisor, y **el dato ya está guardado**: `historial`
-  (`caja.service.ts`) ya filtra por `usuarioId`, ya devuelve `diferencia` y
-  `diferencia_total` por caja, y un supervisor con `tieneVerTodas` ya puede pedir la de
-  cualquier cajero. Falta la **señal**, no el dato ni el permiso.
-  ⚠️ **Matiz de diseño que no se puede perder: la señal es el sesgo, no el monto.** El cajero
-  de la caja más cargada va a tener más varianza siempre, y no por eso es sospechoso. Lo que
-  delata es descuadrar **siempre para el mismo lado**. Un promedio de magnitud marca al más
-  ocupado; un promedio **con signo** marca al que roba.
-  🛑 **Sin decidir, para cuando se tome:** sobre qué ventana se mide (¿últimos N cierres, o
-  un rango de fechas?), y si el cajero ve su propia tendencia o es solo del supervisor —
-  ojo que esto último **no** es la pregunta que se cerró el 2026-08-22: aquella era sobre el
-  turno en curso, esta es sobre el acumulado.
+  ✅ **La tendencia por cajero SE CONSTRUYÓ el 2026-08-22** — `GET /caja/tendencia` +
+  `/cajas/tendencia`, solo supervisión. Con eso el supervisor ya puede **ver** el sesgo:
+  suma con signo del efectivo, otros medios aparte, y conteos de faltante/sobrante/cuadrado,
+  ordenado por el faltante más grande arriba. Detalle en
+  [`features/gestion-cajas.md`](../features/gestion-cajas.md#tendencia-de-descuadres-por-cajero).
+  ⏳ **Lo que sigue abierto es la otra mitad, y es la que da nombre a la entrada: que alguien
+  REVISE.** Ver el sesgo exige que el supervisor abra la pantalla y sospeche primero; nada lo
+  llama. La revisión de verdad es el paso de conciliación de Fudo o el umbral de Toast — y el
+  umbral es la entrada de arriba, que **ahora sí se puede tomar**, porque ya hay de dónde
+  sacar el número.
+  🛑 **Preguntas que quedaron anotadas al construir la tendencia**, ninguna bloqueante: si la
+  ventana por defecto de 30 días es la correcta; si se quiere el **promedio con signo**
+  (queda afuera porque un promedio de dinero es una división de dinero y arrastra la
+  cuantización por moneda); y si un cajero que rota entre cajones debería verse separado por
+  cajón en vez de en una fila sola.
 
 - [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
   de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue

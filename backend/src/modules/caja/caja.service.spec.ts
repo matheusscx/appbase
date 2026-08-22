@@ -1496,6 +1496,125 @@ describe('CajaService', () => {
     });
   });
 
+  describe('tendenciaDescuadres', () => {
+    const filaCruda = {
+      usuario_id: USUARIO_ID,
+      usuario_nombre: 'Ana',
+      usuario_apellido: 'Pérez',
+      cierres: 20,
+      efectivo_suma: '-60000.0000',
+      otros_medios_suma: '0.0000',
+      con_faltante: 18,
+      con_sobrante: 1,
+      cuadrados: 1,
+    };
+
+    it('sin fechas no consulta la zona horaria: una sola query', async () => {
+      dataSource.query.mockResolvedValueOnce([filaCruda]);
+
+      await service.tendenciaDescuadres(TENANT_ID, {});
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [, params] = dataSource.query.mock.calls[0];
+      expect(params).toEqual([TENANT_ID]);
+    });
+
+    it('mapea la fila y arma el nombre con apellido', async () => {
+      dataSource.query.mockResolvedValueOnce([filaCruda]);
+
+      const res = await service.tendenciaDescuadres(TENANT_ID, {});
+
+      expect(res).toEqual([
+        {
+          usuarioId: USUARIO_ID,
+          usuarioNombre: 'Ana Pérez',
+          cierres: 20,
+          efectivoSuma: '-60000.0000',
+          otrosMediosSuma: '0.0000',
+          conFaltante: 18,
+          conSobrante: 1,
+          cuadrados: 1,
+        },
+      ]);
+    });
+
+    it('cajero sin nombre (soft-borrado) no desaparece: la fila sobrevive', async () => {
+      // El LEFT JOIN filtra `u.eliminado_el IS NULL`, así que un cajero dado de
+      // baja deja de aportar nombre — pero sus cierres YA OCURRIERON y no pueden
+      // salirse del informe. Mismo criterio que el ítem borrado en mermas.
+      dataSource.query.mockResolvedValueOnce([
+        { ...filaCruda, usuario_nombre: null, usuario_apellido: null },
+      ]);
+
+      const [fila] = await service.tendenciaDescuadres(TENANT_ID, {});
+
+      expect(fila.usuarioNombre).toBe('Sin usuario');
+      expect(fila.cierres).toBe(20);
+    });
+
+    it('solo cuenta cierres con el conteo congelado, de caja física y no borrada', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.tendenciaDescuadres(TENANT_ID, {});
+
+      const [sql] = dataSource.query.mock.calls[0];
+      expect(sql).toContain('c.diferencia IS NOT NULL');
+      expect(sql).toContain("c.tipo = 'fisica'");
+      expect(sql).toContain('c.eliminado_el IS NULL');
+      expect(sql).toContain('am.eliminado_el IS NULL');
+    });
+
+    it('el soft-delete del cajero va en el ON del LEFT JOIN, no en el WHERE', async () => {
+      // No es un detalle de estilo: en el WHERE, el LEFT JOIN degenera a INNER y
+      // el cajero dado de baja DESAPARECE del informe con todos sus cierres. Un
+      // `toContain('u.eliminado_el IS NULL')` a secas pasa igual en los dos
+      // casos, así que la aserción tiene que fijar la cláusula entera.
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.tendenciaDescuadres(TENANT_ID, {});
+
+      const [sql] = dataSource.query.mock.calls[0];
+      expect((sql as string).replace(/\s+/g, ' ')).toContain(
+        'LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id AND u.eliminado_el IS NULL',
+      );
+    });
+
+    it('con fecha pura resuelve la zona del tenant y expande el borde superior', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([]);
+
+      await service.tendenciaDescuadres(TENANT_ID, {
+        desde: '2026-08-01',
+        hasta: '2026-08-16',
+      });
+
+      const [sql, params] = dataSource.query.mock.calls[1];
+      expect(params).toEqual([
+        TENANT_ID,
+        'America/Santiago',
+        '2026-08-01',
+        '2026-08-16',
+      ]);
+      // El borde superior NO puede ser `<=`: con fecha pura se come el día
+      // entero (`cf8396be`). `bordeHastaSql` emite `< (fecha + 1)`.
+      expect(sql).toContain('::date + 1');
+      // Y la ventana se mide sobre el COALESCE, no sobre `fecha_cierre` a secas:
+      // una caja en `en_conciliacion` la tiene NULL y quedaría fuera en silencio.
+      expect(sql).toContain('COALESCE(c.fecha_cierre, c.fecha_apertura)');
+    });
+
+    it('el tenant sale del argumento, nunca de la query', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.tendenciaDescuadres(TENANT_ID, {});
+
+      const [sql, params] = dataSource.query.mock.calls[0];
+      expect(sql).toContain('c.tenant_id = $1');
+      expect(params[0]).toBe(TENANT_ID);
+    });
+  });
+
   describe('getArqueoCiego / setArqueoCiego', () => {
     it('getArqueoCiego lee tenants.arqueo_ciego filtrando soft-delete', async () => {
       dataSource.query.mockResolvedValueOnce([{ arqueo_ciego: true }]);

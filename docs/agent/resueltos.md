@@ -47,9 +47,21 @@ cajero se le oculta la diferencia, **no puede completar el cierre de su propia c
 
 **Una corrección de hecho:** la entrada afirmaba que el panel de resumen del turno seguía
 mostrando el esperado. Ya no — lo cerró `8571b8b3`. Hoy las cuatro superficies de lectura
-comparten **el mismo predicado**, `!esAdmin && estado === 'abierta' && arqueoCiego`. No queda
-ninguna fuga **antes** del conteo; lo único abierto era la revelación **después**, que es
+comparten **el mismo predicado**, `!esAdmin && estado === 'abierta' && arqueoCiego`. Lo único
+abierto **dentro del módulo `caja`** era la revelación **después** del conteo, que es
 exactamente lo que esta entrada pedía tapar.
+
+⛔ **Corrección del 2026-08-22, el mismo día: esta entrada decía "no queda ninguna fuga antes
+del conteo" y ERA FALSO.** Una auditoría dirigida encontró seis fugas fuera del módulo `caja`,
+dos de ellas demostradas corriendo: `GET /pagos?cajaId=…&metodoPagoId=…` devuelve el esperado
+completo en **un** request al cajero (que tiene `Pagos:Leer` por el rol Vendedor del seed), y
+el 422 *"Saldo insuficiente en caja"* de `POST /caja/:id/movimientos` es un **oráculo** que lo
+entrega en 20 requests por búsqueda binaria, sin dejar rastro. La causa de que la afirmación
+saliera mal vale más que el dato: **el predicado del ciego existe solo dentro de
+`caja.service.ts`**, y el rasgo que define a esas seis fugas es justamente **no** mencionarlo
+—`pagos` y `ventas` sirven la misma plata sin enterarse de que el modo ciego existe—. Verificar
+"las cuatro superficies" era verificar el mecanismo, no la conducta. Frente propio en
+[`pendientes.md`](pendientes.md).
 
 **Y una pasada de investigación** ([§11](investigaciones/2026-07-23-gestion-caja.md#11-cuándo-se-revela-el-descuadre-y-a-quién-2026-08-22-5ª-pasada),
 doce productos relevados, internacional + CL/LatAm).

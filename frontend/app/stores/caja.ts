@@ -100,6 +100,19 @@ export interface ArqueoLinea {
   comentarioDiferencia?: string | null
 }
 
+export interface TendenciaDescuadres {
+  usuarioId: string
+  usuarioNombre: string
+  cierres: number
+  /** Suma CON signo de la línea de efectivo. Negativo = faltante. */
+  efectivoSuma: string
+  /** Todo lo que no es efectivo, aparte y nunca sumado al de arriba. */
+  otrosMediosSuma: string
+  conFaltante: number
+  conSobrante: number
+  cuadrados: number
+}
+
 export interface MotivoDiferencia {
   id: string
   nombre: string
@@ -358,6 +371,23 @@ export const useCajaStore = defineStore('caja', () => {
     detalle.value = data && typeof data === 'object' ? data : null
   }
 
+  /**
+   * Tendencia de descuadres por cajero. Lectura de supervisión (`Cajas:Leer`):
+   * no hay versión "la mía" — el cajero no ve su propio acumulado.
+   */
+  async function cargarTendencia(
+    desde?: string,
+    hasta?: string,
+  ): Promise<TendenciaDescuadres[]> {
+    const qs = new URLSearchParams()
+    if (desde) qs.set('desde', desde)
+    if (hasta) qs.set('hasta', hasta)
+    const sufijo = qs.toString() ? `?${qs.toString()}` : ''
+    return useApiFetch<TendenciaDescuadres[]>(
+      `${config.public.apiUrl}/caja/tendencia${sufijo}`,
+    )
+  }
+
   return {
     activa,
     resumenTurno,
@@ -383,6 +413,7 @@ export const useCajaStore = defineStore('caja', () => {
     justificarDiferencias,
     cargarCajonesEstado,
     cargarDetalle,
+    cargarTendencia,
     cargarCajonesDisponibles,
     cargarArqueo,
     cargarArqueoCiego,

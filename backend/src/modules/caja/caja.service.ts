@@ -28,11 +28,18 @@ import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import type { FinalizarCierreDto } from './dto/finalizar-cierre.dto';
 import type { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import type { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
+import type { QueryTendenciaDescuadresDto } from './dto/query-tendencia-descuadres.dto';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+import {
+  bordeFechaSql,
+  bordeHastaSql,
+  requiereZonaTenant,
+  zonaHorariaTenant,
+} from '../../common/utils/rango-fecha.util';
 
 export interface CajonEstado {
   cajonId: string;
@@ -80,6 +87,51 @@ export interface LineaArqueo {
   motivoDiferenciaId?: string | null;
   motivoNombre?: string | null;
   comentarioDiferencia?: string | null;
+}
+
+/**
+ * Columna sobre la que se mide la ventana de la tendencia: el cierre **cuando
+ * existe**, y la apertura cuando no.
+ *
+ * Filtrar `fecha_cierre` a secas excluiría **en silencio** a las cajas en
+ * `en_conciliacion` —que la tienen NULL y son justo las que más le importan al
+ * supervisor: descuadraron y siguen sin resolver—, porque toda comparación
+ * contra NULL es falsa. Ninguna fila se cae de la ventana por su estado.
+ */
+const COLUMNA_VENTANA = 'COALESCE(c.fecha_cierre, c.fecha_apertura)';
+
+/**
+ * Una fila de la tendencia de descuadres: un cajero, su ventana. Los montos
+ * viajan como string (convención de dinero del proyecto), los conteos como int.
+ *
+ * ⚠️ Los tres conteos son **de la línea de efectivo**, no del arqueo entero: una
+ * caja con el efectivo exacto y −500 en tarjeta cuenta como `cuadrados`. Es
+ * deliberado —la señal de sesgo es sobre el efectivo— pero quien renderice esto
+ * tiene que rotularlo, o el número miente.
+ */
+export interface TendenciaDescuadresItem {
+  usuarioId: string;
+  usuarioNombre: string;
+  cierres: number;
+  /** Suma CON SIGNO de la línea de efectivo. Negativo = faltante. */
+  efectivoSuma: string;
+  /** Todo lo que no es efectivo, agregado aparte y nunca sumado al de arriba. */
+  otrosMediosSuma: string;
+  conFaltante: number;
+  conSobrante: number;
+  cuadrados: number;
+}
+
+interface TendenciaDescuadresRow {
+  usuario_id: string;
+  usuario_nombre: string | null;
+  usuario_apellido: string | null;
+  cierres: number;
+  efectivo_suma: string;
+  otros_medios_suma: string;
+  con_faltante: number;
+  con_sobrante: number;
+  cuadrados: number;
 }
 
 export interface CajaHistorialItem {
@@ -1152,6 +1204,134 @@ export class CajaService {
       comentario: r.comentario,
       cajonNombre: r.cajon_nombre,
     };
+  }
+
+  /**
+   * Tendencia de descuadres por cajero, sobre una ventana de fechas. Lectura de
+   * supervisión (`Cajas:Leer`): el cajero NO ve la propia —decisión del owner
+   * 2026-08-22—, porque mostrarle su sesgo acumulado le entrega la calibración
+   * ya calculada.
+   *
+   * **La señal es el sesgo, no la magnitud.** El cajero de la caja más cargada
+   * va a tener más varianza siempre y no por eso es sospechoso; lo que delata es
+   * descuadrar SIEMPRE para el mismo lado. Por eso la fila devuelve la suma con
+   * signo más los conteos de faltante/sobrante/cuadrado, y NO un promedio: un
+   * promedio de dinero es una división de dinero, y eso arrastraría la
+   * cuantización por moneda a un reporte para decir lo que "18 de 20 para abajo"
+   * ya dice.
+   *
+   * **Efectivo y resto van separados, nunca sumados en una cifra.** El robo vive
+   * en el efectivo (una tarjeta no se guarda en el bolsillo), así que mezclar
+   * medios le mete a la señal el ruido de la conciliación de tarjeta. Pero
+   * mostrar SOLO el efectivo ya fue un bug acá: `CajaHistorial.vue` documenta que
+   * con la columna sobre `diferencia` una caja cerrada con -500 en tarjeta se
+   * veía como "+0" en la lista y como "-500" al abrir el detalle. Las dos
+   * columnas, entonces.
+   *
+   * Una sola query agregada: `GROUP BY` por cajero, sin una consulta por fila.
+   */
+  async tendenciaDescuadres(
+    tenantId: string,
+    query: QueryTendenciaDescuadresDto,
+  ): Promise<TendenciaDescuadresItem[]> {
+    // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
+    const zona = requiereZonaTenant(query.desde, query.hasta)
+      ? await zonaHorariaTenant(this.db, tenantId)
+      : null;
+
+    const params: unknown[] = [tenantId];
+    let idxZona = 0;
+    if (zona != null) {
+      params.push(zona);
+      idxZona = params.length;
+    }
+
+    let filtros = '';
+    if (query.desde) {
+      params.push(query.desde);
+      filtros += bordeFechaSql(
+        COLUMNA_VENTANA,
+        '>=',
+        query.desde,
+        params.length,
+        idxZona,
+      );
+    }
+    if (query.hasta) {
+      params.push(query.hasta);
+      filtros += bordeHastaSql(
+        COLUMNA_VENTANA,
+        query.hasta,
+        params.length,
+        idxZona,
+      );
+    }
+
+    const rows: TendenciaDescuadresRow[] = await this.db.query(
+      // `c.diferencia IS NOT NULL` en vez de enumerar estados: significa
+      // exactamente "el conteo se congeló", que es la condición que importa, y
+      // sobrevive a que mañana se agregue un estado nuevo. Incluye `cerrada` y
+      // `en_conciliacion` —en las dos el descuadre ya ocurrió—, y deja afuera la
+      // caja abierta, donde todavía es NULL.
+      //
+      // La fila se atribuye a `c.usuario_id` (el DUEÑO del turno) y no a
+      // `cerrada_por`: en un cierre forzado el encargado contó, pero el
+      // descuadre es del turno de quien lo trabajó.
+      `SELECT c.usuario_id,
+              u.nombre   AS usuario_nombre,
+              u.apellido AS usuario_apellido,
+              COUNT(*)::int AS cierres,
+              COALESCE(SUM(c.diferencia), 0)::text AS efectivo_suma,
+              COALESCE(SUM(COALESCE(arq.diferencia_total, c.diferencia) - c.diferencia), 0)::text
+                AS otros_medios_suma,
+              COUNT(*) FILTER (WHERE c.diferencia < 0)::int AS con_faltante,
+              COUNT(*) FILTER (WHERE c.diferencia > 0)::int AS con_sobrante,
+              COUNT(*) FILTER (WHERE c.diferencia = 0)::int AS cuadrados
+         FROM cajas c
+         -- LEFT JOIN, no INNER: un cajero dado de baja pierde el nombre pero sus
+         -- cierres YA OCURRIERON y no se pueden caer del informe. Mismo criterio
+         -- que el ítem borrado en el informe de mermas.
+         LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id
+                AND u.eliminado_el IS NULL
+         -- Lateral y no un JOIN + GROUP BY: idéntico al de historial, para no
+         -- multiplicar la fila de la caja por sus líneas de arqueo.
+         LEFT JOIN LATERAL (
+           SELECT SUM(am.diferencia) AS diferencia_total
+             FROM caja_arqueo_medio am
+            WHERE am.caja_id = c.caja_id AND am.eliminado_el IS NULL
+         ) arq ON TRUE
+        WHERE c.tenant_id = $1
+          AND c.tipo = 'fisica'
+          AND c.eliminado_el IS NULL
+          AND c.diferencia IS NOT NULL
+          ${filtros}
+        GROUP BY c.usuario_id, u.nombre, u.apellido
+        -- Desempate por usuario: sin él, dos cajeros con la misma suma (el caso
+        -- común, todos en cero) salen en orden no determinista entre requests.
+        ORDER BY SUM(c.diferencia) ASC, c.usuario_id ASC`,
+      params,
+    );
+
+    return rows.map((r) => ({
+      usuarioId: r.usuario_id,
+      usuarioNombre:
+        [r.usuario_nombre, r.usuario_apellido]
+          .filter((p): p is string => Boolean(p))
+          .join(' ')
+          .trim() || 'Sin usuario',
+      cierres: r.cierres,
+      // Normalizado a la escala 4 como hace `mapCajaHistorialRow`, y no
+      // devuelto crudo: así la forma del string la decide el código y no lo que
+      // emita el driver. (Los dos `COALESCE(...,0)` de la query son hoy
+      // inalcanzables —`diferencia IS NOT NULL` garantiza que ningún `SUM` dé
+      // NULL, y `GROUP BY` no produce grupos vacíos—, así que la consistencia
+      // con su vecino es la única razón de esta línea, no un caso borde real.)
+      efectivoSuma: new Decimal(r.efectivo_suma).toFixed(4),
+      otrosMediosSuma: new Decimal(r.otros_medios_suma).toFixed(4),
+      conFaltante: r.con_faltante,
+      conSobrante: r.con_sobrante,
+      cuadrados: r.cuadrados,
+    }));
   }
 
   /**

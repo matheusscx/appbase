@@ -28,6 +28,7 @@ import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
+import { QueryTendenciaDescuadresDto } from './dto/query-tendencia-descuadres.dto';
 import { SetArqueoCiegoDto } from './dto/set-arqueo-ciego.dto';
 import { JustificarDiferenciasDto } from './dto/justificar-diferencias.dto';
 import { FinalizarCierreDto } from './dto/finalizar-cierre.dto';
@@ -160,6 +161,26 @@ export class CajaController {
     const u = req.user as JwtUser;
     await this.cajaService.setArqueoCiego(u.tenantId!, dto.arqueoCiego);
     return { arqueoCiego: dto.arqueoCiego };
+  }
+
+  /**
+   * Tendencia de descuadres por cajero — lectura de SUPERVISIÓN, no del cajero.
+   * `Cajas:Leer` a secas (no `resolverLecturaCompartida`): a diferencia del
+   * historial, acá no hay versión "la mía" que un cajero pueda pedir. Decisión
+   * del owner 2026-08-22: el sesgo acumulado lo ve el supervisor.
+   *
+   * ⚠️ Va declarada ANTES de `@Get(':id')` o la ruta literal se la come el
+   * parámetro: `/caja/tendencia` entraría como `findOne('tendencia')` y moriría
+   * buscando una caja con ese id.
+   */
+  @Get('tendencia')
+  @RequiresPermiso('Cajas', 'Leer')
+  async tendenciaDescuadres(
+    @Req() req: Request,
+    @Query() query: QueryTendenciaDescuadresDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.cajaService.tendenciaDescuadres(u.tenantId!, query);
   }
 
   @Get(':id/arqueo')
