@@ -387,38 +387,6 @@ empezarlas.
   la fixture de `garzon-pin.e2e-spec.ts` que necesita `Salones:Operar`— hay que revisarlos
   uno por uno, o el encargado de salón pierde el garzón al mover el permiso.
 
-- [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
-  persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
-  sí lo vieron**) — `auth.controller.ts` → `googleCallback` redirige a
-  `/auth/callback?token=...` con el **access token en la query string**, a diferencia del resto
-  del sistema que usa cookie `httpOnly` para el refresh. Queda en el historial del navegador y
-  en los logs de acceso del hosting del frontend; `callback.vue` ni siquiera hace
-  `replace: true`.
-  **Lo que lo agrava, y es la mitad que una sola lente no vio:** con ese access token filtrado
-  se puede llamar `POST /auth/switch-tenant`, que solo exige `JwtAuthGuard`, y la respuesta trae
-  un `refresh_token` nuevo por `Set-Cookie` — legible por cualquier cliente HTTP, no solo por un
-  navegador. Una filtración de 15 minutos se vuelve una sesión renovable.
-  **Antes de decidir el arreglo hay que contestar algo previo: ¿el login con Google está
-  habilitado en producción?** Si no lo está, esto baja de prioridad sin dejar de ser deuda.
-  ✅ **Prioridad decidida (owner, 2026-08-15): baja, porque el login con Google no está en
-  uso.** No cambia que sea deuda —el token en la query string queda en historial y logs— pero sí
-  cuándo se paga: **antes de habilitar Google**, no ahora.
-  ✅ **La otra mitad ya está cerrada (2026-08-15, ver `resueltos.md`):**
-  `POST /auth/switch-tenant` exige ahora también la cookie de refresh, y de una sesión viva
-  del mismo usuario, así que un access token filtrado —venga de Google o no— dejó de poder
-  convertirse en sesión renovable.
-  **Lo que queda abierto acá es sólo el token en la query string**, con su prioridad baja: el
-  redirect a `/auth/callback?token=…` sigue dejándolo en el historial del navegador y en los
-  logs de acceso del frontend, y `callback.vue` sigue sin `replace: true`. Se paga **antes de
-  habilitar Google**.
-  ➕ **Y con él se paga otra cosa que el mismo día dejó a medias (2026-08-16):** al cortar la
-  vinculación por coincidencia de correo, entrar con Google teniendo ya una cuenta local
-  devuelve `409` y manda a usar la contraseña — **pero no existe ningún camino para vincular
-  Google a esa cuenta después**. Es deliberado: hacerlo implícito en el login era el agujero,
-  y la acción correcta —vincular desde adentro de la sesión, en el perfil— es una feature que
-  nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
-  habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
-
 - [ ] **El default del checkbox de anulación cuando la línea ya se despachó a cocina**
   (backend + frontend, decisión 2 del owner del 2026-08-15; **pieza C** de la entrada
   *"anular una venta con recetas no repone"*, cerrada el 2026-08-22 →
@@ -816,6 +784,46 @@ empezarlas.
   2026-08-21 y se verificó tecla por tecla justo con UF (`5,0500` tipeado, `5.0500`
   persistido). O sea que la UF como oficial ya **no** arrastra ese problema de pantalla:
   lo que queda de esta entrada es lo suyo propio —unidad de cuenta vs medio de pago—.
+
+- [ ] **El token de Google viaja por la URL** — ⬇️ **prioridad muy baja, reconfirmada por el
+  owner el 2026-08-22** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes
+  ciegas entre sí lo vieron**).
+  ℹ️ **Perdió el 🚩 en esa misma reconfirmación, y conviene decir por qué**: la marca decía
+  "severidad alta" y convivía con una prioridad que el owner ya había puesto en baja el
+  2026-08-15 — se contradecían, y la que quedaba a la vista al leer la lista era la marca.
+  Lo que la justificaba era la mitad que convertía el token en sesión renovable, **y esa está
+  cerrada**. No se toca hasta habilitar Google.
+  **Lo medido:** `auth.controller.ts` → `googleCallback` redirige a
+  `/auth/callback?token=...` con el **access token en la query string**, a diferencia del resto
+  del sistema que usa cookie `httpOnly` para el refresh. Queda en el historial del navegador y
+  en los logs de acceso del hosting del frontend; `callback.vue` ni siquiera hace
+  `replace: true`.
+  **Lo que lo agrava, y es la mitad que una sola lente no vio:** con ese access token filtrado
+  se puede llamar `POST /auth/switch-tenant`, que solo exige `JwtAuthGuard`, y la respuesta trae
+  un `refresh_token` nuevo por `Set-Cookie` — legible por cualquier cliente HTTP, no solo por un
+  navegador. Una filtración de 15 minutos se vuelve una sesión renovable.
+  **Antes de decidir el arreglo hay que contestar algo previo: ¿el login con Google está
+  habilitado en producción?** Si no lo está, esto baja de prioridad sin dejar de ser deuda.
+  ✅ **Prioridad decidida (owner, 2026-08-15) y bajada otra vez el 2026-08-22: muy baja,
+  porque el login con Google no está en uso.** No cambia que sea deuda —el token en la query
+  string queda en historial y logs— pero sí cuándo se paga: **antes de habilitar Google**, no
+  ahora. El disparador es habilitar Google, **no** el paso a producción: por eso la entrada
+  sigue en esta sección y no en la de endurecimiento.
+  ✅ **La otra mitad ya está cerrada (2026-08-15, ver `resueltos.md`):**
+  `POST /auth/switch-tenant` exige ahora también la cookie de refresh, y de una sesión viva
+  del mismo usuario, así que un access token filtrado —venga de Google o no— dejó de poder
+  convertirse en sesión renovable.
+  **Lo que queda abierto acá es sólo el token en la query string**, con su prioridad baja: el
+  redirect a `/auth/callback?token=…` sigue dejándolo en el historial del navegador y en los
+  logs de acceso del frontend, y `callback.vue` sigue sin `replace: true`. Se paga **antes de
+  habilitar Google**.
+  ➕ **Y con él se paga otra cosa que el mismo día dejó a medias (2026-08-16):** al cortar la
+  vinculación por coincidencia de correo, entrar con Google teniendo ya una cuenta local
+  devuelve `409` y manda a usar la contraseña — **pero no existe ningún camino para vincular
+  Google a esa cuenta después**. Es deliberado: hacerlo implícito en el login era el agujero,
+  y la acción correcta —vincular desde adentro de la sesión, en el perfil— es una feature que
+  nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
+  habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
 ---
 
