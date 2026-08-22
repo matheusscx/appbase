@@ -17,6 +17,48 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El `Promise.all` del motor sobre el cliente transaccional (2026-08-21)
+
+Cierra la entrada del backlog, **con su alcance original**: los **dos** `Promise.all` de
+`calculo-precios.service.ts` pasan a `await` secuenciales.
+
+**El mecanismo:** `calcular()` corre dentro de `crearEnTransaccion` → `db.transaccion(...)` en
+toda venta real, y ahí las cinco consultas resuelven contra el `EntityManager` del contexto ALS
+—**un único `pg.Client`**—. Concurrentes sobre ese cliente, node-postgres las encola; en `pg@9`
+la segunda tira en vez de esperar. Secuencial no cambia el orden real de ejecución en ese
+camino —ya era serie— ni ningún resultado: cambia la vía, de una anunciada como removida a una
+soportada.
+
+**El costo, declarado:** hay un camino sin transacción —la previsualización de
+`POST /calculo-precios/calcular`— donde estas consultas sí corrían en paralelo real sobre
+conexiones distintas del pool. Ese camino lo pierde. Se acepta: son cinco consultas y no es el
+camino caliente.
+
+### Dos cosas que la ejecución desmintió, y las dos son de método
+
+**1. La evidencia que la entrada citaba era de otra cosa.** Decía que la salida de
+`test:e2e -- concurrencia-pool` *"no está limpia por este mismo motivo"*. Medido con
+`--trace-deprecation`: el `DeprecationWarning` sale del `Promise.all` **interno de TypeORM**, en
+`DataSource.synchronize` → `getTables`, al arrancar cada app de test. Y **Node emite cada
+deprecación una sola vez por proceso**, así que ese warning —que ocurre al arrancar— tapa
+cualquier otro que venga después: el caso real nunca se iba a poder observar ahí. Los 43 de la
+suite completa son ~uno por proceso de test, no 43 colisiones nuestras, y **siguen siendo 43
+después del arreglo**. Por eso el mecanismo se verificó por el código y no por el warning.
+
+**2. La primera medición mía fue peor que la de la entrada.** Concluí que solo una de las tres
+ramas del primer `Promise.all` tocaba el cliente compartido, y dejé ese sitio concurrente. Era
+falso: `descuentos` y `recargos` consultan por `@InjectRepository`, que en este proyecto **no es
+el repo del pool** — `RepositoriosModule` (ADR-020) inyecta un **Proxy** que resuelve
+`TxContext.managerActivo()` en cada acceso. El ADR ya lo decía, *"motor de precios incluido"*, y
+además ya había anotado el warning en **los dos** sitios.
+
+El error fue grepear `this.db.query` literal y tomar el resultado por exhaustivo: **el proxy no
+aparece en ese grep**. Es exactamente el modo de fallar que el repo ya tenía anotado —buscar por
+mecanismo en vez de por conducta— y esta vez habría dejado el riesgo vivo en el motor con la
+entrada del backlog borrada. Lo cazó la revisión independiente.
+
+---
+
 ## Un descuento de nivel venta ya baja la base del IVA (2026-08-21)
 
 Cierra la entrada 🔴 del backlog y la decisión **(f)** de

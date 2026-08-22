@@ -59,6 +59,28 @@ detalle de las dos tandas, con los errores que se cometieron en el camino, está
 [`resueltos.md`](resueltos.md). Volvió a poblarse con los minors del frente de redondeo, que
 son de una sola pasada y están agrupados abajo.
 
+### El `Promise.all` de personalización, sobre el mismo cliente transaccional (2026-08-21)
+
+- [ ] **`ventas.service.ts:296` dispara consultas concurrentes sobre el cliente de la
+  transacción** (backend, **medido 2026-08-21** por la revisión del arreglo gemelo) — es la
+  **misma clase de defecto** que se cerró ese día en `calculo-precios.service.ts`
+  (ver [`resueltos.md`](resueltos.md)), un frame más arriba en el mismo `POST /ventas`.
+  `crearEnTransaccion` corre dentro de `db.transaccion` y ese `Promise.all` recorre
+  `dto.lineas` llamando a `resolverPersonalizacionReceta` / `resolverPersonalizacionCombo`
+  con el `manager` explícito. Con **dos o más líneas de tipo receta o combo** en la misma
+  venta, son consultas concurrentes sobre un único `pg.Client`.
+  **No es una sospecha: el propio proyecto ya lo midió** al cerrar el N+1 de la
+  personalización el 2026-08-20 —*"el `Promise.all` corre sobre el manager de la transacción,
+  o sea una sola conexión, y `pg` las encola. Son viajes en serie"*— y **dejó el `Promise.all`
+  tal cual**, porque esa tanda perseguía el conteo de consultas, no la vía.
+  **El arreglo es el mismo:** `await` secuenciales. **Costo cero**, y por la misma medición:
+  ya corren en serie, encolados por el driver. Lo único que cambia es la vía, de una que `pg`
+  anunció que va a eliminar —en `pg@9` la segunda tira en vez de esperar— a una soportada.
+  ⚠️ Al tomarlo, buscar **por conducta y no por mecanismo**: en este proyecto
+  `@InjectRepository` NO es el repo del pool (`RepositoriosModule` inyecta un Proxy que
+  resuelve el manager activo, ADR-020), así que grepear `this.db.query` deja afuera la mitad
+  de los sitios. Ese error ya se cometió una vez, el 2026-08-21, y lo cazó la revisión.
+
 ### Los minors que dejó el frente de redondeo de plata (2026-08-21)
 
 Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tests que no
@@ -1070,38 +1092,6 @@ una respuesta.
   de una NC emitida **por monto** y no por líneas — que es la forma que este sistema usa y la
   que hace la pregunta difícil.
   ⚠️ Regla del cruce: lo que traiga es **insumo para adaptar, no verdad a copiar**.
-
-- [ ] **Dos `Promise.all` del motor de precios corren en serie por una vía que pg va a
-  eliminar** (backend, medido 2026-08-18 al cerrar la Task 5 del contexto transaccional ALS)
-  — **⛔ Toca el motor de cálculo de precios: no avanzar sin decisión del owner** (`CLAUDE.md`
-  → detenerse ante el motor de precios).
-  **Los dos sitios exactos:** `calculo-precios.service.ts` ~línea 90
-  (`Promise.all([impuestosService.findAll, descuentosService.findAll, recargosService.findAll])`)
-  y ~línea 163 (`Promise.all([itemsService.cargarBasePorIds, itemsService.cargarReglasPorIds])`).
-  **El mecanismo:** `calcular()` corre dentro de `crearEnTransaccion`, que corre dentro de
-  `this.db.transaccion(...)` (Task 5) — así que los cinco callees resuelven contra el MISMO
-  `EntityManager` del contexto ALS, o sea un único `pg.Client`. El `Promise.all` los dispara
-  concurrentes sobre ese cliente, y node-postgres los encola en vez de correrlos en paralelo,
-  emitiendo `DeprecationWarning: Calling client.query() when the client is already executing a
-  query is deprecated and will be removed in pg@9.0`. Antes de la Task 5 cada llamada tomaba su
-  propia conexión del pool (sin `EntityManager` compartido), así que la contención no existía.
-  **El disparador:** un upgrade mayor de `pg` (a `pg@9`). No es una bomba de tiempo, es un break
-  con puerta — requiere una acción deliberada (subir esa dependencia) para activarse.
-  **El alcance del daño si pasa:** el camino caliente completo, cada `POST /ventas` — hoy el
-  encolado es silencioso (solo el warning); en `pg@9` la segunda `client.query()` concurrente
-  tira en vez de esperar.
-  **El arreglo conocido:** reemplazar los dos `Promise.all` por `await` secuenciales. Cero
-  cambio de resultado — hoy ya corren en serie, encolados por el driver; el arreglo solo cambia
-  la vía por la que corren en serie, de una que se anuncia removida a una soportada.
-  **La pregunta para el owner:** ¿cuándo se autoriza tocar `calculo-precios.service.ts` para
-  aplicar ese `await` secuencial? Es el único cambio que pide esta entrada —ninguna regla de
-  cálculo, redondeo u orden de operaciones se toca—, pero el archivo es zona de "detenerse y
-  preguntar" y la Task 5 (2026-08-18) tenía permiso explícito solo para cambiar toma de
-  conexión, no orden de llamadas — el owner decidió esa fecha anotarlo acá en vez de tocarlo
-  dentro de esa tanda.
-  ℹ️ La salida de `npm run test:e2e -- concurrencia-pool` **no está limpia** por este mismo
-  motivo: imprime el `DeprecationWarning` de arriba en cada corrida (el test igual pasa). No es
-  una regresión nueva si alguien lo redescubre — es este pendiente, ya conocido.
 
 ## 5. Carreras de concurrencia
 

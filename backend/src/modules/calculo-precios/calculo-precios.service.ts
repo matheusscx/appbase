@@ -100,11 +100,32 @@ export class CalculoPreciosService {
       ));
 
     // Catálogos del tenant cargados una vez e indexados por id.
-    const [impuestos, descuentos, recargos] = await Promise.all([
-      this.impuestosService.findAll(tenantId),
-      this.descuentosService.findAll(tenantId),
-      this.recargosService.findAll(tenantId),
-    ]);
+    /**
+     * **Secuencial a propósito, y no es una desoptimización en el camino que
+     * importa.** `calcular()` corre dentro de `crearEnTransaccion` →
+     * `db.transaccion(...)` en toda venta real (`ventas.service.ts`), y ahí las
+     * tres ramas resuelven contra el `EntityManager` del contexto ALS: **un
+     * único `pg.Client`**. Un `Promise.all` las dispara concurrentes sobre ese
+     * cliente y node-postgres las encola igual; en `pg@9` la segunda **tira**.
+     *
+     * ⚠️ **Las tres, no una.** `descuentos` y `recargos` consultan por
+     * `@InjectRepository`, que acá NO es el repo del pool: `RepositoriosModule`
+     * (ADR-020) inyecta un **Proxy** que en cada acceso resuelve
+     * `TxContext.managerActivo()` y usa el manager de la transacción si hay una
+     * viva. El ADR lo dice con todas las letras, *"motor de precios incluido"*.
+     * Buscar `this.db.query` literal no alcanza para saber quién toca el cliente
+     * compartido — el proxy no aparece en ese grep.
+     *
+     * **El costo, declarado:** hay un camino sin transacción —la previsualización
+     * de `POST /calculo-precios/calcular`, que no la envuelve—, y ahí estas tres
+     * sí corrían en paralelo real sobre conexiones distintas del pool. Ese camino
+     * pierde ese paralelismo. Se acepta: son tres consultas, y la previsualización
+     * no es el camino caliente; el de la venta sí, y ahí no había paralelismo que
+     * perder.
+     */
+    const impuestos = await this.impuestosService.findAll(tenantId);
+    const descuentos = await this.descuentosService.findAll(tenantId);
+    const recargos = await this.recargosService.findAll(tenantId);
     const impuestoMap = new Map<string, ImpuestoResuelto & { tipo: string }>(
       impuestos.map((i) => [
         i.id,
@@ -173,10 +194,38 @@ export class CalculoPreciosService {
     }
 
     const itemIds = dto.lineas.map((l) => l.itemId);
-    const [itemsBase, reglasPorItem] = await Promise.all([
-      this.itemsService.cargarBasePorIds(tenantId, itemIds),
-      this.itemsService.cargarReglasPorIds(tenantId, itemIds),
-    ]);
+    /**
+     * **Secuencial a propósito, y no es una desoptimización.** Los dos loaders
+     * consultan con `this.db.query`, y `calcular()` corre dentro de
+     * `crearEnTransaccion` → `db.transaccion(...)`, así que los dos resuelven
+     * contra el `EntityManager` del contexto ALS: **un único `pg.Client`**. Un
+     * `Promise.all` los dispara concurrentes sobre ese cliente y node-postgres
+     * los encola igual; en `pg@9` la segunda tira en vez de esperar.
+     *
+     * En el camino de la venta el `await` secuencial no cambia el orden real de
+     * ejecución —ya era serie— ni ningún resultado: cambia la vía por la que
+     * corre en serie, de una anunciada como removida a una soportada. En la
+     * previsualización, que corre fuera de transacción, sí saca paralelismo
+     * real: dos consultas, costo aceptado (ver el bloque de arriba).
+     *
+     * ⚠️ **El `DeprecationWarning` que el backlog citaba como evidencia no era
+     * de acá** (medido 2026-08-21 con `--trace-deprecation`): sale del
+     * `Promise.all` interno de TypeORM en `DataSource.synchronize`, al arrancar
+     * cada app de test. Node emite cada deprecación **una vez por proceso**, así
+     * que ese warning tapa cualquier otro y no sirve para observar este caso. El
+     * mecanismo sí se verificó, pero por el código: `Db.query` → `managerActivo`.
+     *
+     * Los dos siguen siendo loaders BATCH —una consulta por llamada, no una por
+     * línea—, que es lo que este par vino a resolver.
+     */
+    const itemsBase = await this.itemsService.cargarBasePorIds(
+      tenantId,
+      itemIds,
+    );
+    const reglasPorItem = await this.itemsService.cargarReglasPorIds(
+      tenantId,
+      itemIds,
+    );
 
     const lineas: LineaResuelta[] = dto.lineas.map((linea) =>
       this.resolverLinea(
