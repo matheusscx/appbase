@@ -19,8 +19,8 @@ entrada 🔴 de [`pendientes.md`](../../agent/pendientes.md)
 | a | ¿Un descuento fijo se resta del neto o de lo cobrado? | **De lo cobrado** |
 | b | ¿Cómo baja el descuento global al IVA? | **Prorrateo por peso a las líneas** |
 | c | Con afecto y exento mezclados, ¿a qué base pega? | **Prorrata, calculada por el sistema** |
-| d | ¿Quién se queda con el residuo del reparto? | **El resto más grande; desempata el `id`** |
-| e | ¿El descuento global apaga el cierre a góndola? | **Sí, y se documenta** |
+| d | ¿Quién se queda con el residuo del reparto? | **El resto más grande; desempata la posición** |
+| e | ¿El descuento global apaga el cierre a góndola? | **No: le mueve el ancla** (enmendada) |
 | f | ¿El frente va entero o por partes? | **Dos pasos: contrato fiscal, después prorrateo** |
 
 ---
@@ -97,6 +97,11 @@ ordenó la lista.
 
 **Qué obliga:**
 - El reparto tiene que ser **determinista y testeable sin depender del orden de entrada**.
+- ⚠️ **Enmendada al implementar (2026-08-21):** la decisión decía *"desempata el `id`"*, copiando
+  a `elegirAbsorbente`. **Una línea no tiene un id propio** —dos líneas pueden ser del mismo
+  ítem— así que se desempata por **posición**. Cumple el porqué de la decisión original, que era
+  que el resultado no dependiera del orden de una consulta: la posición de una línea es el orden
+  del documento, lo que el comprobante imprime, no el orden en que volvió un `SELECT`.
 - Test con el caso numérico exacto: `$10.000` entre tres líneas iguales en CLP da
   `3.333 + 3.333 + 3.334`, no `3.333 × 3`.
 
@@ -116,8 +121,15 @@ comentario; esta decisión lo extiende al descuento global sin cambiar el criter
 - ⚠️ **No confundirlo con la consecuencia elegida de la decisión (e) del redondeo**, donde el
   IVA difiere de `tasa × base` en un peso y **está bien**. Los dos casos viven en el mismo
   archivo y se parecen.
-- Verificado que no hay contradicción con (a): con un `%`, derivar por resta desde la góndola
-  descontada y aplicar `tasa × base` dan el mismo número (894 / 751 / 143).
+- ⚠️ **Enmendada el 2026-08-21, con el spike y con el owner.** La versión original decía que
+  la línea *"deja de cerrar y su impuesto se calcula por el camino normal"*, y afirmaba —desde
+  **un solo ejemplo**— que eso no contradecía (a). Un barrido de 11.604 casos dice que derivar
+  por resta y aplicar `tasa × base` **difieren en 1.815 (15,6%)**, y que en esos casos
+  `tasa × base` rompe que `base + impuesto` sea el total: `87 + 17 = 104` sobre un total de
+  103. Como (a) **ancla lo que el cliente paga**, esa identidad no es negociable.
+- **La decisión corregida:** el cierre **no se apaga, se le mueve el ancla** — de "el precio de
+  etiqueta" a "el precio de etiqueta menos la parte prorrateada". El impuesto se sigue
+  derivando por resta, que cierra siempre por construcción.
 
 ## f) El frente va en dos pasos, y el primero va solo
 

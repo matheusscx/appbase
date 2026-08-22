@@ -526,6 +526,41 @@ cd backend && npm run test:e2e
 
 ---
 
+## Un descuento de nivel venta y la base del IVA
+
+Un descuento de documento **baja la base imponible**, no solo lo cobrado. Hasta el
+2026-08-21 no lo hacía: la boleta declaraba el IVA del neto sin descontar y
+`IVA ≠ tasa × MntNeto`. Lo que manda es la fórmula del formato DTE:
+
+```
+MntNeto = Σ MontoItem por línea − Descuentos + Recargos   · solo items con IndExe = 0
+IVA     = MntNeto * 19%
+```
+
+**Cómo lo resuelve el motor:** el descuento **baja prorrateado a las líneas** por lo que cada
+una aporta, y cada línea recalcula su impuesto. No hay un paso `impuestos` a nivel documento
+y no es un olvido: una boleta puede llevar IVA e ILA a tasas distintas, y no existe una tasa
+única aplicable al neto agregado.
+
+Cada línea decide cuánto de su parte es neto y cuánto impuesto **según sus propias tasas**:
+una línea exenta se lleva su parte entera como neto, una afecta la parte. Eso es la prorrata
+entre base afecta y exenta que el DTE declara con `IndExeDR`, sin tratar las dos bases por
+separado.
+
+**Un descuento de monto fijo se resta de lo cobrado.** `$200` de descuento significa que el
+cliente paga `$200` menos; el documento declara `168` de descuento y `32` menos de IVA, que
+es lo que `MntNeto = Σ MontoItem − Descuentos` pide. Con un `%` la distinción no existe:
+bajar 10% del neto y 10% del IVA es bajar 10% del total.
+
+⚠️ **No confundir con la consecuencia elegida del desbruteo** —la sección de arriba—, donde el
+IVA difiere de `tasa × base` en una unidad y **está bien**. Acá el monto persistido estaba mal;
+allá está bien y lo que sobra es la multiplicación. Los dos casos viven en este archivo justo
+para que quien audite una boleta no "arregle" uno creyendo que persigue el otro.
+
+Decisiones y evidencia:
+[spec](../superpowers/specs/2026-08-21-descuento-global-vs-iva-decisiones.md) ·
+[investigación del DTE](../agent/investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
+
 ## Related Features
 
 - [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md) — el IVA se deriva de

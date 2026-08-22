@@ -1,6 +1,6 @@
 # Plan: el descuento global baja la base del IVA
 
-**Status:** In Progress — Paso 0 entregado (2026-08-21); Paso 1 sin empezar
+**Status:** Done — Paso 0 y Paso 1 entregados el 2026-08-21
 **Date:** 2026-08-21
 **Owner:** Cesar Matheus
 
@@ -169,47 +169,47 @@ menos la parte prorrateada del descuento". El mecanismo de derivar el IVA por re
 mantiene; lo que cambia es contra qué se resta. **No se toca código hasta que esto esté
 decidido.**
 
-- [ ] **2. El descuento global se prorratea por peso a las líneas** y el impuesto se recalcula
+- [x] **2. El descuento global se prorratea por peso a las líneas** y el impuesto se recalcula
       por línea sobre la base nueva — decisión (b). No agregar un paso `impuestos` a nivel
       documento: no existe una tasa única para el neto agregado cuando las líneas llevan IVA
       y `'otro'`.
-- [ ] **3. El residuo va al resto más grande, desempate por `id`** — decisión (d). Mismo
+- [x] **3. El residuo va al resto más grande, desempate por `id`** — decisión (d). Mismo
       criterio que `elegirAbsorbente`, y por la misma razón escrita ahí (que el resultado no
       dependa del orden en que la query devolvió las líneas). Test con el caso exacto:
       `$10.000` entre tres líneas iguales en CLP → `3.333 + 3.333 + 3.334`.
-- [ ] **4. Prorrata entre base afecta y exenta** — decisión (c). Usa el estado fiscal del Paso
+- [x] **4. Prorrata entre base afecta y exenta** — decisión (c). Usa el estado fiscal del Paso
       0. Test con el caso medido de la spec (`$80.000` afecto + `$20.000` exento, `$10.000` de
       descuento → IVA 13.680) y con los dos degenerados (todo afecto / todo exento).
-- [ ] **5. Un descuento de monto fijo se resta de lo cobrado** — decisión (a). ⚠️ Con `%` no
+- [x] **5. Un descuento de monto fijo se resta de lo cobrado** — decisión (a). ⚠️ Con `%` no
       cambia nada (verificado); el test que prueba esta decisión tiene que ser **de monto
       fijo**, o no prueba nada.
-- [ ] **6. Corregir el comentario de `calculo-precios.engine.ts:918-919`**, que afirma que la
+- [x] **6. Corregir el comentario de `calculo-precios.engine.ts:918-919`**, que afirma que la
       ausencia del paso a nivel venta es deliberada. **En el mismo commit que el arreglo**, o
       el próximo agente lo lee y desarregla.
 
 ## Verification (Paso 1)
 
-- [ ] **Red de regresión que hoy no existe:** un e2e que lea `ventas.total_impuestos` **de la
+- [x] **Red de regresión que hoy no existe:** un e2e que lea `ventas.total_impuestos` **de la
       base** después de una venta con descuento global. Ningún e2e lee hoy los totales
       persistidos — es una entrada propia del backlog y este frente es el que la necesita.
       ⚠️ Si el test necesita SQL directo para montar el escenario, sospechar que el caso real
       quedó sin cubrir.
-- [ ] Cada arreglo de conducta con su **mutante que revierte al código anterior**.
-- [ ] Gate completo backend + `reset-db.sh` + **e2e COMPLETO** + `--verificar`. Exit codes.
-- [ ] Frontend: `npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
+- [x] Cada arreglo de conducta con su **mutante que revierte al código anterior**.
+- [x] Gate completo backend + `reset-db.sh` + **e2e COMPLETO** + `--verificar`. Exit codes.
+- [x] Frontend: `npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
       — no se toca frontend, pero el gate va entero.
-- [ ] Revisión independiente sobre el diff, recibo, commit.
+- [x] Revisión independiente sobre el diff, recibo, commit.
 
 ## Documentación (mismo commit que el código)
 
-- [ ] `docs/features/impuestos.md` — decisión (e), y **separada visiblemente** de la
+- [x] `docs/features/impuestos.md` — decisión (e), y **separada visiblemente** de la
       consecuencia elegida del desbruteo, que vive en el mismo archivo y se le parece.
-- [ ] `docs/features/motor-calculo-precios.md` — el prorrateo y el criterio del residuo.
-- [ ] `docs/features/ventas.md` — qué significa ahora un descuento de nivel venta.
-- [ ] `docs/agent/pendientes.md` → mover la entrada 🔴 a `resueltos.md` con el detalle.
-- [ ] Revisar si corresponde entrada en `docs/agent/anti-patterns.md`. ⚠️ Ese archivo tiene 22
+- [x] `docs/features/motor-calculo-precios.md` — el prorrateo y el criterio del residuo.
+- [x] `docs/features/ventas.md` — qué significa ahora un descuento de nivel venta.
+- [x] `docs/agent/pendientes.md` → mover la entrada 🔴 a `resueltos.md` con el detalle.
+- [x] Revisar si corresponde entrada en `docs/agent/anti-patterns.md`. ⚠️ Ese archivo tiene 22
       entradas contra su propio tope de 20: si se agrega una, se poda.
-- [ ] `docs/ESTADO.md` si cambia el estado de alguna funcionalidad.
+- [x] `docs/ESTADO.md` si cambia el estado de alguna funcionalidad.
 
 ## Decisions / Open questions
 

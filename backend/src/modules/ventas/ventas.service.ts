@@ -484,6 +484,7 @@ export class VentasService {
           subtotal: rLinea.subtotalNeto,
           descuentoAplicado: rLinea.descuentoAplicado,
           recargoAplicado: rLinea.recargoAplicado,
+          ajusteVenta: rLinea.ajusteVenta,
           impuestoAplicado: rLinea.impuestoAplicado,
           totalLinea: rLinea.totalLinea,
           personalizacion,
@@ -1619,8 +1620,8 @@ export class VentasService {
     const detalles: Row[] = await this.db.query(
       `SELECT d.detalle_id, d.item_id, d.descripcion, d.cantidad, d.precio_unitario,
               d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
-              d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.impuesto_aplicado,
-              d.total_linea, d.cantidad_presentacion, d.unidad_codigo_presentacion,
+              d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.ajuste_venta,
+              d.impuesto_aplicado, d.total_linea, d.cantidad_presentacion, d.unidad_codigo_presentacion,
               d.unidad_codigo_base,
               ip.modo_inventario
        FROM venta_detalles d
@@ -1813,6 +1814,10 @@ export class VentasService {
         subtotal: d['subtotal'],
         descuentoAplicado: d['descuento_aplicado'],
         recargoAplicado: d['recargo_aplicado'],
+        // Va sí o sí: sin él las partes que la pantalla muestra no suman el
+        // total que muestra. La fila cierra en la base, pero el drawer y el
+        // modal de reembolso leen de acá, no de la tabla.
+        ajusteVenta: d['ajuste_venta'],
         impuestoAplicado: d['impuesto_aplicado'],
         totalLinea: d['total_linea'],
         // null = servicio (sin fila en item_producto); el modal de reembolso

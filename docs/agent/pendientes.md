@@ -755,44 +755,6 @@ y quedó **fuera de la pasada** por la regla de aislamiento: dos cambios del mot
 misma tanda es lo que obligó a revertir el arreglo anterior. Las citas de línea se
 verificaron el 2026-08-21, después del frente.
 
-- [ ] 🔴 **Un descuento de nivel venta baja lo cobrado pero NO la base del IVA** (backend,
-  decisión f) — **el que más pesa de esta lista, y ninguna cuantización lo arregla.** El
-  bucle de pasos de nivel venta (`calculo-precios.engine.ts:937-965`) solo tiene ramas para
-  `'descuentos'` y `'recargos'`: **el paso `impuestos` no existe a nivel venta.** Con un
-  descuento global, la boleta declara más IVA del que corresponde a lo cobrado.
-  ⚠️ **No confundirlo con la consecuencia elegida del desbruteo** (decisión e: con precio de
-  góndola el IVA absorbe el residuo y difiere de `tasa × base` en un peso). Están separados
-  en [`features/impuestos.md`](../features/impuestos.md) justamente porque quien audite una
-  boleta puede "arreglar" aquélla creyendo que persigue ésta. **Acá el monto persistido está
-  mal; allá está bien y lo que sobra es la multiplicación.**
-  Es un frente propio del motor: va solo, con el sistema quieto, como fue éste.
-
-  📄 **Investigada el 2026-08-21:** [`investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md`](investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
-  **Leerla antes de diseñar** — el cruce contra el código corrigió esta entrada en cuatro
-  puntos, y el tercero cambia el tamaño del frente:
-  1. **Las coordenadas estaban vencidas** (decía `:901-930`, la spec `:633-634`). Corregidas
-     arriba; se vencieron con los commits del 2026-08-21.
-  2. **Un comentario del motor (`:918-919`) afirma que la ausencia del paso es deliberada.**
-     Quien lo arregle lo corrige en el mismo commit o el próximo agente desarregla.
-  3. 🛑 **El motor no recibe el estado fiscal de la línea** y la norma exige segregar la base
-     (`MntNeto` suma solo `IndExe = 0`). Derivar "exenta" de "no tiene IVA" **violaría la
-     invariante 5**. No es agregar una rama al bucle: toca el contrato de entrada del motor,
-     territorio de **ADR-018**.
-  4. **La opción "correr el paso impuestos a nivel venta" queda descartada por el modelo**,
-     no por preferencia: nuestras líneas llevan impuestos de tasas distintas (IVA + ILA) y no
-     existe una tasa única aplicable al neto agregado. El prorrateo a las líneas es lo único
-     que generaliza — y es lo que hace el mercado.
-
-  ✋ **Cuatro preguntas del owner sin responder** (§6 de la investigación): prorrateo,
-  sobre qué base pega el descuento cuando hay afecto y exento, quién se come el residuo, y si
-  se acepta que un descuento global apague el cierre a góndola de las líneas con precio con
-  impuesto incluido.
-
-  📌 **Reachability, medida el 2026-08-21:** ninguna pantalla manda `descuentosVentaIds`
-  (cero productores en `frontend/app`), pero la API lo acepta y **dos e2e ya lo ejercen**
-  (`ventas.e2e-spec.ts:375` y `:1178`). No es teórico y tampoco es urgente: es un endpoint
-  sin consumidor de pantalla.
-
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
   monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las

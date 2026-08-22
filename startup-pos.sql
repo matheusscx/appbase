@@ -1189,6 +1189,7 @@ CREATE TABLE "venta_detalles" (
   "subtotal"               NUMERIC(18,4) NOT NULL DEFAULT 0,
   "descuento_aplicado"     NUMERIC(18,4) NOT NULL DEFAULT 0,
   "recargo_aplicado"       NUMERIC(18,4) NOT NULL DEFAULT 0,
+  "ajuste_venta"           NUMERIC(18,4) NOT NULL DEFAULT 0,  -- parte de la línea en las reglas de NIVEL VENTA, en neto y con signo
   "impuesto_aplicado"      NUMERIC(18,4) NOT NULL DEFAULT 0,
   "total_linea"            NUMERIC(18,4) NOT NULL DEFAULT 0,
   "creado_el"              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

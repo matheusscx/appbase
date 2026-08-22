@@ -110,6 +110,26 @@ export class VentaDetalle {
   })
   recargoAplicado: string;
 
+  /**
+   * Parte de esta línea en los descuentos y recargos de NIVEL VENTA, en neto y
+   * con signo. Es un componente de la identidad de la fila, igual que
+   * `descuento_aplicado`: sin él, `subtotal − descuento + recargo + impuesto`
+   * deja de dar `total_linea` en toda venta con un descuento global, y el dato
+   * para reconstruir el desglose se pierde en el `INSERT`.
+   *
+   * Se persiste y no se deriva porque `venta_detalles` es el snapshot fiscal de
+   * la línea: una reimpresión o una nota de crédito lo leen de acá, no lo
+   * recalculan con las reglas de hoy.
+   */
+  @Column({
+    name: 'ajuste_venta',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    default: '0',
+  })
+  ajusteVenta: string;
+
   @Column({
     name: 'impuesto_aplicado',
     type: 'decimal',

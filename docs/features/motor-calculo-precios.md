@@ -647,6 +647,32 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 
 ## Notes
 
+### El prorrateo de las reglas de nivel venta (2026-08-21)
+
+`calcularVenta` corre **dos pasadas** sobre las líneas. La primera las calcula sin ajuste y da
+los pesos del reparto y la plata cobrada sobre la que se miden las reglas de documento; la
+segunda las recalcula con su parte prorrateada, para que la base imponible de cada línea
+refleje el descuento global. Es aritmética pura —ni una consulta— así que el costo es nulo.
+
+**El residuo no es un refinamiento.** Repartir 100 entre netos de 333/333/334 cuantizando cada
+parte da `33 + 33 + 33 = 99` (medido). La unidad que sobra va a la línea con el **resto
+fraccionario más grande**, desempatando por posición. El desempate por posición vale acá y no
+valdría en `elegirAbsorbente`: la posición de una línea es el orden del documento, mientras que
+allá el orden venía de una consulta y podía cambiar entre dos lecturas de la misma venta.
+
+**El ancla del cierre se mueve, no se apaga.** Una línea con precio de góndola y un descuento
+global cierra contra "etiqueta menos su parte", y el impuesto sale por resta contra ese ancla.
+Aplicar `tasa × base` en su lugar rompe que `base + impuesto` sea el total en el **15,6%** de
+los casos (barrido de 11.604): `87 + 17 = 104` sobre un total de 103.
+
+**Las reglas de documento se evalúan en plata cobrada y se declaran en neto.** `MntNeto` resta
+descuentos netos, así que las trazas y los totales se convierten con el factor agregado que las
+líneas ya resolvieron. `valorSolicitado` se convierte con el mismo factor: su docblock promete
+que es igual a `monto` salvo en un descuento topeado, y dejarlo en plata cobrada rompería justo
+esa comparación.
+
+
+
 Primera pieza de la cadena de ventas. El módulo de ventas (por construir)
 consumirá este motor para calcular y luego persistir `ventas` / `venta_detalles`
 / `ventas_descuentos`, y para convertir a moneda oficial.

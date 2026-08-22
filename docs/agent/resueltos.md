@@ -17,6 +17,77 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un descuento de nivel venta ya baja la base del IVA (2026-08-21)
+
+Cierra la entrada 🔴 del backlog y la decisión **(f)** de
+[redondeo de plata](../superpowers/specs/2026-08-20-redondeo-de-plata-decisiones.md), que
+documentó el defecto y dejó el criterio sin decidir.
+
+**El problema, con número:** dos líneas afectas de neto 1.000 con un descuento global del 10%
+declaraban `totalImpuestos = 380` sobre una base cobrada de 1.800, cuyo IVA es 342. En su forma
+extrema —un descuento fijo de 2.000 sobre una venta de 1.190— la venta cobraba **cero** y
+declaraba **190 de IVA**.
+
+### Lo que decidió el owner, y lo que la investigación aportó
+
+Antes de diseñar se hizo la pasada de investigación que pide `CLAUDE.md`
+([2026-08-21](investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md)). En Chile la
+respuesta está en la norma y no en la competencia: el formato de la boleta define
+`MntNeto = Σ MontoItem − Descuentos`, **solo con items `IndExe = 0`**, y `IVA = MntNeto * 19%`.
+O sea que el descuento entra en la base y la base está segregada por estado fiscal.
+
+Las seis decisiones están en su
+[spec](../superpowers/specs/2026-08-21-descuento-global-vs-iva-decisiones.md). El cruce contra
+el código corrigió la entrada del backlog en cuatro puntos, y dos cambiaron el trabajo:
+
+- **El motor no recibía el estado fiscal de la línea.** Se entregó aparte (Paso 0), y resultó
+  más chico de lo escrito: el dato ya viajaba del ítem a `venta_detalles` y `resolverLinea` ya
+  lo leía para derivar el IVA (ADR-018). Faltaba que entrara al motor.
+- **"Correr el paso `impuestos` a nivel venta" no era implementable**: las líneas llevan tasas
+  distintas (IVA + ILA) y no existe una tasa única para el neto agregado.
+
+### Lo que el spike desmintió de la propia spec
+
+La decisión (e) decía que un descuento global *"apaga el cierre a góndola"*, y afirmaba —**desde
+un solo ejemplo**— que eso no contradecía la decisión (a). Un barrido de 11.604 casos: derivar
+por resta y aplicar `tasa × base` **difieren en 1.815 (15,6%)**, y en esos casos `tasa × base`
+rompe que `base + impuesto` sea el total (`87 + 17 = 104` sobre 103). Se paró, se consultó, y
+el owner enmendó (e): **el ancla se mueve, no se apaga.**
+
+Es la tercera vez en este frente que una afirmación generalizada desde un ejemplo resulta falsa
+al contarla. El spike existía justamente para eso.
+
+### El arreglo
+
+Dos pasadas sobre las líneas: la primera da los pesos, la segunda recalcula con el ajuste
+prorrateado. El residuo del reparto va al resto más grande —cuantizar cada tercio de 10.000 da
+9.999— con desempate por posición. Cada línea decide cuánto de su parte es neto y cuánto
+impuesto según sus propias tasas, así que la prorrata entre base afecta y exenta **cae sola**:
+medido, 1 afecta + 1 exenta con 200 de descuento da neto 908 + IVA 173 + exento 909 = 1.990, y
+el cliente paga exactamente 200 menos.
+
+Las reglas de documento se evalúan en plata cobrada —decisión (a)— y se declaran en neto, que
+es lo que `MntNeto` resta.
+
+### Lo que lo fija
+
+Seis tests de motor con los casos numéricos exactos (incluido el de monto fijo, que es el único
+que prueba la decisión (a): con `%` las dos lecturas coinciden y un test con `%` no probaría
+nada) y **la red de regresión que no existía**: un e2e que afirma la identidad **tres veces** —en la
+cabecera persistida, en cada fila de `venta_detalles`, y en la respuesta de
+`GET /api/ventas/:id`— porque las tres se rompen distinto. Hasta ahora ninguna prueba leía los
+totales guardados, solo la respuesta del endpoint.
+
+⚠️ **Las dos últimas las agregó la revisión independiente, bloqueando dos veces.** La primera
+versión de este arreglo dejaba la cabecera perfecta y **rompía la fila de la línea**, que antes
+cerraba siempre: el componente nuevo no se persistía y el dato se perdía en el `INSERT`, en la
+tabla que lee una reimpresión o una nota de crédito. Arreglado eso, el mismo defecto seguía un
+nivel más arriba: el `SELECT` explícito de `findOne` no traía la columna, así que la pantalla
+mostraba partes que no sumaban su propio total. **Es la lección de este frente:** una identidad
+aditiva se rompe en cada capa por separado, y verificar una no dice nada de las otras.
+
+---
+
 ## El punto fijo de `MoneyInput`: el catálogo vuelve a ser editable en USD y UF (2026-08-21)
 
 Cierra la parte 🔴 de la entrada *"El punto fijo de `MoneyInput` con `v-model` y monedas de

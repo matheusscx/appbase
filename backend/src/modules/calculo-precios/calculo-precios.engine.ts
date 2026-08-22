@@ -191,6 +191,26 @@ export interface ResultadoLinea {
   subtotalNeto: string;
   descuentoAplicado: string;
   recargoAplicado: string;
+  /**
+   * Parte de esta línea en los descuentos y recargos de **nivel venta**, en
+   * términos de NETO y con signo (negativo = descuento). Es un componente más
+   * de la identidad aditiva de la línea, igual que `descuentoAplicado`.
+   *
+   * Existe porque una regla de documento no se puede declarar solo en el
+   * documento: el IVA se calcula por línea y con tasas que pueden diferir entre
+   * líneas (IVA + ILA), así que el descuento global tiene que bajar a la línea
+   * para que su base imponible lo refleje. Es el mismo mecanismo que usa el
+   * mercado —Square crea un descuento por línea para cada descuento de scope
+   * `ORDER`— y lo que el DTE espera: `MntNeto` suma los items menos los
+   * descuentos de `DscRcgGlobal`.
+   *
+   * **En NETO, no en lo cobrado.** Un descuento fijo de 100 sobre una línea con
+   * IVA 19% baja lo cobrado en 100, pero declara 84 de descuento y 16 menos de
+   * IVA — que es lo que `MntNeto = Σ MontoItem − Descuentos` pide. Ver la
+   * decisión (a) de
+   * `docs/superpowers/specs/2026-08-21-descuento-global-vs-iva-decisiones.md`.
+   */
+  ajusteVenta: string;
   impuestoAplicado: string;
   totalLinea: string;
   trazas: {
@@ -527,6 +547,18 @@ function procesarReglas(
      * Confundir las dos dejaba ventas en negativo sin advertencia.
      */
     disponible?: Decimal;
+    /**
+     * Base de los `%` cuando `modoCalculo` es `base`. Por defecto `neto`, que es
+     * lo correcto por línea. **A nivel venta se pasa la plata cobrada**, no el
+     * neto agregado: la decisión (a) dice que un descuento global se mide contra
+     * lo que el cliente paga, y un `%` sobre el neto no es el mismo número que
+     * un `%` sobre el total.
+     *
+     * Va aparte de `neto` a propósito: `neto` sigue siendo la magnitud con la
+     * que se elige el tramo de una regla `por_monto_venta`, y mezclarlos
+     * cambiaría qué tramo aplica, que no es lo que esta decisión decidió.
+     */
+    basePorcentaje?: Decimal;
     cantidad: Decimal;
     signo: -1 | 1;
     modoCalculo: string;
@@ -566,7 +598,10 @@ function procesarReglas(
       continue;
     }
 
-    const base = params.modoCalculo === 'compuesto' ? acc : params.neto;
+    const base =
+      params.modoCalculo === 'compuesto'
+        ? acc
+        : (params.basePorcentaje ?? params.neto);
     const evaluacion = evaluarRegla(regla, {
       base,
       cantidad: params.cantidad,
@@ -669,6 +704,13 @@ function calcularLinea(
   linea: LineaResuelta,
   metodoPagoId: string | null,
   cfg: ConfigCalculo,
+  /**
+   * Parte prorrateada de las reglas de nivel venta que le toca a esta línea,
+   * **en plata cobrada** y con signo (negativo = descuento). Llega en cero en
+   * la primera pasada de `calcularVenta` —que es la que calcula los pesos del
+   * reparto— y con su valor en la segunda.
+   */
+  ajusteVenta: Decimal = ZERO,
 ): ResultadoLinea {
   const cantidad = new Decimal(linea.cantidad);
   const bruto = new Decimal(linea.precioUnitario);
@@ -723,6 +765,11 @@ function calcularLinea(
   let descuentoAplicado = ZERO;
   let recargoAplicado = ZERO;
   let impuestoAplicado = ZERO;
+  // Lo que el ajuste de venta declara en NETO. Sale de dividir el ajuste
+  // cobrado por `1 + Σ tasas` de ESTA línea: una línea exenta se lleva su parte
+  // entera como neto, una afecta la parte entre neto e IVA. Es la prorrata de
+  // la decisión (c) sin necesidad de tratar las dos bases por separado.
+  let ajusteVentaNeto = ZERO;
   // El aviso del impuesto pausado solo tiene sentido si la fórmula del tenant
   // aplica impuestos: si el paso no está, ese impuesto no se iba a cobrar de
   // todos modos y "no se aplicó" describe la fórmula, no la pausa. Se armaba
@@ -802,7 +849,11 @@ function calcularLinea(
       // Base imponible = acumulado al inicio del paso (no hay impuesto sobre
       // impuesto), ya cuantizado por el cierre del paso anterior: el impuesto
       // declarado es `tasa ×` la base que el documento muestra.
-      const baseImponible = acc;
+      const baseSinAjuste = acc;
+      const sumaTasas = impuestosVigentes.reduce(
+        (a, imp) => a.plus(imp.porcentaje),
+        ZERO,
+      );
 
       /**
        * **La etiqueta manda** (decisión del owner, 2026-08-04): cuando el
@@ -811,13 +862,11 @@ function calcularLinea(
        * es el bruto y el impuesto es lo que sobra sobre el neto declarado. Con
        * `tasa × base` no cierra: góndola 993 → neto 834, IVA 158, total 992.
        *
-       * **No se generaliza a la línea con reglas, y está medido:** con un 10%
-       * de descuento sobre esa misma línea (base 751), restar contra la góndola
-       * da un IVA de 242 —cobra la etiqueta entera e ignora el descuento— y
-       * restar contra góndola−descuento da 159, cuando el correcto es 143. La
-       * razón es la decisión misma: con un descuento el cliente ya no paga la
-       * etiqueta, no hay góndola que cerrar, y lo que el documento tiene que
-       * declarar es el impuesto de la base realmente cobrada.
+       * **No se generaliza a la línea con reglas de LÍNEA, y está medido:** con
+       * un 10% de descuento sobre esa misma línea (base 751), restar contra la
+       * góndola da un IVA de 242 —cobra la etiqueta entera e ignora el
+       * descuento— y restar contra góndola−descuento da 159, cuando el correcto
+       * es 143. Con un descuento de línea el cliente ya no paga la etiqueta.
        */
       const cierraAGondola =
         linea.precioIncluyeImpuesto &&
@@ -826,43 +875,98 @@ function calcularLinea(
         recargoAplicado.isZero() &&
         !hayReglasDespuesDelImpuesto;
 
-      if (cierraAGondola) {
-        const residuo = q(redondear(bruto.times(cantidad), cfg)).minus(
-          subtotalNeto,
-        );
-        // Los adicionales van por su fórmula y el IVA se queda con el residuo:
-        // el ILA de una botella es una línea del DTE con su tasa, mientras que
-        // el peso del redondeo tiene que caer en algún lado. Ver
-        // `elegirAbsorbente` para la línea exenta, que no tiene IVA que ceda.
-        const absorbeId = elegirAbsorbente(impuestosVigentes);
-        let repartido = ZERO;
+      /**
+       * **El ancla del cierre — qué monto tiene que dar la línea.**
+       *
+       * Un descuento de nivel venta NO apaga el cierre: le **mueve el ancla**,
+       * de "el precio de etiqueta" a "lo que la línea iba a cobrar menos su
+       * parte del descuento". Es la decisión (e) corregida por el spike del
+       * 2026-08-21, y la corrección no es cosmética: barriendo brutos 100..3000
+       * contra descuentos fijos {1,7,100,333}, derivar el impuesto por resta y
+       * aplicar `tasa × base` **difieren en 1.815 de 11.604 casos (15,6%)**, y
+       * en esos casos `tasa × base` rompe que `base + impuesto` sea el total
+       * (`87 + 17 = 104` sobre un total de 103). Por resta cierra siempre, por
+       * construcción — que es lo mismo que el cierre del documento ya protege.
+       *
+       * Solo se ancla si el paso de impuestos es el último que mueve plata: con
+       * reglas después, el acumulado va a seguir cambiando y el ancla mentiría.
+       * Ahí el ajuste entra como corrimiento de la base y los impuestos van por
+       * su fórmula, que es la rama segura.
+       */
+      const puedeAnclar = !hayReglasDespuesDelImpuesto;
+      let ancla: Decimal | null = cierraAGondola
+        ? q(redondear(bruto.times(cantidad), cfg))
+        : null;
+      if (!ajusteVenta.isZero() && puedeAnclar) {
+        const sinAjuste =
+          ancla ??
+          baseSinAjuste.plus(
+            impuestosVigentes.reduce(
+              (a, imp) =>
+                a.plus(q(redondear(baseSinAjuste.times(imp.porcentaje), cfg))),
+              ZERO,
+            ),
+          );
+        ancla = sinAjuste.plus(ajusteVenta);
+      }
 
-        // Se recorre en el orden de entrada —el absorbente se completa después—
-        // para que las líneas de impuesto del documento salgan como llegaron:
-        // el orden de las trazas es parte de lo que el comprobante imprime.
-        for (const imp of impuestosVigentes) {
-          const monto =
-            imp.id === absorbeId
-              ? ZERO
-              : q(redondear(baseImponible.times(imp.porcentaje), cfg));
-          repartido = repartido.plus(monto);
-          trazas.impuestos.push({
-            id: imp.id,
-            nombre: imp.nombre,
-            tasa: imp.porcentaje,
-            monto: fmt(monto, cfg),
-          });
+      if (ancla !== null) {
+        const baseImponible = ajusteVenta.isZero()
+          ? baseSinAjuste
+          : q(redondear(ancla.dividedBy(new Decimal(1).plus(sumaTasas)), cfg));
+        ajusteVentaNeto = baseImponible.minus(baseSinAjuste);
+        // Lo que queda entre el ancla y el neto ES el impuesto de la línea.
+        const residuo = ancla.minus(baseImponible);
+
+        if (impuestosVigentes.length > 0) {
+          // Los adicionales van por su fórmula y el IVA se queda con el
+          // residuo: el ILA de una botella es una línea del DTE con su tasa,
+          // mientras que el peso del redondeo tiene que caer en algún lado. Ver
+          // `elegirAbsorbente` para la línea exenta, que no tiene IVA que ceda.
+          const absorbeId = elegirAbsorbente(impuestosVigentes);
+          let repartido = ZERO;
+
+          // Se recorre en el orden de entrada —el absorbente se completa
+          // después— para que las líneas de impuesto del documento salgan como
+          // llegaron: el orden de las trazas es parte de lo que el comprobante
+          // imprime.
+          for (const imp of impuestosVigentes) {
+            const monto =
+              imp.id === absorbeId
+                ? ZERO
+                : q(redondear(baseImponible.times(imp.porcentaje), cfg));
+            repartido = repartido.plus(monto);
+            trazas.impuestos.push({
+              id: imp.id,
+              nombre: imp.nombre,
+              tasa: imp.porcentaje,
+              monto: fmt(monto, cfg),
+            });
+          }
+
+          // La traza del absorbente dice lo que REALMENTE absorbió, no
+          // `tasa × base`: cada impuesto es una línea declarada del documento y
+          // `Σ trazas = impuestoAplicado` tiene que seguir valiendo.
+          const traza = trazas.impuestos.find((t) => t.id === absorbeId)!;
+          traza.monto = fmt(residuo.minus(repartido), cfg);
         }
 
-        // La traza del absorbente dice lo que REALMENTE absorbió, no
-        // `tasa × base`: cada impuesto es una línea declarada del documento y
-        // `Σ trazas = impuestoAplicado` tiene que seguir valiendo.
-        const traza = trazas.impuestos.find((t) => t.id === absorbeId)!;
-        traza.monto = fmt(residuo.minus(repartido), cfg);
-
         impuestoAplicado = residuo;
-        acc = acc.plus(residuo);
+        acc = baseImponible.plus(residuo);
       } else {
+        // Sin ancla. Si hay ajuste de venta, corre la base antes de aplicar las
+        // tasas: el descuento global tiene que bajar la base imponible igual,
+        // aunque acá no se pueda cerrar por resta.
+        if (!ajusteVenta.isZero()) {
+          ajusteVentaNeto = q(
+            redondear(
+              ajusteVenta.dividedBy(new Decimal(1).plus(sumaTasas)),
+              cfg,
+            ),
+          );
+        }
+        const baseImponible = baseSinAjuste.plus(ajusteVentaNeto);
+        acc = baseImponible;
         for (const imp of impuestosVigentes) {
           // Cada impuesto se cuantiza por separado porque cada uno es una línea
           // declarada del documento, y todos salen de la MISMA base: acá no hay
@@ -889,6 +993,7 @@ function calcularLinea(
   const totalLinea = subtotalNeto
     .minus(descuentoAplicado)
     .plus(recargoAplicado)
+    .plus(ajusteVentaNeto)
     .plus(impuestoAplicado);
 
   return {
@@ -898,11 +1003,94 @@ function calcularLinea(
     subtotalNeto: fmt(subtotalNeto, cfg),
     descuentoAplicado: fmt(descuentoAplicado, cfg),
     recargoAplicado: fmt(recargoAplicado, cfg),
+    ajusteVenta: fmt(ajusteVentaNeto, cfg),
     impuestoAplicado: fmt(impuestoAplicado, cfg),
     totalLinea: fmt(totalLinea, cfg),
     trazas,
     advertencias,
   };
+}
+
+/**
+ * Reparte `monto` entre `pesos` en proporción, y **asigna el residuo al resto
+ * fraccionario más grande** — desempatando por posición.
+ *
+ * El residuo no es un detalle: repartir 100 entre netos de 333/333/334
+ * cuantizando cada parte da `33 + 33 + 33 = 99` (medido). Sin esta regla el
+ * reparto no suma el descuento y el documento no cuadra.
+ *
+ * El desempate por posición vale acá y NO valdría en `elegirAbsorbente`: la
+ * posición de una línea es el orden del documento —lo que el comprobante
+ * imprime— mientras que allá el orden venía de una consulta y podía cambiar
+ * entre dos lecturas de la misma venta.
+ *
+ * Con `Σ pesos = 0` (una venta que no cobra nada) reparte todo en la primera
+ * línea: no hay proporción que calcular y el `disponible` de arriba ya garantizó
+ * que el monto sea cero, así que es un borde defensivo, no un caso real.
+ */
+function repartirProporcional(
+  monto: Decimal,
+  pesos: Decimal[],
+  cfg: ConfigCalculo,
+): Decimal[] {
+  const total = pesos.reduce((a, p) => a.plus(p), ZERO);
+  if (pesos.length === 0) return [];
+  if (total.isZero()) {
+    return pesos.map((_, i) => (i === 0 ? monto : ZERO));
+  }
+
+  const finas = pesos.map((peso) => monto.times(peso).dividedBy(total));
+  const partes = finas.map((f) => cuantizar(f, cfg));
+  const repartido = partes.reduce((a, p) => a.plus(p), ZERO);
+  let sobra = monto.minus(repartido);
+  if (sobra.isZero()) return partes;
+
+  // Un paso de la unidad mínima, con el signo de lo que falta repartir.
+  const unidad = new Decimal(10).pow(-cfg.decimalesMoneda).times(sobra.s);
+  const orden = finas
+    .map((f, i) => ({ i, resto: f.minus(partes[i]).abs() }))
+    .sort((a, b) => {
+      const cmp = b.resto.comparedTo(a.resto);
+      return cmp !== 0 ? cmp : a.i - b.i;
+    });
+  for (const { i } of orden) {
+    if (sobra.isZero()) break;
+    partes[i] = partes[i].plus(unidad);
+    sobra = sobra.minus(unidad);
+  }
+  return partes;
+}
+
+/**
+ * Reescribe los montos de un grupo de trazas para que sumen `total`,
+ * respetando sus proporciones. Se usa al convertir las reglas de documento de
+ * plata cobrada a neto: el monto de cada regla cambia, la proporción entre
+ * ellas no, y `Σ trazas = lo declarado` tiene que seguir valiendo.
+ */
+function reescalarTrazas(
+  trazas: TrazaRegla[],
+  total: Decimal,
+  factor: Decimal,
+  cfg: ConfigCalculo,
+): TrazaRegla[] {
+  if (trazas.length === 0) return trazas;
+  const partes = repartirProporcional(
+    total,
+    trazas.map((tz) => new Decimal(tz.monto)),
+    cfg,
+  );
+  return trazas.map((tz, i) => ({
+    ...tz,
+    monto: fmt(partes[i], cfg),
+    // `valorSolicitado` se convierte con el mismo factor y no con el reparto:
+    // no tiene que sumar nada, pero SÍ tiene que seguir siendo comparable con
+    // `monto` —su docblock promete que son iguales salvo en un descuento
+    // topeado— y dejarlo en plata cobrada rompería justo esa comparación.
+    valorSolicitado: fmt(
+      cuantizar(new Decimal(tz.valorSolicitado).times(factor), cfg),
+      cfg,
+    ),
+  }));
 }
 
 // ── Cálculo de la venta completa ────────────────────────────────────────────
@@ -918,29 +1106,46 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
   const q: Cuantizador =
     cfg.nivelRedondeo === 'linea' ? (d) => cuantizar(d, cfg) : SIN_CUANTIZAR;
 
-  const lineas = venta.lineas.map((l) =>
+  /**
+   * **Dos pasadas, y la primera no se tira.** La pasada 1 calcula las líneas
+   * sin ajuste: da los pesos del reparto y la plata cobrada sobre la que se
+   * miden las reglas de documento. La pasada 2 las recalcula con su parte
+   * prorrateada, para que la base imponible de cada línea refleje el descuento
+   * global. Es aritmética pura —ni una consulta— así que el costo es nulo.
+   */
+  const totalizar = (ls: ResultadoLinea[]) => {
+    let neto = ZERO;
+    let desc = ZERO;
+    let rec = ZERO;
+    let imp = ZERO;
+    let ajuste = ZERO;
+    let total = ZERO;
+    let cant = ZERO;
+    for (const l of ls) {
+      neto = neto.plus(l.subtotalNeto);
+      desc = desc.plus(l.descuentoAplicado);
+      rec = rec.plus(l.recargoAplicado);
+      imp = imp.plus(l.impuestoAplicado);
+      ajuste = ajuste.plus(l.ajusteVenta);
+      total = total.plus(l.totalLinea);
+      cant = cant.plus(l.cantidad);
+    }
+    return { neto, desc, rec, imp, ajuste, total, cant };
+  };
+
+  let lineas = venta.lineas.map((l) =>
     calcularLinea(l, venta.metodoPagoId, cfg),
   );
+  let t = totalizar(lineas);
+  const subtotalNeto = t.neto;
+  const cantidadTotal = t.cant;
 
-  let subtotalNeto = ZERO;
-  let totalDescuentos = ZERO;
-  let totalRecargos = ZERO;
-  let totalImpuestos = ZERO;
-  let totalFinal = ZERO;
-  let cantidadTotal = ZERO;
-
-  for (const l of lineas) {
-    subtotalNeto = subtotalNeto.plus(l.subtotalNeto);
-    totalDescuentos = totalDescuentos.plus(l.descuentoAplicado);
-    totalRecargos = totalRecargos.plus(l.recargoAplicado);
-    totalImpuestos = totalImpuestos.plus(l.impuestoAplicado);
-    totalFinal = totalFinal.plus(l.totalLinea);
-    cantidadTotal = cantidadTotal.plus(l.cantidad);
-  }
-
-  // Reglas a nivel venta: aplican sobre el neto agregado, respetando el orden
-  // de la fórmula del tenant (el paso `impuestos` no aplica a nivel venta).
-  let accVenta = subtotalNeto;
+  // Reglas a nivel venta: aplican sobre la plata cobrada, respetando el orden
+  // de la fórmula del tenant. El paso `impuestos` no corre acá y no es un
+  // olvido: el impuesto se recalcula por línea en la pasada 2, porque las
+  // líneas pueden llevar tasas distintas (IVA + ILA) y no existe una tasa única
+  // aplicable al agregado.
+  let accVenta = t.total;
   let dv: ResultadoPaso = {
     acc: accVenta,
     total: ZERO,
@@ -954,15 +1159,16 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
     advertencias: [],
   };
 
-  // Plata real de la venta sobre la que se topea: la suma de `totalLinea`, no
-  // el neto agregado. `accVenta` sigue siendo la base de los `%` (el neto), que
-  // es la semántica documentada de las reglas a nivel venta.
-  let disponibleVenta = totalFinal;
+  // Plata real de la venta sobre la que se topea: la suma de `totalLinea`. Ya
+  // es la misma que la base de los `%`, así que las dos no pueden divergir —
+  // que era el bug que dejaba ventas en negativo sin advertencia.
+  let disponibleVenta = t.total;
 
   for (const paso of cfg.formula) {
     if (paso === 'descuentos') {
       dv = procesarReglas(venta.descuentosVenta, {
         neto: subtotalNeto,
+        basePorcentaje: accVenta,
         acc: accVenta,
         disponible: disponibleVenta,
         cantidad: cantidadTotal,
@@ -977,6 +1183,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
     } else if (paso === 'recargos') {
       rv = procesarReglas(venta.recargosVenta, {
         neto: subtotalNeto,
+        basePorcentaje: accVenta,
         acc: accVenta,
         cantidad: cantidadTotal,
         signo: 1,
@@ -990,9 +1197,63 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
     }
   }
 
-  totalDescuentos = totalDescuentos.plus(dv.total);
-  totalRecargos = totalRecargos.plus(rv.total);
-  totalFinal = totalFinal.minus(dv.total).plus(rv.total);
+  /**
+   * El efecto NETO de las reglas de documento, en plata cobrada. Baja a las
+   * líneas prorrateado por lo que cada una aporta, y ahí cada línea decide
+   * cuánto de su parte es neto y cuánto impuesto, según SUS tasas: una línea
+   * exenta se lleva su parte entera como neto y una afecta la parte. Eso es la
+   * prorrata entre base afecta y exenta de la decisión (c), sin necesidad de
+   * tratar las dos bases por separado.
+   *
+   * Se reparte el neto de descuentos y recargos junto, no cada uno por su lado:
+   * el documento declara el efecto sobre `MntNeto`, y el detalle regla por
+   * regla no se pierde —vive en `trazasVenta`—.
+   */
+  const ajusteBruto = rv.total.minus(dv.total);
+  if (!ajusteBruto.isZero()) {
+    const partes = repartirProporcional(
+      ajusteBruto,
+      lineas.map((l) => new Decimal(l.totalLinea)),
+      cfg,
+    );
+    lineas = venta.lineas.map((l, i) =>
+      calcularLinea(l, venta.metodoPagoId, cfg, partes[i]),
+    );
+    t = totalizar(lineas);
+  }
+
+  /**
+   * **Las reglas de documento se declaran en NETO, no en plata cobrada.**
+   *
+   * `procesarReglas` las evaluó contra lo que el cliente paga —eso es la
+   * decisión (a)— pero lo que el documento declara es el efecto sobre la base:
+   * `MntNeto = Σ MontoItem − Descuentos + Recargos`. Un descuento fijo de 100
+   * sobre una línea con IVA 19% baja lo cobrado en 100 y declara 84.
+   *
+   * La conversión se hace con el factor agregado neto/cobrado que las líneas ya
+   * resolvieron, y el recargo se despeja del descuento en vez de cuantizarse
+   * aparte: así `neto(recargo) − neto(descuento)` es exactamente el ajuste que
+   * las líneas aplicaron, y el documento no puede quedar en desacuerdo consigo
+   * mismo por un peso.
+   *
+   * Las trazas se reescalan al mismo total con el reparto por resto más grande,
+   * porque `Σ trazas = lo declarado` es lo que permite auditar el comprobante
+   * regla por regla.
+   */
+  let netoDescuentoVenta = ZERO;
+  let netoRecargoVenta = ZERO;
+  if (!ajusteBruto.isZero()) {
+    const factor = t.ajuste.dividedBy(ajusteBruto);
+    netoDescuentoVenta = cuantizar(dv.total.times(factor), cfg);
+    netoRecargoVenta = netoDescuentoVenta.plus(t.ajuste);
+    dv.trazas = reescalarTrazas(dv.trazas, netoDescuentoVenta, factor, cfg);
+    rv.trazas = reescalarTrazas(rv.trazas, netoRecargoVenta, factor, cfg);
+  }
+
+  const totalDescuentos = t.desc.plus(netoDescuentoVenta);
+  const totalRecargos = t.rec.plus(netoRecargoVenta);
+  const totalImpuestos = t.imp;
+  const totalFinal = t.total;
 
   /**
    * Cierre del documento — mismo invariante que `calcularLinea` (ver el

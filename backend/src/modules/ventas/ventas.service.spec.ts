@@ -92,6 +92,7 @@ const mockResultadoVenta = {
       subtotalNeto: '100.0000',
       descuentoAplicado: '0.0000',
       recargoAplicado: '0.0000',
+      ajusteVenta: '0',
       impuestoAplicado: '0.0000',
       totalLinea: '100.0000',
       trazas: { descuentos: [], recargos: [], impuestos: [] },
@@ -665,6 +666,7 @@ describe('VentasService', () => {
           {
             ...mockResultadoVenta.lineas[0],
             recargoAplicado: '5.0000',
+            ajusteVenta: '0',
             totalLinea: '105.0000',
             trazas: {
               descuentos: [],

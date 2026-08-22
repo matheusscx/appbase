@@ -1578,4 +1578,133 @@ describe('Ventas (e2e)', () => {
         .expect(401);
     });
   });
+
+  describe('el descuento de nivel venta baja el IVA persistido', () => {
+    /**
+     * Red de regresión que no existía: ninguna prueba leía los totales de la
+     * BASE, solo la respuesta del endpoint. El bug que este test fija vivía
+     * justo ahí — la venta se guardaba con el IVA de antes del descuento.
+     */
+    it('los totales guardados cierran entre sí y el IVA es el de la base cobrada', async () => {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio IVA global E2E ${Date.now()}`,
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      expect(resItem.status).toBe(201);
+      const itemId = (resItem.body as { id: string }).id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId, cantidad: '1' }],
+          descuentosVentaIds: [DESCUENTO_FIJO_ID],
+          pagos: [],
+        });
+      expect(res.status).toBe(201);
+      const ventaId = (res.body as { id: string }).id;
+
+      const [fila]: {
+        total_bruto: string;
+        total_descuentos: string;
+        total_recargos: string;
+        total_impuestos: string;
+        total_final: string;
+      }[] = await ds.query(
+        `SELECT total_bruto, total_descuentos, total_recargos,
+                total_impuestos, total_final
+           FROM ventas WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(fila).toBeDefined();
+
+      const neto = new Decimal(fila.total_bruto);
+      const desc = new Decimal(fila.total_descuentos);
+      const rec = new Decimal(fila.total_recargos);
+      const imp = new Decimal(fila.total_impuestos);
+      const total = new Decimal(fila.total_final);
+
+      // La identidad del documento, leída de la base y no de la respuesta.
+      expect(neto.minus(desc).plus(rec).plus(imp).eq(total)).toBe(true);
+      // Y el IVA es el de la base cobrada, no el del neto sin descontar: con
+      // descuento, `imp` tiene que ser MENOR que el impuesto del neto entero.
+      expect(desc.greaterThan(0)).toBe(true);
+      expect(imp.lessThan(neto.times('0.19'))).toBe(true);
+
+      // La MISMA identidad, pero por línea. Va aparte de la cabecera a
+      // propósito: `venta_detalles` es el snapshot fiscal que leen una
+      // reimpresión o una nota de crédito, y una cabecera que cuadra no dice
+      // nada sobre las filas. La primera versión de este arreglo dejaba la
+      // cabecera perfecta y la línea rota por el monto del ajuste.
+      const detalles: {
+        subtotal: string;
+        descuento_aplicado: string;
+        recargo_aplicado: string;
+        ajuste_venta: string;
+        impuesto_aplicado: string;
+        total_linea: string;
+      }[] = await ds.query(
+        `SELECT subtotal, descuento_aplicado, recargo_aplicado, ajuste_venta,
+                impuesto_aplicado, total_linea
+           FROM venta_detalles
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(detalles.length).toBeGreaterThan(0);
+      for (const d of detalles) {
+        expect(
+          new Decimal(d.subtotal)
+            .minus(d.descuento_aplicado)
+            .plus(d.recargo_aplicado)
+            .plus(d.ajuste_venta)
+            .plus(d.impuesto_aplicado)
+            .eq(d.total_linea),
+        ).toBe(true);
+      }
+      // Y el ajuste llegó de verdad a la base: sin esto el test pasaría con la
+      // columna en cero y la línea cuadrando por casualidad.
+      expect(detalles.some((d) => !new Decimal(d.ajuste_venta).isZero())).toBe(
+        true,
+      );
+
+      // La MISMA identidad una tercera vez, ahora por el camino que usa la
+      // aplicación. Leer la tabla con SQL bypasea el `SELECT` explícito de
+      // `findOne`, y una columna que existe en la base pero no se selecciona
+      // deja a la pantalla mostrando partes que no suman su propio total. Es el
+      // mismo defecto que arriba, un nivel más arriba.
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(detalle.status).toBe(200);
+      const cuerpo = detalle.body as {
+        detalles: {
+          subtotal: string;
+          descuentoAplicado: string;
+          recargoAplicado: string;
+          ajusteVenta: string;
+          impuestoAplicado: string;
+          totalLinea: string;
+        }[];
+      };
+      expect(cuerpo.detalles.length).toBeGreaterThan(0);
+      for (const d of cuerpo.detalles) {
+        expect(
+          new Decimal(d.subtotal)
+            .minus(d.descuentoAplicado)
+            .plus(d.recargoAplicado)
+            .plus(d.ajusteVenta)
+            .plus(d.impuestoAplicado)
+            .eq(d.totalLinea),
+        ).toBe(true);
+      }
+      expect(
+        cuerpo.detalles.some((d) => !new Decimal(d.ajusteVenta).isZero()),
+      ).toBe(true);
+    });
+  });
 });

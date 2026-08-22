@@ -5,6 +5,7 @@ import {
   type ConfigCalculo,
   type ImpuestoResuelto,
   type LineaResuelta,
+  type ResultadoVenta,
   type ReglaResuelta,
   type ResultadoLinea,
   type VentaResuelta,
@@ -63,6 +64,20 @@ const linea = (over: Partial<LineaResuelta> = {}): LineaResuelta => ({
   impuestos: [],
   ...over,
 });
+
+/**
+ * `subtotalNeto − descuentos + recargos + impuestos = total`. Es lo que el
+ * comprobante promete y lo que un descuento de nivel venta puede romper si el
+ * impuesto no lo sigue.
+ */
+const identidadDocumento = (r: ResultadoVenta): boolean => {
+  const t = r.totales;
+  return new Decimal(t.subtotalNeto)
+    .minus(t.totalDescuentos)
+    .plus(t.totalRecargos)
+    .plus(t.totalImpuestos)
+    .eq(t.totalFinal);
+};
 
 const venta = (over: Partial<VentaResuelta> = {}): VentaResuelta => ({
   lineas: [linea()],
@@ -1072,13 +1087,19 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         }),
       );
 
-      // El socio aplica de verdad, sobre el neto y no sobre un acumulado hundido.
+      // El socio aplica de verdad y no sobre un acumulado hundido. Declara los
+      // mismos 100 que antes, por otro camino: el 10% corre sobre la plata
+      // cobrada (1.190 → 119) y la traza lo declara en neto, que es lo que
+      // `MntNeto = Σ MontoItem − Descuentos` resta. Ver la decisión (a).
       expect(r.trazasVenta.descuentos[0].nombre).toBe('Socio 10%');
       expect(r.trazasVenta.descuentos[0].monto).toBe('100.000000');
-      // El cupón se lleva lo que queda, y la traza guarda que pidió más.
+      // El cupón se lleva lo que queda, y la traza guarda que pidió más:
+      // 924,3697 netos pedidos contra 900 aplicados (la escala de este archivo
+      // es 4, no la del peso). Los dos en la misma unidad, que es lo único que
+      // hace comparable el par.
       expect(r.trazasVenta.descuentos[1].nombre).toBe('Cupón 1100');
-      expect(r.trazasVenta.descuentos[1].monto).toBe('1090.000000');
-      expect(r.trazasVenta.descuentos[1].valorSolicitado).toBe('1100.000000');
+      expect(r.trazasVenta.descuentos[1].monto).toBe('900.000000');
+      expect(r.trazasVenta.descuentos[1].valorSolicitado).toBe('924.369700');
       expect(r.totales.totalFinal).toBe('0.000000');
     });
   });
@@ -1623,7 +1644,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       const dv = new Decimal(r.trazasVenta.descuentos[0].monto);
 
       expect(dv.isInteger()).toBe(true);
-      expect(sumaLineas.minus(dv).eq(r.totales.totalFinal)).toBe(true);
+      // El descuento global ya no se resta del agregado: baja prorrateado a las
+      // líneas, así que `Σ totalLinea` ES el total. Se afirma además la
+      // identidad del documento, que es la que el comprobante promete.
+      expect(sumaLineas.eq(r.totales.totalFinal)).toBe(true);
+      expect(identidadDocumento(r)).toBe(true);
     });
 
     it('Σ trazas = total con DOS reglas de nivel venta (Q(a+b) ≠ Q(a)+Q(b))', () => {
@@ -1660,7 +1685,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         (acc, l) => acc.plus(l.totalLinea),
         new Decimal(0),
       );
-      expect(sumaLineas.minus(sumaTrazas).eq(r.totales.totalFinal)).toBe(true);
+      expect(sumaLineas.eq(r.totales.totalFinal)).toBe(true);
+      // Las trazas de documento suman lo declarado, que es lo que permite
+      // auditar el comprobante regla por regla.
+      expect(sumaTrazas.eq(r.totales.totalDescuentos)).toBe(true);
+      expect(identidadDocumento(r)).toBe(true);
     });
 
     it('el piso en cero a nivel venta: dos descuentos que exceden lo disponible no dejan el total negativo', () => {
@@ -1741,7 +1770,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       const rv = new Decimal(r.trazasVenta.recargos[0].monto);
 
       expect(rv.isInteger()).toBe(true);
-      expect(sumaLineas.plus(rv).eq(r.totales.totalFinal)).toBe(true);
+      expect(sumaLineas.eq(r.totales.totalFinal)).toBe(true);
+      expect(identidadDocumento(r)).toBe(true);
     });
   });
 
@@ -1974,6 +2004,149 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(new Decimal(l.impuestoAplicado).eq(433)).toBe(true);
       expect(new Decimal(l.totalLinea).eq(2709)).toBe(true);
       expect(sumaTrazas(l).eq(l.impuestoAplicado)).toBe(true);
+    });
+  });
+
+  describe('un descuento de nivel venta baja la base del IVA', () => {
+    // CLP: la escala del peso, que es donde el reparto tiene residuo.
+    const clp = (over: Partial<ConfigCalculo> = {}) =>
+      config({ decimalesMoneda: 0, ...over });
+
+    it('el IVA declarado es el de la base cobrada, no el de antes del descuento', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              itemId: 'a',
+              precioUnitario: '1000',
+              impuestos: [impuesto()],
+            }),
+            linea({
+              itemId: 'b',
+              precioUnitario: '1000',
+              impuestos: [impuesto()],
+            }),
+          ],
+          descuentosVenta: [regla({ valor: '0.10' })],
+          config: clp(),
+        }),
+      );
+      // Antes de este arreglo: descuento 200, IVA 380 y total 2.180 — la boleta
+      // declaraba el IVA de 2.000 sobre una base cobrada de 1.800.
+      expect(r.totales.subtotalNeto).toBe('2000.000000');
+      expect(r.totales.totalDescuentos).toBe('200.000000');
+      expect(r.totales.totalImpuestos).toBe('342.000000');
+      expect(r.totales.totalFinal).toBe('2142.000000');
+      expect(identidadDocumento(r)).toBe(true);
+    });
+
+    it('un descuento de MONTO FIJO se resta de lo cobrado, no del neto', () => {
+      // Decisión (a). Con `%` no se distingue —bajar 10% del neto y 10% del IVA
+      // es bajar 10% del total— así que este test tiene que ser de monto fijo o
+      // no prueba la decisión.
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ precioUnitario: '1000', impuestos: [impuesto()] })],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '200' })],
+          config: clp(),
+        }),
+      );
+      // El cliente paga exactamente 200 menos que 1.190.
+      expect(r.totales.totalFinal).toBe('990.000000');
+      // Y el documento declara el descuento en NETO: 200/1,19 = 168.
+      expect(r.totales.totalDescuentos).toBe('168.000000');
+      expect(r.totales.totalImpuestos).toBe('158.000000');
+      expect(identidadDocumento(r)).toBe(true);
+    });
+
+    it('el residuo del reparto va al resto más grande: 10.000 entre tres da 3.334 en una', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: ['a', 'b', 'c'].map((id) =>
+            linea({ itemId: id, precioUnitario: '10000', impuestos: [] }),
+          ),
+          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '10000' })],
+          config: clp(),
+        }),
+      );
+      // Sin líneas afectas el ajuste es todo neto, así que las partes se leen
+      // directo. Cuantizar cada tercio daría 3.333 × 3 = 9.999.
+      const partes = r.lineas.map((l) => l.ajusteVenta);
+      expect(partes).toEqual(['-3334.000000', '-3333.000000', '-3333.000000']);
+      expect(r.totales.totalDescuentos).toBe('10000.000000');
+      expect(identidadDocumento(r)).toBe(true);
+    });
+
+    it('con afecto y exento mezclados reparte por peso y solo el afecto baja el IVA', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              itemId: 'afecto',
+              precioUnitario: '1000',
+              impuestos: [impuesto()],
+            }),
+            linea({
+              itemId: 'exento',
+              precioUnitario: '1000',
+              impuestos: [],
+              clasificacionTributaria: 'exento',
+            }),
+          ],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '200' })],
+          config: clp(),
+        }),
+      );
+      // Pesos 1.190 y 1.000 sobre 2.190: 109 y 91.
+      // La afecta parte su 109 entre neto (92) e IVA (17); la exenta se lleva
+      // su 91 entero como neto, porque no tiene IVA que ceder. Eso es la
+      // prorrata entre las dos bases de la decisión (c), sin tratarlas aparte.
+      expect(r.lineas[0].ajusteVenta).toBe('-92.000000');
+      expect(r.lineas[1].ajusteVenta).toBe('-91.000000');
+      expect(r.totales.totalImpuestos).toBe('173.000000');
+      expect(r.totales.totalFinal).toBe('1990.000000');
+      expect(identidadDocumento(r)).toBe(true);
+    });
+
+    it('una venta toda exenta baja el neto entero y no inventa impuesto', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              impuestos: [],
+              clasificacionTributaria: 'exento',
+            }),
+          ],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '200' })],
+          config: clp(),
+        }),
+      );
+      expect(r.totales.totalDescuentos).toBe('200.000000');
+      expect(r.totales.totalImpuestos).toBe('0.000000');
+      expect(r.totales.totalFinal).toBe('800.000000');
+    });
+
+    it('con precio de góndola el descuento global mueve el ancla, no la apaga', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '993',
+              precioIncluyeImpuesto: true,
+              impuestos: [impuesto()],
+            }),
+          ],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '100' })],
+          config: clp(),
+        }),
+      );
+      // Etiqueta 993 − 100 = 893, y el IVA sale por resta contra ESE ancla.
+      // Con `tasa × base` daría 143 sobre una base de 750 → 893 igual acá, pero
+      // el barrido del spike encontró 1.815 casos de 11.604 donde no cierra.
+      expect(r.totales.totalFinal).toBe('893.000000');
+      expect(r.lineas[0].subtotalNeto).toBe('834.000000');
+      expect(identidadDocumento(r)).toBe(true);
     });
   });
 });
