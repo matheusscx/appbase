@@ -495,6 +495,71 @@ describe('AuthService', () => {
       expect(tomado).toEqual(libre);
     });
 
+    it('una carrera por el mismo correo nuevo no rompe la respuesta uniforme', async () => {
+      // Dos registros simultáneos del mismo correo libre: los dos ven
+      // `findByEmail` en null y los dos insertan. El perdedor se come el 23505
+      // de la unique de `usuarios.correo`, y sin traducir eso sale un **500** —
+      // que vuelve a distinguir desde afuera un correo tomado de uno libre, que
+      // es exactamente lo que este endpoint dejó de hacer.
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.create.mockResolvedValue({ ...mockUser, id: 'ganador' });
+      const esperado = await service.register({
+        nombre: 'N',
+        correo: 'libre@x.cl',
+        contrasena: 'secreto123',
+      });
+
+      // Primero ve el correo libre; después del choque, el ganador ya está.
+      usersService.findByEmail
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({ ...mockUser, correo: 'carrera@x.cl' });
+      usersService.create.mockRejectedValue(
+        Object.assign(
+          new Error('duplicate key value violates unique constraint'),
+          { code: '23505' },
+        ),
+      );
+      const perdedor = await service.register({
+        nombre: 'N',
+        correo: 'carrera@x.cl',
+        contrasena: 'secreto123',
+      });
+
+      // Byte por byte, igual que el caso de arriba.
+      expect(perdedor).toEqual(esperado);
+    });
+
+    it('NO se traga la colisión de `nombre_usuario`, que no creó ninguna cuenta', async () => {
+      // `usuarios` tiene dos uniques y el DTO acepta los dos. Si el 23505 vino
+      // del nombre de usuario, la cuenta no existe: responder "revisá tu correo"
+      // sería mentirle a alguien que quedó sin registrarse. Se distingue porque
+      // el correo sigue libre después del choque.
+      //
+      // ⚠️ **Contra qué mutante vale este test, porque no es el obvio.** Contra
+      // el código ANTERIOR al fix pasa igual —sin `catch`, el error sube solo—,
+      // así que una revisión que use ese baseline lo va a leer como tautológico
+      // (pasó: lo levantó la revisión independiente del 2026-08-22). El mutante
+      // que sí caza es **la primera versión del fix**: un `catch` que se traga
+      // CUALQUIER `23505` y devuelve el mensaje uniforme. Con esa versión este
+      // test falla y es el único de los 30 que lo hace — verificado.
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.create.mockRejectedValue(
+        Object.assign(
+          new Error('duplicate key value violates unique constraint'),
+          { code: '23505' },
+        ),
+      );
+
+      await expect(
+        service.register({
+          nombre: 'N',
+          correo: 'libre-igual@x.cl',
+          contrasena: 'secreto123',
+          nombreUsuario: 'tomado',
+        }),
+      ).rejects.toThrow(/duplicate key/);
+    });
+
     it('no crea ninguna cuenta cuando el correo ya está verificado', async () => {
       usersService.findByEmail.mockResolvedValue({
         ...mockUser,

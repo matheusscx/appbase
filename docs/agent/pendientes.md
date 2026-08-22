@@ -766,38 +766,34 @@ empezarlas.
   ℹ️ Paradoja que conviene no perder: hoy el cajero **no queda atrapado precisamente porque la
   fuga sigue abierta**. Cerrarla sin contestar esto lo deja sin salida.
 
-- [ ] **Un correo de usuario soft-borrado hace explotar el alta con un 500** (backend,
-  `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08 contra la
-  base viva: la búsqueda de `usuarioPrevio` corre con el filtro de soft delete, pero la
-  unique de `usuarios.correo` **no es parcial**, así que el `INSERT` choca y sale un
-  `500 Internal server error` en vez de un 409 o un 400 accionable. **Hoy es inalcanzable**:
-  nada en `backend/src` soft-borra un `Usuario` (`removeMember` solo da de baja la
-  membresía). Se anota y no se arregla porque el fix depende de una decisión que no está
-  tomada — si algún día se pueden dar de baja usuarios, ¿el alta los revive, los rechaza, o
-  el correo queda quemado?
-  **Decisión del owner (2026-08-11): el alta REVIVE la cuenta, avisando.** La persona
-  vuelve con su historial —sus ventas, turnos y propinas siguen siendo suyas— y el alta
-  responde que está reactivando una cuenta, no creando una.
-  ⚠️ **Revivir la cuenta no es revivir los permisos.** El alta tiene que declarar los
-  roles de nuevo, igual que hace hoy `POST /tenants/usuarios`; heredar en silencio los
-  viejos es exactamente el agujero que la entrada de `addMember` de acá arriba describe.
-  Sigue sin implementarse por lo mismo de antes: **nada soft-borra un `Usuario`**, así que
-  el escenario es inalcanzable. Lo que la decisión fija es la forma del fix el día que
-  exista la baja — y que la unique de `usuarios.correo` va a tener que ser parcial.
-  ➕ **Ganó un segundo llamador el 2026-08-15** (lo levantó la revisión independiente):
-  `auth.service.ts` → `register` tiene el mismo hueco —`findByEmail` filtra borrados, así
-  que `existing` da `null` y el `create` choca contra la unique—, y ahí duele más: ese
-  endpoint acaba de pasar a **responder siempre lo mismo** para no ser un enumerador de
-  cuentas, y un `500` vuelve a distinguir un caso desde afuera. Sigue inalcanzable por la
-  misma razón, y se arregla en el mismo momento y con la misma decisión.
-
-### Lo que el frente de redondeo de plata dejó afuera a propósito (2026-08-21)
-
-Cada uno tiene decisión tomada en
-[`specs/2026-08-20-redondeo-de-plata-decisiones.md`](../superpowers/specs/2026-08-20-redondeo-de-plata-decisiones.md)
-y quedó **fuera de la pasada** por la regla de aislamiento: dos cambios del motor en una
-misma tanda es lo que obligó a revertir el arreglo anterior. Las citas de línea se
-verificaron el 2026-08-21, después del frente.
+- [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
+  de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
+  medirla, porque la mitad de lo que decía ya no era cierto**) —
+  ⚠️ **Lo que esta entrada afirmaba y HOY ES FALSO:** decía que un correo de usuario
+  soft-borrado *"hace explotar el alta con un 500"* en `tenants.service.ts` → `crearUsuario`.
+  **Ese camino ya traduce el `23505`** desde el 2026-08-11 (`:861-877`): devuelve **409**, no
+  500, y su comentario nombra las dos causas posibles. No hay nada que arreglar ahí.
+  ✅ **El segundo llamador, que era el que seguía vivo, se arregló el 2026-08-22:**
+  `auth.service.ts` → `register` no capturaba su `23505` y salía un 500 — alcanzable **sin
+  ninguna baja de usuario**, por una carrera entre dos registros del mismo correo libre. Y ahí
+  dolía porque ese endpoint responde siempre lo mismo para no ser un enumerador de cuentas: el
+  500 volvía a distinguir un correo tomado de uno libre. Ver `resueltos.md`.
+  **Lo que queda pendiente, y sigue sin poder construirse:** la decisión del owner
+  (2026-08-11) es que **el alta REVIVA la cuenta, avisando** —la persona vuelve con su
+  historial, y el alta declara los roles de nuevo, sin heredarlos en silencio—, y que la
+  unique de `usuarios.correo` pase a ser **parcial**. Sigue **inalcanzable**: verificado otra
+  vez el 2026-08-22, **nada en `backend/src` soft-borra un `Usuario`** (`removeMember` solo da
+  de baja la membresía). Construirlo hoy sería infraestructura para un estado que no existe.
+  ➕ **Dos huecos menores que aparecieron al medir, anotados y NO arreglados** (ninguno vale
+  un frente propio, los dos son de la misma carrera):
+  1. El 409 de `crearUsuario` dice *"Ese correo ya es miembro de este tenant"*, que es cierto
+     cuando la carrera es dentro del mismo tenant y **falso** cuando dos tenants distintos dan
+     de alta el mismo correo nuevo a la vez. Distinguirlo exige mirar el nombre de la
+     constraint, que en TypeORM es un hash (`UQ_1a7a36f3…`) y cambia con el esquema.
+  2. `usuarios` tiene **dos** uniques —`correo` y `nombre_usuario`— y `RegisterDto` acepta las
+     dos. Una carrera por `nombre_usuario` **sigue dando 500**: es el statu quo, no una
+     regresión, y el arreglo del 2026-08-22 la deja pasar a propósito en vez de tragársela
+     (tragarla le diría "revisá tu correo" a alguien que no quedó registrado).
 
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el

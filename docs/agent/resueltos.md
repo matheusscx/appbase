@@ -17,6 +17,50 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `register` deja de responder 500 cuando dos personas toman el mismo correo a la vez (2026-08-22)
+
+Cierra la mitad viva de la entrada *"Un correo de usuario soft-borrado hace explotar el alta
+con un 500"*. La otra mitad **no se cerró: se corrigió**, porque afirmaba algo que ya no era
+cierto — queda reescrita en [`pendientes.md`](pendientes.md).
+
+### Lo que la entrada decía, y lo que se midió
+
+Decía que el 500 salía en `tenants.service.ts` → `crearUsuario`. **Ese camino ya traducía su
+`23505` a un 409** desde el 2026-08-11, con un comentario que nombra las dos causas posibles.
+Lo que seguía vivo era el segundo llamador —`auth.service.ts` → `register`, anotado el
+2026-08-15—, y ahí el escenario **no necesita ninguna baja de usuario**: dos registros
+simultáneos del mismo correo libre ven los dos `findByEmail` en `null`, los dos insertan, y el
+perdedor se come la unique. **Alcanzable hoy, por API.**
+
+Duele más de lo que parece porque ese endpoint responde **siempre lo mismo** para no ser un
+enumerador público de cuentas: un 500 vuelve a distinguir desde afuera un correo tomado de uno
+libre, que es justo lo que se había sacado.
+
+### El arreglo, y el hueco que tenía la primera versión
+
+Traducir el `23505` y devolver la misma respuesta uniforme. Sin reintentar ni releer para
+seguir: el ganador de la carrera manda el mail de verificación, y continuar emitiría un
+segundo token que le quemaría el link al ganador — dos mails y un solo link válido.
+
+⚠️ **La primera versión del fix se tragaba cualquier `23505`, y eso era peor que el 500.**
+`usuarios` tiene **dos** uniques —`correo` y `nombre_usuario`— y `RegisterDto` acepta las dos:
+una colisión de nombre de usuario habría respondido *"revisá tu correo"* a alguien cuya cuenta
+**no se creó**. Se distingue **por conducta, no por el texto del error**: si después del
+choque el correo ya está tomado, la carrera fue por el correo; si sigue libre, el error sube
+tal cual. Los nombres de constraint no sirven para esto — TypeORM los genera como hashes
+(`UQ_1a7a36f3…`) y cambian con el esquema.
+
+### Los tests
+
+El RED corrió **contra el código de producción sin tocar**, que es la forma más fuerte del
+mutante: el test de la carrera fallaba con el `duplicate key` crudo antes del fix. Y hay uno
+por rama, porque la rama peligrosa es la que no rechaza: *"NO se traga la colisión de
+`nombre_usuario`, que no creó ninguna cuenta"*.
+
+**Gate:** lint 0, typecheck limpio, 2016 unitarios, e2e completo sobre base reseteada.
+
+---
+
 ## El pipe de escala deja de arrastrar a once controllers a `Scope.REQUEST` (2026-08-22)
 
 Cierra la entrada *"El contagio de `Scope.REQUEST` de `EscalaMonedaPipe` — el spike de

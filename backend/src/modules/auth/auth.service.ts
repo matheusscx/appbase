@@ -154,12 +154,38 @@ export class AuthService {
       usuarioId = existing.id;
     } else {
       const hashed = await bcrypt.hash(dto.contrasena, 10);
-      const user = await this.usersService.create({
-        ...dto,
-        correo,
-        contrasena: hashed,
-      });
-      usuarioId = user.id;
+      try {
+        const user = await this.usersService.create({
+          ...dto,
+          correo,
+          contrasena: hashed,
+        });
+        usuarioId = user.id;
+      } catch (e) {
+        // 23505 = unique_violation. Se llega acá por una carrera: dos registros
+        // del mismo correo libre, los dos vieron `findByEmail` en null y los dos
+        // insertaron. Sin traducirlo sale un **500**, y ese 500 vuelve a
+        // distinguir desde afuera un correo tomado de uno libre — justo lo que
+        // este endpoint dejó de hacer al responder siempre lo mismo. Mismo
+        // criterio que `tenants.service.ts` → `crearUsuario`, que ya traduce el
+        // suyo.
+        if ((e as { code?: string }).code !== '23505') throw e;
+        // ⚠️ `usuarios` tiene DOS uniques: `correo` y `nombre_usuario` — y
+        // `RegisterDto` acepta los dos. Tragarse cualquier 23505 le diría
+        // "revisá tu correo" a alguien cuya cuenta NO se creó, que es peor que
+        // el 500. Se distingue **por conducta y no por el texto del error**:
+        // los nombres de constraint son hashes de TypeORM (`UQ_1a7a36f3…`) y
+        // cambian con el esquema. Si el correo ya está tomado, la carrera fue
+        // por el correo.
+        const ganador = await this.usersService.findByEmail(correo);
+        if (!ganador) throw e;
+        // Se corta acá a propósito, sin reintentar: el ganador de la carrera
+        // sigue su flujo y manda el mail de verificación. Continuar emitiría un
+        // segundo token y `invalidarAnteriores` le quemaría el link al ganador
+        // — dos mails y un solo link válido, el peor de los dos mundos para
+        // quien se está registrando.
+        return { message: MENSAJE_REGISTRO };
+      }
     }
 
     // Igual que en `recuperar`: registrarse dos veces deja UN link válido, el
