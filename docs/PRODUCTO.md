@@ -119,6 +119,12 @@ también. Quien opera en dos empresas cambia de contexto y vuelve a entrar.
 puede provocarlo** —solo la propia persona, actuando sobre su propia cuenta—. Se documenta
 acá para que no se vuelva a levantar como hallazgo.
 
+⚠️ **Si algún día se revierte esta decisión, la trampa está medida:** un filtro
+`WHERE active_tenant_id = :tenantId` **no** alcanza. Las sesiones recién logueadas nacen con
+`active_tenant_id = null` —todavía no eligieron tenant— así que ese filtro las dejaría vivas
+en otros dispositivos, que es justo lo contrario de lo que buscaría el acotamiento. Lo
+detectó la revisión independiente del 2026-08-22 al verificar el docblock de `switchTenant`.
+
 ---
 
 ### 3. Control de acceso (RBAC)
