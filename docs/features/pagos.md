@@ -147,6 +147,12 @@ Response (200):
   vuelto superen el total a cobrar: ese excedente no hay con qué devolverlo. El frontend ya
   lo marcaba en `resumenCobro` (`excedenteSinVuelto`); ahora también es guard de backend.
 - Los pagos son inmutables: no hay edición ni eliminación (soft delete solo para auditoría).
+- **`monto` tiene que ser mayor a cero** (`@IsDecimalPositivo`, 2026-08-22): mismo gate que
+  la línea de pago de una venta, que lo tenía desde siempre. Un abono negativo ya no llegaba
+  a persistirse —el guard de `registrarMovimientoEnTransaccion` lo frena y revierte la
+  transacción entera— pero contestaba **422 hablando de un movimiento de caja** en vez de
+  del monto que el cliente mandó; y el **cero** no lo frenaba nadie, y dejaba pago,
+  aplicación y movimiento de caja en cero sin aportar nada.
 - **`monto` se rechaza con 400 si trae más decimales de los que admite la moneda oficial
   del tenant** (`@EsMontoCobrado` + `EscalaMonedaPipe`; medio peso chileno no existe). El
   contrato completo, incluido el de las pasarelas —**validan en su borde y nunca redondean

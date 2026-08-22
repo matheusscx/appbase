@@ -742,6 +742,45 @@ describe('Ventas (e2e)', () => {
         PAGO_INICIAL - PROPINA + ABONO,
       );
     });
+
+    /**
+     * El monto del abono no tenía validación de signo: `PagoItemDto.monto` lleva
+     * `@IsNumberString` + `@EsMontoCobrado`, pero no `@IsDecimalPositivo`, que
+     * su gemelo `PagoVentaDto` (la venta) sí tiene desde siempre.
+     *
+     * Medido antes de arreglarlo: el **negativo** no se persistía —el guard de
+     * `registrarMovimientoEnTransaccion` lo frena y la transacción entera
+     * revierte—, pero contestaba **422 hablando de un movimiento de caja** por
+     * lo que en realidad es un monto de pago inválido. El **cero** no lo frenaba
+     * nadie: dejaba un pago, una aplicación y un movimiento de caja, todos en
+     * cero. Los dos casos se cierran donde corresponde, en el DTO.
+     */
+    it.each([['-1000'], ['0']])(
+      'rechaza con 400 un abono de monto %s, sin escribir nada',
+      async (monto) => {
+        const resVenta = await request(app.getHttpServer())
+          .post('/api/ventas')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+            pagos: [],
+          })
+          .expect(201);
+        const ventaId = (resVenta.body as { id: string }).id;
+
+        await request(app.getHttpServer())
+          .post('/api/pagos')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ ventaId, pagos: [{ metodoPagoId: EFECTIVO_ID, monto }] })
+          .expect(400);
+
+        const pagos: unknown[] = await ds.query(
+          `SELECT 1 FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL`,
+          [ventaId],
+        );
+        expect(pagos).toHaveLength(0);
+      },
+    );
   });
 
   describe('POST /ventas con un método de pago no contratado', () => {

@@ -17,6 +17,39 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El signo del abono en `POST /pagos`: el negativo estaba contenido, el cero no (2026-08-22)
+
+Cierra la entrada *"El signo del abono en `POST /pagos`"* (2026-08-21), que se declaraba a sí
+misma **"un puntero, no un enunciado verificado"** y mandaba medir antes de escribir. Bien
+que lo dijera: lo medido no era lo que sugería el título.
+
+### Lo que pasaba de verdad
+
+`PagoItemDto.monto` llevaba `@IsNumberString` + `@EsMontoCobrado`, pero **no**
+`@IsDecimalPositivo`, que su gemelo `PagoVentaDto.monto` (la línea de pago de una venta)
+tiene desde siempre. De ahí salen dos conductas distintas, no una:
+
+| Monto | Qué hacía | Por qué |
+|---|---|---|
+| Negativo | **422**, y no persistía nada | `registrarMovimientoEnTransaccion` rechaza un movimiento de caja negativo y revierte la transacción entera |
+| Cero | **201**, y persistía | nadie lo frenaba: ese guard rechaza negativos, **no** el cero, y a propósito (un pago devuelto íntegro como vuelto deja neto 0 y es legítimo) |
+
+O sea que el agujero de plata que el título insinuaba —un abono negativo sacando dinero de la
+caja por la puerta de una `entrada`— **no existía**: ya estaba tapado aguas abajo. Lo que sí
+existía era un 422 que hablaba de un movimiento de caja cuando el problema era el monto que
+mandó el cliente, y un cero que dejaba pago + aplicación + movimiento de caja en cero.
+
+### El arreglo
+
+Un decorador en el DTO, que es donde corresponde: el guard de caja protege la caja, no valida
+la entrada del endpoint de pagos. Dos e2e (`it.each` con `-1000` y `0`) exigen 400 y que no
+quede ninguna fila en `pagos`. **Validados revirtiendo**: sin el decorador dan 422 y 201.
+
+⚠️ El test es e2e y no un unit del DTO a propósito: `plainToInstance` + `validate` no ejerce
+el pipe, así que un unit habría pasado sin probar el camino real del request.
+
+---
+
 ## Los tres guards de elegibilidad de la NC: el que estaba en duda no es alcanzable (2026-08-22)
 
 Cierra la entrada *"Los tres guards de elegibilidad de la NC no corren por el webhook, y uno

@@ -811,12 +811,6 @@ empezarlas.
   un costo de `5,0500`/g es válido y no se puede tipear. Es preexistente y del mismo tema;
   si se toma esta entrada, se toman juntos.
 
-- [ ] **El signo del abono en `POST /pagos`** (backend, hallazgo del análisis del redondeo,
-  2026-08-21) — quedó fuera del frente porque no es escala sino signo, y el decorador de
-  signo es otra pieza. Hay que abrir el DTO y el service, medir qué pasa hoy con un monto
-  negativo, y recién entonces escribir la entrada de verdad: **ésta es un puntero, no un
-  enunciado verificado.**
-
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera
   la spec al revés**, entendiéndolo como dato de formato de UI. Es el minor unit de la
