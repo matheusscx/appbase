@@ -29,6 +29,12 @@ interface ProductoOpt {
   costoActual: string | null
   unidadMedida: string | null
   modoInventario: string | null
+  // `GET /items` ya lo devuelve; lo que faltaba era declararlo acá. Lo necesita
+  // `MoneyInput` para resolver separadores y locale del costo.
+  // NO nullable: `items.moneda_id` es `NOT NULL` (ver `item.entity.ts`), así que
+  // el campo queda deshabilitado solo mientras no haya producto elegido — nunca
+  // por un producto sin moneda.
+  monedaId: string
 }
 
 interface CausaOpt {
@@ -453,10 +459,14 @@ const columns: TableColumn<MermaListItem>[] = [
               ? 'Obligatorio: valoriza solo esta merma, no actualiza el costo del producto.'
               : 'Prefill con el costo actual; puedes ajustarlo solo para este movimiento.'"
           >
-            <UInput
+            <!-- `decimales` en 4 y no los de la moneda: el backend valida este
+                 campo con `@EsCosto()`, que es escala FIJA — un costo de
+                 `5,0500`/g es válido incluso en un ítem en CLP. -->
+            <MoneyInput
               v-model="form.costoUnitario"
-              inputmode="decimal"
-              placeholder="0"
+              :moneda-id="productoSeleccionado?.monedaId"
+              :decimales="4"
+              class="w-full"
             />
           </UFormField>
 

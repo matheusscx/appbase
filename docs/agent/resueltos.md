@@ -17,6 +17,47 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los campos de costo dejan de mentir sobre cuántos decimales admiten (2026-08-22)
+
+Cierra dos de las tres mitades de la entrada *"`mermas` y `grupos-modificadores` siguen sin
+`MoneyInput`, y re-migrarlos no es mecánico"*. La tercera —`grupos-modificadores`— sigue
+abierta y por una razón que no es de implementación: esa pantalla no tiene ninguna moneda a
+mano y sus opciones aplican a ítems en monedas distintas. Quedó reescrita en
+[`pendientes.md`](pendientes.md) con la pregunta que la destraba.
+
+### Lo que la entrada decía y no era
+
+Decía que para `mermas` *"hay que agregar `monedaId` al endpoint que alimenta el selector de
+productos"*. **El endpoint ya lo devuelve** (`items.service.ts:220`, `GET /items`): lo que
+faltaba era declararlo en la interfaz `ProductoOpt` del frontend. Cero backend.
+
+### Y lo que la entrada no decía, que era lo importante
+
+Nombraba como daño colateral *"los campos de costo de `items.vue` (`form.costo`,
+`precioExtra`)"*. Al medirlo son **los seis** `MoneyInput` de esa pantalla, `precioBase`
+incluido: el DTO lo valida con `@EsCosto()` y no con `@EsMontoCobrado()`, porque el precio de
+lista es dinero **por unidad** —una tasa— y la frontera tasa→monto se cruza al multiplicar
+por la cantidad. O sea que en un ítem CLP la pantalla entera admitía 0 decimales mientras el
+backend admitía 4: un costo de `5,0500`/g era válido y no se podía tipear.
+
+### Un cambio de conducta que hay que saber
+
+En `mermas`, el campo de costo queda **deshabilitado hasta elegir un producto**: `MoneyInput`
+se deshabilita solo cuando no puede resolver la moneda (`:disabled="disabled || !cfg"`), y la
+moneda sale del producto seleccionado. No es una trampa —`items.moneda_id` es `NOT NULL`, así
+que ningún producto puede dejarlo deshabilitado para siempre— y en el flujo real no se pierde
+nada: elegir el producto **prefillea** el costo, así que lo tecleado antes se perdía igual.
+
+### El guard es sobre el fuente, a propósito
+
+El test nuevo lee `items.vue` y exige que **todo** `<MoneyInput` de esa pantalla lleve
+`:decimales="4"`. Un test que monta la pantalla solo vería los campos ya dibujados, y lo que
+hay que evitar es que el **próximo** campo de dinero nazca sin el prop. Cuenta aperturas de
+tag para no contar de más si alguien lo menciona en un comentario.
+**Validado revirtiendo**: sin el fix falla listando los 6 tags.
+
+---
+
 ## La gestión de garzones la habilitan Salones **o** Propinas (2026-08-22)
 
 Cierra la entrada *"El garzón «Mostrador» pasa a colgar del módulo `Propinas`"* (medida el

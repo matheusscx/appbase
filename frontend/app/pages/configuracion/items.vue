@@ -1605,7 +1605,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             </UFormField>
 
             <UFormField v-if="form.tipo !== 'ingrediente'" label="Precio base" required>
-              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" class="w-full" />
+              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
             </UFormField>
 
             <UFormField label="Moneda" required>
@@ -1676,7 +1676,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   />
                 </UFormField>
                 <UFormField v-if="!editingId" label="Costo">
-                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
+                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
                 </UFormField>
                 <UFormField v-else label="Costo vigente">
                   <div class="flex items-center justify-between gap-2">
@@ -1808,7 +1808,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   />
                 </UFormField>
                 <UFormField v-if="!editingId" label="Costo">
-                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
+                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
                 </UFormField>
                 <UFormField v-else label="Costo vigente">
                   <div class="flex items-center justify-between gap-2">
@@ -1954,7 +1954,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <div class="flex items-end gap-2">
                   <UFormField label="Precio extra" class="flex-1">
-                    <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" class="w-full" />
+                    <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
                   </UFormField>
                   <UButton
                     color="error"
@@ -2106,6 +2106,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       v-model="grupo.opciones[opIdx]!.precioExtra"
                       :moneda-id="form.monedaId"
                       class="col-span-3 w-full"
+                      :decimales="4"
                     />
                     <UBadge
                       v-if="op.cantidad === '' && !op.cantidadDefault"
@@ -2328,7 +2329,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             v-if="ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'"
             :label="costoUnitarioLabel"
           >
-            <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" class="w-full" />
+            <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" :decimales="4" class="w-full" />
           </UFormField>
 
           <!-- Modo cantidad: cantidad + unidad opcional -->

@@ -720,28 +720,22 @@ empezarlas.
   cubierto porque su handler no lo persiste, y otro marcado puede no tener el pipe colgado.
   El estado de partida está en [`patterns/backend.md` §3.1](../patterns/backend.md).
 
-- [ ] **`mermas` y `grupos-modificadores` siguen sin `MoneyInput`, y re-migrarlos no es
-  mecánico** (frontend + backend chico, **medido el 2026-08-21**) — el punto fijo que los
-  había expulsado **está arreglado** (ver [`resueltos.md`](resueltos.md)), así que la razón
-  original ya no existe. Pero al ir a re-migrarlos apareció otra, que la entrada anterior no
-  contemplaba: **`MoneyInput` necesita una moneda** para resolver separadores y locale, y
-  ninguna de las dos pantallas tiene una a mano.
-  - `mermas.vue` (`costoUnitario`): su `ProductoOpt` **no trae `monedaId`** — hay que
-    agregarlo al endpoint que alimenta el selector de productos.
-  - `grupos-modificadores.vue` (`precioExtra`, `lotePrecio`): **no menciona moneda en
-    ningún lado**, y sus opciones aplican a ítems que pueden estar en monedas distintas.
-
+- [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
+  resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
+  2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
+  resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
+  opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
+  `lotePrecio`).
   Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
-  extranjera, que es cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
-  La escala la sigue validando el backend con `@EsCosto()` (escala 4), así que lo que falta
-  es ayuda visual, no control: **por eso no bloquea nada y no se hizo de arrastre.**
-  Quien lo tome: los tres campos van con el prop `decimales` en 4, no con los decimales de
-  la moneda, porque `@EsCosto()` es escala fija.
-  ⚠️ **De paso, algo que apareció midiendo y no es esta entrada:** los campos de costo de
-  `items.vue` (`form.costo`, `precioExtra`) usan `:moneda-id` **sin** el prop `decimales`,
-  así que para un ítem en CLP la pantalla admite 0 decimales mientras el backend admite 4 —
-  un costo de `5,0500`/g es válido y no se puede tipear. Es preexistente y del mismo tema;
-  si se toma esta entrada, se toman juntos.
+  extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
+  **La pregunta para el owner:** una opción de grupo que se aplica a ítems en monedas
+  distintas, ¿tiene moneda propia, hereda la del ítem al que se aplica (y entonces el campo
+  no puede tener una sola máscara), o se asume la oficial del tenant asumiendo el error en el
+  caso multi-moneda? Las tres cambian el modelo, no la pantalla.
+  ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
+  Lo que falta es ayuda visual, no control.
+  ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
+  moneda, porque `@EsCosto()` es escala fija.
 
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera

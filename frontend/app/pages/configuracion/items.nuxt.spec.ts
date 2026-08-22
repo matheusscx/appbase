@@ -5,6 +5,8 @@
 // un usuario con el permiso ve sus controles aunque no sea admin — y que las
 // entradas del menú de acciones se arman por permiso: "Ajustar stock" escribe,
 // "Historial" solo lee, y quedaron en el mismo dropdown.
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Items from './items.vue'
@@ -767,5 +769,36 @@ describe('configuracion/items — guard de reentrancia de "Eliminar"', () => {
     expect(usoCalls).toEqual([ITEM_A, ITEM_B])
 
     wrapper.unmount()
+  })
+})
+
+/**
+ * Los campos de dinero de esta pantalla son TODOS de escala fija 4 en el
+ * backend (`@EsCosto()`): `precioBase`, `costo`, y los dos `precioExtra` —el de
+ * extras de receta y el de opciones de grupo—, más el `costoUnitario` del
+ * ajuste. Son precios **por unidad**, o sea tasas, y la frontera tasa→monto se
+ * cruza al multiplicar por la cantidad, no acá.
+ *
+ * `MoneyInput` sin el prop `decimales` sigue los decimales de la MONEDA, y con
+ * CLP (0) la máscara no deja abrir parte decimal: un costo de `5,0500`/g es
+ * válido para el backend y no se podía tipear.
+ *
+ * El guard es sobre el fuente y no sobre el render a propósito: lo que hay que
+ * evitar es que el PRÓXIMO campo de dinero de esta pantalla nazca sin el prop,
+ * y un test que monta solo ve los que ya están dibujados. Cuenta aperturas de
+ * tag para no contar de más si alguien lo menciona en un comentario.
+ */
+describe('configuracion/items — los campos de dinero son de escala fija', () => {
+  it('todo MoneyInput de la pantalla fija decimales en 4', () => {
+    // Desde la raíz del proyecto: en el entorno `nuxt` de vitest,
+    // `import.meta.url` no es un `file:` usable.
+    const ruta = resolve(process.cwd(), 'app/pages/configuracion/items.vue')
+    const fuente = readFileSync(ruta, 'utf8')
+
+    const tags = fuente.match(/<MoneyInput[\s\S]*?\/>/g) ?? []
+    expect(tags.length).toBeGreaterThan(0)
+
+    const sinDecimales = tags.filter(t => !t.includes(':decimales="4"'))
+    expect(sinDecimales).toEqual([])
   })
 })
