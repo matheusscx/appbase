@@ -105,36 +105,6 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **El contagio de `Scope.REQUEST` de `EscalaMonedaPipe` — el spike de contexto en ALS,
-  antes que partir ningún controller** (backend, **medido el 2026-08-21**, **decidido por el
-  owner el 2026-08-22**) — el pipe inyecta `@Inject(REQUEST)` para leer el tenant del token, y
-  Nest propaga el scope **hacia arriba**: el controller anfitrión entero se instancia por
-  request, también sus rutas de lectura. El scope es propiedad de la **instancia**, no del
-  handler, así que en `items.controller.ts` el pipe cuelga de tres handlers de escritura
-  (`:53`, `:66`, `:120`) y las once rutas pagan.
-  **Lo medido** sobre `GET /items`, dos rondas por brazo: secuencial no se nota —los brazos se
-  solapan—; con 20 concurrentes **~7% menos req/s y ~13% más p95**. Tabla completa en el
-  docblock de `escala-moneda.pipe.ts`.
-  ✅ **Decisión del owner (2026-08-22): primero el spike de ALS; partir `ItemsController` es el
-  plan B.** Lo que movió la decisión fue contar el pajar: el pipe cuelga de **once**
-  controllers —`ventas`, `caja`, `pagos`, `salones`, `mermas`, `inventario`,
-  `grupos-modificadores`, `propinas`, `tenants`, `desfases` e `items`—, así que partir `items`
-  arregla lo único medido y deja los otros diez igual.
-  **Qué tiene que medir el spike:** si el pipe puede leer el `tenant_id` desde un ALS de
-  request en vez de `@Inject(REQUEST)`. Si puede, vuelve a ser singleton y el contagio
-  desaparece en los once de una. El precedente del proyecto es
-  `common/db/tx-context.ts` (**ADR-020**), pero **ese ALS lleva hoy el `EntityManager`, no al
-  usuario**: habría que sembrarlo con el `JwtUser`.
-  ⚠️ **Lo primero que el spike tiene que confirmar es el orden de ejecución**, y no está
-  verificado: el middleware corre **antes** de los guards (todavía no hay `req.user`), y si lo
-  siembra un interceptor hay que probar que el pipe se ejecute dentro del `als.run()` —los
-  pipes resuelven los argumentos al suscribirse el observable de `next.handle()`—. Si el orden
-  no da, se cae al plan B sin más vueltas.
-  ⚠️ **Trampa escrita en el propio pipe:** el memo de decimales está cacheado con la clave del
-  tenant **a propósito**, para que sacarle el `Scope.REQUEST` no le sirva los decimales del
-  primer tenant a todos los demás. Al pasar a singleton esa clave deja de ser redundancia y
-  pasa a ser lo único que separa un tenant de otro. Es plata y es multi-tenant.
-
 - [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
   saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
   del proyecto dice que `movimientos_inventario` es la fuente de verdad y `item_producto.stock`
@@ -949,7 +919,7 @@ que el que la tome se va a encontrar**:
 
 | Entrada | Decisión | Dónde quedó |
 |---|---|---|
-| `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Sección 2** |
+| `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Resuelto el 2026-08-22**: el spike salió, se migró y el plan B no hizo falta ([`resueltos.md`](resueltos.md)) |
 | El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Sección 3** |
 | El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
 | El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Construido el 2026-08-22** ([`resueltos.md`](resueltos.md)) |

@@ -1,5 +1,6 @@
 import { BadRequestException, type ArgumentMetadata } from '@nestjs/common';
 import { EscalaMonedaPipe } from './escala-moneda.pipe';
+import { RequestContext } from '../context/request-context';
 import { EsCosto, EsMontoCobrado } from '../decorators/escala-moneda.decorator';
 import { type MonedasService } from '../../modules/monedas/monedas.service';
 
@@ -29,6 +30,15 @@ class DtoConLineas {
 const meta = (metatype: unknown): ArgumentMetadata =>
   ({ type: 'body', metatype, data: undefined }) as ArgumentMetadata;
 
+/**
+ * El pipe es **singleton** y lee el usuario del `RequestContext`, así que un
+ * test tiene que decir dónde empieza y termina cada request — antes eso lo daba
+ * el `Scope.REQUEST` gratis.
+ *
+ * `pipe.transform(...)` = **un request**, con store propio (que es lo que hace
+ * el interceptor global). Para varias llamadas dentro del MISMO request está
+ * `enRequest(fn)`, que es donde se ve el memo.
+ */
 function armar(decimales: number) {
   const decimalesOficiales = jest.fn().mockResolvedValue(decimales);
   const monedas = { decimalesOficiales } as unknown as MonedasService;
@@ -40,8 +50,18 @@ function armar(decimales: number) {
       esSuperadmin: false,
     },
   };
-  const pipe = new EscalaMonedaPipe(monedas, request);
-  return { pipe, decimalesOficiales, request };
+  const contexto = new RequestContext();
+  const real = new EscalaMonedaPipe(monedas, contexto);
+
+  const enRequest = <T>(fn: () => Promise<T>): Promise<T> =>
+    contexto.correrCon({ user: request.user }, fn);
+
+  const pipe = {
+    transform: (valor: unknown, meta: ArgumentMetadata): Promise<unknown> =>
+      enRequest(() => real.transform(valor, meta)),
+  };
+
+  return { pipe, real, contexto, enRequest, decimalesOficiales, request };
 }
 
 const linea = (monto: string): LineaDePago =>
@@ -168,16 +188,77 @@ describe('EscalaMonedaPipe', () => {
   });
 
   it('pregunta los decimales de la moneda una sola vez por request', async () => {
-    const { pipe, decimalesOficiales } = armar(0);
+    const { real, enRequest, decimalesOficiales } = armar(0);
     const dto = Object.assign(new DtoConLineas(), {
       pagos: [linea('1000'), linea('2000'), linea('3000')],
     });
 
-    await pipe.transform(dto, meta(DtoConLineas));
-    await pipe.transform({ monto: '10' }, meta(DtoDeMonto));
+    // Las dos llamadas dentro del MISMO request: es el caso que el memo cubre.
+    await enRequest(async () => {
+      await real.transform(dto, meta(DtoConLineas));
+      await real.transform({ monto: '10' }, meta(DtoDeMonto));
+    });
 
     expect(decimalesOficiales).toHaveBeenCalledTimes(1);
     expect(decimalesOficiales).toHaveBeenCalledWith('tenant-1');
+  });
+
+  /**
+   * El peligro que un memo de instancia SÍ produce, y que la concurrencia no
+   * alcanza a mostrar: **quedarse pegado**. Con el pipe singleton, un memo en la
+   * instancia —aunque lleve la clave del tenant— cachea para siempre, así que un
+   * tenant que cambia la moneda oficial de su configuración seguiría validando
+   * con la escala vieja hasta que alguien reinicie el proceso. Sobre plata.
+   *
+   * El memo vive en el store del request justamente para que su vida sea la del
+   * request. Este test lo fija: dos requests del MISMO tenant preguntan dos
+   * veces.
+   */
+  it('el memo no sobrevive al request: el siguiente vuelve a preguntar', async () => {
+    const { pipe, decimalesOficiales } = armar(0);
+
+    await pipe.transform({ monto: '10' }, meta(DtoDeMonto));
+    await pipe.transform({ monto: '20' }, meta(DtoDeMonto));
+
+    expect(decimalesOficiales).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * La propiedad que sostiene todo lo demás: el pipe es **una sola instancia**
+   * para todos los requests, así que si el memo se le escapara a la instancia,
+   * dos tenants concurrentes se pisarían y uno validaría su plata con la escala
+   * del otro. Se mide con requests **entrelazados**, no secuenciales: uno abre
+   * su contexto, cede el control, y recién después valida.
+   */
+  it('dos requests concurrentes de tenants distintos no se pisan', async () => {
+    const { real, contexto, decimalesOficiales } = armar(0);
+    decimalesOficiales.mockImplementation((tenantId: string) =>
+      Promise.resolve(tenantId === 'tenant-clp' ? 0 : 2),
+    );
+
+    const usuario = (tenantId: string) => ({
+      id: 'u-1',
+      email: 'x@y.cl',
+      tenantId,
+      esSuperadmin: false,
+    });
+
+    const enCurso = (tenantId: string, monto: string) =>
+      contexto.correrCon({ user: usuario(tenantId) }, async () => {
+        // Cede el turno DESPUÉS de abrir el contexto: si el store se compartiera
+        // entre requests, acá es donde se rompería.
+        await new Promise((r) => setTimeout(r, 0));
+        return real.transform({ monto }, meta(DtoDeMonto));
+      });
+
+    const [clp, usd] = await Promise.allSettled([
+      enCurso('tenant-clp', '10.55'),
+      enCurso('tenant-usd', '10.55'),
+    ]);
+
+    // CLP no admite decimales → rechaza. USD sí → pasa. Cada uno con SU escala.
+    expect(clp.status).toBe('rejected');
+    expect(usd.status).toBe('fulfilled');
   });
 
   it('LIMITACIÓN CONOCIDA: un anidado sin @Type() no se valida', async () => {

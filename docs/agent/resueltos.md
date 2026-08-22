@@ -17,6 +17,90 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El pipe de escala deja de arrastrar a once controllers a `Scope.REQUEST` (2026-08-22)
+
+Cierra la entrada *"El contagio de `Scope.REQUEST` de `EscalaMonedaPipe` — el spike de
+contexto en ALS, antes que partir ningún controller"*. **El spike salió, se migró, y el
+plan B —partir `ItemsController`— no hizo falta.**
+
+### El spike, que era lo que la entrada pedía
+
+La duda concreta era el **orden de ejecución**: los pipes resuelven los argumentos cuando
+alguien se suscribe al observable de `next.handle()`, que podía caer **fuera** del
+`als.run` del interceptor. Se montó un experimento con un pipe singleton y dos formas de
+siembra:
+
+| Medición | `als.run` | `enterWith` |
+|---|---|---|
+| El pipe singleton ve el contexto | ✅ | ✅ |
+| 20 concurrentes de tenants distintos | **0 de 20 cruzados** | **0 de 20 cruzados** |
+| Request sin siembra hereda el anterior | No | No |
+| Instancias del controller para N requests | **1** | **1** |
+
+Se eligió `run`: `enterWith` también funcionó, pero no cierra el contexto al volver.
+
+### Lo construido
+
+`RequestContext` (`common/context/request-context.ts`) + un interceptor global que lo
+siembra con `req.user`. `EscalaMonedaPipe` pasó a **singleton** y su memo de decimales se
+mudó al **store del request** — un memo de instancia en un singleton le serviría los
+decimales del primer tenant a todos los demás, que es exactamente lo que el docblock viejo
+advertía que pasaría *"al que le saque el `Scope.REQUEST`"*. Hoy **no queda ningún provider
+request-scoped en `backend/src`**. Patrón documentado en
+[`patterns/backend.md`](../patterns/backend.md) §9b.
+
+### ⚠️ El 7% no se reproduce, y eso corrige a la entrada que motivó todo
+
+La entrada justificaba el trabajo con *"~7% menos req/s y ~13% más p95, **sin solapamiento
+entre brazos**"*, medido con **dos rondas por brazo** el 2026-08-21. Al migrar se rehízo el
+A/B en la misma máquina y con el mismo arnés, **seis rondas por brazo**:
+
+| Brazo | Rondas 3-6 (req/s) |
+|---|---|
+| Singleton, 1ª pasada | 597 · 597 · 576 · 548 |
+| Singleton, 2ª pasada | 534 · 556 · 591 · 603 |
+| Request-scoped (revertido a propósito) | 542 · 539 · 591 · 571 |
+
+**Los tres tramos se superponen.** Lo que domina la serie es el **calentamiento**: la ronda
+1 arranca en ~420-460 req/s en los tres brazos y sube hasta ~600. La diferencia de scope
+queda dentro del ruido que dos rondas no alcanzaban a ver.
+
+**No se revirtió la migración por eso**, y el porqué está escrito en el docblock del pipe:
+lo que queda en pie es el motivo **estructural** —un provider request-scoped contagia a
+quien lo hospede, el costo es invisible y crece solo, y la disciplina que lo contenía no se
+puede verificar en una revisión—. Pero el número no se puede seguir citando.
+
+### El test se validó revirtiendo — y la primera versión de este párrafo era falsa
+
+**Lo que decía:** *"el mutante es el diseño anterior —memo de vuelta en la instancia— y con
+él fallan dos tests"*. **La revisión independiente lo refutó reconstruyendo el mutante**, y
+tenía razón: yo había mutado el memo **sacándole la clave del tenant**, que es otra cosa. El
+mutante fiel al diseño anterior —memo en la instancia **conservando** la clave— **pasaba los
+dos tests**.
+
+**Por qué los pasaba, que es lo que importa:** `decimalesDelTenant()` es síncrona hasta el
+`return` —compara, asigna y devuelve la promesa sin ningún `await` en el medio—, así que dos
+requests no pueden entrelazarse ahí: cada uno se lleva la promesa que él mismo creó. Un memo
+de instancia **con** clave de tenant no produce fuga cruzada, y ningún test de concurrencia
+lo iba a cazar, porque no hay nada que cazar.
+
+**El peligro real de ese diseño es otro: quedarse pegado.** Con el pipe singleton, un memo
+de instancia cachea **para siempre**; un tenant que cambia su moneda oficial seguiría
+validando con la escala vieja hasta que alguien reinicie el proceso. Sobre plata.
+
+De ahí el test que faltaba y ahora existe — *"el memo no sobrevive al request: el siguiente
+vuelve a preguntar"*: dos requests del mismo tenant tienen que preguntar dos veces. Con el
+mutante de la revisión **falla**, y es el único de los tres que lo caza.
+
+Los otros dos siguen valiendo por lo suyo: *"vuelve a preguntar los decimales si cambia el
+tenant"* (ya existía, y anticipaba esta migración) y el de dos requests concurrentes con
+distinta escala — que cubren el memo **sin** clave, no el memo de instancia.
+
+**Gate:** lint 0, typecheck limpio, 2013 unitarios, **e2e completo 43 suites / 530 tests**
+sobre base reseteada.
+
+---
+
 ## "Hasta el 16" ya muestra el 16 (2026-08-22)
 
 Cierra la entrada *"El borde `hasta` de los filtros de fecha pasa a ser inclusivo del

@@ -486,6 +486,41 @@ con el deadlock que motivó esto y las alternativas descartadas, está en
 
 ---
 
+## 9b. Contexto de request (ALS) — nunca `@Inject(REQUEST)`
+
+Un provider que necesita el usuario del token **no lo pide por inyección**: lo lee de
+`RequestContext` (`src/common/context/request-context.ts`), un `AsyncLocalStorage`
+sembrado por un interceptor global con `req.user`.
+
+**El motivo es estructural, no de rendimiento.** `@Inject(REQUEST)` obliga al provider a
+`Scope.REQUEST`, y Nest **propaga ese scope hacia arriba**: el controller anfitrión entero
+pasa a instanciarse por request, incluidas sus rutas de lectura, que no tocan al provider.
+Es un costo invisible que crece solo cada vez que alguien cuelga ese provider de un
+controller nuevo, y la disciplina que lo contenía —*"colgalo del controller más chico"*—
+no se puede verificar en una revisión.
+
+- **Sembrar con `run`, no con `enterWith`.** Las dos funcionan (medido); `enterWith` no
+  cierra el contexto al volver.
+- **Interceptor, no middleware.** El middleware corre **antes** de los guards, así que
+  todavía no hay `req.user` — lo pone Passport dentro de `JwtAuthGuard`.
+- **El estado por request va en el store, no en el provider.** Un memo en la instancia de
+  un singleton le serviría el dato del primer tenant a todos los demás. `EscalaMonedaPipe`
+  memoiza ahí los decimales de la moneda: una consulta por request, y con la clave del
+  tenant al lado.
+- **Fuera de un request** (jobs, seeder, tests que no lo siembran) `actual()` devuelve
+  `undefined`: quien lo use decide qué hacer, no asume que hay usuario.
+
+⚠️ **Lo que NO justifica este patrón: un número de throughput.** La entrada que lo motivó
+midió ~7% menos req/s con el pipe request-scoped, con dos rondas por brazo. Al migrar se
+rehízo el A/B con **seis rondas por brazo** en la misma máquina y **los brazos se
+superponen**: lo que domina la serie es el calentamiento. Si alguien va a citar un número
+para justificar un cambio de scope, que lo mida con rondas suficientes — y que compare
+tramos calientes, no la primera ronda.
+
+Es el hermano de `TxContext` (§9): mismo mecanismo, otro contenido.
+
+---
+
 ## 10. Paginación server-side
 
 Para listados grandes (pagos, ventas, kardex):

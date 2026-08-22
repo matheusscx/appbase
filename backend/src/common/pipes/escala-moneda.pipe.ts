@@ -1,25 +1,18 @@
 import {
   BadRequestException,
   ForbiddenException,
-  Inject,
   Injectable,
-  Scope,
   type ArgumentMetadata,
   type PipeTransform,
 } from '@nestjs/common';
-import { REQUEST } from '@nestjs/core';
 import Decimal from 'decimal.js';
 import { MonedasService } from '../../modules/monedas/monedas.service';
-import { type JwtUser } from '../interfaces/jwt-user.interface';
+import { RequestContext } from '../context/request-context';
 import { ESCALA_COSTO } from '../constants/escalas';
 import {
   ESCALA_COSTO_KEY,
   ESCALA_MONEDA_KEY,
 } from '../decorators/escala-moneda.decorator';
-
-interface RequestConUsuario {
-  user?: JwtUser;
-}
 
 /**
  * Tope de anidamiento que se inspecciona. La recursión baja sincrónicamente y
@@ -36,34 +29,33 @@ const PROFUNDIDAD_MAX = 20;
  * con su propia regla — el número guardado deja de ser el que se tecleó.
  * Decisión del owner: 400, nunca cuantizar en silencio.
  *
- * Se aplica por parámetro (`@Body(EscalaMonedaPipe)`), no global. Es
- * request-scoped, y Nest hace request-scoped al **controller anfitrión
- * entero**: si se cuelga de un controller, sus rutas se instancian de nuevo en
- * cada request, también las que no tocan plata. Por eso conviene colgarlo del
- * controller más chico que cubra los DTOs marcados, y por eso registrarlo
- * global le cobraría ese costo a toda la API.
+ * Se aplica por parámetro (`@Body(EscalaMonedaPipe)`), no global.
  *
- * **Cuánto cuesta, medido (2026-08-21).** Sobre `GET /items`, la lectura más
- * caliente del POS y la que más se temía, contra el stack de compose con el
- * catálogo del seed. Dos rondas por brazo, quitando y reponiendo el pipe de
- * `ItemsController` (que es lo único que le sube el scope: el pipe cuelga solo de
- * handlers de ESCRITURA, y Nest contagia igual al controller entero).
+ * ✅ **Es SINGLETON desde el 2026-08-22.** Hasta entonces pedía el request por
+ * inyección (`@Inject(REQUEST)`), lo que lo hacía `Scope.REQUEST` — y Nest
+ * propaga ese scope al **controller anfitrión entero**, así que las rutas de
+ * lectura de once controllers se instanciaban de nuevo en cada request sin tocar
+ * el pipe. Hoy el tenant sale de [`RequestContext`](../context/request-context.ts),
+ * un ALS sembrado por un interceptor global, y **no queda ningún provider
+ * request-scoped en `src/`**.
  *
- * | | secuencial, mediana | 20 concurrentes, mediana | p95 | req/s |
- * |---|---|---|---|---|
- * | con el pipe (request-scoped) | 6,86 / 6,95 ms | 40,6 / 40,0 ms | 53,0 / 50,7 | 475 / 481 |
- * | sin el pipe (singleton) | 6,54 / 6,91 ms | 39,0 / 36,8 ms | 46,8 / 45,3 | 503 / 522 |
+ * ⚠️ **La justificación de rendimiento resultó más blanda de lo que esta doc
+ * decía, y conviene saberlo antes de citarla.** La medición del 2026-08-21
+ * (`GET /items`, 20 concurrentes) daba **~7% menos req/s y ~13% más p95** con el
+ * pipe puesto, y afirmaba *"sin solapamiento entre brazos"* — con **dos** rondas
+ * por brazo. Al migrar se rehízo el A/B en la misma máquina y con el mismo arnés,
+ * **seis rondas por brazo**, y los tres tramos (singleton ×2 pasadas,
+ * request-scoped ×1) **se superponen**: 534-603 req/s contra 539-591. Lo que
+ * domina la serie es el **calentamiento** —la ronda 1 arranca en ~420-460 req/s y
+ * sube hasta ~600 en las tres—, no el scope. O sea que el 7% no se reproduce:
+ * era una diferencia dentro del ruido que dos rondas no alcanzaban a ver.
  *
- * **Secuencial no se nota** —los dos brazos se solapan, la diferencia queda bajo
- * el ruido entre corridas—. **Concurrente sí, y en la cola:** ~7% menos req/s y
- * ~13% más p95, sin solapamiento entre brazos en ninguna de las dos métricas.
- *
- * O sea: el trade-off es real pero modesto, y la salida que la doc daba por obvia
- * —"no colgar el pipe del handler de lectura"— **no aplica**, porque ya no cuelga
- * de ahí. La única salida sería partir el controller, y eso es una decisión de
- * estructura con su propio costo: queda anotada, no tomada.
- * Lo que la medición NO cubre: memoria/GC y un catálogo mucho más grande que el
- * del seed. Si cambia alguno, se vuelve a medir.
+ * **Entonces por qué se migró igual:** el motivo que queda en pie es
+ * **estructural**, no de números. Un provider request-scoped contagia a quien lo
+ * hospede, así que el costo de colgar este pipe de un controller nuevo era
+ * invisible y crecía solo; y la regla que la doc daba —"colgalo del controller
+ * más chico"— es una disciplina que nadie puede verificar en una revisión. Como
+ * singleton, aplicarlo donde haga falta ya no arrastra a nadie.
  *
  * Nest inscribe solo automáticamente los pipes de parámetro como injectables
  * del módulo del controller, así que ese módulo debe importar `MonedasModule`.
@@ -73,21 +65,11 @@ const PROFUNDIDAD_MAX = 20;
  * (`Object`), sin marcas que leer. Marcar campos dentro de un anidado exige
  * `@Type()` en el padre. Fijado por el test "LIMITACIÓN CONOCIDA".
  */
-@Injectable({ scope: Scope.REQUEST })
+@Injectable()
 export class EscalaMonedaPipe implements PipeTransform {
-  /**
-   * Los decimales de la moneda, resueltos como mucho una vez: un body con cien
-   * líneas de pago cuesta una sola consulta. Va con la clave del tenant a
-   * propósito. Hoy el scope request alcanzaría, pero entonces la corrección de
-   * la caché dependería enteramente de ese scope: al que le saque el
-   * `Scope.REQUEST`, los decimales del primer tenant le servirían a todos los
-   * demás en silencio. Es plata y es multi-tenant.
-   */
-  private memo?: { tenantId: string; decimales: Promise<number> };
-
   constructor(
     private readonly monedas: MonedasService,
-    @Inject(REQUEST) private readonly request: RequestConUsuario,
+    private readonly contexto: RequestContext,
   ) {}
 
   async transform(valor: unknown, meta: ArgumentMetadata): Promise<unknown> {
@@ -175,19 +157,30 @@ export class EscalaMonedaPipe implements PipeTransform {
     );
   }
 
+  /**
+   * Los decimales de la moneda del tenant, resueltos **como mucho una vez por
+   * request**: un body con cien líneas de pago cuesta una sola consulta.
+   *
+   * ⚠️ El memo vive en el **store del request**, no en la instancia, y ésa es la
+   * única razón por la que este pipe puede ser singleton. Un memo de instancia
+   * le serviría los decimales del primer tenant a todos los demás, en silencio y
+   * sobre plata. Igual va con la clave del tenant al lado: el día que el store
+   * lleve algo más que un usuario, el memo no se puede quedar sin dueño.
+   */
   private decimalesDelTenant(): Promise<number> {
+    const ctx = this.contexto.actual();
     // tenant_id SIEMPRE del token, nunca del body (invariante del proyecto).
-    const tenantId = this.request.user?.tenantId;
-    if (!tenantId) {
+    const tenantId = ctx?.user?.tenantId;
+    if (!ctx || !tenantId) {
       throw new ForbiddenException('No hay tenant activo en el token');
     }
-    if (this.memo?.tenantId !== tenantId) {
-      this.memo = {
+    if (ctx.decimales?.tenantId !== tenantId) {
+      ctx.decimales = {
         tenantId,
-        decimales: this.monedas.decimalesOficiales(tenantId),
+        valor: this.monedas.decimalesOficiales(tenantId),
       };
     }
-    return this.memo.decimales;
+    return ctx.decimales.valor;
   }
 }
 
