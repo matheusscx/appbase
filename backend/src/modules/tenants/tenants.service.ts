@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, type EntityManager } from 'typeorm';
+import Decimal from 'decimal.js';
 import { randomUUID } from 'crypto';
 import { Db } from '../../common/db/db.service';
 import { Usuario } from '../users/usuario.entity';
@@ -209,6 +210,13 @@ export class TenantsService {
         modoRedondeo: 'HALF_UP',
         nivelRedondeo: 'linea',
         montoTolerancia: '0',
+        // Umbrales de descuadre APAGADOS al nacer el tenant: el número correcto
+        // sale de mirar la distribución real de sus propios cierres
+        // (`/cajas/tendencia`), no de un default que el sistema invente. Un
+        // umbral elegido a ojo falla de las dos maneras — bajo, avisa siempre;
+        // alto, no atrapa nada.
+        umbralDescuadreAviso: '0',
+        umbralDescuadreAlto: '0',
       });
       const savedTenant = await manager.save(Tenant, tenant);
 
@@ -1403,6 +1411,8 @@ export class TenantsService {
     modoRedondeo: ModoRedondeo;
     nivelRedondeo: NivelRedondeo;
     montoTolerancia: string;
+    umbralDescuadreAviso: string;
+    umbralDescuadreAlto: string;
   }> {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     if (!tenant)
@@ -1419,6 +1429,8 @@ export class TenantsService {
       modoRedondeo: tenant.modoRedondeo,
       nivelRedondeo: tenant.nivelRedondeo,
       montoTolerancia: tenant.montoTolerancia,
+      umbralDescuadreAviso: tenant.umbralDescuadreAviso,
+      umbralDescuadreAlto: tenant.umbralDescuadreAlto,
     };
   }
 
@@ -1433,6 +1445,8 @@ export class TenantsService {
     modoRedondeo: ModoRedondeo;
     nivelRedondeo: NivelRedondeo;
     montoTolerancia: string;
+    umbralDescuadreAviso: string;
+    umbralDescuadreAlto: string;
   }> {
     // Validate no duplicates (DTO only validates each element is valid, not uniqueness)
     const unique = new Set(dto.formula);
@@ -1485,13 +1499,29 @@ export class TenantsService {
       );
     }
 
+    // Los dos umbrales de descuadre se validan ENTRE SÍ, que es lo único que un
+    // decorador de campo no puede hacer (el signo y la escala ya los cubren
+    // `@IsDecimalNoNegativo` + `@EsMontoCobrado`). Con el alto por debajo del
+    // aviso, el nivel "aviso" sería inalcanzable: toda diferencia que pasa el
+    // aviso pasaría también el alto y saldría clasificada como alta. El `0`
+    // desactiva su nivel, así que la comparación solo aplica con los dos activos.
+    const aviso = new Decimal(dto.umbralDescuadreAviso);
+    const alto = new Decimal(dto.umbralDescuadreAlto);
+    if (aviso.gt(0) && alto.gt(0) && alto.lt(aviso)) {
+      throw new BadRequestException(
+        'El umbral alto de descuadre no puede ser menor que el de aviso: ' +
+          'con el alto por debajo, ninguna diferencia quedaría en nivel de aviso.',
+      );
+    }
+
     await this.db.transaccion(async (manager) => {
       await manager.query(
         `UPDATE tenants
          SET calculo_descuentos = $1, calculo_recargos = $2,
              escala_calculo = $3, modo_redondeo = $4, monto_tolerancia = $5,
-             nivel_redondeo = $6
-         WHERE tenant_id = $7`,
+             nivel_redondeo = $6, umbral_descuadre_aviso = $7,
+             umbral_descuadre_alto = $8
+         WHERE tenant_id = $9`,
         [
           dto.calculoDescuentos,
           dto.calculoRecargos,
@@ -1499,6 +1529,8 @@ export class TenantsService {
           dto.modoRedondeo,
           dto.montoTolerancia,
           dto.nivelRedondeo,
+          dto.umbralDescuadreAviso,
+          dto.umbralDescuadreAlto,
           tenantId,
         ],
       );
@@ -1527,6 +1559,8 @@ export class TenantsService {
       modoRedondeo: dto.modoRedondeo,
       nivelRedondeo: dto.nivelRedondeo,
       montoTolerancia: dto.montoTolerancia,
+      umbralDescuadreAviso: dto.umbralDescuadreAviso,
+      umbralDescuadreAlto: dto.umbralDescuadreAlto,
     };
   }
 }

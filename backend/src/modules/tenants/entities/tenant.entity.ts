@@ -79,6 +79,43 @@ export class Tenant {
   @Column({ name: 'arqueo_ciego', type: 'boolean', default: false })
   arqueoCiego: boolean;
 
+  /**
+   * Umbral de AVISO del descuadre al cierre, en plata de la moneda oficial. Si
+   * el |diferencia| de alguna línea del arqueo lo **supera**, el cajero ve la
+   * advertencia, confirma y cierra. Nunca bloquea (owner, 2026-08-23).
+   *
+   * `'0'` = **desactivado**, no "cero tolerancia". Es lo contrario de
+   * `montoTolerancia` de arriba, y es deliberado: con `0` activo cualquier peso
+   * de diferencia dispararía el aviso, y un control que avisa siempre deja de
+   * avisar. Escala 4 (la de las columnas de plata), no la 6 de `montoTolerancia`:
+   * esto se compara contra `caja_arqueo_medio.diferencia`, que es NUMERIC(18,4).
+   */
+  @Column({
+    name: 'umbral_descuadre_aviso',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    default: 0,
+  })
+  umbralDescuadreAviso: string;
+
+  /**
+   * Umbral ALTO. Si el |diferencia| de alguna línea lo supera, el cierre queda
+   * marcado `nivel_descuadre = 'alto'` y aparece en la bandeja de pendientes de
+   * revisar del encargado. Tampoco bloquea: el cajero cierra y se va.
+   *
+   * `'0'` = desactivado, igual que el de aviso. Si los dos están activos,
+   * `TenantsService.updatePreferenciasFinancieras` exige alto >= aviso.
+   */
+  @Column({
+    name: 'umbral_descuadre_alto',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    default: 0,
+  })
+  umbralDescuadreAlto: string;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

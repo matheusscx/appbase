@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { ArqueoLinea } from '~/stores/caja'
+import type { ArqueoLinea, NivelDescuadre } from '~/stores/caja'
 
 const props = defineProps<{
   cajaId: string
@@ -28,6 +28,14 @@ const comentario = ref('')
 const motivoPorClave = ref<Record<string, string>>({})
 const comentarioJustificacionPorClave = ref<Record<string, string>>({})
 
+// Nivel del descuadre que informó la fase 1. `null` mientras no se envió el
+// conteo. NO se recalcula en el cliente: el umbral es config del tenant y el
+// nivel lo congela el backend con el arqueo — recomputarlo acá sería una
+// segunda fuente de verdad que se puede desincronizar de la que se persistió.
+const nivelDescuadre = ref<NivelDescuadre | null>(null)
+// Texto libre del cajero. Siempre opcional: ningún nivel bloquea el cierre.
+const explicacionDescuadre = ref('')
+
 const claveDe = (l: ArqueoLinea) => l.metodoPagoId ?? 'EFECTIVO'
 
 const ciego = computed(() => cajaStore.arqueoCiego)
@@ -41,6 +49,8 @@ function resetEstadoLocal() {
   comentario.value = ''
   motivoPorClave.value = {}
   comentarioJustificacionPorClave.value = {}
+  nivelDescuadre.value = null
+  explicacionDescuadre.value = ''
   fase.value = 'conteo'
 }
 
@@ -72,6 +82,11 @@ watch(open, async (isOpen) => {
       const cargas = [
         cajaStore.cargarArqueo(props.cajaId),
         cajaStore.cargarMotivos(true),
+        // El detalle trae `nivelDescuadre`, congelado por la fase 1. Sin esto,
+        // cerrar el drawer y retomar la conciliación más tarde perdía el aviso
+        // del umbral: el ref local se resetea, y el nivel no se puede
+        // recalcular en el cliente (el umbral es config del tenant).
+        cajaStore.cargarDetalle(props.cajaId),
       ]
       // Solo el cierre forzado exige firma o comentario (fase 2, más abajo):
       // sin esto la primera apertura directa en conciliación vería `testigos`
@@ -85,6 +100,10 @@ watch(open, async (isOpen) => {
         cargas.push(cajaStore.cargarTestigos(props.cajaId).catch(() => {}))
       }
       await Promise.all(cargas)
+      if (cajaStore.detalle?.id === props.cajaId) {
+        nivelDescuadre.value = cajaStore.detalle.nivelDescuadre ?? null
+        explicacionDescuadre.value = cajaStore.detalle.explicacionDescuadre ?? ''
+      }
     }
     else {
       fase.value = 'conteo'
@@ -154,6 +173,7 @@ async function enviarConteo() {
         montoContado,
       }))
     const res = await cajaStore.enviarConteo(props.cajaId, { lineas, comentario: comentario.value || undefined })
+    nivelDescuadre.value = res.nivelDescuadre
 
     if (res.estado === 'en_conciliacion') {
       const cargas = [cajaStore.cargarMotivos(true)]
@@ -243,7 +263,11 @@ async function confirmarCierre() {
       motivoDiferenciaId: motivoPorClave.value[claveDe(l)] || undefined,
       comentarioDiferencia: comentarioJustificacionPorClave.value[claveDe(l)]?.trim() || undefined,
     }))
-    const res = await cajaStore.cerrar(props.cajaId, { lineas, comentario: comentario.value.trim() || undefined })
+    const res = await cajaStore.cerrar(props.cajaId, {
+      lineas,
+      comentario: comentario.value.trim() || undefined,
+      explicacionDescuadre: explicacionDescuadre.value.trim() || undefined,
+    })
     await finalizarExito(res.arqueo)
   }
   catch (e: unknown) {
@@ -353,6 +377,33 @@ async function confirmarCierre() {
         <p v-else-if="props.forzado" class="text-sm text-muted">
           El conteo cuadró. Es un cierre forzado: pedile firma a un garzón en turno o explicá qué pasó.
         </p>
+
+        <!-- Aviso del umbral. No hay botón que frene: el cajero confirma y
+             cierra igual (owner, 2026-08-23). El texto dice qué va a pasar
+             después, que es lo único que cambia entre los dos niveles. -->
+        <template v-if="nivelDescuadre === 'aviso' || nivelDescuadre === 'alto'">
+          <UAlert
+            :color="nivelDescuadre === 'alto' ? 'error' : 'warning'"
+            variant="soft"
+            :icon="nivelDescuadre === 'alto' ? 'i-lucide-siren' : 'i-lucide-triangle-alert'"
+            :title="nivelDescuadre === 'alto'
+              ? 'La diferencia superó el límite del local'
+              : 'La diferencia es más grande de lo habitual'"
+            :description="nivelDescuadre === 'alto'
+              ? 'Podés cerrar igual. Tu cierre le va a quedar al encargado para revisar; contá acá qué pasó y lo revisa con tu explicación al lado.'
+              : 'Podés cerrar igual. Si querés, dejá una nota de qué pasó.'"
+            :data-qa="`cierre-umbral-${nivelDescuadre}`"
+          />
+          <UFormField label="¿Qué pasó?" data-qa="cierre-explicacion-descuadre">
+            <UTextarea
+              v-model="explicacionDescuadre"
+              :rows="2"
+              :maxlength="1000"
+              placeholder="Ej: le di vuelto de más a un cliente, faltó registrar una compra de insumos…"
+              class="w-full"
+            />
+          </UFormField>
+        </template>
 
         <template v-if="requiereComentarioSinTestigo">
           <UAlert

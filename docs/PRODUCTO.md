@@ -647,6 +647,25 @@ muestra un **modal informativo** con ambas fechas.
   - `diferencia = monto_fisico_contado − saldo_esperado`
   - Se persisten ambos valores para auditoría
 
+**Umbral de descuadre al cierre (decisión del owner, 2026-08-23):** el tenant configura
+**dos umbrales** de diferencia, y **ninguno de los dos frena el cierre**. Si la diferencia
+de alguna línea del arqueo supera el de **aviso**, el cajero ve una advertencia, confirma y
+cierra; si supera el **alto**, además el cierre le queda al encargado en una **bandeja de
+pendientes de revisar** hasta que alguien lo marque visto. El cajero puede dejar una
+**explicación de texto libre** de qué pasó, que la bandeja muestra al lado del monto.
+
+⚠️ Esto **revierte** la decisión del 2026-08-11, que hacía el umbral bloqueante con
+aprobación del encargado. La razón del cambio: frenar un cierre a las 2 de la mañana
+porque no hay un encargado disponible detiene la operación. El costo asumido, dicho
+explícito: el umbral **deja de ser un control preventivo y pasa a ser enteramente rastro**
+— si el evento no queda o nadie lo mira, no queda nada.
+
+El **cierre forzado** (el encargado cierra la caja de otro) pasa por el mismo umbral y
+entra en la bandeja igual. Quien lo forzó puede marcarlo visto, y queda registrado que fue
+él: ahí el control es el registro, no impedir.
+
+Detalle: [`features/gestion-cajas.md`](features/gestion-cajas.md#umbral-de-descuadre-al-cierre--dos-niveles-ninguno-bloquea).
+
 ---
 
 ### 13. Registro de pagos

@@ -1134,6 +1134,14 @@ export class SeederService implements OnApplicationBootstrap {
             modoRedondeo: 'HALF_UP',
             nivelRedondeo: 'linea',
             montoTolerancia: '0',
+            // Umbrales de descuadre al cierre, en CLP (moneda oficial de los
+            // dos tenants del seed, 0 decimales). Se siembran ACTIVOS y no en
+            // `'0'` —el default de un tenant real, que nace apagado— para que
+            // la bandeja de pendientes de revisar tenga de dónde poblarse en el
+            // demo: con los dos en cero la feature entera es invisible.
+            // $2.000 avisa, $10.000 va a la bandeja.
+            umbralDescuadreAviso: '2000',
+            umbralDescuadreAlto: '10000',
           }),
         );
       }

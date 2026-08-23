@@ -18,6 +18,10 @@ const escalaCalculo = ref<number>(6)
 const modoRedondeo = ref<string>('HALF_UP')
 const nivelRedondeo = ref<string>('linea')
 const montoTolerancia = ref<string>('0')
+// Umbrales de descuadre al cierre de caja. `'0'` DESACTIVA el nivel — es lo
+// contrario de la tolerancia de arriba, donde `0` significa "cero tolerancia".
+const umbralDescuadreAviso = ref<string>('0')
+const umbralDescuadreAlto = ref<string>('0')
 
 const calculoOptions = [
   { value: 'base', label: 'Sobre monto base', description: 'Todos se calculan sobre el precio neto' },
@@ -53,6 +57,8 @@ async function cargar() {
       modoRedondeo: string
       nivelRedondeo: string
       montoTolerancia: string
+      umbralDescuadreAviso: string
+      umbralDescuadreAlto: string
     }>(`${apiUrl}/tenants/preferencias-financieras`)
     calculoDescuentos.value = data.calculoDescuentos as 'base' | 'compuesto'
     calculoRecargos.value = data.calculoRecargos as 'base' | 'compuesto'
@@ -61,6 +67,8 @@ async function cargar() {
     modoRedondeo.value = data.modoRedondeo
     nivelRedondeo.value = data.nivelRedondeo
     montoTolerancia.value = data.montoTolerancia
+    umbralDescuadreAviso.value = data.umbralDescuadreAviso
+    umbralDescuadreAlto.value = data.umbralDescuadreAlto
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar preferencias'), color: 'error' })
@@ -79,6 +87,8 @@ const formState = computed(() => ({
   modoRedondeo: modoRedondeo.value,
   nivelRedondeo: nivelRedondeo.value,
   montoTolerancia: montoTolerancia.value,
+  umbralDescuadreAviso: umbralDescuadreAviso.value,
+  umbralDescuadreAlto: umbralDescuadreAlto.value,
 }))
 
 async function guardar() {
@@ -94,6 +104,8 @@ async function guardar() {
         modoRedondeo: modoRedondeo.value,
         nivelRedondeo: nivelRedondeo.value,
         montoTolerancia: montoTolerancia.value,
+        umbralDescuadreAviso: umbralDescuadreAviso.value,
+        umbralDescuadreAlto: umbralDescuadreAlto.value,
       },
     })
     // El admin puede acabar de cambiar `modoRedondeo`: sin esto, `useMonedaConversion`
@@ -233,6 +245,55 @@ function moverAbajo(index: number) {
                 v-model="montoTolerancia"
                 oficial
                 class="w-40"
+              />
+            </UFormField>
+          </div>
+
+          <USeparator />
+
+          <!-- Umbrales de descuadre al cierre de caja -->
+          <div class="space-y-4">
+            <div class="space-y-1">
+              <p class="font-medium text-default">
+                Diferencias al cerrar caja
+              </p>
+              <p class="text-sm text-muted">
+                Cuánto puede descuadrar un turno antes de que el sistema diga algo.
+                <strong>Ninguno de los dos frena el cierre</strong>: el cajero cierra y se
+                va igual. El número se mide sobre la diferencia de cada medio de pago por
+                separado, no sobre el total — así un faltante de efectivo tapado por un
+                sobrante de tarjeta no pasa desapercibido.
+              </p>
+              <p class="text-sm text-muted">
+                Dejá un umbral en <strong>0</strong> para apagarlo. Para elegir los
+                números, mirá primero la
+                <ULink to="/cajas/tendencia" class="text-highlighted">
+                  tendencia de descuadres
+                </ULink>: sirve saber cuánto descuadra tu local de verdad.
+              </p>
+            </div>
+
+            <UFormField
+              label="Avisar al cajero desde"
+              hint="Ve una advertencia al cerrar y puede dejar una nota. Nadie más se entera."
+            >
+              <MoneyInput
+                v-model="umbralDescuadreAviso"
+                oficial
+                class="w-40"
+                data-qa="umbral-descuadre-aviso"
+              />
+            </UFormField>
+
+            <UFormField
+              label="Avisar al encargado desde"
+              hint="Además del aviso al cajero, el cierre le queda al encargado en «Pendientes de revisar» hasta que alguien lo marque visto. No puede ser menor que el de arriba."
+            >
+              <MoneyInput
+                v-model="umbralDescuadreAlto"
+                oficial
+                class="w-40"
+                data-qa="umbral-descuadre-alto"
               />
             </UFormField>
           </div>

@@ -200,6 +200,36 @@ export class CajaController {
     return this.cajaService.listarIntentosRechazados(u.tenantId!, query);
   }
 
+  /**
+   * Bandeja de pendientes de revisar. `Cajas:Leer` a secas, igual que
+   * `tendencia` y por el mismo motivo: es supervisión, no tiene versión "la
+   * mía" que un cajero pueda pedir. Un cajero con `MiCaja:Leer` recibe 403.
+   *
+   * ⚠️ Antes de `@Get(':id')`, o el parámetro se come la ruta literal.
+   */
+  @Get('pendientes-revision')
+  @RequiresPermiso('Cajas', 'Leer')
+  pendientesRevision(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    return this.cajaService.pendientesRevision(u.tenantId!);
+  }
+
+  /**
+   * Resumen de descuadres de la jornada, para encabezar la bandeja. Mismo
+   * permiso y mismo motivo que la bandeja. Sustituye por ahora al envío
+   * programado: falta el job que lo mande —`MailService` y el `CronRunner`
+   * ya existen— y la política de a quién y a qué hora (ver
+   * `docs/features/gestion-cajas.md`).
+   *
+   * ⚠️ Antes de `@Get(':id')`.
+   */
+  @Get('resumen-descuadres-dia')
+  @RequiresPermiso('Cajas', 'Leer')
+  resumenDescuadresDia(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    return this.cajaService.resumenDescuadresDia(u.tenantId!);
+  }
+
   @Get(':id/arqueo')
   async arqueo(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
@@ -303,6 +333,21 @@ export class CajaController {
     const u = req.user as JwtUser;
     const puedeForzar = await this.resolverEscrituraCompartida(u);
     return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, puedeForzar, dto);
+  }
+
+  /**
+   * "Marcar visto" de la bandeja. `Cajas:Actualizar` —el eje de supervisión—,
+   * NO `resolverEscrituraCompartida`: revisar el cierre de alguien no es una
+   * escritura que el dueño de la caja comparta. Un cajero con `MiCaja:*` no
+   * puede darse por revisado a sí mismo; el encargado que forzó el cierre sí
+   * puede, y queda registrado que fue él (decisión del owner: el registro es el
+   * control, no impedir).
+   */
+  @Post(':id/revisar')
+  @RequiresPermiso('Cajas', 'Actualizar')
+  marcarRevisado(@Req() req: Request, @Param('id') cajaId: string) {
+    const u = req.user as JwtUser;
+    return this.cajaService.marcarRevisado(u.tenantId!, u.id, cajaId);
   }
 
   /** El encargado pide la firma. Requiere `Cajas:Actualizar` — primera ruta que lo usa. */

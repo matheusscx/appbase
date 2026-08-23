@@ -17,6 +17,157 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El umbral de descuadre al cierre: dos niveles, ninguno bloquea, y una bandeja que llama a revisar (2026-08-23)
+
+**Venían de la sección 3** («ya decidido, falta construir»): dos entradas que se construyeron
+juntas porque eran las dos mitades del mismo control. Mudadas verbatim con su cierre; el
+residuo (el envío diario) quedó como entrada corta en `pendientes.md` §3.
+
+### La entrada del umbral
+
+**Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
+si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
+aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
+fiel al mercado; mayor alcance. Ya no depende de resolver el modelo del esperado (§3,
+**resuelto** por el sub-proyecto A) — el umbral se evaluaría sobre la
+diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
+inflaba cualquier diferencia.
+✅ **Decidido por el owner (2026-08-11): sí, con umbral configurable por tenant, y el
+cierre queda esperando aprobación.** Bloqueante, no aviso.
+⚠️ **Cruce sin resolver con el cierre forzado**, que ya se entregó (2026-08-13, ver
+[`resueltos.md`](resueltos.md)) — así que este cruce dejó de ser hipotético: si el encargado
+cierra la caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
+mismo anula el control; que lo apruebe un tercero puede no haber a esa hora. Hay que
+contestarlo antes de escribir el flujo, no durante.
+🔶 **Pieza que aportó la investigación (§10.6) y todavía no está decidida:** el precedente
+bancario no es binario — bajo el umbral se ajusta sin avisar; **sobre** el umbral, dos
+personas reverifican **y se le avisa al dueño de la plata**. Ese aviso al cajero no estaba
+en la decisión del umbral y encaja con que la diferencia sea un incidente, no su faltante.
+✅ **DECIDIDO (owner, 2026-08-15) el cruce que faltaba: quien cerró PUEDE aprobar su propio
+cierre, y queda registrado quién aprobó qué.** El razonamiento del owner: el control existe
+para auditoría, no para impedir — frenar un cierre a las 2 de la mañana porque no hay un
+tercero disponible detiene la operación.
+⚠️ **Cómo convive con la decisión del 2026-08-11, que sigue vigente:** el cierre por umbral
+**sigue siendo bloqueante** en el caso normal (el cajero cierra su caja y espera al encargado).
+Lo que esta decisión resuelve es solo el cruce con el **cierre forzado**: cuando el encargado
+ya cerró la caja de otro, es él quien aprueba, y el registro es el control. **No son
+contradictorias, pero quien lo construya tiene que ver las dos** o va a implementar un bloqueo
+que en ese camino nunca se puede levantar.
+⚠️ **Costo asumido, dicho explícito:** en el camino del cierre forzado el umbral deja de ser un
+control preventivo y pasa a ser un rastro. Que el registro exista y sea legible **es** el
+control ahí; si el evento no queda o nadie lo mira, no queda nada.
+➕ **Lo que aportó la 5ª pasada de la investigación (2026-08-22), y precisa el patrón:**
+Toast no tiene un umbral sino **dos niveles** — `Closeout Over/Short Max` bloquea y exige
+*managerial override*, y `Closeout Over/Short Warning` solo pide confirmación del empleado
+**sin** bloquear. El chileno **mySYSTEM** también tiene tope configurable que impide cerrar.
+Los nombres van acá para no volver a relevarlos.
+🔄 **REVISADO POR EL OWNER (2026-08-23) — esto reemplaza el "bloqueante" del 2026-08-11.**
+Son **dos niveles y NINGUNO frena el cierre**:
+- **Nivel de aviso:** el cajero ve la advertencia, confirma y cierra.
+- **Nivel alto:** avisa más fuerte y le llega al encargado, pero el cajero igual cierra y se
+  va. No se detiene la operación en ningún caso.
+⚠️ **Es una reversión, no un matiz:** la decisión del 2026-08-11 decía "bloqueante, no aviso"
+y la del 2026-08-15 resolvía solo el cruce con el cierre forzado. Quien construya esto se
+guía por **esta** entrada; las dos anteriores quedan como historia del porqué.
+⛔ **Consecuencia asumida, que antes valía solo para el cierre forzado y ahora vale para
+todos:** el umbral deja de ser un control preventivo y es **enteramente rastro**. Si el
+evento no queda o nadie lo mira, no queda nada. Por eso lo que sigue no es adorno:
+✅ **Cómo se entera el encargado (owner, 2026-08-23):** el cierre le queda en una **bandeja
+de "pendientes de revisar"** hasta que alguien lo abre y lo marca visto, **más un resumen
+diario** con los descuadres de la jornada. Nada de notificación en el momento: a las 2 de la
+mañana se vuelve ruido y un control que se vuelve ruido se muere.
+✅ **El cajero SÍ se entera, y puede dejar su explicación (owner, 2026-08-23):** al cerrar ve
+que la diferencia pasó el límite y que su cierre va a revisarse, y puede escribir qué pasó
+("le di vuelto de más", "faltó registrar una compra de insumos"). El encargado revisa con esa
+explicación al lado en vez de con un número pelado. Cierra el 🔶 del precedente bancario
+—avisarle al dueño de la plata— que estaba sin decidir.
+🔗 **Y esta entrada resultó ser la forma concreta de tapar el agujero que dejó el cierre
+ciego**: el descuadre lo justifica hoy la misma persona que lo produjo y no lo revisa nadie
+(ver la entrada de abajo). El umbral es el control **agudo** de ese agujero.
+⚠️ **Secuencia, no orden de gusto: la tendencia por cajero va ANTES que esta entrada.** El
+umbral necesita un número, y hoy nadie sabe si un descuadre típico de esta operación es de
+\$200 o de \$8.000. Elegirlo a ojo falla de las dos maneras: bajo, y cada turno espera a un
+encargado que no está; alto, y no atrapa nada. La distribución real la da la entrada de
+abajo, que además **no toca el flujo de cierre** — a diferencia de esta.
+✅ **Esa tendencia ya existe (2026-08-22): `/cajas/tendencia`.** O sea que **el bloqueo de
+secuencia se levantó** — el número del umbral ya se puede elegir mirando la distribución
+real en vez de a ojo. Lo que sigue faltando para tomar esta entrada es lo de siempre: el
+cruce con el cierre forzado ya está decidido, y falta el aviso al cajero (🔶 arriba).
+✅ **CONSTRUIDO 2026-08-23.** **Qué quedó:** dos umbrales por tenant
+(`tenants.umbral_descuadre_aviso` / `umbral_descuadre_alto`, en Preferencias financieras,
+Decimal.js y cuantizados a la moneda oficial, `'0'` = **apagado** — al revés que
+`montoTolerancia`, y con validación de que el alto no baje del aviso). El nivel se mide
+sobre la **|diferencia| de cada línea** del arqueo (nunca sobre el total, que deja que
+−5.000 en efectivo y +5.000 en tarjeta se cancelen), "supera" es **estrictamente mayor**,
+y se **congela** en la fase 1 del cierre (`cajas.nivel_descuadre`) sin recomputarse al
+leer. **Ningún nivel bloquea**, ni siquiera el alto. El cajero deja su explicación libre
+(`cajas.explicacion_descuadre`, distinta del motivo categorizado por línea) en la fase 2.
+Bandeja `GET /caja/pendientes-revision` + `POST /caja/:id/revisar` (registra quién y
+cuándo, rechaza el re-marcado con 400) + resumen `GET /caja/resumen-descuadres-dia`, todo
+bajo `Cajas` y no `MiCaja`; pantalla `/cajas/pendientes-revision`. El cierre forzado pasa
+por el mismo umbral, entra en la bandeja marcado como tal, y quien lo forzó puede marcarlo
+visto quedando registrado. Doc:
+[`features/gestion-cajas.md`](../features/gestion-cajas.md#umbral-de-descuadre-al-cierre--dos-niveles-ninguno-bloquea).
+🔲 **Qué NO quedó:** el **envío diario** del resumen. No se construyó el envío —mailer y cron runner ya existen en el repo; el
+dato se expone y la bandeja lo muestra al abrirla—; el envío programado es frente propio
+(a quién, con qué frecuencia, qué pasa si falla). Tampoco quedó ninguna notificación en el
+momento, que es lo que el owner explícitamente descartó. Y los umbrales de un tenant nuevo
+nacen en `'0'` (apagados): **elegir el número sigue siendo del owner**, mirando
+`/cajas/tendencia`; el seed los deja activos solo para que el demo muestre la feature.
+
+### La entrada de "nadie lo revisa"
+
+**El descuadre lo justifica quien lo produjo, y no lo revisa nadie** (producto +
+backend) — **abierta el 2026-08-22**, al cerrar por descarte *"Ocultar el resultado
+post-cierre al cajero"* (ver [`resueltos.md`](resueltos.md)). Es lo que sobrevivió de esa
+preocupación una vez descartado el ocultamiento, y **es el agujero de verdad**: hoy el
+cajero cuenta, se entera de su diferencia, elige él mismo el motivo, escribe él mismo la
+explicación y cierra él mismo su caja. Queda registrado — pero **registrado no es
+revisado**: alguien tiene que ir a buscarlo al historial, y nada le avisa que vaya. Un
+cajero que descuadra \$3.000 por turno, siempre para el mismo lado y siempre con el mismo
+motivo, atraviesa el flujo entero sin encender nada.
+📌 **Precedente medido:** es exactamente lo que cubre la **"Conciliación de Caja"** de Fudo
+—*esquema de doble control entre operador y supervisor*— y lo que cubre el umbral de Toast.
+Ninguno de los dos exige que el cajero esté a ciegas
+([§11.2](investigaciones/2026-07-23-gestion-caja.md#112-fudo-es-el-único-precedente-de-la-opción-solo-el-supervisor)).
+✅ **La tendencia por cajero SE CONSTRUYÓ el 2026-08-22** — `GET /caja/tendencia` +
+`/cajas/tendencia`, solo supervisión. Con eso el supervisor ya puede **ver** el sesgo:
+suma con signo del efectivo, otros medios aparte, y conteos de faltante/sobrante/cuadrado,
+ordenado por el faltante más grande arriba. Detalle en
+[`features/gestion-cajas.md`](../features/gestion-cajas.md#tendencia-de-descuadres-por-cajero).
+✅ **La otra mitad —que alguien REVISE— quedó decidida el 2026-08-23**, y con eso esta
+entrada ya no tiene pregunta propia: se construye junto con el umbral, que es la entrada de
+arriba. Lo que la cierra es que el cierre descuadrado **le queda al encargado en una bandeja
+de pendientes de revisar, más un resumen diario** — o sea, algo que lo llama, en vez de
+depender de que abra la pantalla de tendencia y sospeche primero. Y el cajero deja **su
+explicación al cerrar**, así que la revisión llega con el contexto y no con un número pelado.
+📌 Lo que sobrevive de esta entrada es el **porqué**, no trabajo aparte: sirve para no
+construir el umbral como un número suelto. Ver el sesgo (la tendencia, ya construida) y que
+algo llame a mirarlo (la bandeja) son las dos mitades del mismo control.
+✅ **Las tres preguntas que quedaron anotadas al construir la tendencia, contestadas
+(owner, 2026-08-23) — y las tres confirman lo que ya existe, así que no hay trabajo:**
+la **ventana de 30 días** queda (un mes de turnos: alcanza para que un sesgo chico se note y
+es corto para no arrastrar gente que ya no está); **una fila por cajero**, sin abrir por
+cajón (la pregunta que importa es quién descuadra, y la lista se mantiene corta); y el
+**promedio con signo sigue afuera**, que no era pregunta de producto sino consecuencia de que
+un promedio de dinero es una división de dinero y arrastra la cuantización por moneda.
+⚠️ El costo de "una fila por cajero", asumido: si un cajón tiene un problema propio —un
+vuelto mal configurado, dos personas compartiéndolo— queda diluido entre los turnos buenos de
+esa persona en otros cajones. Si algún día aparece esa sospecha, la salida es abrir por cajón,
+no cambiar el default.
+✅ **CONSTRUIDO 2026-08-23, junto con el umbral de arriba** (era su otra mitad, no trabajo
+aparte). **Qué quedó:** el cierre descuadrado grande ya no depende de que alguien sospeche
+y abra la pantalla de tendencia — le queda al encargado en la bandeja de pendientes de
+revisar hasta que la marque visto, con la **explicación del cajero al lado** en vez de un
+número pelado, y con el resumen del día arriba. Las dos mitades del control quedaron
+cerradas: ver el sesgo (`/cajas/tendencia`, crónico) y que algo llame a mirarlo
+(`/cajas/pendientes-revision`, agudo).
+🔲 **Qué NO quedó:** nada llama al encargado **fuera de la app** — el envío diario sigue
+siendo trabajo futuro (ver arriba). Mientras tanto, el control depende de que alguien abra
+la bandeja: es rastro, no alarma, y eso fue asumido explícitamente.
+
+---
+
 ## El modo ciego deja de prometer lo que no sostiene, y los oráculos dejan rastro (2026-08-23)
 
 **Venía de la sección 3** («ya decidido, falta construir»). Mudada verbatim con su cierre;

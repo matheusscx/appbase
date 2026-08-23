@@ -16,7 +16,7 @@ import {
 } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
-import { Caja } from './entities/caja.entity';
+import { Caja, type NivelDescuadre } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import { CajaIntentoRechazado } from './entities/caja-intento-rechazado.entity';
@@ -184,6 +184,83 @@ interface TendenciaDescuadresRow {
   con_faltante: number;
   con_sobrante: number;
   cuadrados: number;
+}
+
+/**
+ * Nivel del descuadre de un cierre contra los dos umbrales del tenant.
+ *
+ * Tres decisiones que hay que ver juntas, porque separadas parecen arbitrarias:
+ *
+ * 1. **Se mide POR LÍNEA, no sobre el total.** Es la máxima diferencia absoluta
+ *    entre las líneas del arqueo multi-medio. Sumar primero deja que −5.000 en
+ *    efectivo y +5.000 en tarjeta se cancelen y el cierre pase como cuadrado,
+ *    que es exactamente el caso que más interesa mirar.
+ * 2. **`0` desactiva el nivel.** No es "cero tolerancia": con `0` activo,
+ *    cualquier peso de diferencia dispararía, y un control que avisa siempre
+ *    deja de avisar. El default de un tenant nuevo es `0`/`0` — apagado hasta
+ *    que el encargado elija el número mirando `/cajas/tendencia`.
+ * 3. **"Supera" es estrictamente mayor.** Una diferencia EXACTAMENTE igual al
+ *    umbral no lo supera: el umbral es el techo de lo tolerado, no el piso de
+ *    lo que se avisa. Con `>=` un umbral de 0 activo marcaría hasta los cierres
+ *    cuadrados.
+ *
+ * El nivel alto gana sobre el de aviso cuando los dos aplican.
+ */
+export function calcularNivelDescuadre(
+  diferencias: (string | null)[],
+  umbralAviso: string,
+  umbralAlto: string,
+): NivelDescuadre {
+  const peor = diferencias.reduce<Decimal>(
+    (max, d) => (d === null ? max : Decimal.max(max, new Decimal(d).abs())),
+    new Decimal(0),
+  );
+  const alto = new Decimal(umbralAlto);
+  if (alto.gt(0) && peor.gt(alto)) return 'alto';
+  const aviso = new Decimal(umbralAviso);
+  if (aviso.gt(0) && peor.gt(aviso)) return 'aviso';
+  return 'ninguno';
+}
+
+/**
+ * Una fila de la bandeja de pendientes de revisar: un cierre de nivel alto que
+ * todavía nadie miró. `explicacionDescuadre` viaja al lado del número a
+ * propósito — la revisión llega con el contexto que dejó el cajero, no con un
+ * monto pelado (owner, 2026-08-23).
+ */
+export interface CierrePendienteRevision {
+  cajaId: string;
+  usuarioId: string | null;
+  usuarioNombre: string;
+  cajonNombre: string | null;
+  estado: string;
+  fechaApertura: Date;
+  fechaCierre: Date | null;
+  /** Diferencia de la línea de EFECTIVO. */
+  diferencia: string | null;
+  /** La |diferencia| más grande del arqueo: el número que disparó el nivel. */
+  peorDiferencia: string;
+  explicacionDescuadre: string | null;
+  comentarioCierre: string | null;
+  /** `true` si quien contó no es el dueño del turno (cierre forzado). */
+  forzado: boolean;
+}
+
+/**
+ * Resumen del día para encabezar la bandeja. Reemplaza —por ahora— al envío
+ * programado: se muestra al abrir la pantalla en vez de llegar por correo. El
+ * envío diario es trabajo futuro (ver `docs/features/gestion-cajas.md`).
+ */
+export interface ResumenDescuadresDia {
+  /** `YYYY-MM-DD` local del tenant sobre el que se calculó. */
+  fecha: string;
+  cierres: number;
+  conDescuadre: number;
+  nivelAviso: number;
+  nivelAlto: number;
+  altoSinRevisar: number;
+  /** Suma CON SIGNO de la línea de efectivo de la jornada. */
+  efectivoSuma: string;
 }
 
 export interface CajaHistorialItem {
@@ -781,7 +858,11 @@ export class CajaService {
     dto: CerrarCajaDto,
     puedeForzar = false,
     esAdmin = false,
-  ): Promise<{ estado: 'cerrada' | 'en_conciliacion'; arqueo: LineaArqueo[] }> {
+  ): Promise<{
+    estado: 'cerrada' | 'en_conciliacion';
+    arqueo: LineaArqueo[];
+    nivelDescuadre: NivelDescuadre;
+  }> {
     return this.db.transaccion(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
 
@@ -903,6 +984,22 @@ export class CajaService {
       caja.testigosDisponibles =
         await this.sesionesGarzonService.contarAbiertas(manager, tenantId);
 
+      // Nivel del descuadre contra los umbrales del tenant, CONGELADO acá junto
+      // con el arqueo y nunca recomputado al leer: si mañana suben el umbral,
+      // este cierre no deja de haber sido alto. Una sola query por cierre, con
+      // el manager de la transacción en curso.
+      const umbrales: { aviso: string; alto: string }[] = await manager.query(
+        `SELECT umbral_descuadre_aviso AS aviso, umbral_descuadre_alto AS alto
+           FROM tenants
+          WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+        [tenantId],
+      );
+      caja.nivelDescuadre = calcularNivelDescuadre(
+        lineasResueltas.map((l) => l.diferencia),
+        umbrales[0]?.aviso ?? '0',
+        umbrales[0]?.alto ?? '0',
+      );
+
       // Bifurcación fase 1: cualquier línea descuadrada, o un cierre forzado
       // (aunque cuadre) → conciliación pendiente (fase 2 la resuelve); todo
       // cuadrado en un cierre normal → auto-cierre.
@@ -924,6 +1021,7 @@ export class CajaService {
       return {
         estado: caja.estado as 'cerrada' | 'en_conciliacion',
         arqueo: lineasResueltas,
+        nivelDescuadre: caja.nivelDescuadre,
       };
     });
   }
@@ -1012,6 +1110,15 @@ export class CajaService {
       // (`docs/agent/resueltos.md`).
       if (dto.comentario?.trim()) {
         caja.comentarioCierre = dto.comentario.trim();
+      }
+
+      // La explicación del descuadre se persiste tal cual venga, sin exigirla:
+      // ningún nivel de umbral bloquea el cierre. Se guarda incluso con
+      // `nivelDescuadre = 'ninguno'` —un cajero puede querer explicar una
+      // diferencia chica— y solo se pisa si viene texto, para que retomar la
+      // fase 2 más tarde sin escribir nada no borre lo ya explicado.
+      if (dto.explicacionDescuadre?.trim()) {
+        caja.explicacionDescuadre = dto.explicacionDescuadre.trim();
       }
 
       // Las solicitudes que quedaron con el conteo congelado se resuelven
@@ -1599,6 +1706,224 @@ export class CajaService {
       conSobrante: r.con_sobrante,
       cuadrados: r.cuadrados,
     }));
+  }
+
+  /**
+   * Bandeja de pendientes de revisar: los cierres de nivel ALTO que todavía
+   * nadie marcó visto. Lectura de SUPERVISIÓN (`Cajas:Leer` en el controller),
+   * nunca del cajero — es el par de ojos que la entrada de backlog pedía, y no
+   * tiene versión "la mía".
+   *
+   * **Entran las `en_conciliacion` además de las `cerrada`.** El nivel se
+   * congela en la fase 1, así que una caja parada a mitad del cierre con un
+   * descuadre grande YA es un pendiente: filtrar por `estado = 'cerrada'` la
+   * escondería justo cuando más conviene mirarla. Ninguna caja abierta puede
+   * colarse: sin conteo congelado, `nivel_descuadre` sigue en `'ninguno'`.
+   *
+   * Sin paginación, igual que la tendencia: la bandeja se vacía marcando visto,
+   * así que su tamaño natural es chico. Si un tenant la deja crecer sin
+   * revisar, eso es la señal, no un problema de la query.
+   */
+  async pendientesRevision(
+    tenantId: string,
+  ): Promise<CierrePendienteRevision[]> {
+    const rows: {
+      caja_id: string;
+      usuario_id: string | null;
+      usuario_nombre: string | null;
+      usuario_apellido: string | null;
+      cajon_nombre: string | null;
+      estado: string;
+      fecha_apertura: Date;
+      fecha_cierre: Date | null;
+      diferencia: string | null;
+      peor_diferencia: string | null;
+      explicacion_descuadre: string | null;
+      comentario_cierre: string | null;
+      cerrada_por: string | null;
+    }[] = await this.db.query(
+      `SELECT c.caja_id,
+              c.usuario_id,
+              u.nombre   AS usuario_nombre,
+              u.apellido AS usuario_apellido,
+              cj.nombre  AS cajon_nombre,
+              c.estado,
+              c.fecha_apertura,
+              c.fecha_cierre,
+              c.diferencia,
+              arq.peor_diferencia,
+              c.explicacion_descuadre,
+              c.comentario_cierre,
+              c.cerrada_por
+         FROM cajas c
+         -- LEFT JOIN, no INNER: un cajero dado de baja pierde el nombre pero su
+         -- cierre pendiente no se puede caer de la bandeja (mismo criterio que
+         -- la tendencia).
+         LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id
+                AND u.eliminado_el IS NULL
+         LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id
+                AND cj.eliminado_el IS NULL
+         -- Lateral, no JOIN + GROUP BY: una query para todas las filas (sin
+         -- N+1) y sin agrupar por las doce columnas de arriba.
+         LEFT JOIN LATERAL (
+           SELECT MAX(ABS(am.diferencia)) AS peor_diferencia
+             FROM caja_arqueo_medio am
+            WHERE am.caja_id = c.caja_id AND am.eliminado_el IS NULL
+         ) arq ON TRUE
+        WHERE c.tenant_id = $1
+          AND c.tipo = 'fisica'
+          AND c.eliminado_el IS NULL
+          AND c.nivel_descuadre = 'alto'
+          AND c.revisado_el IS NULL
+        -- Lo más viejo sin revisar primero: es lo que más tiempo lleva esperando.
+        ORDER BY COALESCE(c.fecha_cierre, c.fecha_apertura) ASC, c.caja_id ASC`,
+      [tenantId],
+    );
+
+    return rows.map((r) => ({
+      cajaId: r.caja_id,
+      usuarioId: r.usuario_id,
+      usuarioNombre:
+        [r.usuario_nombre, r.usuario_apellido]
+          .filter((p): p is string => Boolean(p))
+          .join(' ')
+          .trim() || 'Sin usuario',
+      cajonNombre: r.cajon_nombre,
+      estado: r.estado,
+      fechaApertura: r.fecha_apertura,
+      fechaCierre: r.fecha_cierre,
+      diferencia:
+        r.diferencia == null ? null : new Decimal(r.diferencia).toFixed(4),
+      peorDiferencia: new Decimal(r.peor_diferencia ?? 0).toFixed(4),
+      explicacionDescuadre: r.explicacion_descuadre,
+      comentarioCierre: r.comentario_cierre,
+      // Mismo criterio que `cerrar`: "forzado" se DERIVA de los datos
+      // (`cerrada_por <> usuario_id`), nunca de un flag que podría
+      // contradecirlos.
+      forzado: r.cerrada_por != null && r.cerrada_por !== r.usuario_id,
+    }));
+  }
+
+  /**
+   * Marca visto un cierre de la bandeja: registra QUIÉN y CUÁNDO. Requiere
+   * `Cajas:Actualizar` (guard en el controller).
+   *
+   * Queda registrado aunque sea la misma persona que cerró —el caso del cierre
+   * forzado, donde el encargado contó y después revisa lo suyo—: ahí el umbral
+   * dejó de ser un control preventivo y es enteramente rastro, y el rastro
+   * legible **es** el control (owner, 2026-08-15 / 2026-08-23).
+   *
+   * Un cierre ya revisado se rechaza con 400 en vez de re-marcarse: pisar
+   * `revisado_por` borraría al primero que miró, que es justo el dato que la
+   * bandeja existe para dejar.
+   */
+  async marcarRevisado(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+  ): Promise<{ cajaId: string; revisadoPor: string; revisadoEl: Date }> {
+    return this.db.transaccion(async (manager) => {
+      // FOR UPDATE: dos encargados marcando a la vez leerían `revisado_el`
+      // nulo los dos en READ COMMITTED y el segundo pisaría al primero.
+      const caja = await manager.findOne(Caja, {
+        where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!caja) throw new NotFoundException('Caja no encontrada');
+      if (caja.nivelDescuadre !== 'alto') {
+        throw new BadRequestException(
+          'Este cierre no está en la bandeja de pendientes de revisar',
+        );
+      }
+      if (caja.revisadoEl != null) {
+        throw new BadRequestException('Este cierre ya fue revisado');
+      }
+      caja.revisadoPor = usuarioId;
+      caja.revisadoEl = new Date();
+      await manager.save(Caja, caja);
+      return {
+        cajaId: caja.id,
+        revisadoPor: usuarioId,
+        revisadoEl: caja.revisadoEl,
+      };
+    });
+  }
+
+  /**
+   * Resumen de descuadres de LA JORNADA para encabezar la bandeja.
+   *
+   * Es lo que reemplaza —por ahora— al resumen diario por correo que pidió el
+   * owner: el dato se expone y la pantalla lo muestra al abrirla. El envío
+   * programado es trabajo futuro: la infraestructura ya existe (`MailService`,
+   * `CronRunnerService` + `@Cron` en `cron/jobs`), lo que falta es el job y la
+   * política de destinatario y hora, anotado en `docs/features/gestion-cajas.md`.
+   *
+   * "El día" es el día LOCAL del tenant (zona horaria del país, misma fuente
+   * que el resto de los reportes), no el UTC: en Chile un cierre de las 22:00
+   * cae en el día siguiente en UTC y saldría del resumen de su propia jornada.
+   */
+  async resumenDescuadresDia(tenantId: string): Promise<ResumenDescuadresDia> {
+    const zona = await zonaHorariaTenant(this.db, tenantId);
+    const rows: {
+      fecha: string;
+      cierres: number;
+      con_descuadre: number;
+      nivel_aviso: number;
+      nivel_alto: number;
+      alto_sin_revisar: number;
+      efectivo_suma: string;
+    }[] = await this.db.query(
+      // La ventana se arma con el mismo molde DST-correcto de
+      // `rango-fecha.util.ts`: la medianoche local de HOY y la de mañana, con
+      // la aritmética del lado de Postgres. `< mañana` y no `<= 23:59:59`, que
+      // se come el último segundo.
+      `WITH hoy AS (SELECT (NOW() AT TIME ZONE $2)::date AS d)
+       SELECT to_char((SELECT d FROM hoy), 'YYYY-MM-DD') AS fecha,
+              COUNT(*)::int AS cierres,
+              -- Cualquier línea del arqueo, no solo el efectivo: el nivel se
+              -- congeló mirando todas, y esta tarjeta tiene que contar igual
+              -- o un descuadre de tarjeta sale como "alto" y "sin diferencia".
+              COUNT(*) FILTER (
+                WHERE EXISTS (
+                  SELECT 1 FROM caja_arqueo_medio am
+                   WHERE am.caja_id = c.caja_id
+                     AND am.eliminado_el IS NULL
+                     AND am.diferencia <> 0
+                )
+              )::int AS con_descuadre,
+              COUNT(*) FILTER (WHERE c.nivel_descuadre = 'aviso')::int AS nivel_aviso,
+              COUNT(*) FILTER (WHERE c.nivel_descuadre = 'alto')::int AS nivel_alto,
+              COUNT(*) FILTER (
+                WHERE c.nivel_descuadre = 'alto' AND c.revisado_el IS NULL
+              )::int AS alto_sin_revisar,
+              COALESCE(SUM(c.diferencia), 0)::text AS efectivo_suma
+         FROM cajas c
+        WHERE c.tenant_id = $1
+          AND c.tipo = 'fisica'
+          AND c.eliminado_el IS NULL
+          -- "El conteo se congeló", igual que la tendencia: incluye las cerradas
+          -- y las en conciliación, deja afuera la caja todavía abierta.
+          AND c.diferencia IS NOT NULL
+          AND COALESCE(c.fecha_cierre, c.fecha_apertura)
+              >= ((SELECT d FROM hoy)::timestamp AT TIME ZONE $2)
+          AND COALESCE(c.fecha_cierre, c.fecha_apertura)
+              < (((SELECT d FROM hoy) + 1)::timestamp AT TIME ZONE $2)`,
+      [tenantId, zona],
+    );
+
+    const r = rows[0];
+    return {
+      // El `COUNT(*)` sin `GROUP BY` siempre devuelve una fila, incluso sin
+      // cierres en el día — pero la fecha sale igual del CTE, así que el
+      // fallback no depende de recomputar el día en JS.
+      fecha: r?.fecha ?? '',
+      cierres: r?.cierres ?? 0,
+      conDescuadre: r?.con_descuadre ?? 0,
+      nivelAviso: r?.nivel_aviso ?? 0,
+      nivelAlto: r?.nivel_alto ?? 0,
+      altoSinRevisar: r?.alto_sin_revisar ?? 0,
+      efectivoSuma: new Decimal(r?.efectivo_suma ?? 0).toFixed(4),
+    };
   }
 
   /**

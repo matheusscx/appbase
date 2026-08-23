@@ -19,8 +19,9 @@ Preferencias Financieras es una pantalla de configuración que permite al admini
 5. **Modo de redondeo** (`modoRedondeo`, default `HALF_UP`): con qué criterio se redondea (`HALF_UP` | `HALF_EVEN` | `FLOOR` | `CEIL`). Es el modo que usa la cuantización final, así que hoy los cuatro producen totales distintos sobre el mismo carrito.
 6. **Nivel de redondeo** (`nivelRedondeo`, default `linea`): `linea` (cada línea de la venta se cuantiza a la escala de la moneda y el total es la suma) o `documento` (las líneas quedan a `escalaCalculo` y solo el total final se cuantiza — la regla mexicana). El motor de cálculo de precios la consume vía `ConfigCalculo`.
 7. **Tolerancia de conciliación** (`montoTolerancia`, default `'0'`): diferencia máxima permitida antes de rechazar una conciliación.
+8. **Avisar al cajero desde** (`umbralDescuadreAviso`, default `'0'`) y 9. **Avisar al encargado desde** (`umbralDescuadreAlto`, default `'0'`): los dos umbrales de descuadre al **cerrar caja**. Ninguno bloquea el cierre; el alto además deja el cierre en la bandeja de pendientes de revisar. ⚠️ **Acá `'0'` DESACTIVA el umbral**, al revés que `montoTolerancia` de arriba, donde `0` es "cero tolerancia" — con `0` activo cualquier peso dispararía, y un control que avisa siempre deja de avisar. Regla completa: [`gestion-cajas.md`](./gestion-cajas.md#umbral-de-descuadre-al-cierre--dos-niveles-ninguno-bloquea).
 
-⚠️ **Esta lista enumeraba 3 campos cuando la pantalla mostraba 6.** Se corrigió el 2026-08-21, contando los controles del `.vue` en vez de asumirlos: hoy son **7**, y `nivelRedondeo` es el que agregó el frente de redondeo de plata.
+⚠️ **Esta lista enumeraba 3 campos cuando la pantalla mostraba 6.** Se corrigió el 2026-08-21, contando los controles del `.vue` en vez de asumirlos: hoy son **9** (eran 7 hasta que el umbral de descuadre agregó dos el 2026-08-23), y `nivelRedondeo` es el que agregó el frente de redondeo de plata.
 
 La configuración se persiste en la base de datos y **el motor de cálculo de precios la consume en cada venta** desde junio de 2026 (ver [motor-calculo-precios.md](./motor-calculo-precios.md)). Este documento decía *"pendiente"* hasta el 2026-08-21.
 
@@ -159,6 +160,8 @@ Se integra en el módulo de tenants existente (no es un módulo nuevo).
 | `modo_redondeo` | TEXT | NOT NULL, default 'HALF_UP' | Valores: 'HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL' |
 | `nivel_redondeo` | TEXT | NOT NULL, default 'linea', CHECK IN ('linea','documento') | 'linea' cuantiza cada línea; 'documento' solo el total (regla mexicana) |
 | `monto_tolerancia` | NUMERIC(18,6) | NOT NULL, default 0 | Tolerancia máxima en conciliaciones |
+| `umbral_descuadre_aviso` | NUMERIC(18,4) | NOT NULL, default 0 | Umbral de AVISO del descuadre al cierre de caja. `0` = desactivado |
+| `umbral_descuadre_alto` | NUMERIC(18,4) | NOT NULL, default 0 | Umbral ALTO: manda el cierre a la bandeja de revisión. `0` = desactivado. Escala 4 (no 6) porque se compara contra `caja_arqueo_medio.diferencia`, que es NUMERIC(18,4) |
 
 2. **`tenant_formula_precio`** (tabla nueva)
 
@@ -186,6 +189,8 @@ export class PreferenciasFinancierasDto {
   modoRedondeo: string;         // 'HALF_UP' | 'HALF_EVEN' | 'FLOOR' | 'CEIL'
   nivelRedondeo: string;        // 'linea' | 'documento'
   montoTolerancia: string;      // numeric como string (Decimal.js)
+  umbralDescuadreAviso: string; // idem — '0' desactiva
+  umbralDescuadreAlto: string;  // idem — '0' desactiva
 }
 
 // PUT request
@@ -197,6 +202,8 @@ export class UpdatePreferenciasFinancierasDto {
   modoRedondeo: string;         // @IsIn(['HALF_UP','HALF_EVEN','FLOOR','CEIL'])
   nivelRedondeo: string;        // @IsIn(['linea','documento'])
   montoTolerancia: string;      // @IsNumberString @IsDecimalNoNegativo @EsMontoCobrado
+  umbralDescuadreAviso: string; // idem
+  umbralDescuadreAlto: string;  // idem — el service exige además alto >= aviso
 }
 ```
 
@@ -210,6 +217,10 @@ Validación con `class-validator`:
 - `montoTolerancia`: number string, nunca negativo, y con **como mucho los decimales que
   admite la moneda oficial del tenant** (`@EsMontoCobrado()` + `EscalaMonedaPipe`, colgado
   del `@Body` de esta ruta). En CLP eso es cero: `"1.5"` es un 400.
+- `umbralDescuadreAviso` / `umbralDescuadreAlto`: misma regla de signo y escala. La
+  relación **entre** los dos (con ambos activos, `alto >= aviso`) no la puede expresar un
+  decorador de campo y la valida el service: con el alto por debajo, el nivel de aviso
+  sería inalcanzable.
 
 Validación adicional en el service (no expresable con `class-validator`, depende de la
 moneda oficial del tenant — `MonedasService.decimalesOficiales`). Son **tres** reglas, y
@@ -262,6 +273,10 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
     en la moneda oficial y el backend lo rechaza con 400 si trae más decimales de los que
     ésta admite, así que el input no lo deja tipear. Era un `UInput inputmode="decimal"`
     hasta el 2026-08-21 — mismo caso que el monto manual de propinas
+- Sección "Diferencias al cerrar caja": dos `MoneyInput oficial`
+  (`umbralDescuadreAviso` / `umbralDescuadreAlto`) con el texto que explica que ninguno
+  frena el cierre y que `0` apaga el umbral, más un enlace a `/cajas/tendencia` — el
+  número se elige mirando la distribución real, no a ojo
 - Botón guardar
 
 ### State
@@ -275,6 +290,8 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
   modoRedondeo: string                     — ref (default 'HALF_UP')
   nivelRedondeo: string                    — ref (default 'linea')
   montoTolerancia: string                  — ref (default '0', string end-to-end)
+  umbralDescuadreAviso: string             — ref (default '0' = desactivado)
+  umbralDescuadreAlto: string              — ref (default '0' = desactivado)
 }
 ```
 

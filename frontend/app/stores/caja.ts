@@ -32,7 +32,17 @@ export interface Caja {
   cajonNombre: string | null
   /** Nombre del cajero dueño — solo lo resuelve `findOne` (detalle), no el resto de los endpoints. */
   usuarioNombre?: string | null
+  /** Nivel del descuadre contra los umbrales del tenant, congelado en la fase 1. Ninguno bloquea el cierre. */
+  nivelDescuadre?: NivelDescuadre
+  /** Texto libre que dejó el cajero al cerrar. Distinto del motivo categorizado por línea. */
+  explicacionDescuadre?: string | null
+  /** Quién marcó visto el cierre en la bandeja, y cuándo. `null` = sin revisar. */
+  revisadoPor?: string | null
+  revisadoEl?: string | null
 }
+
+/** 'aviso' se le advierte al cajero; 'alto' además va a la bandeja del encargado. */
+export type NivelDescuadre = 'ninguno' | 'aviso' | 'alto'
 
 export interface TestigoEstado {
   id: string
@@ -133,6 +143,37 @@ export interface IntentoRechazado {
   montoSolicitado: string
   ventaId: string | null
   fecha: string
+}
+
+/** Una fila de la bandeja de pendientes de revisar (solo supervisión). */
+export interface CierrePendienteRevision {
+  cajaId: string
+  usuarioId: string | null
+  usuarioNombre: string
+  cajonNombre: string | null
+  estado: string
+  fechaApertura: string
+  fechaCierre: string | null
+  /** Diferencia de la línea de EFECTIVO. */
+  diferencia: string | null
+  /** La |diferencia| más grande del arqueo: el número que disparó el nivel. */
+  peorDiferencia: string
+  explicacionDescuadre: string | null
+  comentarioCierre: string | null
+  /** El encargado cerró la caja de otro. */
+  forzado: boolean
+}
+
+/** Encabezado de la bandeja. El envío diario por correo es trabajo futuro. */
+export interface ResumenDescuadresDia {
+  /** `YYYY-MM-DD` local del tenant. */
+  fecha: string
+  cierres: number
+  conDescuadre: number
+  nivelAviso: number
+  nivelAlto: number
+  altoSinRevisar: number
+  efectivoSuma: string
 }
 
 export interface MotivoDiferencia {
@@ -285,8 +326,8 @@ export const useCajaStore = defineStore('caja', () => {
   async function enviarConteo(
     cajaId: string,
     payload: { lineas: { metodoPagoId: string | null, montoContado: string }[], comentario?: string },
-  ): Promise<{ estado: string, arqueo: ArqueoLinea[] }> {
-    const res = await useApiFetch<{ estado: string, arqueo: ArqueoLinea[] }>(
+  ): Promise<{ estado: string, arqueo: ArqueoLinea[], nivelDescuadre: NivelDescuadre }> {
+    const res = await useApiFetch<{ estado: string, arqueo: ArqueoLinea[], nivelDescuadre: NivelDescuadre }>(
       `${config.public.apiUrl}/caja/${cajaId}/conteo`,
       { method: 'POST', body: payload },
     )
@@ -310,7 +351,7 @@ export const useCajaStore = defineStore('caja', () => {
 
   async function cerrar(
     cajaId: string,
-    payload: { lineas: { metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }[], comentario?: string },
+    payload: { lineas: { metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }[], comentario?: string, explicacionDescuadre?: string },
   ): Promise<{ caja: Caja, arqueo: ArqueoLinea[] }> {
     const res = await useApiFetch<{ caja: Caja, arqueo: ArqueoLinea[] }>(
       `${config.public.apiUrl}/caja/${cajaId}/cerrar`,
@@ -410,6 +451,38 @@ export const useCajaStore = defineStore('caja', () => {
     )
   }
 
+  /**
+   * Bandeja de pendientes de revisar. Lectura de supervisión (`Cajas:Leer`),
+   * como la tendencia: el cajero no tiene versión "la mía" de esto — es el
+   * sujeto del control, no quien lo ejerce.
+   */
+  async function cargarPendientesRevision(): Promise<CierrePendienteRevision[]> {
+    return useApiFetch<CierrePendienteRevision[]>(
+      `${config.public.apiUrl}/caja/pendientes-revision`,
+    )
+  }
+
+  /** Resumen de la jornada que encabeza la bandeja. */
+  async function cargarResumenDescuadresDia(): Promise<ResumenDescuadresDia> {
+    return useApiFetch<ResumenDescuadresDia>(
+      `${config.public.apiUrl}/caja/resumen-descuadres-dia`,
+    )
+  }
+
+  /**
+   * Marcar visto: registra quién y cuándo. Requiere `Cajas:Actualizar`.
+   *
+   * NO parchea `detalle` localmente: quién revisó lo decide el backend y el
+   * store no tiene el `usuarioId` a mano, así que un parche solo podría poner
+   * la fecha — un detalle con `revisadoEl` puesto y `revisadoPor` en `null`
+   * miente peor que uno sin actualizar. Quien llama recarga lo que muestra.
+   */
+  async function marcarRevisado(cajaId: string): Promise<void> {
+    await useApiFetch(`${config.public.apiUrl}/caja/${cajaId}/revisar`, {
+      method: 'POST',
+    })
+  }
+
   return {
     activa,
     resumenTurno,
@@ -436,6 +509,9 @@ export const useCajaStore = defineStore('caja', () => {
     cargarCajonesEstado,
     cargarDetalle,
     cargarTendencia,
+    cargarPendientesRevision,
+    cargarResumenDescuadresDia,
+    marcarRevisado,
     cargarCajonesDisponibles,
     cargarArqueo,
     cargarArqueoCiego,

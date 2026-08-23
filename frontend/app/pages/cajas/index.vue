@@ -20,6 +20,13 @@ definePageMeta({
           </p>
           <div class="flex items-center gap-2">
             <UButton
+              to="/cajas/pendientes-revision"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-inbox"
+              label="Pendientes de revisar"
+            />
+            <UButton
               to="/cajas/tendencia"
               variant="outline"
               color="neutral"

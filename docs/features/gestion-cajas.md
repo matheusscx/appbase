@@ -711,8 +711,168 @@ leía `usuarioId` de la query.
 - **No avisa nada.** Ni badge, ni notificación, ni bloqueo. Es lectura pura, y por eso **no
   toca el flujo de cierre** — una propiedad buscada, después de que el intento del
   2026-08-16 dejara al cajero sin poder cerrar su caja.
-- **No es el umbral de aprobación**, que sigue pendiente. Al contrario: **existe para poder
-  elegir ese número con fundamento**, mirando la distribución real en vez de a ojo.
+- **No es el umbral de descuadre** (construido después, el 2026-08-23, ver
+  [Umbral de descuadre al cierre](#umbral-de-descuadre-al-cierre--dos-niveles-ninguno-bloquea)).
+  Al contrario: **existió para poder elegir ese número con fundamento**, mirando la
+  distribución real en vez de a ojo.
+
+---
+
+## Umbral de descuadre al cierre — dos niveles, ninguno bloquea
+
+Construido el **2026-08-23**. Es el control **agudo** del descuadre: la
+[tendencia](#tendencia-de-descuadres-por-cajero) muestra el sesgo repetido, pero nada
+llama a mirarla. Esto cierra el agujero que quedó nombrado en el backlog como *"el
+descuadre lo justifica quien lo produjo, y no lo revisa nadie"*: hoy el cajero cuenta, se
+entera de su diferencia, elige él mismo el motivo, escribe él mismo la explicación y cierra
+él mismo su caja. Queda registrado — pero **registrado no es revisado**.
+
+### La decisión que hay que leer primero: no bloquea
+
+⚠️ **Esto revierte la decisión del 2026-08-11**, que decía *"bloqueante, no aviso"*. El
+owner la revisó el **2026-08-23**: son dos niveles y **ninguno frena el cierre**.
+
+| Nivel | Qué pasa | Quién se entera |
+|---|---|---|
+| `ninguno` | Nada | Nadie |
+| `aviso` | El cajero ve la advertencia, confirma y cierra | Solo el cajero |
+| `alto` | El cajero ve una advertencia más fuerte, **cierra igual y se va** | El cajero + el encargado, vía la bandeja |
+
+⛔ **Consecuencia asumida, dicha explícita:** el umbral **no es un control preventivo, es
+enteramente rastro**. Si el evento no queda o nadie lo mira, no queda nada. Por eso la
+bandeja y el resumen del día no son adorno: son la mitad que hace que esto sirva.
+
+Por qué no bloquea: frenar un cierre a las 2 de la mañana porque no hay un encargado
+disponible detiene la operación, y una operación detenida encuentra la forma de saltarse el
+control.
+
+### La config: dos umbrales por tenant, y `0` los apaga
+
+Viven en las **Preferencias financieras** del tenant (`tenants.umbral_descuadre_aviso` y
+`umbral_descuadre_alto`, `NUMERIC(18,4)`, default `0`), con el mismo tratamiento que el
+resto de la plata: `Decimal.js`, `@EsMontoCobrado()` y `EscalaMonedaPipe` los cuantizan a
+la escala de la **moneda oficial** — en un tenant chileno, `1000.50` se rechaza con 400.
+
+⚠️ **`'0'` DESACTIVA el nivel.** Es lo contrario de `montoTolerancia`, su vecino en la
+misma pantalla, donde `0` significa *"cero tolerancia"*. Va así porque con `0` activo
+cualquier peso de diferencia dispararía el aviso, **y un control que avisa siempre deja de
+avisar**. Un tenant nuevo nace con los dos en `0`: el número correcto sale de mirar la
+distribución real de sus propios cierres en `/cajas/tendencia`, no de un default inventado.
+
+El service valida lo único que un decorador de campo no puede: **con los dos activos, el
+alto no puede ser menor que el de aviso**. Con el alto por debajo, el nivel de aviso sería
+inalcanzable (toda diferencia que pasa el aviso pasaría también el alto) y la pantalla
+mentiría sobre lo que va a pasar.
+
+### Cómo se decide el nivel
+
+`calcularNivelDescuadre` (exportada de `caja.service.ts`, y por eso testeable sin montar
+nada) toma la lista de diferencias del arqueo y los dos umbrales. Tres reglas:
+
+1. **Se mide por LÍNEA, no sobre el total.** Es la máxima diferencia **absoluta** entre las
+   líneas del arqueo multi-medio. Sumar primero deja que −5.000 en efectivo y +5.000 en
+   tarjeta se cancelen y el cierre pase como cuadrado — justo el caso que más conviene
+   mirar. Es el mismo criterio que la tendencia adoptó al separar efectivo de otros medios.
+2. **"Supera" es estrictamente mayor.** Una diferencia *exactamente* igual al umbral no lo
+   supera: el umbral es el techo de lo tolerado, no el piso de lo que se avisa.
+3. **El alto gana** cuando los dos aplican.
+
+El signo no importa: un sobrante de \$15.000 pesa igual que un faltante de \$15.000.
+
+### Dónde se congela
+
+En la **fase 1 del cierre** (`POST /caja/:id/conteo`), junto con el arqueo, en
+`cajas.nivel_descuadre`. **No se recomputa al leer.** Si el encargado sube el umbral el mes
+que viene, un cierre que ya fue alto no deja de haberlo sido: el nivel es un hecho de ese
+cierre, no una vista de la config de hoy. Mismo criterio que `caja_arqueo_medio`, que
+congela y nunca recalcula.
+
+La fase 1 devuelve `nivelDescuadre` en su respuesta, que es como el **cajero** se entera en
+el momento — sin una segunda fuente de verdad en el cliente: el umbral es config del
+tenant, así que el front no lo recalcula, lo muestra.
+
+### La explicación del cajero
+
+`cajas.explicacion_descuadre` (texto libre, hasta 1000 caracteres), que el cajero escribe
+en la **fase 2** (`POST /caja/:id/cerrar` → `explicacionDescuadre`). Es **otra cosa** que:
+
+- el **motivo categorizado por línea** (`caja_arqueo_medio.motivo_diferencia_id`), que
+  clasifica cada diferencia contra el catálogo del tenant;
+- el **comentario de cierre** (`cajas.comentario_cierre`), que es la observación del cierre.
+
+Esto cuenta *qué pasó en el turno*: *"le di vuelto de más"*, *"faltó registrar una compra de
+insumos"*. El encargado revisa con esa explicación al lado en vez de con un número pelado —
+que es exactamente lo que el owner pidió el 2026-08-23, y de paso cierra el 🔶 del
+precedente bancario (avisarle al dueño de la plata).
+
+⚠️ **Es siempre opcional, incluso en nivel alto.** Exigirla reintroduciría por la puerta de
+atrás el bloqueo que la decisión del owner sacó.
+
+### La bandeja de pendientes de revisar
+
+`GET /caja/pendientes-revision` (`Cajas:Leer`) + pantalla `/cajas/pendientes-revision`,
+enlazada desde `/cajas`. Lista los cierres con `nivel_descuadre = 'alto'` y
+`revisado_el IS NULL`.
+
+- **Entran también las `en_conciliacion`**, no solo las `cerrada`. El nivel se congela en la
+  fase 1, así que una caja parada a mitad del cierre con un descuadre grande **ya** es un
+  pendiente; filtrar por `estado = 'cerrada'` la escondería justo cuando más conviene
+  mirarla. Ninguna caja abierta puede colarse: sin conteo congelado, el nivel sigue en
+  `'ninguno'`.
+- **Lo más viejo sin revisar, arriba**: es lo que lleva más tiempo esperando.
+- **Sin paginación**, igual que la tendencia: la bandeja se vacía marcando visto, así que su
+  tamaño natural es chico. Que crezca **es** la señal, no un problema de la query.
+- La fila se atribuye al **dueño del turno**, no a quien contó — mismo criterio que la
+  tendencia — y marca `forzado` cuando difieren.
+- Trae `peorDiferencia` (la |diferencia| más grande, o sea el número que disparó el nivel)
+  al lado de `diferencia` (la línea de efectivo): la segunda sola escondería un descuadre de
+  tarjeta.
+
+`POST /caja/:id/revisar` (`Cajas:Actualizar`) marca visto: registra `revisado_por` y
+`revisado_el`, y saca el cierre de la bandeja. Un cierre **ya revisado se rechaza con 400**
+en vez de re-marcarse: pisar `revisado_por` borraría al primero que miró, que es justo el
+dato que la bandeja existe para dejar.
+
+⚠️ **`Cajas`, no `MiCaja`.** El cajero es el sujeto del control, no quien lo ejerce: no lee
+la bandeja ni marca visto, ni siquiera su propio cierre. Sin ese eje, la bandeja sería un
+espejo donde el cajero se autorevisa.
+
+### El resumen del día
+
+`GET /caja/resumen-descuadres-dia` (`Cajas:Leer`): cierres de la jornada, cuántos
+descuadraron, cuántos por nivel, cuántos altos sin revisar y la suma con signo del efectivo.
+La bandeja lo muestra arriba.
+
+"El día" es el día **local del tenant** (zona horaria del país, misma fuente que el resto de
+los reportes), no el UTC: en Chile un cierre de las 22:00 cae en el día siguiente en UTC y
+saldría del resumen de su propia jornada.
+
+🔲 **El envío programado es trabajo futuro.** El owner pidió *"un resumen diario"*; lo que
+existe hoy es el **dato expuesto y mostrado al abrir la pantalla**. No se construyó mailer
+ni cron: eso es un frente propio (a quién se le manda, con qué frecuencia, qué pasa si
+falla) y colgarlo de esta tarea habría sido infraestructura especulativa.
+
+### El cruce con el cierre forzado
+
+Cuando el encargado cierra la caja de otro, ese cierre **pasa por el umbral igual** y entra
+en la bandeja igual, marcado como `forzado`. Quien lo forzó **puede marcarlo visto**, y
+queda registrado que fue él.
+
+Que se apruebe a sí mismo no anula el control porque **acá no hay aprobación que anular**:
+el control es el rastro. Es la decisión del owner del 2026-08-15 —*"quien cerró PUEDE
+aprobar su propio cierre, y queda registrado quién aprobó qué"*— sobreviviendo intacta a la
+reversión del bloqueo, porque su razón era la misma: frenar la operación cuesta más de lo
+que compra.
+
+### Lo que esta feature NO hace
+
+- **No bloquea nada.** Ningún nivel, en ningún camino.
+- **No manda nada.** Sin correo, sin push, sin badge en el menú. A las 2 de la mañana una
+  notificación se vuelve ruido, y un control que se vuelve ruido se muere (owner,
+  2026-08-23).
+- **No recalcula el nivel de cierres viejos** al cambiar el umbral: son hechos congelados.
+- **No decide el número por vos.** Los umbrales nacen en `0` (apagados). Elegirlos es mirar
+  `/cajas/tendencia`.
 
 ---
 
@@ -939,8 +1099,17 @@ Igual que en el sub-proyecto B, quedan fuera de alcance y registrados en
   ya congeló, y
   pedirle fe del conteo a un garzón en turno, que firma o rechaza desde `/salones`. Ver
   [Modelo de acceso](#modelo-de-acceso-por-permiso).
-- **Aprobación de cierre por umbral de diferencia** (patrón Toast).
+- ~~**Aprobación de cierre por umbral de diferencia**~~ — implementado el 2026-08-23,
+  pero **NO como aprobación**: el owner revirtió el bloqueo y quedaron dos niveles que
+  avisan sin frenar. Ver
+  [Umbral de descuadre al cierre](#umbral-de-descuadre-al-cierre--dos-niveles-ninguno-bloquea).
 - **Reporte de over/short** agregado (histórico de diferencias por cajero/motivo/período).
+- **Envío diario del resumen de descuadres** (correo o notificación programada). Hoy el
+  resumen del día existe como endpoint y lo muestra la bandeja al abrirla. La infraestructura
+  **ya existe** (`MailService` sobre SMTP con fallback a log; `CronRunnerService` con registro
+  en `cron_ejecuciones`, ver `cron/jobs/expirar-ordenes.job.ts` como molde): lo que falta es
+  el **job** y la política —a quién, a qué hora del tenant, qué pasa si falla, y si un día sin
+  descuadres manda correo—. Es trabajo propio por las preguntas, no por la plomería.
 
 ---
 
@@ -1587,6 +1756,63 @@ Body (POST/PATCH): { "nombre"?: string, "activo"?: boolean, "requiereComentario"
 Controller/service propios (`src/modules/motivos-diferencia/`), no `caja.controller.ts`.
 Detalle en [Cierre en dos fases § Motivos de diferencia](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
 
+### GET /caja/pendientes-revision — Bandeja de cierres sin revisar
+
+`Cajas:Leer` (supervisión: el cajero recibe 403). Sin query params y sin paginación.
+Devuelve los cierres con `nivel_descuadre = 'alto'` y `revisado_el IS NULL`, lo más viejo
+arriba. Incluye `en_conciliacion` además de `cerrada`.
+
+```json
+[
+  {
+    "cajaId": "…",
+    "usuarioId": "…",
+    "usuarioNombre": "Ana Pérez",
+    "cajonNombre": "Cajón 1",
+    "estado": "cerrada",
+    "fechaApertura": "2026-08-23T13:00:00.000Z",
+    "fechaCierre": "2026-08-24T01:00:00.000Z",
+    "diferencia": "-8000.0000",
+    "peorDiferencia": "8000.0000",
+    "explicacionDescuadre": "Le di vuelto de más a un cliente",
+    "comentarioCierre": null,
+    "forzado": false
+  }
+]
+```
+
+### GET /caja/resumen-descuadres-dia — La jornada de un vistazo
+
+`Cajas:Leer`. Encabeza la bandeja. El día es el **local del tenant**, no el UTC.
+`conDescuadre` cuenta cierres con **alguna línea** del arqueo distinta de cero (igual que
+el nivel, que se congeló mirando todas); `efectivoSuma` es **solo efectivo**, con signo.
+
+```json
+{
+  "fecha": "2026-08-23",
+  "cierres": 4,
+  "conDescuadre": 3,
+  "nivelAviso": 2,
+  "nivelAlto": 1,
+  "altoSinRevisar": 1,
+  "efectivoSuma": "-9500.0000"
+}
+```
+
+### POST /caja/:id/revisar — Marcar visto
+
+`Cajas:Actualizar` (`MiCaja` no alcanza: el cajero no revisa su propio cierre). Registra
+`revisado_por`/`revisado_el` y saca el cierre de la bandeja.
+
+Response (**201**, que es el default de Nest para un `@Post` sin `@HttpCode`):
+`{ "cajaId": "…", "revisadoPor": "…", "revisadoEl": "…" }`
+
+Errores:
+
+- **400** — el cierre no es de nivel alto (no está en la bandeja).
+- **400** — ya fue revisado. No se re-marca: pisar `revisado_por` borraría al primero que
+  miró, que es el dato que la bandeja existe para dejar.
+
 ### GET /caja — Historial de cajas (paginado)
 
 ```
@@ -1671,6 +1897,10 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `comentario_cierre` | TEXT | nullable | Comentario del CIERRE: lo escribe la fase 1 (`POST /caja/:id/conteo`) y, si llega uno nuevo, lo actualiza la fase 2 (`POST /caja/:id/cerrar`). Columna separada de `comentario` a propósito — antes compartían una y la fase 1 pisaba el de apertura sin dejar rastro (`docs/agent/resueltos.md`) |
 | `cerrada_por` | UUID | FK usuarios, nullable | Quién EJECUTÓ el cierre (fase 1); `NULL` mientras la caja sigue `'abierta'`. "Forzado" = `cerrada_por <> usuario_id` |
 | `testigos_disponibles` | SMALLINT | nullable | Sesiones de garzón abiertas al congelar el conteo (fase 1) |
+| `nivel_descuadre` | TEXT | NOT NULL, default `'ninguno'` | `'ninguno'` \| `'aviso'` \| `'alto'`. CONGELADO en la fase 1 contra los umbrales del tenant; nunca se recomputa al leer. Ver [Umbral de descuadre](#umbral-de-descuadre-al-cierre--dos-niveles-ninguno-bloquea) |
+| `explicacion_descuadre` | TEXT | nullable | Texto libre del cajero al cerrar ("le di vuelto de más"). Distinto del motivo CATEGORIZADO por línea (`caja_arqueo_medio`) y del `comentario_cierre` |
+| `revisado_por` | UUID | FK usuarios, nullable | Quién marcó visto el cierre en la bandeja. Se registra siempre, incluso si es quien lo cerró (cierre forzado) |
+| `revisado_el` | TIMESTAMPTZ | nullable | Cuándo. `NULL` + `nivel_descuadre='alto'` = sigue en la bandeja (índice parcial `ix_cajas_pendientes_revision`) |
 | `abierta_el` / `fecha_apertura` | TIMESTAMPTZ | NOT NULL | `@CreateDateColumn` |
 | `fecha_cierre` | TIMESTAMPTZ | nullable | Se setea al cerrar |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
@@ -1838,6 +2068,10 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
 - `pages/cajas/index.vue` — Grid de **todos los cajones activos** del tenant y su estado
   (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). El botón
   "Ver historial" abre `/cajas/historial`. Gate: `Cajas:Leer`.
+- `pages/cajas/pendientes-revision.vue` — Bandeja de cierres de nivel alto sin revisar
+  (`CajaPendientesRevision`), con el resumen del día arriba. Gate: `Cajas:Leer`; el botón
+  "Marcar visto" además se esconde sin `Cajas:Actualizar` (esconder no es el control —lo es
+  el guard— pero ofrecer una acción que va a rebotar con 403 es peor que no ofrecerla).
 - `pages/cajas/historial.vue` — Historial de **todos los cajeros** del tenant
   (`CajaHistorial` con `todas`; alcance fijo, sin toggle). Soporta `?usuarioId=` (por
   cajero) y `?cajonId=` (por cajón). El alcance "solo propias" vive en `/mi-caja/historial`.
@@ -2143,6 +2377,8 @@ npm test -- modules/motivos-diferencia/motivos-diferencia.service.spec.ts
 cd backend
 npm run test:e2e -- caja.e2e-spec.ts
 npm run test:e2e -- motivos-diferencia.e2e-spec.ts
+npm run test:e2e -- tendencia-descuadres.e2e-spec.ts
+npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 ```
 
 ### Manual Testing (Swagger)

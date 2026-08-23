@@ -53,4 +53,24 @@ export class UpdatePreferenciasFinancierasDto {
   @IsDecimalNoNegativo()
   @EsMontoCobrado()
   montoTolerancia: string;
+
+  /**
+   * Umbral de AVISO del descuadre al cierre de caja. `'0'` desactiva el nivel
+   * —no es "cero tolerancia", al revés que `montoTolerancia`: ver el docblock
+   * de la columna en `Tenant`—. Nunca negativo.
+   */
+  @IsNumberString()
+  @IsDecimalNoNegativo()
+  @EsMontoCobrado()
+  umbralDescuadreAviso: string;
+
+  /**
+   * Umbral ALTO: el que manda el cierre a la bandeja de pendientes de revisar.
+   * `'0'` lo desactiva. Que sea >= al de aviso lo valida el service (necesita
+   * comparar los dos campos entre sí, cosa que un decorador de campo no hace).
+   */
+  @IsNumberString()
+  @IsDecimalNoNegativo()
+  @EsMontoCobrado()
+  umbralDescuadreAlto: string;
 }

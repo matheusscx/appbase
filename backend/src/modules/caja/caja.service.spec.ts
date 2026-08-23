@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { In, IsNull, QueryFailedError } from 'typeorm';
 import { Db } from '../../common/db/db.service';
-import { CajaService } from './caja.service';
+import { CajaService, calcularNivelDescuadre } from './caja.service';
 import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
@@ -1281,6 +1281,52 @@ describe('CajaService', () => {
       expect(res.caja.estado).toBe('cerrada');
     });
 
+    /**
+     * La explicación de texto libre del cajero: se persiste con el cierre y es
+     * SIEMPRE opcional. Que el cierre igual se complete sin ella no es un
+     * descuido — ningún nivel de umbral bloquea (owner, 2026-08-23), así que
+     * exigirla sería reintroducir el bloqueo por la puerta de atrás. Es un
+     * campo distinto del motivo CATEGORIZADO por línea, que va en `lineas`.
+     */
+    it('persiste la explicación libre del descuadre, sin exigirla', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+        cerradaPor: USUARIO_ID,
+        nivelDescuadre: 'alto',
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-15000.0000' },
+      ]); // filas congeladas
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      motivosService.assertMotivoValido.mockResolvedValueOnce({
+        id: 'm1',
+        nombre: 'falta de efectivo',
+        requiereComentario: false,
+      });
+      managerMock.query.mockResolvedValueOnce(undefined); // UPDATE motivos
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: USUARIO_ID,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+        lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
+        explicacionDescuadre: '  Le di vuelto de más a un cliente  ',
+      });
+
+      const savedCaja = managerMock.save.mock.calls.at(-1)[1];
+      expect(savedCaja.explicacionDescuadre).toBe(
+        'Le di vuelto de más a un cliente',
+      );
+      // Y el cierre se completó igual: el nivel alto no frena nada.
+      expect(savedCaja.estado).toBe('cerrada');
+    });
+
     it('admin (no owner) puede finalizar', async () => {
       managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
       managerMock.findOne.mockResolvedValueOnce({
@@ -1761,6 +1807,261 @@ describe('CajaService', () => {
       expect(countSql).toContain('ir.caja_id = $2');
       expect(countSql).toContain('ir.usuario_id = $3');
       expect(countParams).toEqual([TENANT_ID, CAJA_ID, USUARIO_ID]);
+    });
+  });
+
+  /**
+   * Umbral de descuadre al cierre. Lo que estos tests sostienen, y que ninguna
+   * otra prueba cubre: que el nivel se decida **por línea**, que el `0` apague
+   * el nivel en vez de encenderlo siempre, que el borde EXACTO no dispare, y
+   * que ningún nivel frene el cierre (owner, 2026-08-23).
+   */
+  describe('umbral de descuadre — enviarConteo congela el nivel', () => {
+    /** Lock (FOR UPDATE) primero, umbrales del tenant después. */
+    function mockQueries(aviso: string, alto: string) {
+      managerMock.query
+        .mockReset()
+        .mockResolvedValueOnce([{ caja_id: CAJA_ID }])
+        .mockResolvedValue([{ aviso, alto }]);
+    }
+
+    beforeEach(() => {
+      managerMock.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      managerMock.create.mockImplementation(
+        (_e: unknown, data: unknown) => data,
+      );
+      managerMock.save.mockImplementation((_e: unknown, x: unknown) => x);
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValue([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '10000.0000',
+          requiereConteo: true,
+        },
+      ]);
+    });
+
+    it('diferencia sobre el umbral de aviso → nivel aviso, y el cierre NO se frena', async () => {
+      mockQueries('2000', '10000');
+      const res = await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [{ metodoPagoId: null, montoContado: '7000' }], // −3.000
+      });
+      expect(res.nivelDescuadre).toBe('aviso');
+      // No bloquea: sigue el camino normal de un descuadre (fase 2 lo cierra).
+      expect(res.estado).toBe('en_conciliacion');
+      expect(managerMock.save.mock.calls.at(-1)[1].nivelDescuadre).toBe(
+        'aviso',
+      );
+    });
+
+    it('diferencia sobre el umbral alto → nivel alto, y el cierre NO se frena', async () => {
+      mockQueries('2000', '10000');
+      const res = await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [{ metodoPagoId: null, montoContado: '-5000' }], // −15.000
+      });
+      expect(res.nivelDescuadre).toBe('alto');
+      expect(res.estado).toBe('en_conciliacion');
+      expect(managerMock.save.mock.calls.at(-1)[1].nivelDescuadre).toBe('alto');
+    });
+
+    it('cuadrado con umbrales activos → nivel ninguno', async () => {
+      mockQueries('2000', '10000');
+      const res = await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [{ metodoPagoId: null, montoContado: '10000' }],
+      });
+      expect(res.nivelDescuadre).toBe('ninguno');
+      expect(res.estado).toBe('cerrada');
+    });
+
+    /**
+     * El nivel se congela con el arqueo y no se recomputa después. Si saliera
+     * de leer la config al consultar, subir el umbral el mes que viene borraría
+     * retroactivamente los cierres altos del mes pasado — que es justamente el
+     * rastro que la bandeja existe para conservar.
+     */
+    it('el nivel se persiste en la caja, no se deriva al leer', async () => {
+      mockQueries('2000', '10000');
+      await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [{ metodoPagoId: null, montoContado: '-5000' }],
+      });
+      const guardada = managerMock.save.mock.calls.find(
+        (c: unknown[]) => c[0] === Caja,
+      )?.[1] as Partial<Caja>;
+      expect(guardada.nivelDescuadre).toBe('alto');
+    });
+  });
+
+  describe('umbral de descuadre — cálculo del nivel', () => {
+    it('el borde EXACTO no supera el umbral: |dif| = aviso todavía es ninguno', () => {
+      expect(calcularNivelDescuadre(['-2000.0000'], '2000', '10000')).toBe(
+        'ninguno',
+      );
+      expect(calcularNivelDescuadre(['-2000.0001'], '2000', '10000')).toBe(
+        'aviso',
+      );
+    });
+
+    it('el borde EXACTO del alto todavía es aviso, no alto', () => {
+      expect(calcularNivelDescuadre(['10000.0000'], '2000', '10000')).toBe(
+        'aviso',
+      );
+      expect(calcularNivelDescuadre(['10000.0001'], '2000', '10000')).toBe(
+        'alto',
+      );
+    });
+
+    it('el signo no importa: un sobrante grande pesa igual que un faltante', () => {
+      expect(calcularNivelDescuadre(['15000'], '2000', '10000')).toBe('alto');
+      expect(calcularNivelDescuadre(['-15000'], '2000', '10000')).toBe('alto');
+    });
+
+    /**
+     * El caso que obliga a medir por línea: −5.000 en efectivo y +5.000 en
+     * tarjeta suman cero. Sobre el total el cierre pasaría como cuadrado, que
+     * es el caso que más conviene mirar.
+     */
+    it('mide por LÍNEA, no sobre el total: dos diferencias que se cancelan igual disparan', () => {
+      expect(calcularNivelDescuadre(['-5000', '5000'], '2000', '10000')).toBe(
+        'aviso',
+      );
+    });
+
+    it('las líneas informativas (contado NULL) no cuentan', () => {
+      expect(calcularNivelDescuadre([null, null], '2000', '10000')).toBe(
+        'ninguno',
+      );
+      expect(calcularNivelDescuadre([null, '-15000'], '2000', '10000')).toBe(
+        'alto',
+      );
+    });
+
+    /**
+     * `0` DESACTIVA el nivel — al revés que `montoTolerancia`. Con `0` activo,
+     * cualquier peso dispararía y el control se volvería ruido.
+     */
+    it('0 en los dos umbrales apaga la feature: ninguna diferencia dispara', () => {
+      expect(calcularNivelDescuadre(['-999999'], '0', '0')).toBe('ninguno');
+    });
+
+    it('solo el alto activo: no hay nivel de aviso posible', () => {
+      expect(calcularNivelDescuadre(['-5000'], '0', '10000')).toBe('ninguno');
+      expect(calcularNivelDescuadre(['-15000'], '0', '10000')).toBe('alto');
+    });
+
+    it('solo el aviso activo: nunca escala a alto', () => {
+      expect(calcularNivelDescuadre(['-999999'], '2000', '0')).toBe('aviso');
+    });
+  });
+
+  describe('umbral de descuadre — bandeja y marcar visto', () => {
+    it('marcarRevisado registra quién y cuándo', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        nivelDescuadre: 'alto',
+        revisadoEl: null,
+        revisadoPor: null,
+      });
+      managerMock.save.mockImplementation((_e: unknown, x: unknown) => x);
+
+      const res = await service.marcarRevisado(
+        TENANT_ID,
+        OTRO_USUARIO,
+        CAJA_ID,
+      );
+      // Sin el lock, dos encargados a la vez leen `revisado_el` nulo los dos
+      // y el segundo pisa al primero — justo el dato que la bandeja guarda.
+      expect(managerMock.findOne).toHaveBeenCalledWith(
+        Caja,
+        expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+      );
+
+      expect(res.revisadoPor).toBe(OTRO_USUARIO);
+      expect(res.revisadoEl).toBeInstanceOf(Date);
+      const guardada = managerMock.save.mock.calls.at(-1)[1];
+      expect(guardada.revisadoPor).toBe(OTRO_USUARIO);
+      expect(guardada.revisadoEl).toBeInstanceOf(Date);
+    });
+
+    /**
+     * El cruce con el cierre forzado: el encargado que cerró la caja de otro
+     * puede revisar su propio cierre, y queda registrado que fue él. El control
+     * ahí no es impedir —a las 2 de la mañana no hay un tercero— sino el rastro
+     * (owner, 2026-08-15).
+     */
+    it('quien cerró puede marcar visto su propio cierre, y queda registrado', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: OTRO_USUARIO, // la caja era de otro: cierre forzado
+        cerradaPor: USUARIO_ID,
+        nivelDescuadre: 'alto',
+        revisadoEl: null,
+      });
+      managerMock.save.mockImplementation((_e: unknown, x: unknown) => x);
+
+      const res = await service.marcarRevisado(TENANT_ID, USUARIO_ID, CAJA_ID);
+
+      expect(res.revisadoPor).toBe(USUARIO_ID);
+    });
+
+    it('un cierre ya revisado no se re-marca: se conserva quién miró primero', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        nivelDescuadre: 'alto',
+        revisadoPor: OTRO_USUARIO,
+        revisadoEl: new Date('2026-08-22T10:00:00Z'),
+      });
+      await expect(
+        service.marcarRevisado(TENANT_ID, USUARIO_ID, CAJA_ID),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('un cierre que no es de nivel alto no está en la bandeja', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        nivelDescuadre: 'aviso',
+        revisadoEl: null,
+      });
+      await expect(
+        service.marcarRevisado(TENANT_ID, USUARIO_ID, CAJA_ID),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('pendientesRevision filtra por nivel alto sin revisar y deriva "forzado" de los datos', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        {
+          caja_id: CAJA_ID,
+          usuario_id: USUARIO_ID,
+          usuario_nombre: 'Ana',
+          usuario_apellido: 'Pérez',
+          cajon_nombre: 'Cajón 1',
+          estado: 'cerrada',
+          fecha_apertura: new Date('2026-08-23T09:00:00Z'),
+          fecha_cierre: new Date('2026-08-23T21:00:00Z'),
+          diferencia: '-15000.0000',
+          peor_diferencia: '15000.0000',
+          explicacion_descuadre: 'Le di vuelto de más',
+          comentario_cierre: null,
+          cerrada_por: OTRO_USUARIO, // contó otro → forzado
+        },
+      ]);
+
+      const [fila] = await service.pendientesRevision(TENANT_ID);
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain("c.nivel_descuadre = 'alto'");
+      expect(sql).toContain('c.revisado_el IS NULL');
+      expect(fila.forzado).toBe(true);
+      expect(fila.peorDiferencia).toBe('15000.0000');
+      expect(fila.explicacionDescuadre).toBe('Le di vuelto de más');
+      expect(fila.usuarioNombre).toBe('Ana Pérez');
     });
   });
 

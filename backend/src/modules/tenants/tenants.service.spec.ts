@@ -37,6 +37,8 @@ const mockTenant: Tenant = {
   modoRedondeo: 'HALF_UP',
   nivelRedondeo: 'linea',
   montoTolerancia: '0',
+  umbralDescuadreAviso: '0',
+  umbralDescuadreAlto: '0',
   arqueoCiego: false,
   creadoEl: new Date(),
   actualizadoEl: new Date(),
@@ -622,6 +624,8 @@ describe('TenantsService', () => {
       modoRedondeo: 'HALF_UP',
       montoTolerancia: '0',
       nivelRedondeo: 'linea',
+      umbralDescuadreAviso: '0',
+      umbralDescuadreAlto: '0',
     };
 
     it('persiste modos y reescribe la fórmula con pasos correctos', async () => {
@@ -643,6 +647,8 @@ describe('TenantsService', () => {
         modoRedondeo: 'HALF_EVEN',
         montoTolerancia: '1.5',
         nivelRedondeo: 'linea',
+        umbralDescuadreAviso: '2000',
+        umbralDescuadreAlto: '10000',
       };
 
       const result = await service.updatePreferenciasFinancieras(
@@ -656,7 +662,17 @@ describe('TenantsService', () => {
       // tanto el fragmento SQL como la posición del parámetro en el array.
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('nivel_redondeo = $6'),
-        ['compuesto', 'base', 4, 'HALF_EVEN', '1.5', 'linea', 'tenant-uuid'],
+        [
+          'compuesto',
+          'base',
+          4,
+          'HALF_EVEN',
+          '1.5',
+          'linea',
+          '2000',
+          '10000',
+          'tenant-uuid',
+        ],
       );
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('DELETE FROM tenant_formula_precio'),
@@ -794,9 +810,57 @@ describe('TenantsService', () => {
       // 'linea'; ésta la cubre para el valor que el borde acaba de habilitar.
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('nivel_redondeo = $6'),
-        ['base', 'base', 4, 'HALF_UP', '0', 'documento', 'tenant-uuid'],
+        [
+          'base',
+          'base',
+          4,
+          'HALF_UP',
+          '0',
+          'documento',
+          '0',
+          '0',
+          'tenant-uuid',
+        ],
       );
       expect(r.nivelRedondeo).toBe('documento');
+    });
+
+    /**
+     * Umbrales de descuadre: la única regla que un decorador de campo no puede
+     * expresar es la que mira los dos campos a la vez. Con el alto por debajo
+     * del aviso, el nivel "aviso" queda inalcanzable — toda diferencia que pasa
+     * el aviso pasa también el alto — y la config quedaría mintiendo.
+     */
+    it('rechaza un umbral alto menor que el de aviso', async () => {
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', {
+          ...prefsValidas,
+          umbralDescuadreAviso: '10000',
+          umbralDescuadreAlto: '2000',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('acepta el alto en 0 con el aviso activo: 0 apaga el nivel, no lo invalida', async () => {
+      const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager),
+      );
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      const r = await service.updatePreferenciasFinancieras('tenant-uuid', {
+        ...prefsValidas,
+        umbralDescuadreAviso: '2000',
+        umbralDescuadreAlto: '0',
+      });
+
+      expect(r.umbralDescuadreAviso).toBe('2000');
+      expect(r.umbralDescuadreAlto).toBe('0');
     });
   });
 

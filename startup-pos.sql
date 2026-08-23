@@ -191,6 +191,14 @@ CREATE TABLE "tenants" (
   "nivel_redondeo"     TEXT        NOT NULL DEFAULT 'linea',   -- 'linea' | 'documento'
   "monto_tolerancia"   NUMERIC(18,6) NOT NULL DEFAULT 0,      -- tolerancia en conciliaciones
   "arqueo_ciego"       BOOLEAN     NOT NULL DEFAULT false,     -- cierre ciego: retiene el esperado durante el conteo
+  -- Umbrales del descuadre al cerrar caja. `0` DESACTIVA el nivel (al revés
+  -- que "monto_tolerancia", donde 0 es "cero tolerancia"): con 0 activo
+  -- cualquier peso dispararía, y un control que avisa siempre deja de avisar.
+  -- Ninguno de los dos bloquea el cierre; el alto lo manda a la bandeja de
+  -- pendientes de revisar. Escala 4 y no 6: se compara contra
+  -- "caja_arqueo_medio"."diferencia", que es NUMERIC(18,4).
+  "umbral_descuadre_aviso" NUMERIC(18,4) NOT NULL DEFAULT 0,
+  "umbral_descuadre_alto"  NUMERIC(18,4) NOT NULL DEFAULT 0,
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ,
@@ -945,10 +953,30 @@ CREATE TABLE "cajas" (
   -- Cuántos garzones tenían sesión abierta al congelar el conteo. Es lo que
   -- distingue "cerró solo porque no había nadie" de "cerró solo habiendo tres".
   "testigos_disponibles" SMALLINT,
+  -- Nivel del descuadre contra los dos umbrales del tenant, CONGELADO en la
+  -- fase 1 del cierre junto con el arqueo. No se recomputa al leer: si mañana
+  -- suben el umbral, este cierre no deja de haber sido alto.
+  "nivel_descuadre" TEXT         NOT NULL DEFAULT 'ninguno',  -- 'ninguno' | 'aviso' | 'alto'
+  -- Texto libre del cajero al cerrar ("le di vuelto de más"). Distinto del
+  -- motivo CATEGORIZADO por línea ("caja_arqueo_medio") y del comentario de
+  -- cierre: esto cuenta qué pasó en el turno.
+  "explicacion_descuadre" TEXT,
+  -- Quién marcó visto el cierre en la bandeja, y cuándo. Se registra aunque
+  -- sea la misma persona que lo cerró (cierre forzado): ahí el control es el
+  -- rastro, no impedir.
+  "revisado_por"   UUID          REFERENCES "usuarios" ("usuario_id"),
+  "revisado_el"    TIMESTAMPTZ,
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
+
+-- Bandeja de pendientes de revisar: la consulta es siempre este predicado
+-- exacto y la respuesta es una minoría de las filas. Sin el índice parcial, la
+-- bandeja hace seq scan sobre el histórico entero de cierres del tenant.
+CREATE INDEX "ix_cajas_pendientes_revision"
+  ON "cajas" ("tenant_id")
+  WHERE "nivel_descuadre" = 'alto' AND "revisado_el" IS NULL AND "eliminado_el" IS NULL;
 
 -- Unicidad de sesión por cajón: un cajón físico solo admite una caja abierta
 -- a la vez. Sub-proyecto 3/3 del refactor general de caja. `en_conciliacion`
