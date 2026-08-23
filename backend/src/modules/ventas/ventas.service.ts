@@ -1854,13 +1854,24 @@ export class VentasService {
       venta_referencia_id: string | null;
       tipo_documento_codigo: string | null;
       tipo_documento_nombre: string | null;
+      tiene_lineas_despachadas: boolean;
     }[] = await this.db.query(
       `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
               v.total_bruto, v.total_descuentos, v.total_recargos, v.total_impuestos, v.total_final,
               v.base_ventas_total_final, v.base_ventas_sin_impuestos,
               v.config_calculo,
               v.comentario, v.fecha, v.creado_el, v.venta_referencia_id,
-              td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre
+              td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre,
+              EXISTS (
+                SELECT 1 FROM cuentas cta
+                  JOIN cuenta_lineas cl ON cl.cuenta_id = cta.cuenta_id
+                       AND cl.tenant_id = cta.tenant_id
+                       AND cl.eliminado_el IS NULL
+                       AND cl.cantidad_enviada > 0
+                 WHERE cta.venta_id = v.venta_id
+                   AND cta.tenant_id = v.tenant_id
+                   AND cta.eliminado_el IS NULL
+              ) AS tiene_lineas_despachadas
        FROM ventas v
        LEFT JOIN tipos_documento_tributario td
             ON td.tipo_documento_id = v.tipo_documento_id AND td.eliminado_el IS NULL
@@ -2046,6 +2057,14 @@ export class VentasService {
       // "Nota de crédito" sobre una NC mientras el listado sí la marcaba.
       esNotaCredito: v.tipo_documento_id === TIPO_DOCUMENTO_NC_ID,
       ventaReferenciaId: v.venta_referencia_id,
+      // La venta vino de una cuenta de salón con al menos una línea YA ENVIADA a
+      // cocina. Lo consume el modal de anulación: reponer comida que ya se cocinó
+      // mete al stock ingredientes que físicamente no existen, así que ahí el
+      // checkbox "Reponer el stock" nace DESTILDADO (owner, 2026-08-15). Es uno
+      // solo para toda la venta y basta con que ALGUNA línea se haya despachado
+      // (owner, 2026-08-23): el cajero lo tilda si igual quiere reponer.
+      // `false` en la venta de POS, que no viene de ninguna cuenta.
+      tieneLineasDespachadas: v.tiene_lineas_despachadas === true,
       canal: v.canal,
       estado: v.estado,
       totalBruto: v.total_bruto,

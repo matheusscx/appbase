@@ -416,28 +416,6 @@ empezarlas.
   las dos**; (c) `tramo.valor` vive dentro de un DTO anidado, y el pipe **no recorre anidados
   sin `@Type()` en el padre** (limitación conocida, fijada por el test "LIMITACIÓN CONOCIDA").
 
-- [ ] **El default del checkbox de anulación cuando la línea ya se despachó a cocina**
-  (backend + frontend, decisión 2 del owner del 2026-08-15; **pieza C** de la entrada
-  *"anular una venta con recetas no repone"*, cerrada el 2026-08-22 →
-  [`resueltos.md`](resueltos.md)) — el checkbox *"Reponer el stock que la venta descontó"*
-  nace **siempre tildado** (`AnularVentaModal.vue:19`, y `:27` lo re-tilda al abrir). La
-  decisión: si la línea **ya se despachó a cocina** el plato se hizo, así que nace
-  **destildado**; si no se envió nada, sigue tildado. El aporte del owner que lo motivó:
-  reponer comida servida mete stock que físicamente no existe, y eso es peor que no
-  reponer.
-  ⚠️ **La partición de la entrada madre decía *"C quedó barata: es solo el default del
-  checkbox"*, y al abrirla el 2026-08-22 resultó falso.** El modal recibe **únicamente
-  `ventaId`** —no conoce ninguna línea— y `cantidad_enviada` existe **solo** en
-  `cuenta_lineas` (`cuenta-linea.entity.ts:55`), nunca en `venta_detalles`: grep del
-  backend entero, la única otra aparición es el DTO de comanda. Se llega por
-  `cuenta.venta_id` (`cuenta.entity.ts:40`), así que la pieza es **una lectura nueva de
-  backend + exponerla en el payload de la venta**, acoplando ventas→salones. No es un
-  `ref(false)`.
-  **Lo que falta decidir al construirla, y no está contestado:** una venta de POS no viene
-  de ninguna cuenta (no hay comanda que consultar), y una venta de salón puede tener unas
-  líneas despachadas y otras no. ¿El default es "destildado si **alguna** línea se
-  despachó", o el checkbox deja de ser uno solo para toda la venta?
-
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
   arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (`ventas.service.ts:1390`,
@@ -885,8 +863,11 @@ empezarlas.
   (Toast, Square y Lightspeed manejan *voids* de ítems despachados). Sin eso, hoy el garzón
   que se equivocó de plato después de mandar la comanda no tiene ninguna salida.
 
-  🔗 Queda además la pieza **C** de la partición (el default destildado del modal de
-  anulación), que ahora es barata: el campo ya viaja al cliente.
+  🔗 La pieza **C** de la partición (el default destildado del modal de anulación) se
+  **construyó el 2026-08-23** — ver [`resueltos.md`](resueltos.md) § *"El checkbox de
+  anulación nace destildado si algo ya salió a cocina"*. Lo que sigue abierto acá es solo la
+  salida con motivo: son cosas distintas, la C decide qué llega tildado a la pantalla de
+  anulación y esta le da al garzón una forma legítima de sacar un plato ya despachado.
 
 - [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
   de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al

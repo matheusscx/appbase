@@ -17,6 +17,53 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El checkbox de anulación nace destildado si algo ya salió a cocina (2026-08-23)
+
+**Venía de la sección 3** («ya decidido, falta construir»). Mudada verbatim con su cierre.
+
+**El default del checkbox de anulación cuando la línea ya se despachó a cocina**
+(backend + frontend, decisión 2 del owner del 2026-08-15; **pieza C** de la entrada
+*"anular una venta con recetas no repone"*, cerrada el 2026-08-22 →
+[`resueltos.md`](resueltos.md)) — el checkbox *"Reponer el stock que la venta descontó"*
+nace **siempre tildado** (`AnularVentaModal.vue:19`, y `:27` lo re-tilda al abrir). La
+decisión: si la línea **ya se despachó a cocina** el plato se hizo, así que nace
+**destildado**; si no se envió nada, sigue tildado. El aporte del owner que lo motivó:
+reponer comida servida mete stock que físicamente no existe, y eso es peor que no
+reponer.
+⚠️ **La partición de la entrada madre decía *"C quedó barata: es solo el default del
+checkbox"*, y al abrirla el 2026-08-22 resultó falso.** El modal recibe **únicamente
+`ventaId`** —no conoce ninguna línea— y `cantidad_enviada` existe **solo** en
+`cuenta_lineas` (`cuenta-linea.entity.ts:55`), nunca en `venta_detalles`: grep del
+backend entero, la única otra aparición es el DTO de comanda. Se llega por
+`cuenta.venta_id` (`cuenta.entity.ts:40`), así que la pieza es **una lectura nueva de
+backend + exponerla en el payload de la venta**, acoplando ventas→salones. No es un
+`ref(false)`.
+**Lo que falta decidir al construirla, y no está contestado:** una venta de POS no viene
+de ninguna cuenta (no hay comanda que consultar), y una venta de salón puede tener unas
+líneas despachadas y otras no. ¿El default es "destildado si **alguna** línea se
+despachó", o el checkbox deja de ser uno solo para toda la venta?
+
+✅ **CONSTRUIDO 2026-08-23.** La pregunta la contestó el owner el mismo día: **un solo
+checkbox para toda la venta, destildado si ALGUNA línea se despachó**; el cajero lo tilda
+igual si la mercadería sigue vendible (es un default, no un bloqueo), y la venta de POS
+—que no viene de ninguna cuenta— sigue naciendo tildada. Partirlo por línea sería más fino
+y menos usable: se está anulando la venta entera, no reconciliando el inventario plato por
+plato.
+**Cómo quedó:** `GET /ventas/:id` expone `tieneLineasDespachadas`, resuelto con un `EXISTS`
+**dentro de la misma consulta de la cabecera** (`cuentas` → `cuenta_lineas` con
+`cantidad_enviada > 0`, filtrando `eliminado_el` en las dos y correlacionando por
+`cuentas.venta_id`), así que no agrega ni una ida a la base ni toca el alcance "mío/todos"
+que ya aplicaba `findOne`. El modal lo recibe como prop **del detalle que la pantalla ya
+carga** —sin segunda llamada— y muestra al lado por qué. Esa consulta es el primer lector
+de `cuentas.venta_id`, así que la columna estrenó índice (`idx_cuentas_venta`).
+📌 **El backend de la anulación no cambió:** sigue haciendo lo que `reponerStock` diga. Lo
+que se movió es qué llega marcado por default a la pantalla.
+Regla en [`features/ventas.md`](../features/ventas.md) y
+[`PRODUCTO.md`](../PRODUCTO.md); el puente desde salones, en
+[`features/salones-mesas.md`](../features/salones-mesas.md).
+
+---
+
 ## El tenant `MiCaja`-only: descartado, son el mismo módulo partido por audiencia (2026-08-22)
 
 **Lo levantó la revisión independiente** del diff del eje de visibilidad: la rama 2 de

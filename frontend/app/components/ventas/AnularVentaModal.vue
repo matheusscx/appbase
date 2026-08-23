@@ -1,5 +1,14 @@
 <script setup lang="ts">
-const props = defineProps<{ ventaId: string }>()
+const props = defineProps<{
+  ventaId: string
+  /**
+   * La venta vino de una cuenta de salón con al menos una línea ya enviada a
+   * cocina (lo calcula el backend en `GET /ventas/:id`). Es lo que decide el
+   * DEFAULT del checkbox de reposición, no un bloqueo: el cajero lo tilda igual
+   * si la mercadería sigue vendible.
+   */
+  tieneLineasDespachadas: boolean
+}>()
 
 export interface AnularVentaSuccessPayload {
   id: string
@@ -16,7 +25,14 @@ const toast = useToast()
 const apiUrl = config.public.apiUrl
 
 const motivo = ref('')
-const reponerStock = ref(true)
+/**
+ * Nace DESTILDADO si alguna línea ya se despachó (decisión del owner
+ * 2026-08-15, caso mixto resuelto el 2026-08-23): reponer comida que la cocina
+ * ya hizo mete al stock ingredientes que físicamente no existen, y eso es peor
+ * que no reponer. Uno solo para toda la venta: basta con que ALGUNA línea haya
+ * salido.
+ */
+const reponerStock = ref(!props.tieneLineasDespachadas)
 const submitting = ref(false)
 
 const MOTIVO_MIN = 10
@@ -24,10 +40,16 @@ const MOTIVO_MIN = 10
 watch(open, (v) => {
   if (!v) return
   motivo.value = ''
-  reponerStock.value = true
+  reponerStock.value = !props.tieneLineasDespachadas
 })
 
 const motivoValido = computed(() => motivo.value.trim().length >= MOTIVO_MIN)
+
+const ayudaReposicion = computed(() =>
+  props.tieneLineasDespachadas
+    ? 'Hay platos ya enviados a cocina: eso no vuelve al inventario. Tildalo solo si la mercadería sigue vendible.'
+    : 'Desmarcalo solo si la mercadería ya no está vendible: el descuento queda como pérdida.',
+)
 
 async function confirmar() {
   submitting.value = true
@@ -83,7 +105,7 @@ async function confirmar() {
         <UCheckbox
           v-model="reponerStock"
           label="Reponer el stock que la venta descontó"
-          help="Desmarcalo solo si la mercadería ya no está vendible: el descuento queda como pérdida."
+          :description="ayudaReposicion"
         />
       </div>
     </template>

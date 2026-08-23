@@ -100,6 +100,12 @@ interface VentaDetalle {
   totalImpuestos: string
   totalFinal: string
   ventaReferenciaId: string | null
+  /**
+   * La venta salió de una cuenta de salón con alguna línea ya enviada a cocina.
+   * Viaja en el detalle que esta pantalla ya carga —no se pide aparte— y lo usa
+   * el modal de anulación para el default del checkbox de reposición.
+   */
+  tieneLineasDespachadas: boolean
   tipoDocumento: { id: string, codigo: string | null, nombre: string | null } | null
   /** Lo calcula el backend contra el id del tipo de documento, no contra `codigo`. */
   esNotaCredito: boolean
@@ -1076,6 +1082,7 @@ function onNcSuccess(payload: {
     v-if="venta"
     v-model:open="anularOpen"
     :venta-id="venta.id"
+    :tiene-lineas-despachadas="venta.tieneLineasDespachadas"
     @success="onAnularSuccess"
   />
 

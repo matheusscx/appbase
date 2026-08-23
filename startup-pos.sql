@@ -1944,6 +1944,11 @@ ALTER TABLE cuentas
 CREATE INDEX idx_cuentas_responsable
     ON cuentas (tenant_id, garzon_responsable_id);
 
+-- Lo pide el EXISTS de VentasService.findOne ("¿esta venta vino de una cuenta
+-- con líneas ya despachadas a cocina?"), que corre en cada GET /ventas/:id.
+CREATE INDEX idx_cuentas_venta
+    ON cuentas (tenant_id, venta_id);
+
 -- Historial de asignaciones de responsable por cuenta. La fila vigente tiene
 -- hasta_el IS NULL; el índice único parcial garantiza una sola vigente.
 CREATE TABLE cuenta_asignaciones (

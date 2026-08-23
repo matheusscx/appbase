@@ -419,4 +419,162 @@ describe('Salones — comanda a cocina (e2e)', () => {
         .expect(200);
     });
   });
+
+  /**
+   * El default del checkbox "Reponer el stock" del modal de anulación (decisión
+   * del owner 2026-08-15; el caso mixto —unas líneas despachadas y otras no— lo
+   * cerró el owner el 2026-08-23: **un solo checkbox para toda la venta,
+   * destildado si ALGUNA línea salió**). Reponer comida que la cocina ya hizo
+   * mete al inventario ingredientes que físicamente no existen, y eso es peor
+   * que no reponer.
+   *
+   * Va como e2e y no solo como unit porque lo que se fija es que el dato cruce
+   * el puente `venta → cuenta → cuenta_lineas` **con `cantidad_enviada` escrita
+   * por el flujo real de la comanda**: el unit del service tiene el SQL
+   * mockeado, así que solo puede afirmar sobre la consulta, no sobre lo que
+   * Postgres contesta.
+   */
+  describe('la venta dice si su cuenta ya había despachado a cocina', () => {
+    let cajaId: string;
+
+    /** `tieneLineasDespachadas` tal como lo ve la pantalla de ventas. */
+    async function detalleVenta(
+      ventaId: string,
+    ): Promise<{ tieneLineasDespachadas: boolean; estado: string }> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as { tieneLineasDespachadas: boolean; estado: string };
+    }
+
+    /** Cierra la cuenta SIN cobrar: la venta queda `pendiente`, o sea anulable. */
+    async function cerrarSinCobrar(cuentaId: string): Promise<string> {
+      const cierre = await post<{ ventaId: string }>(
+        `/api/cuentas/${cuentaId}/cerrar`,
+        { garzonId: garzon.id, pin: garzon.pin, pagos: [] },
+      );
+      expect(cierre.ventaId).toBeTruthy();
+      return cierre.ventaId;
+    }
+
+    beforeAll(async () => {
+      // Caja propia de este bloque: cerrar una cuenta crea una venta
+      // `canal='fisico'`, que exige caja abierta, y los otros tests de este
+      // archivo no cobran nada. Se cierra en el `afterAll` — un cajón ocupado
+      // le rompe la apertura al spec siguiente de la suite.
+      const disp = await request(app.getHttpServer())
+        .get('/api/caja/cajones-disponibles')
+        .set('Authorization', `Bearer ${token}`);
+      expect(disp.status).toBe(200);
+      const cajonId = (disp.body as { cajonId: string }[])[0]?.cajonId;
+      expect(cajonId).toBeTruthy();
+      cajaId = (
+        await post<IdResponse>('/api/caja/abrir', {
+          cajonId,
+          saldoInicial: '0.0000',
+          comentario: 'Apertura E2E comanda→venta',
+        })
+      ).id;
+
+      // Los ítems del spec nacen con stock 0 y `modo_inventario='cantidad'`:
+      // sin esta entrada, cerrar la cuenta muere con "stock insuficiente" y el
+      // test fallaría por una razón que no es la que prueba.
+      for (const itemId of [platoId, postreId]) {
+        const res = await request(app.getHttpServer())
+          .patch(`/api/items/${itemId}/stock`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            tipo: 'entrada',
+            motivo: 'compra',
+            cantidad: '50',
+            costoUnitario: '1000',
+          });
+        expect(res.status).toBe(200);
+      }
+    }, 60000);
+
+    afterAll(async () => {
+      // Dos fases reales, igual que `combos.e2e-spec.ts`: el conteo congela el
+      // arqueo y auto-cierra si cuadra; si descuadra hay que finalizar con un
+      // motivo por línea. Acá las ventas quedan pendientes (sin pagos), así que
+      // lo esperable es que cuadre — el segundo tramo está igual porque un
+      // cajón que queda ocupado reaparece como un 409 críptico en otra suite.
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+      expect([200, 201]).toContain(conteo.status);
+
+      if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+        const motivos = await request(app.getHttpServer())
+          .get('/api/motivos-diferencia?soloActivas=true')
+          .set('Authorization', `Bearer ${token}`);
+        const motivoId = (motivos.body as { id: string }[])[0]?.id;
+        const cierre = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            lineas: [
+              {
+                metodoPagoId: null,
+                motivoDiferenciaId: motivoId,
+                comentarioDiferencia: 'Cierre de la suite e2e',
+              },
+            ],
+          });
+        expect([200, 201]).toContain(cierre.status);
+      }
+    });
+
+    it('con la comanda ya mandada, la venta nace marcada', async () => {
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
+      await post(`/api/cuentas/${cuenta.id}/comanda/reclamar`, {});
+
+      const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
+
+      expect(venta.tieneLineasDespachadas).toBe(true);
+      // La venta es anulable: si no fuera `pendiente`, el modal cuyo default
+      // decide esta marca ni siquiera se abriría.
+      expect(venta.estado).toBe('pendiente');
+    });
+
+    it('sin comanda mandada, la misma cuenta deja la venta sin marcar', async () => {
+      // El cierre de cuenta que nunca pasó por cocina: el checkbox tiene que
+      // seguir naciendo tildado, como en cualquier venta.
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+
+      const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
+
+      expect(venta.tieneLineasDespachadas).toBe(false);
+    });
+
+    it('basta con que UNA línea se haya despachado: la mezcla también marca', async () => {
+      // El caso mixto que el owner decidió el 2026-08-23. La comanda se manda
+      // con una sola línea en la cuenta y la segunda se agrega DESPUÉS, así que
+      // queda con `cantidad_enviada = 0` mientras la primera ya salió.
+      const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+      await post(`/api/cuentas/${cuenta.id}/comanda/reclamar`, {});
+      await post(`/api/cuentas/${cuenta.id}/lineas`, {
+        itemId: postreId,
+        cantidad: '1',
+      });
+
+      const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
+
+      expect(venta.tieneLineasDespachadas).toBe(true);
+    });
+
+    it('la marca es de ESTA venta, no del local: la de POS no hereda la del salón', async () => {
+      // Sin la correlación `cuentas.venta_id = ventas.venta_id`, cualquier venta
+      // del tenant nacería destildada en cuanto una sola mesa hubiera despachado
+      // algo alguna vez — y arriba ya se despachó.
+      const venta = await post<IdResponse>('/api/ventas', {
+        lineas: [{ itemId: platoId, cantidad: '1' }],
+        pagos: [],
+      });
+
+      expect((await detalleVenta(venta.id)).tieneLineasDespachadas).toBe(false);
+    });
+  });
 });

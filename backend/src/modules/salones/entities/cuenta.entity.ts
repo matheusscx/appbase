@@ -14,6 +14,16 @@ export enum EstadoCuenta {
   CANCELADA = 'cancelada',
 }
 
+/**
+ * `idx_cuentas_venta`: lo pide el `EXISTS` de `VentasService.findOne`, que
+ * pregunta si la venta vino de una cuenta con líneas ya despachadas a cocina.
+ * Corre en cada `GET /ventas/:id` —o sea cada vez que alguien abre el detalle de
+ * una venta— y `cuentas` crece con cada mesa atendida en la historia del tenant,
+ * soft-deletes incluidos. Sin él es un seq scan que escala con el volumen del
+ * salón. Postgres no indexa las FK por su cuenta, y `venta_id` no tenía ningún
+ * lector antes de esa consulta.
+ */
+@Index('idx_cuentas_venta', ['tenantId', 'ventaId'])
 @Index('idx_cuentas_responsable', ['tenantId', 'garzonResponsableId'])
 @Entity('cuentas')
 export class Cuenta {

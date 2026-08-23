@@ -139,7 +139,7 @@ Todo lo demás se revierte con nota de crédito.
 - `motivo` obligatorio, mínimo 10 caracteres: una anulación sin explicación no sirve como
   auditoría. Queda en `ventas.motivo_cancelacion`, junto con `cancelada_el` y
   `cancelada_por_usuario_id`.
-- `reponerStock` (default `true`) devuelve al kardex lo que la venta descontó, con motivo
+- `reponerStock` (default `true` en la API) devuelve al kardex lo que la venta descontó, con motivo
   **`anulacion`** — distinto de `devolucion`, porque anular una venta mal ingresada y que
   un cliente devuelva mercadería son eventos distintos. En `false` el descuento original
   queda como pérdida (equivalente a la "Anulación no Recuperable" de Toteat).
@@ -161,6 +161,22 @@ Todo lo demás se revierte con nota de crédito.
 
 **Errores:** `400` motivo corto · `400` estado distinto de `pendiente` · `400` con pagos ·
 `400` con documento tributario · `400` reponer stock de serie/lote · `403` sin permiso.
+
+**El default del checkbox de reposición lo decide la cocina, no la API** (decisión del
+owner 2026-08-15; caso mixto cerrado el 2026-08-23). En la pantalla, "Reponer el stock que
+la venta descontó" nace **destildado** si la venta salió de una cuenta de salón con
+**alguna** línea ya enviada a cocina, y explica por qué. La razón es del local, no técnica:
+reponer comida que ya se cocinó mete al inventario ingredientes que **físicamente no
+existen**, y eso es peor que no reponer.
+
+- Es **un solo checkbox para toda la venta** y basta con que **una** línea se haya
+  despachado. Partirlo por línea sería más fino y menos usable: el cajero está anulando la
+  venta entera, no reconciliando el inventario plato por plato.
+- Es un **default, no un bloqueo**: el cajero lo tilda igual si la mercadería sigue
+  vendible (la botella que volvió cerrada).
+- La venta de POS, que no viene de ninguna cuenta, sigue naciendo **tildada**.
+- El dato lo expone `GET /ventas/:id` como `tieneLineasDespachadas` (ver abajo). El
+  **backend no cambia**: sigue haciendo lo que `reponerStock` diga.
 
 Origen de la decisión: `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`.
 
@@ -208,6 +224,13 @@ Response (200):
 ### GET /api/ventas/:id
 
 Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Incluye `montoPagado` y `saldo`.
+
+`tieneLineasDespachadas` (booleano) dice si la venta salió de una **cuenta de salón con
+alguna línea ya enviada a cocina**. Es el único consumidor de ese puente hacia salones, y
+existe para el default del checkbox de anulación (arriba). Se resuelve con un `EXISTS`
+dentro de la misma consulta de la cabecera —`cuentas` → `cuenta_lineas` con
+`cantidad_enviada > 0`—, así que no agrega ni una ida a la base; `cantidad_enviada` vive
+solo en `cuenta_lineas`, nunca en `venta_detalles`. `false` en la venta de POS.
 
 ---
 

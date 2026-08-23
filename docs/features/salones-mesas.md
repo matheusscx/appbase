@@ -303,6 +303,12 @@ un camino **con motivo** (merma o cortesía). Bloquear evita la pérdida silenci
 la salida legítima. Ese camino sigue en `docs/agent/pendientes.md` y ahí entra la
 investigación de mercado.
 
+**`cantidad_enviada` también sobrevive a la cuenta (2026-08-23).** La venta que sale del
+cierre lo expone como `tieneLineasDespachadas` en `GET /ventas/:id`, y con eso el modal de
+anulación **destilda** la reposición de stock: la comida que ya salió a cocina no vuelve al
+inventario. Es el único lector de `cuentas.venta_id` —de ahí el índice `idx_cuentas_venta`—
+y la regla completa vive en [`features/ventas.md`](ventas.md).
+
 Para que la pantalla no ofrezca un tacho que termina en `400`, el detalle de la cuenta
 ahora **expone `cantidadEnviada`** por línea. El backend ya lo emitía, pero solo dentro
 del preview de comanda (`ComandaEstacion`), que es otro flujo: la línea que el garzón ve

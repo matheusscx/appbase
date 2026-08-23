@@ -557,6 +557,11 @@ La venta lleva un campo `canal` (`'fisico'` | `'online'`) que determina el flujo
   (`POST /ventas/:id/anular`, permiso propio `Ventas/Anular`, motivo obligatorio). Una
   venta cobrada o ya documentada no se anula: se revierte con nota de crédito, porque el
   SII no permite anular un DTE aceptado.
+  Al anular se elige si el stock vuelve. La pantalla lo ofrece **tildado**, salvo que la
+  venta venga de una cuenta de salón con **alguna** línea ya enviada a cocina: ahí nace
+  **destildado**, porque reponer comida ya cocinada suma al inventario ingredientes que no
+  existen. Es un default, no un bloqueo: el cajero lo tilda igual si la mercadería sigue
+  vendible.
 
 **Nota de crédito:** puede ser total (anula la venta completa) o parcial (anula parte). Referencia a la venta original mediante `venta_referencia_id` en la tabla `ventas`.
 

@@ -2689,4 +2689,109 @@ describe('VentasService', () => {
       expect(sqlDe(0)).toContain('c.usuario_id =');
     });
   });
+
+  /**
+   * El default del checkbox "Reponer el stock" del modal de anulación. Reponer
+   * comida que la cocina ya hizo mete al inventario ingredientes que
+   * físicamente no existen, así que la venta tiene que poder decir si alguna de
+   * sus líneas salió despachada. `cantidad_enviada` vive SOLO en
+   * `cuenta_lineas`, y se llega por `cuentas.venta_id`.
+   */
+  describe('la marca de líneas ya despachadas a cocina', () => {
+    const USUARIO = 'usuario-uuid-despacho';
+    const VENTA_ID = 'venta-uuid-despacho';
+
+    /** La cabecera con el `EXISTS` ya resuelto por la base. */
+    const cabecera = (despachadas: boolean) => ({
+      venta_id: VENTA_ID,
+      caja_id: CAJA_ID,
+      moneda_id: MONEDA_OFICIAL_ID,
+      tipo_documento_id: null,
+      canal: 'fisico',
+      estado: 'pendiente',
+      total_bruto: '5000.0000',
+      total_descuentos: '0',
+      total_recargos: '0',
+      total_impuestos: '0',
+      total_final: '5000.0000',
+      comentario: null,
+      fecha: new Date('2026-08-23'),
+      creado_el: new Date('2026-08-23'),
+      venta_referencia_id: null,
+      tipo_documento_codigo: null,
+      tipo_documento_nombre: null,
+      tiene_lineas_despachadas: despachadas,
+    });
+
+    const responderCabecera = (despachadas: boolean) => {
+      dataSourceMock.query.mockImplementation((sql: string) =>
+        sql.includes('FROM ventas v')
+          ? Promise.resolve([cabecera(despachadas)])
+          : Promise.resolve([]),
+      );
+    };
+
+    /** El SQL de la cabecera, normalizado a un solo espacio. */
+    const sqlCabecera = (): string =>
+      (dataSourceMock.query.mock.calls[0][0] as string).replace(/\s+/g, ' ');
+
+    it('viaja en true cuando la cuenta tenía algo ya enviado a cocina', async () => {
+      responderCabecera(true);
+
+      const res = await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(res.tieneLineasDespachadas).toBe(true);
+    });
+
+    it('viaja en false cuando la cuenta existe pero nunca se mandó comanda', async () => {
+      responderCabecera(false);
+
+      const res = await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(res.tieneLineasDespachadas).toBe(false);
+    });
+
+    it('la venta de POS —sin cuenta— viaja en false, y no puede heredar la de otra venta', async () => {
+      // El `EXISTS` no encuentra ninguna fila de `cuentas`, así que da false. Lo
+      // que hace que eso sea cierto y no una casualidad del mock es la
+      // correlación: sin `cta.venta_id = v.venta_id` el EXISTS sería global y
+      // CUALQUIER venta del tenant nacería destildada en cuanto una sola mesa
+      // del local hubiera despachado algo alguna vez.
+      responderCabecera(false);
+
+      const res = await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(res.tieneLineasDespachadas).toBe(false);
+      expect(sqlCabecera()).toContain('cta.venta_id = v.venta_id');
+    });
+
+    it('mira lo DESPACHADO, no la mera existencia de la cuenta', async () => {
+      // Sin esta condición el flag daría true para toda venta que venga de
+      // salón —haya salido o no un plato— y el checkbox nacería destildado
+      // siempre, que es justo lo que la decisión no dice.
+      responderCabecera(true);
+
+      await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(sqlCabecera()).toContain('cl.cantidad_enviada > 0');
+    });
+
+    it('no cuenta cuentas ni líneas borradas', async () => {
+      responderCabecera(true);
+
+      await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      const sql = sqlCabecera();
+      expect(sql).toContain('cl.eliminado_el IS NULL');
+      expect(sql).toContain('cta.eliminado_el IS NULL');
+    });
+
+    it('el tenant sale de la venta, no de la cuenta suelta', async () => {
+      responderCabecera(true);
+
+      await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(sqlCabecera()).toContain('cta.tenant_id = v.tenant_id');
+    });
+  });
 });
