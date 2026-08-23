@@ -94,6 +94,22 @@ app»: es exactamente lo que hace posible este proxy.
   llamadas «funcionen»: hay que sostener que transporta sin interpretar. Las dos propiedades
   de arriba son la deuda concreta de esto, y las encontró la revisión independiente del diff
   —no la suite—, con el login en verde mientras el redirect ya estaba roto.
+- **No habilita cerrar el backend a internet.** El retorno de la pasarela y el callback de
+  Google entran **directo al backend** por `API_PUBLIC_URL` / `GOOGLE_CALLBACK_URL`, no por
+  este proxy. Sigue teniendo que ser públicamente alcanzable.
+- **Dos límites que hoy no muerden y llegan con features previsibles.** `proxyRequest`
+  bufferea el cuerpo entero en memoria (`readRawBody`), así que una subida de imágenes de
+  producto pediría `streamRequest: true`; y un proxy HTTP no upgradea **WebSockets**, así que
+  algo como comandas en vivo necesita camino propio. Verificado el 2026-08-23: hoy no hay
+  ningún `multipart` ni gateway de WS en el backend.
+- **Lo que ve el backend como cliente es este servidor, no el navegador.** Nadie usa la IP del
+  cliente hoy —medido: sin `req.ip`, sin throttler, sin `X-Forwarded-For`—, pero el día del
+  rate limiting «por IP» todos los usuarios comparten un balde. La nota accionable vive en la
+  entrada de rate limiting de [`docs/agent/pendientes.md`](../agent/pendientes.md).
+
+**Mejora pendiente, con su prerequisito:** el salto sale hoy a la red pública de Railway.
+Pasarlo a `*.railway.internal` exige antes que el backend escuche en IPv6 —`main.ts` hace
+`app.listen(process.env.PORT ?? 3000)`, que bindea `0.0.0.0`, y esa red es IPv6-only—.
 
 **Cuándo revisarla.** No cuando exista la whitelist de CORS: CORS ya estaba bien el día que
 el demo no dejaba entrar, y no es lo que gobierna si la cookie viaja. La condición sería que

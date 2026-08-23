@@ -1491,6 +1491,50 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   cuota de otro. Y con varias instancias detrás de un load balancer el límite en memoria no
   sirve: hace falta store compartido (Redis) — que es dependencia nueva y necesita
   confirmación del owner.
+  🚨 **«Límite por IP» dejó de significar «por usuario» — leer antes de escribir la key.**
+  Desde ADR-022 (2026-08-23) el navegador no llega al backend: llega el **servidor del
+  frontend**, que hace de proxy de `/api`. El par TCP que ve el backend es siempre el mismo,
+  así que `req.ip` es **una sola IP para todos los usuarios**: un límite por IP se convierte
+  en un balde compartido y el local que venda más rápido deja afuera a los demás. Es una
+  falla que además se ve como «el rate limiting funciona» en cualquier prueba de un solo
+  cliente.
+  **Lo que hay que hacer al tomarla:** `app.set('trust proxy', …)` en el backend y derivar la
+  key de `X-Forwarded-For`, **después de medir qué llega**. Lo que está verificado hoy es que
+  el proxy reenvía las cabeceras entrantes tal cual —`x-forwarded-for` no está en la lista de
+  ignoradas de h3, sí lo está `host`—; lo que **no** está medido es si el borde de Railway
+  puebla esa cabecera en la entrada al frontend. Se mide con un request real antes de elegir
+  la key, no se supone.
+  📌 Y ojo con el cruce: una key mal derivada de una cabecera que el cliente puede escribir es
+  peor que no tener límite, porque se saltea poniendo un valor distinto en cada request.
+- [ ] **El proxy de `/api` cambió tres supuestos de producción** (infra + backend, anotado
+  2026-08-23 al desplegar ADR-022) — no es trabajo pendiente por sí solo: es lo que hay que
+  saber **antes** de tomar otras entradas de esta sección, porque cada punto muerde durante
+  una tarea distinta.
+
+  1. **El backend NO se puede cerrar a internet.** Es lo primero que uno piensa al ver un
+     proxy delante, y es falso acá: el retorno de la pasarela entra **directo al backend** por
+     `API_PUBLIC_URL` (`pasarela/services/pagos-redirect.service.ts:97` y el gemelo de
+     inscripciones en `:66`) — Transbank redirige el navegador ahí, no pasa por el frontend.
+     El callback de Google (`GOOGLE_CALLBACK_URL`) es igual. Hacerlo privado rompe los pagos,
+     y se rompe en el retorno: con la plata ya cobrada del otro lado.
+  2. **El servidor del frontend pasa a dimensionarse por tráfico de API, y es camino crítico.**
+     Antes servía estáticos; ahora cada llamada de cada caja pasa por su event loop, que es un
+     solo proceso Node. Dos consecuencias para la entrada de deploy/escala: hay que sizear ese
+     servicio por requests de negocio y no por visitas, y **una caída del frontend deja la API
+     inalcanzable para la app** aunque el backend esté sano — antes eran dos caídas
+     independientes.
+  3. **La red privada de Railway ahorraría el salto público, pero tiene un prerequisito.**
+     Hoy el proxy sale a internet y vuelve a entrar (latencia + egress por request). Pasarlo a
+     `*.railway.internal` exige antes que el backend escuche en IPv6: `main.ts:33` hace
+     `app.listen(process.env.PORT ?? 3000)`, que bindea `0.0.0.0`, y la red privada de Railway
+     es IPv6-only. Sin `listen(port, '::')` el cambio de URL falla y parece un problema de DNS.
+
+  📌 Los dos que **hoy no aplican** y llegan con features previsibles están en las
+  consecuencias de [ADR-022](../adr/022-navegador-un-solo-origen.md): el proxy bufferea el
+  cuerpo entero en memoria (importa el día que haya subida de imágenes de producto) y no
+  upgradea WebSockets (importa el día que haya comandas en vivo). Verificado el 2026-08-23:
+  hoy no hay ni un `multipart` ni un gateway de WS en el backend.
+
 - [ ] **Deploy seguro: rollback + feature flags + canary** (infra) — el portón de CI evita
   el error *conocido* (que los tests detectan), no el desconocido (bug que ningún test cubre y
   pasa en verde). Para acotar ese: rollback rápido a la versión anterior (deploy inmutable),
