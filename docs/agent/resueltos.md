@@ -17,6 +17,137 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El demo vuelve a dejar entrar: el navegador pasa a hablar con un solo origen (2026-08-23)
+
+**Venía de la sección 4** («necesita que el owner conteste»), y fue la entrada más corta de
+este archivo: se escribió y se cerró el mismo día. El owner eligió **A —el proxy en el
+frontend—** sobre B (dominio propio). Mudada verbatim:
+
+---
+
+- [ ] **El demo de Railway no deja entrar: la cookie de refresh es cross-site y el navegador
+  no la lleva** (infra + frontend, medido contra el demo vivo el 2026-08-23) — el backend
+  está **sano**: con `curl` y un cookie jar el flujo `login → switch-tenant` completa. Lo que
+  falla es el navegador, y `POST /auth/switch-tenant` contesta **401 «No refresh token»**.
+
+  **Lo medido, sin interpretar** (headers reales del demo, 2026-08-23):
+
+  ```
+  set-cookie: refresh_token=…; Max-Age=3600; Path=/; HttpOnly; SameSite=Lax
+  access-control-allow-credentials: true
+  access-control-allow-origin: https://frontend-production-c0db.up.railway.app
+  ```
+
+  - **CORS está bien.** El `allow-credentials` y el `allow-origin` son los correctos. Quien
+    llegue acá buscando un problema de CORS va a perder el día: no es eso.
+  - **El cliente está bien.** `useApiFetch` pone `credentials: 'include'` en todas las
+    llamadas (`composables/useApiFetch.ts:12`) y `switchTenant` pasa por ahí
+    (`stores/tenant.ts:45`). Hay hasta un test que lo fija (`stores/auth.spec.ts:179`).
+  - **`up.railway.app` está en la Public Suffix List** (verificado el 2026-08-23 contra
+    `publicsuffix.org`, entrada de Railway Corporation). O sea que
+    `frontend-production-c0db.up.railway.app` y `backend-production-8635.up.railway.app`
+    tienen **dominios registrables distintos**: para el navegador son **cross-site**, no solo
+    cross-origin. Una cookie `SameSite=Lax` no viaja ahí. No distinguí si el navegador falla
+    al guardarla o al mandarla; el resultado es el mismo.
+  - **Por eso nadie lo vio en desarrollo:** `localhost:5173` y `localhost:3000` se
+    diferencian **solo en el puerto**, y el puerto no cuenta para «sitio». En local son
+    same-site y la cookie viaja. El bug **solo existe desplegado**.
+
+  ⚠️ **No se arregla con variables de entorno.** `sameSite: 'lax'` está **hardcodeado** en
+  `auth.controller.ts:41` —única ocurrencia en todo el backend— y no lo lee ninguna config.
+
+  ℹ️ **De paso, medido por el mismo header:** falta el atributo `Secure`, que sale de
+  `NODE_ENV === 'production'` (`auth.controller.ts:42`), así que **en Railway `NODE_ENV` no
+  es `production`**. No es lo que rompe el login (sobre HTTPS la cookie viaja igual sin
+  `Secure`), pero es endurecimiento pendiente y **puede tener otras consecuencias sin medir**:
+  `nuxt.config.ts` ramifica su lista de módulos con ese mismo `NODE_ENV` y `Dockerfile.prod`
+  no lo fija, así que la imagen del demo podría estar construida con `@nuxt/test-utils`
+  adentro. **Sin verificar** — se mira antes de tocar nada.
+
+  **La pregunta para el owner: A o B.** Las dos arreglan el login; ninguna toca el sistema de
+  tokens.
+
+  - **A — el frontend hace de proxy de `/api`.** El frontend **no** es estático: `Dockerfile.prod`
+    corre `node .output/server/index.mjs`, un servidor Nitro de verdad, así que admite rutas
+    `server/api/**` aunque `ssr: false` (hoy no existe el directorio `server/`). Con eso el
+    navegador habla **solo** con el frontend: same-origin, la cookie viaja, y **CORS
+    desaparece del problema**. Toda la app sale por `useRuntimeConfig().public.apiUrl`, un
+    solo lugar. ⚠️ **Trampa:** `VITE_API_URL` entra como **ARG de build** y se hornea en la
+    imagen (`Dockerfile.prod`), así que esto es un **rebuild**, no un cambio de variable.
+  - **B — dominio propio, `app.` y `api.` bajo el mismo dominio registrable.** Comparten
+    eTLD+1, así que pasan a ser same-site y `Lax` alcanza: **cero código**. Cuesta un dominio
+    y su configuración en Railway.
+
+  🔶 **La tercera, que es la tentadora, y por qué no la propongo sola:** cambiar la cookie a
+  `SameSite=None; Secure` es **una línea** en `auth.controller.ts:41` más `NODE_ENV`. Toca la
+  cookie de refresh del sistema de autenticación ya implementado, así que roza la
+  **invariante 4** de `CLAUDE.md` («no modificar el sistema de tokens JWT»). Si eso cuenta o
+  no como «modificar el sistema» lo decide el owner, no el agente — por eso está escrita acá
+  y no ejecutada. Y aunque se decida que sí vale, deja la sesión más expuesta que A, que
+  elimina el problema en vez de permitirlo.
+
+  📌 **El owner se inclinó por A** al verlo el 2026-08-23, pero no lo cerró. Falta el sí.
+
+---
+
+### Qué se hizo
+
+El navegador dejó de tener URL de backend. `runtimeConfig.public.apiUrl` es **`/api`,
+relativa y constante** —ya no es una variable de entorno—, y un catch-all de Nitro
+(`frontend/server/api/[...].ts`) reenvía cada `/api/**` al backend con `proxyRequest` de h3.
+`API_PROXY_TARGET` sustituye a `VITE_API_URL` en `docker-compose.yml`, `.env.example`, CI y
+Railway, y desaparece el `ARG VITE_API_URL` de `Dockerfile.prod`.
+
+La decisión completa, con las dos alternativas descartadas y sus motivos, en
+**[ADR-022](../adr/022-navegador-un-solo-origen.md)**. Tres cosas que vale repetir acá:
+
+- **El destino se lee de `process.env` en cada request, no de `runtimeConfig`.**
+  `nuxt.config.ts` se evalúa en el BUILD, así que cualquier cosa que se resuelva ahí queda
+  horneada en la imagen — que es exactamente la trampa que teníamos. Ahora cambiar de backend
+  es una variable y un reinicio.
+- **`apiUrl` dejó de ser configurable a propósito.** Apuntar el navegador a otro host tiene
+  que ser **imposible**, no desaconsejado: si sigue siendo una variable, el bug puede volver
+  el día que alguien la ponga mal, y no hay nada que avise.
+- **Dev y prod usan el mismo camino.** La causa de este bug fue que dev y prod tenían formas
+  distintas; un proxy que solo existiera desplegado sería el mismo error con otro disfraz.
+
+### Qué lo fija
+
+- **Un e2e de navegador nuevo, `e2e/smoke/mismo-origen.smoke.spec.ts`** (`@smoke`): hace el
+  login por la UI —sin reusar `storageState`, porque el tramo a observar es justo donde nace
+  y se usa la cookie— y afirma que **ninguna llamada a `/api` sale del origen del frontend**.
+  **Mutante corrido:** devolver `apiUrl` a `http://localhost:3000/api` —el código anterior—
+  lo pone rojo. Y el detalle que justifica que este test exista: bajo el mutante **el login
+  sigue funcionando** (el test llega a ver «Bienvenido» y recién después falla en la
+  aserción). Un test que solo mire *«¿entró?»* pasa en local antes y después del arreglo; el
+  que discrimina es el que mira **adónde se habla**.
+- **La suite de navegador entera pasa a través del proxy**, así que toda la app ejercita el
+  camino nuevo, no solo el login.
+- **`e2e/smoke/proxy-api.smoke.spec.ts`**, que mira el proxy *como proxy*: que una
+  redirección del backend llegue al navegador en vez de que la siga el servidor, y que una
+  ruta que se sale de `/api` la corte el proxy y no el backend. Cada uno con su mutante, y
+  cada mutante mata solo su test.
+
+### Lo que encontró la revisión, y por qué importa cómo
+
+El primer intento pasaba el gate entero en verde —suite de navegador incluida— y **tenía dos
+bugs**: el proxy seguía los 3xx del backend en vez de transportarlos (medido: `/api/auth/google`
+pasaba de **302 a 200**, o sea el login con Google roto), y no anclaba la ruta al prefijo
+(medido: `/api/../algo` llegaba al backend como `/algo`). Los encontró la revisión
+independiente del diff; ninguna prueba existente los podía ver, porque **ninguna ejercitaba
+un redirect ni una ruta cruda**. La lección no es «revisar más»: es que al meter una pieza de
+transporte nueva, lo que hay que probar no es que las llamadas de siempre sigan andando —eso
+pasa igual— sino las propiedades que la pieza promete.
+
+### Qué NO arregla, y sigue anotado
+
+`NODE_ENV` en Railway no es `production` —lo prueba el `Secure` ausente en la cookie—. No es
+lo que rompía el login y no se tocó acá. Con esta decisión además **importa menos**: la
+cookie ya no depende de atributos cross-site para viajar. Sigue siendo endurecimiento
+pendiente, con su consecuencia sin verificar sobre el build del frontend.
+
+---
+
 ## Los dos mensajes de las reglas: el `update` pregunta en el orden del `create`, y el del tramo dice la verdad en los dos caminos (2026-08-23)
 
 **Venía de la sección 3** («ya decidido, falta construir»). Es el remate del corte de

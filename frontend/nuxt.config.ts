@@ -20,12 +20,20 @@ export default defineNuxtConfig({
     },
   },
   runtimeConfig: {
-    // Sin `apiUrl` privada: existía para el fetching server-side, que con
-    // `ssr: false` no ocurre. La leían `stores/auth.ts` y `stores/tenant.ts`,
-    // pero solo detrás de `import.meta.server` y con fallback a la pública
-    // (ADR-017).
+    // Sigue sin haber `apiUrl` privada: existía para el fetching server-side,
+    // que con `ssr: false` no ocurre (ADR-017). El destino del proxy NO va acá
+    // —`nuxt.config.ts` se evalúa en el build y quedaría horneado—: lo lee
+    // `server/api/[...].ts` de `process.env` en cada request.
     public: {
-      apiUrl: process.env.VITE_API_URL ?? 'http://localhost:3000/api',
+      // Relativa y constante, no configurable: el navegador habla SOLO con este
+      // origen y `server/api/[...].ts` reenvía al backend. Que era una URL
+      // absoluta configurable es lo que rompía el demo —cross-site, la cookie
+      // de refresh no viajaba— y por eso dejó de ser una variable: apuntar el
+      // navegador a otro host tiene que ser imposible, no desaconsejado.
+      // Para desarrollar contra un backend remoto está `API_PROXY_TARGET`, que
+      // mueve la perilla al servidor sin sacar al navegador de este origen.
+      // ADR-022.
+      apiUrl: '/api',
     },
   },
 })

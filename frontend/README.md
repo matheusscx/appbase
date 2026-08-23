@@ -10,7 +10,9 @@ npm run dev       # servidor de desarrollo (puerto 5173 vía Docker; 3000 standa
 npm run build     # build de producción
 ```
 
-Config vía `VITE_API_URL` y `VITE_APP_NAME` en el `.env` de la raíz.
+Config vía `API_PROXY_TARGET` y `VITE_APP_NAME` en el `.env` de la raíz. El
+navegador no tiene URL de backend: pide `/api` a este mismo servidor, que lo
+reenvía (`server/api/[...].ts`, ADR-022).
 
 - Arquitectura y rutas: [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)
 - Patrones de páginas/componentes: [`docs/patterns/frontend.md`](../docs/patterns/frontend.md)

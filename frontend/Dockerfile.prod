@@ -3,10 +3,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-# Sin `API_INTERNAL_URL`: alimentaba la `runtimeConfig` privada del fetching
-# server-side, que con `ssr: false` no existe (ADR-017).
-ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
+# Sin ninguna URL de API en el build. La del navegador es `/api`, relativa y
+# constante (`nuxt.config.ts`); la del backend la lee el proxy de `process.env`
+# EN RUNTIME (`server/api/[...].ts`). Que la URL entrara como ARG es lo que
+# obligaba a reconstruir la imagen para cambiar de backend. Ver ADR-022.
 RUN npm run build
 
 FROM node:22-alpine
@@ -14,4 +14,7 @@ WORKDIR /app
 COPY --from=builder /app/.output ./.output
 EXPOSE 3000
 ENV PORT=3000
+# `API_PROXY_TARGET` se fija en el entorno del deploy (en Railway, la variable
+# del servicio). Sin ella el proxy cae al default `http://localhost:3000`, que
+# adentro del contenedor es él mismo: da 502 y no 200 silencioso.
 CMD ["node", ".output/server/index.mjs"]

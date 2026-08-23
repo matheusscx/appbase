@@ -49,7 +49,10 @@ jobs:
       JWT_REFRESH_SECRET: ci-only-not-a-real-refresh-secret
       JWT_EXPIRATION: 15m
       JWT_REFRESH_EXPIRATION: 7d
-      VITE_API_URL: http://localhost:3000/api
+      # El navegador no tiene URL de backend: pide `/api` al frontend y el
+      # proxy de Nitro reenvía acá (ADR-022). En CI los dos servidores viven
+      # en el mismo host, así que el destino es localhost.
+      API_PROXY_TARGET: http://localhost:3000
       # CredencialesService (módulo pasarela) tira error en el constructor si falta
       # → sin esto, todo test e2e muere al bootear AppModule. Valor de test (32 bytes b64).
       PASARELA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
@@ -155,7 +158,10 @@ jobs:
       JWT_REFRESH_SECRET: ci-only-not-a-real-refresh-secret
       JWT_EXPIRATION: 15m
       JWT_REFRESH_EXPIRATION: 7d
-      VITE_API_URL: http://localhost:3000/api
+      # El navegador no tiene URL de backend: pide `/api` al frontend y el
+      # proxy de Nitro reenvía acá (ADR-022). En CI los dos servidores viven
+      # en el mismo host, así que el destino es localhost.
+      API_PROXY_TARGET: http://localhost:3000
       PASARELA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
     steps:

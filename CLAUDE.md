@@ -139,7 +139,9 @@ npm run e2e:smoke  # solo el subconjunto @smoke
 ```
 
 Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_URL`,
-`JWT_SECRET`, `PORT`, `API_PREFIX`; frontend lee `VITE_API_URL`.
+`JWT_SECRET`, `PORT`, `API_PREFIX`; el frontend lee `API_PROXY_TARGET` —el destino
+al que su servidor reenvía `/api`—. El navegador **no** tiene URL de backend: habla
+solo con el origen del frontend (ADR-022).
 
 ⚠️ **No toques un `.ts` del backend con el e2e corriendo.** El compose usa
 `start:dev` con el fuente bind-mounteado, así que cualquier cambio recompila,

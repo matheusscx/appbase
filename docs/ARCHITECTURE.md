@@ -71,6 +71,27 @@ startup-app/
 └── startup-pos.sql               # Esquema de BD completo (fuente de verdad del schema)
 ```
 
+## Cómo llega una request del navegador al backend
+
+```
+[Navegador] --- fetch('/api/...') ---> [Servidor de Nuxt (Nitro)]
+                                              |
+                                    server/api/[...].ts
+                                    proxyRequest → API_PROXY_TARGET
+                                              ↓
+                                        [Backend NestJS]
+```
+
+**El navegador habla con un solo origen: el del frontend.** No conoce la URL del backend.
+Eso hace que la cookie de refresh sea same-origin por construcción y que CORS no participe
+del camino real. Es una decisión, no una comodidad: con la llamada directa el demo
+desplegado no podía completar el login, porque frontend y backend eran **sitios** distintos
+y una cookie `SameSite=Lax` no viaja cross-site.
+→ [ADR-022](./adr/022-navegador-un-solo-origen.md).
+
+El servidor de Nuxt existe aunque la app sea una SPA: `ssr: false` apaga el *renderizado*
+server-side, no el servidor ([ADR-017](./adr/017-spa-sin-ssr.md)).
+
 ## Backend
 
 ### Flujo de una request
@@ -104,7 +125,9 @@ prohibidos por lint fuera de la fachada, el seeder y los specs — ver
 
 ### Bootstrap (`main.ts`)
 
-1. **CORS** — origen `FRONTEND_URL` (dev: `http://localhost:5173`)
+1. **CORS** — origen `FRONTEND_URL` (dev: `http://localhost:5173`). Desde ADR-022 **ya no
+   está en el camino del navegador**, que llega por el proxy del frontend; sigue puesto
+   para clientes que peguen directo a la API.
 2. **ValidationPipe** — global, valida todos los DTOs con `class-validator`
 3. **ClassSerializerInterceptor** — excluye campos anotados con `@Exclude()`
 4. **Swagger** — docs en `/api/docs` con soporte Bearer
@@ -263,12 +286,16 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 | `FRONTEND_URL` | Origen CORS permitido |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Google OAuth |
 
-### Frontend (runtime config, prefijo `VITE_`)
+### Frontend
 
 | Variable | Propósito |
 |---|---|
-| `VITE_API_URL` | Base URL del backend (`http://localhost:3000/api`) |
+| `API_PROXY_TARGET` | Origen del backend al que el servidor de Nuxt reenvía `/api` (compose: `http://backend:3000`) |
 | `VITE_APP_NAME` | Título de la app |
+
+⚠️ **El navegador no tiene URL de backend, y no es configurable.** `apiUrl` es `/api`,
+relativa y constante en `nuxt.config.ts`. Que fuera una URL absoluta configurable es lo que
+rompía el demo desplegado — ver [ADR-022](./adr/022-navegador-un-solo-origen.md).
 
 ## Deployment
 

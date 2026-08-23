@@ -812,72 +812,9 @@ del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del hand
 —no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
 que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
 
-**Quedan 2 entradas.** La de la nota de crédito no espera una respuesta sino la
-**investigación de mercado que la destraba, lanzada el 2026-08-22**; la del login del demo sí
-espera una respuesta, y es una elección entre dos caminos ya medidos.
-
-- [ ] **El demo de Railway no deja entrar: la cookie de refresh es cross-site y el navegador
-  no la lleva** (infra + frontend, medido contra el demo vivo el 2026-08-23) — el backend
-  está **sano**: con `curl` y un cookie jar el flujo `login → switch-tenant` completa. Lo que
-  falla es el navegador, y `POST /auth/switch-tenant` contesta **401 «No refresh token»**.
-
-  **Lo medido, sin interpretar** (headers reales del demo, 2026-08-23):
-
-  ```
-  set-cookie: refresh_token=…; Max-Age=3600; Path=/; HttpOnly; SameSite=Lax
-  access-control-allow-credentials: true
-  access-control-allow-origin: https://frontend-production-c0db.up.railway.app
-  ```
-
-  - **CORS está bien.** El `allow-credentials` y el `allow-origin` son los correctos. Quien
-    llegue acá buscando un problema de CORS va a perder el día: no es eso.
-  - **El cliente está bien.** `useApiFetch` pone `credentials: 'include'` en todas las
-    llamadas (`composables/useApiFetch.ts:12`) y `switchTenant` pasa por ahí
-    (`stores/tenant.ts:45`). Hay hasta un test que lo fija (`stores/auth.spec.ts:179`).
-  - **`up.railway.app` está en la Public Suffix List** (verificado el 2026-08-23 contra
-    `publicsuffix.org`, entrada de Railway Corporation). O sea que
-    `frontend-production-c0db.up.railway.app` y `backend-production-8635.up.railway.app`
-    tienen **dominios registrables distintos**: para el navegador son **cross-site**, no solo
-    cross-origin. Una cookie `SameSite=Lax` no viaja ahí. No distinguí si el navegador falla
-    al guardarla o al mandarla; el resultado es el mismo.
-  - **Por eso nadie lo vio en desarrollo:** `localhost:5173` y `localhost:3000` se
-    diferencian **solo en el puerto**, y el puerto no cuenta para «sitio». En local son
-    same-site y la cookie viaja. El bug **solo existe desplegado**.
-
-  ⚠️ **No se arregla con variables de entorno.** `sameSite: 'lax'` está **hardcodeado** en
-  `auth.controller.ts:41` —única ocurrencia en todo el backend— y no lo lee ninguna config.
-
-  ℹ️ **De paso, medido por el mismo header:** falta el atributo `Secure`, que sale de
-  `NODE_ENV === 'production'` (`auth.controller.ts:42`), así que **en Railway `NODE_ENV` no
-  es `production`**. No es lo que rompe el login (sobre HTTPS la cookie viaja igual sin
-  `Secure`), pero es endurecimiento pendiente y **puede tener otras consecuencias sin medir**:
-  `nuxt.config.ts` ramifica su lista de módulos con ese mismo `NODE_ENV` y `Dockerfile.prod`
-  no lo fija, así que la imagen del demo podría estar construida con `@nuxt/test-utils`
-  adentro. **Sin verificar** — se mira antes de tocar nada.
-
-  **La pregunta para el owner: A o B.** Las dos arreglan el login; ninguna toca el sistema de
-  tokens.
-
-  - **A — el frontend hace de proxy de `/api`.** El frontend **no** es estático: `Dockerfile.prod`
-    corre `node .output/server/index.mjs`, un servidor Nitro de verdad, así que admite rutas
-    `server/api/**` aunque `ssr: false` (hoy no existe el directorio `server/`). Con eso el
-    navegador habla **solo** con el frontend: same-origin, la cookie viaja, y **CORS
-    desaparece del problema**. Toda la app sale por `useRuntimeConfig().public.apiUrl`, un
-    solo lugar. ⚠️ **Trampa:** `VITE_API_URL` entra como **ARG de build** y se hornea en la
-    imagen (`Dockerfile.prod`), así que esto es un **rebuild**, no un cambio de variable.
-  - **B — dominio propio, `app.` y `api.` bajo el mismo dominio registrable.** Comparten
-    eTLD+1, así que pasan a ser same-site y `Lax` alcanza: **cero código**. Cuesta un dominio
-    y su configuración en Railway.
-
-  🔶 **La tercera, que es la tentadora, y por qué no la propongo sola:** cambiar la cookie a
-  `SameSite=None; Secure` es **una línea** en `auth.controller.ts:41` más `NODE_ENV`. Toca la
-  cookie de refresh del sistema de autenticación ya implementado, así que roza la
-  **invariante 4** de `CLAUDE.md` («no modificar el sistema de tokens JWT»). Si eso cuenta o
-  no como «modificar el sistema» lo decide el owner, no el agente — por eso está escrita acá
-  y no ejecutada. Y aunque se decida que sí vale, deja la sesión más expuesta que A, que
-  elimina el problema en vez de permitirlo.
-
-  📌 **El owner se inclinó por A** al verlo el 2026-08-23, pero no lo cerró. Falta el sí.
+**Queda 1 entrada**, y no espera una respuesta sino la **investigación de mercado que la
+destraba, lanzada el 2026-08-22**. (La del login del demo entró y salió el mismo día: el
+owner eligió el proxy → [`resueltos.md`](resueltos.md).)
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
