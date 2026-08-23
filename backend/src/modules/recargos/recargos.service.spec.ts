@@ -428,6 +428,30 @@ describe('RecargosService', () => {
       ).rejects.toThrow(/el importe va en valorPorcentaje/);
     });
 
+    it('lo dice igual cuando el PATCH apaga de paso la columna correcta', async () => {
+      // Gemelo del de descuentos: mandar las DOS columnas —la buena en `null`,
+      // la equivocada con el número— deja la fila resultante sin importe, y el
+      // chequeo de "requerido" contestaba antes de que nadie mirara el `5000`
+      // que sí vino.
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r-pct-2',
+        tenantId: TENANT,
+        nombre: 'Diez por ciento',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.10',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await expect(
+        service.update(TENANT, 'r-pct-2', {
+          valorPorcentaje: null,
+          valorMonto: '5000',
+        }),
+      ).rejects.toThrow(/el importe va en valorPorcentaje/);
+    });
+
     it('valida los tramos aunque ningún tipo de recargo los pida', async () => {
       // La plomería de tramos es alcanzable por API y el motor los evalúa
       // mirando `tramos.length` antes que el código del tipo.

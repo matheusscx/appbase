@@ -566,6 +566,33 @@ describe('DescuentosService', () => {
       ).rejects.toThrow(/el importe va en valorPorcentaje/);
     });
 
+    it('lo dice igual cuando el PATCH apaga de paso la columna correcta', async () => {
+      // El mismo error, con una vuelta de tuerca: el cliente manda las DOS
+      // columnas —la buena en `null`, la equivocada con el número—, que es lo
+      // que arma quien serializa el formulario entero. `importeResultante`
+      // toma ese `null` al pie de la letra, así que la fila resultante queda
+      // sin importe y el chequeo de "requerido" se dispara ANTES de que nadie
+      // mire el `5000` que sí vino. Respuesta: *"El valor es requerido"* a
+      // quien mandó un valor. El único arreglo es el orden.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-pct-2',
+        tenantId: TENANT,
+        nombre: 'Diez por ciento',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.10',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.update(TENANT, 'd-pct-2', {
+          valorPorcentaje: null,
+          valorMonto: '5000',
+        }),
+      ).rejects.toThrow(/el importe va en valorPorcentaje/);
+    });
+
     it('un PATCH que solo cambia el modo revalida los tramos ya guardados', async () => {
       // Antes, un tramo de 5000 legítimo como monto fijo pasaba a leerse como
       // 500.000% al cambiar el modo. Con las columnas partidas ya no puede:
@@ -589,7 +616,7 @@ describe('DescuentosService', () => {
 
       await expect(
         service.update(TENANT, 'd-tramos', { modo: 'porcentaje' }),
-      ).rejects.toThrow(/un tramo trae su importe en valorMonto/);
+      ).rejects.toThrow(/hay un tramo con su importe en valorMonto/);
     });
 
     it('rechaza un tramo en porcentaje con valor >= 1 también en el PATCH', async () => {

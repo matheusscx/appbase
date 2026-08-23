@@ -390,6 +390,24 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     );
   });
 
+  it('el mismo mensaje sirve en un POST, donde no hay ningún tramo guardado', async () => {
+    // El tramo que no cuadra llegó en el body, no de la BD. El texto tiene que
+    // ser cierto por los dos caminos con una sola redacción: hasta el
+    // 2026-08-23 hablaba de "los tramos guardados" y de "si el PATCH no los
+    // reenvía" también acá, donde no hay PATCH ni nada guardado.
+    const res = await crearDescuento({
+      nombre: `Tramo unidad cruzada E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      tramos: [{ minimo: '10', valorMonto: '5000' }],
+    });
+
+    expect(res.status).toBe(400);
+    const mensaje = (res.body as { message: string }).message;
+    expect(mensaje).toMatch(/hay un tramo con su importe en valorMonto/);
+    expect(mensaje).toMatch(/tienen que expresarlo en valorPorcentaje/);
+  });
+
   it('cambiar SOLO el modo a porcentaje revalida los tramos ya guardados', async () => {
     // El `PATCH` no trae tramos, y hay que leerlos igual. Lo que cambió con
     // las columnas partidas es el MOTIVO del rechazo: antes el 5000 guardado
@@ -414,9 +432,12 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     expect(res.status).toBe(400);
     // El mensaje nombra al TRAMO y dice qué hacer: el cliente mandó bien su
     // `modo`, lo que no cuadra es un tramo guardado que el PATCH no reenvió.
-    expect((res.body as { message: string }).message).toMatch(
-      /un tramo trae su importe en valorMonto/,
-    );
+    // Se anclan las DOS mitades: la segunda —la que dice qué mandar— es la
+    // única accionable, y estuvo sin cubrir mientras decía algo que en un POST
+    // no era cierto.
+    const mensaje = (res.body as { message: string }).message;
+    expect(mensaje).toMatch(/hay un tramo con su importe en valorMonto/);
+    expect(mensaje).toMatch(/tienen que expresarlo en valorPorcentaje/);
   });
 
   it('un PATCH de valor sobre una regla monto_fijo no lo lee como porcentaje', async () => {
@@ -438,6 +459,33 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
 
     expect(res.status).toBe(200);
     expect((res.body as ReglaResponse).valorMonto).toBe('5000');
+  });
+
+  it('un PATCH que apaga la columna correcta y manda la otra dice cuál corresponde', async () => {
+    // La forma que arma cualquier cliente que serialice el formulario entero:
+    // las dos columnas en el body, la buena en `null` y el número en la que no
+    // corresponde. La fila resultante queda sin importe, así que el chequeo de
+    // "requerido" contestaba primero —*"El valor es requerido para este tipo"*
+    // a quien acababa de mandar un valor— y el mensaje que dice CUÁL columna va
+    // no llegaba nunca. El frontend no arma esta forma; muerde a la API.
+    const creado = await crearDescuento({
+      nombre: `Columna cruzada E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'porcentaje',
+      valorPorcentaje: '0.10',
+    });
+    expect(creado.status).toBe(201);
+    const id = (creado.body as ReglaResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ valorPorcentaje: null, valorMonto: '5000' });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /el importe va en valorPorcentaje/,
+    );
   });
 
   // ─── Recargo por escalones de monto (tipo nuevo, 2026-08-22) ──────────────

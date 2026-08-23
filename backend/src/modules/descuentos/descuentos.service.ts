@@ -591,9 +591,10 @@ export class DescuentosService {
    * viene, es que cambiar el tipo cambia QUÉ campos hacen falta. Por eso se
    * valida el resultado.
    *
-   * Las cuentas de `tramos`/`metodoPagoIds` solo se consultan cuando el tipo
-   * resultante las exige y el `PATCH` no las trae — una query puntual, nunca
-   * una por fila.
+   * Lo que el `PATCH` no trae se lee de la BD: los tramos siempre que falten
+   * (los guardados son los que delatan que la fila no puede quedar como se
+   * pide), los métodos de pago solo si el tipo resultante los exige. Una query
+   * puntual por request, nunca una por fila.
    */
   private async validarEstadoResultante(
     codigo: string,
@@ -608,14 +609,6 @@ export class DescuentosService {
     const modoResultante = tiposFijoPorcentaje.includes(codigo)
       ? 'porcentaje'
       : (dto.modo ?? actual.modo);
-    const resultante = importeResultante(modoResultante, dto, actual);
-    const importeFinal =
-      modoResultante === 'monto_fijo'
-        ? resultante.valorMonto
-        : resultante.valorPorcentaje;
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
-      throw new BadRequestException('El valor es requerido para este tipo');
-
     // Los tramos que QUEDAN, no los que llegaron. Un `PATCH` que solo cambia el
     // `modo` ya no puede reinterpretarlos —viven en la columna de la unidad
     // vieja—, así que leerlos es lo que hace que ese PATCH FALLE en vez de
@@ -636,6 +629,26 @@ export class DescuentosService {
     // los guardados están en la columna de la unidad vieja y esto falla — que
     // es lo correcto: antes ese mismo PATCH los reinterpretaba en silencio.
     validarMontosDeRegla(modoResultante, dto, tramosFinales);
+
+    // El mismo orden que en `validarSegunTipoCreate`, y por el mismo motivo:
+    // PRIMERO lo que mandó el cliente, después lo que falta. Al revés —como
+    // estuvo hasta el 2026-08-23— un `PATCH { valorPorcentaje: null,
+    // valorMonto: '5000' }` sobre una regla de porcentaje deja la fila sin
+    // importe, así que contestaba *"el valor es requerido"* a quien acababa de
+    // mandar uno, en vez de decirle cuál columna corresponde. La forma la arma
+    // cualquier cliente que serialice el formulario entero; el frontend no,
+    // porque manda una sola columna.
+    //
+    // Cuesta que la lectura de tramos de arriba corra antes de este chequeo:
+    // un PATCH destinado a morir acá hace una query que antes se ahorraba. Es
+    // una query puntual por request, nunca una por fila.
+    const resultante = importeResultante(modoResultante, dto, actual);
+    const importeFinal =
+      modoResultante === 'monto_fijo'
+        ? resultante.valorMonto
+        : resultante.valorPorcentaje;
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
+      throw new BadRequestException('El valor es requerido para este tipo');
 
     if (TIPOS_CON_METODOS.includes(codigo)) {
       const cantidad =

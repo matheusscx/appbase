@@ -565,14 +565,6 @@ export class RecargosService {
     const modoResultante = tiposFijoPorcentaje.includes(codigo)
       ? 'porcentaje'
       : (dto.modo ?? actual.modo);
-    const resultante = importeResultante(modoResultante, dto, actual);
-    const importeFinal =
-      modoResultante === 'monto_fijo'
-        ? resultante.valorMonto
-        : resultante.valorPorcentaje;
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
-      throw new BadRequestException('El valor es requerido para este tipo');
-
     // Los tramos que QUEDAN, no los que llegaron. Un `PATCH` que solo cambia el
     // `modo` ya no puede reinterpretarlos —viven en la columna de la unidad
     // vieja—, así que leerlos es lo que hace que ese PATCH FALLE en vez de
@@ -588,6 +580,26 @@ export class RecargosService {
     // Lo que mandó el cliente (para que la columna equivocada sea 400) más los
     // tramos que quedan.
     validarMontosDeRegla(modoResultante, dto, tramosFinales);
+
+    // El mismo orden que en `validarSegunTipoCreate`, y por el mismo motivo:
+    // PRIMERO lo que mandó el cliente, después lo que falta. Al revés —como
+    // estuvo hasta el 2026-08-23— un `PATCH { valorPorcentaje: null,
+    // valorMonto: '5000' }` sobre una regla de porcentaje deja la fila sin
+    // importe, así que contestaba *"el valor es requerido"* a quien acababa de
+    // mandar uno, en vez de decirle cuál columna corresponde. La forma la arma
+    // cualquier cliente que serialice el formulario entero; el frontend no,
+    // porque manda una sola columna.
+    //
+    // Cuesta que la lectura de tramos de arriba corra antes de este chequeo:
+    // un PATCH destinado a morir acá hace una query que antes se ahorraba. Es
+    // una query puntual por request, nunca una por fila.
+    const resultante = importeResultante(modoResultante, dto, actual);
+    const importeFinal =
+      modoResultante === 'monto_fijo'
+        ? resultante.valorMonto
+        : resultante.valorPorcentaje;
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
+      throw new BadRequestException('El valor es requerido para este tipo');
 
     if (TIPOS_CON_METODOS.includes(codigo)) {
       const cantidad =

@@ -58,6 +58,14 @@ function validarMonto(
  * Que las dos vengan vacías NO es error acá: es el estado del valor plano de
  * una regla por tramos, que expresa su importe en `tramos[]`. **En un tramo sí
  * lo es** — ver `validarTramo`.
+ *
+ * ⚠️ El mensaje del tramo tiene que ser cierto por los DOS caminos con un solo
+ * texto. En un `POST` el tramo que no cuadra siempre viene en el body; en un
+ * `PATCH` puede ser uno guardado que el cliente no reenvió y ni siquiera sabe
+ * que existe. Por eso nombra las dos procedencias en vez de afirmar una:
+ * `donde` distingue regla de tramo, pero acá no llega ningún discriminador de
+ * POST/PATCH, y agregarlo sería enhebrar un parámetro por los dos services
+ * solo para elegir un texto.
  */
 function validarExpresion(
   modo: string,
@@ -73,14 +81,14 @@ function validarExpresion(
     throw new BadRequestException(
       donde === 'la regla'
         ? 'Esta regla es un porcentaje: el importe va en valorPorcentaje'
-        : 'Esta regla es un porcentaje, y un tramo trae su importe en valorMonto. Si el PATCH no los reenvía, son los tramos guardados: mandalos con su importe en valorPorcentaje',
+        : 'Esta regla es un porcentaje: hay un tramo con su importe en valorMonto. Los tramos —los que mandes, o los que ya estén guardados si no los mandás— tienen que expresarlo en valorPorcentaje',
     );
   }
   if (modo === 'monto_fijo' && valores.valorPorcentaje) {
     throw new BadRequestException(
       donde === 'la regla'
         ? 'Esta regla es un monto fijo: el importe va en valorMonto'
-        : 'Esta regla es un monto fijo, y un tramo trae su importe en valorPorcentaje. Si el PATCH no los reenvía, son los tramos guardados: mandalos con su importe en valorMonto',
+        : 'Esta regla es un monto fijo: hay un tramo con su importe en valorPorcentaje. Los tramos —los que mandes, o los que ya estén guardados si no los mandás— tienen que expresarlo en valorMonto',
     );
   }
   validarMonto('monto', valores.valorMonto);

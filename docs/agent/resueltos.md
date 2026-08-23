@@ -17,6 +17,99 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos mensajes de las reglas: el `update` pregunta en el orden del `create`, y el del tramo dice la verdad en los dos caminos (2026-08-23)
+
+**Venía de la sección 3** («ya decidido, falta construir»). Es el remate del corte de
+`valor` en dos columnas —ver [«El importe de una regla deja de ser ambiguo»](#el-importe-de-una-regla-deja-de-ser-ambiguo-dos-columnas-en-vez-de-una-cerrado-2026-08-23)—:
+lo que ese cierre dejó anotado porque su diff ya tenía el LIMPIO atado por hash.
+Mudada verbatim:
+
+---
+
+- [ ] **Dos mensajes de las reglas dicen algo que no siempre es cierto** (backend, medidos
+  contra la API viva el 2026-08-23 al cerrar el corte de `valor` en dos columnas → ver
+  [`resueltos.md`](resueltos.md)) — ninguno es fuga ni persistencia mala: los dos caminos
+  rechazan bien con 400. Es diagnosticabilidad, y salen los dos en una pasada.
+
+  1. **El `create` y el `update` validan en orden inverso, y el comentario del `create`
+     declara un principio que su gemelo no cumple.** En `validarSegunTipoCreate` se puso
+     `validarMontosDeRegla` **antes** del chequeo de "el valor es requerido", justamente para
+     que quien manda la columna equivocada no reciba *"el valor es requerido"* habiendo
+     mandado un valor. En `validarEstadoResultante` quedó al revés
+     (`descuentos.service.ts:617` antes de `:638`, gemelo en `recargos.service.ts:574`
+     vs `:590`), así que `PATCH {"valorPorcentaje": null, "valorMonto": "5000"}` sobre una
+     regla de porcentaje contesta *"El valor es requerido para este tipo"*. El frontend no
+     manda esa forma —arma una sola columna—, así que muerde a clientes de API.
+  2. **El mensaje del tramo habla de un `PATCH` y de "tramos guardados" también en un
+     `POST`** (`common/utils/monto-regla.util.ts:76,83`), donde no hay nada guardado y el
+     cliente acaba de mandar el tramo en el body. La frase es un condicional, así que no
+     afirma algo falso, pero la segunda mitad es ruido en el POST y **ningún test la
+     cubre**: el e2e ancla solo la primera mitad. `validarExpresion` ya recibe un
+     discriminador `donde` (regla/tramo); le falta el equivalente de POST/PATCH, o cortar la
+     frase.
+
+  ⚠️ **Por qué está acá y no se arregló en el momento:** el diff ya tenía el LIMPIO de la
+  revisión independiente atado por hash, y tocarlo lo invalidaba. Son de mensaje, no de
+  conducta.
+
+---
+
+### Qué se hizo
+
+**1. El orden.** El chequeo de *"El valor es requerido para este tipo"* se movió a
+**después** de `validarMontosDeRegla` en `validarEstadoResultante`, en los dos services.
+Ahora los cuatro caminos —`create` y `update` × descuentos y recargos— preguntan lo mismo
+en el mismo orden: primero si lo que mandó el cliente cuadra, después si falta algo.
+
+El caso que se medía mal no era el que decía la entrada. Un `PATCH { valorMonto: '5000' }`
+a secas sobre una regla de porcentaje **ya contestaba bien**, porque `importeResultante`
+cae de vuelta al `valorPorcentaje` guardado y la fila resultante sí tiene importe. La forma
+que muerde es la que manda **las dos** columnas —`{ valorPorcentaje: null, valorMonto:
+'5000' }`—, que es lo que arma cualquier cliente que serialice el formulario entero: ese
+`null` explícito deja la fila sin importe, y el chequeo de requerido contestaba antes de que
+nadie mirara el `5000` que sí vino. El arreglo es el mismo; el test que lo fija tuvo que
+apuntar a esa forma y no a la de la entrada.
+
+**Costo asumido, dicho explícito:** la lectura de los tramos guardados ahora corre **antes**
+del chequeo de requerido, así que un `PATCH` destinado a morir por falta de importe hace una
+query que antes se ahorraba. Es una query puntual por request, nunca una por fila. La
+alternativa —partir `validarMontosDeRegla` en dos llamadas para colar el requerido en el
+medio— se descartó: convierte una función con una responsabilidad en dos mitades que hay que
+acordar entre cuatro llamadores, que es exactamente el acuerdo entre copias que este archivo
+existió para eliminar.
+
+**2. El mensaje del tramo.** `common/utils/monto-regla.util.ts` ya no habla de un `PATCH`
+ni de "los tramos guardados" cuando puede no haber ninguno:
+
+> Esta regla es un porcentaje: hay un tramo con su importe en `valorMonto`. Los tramos —los
+> que mandes, o los que ya estén guardados si no los mandás— tienen que expresarlo en
+> `valorPorcentaje`.
+
+Nombra las dos procedencias en vez de afirmar una, así que es cierto en el `POST` (el tramo
+vino en el body) y en el `PATCH` (puede ser uno guardado que el cliente ni sabe que existe).
+Se descartó enhebrar un discriminador POST/PATCH por los dos services **solo para elegir un
+texto**, y se descartó cortar la segunda mitad: es la única parte accionable del mensaje.
+
+### Qué lo fija
+
+- **Unit, uno por service** (`descuentos.service.spec.ts`, `recargos.service.spec.ts`):
+  *"lo dice igual cuando el PATCH apaga de paso la columna correcta"*.
+  **Mutante corrido:** revertir el bloque de requerido a su posición anterior —el código tal
+  cual estaba— pone rojos exactamente esos dos y ningún otro. No basta con romperlo: el
+  mutante es el código viejo, así que prueba que el test **habría cazado el bug**.
+- **E2E** (`reglas-valor.e2e-spec.ts`, de 21 a 23 tests): el `PATCH` con las dos columnas
+  contra la API viva, y la frase del tramo por el camino del **`POST`**, que era el que no
+  estaba cubierto —el e2e viejo anclaba solo la primera mitad, la que no cambia—. Las dos
+  aserciones del tramo ahora anclan las dos mitades.
+
+### Lo que no se tocó
+
+Ninguna conducta de cálculo, ningún `CHECK`, ninguna columna, ningún DTO. Los dos caminos ya
+rechazaban con 400 antes y siguen rechazando con 400: cambió **qué dicen** y **en qué orden
+preguntan**.
+
+---
+
 ## El umbral de descuadre al cierre: dos niveles, ninguno bloquea, y una bandeja que llama a revisar (2026-08-23)
 
 **Venían de la sección 3** («ya decidido, falta construir»): dos entradas que se construyeron

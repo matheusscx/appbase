@@ -391,32 +391,6 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
-- [ ] **Dos mensajes de las reglas dicen algo que no siempre es cierto** (backend, medidos
-  contra la API viva el 2026-08-23 al cerrar el corte de `valor` en dos columnas → ver
-  [`resueltos.md`](resueltos.md)) — ninguno es fuga ni persistencia mala: los dos caminos
-  rechazan bien con 400. Es diagnosticabilidad, y salen los dos en una pasada.
-
-  1. **El `create` y el `update` validan en orden inverso, y el comentario del `create`
-     declara un principio que su gemelo no cumple.** En `validarSegunTipoCreate` se puso
-     `validarMontosDeRegla` **antes** del chequeo de "el valor es requerido", justamente para
-     que quien manda la columna equivocada no reciba *"el valor es requerido"* habiendo
-     mandado un valor. En `validarEstadoResultante` quedó al revés
-     (`descuentos.service.ts:617` antes de `:638`, gemelo en `recargos.service.ts:574`
-     vs `:590`), así que `PATCH {"valorPorcentaje": null, "valorMonto": "5000"}` sobre una
-     regla de porcentaje contesta *"El valor es requerido para este tipo"*. El frontend no
-     manda esa forma —arma una sola columna—, así que muerde a clientes de API.
-  2. **El mensaje del tramo habla de un `PATCH` y de "tramos guardados" también en un
-     `POST`** (`common/utils/monto-regla.util.ts:76,83`), donde no hay nada guardado y el
-     cliente acaba de mandar el tramo en el body. La frase es un condicional, así que no
-     afirma algo falso, pero la segunda mitad es ruido en el POST y **ningún test la
-     cubre**: el e2e ancla solo la primera mitad. `validarExpresion` ya recibe un
-     discriminador `donde` (regla/tramo); le falta el equivalente de POST/PATCH, o cortar la
-     frase.
-
-  ⚠️ **Por qué está acá y no se arregló en el momento:** el diff ya tenía el LIMPIO de la
-  revisión independiente atado por hash, y tocarlo lo invalidaba. Son de mensaje, no de
-  conducta.
-
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
   arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (`ventas.service.ts:1390`,
