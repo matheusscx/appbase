@@ -133,7 +133,17 @@ Modelo: `rol → módulo contratado → permisos`
 
 **Dos niveles de actor:**
 
-- **Superadmin del SaaS** — contrata/desactiva módulos por tenant (`tenant_modulos`). El tenant no puede gestionar sus propios módulos.
+- **Superadmin del SaaS** — contrata módulos por tenant (`tenant_modulos`). El tenant no puede
+  gestionar sus propios módulos.
+  ⚠️ **Contrata, no desactiva** (medido el 2026-08-23): existe `POST /admin/tenants/:id/modules`
+  y **ninguna baja** — `tenantModuloRepo` solo hace `create`/`save`/`find`. Dar de baja un
+  módulo hoy es tocar la base a mano. Esta línea decía "contrata/desactiva" y era falsa.
+  📌 **`MiCaja` y `Cajas` se venden juntos, y con `Ventas` presencial** (regla del owner,
+  2026-08-22): no son dos productos sino dos alcances de permiso modelados como módulos —el
+  cajero operando su turno, y la supervisión de las cajas ajenas—, y sueltos no sirven. Nada
+  en el código sostiene la convención: el alta de tenant no contrata **ningún** módulo, así
+  que un tenant con `MiCaja` y sin `Cajas` es construible por descuido, y ahí sus cajeros se
+  ven la plata entre ellos ([`features/ventas.md`](features/ventas.md)).
 - **Admin del tenant** — crea roles personalizados, les asigna módulos contratados y permisos, y los asigna a usuarios del tenant.
 
 **Roles:**

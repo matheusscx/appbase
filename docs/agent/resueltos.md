@@ -17,6 +17,57 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El tenant `MiCaja`-only: descartado, son el mismo módulo partido por audiencia (2026-08-22)
+
+**Lo levantó la revisión independiente** del diff del eje de visibilidad: la rama 2 de
+`resolverAlcanceDerivadoDeCaja` pregunta solo por el módulo `Cajas`, así que un tenant con
+`MiCaja` y sin `Cajas` —que sí tiene cajones físicos y puede tener varios cajeros— se queda sin
+eje, y ahí todos ven la facturación de todos.
+
+**La respuesta del owner mueve la pregunta de lugar:** `MiCaja` y `Cajas` **no son dos
+productos**. Son el mismo módulo partido por audiencia —uno es el cajero operando su turno, el
+otro la supervisión de las cajas ajenas— y **se venden juntos, con `Ventas` presencial**;
+sueltos no sirven. Con eso, el único tenant que cae en la rama 2 es el que no tiene ninguno de
+los dos: la tienda **solo online**, que es literalmente la justificación con la que la rama se
+escribió. El caso que levantó la revisión es **hipotético**.
+
+**Por qué el split en dos módulos se queda igual:** no está haciendo trabajo comercial, está
+haciendo trabajo de **permisos**. Es lo que hace expresable el eje — `Cajas:Leer` sirve de señal
+de supervisión precisamente porque `Cajas` es un módulo que el tenant puede tener o no. Unirlos
+obligaría a mover esa distinción entera adentro de un módulo y a que el eje pregunte otra cosa:
+arquitectura nueva para un problema que no existe.
+
+**Dos datos que se midieron en el camino y corrigen la entrada original:**
+
+1. **No hay downgrade silencioso.** La entrada decía que dar de baja el contrato de `Cajas`
+   concede visibilidad total. Hay `POST /admin/tenants/:id/modules` para agregar (y el
+   listado vive aparte, en `GET /api/tenants/modules`, del lado del tenant activo), pero
+   **no hay ninguna baja**: `tenantModuloRepo` solo tiene `create`/`save` y `find` en todo `src/`: solo pasaría tocando la base a mano.
+2. **El alta de tenant no contrata ningún módulo.** Crea el rol admin, la fórmula de precio y la
+   caja virtual, y `tenant_modulos` arranca vacío. O sea que "se venden juntos" es una
+   **convención comercial que nada en el código sostiene**, y el riesgo real que queda es el
+   descuido al aprovisionar, no un paquete que exista.
+
+**Qué se hizo, decidido por el owner:** dejar la regla como está, y cerrar el hueco de
+verificación en vez del hipotético.
+
+- **`backend/test/visibilidad-tenant-sin-cajas.e2e-spec.ts`** (nuevo): los dos tenants del seed
+  contratan `Cajas`, así que **la rama 2 no la ejercía nadie**. El test crea el tenant con
+  `Ventas` y `Pagos` y ningún módulo de caja, y fija que su admin **no queda bloqueado** —que es
+  la regresión que de verdad se cometió: la primera versión del eje lanzaba `403` y ahí le
+  pegaba a todo el mundo, sin arreglo posible por configuración—. El segundo `it` comprueba, en
+  vez de asumir, que `Cajas:Leer` es inobtenible en ese tenant.
+  ⚠️ **Verificado con mutante**, no solo "pasa": volviendo el controller a la variante que lanza
+  (`resolverAlcanceCaja`, el código anterior al arreglo) el test se pone rojo con
+  `["/api/ventas", 403]` contra `200`. Lo que **no** puede fijar, y está dicho en el archivo:
+  que "ve todo" en vez de "ve lo suyo" — con un solo usuario las dos ramas devuelven lo mismo, y
+  un segundo usuario exige el flujo de invitación. Esa distinción ya vive en `rbac.service.spec.ts`.
+- **`docs/features/ventas.md`**: queda escrita la convención (van juntos, y con `Ventas`), por
+  qué el split es de permisos y no comercial, y el aviso de que nada en el código la sostiene.
+  Se decidió **no** codificar la dependencia entre módulos: el catálogo hoy no la tiene.
+
+---
+
 ## Ocultarle el resultado al cajero se descarta: pelea contra la aritmética, y contra el propio cierre (2026-08-22)
 
 Cierra la entrada *"Ocultar el resultado post-cierre al cajero"*. **Se cierra por descarte,

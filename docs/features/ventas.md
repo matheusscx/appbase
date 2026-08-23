@@ -219,8 +219,20 @@ aparte, y lo gobierna un permiso de otro módulo. La regla completa tiene **tres
 | Situación | Alcance | Por qué |
 |---|---|---|
 | Tiene `Cajas:Leer` | **Todo el tenant** | Es el nivel de supervisión. |
-| No lo tiene, y el tenant **no contrató** el módulo `Cajas` | **Todo el tenant** | Ahí la supervisión no existe como concepto: `Cajas:Leer` es inobtenible **incluso para el admin**, así que acotar sería permanente e irreversible por configuración. Una tienda solo online se quedaría sin ver su propia facturación. ⚠️ **Agujero conocido:** alcanza también al tenant que compró `MiCaja` y **no** `Cajas`, que sí tiene cajones físicos y varios cajeros — ahí el eje queda apagado, y dar de baja el contrato de `Cajas` concede visibilidad total en silencio. Decisión de producto pendiente en [`agent/pendientes.md`](../agent/pendientes.md). |
+| No lo tiene, y el tenant **no contrató** el módulo `Cajas` | **Todo el tenant** | Ahí la supervisión no existe como concepto: `Cajas:Leer` es inobtenible **incluso para el admin**, así que acotar sería permanente e irreversible por configuración. Es el caso de la tienda **solo online**. |
 | No lo tiene, y el tenant **sí contrató** `Cajas` | **Lo de sus cajas** | Que no lo tenga es una decisión de configuración, no una ausencia del concepto. |
+
+📌 **`MiCaja` y `Cajas` se venden juntos, y con `Ventas` presencial** (regla del owner,
+2026-08-22). No son dos productos: son **dos alcances de permiso modelados como módulos** — uno
+es la operación del cajero sobre su propio turno y el otro la supervisión de las cajas ajenas, y
+sueltos no sirven. Esa convención es la que hace que la rama 2 solo alcance a la tienda **solo
+online**, que es su justificación escrita.
+⚠️ **Nada en el código la sostiene:** el alta de tenant **no contrata ningún módulo**
+(`tenant_modulos` arranca vacío) y se agregan de a uno por `POST /admin/tenants/:id/modules`, sin
+endpoint para quitarlos. O sea que un tenant con `MiCaja` y sin `Cajas` es construible por
+descuido al dar de alta, y ahí sus cajeros se verían la plata entre ellos. Es un error de
+aprovisionamiento, no un paquete que exista — se decidió **no** codificar la dependencia entre
+módulos, que hoy el catálogo no tiene.
 
 ⚠️ **`MiCaja:Leer` no entra en la regla, y es a propósito.** La primera versión lo usaba y era
 **fail-open**: sacarle `MiCaja:Leer` a un rol que conserva `MiCaja:Crear` le concedía

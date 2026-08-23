@@ -1090,40 +1090,6 @@ destraba, lanzada el 2026-08-22**.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
 
-### El tenant que compró `MiCaja` y no `Cajas` se queda sin eje de visibilidad (2026-08-22)
-
-**Lo levantó la revisión independiente del diff del eje**, y no es un bug: es la rama 2 de
-`RbacService.resolverAlcanceDerivadoDeCaja` funcionando como se diseñó. Pero su justificación
-escrita ("una tienda solo online no tiene cajas que acotar") **no cubre el caso que la propia
-regla incluye**.
-
-**El hecho:** la rama pregunta solo por el módulo `Cajas`. Un tenant que contrató `MiCaja` y
-**no** `Cajas` sí tiene cajones físicos que se arquean, y puede tener varios cajeros — y ahí
-todos ven la facturación de todos, que es exactamente la fuga que este frente cerró. Corolario
-incómodo: **dar de baja el contrato de `Cajas`** (soft-delete en `tenant_modulos`) concede
-visibilidad total, en silencio.
-
-**Por qué la rama existe igual:** en ese tenant `Cajas:Leer` es *inobtenible*, ni siquiera para
-el admin, porque `userHasPermiso` exige el módulo contratado incluso en el short-circuit del rol
-fijo. Acotar ahí dejaría a todo el mundo —admin incluido— viendo solo su propia caja, **sin
-forma de revertirlo por configuración**. Se eligió el default que no deja a un tenant sin acceso
-a su propia facturación.
-
-**Hoy no está ejercido por ningún test** porque el seed no tiene ese tenant: Paris y Falabella
-contratan los dos módulos. O sea que la regla no está mal, está **sin cubrir**.
-
-🛑 **La pregunta al owner:** ¿se vende `MiCaja` sin `Cajas`? Tres salidas, y la elección es de
-producto, no técnica:
-
-1. **Dejarlo como está.** Correcto si `MiCaja` sin `Cajas` no es un paquete que se venda.
-2. **Condicionar la rama a que el tenant no tenga NINGUNO de los dos módulos**, y usar
-   `RbacService.userIsTenantAdmin` como escape para que el admin no quede acotado para siempre.
-   Es la que evita el dilema sin inventar un módulo nuevo; el código ya tiene las dos piezas.
-3. **Que `MiCaja` implique el eje**, acotando a todos menos al admin.
-
-Cualquiera que se elija, va con un test que ejerza el tenant `MiCaja`-only — que es lo que hoy
-falta más que la decisión.
-
 ## 5. Carreras de concurrencia
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se

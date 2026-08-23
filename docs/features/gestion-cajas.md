@@ -62,6 +62,13 @@ en **dos módulos de permiso y dos superficies de navegación**:
 |---|---|---|---|
 | `MiCaja` | `Leer` / `Crear` / `Actualizar` | `/mi-caja*` | El cajero opera **su propio** turno: abrir, registrar movimientos, cerrar con cuadre, ver su propio historial. |
 | `Cajas` | `Leer` / `Crear` / `Actualizar` / `Eliminar` | `/cajas*`, `/configuracion/cajas` | Con `Leer`, el encargado **supervisa** todos los cajones del tenant: grid con su estado, historial de todos (filtro por cajero o por cajón) y detalle de cualquier caja. `Crear`/`Actualizar`/`Eliminar` gobiernan el **CRUD de cajones** (desde 2026-07-23). Y desde el **2026-08-13**, `Actualizar` habilita además **operar sobre caja ajena**: forzar el cierre de la caja de un cajero ausente y pedirle fe a un garzón en turno (ver [Ciclo de vida](#ciclo-de-vida-de-una-solicitud-de-testigo)). Hasta esa fecha la **superficie `/cajas*` era read-only** —el módulo no, que ya administraba cajones—, y ese ensanche del significado de `Actualizar` está anotado como permiso grueso en [`pendientes.md`](../agent/pendientes.md). |
+📌 **Los dos módulos se venden juntos, y con `Ventas` presencial** (regla del owner, 2026-08-22).
+No son dos productos: son **dos alcances de permiso modelados como módulos** —operar la propia
+caja contra supervisar las ajenas—, y sueltos no sirven. Ese split es lo que hace expresable el
+eje de visibilidad de `ventas`/`pagos`, que usa `Cajas:Leer` como señal de supervisión
+([`ventas.md`](ventas.md)). ⚠️ **Nada en el código lo sostiene:** el alta de tenant no contrata
+ningún módulo y no hay endpoint para quitarlos, así que un tenant con `MiCaja` y sin `Cajas` es
+construible por descuido al aprovisionar.
 
 Un usuario con ambos módulos ve las dos entradas de sidebar de forma independiente:
 "Mi caja" es su propio turno, "Cajas" es supervisión — sin lógica especial para el caso

@@ -125,9 +125,12 @@ y su mecánica en [`patterns/backend.md` §16](../../patterns/backend.md).
 3. **Tercera rama, que el diseño no tenía:** un tenant que **no contrató el módulo `Cajas`** ve
    todo, porque ahí `Cajas:Leer` es inobtenible —`userHasPermiso` exige el módulo contratado
    incluso para el admin—. Acotar ahí sería permanente y sin arreglo por configuración.
-   ⚠️ **Alcanza también al tenant que compró `MiCaja` y no `Cajas`**, que sí tiene cajones
-   físicos: ahí el eje queda apagado. Anotado como decisión de producto pendiente en
-   [`agent/pendientes.md`](../../agent/pendientes.md).
+   ⚠️ **Alcanzaría también al tenant que compró `MiCaja` y no `Cajas`**, que sí tiene cajones
+   físicos. **Resuelto el 2026-08-22 y descartado:** los dos son el mismo módulo partido por
+   audiencia y se venden juntos, así que ese tenant no existe y la rama solo alcanza a la tienda
+   solo online — su justificación escrita. Se agregó el e2e que faltaba
+   (`visibilidad-tenant-sin-cajas.e2e-spec.ts`); detalle en
+   [`agent/resueltos.md`](../../agent/resueltos.md).
 4. **`caja_id` NULL → "de nadie".** Se resolvió con `EXISTS` **sin** `OR caja_id IS NULL`: hoy
    ningún camino la deja vacía, y si mañana aparece uno, una fila sin caja no cae en "lo mío"
    por omisión.

@@ -752,8 +752,13 @@ participa. Sus tres ramas:
    como concepto**: `Cajas:Leer` es inobtenible, ni siquiera para el admin, porque
    `userHasPermiso` exige el módulo contratado incluso en el short-circuit del rol fijo.
    Acotar sería permanente y sin arreglo posible por configuración — una tienda solo online se
-   quedaría sin ver su propia facturación. Aplica también al tenant que compró `MiCaja` y no
-   `Cajas`.
+   quedaría sin ver su propia facturación. 📌 En la práctica es **solo** ese caso: `MiCaja` y
+   `Cajas` se venden juntos (regla del owner, 2026-08-22), así que el tenant con `MiCaja` y sin
+   `Cajas` no existe — y si aparece por un descuido al aprovisionar, sus cajeros se ven la plata
+   entre ellos. La rama la **ejecuta** `visibilidad-tenant-sin-cajas.e2e-spec.ts` — ojo: fija que ese
+   tenant **no queda bloqueado**, no que vea todo. Si la rama devolviera `false`, las rutas
+   seguirían dando 200 (solo se agrega un `AND`) y el test seguiría verde. La conducta
+   rama-por-rama la fija `rbac.service.spec.ts`.
 3. **Sin él, y el tenant SÍ contrató `Cajas`** → `false`, se acota. Que al rol le falte el
    permiso es una decisión de configuración, no una ausencia del concepto.
 
