@@ -978,7 +978,7 @@ describe('Ventas (e2e)', () => {
     // "Directo" — regla de valor plano sin condiciones (seedTiposRegla()).
     const TIPO_DIRECTO_ID = '550e8400-e29b-41d4-a716-446655440337';
 
-    const crearDescuento = async (nombre: string, valor: string) => {
+    const crearDescuento = async (nombre: string, valorPorcentaje: string) => {
       const res = await request(app.getHttpServer())
         .post('/api/descuentos')
         .set('Authorization', `Bearer ${token}`)
@@ -986,7 +986,7 @@ describe('Ventas (e2e)', () => {
           nombre,
           tipoReglaId: TIPO_DIRECTO_ID,
           modo: 'porcentaje',
-          valor,
+          valorPorcentaje,
           activo: true,
         });
       expect(res.status).toBe(201);
@@ -1036,7 +1036,7 @@ describe('Ventas (e2e)', () => {
       const patch = await request(app.getHttpServer())
         .patch(`/api/descuentos/${descuentoId}`)
         .set('Authorization', `Bearer ${token}`)
-        .send({ nombre: `Socio 20% ${sufijo}`, valor: '0.20' });
+        .send({ nombre: `Socio 20% ${sufijo}`, valorPorcentaje: '0.20' });
       expect(patch.status).toBe(200);
 
       // Sin esto el test pasaría igual con un PATCH que no hiciera nada: hay
@@ -1047,9 +1047,13 @@ describe('Ventas (e2e)', () => {
         .set('Authorization', `Bearer ${token}`);
       expect(catalogo.status).toBe(200);
       const enCatalogo = (
-        catalogo.body as { id: string; nombre: string; valor: string }[]
+        catalogo.body as {
+          id: string;
+          nombre: string;
+          valorPorcentaje: string;
+        }[]
       ).find((d) => d.id === descuentoId);
-      expect(Number(enCatalogo?.valor)).toBeCloseTo(0.2, 4);
+      expect(Number(enCatalogo?.valorPorcentaje)).toBeCloseTo(0.2, 4);
       expect(enCatalogo?.nombre).toBe(`Socio 20% ${sufijo}`);
 
       const filas = await filasDescuento(ventaId);

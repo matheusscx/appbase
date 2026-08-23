@@ -201,6 +201,17 @@ desempate entre reglas del mismo modo, donde el orden no mueve el total.
 
 ### Algoritmo (núcleo)
 
+**De dónde sale el importe de una regla (2026-08-23).** Desde que `valor` se partió, cada
+descuento y cada recargo lleva su importe en `valor_monto` **o** en `valor_porcentaje`, y el
+motor toma la que corresponde con `valorDelModo(regla.modo, …)`. La otra se ignora: el `modo`
+manda, aunque un CHECK de tabla ya impide que las dos vengan llenas.
+
+⚠️ **`modo` no se volvió redundante con eso**, y conviene decirlo porque es lo primero que
+uno supone: sigue siendo la **clave de orden** de los pasos —los `monto_fijo` se aplican
+después de los porcentajes, ver `ordenarReglas()`— y sigue siendo lo que se **congela en la venta**.
+Lo que sí cambió es que `valorEfectivo` ya no puede salir de un número ambiguo.
+
+
 **Desbruteo.** Si `precio_incluye_impuesto`, el neto sale de dividir por `1 + Σ tasas`
 de **todos** los impuestos vigentes de la línea, no solo el IVA: el precio de góndola de
 una botella con ILA ya trae los dos, y tratarlo como "IVA solamente" cobraría el ILA dos

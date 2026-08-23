@@ -162,7 +162,7 @@ describe('RecargosService', () => {
       await service.create(TENANT, {
         nombre: 'Recargo general',
         tipoReglaId: 'tipo-general',
-        valor: '0.05',
+        valorPorcentaje: '0.05',
         modo: 'porcentaje',
       });
       expect(managerMock.save).toHaveBeenCalledTimes(1);
@@ -182,9 +182,9 @@ describe('RecargosService', () => {
         service.create(TENANT, {
           nombre: 'Recargo con tramo',
           tipoReglaId: 'tipo-general',
-          valor: '0.05',
+          valorPorcentaje: '0.05',
           modo: 'porcentaje',
-          tramos: [{ minimo: '10', valor: '50' }],
+          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });
@@ -212,8 +212,8 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-monto',
         modo: 'monto_fijo',
         tramos: [
-          { minimo: '0', valor: '2000' },
-          { minimo: '20000', valor: '500' },
+          { minimo: '0', valorMonto: '2000' },
+          { minimo: '20000', valorMonto: '500' },
         ],
       });
       expect(managerMock.save).toHaveBeenCalled();
@@ -228,7 +228,7 @@ describe('RecargosService', () => {
           nombre: 'Sin tramos',
           tipoReglaId: 'tipo-monto',
           modo: 'monto_fijo',
-          valor: '2000',
+          valorMonto: '2000',
         }),
       ).rejects.toThrow(/al menos un tramo/);
     });
@@ -239,7 +239,7 @@ describe('RecargosService', () => {
         nombre: 'Mora',
         tipoReglaId: 'tipo-mora',
         diasVencimiento: 30,
-        valor: '0.05',
+        valorPorcentaje: '0.05',
         modo: 'porcentaje',
       });
       const createArgs = managerMock.create.mock.calls[0] as [
@@ -258,7 +258,7 @@ describe('RecargosService', () => {
         service.create(TENANT, {
           nombre: 'Mora sin dias',
           tipoReglaId: 'tipo-mora',
-          valor: '0.05',
+          valorPorcentaje: '0.05',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -271,7 +271,7 @@ describe('RecargosService', () => {
           nombre: 'Mora fuera rango',
           tipoReglaId: 'tipo-mora',
           diasVencimiento: 400,
-          valor: '0.05',
+          valorPorcentaje: '0.05',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -285,7 +285,7 @@ describe('RecargosService', () => {
         nombre: 'Recargo MP',
         tipoReglaId: 'tipo-recargo_metodo_pago',
         metodoPagoIds: ['mp-1'],
-        valor: '0.03',
+        valorPorcentaje: '0.03',
         modo: 'porcentaje',
       });
       expect(managerMock.save).toHaveBeenCalledTimes(2);
@@ -301,7 +301,7 @@ describe('RecargosService', () => {
         service.create(TENANT, {
           nombre: 'Recargo MP',
           tipoReglaId: 'tipo-recargo_metodo_pago',
-          valor: '0.03',
+          valorPorcentaje: '0.03',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -312,7 +312,7 @@ describe('RecargosService', () => {
       await service.create(TENANT, {
         nombre: 'Interés simple',
         tipoReglaId: 'tipo-interes_simple',
-        valor: '0.02',
+        valorPorcentaje: '0.02',
       });
       const createArgs = managerMock.create.mock.calls[0] as [
         unknown,
@@ -328,7 +328,7 @@ describe('RecargosService', () => {
       await service.create(TENANT, {
         nombre: 'Interés compuesto',
         tipoReglaId: 'tipo-interes_compuesto',
-        valor: '0.02',
+        valorPorcentaje: '0.02',
       });
       const createArgs = managerMock.create.mock.calls[0] as [
         unknown,
@@ -344,7 +344,7 @@ describe('RecargosService', () => {
         service.create(TENANT, {
           nombre: 'Existing',
           tipoReglaId: 'tipo-general',
-          valor: '0.05',
+          valorPorcentaje: '0.05',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -371,13 +371,61 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-general',
         condicionValor: null,
         modo: 'monto_fijo',
-        valor: '1000',
+        valorMonto: '1000',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
 
       await expect(
-        service.update(TENANT, 'r-fijo', { valor: '5000' }),
+        service.update(TENANT, 'r-fijo', { valorMonto: '5000' }),
       ).resolves.toBeDefined();
+    });
+
+    it('cambiar de modo con su importe APAGA la columna abandonada', async () => {
+      // Es la acción más común del drawer: editar y pasar de monto fijo a
+      // porcentaje. Si la columna vieja no se apaga, la fila queda con las dos
+      // llenas y el CHECK de tabla la rechaza: 500 en vez de guardar.
+      // Sin este test, borrar el apagado deja el gate ENTERO en verde.
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r-fijo-a-pct',
+        tenantId: TENANT,
+        nombre: 'Mil pesos',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'monto_fijo',
+        valorMonto: '1000',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      const res = await service.update(TENANT, 'r-fijo-a-pct', {
+        modo: 'porcentaje',
+        valorPorcentaje: '0.15',
+      });
+
+      expect(res).toMatchObject({
+        modo: 'porcentaje',
+        valorPorcentaje: '0.15',
+        valorMonto: null,
+      });
+    });
+
+    it('rechaza un PATCH que manda la columna que no corresponde al modo', async () => {
+      // El 400 tiene que salir en el borde y decir cuál columna corresponde.
+      // Descartarla en silencio guardaría algo distinto de lo que se tecleó.
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r-pct',
+        tenantId: TENANT,
+        nombre: 'Diez por ciento',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.10',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await expect(
+        service.update(TENANT, 'r-pct', { valorMonto: '5000' }),
+      ).rejects.toThrow(/el importe va en valorPorcentaje/);
     });
 
     it('valida los tramos aunque ningún tipo de recargo los pida', async () => {
@@ -390,13 +438,13 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-general',
         condicionValor: null,
         modo: 'porcentaje',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
 
       await expect(
         service.update(TENANT, 'r-tramos', {
-          tramos: [{ minimo: '10', valor: '50' }],
+          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });
@@ -414,7 +462,7 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-general',
         condicionValor: null,
         modo: 'monto_fijo',
-        valor: '3000',
+        valorMonto: '3000',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(
         makeTipo('recargo_por_monto_venta'),
@@ -443,7 +491,7 @@ describe('RecargosService', () => {
       await service.update(TENANT, 'r-1', {
         tipoReglaId: 'tipo-recargo_metodo_pago',
         metodoPagoIds: ['mp-5'],
-        valor: '0.03',
+        valorPorcentaje: '0.03',
         modo: 'porcentaje',
       });
 
@@ -465,9 +513,9 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-general',
         condicionValor: null,
         modo: 'porcentaje',
-        // Un recargo `general` VÁLIDO tiene valor: sin esto la fixture
+        // Un recargo `general` VÁLIDO tiene valorPorcentaje: sin esto la fixture
         // representa un estado que el sistema ya no permite.
-        valor: '0.05',
+        valorPorcentaje: '0.05',
       };
       recargoRepoMock.findOne.mockResolvedValue(existing);
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
@@ -793,7 +841,7 @@ describe('RecargosService', () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('interes_simple'));
 
       await expect(
-        service.update(TENANT, 'r1', { valor: null }),
+        service.update(TENANT, 'r1', { valorPorcentaje: null }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -803,7 +851,7 @@ describe('RecargosService', () => {
         tenantId: TENANT,
         nombre: 'Interés',
         tipoReglaId: 'tipo-interes_simple',
-        valor: '0.05',
+        valorPorcentaje: '0.05',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('interes_simple'));
 

@@ -146,9 +146,13 @@ pierde el evento: se cuantiza y se registra el valor original en la traza. Ver
 produce más de 4 decimales y se recorta). No es incoherencia: la regla es sobre lo que
 alguien escribe.
 
-Punto ciego conocido, con entrada en [`agent/pendientes.md`](../agent/pendientes.md): el
-`valor` de descuentos y recargos **no se puede marcar** — es monto fijo o porcentaje según
-el campo hermano `modo`, y ni el decorador ni el pipe leen campos hermanos.
+✅ **El punto ciego de descuentos y recargos se cerró el 2026-08-23.** Su `valor` no se
+podía marcar —era monto fijo o porcentaje según el campo hermano `modo`, y ni el decorador
+ni el pipe leen campos hermanos—, así que se **partió en dos columnas**: `valor_monto`
+(marcada) y `valor_porcentaje` (que no es plata y conserva su regla de "0.10 = 10%"). La
+lección general: **un campo cuyo significado depende de un hermano no es marcable, y el
+arreglo es partir el campo, no enseñarle al pipe a leer hermanos.** Detalle en
+[`features/descuentos-recargos.md`](../features/descuentos-recargos.md).
 
 Implementación: `common/decorators/escala-moneda.decorator.ts` y
 `common/pipes/escala-moneda.pipe.ts`.

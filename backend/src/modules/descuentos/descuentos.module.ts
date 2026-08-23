@@ -6,6 +6,7 @@ import { DescuentoMetodoPago } from './entities/descuento-metodo-pago.entity';
 import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
 import { DescuentosService } from './descuentos.service';
 import { DescuentosController } from './descuentos.controller';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -15,6 +16,9 @@ import { DescuentosController } from './descuentos.controller';
       DescuentoMetodoPago,
       TipoRegla,
     ]),
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [DescuentosController],
   providers: [DescuentosService],

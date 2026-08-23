@@ -5,9 +5,14 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Check,
 } from 'typeorm';
 
 @Entity('descuento_tramos')
+@Check(
+  'chk_descuento_tramos_una_unidad',
+  '("valor_monto" IS NULL) <> ("valor_porcentaje" IS NULL)',
+)
 export class DescuentoTramo {
   @PrimaryGeneratedColumn('uuid', { name: 'descuento_tramo_id' })
   id: string;
@@ -18,8 +23,26 @@ export class DescuentoTramo {
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   minimo: string | null; // cantidad o monto mínimo para este tramo
 
-  @Column({ type: 'numeric', precision: 18, scale: 4 })
-  valor: string | null; // valor del descuento en este tramo
+  // Exactamente una de las dos, y la misma que el `modo` de su regla. Lo
+  // primero lo garantiza el CHECK de abajo; lo segundo es entre tablas y NO se
+  // puede expresar como CHECK: lo valida `validarMontosDeRegla` en el service.
+  @Column({
+    name: 'valor_monto',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  valorMonto: string | null; // importe del descuento en este tramo, en plata
+
+  @Column({
+    name: 'valor_porcentaje',
+    type: 'numeric',
+    precision: 7,
+    scale: 4,
+    nullable: true,
+  })
+  valorPorcentaje: string | null; // importe del descuento en este tramo, decimal
 
   @Column({ type: 'int', default: 0 })
   orden: number;

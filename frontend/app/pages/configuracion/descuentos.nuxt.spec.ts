@@ -28,9 +28,10 @@ interface DescuentoFake {
   nombre: string
   tipoReglaId: string
   modo: string | null
-  valor: string | null
+  valorMonto: string | null
+  valorPorcentaje: string | null
   metodoPagoIds: string[]
-  tramos: { minimo: string, valor: string }[]
+  tramos: { minimo: string, valorMonto: string | null, valorPorcentaje: string | null }[]
   diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
@@ -45,7 +46,8 @@ function descuento(over: Partial<DescuentoFake> = {}): DescuentoFake {
     nombre: 'Black Friday',
     tipoReglaId: 'tipo-1',
     modo: 'porcentaje',
-    valor: '0.10',
+    valorMonto: null,
+    valorPorcentaje: '0.10',
     metodoPagoIds: [],
     tramos: [],
     diasVencimiento: null,
@@ -124,9 +126,9 @@ function itemsUso(n: number) {
 
 /**
  * `directo` es de `modo: 'libre'` con `campoValor` (ver `reglas-form-config.ts`):
- * es el tipo que hace rendir el radio Porcentaje/Monto fijo y el campo `valor`
- * compartido por los dos modos. Sin tipos, `config` queda en `null` y el drawer no
- * muestra ninguno de los dos.
+ * es el tipo que hace rendir el radio Porcentaje/Monto fijo y el campo de importe,
+ * que desde el 2026-08-23 son DOS —`valorMonto` y `valorPorcentaje`, uno por modo—.
+ * Sin tipos, `config` queda en `null` y el drawer no muestra ninguno de los dos.
  */
 const TIPOS_REGLA = [
   { id: 'tipo-1', nombre: 'Directo', codigo: 'directo', descripcion: null },
@@ -730,20 +732,31 @@ describe('configuracion/descuentos — pausar: confirmación con el alcance', ()
 })
 
 /**
- * `valor` es UN campo del form que las dos ramas del `v-if` del drawer se reparten
- * según `form.modo`: monto fijo lo rinde con `MoneyInput` (plata, escala de la
- * moneda) y porcentaje con un `UInput` en decimal (`0.10` = 10%). No comparten ni
- * escala ni significado.
+ * El importe se guarda en DOS campos —`valorMonto` (plata, `MoneyInput`, escala de
+ * la moneda) y `valorPorcentaje` (decimal, `UInput`, `0.10` = 10%)— y cada rama del
+ * `v-if` del drawer escribe el suyo. No comparten ni escala ni significado.
  *
  * El bug que este describe fija: al pasar de porcentaje a monto fijo, el input
  * mostraba `0` —`MoneyInput` trunca a los 0 decimales del CLP solo para MOSTRAR—
- * mientras `form.valor` seguía valiendo `0.10`. El usuario veía un número y
- * guardaba otro. Medido revirtiendo el fix: el campo queda en `'0'` y el modelo en
- * `'0.10'`. Es de RUNTIME: ni el build ni el typecheck lo ven.
+ * mientras el modelo seguía valiendo `0.10`. El usuario veía un número y guardaba
+ * otro. Medido revirtiendo el fix: el campo queda en `'0'` y el modelo en `'0.10'`.
+ * Es de RUNTIME: ni el build ni el typecheck lo ven.
+ *
+ * ⚠️ **Cuál de los dos tests lo caza cambió con las columnas partidas, y conviene
+ * decirlo para no confiar en el equivocado.** El primero —de porcentaje a monto
+ * fijo— ya NO muere si se apaga el reset: `abrirEditar` puebla `valorMonto` desde
+ * la fila, que en una regla de porcentaje es `null`, así que el campo aparece
+ * vacío haya reset o no. Queda como ancla de render. **El que fija la conducta es
+ * el segundo** —volver a porcentaje después de tipear un monto—, que sí muere.
+ * Medido apagando el cuerpo de `onModoChange`.
+ *
+ * Con las columnas partidas hay un segundo motivo para resetear, y no reemplaza al
+ * primero: el backend rechaza un body que traiga las dos columnas, así que la
+ * unidad abandonada no puede quedar cargada.
  */
 describe('configuracion/descuentos — cambiar de modo no deja un valor de la otra escala', () => {
   beforeEach(() => {
-    descuentosBackend = [descuento({ modo: 'porcentaje', valor: '0.10' })]
+    descuentosBackend = [descuento({ modo: 'porcentaje', valorPorcentaje: '0.10' })]
     reset()
   })
 

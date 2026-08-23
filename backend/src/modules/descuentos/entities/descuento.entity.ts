@@ -5,10 +5,16 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Check,
 } from 'typeorm';
 import { ModoRegla, CondicionTipo } from '../../../common/enums/reglas.enums';
 
 @Entity('descuentos')
+@Check(
+  'chk_descuentos_valor_segun_modo',
+  `("modo" = 'monto_fijo' AND "valor_porcentaje" IS NULL)
+   OR ("modo" = 'porcentaje' AND "valor_monto" IS NULL)`,
+)
 export class Descuento {
   @PrimaryGeneratedColumn('uuid', { name: 'descuento_id' })
   id: string;
@@ -22,8 +28,30 @@ export class Descuento {
   @Column({ type: 'enum', enum: ModoRegla, enumName: 'modo_regla' })
   modo: ModoRegla;
 
-  @Column({ type: 'numeric', precision: 18, scale: 4, nullable: true })
-  valor: string | null; // numeric ↦ string en JS; null cuando usa tramos
+  // El importe vive en UNA de las dos, la que dice `modo`. Las dos en null es
+  // el estado válido de una regla por tramos, que lo expresa en `descuento_tramos`.
+  // Partirlo es lo que HABILITA marcar `valorMonto` con `@EsMontoCobrado` en el
+  // DTO —el decorador no puede leer el campo hermano `modo`—; que esa marca se
+  // haga efectiva depende de que el controller pase por `EscalaMonedaPipe`.
+  @Column({
+    name: 'valor_monto',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  valorMonto: string | null; // numeric ↦ string en JS
+
+  // (7,4) y no (18,4): el tipo dice por sí solo que acá no entra plata. Mismo
+  // tipo que `venta_descuentos.porcentaje_aplicado`, que ya resolvió esto.
+  @Column({
+    name: 'valor_porcentaje',
+    type: 'numeric',
+    precision: 7,
+    scale: 4,
+    nullable: true,
+  })
+  valorPorcentaje: string | null; // decimal: 0.10 = 10%
 
   @Column({ name: 'tipo_regla_id', type: 'uuid' })
   tipoReglaId: string;

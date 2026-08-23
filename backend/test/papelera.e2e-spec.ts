@@ -379,7 +379,7 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
           modo: 'porcentaje',
           // Todo descuento tiene que expresar su monto (decisión del owner,
           // 2026-08-01): `directo` sin `valor` ahora es 400.
-          valor: '0.10',
+          valorPorcentaje: '0.10',
         })),
     },
     {
@@ -391,7 +391,7 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
         crearFila('recargos', 'Recargo', (n) => ({
           nombre: n,
           tipoReglaId: RECARGO_GENERAL_TIPO_ID,
-          valor: '0.05',
+          valorPorcentaje: '0.05',
           modo: 'porcentaje',
         })),
     },
@@ -1397,7 +1397,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
         nombre: `Descuento papelera E2E ${Date.now()}`,
         tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
         modo: 'porcentaje',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       }),
     },
     {
@@ -1406,7 +1406,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       crearBody: () => ({
         nombre: `Recargo papelera E2E ${Date.now()}`,
         tipoReglaId: RECARGO_GENERAL_TIPO_ID,
-        valor: '0.05',
+        valorPorcentaje: '0.05',
         modo: 'porcentaje',
       }),
     },
@@ -1589,7 +1589,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       nombre,
       tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
       modo: 'porcentaje',
-      valor: '0.10',
+      valorPorcentaje: '0.10',
     };
     const resOriginal = await request(app.getHttpServer())
       .post('/api/descuentos')
@@ -1649,7 +1649,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       nombre,
       tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
       modo: 'porcentaje',
-      valor: '0.10',
+      valorPorcentaje: '0.10',
     };
     const crear = async (n: string) => {
       const res = await request(app.getHttpServer())
@@ -1714,7 +1714,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       nombre,
       tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
       modo: 'porcentaje',
-      valor: '0.10',
+      valorPorcentaje: '0.10',
     };
     const crear = async (n: string) => {
       const res = await request(app.getHttpServer())
@@ -1749,7 +1749,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const bodyBase = {
       nombre,
       tipoReglaId: RECARGO_GENERAL_TIPO_ID,
-      valor: '0.05',
+      valorPorcentaje: '0.05',
       modo: 'porcentaje',
     };
     const resOriginal = await request(app.getHttpServer())
@@ -1799,7 +1799,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const bodyBase = {
       nombre,
       tipoReglaId: RECARGO_GENERAL_TIPO_ID,
-      valor: '0.05',
+      valorPorcentaje: '0.05',
       modo: 'porcentaje',
     };
     const crear = async (n: string) => {
@@ -1864,7 +1864,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const bodyBase = {
       nombre,
       tipoReglaId: RECARGO_GENERAL_TIPO_ID,
-      valor: '0.05',
+      valorPorcentaje: '0.05',
       modo: 'porcentaje',
     };
     const crear = async (n: string) => {

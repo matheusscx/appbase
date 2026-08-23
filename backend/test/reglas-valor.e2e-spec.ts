@@ -15,7 +15,7 @@ import { AppModule } from '../src/app.module';
  * el agujero: `valor` es `@IsOptional()`, así que un `{ "valor": null }` pasa
  * la validación de forma y llega al service. Las dos puertas se verificaron
  * ABIERTAS contra esta misma API antes de cerrarlas — las CUATRO: crear un
- * `directo` sin valor (201), vaciar el valor con `PATCH { valor: null }` (200),
+ * `directo` sin valor (201), vaciar el valor con `PATCH { valorPorcentaje: null }` (200),
  * y cambiar el `tipoReglaId` a uno que exige valor o tramas sin mandarlos (200
  * las dos). Estos tests fijan conducta que estuvo rota, no hipótesis.
  *
@@ -44,7 +44,8 @@ interface TokenResponse {
 interface ReglaResponse {
   id: string;
   nombre: string;
-  valor: string | null;
+  valorMonto: string | null;
+  valorPorcentaje: string | null;
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -114,13 +115,85 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Directo con valor E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_DIRECTO,
       modo: 'porcentaje',
-      valor: '0.10',
+      valorPorcentaje: '0.10',
     });
 
     expect(res.status).toBe(201);
     // El POST devuelve el valor TAL CUAL se mandó; el normalizado a 4 decimales
     // de la columna aparece recién al releerlo.
-    expect((res.body as ReglaResponse).valor).toBe('0.10');
+    expect((res.body as ReglaResponse).valorPorcentaje).toBe('0.10');
+  });
+
+  it('mandar la columna equivocada dice CUÁL corresponde, no "falta el valor"', async () => {
+    // El cliente mandó un importe: contestarle "el valor es requerido" lo manda
+    // a buscar donde no está. Depende del ORDEN de las validaciones en el
+    // service, y por eso se fija acá.
+    const res = await crearDescuento({
+      nombre: `Columna equivocada E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'porcentaje',
+      valorMonto: '5000',
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /el importe va en valorPorcentaje/,
+    );
+  });
+
+  // ─── El borde de escala sobre el importe en plata ─────────────────────────
+
+  it('rechaza un monto fijo con decimales que la moneda no admite', async () => {
+    // El tenant Paris opera en CLP, que no tiene centavos (`decimales = 0`).
+    // Sin el pipe esto entra y Postgres recorta con su propia regla: el número
+    // guardado deja de ser el que se tecleó.
+    const res = await crearDescuento({
+      nombre: `Descuento con centavos E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'monto_fijo',
+      valorMonto: '1000.55',
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/decimales/);
+  });
+
+  it('acepta el mismo monto sin decimales', async () => {
+    const res = await crearDescuento({
+      nombre: `Descuento redondo E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'monto_fijo',
+      valorMonto: '1000',
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('el porcentaje NO se valida contra la escala de la moneda', async () => {
+    // `0.0750` tiene 4 decimales y CLP admite 0: si el pipe mirara esta
+    // columna sería 400. No es plata — es la razón de que sean dos columnas.
+    const res = await crearDescuento({
+      nombre: `Descuento 7,5% E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'porcentaje',
+      valorPorcentaje: '0.0750',
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('valida también el monto de un tramo, que viaja anidado', async () => {
+    // El pipe no recorre anidados sin `@Type()` en el padre; `CreateDescuentoDto`
+    // ya lo tiene, y esto es lo que lo fija.
+    const res = await crearDescuento({
+      nombre: `Tramo con centavos E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'monto_fijo',
+      tramos: [{ minimo: '10', valorMonto: '500.25' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/decimales/);
   });
 
   // ─── Puerta 2: vaciar por PATCH ───────────────────────────────────────────
@@ -133,7 +206,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre,
       tipoReglaId: TIPO_DESCUENTO_PROMOCIONAL,
       modo: 'porcentaje',
-      valor: '0.15',
+      valorPorcentaje: '0.15',
       fechaInicio: '2026-01-01',
       fechaFin: '2026-12-31',
     });
@@ -143,7 +216,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/descuentos/${id}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ valor: null });
+      .send({ valorPorcentaje: null });
     expect(res.status).toBe(400);
 
     // Y no quedó a medias: el valor original sigue ahí.
@@ -151,7 +224,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       .get('/api/descuentos')
       .set('Authorization', `Bearer ${token}`);
     const fila = (listado.body as ReglaResponse[]).find((d) => d.id === id);
-    expect(fila?.valor).toBe('0.1500');
+    expect(fila?.valorPorcentaje).toBe('0.1500');
   });
 
   it('vaciar el valor de un recargo por PATCH es 400, y el valor no cambia', async () => {
@@ -163,7 +236,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
         nombre,
         tipoReglaId: TIPO_RECARGO_GENERAL,
         modo: 'porcentaje',
-        valor: '0.05',
+        valorPorcentaje: '0.05',
       });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -171,14 +244,14 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/recargos/${id}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ valor: null });
+      .send({ valorPorcentaje: null });
     expect(res.status).toBe(400);
 
     const listado = await request(app.getHttpServer())
       .get('/api/recargos')
       .set('Authorization', `Bearer ${token}`);
     const fila = (listado.body as ReglaResponse[]).find((r) => r.id === id);
-    expect(fila?.valor).toBe('0.0500');
+    expect(fila?.valorPorcentaje).toBe('0.0500');
   });
 
   // ─── Puertas 3 y 4: cambiar el TIPO ───────────────────────────────────────
@@ -192,7 +265,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Por tramos E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valor: '0.05' }],
+      tramos: [{ minimo: '10', valorPorcentaje: '0.05' }],
     });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -210,7 +283,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Directo a tramos E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_DIRECTO,
       modo: 'porcentaje',
-      valor: '0.10',
+      valorPorcentaje: '0.10',
     });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -228,14 +301,14 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Cambio de tipo válido E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valor: '0.05' }],
+      tramos: [{ minimo: '10', valorPorcentaje: '0.05' }],
     });
     const id = (creado.body as ReglaResponse).id;
 
     const res = await request(app.getHttpServer())
       .patch(`/api/descuentos/${id}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipoReglaId: TIPO_DESCUENTO_DIRECTO, valor: '0.25' });
+      .send({ tipoReglaId: TIPO_DESCUENTO_DIRECTO, valorPorcentaje: '0.25' });
 
     expect(res.status).toBe(200);
 
@@ -243,7 +316,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       .get('/api/descuentos')
       .set('Authorization', `Bearer ${token}`);
     const fila = (listado.body as ReglaResponse[]).find((d) => d.id === id);
-    expect(fila?.valor).toBe('0.2500');
+    expect(fila?.valorPorcentaje).toBe('0.2500');
   });
 
   it('un PATCH que no toca el valor sigue funcionando (ancla positiva)', async () => {
@@ -253,7 +326,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Directo renombrable E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_DIRECTO,
       modo: 'porcentaje',
-      valor: '0.20',
+      valorPorcentaje: '0.20',
     });
     const id = (creado.body as ReglaResponse).id;
     const nuevoNombre = `Directo renombrado E2E ${Date.now()}`;
@@ -280,7 +353,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo 50 E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valor: '50' }],
+      tramos: [{ minimo: '10', valorPorcentaje: '50' }],
     });
 
     expect(res.status).toBe(400);
@@ -294,20 +367,41 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo fijo E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'monto_fijo',
-      tramos: [{ minimo: '10', valor: '5000' }],
+      tramos: [{ minimo: '10', valorMonto: '5000' }],
     });
 
     expect(res.status).toBe(201);
   });
 
+  it('un tramo sin importe es 400, no un 500 contra el CHECK', async () => {
+    // Al partir `valor` en dos campos opcionales se perdió el guardia que daba
+    // el DTO (`valor` era obligatorio). Sin validación propia, este body llega
+    // al CHECK de tabla y Postgres lo rechaza como 500.
+    const res = await crearDescuento({
+      nombre: `Tramo sin importe E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      tramos: [{ minimo: '10' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /tiene que expresar su importe/,
+    );
+  });
+
   it('cambiar SOLO el modo a porcentaje revalida los tramos ya guardados', async () => {
-    // El `PATCH` no trae tramos: mirar solo lo que llega deja pasar la
-    // reinterpretación de valores que ya estaban guardados.
+    // El `PATCH` no trae tramos, y hay que leerlos igual. Lo que cambió con
+    // las columnas partidas es el MOTIVO del rechazo: antes el 5000 guardado
+    // se reinterpretaba como 500.000% y lo frenaba la regla del decimal; ahora
+    // ese 5000 vive en `valorMonto` y el modo nuevo no puede leerlo, así que
+    // el rechazo dice directamente que la unidad no corresponde. Sigue siendo
+    // 400 y sigue siendo por los tramos guardados.
     const creado = await crearDescuento({
       nombre: `Tramo remodo E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'monto_fijo',
-      tramos: [{ minimo: '10', valor: '5000' }],
+      tramos: [{ minimo: '10', valorMonto: '5000' }],
     });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -318,7 +412,11 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       .send({ modo: 'porcentaje' });
 
     expect(res.status).toBe(400);
-    expect((res.body as { message: string }).message).toMatch(/decimal/);
+    // El mensaje nombra al TRAMO y dice qué hacer: el cliente mandó bien su
+    // `modo`, lo que no cuadra es un tramo guardado que el PATCH no reenvió.
+    expect((res.body as { message: string }).message).toMatch(
+      /un tramo trae su importe en valorMonto/,
+    );
   });
 
   it('un PATCH de valor sobre una regla monto_fijo no lo lee como porcentaje', async () => {
@@ -328,7 +426,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Cupón fijo E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_DIRECTO,
       modo: 'monto_fijo',
-      valor: '1000',
+      valorMonto: '1000',
     });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -336,10 +434,10 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/descuentos/${id}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ valor: '5000' });
+      .send({ valorMonto: '5000' });
 
     expect(res.status).toBe(200);
-    expect((res.body as ReglaResponse).valor).toBe('5000');
+    expect((res.body as ReglaResponse).valorMonto).toBe('5000');
   });
 
   // ─── Recargo por escalones de monto (tipo nuevo, 2026-08-22) ──────────────
@@ -354,7 +452,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
         nombre: `Rec por monto sin tramos E2E ${Date.now()}`,
         tipoReglaId: TIPO_RECARGO_POR_MONTO,
         modo: 'monto_fijo',
-        valor: '2000',
+        valorMonto: '2000',
       });
     expect(res.status).toBe(400);
     expect((res.body as { message: string }).message).toMatch(
@@ -376,8 +474,8 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
         tipoReglaId: TIPO_RECARGO_POR_MONTO,
         modo: 'monto_fijo',
         tramos: [
-          { minimo: '0', valor: '2000' },
-          { minimo: '20000', valor: '500' },
+          { minimo: '0', valorMonto: '2000' },
+          { minimo: '20000', valorMonto: '500' },
         ],
       });
     expect(creado.status).toBe(201);
@@ -432,8 +530,8 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
         nombre: `Recargo tramo 50 E2E ${Date.now()}`,
         tipoReglaId: TIPO_RECARGO_GENERAL,
         modo: 'porcentaje',
-        valor: '0.05',
-        tramos: [{ minimo: '10', valor: '50' }],
+        valorPorcentaje: '0.05',
+        tramos: [{ minimo: '10', valorPorcentaje: '50' }],
       });
 
     expect(res.status).toBe(400);

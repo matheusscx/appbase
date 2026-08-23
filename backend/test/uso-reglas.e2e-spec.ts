@@ -146,7 +146,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
         nombre: `Descuento sin uso E2E ${Date.now()}`,
         tipoReglaId: TIPO_DESCUENTO_DIRECTO,
         modo: 'porcentaje',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       });
     expect(resDescuentoSinUso.status).toBe(201);
     descuentoSinUsoId = (resDescuentoSinUso.body as IdResponse).id;
@@ -158,7 +158,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
         nombre: `Recargo sin uso E2E ${Date.now()}`,
         tipoReglaId: TIPO_RECARGO_GENERAL,
         modo: 'porcentaje',
-        valor: '0.02',
+        valorPorcentaje: '0.02',
       });
     expect(resRecargoSinUso.status).toBe(201);
     recargoSinUsoId = (resRecargoSinUso.body as IdResponse).id;

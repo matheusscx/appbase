@@ -10,7 +10,10 @@ import {
   errorDeColisionNombre,
   traducirColisionDeNombre,
 } from '../../common/utils/nombre-sugerido.util';
-import { validarMontosDeRegla } from '../../common/utils/monto-regla.util';
+import {
+  validarMontosDeRegla,
+  importeResultante,
+} from '../../common/utils/monto-regla.util';
 import { Descuento } from './entities/descuento.entity';
 import { DescuentoTramo } from './entities/descuento-tramo.entity';
 import { DescuentoMetodoPago } from './entities/descuento-metodo-pago.entity';
@@ -122,7 +125,11 @@ export class DescuentosService {
       tipoRegla: tipoMap.get(r.tipoReglaId) ?? null,
       tramos: tramos
         .filter((t) => t.descuentoId === r.id)
-        .map((t) => ({ minimo: t.minimo, valor: t.valor })),
+        .map((t) => ({
+          minimo: t.minimo,
+          valorMonto: t.valorMonto,
+          valorPorcentaje: t.valorPorcentaje,
+        })),
       metodoPagoIds: metodos
         .filter((m) => m.descuentoId === r.id)
         .map((m) => m.metodoPagoId),
@@ -152,7 +159,8 @@ export class DescuentosService {
         nombre: dto.nombre,
         tipoReglaId: dto.tipoReglaId,
         modo,
-        valor: dto.valor ?? null,
+        // Solo la columna del modo; la otra queda en null explícito.
+        ...importeResultante(modo, dto, {}),
         condicionTipo,
         condicionValor,
         fechaInicio: dto.fechaInicio ?? null,
@@ -166,7 +174,8 @@ export class DescuentosService {
           manager.create(DescuentoTramo, {
             descuentoId: descuento.id,
             minimo: t.minimo,
-            valor: t.valor,
+            valorMonto: t.valorMonto ?? null,
+            valorPorcentaje: t.valorPorcentaje ?? null,
             orden: i,
           }),
         );
@@ -186,7 +195,8 @@ export class DescuentosService {
       return this.toListItem(descuento, tipoRegla, {
         tramos: (dto.tramos ?? []).map((t) => ({
           minimo: t.minimo,
-          valor: t.valor,
+          valorMonto: t.valorMonto,
+          valorPorcentaje: t.valorPorcentaje,
         })),
         metodoPagoIds: dto.metodoPagoIds ?? [],
         diasVencimiento: dto.diasVencimiento ?? null,
@@ -242,6 +252,10 @@ export class DescuentosService {
       Object.assign(descuento, {
         ...dto,
         modo,
+        // Va DESPUÉS del spread: apaga la columna de la unidad abandonada. Sin
+        // esto, cambiar de unidad dejaría las dos llenas y el CHECK de tabla
+        // devolvería un 500 en vez del 400 que ya dio la validación.
+        ...importeResultante(modo, dto, descuento),
         condicionTipo,
         condicionValor,
       });
@@ -255,7 +269,8 @@ export class DescuentosService {
             manager.create(DescuentoTramo, {
               descuentoId: id,
               minimo: t.minimo,
-              valor: t.valor,
+              valorMonto: t.valorMonto ?? null,
+              valorPorcentaje: t.valorPorcentaje ?? null,
               orden: i,
             }),
           );
@@ -283,7 +298,11 @@ export class DescuentosService {
       return this.toListItem(descuento, tipoRegla, {
         tramos:
           dto.tramos !== undefined
-            ? dto.tramos.map((t) => ({ minimo: t.minimo, valor: t.valor }))
+            ? dto.tramos.map((t) => ({
+                minimo: t.minimo,
+                valorMonto: t.valorMonto,
+                valorPorcentaje: t.valorPorcentaje,
+              }))
             : undefined,
         metodoPagoIds: dto.metodoPagoIds,
         diasVencimiento:
@@ -434,7 +453,11 @@ export class DescuentosService {
     descuento: Descuento,
     tipoRegla: TipoRegla,
     opts: {
-      tramos?: { minimo: string; valor: string }[];
+      tramos?: {
+        minimo: string;
+        valorMonto?: string | null;
+        valorPorcentaje?: string | null;
+      }[];
       metodoPagoIds?: string[];
       diasVencimiento?: number | null;
     },
@@ -509,17 +532,21 @@ export class DescuentosService {
       dto.modo !== 'porcentaje'
     )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !dto.valor)
-      throw new BadRequestException('El valor es requerido para este tipo');
     // Con el modo con el que la fila VA A QUEDAR, que no siempre es el que
     // llegó: tres tipos lo fuerzan a porcentaje.
-    validarMontosDeRegla(
-      tiposFijoPorcentaje.includes(codigo)
-        ? 'porcentaje'
-        : (dto.modo ?? 'porcentaje'),
-      dto.valor,
-      dto.tramos,
-    );
+    const modoResultante = tiposFijoPorcentaje.includes(codigo)
+      ? 'porcentaje'
+      : (dto.modo ?? 'porcentaje');
+    // El orden importa: PRIMERO lo que mandó el cliente, después lo que falta.
+    // Al revés, quien manda `valorMonto` en una regla de porcentaje recibe "el
+    // valor es requerido" —mandó un valor— en vez del mensaje que le dice cuál
+    // columna corresponde. Mandar la columna equivocada tiene que ser un 400
+    // que se entienda, no un descarte mudo que guarde algo distinto.
+    validarMontosDeRegla(modoResultante, dto, dto.tramos);
+    const importe =
+      modoResultante === 'monto_fijo' ? dto.valorMonto : dto.valorPorcentaje;
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importe)
+      throw new BadRequestException('El valor es requerido para este tipo');
     if (codigo === 'pronto_pago' && dto.diasVencimiento == null)
       throw new BadRequestException('Días antes del vencimiento requerido');
     if (codigo === 'mora' && dto.diasVencimiento == null)
@@ -573,16 +600,29 @@ export class DescuentosService {
     actual: Descuento,
     dto: UpdateDescuentoDto,
   ): Promise<void> {
-    const valorFinal = dto.valor !== undefined ? dto.valor : actual.valor;
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !valorFinal)
+    const tiposFijoPorcentaje = [
+      'pronto_pago',
+      'interes_simple',
+      'interes_compuesto',
+    ];
+    const modoResultante = tiposFijoPorcentaje.includes(codigo)
+      ? 'porcentaje'
+      : (dto.modo ?? actual.modo);
+    const resultante = importeResultante(modoResultante, dto, actual);
+    const importeFinal =
+      modoResultante === 'monto_fijo'
+        ? resultante.valorMonto
+        : resultante.valorPorcentaje;
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
       throw new BadRequestException('El valor es requerido para este tipo');
 
-    // Los tramos que QUEDAN, no los que llegaron: un `PATCH` que solo cambia el
-    // `modo` reinterpreta los valores ya guardados —un tramo de `5000` legítimo
-    // como monto fijo pasa a ser 500.000%—, y ese `PATCH` no trae tramos.
-    // Se leen siempre por eso, y porque un cambio de tipo puede dejar tramos
-    // huérfanos en una regla que ya no los pide: el motor igual los evalúa,
-    // porque mira `tramos.length` antes que el código del tipo.
+    // Los tramos que QUEDAN, no los que llegaron. Un `PATCH` que solo cambia el
+    // `modo` ya no puede reinterpretarlos —viven en la columna de la unidad
+    // vieja—, así que leerlos es lo que hace que ese PATCH FALLE en vez de
+    // dejar una fila que el CHECK de tabla rechazaría después. Y se leen
+    // igual porque un cambio de tipo puede dejar tramos huérfanos en una regla
+    // que ya no los pide: el motor los evalúa mirando `tramos.length` antes
+    // que el código del tipo.
     const tramosFinales =
       dto.tramos !== undefined
         ? dto.tramos
@@ -591,18 +631,11 @@ export class DescuentosService {
     if (TIPOS_CON_TRAMOS.includes(codigo) && !tramosFinales.length)
       throw new BadRequestException('Este tipo requiere al menos un tramo');
 
-    const tiposFijoPorcentaje = [
-      'pronto_pago',
-      'interes_simple',
-      'interes_compuesto',
-    ];
-    validarMontosDeRegla(
-      tiposFijoPorcentaje.includes(codigo)
-        ? 'porcentaje'
-        : (dto.modo ?? actual.modo),
-      valorFinal,
-      tramosFinales,
-    );
+    // Lo que mandó el cliente (para que la columna equivocada sea 400) más los
+    // tramos que QUEDAN. Si el modo cambia y el PATCH no reenvía los tramos,
+    // los guardados están en la columna de la unidad vieja y esto falla — que
+    // es lo correcto: antes ese mismo PATCH los reinterpretaba en silencio.
+    validarMontosDeRegla(modoResultante, dto, tramosFinales);
 
     if (TIPOS_CON_METODOS.includes(codigo)) {
       const cantidad =

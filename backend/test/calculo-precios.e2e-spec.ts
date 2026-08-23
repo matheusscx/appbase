@@ -198,7 +198,7 @@ describe('Cálculo de precios (e2e)', () => {
           nombre: `Pausable E2E ${Date.now()}`,
           tipoReglaId: TIPO_DESCUENTO_DIRECTO,
           modo: 'porcentaje',
-          valor: '0.10',
+          valorPorcentaje: '0.10',
         });
       expect(resDesc.status).toBe(201);
       descuentoId = (resDesc.body as { id: string }).id;

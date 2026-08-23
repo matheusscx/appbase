@@ -17,9 +17,10 @@ interface ReglaFake {
   nombre: string
   tipoReglaId: string
   modo: string | null
-  valor: string | null
+  valorMonto: string | null
+  valorPorcentaje: string | null
   metodoPagoIds: string[]
-  tramos: { minimo: string, valor: string }[]
+  tramos: { minimo: string, valorMonto: string | null, valorPorcentaje: string | null }[]
   diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
@@ -31,8 +32,9 @@ interface ReglaFake {
 let recargosBackend: ReglaFake[] = []
 
 /** `general` es el `modo: 'libre'` con `campoValor` de `RECARGO_CONFIG`: el tipo
- *  que hace rendir el radio Porcentaje/Monto fijo y el campo `valor` compartido
- *  por los dos modos. Es el gemelo de `directo` en descuentos. */
+ *  que hace rendir el radio Porcentaje/Monto fijo y el campo de importe, que
+ *  desde el 2026-08-23 son DOS —`valorMonto` y `valorPorcentaje`, uno por modo—.
+ *  Es el gemelo de `directo` en descuentos. */
 const TIPOS_REGLA = [
   { id: 'tipo-1', nombre: 'General', codigo: 'general', descripcion: null },
 ]
@@ -76,6 +78,14 @@ function dialogo(): HTMLElement | null {
   return document.body.querySelector('[role="dialog"]')
 }
 
+/**
+ * Gemelo del de descuentos. ⚠️ **Cuál de los dos tests caza el bug cambió con las
+ * columnas partidas:** el primero —de porcentaje a monto fijo— ya NO muere si se
+ * apaga el reset, porque `abrirEditar` puebla `valorMonto` desde la fila y en una
+ * regla de porcentaje eso es `null`: el campo aparece vacío haya reset o no. Queda
+ * como ancla de render. **El que fija la conducta es el segundo** —volver a
+ * porcentaje después de tipear un monto—. Medido apagando `onModoChange`.
+ */
 describe('configuracion/recargos — cambiar de modo no deja un valor de la otra escala', () => {
   beforeEach(() => {
     recargosBackend = [{
@@ -83,7 +93,8 @@ describe('configuracion/recargos — cambiar de modo no deja un valor de la otra
       nombre: 'Recargo nocturno',
       tipoReglaId: 'tipo-1',
       modo: 'porcentaje',
-      valor: '0.10',
+      valorMonto: null,
+      valorPorcentaje: '0.10',
       metodoPagoIds: [],
       tramos: [],
       diasVencimiento: null,

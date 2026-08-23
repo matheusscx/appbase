@@ -16,9 +16,10 @@ interface Regla {
   tipoReglaId: string
   tipoRegla?: { id: string; codigo: string; nombre: string }
   modo: string | null
-  valor: string | null
+  valorMonto: string | null
+  valorPorcentaje: string | null
   metodoPagoIds: string[]
-  tramos: { minimo: string; valor: string }[]
+  tramos: { minimo: string; valorMonto: string | null; valorPorcentaje: string | null }[]
   diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
@@ -75,9 +76,10 @@ const emptyForm = () => ({
   nombre: '',
   tipoReglaId: '',
   modo: 'porcentaje' as string,
-  valor: '' as string,
+  valorMonto: '' as string,
+  valorPorcentaje: '' as string,
   metodoPagoIds: [] as string[],
-  tramos: [] as { minimo: string; valor: string }[],
+  tramos: [] as { minimo: string; valorMonto: string; valorPorcentaje: string }[],
   diasVencimiento: null as number | null,
   fechaInicio: null as string | null,
   fechaFin: null as string | null,
@@ -124,18 +126,24 @@ function onTipoChange(value: string) {
 // evento del radio, no un watch), para no pisar la población programática de
 // `abrirEditar`.
 //
-// `valor` es un campo compartido por las dos ramas del `v-if` de abajo —monto fijo
-// (MoneyInput, plata) y porcentaje (UInput, decimal 0.10 = 10%)— y los dos modos NO
-// comparten escala ni significado. Sin este reset, escribir `0.10` como porcentaje y
-// pasar a monto fijo dejaba el input mostrando `0` (MoneyInput trunca a los decimales
-// de la moneda para MOSTRAR) mientras `form.valor` seguía valiendo `0.10`: el usuario
-// veía un número y guardaba otro. Vaciar es la salida honesta — no hay conversión
-// sensata de "10%" a un monto.
+// Desde que el importe se guarda en dos columnas (`valorMonto` / `valorPorcentaje`)
+// cada rama del `v-if` de abajo escribe la suya, así que cambiar de modo ya no
+// reinterpreta un número: lo deja de lado. El reset sigue haciendo falta igual, por
+// dos motivos. Uno de pantalla, que es el que lo originó: escribir `0.10` como
+// porcentaje y pasar a monto fijo dejaba el input mostrando `0` (MoneyInput trunca a
+// los decimales de la moneda para MOSTRAR) mientras el valor seguía siendo `0.10` —
+// el usuario veía un número y guardaba otro. Y uno del backend: rechaza un body que
+// traiga las dos columnas, así que la abandonada no puede quedar cargada.
+// Vaciar es la salida honesta — no hay conversión sensata de "10%" a un monto.
 function onModoChange(value: string) {
   if (value === form.value.modo) return
   form.value.modo = value
-  form.value.valor = ''
-  for (const tramo of form.value.tramos) tramo.valor = ''
+  form.value.valorMonto = ''
+  form.value.valorPorcentaje = ''
+  for (const tramo of form.value.tramos) {
+    tramo.valorMonto = ''
+    tramo.valorPorcentaje = ''
+  }
 }
 
 // Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
@@ -233,9 +241,14 @@ function abrirEditar(r: Regla) {
     nombre: r.nombre,
     tipoReglaId: r.tipoReglaId,
     modo: r.modo ?? '',
-    valor: r.valor ?? '',
+    valorMonto: r.valorMonto ?? '',
+    valorPorcentaje: r.valorPorcentaje ?? '',
     metodoPagoIds: r.metodoPagoIds ?? [],
-    tramos: r.tramos?.map(t => ({ minimo: t.minimo ?? '', valor: t.valor ?? '' })) ?? [],
+    tramos: r.tramos?.map(t => ({
+      minimo: t.minimo ?? '',
+      valorMonto: t.valorMonto ?? '',
+      valorPorcentaje: t.valorPorcentaje ?? '',
+    })) ?? [],
     diasVencimiento: r.diasVencimiento ?? null,
     fechaInicio: r.fechaInicio ?? null,
     fechaFin: r.fechaFin ?? null,
@@ -274,9 +287,19 @@ async function guardar() {
 
     if (cfg) {
       if (cfg.modo === 'libre') body.modo = form.value.modo
-      if (cfg.campoValor) body.valor = form.value.valor
+      // Solo la columna del modo. Mandar las dos —o la abandonada en `''`— es
+      // 400: el backend rechaza el importe expresado en dos unidades.
+      const enMonto = form.value.modo === 'monto_fijo'
+      if (cfg.campoValor) {
+        if (enMonto) body.valorMonto = form.value.valorMonto
+        else body.valorPorcentaje = form.value.valorPorcentaje
+      }
       if (cfg.campoMetodos) body.metodoPagoIds = form.value.metodoPagoIds
-      if (cfg.campoTramos) body.tramos = form.value.tramos
+      if (cfg.campoTramos) {
+        body.tramos = form.value.tramos.map(t => enMonto
+          ? { minimo: t.minimo, valorMonto: t.valorMonto }
+          : { minimo: t.minimo, valorPorcentaje: t.valorPorcentaje })
+      }
       if (cfg.campoDias) body.diasVencimiento = form.value.diasVencimiento
       if (cfg.campoFechaInicio) body.fechaInicio = form.value.fechaInicio || null
       if (cfg.campoFechaFin) body.fechaFin = form.value.fechaFin || null
@@ -410,7 +433,7 @@ function confirmarColision() {
 }
 
 function agregarTramo() {
-  form.value.tramos = [...form.value.tramos, { minimo: '', valor: '' }]
+  form.value.tramos = [...form.value.tramos, { minimo: '', valorMonto: '', valorPorcentaje: '' }]
 }
 
 function eliminarTramo(i: number) {
@@ -470,9 +493,9 @@ const columns: TableColumn<Regla>[] = [
               <template v-if="row.original.tramos?.length">
                 {{ row.original.tramos.length }} tramo{{ row.original.tramos.length !== 1 ? 's' : '' }}
               </template>
-              <template v-else-if="row.original.valor">
-                {{ row.original.modo === 'porcentaje' ? `${(Number(row.original.valor) * 100).toFixed(0)}%` : row.original.valor }}
-                ({{ row.original.modo === 'porcentaje' ? 'porcentaje' : 'monto fijo' }})
+              <template v-else-if="row.original.valorPorcentaje || row.original.valorMonto">
+                {{ row.original.valorPorcentaje ? `${(Number(row.original.valorPorcentaje) * 100).toFixed(0)}%` : row.original.valorMonto }}
+                ({{ row.original.valorPorcentaje ? 'porcentaje' : 'monto fijo' }})
               </template>
               <template v-else>
                 {{ row.original.metodoPagoIds?.length ? `${row.original.metodoPagoIds.length} método(s) de pago` : '—' }}
@@ -582,19 +605,20 @@ const columns: TableColumn<Regla>[] = [
               />
             </UFormField>
 
-            <!-- Valor — when campoValor. El campo es monto fijo O porcentaje según
-                 `form.modo`: el backend no puede validar la escala (decorador/pipe no
-                 leen el campo hermano `modo`), así que acá es la única capa que puede
-                 distinguirlos. Porcentaje sigue sin máscara de moneda: no es plata. -->
+            <!-- Valor — when campoValor. Cada modo escribe SU campo: `valorMonto`
+                 es plata y va con máscara de moneda, `valorPorcentaje` es un decimal
+                 y no la lleva. Ya no es la única capa que los distingue —el backend
+                 valida cada columna, y la escala de `valorMonto` la rechaza en el
+                 borde—; acá el `v-if` elige el input que corresponde. -->
             <UFormField v-if="config.campoValor" :label="config.labelValor ?? 'Valor'" required>
               <MoneyInput
                 v-if="form.modo === 'monto_fijo'"
-                v-model="form.valor"
+                v-model="form.valorMonto"
                 oficial
               />
               <UInput
                 v-else
-                v-model="form.valor"
+                v-model="form.valorPorcentaje"
                 inputmode="decimal"
                 placeholder="0.10 (= 10%)"
               />
@@ -653,8 +677,8 @@ const columns: TableColumn<Regla>[] = [
                       <UInput v-else v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
                     </td>
                     <td class="py-1 pr-2">
-                      <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valor" oficial class="w-full" />
-                      <UInput v-else v-model="tramo.valor" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
+                      <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valorMonto" oficial class="w-full" />
+                      <UInput v-else v-model="tramo.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
                     </td>
                     <td class="py-1">
                       <UButton

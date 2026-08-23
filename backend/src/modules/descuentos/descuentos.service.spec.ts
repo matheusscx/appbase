@@ -174,7 +174,7 @@ describe('DescuentosService', () => {
       const promesa = service.create(TENANT, {
         nombre: 'Black Friday',
         tipoReglaId: 'tipo-directo',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
         modo: 'porcentaje',
       });
       await expect(promesa).rejects.toThrow(BadRequestException);
@@ -199,7 +199,7 @@ describe('DescuentosService', () => {
 
       const promesa = service.update(TENANT, 'd-1', {
         nombre: 'Black Friday',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       });
       await expect(promesa).rejects.toThrow(BadRequestException);
       await expect(promesa).rejects.toThrow(
@@ -220,7 +220,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Black Friday',
           tipoReglaId: 'tipo-directo',
-          valor: '0.10',
+          valorPorcentaje: '0.10',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow('duplicate key');
@@ -240,7 +240,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Black Friday',
           tipoReglaId: 'tipo-directo',
-          valor: '0.10',
+          valorPorcentaje: '0.10',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow('db caída');
@@ -270,7 +270,7 @@ describe('DescuentosService', () => {
         nombre: 'Desc MP',
         tipoReglaId: 'tipo-metodo_pago',
         metodoPagoIds: ['mp-1', 'mp-2'],
-        valor: '0.10',
+        valorPorcentaje: '0.10',
         modo: 'porcentaje',
       });
       // save called twice: once for descuento, once for metodos array
@@ -285,7 +285,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Desc MP',
           tipoReglaId: 'tipo-metodo_pago',
-          valor: '0.10',
+          valorPorcentaje: '0.10',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -297,7 +297,7 @@ describe('DescuentosService', () => {
         nombre: 'Pronto pago',
         tipoReglaId: 'tipo-pronto_pago',
         diasVencimiento: 30,
-        valor: '0.05',
+        valorPorcentaje: '0.05',
       });
       // Check entity was created with condicionTipo=VENCIMIENTO and forced modo
       const firstCreateArgs = managerMock.create.mock.calls[0] as [
@@ -319,7 +319,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Pronto pago',
           tipoReglaId: 'tipo-pronto_pago',
-          valor: '0.05',
+          valorPorcentaje: '0.05',
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -331,7 +331,7 @@ describe('DescuentosService', () => {
           nombre: 'PP',
           tipoReglaId: 'tipo-pronto_pago',
           diasVencimiento: 0,
-          valor: '0.10',
+          valorPorcentaje: '0.10',
         }),
       ).rejects.toThrow('mayor a 0');
     });
@@ -342,8 +342,8 @@ describe('DescuentosService', () => {
         nombre: 'Por mayor',
         tipoReglaId: 'tipo-por_mayor',
         tramos: [
-          { minimo: '10', valor: '0.10' },
-          { minimo: '100', valor: '0.15' },
+          { minimo: '10', valorPorcentaje: '0.10' },
+          { minimo: '100', valorPorcentaje: '0.15' },
         ],
         modo: 'porcentaje',
       });
@@ -376,7 +376,7 @@ describe('DescuentosService', () => {
           tipoReglaId: 'tipo-por_mayor',
           modo: 'porcentaje',
           // El typo natural de quien piensa "50%".
-          tramos: [{ minimo: '10', valor: '50' }],
+          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });
@@ -389,23 +389,23 @@ describe('DescuentosService', () => {
           tipoReglaId: 'tipo-por_mayor',
           modo: 'porcentaje',
           tramos: [
-            { minimo: '10', valor: '0.10' },
-            { minimo: '100', valor: '-0.05' },
+            { minimo: '10', valorPorcentaje: '0.10' },
+            { minimo: '100', valorPorcentaje: '-0.05' },
           ],
         }),
       ).rejects.toThrow(/mayor a 0/);
     });
 
     it('un tramo de 5000 en monto fijo sí es válido', async () => {
-      // El mismo número que se rechaza como porcentaje: lo que decide es el
-      // modo, no el número.
+      // El mismo número que se rechaza como porcentaje. Lo que decide ya no es
+      // el modo leyendo un valor ambiguo: es la COLUMNA en la que vino.
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
       await expect(
         service.create(TENANT, {
           nombre: 'Por mayor fijo',
           tipoReglaId: 'tipo-por_mayor',
           modo: 'monto_fijo',
-          tramos: [{ minimo: '10', valor: '5000' }],
+          tramos: [{ minimo: '10', valorMonto: '5000' }],
         }),
       ).resolves.toBeDefined();
     });
@@ -415,7 +415,7 @@ describe('DescuentosService', () => {
       await service.create(TENANT, {
         nombre: 'Por monto',
         tipoReglaId: 'tipo-por_monto_venta',
-        tramos: [{ minimo: '500', valor: '0.10' }],
+        tramos: [{ minimo: '500', valorPorcentaje: '0.10' }],
         modo: 'porcentaje',
         fechaInicio: '2024-01-01',
         fechaFin: '2024-12-31',
@@ -428,7 +428,7 @@ describe('DescuentosService', () => {
       await service.create(TENANT, {
         nombre: 'Promo navidad',
         tipoReglaId: 'tipo-promocional',
-        valor: '0.20',
+        valorPorcentaje: '0.20',
         modo: 'porcentaje',
         fechaInicio: '2024-12-01',
         fechaFin: '2024-12-31',
@@ -443,7 +443,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Promo',
           tipoReglaId: 'tipo-promocional',
-          valor: '0.20',
+          valorPorcentaje: '0.20',
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -456,7 +456,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Existing',
           tipoReglaId: 'tipo-por_mayor',
-          tramos: [{ minimo: '10', valor: '0.10' }],
+          tramos: [{ minimo: '10', valorPorcentaje: '0.10' }],
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -487,7 +487,7 @@ describe('DescuentosService', () => {
 
       await service.update(TENANT, 'd-1', {
         tipoReglaId: 'tipo-por_mayor',
-        tramos: [{ minimo: '20', valor: '0.15' }],
+        tramos: [{ minimo: '20', valorPorcentaje: '0.15' }],
         modo: 'porcentaje',
       });
 
@@ -509,18 +509,70 @@ describe('DescuentosService', () => {
         tipoReglaId: 'tipo-directo',
         condicionValor: null,
         modo: 'monto_fijo',
-        valor: '1000',
+        valorMonto: '1000',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
 
       await expect(
-        service.update(TENANT, 'd-fijo', { valor: '5000' }),
+        service.update(TENANT, 'd-fijo', { valorMonto: '5000' }),
       ).resolves.toBeDefined();
     });
 
+    it('cambiar de modo con su importe APAGA la columna abandonada', async () => {
+      // Es la acción más común del drawer: editar y pasar de monto fijo a
+      // porcentaje. Si la columna vieja no se apaga, la fila queda con las dos
+      // llenas y el CHECK de tabla la rechaza: 500 en vez de guardar.
+      // Sin este test, borrar el apagado deja el gate ENTERO en verde.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-fijo-a-pct',
+        tenantId: TENANT,
+        nombre: 'Mil pesos',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'monto_fijo',
+        valorMonto: '1000',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      const res = await service.update(TENANT, 'd-fijo-a-pct', {
+        modo: 'porcentaje',
+        valorPorcentaje: '0.15',
+      });
+
+      expect(res).toMatchObject({
+        modo: 'porcentaje',
+        valorPorcentaje: '0.15',
+        valorMonto: null,
+      });
+    });
+
+    it('rechaza un PATCH que manda la columna que no corresponde al modo', async () => {
+      // El 400 tiene que salir en el borde y decir cuál columna corresponde.
+      // Descartarla en silencio guardaría algo distinto de lo que se tecleó.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-pct',
+        tenantId: TENANT,
+        nombre: 'Diez por ciento',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.10',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.update(TENANT, 'd-pct', { valorMonto: '5000' }),
+      ).rejects.toThrow(/el importe va en valorPorcentaje/);
+    });
+
     it('un PATCH que solo cambia el modo revalida los tramos ya guardados', async () => {
-      // Tramos de 5000 legítimos como monto fijo pasan a ser 500.000% si el
-      // modo cambia. El PATCH no trae tramos: hay que leerlos.
+      // Antes, un tramo de 5000 legítimo como monto fijo pasaba a leerse como
+      // 500.000% al cambiar el modo. Con las columnas partidas ya no puede:
+      // el 5000 vive en `valorMonto` y el modo nuevo lo deja fuera de juego,
+      // así que el PATCH FALLA en vez de reinterpretar. Sigue haciendo falta
+      // leer los tramos guardados —el PATCH no los trae— porque son ellos los
+      // que delatan que la regla no puede quedar como se pide.
       descuentoRepoMock.findOne.mockResolvedValue({
         id: 'd-tramos',
         tenantId: TENANT,
@@ -528,14 +580,16 @@ describe('DescuentosService', () => {
         tipoReglaId: 'tipo-por_mayor',
         condicionValor: null,
         modo: 'monto_fijo',
-        valor: null,
+        valorMonto: null,
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
-      tramoRepoMock.find.mockResolvedValue([{ minimo: '10', valor: '5000' }]);
+      tramoRepoMock.find.mockResolvedValue([
+        { minimo: '10', valorMonto: '5000' },
+      ]);
 
       await expect(
         service.update(TENANT, 'd-tramos', { modo: 'porcentaje' }),
-      ).rejects.toThrow(/decimal/);
+      ).rejects.toThrow(/un tramo trae su importe en valorMonto/);
     });
 
     it('rechaza un tramo en porcentaje con valor >= 1 también en el PATCH', async () => {
@@ -546,13 +600,13 @@ describe('DescuentosService', () => {
         tipoReglaId: 'tipo-por_mayor',
         condicionValor: null,
         modo: 'porcentaje',
-        valor: null,
+        valorPorcentaje: null,
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
 
       await expect(
         service.update(TENANT, 'd-tramos-2', {
-          tramos: [{ minimo: '10', valor: '50' }],
+          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });
@@ -572,7 +626,7 @@ describe('DescuentosService', () => {
       await service.update(TENANT, 'd-2', {
         tipoReglaId: 'tipo-metodo_pago',
         metodoPagoIds: ['mp-3'],
-        valor: '0.10',
+        valorPorcentaje: '0.10',
         modo: 'porcentaje',
       });
 
@@ -597,7 +651,7 @@ describe('DescuentosService', () => {
         // Una fila `metodo_pago` VÁLIDA tiene valor y al menos un método: sin
         // esto la fixture representa un estado que el sistema ya no permite, y
         // el PATCH parcial falla por la fixture, no por lo que prueba.
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       };
       descuentoRepoMock.findOne.mockResolvedValue(existing);
       metodoPagoRepoMock.count.mockResolvedValue(1);
@@ -947,7 +1001,7 @@ describe('DescuentosService', () => {
         nombre: 'Directo 10%',
         tipoReglaId: 'tipo-directo',
         modo: 'porcentaje',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       });
 
       expect(managerMock.save).toHaveBeenCalled();
@@ -964,7 +1018,7 @@ describe('DescuentosService', () => {
         tenantId: TENANT,
         nombre: 'Por tramos',
         tipoReglaId: 'tipo-por_mayor',
-        valor: null,
+        valorPorcentaje: null,
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
 
@@ -979,7 +1033,7 @@ describe('DescuentosService', () => {
         tenantId: TENANT,
         nombre: 'Directo',
         tipoReglaId: 'tipo-directo',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
       tramoRepoMock.count.mockResolvedValue(0);
@@ -995,14 +1049,14 @@ describe('DescuentosService', () => {
         tenantId: TENANT,
         nombre: 'Por tramos',
         tipoReglaId: 'tipo-por_mayor',
-        valor: null,
+        valorPorcentaje: null,
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
 
       await expect(
         service.update(TENANT, 'd1', {
           tipoReglaId: 'tipo-directo',
-          valor: '0.10',
+          valorPorcentaje: '0.10',
         }),
       ).resolves.toBeDefined();
     });
@@ -1017,7 +1071,7 @@ describe('DescuentosService', () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
 
       await expect(
-        service.update(TENANT, 'd1', { valor: null }),
+        service.update(TENANT, 'd1', { valorPorcentaje: null }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1027,7 +1081,7 @@ describe('DescuentosService', () => {
         tenantId: TENANT,
         nombre: 'Promo',
         tipoReglaId: 'tipo-promocional',
-        valor: '0.15',
+        valorPorcentaje: '0.15',
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
 

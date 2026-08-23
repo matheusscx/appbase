@@ -161,14 +161,43 @@ Mismos endpoints bajo `/api/recargos`.
 
 | Tabla | Cambio |
 |-------|--------|
-| `descuentos` | `valor` ahora nullable |
-| `recargos` | `valor` ahora nullable |
+| `descuentos` | el importe vive en `valor_monto` / `valor_porcentaje`, las dos nullable |
+| `recargos` | ídem |
+
+#### El importe se expresa en dos columnas (2026-08-23)
+
+`valor` se partió en **`valor_monto`** (`numeric(18,4)`, plata) y **`valor_porcentaje`**
+(`numeric(7,4)`, decimal: `0.10` = 10%). El `(7,4)` no es cosmético: dice por sí solo que
+ahí no entra plata.
+
+**Por qué**, y no es preferencia de estilo: el borde de escala valida la plata con un
+decorador **por campo** (`@EsMontoCobrado`) que un pipe lee del metadata, y un campo que es
+monto **o** porcentaje según el hermano `modo` no se puede marcar — ni el decorador ni el
+pipe leen campos hermanos. Con el campo partido, `valor_monto` sí se marca, y el borde
+rechaza con 400 la plata que no cabe en la moneda del tenant.
+
+`modo` **sobrevive** y no es redundante: es la clave de orden del motor (los `monto_fijo` se
+aplican después de los porcentajes) y es lo que se congela en la venta.
+
+**La invariante, y dónde vive cada mitad** —se dice separada porque no tienen la misma
+fuerza—:
+
+| Regla | Quién la garantiza |
+|---|---|
+| En la regla: la columna llena es la que dice `modo`, la otra NULL (las dos NULL = usa tramos) | `CHECK` de tabla |
+| En el tramo: exactamente una de las dos | `CHECK` de tabla |
+| Que todos los tramos usen la columna que dice el `modo` de **su regla** | el service (`validarMontosDeRegla`) — es entre tablas y un CHECK no lo puede expresar |
+
+**Consecuencia buscada:** cambiar solo el `modo` por `PATCH` ya no reinterpreta lo guardado
+—un tramo de `5000` legítimo como monto fijo no puede pasar a leerse como 500.000%—, porque
+el importe vive en una columna que el modo nuevo deja fuera de juego. Ese `PATCH` **falla con
+400** en vez de reinterpretar.
 
 **Nuevas tablas:**
 
 | Tabla | Descripción |
 |-------|-------------|
-| `descuento_tramos` | Tramos de descuento (`minimo`, `valor`, `orden`). PK UUID, FK descuento_id |
+| `descuento_tramos` | Tramos de descuento (`minimo`, `valor_monto`, `valor_porcentaje`, `orden`). PK UUID, FK descuento_id |
 | `recargo_tramos` | Tramos de recargo. Misma estructura |
 | `descuento_metodo_pago` | Bridge descuento ↔ metodo_pago. PK compuesta |
 | `recargo_metodo_pago` | Bridge recargo ↔ metodo_pago. PK compuesta |
@@ -179,7 +208,12 @@ Todas con soft delete (`eliminado_el`) y timestamps.
 
 - `CreateDescuentoDto` / `UpdateDescuentoDto`: nuevos campos `metodoPagoIds?: string[]`,
   `tramos?: TramoDto[]`, `diasVencimiento?: number`, `fechaInicio?: string`, `fechaFin?: string`
-- `TramoDto`: `{ minimo: string, valor: string }` (strings para `@IsNumberString`).
+- `TramoDto`: `{ minimo: string, valorMonto?: string, valorPorcentaje?: string }` (strings
+  para `@IsNumberString`). Los dos importes son opcionales **en el DTO** porque cuál
+  corresponde depende del hermano `modo`; que llegue exactamente uno lo exige el service.
+  ⚠️ Esa opcionalidad se llevó puesto el guardia que daba el `valor` obligatorio: sin la
+  validación propia del service, un tramo sin importe llegaba al CHECK de tabla y salía un
+  **500** en vez de un 400.
   **No hay `maximo`** —este documento lo afirmaba y nunca existió, ni en las entidades ni en
   el esquema (verificado 2026-08-22)—: los tramos son **abiertos hacia arriba** y gana el de
   `minimo` más alto que la magnitud alcance.
@@ -216,7 +250,7 @@ Todas con soft delete (`eliminado_el`) y timestamps.
   ↓
 [Template renderiza campos condicionalmente con v-if]
   ↓
-[guardar() arma payload con { tipoReglaId, valor?, tramos?, metodoPagoIds?, diasVencimiento? }]
+[guardar() arma payload con { tipoReglaId, valorMonto? | valorPorcentaje?, tramos?, metodoPagoIds?, diasVencimiento? }]
   ↓
 [POST/PATCH /api/descuentos|recargos]
   ↓

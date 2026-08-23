@@ -37,7 +37,8 @@ const regla = (over: Partial<ReglaResuelta> = {}): ReglaResuelta => ({
   nombre: 'Regla',
   codigo: 'general',
   modo: 'porcentaje',
-  valor: '0.10',
+  valorMonto: null,
+  valorPorcentaje: '0.10',
   tramos: [],
   metodoPagoIds: [],
   activo: true,
@@ -152,13 +153,91 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     });
   });
 
+  describe('la unidad la dice la columna, no el número', () => {
+    it('un monto fijo de 25 cobra 25, no 2.500%', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({
+                  modo: 'monto_fijo',
+                  valorMonto: '25',
+                  valorPorcentaje: null,
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('25.000000');
+    });
+
+    it('un porcentaje de 0.10 sobre la línea de 100 cobra 10', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ descuentos: [regla({ valorPorcentaje: '0.10' })] })],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('10.000000'); // 100 * 0.10
+    });
+
+    it('la columna que no corresponde al modo se ignora', () => {
+      // Estado que la base NO permite (lo frena el CHECK de tabla). Va igual
+      // como red del motor: si algún día alguien afloja el CHECK, esto fija
+      // que el motor sigue leyendo la columna que dice el modo.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({
+                  modo: 'porcentaje',
+                  valorMonto: '5000',
+                  valorPorcentaje: '0.10',
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('10.000000');
+    });
+
+    it('un tramo elegido se cobra en la unidad de su regla', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              cantidad: '12',
+              descuentos: [
+                regla({
+                  codigo: 'por_mayor',
+                  modo: 'monto_fijo',
+                  valorMonto: null,
+                  valorPorcentaje: null,
+                  tramos: [
+                    { minimo: '1', valorMonto: '5', valorPorcentaje: null },
+                    { minimo: '10', valorMonto: '30', valorPorcentaje: null },
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      // 12 unidades → el tramo de 10, que son $30 y no un 3.000%.
+      expect(r.lineas[0].descuentoAplicado).toBe('30.000000');
+    });
+  });
+
   describe('descuentos y recargos: base vs compuesto', () => {
     it('descuento porcentaje + impuesto en orden por defecto', () => {
       const r = calcularVenta(
         venta({
           lineas: [
             linea({
-              descuentos: [regla({ valor: '0.10' })],
+              descuentos: [regla({ valorPorcentaje: '0.10' })],
               impuestos: [impuesto()],
             }),
           ],
@@ -175,8 +254,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ id: 'a', valor: '0.10' }),
-                regla({ id: 'b', valor: '0.10' }),
+                regla({ id: 'a', valorPorcentaje: '0.10' }),
+                regla({ id: 'b', valorPorcentaje: '0.10' }),
               ],
             }),
           ],
@@ -193,8 +272,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ id: 'a', valor: '0.10' }),
-                regla({ id: 'b', valor: '0.10' }),
+                regla({ id: 'a', valorPorcentaje: '0.10' }),
+                regla({ id: 'b', valorPorcentaje: '0.10' }),
               ],
             }),
           ],
@@ -210,7 +289,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         venta({
           lineas: [
             linea({
-              recargos: [regla({ modo: 'monto_fijo', valor: '15' })],
+              recargos: [regla({ modo: 'monto_fijo', valorMonto: '15' })],
             }),
           ],
         }),
@@ -230,12 +309,12 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
    * salones, combos) sin que ninguno tenga que acordarse.
    */
   describe('orden de aplicación: porcentajes antes que montos fijos', () => {
-    const pct = regla({ id: 'a', nombre: '20%', valor: '0.20' });
+    const pct = regla({ id: 'a', nombre: '20%', valorPorcentaje: '0.20' });
     const fijo = regla({
       id: 'b',
       nombre: 'Fijo 100',
       modo: 'monto_fijo',
-      valor: '100',
+      valorMonto: '100',
     });
 
     const totalCon = (descuentos: ReglaResuelta[], calculoDescuentos: string) =>
@@ -300,9 +379,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'c',
                   nombre: 'Fijo 100',
                   modo: 'monto_fijo',
-                  valor: '100',
+                  valorMonto: '100',
                 }),
-                regla({ id: 'd', nombre: '5%', valor: '0.05' }),
+                regla({ id: 'd', nombre: '5%', valorPorcentaje: '0.05' }),
               ],
             }),
           ],
@@ -327,8 +406,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               precioUnitario: '1000',
               descuentos: [
-                regla({ id: 'x', nombre: 'Primero', valor: '0.10' }),
-                regla({ id: 'y', nombre: 'Segundo', valor: '0.30' }),
+                regla({ id: 'x', nombre: 'Primero', valorPorcentaje: '0.10' }),
+                regla({ id: 'y', nombre: 'Segundo', valorPorcentaje: '0.30' }),
               ],
             }),
           ],
@@ -348,7 +427,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         venta({
           lineas: [
             linea({
-              descuentos: [regla({ valor: '0.10' })],
+              descuentos: [regla({ valorPorcentaje: '0.10' })],
               impuestos: [impuesto()],
             }),
           ],
@@ -367,8 +446,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
   describe('tramos', () => {
     const tramos = [
-      { minimo: '1', valor: '0.05' },
-      { minimo: '10', valor: '0.10' },
+      { minimo: '1', valorMonto: null, valorPorcentaje: '0.05' },
+      { minimo: '10', valorMonto: null, valorPorcentaje: '0.10' },
     ];
 
     it('por_mayor elige el tramo por cantidad', () => {
@@ -377,7 +456,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               cantidad: '12',
-              descuentos: [regla({ codigo: 'por_mayor', valor: null, tramos })],
+              descuentos: [
+                regla({ codigo: 'por_mayor', valorPorcentaje: null, tramos }),
+              ],
             }),
           ],
         }),
@@ -394,7 +475,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               cantidad: '1',
               precioUnitario: '1200',
               descuentos: [
-                regla({ codigo: 'por_monto_venta', valor: null, tramos }),
+                regla({
+                  codigo: 'por_monto_venta',
+                  valorPorcentaje: null,
+                  tramos,
+                }),
               ],
             }),
           ],
@@ -409,7 +494,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               cantidad: '0.5',
-              descuentos: [regla({ codigo: 'por_mayor', valor: null, tramos })],
+              descuentos: [
+                regla({ codigo: 'por_mayor', valorPorcentaje: null, tramos }),
+              ],
             }),
           ],
         }),
@@ -421,7 +508,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
   describe('filtro por método de pago', () => {
     const mp = regla({
       codigo: 'metodo_pago',
-      valor: '0.05',
+      valorPorcentaje: '0.05',
       metodoPagoIds: ['mp1'],
     });
 
@@ -459,7 +546,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       (codigo) => {
         const r = calcularVenta(
           venta({
-            lineas: [linea({ descuentos: [regla({ codigo, valor: '0.50' })] })],
+            lineas: [
+              linea({
+                descuentos: [regla({ codigo, valorPorcentaje: '0.50' })],
+              }),
+            ],
           }),
         );
         expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
@@ -471,7 +562,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     it('HALF_UP redondea hacia arriba en el límite', () => {
       const r = calcularVenta(
         venta({
-          lineas: [linea({ descuentos: [regla({ valor: '0.12345' })] })],
+          lineas: [
+            linea({ descuentos: [regla({ valorPorcentaje: '0.12345' })] }),
+          ],
           config: config({ escalaCalculo: 2, modoRedondeo: 'HALF_UP' }),
         }),
       );
@@ -482,7 +575,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     it('FLOOR trunca hacia abajo', () => {
       const r = calcularVenta(
         venta({
-          lineas: [linea({ descuentos: [regla({ valor: '0.12345' })] })],
+          lineas: [
+            linea({ descuentos: [regla({ valorPorcentaje: '0.12345' })] }),
+          ],
           config: config({ escalaCalculo: 2, modoRedondeo: 'FLOOR' }),
         }),
       );
@@ -498,7 +593,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({ precioUnitario: '100' }),
             linea({ precioUnitario: '100' }),
           ],
-          descuentosVenta: [regla({ valor: '0.10' })],
+          descuentosVenta: [regla({ valorPorcentaje: '0.10' })],
         }),
       );
       // neto agregado 200, descuento venta 20
@@ -512,8 +607,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       const r = calcularVenta(
         venta({
           lineas: [linea({ precioUnitario: '100' })],
-          descuentosVenta: [regla({ id: 'dv', valor: '0.10' })],
-          recargosVenta: [regla({ id: 'rv', valor: '0.10' })],
+          descuentosVenta: [regla({ id: 'dv', valorPorcentaje: '0.10' })],
+          recargosVenta: [regla({ id: 'rv', valorPorcentaje: '0.10' })],
           config: config({
             formula: ['recargos', 'descuentos', 'impuestos'],
             calculoDescuentos: 'compuesto',
@@ -719,7 +814,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         const tope = regla({
           nombre: 'Fijo 500',
           modo: 'monto_fijo',
-          valor: '500',
+          valorMonto: '500',
         });
         const r = calcularVenta(
           venta({
@@ -781,7 +876,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ nombre: 'Fijo 500', modo: 'monto_fijo', valor: '500' }),
+                regla({
+                  nombre: 'Fijo 500',
+                  modo: 'monto_fijo',
+                  valorMonto: '500',
+                }),
               ],
             }),
           ],
@@ -809,9 +908,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ id: 'd1', nombre: 'A', valor: '0.40' }),
-                regla({ id: 'd2', nombre: 'B', valor: '0.40' }),
-                regla({ id: 'd3', nombre: 'C', valor: '0.40' }),
+                regla({ id: 'd1', nombre: 'A', valorPorcentaje: '0.40' }),
+                regla({ id: 'd2', nombre: 'B', valorPorcentaje: '0.40' }),
+                regla({ id: 'd3', nombre: 'C', valorPorcentaje: '0.40' }),
               ],
             }),
           ],
@@ -831,7 +930,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
     it('un descuento que NO se pasa no genera advertencia ni cambia nada', () => {
       const r = calcularVenta(
-        venta({ lineas: [linea({ descuentos: [regla({ valor: '0.10' })] })] }),
+        venta({
+          lineas: [linea({ descuentos: [regla({ valorPorcentaje: '0.10' })] })],
+        }),
       );
       expect(r.lineas[0].descuentoAplicado).toBe('10.000000');
       expect(r.lineas[0].totalLinea).toBe('90.000000');
@@ -848,12 +949,18 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               precioUnitario: '1000',
-              descuentos: [regla({ nombre: 'Linea 90%', valor: '0.90' })],
+              descuentos: [
+                regla({ nombre: 'Linea 90%', valorPorcentaje: '0.90' }),
+              ],
               impuestos: [impuesto({ id: 'iva' })],
             }),
           ],
           descuentosVenta: [
-            regla({ nombre: 'Venta 500', modo: 'monto_fijo', valor: '500' }),
+            regla({
+              nombre: 'Venta 500',
+              modo: 'monto_fijo',
+              valorMonto: '500',
+            }),
           ],
         }),
       );
@@ -877,7 +984,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             }),
           ],
           descuentosVenta: [
-            regla({ nombre: 'Cupón 1100', modo: 'monto_fijo', valor: '1100' }),
+            regla({
+              nombre: 'Cupón 1100',
+              modo: 'monto_fijo',
+              valorMonto: '1100',
+            }),
           ],
         }),
       );
@@ -898,13 +1009,17 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                 regla({
                   nombre: 'Fijo 5000',
                   modo: 'monto_fijo',
-                  valor: '5000',
+                  valorMonto: '5000',
                 }),
               ],
             }),
           ],
           descuentosVenta: [
-            regla({ nombre: 'Venta 9000', modo: 'monto_fijo', valor: '9000' }),
+            regla({
+              nombre: 'Venta 9000',
+              modo: 'monto_fijo',
+              valorMonto: '9000',
+            }),
           ],
         }),
       );
@@ -927,7 +1042,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       const r = calcularVenta(
         venta({
           descuentosVenta: [
-            regla({ nombre: 'Venta 999', modo: 'monto_fijo', valor: '999' }),
+            regla({
+              nombre: 'Venta 999',
+              modo: 'monto_fijo',
+              valorMonto: '999',
+            }),
           ],
         }),
       );
@@ -942,7 +1061,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               recargos: [
-                regla({ nombre: 'Fijo 500', modo: 'monto_fijo', valor: '500' }),
+                regla({
+                  nombre: 'Fijo 500',
+                  modo: 'monto_fijo',
+                  valorMonto: '500',
+                }),
               ],
             }),
           ],
@@ -979,7 +1102,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                 regla({
                   nombre: 'Fijo 1200',
                   modo: 'monto_fijo',
-                  valor: '1200',
+                  valorMonto: '1200',
                 }),
               ],
               recargos: [
@@ -987,7 +1110,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'r2',
                   nombre: 'Fijo 2000',
                   modo: 'monto_fijo',
-                  valor: '2000',
+                  valorMonto: '2000',
                 }),
               ],
             }),
@@ -1031,9 +1154,15 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             }),
           ],
           descuentosVenta: [
-            regla({ nombre: 'Cupón 1190', modo: 'monto_fijo', valor: '1190' }),
+            regla({
+              nombre: 'Cupón 1190',
+              modo: 'monto_fijo',
+              valorMonto: '1190',
+            }),
           ],
-          recargosVenta: [regla({ nombre: 'Tarjeta 10%', valor: '0.10' })],
+          recargosVenta: [
+            regla({ nombre: 'Tarjeta 10%', valorPorcentaje: '0.10' }),
+          ],
           config: config({ calculoRecargos: 'compuesto' }),
         }),
       );
@@ -1079,9 +1208,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               id: 'd1',
               nombre: 'Cupón 1100',
               modo: 'monto_fijo',
-              valor: '1100',
+              valorMonto: '1100',
             }),
-            regla({ id: 'd2', nombre: 'Socio 10%', valor: '0.10' }),
+            regla({ id: 'd2', nombre: 'Socio 10%', valorPorcentaje: '0.10' }),
           ],
           config: config({ calculoDescuentos: 'compuesto' }),
         }),
@@ -1110,7 +1239,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         venta({
           lineas: [
             linea({
-              descuentos: [regla({ id: 'd1', nombre: 'Desc', valor: '0.10' })],
+              descuentos: [
+                regla({ id: 'd1', nombre: 'Desc', valorPorcentaje: '0.10' }),
+              ],
               impuestos: [impuesto()],
             }),
           ],
@@ -1142,7 +1273,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     it('regla plana en porcentaje: reporta la tasa, no el monto', () => {
       const r = calcularVenta(
         venta({
-          lineas: [linea({ descuentos: [regla({ valor: '0.10' })] })],
+          lineas: [linea({ descuentos: [regla({ valorPorcentaje: '0.10' })] })],
         }),
       );
       const t = r.lineas[0].trazas.descuentos[0];
@@ -1158,7 +1289,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         venta({
           lineas: [
             linea({
-              recargos: [regla({ modo: 'monto_fijo', valor: '10' })],
+              recargos: [regla({ modo: 'monto_fijo', valorMonto: '10' })],
             }),
           ],
         }),
@@ -1180,10 +1311,10 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               descuentos: [
                 regla({
                   codigo: 'por_mayor',
-                  valor: null,
+                  valorPorcentaje: null,
                   tramos: [
-                    { minimo: '1', valor: '0.05' },
-                    { minimo: '10', valor: '0.10' },
+                    { minimo: '1', valorMonto: null, valorPorcentaje: '0.05' },
+                    { minimo: '10', valorMonto: null, valorPorcentaje: '0.10' },
                   ],
                 }),
               ],
@@ -1203,7 +1334,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ nombre: 'Fijo 500', modo: 'monto_fijo', valor: '500' }),
+                regla({
+                  nombre: 'Fijo 500',
+                  modo: 'monto_fijo',
+                  valorMonto: '500',
+                }),
               ],
             }),
           ],
@@ -1219,7 +1354,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     it('sin tope, `valorSolicitado` es igual al monto', () => {
       const r = calcularVenta(
         venta({
-          lineas: [linea({ descuentos: [regla({ valor: '0.10' })] })],
+          lineas: [linea({ descuentos: [regla({ valorPorcentaje: '0.10' })] })],
         }),
       );
       const t = r.lineas[0].trazas.descuentos[0];
@@ -1229,14 +1364,14 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     it.each([
       [
         'diferida',
-        regla({ codigo: 'promocional', valor: '0.50' }),
+        regla({ codigo: 'promocional', valorPorcentaje: '0.50' }),
         null as string | null,
       ],
       [
         'método de pago que no coincide',
         regla({
           codigo: 'metodo_pago',
-          valor: '0.05',
+          valorPorcentaje: '0.05',
           metodoPagoIds: ['otro'],
         }),
         null as string | null,
@@ -1245,8 +1380,10 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         'sin tramo aplicable',
         regla({
           codigo: 'por_monto_venta',
-          valor: null,
-          tramos: [{ minimo: '99999', valor: '0.10' }],
+          valorPorcentaje: null,
+          tramos: [
+            { minimo: '99999', valorMonto: null, valorPorcentaje: '0.10' },
+          ],
         }),
         null as string | null,
       ],
@@ -1266,7 +1403,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
     it('las reglas a nivel venta congelan igual que las de línea', () => {
       const r = calcularVenta(
-        venta({ descuentosVenta: [regla({ valor: '0.10' })] }),
+        venta({ descuentosVenta: [regla({ valorPorcentaje: '0.10' })] }),
       );
       const t = r.trazasVenta.descuentos[0];
       expect(t.modo).toBe('porcentaje');
@@ -1282,7 +1419,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         lineas: [
           linea({
             precioUnitario: '15000',
-            descuentos: [regla({ id: 'd1', nombre: '5%', valor: '0.05' })],
+            descuentos: [
+              regla({ id: 'd1', nombre: '5%', valorPorcentaje: '0.05' }),
+            ],
             impuestos: [impuesto()],
           }),
         ],
@@ -1338,8 +1477,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ id: 'd1', nombre: 'A', valor: '0.125' }),
-                regla({ id: 'd2', nombre: 'B', valor: '0.125' }),
+                regla({ id: 'd1', nombre: 'A', valorPorcentaje: '0.125' }),
+                regla({ id: 'd2', nombre: 'B', valorPorcentaje: '0.125' }),
               ],
             }),
           ],
@@ -1394,7 +1533,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               // 100 − 7,5% = 92,5 fino. El paso cierra en 92 (el descuento
               // cuantizado es 8), así que el IVA sale de 92, no de 92,5.
-              descuentos: [regla({ valor: '0.075' })],
+              descuentos: [regla({ valorPorcentaje: '0.075' })],
               impuestos: [impuesto()],
             }),
           ],
@@ -1425,8 +1564,16 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               recargos: [
-                regla({ id: 'r1', modo: 'porcentaje', valor: '0.005' }),
-                regla({ id: 'r2', modo: 'porcentaje', valor: '0.50' }),
+                regla({
+                  id: 'r1',
+                  modo: 'porcentaje',
+                  valorPorcentaje: '0.005',
+                }),
+                regla({
+                  id: 'r2',
+                  modo: 'porcentaje',
+                  valorPorcentaje: '0.50',
+                }),
               ],
             }),
           ],
@@ -1455,8 +1602,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               // neto, y si cada uno se cuantizara sin mirar lo que queda
               // disponible darían 51 + 51 = 102 sobre un neto de 100.
               descuentos: [
-                regla({ id: 'f1', modo: 'monto_fijo', valor: '50.5' }),
-                regla({ id: 'f2', modo: 'monto_fijo', valor: '50.5' }),
+                regla({ id: 'f1', modo: 'monto_fijo', valorMonto: '50.5' }),
+                regla({ id: 'f2', modo: 'monto_fijo', valorMonto: '50.5' }),
               ],
             }),
           ],
@@ -1485,13 +1632,13 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'f1',
                   nombre: 'A',
                   modo: 'monto_fijo',
-                  valor: '50.5',
+                  valorMonto: '50.5',
                 }),
                 regla({
                   id: 'f2',
                   nombre: 'B',
                   modo: 'monto_fijo',
-                  valor: '49.4',
+                  valorMonto: '49.4',
                 }),
               ],
             }),
@@ -1517,13 +1664,13 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'f1',
                   nombre: 'A',
                   modo: 'monto_fijo',
-                  valor: '50.5',
+                  valorMonto: '50.5',
                 }),
                 regla({
                   id: 'f2',
                   nombre: 'B',
                   modo: 'monto_fijo',
-                  valor: '50.5',
+                  valorMonto: '50.5',
                 }),
               ],
             }),
@@ -1549,8 +1696,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [
-                regla({ id: 'f1', modo: 'monto_fijo', valor: '50.5' }),
-                regla({ id: 'f2', modo: 'monto_fijo', valor: '50.5' }),
+                regla({ id: 'f1', modo: 'monto_fijo', valorMonto: '50.5' }),
+                regla({ id: 'f2', modo: 'monto_fijo', valorMonto: '50.5' }),
               ],
             }),
           ],
@@ -1600,7 +1747,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         lineas: [
           linea({
             precioUnitario: '1000',
-            recargos: [regla({ id: 'r1', modo: 'monto_fijo', valor: '0.1' })],
+            recargos: [
+              regla({ id: 'r1', modo: 'monto_fijo', valorMonto: '0.1' }),
+            ],
           }),
           linea({
             precioUnitario: '2000',
@@ -1618,7 +1767,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         venta({
           config: cfgCLP,
           descuentosVenta: [
-            regla({ id: 'dv1', nombre: 'Cupón 7%', valor: '0.07' }),
+            regla({ id: 'dv1', nombre: 'Cupón 7%', valorPorcentaje: '0.07' }),
           ],
           // Netos 3.000 + 1.550 = 4.550, y 7% de 4.550 = 318,5 → el descuento
           // global cae justo en el medio peso, el caso que la identidad tiene
@@ -1660,13 +1809,13 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               id: 'f1',
               nombre: 'Fijo A',
               modo: 'monto_fijo',
-              valor: '0.5',
+              valorMonto: '0.5',
             }),
             regla({
               id: 'f2',
               nombre: 'Fijo B',
               modo: 'monto_fijo',
-              valor: '0.5',
+              valorMonto: '0.5',
             }),
           ],
           lineas: [linea({ precioUnitario: '3000' })],
@@ -1701,13 +1850,13 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               id: 'f1',
               nombre: 'Fijo A',
               modo: 'monto_fijo',
-              valor: '50.5',
+              valorMonto: '50.5',
             }),
             regla({
               id: 'f2',
               nombre: 'Fijo B',
               modo: 'monto_fijo',
-              valor: '50.5',
+              valorMonto: '50.5',
             }),
           ],
           // Una sola línea, sin reglas propias: la plata real disponible es
@@ -1742,7 +1891,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         venta({
           config: cfgCLP,
           recargosVenta: [
-            regla({ id: 'rv1', nombre: 'Recargo 7%', valor: '0.07' }),
+            regla({ id: 'rv1', nombre: 'Recargo 7%', valorPorcentaje: '0.07' }),
           ],
           // Netos 3.000 + 1.550 = 4.550, y 7% de 4.550 = 318,5 → el mismo
           // medio peso del test del descuento global, pero del lado del
@@ -1843,7 +1992,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               precioUnitario: '993',
               precioIncluyeImpuesto: true,
-              descuentos: [regla({ id: 'd1', nombre: '10%', valor: '0.10' })],
+              descuentos: [
+                regla({ id: 'd1', nombre: '10%', valorPorcentaje: '0.10' }),
+              ],
               impuestos: [IVA],
             }),
           ],
@@ -1879,7 +2030,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'd1',
                   nombre: '-50',
                   modo: 'monto_fijo',
-                  valor: '50',
+                  valorMonto: '50',
                 }),
               ],
               recargos: [
@@ -1887,7 +2038,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'r1',
                   nombre: '+50',
                   modo: 'monto_fijo',
-                  valor: '50',
+                  valorMonto: '50',
                 }),
               ],
               impuestos: [IVA],
@@ -1920,8 +2071,12 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               precioUnitario: '993',
               precioIncluyeImpuesto: true,
-              descuentos: [regla({ id: 'd1', nombre: '-10%', valor: '0.10' })],
-              recargos: [regla({ id: 'r1', nombre: '+10%', valor: '0.10' })],
+              descuentos: [
+                regla({ id: 'd1', nombre: '-10%', valorPorcentaje: '0.10' }),
+              ],
+              recargos: [
+                regla({ id: 'r1', nombre: '+10%', valorPorcentaje: '0.10' }),
+              ],
               impuestos: [IVA],
             }),
           ],
@@ -1949,7 +2104,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'd1',
                   nombre: '-5',
                   modo: 'monto_fijo',
-                  valor: '5',
+                  valorMonto: '5',
                 }),
               ],
               recargos: [
@@ -1957,7 +2112,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'r1',
                   nombre: '+5',
                   modo: 'monto_fijo',
-                  valor: '5',
+                  valorMonto: '5',
                 }),
               ],
               impuestos: [IVA],
@@ -1987,7 +2142,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'd1',
                   nombre: '-50',
                   modo: 'monto_fijo',
-                  valor: '50',
+                  valorMonto: '50',
                 }),
               ],
               recargos: [
@@ -1995,7 +2150,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'r1',
                   nombre: '+49',
                   modo: 'monto_fijo',
-                  valor: '49',
+                  valorMonto: '49',
                 }),
               ],
               impuestos: [IVA],
@@ -2021,7 +2176,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               id: 'dv',
               nombre: '-100',
               modo: 'monto_fijo',
-              valor: '100',
+              valorMonto: '100',
             }),
           ],
           lineas: [
@@ -2033,7 +2188,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'd1',
                   nombre: '-50',
                   modo: 'monto_fijo',
-                  valor: '50',
+                  valorMonto: '50',
                 }),
               ],
               recargos: [
@@ -2041,7 +2196,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   id: 'r1',
                   nombre: '+50',
                   modo: 'monto_fijo',
-                  valor: '50',
+                  valorMonto: '50',
                 }),
               ],
               impuestos: [IVA],
@@ -2150,7 +2305,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               precioUnitario: '993',
               precioIncluyeImpuesto: true,
-              descuentos: [regla({ id: 'd1', nombre: '10%', valor: '0.10' })],
+              descuentos: [
+                regla({ id: 'd1', nombre: '10%', valorPorcentaje: '0.10' }),
+              ],
               impuestos: [IVA],
             }),
           ],
@@ -2228,7 +2385,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               impuestos: [impuesto()],
             }),
           ],
-          descuentosVenta: [regla({ valor: '0.10' })],
+          descuentosVenta: [regla({ valorPorcentaje: '0.10' })],
           config: clp(),
         }),
       );
@@ -2248,7 +2405,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       const r = calcularVenta(
         venta({
           lineas: [linea({ precioUnitario: '1000', impuestos: [impuesto()] })],
-          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '200' })],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valorMonto: '200' })],
           config: clp(),
         }),
       );
@@ -2266,7 +2423,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: ['a', 'b', 'c'].map((id) =>
             linea({ itemId: id, precioUnitario: '10000', impuestos: [] }),
           ),
-          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '10000' })],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valorMonto: '10000' })],
           config: clp(),
         }),
       );
@@ -2294,7 +2451,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               clasificacionTributaria: 'exento',
             }),
           ],
-          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '200' })],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valorMonto: '200' })],
           config: clp(),
         }),
       );
@@ -2319,7 +2476,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               clasificacionTributaria: 'exento',
             }),
           ],
-          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '200' })],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valorMonto: '200' })],
           config: clp(),
         }),
       );
@@ -2338,7 +2495,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               impuestos: [impuesto()],
             }),
           ],
-          descuentosVenta: [regla({ modo: 'monto_fijo', valor: '100' })],
+          descuentosVenta: [regla({ modo: 'monto_fijo', valorMonto: '100' })],
           config: clp(),
         }),
       );

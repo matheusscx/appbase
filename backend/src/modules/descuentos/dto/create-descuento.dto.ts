@@ -12,13 +12,25 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class TramoDto {
   @IsNumberString()
   minimo: string;
 
+  // Exactamente una de las dos, y la que corresponde al `modo` de la regla: lo
+  // valida el service. Acá van opcionales porque cuál corresponde no se sabe
+  // sin mirar el hermano `modo`, que un decorador no puede leer.
+  // `valorMonto` es lo que el borde de escala PUEDE marcar ahora que existe
+  // como campo propio; el pipe que lo hace efectivo se enchufa aparte.
+  @IsOptional()
   @IsNumberString()
-  valor: string;
+  @EsMontoCobrado()
+  valorMonto?: string | null;
+
+  @IsOptional()
+  @IsNumberString()
+  valorPorcentaje?: string | null;
 }
 
 export class CreateDescuentoDto {
@@ -29,10 +41,16 @@ export class CreateDescuentoDto {
   @IsUUID()
   tipoReglaId: string;
 
-  // valor is optional at DTO level; service validates by tipo
+  // El importe va en UNA de las dos, la que dice `modo`; que un tipo lo EXIJA
+  // lo decide el service. Una regla por tramos no manda ninguna de las dos.
   @IsOptional()
   @IsNumberString()
-  valor?: string | null;
+  @EsMontoCobrado()
+  valorMonto?: string | null;
+
+  @IsOptional()
+  @IsNumberString()
+  valorPorcentaje?: string | null;
 
   // modo is optional at DTO level; service validates by tipo
   @IsOptional()

@@ -458,7 +458,11 @@ CREATE TABLE "descuentos" (
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
-  "valor"           NUMERIC(18,4),            -- null cuando el tipo usa tramos; decimal si modo=porcentaje: 0.10 = 10%
+  -- El importe va en UNA de las dos, la que dice `modo`; las dos en null = usa tramos.
+  -- Lo fuerza la restricción del final de la tabla. (7,4) en el porcentaje dice
+  -- por sí solo que ahí no entra plata.
+  "valor_monto"      NUMERIC(18,4),
+  "valor_porcentaje" NUMERIC(7,4),             -- decimal: 0.10 = 10%
   "tipo_regla_id"   UUID          NOT NULL REFERENCES "tipos_regla" ("tipo_regla_id"),
   "condicion_tipo"  condicion_tipo NOT NULL DEFAULT 'ninguna',
   "condicion_valor" TEXT,
@@ -468,7 +472,11 @@ CREATE TABLE "descuentos" (
   "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
   "eliminado_el"    TIMESTAMPTZ,
-  "eliminado_por"   UUID          REFERENCES usuarios("usuario_id")
+  "eliminado_por"   UUID          REFERENCES usuarios("usuario_id"),
+  CONSTRAINT "chk_descuentos_valor_segun_modo" CHECK (
+    ("modo" = 'monto_fijo' AND "valor_porcentaje" IS NULL)
+    OR ("modo" = 'porcentaje' AND "valor_monto" IS NULL)
+  )
 );
 
 -- Ver la nota de `uq_recargos_tenant_nombre_vivo` más abajo: misma regla.
@@ -481,7 +489,11 @@ CREATE TABLE "recargos" (
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
-  "valor"           NUMERIC(18,4),            -- null cuando el tipo usa tramos; decimal si modo=porcentaje: 0.10 = 10%
+  -- El importe va en UNA de las dos, la que dice `modo`; las dos en null = usa tramos.
+  -- Lo fuerza la restricción del final de la tabla. (7,4) en el porcentaje dice
+  -- por sí solo que ahí no entra plata.
+  "valor_monto"      NUMERIC(18,4),
+  "valor_porcentaje" NUMERIC(7,4),             -- decimal: 0.10 = 10%
   "tipo_regla_id"   UUID          NOT NULL REFERENCES "tipos_regla" ("tipo_regla_id"),
   "condicion_tipo"  condicion_tipo NOT NULL DEFAULT 'ninguna',
   "condicion_valor" TEXT,
@@ -491,7 +503,11 @@ CREATE TABLE "recargos" (
   "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
   "eliminado_el"    TIMESTAMPTZ,
-  "eliminado_por"   UUID          REFERENCES usuarios("usuario_id")
+  "eliminado_por"   UUID          REFERENCES usuarios("usuario_id"),
+  CONSTRAINT "chk_recargos_valor_segun_modo" CHECK (
+    ("modo" = 'monto_fijo' AND "valor_porcentaje" IS NULL)
+    OR ("modo" = 'porcentaje' AND "valor_monto" IS NULL)
+  )
 );
 
 -- Unicidad de nombre por tenant, case-insensitive y solo entre los vivos.
@@ -510,11 +526,17 @@ CREATE TABLE "descuento_tramos" (
   "descuento_tramo_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "descuento_id"       UUID          NOT NULL REFERENCES "descuentos" ("descuento_id") ON DELETE CASCADE,
   "minimo"             NUMERIC(18,4) NOT NULL,
-  "valor"              NUMERIC(18,4) NOT NULL,
+  -- Exactamente una de las dos, y la misma unidad que el `modo` de su regla.
+  -- Lo segundo es entre tablas y no se puede expresar acá: lo valida el service.
+  "valor_monto"        NUMERIC(18,4),
+  "valor_porcentaje"   NUMERIC(7,4),
   "orden"              INTEGER       NOT NULL DEFAULT 0,
   "creado_el"          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
-  "eliminado_el"       TIMESTAMPTZ
+  "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT "chk_descuento_tramos_una_unidad" CHECK (
+    ("valor_monto" IS NULL) <> ("valor_porcentaje" IS NULL)
+  )
 );
 
 -- Tramos de recargo (para tipos que usan escalonado por cantidad o monto)
@@ -522,11 +544,17 @@ CREATE TABLE "recargo_tramos" (
   "recargo_tramo_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "recargo_id"       UUID          NOT NULL REFERENCES "recargos" ("recargo_id") ON DELETE CASCADE,
   "minimo"           NUMERIC(18,4) NOT NULL,
-  "valor"            NUMERIC(18,4) NOT NULL,
+  -- Exactamente una de las dos, y la misma unidad que el `modo` de su regla.
+  -- Lo segundo es entre tablas y no se puede expresar acá: lo valida el service.
+  "valor_monto"      NUMERIC(18,4),
+  "valor_porcentaje" NUMERIC(7,4),
   "orden"            INTEGER       NOT NULL DEFAULT 0,
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
-  "eliminado_el"     TIMESTAMPTZ
+  "eliminado_el"     TIMESTAMPTZ,
+  CONSTRAINT "chk_recargo_tramos_una_unidad" CHECK (
+    ("valor_monto" IS NULL) <> ("valor_porcentaje" IS NULL)
+  )
 );
 
 -- Métodos de pago asociados a descuentos (para tipo metodo_pago)

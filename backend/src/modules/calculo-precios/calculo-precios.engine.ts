@@ -24,9 +24,18 @@ export interface ReglaResuelta {
   /** `tipos_regla.codigo` — determina la estrategia de evaluación. */
   codigo: string | null;
   modo: ModoRegla;
-  /** Decimal en string; null cuando la regla usa tramos. */
-  valor: string | null;
-  tramos: { minimo: string; valor: string }[];
+  /**
+   * El importe vive en UNA de las dos, la que dice `modo`. Las dos en null es
+   * el estado de una regla por tramos, que lo expresa en `tramos[]`.
+   */
+  valorMonto: string | null;
+  /** Decimal en string: 0.10 = 10%. */
+  valorPorcentaje: string | null;
+  tramos: {
+    minimo: string;
+    valorMonto: string | null;
+    valorPorcentaje: string | null;
+  }[];
   metodoPagoIds: string[];
   /**
    * `false` = pausada: no se aplica y emite advertencia. Requerido a propósito:
@@ -360,6 +369,18 @@ interface ContextoRegla {
   metodoPagoId: string | null;
 }
 
+/**
+ * La columna que corresponde al modo. No elige entre dos valores: nombra cuál
+ * de las dos existe. Que nunca estén las dos llenas lo garantiza el CHECK de
+ * tabla, no esta función — acá el modo manda y la otra columna se ignora.
+ */
+function valorDelModo(
+  modo: ModoRegla,
+  valores: { valorMonto: string | null; valorPorcentaje: string | null },
+): string | null {
+  return modo === 'monto_fijo' ? valores.valorMonto : valores.valorPorcentaje;
+}
+
 function aplicarValor(
   modo: ModoRegla,
   valor: string | null,
@@ -372,10 +393,10 @@ function aplicarValor(
 }
 
 function seleccionarTramo(
-  tramos: { minimo: string; valor: string }[],
+  tramos: ReglaResuelta['tramos'],
   magnitud: Decimal,
-): { minimo: string; valor: string } | null {
-  let elegido: { minimo: string; valor: string } | null = null;
+): ReglaResuelta['tramos'][number] | null {
+  let elegido: ReglaResuelta['tramos'][number] | null = null;
   let mejorMin = new Decimal(-1);
   for (const t of tramos) {
     const min = new Decimal(t.minimo);
@@ -391,7 +412,7 @@ function seleccionarTramo(
  * Resultado de evaluar una regla. Lleva el valor usado además del monto porque
  * el monto solo no reconstruye la regla: 10 sobre 100 puede ser un 10% o un
  * monto fijo de 10, y en una regla por tramos el valor sale del tramo elegido,
- * no de `regla.valor` (que es `null`).
+ * no del valor plano de la regla (que ahí es `null` en las dos columnas).
  */
 interface EvaluacionRegla {
   monto: Decimal;
@@ -412,9 +433,10 @@ function evaluarRegla(
     if (!ctx.metodoPagoId || !regla.metodoPagoIds.includes(ctx.metodoPagoId)) {
       return SIN_VALOR;
     }
+    const valor = valorDelModo(regla.modo, regla);
     return {
-      monto: aplicarValor(regla.modo, regla.valor, ctx.base),
-      valorEfectivo: regla.valor,
+      monto: aplicarValor(regla.modo, valor, ctx.base),
+      valorEfectivo: valor,
     };
   }
 
@@ -423,16 +445,19 @@ function evaluarRegla(
     const tramo = seleccionarTramo(regla.tramos, magnitud);
     if (!tramo) return SIN_VALOR;
     // El tramo elegido ES el valor de la regla en esta venta. Propagarlo es lo
-    // único que permite reportarlo después: `regla.valor` es `null` acá.
+    // único que permite reportarlo después: el valor plano de la regla es
+    // `null` acá, en las dos columnas.
+    const valorTramo = valorDelModo(regla.modo, tramo);
     return {
-      monto: aplicarValor(regla.modo, tramo.valor, ctx.base),
-      valorEfectivo: tramo.valor,
+      monto: aplicarValor(regla.modo, valorTramo, ctx.base),
+      valorEfectivo: valorTramo,
     };
   }
 
+  const valor = valorDelModo(regla.modo, regla);
   return {
-    monto: aplicarValor(regla.modo, regla.valor, ctx.base),
-    valorEfectivo: regla.valor,
+    monto: aplicarValor(regla.modo, valor, ctx.base),
+    valorEfectivo: valor,
   };
 }
 

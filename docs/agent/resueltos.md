@@ -8375,3 +8375,103 @@ Texto original de la entrada, verbatim:
 > (`docs/features/roles-permisos.md`). Lo que queda de esta entrada es el vínculo
 > `garzones.usuario_id` + `usuarios_tenants.es_totem` y la resolución del garzón actuante,
 > todo diseñado en el plan.
+
+## El importe de una regla deja de ser ambiguo: dos columnas en vez de una (cerrado 2026-08-23)
+
+Entrada mudada verbatim desde `pendientes.md` § 3:
+
+> - [ ] **El `valor` de descuentos y recargos se parte en dos columnas** (backend + BD +
+>   frontend, medido 2026-08-21, **decidido por el owner el 2026-08-22**) — el borde de escala
+>   valida la plata con un decorador por campo (`@EsMontoCobrado` / `@EsCosto`) que un pipe lee
+>   del metadata, y ese campo **no se puede marcar con ninguno de los dos**: es monto fijo **o**
+>   porcentaje según el valor del hermano `modo`, y ni el decorador ni el pipe leen campos
+>   hermanos.
+>   🔴 El punto ciego cae justo en el módulo donde la confusión valor-vs-porcentaje **ya produjo
+>   un bug** (un `19` leído como tasa multiplica el impuesto por cien), y deja a
+>   `configuracion/descuentos.vue` y `configuracion/recargos.vue` (`form.valor`, `tramo.valor`)
+>   como los únicos inputs de plata del inventario que no pueden apoyarse en el rechazo del
+>   backend.
+>   ✅ **Decisión: opción (2) — `valor_monto` / `valor_porcentaje`, cada una con su marca.** El
+>   owner descartó el validador que lee al hermano **aun siendo el más barato**: partir la
+>   columna es lo único que hace que el dato deje de ser ambiguo también para **quien lo lee**,
+>   no solo para quien lo escribe.
+>   **Lo que toca:** esquema, DTOs, motor de precios, seeder y las dos pantallas. La mitad cara
+>   de una migración no aplica —no hay datos productivos: se cambia el esquema, se actualiza el
+>   seeder y se resetea—.
+>   ⚠️ **Trampas para quien la tome:** (a) toca el **motor de cálculo de precios**, así que va
+>   sola y con el sistema quieto (`CLAUDE.md` → detenerse ante el motor); (b) el campo `modo` no
+>   desaparece solo — la spec tiene que decidir si sobrevive como discriminador o si manda la
+>   columna llena, y **las dos formas no pueden convivir sin una invariante que impida llenar
+>   las dos**; (c) `tramo.valor` vive dentro de un DTO anidado, y el pipe **no recorre anidados
+>   sin `@Type()` en el padre** (limitación conocida, fijada por el test "LIMITACIÓN CONOCIDA").
+
+### Cómo se cerró
+
+`valor` se partió en `valor_monto` (`numeric(18,4)`) y `valor_porcentaje` (`numeric(7,4)`)
+en las **cuatro** tablas —`descuentos`, `recargos` y sus dos de tramos—. Los tipos no se
+eligieron: se copiaron de `venta_descuentos.valor_aplicado` / `porcentaje_aplicado`, porque
+**el rastro congelado de la venta ya guardaba el dato partido**. El catálogo era el que
+había quedado atrás.
+
+**`modo` sobrevive**, que era la pregunta abierta de la trampa (b). No es redundante: tiene
+**tres** roles y solo uno se podía reemplazar. Es el discriminador, es la clave de orden del
+motor (`calculo-precios.engine.ts` → `ordenarReglas()`: los `monto_fijo` van después de los
+porcentajes) y es lo que se congela en la venta. La alternativa —que mandara la columna
+llena— se rompía justo donde importa: **una regla por tramos tiene las dos columnas en
+NULL**, así que su unidad solo se derivaría leyendo sus tramos, y eso convierte la invariante
+en una condición entre filas que un CHECK no puede expresar.
+
+La invariante quedó partida en dos mitades **de distinta fuerza**, y conviene no leerlas
+juntas: la de la regla y la del tramo son `CHECK` de tabla; que **todos los tramos usen la
+columna que dice el `modo` de su regla** es entre tablas y vive en el service, que es donde
+vivía antes. No es mejora ni regresión: es lo mismo, movido.
+
+### Lo que se midió y NO era como la entrada decía
+
+- ⛔ **La trampa (c) no aplicaba.** Decía que `tramo.valor` vive en un DTO anidado y que *"el
+  pipe no recorre anidados sin `@Type()` en el padre"*. El padre **ya lo tenía**
+  (`create-descuento.dto.ts` → `@Type(() => TramoDto)`), así que los tramos se recorren sin
+  trabajo extra. Una entrada de backlog es un punto de partida, no un enunciado verificado.
+- 🆕 **Apareció un agujero que la entrada no anticipaba, y lo encontró la revisión
+  independiente, no el gate.** Al partir `valor` en dos campos que **por fuerza** son
+  opcionales —cuál corresponde depende del hermano `modo`— se perdió el guardia que daba el
+  `valor` obligatorio del DTO: un tramo sin ningún importe pasaba la validación y moría contra
+  el `CHECK` de tabla, o sea **500 de Postgres en vez del 400 que corresponde**. Peor: el test
+  del util que se migró mecánicamente (*"un tramo sin valor no es error"*) **declaraba correcto
+  ese camino**. Lo tapa ahora `validarTramo`, con test de unidad y un e2e por el camino real.
+  📌 **La lección, que vale más que el fix:** partir un campo obligatorio en dos opcionales
+  **borra una validación que nadie escribió** — la daba el `required` del campo viejo. Hay que
+  reponerla a mano, y un renombre mecánico de los tests la deja invisible.
+- 🆕 **Y una segunda cosa que solo vio la revisión, no el gate:** la línea que apaga la columna
+  abandonada al cambiar de modo (`...importeResultante(modo, dto, descuento)`) **sobrevivía a
+  su propio borrado con el gate entero en verde**. No había un solo test de un cambio de modo
+  **exitoso** — todos los PATCH de la suite esperaban un 400—, y sin esa línea la acción más
+  común del drawer (pasar de monto fijo a porcentaje) deja las dos columnas llenas y sale un
+  500 del CHECK. Lo fija ahora *"cambiar de modo con su importe APAGA la columna abandonada"*,
+  en los dos services, verificado con el mutante.
+  📌 **La lección:** una invariante nueva atrae tests de lo que debe RECHAZAR, y deja sin
+  cubrir el camino feliz que la ejerce. El mutante sobre la línea, no sobre el rechazo.
+
+### Regalo que salió de arriba, sin trabajo extra
+
+Un `PATCH` que solo cambia el `modo` ya no puede reinterpretar lo guardado. Antes un tramo de
+`5000` legítimo como monto fijo pasaba a leerse como 500.000% y lo frenaba la regla del
+decimal; ahora ese `5000` vive en `valorMonto`, el modo nuevo no puede leerlo y el `PATCH`
+**falla diciendo que la unidad no corresponde**. Sigue siendo 400 y sigue haciendo falta leer
+los tramos guardados, pero por otro motivo.
+
+### Qué lo fija
+
+- **Mutante (revierte, no rompe):** el motor vuelve a tomar "el valor que haya" sin mirar el
+  modo —la conducta de la columna única— y muere *"la columna que no corresponde al modo se
+  ignora"* en `calculo-precios.engine.spec.ts`.
+- Unidad **2128**, e2e **597/599 (2 skipped)** —los dos enteros, con `reset-db.sh` antes y
+  `--verificar` después—, frontend **804**.
+  ⚠️ Este recibo decía "e2e 592" y era falso: el número salió de una corrida anterior a los
+  tests que el propio cierre agregó. Lo cazó la segunda revisión independiente comparando
+  contra una corrida propia. **Un recibo con un número inventado es peor que no tenerlo**: el
+  próximo que compare cree que perdió cuatro tests.
+- **Smoke en el navegador**, que es lo único que ve el drawer: crear en monto fijo, editar a
+  porcentaje —el campo queda **vacío**, no arrastra el 1000—, guardar 0.10 y verlo como
+  `10% (porcentaje)`, y crear una regla por tramos en monto fijo. Verificado en la base que la
+  columna abandonada queda en `NULL` y que los dos tramos aterrizan en `valor_monto`.

@@ -6,6 +6,7 @@ import { RecargoMetodoPago } from './entities/recargo-metodo-pago.entity';
 import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
 import { RecargosService } from './recargos.service';
 import { RecargosController } from './recargos.controller';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -15,6 +16,9 @@ import { RecargosController } from './recargos.controller';
       RecargoMetodoPago,
       TipoRegla,
     ]),
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [RecargosController],
   providers: [RecargosService],

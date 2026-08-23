@@ -391,31 +391,6 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
-- [ ] **El `valor` de descuentos y recargos se parte en dos columnas** (backend + BD +
-  frontend, medido 2026-08-21, **decidido por el owner el 2026-08-22**) — el borde de escala
-  valida la plata con un decorador por campo (`@EsMontoCobrado` / `@EsCosto`) que un pipe lee
-  del metadata, y ese campo **no se puede marcar con ninguno de los dos**: es monto fijo **o**
-  porcentaje según el valor del hermano `modo`, y ni el decorador ni el pipe leen campos
-  hermanos.
-  🔴 El punto ciego cae justo en el módulo donde la confusión valor-vs-porcentaje **ya produjo
-  un bug** (un `19` leído como tasa multiplica el impuesto por cien), y deja a
-  `configuracion/descuentos.vue` y `configuracion/recargos.vue` (`form.valor`, `tramo.valor`)
-  como los únicos inputs de plata del inventario que no pueden apoyarse en el rechazo del
-  backend.
-  ✅ **Decisión: opción (2) — `valor_monto` / `valor_porcentaje`, cada una con su marca.** El
-  owner descartó el validador que lee al hermano **aun siendo el más barato**: partir la
-  columna es lo único que hace que el dato deje de ser ambiguo también para **quien lo lee**,
-  no solo para quien lo escribe.
-  **Lo que toca:** esquema, DTOs, motor de precios, seeder y las dos pantallas. La mitad cara
-  de una migración no aplica —no hay datos productivos: se cambia el esquema, se actualiza el
-  seeder y se resetea—.
-  ⚠️ **Trampas para quien la tome:** (a) toca el **motor de cálculo de precios**, así que va
-  sola y con el sistema quieto (`CLAUDE.md` → detenerse ante el motor); (b) el campo `modo` no
-  desaparece solo — la spec tiene que decidir si sobrevive como discriminador o si manda la
-  columna llena, y **las dos formas no pueden convivir sin una invariante que impida llenar
-  las dos**; (c) `tramo.valor` vive dentro de un DTO anidado, y el pipe **no recorre anidados
-  sin `@Type()` en el padre** (limitación conocida, fijada por el test "LIMITACIÓN CONOCIDA").
-
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
   arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (`ventas.service.ts:1390`,
@@ -603,9 +578,16 @@ empezarlas.
   expresa como un tramo de valor 0, que es la forma del caso más común.
   ✅ **Y cómo se ve, decidido en la misma pasada: un recargo que quedó en cero NO aparece en
   la boleta.** Nada de líneas en `$0` ni de la palabra "gratis" — el documento queda limpio.
-  ⚠️ Ojo al construir: `validarMontosDeRegla` exige `valor > 0` y la comparte con descuentos,
-  así que aflojarla toca los dos. Un descuento de cero es inocuo, pero conviene que sea una
+  ⚠️ Ojo al construir: `validarMontosDeRegla` exige `> 0` y la comparte con descuentos, así
+  que aflojarla toca los dos. Un descuento de cero es inocuo, pero conviene que sea una
   decisión y no un efecto secundario.
+  🔄 **La validación cambió de forma el 2026-08-23** y esta entrada hay que leerla con eso:
+  ya no recibe un `valor` suelto sino `{ valorMonto, valorPorcentaje }`, el `> 0` vive en
+  `validarMonto(unidad, valor)`, y **hay una segunda función, `validarTramo`, que además
+  exige que el tramo traiga exactamente una de las dos columnas**. Permitir el cero toca las
+  dos: aflojar el `> 0` sin mirar `validarTramo` deja "sin importe" y "importe cero"
+  indistinguibles, que no es lo que se decidió. Ver
+  [`resueltos.md`](resueltos.md) § *"El importe de una regla deja de ser ambiguo"*.
 
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`
@@ -819,7 +801,7 @@ que el que la tome se va a encontrar**:
 | Entrada | Decisión | Dónde quedó |
 |---|---|---|
 | `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Resuelto el 2026-08-22**: el spike salió, se migró y el plan B no hizo falta ([`resueltos.md`](resueltos.md)) |
-| El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Sección 3** |
+| El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Construido el 2026-08-23** ([`resueltos.md`](resueltos.md)) |
 | El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
 | El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Construido el 2026-08-22** ([`resueltos.md`](resueltos.md)) |
 | La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Corrida el 2026-08-22** → 0 hallazgos ([`resueltos.md`](resueltos.md)) |

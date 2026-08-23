@@ -321,9 +321,14 @@ export class CalculoPreciosService {
       id: string;
       nombre: string;
       modo: string;
-      valor: string | null;
+      valorMonto: string | null;
+      valorPorcentaje: string | null;
       tipoRegla: { codigo: string } | null;
-      tramos: { minimo: string | null; valor: string | null }[];
+      tramos: {
+        minimo: string | null;
+        valorMonto: string | null;
+        valorPorcentaje: string | null;
+      }[];
       metodoPagoIds: string[];
       activo: boolean;
     }[],
@@ -336,10 +341,17 @@ export class CalculoPreciosService {
           nombre: r.nombre,
           codigo: r.tipoRegla?.codigo ?? null,
           modo: r.modo as ReglaResuelta['modo'],
-          valor: r.valor,
+          valorMonto: r.valorMonto,
+          valorPorcentaje: r.valorPorcentaje,
+          // El `?? '0'` del `minimo` queda: un tramo sin mínimo arranca en cero
+          // y eso es un dato, no una ambigüedad. Los importes NO llevan default:
+          // poner `'0'` en las dos columnas volvería a inventar el dato que
+          // este cambio vino a desambiguar. El default lo aplica el motor,
+          // DESPUÉS de elegir la columna.
           tramos: r.tramos.map((t) => ({
             minimo: t.minimo ?? '0',
-            valor: t.valor ?? '0',
+            valorMonto: t.valorMonto,
+            valorPorcentaje: t.valorPorcentaje,
           })),
           metodoPagoIds: r.metodoPagoIds,
           // El mapa conserva las reglas pausadas a propósito: sacarlas de acá

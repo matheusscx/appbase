@@ -150,7 +150,7 @@ describe('Unicidad de nombre (e2e) — case-insensitive en los 9', () => {
       nombre,
       tipoReglaId: TIPO_DESCUENTO_DIRECTO,
       modo: 'porcentaje',
-      valor: '0.10',
+      valorPorcentaje: '0.10',
     });
     const primero = await request(app.getHttpServer())
       .post('/api/descuentos')
@@ -171,7 +171,7 @@ describe('Unicidad de nombre (e2e) — case-insensitive en los 9', () => {
       nombre,
       tipoReglaId: TIPO_RECARGO_GENERAL,
       modo: 'porcentaje',
-      valor: '0.05',
+      valorPorcentaje: '0.05',
     });
     const primero = await request(app.getHttpServer())
       .post('/api/recargos')
@@ -281,7 +281,7 @@ describe('Unicidad de nombre (e2e) — case-insensitive en los 9', () => {
         nombre,
         tipoReglaId: TIPO_DESCUENTO_DIRECTO,
         modo: 'porcentaje',
-        valor: '0.10',
+        valorPorcentaje: '0.10',
       }),
       statusDelete: 200,
     },
@@ -291,7 +291,7 @@ describe('Unicidad de nombre (e2e) — case-insensitive en los 9', () => {
         nombre,
         tipoReglaId: TIPO_RECARGO_GENERAL,
         modo: 'porcentaje',
-        valor: '0.05',
+        valorPorcentaje: '0.05',
       }),
       statusDelete: 200,
     },
