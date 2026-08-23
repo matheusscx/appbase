@@ -52,6 +52,14 @@ arreglo anterior del redondeo se hizo por partes y hubo que revertirlo. Un N+1 *
 introduzca la tarea sí se saca en el momento: lo que se consulta es abrir un frente, no
 arreglar lo que uno rompió.
 
+📌 **Lo fiscal va solo, igual que el motor de cálculo** (owner, 2026-08-23). Impuestos,
+documentos tributarios y notas de crédito no se toman de arrastre ni como parte de otra
+tarea: abren su propio frente, con su propia sesión y su propia verificación. La razón es la
+misma que en el motor —el error no se ve al escribirlo, se ve en un documento ya emitido— y
+además es materia donde la regla la pone el owner, no el agente: **ADR-010** y el primer
+punto de "Detenerse y preguntar". Vale también para la tanda de decisiones: una pregunta
+fiscal no se cuelga al final de una ronda de preguntas de producto.
+
 **Investigación de mercado (al detenerse por una regla de negocio no documentada):** si
 además el mercado ya resolvió el tema (POS maduros: Toast/Square/Lightspeed…) y el owner
 no es experto del dominio, **preguntar si quiere una pasada de investigación antes de

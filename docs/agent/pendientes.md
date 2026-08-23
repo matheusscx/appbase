@@ -452,8 +452,17 @@ empezarlas.
   **La pregunta para el owner:** la NC devuelve **por línea elegida** (`devoluciones`),
   no la venta entera. Para un producto la correspondencia línea→stock es directa; para una
   receta hay que decidir si devolver una unidad de "Hamburguesa" repone sus ingredientes
-  —simétrico con la venta— o si se rechaza explícito. **No avanzar sin esa respuesta:**
-  toca `movimientos_inventario` y el camino del reembolso de pasarela.
+  —simétrico con la venta— o si se rechaza explícito.
+  ✅ **DECIDIDO (owner, 2026-08-23): ni una cosa ni la otra — se pregunta.** Al hacer la nota
+  de crédito, el sistema pregunta **si el producto se recupera o se pierde**. Si se recupera,
+  repone; si no, **sale como merma**. Es lo fiel a un local de comida: una hamburguesa ya
+  armada no vuelve a ser pan y carne, pero una que nunca salió de la cocina sí.
+  ✅ **La pregunta aparece SIEMPRE que haya stock de por medio**, no solo en recetas y combos:
+  también en el producto suelto, porque la botella puede volver rota. Una sola regla, sin
+  excepción que explicar.
+  ⚠️ **Al construir:** la merma ya existe y **pide causa**, así que hay que definir con qué
+  causa entra la que nace de una devolución —o si se crea una— antes de escribir el flujo.
+  Y sigue en pie que toca `movimientos_inventario` y el camino del reembolso de pasarela.
 
 - [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
   no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
@@ -509,6 +518,26 @@ empezarlas.
   *managerial override*, y `Closeout Over/Short Warning` solo pide confirmación del empleado
   **sin** bloquear. El chileno **mySYSTEM** también tiene tope configurable que impide cerrar.
   Los nombres van acá para no volver a relevarlos.
+  🔄 **REVISADO POR EL OWNER (2026-08-23) — esto reemplaza el "bloqueante" del 2026-08-11.**
+  Son **dos niveles y NINGUNO frena el cierre**:
+  - **Nivel de aviso:** el cajero ve la advertencia, confirma y cierra.
+  - **Nivel alto:** avisa más fuerte y le llega al encargado, pero el cajero igual cierra y se
+    va. No se detiene la operación en ningún caso.
+  ⚠️ **Es una reversión, no un matiz:** la decisión del 2026-08-11 decía "bloqueante, no aviso"
+  y la del 2026-08-15 resolvía solo el cruce con el cierre forzado. Quien construya esto se
+  guía por **esta** entrada; las dos anteriores quedan como historia del porqué.
+  ⛔ **Consecuencia asumida, que antes valía solo para el cierre forzado y ahora vale para
+  todos:** el umbral deja de ser un control preventivo y es **enteramente rastro**. Si el
+  evento no queda o nadie lo mira, no queda nada. Por eso lo que sigue no es adorno:
+  ✅ **Cómo se entera el encargado (owner, 2026-08-23):** el cierre le queda en una **bandeja
+  de "pendientes de revisar"** hasta que alguien lo abre y lo marca visto, **más un resumen
+  diario** con los descuadres de la jornada. Nada de notificación en el momento: a las 2 de la
+  mañana se vuelve ruido y un control que se vuelve ruido se muere.
+  ✅ **El cajero SÍ se entera, y puede dejar su explicación (owner, 2026-08-23):** al cerrar ve
+  que la diferencia pasó el límite y que su cierre va a revisarse, y puede escribir qué pasó
+  ("le di vuelto de más", "faltó registrar una compra de insumos"). El encargado revisa con esa
+  explicación al lado en vez de con un número pelado. Cierra el 🔶 del precedente bancario
+  —avisarle al dueño de la plata— que estaba sin decidir.
   🔗 **Y esta entrada resultó ser la forma concreta de tapar el agujero que dejó el cierre
   ciego**: el descuadre lo justifica hoy la misma persona que lo produjo y no lo revisa nadie
   (ver la entrada de abajo). El umbral es el control **agudo** de ese agujero.
@@ -678,16 +707,26 @@ empezarlas.
   suma con signo del efectivo, otros medios aparte, y conteos de faltante/sobrante/cuadrado,
   ordenado por el faltante más grande arriba. Detalle en
   [`features/gestion-cajas.md`](../features/gestion-cajas.md#tendencia-de-descuadres-por-cajero).
-  ⏳ **Lo que sigue abierto es la otra mitad, y es la que da nombre a la entrada: que alguien
-  REVISE.** Ver el sesgo exige que el supervisor abra la pantalla y sospeche primero; nada lo
-  llama. La revisión de verdad es el paso de conciliación de Fudo o el umbral de Toast — y el
-  umbral es la entrada de arriba, que **ahora sí se puede tomar**, porque ya hay de dónde
-  sacar el número.
-  🛑 **Preguntas que quedaron anotadas al construir la tendencia**, ninguna bloqueante: si la
-  ventana por defecto de 30 días es la correcta; si se quiere el **promedio con signo**
-  (queda afuera porque un promedio de dinero es una división de dinero y arrastra la
-  cuantización por moneda); y si un cajero que rota entre cajones debería verse separado por
-  cajón en vez de en una fila sola.
+  ✅ **La otra mitad —que alguien REVISE— quedó decidida el 2026-08-23**, y con eso esta
+  entrada ya no tiene pregunta propia: se construye junto con el umbral, que es la entrada de
+  arriba. Lo que la cierra es que el cierre descuadrado **le queda al encargado en una bandeja
+  de pendientes de revisar, más un resumen diario** — o sea, algo que lo llama, en vez de
+  depender de que abra la pantalla de tendencia y sospeche primero. Y el cajero deja **su
+  explicación al cerrar**, así que la revisión llega con el contexto y no con un número pelado.
+  📌 Lo que sobrevive de esta entrada es el **porqué**, no trabajo aparte: sirve para no
+  construir el umbral como un número suelto. Ver el sesgo (la tendencia, ya construida) y que
+  algo llame a mirarlo (la bandeja) son las dos mitades del mismo control.
+  ✅ **Las tres preguntas que quedaron anotadas al construir la tendencia, contestadas
+  (owner, 2026-08-23) — y las tres confirman lo que ya existe, así que no hay trabajo:**
+  la **ventana de 30 días** queda (un mes de turnos: alcanza para que un sesgo chico se note y
+  es corto para no arrastrar gente que ya no está); **una fila por cajero**, sin abrir por
+  cajón (la pregunta que importa es quién descuadra, y la lista se mantiene corta); y el
+  **promedio con signo sigue afuera**, que no era pregunta de producto sino consecuencia de que
+  un promedio de dinero es una división de dinero y arrastra la cuantización por moneda.
+  ⚠️ El costo de "una fila por cajero", asumido: si un cajón tiene un problema propio —un
+  vuelto mal configurado, dos personas compartiéndolo— queda diluido entre los turnos buenos de
+  esa persona en otros cajones. Si algún día aparece esa sospecha, la salida es abrir por cajón,
+  no cambiar el default.
 
 - [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
   de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
@@ -802,7 +841,15 @@ empezarlas.
   [`features/descuentos-recargos.md`](../features/descuentos-recargos.md).
   **Las dos salidas son de producto, no correcciones:** (a) permitir `valor = 0` en un
   tramo, o (b) agregarle `maximo` al tramo. Las dos afectan **también a descuentos**, que
-  comparten la validación y el modelo. **Pregunta para el owner antes de tocar nada.**
+  comparten la validación y el modelo.
+  ✅ **DECIDIDO (owner, 2026-08-23): la (a) — un tramo puede valer cero.** No se agrega
+  `maximo`: los tramos siguen abiertos hacia arriba. Con eso "envío gratis sobre $30.000" se
+  expresa como un tramo de valor 0, que es la forma del caso más común.
+  ✅ **Y cómo se ve, decidido en la misma pasada: un recargo que quedó en cero NO aparece en
+  la boleta.** Nada de líneas en `$0` ni de la palabra "gratis" — el documento queda limpio.
+  ⚠️ Ojo al construir: `validarMontosDeRegla` exige `valor > 0` y la comparte con descuentos,
+  así que aflojarla toca los dos. Un descuento de cero es inocuo, pero conviene que sea una
+  decisión y no un efecto secundario.
 
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`
