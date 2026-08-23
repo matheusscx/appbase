@@ -808,26 +808,27 @@ empezarlas.
   total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
   pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
 
-- [ ] **Los tramos de `mora` y `recargo_metodo_pago` cobran cero en silencio** (backend,
+- [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
   parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
   [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
   (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
   queda son los dos tipos que el motor **no** lleva a la rama de tramos:
 
-  | Tipo | Con tramos hoy | Por qué |
+  | Tipo | Clase | Con tramos hoy |
   |---|---|---|
-  | `recargo_metodo_pago` | ⚠️ **0** | la rama de `METODO_PAGO_CODIGOS` retorna **antes** del `if` de tramos, y `valor` es null |
-  | `mora` | ⚠️ **0** | está en `DIFERIDAS`: el motor no la evalúa |
+  | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
+  | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
 
-  **No "ignoran" el tramo: cobran cero.** Habilitarles `campoTramos` sin tocar el motor
-  produciría recargos que el admin configura, la UI muestra y la venta no cobra.
-  Cada una necesita algo distinto: `mora` hay que des-diferirla; `recargo_metodo_pago`
-  necesita que su rama siga hasta los tramos en vez de retornar.
-  ⚠️ **La magnitud "días de atraso" o "plazo" no existe en el motor** (`línea 291`: o
-  cantidad si el código es `por_mayor`, o monto). Escalonar `mora` por días o los intereses
-  por plazo es una magnitud nueva, no un tipo nuevo. Y los intereses tienen un tema previo:
-  hoy el motor los aplica como **porcentaje plano de la base**, sin ninguna dimensión
-  temporal, aunque la UI los etiquete "Tasa mensual".
+  ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
+  archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
+  falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
+  `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
+  que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
+  📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
+  tramos en uno y no en el otro deja la mitad del bug.
+  📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
+  *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
+  Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
   ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
 
 - [ ] **Un tramo no puede valer cero, y no hay `maximo`: "gratis sobre $X" no se expresa**
@@ -1547,6 +1548,79 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   donde insumos e ingredientes son todos `cantidad`.
 
 ---
+
+### Cinco tipos de regla no hacen lo que la pantalla promete — arreglarlos (2026-08-23)
+
+**Qué es esto:** el 2026-08-23 se midió que cinco de los doce tipos de regla no se comportan
+como su formulario dice. Se evaluó **sacarlos** y el owner lo descartó: **no se sacan, se
+arreglan**. Esta entrada es el inventario de qué está mal en cada uno y qué hay que decidir
+antes de tocar nada.
+
+⚠️ **La causa de fondo es una sola, y es del motor:** `calculo-precios.engine.ts` conoce
+**montos y cantidades**, no tiempo. Su magnitud es literalmente
+`codigo === 'por_mayor' ? ctx.cantidad : ctx.monto` — no hay una tercera. Ni plazos, ni días de
+atraso, ni rangos de fecha. Todo lo que dependa del tiempo, entonces, o no se evalúa o se
+evalúa mal.
+
+#### Los que NO hacen nada
+
+Están en `DIFERIDAS` (`calculo-precios.engine.ts:270`), o sea que el motor los saltea y
+devuelve "sin valor". Se configuran, se guardan, y no pasa nada al vender.
+
+| Tipo | Lo que la pantalla pide | Lo que hay que decidir para arreglarlo |
+|---|---|---|
+| `promocional` | fecha desde / hasta | **El más común y el más barato.** Solo necesita saber si *hoy* cae en el rango — no precisa plazos ni intereses. ¿La fecha que manda es siempre la de la venta? ¿Y una venta creada un día y pagada al otro? ¿Y una devolución sobre una promo ya vencida? |
+| `pronto_pago` | *"Días antes del vencimiento"* | Necesita que la venta tenga un **vencimiento**, que hoy no existe como concepto. Va con el frente de crédito. |
+| `mora` | días de atraso | Necesita vencimiento **y** un evento que dispare el atraso. ¿Se calcula al cobrar? ¿Un job la devenga? Va con el frente de crédito. |
+
+#### Los que SÍ hacen algo, pero mal
+
+⚠️ **Este matiz importa y en una versión anterior de esta nota estaba mal dicho:** estos dos
+**no** están diferidos. Cobran — cobran distinto de lo que prometen.
+
+| Tipo | Lo que la pantalla pide | Lo que hace |
+|---|---|---|
+| `interes_simple` | *"Tasa mensual"* | cobra ese porcentaje **una sola vez**, sobre la base, sin preguntar plazo: una venta a 1 mes y otra a 6 cobran lo mismo |
+| `interes_compuesto` | *"Tasa mensual"* | **exactamente lo mismo que el simple** — ninguna rama del motor los distingue, así que la diferencia entre los dos tipos hoy es solo el nombre |
+
+**Lo que hay que decidir:** de dónde sale el plazo de una venta a crédito, y si el interés se
+calcula al vender (queda congelado en el documento) o al cobrar. Recién con eso simple y
+compuesto pueden dar distinto.
+
+#### Y un sexto, de otra familia, que aparece al mirar esto
+
+`metodo_pago` (descuento) y `recargo_metodo_pago` (recargo) **ignoran los tramos**: su rama en
+el motor retorna antes del `if` de tramos. No cobran cero —los dos están en
+`TIPOS_CON_VALOR_UNICO`, así que el backend les exige `valor` y el motor cobra ese— pero los
+escalones que se configuren se descartan. Hoy no muerde porque la pantalla no ofrece el campo
+(`campoTramos: false` en los dos), y está **diferido** hasta que un tenant lo pida. Ver su
+entrada propia más arriba.
+
+#### Dos huecos de plomería que se midieron en el camino
+
+Los dos son independientes de la decisión de producto y valen por sí solos:
+
+1. **La pausa de un tipo no se hace valer.** `TiposReglaService.findAll` filtra `activo: true`,
+   así que un tipo pausado desaparece del selector — pero `validarTipoRegla` (en
+   `recargos.service.ts` **y** en `descuentos.service.ts`) **no mira `activo`**, así que un
+   `POST` directo con ese id crea la regla igual. Es *"un `activo` que solo se escribe"*, que el
+   propio playbook nombra como bug. Enforcement de una línea en cada service, con el cuidado de
+   validar **solo cuando el tipo cambia**: el frontend reenvía `tipoReglaId` en todo PATCH, así
+   que validarlo por venir en el DTO deja las reglas existentes de ese tipo imposibles de editar.
+2. **El seed no repone estado sobre una base ya sembrada.** Los loops de descuentos y recargos
+   son `if (!exists) save`, así que cualquier cambio de `activo` en el seed solo tiene efecto en
+   una base fresca — en el demo de Railway, que persiste entre deploys, no pasa nada.
+   ⛔ **Y una trampa medida:** reponer también el `nombre` en ese UPDATE **tumba el arranque del
+   backend** si otra regla viva del tenant tomó el nombre viejo (choca con
+   `uq_..._tenant_nombre_vivo` dentro de `onApplicationBootstrap`). Si se toca, solo `activo`.
+
+📌 **Si alguna vez se evalúa pausarlos de nuevo, medido el 2026-08-23:** pausar el tipo deja la
+columna "Tipo" en blanco en la tabla y el drawer de edición **sin ningún campo**, porque su
+`config` sale del selector, que filtra los pausados. Renombrar y despausar siguen andando. La
+salida sería mostrar el tipo pausado marcado como tal, no filtrarlo en el backend.
+
+⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y `promocional`
+**puede salir antes y por separado** — no necesita nada de la aritmética del crédito.
 
 ## 7. Acción del owner fuera del código
 
