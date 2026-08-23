@@ -1511,6 +1511,30 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   **Nota de alcance:** CORS solo guarda al **navegador** (evita que la web de otro origen use la
   sesión/cookie del usuario contra la API); no frena curl/Postman/servidor-a-servidor. El control
   de acceso real es el JWT ya implementado — la whitelist es defensa en profundidad, no el candado.
+  📌 **Desde ADR-022 (2026-08-23) CORS ya no está en el camino real de la app.** El navegador
+  habla solo con el origen del frontend, que hace de proxy de `/api`; lo que sostiene la
+  sesión es que la llamada es **same-origin**, no una cabecera. La whitelist sigue valiendo y
+  sigue habiendo que hacerla, pero como defensa en profundidad para lo que pegue **directo** a
+  la API (curl, un cliente móvil futuro) — no como lo que hace andar la pantalla.
+
+  ⚠️ **Si al tomar esta entrada aparece la idea de revertir el proxy «ahora que CORS está
+  bien»: tener CORS bien NO es la condición, y esto está medido.** El 2026-08-23 el demo
+  respondía `access-control-allow-credentials: true` con el `allow-origin` correcto —CORS
+  impecable— y el login **igual** no completaba. Lo que no viajaba era la **cookie**, y eso lo
+  decide `SameSite`, no CORS. Son dos mecanismos distintos que se confunden por vecindad: CORS
+  gobierna si el JS puede **leer la respuesta**; `SameSite` gobierna si la cookie **se manda**.
+  Arreglar uno no toca al otro.
+
+  **Lo que sí habilitaría revertir**, si alguna vez se quisiera: que frontend y backend
+  compartan **dominio registrable** (`app.` y `api.` del mismo dominio propio), con lo que
+  pasan a ser same-site y `Lax` alcanza; **o** pasar la cookie a `SameSite=None; Secure`, que
+  roza la invariante 4 de `CLAUDE.md` y deja la sesión más expuesta.
+
+  📌 **Y aun cumpliéndose, revertir es opcional y no se recomienda.** El proxy no molesta con
+  dominio propio, y es lo que hace **imposible** que el bug vuelva el día que alguien despliegue
+  en dos dominios distintos. Revertirlo exige devolverle al navegador una URL de backend
+  configurable — justo la perilla que ADR-022 sacó a propósito, porque mientras exista el bug
+  puede volver por configuración y nada avisa.
 - [ ] **Observabilidad: logs estructurados + error tracking + alertas** (backend/infra) —
   logging estructurado que **no filtre PII ni `tenant_id` cruzado**, captura de errores
   (Sentry/equivalente), y alertas de error-rate/latencia para enterarse en minutos, no cuando

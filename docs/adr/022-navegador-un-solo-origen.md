@@ -95,6 +95,13 @@ app»: es exactamente lo que hace posible este proxy.
   de arriba son la deuda concreta de esto, y las encontró la revisión independiente del diff
   —no la suite—, con el login en verde mientras el redirect ya estaba roto.
 
+**Cuándo revisarla.** No cuando exista la whitelist de CORS: CORS ya estaba bien el día que
+el demo no dejaba entrar, y no es lo que gobierna si la cookie viaja. La condición sería que
+frontend y backend pasen a compartir dominio registrable, y aun así revertir sería opcional
+—el proxy no estorba ahí y sigue impidiendo que el bug vuelva por configuración—. La nota
+larga, para quien tome el endurecimiento de CORS, está en
+[`docs/agent/pendientes.md`](../agent/pendientes.md) § «Endurecimiento para producción».
+
 ## Alternatives considered
 
 - **Dominio propio con `app.` y `api.` bajo el mismo dominio registrable.** Comparten
