@@ -720,6 +720,105 @@ bandeja de desfases".
 
 ---
 
+## 16. Alcance de lectura por usuario: el eje `MiCaja`/`Cajas`
+
+**Cuándo aplica:** un listado que devuelve plata o actividad **atribuible a una persona**, y
+que hoy solo filtra por tenant.
+
+El permiso del módulo (`Ventas:Leer`, `Pagos:Leer`) es el **piso** —dice si podés entrar—; el
+que dice **cuánto ves** es un eje aparte:
+
+```ts
+const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+  u.id,
+  u.tenantId!,
+);
+return this.service.listar(u.tenantId!, query, u.id, verTodas);
+```
+
+⚠️ **Hay DOS métodos y elegir mal rompe cosas distintas. Para un módulo que no es caja va
+siempre `resolverAlcanceDerivadoDeCaja`:**
+
+| Método | Para | Sin ninguno de los dos permisos |
+|---|---|---|
+| `resolverAlcanceCaja` | rutas de **caja** (el permiso es el piso) | **lanza `403`** |
+| `resolverAlcanceDerivadoDeCaja` | **ventas, pagos**, y cualquier otro (el permiso es el acotador) | depende de si el tenant contrató el módulo `Cajas` |
+
+⚠️ **El derivado mira UN solo permiso —`Cajas:Leer`— y UN solo módulo —`Cajas`.** `MiCaja` no
+participa. Sus tres ramas:
+
+1. **Con `Cajas:Leer`** → `true`, ve todo. Es el nivel de supervisión.
+2. **Sin él, y el tenant NO contrató `Cajas`** → `true` igual. Ahí la supervisión **no existe
+   como concepto**: `Cajas:Leer` es inobtenible, ni siquiera para el admin, porque
+   `userHasPermiso` exige el módulo contratado incluso en el short-circuit del rol fijo.
+   Acotar sería permanente y sin arreglo posible por configuración — una tienda solo online se
+   quedaría sin ver su propia facturación. Aplica también al tenant que compró `MiCaja` y no
+   `Cajas`.
+3. **Sin él, y el tenant SÍ contrató `Cajas`** → `false`, se acota. Que al rol le falte el
+   permiso es una decisión de configuración, no una ausencia del concepto.
+
+O sea: el derivado **distingue las dos causas** por las que `userHasPermiso` puede dar `false`
+—falta el permiso vs. no existe el módulo— y solo la primera acota.
+
+⛔ **No metas `MiCaja:Leer` en la regla.** La primera versión lo hacía y tenía dos defectos: en
+un tenant `MiCaja`-only dejaba al **admin** acotado a su propia caja para siempre, y —peor—
+cuando la condición era "ninguno de los dos" resultaba **fail-open**. `abrir` y `movimientos`
+piden `MiCaja:`**`Crear`**, y `conteo`/`cerrar` no llevan permiso de módulo, así que un admin
+que le saca `MiCaja:Leer` al rol Vendedor —una acción que *parece* un endurecimiento— lo dejaba
+operativo de punta a punta **y** le concedía todos los pagos del tenant. **Quitar un permiso no
+puede conceder acceso.**
+
+**Por qué el eje de caja gobierna ventas y pagos.** Ni `ventas` ni `pagos` guardan quién los
+hizo: solo `caja_id`. La autoría **se deriva de la caja** (`venta.caja_id → cajas.usuario_id`),
+y eso es exacto porque `ux_cajas_activa_por_usuario` garantiza que una caja abierta pertenece a
+un solo usuario. El permiso que decide *"¿ves cajas ajenas?"* es entonces el mismo que debe
+decidir *"¿ves ventas ajenas?"*: no son dos ejes parecidos, es **el mismo eje**.
+
+**Cómo se escribe el filtro**, y las tres cosas que hay que respetar:
+
+```sql
+AND EXISTS (
+  SELECT 1 FROM cajas c
+   WHERE c.caja_id = p.caja_id
+     AND c.tenant_id = p.tenant_id
+     AND c.usuario_id = $n
+     AND c.eliminado_el IS NULL
+)
+```
+
+1. **`EXISTS`, no `JOIN`** — no cambia la multiplicidad de filas y entra igual en la query del
+   `COUNT` y en la de las filas, que tienen `FROM` distintos.
+2. **El mismo filtro en las DOS queries.** Si el `COUNT` no lo lleva, la paginación miente:
+   `total` cuenta filas que el usuario no puede ver y la última página vuelve vacía.
+3. **Sin `OR caja_id IS NULL`.** La columna es nullable; una fila sin caja **no es de nadie** y
+   no puede caer en "lo mío" por omisión. El `EXISTS` con NULL da falso, que es lo correcto.
+
+**El eje va primero y fuera de todo `if` de query:** es el alcance, no un filtro que el cliente
+elige. Que siga existiendo un `?cajaId=` en el DTO no lo debilita — acota **dentro** de lo que
+ya se puede ver.
+
+⚠️ **Un detalle sale del alcance a propósito: la venta `canal='online'`.** Va siempre contra la
+caja **virtual** del tenant (`findVirtual`), que no es de nadie, así que con la regla de arriba
+sería invisible para todos los cajeros. Entra con un `OR v.canal = 'online'` porque **no puede
+revelar el esperado de ningún cajón que alguien vaya a arquear**, que es lo único que el eje
+protege.
+
+⚠️ **En el detalle de un recurso ajeno se responde `404`, no `403`:** un `403` confirma que
+existe.
+
+**De dónde salió** (2026-08-22): un cajero con `Pagos:Leer` listaba **todos** los pagos del
+tenant, y con eso reconstruía el esperado de **cualquier** caja. Medido después del arreglo: el
+admin ve 87 pagos de 18 cajas, el cajero 3 de las 2 suyas.
+
+⚠️ **Lo que este patrón NO da, y hay que saberlo antes de apoyarse en él:** el usuario sigue
+viendo **lo suyo**, así que cualquier agregado que se derive de su propia actividad le sigue
+siendo derivable. El eje acota **de quién**, no **qué**. Si lo que se quiere proteger es un
+número que el propio usuario generó, este patrón no es la herramienta.
+Diseño completo en
+[`specs/2026-08-22-visibilidad-ventas-pagos-design.md`](../superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md).
+
+---
+
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.

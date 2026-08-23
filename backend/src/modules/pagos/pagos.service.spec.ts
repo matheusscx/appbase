@@ -663,7 +663,7 @@ describe('PagosService', () => {
         },
       ]);
 
-      const result = await service.resumen(TENANT_ID);
+      const result = await service.resumen(TENANT_ID, USUARIO_ID, true);
 
       expect(result).toEqual({
         totalPagos: 10,
@@ -671,6 +671,102 @@ describe('PagosService', () => {
         pagosHoy: 2,
         montoHoy: '300.0000',
       });
+    });
+  });
+
+  describe('el eje "lo mío / todo"', () => {
+    /**
+     * Ni `pagos` ni `ventas` guardan quién los hizo: solo `caja_id`. Así que
+     * "lo mío" se deriva por la caja, y el filtro tiene que ser un `EXISTS`
+     * contra `cajas` — no un `p.usuario_id`, que no existe.
+     */
+    const sqlDe = (llamada: number): string =>
+      (dataSourceMock.query.mock.calls[llamada][0] as string).replace(
+        /\s+/g,
+        ' ',
+      );
+
+    it('sin alcance completo, listar acota a las cajas del usuario', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO_ID, false);
+
+      const sql = sqlDe(0);
+      expect(sql).toContain('EXISTS');
+      expect(sql).toContain('FROM cajas c');
+      expect(sql).toContain('c.caja_id = p.caja_id');
+      expect(sql).toContain('c.usuario_id =');
+      expect(sql).toContain('c.eliminado_el IS NULL');
+      // El id del usuario viaja como parámetro, nunca interpolado.
+      expect(dataSourceMock.query.mock.calls[0][1]).toContain(USUARIO_ID);
+    });
+
+    it('el MISMO filtro va en la query del COUNT y en la de las filas', async () => {
+      // Si el count no lo lleva, la paginación miente: `total` cuenta pagos que
+      // el usuario no puede ver, y la última página vuelve vacía.
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO_ID, false);
+
+      expect(sqlDe(0)).toContain('c.usuario_id =');
+      expect(sqlDe(1)).toContain('c.usuario_id =');
+    });
+
+    it('con alcance completo no acota nada', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO_ID, true);
+
+      expect(sqlDe(0)).not.toContain('c.usuario_id =');
+    });
+
+    it('un pago SIN caja no es de nadie: el filtro no lo perdona', async () => {
+      // `caja_id` es nullable. Hoy ningún camino lo deja en NULL, pero la
+      // columna lo permite: el filtro es un EXISTS, que con NULL da falso, y
+      // NO lleva un `OR p.caja_id IS NULL` que lo metería en "lo mío".
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO_ID, false);
+
+      expect(sqlDe(0)).not.toContain('caja_id IS NULL');
+    });
+
+    it('los pagos de una venta ONLINE quedan visibles, igual que en ventas', async () => {
+      // Sin esta rama, `ventas` y `pagos` tratan distinto a la MISMA fila: el
+      // cajero ve la venta online y sus pagos por GET /ventas/:id pero no en
+      // /pagos, así que la exclusión no compra seguridad y descuadra los KPI.
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO_ID, false);
+
+      expect(sqlDe(0)).toContain("vo.canal = 'online'");
+    });
+
+    it('resumen acota igual que listar', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([{}]);
+
+      await service.resumen(TENANT_ID, USUARIO_ID, false);
+
+      expect(sqlDe(0)).toContain('c.usuario_id =');
+      expect(dataSourceMock.query.mock.calls[0][1]).toContain(USUARIO_ID);
+    });
+
+    it('resumen con alcance completo sigue siendo del tenant', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([{}]);
+
+      await service.resumen(TENANT_ID, USUARIO_ID, true);
+
+      expect(sqlDe(0)).not.toContain('c.usuario_id =');
     });
   });
 
@@ -694,7 +790,12 @@ describe('PagosService', () => {
         .mockResolvedValueOnce([{ total: 25 }])
         .mockResolvedValueOnce([PAGO_ROW]);
 
-      const result = await service.listar(TENANT_ID, { page: 2, pageSize: 15 });
+      const result = await service.listar(
+        TENANT_ID,
+        { page: 2, pageSize: 15 },
+        USUARIO_ID,
+        true,
+      );
 
       expect(result.meta).toEqual({
         page: 2,
@@ -712,7 +813,12 @@ describe('PagosService', () => {
         .mockResolvedValueOnce([{ total: 1 }])
         .mockResolvedValueOnce([PAGO_ROW]);
 
-      await service.listar(TENANT_ID, { ventaEstado: EstadoVenta.PAGADA });
+      await service.listar(
+        TENANT_ID,
+        { ventaEstado: EstadoVenta.PAGADA },
+        USUARIO_ID,
+        true,
+      );
 
       const countSql = dataSourceMock.query.mock.calls[0][0] as string;
       expect(countSql).toContain('v.estado');

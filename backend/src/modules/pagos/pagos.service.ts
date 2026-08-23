@@ -425,9 +425,65 @@ export class PagosService {
   }
 
   /**
-   * KPIs globales del tenant (independientes de filtros/página).
+   * El filtro de "lo mío" para pagos. Se deriva por la caja porque **`pagos` no
+   * guarda quién lo hizo**: solo `caja_id`. Para un pago de una venta física eso
+   * es exacto — `ux_cajas_activa_por_usuario` garantiza que una caja abierta
+   * pertenece a un solo usuario, así que la caja *es* el registro de autoría.
+   *
+   * `EXISTS` y no un `JOIN`: no cambia la multiplicidad de filas y entra igual
+   * en la query del COUNT y en la de las filas, que tienen `FROM` distintos.
+   *
+   * ⚠️ **Sin `OR p.caja_id IS NULL`, a propósito.** La columna es nullable y hoy
+   * ningún camino la deja vacía, pero si mañana aparece uno, una fila sin caja
+   * **no es de nadie** y no puede caer en "lo mío" por omisión. El `EXISTS` con
+   * NULL da falso, que es exactamente lo que corresponde.
+   *
+   * ⚠️ **La rama de la venta online tiene que estar acá también, y no es
+   * simetría por prolijidad.** Sin ella, `ventas` y `pagos` tratan distinto a la
+   * MISMA fila: el cajero veía la venta online y sus pagos por `GET /ventas/:id`
+   * —donde viajan `caja_id`, `monto` y `vuelto`— pero no en `/pagos`, así que la
+   * exclusión no compraba seguridad y sí descuadraba los KPI (`montoCobrado` y
+   * `montoHoy` sin lo online contra un `ventas/resumen` que sí lo incluye).
+   * Los pagos online viven en la caja **virtual**, que tiene `usuario_id` NULL,
+   * o sea que el `EXISTS` de abajo nunca los alcanza.
    */
-  async resumen(tenantId: string): Promise<PagosResumen> {
+  private filtroDeMisCajas(idxUsuario: number): string {
+    return ` AND (
+             EXISTS (
+               SELECT 1 FROM ventas vo
+                WHERE vo.venta_id = p.venta_id
+                  AND vo.canal = 'online'
+                  AND vo.eliminado_el IS NULL
+             )
+             OR EXISTS (
+               SELECT 1 FROM cajas c
+                WHERE c.caja_id = p.caja_id
+                  AND c.tenant_id = p.tenant_id
+                  AND c.usuario_id = $${idxUsuario}
+                  AND c.eliminado_el IS NULL
+             )
+           )`;
+  }
+
+  /**
+   * KPIs del tenant, independientes de filtros y de página — pero **no del
+   * usuario**: sin `verTodas` se acotan por el mismo eje que `listar`, así que
+   * el cajero ve el total de lo suyo, no el del local. Que ambos usen
+   * `filtroDeMisCajas` no es prolijidad: si el resumen fuera global, la resta
+   * contra lo listado devolvería justo lo que el eje esconde.
+   */
+  async resumen(
+    tenantId: string,
+    usuarioId: string,
+    verTodas: boolean,
+  ): Promise<PagosResumen> {
+    const params: unknown[] = [tenantId];
+    let filtroPropio = '';
+    if (!verTodas) {
+      params.push(usuarioId);
+      filtroPropio = this.filtroDeMisCajas(params.length);
+    }
+
     const rows: {
       total_pagos: number;
       monto_cobrado: string;
@@ -443,8 +499,9 @@ export class PagosService {
               )::text AS monto_hoy
        FROM pagos p
        WHERE p.tenant_id = $1
-         AND p.eliminado_el IS NULL`,
-      [tenantId],
+         AND p.eliminado_el IS NULL
+         ${filtroPropio}`,
+      params,
     );
 
     const row = rows[0];
@@ -462,9 +519,16 @@ export class PagosService {
   async listar(
     tenantId: string,
     query: QueryPagosDto,
+    usuarioId: string,
+    verTodas: boolean,
   ): Promise<PaginatedResponse<PagoListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    const { filters, params } = this.buildListarFilters(tenantId, query);
+    const { filters, params } = this.buildListarFilters(
+      tenantId,
+      query,
+      usuarioId,
+      verTodas,
+    );
 
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
@@ -530,10 +594,20 @@ export class PagosService {
   private buildListarFilters(
     tenantId: string,
     query: QueryPagosDto,
+    usuarioId: string,
+    verTodas: boolean,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
     let filters = '';
+
+    // El eje va PRIMERO y fuera de todo `if` de query: es el alcance, no un
+    // filtro que el cliente elige. Que el `cajaId` del query siga existiendo no
+    // lo debilita — acota dentro de lo que ya se puede ver.
+    if (!verTodas) {
+      params.push(usuarioId);
+      filters += this.filtroDeMisCajas(paramIdx++);
+    }
 
     if (query.fechaDesde) {
       filters += ` AND p.fecha >= $${paramIdx++}`;

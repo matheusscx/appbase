@@ -211,6 +211,71 @@ Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recar
 
 ---
 
+## Quién ve qué: el eje `Cajas:Leer`
+
+`Ventas:Leer` es el **piso** —dice si podés entrar—; el que dice **cuánto ves** es un eje
+aparte, y lo gobierna un permiso de otro módulo. La regla completa tiene **tres** ramas:
+
+| Situación | Alcance | Por qué |
+|---|---|---|
+| Tiene `Cajas:Leer` | **Todo el tenant** | Es el nivel de supervisión. |
+| No lo tiene, y el tenant **no contrató** el módulo `Cajas` | **Todo el tenant** | Ahí la supervisión no existe como concepto: `Cajas:Leer` es inobtenible **incluso para el admin**, así que acotar sería permanente e irreversible por configuración. Una tienda solo online se quedaría sin ver su propia facturación. ⚠️ **Agujero conocido:** alcanza también al tenant que compró `MiCaja` y **no** `Cajas`, que sí tiene cajones físicos y varios cajeros — ahí el eje queda apagado, y dar de baja el contrato de `Cajas` concede visibilidad total en silencio. Decisión de producto pendiente en [`agent/pendientes.md`](../agent/pendientes.md). |
+| No lo tiene, y el tenant **sí contrató** `Cajas` | **Lo de sus cajas** | Que no lo tenga es una decisión de configuración, no una ausencia del concepto. |
+
+⚠️ **`MiCaja:Leer` no entra en la regla, y es a propósito.** La primera versión lo usaba y era
+**fail-open**: sacarle `MiCaja:Leer` a un rol que conserva `MiCaja:Crear` le concedía
+visibilidad total, y `Crear` alcanza para operar caja de punta a punta. Quitar un permiso no
+puede conceder acceso. Detalle en el docblock de `resolverAlcanceDerivadoDeCaja`.
+
+**Por qué el eje de caja y no uno propio:** ni `ventas` ni `pagos` guardan quién los hizo —solo
+`caja_id`—, así que la autoría **se deriva de la caja** (`caja_id → cajas.usuario_id`), exacto
+porque una caja abierta pertenece a un solo usuario. El permiso que decide *"¿ves cajas
+ajenas?"* es entonces el mismo que decide *"¿ves ventas ajenas?"*. Mecánica y las **dos**
+funciones que no hay que confundir (la de caja lanza 403, esta no) en
+[`patterns/backend.md` §16](../patterns/backend.md).
+
+**De dónde salió (2026-08-22).** Antes de esto, un cajero con `Ventas:Leer` listaba **todas** las
+ventas del tenant y podía abrir el detalle de cualquiera — y el detalle trae `caja_id`, `monto`
+y `vuelto` **por pago**, así que era el camino largo para reconstruir el esperado de una caja
+ajena. Ahora el detalle de una venta que no es suya responde **404**, y en el detalle de una
+venta propia el `caja_id` de un pago que no es suyo **viaja en `null`**.
+
+**Lo que arregla es más grande que el modo ciego:** hasta acá cualquier cajero veía la
+facturación entera del local. Medido después de construir el eje: el admin ve 87 pagos de 18
+cajas, el cajero ve 3, de las 2 suyas.
+
+⚠️ **El detalle de una venta ajena responde `404`, no `403`** — un `403` confirmaría que existe.
+
+⚠️ **Lo que este eje NO cubre: las escrituras por id.** `POST /ventas/:id/notas-credito` y
+`POST /ventas/:id/anular` siguen resolviendo la venta **solo por tenant**, así que un usuario
+acotado puede operar sobre una venta que `GET /ventas/:id` le oculta. Hoy no es alcanzable con
+el rol `Vendedor` del seed —no tiene esos dos permisos—, pero el eje es de **lectura** y no hay
+que leerlo como si cubriera todo.
+
+⚠️ **La venta `canal='online'` la ve cualquiera con `Ventas:Leer`**, aunque no sea de nadie: va
+siempre contra la caja **virtual** del tenant, que nunca se cuenta físicamente, así que no puede
+revelar el esperado de ningún cajón que alguien vaya a arquear. Sus **pagos** también entran en
+el listado, por la misma razón — si no, la misma fila tendría dos reglas distintas y los KPI de
+pagos quedarían descuadrados contra los de ventas.
+⚠️ **Eso vale mientras online exija pago completo.** No es una propiedad del canal: descansa en
+que `crear` rechaza una venta online sin pago total y en que el abono opera siempre sobre caja
+física. Si algún día se habilita pago contra entrega o abono parcial online, hay que volver a
+mirar este filtro.
+
+⛔ **Lo que NO arregla, y conviene no confundirlo:** el cajero **sigue pudiendo deducir el
+esperado de su PROPIA caja** sumando sus propios pagos — verificado corriendo la demostración
+otra vez con el eje puesto: dedujo 20.357 contra 20.357 reales. Y está bien que pueda, porque
+esos pagos los cobró él. Cerrarlo exigiría quitarle su propio historial de ventas, que es la
+misma aritmética que hizo descartar el ocultamiento del resultado post-conteo.
+**Corolario:** contra la caja propia, el modo ciego es **fricción, no barrera** — evita el
+maquillaje casual, no a quien lleva la cuenta. Lo que sí garantiza, y antes no, es que **no vea
+la plata de otros**.
+
+⚠️ **Tampoco cierra los dos oráculos** del modo ciego (el `422` de
+`POST /caja/:id/movimientos` y el de la nota de crédito en efectivo). No salen de un listado
+sino del borde aceptar/rechazar de una validación legítima, y se resuelven por **rastro**, no
+por ocultamiento. Frente propio en [`agent/pendientes.md`](../agent/pendientes.md).
+
 ## Backend
 
 ### Module & Services

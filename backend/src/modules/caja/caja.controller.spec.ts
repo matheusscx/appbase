@@ -41,6 +41,28 @@ describe('CajaController', () => {
       userHasPermiso: jest.fn(),
       userIsTenantAdmin: jest.fn(),
     } as unknown as RbacService;
+    // `resolverAlcanceCaja` se implementa contra el `userHasPermiso` mockeado en
+    // vez de devolver un booleano fijo, para que los tests de abajo —que
+    // configuran PERMISOS, no alcance— sigan afirmando exactamente lo mismo que
+    // antes de que esa lógica se mudara a `RbacService` (2026-08-22).
+    // ⚠️ Sí: esto reimplementa la producción en el doble, así que estos tests NO
+    // cazarían un bug dentro de `resolverAlcanceCaja`. No es su trabajo — eso lo
+    // cubre `rbac.service.spec.ts`, con sus cuatro casos. Lo que estos tests
+    // cubren es que el controller PROPAGUE el alcance al service.
+    (
+      rbacService as unknown as {
+        resolverAlcanceCaja: (u: string, t: string) => Promise<boolean>;
+      }
+    ).resolverAlcanceCaja = async (u: string, t: string) => {
+      const [tieneMiCaja, tieneCajas] = await Promise.all([
+        rbacService.userHasPermiso(u, t, 'MiCaja', 'Leer'),
+        rbacService.userHasPermiso(u, t, 'Cajas', 'Leer'),
+      ]);
+      if (!tieneMiCaja && !tieneCajas) {
+        throw new ForbiddenException('No tienes permiso para esta acción');
+      }
+      return tieneCajas;
+    };
 
     controller = new CajaController(
       cajaService,

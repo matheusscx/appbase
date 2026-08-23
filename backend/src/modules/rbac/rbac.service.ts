@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { type EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 
@@ -60,6 +60,110 @@ const ADMINISTRADORES_SQL = `
 @Injectable()
 export class RbacService {
   constructor(private readonly db: Db) {}
+
+  /**
+   * El eje **"lo mío" / "todo"**, que gobierna caja, ventas y pagos.
+   *
+   * Devuelve `true` si el usuario ve las cajas ajenas (`Cajas:Leer`) y `false`
+   * si solo ve la suya (`MiCaja:Leer`). Lanza `403` si no tiene ninguno de los
+   * dos: devolver `false` sería peor que lanzar, porque el llamador filtraría
+   * por "lo mío" y le respondería `200` con una lista vacía a alguien que no
+   * tiene permiso de leer nada.
+   *
+   * **Por qué el mismo permiso decide las ventas y los pagos, y no uno propio:**
+   * ni `ventas` ni `pagos` guardan quién los hizo —solo `caja_id`—, así que la
+   * autoría de una venta **se deriva de su caja** (`venta.caja_id →
+   * cajas.usuario_id`, exacto porque una caja abierta pertenece a un solo
+   * usuario). El permiso que decide "¿ves cajas ajenas?" es entonces el mismo
+   * que debe decidir "¿ves ventas ajenas?": no son dos ejes parecidos, es el
+   * mismo eje. Ver `docs/superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md`.
+   *
+   * ⚠️ Costo aceptado: un tenant no puede tener a alguien que supervise ventas
+   * **sin** supervisar caja. Si aparece ese rol, ahí sí corresponden módulos
+   * propios (`MisVentas`/`MisPagos`), que es el camino que la spec descartó por
+   * agregar dos módulos al contrato de cada tenant para una pregunta que este
+   * eje ya responde.
+   */
+  async resolverAlcanceCaja(
+    usuarioId: string,
+    tenantId: string,
+  ): Promise<boolean> {
+    const [tieneMiCaja, tieneCajas] = await Promise.all([
+      this.userHasPermiso(usuarioId, tenantId, 'MiCaja', 'Leer'),
+      this.userHasPermiso(usuarioId, tenantId, 'Cajas', 'Leer'),
+    ]);
+    if (!tieneMiCaja && !tieneCajas) {
+      throw new ForbiddenException('No tienes permiso para esta acción');
+    }
+    return tieneCajas;
+  }
+
+  /**
+   * ¿El tenant tiene contratado el módulo **`Cajas`**?
+   *
+   * Pregunta por `Cajas` **y no por los dos módulos de caja**, porque el que
+   * gobierna "¿ves lo ajeno?" es solo ese: `MiCaja` habilita operar la propia,
+   * `Cajas` es el nivel de supervisión. Un tenant que compró `MiCaja` y no
+   * `Cajas` **no puede expresar supervisión**: `Cajas:Leer` es inobtenible ahí,
+   * ni siquiera para su admin.
+   */
+  async tenantContrataModuloCajas(tenantId: string): Promise<boolean> {
+    const rows: unknown[] = await this.db.query(
+      `SELECT 1
+         FROM tenant_modulos tm
+         JOIN modulos_app ma
+           ON ma.modulo_app_id = tm.modulo_app_id
+          AND ma.eliminado_el IS NULL
+        WHERE tm.tenant_id = $1
+          AND tm.eliminado_el IS NULL
+          AND ma.nombre = 'Cajas'
+        LIMIT 1`,
+      [tenantId],
+    );
+    return rows.length > 0;
+  }
+
+  /**
+   * El mismo eje, pero para módulos que **no son caja** (`ventas`, `pagos`),
+   * donde el permiso de caja **no es el piso sino el acotador**.
+   *
+   * ⚠️ **La diferencia con `resolverAlcanceCaja` no es cosmética: acá NO se
+   * lanza 403**, porque el permiso de caja no habilita la ruta. La regla:
+   *
+   * 1. **Con `Cajas:Leer`** → ve todo. Es el nivel de supervisión.
+   * 2. **Sin él, pero el tenant NO contrató `Cajas`** → ve todo igual, porque
+   *    en ese tenant la supervisión **no existe como concepto**: nadie puede
+   *    obtener ese permiso, ni el admin. Acotar ahí sería permanente y sin
+   *    arreglo posible por configuración — una tienda solo online se quedaría
+   *    sin ver su propia facturación.
+   * 3. **Sin él, y el tenant SÍ contrató `Cajas`** → se acota a lo suyo. Que no
+   *    lo tenga es una decisión de configuración, no una ausencia del concepto.
+   *
+   * ⚠️ **`MiCaja:Leer` NO entra en la regla, y es a propósito.** La primera
+   * versión lo usaba y tenía dos defectos: en un tenant `MiCaja`-only dejaba al
+   * **admin** acotado a su propia caja sin forma de revertirlo, y —peor— cuando
+   * la condición era "ninguno de los dos" resultaba **fail-open**, porque
+   * sacarle `MiCaja:Leer` a un rol que conserva `MiCaja:Crear` le concedía
+   * visibilidad total. `Crear` alcanza para operar caja de punta a punta:
+   * `abrir` y `movimientos` piden `Crear`, y `conteo`/`cerrar` no llevan permiso
+   * de módulo. **Quitar un permiso no puede conceder acceso.** (Las dos las
+   * levantó la revisión independiente del 2026-08-22.)
+   */
+  async resolverAlcanceDerivadoDeCaja(
+    usuarioId: string,
+    tenantId: string,
+  ): Promise<boolean> {
+    // `TenantGuard` va delante y esto no debería pasar. Está igual porque el
+    // default tiene que apuntar a acotar: con un tenant vacío las dos consultas
+    // dan "no", y sin esta guarda ese "no" se leería como la rama 2 —"el tenant
+    // no contrató `Cajas`"— concediendo visibilidad total.
+    if (!tenantId) return false;
+
+    if (await this.userHasPermiso(usuarioId, tenantId, 'Cajas', 'Leer')) {
+      return true;
+    }
+    return !(await this.tenantContrataModuloCajas(tenantId));
+  }
 
   async userHasPermiso(
     userId: string,

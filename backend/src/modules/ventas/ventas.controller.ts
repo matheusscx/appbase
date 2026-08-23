@@ -15,6 +15,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import { RbacService } from '../rbac/rbac.service';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
@@ -27,7 +28,10 @@ import { CancelarVentaDto } from './dto/cancelar-venta.dto';
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('ventas')
 export class VentasController {
-  constructor(private readonly ventasService: VentasService) {}
+  constructor(
+    private readonly ventasService: VentasService,
+    private readonly rbacService: RbacService,
+  ) {}
 
   @Post()
   @RequiresPermiso('Ventas', 'Crear')
@@ -76,25 +80,46 @@ export class VentasController {
     });
   }
 
+  /**
+   * Alcance de lectura: `Ventas:Leer` es el piso —dice si podés entrar—, y el eje
+   * **`Cajas:Leer`** dice CUÁNTO ves — `MiCaja` NO entra en la regla, ver el
+   * docblock de `resolverAlcanceDerivadoDeCaja`. Sin esto, un cajero con `Ventas:Leer` leía
+   * TODAS las ventas del tenant y el detalle de cualquiera de ellas, que trae
+   * `caja_id`, `monto` y `vuelto` por pago: era el camino largo para reconstruir
+   * el esperado de una caja ajena (auditoría del 2026-08-22, ver
+   * `docs/superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md`).
+   */
   @Get('resumen')
   @RequiresPermiso('Ventas', 'Leer')
-  resumen(@Req() req: Request) {
+  async resumen(@Req() req: Request) {
     const u = req.user as JwtUser;
-    return this.ventasService.resumen(u.tenantId ?? '');
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
+    return this.ventasService.resumen(u.tenantId ?? '', u.id, verTodas);
   }
 
   @Get()
   @RequiresPermiso('Ventas', 'Leer')
   async listar(@Req() req: Request, @Query() query: QueryVentasDto) {
     const u = req.user as JwtUser;
-    return this.ventasService.listar(u.tenantId ?? '', query);
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
+    return this.ventasService.listar(u.tenantId ?? '', query, u.id, verTodas);
   }
 
   @Get(':id')
   @RequiresPermiso('Ventas', 'Leer')
   async findOne(@Req() req: Request, @Param('id') id: string) {
     const u = req.user as JwtUser;
-    return this.ventasService.findOne(u.tenantId ?? '', id);
+    const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
+      u.id,
+      u.tenantId!,
+    );
+    return this.ventasService.findOne(u.tenantId ?? '', id, u.id, verTodas);
   }
 }
 

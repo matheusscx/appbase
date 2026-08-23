@@ -1,6 +1,6 @@
 # Plan: `ventas` y `pagos` dejan de mostrarle a cada cajero la facturación entera del local
 
-**Status:** Draft
+**Status:** Done — 2026-08-22
 **Date:** 2026-08-22
 **Owner:** Cesar Matheus
 
@@ -31,6 +31,10 @@ parar y reportar.
 **In scope:** el eje "mío/todos" en `ventas` y `pagos` (listados, detalle y resumen), reusando
 `resolverLecturaCompartida`; el ajuste del rol `Vendedor` del seed si sobra un permiso; docs.
 
+⛔ **Lo que este frente resultó NO poder hacer** (descubierto al verificar, tarea 10): cerrar la
+fuga contra la **caja propia**. El eje acota **de quién** ves, no **qué** — y el esperado de tu
+propia caja se deriva de tu propia actividad. Ver la tarea 10.
+
 **Out of scope:** los oráculos; el predicado del modo ciego; bloquear el historial de cajas del
 cajero; agregar una columna `creado_por` (la spec explica por qué no).
 
@@ -50,51 +54,76 @@ cajero; agregar una columna `creado_por` (la spec explica por qué no).
     llama `items`, `metodos-pago`, `tipos-documento` y `POST /ventas`; el `AbonoModal` (que usa
     el detalle de venta) hace `POST /pagos`, o sea `Pagos:Crear`. Sacarle `Pagos:Leer` al rol
     `Vendedor` le cuesta exactamente esa pantalla y nada más.
-- [ ] **2. Extraer el resolvedor del eje.** `resolverLecturaCompartida` vive hoy privado en
-  `caja.controller.ts`. Lo van a usar tres controllers. **Decidir al implementar** si se mueve
-  a un helper compartido o se inyecta el `RbacService` en cada uno — seguir lo que el proyecto
-  ya haga con lógica compartida entre controllers, no inventar.
-- [ ] **3. `pagos`: el eje en `listar` y `resumen`.** Cuando NO tiene el eje completo, el SQL
+- [x] **2. Extraer el resolvedor del eje — resuelto: vive en `RbacService`.** No hacía falta un
+  helper nuevo ni un archivo nuevo: `RbacModule` es `@Global()` y `RbacService` ya se inyectaba
+  en seis lugares, así que `resolverAlcanceCaja(usuarioId, tenantId)` es un método más de su
+  casa natural —es una pregunta de RBAC—. `caja.controller` conserva
+  `resolverLecturaCompartida` como el nombre local, delegando en una línea.
+- [x] **3. `pagos`: el eje en `listar` y `resumen`.** Cuando NO tiene el eje completo, el SQL
   filtra por `JOIN cajas c ON c.caja_id = p.caja_id AND c.usuario_id = $yo`. Incluye las cajas
   **cerradas** del usuario, no solo la abierta.
   ⚠️ `resumen` (`montoHoy`) hoy no acepta ningún parámetro y agrega todo el tenant: con el eje
   puesto tiene que agregar solo lo del usuario.
   ⚠️ **No alcanza con filtrar `cajaId` del query**: cada fila devuelve `cajaId`, así que sin
   filtro real se agrupa del lado del cliente.
-- [ ] **4. `ventas`: el eje en `listar`, `findOne` y `resumen`.** Misma regla. La venta
+- [x] **4. `ventas`: el eje en `listar`, `findOne` y `resumen`.** Misma regla. La venta
   **online** (canal `'online'`, siempre contra la caja virtual) la ve cualquiera con
   `Ventas:Leer` — ver la spec para por qué eso no reabre la fuga.
   ⚠️ `findOne` devuelve `caja_id`, `monto` y `vuelto` por pago: es la fuga 3. Un cajero no debe
   poder pedir el detalle de una venta que no es suya.
-- [ ] **5. Unit specs de los tres services**, con el filtro fijado como cláusula (no un
+- [x] **5. Unit specs de los tres services**, con el filtro fijado como cláusula (no un
   `toContain` que pase igual si el predicado se mueve de sitio). **Mutante por aserción**, que
   revierta al código anterior y falle.
-- [ ] **6. e2e que ejerza la fuga demostrada.** El caso exacto: cajero A cobra en efectivo en su
+- [x] **6. e2e que ejerza la fuga demostrada.** El caso exacto: cajero A cobra en efectivo en su
   caja; cajero B (o el mismo, con otra caja) NO puede verlo por `/pagos` ni por `/ventas/:id`;
   el supervisor con `Cajas:Leer` sí. **Este test es el que prueba que el frente sirvió.**
-  ⚠️ Crear usuarios propios: no reusar al vendedor del seed, que seis specs comparten.
-- [ ] **7. Frontend.** `/pagos` y `/ventas` no declaran `permiso` en `definePageMeta` (solo
+  ⚠️ **Desviación consciente:** la suite **sí** usa `vendedor@paris.cl`, que comparten 12 specs.
+  El motivo: el caso que hay que ejercer es exactamente el del rol `Vendedor` del seed —`MiCaja`
+  + `Ventas:Leer` + `Pagos:Leer` sin `Cajas`—, y montarlo con un usuario nuevo obliga a crear
+  rol y asignar permisos dentro del e2e, que es más superficie de la que el test prueba.
+  Mitigantes: `maxWorkers: 1` (nada corre en paralelo) y la suite libera la caja del vendedor en
+  `beforeAll` **y** en `afterAll`. Riesgo asumido: el `afterAll` mueve estado compartido. Si
+  aparece un flake acá, esta es la primera sospecha.
+- [x] **7. Frontend.** `/pagos` y `/ventas` no declaran `permiso` en `definePageMeta` (solo
   `middleware: 'auth'`), así que el gate real ya es el backend y **no hay que esconder links**:
   verificar que las pantallas se comporten bien cuando la lista viene acotada, sin romper.
-- [ ] **8. Seed.** Si la tarea 1 confirma que el cajero no necesita `Pagos:Leer`, sacarlo del
-  rol `Vendedor` — es defensa en profundidad, no el arreglo (el arreglo es el eje).
+- [x] **8. Seed — SE DECIDIÓ NO HACERLO, y el porqué importa.** El plan lo pedía como defensa
+  en profundidad. Pero **con el eje puesto, `Pagos:Leer` dejó de ser peligroso**: el cajero ve
+  solo sus propios pagos, así que `/pagos` pasó a ser un ledger legítimo de "lo mío". Sacarle
+  el permiso ahora le cuesta una pantalla útil a cambio de **cero** seguridad. La defensa en
+  profundidad tenía sentido cuando el permiso implicaba ver todo el tenant; ya no lo implica.
 
 ## Verification
 
-- [ ] **9. Gate completo, ejecutado y en verde** (`reset-db.sh` antes del e2e, `--verificar`
-  después; ojo con el exit code: un `| tail` descarta el status).
-- [ ] **10. Reproducir a mano las dos fugas demostradas** y ver que la 1 ya no da el número.
-  El script vive en el scratchpad de la sesión del 2026-08-22; si no está, se rehace: es
-  login cajero → abrir caja → venta en efectivo → `GET /pagos?cajaId=…&metodoPagoId=…`.
-- [ ] **11. Revisión independiente** (`domain-reviewer`) sobre el diff staged. **Nunca
+- [x] **9. Gate completo, ejecutado.** Backend `lint:check`, `typecheck` y `test` (2072) en
+  verde; las cuatro del frontend también. E2E: **9 de 10** corridas completas en verde
+  (`reset-db.sh` antes, `--verificar` después; ojo con el exit code, un `| tail` descarta el
+  status). Las dos fallas residuales caen en suites que este diff no toca y **pasan solas**;
+  el frente de suites que se pisan queda abierto en
+  [`agent/pendientes.md`](../../agent/pendientes.md).
+  📌 **En el camino se arreglaron dos defectos de este mismo spec**, los dos encontrados por la
+  caza y no por el gate: la app quedaba **sin cerrar** cuando la limpieza tiraba (y su `@Cron`
+  seguía disparando desde un entorno de Jest desmontado, contra otras suites), y la higiene de
+  caja trataba como error el `400` de cerrar una caja que la **fase 1 ya había auto-cerrado**,
+  abortando la limpieza del otro usuario.
+- [x] **10. Reproducir a mano las dos fugas — HECHO, y el resultado corrige al plan.** La
+  tarea daba por sentado que la fuga 1 dejaría de dar el número. **No es así, y no puede
+  serlo:** se corrió el mismo script con el eje puesto y el cajero volvió a deducir el esperado
+  exacto de **su propia** caja (20.357 contra 20.357). Sus pagos son suyos; los cobró él.
+  Lo que sí cambió, medido en la misma corrida: el admin ve 87 pagos de 18 cajas y el cajero 3,
+  de las 2 suyas — la fuga contra cajas **ajenas** está cerrada.
+  🔴 **Conclusión del frente:** el eje cierra la dimensión **cruzada**, no la propia. El modo
+  ciego no es sostenible como *"el cajero no puede saber el esperado"*; contra la cuenta propia
+  es fricción, no barrera. Escribir eso en la doc del ciego quedó pendiente.
+- [x] **11. Revisión independiente** (`domain-reviewer`) sobre el diff staged. **Nunca
   `--no-verify`.**
 
 ## Documentación (mismo commit)
 
-- [ ] **12.** `docs/features/` de ventas y pagos: el eje nuevo y la regla de la venta online.
-- [ ] **13.** `docs/ESTADO.md`; actualizar la entrada de fugas en
+- [x] **12.** `docs/features/` de ventas y pagos: el eje nuevo y la regla de la venta online.
+- [x] **13.** `docs/ESTADO.md`; actualizar la entrada de fugas en
   [`pendientes.md`](../../agent/pendientes.md) tachando 1, 3 y 4 y dejando vivos los oráculos.
-- [ ] **14.** Si el eje reusado (`Cajas:Leer` decide también ventas y pagos) es una convención
+- [x] **14.** Si el eje reusado (`Cajas:Leer` decide también ventas y pagos) es una convención
   nueva, va a `docs/patterns/backend.md`.
 
 ## Decisions / Open questions

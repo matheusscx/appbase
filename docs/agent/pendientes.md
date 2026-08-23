@@ -328,6 +328,63 @@ decisión que no es mía).
 
 ---
 
+### Las suites del e2e se pisan entre sí por el estado del seed (2026-08-22)
+
+⚠️ **Encuadre, porque la primera versión de esta entrada se llamaba "el `401` fantasma" y eso
+mandó a buscar en `auth` durante horas.** El `401` era **un síntoma, no el problema**. El
+problema es que las suites del e2e comparten usuarios, ítems y cajas del seed, y una que deja
+estado a medias rompe a otra **lejos de donde estaba la causa**.
+
+**Síntomas vistos, todos intermitentes y en suites distintas cada corrida:**
+
+| Suite | Síntoma |
+|---|---|
+| `costeo-cpp` | `401` en `POST /api/items` con token recién emitido; y `409` al abrir caja |
+| `alta-usuarios-tenant` | `401` en `POST /api/auth/register` — **endpoint público, sin ninguna rama que tire 401** |
+| `papelera` | `401` en `POST /api/auth/login` con credenciales del seed — 20 tests detrás |
+| `rbac-y-contrasena` | `401` al loguear un usuario **recién verificado** (el `verificar` dio 200 en la línea anterior) |
+| `reglas-valor` | `401` en un `PATCH` con un Bearer que la misma suite venía usando |
+| `inventario` | `costoActual` en `undefined` — **no es un 401**, y es lo que muestra que la familia es más ancha |
+
+**Dos causas ya encontradas y arregladas** (las dos en `visibilidad-ventas-pagos.e2e-spec.ts`,
+las dos aplican a cualquier spec nuevo — por eso quedan acá y no solo en el commit):
+
+1. **`app.close()` fuera del `finally`.** Si la limpieza tiraba, la app **no se cerraba**, y
+   `AppModule` registra un `@Cron` (`expirar-ordenes`, cada 10 min) que **sobrevive al teardown
+   de Jest** y sigue pegándole a la base desde un módulo desmontado, mientras corren OTRAS
+   suites. Medido: `"You are trying to require a file after the Jest environment has been torn
+   down"`, con el cron disparando a las 22:20:00 y 22:30:00. **Regla: en todo e2e, el
+   `app.close()` va en un `finally`.**
+2. **Tratar como error el `400` de la fase 2 de cierre.** `POST /:id/conteo` **auto-cierra si
+   el arqueo cuadra**; solo deja `en_conciliacion` si algo descuadra. Un `cerrar` incondicional
+   después pega contra una caja ya cerrada y responde `400 "La caja no está en conciliación"`,
+   que es **inofensivo**. Tratarlo como falla abortaba la higiene y dejaba la caja del OTRO
+   usuario abierta → `409` en la suite siguiente. El helper que sí lo hace bien, y que conviene
+   copiar, es `liberarCajeroSiQuedoOcupado` en `caja.e2e-spec.ts` (best-effort en los pasos
+   intermedios, y maneja descuadres con motivo).
+
+**Efecto medido de los dos arreglos:** de **3 de 5** corridas completas en rojo a **1 de 10**, y
+**el `401` no volvió a aparecer**. ⚠️ **No está probado que la fuga de la app lo causara**: nunca
+se explicó el mecanismo —`JwtStrategy` es *stateless*, y con sondas puestas en `validateUser` y
+en el `JwtAuthGuard` no se logró atrapar ninguno— y el cron no toca nada de auth: lee
+`pasarela_ordenes` y `pasarela_transacciones`, y escribe una fila en `cron_ejecucion` en **cada**
+tick. Es más de lo que parece —el módulo desmontado seguía escribiendo—, pero ninguna de las
+tres tablas tiene camino a una falla de auth. **Dejó de reproducirse, que no es lo mismo que resuelto.**
+
+**Lo que queda abierto:** la falla de `inventario` (`costoActual: undefined`), que **pasa sola**
+y no la toca ningún diff reciente. Y la pregunta de fondo: hoy 42 archivos de test comparten
+`admin.paris@paris.cl` y 13 `vendedor@paris.cl` (12 de ellos ajenos a este frente), con `maxWorkers: 1` como única red. Mientras
+siga así, cualquier spec nuevo puede destapar esto de nuevo.
+
+**Descartado con evidencia, para no rehacerlo:** no es re-siembra (`reset-db.sh --verificar`
+justo después de una corrida roja: *"1 solo 'Seed complete'"*); no es estado corrupto (los dos
+usuarios del seed quedaron con `correo_verificado_el` puesto, `eliminado_el` nulo y el hash
+intacto); no es vencimiento ni firma (`JWT_EXPIRATION=15m` contra corridas de ~115s, y ningún
+spec toca `process.env`); no hay throttler; y el `DeprecationWarning` de `pg` que aparece ~45
+veces por corrida **no es evidencia de nada**: sale del `Promise.all` interno de TypeORM en
+`DataSource.synchronize`, una vez por app de test (ya medido el 2026-08-21), y su conteo es
+casi idéntico con y sin el spec nuevo (45 vs 44).
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -552,6 +609,31 @@ empezarlas.
     cierre forzado.
   - **(c) aceptar que el ciego es fricción y no barrera**, y decirlo en la doc en vez de
     prometer un control que no se sostiene.
+
+  ✅ **EL EJE SE CONSTRUYÓ el 2026-08-22**, y cierra la **dimensión cruzada** de las fugas 1, 3
+  y 4: un cajero sin `Cajas:Leer` ya no ve la actividad de **otros**. Medido después de
+  construirlo: el admin ve 87 pagos de 18 cajas, el cajero ve 3, de las 2 suyas. El detalle de
+  una venta ajena responde 404. Lo fija `visibilidad-ventas-pagos.e2e-spec.ts`, y el mutante
+  que devuelve alcance completo hace fallar los cuatro tests que codifican la fuga. Ver
+  [`features/pagos.md`](../features/pagos.md) y [`patterns/backend.md` §16](../patterns/backend.md).
+
+  ⛔ **PERO NO CIERRA LA FUGA 1 CONTRA LA CAJA PROPIA, Y NO PUEDE.** Se verificó corriendo el
+  mismo script de la demostración **después** de construir el eje: el cajero sumó sus propios
+  pagos en efectivo y volvió a deducir el esperado exacto de su caja (20.357 contra 20.357).
+  Y está bien que pueda: **esos pagos son suyos, los cobró él**. Cerrarlo exigiría quitarle su
+  propio historial de ventas, que es exactamente la aritmética que hizo descartar el
+  ocultamiento en
+  [§11.3](investigaciones/2026-07-23-gestion-caja.md#113-cruce-contra-nuestro-código--dos-hechos-que-el-mercado-no-podía-darnos).
+  Lo mismo vale para la 4: `montoHoy` acotado a sus cajas sigue siendo su propio cobrado.
+
+  🔴 **Consecuencia, y es la conclusión del frente entero: el modo ciego NO es sostenible como
+  "el cajero no puede saber el esperado".** Contra la cuenta propia es **fricción, no barrera** —
+  la salida (c) de las tres que se ofrecieron el 2026-08-22 resultó ser la verdad para esa
+  dimensión, se eligiera lo que se eligiera para el resto. Lo que el ciego **sí** sostiene, y
+  ahora es cierto donde antes no lo era, es *"el cajero no ve la plata de otros"*.
+  ⏳ **Sigue sin hacerse:** el rastro de los oráculos (fugas 2 y 5, decisión 2 de abajo), la
+  enumeración de medios (6), y **decidir qué dice la doc del modo ciego** ahora que se sabe que
+  contra la caja propia no promete lo que parecía prometer.
 
   ✅ **DECIDIDO POR EL OWNER (2026-08-22), las dos:**
   1. **`ventas` y `pagos` reciben el eje "mío/todos", igual que `caja`.** El cajero ve solo lo
@@ -1007,6 +1089,40 @@ destraba, lanzada el 2026-08-22**.
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
+
+### El tenant que compró `MiCaja` y no `Cajas` se queda sin eje de visibilidad (2026-08-22)
+
+**Lo levantó la revisión independiente del diff del eje**, y no es un bug: es la rama 2 de
+`RbacService.resolverAlcanceDerivadoDeCaja` funcionando como se diseñó. Pero su justificación
+escrita ("una tienda solo online no tiene cajas que acotar") **no cubre el caso que la propia
+regla incluye**.
+
+**El hecho:** la rama pregunta solo por el módulo `Cajas`. Un tenant que contrató `MiCaja` y
+**no** `Cajas` sí tiene cajones físicos que se arquean, y puede tener varios cajeros — y ahí
+todos ven la facturación de todos, que es exactamente la fuga que este frente cerró. Corolario
+incómodo: **dar de baja el contrato de `Cajas`** (soft-delete en `tenant_modulos`) concede
+visibilidad total, en silencio.
+
+**Por qué la rama existe igual:** en ese tenant `Cajas:Leer` es *inobtenible*, ni siquiera para
+el admin, porque `userHasPermiso` exige el módulo contratado incluso en el short-circuit del rol
+fijo. Acotar ahí dejaría a todo el mundo —admin incluido— viendo solo su propia caja, **sin
+forma de revertirlo por configuración**. Se eligió el default que no deja a un tenant sin acceso
+a su propia facturación.
+
+**Hoy no está ejercido por ningún test** porque el seed no tiene ese tenant: Paris y Falabella
+contratan los dos módulos. O sea que la regla no está mal, está **sin cubrir**.
+
+🛑 **La pregunta al owner:** ¿se vende `MiCaja` sin `Cajas`? Tres salidas, y la elección es de
+producto, no técnica:
+
+1. **Dejarlo como está.** Correcto si `MiCaja` sin `Cajas` no es un paquete que se venda.
+2. **Condicionar la rama a que el tenant no tenga NINGUNO de los dos módulos**, y usar
+   `RbacService.userIsTenantAdmin` como escape para que el admin no quede acotado para siempre.
+   Es la que evita el dilema sin inventar un módulo nuevo; el código ya tiene las dos piezas.
+3. **Que `MiCaja` implique el eje**, acotando a todos menos al admin.
+
+Cualquiera que se elija, va con un test que ejerza el tenant `MiCaja`-only — que es lo que hoy
+falta más que la decisión.
 
 ## 5. Carreras de concurrencia
 

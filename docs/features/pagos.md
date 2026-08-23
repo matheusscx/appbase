@@ -107,6 +107,29 @@ Response (200):
 
 ---
 
+## Quién ve qué: el eje `Cajas:Leer`
+
+`Pagos:Leer` es el **piso**; cuánto ves lo decide el mismo eje que en ventas, porque es la
+**misma fila** vista de otro lado. La regla —sus **tres** ramas, por qué `MiCaja:Leer` quedó
+afuera, y qué NO cierra— está una sola vez, en
+[`ventas.md` → Quién ve qué](./ventas.md#quién-ve-qué-el-eje-cajasleer). Acá solo lo propio de
+pagos.
+
+**El filtro se deriva por la caja** (`p.caja_id → cajas.usuario_id`) porque `pagos` no guarda
+quién lo hizo. Sin `verTodas`, se aplica a `listar` **y también a `resumen`**: si los KPI
+fueran globales, la resta contra lo listado devolvería justo lo que el eje esconde.
+
+⚠️ **La rama de la venta `online` también está acá, y no es simetría por prolijidad.** Sin
+ella, `ventas` y `pagos` trataban distinto a la misma fila: el cajero veía la venta online y
+sus pagos por `GET /ventas/:id` pero no en `/pagos`, así que la exclusión no compraba
+seguridad y sí descuadraba `montoCobrado`/`montoHoy` contra `ventas/resumen`. Los pagos online
+viven en la caja **virtual**, cuyo `usuario_id` es NULL.
+
+⚠️ **Un borde conocido:** `registrarAbono` resuelve la venta **solo por tenant**, así que si el
+cajero B abona una venta que abrió el cajero A, el pago cae en la caja de B y **sí** aparece en
+su listado —es suyo—, mientras `GET /ventas/:id` de esa misma venta le responde 404. La fila
+derivada se ve y la de origen no. No filtra plata ajena, pero es una regla partida en dos.
+
 ## Backend
 
 ### Module & Services

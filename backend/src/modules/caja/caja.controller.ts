@@ -53,16 +53,13 @@ export class CajaController {
    * `Cajas:Leer`; lanza 403 si no tiene ni `MiCaja:Leer` ni `Cajas:Leer`.
    * El alcance (propia vs. todas) y la escritura owner-only los sigue
    * resolviendo el service.
+   *
+   * La lógica se mudó a `RbacService.resolverAlcanceCaja` cuando `ventas` y
+   * `pagos` pasaron a necesitar el mismo eje (2026-08-22): tres copias eran
+   * una de más. Este método queda como el nombre local de esa pregunta.
    */
-  private async resolverLecturaCompartida(u: JwtUser): Promise<boolean> {
-    const [tieneMiCaja, tieneCajas] = await Promise.all([
-      this.rbacService.userHasPermiso(u.id, u.tenantId!, 'MiCaja', 'Leer'),
-      this.rbacService.userHasPermiso(u.id, u.tenantId!, 'Cajas', 'Leer'),
-    ]);
-    if (!tieneMiCaja && !tieneCajas) {
-      throw new ForbiddenException('No tienes permiso para esta acción');
-    }
-    return tieneCajas;
+  private resolverLecturaCompartida(u: JwtUser): Promise<boolean> {
+    return this.rbacService.resolverAlcanceCaja(u.id, u.tenantId!);
   }
 
   /**

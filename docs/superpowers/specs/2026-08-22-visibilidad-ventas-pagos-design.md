@@ -1,6 +1,6 @@
 # Visibilidad por usuario en `ventas` y `pagos` — diseño
 
-**Fecha:** 2026-08-22 · **Estado:** Draft · **Plan:** [`plans/2026-08-22-visibilidad-ventas-pagos.md`](../plans/2026-08-22-visibilidad-ventas-pagos.md)
+**Fecha:** 2026-08-22 · **Estado:** Ejecutado (2026-08-22) · **Plan:** [`plans/2026-08-22-visibilidad-ventas-pagos.md`](../plans/2026-08-22-visibilidad-ventas-pagos.md)
 
 ## De dónde sale
 
@@ -54,12 +54,15 @@ Tres caminos, y el elegido es el tercero:
 2. **Cambiar la semántica de `Ventas:Leer`** a "solo las mías" y agregar un permiso nuevo para
    el listado completo. Rompe el significado de un permiso ya asignado en tenants existentes.
 3. ✅ **Reusar el eje de `caja`.** Quien tiene `Cajas:Leer` (supervisión de cajas) ve todas las
-   ventas y todos los pagos; quien solo tiene `MiCaja` ve lo de **sus** cajas.
+   ventas y todos los pagos; quien no lo tiene ve lo de **sus** cajas.
+   ⚠️ Esta línea decía *"quien solo tiene `MiCaja`"* y **al ejecutar se descartó** por
+   fail-open. Ver *Resuelto al ejecutar* abajo.
 
 **Por qué el 3 y no el 1:** la autoría de una venta **se deriva de su caja**, así que el
 permiso que decide "¿ves cajas ajenas?" es exactamente el que debe decidir "¿ves ventas
 ajenas?". No son dos ejes que casualmente se parecen: es el mismo eje. Y el helper ya existe
-(`resolverLecturaCompartida` en `caja.controller.ts`), así que no hay arquitectura nueva —
+(`resolverLecturaCompartida` en `caja.controller.ts` — al ejecutar se movió a `RbacService` y
+se partió en dos, ver abajo), así que no hay arquitectura nueva —
 `CLAUDE.md` es explícito sobre no introducirla para un problema que el stack ya resuelve.
 
 ⚠️ **Costo aceptado, dicho explícito:** un tenant que quiera alguien que supervise ventas
@@ -103,6 +106,36 @@ Nada bloqueante. Lo que conviene mirar al ejecutar, y no antes:
 - **`caja_id` es nullable en las dos entidades.** Hay que ver si existen ventas o pagos sin
   caja (¿importaciones? ¿la pasarela?) y decidir si son "de nadie" (invisibles para el cajero)
   o visibles para todos como las online. Medir primero, no asumir.
+
+## ✅ Resuelto al ejecutar (2026-08-22)
+
+Lo que el diseño dejó abierto o dijo mal, y cómo quedó. **Esta sección manda sobre lo de
+arriba**; la regla viva está en
+[`features/ventas.md` → Quién ve qué](../../features/ventas.md#quién-ve-qué-el-eje-cajasleer)
+y su mecánica en [`patterns/backend.md` §16](../../patterns/backend.md).
+
+1. **`MiCaja:Leer` quedó FUERA de la regla.** El diseño decía "quien solo tiene `MiCaja` ve lo
+   de sus cajas" y **eso era fail-open**: `abrir` y `movimientos` piden `MiCaja:`**`Crear`** y
+   `conteo`/`cerrar` no llevan permiso de módulo, así que quitarle `MiCaja:Leer` a un rol lo
+   dejaba operativo de punta a punta **y** le concedía todos los pagos del tenant. Quitar un
+   permiso no puede conceder acceso. Hoy la regla mira **solo `Cajas:Leer`**.
+2. **Aparecieron dos funciones, no una.** `resolverAlcanceCaja` (rutas de caja: el permiso es
+   el piso, lanza 403) y `resolverAlcanceDerivadoDeCaja` (ventas, pagos: el permiso es el
+   acotador, no lanza). Confundirlas rompe cosas distintas.
+3. **Tercera rama, que el diseño no tenía:** un tenant que **no contrató el módulo `Cajas`** ve
+   todo, porque ahí `Cajas:Leer` es inobtenible —`userHasPermiso` exige el módulo contratado
+   incluso para el admin—. Acotar ahí sería permanente y sin arreglo por configuración.
+   ⚠️ **Alcanza también al tenant que compró `MiCaja` y no `Cajas`**, que sí tiene cajones
+   físicos: ahí el eje queda apagado. Anotado como decisión de producto pendiente en
+   [`agent/pendientes.md`](../../agent/pendientes.md).
+4. **`caja_id` NULL → "de nadie".** Se resolvió con `EXISTS` **sin** `OR caja_id IS NULL`: hoy
+   ningún camino la deja vacía, y si mañana aparece uno, una fila sin caja no cae en "lo mío"
+   por omisión.
+5. **La venta `online` quedó visible para todos, y sus pagos también.** Excluir los pagos
+   online no compraba seguridad —viajaban igual en `GET /ventas/:id`— y descuadraba los KPI de
+   pagos contra los de ventas.
+6. **El detalle de una venta propia redacta el `caja_id` de un pago ajeno** (abono cruzado), en
+   vez de esconder la fila: el monto es de su venta, el cajón no es suyo.
 
 ## Fuera de alcance
 

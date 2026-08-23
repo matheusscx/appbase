@@ -1887,7 +1887,12 @@ describe('VentasService', () => {
         return Promise.resolve([]);
       });
 
-      const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID);
+      const res = await service.findOne(
+        TENANT_ID,
+        VENTA_ORIG_ID,
+        'u-test',
+        true,
+      );
       expect(res.tipoDocumento?.codigo).toBe('9999');
       expect(res.esNotaCredito).toBe(true);
     });
@@ -2003,7 +2008,12 @@ describe('VentasService', () => {
         return Promise.resolve([]);
       });
 
-      const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID);
+      const res = await service.findOne(
+        TENANT_ID,
+        VENTA_ORIG_ID,
+        'u-test',
+        true,
+      );
       expect(res.ventaReferenciaId).toBeNull();
       expect(res.tipoDocumento).toEqual({
         id: 'doc-boleta',
@@ -2094,7 +2104,7 @@ describe('VentasService', () => {
         ]);
       });
 
-      const res = await service.listar(TENANT_ID, {});
+      const res = await service.listar(TENANT_ID, {}, 'u-test', true);
       const listSql = dataSourceMock.query.mock.calls.find(
         (c: unknown[]) =>
           typeof c[0] === 'string' &&
@@ -2121,7 +2131,7 @@ describe('VentasService', () => {
       dataSourceMock.query.mockResolvedValueOnce([
         { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
       ]);
-      await service.resumen(TENANT_ID);
+      await service.resumen(TENANT_ID, 'u-test', true);
       const [sql, params] = dataSourceMock.query.mock.calls[0] as [
         string,
         unknown[],
@@ -2571,6 +2581,112 @@ describe('VentasService', () => {
 
         expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
       });
+    });
+  });
+  describe('el eje "lo mío / todo"', () => {
+    const USUARIO = 'usuario-uuid-eje';
+
+    const sqlDe = (llamada: number): string =>
+      (dataSourceMock.query.mock.calls[llamada][0] as string).replace(
+        /\s+/g,
+        ' ',
+      );
+
+    it('sin alcance completo, listar acota a las cajas del usuario', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO, false);
+
+      const sql = sqlDe(0);
+      expect(sql).toContain('EXISTS');
+      expect(sql).toContain('FROM cajas c');
+      expect(sql).toContain('c.caja_id = v.caja_id');
+      expect(sql).toContain('c.usuario_id =');
+      expect(dataSourceMock.query.mock.calls[0][1]).toContain(USUARIO);
+    });
+
+    it('la venta ONLINE queda visible aunque no sea de nadie', async () => {
+      // Va siempre contra la caja virtual del tenant (`findVirtual`), nunca
+      // contra una física, así que no puede revelar el esperado de ningún cajón
+      // que alguien vaya a arquear — que es lo único que este eje protege.
+      // Ocultársela al cajero rompería una pantalla legítima a cambio de nada.
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO, false);
+
+      expect(sqlDe(0)).toContain("v.canal = 'online'");
+    });
+
+    it('el mismo filtro va en el COUNT y en las filas', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO, false);
+
+      expect(sqlDe(0)).toContain('c.usuario_id =');
+      expect(sqlDe(1)).toContain('c.usuario_id =');
+    });
+
+    it('con alcance completo no acota nada', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, {}, USUARIO, true);
+
+      expect(sqlDe(0)).not.toContain('c.usuario_id =');
+    });
+
+    it('resumen acota igual, y con alcance completo no', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([{}]);
+      await service.resumen(TENANT_ID, USUARIO, false);
+      expect(sqlDe(0)).toContain('c.usuario_id =');
+
+      dataSourceMock.query.mockClear();
+      dataSourceMock.query.mockResolvedValueOnce([{}]);
+      await service.resumen(TENANT_ID, USUARIO, true);
+      expect(sqlDe(0)).not.toContain('c.usuario_id =');
+    });
+
+    it('el caja_id de un pago ajeno se redacta, aunque la venta sea propia', async () => {
+      // El abono cruzado: A deja una venta por cobrar, B la abona con SU caja.
+      // La cabecera no corta —la venta es de A— así que sin esto A se lleva el
+      // triplete caja_id + monto + vuelto de la caja de B.
+      dataSourceMock.query.mockResolvedValue([]);
+      dataSourceMock.query.mockResolvedValueOnce([
+        {
+          venta_id: 'v1',
+          caja_id: 'caja-a',
+          canal: 'fisico',
+          estado: 'pagada',
+        },
+      ]);
+
+      await service.findOne(TENANT_ID, 'v1', USUARIO, false).catch(() => null);
+
+      const sqlPagos = dataSourceMock.query.mock.calls
+        .map((c: unknown[]) => (c[0] as string).replace(/\s+/g, ' '))
+        .find((sql: string) => sql.includes('FROM pagos WHERE venta_id'));
+      expect(sqlPagos).toBeDefined();
+      expect(sqlPagos).toContain('CASE WHEN');
+      expect(sqlPagos).toContain('c.usuario_id =');
+    });
+
+    it('findOne de una venta ajena responde 404, no el detalle', async () => {
+      // 404 y no 403: un 403 confirmaría que la venta existe. El detalle trae
+      // caja_id, monto y vuelto por pago — es la fuga 3 de la auditoría.
+      dataSourceMock.query.mockResolvedValueOnce([]);
+
+      await expect(
+        service.findOne(TENANT_ID, 'venta-ajena', USUARIO, false),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(sqlDe(0)).toContain('c.usuario_id =');
     });
   });
 });

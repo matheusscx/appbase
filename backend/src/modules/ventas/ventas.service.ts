@@ -1608,7 +1608,61 @@ export class VentasService {
     }));
   }
 
-  async resumen(tenantId: string): Promise<VentasResumen> {
+  /**
+   * El filtro de "lo mío" para ventas. Se deriva por la caja porque **`ventas` no
+   * guarda quién la hizo**: tiene `caja_id`, `canal` y `cancelada_por_usuario_id`,
+   * pero ningún `creado_por`. Para una venta física la derivación es exacta —una
+   * caja abierta pertenece a un solo usuario, así que la caja *es* el registro de
+   * autoría—.
+   *
+   * **La venta online entra siempre**, sea de quien sea: `crear` la resuelve
+   * contra la caja VIRTUAL del tenant (`findVirtual`), nunca contra una física,
+   * así que no puede revelar el esperado de ningún cajón que alguien vaya a
+   * arquear —que es lo único que este eje protege— y ocultársela al cajero
+   * rompería una pantalla legítima a cambio de nada.
+   *
+   * ⚠️ **Eso vale MIENTRAS online exija pago completo.** Que sus pagos no puedan
+   * caer en una caja física no es una propiedad del canal: descansa en dos
+   * guardas que viven lejos de acá —`crear` rechaza una venta online sin pago
+   * total, y `registrarAbono` opera **siempre** sobre la caja física del que
+   * cobra—. El día que se habilite pago contra entrega o abono parcial online,
+   * los pagos de una venta online caen en el cajón de un cajero y **esta
+   * excepción los expone a cualquier otro cajero** vía el detalle de la venta.
+   * Si eso se habilita, hay que filtrar por alcance **dos** lugares, no uno: la
+   * lista de pagos de `findOne` (acá) y el listado de `GET /pagos`, que devuelve
+   * `p.caja_id` sin redactar para los pagos que entran por su misma rama
+   * `online` — hoy inocuo porque viven en la caja virtual, cuyo `usuario_id` es
+   * NULL.
+   *
+   * ⚠️ Una venta **sin caja** no es de nadie y no entra: `caja_id` es nullable y
+   * hoy ningún camino lo deja vacío, pero si mañana aparece uno, el `EXISTS` con
+   * NULL da falso, que es lo que corresponde.
+   */
+  private filtroDeMisCajas(idxUsuario: number): string {
+    return ` AND (
+             v.canal = 'online'
+             OR EXISTS (
+               SELECT 1 FROM cajas c
+                WHERE c.caja_id = v.caja_id
+                  AND c.tenant_id = v.tenant_id
+                  AND c.usuario_id = $${idxUsuario}
+                  AND c.eliminado_el IS NULL
+             )
+           )`;
+  }
+
+  async resumen(
+    tenantId: string,
+    usuarioId: string,
+    verTodas: boolean,
+  ): Promise<VentasResumen> {
+    const params: unknown[] = [tenantId, TIPO_DOCUMENTO_NC_ID];
+    let filtroPropio = '';
+    if (!verTodas) {
+      params.push(usuarioId);
+      filtroPropio = this.filtroDeMisCajas(params.length);
+    }
+
     const rows: {
       total_ventas: number;
       total_facturado: string;
@@ -1627,8 +1681,9 @@ export class VentasService {
               ), 0)::text AS saldo_pendiente
        FROM ventas v
        WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
-         AND v.tipo_documento_id IS DISTINCT FROM $2`,
-      [tenantId, TIPO_DOCUMENTO_NC_ID],
+         AND v.tipo_documento_id IS DISTINCT FROM $2
+         ${filtroPropio}`,
+      params,
     );
 
     const row = rows[0];
@@ -1642,9 +1697,16 @@ export class VentasService {
   async listar(
     tenantId: string,
     query: QueryVentasDto,
+    usuarioId: string,
+    verTodas: boolean,
   ): Promise<PaginatedResponse<VentaListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    const { filters, params } = this.buildListarFilters(tenantId, query);
+    const { filters, params } = this.buildListarFilters(
+      tenantId,
+      query,
+      usuarioId,
+      verTodas,
+    );
 
     const countRows: { total: number }[] = await this.db.query(
       `SELECT COUNT(*)::int AS total
@@ -1705,10 +1767,19 @@ export class VentasService {
   private buildListarFilters(
     tenantId: string,
     query: QueryVentasDto,
+    usuarioId: string,
+    verTodas: boolean,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
     let filters = '';
+
+    // El eje va primero y fuera de todo `if` de query: es el alcance, no un
+    // filtro que el cliente elige.
+    if (!verTodas) {
+      params.push(usuarioId);
+      filters += this.filtroDeMisCajas(paramIdx++);
+    }
 
     if (query.estado) {
       filters += ` AND v.estado = $${paramIdx++}`;
@@ -1749,7 +1820,19 @@ export class VentasService {
     };
   }
 
-  async findOne(tenantId: string, ventaId: string) {
+  async findOne(
+    tenantId: string,
+    ventaId: string,
+    usuarioId: string,
+    verTodas: boolean,
+  ) {
+    const paramsDetalle: unknown[] = [ventaId, tenantId];
+    let filtroPropio = '';
+    if (!verTodas) {
+      paramsDetalle.push(usuarioId);
+      filtroPropio = this.filtroDeMisCajas(paramsDetalle.length);
+    }
+
     const rows: {
       venta_id: string;
       caja_id: string | null;
@@ -1781,10 +1864,14 @@ export class VentasService {
        FROM ventas v
        LEFT JOIN tipos_documento_tributario td
             ON td.tipo_documento_id = v.tipo_documento_id AND td.eliminado_el IS NULL
-       WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
-      [ventaId, tenantId],
+       WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL
+         ${filtroPropio}`,
+      paramsDetalle,
     );
 
+    // 404 y no 403 cuando la venta existe pero no es suya: un 403 confirmaría
+    // que existe. El detalle trae `caja_id`, `monto` y `vuelto` por pago, que es
+    // por donde se reconstruía el esperado de una caja ajena.
     if (!rows.length) throw new NotFoundException('Venta no encontrada');
     const v = rows[0];
 
@@ -1862,10 +1949,31 @@ export class VentasService {
        FROM venta_customer WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
+    // `caja_id` se REDACTA cuando el pago no cayó en una caja del que consulta.
+    // Alcanzable hoy, sin ningún cambio de producto: el cajero A deja una venta
+    // como cuenta por cobrar, el cajero B la abona con SU caja abierta
+    // (`registrarAbono` resuelve la venta solo por tenant), y A abre el detalle
+    // de su PROPIA venta —así que el filtro de alcance de la cabecera no corta— y
+    // se lleva el triplete `caja_id` + `monto` + `vuelto` de la caja de B. Es
+    // exactamente el dato que este eje existe para proteger.
+    //
+    // Se redacta el `caja_id` en vez de esconder la fila: el monto y el medio son
+    // de SU venta y los necesita para entender que está pagada; lo que no es suyo
+    // es a qué cajón fue a parar. Sin `caja_id` el pago no se puede atribuir a la
+    // caja de nadie.
     const pagos: Row[] = await this.db.query(
-      `SELECT pago_id, metodo_pago_id, moneda_oficial_id, caja_id, monto, vuelto, fecha, referencia
+      `SELECT pago_id, metodo_pago_id, moneda_oficial_id, monto, vuelto, fecha, referencia,
+              CASE WHEN $2::boolean OR EXISTS (
+                     SELECT 1 FROM cajas c
+                      WHERE c.caja_id = pagos.caja_id
+                        AND c.tenant_id = pagos.tenant_id
+                        AND c.usuario_id = $3
+                        AND c.eliminado_el IS NULL
+                   )
+                   THEN caja_id
+              END AS caja_id
        FROM pagos WHERE venta_id = $1 AND eliminado_el IS NULL ORDER BY creado_el ASC`,
-      [ventaId],
+      [ventaId, verTodas, usuarioId],
     );
 
     const pagoIds = pagos.map((p) => p['pago_id'] as string);
