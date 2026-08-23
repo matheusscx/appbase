@@ -84,6 +84,33 @@ nombra.
 El `(7,4)` no es cosmético: hoy un porcentaje vive en un `(18,4)` que admite `500000`. El tipo
 pasa a decir por sí solo que ahí no entra plata.
 
+### Qué pasa con el tope de `(7,4)` — medido, porque es un límite nuevo
+
+**Es inalcanzable por la API.** Las únicas dos escrituras de `valor` y `tramo.valor` son
+`create` y `update`, y las dos validan antes de escribir (`descuentos.service.ts:136` antes
+del write de `:150-173`; `:222-223` antes del de `:248-262`). Las otras dos escrituras del
+service —`:310` y `:343`— son borrar y restaurar, y solo tocan `eliminado_el`,
+`eliminado_por` y `nombre`. Con `validarMonto` exigiendo `< 1` arriba, `999.9999` no se
+alcanza por ningún camino.
+
+**Entonces el tope no protege de nada salvo en el caso que importa:** que alguien agregue
+después un camino de escritura que se saltee la validación. Ahí las dos formas se separan.
+
+| Tipo | Qué pasa con una regla de `500` (o sea 50.000%) |
+|---|---|
+| `decimal(18,4)` (hoy) | **entra en silencio** y queda guardada |
+| `decimal(7,4)` | Postgres tira `numeric field overflow` (22003) → **500** |
+
+**Se elige el 500 a propósito.** Es la misma disyuntiva que el proyecto ya resolvió dos veces
+para el mismo lado: *"400, nunca cuantizar en silencio"* en el borde de escala, y ADR-020
+prefiriendo que un agotamiento futuro del pool falle ruidoso antes que dejar la API muerta.
+Acá el silencio no sería un decimal de más: sería una regla cobrando 50.000%, que es el bug
+que esta tarea existe para matar.
+
+⚠️ **Y no se ajusta más de `(7,4)`** —un `(5,4)` toparía en `9.9999` y seguiría sobrando—
+porque es el tipo que `venta_descuentos.porcentaje_aplicado` ya usa para lo mismo, y el
+proyecto manda seguir la forma existente antes que afinar una propia.
+
 `modo` no cambia: sigue siendo el enum `modo_regla` (`porcentaje` | `monto_fijo`), NOT NULL.
 
 ## La invariante, y dónde vive cada mitad
