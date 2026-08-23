@@ -9,6 +9,41 @@ metadata:
 
 # NestJS Best Practices
 
+## ⛔ Overrides de ESTE repo — mandan sobre cualquier regla de abajo
+
+Esta skill es genérica (vendorizada). Donde choque con lo de acá, **gana esto**, y no es
+preferencia de estilo: son cosas que este proyecto ya midió, arregló y protegió con lint.
+
+| La skill muestra | En este repo va | Por qué |
+|---|---|---|
+| `TypeOrmModule.forFeature([X])` | `RepositoriosModule.forFeature([X])` | los repos del pool no resuelven el manager de la transacción activa |
+| `dataSource.transaction(fn)` | `db.transaccion(fn)` | reusa la transacción activa en vez de anidar |
+| inyectar `DataSource` | inyectar `Db` (`src/common/db/db.service.ts`) | única puerta al acceso a datos fuera de los repos |
+| `createQueryRunner()` | no existe acá | nada lo usa; no introducirlo |
+| `dataSource.query(sql)` | `db.query(sql, params)` | usa el manager del contexto si hay transacción abierta |
+
+**El deadlock que esto evita está medido, no supuesto** (ADR-020): un service que adentro de
+una transacción pide una conexión **nueva** al pool necesita dos conexiones a la vez. Con el
+pool en 10, **9 operaciones concurrentes pasan y la décima cuelga para siempre** — no es un
+timeout, las requests no vuelven nunca y el proceso queda envenenado hasta reiniciar el
+contenedor. Subir el pool no arregla nada: solo mueve el umbral.
+
+**Consecuencia que hay que tener presente al escribir código o un plan:** `@InjectRepository`
+acá **no** devuelve el repo del pool — es un `Proxy` que en cada acceso resuelve el manager de
+la transacción activa. Por eso **no hace falta pasar `manager` a mano** a un service que se
+llama desde adentro de `db.transaccion`; y por eso registrar un módulo con
+`TypeOrmModule.forFeature` rompe la garantía **sin que se vea en el constructor de nadie**.
+
+⚠️ **Vale también para los planes de implementación, no solo para el código.** Un plan que
+muestre un bloque de módulo, de service o de transacción escrito de memoria propaga el patrón
+prohibido a quien lo ejecute. Antes de escribir ese bloque: abrir el archivo real.
+
+📌 El porqué completo, con el experimento y las alternativas descartadas:
+[ADR-020](../../../docs/adr/020-contexto-transaccional-als.md) y
+[`docs/patterns/backend.md`](../../../docs/patterns/backend.md) §5.
+
+---
+
 Comprehensive best practices guide for NestJS applications. Contains 40 rules across 10 categories, prioritized by impact to guide automated refactoring and code generation.
 
 ## When to Apply

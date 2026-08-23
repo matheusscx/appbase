@@ -59,7 +59,10 @@ src/
 
 // users.module.ts
 @Module({
-  imports: [TypeOrmModule.forFeature([User])],
+  // ⛔ En ESTE repo NUNCA `TypeOrmModule.forFeature`: registra repos del pool,
+  // sin los proxies que resuelven el manager de la transacción activa (ADR-020).
+  // Prohibido por lint en `src/**`. Ver el override al tope de SKILL.md.
+  imports: [RepositoriosModule.forFeature([User])],
   controllers: [UsersController],
   providers: [UsersService, UsersRepository],
   exports: [UsersService], // Only export what others need
