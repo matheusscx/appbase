@@ -289,7 +289,16 @@ describe('Tendencia de descuadres (e2e)', () => {
   it('la ventana de hoy SÍ lo devuelve — el borde superior no se come el día', async () => {
     // El bug de `cf8396be`: con `<= hasta` y fecha pura, "hasta hoy" dejaba
     // fuera el día entero, así que el cierre recién hecho no aparecía.
-    const hoy = new Date().toISOString().slice(0, 10);
+    // La fecha se calcula en la zona del TENANT, no en UTC ni en la del runner.
+    // `toISOString()` daba UTC y este test se volvía flaky después de las 20:00
+    // en Chile: a las 20:15 -04 el UTC ya es el día siguiente, así que la
+    // ventana [mañana, mañana] no contenía el cierre recién hecho y el test
+    // fallaba sin que nada estuviera roto. El backend siempre estuvo bien —
+    // `bordeFechaSql`/`bordeHastaSql` resuelven la zona desde el país del
+    // tenant—; era el test el que preguntaba por otro día. Paris es chileno.
+    const hoy = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Santiago',
+    }).format(new Date());
     const filas = await tendencia(
       tokenSupervisor,
       `?desde=${hoy}&hasta=${hoy}`,
