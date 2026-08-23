@@ -35,6 +35,34 @@ cero, que toca la misma validación.
   documentación y se actualiza igual.
 - **Nunca `git commit --no-verify`.**
 
+## Contexto transaccional (ADR-020) — lo que este plan NO puede romper
+
+Se revisó **antes** de ejecutar, porque el trabajo toca dos services de escritura y un pipe
+que consulta la base. Tres cosas que quien ejecute tiene que dar por sentadas:
+
+1. **El registro de entidades es `RepositoriosModule.forFeature`, nunca
+   `TypeOrmModule.forFeature`.** No es preferencia de estilo: los repos que provee son
+   `Proxy` que resuelven el manager de la transacción activa. Un módulo registrado con
+   `TypeOrmModule.forFeature` recibe repos atados al pool y **reabre el deadlock** que
+   ADR-020 cerró — con el pool en 10, 9 operaciones concurrentes pasan y la décima cuelga
+   para siempre. `eslint.config.mjs` lo prohíbe en `src/**`, así que además rompe
+   `lint:check`. Este plan **solo agrega `MonedasModule`** a los imports; la lista de
+   entidades no se toca.
+2. **`@InjectRepository` acá no es "el repo del pool".** `this.descuentoRepo` y
+   `this.tramoRepo` ya resuelven solos el manager de la transacción que los envuelve. No hace
+   falta —ni conviene— pasar `manager` a mano donde hoy no se pasa: los sitios con `manager`
+   explícito (los `manager.create` / `manager.save` de `create` y `update`) quedan como están,
+   que es la regla del ADR: *el explícito gana donde ya está*.
+3. **La validación sigue corriendo FUERA de la transacción.** Hoy `create` valida en
+   `descuentos.service.ts:134-136` y recién después abre `this.db.transaccion` (`:138`). El
+   plan no mueve nada de eso hacia adentro. Lo mismo el pipe de escala: corre **antes** del
+   handler, así que su consulta de `decimalesOficiales` nunca pide una segunda conexión con
+   una transacción abierta — que es exactamente el patrón que produce el deadlock.
+
+📌 `EscalaMonedaPipe` es **singleton** desde el 2026-08-22, así que colgarlo de estos dos
+controllers ya no arrastra al controller entero a scope de request. Antes de esa fecha sí lo
+hacía, y esa era la razón para dudar de enchufarlo — ya no aplica.
+
 ## Scope
 
 **Adentro:** las cuatro tablas de reglas, sus DTOs, los dos services, el motor, el service de
@@ -651,11 +679,30 @@ y lo mismo en el `@Body()` del `update`. **No** en `RestaurarDto`: no lleva plat
 
 - [ ] **Paso 4: Importar `MonedasModule` en los dos módulos**
 
-Nest inscribe los pipes de parámetro como injectables del módulo del controller, así que sin
-este import el arranque falla por dependencia sin resolver.
+`EscalaMonedaPipe` resuelve `MonedasService` desde los injectables del módulo del controller:
+sin este import, el `@Body` falla en runtime.
+
+⛔ **El registro de entidades NO se toca, y NO es `TypeOrmModule.forFeature`.** Los dos
+módulos ya usan `RepositoriosModule.forFeature`, que es el único registro válido (ADR-020 +
+`docs/patterns/backend.md` §5) y que además `eslint.config.mjs` hace cumplir prohibiendo
+`TypeOrmModule.forFeature` en `src/**`. Solo se **agrega** `MonedasModule` a la lista de
+imports, copiando la forma de `mermas.module.ts`:
 
 ```ts
-  imports: [TypeOrmModule.forFeature([...]), MonedasModule],
+@Module({
+  imports: [
+    RepositoriosModule.forFeature([
+      Descuento,
+      DescuentoTramo,
+      DescuentoMetodoPago,
+      TipoRegla,
+    ]),
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
+  ],
+  // controllers / providers / exports: sin cambios
+})
 ```
 
 - [ ] **Paso 5: Correr el e2e del spec y verificar que pasa**
