@@ -103,7 +103,11 @@ function signo(val: string): string {
 }
 
 // Al detalle de ESE cajero: `/cajas/historial` ya lee `usuarioId` de la query.
+// El guard no es decorativo: `usuarioId` es nullable (la caja puede no tener
+// dueño) y sin él la fila navegaba a `?usuarioId=null`, que filtra por un
+// usuario inexistente y devuelve una lista vacía sin ningún error visible.
 function onSelectFila(_e: Event, row: Row<TendenciaDescuadres>) {
+  if (!row.original.usuarioId) return
   navigateTo(`/cajas/historial?usuarioId=${row.original.usuarioId}`)
 }
 </script>

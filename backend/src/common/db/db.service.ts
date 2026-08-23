@@ -41,8 +41,11 @@ export class Db {
   /**
    * Salida EXPLÍCITA: corre fn con conexión propia del pool aunque haya una
    * transacción en contexto. Para semántica deliberada de fuera-de-transacción
-   * (auditoría que debe sobrevivir al rollback, etc.). Auditado 2026-08-18:
-   * ningún sitio actual lo necesita — documentado para el que lo necesite.
+   * (auditoría que debe sobrevivir al rollback, etc.). Primer uso real:
+   * `CajaService.conRastroDeRechazo` (2026-08-23) — el rastro de un intento
+   * rechazado se escribe acá para que no se vaya con el rollback. Ojo: si el
+   * llamador ya está dentro de una transacción, esto toma una SEGUNDA conexión
+   * del pool mientras la primera sigue retenida (ver `docs/patterns/backend.md` §9).
    */
   sinTransaccion<T>(fn: () => Promise<T>): Promise<T> {
     return this.tx.correrFuera(fn);

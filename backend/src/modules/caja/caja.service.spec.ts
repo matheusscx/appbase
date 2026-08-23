@@ -14,6 +14,7 @@ import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
+import { CajaIntentoRechazado } from './entities/caja-intento-rechazado.entity';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
@@ -61,6 +62,7 @@ describe('CajaService', () => {
     transaction: jest.Mock;
     query: jest.Mock;
   };
+  let sinTransaccion: jest.Mock;
   const motivosService = {
     assertMotivoValido: jest.fn(),
     hayMotivosActivos: jest.fn(),
@@ -71,6 +73,13 @@ describe('CajaService', () => {
   const cajaTestigoServiceMock = {
     hayFirmaDe: jest.fn(),
     cancelarPendientes: jest.fn(),
+  };
+  // El rastro de intentos rechazados vive en su propio repo, no en el
+  // `managerMock`: los tests que verifican "no se guardó el movimiento"
+  // siguen mirando `managerMock.save` sin que el rastro los ensucie.
+  const intentoRechazadoRepo = {
+    create: jest.fn(),
+    save: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -95,10 +104,16 @@ describe('CajaService', () => {
       ),
       query: jest.fn(),
     };
+    intentoRechazadoRepo.create.mockReset().mockImplementation((x) => x);
+    intentoRechazadoRepo.save.mockReset().mockResolvedValue(undefined);
+    // `sinTransaccion` como jest.fn y no como passthrough anónimo: los tests
+    // del rastro necesitan afirmar que la escritura pasó POR ACÁ (fuera del
+    // contexto transaccional) y no por el manager de la transacción abortada.
+    sinTransaccion = jest.fn((fn: () => unknown) => fn());
     const dbMock = {
       transaccion: dataSource.transaction,
       query: dataSource.query,
-      sinTransaccion: (fn: () => unknown) => fn(),
+      sinTransaccion,
     };
 
     motivosService.assertMotivoValido.mockReset();
@@ -121,6 +136,10 @@ describe('CajaService', () => {
         {
           provide: getRepositoryToken(CajaArqueoMedio),
           useValue: { create: jest.fn((x) => x), save: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(CajaIntentoRechazado),
+          useValue: intentoRechazadoRepo,
         },
         { provide: Db, useValue: dbMock },
         { provide: MotivosDiferenciaService, useValue: motivosService },
@@ -240,6 +259,119 @@ describe('CajaService', () => {
       );
 
       expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    describe('rastro del retiro rechazado (fuga 2 del modo ciego)', () => {
+      function saldoInsuficiente() {
+        managerMock.findOne.mockResolvedValue(mockCajaAbierta);
+        managerMock.query
+          .mockResolvedValueOnce([{ caja_id: CAJA_ID }])
+          .mockResolvedValueOnce([
+            { saldo_inicial: '300', total_entradas: null, total_salidas: null },
+          ]);
+      }
+
+      it('registra quién, qué caja y cuánto pidió', async () => {
+        saldoInsuficiente();
+
+        await expect(
+          service.registrarMovimiento(
+            TENANT_ID,
+            USUARIO_ID,
+            CAJA_ID,
+            dtoSalida,
+          ),
+        ).rejects.toThrow('Saldo insuficiente en caja');
+
+        expect(intentoRechazadoRepo.create).toHaveBeenCalledWith({
+          tenantId: TENANT_ID,
+          cajaId: CAJA_ID,
+          usuarioId: USUARIO_ID,
+          tipo: 'retiro',
+          motivo: 'saldo_insuficiente',
+          montoSolicitado: '500.0000',
+          ventaId: null,
+        });
+        expect(intentoRechazadoRepo.save).toHaveBeenCalledTimes(1);
+      });
+
+      it('el rastro NO pasa por el manager de la transacción abortada: sobrevive al rollback', async () => {
+        saldoInsuficiente();
+        const orden: string[] = [];
+        dataSource.transaction.mockImplementationOnce(
+          async (cb: (m: typeof managerMock) => Promise<unknown>) => {
+            try {
+              return await cb(managerMock);
+            } finally {
+              // Lo que hace TypeORM al abortar: deshace y suelta la conexión.
+              orden.push('rollback');
+            }
+          },
+        );
+        sinTransaccion.mockImplementationOnce((fn: () => unknown) => {
+          orden.push('rastro');
+          return fn();
+        });
+
+        await expect(
+          service.registrarMovimiento(
+            TENANT_ID,
+            USUARIO_ID,
+            CAJA_ID,
+            dtoSalida,
+          ),
+        ).rejects.toThrow('Saldo insuficiente en caja');
+
+        // Las dos mitades de la garantía: la escritura sale por la puerta de
+        // fuera-de-transacción, y sale DESPUÉS de que la transacción terminó.
+        expect(sinTransaccion).toHaveBeenCalledTimes(1);
+        expect(orden).toEqual(['rollback', 'rastro']);
+        // Y nunca por el manager, que es lo que el rollback se lleva.
+        expect(managerMock.save).not.toHaveBeenCalled();
+      });
+
+      it('el retiro que SÍ pasa no deja intento: el rastro es de rechazos', async () => {
+        managerMock.findOne.mockResolvedValue(mockCajaAbierta);
+        managerMock.query
+          .mockResolvedValueOnce([{ caja_id: CAJA_ID }])
+          .mockResolvedValueOnce([
+            {
+              saldo_inicial: '1000',
+              total_entradas: null,
+              total_salidas: null,
+            },
+          ]);
+        managerMock.create.mockReturnValue({ id: 'mov-ok' });
+        managerMock.save.mockResolvedValue({ id: 'mov-ok' });
+
+        await service.registrarMovimiento(
+          TENANT_ID,
+          USUARIO_ID,
+          CAJA_ID,
+          dtoSalida,
+        );
+
+        expect(intentoRechazadoRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('un rechazo que NO es oráculo de plata (caja ajena) tampoco deja intento', async () => {
+        managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]);
+        managerMock.findOne.mockResolvedValue({
+          ...mockCajaAbierta,
+          usuarioId: OTRO_USUARIO,
+        });
+
+        await expect(
+          service.registrarMovimiento(
+            TENANT_ID,
+            USUARIO_ID,
+            CAJA_ID,
+            dtoSalida,
+          ),
+        ).rejects.toThrow(ForbiddenException);
+
+        expect(intentoRechazadoRepo.save).not.toHaveBeenCalled();
+      });
     });
 
     it('throws ForbiddenException when caja is closed or not found', async () => {
@@ -426,6 +558,7 @@ describe('CajaService', () => {
       jest
         .spyOn(service, 'calcularArqueo')
         .mockResolvedValue(arqueoRecomputado);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(false);
       const dto: CerrarCajaDto = {
         lineas: [
           {
@@ -436,7 +569,63 @@ describe('CajaService', () => {
       };
       await expect(
         service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toThrow('Falta el conteo de Efectivo');
+    });
+
+    it('sin ciego el 400 NOMBRA el medio que falta', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue([
+          arqueoRecomputado[0],
+          { ...arqueoRecomputado[1], requiereConteo: true },
+        ]);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(false);
+      const dto: CerrarCajaDto = {
+        lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+      };
+      await expect(
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+      ).rejects.toThrow('Falta el conteo de Tarjeta');
+    });
+
+    it('con ciego el 400 NO nombra el medio (fuga 6): la lista sale por otra puerta', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue([
+          arqueoRecomputado[0],
+          { ...arqueoRecomputado[1], requiereConteo: true },
+        ]);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(true);
+      const dto: CerrarCajaDto = {
+        lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+      };
+      const error = (await service
+        .enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto)
+        .catch((e: Error) => e)) as Error;
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.message).toBe(
+        'Falta el conteo de un medio de pago obligatorio',
+      );
+      expect(error.message).not.toMatch(/Tarjeta/);
+    });
+
+    it('al admin el ciego no le aplica y ni se consulta la config', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
+      const flag = jest.spyOn(service, 'getArqueoCiego');
+      const dto: CerrarCajaDto = {
+        lineas: [
+          {
+            metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
+            montoContado: '800',
+          },
+        ],
+      };
+      await expect(
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto, false, true),
+      ).rejects.toThrow('Falta el conteo de Efectivo');
+      expect(flag).not.toHaveBeenCalled();
     });
 
     it('400 si el DTO trae un metodoPagoId ajeno al arqueo', async () => {
@@ -464,6 +653,7 @@ describe('CajaService', () => {
           arqueoRecomputado[0],
           { ...arqueoRecomputado[1], requiereConteo: true },
         ]);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(false);
       const dto: CerrarCajaDto = {
         lineas: [{ metodoPagoId: null, montoContado: '1000' }],
       };
@@ -1496,6 +1686,84 @@ describe('CajaService', () => {
     });
   });
 
+  describe('listarIntentosRechazados', () => {
+    const filaCruda = {
+      intento_id: 'int-001',
+      caja_id: CAJA_ID,
+      usuario_id: USUARIO_ID,
+      usuario_nombre: 'Ana',
+      usuario_apellido: 'Pérez',
+      cajon_nombre: 'Cajón 1',
+      tipo: 'retiro',
+      motivo: 'saldo_insuficiente',
+      monto_solicitado: '500.0000',
+      venta_id: null,
+      fecha: new Date('2026-08-23T12:00:00Z'),
+    };
+
+    it('mapea la fila con el nombre del cajero y del cajón, en dos queries (count + filas)', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([filaCruda]);
+
+      const res = await service.listarIntentosRechazados(TENANT_ID, {});
+
+      // Dos queries fijas, no una por fila.
+      expect(dataSource.query).toHaveBeenCalledTimes(2);
+      expect(res.data).toEqual([
+        {
+          id: 'int-001',
+          cajaId: CAJA_ID,
+          cajonNombre: 'Cajón 1',
+          usuarioId: USUARIO_ID,
+          usuarioNombre: 'Ana Pérez',
+          tipo: 'retiro',
+          motivo: 'saldo_insuficiente',
+          montoSolicitado: '500.0000',
+          ventaId: null,
+          fecha: filaCruda.fecha,
+        },
+      ]);
+      expect(res.meta.total).toBe(1);
+    });
+
+    it('filtra soft-delete y tenant en las DOS queries', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listarIntentosRechazados(TENANT_ID, {});
+
+      for (const [sql, params] of dataSource.query.mock.calls as [
+        string,
+        unknown[],
+      ][]) {
+        expect(sql).toContain('ir.eliminado_el IS NULL');
+        expect(sql).toContain('ir.tenant_id = $1');
+        expect(params[0]).toBe(TENANT_ID);
+      }
+    });
+
+    it('el filtro por caja y por usuario entra en el COUNT también: si no, la paginación miente', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.listarIntentosRechazados(TENANT_ID, {
+        cajaId: CAJA_ID,
+        usuarioId: USUARIO_ID,
+      });
+
+      const [countSql, countParams] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(countSql).toContain('ir.caja_id = $2');
+      expect(countSql).toContain('ir.usuario_id = $3');
+      expect(countParams).toEqual([TENANT_ID, CAJA_ID, USUARIO_ID]);
+    });
+  });
+
   describe('tendenciaDescuadres', () => {
     const filaCruda = {
       usuario_id: USUARIO_ID,
@@ -2258,6 +2526,10 @@ describe('CajaService.abrir', () => {
         { provide: getRepositoryToken(MovimientoCaja), useValue: {} },
         {
           provide: getRepositoryToken(CajaArqueoMedio),
+          useValue: { create: jest.fn((x) => x), save: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(CajaIntentoRechazado),
           useValue: { create: jest.fn((x) => x), save: jest.fn() },
         },
         { provide: Db, useValue: dbMock },

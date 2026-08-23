@@ -995,6 +995,80 @@ es una política anti-fraude, no una acción operativa. El CRUD de cajones de la
 pantalla sigue delegable a `Cajas:Actualizar`. Criterio: `docs/features/roles-permisos.md`,
 sección "Admin-only vs permiso de módulo".
 
+### Qué promete el modo ciego, y qué NO (revisado 2026-08-23)
+
+Esta sección corrige lo que las de arriba dejaban entender. Un frente de auditoría dirigida
+(2026-08-22; la entrada vive hoy en `docs/agent/resueltos.md`, *"El modo ciego deja de
+prometer lo que no sostiene"*) midió que **el esperado del turno no es un
+secreto guardable**: es una cuenta que el sistema tiene que hacer para operar, y toda
+validación o listado que toque la plata del turno la filtra. Lo que quedó, medido:
+
+| La promesa | ¿Se sostiene? |
+|---|---|
+| *"El cajero no ve la plata de OTROS"* | ✅ **Sí, y ahora es cierto donde antes no lo era.** Lo cierra el eje `MiCaja`/`Cajas` extendido a `ventas` y `pagos` el 2026-08-22 ([patterns/backend §16](../patterns/backend.md)). Medido: el admin ve 87 pagos de 18 cajas, el cajero 3 de sus 2 cajas |
+| *"El cajero no puede saber SU PROPIO esperado"* | ❌ **No.** Es **fricción, no barrera**. Sus propios pagos son suyos —los cobró él— y sumándolos vuelve a deducir el esperado exacto. Verificado corriendo el script de la demostración después de construir el eje: 20.357 contra 20.357 |
+
+⛔ **No se puede cerrar sin quitarle al cajero su propio historial de ventas**, que es la
+misma aritmética que hizo descartar el ocultamiento en
+[§11.3](../agent/investigaciones/2026-07-23-gestion-caja.md#113-cruce-contra-nuestro-código--dos-hechos-que-el-mercado-no-podía-darnos).
+Y los dos rechazos que sobraban —el retiro sin saldo y el tope de la devolución en
+efectivo— **no se pueden tapar sin romper chequeos que existen por una razón legítima**:
+hoy impiden sacar plata que no está.
+
+📌 **Por eso el control sobre esos dos es DETECTIVO, no preventivo** (decisión del owner,
+2026-08-22, la misma forma que ya se eligió para el cierre forzado): el chequeo queda
+intacto y el intento rechazado **deja rastro** para el supervisor. Ver abajo.
+
+Lo que sí se sacó de los mensajes es el **número**: un 422 que interpola el monto disponible
+entrega la cuenta entera en un solo request, y eso no es fricción, es un cartel.
+
+### Rastro de intentos rechazados
+
+Tabla `caja_intentos_rechazados`. Se escribe un intento cuando un rechazo por **falta de
+plata** es además un oráculo sobre el esperado del turno:
+
+| Camino | Motivo registrado |
+|---|---|
+| `POST /caja/:id/movimientos` con `tipo:'salida'` y saldo insuficiente | `tipo:'retiro'`, `motivo:'saldo_insuficiente'` |
+| Nota de crédito con devolución en efectivo por encima de lo que esa venta cobró en efectivo | `tipo:'devolucion_nc'`, `motivo:'supera_efectivo_de_la_venta'` |
+| Nota de crédito con devolución en efectivo y la caja sin saldo | `tipo:'devolucion_nc'`, `motivo:'saldo_insuficiente'` |
+
+Guarda **quién, cuándo, qué caja, cuánto pidió** y —en la NC— sobre qué venta. **No guarda
+el monto disponible**: ese es justo el dato que el rechazo filtraba, y persistirlo lo
+dejaría a un endpoint de distancia del cajero. Lo que el supervisor necesita para leer un
+barrido binario es la **secuencia de montos pedidos**, no el resultado.
+
+⚠️ **El rastro tiene que sobrevivir al rollback, y eso condiciona cómo se escribe.** El 422
+aborta la transacción que lo produjo; un registro escrito adentro se va con ella. La
+escritura se hace en `CajaService.conRastroDeRechazo`, en un `catch` **por fuera** de
+`db.transaccion` (cuando corre, TypeORM ya deshizo y ya soltó la conexión: no se toma una
+segunda conexión simultánea, que es el deadlock de [ADR-020](../adr/020-contexto-transaccional-als.md)),
+y la escritura misma va envuelta en `db.sinTransaccion` como red por si algún llamador
+envolvió la operación en una transacción propia —ahí `db.transaccion` la reusa, el rollback
+no ocurre en este nivel y el contexto ALS sigue activo—. La tabla **no declara FKs** a
+`cajas` ni a `usuarios`: un FK pide `FOR KEY SHARE` sobre la fila que la transacción que
+está muriendo retiene con `FOR UPDATE`, y las dos se esperarían para siempre.
+
+**Lectura, solo supervisión:** `GET /caja/intentos-rechazados` con `Cajas:Leer` a secas
+(igual que `tendencia`, y a diferencia del historial: **no hay versión "los míos"**, porque
+el rastro existe para vigilar al cajero y dárselo le diría cuánto ruido hizo). Filtros
+opcionales `cajaId` y `usuarioId`, paginado. Se renderiza en el detalle de caja
+(`/cajas/:id`, `CajaIntentosRechazados.vue`), en cualquier estado de la caja: la ráfaga que
+delata pasa con la caja **abierta**, que es cuando el supervisor todavía puede hacer algo.
+
+📌 **Cómo se lee la tabla:** una fila suelta es normal —el cajero se equivocó de monto—. Lo
+que delata es la **ráfaga**: veinte intentos en dos minutos con montos que convergen es
+alguien binarizando el esperado, y es una firma inconfundible.
+
+### El 400 del conteo no enumera medios en modo ciego
+
+`POST /caja/:id/conteo` respondía `Falta el conteo de <medio>` cuando faltaba una línea
+obligatoria — la misma lista de medios que el ciego filtra en `obtenerArqueo`, saliendo por
+la puerta del 400. Con el ciego activo para ese usuario (mismo predicado de siempre: no
+admin + caja `abierta` + `arqueo_ciego`) el mensaje pasa a ser genérico, *"Falta el conteo de
+un medio de pago obligatorio"*. Al admin del tenant le sigue nombrando el medio, y el
+cortocircuito `!esAdmin && …` evita consultar la config cuando no hace falta.
+
 ---
 
 ## Ciclo de vida de una solicitud de testigo

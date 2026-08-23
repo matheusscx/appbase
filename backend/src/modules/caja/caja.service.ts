@@ -19,6 +19,7 @@ import { Db } from '../../common/db/db.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
+import { CajaIntentoRechazado } from './entities/caja-intento-rechazado.entity';
 import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import { CajaTestigoService } from './caja-testigo.service';
@@ -26,6 +27,7 @@ import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import type { FinalizarCierreDto } from './dto/finalizar-cierre.dto';
+import type { QueryIntentosRechazadosDto } from './dto/query-intentos-rechazados.dto';
 import type { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import type { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
 import type { QueryTendenciaDescuadresDto } from './dto/query-tendencia-descuadres.dto';
@@ -89,6 +91,50 @@ export interface LineaArqueo {
   comentarioDiferencia?: string | null;
 }
 
+/** Lo que hay que saber de un intento rechazado para poder escribirlo. */
+export interface IntentoRechazadoData {
+  cajaId: string;
+  usuarioId: string;
+  tipo: 'retiro' | 'devolucion_nc';
+  motivo: 'saldo_insuficiente' | 'supera_efectivo_de_la_venta';
+  /** Lo pedido, escala 4 (convención de dinero del proyecto). */
+  montoSolicitado: string;
+  ventaId?: string | null;
+}
+
+/**
+ * El 422 de un rechazo que además es un ORÁCULO sobre la plata del turno, con
+ * los datos del intento colgados encima. Extiende `UnprocessableEntityException`
+ * a propósito: para el cliente es el mismo 422 de siempre —mismo status, mismo
+ * mensaje— y solo `conRastroDeRechazo` mira el payload.
+ *
+ * ⚠️ El mensaje NO lleva el monto disponible. Ese era el agujero de la fuga 5:
+ * un `(disponible: 1234.5600)` interpolado entrega el número entero en UN
+ * request rechazado, sin emitir nada.
+ */
+export class IntentoRechazadoError extends UnprocessableEntityException {
+  constructor(
+    mensaje: string,
+    readonly intento: IntentoRechazadoData,
+  ) {
+    super(mensaje);
+  }
+}
+
+/** Una fila del rastro, ya resuelta con el nombre de quien lo intentó. */
+export interface IntentoRechazadoItem {
+  id: string;
+  cajaId: string;
+  cajonNombre: string | null;
+  usuarioId: string;
+  usuarioNombre: string;
+  tipo: string;
+  motivo: string;
+  montoSolicitado: string;
+  ventaId: string | null;
+  fecha: Date;
+}
+
 /**
  * Columna sobre la que se mide la ventana de la tendencia: el cierre **cuando
  * existe**, y la apertura cuando no.
@@ -110,7 +156,13 @@ const COLUMNA_VENTANA = 'COALESCE(c.fecha_cierre, c.fecha_apertura)';
  * tiene que rotularlo, o el número miente.
  */
 export interface TendenciaDescuadresItem {
-  usuarioId: string;
+  /**
+   * `null` si la caja no tiene dueño. Hoy inalcanzable —el filtro
+   * `tipo = 'fisica'` lo impide— pero `Caja.usuarioId` es nullable y su vecino
+   * `CajaHistorialItem` ya lo tipaba así. Tiparlo `string` hacía que quien
+   * renderiza la fila armara un enlace a `?usuarioId=null` sin error visible.
+   */
+  usuarioId: string | null;
   usuarioNombre: string;
   cierres: number;
   /** Suma CON SIGNO de la línea de efectivo. Negativo = faltante. */
@@ -123,7 +175,7 @@ export interface TendenciaDescuadresItem {
 }
 
 interface TendenciaDescuadresRow {
-  usuario_id: string;
+  usuario_id: string | null;
   usuario_nombre: string | null;
   usuario_apellido: string | null;
   cierres: number;
@@ -167,6 +219,8 @@ export class CajaService {
     private readonly movimientoCajaRepo: Repository<MovimientoCaja>,
     @InjectRepository(CajaArqueoMedio)
     private readonly arqueoMedioRepo: Repository<CajaArqueoMedio>,
+    @InjectRepository(CajaIntentoRechazado)
+    private readonly intentoRechazadoRepo: Repository<CajaIntentoRechazado>,
     private readonly db: Db,
     private readonly motivosService: MotivosDiferenciaService,
     private readonly sesionesGarzonService: SesionesGarzonService,
@@ -726,6 +780,7 @@ export class CajaService {
     cajaId: string,
     dto: CerrarCajaDto,
     puedeForzar = false,
+    esAdmin = false,
   ): Promise<{ estado: 'cerrada' | 'en_conciliacion'; arqueo: LineaArqueo[] }> {
     return this.db.transaccion(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
@@ -771,14 +826,33 @@ export class CajaService {
         }
       }
 
-      // Resolver contado/diferencia + validar obligatorias.
+      // Validar obligatorias ANTES del map: el mensaje necesita un `await` (la
+      // config del ciego) y un callback de `map` no puede tenerlo.
+      const faltante = arqueo.find(
+        (l) =>
+          (l.esEfectivo || l.requiereConteo) &&
+          contadoPorClave.get(claveDe(l.metodoPagoId)) === undefined,
+      );
+      if (faltante) {
+        // El nombre del medio se RETIENE en modo ciego (fuga 6): enumerar qué
+        // medios participaron en el turno es la misma lista que el ciego filtra
+        // en `obtenerArqueo`, saliendo por la puerta del 400. Mismo predicado
+        // que el resto del módulo —no admin + caja abierta + arqueo ciego—; la
+        // caja acá es `abierta` por construcción (el `findOne` de arriba lo
+        // exige), así que el término del estado ya está cumplido. El admin
+        // cortocircuita antes de `getArqueoCiego`: sin query de más.
+        const ciego = !esAdmin && (await this.getArqueoCiego(tenantId));
+        throw new BadRequestException(
+          ciego
+            ? 'Falta el conteo de un medio de pago obligatorio'
+            : `Falta el conteo de ${faltante.nombre}`,
+        );
+      }
+
+      // Resolver contado/diferencia.
       const lineasResueltas = arqueo.map((l) => {
         const clave = claveDe(l.metodoPagoId);
         const contadoRaw = contadoPorClave.get(clave);
-        const obligatoria = l.esEfectivo || l.requiereConteo;
-        if (obligatoria && contadoRaw === undefined) {
-          throw new BadRequestException(`Falta el conteo de ${l.nombre}`);
-        }
         const contado =
           contadoRaw === undefined ? null : new Decimal(contadoRaw).toFixed(4);
         const diferencia =
@@ -1004,7 +1078,190 @@ export class CajaService {
     return manager.save(MovimientoCaja, movimiento);
   }
 
+  /**
+   * Envuelve una operación que puede rechazar por falta de plata y deja el
+   * rastro del rechazo. **El rastro tiene que sobrevivir al rollback**, o no
+   * sirve: el 422 aborta la transacción que lo produjo, y un registro escrito
+   * adentro se va con ella.
+   *
+   * **Cómo sobrevive, y por qué así.** El `catch` está en el BORDE, por fuera
+   * de `db.transaccion`: cuando corre, TypeORM ya hizo el rollback y ya
+   * devolvió la conexión al pool, así que la escritura no comparte nada con lo
+   * deshecho **y no toma una segunda conexión simultánea** — que es el deadlock
+   * exacto de [ADR-020](../../../../docs/adr/020-contexto-transaccional-als.md).
+   * El `db.sinTransaccion` de `persistirIntentoRechazado` es la red para el otro
+   * caso: si algún llamador envuelve esto en una transacción PROPIA,
+   * `db.transaccion` la reusa en vez de anidar, el rollback no ocurre acá y el
+   * contexto ALS sigue activo cuando llega el `catch`. Sin `sinTransaccion` el
+   * repo resolvería ese manager y el rastro se perdería igual.
+   *
+   * Se ejecuta desde `registrarMovimiento` (fuga 2) y desde
+   * `VentasService.crearNotaCredito` (fuga 5) — los dos oráculos que la
+   * decisión del owner del 2026-08-22 mandó volver detectivos en vez de
+   * taparlos: el chequeo de saldo insuficiente existe para impedir retirar
+   * plata que no está, y se queda intacto.
+   */
+  async conRastroDeRechazo<T>(
+    tenantId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof IntentoRechazadoError) {
+        // Si la escritura del rastro falla, el error PROPAGA y el cajero recibe
+        // un 500 en vez del 422 — decidido así a propósito. Tragarlo dejaría un
+        // agujero silencioso en un control anti-fraude, que es exactamente la
+        // clase de bug que abrió este frente: el rechazo volvería a no dejar
+        // nada y nadie se enteraría. La plata no se movió en ninguno de los dos
+        // casos; lo único que se pierde es la prolijidad del mensaje.
+        await this.persistirIntentoRechazado(tenantId, e.intento);
+      }
+      throw e;
+    }
+  }
+
+  private async persistirIntentoRechazado(
+    tenantId: string,
+    intento: IntentoRechazadoData,
+  ): Promise<void> {
+    // `create` y `save` van los DOS adentro del callback: el proxy de repos
+    // resuelve el manager en el acceso a la propiedad, no en la invocación
+    // (`docs/agent/anti-patterns.md`), así que sacar el `create` afuera lo
+    // dejaría atado al contexto que este bloque justamente evita.
+    await this.db.sinTransaccion(() =>
+      this.intentoRechazadoRepo.save(
+        this.intentoRechazadoRepo.create({
+          tenantId,
+          cajaId: intento.cajaId,
+          usuarioId: intento.usuarioId,
+          tipo: intento.tipo,
+          motivo: intento.motivo,
+          montoSolicitado: intento.montoSolicitado,
+          ventaId: intento.ventaId ?? null,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Los intentos rechazados del tenant — lectura de SUPERVISIÓN (`Cajas:Leer`),
+   * nunca del cajero: el rastro existe para que lo lea quien vigila, y dárselo
+   * al vigilado le diría exactamente cuánto ruido hizo.
+   *
+   * Una sola query con `LEFT JOIN` para el nombre del cajero y el del cajón:
+   * sin una consulta por fila. Los joins son `LEFT` por el mismo motivo que en
+   * la tendencia — un cajero dado de baja pierde el nombre, pero su intento YA
+   * OCURRIÓ y no se puede caer del informe.
+   */
+  async listarIntentosRechazados(
+    tenantId: string,
+    query: QueryIntentosRechazadosDto,
+  ): Promise<PaginatedResponse<IntentoRechazadoItem>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+
+    const params: unknown[] = [tenantId];
+    let filtros = '';
+    if (query.cajaId) {
+      params.push(query.cajaId);
+      filtros += ` AND ir.caja_id = $${params.length}`;
+    }
+    if (query.usuarioId) {
+      params.push(query.usuarioId);
+      filtros += ` AND ir.usuario_id = $${params.length}`;
+    }
+
+    const countRows: { total: number }[] = await this.db.query(
+      `SELECT COUNT(*)::int AS total
+         FROM caja_intentos_rechazados ir
+        WHERE ir.tenant_id = $1
+          AND ir.eliminado_el IS NULL
+          ${filtros}`,
+      params,
+    );
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: {
+      intento_id: string;
+      caja_id: string;
+      usuario_id: string;
+      usuario_nombre: string | null;
+      usuario_apellido: string | null;
+      cajon_nombre: string | null;
+      tipo: string;
+      motivo: string;
+      monto_solicitado: string;
+      venta_id: string | null;
+      fecha: Date;
+    }[] = await this.db.query(
+      `SELECT ir.intento_id,
+              ir.caja_id,
+              ir.usuario_id,
+              u.nombre   AS usuario_nombre,
+              u.apellido AS usuario_apellido,
+              cj.nombre  AS cajon_nombre,
+              ir.tipo,
+              ir.motivo,
+              ir.monto_solicitado,
+              ir.venta_id,
+              ir.fecha
+         FROM caja_intentos_rechazados ir
+         LEFT JOIN usuarios u ON u.usuario_id = ir.usuario_id
+                AND u.eliminado_el IS NULL
+         LEFT JOIN cajas c ON c.caja_id = ir.caja_id
+                AND c.tenant_id = ir.tenant_id
+                AND c.eliminado_el IS NULL
+         LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id
+                AND cj.eliminado_el IS NULL
+        WHERE ir.tenant_id = $1
+          AND ir.eliminado_el IS NULL
+          ${filtros}
+        -- Más nuevo arriba: lo que el supervisor busca es la ráfaga de recién,
+        -- no el primer intento de hace un mes. Desempate por id para que dos
+        -- intentos del mismo milisegundo no salgan en orden distinto entre
+        -- requests y la paginación no repita ni saltee filas.
+        ORDER BY ir.fecha DESC, ir.intento_id DESC
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
+    );
+
+    return {
+      data: rows.map((r) => ({
+        id: r.intento_id,
+        cajaId: r.caja_id,
+        cajonNombre: r.cajon_nombre,
+        usuarioId: r.usuario_id,
+        usuarioNombre:
+          [r.usuario_nombre, r.usuario_apellido]
+            .filter((p): p is string => Boolean(p))
+            .join(' ')
+            .trim() || 'Sin usuario',
+        tipo: r.tipo,
+        motivo: r.motivo,
+        montoSolicitado: new Decimal(r.monto_solicitado).toFixed(4),
+        ventaId: r.venta_id,
+        fecha: r.fecha,
+      })),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
   async registrarMovimiento(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    dto: CrearMovimientoDto,
+  ): Promise<MovimientoCaja> {
+    return this.conRastroDeRechazo(tenantId, () =>
+      this.registrarMovimientoEnCaja(tenantId, usuarioId, cajaId, dto),
+    );
+  }
+
+  private async registrarMovimientoEnCaja(
     tenantId: string,
     usuarioId: string,
     cajaId: string,
@@ -1039,7 +1296,17 @@ export class CajaService {
         dto.tipo === 'salida' &&
         new Decimal(esperadoEfectivo).minus(dto.monto).lt(0)
       ) {
-        throw new UnprocessableEntityException('Saldo insuficiente en caja');
+        // El chequeo NO se toca: existe para impedir retirar plata que no está.
+        // Lo que cambia es que el rechazo deja rastro — este 422 contestado 20
+        // veces reconstruye el esperado por búsqueda binaria (medido: 73.450 en
+        // 20 requests), y sin registro no queda nada de esa ráfaga.
+        throw new IntentoRechazadoError('Saldo insuficiente en caja', {
+          cajaId,
+          usuarioId,
+          tipo: 'retiro',
+          motivo: 'saldo_insuficiente',
+          montoSolicitado: new Decimal(dto.monto).toFixed(4),
+        });
       }
 
       return this.registrarMovimientoEnTransaccion(manager, {

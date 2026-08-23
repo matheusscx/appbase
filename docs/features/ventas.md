@@ -306,10 +306,17 @@ misma aritmética que hizo descartar el ocultamiento del resultado post-conteo.
 maquillaje casual, no a quien lleva la cuenta. Lo que sí garantiza, y antes no, es que **no vea
 la plata de otros**.
 
-⚠️ **Tampoco cierra los dos oráculos** del modo ciego (el `422` de
+⚠️ **Tampoco cerraba los dos oráculos** del modo ciego (el `422` de
 `POST /caja/:id/movimientos` y el de la nota de crédito en efectivo). No salen de un listado
-sino del borde aceptar/rechazar de una validación legítima, y se resuelven por **rastro**, no
-por ocultamiento. Frente propio en [`agent/pendientes.md`](../agent/pendientes.md).
+sino del borde aceptar/rechazar de una validación legítima.
+✅ **Resueltos por RASTRO el 2026-08-23**, que es lo que el owner había decidido: el chequeo
+queda intacto y el intento rechazado se registra en `caja_intentos_rechazados` para que lo
+lea el supervisor. Del lado de ventas cambia **solo el mensaje**: el `422` del tope de la
+devolución en efectivo ya **no interpola el monto disponible** —era un oráculo de UN request,
+que entregaba el efectivo cobrado de la venta sin emitir ninguna NC— y el tope en sí, el
+monto de la NC y la semántica del documento no se tocaron. Detalle del mecanismo y de la
+lectura del supervisor en
+[`features/gestion-cajas.md`](./gestion-cajas.md#rastro-de-intentos-rechazados).
 
 ## Backend
 

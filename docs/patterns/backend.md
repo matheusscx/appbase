@@ -469,12 +469,26 @@ con el deadlock que motivó esto y las alternativas descartadas, está en
     atómica con la rotación del token —el resultado de la poda no afecta si la
     rotación tuvo éxito— así que alargar el lock de la transacción principal
     para incluirla sería costo sin beneficio.
-  ⚠️ Auditado el 2026-08-18: ningún sitio de hoy **necesita** `sinTransaccion`
-  para estar fuera de contexto — los dos ejemplos de arriba ya están
-  lexicalmente fuera del callback de `db.transaccion`, así que el ALS los deja
-  solos en el pool sin pedirlo. `sinTransaccion` existe para el día que el
-  código fuera-de-transacción tenga que vivir **dentro** de un callback que
-  por lo demás sí está en transacción.
+  📌 **Primer uso real (2026-08-23): `CajaService.conRastroDeRechazo`** — el rastro
+  de un intento de retiro rechazado, que tiene que quedar escrito aunque el
+  `422` que lo produjo aborte la transacción. Y muestra la forma completa, que
+  es **dos piezas, no una**:
+  1. **El `catch` va en el BORDE, por fuera de `db.transaccion`.** Cuando corre,
+     TypeORM ya hizo el rollback y ya devolvió la conexión al pool: la escritura
+     no comparte nada con lo deshecho **y no toma una segunda conexión
+     simultánea** — que es el deadlock de [ADR-020](../adr/020-contexto-transaccional-als.md).
+     Escribir el rastro *adentro* del callback con `sinTransaccion` funciona,
+     pero duplica conexiones justo en el camino que un atacante puede repetir.
+  2. **`sinTransaccion` alrededor de la escritura, igual**, como red: si algún
+     llamador envuelve la operación en una transacción PROPIA, `db.transaccion`
+     la reusa en vez de anidar, el rollback no ocurre en ese nivel y el contexto
+     ALS sigue activo cuando llega el `catch`. Sin `sinTransaccion` el repo
+     resolvería ese manager y el rastro se perdería igual.
+  ⚠️ **Y una consecuencia de esquema:** una tabla que se escribe fuera de la
+  transacción que está muriendo **no puede declarar FK** a una fila que esa
+  transacción retiene con `FOR UPDATE`. El FK pide `FOR KEY SHARE` sobre ella; se
+  esperan mutuamente. `caja_intentos_rechazados` no declara relaciones a `cajas`
+  ni a `usuarios` por esto.
 - **El `manager: EntityManager` explícito en una firma preexistente sigue
   siendo válido — no migrar por migrar.** Donde ya se enhebra a mano
   (`calcularEsperadoEfectivo(cajaId, manager)` y similares) es correcto y el

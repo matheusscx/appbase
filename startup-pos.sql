@@ -1050,6 +1050,35 @@ CREATE TABLE "movimientos_caja" (
   CONSTRAINT chk_movimientos_caja_monto_no_negativo CHECK ("monto" >= 0)
 );
 
+-- Rastro de los intentos RECHAZADOS contra la plata de una caja: el retiro con
+-- saldo insuficiente y la devolución en efectivo que supera lo que la venta
+-- cobró en efectivo. Los dos rechazos son oráculos sobre el esperado del turno
+-- —justo lo que el modo ciego retiene— y la decisión del owner (2026-08-22) fue
+-- RASTRO en vez de ocultamiento: el chequeo queda intacto y el control pasa de
+-- preventivo a detectivo. Lo lee solo la supervisión (`Cajas:Leer`).
+--
+-- ⚠️ SIN foreign keys a `cajas` ni a `usuarios`, a propósito. La fila se escribe
+-- FUERA de la transacción que se está deshaciendo, y esa transacción retiene
+-- FOR UPDATE sobre la misma caja: un FK pediría FOR KEY SHARE sobre esa fila y
+-- las dos se esperarían para siempre. (Las entities de TypeORM tampoco declaran
+-- la relación — ver `caja-intento-rechazado.entity.ts`.)
+CREATE TABLE "caja_intentos_rechazados" (
+  "intento_id"       UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"        UUID          NOT NULL,
+  "caja_id"          UUID          NOT NULL,
+  "usuario_id"       UUID          NOT NULL,  -- quién lo intentó, no el dueño de la caja
+  "tipo"             TEXT          NOT NULL,  -- 'retiro' | 'devolucion_nc'
+  "motivo"           TEXT          NOT NULL,  -- 'saldo_insuficiente' | 'supera_efectivo_de_la_venta'
+  -- Lo que se PIDIÓ, no lo que había: el disponible es el dato que el rechazo
+  -- filtraba, y persistirlo lo dejaría a un endpoint del cajero.
+  "monto_solicitado" NUMERIC(18,4) NOT NULL,
+  "venta_id"         UUID,                    -- la venta original de la NC; NULL en un retiro
+  "fecha"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ
+);
+
 -- Catálogo de motivos de diferencia de caja por tenant (falta de efectivo, divergencia
 -- de tarjeta, etc.) — sub-proyecto de negocio C, cierre en dos fases (ver
 -- docs/features/gestion-cajas.md § Cierre en dos fases). Mismo patrón que

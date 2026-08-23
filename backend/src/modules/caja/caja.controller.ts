@@ -28,6 +28,7 @@ import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
+import { QueryIntentosRechazadosDto } from './dto/query-intentos-rechazados.dto';
 import { QueryTendenciaDescuadresDto } from './dto/query-tendencia-descuadres.dto';
 import { SetArqueoCiegoDto } from './dto/set-arqueo-ciego.dto';
 import { JustificarDiferenciasDto } from './dto/justificar-diferencias.dto';
@@ -180,6 +181,25 @@ export class CajaController {
     return this.cajaService.tendenciaDescuadres(u.tenantId!, query);
   }
 
+  /**
+   * Rastro de intentos rechazados contra la plata de una caja — lectura de
+   * SUPERVISIÓN, igual que `tendencia`: `Cajas:Leer` a secas, sin
+   * `resolverLecturaCompartida`. No hay versión "los míos" a propósito — el
+   * rastro existe para vigilar al cajero, y dárselo le diría cuánto ruido hizo.
+   *
+   * ⚠️ Declarada ANTES de `@Get(':id')`, o la ruta literal se la come el
+   * parámetro (mismo motivo que `tendencia`).
+   */
+  @Get('intentos-rechazados')
+  @RequiresPermiso('Cajas', 'Leer')
+  intentosRechazados(
+    @Req() req: Request,
+    @Query() query: QueryIntentosRechazadosDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.cajaService.listarIntentosRechazados(u.tenantId!, query);
+  }
+
   @Get(':id/arqueo')
   async arqueo(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
@@ -252,13 +272,19 @@ export class CajaController {
     @Body(EscalaMonedaPipe) dto: CerrarCajaDto,
   ) {
     const u = req.user as JwtUser;
-    const puedeForzar = await this.resolverEscrituraCompartida(u);
+    // `esAdmin` no gatea nada acá: decide solo si el 400 de "falta el conteo"
+    // puede nombrar el medio de pago (fuga 6 del modo ciego).
+    const [puedeForzar, esAdmin] = await Promise.all([
+      this.resolverEscrituraCompartida(u),
+      this.esAdminTenant(u),
+    ]);
     return this.cajaService.enviarConteo(
       u.tenantId!,
       u.id,
       cajaId,
       dto,
       puedeForzar,
+      esAdmin,
     );
   }
 

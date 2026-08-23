@@ -13,7 +13,7 @@ import type {
   TrazaRegla,
 } from '../calculo-precios/calculo-precios.engine';
 import { cuantizar } from '../calculo-precios/calculo-precios.engine';
-import { CajaService } from '../caja/caja.service';
+import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
@@ -86,6 +86,33 @@ export interface VentasResumen {
   totalVentas: number;
   totalFacturado: string;
   saldoPendiente: string;
+}
+
+/**
+ * Params de la NC. Con nombre (y no inline en la firma) desde que el cuerpo se
+ * partió en dos: `crearNotaCredito` envuelve y `crearNotaCreditoEnTransaccion`
+ * ejecuta, y repetir el literal en las dos firmas las deja derivar en silencio.
+ */
+export interface CrearNotaCreditoParams {
+  tenantId: string;
+  usuarioId: string;
+  ventaOriginalId: string;
+  monto: string;
+  devoluciones?: DevolucionReembolso[];
+  comentario?: string;
+  /** Egreso de caja: movimiento 'salida' en la caja física abierta del usuario. */
+  devolverDinero?: boolean;
+  /** Solo el endpoint manual: exige venta pagada/pagada_parcial y no-NC. */
+  validarVentaElegible?: boolean;
+}
+
+export interface NotaCreditoCreada {
+  id: string;
+  totalFinal: string;
+  movimientoCajaId: string | null;
+  fecha: Date;
+  comentario: string | null;
+  devoluciones: DevolucionReembolso[];
 }
 
 export interface TipoDocumentoResponse {
@@ -1089,28 +1116,24 @@ export class VentasService {
    * documenta la devolución). Las líneas son opcionales e informativas: solo
    * los ítems elegidos para devolver a stock, sin validar cruce con el monto.
    */
-  async crearNotaCredito(params: {
-    tenantId: string;
-    usuarioId: string;
-    ventaOriginalId: string;
-    monto: string;
-    devoluciones?: DevolucionReembolso[];
-    comentario?: string;
-    /** Egreso de caja: movimiento 'salida' en la caja física abierta del usuario. */
-    devolverDinero?: boolean;
-    /** Solo el endpoint manual: exige venta pagada/pagada_parcial y no-NC. */
-    validarVentaElegible?: boolean;
-  }): Promise<{
-    id: string;
-    totalFinal: string;
-    movimientoCajaId: string | null;
-    fecha: Date;
-    comentario: string | null;
-    devoluciones: DevolucionReembolso[];
-  }> {
+  async crearNotaCredito(
+    params: CrearNotaCreditoParams,
+  ): Promise<NotaCreditoCreada> {
     if (new Decimal(params.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
 
+    // Los dos rechazos por falta de plata de acá abajo son oráculos sobre el
+    // efectivo del turno (fuga 5 del modo ciego). `conRastroDeRechazo` escribe
+    // el intento FUERA de esta transacción, para que el rollback del 422 no se
+    // lo lleve — ver `CajaService.conRastroDeRechazo`.
+    return this.cajaService.conRastroDeRechazo(params.tenantId, () =>
+      this.crearNotaCreditoEnTransaccion(params),
+    );
+  }
+
+  private async crearNotaCreditoEnTransaccion(
+    params: CrearNotaCreditoParams,
+  ): Promise<NotaCreditoCreada> {
     return this.db.transaccion(async (manager) => {
       const original = await this.lockVentaOriginal(
         manager,
@@ -1292,9 +1315,22 @@ export class VentasService {
         const devolvibleEfectivo = new Decimal(
           efectivoRows[0]?.cobrado ?? '0',
         ).minus(efectivoRows[0]?.devuelto ?? '0');
+        // ⚠️ El mensaje NO interpola `devolvibleEfectivo`. Ese número era la
+        // fuga 5 del modo ciego: un solo request rechazado con monto = techo + 1
+        // entregaba el efectivo cobrado de la venta, sin emitir ninguna NC. El
+        // tope sigue igual de duro; lo que se fue es el número, y en su lugar
+        // queda el rastro del intento.
         if (new Decimal(params.monto).gt(devolvibleEfectivo))
-          throw new UnprocessableEntityException(
-            `No se puede devolver en efectivo más de lo que esta venta cobró en efectivo (disponible: ${devolvibleEfectivo.toFixed(4)}). Emití la nota de crédito sin devolución de dinero, o devolvé por el medio de pago original.`,
+          throw new IntentoRechazadoError(
+            'No se puede devolver en efectivo más de lo que esta venta cobró en efectivo. Emití la nota de crédito sin devolución de dinero, o devolvé por el medio de pago original.',
+            {
+              cajaId: caja.id,
+              usuarioId: params.usuarioId,
+              tipo: 'devolucion_nc',
+              motivo: 'supera_efectivo_de_la_venta',
+              montoSolicitado: new Decimal(params.monto).toFixed(4),
+              ventaId: params.ventaOriginalId,
+            },
           );
 
         const saldoEfectivo = await this.cajaService.calcularEsperadoEfectivo(
@@ -1302,7 +1338,14 @@ export class VentasService {
           manager,
         );
         if (new Decimal(saldoEfectivo).minus(params.monto).lt(0))
-          throw new UnprocessableEntityException('Saldo insuficiente en caja');
+          throw new IntentoRechazadoError('Saldo insuficiente en caja', {
+            cajaId: caja.id,
+            usuarioId: params.usuarioId,
+            tipo: 'devolucion_nc',
+            motivo: 'saldo_insuficiente',
+            montoSolicitado: new Decimal(params.monto).toFixed(4),
+            ventaId: params.ventaOriginalId,
+          });
         const movimiento =
           await this.cajaService.registrarMovimientoEnTransaccion(manager, {
             cajaId: caja.id,

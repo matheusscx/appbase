@@ -3,6 +3,7 @@ import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
+import { CajaIntentoRechazado } from './entities/caja-intento-rechazado.entity';
 import { CajaTestigo } from './entities/caja-testigo.entity';
 import { CajaController } from './caja.controller';
 import { CajaService } from './caja.service';
@@ -18,6 +19,7 @@ import { MonedasModule } from '../monedas/monedas.module';
       Caja,
       MovimientoCaja,
       CajaArqueoMedio,
+      CajaIntentoRechazado,
       CajaTestigo,
     ]),
     MotivosDiferenciaModule,

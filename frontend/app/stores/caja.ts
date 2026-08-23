@@ -101,7 +101,8 @@ export interface ArqueoLinea {
 }
 
 export interface TendenciaDescuadres {
-  usuarioId: string
+  /** `null` si la caja no tuvo dueño: quien arme un enlace tiene que guardarlo. */
+  usuarioId: string | null
   usuarioNombre: string
   cierres: number
   /** Suma CON signo de la línea de efectivo. Negativo = faltante. */
@@ -111,6 +112,27 @@ export interface TendenciaDescuadres {
   conFaltante: number
   conSobrante: number
   cuadrados: number
+}
+
+/**
+ * Un intento RECHAZADO contra la plata de una caja (retiro sin saldo, o
+ * devolución en efectivo por encima de lo que la venta cobró en efectivo).
+ * Lectura de supervisión: `Cajas:Leer`, nunca del cajero.
+ */
+export interface IntentoRechazado {
+  id: string
+  cajaId: string
+  cajonNombre: string | null
+  usuarioId: string
+  usuarioNombre: string
+  /** `'retiro'` | `'devolucion_nc'`. */
+  tipo: string
+  /** `'saldo_insuficiente'` | `'supera_efectivo_de_la_venta'`. */
+  motivo: string
+  /** Lo que PIDIÓ. El disponible no se guarda: era justo el dato que filtraba. */
+  montoSolicitado: string
+  ventaId: string | null
+  fecha: string
 }
 
 export interface MotivoDiferencia {

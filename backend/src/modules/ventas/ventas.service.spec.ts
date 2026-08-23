@@ -9,7 +9,7 @@ import { Db } from '../../common/db/db.service';
 import { VentasService } from './ventas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
-import { CajaService } from '../caja/caja.service';
+import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
@@ -266,6 +266,13 @@ describe('VentasService', () => {
             registrarMovimientoEnTransaccion: jest
               .fn()
               .mockResolvedValue({ id: 'mov-caja-nc-1' }),
+            // Pasa la operación tal cual y deja pasar el error: lo que este
+            // spec fija es que `ventas` ENTREGA el intento con los datos
+            // correctos. Que el rastro sobreviva al rollback lo fija
+            // `caja.service.spec.ts` (unit) y el e2e (contra la base real).
+            conRastroDeRechazo: jest.fn(
+              (_tenantId: string, fn: () => Promise<unknown>) => fn(),
+            ),
           },
         },
         {
@@ -2482,13 +2489,61 @@ describe('VentasService', () => {
             ...baseParams,
             devolverDinero: true,
           }),
-        ).rejects.toThrow(
-          /más de lo que esta venta cobró en efectivo \(disponible: 200\.0000\)/,
-        );
+        ).rejects.toThrow(/más de lo que esta venta cobró en efectivo/);
 
         expect(
           cajaService.registrarMovimientoEnTransaccion,
         ).not.toHaveBeenCalled();
+      });
+
+      it('el 422 NO imprime el efectivo disponible (fuga 5 del modo ciego)', async () => {
+        // Era un oráculo de UN request: monto = techo + 1 y el mensaje
+        // devolvía el efectivo cobrado de la venta, sin emitir ninguna NC.
+        efectivoCobrado = '200.0000';
+
+        const error = (await service
+          .crearNotaCreditoDesdeVenta({ ...baseParams, devolverDinero: true })
+          .catch((e: Error) => e)) as Error;
+
+        expect(error).toBeInstanceOf(IntentoRechazadoError);
+        expect(error.message).not.toMatch(/200/);
+        expect(error.message).not.toMatch(/disponible/);
+      });
+
+      it('el intento rechazado se entrega al rastro con quién, qué caja, cuánto pidió y sobre qué venta', async () => {
+        efectivoCobrado = '200.0000';
+
+        const error = (await service
+          .crearNotaCreditoDesdeVenta({ ...baseParams, devolverDinero: true })
+          .catch((e: Error) => e)) as IntentoRechazadoError;
+
+        expect(error.intento).toEqual({
+          cajaId: CAJA_ID,
+          usuarioId: USUARIO_ID,
+          tipo: 'devolucion_nc',
+          motivo: 'supera_efectivo_de_la_venta',
+          montoSolicitado: '1100.0000',
+          ventaId: VENTA_ORIG_ID,
+        });
+        // Y la operación entera pasó por el envoltorio que lo escribe fuera de
+        // la transacción: sin esto el 422 se lleva el rastro en el rollback.
+        expect(cajaService.conRastroDeRechazo).toHaveBeenCalledWith(
+          TENANT_ID,
+          expect.any(Function),
+        );
+      });
+
+      it('el 422 de saldo insuficiente en la NC también deja intento, con su propio motivo', async () => {
+        efectivoCobrado = '5000.0000';
+        cajaService.calcularEsperadoEfectivo.mockResolvedValueOnce('10.0000');
+
+        const error = (await service
+          .crearNotaCreditoDesdeVenta({ ...baseParams, devolverDinero: true })
+          .catch((e: Error) => e)) as IntentoRechazadoError;
+
+        expect(error.message).toBe('Saldo insuficiente en caja');
+        expect(error.intento.motivo).toBe('saldo_insuficiente');
+        expect(error.intento.tipo).toBe('devolucion_nc');
       });
 
       it('el tope acota el DINERO, no el documento: la NC sin devolución pasa igual', async () => {
@@ -2511,7 +2566,7 @@ describe('VentasService', () => {
             ...baseParams,
             devolverDinero: true,
           }),
-        ).rejects.toThrow(/disponible: 200\.0000/);
+        ).rejects.toThrow(/más de lo que esta venta cobró en efectivo/);
       });
 
       it('rechaza NC sobre otra NC', async () => {

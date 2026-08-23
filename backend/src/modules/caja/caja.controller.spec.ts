@@ -404,6 +404,7 @@ describe('CajaController', () => {
         'caja1',
         dto,
         false,
+        false, // esAdmin: decide solo si el 400 puede nombrar el medio
       );
     });
 
@@ -428,6 +429,7 @@ describe('CajaController', () => {
         'caja1',
         dto,
         true,
+        false,
       );
     });
   });

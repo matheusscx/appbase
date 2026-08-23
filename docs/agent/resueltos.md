@@ -17,6 +17,193 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El modo ciego deja de prometer lo que no sostiene, y los oráculos dejan rastro (2026-08-23)
+
+**Venía de la sección 3** («ya decidido, falta construir»). Mudada verbatim con su cierre;
+los dos residuos que deja quedaron como entrada corta en `pendientes.md` §3.
+
+🚩 **El modo ciego se evade desde afuera del módulo `caja`: seis fugas, dos demostradas
+corriendo** (backend + producto) — **abierta el 2026-08-22** por una auditoría dirigida, el
+mismo día en que el cierre de *"ocultar el resultado post-cierre"* afirmó —**mal**— que no
+quedaba ninguna fuga antes del conteo (corregido en [`resueltos.md`](resueltos.md)).
+
+**La causa raíz, que es lo que hay que decidir, no cada agujero suelto:** el predicado del
+ciego (`!esAdmin && estado === 'abierta' && arqueoCiego`) **existe solo dentro de
+`caja.service.ts`**. Ningún otro módulo sabe que el modo ciego existe, y `pagos` y `ventas`
+sirven la misma plata por otro camino. El rasgo común de las seis es **no** nombrar al ciego,
+así que grepear `getArqueoCiego` da una lista que parece exhaustiva y las deja a todas afuera.
+
+**Demostradas contra el stack real** (no leídas):
+1. 🔴 **`GET /pagos?cajaId=<la propia>&metodoPagoId=<efectivo>` da el esperado completo en UN
+   request.** Medido: con el ciego activo y `esperado: null` en el arqueo, el cajero sumó
+   `monto − vuelto` + el fondo y obtuvo **25.355**; el real era **25.355**. `listar` recibe
+   solo `tenantId` (`pagos.service.ts`), **no valida propiedad de la caja**, y el rol
+   `Vendedor` del seed tiene `Pagos:Leer` junto con `MiCaja` — es literalmente el cajero.
+   ⚠️ Quitar el filtro `cajaId` **no alcanza**: cada fila devuelve `cajaId`, así que se agrupa
+   del lado del cliente. Hay que decidir sobre el dato, no sobre el parámetro.
+2. 🔴 **El 422 `"Saldo insuficiente en caja"` de `POST /caja/:id/movimientos` es un oráculo
+   exacto.** Medido: **73.450 recuperados en 20 requests** por búsqueda binaria con retiros
+   rechazados. Pide `MiCaja:Crear`, exige que la caja sea **suya** y esté **`abierta`** —la
+   ventana exacta que el ciego protege— y el rechazo aborta la transacción, así que **no deja
+   rastro**. Los intentos aceptados se compensan con una entrada del mismo monto.
+
+**Encontradas por lectura, sin correr:**
+3. `GET /ventas` + `GET /ventas/:id` (`Ventas:Leer`, también del rol Vendedor): el detalle
+   trae `caja_id`, `monto` y `vuelto` de cada pago. **Mismo número, más requests** — tapar
+   `/pagos` sin esto no cierra nada.
+4. `GET /pagos/resumen` devuelve `montoHoy` de todo el tenant **sin ningún parámetro**. Ojo con
+   qué es: `SUM(monto − vuelto)` **de todos los medios**, no solo efectivo. Con un cajón y un
+   turno —el caso común— es el **cobrado total** de esa caja; para llegar al efectivo hay que
+   restarle las líneas no-efectivo, que el punto 1 entrega.
+5. **La NC en efectivo NO es un oráculo caro: imprime el número.** El 422 de
+   `ventas.service.ts` interpola el monto en el mensaje —*"(disponible: 1234.5600)"*—, así que
+   **un solo request rechazado** (monto = 1 sobre el techo) entrega el efectivo cobrado de esa
+   venta **sin emitir ninguna NC y sin dejar rastro**. No hace falta búsqueda binaria.
+   ⚠️ Lo que sí acota: es el efectivo de **esa venta**, no el esperado del turno — el chequeo
+   de `devolvibleEfectivo` corre **antes** del `Saldo insuficiente en caja`, así que este
+   camino no sirve para binarizar la caja entera. (Corregido el 2026-08-22 por la revisión
+   independiente: la primera redacción de esta entrada le atribuía un costo de explotación
+   mucho más alto del real, y eso la habría dejado abajo en la lista sin merecerlo.)
+6. Los `400` de `POST /caja/:id/conteo` enumeran **qué medios** participaron (no montos). Es
+   la misma lista que el ciego filtra, saliendo por otra puerta. Menor.
+
+➕ **Anotado al pasar, para quien tome el frente** (no vale un frente propio): en
+`caja.service.ts`, la fila cruda de la tendencia tipa `usuario_id: string` cuando
+`Caja.usuarioId` es `nullable: true` y su vecino `historial` lo tipa `string | null`. Hoy es
+inalcanzable porque el filtro `tipo = 'fisica'` lo impide, pero si entrara un NULL la fila
+navegaría a `/cajas/historial?usuarioId=null` sin error visible. Una línea.
+
+📌 **Reencuadre medido el 2026-08-22, y es lo que hay que mirar antes de decidir: esto no es
+un problema del modo ciego, es que `ventas` y `pagos` NO TIENEN NINGÚN NIVEL DE VISIBILIDAD
+POR USUARIO.** `caja` sí tiene el modelo de dos niveles —`MiCaja` (la mía) contra `Cajas`
+(todas), resuelto en `resolverLecturaCompartida` y con chequeos de `usuarioId` explícitos en
+`historial`, `listarMovimientos` y `verificarAccesoCaja`—. En `ventas` y `pagos` **no existe
+el eje**: `listar(tenantId, query)`, `findOne(tenantId, ventaId)` y `resumen(tenantId)` no
+reciben `usuarioId` ni lo consultan. Un cajero con `Ventas:Leer` ve **todas** las ventas del
+tenant; con `Pagos:Leer`, **todos** los pagos. El modo ciego solo hizo visible esa asimetría.
+⚠️ Corolario práctico: tapar el modo ciego endpoint por endpoint es tratar el síntoma. La
+pregunta de fondo es si `ventas`/`pagos` deben tener el mismo eje "mío/todos" que `caja`.
+
+➕ **Dato que achica una parte del problema sin código: el POS no usa `Pagos:Leer`.**
+`ventas/pos.vue` solo llama a `items`, `metodos-pago`, `tipos-documento` y `POST /ventas` —
+cero llamadas a `/pagos`. O sea que `Pagos:Leer` en el rol Vendedor del seed **parece
+incidental**, y sacarlo cerraría las fugas 1 y 4 sin tocar una línea de lógica. ⚠️ **No
+cierra la 3**, que va por `Ventas:Leer` — permiso que el cajero sí necesita para cobrar una
+venta pendiente. Verificar antes de sacarlo si algún otro flujo del cajero lo usa.
+
+ℹ️ Nota sobre el frontend: `ventas/index.vue`, `ventas/pos.vue` y `pagos/index.vue` **no
+declaran `permiso` en `definePageMeta`** —solo `middleware: 'auth'`—, así que el único gate
+real es el guard del backend. Correcto según la invariante 6, pero significa que cualquier
+cambio de alcance hay que hacerlo en el backend: esconder el link del nav no hace nada.
+
+🛑 **La pregunta para el owner, antes de tocar nada — y no es "arreglemos las seis":**
+el esperado **no es un secreto guardable**, es una cuenta que el sistema tiene que hacer para
+operar, y toda validación o listado que toque la plata del turno lo filtra. Taparlas de a una
+es whack-a-mole. Hay que elegir qué promete el ciego:
+- **(a) "el cajero no puede ver el número"** — exige tocar `pagos`, `ventas`, el resumen y los
+  dos oráculos. Y el oráculo del retiro **no se puede cerrar sin romper el chequeo de saldo
+  insuficiente**, que existe por una razón legítima: hoy impide retirar plata que no está.
+- **(b) "el cajero no puede verlo sin dejar rastro"** — se resuelve con **auditoría** en vez
+  de ocultamiento: registrar quién consultó qué del turno en curso, y que el supervisor lo
+  vea. Cambia el control de preventivo a detectivo, que es lo mismo que ya se eligió para el
+  cierre forzado.
+- **(c) aceptar que el ciego es fricción y no barrera**, y decirlo en la doc en vez de
+  prometer un control que no se sostiene.
+
+✅ **EL EJE SE CONSTRUYÓ el 2026-08-22**, y cierra la **dimensión cruzada** de las fugas 1, 3
+y 4: un cajero sin `Cajas:Leer` ya no ve la actividad de **otros**. Medido después de
+construirlo: el admin ve 87 pagos de 18 cajas, el cajero ve 3, de las 2 suyas. El detalle de
+una venta ajena responde 404. Lo fija `visibilidad-ventas-pagos.e2e-spec.ts`, y el mutante
+que devuelve alcance completo hace fallar los cuatro tests que codifican la fuga. Ver
+[`features/pagos.md`](../features/pagos.md) y [`patterns/backend.md` §16](../patterns/backend.md).
+
+⛔ **PERO NO CIERRA LA FUGA 1 CONTRA LA CAJA PROPIA, Y NO PUEDE.** Se verificó corriendo el
+mismo script de la demostración **después** de construir el eje: el cajero sumó sus propios
+pagos en efectivo y volvió a deducir el esperado exacto de su caja (20.357 contra 20.357).
+Y está bien que pueda: **esos pagos son suyos, los cobró él**. Cerrarlo exigiría quitarle su
+propio historial de ventas, que es exactamente la aritmética que hizo descartar el
+ocultamiento en
+[§11.3](investigaciones/2026-07-23-gestion-caja.md#113-cruce-contra-nuestro-código--dos-hechos-que-el-mercado-no-podía-darnos).
+Lo mismo vale para la 4: `montoHoy` acotado a sus cajas sigue siendo su propio cobrado.
+
+🔴 **Consecuencia, y es la conclusión del frente entero: el modo ciego NO es sostenible como
+"el cajero no puede saber el esperado".** Contra la cuenta propia es **fricción, no barrera** —
+la salida (c) de las tres que se ofrecieron el 2026-08-22 resultó ser la verdad para esa
+dimensión, se eligiera lo que se eligiera para el resto. Lo que el ciego **sí** sostiene, y
+ahora es cierto donde antes no lo era, es *"el cajero no ve la plata de otros"*.
+⏳ **Sigue sin hacerse:** el rastro de los oráculos (fugas 2 y 5, decisión 2 de abajo), la
+enumeración de medios (6), y **decidir qué dice la doc del modo ciego** ahora que se sabe que
+contra la caja propia no promete lo que parecía prometer.
+
+✅ **DECIDIDO POR EL OWNER (2026-08-22), las dos:**
+1. **`ventas` y `pagos` reciben el eje "mío/todos", igual que `caja`.** El cajero ve solo lo
+   suyo; el listado completo pasa a ser de supervisión. Cierra de raíz las fugas 1, 3 y 4, y
+   arregla algo más grande que el modo ciego: hoy cualquier cajero ve la facturación entera
+   del local.
+2. **Los dos oráculos se resuelven con RASTRO, no con ocultamiento.** Se registra el intento
+   rechazado —quién, cuándo, con qué monto— y el supervisor lo ve; el chequeo de saldo
+   insuficiente queda intacto, porque existe para impedir retirar plata que no está. El
+   control pasa de preventivo a detectivo, igual que lo ya elegido para el cierre forzado.
+   Veinte retiros rechazados en dos minutos es una firma inconfundible.
+
+⚠️ **Restricción medida que condiciona el diseño del punto 1: ni `ventas` ni `pagos` guardan
+quién los hizo.** `venta` tiene `caja_id` y `canal`, pero **no** un `usuario_id`/`creado_por`
+(solo `cancelada_por_usuario_id`); `pago` tiene `caja_id` y nada más. Así que "lo mío" **se
+deriva por la caja** (`venta.caja_id → cajas.usuario_id`), que para una venta física es
+exacto —la caja está abierta para un solo usuario—. Lo que queda sin regla es la venta
+**online**, que va contra la caja virtual del tenant y por lo tanto **no tiene dueño**: hay
+que decidir si el cajero las ve, no las ve, o las ve solo quien tenga supervisión. Diseño en
+[`specs/2026-08-22-visibilidad-ventas-pagos-design.md`](../superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md).
+
+⚠️ **Ordena el frente del historial:** bloquear el historial de cajas del cajero (pedido el
+2026-08-22) **no compra nada mientras estas estén abiertas**. El historial es el acumulado de
+turnos pasados; esto es el esperado del turno **en curso**, que es lo que el ciego existe para
+proteger. Va después de decidir (a)/(b)/(c), no antes.
+
+✅ **CONSTRUIDO 2026-08-23 — la decisión 2 (rastro) y las fugas 6 y la nota menor. Lo que
+quedó:**
+- **Fuga 2 y fuga 5 → `caja_intentos_rechazados`.** Se registra el intento rechazado —quién,
+  cuándo, qué caja, cuánto pidió, y la venta en el caso de la NC— en los tres bordes que
+  rechazan por falta de plata: el retiro con saldo insuficiente
+  (`caja.service.ts` → `registrarMovimiento`) y los dos de la NC en efectivo
+  (`ventas.service.ts`, el tope de `devolvibleEfectivo` y el saldo de caja). **No guarda el
+  disponible**, que era justo el dato que filtraba. Los chequeos quedaron **intactos**.
+- **El mensaje de la fuga 5 perdió el número.** El `422` ya no interpola
+  `(disponible: 1234.5600)` — era un oráculo de UN request. El tope, el monto de la NC y la
+  semántica del documento no se tocaron.
+- **Cómo sobrevive al rollback, que es lo que costaba decidir:** `catch` en el BORDE, por
+  fuera de `db.transaccion` (`CajaService.conRastroDeRechazo`). Cuando corre, TypeORM ya
+  deshizo y ya devolvió la conexión al pool: no se toma una segunda conexión simultánea, que
+  es el deadlock de **ADR-020**. `db.sinTransaccion` envuelve la escritura igual, como red
+  por si un llamador envuelve la operación en una transacción propia (ahí `db.transaccion`
+  la reusa y el rollback no ocurre en ese nivel). ⚠️ Y por lo mismo la tabla **no declara
+  FKs**: un FK pide `FOR KEY SHARE` sobre la fila que la transacción moribunda retiene con
+  `FOR UPDATE`, y se esperan mutuamente. Es el primer uso real de `sinTransaccion`
+  (`patterns/backend.md` §9 actualizado).
+- **Fuga 6 cerrada:** el `400` de `POST /caja/:id/conteo` ya no nombra el medio cuando el
+  ciego aplica al usuario (mismo predicado: no admin + abierta + `arqueo_ciego`).
+- **Lectura del supervisor:** `GET /caja/intentos-rechazados?cajaId=&usuarioId=`
+  (`Cajas:Leer` a secas, **sin** versión "los míos" — el vigilado no ve su propio ruido) y
+  `CajaIntentosRechazados.vue` en `/cajas/:id`.
+- **La nota menor:** `usuario_id` de la fila cruda de la tendencia pasó a `string | null`, y
+  con eso `CajaTendencia.vue` dejó de poder navegar a `?usuarioId=null`.
+- **La doc del modo ciego quedó reescrita** con la conclusión del frente
+  ([`features/gestion-cajas.md` → *Qué promete el modo ciego, y qué NO*](../features/gestion-cajas.md#qué-promete-el-modo-ciego-y-qué-no-revisado-2026-08-23)):
+  *"el cajero no ve la plata de otros"* se sostiene; *"el cajero no puede saber su propio
+  esperado"* es **fricción, no barrera**; el control sobre los oráculos es **detectivo**.
+- Lo fija `rastro-intentos-rechazados.e2e-spec.ts` (el rollback real: el movimiento no queda
+  y el intento sí) más los unit de `caja.service.spec.ts` / `ventas.service.spec.ts`. Dos
+  mutantes verificados: sin el envoltorio caen 2 tests; sin `sinTransaccion` cae el que fija
+  el orden rollback→rastro.
+
+⏳ **Lo que esta entrada deja abierto:** el frente del historial de cajas del cajero (párrafo
+de arriba) ya no está bloqueado por "decidir (a)/(b)/(c)" — la salida (c) para la caja propia
+y el rastro para los oráculos ya están. Y el `400` *"Método de pago no pertenece al arqueo"*
+sigue siendo un oráculo de presencia por medio, pero **cada sondeo exitoso cierra la caja**,
+así que es de un solo uso y no se tocó.
+
+---
+
 ## El checkbox de anulación nace destildado si algo ya salió a cocina (2026-08-23)
 
 **Venía de la sección 3** («ya decidido, falta construir»). Mudada verbatim con su cierre.

@@ -78,6 +78,13 @@ onMounted(async () => {
 
           <CajaCierreForzadoPanel :caja="cajaStore.detalle" :usuario-actual-id="authStore.user?.id" />
 
+          <!-- Rastro de los intentos rechazados: vive acá y no en la pantalla
+               del cajero porque es supervisión (`Cajas:Leer`, el mismo permiso
+               que gatea esta página). Se muestra en cualquier estado de la
+               caja: la ráfaga que delata pasa con la caja ABIERTA, que es
+               justo cuando el supervisor todavía puede hacer algo. -->
+          <CajaIntentosRechazados :caja-id="cajaId" />
+
           <UCard v-if="cajaStore.detalle.estado === 'cerrada' && cajaStore.arqueo.length > 0" class="w-full">
             <template #header>
               <h3 class="text-sm font-semibold text-default">
