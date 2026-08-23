@@ -1,4 +1,5 @@
 import net from 'node:net'
+import tls from 'node:tls'
 import { test, expect } from '@playwright/test'
 
 // @smoke — el proxy de `/api` (ADR-022) visto como proxy, no como navegador.
@@ -33,11 +34,21 @@ test.describe('el proxy de /api transporta, no interpreta', () => {
     // Va por socket crudo a propósito: todo cliente HTTP normal —`fetch`, el
     // `request` de Playwright, `curl` sin `--path-as-is`— normaliza el `..`
     // antes de mandarlo, así que por ahí el caso no es ni expresable.
-    const { hostname, port } = new URL(baseURL!)
+    // TLS o texto plano según el destino: en local y en CI el `baseURL` es
+    // `http://localhost:5173`, pero apuntándolo al demo desplegado es `https://`
+    // sin puerto explícito, y ahí un socket TCP pelado no llega a ninguna parte.
+    const url = new URL(baseURL!)
+    const seguro = url.protocol === 'https:'
+    const puerto = Number(url.port) || (seguro ? 443 : 80)
+    const anfitrion = seguro ? url.hostname : `${url.hostname}:${puerto}`
     const respuesta = await new Promise<string>((resolve, reject) => {
-      const socket = net.connect(Number(port), hostname, () => {
-        socket.write(`GET /api/../algo-fuera HTTP/1.1\r\nHost: ${hostname}:${port}\r\nConnection: close\r\n\r\n`)
-      })
+      const abrir = seguro
+        ? () => tls.connect({ host: url.hostname, port: puerto, servername: url.hostname }, enviar)
+        : () => net.connect(puerto, url.hostname, enviar)
+      function enviar() {
+        socket.write(`GET /api/../algo-fuera HTTP/1.1\r\nHost: ${anfitrion}\r\nConnection: close\r\n\r\n`)
+      }
+      const socket: net.Socket = abrir()
       let datos = ''
       socket.on('data', (chunk) => { datos += chunk.toString() })
       socket.on('end', () => resolve(datos))
