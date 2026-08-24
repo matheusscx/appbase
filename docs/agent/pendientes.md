@@ -355,6 +355,14 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
+⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
+decisiones.** De sus 16 entradas, **siete son features de producto con su propia spec** —el
+motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
+conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
+resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
+trabajo, y cada una abre su propio frente.** La deuda chica de verdad son las tres del final
+(`minimo`, la pasarela y el renombre de `moneda.decimales`).
+
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
   el documento completo es
@@ -546,29 +554,6 @@ empezarlas.
   total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
   pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
 
-- [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
-  parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
-  [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
-  (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
-  queda son los dos tipos que el motor **no** lleva a la rama de tramos:
-
-  | Tipo | Clase | Con tramos hoy |
-  |---|---|---|
-  | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
-  | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
-
-  ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
-  archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
-  falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
-  `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
-  que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
-  📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
-  tramos en uno y no en el otro deja la mitad del bug.
-  📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
-  *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
-  Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
-  ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
-
 - [ ] **Un tramo no puede valer cero, y no hay `maximo`: "gratis sobre $X" no se expresa**
   (backend + producto, medido el 2026-08-22 al construir el recargo por escalones) — los
   tramos son **abiertos hacia arriba** (solo `minimo`) y `validarMontosDeRegla` exige
@@ -636,43 +621,6 @@ empezarlas.
   salida con motivo: son cosas distintas, la C decide qué llega tildado a la pantalla de
   anulación y esta le da al garzón una forma legítima de sacar un plato ya despachado.
 
-- [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
-  de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
-  medirla, porque la mitad de lo que decía ya no era cierto**) —
-  ⚠️ **Lo que esta entrada afirmaba y HOY ES FALSO:** decía que un correo de usuario
-  soft-borrado *"hace explotar el alta con un 500"* en `tenants.service.ts` → `crearUsuario`.
-  **Ese camino ya traduce el `23505`** desde el 2026-08-11 (`:861-877`): devuelve **409**, no
-  500, y su comentario nombra las dos causas posibles. No hay nada que arreglar ahí.
-  ✅ **El segundo llamador, que era el que seguía vivo, se arregló el 2026-08-22:**
-  `auth.service.ts` → `register` no capturaba su `23505` y salía un 500 — alcanzable **sin
-  ninguna baja de usuario**, por una carrera entre dos registros del mismo correo libre. Y ahí
-  dolía porque ese endpoint responde siempre lo mismo para no ser un enumerador de cuentas: el
-  500 volvía a distinguir un correo tomado de uno libre. Ver `resueltos.md`.
-  **Lo que queda pendiente, y sigue sin poder construirse:** la decisión del owner
-  (2026-08-11) es que **el alta REVIVA la cuenta, avisando** —la persona vuelve con su
-  historial, y el alta declara los roles de nuevo, sin heredarlos en silencio—, y que la
-  unique de `usuarios.correo` pase a ser **parcial**. Sigue **inalcanzable**: verificado otra
-  vez el 2026-08-22, **nada en `backend/src` soft-borra un `Usuario`** (`removeMember` solo da
-  de baja la membresía). Construirlo hoy sería infraestructura para un estado que no existe.
-  ➕ **Dos huecos menores que aparecieron al medir, anotados y NO arreglados** (ninguno vale
-  un frente propio, los dos son de la misma carrera):
-  1. El 409 de `crearUsuario` dice *"Ese correo ya es miembro de este tenant"*, que es cierto
-     cuando la carrera es dentro del mismo tenant y **falso** cuando dos tenants distintos dan
-     de alta el mismo correo nuevo a la vez. Distinguirlo exige mirar el nombre de la
-     constraint, que en TypeORM es un hash (`UQ_1a7a36f3…`) y cambia con el esquema.
-  2. `usuarios` tiene **dos** uniques —`correo` y `nombre_usuario`— y `RegisterDto` acepta las
-     dos. Una carrera por `nombre_usuario` **sigue dando 500**: es el statu quo, no una
-     regresión, y el arreglo del 2026-08-22 la deja pasar a propósito en vez de tragársela
-     (tragarla le diría "revisá tu correo" a alguien que no quedó registrado).
-  3. **La rama perdedora de la carrera responde más rápido que las otras tres**, porque se
-     saltea `invalidarAnteriores` + `emitir` + `mail.enviar` (lo levantó la revisión
-     independiente del 2026-08-22, sin bloquear). Es un canal de **tiempo** en un endpoint
-     cuyo sentido es responder siempre lo mismo. ⚠️ Antes de tomarlo, tener presente el
-     alcance real: **solo lo puede observar quien induce la carrera él mismo**, con dos
-     requests concurrentes al mismo correo — no es un oráculo de una consulta suelta, que es
-     la amenaza que el endpoint dice cerrar. Cerrarlo sería igualar el trabajo de las cuatro
-     ramas, y eso cuesta más de lo que parece: implica hacer trabajo inútil a propósito.
-
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
   monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las
@@ -731,28 +679,6 @@ empezarlas.
   **No es un arreglo de una línea:** exige decidir de dónde saca el tenant un controller que no
   tiene JWT.
 
-- [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
-  resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
-  2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
-  resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
-  opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
-  `lotePrecio`).
-  Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
-  extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
-  **La pregunta para el owner:** una opción de grupo que se aplica a ítems en monedas
-  distintas, ¿tiene moneda propia, hereda la del ítem al que se aplica (y entonces el campo
-  no puede tener una sola máscara), o se asume la oficial del tenant asumiendo el error en el
-  caso multi-moneda? Las tres cambian el modelo, no la pantalla.
-  ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
-  Lo que falta es ayuda visual, no control.
-  ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
-  moneda, porque `@EsCosto()` es escala fija.
-
-  ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
-  un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
-  `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
-  cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
-  a "el único módulo donde se tipea plata sin escala validada", que es falso.
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera
   la spec al revés**, entendiéndolo como dato de formato de UI. Es el minor unit de la
@@ -847,12 +773,19 @@ del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del hand
 —no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
 que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
 
-**Quedan 2 entradas.** La de la nota de crédito no espera una respuesta sino la
+**Quedan 5 entradas.** La de la nota de crédito no espera una respuesta sino la
 **investigación de mercado que la destraba, lanzada el 2026-08-22**. La del descarte de
 desfases llegó el **2026-08-24 desde la § 2**, al medirla: lo medido contradijo la premisa con
 la que se había diferido, así que la pregunta es si se reabre esa decisión.
 (La del login del demo entró y salió el mismo día: el owner eligió el proxy →
 [`resueltos.md`](resueltos.md).)
+
+➕ **Y tres llegaron el 2026-08-24 desde la § 3**, al revisar cuáles de sus entradas decían
+adentro que esperaban al owner. **Tres lo decían y nadie las había movido**, así que la § 3
+aparentaba 19 frentes construibles cuando eran 16. ⚠️ Al revisar salió también un falso
+positivo que conviene dejar dicho: *"el modal de pausa"* abre con *"Decisión del owner
+pendiente"* y **dos líneas más abajo tiene su `✅ DECIDIDO (owner, 2026-08-15)`**. Se la dio
+por bloqueada una vez leyendo solo la primera línea. Está bien en la § 3.
 
 - [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
   como "omitido" cuando ya puede no ser el propuesto** (backend,
@@ -977,6 +910,102 @@ la que se había diferido, así que la pregunta es si se reabre esa decisión.
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
+
+- [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
+  parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
+  [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
+  (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
+  queda son los dos tipos que el motor **no** lleva a la rama de tramos:
+
+  | Tipo | Clase | Con tramos hoy |
+  |---|---|---|
+  | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
+  | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
+
+  ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
+  archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
+  falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
+  `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
+  que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
+  📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
+  tramos en uno y no en el otro deja la mitad del bug.
+  📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
+  *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
+  Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
+  ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
+  ➕ **Movida desde la § 3 el 2026-08-24.** Estaba en "ya decidido, falta construir" y su
+  propio texto pide lo contrario: *"se confirma con el owner antes de escribir"*. **La pregunta:**
+  ¿los dos tipos por método de pago pasan a leer tramos como el de monto de venta, o el valor
+  único es deliberado y lo que sobra es la promesa de la pantalla?
+
+- [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
+  de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
+  medirla, porque la mitad de lo que decía ya no era cierto**) —
+  ⚠️ **Lo que esta entrada afirmaba y HOY ES FALSO:** decía que un correo de usuario
+  soft-borrado *"hace explotar el alta con un 500"* en `tenants.service.ts` → `crearUsuario`.
+  **Ese camino ya traduce el `23505`** desde el 2026-08-11 (`:861-877`): devuelve **409**, no
+  500, y su comentario nombra las dos causas posibles. No hay nada que arreglar ahí.
+  ✅ **El segundo llamador, que era el que seguía vivo, se arregló el 2026-08-22:**
+  `auth.service.ts` → `register` no capturaba su `23505` y salía un 500 — alcanzable **sin
+  ninguna baja de usuario**, por una carrera entre dos registros del mismo correo libre. Y ahí
+  dolía porque ese endpoint responde siempre lo mismo para no ser un enumerador de cuentas: el
+  500 volvía a distinguir un correo tomado de uno libre. Ver `resueltos.md`.
+  **Lo que queda pendiente, y sigue sin poder construirse:** la decisión del owner
+  (2026-08-11) es que **el alta REVIVA la cuenta, avisando** —la persona vuelve con su
+  historial, y el alta declara los roles de nuevo, sin heredarlos en silencio—, y que la
+  unique de `usuarios.correo` pase a ser **parcial**. Sigue **inalcanzable**: verificado otra
+  vez el 2026-08-22, **nada en `backend/src` soft-borra un `Usuario`** (`removeMember` solo da
+  de baja la membresía). Construirlo hoy sería infraestructura para un estado que no existe.
+  ➕ **Dos huecos menores que aparecieron al medir, anotados y NO arreglados** (ninguno vale
+  un frente propio, los dos son de la misma carrera):
+  1. El 409 de `crearUsuario` dice *"Ese correo ya es miembro de este tenant"*, que es cierto
+     cuando la carrera es dentro del mismo tenant y **falso** cuando dos tenants distintos dan
+     de alta el mismo correo nuevo a la vez. Distinguirlo exige mirar el nombre de la
+     constraint, que en TypeORM es un hash (`UQ_1a7a36f3…`) y cambia con el esquema.
+  2. `usuarios` tiene **dos** uniques —`correo` y `nombre_usuario`— y `RegisterDto` acepta las
+     dos. Una carrera por `nombre_usuario` **sigue dando 500**: es el statu quo, no una
+     regresión, y el arreglo del 2026-08-22 la deja pasar a propósito en vez de tragársela
+     (tragarla le diría "revisá tu correo" a alguien que no quedó registrado).
+  3. **La rama perdedora de la carrera responde más rápido que las otras tres**, porque se
+     saltea `invalidarAnteriores` + `emitir` + `mail.enviar` (lo levantó la revisión
+     independiente del 2026-08-22, sin bloquear). Es un canal de **tiempo** en un endpoint
+     cuyo sentido es responder siempre lo mismo. ⚠️ Antes de tomarlo, tener presente el
+     alcance real: **solo lo puede observar quien induce la carrera él mismo**, con dos
+     requests concurrentes al mismo correo — no es un oráculo de una consulta suelta, que es
+     la amenaza que el endpoint dice cerrar. Cerrarlo sería igualar el trabajo de las cuatro
+     ramas, y eso cuesta más de lo que parece: implica hacer trabajo inútil a propósito.
+  ➕ **Movida desde la § 3 el 2026-08-24**, pero no por una pregunta de negocio: **no se puede
+  construir**. Verificado dos veces (2026-08-22 y hoy) que nada en `backend/src` soft-borra un
+  `Usuario`, así que revivir cuentas es infraestructura para un estado inalcanzable. **Lo que el
+  owner tiene que contestar es si la baja de usuarios entra al roadmap** — hasta entonces esta
+  entrada no tiene disparador. Los tres huecos menores de adentro sí son reales y siguen abiertos.
+
+- [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
+  resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
+  2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
+  resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
+  opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
+  `lotePrecio`).
+  Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
+  extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
+  **La pregunta para el owner:** una opción de grupo que se aplica a ítems en monedas
+  distintas, ¿tiene moneda propia, hereda la del ítem al que se aplica (y entonces el campo
+  no puede tener una sola máscara), o se asume la oficial del tenant asumiendo el error en el
+  caso multi-moneda? Las tres cambian el modelo, no la pantalla.
+  ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
+  Lo que falta es ayuda visual, no control.
+  ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
+  moneda, porque `@EsCosto()` es escala fija.
+
+  ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
+  un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
+  `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
+  cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
+  a "el único módulo donde se tipea plata sin escala validada", que es falso.
+  ➕ **Movida desde la § 3 el 2026-08-24.** Se la venía citando como trabajo chico de frontend —
+  incluso en una recomendación de esa misma fecha— y no lo es: su pregunta al owner tiene tres
+  respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
+  campo que escribir.
 
 ## 5. Carreras de concurrencia
 
