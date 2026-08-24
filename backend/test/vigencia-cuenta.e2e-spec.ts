@@ -1,0 +1,335 @@
+import { Test, type TestingModule } from '@nestjs/testing';
+import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import request from 'supertest';
+import cookieParser from 'cookie-parser';
+import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
+import { randomUUID } from 'node:crypto';
+import { AppModule } from '../src/app.module';
+
+/**
+ * La vigencia por fecha (Task 3) evalúa las reglas contra un instante — hasta
+ * acá, siempre "ahora". Esta tarea hace que, cuando la venta nace de una
+ * cuenta de salón, el instante que decide sea el momento en que **se abrió
+ * la cuenta**: la mesa que se sienta con una promo vigente y paga después de
+ * que venció tiene que llevar el descuento igual.
+ *
+ * El caso real —cuenta abierta DENTRO de la vigencia, cerrada FUERA— no se
+ * puede fabricar por API: no hay forma de pedirle a `POST /mesas/:id/cuentas`
+ * que abra "hace una semana". Se **controla el reloj por SQL** después de
+ * abrir la cuenta de verdad, mismo criterio que
+ * `filtros-fecha-zona.e2e-spec.ts` usa para `movimientos_inventario.creado_el`:
+ * no es fabricar un estado inalcanzable (una cuenta abierta hace una semana
+ * y cerrada hoy ocurre todos los días en un local real), es controlar el
+ * instante, que por API no se puede.
+ */
+
+const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
+// Otro tenant del seed — la cuenta "ajena" del test de aislamiento se
+// inserta acá, no en Paris.
+const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+const ADMIN_EMAIL = 'admin.paris@paris.cl';
+const ADMIN_PASS = 'admin';
+const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+// Tipo sembrado (`seeder.service.ts` → `seedTiposRegla`), mismo id que usa
+// `reglas-valor.e2e-spec.ts`: un descuento `directo` solo exige su valor.
+const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
+// Ítem sembrado del tenant Paris, usado también en `calculo-precios.e2e-spec.ts`.
+const ITEM_ID = '550e8400-e29b-41d4-a716-446655440281';
+
+interface TokenResponse {
+  access_token: string;
+}
+interface IdResponse {
+  id: string;
+}
+interface GarzonCreado {
+  id: string;
+  pin: string;
+}
+interface CuentaDetalle {
+  id: string;
+  lineas: { id: string; itemId: string; cantidad: string }[];
+}
+interface VentaDetalle {
+  totalDescuentos: string;
+  detalles: { itemId: string; descuentoAplicado: string }[];
+}
+
+async function login(app: INestApplication<App>): Promise<string> {
+  const resLogin = await request(app.getHttpServer())
+    .post('/api/auth/login')
+    .send({ email: ADMIN_EMAIL, password: ADMIN_PASS });
+  expect(resLogin.status).toBe(200);
+  const initialToken = (resLogin.body as TokenResponse).access_token;
+  const resTenant = await request(app.getHttpServer())
+    .post('/api/auth/switch-tenant')
+    .set(
+      'Cookie',
+      (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+    )
+    .set('Authorization', `Bearer ${initialToken}`)
+    .send({ tenantId: PARIS_TENANT_ID });
+  expect(resTenant.status).toBe(200);
+  return (resTenant.body as TokenResponse).access_token;
+}
+
+describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
+  let app: INestApplication<App>;
+  let token: string;
+  let ds: DataSource;
+  let mesaId: string;
+  let garzon: GarzonCreado;
+  let cajaId: string;
+
+  async function post<T>(
+    url: string,
+    body: Record<string, unknown>,
+    esperado = 201,
+  ): Promise<T> {
+    const res = await request(app.getHttpServer())
+      .post(url)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+    expect(res.status).toBe(esperado);
+    return res.body as T;
+  }
+
+  /** Abre una cuenta nueva en la mesa del spec y le agrega UNA línea del ítem dado. */
+  async function abrirCuentaCon(itemId: string): Promise<CuentaDetalle> {
+    const cuenta = await post<CuentaDetalle>(`/api/mesas/${mesaId}/cuentas`, {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+    });
+    await post(`/api/cuentas/${cuenta.id}/lineas`, {
+      itemId,
+      cantidad: '1',
+    });
+    return cuenta;
+  }
+
+  /** Cierra sin cobrar (pagos vacíos): alcanza para leer los totales congelados. */
+  async function cerrarSinCobrar(cuentaId: string): Promise<string> {
+    const cierre = await post<{ ventaId: string }>(
+      `/api/cuentas/${cuentaId}/cerrar`,
+      { garzonId: garzon.id, pin: garzon.pin, pagos: [] },
+    );
+    return cierre.ventaId;
+  }
+
+  async function detalleVenta(ventaId: string): Promise<VentaDetalle> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/ventas/${ventaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return res.body as VentaDetalle;
+  }
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    // `switch-tenant` y `refresh` leen `req.cookies`, y `cookieParser` vive en
+    // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    token = await login(app);
+    ds = app.get(DataSource);
+
+    const marca = Date.now();
+
+    // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón y el
+    // estado se filtra de un spec al siguiente (`jest-e2e.json` corre con
+    // `maxWorkers: 1`): compartir a Ana rompe el `iniciar` del siguiente spec.
+    garzon = await post<GarzonCreado>('/api/garzones', {
+      nombre: `Garzón vigencia E2E ${marca}`,
+    });
+    await post('/api/sesiones-garzon/iniciar', {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+      turnoId: TURNO_MANANA_ID,
+    });
+
+    const salonId = (
+      await post<IdResponse>('/api/salones', {
+        nombre: `Salón vigencia E2E ${marca}`,
+      })
+    ).id;
+    mesaId = (
+      await post<IdResponse>(`/api/salones/${salonId}/mesas`, {
+        nombre: 'Mesa vigencia',
+      })
+    ).id;
+
+    // Cerrar una cuenta genera una venta `canal='fisico'`, que exige caja
+    // abierta. Caja propia del spec: no cobra nada de las otras suites y no
+    // deja un cajón ocupado para la siguiente.
+    const disp = await request(app.getHttpServer())
+      .get('/api/caja/cajones-disponibles')
+      .set('Authorization', `Bearer ${token}`);
+    expect(disp.status).toBe(200);
+    const cajonId = (disp.body as { cajonId: string }[])[0]?.cajonId;
+    expect(cajonId).toBeTruthy();
+    cajaId = (
+      await post<IdResponse>('/api/caja/abrir', {
+        cajonId,
+        saldoInicial: '0.0000',
+        comentario: 'Apertura E2E vigencia-cuenta',
+      })
+    ).id;
+  }, 60000);
+
+  afterAll(async () => {
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: garzon.id, pin: garzon.pin });
+
+    // Ventas sin pagos: el conteo en 0 debería cuadrar. Si no, cerrar con
+    // motivo — mismo patrón de dos fases que `salones-comanda.e2e-spec.ts`.
+    const conteo = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/conteo`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+    expect([200, 201]).toContain(conteo.status);
+    if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+      const motivos = await request(app.getHttpServer())
+        .get('/api/motivos-diferencia?soloActivas=true')
+        .set('Authorization', `Bearer ${token}`);
+      const motivoId = (motivos.body as { id: string }[])[0]?.id;
+      await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            {
+              metodoPagoId: null,
+              motivoDiferenciaId: motivoId,
+              comentarioDiferencia: 'Cierre de la suite e2e',
+            },
+          ],
+        });
+    }
+
+    await app.close();
+  });
+
+  it('un `cuentaId` inexistente es 400, no un silencioso "entonces ahora"', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+        cuentaId: '550e8400-e29b-41d4-a716-4466554409ff',
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('un `cuentaId` real pero de OTRO tenant es 400: el filtro es tenant_id, no solo la PK', async () => {
+    // Cuenta REAL, pero de Falabella. Si `instanteDeVigencia` filtrara solo
+    // por `cuenta_id` (sin `AND tenant_id = $2`), esta fila resolvería igual
+    // y el 400 nunca saldría — el mismo 400 de arriba, pero por el motivo
+    // equivocado. Se inserta por SQL directo: no hace falta levantar
+    // salón/mesa/garzón/caja de Falabella solo para tener una fila que
+    // `instanteDeVigencia` no necesita más que por su `tenant_id`. `mesa_id`
+    // no tiene FK real en el esquema (columna simple en `Cuenta`, sin
+    // `@ManyToOne`), así que un UUID inventado no rompe el INSERT.
+    const filas: { cuenta_id: string }[] = await ds.query(
+      `INSERT INTO cuentas (tenant_id, mesa_id, numero, estado, abierta_el)
+       VALUES ($1, $2, 9999, 'abierta', now())
+       RETURNING cuenta_id`,
+      [FALABELLA_TENANT_ID, randomUUID()],
+    );
+    const cuentaAjenaId = filas[0].cuenta_id;
+
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`) // token de Paris, NO de Falabella
+      .send({
+        lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+        cuentaId: cuentaAjenaId,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  describe('la cuenta abierta DENTRO de la vigencia y cerrada FUERA lleva el descuento', () => {
+    let descuentoId: string;
+    let itemId: string;
+
+    beforeAll(async () => {
+      // Ventana de vigencia YA VENCIDA respecto de "ahora" (la suite corre
+      // 2026-08-24 en adelante): si el service siguiera resolviendo "ahora"
+      // como en la Task 3, este descuento NUNCA se aplicaría más.
+      const marca = Date.now();
+      descuentoId = (
+        await post<IdResponse>('/api/descuentos', {
+          nombre: `Promo vigencia E2E ${marca}`,
+          tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+          modo: 'porcentaje',
+          valorPorcentaje: '0.20',
+          fechaInicio: '2026-08-15',
+          fechaFin: '2026-08-20',
+        })
+      ).id;
+
+      // Ítem propio con el descuento asociado por defecto (`descuentosIds`):
+      // `cerrarCuenta` arma sus líneas SIN `descuentoIds` explícito, así que
+      // lo que aplica es lo que el ítem trae por defecto
+      // (`ItemsService.cargarReglasPorIds`). `tipo: 'servicio'` de propósito:
+      // sin fila en `item_producto`, cerrar la cuenta no exige stock.
+      itemId = (
+        await post<IdResponse>('/api/items', {
+          nombre: `Servicio vigencia E2E ${marca}`,
+          tipo: 'servicio',
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          descuentosIds: [descuentoId],
+        })
+      ).id;
+    });
+
+    it('con la cuenta abierta AHORA (fuera de la ventana del descuento), no lo lleva', async () => {
+      // Ancla negativa: sin este control, "aplica el descuento" podría estar
+      // pasando porque el descuento se cuela por cualquier otro motivo, no
+      // porque el instante venga de la cuenta.
+      const cuenta = await abrirCuentaCon(itemId);
+      const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
+
+      expect(Number(venta.totalDescuentos)).toBe(0);
+      const linea = venta.detalles.find((d) => d.itemId === itemId);
+      expect(linea).toBeDefined();
+      expect(Number(linea!.descuentoAplicado)).toBe(0);
+    });
+
+    it('con la cuenta backdateada DENTRO de la ventana, lo lleva aunque se cierre hoy', async () => {
+      const cuenta = await abrirCuentaCon(itemId);
+
+      // Controla el reloj: la cuenta "se abrió" el 17 de agosto —dentro de la
+      // ventana del descuento (15 al 20)—, aunque el cierre de abajo ocurre
+      // en la fecha real de la corrida. Mediodía UTC para no depender de qué
+      // huso horario resuelva `zonaHorariaTenant`: a esa hora, cualquier
+      // offset razonable sigue cayendo en el 17 local.
+      await ds.query(
+        `UPDATE cuentas SET abierta_el = '2026-08-17T12:00:00Z' WHERE cuenta_id = $1`,
+        [cuenta.id],
+      );
+
+      const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
+
+      // 20% de 10000 = 2000. El total de la venta también sube de precio con
+      // impuesto, así que se afirma sobre `descuentoAplicado`, que no lo
+      // arrastra.
+      expect(Number(venta.totalDescuentos)).toBeGreaterThan(0);
+      const linea = venta.detalles.find((d) => d.itemId === itemId);
+      expect(linea).toBeDefined();
+      expect(Number(linea!.descuentoAplicado)).toBeCloseTo(2000, 4);
+    });
+  });
+});

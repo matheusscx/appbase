@@ -1173,6 +1173,7 @@ export class SalonesService {
         tenantId,
         usuarioId,
         ventaDto,
+        cuentaId,
       );
 
       cuenta.estado = EstadoCuenta.CERRADA;

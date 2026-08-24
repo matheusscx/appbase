@@ -1690,6 +1690,7 @@ describe('SalonesService', () => {
             estrategia: 'no_vuelto',
           }),
         }),
+        CUENTA,
       );
       expect(sesiones.buscarSesionAbierta).toHaveBeenCalledWith(
         TENANT,
@@ -1755,6 +1756,7 @@ describe('SalonesService', () => {
             }),
           ],
         }),
+        CUENTA,
       );
     });
 
@@ -1795,6 +1797,7 @@ describe('SalonesService', () => {
             }),
           ],
         }),
+        CUENTA,
       );
     });
 
@@ -1839,6 +1842,7 @@ describe('SalonesService', () => {
             estrategia: 'no_vuelto',
           }),
         }),
+        CUENTA,
       );
     });
 
@@ -1882,6 +1886,7 @@ describe('SalonesService', () => {
             tipoGarzon: TipoGarzon.COCINA,
           }),
         }),
+        CUENTA,
       );
     });
 

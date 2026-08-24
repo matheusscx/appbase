@@ -188,6 +188,11 @@ export class VentasService {
     tenantId: string,
     usuarioId: string,
     dto: CreateVentaDto,
+    // La cuenta cuyo instante de apertura decide la vigencia. Va como parámetro
+    // y NO en `CreateVentaDto` a propósito: en el body, un cliente podría dejar
+    // una cuenta abierta en diciembre y mandar su id en marzo para cobrar con
+    // la promo de verano. Solo `salones.cerrarCuenta` lo pasa.
+    cuentaId?: string,
   ) {
     const canal = dto.canal ?? 'fisico';
 
@@ -469,6 +474,7 @@ export class VentasService {
       metodoPagoId: dto.metodoPagoId,
       descuentosVentaIds: dto.descuentosVentaIds,
       recargosVentaIds: dto.recargosVentaIds,
+      cuentaId,
     };
 
     // 5. Calcular importes (sin persistencia)

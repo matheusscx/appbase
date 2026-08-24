@@ -102,9 +102,13 @@ export class CalculoPreciosService {
         await this.monedasService.decimalesOficiales(tenantId),
       ));
 
-    // El día del local para el instante que decide. En esta tarea es siempre
-    // "ahora"; la Task 4 lo hace salir de la cuenta cuando hay una.
-    const fechaLocal = await fechaLocalTenant(this.db, tenantId, new Date());
+    // El día del local para el instante que decide: la apertura de la cuenta
+    // si la venta nace de una, y si no, ahora.
+    const fechaLocal = await fechaLocalTenant(
+      this.db,
+      tenantId,
+      await this.instanteDeVigencia(tenantId, dto.cuentaId),
+    );
 
     // Catálogos del tenant cargados una vez e indexados por id.
     /**
@@ -267,6 +271,28 @@ export class CalculoPreciosService {
     this.advertirItemsPausados(dto, itemsBase, resultado);
 
     return resultado;
+  }
+
+  /**
+   * El instante que decide la vigencia: la apertura de la cuenta si hay una, y
+   * si no, ahora.
+   *
+   * Un `cuentaId` que no resuelve —inexistente, o de otro tenant— es 400 y no
+   * un silencioso "entonces ahora": el descarte mudo esconde el error justo
+   * donde cambia la plata.
+   */
+  private async instanteDeVigencia(
+    tenantId: string,
+    cuentaId?: string,
+  ): Promise<Date> {
+    if (!cuentaId) return new Date();
+    const filas: { abierta_el: Date }[] = await this.db.query(
+      `SELECT abierta_el FROM cuentas
+        WHERE cuenta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [cuentaId, tenantId],
+    );
+    if (!filas[0]) throw new BadRequestException('La cuenta no existe');
+    return filas[0].abierta_el;
   }
 
   /**

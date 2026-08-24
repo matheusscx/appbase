@@ -90,4 +90,14 @@ export class CalcularVentaDto {
   @IsArray()
   @IsUUID('4', { each: true })
   recargosVentaIds?: string[];
+
+  /**
+   * Cuenta de salón cuyo instante de apertura decide la vigencia de las reglas.
+   *
+   * Se manda el **id**, no la fecha: aceptar un instante del cliente sería la
+   * forma de hacer que una promo vencida aplique. El servidor lee `abierta_el`.
+   */
+  @IsOptional()
+  @IsUUID('4')
+  cuentaId?: string;
 }
