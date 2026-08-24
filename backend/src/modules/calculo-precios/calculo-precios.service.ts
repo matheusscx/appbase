@@ -6,6 +6,8 @@ import { DescuentosService } from '../descuentos/descuentos.service';
 import { RecargosService } from '../recargos/recargos.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { MonedasService } from '../monedas/monedas.service';
+import { Db } from '../../common/db/db.service';
+import { fechaLocalTenant } from '../../common/utils/rango-fecha.util';
 import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
 import {
   calcularVenta,
@@ -48,6 +50,7 @@ export class CalculoPreciosService {
     private readonly recargosService: RecargosService,
     private readonly tenantsService: TenantsService,
     private readonly monedasService: MonedasService,
+    private readonly db: Db,
   ) {}
 
   /**
@@ -98,6 +101,10 @@ export class CalculoPreciosService {
         tenantId,
         await this.monedasService.decimalesOficiales(tenantId),
       ));
+
+    // El día del local para el instante que decide. En esta tarea es siempre
+    // "ahora"; la Task 4 lo hace salir de la cuenta cuando hay una.
+    const fechaLocal = await fechaLocalTenant(this.db, tenantId, new Date());
 
     // Catálogos del tenant cargados una vez e indexados por id.
     /**
@@ -156,8 +163,8 @@ export class CalculoPreciosService {
       // IVA es del país (`tenant_id` nulo) y su PATCH devuelve 404.
       return iva ? { ...iva, activo: true } : null;
     })();
-    const descuentoMap = this.indexarReglas(descuentos);
-    const recargoMap = this.indexarReglas(recargos);
+    const descuentoMap = this.indexarReglas(descuentos, fechaLocal);
+    const recargoMap = this.indexarReglas(recargos, fechaLocal);
 
     const tasaMap = new Map(
       (await this.monedasService.findMonedas(tenantId)).map((m) => [
@@ -331,7 +338,10 @@ export class CalculoPreciosService {
       }[];
       metodoPagoIds: string[];
       activo: boolean;
+      fechaInicio: string | null;
+      fechaFin: string | null;
     }[],
+    fechaLocal: string,
   ): Map<string, ReglaResuelta> {
     return new Map(
       reglas.map((r) => [
@@ -359,9 +369,13 @@ export class CalculoPreciosService {
           // la tenga asociada, y el POS dejaría de vender. El descarte pasa al
           // aplicarlas, en el motor.
           activo: r.activo,
-          // Fijo en esta tarea: la Task 3 lo calcula de verdad. Puesto acá para
-          // que el compilador no deje pasar el campo sin mapear.
-          vigente: true,
+          // Fuera de rango no se aplica. Comparación de strings: las fechas
+          // ISO ordenan lexicográficamente igual que cronológicamente, así que
+          // es exacta y no necesita librería. Bordes INCLUSIVOS los dos, mismo
+          // criterio que los filtros de fecha (2026-08-22).
+          vigente:
+            (!r.fechaInicio || r.fechaInicio <= fechaLocal) &&
+            (!r.fechaFin || fechaLocal <= r.fechaFin),
         },
       ]),
     );

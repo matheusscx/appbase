@@ -8,6 +8,8 @@ import { DescuentosService } from '../descuentos/descuentos.service';
 import { RecargosService } from '../recargos/recargos.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { MonedasService } from '../monedas/monedas.service';
+import { Db } from '../../common/db/db.service';
+import * as rangoFechaUtil from '../../common/utils/rango-fecha.util';
 
 const TENANT = 't-1';
 
@@ -138,6 +140,15 @@ describe('CalculoPreciosService', () => {
       decimalesOficiales: jest.fn().mockResolvedValue(4),
     };
 
+    // `calcular()` ahora resuelve `fechaLocalTenant` siempre, no solo cuando
+    // una regla tiene fechas. Se mockea acá (default sin efecto real: ninguna
+    // regla del fixture base tiene `fechaInicio`/`fechaFin`) para que el resto
+    // del spec no dependa de `Db` de verdad ni de la fecha real del runner —
+    // el describe de vigencia la pisa por test con `mockResolvedValue`.
+    jest
+      .spyOn(rangoFechaUtil, 'fechaLocalTenant')
+      .mockResolvedValue('2026-01-01');
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         CalculoPreciosService,
@@ -147,6 +158,7 @@ describe('CalculoPreciosService', () => {
         { provide: RecargosService, useValue: recargosService },
         { provide: TenantsService, useValue: tenantsService },
         { provide: MonedasService, useValue: monedasService },
+        { provide: Db, useValue: { query: jest.fn() } },
       ],
     }).compile();
 
@@ -736,6 +748,112 @@ describe('CalculoPreciosService', () => {
         ['item-ingrediente', null],
       ]);
       spy.mockRestore();
+    });
+  });
+
+  describe('vigencia por fecha', () => {
+    // Forma copiada del mock de `descuentosService.findAll` de arriba: mismos
+    // campos que ya usa el resto del archivo, sumando `fechaInicio`/`fechaFin`
+    // (Task 1 / entidad `Descuento`). `desc-1` es el id que ya trae por
+    // default `reglas()` en `descuentoIds`, así que no hace falta tocar el
+    // mock de `itemsService.cargarReglasPorIds`.
+    const reglaConVigencia = (over: Record<string, unknown> = {}) => ({
+      id: 'desc-1',
+      nombre: 'Promo verano',
+      modo: 'porcentaje',
+      valorPorcentaje: '0.10',
+      tipoRegla: { codigo: 'general' },
+      tramos: [],
+      metodoPagoIds: [],
+      activo: true,
+      fechaInicio: null,
+      fechaFin: null,
+      ...over,
+    });
+
+    // Las fechas del test son fijas: el instante entra por el service, nunca
+    // se afirma contra `new Date()` del runner — se pisa `fechaLocalTenant`
+    // (que ya vive mockeada en el `beforeEach` de arriba) con el valor fijo
+    // que cada test necesita.
+    it('una regla cuyo rango ya pasó llega al motor con vigente = false', async () => {
+      // Fecha local del tenant: 2026-03-05. Rango: diciembre a enero.
+      // Sin este chequeo la promo de verano descuenta en marzo.
+      jest
+        .spyOn(rangoFechaUtil, 'fechaLocalTenant')
+        .mockResolvedValue('2026-03-05');
+      descuentosService.findAll.mockResolvedValue([
+        reglaConVigencia({
+          fechaInicio: '2025-12-01',
+          fechaFin: '2026-01-31',
+        }),
+      ]);
+
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      // Fuera de rango: no aplica, ni traza ni descuenta.
+      expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
+    });
+
+    it('una regla dentro del rango llega con vigente = true', async () => {
+      jest
+        .spyOn(rangoFechaUtil, 'fechaLocalTenant')
+        .mockResolvedValue('2026-03-05');
+      descuentosService.findAll.mockResolvedValue([
+        reglaConVigencia({
+          fechaInicio: '2026-03-01',
+          fechaFin: '2026-03-31',
+        }),
+      ]);
+
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      expect(r.lineas[0].descuentoAplicado).toBe('10.000000'); // 100 * 0.10
+    });
+
+    it('el primer día y el último día están DENTRO (bordes inclusivos)', async () => {
+      descuentosService.findAll.mockResolvedValue([
+        reglaConVigencia({
+          fechaInicio: '2026-03-01',
+          fechaFin: '2026-03-31',
+        }),
+      ]);
+      const aplicadoEn = async (fechaLocal: string) => {
+        jest
+          .spyOn(rangoFechaUtil, 'fechaLocalTenant')
+          .mockResolvedValue(fechaLocal);
+        const r = await service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        });
+        return r.lineas[0].descuentoAplicado;
+      };
+
+      // El primer día del rango: fechaInicio === fechaLocal. DENTRO.
+      expect(await aplicadoEn('2026-03-01')).toBe('10.000000');
+      // El último día del rango: fechaFin === fechaLocal. DENTRO.
+      expect(await aplicadoEn('2026-03-31')).toBe('10.000000');
+      // Un día antes / un día después del rango: FUERA. Sin este par, un
+      // mutante que fije `vigente: true` (o que cambie `<=` por `<`) pasa
+      // igual: los dos casos DENTRO de arriba no lo distinguen porque ya
+      // eran `true` de verdad.
+      expect(await aplicadoEn('2026-02-28')).toBe('0.000000');
+      expect(await aplicadoEn('2026-04-01')).toBe('0.000000');
+    });
+
+    it('una regla sin fechas está vigente siempre', async () => {
+      jest
+        .spyOn(rangoFechaUtil, 'fechaLocalTenant')
+        .mockResolvedValue('2026-03-05');
+      descuentosService.findAll.mockResolvedValue([reglaConVigencia()]);
+
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      expect(r.lineas[0].descuentoAplicado).toBe('10.000000');
     });
   });
 });
