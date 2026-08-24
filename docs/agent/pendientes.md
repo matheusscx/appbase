@@ -1312,9 +1312,51 @@ devuelve "sin valor". Se configuran, se guardan, y no pasa nada al vender.
 
 | Tipo | Lo que la pantalla pide | Lo que hay que decidir para arreglarlo |
 |---|---|---|
-| `promocional` | fecha desde / hasta | **El más común y el más barato.** Solo necesita saber si *hoy* cae en el rango — no precisa plazos ni intereses. ¿La fecha que manda es siempre la de la venta? ¿Y una venta creada un día y pagada al otro? ¿Y una devolución sobre una promo ya vencida? |
+| `promocional` | fecha desde / hasta | **El más común y el más barato, y el único listo para empezar:** solo necesita saber si *hoy* cae en el rango, sin plazos ni intereses. ✅ **Sus cuatro decisiones están tomadas** — ver el bloque de abajo. |
 | `pronto_pago` | *"Días antes del vencimiento"* | Necesita que la venta tenga un **vencimiento**, que hoy no existe como concepto. Va con el frente de crédito. |
 | `mora` | días de atraso | Necesita vencimiento **y** un evento que dispare el atraso. ¿Se calcula al cobrar? ¿Un job la devenga? Va con el frente de crédito. |
+
+#### ✅ `promocional`: decidido y listo para abrir frente (owner, 2026-08-23)
+
+Es el único de los cinco que no espera nada: no necesita vencimiento de venta ni aritmética
+de crédito. Las cuatro decisiones, con lo que se midió al tomarlas:
+
+1. **El momento que decide es cuándo se ABRIÓ la cuenta, no cuándo se cobra.** La escena que
+   se resolvió: una mesa que se sienta 23:50 con la promo vigente y paga 00:10 **sí** lleva el
+   descuento — se le prometió al sentarse.
+   ⚠️ **Lo que eso cuesta, medido:** el motor corre en `ventas.service.ts` →
+   `crearEnTransaccion`, y en salones eso ocurre **al cerrar la cuenta**
+   (`salones.service.ts:1022`), o sea al cobrar. Hay que llevarle al motor un instante que hoy
+   no recibe: `ReglaResuelta` **no tiene ningún campo de fecha** — `fechaInicio`/`fechaFin` ni
+   siquiera llegan. La regla completa es *"el momento en que se abrió la cuenta, o el de la
+   venta si no hubo cuenta"*: en POS directo y en online los dos instantes son el mismo.
+2. **«Hoy» es el día del local, y sale de la ZONA DE LA PROVINCIA.**
+   ⛔ **Y eso corrige un hueco que esta entrada no tenía:** `provincia.zona_horaria` existe y
+   está sembrada (Región Metropolitana `America/Santiago`, Isla de Pascua `Pacific/Easter`),
+   pero `zonaHorariaTenant` (`common/utils/rango-fecha.util.ts:117`) hace
+   `tenants → provincia → pais` y devuelve **`pais.zona_horaria_principal`**: pasa *por* la
+   provincia y se saltea su columna. El propio nombre `zona_horaria_**principal**` del país
+   dice que el modelo esperaba que la provincia mandara.
+   ✅ **Decidido: se corrige el helper, y la provincia manda.** Es una línea, y **hoy no
+   cambia ningún resultado** —medido el 2026-08-23: los seis tenants están en Región
+   Metropolitana, donde provincia y país coinciden—. Pero cambia conducta de sus tres
+   lectores: `mermas.service.ts`, `pasarela/services/cobros.service.ts` y
+   `turnos/sesiones-garzon.service.ts`, así que **entra en el gate con ellos**. Sin esto, el
+   primer local de Isla de Pascua corta sus promos —y ya hoy, sus reportes— dos horas antes.
+3. **El borde `hasta` es inclusivo del día**, sin decisión nueva: se reusa el criterio ya
+   tomado el 2026-08-22 para los filtros de fecha, que vive en el mismo
+   `rango-fecha.util.ts` (`bordeHastaSql` expande a `< fecha+1`). Seguir lo existente, no
+   inventar un segundo criterio.
+4. **Una promo vencida se muestra como «vencida» en la pantalla**, no desaparece ni se calla.
+   El riesgo que evita es concreto: hoy una regla vencida se ve idéntica a una vigente, así que
+   el local puede pasar semanas creyendo que da un descuento que no da. Sale de datos que ya
+   están —el backend **exige** ambas fechas para `promocional`
+   (`descuentos.service.ts:570` y `:706`)—, así que es presentación: ninguna columna nueva.
+
+⛔ **Una pregunta que la entrada traía y NO existe:** *"¿y una devolución sobre una promo ya
+vencida?"*. Medido el 2026-08-23: el motor corre **una sola vez, al crear la venta**, y nada
+re-evalúa una venta existente —la nota de crédito arma su fila directo—. Una devolución nunca
+vuelve a pasar por las reglas, así que no hay nada que decidir ahí.
 
 #### Los que SÍ hacen algo, pero mal
 
