@@ -42,6 +42,7 @@ const regla = (over: Partial<ReglaResuelta> = {}): ReglaResuelta => ({
   tramos: [],
   metodoPagoIds: [],
   activo: true,
+  vigente: true,
   ...over,
 });
 
@@ -866,6 +867,50 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       );
       expect(r.advertencias).toEqual([]);
       expect(r.lineas[0].advertencias).toEqual([]);
+    });
+  });
+
+  describe('reglas fuera de vigencia (vigente = false)', () => {
+    it('no descuenta nada y —a diferencia de la pausada— NO avisa', () => {
+      // Una promo fuera de su rango es la regla funcionando como se configuró,
+      // no una anomalía. Avisar la convertiría en un toast en cada venta
+      // durante los meses que no rige; ver la spec.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [regla({ nombre: 'Promo verano', vigente: false })],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
+      expect(r.lineas[0].totalLinea).toBe('100.000000');
+      expect(r.lineas[0].advertencias).toEqual([]);
+      expect(r.lineas[0].trazas.descuentos).toEqual([]);
+    });
+
+    it('pausada Y fuera de vigencia sigue avisando por la PAUSA', () => {
+      // Los dos guards conviven y el orden importa: si el de vigencia corriera
+      // primero, una regla pausada dejaría de avisar apenas se le pongan
+      // fechas vencidas, y el aviso de pausa es el que el owner sí quiere.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ nombre: 'Promo vieja', activo: false, vigente: false }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].advertencias).toEqual([
+        {
+          titulo: 'Descuento "Promo vieja"',
+          detalle: 'está en pausa y no se aplicó',
+        },
+      ]);
     });
   });
 

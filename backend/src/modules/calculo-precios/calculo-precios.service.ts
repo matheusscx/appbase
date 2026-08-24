@@ -359,6 +359,9 @@ export class CalculoPreciosService {
           // la tenga asociada, y el POS dejaría de vender. El descarte pasa al
           // aplicarlas, en el motor.
           activo: r.activo,
+          // Fijo en esta tarea: la Task 3 lo calcula de verdad. Puesto acá para
+          // que el compilador no deje pasar el campo sin mapear.
+          vigente: true,
         },
       ]),
     );

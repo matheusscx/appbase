@@ -43,6 +43,21 @@ export interface ReglaResuelta {
    * pausada volviera a cobrarse en silencio, que es justo el bug que esto cierra.
    */
   activo: boolean;
+  /**
+   * `false` = fuera de su rango de fechas: no se aplica y **NO** avisa.
+   *
+   * La diferencia con `activo` no es un descuido: una regla **pausada** es una
+   * anomalía que alguien provocó y el aviso se la recuerda; una regla **fuera de
+   * fecha** es la regla funcionando como se configuró, y avisarla sería un toast
+   * en cada venta durante los meses que no rige.
+   *
+   * Requerido a propósito, igual que `activo`: si fuera opcional, olvidarse de
+   * mapearlo en el service haría que una regla vencida volviera a cobrarse en
+   * silencio, que es justo el bug que esto cierra. Lo calcula
+   * `CalculoPreciosService.indexarReglas` — el motor no sabe de fechas ni de
+   * husos horarios.
+   */
+  vigente: boolean;
 }
 
 export interface ImpuestoResuelto {
@@ -622,6 +637,11 @@ function procesarReglas(
       });
       continue;
     }
+
+    // Fuera de vigencia: mismo trato que la pausada —no aplica, no deja traza,
+    // el `continue` va antes de evaluar— salvo que acá NO se avisa. Ver el
+    // docblock de `ReglaResuelta.vigente`.
+    if (!regla.vigente) continue;
 
     const base =
       params.modoCalculo === 'compuesto'
