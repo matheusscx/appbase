@@ -1290,12 +1290,14 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
 ---
 
-### Cinco tipos de regla no hacen lo que la pantalla promete — arreglarlos (2026-08-23)
+### Cinco tipos de regla no hacen lo que la pantalla promete — construirlos (2026-08-23)
 
 **Qué es esto:** el 2026-08-23 se midió que cinco de los doce tipos de regla no se comportan
-como su formulario dice. Se evaluó **sacarlos** y el owner lo descartó: **no se sacan, se
-arreglan**. Esta entrada es el inventario de qué está mal en cada uno y qué hay que decidir
-antes de tocar nada.
+como su formulario dice. Se evaluó **sacarlos** y después **pausarlos**; el owner descartó las
+dos: **se construyen**. No es «arreglar un bug» en la mayoría de los casos — cuatro de los
+cinco dependen de algo que el sistema todavía no tiene, así que el trabajo es desarrollarlos.
+Esta entrada es el inventario de qué falta en cada uno y qué hay que decidir antes de tocar
+nada.
 
 ⚠️ **La causa de fondo es una sola, y es del motor:** `calculo-precios.engine.ts` conoce
 **montos y cantidades**, no tiempo. Su magnitud es literalmente
@@ -1324,9 +1326,26 @@ devuelve "sin valor". Se configuran, se guardan, y no pasa nada al vender.
 | `interes_simple` | *"Tasa mensual"* | cobra ese porcentaje **una sola vez**, sobre la base, sin preguntar plazo: una venta a 1 mes y otra a 6 cobran lo mismo |
 | `interes_compuesto` | *"Tasa mensual"* | **exactamente lo mismo que el simple** — ninguna rama del motor los distingue, así que la diferencia entre los dos tipos hoy es solo el nombre |
 
-**Lo que hay que decidir:** de dónde sale el plazo de una venta a crédito, y si el interés se
-calcula al vender (queda congelado en el documento) o al cobrar. Recién con eso simple y
-compuesto pueden dar distinto.
+🔨 **Los dos hay que DESARROLLARLOS, no esconderlos** (owner, 2026-08-23, dicho al descartar
+la pausa). Hoy no sirven: cobrar una tasa *mensual* una sola vez y sin mirar el plazo no es
+interés simple, es un recargo porcentual con otro nombre — y compuesto es literalmente el
+mismo código. Mientras sigan así, un local que financie a 6 meses cobra lo mismo que uno que
+financia a 1.
+
+**Lo que hay que decidir antes de escribir una línea:**
+- **De dónde sale el plazo de una venta a crédito.** Hoy la venta no tiene vencimiento: es el
+  mismo concepto que les falta a `pronto_pago` y `mora`, así que los cuatro comparten
+  prerequisito y conviene decidirlo una sola vez.
+- **Cuándo se calcula el interés: al vender o al cobrar.** Al vender queda congelado en el
+  documento —lo que pide ADR-010 para el hecho fiscal— pero entonces un pago adelantado no lo
+  baja. Al cobrar sigue la realidad, pero el total del documento deja de ser el total.
+- **Con qué periodicidad capitaliza el compuesto** (mensual, diaria), que es lo único que lo
+  hace distinto del simple.
+
+⚠️ **El motor no sabe de tiempo, y ése es el trabajo de verdad.** Su magnitud es
+`codigo === 'por_mayor' ? ctx.cantidad : ctx.monto`: no hay una tercera. Darle plazo no es
+agregar una rama a `evaluarRegla`, es agregarle una dimensión — por eso esto es un frente con
+diseño propio y no un arreglo.
 
 #### Y un sexto, de otra familia, que aparece al mirar esto
 
@@ -1337,28 +1356,13 @@ escalones que se configuren se descartan. Hoy no muerde porque la pantalla no of
 (`campoTramos: false` en los dos), y está **diferido** hasta que un tenant lo pida. Ver su
 entrada propia más arriba.
 
-#### Dos huecos de plomería que se midieron en el camino
+#### Pausarlos quedó descartado como ruta
 
-Los dos son independientes de la decisión de producto y valen por sí solos:
-
-1. **La pausa de un tipo no se hace valer.** `TiposReglaService.findAll` filtra `activo: true`,
-   así que un tipo pausado desaparece del selector — pero `validarTipoRegla` (en
-   `recargos.service.ts` **y** en `descuentos.service.ts`) **no mira `activo`**, así que un
-   `POST` directo con ese id crea la regla igual. Es *"un `activo` que solo se escribe"*, que el
-   propio playbook nombra como bug. Enforcement de una línea en cada service, con el cuidado de
-   validar **solo cuando el tipo cambia**: el frontend reenvía `tipoReglaId` en todo PATCH, así
-   que validarlo por venir en el DTO deja las reglas existentes de ese tipo imposibles de editar.
-2. **El seed no repone estado sobre una base ya sembrada.** Los loops de descuentos y recargos
-   son `if (!exists) save`, así que cualquier cambio de `activo` en el seed solo tiene efecto en
-   una base fresca — en el demo de Railway, que persiste entre deploys, no pasa nada.
-   ⛔ **Y una trampa medida:** reponer también el `nombre` en ese UPDATE **tumba el arranque del
-   backend** si otra regla viva del tenant tomó el nombre viejo (choca con
-   `uq_..._tenant_nombre_vivo` dentro de `onApplicationBootstrap`). Si se toca, solo `activo`.
-
-📌 **Si alguna vez se evalúa pausarlos de nuevo, medido el 2026-08-23:** pausar el tipo deja la
-columna "Tipo" en blanco en la tabla y el drawer de edición **sin ningún campo**, porque su
-`config` sale del selector, que filtra los pausados. Renombrar y despausar siguen andando. La
-salida sería mostrar el tipo pausado marcado como tal, no filtrarlo en el backend.
+Al medir esto la primera salida que apareció fue **pausar** los cinco tipos para que nadie
+pudiera configurar algo que no funciona. **El owner la descartó dos veces** (2026-08-23): no
+se esconden, **se desarrollan**. Lo que se midió mientras se evaluaba esa ruta —el `activo`
+de `tipos_regla` que no se hace valer, y el seed que no lo repone— dejó de ser trabajo por
+eso, y está archivado en «Vigilancia» al final de este archivo por si la ruta vuelve.
 
 ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y `promocional`
 **puede salir antes y por separado** — no necesita nada de la aritmética del crédito.
@@ -1616,6 +1620,32 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **Pausar un tipo de regla: la ruta se descartó, y con ella sus dos huecos**
+  (backend, medido 2026-08-23) — apareció como salida para esconder los cinco tipos que no
+  hacen lo que prometen; **el owner la descartó: se desarrollan, no se pausan**. Queda acá lo
+  medido, para que quien lo re-descubra no lo vuelva a investigar ni lo tome como bug vivo.
+  **Por qué no es trabajo hoy:** no existe forma de pausar un tipo. `tipos-regla.controller.ts`
+  es **solo `GET`** —catálogo global read-only, sin `PATCH` ni pantalla de admin— y los doce
+  tipos del seed están en `activo: true`. Para que exista un tipo pausado hay que escribir SQL
+  a mano, así que ninguno de los dos huecos de abajo es alcanzable.
+  **Los dos huecos, por si la ruta vuelve:**
+  1. **El `activo` de `tipos_regla` no se hace valer.** `TiposReglaService.findAll` lo filtra
+     —el tipo desaparece del selector— pero `validarTipoRegla`, en `descuentos.service.ts`
+     **y** en `recargos.service.ts`, no lo mira: un `POST` directo con ese id crea la regla
+     igual. Enforcement de una línea por service, ⚠️ **con el cuidado de exigirlo solo cuando
+     el tipo CAMBIA**: la pantalla reenvía `tipoReglaId` en todo PATCH (mismo `body` que el
+     alta), así que exigirlo por venir el campo dejaría las reglas existentes de un tipo
+     pausado imposibles de editar, renombrar o despausar. Verificado el 2026-08-23.
+  2. **El seed no repone `activo` sobre una base ya sembrada** (`if (!exists) save`). ⛔ Y una
+     trampa medida: reponer también el `nombre` en ese UPDATE **tumba el arranque del backend**
+     si otra regla viva del tenant tomó el nombre viejo (choca con `uq_..._tenant_nombre_vivo`
+     dentro de `onApplicationBootstrap`). Si se toca, solo `activo`.
+  📌 **Y la funcionalidad no está terminada por ningún lado:** medido el 2026-08-23, pausar un
+  tipo a mano deja la columna "Tipo" en blanco en la tabla y el drawer de edición **sin ningún
+  campo**, porque su `config` sale del selector, que filtra los pausados. O sea que «pausar un
+  tipo» no es una línea de enforcement: es una feature con backend, pantalla y decisión de
+  producto. Si alguna vez se quiere, la salida sería **marcar** el tipo pausado, no filtrarlo.
 
 **Nada de esta sección hay que hacer.** Son cosas que se miraron y se decidió no arreglar,
 hallazgos refutados, y ramas de test que se descartaron con su motivo. Viven acá para no
