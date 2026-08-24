@@ -2,7 +2,7 @@
 
 **Status**: Implemented
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-06-27
+**Last Updated**: 2026-08-23
 
 ---
 
@@ -31,9 +31,30 @@ capture exactamente los datos que necesita para que el motor de precios pueda ev
   - 122 tests TDD (unitarios + integración)
 
 - NOT included (future):
-  - Evaluación de condiciones en el motor de cálculo de precios
-  - Aplicación de tramos y métodos a ventas
-  - UI para gestión de la tabla `tipos_regla` (es solo seed por ahora)
+  - UI para gestión de la tabla `tipos_regla` (es solo seed por ahora — verificado el
+    2026-08-23: `tipos-regla.controller.ts` es solo `GET`)
+
+⚠️ **Esta lista decía dos cosas más que dejaron de ser ciertas, y la corrección importa
+más que el dato** (2026-08-23). Decía que la *"evaluación de condiciones en el motor"* y la
+*"aplicación de tramos y métodos a ventas"* eran futuro. **Las dos están construidas**: el
+motor evalúa tramos por cantidad y por monto y filtra por método de pago
+(`calculo-precios.engine.ts` → `evaluarRegla`), y `calculo-precios.service.ts` carga las
+reglas de cada ítem y las aplica al vender.
+
+El costo de no haberlo corregido antes está medido: el análisis del motor de promociones
+(`docs/superpowers/specs/2026-07-22-motor-promociones-analisis.md`) **citó estas líneas** y
+arrancó de la premisa de que los descuentos estaban *"definidos pero NO aplicados al vender"*.
+Quien retomara ese frente iba a diseñar contra un sistema que no existe.
+
+**Qué se evalúa hoy, sin adornos** (verificado el 2026-08-23):
+
+| Se aplica bien | Se aplica MAL | No se aplica |
+|---|---|---|
+| `directo`, `general`, `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta`, `recargo_fijo`, `recargo_porcentaje` | `metodo_pago` y `recargo_metodo_pago` (ignoran sus tramos); `interes_simple` e `interes_compuesto` (cobran la tasa una sola vez y sin mirar plazo — y son idénticos entre sí) | `promocional`, `mora`, `pronto_pago` (en `DIFERIDAS`) |
+
+El detalle de cada hueco y qué hace falta para cerrarlo está en
+[`pendientes.md`](../agent/pendientes.md) § 6, *"Cinco tipos de regla no hacen lo que la
+pantalla promete"*.
 
 ---
 

@@ -404,6 +404,42 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
+- [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
+  (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
+  el documento completo es
+  [`specs/2026-07-22-motor-promociones-analisis.md`](../superpowers/specs/2026-07-22-motor-promociones-analisis.md)
+  y está **más avanzado de lo que nadie recuerda**: alcance de Fase 1 **cerrado**, las cuatro
+  preguntas abiertas resueltas, e investigación de mercado (Toast/Square/Lightspeed) hecha.
+  **Lo único que falta es diseñar la arquitectura** —esquema de tablas Promoción/Condición/
+  Beneficio y forma del evaluador— para promoverlo a `-design.md` y plan.
+
+  ⚠️ **Por qué está acá y no se acordaba nadie: no lo nombraba ningún backlog.** Su único
+  puntero era desde `investigacion-mercado.md`, como *ejemplo* de investigación. Esta entrada
+  existe para que tenga quién lo reclame; **si vuelve a quedar sin ella, se pierde otra vez.**
+
+  **Lo que ya está decidido** (no re-preguntarlo): solo la familia que descuenta líneas ya
+  pedidas —2x1/NxM, happy hour %, precio fijo de combo—, activación solo automática, sin
+  acumulación (gana la de mayor descuento), scope declarado por cada promo (lista de ítems /
+  categoría / todo el pedido), y todo beneficio expresado como **descuento portable** para no
+  inventar concepto fiscal de ningún país (ADR-010).
+
+  ⛔ **Y una premisa suya que ya se corrigió, porque invalidaba el diseño:** citaba que los
+  descuentos estaban *"definidos pero NO aplicados al vender"*. **Es falso** — lo sacaba de una
+  lista desactualizada de `descuentos-recargos.md`, corregida el 2026-08-23 en los dos lados.
+  El motor **sí** aplica valor plano, tramos y método de pago. Quien retome esto tiene que
+  releer la § 6 de este archivo antes de diseñar: el punto de integración cambió de forma.
+
+  🔶 **Decisión de producto que conviene tomar ANTES, y es barata ahora:** ese documento decide
+  que *descuentos y promociones conviven, no se fusionan*. Entonces el día que el módulo exista
+  van a coexistir un **tipo de regla `promocional`** —que es solo un descuento con fechas
+  obligatorias— y un **módulo Promociones** que es el evaluador cross-carrito. **Dos cosas
+  distintas con el mismo nombre.** Renombrar el tipo de regla ahora (p. ej. a *"descuento con
+  vigencia"*) cuesta un seed y una pantalla; después cuesta reglas ya creadas en producción.
+
+  ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y el propio
+  análisis lo dice: el evaluador es **una etapa nueva sobre el carrito entero**, no una rama más
+  en `evaluarRegla`.
+
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
   arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (`ventas.service.ts:1390`,

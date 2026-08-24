@@ -219,6 +219,27 @@ exacto, ese es el camino.
   **Si el diff los toca, el alcance se desbordó.**
 - El aviso al vender de una regla fuera de vigencia (decisión 4: no avisa).
 
+## Relación con el motor de promociones (que existe como análisis, no como código)
+
+Hay un análisis con **alcance de Fase 1 cerrado** desde el 2026-07-22
+([`2026-07-22-motor-promociones-analisis.md`](2026-07-22-motor-promociones-analisis.md)) para
+un evaluador **cross-carrito**: 2x1/NxM, happy hour, precio fijo de combo. **Esto no lo pisa
+ni lo adelanta**, y conviene decir por qué:
+
+- Aquello es **una etapa nueva sobre el carrito entero** —mira varias líneas a la vez para
+  decidir "la más barata gratis"—. Esto es un **guard por regla** dentro del bucle que ya
+  existe. Son capas distintas del mismo pipeline.
+- Aquel documento decide explícitamente que **`descuentos` y `promociones` conviven**, y ya
+  contaba con que el tipo `promocional` viviera en el motor de precios.
+- **Granularidad:** acá la vigencia es por **día** (`fecha_inicio`/`fecha_fin` son `date`). Un
+  *happy hour* necesita **hora**, que este frente no aporta y no debe inventar.
+
+⚠️ **Colisión de nombres que este frente no resuelve y conviene decidir antes de construir el
+módulo:** quedarían un **tipo de regla `promocional`** —un descuento con fechas obligatorias— y
+un **módulo Promociones** que es otra cosa. Está anotado en
+[`pendientes.md`](../../agent/pendientes.md) § 3; renombrar el tipo es barato hoy y caro cuando
+haya reglas creadas.
+
 ## Traps para quien lo implemente
 
 1. **`RepositoriosModule.forFeature`, nunca `TypeOrmModule.forFeature`** si hace falta registrar

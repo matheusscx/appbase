@@ -2,6 +2,9 @@
 
 **Status**: Alcance de Fase 1 CERRADO — falta diseñar la arquitectura (tablas +
 evaluador). Todavía NO es plan ejecutable.
+**Dónde se reclama**: [`pendientes.md`](../../agent/pendientes.md) § 3. ⚠️ Estuvo **huérfano
+hasta el 2026-08-23** —ningún backlog lo nombraba— y por eso se lo dio por perdido más de una
+vez. Si este documento vuelve a quedar sin entrada que lo reclame, se pierde otra vez.
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-07-22
 
@@ -132,9 +135,19 @@ después = un registro nuevo, no una migración.
   (neto → descuentos → recargos → impuestos → total, con trazas por regla). Ya
   reserva el tipo de regla `promocional` (por fecha) como *deferred* → **hoy
   devuelve monto 0**. La arquitectura ya apuntaba acá.
-- **Módulo `descuentos`/`recargos` + `tipos_regla`** (10 tipos, `descuento_tramos`,
-  `item_descuentos`): descuentos **definidos pero NO aplicados al vender**
-  (`descuentos-recargos.md` → *NOT included (future): aplicación a ventas*).
+- **Módulo `descuentos`/`recargos` + `tipos_regla`** (`descuento_tramos`, `item_descuentos`).
+  ⛔ **CORREGIDO el 2026-08-23: esta línea decía que los descuentos estaban «definidos pero
+  NO aplicados al vender», y es FALSO.** Lo citaba de la lista *NOT included (future)* de
+  `descuentos-recargos.md`, que estaba desactualizada y ya se corrigió allá. Hoy el motor
+  **sí aplica**: valor plano, tramos por cantidad (`por_mayor`) y por monto
+  (`por_monto_venta`), y filtro por método de pago; y `calculo-precios.service.ts` carga las
+  reglas de cada ítem al vender.
+  **Por qué importa para este documento:** buena parte de su premisa era que el módulo de
+  descuentos no aplicaba nada. Lo que falta hoy es otra cosa y está inventariado en
+  `pendientes.md` § 6 — `promocional`/`mora`/`pronto_pago` diferidos, los dos "por método de
+  pago" que ignoran sus tramos, y los intereses que cobran una sola vez. **Quien retome esto
+  tiene que releer esa sección antes de diseñar**, porque el punto de integración con el motor
+  cambió de forma desde julio.
 
 ---
 
