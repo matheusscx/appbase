@@ -343,15 +343,39 @@ decisión que no es mía).
   ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
   lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
   frente que la tanda 🔴 mandaba aislar.
-  **Por qué está en esta sección y no en la 1:** falta medir **qué se ve**. De leer
-  `filasDesfaseRecetas` / `filasDesfaseCombos` —que ocultan la fila solo si el propuesto
-  recalculado coincide (`eq4`) con `costo_propuesto_omitido`— sale que un omitido viejo
-  hace que el ítem **reaparezca** en la bandeja, no que un desfase real quede silenciado.
-  O sea: el síntoma probable es "el descarte no pega", que es molesto y no peligroso. Eso
-  está **deducido del código, no medido**: montar las dos transacciones y mirar qué queda
-  en `costo_propuesto_omitido` es lo primero. Si el síntoma es ese, el arreglo puede ser
-  tan barato como releer bajo lock; si aparece un caso donde el desfase se silencia, sube
-  de sección y de prioridad.
+  ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
+  la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
+  molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
+  nunca vio.**
+
+  La medición, paso por paso sobre `Hamburguesa Especial`:
+
+  | Paso | Resultado |
+  |---|---|
+  | El usuario ve en la bandeja | propuesto **1120** |
+  | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
+  | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
+  | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
+  | La bandeja después | **0 filas** |
+
+  **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
+  leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
+  **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
+  el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
+
+  ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
+  omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
+  dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
+  de la lectura del descarte, y la peligrosa es la de "antes".
+
+  ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
+  aparece un caso donde el desfase se silencia, sube"*. Apareció.
+
+  💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
+  de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
+  —o rechaza cuando no coincide con el recalculado, como un control optimista de
+  concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
+  opción a evaluar al tomarla, no una decisión tomada.
 
 ---
 
