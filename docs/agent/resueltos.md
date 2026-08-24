@@ -148,6 +148,213 @@ pendiente, con su consecuencia sin verificar sobre el build del frontend.
 
 ---
 
+## La vigencia por fecha se evalúa, y `promocional` deja de existir (2026-08-24)
+
+**Venía de la sección 6.** Lo que se abrió como *"hacer andar `promocional`"* terminó siendo
+otra cosa dos veces: primero al medir que la vigencia no es de ese tipo sino de **cualquier
+regla con fechas**, y después al decidir el owner que ese tipo **se elimina**. El frente
+entregado es más chico que el que se abrió, y el diagnóstico más grande.
+
+Spec: [`2026-08-23-vigencia-por-fecha-design.md`](../superpowers/specs/2026-08-23-vigencia-por-fecha-design.md) ·
+Plan: [`2026-08-23-vigencia-por-fecha.md`](../superpowers/plans/2026-08-23-vigencia-por-fecha.md)
+
+**Lo que queda abierto de esa sección** —`mora`, `pronto_pago` y los dos intereses, que
+esperan el vencimiento de venta— sigue en `pendientes.md` § 6. Texto de la entrada, mudado
+verbatim:
+
+---
+
+### Cinco tipos de regla no hacen lo que la pantalla promete — construirlos (2026-08-23)
+
+**Qué es esto:** el 2026-08-23 se midió que cinco de los doce tipos de regla no se comportan
+como su formulario dice. Se evaluó **sacarlos** y después **pausarlos**; el owner descartó las
+dos: **se construyen**. No es «arreglar un bug» en la mayoría de los casos — cuatro de los
+cinco dependen de algo que el sistema todavía no tiene, así que el trabajo es desarrollarlos.
+Esta entrada es el inventario de qué falta en cada uno y qué hay que decidir antes de tocar
+nada.
+
+⚠️ **La causa de fondo es una sola, y es del motor:** `calculo-precios.engine.ts` conoce
+**montos y cantidades**, no tiempo. Su magnitud es literalmente
+`codigo === 'por_mayor' ? ctx.cantidad : ctx.monto` — no hay una tercera. Ni plazos, ni días de
+atraso, ni rangos de fecha. Todo lo que dependa del tiempo, entonces, o no se evalúa o se
+evalúa mal.
+
+#### Los que NO hacen nada
+
+Están en `DIFERIDAS` (`calculo-precios.engine.ts:270`), o sea que el motor los saltea y
+devuelve "sin valor". Se configuran, se guardan, y no pasa nada al vender.
+
+| Tipo | Lo que la pantalla pide | Lo que hay que decidir para arreglarlo |
+|---|---|---|
+| `promocional` | fecha desde / hasta | **El más común y el más barato, y el único listo para empezar:** solo necesita saber si *hoy* cae en el rango, sin plazos ni intereses. ✅ **Sus cuatro decisiones están tomadas** — ver el bloque de abajo. |
+| `pronto_pago` | *"Días antes del vencimiento"* | Necesita que la venta tenga un **vencimiento**, que hoy no existe como concepto. Va con el frente de crédito. |
+| `mora` | días de atraso | Necesita vencimiento **y** un evento que dispare el atraso. ¿Se calcula al cobrar? ¿Un job la devenga? Va con el frente de crédito. |
+
+#### ✅ `promocional`: decidido y listo para abrir frente (owner, 2026-08-23)
+
+Es el único de los cinco que no espera nada: no necesita vencimiento de venta ni aritmética
+de crédito. Las cuatro decisiones, con lo que se midió al tomarlas:
+
+1. **El momento que decide es cuándo se ABRIÓ la cuenta, no cuándo se cobra.** La escena que
+   se resolvió: una mesa que se sienta 23:50 con la promo vigente y paga 00:10 **sí** lleva el
+   descuento — se le prometió al sentarse.
+   ⚠️ **Lo que eso cuesta, medido:** el motor corre en `ventas.service.ts` →
+   `crearEnTransaccion`, y en salones eso ocurre **al cerrar la cuenta**
+   (`salones.service.ts:1022`), o sea al cobrar. Hay que llevarle al motor un instante que hoy
+   no recibe: `ReglaResuelta` **no tiene ningún campo de fecha** — `fechaInicio`/`fechaFin` ni
+   siquiera llegan. La regla completa es *"el momento en que se abrió la cuenta, o el de la
+   venta si no hubo cuenta"*: en POS directo y en online los dos instantes son el mismo.
+2. **«Hoy» es el día del local, y sale de la ZONA DE LA PROVINCIA.**
+   ✅ **HECHO el 2026-08-23, antes de abrir este frente** → [`resueltos.md`](resueltos.md)
+   § «Una sola noción de zona horaria, y sale de la provincia». Salió aparte a propósito: es
+   transversal y de bajo riesgo, así que separarlo deja `promocional` como puro motor +
+   pantalla. Lo que se encontró al hacerlo y esta entrada no sabía: no era «una línea en el
+   helper» sino **tres copias byte a byte** de la misma consulta.
+   👉 **Para quien tome `promocional`:** la zona ya se pide con
+   `zonaHorariaTenant(db, tenantId)` y ya devuelve la de la provincia. No hay nada que decidir
+   ni que agregar.
+
+3. **El borde `hasta` es inclusivo del día**, sin decisión nueva: se reusa el criterio ya
+   tomado el 2026-08-22 para los filtros de fecha, que vive en el mismo
+   `rango-fecha.util.ts` (`bordeHastaSql` expande a `< fecha+1`). Seguir lo existente, no
+   inventar un segundo criterio.
+4. **Una promo vencida se muestra como «vencida» en la pantalla**, no desaparece ni se calla.
+   El riesgo que evita es concreto: hoy una regla vencida se ve idéntica a una vigente, así que
+   el local puede pasar semanas creyendo que da un descuento que no da. Sale de datos que ya
+   están —el backend **exige** ambas fechas para `promocional`
+   (`descuentos.service.ts:570` y `:706`)—, así que es presentación: ninguna columna nueva.
+
+⛔ **Una pregunta que la entrada traía y NO existe:** *"¿y una devolución sobre una promo ya
+vencida?"*. Medido el 2026-08-23: el motor corre **una sola vez, al crear la venta**, y nada
+re-evalúa una venta existente —la nota de crédito arma su fila directo—. Una devolución nunca
+vuelve a pasar por las reglas, así que no hay nada que decidir ahí.
+
+#### Los que SÍ hacen algo, pero mal
+
+⚠️ **Este matiz importa y en una versión anterior de esta nota estaba mal dicho:** estos dos
+**no** están diferidos. Cobran — cobran distinto de lo que prometen.
+
+| Tipo | Lo que la pantalla pide | Lo que hace |
+|---|---|---|
+| `interes_simple` | *"Tasa mensual"* | cobra ese porcentaje **una sola vez**, sobre la base, sin preguntar plazo: una venta a 1 mes y otra a 6 cobran lo mismo |
+| `interes_compuesto` | *"Tasa mensual"* | **exactamente lo mismo que el simple** — ninguna rama del motor los distingue, así que la diferencia entre los dos tipos hoy es solo el nombre |
+
+🔨 **Los dos hay que DESARROLLARLOS, no esconderlos** (owner, 2026-08-23, dicho al descartar
+la pausa). Hoy no sirven: cobrar una tasa *mensual* una sola vez y sin mirar el plazo no es
+interés simple, es un recargo porcentual con otro nombre — y compuesto es literalmente el
+mismo código. Mientras sigan así, un local que financie a 6 meses cobra lo mismo que uno que
+financia a 1.
+
+**Lo que hay que decidir antes de escribir una línea:**
+- **De dónde sale el plazo de una venta a crédito.** Hoy la venta no tiene vencimiento: es el
+  mismo concepto que les falta a `pronto_pago` y `mora`, así que los cuatro comparten
+  prerequisito y conviene decidirlo una sola vez.
+- **Cuándo se calcula el interés: al vender o al cobrar.** Al vender queda congelado en el
+  documento —lo que pide ADR-010 para el hecho fiscal— pero entonces un pago adelantado no lo
+  baja. Al cobrar sigue la realidad, pero el total del documento deja de ser el total.
+- **Con qué periodicidad capitaliza el compuesto** (mensual, diaria), que es lo único que lo
+  hace distinto del simple.
+
+⚠️ **El motor no sabe de tiempo, y ése es el trabajo de verdad.** Su magnitud es
+`codigo === 'por_mayor' ? ctx.cantidad : ctx.monto`: no hay una tercera. Darle plazo no es
+agregar una rama a `evaluarRegla`, es agregarle una dimensión — por eso esto es un frente con
+diseño propio y no un arreglo.
+
+#### Y un sexto, de otra familia, que aparece al mirar esto
+
+`metodo_pago` (descuento) y `recargo_metodo_pago` (recargo) **ignoran los tramos**: su rama en
+el motor retorna antes del `if` de tramos. No cobran cero —los dos están en
+`TIPOS_CON_VALOR_UNICO`, así que el backend les exige `valor` y el motor cobra ese— pero los
+escalones que se configuren se descartan. Hoy no muerde porque la pantalla no ofrece el campo
+(`campoTramos: false` en los dos), y está **diferido** hasta que un tenant lo pida. Ver su
+entrada propia más arriba.
+
+#### Pausarlos quedó descartado como ruta
+
+Al medir esto la primera salida que apareció fue **pausar** los cinco tipos para que nadie
+pudiera configurar algo que no funciona. **El owner la descartó dos veces** (2026-08-23): no
+se esconden, **se desarrollan**. Lo que se midió mientras se evaluaba esa ruta —el `activo`
+de `tipos_regla` que no se hace valer, y el seed que no lo repone— dejó de ser trabajo por
+eso, y está archivado en «Vigilancia» al final de este archivo por si la ruta vuelve.
+
+⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y `promocional`
+**puede salir antes y por separado** — no necesita nada de la aritmética del crédito.
+
+---
+
+### Qué se construyó
+
+Seis tareas, seis commits, cada una con su revisión independiente de contexto fresco:
+
+| Commit | Qué dejó |
+|---|---|
+| `2511887` | El motor descarta la regla no vigente. Guard al lado del de la pausada, **sin avisar** |
+| `e98dc0b` | `fechaLocalTenant` — el instante al día del local, con `Intl` y sin dependencia |
+| `4ec6629` | El servicio calcula `vigente` contra ese día, bordes inclusivos |
+| `f10cec9` | El instante sale de `cuentas.abierta_el` cuando la venta nace de una cuenta |
+| `2494601` | `promocional` eliminado; `directo` gana fechas opcionales |
+| `a549deb` | La pantalla marca *Vencida* y *Programada* |
+
+**Las cuatro decisiones de producto** (owner, 2026-08-23) están en la spec. La que da sentido
+al frente: **manda el momento en que se ABRIÓ la cuenta**, no el del cobro — la mesa que se
+sienta 23:50 con la promo vigente y paga 00:10 lleva el descuento, porque se le prometió al
+sentarse.
+
+**Dos hallazgos que cambiaron el alcance sobre la marcha:**
+- **No era `promocional`: eran tres tipos con fechas, y dos de ellos COBRABAN fuera de su
+  ventana.** Los escalones por monto no estaban diferidos, así que sus fechas se ignoraban en
+  silencio. Ese era el problema peor —`promocional` al menos no cobraba de más— y quedó
+  arreglado de arrastre, sin trabajo extra.
+- **`promocional` salió también del `Set` `DIFERIDAS`.** Dejarlo era un comentario que miente
+  sobre un tipo que ya no existe, y una trampa latente: si alguien recreara ese código,
+  quedaría descartado en silencio — el bug exacto que este frente cierra.
+
+### Qué se decidió y por qué el motor no aprendió de fechas
+
+El motor recibe un `vigente: boolean` **requerido**; toda la aritmética de fechas y husos vive
+en la capa de servicio. Se descartó que el motor comparara fechas: es una función **pura y
+sincrónica sin I/O**, y en este repo la aritmética de husos la hace Postgres — comparar ahí
+adentro exigiría una **librería de zonas horarias**, o sea una dependencia nueva, que obliga a
+frenar y preguntar. El requisito de que el campo sea obligatorio no es estilo: si fuera
+opcional, olvidarse de mapearlo dejaría una regla vencida cobrando en silencio.
+
+El instante viaja por **id de cuenta**, nunca como fecha del cliente, y **`CreateVentaDto` no
+lo expone**: llega a `crearEnTransaccion` como parámetro del método, que solo salones pasa. El
+abuso que eso cierra es concreto — dejar una cuenta abierta en diciembre y mandar su id en un
+`POST /ventas` de marzo para cobrar con la promo de verano, que el acotado por tenant no
+frena porque la cuenta es propia.
+
+### La lección, que es sobre los tests y no sobre las fechas
+
+**Tres veces en este mismo plan un borde quedó sin red**, y las tres el código estaba bien:
+lo que faltaba era el test.
+- El esqueleto de la Task 3 solo probaba los días de **adentro** del rango; un `vigente: true`
+  fijo los dejaba pasar. El implementador lo detectó y lo reforzó.
+- La revisión corrió un mutante que nadie pidió —`<=` por `<`— para comprobar que los bordes
+  inclusivos estuvieran cubiertos de verdad.
+- En la pantalla, el docblock afirmaba "bordes inclusivos" sin que nada lo verificara.
+
+Y una cuarta, distinta y peor: **un mutante que se dio por bueno resultó EQUIVALENTE.** El
+reporte afirmaba que reordenar dos condiciones mataba un test; reproducido, pasaban los 27.
+Las dos condiciones miran campos mutuamente excluyentes, así que el orden nunca cambia el
+resultado. **Una verificación mal descrita es peor que ninguna**, porque la siguiente lectura
+la da por hecha.
+
+📌 El patrón que las cuatro comparten: **preguntarse qué mutante mataría a este test, y si la
+respuesta es "ninguno", el test no cubre lo que dice cubrir.**
+
+### Dos cosas que se cubrieron por decisión del coordinador, no por el plan
+
+- **El filtro por tenant de la consulta de la cuenta no lo cubría ningún test** — la revisión
+  lo comprobó sacándolo y viendo la suite entera en verde. Por el rubro era "Menor"; se
+  arregló igual, porque el aislamiento por tenant es la invariante 1 de `CLAUDE.md` y un guard
+  sin test es como desaparece en un refactor.
+- **El badge de la pantalla se verificó en el navegador**, no solo por unit: *"Promo verano
+  2026-27"* sale **Programada**, la promo de e2e ya vencida sale **Vencida**, y el resto de las
+  filas sin badge.
+
+---
+
 ## Una sola noción de zona horaria, y sale de la provincia (2026-08-23)
 
 **Salió de la sección 6**, como prerequisito separado del frente de `promocional`: el owner
