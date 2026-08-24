@@ -96,43 +96,6 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
-  saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
-  del proyecto dice que `movimientos_inventario` es la fuente de verdad y `item_producto.stock`
-  un saldo materializado. En modo `serie`/`lote` eso se autocorrige: `recalcularStockSerie/Lote`
-  (`inventario.service.ts:640-675`) recalcula el saldo desde `item_unidad`/`item_lote` en cada
-  movimiento. En modo `cantidad` —el default— solo hay un `UPDATE` incremental, y no existe
-  función ni endpoint que sume el kardex y lo compare.
-  ⚠️ **Severidad baja a propósito, y el reencuadre importa**: la lente lo reportó como alta, pero
-  **no hay ninguna divergencia medida**. El chokepoint (`registrarMovimiento`) se verificó sólido
-  por dos lentes independientes: todo camino de producción pasa por ahí y escribe movimiento y
-  saldo en la misma transacción. El escenario que ofrecía era un bug futuro hipotético, que no
-  es un escenario reproducible.
-  **Por eso está acá y no en 1:** lo primero es una query que compare las dos cosas sobre la base
-  de dev y diga si el drift existe. Si da cero, esto es defensa en profundidad y puede quedar
-  anotado; si da distinto de cero, cambia de sección y de prioridad. Construir un reconciliador
-  antes de esa medición es construir sin evidencia.
-
-  ✅ **MEDIDO el 2026-08-16: el drift es CERO, por tres caminos independientes.** Sobre la base de
-  dev **después de una suite e2e completa** —o sea con tráfico de escritura de todos los caminos
-  de producción—, 87 productos en modo `cantidad` y 175 movimientos:
-
-  | Medición | Resultado |
-  |---|---|
-  | `SUM(stock_resultante - stock_anterior)` vs `item_producto.stock` | 0 ítems con drift |
-  | `stock_resultante` del último movimiento vs el saldo | 0 ítems con drift |
-  | Cortes de cadena (`stock_anterior` de N ≠ `stock_resultante` de N-1) | 0 |
-
-  ⚠️ **La primera pasada dio 28 falsos positivos** y vale anotarlo: sumaba `cantidad` sin signo.
-  Las `salida` se guardan **positivas** (`tipo` es la que lleva el signo), y las `ajuste` guardan
-  `cantidad = 0` con el delta en `stock_anterior`/`stock_resultante`. Cualquier consulta futura
-  sobre el kardex tiene que sumar el **delta**, nunca `cantidad`.
-
-  ➡️ **Por su propio criterio, esto NO escala**: queda como defensa en profundidad anotada. Que
-  el drift no exista hoy no dice que un bug futuro no lo produzca — dice que **construir un
-  reconciliador ahora sería construir sin evidencia**, que es justo lo que la entrada quería
-  evitar. Si alguna vez se quiere igual, es una decisión nueva del owner y no un arreglo.
-
 - [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
   test** (backend) — el e2e prueba que la escritura ajena no prospera y que la caja queda
   intacta, pero no aísla cuál de las tres defensas la frena (`bloquearCajaAbierta` +
@@ -326,56 +289,6 @@ decisión que no es mía).
   🔗 Puede ser pariente del intermitente de autenticación de la entrada de arriba (cuatro
   avistajes): los dos son intermitentes del e2e local, un solo test por corrida, verde al
   repetir. Nada lo prueba todavía.
-
-- [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
-  como "omitido" cuando ya puede no ser el propuesto** (backend,
-  `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
-  cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
-  (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
-  (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
-  (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
-  `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
-  concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
-  descarte archiva un propuesto que ya no lo es.
-  ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
-  es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
-  (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
-  ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
-  lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
-  frente que la tanda 🔴 mandaba aislar.
-  ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
-  la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
-  molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
-  nunca vio.**
-
-  La medición, paso por paso sobre `Hamburguesa Especial`:
-
-  | Paso | Resultado |
-  |---|---|
-  | El usuario ve en la bandeja | propuesto **1120** |
-  | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
-  | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
-  | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
-  | La bandeja después | **0 filas** |
-
-  **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
-  leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
-  **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
-  el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
-
-  ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
-  omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
-  dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
-  de la lectura del descarte, y la peligrosa es la de "antes".
-
-  ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
-  aparece un caso donde el desfase se silencia, sube"*. Apareció.
-
-  💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
-  de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
-  —o rechaza cuando no coincide con el recalculado, como un control optimista de
-  concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
-  opción a evaluar al tomarla, no una decisión tomada.
 
 ---
 
@@ -934,9 +847,73 @@ del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del hand
 —no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
 que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
 
-**Queda 1 entrada**, y no espera una respuesta sino la **investigación de mercado que la
-destraba, lanzada el 2026-08-22**. (La del login del demo entró y salió el mismo día: el
-owner eligió el proxy → [`resueltos.md`](resueltos.md).)
+**Quedan 2 entradas.** La de la nota de crédito no espera una respuesta sino la
+**investigación de mercado que la destraba, lanzada el 2026-08-22**. La del descarte de
+desfases llegó el **2026-08-24 desde la § 2**, al medirla: lo medido contradijo la premisa con
+la que se había diferido, así que la pregunta es si se reabre esa decisión.
+(La del login del demo entró y salió el mismo día: el owner eligió el proxy →
+[`resueltos.md`](resueltos.md).)
+
+- [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
+  como "omitido" cuando ya puede no ser el propuesto** (backend,
+  `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
+  cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
+  (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
+  (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
+  (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
+  `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
+  concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
+  descarte archiva un propuesto que ya no lo es.
+  ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
+  es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
+  (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
+  ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
+  lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
+  frente que la tanda 🔴 mandaba aislar.
+  ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
+  la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
+  molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
+  nunca vio.**
+
+  La medición, paso por paso sobre `Hamburguesa Especial`:
+
+  | Paso | Resultado |
+  |---|---|
+  | El usuario ve en la bandeja | propuesto **1120** |
+  | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
+  | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
+  | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
+  | La bandeja después | **0 filas** |
+
+  **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
+  leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
+  **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
+  el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
+
+  ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
+  omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
+  dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
+  de la lectura del descarte, y la peligrosa es la de "antes".
+
+  ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
+  aparece un caso donde el desfase se silencia, sube"*. Apareció.
+
+  💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
+  de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
+  —o rechaza cuando no coincide con el recalculado, como un control optimista de
+  concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
+  opción a evaluar al tomarla, no una decisión tomada.
+
+  ❓ **LA PREGUNTA, que es lo que la trae a esta sección (2026-08-24):** el 2026-08-19 decidiste
+  *"se anota, no se arregla en esta pasada"*, y era razonable **con la premisa de entonces** —que
+  el síntoma fuera "el descarte no pega", molesto y no peligroso—. Esa premisa resultó falsa: lo
+  medido es que **silencia un desfase que nadie vio**. Y el motivo del diferimiento —que arreglarlo
+  obligaba a meterse con el orden de bloqueo de la bandeja— **puede no aplicar**: si el cliente
+  manda el propuesto que vio y el servidor archiva ese (o rechaza si no coincide), no hace falta
+  ningún lock nuevo.
+  👉 **¿Se toma ahora por esa vía, o sigue esperando el frente de bloqueo?** No lo decido yo: es
+  reabrir una decisión tuya, y la reabro porque apareció evidencia que la contradice, no porque
+  no me guste.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
@@ -1699,6 +1676,46 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
+  saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
+  del proyecto dice que `movimientos_inventario` es la fuente de verdad y `item_producto.stock`
+  un saldo materializado. En modo `serie`/`lote` eso se autocorrige: `recalcularStockSerie/Lote`
+  (`inventario.service.ts:640-675`) recalcula el saldo desde `item_unidad`/`item_lote` en cada
+  movimiento. En modo `cantidad` —el default— solo hay un `UPDATE` incremental, y no existe
+  función ni endpoint que sume el kardex y lo compare.
+  ⚠️ **Severidad baja a propósito, y el reencuadre importa**: la lente lo reportó como alta, pero
+  **no hay ninguna divergencia medida**. El chokepoint (`registrarMovimiento`) se verificó sólido
+  por dos lentes independientes: todo camino de producción pasa por ahí y escribe movimiento y
+  saldo en la misma transacción. El escenario que ofrecía era un bug futuro hipotético, que no
+  es un escenario reproducible.
+  **Por eso está acá y no en 1:** lo primero es una query que compare las dos cosas sobre la base
+  de dev y diga si el drift existe. Si da cero, esto es defensa en profundidad y puede quedar
+  anotado; si da distinto de cero, cambia de sección y de prioridad. Construir un reconciliador
+  antes de esa medición es construir sin evidencia.
+
+  ✅ **MEDIDO el 2026-08-16: el drift es CERO, por tres caminos independientes.** Sobre la base de
+  dev **después de una suite e2e completa** —o sea con tráfico de escritura de todos los caminos
+  de producción—, 87 productos en modo `cantidad` y 175 movimientos:
+
+  | Medición | Resultado |
+  |---|---|
+  | `SUM(stock_resultante - stock_anterior)` vs `item_producto.stock` | 0 ítems con drift |
+  | `stock_resultante` del último movimiento vs el saldo | 0 ítems con drift |
+  | Cortes de cadena (`stock_anterior` de N ≠ `stock_resultante` de N-1) | 0 |
+
+  ⚠️ **La primera pasada dio 28 falsos positivos** y vale anotarlo: sumaba `cantidad` sin signo.
+  Las `salida` se guardan **positivas** (`tipo` es la que lleva el signo), y las `ajuste` guardan
+  `cantidad = 0` con el delta en `stock_anterior`/`stock_resultante`. Cualquier consulta futura
+  sobre el kardex tiene que sumar el **delta**, nunca `cantidad`.
+
+  ➡️ **Por su propio criterio, esto NO escala**: queda como defensa en profundidad anotada. Que
+  el drift no exista hoy no dice que un bug futuro no lo produzca — dice que **construir un
+  reconciliador ahora sería construir sin evidencia**, que es justo lo que la entrada quería
+  evitar. Si alguna vez se quiere igual, es una decisión nueva del owner y no un arreglo.
+
+  ➡️ **Mudada acá desde la § 2 el 2026-08-24**: la medición ya está hecha y su propio
+  criterio dice que no escala. Vivía en «medir primero» sin nada que medir.
 
 - [ ] **Pausar un tipo de regla: la ruta se descartó, y con ella sus dos huecos**
   (backend, medido 2026-08-23) — apareció como salida para esconder los cinco tipos que no
