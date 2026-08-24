@@ -212,12 +212,26 @@ decisión que no es mía).
   solo, comprobar que el módulo del cambio no está en el camino del test, y **re-correr la
   suite entera** —no un subconjunto—.
 
-  ✅ **CAUSA MEJOR SOSTENIDA, medida el 2026-08-15 por la auditoría de RBAC/auth:** los helpers
-  `login()` de 23 de los 32 specs leen el `access_token` **sin afirmar el status**, así que un
-  login fallido deja el token en `undefined` y el `describe` entero manda `Bearer undefined` →
-  401 en la ruta siguiente. Ver la entrada de la sección 1. ⚠️ Explica **la forma** del síntoma,
-  no el disparador: sigue sin saberse por qué el login falla esa vez, y por eso esta entrada
-  queda abierta. Lo que cambia es que el próximo rojo va a caer donde corresponde.
+  ⛔ **LA "CAUSA MEJOR SOSTENIDA" YA NO EXISTE — re-medida el 2026-08-24, y hay que dejar de
+  mandar gente hacia allá.** Decía que *"los helpers `login()` de 23 de los 32 specs leen el
+  `access_token` sin afirmar el status"*, así que un login fallido dejaba el token en `undefined`
+  y el `describe` entero mandaba `Bearer undefined`. **Medido hoy sobre los 47 specs: los 47
+  afirman el status del login antes de leer el token.** Cero excepciones.
+
+  ⚠️ **Y eso hace más grave lo que queda, no menos.** El avistaje de hoy en `papelera.e2e-spec.ts`
+  ocurrió **con el assert puesto** (`test/papelera.e2e-spec.ts:71`): el login devolvió 200 y el
+  token era real. O sea que **un token válido recibió un 401 en una ruta posterior**, que es un
+  mecanismo distinto del que esta entrada describía y sigue sin explicación.
+
+  📌 **Dos cosas que la re-medición deja como método**, porque cada una costó una pasada en falso:
+  - La afirmación vieja no se puede verificar con un grep ingenuo. Un primer intento marcó **46 de
+    47 como culpables** —contaba la declaración `access_token: string` de la interfaz como una
+    lectura— y un segundo dejó **uno**, que resultó falso positivo: afirmaba los dos status juntos
+    con `toEqual([200, 200])`, forma que el regex no cubría. **Medir mal en la dirección alarmante
+    es tan caro como no medir.**
+  - Descartes ya hechos para el próximo: no es la base moviéndose (`--verificar` verde), no es el
+    spec (pasa solo), no es el módulo del cambio en curso, y no es el pool disfrazado de 401
+    —`jwt.strategy.ts` → `validate()` no toca la base—.
   ⛔ **Y descarta la sospecha que esta entrada anotaba**: "el pool agotado disfrazado de 401" es
   falso. `jwt.strategy.ts` → `validate()` **no toca la base** (verificado abriendo el archivo:
   recibe el payload firmado y mapea cuatro campos), y ningún guard tiene `try/catch` que
