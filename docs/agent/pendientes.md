@@ -747,25 +747,38 @@ empezarlas.
   caja aparte, así que su lugar en el modelo no es el mismo y hay que decidir dónde se
   contabiliza.
 
-- [ ] **Los DTOs con `@IsNumberString` sin trazar hasta su punto de persistencia**
-  (backend, decisión d) — ⚠️ **re-medido el 2026-08-24, y el número de esta entrada estaba
-  viejo en la dirección que importa.** Decía *"66 usos, 29 evidentemente plata"*. Hoy el grep
-  da **79 usos**, pero **5 no son campos** —son menciones de `@IsNumberString` en comentarios
-  de services y specs, y en el propio decorador y el pipe—, así que los campos de DTO reales
-  son **74**, en 17 módulos. Creció ~12% desde que se escribió la entrada: **es un hueco que
-  se ensancha solo**, porque cada DTO nuevo con un monto lo agranda y nada avisa.
-  📌 **Y el "29 evidentemente plata" no se sostiene como estimación**: el piloto sobre `items`
-  (13 campos, el módulo más grande) dio **7 OK y 6 que no son plata, cero problemas** — ese
-  módulo ya había pasado por una auditoría. El tamaño real del trabajo se sabe con el
-  inventario, no con el grep. `@IsNumberString`
-  dice que es un número, no que quepa en la moneda; la misma auditoría que destapó este
-  frente podría encontrar más sitios donde el redondeo real lo sigue haciendo Postgres.
-  **Es un barrido, no un arreglo puntual**, y por eso no entró: el criterio para cada campo
-  es *monto cobrado* vs *tasa*, que es exactamente donde la spec de este frente se
-  contradijo a sí misma y hubo que corregirla al ejecutar.
-  ⚠️ **Buscar por conducta, no por decorador**: un campo puede estar sin marcar y aun así
-  cubierto porque su handler no lo persiste, y otro marcado puede no tener el pipe colgado.
-  El estado de partida está en [`patterns/backend.md` §3.1](../patterns/backend.md).
+- [ ] **`minimo` de un tramo: la ambigüedad que `valor` resolvió, en el campo de al lado**
+  (backend, **medido el 2026-08-24** →
+  [`investigaciones/2026-08-24-inventario-isnumberstring.md`](investigaciones/2026-08-24-inventario-isnumberstring.md))
+  — ⛔ **Esta entrada reemplaza a "los ~30 DTOs con `@IsNumberString`", cuyo barrido NO EXISTE.**
+  Se midieron los **72** campos de DTO: **30 OK, 39 que no son plata, 2 dudosos, y CERO campos de
+  plata sin marca o con marca sin pipe**. El borde de escala está cerrado; lo que queda es esto.
+
+  `TramoDto.minimo` (`descuentos/dto/create-descuento.dto.ts:18` y su gemelo en `recargos`) lleva
+  **solo `@IsNumberString()`** —ni escala, ni signo— y significa dos cosas según un hermano que el
+  decorador no puede leer: `calculo-precios.engine.ts:459` hace
+  `codigo === 'por_mayor' ? ctx.cantidad : ctx.monto`. El comentario de la entidad lo dice sin
+  rodeos: *"cantidad o monto mínimo para este tramo"*.
+
+  ⚠️ **Es la misma FORMA que el corte de `valor` (cerrado 2026-08-23), con consecuencia mucho más
+  chica, y decirlo importa para no inflar el arreglo.** Un `valor` mal leído multiplicaba el cobro
+  por cien; un `minimo` con decimales que la moneda no admite es **un umbral raro, no una plata mal
+  calculada** — la comparación `magnitud >= minimo` sigue funcionando. Lo que se pierde es que el
+  dato sea expresable.
+  📌 En `recargos` la ambigüedad es **teórica hoy**: `TIPOS_CON_TRAMOS` tiene un solo código, así
+  que ahí `minimo` siempre es monto. La certeza descansa en una lista hardcodeada, no en un
+  invariante: entra un segundo tipo por tramos y se vuelve ambiguo como en descuentos.
+
+- [ ] **La pasarela valida la escala por su cuenta, en paralelo al borde** (backend, medido el
+  2026-08-24 en el mismo inventario) — `PasarelaApiController` usa `ApiKeyGuard` y no
+  `JwtAuthGuard`, así que `req.user` no existe y `SembrarContextoInterceptor` no siembra el
+  `RequestContext`: **colgar `EscalaMonedaPipe` ahí tiraría 403 en cada request**. La moneda de
+  esas órdenes está **hardcodeada a `'CLP'`**, y la validación de escala que sí existe vive dentro
+  de `webpay-plus.provider.ts` (`montoEntero`).
+  ⚠️ **Son dos nociones de escala compitiendo**, el mismo patrón que ya mordió con la zona horaria.
+  Hoy no divergen porque todo es CLP; divergen el día que un tenant opere en otra moneda oficial.
+  **No es un arreglo de una línea:** exige decidir de dónde saca el tenant un controller que no
+  tiene JWT.
 
 - [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
   resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
@@ -784,6 +797,11 @@ empezarlas.
   ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
   moneda, porque `@EsCosto()` es escala fija.
 
+  ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
+  un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
+  `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
+  cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
+  a "el único módulo donde se tipea plata sin escala validada", que es falso.
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera
   la spec al revés**, entendiéndolo como dato de formato de UI. Es el minor unit de la
