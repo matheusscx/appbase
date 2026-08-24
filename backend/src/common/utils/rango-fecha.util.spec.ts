@@ -4,6 +4,7 @@ import {
   bordeFechaSql,
   bordeHastaSql,
   esFechaPura,
+  fechaLocalTenant,
   requiereZonaTenant,
   zonaHorariaTenant,
 } from './rango-fecha.util';
@@ -92,6 +93,53 @@ describe('rango-fecha.util', () => {
       await expect(zonaHorariaTenant(db, TENANT)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('fechaLocalTenant', () => {
+    const TENANT = 'tenant-uuid';
+
+    function dbConZona(zona: string) {
+      return {
+        query: jest.fn().mockResolvedValue([{ zona_horaria: zona }]),
+      } as unknown as DataSource;
+    }
+
+    it('colapsa el instante al día del LOCAL, no al de UTC', async () => {
+      // 02:30 UTC del 1-dic todavía es 30-nov en Chile. Si esto se resolviera
+      // en UTC, una promo que arranca el 1-dic empezaría a las 21:00 del 30.
+      const instante = new Date('2026-12-01T02:30:00Z');
+      await expect(
+        fechaLocalTenant(dbConZona('America/Santiago'), TENANT, instante),
+      ).resolves.toBe('2026-11-30');
+    });
+
+    it('respeta la zona de la provincia, que puede no ser la del país', async () => {
+      // Isla de Pascua está dos horas detrás del continente. El test existe
+      // para que el día que alguien devuelva la zona del país esto se ponga
+      // rojo — ver `resueltos.md` § "Una sola noción de zona horaria".
+      const instante = new Date('2026-12-01T04:30:00Z');
+      const santiago = await fechaLocalTenant(
+        dbConZona('America/Santiago'),
+        TENANT,
+        instante,
+      );
+      const pascua = await fechaLocalTenant(
+        dbConZona('Pacific/Easter'),
+        TENANT,
+        instante,
+      );
+      expect(santiago).toBe('2026-12-01');
+      expect(pascua).toBe('2026-11-30');
+    });
+
+    it('devuelve siempre `YYYY-MM-DD`, que es lo que se compara contra las columnas `date`', async () => {
+      const fecha = await fechaLocalTenant(
+        dbConZona('America/Santiago'),
+        TENANT,
+        new Date('2026-03-05T15:00:00Z'),
+      );
+      expect(fecha).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
   });
 

@@ -155,3 +155,30 @@ export async function zonaHorariaTenant(
   }
   return rows[0].zona_horaria;
 }
+
+/**
+ * El día del calendario **local del tenant** en el que cae un instante.
+ *
+ * Se usa para comparar contra columnas `date` —`fecha_inicio` / `fecha_fin` de
+ * las reglas— que no llevan hora: la pregunta que contestan es "¿qué día es
+ * hoy para este local?", y la respuesta cambia con el huso.
+ *
+ * ⚠️ **Por qué acá se convierte con `Intl` y no con Postgres, que es lo que hace
+ * el resto de este archivo.** No es el mismo problema: los helpers de arriba
+ * **expanden** una fecha a un rango dentro de un `WHERE`, y eso tiene que estar
+ * en SQL. Acá hay que **colapsar** un instante a una fecha para compararlo
+ * contra datos que ya están en memoria, y hacerlo en SQL sería un viaje a la
+ * base solo para formatear. `Intl` es DST-correcto y no agrega dependencia: el
+ * Node del contenedor tiene ICU completo (medido el 2026-08-23).
+ *
+ * `'en-CA'` no es una preferencia de idioma: es el locale cuyo formato corto ES
+ * `YYYY-MM-DD`, que es exactamente la forma que comparan las columnas.
+ */
+export async function fechaLocalTenant(
+  db: DataSource | EntityManager | Db,
+  tenantId: string,
+  instante: Date,
+): Promise<string> {
+  const zona = await zonaHorariaTenant(db, tenantId);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: zona }).format(instante);
+}
