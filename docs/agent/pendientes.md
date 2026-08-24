@@ -747,8 +747,17 @@ empezarlas.
   caja aparte, así que su lugar en el modelo no es el mismo y hay que decidir dónde se
   contabiliza.
 
-- [ ] **Los ~30 DTOs con `@IsNumberString` sin trazar hasta su punto de persistencia**
-  (backend, decisión d) — medidos: **66 usos, 29 evidentemente plata**. `@IsNumberString`
+- [ ] **Los DTOs con `@IsNumberString` sin trazar hasta su punto de persistencia**
+  (backend, decisión d) — ⚠️ **re-medido el 2026-08-24, y el número de esta entrada estaba
+  viejo en la dirección que importa.** Decía *"66 usos, 29 evidentemente plata"*. Hoy el grep
+  da **79 usos**, pero **5 no son campos** —son menciones de `@IsNumberString` en comentarios
+  de services y specs, y en el propio decorador y el pipe—, así que los campos de DTO reales
+  son **74**, en 17 módulos. Creció ~12% desde que se escribió la entrada: **es un hueco que
+  se ensancha solo**, porque cada DTO nuevo con un monto lo agranda y nada avisa.
+  📌 **Y el "29 evidentemente plata" no se sostiene como estimación**: el piloto sobre `items`
+  (13 campos, el módulo más grande) dio **7 OK y 6 que no son plata, cero problemas** — ese
+  módulo ya había pasado por una auditoría. El tamaño real del trabajo se sabe con el
+  inventario, no con el grep. `@IsNumberString`
   dice que es un número, no que quepa en la moneda; la misma auditoría que destapó este
   frente podría encontrar más sitios donde el redondeo real lo sigue haciendo Postgres.
   **Es un barrido, no un arreglo puntual**, y por eso no entró: el criterio para cada campo
