@@ -36,12 +36,7 @@ const CLASE = 'descuento';
  * `create()`— porque `update()` necesita la MISMA lista para no dejar vaciar
  * por `PATCH` un valor que `create()` exigió.
  */
-const TIPOS_CON_VALOR_UNICO = [
-  'directo',
-  'metodo_pago',
-  'pronto_pago',
-  'promocional',
-];
+const TIPOS_CON_VALOR_UNICO = ['directo', 'metodo_pago', 'pronto_pago'];
 
 /** Tipos que expresan su monto con `tramos` en vez de con un `valor` único. */
 const TIPOS_CON_TRAMOS = ['por_mayor', 'por_monto_venta'];
@@ -567,10 +562,6 @@ export class DescuentosService {
       throw new BadRequestException(
         'Días de vencimiento debe estar entre 0 y 365',
       );
-    if (codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))
-      throw new BadRequestException(
-        'Fechas de inicio y fin requeridas para descuento promocional',
-      );
   }
 
   // Called from update() — only validate fields explicitly present in the DTO
@@ -700,14 +691,6 @@ export class DescuentosService {
     )
       throw new BadRequestException(
         'Días de vencimiento debe estar entre 0 y 365',
-      );
-    if (
-      (dto.fechaInicio !== undefined || dto.fechaFin !== undefined) &&
-      codigo === 'promocional' &&
-      (!dto.fechaInicio || !dto.fechaFin)
-    )
-      throw new BadRequestException(
-        'Fechas de inicio y fin requeridas para descuento promocional',
       );
   }
 

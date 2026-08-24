@@ -542,7 +542,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
   });
 
   describe('reglas diferidas (fuera de alcance esta fase)', () => {
-    it.each(['promocional', 'mora', 'pronto_pago'])(
+    it.each(['mora', 'pronto_pago'])(
       'codigo %s no se evalúa (monto 0)',
       (codigo) => {
         const r = calcularVenta(
@@ -557,6 +557,28 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
       },
     );
+
+    // `promocional` se eliminó como tipo de regla (2026-08-23): ya no existe
+    // como código sembrable, así que salió de `DIFERIDAS`. Este test fija esa
+    // conducta desde el otro lado — si `codigo: 'promocional'` volviera a
+    // colarse en `DIFERIDAS` (por ejemplo porque alguien reintroduce el tipo
+    // sin revisar esta lista), quedaría diferido en silencio en vez de
+    // respetar su vigencia como cualquier otra regla, que es justo el bug que
+    // este frente cerró.
+    it('codigo `promocional` YA NO es diferido: se evalúa como una regla normal', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ codigo: 'promocional', valorPorcentaje: '0.50' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).not.toBe('0.000000');
+    });
   });
 
   describe('redondeo', () => {
@@ -1409,7 +1431,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     it.each([
       [
         'diferida',
-        regla({ codigo: 'promocional', valorPorcentaje: '0.50' }),
+        regla({ codigo: 'mora', valorPorcentaje: '0.50' }),
         null as string | null,
       ],
       [

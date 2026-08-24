@@ -24,7 +24,6 @@ const CODIGOS_DESCUENTO_SEED = [
   'metodo_pago',
   'por_mayor',
   'por_monto_venta',
-  'promocional',
   'pronto_pago',
 ]
 
@@ -57,17 +56,20 @@ describe('reglas-form-config', () => {
     expect(sinMonto).toEqual([])
   })
 
-  it('`directo` deja elegir porcentaje o monto fijo, y pide valor', () => {
+  it('`directo` deja elegir porcentaje o monto fijo, pide valor y admite fechas opcionales', () => {
     // Es un descuento de propósito general: no tiene tramos, ni métodos, ni
-    // días, ni fechas. Solo modo + valor.
+    // días. Desde que `promocional` se eliminó (2026-08-23), `directo` es el
+    // que cubre "10% del 15 al 20 de septiembre" — con fechas OPCIONALES, no
+    // obligatorias como las exigía `promocional`.
     expect(DESCUENTO_CONFIG.directo).toMatchObject({
       modo: 'libre',
       campoValor: true,
       campoMetodos: false,
       campoTramos: false,
       campoDias: false,
-      campoFechaInicio: false,
-      campoFechaFin: false,
+      campoFechaInicio: true,
+      campoFechaFin: true,
+      fechasRequeridas: false,
     })
   })
 })

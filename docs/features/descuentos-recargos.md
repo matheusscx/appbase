@@ -50,7 +50,12 @@ Quien retomara ese frente iba a diseñar contra un sistema que no existe.
 
 | Se aplica bien | Se aplica MAL | No se aplica |
 |---|---|---|
-| `directo`, `general`, `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta`, `recargo_fijo`, `recargo_porcentaje` | `metodo_pago` y `recargo_metodo_pago` (ignoran sus tramos); `interes_simple` e `interes_compuesto` (cobran la tasa una sola vez y sin mirar plazo — y son idénticos entre sí) | `promocional`, `mora`, `pronto_pago` (en `DIFERIDAS`) |
+| `directo`, `general`, `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta`, `recargo_fijo`, `recargo_porcentaje` | `metodo_pago` y `recargo_metodo_pago` (ignoran sus tramos); `interes_simple` e `interes_compuesto` (cobran la tasa una sola vez y sin mirar plazo — y son idénticos entre sí) | `mora`, `pronto_pago` (en `DIFERIDAS`) |
+
+⚠️ **`promocional` se eliminó del catálogo (2026-08-23):** su caso —un descuento con
+vigencia obligatoria— se mudó al futuro módulo de promociones. La capacidad de expresar
+*"10% del 15 al 20 de septiembre"* no desapareció: `directo` ganó `fechaInicio`/`fechaFin`
+opcionales. Detalle: `docs/superpowers/specs/2026-08-23-vigencia-por-fecha-design.md`.
 
 El detalle de cada hueco y qué hace falta para cerrarlo está en
 [`pendientes.md`](../agent/pendientes.md) § 6, *"Cinco tipos de regla no hacen lo que la

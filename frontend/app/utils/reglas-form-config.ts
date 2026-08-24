@@ -32,12 +32,11 @@ export const DESCUENTO_CONFIG: Record<string, TipoConfig> = {
   // `directo` faltaba hasta el 2026-08-01: el tipo más básico ("Descuento
   // directo", el de propósito general) no mostraba ni modo ni valor. Se
   // encontró haciendo un smoke de otra feature, no por un test.
-  directo:         { modo: 'libre',      campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
+  directo:         { modo: 'libre',      campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: true,  campoFechaFin: true,  fechasRequeridas: false },
   metodo_pago:     { modo: 'libre',      campoValor: true,  campoMetodos: true,  campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   pronto_pago:     { modo: 'porcentaje', campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: true,  labelDias: 'Días antes del vencimiento', diasMin: 1, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   por_mayor:       { modo: 'libre',      campoValor: false, campoMetodos: false, campoTramos: true,  labelTramos: 'Cantidad mínima', campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   por_monto_venta: { modo: 'libre',      campoValor: false, campoMetodos: false, campoTramos: true,  labelTramos: 'Monto mínimo',    campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: true,  campoFechaFin: true,  fechasRequeridas: false },
-  promocional:     { modo: 'libre',      campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: true,  campoFechaFin: true,  fechasRequeridas: true  },
 }
 
 export const RECARGO_CONFIG: Record<string, TipoConfig> = {

@@ -423,11 +423,15 @@ describe('DescuentosService', () => {
       expect(managerMock.save).toHaveBeenCalledTimes(2);
     });
 
-    it('creates promocional with fechaInicio and fechaFin', async () => {
-      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
+    // `promocional` se eliminó (2026-08-23): su caso —un descuento con
+    // vigencia— lo cubre ahora `directo` con fechas OPCIONALES. Este test
+    // reemplaza a "creates promocional with fechaInicio and fechaFin":
+    // conserva las mismas fechas del body, sobre el tipo que las hereda.
+    it('creates directo with fechaInicio and fechaFin', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
       await service.create(TENANT, {
         nombre: 'Promo navidad',
-        tipoReglaId: 'tipo-promocional',
+        tipoReglaId: 'tipo-directo',
         valorPorcentaje: '0.20',
         modo: 'porcentaje',
         fechaInicio: '2024-12-01',
@@ -435,18 +439,6 @@ describe('DescuentosService', () => {
       });
       // No children → save called once
       expect(managerMock.save).toHaveBeenCalledTimes(1);
-    });
-
-    it('rejects promocional without dates', async () => {
-      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
-      await expect(
-        service.create(TENANT, {
-          nombre: 'Promo',
-          tipoReglaId: 'tipo-promocional',
-          valorPorcentaje: '0.20',
-          modo: 'porcentaje',
-        }),
-      ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects duplicate nombre', async () => {
@@ -1093,9 +1085,9 @@ describe('DescuentosService', () => {
         id: 'd1',
         tenantId: TENANT,
         nombre: 'Promo',
-        tipoReglaId: 'tipo-promocional',
+        tipoReglaId: 'tipo-directo',
       });
-      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
 
       await expect(
         service.update(TENANT, 'd1', { valorPorcentaje: null }),
@@ -1107,10 +1099,10 @@ describe('DescuentosService', () => {
         id: 'd1',
         tenantId: TENANT,
         nombre: 'Promo',
-        tipoReglaId: 'tipo-promocional',
+        tipoReglaId: 'tipo-directo',
         valorPorcentaje: '0.15',
       });
-      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
 
       await expect(
         service.update(TENANT, 'd1', { nombre: 'Promo renombrada' }),

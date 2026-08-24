@@ -291,7 +291,7 @@ export interface ResultadoVenta {
 // ── Constantes de estrategia ────────────────────────────────────────────────
 
 /** Reglas que requieren datos de venta/crédito aún inexistentes: no se evalúan. */
-const DIFERIDAS = new Set(['promocional', 'mora', 'pronto_pago']);
+const DIFERIDAS = new Set(['mora', 'pronto_pago']);
 const METODO_PAGO_CODIGOS = new Set(['metodo_pago', 'recargo_metodo_pago']);
 const ZERO = new Decimal(0);
 

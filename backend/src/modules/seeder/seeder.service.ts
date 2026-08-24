@@ -2523,15 +2523,6 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
       },
       {
-        id: '550e8400-e29b-41d4-a716-446655440121',
-        clase: 'descuento',
-        codigo: 'promocional',
-        nombre: 'Promocional',
-        descripcion:
-          'Descuento de campaña con vigencia obligatoria. Se aplica únicamente entre la fecha de inicio y fin definidas.',
-        activo: true,
-      },
-      {
         id: '550e8400-e29b-41d4-a716-446655440122',
         clase: 'recargo',
         codigo: 'general',
@@ -2849,7 +2840,6 @@ export class SeederService implements OnApplicationBootstrap {
     const TIPO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
     const TIPO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440118';
     const TIPO_POR_MONTO_VENTA = '550e8400-e29b-41d4-a716-446655440119';
-    const TIPO_PROMOCIONAL = '550e8400-e29b-41d4-a716-446655440121';
     const TIPO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
     const descuentos: Partial<Descuento>[] = [
       {
@@ -2897,11 +2887,14 @@ export class SeederService implements OnApplicationBootstrap {
       {
         id: '550e8400-e29b-41d4-a716-446655440128',
         tenantId: PARIS,
-        tipoReglaId: TIPO_PROMOCIONAL,
+        tipoReglaId: TIPO_DIRECTO,
         nombre: 'Promo verano 2026-27',
         modo: ModoRegla.PORCENTAJE,
         valorPorcentaje: '0.15',
-        condicionTipo: CondicionTipo.FECHA,
+        // `NINGUNA` y no `FECHA`: es lo que `derivarCondicionTipo` produce para
+        // `directo`, así una fila sembrada y una creada por API son iguales.
+        // Verificado el 2026-08-23: nadie lee `condicion_tipo`.
+        condicionTipo: CondicionTipo.NINGUNA,
         fechaInicio: '2026-12-01',
         fechaFin: '2027-01-31',
         activo: true,

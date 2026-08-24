@@ -32,7 +32,6 @@ const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 
 // Tipos sembrados (`seeder.service.ts` → `seedTiposRegla`).
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
-const TIPO_DESCUENTO_PROMOCIONAL = '550e8400-e29b-41d4-a716-446655440121';
 const TIPO_DESCUENTO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
 const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
 const TIPO_RECARGO_POR_MONTO = '550e8400-e29b-41d4-a716-446655440353';
@@ -204,7 +203,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const nombre = `Promo PATCH E2E ${Date.now()}`;
     const creado = await crearDescuento({
       nombre,
-      tipoReglaId: TIPO_DESCUENTO_PROMOCIONAL,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
       modo: 'porcentaje',
       valorPorcentaje: '0.15',
       fechaInicio: '2026-01-01',
@@ -584,5 +583,18 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
 
     expect(res.status).toBe(400);
     expect((res.body as { message: string }).message).toMatch(/decimal/);
+  });
+
+  it('el tipo `promocional` ya no existe en el catálogo', async () => {
+    // Se eliminó el 2026-08-23: su caso se mudó al módulo de promociones, y
+    // `directo` con fechas cubre el descuento con vigencia. Sin este test, el
+    // tipo puede volver por un merge del seeder y nadie se entera.
+    const res = await request(app.getHttpServer())
+      .get('/api/tipos-regla?clase=descuento')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const codigos = (res.body as { codigo: string }[]).map((t) => t.codigo);
+    expect(codigos).not.toContain('promocional');
+    expect(codigos).toContain('directo');
   });
 });
