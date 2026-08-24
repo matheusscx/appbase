@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { precioUnitarioLinea, type CuentaLineaDetalle } from './useSalones'
+import { cuentaToCalcularInput, precioUnitarioLinea, type CuentaDetalle, type CuentaLineaDetalle } from './useSalones'
 
 function linea(personalizacion: CuentaLineaDetalle['personalizacion']): CuentaLineaDetalle {
   return {
@@ -11,6 +11,25 @@ function linea(personalizacion: CuentaLineaDetalle['personalizacion']): CuentaLi
     cantidad: '1',
     cantidadEnviada: '0',
     personalizacion,
+  }
+}
+
+function cuenta(overrides: Partial<CuentaDetalle> = {}): CuentaDetalle {
+  return {
+    id: 'cuenta-1',
+    numero: 1,
+    nombre: null,
+    estado: 'abierta',
+    mesaId: 'mesa-1',
+    ventaId: null,
+    garzonAperturaId: null,
+    garzonAperturaNombre: null,
+    garzonResponsableId: null,
+    garzonResponsableNombre: null,
+    garzonCierreId: null,
+    garzonCierreNombre: null,
+    lineas: [linea(null)],
+    ...overrides,
   }
 }
 
@@ -83,5 +102,16 @@ describe('precioUnitarioLinea', () => {
     })
     // 4300 + (1500 × 2) + (300 × 1) = 7600
     expect(precioUnitarioLinea(l)).toBe('7600')
+  })
+})
+
+describe('cuentaToCalcularInput', () => {
+  it('manda el cuentaId de la cuenta, no solo las líneas', () => {
+    // Sin esto la previsualización del salón evalúa vigencia de reglas por
+    // fecha contra "ahora" mientras el cobro evalúa `abierta_el`: la mesa que
+    // se sienta con la promo vigente y paga después de que venció vería el
+    // total sin descuento en pantalla y se le cobraría CON descuento.
+    const input = cuentaToCalcularInput(cuenta({ id: 'cuenta-xyz' }))
+    expect(input.cuentaId).toBe('cuenta-xyz')
   })
 })

@@ -309,6 +309,34 @@ describe('OnlineService', () => {
     ).rejects.toThrow('métodos de pago');
   });
 
+  it('pagar: nunca reenvía al motor el cuentaId que manda el cliente', async () => {
+    // `pagar` autoriza el cargo a la tarjeta contra `resultado.totales.totalFinal`.
+    // Si un `cuentaId` de una cuenta abierta dentro de una promo vieja llegara
+    // al motor, movería la vigencia de las reglas con fecha y el monto cobrado
+    // divergiría del total que la venta persiste después (que recalcula sin
+    // `cuentaId`, con "ahora"). La tienda no tiene noción de cuenta de salón.
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([
+      { metodoPagoId: 'mp-credito', nombre: 'Crédito', habilitada: true },
+    ]);
+    pagosRedirect.iniciar.mockResolvedValue({
+      ordenId: 'orden-4',
+      urlWebpay: 'https://webpay/redirect',
+    });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', {
+      ...dto,
+      cuentaId: 'cuenta-de-una-promo-vencida',
+    });
+
+    const [, calcularDto] = calculo.calcular.mock.calls[0] as [
+      string,
+      { cuentaId?: string },
+    ];
+    expect(calcularDto.cuentaId).toBeUndefined();
+  });
+
   it('resultadoOrden: mapea a { estado, ventaId, detalle del pago }', async () => {
     pagosRedirect.obtenerResultado.mockResolvedValue({
       ordenId: 'orden-1',

@@ -21,6 +21,14 @@ export interface CalcularVentaInput {
   metodoPagoId?: string
   descuentosVentaIds?: string[]
   recargosVentaIds?: string[]
+  /**
+   * Cuenta de salón cuyo `abierta_el` decide la vigencia de las reglas con
+   * fecha. Sin esto la previsualización de la cuenta evalúa "ahora" mientras
+   * el cobro evalúa la apertura: la mesa que se sienta con la promo vigente y
+   * paga después de que venció vería un total sin descuento en pantalla y
+   * cobrado con descuento.
+   */
+  cuentaId?: string
 }
 
 export interface TrazaRegla {

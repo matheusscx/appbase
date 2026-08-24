@@ -249,13 +249,21 @@ Cada tenant define sus propias reglas reutilizables:
 
 **El tipo y el modo son ejes independientes.** El *tipo* (`tipos_regla.codigo`)
 dice **cuándo** se aplica la regla: `pronto_pago` (si paga antes), `metodo_pago`
-(según el medio), `por_mayor` / `por_monto_venta` (por tramos), `promocional`
-(dentro de un rango de fechas), y `directo` — **el que no tiene condición: se
-aplica siempre**. El *modo* dice **cómo** se expresa el importe: porcentaje o
-monto fijo. Cualquier tipo puede ir en cualquiera de los dos modos, salvo
-`pronto_pago`, `interes_simple` e `interes_compuesto`, que el backend fuerza a
-porcentaje. Que `directo` sea el más usado con monto fijo es un accidente del
-catálogo de ejemplo, no la definición.
+(según el medio), `por_mayor` / `por_monto_venta` (por tramos), y `directo` — el
+que no tiene otra condición que la fecha. El *modo* dice **cómo** se expresa el
+importe: porcentaje o monto fijo. Cualquier tipo puede ir en cualquiera de los
+dos modos, salvo `pronto_pago`, `interes_simple` e `interes_compuesto`, que el
+backend fuerza a porcentaje. Que `directo` sea el más usado con monto fijo es
+un accidente del catálogo de ejemplo, no la definición.
+
+**Cualquier regla con `fecha_inicio`/`fecha_fin` vale solo entre esas fechas**
+(ambos bordes inclusive, día local del tenant) — no es un tipo aparte: las
+fechas son opcionales en cualquier tipo, y una regla sin ellas está vigente
+siempre. El tipo `promocional` (fechas obligatorias) se eliminó: era la misma
+capacidad con un nombre que iba a chocar con el futuro módulo de promociones —
+ver `docs/superpowers/specs/2026-08-23-vigencia-por-fecha-design.md`. Una regla
+fuera de vigencia no cobra y no avisa al vender; la pantalla de configuración
+la marca "Vencida"/"Programada".
 
 **Toda regla expresa su monto** (decisión del owner, 2026-08-01): un descuento
 o recargo sin importe no descuenta ni recarga nada, así que no se puede guardar.

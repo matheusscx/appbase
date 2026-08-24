@@ -219,9 +219,18 @@ function tienePersonalizacionConRecargo(l: CuentaLineaDetalle): boolean {
   return personalizacionAfectaPrecio(l.personalizacion)
 }
 
-/** Mapea las líneas de una cuenta a la entrada del motor de precios. */
+/**
+ * Mapea las líneas de una cuenta a la entrada del motor de precios.
+ *
+ * Manda `cuentaId`: sin esto la previsualización evalúa vigencia contra
+ * "ahora" mientras el cobro (`cerrarCuenta` → `crearEnTransaccion`) evalúa
+ * `abierta_el`. La mesa que se sentó con la promo vigente y paga después de
+ * que venció vería el total sin descuento en pantalla y se le cobraría CON
+ * descuento — la pantalla mentiría sobre lo que se cobra.
+ */
 export function cuentaToCalcularInput(cuenta: CuentaDetalle): CalcularVentaInput {
   return {
+    cuentaId: cuenta.id,
     lineas: cuenta.lineas.map((l) => {
       const precioUnitario = tienePersonalizacionConRecargo(l)
         ? precioUnitarioLinea(l)

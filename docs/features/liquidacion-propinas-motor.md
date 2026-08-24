@@ -339,7 +339,7 @@ orden. `HORAS_TRABAJADAS`/`MANUAL` siguen cubiertos por los unit tests.
 ### QA E2E date/time inputs (Chrome DevTools)
 
 Cubre pickers Nuxt UI (`AppDate*` / `AppTimeInput`) con smoke + mutaciones
-(turno, liquidación, descuento promocional, filtros):
+(turno, liquidación, descuento con vigencia por fecha, filtros):
 
 ```bash
 chrome-devtools start --headless=false

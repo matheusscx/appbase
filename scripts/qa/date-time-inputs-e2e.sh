@@ -38,7 +38,10 @@ QA_REPLICA_URL="${QA_REPLICA_URL:-$QA_DB_URL}"
 
 QA_TURNO_NOMBRE="${QA_TURNO_NOMBRE:-QA DateTime Turno}"
 QA_DESCUENTO_NOMBRE="${QA_DESCUENTO_NOMBRE:-QA DateTime Promo}"
-QA_TIPO_PROMOCIONAL='550e8400-e29b-41d4-a716-446655440121'
+# `promocional` se eliminó como tipo de regla (2026-08-23): el caso ahora usa
+# `directo`, que ganó fechaInicio/fechaFin OPCIONALES en el mismo frente y es
+# justo lo que este harness ejercita (fechas por AppDateInput).
+QA_TIPO_DIRECTO='550e8400-e29b-41d4-a716-446655440337'
 
 PASS=0
 FAIL=0
@@ -452,7 +455,8 @@ WHERE tenant_id = '$QA_TENANT_ID' AND nombre = '$QA_DESCUENTO_NOMBRE' AND elimin
   fill_input_qa_or_placeholder "" "Mi descuento" "$QA_DESCUENTO_NOMBRE"
   sleep 0.3
 
-  # Seleccionar tipo Promocional
+  # Seleccionar tipo Descuento directo (nombre seed de `directo`, que expone las
+  # dos fechas — `promocional`, que las exigía, ya no existe como tipo).
   cd_eval '() => {
     const triggers = [...document.querySelectorAll("button, [role=combobox], input")]
       .filter(e => /tipo|selecciona/i.test((e.textContent || e.getAttribute("placeholder") || "")));
@@ -463,7 +467,7 @@ WHERE tenant_id = '$QA_TENANT_ID' AND nombre = '$QA_DESCUENTO_NOMBRE' AND elimin
   sleep 0.5
   cd_eval '() => {
     const opt = [...document.querySelectorAll("[role=option], [cmdk-item], li, div, button")]
-      .find(e => (e.textContent || "").trim() === "Promocional");
+      .find(e => (e.textContent || "").trim() === "Descuento directo");
     if (!opt) return "miss-tipo";
     opt.click();
     return "ok";

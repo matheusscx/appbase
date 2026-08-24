@@ -27,13 +27,15 @@ auditable. El cálculo de dinero usa **Decimal.js** en todo (nunca `number`).
 
 - **Incluido**: cálculo por línea y por venta; reglas planas (% o monto fijo),
   tramos (`por_mayor` por cantidad, `por_monto_venta` por monto) y filtro por
-  método de pago; desbruteo cuando `precio_incluye_impuesto`; `base` vs
-  `compuesto`; orden de fórmula configurable; `escala_calculo` + `modo_redondeo`;
-  **cuantización a la escala de la moneda oficial** al cerrar cada paso, con
-  `nivel_redondeo` (`linea` | `documento`) eligiendo dónde cierra.
-- **NO incluido (futuro)**: reglas por fecha (`promocional`) y por vencimiento
-  (`mora`, `pronto_pago`) — requieren datos de venta/crédito aún inexistentes;
-  condiciones `monto_minimo`/`cantidad_minima`/`customer`/`categoria`.
+  método de pago; **vigencia por fecha** para cualquier regla con
+  `fechaInicio`/`fechaFin` (ver `docs/superpowers/specs/2026-08-23-vigencia-por-fecha-design.md`);
+  desbruteo cuando `precio_incluye_impuesto`; `base` vs `compuesto`; orden de
+  fórmula configurable; `escala_calculo` + `modo_redondeo`; **cuantización a la
+  escala de la moneda oficial** al cerrar cada paso, con `nivel_redondeo`
+  (`linea` | `documento`) eligiendo dónde cierra.
+- **NO incluido (futuro)**: reglas por vencimiento (`mora`, `pronto_pago`) —
+  requieren datos de crédito aún inexistentes; condiciones
+  `monto_minimo`/`cantidad_minima`/`customer`/`categoria`.
   (Persistencia de ventas y conversión a moneda oficial **ya existen** desde entonces —
   ver `convertirAMonedaOficial`, más abajo.)
 
@@ -360,7 +362,9 @@ CPP de inventario, el costo propuesto de una receta y el reparto de propinas tam
 redondean y siguen en HALF_UP fijo (`docs/agent/pendientes.md`).
 
 **Decisiones**: `monto_fijo` se aplica por línea (no por unidad); las reglas
-diferidas (`promocional`, `mora`, `pronto_pago`) devuelven monto 0; los ids de
+diferidas (`mora`, `pronto_pago`) devuelven monto 0; una regla con fechas fuera
+de su vigencia hace `continue` antes de evaluar (sin traza ni advertencia); los
+ids de
 descuento/recargo/impuesto en la línea **reemplazan** a los asociados al ítem
 (override) — con una excepción: para impuestos, el override solo alcanza a los
 **adicionales** (`tipo='otro'`). El IVA nunca sale de `impuestoIds`, ni del ítem

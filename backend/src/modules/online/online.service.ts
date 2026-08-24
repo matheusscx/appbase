@@ -294,7 +294,16 @@ export class OnlineService {
     }
 
     return {
-      calcularDto: { ...dto, lineas: calcularLineas },
+      // `cuentaId` NUNCA se reenvía tal cual llegó del cliente: `CalcularVentaDto`
+      // lo declara opcional para la previsualización de salón (que no cobra), y
+      // `whitelist: true` lo deja pasar el pipe igual en este DTO. Pero este
+      // camino sí cobra — `pagar()` autoriza `resultado.totales.totalFinal`
+      // contra la tarjeta con el resultado de este mismo `calcularDto` — así que
+      // un `cuentaId` de una cuenta abierta dentro de una promo vieja movería la
+      // vigencia y descuadraría el cargo contra lo que la venta persiste después
+      // (el callback recalcula sin `cuentaId`, o sea con "ahora"). La tienda
+      // online no tiene noción de cuenta de salón: el instante siempre es ahora.
+      calcularDto: { ...dto, cuentaId: undefined, lineas: calcularLineas },
       lineasSnapshot,
     };
   }
