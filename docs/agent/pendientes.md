@@ -1337,12 +1337,27 @@ de crédito. Las cuatro decisiones, con lo que se midió al tomarlas:
    `tenants → provincia → pais` y devuelve **`pais.zona_horaria_principal`**: pasa *por* la
    provincia y se saltea su columna. El propio nombre `zona_horaria_**principal**` del país
    dice que el modelo esperaba que la provincia mandara.
-   ✅ **Decidido: se corrige el helper, y la provincia manda.** Es una línea, y **hoy no
-   cambia ningún resultado** —medido el 2026-08-23: los seis tenants están en Región
-   Metropolitana, donde provincia y país coinciden—. Pero cambia conducta de sus tres
-   lectores: `mermas.service.ts`, `pasarela/services/cobros.service.ts` y
-   `turnos/sesiones-garzon.service.ts`, así que **entra en el gate con ellos**. Sin esto, el
-   primer local de Isla de Pascua corta sus promos —y ya hoy, sus reportes— dos horas antes.
+   ✅ **Decidido: la provincia manda.**
+   ⚠️ **Corrección del mismo día: NO es «una línea en el helper», y decirlo así mandaba al
+   próximo a un arreglo a medias.** Al buscar por conducta y no por el nombre del helper
+   aparecieron **tres copias byte a byte de la misma consulta**, las tres devolviendo la del
+   país: `common/utils/rango-fecha.util.ts:122` (el helper compartido `zonaHorariaTenant`),
+   `turnos/sesiones-garzon.service.ts:559` y `propinas/propina-reportes.service.ts:279`, cada
+   uno con su `private zonaHoraria()` propio. Corregir solo el helper deja **dos módulos
+   leyendo la del país y uno la de la provincia**: dos nociones compitiendo, peor que el bug.
+   **El trabajo es:** corregir la consulta **y** hacer que los dos privados usen el helper
+   compartido, para que quede una sola definición y la próxima no nazca duplicada.
+   **Lectores afectados** (los que consumen el valor, no los que lo consultan):
+   `mermas.service.ts`, `pasarela/services/cobros.service.ts`,
+   `turnos/sesiones-garzon.service.ts` y `propinas/propina-reportes.service.ts` — **entran en
+   el gate con esto**.
+   📊 **Hoy no cambia ningún resultado** —medido el 2026-08-23: los seis tenants están en
+   Región Metropolitana, donde provincia y país coinciden—. Sin esto, el primer local de Isla
+   de Pascua corta sus promos, y ya hoy sus reportes, dos horas antes.
+   📌 **Qué pasa con `pais.zona_horaria_principal`:** se queda, pero sin lectores en runtime.
+   Su sentido pasa a ser el default del país al **crear una provincia** —el nombre
+   «principal» ya lo decía—, no la zona con la que se calcula. Decirlo explícito es lo que
+   evita que alguien la vuelva a leer «porque estaba ahí».
 3. **El borde `hasta` es inclusivo del día**, sin decisión nueva: se reusa el criterio ya
    tomado el 2026-08-22 para los filtros de fecha, que vive en el mismo
    `rango-fecha.util.ts` (`bordeHastaSql` expande a `< fecha+1`). Seguir lo existente, no
