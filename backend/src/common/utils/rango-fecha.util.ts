@@ -111,15 +111,34 @@ export function bordeHastaSql(
 }
 
 /**
- * Zona horaria del tenant, que sale del **país**, no de una preferencia del
- * tenant — misma fuente y misma consulta que usa el reporte de propinas.
+ * Zona horaria del tenant. **Sale de la PROVINCIA**, no de una preferencia del
+ * tenant y no del país.
+ *
+ * ⚠️ Hasta el 2026-08-23 devolvía `pais.zona_horaria_principal`: esta consulta
+ * pasaba *por* la provincia para llegar al país y se salteaba
+ * `provincia.zona_horaria`, que existe, es `NOT NULL` y está sembrada con
+ * valores distintos —`America/Santiago` y `Pacific/Easter`—. El nombre
+ * «principal» del país ya decía que la provincia manda; la del país queda como
+ * el default al **crear** una provincia, no como la zona con la que se calcula.
+ * Nadie la lee en runtime.
+ *
+ * 📌 Y no era un lugar: eran **tres copias byte a byte** de esta consulta
+ * —acá, en `sesiones-garzon.service.ts` y en `propina-reportes.service.ts`—.
+ * Los dos privados se colapsaron contra esta función en el mismo commit, porque
+ * corregir una sola habría dejado dos módulos leyendo la del país y uno la de
+ * la provincia: dos nociones compitiendo, peor que el bug original.
+ *
+ * El `JOIN pais` se queda aunque ya no se lea su columna: es lo que impide
+ * resolver la zona de un tenant cuyo país está dado de baja, y hay un test que
+ * lo exige en `sesiones-garzon.service.spec.ts` —nació porque el mutante que
+ * borraba estos filtros pasaba la suite entera—.
  */
 export async function zonaHorariaTenant(
   db: DataSource | EntityManager | Db,
   tenantId: string,
 ): Promise<string> {
   const rows: { zona_horaria: string }[] = await db.query(
-    `SELECT p.zona_horaria_principal AS zona_horaria
+    `SELECT pr.zona_horaria AS zona_horaria
        FROM tenants t
        JOIN provincia pr
          ON pr.provincia_id = t.provincia_id

@@ -843,9 +843,9 @@ espejo donde el cajero se autorevisa.
 descuadraron, cuántos por nivel, cuántos altos sin revisar y la suma con signo del efectivo.
 La bandeja lo muestra arriba.
 
-"El día" es el día **local del tenant** (zona horaria del país, misma fuente que el resto de
-los reportes), no el UTC: en Chile un cierre de las 22:00 cae en el día siguiente en UTC y
-saldría del resumen de su propia jornada.
+"El día" es el día **local del tenant** (zona horaria de su **provincia**, misma fuente que
+el resto de los reportes — ver `zonaHorariaTenant`), no el UTC: en Chile un cierre de las
+22:00 cae en el día siguiente en UTC y saldría del resumen de su propia jornada.
 
 🔲 **El envío programado es trabajo futuro.** El owner pidió *"un resumen diario"*; lo que
 existe hoy es el **dato expuesto y mostrado al abrir la pantalla**. No se construyó mailer

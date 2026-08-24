@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import { zonaHorariaTenant } from '../../common/utils/rango-fecha.util';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { TurnosService } from './turnos.service';
@@ -555,23 +556,11 @@ export class SesionesGarzonService {
    * advierte que un módulo nuevo puede olvidar.
    */
   private async zonaHoraria(tenantId: string): Promise<string> {
-    const rows: { zona_horaria: string }[] = await this.db.query(
-      `SELECT p.zona_horaria_principal AS zona_horaria
-         FROM tenants t
-         JOIN provincia pr
-           ON pr.provincia_id = t.provincia_id
-          AND pr.eliminado_el IS NULL
-         JOIN pais p
-           ON p.pais_id = pr.pais_id
-          AND p.eliminado_el IS NULL
-        WHERE t.tenant_id = $1
-          AND t.eliminado_el IS NULL`,
-      [tenantId],
-    );
-    if (!rows[0]?.zona_horaria) {
-      throw new NotFoundException('No se encontró la zona horaria del tenant');
-    }
-    return rows[0].zona_horaria;
+    // Antes esta consulta estaba copiada acá, byte a byte. Se colapsó contra
+    // `zonaHorariaTenant` el 2026-08-23, al corregir que la zona sale de la
+    // PROVINCIA y no del país: con tres copias, arreglar una sola dejaba
+    // módulos leyendo zonas distintas.
+    return zonaHorariaTenant(this.db, tenantId);
   }
 
   /**

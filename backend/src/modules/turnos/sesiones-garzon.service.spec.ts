@@ -699,7 +699,14 @@ describe('SesionesGarzonService', () => {
     await service.historial(TENANT, { estado: EstadoSesionGarzon.ABIERTA });
 
     const sqls = dataSource.query.mock.calls.map(([s]) => s as string);
-    expect(sqls.some((s) => s.includes('zona_horaria_principal'))).toBe(false);
+    // ⚠️ Afirma sobre el JOIN, no sobre el nombre de la columna. Esto decía
+    // `includes('zona_horaria_principal')` y el 2026-08-23 quedó HUECO: al pasar
+    // la zona a salir de la provincia, ninguna consulta contiene ya ese string,
+    // así que la aserción daba verde sin distinguir "no fue a buscar la zona" de
+    // "fue a buscarla con la consulta nueva". El `JOIN provincia` es la forma de
+    // esa consulta y no aparece en la del historial, así que sigue discriminando
+    // aunque la columna vuelva a cambiar de nombre.
+    expect(sqls.some((s) => s.includes('JOIN provincia'))).toBe(false);
   });
 
   it('un filtro ausente no deja un hueco en la numeración', async () => {

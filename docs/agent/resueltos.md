@@ -148,6 +148,78 @@ pendiente, con su consecuencia sin verificar sobre el build del frontend.
 
 ---
 
+## Una sola noción de zona horaria, y sale de la provincia (2026-08-23)
+
+**Salió de la sección 6**, como prerequisito separado del frente de `promocional`: el owner
+eligió sacarlo aparte porque es transversal y de bajo riesgo, y así el frente del motor queda
+solo con motor y pantalla.
+
+### Qué estaba mal
+
+`provincia.zona_horaria` existe, es `NOT NULL` y está sembrada con dos valores distintos
+—`America/Santiago` para Región Metropolitana, `Pacific/Easter` para Isla de Pascua—. **Nadie
+la leía.** La consulta que resuelve la zona de un tenant hacía `tenants → provincia → pais` y
+devolvía `pais.zona_horaria_principal`: pasaba *por* la provincia y se salteaba su columna. El
+propio nombre «principal» del país decía que la provincia manda.
+
+⚠️ **Y no era un lugar: eran tres copias byte a byte de la misma consulta.** El diagnóstico
+inicial —«es una línea en el helper»— salió de grepear por el nombre del helper; buscando por
+**conducta** aparecieron `common/utils/rango-fecha.util.ts`, más un `private zonaHoraria()`
+propio en `turnos/sesiones-garzon.service.ts` y otro en `propinas/propina-reportes.service.ts`.
+Corregir una sola habría dejado dos módulos leyendo la del país y uno la de la provincia: **dos
+nociones compitiendo, peor que el bug original.**
+
+### Qué se hizo
+
+La consulta pasa a seleccionar `pr.zona_horaria`, y los dos privados se colapsaron contra
+`zonaHorariaTenant` en el mismo commit, para que quede **una sola definición** y la próxima no
+nazca duplicada. El `JOIN pais` se queda aunque ya no se lea su columna: es lo que impide
+resolver la zona de un tenant cuyo país está dado de baja, y hay un test que lo exige —nació
+porque el mutante que borraba esos filtros pasaba la suite entera—.
+
+`pais.zona_horaria_principal` **se queda sin lectores en runtime**, y eso está dicho en el
+docblock a propósito: su sentido pasa a ser el default del país al **crear** una provincia, no
+la zona con la que se calcula. Sin decirlo, alguien la vuelve a leer «porque estaba ahí».
+
+### Qué se midió
+
+📊 **Hoy no cambia ningún resultado**: los seis tenants están en Región Metropolitana, donde
+provincia y país coinciden. Lo que cambia es el futuro — el primer local de Isla de Pascua iba
+a tener dos horas de corrimiento en sus mermas, sus cobros de pasarela, sus sesiones de garzón
+y sus reportes de propina. Era un bug **latente**, no vivo, y se dice así para que nadie lo
+lea como un incendio apagado.
+
+### Qué lo fija
+
+`rango-fecha.util.spec.ts` estrena un `describe('zonaHorariaTenant')` —la función no tenía
+ninguno—: que la zona sale de la provincia, que los dos filtros de borrado siguen, y que sin
+fila es 404. **Mutante corrido:** devolver la consulta a `p.zona_horaria_principal` —el código
+anterior— pone rojo exactamente ese test y ningún otro.
+⚠️ La aserción va sobre la cláusula que **selecciona** (`/SELECT\s+pr\.zona_horaria\s+AS/`),
+no sobre una mención suelta: un `toContain('pr.zona_horaria')` lo satisface hasta un
+comentario, que es un error ya cometido en este repo.
+
+### Y una aserción ajena que este cambio dejó HUECA
+
+Lo encontró la revisión independiente, y es la parte que no se ve sola. En
+`sesiones-garzon.service.spec.ts` había un test —*"sin filtro de fecha no sale a buscar la
+zona horaria"*— que lo afirmaba con `includes('zona_horaria_principal')`. Al pasar la zona a
+salir de la provincia, **ninguna consulta contiene ya ese string**: la aserción quedó
+verdadera por vacío, sin distinguir *"no fue a buscar la zona"* de *"fue a buscarla con la
+consulta nueva"*. Seguía verde y ya no probaba nada.
+
+Se reancló sobre el `JOIN provincia`, que es la **forma** de esa consulta y no aparece en la
+del historial, así que sigue discriminando aunque la columna vuelva a cambiar de nombre.
+**Mutante corrido:** forzar al service a pedir la zona siempre lo pone rojo.
+
+📌 **La lección, que es más general que este arreglo:** una aserción negativa
+(`expect(...).toBe(false)`) escrita sobre un nombre concreto **se vuelve inofensiva sola** en
+cuanto ese nombre cambia, y no hay nada que avise — el test sigue verde. Al renombrar una
+columna o un símbolo, los `not`/`toBe(false)` que lo mencionan hay que revisarlos uno por uno:
+son los únicos que se rompen quedándose en verde.
+
+---
+
 ## Los dos mensajes de las reglas: el `update` pregunta en el orden del `create`, y el del tramo dice la verdad en los dos caminos (2026-08-23)
 
 **Venía de la sección 3** («ya decidido, falta construir»). Es el remate del corte de

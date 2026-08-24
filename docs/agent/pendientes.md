@@ -199,6 +199,19 @@ decisión que no es mía).
   sola siembra. Es otro spec y otra ruta, así que **no es "el flaky de caja"**: es un
   intermitente de **autenticación**, que es la familia a la que los dos pertenecen.
 
+  🆕 **Tercer avistaje (2026-08-23), y el patrón se sostiene.** `papelera.e2e-spec.ts` →
+  *"items: una fila borrada sin `eliminado_por` no aparece en la papelera ni se puede
+  restaurar"* falló con **`401` en `POST /items`**. Idéntica forma: **un solo** test de 601,
+  `--verificar` confirmó una sola siembra, el spec pasa **83/83 corrido solo**, y la suite
+  entera vuelve verde en la corrida siguiente desde base limpia. Tercer spec y tercera ruta
+  distintos: ya son `caja`, `ventas` y `papelera`, lo que aleja definitivamente cualquier
+  causa local a un módulo.
+  ⚠️ **Y sirve de aviso operativo, porque cuesta tiempo cada vez:** este rojo aparece a mitad
+  del gate de una tarea que no tiene nada que ver, y la primera reacción es sospechar del
+  cambio propio. El descarte son cuatro cosas y en ese orden: `--verificar`, correr el spec
+  solo, comprobar que el módulo del cambio no está en el camino del test, y **re-correr la
+  suite entera** —no un subconjunto—.
+
   ✅ **CAUSA MEJOR SOSTENIDA, medida el 2026-08-15 por la auditoría de RBAC/auth:** los helpers
   `login()` de 23 de los 32 specs leen el `access_token` **sin afirmar el status**, así que un
   login fallido deja el token en `undefined` y el `describe` entero manda `Bearer undefined` →
@@ -1331,33 +1344,15 @@ de crédito. Las cuatro decisiones, con lo que se midió al tomarlas:
    siquiera llegan. La regla completa es *"el momento en que se abrió la cuenta, o el de la
    venta si no hubo cuenta"*: en POS directo y en online los dos instantes son el mismo.
 2. **«Hoy» es el día del local, y sale de la ZONA DE LA PROVINCIA.**
-   ⛔ **Y eso corrige un hueco que esta entrada no tenía:** `provincia.zona_horaria` existe y
-   está sembrada (Región Metropolitana `America/Santiago`, Isla de Pascua `Pacific/Easter`),
-   pero `zonaHorariaTenant` (`common/utils/rango-fecha.util.ts:117`) hace
-   `tenants → provincia → pais` y devuelve **`pais.zona_horaria_principal`**: pasa *por* la
-   provincia y se saltea su columna. El propio nombre `zona_horaria_**principal**` del país
-   dice que el modelo esperaba que la provincia mandara.
-   ✅ **Decidido: la provincia manda.**
-   ⚠️ **Corrección del mismo día: NO es «una línea en el helper», y decirlo así mandaba al
-   próximo a un arreglo a medias.** Al buscar por conducta y no por el nombre del helper
-   aparecieron **tres copias byte a byte de la misma consulta**, las tres devolviendo la del
-   país: `common/utils/rango-fecha.util.ts:122` (el helper compartido `zonaHorariaTenant`),
-   `turnos/sesiones-garzon.service.ts:559` y `propinas/propina-reportes.service.ts:279`, cada
-   uno con su `private zonaHoraria()` propio. Corregir solo el helper deja **dos módulos
-   leyendo la del país y uno la de la provincia**: dos nociones compitiendo, peor que el bug.
-   **El trabajo es:** corregir la consulta **y** hacer que los dos privados usen el helper
-   compartido, para que quede una sola definición y la próxima no nazca duplicada.
-   **Lectores afectados** (los que consumen el valor, no los que lo consultan):
-   `mermas.service.ts`, `pasarela/services/cobros.service.ts`,
-   `turnos/sesiones-garzon.service.ts` y `propinas/propina-reportes.service.ts` — **entran en
-   el gate con esto**.
-   📊 **Hoy no cambia ningún resultado** —medido el 2026-08-23: los seis tenants están en
-   Región Metropolitana, donde provincia y país coinciden—. Sin esto, el primer local de Isla
-   de Pascua corta sus promos, y ya hoy sus reportes, dos horas antes.
-   📌 **Qué pasa con `pais.zona_horaria_principal`:** se queda, pero sin lectores en runtime.
-   Su sentido pasa a ser el default del país al **crear una provincia** —el nombre
-   «principal» ya lo decía—, no la zona con la que se calcula. Decirlo explícito es lo que
-   evita que alguien la vuelva a leer «porque estaba ahí».
+   ✅ **HECHO el 2026-08-23, antes de abrir este frente** → [`resueltos.md`](resueltos.md)
+   § «Una sola noción de zona horaria, y sale de la provincia». Salió aparte a propósito: es
+   transversal y de bajo riesgo, así que separarlo deja `promocional` como puro motor +
+   pantalla. Lo que se encontró al hacerlo y esta entrada no sabía: no era «una línea en el
+   helper» sino **tres copias byte a byte** de la misma consulta.
+   👉 **Para quien tome `promocional`:** la zona ya se pide con
+   `zonaHorariaTenant(db, tenantId)` y ya devuelve la de la provincia. No hay nada que decidir
+   ni que agregar.
+
 3. **El borde `hasta` es inclusivo del día**, sin decisión nueva: se reusa el criterio ya
    tomado el 2026-08-22 para los filtros de fecha, que vive en el mismo
    `rango-fecha.util.ts` (`bordeHastaSql` expande a `< fecha+1`). Seguir lo existente, no

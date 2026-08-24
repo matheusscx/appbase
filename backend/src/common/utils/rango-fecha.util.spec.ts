@@ -1,8 +1,11 @@
+import type { DataSource } from 'typeorm';
+import { NotFoundException } from '@nestjs/common';
 import {
   bordeFechaSql,
   bordeHastaSql,
   esFechaPura,
   requiereZonaTenant,
+  zonaHorariaTenant,
 } from './rango-fecha.util';
 
 describe('rango-fecha.util', () => {
@@ -41,6 +44,54 @@ describe('rango-fecha.util', () => {
       expect(
         requiereZonaTenant('2026-08-01T15:30:00Z', '2026-08-31T23:59:59Z'),
       ).toBe(false);
+    });
+  });
+
+  describe('zonaHorariaTenant', () => {
+    const TENANT = 'tenant-uuid';
+
+    function dbConZona(filas: unknown[]) {
+      const query = jest.fn().mockResolvedValue(filas);
+      return { db: { query } as unknown as DataSource, query };
+    }
+
+    it('la zona sale de la PROVINCIA, no del país', async () => {
+      // `provincia.zona_horaria` existía y estaba sembrada —Isla de Pascua es
+      // `Pacific/Easter`— y esta consulta pasaba POR la provincia para leer
+      // `pais.zona_horaria_principal`, salteándose su columna. El nombre
+      // "principal" del país ya decía que la provincia manda.
+      const { db, query } = dbConZona([{ zona_horaria: 'Pacific/Easter' }]);
+
+      await expect(zonaHorariaTenant(db, TENANT)).resolves.toBe(
+        'Pacific/Easter',
+      );
+
+      const [sql] = query.mock.calls[0] as [string, unknown[]];
+      // Sobre la cláusula que SELECCIONA, no sobre una mención cualquiera: un
+      // `toContain('pr.zona_horaria')` lo satisface hasta un comentario.
+      expect(sql).toMatch(/SELECT\s+pr\.zona_horaria\s+AS\s+zona_horaria/);
+      expect(sql).not.toMatch(/SELECT\s+p\.zona_horaria_principal/);
+    });
+
+    it('sigue filtrando el borrado de provincia y de país', async () => {
+      // El `JOIN pais` se queda aunque ya no se lea su columna: es lo que
+      // impide resolver la zona de un tenant cuyo país está dado de baja, y hay
+      // un test gemelo en `sesiones-garzon.service.spec.ts` que lo exige —
+      // nació porque el mutante que borraba estos filtros pasaba la suite.
+      const { db, query } = dbConZona([{ zona_horaria: 'America/Santiago' }]);
+
+      await zonaHorariaTenant(db, TENANT);
+
+      const [sql] = query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/JOIN provincia pr[\s\S]*?pr\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/JOIN pais p[\s\S]*?p\.eliminado_el IS NULL/);
+    });
+
+    it('sin fila es 404, no undefined que reviente más abajo', async () => {
+      const { db } = dbConZona([]);
+      await expect(zonaHorariaTenant(db, TENANT)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

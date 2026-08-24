@@ -44,7 +44,8 @@ confundir el hecho de venta con el snapshot auditable de liquidación.
 - La asignación usa liquidaciones confirmadas completamente contenidas en el
   período consultado.
 - Las fechas de query son calendario `YYYY-MM-DD`; el backend convierte los
-  límites a medianoche usando la zona horaria del país del tenant.
+  límites a medianoche usando la zona horaria de la **provincia** del tenant
+  (`zonaHorariaTenant`; hasta el 2026-08-23 usaba la del país).
 - Pendiente libre, en borrador y liquidada son estados actuales excluyentes.
 - El monto liberado por anulación es histórico y no se suma al estado actual.
 - Una liquidación parcialmente solapada se excluye y genera una advertencia; no
