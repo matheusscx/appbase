@@ -147,6 +147,51 @@ describe('MonedasService', () => {
     });
   });
 
+  describe('validarEscalaDeMoneda', () => {
+    it('rechaza un monto con más decimales de los que admite la moneda', async () => {
+      dataSource.query.mockResolvedValue([{ decimales: 0 }]);
+
+      await expect(
+        service.validarEscalaDeMoneda('1000.50', 'CLP'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('resuelve la escala por el CÓDIGO recibido, no por el tenant', async () => {
+      // Es la razón de existir del método: una orden de pasarela se fija en la
+      // moneda de la pasarela, no en la oficial del tenant que cobra. Si la
+      // consulta volviera a partir de `tenants`, un tenant con oficial USD
+      // aceptaría dos decimales en una orden CLP.
+      dataSource.query.mockResolvedValue([{ decimales: 2 }]);
+
+      await service.validarEscalaDeMoneda('10.25', 'USD');
+
+      const [sql, params] = dataSource.query.mock.calls[0] as [string, unknown];
+      expect(sql).toContain('codigo_iso');
+      expect(sql).not.toContain('tenants');
+      expect(params).toEqual(['USD']);
+    });
+
+    it('acepta ceros a la derecha: la regla es sobre el VALOR, no la cadena', async () => {
+      // '1000.00' en CLP vale 1000 y es representable. Rechazarlo sería
+      // castigar un formato — mismo criterio que `EscalaMonedaPipe`.
+      dataSource.query.mockResolvedValue([{ decimales: 0 }]);
+
+      await expect(
+        service.validarEscalaDeMoneda('1000.00', 'CLP'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('filtra eliminado_el y rechaza una moneda que no existe', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await expect(
+        service.validarEscalaDeMoneda('1000', 'XXX'),
+      ).rejects.toThrow(BadRequestException);
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toContain('eliminado_el IS NULL');
+    });
+  });
+
   describe('decimalesDeLaVenta', () => {
     const VENTA = 'venta-uuid';
 

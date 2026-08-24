@@ -138,6 +138,27 @@ Response (200):
 }
 ```
 
+### La moneda de una orden no es la del tenant
+
+Toda orden va en **CLP** (`MONEDA_ORDEN_V1`, en `pasarela-orden.entity.ts`): es la
+moneda en la que liquida Transbank, no la oficial del tenant. Un tenant con moneda
+oficial USD igual crea órdenes en pesos.
+
+⚠️ **De ahí sale la regla de escala, y es la trampa de este módulo:** el `monto` se
+valida contra los decimales de **la moneda de la orden**
+(`MonedasService.validarEscalaDeMoneda`), **no** con `@EsMontoCobrado()` +
+`EscalaMonedaPipe`, que resuelven la moneda oficial desde el token. Colgar el pipe acá
+—que es lo que parece faltar al mirar los DTOs— haría que un tenant con oficial USD
+aceptara `1000.50` en una orden CLP. Los tres DTOs de plata llevan el porqué escrito
+al lado del campo.
+
+La escala se valida **en el borde del service, antes de persistir**. Antes la miraba
+solo `montoEntero` dentro del provider, y en `cobrar` eso pasaba *después* de guardar
+la orden: un monto con decimales dejaba una orden `en_proceso` huérfana —sin
+transacción y sin nada enviado a Transbank— por un error de formato del cliente.
+`montoEntero` sigue existiendo como guardia de formato de la API de Transbank
+(el `amount` viaja entero), que es otra cosa que la escala de la moneda.
+
 ---
 
 ## Backend

@@ -6,8 +6,13 @@ import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CallbackDispatcherService } from './callback-dispatcher.service';
 import { ProviderFactory } from '../providers/provider.factory';
-import { PasarelaOrden } from '../entities/pasarela-orden.entity';
+import {
+  MONEDA_ORDEN_V1,
+  PasarelaOrden,
+} from '../entities/pasarela-orden.entity';
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
+import { MonedasService } from '../../monedas/monedas.service';
+import { BadRequestException } from '@nestjs/common';
 
 describe('PagosRedirectService', () => {
   let service: PagosRedirectService;
@@ -33,6 +38,19 @@ describe('PagosRedirectService', () => {
     },
     dispatcher: { dispatch: jest.fn().mockResolvedValue(undefined) },
     config: { get: jest.fn().mockReturnValue('http://localhost:3000') },
+    // Se comporta como la moneda de la orden (CLP, escala 0). La regla vive en
+    // MonedasService y tiene sus propios tests; acá importa DÓNDE se aplica.
+    monedas: {
+      validarEscalaDeMoneda: jest.fn((monto: string) =>
+        monto.includes('.')
+          ? Promise.reject(
+              new BadRequestException(
+                'El monto tiene más decimales de los que admite CLP (0).',
+              ),
+            )
+          : Promise.resolve(),
+      ),
+    },
   };
 
   beforeEach(async () => {
@@ -50,6 +68,7 @@ describe('PagosRedirectService', () => {
           useValue: { getPagoRedirect: () => provider },
         },
         { provide: ConfigService, useValue: deps.config },
+        { provide: MonedasService, useValue: deps.monedas },
       ],
     }).compile();
     service = module.get(PagosRedirectService);
@@ -136,6 +155,24 @@ describe('PagosRedirectService', () => {
     await expect(
       service.iniciar('t-1', { ...dtoBase, monto: '0' }),
     ).rejects.toThrow('mayor a cero');
+  });
+
+  it('iniciar: monto fuera de la escala se rechaza sin llamar al proveedor', async () => {
+    // Acá el proveedor se llama ANTES de persistir, así que no quedaba orden
+    // huérfana como en `cobrar` — pero el 400 salía de adentro de `montoEntero`
+    // y nombraba a Transbank en vez de al monto que el cliente mandó.
+    await expect(
+      service.iniciar('t-1', { ...dtoBase, monto: '10000.50' }),
+    ).rejects.toThrow('decimales');
+
+    expect(provider.iniciarPago).not.toHaveBeenCalled();
+    expect(ordenRepo.save).not.toHaveBeenCalled();
+    // Contra la moneda de la ORDEN, no la oficial del tenant: ver el gemelo
+    // en `cobros.service.spec.ts`.
+    expect(deps.monedas.validarEscalaDeMoneda).toHaveBeenCalledWith(
+      '10000.50',
+      MONEDA_ORDEN_V1,
+    );
   });
 
   it('confirmarRetorno aprobado: orden pagada, dispara callback y redirige a urls.exito', async () => {

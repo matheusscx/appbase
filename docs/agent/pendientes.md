@@ -668,17 +668,6 @@ trabajo, y cada una abre su propio frente.** La deuda chica de verdad son las tr
   que ahí `minimo` siempre es monto. La certeza descansa en una lista hardcodeada, no en un
   invariante: entra un segundo tipo por tramos y se vuelve ambiguo como en descuentos.
 
-- [ ] **La pasarela valida la escala por su cuenta, en paralelo al borde** (backend, medido el
-  2026-08-24 en el mismo inventario) — `PasarelaApiController` usa `ApiKeyGuard` y no
-  `JwtAuthGuard`, así que `req.user` no existe y `SembrarContextoInterceptor` no siembra el
-  `RequestContext`: **colgar `EscalaMonedaPipe` ahí tiraría 403 en cada request**. La moneda de
-  esas órdenes está **hardcodeada a `'CLP'`**, y la validación de escala que sí existe vive dentro
-  de `webpay-plus.provider.ts` (`montoEntero`).
-  ⚠️ **Son dos nociones de escala compitiendo**, el mismo patrón que ya mordió con la zona horaria.
-  Hoy no divergen porque todo es CLP; divergen el día que un tenant opere en otra moneda oficial.
-  **No es un arreglo de una línea:** exige decidir de dónde saca el tenant un controller que no
-  tiene JWT.
-
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera
   la spec al revés**, entendiéndolo como dato de formato de UI. Es el minor unit de la

@@ -64,6 +64,21 @@ que entre un segundo tipo por tramos, se vuelve ambiguo como en descuentos.
 
 ## El otro hallazgo: la pasarela valida la escala por su cuenta
 
+> ⛔ **CORREGIDO EL MISMO DÍA, al construirlo.** Esta sección tiene el diagnóstico invertido y
+> se deja como estaba —el documento registra lo que se midió— con la corrección al lado.
+> **`montoEntero` no era una segunda noción de escala compitiendo: era la noción CORRECTA**, en
+> el lugar equivocado. Una orden de pasarela va en la moneda de la pasarela, no en la oficial
+> del tenant, así que colgar `EscalaMonedaPipe` habría hecho que un tenant con oficial USD
+> aceptara dos decimales en una orden CLP. Y la pregunta que esta sección declaraba abierta
+> —de dónde saca el tenant un controller sin JWT— **ya estaba contestada**: `ApiKeyGuard` lo
+> deja en `req.pasarelaAuth`. El cierre completo, y el defecto que apareció al medirlo (una
+> orden huérfana por un error de formato), en [`resueltos.md`](../resueltos.md).
+>
+> 📌 **La lección es sobre el método de este inventario**, no sobre la pasarela: recorrer DTOs
+> buscando marcas hace que "falta la marca" sea la única forma que el problema puede tener. Un
+> campo de plata **sin** marca puede ser correcto — la marca afirma *"la moneda es la del
+> tenant"*, y eso es dominio, no un checkbox.
+
 Los cuatro montos de `pasarela` no son "no aplica porque vienen de un tercero". Es estructural:
 
 - `PasarelaApiController` usa `ApiKeyGuard`, **no** `JwtAuthGuard`, así que `req.user` nunca

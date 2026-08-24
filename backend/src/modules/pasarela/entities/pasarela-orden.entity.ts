@@ -41,7 +41,7 @@ export class PasarelaOrden {
   monto: string; // numeric ↦ string, Decimal.js para operar
 
   @Column({ length: 3 })
-  moneda: string; // 'CLP' en v1
+  moneda: string; // ver MONEDA_ORDEN_V1
 
   @Column({ default: 'creada' })
   estado: string; // 'creada' | 'en_proceso' | 'procesando' | 'pagada' | 'pendiente' | 'conciliada' | 'fallida' | 'expirada' | 'reembolsada'
@@ -73,3 +73,14 @@ export class PasarelaOrden {
   @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
   eliminadoEl: Date | null;
 }
+
+/**
+ * La moneda de TODA orden de pasarela en v1. No es la moneda oficial del
+ * tenant: Transbank liquida en pesos chilenos, así que un tenant con oficial
+ * USD igual crea órdenes en CLP. Por eso el monto de una orden se valida
+ * contra ESTA escala y no contra `MonedasService.decimalesOficiales`.
+ *
+ * Existe como constante para que el día que entre una segunda moneda haya un
+ * solo lugar del que sacarla, en vez de literales sueltos que se desincronizan.
+ */
+export const MONEDA_ORDEN_V1 = 'CLP';

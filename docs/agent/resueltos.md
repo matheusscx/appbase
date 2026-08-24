@@ -17,6 +17,108 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La escala del monto de la pasarela sale de la moneda de la ORDEN, no del tenant (2026-08-24)
+
+**Venía de la sección 3.** Se cerró en el mismo movimiento en que se descubrió que su
+diagnóstico estaba **invertido**.
+
+### Lo que la entrada decía, y por qué era al revés
+
+Decía que faltaba colgar `EscalaMonedaPipe` en `PasarelaApiController`, y que lo bloqueaba
+una pregunta de diseño: *"exige decidir de dónde saca el tenant un controller que no tiene
+JWT"*.
+
+**Las dos mitades resultaron falsas al medirlas:**
+
+1. **La pregunta ya estaba contestada en el código.** `ApiKeyGuard` resuelve el tenant desde
+   la API key y lo deja en `req.pasarelaAuth = { tenantId, apiKeyId }`. No había nada que
+   decidir.
+2. **Y colgar el pipe habría sido el arreglo EQUIVOCADO**, que es lo que importa. El pipe
+   valida contra la moneda **oficial del tenant**; una orden de pasarela va en la moneda de
+   la pasarela (`pasarela_ordenes.moneda`, hoy CLP siempre, hardcodeada en 6 lugares). Un
+   tenant con oficial USD habría pasado a aceptar `1000.50` en una orden CLP. La entrada leía
+   `montoEntero` como *"una segunda noción de escala compitiendo con el borde"*; medido, era
+   **la noción correcta**, en el lugar equivocado.
+
+⚠️ **La lección no es sobre la pasarela.** La entrada se escribió desde un inventario que
+recorría DTOs buscando marcas de escala, y desde esa lente "falta la marca" es la única forma
+que puede tener el problema. Un campo de plata **sin** marca puede ser correcto: la marca dice
+*"la moneda es la del tenant"*, y eso es una afirmación de dominio, no un checkbox.
+
+### El defecto que apareció al medir, y que nadie había anotado
+
+En `CobrosService.cobrar` la orden se **persiste antes** de llamar al proveedor, y el proveedor
+(`montoEntero`) era el único que miraba la escala. Además el `catch` de ahí solo atrapa
+`ProviderComunicacionError`. Resultado, con `POST /pasarela/api/cobros` y `monto: "1000.50"`:
+
+- la orden queda guardada en `en_proceso`,
+- sin ninguna transacción asociada y **sin que se enviara nada a Transbank**,
+- el cliente recibe un 400 que nombra a Transbank en vez de a su monto,
+- y la fila queda colgada hasta `fechaExpiracion`.
+
+O sea: un error de **formato del cliente** ensuciaba la tabla de órdenes.
+
+### Qué se hizo
+
+- `MonedasService.validarEscalaDeMoneda(monto, codigoIso)` — la misma regla y la misma fuente
+  que `EscalaMonedaPipe` (`moneda.decimales`) por otra puerta: el pipe resuelve la moneda desde
+  el token, este método la **recibe**. No son dos nociones de escala.
+- `MONEDA_ORDEN_V1` en `pasarela-orden.entity.ts`, reemplazando los 6 literales `'CLP'` de los
+  dos services, para que la moneda de la orden tenga un solo lugar del que salir.
+- La validación corre **en el borde**, junto al `lte(0)` que ya estaba, en `cobrar`,
+  `reembolsar` e `iniciar` — antes de persistir o de llamar al proveedor.
+- Los tres DTOs de plata llevan escrito al lado del campo **por qué NO llevan
+  `@EsMontoCobrado()`**, que es la parte que evita que el próximo lo "arregle" al revés.
+- `montoEntero` **se dejó como estaba**: es el guardia de formato de la API de Transbank (el
+  `amount` viaja entero), que es otra cosa que la escala de una moneda.
+
+### Qué lo fija
+
+Cuatro tests sobre `validarEscalaDeMoneda` (rechazo por escala, resolución **por código y no
+por tenant** con un `not.toContain('tenants')`, ceros a la derecha aceptados, moneda
+inexistente) y tres sobre dónde se aplica.
+
+El que carga el peso es `'cobro con monto fuera de la escala: NO queda orden creada'`: **no
+afirma el throw** —el proveedor también tiraba, así que un test del throw pasaba en verde con
+el bug puesto— sino que `ordenRepo.save`, `provider.autorizarCobro` y `transacciones.registrar`
+**no se llamaron**. Verificado con mutante: quitando la línea nueva de `cobrar`, ese test es el
+que cae; el equivalente en `pagos-redirect` también.
+
+### Lo que levantó la revisión independiente, y cómo se cerró
+
+Veredicto **LIMPIO** con dos advertencias, las dos accionadas:
+
+1. **Los tests no fijaban la MONEDA del call site.** Afirmaban que nada se persistió, pero
+   ninguno miraba el segundo argumento: un mutante que pasara la moneda oficial del tenant en
+   vez de la de la orden —**la regresión exacta que este cambio existe para evitar**— pasaba
+   en verde. Se agregó el `toHaveBeenCalledWith(monto, MONEDA_ORDEN_V1)` en los dos services y
+   se verificó con ese mutante (`'USD'` en el call site → el test cae).
+2. **`reembolsar` valida contra la constante, no contra `orden.moneda`**, aunque ahí la orden
+   ya existe y su moneda es legible. Es deliberado: la moneda de una orden la escribe ese
+   mismo código desde la constante, así que hoy no pueden diferir, y validar antes de abrir la
+   transacción da un 400 sin abrirla, sin tomar el `FOR UPDATE` y sin escribir nada (leer, lee:
+   el chequeo hace su propio `SELECT` sobre `moneda`). El día que la moneda deje de salir de la
+   constante, el chequeo **se mueve adentro** y lee `orden.moneda`.
+
+   ⛔ **Y acá el cierre se equivocó primero, lo que vale más que el dato:** el comentario que
+   se escribió justificaba dejarlo afuera diciendo que meterlo en la transacción *"pediría una
+   segunda conexión sosteniendo el lock, el auto-bloqueo de ADR-020"*. **Es falso.** `Db.query`
+   resuelve el manager de la transacción activa (`db.service.ts`, "manager del contexto si hay
+   transacción en curso; pool si no"): correrlo adentro usa **la misma** conexión. Lo único que
+   toma una segunda es `db.sinTransaccion`, la salida explícita. La revisión independiente lo
+   bloqueó por esto —no por el código, que estaba bien— y tenía razón: un comentario que enseña
+   lo contrario del invariante de conexiones empuja al próximo a "arreglarlo" con
+   `sinTransaccion`, que **sí** reabre el patrón del deadlock.
+
+Y una corrección de dato: la tabla es `pasarela_ordenes`, no `pasarela_orden`.
+
+📌 **Lo que este cierre NO tocó**, y queda dicho: `montoEntero` está **duplicado byte a byte**
+en `webpay-plus.provider.ts` y `oneclick.provider.ts`. Es el patrón de las tres copias de la
+zona horaria, pero es formato de proveedor y no escala de moneda, así que se dejó fuera de
+alcance en vez de arrastrarlo. Si entra un tercer proveedor, se extrae.
+
+---
+
 ## El demo vuelve a dejar entrar: el navegador pasa a hablar con un solo origen (2026-08-23)
 
 **Venía de la sección 4** («necesita que el owner conteste»), y fue la entrada más corta de

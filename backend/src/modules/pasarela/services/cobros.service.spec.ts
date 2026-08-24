@@ -7,9 +7,14 @@ import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CredencialesService } from './credenciales.service';
 import { ProviderFactory } from '../providers/provider.factory';
-import { PasarelaOrden } from '../entities/pasarela-orden.entity';
+import {
+  MONEDA_ORDEN_V1,
+  PasarelaOrden,
+} from '../entities/pasarela-orden.entity';
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
 import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
+import { MonedasService } from '../../monedas/monedas.service';
+import { BadRequestException } from '@nestjs/common';
 
 const inscripcionActiva = {
   inscripcionId: 'insc-1',
@@ -77,6 +82,20 @@ describe('CobrosService', () => {
     },
     credenciales: { descifrarTexto: jest.fn().mockReturnValue('tbk-u-1') },
   };
+  // Se comporta como la moneda de la orden (CLP, escala 0). Lo que estos tests
+  // verifican no es la regla —vive en MonedasService y tiene sus propios
+  // tests— sino DÓNDE se aplica: qué ya pasó cuando el monto se rechaza.
+  const monedas = {
+    validarEscalaDeMoneda: jest.fn((monto: string) => {
+      if (monto.includes('.'))
+        return Promise.reject(
+          new BadRequestException(
+            'El monto tiene más decimales de los que admite CLP (0).',
+          ),
+        );
+      return Promise.resolve();
+    }),
+  };
   const reembolsoHandler = {
     onReembolsoAprobado: jest.fn(),
   };
@@ -97,6 +116,7 @@ describe('CobrosService', () => {
         { provide: TransaccionesService, useValue: deps.transacciones },
         { provide: CredencialesService, useValue: deps.credenciales },
         { provide: ReembolsoCallbackRegistry, useValue: reembolsoRegistry },
+        { provide: MonedasService, useValue: monedas },
         {
           provide: ProviderFactory,
           useValue: {
@@ -463,6 +483,48 @@ describe('CobrosService', () => {
     await expect(
       service.reembolsar('t-1', 'orden-1', { monto: '2000' }),
     ).rejects.toThrow('excede');
+  });
+
+  it('cobro con monto fuera de la escala: NO queda orden creada', async () => {
+    // El defecto que esto cierra: la orden se persiste ANTES de llamar al
+    // proveedor, y el proveedor (`montoEntero`) era el único que miraba la
+    // escala. Un monto con decimales dejaba una orden 'en_proceso' huérfana
+    // —sin transacción y sin nada enviado a Transbank— por un error de formato.
+    await expect(
+      service.cobrar(
+        't-1',
+        { pagadorRef: 'rut-123', monto: '1000.50', descripcion: 'Cobro test' },
+        'api',
+        'key-1',
+      ),
+    ).rejects.toThrow('decimales');
+
+    // La afirmación que caza el revert no es el throw —el proveedor también
+    // tiraba— sino que no haya quedado NADA persistido ni enviado.
+    expect(ordenRepo.save).not.toHaveBeenCalled();
+    expect(provider.autorizarCobro).not.toHaveBeenCalled();
+    expect(deps.transacciones.registrar).not.toHaveBeenCalled();
+
+    // Y contra QUÉ moneda se validó, que es el punto entero del cambio: sin
+    // esto, un mutante que pase la moneda oficial del tenant en vez de la de
+    // la orden pasa en verde, y es justo la regresión que esto viene a cerrar.
+    expect(monedas.validarEscalaDeMoneda).toHaveBeenCalledWith(
+      '1000.50',
+      MONEDA_ORDEN_V1,
+    );
+  });
+
+  it('reembolso con monto fuera de la escala es rechazado antes de tocar la orden', async () => {
+    await expect(
+      service.reembolsar('t-1', 'orden-1', { monto: '1000.50' }),
+    ).rejects.toThrow('decimales');
+    expect(ordenRepo.findOne).not.toHaveBeenCalled();
+    // El tercer call site también fija la moneda: sin esto, un mutante que
+    // pusiera la oficial del tenant acá pasaba la suite entera en verde.
+    expect(monedas.validarEscalaDeMoneda).toHaveBeenCalledWith(
+      '1000.50',
+      MONEDA_ORDEN_V1,
+    );
   });
 
   it('reembolso con monto <= 0 es rechazado antes de tocar la orden', async () => {

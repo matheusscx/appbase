@@ -8,6 +8,13 @@ import {
 } from 'class-validator';
 
 export class CreatePagoDto {
+  /**
+   * Sin `@EsMontoCobrado()` a propósito: esa marca valida contra la moneda
+   * OFICIAL DEL TENANT, y una orden de pasarela va en la moneda de la pasarela
+   * (`MONEDA_ORDEN_V1`, hoy CLP). Un tenant con oficial USD aceptaría dos
+   * decimales en una orden CLP. La escala la valida el service contra la moneda
+   * de la orden — ver `MonedasService.validarEscalaDeMoneda`.
+   */
   @IsNumberString()
   monto: string;
 

@@ -9,8 +9,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import Decimal from 'decimal.js';
-import { PasarelaOrden } from '../entities/pasarela-orden.entity';
+import {
+  MONEDA_ORDEN_V1,
+  PasarelaOrden,
+} from '../entities/pasarela-orden.entity';
 import { CreatePagoDto } from '../dto/create-pago.dto';
+import { MonedasService } from '../../monedas/monedas.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CallbackDispatcherService } from './callback-dispatcher.service';
@@ -57,6 +61,7 @@ export class PagosRedirectService {
     private readonly callbackDispatcher: CallbackDispatcherService,
     private readonly providerFactory: ProviderFactory,
     private readonly config: ConfigService,
+    private readonly monedas: MonedasService,
   ) {}
 
   /** buyOrder ≤26 chars (límite Webpay): 'W' + timestamp36 + 8 random. */
@@ -84,6 +89,10 @@ export class PagosRedirectService {
   ) {
     if (new Decimal(dto.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
+    // Mismo borde que `CobrosService.cobrar`: acá el proveedor se llama ANTES
+    // de persistir, así que no queda orden huérfana, pero el 400 igual salía de
+    // adentro de `montoEntero` en vez de del borde que recibió el monto.
+    await this.monedas.validarEscalaDeMoneda(dto.monto, MONEDA_ORDEN_V1);
 
     const origen = opts.origen ?? 'api';
 
@@ -100,7 +109,7 @@ export class PagosRedirectService {
     const inicio = await provider.iniciarPago(cred, {
       codigoOrden,
       monto: dto.monto,
-      moneda: 'CLP',
+      moneda: MONEDA_ORDEN_V1,
       returnUrl,
     });
 
@@ -112,7 +121,7 @@ export class PagosRedirectService {
         codigoOrden,
         descripcion: dto.descripcion,
         monto: dto.monto,
-        moneda: 'CLP',
+        moneda: MONEDA_ORDEN_V1,
         estado: 'en_proceso',
         fechaExpiracion: new Date(Date.now() + EXPIRACION_ORDEN_MS),
         tokenProveedor: inicio.tokenExterno,

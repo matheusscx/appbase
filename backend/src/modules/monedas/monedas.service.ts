@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
+import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import type { ModoRedondeo } from '../calculo-precios/calculo-precios.engine';
 import { TenantMoneda } from './entities/tenant-moneda.entity';
@@ -148,6 +149,47 @@ export class MonedasService {
       );
     }
     return Number(rows[0].decimales);
+  }
+
+  /**
+   * Valida que `monto` quepa en la escala de la moneda `codigoIso`, que se pasa
+   * **explícita** en vez de derivarse del tenant.
+   *
+   * ⚠️ Existe porque hay montos cuya moneda **no** es la oficial del tenant, y
+   * para ellos `decimalesOficiales` da la escala equivocada: una orden de
+   * pasarela se fija en la moneda de la pasarela (`pasarela_ordenes.moneda`, hoy
+   * CLP siempre), no en la del tenant que cobra. Un tenant con moneda oficial
+   * USD cobrando por Transbank tiene dos escalas distintas en juego, y la que
+   * manda sobre el monto de la orden es la de la orden.
+   *
+   * Es la misma regla y la misma fuente que `EscalaMonedaPipe` —`moneda.decimales`—
+   * por otra puerta: el pipe resuelve la moneda desde el token, esto la recibe.
+   * Lo que NO son es dos nociones distintas de escala.
+   */
+  async validarEscalaDeMoneda(monto: string, codigoIso: string): Promise<void> {
+    const rows: { decimales: number | string }[] = await this.db.query(
+      `SELECT m.decimales
+         FROM moneda m
+        WHERE m.codigo_iso = $1 AND m.eliminado_el IS NULL`,
+      [codigoIso],
+    );
+    if (!rows.length)
+      throw new BadRequestException(`Moneda desconocida: ${codigoIso}`);
+
+    const decimales = Number(rows[0].decimales);
+    let valor: Decimal;
+    try {
+      valor = new Decimal(monto);
+    } catch {
+      // El formato ya lo valida `@IsNumberString` en el DTO; acá solo la escala.
+      return;
+    }
+    // La regla es sobre el VALOR, no sobre la cadena: '1000.00' en CLP vale
+    // 1000 y es representable (mismo criterio que `EscalaMonedaPipe`).
+    if (valor.decimalPlaces() > decimales)
+      throw new BadRequestException(
+        `El monto tiene más decimales de los que admite ${codigoIso} (${decimales}).`,
+      );
   }
 
   /**

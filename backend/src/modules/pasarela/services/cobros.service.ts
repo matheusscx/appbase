@@ -8,9 +8,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../../common/db/db.service';
+import { MonedasService } from '../../monedas/monedas.service';
 import Decimal from 'decimal.js';
 import { randomBytes } from 'crypto';
-import { PasarelaOrden } from '../entities/pasarela-orden.entity';
+import {
+  MONEDA_ORDEN_V1,
+  PasarelaOrden,
+} from '../entities/pasarela-orden.entity';
 import { CreateCobroDto } from '../dto/create-cobro.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
 import type { QueryOrdenesDto } from '../dto/query-ordenes.dto';
@@ -76,6 +80,7 @@ export class CobrosService {
     private readonly credenciales: CredencialesService,
     private readonly providerFactory: ProviderFactory,
     private readonly reembolsoRegistry: ReembolsoCallbackRegistry,
+    private readonly monedas: MonedasService,
   ) {}
 
   /** buyOrder ≤26 chars alfanumérico (límite Oneclick): 'O' + timestamp36 + 8 random. */
@@ -110,6 +115,11 @@ export class CobrosService {
   ) {
     if (new Decimal(dto.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
+    // Antes de resolver nada: más abajo la orden se PERSISTE antes de llamar al
+    // proveedor, y el proveedor era el único que miraba la escala (`montoEntero`).
+    // Un monto con decimales dejaba una orden 'en_proceso' huérfana —sin
+    // transacción, sin nada enviado— por un error de formato del cliente.
+    await this.monedas.validarEscalaDeMoneda(dto.monto, MONEDA_ORDEN_V1);
 
     const inscripcion = await this.inscripciones.resolverParaCobro(
       tenantId,
@@ -131,7 +141,7 @@ export class CobrosService {
         codigoOrden: this.generarCodigoOrden(),
         descripcion: dto.descripcion,
         monto: dto.monto,
-        moneda: 'CLP',
+        moneda: MONEDA_ORDEN_V1,
         estado: 'en_proceso',
         fechaExpiracion: new Date(Date.now() + EXPIRACION_ORDEN_MS),
         origen,
@@ -148,7 +158,7 @@ export class CobrosService {
         ),
         codigoOrden: orden.codigoOrden,
         monto: dto.monto,
-        moneda: 'CLP',
+        moneda: MONEDA_ORDEN_V1,
         cuotas: dto.cuotas ?? 0,
       });
     } catch (e) {
@@ -162,7 +172,7 @@ export class CobrosService {
           tipo: 'AUTHORIZATION',
           estado: 'error',
           monto: dto.monto,
-          moneda: 'CLP',
+          moneda: MONEDA_ORDEN_V1,
           codigoOrden: orden.codigoOrden,
           request: e.request,
           response: e.response,
@@ -182,7 +192,7 @@ export class CobrosService {
       tipo: 'AUTHORIZATION',
       estado: resultado.aprobada ? 'aprobada' : 'rechazada',
       monto: dto.monto,
-      moneda: 'CLP',
+      moneda: MONEDA_ORDEN_V1,
       codigoOrden: orden.codigoOrden,
       codigoAutorizacion: resultado.codigoAutorizacion,
       identificadorTransaccionExterno:
@@ -233,6 +243,23 @@ export class CobrosService {
   ) {
     if (new Decimal(dto.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
+    // Mismo borde que en `cobrar`, y por la misma razón: acá el rollback de la
+    // transacción evita la orden huérfana, pero sin esto el 400 sale de adentro
+    // del proveedor con un mensaje que nombra a Transbank, no al monto.
+    //
+    // ⚠️ Va contra `MONEDA_ORDEN_V1` y no contra `orden.moneda`, aunque acá la
+    // orden existe: la moneda de una orden la escribe ESTE mismo código desde
+    // la constante, así que hoy no pueden diferir. La razón de validarlo antes
+    // de abrir la transacción es que un monto mal formado da un 400 sin abrirla,
+    // sin tomar el `FOR UPDATE` y sin escribir nada (leer, lee: el chequeo hace
+    // su propio SELECT sobre `moneda`).
+    //
+    // El día que la moneda de la orden deje de salir de la constante, esto se
+    // mueve adentro de la transacción y pasa a leer `orden.moneda` — y es
+    // barato: `Db.query` resuelve el manager de la transacción activa
+    // (ADR-020), así que NO abre una segunda conexión. Lo único que la abriría
+    // es `db.sinTransaccion`, que este camino no usa ni necesita.
+    await this.monedas.validarEscalaDeMoneda(dto.monto, MONEDA_ORDEN_V1);
 
     // Todo el read (disponible) → proveedor → write corre bajo un lock pesimista
     // de la fila de la orden (SELECT ... FOR UPDATE): dos reembolsos concurrentes
