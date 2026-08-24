@@ -429,12 +429,20 @@ empezarlas.
   El motor **sí** aplica valor plano, tramos y método de pago. Quien retome esto tiene que
   releer la § 6 de este archivo antes de diseñar: el punto de integración cambió de forma.
 
-  🔶 **Decisión de producto que conviene tomar ANTES, y es barata ahora:** ese documento decide
-  que *descuentos y promociones conviven, no se fusionan*. Entonces el día que el módulo exista
-  van a coexistir un **tipo de regla `promocional`** —que es solo un descuento con fechas
-  obligatorias— y un **módulo Promociones** que es el evaluador cross-carrito. **Dos cosas
-  distintas con el mismo nombre.** Renombrar el tipo de regla ahora (p. ej. a *"descuento con
-  vigencia"*) cuesta un seed y una pantalla; después cuesta reglas ya creadas en producción.
+  ✅ **DECIDIDO (owner, 2026-08-23): el tipo de regla `promocional` se ELIMINA y su caso pasa a
+  este módulo.** No fue por el choque de nombres sino por duplicación: la Fase 1 de este
+  documento ya incluye *"happy hour %"*, que es un descuento porcentual acotado a una ventana —
+  o sea `promocional` con granularidad más fina. Mantener los dos era construir la misma
+  capacidad dos veces y hacer que el local adivine cuál usar. Se ejecuta dentro del frente de
+  vigencia por fecha
+  ([spec](../superpowers/specs/2026-08-23-vigencia-por-fecha-design.md)), donde `directo` gana
+  fechas opcionales para que la capacidad no desaparezca.
+
+  ⚠️ **REQUISITO QUE ESTE MÓDULO HEREDA, y no es opcional:** al eliminar `promocional` se pierde
+  su guardarraíl —era el único tipo que **obligaba** a poner las dos fechas—, y eso es lo que
+  previene el *"20% de aniversario"* corriendo tres años. **Una campaña sin fecha de fin no
+  debería aceptarse acá.** Entre la eliminación del tipo y la existencia de este módulo hay una
+  ventana sin ese control: es un costo aceptado a sabiendas, no un olvido.
 
   ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y el propio
   análisis lo dice: el evaluador es **una etapa nueva sobre el carrito entero**, no una rama más

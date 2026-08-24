@@ -10,9 +10,15 @@ De la entrada *"Cinco tipos de regla no hacen lo que la pantalla promete"* de
 aritmética de crédito, solo saber si el día cae en el rango. Sus cuatro decisiones de producto
 están tomadas y viven en esa entrada.
 
+⚠️ **El frente cambió de forma dos veces mientras se diseñaba, y las dos veces creció el
+diagnóstico y se achicó el código.** Primero al medir que la vigencia no es de `promocional`
+sino de cualquier regla con fechas; después al decidir el owner que **el tipo `promocional` se
+elimina** y su caso se muda al futuro módulo de promociones. Lo que queda es más chico que lo
+que se abrió.
+
 ⛔ **Toca el motor de precios**, así que por `CLAUDE.md` va solo y con el sistema quieto.
 
-## El frente no es `promocional`: son tres tipos, y dos ya cobran mal
+## El frente no es `promocional`: son las fechas, y dos tipos ya cobran fuera de ellas
 
 Al abrirlo apareció que la vigencia no es una propiedad de `promocional` sino de **cualquier
 regla que tenga fechas**. Tres tipos las ofrecen en la pantalla
@@ -29,6 +35,14 @@ Son **dos problemas distintos, y el segundo es peor**: `promocional` molesta per
 más; los otros dos cobran fuera de la ventana que el local configuró, sin avisar. Es un bug
 vivo en una feature entregada el 2026-08-22.
 
+**Cómo queda después de este frente** (ver la sección siguiente):
+
+| Tipo | Fechas |
+|---|---|
+| `directo` | **opcionales — nuevas** |
+| `por_monto_venta`, `recargo_por_monto_venta` | opcionales, ya existían |
+| `promocional` | **eliminado** |
+
 📊 **Medido el 2026-08-23:** hoy solo existen dos reglas con fechas, las dos `promocional`
 (*"Promo verano 2026-27"*, 1-dic→31-ene, y una de test). **Ninguna** de los otros dos tipos.
 Así que evaluar la vigencia **no le cambia el cobro a nadie hoy**: cierra el agujero antes de
@@ -41,6 +55,44 @@ respete y en otros no.
 
 ⚠️ **Consecuencia real sobre un dato que ya existe:** la promo *"Promo verano 2026-27"* del
 seed **empieza a descontar en diciembre**. Es lo correcto, y se dice acá para que no sorprenda.
+
+## `promocional` se elimina como tipo de regla (owner, 2026-08-23)
+
+**Decisión tomada mientras se escribía esta spec**, y cambia de qué se trata el frente.
+
+**El argumento no es el nombre, es la duplicación.** El alcance de Fase 1 del motor de
+promociones —cerrado el 2026-07-22— ya incluye **"happy hour %"**: un descuento porcentual
+acotado a una ventana. Eso *es* `promocional`, con granularidad más fina. Mantener los dos
+significa construir la misma capacidad dos veces, en dos lugares, y que el local tenga que
+adivinar cuál usar. Y evita la colisión que se venía: un **tipo de regla** `promocional` y un
+**módulo Promociones** que son cosas distintas.
+
+**La condición, sin la cual esto deja un hueco:** `promocional` es hoy el único tipo que ofrece
+fechas para un descuento común. Si desaparece y no lo reemplaza nada, *"10% del 15 al 20 de
+septiembre"* deja de ser expresable hasta que exista el módulo — que no tiene plan ni fecha.
+Por eso **`directo` gana `fechaInicio`/`fechaFin` opcionales** en la pantalla, en el mismo
+frente. La capacidad no desaparece: deja de tener un nombre que va a chocar.
+
+⚠️ **Lo que se pierde, dicho derecho:** el guardarraíl. `promocional` **obliga** a las dos
+fechas, y eso es lo que previene el *"20% de aniversario"* corriendo tres años. Con fechas
+opcionales en `directo` nada obliga a ponerle fin. **Ese guardarraíl se muda al módulo de
+promociones** —una campaña sin fecha de fin no debería aceptarse— y queda anotado como
+requisito suyo en [`pendientes.md`](../../agent/pendientes.md) § 3. Mientras tanto hay una
+ventana sin él, y es un costo chico: hoy protege un tipo que no funciona.
+
+**Migración: ninguna.** El proyecto no tiene datos productivos — se cambia el seeder y se
+resetea. La única fila real es *"Promo verano 2026-27"*, que pasa a ser un `directo` con las
+mismas fechas y sigue comportándose igual (empieza a descontar en diciembre, como ya decía esta
+spec).
+
+**Costo medido (2026-08-23): 8 archivos**, todos fixtures, config y una rama de validación —
+`seeder.service.ts`, `calculo-precios.engine.ts` + su spec, `descuentos.service.ts` + su spec,
+`reglas-form-config.ts` + su spec, y `test/reglas-valor.e2e-spec.ts` (que usa
+`TIPO_DESCUENTO_PROMOCIONAL` como fixture). Nada de esto es lógica de negocio.
+
+📌 **Por qué en este frente y no después:** dejarlo para más adelante significa entregar un
+`promocional` que funciona y quitarlo un mes después — churn sobre un tipo que el local ya vio
+en pantalla.
 
 ## Las cuatro decisiones de producto que gobiernan el diseño
 
@@ -103,7 +155,9 @@ En el bucle de reglas, junto al guard de la pausada:
 - `!regla.vigente` → `continue`, **sin advertencia y sin traza**. No es un "aplicó 0".
 - El `continue` va **antes** de evaluar, para que ni siquiera se calcule el monto.
 
-`promocional` sale de `DIFERIDAS`. `mora` y `pronto_pago` **se quedan**.
+`promocional` sale de `DIFERIDAS` **por borrado del tipo, no por implementarlo** — un caso
+menos que sostener. `mora` y `pronto_pago` **se quedan** ahí: dependen del vencimiento de la
+venta, que no existe.
 
 ### El servicio: `indexarReglas` calcula `vigente`
 
@@ -208,6 +262,9 @@ exacto, ese es el camino.
 - **Mutantes exigidos:** quitar el guard del motor, y devolver `vigente: true` fijo en el
   servicio. Cada uno tiene que matar tests distintos.
 
+- **E2E de la pantalla de configuración:** que `directo` acepte y devuelva fechas, y que el
+  tipo `promocional` **ya no exista** en el catálogo.
+
 ⚠️ **Los tests de fecha no pueden depender del día en que corren.** El instante entra por el
 `cuentaId` (o se controla en el unit), nunca se afirma contra `new Date()` del runner.
 
@@ -253,3 +310,8 @@ haya reglas creadas.
    abuso descrito arriba. El camino es un parámetro de `crearEnTransaccion`.
 6. **Los mutantes son parte del entregable, no un extra.** Un `vigente` que nadie enforcea pasa
    la suite entera: es exactamente la forma del bug que este frente cierra.
+7. **No reintroducir `promocional`.** Si al tocar el seeder, la config de la pantalla o un
+   fixture del e2e reaparece el tipo, la decisión se perdió. El e2e lo usa hoy como fixture
+   (`TIPO_DESCUENTO_PROMOCIONAL`): hay que cambiarlo por `directo` con fechas, no revivirlo.
+8. **`directo` con fechas es parte del entregable, no un extra.** Sin eso el frente **quita**
+   una capacidad en vez de arreglarla.
