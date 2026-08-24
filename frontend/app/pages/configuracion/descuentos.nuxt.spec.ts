@@ -278,6 +278,16 @@ function badges(wrapper: Awaited<ReturnType<typeof montar>>): string[] {
     .filter(t => t === 'Eliminado')
 }
 
+/**
+ * Los textos de los `UBadge` de vigencia, con el mismo criterio que `badges()`:
+ * como elementos, no como subcadena del texto de la página.
+ */
+function badgesVigencia(wrapper: Awaited<ReturnType<typeof montar>>): string[] {
+  return wrapper.findAll('tbody span')
+    .map(s => s.text().trim())
+    .filter(t => t === 'Vencida' || t === 'Programada')
+}
+
 /** El botón "Restaurar" de la fila (el que abre el modal), no el del modal. */
 async function abrirRestaurarDeLaFila(
   wrapper: Awaited<ReturnType<typeof montar>>,
@@ -817,5 +827,96 @@ describe('configuracion/descuentos — cambiar de modo no deja un valor de la ot
     await clickModo('porcentaje')
 
     expect(inputValor().value).toBe('')
+  })
+})
+
+// El badge de vigencia (`useVigenciaRegla`): sin él, una regla vencida se ve
+// idéntica a una vigente en la tabla y el local puede pasar semanas creyendo
+// que da un descuento que no está dando. `directo` es el tipo que expone
+// `fechaInicio`/`fechaFin` en el drawer (ver `TIPOS_REGLA` arriba), así que
+// alcanza con variarlas en el fake — no hace falta tocar el drawer para esto.
+/** 'YYYY-MM-DD' de HOY, con el mismo criterio que `useVigenciaRegla` (fecha
+ *  LOCAL, no `toISOString()` que da UTC). Se calcula en vez de fijar una fecha
+ *  a mano porque los tests de borde de abajo necesitan que "hoy" en el test sea
+ *  el mismo "hoy" que usa el composable, corra cuando corra la suite. */
+function hoyLocal(): string {
+  const d = new Date()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mes}-${dia}`
+}
+
+describe('configuracion/descuentos — badge de vigencia', () => {
+  beforeEach(() => {
+    reset()
+  })
+
+  it('una regla cuyo rango ya pasó se muestra como Vencida', async () => {
+    descuentosBackend = [descuento({ fechaInicio: null, fechaFin: '2020-01-01' })]
+    const wrapper = await montar()
+
+    expect(badgesVigencia(wrapper)).toEqual(['Vencida'])
+
+    wrapper.unmount()
+  })
+
+  // Contracara del anterior: una fecha de inicio futura es "todavía no", no
+  // "ya pasó". Sin esta distinción, un mutante que devolviera 'vencida' para
+  // cualquier regla con al menos una fecha puesta pasaría el test de arriba
+  // igual.
+  it('una regla programada a futuro se muestra como Programada, no como Vencida', async () => {
+    descuentosBackend = [descuento({ fechaInicio: '2099-01-01', fechaFin: null })]
+    const wrapper = await montar()
+
+    expect(badgesVigencia(wrapper)).toEqual(['Programada'])
+
+    wrapper.unmount()
+  })
+
+  // El caso esperado —una regla en su rango vigente— NO lleva badge: solo se
+  // marca la excepción. Sin este test, un mutante que sacara el `v-if` y
+  // mostrara el badge siempre (con la etiqueta "vigente" o vacía) pasaría los
+  // dos tests de arriba igual, porque ninguno mira las filas vigentes.
+  it('una regla vigente (dentro de su rango) no muestra ningún badge de vigencia', async () => {
+    descuentosBackend = [descuento({ fechaInicio: '2020-01-01', fechaFin: '2099-01-01' })]
+    const wrapper = await montar()
+
+    expect(badgesVigencia(wrapper)).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  // Y el caso más común de todos: una regla sin fechas —la mayoría de los
+  // tipos ni siquiera muestran esos campos en el drawer— tampoco lleva badge.
+  it('una regla sin fechaInicio ni fechaFin no muestra badge de vigencia', async () => {
+    descuentosBackend = [descuento({ fechaInicio: null, fechaFin: null })]
+    const wrapper = await montar()
+
+    expect(badgesVigencia(wrapper)).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  // Bordes INCLUSIVOS — el docblock de `useVigenciaRegla` lo afirma explícitamente
+  // (mismo criterio que `calculo-precios.service.ts` → `indexarReglas`) y hasta la
+  // ronda de arreglo 1 ningún test tocaba el día exacto. Sin estos dos, un `<=` en
+  // vez de `<` (o un `>=` en vez de `>`) en el composable pasaría toda la suite
+  // igual: medido más abajo, revirtiendo después.
+  it('una regla que empieza HOY es vigente: no muestra "Programada"', async () => {
+    descuentosBackend = [descuento({ fechaInicio: hoyLocal(), fechaFin: null })]
+    const wrapper = await montar()
+
+    expect(badgesVigencia(wrapper)).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('una regla que termina HOY es vigente: no muestra "Vencida"', async () => {
+    descuentosBackend = [descuento({ fechaInicio: null, fechaFin: hoyLocal() })]
+    const wrapper = await montar()
+
+    expect(badgesVigencia(wrapper)).toEqual([])
+
+    wrapper.unmount()
   })
 })

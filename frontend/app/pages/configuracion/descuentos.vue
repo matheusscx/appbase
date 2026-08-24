@@ -33,6 +33,7 @@ const toast = useToast()
 const apiUrl = runtimeConfig.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('descuentos')
+const { estadoVigencia, vigenciaColor, vigenciaLabel } = useVigenciaRegla()
 
 const descuentos = ref<Regla[]>([])
 const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
@@ -489,6 +490,13 @@ const columns: TableColumn<Regla>[] = [
               </p>
               <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
                 Eliminado
+              </UBadge>
+              <UBadge
+                v-if="estadoVigencia(row.original.fechaInicio, row.original.fechaFin) !== 'vigente'"
+                :color="vigenciaColor(row.original.fechaInicio, row.original.fechaFin)"
+                variant="subtle"
+              >
+                {{ vigenciaLabel(row.original.fechaInicio, row.original.fechaFin) }}
               </UBadge>
             </div>
             <p v-if="row.original.eliminadoEl" class="text-xs text-muted">

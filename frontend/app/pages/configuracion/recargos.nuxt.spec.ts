@@ -161,3 +161,41 @@ describe('configuracion/recargos — cambiar de modo no deja un valor de la otra
     expect(inputValor().value).toBe('')
   })
 })
+
+/**
+ * El badge de vigencia (`useVigenciaRegla`, compartido con `descuentos.vue`) usa
+ * exactamente el mismo `v-if`/`color`/`label` en las dos pantallas — la lógica de
+ * `estadoVigencia` ya está cubierta a fondo en `descuentos.nuxt.spec.ts` (Vencida,
+ * Programada, vigente sin badge, sin fechas). Acá va solo la comprobación de que
+ * ESTA pantalla lo tiene cableado: mismo motivo que el describe de arriba —
+ * "simétrico" es una intención del código, no una garantía, y esta pantalla ya
+ * tuvo un caso donde perdió la simetría sin que nada avisara.
+ */
+describe('configuracion/recargos — badge de vigencia', () => {
+  it('un recargo cuyo rango ya pasó se muestra como Vencida', async () => {
+    recargosBackend = [{
+      id: 'rec-2',
+      nombre: 'Recargo temporada',
+      tipoReglaId: 'tipo-1',
+      modo: 'porcentaje',
+      valorMonto: null,
+      valorPorcentaje: '0.10',
+      metodoPagoIds: [],
+      tramos: [],
+      diasVencimiento: null,
+      fechaInicio: null,
+      fechaFin: '2020-01-01',
+      activo: true,
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }]
+    const wrapper = await montar()
+
+    const textosBadge = wrapper.findAll('tbody span')
+      .map(s => s.text().trim())
+      .filter(t => t === 'Vencida' || t === 'Programada')
+    expect(textosBadge).toEqual(['Vencida'])
+
+    wrapper.unmount()
+  })
+})
