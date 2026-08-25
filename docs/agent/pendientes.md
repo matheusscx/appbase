@@ -213,6 +213,55 @@ decisión que no es mía).
   recibe el payload firmado y mapea cuatro campos), y ningún guard tiene `try/catch` que
   traduzca un error a 401. Un fallo de base ahí da 500, no 401.
 
+  🔬 **Pasada del 2026-08-24: se instrumentó, y se refutaron dos hipótesis con evidencia.**
+
+  **Lo que ahora existe y antes no: `backend/test/diagnostico-401.ts`, una caja negra.** Se
+  engancha por `setupFilesAfterEnv` —no hay que tocar ningún spec— y parchea el `end` de
+  supertest, por donde pasan también los `await`. Escribe **todo** 401 de la corrida a
+  `test/tmp-401.jsonl` (gitignored, se borra al empezar cada corrida) con la ruta, el body,
+  si viajaba `Authorization` y de qué largo, y el nombre del test. Marca `sospechoso: true`
+  al que cae en una ruta que no espera 401.
+
+  **Por qué el body y no el status, que es lo único que registraron los cinco avistajes:**
+  el body dice **quién** tiró el 401, y es un discriminador que nadie usó todavía.
+
+  | Body | Quién lo tiró |
+  |---|---|
+  | `{ message: 'Unauthorized', statusCode: 401 }` — **sin** `error` | Passport, o sea un guard, sin pasar por código propio |
+  | `{ message: '<texto>', error: 'Unauthorized', statusCode: 401 }` | código de la app |
+
+  ✅ **CONFIRMADO, y es lo más raro de esta entrada: el 401 de `POST /auth/register` es
+  imposible desde la app.** Se midió entero, no por encima: no hay guard global (`APP_GUARD`
+  no aparece en el repo), `AuthController` **no tiene guard de clase** —solo `@ApiTags` y
+  `@Controller('auth')`—, la ruta no tiene `@UseGuards`, y `AuthService.register`
+  (`auth.service.ts:143`) **no tiene rama de 401**: devuelve 200 fijo. El único
+  `UnauthorizedException` cerca es el de `validateUser` (`:113`), que es el camino del
+  **login**. Y la atribución del avistaje también se verificó: `alta-usuarios-tenant`
+  efectivamente llama a `register` (líneas 330, 356 y 363). O sea que hay que explicar una
+  respuesta que la app no puede producir.
+
+  ⛔ **REFUTADO — supertest concurrente.** Hipótesis razonable: dos requests en `Promise.all`
+  sobre un server que todavía no escucha hacen que las dos llamen a `listen(0)`, y una
+  respuesta cruzada explicaría un 401 en una ruta sin guard. **Medido: no aplica.** De los 50
+  specs, **uno solo** usa supertest dentro de un `Promise.all` (`rbac-y-contrasena`), y
+  **ninguno de los cinco specs con avistajes** lo hace (`caja`, `ventas`, `papelera`,
+  `recetas`, `alta-usuarios-tenant`: cero).
+
+  ⛔ **REFUTADO — una spec le rompe la contraseña a un usuario compartido.** Encajaba con el
+  401 al loguear con credenciales del seed, y con que 42 archivos compartan
+  `admin.paris@paris.cl`. **Medido: el único spec que cambia contraseñas es
+  `rbac-y-contrasena`, y registra una cuenta nueva por test justamente para no hacer eso**
+  (está escrito en su propio docblock, `:188-191`). Tampoco es el seeder anulando la
+  verificación: es idempotente —`findOne` y crea solo si falta, con `correoVerificadoEl`
+  sellado (`seeder.service.ts:1083-1092`)—, así que re-correrlo no toca a un usuario que ya
+  existe.
+
+  📌 **Y la acción concreta que esta entrada propone —que toda limpieza de `afterAll` afirme
+  su status— quedó dimensionada:** de los 50 specs, **15** tienen limpieza que corre antes
+  del `app.close()` y **fuera de un `finally`**. Otros 20 no tienen `finally` pero su
+  `afterAll` **solo cierra la app**, así que no hay nada que pueda fallar antes: contarlos
+  daba 35 y habría inflado el trabajo al doble.
+
   Por qué importa para el de caja: un `401` devuelve un **objeto** (`{statusCode, message}`),
   no un array — que es exactamente `resMiembros.body.find is not a function`. Los dos
   síntomas se explican con la misma causa. **Sigue siendo hipótesis, no medición**: nadie
