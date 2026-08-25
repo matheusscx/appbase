@@ -90,6 +90,43 @@ eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó le
 detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
 de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
 
+- [ ] **15 specs del e2e cierran la app fuera de un `finally`, y una limpieza que falla deja
+  un cron vivo pegándole a la base** (backend/tests, medido el 2026-08-24) — es mecánico: hay
+  molde funcionando y el daño está medido, no supuesto.
+
+  **Qué pasa hoy.** Si la limpieza del `afterAll` tira antes del `app.close()`, la app **no
+  se cierra**, y `AppModule` registra un `@Cron` (`expirar-ordenes`, cada 10 min) que
+  **sobrevive al teardown de Jest** y le sigue escribiendo a la base desde un módulo
+  desmontado **mientras corren otras suites**. Medido en su momento:
+  `"You are trying to require a file after the Jest environment has been torn down"`, con el
+  cron disparando a las 22:20 y 22:30.
+
+  **El tamaño, medido y no estimado:** de los 50 specs, **15** tienen limpieza que corre
+  antes del `app.close()` y fuera de un `finally`. Otros 20 no tienen `finally` pero su
+  `afterAll` **solo cierra la app**, así que no hay nada que pueda fallar antes — contarlos
+  daba 35 e inflaba el trabajo al doble. Los 15:
+  `cajones`, `combos`, `costeo-cpp`, `grupos-modificadores-overrides`, `grupos-modificadores`,
+  `items-pausados`, `liquidacion-propinas`, `monto-tolerancia`, `recetas`, `salones-comanda`,
+  `salones-fusion`, `tendencia-descuadres`, `unidad-ingrediente-referenciado`, `uso-reglas`,
+  `vigencia-cuenta`.
+
+  ⚠️ **La trampa, que ya costó el veredicto de un mutante entero:** *"que el `afterAll` afirme
+  su status"* aplicado a secas **hace daño**. Si el `expect` corre **antes** del
+  `app.close()`, el primer fallo de limpieza tira la excepción, la app de Nest queda viva con
+  su pool abierto y **jest imprime el resultado y no termina nunca** (medido: 7 minutos, 0%
+  CPU, `pg_stat_activity` sin una sola query). Un mutante que hace exactamente lo que debe se
+  vuelve indistinguible de un entorno colgado.
+  ➡️ **La forma correcta, ya aplicada en `caja-testigo.e2e-spec.ts`** —copiar de ahí—:
+  acumular los fallos de limpieza, cerrar la app en un `finally`, y afirmar **después**.
+  Mismo diagnóstico, 4,4 s en vez de colgarse. Y para los pasos intermedios que pueden
+  responder un 400 inofensivo, el molde es `liberarCajeroSiQuedoOcupado` en
+  `caja.e2e-spec.ts`: best-effort, sin abortar la higiene.
+
+  ℹ️ **Por qué está suelta acá y no adentro de otra entrada:** venía anidada en la del `401`
+  fantasma, y cuando ésa se cerró el 2026-08-25 esta acción **quedó huérfana en
+  `resueltos.md`** —cero menciones en este archivo— hasta que se notó. No depende de aquel
+  bug: el `401` era otro proceso ocupando un puerto, y esto es una fuga real y aparte.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
