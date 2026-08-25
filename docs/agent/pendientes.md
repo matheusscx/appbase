@@ -133,6 +133,50 @@ decisión que no es mía).
   arreglo de allá no se transfiere. Quién retome esto decide si lo toma; lo único que
   cambió es que ya no hay tanda cerrada que esperar.
 
+- [ ] **El `401` fantasma del e2e REAPARECIÓ después de darlo por cerrado** (harness de test,
+  medido 2026-08-25 19:52) — se cerró esa misma mañana
+  ([`resueltos.md`](resueltos.md) § *"El `401` fantasma no era nuestro"*) con
+  `listen(0, '127.0.0.1')` en `backend/test/setup-supertest.ts`, y **volvió a aparecer a las
+  pocas horas**, en `papelera.e2e-spec.ts` → *"la promesa de la feature: item con impuesto propio
+  + descuento + recargo…"*: `401` donde esperaba `403`.
+
+  **La firma es la misma que la caracterizada**, y la caja negra la capturó entera:
+
+```json
+{"t":"2026-08-25T19:52:00.010Z","metodo":"POST",
+ "url":"http://127.0.0.1:56561/api/items/2c9d…/restaurar",
+ "sospechoso":true,"body":{},"texto":"",
+ "headers":{"content-length":"0","date":"…","connection":"close"},
+ "autorizacion":"presente(len=330)","cookie":"ausente"}
+```
+
+  Body vacío, **sin `x-powered-by`** —o sea que la respuesta no pasó por Express— y con el token
+  presente. Y `lsof -nP -i :56561` inmediatamente después mostró el puerto tomado por el **mismo
+  proceso** que se identificó a la mañana: `Agent` (Battle.net), en `127.0.0.1:56561`.
+
+  ⛔ **Lo que esto refuta es MI propio cierre, no el diagnóstico.** La causa sigue siendo la
+  descrita —otro proceso en el rango efímero—, pero el arreglo **no la elimina**, y la entrada de
+  `resueltos.md` afirma que sí. Eso hay que corregirlo donde se descubra, que es acá.
+
+  ❓ **Por qué se coló: NO SE SABE, y las dos hipótesis obvias ya están descartadas.** Se
+  descartaron leyendo la fuente, no razonando:
+
+  - ⛔ **(a) Una ventana entre el `close()` de un request y el `listen()` del siguiente —
+    REFUTADA.** `supertest/lib/test.js:63` solo asigna `this._server` **si él hizo el listen**, y
+    `:141` solo cierra `if (server && server._handle)`. Con el guard puesto, `app.address()` ya
+    no es null, supertest no lista, `_server` queda `undefined` y **nunca cierra**: el server
+    queda atado a `127.0.0.1` para todo el archivo. No hay ventana que aprovechar.
+  - ⛔ **(b) Que el server ya estuviera en el WILDCARD por un `listen` propio del spec —
+    NO APLICA ACÁ.** Tres specs hacen `server.listen(0, cb)` sin host (`rbac-y-contrasena:349`,
+    `concurrencia-pool:87`, `orden-locks-desfases:283`) y en ésos el guard es un no-op — pero
+    **`papelera` no es uno de ellos**, y es el que falló. Con `maxWorkers: 1` comparten proceso,
+    pero cada archivo tiene su propio server, así que el bind ajeno no lo explica.
+
+  ➡️ **Por dónde seguir:** queda el **primer** request de un archivo, que es el único instante en
+  que nada nuestro tiene el puerto. Medirlo es barato: registrar en la caja negra si la captura
+  fue el primer request de su spec. Y aunque no explique éste, a los tres `listen` sin host
+  conviene pasarles `'127.0.0.1'` igual — hoy dependen de que nadie les gane el puerto.
+
 - [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local, con cinco
   causas ya descartadas** (backend/tests, visto y medido el 2026-08-18 en el cierre del
   contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
@@ -199,6 +243,38 @@ decisión que no es mía).
   conexión por request y el server contesta `Connection: close`, así que no hay reuso y cada
   una quema un par de puertos. **Medido durante una corrida completa a 200 ms**: TIME_WAIT
   pica en 991 y los puertos efímeros en uso en **1071 de 16384 (6,5%)**. No hay presión.
+
+  🎯 **REPRODUJO EL MISMO DÍA, Y LA SONDA CONTESTÓ LA PREGUNTA (2026-08-25, 19:56).** Undécima
+  corrida de la suite, un solo fallo: `caja.e2e-spec.ts` → *"caja abierta ajena en tenant ciego:
+  el supervisor la ve pero sin el esperado"*, `500` donde esperaba `200`. La captura, verbatim:
+
+```json
+{"t":"2026-08-25T19:56:51.082Z","ms":5002,
+ "error":"timeout exceeded when trying to connect",
+ "antes":{"total":1,"idle":1,"esperando":1,"max":10},
+ "despues":{"total":3,"idle":2,"esperando":0,"max":10}}
+```
+
+  ⛔ **NO es agotamiento del pool, y ahora con la magnitud correcta.** El pool tenía **1 cliente
+  de 10**, y ese cliente estaba **idle**. La tabla de esta entrada distinguía "saturado"
+  (`esperando > 0` **y** `total === max`) de "connect lento" (`total < max`, `ms` alto): esto es
+  inequívocamente lo segundo. Cinco segundos esperando para abrir una conexión con el pool casi
+  vacío.
+
+  ⚠️ **Y hay un dato que no encaja del todo, que conviene no alisar:** `idle: 1` con
+  `esperando: 1` es raro — con un cliente libre, `pg-pool` debería haberlo entregado. O el
+  snapshot cae en un instante transitorio (el `antes` se lee sincrónico, y el otro encolado pudo
+  entrar en el mismo tick), o el cliente idle no era usable. **No lo sé, y no lo invento.**
+
+  ➡️ **Adónde apunta esto:** afuera del proyecto. Con el pool en 1/10, ni nuestra concurrencia ni
+  el orden de locks explican una demora de 5 s para establecer una conexión; queda Postgres o
+  Docker tardando en aceptarla en ese instante. El próximo paso ya no es instrumentar el pool
+  —está contestado— sino mirar del lado del servidor **en el mismo instante**: log de Postgres y
+  estado del contenedor, con la hora de la captura.
+
+  📌 **Y una advertencia para el que lo tome:** `reset-db.sh` hace `down -v`, así que el
+  contenedor y sus logs desaparecen. Peritar esto exige NO resetear entre el fallo y la
+  inspección — que es exactamente lo que impidió peritar el fallo original.
 
   📌 **Dos notas de método de esta pasada:**
   - **No hace falta atrapar el fallo para caracterizarlo.** Medir la distribución de lo que
@@ -303,7 +379,7 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 16 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** De sus 17 entradas, **siete son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
@@ -441,6 +517,45 @@ nivel de la regla. La quinta —el descarte de desfases— **se construyó el mi
   dejarlo escrito o se desincroniza**: el modal (`usePausaRegla`) filtra los borrados y el 400 del
   cambio de nivel los necesita. Un cambio futuro que "simplifique" devolviendo una sola lista rompe
   uno de los dos en silencio.
+
+- [ ] **El drawer del simulador se recarga con un alcance más angosto que lo que muestra**
+  (frontend; lo levantó la revisión independiente del 2026-08-25 al cerrar el frente del
+  descarte, → [`resueltos.md`](resueltos.md) § *"El descarte de un desfase deja de silenciarlo"*)
+  — cuando el descarte devuelve `cambiados`, `useSimuladorDesfases` recarga la lista con
+  `GET /items/:insumoId/afectados`, que filtra por **componente DIRECTO**
+  (`filasDesfaseCombos`: `JOIN combo_componentes cc … AND cc.componente_item_id = $2`, sin
+  transitividad). Pero el drawer puede contener filas que no salen de ahí: `onAplicarDesfases`
+  **agrega** `res.afectados` —los combos que contienen la receta recién aplicada— y si el drawer
+  se abrió por un **ingrediente**, esos combos nunca son alcanzables por `afectados(ingrediente)`,
+  porque un ingrediente no puede ser componente de un combo.
+  **Repro** (camino compuesto, una sola sesión de drawer): ajuste de costo del ingrediente X →
+  drawer con la receta R → Aplicar R → el drawer queda con el combo C → Descartar → C vuelve en
+  `cambiados` → la recarga trae `afectados(X)`, que **no incluye a C**. El drawer queda
+  probablemente vacío mientras el toast dice *"El costo de «C» cambió mientras mirabas… decidí
+  otra vez"*, sobre una fila que ya no está en pantalla.
+  ℹ️ **No silencia nada ni escribe nada mal** —el backend no archivó, y C sigue listada en
+  `/desfases`, que es la bandeja canónica—: es pérdida de contexto en pantalla. Por eso se anota
+  en vez de frenar el frente.
+  📌 **Residuo emparentado, de la misma recarga:** su `catch` es silencioso, así que si el GET
+  falla la fila cambiada queda con su número viejo mientras el toast dice *"mirá el número
+  nuevo"*. Es la misma degradación asumida que la rama sin `highlightId` —una foto vieja
+  coherente— y desaparece sola si se toma la salida del backend.
+  ⛔ **La puerta equivocada, y es la que más tienta: ensanchar `afectados` para que sea
+  transitivo.** El filtro es `cc.componente_item_id = $2` —componente directo— y tocarlo cambia
+  la semántica de `GET /items/:id/afectados` para **todos** sus consumidores, empezando por
+  `maybeAbrirDesfases`, que es justamente quien puebla el drawer. Se arregla la recarga rompiendo
+  lo que la llenó.
+  💡 **La salida preferida es el backend**: que `cambiados` devuelva la fila completa
+  (`DesfaseItemDto`) en vez de solo `costoPropuestoActual` elimina la recarga en los DOS
+  consumidores y borra esta clase de divergencia entera.
+  ⚠️ **Cuánto cuesta, medido y no estimado** (revisión independiente, 2026-08-25): hoy no
+  alcanza con los datos que el descarte ya tiene. Un `DesfaseItemDto` necesita `afectados` (los
+  insumos **con nombre**) y `precio_base`, y ninguno está en la transacción:
+  `ingredientesPorReceta` selecciona `receta_item_id, cantidad, unidad_codigo, unidad_medida,
+  costo_actual` —sin id ni nombre del ingrediente—, `componentesPorCombo` lo mismo, y
+  `cabecerasCompuestas` devuelve solo `{ tipo, nombre }`. O se ensanchan tres helpers que
+  **también usa `aplicarDesfases`**, o se agrega una lectura. Por eso es frente propio y no el
+  remate del que lo descubrió.
 
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
