@@ -292,12 +292,21 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
   }, 60000);
 
   afterAll(async () => {
-    if (cajonDelCajeroId) {
-      await request(app.getHttpServer())
-        .delete(`/api/cajones/${cajonDelCajeroId}`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`);
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      if (cajonDelCajeroId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonDelCajeroId}`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 
   describe('GET /caja/cajones-estado', () => {
@@ -1482,16 +1491,25 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
   }, 60000);
 
   afterAll(async () => {
-    await ds.query(
-      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
-      [PARIS_TENANT_ID],
-    );
-    if (cajonId) {
-      await request(app.getHttpServer())
-        .delete(`/api/cajones/${cajonId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      await ds.query(
+        'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+        [PARIS_TENANT_ID],
+      );
+      if (cajonId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonId}`)
+          .set('Authorization', `Bearer ${adminToken}`);
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 
   it('ciego + caja abierta: resumen oculta cifras (ciego:true, totales null, saldoInicial presente) y movimientos devuelve página vacía', async () => {
@@ -1605,16 +1623,25 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
   }, 60000);
 
   afterAll(async () => {
-    await ds.query(
-      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
-      [PARIS_TENANT_ID],
-    );
-    if (cajonId) {
-      await request(app.getHttpServer())
-        .delete(`/api/cajones/${cajonId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      await ds.query(
+        'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+        [PARIS_TENANT_ID],
+      );
+      if (cajonId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 
   it('caja abierta del cajero en tenant ciego: el cajero la ve ciega, el admin (verTodas) la ve completa', async () => {
@@ -1717,36 +1744,45 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
   }, 60000);
 
   afterAll(async () => {
-    await ds.query(
-      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
-      [PARIS_TENANT_ID],
-    );
-    // Si el test falló antes de su cierre, el cajero se queda con la caja
-    // abierta y el 409 aparece varias suites más allá, lejos de la causa
-    // (ver `docs/agent/pendientes.md`). Liberarlo acá, pase lo que pase.
-    const activa = await request(app.getHttpServer())
-      .get('/api/caja/activa')
-      .set('Authorization', `Bearer ${tokenCajero}`);
-    const abiertaId = (activa.body as CajaResponse | null)?.id;
-    if (abiertaId) {
-      const motivos = await request(app.getHttpServer())
-        .get('/api/motivos-diferencia?soloActivas=true')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const motivoId = (motivos.body as { id: string }[])[0]?.id;
-      await cerrarEnDosFases(
-        app,
-        abiertaId,
-        tokenCajero,
-        [{ metodoPagoId: null, montoContado: '0' }],
-        [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      await ds.query(
+        'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+        [PARIS_TENANT_ID],
       );
+      // Si el test falló antes de su cierre, el cajero se queda con la caja
+      // abierta y el 409 aparece varias suites más allá, lejos de la causa
+      // (ver `docs/agent/pendientes.md`). Liberarlo acá, pase lo que pase.
+      const activa = await request(app.getHttpServer())
+        .get('/api/caja/activa')
+        .set('Authorization', `Bearer ${tokenCajero}`);
+      const abiertaId = (activa.body as CajaResponse | null)?.id;
+      if (abiertaId) {
+        const motivos = await request(app.getHttpServer())
+          .get('/api/motivos-diferencia?soloActivas=true')
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        const motivoId = (motivos.body as { id: string }[])[0]?.id;
+        await cerrarEnDosFases(
+          app,
+          abiertaId,
+          tokenCajero,
+          [{ metodoPagoId: null, montoContado: '0' }],
+          [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+        );
+      }
+      if (cajonId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+      }
+    } finally {
+      await app.close();
     }
-    if (cajonId) {
-      await request(app.getHttpServer())
-        .delete(`/api/cajones/${cajonId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-    }
-    await app.close();
   });
 
   it('caja abierta ajena en tenant ciego: el supervisor la ve pero sin el esperado; el admin sí lo ve', async () => {
@@ -1901,17 +1937,26 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
   }, 60000);
 
   afterAll(async () => {
-    // El teardown **asevera** el cierre: si la caja queda abierta, el cajón
-    // queda ocupado y el spec siguiente se lleva un 409 críptico al abrir.
-    if (cajaParisId) {
-      const conteo = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaParisId}/conteo`)
-        .set('Authorization', `Bearer ${tokenParis}`)
-        .send({ lineas: [{ metodoPagoId: null, montoContado: '50000' }] });
-      expect([200, 201]).toContain(conteo.status);
-      expect((conteo.body as { estado: string }).estado).toBe('cerrada');
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      // El teardown **asevera** el cierre: si la caja queda abierta, el cajón
+      // queda ocupado y el spec siguiente se lleva un 409 críptico al abrir.
+      if (cajaParisId) {
+        const conteo = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaParisId}/conteo`)
+          .set('Authorization', `Bearer ${tokenParis}`)
+          .send({ lineas: [{ metodoPagoId: null, montoContado: '50000' }] });
+        expect([200, 201]).toContain(conteo.status);
+        expect((conteo.body as { estado: string }).estado).toBe('cerrada');
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 
   // Control: la caja existe y su propio tenant la ve. Sin esto, un 404 para el
@@ -2041,16 +2086,25 @@ describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cie
   }, 60000);
 
   afterAll(async () => {
-    // Higiene: liberar al cajero si algún `it` lo dejó ocupado (abierta O
-    // en_conciliacion — ver el docblock de `liberarCajeroSiQuedoOcupado`),
-    // para no arrastrar un 409 a la próxima suite que use `vendedor@paris.cl`.
-    await liberarCajeroSiQuedoOcupado(app, tokenCajero, tokenAdmin);
-    if (cajonId) {
-      await request(app.getHttpServer())
-        .delete(`/api/cajones/${cajonId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      // Higiene: liberar al cajero si algún `it` lo dejó ocupado (abierta O
+      // en_conciliacion — ver el docblock de `liberarCajeroSiQuedoOcupado`),
+      // para no arrastrar un 409 a la próxima suite que use `vendedor@paris.cl`.
+      await liberarCajeroSiQuedoOcupado(app, tokenCajero, tokenAdmin);
+      if (cajonId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 
   it('el encargado (no admin) fuerza el conteo de la caja del cajero → en_conciliacion, y cierra fase 2 con comentario', async () => {
@@ -2152,39 +2206,48 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
   }, 60000);
 
   afterAll(async () => {
-    await ds.query(
-      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
-      [PARIS_TENANT_ID],
-    );
-    const activa = await request(app.getHttpServer())
-      .get('/api/caja/activa')
-      .set('Authorization', `Bearer ${tokenCajero}`);
-    const abiertaId = (activa.body as CajaResponse | null)?.id;
-    if (abiertaId) {
-      const motivos = await request(app.getHttpServer())
-        .get('/api/motivos-diferencia?soloActivas=true')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const motivoId = (motivos.body as { id: string }[])[0]?.id;
-      await cerrarEnDosFases(
-        app,
-        abiertaId,
-        tokenCajero,
-        [{ metodoPagoId: null, montoContado: '0' }],
-        [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      await ds.query(
+        'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+        [PARIS_TENANT_ID],
       );
+      const activa = await request(app.getHttpServer())
+        .get('/api/caja/activa')
+        .set('Authorization', `Bearer ${tokenCajero}`);
+      const abiertaId = (activa.body as CajaResponse | null)?.id;
+      if (abiertaId) {
+        const motivos = await request(app.getHttpServer())
+          .get('/api/motivos-diferencia?soloActivas=true')
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        const motivoId = (motivos.body as { id: string }[])[0]?.id;
+        await cerrarEnDosFases(
+          app,
+          abiertaId,
+          tokenCajero,
+          [{ metodoPagoId: null, montoContado: '0' }],
+          [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+        );
+      }
+      // Red de seguridad adicional: lo de arriba asume que la caja seguía
+      // `abierta` (el conteo con motivo la resuelve si descuadra). Si algún
+      // `it` la dejó ya `en_conciliacion` (p.ej. una aserción que aborta el
+      // test antes de llegar a cerrarla), esto la libera igual — ver
+      // `liberarCajeroSiQuedoOcupado`.
+      await liberarCajeroSiQuedoOcupado(app, tokenCajero, tokenAdmin);
+      if (cajonId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+      }
+    } finally {
+      await app.close();
     }
-    // Red de seguridad adicional: lo de arriba asume que la caja seguía
-    // `abierta` (el conteo con motivo la resuelve si descuadra). Si algún
-    // `it` la dejó ya `en_conciliacion` (p.ej. una aserción que aborta el
-    // test antes de llegar a cerrarla), esto la libera igual — ver
-    // `liberarCajeroSiQuedoOcupado`.
-    await liberarCajeroSiQuedoOcupado(app, tokenCajero, tokenAdmin);
-    if (cajonId) {
-      await request(app.getHttpServer())
-        .delete(`/api/cajones/${cajonId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-    }
-    await app.close();
   });
 
   it('caja abierta ajena en tenant ciego: el encargado que puede forzar la ve sin el esperado; el admin sí lo ve; forzar el conteo no cambia eso', async () => {

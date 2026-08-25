@@ -190,11 +190,26 @@ describe('Salones — fusionar cuentas (e2e)', () => {
     // El garzón es propio, así que dejar la sesión abierta no le cambiaría el
     // escenario a nadie. Se cierra igual: una sesión abierta para siempre es
     // ruido en el historial de turnos de la base de dev.
-    await request(app.getHttpServer())
-      .post('/api/sesiones-garzon/cerrar')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: garzon.id, pin: garzon.pin });
-    await app.close();
+    //
+    // El status se afirma **después** del `close`, que va en un `finally`: una
+    // limpieza que falla en silencio es la que después aparece como un error
+    // lejos de acá, y una que tira antes del cierre deja la app viva con su
+    // `@Cron` pegándole a la base durante las suites siguientes. Ver
+    // `docs/agent/pendientes.md` § 1.
+    let cierre: number | string;
+    try {
+      cierre = (
+        await request(app.getHttpServer())
+          .post('/api/sesiones-garzon/cerrar')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ garzonId: garzon.id, pin: garzon.pin })
+      ).status;
+    } catch (e) {
+      cierre = (e as Error).message;
+    } finally {
+      await app.close();
+    }
+    expect([200, 201]).toContain(cierre);
   });
 
   it('mergea la línea repetida reconvirtiendo a la presentación del destino, y muda la que no matchea', async () => {

@@ -165,27 +165,74 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
   }, 60000);
 
   afterAll(async () => {
-    if (itemId) {
-      await request(app.getHttpServer())
-        .delete(`/api/items/${itemId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
+    // Acumular en vez de cortar: si un paso falla, los que siguen igual tienen
+    // que correr — lo que dejen sin limpiar contamina las suites siguientes. El
+    // `close` va en un `finally` y la aserción DESPUÉS: afirmar antes deja la
+    // app de Nest viva con su `@Cron` escribiéndole a la base desde un módulo
+    // desmontado (medido: cuelga jest para siempre). Molde:
+    // `caja-testigo.e2e-spec.ts`. Ver `docs/agent/pendientes.md` § 1.
+    const fallos: string[] = [];
+    // `404` es legítimo acá: significa que un test ya lo borró antes que la
+    // limpieza. Cualquier otro status sí es un problema.
+    const limpiar = async (
+      que: string,
+      ejecutar: () => Promise<number>,
+      ok: number[] = [200, 404],
+    ) => {
+      try {
+        const status = await ejecutar();
+        if (!ok.includes(status)) fallos.push(`${que} → ${status}`);
+      } catch (e) {
+        fallos.push(`${que} → ${(e as Error).message}`);
+      }
+    };
+
+    try {
+      if (itemId)
+        await limpiar(
+          `borrar ítem ${itemId}`,
+          async () =>
+            (
+              await request(app.getHttpServer())
+                .delete(`/api/items/${itemId}`)
+                .set('Authorization', `Bearer ${tokenAdmin}`)
+            ).status,
+        );
+      if (impuestoId)
+        await limpiar(
+          `borrar impuesto ${impuestoId}`,
+          async () =>
+            (
+              await request(app.getHttpServer())
+                .delete(`/api/impuestos/${impuestoId}`)
+                .set('Authorization', `Bearer ${tokenAdmin}`)
+            ).status,
+        );
+      if (descuentoSinUsoId)
+        await limpiar(
+          `borrar descuento ${descuentoSinUsoId}`,
+          async () =>
+            (
+              await request(app.getHttpServer())
+                .delete(`/api/descuentos/${descuentoSinUsoId}`)
+                .set('Authorization', `Bearer ${tokenAdmin}`)
+            ).status,
+        );
+      if (recargoSinUsoId)
+        await limpiar(
+          `borrar recargo ${recargoSinUsoId}`,
+          async () =>
+            (
+              await request(app.getHttpServer())
+                .delete(`/api/recargos/${recargoSinUsoId}`)
+                .set('Authorization', `Bearer ${tokenAdmin}`)
+            ).status,
+        );
+    } finally {
+      await app.close();
     }
-    if (impuestoId) {
-      await request(app.getHttpServer())
-        .delete(`/api/impuestos/${impuestoId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-    }
-    if (descuentoSinUsoId) {
-      await request(app.getHttpServer())
-        .delete(`/api/descuentos/${descuentoSinUsoId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-    }
-    if (recargoSinUsoId) {
-      await request(app.getHttpServer())
-        .delete(`/api/recargos/${recargoSinUsoId}`)
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-    }
-    await app.close();
+
+    expect(fallos).toEqual([]);
   });
 
   // ─── Devuelve los ítems que usan la regla ─────────────────────────────────

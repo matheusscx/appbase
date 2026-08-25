@@ -17,6 +17,98 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La limpieza del e2e ya no se lleva puesto el cierre de la app (2026-08-25)
+
+**Venía de la sección 1.** En **18 archivos** de e2e, el `app.close()` corría *después* de la
+limpieza y fuera de un `finally`: si un paso de limpieza tiraba, la app de Nest **no se
+cerraba**, y `AppModule` registra un `@Cron` (`expirar-ordenes`, cada 10 min) que sobrevive
+al teardown de Jest y le sigue escribiendo a la base desde un módulo desmontado **mientras
+corren otras suites**.
+
+### Qué se hizo, por forma y no por archivo
+
+| Forma | Cuántos | Tratamiento |
+|---|---|---|
+| Un solo paso, y ese paso **ya afirma** adentro (`cerrarCaja`) | 7 | `try { … } finally { await app.close() }`. Nada más: la aserción ya existía, lo único roto era que su fallo se llevaba el cierre |
+| Un solo paso **sin afirmar** | 3 | Igual, más el status afirmado **después** del cierre |
+| Varios pasos | 6 | Acumulador `limpiar()` + `finally` + `expect(fallos).toEqual([])` al final, molde de `caja-testigo.e2e-spec.ts` |
+| Bloques largos de `caja` y `papelera` | 8 bloques | Envueltos en `try/finally` sin tocar la semántica de sus aserciones |
+
+Total: **33 bloques `afterAll`** quedan hoy con el `close` en un `finally`. Suite completa en
+verde, 610 pasados.
+
+### Tres cosas que valen más que el cambio
+
+📌 **El acumulador NO se puso en los 18.** Solo 6 tienen varios pasos; en los demás un
+`try/finally` alcanza y el acumulador habría sido arquitectura de más para un problema chico.
+Y **no se extrajo a un helper compartido**: los 50 specs de e2e no importan nada entre sí
+—cada uno define su propio `cerrarCaja`— y `caja-testigo` ya tenía el suyo local. Meter el
+primer import cruzado de la suite por 6 copias no valía el cambio de forma.
+
+⚠️ **`404` es un status legítimo en varias de estas limpiezas, y afirmarlo mal habría creado
+rojos falsos.** Medido: `cajones.e2e-spec.ts` mete un id en `creados` (`:113`) y lo borra
+dentro del mismo test (`:131`), y `uso-reglas` hace lo mismo con su ítem (`:294`). El borrado
+de la limpieza contesta `404` —`NotFoundException`, verificado en `cajones.service.ts:107`—
+que significa *"un test ya lo borró"*, no un problema. La aserción acepta `[200, 404]`.
+
+⛔ **El tamaño publicado estaba mal, y por la misma causa tres veces en el día.** La entrada
+decía **15 specs**: eran **18 archivos**. La medición original solo miraba el **primer**
+`afterAll` de cada archivo, así que `caja.e2e-spec.ts` —que tiene **7** bloques, y es el
+archivo que la propia entrada citaba— aparecía como si tuviera uno, y `ventas` y `papelera`
+no aparecían. Un `awk` acotado por un terminador frágil **parece exhaustivo y no lo es**.
+
+### Lo que quedó protegido de arrastre
+
+Cuatro bloques de `caja` restauran `arqueo_ciego = false` del tenant y uno de
+`monto-tolerancia` restaura las preferencias financieras. Son estado **compartido por todas
+las suites**: si no vuelven a su valor, las que corren después calculan con la configuración
+de ese spec y fallan lejos de la causa. Ahora el cierre corre igual y el fallo queda dicho.
+
+⚠️ La trampa que esto NO repitió, y que ya había costado el veredicto de un mutante entero:
+si el `expect` corre **antes** del `close`, jest imprime el resultado y **no termina nunca**
+(medido: 7 minutos, 0% CPU). `caja.e2e-spec.ts` tenía exactamente eso en uno de sus bloques.
+
+### El texto con el que estaba anotada
+
+> - [ ] **15 specs del e2e cierran la app fuera de un `finally`, y una limpieza que falla deja
+>   un cron vivo pegándole a la base** (backend/tests, medido el 2026-08-24) — es mecánico: hay
+>   molde funcionando y el daño está medido, no supuesto.
+>
+>   **Qué pasa hoy.** Si la limpieza del `afterAll` tira antes del `app.close()`, la app **no
+>   se cierra**, y `AppModule` registra un `@Cron` (`expirar-ordenes`, cada 10 min) que
+>   **sobrevive al teardown de Jest** y le sigue escribiendo a la base desde un módulo
+>   desmontado **mientras corren otras suites**. Medido en su momento:
+>   `"You are trying to require a file after the Jest environment has been torn down"`, con el
+>   cron disparando a las 22:20 y 22:30.
+>
+>   **El tamaño, medido y no estimado:** de los 50 specs, **15** tienen limpieza que corre
+>   antes del `app.close()` y fuera de un `finally`. Otros 20 no tienen `finally` pero su
+>   `afterAll` **solo cierra la app**, así que no hay nada que pueda fallar antes — contarlos
+>   daba 35 e inflaba el trabajo al doble. Los 15:
+>   `cajones`, `combos`, `costeo-cpp`, `grupos-modificadores-overrides`, `grupos-modificadores`,
+>   `items-pausados`, `liquidacion-propinas`, `monto-tolerancia`, `recetas`, `salones-comanda`,
+>   `salones-fusion`, `tendencia-descuadres`, `unidad-ingrediente-referenciado`, `uso-reglas`,
+>   `vigencia-cuenta`.
+>
+>   ⚠️ **La trampa, que ya costó el veredicto de un mutante entero:** *"que el `afterAll` afirme
+>   su status"* aplicado a secas **hace daño**. Si el `expect` corre **antes** del
+>   `app.close()`, el primer fallo de limpieza tira la excepción, la app de Nest queda viva con
+>   su pool abierto y **jest imprime el resultado y no termina nunca** (medido: 7 minutos, 0%
+>   CPU, `pg_stat_activity` sin una sola query). Un mutante que hace exactamente lo que debe se
+>   vuelve indistinguible de un entorno colgado.
+>   ➡️ **La forma correcta, ya aplicada en `caja-testigo.e2e-spec.ts`** —copiar de ahí—:
+>   acumular los fallos de limpieza, cerrar la app en un `finally`, y afirmar **después**.
+>   Mismo diagnóstico, 4,4 s en vez de colgarse. Y para los pasos intermedios que pueden
+>   responder un 400 inofensivo, el molde es `liberarCajeroSiQuedoOcupado` en
+>   `caja.e2e-spec.ts`: best-effort, sin abortar la higiene.
+>
+>   ℹ️ **Por qué está suelta acá y no adentro de otra entrada:** venía anidada en la del `401`
+>   fantasma, y cuando ésa se cerró el 2026-08-25 esta acción **quedó huérfana en
+>   `resueltos.md`** —cero menciones en este archivo— hasta que se notó. No depende de aquel
+>   bug: el `401` era otro proceso ocupando un puerto, y esto es una fuga real y aparte.
+
+---
+
 ## El `401` fantasma no era nuestro: otro proceso ocupaba el puerto (2026-08-25)
 
 **Venía de la sección 2.** Siete avistajes en cinco specs distintos entre el 2026-08-11 y el

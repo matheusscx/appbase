@@ -2249,25 +2249,34 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
   }, 60000);
 
   afterAll(async () => {
-    // Deja la caja cerrada para no bloquear el cajón/usuario en otras suites
-    // (mismo patrón defensivo que `ventas.e2e-spec.ts` → `cerrarCaja`).
-    const conteo = await request(app.getHttpServer())
-      .post(`/api/caja/${cajaId}/conteo`)
-      .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
-    if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
-      const motivos = await request(app.getHttpServer())
-        .get('/api/motivos-diferencia?soloActivas=true')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const motivoId = (motivos.body as { id: string }[])[0]?.id;
-      await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
+    // El `close` va en un `finally`: cualquier paso de esta limpieza puede
+    // tirar —un `query` que falla, una aserción de acá abajo— y sin esto la app
+    // de Nest quedaba viva con su `@Cron` escribiéndole a la base desde un
+    // módulo desmontado MIENTRAS corren las suites siguientes. El fallo sigue
+    // propagando; lo que cambia es que ya no se lleva el cierre puesto.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      // Deja la caja cerrada para no bloquear el cajón/usuario en otras suites
+      // (mismo patrón defensivo que `ventas.e2e-spec.ts` → `cerrarCaja`).
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenAdmin}`)
-        .send({
-          lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
-        });
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+      if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+        const motivos = await request(app.getHttpServer())
+          .get('/api/motivos-diferencia?soloActivas=true')
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        const motivoId = (motivos.body as { id: string }[])[0]?.id;
+        await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .send({
+            lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+          });
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 
   it('colisión real de Postgres — crear el primer Mostrador de Falabella, borrarlo, que asegurarMostrador() cree otro, restaurar el viejo → 400, nada cambia; limpieza en try/finally', async () => {

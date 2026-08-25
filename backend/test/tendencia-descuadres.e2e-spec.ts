@@ -222,13 +222,52 @@ describe('Tendencia de descuadres (e2e)', () => {
   });
 
   afterAll(async () => {
-    await liberarCajero();
-    // El cajón creado en beforeAll se borra: sin esto cada corrida local deja
-    // uno más en la base compartida de desarrollo.
-    await request(app.getHttpServer())
-      .delete(`/api/cajones/${cajonId}`)
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    await app.close();
+    // Acumular en vez de cortar: si un paso falla, los que siguen igual tienen
+    // que correr — lo que dejen sin limpiar contamina las suites siguientes. El
+    // `close` va en un `finally` y la aserción DESPUÉS: afirmar antes deja la
+    // app de Nest viva con su `@Cron` escribiéndole a la base desde un módulo
+    // desmontado (medido: cuelga jest para siempre). Molde:
+    // `caja-testigo.e2e-spec.ts`. Ver `docs/agent/pendientes.md` § 1.
+    const fallos: string[] = [];
+    // `404` es legítimo acá: significa que un test ya lo borró antes que la
+    // limpieza. Cualquier otro status sí es un problema.
+    const limpiar = async (
+      que: string,
+      ejecutar: () => Promise<number>,
+      ok: number[] = [200, 404],
+    ) => {
+      try {
+        const status = await ejecutar();
+        if (!ok.includes(status)) fallos.push(`${que} → ${status}`);
+      } catch (e) {
+        fallos.push(`${que} → ${(e as Error).message}`);
+      }
+    };
+
+    try {
+      // Liberar al cajero ANTES del borrado: `vendedor@paris.cl` es del seed y
+      // lo comparten otras suites, así que una caja suya que quede abierta las
+      // frena a ellas, no a ésta.
+      await limpiar('liberar cajero', async () => {
+        await liberarCajero();
+        return 200;
+      });
+      // El cajón creado en beforeAll se borra: sin esto cada corrida local deja
+      // uno más en la base compartida de desarrollo.
+      await limpiar(
+        `borrar cajón ${cajonId}`,
+        async () =>
+          (
+            await request(app.getHttpServer())
+              .delete(`/api/cajones/${cajonId}`)
+              .set('Authorization', `Bearer ${tokenAdmin}`)
+          ).status,
+      );
+    } finally {
+      await app.close();
+    }
+
+    expect(fallos).toEqual([]);
   });
 
   // Las aserciones van por DELTA y no por valor absoluto: otras suites cierran

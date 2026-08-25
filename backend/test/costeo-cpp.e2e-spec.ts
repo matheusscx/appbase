@@ -122,8 +122,16 @@ describe('Costeo CPP (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (cajaId) await cerrarCaja(app, token, cajaId);
-    await app.close();
+    // `close` en un `finally`: `cerrarCaja` afirma sus status adentro, así que
+    // si la caja no cierra **tira**, y sin esto la app de Nest quedaba viva con
+    // su `@Cron` escribiéndole a la base durante las suites siguientes. El
+    // fallo sigue propagando; lo que cambia es que ya no se lleva el cierre
+    // puesto. Ver `docs/agent/pendientes.md` § 1.
+    try {
+      if (cajaId) await cerrarCaja(app, token, cajaId);
+    } finally {
+      await app.close();
+    }
   });
 
   it('la segunda compra promedia el costo en vez de pisarlo', async () => {

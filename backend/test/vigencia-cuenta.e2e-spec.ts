@@ -187,38 +187,77 @@ describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
   }, 60000);
 
   afterAll(async () => {
-    await request(app.getHttpServer())
-      .post('/api/sesiones-garzon/cerrar')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: garzon.id, pin: garzon.pin });
+    // Acumular en vez de cortar: si un paso falla, los que siguen igual tienen
+    // que correr — lo que dejen sin limpiar contamina las suites siguientes. El
+    // `close` va en un `finally` y la aserción DESPUÉS.
+    //
+    // ⚠️ Acá el `expect([200, 201]).toContain(conteo.status)` estaba **adentro**
+    // de la limpieza y antes del `close`: si el conteo no cuadraba, tiraba ahí
+    // mismo, la caja quedaba sin cerrar Y la app de Nest viva con su `@Cron`
+    // escribiéndole a la base durante las suites siguientes. Es la trampa exacta
+    // que documenta `docs/agent/pendientes.md` § 1. Molde:
+    // `caja-testigo.e2e-spec.ts`.
+    const fallos: string[] = [];
+    const limpiar = async (
+      que: string,
+      ejecutar: () => Promise<number>,
+      ok: number[] = [200, 201],
+    ) => {
+      try {
+        const status = await ejecutar();
+        if (!ok.includes(status)) fallos.push(`${que} → ${status}`);
+      } catch (e) {
+        fallos.push(`${que} → ${(e as Error).message}`);
+      }
+    };
 
-    // Ventas sin pagos: el conteo en 0 debería cuadrar. Si no, cerrar con
-    // motivo — mismo patrón de dos fases que `salones-comanda.e2e-spec.ts`.
-    const conteo = await request(app.getHttpServer())
-      .post(`/api/caja/${cajaId}/conteo`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
-    expect([200, 201]).toContain(conteo.status);
-    if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
-      const motivos = await request(app.getHttpServer())
-        .get('/api/motivos-diferencia?soloActivas=true')
-        .set('Authorization', `Bearer ${token}`);
-      const motivoId = (motivos.body as { id: string }[])[0]?.id;
-      await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({
-          lineas: [
-            {
-              metodoPagoId: null,
-              motivoDiferenciaId: motivoId,
-              comentarioDiferencia: 'Cierre de la suite e2e',
-            },
-          ],
-        });
+    try {
+      await limpiar(
+        'cerrar sesión del garzón',
+        async () =>
+          (
+            await request(app.getHttpServer())
+              .post('/api/sesiones-garzon/cerrar')
+              .set('Authorization', `Bearer ${token}`)
+              .send({ garzonId: garzon.id, pin: garzon.pin })
+          ).status,
+      );
+
+      // Ventas sin pagos: el conteo en 0 debería cuadrar. Si no, cerrar con
+      // motivo — mismo patrón de dos fases que `salones-comanda.e2e-spec.ts`.
+      await limpiar('cerrar caja', async () => {
+        const conteo = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/conteo`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+        if (![200, 201].includes(conteo.status)) return conteo.status;
+        if ((conteo.body as { estado?: string }).estado !== 'en_conciliacion') {
+          return 200;
+        }
+        const motivos = await request(app.getHttpServer())
+          .get('/api/motivos-diferencia?soloActivas=true')
+          .set('Authorization', `Bearer ${token}`);
+        const motivoId = (motivos.body as { id: string }[])[0]?.id;
+        return (
+          await request(app.getHttpServer())
+            .post(`/api/caja/${cajaId}/cerrar`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({
+              lineas: [
+                {
+                  metodoPagoId: null,
+                  motivoDiferenciaId: motivoId,
+                  comentarioDiferencia: 'Cierre de la suite e2e',
+                },
+              ],
+            })
+        ).status;
+      });
+    } finally {
+      await app.close();
     }
 
-    await app.close();
+    expect(fallos).toEqual([]);
   });
 
   it('un `cuentaId` inexistente es 400, no un silencioso "entonces ahora"', async () => {

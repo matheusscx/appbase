@@ -277,14 +277,52 @@ describe('Ítem pausado según el canal (e2e)', () => {
   }, 60000);
 
   afterAll(async () => {
-    if (garzon) {
-      await request(app.getHttpServer())
-        .post('/api/sesiones-garzon/cerrar')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ garzonId: garzon.id, pin: garzon.pin });
+    // Acumular en vez de cortar: si un paso falla, los que siguen igual tienen
+    // que correr — lo que dejen sin limpiar contamina las suites siguientes. El
+    // `close` va en un `finally` y la aserción DESPUÉS: afirmar antes deja la
+    // app de Nest viva con su `@Cron` escribiéndole a la base desde un módulo
+    // desmontado (medido: cuelga jest para siempre). Molde:
+    // `caja-testigo.e2e-spec.ts`. Ver `docs/agent/pendientes.md` § 1.
+    const fallos: string[] = [];
+    const limpiar = async (
+      que: string,
+      ejecutar: () => Promise<number>,
+      ok: number[] = [200, 201],
+    ) => {
+      try {
+        const status = await ejecutar();
+        if (!ok.includes(status)) fallos.push(`${que} → ${status}`);
+      } catch (e) {
+        fallos.push(`${que} → ${(e as Error).message}`);
+      }
+    };
+
+    try {
+      if (garzon) {
+        await limpiar(
+          'cerrar sesión del garzón',
+          async () =>
+            (
+              await request(app.getHttpServer())
+                .post('/api/sesiones-garzon/cerrar')
+                .set('Authorization', `Bearer ${token}`)
+                .send({ garzonId: garzon.id, pin: garzon.pin })
+            ).status,
+        );
+      }
+      // `cerrarCaja` afirma sus status adentro: acá solo hay que evitar que su
+      // fallo se lleve puesto el `close`, y dejar registro de que falló.
+      if (cajaId) {
+        await limpiar('cerrar caja', async () => {
+          await cerrarCaja(app, token, cajaId);
+          return 200;
+        });
+      }
+    } finally {
+      await app.close();
     }
-    if (cajaId) await cerrarCaja(app, token, cajaId);
-    await app.close();
+
+    expect(fallos).toEqual([]);
   });
 
   it('control — activo: el checkout online pasa y el cálculo no advierte nada', async () => {
@@ -578,8 +616,15 @@ describe('Categoría y tercero pausados: el backend rechaza la asignación nueva
   }, 60000);
 
   afterAll(async () => {
-    if (cajaId) await cerrarCaja(app, token, cajaId);
-    await app.close();
+    // `close` en un `finally`: `cerrarCaja` afirma sus status adentro, así que
+    // si la caja no cierra **tira**, y sin esto la app de Nest quedaba viva con
+    // su `@Cron` escribiéndole a la base durante las suites siguientes.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      if (cajaId) await cerrarCaja(app, token, cajaId);
+    } finally {
+      await app.close();
+    }
   });
 
   it('control — con la categoría y el tercero activos, ambos se asignan', async () => {

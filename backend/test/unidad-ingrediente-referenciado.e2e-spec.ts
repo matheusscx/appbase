@@ -303,12 +303,20 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
   // envenena a cualquier suite posterior que liste recetas o desfases de este
   // tenant, y el fallo aparece lejos de acá.
   afterAll(async () => {
-    if (ingredienteEnRecetaId) {
-      await ds.query(
-        `UPDATE item_producto SET unidad_medida = 'g' WHERE item_id = $1`,
-        [ingredienteEnRecetaId],
-      );
+    // El `close` va en un `finally`: un `query` que falla tira, y sin esto la
+    // app de Nest quedaba viva con su `@Cron` escribiéndole a la base durante
+    // las suites siguientes. Acá no hay status que afirmar —`ds.query` tira por
+    // su cuenta—, así que alcanza con el `finally`.
+    // Ver `docs/agent/pendientes.md` § 1.
+    try {
+      if (ingredienteEnRecetaId) {
+        await ds.query(
+          `UPDATE item_producto SET unidad_medida = 'g' WHERE item_id = $1`,
+          [ingredienteEnRecetaId],
+        );
+      }
+    } finally {
+      await app.close();
     }
-    await app.close();
   });
 });

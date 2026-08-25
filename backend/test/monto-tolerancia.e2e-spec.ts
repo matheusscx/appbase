@@ -88,13 +88,29 @@ describe('montoTolerancia (e2e) — el único monto sobre NUMERIC(18,6)', () => 
   }, 60000);
 
   afterAll(async () => {
-    if (originales) {
-      await request(app.getHttpServer())
-        .put('/api/tenants/preferencias-financieras')
-        .set('Authorization', `Bearer ${token}`)
-        .send(originales);
+    // ⚠️ Esta limpieza es la más cara de las que fallan callado: restaura las
+    // preferencias financieras del TENANT, que comparten todas las suites. Si
+    // no vuelve a su valor, las que corran después calculan con la tolerancia
+    // de este spec y fallan lejos de acá, sin nada que las apunte para acá.
+    // Por eso el status se afirma; y se afirma DESPUÉS del `close`, que va en
+    // un `finally`, porque afirmar antes deja la app viva con su `@Cron`
+    // pegándole a la base. Ver `docs/agent/pendientes.md` § 1.
+    let restauracion: number | string | null = null;
+    try {
+      if (originales) {
+        restauracion = (
+          await request(app.getHttpServer())
+            .put('/api/tenants/preferencias-financieras')
+            .set('Authorization', `Bearer ${token}`)
+            .send(originales)
+        ).status;
+      }
+    } catch (e) {
+      restauracion = (e as Error).message;
+    } finally {
+      await app.close();
     }
-    await app.close();
+    if (originales) expect(restauracion).toBe(200);
   });
 
   /** Cambia SOLO la tolerancia: el resto viaja tal como estaba. */
