@@ -303,7 +303,7 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 13 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** De sus 12 entradas, **siete son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
@@ -397,33 +397,6 @@ revisión independiente no lo pudo reproducir, con razón.
   ⚠️ **Al construir:** la merma ya existe y **pide causa**, así que hay que definir con qué
   causa entra la que nace de una devolución —o si se crea una— antes de escribir el flujo.
   Y sigue en pie que toca `movimientos_inventario` y el camino del reembolso de pasarela.
-
-- [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
-  (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
-  [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
-  nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
-  `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
-  y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
-  contra la línea. Nada falla: cobra otra cosa.
-  **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
-  el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
-  la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
-  bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
-  ⚠️ Si se empuja, hay que decidir qué pasa al **cambiar de tipo** con el radio ya tocado a
-  mano: `onTipoChange` hoy pisa otros campos, y pisar una elección explícita del usuario es
-  peor que no empujar nada. El seeder ya tuvo que corregir sus dos filas a mano, que es la
-  señal de que el default engaña más seguido de lo que parece.
-
-- [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
-  desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
-  filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
-  las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
-  intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
-  *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
-  restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
-  devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
-  los vivos), o que el 400 los nombre. La primera parece mejor porque la papelera ya es un
-  concepto de la pantalla, pero es decisión de producto.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -686,7 +659,7 @@ del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del hand
 —no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
 que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
 
-**Quedan 5 entradas.** La de la nota de crédito no espera una respuesta sino la
+**Quedan 7 entradas.** La de la nota de crédito no espera una respuesta sino la
 **investigación de mercado que la destraba, lanzada el 2026-08-22**. La del descarte de
 desfases llegó el **2026-08-24 desde la § 2**, al medirla: lo medido contradijo la premisa con
 la que se había diferido, así que la pregunta es si se reabre esa decisión.
@@ -699,6 +672,40 @@ aparentaba 19 frentes construibles cuando eran 16. ⚠️ Al revisar salió tamb
 positivo que conviene dejar dicho: *"el modal de pausa"* abre con *"Decisión del owner
 pendiente"* y **dos líneas más abajo tiene su `✅ DECIDIDO (owner, 2026-08-15)`**. Se la dio
 por bloqueada una vez leyendo solo la primera línea. Está bien en la § 3.
+
+➕ **Y dos más el 2026-08-25, por el mismo motivo y con un día de diferencia.** Las dos
+nacieron al cerrar el frente del nivel de la regla y se escribieron en la § 3 aunque las dos
+terminan en una pregunta al owner. Es exactamente el error que el párrafo de arriba acababa de
+corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
+habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
+ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+- [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
+  (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
+  [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
+  nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
+  `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
+  y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
+  contra la línea. Nada falla: cobra otra cosa.
+  **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
+  el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
+  la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
+  bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
+  ⚠️ Si se empuja, hay que decidir qué pasa al **cambiar de tipo** con el radio ya tocado a
+  mano: `onTipoChange` hoy pisa otros campos, y pisar una elección explícita del usuario es
+  peor que no empujar nada. El seeder ya tuvo que corregir sus dos filas a mano, que es la
+  señal de que el default engaña más seguido de lo que parece.
+
+- [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
+  desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
+  filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
+  las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
+  intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
+  *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
+  restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
+  devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
+  los vivos), o que el 400 los nombre. La primera parece mejor porque la papelera ya es un
+  concepto de la pantalla, pero es decisión de producto.
 
 - [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
   como "omitido" cuando ya puede no ser el propuesto** (backend,
