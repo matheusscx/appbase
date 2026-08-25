@@ -630,6 +630,96 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     expect((res.body as { message: string }).message).toMatch(/decimal/);
   });
 
+  it('"envío gratis sobre $30.000": el tramo en 0 entra y el motor NO cobra', async () => {
+    // El caso que originó la entrada del backlog. Los tramos son abiertos
+    // hacia arriba —no hay `maximo`—, así que el escalón que deja de cobrar
+    // solo se puede expresar poniéndolo en 0. Hasta el 2026-08-24 esto era un
+    // 400 y el caso más común de un recargo por envío no se podía cargar.
+    //
+    // Va por la API entera a propósito: el `> 0` que se aflojó vive en una
+    // función, pero que un `'0'` sobreviva depende además del DTO
+    // (`@IsNumberString`), del CHECK de tabla y de que `aplicarValor` corte
+    // por `== null` y no por falsy. Un test sobre la función sola no ve nada
+    // de eso.
+    const creado = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Rec envio gratis E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_POR_MONTO,
+        modo: 'monto_fijo',
+        tramos: [
+          { minimoMonto: '0', valorMonto: '2000' },
+          { minimoMonto: '30000', valorMonto: '0' },
+        ],
+      });
+    expect(creado.status).toBe(201);
+    const recargoId = (creado.body as ReglaResponse).id;
+
+    const resItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Item con envio gratis E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '100',
+        costo: '500',
+        recargosIds: [recargoId],
+      });
+    expect(resItem.status).toBe(201);
+    const itemId = (resItem.body as { id: string }).id;
+
+    const calcular = (cantidad: string) =>
+      request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId, cantidad }] });
+
+    // 1 × 1000 = 1000 → tramo de $0: cobra el envío.
+    const chico = await calcular('1');
+    expect(chico.status).toBe(201);
+    expect(
+      (chico.body as { totales: { totalRecargos: string } }).totales
+        .totalRecargos,
+    ).toBe('2000.000000');
+
+    // 40 × 1000 = 40.000 → tramo de $30.000, que vale 0: el envío no se cobra.
+    // El total tiene que ser el neto pelado, no el neto + 2000: si el tramo en
+    // cero no se eligiera, acá seguiría aplicando el de abajo.
+    const grande = await calcular('40');
+    expect(grande.status).toBe(201);
+    const totales = (
+      grande.body as {
+        totales: { totalRecargos: string; subtotalNeto: string };
+      }
+    ).totales;
+    expect(totales.totalRecargos).toBe('0.000000');
+    expect(totales.subtotalNeto).toBe('40000.000000');
+  });
+
+  it('pero el valor PLANO en 0 sigue siendo 400: para apagar una regla se pausa', async () => {
+    // La asimetría decidida por el owner el 2026-08-24. Una regla plana en 0
+    // se aplicaría en cada venta sin cobrar nada y sin avisarle a nadie;
+    // pausarla hace lo mismo y el POS sí avisa ("está en pausa y no se
+    // aplicó"). Dos formas de apagar una regla, una silenciosa, es lo que
+    // esto evita.
+    const res = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Recargo plano 0 E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_GENERAL,
+        modo: 'monto_fijo',
+        valorMonto: '0',
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/mayor a 0/);
+  });
+
   it('el tipo `promocional` ya no existe en el catálogo', async () => {
     // Se eliminó el 2026-08-23: su caso se mudó al módulo de promociones, y
     // `directo` con fechas cubre el descuento con vigencia. Sin este test, el

@@ -26,10 +26,22 @@ describe('validarMontosDeRegla', () => {
       ).not.toThrow();
     });
 
-    it.each(['0', '-1', 'abc'])('rechaza %s', (valor) => {
+    it.each(['-1', 'abc'])('rechaza %s', (valor) => {
       expect(() =>
         validarMontosDeRegla('monto_fijo', { valorMonto: valor }),
       ).toThrow(BadRequestException);
+    });
+
+    it('rechaza 0, y desde el 2026-08-24 eso es una DECISIÓN, no un descarte', () => {
+      // Sale del `it.each` de arriba a propósito: `-1` y `abc` se rechazan
+      // porque no son un importe, y este `0` sí lo es. Lo que lo rechaza es
+      // que una regla plana en 0 se aplicaría en cada venta sin cobrar nada,
+      // que ya se dice pausándola —y pausada el POS *avisa*—. La asimetría con
+      // el tramo (ver abajo) es todo el cambio, así que si alguien afloja el
+      // piso para los dos, este test es el que tiene que frenarlo.
+      expect(() =>
+        validarMontosDeRegla('monto_fijo', { valorMonto: '0' }),
+      ).toThrow(/mayor a 0/);
     });
 
     it.each([null, undefined, ''])(
@@ -97,10 +109,39 @@ describe('validarMontosDeRegla', () => {
       ).not.toThrow();
     });
 
-    it('rechaza un tramo en 0 o negativo', () => {
+    it('un tramo SÍ puede valer cero: es "envío gratis sobre $30.000"', () => {
+      // Decisión del owner (2026-08-24). Es la forma del caso más común y la
+      // única disponible: los tramos son abiertos hacia arriba —no hay
+      // `maximo`—, así que el escalón que no cobra se expresa poniéndolo en 0,
+      // no acotando el de abajo.
+      //
+      // Este test también cubre que `validarTramo` no lo confunda con un tramo
+      // SIN importe: `'0'` es truthy como string, y si dejara de serlo el cero
+      // sería inexpresable igual, por el otro chequeo.
+      expect(() =>
+        validarMontosDeRegla('monto_fijo', {}, [
+          { valorMonto: '2000' },
+          { valorMonto: '0' },
+        ]),
+      ).not.toThrow();
+    });
+
+    it('y en porcentaje también: un 0% es un tramo que no descuenta', () => {
+      expect(() =>
+        validarMontosDeRegla('porcentaje', {}, [
+          { valorPorcentaje: '0.10' },
+          { valorPorcentaje: '0' },
+        ]),
+      ).not.toThrow();
+    });
+
+    it('pero un tramo negativo se sigue rechazando', () => {
+      // El piso bajó de `> 0` a `>= 0`, no desapareció: ninguna regla aporta
+      // una magnitud negativa —el signo lo pone el TIPO de regla, nunca el
+      // valor—, así que un tramo en -5 no significa nada en ninguna lectura.
       expect(() =>
         validarMontosDeRegla('monto_fijo', {}, [{ valorMonto: '-5' }]),
-      ).toThrow(/mayor a 0/);
+      ).toThrow(/mayor o igual a 0/);
     });
 
     it('rechaza un tramo cuya columna no corresponde al modo de la regla', () => {

@@ -17,6 +17,127 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un tramo puede valer cero: "envío gratis sobre $30.000" (2026-08-24)
+
+**Venía de la sección 3.** Texto con el que estaba anotada:
+
+> - [ ] **Un tramo no puede valer cero, y no hay `maximo`: "gratis sobre $X" no se expresa**
+>   (backend + producto, medido el 2026-08-22 al construir el recargo por escalones) — los
+>   tramos son **abiertos hacia arriba** (solo `minimo`) y `validarMontosDeRegla` exige
+>   `valor > 0`. Con eso un recargo escalonado puede **bajar** ($2.000 bajo $20.000 → $500
+>   arriba) pero no **llegar a cero**, que es justo la forma del caso más común —envío gratis
+>   sobre cierto monto, recargo por pedido chico que desaparece—.
+>   ℹ️ Este documento afirmaba que los tramos tenían `maximo` nullable: **nunca existió**, ni
+>   en las entidades ni en `startup-pos.sql`. Ya se corrigió en
+>   [`features/descuentos-recargos.md`](../features/descuentos-recargos.md).
+>   **Las dos salidas son de producto, no correcciones:** (a) permitir `valor = 0` en un
+>   tramo, o (b) agregarle `maximo` al tramo. Las dos afectan **también a descuentos**, que
+>   comparten la validación y el modelo.
+>   ✅ **DECIDIDO (owner, 2026-08-23): la (a) — un tramo puede valer cero.** No se agrega
+>   `maximo`: los tramos siguen abiertos hacia arriba. Con eso "envío gratis sobre $30.000" se
+>   expresa como un tramo de valor 0, que es la forma del caso más común.
+>   ✅ **Y cómo se ve, decidido en la misma pasada: un recargo que quedó en cero NO aparece en
+>   la boleta.** Nada de líneas en `$0` ni de la palabra "gratis" — el documento queda limpio.
+>   ⚠️ Ojo al construir: `validarMontosDeRegla` exige `> 0` y la comparte con descuentos, así
+>   que aflojarla toca los dos. Un descuento de cero es inocuo, pero conviene que sea una
+>   decisión y no un efecto secundario.
+>   🔄 **La validación cambió de forma el 2026-08-23** y esta entrada hay que leerla con eso:
+>   ya no recibe un `valor` suelto sino `{ valorMonto, valorPorcentaje }`, el `> 0` vive en
+>   `validarMonto(unidad, valor)`, y **hay una segunda función, `validarTramo`, que además
+>   exige que el tramo traiga exactamente una de las dos columnas**. Permitir el cero toca las
+>   dos: aflojar el `> 0` sin mirar `validarTramo` deja "sin importe" y "importe cero"
+>   indistinguibles, que no es lo que se decidió. Ver
+>   [`resueltos.md`](resueltos.md) § *"El importe de una regla deja de ser ambiguo"*.
+
+### La advertencia de la entrada era FALSA, y se midió antes de escribir nada
+
+La entrada avisaba que aflojar el `> 0` sin mirar `validarTramo` dejaría *"sin importe"* e
+*"importe cero"* indistinguibles. **No es así, y ya no lo era cuando se escribió:**
+`validarTramo` pregunta `!tramo.valorMonto && !tramo.valorPorcentaje`, los dos campos son
+`string` —`@IsNumberString` rechaza un número de JSON, y TypeORM devuelve `numeric` como
+string— y **`'0'` es truthy**. Los dos casos ya estaban separados sin tocar una línea.
+
+Es exactamente el mismo error que se había corregido cuatro días antes en
+`validarMinimosDeTramos`, donde un mutante mostró que la forma larga contra
+`null`/`undefined`/`''` era equivalente a `!!` para strings. Corregido en el docblock de
+`validarTramo`, que es donde el próximo lo va a buscar.
+
+### La mitad más grande estaba HECHA, y la entrada no lo sabía
+
+La otra decisión del owner —*un recargo que quedó en cero no aparece en la boleta*— no
+necesitó una línea de código:
+
+- **La boleta ya lo omite.** `ticket-builder.ts` imprime la línea de recargo solo con
+  `.gt(0)`, y muestra el **agregado** `totalRecargos`, no una línea por regla: una regla en
+  cero nunca tuvo línea propia.
+- **El motor ya aplicaba el `'0'` bien.** `aplicarValor` corta con `valor == null`, no con
+  falsy, así que un tramo en `'0'` produce un monto 0 y no un "sin valor".
+- **El drawer de auditoría sí lo muestra**, atenuado (`sinEfecto`), y eso es lo correcto:
+  son dos superficies distintas —el documento del cliente y la pantalla de quien explica un
+  descuadre—. Filtrar el cero en el motor habría borrado la fila de `venta_recargos` sin
+  ganar nada.
+
+⚠️ **Corrección a esta entrada, de la revisión independiente:** acá se había escrito que las
+trazas *"son las dos cosas a la vez: la línea del comprobante y el registro auditable"*, y
+**para descuentos y recargos es falso**. La boleta no imprime una línea por regla de esas dos
+familias —imprime los agregados `totalDescuentos`/`totalRecargos`—, y el único consumidor
+traza por traza es `agregarImpuestosVenta`, que es de impuestos. O sea que filtrar el cero en
+el motor **no habría cambiado la boleta en absoluto** (sumarle 0 a un agregado no la mueve):
+habría costado *solo* la fila auditable. La decisión de no filtrar no cambia; el argumento con
+el que quedó escrita, sí.
+
+### Lo que sí se decidió: el cero lo admite el tramo, no el valor plano
+
+Lo que la entrada marcó sin resolver —*"conviene que sea una decisión y no un efecto
+secundario"*— es que el `> 0` vive en `validarMonto`, compartida por el valor plano de la
+regla y el de cada tramo. **Decisión del owner (2026-08-24): solo el tramo.**
+
+Un tramo en 0 significa algo: con los tramos abiertos hacia arriba, es la única forma de
+escribir el escalón que deja de cobrar. Una regla **plana** en 0 no: queda prendida, se
+aplica en cada venta, no cobra nada y no le dice nada a nadie — mientras que pausarla hace
+lo mismo y el POS **avisa** al cajero (*"está en pausa y no se aplicó"*, el `continue` de
+`procesarReglas`). Dos maneras de apagar una regla, una silenciosa y a simple vista idéntica
+a una rota, es lo que la asimetría evita.
+
+`validarMonto` aprende cuál de los dos está validando por el mismo `donde` que
+`validarExpresion` ya enhebraba para elegir el texto del error. No hizo falta un parámetro
+nuevo.
+
+### Los tests, y qué mutante mata a cada uno
+
+Unit en `monto-regla.util.spec.ts` y en `descuentos.service.spec.ts` —la función y el
+camino del service, que es donde se la invoca de verdad—, dos e2e en
+`reglas-valor.e2e-spec.ts`, y uno de `MoneyInput` en el frontend.
+
+| Mutante | Qué mata |
+|---|---|
+| Revertir a `numero <= 0` (el código anterior) | **3** — los dos tramos en cero y el ancla del service |
+| `const admiteCero = true` (aflojar para los dos) | 1 — el valor plano en 0, que es la decisión |
+| Sacar `numero < 0` | **3** — el tramo negativo, el `-1` del valor plano y el del service |
+| Tratar el cero como campo vacío en `MoneyInput` | 1 — el `'0'` tecleado no llegaría nunca |
+
+⚠️ **Esta tabla decía 2 / 1 / 2, y estaba mal por medir en el momento equivocado:** los
+mutantes se corrieron *antes* de agregar los tests de `descuentos.service.spec.ts`, y la
+tabla no se volvió a medir después. Lo cazó la revisión independiente, que sí los corrió
+sobre el diff entero. Es el mismo error que este archivo registra en otras entradas: una
+afirmación comparable se mide, y **se vuelve a medir cuando cambia lo comparado**.
+
+El primero es un **revert**, no un "romper": prueba que el test habría cazado el bug, no
+solo que toca la línea nueva.
+
+⚠️ Un test viejo **sobreafirmaba**: se llamaba *"rechaza un tramo en 0 o negativo"* y solo
+probaba `-5`. Se separó, y el `'0'` del valor plano salió del `it.each` que compartía con
+`-1` y `abc`: los tres se rechazan, pero por razones distintas, y `0` ahora es el único que
+guarda una decisión de producto.
+
+El e2e va por la API entera a propósito: que un `'0'` sobreviva depende del DTO, del CHECK
+de tabla y de `aplicarValor`, y un test sobre la función sola no ve nada de eso. Prueba el
+caso de la entrada con el mismo ítem: **$2.000 de recargo con cantidad 1** ($1.000) y
+**$0 con cantidad 40** ($40.000, tramo de $30.000 que vale cero), afirmando además que el
+neto queda pelado — si el tramo en cero no se eligiera, ahí seguiría aplicando el de abajo.
+
+---
+
 ## El mínimo de un tramo dice qué mide: `minimo` se parte en cantidad y monto (2026-08-24)
 
 **Venía de la sección 3.** Es la misma FORMA que el corte de `valor` del 2026-08-23, un campo

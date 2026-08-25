@@ -369,15 +369,16 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 14 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** De sus 13 entradas, **siete son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
 trabajo, y cada una abre su propio frente.**
 
-De la deuda chica que quedaba, el **2026-08-24 salieron dos**: la escala de la pasarela y el
-`minimo` de un tramo (las dos en [`resueltos.md`](resueltos.md)). **La única que sigue es el
-renombre de `moneda.decimales`** — y ojo, su entrada subestima el tamaño. Medido ese día:
+De la deuda chica que quedaba, el **2026-08-24 salieron tres**: la escala de la pasarela, el
+`minimo` de un tramo y el tramo en cero (las tres en [`resueltos.md`](resueltos.md)). **La
+única que sigue es el renombre de `moneda.decimales`** — y ojo, su entrada subestima el
+tamaño. Medido ese día:
 
 ```bash
 grep -rn 'decimales' backend/src backend/test frontend/app frontend/server frontend/e2e | wc -l
@@ -583,34 +584,6 @@ revisión independiente no lo pudo reproducir, con razón.
   ℹ️ **Lo único de esta entrada que sí se cerró** (2026-08-16, con la entrada de la venta de
   total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
   pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
-
-- [ ] **Un tramo no puede valer cero, y no hay `maximo`: "gratis sobre $X" no se expresa**
-  (backend + producto, medido el 2026-08-22 al construir el recargo por escalones) — los
-  tramos son **abiertos hacia arriba** (solo `minimo`) y `validarMontosDeRegla` exige
-  `valor > 0`. Con eso un recargo escalonado puede **bajar** ($2.000 bajo $20.000 → $500
-  arriba) pero no **llegar a cero**, que es justo la forma del caso más común —envío gratis
-  sobre cierto monto, recargo por pedido chico que desaparece—.
-  ℹ️ Este documento afirmaba que los tramos tenían `maximo` nullable: **nunca existió**, ni
-  en las entidades ni en `startup-pos.sql`. Ya se corrigió en
-  [`features/descuentos-recargos.md`](../features/descuentos-recargos.md).
-  **Las dos salidas son de producto, no correcciones:** (a) permitir `valor = 0` en un
-  tramo, o (b) agregarle `maximo` al tramo. Las dos afectan **también a descuentos**, que
-  comparten la validación y el modelo.
-  ✅ **DECIDIDO (owner, 2026-08-23): la (a) — un tramo puede valer cero.** No se agrega
-  `maximo`: los tramos siguen abiertos hacia arriba. Con eso "envío gratis sobre $30.000" se
-  expresa como un tramo de valor 0, que es la forma del caso más común.
-  ✅ **Y cómo se ve, decidido en la misma pasada: un recargo que quedó en cero NO aparece en
-  la boleta.** Nada de líneas en `$0` ni de la palabra "gratis" — el documento queda limpio.
-  ⚠️ Ojo al construir: `validarMontosDeRegla` exige `> 0` y la comparte con descuentos, así
-  que aflojarla toca los dos. Un descuento de cero es inocuo, pero conviene que sea una
-  decisión y no un efecto secundario.
-  🔄 **La validación cambió de forma el 2026-08-23** y esta entrada hay que leerla con eso:
-  ya no recibe un `valor` suelto sino `{ valorMonto, valorPorcentaje }`, el `> 0` vive en
-  `validarMonto(unidad, valor)`, y **hay una segunda función, `validarTramo`, que además
-  exige que el tramo traiga exactamente una de las dos columnas**. Permitir el cero toca las
-  dos: aflojar el `> 0` sin mirar `validarTramo` deja "sin importe" y "importe cero"
-  indistinguibles, que no es lo que se decidió. Ver
-  [`resueltos.md`](resueltos.md) § *"El importe de una regla deja de ser ambiguo"*.
 
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`

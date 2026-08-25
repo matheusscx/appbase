@@ -277,6 +277,21 @@ describe('MoneyInput', () => {
       expect(modelo.value).toBe('500')
     })
 
+    // Desde el 2026-08-24 un TRAMO de descuento/recargo puede valer 0 —es cómo
+    // se escribe "envío gratis sobre $30.000"— y este campo es por donde se
+    // tipea. El cero es el único monto que el componente podría confundir con
+    // "campo vacío": emite `detail.unmasked || ''`, así que si maska devolviera
+    // `''` para un cero solo, el importe llegaría ausente al backend y el 400
+    // sería "el tramo tiene que expresar su importe" — un error que le echa la
+    // culpa a quien escribió bien.
+    it('en CLP, tipear un "0" solo emite "0" y no vacío', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
+
+      await tipear(input, ['0'])
+
+      expect(modelo.value).toBe('0')
+    })
+
     it('en CLP, 5 dígitos seguidos extienden el entero a 10000', async () => {
       const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
 

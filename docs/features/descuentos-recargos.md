@@ -115,27 +115,59 @@ de borrarlo**: `recargo_por_monto_venta`, espejo del `por_monto_venta` de descue
   ramifica por `tramos.length > 0` sin mirar la clase, y un código que no está en
   `DIFERIDAS` ni en `METODO_PAGO_CODIGOS` llega a esa rama con la magnitud del monto.
 
-### Los dos límites de forma, medidos
+### El cero: lo admite el tramo, no el valor plano (2026-08-24)
 
-Los tramos son **abiertos hacia arriba** (solo el mínimo, sin `maximo`) y su `valor` tiene
-que ser **mayor a cero** (`validarMontosDeRegla`, compartido con descuentos). De las dos
-cosas juntas sale un límite concreto:
+Los tramos son **abiertos hacia arriba** —solo el mínimo, sin `maximo`— y esa parte no
+cambió. Lo que cambió es el piso del importe:
 
-> **"Envío gratis sobre $20.000" no se puede expresar.** Se puede hacer que el recargo
-> *baje* por escalones ($2.000 bajo $20.000 → $500 arriba), pero no que **llegue a cero**:
-> haría falta un tramo con valor 0, que la validación rechaza, o un `maximo` en el tramo,
-> que no existe en el modelo.
+| Dónde | Piso | Por qué |
+|---|---|---|
+| Cada **tramo** | `>= 0` | Es la única forma de expresar el escalón que deja de cobrar |
+| El **valor plano** de la regla | `> 0` | Apagar una regla ya se dice pausándola, y pausada **avisa** |
 
-No se tocó ninguna de las dos reglas porque las comparte el módulo de descuentos y cambiarlas
-es decisión de producto, no una corrección. Queda anotado acá para que se decida a la vista.
+Sin el cero, **"envío gratis sobre $30.000" no era expresable**: el recargo podía *bajar*
+por escalones ($2.000 bajo $30.000 → $500 arriba) pero nunca **llegar a cero**, que es la
+forma del caso más común. Con los tramos abiertos hacia arriba, el escalón que no cobra
+solo se puede escribir poniéndolo en 0.
+
+La asimetría con el valor plano es deliberada (decisión del owner). Una regla plana en 0
+queda **prendida**, se aplica en cada venta y no cobra nada, sin decirle nada a nadie —
+mientras que la regla pausada hace lo mismo y el POS le avisa al cajero *"está en pausa y
+no se aplicó"*. Permitir las dos dejaría dos maneras de apagar una regla, una silenciosa y
+a simple vista idéntica a una rota. Quien intente guardar una regla plana en 0 recibe un
+400 que le dice que la pause.
+
+⚠️ **Que un tramo pueda valer 0 no lo vuelve indistinguible de un tramo SIN importe.** El
+backlog afirmaba que sí y **se midió que no**: los dos campos son `string` —`@IsNumberString`
+rechaza un número de JSON, y TypeORM devuelve `numeric` como string— y `'0'` es *truthy*,
+así que el chequeo de presencia de `validarTramo` sigue separando los dos casos sin una
+línea de más.
+
+**Lo que NO hubo que tocar, y se midió antes de tocarlo:** el motor ya aplicaba un `'0'`
+bien (`aplicarValor` corta por `== null`, no por falsy) y la boleta ya omite el recargo en
+cero (`ticket-builder.ts` imprime la línea solo con `.gt(0)`, y muestra el agregado, no una
+línea por regla). El drawer de auditoría **sí** lo muestra, atenuado (`sinEfecto`), que es
+lo correcto: son dos superficies distintas —el documento del cliente y la pantalla de quien
+explica un descuadre— y el cero es información en la segunda.
 
 ### Lo que sigue sin salir
 
 `mora` y `recargo_metodo_pago` **no** son candidatos a tramos todavía, y no por falta de
-configuración: hoy con tramos **cobran cero en silencio** (el primero está diferido, el
-segundo retorna antes del `if` de tramos). Habilitarles el campo sin tocar el motor daría
-recargos que el admin configura, la UI muestra y la venta no cobra. Detalle y medición por
-tipo en `docs/agent/pendientes.md`.
+configuración: hoy con tramos **el cálculo no los mira**. Pero no del mismo modo, y la
+diferencia importa —medido el 2026-08-24—:
+
+| Tipo | Qué hace el motor con sus tramos | Qué cobra |
+|---|---|---|
+| `mora` | los ignora: está en `DIFERIDAS` y `evaluarRegla` corta antes | **cero** |
+| `recargo_metodo_pago` | los ignora: está en `METODO_PAGO_CODIGOS` y retorna antes del `if` de tramos | **el valor plano** |
+
+⚠️ Este párrafo decía que **los dos** *"cobran cero en silencio"*. Es cierto solo del primero:
+`recargo_metodo_pago` está en `TIPOS_CON_VALOR_UNICO`, así que el backend le **exige** valor y
+el motor cobra ése. Es la tercera copia del mismo dato viejo —`pendientes.md` ya lo había
+corregido contra el código el 2026-08-23— y sobrevivió acá.
+
+Habilitarles el campo sin tocar el motor daría recargos que el admin configura, la UI muestra
+y la venta cobra por otro lado. Detalle y medición por tipo en `docs/agent/pendientes.md`.
 
 ---
 

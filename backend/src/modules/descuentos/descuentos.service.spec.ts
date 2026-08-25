@@ -381,7 +381,11 @@ describe('DescuentosService', () => {
       ).rejects.toThrow(/decimal/);
     });
 
-    it('rechaza un tramo con valor 0 o negativo', async () => {
+    it('rechaza un tramo con valor negativo', async () => {
+      // ⚠️ Este test se llamaba "valor 0 o negativo" y **solo probaba el
+      // negativo**. Desde el 2026-08-24 el 0 va para el otro lado —un tramo
+      // puede valer cero— así que el título mentía en las dos mitades: la que
+      // no probaba y, después, la que dejó de ser cierta.
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
       await expect(
         service.create(TENANT, {
@@ -393,7 +397,25 @@ describe('DescuentosService', () => {
             { minimoCantidad: '100', valorPorcentaje: '-0.05' },
           ],
         }),
-      ).rejects.toThrow(/mayor a 0/);
+      ).rejects.toThrow(/mayor o igual a 0/);
+    });
+
+    it('y acepta el tramo en 0: es el escalón que deja de descontar', async () => {
+      // Por el camino del service, que es donde `validarMontosDeRegla` se
+      // invoca de verdad: el unit de la función sola no prueba que este tipo
+      // llegue a llamarla con los tramos del DTO.
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Por mayor',
+          tipoReglaId: 'tipo-por_mayor',
+          modo: 'porcentaje',
+          tramos: [
+            { minimoCantidad: '10', valorPorcentaje: '0.10' },
+            { minimoCantidad: '100', valorPorcentaje: '0' },
+          ],
+        }),
+      ).resolves.toBeDefined();
     });
 
     it('un tramo de 5000 en monto fijo sí es válido', async () => {

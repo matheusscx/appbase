@@ -46,15 +46,31 @@ export interface ValoresDeRegla {
 /**
  * Un monto suelto. `null`/vacío no es error acá — que un tipo EXIJA importe lo
  * decide el service, que es quien sabe de qué tipo de regla se trata.
+ *
+ * ✅ **El cero lo admite un TRAMO y no el valor plano** (decisión del owner,
+ * 2026-08-24). No es una asimetría cosmética: un tramo en 0 es lo que expresa
+ * "envío gratis sobre $30.000" —los otros tramos cobran y ése es el brazo que
+ * no cobra—, mientras que una regla PLANA en 0 se aplicaría en cada venta para
+ * no cobrar nada. Eso último **ya se dice de otra forma**, pausándola, y esa
+ * otra forma además *avisa al cajero* ("está en pausa y no se aplicó", ver el
+ * `continue` de `procesarReglas`). Permitir las dos dejaría dos maneras de
+ * apagar una regla, una de ellas silenciosa y a simple vista idéntica a una
+ * regla rota.
  */
 function validarMonto(
   unidad: 'monto' | 'porcentaje',
   valor: string | null | undefined,
+  donde: 'la regla' | 'el tramo',
 ): void {
   if (!valor) return;
   const numero = Number(valor);
-  if (!Number.isFinite(numero) || numero <= 0) {
-    throw new BadRequestException('El valor debe ser un número mayor a 0');
+  const admiteCero = donde === 'el tramo';
+  if (!Number.isFinite(numero) || numero < 0 || (numero === 0 && !admiteCero)) {
+    throw new BadRequestException(
+      admiteCero
+        ? 'El valor de un tramo debe ser un número mayor o igual a 0'
+        : 'El valor debe ser un número mayor a 0',
+    );
   }
   if (unidad === 'porcentaje' && numero >= 1) {
     throw new BadRequestException(
@@ -103,8 +119,8 @@ function validarExpresion(
         : 'Esta regla es un monto fijo: hay un tramo con su importe en valorPorcentaje. Los tramos —los que mandes, o los que ya estén guardados si no los mandás— tienen que expresarlo en valorMonto',
     );
   }
-  validarMonto('monto', valores.valorMonto);
-  validarMonto('porcentaje', valores.valorPorcentaje);
+  validarMonto('monto', valores.valorMonto, donde);
+  validarMonto('porcentaje', valores.valorPorcentaje, donde);
 }
 
 /**
@@ -117,6 +133,14 @@ function validarExpresion(
  * por fuerza son opcionales (cuál corresponde depende del hermano `modo`, que
  * un decorador no puede leer), ese guardia desapareció y un tramo vacío llegaba
  * hasta el `CHECK` de tabla: **500 de Postgres en vez del 400 que corresponde**.
+ *
+ * ⚠️ **Que ahora un tramo pueda valer 0 no vuelve ambiguo este chequeo**, y se
+ * midió antes de tocar nada (2026-08-24): los dos campos son `string`
+ * —`@IsNumberString` rechaza un número de JSON, y TypeORM devuelve `numeric`
+ * como string— y `'0'` es *truthy*, así que "sin importe" e "importe cero"
+ * siguen siendo casos distintos sin escribir una línea. `pendientes.md`
+ * afirmaba lo contrario; era el mismo error que ya se había corregido en
+ * `validarMinimosDeTramos`. Solo diferiría si acá pudiera llegar el número 0.
  */
 function validarTramo(modo: string, tramo: ValoresDeRegla): void {
   validarExpresion(modo, tramo, 'el tramo');
