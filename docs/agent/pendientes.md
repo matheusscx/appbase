@@ -303,7 +303,7 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 12 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** De sus 17 entradas, **siete son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
@@ -327,6 +327,187 @@ que lo convierte en un frente propio y no en un remate.
 ⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
+
+➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner: el descarte
+de desfases, los dos tipos por método de pago, la moneda de las opciones de modificadores, y las
+dos que había dejado el frente del nivel de la regla. Cada una lleva su decisión escrita adentro
+**y las trampas que el que la tome se va a encontrar**, que es lo que las hace construibles y no
+solo contestadas.
+
+- [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
+  como "omitido" cuando ya puede no ser el propuesto** (backend,
+  `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
+  cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
+  (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
+  (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
+  (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
+  `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
+  concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
+  descarte archiva un propuesto que ya no lo es.
+  ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
+  es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
+  (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
+  ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
+  lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
+  frente que la tanda 🔴 mandaba aislar.
+  ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
+  la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
+  molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
+  nunca vio.**
+
+  La medición, paso por paso sobre `Hamburguesa Especial`:
+
+  | Paso | Resultado |
+  |---|---|
+  | El usuario ve en la bandeja | propuesto **1120** |
+  | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
+  | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
+  | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
+  | La bandeja después | **0 filas** |
+
+  **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
+  leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
+  **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
+  el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
+
+  ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
+  omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
+  dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
+  de la lectura del descarte, y la peligrosa es la de "antes".
+
+  ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
+  aparece un caso donde el desfase se silencia, sube"*. Apareció.
+
+  💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
+  de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
+  —o rechaza cuando no coincide con el recalculado, como un control optimista de
+  concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
+  opción a evaluar al tomarla, no una decisión tomada.
+
+  ❓ **LA PREGUNTA, que es lo que la trae a esta sección (2026-08-24):** el 2026-08-19 decidiste
+  *"se anota, no se arregla en esta pasada"*, y era razonable **con la premisa de entonces** —que
+  el síntoma fuera "el descarte no pega", molesto y no peligroso—. Esa premisa resultó falsa: lo
+  medido es que **silencia un desfase que nadie vio**. Y el motivo del diferimiento —que arreglarlo
+  obligaba a meterse con el orden de bloqueo de la bandeja— **puede no aplicar**: si el cliente
+  manda el propuesto que vio y el servidor archiva ese (o rechaza si no coincide), no hace falta
+  ningún lock nuevo.
+  ✅ **DECIDIDO (owner, 2026-08-25): se arregla AHORA, por la vía sin lock.** El cliente manda el
+  propuesto que vio y el servidor archiva **ese**, o rechaza si no coincide con el recalculado —
+  control optimista de concurrencia. Reabre la decisión del 2026-08-19, y la reabre la evidencia:
+  aquella se tomó con la premisa de que el síntoma era "el descarte no pega", y lo medido es que
+  **silencia un desfase que nadie vio**.
+  ⚠️ **Al construirlo:** lo que habilita tomarlo ya es justamente que **no lleva ningún `FOR
+  UPDATE` nuevo**. Si al escribirlo aparece la tentación de agregar uno, eso deja de ser este
+  frente y pasa a ser el de la § 5 — frenar y consultar, no resolverlo de paso. Y el contrato del
+  endpoint cambia (el descarte pasa a recibir el propuesto visto), así que la pantalla de la
+  bandeja entra en el mismo commit.
+
+- [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
+  parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
+  [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
+  (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
+  queda son los dos tipos que el motor **no** lleva a la rama de tramos:
+
+  | Tipo | Clase | Con tramos hoy |
+  |---|---|---|
+  | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
+  | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
+
+  ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
+  archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
+  falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
+  `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
+  que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
+  📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
+  tramos en uno y no en el otro deja la mitad del bug.
+  📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
+  *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
+  Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
+  ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
+  ➕ **Movida desde la § 3 el 2026-08-24.** Estaba en "ya decidido, falta construir" y su
+  propio texto pide lo contrario: *"se confirma con el owner antes de escribir"*.
+  ✅ **DECIDIDO (owner, 2026-08-25): los dos pasan a leer los tramos**, como el de monto de venta.
+  La pantalla no promete de más — el motor promete de menos.
+  ⛔ **Y por eso este frente VA SOLO, con el sistema quieto**: toca el motor de precios, primer
+  punto de "Detenerse y preguntar" de `CLAUDE.md`. Nada de arrastre, nada colgado al final de otra
+  tarea. La razón está medida: el arreglo anterior del redondeo se hizo por partes y hubo que
+  revertirlo.
+  📌 **Los DOS o ninguno**: habilitar tramos en el recargo y no en su gemelo de descuento deja la
+  mitad del bug, con el agravante de que la mitad arreglada hace que nadie vuelva a mirar.
+
+- [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
+  resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
+  2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
+  resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
+  opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
+  `lotePrecio`).
+  Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
+  extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
+  ✅ **DECIDIDO (owner, 2026-08-25): la opción HEREDA la moneda del ítem al que se aplica.** Un
+  `+$800` significa 800 de lo que valga ese ítem.
+  ⚠️ **Y con eso la consecuencia que la pregunta anticipaba pasa a ser el trabajo:** el campo **no
+  puede tener una sola máscara**. En la pantalla de configuración del grupo todavía no hay ítem,
+  así que ahí no hay moneda que resolver — quien lo tome decide si ahí el campo se queda **sin**
+  máscara (y la ayuda visual aparece solo donde el grupo se ve colgado de un ítem) o si se muestra
+  otra referencia. Lo que **no** puede hacer es inventar una moneda para llenar el hueco: ésa es
+  justo la salida que el owner descartó.
+  📌 Sigue en pie que el prop `decimales` va en **4** (escala fija de `@EsCosto()`), no en los
+  decimales de la moneda.
+  ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
+  Lo que falta es ayuda visual, no control.
+  ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
+  moneda, porque `@EsCosto()` es escala fija.
+
+  ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
+  un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
+  `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
+  cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
+  a "el único módulo donde se tipea plata sin escala validada", que es falso.
+  ➕ **Movida desde la § 3 el 2026-08-24.** Se la venía citando como trabajo chico de frontend —
+  incluso en una recomendación de esa misma fecha— y no lo es: su pregunta al owner tiene tres
+  respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
+  campo que escribir.
+
+- [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
+  (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
+  [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
+  nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
+  `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
+  y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
+  contra la línea. Nada falla: cobra otra cosa.
+  **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
+  el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
+  la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
+  bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
+  ✅ **DECIDIDO (owner, 2026-08-25): el tipo EMPUJA el default del radio, sin bloquearlo.** Elegir
+  un tipo "por monto de venta" deja el radio en *Al total de la venta*; quien quiera el caso del
+  vino —*"llevando $50.000 de este vino, 10% en el vino"*— lo mueve a mano y se respeta.
+  📌 **La sub-pregunta que quedaba —qué pasa al cambiar de tipo con el radio ya tocado— se resuelve
+  por derivación, no se vuelve a preguntar:** "empujar sin bloquear" describe un **default**, y un
+  default solo aplica mientras el usuario no eligió. Entonces el tipo mueve el radio **solo
+  mientras nadie lo haya tocado**; en cuanto se toca a mano, cambiar de tipo ya no lo pisa. Es lo
+  contrario de lo que hace hoy `onTipoChange` con los otros campos, así que quien lo construya
+  necesita un testigo de "tocado" y no puede colgarse de ese mismo camino.
+  ⚠️ Si al construirlo ese testigo resulta más caro de lo que vale, **eso sí vuelve al owner**: la
+  alternativa (pisar siempre) es decisión de producto, no una simplificación.
+  El seeder ya tuvo que corregir sus dos filas a mano, que es la señal de que el default engaña más
+  seguido de lo que parece.
+
+- [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
+  desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
+  filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
+  las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
+  intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
+  *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
+  restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
+  devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
+  los vivos), o que el 400 los nombre.
+  ✅ **DECIDIDO (owner, 2026-08-25): `GET /:id/uso` devuelve también los borrados, marcados.** El
+  modal de pausa **sigue mostrando solo los vivos** — ahí un ítem en la papelera es ruido.
+  ⚠️ **Con eso el endpoint queda con dos consumidores que piden cosas distintas, y eso hay que
+  dejarlo escrito o se desincroniza**: el modal (`usePausaRegla`) filtra los borrados y el 400 del
+  cambio de nivel los necesita. Un cambio futuro que "simplifique" devolviendo una sola lista rompe
+  uno de los dos en silencio.
 
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
@@ -659,10 +840,19 @@ del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del hand
 —no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
 que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
 
-**Quedan 7 entradas.** La de la nota de crédito no espera una respuesta sino la
-**investigación de mercado que la destraba, lanzada el 2026-08-22**. La del descarte de
-desfases llegó el **2026-08-24 desde la § 2**, al medirla: lo medido contradijo la premisa con
-la que se había diferido, así que la pregunta es si se reabre esa decisión.
+✅ **Tercera tanda completa el 2026-08-25: las 6 preguntas no fiscales se contestaron de una**, y
+cada entrada se mudó con su decisión escrita y con las trampas que el que la tome se va a
+encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
+moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
+**Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
+al roadmap todavía, así que la entrada no tiene disparador).
+
+**Queda 1 entrada, y no espera una respuesta:** la de la nota de crédito espera la
+**investigación de mercado que la destraba, lanzada el 2026-08-22**.
+
+⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
+pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
+documentos tributarios abren su propio frente, con su propia sesión.
 (La del login del demo entró y salió el mismo día: el owner eligió el proxy →
 [`resueltos.md`](resueltos.md).)
 
@@ -679,94 +869,6 @@ terminan en una pregunta al owner. Es exactamente el error que el párrafo de ar
 corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
-
-- [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
-  (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
-  [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
-  nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
-  `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
-  y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
-  contra la línea. Nada falla: cobra otra cosa.
-  **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
-  el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
-  la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
-  bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
-  ⚠️ Si se empuja, hay que decidir qué pasa al **cambiar de tipo** con el radio ya tocado a
-  mano: `onTipoChange` hoy pisa otros campos, y pisar una elección explícita del usuario es
-  peor que no empujar nada. El seeder ya tuvo que corregir sus dos filas a mano, que es la
-  señal de que el default engaña más seguido de lo que parece.
-
-- [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
-  desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
-  filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
-  las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
-  intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
-  *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
-  restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
-  devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
-  los vivos), o que el 400 los nombre. La primera parece mejor porque la papelera ya es un
-  concepto de la pantalla, pero es decisión de producto.
-
-- [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
-  como "omitido" cuando ya puede no ser el propuesto** (backend,
-  `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
-  cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
-  (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
-  (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
-  (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
-  `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
-  concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
-  descarte archiva un propuesto que ya no lo es.
-  ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
-  es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
-  (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
-  ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
-  lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
-  frente que la tanda 🔴 mandaba aislar.
-  ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
-  la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
-  molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
-  nunca vio.**
-
-  La medición, paso por paso sobre `Hamburguesa Especial`:
-
-  | Paso | Resultado |
-  |---|---|
-  | El usuario ve en la bandeja | propuesto **1120** |
-  | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
-  | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
-  | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
-  | La bandeja después | **0 filas** |
-
-  **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
-  leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
-  **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
-  el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
-
-  ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
-  omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
-  dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
-  de la lectura del descarte, y la peligrosa es la de "antes".
-
-  ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
-  aparece un caso donde el desfase se silencia, sube"*. Apareció.
-
-  💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
-  de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
-  —o rechaza cuando no coincide con el recalculado, como un control optimista de
-  concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
-  opción a evaluar al tomarla, no una decisión tomada.
-
-  ❓ **LA PREGUNTA, que es lo que la trae a esta sección (2026-08-24):** el 2026-08-19 decidiste
-  *"se anota, no se arregla en esta pasada"*, y era razonable **con la premisa de entonces** —que
-  el síntoma fuera "el descarte no pega", molesto y no peligroso—. Esa premisa resultó falsa: lo
-  medido es que **silencia un desfase que nadie vio**. Y el motivo del diferimiento —que arreglarlo
-  obligaba a meterse con el orden de bloqueo de la bandeja— **puede no aplicar**: si el cliente
-  manda el propuesto que vio y el servidor archiva ese (o rechaza si no coincide), no hace falta
-  ningún lock nuevo.
-  👉 **¿Se toma ahora por esa vía, o sigue esperando el frente de bloqueo?** No lo decido yo: es
-  reabrir una decisión tuya, y la reabro porque apareció evidencia que la contradice, no porque
-  no me guste.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
@@ -830,102 +932,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
-
-- [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
-  parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
-  [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
-  (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
-  queda son los dos tipos que el motor **no** lleva a la rama de tramos:
-
-  | Tipo | Clase | Con tramos hoy |
-  |---|---|---|
-  | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
-  | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
-
-  ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
-  archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
-  falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
-  `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
-  que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
-  📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
-  tramos en uno y no en el otro deja la mitad del bug.
-  📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
-  *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
-  Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
-  ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
-  ➕ **Movida desde la § 3 el 2026-08-24.** Estaba en "ya decidido, falta construir" y su
-  propio texto pide lo contrario: *"se confirma con el owner antes de escribir"*. **La pregunta:**
-  ¿los dos tipos por método de pago pasan a leer tramos como el de monto de venta, o el valor
-  único es deliberado y lo que sobra es la promesa de la pantalla?
-
-- [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
-  de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
-  medirla, porque la mitad de lo que decía ya no era cierto**) —
-  ⚠️ **Lo que esta entrada afirmaba y HOY ES FALSO:** decía que un correo de usuario
-  soft-borrado *"hace explotar el alta con un 500"* en `tenants.service.ts` → `crearUsuario`.
-  **Ese camino ya traduce el `23505`** desde el 2026-08-11 (`:861-877`): devuelve **409**, no
-  500, y su comentario nombra las dos causas posibles. No hay nada que arreglar ahí.
-  ✅ **El segundo llamador, que era el que seguía vivo, se arregló el 2026-08-22:**
-  `auth.service.ts` → `register` no capturaba su `23505` y salía un 500 — alcanzable **sin
-  ninguna baja de usuario**, por una carrera entre dos registros del mismo correo libre. Y ahí
-  dolía porque ese endpoint responde siempre lo mismo para no ser un enumerador de cuentas: el
-  500 volvía a distinguir un correo tomado de uno libre. Ver `resueltos.md`.
-  **Lo que queda pendiente, y sigue sin poder construirse:** la decisión del owner
-  (2026-08-11) es que **el alta REVIVA la cuenta, avisando** —la persona vuelve con su
-  historial, y el alta declara los roles de nuevo, sin heredarlos en silencio—, y que la
-  unique de `usuarios.correo` pase a ser **parcial**. Sigue **inalcanzable**: verificado otra
-  vez el 2026-08-22, **nada en `backend/src` soft-borra un `Usuario`** (`removeMember` solo da
-  de baja la membresía). Construirlo hoy sería infraestructura para un estado que no existe.
-  ➕ **Dos huecos menores que aparecieron al medir, anotados y NO arreglados** (ninguno vale
-  un frente propio, los dos son de la misma carrera):
-  1. El 409 de `crearUsuario` dice *"Ese correo ya es miembro de este tenant"*, que es cierto
-     cuando la carrera es dentro del mismo tenant y **falso** cuando dos tenants distintos dan
-     de alta el mismo correo nuevo a la vez. Distinguirlo exige mirar el nombre de la
-     constraint, que en TypeORM es un hash (`UQ_1a7a36f3…`) y cambia con el esquema.
-  2. `usuarios` tiene **dos** uniques —`correo` y `nombre_usuario`— y `RegisterDto` acepta las
-     dos. Una carrera por `nombre_usuario` **sigue dando 500**: es el statu quo, no una
-     regresión, y el arreglo del 2026-08-22 la deja pasar a propósito en vez de tragársela
-     (tragarla le diría "revisá tu correo" a alguien que no quedó registrado).
-  3. **La rama perdedora de la carrera responde más rápido que las otras tres**, porque se
-     saltea `invalidarAnteriores` + `emitir` + `mail.enviar` (lo levantó la revisión
-     independiente del 2026-08-22, sin bloquear). Es un canal de **tiempo** en un endpoint
-     cuyo sentido es responder siempre lo mismo. ⚠️ Antes de tomarlo, tener presente el
-     alcance real: **solo lo puede observar quien induce la carrera él mismo**, con dos
-     requests concurrentes al mismo correo — no es un oráculo de una consulta suelta, que es
-     la amenaza que el endpoint dice cerrar. Cerrarlo sería igualar el trabajo de las cuatro
-     ramas, y eso cuesta más de lo que parece: implica hacer trabajo inútil a propósito.
-  ➕ **Movida desde la § 3 el 2026-08-24**, pero no por una pregunta de negocio: **no se puede
-  construir**. Verificado dos veces (2026-08-22 y hoy) que nada en `backend/src` soft-borra un
-  `Usuario`, así que revivir cuentas es infraestructura para un estado inalcanzable. **Lo que el
-  owner tiene que contestar es si la baja de usuarios entra al roadmap** — hasta entonces esta
-  entrada no tiene disparador. Los tres huecos menores de adentro sí son reales y siguen abiertos.
-
-- [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
-  resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
-  2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
-  resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
-  opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
-  `lotePrecio`).
-  Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
-  extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
-  **La pregunta para el owner:** una opción de grupo que se aplica a ítems en monedas
-  distintas, ¿tiene moneda propia, hereda la del ítem al que se aplica (y entonces el campo
-  no puede tener una sola máscara), o se asume la oficial del tenant asumiendo el error en el
-  caso multi-moneda? Las tres cambian el modelo, no la pantalla.
-  ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
-  Lo que falta es ayuda visual, no control.
-  ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
-  moneda, porque `@EsCosto()` es escala fija.
-
-  ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
-  un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
-  `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
-  cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
-  a "el único módulo donde se tipea plata sin escala validada", que es falso.
-  ➕ **Movida desde la § 3 el 2026-08-24.** Se la venía citando como trabajo chico de frontend —
-  incluso en una recomendación de esa misma fecha— y no lo es: su pregunta al owner tiene tres
-  respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
-  campo que escribir.
 
 ## 5. Carreras de concurrencia
 
@@ -1656,6 +1662,58 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
+  de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
+  medirla, porque la mitad de lo que decía ya no era cierto**) —
+  ⚠️ **Lo que esta entrada afirmaba y HOY ES FALSO:** decía que un correo de usuario
+  soft-borrado *"hace explotar el alta con un 500"* en `tenants.service.ts` → `crearUsuario`.
+  **Ese camino ya traduce el `23505`** desde el 2026-08-11 (`:861-877`): devuelve **409**, no
+  500, y su comentario nombra las dos causas posibles. No hay nada que arreglar ahí.
+  ✅ **El segundo llamador, que era el que seguía vivo, se arregló el 2026-08-22:**
+  `auth.service.ts` → `register` no capturaba su `23505` y salía un 500 — alcanzable **sin
+  ninguna baja de usuario**, por una carrera entre dos registros del mismo correo libre. Y ahí
+  dolía porque ese endpoint responde siempre lo mismo para no ser un enumerador de cuentas: el
+  500 volvía a distinguir un correo tomado de uno libre. Ver `resueltos.md`.
+  **Lo que queda pendiente, y sigue sin poder construirse:** la decisión del owner
+  (2026-08-11) es que **el alta REVIVA la cuenta, avisando** —la persona vuelve con su
+  historial, y el alta declara los roles de nuevo, sin heredarlos en silencio—, y que la
+  unique de `usuarios.correo` pase a ser **parcial**. Sigue **inalcanzable**: verificado otra
+  vez el 2026-08-22, **nada en `backend/src` soft-borra un `Usuario`** (`removeMember` solo da
+  de baja la membresía). Construirlo hoy sería infraestructura para un estado que no existe.
+  ➕ **Dos huecos menores que aparecieron al medir, anotados y NO arreglados** (ninguno vale
+  un frente propio, los dos son de la misma carrera):
+  1. El 409 de `crearUsuario` dice *"Ese correo ya es miembro de este tenant"*, que es cierto
+     cuando la carrera es dentro del mismo tenant y **falso** cuando dos tenants distintos dan
+     de alta el mismo correo nuevo a la vez. Distinguirlo exige mirar el nombre de la
+     constraint, que en TypeORM es un hash (`UQ_1a7a36f3…`) y cambia con el esquema.
+  2. `usuarios` tiene **dos** uniques —`correo` y `nombre_usuario`— y `RegisterDto` acepta las
+     dos. Una carrera por `nombre_usuario` **sigue dando 500**: es el statu quo, no una
+     regresión, y el arreglo del 2026-08-22 la deja pasar a propósito en vez de tragársela
+     (tragarla le diría "revisá tu correo" a alguien que no quedó registrado).
+  3. **La rama perdedora de la carrera responde más rápido que las otras tres**, porque se
+     saltea `invalidarAnteriores` + `emitir` + `mail.enviar` (lo levantó la revisión
+     independiente del 2026-08-22, sin bloquear). Es un canal de **tiempo** en un endpoint
+     cuyo sentido es responder siempre lo mismo. ⚠️ Antes de tomarlo, tener presente el
+     alcance real: **solo lo puede observar quien induce la carrera él mismo**, con dos
+     requests concurrentes al mismo correo — no es un oráculo de una consulta suelta, que es
+     la amenaza que el endpoint dice cerrar. Cerrarlo sería igualar el trabajo de las cuatro
+     ramas, y eso cuesta más de lo que parece: implica hacer trabajo inútil a propósito.
+  ➕ **Movida desde la § 3 el 2026-08-24**, pero no por una pregunta de negocio: **no se puede
+  construir**. Verificado dos veces (2026-08-22 y hoy) que nada en `backend/src` soft-borra un
+  `Usuario`, así que revivir cuentas es infraestructura para un estado inalcanzable. **Lo que el
+  owner tiene que contestar es si la baja de usuarios entra al roadmap** — hasta entonces esta
+  entrada no tiene disparador. Los tres huecos menores de adentro sí son reales y siguen abiertos.
+  ✅ **CONTESTADO (owner, 2026-08-25): la baja de usuarios NO entra al roadmap por ahora.** Queda
+  **inerte a propósito**: sacar la membresía ya resuelve el caso real del local —que la persona
+  deje de entrar—, y el día que la baja haga falta se construyen las dos juntas, la baja y el
+  revivir-avisando. La decisión del 2026-08-11 **se conserva**: no hay que rediscutirla, hay que
+  esperarla.
+  ⛔ **Lo que esto NO habilita:** construir el revivir por su cuenta. Sigue siendo infraestructura
+  para un estado inalcanzable, y ahora además está dicho que se queda así.
+  ➡️ **Movida acá desde la § 4 el 2026-08-25**, al contestarse: no espera diseño ni respuesta,
+  espera un disparador que el owner decidió no crear todavía. Vive en Vigilancia para que nadie la
+  redescubra como hueco nuevo — el hueco es real, y la decisión de no taparlo también.
 
 - [ ] **En modo `cantidad` nada compara el saldo contra la suma del kardex, y no hay forma de
   saber si alguna vez divergieron** (backend, auditoría `inventario` 2026-08-15) — la invariante
