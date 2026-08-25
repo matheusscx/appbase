@@ -457,7 +457,7 @@ Array inmutable — nunca mutar directamente:
 
 ```typescript
 function agregarTramo() {
-  form.value.tramos = [...form.value.tramos, { minimo: '', valor: '' }]
+  form.value.tramos = [...form.value.tramos, { minimo: '', valorMonto: '', valorPorcentaje: '' }]
 }
 function eliminarTramo(i: number) {
   form.value.tramos = form.value.tramos.filter((_, idx) => idx !== i)

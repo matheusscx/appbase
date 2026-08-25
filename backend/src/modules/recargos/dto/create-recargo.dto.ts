@@ -15,8 +15,20 @@ import {
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class TramoDto {
+  // El mínimo va en UNA de las dos, y cuál corresponde lo decide el TIPO de la
+  // regla, que un decorador no puede leer — igual que pasa con el importe y su
+  // `modo`. Lo valida `validarMinimosDeTramos` en el service.
+  // `minimoMonto` es el que el borde de escala PUEDE marcar: un umbral en plata
+  // tiene que caber en la moneda del tenant. `minimoCantidad` no lleva marca
+  // porque sus decimales son legítimos (2,5 kg).
+  @IsOptional()
   @IsNumberString()
-  minimo: string;
+  minimoCantidad?: string | null;
+
+  @IsOptional()
+  @IsNumberString()
+  @EsMontoCobrado()
+  minimoMonto?: string | null;
 
   // Exactamente una de las dos, y la que corresponde al `modo` de la regla: lo
   // valida el service. Acá van opcionales porque cuál corresponde no se sabe

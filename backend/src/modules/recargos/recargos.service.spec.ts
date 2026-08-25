@@ -184,7 +184,7 @@ describe('RecargosService', () => {
           tipoReglaId: 'tipo-general',
           valorPorcentaje: '0.05',
           modo: 'porcentaje',
-          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
+          tramos: [{ minimoMonto: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });
@@ -212,8 +212,8 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-monto',
         modo: 'monto_fijo',
         tramos: [
-          { minimo: '0', valorMonto: '2000' },
-          { minimo: '20000', valorMonto: '500' },
+          { minimoMonto: '0', valorMonto: '2000' },
+          { minimoMonto: '20000', valorMonto: '500' },
         ],
       });
       expect(managerMock.save).toHaveBeenCalled();
@@ -468,7 +468,7 @@ describe('RecargosService', () => {
 
       await expect(
         service.update(TENANT, 'r-tramos', {
-          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
+          tramos: [{ minimoMonto: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });

@@ -117,7 +117,7 @@ de borrarlo**: `recargo_por_monto_venta`, espejo del `por_monto_venta` de descue
 
 ### Los dos límites de forma, medidos
 
-Los tramos son **abiertos hacia arriba** (solo `minimo`, sin `maximo`) y su `valor` tiene
+Los tramos son **abiertos hacia arriba** (solo el mínimo, sin `maximo`) y su `valor` tiene
 que ser **mayor a cero** (`validarMontosDeRegla`, compartido con descuentos). De las dos
 cosas juntas sale un límite concreto:
 
@@ -223,7 +223,7 @@ el importe vive en una columna que el modo nuevo deja fuera de juego. Ese `PATCH
 
 | Tabla | Descripción |
 |-------|-------------|
-| `descuento_tramos` | Tramos de descuento (`minimo`, `valor_monto`, `valor_porcentaje`, `orden`). PK UUID, FK descuento_id |
+| `descuento_tramos` | Tramos de descuento (`minimo_cantidad` \| `minimo_monto`, `valor_monto` \| `valor_porcentaje`, `orden`). PK UUID, FK descuento_id. Dos CHECK: exactamente un mínimo y exactamente un importe |
 | `recargo_tramos` | Tramos de recargo. Misma estructura |
 | `descuento_metodo_pago` | Bridge descuento ↔ metodo_pago. PK compuesta |
 | `recargo_metodo_pago` | Bridge recargo ↔ metodo_pago. PK compuesta |
@@ -234,15 +234,49 @@ Todas con soft delete (`eliminado_el`) y timestamps.
 
 - `CreateDescuentoDto` / `UpdateDescuentoDto`: nuevos campos `metodoPagoIds?: string[]`,
   `tramos?: TramoDto[]`, `diasVencimiento?: number`, `fechaInicio?: string`, `fechaFin?: string`
-- `TramoDto`: `{ minimo: string, valorMonto?: string, valorPorcentaje?: string }` (strings
-  para `@IsNumberString`). Los dos importes son opcionales **en el DTO** porque cuál
-  corresponde depende del hermano `modo`; que llegue exactamente uno lo exige el service.
+- `TramoDto`: `{ minimoCantidad?, minimoMonto?, valorMonto?, valorPorcentaje? }` (strings
+  para `@IsNumberString`). Los cuatro son opcionales **en el DTO** porque cuál corresponde
+  depende de un hermano que un decorador no puede leer; que llegue exactamente uno de cada
+  par lo exige el service.
   ⚠️ Esa opcionalidad se llevó puesto el guardia que daba el `valor` obligatorio: sin la
   validación propia del service, un tramo sin importe llegaba al CHECK de tabla y salía un
   **500** en vez de un 400.
   **No hay `maximo`** —este documento lo afirmaba y nunca existió, ni en las entidades ni en
   el esquema (verificado 2026-08-22)—: los tramos son **abiertos hacia arriba** y gana el de
-  `minimo` más alto que la magnitud alcance.
+  mínimo más alto que la magnitud alcance.
+
+### El mínimo de un tramo: dos columnas, dos ejes (2026-08-24)
+
+`minimo` era **una** columna que significaba dos cosas: en un `por_mayor` son unidades, en un
+`por_monto_venta` es plata. Quién decidía cuál era un `if` con el string del tipo adentro del
+motor, y la consecuencia práctica es que **ninguna de las dos unidades se podía validar en el
+borde**: marcarla como plata habría rechazado un "2,5 kg" legítimo de un local que vende al
+peso.
+
+Partido en `minimo_cantidad` / `minimo_monto`:
+
+- **El tramo dice qué mide.** El motor elige la magnitud por la columna que está llena, no
+  por el código de la regla — ese `if` con el string ya no existe.
+- **El umbral en plata pasa por el borde de escala** (`@EsMontoCobrado()`): en un tenant CLP,
+  `20.000,50` es 400. El de cantidad conserva sus decimales.
+- **Son dos ejes independientes:** el importe lo decide `modo` (monto fijo vs porcentaje) y
+  el mínimo lo decide el `codigo` del tipo. Un `por_mayor` puede descontar un porcentaje.
+
+⚠️ **Quien agregue un tipo con tramos tiene que decidir cuál mide**, y el único lugar donde
+se declara es `CODIGOS_MINIMO_POR_CANTIDAD` en `monto-regla.util.ts`. Se usa **solo al
+escribir**: al leer, el dato ya lo dice.
+
+📌 **Un caso que la validación tiene que dejar pasar, y por qué:** un `PATCH` que cambia el
+tipo a uno **sin tramos** deja huérfanos los guardados. Se pasa `codigo: null` para eso, y ahí
+se valida **toda la forma y solo la forma**: un solo mínimo por tramo, no negativo, y **todos
+los tramos de la regla midiendo lo mismo**. Lo único que NO se exige es la correspondencia con
+el tipo, que no significa nada cuando el tipo no mide.
+
+⚠️ **La tercera de esas tres no es decorativa** y se agregó el 2026-08-24 al levantarla la
+revisión independiente: sin ella, un `POST` a un tipo sin tramos podía mandar uno en cantidad y
+otro en monto —medido, entraba con 201— y el motor comparaba *"500 unidades"* contra *"$100"*
+para decidir cuál tramo gana. Es regla de **forma**, no de negocio: no dice cuál columna, dice
+que no se mezclen.
 
 ### Key Methods
 

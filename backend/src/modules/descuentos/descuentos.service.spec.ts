@@ -342,8 +342,8 @@ describe('DescuentosService', () => {
         nombre: 'Por mayor',
         tipoReglaId: 'tipo-por_mayor',
         tramos: [
-          { minimo: '10', valorPorcentaje: '0.10' },
-          { minimo: '100', valorPorcentaje: '0.15' },
+          { minimoCantidad: '10', valorPorcentaje: '0.10' },
+          { minimoCantidad: '100', valorPorcentaje: '0.15' },
         ],
         modo: 'porcentaje',
       });
@@ -376,7 +376,7 @@ describe('DescuentosService', () => {
           tipoReglaId: 'tipo-por_mayor',
           modo: 'porcentaje',
           // El typo natural de quien piensa "50%".
-          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
+          tramos: [{ minimoCantidad: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });
@@ -389,8 +389,8 @@ describe('DescuentosService', () => {
           tipoReglaId: 'tipo-por_mayor',
           modo: 'porcentaje',
           tramos: [
-            { minimo: '10', valorPorcentaje: '0.10' },
-            { minimo: '100', valorPorcentaje: '-0.05' },
+            { minimoCantidad: '10', valorPorcentaje: '0.10' },
+            { minimoCantidad: '100', valorPorcentaje: '-0.05' },
           ],
         }),
       ).rejects.toThrow(/mayor a 0/);
@@ -405,7 +405,7 @@ describe('DescuentosService', () => {
           nombre: 'Por mayor fijo',
           tipoReglaId: 'tipo-por_mayor',
           modo: 'monto_fijo',
-          tramos: [{ minimo: '10', valorMonto: '5000' }],
+          tramos: [{ minimoCantidad: '10', valorMonto: '5000' }],
         }),
       ).resolves.toBeDefined();
     });
@@ -415,7 +415,7 @@ describe('DescuentosService', () => {
       await service.create(TENANT, {
         nombre: 'Por monto',
         tipoReglaId: 'tipo-por_monto_venta',
-        tramos: [{ minimo: '500', valorPorcentaje: '0.10' }],
+        tramos: [{ minimoMonto: '500', valorPorcentaje: '0.10' }],
         modo: 'porcentaje',
         fechaInicio: '2024-01-01',
         fechaFin: '2024-12-31',
@@ -448,7 +448,7 @@ describe('DescuentosService', () => {
         service.create(TENANT, {
           nombre: 'Existing',
           tipoReglaId: 'tipo-por_mayor',
-          tramos: [{ minimo: '10', valorPorcentaje: '0.10' }],
+          tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.10' }],
           modo: 'porcentaje',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -479,7 +479,7 @@ describe('DescuentosService', () => {
 
       await service.update(TENANT, 'd-1', {
         tipoReglaId: 'tipo-por_mayor',
-        tramos: [{ minimo: '20', valorPorcentaje: '0.15' }],
+        tramos: [{ minimoCantidad: '20', valorPorcentaje: '0.15' }],
         modo: 'porcentaje',
       });
 
@@ -603,7 +603,7 @@ describe('DescuentosService', () => {
       });
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
       tramoRepoMock.find.mockResolvedValue([
-        { minimo: '10', valorMonto: '5000' },
+        { minimoCantidad: '10', valorMonto: '5000' },
       ]);
 
       await expect(
@@ -625,7 +625,7 @@ describe('DescuentosService', () => {
 
       await expect(
         service.update(TENANT, 'd-tramos-2', {
-          tramos: [{ minimo: '10', valorPorcentaje: '50' }],
+          tramos: [{ minimoCantidad: '10', valorPorcentaje: '50' }],
         }),
       ).rejects.toThrow(/decimal/);
     });

@@ -167,13 +167,26 @@ decisión que no es mía).
   restaurar"* falló con **`401` en `POST /items`**. Idéntica forma: **un solo** test de 601,
   `--verificar` confirmó una sola siembra, el spec pasa **83/83 corrido solo**, y la suite
   entera vuelve verde en la corrida siguiente desde base limpia. Tercer spec y tercera ruta
-  distintos: ya son `caja`, `ventas` y `papelera`, lo que aleja definitivamente cualquier
-  causa local a un módulo.
+  distintos: ya son `caja`, `ventas` y `papelera`, lo que aleja cualquier causa local a un
+  módulo. ⚠️ El "definitivamente" que decía acá se sacó el 2026-08-24: el cuarto avistaje cayó
+  en **este mismo spec**.
   ⚠️ **Y sirve de aviso operativo, porque cuesta tiempo cada vez:** este rojo aparece a mitad
   del gate de una tarea que no tiene nada que ver, y la primera reacción es sospechar del
   cambio propio. El descarte son cuatro cosas y en ese orden: `--verificar`, correr el spec
   solo, comprobar que el módulo del cambio no está en el camino del test, y **re-correr la
   suite entera** —no un subconjunto—.
+
+  🆕 **Cuarto avistaje (2026-08-24, durante el corte de `minimo`), y trae un dato que
+  DEBILITA el argumento de arriba.** `papelera.e2e-spec.ts` → *"garzones: restaurar deja
+  `eliminado_por` en NULL…"*, **401** en `POST /restaurar`. Misma forma en todo lo demás: un
+  solo test de 609, `--verificar` con una sola siembra, el spec **83/83 corrido solo**, y la
+  suite completa re-corrida **verde**. Nada del cambio en curso tocaba auth, guards ni tokens.
+  ⚠️ **Lo nuevo:** es el **mismo spec que el tercer avistaje**, en otro test. La entrada venía
+  argumentando "tres specs distintos, lo que aleja definitivamente cualquier causa local a un
+  módulo" — con dos de los cuatro en `papelera.e2e-spec.ts`, **ese argumento se debilita**.
+  Sigue sin ser prueba de causa local (los otros dos son `caja` y `ventas`), pero quien retome
+  esto debería mirar qué tiene `papelera` que lo hace aparecer el doble: es el spec con más
+  tests del repo (83) y el que más recursos distintos recorre.
 
   ⛔ **LA "CAUSA MEJOR SOSTENIDA" YA NO EXISTE — re-medida el 2026-08-24, y hay que dejar de
   mandar gente hacia allá.** Decía que *"los helpers `login()` de 23 de los 32 specs leen el
@@ -356,12 +369,29 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 16 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** De sus 14 entradas, **siete son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
-trabajo, y cada una abre su propio frente.** La deuda chica de verdad son las tres del final
-(`minimo`, la pasarela y el renombre de `moneda.decimales`).
+trabajo, y cada una abre su propio frente.**
+
+De la deuda chica que quedaba, el **2026-08-24 salieron dos**: la escala de la pasarela y el
+`minimo` de un tramo (las dos en [`resueltos.md`](resueltos.md)). **La única que sigue es el
+renombre de `moneda.decimales`** — y ojo, su entrada subestima el tamaño. Medido ese día:
+
+```bash
+grep -rn 'decimales' backend/src backend/test frontend/app frontend/server frontend/e2e | wc -l
+```
+
+**394 ocurrencias en código y tests** (155 backend sin specs · 115 specs de backend · 31 e2e ·
+93 frontend), más las de `docs/`. No son 394 renombres —el grep incluye la palabra suelta en
+comentarios— pero sí muestra que el nombre se **propagó a métodos y campos**
+(`decimalesOficiales`, `decimalesDeLaVenta`, `decimalesMoneda`, `ctx.decimales`), que es lo
+que lo convierte en un frente propio y no en un remate.
+
+⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
+superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
+revisión independiente no lo pudo reproducir, con razón.
 
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
@@ -645,28 +675,6 @@ trabajo, y cada una abre su propio frente.** La deuda chica de verdad son las tr
   ⚠️ Ese redondeo **no toca el documento tributario ni el impuesto**: es una diferencia de
   caja aparte, así que su lugar en el modelo no es el mismo y hay que decidir dónde se
   contabiliza.
-
-- [ ] **`minimo` de un tramo: la ambigüedad que `valor` resolvió, en el campo de al lado**
-  (backend, **medido el 2026-08-24** →
-  [`investigaciones/2026-08-24-inventario-isnumberstring.md`](investigaciones/2026-08-24-inventario-isnumberstring.md))
-  — ⛔ **Esta entrada reemplaza a "los ~30 DTOs con `@IsNumberString`", cuyo barrido NO EXISTE.**
-  Se midieron los **72** campos de DTO: **30 OK, 39 que no son plata, 2 dudosos, y CERO campos de
-  plata sin marca o con marca sin pipe**. El borde de escala está cerrado; lo que queda es esto.
-
-  `TramoDto.minimo` (`descuentos/dto/create-descuento.dto.ts:18` y su gemelo en `recargos`) lleva
-  **solo `@IsNumberString()`** —ni escala, ni signo— y significa dos cosas según un hermano que el
-  decorador no puede leer: `calculo-precios.engine.ts:459` hace
-  `codigo === 'por_mayor' ? ctx.cantidad : ctx.monto`. El comentario de la entidad lo dice sin
-  rodeos: *"cantidad o monto mínimo para este tramo"*.
-
-  ⚠️ **Es la misma FORMA que el corte de `valor` (cerrado 2026-08-23), con consecuencia mucho más
-  chica, y decirlo importa para no inflar el arreglo.** Un `valor` mal leído multiplicaba el cobro
-  por cien; un `minimo` con decimales que la moneda no admite es **un umbral raro, no una plata mal
-  calculada** — la comparación `magnitud >= minimo` sigue funcionando. Lo que se pierde es que el
-  dato sea expresable.
-  📌 En `recargos` la ambigüedad es **teórica hoy**: `TIPOS_CON_TRAMOS` tiene un solo código, así
-  que ahí `minimo` siempre es monto. La certeza descansa en una lista hardcodeada, no en un
-  invariante: entra un segundo tipo por tramos y se vuelve ambiguo como en descuentos.
 
 - [ ] **Renombrar `moneda.decimales`** (backend + frontend, decisión explícita de dejarlo
   afuera, 2026-08-21) — el nombre es ambiguo: **es lo que causó que el propio owner leyera

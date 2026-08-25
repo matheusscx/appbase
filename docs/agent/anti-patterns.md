@@ -722,7 +722,7 @@ const form = ref({ modo: 'porcentaje' as string })
 function abrirEditar(d: Regla) { form.value = { modo: d.modo ?? '', /* … */ } }
 ```
 
-`?? ''` al cargar es el mismo patrón ya usado en el repo para tramos (`t.minimo ?? ''`).
+`?? ''` al cargar es el mismo patrón ya usado en el repo para tramos (desde el 2026-08-24, `t.minimoCantidad ?? t.minimoMonto ?? ''`).
 Antes de aplicarlo verificar que el `null` no viaje al payload: en `descuentos`/`recargos`
 el campo solo se manda cuando `cfg` lo habilita, y ahí el valor siempre es un string real,
 así que la coerción es payload-neutral. Si el `null` sí llegara al body, es decisión de

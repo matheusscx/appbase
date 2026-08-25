@@ -17,6 +17,114 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El mínimo de un tramo dice qué mide: `minimo` se parte en cantidad y monto (2026-08-24)
+
+**Venía de la sección 3.** Es la misma FORMA que el corte de `valor` del 2026-08-23, un campo
+al lado, y el owner eligió resolverla igual: partir la columna.
+
+### Qué estaba mal
+
+`minimo` era **una** columna que significaba dos cosas según un hermano que estaba en otra
+tabla: en un `por_mayor` son unidades, en un `por_monto_venta` es plata. Quién decidía era un
+`if` con el string del tipo adentro del motor:
+
+```ts
+const magnitud = codigo === 'por_mayor' ? ctx.cantidad : ctx.monto;
+```
+
+La consecuencia práctica no es que el motor calculara mal —no lo hacía— sino que **ninguna de
+las dos unidades se podía validar en el borde**. Marcar la columna como plata habría rechazado
+un `2,5` legítimo de un local que vende al peso; no marcarla dejaba pasar un umbral de
+`$20.000,50` en un tenant CLP, que es un dato inexpresable en esa moneda.
+
+📌 **La prueba de que la ambigüedad era real estaba en los tests, y nadie la había leído así:**
+el spec del motor tenía **un solo `const tramos` compartido** entre el caso `por_mayor` y el
+caso `por_monto_venta`. Funcionaba justamente porque el significado no estaba en el dato.
+
+### Qué se hizo
+
+- `minimo` → `minimo_cantidad` / `minimo_monto` en `descuento_tramos` y `recargo_tramos`, con
+  un CHECK de exactamente uno, igual que el de `valor`.
+- **El motor pasó a leer el dato:** `seleccionarTramo` recibe las dos magnitudes y cada tramo
+  se compara contra la suya. El `if` con el string **ya no existe**.
+- `minimoMonto` lleva `@EsMontoCobrado()`, así que el umbral en plata pasa por
+  `EscalaMonedaPipe` como cualquier otro monto. `minimoCantidad` no lo lleva, a propósito.
+- `validarMinimosDeTramos(codigo, tramos)` en `monto-regla.util.ts` —donde ya vive la regla
+  gemela del importe— exige que el tramo llene la columna del tipo de su regla.
+- Seeder, DTOs, services y las dos pantallas de configuración.
+
+### El bug de frontend que el cambio destapó
+
+`recargos.vue` elegía el `MoneyInput` del umbral con `codigo === 'por_monto_venta'`, y el tipo
+de recargo se llama **`recargo_por_monto_venta`**: la condición nunca daba `true`. Su
+comentario decía *"hoy ningún recargo seedeado usa campoTramos"*, cierto cuando se escribió y
+falso desde el 2026-08-22.
+
+Pasaba desapercibido porque el backend aceptaba cualquier escala en el umbral. **Este cambio lo
+volvió visible**: desde que `minimoMonto` se valida, un `20.000,50` es 400, y el campo tenía
+que impedir tipearlo en vez de dejar que rebotara. En `descuentos.vue` la condición se cambió
+a la MISMA expresión que elige la columna al guardar, para que no puedan separarse.
+
+### Qué lo fija
+
+El que carga el peso es `'la magnitud la dice el TRAMO, no el código de la regla'`: monta una
+regla con código `por_monto_venta` y tramos que llenan `minimoCantidad`, y afirma que se mide
+contra la cantidad. **Con el `if` viejo puesto, ese test da 120 en vez de 60** — verificado
+revirtiendo la línea. Es un estado que el service no deja escribir, y está a propósito: el
+motor es una función pura y su contrato es *"mido lo que el tramo dice"*.
+
+Más: 8 tests sobre `validarMinimosDeTramos` —verificados con el mutante que invierte
+`CODIGOS_MINIMO_POR_CANTIDAD`, que voltea 6 tests entre el util y los services— y 3 e2e que
+recorren el camino de la app: el umbral en plata con centavos es 400, el `2,5` de cantidad es
+201, y el mínimo en la columna cruzada es 400.
+
+⚠️ **Un mutante SOBREVIVIÓ y por eso el código quedó más corto:** la presencia del mínimo se
+había escrito contra `null`/`undefined`/`''` "porque `!valor` trataría el 0 como ausente".
+**Es falso para strings** —`!!'0'` es `true`— y el mutante que lo simplificaba pasaba en verde.
+Se dejó la forma corta y el test dice explícitamente que fija la conducta, no la forma.
+
+### Lo que levantó la revisión independiente
+
+Bloqueó, y las tres tenían razón:
+
+1. **`startup-pos.sql` seguía declarando `minimo NOT NULL`** en las dos tablas. No era
+   opinable: el corte de `valor` —que es **el último commit que tocó ese archivo**, `43d35250`—
+   **sí** lo había actualizado, y sobre estas dos tablas.
+2. **`motor-calculo-precios.md` describía el despacho que este cambio eliminó** —*"tramos
+   (`por_mayor` por cantidad, `por_monto_venta` por monto)"*—, y es el documento que
+   `CLAUDE.md` manda leer ANTES de tocar el motor.
+3. **Y la buena de verdad: el docblock del motor prometía una homogeneidad que el código no
+   garantizaba.** Decía que todos los tramos de una regla miden lo mismo "porque lo exige
+   `validarMinimosDeTramos`", y con `codigo: null` solo se validaba la forma. **Medido: un
+   `POST /descuentos` de tipo `directo` con un tramo en cantidad y otro en monto entraba con
+   201**, y entonces `seleccionarTramo` comparaba *"500 unidades"* contra *"$100"* para
+   decidir cuál gana. Esa comparación cruzada **es nueva de este cambio**: antes todos los
+   tramos se medían contra una sola magnitud, así que `mejorMin` era homogéneo por
+   construcción.
+
+   Se cerró exigiendo que **todos los tramos de una regla midan lo mismo, también cuando el
+   tipo no usa tramos**. No es una regla de negocio —no dice cuál columna, eso lo decide el
+   tipo— sino de forma: mezclar unidades no significa nada en ninguna lectura. Con eso el
+   docblock pasó a ser cierto.
+
+También levantó, y se aplicó, que `porCantidad` usaba `!== null` estricto mientras la
+respuesta de un `POST` **omite la key** (los campos del DTO son opcionales): con `undefined`
+caía en la rama de cantidad y hacía `new Decimal(undefined)`. Ahora es `!= null`.
+
+### Lo que la primera versión rompió, y lo cazó el e2e
+
+Un `PATCH` que cambia el tipo a uno **sin tramos** deja huérfanos los guardados, y la
+validación les exigía la columna del tipo nuevo — que no mide nada. Rechazaba un `PATCH`
+legítimo (`ancla positiva`). Se corrigió pasando `codigo: null` en ese caso: se valida la
+**forma** —un solo mínimo, no negativo, que es lo que evita el 500 del CHECK— y no la
+correspondencia con el tipo.
+
+📌 Lo interesante es de dónde salió: **ni el unit ni el typecheck lo vieron**; lo vio el e2e
+completo, y el test que lo vio era un "ancla positiva" —de los que afirman que algo que DEBE
+funcionar sigue funcionando—, no uno de los que buscan el error.
+
+---
+
 ## La escala del monto de la pasarela sale de la moneda de la ORDEN, no del tenant (2026-08-24)
 
 **Venía de la sección 3.** Se cerró en el mismo movimiento en que se descubrió que su

@@ -19,7 +19,7 @@ interface Regla {
   valorMonto: string | null
   valorPorcentaje: string | null
   metodoPagoIds: string[]
-  tramos: { minimo: string; valorMonto: string | null; valorPorcentaje: string | null }[]
+  tramos: { minimoCantidad: string | null; minimoMonto: string | null; valorMonto: string | null; valorPorcentaje: string | null }[]
   diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
@@ -246,7 +246,9 @@ function abrirEditar(r: Regla) {
     valorPorcentaje: r.valorPorcentaje ?? '',
     metodoPagoIds: r.metodoPagoIds ?? [],
     tramos: r.tramos?.map(t => ({
-      minimo: t.minimo ?? '',
+      // El form guarda UN campo `minimo`: cuál de las dos columnas lo llena lo
+      // decide el tipo de la regla, y el body lo vuelve a separar al guardar.
+      minimo: t.minimoCantidad ?? t.minimoMonto ?? '',
       valorMonto: t.valorMonto ?? '',
       valorPorcentaje: t.valorPorcentaje ?? '',
     })) ?? [],
@@ -297,9 +299,13 @@ async function guardar() {
       }
       if (cfg.campoMetodos) body.metodoPagoIds = form.value.metodoPagoIds
       if (cfg.campoTramos) {
+        // Todos los tipos de recargo con tramos miden MONTO de venta (hoy solo
+        // `recargo_por_monto_venta`), así que el umbral va siempre en
+        // `minimoMonto`. En descuentos no alcanza con esto: ahí `por_mayor`
+        // mide cantidad y el body elige columna según el tipo.
         body.tramos = form.value.tramos.map(t => enMonto
-          ? { minimo: t.minimo, valorMonto: t.valorMonto }
-          : { minimo: t.minimo, valorPorcentaje: t.valorPorcentaje })
+          ? { minimoMonto: t.minimo, valorMonto: t.valorMonto }
+          : { minimoMonto: t.minimo, valorPorcentaje: t.valorPorcentaje })
       }
       if (cfg.campoDias) body.diasVencimiento = form.value.diasVencimiento
       if (cfg.campoFechaInicio) body.fechaInicio = form.value.fechaInicio || null
@@ -677,12 +683,18 @@ const columns: TableColumn<Regla>[] = [
                 <tbody>
                   <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-default">
                     <td class="py-1 pr-2">
-                      <!-- Gemelo de descuentos.vue: "Mínimo" es plata solo cuando el
-                           tipo es `por_monto_venta` (hoy ningún recargo seedeado usa
-                           `campoTramos`, pero el criterio queda igual por si se agrega
-                           uno). -->
-                      <MoneyInput v-if="tipoSeleccionado?.codigo === 'por_monto_venta'" v-model="tramo.minimo" oficial class="w-full" />
-                      <UInput v-else v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
+                      <!-- Siempre MoneyInput: TODO tipo de recargo con tramos mide
+                           monto de venta, así que el umbral es plata (a diferencia de
+                           descuentos, donde `por_mayor` mide cantidad).
+                           ⚠️ Acá había un `v-if` contra `'por_monto_venta'` que NUNCA
+                           daba true: el tipo se llama `recargo_por_monto_venta`. Su
+                           comentario decía "hoy ningún recargo seedeado usa
+                           campoTramos", que dejó de ser cierto el 2026-08-22. Pasaba
+                           desapercibido porque el backend aceptaba cualquier escala en
+                           el umbral; desde que `minimoMonto` va con `@EsMontoCobrado()`
+                           (2026-08-24) un "20000,50" es 400, así que el campo tiene que
+                           impedir tipearlo en vez de dejar que rebote. -->
+                      <MoneyInput v-model="tramo.minimo" oficial class="w-full" />
                     </td>
                     <td class="py-1 pr-2">
                       <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valorMonto" oficial class="w-full" />

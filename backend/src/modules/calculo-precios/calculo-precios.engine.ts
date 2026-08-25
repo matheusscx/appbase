@@ -9,7 +9,7 @@ import Decimal from 'decimal.js';
  * escala de cálculo y modo de redondeo. Toda la aritmética usa Decimal.js.
  *
  * Reglas evaluadas en esta fase: valor plano (% o monto fijo), tramos
- * (`por_mayor` por cantidad, `por_monto_venta` por monto) y filtro por método
+ * (cada tramo dice si su umbral es cantidad o monto) y filtro por método
  * de pago. Las reglas por fecha/vencimiento quedan modeladas pero NO se
  * evalúan todavía (ver DIFERIDAS).
  */
@@ -32,7 +32,10 @@ export interface ReglaResuelta {
   /** Decimal en string: 0.10 = 10%. */
   valorPorcentaje: string | null;
   tramos: {
-    minimo: string;
+    /** Umbral en unidades. Excluyente con `minimoMonto`. */
+    minimoCantidad: string | null;
+    /** Umbral en plata. Excluyente con `minimoCantidad`. */
+    minimoMonto: string | null;
     valorMonto: string | null;
     valorPorcentaje: string | null;
   }[];
@@ -377,9 +380,9 @@ function fmt(d: Decimal, cfg: ConfigCalculo): string {
 interface ContextoRegla {
   /** Base sobre la que se calcula el porcentaje (neto o acumulado). */
   base: Decimal;
-  /** Magnitud para tramos `por_mayor`. */
+  /** Magnitud de los tramos cuyo umbral es `minimoCantidad`. */
   cantidad: Decimal;
-  /** Magnitud para tramos `por_monto_venta` (monto neto). */
+  /** Magnitud de los tramos cuyo umbral es `minimoMonto` (monto neto). */
   monto: Decimal;
   metodoPagoId: string | null;
 }
@@ -407,14 +410,41 @@ function aplicarValor(
   return modo === 'monto_fijo' ? v : base.times(v);
 }
 
+/**
+ * El tramo de mayor mínimo que la venta alcanza.
+ *
+ * ⚠️ **Contra qué magnitud se compara lo dice el TRAMO**, no el código de la
+ * regla: el que llena `minimoCantidad` se mide contra las unidades, el que
+ * llena `minimoMonto` contra la plata. Antes acá llegaba una sola magnitud, que
+ * el llamador elegía con `codigo === 'por_mayor' ? cantidad : monto` — un
+ * string del catálogo decidiendo la unidad de una columna. Que la unidad viaje
+ * en el dato es lo que permitió marcar el umbral en plata con
+ * `@EsMontoCobrado()`; el de cantidad conserva sus decimales.
+ *
+ * Los tramos de una misma regla son todos de la misma clase —lo exige
+ * `validarMinimosDeTramos` al escribir, **también cuando el tipo no usa tramos**,
+ * que es el caso que hacía falta cerrar—, así que `mejorMin` nunca compara
+ * unidades distintas. Aun así cada tramo se mide contra lo suyo: el motor no
+ * depende de esa garantía para elegir la magnitud, solo para que "gana el de
+ * mayor mínimo" signifique algo.
+ */
 function seleccionarTramo(
   tramos: ReglaResuelta['tramos'],
-  magnitud: Decimal,
+  cantidad: Decimal,
+  monto: Decimal,
 ): ReglaResuelta['tramos'][number] | null {
   let elegido: ReglaResuelta['tramos'][number] | null = null;
   let mejorMin = new Decimal(-1);
   for (const t of tramos) {
-    const min = new Decimal(t.minimo);
+    // `!= null` y no `!== null`: el GET devuelve `null` pero la respuesta de un
+    // POST/PATCH omite la key (los campos del DTO son opcionales), así que acá
+    // puede llegar `undefined`. Con el estricto, ese caso caía en la rama de
+    // cantidad y hacía `new Decimal(undefined)`.
+    const porCantidad = t.minimoCantidad != null;
+    const min = new Decimal(
+      porCantidad ? t.minimoCantidad! : (t.minimoMonto ?? '0'),
+    );
+    const magnitud = porCantidad ? cantidad : monto;
     if (magnitud.greaterThanOrEqualTo(min) && min.greaterThan(mejorMin)) {
       elegido = t;
       mejorMin = min;
@@ -456,8 +486,7 @@ function evaluarRegla(
   }
 
   if (regla.tramos.length > 0) {
-    const magnitud = codigo === 'por_mayor' ? ctx.cantidad : ctx.monto;
-    const tramo = seleccionarTramo(regla.tramos, magnitud);
+    const tramo = seleccionarTramo(regla.tramos, ctx.cantidad, ctx.monto);
     if (!tramo) return SIN_VALOR;
     // El tramo elegido ES el valor de la regla en esta venta. Propagarlo es lo
     // único que permite reportarlo después: el valor plano de la regla es

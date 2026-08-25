@@ -188,11 +188,56 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo con centavos E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'monto_fijo',
-      tramos: [{ minimo: '10', valorMonto: '500.25' }],
+      tramos: [{ minimoCantidad: '10', valorMonto: '500.25' }],
     });
 
     expect(res.status).toBe(400);
     expect((res.body as { message: string }).message).toMatch(/decimales/);
+  });
+
+  it('el MÍNIMO en plata también pasa por el borde de escala', async () => {
+    // Es el pago del corte de `minimo` (2026-08-24). Antes el umbral vivía en
+    // una sola columna que significaba kilos o pesos según el tipo, y por eso
+    // no se podía marcar: `@EsMontoCobrado()` habría rechazado un "2,5 kg"
+    // legítimo. Partido en dos, el de plata sí se marca.
+    const res = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Umbral con centavos E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_POR_MONTO,
+        modo: 'monto_fijo',
+        tramos: [{ minimoMonto: '20000.50', valorMonto: '500' }],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/decimales/);
+  });
+
+  it('el MÍNIMO en cantidad conserva sus decimales (2,5 kg es legítimo)', async () => {
+    // La contracara, y la que evita que el arreglo se pase de largo: un local
+    // que vende al peso pone "llevando 2,5 kg o más". Si esta columna llevara
+    // la marca de plata, en un tenant CLP esto sería 400.
+    const res = await crearDescuento({
+      nombre: `Por mayor al peso E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      tramos: [{ minimoCantidad: '2.5', valorPorcentaje: '0.10' }],
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('el mínimo en la columna que no corresponde al tipo es 400', async () => {
+    const res = await crearDescuento({
+      nombre: `Umbral cruzado E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      tramos: [{ minimoMonto: '10', valorPorcentaje: '0.10' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/minimoCantidad/);
   });
 
   // ─── Puerta 2: vaciar por PATCH ───────────────────────────────────────────
@@ -264,7 +309,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Por tramos E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valorPorcentaje: '0.05' }],
+      tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
     });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -300,7 +345,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Cambio de tipo válido E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valorPorcentaje: '0.05' }],
+      tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
     });
     const id = (creado.body as ReglaResponse).id;
 
@@ -352,7 +397,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo 50 E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valorPorcentaje: '50' }],
+      tramos: [{ minimoCantidad: '10', valorPorcentaje: '50' }],
     });
 
     expect(res.status).toBe(400);
@@ -366,7 +411,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo fijo E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'monto_fijo',
-      tramos: [{ minimo: '10', valorMonto: '5000' }],
+      tramos: [{ minimoCantidad: '10', valorMonto: '5000' }],
     });
 
     expect(res.status).toBe(201);
@@ -380,7 +425,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo sin importe E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10' }],
+      tramos: [{ minimoCantidad: '10' }],
     });
 
     expect(res.status).toBe(400);
@@ -398,7 +443,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo unidad cruzada E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'porcentaje',
-      tramos: [{ minimo: '10', valorMonto: '5000' }],
+      tramos: [{ minimoCantidad: '10', valorMonto: '5000' }],
     });
 
     expect(res.status).toBe(400);
@@ -418,7 +463,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       nombre: `Tramo remodo E2E ${Date.now()}`,
       tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
       modo: 'monto_fijo',
-      tramos: [{ minimo: '10', valorMonto: '5000' }],
+      tramos: [{ minimoCantidad: '10', valorMonto: '5000' }],
     });
     expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
@@ -521,8 +566,8 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
         tipoReglaId: TIPO_RECARGO_POR_MONTO,
         modo: 'monto_fijo',
         tramos: [
-          { minimo: '0', valorMonto: '2000' },
-          { minimo: '20000', valorMonto: '500' },
+          { minimoMonto: '0', valorMonto: '2000' },
+          { minimoMonto: '20000', valorMonto: '500' },
         ],
       });
     expect(creado.status).toBe(201);
@@ -578,7 +623,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
         tipoReglaId: TIPO_RECARGO_GENERAL,
         modo: 'porcentaje',
         valorPorcentaje: '0.05',
-        tramos: [{ minimo: '10', valorPorcentaje: '50' }],
+        tramos: [{ minimoMonto: '10', valorPorcentaje: '50' }],
       });
 
     expect(res.status).toBe(400);

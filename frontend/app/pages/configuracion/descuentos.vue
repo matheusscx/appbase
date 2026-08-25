@@ -19,7 +19,7 @@ interface Regla {
   valorMonto: string | null
   valorPorcentaje: string | null
   metodoPagoIds: string[]
-  tramos: { minimo: string; valorMonto: string | null; valorPorcentaje: string | null }[]
+  tramos: { minimoCantidad: string | null; minimoMonto: string | null; valorMonto: string | null; valorPorcentaje: string | null }[]
   diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
@@ -246,7 +246,9 @@ function abrirEditar(d: Regla) {
     valorPorcentaje: d.valorPorcentaje ?? '',
     metodoPagoIds: d.metodoPagoIds ?? [],
     tramos: d.tramos?.map(t => ({
-      minimo: t.minimo ?? '',
+      // El form guarda UN campo `minimo`: cuál de las dos columnas lo llena lo
+      // decide el tipo de la regla, y el body lo vuelve a separar al guardar.
+      minimo: t.minimoCantidad ?? t.minimoMonto ?? '',
       valorMonto: t.valorMonto ?? '',
       valorPorcentaje: t.valorPorcentaje ?? '',
     })) ?? [],
@@ -297,9 +299,18 @@ async function guardar() {
       }
       if (cfg.campoMetodos) body.metodoPagoIds = form.value.metodoPagoIds
       if (cfg.campoTramos) {
-        body.tramos = form.value.tramos.map(t => enMonto
-          ? { minimo: t.minimo, valorMonto: t.valorMonto }
-          : { minimo: t.minimo, valorPorcentaje: t.valorPorcentaje })
+        // El umbral va en la columna que corresponde al TIPO (por_mayor mide
+        // cantidad; el resto, monto de venta), que es un eje distinto del
+        // `modo` que decide el importe. Mandar la columna equivocada es 400.
+        const umbralEnMonto = tipoSeleccionado.value?.codigo !== 'por_mayor'
+        body.tramos = form.value.tramos.map((t) => {
+          const minimo = umbralEnMonto
+            ? { minimoMonto: t.minimo }
+            : { minimoCantidad: t.minimo }
+          return enMonto
+            ? { ...minimo, valorMonto: t.valorMonto }
+            : { ...minimo, valorPorcentaje: t.valorPorcentaje }
+        })
       }
       if (cfg.campoDias) body.diasVencimiento = form.value.diasVencimiento
       if (cfg.campoFechaInicio) body.fechaInicio = form.value.fechaInicio || null
@@ -686,7 +697,10 @@ const columns: TableColumn<Regla>[] = [
                            `labelTramos` lo dice: "Monto mínimo"); en `por_mayor` es
                            una cantidad ("Cantidad mínima"). El código del tipo, no el
                            label de UI, decide la máscara. -->
-                      <MoneyInput v-if="tipoSeleccionado?.codigo === 'por_monto_venta'" v-model="tramo.minimo" oficial class="w-full" />
+                      <!-- La MISMA condición que elige la columna al guardar (ver el
+                           body de `guardar`): si las dos se separan, la pantalla ofrece
+                           una máscara y el backend espera la otra columna. -->
+                      <MoneyInput v-if="tipoSeleccionado?.codigo !== 'por_mayor'" v-model="tramo.minimo" oficial class="w-full" />
                       <UInput v-else v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
                     </td>
                     <td class="py-1 pr-2">

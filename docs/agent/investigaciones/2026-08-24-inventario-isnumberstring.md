@@ -35,6 +35,13 @@ en el propio decorador y el pipe. Contar hits y llamarlos campos es lo que infla
 
 ## El hallazgo: `minimo` es la ambigüedad que `valor` ya resolvió, en el campo de al lado
 
+> ✅ **CERRADO el 2026-08-24**, el mismo día, por la vía que esta sección anticipaba: se partió
+> en `minimo_cantidad` / `minimo_monto`. Detalle en [`resueltos.md`](../resueltos.md).
+> 📌 Una cosa que esta medición subestimó: decía que la consecuencia era "un umbral raro, no
+> una plata mal calculada", y es cierto para el CÁLCULO — pero al construirlo apareció que el
+> mismo hueco tapaba un bug de frontend (`recargos.vue` nunca mostraba el `MoneyInput` del
+> umbral, por comparar contra un código que no existe).
+
 `TramoDto.minimo` (`descuentos/dto/create-descuento.dto.ts:18` y su gemelo en `recargos`)
 lleva **solo `@IsNumberString()`**: ni marca de escala, ni validación de signo, nada.
 

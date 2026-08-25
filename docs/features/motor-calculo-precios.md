@@ -26,7 +26,9 @@ auditable. El cálculo de dinero usa **Decimal.js** en todo (nunca `number`).
 ### Scope
 
 - **Incluido**: cálculo por línea y por venta; reglas planas (% o monto fijo),
-  tramos (`por_mayor` por cantidad, `por_monto_venta` por monto) y filtro por
+  tramos (**cada tramo dice si su umbral es cantidad o monto**, según cuál de
+  `minimo_cantidad`/`minimo_monto` esté lleno — desde el 2026-08-24 el motor ya
+  no lo deduce del código de la regla) y filtro por
   método de pago; **vigencia por fecha** para cualquier regla con
   `fechaInicio`/`fechaFin` (ver `docs/superpowers/specs/2026-08-23-vigencia-por-fecha-design.md`);
   desbruteo cuando `precio_incluye_impuesto`; `base` vs `compuesto`; orden de

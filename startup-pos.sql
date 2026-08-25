@@ -525,7 +525,11 @@ CREATE UNIQUE INDEX "uq_recargos_tenant_nombre_vivo"
 CREATE TABLE "descuento_tramos" (
   "descuento_tramo_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "descuento_id"       UUID          NOT NULL REFERENCES "descuentos" ("descuento_id") ON DELETE CASCADE,
-  "minimo"             NUMERIC(18,4) NOT NULL,
+  -- Exactamente uno de los dos, y el que corresponde al TIPO de la regla
+  -- (`por_mayor` mide cantidad; el resto, monto de venta). Lo segundo es entre
+  -- tablas y no se puede expresar acá: lo valida el service.
+  "minimo_cantidad"    NUMERIC(18,4),
+  "minimo_monto"       NUMERIC(18,4),
   -- Exactamente una de las dos, y la misma unidad que el `modo` de su regla.
   -- Lo segundo es entre tablas y no se puede expresar acá: lo valida el service.
   "valor_monto"        NUMERIC(18,4),
@@ -534,6 +538,9 @@ CREATE TABLE "descuento_tramos" (
   "creado_el"          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT "chk_descuento_tramos_un_minimo" CHECK (
+    ("minimo_cantidad" IS NULL) <> ("minimo_monto" IS NULL)
+  ),
   CONSTRAINT "chk_descuento_tramos_una_unidad" CHECK (
     ("valor_monto" IS NULL) <> ("valor_porcentaje" IS NULL)
   )
@@ -543,7 +550,11 @@ CREATE TABLE "descuento_tramos" (
 CREATE TABLE "recargo_tramos" (
   "recargo_tramo_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "recargo_id"       UUID          NOT NULL REFERENCES "recargos" ("recargo_id") ON DELETE CASCADE,
-  "minimo"           NUMERIC(18,4) NOT NULL,
+  -- Exactamente uno de los dos, y el que corresponde al TIPO de la regla
+  -- (`por_mayor` mide cantidad; el resto, monto de venta). Lo segundo es entre
+  -- tablas y no se puede expresar acá: lo valida el service.
+  "minimo_cantidad"  NUMERIC(18,4),
+  "minimo_monto"     NUMERIC(18,4),
   -- Exactamente una de las dos, y la misma unidad que el `modo` de su regla.
   -- Lo segundo es entre tablas y no se puede expresar acá: lo valida el service.
   "valor_monto"      NUMERIC(18,4),
@@ -552,6 +563,9 @@ CREATE TABLE "recargo_tramos" (
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ,
+  CONSTRAINT "chk_recargo_tramos_un_minimo" CHECK (
+    ("minimo_cantidad" IS NULL) <> ("minimo_monto" IS NULL)
+  ),
   CONSTRAINT "chk_recargo_tramos_una_unidad" CHECK (
     ("valor_monto" IS NULL) <> ("valor_porcentaje" IS NULL)
   )

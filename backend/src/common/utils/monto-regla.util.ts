@@ -25,6 +25,18 @@ import { BadRequestException } from '@nestjs/common';
  * único enforcement.
  */
 
+/**
+ * Tipos de regla cuyos tramos miden **cantidad** y no plata. El resto de los
+ * tipos con tramos miden monto de venta.
+ *
+ * Es la única lista que queda nombrando códigos para esto, y vive acá a
+ * propósito: el motor ya NO decide la magnitud por el código —la decide el
+ * tramo, según cuál de sus dos columnas de mínimo esté llena—. Este arreglo
+ * solo se usa al ESCRIBIR, para exigir que el tramo llene la que corresponde
+ * al tipo de su regla.
+ */
+const CODIGOS_MINIMO_POR_CANTIDAD = ['por_mayor'];
+
 /** Una de las dos columnas de importe. La unidad ya viene decidida por cuál es. */
 export interface ValoresDeRegla {
   valorMonto?: string | null;
@@ -138,6 +150,97 @@ export function validarMontosDeRegla(
 ): void {
   validarExpresion(modo, valores);
   for (const tramo of tramos ?? []) validarTramo(modo, tramo);
+}
+
+/** El mínimo de un tramo: cantidad **o** monto, nunca los dos ni ninguno. */
+export interface MinimoDeTramo {
+  minimoCantidad?: string | null;
+  minimoMonto?: string | null;
+}
+
+/**
+ * El mínimo de cada tramo, contra el TIPO de su regla.
+ *
+ * Va aparte de `validarMontosDeRegla` porque el discriminador es otro: el
+ * importe lo decide `modo` (monto fijo vs porcentaje) y el mínimo lo decide el
+ * `codigo` del tipo (por cantidad vs por monto de venta). Son dos ejes
+ * independientes — un `por_mayor` puede descontar un porcentaje.
+ *
+ * ⚠️ **Por qué el mínimo se partió en dos columnas** (2026-08-24): una sola
+ * columna significaba kilos o pesos según un hermano que ni el decorador ni el
+ * motor podían leer sin un `if` con el código adentro. Partido, el tramo dice
+ * por sí solo qué mide: `minimoMonto` lleva `@EsMontoCobrado()` y lo valida el
+ * borde de escala —"$50.000,50" en un tenant CLP se rechaza—, mientras
+ * `minimoCantidad` conserva sus decimales, que en un local que vende al peso
+ * son legítimos (2,5 kg).
+ */
+export function validarMinimosDeTramos(
+  codigo: string | null,
+  tramos?: MinimoDeTramo[],
+): void {
+  // `codigo === null` significa "el tipo NO usa tramos". Pasa de verdad: un
+  // PATCH que cambia el tipo a uno sin tramos deja los guardados huérfanos, y
+  // exigirles la columna de un tipo que no mide nada rechazaba un PATCH
+  // legítimo (lo cazó el e2e `ancla positiva`). En ese caso se valida la FORMA
+  // —una sola columna, no negativa— que es lo que evita el 500 del CHECK de
+  // tabla, y no la correspondencia con el tipo, que ahí no significa nada.
+  const exigirColumnaDelTipo = codigo !== null;
+  const porCantidad =
+    codigo !== null && CODIGOS_MINIMO_POR_CANTIDAD.includes(codigo);
+  // Unidad del primer tramo, para exigir que todos los de la regla coincidan.
+  let unidadDeLaRegla: 'cantidad' | 'monto' | null = null;
+  for (const tramo of tramos ?? []) {
+    if (tramo.minimoCantidad && tramo.minimoMonto) {
+      throw new BadRequestException(
+        'El mínimo de un tramo se expresa en una sola unidad: cantidad o monto, no las dos',
+      );
+    }
+    // `!!` alcanza y es equivalente: los dos campos son `string` (`@IsNumberString`
+    // rechaza un número de JSON), y el `'0'` de "desde cero" es truthy como
+    // string. Se midió con un mutante: la forma larga contra null/undefined/''
+    // no cambia ni un caso, y solo diferiría si acá pudiera llegar el número 0.
+    const tieneCantidad = !!tramo.minimoCantidad;
+    const tieneMonto = !!tramo.minimoMonto;
+    if (!tieneCantidad && !tieneMonto) {
+      throw new BadRequestException(
+        porCantidad
+          ? 'Cada tramo tiene que expresar su mínimo en minimoCantidad'
+          : 'Cada tramo tiene que expresar su mínimo en minimoMonto',
+      );
+    }
+    if (exigirColumnaDelTipo && porCantidad && tieneMonto) {
+      throw new BadRequestException(
+        'Esta regla mide cantidad: el mínimo de cada tramo va en minimoCantidad',
+      );
+    }
+    if (exigirColumnaDelTipo && !porCantidad && tieneCantidad) {
+      throw new BadRequestException(
+        'Esta regla mide monto de venta: el mínimo de cada tramo va en minimoMonto',
+      );
+    }
+    // ⚠️ Todos los tramos de UNA regla miden lo mismo, y esto se exige incluso
+    // cuando el tipo no usa tramos (`codigo: null`). No es una regla de negocio
+    // sino de forma: `seleccionarTramo` elige el de mayor mínimo, y comparar
+    // "500 unidades" contra "$100" para decidir cuál gana no significa nada en
+    // ninguna lectura. Sin esto, un POST a un tipo sin tramos podía mezclarlos
+    // —medido: entraba con 201— y el motor los comparaba igual, porque ramifica
+    // por `tramos.length` antes que por el código del tipo.
+    const unidadDelTramo = tieneCantidad ? 'cantidad' : 'monto';
+    if (unidadDeLaRegla === null) unidadDeLaRegla = unidadDelTramo;
+    else if (unidadDeLaRegla !== unidadDelTramo) {
+      throw new BadRequestException(
+        'Todos los tramos de una regla miden lo mismo: o cantidad, o monto, no una mezcla',
+      );
+    }
+
+    const crudo = tieneCantidad ? tramo.minimoCantidad! : tramo.minimoMonto!;
+    const numero = Number(crudo);
+    if (!Number.isFinite(numero) || numero < 0) {
+      throw new BadRequestException(
+        'El mínimo de un tramo debe ser un número mayor o igual a 0',
+      );
+    }
+  }
 }
 
 /**

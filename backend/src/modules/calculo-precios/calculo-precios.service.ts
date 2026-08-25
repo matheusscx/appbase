@@ -358,7 +358,8 @@ export class CalculoPreciosService {
       valorPorcentaje: string | null;
       tipoRegla: { codigo: string } | null;
       tramos: {
-        minimo: string | null;
+        minimoCantidad: string | null;
+        minimoMonto: string | null;
         valorMonto: string | null;
         valorPorcentaje: string | null;
       }[];
@@ -379,13 +380,14 @@ export class CalculoPreciosService {
           modo: r.modo as ReglaResuelta['modo'],
           valorMonto: r.valorMonto,
           valorPorcentaje: r.valorPorcentaje,
-          // El `?? '0'` del `minimo` queda: un tramo sin mínimo arranca en cero
-          // y eso es un dato, no una ambigüedad. Los importes NO llevan default:
-          // poner `'0'` en las dos columnas volvería a inventar el dato que
-          // este cambio vino a desambiguar. El default lo aplica el motor,
-          // DESPUÉS de elegir la columna.
+          // Ni el mínimo ni el importe llevan default: poner `'0'` en las dos
+          // columnas volvería a inventar el dato que este cambio vino a
+          // desambiguar —cuál de las dos unidades usa el tramo—. Cuál mide lo
+          // dice qué columna está llena, y el CHECK de tabla garantiza que sea
+          // exactamente una.
           tramos: r.tramos.map((t) => ({
-            minimo: t.minimo ?? '0',
+            minimoCantidad: t.minimoCantidad,
+            minimoMonto: t.minimoMonto,
             valorMonto: t.valorMonto,
             valorPorcentaje: t.valorPorcentaje,
           })),

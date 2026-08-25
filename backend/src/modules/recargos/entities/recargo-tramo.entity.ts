@@ -13,6 +13,10 @@ import {
   'chk_recargo_tramos_una_unidad',
   '("valor_monto" IS NULL) <> ("valor_porcentaje" IS NULL)',
 )
+@Check(
+  'chk_recargo_tramos_un_minimo',
+  '("minimo_cantidad" IS NULL) <> ("minimo_monto" IS NULL)',
+)
 export class RecargoTramo {
   @PrimaryGeneratedColumn('uuid', { name: 'recargo_tramo_id' })
   id: string;
@@ -20,8 +24,29 @@ export class RecargoTramo {
   @Column({ name: 'recargo_id', type: 'uuid' })
   recargoId: string;
 
-  @Column({ type: 'numeric', precision: 18, scale: 4 })
-  minimo: string | null; // cantidad o monto mínimo para este tramo
+  // El mínimo va en UNA de las dos, y cuál corresponde lo decide el TIPO de la
+  // regla (`por_mayor` mide cantidad; el resto, monto de venta). Antes era una
+  // sola columna `minimo` que significaba kilos o pesos según un hermano que
+  // estaba en otra tabla: el motor lo resolvía con un `if` sobre el código, y
+  // ninguna de las dos unidades podía validarse en el borde. Ahora el tramo
+  // dice por sí solo qué mide.
+  @Column({
+    name: 'minimo_cantidad',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  minimoCantidad: string | null; // unidades; admite decimales (2,5 kg)
+
+  @Column({
+    name: 'minimo_monto',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  minimoMonto: string | null; // plata, en la escala de la moneda oficial
 
   // Exactamente una de las dos, y la misma que el `modo` de su regla. Lo
   // primero lo garantiza el CHECK de abajo; lo segundo es entre tablas y NO se

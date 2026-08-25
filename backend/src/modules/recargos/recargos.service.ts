@@ -12,6 +12,7 @@ import {
 } from '../../common/utils/nombre-sugerido.util';
 import {
   validarMontosDeRegla,
+  validarMinimosDeTramos,
   importeResultante,
 } from '../../common/utils/monto-regla.util';
 import { Recargo } from './entities/recargo.entity';
@@ -135,7 +136,8 @@ export class RecargosService {
       tramos: tramos
         .filter((t) => t.recargoId === r.id)
         .map((t) => ({
-          minimo: t.minimo,
+          minimoCantidad: t.minimoCantidad,
+          minimoMonto: t.minimoMonto,
           valorMonto: t.valorMonto,
           valorPorcentaje: t.valorPorcentaje,
         })),
@@ -182,7 +184,8 @@ export class RecargosService {
         const tramos = dto.tramos.map((t, i) =>
           manager.create(RecargoTramo, {
             recargoId: recargo.id,
-            minimo: t.minimo,
+            minimoCantidad: t.minimoCantidad ?? null,
+            minimoMonto: t.minimoMonto ?? null,
             valorMonto: t.valorMonto ?? null,
             valorPorcentaje: t.valorPorcentaje ?? null,
             orden: i,
@@ -203,7 +206,8 @@ export class RecargosService {
 
       return this.toListItem(recargo, tipoRegla, {
         tramos: (dto.tramos ?? []).map((t) => ({
-          minimo: t.minimo,
+          minimoCantidad: t.minimoCantidad,
+          minimoMonto: t.minimoMonto,
           valorMonto: t.valorMonto,
           valorPorcentaje: t.valorPorcentaje,
         })),
@@ -274,7 +278,8 @@ export class RecargosService {
           const tramos = dto.tramos.map((t, i) =>
             manager.create(RecargoTramo, {
               recargoId: id,
-              minimo: t.minimo,
+              minimoCantidad: t.minimoCantidad ?? null,
+              minimoMonto: t.minimoMonto ?? null,
               valorMonto: t.valorMonto ?? null,
               valorPorcentaje: t.valorPorcentaje ?? null,
               orden: i,
@@ -305,7 +310,8 @@ export class RecargosService {
         tramos:
           dto.tramos !== undefined
             ? dto.tramos.map((t) => ({
-                minimo: t.minimo,
+                minimoCantidad: t.minimoCantidad,
+                minimoMonto: t.minimoMonto,
                 valorMonto: t.valorMonto,
                 valorPorcentaje: t.valorPorcentaje,
               }))
@@ -443,7 +449,8 @@ export class RecargosService {
     tipoRegla: TipoRegla,
     opts: {
       tramos?: {
-        minimo: string;
+        minimoCantidad?: string | null;
+        minimoMonto?: string | null;
         valorMonto?: string | null;
         valorPorcentaje?: string | null;
       }[];
@@ -526,6 +533,12 @@ export class RecargosService {
     // columna corresponde. Mandar la columna equivocada tiene que ser un 400
     // que se entienda, no un descarte mudo que guarde algo distinto.
     validarMontosDeRegla(modoResultante, dto, dto.tramos);
+    // El mínimo va aparte porque su discriminador es el `codigo` del tipo, no
+    // el `modo`: son dos ejes independientes.
+    validarMinimosDeTramos(
+      TIPOS_CON_TRAMOS.includes(codigo) ? codigo : null,
+      dto.tramos,
+    );
     const importe =
       modoResultante === 'monto_fijo' ? dto.valorMonto : dto.valorPorcentaje;
     if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importe)
@@ -580,6 +593,14 @@ export class RecargosService {
     // Lo que mandó el cliente (para que la columna equivocada sea 400) más los
     // tramos que quedan.
     validarMontosDeRegla(modoResultante, dto, tramosFinales);
+    // Sobre `tramosFinales` y no sobre `dto.tramos`: un PATCH que solo cambia
+    // el `tipoReglaId` reinterpreta los tramos YA GUARDADOS, y ahí es donde el
+    // mínimo puede quedar en la columna equivocada sin que el cliente mande
+    // ningún tramo.
+    validarMinimosDeTramos(
+      TIPOS_CON_TRAMOS.includes(codigo) ? codigo : null,
+      tramosFinales,
+    );
 
     // El mismo orden que en `validarSegunTipoCreate`, y por el mismo motivo:
     // PRIMERO lo que mandó el cliente, después lo que falta. Al revés —como

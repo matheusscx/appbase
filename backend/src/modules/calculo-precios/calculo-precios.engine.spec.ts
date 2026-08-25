@@ -218,8 +218,18 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   valorMonto: null,
                   valorPorcentaje: null,
                   tramos: [
-                    { minimo: '1', valorMonto: '5', valorPorcentaje: null },
-                    { minimo: '10', valorMonto: '30', valorPorcentaje: null },
+                    {
+                      minimoCantidad: '1',
+                      minimoMonto: null,
+                      valorMonto: '5',
+                      valorPorcentaje: null,
+                    },
+                    {
+                      minimoCantidad: '10',
+                      minimoMonto: null,
+                      valorMonto: '30',
+                      valorPorcentaje: null,
+                    },
                   ],
                 }),
               ],
@@ -446,10 +456,29 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
   });
 
   describe('tramos', () => {
-    const tramos = [
-      { minimo: '1', valorMonto: null, valorPorcentaje: '0.05' },
-      { minimo: '10', valorMonto: null, valorPorcentaje: '0.10' },
+    // Hasta el 2026-08-24 estos dos casos compartían UN solo `tramos`, y
+    // funcionaba porque la unidad del umbral la decidía el `codigo` de la
+    // regla. Ahora la decide el tramo, así que son dos listas distintas —
+    // que es exactamente lo que el cambio vino a hacer visible.
+    const tramosPorCantidad = [
+      {
+        minimoCantidad: '1',
+        minimoMonto: null,
+        valorMonto: null,
+        valorPorcentaje: '0.05',
+      },
+      {
+        minimoCantidad: '10',
+        minimoMonto: null,
+        valorMonto: null,
+        valorPorcentaje: '0.10',
+      },
     ];
+    const tramosPorMonto = tramosPorCantidad.map((t) => ({
+      ...t,
+      minimoCantidad: null,
+      minimoMonto: t.minimoCantidad,
+    }));
 
     it('por_mayor elige el tramo por cantidad', () => {
       const r = calcularVenta(
@@ -458,13 +487,17 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               cantidad: '12',
               descuentos: [
-                regla({ codigo: 'por_mayor', valorPorcentaje: null, tramos }),
+                regla({
+                  codigo: 'por_mayor',
+                  valorPorcentaje: null,
+                  tramos: tramosPorCantidad,
+                }),
               ],
             }),
           ],
         }),
       );
-      // subtotal 1200, cantidad 12 -> tramo minimo 10 -> 0.10 -> 120
+      // subtotal 1200, cantidad 12 -> tramo minimoCantidad 10 -> 0.10 -> 120
       expect(r.lineas[0].descuentoAplicado).toBe('120.000000');
     });
 
@@ -479,7 +512,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                 regla({
                   codigo: 'por_monto_venta',
                   valorPorcentaje: null,
-                  tramos,
+                  tramos: tramosPorMonto,
                 }),
               ],
             }),
@@ -489,6 +522,38 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.lineas[0].descuentoAplicado).toBe('120.000000');
     });
 
+    it('la magnitud la dice el TRAMO, no el código de la regla', () => {
+      // El mutante que esto mata es la vuelta atrás:
+      // `const magnitud = codigo === 'por_mayor' ? ctx.cantidad : ctx.monto`.
+      // Con esa línea puesta, esta regla —código `por_monto_venta`, tramos que
+      // llenan `minimoCantidad`— se mediría contra el monto (1200) y elegiría
+      // el tramo de 10 → 120. Leyendo el dato se mide contra la cantidad (2),
+      // que solo alcanza el tramo de 1 → 5% de 1200 = 60.
+      //
+      // Es un estado que el service no deja escribir (`validarMinimosDeTramos`
+      // exige que el tramo llene la columna del tipo), y está acá a propósito:
+      // el motor es una función pura y su contrato es "mido lo que el tramo
+      // dice", no "confío en que el código y la columna coincidan".
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              cantidad: '2',
+              precioUnitario: '600',
+              descuentos: [
+                regla({
+                  codigo: 'por_monto_venta',
+                  valorPorcentaje: null,
+                  tramos: tramosPorCantidad,
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('60.000000');
+    });
+
     it('sin tramo aplicable -> monto 0', () => {
       const r = calcularVenta(
         venta({
@@ -496,7 +561,11 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               cantidad: '0.5',
               descuentos: [
-                regla({ codigo: 'por_mayor', valorPorcentaje: null, tramos }),
+                regla({
+                  codigo: 'por_mayor',
+                  valorPorcentaje: null,
+                  tramos: tramosPorCantidad,
+                }),
               ],
             }),
           ],
@@ -1380,8 +1449,18 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                   codigo: 'por_mayor',
                   valorPorcentaje: null,
                   tramos: [
-                    { minimo: '1', valorMonto: null, valorPorcentaje: '0.05' },
-                    { minimo: '10', valorMonto: null, valorPorcentaje: '0.10' },
+                    {
+                      minimoCantidad: '1',
+                      minimoMonto: null,
+                      valorMonto: null,
+                      valorPorcentaje: '0.05',
+                    },
+                    {
+                      minimoCantidad: '10',
+                      minimoMonto: null,
+                      valorMonto: null,
+                      valorPorcentaje: '0.10',
+                    },
                   ],
                 }),
               ],
@@ -1449,7 +1528,12 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           codigo: 'por_monto_venta',
           valorPorcentaje: null,
           tramos: [
-            { minimo: '99999', valorMonto: null, valorPorcentaje: '0.10' },
+            {
+              minimoCantidad: null,
+              minimoMonto: '99999',
+              valorMonto: null,
+              valorPorcentaje: '0.10',
+            },
           ],
         }),
         null as string | null,
