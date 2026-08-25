@@ -58,8 +58,12 @@ vigencia obligatoria— se mudó al futuro módulo de promociones. La capacidad 
 opcionales. Detalle: `docs/superpowers/specs/2026-08-23-vigencia-por-fecha-design.md`.
 
 El detalle de cada hueco y qué hace falta para cerrarlo está en
-[`pendientes.md`](../agent/pendientes.md) § 6, *"Cinco tipos de regla no hacen lo que la
-pantalla promete"*.
+[`pendientes.md`](../agent/pendientes.md), en *"Los tipos de regla por TIEMPO, que siguen
+esperando el vencimiento de venta"*.
+
+⚠️ **Esta cita apuntaba a un título renombrado** —*"Cinco tipos de regla no hacen lo que la
+pantalla promete"*—, que hoy solo existe en [`resueltos.md`](../agent/resueltos.md) marcado
+como **cerrado**. Quien siguiera el puntero concluía que el tema ya salió.
 
 ---
 
@@ -245,8 +249,8 @@ dice cuánto cobra y sale 400.
 
 `mora` **no** es candidato a tramos, y no por falta de configuración: está en `DIFERIDAS`, así
 que `evaluarRegla` corta antes de mirar nada y con tramos **cobraría cero**. Su problema no es
-de escalones sino de **tiempo** — vive en `docs/agent/pendientes.md`, en *"Cinco tipos de regla
-no hacen lo que la pantalla promete"*.
+de escalones sino de **tiempo** — vive en `docs/agent/pendientes.md`, en *"Los tipos de regla
+por TIEMPO, que siguen esperando el vencimiento de venta"*.
 
 ⚠️ Este párrafo nombraba también a `recargo_metodo_pago`, y llegó a decir que los dos
 *"cobran cero en silencio"*. Lo primero se resolvió el 2026-08-25 (sección de arriba); lo
