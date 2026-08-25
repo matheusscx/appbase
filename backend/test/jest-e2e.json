@@ -16,6 +16,6 @@
   "maxWorkers": 1,
   "testTimeout": 30000,
   "setupFilesAfterEnv": [
-    "<rootDir>/diagnostico-401.ts"
+    "<rootDir>/setup-supertest.ts"
   ]
 }

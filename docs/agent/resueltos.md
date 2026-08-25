@@ -17,6 +17,312 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El `401` fantasma no era nuestro: otro proceso ocupaba el puerto (2026-08-25)
+
+**Venía de la sección 2.** Siete avistajes en cinco specs distintos entre el 2026-08-11 y el
+2026-08-25, y **ninguna de las causas que la entrada persiguió era la correcta** — porque el
+problema no estaba en el proyecto.
+
+### La causa
+
+`supertest` **bindea una dirección y le habla a otra**
+(`node_modules/supertest/lib/test.js:60-70`):
+
+```js
+if (!addr) this._server = app.listen(0);          // bindea el WILDCARD (::)
+return protocol + '://127.0.0.1:' + port + path;  // pero direcciona 127.0.0.1
+```
+
+En macOS eso abre un hueco, y está medido con un experimento propio, no deducido:
+
+| Experimento | Resultado |
+|---|---|
+| Bind al **wildcard** sobre un puerto que otro proceso tiene en `127.0.0.1` | **Entra sin `EADDRINUSE`** |
+| Conexión a `127.0.0.1:<ese puerto>` | **Se la lleva el bind más específico**, o sea el ajeno |
+| Bind a **`127.0.0.1`** sobre ese mismo puerto | `EADDRINUSE` |
+
+Como `listen(0)` saca puertos del rango efímero —acá 49152-65535— alcanza con que cualquier
+programa escuche ahí adentro. En esta máquina era el **agente de Battle.net** en
+`127.0.0.1:56561`, y su respuesta a cualquier request es, textual:
+
+```
+HTTP/1.1 401 Unauthorized
+Content-Length: 0
+Connection: close
+```
+
+Idéntica, byte por byte, a lo capturado en el e2e.
+
+### Por qué explica lo que ninguna hipótesis explicaba
+
+- **El `401` en `POST /auth/register`**, ruta sin guard ni rama de 401: el request **nunca
+  llegó a la app**.
+- **Un token válido rechazado**: la app nunca lo vio.
+- **Spec y ruta distintos cada vez**: el que pidiera algo justo después de que `listen(0)`
+  entregara ese puerto.
+- **Verde al repetir**: otro puerto.
+- **El `TypeError: resMiembros.body.find is not a function`** del primer avistaje: un body
+  vacío no es un array.
+- **Y por qué CI casi no lo veía**: allá no hay un Battle.net escuchando.
+
+### El arreglo
+
+Que el bind coincida con la dirección a la que se habla: `listen(0, '127.0.0.1')`. Ahí el
+puerto ocupado **sí** da conflicto y el sistema entrega otro libre. Se parchea
+`serverAddress` una vez, en `backend/test/setup-supertest.ts`: son 50 specs y ninguno tiene
+por qué saber esto.
+
+⚠️ **No se arregla cerrando Battle.net.** Hoy es ése; mañana es cualquier programa que
+escuche en el rango efímero, y el síntoma vuelve sin relación aparente con nada.
+
+### Cómo se agarró, que es lo que vale para el próximo
+
+**No se resolvió leyendo código: se resolvió instrumentando y corriendo en loop.** Cinco
+avistajes en dos semanas no habían alcanzado porque **todos registraron el status y ninguno
+el body**. La caja negra (en el mismo archivo del arreglo, y **queda puesta** como red)
+engancha por `setupFilesAfterEnv` —sin tocar un solo spec— y escribe todo 401 con su body,
+sus headers y el test que lo produjo.
+
+La secuencia, cada paso decidido por el anterior:
+
+| Medición | Qué descartó |
+|---|---|
+| `body: {}` vacío | Nest **siempre** serializa la excepción a JSON → no salió de la capa de excepciones |
+| `content-type` ausente, `content-length: 0` | no es JSON; el 401 legítimo del mismo guard trae `content-length: 43` |
+| **`x-powered-by` ausente** | Express lo pone en TODA respuesta suya → **no pasó por Express** |
+| `socketReciclado: false` | no era reuso de socket del pool de keep-alive |
+| El puerto: `56561` en las 3 capturas, y **distinto en cada 401 legítimo** | dejó de ser "un 401 raro" y pasó a ser "hay algo en ese puerto" |
+| `lsof -nP -i :56561` | el nombre y el PID del culpable |
+
+📌 **Tres notas de método**, que valen más que el bug:
+1. **La tasa real era 1 en 4, no 1 en 10.** La entrada la estimaba por avistajes casuales;
+   medida en loop, cayó en la corrida 4, después en la 3, después en la 3.
+2. **La caja negra tuvo su propio bug y por poco arruina la cacería:** borraba el log al
+   empezar **cada spec**, porque el flag vivía en `globalThis` y jest le da a cada archivo su
+   propio sandbox (`process.env` tampoco sirve: también es por archivo). Dos corridas
+   completas dejaron **cero** capturas. No se vio al estrenarla porque se verificó con **un**
+   spec, donde el bug es invisible por construcción.
+3. **Un discriminador anotado a priori puede no servir.** Se instrumentó `www-authenticate`
+   pensando que separaría Passport del resto: resultó **ausente también en el 401 legítimo**.
+   El que decidió fue `x-powered-by`, que se agregó después.
+
+### La red que queda
+
+`app.e2e-spec.ts` afirma que el server de los tests se ata a `127.0.0.1`. Afirma sobre la
+**llamada a `listen`** y no sobre `address()`, porque supertest cierra el server al terminar
+el request. Mutante: sacar el parche → el test cae. Sin esa red el arreglo es invisible y su
+ausencia no se ve hasta el próximo fantasma.
+
+### El texto con el que estaba anotada
+
+> - [ ] **Un flaky del e2e de caja, y seis lecturas de `/tenants/members` que esconden su
+>   causa** (backend/tests, visto el 2026-08-11) — son dos cosas y la segunda es la que se
+>   puede arreglar hoy.
+>
+>   **El flaky:** `caja.e2e-spec.ts` → *"un usuario fuera del allow-list del cajón recibe 403
+>   al abrir"* falló con `TypeError: resMiembros.body.find is not a function`. La corrida
+>   siguiente, verde. **Las dos** partieron de `reset-db.sh` y las dos pasaron
+>   `reset-db.sh --verificar` (un solo `Seed complete`, mismo contenedor), así que no es la
+>   contaminación acumulativa de siempre. Y `test/jest-e2e.json` tiene `maxWorkers: 1`, así
+>   que tampoco es interferencia entre specs en paralelo. **Causa no determinada:** lo único
+>   medido es que el body no era un array.
+>
+>   ✅ **La mitad legible se cerró el 2026-08-11** (ver [`resueltos.md`](resueltos.md)): las
+>   lecturas de `/tenants/members` afirman el status antes de castear, así que la próxima vez
+>   que esto pase el test va a decir qué contestó el servidor. **El flaky sigue abierto**: su
+>   causa sigue sin determinarse, y lo que se cerró es la mudez, no el bug.
+>
+>   Contexto que puede o no ser relevante, anotado para no perderlo: `GET /tenants/members`
+>   es **admin-only** desde el 2026-08-09 (`TenantAdminGuard`). El token que usa el test es
+>   el del admin, así que un 403 liso no es la explicación obvia — pero es justo la clase de
+>   hipótesis que la aserción de status confirmaría o descartaría de una.
+>
+>   🆕 **Segundo avistaje, y le da forma a la hipótesis (2026-08-11).** En una corrida de la
+>   suite completa, `ventas.e2e-spec.ts` → *"anula, repone el stock y persiste quién y por
+>   qué"* falló con **`401 Unauthorized` en `POST /ventas`**. Mismo patrón: un solo test, la
+>   corrida siguiente (misma suite, mismo `reset-db.sh`) verde, y `--verificar` confirmó una
+>   sola siembra. Es otro spec y otra ruta, así que **no es "el flaky de caja"**: es un
+>   intermitente de **autenticación**, que es la familia a la que los dos pertenecen.
+>
+>   🆕 **Tercer avistaje (2026-08-23), y el patrón se sostiene.** `papelera.e2e-spec.ts` →
+>   *"items: una fila borrada sin `eliminado_por` no aparece en la papelera ni se puede
+>   restaurar"* falló con **`401` en `POST /items`**. Idéntica forma: **un solo** test de 601,
+>   `--verificar` confirmó una sola siembra, el spec pasa **83/83 corrido solo**, y la suite
+>   entera vuelve verde en la corrida siguiente desde base limpia. Tercer spec y tercera ruta
+>   distintos: ya son `caja`, `ventas` y `papelera`, lo que aleja cualquier causa local a un
+>   módulo. ⚠️ El "definitivamente" que decía acá se sacó el 2026-08-24: el cuarto avistaje cayó
+>   en **este mismo spec**.
+>   ⚠️ **Y sirve de aviso operativo, porque cuesta tiempo cada vez:** este rojo aparece a mitad
+>   del gate de una tarea que no tiene nada que ver, y la primera reacción es sospechar del
+>   cambio propio. El descarte son cuatro cosas y en ese orden: `--verificar`, correr el spec
+>   solo, comprobar que el módulo del cambio no está en el camino del test, y **re-correr la
+>   suite entera** —no un subconjunto—.
+>
+>   🆕 **Cuarto avistaje (2026-08-24, durante el corte de `minimo`), y trae un dato que
+>   DEBILITA el argumento de arriba.** `papelera.e2e-spec.ts` → *"garzones: restaurar deja
+>   `eliminado_por` en NULL…"*, **401** en `POST /restaurar`. Misma forma en todo lo demás: un
+>   solo test de 609, `--verificar` con una sola siembra, el spec **83/83 corrido solo**, y la
+>   suite completa re-corrida **verde**. Nada del cambio en curso tocaba auth, guards ni tokens.
+>   ⚠️ **Lo nuevo:** es el **mismo spec que el tercer avistaje**, en otro test. La entrada venía
+>   argumentando "tres specs distintos, lo que aleja definitivamente cualquier causa local a un
+>   módulo" — con dos de los cuatro en `papelera.e2e-spec.ts`, **ese argumento se debilita**.
+>   Sigue sin ser prueba de causa local (los otros dos son `caja` y `ventas`), pero quien retome
+>   esto debería mirar qué tiene `papelera` que lo hace aparecer el doble: es el spec con más
+>   tests del repo (83) y el que más recursos distintos recorre.
+>
+>   ⛔ **LA "CAUSA MEJOR SOSTENIDA" YA NO EXISTE — re-medida el 2026-08-24, y hay que dejar de
+>   mandar gente hacia allá.** Decía que *"los helpers `login()` de 23 de los 32 specs leen el
+>   `access_token` sin afirmar el status"*, así que un login fallido dejaba el token en `undefined`
+>   y el `describe` entero mandaba `Bearer undefined`. **Medido hoy sobre los 47 specs: los 47
+>   afirman el status del login antes de leer el token.** Cero excepciones.
+>
+>   ⚠️ **Y eso hace más grave lo que queda, no menos.** El avistaje de hoy en `papelera.e2e-spec.ts`
+>   ocurrió **con el assert puesto** (`test/papelera.e2e-spec.ts:71`): el login devolvió 200 y el
+>   token era real. O sea que **un token válido recibió un 401 en una ruta posterior**, que es un
+>   mecanismo distinto del que esta entrada describía y sigue sin explicación.
+>
+>   📌 **Dos cosas que la re-medición deja como método**, porque cada una costó una pasada en falso:
+>   - La afirmación vieja no se puede verificar con un grep ingenuo. Un primer intento marcó **46 de
+>     47 como culpables** —contaba la declaración `access_token: string` de la interfaz como una
+>     lectura— y un segundo dejó **uno**, que resultó falso positivo: afirmaba los dos status juntos
+>     con `toEqual([200, 200])`, forma que el regex no cubría. **Medir mal en la dirección alarmante
+>     es tan caro como no medir.**
+>   - Descartes ya hechos para el próximo: no es la base moviéndose (`--verificar` verde), no es el
+>     spec (pasa solo), no es el módulo del cambio en curso, y no es el pool disfrazado de 401
+>     —`jwt.strategy.ts` → `validate()` no toca la base—.
+>   ⛔ **Y descarta la sospecha que esta entrada anotaba**: "el pool agotado disfrazado de 401" es
+>   falso. `jwt.strategy.ts` → `validate()` **no toca la base** (verificado abriendo el archivo:
+>   recibe el payload firmado y mapea cuatro campos), y ningún guard tiene `try/catch` que
+>   traduzca un error a 401. Un fallo de base ahí da 500, no 401.
+>
+>   🎯 **SEXTO AVISTAJE (2026-08-25), el primero ATRAPADO CON LA CAJA NEGRA — y trae el dato
+>   que cambia el problema.** Se corrió la suite completa en loop; cayó en la **corrida 4**
+>   (tres verdes antes, ~130 s cada una), o sea que la tasa medida es del orden de 1 en 4, no
+>   de 1 en 10.
+>
+>   - **Spec y test:** `items-pausados.e2e-spec.ts` → *"crear un ítem con la categoría pausada
+>     devuelve 400 y la nombra"* (`:614`). Esperaba **400**, recibió **401**.
+>   - **Ruta:** `POST /api/items`, que sí tiene `JwtAuthGuard` a nivel de `@Controller`, así
+>     que un 401 ahí **sería legítimo**… salvo por lo de abajo.
+>   - **El token viajaba:** `Authorization` presente, 334 caracteres. **No es
+>     `Bearer undefined`**, que era la causa que esta entrada dio por buena y ya estaba
+>     refutada.
+>
+>   ⛔ **EL BODY VINO VACÍO (`{}`), y eso no lo explica ninguna de las dos formas conocidas.**
+>   Nest **siempre** serializa una excepción a JSON: un guard da
+>   `{ message: 'Unauthorized', statusCode: 401 }` y el código propio da
+>   `{ message: '<texto>', error: 'Unauthorized', statusCode: 401 }`. **Un 401 con body vacío
+>   no salió de la capa de excepciones de Nest.** Es la primera pista dura en seis avistajes, y
+>   reorienta el frente: **deja de ser un bug de auth** y pasa a ser "quién escribe una
+>   respuesta que la app no escribió".
+>
+>   🔗 **Y conecta con la entrada de abajo**, la del `timeout exceeded when trying to connect`:
+>   ese intermitente también cayó en **`items-pausados.e2e-spec.ts`**. La entrada de allá
+>   anotaba *"puede ser pariente… nada lo prueba todavía"*; que los dos aparezcan en el mismo
+>   spec no lo prueba tampoco, pero es la primera coincidencia concreta entre los dos.
+>
+>   ➡️ **Siguiente paso, ya instrumentado:** la caja negra ahora captura además
+>   `content-type`, `content-length`, `www-authenticate` y `connection`, más los primeros 300
+>   caracteres del texto crudo. Con eso el próximo se cierra: **sin `content-type` es un
+>   `res.end()` pelado; con `www-authenticate` es Passport**; y un `content-length` que no
+>   cuadra apuntaría a una respuesta cortada.
+>
+>   🔬 **Pasada del 2026-08-24: se instrumentó, y se refutaron dos hipótesis con evidencia.**
+>
+>   **Lo que ahora existe y antes no: `backend/test/diagnostico-401.ts`, una caja negra.** Se
+>   engancha por `setupFilesAfterEnv` —no hay que tocar ningún spec— y parchea el `end` de
+>   supertest, por donde pasan también los `await`. Escribe **todo** 401 de la corrida a
+>   `test/tmp-401.jsonl` (gitignored, se borra al empezar cada corrida) con la ruta, el body,
+>   si viajaba `Authorization` y de qué largo, y el nombre del test. Marca `sospechoso: true`
+>   al que cae en una ruta que no espera 401.
+>
+>   **Por qué el body y no el status, que es lo único que registraron los cinco avistajes:**
+>   el body dice **quién** tiró el 401, y es un discriminador que nadie usó todavía.
+>
+>   | Body | Quién lo tiró |
+>   |---|---|
+>   | `{ message: 'Unauthorized', statusCode: 401 }` — **sin** `error` | Passport, o sea un guard, sin pasar por código propio |
+>   | `{ message: '<texto>', error: 'Unauthorized', statusCode: 401 }` | código de la app |
+>
+>   ✅ **CONFIRMADO, y es lo más raro de esta entrada: el 401 de `POST /auth/register` es
+>   imposible desde la app.** Se midió entero, no por encima: no hay guard global (`APP_GUARD`
+>   no aparece en el repo), `AuthController` **no tiene guard de clase** —solo `@ApiTags` y
+>   `@Controller('auth')`—, la ruta no tiene `@UseGuards`, y `AuthService.register`
+>   (`auth.service.ts:143`) **no tiene rama de 401**: devuelve 200 fijo. El único
+>   `UnauthorizedException` cerca es el de `validateUser` (`:113`), que es el camino del
+>   **login**. Y la atribución del avistaje también se verificó: `alta-usuarios-tenant`
+>   efectivamente llama a `register` (líneas 330, 356 y 363). O sea que hay que explicar una
+>   respuesta que la app no puede producir.
+>
+>   ⛔ **REFUTADO — supertest concurrente.** Hipótesis razonable: dos requests en `Promise.all`
+>   sobre un server que todavía no escucha hacen que las dos llamen a `listen(0)`, y una
+>   respuesta cruzada explicaría un 401 en una ruta sin guard. **Medido: no aplica.** De los 50
+>   specs, **uno solo** usa supertest dentro de un `Promise.all` (`rbac-y-contrasena`), y
+>   **ninguno de los cinco specs con avistajes** lo hace (`caja`, `ventas`, `papelera`,
+>   `recetas`, `alta-usuarios-tenant`: cero).
+>
+>   ⛔ **REFUTADO — una spec le rompe la contraseña a un usuario compartido.** Encajaba con el
+>   401 al loguear con credenciales del seed, y con que 42 archivos compartan
+>   `admin.paris@paris.cl`. **Medido: el único spec que cambia contraseñas es
+>   `rbac-y-contrasena`, y registra una cuenta nueva por test justamente para no hacer eso**
+>   (está escrito en su propio docblock, `:188-191`). Tampoco es el seeder anulando la
+>   verificación: es idempotente —`findOne` y crea solo si falta, con `correoVerificadoEl`
+>   sellado (`seeder.service.ts:1083-1092`)—, así que re-correrlo no toca a un usuario que ya
+>   existe.
+>
+>   📌 **Y la acción concreta que esta entrada propone —que toda limpieza de `afterAll` afirme
+>   su status— quedó dimensionada:** de los 50 specs, **15** tienen limpieza que corre antes
+>   del `app.close()` y **fuera de un `finally`**. Otros 20 no tienen `finally` pero su
+>   `afterAll` **solo cierra la app**, así que no hay nada que pueda fallar antes: contarlos
+>   daba 35 y habría inflado el trabajo al doble.
+>
+>   Por qué importa para el de caja: un `401` devuelve un **objeto** (`{statusCode, message}`),
+>   no un array — que es exactamente `resMiembros.body.find is not a function`. Los dos
+>   síntomas se explican con la misma causa. **Sigue siendo hipótesis, no medición**: nadie
+>   vio todavía el status de la respuesta que rompió el de caja; eso lo va a decir la
+>   aserción que se agregó el 2026-08-11 la próxima vez que ocurra. Lo que cambió es que ahora
+>   hay dónde mirar primero: por qué un token válido a mitad de suite se rechaza.
+>
+>   🆕 **Tercer avistaje (2026-08-12), y ya no puede ser casualidad.** `recetas.e2e-spec.ts` →
+>   *"12. un ítem pedido en una cuenta abierta no se puede borrar…"* falló con **401** en
+>   `GET /items/:id/uso`. Corrida siguiente, misma suite y mismo `reset-db.sh`: verde, 400/400.
+>   **Son tres specs distintos, tres rutas distintas, y las tres veces un 401**
+>   (`caja` → `TypeError` sobre un body que no era array, o sea un 401 disfrazado; `ventas` →
+>   `POST /ventas`; `recetas` → `GET /items/:id/uso`). Un solo test por corrida, siempre
+>   distinto, siempre auth.
+>   Eso descarta que sea de un spec: es **un intermitente del camino de autenticación** bajo la
+>   suite completa (que corre con `maxWorkers: 1`, así que tampoco es paralelismo). Sospechas a
+>   medir, en este orden: expiración del access token a mitad de suite (¿cuánto dura?), y el
+>   pool de conexiones bajo la consulta de sesión/permisos.
+>   ⚠️ **Importa más de lo que parece:** hace que **cualquier** corrida de CI pueda fallar sin
+>   regresión, y entrena a leer un rojo como ruido — que es exactamente cómo pasa desapercibida
+>   una regresión real.
+>
+>   🔗 **Cuarto avistaje (2026-08-12) y la conexión que faltaba.** `garzon-modo-personal.e2e-spec.ts`
+>   falló con **400** en `POST /sesiones-garzon/iniciar` — *"ya tiene una sesión abierta"*. No
+>   reprodujo: solo pasa 14/14, y la suite completa siguiente dio 400/402 verde.
+>   **No es un intermitente nuevo: es la CONSECUENCIA del 401.** Si el 401 pega sobre un `cerrar`
+>   de limpieza —y las limpiezas de `afterAll` **no afirman su status**—, la sesión queda abierta
+>   en silencio y el siguiente spec que use ese garzón recibe un 400 que no tiene nada que ver.
+>   Por eso el síntoma cambia de spec en spec y parece aleatorio.
+>   ➡️ **Acción concreta que se puede tomar YA, sin resolver la causa:** que **toda** limpieza de
+>   `afterAll` afirme su status. No arregla el 401, pero convierte una cascada silenciosa en un
+>   fallo que apunta a su origen. Es el mismo hallazgo que la revisión ya había marcado sobre
+>   `caja.e2e-spec.ts` ("la higiene final no verifica status... contamina los describes siguientes
+>   en silencio").
+>
+>   ⚠️ **Precisión medida el 2026-08-13: "que afirme su status" es correcto pero incompleto, y
+>   aplicado a secas hace daño.** Si el `expect` corre **antes** de `app.close()`, el primer fallo
+>   de limpieza tira la excepción, la app de Nest queda viva con su pool abierto y **jest imprime
+>   el resultado y no termina nunca** (medido: 7 minutos, 0% CPU, `pg_stat_activity` sin una sola
+>   query). Un mutante que hace exactamente lo que debe se vuelve indistinguible de un entorno
+>   colgado — costó el veredicto de un mutante entero.
+>   ➡️ La forma correcta, ya aplicada en `caja-testigo.e2e-spec.ts`: **acumular** los fallos de
+>   limpieza, cerrar la app en un `finally`, y afirmar **después**. Mismo diagnóstico, 4,4 s en
+>   vez de colgarse. Los `afterAll` de los otros specs siguen con la forma vieja.
+
+---
+
 ## Un tramo puede valer cero: "envío gratis sobre $30.000" (2026-08-24)
 
 **Venía de la sección 3.** Texto con el que estaba anotada:
