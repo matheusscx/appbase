@@ -29,7 +29,10 @@ auditable. El cálculo de dinero usa **Decimal.js** en todo (nunca `number`).
   tramos (**cada tramo dice si su umbral es cantidad o monto**, según cuál de
   `minimo_cantidad`/`minimo_monto` esté lleno — desde el 2026-08-24 el motor ya
   no lo deduce del código de la regla) y filtro por
-  método de pago; **vigencia por fecha** para cualquier regla con
+  método de pago —que desde el 2026-08-25 es solo eso, un **filtro**: la rama de
+  `METODO_PAGO_CODIGOS` decide *si* la regla aplica y sigue de largo, así que
+  esos dos tipos también cobran por escalones si los tienen—; **vigencia por
+  fecha** para cualquier regla con
   `fechaInicio`/`fechaFin` (ver `docs/superpowers/specs/2026-08-23-vigencia-por-fecha-design.md`);
   desbruteo cuando `precio_incluye_impuesto`; `base` vs `compuesto`; orden de
   fórmula configurable; `escala_calculo` + `modo_redondeo`; **cuantización a la

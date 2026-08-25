@@ -90,6 +90,50 @@ eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó le
 detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
 de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
 
+### El mismo hueco sigue abierto en los tipos de valor único (2026-08-25)
+
+- [ ] **Cuatro tipos de valor único aceptan `tramos` por API, y el motor los prefiere: la
+  tasa queda muerta sin aviso** (backend) — lo dejó ver la revisión independiente del frente
+  de método de pago, y es **el mismo bug que ese frente cerró**, en los tipos que quedaron
+  afuera. Nada en `validarSegunTipoCreate` prohíbe mandar valor **y** tramos, y `evaluarRegla`
+  ramifica por `tramos.length > 0` antes de mirar el valor plano.
+
+  **Medido** ejecutando el motor con una regla al 50% más un tramo al 3% sobre un neto de 100
+  (revisión independiente, 2026-08-25):
+
+  | Tipo | Qué cobra | ¿Tiene el hueco? |
+  |---|---|---|
+  | `directo` | el tramo (3) | **sí** |
+  | `general` | el tramo (3) | **sí** |
+  | `interes_simple` | el tramo (3) | **sí** |
+  | `interes_compuesto` | el tramo (3) | **sí** |
+  | `pronto_pago` | cero | no — corta en `DIFERIDAS` |
+  | `mora` | cero | no — corta en `DIFERIDAS` |
+
+  ⚠️ **La primera redacción de esta entrada nombraba `pronto_pago` y omitía los dos de
+  interés**, y la bloqueó la revisión por eso. Las dos mitades del error importan: mandaba a
+  buscar en `pronto_pago` un mecanismo que ahí **no ocurre** —está en `DIFERIDAS`
+  (`calculo-precios.engine.ts:297`) y retorna antes de la rama de tramos—, y dejaba afuera
+  **dos tipos que sí cobran mal**. Es exactamente la falla que este frente vino a cerrar,
+  cometida al escribir su propio remate.
+
+  ✅ **El arreglo ya está escrito y probado**: `validarFormaDeImporte` en
+  `common/utils/monto-regla.util.ts`, que el frente de método de pago dejó hecha. Acá la
+  variante es más simple todavía —estos tipos **no eligen**, así que lo que corresponde es
+  rechazar los tramos, no elegir entre formas—. Alcanza con negar tramos no vacíos cuando el
+  código está en `TIPOS_CON_VALOR_UNICO`, en los dos services: esa lista cubre los cuatro con
+  hueco **y** los dos diferidos, así que no hay que enumerar nada a mano.
+
+  📌 **No es alcanzable desde la pantalla** (`campoTramos: false` en los seis), igual que no lo
+  era para método de pago hasta que se construyó. O sea: hoy no cobra mal, y lo único que lo
+  impide es que nadie pegue a la API a mano.
+
+  ⚠️ **Toca el motor solo para leerlo, no para cambiarlo**: la conducta —gana el escalón— se
+  deja como está y lo que se agrega es el guardia de escritura. Quien la tome mide primero si
+  `por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tienen el hueco espejo (aceptar un
+  valor plano además de sus tramos), porque es la misma familia y esta entrada **no lo
+  verificó**.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
@@ -406,43 +450,11 @@ revisión independiente no lo pudo reproducir, con razón.
 
 ➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner. Cada una
 lleva su decisión escrita adentro **y las trampas que el que la tome se va a encontrar**, que es
-lo que las hace construibles y no solo contestadas. Quedan **cuatro** acá: los dos tipos por
-método de pago, la moneda de las opciones de modificadores, y las dos que dejó el frente del
-nivel de la regla. La quinta —el descarte de desfases— **se construyó el mismo día** y vive en
-[`resueltos.md`](resueltos.md); se nombra así y no en la lista para que nadie la busque acá.
-
-- [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
-  parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
-  [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
-  (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
-  queda son los dos tipos que el motor **no** lleva a la rama de tramos:
-
-  | Tipo | Clase | Con tramos hoy |
-  |---|---|---|
-  | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
-  | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
-
-  ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
-  archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
-  falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
-  `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
-  que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
-  📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
-  tramos en uno y no en el otro deja la mitad del bug.
-  📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
-  *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
-  Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
-  ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
-  ➕ **Movida desde la § 3 el 2026-08-24.** Estaba en "ya decidido, falta construir" y su
-  propio texto pide lo contrario: *"se confirma con el owner antes de escribir"*.
-  ✅ **DECIDIDO (owner, 2026-08-25): los dos pasan a leer los tramos**, como el de monto de venta.
-  La pantalla no promete de más — el motor promete de menos.
-  ⛔ **Y por eso este frente VA SOLO, con el sistema quieto**: toca el motor de precios, primer
-  punto de "Detenerse y preguntar" de `CLAUDE.md`. Nada de arrastre, nada colgado al final de otra
-  tarea. La razón está medida: el arreglo anterior del redondeo se hizo por partes y hubo que
-  revertirlo.
-  📌 **Los DOS o ninguno**: habilitar tramos en el recargo y no en su gemelo de descuento deja la
-  mitad del bug, con el agravante de que la mitad arreglada hace que nadie vuelva a mirar.
+lo que las hace construibles y no solo contestadas. Quedan **tres** acá: la moneda de las
+opciones de modificadores y las dos que dejó el frente del nivel de la regla. Las otras dos
+—el descarte de desfases y los dos tipos por método de pago— **se construyeron el mismo día**
+y viven en [`resueltos.md`](resueltos.md); se nombran así y no en la lista para que nadie las
+busque acá.
 
 - [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
   resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
@@ -893,8 +905,8 @@ cada entrada se mudó con su decisión escrita y con las trampas que el que la t
 encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
 moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
 **Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
-al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **el descarte de
-desfases se construyó el mismo día** y ya no está en la § 3 →
+al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **dos se construyeron el mismo día** —el
+descarte de desfases y los dos tipos por método de pago— y ya no están en la § 3 →
 [`resueltos.md`](resueltos.md).
 
 **Queda 1 entrada, y no espera una respuesta:** la de la nota de crédito espera la

@@ -176,6 +176,42 @@ export function validarMontosDeRegla(
   for (const tramo of tramos ?? []) validarTramo(modo, tramo);
 }
 
+/**
+ * **Exactamente una** forma de decir cuánto cobra: un valor único o escalones.
+ *
+ * Es para los tipos que admiten las dos —hoy solo los dos de método de pago—,
+ * no para los que ya tienen una sola: un `directo` no elige nada y un
+ * `por_monto_venta` se expresa siempre por escalones.
+ *
+ * ✅ **Decisión del owner, 2026-08-25.** El caso es "3% con tarjeta, y 1,5%
+ * arriba de $100.000": el método de pago es la CONDICIÓN de la regla, así que
+ * puede combinarse con cualquiera de las dos formas de importe. Las otras dos
+ * lecturas se descartaron: obligar a escalones siempre volvía trabajoso el caso
+ * común (3% y listo), y dejar que convivieran obligaba a saber cuál gana.
+ *
+ * ⚠️ **Que las dos juntas no sean expresables es lo que sostiene el motor.**
+ * `evaluarRegla` ramifica por `tramos.length > 0` antes de mirar el valor plano,
+ * o sea que una fila con las dos llenas cobraría por escalones y dejaría el
+ * valor único muerto **sin aviso** — exactamente el bug que este frente vino a
+ * cerrar, dado vuelta. El orden del motor no es la garantía; esta función sí.
+ */
+export function validarFormaDeImporte(
+  importe: string | null | undefined,
+  tramos?: unknown[],
+): void {
+  const tieneTramos = !!tramos?.length;
+  if (importe && tieneTramos) {
+    throw new BadRequestException(
+      'El importe de esta regla se expresa de una sola forma: un valor único o escalones, no las dos',
+    );
+  }
+  if (!importe && !tieneTramos) {
+    throw new BadRequestException(
+      'Esta regla tiene que expresar su importe: un valor único o al menos un escalón',
+    );
+  }
+}
+
 /** El mínimo de un tramo: cantidad **o** monto, nunca los dos ni ninguno. */
 export interface MinimoDeTramo {
   minimoCantidad?: string | null;

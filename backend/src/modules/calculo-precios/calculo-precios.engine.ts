@@ -474,15 +474,26 @@ function evaluarRegla(
   const codigo = regla.codigo ?? '';
   if (DIFERIDAS.has(codigo)) return SIN_VALOR;
 
+  // El método de pago es una CONDICIÓN, no una forma de expresar el importe:
+  // decide **si** la regla se aplica, no **cuánto** cobra. Por eso acá se filtra
+  // y se sigue de largo — el importe lo resuelven las mismas dos ramas que para
+  // el resto de los tipos, tramos primero.
+  //
+  // ⚠️ Hasta el 2026-08-25 esta rama RETORNABA acá con el valor plano, y ese
+  // `return` era el bug: una regla de tarjeta con escalones los guardaba, los
+  // mostraba en la grilla ("2 tramos") y cobraba el valor único igual. No
+  // fallaba nada; cobraba otra cosa. Los escalones ni siquiera eran alcanzables
+  // desde la pantalla (`campoTramos: false` en `reglas-form-config.ts`), solo
+  // por API — por eso el arreglo del motor viene con su mitad de frontend.
+  //
+  // Que las dos formas no puedan estar juntas lo garantiza el service al
+  // escribir (`TIPOS_CON_TRAMOS_OPCIONALES`), no este orden: acá los tramos
+  // ganan porque son más específicos, pero una fila con las dos llenas no es
+  // expresable.
   if (METODO_PAGO_CODIGOS.has(codigo)) {
     if (!ctx.metodoPagoId || !regla.metodoPagoIds.includes(ctx.metodoPagoId)) {
       return SIN_VALOR;
     }
-    const valor = valorDelModo(regla.modo, regla);
-    return {
-      monto: aplicarValor(regla.modo, valor, ctx.base),
-      valorEfectivo: valor,
-    };
   }
 
   if (regla.tramos.length > 0) {

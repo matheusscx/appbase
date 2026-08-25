@@ -21,6 +21,11 @@ const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 // "Papas fritas" — producto, precio_base 1500, precio_incluye_impuesto = false.
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440281';
+// Tipo `recargo_metodo_pago` y "Tarjeta de crédito", los dos del seed. Se usan
+// para el recargo de tarjeta POR ESCALONES.
+const TIPO_RECARGO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440124';
+const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
+const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 // "Producto demo (unidad · CLP)" — `clasificacion_tributaria = 'afecto'`, el
 // motor le deriva el IVA del país (ya no hay `item_impuestos` asociado). Se usa
 // para el caso de casing: un total sin impuesto delata que se perdieron las
@@ -180,6 +185,139 @@ describe('Cálculo de precios (e2e)', () => {
       });
 
     expect(res.status).toBe(201);
+  });
+
+  /**
+   * El recargo de tarjeta POR ESCALONES, de punta a punta: el POST lo guarda,
+   * `findAll` lo devuelve con sus tramos y el motor cobra el del tramo
+   * alcanzado.
+   *
+   * ⚠️ Por qué hace falta un e2e y no alcanza el unit del motor: hasta el
+   * 2026-08-25 los tramos de estos dos tipos **se guardaban y se leían bien**;
+   * lo que fallaba era el último tramo del recorrido, `evaluarRegla`, que
+   * retornaba con el valor plano antes de mirarlos. Un test que le arma el
+   * `ReglaResuelta` al motor a mano no habría probado que el dato sobrevive el
+   * viaje — y ese viaje es el que ya rompió antes en otros campos.
+   */
+  describe('recargo por método de pago con escalones', () => {
+    let recargoId: string;
+    let itemPropioId: string;
+
+    beforeAll(async () => {
+      // "3% con tarjeta, y 1,5% arriba de $2.000". El ítem vale $1.000, así que
+      // una unidad cae en el tramo de abajo y tres en el de arriba.
+      const resRec = await request(app.getHttpServer())
+        .post('/api/recargos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Tarjeta por tramos E2E ${Date.now()}`,
+          tipoReglaId: TIPO_RECARGO_METODO_PAGO,
+          modo: 'porcentaje',
+          metodoPagoIds: [TARJETA_CREDITO_ID],
+          tramos: [
+            { minimoMonto: '0', valorPorcentaje: '0.03' },
+            { minimoMonto: '2000', valorPorcentaje: '0.015' },
+          ],
+        });
+      expect(resRec.status).toBe(201);
+      recargoId = (resRec.body as { id: string }).id;
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Item tarjeta E2E ${Date.now()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          stock: '10',
+          costo: '500',
+          recargosIds: [recargoId],
+        });
+      expect(resItem.status).toBe(201);
+      itemPropioId = (resItem.body as { id: string }).id;
+    });
+
+    const calcular = (cantidad: string, metodoPagoId?: string) =>
+      request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: itemPropioId, cantidad }],
+          ...(metodoPagoId ? { metodoPagoId } : {}),
+        });
+
+    it('los tramos vuelven del GET tal como se guardaron', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/recargos')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const guardado = (
+        res.body as { id: string; tramos: { minimoMonto: string | null }[] }[]
+      ).find((r) => r.id === recargoId);
+      expect(guardado?.tramos).toHaveLength(2);
+    });
+
+    it('con tarjeta y $1.000 cobra el 3% del tramo de abajo', async () => {
+      const res = await calcular('1', TARJETA_CREDITO_ID);
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalRecargos).toBe('30.000000');
+    });
+
+    it('con tarjeta y $3.000 cobra el 1,5% del tramo de arriba', async () => {
+      const res = await calcular('3', TARJETA_CREDITO_ID);
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalRecargos).toBe('45.000000');
+    });
+
+    it('con efectivo no cobra nada: la condición sigue mandando', async () => {
+      const res = await calcular('1', EFECTIVO_ID);
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalRecargos).toBe('0.000000');
+    });
+
+    it('sin método de pago tampoco cobra', async () => {
+      const res = await calcular('1');
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalRecargos).toBe('0.000000');
+    });
+
+    it('la API rechaza guardar las dos formas juntas', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/recargos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Tarjeta ambigua E2E ${Date.now()}`,
+          tipoReglaId: TIPO_RECARGO_METODO_PAGO,
+          modo: 'porcentaje',
+          metodoPagoIds: [TARJETA_CREDITO_ID],
+          valorPorcentaje: '0.03',
+          tramos: [{ minimoMonto: '0', valorPorcentaje: '0.02' }],
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'una sola forma',
+      );
+    });
+
+    it('un PATCH puede volver de escalones a valor único', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/recargos/${recargoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ tramos: [], valorPorcentaje: '0.02' });
+      expect(res.status).toBe(200);
+
+      const calc = await calcular('1', TARJETA_CREDITO_ID);
+      expect(calc.status).toBe(201);
+      expect((calc.body as ResultadoVentaResponse).totales.totalRecargos).toBe(
+        '20.000000',
+      );
+    });
   });
 
   /**

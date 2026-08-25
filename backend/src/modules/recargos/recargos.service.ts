@@ -13,6 +13,7 @@ import {
 import {
   validarMontosDeRegla,
   validarMinimosDeTramos,
+  validarFormaDeImporte,
   importeResultante,
 } from '../../common/utils/monto-regla.util';
 import { Recargo } from './entities/recargo.entity';
@@ -30,15 +31,18 @@ import {
 const CLASE = 'recargo';
 
 /**
- * Los 5 tipos de recargo expresan su monto con un `valor` único — ninguno usa
- * tramos. `create()` ya los exigía todos; la lista sube a nivel módulo para
- * que `update()` use la MISMA y no deje vaciar por `PATCH` lo que `create()`
- * exigió (un interés sin tasa es entrada del motor de precios).
+ * Tipos que expresan su monto con un `valor` único **y solo así**. `create()`
+ * ya los exigía todos; la lista sube a nivel módulo para que `update()` use la
+ * MISMA y no deje vaciar por `PATCH` lo que `create()` exigió (un interés sin
+ * tasa es entrada del motor de precios).
+ *
+ * ⚠️ `recargo_metodo_pago` salió de acá el 2026-08-25: pasó a
+ * `TIPOS_CON_TRAMOS_OPCIONALES`, donde el valor único es una de dos formas
+ * posibles y no la única.
  */
 const TIPOS_CON_VALOR_UNICO = [
   'general',
   'mora',
-  'recargo_metodo_pago',
   'interes_simple',
   'interes_compuesto',
 ];
@@ -62,6 +66,33 @@ const TIPOS_CON_METODOS = ['recargo_metodo_pago'];
  * `METODO_PAGO_CODIGOS` llega a esa rama con la magnitud del monto.
  */
 const TIPOS_CON_TRAMOS = ['recargo_por_monto_venta'];
+
+/**
+ * Tipos que admiten las DOS formas y tienen que elegir una: valor único o
+ * escalones (decisión del owner, 2026-08-25 — ver `validarFormaDeImporte`).
+ * Espejo de la lista homónima en `descuentos.service.ts`: los dos códigos de
+ * método de pago son gemelos y se mueven juntos, siempre.
+ *
+ * Por qué estos y no otros: el método de pago es la **condición** de la regla
+ * —con qué se paga—, no su forma de importe, así que se combina con cualquiera
+ * de las dos. "3% con tarjeta" y "3% con tarjeta, 1,5% arriba de $100.000" son
+ * la misma regla dicha de dos maneras.
+ *
+ * Cuentan para `validarMinimosDeTramos` igual que los de `TIPOS_CON_TRAMOS`
+ * (ver `admiteTramos`): sus escalones miden **monto de venta**, así que el
+ * umbral va en `minimoMonto` y no en `minimoCantidad`. Sin eso, el código que
+ * llega al validador sería `null` y un escalón "desde 3 unidades" entraría con
+ * 201 en una regla de tarjeta.
+ */
+const TIPOS_CON_TRAMOS_OPCIONALES = ['recargo_metodo_pago'];
+
+/** Los tipos a los que un tramo les significa algo: los exigen o los admiten. */
+function admiteTramos(codigo: string): boolean {
+  return (
+    TIPOS_CON_TRAMOS.includes(codigo) ||
+    TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo)
+  );
+}
 
 // `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
 // devolviendo `Recargo[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
@@ -588,13 +619,12 @@ export class RecargosService {
     validarMontosDeRegla(modoResultante, dto, dto.tramos);
     // El mínimo va aparte porque su discriminador es el `codigo` del tipo, no
     // el `modo`: son dos ejes independientes.
-    validarMinimosDeTramos(
-      TIPOS_CON_TRAMOS.includes(codigo) ? codigo : null,
-      dto.tramos,
-    );
+    validarMinimosDeTramos(admiteTramos(codigo) ? codigo : null, dto.tramos);
     const importe =
       modoResultante === 'monto_fijo' ? dto.valorMonto : dto.valorPorcentaje;
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importe)
+    if (TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo))
+      validarFormaDeImporte(importe, dto.tramos);
+    else if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importe)
       throw new BadRequestException('El valor es requerido para este tipo');
     if (codigo === 'mora' && dto.diasVencimiento == null)
       throw new BadRequestException('Días de vencimiento requerido');
@@ -650,10 +680,7 @@ export class RecargosService {
     // el `tipoReglaId` reinterpreta los tramos YA GUARDADOS, y ahí es donde el
     // mínimo puede quedar en la columna equivocada sin que el cliente mande
     // ningún tramo.
-    validarMinimosDeTramos(
-      TIPOS_CON_TRAMOS.includes(codigo) ? codigo : null,
-      tramosFinales,
-    );
+    validarMinimosDeTramos(admiteTramos(codigo) ? codigo : null, tramosFinales);
 
     // El mismo orden que en `validarSegunTipoCreate`, y por el mismo motivo:
     // PRIMERO lo que mandó el cliente, después lo que falta. Al revés —como
@@ -672,7 +699,13 @@ export class RecargosService {
       modoResultante === 'monto_fijo'
         ? resultante.valorMonto
         : resultante.valorPorcentaje;
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
+    // Sobre `tramosFinales`, no sobre `dto.tramos`, y por el mismo motivo que
+    // arriba: un `PATCH` que solo manda `valorPorcentaje` sobre una regla de
+    // tarjeta que YA tiene escalones deja las dos formas llenas, y el cliente
+    // ni sabe que los escalones existen. Con `dto.tramos` ese PATCH entraba.
+    if (TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo))
+      validarFormaDeImporte(importeFinal, tramosFinales);
+    else if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
       throw new BadRequestException('El valor es requerido para este tipo');
 
     if (TIPOS_CON_METODOS.includes(codigo)) {
@@ -690,7 +723,16 @@ export class RecargosService {
   private validarSegunTipoUpdate(codigo: string, dto: UpdateRecargoDto): void {
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
 
-    if (dto.tramos !== undefined && !dto.tramos.length)
+    // `tramos: []` es el vaciado explícito, y para los tipos que ELIGEN forma
+    // es la única manera de volver de escalones a valor único: hay que dejarlo
+    // pasar o la mitad de ida del interruptor no tiene vuelta. No queda sin
+    // red — `validarEstadoResultante` corre después con `tramosFinales` vacíos
+    // y exige que la fila diga cuánto cobra de la otra forma.
+    if (
+      dto.tramos !== undefined &&
+      !dto.tramos.length &&
+      !TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo)
+    )
       throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (dto.metodoPagoIds !== undefined && !dto.metodoPagoIds.length)
       throw new BadRequestException('Selecciona al menos un método de pago');

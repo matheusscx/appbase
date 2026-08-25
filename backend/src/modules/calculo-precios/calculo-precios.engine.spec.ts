@@ -608,6 +608,157 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       );
       expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
     });
+
+    /**
+     * El método de pago es la CONDICIÓN de la regla, no su forma de importe:
+     * decide si se aplica, no cuánto. Así que se combina con escalones igual
+     * que cualquier otro tipo (decisión del owner, 2026-08-25).
+     *
+     * ⚠️ Hasta esa fecha `evaluarRegla` RETORNABA en la rama de método de pago
+     * con el valor plano, sin llegar nunca a la de tramos. Como una regla por
+     * escalones tiene el valor plano en `null` en las dos columnas, esos casos
+     * daban `0.000000`: los escalones se guardaban, la grilla los mostraba y la
+     * venta no los cobraba.
+     */
+    describe('con escalones', () => {
+      // "3% con tarjeta, y 1,5% arriba de $200" sobre una línea de neto 100.
+      const porEscalones = regla({
+        codigo: 'metodo_pago',
+        valorPorcentaje: null,
+        metodoPagoIds: ['mp1'],
+        tramos: [
+          {
+            minimoCantidad: null,
+            minimoMonto: '0',
+            valorMonto: null,
+            valorPorcentaje: '0.03',
+          },
+          {
+            minimoCantidad: null,
+            minimoMonto: '200',
+            valorMonto: null,
+            valorPorcentaje: '0.015',
+          },
+        ],
+      });
+
+      it('cobra el escalón alcanzado cuando el método coincide', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ descuentos: [porEscalones] })],
+            metodoPagoId: 'mp1',
+          }),
+        );
+        expect(r.lineas[0].descuentoAplicado).toBe('3.000000');
+      });
+
+      it('cobra el escalón de arriba cuando la línea lo alcanza', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ cantidad: '3', descuentos: [porEscalones] })],
+            metodoPagoId: 'mp1',
+          }),
+        );
+        // neto 300 → cae en el tramo de 200 → 1,5%
+        expect(r.lineas[0].descuentoAplicado).toBe('4.500000');
+      });
+
+      it('el filtro de método sigue mandando: otro método no descuenta', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ descuentos: [porEscalones] })],
+            metodoPagoId: 'mp2',
+          }),
+        );
+        expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
+      });
+
+      it('sin escalón alcanzado no descuenta, aunque el método coincida', () => {
+        const soloAltos = regla({
+          codigo: 'metodo_pago',
+          valorPorcentaje: null,
+          metodoPagoIds: ['mp1'],
+          tramos: [
+            {
+              minimoCantidad: null,
+              minimoMonto: '500',
+              valorMonto: null,
+              valorPorcentaje: '0.03',
+            },
+          ],
+        });
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ descuentos: [soloAltos] })],
+            metodoPagoId: 'mp1',
+          }),
+        );
+        expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
+      });
+
+      it('a nivel venta el escalón se mide contra el subtotal de la venta', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ cantidad: '2' }), linea({ cantidad: '1' })],
+            recargosVenta: [
+              regla({
+                id: 'rv',
+                codigo: 'recargo_metodo_pago',
+                valorPorcentaje: null,
+                metodoPagoIds: ['mp1'],
+                tramos: [
+                  {
+                    minimoCantidad: null,
+                    minimoMonto: '0',
+                    valorMonto: null,
+                    valorPorcentaje: '0.03',
+                  },
+                  {
+                    minimoCantidad: null,
+                    minimoMonto: '200',
+                    valorMonto: null,
+                    valorPorcentaje: '0.015',
+                  },
+                ],
+              }),
+            ],
+            metodoPagoId: 'mp1',
+          }),
+        );
+        // subtotal 300 → tramo de 200 → 1,5% = 4,5
+        expect(r.totales.totalRecargos).toBe('4.500000');
+        expect(identidadDocumento(r)).toBe(true);
+      });
+
+      /**
+       * Una fila con las DOS formas llenas **no es expresable por la API**
+       * —`validarFormaDeImporte` la rechaza con 400—, pero el motor igual tiene
+       * que ser determinista si una llega por SQL directo: gana el escalón, por
+       * ser lo más específico.
+       */
+      it('si por SQL quedaran las dos formas, gana el escalón', () => {
+        const conLasDos = regla({
+          codigo: 'metodo_pago',
+          valorPorcentaje: '0.50',
+          metodoPagoIds: ['mp1'],
+          tramos: [
+            {
+              minimoCantidad: null,
+              minimoMonto: '0',
+              valorMonto: null,
+              valorPorcentaje: '0.03',
+            },
+          ],
+        });
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ descuentos: [conLasDos] })],
+            metodoPagoId: 'mp1',
+          }),
+        );
+        expect(r.lineas[0].descuentoAplicado).toBe('3.000000');
+      });
+    });
   });
 
   describe('reglas diferidas (fuera de alcance esta fase)', () => {

@@ -17,6 +17,110 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos tipos por método de pago leen sus escalones (2026-08-25)
+
+**Venía de la sección 3.** Texto de la entrada, verbatim:
+
+> - [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
+>   parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
+>   [`resueltos.md`](resueltos.md)) — el tipo por escalones ya existe
+>   (`recargo_por_monto_venta`) y salió **sin tocar el motor**, como estaba medido. Lo que
+>   queda son los dos tipos que el motor **no** lleva a la rama de tramos:
+>
+>   | Tipo | Clase | Con tramos hoy |
+>   |---|---|---|
+>   | `recargo_metodo_pago` | recargo | **ignora los tramos y cobra el `valor`** |
+>   | `metodo_pago` | descuento | **ídem** — es el gemelo, los dos están en `METODO_PAGO_CODIGOS` |
+>
+>   ⚠️ **Corregido el 2026-08-23 contra el código, y el dato viejo llegó a estar en tres
+>   archivos:** esto decía *"cobran cero en silencio"* y que el `valor` era null. **Las dos son
+>   falsas.** Los dos tipos están en `TIPOS_CON_VALOR_UNICO`, así que el backend les **exige**
+>   `valor` y el motor cobra ese; para llegar a cero habría que sacarlos también de esa lista. Lo
+>   que pasa con escalones es que se configuran, se muestran y **el cálculo no los mira**.
+>   📌 Y son **dos**, no uno: hasta esa fecha la entrada nombraba solo el recargo. Habilitar
+>   tramos en uno y no en el otro deja la mitad del bug.
+>   📌 **`mora` salió de esta entrada:** no era un caso de tramos sino de **tiempo**. Vive en
+>   *"Cinco tipos de regla no hacen lo que la pantalla promete"*, más abajo.
+>   Lo que necesitan los dos: que su rama siga hasta los tramos en vez de retornar.
+>   ⛔ **Toca el motor de precios: se confirma con el owner antes de escribir.**
+>   ➕ **Movida desde la § 3 el 2026-08-24.** Estaba en "ya decidido, falta construir" y su
+>   propio texto pide lo contrario: *"se confirma con el owner antes de escribir"*.
+>   ✅ **DECIDIDO (owner, 2026-08-25): los dos pasan a leer los tramos**, como el de monto de venta.
+>   La pantalla no promete de más — el motor promete de menos.
+>   ⛔ **Y por eso este frente VA SOLO, con el sistema quieto**: toca el motor de precios, primer
+>   punto de "Detenerse y preguntar" de `CLAUDE.md`. Nada de arrastre, nada colgado al final de otra
+>   tarea. La razón está medida: el arreglo anterior del redondeo se hizo por partes y hubo que
+>   revertirlo.
+>   📌 **Los DOS o ninguno**: habilitar tramos en el recargo y no en su gemelo de descuento deja la
+>   mitad del bug, con el agravante de que la mitad arreglada hace que nadie vuelva a mirar.
+
+### Qué se hizo
+
+**El motor:** `evaluarRegla` cortaba con un `return` en la rama de
+`METODO_PAGO_CODIGOS` y nunca llegaba a la de tramos, 15 líneas más abajo. Ahora esa rama
+**filtra y sigue**: el método de pago es la *condición* de la regla —decide **si** aplica—,
+no su forma de importe. El importe lo resuelven las mismas dos ramas que para el resto de
+los tipos, tramos primero. Es un `return` menos, y es todo el cambio del motor.
+
+**La escritura**, que no estaba en la entrada y es la mitad del frente: los dos códigos
+salieron de `TIPOS_CON_VALOR_UNICO` —donde el valor era obligatorio *siempre*— y pasaron a
+una lista nueva, `TIPOS_CON_TRAMOS_OPCIONALES`. Ahí rige `validarFormaDeImporte`:
+**exactamente una** de las dos formas, las dos juntas es 400 y ninguna también.
+
+⛔ **Sin ese guardia el arreglo se daba vuelta.** El motor ramifica por `tramos.length > 0`
+antes de mirar el valor plano, así que una fila con las dos llenas cobraría por escalones y
+dejaría el valor único **muerto sin aviso** — el mismo bug que este frente cerró, del otro
+lado. Lo decidió el owner el 2026-08-25: *o valor único, o escalones*.
+
+**El frontend**, que la entrada daba por hecho y no lo estaba. La entrada decía que los
+escalones *"se configuran, se muestran"*: lo segundo sí (la grilla muestra "N tramos"), **lo
+primero no**. Los dos tipos tenían `campoTramos: false` en `reglas-form-config.ts`, así que
+los escalones solo eran alcanzables **por API**. Arreglar únicamente el motor habría dejado
+una función que ningún local podía usar. Ahora los dos tipos llevan `campoValor` y
+`campoTramos` en `true`, y eso **no dibuja los dos campos**: significa que el tipo admite las
+dos formas y el drawer hace elegir con un radio (`eligeForma`).
+
+📌 **La vuelta del interruptor tuvo su propio hueco.** `tramos: []` era 400 para cualquier
+tipo (*"Este tipo requiere al menos un tramo"*), así que una regla de tarjeta no podía volver
+de escalones a valor único. Se exceptúa a los dos tipos que eligen forma; no quedan sin red,
+porque `validarEstadoResultante` corre después con los tramos finales vacíos y exige que la
+fila diga cuánto cobra de la otra forma. El frontend además **apaga explícitamente** la forma
+abandonada (`valorMonto: null` al pasar a escalones, `tramos: []` al volver), porque omitir
+la key deja el dato viejo y el 400 le llega a un usuario que no sabe cuál es la otra forma.
+
+### Qué lo fija
+
+- **Motor** (`calculo-precios.engine.spec.ts`, 6 casos nuevos): cobra el escalón alcanzado,
+  el de arriba cuando la línea lo alcanza, a nivel venta contra el subtotal, el filtro de
+  método sigue mandando, sin escalón alcanzado no cobra, y —si por SQL directo quedaran las
+  dos formas— gana el escalón.
+  🧪 **Mutante:** restaurado el `return` viejo en la rama de método de pago, **4 de los 6
+  caen**. Los otros dos son los guardias que esperan cero y dan cero en las dos versiones.
+- **Escritura** (`monto-regla.util.spec.ts` + los dos service specs, gemelos): las dos formas
+  juntas, ninguna, el umbral en la columna equivocada (`minimoCantidad` en una regla de
+  tarjeta), el `PATCH` que agrega escalones sin apagar el valor, y las dos caras del vaciado
+  con `tramos: []`.
+- **De punta a punta** (`calculo-precios.e2e-spec.ts`): el recargo de tarjeta por escalones
+  se crea, vuelve del `GET` con sus tramos, cobra 3% con $1.000 y 1,5% con $3.000, no cobra
+  con efectivo ni sin método, la API rechaza las dos formas juntas y el `PATCH` de vuelta a
+  valor único cambia lo que la venta cobra.
+  ⚠️ **Por qué hacía falta el e2e y no alcanzaba el unit del motor:** los tramos de estos dos
+  tipos **ya se guardaban y se leían bien**; lo que fallaba era el último tramo del recorrido.
+  Un test que le arma el `ReglaResuelta` al motor a mano no prueba que el dato sobreviva el
+  viaje, y ese viaje es el que ya rompió antes en otros campos.
+- **Frontend** (`reglas-form-config.spec.ts`): los dos tipos admiten las dos formas, y
+  **ningún otro tipo las admite** — esa segunda aserción es la que caza a quien prenda las dos
+  banderas en un tipo donde el drawer no sabría qué preguntar.
+
+### Lo que la entrada afirmaba y no era
+
+*"Se configuran, se muestran y el cálculo no los mira"*: la primera mitad era falsa —la
+pantalla no ofrecía escalones para estos tipos—, y eso **cambió el tamaño del frente**, no su
+dirección. Es el mismo patrón que dominó el 2026-08-24: la afirmación no se cayó por releerla
+sino por volver a medirla.
+
+---
+
 ## El descarte de un desfase deja de silenciarlo: archiva lo que el usuario vio (2026-08-25)
 
 **Venía de la sección 4**, adonde había subido desde la 2 al medirla. Texto de la entrada,

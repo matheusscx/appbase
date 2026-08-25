@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   validarMontosDeRegla,
   validarMinimosDeTramos,
+  validarFormaDeImporte,
 } from './monto-regla.util';
 
 describe('validarMontosDeRegla', () => {
@@ -291,5 +292,38 @@ describe('validarMinimosDeTramos', () => {
   it('sin tramos no hay nada que validar', () => {
     expect(() => validarMinimosDeTramos('directo')).not.toThrow();
     expect(() => validarMinimosDeTramos('directo', [])).not.toThrow();
+  });
+});
+
+/**
+ * Los tipos que admiten las dos formas de cobrar tienen que elegir una
+ * (decisión del owner, 2026-08-25). Lo que sostiene esto no es cosmético:
+ * `evaluarRegla` ramifica por `tramos.length > 0` antes de mirar el valor
+ * plano, así que una fila con las dos llenas cobraría por escalones y dejaría
+ * el valor único muerto sin aviso.
+ */
+describe('validarFormaDeImporte', () => {
+  const tramo = [{ minimoMonto: '0', valorPorcentaje: '0.03' }];
+
+  it('acepta valor único sin escalones', () => {
+    expect(() => validarFormaDeImporte('0.03')).not.toThrow();
+    expect(() => validarFormaDeImporte('0.03', [])).not.toThrow();
+  });
+
+  it('acepta escalones sin valor único', () => {
+    expect(() => validarFormaDeImporte(null, tramo)).not.toThrow();
+    expect(() => validarFormaDeImporte(undefined, tramo)).not.toThrow();
+  });
+
+  it('rechaza las dos juntas', () => {
+    expect(() => validarFormaDeImporte('0.03', tramo)).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('rechaza ninguna de las dos', () => {
+    expect(() => validarFormaDeImporte(null)).toThrow(BadRequestException);
+    expect(() => validarFormaDeImporte(null, [])).toThrow(BadRequestException);
+    expect(() => validarFormaDeImporte('')).toThrow(BadRequestException);
   });
 });

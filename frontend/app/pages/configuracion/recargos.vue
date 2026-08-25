@@ -75,6 +75,15 @@ const modoOptions = [
   { label: 'Monto fijo', value: 'monto_fijo' },
 ]
 
+// Cómo dice la regla cuánto cobra. Es un eje distinto del `modo`: el modo elige
+// la UNIDAD (plata o porcentaje) y esto elige la FORMA (un valor para toda la
+// venta, o escalones según el monto). Solo aparece en los tipos que admiten las
+// dos — ver `eligeForma`.
+const formaImporteOptions = [
+  { label: 'Un valor único', value: 'valor' },
+  { label: 'Por escalones', value: 'tramos' },
+]
+
 const CONFIG_MAP = RECARGO_CONFIG
 
 const emptyForm = () => ({
@@ -85,6 +94,7 @@ const emptyForm = () => ({
   valorMonto: '' as string,
   valorPorcentaje: '' as string,
   metodoPagoIds: [] as string[],
+  formaImporte: 'valor' as 'valor' | 'tramos',
   tramos: [] as { minimo: string; valorMonto: string; valorPorcentaje: string }[],
   diasVencimiento: null as number | null,
   fechaInicio: null as string | null,
@@ -118,11 +128,24 @@ const config = computed<TipoConfig | null>(() =>
   tipoSeleccionado.value ? CONFIG_MAP[tipoSeleccionado.value.codigo] ?? null : null,
 )
 
+// Un tipo con las DOS banderas prendidas no muestra los dos campos: admite las
+// dos formas y hay que elegir una (backend: `validarFormaDeImporte`). Con una
+// sola bandera no hay nada que elegir y el interruptor no aparece, así que los
+// tipos de siempre se ven igual que antes.
+const eligeForma = computed(() => !!(config.value?.campoValor && config.value?.campoTramos))
+const mostrarValor = computed(() =>
+  !!config.value?.campoValor && (!eligeForma.value || form.value.formaImporte === 'valor'),
+)
+const mostrarTramos = computed(() =>
+  !!config.value?.campoTramos && (!eligeForma.value || form.value.formaImporte === 'tramos'),
+)
+
 // Reset dependent fields only on a real user change of tipo (not on programmatic
 // form population in abrirEditar). Bound to the select's change event below.
 function onTipoChange(value: string) {
   form.value.tipoReglaId = value
   form.value.metodoPagoIds = []
+  form.value.formaImporte = 'valor'
   form.value.tramos = []
   form.value.diasVencimiento = null
   form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'
@@ -251,6 +274,9 @@ function abrirEditar(r: Regla) {
     valorMonto: r.valorMonto ?? '',
     valorPorcentaje: r.valorPorcentaje ?? '',
     metodoPagoIds: r.metodoPagoIds ?? [],
+    // La forma sale de la fila, no de un campo propio: tener escalones ES
+    // cobrar por escalones, y el backend garantiza que no haya fila con las dos.
+    formaImporte: r.tramos?.length ? 'tramos' as const : 'valor' as const,
     tramos: r.tramos?.map(t => ({
       // El form guarda UN campo `minimo`: cuál de las dos columnas lo llena lo
       // decide el tipo de la regla, y el body lo vuelve a separar al guardar.
@@ -300,19 +326,34 @@ async function guardar() {
       // Solo la columna del modo. Mandar las dos —o la abandonada en `''`— es
       // 400: el backend rechaza el importe expresado en dos unidades.
       const enMonto = form.value.modo === 'monto_fijo'
-      if (cfg.campoValor) {
+      if (mostrarValor.value) {
         if (enMonto) body.valorMonto = form.value.valorMonto
         else body.valorPorcentaje = form.value.valorPorcentaje
       }
+      // Pasar a escalones tiene que APAGAR el valor único explícitamente. Sin
+      // este `null`, un PATCH que solo agrega tramos deja la fila con las dos
+      // formas llenas y el backend lo rechaza con 400 — el usuario vería
+      // "se expresa de una sola forma" sin entender cuál es la otra.
+      else if (eligeForma.value) {
+        if (enMonto) body.valorMonto = null
+        else body.valorPorcentaje = null
+      }
       if (cfg.campoMetodos) body.metodoPagoIds = form.value.metodoPagoIds
-      if (cfg.campoTramos) {
-        // Todos los tipos de recargo con tramos miden MONTO de venta (hoy solo
-        // `recargo_por_monto_venta`), así que el umbral va siempre en
-        // `minimoMonto`. En descuentos no alcanza con esto: ahí `por_mayor`
-        // mide cantidad y el body elige columna según el tipo.
+      if (mostrarTramos.value) {
+        // Todos los tipos de recargo con tramos miden MONTO de venta
+        // (`recargo_por_monto_venta` y `recargo_metodo_pago`), así que el
+        // umbral va siempre en `minimoMonto`. En descuentos no alcanza con
+        // esto: ahí `por_mayor` mide cantidad y el body elige columna según el
+        // tipo.
         body.tramos = form.value.tramos.map(t => enMonto
           ? { minimoMonto: t.minimo, valorMonto: t.valorMonto }
           : { minimoMonto: t.minimo, valorPorcentaje: t.valorPorcentaje })
+      }
+      // La vuelta del interruptor: volver a valor único BORRA los escalones
+      // guardados. El `[]` explícito es lo único que los limpia — omitir la key
+      // los deja intactos (el backend solo reemplaza hijos que vengan en el DTO).
+      else if (eligeForma.value) {
+        body.tramos = []
       }
       if (cfg.campoDias) body.diasVencimiento = form.value.diasVencimiento
       if (cfg.campoFechaInicio) body.fechaInicio = form.value.fechaInicio || null
@@ -645,12 +686,22 @@ const columns: TableColumn<Regla>[] = [
               />
             </UFormField>
 
+            <!-- Cómo cobra — solo en los tipos que admiten las dos formas. -->
+            <UFormField v-if="eligeForma" label="Cómo cobra" required>
+              <URadioGroup
+                v-model="form.formaImporte"
+                :items="formaImporteOptions"
+                value-key="value"
+                orientation="horizontal"
+              />
+            </UFormField>
+
             <!-- Valor — when campoValor. Cada modo escribe SU campo: `valorMonto`
                  es plata y va con máscara de moneda, `valorPorcentaje` es un decimal
                  y no la lleva. Ya no es la única capa que los distingue —el backend
                  valida cada columna, y la escala de `valorMonto` la rechaza en el
                  borde—; acá el `v-if` elige el input que corresponde. -->
-            <UFormField v-if="config.campoValor" :label="config.labelValor ?? 'Valor'" required>
+            <UFormField v-if="mostrarValor" :label="config.labelValor ?? 'Valor'" required>
               <MoneyInput
                 v-if="form.modo === 'monto_fijo'"
                 v-model="form.valorMonto"
@@ -691,7 +742,7 @@ const columns: TableColumn<Regla>[] = [
             </UFormField>
 
             <!-- Tramos table — when campoTramos -->
-            <div v-if="config.campoTramos" class="space-y-2">
+            <div v-if="mostrarTramos" class="space-y-2">
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Tramos</span>
                 <UButton size="xs" icon="i-lucide-plus" variant="ghost" @click="agregarTramo">

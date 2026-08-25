@@ -479,6 +479,127 @@ describe('DescuentosService', () => {
 
   // ─── update ───────────────────────────────────────────────────────────────
 
+  /**
+   * Gemelo exacto del bloque de `recargo_metodo_pago` en
+   * `recargos.service.spec.ts`. Los dos códigos se mueven juntos, siempre:
+   * habilitar escalones en uno solo deja la mitad del bug, con el agravante
+   * de que la mitad arreglada hace que nadie vuelva a mirar.
+   */
+  describe('metodo_pago elige forma: valor único o escalones', () => {
+    it('crea uno por escalones, sin valor único', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      await service.create(TENANT, {
+        nombre: 'Efectivo por tramos',
+        tipoReglaId: 'tipo-metodo_pago',
+        metodoPagoIds: ['mp-1'],
+        modo: 'porcentaje',
+        tramos: [
+          { minimoMonto: '0', valorPorcentaje: '0.03' },
+          { minimoMonto: '100000', valorPorcentaje: '0.05' },
+        ],
+      });
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+
+    it('rechaza las dos formas juntas', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Efectivo ambiguo',
+          tipoReglaId: 'tipo-metodo_pago',
+          metodoPagoIds: ['mp-1'],
+          modo: 'porcentaje',
+          valorPorcentaje: '0.03',
+          tramos: [{ minimoMonto: '0', valorPorcentaje: '0.02' }],
+        }),
+      ).rejects.toThrow(/una sola forma/);
+    });
+
+    it('rechaza ninguna de las dos', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Efectivo mudo',
+          tipoReglaId: 'tipo-metodo_pago',
+          metodoPagoIds: ['mp-1'],
+          modo: 'porcentaje',
+        }),
+      ).rejects.toThrow(/tiene que expresar su importe/);
+    });
+
+    it('sus escalones miden monto de venta, no cantidad', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Efectivo por unidades',
+          tipoReglaId: 'tipo-metodo_pago',
+          metodoPagoIds: ['mp-1'],
+          modo: 'porcentaje',
+          tramos: [{ minimoCantidad: '3', valorPorcentaje: '0.03' }],
+        }),
+      ).rejects.toThrow(/minimoMonto/);
+    });
+
+    it('un PATCH que agrega escalones sin apagar el valor único es 400', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-mp',
+        tenantId: TENANT,
+        nombre: 'Efectivo',
+        tipoReglaId: 'tipo-metodo_pago',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.03',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      metodoPagoRepoMock.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(TENANT, 'd-mp', {
+          tramos: [{ minimoMonto: '0', valorPorcentaje: '0.02' }],
+        }),
+      ).rejects.toThrow(/una sola forma/);
+    });
+
+    it('un PATCH puede volver de escalones a valor único con tramos: []', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-mp2',
+        tenantId: TENANT,
+        nombre: 'Efectivo',
+        tipoReglaId: 'tipo-metodo_pago',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      metodoPagoRepoMock.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(TENANT, 'd-mp2', {
+          tramos: [],
+          valorPorcentaje: '0.03',
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('pero vaciar los escalones sin poner valor único es 400', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-mp3',
+        tenantId: TENANT,
+        nombre: 'Efectivo',
+        tipoReglaId: 'tipo-metodo_pago',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+      metodoPagoRepoMock.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(TENANT, 'd-mp3', { tramos: [] }),
+      ).rejects.toThrow(/tiene que expresar su importe/);
+    });
+  });
+
   describe('update', () => {
     it('throws NotFoundException when descuento not found', async () => {
       descuentoRepoMock.findOne.mockResolvedValue(null);

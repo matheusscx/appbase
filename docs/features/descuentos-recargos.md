@@ -50,7 +50,7 @@ Quien retomara ese frente iba a diseñar contra un sistema que no existe.
 
 | Se aplica bien | Se aplica MAL | No se aplica |
 |---|---|---|
-| `directo`, `general`, `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta`, `recargo_fijo`, `recargo_porcentaje` | `metodo_pago` y `recargo_metodo_pago` (ignoran sus tramos); `interes_simple` e `interes_compuesto` (cobran la tasa una sola vez y sin mirar plazo — y son idénticos entre sí) | `mora`, `pronto_pago` (en `DIFERIDAS`) |
+| `directo`, `general`, `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta`, `metodo_pago` y `recargo_metodo_pago` (los dos leen sus escalones desde el 2026-08-25) | `interes_simple` e `interes_compuesto` (cobran la tasa una sola vez y sin mirar plazo — y son idénticos entre sí) | `mora`, `pronto_pago` (en `DIFERIDAS`) |
 
 ⚠️ **`promocional` se eliminó del catálogo (2026-08-23):** su caso —un descuento con
 vigencia obligatoria— se mudó al futuro módulo de promociones. La capacidad de expresar
@@ -203,24 +203,55 @@ línea por regla). El drawer de auditoría **sí** lo muestra, atenuado (`sinEfe
 lo correcto: son dos superficies distintas —el documento del cliente y la pantalla de quien
 explica un descuadre— y el cero es información en la segunda.
 
+### Método de pago: valor único **o** escalones (2026-08-25)
+
+`metodo_pago` y `recargo_metodo_pago` son los primeros tipos que **admiten las dos formas de
+expresar el importe y tienen que elegir una**. El caso de local es "3% con tarjeta, y 1,5%
+arriba de $100.000".
+
+Por qué estos y no otros: el método de pago es la **condición** de la regla —con qué se
+paga—, no su forma de importe, así que se combina con cualquiera de las dos. Los demás tipos
+siguen teniendo una sola forma: `directo` cobra un valor, `por_monto_venta` cobra por
+escalones, y ninguno elige nada.
+
+| Dónde | Qué garantiza |
+|---|---|
+| `evaluarRegla` (motor) | la rama de método de pago **filtra y sigue**: el importe lo resuelven las mismas dos ramas que para el resto, tramos primero |
+| `validarFormaDeImporte` (service) | **exactamente una** de las dos: las dos juntas es 400, ninguna también |
+| `reglas-form-config.ts` (drawer) | `campoValor` y `campoTramos` los dos en `true` = el drawer hace **elegir** con un radio, no dibuja los dos campos |
+
+⚠️ **Que las dos juntas no sean expresables es lo que sostiene al motor**, no un capricho de
+formulario: `evaluarRegla` ramifica por `tramos.length > 0` antes de mirar el valor plano, así
+que una fila con las dos llenas cobraría por escalones y dejaría el valor único **muerto sin
+aviso** — exactamente el bug que este frente cerró, dado vuelta.
+
+📌 Sus escalones miden **monto** y no cantidad, o sea que el umbral va en `minimoMonto`.
+`por_mayor` sigue siendo el único que mide cantidad, y eso lo decide
+`CODIGOS_MINIMO_POR_CANTIDAD` en el util.
+
+⚠️ **"Monto" es el de la puerta por la que entra la regla, no siempre el de la venta**, igual
+que en `por_monto_venta`: el motor compara contra `ctx.monto`, que en una regla de **nivel
+línea** es el neto de esa línea y en una de **nivel venta** es el subtotal de la venta. Un
+*"1,5% con tarjeta arriba de $100.000"* pensado sobre el total tiene que ser de **nivel
+venta**; colgado de un ítem se dispara con una línea de $100.000 dentro de una venta mayor. Es
+exactamente el caso que motivó el campo `nivel` (2026-08-25), y el drawer lo pregunta primero.
+
+📌 **La vuelta del interruptor tiene su propia regla:** `tramos: []` es 400 para los tipos que
+exigen escalones, pero estos dos lo aceptan — es la única manera de volver a valor único.
+Quien mande ese PATCH tiene que mandar el valor en el mismo body, o el estado resultante no
+dice cuánto cobra y sale 400.
+
 ### Lo que sigue sin salir
 
-`mora` y `recargo_metodo_pago` **no** son candidatos a tramos todavía, y no por falta de
-configuración: hoy con tramos **el cálculo no los mira**. Pero no del mismo modo, y la
-diferencia importa —medido el 2026-08-24—:
+`mora` **no** es candidato a tramos, y no por falta de configuración: está en `DIFERIDAS`, así
+que `evaluarRegla` corta antes de mirar nada y con tramos **cobraría cero**. Su problema no es
+de escalones sino de **tiempo** — vive en `docs/agent/pendientes.md`, en *"Cinco tipos de regla
+no hacen lo que la pantalla promete"*.
 
-| Tipo | Qué hace el motor con sus tramos | Qué cobra |
-|---|---|---|
-| `mora` | los ignora: está en `DIFERIDAS` y `evaluarRegla` corta antes | **cero** |
-| `recargo_metodo_pago` | los ignora: está en `METODO_PAGO_CODIGOS` y retorna antes del `if` de tramos | **el valor plano** |
-
-⚠️ Este párrafo decía que **los dos** *"cobran cero en silencio"*. Es cierto solo del primero:
-`recargo_metodo_pago` está en `TIPOS_CON_VALOR_UNICO`, así que el backend le **exige** valor y
-el motor cobra ése. Es la tercera copia del mismo dato viejo —`pendientes.md` ya lo había
-corregido contra el código el 2026-08-23— y sobrevivió acá.
-
-Habilitarles el campo sin tocar el motor daría recargos que el admin configura, la UI muestra
-y la venta cobra por otro lado. Detalle y medición por tipo en `docs/agent/pendientes.md`.
+⚠️ Este párrafo nombraba también a `recargo_metodo_pago`, y llegó a decir que los dos
+*"cobran cero en silencio"*. Lo primero se resolvió el 2026-08-25 (sección de arriba); lo
+segundo nunca fue cierto del recargo, que cobraba el valor plano. Fue la tercera copia del
+mismo dato viejo que sobrevivió a su corrección en `pendientes.md`.
 
 ---
 

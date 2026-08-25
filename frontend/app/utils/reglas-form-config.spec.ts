@@ -56,6 +56,36 @@ describe('reglas-form-config', () => {
     expect(sinMonto).toEqual([])
   })
 
+  /**
+   * Los dos tipos de método de pago son los únicos que admiten las DOS formas
+   * de expresar el importe (decisión del owner, 2026-08-25). Con las dos
+   * banderas prendidas el drawer NO dibuja los dos campos: hace elegir una
+   * (`eligeForma`), y el backend enforcea lo mismo con `validarFormaDeImporte`.
+   *
+   * Van juntos a propósito: habilitar escalones en uno y no en su gemelo deja
+   * la mitad del bug, con el agravante de que la mitad arreglada hace que nadie
+   * vuelva a mirar.
+   */
+  it('los dos tipos de método de pago admiten valor único Y escalones', () => {
+    for (const cfg of [DESCUENTO_CONFIG.metodo_pago, RECARGO_CONFIG.recargo_metodo_pago]) {
+      expect(cfg).toMatchObject({
+        campoValor: true,
+        campoTramos: true,
+        campoMetodos: true,
+        labelTramos: 'Monto mínimo',
+      })
+    }
+  })
+
+  it('ningún otro tipo admite las dos formas a la vez', () => {
+    const conLasDos = Object.entries({ ...DESCUENTO_CONFIG, ...RECARGO_CONFIG })
+      .filter(([, c]) => c.campoValor && c.campoTramos)
+      .map(([codigo]) => codigo)
+      .sort()
+
+    expect(conLasDos).toEqual(['metodo_pago', 'recargo_metodo_pago'])
+  })
+
   it('`directo` deja elegir porcentaje o monto fijo, pide valor y admite fechas opcionales', () => {
     // Es un descuento de propósito general: no tiene tramos, ni métodos, ni
     // días. Desde que `promocional` se eliminó (2026-08-23), `directo` es el
