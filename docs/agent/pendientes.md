@@ -213,6 +213,38 @@ decisión que no es mía).
   recibe el payload firmado y mapea cuatro campos), y ningún guard tiene `try/catch` que
   traduzca un error a 401. Un fallo de base ahí da 500, no 401.
 
+  🎯 **SEXTO AVISTAJE (2026-08-25), el primero ATRAPADO CON LA CAJA NEGRA — y trae el dato
+  que cambia el problema.** Se corrió la suite completa en loop; cayó en la **corrida 4**
+  (tres verdes antes, ~130 s cada una), o sea que la tasa medida es del orden de 1 en 4, no
+  de 1 en 10.
+
+  - **Spec y test:** `items-pausados.e2e-spec.ts` → *"crear un ítem con la categoría pausada
+    devuelve 400 y la nombra"* (`:614`). Esperaba **400**, recibió **401**.
+  - **Ruta:** `POST /api/items`, que sí tiene `JwtAuthGuard` a nivel de `@Controller`, así
+    que un 401 ahí **sería legítimo**… salvo por lo de abajo.
+  - **El token viajaba:** `Authorization` presente, 334 caracteres. **No es
+    `Bearer undefined`**, que era la causa que esta entrada dio por buena y ya estaba
+    refutada.
+
+  ⛔ **EL BODY VINO VACÍO (`{}`), y eso no lo explica ninguna de las dos formas conocidas.**
+  Nest **siempre** serializa una excepción a JSON: un guard da
+  `{ message: 'Unauthorized', statusCode: 401 }` y el código propio da
+  `{ message: '<texto>', error: 'Unauthorized', statusCode: 401 }`. **Un 401 con body vacío
+  no salió de la capa de excepciones de Nest.** Es la primera pista dura en seis avistajes, y
+  reorienta el frente: **deja de ser un bug de auth** y pasa a ser "quién escribe una
+  respuesta que la app no escribió".
+
+  🔗 **Y conecta con la entrada de abajo**, la del `timeout exceeded when trying to connect`:
+  ese intermitente también cayó en **`items-pausados.e2e-spec.ts`**. La entrada de allá
+  anotaba *"puede ser pariente… nada lo prueba todavía"*; que los dos aparezcan en el mismo
+  spec no lo prueba tampoco, pero es la primera coincidencia concreta entre los dos.
+
+  ➡️ **Siguiente paso, ya instrumentado:** la caja negra ahora captura además
+  `content-type`, `content-length`, `www-authenticate` y `connection`, más los primeros 300
+  caracteres del texto crudo. Con eso el próximo se cierra: **sin `content-type` es un
+  `res.end()` pelado; con `www-authenticate` es Passport**; y un `content-length` que no
+  cuadra apuntaría a una respuesta cortada.
+
   🔬 **Pasada del 2026-08-24: se instrumentó, y se refutaron dos hipótesis con evidencia.**
 
   **Lo que ahora existe y antes no: `backend/test/diagnostico-401.ts`, una caja negra.** Se

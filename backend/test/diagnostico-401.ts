@@ -126,6 +126,19 @@ proto.end = function (
             // significa que lo tiró código de la app, ausente que lo tiró
             // Passport. Ver la tabla del docblock.
             body: res.body,
+            // ⚠️ Agregados el 2026-08-25, después de la PRIMERA captura: el 401
+            // anómalo vino con `body: {}` **vacío**, que no es ninguna de las dos
+            // formas de la tabla de arriba —Nest siempre serializa la excepción a
+            // JSON—. O sea que no salió de la capa de excepciones, y para saber de
+            // dónde salió hace falta el sobre, no el contenido: `content-type`
+            // ausente dice `res.end()` pelado, y `www-authenticate` dice Passport.
+            texto: typeof res.text === 'string' ? res.text.slice(0, 300) : null,
+            headers: {
+              'content-type': res.headers?.['content-type'] ?? null,
+              'content-length': res.headers?.['content-length'] ?? null,
+              'www-authenticate': res.headers?.['www-authenticate'] ?? null,
+              connection: res.headers?.['connection'] ?? null,
+            },
             // Nunca el token: solo si viajaba uno y de qué largo. Alcanza para
             // distinguir "no mandó nada" de "mandó `Bearer undefined`" (que
             // fue la causa que esta entrada dio por buena y resultó falsa).
