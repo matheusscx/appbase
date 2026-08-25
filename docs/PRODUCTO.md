@@ -276,6 +276,22 @@ descuento sin importe sin haber tocado ningún campo de importe. Detalle de las
 cuatro formas en que se llegaba a ese estado, todas verificadas abiertas contra
 la API antes de cerrarlas: [`docs/agent/resueltos.md`](./agent/resueltos.md).
 
+**Toda regla declara dónde se aplica** (decisión del owner, 2026-08-15): por **línea** o
+por **venta**. Una de línea se asocia a ítems y se mide contra el subtotal de esa línea;
+una de venta se elige al cobrar y se mide contra el acumulado de la venta. Hasta el
+2026-08-25 la misma fila servía para las dos cosas, así que *"20% sobre compras de
+$50.000"* podía usarse en los dos lados sin que nada lo dijera, midiendo cosas distintas.
+Es **binario**: quien quiera la misma promo en los dos lugares crea dos reglas. El backend
+rechaza usar una regla por la puerta que no le corresponde, y rechaza pasarla a nivel venta
+mientras ítems la usen.
+
+⚠️ **El nivel lo declara quien crea la regla; el tipo no lo deduce.** Un tipo "por monto de
+venta" puede quedar en nivel línea, y ahí sus tramos se miden contra la línea — que es un
+uso legítimo (*"llevando $50.000 de este vino, 10% en el vino"*) y también la forma de
+equivocarse sin que nada avise. Lo que la columna garantiza es que la MISMA regla no sirva
+para las dos cosas, no que el nivel sea el correcto.
+Detalle en [`docs/features/descuentos-recargos.md`](./features/descuentos-recargos.md).
+
 **[ PENDIENTE ]** ¿Se implementa la evaluación de condiciones (`condicion_tipo`, vigencia,
 modo escalonado)? En el sistema original estas columnas existen pero la lógica no está
 implementada.

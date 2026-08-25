@@ -26,6 +26,7 @@ const BORRADO_EL = '2026-08-01T21:00:00.000Z'
 interface DescuentoFake {
   id: string
   nombre: string
+  nivel: 'linea' | 'venta'
   tipoReglaId: string
   modo: string | null
   valorMonto: string | null
@@ -44,6 +45,7 @@ function descuento(over: Partial<DescuentoFake> = {}): DescuentoFake {
   return {
     id: DESCUENTO_ID,
     nombre: 'Black Friday',
+    nivel: 'linea',
     tipoReglaId: 'tipo-1',
     modo: 'porcentaje',
     valorMonto: null,
@@ -167,7 +169,12 @@ mockNuxtImport('useApiFetch', () => {
       const id = url.split('/').slice(-2)[0] ?? ''
       getsUso.push(id)
       if (usoFalla) return Promise.reject(errorApi('No se pudo verificar el uso'))
-      return Promise.resolve({ items: usoPorId[id] ?? [] })
+      // El `nivel` sale de la fila, igual que en el backend: `obtenerUso` lo
+      // lee del descuento, no de las asociaciones.
+      return Promise.resolve({
+        nivel: descuentosBackend.find(x => x.id === id)?.nivel ?? 'linea',
+        items: usoPorId[id] ?? [],
+      })
     }
     if (method === 'PATCH') {
       const id = url.split('/').pop() ?? ''
@@ -685,6 +692,46 @@ describe('configuracion/descuentos — pausar: confirmación con el alcance', ()
     expect(patchesActivo).toEqual([{ id: DESCUENTO_ID, activo: false }])
 
     wrapper.unmount()
+  })
+
+  // Una regla de nivel venta no se asocia a ningún ítem: su conteo es 0 por
+  // construcción. Hasta el 2026-08-25 eso la hacía caer en la rama "nadie la
+  // usa" y se pausaba sin preguntar, mientras la pantalla habría dicho que
+  // afectaba a 0 ítems. Lo que pierde el local es poder aplicarla al cobrar.
+  it('una regla de nivel venta pregunta aunque no tenga ningún ítem', async () => {
+    descuentosBackend = [descuento({ nivel: 'venta' })]
+    usoPorId = {}
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(document.body.textContent).toContain('Pausar «Black Friday»')
+    expect(document.body.textContent).toContain(
+      'Deja de ofrecerse al cobrar',
+    )
+    expect(document.body.textContent).not.toContain('0 ítems')
+    // Con el modal abierto todavía no viajó nada.
+    expect(patchesActivo).toEqual([])
+
+    await confirmarEnModal('Pausar')
+    expect(patchesActivo).toEqual([{ id: DESCUENTO_ID, activo: false }])
+
+    wrapper.unmount()
+  })
+
+  it('la tabla marca la regla de venta, y no marca la de línea', async () => {
+    descuentosBackend = [descuento({ nivel: 'venta' })]
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Por venta')
+    wrapper.unmount()
+
+    descuentosBackend = [descuento({ nivel: 'linea' })]
+    const otro = await montar()
+    // La de línea es el caso esperado y el default de la columna: marcarla
+    // sería ruido en casi todas las filas.
+    expect(otro.text()).not.toContain('Por venta')
+    expect(otro.text()).not.toContain('Por ítem')
+    otro.unmount()
   })
 
   it('reactivar no pregunta nada: ni consulta el uso ni abre modal', async () => {

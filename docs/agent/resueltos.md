@@ -17,6 +17,113 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una regla dice dónde se aplica: `nivel` línea/venta (2026-08-25)
+
+**Venía de la sección 3.** Texto de la entrada, verbatim:
+
+> - [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
+>   no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
+>   `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
+>   `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
+>   en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
+>   sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
+>   Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
+>   serlo en cuanto exista un productor.
+>   Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
+>   (línea vs venta), que hoy no distingue.
+>   ✅ **DECIDIDO (owner, 2026-08-15): el modelo distingue el nivel de la regla** — si aplica por
+>   línea o por venta— y el modal dice lo que corresponde en cada caso, en vez de "afecta 0 ítems".
+>   ⚠️ **Es un campo nuevo en `descuentos`/`recargos`, así que arrastra más de lo que parece:** el
+>   motor tiene que respetarlo (una regla de venta no debería poder asociarse a un ítem, ni al
+>   revés), el seeder tiene que declararlo en cada fila, y las pantallas de administración tienen
+>   que ofrecerlo. **Hoy es teórico** —ninguna pantalla manda reglas a nivel venta, medido— así que
+>   se puede planificar sin apuro; lo que no conviene es construir el productor antes que el campo.
+>
+
+### Qué se hizo
+
+Columna **`nivel`** (`nivel_regla`: `'linea' | 'venta'`, `NOT NULL DEFAULT 'linea'`) en
+`descuentos` y `recargos`, más las dos puertas que la hacen cumplir y las pantallas que la
+ofrecen.
+
+| Pieza | Qué cambió |
+|---|---|
+| Entities + enum | `NivelRegla` en `common/enums/reglas.enums.ts`; la columna en las dos entities |
+| DTOs | `nivel?` opcional (`@IsEnum`); el service resuelve el default |
+| `ItemsService.validarReglas` | rechaza asociar a un ítem una regla de nivel venta. **Sigue siendo una sola query**: `nivel` viaja en el `SELECT` que ya validaba pertenencia |
+| `CalculoPreciosService.resolverReglas` | exige el nivel de la puerta por la que entraron los ids: línea para `descuentoIds`, venta para `descuentosVentaIds` |
+| `update` de las dos reglas | 400 al pasar a nivel venta con ítems asociados, con el conteo en el mensaje |
+| `obtenerUso` | devuelve `{ nivel, items }` |
+| Seeder | `nivel` declarado en **las 12 filas**, no solo en las que no son el default. Dos pasan a `venta` —"Descuento compra grande" y "Recargo por pedido chico", cuyos tramos se miden contra el total— y se suma **"Promo del total $5.000"**, gemela de nivel venta de "Promo fija $5.000" |
+| Frontend | `useNivelRegla()`, radio "Se aplica" en las dos pantallas, badge *Por venta* en la tabla, y `usePausaRegla` + `CrudPausarModal` con el copy que corresponde |
+
+⚠️ **Los dos que "pasan a `venta`" solo pasan en base virgen.** El seeder inserta si el id no
+existe, así que sobre una base ya sembrada —el demo de Railway, o un local sin `reset-db.sh`—
+esas dos filas se quedan en `'linea'` por el default de la columna. La fila nueva (`…440360`)
+sí entra en las dos, y por eso el e2e pasa igual en los dos mundos y nada señala la
+divergencia. Se corrige con el volcado de `railway-sync-db` **después** de un reset local.
+
+### Tres decisiones, con su porqué
+
+**El default no es comodidad: es lo que salva el deploy.** Una columna `NOT NULL` sin default
+sobre las filas viejas del demo es el `23502` que dejó Railway en CRASHED el **2026-08-09**
+(`e163dbb7`). El 2026-08-23 el mismo demo tumbó otro deploy con un `23514` de `@Check` —otro
+código, misma causa—, y eso **no está registrado en este repo**: vive en el troubleshooting de
+la skill `railway-sync-db`, que es donde hay que ir a buscarlo. Y `'linea'` es el valor **verdadero** para esas filas: hasta hoy
+la única forma de usar una regla era asociarla a un ítem.
+
+**La validación NO entró al motor**, y por eso este frente no abrió el frente del motor. El
+motor recibe las dos listas ya separadas y calcula plata; el nivel es una regla de catálogo
+sobre dónde se puede usar cada regla — mismo orden que "el ítem está pausado", que por la
+misma razón vive en el service. `ReglaResuelta` quedó intacta: el mapa del service usa
+`ReglaResuelta & { nivel }`.
+
+**Una regla de venta siempre pregunta al pausarla**, aunque su conteo sea 0. No es excepción
+a "solo pregunta cuando hay algo que perder de vista" sino su aplicación: sin tabla puente,
+ese 0 es estructural y no significa "nadie la usa".
+
+### Lo que el cierre encontró y la entrada no decía
+
+**Hay una tercera puerta.** La entrada nombraba dos —asociar al ítem y `descuentosVentaIds`—
+pero una línea puede mandar sus propios `descuentoIds` y **pisar** los del ítem
+(`resolverLinea`), camino que nunca pasa por el catálogo. Por eso la validación vive en
+`resolverReglas` y no solo en `ItemsService`.
+
+**Cuatro llamadas del e2e mandaban una regla de línea por `descuentosVentaIds`** (una en
+`calculo-precios.e2e-spec.ts`, tres en `ventas.e2e-spec.ts`), todas con "Promo fija $5.000".
+No era un descuido de los tests: era exactamente el agujero que esta columna cierra. Se
+apuntaron a la gemela sembrada de nivel venta.
+
+### Qué lo fija
+
+Mutantes que **revierten al código anterior**, no que rompen:
+
+| Mutante | Test que cae |
+|---|---|
+| `create` sin `nivel` explícito | *sin `nivel` en el DTO guarda `linea`* + *`nivel: venta` se persiste* |
+| `obtenerUso` vuelve a devolver solo `items` | *obtenerUso devuelve el nivel* |
+| Sin la llamada a `validarCambioDeNivel` | *pasar a nivel venta con ítems asociados es 400* |
+| El guard consulta siempre (sin los early returns) | *un PATCH que no toca el nivel no consulta los ítems* |
+| `usePausaRegla` vuelve a `if (uso.items.length === 0)` | *una regla de nivel venta pregunta aunque no tenga ningún ítem* |
+| Sin el badge en `descuentos.vue` | *la tabla marca la regla de venta, y no marca la de línea* |
+| El guard vuelve a reusar `obtenerUso` (que filtra el borrado) | *el guard cuenta también los ítems en la papelera* — afirma sobre el SQL: `not.toContain('eliminado_el')` |
+| `configuracion/items.vue` vuelve a listar sin mirar el nivel | *las reglas de nivel venta no figuran en ningún selector* |
+
+Más 8 casos e2e en `uso-reglas.e2e-spec.ts` que recorren las tres puertas en los dos sentidos,
+con **ancla positiva**: la regla de venta SÍ se aplica por `descuentosVentaIds` y baja el
+total. Sin ella, los cinco 400 también pasarían con una puerta tapiada de los dos lados. El
+octavo es el de la papelera, y va **después** del test que borra el ítem porque necesita justo
+el estado que los demás evitan.
+
+### Lo que sigue abierto, a propósito
+
+**El productor no existe.** Ninguna pantalla manda todavía `descuentosVentaIds` /
+`recargosVentaIds` — están declarados en `useCalculoPrecios.ts` y consumidos por el backend,
+nada más. El campo se construyó **antes** que el productor porque al revés el productor habría
+nacido pudiendo mandar cualquier regla, que es el bug que esto cierra.
+
+---
+
 ## La limpieza del e2e ya no se lleva puesto el cierre de la app (2026-08-25)
 
 **Venía de la sección 1.** En **18 archivos** de e2e, el `app.close()` corría *después* de la

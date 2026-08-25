@@ -21,7 +21,11 @@ import { DescuentoMetodoPago } from './entities/descuento-metodo-pago.entity';
 import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
 import { CreateDescuentoDto } from './dto/create-descuento.dto';
 import { UpdateDescuentoDto } from './dto/update-descuento.dto';
-import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
+import {
+  ModoRegla,
+  CondicionTipo,
+  NivelRegla,
+} from '../../common/enums/reglas.enums';
 
 const CLASE = 'descuento';
 
@@ -163,6 +167,7 @@ export class DescuentosService {
         fechaInicio: dto.fechaInicio ?? null,
         fechaFin: dto.fechaFin ?? null,
         activo: dto.activo ?? true,
+        nivel: dto.nivel ?? NivelRegla.LINEA,
       });
       await manager.save(descuento);
 
@@ -230,6 +235,7 @@ export class DescuentosService {
     await this.validarNombreUnico(tenantId, dto.nombre ?? descuento.nombre, id);
     this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
     await this.validarEstadoResultante(tipoRegla.codigo, descuento, dto);
+    await this.validarCambioDeNivel(tenantId, descuento, dto);
 
     const escritura = this.db.transaccion(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
@@ -430,7 +436,10 @@ export class DescuentosService {
   async obtenerUso(
     tenantId: string,
     id: string,
-  ): Promise<{ items: { id: string; nombre: string }[] }> {
+  ): Promise<{
+    nivel: NivelRegla;
+    items: { id: string; nombre: string }[];
+  }> {
     const descuento = await this.descuentoRepo.findOne({
       where: { id, tenantId },
     });
@@ -447,7 +456,51 @@ export class DescuentosService {
       [id, tenantId],
     );
 
-    return { items };
+    return { nivel: descuento.nivel, items };
+  }
+
+  /**
+   * Cambiar una regla de línea a venta con ítems que ya la usan **se rechaza**,
+   * no se resuelve solo. Las dos salidas automáticas eran peores: dejar las
+   * asociaciones vivas produce el estado que la puerta de `ItemsService`
+   * prohíbe, y borrarlas en silencio tira trabajo del catálogo por un cambio
+   * que se hizo en otra pantalla. El mensaje nombra el conteo para que se sepa
+   * qué hay que desasociar.
+   *
+   * ⚠️ **Cuenta también los ítems BORRADOS, y por eso no reusa `obtenerUso`.**
+   * `ItemsService.remove` es un soft delete que **no toca las tablas puente**:
+   * las filas de `item_descuentos` sobreviven al borrado del ítem. Contando solo los
+   * vivos —como hace `obtenerUso`, que alimenta un modal donde un ítem en la
+   * papelera sería ruido— este guard dejaba pasar el cambio, y al restaurar el
+   * ítem su regla asociada resultaba de nivel venta: `resolverReglas` tira 400 y
+   * **el ítem queda invendible**, junto con todo carrito que lo contenga.
+   *
+   * Solo consulta cuando el nivel EFECTIVAMENTE cambia hacia venta: el PATCH
+   * que no toca `nivel` no paga la query.
+   *
+   * El filtro por tenant va por el JOIN a `items` porque la tabla puente no
+   * tiene `tenant_id` propio — misma defensa que `cargarReglasPorIds`.
+   */
+  private async validarCambioDeNivel(
+    tenantId: string,
+    descuento: Descuento,
+    dto: UpdateDescuentoDto,
+  ): Promise<void> {
+    if (dto.nivel !== NivelRegla.VENTA) return;
+    if (descuento.nivel === NivelRegla.VENTA) return;
+    const filas: { cnt: string }[] = await this.db.query(
+      `SELECT COUNT(*) AS cnt
+         FROM item_descuentos idd
+         JOIN items i ON i.item_id = idd.item_id AND i.tenant_id = $2
+        WHERE idd.descuento_id = $1`,
+      [descuento.id, tenantId],
+    );
+    const asociados = parseInt(filas[0].cnt, 10);
+    if (asociados > 0) {
+      throw new BadRequestException(
+        `No se puede pasar a nivel venta: ${asociados} ítem(s) todavía tienen este descuento asociado (incluidos los que estén en la papelera). Quitá la asociación primero.`,
+      );
+    }
   }
 
   private toListItem(

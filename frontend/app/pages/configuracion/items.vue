@@ -852,19 +852,31 @@ async function cargarCatalogos() {
         value: i.id,
       }))
 
-    descuentosOpts.value = descuentos
+    // ⚠️ Las reglas de **nivel venta** no entran en NINGUNA de las cuatro
+    // listas, ni siquiera en las de pausadas. No es cosmética: el backend
+    // rechaza con 400 asociar una regla de venta a un ítem
+    // (`ItemsService.validarReglas`), así que ofrecerlas acá sería ofrecer una
+    // opción que siempre falla al guardar — y el seed trae tres.
+    //
+    // Es un eje distinto del de la pausa, y por eso el filtro va antes de
+    // partir por `activo`: una regla pausada sigue siendo elegible (se muestra
+    // marcada), una de venta no es elegible nunca desde acá.
+    const descuentosDeLinea = descuentos.filter((d) => d.nivel !== 'venta')
+    const recargosDeLinea = recargos.filter((r) => r.nivel !== 'venta')
+
+    descuentosOpts.value = descuentosDeLinea
       .filter((d) => d.activo)
       .map((d) => ({ label: d.nombre, value: d.id }))
 
-    descuentosPausadosOpts.value = descuentos
+    descuentosPausadosOpts.value = descuentosDeLinea
       .filter((d) => !d.activo)
       .map((d) => ({ label: `${d.nombre} (en pausa)`, value: d.id }))
 
-    recargosOpts.value = recargos
+    recargosOpts.value = recargosDeLinea
       .filter((r) => r.activo)
       .map((r) => ({ label: r.nombre, value: r.id }))
 
-    recargosPausadosOpts.value = recargos
+    recargosPausadosOpts.value = recargosDeLinea
       .filter((r) => !r.activo)
       .map((r) => ({ label: `${r.nombre} (en pausa)`, value: r.id }))
 

@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumberString,
@@ -12,6 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { NivelRegla } from '../../../common/enums/reglas.enums';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class TramoDto {
@@ -95,4 +97,13 @@ export class CreateDescuentoDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  /**
+   * Dónde se aplica la regla. Opcional y con default `linea` en el service: la
+   * API vieja no lo mandaba y todo lo que existe es de línea, así que omitirlo
+   * conserva el significado en vez de inventar uno.
+   */
+  @IsOptional()
+  @IsEnum(NivelRegla)
+  nivel?: NivelRegla;
 }

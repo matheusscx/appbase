@@ -7,7 +7,7 @@ import { Recargo } from './entities/recargo.entity';
 import { RecargoTramo } from './entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from './entities/recargo-metodo-pago.entity';
 import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
-import { CondicionTipo } from '../../common/enums/reglas.enums';
+import { CondicionTipo, NivelRegla } from '../../common/enums/reglas.enums';
 
 const TENANT = 'tenant-uuid';
 const USUARIO_ID = 'usuario-uuid';
@@ -933,6 +933,137 @@ describe('RecargosService', () => {
       const result = await service.obtenerUso(TENANT, 'r1');
 
       expect(result).toEqual({ items: [] });
+    });
+  });
+
+  // ─── Nivel de la regla (línea vs venta) ─────────────────────────────────
+
+  describe('nivel', () => {
+    it('sin `nivel` en el DTO guarda `linea`: la API vieja no lo mandaba y todo lo que existe es de línea', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await service.create(TENANT, {
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-general',
+        valorPorcentaje: '0.10',
+        modo: 'porcentaje',
+      });
+
+      const [[, data]] = managerMock.create.mock.calls as Array<
+        [unknown, { nivel: NivelRegla }]
+      >;
+      expect(data.nivel).toBe(NivelRegla.LINEA);
+    });
+
+    it('`nivel: venta` en el DTO se persiste', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await service.create(TENANT, {
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-general',
+        valorPorcentaje: '0.10',
+        modo: 'porcentaje',
+        nivel: NivelRegla.VENTA,
+      });
+
+      const [[, data]] = managerMock.create.mock.calls as Array<
+        [unknown, { nivel: NivelRegla }]
+      >;
+      expect(data.nivel).toBe(NivelRegla.VENTA);
+    });
+
+    it('obtenerUso devuelve el nivel: sin él la pantalla no puede distinguir "0 ítems" de "no se mide en ítems"', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Compra grande',
+        nivel: NivelRegla.VENTA,
+      });
+      dataSourceMock.query.mockResolvedValue([]);
+
+      await expect(service.obtenerUso(TENANT, 'r1')).resolves.toEqual({
+        nivel: NivelRegla.VENTA,
+        items: [],
+      });
+    });
+
+    it('pasar a nivel venta con ítems asociados es 400, y no escribe', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-general',
+        nivel: NivelRegla.LINEA,
+        valorPorcentaje: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+      dataSourceMock.query.mockResolvedValue([{ cnt: '1' }]);
+
+      await expect(
+        service.update(TENANT, 'r1', { nivel: NivelRegla.VENTA }),
+      ).rejects.toThrow(BadRequestException);
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    it('pasar a nivel venta SIN ítems asociados pasa (ancla positiva)', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-general',
+        nivel: NivelRegla.LINEA,
+        valorPorcentaje: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+      dataSourceMock.query.mockResolvedValue([{ cnt: '0' }]);
+
+      await expect(
+        service.update(TENANT, 'r1', { nivel: NivelRegla.VENTA }),
+      ).resolves.toBeDefined();
+    });
+
+    it('el guard cuenta también los ítems en la papelera: el soft delete no toca la tabla puente', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-general',
+        nivel: NivelRegla.LINEA,
+        valorPorcentaje: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+      dataSourceMock.query.mockResolvedValue([{ cnt: '1' }]);
+
+      await expect(
+        service.update(TENANT, 'r1', { nivel: NivelRegla.VENTA }),
+      ).rejects.toThrow(BadRequestException);
+
+      // Reusar `obtenerUso` acá dejaba pasar el cambio con el ítem en la
+      // papelera, y al restaurarlo el ítem quedaba invendible. El testigo es el
+      // SQL: si vuelve a filtrar el borrado, esta aserción cae.
+      const llamadas = dataSourceMock.query.mock.calls as [string, unknown[]][];
+      const [sql] = llamadas[llamadas.length - 1];
+      expect(sql).toContain('item_recargos');
+      expect(sql).not.toContain('eliminado_el');
+    });
+
+    it('un PATCH que no toca el nivel no consulta los ítems: el guard no le cobra una query a todo el resto', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-general',
+        nivel: NivelRegla.LINEA,
+        valorPorcentaje: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await service.update(TENANT, 'r1', { nombre: 'Promo renombrada' });
+
+      expect(dataSourceMock.query).not.toHaveBeenCalledWith(
+        expect.stringContaining('item_recargos'),
+        expect.anything(),
+      );
     });
   });
 });

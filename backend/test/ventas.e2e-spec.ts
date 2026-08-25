@@ -18,8 +18,10 @@ const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 // (CLP, la oficial, es '1'). Entrada 12 de `docs/agent/pendientes.md`: la
 // única moneda con tasa != 1 disponible en el seed además de UF.
 const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
-// "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
-const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
+// "Promo del total $5.000" — descuento monto_fijo sin condiciones y de nivel
+// VENTA (seedDescuentos()). Los `descuentosVentaIds` solo aceptan reglas de ese
+// nivel; su gemela de línea, "Promo fija $5.000", se asocia a ítems.
+const DESCUENTO_FIJO_VENTA_ID = '550e8400-e29b-41d4-a716-446655440360';
 // IVA (sistema, Chile) — seedImpuestos(): tipo='iva', porcentaje '0.19'.
 const IVA_CL_ID = '550e8400-e29b-41d4-a716-446655440280';
 
@@ -348,7 +350,7 @@ describe('Ventas (e2e)', () => {
       expect(res.status).toBe(400);
     });
 
-    // El motor topea "Promo fija $5.000" (monto_fijo, sin condición) contra el
+    // El motor topea "Promo del total $5.000" (monto_fijo, sin condición) contra el
     // disponible de una sola línea de $1.500: avisa, y ventas.service.ts
     // recompone `{ titulo, detalle }` a un string plano. Es la única venta de
     // toda la suite que dispara un descuento topeado al crear — sin ella, un
@@ -380,7 +382,7 @@ describe('Ventas (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioId, cantidad: '1' }],
-          descuentosVentaIds: [DESCUENTO_FIJO_ID],
+          descuentosVentaIds: [DESCUENTO_FIJO_VENTA_ID],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000.0000' }],
         });
 
@@ -388,7 +390,7 @@ describe('Ventas (e2e)', () => {
       const venta = res.body as VentaResponse;
       expect(venta.advertencias).toHaveLength(1);
       const advertencia = venta.advertencias?.[0] ?? '';
-      expect(advertencia).toContain('Promo fija $5.000');
+      expect(advertencia).toContain('Promo del total $5.000');
       expect(advertencia).toContain('no se aplicó completo');
     });
 
@@ -1207,7 +1209,7 @@ describe('Ventas (e2e)', () => {
     });
 
     it('guarda lo que el descuento pedía cuando el piso en cero lo recortó', async () => {
-      // "Promo fija $5.000" a nivel venta sobre un servicio de $2.000: se topea.
+      // "Promo del total $5.000" sobre un servicio de $2.000: se topea.
       const resItem = await request(app.getHttpServer())
         .post('/api/items')
         .set('Authorization', `Bearer ${token}`)
@@ -1226,7 +1228,7 @@ describe('Ventas (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId: servicioId, cantidad: '1' }],
-          descuentosVentaIds: [DESCUENTO_FIJO_ID],
+          descuentosVentaIds: [DESCUENTO_FIJO_VENTA_ID],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000.0000' }],
         });
       expect(venta.status).toBe(201);
@@ -1654,7 +1656,7 @@ describe('Ventas (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           lineas: [{ itemId, cantidad: '1' }],
-          descuentosVentaIds: [DESCUENTO_FIJO_ID],
+          descuentosVentaIds: [DESCUENTO_FIJO_VENTA_ID],
           pagos: [],
         });
       expect(res.status).toBe(201);

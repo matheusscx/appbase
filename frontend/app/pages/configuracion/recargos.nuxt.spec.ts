@@ -15,6 +15,8 @@ import Recargos from './recargos.vue'
 interface ReglaFake {
   id: string
   nombre: string
+  /** Ausente en las filas viejas del fixture: el backend las trata como `linea`. */
+  nivel?: 'linea' | 'venta'
   tipoReglaId: string
   modo: string | null
   valorMonto: string | null
@@ -197,5 +199,41 @@ describe('configuracion/recargos — badge de vigencia', () => {
     expect(textosBadge).toEqual(['Vencida'])
 
     wrapper.unmount()
+  })
+})
+
+// Mismo motivo que el bloque de arriba: el badge de nivel se agregó en las dos
+// pantallas por copia, y la copia es lo que deriva. Acá va solo el badge — el
+// modal de pausa y `usePausaRegla` son compartidos y los cubre
+// `descuentos.nuxt.spec.ts`.
+describe('configuracion/recargos — badge de nivel', () => {
+  it('marca el recargo de nivel venta, y no marca el de línea', async () => {
+    const base: ReglaFake = {
+      id: 'rec-3',
+      nombre: 'Recargo del total',
+      nivel: 'venta',
+      tipoReglaId: 'tipo-1',
+      modo: 'porcentaje',
+      valorMonto: null,
+      valorPorcentaje: '0.10',
+      metodoPagoIds: [],
+      tramos: [],
+      diasVencimiento: null,
+      fechaInicio: null,
+      fechaFin: null,
+      activo: true,
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }
+
+    recargosBackend = [base]
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Por venta')
+    wrapper.unmount()
+
+    recargosBackend = [{ ...base, nivel: 'linea' }]
+    const otro = await montar()
+    expect(otro.text()).not.toContain('Por venta')
+    otro.unmount()
   })
 })

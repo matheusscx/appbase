@@ -107,6 +107,7 @@ describe('CalculoPreciosService', () => {
           tramos: [],
           metodoPagoIds: [],
           activo: true,
+          nivel: 'linea',
         },
         {
           id: 'desc-2',
@@ -117,6 +118,7 @@ describe('CalculoPreciosService', () => {
           tramos: [],
           metodoPagoIds: [],
           activo: true,
+          nivel: 'linea',
         },
       ]),
     };
@@ -342,6 +344,61 @@ describe('CalculoPreciosService', () => {
     expect(r.totales.totalFinal).toBe('321.300000'); // 3 × 107.10
   });
 
+  // ── El nivel decide por qué puerta se usa una regla ──────────────────────
+  //
+  // Las dos puertas del nivel viven acá y en `ItemsService.validarReglas`. Ésta
+  // es la que cubre el camino que la otra no ve: una línea puede mandar sus
+  // propios `descuentoIds` y pisar los del ítem, sin pasar nunca por el catálogo.
+  describe('nivel de la regla', () => {
+    const reglaDeVenta = {
+      id: 'desc-venta',
+      nombre: 'Promo del total',
+      modo: 'porcentaje',
+      valorPorcentaje: '0.10',
+      tipoRegla: { codigo: 'general' },
+      tramos: [],
+      metodoPagoIds: [],
+      activo: true,
+      nivel: 'venta',
+    };
+
+    it('una regla de venta pedida en la línea es 400', async () => {
+      descuentosService.findAll.mockResolvedValue([reglaDeVenta]);
+
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [
+            { itemId: 'item-1', cantidad: '1', descuentoIds: ['desc-venta'] },
+          ],
+        }),
+      ).rejects.toThrow(/nivel venta/);
+    });
+
+    it('una regla de línea pedida en la venta es 400', async () => {
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+          descuentosVentaIds: ['desc-1'],
+        }),
+      ).rejects.toThrow(/nivel línea/);
+    });
+
+    it('cada una por su puerta sí se aplica (ancla positiva)', async () => {
+      descuentosService.findAll.mockResolvedValue([reglaDeVenta]);
+      // El ítem por default trae `desc-1`, que este mock ya no devuelve.
+      mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
+
+      // Sin esto, los dos 400 de arriba pasarían igual con la puerta tapiada
+      // de los dos lados.
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        descuentosVentaIds: ['desc-venta'],
+      });
+
+      expect(Number(r.totales.totalDescuentos)).toBeGreaterThan(0);
+    });
+  });
+
   it('resuelve los recargos asociados al ítem por id', async () => {
     // El fixture fijaba `recargosIds: []` en todos los tests, así que la
     // resolución de recargos por id no la ejercía nadie: un mutante que le
@@ -356,6 +413,7 @@ describe('CalculoPreciosService', () => {
         tramos: [],
         metodoPagoIds: [],
         activo: true,
+        nivel: 'linea',
       },
     ]);
     // Ítem exento: aísla la resolución de recargos sin que la derivación de
@@ -766,6 +824,7 @@ describe('CalculoPreciosService', () => {
       tramos: [],
       metodoPagoIds: [],
       activo: true,
+      nivel: 'linea',
       fechaInicio: null,
       fechaFin: null,
       ...over,

@@ -24,6 +24,13 @@ CREATE TYPE "modo_regla" AS ENUM (
   'monto_fijo'
 );
 
+-- Dónde se aplica una regla de precio. Decide contra qué magnitud se mide:
+-- 'linea' contra el subtotal de la línea, 'venta' contra el total de la venta.
+CREATE TYPE "nivel_regla" AS ENUM (
+  'linea',            -- se asocia a ítems (item_descuentos / item_recargos)
+  'venta'             -- se elige al cobrar (descuentosVentaIds / recargosVentaIds)
+);
+
 CREATE TYPE "estado_venta" AS ENUM (
   -- sin 'borrador': la venta en construcción vive en cuenta/cuenta_lineas (salones)
   'pendiente',
@@ -458,6 +465,10 @@ CREATE TABLE "descuentos" (
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
+  -- Default 'linea': es el valor verdadero para toda fila anterior a esta
+  -- columna, porque hasta entonces la única forma de usar una regla era
+  -- asociarla a un ítem.
+  "nivel"           nivel_regla   NOT NULL DEFAULT 'linea',
   -- El importe va en UNA de las dos, la que dice `modo`; las dos en null = usa tramos.
   -- Lo fuerza la restricción del final de la tabla. (7,4) en el porcentaje dice
   -- por sí solo que ahí no entra plata.
@@ -489,6 +500,10 @@ CREATE TABLE "recargos" (
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
+  -- Default 'linea': es el valor verdadero para toda fila anterior a esta
+  -- columna, porque hasta entonces la única forma de usar una regla era
+  -- asociarla a un ítem.
+  "nivel"           nivel_regla   NOT NULL DEFAULT 'linea',
   -- El importe va en UNA de las dos, la que dice `modo`; las dos en null = usa tramos.
   -- Lo fuerza la restricción del final de la tabla. (7,4) en el porcentaje dice
   -- por sí solo que ahí no entra plata.

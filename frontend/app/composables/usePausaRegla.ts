@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import { useApiFetch } from './useApiFetch'
+import type { NivelRegla } from './useNivelRegla'
 
 /** Lo mínimo que este composable necesita de la fila para poder pausarla. */
 export interface ReglaPausable {
@@ -9,7 +10,14 @@ export interface ReglaPausable {
   eliminadoEl?: string | null
 }
 
-interface UsoRegla { items: { id: string, nombre: string }[] }
+interface UsoRegla {
+  /**
+   * Ausente en impuestos, que no tienen nivel: se trata como `'linea'`, que es
+   * lo que un impuesto es —se asocia a ítems—.
+   */
+  nivel?: NivelRegla
+  items: { id: string, nombre: string }[]
+}
 
 /**
  * Pausar y reactivar una regla del catálogo, con la confirmación que dice a
@@ -23,6 +31,13 @@ interface UsoRegla { items: { id: string, nombre: string }[] }
  * - **Pausar solo pregunta cuando hay algo que perder de vista**: si ningún ítem
  *   usa la regla, se pausa directo, sin modal. Un diálogo que dice "0 ítems" es
  *   ruido, y el ruido enseña a confirmar sin leer.
+ *
+ * ⚠️ **Una regla de nivel venta SIEMPRE pregunta**, aunque el conteo sea 0. No
+ * es una excepción a la regla de arriba sino su aplicación: una regla de venta
+ * no se asocia a ningún ítem —no tiene tabla puente—, así que su conteo es 0
+ * por construcción y siempre lo será. Está disponible en toda venta, que es
+ * mucho más que "nada", y hasta el 2026-08-25 esto la pausaba sin preguntar
+ * mientras la pantalla juraba que afectaba a 0 ítems.
  *
  * Si el `GET .../uso` falla, el toggle **no se mueve**: sin saber a cuántos
  * ítems afecta, no se pausa a ciegas.
@@ -58,6 +73,7 @@ export function usePausaRegla<T extends ReglaPausable>(
   // papelera) y el diálogo quedaría nombrando otra fila.
   const confirmPausarNombre = ref('')
   const confirmPausarItems = ref(0)
+  const confirmPausarNivel = ref<NivelRegla>('linea')
   const confirmPausarModalOpen = ref(false)
 
   async function aplicarActivo(regla: T, activo: boolean) {
@@ -95,13 +111,15 @@ export function usePausaRegla<T extends ReglaPausable>(
     verificandoUsoId.value = regla.id
     try {
       const uso = await useApiFetch<UsoRegla>(`${apiUrl}/${recurso}/${regla.id}/uso`)
-      if (uso.items.length === 0) {
+      const nivel = uso.nivel ?? 'linea'
+      if (nivel === 'linea' && uso.items.length === 0) {
         await aplicarActivo(regla, false)
         return
       }
       confirmPausarId.value = regla.id
       confirmPausarNombre.value = regla.nombre
       confirmPausarItems.value = uso.items.length
+      confirmPausarNivel.value = nivel
       confirmPausarModalOpen.value = true
     }
     catch (e: unknown) {
@@ -119,6 +137,7 @@ export function usePausaRegla<T extends ReglaPausable>(
     confirmPausarId.value = null
     confirmPausarNombre.value = ''
     confirmPausarItems.value = 0
+    confirmPausarNivel.value = 'linea'
     confirmPausarModalOpen.value = false
   }
 
@@ -132,6 +151,7 @@ export function usePausaRegla<T extends ReglaPausable>(
     toggling,
     confirmPausarNombre,
     confirmPausarItems,
+    confirmPausarNivel,
     confirmPausarModalOpen,
     toggleActivo,
     cerrarPausar,

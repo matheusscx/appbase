@@ -35,7 +35,7 @@ saber cuáles se podían tomar sin preguntar nada.
 | 2. Medir primero | Abrir un archivo o correr algo. No es una pregunta para el owner |
 | 3. Ya decidido, falta construir | Nada del owner: ya contestó. Es trabajo con diseño adentro |
 | 4. Necesita que el owner conteste | Una respuesta, que está al frente de cada entrada |
-| 5. Carreras de concurrencia | Un análisis de orden de locks, común a las tres |
+| 5. Carreras de concurrencia | Un análisis de orden de locks, común a las cinco |
 | 6. Proyectos que van solos | Spec propia. No entran de arrastre en otra tarea |
 | 7. Acción del owner fuera del código | Algo que no se resuelve programando |
 | Endurecimiento para producción | Nada hoy: se abre al encarar el paso a prod |
@@ -398,23 +398,32 @@ revisión independiente no lo pudo reproducir, con razón.
   causa entra la que nace de una devolución —o si se crea una— antes de escribir el flujo.
   Y sigue en pie que toca `movimientos_inventario` y el camino del reembolso de pasarela.
 
-- [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
-  no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
-  `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
-  `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
-  en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
-  sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
-  Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
-  serlo en cuanto exista un productor.
-  Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
-  (línea vs venta), que hoy no distingue.
-  ✅ **DECIDIDO (owner, 2026-08-15): el modelo distingue el nivel de la regla** — si aplica por
-  línea o por venta— y el modal dice lo que corresponde en cada caso, en vez de "afecta 0 ítems".
-  ⚠️ **Es un campo nuevo en `descuentos`/`recargos`, así que arrastra más de lo que parece:** el
-  motor tiene que respetarlo (una regla de venta no debería poder asociarse a un ítem, ni al
-  revés), el seeder tiene que declararlo en cada fila, y las pantallas de administración tienen
-  que ofrecerlo. **Hoy es teórico** —ninguna pantalla manda reglas a nivel venta, medido— así que
-  se puede planificar sin apuro; lo que no conviene es construir el productor antes que el campo.
+- [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
+  (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
+  [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
+  nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
+  `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
+  y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
+  contra la línea. Nada falla: cobra otra cosa.
+  **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
+  el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
+  la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
+  bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
+  ⚠️ Si se empuja, hay que decidir qué pasa al **cambiar de tipo** con el radio ya tocado a
+  mano: `onTipoChange` hoy pisa otros campos, y pisar una elección explícita del usuario es
+  peor que no empujar nada. El seeder ya tuvo que corregir sus dos filas a mano, que es la
+  señal de que el default engaña más seguido de lo que parece.
+
+- [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
+  desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
+  filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
+  las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
+  intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
+  *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
+  restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
+  devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
+  los vivos), o que el 400 los nombre. La primera parece mejor porque la papelera ya es un
+  concepto de la pantalla, pero es decisión de producto.
 
 - [ ] **Lo que quedó del frente del modo ciego, ya cerrado** (backend + producto; la entrada
   madre —seis fugas, el eje mío/todos y el rastro de los oráculos— se mudó entera a
@@ -914,15 +923,26 @@ por bloqueada una vez leyendo solo la primera línea. Está bien en la § 3.
 ## 5. Carreras de concurrencia
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
-bloquea y en qué orden en cada camino—, no cuatro parches. Son **dos moldes distintos**, y
+bloquea y en qué orden en cada camino—, no cinco parches. Son **dos moldes distintos**, y
 conviene no confundirlos:
 
-- **Tres del molde "no toma lock"** (las tres primeras, y las tres entradas ya lo dicen por
-  su cuenta): un `SELECT` de validación sin lock, y otra transacción que escribe entre el
-  chequeo y el commit.
-- **Una del molde "lockea en orden no determinista"** (la última, de la auditoría de
-  `inventario`): el lock sí se toma, pero el orden lo decide el cliente. El arreglo es el
-  contrario —no agregar un lock sino fijar un orden—, y las piezas ya existen en el repo.
+- **Cuatro del molde "no toma lock"** —el guard del nivel de una regla, `remove()` de ítems,
+  borrar un ítem contra agregarlo a una cuenta, y `PATCH /items/:id` contra `DELETE`—: un
+  `SELECT` de validación sin lock, y otra transacción que escribe entre el chequeo y el
+  commit. Cada entrada lo dice por su cuenta.
+- **Una del molde "lockea en orden no determinista"** —la de la auditoría de `inventario`,
+  los tres caminos que revierten stock—: el lock sí se toma, pero el orden lo decide el
+  cliente. El arreglo es el contrario —no agregar un lock sino fijar un orden—, y las piezas
+  ya existen en el repo.
+
+⚠️ **Las dos listas de arriba nombran las entradas, no su posición**, y la razón es peor que
+"se desactualizaron". Decían "las tres primeras" y "la última"; medido contra el archivo antes
+de este cambio (`git show HEAD:docs/agent/pendientes.md`, 2026-08-25), el orden real era
+`[stock, remove(), cuenta, PATCH]` — o sea que la del molde raro era la **primera** y las tres
+del molde común eran las **últimas**: **las dos frases ya estaban dadas vuelta**, y lo único
+que hizo agregar una entrada fue que alguien las mirara. Un conteo posicional no se rompe el
+día que insertás algo; se rompe callado y ningún gate lo va a ver nunca. Por eso acá se nombra,
+no se enumera.
 
 ⚠️ **Corregido el 2026-08-18** (la versión anterior de esta nota se contradecía sola —
 decía "ninguno de estos moldes" y dos líneas después describía uno de ellos): los dos
@@ -932,7 +952,7 @@ orden de lock en la bandeja de desfases de combos…", hoy cerrada y mudada a
 ciclo `item_receta` ↔ `item_combo` es "no toma lock" (`descartarDesfases` no bloquea nada) y
 el ciclo `items` ↔ `item_combo` es "lockea en orden no determinista" (`aplicarDesfases` y
 `update()` de un combo toman los mismos locks en orden inverso). Lo que separa a esa entrada
-de las cuatro de acá **no es la familia de bug — es la tabla y el disparador**: acá es
+de las cinco de acá **no es la familia de bug — es la tabla y el disparador**: acá es
 caja/inventario/stock; ahí es `items`/`item_receta`/`item_combo` en la bandeja de desfases.
 (Los otros dos puntos de esa entrada residual —el `FOR UPDATE` antes de validar tenant, y el
 hueco de test de N combos— no son de ninguno de los dos moldes.)
@@ -940,16 +960,36 @@ hueco de test de N combos— no son de ninguno de los dos moldes.)
 ℹ️ **2026-08-20:** esa entrada residual **se cerró** y vive en
 [`resueltos.md`](resueltos.md) § "El orden de bloqueo de filas de la bandeja de
 desfases". Lo de arriba se conserva porque la clasificación por moldes sigue siendo cierta
-y es la que hay que aplicarle a las cuatro de acá. Cómo quedó el "no toma lock" del molde
+y es la que hay que aplicarle a las cinco de acá. Cómo quedó el "no toma lock" del molde
 2: `descartarDesfases` sigue sin tomar un solo `FOR UPDATE` —el arreglo no fue agregar
 locks sino **fijar el orden en que sus `UPDATE` los toman solos**—, y el orden canónico del
 proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de
-bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cuatro
+bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cinco
 entradas de esta sección.
 
+- [ ] **El guard del nivel de una regla valida sin lock y fuera de la transacción**
+  (backend; anotado 2026-08-25 al cerrar el frente del nivel, → [`resueltos.md`](resueltos.md)
+  § *"Una regla dice dónde se aplica"*) — **del molde "no toma lock"**, y por eso vive
+  acá y no como frente propio. `validarCambioDeNivel` (`descuentos.service.ts`,
+  `recargos.service.ts`) hace un `COUNT` sobre la tabla puente **antes** de `db.transaccion`;
+  un `PATCH /items` que asocie esa misma regla entre el `COUNT` y el `save` deja una regla de
+  nivel venta colgada de un ítem — el estado que las dos puertas existen para impedir.
+  Síntoma: el ítem no se puede vender (400 de `resolverReglas`). Salida: quitar la asociación.
+  ⚠️ **No se parchea suelto**: cerrarla pide un `FOR UPDATE` sobre la fila de la regla dentro
+  de la transacción, y agregar un lock cambia el orden de bloqueo — materia de
+  [`../patterns/backend.md`](../patterns/backend.md) § 15 y del precedente de
+  `ventas.service.ts → crear()`, que es exactamente lo que el encabezado de esta sección dice
+  no querer hacer de a uno. (**No** citar ADR-020 acá: su deadlock es de agotamiento del pool
+  y lo dice con todas las letras, *"no de locks de fila"*; peor, bajo ADR-020 mover el `COUNT`
+  adentro de la transacción **no cuesta una conexión extra**, así que leído entero argumenta a
+  favor de hacerlo.) El docblock de `resolverReglas` acota la inalcanzabilidad con esta misma
+  ventana.
+
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
-  `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es otro molde que los tres
-  de arriba: acá el lock **sí** se toma, lo que no es determinista es **el orden**.
+  `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el
+  lock **sí** se toma, lo que no es determinista es **el orden**. (Decía "los tres de arriba",
+  y era falso desde antes de que existiera esta nota: es la única de su molde, y las otras
+  cuatro no están todas arriba.)
   `registrarMovimiento` toma un `FOR UPDATE` sobre `item_producto` **por ítem**, o sea N
   statements separados. `crear()` lo sabe y lo resuelve con dos capas —orden determinista por
   `itemId` (`ventas.service.ts:618-626`) y reintento ante `40P01`

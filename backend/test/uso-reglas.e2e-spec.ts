@@ -35,6 +35,8 @@ interface TokenResponse {
   access_token: string;
 }
 interface UsoResponse {
+  /** Ausente en impuestos, que no tienen nivel. */
+  nivel?: 'linea' | 'venta';
   items: { id: string; nombre: string }[];
 }
 interface IdResponse {
@@ -73,6 +75,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
   let impuestoId: string;
   let descuentoSinUsoId: string;
   let recargoSinUsoId: string;
+  let descuentoDeVentaId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -162,6 +165,20 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
       });
     expect(resRecargoSinUso.status).toBe(201);
     recargoSinUsoId = (resRecargoSinUso.body as IdResponse).id;
+
+    // Un descuento de nivel VENTA: no se asocia a ítems, se elige al cobrar.
+    const resDescuentoVenta = await request(app.getHttpServer())
+      .post('/api/descuentos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        nombre: `Descuento de venta E2E ${Date.now()}`,
+        tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.05',
+        nivel: 'venta',
+      });
+    expect(resDescuentoVenta.status).toBe(201);
+    descuentoDeVentaId = (resDescuentoVenta.body as IdResponse).id;
   }, 60000);
 
   afterAll(async () => {
@@ -215,6 +232,16 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
             (
               await request(app.getHttpServer())
                 .delete(`/api/descuentos/${descuentoSinUsoId}`)
+                .set('Authorization', `Bearer ${tokenAdmin}`)
+            ).status,
+        );
+      if (descuentoDeVentaId)
+        await limpiar(
+          `borrar descuento de venta ${descuentoDeVentaId}`,
+          async () =>
+            (
+              await request(app.getHttpServer())
+                .delete(`/api/descuentos/${descuentoDeVentaId}`)
                 .set('Authorization', `Bearer ${tokenAdmin}`)
             ).status,
         );
@@ -275,7 +302,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
       .set('Authorization', `Bearer ${tokenAdmin}`);
 
     expect(res.status).toBe(200);
-    expect(res.body as UsoResponse).toEqual({ items: [] });
+    expect(res.body as UsoResponse).toEqual({ nivel: 'linea', items: [] });
   });
 
   it('recargos/:id/uso devuelve lista vacía cuando nadie lo usa', async () => {
@@ -284,7 +311,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
       .set('Authorization', `Bearer ${tokenAdmin}`);
 
     expect(res.status).toBe(200);
-    expect(res.body as UsoResponse).toEqual({ items: [] });
+    expect(res.body as UsoResponse).toEqual({ nivel: 'linea', items: [] });
   });
 
   // ─── Aislamiento multi-tenant ──────────────────────────────────────────────
@@ -316,6 +343,116 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
     expect(res.status).toBe(404);
   });
 
+  // ─── Nivel de la regla ─────────────────────────────────────────────────────
+
+  /**
+   * El nivel decide por qué puerta se usa una regla, y las dos puertas lo hacen
+   * cumplir: `ItemsService.validarReglas` (asociarla a un ítem) y
+   * `CalculoPreciosService.resolverReglas` (mandarla en el cálculo). Sin esto
+   * una regla medida contra el total de la venta se podía colgar de un ítem y
+   * cobrarse contra la línea, que es otra plata.
+   */
+
+  it('el uso de una regla de venta dice su nivel, no solo "0 ítems"', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/descuentos/${descuentoDeVentaId}/uso`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+
+    expect(res.status).toBe(200);
+    // El conteo en 0 es correcto Y es inútil solo: una regla de venta no tiene
+    // tabla puente con ítems, así que su 0 no significa "nadie la usa". El
+    // `nivel` es lo que deja a la pantalla decir lo que corresponde.
+    expect(res.body as UsoResponse).toEqual({ nivel: 'venta', items: [] });
+  });
+
+  it('crear un ítem con un descuento de nivel venta es 400', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        nombre: `Item nivel E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+        clasificacionTributaria: 'afecto',
+        descuentosIds: [descuentoDeVentaId],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain('nivel venta');
+  });
+
+  it('asociar por PATCH un descuento de nivel venta a un ítem es 400', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ descuentosIds: [descuentoDeVentaId] });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain('nivel venta');
+  });
+
+  it('mandar una regla de línea en descuentosVentaIds es 400', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        lineas: [{ itemId, cantidad: '1' }],
+        descuentosVentaIds: [DESCUENTO_SIN_CONDICION_ID],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain(
+      'es de nivel línea',
+    );
+  });
+
+  it('mandar una regla de venta en la línea es 400', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        lineas: [{ itemId, cantidad: '1', descuentoIds: [descuentoDeVentaId] }],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain(
+      'es de nivel venta',
+    );
+  });
+
+  it('la regla de venta SÍ se aplica por su propia puerta (ancla positiva)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        lineas: [{ itemId, cantidad: '1' }],
+        descuentosVentaIds: [descuentoDeVentaId],
+      });
+
+    // Sin esto, los cuatro 400 de arriba también pasarían con una puerta
+    // tapiada de los dos lados.
+    expect(res.status).toBe(201);
+    expect(
+      Number(
+        (res.body as { totales: { totalDescuentos: string } }).totales
+          .totalDescuentos,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it('pasar a nivel venta una regla que ítems todavía usan es 400', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nivel: 'venta' });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain(
+      'todavía tienen',
+    );
+  });
+
   // ─── Ítems borrados ────────────────────────────────────────────────────────
 
   /**
@@ -325,9 +462,11 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
    * un `toContain` sobre la query también matchea el comentario de arriba.
    *
    * ⚠️ Borra el ítem que usan los tests de arriba, así que tiene que quedar
-   * DESPUÉS de todos los que dependan de él. Solo puede seguirlo el test del
-   * guard, que corta en `TenantAdminGuard` sin llegar al service y por eso no
-   * mira ningún ítem. Cualquier test nuevo que consulte `/uso` va ANTES de este.
+   * DESPUÉS de todos los que dependan de él **con el ítem vivo**. Un test nuevo
+   * que consulte `/uso` va ANTES de éste salvo que necesite justo lo contrario
+   * —el ítem ya borrado—, que es el caso del de la papelera de más abajo. El del
+   * guard cierra la lista porque corta en `TenantAdminGuard` sin llegar al
+   * service, así que no mira ningún ítem.
    */
   it('un ítem borrado deja de contarse en el uso de las tres reglas', async () => {
     const antes = await request(app.getHttpServer())
@@ -355,6 +494,33 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
         false,
       );
     }
+  });
+
+  /**
+   * ⚠️ Va DESPUÉS del test de arriba a propósito: necesita el ítem ya borrado,
+   * que es justo el estado que el guard no veía. `ItemsService.remove` es un
+   * soft delete que **no toca las tablas puente**, así que la fila de
+   * `item_descuentos` sigue viva; contando solo los ítems vivos el cambio de
+   * nivel pasaba, y al restaurar el ítem su descuento resultaba de nivel venta
+   * y el ítem quedaba invendible.
+   */
+  it('un ítem en la papelera igual bloquea el paso a nivel venta', async () => {
+    // Ancla positiva: el uso ya NO lo cuenta (el test de arriba lo verificó),
+    // así que si el guard mirara lo mismo que el modal, esto pasaría.
+    const uso = await request(app.getHttpServer())
+      .get(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}/uso`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect((uso.body as UsoResponse).items.some((i) => i.id === itemId)).toBe(
+      false,
+    );
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nivel: 'venta' });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain('papelera');
   });
 
   // ─── Guard: admin-only ─────────────────────────────────────────────────────

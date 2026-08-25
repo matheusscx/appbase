@@ -92,6 +92,8 @@ Reglas de la pausa:
 
 En la UI, pausar abre un modal que dice a cuántos ítems afecta (`GET /api/descuentos/:id/uso`)
 y promete la reversibilidad. Con cero ítems asociados no hay modal. Reactivar no pregunta.
+**Excepción: una regla de nivel venta siempre pregunta**, aunque su conteo sea 0 — no tiene
+tabla puente con ítems, así que ese 0 no significa "nadie la usa"; ver la sección siguiente.
 El flujo vive en `usePausaRegla()` + `CrudPausarModal.vue`, compartidos por las tres
 pantallas (descuentos, recargos, impuestos). Lo que **no** vive ahí es el guard del
 catálogo oficial de impuestos (`origen === 'sistema'`): es regla de impuestos, no de
@@ -99,6 +101,57 @@ pausar, y se queda en su pantalla.
 
 **El IVA queda fuera de todo esto**: no se pausa, se es afecto o exento. Ver
 [impuestos.md](./impuestos.md).
+
+## El nivel de la regla: por línea o por venta (2026-08-25)
+
+Una regla declara **dónde se aplica**, en la columna `nivel` (`'linea' | 'venta'`, default
+`'linea'`):
+
+| Nivel | Cómo se usa | Contra qué se mide |
+|---|---|---|
+| `linea` | se asocia a ítems (`item_descuentos` / `item_recargos`) o viaja en `descuentoIds` de una línea | el subtotal de esa línea |
+| `venta` | se elige al cobrar y viaja en `descuentosVentaIds` / `recargosVentaIds` | el acumulado de la venta |
+
+**Por qué hace falta la columna:** hasta el 2026-08-25 la misma fila servía para las dos
+cosas, así que *"20% sobre compras de $50.000"* se podía colgar de un ítem y dispararse con
+una línea de $50.000 dentro de una venta de $60.000. Es otra plata, y nada lo decía.
+
+⚠️ **La columna NO deriva del tipo de regla, y eso es a propósito pero tiene filo.** Un
+`por_monto_venta` creado desde la pantalla queda en `'linea'` por default, y ahí sus tramos se
+miden contra la línea: sigue siendo construible el caso del párrafo anterior si el autor no
+cambia el radio. Es un uso legítimo —*"llevando $50.000 de este vino, 10% en el vino"*— y por
+eso no se fuerza; lo que la columna garantiza es que la MISMA regla no sirva para las dos
+cosas. Si conviene que el tipo empuje el default del radio está anotado en
+[`pendientes.md`](../agent/pendientes.md).
+
+**Es binario a propósito** (decisión del owner, 2026-08-15). Un negocio que quiera la misma
+promo en los dos lugares crea dos reglas — el seed tiene el par: *"Promo fija $5.000"* (línea)
+y *"Promo del total $5.000"* (venta). El tercer estado costaría explicarlo en cada pantalla y
+respetarlo en cada puerta, contra duplicar una fila una vez.
+
+**Dos puertas lo hacen cumplir, y hacen falta las dos:**
+
+| Puerta | Rechaza |
+|---|---|
+| `ItemsService.validarReglas` | asociar a un ítem una regla de nivel venta (`POST`/`PATCH /items`) |
+| `CalculoPreciosService.resolverReglas` | una regla de venta en `descuentoIds` de una línea, y una de línea en `descuentosVentaIds` |
+
+La segunda no es redundante: una línea puede mandar sus propios `descuentoIds` y pisar los del
+ítem, camino que nunca pasa por el catálogo.
+
+**La validación NO vive en el motor.** El motor recibe las dos listas ya separadas y calcula
+plata; el nivel es una regla de catálogo sobre dónde se puede usar cada regla, del mismo orden
+que "el ítem está pausado" —que por la misma razón se resuelve en el service—.
+
+**Cambiar el nivel de línea a venta con ítems asociados se rechaza** (400 con el conteo). Las
+dos salidas automáticas eran peores: dejar las asociaciones vivas produce justo el estado que
+la primera puerta prohíbe, y borrarlas en silencio tira trabajo del catálogo por un cambio
+hecho en otra pantalla.
+
+⚠️ **Hoy el productor de reglas de venta no existe en el frontend.** `descuentosVentaIds` /
+`recargosVentaIds` están declarados en `useCalculoPrecios.ts` y consumidos por el backend, pero
+ninguna pantalla los llena todavía. El campo se construyó **antes** que el productor a
+propósito: al revés, el productor habría nacido pudiendo mandar cualquier regla.
 
 ## Recargo por escalones de monto (2026-08-22)
 
@@ -219,7 +272,7 @@ Mismos endpoints bajo `/api/recargos`.
 
 | Tabla | Cambio |
 |-------|--------|
-| `descuentos` | el importe vive en `valor_monto` / `valor_porcentaje`, las dos nullable |
+| `descuentos` | el importe vive en `valor_monto` / `valor_porcentaje`, las dos nullable; `nivel` (`nivel_regla`, default `'linea'`) dice si se aplica por línea o por venta |
 | `recargos` | ídem |
 
 #### El importe se expresa en dos columnas (2026-08-23)

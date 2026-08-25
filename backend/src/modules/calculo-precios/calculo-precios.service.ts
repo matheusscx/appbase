@@ -8,6 +8,7 @@ import { TenantsService } from '../tenants/tenants.service';
 import { MonedasService } from '../monedas/monedas.service';
 import { Db } from '../../common/db/db.service';
 import { fechaLocalTenant } from '../../common/utils/rango-fecha.util';
+import { NivelRegla } from '../../common/enums/reglas.enums';
 import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
 import {
   calcularVenta,
@@ -32,6 +33,14 @@ import {
  * `NUMERIC(18,6)`. La afirmación acotada al libro de ventas es la que se sostiene.)
  */
 const ESCALA_PERSISTIDA = 4;
+
+/**
+ * Una regla del catálogo con el dato que el motor **no** necesita: dónde se
+ * puede usar. Se agrega acá y no en `ReglaResuelta` para que el contrato del
+ * motor siga diciendo solo lo que el motor lee — el nivel se consume entero en
+ * este service, en `resolverReglas`.
+ */
+type ReglaResueltaConNivel = ReglaResuelta & { nivel: NivelRegla };
 
 type ItemsBaseMap = Awaited<ReturnType<ItemsService['cargarBasePorIds']>>;
 type ItemsReglasMap = Awaited<ReturnType<ItemsService['cargarReglasPorIds']>>;
@@ -259,11 +268,13 @@ export class CalculoPreciosService {
         dto.descuentosVentaIds ?? [],
         descuentoMap,
         'descuento',
+        NivelRegla.VENTA,
       ),
       recargosVenta: this.resolverReglas(
         dto.recargosVentaIds ?? [],
         recargoMap,
         'recargo',
+        NivelRegla.VENTA,
       ),
       config,
     });
@@ -365,11 +376,12 @@ export class CalculoPreciosService {
       }[];
       metodoPagoIds: string[];
       activo: boolean;
+      nivel: NivelRegla;
       fechaInicio: string | null;
       fechaFin: string | null;
     }[],
     fechaLocal: string,
-  ): Map<string, ReglaResuelta> {
+  ): Map<string, ReglaResueltaConNivel> {
     return new Map(
       reglas.map((r) => [
         r.id,
@@ -392,6 +404,10 @@ export class CalculoPreciosService {
             valorPorcentaje: t.valorPorcentaje,
           })),
           metodoPagoIds: r.metodoPagoIds,
+          // El motor no lee `nivel` —recibe las dos listas ya separadas—, pero
+          // el mapa sí lo lleva: es lo que `resolverReglas` compara para negarse
+          // a aplicar una regla por la puerta equivocada.
+          nivel: r.nivel,
           // El mapa conserva las reglas pausadas a propósito: sacarlas de acá
           // haría que `requerir()` tirara 400 por id ausente en cada ítem que
           // la tenga asociada, y el POS dejaría de vender. El descarte pasa al
@@ -415,8 +431,8 @@ export class CalculoPreciosService {
     reglasPorItem: ItemsReglasMap,
     impuestoMap: Map<string, ImpuestoResuelto & { tipo: string }>,
     ivaDelPais: (ImpuestoResuelto & { tipo: string }) | null,
-    descuentoMap: Map<string, ReglaResuelta>,
-    recargoMap: Map<string, ReglaResuelta>,
+    descuentoMap: Map<string, ReglaResueltaConNivel>,
+    recargoMap: Map<string, ReglaResueltaConNivel>,
     tasaMap: Map<string, string>,
     modoRedondeo: ModoRedondeo,
   ): LineaResuelta {
@@ -469,17 +485,83 @@ export class CalculoPreciosService {
       precioIncluyeImpuesto: item.precioIncluyeImpuesto,
       clasificacionTributaria: item.clasificacionTributaria,
       impuestos: impuestosLinea,
-      descuentos: this.resolverReglas(descuentoIds, descuentoMap, 'descuento'),
-      recargos: this.resolverReglas(recargoIds, recargoMap, 'recargo'),
+      descuentos: this.resolverReglas(
+        descuentoIds,
+        descuentoMap,
+        'descuento',
+        NivelRegla.LINEA,
+      ),
+      recargos: this.resolverReglas(
+        recargoIds,
+        recargoMap,
+        'recargo',
+        NivelRegla.LINEA,
+      ),
     };
   }
 
+  /**
+   * Resuelve ids del catálogo **exigiendo el nivel que corresponde a la puerta
+   * por la que entraron**: los de una línea tienen que ser de nivel línea, y los
+   * de la venta, de nivel venta. Es la segunda de las dos puertas donde el nivel
+   * se hace cumplir; la primera es `ItemsService.validarReglas`, que cubre la
+   * asociación en el catálogo.
+   *
+   * Hacen falta las DOS. Una línea puede mandar `descuentoIds` propios y pisar
+   * los del ítem (`resolverLinea`), así que la puerta del catálogo no ve ese
+   * camino; y `descuentosVentaIds` no pasa por ningún ítem.
+   *
+   * ⚠️ **La validación vive acá y NO en el motor.** El motor recibe las reglas
+   * ya separadas en dos listas y calcula plata; el nivel es una regla del
+   * catálogo sobre dónde se puede usar cada una, del mismo orden que "el ítem
+   * está pausado" —que por la misma razón se resuelve en este service—.
+   *
+   * ⚠️ **Tira 400 y no advierte, al revés que la regla pausada** —que este mismo
+   * archivo conserva en el mapa justo para no dejar de vender (ver
+   * `indexarReglas`)—, y la diferencia es qué clase de cosa es cada una. Una
+   * regla pausada es un ESTADO al que el catálogo llega solo, con ítems ya
+   * asociados: cortar ahí deja el POS sin vender por una decisión de
+   * administración. Un id en la lista equivocada es un REQUEST mal armado, y no
+   * es alcanzable desde el catálogo: `item_descuentos` no puede contener una
+   * regla de venta (lo impiden `ItemsService.validarReglas` al asociar y
+   * `validarCambioDeNivel` al cambiar el nivel, que cuenta también los ítems en
+   * la papelera).
+   *
+   * ⚠️ **Esa inalcanzabilidad vale salvo una ventana, y va dicha acá para que no
+   * se lea como garantía estructural:** `validarCambioDeNivel` corre FUERA de
+   * `db.transaccion`, así que un `PATCH /items` que asocie la regla entre su
+   * `COUNT` y el `save` deja la fila puente con una regla de venta. Es la misma
+   * forma que las otras tres carreras anotadas en `docs/agent/pendientes.md` § 5
+   * —validación sin lock, escritura ajena en el medio— y se resuelve con ellas,
+   * no con un parche suelto: cerrar la carrera pide un `FOR UPDATE`, y agregar un
+   * lock de fila acá cambia el orden de bloqueo — que es materia de
+   * `docs/patterns/backend.md` § 15, "Orden de bloqueo de filas en ítems
+   * compuestos", y del precedente de `ventas.service.ts → crear()` (orden
+   * determinista por `itemId` + reintento ante `40P01`).
+   *
+   * Si esa carrera se materializa, el síntoma es este 400 al vender y el arreglo
+   * es quitar la asociación. Si el estado se volviera alcanzable **por catálogo**
+   * —no por carrera—, esta decisión hay que releerla entera: ahí el 400 dejaría
+   * de ser "te equivocaste al pedir" y pasaría a ser "el catálogo te dejó sin
+   * vender".
+   */
   private resolverReglas(
     ids: string[],
-    mapa: Map<string, ReglaResuelta>,
+    mapa: Map<string, ReglaResueltaConNivel>,
     label: string,
+    nivelEsperado: NivelRegla,
   ): ReglaResuelta[] {
-    return ids.map((id) => this.requerir(mapa, id, label));
+    return ids.map((id) => {
+      const regla = this.requerir(mapa, id, label);
+      if (regla.nivel !== nivelEsperado) {
+        throw new BadRequestException(
+          nivelEsperado === NivelRegla.LINEA
+            ? `El ${label} "${regla.nombre}" es de nivel venta: se elige en la venta, no por línea`
+            : `El ${label} "${regla.nombre}" es de nivel línea: se asocia a un ítem, no a la venta`,
+        );
+      }
+      return regla;
+    });
   }
 
   /**

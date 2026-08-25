@@ -8,6 +8,7 @@ import { Repository, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
+import { NivelRegla } from '../../common/enums/reglas.enums';
 import { Item } from './entities/item.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import {
@@ -4583,6 +4584,20 @@ export class ItemsService {
     return rows[0].nombre;
   }
 
+  /**
+   * Las reglas que se asocian a un ítem tienen que existir en el tenant **y ser
+   * de nivel línea**. Una regla de nivel venta se elige en la venta y se evalúa
+   * contra el total: asociada a un ítem se evaluaría contra la línea y cobraría
+   * otra cosa —un "10% sobre compras de $50.000" se dispararía con una línea de
+   * $50.000 dentro de una venta de $60.000—. Ésta es una de las dos puertas
+   * donde el nivel se hace cumplir; la otra está en `CalculoPreciosService`.
+   *
+   * Los dos motivos van por separado a propósito: "no pertenece a este tenant"
+   * mandaba a buscar un problema de permisos donde el problema es de nivel.
+   *
+   * Sigue siendo **una sola query** para todos los ids (`= ANY`), no una por
+   * regla: `nivel` viaja en el mismo SELECT que ya validaba pertenencia.
+   */
   private async validarReglas(
     manager: EntityManager,
     tenantId: string,
@@ -4590,14 +4605,19 @@ export class ItemsService {
     tabla: string,
     pkCol: string,
   ): Promise<void> {
-    const rows: { cnt: string }[] = await manager.query(
-      `SELECT COUNT(*) AS cnt FROM ${tabla}
+    const rows: { nivel: NivelRegla }[] = await manager.query(
+      `SELECT nivel FROM ${tabla}
        WHERE ${pkCol} = ANY($1::uuid[]) AND tenant_id = $2 AND eliminado_el IS NULL`,
       [ids, tenantId],
     );
-    if (parseInt(rows[0].cnt) !== ids.length) {
+    if (rows.length !== ids.length) {
       throw new BadRequestException(
         `Una o más reglas de ${tabla} no pertenecen a este tenant`,
+      );
+    }
+    if (rows.some((r) => r.nivel === NivelRegla.VENTA)) {
+      throw new BadRequestException(
+        `Una o más reglas de ${tabla} son de nivel venta: se eligen en la venta, no se asocian a un ítem`,
       );
     }
   }

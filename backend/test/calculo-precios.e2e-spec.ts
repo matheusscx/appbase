@@ -9,8 +9,12 @@ const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 
-// "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
+// "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()),
+// de nivel LÍNEA: se asocia a ítems y se descuenta línea por línea.
 const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
+// "Promo del total $5.000" — su gemela de nivel VENTA. Los `descuentosVentaIds`
+// solo aceptan reglas de este nivel: mandar la de arriba es 400.
+const DESCUENTO_FIJO_VENTA_ID = '550e8400-e29b-41d4-a716-446655440360';
 // Tipo de regla `directo` y moneda CLP, ambos del seed. Se usan para crear una
 // regla y un ítem propios del test, sin depender del estado de los sembrados.
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
@@ -127,14 +131,16 @@ describe('Cálculo de precios (e2e)', () => {
             cantidad: '1',
           },
         ],
-        descuentosVentaIds: [DESCUENTO_FIJO_ID],
+        descuentosVentaIds: [DESCUENTO_FIJO_VENTA_ID],
       });
 
     expect(res.status).toBe(201);
     const body = res.body as ResultadoVentaResponse;
 
     expect(body.advertenciasVenta).toHaveLength(1);
-    expect(body.advertenciasVenta[0].titulo).toContain('Promo fija $5.000');
+    expect(body.advertenciasVenta[0].titulo).toContain(
+      'Promo del total $5.000',
+    );
     expect(body.lineas[0].advertencias).toHaveLength(0);
     expect(body.advertencias).toHaveLength(1);
   });

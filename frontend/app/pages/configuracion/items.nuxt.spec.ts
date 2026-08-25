@@ -65,14 +65,19 @@ const IMPUESTO_OTRO_PAUSADO = {
 }
 const RECARGO_ACTIVO = { id: 'rec-activo', nombre: 'Recargo tarjeta', activo: true }
 const RECARGO_PAUSADO = { id: 'rec-pausado', nombre: 'Recargo viejo', activo: false }
-let recargosMock: typeof RECARGO_ACTIVO[] = [RECARGO_ACTIVO, RECARGO_PAUSADO]
+let recargosMock: Record<string, unknown>[] = [RECARGO_ACTIVO, RECARGO_PAUSADO]
 
 const DESCUENTO_ACTIVO = { id: 'desc-activo', nombre: 'Promo verano', activo: true }
 // Una regla pausada que el ítem YA tiene asociada: el selector la excluye de
 // sus opciones (pausada = no se ofrece), y sin una opción que resuelva
 // id → nombre terminaba pintando el UUID crudo en la pantalla.
 const DESCUENTO_PAUSADO = { id: 'desc-pausado', nombre: 'Promo vieja', activo: false }
-let descuentosMock: typeof DESCUENTO_ACTIVO[] = [DESCUENTO_ACTIVO, DESCUENTO_PAUSADO]
+// Nivel venta: se elige al cobrar, NO se asocia a un ítem. El backend rechaza
+// la asociación con 400, así que ofrecerla acá sería ofrecer una opción que
+// siempre falla al guardar.
+const DESCUENTO_DE_VENTA = { id: 'desc-venta', nombre: 'Promo del total', activo: true, nivel: 'venta' }
+const RECARGO_DE_VENTA = { id: 'rec-venta', nombre: 'Recargo del total', activo: true, nivel: 'venta' }
+let descuentosMock: Record<string, unknown>[] = [DESCUENTO_ACTIVO, DESCUENTO_PAUSADO]
 
 // `/impuestos` y el detalle de `/items/:id` son configurables por test: el
 // chip fijo del IVA depende de la clasificación tributaria que traiga el
@@ -315,6 +320,27 @@ describe('configuracion/items — una regla pausada ya asociada se nombra', () =
       expect(listaCon(listas, 'Recargo tarjeta')).toEqual(['Recargo tarjeta'])
       expect(listaCon(listas, 'Impuesto Adicional (Sistema)')).toEqual(['Impuesto Adicional (Sistema)'])
       expect(listas.flat().filter(l => l.includes('(en pausa)'))).toEqual([])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  // Gemelo del de arriba en un eje DISTINTO: la pausa dice "hoy no se ofrece",
+  // el nivel dice "acá no va nunca". Una regla de venta ni siquiera aparece
+  // como pausada, porque no es que esté apagada: es que no se asocia a ítems.
+  it('las reglas de nivel venta no figuran en ningún selector', async () => {
+    descuentosMock = [DESCUENTO_ACTIVO, DESCUENTO_DE_VENTA]
+    recargosMock = [RECARGO_ACTIVO, RECARGO_DE_VENTA]
+    itemDetalleMock = { ...ITEM_PRODUCTO, impuestosIds: [], descuentosIds: [], recargosIds: [] }
+    const wrapper = await abrirEditar()
+    try {
+      const listas = opcionesPorSelect(wrapper)
+      // Anclas positivas: sin ellas un drawer que no montó pasaría los dos
+      // negativos por vacuidad.
+      expect(listaCon(listas, 'Promo verano')).toEqual(['Promo verano'])
+      expect(listaCon(listas, 'Recargo tarjeta')).toEqual(['Recargo tarjeta'])
+      expect(listas.flat()).not.toContain('Promo del total')
+      expect(listas.flat()).not.toContain('Recargo del total')
     } finally {
       wrapper.unmount()
     }

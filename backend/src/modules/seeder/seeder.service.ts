@@ -27,7 +27,11 @@ import { DescuentoMetodoPago } from '../descuentos/entities/descuento-metodo-pag
 import { Recargo } from '../recargos/entities/recargo.entity';
 import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.entity';
-import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
+import {
+  ModoRegla,
+  CondicionTipo,
+  NivelRegla,
+} from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
@@ -2844,6 +2848,10 @@ export class SeederService implements OnApplicationBootstrap {
     const descuentos: Partial<Descuento>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440114',
+        // El nivel se declara en TODAS las filas, no solo en las que no son el
+        // default: el seed es la referencia de cómo se ve una regla completa, y
+        // una fila que lo omite enseña que es opcional pensarlo.
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_PRONTO_PAGO,
         nombre: 'Descuento pronto pago 10%',
@@ -2855,6 +2863,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440125',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_METODO_PAGO,
         nombre: 'Descuento pago en efectivo 3%',
@@ -2866,6 +2875,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440126',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_POR_MAYOR,
         nombre: 'Descuento mayorista por volumen',
@@ -2876,6 +2886,10 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440127',
+        // Nivel VENTA, y es el único sentido que tiene: sus tramos se miden
+        // contra el monto de la COMPRA. Asociada a un ítem se dispararía con
+        // una línea que alcance el mínimo aunque la venta no lo alcance.
+        nivel: NivelRegla.VENTA,
         tenantId: PARIS,
         tipoReglaId: TIPO_POR_MONTO_VENTA,
         nombre: 'Descuento compra grande',
@@ -2886,6 +2900,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440128',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_DIRECTO,
         nombre: 'Promo verano 2026-27',
@@ -2901,9 +2916,27 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440338',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_DIRECTO,
         nombre: 'Promo fija $5.000',
+        modo: ModoRegla.MONTO_FIJO,
+        valorMonto: '5000',
+        condicionTipo: CondicionTipo.NINGUNA,
+        activo: true,
+      },
+      {
+        // Gemela de "Promo fija $5.000" pero de nivel VENTA, y existe para que
+        // el demo —y el e2e— tengan un descuento que se elige al cobrar y se
+        // descuenta del total. La de arriba se asocia a ítems; ésta no puede,
+        // y ésa es toda la diferencia. Mismo monto a propósito: las dos topean
+        // igual sobre una venta chica, así que el caso "topeado" se prueba a
+        // los dos niveles con la misma aritmética.
+        id: '550e8400-e29b-41d4-a716-446655440360',
+        nivel: NivelRegla.VENTA,
+        tenantId: PARIS,
+        tipoReglaId: TIPO_DIRECTO,
+        nombre: 'Promo del total $5.000',
         modo: ModoRegla.MONTO_FIJO,
         valorMonto: '5000',
         condicionTipo: CondicionTipo.NINGUNA,
@@ -3010,6 +3043,7 @@ export class SeederService implements OnApplicationBootstrap {
     const recargos: Partial<Recargo>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440115',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_INTERES_SIMPLE,
         nombre: 'Interés cuotas 5%',
@@ -3020,6 +3054,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440129',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_GENERAL,
         nombre: 'Recargo administrativo 2%',
@@ -3030,6 +3065,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440130',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_MORA,
         nombre: 'Mora por atraso 15 días',
@@ -3041,6 +3077,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440131',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_RECARGO_METODO_PAGO,
         nombre: 'Recargo tarjeta de crédito 3%',
@@ -3056,6 +3093,9 @@ export class SeederService implements OnApplicationBootstrap {
         // a propósito — el monto lo dicen los tramos (`seedRecargoTramos`),
         // que por ser esta regla `monto_fijo` lo llevan en `valorMonto`.
         id: '550e8400-e29b-41d4-a716-446655440354',
+        // Espejo de "Descuento compra grande": el escalón lo decide el total del
+        // pedido, así que es de nivel venta.
+        nivel: NivelRegla.VENTA,
         tenantId: PARIS,
         tipoReglaId: TIPO_POR_MONTO_VENTA,
         nombre: 'Recargo por pedido chico',
@@ -3066,6 +3106,7 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440132',
+        nivel: NivelRegla.LINEA,
         tenantId: PARIS,
         tipoReglaId: TIPO_INTERES_COMPUESTO,
         nombre: 'Interés compuesto cuotas 4%',

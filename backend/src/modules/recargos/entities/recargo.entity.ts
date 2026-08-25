@@ -7,7 +7,11 @@ import {
   DeleteDateColumn,
   Check,
 } from 'typeorm';
-import { ModoRegla, CondicionTipo } from '../../../common/enums/reglas.enums';
+import {
+  ModoRegla,
+  CondicionTipo,
+  NivelRegla,
+} from '../../../common/enums/reglas.enums';
 
 @Entity('recargos')
 @Check(
@@ -27,6 +31,24 @@ export class Recargo {
 
   @Column({ type: 'enum', enum: ModoRegla, enumName: 'modo_regla' })
   modo: ModoRegla;
+
+  /**
+   * Dónde se aplica: por línea o sobre el total de la venta. Ver `NivelRegla`.
+   *
+   * **Con default y NOT NULL a propósito.** El default no es comodidad del DTO:
+   * es lo que deja que `synchronize` agregue la columna sobre las filas que ya
+   * existen —el demo de Railway— sin el `23502` que dejó el backend en CRASHED
+   * el 2026-08-09 (`e163dbb7`, `docs/ARCHITECTURE.md`). Y `'linea'` es el valor
+   * VERDADERO para esas filas: hasta hoy la única forma de usar una regla era
+   * asociarla a un ítem.
+   */
+  @Column({
+    type: 'enum',
+    enum: NivelRegla,
+    enumName: 'nivel_regla',
+    default: NivelRegla.LINEA,
+  })
+  nivel: NivelRegla;
 
   // El importe vive en UNA de las dos, la que dice `modo`. Las dos en null es
   // el estado válido de una regla por tramos, que lo expresa en `recargo_tramos`.

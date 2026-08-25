@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { NivelRegla } from '~/composables/useNivelRegla'
 import type { TableColumn } from '@nuxt/ui'
 import { DESCUENTO_CONFIG, type TipoConfig } from '~/utils/reglas-form-config'
 
@@ -13,6 +14,7 @@ interface TipoRegla { id: string; nombre: string; codigo: string; descripcion: s
 interface Regla {
   id: string
   nombre: string
+  nivel: NivelRegla
   tipoReglaId: string
   tipoRegla?: { id: string; codigo: string; nombre: string }
   modo: string | null
@@ -34,6 +36,7 @@ const apiUrl = runtimeConfig.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('descuentos')
 const { estadoVigencia, vigenciaColor, vigenciaLabel } = useVigenciaRegla()
+const { nivelOptions, nivelLabel } = useNivelRegla()
 
 const descuentos = ref<Regla[]>([])
 const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
@@ -60,6 +63,7 @@ const {
   toggling,
   confirmPausarNombre,
   confirmPausarItems,
+  confirmPausarNivel,
   confirmPausarModalOpen,
   toggleActivo,
   cerrarPausar,
@@ -76,6 +80,7 @@ const CONFIG_MAP = DESCUENTO_CONFIG
 const emptyForm = () => ({
   nombre: '',
   tipoReglaId: '',
+  nivel: 'linea' as NivelRegla,
   modo: 'porcentaje' as string,
   valorMonto: '' as string,
   valorPorcentaje: '' as string,
@@ -241,6 +246,7 @@ function abrirEditar(d: Regla) {
   form.value = {
     nombre: d.nombre,
     tipoReglaId: d.tipoReglaId,
+    nivel: d.nivel ?? 'linea',
     modo: d.modo ?? '',
     valorMonto: d.valorMonto ?? '',
     valorPorcentaje: d.valorPorcentaje ?? '',
@@ -285,6 +291,7 @@ async function guardar() {
     const body: Record<string, unknown> = {
       nombre: form.value.nombre,
       tipoReglaId: form.value.tipoReglaId,
+      nivel: form.value.nivel,
       activo: form.value.activo,
     }
 
@@ -509,6 +516,13 @@ const columns: TableColumn<Regla>[] = [
               >
                 {{ vigenciaLabel(row.original.fechaInicio, row.original.fechaFin) }}
               </UBadge>
+              <UBadge
+                v-if="nivelLabel(row.original.nivel)"
+                color="neutral"
+                variant="outline"
+              >
+                {{ nivelLabel(row.original.nivel) }}
+              </UBadge>
             </div>
             <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
               {{ formatearBorradoPor(row.original) }}
@@ -615,6 +629,18 @@ const columns: TableColumn<Regla>[] = [
             >
               {{ tipoSeleccionado.descripcion }}
             </p>
+          </UFormField>
+
+          <!-- Nivel: dónde se aplica. Va después del Tipo y fuera del `v-if` de
+               `config`, porque no depende del tipo elegido: toda regla se aplica
+               en un lado o en el otro, y el backend rechaza usarla por la puerta
+               que no es. -->
+          <UFormField label="Se aplica" required>
+            <URadioGroup
+              v-model="form.nivel"
+              :items="nivelOptions"
+              value-key="value"
+            />
           </UFormField>
 
           <!-- Only show the rest if a tipo is selected and config is resolved -->
@@ -772,6 +798,7 @@ const columns: TableColumn<Regla>[] = [
       v-model:open="confirmPausarModalOpen"
       :nombre="confirmPausarNombre"
       :items="confirmPausarItems"
+      :nivel="confirmPausarNivel"
       @cancel="cerrarPausar"
       @confirm="confirmarPausar"
     />
