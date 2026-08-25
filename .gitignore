@@ -25,3 +25,4 @@ npm-debug.log*
 .idea/
 .codegraph.superpowers/
 backend/test/tmp-401.jsonl
+backend/test/tmp-pool.jsonl

@@ -16,6 +16,7 @@
   "maxWorkers": 1,
   "testTimeout": 30000,
   "setupFilesAfterEnv": [
-    "<rootDir>/setup-supertest.ts"
+    "<rootDir>/setup-supertest.ts",
+    "<rootDir>/setup-pool.ts"
   ]
 }

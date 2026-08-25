@@ -158,6 +158,58 @@ decisión que no es mía).
   espera. Es familia de causas, **no causa raíz confirmada**. No se pudo peritar el fallo
   original porque `reset-db.sh` hace `down -v` y el contenedor y sus logs ya no existían.
 
+  🔬 **Pasada del 2026-08-25: se instrumentó el pool, y el descarte de "no es agotamiento"
+  quedó REFUTADO por medir la magnitud equivocada.**
+
+  ⛔ **El descarte estaba mal planteado, no mal medido.** La tabla de arriba concluye que no
+  hay agotamiento porque `pg_stat_activity` picó en **16 contra `max_connections = 100``**.
+  Ese número mide **el servidor**, y el agotamiento acá es **por pool**: cada spec levanta su
+  propia app con su propio pool de 10 (`app.module.ts:161`), así que un pool completamente
+  saturado se ve como ~10 conexiones en Postgres y contra 100 parece holgura. La pregunta
+  correcta no se podía contestar desde ahí.
+
+  **Lo que ahora existe: `backend/test/setup-pool.ts`**, que parchea `Pool.prototype.connect`
+  y registra cada adquisición con el estado del pool (`total`, `idle`, `esperando`, `max`).
+  Distingue las dos causas que comparten síntoma: `esperando > 0` con `total === max` es
+  saturación; `total < max` con `ms` alto es un `connect()` lento.
+
+  ✅ **Medido sobre 10 corridas completas de la suite, todas verdes (~21 min):**
+
+  | | |
+  |---|---|
+  | Adquisiciones pedidas con alguien **ya en cola** | ~400 por corrida |
+  | Pedidas con el pool **lleno** (10/10) | ~164 por corrida |
+  | Espera máxima | **10-18 ms**, un caso de 53 ms |
+  | Cola máxima | **5**, en las 10 corridas |
+  | Timeouts | **0** |
+
+  **La saturación con cola es rutinaria y DELIBERADA**, y la hacen dos specs, no uno: el
+  conocido `concurrencia-pool` (ráfaga de exactamente 10 = el pool) y **`rbac-y-contrasena`,
+  que esta entrada no nombraba** — su test *"una ráfaga de 15 refresh simultáneos no traba el
+  pool"* dispara **15 contra un pool de 10**, así que 5 se encolan siempre. Es exactamente la
+  cola máxima medida.
+
+  ➡️ **Dónde queda el frente:** la cola drena en ~13 ms contra un timeout de 5 s, o sea un
+  margen de ~**94×**. El fallo sería uno de esos encolados pasándose de 5 s porque algo en
+  vuelo se demoró. **No reprodujo en 10 corridas**, así que la causa de la demora sigue sin
+  identificarse — pero la próxima vez la sonda va a decir si el pool estaba saturado o si el
+  `connect()` fue lento, que es lo que nadie pudo contestar hasta ahora.
+
+  ⛔ **REFUTADO — agotamiento de puertos efímeros.** Hipótesis razonable: supertest abre una
+  conexión por request y el server contesta `Connection: close`, así que no hay reuso y cada
+  una quema un par de puertos. **Medido durante una corrida completa a 200 ms**: TIME_WAIT
+  pica en 991 y los puertos efímeros en uso en **1071 de 16384 (6,5%)**. No hay presión.
+
+  📌 **Dos notas de método de esta pasada:**
+  - **No hace falta atrapar el fallo para caracterizarlo.** Medir la distribución de lo que
+    pasa *siempre* mostró la saturación deliberada y el margen real; esperar al intermitente
+    habría costado corridas sin datos.
+  - **Una sonda muda se ve igual que una sonda sin nada que reportar.** La primera versión de
+    ésta dejaba pasar sin instrumentar la forma con **callback** de `connect()`, que —medido
+    en `node_modules/typeorm/driver/postgres/PostgresDriver.js:1085,1106,1401`— es la
+    **única** que TypeORM usa: el archivo salía vacío. Se verifica que engancha bajando el
+    umbral a 0 **antes** de creerle a un archivo vacío.
+
   ⚠️ **Dos notas de método, que valen más que la entrada:**
   - **Un muestreo de 1 segundo NO alcanza.** Dio pico 9; a 200 ms el mismo escenario dio **16**.
     Una medición de conexiones con resolución de segundo lleva a conclusiones equivocadas sobre
