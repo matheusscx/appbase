@@ -127,8 +127,9 @@ bandeja de desfases". La regla que salió de ahí —el orden `item_receta` → 
 `items`, y dentro de cada tabla por `item_id`— vive en
 [`docs/patterns/backend.md`](../patterns/backend.md) § "Orden de bloqueo de filas en ítems
 compuestos", y **hay que leerla antes de tocar cualquier camino que escriba estas tablas**.
-Lo único que sigue abierto de ese frente es una carrera sin lock de `descartarDesfases`, en
-[`docs/agent/pendientes.md`](../agent/pendientes.md) § 2.
+Lo que quedaba abierto de ese frente —una lectura sin lock de `descartarDesfases`— **se cerró
+el 2026-08-25**, y no con un lock: ver *"El descarte archiva lo que el usuario VIO"* más
+abajo.
 
 ### Margen y precio sugerido
 
@@ -150,6 +151,27 @@ Si `precioBase = 0` → márgenes y precio sugerido son `null`.
 |--------|---------------------------|---------------------------|---------------------|
 | **Aplicar** | Recomputa y persiste `costoPropuesto` en servidor | `NULL` | Solo si checkbox `actualizarPrecio` + `precioBase > 0` |
 | **Descartar** | Sin cambio | `costoPropuesto` actual | Sin cambio |
+
+#### El descarte archiva lo que el usuario VIO (2026-08-25)
+
+`descartarDesfases` **recalculaba** el costo propuesto al descartar y archivaba ese. Medido
+contra la API el 2026-08-24, sobre `Hamburguesa Especial`:
+
+| Paso | Resultado |
+|---|---|
+| El usuario ve en la bandeja | propuesto **1120** |
+| Cambia el costo de un ingrediente | el propuesto real pasa a **1019,98** |
+| El usuario hace clic en Descartar | `{"descartados":1}` |
+| Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
+| La bandeja después | **0 filas** |
+
+Con el predicado de la bandeja —oculta si `propuesto == omitido`— el desfase nuevo quedaba
+**silenciado**. Por eso el número viaja desde el cliente.
+
+⚠️ **No es una carrera, y por eso no se arregla con un lock.** El recálculo es desde cero, así
+que cualquier cambio entre abrir la bandeja y hacer clic lo dispara: el mismo usuario, en otra
+pestaña, con minutos de diferencia. Un `FOR UPDATE` cubre milisegundos; la ventana real es lo
+que la pantalla esté abierta.
 
 Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una). **Descartar no toma un `FOR UPDATE` explícito** — el lock lo toma cada `UPDATE`, en el orden en que se ejecuta — pero desde el cierre del 2026-08-20 ese orden ya no es "el que manda el cliente": `descartarDesfases` parte el lote en dos pasadas (`item_receta` antes que `item_combo`) y ordena cada una por `item_id`, igual que los dos `FOR UPDATE` de `aplicar`. Regla completa y por qué existe: [`docs/patterns/backend.md`](../patterns/backend.md) § "Orden de bloqueo de filas en ítems compuestos".
 
@@ -244,10 +266,23 @@ Respuesta:
 Permiso: **Items:Actualizar**.
 
 ```json
-{ "itemIds": ["<uuid>", "<uuid>"] }
+{ "items": [{ "itemId": "<uuid>", "costoPropuestoVisto": "1200.0000" }] }
 ```
 
-Setea `costo_propuesto_omitido` al `costoPropuesto` recomputado (en la tabla que corresponda según `tipo`); no toca costo ni precio.
+```json
+{ "descartados": 1, "cambiados": [] }
+```
+
+Setea `costo_propuesto_omitido` (en la tabla que corresponda según `tipo`); no toca costo ni
+precio.
+
+**`costoPropuestoVisto` es el número que el usuario tenía en pantalla, y el servidor archiva
+ESE.** Ver la sección siguiente: recalcularlo silenciaba desfases.
+
+Una fila cuyo propuesto ya no coincide **no se descarta** y vuelve en `cambiados`
+(`{ itemId, nombre, costoPropuestoActual }`); las demás del lote se descartan igual, para que
+una fila que cambió no bloquee las otras nueve (decisión del owner, 2026-08-25). El status
+sigue siendo `201` en ese caso: no es un error del cliente, es información.
 
 ---
 
@@ -256,7 +291,7 @@ Setea `costo_propuesto_omitido` al `costoPropuesto` recomputado (en la tabla que
 - **Módulo**: `src/modules/items/` (sin módulo Nest nuevo).
 - **Controller**: `desfases.controller.ts` (`@Controller('desfases')`) + `GET :id/afectados` en `items.controller.ts`.
 - **Service**: `ItemsService` — `listarDesfases`, `itemsAfectadosPorInsumo`, `aplicarDesfases`, `descartarDesfases`; privados `costoPropuesto` (recetas, con conversión de unidades) y `costoPropuestoCombo` (combos, sin conversión), más `filasDesfaseRecetas`/`filasDesfaseCombos` que arman las filas de `DesfaseItemDto`.
-- **DTOs**: `query-desfases.dto.ts` (`insumoItemId`), `aplicar-desfases.dto.ts` (`items[]` con `itemId`), `descartar-desfases.dto.ts` (`itemIds[]`).
+- **DTOs**: `query-desfases.dto.ts` (`insumoItemId`), `aplicar-desfases.dto.ts` (`items[]` con `itemId`), `descartar-desfases.dto.ts` (`items[]` con `itemId` + `costoPropuestoVisto`).
 - Endpoints de compra/`PATCH` de costo **sin cambios**; el FE encadena el GET de afectados.
 
 ---

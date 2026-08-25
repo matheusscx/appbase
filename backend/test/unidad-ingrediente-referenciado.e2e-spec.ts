@@ -281,7 +281,10 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
     const resDescartar = await request(app.getHttpServer())
       .post('/api/desfases/descartar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [recetaId] });
+      // El `costoPropuestoVisto` es obligatorio desde el 2026-08-25 pero acá da
+      // igual cuál sea: el 400 de unidad incompatible sale ANTES de compararlo
+      // — no hay costo proponible contra el que comparar, que es el punto.
+      .send({ items: [{ itemId: recetaId, costoPropuestoVisto: '1' }] });
     expect(resDescartar.status).toBe(400);
 
     // Lo que importa de verdad: ninguna de las dos columnas de dinero quedó

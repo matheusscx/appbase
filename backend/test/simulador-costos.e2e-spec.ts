@@ -224,11 +224,32 @@ describe('Simulador impacto costos (e2e)', () => {
       .send({ itemId: panId, costoNuevo: '700', comentario: 'Ajuste E2E' })
       .expect(201);
 
-    await request(app.getHttpServer())
+    // El descarte manda el propuesto que la bandeja mostró, igual que hace la
+    // pantalla: desde el 2026-08-25 el servidor archiva ESE y no uno recalculado,
+    // así que el test tiene que leer la bandeja primero. Mandar un número
+    // inventado devolvería 201 con `descartados: 0`, y la fila seguiría ahí —
+    // que es justo lo que la aserción de abajo verifica.
+    const previa = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`);
+    const filaPrevia = (previa.body as DesfaseItemResponse[]).find(
+      (r) => r.itemId === recetaId,
+    );
+    expect(filaPrevia).toBeDefined();
+
+    const resDescartar = await request(app.getHttpServer())
       .post('/api/desfases/descartar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [recetaId] })
+      .send({
+        items: [
+          {
+            itemId: recetaId,
+            costoPropuestoVisto: filaPrevia!.costoPropuesto,
+          },
+        ],
+      })
       .expect(201);
+    expect((resDescartar.body as { descartados: number }).descartados).toBe(1);
 
     let bandeja = await request(app.getHttpServer())
       .get('/api/desfases')
@@ -253,6 +274,102 @@ describe('Simulador impacto costos (e2e)', () => {
         (r) => r.itemId === recetaId,
       ),
     ).toBe(true);
+  });
+
+  /**
+   * El bug que cerró el frente del 2026-08-25, de punta a punta: el descarte
+   * **recalculaba** el propuesto y archivaba ese, así que un cambio entre abrir
+   * la bandeja y hacer clic dejaba archivado un número que nunca estuvo en
+   * pantalla y la fila desaparecía — un desfase silenciado.
+   *
+   * ⚠️ **No hace falta ninguna carrera para reproducirlo**, y por eso este test
+   * es secuencial: el recálculo es desde cero, así que alcanza con que el costo
+   * se mueva entre las dos requests. Un `FOR UPDATE` no lo habría arreglado.
+   */
+  it('si el costo cambió entre la bandeja y el descarte, la fila NO se silencia', async () => {
+    const resIng = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Pan cambiante E2E ${Date.now()}`,
+        precioBase: '500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '20',
+        costo: '500',
+      });
+    expect(resIng.status).toBe(201);
+    const panId = resIng.body.id as string;
+
+    const resRec = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Cambiante E2E ${Date.now()}`,
+        precioBase: '2000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resRec.status).toBe(201);
+    const recetaId = resRec.body.id as string;
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId: panId, costoNuevo: '700', comentario: 'Ajuste E2E' })
+      .expect(201);
+
+    // 1) El usuario abre la bandeja y ve un número.
+    const previa = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`);
+    const visto = (previa.body as DesfaseItemResponse[]).find(
+      (r) => r.itemId === recetaId,
+    )?.costoPropuesto;
+    expect(visto).toBeDefined();
+
+    // 2) El costo se mueve mientras la pantalla está abierta.
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId: panId, costoNuevo: '900', comentario: 'Ajuste E2E' })
+      .expect(201);
+
+    // 3) El usuario hace clic en Descartar sobre lo que vio.
+    const resDescartar = await request(app.getHttpServer())
+      .post('/api/desfases/descartar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ itemId: recetaId, costoPropuestoVisto: visto }] })
+      .expect(201);
+
+    const cuerpo = resDescartar.body as {
+      descartados: number;
+      cambiados: { itemId: string; costoPropuestoActual: string }[];
+    };
+    expect(cuerpo.descartados).toBe(0);
+    expect(cuerpo.cambiados.map((c) => c.itemId)).toEqual([recetaId]);
+    // El número que se le informa es el NUEVO, no el que mandó.
+    expect(cuerpo.cambiados[0].costoPropuestoActual).not.toBe(visto);
+
+    // 4) Y lo que importa: la fila SIGUE en la bandeja. Antes del arreglo, acá
+    //    había cero filas y el desfase quedaba invisible para siempre.
+    const despues = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`);
+    const fila = (despues.body as DesfaseItemResponse[]).find(
+      (r) => r.itemId === recetaId,
+    );
+    expect(fila).toBeDefined();
+    expect(fila!.costoPropuesto).toBe(cuerpo.cambiados[0].costoPropuestoActual);
   });
 
   it('aplicar sin checkbox no cambia precio_base', async () => {

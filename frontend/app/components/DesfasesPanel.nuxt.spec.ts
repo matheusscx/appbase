@@ -145,3 +145,28 @@ describe('DesfasesPanel — columna Tipo', () => {
 
 // Silencia el warning de vi sin uso si el runtime no lo requiere.
 void vi
+
+// Lo que el panel manda al descartar es la mitad del arreglo del 2026-08-25: el
+// backend archiva el número que viene de acá en vez de recalcularlo, así que si
+// el panel mandara solo ids —o un número que no es el que se está mostrando— el
+// bug vuelve entero y ningún test del backend lo vería.
+describe('DesfasesPanel — descartar manda el costo que se está mostrando', () => {
+  it('emite el `costoPropuesto` de cada fila seleccionada, no solo su id', async () => {
+    esAdmin = true
+    permisos = []
+
+    const wrapper = await mountSuspended(DesfasesPanel, {
+      props: { filas: FILAS as never },
+    })
+
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Descartar'))
+    expect(boton).toBeDefined()
+    await boton!.trigger('click')
+
+    const emitido = wrapper.emitted('descartar')
+    expect(emitido).toBeTruthy()
+    expect(emitido![0]![0]).toEqual([
+      { itemId: 'receta-1', costoPropuestoVisto: '1200.0000' },
+    ])
+  })
+})

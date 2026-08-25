@@ -27,6 +27,18 @@ export interface AplicarDesfaseItem {
   precioBase?: string
 }
 
+/**
+ * Lo que se manda al descartar. El `costoPropuestoVisto` es **el número que
+ * esta tabla tenía en pantalla**, y viaja porque el backend archiva ESE en vez
+ * de recalcularlo: recalculando, un cambio de costo entre abrir la bandeja y
+ * hacer clic dejaba archivado un número que el usuario nunca vio y la fila
+ * desaparecía con el desfase adentro (medido 2026-08-24).
+ */
+export interface DescartarDesfaseItem {
+  itemId: string
+  costoPropuestoVisto: string
+}
+
 const props = withDefaults(
   defineProps<{
     filas: DesfaseItemDto[]
@@ -41,7 +53,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   aplicar: [items: AplicarDesfaseItem[]]
-  descartar: [itemIds: string[]]
+  descartar: [items: DescartarDesfaseItem[]]
   cerrar: []
 }>()
 
@@ -138,11 +150,13 @@ function onAplicar() {
 }
 
 function onDescartar() {
-  const ids = props.filas
+  // Se manda el `costoPropuesto` de la fila TAL COMO SE ESTÁ MOSTRANDO: es el
+  // número que el usuario tiene delante y sobre el que decidió.
+  const items = props.filas
     .filter((f) => selected.value.has(f.itemId))
-    .map((f) => f.itemId)
-  if (!ids.length) return
-  emit('descartar', ids)
+    .map((f) => ({ itemId: f.itemId, costoPropuestoVisto: f.costoPropuesto }))
+  if (!items.length) return
+  emit('descartar', items)
 }
 </script>
 

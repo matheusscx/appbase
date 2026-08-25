@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AplicarDesfaseItem,
+  DescartarDesfaseItem,
   DesfaseItemDto,
 } from '~/components/DesfasesPanel.vue'
 
@@ -8,6 +9,15 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
+
+/**
+ * `cambiados` son las filas cuyo costo se movió entre que la bandeja se cargó y
+ * el clic en Descartar: NO se descartaron, y vuelven con su número nuevo.
+ */
+interface DescartarResponse {
+  descartados: number
+  cambiados: { itemId: string, nombre: string, costoPropuestoActual: string }[]
+}
 
 interface AplicarResponse {
   aplicados: number
@@ -77,16 +87,35 @@ async function onAplicar(items: AplicarDesfaseItem[]) {
   }
 }
 
-async function onDescartar(itemIds: string[]) {
+async function onDescartar(items: DescartarDesfaseItem[]) {
   actionLoading.value = true
   try {
-    await useApiFetch(`${apiUrl}/desfases/descartar`, {
+    const res = await useApiFetch<DescartarResponse>(`${apiUrl}/desfases/descartar`, {
       method: 'POST',
-      body: { itemIds },
+      body: { items },
     })
-    const ids = new Set(itemIds)
-    filas.value = filas.value.filter(f => !ids.has(f.itemId))
-    toast.add({ title: 'Avisos descartados', color: 'success' })
+    if (res.cambiados.length) {
+      // Se recarga entera en vez de filtrar a mano: las filas que cambiaron
+      // tienen que mostrar el número NUEVO, y sacarlas de la lista sería
+      // repetir el bug que este cambio cierra (la fila desaparecía con el
+      // desfase adentro).
+      await cargar()
+      const uno = res.cambiados[0]!
+      toast.add({
+        title: res.cambiados.length === 1
+          ? `El costo de «${uno.nombre}» cambió mientras mirabas`
+          : `${res.cambiados.length} costos cambiaron mientras mirabas`,
+        description: 'Esos avisos no se descartaron. Mirá el número nuevo y decidí otra vez.',
+        color: 'warning',
+      })
+    }
+    else {
+      const ids = new Set(items.map(i => i.itemId))
+      filas.value = filas.value.filter(f => !ids.has(f.itemId))
+    }
+    if (res.descartados) {
+      toast.add({ title: 'Avisos descartados', color: 'success' })
+    }
   }
   catch (e) {
     toast.add({ title: apiErrorMsg(e, 'Error al descartar desfases'), color: 'error' })

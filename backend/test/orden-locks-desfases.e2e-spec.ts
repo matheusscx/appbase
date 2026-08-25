@@ -22,6 +22,8 @@ interface ItemResponse {
 interface DesfaseItemResponse {
   itemId: string;
   tipo: 'receta' | 'combo';
+  /** Lo que la bandeja propone hoy. El descarte tiene que mandarlo de vuelta. */
+  costoPropuesto: string;
 }
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -113,6 +115,28 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
   let port: number;
   let recetaId: string;
   let comboId: string;
+  /**
+   * El propuesto de cada fila, leído UNA vez del `GET /desfases` del setup.
+   *
+   * ⚠️ Desde el 2026-08-25 el descarte solo escribe si el `costoPropuestoVisto`
+   * coincide con el recalculado. Mandar un número inventado haría que el service
+   * **no tome ningún lock** y este spec quedaría midiendo una compuerta vacía —
+   * lo caza `esperandoLockEnLaCompuerta`, que exigiría 2 y vería 0, pero conviene
+   * que la razón esté escrita y no se descubra por un rojo raro.
+   *
+   * Se lee una sola vez, y vale acá por una razón ACOTADA a esta fixture: el
+   * combo de este spec cuelga de un **producto**, no de la receta, así que
+   * `aplicarDesfases` —que mueve `costo_actual`— no le mueve el propuesto a
+   * nadie del lote.
+   *
+   * ⚠️ **No es una propiedad general**: para un combo cuyo componente es una
+   * receta, el costo del insumo ES `item_receta.costo_actual`
+   * (`componentesPorCombo`: `COALESCE(ip.costo_actual, ir.costo_actual)`), y por
+   * eso `aplicarDesfases` devuelve `afectados` — aplicar una receta SÍ mueve el
+   * propuesto de sus combos. Quien cambie la fixture para colgar el combo de la
+   * receta tiene que releer los propuestos entre `it` y `it`.
+   */
+  const propuestoPorId = new Map<string, string>();
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -249,6 +273,7 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
     expect(filas.some((f) => f.itemId === comboId && f.tipo === 'combo')).toBe(
       true,
     );
+    for (const f of filas) propuestoPorId.set(f.itemId, f.costoPropuesto);
 
     // Por HTTP real contra un puerto bindeado: supertest levanta un listener
     // efímero por request y varias simultáneas lo tumban con ECONNRESET —
@@ -296,7 +321,12 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
     });
 
   const descartar = (itemIds: string[]) => () =>
-    postear('/api/desfases/descartar', { itemIds });
+    postear('/api/desfases/descartar', {
+      items: itemIds.map((itemId) => ({
+        itemId,
+        costoPropuestoVisto: propuestoPorId.get(itemId)!,
+      })),
+    });
 
   /**
    * `aplicarDesfases` NO respeta el orden del cliente: su `FOR UPDATE` es

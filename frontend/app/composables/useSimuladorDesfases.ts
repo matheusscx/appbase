@@ -1,4 +1,8 @@
-import type { AplicarDesfaseItem, DesfaseItemDto } from '~/components/DesfasesPanel.vue'
+import type {
+  AplicarDesfaseItem,
+  DescartarDesfaseItem,
+  DesfaseItemDto,
+} from '~/components/DesfasesPanel.vue'
 
 /**
  * Estado y lógica del simulador de impacto de costos en recetas y combos
@@ -19,11 +23,16 @@ export function useSimuladorDesfases() {
   const desfasesFilas = ref<DesfaseItemDto[]>([])
   const desfasesHighlightId = ref<string | null>(null)
 
+  /** Las filas afectadas por un insumo, tal como las calcula el backend hoy. */
+  function traerAfectados(productoId: string) {
+    return useApiFetch<DesfaseItemDto[]>(
+      `${apiUrl}/items/${productoId}/afectados`,
+    )
+  }
+
   async function maybeAbrirDesfases(productoId: string) {
     try {
-      const filas = await useApiFetch<DesfaseItemDto[]>(
-        `${apiUrl}/items/${productoId}/afectados`,
-      )
+      const filas = await traerAfectados(productoId)
       if (filas.length) {
         desfasesFilas.value = filas
         desfasesHighlightId.value = productoId
@@ -104,15 +113,70 @@ export function useSimuladorDesfases() {
     }
   }
 
-  async function onDescartarDesfases(itemIds: string[]) {
+  interface DescartarResponse {
+    descartados: number
+    cambiados: { itemId: string, nombre: string, costoPropuestoActual: string }[]
+  }
+
+  async function onDescartarDesfases(items: DescartarDesfaseItem[]) {
     desfasesLoading.value = true
     try {
-      await useApiFetch(`${apiUrl}/desfases/descartar`, {
+      const res = await useApiFetch<DescartarResponse>(`${apiUrl}/desfases/descartar`, {
         method: 'POST',
-        body: { itemIds },
+        body: { items },
       })
-      toast.add({ title: 'Avisos descartados', color: 'success' })
-      desfasesOpen.value = false
+      if (res.cambiados.length) {
+        // El drawer NO se cierra: cerrarlo escondería justo las filas que no se
+        // descartaron, que es el bug que este cambio cierra.
+        //
+        // ⚠️ Se RECARGA la lista en vez de parchearle el `costoPropuesto` a la
+        // fila que volvió, y la diferencia no es de estilo. `deltaCosto`,
+        // `margenPctPropuesto` y `precioSugerido` se derivan todos del propuesto
+        // (`precioSugerido = costoNuevo × precioViejo / costoViejo`), así que
+        // pisar un solo campo deja una fila internamente inconsistente — y el
+        // `watch` del panel reprellena el input de precio con ese
+        // `precioSugerido` viejo, que `aplicar` persiste tal cual en
+        // `items.precio_base`. Sería el mismo bug que este frente cierra, ahora
+        // con un camino que lo escribe.
+        // Sin insumo que consultar no hay de dónde recalcular: se sacan solo las
+        // descartadas y las demás quedan como estaban. Una foto vieja es
+        // coherente; una fila con un campo pisado, no.
+        const soloLasQueQuedan = () => desfasesFilas.value.filter(
+          f => !items.some(i => i.itemId === f.itemId)
+            || res.cambiados.some(c => c.itemId === f.itemId),
+        )
+        const productoId = desfasesHighlightId.value
+        // ⚠️ La recarga va en su PROPIO try: el descarte ya commiteó, así que un
+        // GET caído acá no puede reportarse como "Error al descartar" — sería
+        // decirle al usuario que no pasó algo que sí pasó, y encima dejando en
+        // la lista las filas que el backend ya archivó. `desfases.vue` no tiene
+        // el problema porque su `cargar()` contiene su propia falla.
+        try {
+          desfasesFilas.value = productoId
+            ? await traerAfectados(productoId)
+            : soloLasQueQuedan()
+        }
+        catch {
+          desfasesFilas.value = soloLasQueQuedan()
+        }
+        const uno = res.cambiados[0]!
+        toast.add({
+          title: res.cambiados.length === 1
+            ? `El costo de «${uno.nombre}» cambió mientras mirabas`
+            : `${res.cambiados.length} costos cambiaron mientras mirabas`,
+          description: 'Esos avisos no se descartaron. Mirá el número nuevo y decidí otra vez.',
+          color: 'warning',
+        })
+        // El caso mixto también avisa de lo que SÍ salió: sin esto, un lote de
+        // diez con una cambiada no daba ninguna señal de que las otras nueve se
+        // descartaron. Mismo criterio que `desfases.vue`.
+        if (res.descartados) {
+          toast.add({ title: 'Avisos descartados', color: 'success' })
+        }
+      } else {
+        toast.add({ title: 'Avisos descartados', color: 'success' })
+        desfasesOpen.value = false
+      }
     } catch (e) {
       toast.add({ title: apiErrorMsg(e, 'Error al descartar desfases'), color: 'error' })
     } finally {

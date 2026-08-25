@@ -17,6 +17,128 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El descarte de un desfase deja de silenciarlo: archiva lo que el usuario vio (2026-08-25)
+
+**Venía de la sección 4**, adonde había subido desde la 2 al medirla. Texto de la entrada,
+verbatim:
+
+> - [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
+>   como "omitido" cuando ya puede no ser el propuesto** (backend,
+>   `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
+>   cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
+>   (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
+>   (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
+>   (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
+>   `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
+>   concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
+>   descarte archiva un propuesto que ya no lo es.
+>   ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
+>   es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
+>   (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
+>   ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
+>   lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
+>   frente que la tanda 🔴 mandaba aislar.
+>   ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
+>   la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
+>   molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
+>   nunca vio.**
+>
+>   La medición, paso por paso sobre `Hamburguesa Especial`:
+>
+>   | Paso | Resultado |
+>   |---|---|
+>   | El usuario ve en la bandeja | propuesto **1120** |
+>   | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
+>   | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
+>   | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
+>   | La bandeja después | **0 filas** |
+>
+>   **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
+>   leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
+>   **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
+>   el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
+>
+>   ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
+>   omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
+>   dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
+>   de la lectura del descarte, y la peligrosa es la de "antes".
+>
+>   ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
+>   aparece un caso donde el desfase se silencia, sube"*. Apareció.
+>
+>   💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
+>   de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
+>   —o rechaza cuando no coincide con el recalculado, como un control optimista de
+>   concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
+>   opción a evaluar al tomarla, no una decisión tomada.
+>
+>   ❓ **LA PREGUNTA, que es lo que la trae a esta sección (2026-08-24):** el 2026-08-19 decidiste
+>   *"se anota, no se arregla en esta pasada"*, y era razonable **con la premisa de entonces** —que
+>   el síntoma fuera "el descarte no pega", molesto y no peligroso—. Esa premisa resultó falsa: lo
+>   medido es que **silencia un desfase que nadie vio**. Y el motivo del diferimiento —que arreglarlo
+>   obligaba a meterse con el orden de bloqueo de la bandeja— **puede no aplicar**: si el cliente
+>   manda el propuesto que vio y el servidor archiva ese (o rechaza si no coincide), no hace falta
+>   ningún lock nuevo.
+>   ✅ **DECIDIDO (owner, 2026-08-25): se arregla AHORA, por la vía sin lock.** El cliente manda el
+>   propuesto que vio y el servidor archiva **ese**, o rechaza si no coincide con el recalculado —
+>   control optimista de concurrencia. Reabre la decisión del 2026-08-19, y la reabre la evidencia:
+>   aquella se tomó con la premisa de que el síntoma era "el descarte no pega", y lo medido es que
+>   **silencia un desfase que nadie vio**.
+>   ⚠️ **Al construirlo:** lo que habilita tomarlo ya es justamente que **no lleva ningún `FOR
+>   UPDATE` nuevo**. Si al escribirlo aparece la tentación de agregar uno, eso deja de ser este
+>   frente y pasa a ser el de la § 5 — frenar y consultar, no resolverlo de paso. Y el contrato del
+>   endpoint cambia (el descarte pasa a recibir el propuesto visto), así que la pantalla de la
+>   bandeja entra en el mismo commit.
+
+### Qué se hizo
+
+El descarte **recibe el costo propuesto que el usuario tenía en pantalla** y archiva ése, en
+vez de recalcularlo.
+
+| Pieza | Qué cambió |
+|---|---|
+| `DescartarDesfasesDto` | de `itemIds: string[]` a `items: [{ itemId, costoPropuestoVisto }]`, con `@EsCosto()` (escala 4, es un costo unitario = tasa, mismo criterio que `precioBase` en el DTO de aplicar) |
+| `DesfasesController` | suma `EscalaMonedaPipe`, igual que `aplicar`: desde que el body lleva plata, el borde de escala tiene que verla o el `@EsCosto()` es metadata que nadie lee |
+| `ItemsService.descartarDesfases` | compara con `eq4` —el mismo que usa el predicado de la bandeja, para que "coincide" signifique lo mismo de los dos lados— y devuelve `{ descartados, cambiados }` |
+| `DesfasesPanel.vue` | emite pares en vez de ids: manda el `costoPropuesto` **tal como se está mostrando** |
+| `desfases.vue` y `useSimuladorDesfases.ts` | los dos consumidores del panel; el drawer del simulador **ya no se cierra** cuando algo cambió, y la bandeja se recarga |
+
+### La decisión, y por qué no fue un lock
+
+**El motivo por el que se había diferido no aplicaba.** La entrada mandaba esperar el frente de
+orden de bloqueo porque arreglarlo "obligaba a meterse con los locks". Medido al tomarlo: **un
+`FOR UPDATE` nunca hubiera arreglado esto.** El descarte recalcula desde cero, así que la
+ventana no es la carrera de milisegundos entre dos transacciones — es todo el tiempo que la
+pantalla del usuario está abierta. No hace falta ni un segundo usuario: alcanza con cambiar el
+costo de un ingrediente en otra pestaña. Un lock cubre milisegundos; lo que cierra la ventana
+es que el dato viaje desde el cliente.
+
+**Cuando el propuesto cambió, esa fila no se descarta y se informa** (decisión del owner,
+2026-08-25), en vez de fallar el lote entero: una fila que cambió no bloquea las otras nueve.
+Vuelve a la bandeja con su número nuevo y el usuario la decide otra vez, viéndolo. El status es
+`201`, no un `4xx`: no es un error del cliente, es información.
+
+### Qué lo fija
+
+| Mutante (revierte al código anterior) | Test que cae |
+|---|---|
+| El service vuelve a archivar el recalculado, siempre | *si el propuesto cambió, esa fila NO se descarta y vuelve en `cambiados`* + *una fila que cambió no bloquea a las demás del lote* |
+| `DesfasesPanel.vue` vuelve a emitir solo los ids | *emite el `costoPropuesto` de cada fila seleccionada, no solo su id* |
+
+Más un e2e de punta a punta en `simulador-costos.e2e-spec.ts` que reproduce la secuencia
+medida —bandeja, cambio de costo, descarte sobre lo visto— y afirma lo que importa: **la fila
+sigue en la bandeja**, con el número nuevo. Antes del arreglo ahí había cero filas.
+
+### Una trampa que dejó puesta el cambio
+
+`orden-locks-desfases.e2e-spec.ts` mide deadlocks haciendo correr dos descartes en paralelo. Si
+el `costoPropuestoVisto` que manda no coincide, **el service no escribe nada y no toma un solo
+lock**: el spec quedaría midiendo una compuerta vacía. Lo caza su propia aserción
+(`esperandoLockEnLaCompuerta` exige 2 y vería 0), pero el spec ahora lee los propuestos del
+`GET /desfases` de su setup y la razón quedó escrita al lado.
+
+---
+
 ## Una regla dice dónde se aplica: `nivel` línea/venta (2026-08-25)
 
 **Venía de la sección 3.** Texto de la entrada, verbatim:

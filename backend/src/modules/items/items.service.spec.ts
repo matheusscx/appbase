@@ -5131,12 +5131,102 @@ describe('ItemsService', () => {
           ])
           .mockResolvedValueOnce([]);
 
-        const result = await service.descartarDesfases(TENANT, [RECETA_ID]);
+        const result = await service.descartarDesfases(TENANT, [
+          { itemId: RECETA_ID, costoPropuestoVisto: '200' },
+        ]);
         expect(result.descartados).toBe(1);
         expect(managerMock.query).toHaveBeenCalledWith(
           expect.stringContaining('costo_propuesto_omitido'),
           expect.arrayContaining(['200.0000', RECETA_ID]),
         );
+      });
+
+      // ── El descarte archiva lo que el usuario VIO ────────────────────────
+      //
+      // El bug que esto cierra, medido contra la API el 2026-08-24: el descarte
+      // RECALCULABA el propuesto y archivaba ese, así que un cambio entre abrir
+      // la bandeja y hacer clic dejaba archivado un número que nunca estuvo en
+      // pantalla y la fila desaparecía. No hace falta ninguna carrera: el mismo
+      // usuario, en otra pestaña.
+
+      it('si el propuesto cambió, esa fila NO se descarta y vuelve en `cambiados`', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([
+            { item_id: RECETA_ID, tipo: 'receta', nombre: 'Hamburguesa' },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValue([]);
+
+        // El usuario vio 180; el costo del ingrediente ya está en 200.
+        const result = await service.descartarDesfases(TENANT, [
+          { itemId: RECETA_ID, costoPropuestoVisto: '180' },
+        ]);
+
+        expect(result.descartados).toBe(0);
+        expect(result.cambiados).toEqual([
+          {
+            itemId: RECETA_ID,
+            nombre: 'Hamburguesa',
+            costoPropuestoActual: '200.0000',
+          },
+        ]);
+        // Y NO se archivó nada: archivar el recalculado es exactamente el bug.
+        const escribio = (managerMock.query.mock.calls as unknown[][]).some(
+          (c) =>
+            typeof c[0] === 'string' &&
+            c[0].includes('SET costo_propuesto_omitido'),
+        );
+        expect(escribio).toBe(false);
+      });
+
+      it('una fila que cambió no bloquea a las demás del lote', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([
+            { item_id: 'receta-a', tipo: 'receta', nombre: 'Receta A' },
+            { item_id: 'receta-b', tipo: 'receta', nombre: 'Receta B' },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: 'receta-a',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '150',
+            },
+            {
+              receta_item_id: 'receta-b',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValue([]);
+
+        // `receta-a` coincide; `receta-b` cambió bajo los pies del usuario.
+        const result = await service.descartarDesfases(TENANT, [
+          { itemId: 'receta-a', costoPropuestoVisto: '150' },
+          { itemId: 'receta-b', costoPropuestoVisto: '190' },
+        ]);
+
+        // Es la decisión del owner (2026-08-25): la que cambió se informa, las
+        // demás se descartan igual. Un lote de diez no se cae por una fila.
+        expect(result.descartados).toBe(1);
+        expect(result.cambiados.map((c) => c.itemId)).toEqual(['receta-b']);
+        const updates = (managerMock.query.mock.calls as unknown[][]).filter(
+          (c) =>
+            typeof c[0] === 'string' && c[0].includes('UPDATE item_receta'),
+        );
+        expect(updates).toHaveLength(1);
+        expect((updates[0][1] as unknown[])[1]).toBe('receta-a');
       });
 
       it('descartar escribe `item_receta` ANTES que `item_combo` aunque el lote venga al revés', async () => {
@@ -5170,7 +5260,10 @@ describe('ItemsService', () => {
           .mockResolvedValue([]);
 
         // El lote viene combo PRIMERO: es el orden que hoy se respeta y que abraza.
-        await service.descartarDesfases(TENANT, ['combo-x', 'receta-y']);
+        await service.descartarDesfases(TENANT, [
+          { itemId: 'combo-x', costoPropuestoVisto: '100' },
+          { itemId: 'receta-y', costoPropuestoVisto: '200' },
+        ]);
 
         const sqls = managerMock.query.mock.calls.map(
           (c: unknown[]) => c[0] as string,
@@ -5189,6 +5282,10 @@ describe('ItemsService', () => {
           tipo: 'receta' as const,
           idMenor: 'receta-a',
           idMayor: 'receta-b',
+          // El propuesto de cada una, para que el descarte COINCIDA y el test
+          // siga midiendo el ORDEN y no la rama de "cambió".
+          vistoMenor: '150',
+          vistoMayor: '200',
           // ingredientesPorReceta: misma unidad en ambos lados, sin
           // conversión real (crearConversor ya tiene default en beforeEach).
           datosDelTipo: [
@@ -5213,6 +5310,8 @@ describe('ItemsService', () => {
           tipo: 'combo' as const,
           idMenor: 'combo-a',
           idMayor: 'combo-b',
+          vistoMenor: '80',
+          vistoMayor: '100',
           // componentesPorCombo: mismo shape que en el test del ciclo
           // item_receta ↔ item_combo de más arriba.
           datosDelTipo: [
@@ -5233,13 +5332,22 @@ describe('ItemsService', () => {
         },
       ])(
         'descartar ordena por `item_id` DENTRO de la pasada de $tipo, aunque el lote venga al revés',
-        async ({ tipo, idMenor, idMayor, datosDelTipo, updateSql }) => {
+        async ({
+          tipo,
+          idMenor,
+          idMayor,
+          vistoMenor,
+          vistoMayor,
+          datosDelTipo,
+          updateSql,
+        }) => {
           // `descartarDesfases` no toma ningún FOR UPDATE: el lock lo toma cada
           // UPDATE, en el orden en que se ejecuta. Sin ordenar DENTRO de la
           // pasada, dos filas del mismo tipo (sin ningún ítem del otro tipo de
           // por medio) todavía podían abrazarse si dos lotes las traían en
-          // sentidos opuestos. El `.sort()` está en las dos pasadas
-          // (`items.service.ts:4361-4366`); el reproductor e2e usa una sola
+          // sentidos opuestos. El orden por `item_id` lo aplica el helper
+          // `porTipo` de `descartarDesfases`, que alimenta las dos pasadas; el
+          // reproductor e2e usa una sola
           // receta y un solo combo, así que el orden intra-tabla de la pasada
           // de combos no lo cubría ningún test hasta acá.
           managerMock.query
@@ -5252,7 +5360,10 @@ describe('ItemsService', () => {
 
           // El lote viene el id MAYOR primero (orden descendente): es el orden
           // que hoy se respeta y que abraza.
-          await service.descartarDesfases(TENANT, [idMayor, idMenor]);
+          await service.descartarDesfases(TENANT, [
+            { itemId: idMayor, costoPropuestoVisto: vistoMayor },
+            { itemId: idMenor, costoPropuestoVisto: vistoMenor },
+          ]);
 
           const updates = managerMock.query.mock.calls.filter(
             (c: unknown[]) =>
@@ -5397,7 +5508,9 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([]);
 
         await expect(
-          service.descartarDesfases(TENANT, [RECETA_ID]),
+          service.descartarDesfases(TENANT, [
+            { itemId: RECETA_ID, costoPropuestoVisto: '200' },
+          ]),
         ).rejects.toThrow(BadRequestException);
         const omitSql = managerMock.query.mock.calls.find(
           (c: unknown[]) =>
@@ -5587,7 +5700,9 @@ describe('ItemsService', () => {
           ]) // 2) componentesPorCombo
           .mockResolvedValueOnce([]); // 3) UPDATE item_combo
 
-        const result = await service.descartarDesfases(TENANT, [COMBO_ID]);
+        const result = await service.descartarDesfases(TENANT, [
+          { itemId: COMBO_ID, costoPropuestoVisto: '600' },
+        ]);
 
         expect(result.descartados).toBe(1);
         const update = managerMock.query.mock.calls.find(

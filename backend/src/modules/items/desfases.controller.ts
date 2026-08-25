@@ -40,10 +40,17 @@ export class DesfasesController {
     return this.itemsService.aplicarDesfases(tenantId, dto.items);
   }
 
+  // `EscalaMonedaPipe` igual que `aplicar`: desde que el descarte manda el
+  // costo que el usuario vio, este body también lleva plata y el borde de
+  // escala tiene que verla. Sin el pipe, el `@EsCosto()` del DTO es metadata
+  // que nadie lee.
   @Post('descartar')
   @RequiresPermiso('Items', 'Actualizar')
-  descartar(@Req() req: Request, @Body() dto: DescartarDesfasesDto) {
+  descartar(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: DescartarDesfasesDto,
+  ) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.descartarDesfases(tenantId, dto.itemIds);
+    return this.itemsService.descartarDesfases(tenantId, dto.items);
   }
 }

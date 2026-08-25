@@ -4418,16 +4418,46 @@ export class ItemsService {
     });
   }
 
+  /**
+   * Descarta el aviso de desfase de varios ítems: archiva el costo propuesto en
+   * `costo_propuesto_omitido`, y la bandeja deja de mostrar la fila mientras el
+   * propuesto siga siendo ese.
+   *
+   * ⚠️ **Archiva el propuesto que el usuario VIO, no uno recalculado.** Hasta el
+   * 2026-08-25 recalculaba, y eso silenciaba desfases: medido contra la API, el
+   * usuario veía 1120, cambiaba el costo de un ingrediente, y el descarte
+   * archivaba 1019,98 —un número que nunca estuvo en pantalla—; con el predicado
+   * de la bandeja (oculta si propuesto == omitido) la fila desaparecía y el
+   * desfase nuevo quedaba sin ver.
+   *
+   * **No es una carrera, y por eso no se arregla con un lock.** El recálculo es
+   * desde cero, así que cualquier cambio entre abrir la bandeja y hacer clic lo
+   * dispara —el mismo usuario, en otra pestaña, con minutos de diferencia—. Un
+   * `FOR UPDATE` cubre milisegundos; la ventana real es lo que la pantalla esté
+   * abierta. Lo que la cierra es que el dato viaje desde el cliente.
+   *
+   * **Cuando el propuesto cambió, esa fila NO se descarta y se informa**
+   * (decisión del owner, 2026-08-25): las demás del lote sí, para que una fila
+   * ajena no bloquee el trabajo. La que cambió vuelve a la bandeja con su número
+   * nuevo y el usuario la decide de nuevo, viéndolo.
+   */
   async descartarDesfases(
     tenantId: string,
-    itemIds: string[],
-  ): Promise<{ descartados: number }> {
+    items: { itemId: string; costoPropuestoVisto: string }[],
+  ): Promise<{
+    descartados: number;
+    cambiados: {
+      itemId: string;
+      nombre: string;
+      costoPropuestoActual: string;
+    }[];
+  }> {
     return this.db.transaccion(async (manager) => {
       // Mismo batch que `aplicarDesfases`: 2 lecturas para todo el lote, loop
       // conservado para no alterar el orden de las validaciones.
-      const ids = [...new Set(itemIds)];
+      const ids = [...new Set(items.map((i) => i.itemId))];
       const cabPorId = await this.cabecerasCompuestas(manager, tenantId, ids);
-      for (const itemId of itemIds) {
+      for (const { itemId } of items) {
         if (!cabPorId.has(itemId)) {
           throw new NotFoundException(`Item ${itemId} no encontrado`);
         }
@@ -4450,6 +4480,11 @@ export class ItemsService {
         : null;
 
       let descartados = 0;
+      const cambiados: {
+        itemId: string;
+        nombre: string;
+        costoPropuestoActual: string;
+      }[] = [];
       // Orden de bloqueo declarado (`docs/patterns/backend.md`): item_receta →
       // item_combo → items. Los UPDATE de acá abajo toman lock de fila igual
       // que un FOR UPDATE, así que recorrer el lote en el orden que manda el
@@ -4462,23 +4497,35 @@ export class ItemsService {
       // explícito: el lock lo toma cada `UPDATE`, en el orden en que se
       // ejecuta. Sin este segundo orden, dos recetas (o dos combos) sin
       // ningún ítem del otro tipo de por medio seguían pudiendo abrazarse si
-      // dos lotes las traían en sentidos opuestos. `Array.prototype.sort` es
-      // estable, así que un id duplicado en el lote no cambia de posición
-      // relativa entre sí y `descartados` sigue contando cada ocurrencia.
+      // dos lotes las traían en sentidos opuestos.
+      //
+      // ⚠️ Se ordena por `itemId` pero **se conserva cada entrada del lote**, no
+      // se deduplica: un id repetido seguía contando dos veces en `descartados`
+      // y sigue contando dos veces ahora. `Array.prototype.sort` es estable, así
+      // que dos entradas del mismo id no cambian de posición relativa entre sí y
+      // cada una conserva SU `costoPropuestoVisto`.
+      //
+      // 📌 Consecuencia del cruce, alcanzable solo por API: un lote
+      // `[{id, '700'}, {id, '900'}]` compara las DOS ocurrencias contra el mismo
+      // propuesto recalculado una vez, así que ese id puede salir en
+      // `descartados` **y** en `cambiados` a la vez. El panel no lo produce
+      // —`onDescartar` mapea filas únicas—, y no se rechaza porque no hay
+      // lectura razonable de "el usuario vio dos números distintos para la misma
+      // fila".
       //
       // Efecto observable asumido: en un lote mixto con errores en los dos
-      // tipos, ahora falla primero el de la receta (misma precedencia que ya
+      // tipos, falla primero el de la receta (misma precedencia que ya
       // tenía `aplicarDesfases`); y dentro de una misma pasada, si hay
-      // errores en más de un id, ahora sale primero el de `item_id` menor,
+      // errores en más de un id, sale primero el de `item_id` menor,
       // no el que vino primero en el lote del cliente.
-      const recetasDelLote = itemIds
-        .filter((id) => cabPorId.get(id)!.tipo === 'receta')
-        .sort();
-      const combosDelLote = itemIds
-        .filter((id) => cabPorId.get(id)!.tipo === 'combo')
-        .sort();
+      const porTipo = (tipo: 'receta' | 'combo') =>
+        items
+          .filter((i) => cabPorId.get(i.itemId)!.tipo === tipo)
+          .sort((a, b) =>
+            a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0,
+          );
 
-      for (const itemId of recetasDelLote) {
+      for (const { itemId, costoPropuestoVisto } of porTipo('receta')) {
         if (!ingsPorReceta.get(itemId)?.length) {
           throw new BadRequestException(
             `La receta ${itemId} no tiene ingredientes`,
@@ -4499,6 +4546,17 @@ export class ItemsService {
               'que la receta declara. Corregí esa unidad antes de descartar.',
           );
         }
+        // La misma comparación que usa el predicado de la bandeja
+        // (`listarDesfases`), para que "coincide" signifique lo mismo en los dos
+        // lados: si acá pasara y allá no, la fila volvería igual.
+        if (!this.eq4(propuesto, costoPropuestoVisto)) {
+          cambiados.push({
+            itemId,
+            nombre: cabPorId.get(itemId)!.nombre,
+            costoPropuestoActual: propuesto,
+          });
+          continue;
+        }
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuesto, itemId],
@@ -4506,7 +4564,7 @@ export class ItemsService {
         descartados += 1;
       }
 
-      for (const itemId of combosDelLote) {
+      for (const { itemId, costoPropuestoVisto } of porTipo('combo')) {
         const comps = compsPorCombo.get(itemId) ?? [];
         if (!comps.length) {
           throw new BadRequestException(
@@ -4516,16 +4574,23 @@ export class ItemsService {
         // Sin caso de error propio: `costoPropuestoCombo` nunca devuelve
         // null, así que el 400 de unidad incompatible no aplica acá.
         const propuestoCombo = this.costoPropuestoCombo(comps);
+        if (!this.eq4(propuestoCombo, costoPropuestoVisto)) {
+          cambiados.push({
+            itemId,
+            nombre: cabPorId.get(itemId)!.nombre,
+            costoPropuestoActual: propuestoCombo,
+          });
+          continue;
+        }
         await manager.query(
           `UPDATE item_combo SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuestoCombo, itemId],
         );
         descartados += 1;
       }
-      return { descartados };
+      return { descartados, cambiados };
     });
   }
-
   private async validarMoneda(
     manager: EntityManager,
     tenantId: string,

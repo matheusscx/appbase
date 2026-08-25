@@ -303,7 +303,7 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 17 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** De sus 16 entradas, **siete son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
@@ -328,79 +328,12 @@ que lo convierte en un frente propio y no en un remate.
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
 
-➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner: el descarte
-de desfases, los dos tipos por método de pago, la moneda de las opciones de modificadores, y las
-dos que había dejado el frente del nivel de la regla. Cada una lleva su decisión escrita adentro
-**y las trampas que el que la tome se va a encontrar**, que es lo que las hace construibles y no
-solo contestadas.
-
-- [ ] **`descartarDesfases` calcula el costo propuesto con lecturas sin lock, y lo archiva
-  como "omitido" cuando ya puede no ser el propuesto** (backend,
-  `items.service.ts` → `ItemsService.descartarDesfases`, visto el 2026-08-19 mientras se
-  cerraba el orden de locks de esa misma bandeja). El método lee las cabeceras
-  (`cabecerasCompuestas`), los ingredientes (`ingredientesPorReceta`) y los componentes
-  (`componentesPorCombo`) **sin ningún `FOR UPDATE`**, calcula el propuesto
-  (`costoPropuesto` / `costoPropuestoCombo`) y recién entonces escribe
-  `costo_propuesto_omitido`. Entre la lectura y el `UPDATE`, un `aplicarDesfases`
-  concurrente —o cualquier ajuste de costo de un insumo— puede mover el número, y el
-  descarte archiva un propuesto que ya no lo es.
-  ℹ️ **Es del molde "no toma lock" de la [sección 5](#5-carreras-de-concurrencia)**, y no
-  es lo mismo que el ciclo de orden de locks que sí se arregló: aquel era un deadlock
-  (`40P01`); este no abraza a nadie, escribe tranquilo un valor viejo.
-  ✅ **Decisión del owner (2026-08-19): se anota, no se arregla en esa pasada.** Poner un
-  lock acá es meterse otra vez con el orden de bloqueo de la bandeja, que es justo el
-  frente que la tanda 🔴 mandaba aislar.
-  ⛔ **MEDIDO el 2026-08-24 contra la API viva, y la deducción de esta entrada era FALSA en
-  la dirección que importa.** Decía que el síntoma probable era *"el descarte no pega"* —
-  molesto y no peligroso—. **Es al revés: el descarte SILENCIA un desfase que el usuario
-  nunca vio.**
-
-  La medición, paso por paso sobre `Hamburguesa Especial`:
-
-  | Paso | Resultado |
-  |---|---|
-  | El usuario ve en la bandeja | propuesto **1120** |
-  | Cambia el costo de un ingrediente (la concurrencia) | el propuesto real pasa a **1019,98** |
-  | El usuario hace clic en Descartar, sobre lo que vio | `{"descartados":1}` |
-  | Lo que quedó en `costo_propuesto_omitido` | **1019,98** — un valor que nunca estuvo en pantalla |
-  | La bandeja después | **0 filas** |
-
-  **La causa es que `descartarDesfases` RECALCULA el propuesto** desde los ingredientes que
-  leyó sin lock (`this.costoPropuesto(convertir!, ingsPorReceta.get(itemId)!)`) y archiva
-  **ese**, no el que el usuario tenía delante. Con el predicado de la bandeja —que oculta si
-  el propuesto coincide con el omitido— el resultado es que el desfase nuevo queda oculto.
-
-  ✅ **La otra mitad también se midió, y sí se comporta como la entrada deducía:** con un
-  omitido que NO coincide con el propuesto actual, la fila **reaparece** en la bandeja. Las
-  dos conductas conviven; cuál toca depende de si el cambio concurrente cae antes o después
-  de la lectura del descarte, y la peligrosa es la de "antes".
-
-  ➡️ **Por su propio criterio, esta entrada SUBE de sección y de prioridad**: decía *"si
-  aparece un caso donde el desfase se silencia, sube"*. Apareció.
-
-  💡 **Y el arreglo puede no necesitar el lock**, que es lo que la mandaba a esperar el frente
-  de orden de bloqueo: si el cliente manda **el propuesto que vio** y el servidor archiva ese
-  —o rechaza cuando no coincide con el recalculado, como un control optimista de
-  concurrencia—, el problema desaparece sin tocar el orden de locks de la bandeja. Es una
-  opción a evaluar al tomarla, no una decisión tomada.
-
-  ❓ **LA PREGUNTA, que es lo que la trae a esta sección (2026-08-24):** el 2026-08-19 decidiste
-  *"se anota, no se arregla en esta pasada"*, y era razonable **con la premisa de entonces** —que
-  el síntoma fuera "el descarte no pega", molesto y no peligroso—. Esa premisa resultó falsa: lo
-  medido es que **silencia un desfase que nadie vio**. Y el motivo del diferimiento —que arreglarlo
-  obligaba a meterse con el orden de bloqueo de la bandeja— **puede no aplicar**: si el cliente
-  manda el propuesto que vio y el servidor archiva ese (o rechaza si no coincide), no hace falta
-  ningún lock nuevo.
-  ✅ **DECIDIDO (owner, 2026-08-25): se arregla AHORA, por la vía sin lock.** El cliente manda el
-  propuesto que vio y el servidor archiva **ese**, o rechaza si no coincide con el recalculado —
-  control optimista de concurrencia. Reabre la decisión del 2026-08-19, y la reabre la evidencia:
-  aquella se tomó con la premisa de que el síntoma era "el descarte no pega", y lo medido es que
-  **silencia un desfase que nadie vio**.
-  ⚠️ **Al construirlo:** lo que habilita tomarlo ya es justamente que **no lleva ningún `FOR
-  UPDATE` nuevo**. Si al escribirlo aparece la tentación de agregar uno, eso deja de ser este
-  frente y pasa a ser el de la § 5 — frenar y consultar, no resolverlo de paso. Y el contrato del
-  endpoint cambia (el descarte pasa a recibir el propuesto visto), así que la pantalla de la
-  bandeja entra en el mismo commit.
+➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner. Cada una
+lleva su decisión escrita adentro **y las trampas que el que la tome se va a encontrar**, que es
+lo que las hace construibles y no solo contestadas. Quedan **cuatro** acá: los dos tipos por
+método de pago, la moneda de las opciones de modificadores, y las dos que dejó el frente del
+nivel de la regla. La quinta —el descarte de desfases— **se construyó el mismo día** y vive en
+[`resueltos.md`](resueltos.md); se nombra así y no en la lista para que nadie la busque acá.
 
 - [ ] **Los dos tipos "por método de pago" ignoran los tramos y cobran el valor único** (backend,
   parte 2 de *"la plomería de tramos en `recargos`"*; la **parte 1 salió el 2026-08-22** →
@@ -845,7 +778,9 @@ cada entrada se mudó con su decisión escrita y con las trampas que el que la t
 encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
 moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
 **Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
-al roadmap todavía, así que la entrada no tiene disparador).
+al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **el descarte de
+desfases se construyó el mismo día** y ya no está en la § 3 →
+[`resueltos.md`](resueltos.md).
 
 **Queda 1 entrada, y no espera una respuesta:** la de la nota de crédito espera la
 **investigación de mercado que la destraba, lanzada el 2026-08-22**.
