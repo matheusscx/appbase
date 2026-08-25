@@ -25,27 +25,43 @@
  * tocar ningún spec**: parchea el `end` de supertest, por donde pasan también
  * los `await` (el `then` de supertest llama a `end`).
  *
- * Lo escrito va a `test/tmp-401.jsonl`, que se BORRA al empezar cada corrida
- * —si no, no se sabe de qué corrida es cada línea—. Para leerlo después de un
- * rojo:
+ * Lo escrito va a `test/tmp-401.jsonl` (gitignored), que **no se borra solo**:
+ * cada línea lleva su `t` y el borrado le toca a quien lanza la corrida. Ver el
+ * bloque de abajo, que explica por qué no se puede hacer desde acá. Para leerlo
+ * después de un rojo:
  *
  * ```bash
  * jq -r 'select(.sospechoso) | "\(.test)\n  \(.metodo) \(.url)\n  \(.body)"' backend/test/tmp-401.jsonl
  * ```
  */
-import { appendFileSync, rmSync } from 'fs';
+import { appendFileSync } from 'fs';
 import { resolve } from 'path';
 import supertest from 'supertest';
 
 const ARCHIVO = resolve(__dirname, 'tmp-401.jsonl');
 
-// Una sola vez por proceso de jest, no por spec: con `maxWorkers: 1` los 50
-// specs comparten proceso, y borrar por spec dejaría solo el último.
-const G = globalThis as { __diag401Limpio?: boolean };
-if (!G.__diag401Limpio) {
-  G.__diag401Limpio = true;
-  rmSync(ARCHIVO, { force: true });
-}
+/**
+ * ⚠️ **Este archivo es APPEND-ONLY: no se borra solo, y es a propósito.**
+ *
+ * Borrarlo "una vez por corrida" desde acá adentro **no se puede**, y costó dos
+ * intentos comprobarlo (2026-08-24):
+ *
+ * | Intento | Por qué falla |
+ * |---|---|
+ * | flag en `globalThis` | jest le da a **cada archivo de test** su propio sandbox: el flag se reinicia y el log se borraba al empezar cada uno de los 50 specs |
+ * | flag en `process.env` | igual — jest también le inyecta a cada archivo su propio `process`. Medido: corriendo dos specs juntos sobrevivieron solo los 401 del segundo |
+ *
+ * En los dos casos el efecto era el mismo y silencioso: una corrida completa
+ * dejaba **cero** capturas, o las de un solo spec. Ninguno se vio al estrenar
+ * esto porque se verificó con **un** spec, donde el bug es invisible por
+ * construcción.
+ *
+ * La salida no es un tercer mecanismo: es que **cada línea lleva su `t`**, y
+ * borrar el archivo le toca a quien lanza la corrida (`rm` antes, o el script
+ * de la cacería, que además se guarda una copia por corrida). Un archivo que
+ * crece unas pocas líneas por corrida no es un problema; una captura que se
+ * borra sola a mitad de camino, sí.
+ */
 
 /**
  * Rutas donde un 401 es el resultado ESPERADO de un test. Se registran igual
