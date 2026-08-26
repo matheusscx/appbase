@@ -590,64 +590,41 @@ desfases, los dos tipos por método de pago, y las dos que dejó el frente del n
   alimentan el umbral de descuadre (construido el 2026-08-23, ver `resueltos.md`) — si divergen, el umbral se dispara
   distinto según cómo contó el cajero.
 
-- [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
-  medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
-  tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
-  Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
-  (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
-  fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
-  pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
-  tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
-  automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
-  la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
-  así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
-  desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
-  `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
-  ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
-  1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
-     `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
-     Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
-     medios de pago online; hay una pasarela real y lo que sobra cuando falta.
-  2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
-     `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
-     `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
-     contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
-     tenant que entre sin pasarela conectada tiene una tienda online que entrega
-     mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
-     donde debería quedar.
-  **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
-  tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
-  retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
-  toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
-  defecto que existe igual, se configure o no.
-  ✅ **DECIDIDO (owner, 2026-08-15): sin cobro real, la venta queda `pendiente`, no `pagada`.**
-  Es el punto 2 de esta entrada —el defecto que existe se configure o no la pasarela— y se
-  arregla ya: el estado `pendiente` ya lo soporta el modelo.
-  ℹ️ **No se saca el camino simulado** (dejaría sin tienda a cualquier tenant que todavía no
-  configuró nada) ni se encara todavía la configuración de medios online, que sigue siendo
-  feature con spec propia.
-  ⚠️ Al hacerlo, mirar el `metodoTarjeta()` que hoy elige método buscando "crédito" en el nombre
-  y **agarra `metodos[0]` si no encuentra**: con la venta en `pendiente` puede que ni corresponda
-  registrar un método. Y la pregunta de cobertura e2e de esta entrada sigue abierta: la pantalla
-  no la alcanza nada automático.
-  ⛔ **BLOQUEADA al intentar construirla (2026-08-16): la decisión choca con un invariante que
-  ya existe, y hay que resolver el choque antes de escribir nada.** `ventas.service.ts:387-395`
-  rechaza con `400` *"Las ventas online requieren el pago completo"* cualquier venta
-  `canal='online'` cuyos pagos no cubran el `totalFinal`. O sea que **una venta online no puede
-  quedar `pendiente` hoy, por diseño** — el comentario de la línea 385 lo dice con todas las
-  letras: *"online no admite cuenta por cobrar"*.
-  Se implementó la pantalla mandando la venta sin pagos, y **todo checkout simulado pasó a
-  fallar con ese 400** (medido, no deducido). Se revirtió.
-  **Lo que hay que decidir antes de retomarla:** ¿se afloja la regla para que una venta online
-  pueda nacer `pendiente`? Aflojarla de plano habilita crear ventas online impagas **por
-  cualquier camino**, incluido el de la pasarela real — que es justo lo que la regla protege.
-  Las alternativas que se ven: (a) un estado/flag propio para "pedido sin pasarela conectada",
-  (b) que el backend distinga el caso por config del tenant en vez de que lo decida el
-  frontend, o (c) asumir que sin pasarela conectada la tienda online no debería estar
-  disponible. Ninguna es una corrección: las tres son producto.
-  ℹ️ **Lo único de esta entrada que sí se cerró** (2026-08-16, con la entrada de la venta de
-  total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
-  pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
+- [ ] **La pantalla de la pasarela demo muestra un medio de pago que no es el que cobra**
+  (frontend, chico; lo levantó la revisión independiente del 2026-08-26 al cerrar el frente
+  de la pasarela demo, → [`resueltos.md`](resueltos.md)) — `pasarela.vue` dejó de **elegir**
+  el método (ahora lo manda el backend), pero sigue **mostrando** la tarjeta Oneclick
+  preferida (`useTarjetas()`) en un flujo donde no se cobra nada y donde lo que se registra
+  es el método contable que resolvió el backend. Preexistente y sin consecuencia en los
+  datos: es el cartel el que miente, no el registro. Decidir si se saca, si se reemplaza por
+  el método que efectivamente se registra, o si se deja con una leyenda de "simulado".
+
+- [ ] **Configurar qué acepta la tienda online** (backend + frontend, feature con spec
+  propia) — que el tenant elija sus medios de cobro online (tarjeta por pasarela,
+  **transferencia**, **pago al retirar**…) en vez de tener solo lo que haya conectado. La
+  nombró el owner el 2026-08-11 y sigue sin empezar; toca configuración, tienda, registro
+  de la venta y el estado resultante.
+  ℹ️ **Lo que ya no forma parte de esto** (cerrado el 2026-08-26, →
+  [`resueltos.md`](resueltos.md)): que la tienda entregara sin cobrar por el solo hecho de
+  no tener Webpay. La pasarela demo se prende a propósito y sin ninguna configurada
+  **`POST /online/pagar`** responde 400 — la guarda vive ahí y **solo ahí**:
+  `POST /online/checkout` sigue calculando y devolviendo su `checkoutUrl` sin mirar
+  pasarelas, hoy inocuo porque el frontend no lo llama y la pantalla exige un
+  `checkoutRef` salido de `pagar`. Lo que esta feature agrega es **qué más se puede aceptar**, no
+  tapar un agujero.
+  ⛔ **Antes de diseñarla, mirar el choque que ya frenó una vez** (2026-08-16): `pago al
+  retirar` es una venta online que nace impaga, y `ventas.service.ts` la rechaza con `400`
+  *"Las ventas online requieren el pago completo"* — el comentario de esa línea dice *"online
+  no admite cuenta por cobrar"*. Aflojarlo de plano habilita ventas online impagas **por
+  cualquier camino**, incluido el de la pasarela real. Y el costo no termina ahí: el docblock
+  de `filtroDeMisCajas` avisa que la venta online se le muestra a cualquier cajero
+  **porque hoy no puede tener pagos en una caja física**; si el pedido se cobra después en el
+  mostrador, ese pago cae en el cajón de un cajero y queda a la vista de todos — hay que
+  filtrar **dos** lugares más (la lista de pagos de `findOne` y `GET /pagos`). Sumado a que
+  el pedido descuenta stock aunque nadie haya pagado (la salida de inventario se registra en
+  `crear`, sin mirar el estado), las salidas siguen siendo las tres de 2026-08-16: (a) un
+  estado propio para el pedido sin cobrar, (b) que el backend distinga el caso por config del
+  tenant, o (c) que ese medio no se ofrezca. Ninguna es una corrección: las tres son producto.
 
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`

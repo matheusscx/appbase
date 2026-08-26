@@ -48,7 +48,10 @@ describe('OnlineService', () => {
     findMetodosPago: jest.fn(),
     resolverMetodoCredito: jest.fn(),
   };
-  const tenantPasarela = { resolverConfiguracionActiva: jest.fn() };
+  const tenantPasarela = {
+    resolverConfiguracionActiva: jest.fn(),
+    codigoActivo: jest.fn(),
+  };
   const pagosRedirect = { iniciar: jest.fn(), obtenerResultado: jest.fn() };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
   /** Fila base como la devuelve `cargarBasePorIds` (BASE_QUERY trae `activo`). */
@@ -149,13 +152,81 @@ describe('OnlineService', () => {
     });
   });
 
-  it('pagar sin Webpay activo: cae a modo simulado', async () => {
-    tenantPasarela.resolverConfiguracionActiva.mockRejectedValue(
-      new Error('no config'),
-    );
-    const res = await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto);
-    expect(res.modo).toBe('simulado');
-    expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+  describe('sin Webpay activo', () => {
+    const sinWebpay = () =>
+      tenantPasarela.resolverConfiguracionActiva.mockRejectedValue(
+        new Error('no config'),
+      );
+
+    it('con la pasarela demo prendida: cae a modo simulado', async () => {
+      sinWebpay();
+      tenantPasarela.codigoActivo.mockResolvedValue(true);
+      metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+
+      const res = await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto);
+
+      expect(res.modo).toBe('simulado');
+      expect(tenantPasarela.codigoActivo).toHaveBeenCalledWith(
+        TENANT_ID,
+        'demo',
+      );
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+
+    /**
+     * El defecto que cierra esta rama: sin ninguna pasarela configurada la
+     * tienda entregaba mercadería y anotaba la venta cobrada, heredando el
+     * simulado por el solo hecho de que faltara Webpay.
+     */
+    it('sin ninguna pasarela configurada: rechaza en vez de simular', async () => {
+      sinWebpay();
+      tenantPasarela.codigoActivo.mockResolvedValue(false);
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto),
+      ).rejects.toThrow(
+        'Este local todavía no tiene un medio de cobro online configurado',
+      );
+      expect(calculo.calcular).not.toHaveBeenCalled();
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+
+    /**
+     * El método lo resuelve el backend con la misma regla que la rama Webpay;
+     * la pantalla lo elegía sola por el nombre y caía en `metodos[0]`, sin
+     * mirar siquiera si estaba habilitado.
+     */
+    it('devuelve el método con el que la pantalla registra el pago', async () => {
+      sinWebpay();
+      tenantPasarela.codigoActivo.mockResolvedValue(true);
+      metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+
+      const res = await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto);
+
+      expect(res).toMatchObject({
+        modo: 'simulado',
+        metodoPagoId: 'mp-credito',
+      });
+    });
+
+    /**
+     * Un carrito de $0 (100% de descuento) es una venta pagada SIN línea de
+     * pago. Resolver el método igual abortaría con 400 —`resolverMetodoCredito`
+     * tira si no hay ninguno habilitado— un checkout que hoy funciona.
+     */
+    it('carrito de $0: no resuelve método alguno', async () => {
+      sinWebpay();
+      tenantPasarela.codigoActivo.mockResolvedValue(true);
+      calculo.calcular.mockResolvedValueOnce({
+        ...mockResultado,
+        totales: { ...mockResultado.totales, totalFinal: '0.0000' },
+      });
+
+      const res = await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto);
+
+      expect(res).toMatchObject({ modo: 'simulado', metodoPagoId: null });
+      expect(metodos.resolverMetodoCredito).not.toHaveBeenCalled();
+    });
   });
 
   it('pagar con Webpay activo: inicia orden interno con snapshot y devuelve webpay', async () => {

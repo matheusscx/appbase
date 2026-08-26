@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import Decimal from 'decimal.js';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type {
   CalcularVentaDto,
@@ -51,18 +52,23 @@ export interface CheckoutSnapshot {
   };
 }
 
-/** Pago simulado (fallback) o real por Webpay, según config del tenant. */
+/** Pago simulado (pasarela demo) o real por Webpay, según config del tenant. */
 export type PagarResponse =
-  | ({ modo: 'simulado' } & CheckoutResponse)
+  | ({ modo: 'simulado'; metodoPagoId: string | null } & CheckoutResponse)
   | { modo: 'webpay'; urlWebpay: string; ordenId: string };
 
 const PASARELA_REDIRECT = 'webpay_plus';
+const PASARELA_DEMO = 'demo';
 
 /**
  * Checkout de la tienda online. Si el tenant tiene Webpay Plus activo, `pagar`
  * inicia una orden de pasarela real (redirect) y la venta se crea recién cuando
  * la orden vuelve aprobada (callback in-process, ver OnlineCallbackHandler). Si
- * no, cae al flujo simulado: `checkout` solo calcula y devuelve una URL dummy.
+ * no, y el tenant tiene prendida la **pasarela demo**, cae al flujo simulado:
+ * `checkout` solo calcula y devuelve una URL dummy, y la pantalla registra la
+ * venta como pagada sin que nadie cobre. Sin ninguna de las dos configuradas la
+ * tienda **no cierra el pedido**: antes el simulado era lo que sobraba cuando
+ * faltaba Webpay, y cualquier tenant lo heredaba sin haberlo elegido.
  */
 @Injectable()
 export class OnlineService {
@@ -100,12 +106,37 @@ export class OnlineService {
     usuarioNombre: string,
     dto: CalcularVentaDto,
   ): Promise<PagarResponse> {
-    // Fallback: sin Webpay Plus activo, mantener la pasarela simulada actual.
+    // Precedencia: la que cobra de verdad le gana a la que simula. Con las dos
+    // prendidas, apagar Webpay en Configuración → Pasarelas es lo que hace caer
+    // la tienda a la demo — y esa es toda la puerta a la pantalla simulada.
     const tieneWebpay = await this.webpayActivo(tenantId);
     if (!tieneWebpay) {
+      // La demo se PRENDE, no se hereda: sin ninguna pasarela configurada la
+      // tienda no cierra el pedido, en vez de entregar y anotarlo cobrado.
+      if (
+        !(await this.tenantPasarelaService.codigoActivo(
+          tenantId,
+          PASARELA_DEMO,
+        ))
+      )
+        throw new BadRequestException(
+          'Este local todavía no tiene un medio de cobro online configurado',
+        );
+      const checkout = await this.checkout(tenantId, dto);
+      // El método lo resuelve el backend, igual que la rama Webpay: la pantalla
+      // lo elegía sola por el nombre y caía en `metodos[0]`, sin mirar siquiera
+      // si estaba habilitado. Un carrito de $0 no registra pago, así que ahí no
+      // se resuelve nada — resolverlo abortaría con 400 un checkout que hoy
+      // funciona en un tenant sin métodos habilitados.
+      const sinCobro = new Decimal(checkout.resultado.totales.totalFinal).lte(
+        0,
+      );
       return {
         modo: 'simulado',
-        ...(await this.checkout(tenantId, dto)),
+        metodoPagoId: sinCobro
+          ? null
+          : await this.metodosPagoService.resolverMetodoCredito(tenantId),
+        ...checkout,
       };
     }
 

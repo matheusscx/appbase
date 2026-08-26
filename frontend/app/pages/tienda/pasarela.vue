@@ -4,13 +4,6 @@ import type { CheckoutResponse } from '~/composables/useTiendaCarrito'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-interface MetodoPago {
-  metodoPagoId: string
-  nombre: string
-  permiteVuelto: boolean
-  habilitada: boolean
-}
-
 const route = useRoute()
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
@@ -29,7 +22,6 @@ const lineasSnapshot = ref<{ itemId: string, cantidad: string }[]>([])
 
 const estado = ref<'revisando' | 'procesando' | 'aprobada' | 'rechazada'>('revisando')
 const ventaId = ref<string | null>(null)
-const metodos = ref<MetodoPago[]>([])
 
 onMounted(async () => {
   if (!checkout.value || checkout.value.checkoutRef !== route.query.ref) {
@@ -38,18 +30,7 @@ onMounted(async () => {
   }
   resumen.value = checkout.value
   lineasSnapshot.value = lineas.value.map((l) => ({ itemId: l.item.id, cantidad: l.cantidad }))
-  try {
-    metodos.value = await useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`)
-  } catch {
-    metodos.value = []
-  }
 })
-
-function metodoTarjeta(): MetodoPago | undefined {
-  return metodos.value.find((m) => m.nombre.toLowerCase().includes('crédito'))
-    ?? metodos.value.find((m) => m.nombre.toLowerCase().includes('credito'))
-    ?? metodos.value[0]
-}
 
 /**
  * Un carrito con 100% de descuento suma $0, y ahí no hay pago que registrar: una
@@ -60,6 +41,10 @@ function metodoTarjeta(): MetodoPago | undefined {
  * El backend deriva el estado de lo aplicado: con total 0 y nada aplicado da
  * `pagada`, y el guard de "las ventas online requieren el pago completo" pasa
  * igual porque 0 ≥ 0.
+ *
+ * Por eso `metodoPagoId` viene `null` en ese caso, y no hay que confundirlo con
+ * "no se pudo resolver": `POST /online/pagar` ya falla con 400 si el tenant no
+ * tiene ningún método habilitado y el carrito sí cobra.
  */
 const sinCobro = computed(
   () => new Decimal(resumen.value?.resultado.totales.totalFinal ?? '0').lte(0),
@@ -67,11 +52,7 @@ const sinCobro = computed(
 
 async function aprobar() {
   if (!resumen.value) return
-  const metodo = sinCobro.value ? undefined : metodoTarjeta()
-  if (!sinCobro.value && !metodo) {
-    toast.add({ title: 'No hay métodos de pago configurados', color: 'error' })
-    return
-  }
+  const metodoPagoId = sinCobro.value ? null : resumen.value.metodoPagoId
 
   estado.value = 'procesando'
   try {
@@ -80,10 +61,10 @@ async function aprobar() {
       body: {
         canal: 'online',
         lineas: lineasSnapshot.value,
-        ...(metodo
+        ...(metodoPagoId
           ? {
               pagos: [{
-                metodoPagoId: metodo.metodoPagoId,
+                metodoPagoId,
                 monto: resumen.value.resultado.totales.totalFinal,
               }],
             }

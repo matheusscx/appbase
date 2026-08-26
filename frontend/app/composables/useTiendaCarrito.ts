@@ -14,12 +14,21 @@ export interface CheckoutResponse {
   resultado: ResultadoVenta
   checkoutRef: string
   checkoutUrl: string
+  /**
+   * Método con el que la pantalla simulada registra el pago. Lo resuelve el
+   * backend —mismo `resolverMetodoCredito` que usa la rama Webpay— porque la
+   * pantalla lo elegía sola buscando "crédito" en el nombre y cayendo en el
+   * primero de la lista, sin mirar si estaba habilitado. `null` cuando el
+   * carrito suma $0: ahí no hay pago que registrar.
+   */
+  metodoPagoId: string | null
 }
 
 /**
  * Respuesta de `POST /online/pagar`: pago real por Webpay (redirect) cuando el
  * tenant lo tiene activo, o el flujo simulado (misma forma que CheckoutResponse)
- * como fallback.
+ * cuando tiene prendida la pasarela demo. Sin ninguna de las dos configuradas
+ * el endpoint responde 400: el simulado ya no se hereda por no tener Webpay.
  */
 export type PagarResponse =
   | ({ modo: 'simulado' } & CheckoutResponse)
@@ -96,8 +105,8 @@ export function useTiendaCarrito() {
     // El flujo simulado (fallback) reutiliza la página /tienda/pasarela, que lee
     // el carrito desde este useState; el flujo Webpay sale de la SPA por redirect.
     if (response.modo === 'simulado') {
-      const { resultado, checkoutRef, checkoutUrl } = response
-      checkout.value = { resultado, checkoutRef, checkoutUrl }
+      const { resultado, checkoutRef, checkoutUrl, metodoPagoId } = response
+      checkout.value = { resultado, checkoutRef, checkoutUrl, metodoPagoId }
     }
     return response
   }

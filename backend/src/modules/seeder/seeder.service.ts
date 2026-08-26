@@ -1582,6 +1582,16 @@ export class SeederService implements OnApplicationBootstrap {
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
       {
+        // Tiene Tienda Online: sin este módulo no puede entrar a Configuración →
+        // Pasarelas, o sea que no puede prender ni apagar el único medio de
+        // cobro que su tienda usa.
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440364',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Falabella → Pasarelas
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440228',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440222', // Paris → Salones
@@ -1951,6 +1961,80 @@ export class SeederService implements OnApplicationBootstrap {
           }),
           configuracionProduccion: null,
           activo: true,
+        }),
+      );
+    }
+
+    // Pasarela demo — aprueba todo sin cobrar. Existe para que un local que
+    // todavía no conectó Transbank pueda PRENDERLA a propósito desde
+    // Configuración → Pasarelas; hasta el 2026-08-26 la tienda caía al flujo
+    // simulado por el solo hecho de no tener Webpay, sin que nadie lo eligiera.
+    // Sin credenciales que cifrar: no habla con ningún proveedor, y las URLs
+    // apuntan a la propia pantalla porque las columnas son NOT NULL.
+    const DEMO_ID = '550e8400-e29b-41d4-a716-446655440361';
+    const existsDemo = await this.pasarelaRepo.findOne({
+      where: { pasarelaId: DEMO_ID },
+      withDeleted: true,
+    });
+    if (!existsDemo) {
+      await this.pasarelaRepo.save(
+        this.pasarelaRepo.create({
+          pasarelaId: DEMO_ID,
+          codigo: 'demo',
+          nombre: 'Pasarela demo (solo pruebas)',
+          soportaTokenizacion: false,
+          soportaCobroRecurrente: false,
+          soportaMall: false,
+          urlProduccion: '/tienda/pasarela',
+          urlPruebas: '/tienda/pasarela',
+          configuracionPruebas: null,
+          configuracionProduccion: null,
+          activo: true,
+        }),
+      );
+    }
+
+    // Paris → demo prendida junto a Webpay. Webpay le gana por precedencia, así
+    // que no cambia nada hasta que alguien la apague: esa es la puerta a la
+    // pantalla simulada en el tenant que sí tiene catálogo.
+    const TP_PARIS_DEMO_ID = '550e8400-e29b-41d4-a716-446655440362';
+    const existsTpParisDemo = await this.tenantPasarelaRepo.findOne({
+      where: { tenantPasarelaId: TP_PARIS_DEMO_ID },
+      withDeleted: true,
+    });
+    if (!existsTpParisDemo) {
+      await this.tenantPasarelaRepo.save(
+        this.tenantPasarelaRepo.create({
+          tenantPasarelaId: TP_PARIS_DEMO_ID,
+          tenantId: '550e8400-e29b-41d4-a716-446655440007',
+          pasarelaId: DEMO_ID,
+          ambiente: 'pruebas',
+          modoIntegracion: 'individual',
+          configuracion: null,
+          activo: true,
+          prioridad: 3,
+        }),
+      );
+    }
+
+    // Falabella → demo prendida. Es el tenant sin Webpay: hasta hoy llegaba al
+    // simulado por descarte, y con el cambio se quedaría sin checkout.
+    const TP_FALABELLA_DEMO_ID = '550e8400-e29b-41d4-a716-446655440363';
+    const existsTpFalaDemo = await this.tenantPasarelaRepo.findOne({
+      where: { tenantPasarelaId: TP_FALABELLA_DEMO_ID },
+      withDeleted: true,
+    });
+    if (!existsTpFalaDemo) {
+      await this.tenantPasarelaRepo.save(
+        this.tenantPasarelaRepo.create({
+          tenantPasarelaId: TP_FALABELLA_DEMO_ID,
+          tenantId: '550e8400-e29b-41d4-a716-446655440040',
+          pasarelaId: DEMO_ID,
+          ambiente: 'pruebas',
+          modoIntegracion: 'individual',
+          configuracion: null,
+          activo: true,
+          prioridad: 1,
         }),
       );
     }

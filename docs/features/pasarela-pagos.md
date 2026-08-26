@@ -191,7 +191,7 @@ e inyectan sus services públicos.
 
 | Tabla | Rol |
 |---|---|
-| `pasarelas` | catálogo global de proveedores (seed); credenciales mall de la plataforma **cifradas** |
+| `pasarelas` | catálogo global de proveedores (seed); credenciales mall de la plataforma **cifradas**. Incluye la **pasarela demo** (`codigo: 'demo'`), que aprueba sin cobrar y no tiene credenciales |
 | `tenant_pasarela` | qué pasarela usa el tenant, modo/ambiente, `configuracion` **cifrada** |
 | `pasarela_api_keys` | keys m2m — solo `key_hash` (SHA-256) + `prefijo` |
 | `pasarela_inscripciones` | inscripción del pagador; `identificador_externo` (tbkUser) **cifrado**; `pagador_ref` opaco |
@@ -283,6 +283,10 @@ componentes CRUD del repo), con tres tabs:
 1. **Mis pasarelas**: lista de `tenant_pasarela`; drawer de alta/edición con
    credenciales **write-only** (al editar muestran `••••`; en modo individual
    exige reingresar las 3 credenciales juntas para no borrar las intactas).
+   La **pasarela demo** (`codigo: 'demo'`) es la excepción: no habla con ningún
+   proveedor, así que el drawer no le pide credenciales ni modo de integración
+   —lo fuerza a `individual`, porque no soporta mall— y la fila se marca "solo
+   pruebas" en vez de "sin credenciales". Ver `docs/features/tienda-online.md`.
 2. **API Keys**: lista + crear (modal muestra la key completa **una sola vez**
    con botón copiar) + revocar.
 3. **Órdenes**: listado paginado (`usePaginatedList`) con estado y monto.

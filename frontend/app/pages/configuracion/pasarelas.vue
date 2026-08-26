@@ -68,6 +68,22 @@ function emptyForm() {
 const form = ref(emptyForm())
 const tocoCredenciales = ref(false) // write-only: solo mandar si se tipeó algo
 
+/**
+ * La pasarela demo aprueba todo sin cobrar: no habla con ningún proveedor, así
+ * que no tiene credenciales que pedir ni modo mall que elegir. El local la
+ * prende a propósito desde acá — antes la tienda caía al flujo simulado por el
+ * solo hecho de no tener Webpay, sin que nadie lo hubiera elegido.
+ */
+const CODIGO_DEMO = 'demo'
+const esDemo = computed(
+  () => globales.value.find(g => g.pasarelaId === form.value.pasarelaId)?.codigo === CODIGO_DEMO,
+)
+watch(esDemo, (demo) => {
+  // El campo queda oculto: sin esto mandaría el 'mall' del formulario vacío, y
+  // el backend lo rechaza porque la demo no soporta mall.
+  if (demo) form.value.modoIntegracion = 'individual'
+})
+
 const drawerTitle = computed(() => (editingId.value ? 'Editar pasarela' : 'Agregar pasarela'))
 
 async function cargarConfig() {
@@ -317,7 +333,12 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
 
         <template #estado-cell="{ row }">
           <div class="flex flex-wrap items-center gap-2">
-            <UBadge v-if="!row.original.tieneCredenciales" color="warning" variant="subtle">
+            <UBadge v-if="row.original.codigo === CODIGO_DEMO" color="warning" variant="subtle">
+              Solo pruebas
+            </UBadge>
+            <UBadge
+              v-else-if="!row.original.tieneCredenciales" color="warning" variant="subtle"
+            >
               Sin credenciales
             </UBadge>
             <UBadge :color="row.original.activo ? 'success' : 'neutral'" variant="subtle">
@@ -431,7 +452,13 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               :items="[{ label: 'Pruebas', value: 'pruebas' }, { label: 'Producción', value: 'produccion' }]"
             />
           </UFormField>
-          <UFormField label="Modo de integración">
+          <UAlert
+            v-if="esDemo"
+            color="warning" variant="subtle" icon="i-lucide-triangle-alert"
+            title="Aprueba todo sin cobrar"
+            description="No pide credenciales y no cobra: la venta queda registrada como pagada sin que entre dinero. Usala solo para probar la tienda."
+          />
+          <UFormField v-if="!esDemo" label="Modo de integración">
             <USelect
               v-model="form.modoIntegracion"
               :items="[
@@ -441,7 +468,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
             />
           </UFormField>
 
-          <template v-if="form.modoIntegracion === 'mall'">
+          <template v-if="!esDemo && form.modoIntegracion === 'mall'">
             <UFormField label="Código de comercio hijo" help="Asignado por la plataforma dentro de su mall">
               <UInput
                 v-model="form.commerceCodeHijo"
@@ -450,7 +477,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               />
             </UFormField>
           </template>
-          <template v-else>
+          <template v-else-if="!esDemo">
             <UFormField label="Código de comercio mall">
               <UInput
                 v-model="form.credencialesIndividual.mallCommerceCode"

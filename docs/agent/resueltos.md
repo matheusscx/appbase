@@ -17,6 +17,135 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La tienda dejó de entregar sin cobrar por descarte: la pasarela demo se prende (2026-08-26)
+
+**Venía de la sección 3.** Texto verbatim:
+
+> - [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
+>   medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
+>   tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
+>   Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
+>   (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
+>   fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
+>   pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
+>   tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
+>   automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
+>   la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
+>   así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
+>   desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
+>   `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
+>   ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
+>   1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
+>      `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
+>      Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
+>      medios de pago online; hay una pasarela real y lo que sobra cuando falta.
+>   2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
+>      `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
+>      `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
+>      contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
+>      tenant que entre sin pasarela conectada tiene una tienda online que entrega
+>      mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
+>      donde debería quedar.
+>   **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
+>   tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
+>   retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
+>   toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
+>   defecto que existe igual, se configure o no.
+>   ✅ **DECIDIDO (owner, 2026-08-15): sin cobro real, la venta queda `pendiente`, no `pagada`.**
+>   Es el punto 2 de esta entrada —el defecto que existe se configure o no la pasarela— y se
+>   arregla ya: el estado `pendiente` ya lo soporta el modelo.
+>   ℹ️ **No se saca el camino simulado** (dejaría sin tienda a cualquier tenant que todavía no
+>   configuró nada) ni se encara todavía la configuración de medios online, que sigue siendo
+>   feature con spec propia.
+>   ⚠️ Al hacerlo, mirar el `metodoTarjeta()` que hoy elige método buscando "crédito" en el nombre
+>   y **agarra `metodos[0]` si no encuentra**: con la venta en `pendiente` puede que ni corresponda
+>   registrar un método. Y la pregunta de cobertura e2e de esta entrada sigue abierta: la pantalla
+>   no la alcanza nada automático.
+>   ⛔ **BLOQUEADA al intentar construirla (2026-08-16): la decisión choca con un invariante que
+>   ya existe, y hay que resolver el choque antes de escribir nada.** `ventas.service.ts:387-395`
+>   rechaza con `400` *"Las ventas online requieren el pago completo"* cualquier venta
+>   `canal='online'` cuyos pagos no cubran el `totalFinal`. O sea que **una venta online no puede
+>   quedar `pendiente` hoy, por diseño** — el comentario de la línea 385 lo dice con todas las
+>   letras: *"online no admite cuenta por cobrar"*.
+>   Se implementó la pantalla mandando la venta sin pagos, y **todo checkout simulado pasó a
+>   fallar con ese 400** (medido, no deducido). Se revirtió.
+>   **Lo que hay que decidir antes de retomarla:** ¿se afloja la regla para que una venta online
+>   pueda nacer `pendiente`? Aflojarla de plano habilita crear ventas online impagas **por
+>   cualquier camino**, incluido el de la pasarela real — que es justo lo que la regla protege.
+>   Las alternativas que se ven: (a) un estado/flag propio para "pedido sin pasarela conectada",
+>   (b) que el backend distinga el caso por config del tenant en vez de que lo decida el
+>   frontend, o (c) asumir que sin pasarela conectada la tienda online no debería estar
+>   disponible. Ninguna es una corrección: las tres son producto.
+>   ℹ️ **Lo único de esta entrada que sí se cerró** (2026-08-16, con la entrada de la venta de
+>   total $0): el carrito de $0 ya no manda `monto: '0'` contra `@IsDecimalPositivo`. Ese caso
+>   pasa el guard de arriba sin tocarlo, porque `0 ≥ 0`.
+
+### Qué se hizo
+
+**Lo decidió el owner el 2026-08-26, y no es ninguna de las tres salidas que la entrada
+tenía anotadas.** Se le presentó la escena con las tres —cerrar la tienda sin medio de
+cobro, dejar el pedido por cobrar, o no tocar nada— y eligió una cuarta: **habilitar la
+pasarela demo por configuración**. Con eso la decisión del 2026-08-15 (*"sin cobro real la
+venta queda `pendiente`"*) queda **superada**: la venta demo sigue naciendo `pagada`, y el
+invariante *"las ventas online requieren el pago completo"* no se tocó — que es lo que había
+bloqueado el intento del 2026-08-16.
+
+- **`pagar()` dejó de decidir por ausencia.** Webpay activo → rama Webpay; si no, **demo
+  prendida** → `modo: 'simulado'`; si no hay ninguna → `400 "Este local todavía no tiene un
+  medio de cobro online configurado"`. Precedencia explícita: la que cobra de verdad le gana
+  a la que simula.
+- **La demo es una fila más del catálogo de pasarelas** (`codigo: 'demo'`), así que se prende
+  desde la pantalla que ya existía (Configuración → Pasarelas), con badge **"solo pruebas"**,
+  sin pedir credenciales y con un aviso de que aprueba sin cobrar. No se construyó ningún
+  mecanismo nuevo al lado del que había.
+- **Se pregunta con `codigoActivo()`, no con `resolverConfiguracionActiva()`**: esa exige un
+  blob de credenciales descifrable, y la demo no tiene ninguno que descifrar — le habría
+  contestado "no configurada" siempre.
+- **El método de pago lo resuelve el backend** y viaja en la respuesta. La pantalla lo elegía
+  sola buscando "crédito" en el nombre y cayendo en `metodos[0]`, **sin mirar si estaba
+  habilitado**. Viene `null` con carrito de $0, donde la venta es pagada sin línea de pago:
+  resolverlo igual abortaría con 400 un checkout que hoy funciona.
+
+📌 **Dos cosas que la entrada daba por sabidas y no eran así**, medidas antes de sembrar:
+`Demo Bodega` **no tiene catálogo `tipo=producto`** (su tienda está vacía; el seed no le
+siembra ítems), y **no tenía contratado el módulo `Pasarelas`** — o sea que el único tenant
+sin Webpay no podía entrar a la pantalla desde donde se prende su único medio de cobro. Se
+le contrató el módulo, y la demo quedó sembrada en los dos tenants: en Bodega porque es el
+que hoy llega al simulado, y en Restaurante porque es el que tiene catálogo — ahí **apagar
+Webpay es la puerta a la pantalla simulada**, que es la parte de la entrada original sobre
+lo inalcanzable de `/tienda/pasarela`.
+
+### Qué lo fija
+
+| Mutante | Qué revierte | Qué muere |
+|---|---|---|
+| `pagar()` vuelve a caer al simulado sin chequear la demo | la decisión por ausencia | 2 unit: *"cae a modo simulado"* y *"rechaza en vez de simular"* |
+| `metodoPagoId: null` siempre | que el backend resuelva el método | 1 unit: *"devuelve el método con el que la pantalla registra el pago"* |
+| resolver el método también con total $0 | el corte por `sinCobro` | 1 unit: *"carrito de $0: no resuelve método alguno"* |
+| `codigoActivo` sin `AND tp.activo = true` | que el interruptor signifique algo | e2e: *"apagada, la tienda no cierra el pedido"* |
+| `pasarela.vue` vuelve a pedir `/metodos-pago` y adivinar | la elección del lado del cliente | los 3 vitest del spec nuevo |
+
+ℹ️ **Un sexto mutante quedó razonado y no medido**: sacar del seed la fila demo de Bodega.
+El e2e lo afirma directo (`find(c => c.codigo === 'demo')` + `toBeDefined()`), y que el
+seeder la crea se verificó por SQL contra una base recién reseteada. No es lo mismo que
+haberlo corrido.
+
+⚠️ **Lo que no cubre ningún test**: que `useTiendaCarrito` **propague** `metodoPagoId` al
+estado del checkout —lo sostiene solo el tipo, o sea `vue-tsc`— y el badge *"solo pruebas"*
+de `configuracion/pasarelas.vue`, que no tiene spec.
+
+📌 **La revisión independiente encontró dos cosas y las dos se corrigieron antes del
+commit**: el test del carrito de $0 **no discriminaba** —la venta sin `pagos` ya salía así
+antes del cambio—, y se le agregó lo que sí discrimina (la pantalla vieja pedía
+`/metodos-pago` en `onMounted`, o sea también para un carrito que no cobra); y una línea del
+backlog decía *"el checkout responde 400"* cuando la guarda vive **solo en `pagar()`** —
+`POST /online/checkout` sigue abierto, hoy inocuo porque nadie lo llama sin pasar por
+`pagar`. También levantó un residuo vivo que el diff no tocaba: la pantalla dejó de
+**elegir** el método pero sigue **mostrando** la tarjeta Oneclick preferida en un flujo donde
+no se cobra nada. Eso no se arregló acá: quedó anotado en `pendientes.md`.
+
+---
+
 ## El drawer del simulador ya no recarga: la fila que cambió viaja en la respuesta (2026-08-26)
 
 **Venía de la sección 3.** Texto verbatim:

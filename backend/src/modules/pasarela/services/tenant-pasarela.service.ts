@@ -59,6 +59,25 @@ export class TenantPasarelaService {
     }));
   }
 
+  /**
+   * ¿El tenant tiene prendida la pasarela `codigo`? Es la pregunta de
+   * `resolverConfiguracionActiva` **sin** la parte de las credenciales: esa
+   * exige un blob descifrable, y la pasarela demo no tiene ninguno que
+   * descifrar. Preguntarle a ella por la demo daría siempre "no configurada".
+   */
+  async codigoActivo(tenantId: string, codigo: string): Promise<boolean> {
+    const rows: { existe: boolean }[] = await this.db.query(
+      `SELECT true AS existe
+         FROM tenant_pasarela tp
+         JOIN pasarelas p ON p.pasarela_id = tp.pasarela_id
+              AND p.codigo = $2 AND p.activo = true AND p.eliminado_el IS NULL
+        WHERE tp.tenant_id = $1 AND tp.activo = true AND tp.eliminado_el IS NULL
+        LIMIT 1`,
+      [tenantId, codigo],
+    );
+    return rows.length > 0;
+  }
+
   /** Catálogo global para el selector del drawer (sin configuración). */
   listarPasarelasGlobales() {
     return this.pasarelaRepo.find({

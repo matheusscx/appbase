@@ -12,8 +12,9 @@
 
 Módulo interno (usuario del tenant logueado) que permite navegar el catálogo de
 productos, armar un carrito y pagar. La compra del carrito cobra por **Webpay
-Plus real** (redirect) cuando el tenant lo tiene activo, cayendo a la pasarela
-simulada (dummy) como fallback si no. Incluye además suscripciones (alta de
+Plus real** (redirect) cuando el tenant lo tiene activo, y por la **pasarela
+demo** (dummy) cuando el tenant la tiene prendida. Sin ninguna de las dos
+configuradas la tienda no cierra el pedido. Incluye además suscripciones (alta de
 compras recurrentes, con backend real y primer cobro inmediato) y medios de
 pago (tarjetas inscritas vía Oneclick, ver sección "Mis medios de pago
 (inscripción Oneclick)").
@@ -34,9 +35,27 @@ el mismo carrito/catálogo.
     materializa `canal:'online'` y deja `referencia_externa = venta.id` (la orden
     queda `conciliada`). Idempotente. Ver [ADR-009](../adr/009-callback-pasarela-venta-por-callback.md)
     y `docs/features/pasarela-pagos.md`.
-  - **Fallback simulado**: si el tenant no tiene `webpay_plus` activo, `pagar`
-    devuelve `modo:'simulado'` y se mantiene la página `/tienda/pasarela` (dummy),
-    que solo calcula y no persiste nada hasta que el usuario aprueba.
+  - **Pasarela demo** (2026-08-26): si el tenant no tiene `webpay_plus` activo
+    pero sí prendida la pasarela de código `demo`, `pagar` devuelve
+    `modo:'simulado'` y se mantiene la página `/tienda/pasarela` (dummy), que
+    solo calcula y no persiste nada hasta que el usuario aprueba. Esa pantalla
+    registra la venta **pagada por el total sin que nadie cobre**, así que la
+    demo se prende a propósito desde Configuración → Pasarelas, con la etiqueta
+    "solo pruebas". Precedencia: la que cobra de verdad le gana a la que simula,
+    o sea que **apagar Webpay ahí es la única puerta a la pantalla simulada** en
+    un tenant que tiene las dos.
+  - **Sin ningún medio de cobro configurado**, `pagar` responde `400 "Este local
+    todavía no tiene un medio de cobro online configurado"`. Hasta el 2026-08-26
+    el simulado era lo que sobraba cuando faltaba Webpay: cualquier tenant que se
+    registrara y no conectara nada heredaba, sin elegirlo, una tienda que entrega
+    mercadería y la anota cobrada.
+  - **El método de pago con el que la pantalla demo registra la venta lo resuelve
+    el backend** y viaja en la respuesta (`metodoPagoId`), con la misma regla que
+    usa la rama Webpay (`resolverMetodoCredito`). Antes lo elegía la pantalla:
+    buscaba "crédito" en el nombre y, si no aparecía, agarraba el primero de
+    `GET /metodos-pago` **sin mirar si estaba habilitado**. Viene `null` cuando
+    el carrito suma $0 — ahí la venta es pagada *sin línea de pago*, y resolverlo
+    igual abortaría con 400 un checkout que hoy funciona.
   - Canal `'online'` en ventas: usa la caja virtual del tenant, exige pago
     completo (no admite cuenta por cobrar), nace directamente `pagada`.
   - Suscripciones: backend real (`item_suscripcion` + tabla `suscripciones`,
@@ -234,7 +253,11 @@ modal de borrado avise el N.
 - **Controller**: `backend/src/modules/online/online.controller.ts`
 - **Service**: `backend/src/modules/online/online.service.ts` — delega en
   `CalculoPreciosService.calcular()` (sin persistir) y genera un
-  `checkoutRef` + `checkoutUrl` dummy.
+  `checkoutRef` + `checkoutUrl` dummy. `pagar()` elige la rama por lo que el
+  tenant tiene **prendido** (Webpay → demo → 400); la demo se pregunta con
+  `TenantPasarelaService.codigoActivo()` y no con `resolverConfiguracionActiva`,
+  que exige un blob de credenciales descifrable y daría "no configurada" para
+  una pasarela que por definición no tiene ninguno.
 
 ### Suscripciones
 
