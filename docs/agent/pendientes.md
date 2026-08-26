@@ -70,7 +70,8 @@ agrupados por naturaleza (tests / comentarios / tipos / duplicación / conducta)
 —incluida la regresión que el e2e cazó y que ni el typecheck ni dos revisiones
 independientes vieron— está en [`resueltos.md`](resueltos.md). La tercera —el tope del
 cuaderno de anti-patrones, la única que pedía juzgar bugs ajenos— salió el **2026-08-22**,
-también en [`resueltos.md`](resueltos.md). **La sección vuelve a quedar vacía.**
+también en [`resueltos.md`](resueltos.md). **Ese grupo quedó cerrado**; lo que hay abajo llegó
+después y no tiene que ver con el redondeo.
 
 ⚠️ **Antes de repartir la próxima tanda, leer la regla que salió de éstas** (misma entrada de
 `resueltos.md`), porque no es la que uno esperaría:
@@ -89,6 +90,16 @@ subcontaban o describían mal el hueco** —decía "tres consultas" y eran cinco
 eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó leyendo: se
 detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
 de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
+
+- [ ] **Los nombres de ítems borrados no tienen tope en el mensaje del cambio de nivel**
+  (frontend, mecánico; lo dejó ver la revisión independiente del 2026-08-25) —
+  `itemsQueLoTienen` en `useNivelRegla.ts` acota los **vivos** con `MAX_NOMBRES` pero a los de
+  la papelera los agrega todos: una regla con 50 asociaciones borradas arma un toast con 50
+  nombres.
+
+  📌 **La asimetría en sí es correcta y hay que conservarla** —los borrados son los que el admin
+  no puede ver por ningún otro lado, y recortarlos fue justamente el bug que esa revisión cazó—.
+  Lo que falta es un techo para ellos también: mismo tratamiento, *"y N más (en la papelera)"*.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -171,6 +182,28 @@ decisión que no es mía).
     `concurrencia-pool:87`, `orden-locks-desfases:283`) y en ésos el guard es un no-op — pero
     **`papelera` no es uno de ellos**, y es el que falló. Con `maxWorkers: 1` comparten proceso,
     pero cada archivo tiene su propio server, así que el bind ajeno no lo explica.
+
+  ➕ **Reapareció TRES veces más el 2026-08-25, en specs distintos** (mismo día, corridas del
+  gate de otros dos frentes): `liquidacion-propinas.e2e-spec.ts:484` —`401` donde esperaba
+  `201`—, `suscripcion-precio.e2e-spec.ts:99` ídem, y `uso-reglas.e2e-spec.ts` —`401` donde
+  esperaba `400`—. Con `papelera` van **cuatro archivos distintos**, y ninguno de los cuatro es
+  de los que hacen `listen` sin host.
+
+  📌 **El de `uso-reglas` merece una nota porque es el caso que más se puede confundir:** cayó
+  en la misma corrida en que ese archivo se estaba modificando, o sea que parecía una regresión
+  propia. No lo era —dos pases sobre base limpia dieron 18/18—, y lo que lo delata sin correr
+  nada es la forma: esperaba **400** y recibió **401**. El guard que ese test ejercita ya pasó
+  la autenticación; un 401 no es "el guard decidió distinto", es "no hubo request".
+
+  **Eso es dato, no anécdota, y apunta en una dirección:** si fuera un bug del harness ligado a
+  un spec, caería siempre en el mismo; que rote entre archivos sin relación es lo que se espera
+  de un proceso ajeno tomando un puerto del rango efímero al azar. Refuerza el diagnóstico y
+  debilita cualquier hipótesis de "algo que hace ESE spec".
+
+  📌 **Los tres pasaron al volver a correrlos solos sobre base limpia**, así que el criterio para
+  no confundirlo con una regresión sigue siendo el mismo: re-correr el spec aislado. Pero eso
+  **no lo cierra** — un intermitente no se cierra sin correrlo en loop, que es la lección que
+  dejó el cierre falso de la mañana.
 
   ➡️ **Por dónde seguir:** queda el **primer** request de un archivo, que es el único instante en
   que nada nuestro tiene el puerto. Medirlo es barato: registrar en la caja negra si la captura
