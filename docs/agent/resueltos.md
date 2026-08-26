@@ -17,6 +17,133 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El drawer del simulador ya no recarga: la fila que cambió viaja en la respuesta (2026-08-26)
+
+**Venía de la sección 3.** Texto verbatim:
+
+> - [ ] **El drawer del simulador se recarga con un alcance más angosto que lo que muestra**
+>   (frontend; lo levantó la revisión independiente del 2026-08-25 al cerrar el frente del
+>   descarte, → [`resueltos.md`](resueltos.md) § *"El descarte de un desfase deja de silenciarlo"*)
+>   — cuando el descarte devuelve `cambiados`, `useSimuladorDesfases` recarga la lista con
+>   `GET /items/:insumoId/afectados`, que filtra por **componente DIRECTO**
+>   (`filasDesfaseCombos`: `JOIN combo_componentes cc … AND cc.componente_item_id = $2`, sin
+>   transitividad). Pero el drawer puede contener filas que no salen de ahí: `onAplicarDesfases`
+>   **agrega** `res.afectados` —los combos que contienen la receta recién aplicada— y si el drawer
+>   se abrió por un **ingrediente**, esos combos nunca son alcanzables por `afectados(ingrediente)`,
+>   porque un ingrediente no puede ser componente de un combo.
+>   **Repro** (camino compuesto, una sola sesión de drawer): ajuste de costo del ingrediente X →
+>   drawer con la receta R → Aplicar R → el drawer queda con el combo C → Descartar → C vuelve en
+>   `cambiados` → la recarga trae `afectados(X)`, que **no incluye a C**. El drawer queda
+>   probablemente vacío mientras el toast dice *"El costo de «C» cambió mientras mirabas… decidí
+>   otra vez"*, sobre una fila que ya no está en pantalla.
+>   ℹ️ **No silencia nada ni escribe nada mal** —el backend no archivó, y C sigue listada en
+>   `/desfases`, que es la bandeja canónica—: es pérdida de contexto en pantalla. Por eso se anota
+>   en vez de frenar el frente.
+>   📌 **Residuo emparentado, de la misma recarga:** su `catch` es silencioso, así que si el GET
+>   falla la fila cambiada queda con su número viejo mientras el toast dice *"mirá el número
+>   nuevo"*. Es la misma degradación asumida que la rama sin `highlightId` —una foto vieja
+>   coherente— y desaparece sola si se toma la salida del backend.
+>   ⛔ **La puerta equivocada, y es la que más tienta: ensanchar `afectados` para que sea
+>   transitivo.** El filtro es `cc.componente_item_id = $2` —componente directo— y tocarlo cambia
+>   la semántica de `GET /items/:id/afectados` para **todos** sus consumidores, empezando por
+>   `maybeAbrirDesfases`, que es justamente quien puebla el drawer. Se arregla la recarga rompiendo
+>   lo que la llenó.
+>   💡 **La salida preferida es el backend**: que `cambiados` devuelva la fila completa
+>   (`DesfaseItemDto`) en vez de solo `costoPropuestoActual` elimina la recarga en los DOS
+>   consumidores y borra esta clase de divergencia entera.
+>   ⚠️ **Cuánto cuesta, medido y no estimado** (revisión independiente, 2026-08-25): hoy no
+>   alcanza con los datos que el descarte ya tiene. Un `DesfaseItemDto` necesita `afectados` (los
+>   insumos **con nombre**) y `precio_base`, y ninguno está en la transacción:
+>   `ingredientesPorReceta` selecciona `receta_item_id, cantidad, unidad_codigo, unidad_medida,
+>   costo_actual` —sin id ni nombre del ingrediente—, `componentesPorCombo` lo mismo, y
+>   `cabecerasCompuestas` devuelve solo `{ tipo, nombre }`. O se ensanchan tres helpers que
+>   **también usa `aplicarDesfases`**, o se agrega una lectura. Por eso es frente propio y no el
+>   remate del que lo descubrió.
+
+**Lo que se hizo:** `descartarDesfases` devuelve, junto a `costoPropuestoActual`, la **fila
+completa** (`fila: DesfaseItemDto | null`), y el drawer la reemplaza en la lista en vez de
+recargar con `GET /items/:insumoId/afectados`. Sin segundo alcance no hay divergencia posible.
+
+**Costó menos de lo que la entrada midió, y la diferencia es dónde se arma la fila.** La
+entrada planteaba ensanchar `ingredientesPorReceta`, `componentesPorCombo` y
+`cabecerasCompuestas` —los tres helpers que también usa `aplicarDesfases`— para que el
+descarte pudiera construir el DTO con lo que ya tenía en la transacción. No hizo falta:
+`filasDesfaseCombos` **ya** aceptaba `(runner, tenantId, { comboItemIds })`, así que alcanzó
+con darle a `filasDesfaseRecetas` la misma firma y llamar a los dos con los ids que cambiaron,
+dentro de la misma transacción. Cero cambios en los tres helpers, y por lo tanto cero riesgo
+para `aplicarDesfases`.
+
+📌 **Y eso trajo, gratis, la parte que la entrada no había visto.** Reusar los constructores de
+la bandeja significa reusar su **predicado**: un ítem cuyo propuesto nuevo ya coincide con el
+cacheado (el usuario revirtió el costo del insumo) sale filtrado, y el descarte lo informa como
+`fila: null` en vez de devolver una fila con delta 0. Un builder aparte —que es lo que se
+hubiera escrito ensanchando los helpers— habría inventado ese desfase fantasma, y el bug se
+habría visto en pantalla, no en un test.
+
+**Cuánto cuesta:** 0 queries en el camino normal (`cambiados` vacío) y hasta 4 en el que ya era
+la excepción — dos por tipo (cabeceras y componentes), y cada helper vuelve sin consultar si no
+le toca ningún id.
+
+⚠️ **Eran 5, y la revisión independiente lo midió.** `filasDesfaseRecetas` llamaba a
+`crearConversor()`, que hace un `find()` de la tabla de unidades **sin caché**, así que el
+descarte releía el catálogo que su propio loop ya había cargado. Se arregló pasándole el
+conversor —`opts.convertir`, el mismo criterio que ya obliga a pasárselo a `costoPropuesto`— y
+recién entonces el número es 4. Lo fija `items.service.spec.ts` con
+`expect(crearConversor).toHaveBeenCalledTimes(1)`; el mutante que lo mata es volver a crearlo
+adentro.
+
+**El residuo emparentado se cerró solo**, como la entrada anticipaba: sin recarga no hay `catch`
+silencioso que pueda dejar la fila con su número viejo mientras el toast dice "mirá el número
+nuevo".
+
+📌 **El aviso también se partió en dos, y esto salió de la misma revisión — dos veces.** El
+toast decía *"mirá el número nuevo y decidí otra vez"* sobre TODO lo que volvía en `cambiados`,
+incluidas las filas `null`: repetía en el texto el bug que el frente cerraba en la lista, hablar
+de algo que ya no está en pantalla. Ahora los que traen fila reciben ese aviso y los que
+vinieron `null` reciben el suyo (*"«X» ya no está desfasado"*), y si no quedó ninguna fila el
+drawer se cierra en vez de quedar abierto y vacío.
+
+⚠️ **La primera corrección lo arregló en el drawer y lo dejó vivo en la bandeja**, y la segunda
+ronda de revisión lo cazó: `desfases.vue` tenía su propio texto, mandaba el aviso único, y su
+`cargar()` sacaba de la lista justamente las filas `null` —porque `GET /desfases` ya no las
+lista—. Por eso el reparto vive ahora en una **función pura compartida**
+(`avisosDeDesfasesCambiados`, exportada de `useSimuladorDesfases.ts`) que usan las dos
+pantallas, y no en un texto por `.vue`: las dos tienen que decir lo mismo o vuelve la
+divergencia por otro lado.
+
+📌 **Lo que ahí NO cubre ningún test:** que `desfases.vue` efectivamente llame a esa función.
+La página no tiene spec —igual que el drawer antes de este frente—, así que lo que está fijado
+es el comportamiento de la función, no que la bandeja la use.
+
+📌 **`desfases.vue` conserva su `cargar()`, a propósito**, y acá la entrada sobreafirmaba al
+decir que la salida del backend "elimina la recarga en los DOS consumidores": la recarga de la
+bandeja pide `GET /desfases`, que es un **superconjunto** de lo que muestra. No puede diverger,
+y además refresca las filas ajenas al lote. Lo que estaba mal era la angostura del alcance del
+drawer, no la recarga como mecanismo.
+
+**Qué lo fija, con el mutante que cada test mata:**
+
+| Mutante | Qué mata |
+|---|---|
+| Sacar el bloque que llena `fila` en `descartarDesfases` (vuelve al `null` de antes) | `items.service.spec.ts` › *la fila que cambió vuelve completa y coherente* |
+| Anular el `eq4(propuesto, cacheado)` de `filasDesfaseRecetas` | `items.service.spec.ts` › *si al recalcular ya no está desfasada, la fila vuelve en `null`* — sin él devuelve la fila fantasma con delta 0 |
+| Recrear el conversor adentro de `filasDesfaseRecetas` en vez de recibirlo | `items.service.spec.ts` › *la fila que cambió vuelve completa* (su afirmación `crearConversor` × 1) |
+| Volver a recargar con `traerAfectados(desfasesHighlightId)` | 4 de los 8 de `useSimuladorDesfases.nuxt.spec.ts` |
+| Volver al aviso único sobre todo `cambiados` | 4 de los 8 de `useSimuladorDesfases.nuxt.spec.ts` (dos se solapan con el anterior) |
+| — | `simulador-costos.e2e-spec.ts` afirma contra la base real que la `fila` que devuelve el descarte es la MISMA que muestra `/desfases` |
+
+⚠️ **La tabla se re-midió entera dos veces, corriendo cada mutante**, no se le fueron sumando
+filas: los tests crecieron durante el frente y los conteos de la primera versión ya no eran
+ciertos. Si algo se agrega acá, se vuelve a medir todo.
+
+⚠️ El spec del composable es **nuevo, y ese hueco era el problema**: el drawer no tiene spec de
+pantalla, así que este camino —abrir por un ingrediente, aplicar la receta, descartar el combo—
+solo se veía corriendo la app. Dos de sus ocho tests recorren esa sesión completa, que es el
+único lugar donde los dos alcances divergen; los demás fijan el reparto de la lista y el de los
+avisos, que no dependen de cómo se llegó.
+
+---
+
 ## El tope de nombres se cuenta por grupo: ni esconde el borrado ni arma un toast de 50 (2026-08-26)
 
 **Venía de la sección 1**, la única mecánica que quedaba. Texto verbatim:

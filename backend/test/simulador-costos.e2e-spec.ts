@@ -353,12 +353,23 @@ describe('Simulador impacto costos (e2e)', () => {
 
     const cuerpo = resDescartar.body as {
       descartados: number;
-      cambiados: { itemId: string; costoPropuestoActual: string }[];
+      cambiados: {
+        itemId: string;
+        costoPropuestoActual: string;
+        fila: DesfaseItemResponse | null;
+      }[];
     };
     expect(cuerpo.descartados).toBe(0);
     expect(cuerpo.cambiados.map((c) => c.itemId)).toEqual([recetaId]);
     // El número que se le informa es el NUEVO, no el que mandó.
     expect(cuerpo.cambiados[0].costoPropuestoActual).not.toBe(visto);
+    // Y la fila viaja ENTERA, para que la pantalla la repinte sin volver a
+    // preguntar: la recarga del drawer usaba `afectados(insumo)`, un alcance más
+    // angosto que lo que muestra, y avisaba sobre filas que ella misma sacaba.
+    expect(cuerpo.cambiados[0].fila).not.toBeNull();
+    expect(cuerpo.cambiados[0].fila!.costoPropuesto).toBe(
+      cuerpo.cambiados[0].costoPropuestoActual,
+    );
 
     // 4) Y lo que importa: la fila SIGUE en la bandeja. Antes del arreglo, acá
     //    había cero filas y el desfase quedaba invisible para siempre.
@@ -370,6 +381,9 @@ describe('Simulador impacto costos (e2e)', () => {
     );
     expect(fila).toBeDefined();
     expect(fila!.costoPropuesto).toBe(cuerpo.cambiados[0].costoPropuestoActual);
+    // La fila que devolvió el descarte y la que muestra la bandeja son la MISMA
+    // foto: si divergieran, el drawer y `/desfases` contarían cosas distintas.
+    expect(cuerpo.cambiados[0].fila).toEqual(fila);
   });
 
   it('aplicar sin checkbox no cambia precio_base', async () => {

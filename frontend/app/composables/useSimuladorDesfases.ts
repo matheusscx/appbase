@@ -5,6 +5,56 @@ import type {
 } from '~/components/DesfasesPanel.vue'
 
 /**
+ * Una fila que el descarte NO archivó porque su costo se movió mientras el
+ * usuario miraba. `fila` es la fila lista para repintarse, o `null` si ese ítem
+ * ya no está desfasado.
+ */
+export interface DesfaseCambiado {
+  itemId: string
+  nombre: string
+  costoPropuestoActual: string
+  fila: DesfaseItemDto | null
+}
+
+/**
+ * Los avisos que corresponden a un `cambiados`, **partidos por lo que el usuario
+ * tiene que hacer con cada grupo**.
+ *
+ * ⚠️ Vive acá y no en cada pantalla porque las dos que descartan —el drawer y la
+ * bandeja `/desfases`— tienen que decir lo mismo, y la bandeja decía otra cosa:
+ * mandaba *"mirá el número nuevo y decidí otra vez"* sobre TODO `cambiados`,
+ * incluidas las filas `null`, que su propia recarga acababa de sacar de la
+ * lista. Es el mismo bug que este frente cerró en el drawer, y una fila que dejó
+ * de estar desfasada no tiene nada que decidir.
+ */
+export function avisosDeDesfasesCambiados(cambiados: DesfaseCambiado[]) {
+  const paraDecidir = cambiados.filter(c => c.fila)
+  const seFueronSolos = cambiados.filter(c => !c.fila)
+  const avisos: { title: string, description: string, color: 'warning' | 'info' }[] = []
+  if (paraDecidir.length) {
+    avisos.push({
+      title: paraDecidir.length === 1
+        ? `El costo de «${paraDecidir[0]!.nombre}» cambió mientras mirabas`
+        : `${paraDecidir.length} costos cambiaron mientras mirabas`,
+      description: 'Esos avisos no se descartaron. Mirá el número nuevo y decidí otra vez.',
+      color: 'warning',
+    })
+  }
+  if (seFueronSolos.length) {
+    avisos.push({
+      title: seFueronSolos.length === 1
+        ? `«${seFueronSolos[0]!.nombre}» ya no está desfasado`
+        : `${seFueronSolos.length} avisos ya no están desfasados`,
+      // Neutro a propósito: `fila: null` sale tanto porque el costo volvió a
+      // coincidir como porque otro descarte ya archivó ese mismo propuesto.
+      description: 'Ya no hay desfase que decidir, así que no hubo nada que descartar.',
+      color: 'info',
+    })
+  }
+  return avisos
+}
+
+/**
  * Estado y lógica del simulador de impacto de costos en recetas y combos
  * ("desfases").
  * Se dispara tras cualquier movimiento que cambie el costo de un producto o
@@ -115,7 +165,7 @@ export function useSimuladorDesfases() {
 
   interface DescartarResponse {
     descartados: number
-    cambiados: { itemId: string, nombre: string, costoPropuestoActual: string }[]
+    cambiados: DesfaseCambiado[]
   }
 
   async function onDescartarDesfases(items: DescartarDesfaseItem[]) {
@@ -129,50 +179,48 @@ export function useSimuladorDesfases() {
         // El drawer NO se cierra: cerrarlo escondería justo las filas que no se
         // descartaron, que es el bug que este cambio cierra.
         //
-        // ⚠️ Se RECARGA la lista en vez de parchearle el `costoPropuesto` a la
-        // fila que volvió, y la diferencia no es de estilo. `deltaCosto`,
-        // `margenPctPropuesto` y `precioSugerido` se derivan todos del propuesto
-        // (`precioSugerido = costoNuevo × precioViejo / costoViejo`), así que
-        // pisar un solo campo deja una fila internamente inconsistente — y el
-        // `watch` del panel reprellena el input de precio con ese
-        // `precioSugerido` viejo, que `aplicar` persiste tal cual en
-        // `items.precio_base`. Sería el mismo bug que este frente cierra, ahora
-        // con un camino que lo escribe.
-        // Sin insumo que consultar no hay de dónde recalcular: se sacan solo las
-        // descartadas y las demás quedan como estaban. Una foto vieja es
-        // coherente; una fila con un campo pisado, no.
-        const soloLasQueQuedan = () => desfasesFilas.value.filter(
-          f => !items.some(i => i.itemId === f.itemId)
-            || res.cambiados.some(c => c.itemId === f.itemId),
-        )
-        const productoId = desfasesHighlightId.value
-        // ⚠️ La recarga va en su PROPIO try: el descarte ya commiteó, así que un
-        // GET caído acá no puede reportarse como "Error al descartar" — sería
-        // decirle al usuario que no pasó algo que sí pasó, y encima dejando en
-        // la lista las filas que el backend ya archivó. `desfases.vue` no tiene
-        // el problema porque su `cargar()` contiene su propia falla.
-        try {
-          desfasesFilas.value = productoId
-            ? await traerAfectados(productoId)
-            : soloLasQueQuedan()
-        }
-        catch {
-          desfasesFilas.value = soloLasQueQuedan()
-        }
-        const uno = res.cambiados[0]!
-        toast.add({
-          title: res.cambiados.length === 1
-            ? `El costo de «${uno.nombre}» cambió mientras mirabas`
-            : `${res.cambiados.length} costos cambiaron mientras mirabas`,
-          description: 'Esos avisos no se descartaron. Mirá el número nuevo y decidí otra vez.',
-          color: 'warning',
+        // ⚠️ La fila que cambió se REEMPLAZA por la que devuelve el backend; no
+        // se le parchea el `costoPropuesto`, y la diferencia no es de estilo.
+        // `deltaCosto`, `margenPctPropuesto` y `precioSugerido` se derivan todos
+        // del propuesto (`precioSugerido = costoNuevo × precioViejo /
+        // costoViejo`), así que pisar un solo campo deja una fila internamente
+        // inconsistente — y el `watch` del panel reprellena el input de precio
+        // con ese `precioSugerido` viejo, que `aplicar` persiste tal cual en
+        // `items.precio_base`.
+        //
+        // ⚠️ Y **no se recarga con `afectados(insumo)`**, que es lo que hacía
+        // hasta el 2026-08-26: ese alcance es más angosto que lo que el drawer
+        // muestra. `onAplicarDesfases` le agrega los combos que contienen la
+        // receta recién aplicada, y esos combos no son alcanzables desde un
+        // ingrediente (`afectados` filtra por componente DIRECTO), así que el
+        // toast avisaba sobre una fila que la propia recarga sacaba de pantalla.
+        // Con la fila viajando en la respuesta no hay segundo alcance que pueda
+        // diverger, y de paso desaparece el `catch` silencioso que dejaba la
+        // fila con su número viejo si ese GET fallaba.
+        const nuevaPorId = new Map(res.cambiados.map(c => [c.itemId, c.fila]))
+        const pedidos = new Set(items.map(i => i.itemId))
+        desfasesFilas.value = desfasesFilas.value.flatMap((f) => {
+          if (!pedidos.has(f.itemId)) return [f]
+          const nueva = nuevaPorId.get(f.itemId)
+          // No volvió en `cambiados`: se descartó, sale de la lista.
+          if (nueva === undefined) return []
+          // Volvió como `null`: el costo del insumo se revirtió y ya no hay
+          // desfase que decidir. Sale igual, sin fila fantasma con delta 0.
+          return nueva ? [nueva] : []
         })
+        for (const aviso of avisosDeDesfasesCambiados(res.cambiados)) {
+          toast.add(aviso)
+        }
         // El caso mixto también avisa de lo que SÍ salió: sin esto, un lote de
         // diez con una cambiada no daba ninguna señal de que las otras nueve se
         // descartaron. Mismo criterio que `desfases.vue`.
         if (res.descartados) {
           toast.add({ title: 'Avisos descartados', color: 'success' })
         }
+        // Si no quedó ninguna fila —todo se descartó o dejó de estar desfasado—
+        // el drawer se cierra, igual que la rama de abajo. Dejarlo abierto y
+        // vacío es alcanzable: pasa cuando todos los cambiados vuelven `null`.
+        if (!desfasesFilas.value.length) desfasesOpen.value = false
       } else {
         toast.add({ title: 'Avisos descartados', color: 'success' })
         desfasesOpen.value = false

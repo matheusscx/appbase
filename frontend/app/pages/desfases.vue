@@ -16,7 +16,7 @@ const toast = useToast()
  */
 interface DescartarResponse {
   descartados: number
-  cambiados: { itemId: string, nombre: string, costoPropuestoActual: string }[]
+  cambiados: DesfaseCambiado[]
 }
 
 interface AplicarResponse {
@@ -100,14 +100,14 @@ async function onDescartar(items: DescartarDesfaseItem[]) {
       // repetir el bug que este cambio cierra (la fila desaparecía con el
       // desfase adentro).
       await cargar()
-      const uno = res.cambiados[0]!
-      toast.add({
-        title: res.cambiados.length === 1
-          ? `El costo de «${uno.nombre}» cambió mientras mirabas`
-          : `${res.cambiados.length} costos cambiaron mientras mirabas`,
-        description: 'Esos avisos no se descartaron. Mirá el número nuevo y decidí otra vez.',
-        color: 'warning',
-      })
+      // ⚠️ El aviso lo arma `avisosDeDesfasesCambiados`, compartido con el
+      // drawer, y no un texto propio: acá se mandaba uno solo sobre TODO
+      // `cambiados`, así que una fila que volvió `null` —ya no está desfasada—
+      // recibía "mirá el número nuevo y decidí otra vez" justo cuando el
+      // `cargar()` de arriba la sacaba de la lista.
+      for (const aviso of avisosDeDesfasesCambiados(res.cambiados)) {
+        toast.add(aviso)
+      }
     }
     else {
       const ids = new Set(items.map(i => i.itemId))

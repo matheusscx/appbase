@@ -476,45 +476,6 @@ desfases, los dos tipos por método de pago, y las dos que dejó el frente del n
   respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
   campo que escribir.
 
-- [ ] **El drawer del simulador se recarga con un alcance más angosto que lo que muestra**
-  (frontend; lo levantó la revisión independiente del 2026-08-25 al cerrar el frente del
-  descarte, → [`resueltos.md`](resueltos.md) § *"El descarte de un desfase deja de silenciarlo"*)
-  — cuando el descarte devuelve `cambiados`, `useSimuladorDesfases` recarga la lista con
-  `GET /items/:insumoId/afectados`, que filtra por **componente DIRECTO**
-  (`filasDesfaseCombos`: `JOIN combo_componentes cc … AND cc.componente_item_id = $2`, sin
-  transitividad). Pero el drawer puede contener filas que no salen de ahí: `onAplicarDesfases`
-  **agrega** `res.afectados` —los combos que contienen la receta recién aplicada— y si el drawer
-  se abrió por un **ingrediente**, esos combos nunca son alcanzables por `afectados(ingrediente)`,
-  porque un ingrediente no puede ser componente de un combo.
-  **Repro** (camino compuesto, una sola sesión de drawer): ajuste de costo del ingrediente X →
-  drawer con la receta R → Aplicar R → el drawer queda con el combo C → Descartar → C vuelve en
-  `cambiados` → la recarga trae `afectados(X)`, que **no incluye a C**. El drawer queda
-  probablemente vacío mientras el toast dice *"El costo de «C» cambió mientras mirabas… decidí
-  otra vez"*, sobre una fila que ya no está en pantalla.
-  ℹ️ **No silencia nada ni escribe nada mal** —el backend no archivó, y C sigue listada en
-  `/desfases`, que es la bandeja canónica—: es pérdida de contexto en pantalla. Por eso se anota
-  en vez de frenar el frente.
-  📌 **Residuo emparentado, de la misma recarga:** su `catch` es silencioso, así que si el GET
-  falla la fila cambiada queda con su número viejo mientras el toast dice *"mirá el número
-  nuevo"*. Es la misma degradación asumida que la rama sin `highlightId` —una foto vieja
-  coherente— y desaparece sola si se toma la salida del backend.
-  ⛔ **La puerta equivocada, y es la que más tienta: ensanchar `afectados` para que sea
-  transitivo.** El filtro es `cc.componente_item_id = $2` —componente directo— y tocarlo cambia
-  la semántica de `GET /items/:id/afectados` para **todos** sus consumidores, empezando por
-  `maybeAbrirDesfases`, que es justamente quien puebla el drawer. Se arregla la recarga rompiendo
-  lo que la llenó.
-  💡 **La salida preferida es el backend**: que `cambiados` devuelva la fila completa
-  (`DesfaseItemDto`) en vez de solo `costoPropuestoActual` elimina la recarga en los DOS
-  consumidores y borra esta clase de divergencia entera.
-  ⚠️ **Cuánto cuesta, medido y no estimado** (revisión independiente, 2026-08-25): hoy no
-  alcanza con los datos que el descarte ya tiene. Un `DesfaseItemDto` necesita `afectados` (los
-  insumos **con nombre**) y `precio_base`, y ninguno está en la transacción:
-  `ingredientesPorReceta` selecciona `receta_item_id, cantidad, unidad_codigo, unidad_medida,
-  costo_actual` —sin id ni nombre del ingrediente—, `componentesPorCombo` lo mismo, y
-  `cabecerasCompuestas` devuelve solo `{ tipo, nombre }`. O se ensanchan tres helpers que
-  **también usa `aplicarDesfases`**, o se agrega una lectura. Por eso es frente propio y no el
-  remate del que lo descubrió.
-
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
   el documento completo es

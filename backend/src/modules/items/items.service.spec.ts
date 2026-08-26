@@ -5163,6 +5163,27 @@ describe('ItemsService', () => {
               costo_actual: '200',
             },
           ])
+          // Las dos lecturas con que `descartarDesfases` arma la fila que vuelve.
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              nombre: 'Hamburguesa',
+              costo_actual: '150',
+              costo_propuesto_omitido: null,
+              precio_base: '500',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              ingrediente_item_id: 'ing-1',
+              ingrediente_nombre: 'Pan',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
           .mockResolvedValue([]);
 
         // El usuario vio 180; el costo del ingrediente ya está en 200.
@@ -5171,13 +5192,10 @@ describe('ItemsService', () => {
         ]);
 
         expect(result.descartados).toBe(0);
-        expect(result.cambiados).toEqual([
-          {
-            itemId: RECETA_ID,
-            nombre: 'Hamburguesa',
-            costoPropuestoActual: '200.0000',
-          },
-        ]);
+        expect(result.cambiados).toHaveLength(1);
+        expect(result.cambiados[0].itemId).toBe(RECETA_ID);
+        expect(result.cambiados[0].nombre).toBe('Hamburguesa');
+        expect(result.cambiados[0].costoPropuestoActual).toBe('200.0000');
         // Y NO se archivó nada: archivar el recalculado es exactamente el bug.
         const escribio = (managerMock.query.mock.calls as unknown[][]).some(
           (c) =>
@@ -5185,6 +5203,124 @@ describe('ItemsService', () => {
             c[0].includes('SET costo_propuesto_omitido'),
         );
         expect(escribio).toBe(false);
+      });
+
+      // ── La fila vuelve ENTERA, no solo su número ─────────────────────────
+      //
+      // El drawer del simulador recargaba con `afectados(insumo)`, un alcance
+      // más angosto que lo que muestra: los combos que `onAplicarDesfases` le
+      // agrega no son alcanzables desde un ingrediente, así que el aviso hablaba
+      // de una fila que la recarga sacaba de pantalla. Parchearle solo el
+      // `costoPropuesto` no era salida: `deltaCosto`, `margenPctPropuesto` y
+      // `precioSugerido` se derivan de él, y ese `precioSugerido` viejo termina
+      // escrito en `items.precio_base`.
+
+      it('la fila que cambió vuelve completa y coherente, no solo su costo', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([
+            { item_id: RECETA_ID, tipo: 'receta', nombre: 'Hamburguesa' },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              nombre: 'Hamburguesa',
+              costo_actual: '150',
+              costo_propuesto_omitido: null,
+              precio_base: '500',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              ingrediente_item_id: 'ing-1',
+              ingrediente_nombre: 'Pan',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValue([]);
+
+        const result = await service.descartarDesfases(TENANT, [
+          { itemId: RECETA_ID, costoPropuestoVisto: '180' },
+        ]);
+
+        const fila = result.cambiados[0].fila;
+        expect(fila).not.toBeNull();
+        // El propuesto de la fila es el mismo que se informa: si divergieran, el
+        // toast diría un número y la tabla mostraría otro.
+        expect(fila!.costoPropuesto).toBe(
+          result.cambiados[0].costoPropuestoActual,
+        );
+        expect(fila!.costoActual).toBe('150.0000');
+        expect(fila!.deltaCosto).toBe('50.0000');
+        // Y los derivados salen del propuesto NUEVO, que es lo que el parche a
+        // mano no podía dar: 500 × 200 / 150.
+        expect(fila!.precioSugerido).toBe('666.6667');
+        expect(fila!.afectados).toEqual([
+          { itemId: 'ing-1', nombre: 'Pan', costoActual: '200' },
+        ]);
+        // Y el catálogo de unidades se leyó UNA vez, no dos: `crearConversor`
+        // hace un `find()` sin caché, así que armar la fila de vuelta sin
+        // pasarle el conversor ya cargado lo releía entero.
+        expect(catalogServiceMock.crearConversor).toHaveBeenCalledTimes(1);
+      });
+
+      it('si al recalcular ya no está desfasada, la fila vuelve en `null`', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([
+            { item_id: RECETA_ID, tipo: 'receta', nombre: 'Hamburguesa' },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          // El costo cacheado ya coincide con el propuesto: el predicado de la
+          // bandeja la filtra, así que no hay fila que pintar. Devolverla con
+          // delta 0 sería inventar un desfase que no existe.
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              nombre: 'Hamburguesa',
+              costo_actual: '200',
+              costo_propuesto_omitido: null,
+              precio_base: '500',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              ingrediente_item_id: 'ing-1',
+              ingrediente_nombre: 'Pan',
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValue([]);
+
+        const result = await service.descartarDesfases(TENANT, [
+          { itemId: RECETA_ID, costoPropuestoVisto: '180' },
+        ]);
+
+        expect(result.cambiados).toHaveLength(1);
+        expect(result.cambiados[0].fila).toBeNull();
       });
 
       it('una fila que cambió no bloquea a las demás del lote', async () => {

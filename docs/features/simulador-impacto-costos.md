@@ -175,6 +175,61 @@ que la pantalla esté abierta.
 
 Tras descartar, el item reaparece cuando su costo propuesto cambia de nuevo. Las dos batches son atómicas (una transacción cada una). **Descartar no toma un `FOR UPDATE` explícito** — el lock lo toma cada `UPDATE`, en el orden en que se ejecuta — pero desde el cierre del 2026-08-20 ese orden ya no es "el que manda el cliente": `descartarDesfases` parte el lote en dos pasadas (`item_receta` antes que `item_combo`) y ordena cada una por `item_id`, igual que los dos `FOR UPDATE` de `aplicar`. Regla completa y por qué existe: [`docs/patterns/backend.md`](../patterns/backend.md) § "Orden de bloqueo de filas en ítems compuestos".
 
+#### La fila que cambió vuelve entera (2026-08-26)
+
+Cuando el descarte informa que un costo cambió, el frontend tiene que mostrar el número nuevo.
+Hasta esta fecha lo conseguía **recargando**, y las dos pantallas recargaban distinto:
+`desfases.vue` con `GET /desfases` —la bandeja completa— y el drawer del simulador con
+`GET /items/:insumoId/afectados`.
+
+El del drawer era más angosto que lo que el drawer muestra. `afectados` filtra por componente
+**directo** (`cc.componente_item_id = $2`, sin transitividad), pero `onAplicarDesfases` le
+agrega los combos que contienen la receta recién aplicada — y si el drawer se abrió por un
+**ingrediente**, esos combos no son alcanzables desde ahí, porque un ingrediente no puede ser
+componente de un combo. Camino completo, en una sola sesión de drawer:
+
+| Paso | Lo que pasa |
+|---|---|
+| Ajuste de costo del ingrediente X | el drawer abre con la receta R |
+| Aplicar R | el drawer queda con el combo C (segunda pasada) |
+| Descartar C, con el costo ya movido | C vuelve en `cambiados` |
+| La recarga pregunta `afectados(X)` | **no incluye a C** |
+| Resultado | drawer vacío y el toast hablando de «C» |
+
+⛔ **La salida que más tienta y está descartada: ensanchar `afectados` para que sea
+transitivo.** Cambia la semántica del endpoint para *todos* sus consumidores, empezando por
+quien puebla el drawer.
+
+⛔ **La otra, también descartada: parchear la fila con `costoPropuestoActual`.** `deltaCosto`,
+`margenPctPropuesto` y `precioSugerido` se derivan del propuesto, y el `watch` del panel
+reprellena el input de precio con el `precioSugerido` viejo, que `aplicar` persiste en
+`items.precio_base`. El arreglo barato **escribe plata mal**.
+
+Lo que se hizo: `cambiados` trae la fila completa. Sin segundo alcance no hay divergencia
+posible, y de paso desaparece el `catch` silencioso de esa recarga —si el GET fallaba, la fila
+quedaba con su número viejo mientras el toast decía "mirá el número nuevo"—.
+
+**El aviso va partido en dos, y no es cosmético.** Las filas que vuelven con `fila` reciben
+*"el costo cambió, decidí otra vez"*; las que vuelven `null` reciben el suyo —*"«X» ya no está
+desfasado"*—, porque no hay nada que decidir y mandarles el primero sería repetir el mismo bug
+en el texto: hablar de una fila que la respuesta acaba de sacar de pantalla. Si no queda
+ninguna fila, el drawer se cierra.
+
+📌 **El reparto vive en `avisosDeDesfasesCambiados`, exportada de `useSimuladorDesfases.ts`, y
+las DOS pantallas que descartan la usan.** No es preferencia de estilo: la bandeja tenía su
+propio texto y mandaba el aviso único, así que las filas `null` —que su propio `cargar()` saca
+de la lista, porque `GET /desfases` ya no las lista— recibían igual el "decidí otra vez". Un
+texto por `.vue` hace que las dos pantallas cuenten cosas distintas del mismo hecho.
+
+📌 **`desfases.vue` conserva su `cargar()` a propósito.** Su alcance es la bandeja entera, un
+**superconjunto** de lo que muestra: no puede diverger, y además refresca las filas ajenas al
+lote. El bug era la angostura del otro alcance, no la recarga en sí.
+
+⚠️ **Lo que esa recarga sí conserva** es el residuo que el drawer perdió: si el `GET /desfases`
+falla, la bandeja avisa del error pero se queda con los números **viejos**, y el aviso de
+*"mirá el número nuevo"* sale igual. Es preexistente y con una señal visible de por medio, así
+que se convive con ello; queda escrito para que no se lea como cerrado.
+
 ---
 
 ## Modelo de datos
@@ -280,9 +335,21 @@ precio.
 ESE.** Ver la sección siguiente: recalcularlo silenciaba desfases.
 
 Una fila cuyo propuesto ya no coincide **no se descarta** y vuelve en `cambiados`
-(`{ itemId, nombre, costoPropuestoActual }`); las demás del lote se descartan igual, para que
-una fila que cambió no bloquee las otras nueve (decisión del owner, 2026-08-25). El status
+(`{ itemId, nombre, costoPropuestoActual, fila }`); las demás del lote se descartan igual, para
+que una fila que cambió no bloquee las otras nueve (decisión del owner, 2026-08-25). El status
 sigue siendo `201` en ese caso: no es un error del cliente, es información.
+
+**`fila` es el `DesfaseItemDto` completo, listo para repintarse, o `null` si ese ítem ya no
+está desfasado** (el costo del insumo volvió atrás, o el propuesto nuevo coincide con el
+omitido). Se arma con los mismos `filasDesfaseRecetas`/`filasDesfaseCombos` que la bandeja,
+predicado incluido, dentro de la misma transacción — por eso el caso "ya no está desfasado"
+sale como `null` en vez de como una fila con delta 0.
+
+Existe porque **el cliente no puede reconstruirla**: `deltaCosto`, `margenPctPropuesto` y
+`precioSugerido` se derivan del propuesto, y parchear solo `costoPropuesto` deja una fila
+incoherente cuyo `precioSugerido` viejo el panel escribe en el input de precio y `aplicar`
+persiste en `items.precio_base`. La alternativa —recargar— tenía su propio agujero: ver
+*"La fila que cambió vuelve entera"* más arriba.
 
 ---
 
@@ -290,7 +357,7 @@ sigue siendo `201` en ese caso: no es un error del cliente, es información.
 
 - **Módulo**: `src/modules/items/` (sin módulo Nest nuevo).
 - **Controller**: `desfases.controller.ts` (`@Controller('desfases')`) + `GET :id/afectados` en `items.controller.ts`.
-- **Service**: `ItemsService` — `listarDesfases`, `itemsAfectadosPorInsumo`, `aplicarDesfases`, `descartarDesfases`; privados `costoPropuesto` (recetas, con conversión de unidades) y `costoPropuestoCombo` (combos, sin conversión), más `filasDesfaseRecetas`/`filasDesfaseCombos` que arman las filas de `DesfaseItemDto`.
+- **Service**: `ItemsService` — `listarDesfases`, `itemsAfectadosPorInsumo`, `aplicarDesfases`, `descartarDesfases`; privados `costoPropuesto` (recetas, con conversión de unidades) y `costoPropuestoCombo` (combos, sin conversión), más `filasDesfaseRecetas`/`filasDesfaseCombos` que arman las filas de `DesfaseItemDto`. Los dos tienen la misma firma `(runner, tenantId, opts)` —`opts.insumoItemId` o la lista de ids— para que `descartarDesfases` pueda armar la fila que devuelve **dentro de su transacción**, viendo los `UPDATE` que acaba de hacer.
 - **DTOs**: `query-desfases.dto.ts` (`insumoItemId`), `aplicar-desfases.dto.ts` (`items[]` con `itemId`), `descartar-desfases.dto.ts` (`items[]` con `itemId` + `costoPropuestoVisto`).
 - Endpoints de compra/`PATCH` de costo **sin cambios**; el FE encadena el GET de afectados.
 
@@ -299,9 +366,9 @@ sigue siendo `201` en ese caso: no es un error del cliente, es información.
 ## Frontend
 
 - `configuracion/items.vue` — tras PATCH de costo o compra con `costoUnitario` → `GET /items/:id/afectados` → drawer con `DesfasesPanel` si hay filas.
-- `desfases.vue` — bandeja con `GET /desfases`; mismas acciones aplicar/descartar; no se cierra sola cuando `aplicar` devuelve `afectados` (los reemplaza en la lista).
+- `desfases.vue` — bandeja con `GET /desfases`; mismas acciones aplicar/descartar; no se cierra sola cuando `aplicar` devuelve `afectados` (los reemplaza en la lista). Al descartar **sí recarga**, a propósito (ver arriba), pero el aviso lo arma `avisosDeDesfasesCambiados`, compartido con el drawer, y no un texto propio.
 - `components/DesfasesPanel.vue` — tabla de simulación con columna Tipo (receta/combo): costos, márgenes, input precio (prellenado con `precioSugerido`), checkbox "Actualizar precio" off por defecto.
-- `composables/useSimuladorDesfases.ts` — mismo flujo aplicar/descartar para el modal (compartido entre `configuracion/items.vue` e `inventario.vue`); reproduce el manejo de `omitidos`/`afectados` con toasts propios.
+- `composables/useSimuladorDesfases.ts` — mismo flujo aplicar/descartar para el modal (compartido entre `configuracion/items.vue` e `inventario.vue`); reproduce el manejo de `omitidos`/`afectados` con toasts propios. Al descartar **no recarga**: reemplaza en la lista lo que vuelve en `cambiados[].fila`. Es la única pantalla del proyecto que arma la lista del drawer con dos orígenes (`afectados` + la segunda pasada de `aplicar`), y ahí es donde una recarga divergía — ver *"La fila que cambió vuelve entera"*.
 - Nav en `dashboard.vue` → "Costos desfasados" (`/desfases`).
 - `configuracion/recetas-desfases.vue` es un stub de compatibilidad: redirige a `/desfases`.
 - Merma y ajustes que no cambian `costo_actual` **no** disparan el modal.
@@ -319,6 +386,9 @@ sigue siendo `201` en ese caso: no es un error del cliente, es información.
   ├─ Aplicar (checkbox precio opcional) → POST /desfases/aplicar
   │    └─ afectados no vacío → el modal se recarga con esas filas (combos de 2ª pasada)
   ├─ Descartar → POST /desfases/descartar
+  │    └─ cambiados no vacío → cada fila que cambió se reemplaza por la que vino
+  │       en `cambiados[].fila`, o sale si vino `null`; el modal queda abierto
+  │       salvo que no haya quedado NINGUNA fila, y ahí sí se cierra
   └─ Después → cierra; siguen en GET /desfases
 
 [Más tarde, bandeja /desfases]

@@ -3911,34 +3911,57 @@ export class ItemsService {
       .toFixed(ESCALA_COSTO);
   }
 
+  /**
+   * `runner` y `opts` son la misma forma que `filasDesfaseCombos`, y por la
+   * misma razón: `descartarDesfases` necesita armar la fila de lo que cambió
+   * **dentro de su transacción**, para ver los `UPDATE` que acaba de hacer.
+   *
+   * `opts.convertir` es el conversor YA cargado, para el llamador que tiene uno.
+   * `crearConversor()` no cachea —hace un `find()` de la tabla de unidades cada
+   * vez—, así que sin este parámetro `descartarDesfases` leía el mismo catálogo
+   * dos veces en la misma transacción. Es el mismo criterio, y por la misma
+   * razón, que ya obliga a pasárselo a `costoPropuesto`.
+   */
   private async filasDesfaseRecetas(
+    runner: Db | EntityManager,
     tenantId: string,
-    insumoItemId?: string,
+    opts: {
+      insumoItemId?: string;
+      recetaItemIds?: string[];
+      convertir?: ConvertirUnidad;
+    },
   ): Promise<DesfaseItemDto[]> {
+    const filtros: string[] = [];
+    const params: unknown[] = [tenantId];
+    let join = '';
+    if (opts.insumoItemId) {
+      join = `JOIN receta_ingredientes ri
+                ON ri.receta_item_id = i.item_id AND ri.eliminado_el IS NULL`;
+      params.push(opts.insumoItemId);
+      filtros.push(`ri.ingrediente_item_id = $${params.length}`);
+    }
+    if (opts.recetaItemIds) {
+      if (!opts.recetaItemIds.length) return [];
+      params.push(opts.recetaItemIds);
+      filtros.push(`i.item_id = ANY($${params.length}::uuid[])`);
+    }
+
     const cabeceras: {
       receta_item_id: string;
       nombre: string;
       costo_actual: string;
       costo_propuesto_omitido: string | null;
       precio_base: string;
-    }[] = await this.db.query(
-      insumoItemId
-        ? `SELECT DISTINCT i.item_id AS receta_item_id, i.nombre,
-                ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
+    }[] = await runner.query(
+      `SELECT DISTINCT i.item_id AS receta_item_id, i.nombre,
+              ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
          FROM items i
          JOIN item_receta ir ON ir.item_id = i.item_id
-         JOIN receta_ingredientes ri
-           ON ri.receta_item_id = i.item_id AND ri.eliminado_el IS NULL
-         WHERE i.tenant_id = $1 AND i.tipo = 'receta' AND i.eliminado_el IS NULL
-           AND ri.ingrediente_item_id = $2
-         ORDER BY i.nombre`
-        : `SELECT i.item_id AS receta_item_id, i.nombre,
-                ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
-         FROM items i
-         JOIN item_receta ir ON ir.item_id = i.item_id
-         WHERE i.tenant_id = $1 AND i.tipo = 'receta' AND i.eliminado_el IS NULL
-         ORDER BY i.nombre`,
-      insumoItemId ? [tenantId, insumoItemId] : [tenantId],
+         ${join}
+        WHERE i.tenant_id = $1 AND i.tipo = 'receta' AND i.eliminado_el IS NULL
+          ${filtros.length ? `AND ${filtros.join(' AND ')}` : ''}
+        ORDER BY i.nombre`,
+      params,
     );
     if (!cabeceras.length) return [];
 
@@ -3951,7 +3974,7 @@ export class ItemsService {
       unidad_codigo: string;
       unidad_base: string;
       costo_actual: string | null;
-    }[] = await this.db.query(
+    }[] = await runner.query(
       `SELECT ri.receta_item_id, ri.ingrediente_item_id, ing.nombre AS ingrediente_nombre,
             ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
      FROM receta_ingredientes ri
@@ -3969,7 +3992,8 @@ export class ItemsService {
       byReceta.set(row.receta_item_id, list);
     }
 
-    const convertir = await this.catalogService.crearConversor();
+    const convertir =
+      opts.convertir ?? (await this.catalogService.crearConversor());
 
     const out: DesfaseItemDto[] = [];
     for (const cab of cabeceras) {
@@ -4025,7 +4049,9 @@ export class ItemsService {
     // Dos bloques de 2 queries cada uno, no una query por item: el costo de un
     // combo se arma con los costos YA cacheados de sus componentes, así que no
     // hace falta expandir nada.
-    const recetas = await this.filasDesfaseRecetas(tenantId, insumoItemId);
+    const recetas = await this.filasDesfaseRecetas(this.db, tenantId, {
+      insumoItemId,
+    });
     const combos = await this.filasDesfaseCombos(this.db, tenantId, {
       insumoItemId,
     });
@@ -4450,6 +4476,14 @@ export class ItemsService {
       itemId: string;
       nombre: string;
       costoPropuestoActual: string;
+      /**
+       * La fila lista para volver a pintarse, o `null` si ese ítem **ya no está
+       * desfasado** (el costo del insumo volvió a lo que estaba). Existe para
+       * que el frontend no tenga que recargar: la recarga del drawer preguntaba
+       * `afectados(insumo)`, un alcance más angosto que lo que el drawer
+       * muestra, y avisaba sobre filas que sacaba de pantalla.
+       */
+      fila: DesfaseItemDto | null;
     }[];
   }> {
     return this.db.transaccion(async (manager) => {
@@ -4484,6 +4518,7 @@ export class ItemsService {
         itemId: string;
         nombre: string;
         costoPropuestoActual: string;
+        fila: DesfaseItemDto | null;
       }[] = [];
       // Orden de bloqueo declarado (`docs/patterns/backend.md`): item_receta →
       // item_combo → items. Los UPDATE de acá abajo toman lock de fila igual
@@ -4554,6 +4589,7 @@ export class ItemsService {
             itemId,
             nombre: cabPorId.get(itemId)!.nombre,
             costoPropuestoActual: propuesto,
+            fila: null,
           });
           continue;
         }
@@ -4579,6 +4615,7 @@ export class ItemsService {
             itemId,
             nombre: cabPorId.get(itemId)!.nombre,
             costoPropuestoActual: propuestoCombo,
+            fila: null,
           });
           continue;
         }
@@ -4587,6 +4624,41 @@ export class ItemsService {
           [propuestoCombo, itemId],
         );
         descartados += 1;
+      }
+      // La fila completa de lo que cambió, para que el frontend la muestre sin
+      // volver a preguntar. Se arma con los MISMOS constructores que la bandeja
+      // —predicado incluido—, no con un builder aparte: así una fila que dejó de
+      // estar desfasada (el usuario revirtió el costo del insumo, o el propuesto
+      // nuevo coincide con el omitido) sale `null` en vez de aparecer con delta
+      // 0. Se lee con el `manager` para ver los UPDATE de arriba: los ítems que
+      // SÍ se descartaron quedan filtrados por su propio `costo_propuesto_omitido`.
+      //
+      // Cuesta 0 queries en el camino normal (`cambiados` vacío) y hasta 4 en el
+      // que ya es la excepción: dos por tipo —cabeceras y componentes—, y cada
+      // helper vuelve sin consultar si no le toca ningún id. Son 4 y no 5 porque
+      // el conversor viaja: `crearConversor()` no cachea, y sin pasarlo esto
+      // releía la tabla de unidades que el loop de arriba ya había cargado.
+      if (cambiados.length) {
+        const idsPorTipo = (tipo: 'receta' | 'combo') => [
+          ...new Set(
+            cambiados
+              .filter((c) => cabPorId.get(c.itemId)!.tipo === tipo)
+              .map((c) => c.itemId),
+          ),
+        ];
+        const filas = [
+          ...(await this.filasDesfaseRecetas(manager, tenantId, {
+            recetaItemIds: idsPorTipo('receta'),
+            // `null` solo cuando el lote no trae ninguna receta, y en ese caso
+            // la lista de ids está vacía y el helper vuelve sin usarlo.
+            convertir: convertir ?? undefined,
+          })),
+          ...(await this.filasDesfaseCombos(manager, tenantId, {
+            comboItemIds: idsPorTipo('combo'),
+          })),
+        ];
+        const porId = new Map(filas.map((f) => [f.itemId, f]));
+        for (const c of cambiados) c.fila = porId.get(c.itemId) ?? null;
       }
       return { descartados, cambiados };
     });
