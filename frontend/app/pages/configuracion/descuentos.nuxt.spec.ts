@@ -119,6 +119,10 @@ let patchGuardarFalla = false
 let getsUso: string[] = []
 /** Cada `PATCH /descuentos/:id` recibido, con el `activo` que viajó. */
 let patchesActivo: { id: string, activo: boolean }[] = []
+/** Cada `PATCH` de GUARDADO del drawer, con el body entero: es el único lugar
+ *  donde se puede ver si la key `tramos` viajó, que es lo que limpia los
+ *  escalones huérfanos al cambiar de tipo. */
+let patchesGuardar: { id: string, body: Record<string, unknown> }[] = []
 
 /** N ítems distintos, que es lo único que el modal mira (`items.length`). */
 function itemsUso(n: number) {
@@ -160,7 +164,10 @@ const MONEDA_CLP = {
 mockNuxtImport('useApiFetch', () => {
   return (
     url: string,
-    opts?: { method?: string, body?: { nombre?: string, activo?: boolean } },
+    opts?: {
+      method?: string
+      body?: { nombre?: string, activo?: boolean } & Record<string, unknown>
+    },
   ) => {
     if (typeof url === 'string' && url.includes('/tipos-regla')) {
       return Promise.resolve(TIPOS_REGLA)
@@ -199,6 +206,11 @@ mockNuxtImport('useApiFetch', () => {
         const d = descuentosBackend.find(x => x.id === id)
         if (d) d.activo = activo
       }
+      // El toggle de la grilla y el drawer pegan al MISMO endpoint, y los dos
+      // mandan `activo`. Lo que los separa es `nombre`: el drawer manda el form
+      // entero, el toggle manda solo el switch.
+      if (typeof opts?.body?.nombre === 'string')
+        patchesGuardar.push({ id, body: opts.body })
       if (patchGuardarFalla) return Promise.reject(errorApi('No se puede pasar a nivel venta'))
       return Promise.resolve({ ...descuentosBackend.find(x => x.id === id) })
     }
@@ -257,6 +269,27 @@ async function montar() {
   await new Promise(r => setTimeout(r, 0))
   return wrapper
 }
+
+/**
+ * Abre el drawer de edición de la PRIMERA fila de la grilla.
+ *
+ * Vive a nivel módulo porque lo usan tres describes: estaba duplicado dos veces
+ * —una con este nombre y otra como `abrirEdicion`— y el tercer uso, el del
+ * frente de la forma de importe (2026-08-26), cruzó el umbral que fija
+ * `CLAUDE.md`: *"duplicar dos veces es aceptable, se extrae a la tercera"*.
+ *
+ * El `hydrate` de la moneda no es decoración: sin la moneda oficial `MoneyInput`
+ * no resuelve config y se rinde deshabilitado y vacío, así que un test del campo
+ * de importe pasaría por el motivo equivocado.
+ */
+async function abrirEdicionDeLaFila(wrapper: Awaited<ReturnType<typeof montar>>) {
+  useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+  const boton = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+  expect(boton, 'botón "Editar" en la fila').toBeTruthy()
+  await boton!.trigger('click')
+  await new Promise(r => setTimeout(r, 20))
+}
+
 
 async function activarVerEliminados(wrapper: Awaited<ReturnType<typeof montar>>) {
   await wrapper.find('[aria-label="Ver eliminados"]').trigger('click')
@@ -358,6 +391,7 @@ function reset() {
   patchActivoFalla = false
   getsUso = []
   patchesActivo = []
+  patchesGuardar = []
 }
 
 describe('configuracion/descuentos — papelera: eliminar respeta el toggle', () => {
@@ -878,14 +912,6 @@ describe('configuracion/descuentos — cambiar de modo no deja un valor de la ot
     return input!
   }
 
-  async function abrirEdicion(wrapper: Awaited<ReturnType<typeof montar>>) {
-    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
-    const boton = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
-    expect(boton, 'botón "Editar" en la fila').toBeTruthy()
-    await boton!.trigger('click')
-    await new Promise(r => setTimeout(r, 20))
-  }
-
   /** El radio de un modo, dentro del drawer. Reka UI los rinde como
    *  `button[role="radio"]` con el `value` del item, no como `<input type=radio>`. */
   async function clickModo(valor: string) {
@@ -897,7 +923,7 @@ describe('configuracion/descuentos — cambiar de modo no deja un valor de la ot
 
   it('de porcentaje a monto fijo, el campo queda vacío en vez de mostrar 0 con 0.10 adentro', async () => {
     const wrapper = await montar()
-    await abrirEdicion(wrapper)
+    await abrirEdicionDeLaFila(wrapper)
 
     // Punto de partida: el porcentaje guardado, tal cual.
     expect(inputValor().value).toBe('0.10')
@@ -914,7 +940,7 @@ describe('configuracion/descuentos — cambiar de modo no deja un valor de la ot
 
   it('volver a porcentaje tampoco arrastra el monto fijo que se haya tipeado', async () => {
     const wrapper = await montar()
-    await abrirEdicion(wrapper)
+    await abrirEdicionDeLaFila(wrapper)
     await clickModo('monto_fijo')
 
     const campo = inputValor()
@@ -1110,14 +1136,6 @@ describe('configuracion/descuentos — el tipo empuja el nivel, sin bloquearlo',
     void wrapper
   }
 
-  async function abrirEdicionDeLaFila(wrapper: Awaited<ReturnType<typeof montar>>) {
-    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
-    const boton = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
-    expect(boton, 'botón "Editar" en la fila').toBeTruthy()
-    await boton!.trigger('click')
-    await new Promise(r => setTimeout(r, 20))
-  }
-
   async function elegirTipo(
     wrapper: Awaited<ReturnType<typeof montar>>,
     tipoReglaId: string,
@@ -1261,6 +1279,162 @@ describe('configuracion/descuentos — el tipo empuja el nivel, sin bloquearlo',
     await guardar(wrapper)
 
     expect(getsUso).toEqual([])
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * Cambiar el tipo de una regla a uno que no usa escalones **borra** los que
+ * tenía, porque el backend rechaza con 400 la fila que dice dos cosas
+ * (`validarValorUnico`, 2026-08-26) y solo reemplaza los hijos que vengan en el
+ * body. El owner eligió **avisar antes** de borrarlos (2026-08-26).
+ *
+ * Es de RUNTIME y por eso vive acá: el freno depende de `escalonesGuardados`,
+ * que se llena al abrir la edición y que `onTipoChange` **no** puede reponer —
+ * cuando el usuario elige el tipo nuevo, el formulario ya vació sus escalones y
+ * la sección donde se veían desapareció de la pantalla—. Ni el build ni el
+ * typecheck ven eso.
+ *
+ * `abrirEdicionDeLaFila` se extrajo a nivel módulo al escribir este describe:
+ * era su TERCER uso, y `CLAUDE.md` manda extraer a la tercera. `elegirTipo`
+ * sigue duplicado —va por la segunda— y por eso queda local.
+ */
+describe('configuracion/descuentos — cambiar a un tipo sin escalones avisa antes de borrarlos', () => {
+  beforeEach(() => {
+    // Una regla POR ESCALONES, que es la única que tiene algo que perder.
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-2',
+      valorPorcentaje: null,
+      tramos: [{ minimo: '50000', valorMonto: null, valorPorcentaje: '0.10' }],
+    })]
+    reset()
+    patchesGuardar = []
+    // ⚠️ El PATCH rechaza A PROPÓSITO, y no es para probar el error: es para que
+    // el drawer NO se cierre. Cerrarlo dispara la animación de salida de Reka UI
+    // (`usePresence`) y en happy-dom eso tira un `TypeError: Receiver must be an
+    // instance of class CSSStyleDeclaration` como **rechazo no capturado** — la
+    // suite reporta todo verde y sale con código 1, o sea CI en rojo sin ningún
+    // test fallado. Ya pasó el 2026-08-25 en el describe del nivel.
+    // El body igual queda registrado: el fake lo empuja ANTES de rechazar.
+    patchGuardarFalla = true
+    // Ver la nota de contaminación del describe del nivel: `UModal` teletransporta
+    // al `body` y desmontar el wrapper no lo saca.
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  async function elegirTipo(wrapper: Awaited<ReturnType<typeof montar>>, id: string) {
+    const select = wrapper.findComponent({ name: 'USelectMenu' })
+    expect(select.exists(), 'USelectMenu del campo Tipo').toBe(true)
+    select.vm.$emit('update:modelValue', id)
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  /** El drawer y el modal comparten el `[role=dialog]`; el drawer es el primero. */
+  function botonPorTexto(texto: string): HTMLElement | undefined {
+    const nodos = [...document.body.querySelectorAll<HTMLElement>('[role="dialog"] button')]
+    return nodos.find(b => b.textContent?.trim() === texto)
+  }
+
+  async function clickGuardar() {
+    const boton = botonPorTexto('Guardar')
+    expect(boton, 'botón "Guardar" del drawer').toBeTruthy()
+    boton!.click()
+    await new Promise(r => setTimeout(r, 60))
+  }
+
+  it('frena con el aviso en vez de guardar', async () => {
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-1')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).toContain('El tipo nuevo no usa ese importe')
+    // Lo que importa no es el texto sino que NO guardó: si el modal apareciera
+    // después del PATCH, el aviso llegaría tarde.
+    expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('y al confirmar manda `tramos: []` para limpiar los huérfanos', async () => {
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-1')
+    await clickGuardar()
+
+    const confirmar = botonPorTexto('Guardar y borrar')
+    expect(confirmar, 'botón de confirmación del aviso').toBeTruthy()
+    confirmar!.click()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(patchesGuardar).toHaveLength(1)
+    // La key TIENE que viajar: omitirla deja los escalones vivos y el backend
+    // contesta 400 — que es exactamente lo que este flujo existe para evitar.
+    expect(patchesGuardar[0]?.body.tramos).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  /**
+   * La otra mitad de la condición. Sin esta ancla, un modal que apareciera
+   * SIEMPRE pasaría los dos tests de arriba, y el usuario tendría que confirmar
+   * un borrado inexistente en cada guardado — que es la forma más rápida de
+   * enseñar a confirmar sin leer.
+   */
+  it('una regla sin escalones guarda derecho, sin preguntar nada', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10', tramos: [] })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await clickGuardar()
+
+    expect(document.body.textContent).not.toContain('El tipo nuevo no usa ese importe')
+    expect(patchesGuardar).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
+  /**
+   * La dirección ESPEJO, que la primera versión de este frente dejó rota: pasar
+   * de un tipo de valor único a uno POR ESCALONES. El campo del valor tampoco
+   * está en pantalla en el tipo nuevo (`campoValor: false`), así que el usuario
+   * no puede borrarlo a mano; y si el body no manda la columna, el backend lee
+   * la PERSISTIDA (`importeResultante`) y contesta 400 nombrando un campo que
+   * no se ve. Lo cazó la revisión independiente midiendo contra la API.
+   */
+  it('la dirección espejo también avisa', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-2')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).toContain('un valor único cargado')
+    expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('y al confirmar apaga la columna del valor', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-2')
+    await clickGuardar()
+
+    const confirmar = botonPorTexto('Guardar y borrar')
+    expect(confirmar, 'botón de confirmación del aviso').toBeTruthy()
+    confirmar!.click()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(patchesGuardar).toHaveLength(1)
+    // `onTipoChange` deja el modo en `monto_fijo` para un tipo `libre`, así que
+    // la columna que el body tiene que apagar es `valorMonto`. El `null` TIENE
+    // que viajar: omitirlo deja vivo el valor persistido y el backend da 400.
+    expect(patchesGuardar[0]?.body.valorMonto).toBeNull()
 
     wrapper.unmount()
   })

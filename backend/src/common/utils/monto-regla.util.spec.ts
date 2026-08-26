@@ -3,6 +3,8 @@ import {
   validarMontosDeRegla,
   validarMinimosDeTramos,
   validarFormaDeImporte,
+  validarValorUnico,
+  validarSoloEscalones,
 } from './monto-regla.util';
 
 describe('validarMontosDeRegla', () => {
@@ -325,5 +327,68 @@ describe('validarFormaDeImporte', () => {
     expect(() => validarFormaDeImporte(null)).toThrow(BadRequestException);
     expect(() => validarFormaDeImporte(null, [])).toThrow(BadRequestException);
     expect(() => validarFormaDeImporte('')).toThrow(BadRequestException);
+  });
+});
+
+/**
+ * Los tipos que **no** eligen: cada uno tiene una sola forma posible y la otra
+ * es un 400. Decisión del owner del 2026-08-25 —cerrar, no abrir—, tomada
+ * sabiendo que la simétrica (los dos de método de pago, acá arriba) se había
+ * abierto ese mismo día.
+ *
+ * Hasta el 2026-08-26 los **nueve** códigos que no eligen aceptaban las dos
+ * formas juntas con 201 — los nueve ejecutados uno por uno con una sonda sobre
+ * el harness de los service specs, antes y después del arreglo. El número se
+ * escribe medido y no deducido por dos antecedentes: la entrada de backlog que
+ * abrió este frente nombraba mal los tipos, y la primera redacción de la doc de
+ * la feature dijo "seis", contando solo los que se habían sondeado hasta ahí.
+ */
+describe('validarValorUnico', () => {
+  const tramo = [{ minimoMonto: '0', valorPorcentaje: '0.03' }];
+
+  it('acepta el valor único solo', () => {
+    expect(() => validarValorUnico('0.03')).not.toThrow();
+    expect(() => validarValorUnico('0.03', [])).not.toThrow();
+  });
+
+  it('rechaza los escalones aunque el valor único venga', () => {
+    expect(() => validarValorUnico('0.03', tramo)).toThrow(
+      /no admite escalones/,
+    );
+  });
+
+  // El orden de los dos chequeos importa y por eso tiene test propio: quien
+  // manda escalones se entera de que este tipo no los admite, no de que "el
+  // valor es requerido" —cierto, pero no es lo que hizo mal—.
+  it('y lo dice también cuando el valor único falta', () => {
+    expect(() => validarValorUnico(null, tramo)).toThrow(/no admite escalones/);
+  });
+
+  it('sigue exigiendo el valor único, con el texto que ya estaba en la API', () => {
+    expect(() => validarValorUnico(null)).toThrow(
+      'El valor es requerido para este tipo',
+    );
+    expect(() => validarValorUnico('')).toThrow(BadRequestException);
+    expect(() => validarValorUnico(undefined, [])).toThrow(BadRequestException);
+  });
+});
+
+/**
+ * El dual. Ojo con el tamaño del daño que tapa, que es **menor**: para estos
+ * tipos el valor plano nunca se leyó —el motor devuelve `SIN_VALOR` cuando
+ * ningún escalón alcanza, no cae al valor plano—, así que lo que entraba era
+ * un número decorativo, no una tasa que alguien creyera estar cobrando.
+ */
+describe('validarSoloEscalones', () => {
+  it('acepta que no haya valor plano', () => {
+    expect(() => validarSoloEscalones(null)).not.toThrow();
+    expect(() => validarSoloEscalones(undefined)).not.toThrow();
+    expect(() => validarSoloEscalones('')).not.toThrow();
+  });
+
+  it('rechaza el valor plano', () => {
+    expect(() => validarSoloEscalones('0.50')).toThrow(
+      /no admite un valor único/,
+    );
   });
 });

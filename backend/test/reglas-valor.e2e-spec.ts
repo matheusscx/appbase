@@ -349,10 +349,19 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     });
     const id = (creado.body as ReglaResponse).id;
 
+    // El `tramos: []` es parte de "lo que el nuevo exige" desde el 2026-08-26:
+    // `update` solo reemplaza los hijos que vengan en el DTO, así que sin él
+    // los escalones del `por_mayor` quedan vivos y la fila termina diciendo dos
+    // cosas —el motor cobraría el 5% del escalón, no este 25%—. El test de
+    // abajo fija esa mitad.
     const res = await request(app.getHttpServer())
       .patch(`/api/descuentos/${id}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipoReglaId: TIPO_DESCUENTO_DIRECTO, valorPorcentaje: '0.25' });
+      .send({
+        tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+        valorPorcentaje: '0.25',
+        tramos: [],
+      });
 
     expect(res.status).toBe(200);
 
@@ -361,6 +370,80 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       .set('Authorization', `Bearer ${token}`);
     const fila = (listado.body as ReglaResponse[]).find((d) => d.id === id);
     expect(fila?.valorPorcentaje).toBe('0.2500');
+  });
+
+  // La mitad que el test de arriba no puede fijar: cambiar de tipo SIN limpiar
+  // los escalones deja la fila diciendo dos cosas, y eso es 400. Se verificó
+  // ABIERTO contra esta API antes de cerrarlo: respondía 200 y dejaba un
+  // `directo` al 25% que el motor cobraba al 5% del escalón huérfano.
+  it('pero cambiar el tipo SIN limpiar los escalones es 400', async () => {
+    const creado = await crearDescuento({
+      nombre: `Cambio sin limpiar E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
+    });
+    const id = (creado.body as ReglaResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipoReglaId: TIPO_DESCUENTO_DIRECTO, valorPorcentaje: '0.25' });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /no admite escalones/,
+    );
+  });
+
+  // La dirección ESPEJO, que la primera versión de este frente dejó rota: de
+  // valor único a un tipo POR ESCALONES. Acá el huérfano es el valor
+  // persistido, que `importeResultante` lee cuando el body no manda la columna.
+  // Medido contra esta API: antes del guardia era 200, y con el guardia sin su
+  // mitad de frontend quedaba en 400 nombrando un campo que la pantalla no
+  // muestra (`campoValor: false` en los tipos por escalones).
+  it('cambiar un `directo` a un tipo por escalones sin apagar el valor es 400', async () => {
+    const creado = await crearDescuento({
+      nombre: `Directo a escalones E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'porcentaje',
+      valorPorcentaje: '0.20',
+    });
+    const id = (creado.body as ReglaResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+        tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /no admite un valor único/,
+    );
+  });
+
+  it('y apagando esa columna en el mismo body sí funciona (ancla positiva)', async () => {
+    const creado = await crearDescuento({
+      nombre: `Directo a escalones OK E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'porcentaje',
+      valorPorcentaje: '0.20',
+    });
+    const id = (creado.body as ReglaResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+        valorPorcentaje: null,
+        tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
+      });
+
+    expect(res.status).toBe(200);
   });
 
   it('un PATCH que no toca el valor sigue funcionando (ancla positiva)', async () => {
@@ -718,6 +801,54 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
 
     expect(res.status).toBe(400);
     expect((res.body as { message: string }).message).toMatch(/mayor a 0/);
+  });
+
+  // ─── Una regla dice su importe de UNA forma ───────────────────────────────
+  // Los tipos que no eligen: `directo` cobra un valor único, `por_monto_venta`
+  // cobra por escalones. Hasta el 2026-08-26 los dos aceptaban las dos formas
+  // juntas con 201, y el motor —que ramifica por `tramos.length > 0` antes de
+  // mirar el valor plano— dejaba muerta la perdedora sin avisar.
+  //
+  // Va como e2e por el mismo motivo que el resto del archivo: `tramos` y
+  // `valorPorcentaje` son los dos `@IsOptional()`, así que el `ValidationPipe`
+  // deja pasar el body con las dos y el service es el ÚNICO enforcement. El
+  // unit mockea el repositorio y no ejercita esa puerta.
+  //
+  // Las anclas positivas ya están en este archivo y no se duplican: *"crear un
+  // descuento `directo` CON valor sigue funcionando"* y *"el motor cobra el
+  // tramo que corresponde al monto"*.
+
+  it('un descuento `directo` con valor único Y escalones es 400', async () => {
+    const res = await crearDescuento({
+      nombre: `Directo ambiguo E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'porcentaje',
+      valorPorcentaje: '0.10',
+      tramos: [{ minimoMonto: '100', valorPorcentaje: '0.03' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /no admite escalones/,
+    );
+  });
+
+  it('y un recargo por monto de venta con escalones Y valor plano también', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Rec por monto ambiguo E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_POR_MONTO,
+        modo: 'monto_fijo',
+        valorMonto: '2000',
+        tramos: [{ minimoMonto: '500', valorMonto: '1000' }],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /no admite un valor único/,
+    );
   });
 
   it('el tipo `promocional` ya no existe en el catálogo', async () => {

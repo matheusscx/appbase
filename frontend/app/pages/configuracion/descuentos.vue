@@ -58,6 +58,16 @@ const colisionMensaje = ref('')
 const nombrePropuesto = ref('')
 const nombreError = ref<string | null>(null)
 
+// Cuántos escalones tenía la fila que se está editando, ANTES de que
+// `onTipoChange` vacíe el formulario. Sin esto el aviso no existe: al elegir el
+// tipo nuevo el form ya no se acuerda de que había escalones, y la sección
+// donde se veían desaparece de la pantalla en el mismo gesto.
+const escalonesGuardados = ref(0)
+/** El gemelo del anterior para la dirección contraria: el valor único que la
+ *  fila tenía cargado, que un tipo POR ESCALONES tampoco puede usar. */
+const valorGuardado = ref(false)
+const confirmEscalonesOpen = ref(false)
+
 // ── Pausar: confirmación con el alcance ─────────────────────────────────────
 const {
   toggling,
@@ -138,6 +148,8 @@ function resetDrawer() {
   form.value = emptyForm()
   nivelTocado.value = false
   nombreError.value = null
+  escalonesGuardados.value = 0
+  valorGuardado.value = false
 }
 
 watch(drawerOpen, (open) => {
@@ -315,6 +327,8 @@ function abrirEditar(d: Regla) {
     fechaFin: d.fechaFin ?? null,
     activo: d.activo,
   }
+  escalonesGuardados.value = d.tramos?.length ?? 0
+  valorGuardado.value = !!(d.valorMonto ?? d.valorPorcentaje)
   nivelTocado.value = true
   drawerOpen.value = true
 }
@@ -355,10 +369,68 @@ async function descripcionDeUso(): Promise<string | undefined> {
   return itemsQueLoTienen('descuentos', editingId.value)
 }
 
+/**
+ * Los escalones guardados que el tipo nuevo ya no puede usar: al guardar hay
+ * que limpiarlos, porque el backend solo reemplaza los hijos que vengan en el
+ * body y dejarlos vivos deja la fila diciendo dos cosas — el motor cobraría el
+ * escalón y no el valor que se acaba de escribir (400 desde el 2026-08-26).
+ *
+ * ⚠️ **No cubre el interruptor de los tipos que ELIGEN forma** (método de pago):
+ * ahí volver a valor único también borra los escalones y sigue haciéndolo sin
+ * preguntar, como se decidió el 2026-08-25. La asimetría está anotada en
+ * `docs/agent/pendientes.md`; unificarla es decisión del owner, no de acá.
+ */
+const escalonesAPerder = computed(
+  () => (editingId.value && !eligeForma.value && !config.value?.campoTramos
+    ? escalonesGuardados.value
+    : 0),
+)
+
+/**
+ * La dirección espejo, que es igual de real y se olvidó en la primera versión:
+ * pasar de un tipo de valor único a uno POR ESCALONES. El campo del valor
+ * tampoco está en pantalla —`campoValor: false`— así que el usuario no puede
+ * borrarlo a mano, y el backend rechaza con 400 la fila que queda diciendo las
+ * dos cosas.
+ */
+const valorAPerder = computed(
+  () => !!(editingId.value && !eligeForma.value && !config.value?.campoValor
+    && valorGuardado.value),
+)
+
+/** Qué se pierde al guardar, en palabras, o `null` si no se pierde nada. */
+const perdidaDeImporte = computed<string | null>(() => {
+  if (escalonesAPerder.value) {
+    const n = escalonesAPerder.value
+    return `${n} ${n === 1 ? 'escalón' : 'escalones'}`
+  }
+  if (valorAPerder.value) return 'un valor único cargado'
+  return null
+})
+
+/**
+ * El portón. Va bindeado al submit del formulario, así que no puede recibir
+ * parámetros propios —el evento ocupa el primero—: por eso el camino
+ * confirmado entra por `guardarAhora`, no por un flag.
+ *
+ * Frena y pregunta una sola vez. El owner eligió avisar por sobre borrar
+ * callado (2026-08-26): al elegir el tipo nuevo la sección de escalones
+ * desaparece del formulario, así que sin este modal el usuario pierde algo que
+ * ya no tiene a la vista.
+ */
 async function guardar() {
   await checkNombre()
   if (nombreError.value) return
 
+  if (perdidaDeImporte.value) {
+    confirmEscalonesOpen.value = true
+    return
+  }
+
+  await guardarAhora()
+}
+
+async function guardarAhora() {
   saving.value = true
   try {
     const cfg = config.value
@@ -382,7 +454,11 @@ async function guardar() {
       // este `null`, un PATCH que solo agrega tramos deja la fila con las dos
       // formas llenas y el backend lo rechaza con 400 — el usuario vería
       // "se expresa de una sola forma" sin entender cuál es la otra.
-      else if (eligeForma.value) {
+      // El `|| valorAPerder` es el gemelo del de los tramos, unas líneas abajo, y
+      // se olvidó en la primera versión: sin él `importeResultante` lee el valor
+      // PERSISTIDO cuando el PATCH no manda la columna, y pasar a un tipo por
+      // escalones daba 400 nombrando un campo que el usuario no ve.
+      else if (eligeForma.value || valorAPerder.value) {
         if (enMonto) body.valorMonto = null
         else body.valorPorcentaje = null
       }
@@ -404,7 +480,7 @@ async function guardar() {
       // La vuelta del interruptor: volver a valor único BORRA los escalones
       // guardados. El `[]` explícito es lo único que los limpia — omitir la key
       // los deja intactos (el backend solo reemplaza hijos que vengan en el DTO).
-      else if (eligeForma.value) {
+      else if (eligeForma.value || escalonesAPerder.value) {
         body.tramos = []
       }
       if (cfg.campoDias) body.diasVencimiento = form.value.diasVencimiento
@@ -904,6 +980,21 @@ const columns: TableColumn<Regla>[] = [
       :nivel="confirmPausarNivel"
       @cancel="cerrarPausar"
       @confirm="confirmarPausar"
+    />
+
+    <!-- Cambiar el tipo a uno que no usa la forma de importe que la fila tenía
+         —escalones o valor único, las dos direcciones— la borra. Se avisa antes
+         (decisión del owner, 2026-08-26) porque al elegir el tipo nuevo el
+         campo donde se veía ya desapareció del formulario: sin este modal el
+         usuario pierde algo que dejó de estar a la vista. -->
+    <CrudModal
+      v-model:open="confirmEscalonesOpen"
+      title="El tipo nuevo no usa ese importe"
+      :message="`«${form.nombre}» tiene ${perdidaDeImporte}. El tipo que elegiste no lo usa, así que al guardar se borra.`"
+      confirm-label="Guardar y borrar"
+      :loading="saving"
+      @cancel="confirmEscalonesOpen = false"
+      @confirm="() => { confirmEscalonesOpen = false; guardarAhora() }"
     />
 
     <CrudModal

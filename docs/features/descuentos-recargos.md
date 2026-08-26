@@ -285,6 +285,90 @@ exigen escalones, pero estos dos lo aceptan — es la única manera de volver a 
 Quien mande ese PATCH tiene que mandar el valor en el mismo body, o el estado resultante no
 dice cuánto cobra y sale 400.
 
+### Y los demás **no eligen** — desde el 2026-08-26 eso se enforcea
+
+La frase de arriba —*"los demás tipos siguen teniendo una sola forma"*— era una descripción,
+no una regla: hasta el 2026-08-26 **los nueve códigos que no eligen** aceptaban las dos formas
+juntas con **201**. Los nueve se ejecutaron uno por uno contra los services, antes y después
+del arreglo:
+
+| Tipo | Forma que le toca | Qué aceptaba de más | Qué pasaba al cobrar |
+|---|---|---|---|
+| `directo`, `general`, `interes_simple`, `interes_compuesto` | valor único | escalones | el motor los **prefiere**: la tasa quedaba muerta **sin aviso** |
+| `pronto_pago`, `mora` | valor único | escalones | nada: cortan en `DIFERIDAS` antes de mirar el importe |
+| `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta` | escalones | un valor plano | nada: no lo lee nadie |
+
+⚠️ **El número se escribe medido, y el primer intento estuvo mal.** La primera versión de
+este párrafo decía *"seis"* —los que se habían sondeado hasta ese momento— arriba de una tabla
+que nombraba **siete**. Nueve es la lista completa: `TIPOS_CON_VALOR_UNICO` (6) +
+`TIPOS_CON_TRAMOS` (3), sumando los dos services. Los que faltaban en esa tabla eran
+`pronto_pago` y `mora`, y no son un detalle de conteo: **aceptaban la escritura igual que el
+resto**, aunque no lleguen a cobrarla.
+
+Lo enforcean `validarValorUnico` y `validarSoloEscalones`, hermanos de `validarFormaDeImporte`
+y en el mismo archivo. Los tres existen por la misma razón, que es del **motor**: `evaluarRegla`
+ramifica por `tramos.length > 0` antes de mirar el valor plano, así que una fila con las dos
+llenas cobra una forma y deja la otra muerta sin avisar. El orden del motor no es la garantía;
+la escritura sí.
+
+⚠️ **Las tres filas no pesan igual, y conviene no venderlas juntas.** Solo la primera —cuatro
+de los nueve— cobraba distinto: el usuario cree estar cobrando la tasa que escribió y se le
+cobra el escalón. En las otras dos lo que entraba era un número decorativo que nadie leía
+(cuando ningún escalón alcanza, el motor devuelve `SIN_VALOR`; no cae al valor plano). Lo que
+se compra en las tres es lo mismo: que la fila no pueda decir dos cosas.
+
+✅ **Decisión del owner (2026-08-25): CERRAR, no abrir** — y es lo contrario de lo que decidió
+**el mismo día** para método de pago, así que el precedente no la resolvía. Ganó cerrar porque
+**en ninguno de los nueve la forma sobrante es alcanzable desde la pantalla**: hoy nadie cobra
+mal, y lo único que existía era un agujero de escritura. Son **dos banderas distintas** según
+el grupo, y conviene no colapsarlas —`campoTramos: false` en los seis de valor único, y
+`campoValor: false` en los tres por escalones, donde los escalones son justamente lo único que
+sí se ve—. Abrirlos habría sido
+una feature nueva —una pantalla por tipo, y decidir qué mide un escalón en un interés
+compuesto— sin ningún caso de local que la pida. Si ese caso aparece, el interruptor es el
+mismo que el de método de pago y está a una línea.
+
+### La salida: cambiar de tipo borra la forma vieja, y avisa antes
+
+Cerrar el estado prohibido dejó al descubierto que **no había forma de salir de él**, y no
+por la puerta rara: por la de todos los días.
+
+**La escena.** Tenés *"Por mayor"*: 5% llevando 10 o más. Decidís que ya no va por escalones
+y lo cambiás a **Directo, 25%**. Hasta el 2026-08-26 eso guardaba con 200, la grilla decía
+*25%* y el motor cobraba **5%** — los escalones viejos seguían vivos porque `update` solo
+reemplaza los hijos que vienen en el body, y `evaluarRegla` los mira antes que el valor plano.
+Es el mismo bug de esta sección entrando por otra puerta, y se llegaba **desde la pantalla**.
+
+**Y va en las dos direcciones**, que es lo que la primera versión de este arreglo pasó por
+alto: al revés —de un tipo de valor único a uno por escalones— el huérfano es el **valor
+plano**, que `importeResultante` lee de la fila cuando el body no manda la columna. Ninguno de
+los dos campos está en pantalla en el tipo de destino, así que el usuario no puede limpiarlos a
+mano.
+
+Con el guardia puesto eso pasó a ser 400, que es honesto pero dejaba al usuario trabado: la
+única salida —mandar `tramos: []`— chocaba contra otro 400, *"Este tipo requiere al menos un
+tramo"*, sobre un tipo que no admite ninguno. Ese segundo era un bug viejo e independiente:
+la condición preguntaba por `!TIPOS_CON_TRAMOS_OPCIONALES` cuando tenía que preguntar por
+`TIPOS_CON_TRAMOS`, o sea *"¿este tipo EXIGE escalones?"*.
+
+| Dónde | Qué hace ahora |
+|---|---|
+| `validarSegunTipoUpdate` (service) | `tramos: []` lo rechaza **solo** el tipo que exige escalones. Para los demás es el vaciado explícito |
+| el drawer, hacia escalones → valor único | manda `tramos: []`, **después de preguntar** |
+| el drawer, hacia valor único → escalones | manda la columna del importe en `null`, **después de preguntar** |
+
+✅ **El aviso lo eligió el owner (2026-08-26)** sobre la alternativa de borrar callado. La
+razón que lo decidió: al elegir el tipo nuevo el campo donde eso se veía **ya desapareció del
+formulario**, así que borrarlo sin decir nada es borrar algo que dejó de estar a la vista en el
+mismo gesto. El modal nombra qué se pierde —*"2 escalones"* o *"un valor único cargado"*—
+porque las dos direcciones pasan por él.
+
+⚠️ **La asimetría que queda, dicha y no escondida:** el interruptor de los tipos que **eligen**
+forma —método de pago— sigue borrando los escalones **sin preguntar** al volver a valor único,
+como se decidió el 2026-08-25. Ahí el usuario sí los está viendo cuando mueve el radio, pero
+son dos conductas distintas para la misma pérdida. Unificarlas es decisión del owner y está
+anotada en [`../agent/pendientes.md`](../agent/pendientes.md).
+
 ### Lo que sigue sin salir
 
 `mora` **no** es candidato a tramos, y no por falta de configuración: está en `DIFERIDAS`, así

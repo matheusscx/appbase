@@ -17,6 +17,180 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una regla dice su importe de una sola forma: los nueve tipos que no eligen (2026-08-26)
+
+**Venía de la sección 3**, adonde había bajado el 2026-08-25 con la decisión del owner escrita
+adentro. Texto verbatim de la entrada:
+
+> ### Los tipos de valor único: el hueco se cierra, no se abre (decidido 2026-08-25)
+>
+> - [ ] **Cuatro tipos de valor único aceptan `tramos` por API, y el motor los prefiere: la
+>   tasa queda muerta sin aviso** (backend) — lo dejó ver la revisión independiente del frente
+>   de método de pago, y es **el mismo bug que ese frente cerró**, en los tipos que quedaron
+>   afuera. Nada en `validarSegunTipoCreate` prohíbe mandar valor **y** tramos, y `evaluarRegla`
+>   ramifica por `tramos.length > 0` antes de mirar el valor plano.
+>
+>   **Medido** ejecutando el motor con una regla al 50% más un tramo al 3% sobre un neto de 100
+>   (revisión independiente, 2026-08-25):
+>
+>   | Tipo | Qué cobra | ¿Tiene el hueco? |
+>   |---|---|---|
+>   | `directo` | el tramo (3) | **sí** |
+>   | `general` | el tramo (3) | **sí** |
+>   | `interes_simple` | el tramo (3) | **sí** |
+>   | `interes_compuesto` | el tramo (3) | **sí** |
+>   | `pronto_pago` | cero | no — corta en `DIFERIDAS` |
+>   | `mora` | cero | no — corta en `DIFERIDAS` |
+>
+>   ⚠️ **La primera redacción de esta entrada nombraba `pronto_pago` y omitía los dos de
+>   interés**, y la bloqueó la revisión por eso. Las dos mitades del error importan: mandaba a
+>   buscar en `pronto_pago` un mecanismo que ahí **no ocurre** —está en `DIFERIDAS`
+>   (`calculo-precios.engine.ts:297`) y retorna antes de la rama de tramos—, y dejaba afuera
+>   **dos tipos que sí cobran mal**. Es exactamente la falla que este frente vino a cerrar,
+>   cometida al escribir su propio remate.
+>
+>   ✅ **DECIDIDO (owner, 2026-08-25): CERRAR.** Los cuatro tipos cobran un valor y punto: la API
+>   rechaza con **400** al que mande valor **y** tramos. La apertura queda a una línea de
+>   distancia, pero **no se construye hasta que un caso de local la pida**.
+>
+>   **Por qué no ganó el precedente** — esto es lo que quien la tome tiene que entender antes de
+>   tocar nada, porque la gemela se decidió al revés el mismo día. Cuando el owner abrió los de
+>   método de pago, esos tipos **ya estaban en la pantalla** y sus escalones a medio construir:
+>   el local podía crear la regla y el motor le cobraba mal. Acá `campoTramos: false` en los
+>   seis, así que **hoy nadie cobra mal** y lo único que existe es un agujero de escritura.
+>   Abrir sería una feature nueva —cuatro pantallas, y decidir qué mide un escalón en un
+>   interés compuesto, que no es obvio— sin ningún caso que la pida.
+>
+>   **El trabajo, entonces:** negar tramos no vacíos cuando el código está en
+>   `TIPOS_CON_VALOR_UNICO`, en los dos services. `validarFormaDeImporte` ya existe en
+>   `common/utils/monto-regla.util.ts` y sirve tal cual, sin tocarla. Esa lista cubre los cuatro
+>   con hueco **y** los dos diferidos, así que no hay que enumerar nada a mano.
+>
+>   📌 **No es alcanzable desde la pantalla** (`campoTramos: false` en los seis), igual que no lo
+>   era para método de pago hasta que se construyó. O sea: hoy no cobra mal, y lo único que lo
+>   impide es que nadie pegue a la API a mano.
+>
+>   ⚠️ **Toca el motor solo para leerlo, no para cambiarlo**: la conducta —gana el escalón— se
+>   deja como está y lo que se agrega es el guardia de escritura. Quien la tome mide primero si
+>   `por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tienen el hueco espejo (aceptar un
+>   valor plano además de sus tramos), porque es la misma familia y esta entrada **no lo
+>   verificó**.
+
+**Lo que se hizo:** dos hermanos de `validarFormaDeImporte`, en el mismo archivo —
+`validarValorUnico` (exige el valor único y **prohíbe** escalones) y `validarSoloEscalones`
+(prohíbe el valor plano)— cableados en los **cuatro** puntos de escritura: `create` y el
+estado resultante del `PATCH`, en los dos services. El motor **no se tocó**, que era la
+condición de la entrada.
+
+**Lo que la entrada NO sabía, y lo cambió el hecho de medir.** La entrada mandaba verificar si
+`por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tenían el hueco espejo, y decía que
+`mora` y `pronto_pago` no lo tenían. Sondeando los NUEVE códigos uno por uno, antes y después:
+
+| Tipo | Forma que le toca | Antes | Qué pasaba al cobrar |
+|---|---|---|---|
+| `directo`, `general`, `interes_simple`, `interes_compuesto` | valor único | 201 con las dos | el motor prefiere el escalón: la tasa quedaba muerta sin aviso |
+| `pronto_pago`, `mora` | valor único | **201 con las dos** | nada: cortan en `DIFERIDAS` |
+| `por_mayor`, `por_monto_venta`, `recargo_por_monto_venta` | escalones | **201 con las dos** | nada: el valor plano no lo lee nadie |
+
+O sea: el hueco espejo **existía**, y además `mora`/`pronto_pago` sí aceptaban la escritura —lo
+que no tenían era consecuencia al cobrar, que es distinto—. Nueve códigos, no seis: la primera
+redacción de la doc de la feature dijo "seis" contando los sondeados hasta ese momento, y se
+corrigió antes de commitear.
+
+**Cómo se sabe que los tests muerden.** Ocho mutantes, cada uno revirtiendo al código
+anterior —no rompiéndolo de cualquier forma—, con lo que cae **contado corriendo las suites**,
+no estimado:
+
+| Mutante | Qué revierte | Cuántos caen |
+|---|---|---|
+| A | la rama de valor único en los dos services, a la condición vieja | **4** |
+| B | sacar la rama de solo-escalones en los dos services | **6** |
+| C | sacar el `throw` de `validarValorUnico` | **6** |
+| D | sacar el `throw` de `validarSoloEscalones` | **7** |
+| E | la condición vieja del `tramos: []` (`!TIPOS_CON_TRAMOS_OPCIONALES`) | **2** |
+| F | sacar el freno del drawer | **8** |
+| G | el body del drawer vuelve a limpiar los escalones solo para los tipos que eligen | **2** |
+| H | ídem con el valor único: la rama gemela, que es la que se olvidó | **2** |
+
+⚠️ **Los números son de las suites UNITARIAS** —`jest` de backend para A–E, `vitest` de las dos
+pantallas para F–H—. El e2e **no se corrió por mutante**: caería también en varios, pero eso no
+se midió y por eso no se cuenta acá. Y son de la ÚLTIMA corrida: los tests crecieron dos veces
+durante el frente, así que un número escrito antes de la última tanda ya no valía. Es el motivo
+por el que la tabla se volvió a medir entera en vez de sumarle filas.
+
+📌 Dos correcciones que la revisión independiente cazó midiendo, y que valen como método: C y D
+se habían anotado como *"2 unit del util"* y *"1 unit del util"*, tratándolas como mutantes de
+capa —pero los services **llaman** al util, así que sacarle el `throw` tira también los de
+service—; y F se había anotado en 4 cuando los tests del espejo lo llevaron a 8.
+
+A, B, E y H son el revert exacto al código anterior: prueban que el test caza **el bug que
+había**, no solo que la línea nueva existe.
+
+**Dónde vive la conducta:** `backend/src/common/utils/monto-regla.util.ts`, con sus tests
+unitarios; los service specs cubren los cuatro puntos de escritura; y `reglas-valor.e2e-spec.ts`
+suma un caso por dirección, que es el único lugar donde se ejercita el `ValidationPipe` — los
+dos campos son `@IsOptional()`, así que el pipe deja pasar el body con las dos formas y el
+service es el ÚNICO enforcement.
+
+📌 **La asimetría con método de pago es deliberada y está escrita en el código**, no solo acá:
+la gemela se ABRIÓ el 2026-08-25 y ésta se CERRÓ. La diferencia que decidió: allá los escalones
+ya eran visibles en la pantalla y el local cobraba mal; acá **la forma sobrante no es
+alcanzable desde la pantalla en ninguno de los nueve**, así que no había nadie cobrando mal —
+solo un agujero de escritura. Medido en `reglas-form-config.ts`, y son dos banderas distintas
+según el grupo: `campoTramos: false` en los seis de valor único, `campoValor: false` en los
+tres por escalones.
+
+⚠️ Esa medida llegó a estar escrita como *"`campoTramos: false` en los nueve"*, que es falso
+para los tres por escalones —ahí esa bandera está en `true`—. No es un detalle de redacción:
+**ésta es la razón registrada de por qué el owner cerró acá y abrió en método de pago**, así
+que quien la verifique tiene que poder reproducirla. La cazó la revisión independiente.
+
+**Y lo que el guardia destapó, que fue la mitad más cara del frente.** Cerrar el estado
+prohibido dejó sin salida a un camino de todos los días: cambiar el tipo de una regla de
+escalones a uno de valor único. Los escalones del tipo viejo quedan vivos —`update` solo
+reemplaza los hijos que vengan en el DTO—, así que el `PATCH` pegaba contra el guardia nuevo;
+y la única forma de limpiarlos, `tramos: []`, chocaba contra un 400 **preexistente** que decía
+*"Este tipo requiere al menos un tramo"* sobre un tipo que no admite ninguno. La condición
+preguntaba `!TIPOS_CON_TRAMOS_OPCIONALES` donde tenía que preguntar `TIPOS_CON_TRAMOS`.
+
+⚠️ **Sin arreglar eso, el commit habría dejado la pantalla peor que antes**: hasta acá el
+cambio de tipo guardaba con 200 y cobraba mal en silencio; con el guardia solo, guardaría 400
+sin ninguna salida. Lo cazó el e2e `cambiar el tipo MANDANDO lo que el nuevo exige`, que estaba
+en verde desde antes y es una **ancla positiva** — o sea que el frente rompió justo el test que
+existe para avisar que se rompió algo legítimo.
+
+⚠️ **Y la primera versión del arreglo lo hizo en UNA sola dirección**, que es la parte que más
+vale contar. Se agregó el vaciado de escalones y se dejó intacta la rama gemela —la que apaga
+el valor único—, así que el camino **valor único → escalones** quedó con el mismo callejón:
+`importeResultante` lee la columna PERSISTIDA cuando el body no la manda, y el 400 nombraba un
+campo que en ese tipo **no está en pantalla** (`campoValor: false`). Lo cazó la revisión
+independiente **midiendo contra la API corriendo**, no leyendo: el gate estaba entero en verde
+porque el e2e cubría la dirección arreglada y no la espejo.
+
+Las dos direcciones tienen ahora su caso que **falla** y su **ancla positiva**, pero el reparto
+entre capas no es simétrico y conviene decirlo en vez de sugerir que lo es:
+
+| Capa | escalones → valor único | valor único → escalones |
+|---|---|---|
+| unit de service | la salida `tramos: []`, y el ancla de que el tipo que EXIGE escalones lo sigue rechazando | el par completo: sin apagar la columna es 400, apagándola pasa |
+| e2e | sin limpiar es 400 · limpiando es 200 | sin apagar es 400 · apagando es 200 |
+| las dos pantallas | frena y avisa · al confirmar manda `tramos: []` | frena y avisa · al confirmar manda la columna en `null` |
+
+El cambio de tipo **sin** limpiar se fija en e2e y no en unit a propósito: ahí participan el
+`ValidationPipe` y el estado realmente persistido, que es de donde salía el huérfano.
+
+✅ **Decisión del owner (2026-08-26): avisar antes de borrarlos**, no borrarlos callado. La
+razón que la definió: al elegir el tipo nuevo la sección de escalones **ya desapareció del
+formulario**, así que borrarlos sin decir nada es borrar algo que dejó de estar a la vista en
+el mismo gesto. El drawer frena con un `CrudModal` que dice cuántos son y recién después manda
+`tramos: []`.
+
+📌 **La asimetría que queda está anotada, no escondida:** el interruptor de los tipos que
+ELIGEN forma —método de pago— sigue borrando los escalones sin preguntar, como se decidió el
+2026-08-25. Unificarlas es del owner → [`pendientes.md`](pendientes.md).
+
+---
+
 ## La invariante 3 de `CLAUDE.md` pasa a criterio: la excepción vale si el porqué está en la consulta (2026-08-25)
 
 **Venía de la sección 4** y la contestó el owner el mismo día en que se escribió. Texto

@@ -437,6 +437,9 @@ que lo convierte en un frente propio y no en un remate.
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
 
+➕ **Y una llegó de la § 4 el 2026-08-25 y salió el 2026-08-26**: los tipos de valor único, que
+el owner decidió **cerrar** → [`resueltos.md`](resueltos.md).
+
 ➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner. Cada una
 lleva su decisión escrita adentro **y las trampas que el que la tome se va a encontrar**, que es
 lo que las hace construibles y no solo contestadas. Queda **una** acá: la moneda de las
@@ -817,60 +820,6 @@ desfases, los dos tipos por método de pago, y las dos que dejó el frente del n
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-### Los tipos de valor único: el hueco se cierra, no se abre (decidido 2026-08-25)
-
-- [ ] **Cuatro tipos de valor único aceptan `tramos` por API, y el motor los prefiere: la
-  tasa queda muerta sin aviso** (backend) — lo dejó ver la revisión independiente del frente
-  de método de pago, y es **el mismo bug que ese frente cerró**, en los tipos que quedaron
-  afuera. Nada en `validarSegunTipoCreate` prohíbe mandar valor **y** tramos, y `evaluarRegla`
-  ramifica por `tramos.length > 0` antes de mirar el valor plano.
-
-  **Medido** ejecutando el motor con una regla al 50% más un tramo al 3% sobre un neto de 100
-  (revisión independiente, 2026-08-25):
-
-  | Tipo | Qué cobra | ¿Tiene el hueco? |
-  |---|---|---|
-  | `directo` | el tramo (3) | **sí** |
-  | `general` | el tramo (3) | **sí** |
-  | `interes_simple` | el tramo (3) | **sí** |
-  | `interes_compuesto` | el tramo (3) | **sí** |
-  | `pronto_pago` | cero | no — corta en `DIFERIDAS` |
-  | `mora` | cero | no — corta en `DIFERIDAS` |
-
-  ⚠️ **La primera redacción de esta entrada nombraba `pronto_pago` y omitía los dos de
-  interés**, y la bloqueó la revisión por eso. Las dos mitades del error importan: mandaba a
-  buscar en `pronto_pago` un mecanismo que ahí **no ocurre** —está en `DIFERIDAS`
-  (`calculo-precios.engine.ts:297`) y retorna antes de la rama de tramos—, y dejaba afuera
-  **dos tipos que sí cobran mal**. Es exactamente la falla que este frente vino a cerrar,
-  cometida al escribir su propio remate.
-
-  ✅ **DECIDIDO (owner, 2026-08-25): CERRAR.** Los cuatro tipos cobran un valor y punto: la API
-  rechaza con **400** al que mande valor **y** tramos. La apertura queda a una línea de
-  distancia, pero **no se construye hasta que un caso de local la pida**.
-
-  **Por qué no ganó el precedente** — esto es lo que quien la tome tiene que entender antes de
-  tocar nada, porque la gemela se decidió al revés el mismo día. Cuando el owner abrió los de
-  método de pago, esos tipos **ya estaban en la pantalla** y sus escalones a medio construir:
-  el local podía crear la regla y el motor le cobraba mal. Acá `campoTramos: false` en los
-  seis, así que **hoy nadie cobra mal** y lo único que existe es un agujero de escritura.
-  Abrir sería una feature nueva —cuatro pantallas, y decidir qué mide un escalón en un
-  interés compuesto, que no es obvio— sin ningún caso que la pida.
-
-  **El trabajo, entonces:** negar tramos no vacíos cuando el código está en
-  `TIPOS_CON_VALOR_UNICO`, en los dos services. `validarFormaDeImporte` ya existe en
-  `common/utils/monto-regla.util.ts` y sirve tal cual, sin tocarla. Esa lista cubre los cuatro
-  con hueco **y** los dos diferidos, así que no hay que enumerar nada a mano.
-
-  📌 **No es alcanzable desde la pantalla** (`campoTramos: false` en los seis), igual que no lo
-  era para método de pago hasta que se construyó. O sea: hoy no cobra mal, y lo único que lo
-  impide es que nadie pegue a la API a mano.
-
-  ⚠️ **Toca el motor solo para leerlo, no para cambiarlo**: la conducta —gana el escalón— se
-  deja como está y lo que se agrega es el guardia de escritura. Quien la tome mide primero si
-  `por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tienen el hueco espejo (aceptar un
-  valor plano además de sus tramos), porque es la misma familia y esta entrada **no lo
-  verificó**.
-
 ---
 
 ## 4. Necesita que el owner conteste
@@ -916,10 +865,17 @@ contestaron ese mismo día.** Los tipos de valor único → **cerrar**, y se mud
 porqué de que el precedente de su gemela **no** haya ganado. La redacción de la invariante 3
 de `CLAUDE.md` → **pasa a criterio**, ya escrita en el archivo → [`resueltos.md`](resueltos.md).
 
-**Queda una entrada, y no espera una respuesta:** la de la nota de crédito espera la
-**investigación de mercado que la destraba** —lanzada el 2026-08-15, corrida y cerrada el
-2026-08-22— y después una decisión fiscal, que por `CLAUDE.md` abre su propio frente con su
-propia sesión.
+**Quedan dos.** La de la nota de crédito **no espera una respuesta** sino la investigación de
+mercado que la destraba —lanzada el 2026-08-15, corrida y cerrada el 2026-08-22— y después una
+decisión fiscal, que por `CLAUDE.md` abre su propio frente con su propia sesión. La otra sí
+espera al owner, es chica, y llegó el 2026-08-26 de rebote del frente que cerró los tipos de
+valor único: hay tres maneras de que una regla pierda la forma de importe que tenía guardada,
+y solo una avisa.
+
+📌 **Esa entrada nació en la § 3 y se movió acá el mismo día**, que es la tercera vez en tres
+días que pasa lo mismo: el reflejo al escribirla es ponerla junto a sus parientes temáticos
+—habla de escalones, como media § 3— en vez de archivarla por **lo que hace falta para
+tomarla**, que es una respuesta tuya.
 
 ⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
 pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
@@ -940,6 +896,31 @@ terminan en una pregunta al owner. Es exactamente el error que el párrafo de ar
 corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+- [ ] **Perder la forma de importe avisa por un camino y no por los otros** (frontend + producto;
+  2026-08-26, salió del frente del guardia de forma de importe →
+  [`resueltos.md`](resueltos.md)) — hay **tres** maneras de que una regla pierda la forma de
+  importe que tenía guardada, y las tres se comportan distinto:
+  1. **Cambiar el tipo** a uno que no usa esa forma —en las **dos** direcciones: escalones →
+     valor único, y valor único → escalones— → desde el 2026-08-26 el drawer **avisa**
+     (*"«X» tiene 2 escalones. El tipo que elegiste no lo usa…"*) y recién después manda el
+     vaciado.
+  2. **Mover el radio a "valor único"** en los tipos por método de pago, que ELIGEN forma →
+     los borra **sin preguntar**, como se decidió el 2026-08-25.
+  3. **Cambiar entre dos tipos que los dos usan escalones** → el formulario se vacía y el
+     backend contesta *"requiere al menos un tramo"*, sin aviso previo. Es el caso más benigno
+     —la sección queda a la vista, vacía, así que el usuario ve lo que pasó— pero es una
+     tercera conducta para la misma familia de pérdida, y lo levantó la revisión independiente
+     al notar que esta entrada enumeraba dos.
+  **El argumento para dejarlo así:** en el caso 2 el usuario está mirando los escalones cuando
+  mueve el radio, y en el 3 ve el formulario vacío; en el 1 el campo ya desapareció de la
+  pantalla en el mismo gesto que dispara el borrado. O sea que la asimetría **no es un olvido**,
+  responde a que en un caso no queda nada a la vista y en los otros sí.
+  **El argumento para unificarlo:** es la misma pérdida, y una pantalla que a veces pregunta y
+  a veces no enseña a no leer el modal.
+  ❓ **La pregunta al owner, chica:** ¿los casos 2 y 3 también avisan, o se quedan como están?
+  Si avisan, es la misma condición del caso 1 con `eligeForma` adentro y los tests espejados;
+  si no, esta entrada se cierra escribiendo el porqué donde hoy está el comentario.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre

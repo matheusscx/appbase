@@ -212,6 +212,65 @@ export function validarFormaDeImporte(
   }
 }
 
+/**
+ * Un tipo que **no elige**: su importe va en un valor único, y los escalones no
+ * significan nada para él.
+ *
+ * Es el hermano de `validarFormaDeImporte`, y las dos existen por el mismo
+ * motivo: `evaluarRegla` ramifica por `tramos.length > 0` **antes** de mirar el
+ * valor plano, así que una fila con las dos cosas llenas cobra por escalones y
+ * deja el valor único muerto **sin aviso**. El orden del motor no es la
+ * garantía; estas funciones sí.
+ *
+ * ✅ **Decisión del owner, 2026-08-25: CERRAR, no abrir.** El caso simétrico
+ * —los dos tipos por método de pago— se abrió el mismo día, así que el
+ * precedente no la resolvía sola. Ganó cerrar porque los escalones de estos
+ * tipos **no son alcanzables desde la pantalla** (`campoTramos: false`): hoy
+ * nadie cobra mal, y lo único que existía era un agujero de escritura. Abrir
+ * habría sido una feature nueva —una pantalla por tipo, y decidir qué mide un
+ * escalón en un interés compuesto— sin ningún caso de local que la pida.
+ */
+export function validarValorUnico(
+  importe: string | null | undefined,
+  tramos?: unknown[],
+): void {
+  if (tramos?.length) {
+    throw new BadRequestException(
+      'El importe de esta regla se expresa con un valor único: este tipo no admite escalones',
+    );
+  }
+  // Verbatim de lo que decían los dos services antes de centralizarlo acá: el
+  // texto ya está en e2e y en specs, y cambiarlo no compra nada.
+  if (!importe) {
+    throw new BadRequestException('El valor es requerido para este tipo');
+  }
+}
+
+/**
+ * El dual: un tipo que expresa su importe **solo** por escalones, así que un
+ * valor plano no lo lee nadie.
+ *
+ * ⚠️ **Acá va solo la mitad que prohíbe.** Que estos tipos EXIJAN al menos un
+ * escalón se sigue exigiendo en cada service, donde ya estaba y donde corre
+ * antes que esto. Traerlo también acá cambiaría el orden en que salen los 400
+ * —un `por_mayor` sin escalones y con el modo equivocado empezaría a contestar
+ * otra cosa— y eso es rehacer código que anda para que la función quede
+ * simétrica en el papel.
+ *
+ * 📌 El daño que tapa es **menor** que el de su hermana y conviene no
+ * exagerarlo: para estos tipos el valor plano nunca se leyó —el motor devuelve
+ * `SIN_VALOR` cuando ningún escalón alcanza, no cae al valor plano (medido
+ * 2026-08-26)—, así que lo que se guardaba era un número decorativo, no una
+ * tasa que el usuario creía estar cobrando.
+ */
+export function validarSoloEscalones(importe: string | null | undefined): void {
+  if (importe) {
+    throw new BadRequestException(
+      'El importe de esta regla se expresa con escalones: este tipo no admite un valor único',
+    );
+  }
+}
+
 /** El mínimo de un tramo: cantidad **o** monto, nunca los dos ni ninguno. */
 export interface MinimoDeTramo {
   minimoCantidad?: string | null;

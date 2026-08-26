@@ -14,6 +14,8 @@ import {
   validarMontosDeRegla,
   validarMinimosDeTramos,
   validarFormaDeImporte,
+  validarValorUnico,
+  validarSoloEscalones,
   importeResultante,
 } from '../../common/utils/monto-regla.util';
 import { Recargo } from './entities/recargo.entity';
@@ -39,6 +41,14 @@ const CLASE = 'recargo';
  * ⚠️ `recargo_metodo_pago` salió de acá el 2026-08-25: pasó a
  * `TIPOS_CON_TRAMOS_OPCIONALES`, donde el valor único es una de dos formas
  * posibles y no la única.
+ *
+ * ✅ **Desde el 2026-08-26 el "y solo así" se enforcea** (`validarValorUnico`):
+ * mandarle escalones a uno de estos tipos es 400. Antes entraba con 201, y en
+ * los que el motor sí evalúa cobraba el escalón dejando el valor único muerto
+ * **sin aviso**. ``mora`` no llegaba a eso —corta en `DIFERIDAS` y no cobra
+ * nada—, pero aceptaba la escritura igual, que es lo que este guardia cierra.
+ * El owner decidió CERRAR y no abrir sabiendo que la simétrica se había abierto
+ * el día anterior; el porqué de esa asimetría vive en `validarValorUnico`.
  */
 const TIPOS_CON_VALOR_UNICO = [
   'general',
@@ -64,6 +74,11 @@ const TIPOS_CON_METODOS = ['recargo_metodo_pago'];
  * El motor no necesitó cambios: `evaluarRegla` ramifica por `tramos.length > 0`
  * sin mirar la clase, y un código que no está en `DIFERIDAS` ni en
  * `METODO_PAGO_CODIGOS` llega a esa rama con la magnitud del monto.
+ *
+ * El "en vez de" también es 400 desde el 2026-08-26 (`validarSoloEscalones`),
+ * y es el daño menor de los dos: un valor plano acá no lo leía nadie —el motor
+ * devuelve `SIN_VALOR` cuando ningún escalón alcanza, no cae al valor plano—,
+ * así que lo que entraba era un número decorativo.
  */
 const TIPOS_CON_TRAMOS = ['recargo_por_monto_venta'];
 
@@ -656,10 +671,15 @@ export class RecargosService {
     validarMinimosDeTramos(admiteTramos(codigo) ? codigo : null, dto.tramos);
     const importe =
       modoResultante === 'monto_fijo' ? dto.valorMonto : dto.valorPorcentaje;
+    // Las tres formas de decir cuánto, cada tipo con la suya. Es la misma
+    // cadena en `validarEstadoResultante`, y las dos ramas nuevas son de
+    // ESCRITURA: el motor ya elegía tramos antes que valor plano, así que una
+    // fila con las dos llenas cobraba una y dejaba la otra muerta sin avisar.
     if (TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo))
       validarFormaDeImporte(importe, dto.tramos);
-    else if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importe)
-      throw new BadRequestException('El valor es requerido para este tipo');
+    else if (TIPOS_CON_VALOR_UNICO.includes(codigo))
+      validarValorUnico(importe, dto.tramos);
+    else if (TIPOS_CON_TRAMOS.includes(codigo)) validarSoloEscalones(importe);
     if (codigo === 'mora' && dto.diasVencimiento == null)
       throw new BadRequestException('Días de vencimiento requerido');
     if (
@@ -739,8 +759,10 @@ export class RecargosService {
     // ni sabe que los escalones existen. Con `dto.tramos` ese PATCH entraba.
     if (TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo))
       validarFormaDeImporte(importeFinal, tramosFinales);
-    else if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !importeFinal)
-      throw new BadRequestException('El valor es requerido para este tipo');
+    else if (TIPOS_CON_VALOR_UNICO.includes(codigo))
+      validarValorUnico(importeFinal, tramosFinales);
+    else if (TIPOS_CON_TRAMOS.includes(codigo))
+      validarSoloEscalones(importeFinal);
 
     if (TIPOS_CON_METODOS.includes(codigo)) {
       const cantidad =
@@ -757,15 +779,23 @@ export class RecargosService {
   private validarSegunTipoUpdate(codigo: string, dto: UpdateRecargoDto): void {
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
 
-    // `tramos: []` es el vaciado explícito, y para los tipos que ELIGEN forma
-    // es la única manera de volver de escalones a valor único: hay que dejarlo
-    // pasar o la mitad de ida del interruptor no tiene vuelta. No queda sin
-    // red — `validarEstadoResultante` corre después con `tramosFinales` vacíos
-    // y exige que la fila diga cuánto cobra de la otra forma.
+    // `tramos: []` es el vaciado explícito, y lo rechaza SOLO el tipo que
+    // exige escalones — el único al que dejarlo sin ninguno lo deja mudo. Para
+    // los que ELIGEN forma es la única manera de volver a valor único, y para
+    // los que no admiten escalones es la única manera de limpiar los que
+    // quedaron huérfanos al cambiar de tipo.
+    //
+    // ⚠️ Hasta el 2026-08-26 la condición preguntaba por lo contrario
+    // —`!TIPOS_CON_TRAMOS_OPCIONALES`— y por eso un `PATCH { tipoReglaId:
+    // <valor único>, tramos: [] }` contestaba *"Este tipo requiere al menos un
+    // tramo"* sobre un tipo que no admite ninguno. Era mentira y además dejaba
+    // el cambio de tipo sin salida: sin mandar tramos quedan los huérfanos
+    // —que el motor cobra, porque ramifica por `tramos.length`— y mandando
+    // `[]` rebotaba acá. Lo destapó el e2e del guardia de forma de importe.
     if (
       dto.tramos !== undefined &&
       !dto.tramos.length &&
-      !TIPOS_CON_TRAMOS_OPCIONALES.includes(codigo)
+      TIPOS_CON_TRAMOS.includes(codigo)
     )
       throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (dto.metodoPagoIds !== undefined && !dto.metodoPagoIds.length)

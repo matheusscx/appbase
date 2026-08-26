@@ -600,6 +600,184 @@ describe('DescuentosService', () => {
     });
   });
 
+  /**
+   * El hermano del describe de arriba: los tipos que **no** eligen forma.
+   * `directo` cobra un valor único y `por_mayor` cobra por escalones —
+   * mandarle a cada uno la forma que no le toca entraba con **201** hasta el
+   * 2026-08-26, medido con una sonda sobre este mismo harness antes de tocar
+   * nada.
+   *
+   * Lo que lo hacía dañino es el motor, que no se tocó: `evaluarRegla`
+   * ramifica por `tramos.length > 0` **antes** de mirar el valor plano, así
+   * que la fila con las dos formas llenas cobraba una y dejaba la otra muerta
+   * sin avisar. El owner decidió CERRAR el 2026-08-25, sabiendo que la
+   * simétrica —método de pago— se había abierto ese mismo día.
+   */
+  describe('los tipos que no eligen forma de importe', () => {
+    it('directo con valor único Y escalones es 400', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Directo ambiguo',
+          tipoReglaId: 'tipo-directo',
+          modo: 'porcentaje',
+          valorPorcentaje: '0.50',
+          tramos: [{ minimoMonto: '100', valorPorcentaje: '0.03' }],
+        }),
+      ).rejects.toThrow(/no admite escalones/);
+    });
+
+    it('y un PATCH que se los agrega también', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-unico',
+        tenantId: TENANT,
+        nombre: 'Directo',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.20',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.update(TENANT, 'd-unico', {
+          tramos: [{ minimoMonto: '100', valorPorcentaje: '0.03' }],
+        }),
+      ).rejects.toThrow(/no admite escalones/);
+    });
+
+    it('por_mayor con escalones Y valor plano es 400', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Por mayor ambiguo',
+          tipoReglaId: 'tipo-por_mayor',
+          modo: 'porcentaje',
+          valorPorcentaje: '0.50',
+          tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.03' }],
+        }),
+      ).rejects.toThrow(/no admite un valor único/);
+    });
+
+    // Los escalones guardados se leen de la BD: sin eso, `tramosFinales` queda
+    // vacío y gana el 400 de "requiere al menos un tramo", que es otro chequeo
+    // y taparía a éste.
+    it('y un PATCH que le agrega el valor plano también', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-tramos',
+        tenantId: TENANT,
+        nombre: 'Por mayor',
+        tipoReglaId: 'tipo-por_mayor',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      tramoRepoMock.find.mockResolvedValue([
+        { minimoCantidad: '10', valorPorcentaje: '0.10' },
+      ]);
+
+      await expect(
+        service.update(TENANT, 'd-tramos', { valorPorcentaje: '0.50' }),
+      ).rejects.toThrow(/no admite un valor único/);
+    });
+
+    // La salida del estado prohibido. Sin esto el guardia de arriba no tiene
+    // puerta: al cambiar de tipo los escalones del tipo viejo quedan vivos en
+    // la BD —`update` solo reemplaza hijos que vengan en el DTO— y el `PATCH`
+    // choca contra el guardia sin forma de limpiarlos. Mandar `tramos: []` es
+    // esa forma, y hasta el 2026-08-26 rebotaba con *"requiere al menos un
+    // tramo"* sobre un tipo que no admite ninguno.
+    it('y `tramos: []` es la salida: limpia los huérfanos del tipo viejo', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-cambio',
+        tenantId: TENANT,
+        nombre: 'Por mayor',
+        tipoReglaId: 'tipo-por_mayor',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      tramoRepoMock.find.mockResolvedValue([
+        { minimoCantidad: '10', valorPorcentaje: '0.10' },
+      ]);
+
+      await expect(
+        service.update(TENANT, 'd-cambio', {
+          tipoReglaId: 'tipo-directo',
+          valorPorcentaje: '0.25',
+          tramos: [],
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    // Ancla del otro lado: el tipo que EXIGE escalones sigue rechazando el
+    // vaciado. Sin esto, la condición podría invertirse del todo y nadie se
+    // enteraría.
+    it('pero el tipo que exige escalones sigue rechazando `tramos: []`', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-exige',
+        tenantId: TENANT,
+        nombre: 'Por mayor',
+        tipoReglaId: 'tipo-por_mayor',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+
+      await expect(
+        service.update(TENANT, 'd-exige', { tramos: [] }),
+      ).rejects.toThrow(/al menos un tramo/);
+    });
+
+    // La dirección ESPEJO del par de arriba, que la primera versión de este
+    // frente dejó rota: de valor único a un tipo POR ESCALONES. Acá el huérfano
+    // es el valor persistido, que `importeResultante` lee cuando el PATCH no
+    // manda la columna.
+    it('cambiar a un tipo por escalones sin apagar el valor es 400', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-espejo',
+        tenantId: TENANT,
+        nombre: 'Directo',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.20',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+
+      await expect(
+        service.update(TENANT, 'd-espejo', {
+          tipoReglaId: 'tipo-por_mayor',
+          tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.10' }],
+        }),
+      ).rejects.toThrow(/no admite un valor único/);
+    });
+
+    it('y apagando esa columna en el mismo body sí pasa', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-espejo2',
+        tenantId: TENANT,
+        nombre: 'Directo',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valorPorcentaje: '0.20',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+
+      await expect(
+        service.update(TENANT, 'd-espejo2', {
+          tipoReglaId: 'tipo-por_mayor',
+          valorPorcentaje: null,
+          tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.10' }],
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
+
   describe('update', () => {
     it('throws NotFoundException when descuento not found', async () => {
       descuentoRepoMock.findOne.mockResolvedValue(null);
