@@ -17,6 +17,65 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La invariante 3 de `CLAUDE.md` pasa a criterio: la excepción vale si el porqué está en la consulta (2026-08-25)
+
+**Venía de la sección 4** y la contestó el owner el mismo día en que se escribió. Texto
+verbatim:
+
+> - [ ] **La invariante 3 de `CLAUDE.md` se reescribió en un commit de feature, y eso lo
+>   confirmás vos** (documentación; 2026-08-25) — decía *"Toda lectura filtra `eliminado_el IS
+>   NULL`"*, en absoluto. **El absoluto ya era falso antes de tocarlo**: hay al menos seis
+>   lecturas que no filtran a propósito, todas anteriores a este frente (kardex ×2, mermas,
+>   líneas de comanda, la autoría del borrado, la papelera). Se reescribió como **criterio** —
+>   *lo que distingue una excepción de un olvido es que el porqué esté escrito en la propia
+>   consulta*— porque el enunciado absoluto es justamente lo que hace que el próximo agente
+>   "arregle" una excepción medida.
+>
+>   ❓ **Lo que hay que confirmar no es el dato sino la potestad.** Tu decisión del 2026-08-25
+>   autorizaba **la excepción del endpoint** (`GET /:id/uso` devuelve los borrados marcados), no
+>   cambiar el enunciado de una invariante del proyecto. Lo señaló la revisión independiente y
+>   tiene razón: la invariante es la regla que aplican el próximo agente, la revisión y en parte
+>   el pre-commit, así que ablandarla de arrastre amplía una decisión puntual a una regla general.
+>
+>   ⛔ **`CLAUDE.md` quedó SIN TOCAR, a propósito.** La reescritura llegó a estar en el diff y se
+>   revirtió antes de commitear: el preámbulo de ese mismo archivo dice *"detenerse, reportar el
+>   conflicto y esperar confirmación. Nunca resolverlo por cuenta propia"*, y editar el enunciado
+>   de la invariante que uno está excepcionando es resolverlo por cuenta propia — encima
+>   auto-legalizándolo. Lo señaló la revisión independiente **dos veces**.
+>
+>   Así que hoy la invariante 3 sigue diciendo *"Toda lectura filtra"*, en absoluto y falso. Lo
+>   que sí se escribió, porque ahí sí corresponde, es el criterio en
+>   [`docs/agent/anti-patterns.md`](anti-patterns.md) —con la tabla de formas que toman— y en
+>   [`docs/patterns/backend.md`](../patterns/backend.md), que es el paso 1 del orden de búsqueda.
+>
+>   Tres salidas, y **ninguna corre sin vos**: **(a)** llevar ese criterio a `CLAUDE.md`,
+>   **(b)** dejar el absoluto y aceptar que las seis excepciones se relean como bugs cada vez
+>   —el costo es real: ya pasó que una revisión marcara una de ellas—, o **(c)** una redacción
+>   tuya.
+
+**Lo que se hizo:** el enunciado de la invariante 3 dejó de ser absoluto. Ahora dice que toda
+lectura filtra `eliminado_el IS NULL` **salvo excepción deliberada**, y que lo que distingue
+una excepción de un olvido es que **el porqué esté escrito en la propia consulta** — con la
+instrucción operativa de buscar ese comentario antes de "arreglar" una lectura sin filtro:
+si no está, es un bug; si está, restaurar el filtro rompe algo que alguien ya midió.
+
+**Por qué ganó el criterio sobre el absoluto** (decisión del owner, 2026-08-25): el absoluto
+**ya era falso** —seis lecturas deliberadas, todas anteriores a este frente— y un enunciado
+falso no es neutro: manda al próximo agente a "arreglar" excepciones medidas, que es
+exactamente lo que pasó una vez. El costo aceptado, dicho sin maquillar: ablanda una de las
+seis reglas que frenan al agente, y alguien podría leer "le puse un comentario" como permiso.
+Lo que lo acota es que el criterio exige el porqué **en el SQL**, que la revisión ve de un
+vistazo.
+
+⚙️ **Nada que testear: es texto de rulebook.** Lo que sí queda fijado en código es la última
+excepción de la tabla —`obtenerUso` de descuentos y recargos—, con un test que afirma sobre
+la cláusula exacta y no sobre la palabra `eliminado_el` suelta.
+
+📌 **El detalle de las formas que toma sigue en
+[`anti-patterns.md`](anti-patterns.md)**, con la tabla que **no** se presenta como inventario,
+y en [`patterns/backend.md`](../patterns/backend.md), que es el paso 1 del orden de búsqueda.
+---
+
 ## El bucle del nivel de la regla, cerrado: el tipo empuja el default y el uso muestra la papelera (2026-08-25)
 
 **Las dos venían de la sección 3**, y las dos las dejó abierta el propio frente del nivel al

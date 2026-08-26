@@ -412,7 +412,7 @@ adentro, y alguna quedó a medias a propósito— pero nadie está esperando una
 empezarlas.
 
 ⚠️ **Esta sección no es una tanda que se "termine", y leerla como tal hace tomar malas
-decisiones.** De sus 17 entradas, **siete son features de producto con su propia spec** —el
+decisiones.** **Siete de sus entradas son features de producto con su propia spec** —el
 motor de promociones, la NC como documento, la UF como moneda oficial, `cashRounding`, el
 conteo por denominación, anular o reducir una línea ya enviada a cocina, y el envío diario del
 resumen de descuadres—. Están acá porque se decidieron, no porque sean deuda: **son la cola de
@@ -817,6 +817,60 @@ desfases, los dos tipos por método de pago, y las dos que dejó el frente del n
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
+### Los tipos de valor único: el hueco se cierra, no se abre (decidido 2026-08-25)
+
+- [ ] **Cuatro tipos de valor único aceptan `tramos` por API, y el motor los prefiere: la
+  tasa queda muerta sin aviso** (backend) — lo dejó ver la revisión independiente del frente
+  de método de pago, y es **el mismo bug que ese frente cerró**, en los tipos que quedaron
+  afuera. Nada en `validarSegunTipoCreate` prohíbe mandar valor **y** tramos, y `evaluarRegla`
+  ramifica por `tramos.length > 0` antes de mirar el valor plano.
+
+  **Medido** ejecutando el motor con una regla al 50% más un tramo al 3% sobre un neto de 100
+  (revisión independiente, 2026-08-25):
+
+  | Tipo | Qué cobra | ¿Tiene el hueco? |
+  |---|---|---|
+  | `directo` | el tramo (3) | **sí** |
+  | `general` | el tramo (3) | **sí** |
+  | `interes_simple` | el tramo (3) | **sí** |
+  | `interes_compuesto` | el tramo (3) | **sí** |
+  | `pronto_pago` | cero | no — corta en `DIFERIDAS` |
+  | `mora` | cero | no — corta en `DIFERIDAS` |
+
+  ⚠️ **La primera redacción de esta entrada nombraba `pronto_pago` y omitía los dos de
+  interés**, y la bloqueó la revisión por eso. Las dos mitades del error importan: mandaba a
+  buscar en `pronto_pago` un mecanismo que ahí **no ocurre** —está en `DIFERIDAS`
+  (`calculo-precios.engine.ts:297`) y retorna antes de la rama de tramos—, y dejaba afuera
+  **dos tipos que sí cobran mal**. Es exactamente la falla que este frente vino a cerrar,
+  cometida al escribir su propio remate.
+
+  ✅ **DECIDIDO (owner, 2026-08-25): CERRAR.** Los cuatro tipos cobran un valor y punto: la API
+  rechaza con **400** al que mande valor **y** tramos. La apertura queda a una línea de
+  distancia, pero **no se construye hasta que un caso de local la pida**.
+
+  **Por qué no ganó el precedente** — esto es lo que quien la tome tiene que entender antes de
+  tocar nada, porque la gemela se decidió al revés el mismo día. Cuando el owner abrió los de
+  método de pago, esos tipos **ya estaban en la pantalla** y sus escalones a medio construir:
+  el local podía crear la regla y el motor le cobraba mal. Acá `campoTramos: false` en los
+  seis, así que **hoy nadie cobra mal** y lo único que existe es un agujero de escritura.
+  Abrir sería una feature nueva —cuatro pantallas, y decidir qué mide un escalón en un
+  interés compuesto, que no es obvio— sin ningún caso que la pida.
+
+  **El trabajo, entonces:** negar tramos no vacíos cuando el código está en
+  `TIPOS_CON_VALOR_UNICO`, en los dos services. `validarFormaDeImporte` ya existe en
+  `common/utils/monto-regla.util.ts` y sirve tal cual, sin tocarla. Esa lista cubre los cuatro
+  con hueco **y** los dos diferidos, así que no hay que enumerar nada a mano.
+
+  📌 **No es alcanzable desde la pantalla** (`campoTramos: false` en los seis), igual que no lo
+  era para método de pago hasta que se construyó. O sea: hoy no cobra mal, y lo único que lo
+  impide es que nadie pegue a la API a mano.
+
+  ⚠️ **Toca el motor solo para leerlo, no para cambiarlo**: la conducta —gana el escalón— se
+  deja como está y lo que se agrega es el guardia de escritura. Quien la tome mide primero si
+  `por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tienen el hueco espejo (aceptar un
+  valor plano además de sus tramos), porque es la misma familia y esta entrada **no lo
+  verificó**.
+
 ---
 
 ## 4. Necesita que el owner conteste
@@ -857,13 +911,15 @@ al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas ci
 descarte de desfases, los dos tipos por método de pago, y las dos del frente del nivel— y ya no
 están en la § 3 → [`resueltos.md`](resueltos.md).
 
-**Quedan 3 entradas.** La de la nota de crédito **no espera una respuesta** sino la
-**investigación de mercado que la destraba, lanzada el 2026-08-22**. Las otras dos sí esperan
-al owner y llegaron el **2026-08-25**, las dos de rebote de los frentes de ese día: los tipos
-de valor único tienen el mismo hueco de tramos y hay que decidir si se cierra o se abre —la
-simétrica se **abrió**, así que el precedente no la resuelve sola—, y la redacción de la
-invariante 3 de `CLAUDE.md`, que se corrigió en un commit de feature y conviene que la
-confirme quien manda sobre el rulebook.
+✅ **Cuarta tanda, 2026-08-25: las dos entradas que habían llegado ese mismo día se
+contestaron ese mismo día.** Los tipos de valor único → **cerrar**, y se mudó a la § 3 con el
+porqué de que el precedente de su gemela **no** haya ganado. La redacción de la invariante 3
+de `CLAUDE.md` → **pasa a criterio**, ya escrita en el archivo → [`resueltos.md`](resueltos.md).
+
+**Queda una entrada, y no espera una respuesta:** la de la nota de crédito espera la
+**investigación de mercado que la destraba** —lanzada el 2026-08-15, corrida y cerrada el
+2026-08-22— y después una decisión fiscal, que por `CLAUDE.md` abre su propio frente con su
+propia sesión.
 
 ⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
 pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
@@ -947,88 +1003,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
-
-### El mismo hueco sigue abierto en los tipos de valor único (2026-08-25)
-
-- [ ] **Cuatro tipos de valor único aceptan `tramos` por API, y el motor los prefiere: la
-  tasa queda muerta sin aviso** (backend) — lo dejó ver la revisión independiente del frente
-  de método de pago, y es **el mismo bug que ese frente cerró**, en los tipos que quedaron
-  afuera. Nada en `validarSegunTipoCreate` prohíbe mandar valor **y** tramos, y `evaluarRegla`
-  ramifica por `tramos.length > 0` antes de mirar el valor plano.
-
-  **Medido** ejecutando el motor con una regla al 50% más un tramo al 3% sobre un neto de 100
-  (revisión independiente, 2026-08-25):
-
-  | Tipo | Qué cobra | ¿Tiene el hueco? |
-  |---|---|---|
-  | `directo` | el tramo (3) | **sí** |
-  | `general` | el tramo (3) | **sí** |
-  | `interes_simple` | el tramo (3) | **sí** |
-  | `interes_compuesto` | el tramo (3) | **sí** |
-  | `pronto_pago` | cero | no — corta en `DIFERIDAS` |
-  | `mora` | cero | no — corta en `DIFERIDAS` |
-
-  ⚠️ **La primera redacción de esta entrada nombraba `pronto_pago` y omitía los dos de
-  interés**, y la bloqueó la revisión por eso. Las dos mitades del error importan: mandaba a
-  buscar en `pronto_pago` un mecanismo que ahí **no ocurre** —está en `DIFERIDAS`
-  (`calculo-precios.engine.ts:297`) y retorna antes de la rama de tramos—, y dejaba afuera
-  **dos tipos que sí cobran mal**. Es exactamente la falla que este frente vino a cerrar,
-  cometida al escribir su propio remate.
-
-  ❓ **Lo que hay que preguntarle al owner: cerrar o abrir.** Son las dos salidas y el
-  precedente juega para los dos lados:
-  - **Cerrar** — negar tramos no vacíos cuando el código está en `TIPOS_CON_VALOR_UNICO`, en
-    los dos services. Barato: esa lista cubre los cuatro con hueco **y** los dos diferidos,
-    así que no hay que enumerar nada a mano. Dice "estos tipos cobran un valor y punto".
-  - **Abrir** — darles el mismo interruptor que a método de pago (`campoTramos: true` +
-    `TIPOS_CON_TRAMOS_OPCIONALES`). Es **lo que el owner decidió para el caso simétrico el
-    2026-08-25**, y hay casos de local que lo piden ("recargo administrativo de 2%, 1% arriba
-    de $200.000").
-
-  ⚠️ **Por eso esta entrada NO es mecánica**, aunque el arreglo esté a mano: `validarFormaDeImporte`
-  ya existe en `common/utils/monto-regla.util.ts` y sirve para las dos salidas. Lo que falta
-  no es código, es cuál de las dos corresponde — y en su gemela la respuesta fue "abrir".
-
-  📌 **No es alcanzable desde la pantalla** (`campoTramos: false` en los seis), igual que no lo
-  era para método de pago hasta que se construyó. O sea: hoy no cobra mal, y lo único que lo
-  impide es que nadie pegue a la API a mano.
-
-  ⚠️ **Toca el motor solo para leerlo, no para cambiarlo**: la conducta —gana el escalón— se
-  deja como está y lo que se agrega es el guardia de escritura. Quien la tome mide primero si
-  `por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tienen el hueco espejo (aceptar un
-  valor plano además de sus tramos), porque es la misma familia y esta entrada **no lo
-  verificó**.
-
-- [ ] **La invariante 3 de `CLAUDE.md` se reescribió en un commit de feature, y eso lo
-  confirmás vos** (documentación; 2026-08-25) — decía *"Toda lectura filtra `eliminado_el IS
-  NULL`"*, en absoluto. **El absoluto ya era falso antes de tocarlo**: hay al menos seis
-  lecturas que no filtran a propósito, todas anteriores a este frente (kardex ×2, mermas,
-  líneas de comanda, la autoría del borrado, la papelera). Se reescribió como **criterio** —
-  *lo que distingue una excepción de un olvido es que el porqué esté escrito en la propia
-  consulta*— porque el enunciado absoluto es justamente lo que hace que el próximo agente
-  "arregle" una excepción medida.
-
-  ❓ **Lo que hay que confirmar no es el dato sino la potestad.** Tu decisión del 2026-08-25
-  autorizaba **la excepción del endpoint** (`GET /:id/uso` devuelve los borrados marcados), no
-  cambiar el enunciado de una invariante del proyecto. Lo señaló la revisión independiente y
-  tiene razón: la invariante es la regla que aplican el próximo agente, la revisión y en parte
-  el pre-commit, así que ablandarla de arrastre amplía una decisión puntual a una regla general.
-
-  ⛔ **`CLAUDE.md` quedó SIN TOCAR, a propósito.** La reescritura llegó a estar en el diff y se
-  revirtió antes de commitear: el preámbulo de ese mismo archivo dice *"detenerse, reportar el
-  conflicto y esperar confirmación. Nunca resolverlo por cuenta propia"*, y editar el enunciado
-  de la invariante que uno está excepcionando es resolverlo por cuenta propia — encima
-  auto-legalizándolo. Lo señaló la revisión independiente **dos veces**.
-
-  Así que hoy la invariante 3 sigue diciendo *"Toda lectura filtra"*, en absoluto y falso. Lo
-  que sí se escribió, porque ahí sí corresponde, es el criterio en
-  [`docs/agent/anti-patterns.md`](anti-patterns.md) —con la tabla de formas que toman— y en
-  [`docs/patterns/backend.md`](../patterns/backend.md), que es el paso 1 del orden de búsqueda.
-
-  Tres salidas, y **ninguna corre sin vos**: **(a)** llevar ese criterio a `CLAUDE.md`,
-  **(b)** dejar el absoluto y aceptar que las seis excepciones se relean como bugs cada vez
-  —el costo es real: ya pasó que una revisión marcara una de ellas—, o **(c)** una redacción
-  tuya.
 
 ## 5. Carreras de concurrencia
 

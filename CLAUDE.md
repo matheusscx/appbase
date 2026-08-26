@@ -14,7 +14,11 @@ y esperar confirmación.** Nunca resolverlo por cuenta propia.
 2. **Dinero y porcentajes con Decimal.js**, nunca `number` nativo. Porcentajes en
    decimal: `0.19` = 19%, nunca `19`.
 3. **Soft delete en todo.** Nunca `DELETE`; marcar `eliminado_el`. Toda lectura filtra
-   `eliminado_el IS NULL`.
+   `eliminado_el IS NULL`, **salvo excepción deliberada** — y lo que distingue una
+   excepción de un olvido es que **el porqué esté escrito en la propia consulta**. Antes de
+   "arreglar" una lectura sin filtro, buscar ese comentario: si no está, es un bug; si está,
+   restaurar el filtro rompe algo que alguien ya midió (las formas que toma:
+   `docs/agent/anti-patterns.md`).
 4. **No modificar el sistema de tokens JWT** (access + refresh, ya implementado).
 5. **"Exento" es un estado fiscal explícito**, nunca la ausencia de impuesto.
 6. **Permisos con enforcement real en el backend** (guards por ruta). Validar en el
