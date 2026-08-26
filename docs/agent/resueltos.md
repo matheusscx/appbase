@@ -17,6 +17,199 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El bucle del nivel de la regla, cerrado: el tipo empuja el default y el uso muestra la papelera (2026-08-25)
+
+**Las dos venían de la sección 3**, y las dos las dejó abierta el propio frente del nivel al
+cerrarse el mismo día. Textos verbatim:
+
+> - [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
+>   (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
+>   [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
+>   nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
+>   `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
+>   y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
+>   contra la línea. Nada falla: cobra otra cosa.
+>   **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
+>   el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
+>   la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
+>   bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
+>   ✅ **DECIDIDO (owner, 2026-08-25): el tipo EMPUJA el default del radio, sin bloquearlo.** Elegir
+>   un tipo "por monto de venta" deja el radio en *Al total de la venta*; quien quiera el caso del
+>   vino —*"llevando $50.000 de este vino, 10% en el vino"*— lo mueve a mano y se respeta.
+>   📌 **La sub-pregunta que quedaba —qué pasa al cambiar de tipo con el radio ya tocado— se resuelve
+>   por derivación, no se vuelve a preguntar:** "empujar sin bloquear" describe un **default**, y un
+>   default solo aplica mientras el usuario no eligió. Entonces el tipo mueve el radio **solo
+>   mientras nadie lo haya tocado**; en cuanto se toca a mano, cambiar de tipo ya no lo pisa. Es lo
+>   contrario de lo que hace hoy `onTipoChange` con los otros campos, así que quien lo construya
+>   necesita un testigo de "tocado" y no puede colgarse de ese mismo camino.
+>   ⚠️ Si al construirlo ese testigo resulta más caro de lo que vale, **eso sí vuelve al owner**: la
+>   alternativa (pisar siempre) es decisión de producto, no una simplificación.
+>   El seeder ya tuvo que corregir sus dos filas a mano, que es la señal de que el default engaña más
+>   seguido de lo que parece.
+
+> - [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
+>   desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
+>   filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
+>   las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
+>   intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
+>   *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
+>   restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
+>   devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
+>   los vivos), o que el 400 los nombre.
+>   ✅ **DECIDIDO (owner, 2026-08-25): `GET /:id/uso` devuelve también los borrados, marcados.** El
+>   modal de pausa **sigue mostrando solo los vivos** — ahí un ítem en la papelera es ruido.
+>   ⚠️ **Con eso el endpoint queda con dos consumidores que piden cosas distintas, y eso hay que
+>   dejarlo escrito o se desincroniza**: el modal (`usePausaRegla`) filtra los borrados y el 400 del
+>   cambio de nivel los necesita. Un cambio futuro que "simplifique" devolviendo una sola lista rompe
+>   uno de los dos en silencio.
+
+### Qué se hizo — el empujón del default
+
+Cada tipo declara su `nivelSugerido` en `reglas-form-config.ts`, y `onTipoChange` lo aplica
+**solo mientras nadie tocó el radio**. Los dos tipos por escalones de monto sugieren `'venta'`;
+los otros nueve, `'linea'`.
+
+⛔ **La mitad importante es la que NO se hizo: no se fuerza.** *"Llevando $50.000 de este vino,
+10% en el vino"* es un `por_monto_venta` a nivel línea, legítimo, y forzar el nivel desde el
+tipo lo volvería inexpresable. Por eso hay un testigo (`nivelTocado`) y no un `watch`.
+
+📌 **Ese testigo no podía colgarse de `onTipoChange`**, que es lo que uno haría por reflejo: esa
+función **pisa siempre** los demás campos, y tiene razón —dependen del tipo, un `general` no
+tiene métodos de pago que conservar—. El nivel no depende del tipo: las dos opciones valen para
+cualquiera. Arranca en `true` al **editar**, porque una regla que ya existe tomó su decisión
+cuando se creó.
+
+### Qué se hizo — los ítems de la papelera
+
+`GET /:id/uso` de descuentos y recargos dejó de filtrar `eliminado_el` y devuelve la marca por
+fila (`eliminado`). El drawer los nombra al fallar el cambio de nivel: *"Lo tienen: Café, Torta
+vieja (en la papelera)"*.
+
+⚠️ **Es la excepción documentada al invariante de soft delete**, y está escrita en la propia
+consulta. La razón es que el guard **cuenta** esas filas —tiene que contarlas: `remove` no toca
+las tablas puente, y sin contarlas el ítem quedaba invendible al restaurarlo— así que un
+endpoint que solo listara vivos dejaba al admin sin forma de saber cuál.
+
+📌 **El endpoint quedó con dos consumidores que piden lo contrario, y eso se escribió en los
+tres lugares donde se puede "simplificar" mal:** el modal de pausa los **descarta** (ahí un ítem
+borrado infla el número sobre el que el admin decide) y el error del cambio de nivel los
+**necesita**. Por eso la marca viaja por fila en vez de decidirse en el service. El `/uso` de
+**impuestos** no cambió: no tienen nivel, nadie cuenta sus borrados.
+
+⚠️ **El filtro del modal hubo que ponerlo en DOS lecturas, no en una**: el conteo que muestra y
+el `if` de salida temprana. Con solo la primera, una regla cuya única asociación está en la
+papelera dejaba de pausarse en silencio para abrir un modal que anuncia "0 ítems".
+
+### Qué lo fija
+
+- **Backend** (los dos service specs, gemelos): la marca pasa por fila, y un test sobre la
+  consulta que afirma la **cláusula exacta** —`not.toContain('i.eliminado_el IS NULL')` más
+  `toContain('(i.eliminado_el IS NOT NULL) AS eliminado')`—, porque `eliminado_el` a secas
+  aparece también en el `SELECT` de la marca y un `toContain` suelto pasaría con las dos
+  versiones.
+  🧪 **Mutante:** restaurado el `AND i.eliminado_el IS NULL` del JOIN, **cae**.
+- **De punta a punta** (`uso-reglas.e2e-spec.ts`): se borra el ítem de verdad y se vuelve a
+  consultar. Descuentos y recargos lo siguen listando con `eliminado: true`; impuestos no. Y el
+  400 del cambio de nivel sigue saliendo, ahora con el uso nombrando la fila.
+  ⚠️ **Dos tests de ese archivo afirmaban la conducta vieja** —que el borrado dejaba de
+  contarse— y se reescribieron con la nueva; el porqué del cambio quedó en el docblock, no
+  borrado.
+- **Frontend** (`descuentos.nuxt.spec.ts`): el ítem en la papelera no abre modal, y el modal
+  cuenta solo los vivos.
+  🧪 **Mutante:** quitado el filtro, caen 7 tests (los 2 propios y 5 que se contaminan con el
+  modal que no debía abrirse).
+- **Frontend** (`descuentos.nuxt.spec.ts`, el empujón): elegir el tipo mueve el radio; con el
+  radio ya tocado, **no** lo mueve; y **editar** una regla existente y cambiarle el tipo tampoco
+  se lo da vuelta.
+  🧪 **Cuatro tests del empujón; tres tienen un mutante que los mata solo a ellos:**
+
+  | Mutante | Qué cae |
+  |---|---|
+  | `onNivelChange` no registra el toque | *ya eligió el nivel a mano* — solo él |
+  | `abrirEditar` no prende el testigo | *editar … NO le da vuelta el nivel* — solo él |
+  | `resetDrawer` no apaga el testigo | *arrancar una regla nueva después de editar* — solo él |
+  | quitar el empujón entero | **DOS**: *mueve el radio* y el de `resetDrawer` |
+
+  📌 **El cuarto test no es estrictamente necesario y se dice en vez de disimularlo:** todo
+  mutante que mata a *"mueve el radio"* mata también al de `resetDrawer`, que hace
+  `crear → elegir tipo` por dentro. Se conserva porque es la expresión **más corta** de la
+  conducta —el ancla que se lee primero—; borrarlo no bajaría la cobertura, bajaría la
+  legibilidad.
+
+  ⛔ **Esta tabla estuvo mal DOS veces, las dos por la misma causa, y las dos las cazó la
+  revisión independiente.** Primero decía que "empujar siempre" mataba solo un test (mata dos).
+  Corregido eso, se agregó el test de `resetDrawer` **y no se volvió a medir**, así que la
+  tabla nueva volvió a sobreafirmar con la columna *"y solo a él"*. La lección no es sobre esta
+  tabla: **una tabla de mutantes envejece cuando se agrega un test**, y agregar una fila no es
+  volver a medirla.
+  ⚠️ **El de editar lo pidió la revisión independiente, y es el que más caro sale**: es el único
+  que toca una regla YA EN USO, donde darle vuelta el nivel cambia en silencio contra qué se
+  mide, o sea cuánta plata cobra. El de `resetDrawer` también salió de una revisión, y es el más
+  silencioso: sin esa línea, el camino *editar → arrancar una nueva* deja el testigo prendido y
+  el bug original vuelve **sin que nada falle**.
+- **Frontend** (`descuentos.nuxt.spec.ts`, el uso): que la pantalla **consulte** el uso en la
+  transición que produce el 400, y que **no** lo consulte fuera de ella.
+  ⚠️ **Alcance real, para no sobrevenderlo:** estos dos NO afirman el texto del toast —
+  `mountSuspended` monta la página sin `UApp`, así que los toasts no tienen dónde renderizar—.
+  El texto lo fija `useNivelRegla.nuxt.spec.ts`. Entre los dos archivos queda el camino entero:
+  acá el CUÁNDO, allá el QUÉ.
+- **Frontend** (`recargos.nuxt.spec.ts`): el bloque espejado — los cuatro del empujón y los dos
+  del *cuándo* se consulta el uso. **Existen porque las dos
+  pantallas son copias y el empujón está duplicado en cada una** (`nivelTocado` vive por página,
+  no en un composable): con tests en una sola, `recargos` podía quedarse sin el empujón y la
+  suite seguía en verde.
+  ⚠️ **La primera versión espejó solo TRES**, y le faltaba justo el de `resetDrawer` —la línea
+  más silenciosa— mientras el docblock de ese archivo afirmaba cubrir "el testigo mal". Lo midió
+  la revisión independiente: el mutante sobre `recargos.vue` dejaba la suite entera en verde.
+  Y después este mismo párrafo quedó diciendo "los tres" con cuatro ya escritos, que es la
+  tercera vez que un conteo envejece por agregar un test sin remedir el texto.
+
+  📌 **La regla no es "descuentos vs recargos" sino DÓNDE VIVE EL CÓDIGO:** lo duplicado se
+  prueba dos veces, lo compartido una. Por eso `descripcionDeUso` —que vive por página, porque
+  el *cuándo* es propio de cada pantalla— tiene sus dos tests en las dos, mientras que el filtro
+  del modal (`usePausaRegla`) y el armado del mensaje (`useNivelRegla`) se prueban una sola vez.
+  ⚠️ Esa frase llegó a decir que lo único compartido era el filtro del modal —también lo es el
+  mensaje— y a omitir que `descripcionDeUso` estaba duplicado **y sin test en recargos**:
+  borrarlo de `recargos.vue` dejaba la suite entera en verde. Lo midió la revisión
+  independiente, y es la MISMA deriva entre gemelos que este bloque decía cubrir.
+- **Frontend** (`useNivelRegla.nuxt.spec.ts`, nuevo): la cadena *"Lo tienen: Café, Torta vieja
+  (en la papelera)"*, que es el **pago visible** de la excepción al soft delete — sin ella, el
+  cambio del backend no lo nota nadie. Cubre: los ítems vivos · el sufijo de papelera · el
+  recurso y el id que pega · el caso sin ítems · el tope de nombres y su borde exacto · **que el
+  tope recorte vivos y nunca borrados** · y **las dos defensas que el docblock llama
+  load-bearing**, que un GET fallido no tire y que uno colgado corte por tiempo.
+
+  ⚠️ **La asimetría del tope es el caso que más fácil se pierde de vista**: los borrados vienen
+  últimos por el `ORDER BY`, así que un tope que recortara la lista entera dejaría *"y 1 más"*
+  justo sobre el único ítem que el admin no puede ver — el tope tapando lo que la feature vino a
+  mostrar. Lo encontró la revisión independiente después de que el tope se agregara.
+
+  📌 Las dos defensas cubren fallas distintas y por eso van las dos: `itemsQueLoTienen` corre
+  dentro del `catch` del guardado, así que **tirar** taparía el error que el usuario vino a leer,
+  y **colgarse** lo dejaría sin ningún error con el botón trabado. El `catch` no cubre colgarse.
+  ⚠️ **Existe porque la revisión independiente encontró que esa función estaba duplicada en las
+  dos `.vue` y sin ningún test.** Se movió a `useNivelRegla` —regla de `CLAUDE.md` sobre
+  utilidades de presentación— y en las pantallas quedó solo el **cuándo**, que sí es propio de
+  cada una.
+- **Frontend** (`reglas-form-config.spec.ts`): solo los dos tipos por monto de venta sugieren
+  `'venta'`, y **todos** declaran su nivel sugerido — la segunda aserción caza al tipo nuevo que
+  se agregue sin la clave, que el `Record<string, TipoConfig>` no ve.
+
+### Lo que costó, y no era el código
+
+**El test del empujón mató al worker de vitest.** Manejar el popup del `USelectMenu` por DOM en
+jsdom da `Maximum call stack size exceeded` y el proceso se cae — no es el código de la
+pantalla, es el render del listbox. Se resolvió emitiendo `update:modelValue` en el componente,
+que es **el mismo contrato que usa el template**: lo único que queda sin cubrir es el render del
+popup, que no es de esta feature.
+
+**Y después falló solo en la suite completa, pasando aislado.** Esa es la firma de la
+contaminación, no del código: `UModal` teletransporta al `body` y **desmontar el wrapper no lo
+saca**, así que el helper `dialogo()` —que devuelve el primero— entregaba el drawer de *"Editar
+descuento"* de otro describe. El bloque nuevo limpia los diálogos viejos en su `beforeEach`.
+
+---
+
 ## Los dos tipos por método de pago leen sus escalones (2026-08-25)
 
 **Venía de la sección 3.** Texto de la entrada, verbatim:

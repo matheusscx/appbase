@@ -37,7 +37,13 @@ interface TokenResponse {
 interface UsoResponse {
   /** Ausente en impuestos, que no tienen nivel. */
   nivel?: 'linea' | 'venta';
-  items: { id: string; nombre: string }[];
+  /**
+   * `eliminado` solo lo devuelven descuentos y recargos, desde el 2026-08-25:
+   * su `/uso` incluye los ítems en la papelera **marcados**, porque el guard del
+   * cambio de nivel los cuenta y el admin no tenía forma de saber cuáles eran.
+   * El de impuestos **sigue filtrando** los borrados, así que ahí no viene.
+   */
+  items: { id: string; nombre: string; eliminado?: boolean }[];
 }
 interface IdResponse {
   id: string;
@@ -456,10 +462,21 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
   // ─── Ítems borrados ────────────────────────────────────────────────────────
 
   /**
-   * El conteo alimenta un modal donde el admin decide: si contara ítems
-   * borrados, decidiría con un número inflado. Se prueba borrando de verdad y
-   * volviendo a consultar, no afirmando que el SQL contiene `eliminado_el` —
-   * un `toContain` sobre la query también matchea el comentario de arriba.
+   * ⚠️ **Esto cambió el 2026-08-25 y la conducta vieja está en el título de este
+   * test, no borrada:** antes `/uso` filtraba los borrados en las tres reglas,
+   * porque el conteo alimenta el modal de pausa y ahí un ítem en la papelera
+   * infla el número. Sigue siendo cierto **del modal** —hoy los descarta él, en
+   * `usePausaRegla`— pero no del endpoint: el guard del cambio de nivel los
+   * cuenta, y filtrarlos dejaba al admin leyendo *"1 ítem todavía lo tiene"* sin
+   * forma de saber cuál (decisión del owner). Por eso ahora viajan **marcados**,
+   * y cada consumidor decide.
+   *
+   * Impuestos quedó como estaba: no tienen nivel, así que nadie cuenta sus
+   * borrados y no hay nada que mostrar.
+   *
+   * Se prueba borrando de verdad y volviendo a consultar, no afirmando que el
+   * SQL contiene `eliminado_el` — un `toContain` sobre la query también matchea
+   * el comentario de arriba.
    *
    * ⚠️ Borra el ítem que usan los tests de arriba, así que tiene que quedar
    * DESPUÉS de todos los que dependan de él **con el ítem vivo**. Un test nuevo
@@ -468,13 +485,23 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
    * guard cierra la lista porque corta en `TenantAdminGuard` sin llegar al
    * service, así que no mira ningún ítem.
    */
-  it('un ítem borrado deja de contarse en el uso de las tres reglas', async () => {
-    const antes = await request(app.getHttpServer())
-      .get(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}/uso`)
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect((antes.body as UsoResponse).items.some((i) => i.id === itemId)).toBe(
-      true,
-    );
+  it('un ítem borrado sigue en el uso de descuentos y recargos, MARCADO; en impuestos no', async () => {
+    for (const url of [
+      `/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}/uso`,
+      `/api/recargos/${RECARGO_SIN_CONDICION_ID}/uso`,
+    ]) {
+      const antes = await request(app.getHttpServer())
+        .get(url)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      const fila = (antes.body as UsoResponse).items.find(
+        (i) => i.id === itemId,
+      );
+      expect(fila).toBeDefined();
+      // Vivo: la marca viaja siempre, no solo cuando es `true`. Sin esto, un
+      // endpoint que no devolviera el campo pasaría el resto del test por
+      // `undefined !== true`.
+      expect(fila!.eliminado).toBe(false);
+    }
 
     const del = await request(app.getHttpServer())
       .delete(`/api/items/${itemId}`)
@@ -484,16 +511,25 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
     for (const url of [
       `/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}/uso`,
       `/api/recargos/${RECARGO_SIN_CONDICION_ID}/uso`,
-      `/api/impuestos/${impuestoId}/uso`,
     ]) {
       const res = await request(app.getHttpServer())
         .get(url)
         .set('Authorization', `Bearer ${tokenAdmin}`);
       expect(res.status).toBe(200);
-      expect((res.body as UsoResponse).items.some((i) => i.id === itemId)).toBe(
-        false,
-      );
+      const fila = (res.body as UsoResponse).items.find((i) => i.id === itemId);
+      expect(fila).toBeDefined();
+      expect(fila!.eliminado).toBe(true);
     }
+
+    // El de impuestos NO cambió: ahí nadie cuenta los borrados —los impuestos no
+    // tienen nivel y no hay guard que los mire—, así que sigue listando vivos.
+    const imp = await request(app.getHttpServer())
+      .get(`/api/impuestos/${impuestoId}/uso`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(imp.status).toBe(200);
+    expect((imp.body as UsoResponse).items.some((i) => i.id === itemId)).toBe(
+      false,
+    );
   });
 
   /**
@@ -504,15 +540,19 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
    * nivel pasaba, y al restaurar el ítem su descuento resultaba de nivel venta
    * y el ítem quedaba invendible.
    */
-  it('un ítem en la papelera igual bloquea el paso a nivel venta', async () => {
-    // Ancla positiva: el uso ya NO lo cuenta (el test de arriba lo verificó),
-    // así que si el guard mirara lo mismo que el modal, esto pasaría.
+  it('un ítem en la papelera igual bloquea el paso a nivel venta, y el uso lo nombra', async () => {
+    // El uso lo lista MARCADO, que es lo que le da al admin la forma de saber
+    // cuál es el ítem que el 400 le está contando. Antes del 2026-08-25 acá se
+    // afirmaba lo contrario —que el uso ya no lo contaba— y esa era justamente
+    // la queja: el admin leía "1 ítem todavía lo tiene" y no tenía de dónde
+    // sacar el nombre; la salida era restaurar a ciegas.
     const uso = await request(app.getHttpServer())
       .get(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}/uso`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect((uso.body as UsoResponse).items.some((i) => i.id === itemId)).toBe(
-      false,
-    );
+    const fila = (uso.body as UsoResponse).items.find((i) => i.id === itemId);
+    expect(fila).toBeDefined();
+    expect(fila!.eliminado).toBe(true);
+    expect(fila!.nombre).toBeTruthy();
 
     const res = await request(app.getHttpServer())
       .patch(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}`)

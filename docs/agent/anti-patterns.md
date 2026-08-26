@@ -187,6 +187,32 @@ En los pocos caminos por repositorio de TypeORM, el equivalente es `repo.softDel
 en vez de `repo.delete(id)`. Omitir el filtro en una query nueva hace reaparecer
 registros borrados en listados y reportes.
 
+⚠️ **Hay excepciones, y por eso la regla NO se aplica con un grep.** Una lectura sin el
+filtro puede ser deliberada; **lo que la distingue de un olvido es que el porqué está
+escrito en la propia consulta**. Ése es el criterio, y es lo único que hay que recordar.
+
+⛔ **Y por eso la lista de abajo NO es exhaustiva, ni pretende serlo.** Una primera versión
+de esta sección decía *"las dos que existen hoy"* y nombraba dos; grepeando por conducta
+aparecieron **al menos seis**. La revisión independiente lo cazó el 2026-08-25 y tenía
+razón en el argumento, no solo en el número: **una lista que se presenta como completa y
+omite las excepciones caras es peor que no tener lista**, porque el que audita consulta la
+lista, no la encuentra, aplica la regla literal y "arregla" algo que costaba plata.
+
+Familias que existen hoy, como muestra de las FORMAS que toma, no como inventario:
+
+| Familia | Por qué no filtra |
+|---|---|
+| El hecho **histórico** ya ocurrido: kardex (`inventario.service.ts`), mermas (`mermas.service.ts`) | *"lo que está en el kardex queda en el kardex"*: dar de baja el producto después no puede borrar el movimiento del informe ni bajar el total sin avisar. Y en el kardex, filtrarlo haría que anular una venta de un ítem borrado dejara de reponer |
+| Lo que **ya está en curso**: líneas de comanda (`salones.service.ts`) | esas líneas ya están en la cuenta; si el ítem se borró del catálogo después, filtrarlo las haría desaparecer del ticket de cocina |
+| La **autoría** del borrado: el `leftJoin` a `usuarios` de los `findAll` con `incluirEliminados` (ejemplo concreto: `categorias.service.ts → findAll`) | quién borró es un hecho histórico: filtrarlo dejaría la columna vacía justo en las filas que se están mirando |
+| La **papelera** entera (`withDeleted()`) | su razón de ser es mostrar lo borrado |
+| `obtenerUso` de descuentos y recargos | el guard del cambio de nivel **cuenta** las filas puente de ítems en la papelera —tiene que contarlas, `remove` no toca las tablas puente— así que listar solo los vivos dejaba al admin leyendo *"1 ítem todavía lo tiene"* sin forma de saber cuál. Devuelve los borrados **marcados** y cada consumidor decide (decisión del owner, 2026-08-25) |
+
+📌 **Antes de "arreglar" una lectura sin filtro, buscá ese comentario.** Si no está, es un
+bug; si está, restaurar el filtro rompe algo que alguien ya midió. La última de la tabla
+además está protegida por un test que afirma sobre la cláusula exacta, no sobre la palabra
+`eliminado_el` suelta.
+
 ### ❌ N+1 — una query por iteración sobre un resultado
 
 ```ts
@@ -965,6 +991,33 @@ módulo) y clasificar cada consumidor en dos grupos, porque no todos van:
 Un valor nuevo que se escribe pero no se puede consultar deja media feature invisible, y
 la doc del mismo commit suele afirmar que funciona.
 
+### ❌ Escribir un conteo en la doc y después agregar un test
+
+**Qué pasó (2026-08-25, CUATRO veces en el mismo frente).** Un docblock decía *"los dos tests
+son necesarios"* y había tres. Una tabla test↔mutante decía *"cada mutante mata solo a uno"* y
+uno mataba dos. Un bullet de `resueltos.md` decía *"los tres tests, espejados"* con cuatro
+escritos, y después *"los ocho casos"* con nueve. Las cuatro las cazó la revisión independiente
+midiendo; ninguna se cayó por releerla.
+
+**La causa no es descuido, es orden de operaciones.** El número se escribe cuando la afirmación
+es cierta, y después se agrega un test —muchas veces *porque la revisión lo pidió*— y nadie
+vuelve al párrafo. **Agregar una fila a la tabla no es volver a medirla.**
+
+```markdown
+❌ Los ocho casos: A, B, C…            ← envejece con el próximo `it`
+❌ Los tres tests son necesarios        ← ídem
+✅ Cubre: A · B · C · D…                ← la enumeración ES el conteo
+✅ (si el número importa) medilo en el momento de escribirlo, con un comando
+```
+
+**Por qué duele más en `resueltos.md`.** Es archivo: nadie vuelve a medirlo. Un conteo falso
+queda congelado y el próximo agente lo cita como evidencia — o peor, borra un test creyéndolo
+redundante porque la tabla dice que otro lo cubre.
+
+📌 **Corolario para las tablas de mutantes:** son la evidencia que autoriza a conservar o borrar
+un test, así que envejecen peor que un comentario cualquiera. Si tocás el bloque de tests, se
+vuelven a correr los mutantes o se saca la tabla.
+
 ### ❌ Leer el resultado de un test suite sin mirar el exit code
 
 **Qué pasó (2026-08-07).** Cerrando la ronda de decisiones reporté el gate del frontend en
@@ -984,6 +1037,18 @@ npm test; echo "EXIT: $?"
 **Por qué importa acá.** El gate de `CLAUDE.md` dice *"Ejecutar, no afirmar"*, y CI corre el
 mismo comando: un exit 1 rompe el push aunque ningún test esté en rojo. El resumen humano de
 una herramienta **no es** su valor de retorno.
+
+⚠️ **Volvió a pasar el 2026-08-25, y esa vez la causa fue un test NUEVO**, no un arrastre:
+un caso que cerraba el drawer con "Cancelar" disparaba la animación de salida de Reka UI
+(`usePresence`) y jsdom tiraba `TypeError: Receiver must be an instance of class
+CSSStyleDeclaration` como **rechazo no capturado**. La suite decía `839 passed` y salía en
+**1**. Dos cosas que dejó:
+
+- **Cerrar un overlay en un test de jsdom no es gratis.** Si el camino que necesitás pasa
+  igual por el código que querés cubrir, elegí el que no anima: acá `abrirCrear` llamaba a
+  `resetDrawer` igual que cerrar, y el mutante caía lo mismo.
+- **El exit code lo cazó en el gate, no en la corrida del spec suelto.** Correr solo el
+  archivo tocado daba verde y exit 0; el rechazo aparecía con la suite completa.
 
 ## Pruebas E2E de navegador
 

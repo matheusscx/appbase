@@ -108,11 +108,13 @@ let restaurarRetenido: Promise<unknown> | null = null
 
 // ── Pausar ──────────────────────────────────────────────────────────────────
 /** Ítems que `GET /descuentos/:id/uso` devuelve por id. Ausente = ninguno. */
-let usoPorId: Record<string, { id: string, nombre: string }[]> = {}
+let usoPorId: Record<string, { id: string, nombre: string, eliminado?: boolean }[]> = {}
 /** Hace fallar ese GET, para el caso "no se pausa a ciegas". */
 let usoFalla = false
 /** El PATCH de activo rechaza: sirve para ver si el switch vuelve a su lugar. */
 let patchActivoFalla = false
+/** Hace fallar el PATCH de guardado del drawer: el 400 del cambio de nivel. */
+let patchGuardarFalla = false
 /** Cada `GET .../uso` recibido: el testigo de que reactivar NO consulta. */
 let getsUso: string[] = []
 /** Cada `PATCH /descuentos/:id` recibido, con el `activo` que viajó. */
@@ -134,6 +136,8 @@ function itemsUso(n: number) {
  */
 const TIPOS_REGLA = [
   { id: 'tipo-1', nombre: 'Directo', codigo: 'directo', descripcion: null },
+  // Su `nivelSugerido` es `'venta'`: es el que empuja el radio "Se aplica".
+  { id: 'tipo-2', nombre: 'Por monto de venta', codigo: 'por_monto_venta', descripcion: null },
 ]
 
 /** La moneda oficial del tenant: sin ella `MoneyInput` no resuelve config y se
@@ -165,6 +169,13 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    // El drawer chequea el nombre ANTES de guardar y aborta si no está libre.
+    // Sin esta rama el fake devolvía la lista, `res.disponible` quedaba
+    // `undefined` y `guardar()` volvía sin mandar nada: cualquier test del
+    // guardado fallaba por el motivo equivocado.
+    if (method === 'GET' && url.includes('/nombre-disponible')) {
+      return Promise.resolve({ disponible: true })
+    }
     if (method === 'GET' && url.endsWith('/uso')) {
       const id = url.split('/').slice(-2)[0] ?? ''
       getsUso.push(id)
@@ -188,6 +199,7 @@ mockNuxtImport('useApiFetch', () => {
         const d = descuentosBackend.find(x => x.id === id)
         if (d) d.activo = activo
       }
+      if (patchGuardarFalla) return Promise.reject(errorApi('No se puede pasar a nivel venta'))
       return Promise.resolve({ ...descuentosBackend.find(x => x.id === id) })
     }
     if (method === 'DELETE') {
@@ -342,6 +354,7 @@ function reset() {
   restaurarRetenido = null
   usoPorId = {}
   usoFalla = false
+  patchGuardarFalla = false
   patchActivoFalla = false
   getsUso = []
   patchesActivo = []
@@ -682,6 +695,45 @@ describe('configuracion/descuentos — pausar: confirmación con el alcance', ()
     wrapper.unmount()
   })
 
+  /**
+   * `GET /uso` incluye los ítems en la papelera desde el 2026-08-25, marcados
+   * con `eliminado`, porque el 400 del cambio de nivel los necesita. Este modal
+   * NO: para pausar, un ítem borrado es ruido.
+   *
+   * Sin el filtro, esta regla dejaría de pausarse en silencio para abrir un
+   * modal que anuncia ítems afectados que el admin no ve en ningún lado.
+   */
+  it('un ítem en la papelera no cuenta: pausar sigue siendo directo', async () => {
+    usoPorId = {
+      [DESCUENTO_ID]: [{ id: 'item-borrado', nombre: 'Torta vieja', eliminado: true }],
+    }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([{ id: DESCUENTO_ID, activo: false }])
+
+    wrapper.unmount()
+  })
+
+  it('el modal cuenta solo los vivos, no los de la papelera', async () => {
+    usoPorId = {
+      [DESCUENTO_ID]: [
+        { id: 'item-vivo', nombre: 'Café', eliminado: false },
+        { id: 'item-borrado', nombre: 'Torta vieja', eliminado: true },
+      ],
+    }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(document.body.textContent).toContain('1 ítem')
+    expect(document.body.textContent).not.toContain('2 ítems')
+
+    wrapper.unmount()
+  })
+
   it('sin ítems que la usen, pausar es directo: no abre modal', async () => {
     usoPorId = {}
     const wrapper = await montar()
@@ -963,6 +1015,252 @@ describe('configuracion/descuentos — badge de vigencia', () => {
     const wrapper = await montar()
 
     expect(badgesVigencia(wrapper)).toEqual([])
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * El tipo de regla EMPUJA el default del radio "Se aplica", sin bloquearlo
+ * (decisión del owner, 2026-08-25).
+ *
+ * El bug que fija: el radio nacía en *"A cada ítem"* para todos los tipos,
+ * incluido `por_monto_venta`, cuyos escalones se llaman *por monto de la venta*.
+ * Quien creaba uno y no tocaba el radio se llevaba una regla que la pantalla
+ * nombra por el total y el motor mide contra la línea. Nada falla: cobra otra
+ * cosa. El seeder ya había tenido que corregir sus dos filas a mano.
+ *
+ * ⚠️ **Cuatro tests del empujón. Tres tienen un mutante que los mata SOLO a ellos;
+ * el cuarto no, y eso se dice en vez de disimularlo** (medido 2026-08-25):
+ *
+ * | Test | Qué prueba | Mutante |
+ * |---|---|---|
+ * | *ya eligió el nivel a mano* | que es un DEFAULT y no una imposición: sin esto, "empujar siempre" rompería el caso del vino | `onNivelChange` no registra el toque → **cae solo él** |
+ * | *editar … NO le da vuelta el nivel* | el único que toca una regla YA EN USO, donde darle vuelta el nivel cambia en silencio contra qué se mide | `abrirEditar` no prende el testigo → **cae solo él** |
+ * | *arrancar una regla nueva después de editar* | que `resetDrawer` apaga el testigo; sin eso el bug original vuelve en silencio | `resetDrawer` no lo apaga → **cae solo él** |
+ * | *mueve el radio* | que el empujón existe | quitar el empujón entero → **caen DOS**: éste y el de `resetDrawer` |
+ *
+ * 📌 **O sea que el último NO es estrictamente necesario**: todo mutante que lo
+ * mata mata también al de `resetDrawer`, que hace `crear → elegir tipo` por
+ * dentro. Se conserva igual, y a propósito: es la expresión **más corta** de la
+ * conducta —el ancla que se lee primero— mientras que el otro la ejerce de paso,
+ * para probar otra cosa. Borrarlo no bajaría la cobertura; bajaría la
+ * legibilidad.
+ *
+ * ⛔ **El segundo y el tercero parecen el mismo test y no lo son.** Un mutante que
+ * quite el `if (!nivelTocado)` mata a los dos, así que ESE mutante no prueba que
+ * hagan falta los dos; los de la tabla sí los separan, porque cubren dos caminos
+ * distintos hacia el mismo `if`: el testigo que prende el **radio** y el que
+ * prende **`abrirEditar`**.
+ *
+ * ⚠️ **Esta tabla ya estuvo mal dos veces, siempre por lo mismo:** se escribió con
+ * un conteo de tests y después se agregaron tests sin volver a medirla. Si sumás
+ * un caso a este bloque, **volvé a correr los mutantes** — no alcanza con agregar
+ * una fila.
+ *
+ * 📌 **El tipo se elige emitiendo `update:modelValue` en el `USelectMenu`, no
+ * abriendo su popup.** Se intentó por el DOM y jsdom **mata al worker** con un
+ * `Maximum call stack size exceeded` al renderizar el listbox (medido
+ * 2026-08-25). El contrato que ejercita este camino es el mismo que usa la
+ * pantalla —el `@update:model-value` del template—, así que lo que se prueba es
+ * la conducta, no un atajo: lo único que queda afuera es el render del popup,
+ * que no es de esta feature. El radio de nivel SÍ se clickea por DOM, que ahí
+ * funciona.
+ */
+describe('configuracion/descuentos — el tipo empuja el nivel, sin bloquearlo', () => {
+  beforeEach(() => {
+    reset()
+    // ⚠️ `UModal` teletransporta su contenido al `body` y **desmontar el wrapper
+    // no lo saca**: los drawers de los describes anteriores quedan ahí. Sin esta
+    // limpieza, `dialogo()` —que devuelve el PRIMERO— entrega el drawer de
+    // "Editar descuento" de otro test y este bloque mide la pantalla equivocada.
+    // Medido: el test fallaba en la suite completa y pasaba aislado, que es la
+    // firma de la contaminación y no del código.
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  /** Radio del drawer por su `value`. Reka UI los rinde como `button[role=radio]`. */
+  function radioNivel(valor: string): HTMLElement {
+    const el = dialogo()?.querySelector<HTMLElement>(`[role="radio"][value="${valor}"]`)
+    expect(el, `radio de nivel "${valor}"`).toBeTruthy()
+    return el!
+  }
+
+  function nivelElegido(): string | null {
+    for (const valor of ['linea', 'venta']) {
+      if (radioNivel(valor).getAttribute('aria-checked') === 'true') return valor
+    }
+    return null
+  }
+
+  async function abrirCrear(wrapper: Awaited<ReturnType<typeof montar>>) {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo'))
+    expect(boton, 'botón "Nuevo descuento"').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  async function guardar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    const boton = [...(dialogo()?.querySelectorAll<HTMLElement>('button') ?? [])]
+      .find(b => b.textContent?.trim() === 'Guardar')
+    expect(boton, 'botón "Guardar" del drawer').toBeTruthy()
+    boton!.click()
+    await new Promise(r => setTimeout(r, 60))
+    void wrapper
+  }
+
+  async function abrirEdicionDeLaFila(wrapper: Awaited<ReturnType<typeof montar>>) {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    const boton = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+    expect(boton, 'botón "Editar" en la fila').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  async function elegirTipo(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    tipoReglaId: string,
+  ) {
+    const select = wrapper.findComponent({ name: 'USelectMenu' })
+    expect(select.exists(), 'USelectMenu del campo Tipo').toBe(true)
+    select.vm.$emit('update:modelValue', tipoReglaId)
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  it('elegir "Por monto de venta" mueve el radio a Al total de la venta', async () => {
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+
+    expect(nivelElegido()).toBe('linea')
+
+    await elegirTipo(wrapper, 'tipo-2')
+
+    expect(nivelElegido()).toBe('venta')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * ⚠️ **`resetDrawer` APAGA el testigo, y sin esa línea el bug original vuelve en
+   * silencio.** Camino: editar una regla —que lo prende— y después arrancar una
+   * nueva. Si el testigo siguiera prendido, el tipo ya no empujaría nada en la
+   * regla nueva y nada fallaría.
+   *
+   * Medido: quitar la línea de `resetDrawer` deja el resto de la suite en verde.
+   *
+   * 📌 **Va por "Nuevo" y no por "Cancelar" a propósito.** Los dos caminos pasan
+   * por `resetDrawer` —`abrirCrear` lo llama directo, y cerrar lo llama por el
+   * `watch(drawerOpen)`— así que el mutante cae igual. Pero cerrar dispara la
+   * animación de salida de Reka UI (`usePresence`), y en jsdom eso tira un
+   * `TypeError: Receiver must be an instance of class CSSStyleDeclaration` como
+   * **rechazo no capturado**: la suite reporta todo verde y sale con código 1, o
+   * sea que CI falla sin que ningún test falle. Medido el 2026-08-25.
+   */
+  it('arrancar una regla nueva después de editar vuelve a habilitar el empujón', async () => {
+    const wrapper = await montar()
+    // Editar prende el testigo.
+    await abrirEdicionDeLaFila(wrapper)
+
+    await abrirCrear(wrapper)
+    expect(nivelElegido()).toBe('linea')
+
+    await elegirTipo(wrapper, 'tipo-2')
+
+    expect(nivelElegido()).toBe('venta')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * ⚠️ **El camino que más caro sale si se rompe, y el que menos se piensa.** Una
+   * regla que YA existe tomó su decisión de nivel cuando se creó; si cambiarle el
+   * tipo se la diera vuelta sola, cambiaría **en silencio contra qué se mide** —o
+   * sea cuánta plata cobra— en una regla que ya está en uso.
+   *
+   * Lo sostiene que `abrirEditar` prende el testigo DESPUÉS de poblar el form:
+   * para el drawer, editar es "el nivel ya fue elegido".
+   */
+  it('editar una regla y cambiarle el tipo NO le da vuelta el nivel', async () => {
+    // La regla vive en nivel línea. Su tipo pasa a uno que sugiere venta.
+    descuentosBackend = [descuento({ nivel: 'linea' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    expect(nivelElegido()).toBe('linea')
+
+    await elegirTipo(wrapper, 'tipo-2')
+
+    expect(nivelElegido()).toBe('linea')
+
+    wrapper.unmount()
+  })
+
+  it('si el usuario ya eligió el nivel a mano, el tipo no lo pisa', async () => {
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+
+    // El caso del vino: nivel línea a mano, y DESPUÉS el tipo por monto de venta.
+    radioNivel('linea').click()
+    await new Promise(r => setTimeout(r, 20))
+
+    await elegirTipo(wrapper, 'tipo-2')
+
+    expect(nivelElegido()).toBe('linea')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * ⚠️ **El pago VISIBLE de todo el cambio del backend**, y hasta acá se podía
+   * borrar entero sin que la suite se enterara (medido cuando este archivo tenía
+   * 33 tests: sacar el `description: await descripcionDeUso()` los dejaba a los
+   * 33 en verde. Hoy son más, y ese mutante **cae**).
+   *
+   * ⚠️ **Alcance real de estos dos tests, para no sobrevenderlos:** afirman que
+   * la pantalla CONSULTA el uso en la transición que produce el 400, y que no lo
+   * consulta fuera de ella. **No afirman el texto del toast**: `mountSuspended`
+   * monta la página sin `UApp`, así que los toasts no tienen dónde renderizar y
+   * ningún test de este archivo mira su contenido. El texto —incluido el sufijo
+   * *(en la papelera)*— lo fija `useNivelRegla.nuxt.spec.ts`, que prueba la
+   * cadena en aislamiento.
+   *
+   * Entre los dos archivos queda cubierto el camino entero, y ninguno de los dos
+   * cubre lo del otro: acá el CUÁNDO, allá el QUÉ.
+   */
+  it('al fallar el paso a nivel venta, consulta el uso para poder nombrar los ítems', async () => {
+    usoPorId = {
+      [DESCUENTO_ID]: [
+        { id: 'i1', nombre: 'Café', eliminado: false },
+        { id: 'i2', nombre: 'Torta vieja', eliminado: true },
+      ],
+    }
+    patchGuardarFalla = true
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    // La transición que produce el 400: la regla es de línea y pasa a venta.
+    radioNivel('venta').click()
+    await new Promise(r => setTimeout(r, 20))
+    await guardar(wrapper)
+
+    expect(getsUso).toEqual([DESCUENTO_ID])
+
+    wrapper.unmount()
+  })
+
+  // La otra mitad de la condición: un guardado que NO es esa transición no paga
+  // la consulta extra. Sin esto, "pedirla siempre" pasaría el test de arriba.
+  it('un guardado que no cambia el nivel no consulta el uso', async () => {
+    usoPorId = { [DESCUENTO_ID]: [{ id: 'i1', nombre: 'Café', eliminado: false }] }
+    patchGuardarFalla = true
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    // Sin tocar el nivel: sigue en línea.
+    await guardar(wrapper)
+
+    expect(getsUso).toEqual([])
 
     wrapper.unmount()
   })

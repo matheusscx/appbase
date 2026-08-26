@@ -121,12 +121,21 @@ cosas, así que *"20% sobre compras de $50.000"* se podía colgar de un ítem y 
 una línea de $50.000 dentro de una venta de $60.000. Es otra plata, y nada lo decía.
 
 ⚠️ **La columna NO deriva del tipo de regla, y eso es a propósito pero tiene filo.** Un
-`por_monto_venta` creado desde la pantalla queda en `'linea'` por default, y ahí sus tramos se
-miden contra la línea: sigue siendo construible el caso del párrafo anterior si el autor no
-cambia el radio. Es un uso legítimo —*"llevando $50.000 de este vino, 10% en el vino"*— y por
-eso no se fuerza; lo que la columna garantiza es que la MISMA regla no sirva para las dos
-cosas. Si conviene que el tipo empuje el default del radio está anotado en
-[`pendientes.md`](../agent/pendientes.md).
+`por_monto_venta` a nivel línea mide sus tramos contra la línea, así que el caso del párrafo
+anterior sigue siendo **construible a mano**. Es un uso legítimo —*"llevando $50.000 de este
+vino, 10% en el vino"*— y por eso no se fuerza; lo que la columna garantiza es que la MISMA
+regla no sirva para las dos cosas.
+
+✅ **Pero el default sí lo empuja el tipo, desde el 2026-08-25** (decisión del owner). Elegir un
+tipo por escalones de monto deja el radio en *Al total de la venta*; los demás tipos lo dejan en
+*A cada ítem*. Cuál sugiere cada uno vive en `nivelSugerido`, en
+`frontend/app/utils/reglas-form-config.ts`.
+
+📌 **Empuja un DEFAULT, no impone**, y esa distinción es la mitad de la decisión: el tipo mueve
+el radio **solo mientras nadie lo tocó a mano**; en cuanto el usuario elige, cambiar de tipo ya
+no lo pisa. Es lo contrario de lo que hace `onTipoChange` con los demás campos —que los limpia
+siempre, porque dependen del tipo— y por eso lleva su propio testigo (`nivelTocado`). Sin esa
+mitad, el caso del vino dejaría de ser expresable.
 
 **Es binario a propósito** (decisión del owner, 2026-08-15). Un negocio que quiera la misma
 promo en los dos lugares crea dos reglas — el seed tiene el par: *"Promo fija $5.000"* (línea)
@@ -151,6 +160,37 @@ que "el ítem está pausado" —que por la misma razón se resuelve en el servic
 dos salidas automáticas eran peores: dejar las asociaciones vivas produce justo el estado que
 la primera puerta prohíbe, y borrarlas en silencio tira trabajo del catálogo por un cambio
 hecho en otra pantalla.
+
+⚠️ **Ese conteo incluye los ítems en la papelera, y tiene que incluirlos**: `ItemsService.remove`
+es un soft delete que **no toca las tablas puente**, así que la fila de `item_descuentos` sigue
+viva. Contando solo los vivos, el cambio de nivel pasaba y al restaurar el ítem su descuento
+resultaba de nivel venta: el ítem quedaba **invendible**.
+
+✅ **Y desde el 2026-08-25 el admin puede ver cuáles son.** `GET /:id/uso` devuelve también los
+borrados, **marcados** (`eliminado: true`), y el drawer los nombra en el error al fallar el
+cambio de nivel: *"Lo tienen: Café, Torta vieja (en la papelera)"*. Antes se leía *"1 ítem
+todavía lo tiene"* sin forma de saber cuál, y la salida era restaurar a ciegas, editar y volver
+a borrar.
+
+⚠️ **Ese endpoint tiene DOS consumidores que piden cosas distintas, y no se puede "simplificar"
+a una sola lista sin romper uno en silencio:**
+
+| Consumidor | Qué hace con los borrados |
+|---|---|
+| El modal de pausa (`usePausaRegla`) | los **descarta** — para pausar, un ítem en la papelera es ruido, y contarlo infla el número sobre el que el admin decide |
+| El error del cambio de nivel (drawer) | los **necesita** — son justamente los que no puede ver por ningún otro lado |
+
+Por eso la marca viaja **por fila** en vez de decidirse en el service. El `/uso` de **impuestos**
+quedó como estaba —sigue filtrando— porque los impuestos no tienen nivel y nadie cuenta sus
+borrados.
+
+📌 **Por qué no se usó `?incluirEliminados=true`, que el repo ya tiene** (`QueryIncluirEliminadosDto`,
+el mismo que usa el `findAll` de estas dos pantallas): con el parámetro, el default del endpoint
+quedaría del lado seguro y cada consumidor pediría lo que necesita. Se eligió igual la marca por
+fila porque es la forma que decidió el owner y porque los dos consumidores conviven en la misma
+pantalla, así que el filtro del cliente es una línea. **El costo queda dicho para quien agregue
+un tercero:** el default de este endpoint devuelve los borrados, y un consumidor nuevo los recibe
+salvo que se acuerde de filtrarlos.
 
 ⚠️ **Hoy el productor de reglas de venta no existe en el frontend.** `descuentosVentaIds` /
 `recargosVentaIds` están declarados en `useCalculoPrecios.ts` y consumidos por el backend, pero

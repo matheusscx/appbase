@@ -36,7 +36,7 @@ const apiUrl = runtimeConfig.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('recargos')
 const { estadoVigencia, vigenciaColor, vigenciaLabel } = useVigenciaRegla()
-const { nivelOptions, nivelLabel } = useNivelRegla()
+const { nivelOptions, nivelLabel, itemsQueLoTienen } = useNivelRegla()
 
 const recargos = ref<Regla[]>([])
 const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
@@ -111,9 +111,32 @@ const submitLabel = computed(() =>
   editingId.value ? 'Guardar' : 'Crear',
 )
 
+/**
+ * ¿El usuario ya eligió el nivel a mano? Es un **testigo**, no un dato del
+ * formulario: no se guarda ni viaja al backend.
+ *
+ * Existe porque "el tipo empuja el default, sin bloquearlo" (decisión del owner,
+ * 2026-08-25) describe un DEFAULT, y un default solo manda mientras nadie eligió.
+ *
+ * ⚠️ **Es lo contrario de lo que hace `onTipoChange` con los demás campos**, que
+ * los pisa siempre, así que este camino no puede colgarse de aquél: los otros
+ * campos dependen del tipo (un `general` no tiene métodos de pago que conservar),
+ * y el nivel no — las dos opciones son válidas para cualquier tipo.
+ *
+ * Arranca en `true` al EDITAR: una regla que ya existe tomó su decisión de nivel
+ * cuando se creó, y cambiarle el tipo no puede darla vuelta sola.
+ */
+const nivelTocado = ref(false)
+
+function onNivelChange(value: NivelRegla) {
+  nivelTocado.value = true
+  form.value.nivel = value
+}
+
 function resetDrawer() {
   editingId.value = null
   form.value = emptyForm()
+  nivelTocado.value = false
   nombreError.value = null
 }
 
@@ -144,6 +167,9 @@ const mostrarTramos = computed(() =>
 // form population in abrirEditar). Bound to the select's change event below.
 function onTipoChange(value: string) {
   form.value.tipoReglaId = value
+  // El tipo empuja el nivel SOLO mientras nadie lo eligió a mano. Va después de
+  // asignar `tipoReglaId` porque `config` se deriva de él.
+  if (!nivelTocado.value) form.value.nivel = config.value?.nivelSugerido ?? 'linea'
   form.value.metodoPagoIds = []
   form.value.formaImporte = 'valor'
   form.value.tramos = []
@@ -289,6 +315,7 @@ function abrirEditar(r: Regla) {
     fechaFin: r.fechaFin ?? null,
     activo: r.activo,
   }
+  nivelTocado.value = true
   drawerOpen.value = true
 }
 
@@ -305,6 +332,27 @@ async function checkNombre() {
   catch {
     // don't block the form on a check failure
   }
+}
+
+/**
+ * ¿Corresponde nombrar los ítems en el error del guardado? Solo en la transición
+ * que puede producir el 400 del guard de nivel: editar una regla que no era de
+ * venta y pasarla a venta.
+ *
+ * ⚠️ **La condición es la TRANSICIÓN, no el error**, y es a propósito: dentro de
+ * esa transición cualquier fallo —un nombre repetido, un 500— sale con la lista
+ * pegada. Se aceptó porque la frase *"Lo tienen: …"* es **cierta igual** (esos
+ * ítems tienen la regla, falle lo que falle) y la alternativa era matchear el
+ * texto del mensaje del backend, que se desincroniza sin que nada avise.
+ *
+ * El armado del mensaje vive en `useNivelRegla`; acá queda solo el cuándo, que
+ * es lo único propio de esta pantalla.
+ */
+async function descripcionDeUso(): Promise<string | undefined> {
+  if (!editingId.value || form.value.nivel !== 'venta') return undefined
+  const previo = recargos.value.find(x => x.id === editingId.value)
+  if ((previo?.nivel ?? 'linea') === 'venta') return undefined
+  return itemsQueLoTienen('recargos', editingId.value)
 }
 
 async function guardar() {
@@ -372,7 +420,11 @@ async function guardar() {
     drawerOpen.value = false
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
+    toast.add({
+      title: apiErrorMsg(e, 'Error al guardar'),
+      description: await descripcionDeUso(),
+      color: 'error',
+    })
   }
   finally {
     saving.value = false
@@ -668,9 +720,10 @@ const columns: TableColumn<Regla>[] = [
                que no es. -->
           <UFormField label="Se aplica" required>
             <URadioGroup
-              v-model="form.nivel"
+              :model-value="form.nivel"
               :items="nivelOptions"
               value-key="value"
+              @update:model-value="onNivelChange"
             />
           </UFormField>
 

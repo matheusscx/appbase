@@ -452,34 +452,60 @@ export class RecargosService {
   }
 
   /**
-   * Consulta inversa a `ItemsService.obtenerUso`: dado un recargo, los
-   * ítems vivos que lo usan. Alimenta el modal de confirmación al pausar
-   * ("deja de aplicarse en N ítems"). Una sola query con JOIN — nunca una
-   * por fila —, acotada por tenant y `eliminado_el IS NULL` sobre `items`
-   * (la tabla puente `item_recargos` no tiene `tenant_id` ni `eliminado_el`
-   * propios).
+   * Consulta inversa a `ItemsService.obtenerUso`: dado un recargo, los ítems que
+   * lo usan, **incluidos los que están en la papelera** —marcados con
+   * `eliminado`—. Una sola query con JOIN, nunca una por fila, acotada por
+   * tenant (la tabla puente `item_recargos` no tiene `tenant_id` ni
+   * `eliminado_el` propios).
+   *
+   * ⚠️ **Decía "los ítems vivos" y "acotada por `eliminado_el IS NULL`", y desde
+   * el 2026-08-25 las dos cosas son falsas.** Se deja anotado porque el criterio
+   * del proyecto para distinguir una excepción deliberada de un olvido es que el
+   * porqué esté escrito en la consulta, y un docblock que jura que el filtro
+   * existe a cuatro líneas de la consulta que no lo tiene rompe justamente eso.
+   *
+   * Tiene DOS consumidores con requisitos opuestos: el modal de pausa descarta
+   * los borrados y el 400 del cambio de nivel los necesita. Ver abajo.
    */
   async obtenerUso(
     tenantId: string,
     id: string,
   ): Promise<{
     nivel: NivelRegla;
-    items: { id: string; nombre: string }[];
+    items: { id: string; nombre: string; eliminado: boolean }[];
   }> {
     const recargo = await this.recargoRepo.findOne({
       where: { id, tenantId },
     });
     if (!recargo) throw new NotFoundException(`Recargo ${id} no encontrado`);
 
-    const items: { id: string; nombre: string }[] = await this.db.query(
-      `SELECT i.item_id AS id, i.nombre
-         FROM item_recargos ir
-         JOIN items i ON i.item_id = ir.item_id
-          AND i.tenant_id = $2 AND i.eliminado_el IS NULL
-        WHERE ir.recargo_id = $1
-        ORDER BY i.nombre ASC`,
-      [id, tenantId],
-    );
+    // ⚠️ **Esta lectura NO filtra `eliminado_el`, y es a propósito** (decisión del
+    // owner, 2026-08-25). Es la excepción al invariante de soft delete, y existe
+    // porque el guard de `validarCambioDeNivel` **cuenta** las filas puente de
+    // los ítems en la papelera —tiene que contarlas: el soft delete no las
+    // borra—, así que un endpoint que solo listara los vivos dejaba al admin
+    // leyendo *"1 ítem todavía lo tiene"* sin forma de saber cuál. La salida era
+    // restaurar a ciegas, editar y volver a borrar.
+    //
+    // ⚠️ **Este endpoint tiene DOS consumidores que piden cosas distintas, y eso
+    // no se puede "simplificar" a una sola lista sin romper uno en silencio:**
+    // el modal de pausa (`usePausaRegla`) descarta los borrados —ahí un ítem en
+    // la papelera es ruido— y el 400 del cambio de nivel los necesita, porque
+    // son justamente los que el admin no puede ver. Por eso la marca viaja por
+    // fila (`eliminado`) en vez de decidirse acá.
+    //
+    // Los vivos primero: el `ORDER BY` los ordena antes que los de la papelera,
+    // que es como se leen en el mensaje de error.
+    const items: { id: string; nombre: string; eliminado: boolean }[] =
+      await this.db.query(
+        `SELECT i.item_id AS id, i.nombre,
+                (i.eliminado_el IS NOT NULL) AS eliminado
+           FROM item_recargos ir
+           JOIN items i ON i.item_id = ir.item_id AND i.tenant_id = $2
+          WHERE ir.recargo_id = $1
+          ORDER BY (i.eliminado_el IS NOT NULL), i.nombre ASC`,
+        [id, tenantId],
+      );
 
     return { nivel: recargo.nivel, items };
   }
@@ -492,13 +518,21 @@ export class RecargosService {
    * que se hizo en otra pantalla. El mensaje nombra el conteo para que se sepa
    * qué hay que desasociar.
    *
-   * ⚠️ **Cuenta también los ítems BORRADOS, y por eso no reusa `obtenerUso`.**
+   * ⚠️ **Cuenta también los ítems BORRADOS, y tiene que contarlos.**
    * `ItemsService.remove` es un soft delete que **no toca las tablas puente**:
    * las filas de `item_recargos` sobreviven al borrado del ítem. Contando solo los
-   * vivos —como hace `obtenerUso`, que alimenta un modal donde un ítem en la
-   * papelera sería ruido— este guard dejaba pasar el cambio, y al restaurar el
-   * ítem su regla asociada resultaba de nivel venta: `resolverReglas` tira 400 y
-   * **el ítem queda invendible**, junto con todo carrito que lo contenga.
+   * vivos, este guard dejaba pasar el cambio, y al restaurar el ítem su regla
+   * asociada resultaba de nivel venta: `resolverReglas` tira 400 y **el ítem
+   * queda invendible**, junto con todo carrito que lo contenga.
+   *
+   * 📌 **Antes acá decía "y por eso no reusa `obtenerUso`", contrastando con que
+   * aquél contaba solo los vivos. Desde el 2026-08-25 eso es falso**: `obtenerUso`
+   * devuelve los borrados marcados, justamente para que el admin pueda ver los que
+   * este conteo le está nombrando. **Las dos consultas devuelven hoy el MISMO
+   * conjunto**, así que reusar `obtenerUso` no exigiría filtrar nada: lo que
+   * sostiene el conteo propio es que el guard no necesita los nombres y un
+   * `COUNT(*)` es más barato que traerlos. **Lo que NO se puede hacer es filtrar
+   * acá los borrados** — ése es el bug que este guard existe para impedir.
    *
    * Solo consulta cuando el nivel EFECTIVAMENTE cambia hacia venta: el PATCH
    * que no toca `nivel` no paga la query.

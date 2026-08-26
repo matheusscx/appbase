@@ -16,7 +16,18 @@ interface UsoRegla {
    * lo que un impuesto es —se asocia a ítems—.
    */
   nivel?: NivelRegla
-  items: { id: string, nombre: string }[]
+  /**
+   * ⚠️ **Incluye los ítems en la papelera**, marcados con `eliminado`. El
+   * endpoint tiene dos consumidores que piden cosas distintas: este modal los
+   * DESCARTA —para pausar, un ítem borrado es ruido— y el 400 del cambio de
+   * nivel los necesita, porque son justamente los que el admin no puede ver.
+   * Ver `obtenerUso` en los services.
+   *
+   * `eliminado` es opcional para no romper a los impuestos, cuyo `/uso` no lo
+   * devuelve: ahí `undefined` es falsy y todos cuentan como vivos, que es lo
+   * correcto —ese endpoint sí filtra los borrados—.
+   */
+  items: { id: string, nombre: string, eliminado?: boolean }[]
 }
 
 /**
@@ -112,13 +123,19 @@ export function usePausaRegla<T extends ReglaPausable>(
     try {
       const uso = await useApiFetch<UsoRegla>(`${apiUrl}/${recurso}/${regla.id}/uso`)
       const nivel = uso.nivel ?? 'linea'
-      if (nivel === 'linea' && uso.items.length === 0) {
+      // Solo los vivos, en las DOS lecturas. Contar los borrados acá tendría
+      // dos efectos y los dos son mentira: una regla cuya única asociación está
+      // en la papelera dejaría de pausarse en silencio para abrir un modal, y
+      // el modal diría un número de ítems afectados que el admin no ve en
+      // ningún lado.
+      const vivos = uso.items.filter(i => !i.eliminado)
+      if (nivel === 'linea' && vivos.length === 0) {
         await aplicarActivo(regla, false)
         return
       }
       confirmPausarId.value = regla.id
       confirmPausarNombre.value = regla.nombre
-      confirmPausarItems.value = uso.items.length
+      confirmPausarItems.value = vivos.length
       confirmPausarNivel.value = nivel
       confirmPausarModalOpen.value = true
     }

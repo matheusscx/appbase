@@ -51,9 +51,15 @@ export class DescuentosController {
     );
   }
 
-  // Consulta inversa a GET /items/:id/uso: alimenta el modal de confirmación
-  // al pausar ("deja de aplicarse en N ítems"). Admin-only porque respalda
-  // una acción admin-only (pausar, ya guardado detrás de TenantAdminGuard).
+  // Consulta inversa a GET /items/:id/uso. Admin-only porque respalda acciones
+  // admin-only (pausar y cambiar el nivel, ya detrás de TenantAdminGuard).
+  //
+  // ⚠️ **DOS consumidores con requisitos opuestos, y por eso devuelve los ítems
+  // de la papelera MARCADOS en vez de decidir por ellos:** el modal de pausa
+  // ("deja de aplicarse en N ítems") los descarta —ahí un ítem borrado infla el
+  // número sobre el que el admin decide— y el 400 del cambio de nivel los
+  // necesita, porque son justamente los que no puede ver por ningún otro lado.
+  // Quien agregue un tercero: el default de este endpoint los INCLUYE.
   @UseGuards(TenantAdminGuard)
   @Get(':id/uso')
   obtenerUso(@Req() req: Request, @Param('id') id: string) {

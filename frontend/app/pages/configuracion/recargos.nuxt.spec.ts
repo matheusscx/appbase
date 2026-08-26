@@ -39,6 +39,13 @@ let recargosBackend: ReglaFake[] = []
  *  Es el gemelo de `directo` en descuentos. */
 const TIPOS_REGLA = [
   { id: 'tipo-1', nombre: 'General', codigo: 'general', descripcion: null },
+  // Su `nivelSugerido` es `'venta'`: es el que empuja el radio "Se aplica".
+  {
+    id: 'tipo-2',
+    nombre: 'Por monto de venta',
+    codigo: 'recargo_por_monto_venta',
+    descripcion: null,
+  },
 ]
 
 /** Sin la moneda oficial, `MoneyInput` no resuelve config y se rinde
@@ -58,13 +65,42 @@ const MONEDA_CLP = {
   valorDelDia: null,
 }
 
+/** Ítems que `GET /recargos/:id/uso` devuelve por id. Ausente = ninguno. */
+let usoPorId: Record<string, { id: string, nombre: string, eliminado?: boolean }[]> = {}
+/** Cada `GET .../uso` recibido: el testigo de CUÁNDO la pantalla lo consulta. */
+let getsUso: string[] = []
+/** Hace fallar el PATCH de guardado del drawer: el 400 del cambio de nivel. */
+let patchGuardarFalla = false
+
 mockNuxtImport('useApiFetch', () => {
-  return (url: string) => {
+  return (url: string, opts?: { method?: string }) => {
     if (typeof url === 'string' && url.includes('/tipos-regla')) {
       return Promise.resolve(TIPOS_REGLA)
     }
     if (typeof url !== 'string' || !url.includes('/recargos')) {
       return Promise.resolve([])
+    }
+    const method = opts?.method ?? 'GET'
+    // El drawer chequea el nombre ANTES de guardar y aborta si no está libre.
+    // Sin esta rama el fake devuelve la lista, `res.disponible` queda `undefined`
+    // y `guardar()` vuelve sin mandar nada: el test fallaría por otro motivo.
+    if (method === 'GET' && url.includes('/nombre-disponible')) {
+      return Promise.resolve({ disponible: true })
+    }
+    if (method === 'GET' && url.endsWith('/uso')) {
+      const id = url.split('/').slice(-2)[0] ?? ''
+      getsUso.push(id)
+      return Promise.resolve({
+        nivel: recargosBackend.find(x => x.id === id)?.nivel ?? 'linea',
+        items: usoPorId[id] ?? [],
+      })
+    }
+    if (method === 'PATCH' && patchGuardarFalla) {
+      return Promise.reject(
+        Object.assign(new Error('No se puede pasar a nivel venta'), {
+          data: { message: 'No se puede pasar a nivel venta' },
+        }),
+      )
     }
     return Promise.resolve(recargosBackend.map(r => ({ ...r })))
   }
@@ -235,5 +271,209 @@ describe('configuracion/recargos — badge de nivel', () => {
     const otro = await montar()
     expect(otro.text()).not.toContain('Por venta')
     otro.unmount()
+  })
+})
+
+/**
+ * El gemelo de `configuracion/descuentos` — mismo bloque, mismo porqué.
+ *
+ * ⚠️ **Existe porque las dos pantallas son copias y el empujón está duplicado en
+ * las dos** (`nivelTocado` / `onNivelChange` viven por página, no en un
+ * composable). Con tests en una sola, la deriva entre gemelos no la vería nadie:
+ * `recargos` podía quedarse sin el empujón —o con cualquiera de las tres líneas
+ * del testigo mal— y la suite seguiría en verde. Lo mismo vale para
+ * `descripcionDeUso`, que también vive por página: sus dos tests están más abajo.
+ *
+ * 📌 **Lo que SÍ se cubre una sola vez es lo que vive en código compartido**: el
+ * filtro del modal de pausa (`usePausaRegla`) y el armado del mensaje
+ * (`useNivelRegla`). La regla no es "descuentos vs recargos" sino **dónde vive el
+ * código**: lo duplicado se prueba dos veces, lo compartido una.
+ *
+ * 📌 **Son cuatro casos, los mismos cuatro que el gemelo**, y cubren las tres
+ * líneas del testigo: la que prende el radio, la que prende `abrirEditar` y la
+ * que apaga `resetDrawer`. Una versión anterior de este bloque tenía solo tres
+ * —le faltaba el de `resetDrawer`— mientras este mismo párrafo afirmaba cubrir
+ * "el testigo mal": lo cazó la revisión independiente midiendo el mutante.
+ *
+ * ⚠️ **La tabla test↔mutante de `descuentos.nuxt.spec.ts` NO se aplica tal cual
+ * acá**, y por eso no se remite a ella sin más: su última fila dice que quitar el
+ * empujón entero mata DOS tests, y eso depende de qué tests tenga cada archivo.
+ * Si tocás este bloque, medí los mutantes **sobre `recargos.vue`**. El porqué de
+ * la decisión sí es común y vive allá.
+ */
+describe('configuracion/recargos — el tipo empuja el nivel, sin bloquearlo', () => {
+  beforeEach(() => {
+    recargosBackend = [{
+      id: 'rec-1',
+      nombre: 'Recargo nocturno',
+      tipoReglaId: 'tipo-1',
+      modo: 'porcentaje',
+      valorMonto: null,
+      valorPorcentaje: '0.10',
+      metodoPagoIds: [],
+      tramos: [],
+      diasVencimiento: null,
+      fechaInicio: null,
+      fechaFin: null,
+      activo: true,
+      nivel: 'linea',
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }]
+    usoPorId = {}
+    getsUso = []
+    patchGuardarFalla = false
+    // `UModal` teletransporta al `body` y desmontar el wrapper no lo saca: sin
+    // esto, `dialogo()` entrega el drawer de otro describe. Medido en el gemelo.
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  function radioNivel(valor: string): HTMLElement {
+    const el = dialogo()?.querySelector<HTMLElement>(`[role="radio"][value="${valor}"]`)
+    expect(el, `radio de nivel "${valor}"`).toBeTruthy()
+    return el!
+  }
+
+  function nivelElegido(): string | null {
+    for (const valor of ['linea', 'venta']) {
+      if (radioNivel(valor).getAttribute('aria-checked') === 'true') return valor
+    }
+    return null
+  }
+
+  async function abrirCrear(wrapper: Awaited<ReturnType<typeof montar>>) {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo'))
+    expect(boton, 'botón "Nuevo recargo"').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  async function guardar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    const boton = [...(dialogo()?.querySelectorAll<HTMLElement>('button') ?? [])]
+      .find(b => b.textContent?.trim() === 'Guardar')
+    expect(boton, 'botón "Guardar" del drawer').toBeTruthy()
+    boton!.click()
+    await new Promise(r => setTimeout(r, 60))
+    void wrapper
+  }
+
+  async function abrirEdicionDeLaFila(wrapper: Awaited<ReturnType<typeof montar>>) {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    const boton = wrapper.findAll('button').find(b => b.attributes('title') === 'Editar')
+    expect(boton, 'botón "Editar" en la fila').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  /**
+   * Se emite `update:modelValue` en el `USelectMenu` en vez de abrir su popup:
+   * manejarlo por DOM en jsdom **mata al worker** con un `Maximum call stack size
+   * exceeded`. Es el mismo contrato que usa el template.
+   */
+  async function elegirTipo(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    tipoReglaId: string,
+  ) {
+    const select = wrapper.findComponent({ name: 'USelectMenu' })
+    expect(select.exists(), 'USelectMenu del campo Tipo').toBe(true)
+    select.vm.$emit('update:modelValue', tipoReglaId)
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  /**
+   * ⚠️ **`descripcionDeUso` está duplicado en las dos pantallas** —vive en el
+   * `.vue`, no en el composable, porque el CUÁNDO es propio de cada una— así que
+   * sin estos dos, borrar `description: await descripcionDeUso()` de
+   * `recargos.vue` dejaba la suite entera en verde. Es la misma deriva entre
+   * gemelos que este bloque existe para cubrir; lo cazó la revisión independiente.
+   *
+   * El QUÉ (la cadena, el sufijo de papelera, el tope) lo fija
+   * `useNivelRegla.nuxt.spec.ts`, que es compartido. Acá solo el cuándo.
+   */
+  it('al fallar el paso a nivel venta, consulta el uso para poder nombrar los ítems', async () => {
+    usoPorId = { 'rec-1': [{ id: 'i1', nombre: 'Café', eliminado: false }] }
+    patchGuardarFalla = true
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    radioNivel('venta').click()
+    await new Promise(r => setTimeout(r, 20))
+    await guardar(wrapper)
+
+    expect(getsUso).toEqual(['rec-1'])
+
+    wrapper.unmount()
+  })
+
+  it('un guardado que no cambia el nivel no consulta el uso', async () => {
+    usoPorId = { 'rec-1': [{ id: 'i1', nombre: 'Café', eliminado: false }] }
+    patchGuardarFalla = true
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await guardar(wrapper)
+
+    expect(getsUso).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('elegir "Por monto de venta" mueve el radio a Al total de la venta', async () => {
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+
+    expect(nivelElegido()).toBe('linea')
+    await elegirTipo(wrapper, 'tipo-2')
+    expect(nivelElegido()).toBe('venta')
+
+    wrapper.unmount()
+  })
+
+  it('si el usuario ya eligió el nivel a mano, el tipo no lo pisa', async () => {
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+
+    radioNivel('linea').click()
+    await new Promise(r => setTimeout(r, 20))
+
+    await elegirTipo(wrapper, 'tipo-2')
+    expect(nivelElegido()).toBe('linea')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * ⚠️ **La línea más silenciosa de las tres del testigo**: sin ella, el camino
+   * *editar → arrancar uno nuevo* lo deja prendido y el default engañoso vuelve
+   * —`recargo_por_monto_venta` naciendo en línea— sin que nada falle.
+   *
+   * Va por "Nuevo" y no por "Cancelar": cerrar dispara la animación de salida de
+   * Reka UI y en jsdom eso tira un rechazo no capturado que hace salir la suite
+   * en 1 con todo verde. Los dos caminos pasan por `resetDrawer` igual.
+   */
+  it('arrancar un recargo nuevo después de editar vuelve a habilitar el empujón', async () => {
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await abrirCrear(wrapper)
+    expect(nivelElegido()).toBe('linea')
+
+    await elegirTipo(wrapper, 'tipo-2')
+
+    expect(nivelElegido()).toBe('venta')
+
+    wrapper.unmount()
+  })
+
+  it('editar un recargo y cambiarle el tipo NO le da vuelta el nivel', async () => {
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    expect(nivelElegido()).toBe('linea')
+    await elegirTipo(wrapper, 'tipo-2')
+    expect(nivelElegido()).toBe('linea')
+
+    wrapper.unmount()
   })
 })

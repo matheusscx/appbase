@@ -86,6 +86,33 @@ describe('reglas-form-config', () => {
     expect(conLasDos).toEqual(['metodo_pago', 'recargo_metodo_pago'])
   })
 
+  /**
+   * El tipo EMPUJA el default del radio "Se aplica", sin bloquearlo (decisión
+   * del owner, 2026-08-25). Los dos tipos por escalones de monto se llaman *por
+   * monto de la venta*: nacer en `'linea'` daba una regla que la pantalla
+   * nombra por el total y el motor mide contra la línea.
+   */
+  it('solo los dos tipos por monto de venta sugieren nivel venta', () => {
+    const sugierenVenta = Object.entries({ ...DESCUENTO_CONFIG, ...RECARGO_CONFIG })
+      .filter(([, c]) => c.nivelSugerido === 'venta')
+      .map(([codigo]) => codigo)
+      .sort()
+
+    expect(sugierenVenta).toEqual(['por_monto_venta', 'recargo_por_monto_venta'])
+  })
+
+  // No alcanza con el test de arriba: un tipo SIN la clave pasaría ese filtro
+  // (`undefined !== 'venta'`) y dejaría el radio en el default de la pantalla
+  // sin que nada lo note. `Record<string, TipoConfig>` no lo caza — es el mismo
+  // hueco que este archivo ya cubre para las claves del mapa.
+  it('todos los tipos declaran su nivel sugerido', () => {
+    const sinNivel = Object.entries({ ...DESCUENTO_CONFIG, ...RECARGO_CONFIG })
+      .filter(([, c]) => c.nivelSugerido !== 'linea' && c.nivelSugerido !== 'venta')
+      .map(([codigo]) => codigo)
+
+    expect(sinNivel).toEqual([])
+  })
+
   it('`directo` deja elegir porcentaje o monto fijo, pide valor y admite fechas opcionales', () => {
     // Es un descuento de propósito general: no tiene tramos, ni métodos, ni
     // días. Desde que `promocional` se eliminó (2026-08-23), `directo` es el

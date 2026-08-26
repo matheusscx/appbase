@@ -406,11 +406,11 @@ revisión independiente no lo pudo reproducir, con razón.
 
 ➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner. Cada una
 lleva su decisión escrita adentro **y las trampas que el que la tome se va a encontrar**, que es
-lo que las hace construibles y no solo contestadas. Quedan **tres** acá: la moneda de las
-opciones de modificadores y las dos que dejó el frente del nivel de la regla. Las otras dos
-—el descarte de desfases y los dos tipos por método de pago— **se construyeron el mismo día**
-y viven en [`resueltos.md`](resueltos.md); se nombran así y no en la lista para que nadie las
-busque acá.
+lo que las hace construibles y no solo contestadas. Queda **una** acá: la moneda de las
+opciones de modificadores. Las otras cuatro **se construyeron el mismo día** —el descarte de
+desfases, los dos tipos por método de pago, y las dos que dejó el frente del nivel de la regla
+(el empujón del default y los ítems de la papelera en el uso)— y viven en
+[`resueltos.md`](resueltos.md); se nombran así y no en la lista para que nadie las busque acá.
 
 - [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
   resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
@@ -444,47 +444,6 @@ busque acá.
   incluso en una recomendación de esa misma fecha— y no lo es: su pregunta al owner tiene tres
   respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
   campo que escribir.
-
-- [ ] **El tipo de regla no empuja el nivel, y el default puede desmentir al tipo**
-  (frontend + producto; medido 2026-08-25 al cerrar el frente del nivel —
-  [`resueltos.md`](resueltos.md) § *"Una regla dice dónde se aplica"*) — el radio "Se aplica"
-  nace en **"A cada ítem"** para todos los tipos, incluidos `por_monto_venta` y
-  `recargo_por_monto_venta`, cuyos tramos se llaman *"por monto de la venta"*. Quien cree uno
-  y no toque el radio se lleva una regla que la pantalla nombra por el total y el motor mide
-  contra la línea. Nada falla: cobra otra cosa.
-  **No se fuerza el nivel desde el tipo a propósito** —*"llevando $50.000 de este vino, 10% en
-  el vino"* es un uso legítimo del mismo tipo a nivel línea, medido contra la línea— así que
-  la pregunta es del owner y es chica: ¿el tipo **empuja el default** del radio (sin
-  bloquearlo), o el radio se queda neutro y la responsabilidad es de quien crea la regla?
-  ✅ **DECIDIDO (owner, 2026-08-25): el tipo EMPUJA el default del radio, sin bloquearlo.** Elegir
-  un tipo "por monto de venta" deja el radio en *Al total de la venta*; quien quiera el caso del
-  vino —*"llevando $50.000 de este vino, 10% en el vino"*— lo mueve a mano y se respeta.
-  📌 **La sub-pregunta que quedaba —qué pasa al cambiar de tipo con el radio ya tocado— se resuelve
-  por derivación, no se vuelve a preguntar:** "empujar sin bloquear" describe un **default**, y un
-  default solo aplica mientras el usuario no eligió. Entonces el tipo mueve el radio **solo
-  mientras nadie lo haya tocado**; en cuanto se toca a mano, cambiar de tipo ya no lo pisa. Es lo
-  contrario de lo que hace hoy `onTipoChange` con los otros campos, así que quien lo construya
-  necesita un testigo de "tocado" y no puede colgarse de ese mismo camino.
-  ⚠️ Si al construirlo ese testigo resulta más caro de lo que vale, **eso sí vuelve al owner**: la
-  alternativa (pisar siempre) es decisión de producto, no una simplificación.
-  El seeder ya tuvo que corregir sus dos filas a mano, que es la señal de que el default engaña más
-  seguido de lo que parece.
-
-- [ ] **El 400 que frena el cambio de nivel nombra un conteo que la pantalla no puede
-  desglosar** (backend + frontend; medido 2026-08-25, mismo cierre) — el guard cuenta las
-  filas puente **incluidos los ítems en la papelera** (tiene que hacerlo: el soft delete no
-  las borra, ver `resueltos.md`), pero `GET /:id/uso` solo lista los vivos. Un admin que
-  intenta pasar una regla a nivel venta y cuya única asociación está en un ítem borrado lee
-  *"1 ítem todavía lo tiene"* y **no tiene forma desde la UI de saber cuál**: hoy la salida es
-  restaurar a ciegas, editar y volver a borrar. Es chico y tiene dos formas: que `/uso`
-  devuelva también los borrados marcados como tales (y el modal de pausa siga mostrando solo
-  los vivos), o que el 400 los nombre.
-  ✅ **DECIDIDO (owner, 2026-08-25): `GET /:id/uso` devuelve también los borrados, marcados.** El
-  modal de pausa **sigue mostrando solo los vivos** — ahí un ítem en la papelera es ruido.
-  ⚠️ **Con eso el endpoint queda con dos consumidores que piden cosas distintas, y eso hay que
-  dejarlo escrito o se desincroniza**: el modal (`usePausaRegla`) filtra los borrados y el 400 del
-  cambio de nivel los necesita. Un cambio futuro que "simplifique" devolviendo una sola lista rompe
-  uno de los dos en silencio.
 
 - [ ] **El drawer del simulador se recarga con un alcance más angosto que lo que muestra**
   (frontend; lo levantó la revisión independiente del 2026-08-25 al cerrar el frente del
@@ -861,15 +820,17 @@ cada entrada se mudó con su decisión escrita y con las trampas que el que la t
 encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
 moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
 **Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
-al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **dos se construyeron el mismo día** —el
-descarte de desfases y los dos tipos por método de pago— y ya no están en la § 3 →
-[`resueltos.md`](resueltos.md).
+al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **cuatro se construyeron el mismo día** —el
+descarte de desfases, los dos tipos por método de pago, y las dos del frente del nivel— y ya no
+están en la § 3 → [`resueltos.md`](resueltos.md).
 
-**Quedan 2 entradas.** La de la nota de crédito **no espera una respuesta** sino la
-**investigación de mercado que la destraba, lanzada el 2026-08-22**. La otra sí espera al
-owner y llegó el **2026-08-25**, de rebote del frente de método de pago: los tipos de valor
-único tienen el mismo hueco y hay que decidir si se cierra o se abre — la simétrica se
-**abrió**, así que el precedente no la resuelve sola.
+**Quedan 3 entradas.** La de la nota de crédito **no espera una respuesta** sino la
+**investigación de mercado que la destraba, lanzada el 2026-08-22**. Las otras dos sí esperan
+al owner y llegaron el **2026-08-25**, las dos de rebote de los frentes de ese día: los tipos
+de valor único tienen el mismo hueco de tramos y hay que decidir si se cierra o se abre —la
+simétrica se **abrió**, así que el precedente no la resuelve sola—, y la redacción de la
+invariante 3 de `CLAUDE.md`, que se corrigió en un commit de feature y conviene que la
+confirme quien manda sobre el rulebook.
 
 ⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
 pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
@@ -1004,6 +965,37 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   `por_mayor`/`por_monto_venta`/`recargo_por_monto_venta` tienen el hueco espejo (aceptar un
   valor plano además de sus tramos), porque es la misma familia y esta entrada **no lo
   verificó**.
+
+- [ ] **La invariante 3 de `CLAUDE.md` se reescribió en un commit de feature, y eso lo
+  confirmás vos** (documentación; 2026-08-25) — decía *"Toda lectura filtra `eliminado_el IS
+  NULL`"*, en absoluto. **El absoluto ya era falso antes de tocarlo**: hay al menos seis
+  lecturas que no filtran a propósito, todas anteriores a este frente (kardex ×2, mermas,
+  líneas de comanda, la autoría del borrado, la papelera). Se reescribió como **criterio** —
+  *lo que distingue una excepción de un olvido es que el porqué esté escrito en la propia
+  consulta*— porque el enunciado absoluto es justamente lo que hace que el próximo agente
+  "arregle" una excepción medida.
+
+  ❓ **Lo que hay que confirmar no es el dato sino la potestad.** Tu decisión del 2026-08-25
+  autorizaba **la excepción del endpoint** (`GET /:id/uso` devuelve los borrados marcados), no
+  cambiar el enunciado de una invariante del proyecto. Lo señaló la revisión independiente y
+  tiene razón: la invariante es la regla que aplican el próximo agente, la revisión y en parte
+  el pre-commit, así que ablandarla de arrastre amplía una decisión puntual a una regla general.
+
+  ⛔ **`CLAUDE.md` quedó SIN TOCAR, a propósito.** La reescritura llegó a estar en el diff y se
+  revirtió antes de commitear: el preámbulo de ese mismo archivo dice *"detenerse, reportar el
+  conflicto y esperar confirmación. Nunca resolverlo por cuenta propia"*, y editar el enunciado
+  de la invariante que uno está excepcionando es resolverlo por cuenta propia — encima
+  auto-legalizándolo. Lo señaló la revisión independiente **dos veces**.
+
+  Así que hoy la invariante 3 sigue diciendo *"Toda lectura filtra"*, en absoluto y falso. Lo
+  que sí se escribió, porque ahí sí corresponde, es el criterio en
+  [`docs/agent/anti-patterns.md`](anti-patterns.md) —con la tabla de formas que toman— y en
+  [`docs/patterns/backend.md`](../patterns/backend.md), que es el paso 1 del orden de búsqueda.
+
+  Tres salidas, y **ninguna corre sin vos**: **(a)** llevar ese criterio a `CLAUDE.md`,
+  **(b)** dejar el absoluto y aceptar que las seis excepciones se relean como bugs cada vez
+  —el costo es real: ya pasó que una revisión marcara una de ellas—, o **(c)** una redacción
+  tuya.
 
 ## 5. Carreras de concurrencia
 

@@ -1265,7 +1265,7 @@ describe('DescuentosService', () => {
       expect(dataSourceMock.query).not.toHaveBeenCalled();
     });
 
-    it('devuelve los ítems vivos que usan el descuento', async () => {
+    it('devuelve los ítems que usan el descuento', async () => {
       descuentoRepoMock.findOne.mockResolvedValue({
         id: 'd1',
         tenantId: TENANT,
@@ -1288,6 +1288,54 @@ describe('DescuentosService', () => {
           { id: 'item-2', nombre: 'Torta' },
         ],
       });
+    });
+
+    /**
+     * ⚠️ **Esta lectura NO filtra `eliminado_el`, y es la excepción documentada
+     * al invariante de soft delete** (decisión del owner, 2026-08-25). El guard
+     * de `validarCambioDeNivel` CUENTA las filas puente de los ítems en la
+     * papelera —tiene que contarlas—, así que un endpoint que solo listara los
+     * vivos dejaba al admin leyendo *"1 ítem todavía lo tiene"* sin forma de
+     * saber cuál.
+     */
+    it('incluye los ítems en la papelera, marcados con `eliminado`', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Con uno borrado',
+      });
+      dataSourceMock.query.mockResolvedValue([
+        { id: 'item-1', nombre: 'Café', eliminado: false },
+        { id: 'item-2', nombre: 'Torta vieja', eliminado: true },
+      ]);
+
+      const result = await service.obtenerUso(TENANT, 'd1');
+
+      expect(result.items).toEqual([
+        { id: 'item-1', nombre: 'Café', eliminado: false },
+        { id: 'item-2', nombre: 'Torta vieja', eliminado: true },
+      ]);
+    });
+
+    it('su consulta no descarta los borrados', async () => {
+      // El mutante que esto caza es restaurar el `AND i.eliminado_el IS NULL`
+      // del JOIN, que es como estaba antes. Se afirma sobre la CLÁUSULA exacta
+      // y no sobre la palabra suelta: `eliminado_el` aparece también en el
+      // `SELECT` de la marca, así que un `toContain('eliminado_el')` pasaría
+      // con las dos versiones.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Cualquiera',
+      });
+      dataSourceMock.query.mockResolvedValue([]);
+
+      await service.obtenerUso(TENANT, 'd1');
+
+      const [sql] = dataSourceMock.query.mock.calls.at(-1) as [string];
+      expect(sql).toContain('item_descuentos');
+      expect(sql).not.toContain('i.eliminado_el IS NULL');
+      expect(sql).toContain('(i.eliminado_el IS NOT NULL) AS eliminado');
     });
 
     it('devuelve lista vacía cuando nadie usa el descuento', async () => {
