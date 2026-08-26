@@ -11,9 +11,10 @@ const ETIQUETA: Record<Exclude<NivelRegla, 'linea'>, string> = {
 }
 
 /**
- * Cuántos nombres **vivos** entran en el mensaje antes de resumir. Es un tope de
- * lectura, no de datos, y **no se aplica a los de la papelera**: ver el porqué en
- * `itemsQueLoTienen`.
+ * Cuántos nombres entran en el mensaje antes de resumir. Es un tope de lectura,
+ * no de datos, y se aplica **por grupo**: hasta 5 vivos y hasta 5 de la
+ * papelera, cada uno con su propio "y N más". El porqué de contarlos separados
+ * está en `itemsQueLoTienen`.
  */
 const MAX_NOMBRES = 5
 
@@ -109,22 +110,33 @@ export function useNivelRegla() {
         'timeout consultando el uso de la regla',
       )
       if (!uso.items.length) return undefined
-      // ⚠️ **El tope recorta VIVOS, nunca borrados**, y esa asimetría es todo el
-      // punto: los de la papelera son los que el admin no puede ver por ningún
-      // otro lado —son la razón de que este mensaje exista—, mientras que los
-      // vivos los encuentra en la pantalla de ítems.
+      // ⚠️ **El tope se cuenta por GRUPO, no sobre la lista entera**, y esa es toda
+      // la decisión: los de la papelera son los que el admin no puede ver por
+      // ningún otro lado —son la razón de que este mensaje exista—, mientras que
+      // los vivos los encuentra en la pantalla de ítems.
       //
       // Una primera versión recortaba la lista entera. Como el backend devuelve
       // los borrados AL FINAL (`ORDER BY (eliminado_el IS NOT NULL)`), una regla
       // con 5 ítems vivos y 1 en la papelera decía "y 1 más" y el invisible
       // seguía invisible: el tope tapaba justo lo que la feature vino a mostrar.
+      //
+      // La segunda los dejó SIN tope, y eso era el otro extremo: una regla con 50
+      // asociaciones borradas armaba un toast de 50 nombres, que no se lee. Con un
+      // presupuesto por grupo los dos casos quedan cubiertos — el borrado nunca se
+      // esconde detrás de los vivos, y su propia cola dice cuántos faltan.
       const vivos = uso.items.filter(i => !i.eliminado).map(i => i.nombre)
       const borrados = uso.items
         .filter(i => i.eliminado)
         .map(i => `${i.nombre} (en la papelera)`)
-      const omitidos = Math.max(0, vivos.length - MAX_NOMBRES)
-      const nombres = [...vivos.slice(0, MAX_NOMBRES), ...borrados]
-      const resumen = omitidos ? `${nombres.join(', ')} y ${omitidos} más` : nombres.join(', ')
+      const nombres = [...vivos.slice(0, MAX_NOMBRES), ...borrados.slice(0, MAX_NOMBRES)]
+      const colas: string[] = []
+      if (vivos.length > MAX_NOMBRES) colas.push(`${vivos.length - MAX_NOMBRES} más`)
+      if (borrados.length > MAX_NOMBRES) {
+        colas.push(`${borrados.length - MAX_NOMBRES} más en la papelera`)
+      }
+      const resumen = colas.length
+        ? `${nombres.join(', ')} y ${colas.join(', y ')}`
+        : nombres.join(', ')
       return `Lo tienen: ${resumen}`
     }
     catch {

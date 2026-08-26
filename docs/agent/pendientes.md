@@ -91,15 +91,10 @@ eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó le
 detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
 de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
 
-- [ ] **Los nombres de ítems borrados no tienen tope en el mensaje del cambio de nivel**
-  (frontend, mecánico; lo dejó ver la revisión independiente del 2026-08-25) —
-  `itemsQueLoTienen` en `useNivelRegla.ts` acota los **vivos** con `MAX_NOMBRES` pero a los de
-  la papelera los agrega todos: una regla con 50 asociaciones borradas arma un toast con 50
-  nombres.
-
-  📌 **La asimetría en sí es correcta y hay que conservarla** —los borrados son los que el admin
-  no puede ver por ningún otro lado, y recortarlos fue justamente el bug que esa revisión cazó—.
-  Lo que falta es un techo para ellos también: mismo tratamiento, *"y N más (en la papelera)"*.
+✅ **Vuelve a estar vacía el 2026-08-26.** Su última entrada —el tope de nombres del mensaje
+del cambio de nivel— salió a [`resueltos.md`](resueltos.md). Que esté vacía no significa que
+no haya trabajo chico: significa que el trabajo chico que queda **no es mecánico**, o sea que
+tiene una decisión adentro por más que el diff sea de tres líneas.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

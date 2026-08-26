@@ -17,6 +17,43 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El tope de nombres se cuenta por grupo: ni esconde el borrado ni arma un toast de 50 (2026-08-26)
+
+**Venía de la sección 1**, la única mecánica que quedaba. Texto verbatim:
+
+> - [ ] **Los nombres de ítems borrados no tienen tope en el mensaje del cambio de nivel**
+>   (frontend, mecánico; lo dejó ver la revisión independiente del 2026-08-25) —
+>   `itemsQueLoTienen` en `useNivelRegla.ts` acota los **vivos** con `MAX_NOMBRES` pero a los de
+>   la papelera los agrega todos: una regla con 50 asociaciones borradas arma un toast con 50
+>   nombres.
+>
+>   📌 **La asimetría en sí es correcta y hay que conservarla** —los borrados son los que el admin
+>   no puede ver por ningún otro lado, y recortarlos fue justamente el bug que esa revisión cazó—.
+>   Lo que falta es un techo para ellos también: mismo tratamiento, *"y N más (en la papelera)"*.
+
+**Lo que se hizo:** `MAX_NOMBRES` pasó de ser un tope sobre los vivos a un **presupuesto por
+grupo** — hasta cinco vivos y hasta cinco de la papelera, cada uno con su propia cola
+(*"y 2 más"*, *"y 3 más en la papelera"*).
+
+**Por qué por grupo y no un tope único**, que es lo que hay que entender antes de
+"simplificarlo": las dos formas simples fallan en direcciones opuestas, y las dos ya se
+probaron acá.
+
+| Forma | Cómo falla |
+|---|---|
+| tope sobre la lista entera (la 1.ª versión) | el backend devuelve los borrados **al final**, así que 5 vivos + 1 borrado decía *"y 1 más"* y el invisible seguía invisible — tapaba justo lo que el mensaje existe para mostrar |
+| sin tope para los borrados (la 2.ª) | 50 asociaciones en la papelera = un toast de 50 nombres, ilegible; o sea igual de inútil que esconderlos |
+
+El presupuesto por grupo cubre las dos: el borrado nunca se esconde detrás de los vivos, y su
+cola dice cuántos faltan.
+
+⚙️ **Cómo se sabe que muerde.** Un mutante que revierte al código anterior —los borrados sin
+tope y sin cola— tira **exactamente los dos** tests nuevos y deja los nueve viejos en verde. El
+segundo test existe justamente porque el primero no alcanza: con 8 borrados y ningún vivo,
+recortar por grupo y recortar en total dan el mismo resultado, así que hace falta un caso con
+los DOS grupos pasados de largo para distinguirlos.
+---
+
 ## Una regla dice su importe de una sola forma: los nueve tipos que no eligen (2026-08-26)
 
 **Venía de la sección 3**, adonde había bajado el 2026-08-25 con la decisión del owner escrita

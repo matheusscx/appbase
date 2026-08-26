@@ -128,6 +128,52 @@ describe('useNivelRegla — itemsQueLoTienen', () => {
   })
 
   /**
+   * ⚠️ **El otro extremo del mismo tope, y salió del arreglo del anterior.** Dejar
+   * a los borrados sin tope armaba un toast de 50 nombres en una regla con 50
+   * asociaciones en la papelera: ilegible, o sea igual de inútil que esconderlos.
+   * El presupuesto es POR GRUPO — hasta 5 de cada lado, cada uno con su cola—,
+   * que es lo que cubre los dos casos a la vez.
+   */
+  it('los de la papelera también tienen tope, con su propia cola', async () => {
+    respuesta = {
+      items: Array.from({ length: 8 }, (_, i) => ({
+        nombre: `Borrado ${i + 1}`,
+        eliminado: true,
+      })),
+    }
+
+    const msg = await useNivelRegla().itemsQueLoTienen('descuentos', 'd1')
+
+    expect(msg).toBe(
+      'Lo tienen: Borrado 1 (en la papelera), Borrado 2 (en la papelera), '
+      + 'Borrado 3 (en la papelera), Borrado 4 (en la papelera), '
+      + 'Borrado 5 (en la papelera) y 3 más en la papelera',
+    )
+  })
+
+  /**
+   * Los dos grupos recortados a la vez. Sin este caso, un tope que se aplicara a
+   * la lista entera —el bug original— pasaría el test de arriba: con 8 borrados y
+   * ningún vivo, recortar por grupo y recortar en total dan lo mismo.
+   */
+  it('y cuando los dos grupos se pasan, cada uno dice cuántos le faltan', async () => {
+    respuesta = {
+      items: [
+        ...Array.from({ length: 7 }, (_, i) => ({ nombre: `Vivo ${i + 1}`, eliminado: false })),
+        ...Array.from({ length: 6 }, (_, i) => ({ nombre: `Borrado ${i + 1}`, eliminado: true })),
+      ],
+    }
+
+    const msg = await useNivelRegla().itemsQueLoTienen('descuentos', 'd1')
+
+    // Los cinco vivos y los cinco borrados entran; las dos colas van al final.
+    expect(msg).toContain('Vivo 5, Borrado 1 (en la papelera)')
+    expect(msg).not.toContain('Vivo 6')
+    expect(msg).not.toContain('Borrado 6')
+    expect(msg).toContain('y 2 más, y 1 más en la papelera')
+  })
+
+  /**
    * El otro modo de fallar, que el `catch` NO cubre: un GET que no responde
    * nunca. Sin el tope, el toast del guardado —que espera esta promesa— no se
    * mostraba jamás y `saving` quedaba en `true`, o sea el botón trabado y ningún
