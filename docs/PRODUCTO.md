@@ -296,6 +296,28 @@ Detalle en [`docs/features/descuentos-recargos.md`](./features/descuentos-recarg
 modo escalonado)? En el sistema original estas columnas existen pero la lógica no está
 implementada.
 
+**Regla producto-vs-promo** (decisión del owner, julio 2026, escrita el 2026-08-27 al
+construirse el módulo de promociones): dos formas distintas de "cobrar menos por un
+conjunto" conviven en el sistema — un **combo** (sección 8c, con grupos de modificadores si
+hay elección) y una **promoción** (2x1/NxM, happy hour, combo a precio fijo por tiempo
+limitado — ver [`features/motor-promociones.md`](./features/motor-promociones.md)). El
+criterio para elegir cuál usar:
+
+- **¿Está siempre en la carta, con su propio precio?** → **catálogo**: es un combo (item
+  `tipo='combo'`, con grupos de modificadores si el customer elige entre opciones).
+- **¿Aparece o desaparece según día, hora o cantidad pedida?** → **promoción**: el
+  descuento tiene que vivir donde se **mide** como descuento (`ventas_promociones`), no
+  mezclado en el precio de un item que existe todo el tiempo. Un "2x1 los martes de 18 a
+  20" nunca es un combo con ese horario incrustado en su ficha — es una promoción sobre los
+  ítems que ya están en la carta.
+
+La distinción no es cosmética: un combo es un **item nuevo** que el catálogo vende como
+unidad (una línea de venta, precio propio fijo, sin conocimiento de la vigencia); una
+promoción es un **descuento sobre líneas que ya existen**, medible por separado de
+`descuentos` y sin tocar el catálogo de items. Mezclarlos —por ejemplo, un combo cuyo precio
+cambia según la hora— rompería la invariante de precio propio fijo del ADR-012 y dejaría el
+descuento por horario sin medición propia.
+
 **Métodos de pago** — catálogo global habilitado por tenant (`tenant_metodo_pago`)
 
 ---

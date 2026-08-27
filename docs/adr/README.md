@@ -34,6 +34,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [020](./020-contexto-transaccional-als.md) | Contexto transaccional con AsyncLocalStorage — la conexión de la transacción viaja sola | Accepted | 2026-08-18 |
 | [021](./021-una-sola-moneda-oficial.md) | Una sola noción de moneda oficial — se elimina `tenant_moneda.es_default` | Accepted | 2026-08-21 |
 | [022](./022-navegador-un-solo-origen.md) | El navegador habla con un solo origen — el frontend hace de proxy de `/api` | Accepted | 2026-08-23 |
+| [023](./023-promociones-familia-propia-del-motor.md) | Promociones: evaluador puro afuera del motor, aplicación y conflicto adentro, familia propia de traza y congelado | Accepted | 2026-08-27 |
 
 ## Creating a New ADR
 
