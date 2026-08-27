@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import GruposModificadores from './grupos-modificadores.vue'
+import type { MonedaTenantApi } from '~/types/moneda'
 
 const GRUPO_ID = 'grupo-1'
 const BORRADO_EL = '2026-08-01T21:00:00.000Z'
@@ -82,6 +83,9 @@ function sugerir(base: string, vivos: string[]): string {
 // Estado del "backend" simulado: `DELETE` lo muta, `GET` lo lee filtrando por
 // `incluirEliminados` igual que el controller real.
 let gruposBackend: GrupoFake[] = []
+
+/** Filas de `GET /grupos-modificadores/:id/items` (drawer "usado en recetas"). */
+let recetasBackend: unknown[] = []
 
 // Para el test de la carrera: retiene la respuesta de cada variante del `GET`
 // en una promesa que el test resuelve a mano, en el orden que quiera.
@@ -149,6 +153,9 @@ mockNuxtImport('useApiFetch', () => {
       g.nombre = nombre
       if (restaurarRetenido) return restaurarRetenido
       return Promise.resolve(undefined)
+    }
+    if (method === 'GET' && url.endsWith('/items')) {
+      return Promise.resolve(recetasBackend.map(r => ({ ...(r as object) })))
     }
     const incluirEliminados = url.includes('incluirEliminados=true')
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
@@ -233,6 +240,7 @@ async function escribirNombre(valor: string) {
 }
 
 function reset() {
+  recetasBackend = []
   overrideConEliminados = null
   overrideSinEliminados = null
   postsRestaurar = []
@@ -498,6 +506,125 @@ describe('configuracion/grupos-modificadores — papelera: la carrera de `cargar
     // después y en teoría pisara el estado.
     expect(wrapper.text()).toContain('Salsas')
     expect(wrapper.text()).not.toContain('Grupo viejo')
+
+    wrapper.unmount()
+  })
+})
+
+// ── El precio extra hereda la moneda de la receta ────────────────────────────
+//
+// Decisión del owner (2026-08-25): la opción de un grupo hereda la moneda del
+// ítem al que se aplica — un `+$800` significa 800 de lo que valga ESE ítem.
+// El drawer "usado en recetas" es la única pantalla donde el mismo grupo se ve
+// colgado de varias recetas a la vez, y por eso es donde la decisión se rompía:
+// mostraba el efectivo de cada receta con la moneda OFICIAL del tenant. Es un
+// bug de RUNTIME puro — el build y el typecheck ven `formatMonto(x)` y
+// `formatMonto(x, id)` igual de válidos, y una revisión de código lee las dos
+// como "formatea plata".
+
+const CLP: MonedaTenantApi = {
+  monedaId: 'clp-1',
+  nombre: 'Peso Chileno',
+  codigoIso: 'CLP',
+  simbolo: '$',
+  decimales: 0,
+  separadorDecimal: ',',
+  separadorMiles: '.',
+  locale: 'es-CL',
+  habilitada: true,
+  esOficial: true,
+  valorDelDia: null,
+}
+
+// Decimales, locale y separadores invertidos respecto de CLP: el formateo de un
+// mismo número no se parece en nada entre las dos, que es lo que hace visible
+// con cuál se formateó.
+const USD: MonedaTenantApi = {
+  monedaId: 'usd-1',
+  nombre: 'Dólar',
+  codigoIso: 'USD',
+  simbolo: 'US$',
+  decimales: 2,
+  separadorDecimal: '.',
+  separadorMiles: ',',
+  locale: 'en-US',
+  habilitada: true,
+  esOficial: false,
+  valorDelDia: null,
+}
+
+const OPCION_ID = 'op-1'
+
+function receta(itemGrupoId: string, nombre: string, monedaId: string, precioExtra: string) {
+  return {
+    itemId: `item-${itemGrupoId}`,
+    itemNombre: nombre,
+    tipo: 'receta',
+    itemGrupoId,
+    monedaId,
+    opciones: [{
+      grupoOpcionId: OPCION_ID,
+      itemNombre: 'Carne',
+      cantidad: '150',
+      cantidadDefault: '150',
+      unidadCodigo: 'g',
+      precioExtra,
+      esPendiente: false,
+    }],
+  }
+}
+
+/** Monta, siembra las monedas y abre el drawer "usado en recetas". */
+async function abrirDrawerRecetas() {
+  const wrapper = await montar()
+  useMonedasStore().hydrate([CLP, USD], 'tenant-1')
+  await new Promise(r => setTimeout(r, 0))
+  const boton = wrapper.findAll('button').find(b => b.text().trim() === String(recetasBackend.length))
+  expect(boton, 'botón con el conteo de recetas que usan el grupo').toBeTruthy()
+  await boton!.trigger('click')
+  await new Promise(r => setTimeout(r, 20))
+  expect(dialogo(), 'drawer "usado en recetas" abierto').toBeTruthy()
+  return wrapper
+}
+
+describe('configuracion/grupos-modificadores — el precio extra hereda la moneda de la receta', () => {
+  beforeEach(() => {
+    // `unmount()` no se lleva el contenido teleportado del drawer (queda su
+    // transición de salida), y `dialogo()` devuelve el PRIMER `[role=dialog]`
+    // del body: sin esta purga, un test lee el drawer del test anterior y
+    // "pasa" o falla por el estado de otro.
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+    gruposBackend = [grupo({
+      itemsUsandoCount: 2,
+      familia: 'vendible',
+      opciones: [{
+        grupoOpcionId: OPCION_ID,
+        itemId: 'item-carne',
+        itemNombre: 'Carne',
+        tipo: 'ingrediente',
+        cantidad: '150',
+        unidadCodigo: 'g',
+        precioExtra: '0',
+        orden: 1,
+        stock: null,
+      }],
+    })]
+    reset()
+    recetasBackend = [
+      receta('ig-usd', 'Hamburguesa (USD)', USD.monedaId, '1234.5'),
+      receta('ig-clp', 'Completo (CLP)', CLP.monedaId, '900'),
+    ]
+  })
+
+  it('el efectivo de cada receta se muestra en SU moneda, no en la oficial del tenant', async () => {
+    const wrapper = await abrirDrawerRecetas()
+
+    const texto = dialogo()!.textContent ?? ''
+    // Ancla positiva: la fila en USD se formatea con los separadores del dólar.
+    expect(texto).toContain('US$1,234.50')
+    // Y el mismo número NO aparece formateado con la moneda oficial (CLP:
+    // 0 decimales, miles con '.'), que es lo que sale si el monedaId no viaja.
+    expect(texto).not.toContain('$1.235')
 
     wrapper.unmount()
   })

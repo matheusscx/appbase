@@ -400,6 +400,73 @@ veces por corrida **no es evidencia de nada**: sale del `Promise.all` interno de
 `DataSource.synchronize`, una vez por app de test (ya medido el 2026-08-21), y su conteo es
 casi idéntico con y sin el spec nuevo (45 vs 44).
 
+### El ticket imprime el precio extra con la moneda oficial, sobre un monto que no lo está (2026-08-26)
+
+- [ ] **El extra de una personalización se imprime con la moneda equivocada, y el ticket no
+  suma** (frontend + backend; **medido el 2026-08-26**, leyendo el código de las tres capas) —
+  `ticket-builder.ts:102` imprime cada extra con `formatMonto(d.monto)`, y ese `formatMonto`
+  se lo inyectan las páginas **sin moneda** (`pos.vue:276`, `salones/index.vue:1158` y
+  `:1249`), o sea con la **oficial del tenant**. El número que formatea sale de
+  `backend/src/common/utils/personalizacion-receta.util.ts:99` como `precioExtra × unidades`
+  **sin convertir**, o sea en la moneda del ítem. Mientras tanto, en el mismo ticket, el
+  precio de la línea **sí** viaja convertido (`ventas.service.ts:436-447`:
+  `precioBase + precioExtraTotal` → `convertirAMonedaOficial`).
+  Consecuencia para una receta en USD: el ticket muestra `+ Extra Queso $1.000` —símbolo y
+  separadores de peso sobre un número en dólares— **al lado de un total que sí está en
+  pesos**. Ni la moneda es la del ítem (que es lo que decidió el owner el 2026-08-25 para el
+  `precioExtra`), ni las dos cifras del ticket pertenecen a la misma escala.
+  **Es preexistente**: no lo introdujo el frente del 2026-08-26, que arregló la otra
+  superficie (el drawer de configuración). Lo encontró la revisión independiente de ese
+  diff, al pedirle explícitamente que buscara un consumidor que el diff no tocara.
+  **Lo que falta decidir, y por eso no salió de arrastre:** el arreglo puede ir por dos
+  lados —convertir el `monto` en el backend, como ya hace la línea, o hacer viajar el
+  `monedaId` hasta el ticket y formatear con él— y la primera opción toca la **conversión de
+  plata**, que es territorio del motor de cálculo (⚠️ `CLAUDE.md`: va sola y con el sistema
+  quieto). La segunda es de presentación y no toca el motor, pero hay que ver qué pasa con un
+  ticket que mezcla dos monedas en la misma columna.
+  ⚠️ **Antes de tomarla, verificar si el detalle de personalización tiene el `monedaId` a
+  mano** en las tres páginas que arman el ticket: la entrada no lo midió.
+
+### El `.` que multiplica por 10 no lo ataja ningún 400: la red que la doc promete no existe (2026-08-26)
+
+- [ ] **`MoneyInput` en una moneda con separador de miles `.` convierte `800.5` en `8005`, y
+  eso se persiste** (frontend; **medido el 2026-08-26** montando el componente con el molde de
+  `MoneyInput.spec.ts`) — en CLP, tecla por tecla: `8`,`0`,`0`,`.`,`5` emite **`8005`** (display
+  `8.005`); con `,` emite `800.5`, bien. maska lee el punto como agrupador, y esto ya estaba
+  documentado como **limitación conocida** en `MoneyInput.vue` y en `docs/patterns/frontend.md`.
+  **Lo que estaba mal escrito es la mitigación**, y por eso esta entrada existe: las dos docs
+  decían que el monto ×10 *"no se persiste: el backend valida la escala y lo rechaza con 400"*.
+  **Falso, y no solo para los campos de escala fija:** el resultado del error es un **entero**
+  (`8005`), y un entero es válido en **cualquier** escala —los 0 decimales del peso incluidos—,
+  así que ningún validador de escala lo puede ver. Con `@EsCosto()` (escala 4) pasa igual.
+  Las dos afirmaciones se corrigieron el 2026-08-26; lo que queda es el riesgo.
+  **Exposición contada ese día** (`grep -rn ':decimales' frontend/app --include='*.vue'`):
+  **7 campos con escala fija de costo** — `mermas.vue:468`, `items.vue:1620`, `:1691`,
+  `:1823`, `:1969`, `:2121`, `:2344`—. ⚠️ **Ése es el piso, no el total:** la familia
+  `MoneyInput oficial` —caja (apertura/cierre/movimiento), `CobroModal`, `AbonoModal`,
+  `NotaCreditoModal`, `ReembolsoModal`, el `valorMonto` y el `minimo` de tramo de
+  `descuentos`/`recargos`, `preferencias-financieras`, `DesfasesPanel`— corre **el mismo
+  riesgo**, porque la oficial de todos los tenants del seed es el peso: mismo `.` como
+  agrupador, mismo entero que ningún validador ve. Y hay dos más atados a un `:moneda-id`
+  dinámico y sin prop `decimales`, que tampoco están en la cuenta de los 7:
+  `inventario/index.vue:347` (`costoNuevo` del ajuste) y `propinas/index.vue:330` (el monto
+  manual del reparto). Se contaron aparte los de escala fija
+  porque ahí el decimal es *legítimo* (un costo de `5,0500`/g) y el error es más fácil de
+  cometer; en un campo de 0 decimales teclear un separador ya es un tecleo sin sentido. En
+  todos, teclear el separador equivocado guarda ×10 en silencio.
+  ⛔ **NO intentar taparlo desde el input.** Ya se probó un `preProcess` con memoria de la
+  última tecla y salió **peor**: rompía el caso chileno normal (`1.500` = mil quinientos emitía
+  `1`), o sea montos válidos y **menores** guardados en silencio. Revertido. El contrato está
+  fijado en `MoneyInput.spec.ts`, describe *"limitación conocida"*.
+  **Por dónde se puede atacar, sin decidir todavía:** (a) mostrar el monto formateado como
+  confirmación antes de guardar, que no depende de maska; (b) rechazar en el backend un salto
+  de magnitud sospechoso contra el valor anterior del campo, que es una regla de negocio y va
+  al owner; (c) aceptar el riesgo y decirlo en las docs, que es lo único hecho hoy.
+  📌 **Consecuencia ya aplicada, para que no se relea como teoría:** por esto el campo
+  "precio extra" del **aplicar en lote** de `grupos-modificadores.vue` se quedó con `UInput`
+  pelado el 2026-08-26 en vez de estrenar `MoneyInput` — ahí el mismo número se aplica a **N
+  recetas de una sola vez**, así que el ×10 se multiplica por N. Está escrito en el template.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -435,46 +502,19 @@ revisión independiente no lo pudo reproducir, con razón.
 ➕ **Y una llegó de la § 4 el 2026-08-25 y salió el 2026-08-26**: los tipos de valor único, que
 el owner decidió **cerrar** → [`resueltos.md`](resueltos.md).
 
-➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner. Cada una
-lleva su decisión escrita adentro **y las trampas que el que la tome se va a encontrar**, que es
-lo que las hace construibles y no solo contestadas. Queda **una** acá: la moneda de las
-opciones de modificadores. Las otras cuatro **se construyeron el mismo día** —el descarte de
-desfases, los dos tipos por método de pago, y las dos que dejó el frente del nivel de la regla
-(el empujón del default y los ítems de la papelera en el uso)— y viven en
-[`resueltos.md`](resueltos.md); se nombran así y no en la lista para que nadie las busque acá.
+➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner, y **las
+cinco están construidas**: cuatro el mismo día —el descarte de desfases, los dos tipos por
+método de pago, y las dos que dejó el frente del nivel de la regla (el empujón del default y
+los ítems de la papelera en el uso)— y la quinta —la moneda de las opciones de
+modificadores— el **2026-08-26**. Todas en [`resueltos.md`](resueltos.md); se nombran así y
+no en la lista para que nadie las busque acá.
 
-- [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
-  resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
-  2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
-  resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
-  opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
-  `lotePrecio`).
-  Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
-  extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
-  ✅ **DECIDIDO (owner, 2026-08-25): la opción HEREDA la moneda del ítem al que se aplica.** Un
-  `+$800` significa 800 de lo que valga ese ítem.
-  ⚠️ **Y con eso la consecuencia que la pregunta anticipaba pasa a ser el trabajo:** el campo **no
-  puede tener una sola máscara**. En la pantalla de configuración del grupo todavía no hay ítem,
-  así que ahí no hay moneda que resolver — quien lo tome decide si ahí el campo se queda **sin**
-  máscara (y la ayuda visual aparece solo donde el grupo se ve colgado de un ítem) o si se muestra
-  otra referencia. Lo que **no** puede hacer es inventar una moneda para llenar el hueco: ésa es
-  justo la salida que el owner descartó.
-  📌 Sigue en pie que el prop `decimales` va en **4** (escala fija de `@EsCosto()`), no en los
-  decimales de la moneda.
-  ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
-  Lo que falta es ayuda visual, no control.
-  ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
-  moneda, porque `@EsCosto()` es escala fija.
-
-  ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
-  un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
-  `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
-  cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
-  a "el único módulo donde se tipea plata sin escala validada", que es falso.
-  ➕ **Movida desde la § 3 el 2026-08-24.** Se la venía citando como trabajo chico de frontend —
-  incluso en una recomendación de esa misma fecha— y no lo es: su pregunta al owner tiene tres
-  respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
-  campo que escribir.
+📌 Lo que dejaron como lección: cada una llevaba su decisión escrita adentro **y las trampas
+que el que la tome se va a encontrar**, y eso es lo que las hizo construibles. Pero la
+última mostró el límite: **una entrada describe el hueco desde donde se lo miró.** La de
+modificadores decía que faltaba un input y lo que estaba roto era un número **mostrado** con
+la moneda equivocada, en una tercera pantalla que la entrada no nombraba. El mapa se hace
+abriendo las superficies, no leyendo la entrada.
 
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —

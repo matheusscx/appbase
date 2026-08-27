@@ -741,8 +741,10 @@ export class GruposModificadoresService {
       item_id: string;
       item_nombre: string;
       tipo: string;
+      moneda_id: string;
     }[] = await this.db.query(
-      `SELECT igm.item_grupo_id, i.item_id, i.nombre AS item_nombre, i.tipo
+      `SELECT igm.item_grupo_id, i.item_id, i.nombre AS item_nombre, i.tipo,
+              i.moneda_id
        FROM item_grupos_modificadores igm
        JOIN items i ON i.item_id = igm.item_id AND i.eliminado_el IS NULL
        WHERE igm.grupo_modificador_id = $1 AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
@@ -792,6 +794,12 @@ export class GruposModificadoresService {
       itemNombre: a.item_nombre,
       tipo: a.tipo,
       itemGrupoId: a.item_grupo_id,
+      // La moneda de la receta viaja porque la opción HEREDA la moneda del ítem
+      // al que se aplica (decisión del owner, 2026-08-25): un `+$800` significa
+      // 800 de lo que valga ese ítem. Sin este campo el drawer formatea el
+      // precio extra con la moneda OFICIAL del tenant, que da los separadores
+      // equivocados en cuanto la receta está en otra moneda.
+      monedaId: a.moneda_id,
       opciones: (opsPorIg.get(a.item_grupo_id) ?? []).map((r) => ({
         grupoOpcionId: r.grupo_opcion_id,
         itemNombre: r.item_nombre,

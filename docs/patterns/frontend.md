@@ -393,14 +393,30 @@ Reglas:
   Vacío / `null` → `'—'`.
 - `MoneyInput` NO se usa para stock, cantidades, porcentajes ni `valorDelDia`
   (ahí va `UInput inputmode="decimal"`, ver §7).
+- **Sin moneda resoluble, `MoneyInput` se renderiza DESHABILITADO** (`!cfg` →
+  `:disabled`). O sea que en una pantalla donde la moneda del monto no se puede
+  determinar —porque depende de un ítem que todavía no se eligió— ponerlo no degrada a
+  "campo sin ayuda visual": mata el campo. Ahí va `UInput inputmode="decimal"` pelado,
+  con el porqué escrito al lado. Usar la moneda oficial del tenant "para llenar el
+  hueco" es peor que no dar ayuda: da los separadores equivocados.
+- ⛔ **El 400 del backend NO es red contra el `.`→×10, en ningún campo.** El bullet de
+  abajo describe ese error y lo presentaba como *visible* porque el backend rechaza la
+  escala. **Medido el 2026-08-26 y es falso:** el resultado del error es un **entero**
+  (teclear `800.5` en CLP emite `8005`), y un entero es válido en cualquier escala —los
+  0 decimales del peso incluidos—, así que ningún validador de escala lo ve. Vale igual
+  para los campos con el prop `decimales` (`@EsCosto()`, escala 4). Antes de estrenar un
+  `MoneyInput` en un campo nuevo, pesar eso; y con más razón si el campo aplica el mismo
+  número a **N filas** de una vez (caso vivo: el "aplicar en lote" de
+  `grupos-modificadores.vue`, que por esto se quedó con `UInput` pelado). Instancias
+  contadas y salidas posibles: `docs/agent/pendientes.md`.
 - `MoneyInput` bloquea tipear más decimales de los que la moneda resuelta admite
   (`number.fraction` de maska) — la contraparte en pantalla del rechazo 400 del backend
   (`EscalaMonedaPipe`).
-  ⚠️ **Limitación conocida:** en una moneda de 0 decimales, maska lee cualquier
-  separador como agrupador de miles, así que teclear `1000.5` en CLP da `10005`. NO
-  intentar taparlo desde el input: ya se probó con un `preProcess` con memoria de la
-  última tecla y salió peor (rompía el caso chileno normal `1.500` → `1`, o sea montos
-  válidos y MENORES guardados en silencio, en vez del 400 visible que da hoy). El
+  ⚠️ **Limitación conocida:** en una moneda con miles `.`, maska lee ese punto como
+  agrupador, así que teclear `1000.5` en CLP da `10005` **y se guarda** (ver el bullet
+  de arriba: ningún 400 lo ataja). NO intentar taparlo desde el input: ya se probó con
+  un `preProcess` con memoria de la última tecla y salió peor (rompía el caso chileno
+  normal `1.500` → `1`, o sea montos válidos y MENORES guardados en silencio). El
   contrato exacto está fijado en `MoneyInput.spec.ts`, describe "limitación conocida".
   ✅ **El punto fijo con monedas de más de 0 decimales está arreglado (2026-08-21).**
   Hasta entonces `MoneyInput` quedaba **muerto tras la primera tecla** con `decimals > 0`
@@ -419,15 +435,21 @@ Reglas:
   **Lo que el arreglo revive solo:** los siete `MoneyInput` atados a `:moneda-id` de
   `items.vue` e `inventario/index.vue` — el precio del catálogo de un ítem en USD o UF ya
   se puede editar, sin tocar esas páginas.
-  **Lo que NO revive solo:** `mermas.vue` (`costoUnitario`) y `grupos-modificadores.vue`
-  (`precioExtra`, `lotePrecio`) siguen con `UInput inputmode="decimal"`. Re-migrarlos **no
-  es mecánico y por eso no se hizo de arrastre**: `MoneyInput` necesita una moneda para
-  resolver separadores y locale, y ninguna de las dos pantallas tiene una a mano —
-  `ProductoOpt` (mermas) no trae `monedaId`, y `grupos-modificadores.vue` no menciona
-  moneda en ningún lado—. Usar la oficial daría los separadores equivocados para un ítem
-  en moneda extranjera. La escala la sigue validando el backend con `@EsCosto()`, así que
-  lo que falta es ayuda visual, no control. Ver la entrada de
-  [`agent/pendientes.md`](../agent/pendientes.md).
+  **Lo que NO revivía solo** eran `mermas.vue` (`costoUnitario`) y
+  `grupos-modificadores.vue` (`precioExtra`, `lotePrecio`), porque `MoneyInput` necesita
+  una moneda y ninguna de las dos la tenía a mano. **Estado al 2026-08-26:**
+  - `mermas.vue` **migrado**: el costo unitario va con `MoneyInput` atado a
+    `productoSeleccionado?.monedaId` y `:decimales="4"`.
+  - `grupos-modificadores.vue` **se queda sin `MoneyInput`, y es deliberado**, con dos
+    razones distintas según el campo. En el drawer del grupo no hay ítem, así que no hay
+    moneda que resolver (la opción hereda la del ítem al que se aplica — owner
+    2026-08-25). En el "aplicar en lote" sí suele haberla, pero el campo aplica el mismo
+    número a N recetas y el `.`→×10 no lo ataja el backend en un campo de escala fija
+    (ver el bullet de §8): un input pelado manda `800.5` tal cual. La ayuda visual sí
+    está donde el ítem existe: `items.vue` (precio extra por receta y extras permitidos).
+  - Lo que se arregló ahí fue otra cosa: el precio extra **se mostraba** con la moneda
+    oficial del tenant. Ahora `GET /grupos-modificadores/:id/items` devuelve el
+    `monedaId` de cada receta y la pantalla formatea con él.
 
 Archivos: `app/stores/monedas.ts`, `app/types/moneda.ts`,
 `app/utils/currency-format.ts` (+ `.spec.ts`), `app/composables/useCurrency.ts`,

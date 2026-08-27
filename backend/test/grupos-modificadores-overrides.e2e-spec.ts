@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 
@@ -468,5 +469,47 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '3500.0000' }],
       });
     expect(resVenta.status).toBe(400);
+  });
+
+  it('9. GET /grupos-modificadores/:id/items devuelve la moneda DE CADA receta, no la oficial del tenant', async () => {
+    // La opción hereda la moneda del ítem al que se aplica (owner, 2026-08-25),
+    // así que el drawer "usado en recetas" formatea y enmascara con la moneda de
+    // cada fila. Esta receta va en USD —habilitada para Paris en el seed— para
+    // que devolver la oficial del tenant (CLP, como hacía la pantalla antes) no
+    // pueda pasar el test.
+    const resRecetaUsd = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa USD OV E2E ${Date.now()}`,
+        precioBase: '9.90',
+        monedaId: USD_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panBaseId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: grupoProteinaId, min: 1, max: 1 },
+        ],
+      });
+    expect(resRecetaUsd.status).toBe(201);
+    const recetaUsdId = (resRecetaUsd.body as ItemResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/grupos-modificadores/${grupoProteinaId}/items`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const filas = res.body as { itemId: string; monedaId: string }[];
+
+    const enUsd = filas.find((f) => f.itemId === recetaUsdId);
+    expect(enUsd?.monedaId).toBe(USD_MONEDA_ID);
+    // Y la de al lado, creada en pesos, sigue en pesos: el campo es por fila.
+    const enClp = filas.find((f) => f.itemId === recetaClasicaId);
+    expect(enClp?.monedaId).toBe(CLP_MONEDA_ID);
   });
 });

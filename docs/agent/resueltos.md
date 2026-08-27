@@ -17,6 +17,126 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El precio extra se muestra en la moneda de la receta, no en la del tenant (2026-08-26)
+
+**Venía de la sección 3.** Texto verbatim:
+
+> - [ ] **`grupos-modificadores` sigue sin `MoneyInput`, y es el único que no se puede
+>   resolver solo** (frontend + producto; `mermas` y los campos de `items` **salieron el
+>   2026-08-22** → [`resueltos.md`](resueltos.md)) — `MoneyInput` necesita una moneda para
+>   resolver separadores y locale, y esta pantalla **no menciona moneda en ningún lado**: sus
+>   opciones aplican a ítems que pueden estar en monedas distintas (`precioExtra`,
+>   `lotePrecio`).
+>   Usar la oficial del tenant daría los **separadores equivocados** para un ítem en moneda
+>   extranjera, o sea cambiar un campo sin ayuda visual por uno con ayuda visual **mal**.
+>   ✅ **DECIDIDO (owner, 2026-08-25): la opción HEREDA la moneda del ítem al que se aplica.** Un
+>   `+$800` significa 800 de lo que valga ese ítem.
+>   ⚠️ **Y con eso la consecuencia que la pregunta anticipaba pasa a ser el trabajo:** el campo **no
+>   puede tener una sola máscara**. En la pantalla de configuración del grupo todavía no hay ítem,
+>   así que ahí no hay moneda que resolver — quien lo tome decide si ahí el campo se queda **sin**
+>   máscara (y la ayuda visual aparece solo donde el grupo se ve colgado de un ítem) o si se muestra
+>   otra referencia. Lo que **no** puede hacer es inventar una moneda para llenar el hueco: ésa es
+>   justo la salida que el owner descartó.
+>   📌 Sigue en pie que el prop `decimales` va en **4** (escala fija de `@EsCosto()`), no en los
+>   decimales de la moneda.
+>   ℹ️ **No bloquea nada:** la escala la sigue validando el backend con `@EsCosto()` (escala 4).
+>   Lo que falta es ayuda visual, no control.
+>   ⚠️ Quien lo tome: el campo va con el prop `decimales` en **4**, no con los decimales de la
+>   moneda, porque `@EsCosto()` es escala fija.
+>
+>   ⚠️ **Aclaración del 2026-08-24, porque esta entrada se citó mal en una recomendación:** esto es
+>   un input de **FRONTEND** que falta, no un agujero de validación. Medido en el inventario de
+>   `@IsNumberString`: `precioExtra` está marcado con `@EsCosto()` en los dos DTOs y los controllers
+>   cuelgan `EscalaMonedaPipe`. La entrada ya lo decía —"no bloquea nada"— pero leída de apuro suena
+>   a "el único módulo donde se tipea plata sin escala validada", que es falso.
+>   ➕ **Movida desde la § 3 el 2026-08-24.** Se la venía citando como trabajo chico de frontend —
+>   incluso en una recomendación de esa misma fecha— y no lo es: su pregunta al owner tiene tres
+>   respuestas y **las tres cambian el modelo, no la pantalla**. Mientras no se conteste, no hay
+>   campo que escribir.
+
+**Lo que la entrada no sabía, y cambió el trabajo.** Antes de tocar nada se abrió el código
+de las superficies donde el `precioExtra` se ve o se teclea, y dos de sus premisas no se
+sostenían:
+
+1. **`configuracion/items.vue` ya cumplía la decisión del owner** desde antes de que se
+   tomara: sus dos campos —el extra permitido de la receta y el override por opción del
+   grupo— ya iban con `<MoneyInput :moneda-id="form.monedaId" :decimales="4">`
+   (`items.vue:1969` y `:2118`). Lo mismo el lado de venta
+   (`ItemPersonalizacionGrupo.vue:50`, `ItemPersonalizacionDrawer.vue:431`). O sea: donde
+   el ítem existe, la moneda ya se heredaba. Lo que faltaba era **solo** la pantalla del
+   grupo.
+2. **La pregunta que la entrada dejaba abierta ("¿el campo del grupo se queda sin
+   máscara?") ya tenía respuesta en el código, no en el gusto de quien la tomara:**
+   `MoneyInput` sin moneda resuelta se renderiza **deshabilitado**
+   (`:disabled="disabled || !cfg"`). Ponerlo ahí no degrada a "campo sin ayuda visual",
+   mata el campo. Queda `UInput` pelado, con el porqué escrito al lado del input.
+
+**Y una tercera superficie que la entrada no nombraba, que era la que estaba mal de
+verdad.** El drawer *"usado en recetas"* mostraba el efectivo de cada receta con
+`formatMonto(precioExtra)` **sin `monedaId`** (`grupos-modificadores.vue:873`), o sea con la
+moneda **oficial del tenant**: una receta en dólares mostraba su recargo con separadores de
+peso. No es un input que falta, es un número mal escrito en pantalla — exactamente lo que la
+decisión del owner prohíbe. Ese es el bug que salió, y el que obligó a tocar backend.
+
+**Lo que se hizo.**
+
+- **Backend** (`grupos-modificadores.service.ts`, `itemsUsando`): la query de asociaciones
+  suma `i.moneda_id` —misma query, sin N+1— y cada fila devuelve `monedaId`.
+- **Display**: el efectivo de cada fila se formatea con la moneda **de esa receta**.
+- **Los dos campos de la pantalla siguen sin máscara**, ahora con la razón escrita al lado
+  de cada uno: en el drawer del grupo porque no hay ítem; en el lote por lo de abajo.
+- La escala la sigue validando el backend con `@EsCosto()` (4, fija): de eso no cambió nada.
+
+⛔ **La máscara del lote se construyó, se testeó… y se sacó antes de commitear.** La primera
+versión enmascaraba el precio del "aplicar en lote" cuando todas las recetas seleccionadas
+compartían moneda. La revisión independiente lo bloqueó y tenía razón; medido después con el
+molde de `MoneyInput.spec.ts`, montando el componente en **CLP** con `:decimales="4"`:
+
+| tecleo | emite | display |
+|---|---|---|
+| `8`,`0`,`0`,`.`,`5` | **`8005`** | `8.005` |
+| `8`,`0`,`0`,`,`,`5` | `800.5` | `800,5` |
+
+En el peso —la moneda oficial de **todos** los tenants del seed— maska lee el `.` como
+separador de miles. La doc del proyecto presenta eso como error *visible* "porque el backend
+rechaza la escala con un 400", y **para este campo es falso**: `@EsCosto()` valida escala 4,
+así que `8005` es un valor válido y se persiste. O sea que la ayuda visual habría estrenado
+un ×10 silencioso **en N recetas de una sola vez**, en un campo que hoy manda `800.5` tal
+cual porque es un `UInput` pelado. El input pelado se queda; la trampa quedó anotada en
+`pendientes.md` como lo que es —una propiedad de `MoneyInput` en todos los campos de escala
+fija, no de esta pantalla—.
+
+**Tres mutantes sobre lo que sí quedó, los tres medidos.**
+
+| Mutante | Qué murió |
+|---|---|
+| Sacar `i.moneda_id` del `SELECT` | e2e 9: `monedaId` llega `undefined` |
+| Devolver la oficial fija (`monedaId: '…440003'`) | e2e 9: la receta en USD contesta CLP |
+| `formatMonto(precioExtra)` sin la moneda de la fila | vitest: la fila USD deja de mostrar `US$1,234.50` |
+
+El e2e nuevo crea la receta en **USD** —habilitada para Paris en el seed— justamente para
+que "devolver la oficial" no pueda pasar: con todas las recetas en pesos, los dos mutantes
+del backend habrían sobrevivido.
+
+📌 **El mapa de superficies quedó incompleto y hubo que ampliarlo.** La lista de arriba
+—items, venta, drawer— **no incluía la impresión**: `ticket-builder.ts:102` formatea el
+`monto` de la personalización con `formatMonto` **sin moneda**, y ese monto sale del backend
+sin convertir. Es preexistente y quedó como entrada propia en `pendientes.md`. Lo encontró
+la revisión, al pedirle explícitamente que buscara un consumidor que el diff no tocara: la
+misma técnica que ya había funcionado dos veces.
+
+📌 **Lo que costó dos corridas:** el drawer teleportado **no se va con `unmount()`** (queda
+su transición de salida) y el helper `dialogo()` del spec devuelve el **primer**
+`[role="dialog"]` del body — un test leía el drawer del test anterior y fallaba por estado
+ajeno. El `beforeEach` del describe nuevo lo purga, con el porqué escrito.
+
+⛔ **Y el error de esta sesión, que casi se lleva puesto este archivo:** el script que
+insertaba este cierre hacía `open(p,'w').write(open(p).read().replace(...))`. Python evalúa
+`open(p,'w')` **primero**, así que truncó `resueltos.md` a 0 bytes y después leyó el archivo
+ya vacío: 10.761 líneas borradas en silencio, con el script reportando `ok`. Lo cazó
+`git diff --cached --stat` al stagear (*"10807 deletions"*), no el script. **Leer a una
+variable y después escribir**, y mirar el `--stat` antes de commitear.
+
 ## La tienda dejó de entregar sin cobrar por descarte: la pasarela demo se prende (2026-08-26)
 
 **Venía de la sección 3.** Texto verbatim:

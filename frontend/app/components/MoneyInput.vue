@@ -100,12 +100,17 @@ function syncFromMaska(detail: MaskaDetail) {
  * `number.fraction` es lo que impide tipear más decimales de los que la moneda
  * admite: con `fraction: 0` (CLP) maska no deja abrir parte decimal.
  *
- * ⚠️ **Limitación conocida, preexistente, NO parcheada acá.** En una moneda de 0
- * decimales cuyo separador de MILES es `.` (el peso chileno), tipear `1000.5` deja
- * `10005`: maska lee ese `.` como agrupador, no como decimal, y pega los dígitos.
- * El monto sale ×10 de lo tecleado, pero **no se persiste**: el backend valida la
- * escala y lo rechaza con 400 (`escala-moneda.pipe.ts`), así que es un error
- * visible, no plata mal guardada.
+ * ⚠️ **Limitación conocida, preexistente, NO parcheada acá.** En una moneda cuyo
+ * separador de MILES es `.` (el peso chileno), tipear `1000.5` deja `10005`: maska
+ * lee ese `.` como agrupador, no como decimal, y pega los dígitos. El monto sale
+ * ×10 de lo tecleado.
+ * ⛔ **Y se persiste.** Esta doc decía hasta el 2026-08-26 que el backend lo
+ * rechazaba con 400 por escala (`escala-moneda.pipe.ts`), o sea que era un error
+ * visible y no plata mal guardada. **Es falso:** el resultado del error es un
+ * **entero**, y un entero es válido en cualquier escala —0 decimales incluidos—, así
+ * que ningún validador de escala lo puede ver. Vale igual para los campos con el prop
+ * `decimales` (`@EsCosto()`, escala 4). El riesgo y por dónde se podría atacar están
+ * anotados en `docs/agent/pendientes.md`; acá solo se corrige la afirmación.
  *
  * Se intentó taparlo con un `preProcess` con memoria de la última tecla y salió
  * peor: rompía el caso normal chileno (`1.500` = mil quinientos emitía `1`) y podía

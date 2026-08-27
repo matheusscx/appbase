@@ -64,6 +64,8 @@ interface RecetaUsando {
   itemNombre: string
   tipo: string
   itemGrupoId: string
+  /** Moneda del ítem: la opción HEREDA la moneda de la receta a la que se aplica. */
+  monedaId: string
   opciones: RecetaUsandoOpcion[]
 }
 
@@ -746,6 +748,13 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
                 :class="{ 'col-span-2': familiaDeItem(op.itemId) !== 'ingrediente' }"
               >
                 <UFormField label="Precio extra" class="flex-1">
+                  <!-- Sin `MoneyInput` a propósito: acá el grupo todavía no cuelga de
+                       ningún ítem, y la opción hereda la moneda del ítem al que se
+                       aplica (owner, 2026-08-25). No hay moneda que resolver, y
+                       `MoneyInput` sin una se renderiza deshabilitado. La ayuda visual
+                       aparece donde el ítem existe: el precio extra por receta en
+                       `configuracion/items.vue`. La escala la valida el backend con
+                       `@EsCosto()` (4). -->
                   <UInput v-model="op.precioExtra" inputmode="decimal" placeholder="0" class="w-full" />
                 </UFormField>
                 <UButton
@@ -817,6 +826,16 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
             </UFormField>
 
             <UFormField label="Precio extra" :class="loteEsIngrediente ? 'col-span-2' : 'col-span-4'">
+              <!-- Sin `MoneyInput` a propósito, y acá la razón NO es la moneda (las
+                   recetas seleccionadas suelen compartirla): es que este campo aplica
+                   el mismo número a N recetas de una y `MoneyInput` en una moneda de
+                   separador de miles `.` —el peso, la oficial de todos los tenants del
+                   seed— lee ese punto como agrupador. Medido: teclear `800.5` emite
+                   `8005`, y el backend NO lo rechaza, porque `@EsCosto()` valida escala
+                   4 y `8005` es válido. O sea, ×10 guardado en silencio en N filas.
+                   Con `,` anda bien, pero el input pelado manda `800.5` tal cual.
+                   El detalle está en `docs/agent/pendientes.md` ("el 400 no es red para
+                   los campos de escala fija"); mientras eso siga así, acá no va máscara. -->
               <UInput v-model="lotePrecio" inputmode="decimal" placeholder="0" class="w-full" />
             </UFormField>
 
@@ -870,7 +889,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
                   />
                   <span v-else class="text-sm text-default">
                     {{ opcionDeFila(row.original)!.cantidad }} {{ opcionDeFila(row.original)!.unidadCodigo }}
-                    · {{ formatMonto(opcionDeFila(row.original)!.precioExtra) }}
+                    · {{ formatMonto(opcionDeFila(row.original)!.precioExtra, row.original.monedaId) }}
                   </span>
                 </div>
               </template>

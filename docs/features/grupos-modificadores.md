@@ -267,6 +267,36 @@ recetas).
 el valor efectivo nunca es `NULL` incluso sin override (nunca queda
 "recargo pendiente", solo cantidad).
 
+**La moneda del `precioExtra` la pone el ítem, no el tenant** (owner,
+2026-08-25). Un `+$800` significa 800 **de lo que valga ese ítem**: la opción
+hereda la moneda de la receta a la que se aplica, así que el mismo grupo puede
+sumar 800 pesos en una receta y 800 dólares en otra. No hay columna de moneda
+en el grupo ni en la opción — se resuelve por el `moneda_id` del ítem.
+
+Consecuencia en pantalla, y es la que se olvida: **el campo no puede tener una
+sola máscara.** La ayuda visual (`MoneyInput`) vive donde el ítem existe —el
+precio extra por receta y los extras permitidos, en `configuracion/items.vue`—.
+En `configuracion/grupos-modificadores.vue` **los dos campos de precio extra van
+sin máscara, a propósito**, por razones distintas:
+
+- **Drawer de configuración del grupo:** todavía no hay ítem, así que no hay
+  moneda que resolver. `MoneyInput` sin moneda se renderiza **deshabilitado**, o
+  sea que ponerlo no da "campo sin ayuda visual", mata el campo. Y usar la
+  oficial del tenant para llenar el hueco da los separadores equivocados en
+  cuanto la receta está en otra moneda: es peor que no dar ninguno.
+- **Aplicar en lote (drawer "usado en recetas"):** ahí la moneda sí se podría
+  resolver cuando todas las recetas seleccionadas la comparten, pero el campo
+  aplica **el mismo número a N recetas de una** y en el peso —la moneda oficial
+  de todos los tenants del seed— `MoneyInput` lee el `.` como separador de
+  miles: medido, teclear `800.5` emite `8005`. El backend **no** lo ataja, y no
+  hay validación de escala que pueda: `8005` es un **entero**, válido en
+  cualquier escala. Sería un ×10 guardado en silencio en N filas. Un `UInput`
+  pelado manda `800.5` tal cual.
+
+La escala la sigue validando el backend con `@EsCosto()` (4 decimales, fija), no
+los decimales de la moneda — pero ninguna validación de escala sirve de red
+contra el `.`→×10, porque el resultado de ese error es un entero.
+
 **Llave del override — UUIDs preservados, no llave de negocio.** Un override
 en `item_grupo_modificador_opciones` se identifica por el par
 (`item_grupo_id`, `grupo_opcion_id`) — los UUIDs de la asociación item↔grupo y
@@ -432,7 +462,13 @@ Response (201):
 - `GET /grupos-modificadores/:id/items` — drawer de recetas: cada asociación
   (`itemGrupoId`, item que usa el grupo) con sus opciones y `cantidad`
   efectiva/`cantidadDefault`/`esPendiente` por opción — para editar los
-  overrides de cantidad/precio de cada receta desde el grupo.
+  overrides de cantidad/precio de cada receta desde el grupo. Incluye el
+  `monedaId` **de cada receta**, porque el precio extra **se muestra** en la
+  moneda del ítem, no en la oficial del tenant. Lo consume un solo lugar y solo
+  para mostrar: la columna "efectivo" del drawer. ⚠️ **No es una invitación a
+  enmascarar el campo del lote con él** — los dos campos de esa pantalla van sin
+  máscara a propósito, y el porqué (medido) está en `precioExtra`, en
+  "Cantidades de consumo por item".
 - `PATCH /grupos-modificadores/:id/overrides` (`AplicarOverridesDto`) —
   aplica en **lote** el mismo override (`cantidad`/`unidadCodigo`/
   `precioExtra`) a una `grupoOpcionId` en varias asociaciones (`itemGrupoIds[]`)

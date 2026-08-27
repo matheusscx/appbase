@@ -319,18 +319,24 @@ describe('MoneyInput', () => {
    * miles, así que teclear `1000.5` no abre una parte decimal —la descarta— y pega
    * el `5` al entero: sale `10005`, diez veces lo tecleado.
    *
-   * **Por qué se deja así:** ese monto no se persiste. El backend valida la escala
-   * de la moneda y lo rechaza con 400 (`escala-moneda.pipe.ts`, tarea 11), o sea es
-   * un error VISIBLE. El intento de taparlo desde el input (un `preProcess` con
-   * memoria de la última tecla) rompía el caso chileno normal `1.500` → `1` y podía
-   * dejar el input muerto: montos válidos, MENORES, guardados en silencio. Se
-   * cambiaba un error visible por plata mal guardada, así que se revirtió.
+   * **Por qué se deja así:** el intento de taparlo desde el input (un `preProcess`
+   * con memoria de la última tecla) rompía el caso chileno normal `1.500` → `1` y
+   * podía dejar el input muerto: montos válidos, MENORES, guardados en silencio. Se
+   * revirtió.
+   *
+   * ⛔ **Corregido el 2026-08-26 — este bloque decía que el monto ×10 "no se
+   * persiste" porque el backend lo rechaza con 400 por escala
+   * (`escala-moneda.pipe.ts`). Es falso:** el resultado del error es un **entero**
+   * (`10005`), y un entero es válido en cualquier escala —los 0 decimales del peso
+   * incluidos—, así que ningún validador de escala lo ve. O sea que esto **no** es
+   * un error visible: es plata ×10 guardada en silencio. Sigue sin resolverse, pero
+   * que se sepa lo que cuesta: `docs/agent/pendientes.md`.
    *
    * Antes de intentar parchearlo de nuevo: lo que haga falta escribir acá tiene que
    * pasar TODO el describe de "tecleo real" de arriba, montado con `v-model` real.
    */
   describe('limitación conocida (documentada, no resuelta): el separador se lee como miles', () => {
-    it('documenta que en CLP teclear "1000.5" da 10005, y que el backend lo rechaza', async () => {
+    it('documenta que en CLP teclear "1000.5" da 10005 — y que eso se guarda, nadie lo rechaza', async () => {
       const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
 
       await tipear(input, ['1', '0', '0', '0', '.', '5'])
