@@ -432,39 +432,73 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
 
 ### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
 
-- [ ] **Observado mientras se escribía el test de compuerta de caja; medido, NO explicado**
-  (harness de test y/o pool) — con la compuerta reteniendo `FOR UPDATE` sobre una caja, se
-  dispararon **dos requests a la vez**: la del dueño (que sí se encola en ese lock) y la de
-  **otro tenant**, que por el filtro de tenant no debería tocar ese lock y que **disparada
-  sola vuelve en 5 ms** —eso último sí está fijado por un test: es el paso 1 del test de
-  compuerta que se shippeó el mismo día—. Medido con `Date.now()` en el
-  callback de cada una: **ninguna de las dos volvió hasta que se soltó la compuerta**, y las
-  dos resolvieron en el mismo milisegundo. Dos corridas, con presupuestos distintos
-  (1.530 ms y 3.046 ms): las respuestas siguieron al presupuesto, o sea al rollback, no a un
-  timeout fijo. Una `GET` liviana disparada en el mismo momento **sí** contestó (200), así que
-  **descarta el event loop y el socket** — y solo esos dos: no dice nada sobre el pool ni
-  sobre `db.transaccion`, que es justamente donde apunta la sospecha.
-  Para el dueño hay explicación —lo destraba el rollback—; **para el ajeno no**: con el filtro
-  de tenant adentro del `SELECT … FOR UPDATE` no debería tocar ese lock, y solo tarda cuando
-  hay otra request encolada.
-  ⚠️ **Lo que NO sirve de esa sesión:** las lecturas de `pg_stat_activity` que se hicieron
-  entonces salían de la conexión de la compuerta, y esa vista **se cachea por transacción**
-  (ver el cierre del test en [`resueltos.md`](resueltos.md)), así que la evidencia del lado de
-  la base es **inservible** y hay que rehacerla. Contar por `ds.query` —pool, transacción
-  implícita nueva— es lo que ve la foto de ahora.
-  **Por dónde seguir:** repetir el escenario contando esperadores y conexiones desde el pool, y
-  mirar si la segunda request llega a pedir conexión (¿pg-pool encolando?) o se queda antes.
-  Ojo que puede ser pariente del otro intermitente de esta sección: el `connectTimeoutMS: 5000`
-  de `app.module.ts` y el `ms: 5002` que se vio en el error de pg-pool.
-  ⚠️ **Cuidado con desescalarlo por el encuadre.** Lo que se trabó no fue una segunda
-  escritura a la misma caja: fue una request **de otro tenant, sobre datos de otro tenant**.
-  Si la causa resulta ser serialización en el pool o en `db.transaccion`, el radio no es "dos
-  escrituras a la misma fila" sino **cualquier request detrás de cualquier request frenada**
-  —cruza tenants y cruza pantallas— y eso es disponibilidad de producción, no una curiosidad
-  del harness. Lo único que hoy se puede decir sin medir más es que **el test que lo destapó
-  no depende de esto** (dispara en secuencia y suelta antes de esperar). Cuánto vale la
-  entrada depende de qué conteste la medición de arriba: mientras no se haga, no se sabe si
-  es del harness o del pool.
+- [ ] **Reproducible, con cuatro hipótesis medidas y descartadas —una, la del ALS, solo en
+  sentido estricto— y ninguna confirmada** (harness de test
+  y/o runtime; medido con una sonda dedicada el 2026-08-26) — con una compuerta reteniendo
+  `FOR UPDATE` sobre una caja, se disparan **dos requests a la vez**: la del dueño (que sí se
+  encola en ese lock) y la de **otro tenant**, que por el filtro de tenant no toca esa fila.
+  **Ninguna de las dos vuelve hasta que se suelta la compuerta**, y resuelven con 1 ms de
+  diferencia (`403 @3112ms` / `201 @3113ms`).
+
+  **Lo que la medición descartó, cada uno con su evidencia:**
+
+  | Hipótesis | Qué se midió | Veredicto |
+  |---|---|---|
+  | La request se queda esperando **conexión** del pool | `setup-pool.ts` engancha `Pool.prototype.connect` y registra en cuatro casos: error, `ms >= 250`, pedida con `esperando > 0`, o pool lleno. Corre en todos los e2e y **no escribió ni una línea** en la ventana de la sonda | descartada, y por medición continua: una espera de ~3 s se habría anotado al resolverse |
+  | **Contexto transaccional compartido** (ALS, ADR-020) | log en `db.transaccion`: las dos entran con `reusa=false`, a los 19 y 24 ms | descartada **en su sentido estricto**: ninguna reusó el manager de la otra |
+  | La request **no llega** al server | middleware de sonda: las dos llegan a los 2 y 5 ms | descartada |
+  | El **event loop** está tapado | las 12 muestras de `pg_stat_activity` las tomó **el propio test, en el mismo proceso**, durante el cuelgue: con el loop tapado de forma sostenida no habría muestras. Y en la sesión anterior una `GET` disparada en esa ventana contestó `200` al toque | descartada |
+
+  ⚠️ **El piso del descarte del pool es `LENTO_MS = 250`**: una espera menor a eso, con la cola
+  vacía y el pool no lleno, es invisible para esa sonda. Criterio exacto del chequeo: **cero
+  líneas** con `test` = *"SONDA concurrencia mide dónde se queda la request ajena"* **en todo
+  el archivo** —que es append-only y nadie lo limpia, así que cubre cualquier ventana— y la
+  única línea `"(fuera de un test)"` que existe es del `2026-08-26T00:36`, anterior a la sonda.
+  ⚠️ `backend/test/tmp-pool.jsonl` es **local y está gitignoreado**: en otro clone no existe, y
+  ahí la ausencia de líneas no prueba nada. Repetir el chequeo pide volver a correr la sonda.
+
+  **Lo que queda sin explicar:** la request ajena **no aparece como backend de Postgres** en
+  ninguna de las 12 muestras —solo se ven la compuerta (`idle in transaction`) y la del dueño
+  (`active`/`Lock`)—. ⚠️ Pero **12 muestras no son exhaustivas**: un backend que vivió entre
+  dos muestras no aparece. Y con `reusa=false` sabemos que **no reusó** contexto ajeno; si
+  llegó a abrir la suya en la base, eso **no se midió**.
+
+  **La principal candidata** —no "la única que queda", que sería afirmar una exhaustividad que
+  la medición no da— es `createQueryRunner()` y la emisión del `BEGIN`: la otra mitad de esa
+  capa, el `connect()`, la excluye la fila 1. Tampoco se miró lo que pasa **después** de que
+  `dataSource.transaction()` retorna —interceptores, serialización de la respuesta—: una
+  request que abrió y cerró su transacción entre dos muestras y se colgó en la salida daría
+  este mismo cuadro.
+
+  ⚠️ **El descarte del pool NO habilita a razonar "había una conexión idle, así que pg-pool no
+  podía encolar".** Este mismo archivo, en la entrada del `timeout exceeded when trying to
+  connect`, registra el estado `idle: 1` con `esperando: 1` y lo deja marcado como *"no lo sé,
+  y no lo invento"*. Lo que descarta esta fila es la **medición continua**, no ese argumento.
+
+  **El discriminador, y es por dónde hay que empezar: solo pasa si las dos están en vuelo
+  desde el principio.** Disparando la ajena **después** de que el dueño ya se encoló, contestó
+  en **53 ms** con la compuerta cerrada. ⚠️ Ese número sale de la **sonda**, no de un test:
+  **ese escenario no lo cubre ninguno**. Lo más parecido que sí corre es el paso 1 de
+  `caja.e2e-spec.ts` (describe "aislamiento multi-tenant"), y es **otro caso** —ahí la ajena
+  va sola, con la compuerta cerrada pero con el dueño todavía sin disparar—; además ese test
+  afirma *"volvió antes de que soltáramos"* y *"la cola quedó en 0"*, con presupuesto de 3 s:
+  **no mira latencia**, así que no fija ningún milisegundo. El 5 ms que citan ese test y
+  [`resueltos.md`](resueltos.md) es de **su** escenario, no de éste.
+
+  ⚠️ **Cuidado con desescalarlo por el encuadre.** Lo que se trabó no fue una segunda escritura
+  a la misma caja: fue una request **de otro tenant, sobre datos de otro tenant**. Si la causa
+  vive en el runtime y no en el harness, el radio es **cualquier request detrás de cualquier
+  request frenada** —cruza tenants y cruza pantallas— y eso es disponibilidad de producción.
+  ℹ️ **El test que lo destapó no depende de esto**: dispara en secuencia y suelta la compuerta
+  antes de esperar nada, así que nadie tiene que sospechar del e2e ya shippeado.
+
+  ℹ️ La sonda era un spec temporal y no quedó en el repo. Reconstruirla es media hora:
+  compuerta con `QueryRunner`, dos disparos sin `await`, un `app.use()` de sonda para saber
+  cuándo llega cada request, y muestreo de `pg_stat_activity` **por el pool** —no por la
+  compuerta: esa vista se cachea por transacción, ver el cierre del test en
+  [`resueltos.md`](resueltos.md)—. Para el pool **no hace falta inventar nada**: `setup-pool.ts`
+  ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
+  tiempo entre `createQueryRunner()` y el `BEGIN`.
 
 ## 3. Ya decidido, falta construir
 
