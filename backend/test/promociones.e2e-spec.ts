@@ -108,7 +108,10 @@ interface VentaCreateResponse {
   id: string;
   estado: string;
   canal: string;
+  totalBruto: string;
   totalDescuentos: string;
+  totalRecargos: string;
+  totalImpuestos: string;
   totalFinal: string;
   detalles: VentaDetalleLinea[];
 }
@@ -810,9 +813,14 @@ describe('Motor de promociones (e2e)', () => {
     afterAll(async () => {
       // Preferencia GLOBAL del tenant: se restaura para no contaminar otras
       // suites que compartan la base (misma higiene que `arqueo_ciego` en
-      // caja.e2e-spec.ts).
-      const restaurar = await putPrefs(original.promosAcumulanDescuentos);
-      expect(restaurar.status).toBe(200);
+      // caja.e2e-spec.ts). Guardado: si el `beforeAll` murió ANTES de asignar
+      // `original` (p. ej. el GET inicial falló), no hay nada que restaurar —
+      // sin el guard, este `afterAll` tiraría `Cannot read properties of
+      // undefined` y taparía el error real del `beforeAll`.
+      if (original !== undefined) {
+        const restaurar = await putPrefs(original.promosAcumulanDescuentos);
+        expect(restaurar.status).toBe(200);
+      }
     });
 
     it('default (no acumula): la venta aplica SOLO la promo, el descuento queda en 0 en la traza', async () => {
@@ -994,8 +1002,34 @@ describe('Motor de promociones (e2e)', () => {
       });
       expect(res.status).toBe(201);
       const venta = res.body as VentaCreateResponse;
+      // (a) La garantía de diseño del owner: el TOTAL cierra exacto al
+      // valorMonto del combo, en el dominio en que el cliente paga.
       expect(Number(venta.totalFinal)).toBe(9990);
-      expect(Number(venta.totalDescuentos)).toBe(1010);
+
+      // (b) Identidad agregada entre los componentes que la propia respuesta
+      // trae — ninguno se cuantiza aparte, se derivan (CLAUDE.md, motor de
+      // precios). `toBeCloseTo` en vez de `===` exacto: la resta de strings
+      // decimales vía `Number` puede arrastrar el error de representación
+      // binaria de punto flotante en el último decimal, no un error del motor.
+      const totalBruto = Number(venta.totalBruto);
+      const totalDescuentos = Number(venta.totalDescuentos);
+      const totalRecargos = Number(venta.totalRecargos);
+      const totalImpuestos = Number(venta.totalImpuestos);
+      expect(
+        totalBruto - totalDescuentos + totalRecargos + totalImpuestos,
+      ).toBeCloseTo(Number(venta.totalFinal), 4);
+
+      // (c) `totalDescuentos` vive en NETO, no en el dominio de LISTA en el
+      // que se prometió el combo (Σ etiquetas 11.000 − valorMonto 9.990 =
+      // 1.010 DE LISTA): es justo el bug de dominios que el motor corrigió
+      // (ver `promociones.evaluator.ts`, `LineaPromo.precioListaUnitario`),
+      // así que afirmar `1010` acá lo reintroduciría en el test. Con IVA
+      // 19% el neto sería ≈ 1010 / 1,19 ≈ 848, pero el número exacto depende
+      // de cómo cuantiza cada línea por separado — lo único que este test
+      // garantiza es que es positivo y estrictamente menor que el monto de
+      // lista.
+      expect(totalDescuentos).toBeGreaterThan(0);
+      expect(totalDescuentos).toBeLessThan(1010);
 
       const detalle = await detalleVenta(venta.id);
       expect(Number(detalle.totalFinal)).toBe(9990);
