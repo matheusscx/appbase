@@ -7,6 +7,14 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: tecnica_postgres
+    # `log_connections` deja en el log del servidor el instante en que Postgres
+    # acepta cada conexión. Es la mitad de servidor del `timeout exceeded when
+    # trying to connect` intermitente (`docs/agent/pendientes.md` § 2): sin esto,
+    # cuando el fallo aparece solo se tiene el lado del cliente y no se puede
+    # partir la cuenta. Va acá y no por `ALTER SYSTEM` porque `reset-db.sh` hace
+    # `down -v` y se lo lleva — y un paso manual después de cada reset es un paso
+    # que no va a estar puesto justo el día que el intermitente caiga.
+    command: postgres -c log_connections=on
     environment:
       POSTGRES_DB: ${DB_NAME:-tecnica_db}
       POSTGRES_USER: ${DB_USER:-dev_user}
