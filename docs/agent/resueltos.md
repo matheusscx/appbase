@@ -17,6 +17,124 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El lock de caja lleva el tenant adentro, y ahora hay una compuerta que lo prueba (2026-08-26)
+
+**Venía de la sección 2.** Texto verbatim:
+
+> - [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
+>   test** (backend) — el e2e prueba que la escritura ajena no prospera y que la caja queda
+>   intacta, pero no aísla cuál de las tres defensas la frena (`bloquearCajaAbierta` +
+>   `findOne` acotado + chequeo de dueño).
+>
+>   ⛔ **CORRECCIÓN medida el 2026-08-16: esta entrada afirmaba algo falso.** Decía que
+>   sacando el filtro de tenant *"la corrida se cuelga"*. **No se cuelga.** Con el
+>   `AND tenant_id = $2` sacado de `bloquearCajaAbierta`, el test solo corre en **3,7 s y
+>   pasa**, y el spec entero da **35/35 en 8,5 s**. Nunca hubo cuelgue que esquivar.
+>
+>   ✅ **Lo que pasa de verdad, y es más ordinario:** el mutante **sobrevive**. Las tres
+>   defensas son redundantes en la dimensión del tenant, así que sacar la primera deja que el
+>   `findOne` acotado produzca el mismo no-201 y ninguna aserción se mueve. No es que no se
+>   pueda medir el resultado: es que el resultado no cambia.
+>
+>   🔴 **Y por eso lo que queda ES el frente prohibido.** Lo único que el filtro de la primera
+>   defensa aporta por su cuenta es **no tomar un `FOR UPDATE` sobre la fila de otro tenant
+>   antes de rechazar**. No es un agujero de datos —el `findOne` frena igual— pero deja que un
+>   tenant bloquee la caja de otro mientras dura la transacción. Fijarlo con un test pide
+>   mirar `pg_locks`, o sea abrir **conexiones/deadlock**, que va aislado y nunca de arrastre.
+>   ➡️ **No se toca hasta que se abra esa tanda.** El docblock de `caja.e2e-spec.ts` ya quedó
+>   corregido para que nadie vuelva a planificar sobre el cuelgue que no existe.
+>   ℹ️ **2026-08-20: la tanda que estaba esperando se cerró** (ver `resueltos.md` § "El orden
+>   de bloqueo de filas de la bandeja de desfases"), así que **el motivo del diferimiento ya
+>   no existe**. Lo que sigue en pie es todo lo demás: sigue haciendo falta `pg_locks` para
+>   fijarlo, por lo que esta misma entrada explica arriba (el mutante sobrevive: las otras
+>   defensas son redundantes en el resultado).
+>   ⚠️ **Y NO es la misma forma que el sub-punto de tenant que se cerró en esa tanda**, aunque
+>   se parezcan de lejos — la comparación estaba escrita al revés en la primera versión de
+>   esta nota. En `aplicarDesfases` el `FOR UPDATE` era `WHERE item_id = ANY($1)` **sin filtro
+>   de tenant**, con la validación en un `SELECT` aparte que corría después: había algo que
+>   subir. Acá el `SELECT … FOR UPDATE` de `bloquearCajaAbierta` (`caja.service.ts`) ya lleva
+>   `AND tenant_id = $2` **dentro de la misma sentencia que toma el lock**, y Postgres no
+>   bloquea una fila que no matchea el `WHERE`. No hay validación separada que mover: el
+>   arreglo de allá no se transfiere. Quién retome esto decide si lo toma; lo único que
+>   cambió es que ya no hay tanda cerrada que esperar.
+
+**Lo que cambió respecto de lo que la entrada daba por necesario.** La entrada decía que
+fijarlo *"pide mirar `pg_locks`, o sea abrir conexiones/deadlock, que va aislado y nunca de
+arrastre"*. Mirar el estado de los locks sí hizo falta —por `pg_stat_activity`, no por
+`pg_locks`—, pero **abrir el frente no**: el que va aislado es *tocar* el orden de bloqueo,
+no *observarlo* desde un test. Este cierre **no cambia una línea de producción**.
+
+La técnica es la **compuerta** que este repo ya usa en `orden-locks-desfases.e2e-spec.ts` y
+`membresia-ultimo-admin.e2e-spec.ts`: un `QueryRunner` propio, fuera de Nest, retiene
+`SELECT … FOR UPDATE` sobre la caja de Paris, y con esa fila tomada se mide quién se encola.
+
+**Las dos mediciones del test, y por qué hacen falta las dos:**
+
+| | Qué hace | Qué prueba |
+|---|---|---|
+| El **otro tenant** escribe | vuelve con la compuerta cerrada, y la cola de esperadores **nunca sube de 0** | no es que esperó poco: no pasó por el lock |
+| El **dueño** escribe (mismo POST, mismo body) | se **encola** (1 esperador) y al soltar escribe (`201`) | el camino de escritura llega de verdad hasta ese `SELECT … FOR UPDATE` |
+
+Sin el segundo, el verde no se distingue del verde de un test mudo: si mañana un guard
+cortara la request antes del lock, el primero seguiría en verde y el filtro podría
+desaparecer sin que nadie se entere. Es el estándar que el propio repo ya fijó —`orden-locks-desfases.e2e-spec.ts` dice de su
+contador de esperadores que es *"lo que separa el verde real del verde de una compuerta que no
+enganchó"*— y lo pidió la revisión independiente, con razón.
+
+**Postgres no bloquea una fila que no matchea el `WHERE`**, así que con el
+`AND tenant_id = $2` adentro del `SELECT … FOR UPDATE` la sentencia no engancha nada y el
+403 sale de una: **5 ms con la fila tomada**, medido in-process en la corrida del propio
+test. Sin el filtro, engancha.
+
+**El mutante, medido, y confirma lo que la entrada afirmaba desde el 2026-08-16.**
+
+| Mutante | Resultado |
+|---|---|
+| `WHERE caja_id = $1 AND $2 = $2` (filtro neutralizado, misma aridad) | **cae el test nuevo; los otros 36 del spec siguen en verde** |
+
+O sea que el diagnóstico viejo era correcto: el mutante sobrevivía a todo el spec porque las
+tres defensas son redundantes **en el resultado**. Lo que faltaba no era medir mejor, era
+medir **otra cosa** —el lock, no el 403—.
+
+📌 **Por qué el mutante es `$2 = $2` y no borrar el `AND`:** sacando la condición entera, el
+`query` manda dos parámetros para una sentencia que usa uno y Postgres corta con *"bind
+message supplies 2 parameters"*: el spec fallaría por sintaxis y no por lo que se quiere
+medir. Neutralizar la condición manteniendo la aridad es la mutación fiel.
+
+---
+
+**Tres cosas que costaron el rato y valen más que el test:**
+
+🛑 **`pg_stat_activity` se cachea por transacción.** La primera versión contaba esperadores
+preguntándole a la conexión de la compuerta —que tiene una transacción abierta de punta a
+punta— y el contador **se quedaba pegado en la foto inicial**: cuatro lecturas byte a byte
+idénticas mientras la cola cambiaba de verdad. Con eso el test daba `0 esperadores` y parecía
+que el camino del dueño no llegaba al lock, cuando sí llegaba. El spec de desfases nunca lo
+sufrió porque pregunta por `ds.query` (pool), o sea una transacción implícita nueva cada vez.
+Éste ahora hace lo mismo, y el porqué quedó escrito en la función.
+
+⛔ **Un `await` sobre una request que puede encolarse cuelga la suite entera.** La versión
+intermedia esperaba la respuesta del otro tenant *antes* de soltar la compuerta. Con el
+filtro presente anda; con el mutante, esa request se encola detrás de la compuerta que solo
+se suelta en el `finally` → **abrazo mortal**: Jest marca el test por timeout a los 30 s pero
+la transacción queda viva y la corrida no termina (se cortó a mano a los 10 minutos, con
+`pg_stat_activity` mostrando dos requests esperando). En la versión final **nada se `await`ea
+mientras la compuerta está cerrada**: se dispara, se sondea, se suelta, y recién ahí se
+espera. Un mutante tiene que morir rojo, no colgado.
+
+📌 **El test devuelve la plata que movió, y el predicado importa más que la devolución.** El
+control del dueño es una entrada de $1.000 que se commitea de verdad; sin una salida que la
+compense, el arqueo del `afterAll` no cuadra, la caja termina `en_conciliacion` en vez de
+`cerrada`, **el cajón queda ocupado** y el spec siguiente revienta con un 409 que no tiene
+nada que ver. Pero la primera versión encendía la compensación **antes de disparar**, y ahí
+está el filo: si esa request muere en el camino —el `401` fantasma del puerto efímero, que
+sigue abierto, o un error de socket—, el `finally` retira $1.000 que **nunca entraron** y
+descuadra la caja por sí solo, sin que nada lo note (49.000 ≥ 0, así que la salida devuelve
+201 igual). Ahora el predicado es el **201 observado**. Y el `expect` de la compensación solo
+corre si el `try` cerró limpio: un throw ahí adentro **reemplaza** el diagnóstico del test, o
+sea que el día que el mutante lo mate el mensaje diría "expected 201" en vez de "el ajeno se
+encoló".
+
 ## El precio extra se muestra en la moneda de la receta, no en la del tenant (2026-08-26)
 
 **Venía de la sección 3.** Texto verbatim:

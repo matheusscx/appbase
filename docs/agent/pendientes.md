@@ -102,43 +102,6 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
-  test** (backend) — el e2e prueba que la escritura ajena no prospera y que la caja queda
-  intacta, pero no aísla cuál de las tres defensas la frena (`bloquearCajaAbierta` +
-  `findOne` acotado + chequeo de dueño).
-
-  ⛔ **CORRECCIÓN medida el 2026-08-16: esta entrada afirmaba algo falso.** Decía que
-  sacando el filtro de tenant *"la corrida se cuelga"*. **No se cuelga.** Con el
-  `AND tenant_id = $2` sacado de `bloquearCajaAbierta`, el test solo corre en **3,7 s y
-  pasa**, y el spec entero da **35/35 en 8,5 s**. Nunca hubo cuelgue que esquivar.
-
-  ✅ **Lo que pasa de verdad, y es más ordinario:** el mutante **sobrevive**. Las tres
-  defensas son redundantes en la dimensión del tenant, así que sacar la primera deja que el
-  `findOne` acotado produzca el mismo no-201 y ninguna aserción se mueve. No es que no se
-  pueda medir el resultado: es que el resultado no cambia.
-
-  🔴 **Y por eso lo que queda ES el frente prohibido.** Lo único que el filtro de la primera
-  defensa aporta por su cuenta es **no tomar un `FOR UPDATE` sobre la fila de otro tenant
-  antes de rechazar**. No es un agujero de datos —el `findOne` frena igual— pero deja que un
-  tenant bloquee la caja de otro mientras dura la transacción. Fijarlo con un test pide
-  mirar `pg_locks`, o sea abrir **conexiones/deadlock**, que va aislado y nunca de arrastre.
-  ➡️ **No se toca hasta que se abra esa tanda.** El docblock de `caja.e2e-spec.ts` ya quedó
-  corregido para que nadie vuelva a planificar sobre el cuelgue que no existe.
-  ℹ️ **2026-08-20: la tanda que estaba esperando se cerró** (ver `resueltos.md` § "El orden
-  de bloqueo de filas de la bandeja de desfases"), así que **el motivo del diferimiento ya
-  no existe**. Lo que sigue en pie es todo lo demás: sigue haciendo falta `pg_locks` para
-  fijarlo, por lo que esta misma entrada explica arriba (el mutante sobrevive: las otras
-  defensas son redundantes en el resultado).
-  ⚠️ **Y NO es la misma forma que el sub-punto de tenant que se cerró en esa tanda**, aunque
-  se parezcan de lejos — la comparación estaba escrita al revés en la primera versión de
-  esta nota. En `aplicarDesfases` el `FOR UPDATE` era `WHERE item_id = ANY($1)` **sin filtro
-  de tenant**, con la validación en un `SELECT` aparte que corría después: había algo que
-  subir. Acá el `SELECT … FOR UPDATE` de `bloquearCajaAbierta` (`caja.service.ts`) ya lleva
-  `AND tenant_id = $2` **dentro de la misma sentencia que toma el lock**, y Postgres no
-  bloquea una fila que no matchea el `WHERE`. No hay validación separada que mover: el
-  arreglo de allá no se transfiere. Quién retome esto decide si lo toma; lo único que
-  cambió es que ya no hay tanda cerrada que esperar.
-
 - [ ] **El `401` fantasma del e2e REAPARECIÓ después de darlo por cerrado** (harness de test,
   medido 2026-08-25 19:52) — se cerró esa misma mañana
   ([`resueltos.md`](resueltos.md) § *"El `401` fantasma no era nuestro"*) con
@@ -466,6 +429,42 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   "precio extra" del **aplicar en lote** de `grupos-modificadores.vue` se quedó con `UInput`
   pelado el 2026-08-26 en vez de estrenar `MoneyInput` — ahí el mismo número se aplica a **N
   recetas de una sola vez**, así que el ×10 se multiplica por N. Está escrito en el template.
+
+### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
+
+- [ ] **Observado mientras se escribía el test de compuerta de caja; medido, NO explicado**
+  (harness de test y/o pool) — con la compuerta reteniendo `FOR UPDATE` sobre una caja, se
+  dispararon **dos requests a la vez**: la del dueño (que sí se encola en ese lock) y la de
+  **otro tenant**, que por el filtro de tenant no debería tocar ese lock y que **disparada
+  sola vuelve en 5 ms** —eso último sí está fijado por un test: es el paso 1 del test de
+  compuerta que se shippeó el mismo día—. Medido con `Date.now()` en el
+  callback de cada una: **ninguna de las dos volvió hasta que se soltó la compuerta**, y las
+  dos resolvieron en el mismo milisegundo. Dos corridas, con presupuestos distintos
+  (1.530 ms y 3.046 ms): las respuestas siguieron al presupuesto, o sea al rollback, no a un
+  timeout fijo. Una `GET` liviana disparada en el mismo momento **sí** contestó (200), así que
+  **descarta el event loop y el socket** — y solo esos dos: no dice nada sobre el pool ni
+  sobre `db.transaccion`, que es justamente donde apunta la sospecha.
+  Para el dueño hay explicación —lo destraba el rollback—; **para el ajeno no**: con el filtro
+  de tenant adentro del `SELECT … FOR UPDATE` no debería tocar ese lock, y solo tarda cuando
+  hay otra request encolada.
+  ⚠️ **Lo que NO sirve de esa sesión:** las lecturas de `pg_stat_activity` que se hicieron
+  entonces salían de la conexión de la compuerta, y esa vista **se cachea por transacción**
+  (ver el cierre del test en [`resueltos.md`](resueltos.md)), así que la evidencia del lado de
+  la base es **inservible** y hay que rehacerla. Contar por `ds.query` —pool, transacción
+  implícita nueva— es lo que ve la foto de ahora.
+  **Por dónde seguir:** repetir el escenario contando esperadores y conexiones desde el pool, y
+  mirar si la segunda request llega a pedir conexión (¿pg-pool encolando?) o se queda antes.
+  Ojo que puede ser pariente del otro intermitente de esta sección: el `connectTimeoutMS: 5000`
+  de `app.module.ts` y el `ms: 5002` que se vio en el error de pg-pool.
+  ⚠️ **Cuidado con desescalarlo por el encuadre.** Lo que se trabó no fue una segunda
+  escritura a la misma caja: fue una request **de otro tenant, sobre datos de otro tenant**.
+  Si la causa resulta ser serialización en el pool o en `db.transaccion`, el radio no es "dos
+  escrituras a la misma fila" sino **cualquier request detrás de cualquier request frenada**
+  —cruza tenants y cruza pantallas— y eso es disponibilidad de producción, no una curiosidad
+  del harness. Lo único que hoy se puede decir sin medir más es que **el test que lo destapó
+  no depende de esto** (dispara en secuencia y suelta antes de esperar). Cuánto vale la
+  entrada depende de qué conteste la medición de arriba: mientras no se haga, no se sabe si
+  es del harness o del pool.
 
 ## 3. Ya decidido, falta construir
 
@@ -2021,9 +2020,11 @@ lectura** de caja, la capa SQL de `propina-reportes` y `HORAS_TRABAJADAS`; más 
 porcentajes) que **no** agregan cobertura de rama: los mataban tests unitarios preexistentes.
 Detalle, mutantes y lo que quedó sin fijar en [`resueltos.md`](resueltos.md).
 
-Lo que la tanda dejó abierto y antes no estaba anotado —el scoping por tenant del camino
-de **escritura** de caja, que ningún test fija— está en la sección 2: cerrarlo empieza por
-medir, no por escribir el `expect`.
+✅ Lo que la tanda dejó abierto y antes no estaba anotado —el scoping por tenant del camino
+de **escritura** de caja, que ningún test fijaba— **se cerró el 2026-08-26** con un test de
+compuerta ([`resueltos.md`](resueltos.md)). Y confirmó lo que decía esta nota: empezaba por
+medir. El `expect` que faltaba no era sobre el 403 —ése no cambia con o sin el filtro— sino
+sobre el **lock**.
 
 ### Auditoría `items` + `calculo-precios` (2026-07-28) — hallazgos confirmados
 

@@ -2008,10 +2008,12 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
    * Lo único que el filtro de la PRIMERA aporta por su cuenta es **no tomar un
    * `FOR UPDATE` sobre la fila de otro tenant antes de rechazar**. Eso no es un
    * agujero de datos —el `findOne` frena igual— pero sí deja que un tenant
-   * bloquee la caja de otro mientras dura la transacción. Observarlo pide mirar
-   * `pg_locks`, o sea el frente 🔴 de conexiones/deadlock, que en este proyecto
-   * va aislado y nunca de arrastre (`CLAUDE.md`). Por eso sigue sin test y por
-   * eso la entrada de `pendientes.md` quedó reescrita en vez de cerrada.
+   * bloquee la caja de otro mientras dura la transacción.
+   * ✅ **Eso ya tiene su test (2026-08-26): el que sigue abajo.** No hizo falta
+   * mirar `pg_locks` ni abrir el frente de conexiones/deadlock: una compuerta
+   * que retiene el lock desde afuera hace observable el bloqueo con una
+   * aserción de orden. Este test de acá sigue midiendo lo otro —que la
+   * escritura no prospera— y sigue siendo el que NO discrimina el filtro.
    *
    * Lo que sí fija, y es lo que importa: la escritura **no prospera** y la caja
    * del otro tenant **queda intacta**. Un conteo ajeno le congelaría el arqueo
@@ -2041,6 +2043,208 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
     const caja = despues.body as { estado: string; saldoInicial: string };
     expect(caja.estado).toBe('abierta');
     expect(Number(caja.saldoInicial)).toBe(50000);
+  });
+
+  /**
+   * El test que le faltaba al de arriba (2026-08-26). Aquél fija que la
+   * escritura ajena **no prospera**; éste fija lo único que el filtro de tenant
+   * de `bloquearCajaAbierta` aporta **por su cuenta**: no tomar un `FOR UPDATE`
+   * sobre la fila de otro tenant antes de rechazar.
+   *
+   * Por qué hacía falta uno aparte: las tres defensas de la escritura —el lock,
+   * el `findOne` acotado y el chequeo de dueño— son redundantes en la dimensión
+   * del tenant, así que sacarle el `AND tenant_id = $2` al lock deja que la
+   * segunda produzca el mismo no-201 y **ninguna aserción de arriba se mueve**
+   * (medido el 2026-08-16: el mutante sobrevive, y el spec entero sigue en
+   * verde). Lo que cambia no es el resultado, es si la fila ajena quedó
+   * bloqueada mientras dura la transacción.
+   *
+   * Cómo se observa sin mirar `pg_locks`: una **compuerta**, la misma técnica de
+   * `orden-locks-desfases.e2e-spec.ts` y `membresia-ultimo-admin.e2e-spec.ts`.
+   * Un `QueryRunner` propio, fuera de Nest, retiene `FOR UPDATE` sobre la caja
+   * de Paris; entonces el otro tenant intenta escribir. Con el filtro adentro
+   * del `SELECT … FOR UPDATE`, Postgres no bloquea una fila que no matchea el
+   * `WHERE`: el rechazo llega **con la compuerta todavía cerrada**. Sin el
+   * filtro, la sentencia matchea y se queda esperando a que la compuerta suelte.
+   *
+   * ⚠️ **Hay DOS presupuestos de tiempo, y conviene saberlo antes de que
+   * parpadee:** 3 s para que conteste el tenant ajeno y 5 s para que el dueño
+   * se encole. Lo que se afirma es el orden de los eventos, no un tiempo, pero
+   * si en una máquina cargada alguno se pasara de su presupuesto el rojo sería
+   * indistinguible del que produce el mutante. El margen medido para el primero
+   * son casi tres órdenes de magnitud —el 403 ajeno tardó **5 ms** con la fila
+   * tomada, medido in-process en esta misma corrida, contra un presupuesto de
+   * 3.000—, así que el riesgo es bajo; si igual parpadea, los sospechosos son estos dos números. Los sondeos
+   * son de 25 ms, así que el camino sano cuesta lo que tardan las dos requests,
+   * no los presupuestos.
+   */
+  it('la escritura ajena ni siquiera bloquea la fila: el tenant va DENTRO del `FOR UPDATE`', async () => {
+    const ds = app.get(DataSource);
+    const runner = ds.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+
+    /**
+     * Cuántos backends de Postgres están esperando el lock de `cajas` ahora
+     * mismo. Es la medición que el repo usa para los locks
+     * (`orden-locks-desfases.e2e-spec.ts`), y no un cronómetro: cuenta
+     * esperadores, no milisegundos.
+     *
+     * 🛑 **Va por el pool (`ds.query`), NUNCA por la conexión de la compuerta**,
+     * y eso no es estilo: `pg_stat_activity` se **cachea por transacción**. La
+     * primera lectura congela la foto y todas las siguientes DENTRO de la misma
+     * transacción devuelven esa. Preguntándole a la compuerta —que tiene una
+     * transacción abierta de punta a punta— el contador se queda pegado en lo
+     * que hubiera al principio: medido, cuatro lecturas byte a byte idénticas
+     * mientras la cola cambiaba. Cada `ds.query` corre en su propia
+     * transacción implícita, así que siempre ve la foto de ahora.
+     * ℹ️ Si alguna vez hace falta leerla DESDE adentro de una transacción, la
+     * válvula existe: `SELECT pg_stat_clear_snapshot()` antes de cada lectura.
+     */
+    async function esperandoElLockDeCajas(): Promise<number> {
+      // ⚠️ El `LIKE` ata la medición al TEXTO de la query de
+      // `bloquearCajaAbierta` (`caja.service.ts`): si alguien la reformatea o la
+      // pasa a query builder (con el nombre entrecomillado), esto deja de
+      // matchear y el test
+      // se pone rojo apuntando al lugar equivocado. Falla hacia el rojo, nunca
+      // hacia el verde, que es la misma propiedad que hace seguros los conteos
+      // exactos de abajo sobre una base compartida con el contenedor: un
+      // esperador de más rompe el test, no lo aprueba.
+      const filas: { n: number }[] = await ds.query(
+        `SELECT count(*)::int AS n
+           FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE '%FROM cajas%'`,
+      );
+      return Number(filas[0]?.n ?? 0);
+    }
+
+    /** Dispara sin esperar: nada se `await`ea mientras la compuerta está
+     *  cerrada, así que un camino que se encole no cuelga el spec. El handler
+     *  va puesto YA y no re-lanza, para no dejar una rejection sin dueño. */
+    function movimiento(
+      tipo: 'entrada' | 'salida',
+      token: string,
+      concepto: string,
+    ) {
+      const estado = { respondio: false };
+      const promesa = request(app.getHttpServer())
+        .post(`/api/caja/${cajaParisId}/movimientos`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ tipo, concepto, monto: '1000.0000' })
+        .then(
+          (r) => {
+            estado.respondio = true;
+            return r;
+          },
+          () => {
+            estado.respondio = true;
+            return undefined;
+          },
+        );
+      return { estado, promesa };
+    }
+
+    /** Se enciende SOLO si la entrada del control se commiteó de verdad.
+     *  ℹ️ Queda una cola inversa, conocida y no cubierta: si el `try` tirara
+     *  ENTRE el disparo del control y esta bandera —un `ds.query` del sondeo,
+     *  o el propio `rollbackTransaction()`—, la request en vuelo commitea sus
+     *  $1.000 y nadie los devuelve. Es mucho más angosta que la que esto
+     *  arregla (aquélla la disparaba el `401` fantasma, que está vivo) y
+     *  cerrarla pediría leer el efectivo de la caja en el `finally` en vez de
+     *  llevar bandera: más maquinaria de la que el riesgo justifica, hoy. Atarlo
+     *  a "la disparé" saca $1.000 que nunca entraron cuando la request muere en
+     *  el camino (un `401` del puerto efímero, un error de socket), y eso
+     *  descuadra el arqueo del `afterAll` → la caja termina `en_conciliacion`,
+     *  el cajón queda ocupado y el spec siguiente revienta con un 409 críptico. */
+    let entroLaPlata = false;
+    /** El `try` llegó hasta el final sin tirar. Sirve para no pisar el
+     *  diagnóstico del test con el de la compensación. */
+    let cerroLimpio = false;
+    try {
+      const retenida: { caja_id: string }[] = await runner.query(
+        `SELECT caja_id FROM cajas
+          WHERE caja_id = $1 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [cajaParisId],
+      );
+      // La compuerta enganchó. Sin esto, una que no enganchara dejaría pasar el
+      // test aunque el lock ajeno se tomara igual.
+      expect(retenida).toHaveLength(1);
+      expect(await esperandoElLockDeCajas()).toBe(0);
+
+      // 1) El OTRO tenant escribe con la compuerta cerrada.
+      const ajeno = movimiento('entrada', tokenFalabella, 'E2E lock ajeno');
+      let colaConElAjeno = 0;
+      const limiteAjeno = Date.now() + 3000;
+      while (!ajeno.estado.respondio && Date.now() < limiteAjeno) {
+        await new Promise((r) => setTimeout(r, 25));
+        colaConElAjeno = Math.max(
+          colaConElAjeno,
+          await esperandoElLockDeCajas(),
+        );
+      }
+      const ajenoRespondioConLaCompuertaCerrada = ajeno.estado.respondio;
+
+      // 2) ⚓ El control que separa este verde del verde de un test mudo: el
+      //    MISMO POST, mismo endpoint y mismo body, hecho por el DUEÑO. Recorre
+      //    el camino entero hasta ese mismo `SELECT … FOR UPDATE`, ahí sí
+      //    matchea, y **tiene que encolarse**. Si algo cortara la request antes
+      //    del lock (un guard, el `ValidationPipe`, el `401` del puerto
+      //    efímero), la cola quedaría vacía y el test se pondría rojo por el
+      //    motivo correcto, en vez de quedarse verde sin haber ejercitado nada.
+      const propio = movimiento('entrada', tokenParis, 'E2E lock propio');
+      let colaConElDueño = 0;
+      const limitePropio = Date.now() + 5000;
+      while (colaConElDueño === 0 && Date.now() < limitePropio) {
+        await new Promise((r) => setTimeout(r, 25));
+        colaConElDueño = await esperandoElLockDeCajas();
+      }
+
+      // Soltamos ANTES de afirmar y ANTES de esperar nada: lo que esté encolado
+      // hay que destrabarlo igual, o el spec se cuelga en el `afterAll`.
+      await runner.rollbackTransaction();
+      const resAjeno = await ajeno.promesa;
+      const resPropio = await propio.promesa;
+      entroLaPlata = resPropio?.status === 201;
+
+      // El ajeno volvió sin que soltáramos, y —lo que de verdad discrimina— no
+      // llegó a encolarse: no es que esperó poco, es que no pasó por el lock.
+      expect(ajenoRespondioConLaCompuertaCerrada).toBe(true);
+      expect(colaConElAjeno).toBe(0);
+      expect(resAjeno?.status).not.toBe(201);
+      // El dueño sí se encoló, y al soltar escribió: su request estaba viva y
+      // detenida en el lock, no muerta en el camino.
+      expect(colaConElDueño).toBe(1);
+      expect(resPropio?.status).toBe(201);
+      cerroLimpio = true;
+    } finally {
+      if (runner.isTransactionActive) await runner.rollbackTransaction();
+      await runner.release();
+      // La entrada del control es plata de verdad en la caja: sin devolverla el
+      // arqueo del `afterAll` no cuadra y la caja termina `en_conciliacion` en
+      // vez de `cerrada`. El test deja la caja como la encontró.
+      if (entroLaPlata) {
+        const vuelta = await movimiento(
+          'salida',
+          tokenParis,
+          'E2E lock propio (devolución)',
+        ).promesa;
+        // El `expect` solo cuando el `try` cerró limpio: si el test ya venía
+        // rojo, un throw acá REEMPLAZA su diagnóstico —el día que el mutante lo
+        // mate, el mensaje diría "expected 201" en vez de "el ajeno se encoló"—.
+        if (cerroLimpio) {
+          expect(vuelta?.status).toBe(201);
+        } else if (vuelta?.status !== 201) {
+          console.error(
+            'La devolución de la compensación falló:',
+            vuelta?.status,
+            '— la caja queda descuadrada y el afterAll va a fallar por eso.',
+          );
+        }
+      }
+    }
   });
 });
 
