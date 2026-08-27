@@ -4,6 +4,7 @@ import {
   buildPrecuentaTicket,
   buildBoletaTicket,
   agregarImpuestosVenta,
+  agregarPromocionesVenta,
   formatTasaPorcentaje,
 } from './ticket-builder'
 
@@ -352,6 +353,29 @@ describe('buildBoletaTicket', () => {
     expect(lines).toContain('  - Sin Cebolla')
     expect(lines).toContain('  + Extra Queso')
   })
+
+  it('imprime la promoción NOMBRADA con signo negativo, no fundida en el agregado de Descuento', () => {
+    // totalDescuentos = 5500 = 500 de catálogo + 5000 de la promo: el agregado
+    // "Descuento" tiene que quedar en 500 (no en 5500) y la promo aparece aparte.
+    const lines = boleta({
+      totales: { ...TOTALES_BASE, totalDescuentos: '5500' },
+      promociones: [{ id: 'promo-1', nombre: '2x1 martes', monto: '5000' }],
+    })
+    expect(lines.some(l => l.startsWith('Descuento') && l.includes('-$500'))).toBe(true)
+    expect(lines.some(l => l.startsWith('2x1 martes') && l.includes('-$5000'))).toBe(true)
+  })
+
+  it('una promoción sin monto no se imprime — mismo molde que el recargo en cero', () => {
+    const lines = boleta({
+      promociones: [{ id: 'promo-1', nombre: 'Promo pausada', monto: '0' }],
+    })
+    expect(lines.some(l => l.startsWith('Promo pausada'))).toBe(false)
+  })
+
+  it('sin promociones no cambia el comportamiento existente del agregado Descuento', () => {
+    const lines = boleta({ totales: { ...TOTALES_BASE, totalDescuentos: '500' } })
+    expect(lines.some(l => l.startsWith('Descuento') && l.includes('-$500'))).toBe(true)
+  })
 })
 
 describe('agregarImpuestosVenta', () => {
@@ -378,6 +402,34 @@ describe('agregarImpuestosVenta', () => {
     expect(r).toEqual([
       { nombre: 'IVA', tasa: '0.19', monto: '1900' },
       { nombre: 'ILA', tasa: '0.10', monto: '1500' },
+    ])
+  })
+})
+
+describe('agregarPromocionesVenta', () => {
+  it('devuelve [] si ninguna línea tiene promociones', () => {
+    expect(agregarPromocionesVenta([{ trazas: { promociones: [] } }])).toEqual([])
+  })
+
+  it('suma la misma promo en varias líneas agrupando por id (2x1 repartido en dos líneas)', () => {
+    const r = agregarPromocionesVenta([
+      { trazas: { promociones: [{ id: 'p1', nombre: '2x1 martes', monto: '2500' }] } },
+      { trazas: { promociones: [{ id: 'p1', nombre: '2x1 martes', monto: '2500' }] } },
+    ])
+    expect(r).toEqual([{ id: 'p1', nombre: '2x1 martes', monto: '5000' }])
+  })
+
+  it('conserva múltiples promociones en orden de primera aparición', () => {
+    const r = agregarPromocionesVenta([
+      { trazas: { promociones: [
+        { id: 'p1', nombre: '2x1 martes', monto: '2500' },
+        { id: 'p2', nombre: 'Combo almuerzo', monto: '1000' },
+      ] } },
+      { trazas: { promociones: [{ id: 'p2', nombre: 'Combo almuerzo', monto: '500' }] } },
+    ])
+    expect(r).toEqual([
+      { id: 'p1', nombre: '2x1 martes', monto: '2500' },
+      { id: 'p2', nombre: 'Combo almuerzo', monto: '1500' },
     ])
   })
 })

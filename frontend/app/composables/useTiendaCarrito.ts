@@ -46,6 +46,11 @@ export function useTiendaCarrito() {
   // `persistKey` porque el carrito de la tienda sobrevive la navegación a
   // /tienda/pasarela y de vuelta: el resultado tiene que volver con él, si no
   // los totales quedan vacíos hasta que el comprador toque algo.
+  //
+  // `canal: 'online'` porque este `calcular` es el único que no cobra —el
+  // cobro real (`POST /online/pagar`) lo fuerza el backend igual— así que sin
+  // esto la previsualización evaluaría promos de canal físico y mostraría un
+  // total distinto del que el checkout va a cobrar de verdad.
   const {
     resultado,
     loading: loadingCalculo,
@@ -53,7 +58,7 @@ export function useTiendaCarrito() {
     asegurarVigente,
     limpiar: limpiarResultado,
   } = useResultadoCalculado(
-    () => toCalcularInput(lineas.value),
+    () => ({ ...toCalcularInput(lineas.value), canal: 'online' }),
     { debounceMs: 300, persistKey: 'tienda-carrito' },
   )
 

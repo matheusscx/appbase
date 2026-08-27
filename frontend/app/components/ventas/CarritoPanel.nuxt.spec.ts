@@ -45,7 +45,7 @@ function resultadoConAvisoEn(indice: number, cantidadLineas: number): ResultadoV
       recargoAplicado: '0',
       impuestoAplicado: '0',
       totalLinea: '1000',
-      trazas: { descuentos: [], recargos: [], impuestos: [] },
+      trazas: { descuentos: [], recargos: [], impuestos: [], promociones: [] },
       advertencias: i === indice
         ? [{ titulo: 'Descuento topeado', detalle: 'superaba el monto disponible' }]
         : [],

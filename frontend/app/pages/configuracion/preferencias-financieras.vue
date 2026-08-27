@@ -22,10 +22,16 @@ const montoTolerancia = ref<string>('0')
 // contrario de la tolerancia de arriba, donde `0` significa "cero tolerancia".
 const umbralDescuadreAviso = ref<string>('0')
 const umbralDescuadreAlto = ref<string>('0')
+const promosAcumulanDescuentos = ref<boolean>(false)
 
 const calculoOptions = [
   { value: 'base', label: 'Sobre monto base', description: 'Todos se calculan sobre el precio neto' },
   { value: 'compuesto', label: 'En cascada (compuesto)', description: 'Cada uno se aplica sobre el resultado del anterior' },
+]
+
+const promosAcumulanOptions = [
+  { value: true, label: 'Se suman', description: 'El cliente recibe la promoción y el descuento juntos.' },
+  { value: false, label: 'Aplica solo la rebaja mayor', description: 'Entre la promoción y el descuento, se aplica el que rebaja más.' },
 ]
 
 const modoRedondeoOptions = [
@@ -59,6 +65,7 @@ async function cargar() {
       montoTolerancia: string
       umbralDescuadreAviso: string
       umbralDescuadreAlto: string
+      promosAcumulanDescuentos: boolean
     }>(`${apiUrl}/tenants/preferencias-financieras`)
     calculoDescuentos.value = data.calculoDescuentos as 'base' | 'compuesto'
     calculoRecargos.value = data.calculoRecargos as 'base' | 'compuesto'
@@ -69,6 +76,7 @@ async function cargar() {
     montoTolerancia.value = data.montoTolerancia
     umbralDescuadreAviso.value = data.umbralDescuadreAviso
     umbralDescuadreAlto.value = data.umbralDescuadreAlto
+    promosAcumulanDescuentos.value = data.promosAcumulanDescuentos
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar preferencias'), color: 'error' })
@@ -89,6 +97,7 @@ const formState = computed(() => ({
   montoTolerancia: montoTolerancia.value,
   umbralDescuadreAviso: umbralDescuadreAviso.value,
   umbralDescuadreAlto: umbralDescuadreAlto.value,
+  promosAcumulanDescuentos: promosAcumulanDescuentos.value,
 }))
 
 async function guardar() {
@@ -106,6 +115,7 @@ async function guardar() {
         montoTolerancia: montoTolerancia.value,
         umbralDescuadreAviso: umbralDescuadreAviso.value,
         umbralDescuadreAlto: umbralDescuadreAlto.value,
+        promosAcumulanDescuentos: promosAcumulanDescuentos.value,
       },
     })
     // El admin puede acabar de cambiar `modoRedondeo`: sin esto, `useMonedaConversion`
@@ -164,6 +174,24 @@ function moverAbajo(index: number) {
             <URadioGroup
               v-model="calculoDescuentos"
               :items="calculoOptions"
+              value-key="value"
+            />
+          </div>
+
+          <USeparator />
+
+          <!-- Promociones vs. descuentos -->
+          <div class="space-y-2">
+            <p class="font-medium text-default">
+              Promociones y descuentos
+            </p>
+            <p class="text-sm text-muted">
+              Cuando una promoción y un descuento tocan el mismo producto: ¿se suman, o
+              aplica solo la rebaja mayor?
+            </p>
+            <URadioGroup
+              v-model="promosAcumulanDescuentos"
+              :items="promosAcumulanOptions"
               value-key="value"
             />
           </div>

@@ -20,7 +20,7 @@ import { personalizacionVacia, type PersonalizacionPayload } from '~/composables
 import type { Turno } from '~/composables/useTurnos'
 import type { SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
-import { agregarImpuestosVenta } from '~/utils/ticket-builder'
+import { agregarImpuestosVenta, agregarPromocionesVenta } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -1143,6 +1143,7 @@ async function imprimirPrecuenta() {
       items: itemsParaTicket(activeCuenta.value, res),
       totales: res.totales,
       impuestos: agregarImpuestosVenta(res.lineas),
+      promociones: agregarPromocionesVenta(res.lineas),
       ...(propinaHabilitada.value && new Decimal(propinaPorcentaje.value || '0').gt(0)
         ? { propinaSugerida: {
             porcentaje: propinaPorcentaje.value,
@@ -1240,6 +1241,7 @@ async function cerrarCuentaConPin(
           items: itemsParaTicket(cuentaCerrada, resultadoCerrado),
           totales: resultadoCerrado.totales,
           impuestos: agregarImpuestosVenta(resultadoCerrado.lineas),
+          promociones: agregarPromocionesVenta(resultadoCerrado.lineas),
           ...(propinaHabilitada.value && new Decimal(tipMonto).gt(0) ? { propina: { monto: tipMonto } } : {}),
           pagos: pagos.map(p => ({
             nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
@@ -1557,6 +1559,7 @@ async function cerrarCuentaConPin(
                       </p>
                       <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
                       <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
+                      <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
                     </div>
                     <AppCantidadInput
                       :model-value="presentacionLinea(linea)"
