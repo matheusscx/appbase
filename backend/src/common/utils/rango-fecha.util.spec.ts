@@ -5,6 +5,7 @@ import {
   bordeHastaSql,
   esFechaPura,
   fechaLocalTenant,
+  instanteLocalTenant,
   requiereZonaTenant,
   zonaHorariaTenant,
 } from './rango-fecha.util';
@@ -140,6 +141,87 @@ describe('rango-fecha.util', () => {
         new Date('2026-03-05T15:00:00Z'),
       );
       expect(fecha).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  describe('instanteLocalTenant', () => {
+    const TENANT = 'tenant-uuid';
+
+    function dbConZona(zona: string) {
+      return {
+        query: jest.fn().mockResolvedValue([{ zona_horaria: zona }]),
+      } as unknown as DataSource;
+    }
+
+    it('colapsa al {fecha, hora, diaIso} del LOCAL, no de UTC', async () => {
+      // Mismo instante que el primer caso de fechaLocalTenant: 02:30 UTC del
+      // 1-dic todavía es 23:30 del 30-nov en Chile (UTC-3 en verano).
+      const instante = new Date('2026-12-01T02:30:00Z');
+      await expect(
+        instanteLocalTenant(dbConZona('America/Santiago'), TENANT, instante),
+      ).resolves.toEqual({ fecha: '2026-11-30', hora: '23:30', diaIso: 1 }); // lunes
+    });
+
+    it('respeta la zona de la provincia también para hora y día ISO', async () => {
+      // Mismo instante que el segundo caso de fechaLocalTenant: Isla de Pascua
+      // va dos horas detrás del continente.
+      const instante = new Date('2026-12-01T04:30:00Z');
+      const santiago = await instanteLocalTenant(
+        dbConZona('America/Santiago'),
+        TENANT,
+        instante,
+      );
+      const pascua = await instanteLocalTenant(
+        dbConZona('Pacific/Easter'),
+        TENANT,
+        instante,
+      );
+      expect(santiago).toEqual({
+        fecha: '2026-12-01',
+        hora: '01:30',
+        diaIso: 2,
+      }); // martes
+      expect(pascua).toEqual({ fecha: '2026-11-30', hora: '23:30', diaIso: 1 }); // lunes
+    });
+
+    it('diaIso en el borde de semana: domingo → 7, lunes → 1', async () => {
+      // 2026-11-29 es domingo local en Santiago (UTC-3); 2026-11-30 es lunes.
+      const domingo = await instanteLocalTenant(
+        dbConZona('America/Santiago'),
+        TENANT,
+        new Date('2026-11-29T15:00:00Z'),
+      );
+      const lunes = await instanteLocalTenant(
+        dbConZona('America/Santiago'),
+        TENANT,
+        new Date('2026-11-30T15:00:00Z'),
+      );
+      expect(domingo.diaIso).toBe(7);
+      expect(lunes.diaIso).toBe(1);
+    });
+
+    // Algunas combinaciones de locale/hourCycle de Intl devuelven '24:00' para
+    // la medianoche exacta en vez de '00:00' — hay que fijar hourCycle 'h23'
+    // explícito y no confiar en el default de hour12:false.
+    it('la medianoche exacta del local es 00:00, no 24:00', async () => {
+      // 03:00 UTC es exactamente medianoche en Santiago (UTC-3).
+      const medianoche = new Date('2026-12-01T03:00:00Z');
+      const { hora } = await instanteLocalTenant(
+        dbConZona('America/Santiago'),
+        TENANT,
+        medianoche,
+      );
+      expect(hora).toBe('00:00');
+      expect(hora).not.toBe('24:00');
+    });
+
+    it('reusa la misma resolución de zona que fechaLocalTenant (una sola query)', async () => {
+      const { query } = dbConZona('America/Santiago') as unknown as {
+        query: jest.Mock;
+      };
+      const db = { query } as unknown as DataSource;
+      await instanteLocalTenant(db, TENANT, new Date('2026-03-05T15:00:00Z'));
+      expect(query).toHaveBeenCalledTimes(1);
     });
   });
 
