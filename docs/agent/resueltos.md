@@ -1722,7 +1722,23 @@ Idéntica, byte por byte, a lo capturado en el e2e.
 - **Verde al repetir**: otro puerto.
 - **El `TypeError: resMiembros.body.find is not a function`** del primer avistaje: un body
   vacío no es un array.
-- **Y por qué CI casi no lo veía**: allá no hay un Battle.net escuchando.
+- **Y por qué CI casi no lo veía**: se anotó *"allá no hay un Battle.net escuchando"*, y la
+  razón real es más fuerte — **en Linux el hueco no existe**. Medido el 2026-08-27 adentro del
+  contenedor del backend (Linux 6.10): con `127.0.0.1:P` tomado, el bind al wildcard sobre `P`
+  da **`EADDRINUSE`**, mientras que en macOS entra sin error. O sea que ni CI ni el contenedor
+  estuvieron nunca expuestos, y el frente es **exclusivamente del harness local en macOS**.
+
+⚠️ **Que sea solo de los tests no lo hacía inofensivo, y esto conviene no perderlo:** en las
+corridas del control positivo, dos fantasmas cayeron en `/api/auth/login` y
+`/api/auth/switch-tenant`, rutas donde un `401` a veces es el resultado **esperado**. Ahí el
+fantasma no pone el test en rojo: lo pone **verde por la razón equivocada**, y puede tapar una
+regresión real de auth. Los rojos molestos eran el síntoma visible; el riesgo era el otro.
+
+ℹ️ **Producción nunca estuvo en juego**, por tres razones independientes: `setup-supertest.ts`
+se carga solo por `test/jest-e2e.json` (`setupFilesAfterEnv`) —el jest unitario tiene
+`rootDir: src` y `tsconfig.build.json` excluye `test`—; el mecanismo necesita un puerto
+**efímero** y `main.ts` hace `app.listen(PORT ?? 3000)`, fijo y adentro de un contenedor; y el
+navegador le habla a la URL pública del frontend, no a un loopback.
 
 ### El arreglo
 
