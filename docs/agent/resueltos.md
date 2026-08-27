@@ -227,10 +227,16 @@ al código anterior, el nuevo no le da nada**.
 Tampoco se corrió en CI en loop: allá pasó una vez (`152b8a18`, `success`), que cubre el cambio
 de ciclo de vida del server en Linux, no el fantasma.
 
-ℹ️ Una de las 6 corridas de la tanda intermedia tuvo 3 rojos por `409` (caja/cajón ocupado) en
-`tendencia-descuadres`. **No es del fantasma** —cero `401`— y pasa en verde aislado sobre base
-limpia: es la contaminación de estado entre suites que ya tiene su propia entrada en
-[`pendientes.md`](pendientes.md).
+ℹ️ Una de las 6 corridas de la tanda intermedia tuvo 3 rojos en `tendencia-descuadres`. **No es
+del fantasma** —cero `401`—, pero ⛔ **la causa que se anotó acá primero era falsa**: se dijo
+"contaminación de estado entre suites" porque los rojos visibles eran `409` (caja/cajón ocupado)
+y porque aislado pasaba en verde. Lo era el **cascabel**, no la causa. `setup-pool.ts` había
+capturado, en esa misma corrida y ese mismo spec, un
+`timeout exceeded when trying to connect` de `pg-pool` a las `14:19:24Z` —dentro de la ventana
+14:17-14:20 de esa vuelta—: el primer test se cayó por ahí (`TypeError` sobre un body de 500) y
+dejó la caja abierta, y los `409` siguientes son el arrastre. Es el otro intermitente vivo, el de
+[`pendientes.md`](pendientes.md) § 2, y **la caja negra ya tenía la respuesta mientras yo
+atribuía el fallo a una familia conocida sin mirarla**.
 
 La diferencia con el cierre falso del 2026-08-25 conviene tenerla presente: aquella vez no había
 ningún test que mirara el estado, así que el arreglo pudo no funcionar sin que nada se pusiera
