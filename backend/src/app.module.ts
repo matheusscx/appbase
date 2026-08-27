@@ -150,6 +150,7 @@ import { Promocion } from './modules/promociones/entities/promocion.entity';
 import { PromocionScope } from './modules/promociones/entities/promocion-scope.entity';
 import { PromocionScopeItem } from './modules/promociones/entities/promocion-scope-item.entity';
 import { VentaPromocion } from './modules/ventas/entities/venta-promocion.entity';
+import { PromocionesModule } from './modules/promociones/promociones.module';
 
 @Module({
   imports: [
@@ -320,6 +321,7 @@ import { VentaPromocion } from './modules/ventas/entities/venta-promocion.entity
     MotivosDiferenciaModule,
     MotivosDiferenciaInventarioModule,
     RecuentosModule,
+    PromocionesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

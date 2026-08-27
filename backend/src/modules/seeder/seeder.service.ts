@@ -165,6 +165,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
     await this.seedRecuentoInventarioLineaIndex();
+    await this.seedPromocionesIndices();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -1296,6 +1297,24 @@ export class SeederService implements OnApplicationBootstrap {
     await this.dataSource.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_recuento_linea_item_vivo
       ON recuento_inventario_linea (recuento_id, item_id) WHERE eliminado_el IS NULL
+    `);
+  }
+
+  /**
+   * Solo el índice, sin demo rows: el seed de promos vive en una tarea
+   * aparte del plan (no se siembra ninguna al crear tenant — no es parte
+   * del kit mínimo rol/fórmula/caja virtual). Mismo molde que
+   * `seedDescuentos()` — `lower(nombre)` no lo puede expresar `@Index` de
+   * TypeORM, así que va acá con SQL cruda — pero separado porque acá no
+   * hay filas que sembrar todavía.
+   * `PromocionesService.validarNombreUnico` + `traducirColisionDeNombre`
+   * asumen este índice para traducir la carrera de nombre (23505) al mismo
+   * 400 que el pre-chequeo; sin él, esa rama nunca dispara.
+   */
+  private async seedPromocionesIndices(): Promise<void> {
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_promociones_tenant_nombre_vivo
+      ON promociones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
   }
 
