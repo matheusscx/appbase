@@ -168,20 +168,74 @@ no una línea rota a mano — que es lo único que prueba que el test habría ca
 no uno cualquiera. Rojo: `expect(alIniciar).not.toBeNull()` → `Received: null`. Restaurado,
 verde.
 
+### El loop, con secuestrador propio y control positivo (2026-08-27)
+
+Correr la suite en loop tal cual **no habría probado nada, y eso se midió antes de correrlo**:
+`lsof` mostró **cero listeners ajenos** en el rango efímero, o sea que el proceso que causaba el
+`401` ya no estaba. Sin secuestrador, cualquier cantidad de vueltas sale limpia funcione o no el
+arreglo. Así que el secuestrador se puso a mano: un proceso que escucha en `127.0.0.1` dentro del
+rango y contesta exactamente lo de Battle.net (`401`, `Content-Length: 0`, `Connection: close`).
+
+**Primero el mecanismo, aislado del e2e** (4000 binds de cada tipo, con 1000 puertos secuestrados
+adelante del contador):
+
+| bind | cayó en un puerto secuestrado |
+|---|---|
+| `listen(0)` — el del código anterior | **1000 de 1500 (66,7%)** |
+| `listen(0, '127.0.0.1')` — el de ahora | **0 de 1500** |
+
+**Después la suite entera, con control positivo** —sin él, las vueltas limpias no distinguen
+"el arreglo anda" de "el experimento no tenía poder"—:
+
+| código | corridas | fantasmas | tests rojos |
+|---|---|---|---|
+| el de `871767de` (mutante) | 2 | **3 y 4** | 24 y 13 |
+| el de este cierre | 3 | **0, 0, 0** | 0 (636 passed, exit 0) |
+
+En el mutante el fantasma **rompe tests reales**, con la misma firma de agosto: un `PATCH` de
+`/api/recuentos/…` que recibe `401`, y `401` en `/api/auth/login` y `/api/auth/switch-tenant`.
+
+⚠️ **Y el experimento estuvo mal diseñado dos veces antes de tener poder, que es lo que más vale
+de esta pasada.** macOS asigna el puerto efímero de forma **incremental**, no al azar; por eso el
+fantasma real era raro y venía en racimos (el contador solo se cobra víctimas cuando pasa por
+encima del puerto ajeno). Consecuencia: **dónde se planta la ventana decide si el experimento
+mide algo.**
+
+1. Ventana plantada **detrás** del contador → 0 fantasmas. Los 3000 puertos quedaron en zona ya
+   recorrida.
+2. Ventana plantada adelante pero **antes** del `reset-db.sh` → 0 fantasmas. Medido con un
+   sampler cada 2 s: los primeros ~12 s (docker + npm + compilación de ts-jest) queman más de
+   4000 puertos, y el contador saltó de 62903 a 51128 antes de que jest bindeara nada.
+3. Ventana **fija** de 2500 puertos plantada con jest ya corriendo → 1 fantasma en 4 corridas.
+   Poder real pero bajo: con esa tasa, ver 0 en 3 corridas del código nuevo tiene 42% de
+   probabilidad **aunque estuviera roto**, así que no discriminaba.
+4. Secuestrador **rastreador**: cada 15 s sondea el contador y replanta 600 puertos justo
+   adelante (7-8 rondas por corrida). Ahí el mutante falla el 100% de las veces.
+
+📌 **El discriminador del fantasma es `x-powered-by` ausente, no la allowlist de rutas** de la
+caja negra: dos de los fantasmas cayeron en `/api/auth/login` y `/api/auth/switch-tenant`, que
+están en `ESPERAN_401` y por lo tanto salen marcados `sospechoso: false`. La allowlist sirve para
+no ahogar el archivo, no para decidir.
+
 ### Lo que NO se hizo, para que nadie lo lea como más de lo que es
 
-**No se corrió en loop.** Sí se corrió **la suite e2e completa sobre base limpia** —50 suites,
-636 tests, exit 0, y `reset-db.sh --verificar` confirmando que la base no se re-sembró abajo—,
-que es lo que cubre el cambio de ciclo de vida del server en los 50 specs. Lo que no se hizo es
-repetirla muchas veces. Lo que está cerrado con evidencia es el **mecanismo**: el bind
-coincide con la dirección a la que se habla, y eso lo afirma un test de estado que falla con
-el código anterior. La ausencia del *síntoma* no está medida sobre muchas corridas.
+**Las 3 corridas limpias son con el secuestrador puesto por mí, no en condiciones naturales**: en
+esta máquina hoy no hay ningún proceso ajeno en el rango, así que el fantasma "natural" no podía
+aparecer de todos modos. Lo que las vueltas prueban es que **con un secuestrador que sí secuestra
+al código anterior, el nuevo no le da nada**.
 
-La diferencia con el cierre falso del 2026-08-25 es esa y conviene tenerla presente: aquella
-vez no había ningún test que mirara el estado, así que el arreglo pudo no funcionar sin que
-nada se pusiera rojo. Si el `401` reaparece igual, lo primero es correr
-`app.e2e-spec.ts`: si sigue verde, la causa es **otra** y esta entrada ya no es el lugar donde
-buscar.
+Tampoco se corrió en CI en loop: allá pasó una vez (`152b8a18`, `success`), que cubre el cambio
+de ciclo de vida del server en Linux, no el fantasma.
+
+ℹ️ Una de las 6 corridas de la tanda intermedia tuvo 3 rojos por `409` (caja/cajón ocupado) en
+`tendencia-descuadres`. **No es del fantasma** —cero `401`— y pasa en verde aislado sobre base
+limpia: es la contaminación de estado entre suites que ya tiene su propia entrada en
+[`pendientes.md`](pendientes.md).
+
+La diferencia con el cierre falso del 2026-08-25 conviene tenerla presente: aquella vez no había
+ningún test que mirara el estado, así que el arreglo pudo no funcionar sin que nada se pusiera
+rojo. Si el `401` reaparece igual, lo primero es correr `app.e2e-spec.ts`: si sigue verde, la
+causa es **otra** y esta entrada ya no es el lugar donde buscar.
 
 ## La pantalla simulada dejó de prometer un cargo que no hace (2026-08-26)
 
