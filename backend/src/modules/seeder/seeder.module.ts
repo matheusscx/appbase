@@ -42,6 +42,9 @@ import { Turno } from '../turnos/entities/turno.entity';
 import { Impresora } from '../impresoras/entities/impresora.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
+import { Promocion } from '../promociones/entities/promocion.entity';
+import { PromocionScope } from '../promociones/entities/promocion-scope.entity';
+import { PromocionScopeItem } from '../promociones/entities/promocion-scope-item.entity';
 
 @Module({
   imports: [
@@ -87,6 +90,9 @@ import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-dis
       Impresora,
       PropinaConfiguracion,
       PropinaGrupoDistribucion,
+      Promocion,
+      PromocionScope,
+      PromocionScopeItem,
     ]),
   ],
   providers: [SeederService],
