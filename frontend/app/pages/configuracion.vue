@@ -67,6 +67,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/recargos',
       },
       {
+        label: 'Promociones',
+        icon: 'i-lucide-megaphone',
+        to: '/configuracion/promociones',
+      },
+      {
         label: 'Preferencias',
         icon: 'i-lucide-sliders-horizontal',
         to: '/configuracion/preferencias-financieras',
