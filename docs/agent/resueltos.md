@@ -17,6 +17,63 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La pantalla simulada dejó de prometer un cargo que no hace (2026-08-26)
+
+**Venía de la sección 3.** Texto verbatim:
+
+> - [ ] **La pantalla de la pasarela demo muestra un medio de pago que no es el que cobra**
+>   (frontend, chico; lo levantó la revisión independiente del 2026-08-26 al cerrar el frente
+>   de la pasarela demo, → [`resueltos.md`](resueltos.md)) — `pasarela.vue` dejó de **elegir**
+>   el método (ahora lo manda el backend), pero sigue **mostrando** la tarjeta Oneclick
+>   preferida (`useTarjetas()`) en un flujo donde no se cobra nada y donde lo que se registra
+>   es el método contable que resolvió el backend. Preexistente y sin consecuencia en los
+>   datos: es el cartel el que miente, no el registro. Decidir si se saca, si se reemplaza por
+>   el método que efectivamente se registra, o si se deja con una leyenda de "simulado".
+
+**Se sacó, y la decisión la fijó el propio owner sin saberlo.** De las tres salidas que la
+entrada dejaba abiertas —sacarla, reemplazarla por el método que se registra, o dejarla con
+leyenda de "simulado"— la segunda y la tercera chocan con lo que ya está decidido: el
+encabezado de esa pantalla **ya dice "Pasarela de pago (simulada)"**, y la pasarela demo se
+prende con la etiqueta *"solo pruebas"* que eligió el owner el 2026-08-25. Mostrar debajo la
+tarjeta Oneclick preferida del comprador contradice las dos. Y el método contable que
+resuelve el backend es del comerciante, no del comprador: enseñárselo no le aclara nada.
+
+Queda una línea que dice lo que pasa: *"No se cobra a ninguna tarjeta: la pasarela está en
+modo simulado. Al aprobar, el pedido queda registrado como pagado."* Con total $0 no aparece
+ni esa línea, porque ahí no hay ni pago que registrar.
+
+**Lo que se llevó puesto de paso:** el atajo *"No tenés tarjetas registradas → Agregar"*, que
+empujaba a inscribir un medio de pago que este flujo **no usa**; y la llamada a
+`GET /online/medios-pago` que `useTarjetas()` dispara sola en su `onMounted` —o sea que la
+pantalla pedía las tarjetas del comprador para no cobrarles nada—.
+
+**Mutante: el archivo tal cual estaba en `HEAD`** (que es la mutación más fiel posible: no es
+una variante inventada, es el código anterior). **Mata 2 de los 3 tests nuevos** — aparecen
+los `•••• 4242` de la tarjeta preferida y `/online/medios-pago` vuelve a pedirse.
+
+📌 **Y una aserción que no medía nada, cazada por la revisión:** el mock de `useApiFetch`
+devolvía la lista de tarjetas **vacía**, así que en el mutante la pantalla vieja renderizaba
+*"No tenés tarjetas registradas"* y **nunca** la tarjeta. O sea que el `not.toContain('••••')`
+—la aserción que decía fijar justo el caso denunciado— no podía fallar nunca. Ahora el mock
+devuelve un comprador **con** tarjeta preferida (Visa •••• 4242) y esa aserción va
+**primera**, para que cuando se rompa el mensaje nombre el caso: *"expected … not to contain
+'4242'"*.
+
+📌 **El tercero no discrimina, y está escrito así en el propio test:** el caso de $0 tampoco
+mostraba nada antes. Se quedó igual, con ancla positiva, porque fija algo del código
+**nuevo**: que el aviso es condicional, o sea que ponerlo fijo lo haría aparecer en un
+checkout donde no hay pago. Un test que no discrimina y lo dice es una red; uno que no
+discrimina y se presenta como prueba es ruido.
+
+➕ **Y una ficha de doc que quedó desmentida**, encontrada al abrir el archivo:
+`docs/features/tienda-online.md` decía que a esta pantalla se llega *"desde el drawer de alta
+de suscripción (`?ref=...&modo=suscripcion`)"* y que en ese modo "Aprobar" llama a
+`POST /suscripciones`. **En el archivo no hay ni una mención a `modo` ni a suscripción**: ese
+flujo vive hoy en `pages/tienda/suscripciones.vue`, con inscripción Oneclick y vuelta por
+`?inscripcionId=...&estado=`. Corregido en el mismo commit.
+
+---
+
 ## El lock de caja lleva el tenant adentro, y ahora hay una compuerta que lo prueba (2026-08-26)
 
 **Venía de la sección 2.** Texto verbatim:

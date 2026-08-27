@@ -11,7 +11,6 @@ const toast = useToast()
 const authStore = useAuthStore()
 
 const { lineas, checkout, limpiar } = useTiendaCarrito()
-const { preferida: tarjetaPreferida } = useTarjetas()
 const { formatMonto } = useFormatters()
 
 // Snapshot local: no depende de `checkout` (useState compartido), que se limpia
@@ -138,23 +137,23 @@ async function rechazar() {
                  usar las dos granularidades por separado duplicaría las de venta. -->
             <AdvertenciasPrecio :advertencias="resumen.resultado.advertencias" />
 
-            <!-- Sin cobro no hay medio que mostrar: enseñar la tarjeta sugeriría
-                 un cargo que no va a ocurrir. -->
-            <div v-if="!sinCobro" class="border border-default rounded-lg p-3">
-              <p class="text-xs text-muted mb-1">Medio de pago</p>
-              <div v-if="tarjetaPreferida" class="flex items-center gap-2">
-                <UIcon name="i-lucide-credit-card" class="text-muted" />
-                <span class="text-sm">{{ tarjetaPreferida.marca }} •••• {{ tarjetaPreferida.last4 }}</span>
-              </div>
-              <div v-else class="flex items-center justify-between gap-2">
-                <span class="text-sm text-muted">No tenés tarjetas registradas.</span>
-                <UButton
-                  to="/tienda/medios-pago"
-                  label="Agregar"
-                  size="xs"
-                  variant="soft"
-                />
-              </div>
+            <!-- Acá NO se cobra: la pasarela demo aprueba sin mover plata, y la
+                 venta se registra con el método contable que resolvió el backend.
+                 Hasta el 2026-08-26 este bloque mostraba la tarjeta Oneclick
+                 preferida del comprador —y si no tenía ninguna, le ofrecía
+                 registrar una—: prometía un cargo a una tarjeta que nunca se toca,
+                 justo debajo de un encabezado que dice "simulada". El cartel
+                 mentía; el registro no. Con `sinCobro` (total $0) no hay ni pago
+                 que registrar, así que no hay nada que aclarar tampoco. -->
+            <div
+              v-if="!sinCobro"
+              class="border border-default rounded-lg p-3 flex items-start gap-2"
+            >
+              <UIcon name="i-lucide-info" class="text-muted mt-0.5 shrink-0" />
+              <p class="text-sm text-muted">
+                No se cobra a ninguna tarjeta: la pasarela está en modo simulado.
+                Al aprobar, el pedido queda registrado como pagado.
+              </p>
             </div>
 
             <div class="flex gap-2">

@@ -629,15 +629,6 @@ abriendo las superficies, no leyendo la entrada.
   alimentan el umbral de descuadre (construido el 2026-08-23, ver `resueltos.md`) — si divergen, el umbral se dispara
   distinto según cómo contó el cajero.
 
-- [ ] **La pantalla de la pasarela demo muestra un medio de pago que no es el que cobra**
-  (frontend, chico; lo levantó la revisión independiente del 2026-08-26 al cerrar el frente
-  de la pasarela demo, → [`resueltos.md`](resueltos.md)) — `pasarela.vue` dejó de **elegir**
-  el método (ahora lo manda el backend), pero sigue **mostrando** la tarjeta Oneclick
-  preferida (`useTarjetas()`) en un flujo donde no se cobra nada y donde lo que se registra
-  es el método contable que resolvió el backend. Preexistente y sin consecuencia en los
-  datos: es el cartel el que miente, no el registro. Decidir si se saca, si se reemplaza por
-  el método que efectivamente se registra, o si se deja con una leyenda de "simulado".
-
 - [ ] **Configurar qué acepta la tienda online** (backend + frontend, feature con spec
   propia) — que el tenant elija sus medios de cobro online (tarjeta por pasarela,
   **transferencia**, **pago al retirar**…) en vez de tener solo lo que haya conectado. La
@@ -868,6 +859,28 @@ terminan en una pregunta al owner. Es exactamente el error que el párrafo de ar
 corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+- [ ] **Dos carteles más que prometen una tarjeta que ese flujo no usa** (frontend, chico;
+  los levantó la revisión independiente del 2026-08-26 al cerrar el de la pantalla demo, →
+  [`resueltos.md`](resueltos.md)) — son la misma clase de afirmación que se acaba de sacar de
+  la pasarela simulada, en dos superficies que ese diff no tocó. **Verificados abriendo el
+  código el mismo día:**
+  1. **La pantalla de éxito de la pasarela demo** (`tienda/pasarela.vue:112-114`) dice *"Pago
+     aprobado"* / *"Tu compra fue registrada correctamente"* sin ninguna marca de simulación.
+     Se salva a medias porque el encabezado *"Pasarela de pago (simulada)"* (`:106`) está
+     fuera del `v-if` y sigue visible en ese estado. Sin test.
+  2. **`tienda/medios-pago.vue:109`** describe las tarjetas como *"inscritas en Webpay
+     Oneclick **para pagar en la tienda online**"*, y **el checkout del carrito nunca las
+     usa**: `CobrosService.cobrar` lo llaman solo `suscripciones.service.ts:123` y el
+     controller de la API externa; la compra normal sale por redirect a Webpay Plus (donde la
+     tarjeta se vuelve a tipear) o por la demo. Es defendible si "tienda online" se lee como
+     el módulo entero —las suscripciones viven ahí—, pero es exactamente la promesa que se
+     acaba de sacar de la otra pantalla.
+  ❓ **Lo que hace falta del owner, y por eso está en esta sección y no en la 3:** si el (2)
+  se reescribe ("para tus suscripciones") o se deja como está, y si el (1) lleva marca de
+  simulación. Ninguno toca datos: los dos son texto de pantalla.
+  📌 Vino de la § 3, donde la entrada madre vivía con un "Decidir…" idéntico. El criterio de
+  orden del archivo es **qué hace falta para tomarla**, y acá hace falta una respuesta.
 
 - [ ] **Perder la forma de importe avisa por un camino y no por los otros** (frontend + producto;
   2026-08-26, salió del frente del guardia de forma de importe →

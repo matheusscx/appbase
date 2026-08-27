@@ -49,6 +49,11 @@ el mismo carrito/catálogo.
     el simulado era lo que sobraba cuando faltaba Webpay: cualquier tenant que se
     registrara y no conectara nada heredaba, sin elegirlo, una tienda que entrega
     mercadería y la anota cobrada.
+  - **La pantalla demo no muestra ningún medio de pago del comprador**
+    (2026-08-26): mostraba la tarjeta Oneclick preferida —y ofrecía registrar una
+    si no había—, o sea prometía un cargo que ese flujo nunca hace. Ahora dice
+    que no se cobra a ninguna tarjeta. Con total $0 no dice ni eso: no hay pago
+    que registrar.
   - **El método de pago con el que la pantalla demo registra la venta lo resuelve
     el backend** y viaja en la respuesta (`metodoPagoId`), con la misma regla que
     usa la rama Webpay (`resolverMetodoCredito`). Antes lo elegía la pantalla:
@@ -368,10 +373,18 @@ detrás del mismo permiso `Tienda Online:Leer`:
   agregar/eliminar/preferida (ver sección "Mis medios de pago (inscripción
   Oneclick)") (`/tienda/medios-pago`).
 - `pages/tienda/pasarela.vue` — pasarela dummy (resumen, aprobar/rechazar).
-  No tiene entrada propia en el sidebar, solo se llega desde el checkout de
-  compra normal o desde el drawer de alta de suscripción
-  (`?ref=...&modo=suscripcion`). En modo suscripción, "Aprobar" llama a
-  `POST /suscripciones` en vez de `POST /ventas` directamente.
+  No tiene entrada propia en el sidebar: solo se llega desde el checkout, y solo
+  cuando la pasarela demo está activa y no hay ninguna que cobre de verdad (ver
+  "Pasarela demo", en el resumen del principio de este documento).
+  ⚠️ **No muestra ningún medio de pago del comprador, y es deliberado**
+  (2026-08-26): acá no se cobra —la demo aprueba sin mover plata y la venta se
+  registra con el método contable que resuelve el backend—, así que enseñar la
+  tarjeta Oneclick preferida prometía un cargo que nunca ocurre, justo debajo de
+  un encabezado que dice "simulada". En su lugar hay una línea que lo dice. Con
+  total $0 no aparece ni esa línea: no hay pago que registrar.
+  📌 El `?modo=suscripcion` que esta ficha describía **ya no existe en el
+  archivo**: el alta de suscripción vive en `pages/tienda/suscripciones.vue`, con
+  inscripción Oneclick y vuelta por `?inscripcionId=...&estado=`.
 
 ### Components
 

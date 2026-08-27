@@ -7,6 +7,12 @@
 // el nombre y, si no aparecía, agarrar `metodos[0]`— sin mirar siquiera si ese
 // método estaba habilitado. Ahora lo resuelve el backend y viaja en la
 // respuesta de `POST /online/pagar`, igual que en la rama Webpay.
+//
+// Y una segunda: QUÉ dice la pantalla sobre el cobro. Mostraba la tarjeta
+// Oneclick preferida del comprador debajo de un encabezado que dice
+// "simulada", o sea prometía un cargo a una tarjeta que esta pantalla nunca
+// toca. Es de RUNTIME puro: el build y el typecheck ven un `v-if` sobre un
+// composable perfectamente válido.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Pasarela from './pasarela.vue'
@@ -29,6 +35,24 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/ventas') && opts?.method === 'POST') {
       ventas.push({ url, body: opts.body ?? {} })
       return Promise.resolve({ id: 'venta-1', estado: 'pagada' })
+    }
+    // El comprador SÍ tiene una tarjeta preferida, y eso no es relleno: con la
+    // lista vacía, la pantalla vieja renderizaba "No tenés tarjetas
+    // registradas" y la aserción sobre los `••••` no discriminaba nada. Es el
+    // caso que la entrada de backlog denunciaba.
+    if (url.includes('/online/medios-pago')) {
+      return Promise.resolve({
+        oneclickDisponible: true,
+        medios: [
+          {
+            inscripcionId: 'insc-1',
+            mediosPago: [{ marca: 'Visa', ultimos4: '4242', tipo: 'credito' }],
+            preferida: true,
+            creadoEl: '2026-08-01T00:00:00.000Z',
+            suscripcionesActivas: 0,
+          },
+        ],
+      })
     }
     return Promise.resolve([])
   }
@@ -117,5 +141,40 @@ describe('tienda/pasarela — el método de pago lo manda el backend', () => {
     expect(ventas).toHaveLength(1)
     expect(ventas[0]!.body.pagos).toBeUndefined()
     expect(urlsPedidas.filter(u => u.includes('/metodos-pago'))).toEqual([])
+  })
+})
+
+describe('tienda/pasarela — la pantalla no promete un cobro que no hace', () => {
+  it('no muestra ninguna tarjeta guardada ni ofrece registrar una', async () => {
+    const wrapper = await montarCon('1000', METODO_DEL_BACKEND)
+
+    const texto = wrapper.text()
+    // Primero lo que se sacó, con el comprador que SÍ tiene tarjeta preferida
+    // (ver el mock): los últimos 4 dígitos de una tarjeta que esta pantalla no
+    // toca. Va antes que el resto para que, cuando esto se rompa, el mensaje
+    // nombre el caso denunciado y no otra cosa.
+    expect(texto).not.toContain('4242')
+    expect(texto).not.toContain('Visa')
+    expect(texto).toContain('No se cobra a ninguna tarjeta')
+  })
+
+  it('no le pide al backend los medios de pago del comprador', async () => {
+    await montarCon('1000', METODO_DEL_BACKEND)
+
+    // `useTarjetas()` pega solo por existir (`onMounted → cargar()`), así que
+    // esta aserción discrimina aunque el bloque quedara oculto por CSS.
+    expect(urlsPedidas.some(u => u.includes('/online/medios-pago'))).toBe(false)
+  })
+
+  // ⚠️ Este NO discrimina el cambio del 2026-08-26 —con el bloque viejo el $0
+  // tampoco mostraba nada— y por eso lleva ancla positiva: fija que el aviso
+  // nuevo es CONDICIONAL, o sea que ponerlo fijo lo haría aparecer en un
+  // checkout donde no hay ni pago que registrar.
+  it('con carrito de $0 no aclara nada sobre el cobro: no hay pago que registrar', async () => {
+    const wrapper = await montarCon('0', null)
+
+    const texto = wrapper.text()
+    expect(texto).toContain('Confirmar pedido')
+    expect(texto).not.toContain('No se cobra a ninguna tarjeta')
   })
 })
