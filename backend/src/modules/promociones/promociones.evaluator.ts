@@ -10,12 +10,11 @@ import Decimal from 'decimal.js';
  * **aplicaciones candidatas** en plata FINA (sin cuantizar) — el motor las suma
  * como un descuento más al cerrar su paso, y ese cierre es quien cuantiza.
  *
- * Esta versión conoce `porcentaje` y `nxm`. `precio_fijo` (combo) y el conflicto
- * greedy entre promos (una unidad toma a lo sumo una aplicación, entre promos
- * distintas) llegan en la Task 4 — hasta entonces, `evaluarPromos` no coordina
- * nada entre promos: cada una se evalúa de forma independiente contra el carrito
- * completo. Dentro de `nxm` ya no hay ese problema: la propia agrupación en
- * `cadaN` consume unidades sin repetirlas.
+ * Conoce los tres tipos: `porcentaje`, `nxm` y `precio_fijo` (combo). Cada tipo
+ * genera sus candidatas de forma INDEPENDIENTE, sin saber nada de las otras
+ * promos — el arbitraje entre promos que compiten por la misma línea (greedy,
+ * "gana la de mayor descuento") es responsabilidad exclusiva de `evaluarPromos`,
+ * documentado ahí.
  */
 
 // ── Tipos de entrada (estructura resuelta por el service) ──────────────────
@@ -249,43 +248,247 @@ function evaluarNxm(
   return aplicaciones;
 }
 
+// ── `precio_fijo` (combo) ────────────────────────────────────────────────
+
+/**
+ * Combo a precio fijo (ej. "1 pizza + 1 bebida = $9.990"): a diferencia de
+ * `porcentaje`/`nxm` —que traen exactamente un scope—, acá se usan TODOS los
+ * scopes de la promo: cada uno es un SLOT del combo, y `scope.cantidad` son
+ * las unidades que ese slot exige.
+ *
+ * Arma tantos combos completos como alcancen las unidades disponibles,
+ * tomando SIEMPRE las unidades MÁS CARAS de cada slot primero (decisión 3
+ * del owner: criterio pro-cliente, maximiza el descuento) — mismo
+ * ordenamiento que `evaluarNxm` (desc por neto, empate por `lineaIndex`
+ * ascendente). Cada combo consume sus unidades antes de intentar el
+ * siguiente, así que un segundo combo de una promo repetible usa lo que
+ * sobró del primero (unidades más baratas).
+ *
+ * `descuento = Σ netos del combo − valorMonto`. Si no es positivo —el combo
+ * encarecería o empataría con comprar suelto, una promo nunca encarece—, esa
+ * combinación no se arma. Como los combos siguientes de la misma promo solo
+ * pueden ser más baratos (consumen unidades cada vez menos caras que la
+ * anterior), no tiene sentido seguir probando: se corta ahí.
+ *
+ * El descuento de cada combo se reparte entre las líneas que aportaron
+ * unidades, a prorrata del neto aportado — ver `repartirDescuentoCombo`.
+ */
+function evaluarPrecioFijo(
+  promo: PromoElegible,
+  lineas: LineaPromo[],
+): AplicacionPromo[] {
+  const valorMonto = new Decimal(promo.valorMonto as string);
+
+  const pools = promo.scopes.map((scope) => {
+    const unidades: UnidadNxm[] = [];
+    for (const linea of lineas) {
+      if (!perteneceAScope(scope, linea)) continue;
+      if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
+
+      const cantidadEntera = new Decimal(linea.cantidad).floor().toNumber();
+      const neto = new Decimal(linea.netoUnitario);
+      for (let u = 0; u < cantidadEntera; u++) {
+        unidades.push({ lineaIndex: linea.index, neto });
+      }
+    }
+    unidades.sort((a, b) => {
+      const cmp = b.neto.comparedTo(a.neto);
+      return cmp !== 0 ? cmp : a.lineaIndex - b.lineaIndex;
+    });
+    return { cantidad: scope.cantidad, unidades, cursor: 0 };
+  });
+
+  const aplicaciones: AplicacionPromo[] = [];
+
+  for (;;) {
+    const tomas: UnidadNxm[][] = [];
+    let alcanza = true;
+    for (const pool of pools) {
+      const grupo = pool.unidades.slice(
+        pool.cursor,
+        pool.cursor + pool.cantidad,
+      );
+      if (grupo.length < pool.cantidad) {
+        alcanza = false;
+        break;
+      }
+      tomas.push(grupo);
+    }
+    if (!alcanza) break;
+
+    const unidadesCombo = tomas.flat();
+    const sumaNetos = unidadesCombo.reduce((a, u) => a.plus(u.neto), ZERO);
+    const descuento = sumaNetos.minus(valorMonto);
+    if (!descuento.greaterThan(ZERO)) break;
+
+    for (const pool of pools) pool.cursor += pool.cantidad;
+
+    const pesosPorLinea = new Map<number, Decimal>();
+    for (const u of unidadesCombo) {
+      pesosPorLinea.set(
+        u.lineaIndex,
+        (pesosPorLinea.get(u.lineaIndex) ?? ZERO).plus(u.neto),
+      );
+    }
+    const aportes = [...pesosPorLinea.entries()]
+      .map(([lineaIndex, peso]) => ({ lineaIndex, peso }))
+      .sort((a, b) => a.lineaIndex - b.lineaIndex);
+
+    aplicaciones.push({
+      promocionId: promo.id,
+      nombre: promo.nombre,
+      tipo: promo.tipo,
+      valorEfectivo: promo.valorMonto as string,
+      montosPorLinea: repartirDescuentoCombo(descuento, aportes),
+    });
+  }
+
+  return aplicaciones;
+}
+
+/**
+ * Reparte `descuento` entre las líneas que aportaron unidades al combo, a
+ * prorrata del neto aportado. Cada parte se calcula por proporción, fina
+ * (sin cuantizar a la escala de moneda — eso lo hace el cierre del motor,
+ * no acá). La SUMA de las partes es EXACTAMENTE igual a `descuento`: el
+ * único resto que puede aparecer es el de precisión de `Decimal` cuando el
+ * reparto no divide exacto (ej. repartir 1.510 en proporción 8.000/11.500 no
+ * termina), y ese resto se lo lleva la línea de mayor resto fraccionario,
+ * desempate por `lineaIndex` ascendente — mismo idioma que
+ * `repartirProporcional` del motor de cálculo de precios, sin su paso de
+ * cuantización a la escala de moneda.
+ */
+function repartirDescuentoCombo(
+  descuento: Decimal,
+  aportes: { lineaIndex: number; peso: Decimal }[],
+): { lineaIndex: number; monto: string }[] {
+  const total = aportes.reduce((a, p) => a.plus(p.peso), ZERO);
+  const finas = aportes.map((a) => descuento.times(a.peso).dividedBy(total));
+  const suma = finas.reduce((a, f) => a.plus(f), ZERO);
+  const sobra = descuento.minus(suma);
+
+  if (!sobra.isZero()) {
+    const orden = aportes
+      .map((a, i) => ({
+        i,
+        lineaIndex: a.lineaIndex,
+        resto: finas[i].minus(finas[i].floor()),
+      }))
+      .sort((x, y) => {
+        const cmp = y.resto.comparedTo(x.resto);
+        return cmp !== 0 ? cmp : x.lineaIndex - y.lineaIndex;
+      });
+    finas[orden[0].i] = finas[orden[0].i].plus(sobra);
+  }
+
+  return aportes.map((a, i) => ({
+    lineaIndex: a.lineaIndex,
+    monto: finas[i].toString(),
+  }));
+}
+
 // ── Entrada ───────────────────────────────────────────────────────────────
 
 /**
  * Evalúa todas las promos elegibles contra las líneas de la venta y devuelve
- * las aplicaciones candidatas, en plata fina. `canal` es propiedad de la
- * VENTA completa (no de la línea ni del instante): una promo con
- * `ventana.canal` fijado que no coincide con el canal de la venta queda fuera
- * entera, antes de mirar sus líneas.
+ * las aplicaciones que sobreviven al conflicto entre promos, en plata fina.
+ * `canal` es propiedad de la VENTA completa (no de la línea ni del
+ * instante): una promo con `ventana.canal` fijado que no coincide con el
+ * canal de la venta queda fuera entera, antes de mirar sus líneas.
  *
- * El `switch` por tipo conoce hoy `porcentaje` y `nxm`; `precio_fijo` llega en
- * la Task 4 junto con el conflicto greedy entre promos (una unidad tomada por
- * una promo no entra en otra) — hasta entonces una promo `precio_fijo` no
- * genera aplicaciones, sin que haga falta una rama vacía para decirlo.
+ * **Conflicto greedy entre promos.** Cada promo genera sus candidatas de
+ * forma INDEPENDIENTE (`evaluarPorcentaje`/`evaluarNxm`/`evaluarPrecioFijo`
+ * no saben nada de las otras promos ni del resultado del greedy). Todas las
+ * candidatas de TODAS las promos se juntan en una sola lista y se ordenan
+ * por monto total DESCENDENTE — desempate por `id` de promo ascendente, y si
+ * aun así empatan, por el orden en que se generaron. Se recorren en ese
+ * orden marcando qué líneas quedan tomadas; una candidata que pisa una línea
+ * ya tomada se descarta ENTERA (no se recorta ni se regenera parcial —
+ * simplicidad F1, ver más abajo). El greedy compite también ENTRE TIPOS
+ * distintos (un 2x1 y una happy hour por la misma unidad, por ejemplo).
+ *
+ * **No se busca un óptimo global**: una combinación distinta de aplicaciones
+ * podría dejar más descuento total sobre la mesa. La regla es "gana la de
+ * mayor descuento", no la mejor combinación posible — eso es intencional
+ * (simplicidad F1), no un defecto a corregir.
+ *
+ * El chequeo de conflicto es por LÍNEA, no por unidad física dentro de la
+ * línea: `AplicacionPromo` no distingue qué unidad concreta tomó cada
+ * aplicación de una línea con `cantidad` > 1 (solo trae `lineaIndex` +
+ * monto), así que es el grano más fino que se puede arbitrar entre promos
+ * DISTINTAS acá. Dentro de una misma promo esto no genera falsos choques en
+ * los casos que cubre este evaluador —cada grupo de `nxm` y cada combo de
+ * `precio_fijo` avanzan sus propios cursores sin repetir unidades—, salvo
+ * un caso no cubierto: una única línea con `cantidad` grande que alimenta
+ * DOS aplicaciones de la MISMA promo (ej. 4 cervezas en una sola línea,
+ * `nxm` cada 2) generaría dos candidatas con el mismo `lineaIndex`, y la
+ * segunda se descartaría por chocar con la primera. Es una limitación
+ * conocida de esta simplicidad F1, no algo que este evaluador resuelva.
  */
 export function evaluarPromos(input: {
   promos: PromoElegible[];
   lineas: LineaPromo[];
   canal: 'fisico' | 'online';
 }): AplicacionPromo[] {
-  const aplicaciones: AplicacionPromo[] = [];
+  const candidatas: {
+    aplicacion: AplicacionPromo;
+    monto: Decimal;
+    promoId: string;
+    orden: number;
+  }[] = [];
+  let orden = 0;
 
   for (const promo of input.promos) {
     if (promo.ventana.canal != null && promo.ventana.canal !== input.canal) {
       continue;
     }
-    const scope = promo.scopes[0];
-    if (!scope) continue;
 
+    let generadas: AplicacionPromo[] = [];
     switch (promo.tipo) {
-      case 'porcentaje':
-        aplicaciones.push(...evaluarPorcentaje(promo, scope, input.lineas));
+      case 'porcentaje': {
+        const scope = promo.scopes[0];
+        if (scope) generadas = evaluarPorcentaje(promo, scope, input.lineas);
         break;
-      case 'nxm':
-        aplicaciones.push(...evaluarNxm(promo, scope, input.lineas));
+      }
+      case 'nxm': {
+        const scope = promo.scopes[0];
+        if (scope) generadas = evaluarNxm(promo, scope, input.lineas);
         break;
+      }
+      case 'precio_fijo':
+        generadas = evaluarPrecioFijo(promo, input.lineas);
+        break;
+    }
+
+    for (const aplicacion of generadas) {
+      const monto = aplicacion.montosPorLinea.reduce(
+        (a, m) => a.plus(m.monto),
+        ZERO,
+      );
+      candidatas.push({
+        aplicacion,
+        monto,
+        promoId: promo.id,
+        orden: orden++,
+      });
     }
   }
 
-  return aplicaciones;
+  candidatas.sort((a, b) => {
+    const cmpMonto = b.monto.comparedTo(a.monto);
+    if (cmpMonto !== 0) return cmpMonto;
+    if (a.promoId !== b.promoId) return a.promoId < b.promoId ? -1 : 1;
+    return a.orden - b.orden;
+  });
+
+  const lineasTomadas = new Set<number>();
+  const resultado: AplicacionPromo[] = [];
+  for (const { aplicacion } of candidatas) {
+    const indices = aplicacion.montosPorLinea.map((m) => m.lineaIndex);
+    if (indices.some((i) => lineasTomadas.has(i))) continue;
+    indices.forEach((i) => lineasTomadas.add(i));
+    resultado.push(aplicacion);
+  }
+
+  return resultado;
 }
