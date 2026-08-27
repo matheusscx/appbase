@@ -1,8 +1,8 @@
 # Motor de promociones — diseño (Fase 1)
 
-**Fecha:** 2026-08-27 · **Estado:** Diseño aprobado por secciones con el owner; pendiente el
-cruce con la investigación de mercado del 2026-08-27 y la revisión final del owner ·
-**Plan:** pendiente
+**Fecha:** 2026-08-27 · **Estado:** Diseño aprobado por secciones con el owner e
+investigación de mercado cruzada el mismo día (ver la sección al final); pendiente la
+revisión final del owner · **Plan:** pendiente
 **Análisis de origen:** [`2026-07-22-motor-promociones-analisis.md`](2026-07-22-motor-promociones-analisis.md)
 — alcance de Fase 1 CERRADO ahí; este documento agrega solo la arquitectura.
 
@@ -45,6 +45,17 @@ tipo `promocional` se perdió el único guardarraíl que obligaba fechas — ac�
    más candidatas que cupo, la aplicación se arma a favor del cliente — al combo entran
    las unidades más caras, el 2x1 regala la más barata del par más caro. Una sola regla
    para todo el módulo.
+4. **El instante que decide la promo es cuándo se PIDE el ítem** — no la apertura de la
+   cuenta ni el pago. Decidido tras el cruce de mercado: el primer borrador heredaba el
+   instante de la vigencia por fecha (`cuenta.abierta_el`) y con granularidad de hora eso
+   dejaba sin happy hour a la mesa abierta 17:30 que pide a las 18:30 — el caso más común
+   de un bar. Toast, el único POS que documenta el instante, evalúa al enviar el ítem a
+   cocina. El caso original de la herencia queda cubierto igual: lo pedido 19:50 mantiene
+   su promo aunque se pague 20:30. ⚠️ **La vigencia por fecha de las reglas comunes NO se
+   toca** — sigue decidida por la apertura de la cuenta, como la construyó su frente. La
+   asimetría queda dicha: la regla es por día (el borde es marginal), la promo es por
+   franja horaria (el borde es el caso central). Unificarlas, si algún día molesta, es
+   una decisión aparte.
 
 ---
 
@@ -163,12 +174,21 @@ motor al cerrar el paso, como con todo).
 franja —con cruce de medianoche: si `hora_inicio > hora_fin`, la franja es
 `[inicio, 24) ∪ [0, fin]`—, día de semana ∈ `dias_semana`, canal compatible.
 
-**El instante es el mismo que decide la vigencia por fecha: `cuenta.abierta_el` si la
-venta nace de una cuenta, y si no, ahora.** La mesa que se sienta 23:50 con el happy hour
-vigente lo mantiene al pagar 00:10 — se le prometió al sentarse. Se **reusa**
-`instanteDeVigencia` (`calculo-precios.service.ts`); no se inventa un segundo mecanismo, y
-el abuso del instante ya está cerrado ahí (el instante nunca viene del cliente por valor;
-`CreateVentaDto` no gana `cuentaId` — trap 5 de la spec de vigencia sigue vigente).
+**El instante es POR LÍNEA: cuándo se pidió el ítem** (decisión 4 del owner). Una línea
+que nace de una cuenta de salón evalúa con el `creado_el` de su línea de cuenta; una venta
+sin cuenta (POS directo, tienda, suscripciones) evalúa todas sus líneas con **ahora** —
+ahí pedir y cobrar son el mismo acto. Fecha, hora y día de semana se evalúan todos con ese
+mismo instante: una línea pedida el 31 dentro de la campaña la conserva aunque se cobre el
+1. Consecuencia asumida: en la misma mesa, las cervezas de las 18:30 llevan el happy hour
+y las de las 20:15 no — es lo prometido en cada pedido.
+
+**El instante nunca viaja por valor desde el cliente** — la forma de abuso que la spec de
+vigencia ya cerró sigue cerrada: el cierre de mesa arma las líneas del lado del servidor
+(ya conoce el `creado_el` de cada una), y la previsualización de salón pasa `cuentaId` y
+el service resuelve los instantes contra las líneas de esa cuenta, acotada por tenant.
+**El cruce exacto línea-del-DTO ↔ línea-de-cuenta en la previsualización lo fija el plan**
+(la venta real no tiene el problema: sus líneas nacen de la cuenta); el contrato que el
+plan no puede aflojar es que el instante salga de la BD, jamás del body.
 
 Para la **hora** local hace falta el gemelo de `fechaLocalTenant` que devuelva
 `HH:mm` + día ISO — misma mecánica `Intl` con la zona de la provincia, mismo docblock de
@@ -341,21 +361,23 @@ descuento tiene que vivir donde se mide como descuento.
 - **Unit del motor:** promo como monto fijo después del catálogo; piso en cero; traza
   propia; el interruptor en las dos posiciones, incluida la aplicación cross-línea
   comparada entera; la familia perdedora deja traza "No aplicó".
-- **Unit del service:** elegibilidad (fecha/hora/día/canal), instante desde
-  `cuenta.abierta_el`, carga batch.
+- **Unit del service:** elegibilidad (fecha/hora/día/canal), instantes por línea desde
+  las líneas de la cuenta, carga batch.
 - **E2E de API:** una promo aplica en una venta real y queda congelada en
-  `ventas_promociones`; **previsualización y venta dicen lo mismo**; una cuenta de salón
-  abierta dentro de la franja y cerrada fuera **sí** lleva la promo (la decisión del
-  instante, punta a punta — la única forma de probarla); tenant en acumula vs. no
-  acumula; canal online. Con **garzón propio** si toca salones (la sesión es única por
-  garzón; no reusar los del seed).
+  `ventas_promociones`; **previsualización y venta dicen lo mismo**; en una cuenta de
+  salón, **la línea pedida dentro de la franja lleva la promo y la pedida fuera no,
+  aunque se cobren juntas** (la decisión 4, punta a punta — la única forma de probarla);
+  tenant en acumula vs. no acumula; canal online. Con **garzón propio** si toca salones
+  (la sesión es única por garzón; no reusar los del seed).
 - **Mutantes exigidos** (parte del entregable, no un extra; cada uno mata tests
   distintos, y el mutante va acotado a la cláusula y revertido verificando el restart del
   watcher):
   1. quitar la obligatoriedad de `fecha_fin`;
   2. evaluador devolviendo `[]` fijo;
   3. la comparación del interruptor invertida;
-  4. `promosAcumulanDescuentos` sin mapear al congelado.
+  4. `promosAcumulanDescuentos` sin mapear al congelado;
+  5. el instante por línea reemplazado por un "ahora" fijo — tiene que matar el e2e de
+     la línea pedida fuera de franja.
 - Los tests de fecha/hora **no dependen del día ni de la hora del runner**: el instante
   entra por `cuentaId` o se controla en el unit.
 
@@ -401,14 +423,89 @@ descuento tiene que vivir donde se mide como descuento.
   (cuantización, prorrateo, piso) fuera del motor — el segundo camino de redondeo que el
   frente de la plata eliminó.
 
+## Investigación de mercado (2026-08-27) y su cruce contra este diseño
+
+Dos pasadas el mismo día: motores de promos en POS internacionales (Toast, Square,
+Lightspeed, Clover — documentación oficial) y norma chilena (SII/DTE, IVA, SERNAC, POS
+locales). **Regla del cruce aplicada:** insumo para adaptar, no verdad a copiar; donde el
+mercado difiere de una decisión del owner, se anota el porqué de la nuestra.
+
+**1 · Promo vs. descuento común.** El patrón dominante es **default exclusivo** (no
+acumula): Toast con flag por descuento *"Allow with other discounts"* (solo check-level y
+BOGO; los de ítem y combo son siempre exclusivos); Lightspeed X-Series con escalera fija
+de prioridad y eCom con toggle default off; Square es la excepción (compone por default,
+la exclusión es declarativa por `pricing_blocklists`); Clover no lo resuelve en el core.
+→ **Nuestro default NO acumula coincide con el patrón.** El interruptor por **tenant** (y
+no por promo, que es lo que hace Toast) es decisión del owner con ese dato a la vista:
+una sola conducta explicable por local; el flag por promo es aditivo si aparece el caso.
+Fuentes: [Toast — exclusividad](https://doc.toasttab.com/doc/platformguide/adminDiscountExclusivity.html) ·
+[Square — apply discounts](https://developer.squareup.com/docs/orders-api/apply-taxes-and-discounts) ·
+[Lightspeed X — multiple promotions](https://x-series-support.lightspeedhq.com/hc/en-us/articles/25534022962843-Can-I-run-multiple-promotions-at-once).
+
+**2 · Selección de unidades.** Donde está documentado, el descuento aterriza en **la
+unidad más barata** (Lightspeed lo fija sin opción; Toast lo expone configurable:
+primera/más barata/más cara). → Nuestro NxM coincide con el patrón dominante. El armado
+del combo con las unidades **más caras** es decisión nuestra (pro-cliente, decisión 3);
+Toast en combos aplica a los modificadores más baratos — el sentido contrario. Queda
+dicho: si un local pide lo opuesto, el selector de Toast es el precedente de config.
+Fuentes: [Toast — BOGO](https://doc.toasttab.com/doc/platformguide/adminDiscountsConfigureBogo.html) ·
+[Lightspeed — discount rules](https://retail-support.lightspeedhq.com/hc/en-us/articles/1260805852410-Creating-discount-rules).
+
+**3 · Repetición y topes.** La repetición automática por cada grupo que califica es el
+comportamiento asumido en todos; **solo Toast documenta un tope configurable** por ticket
+(*"Eligible # of Get Items"*, *"Total Quantity"*). → F1 sin tope coincide; el tope es un
+knob futuro con precedente.
+Fuente: [Toast — discount config reference](https://doc.toasttab.com/doc/platformguide/adminDiscountConfigReference.html).
+
+**4 · Ventanas horarias.** Los cuatro programan día + hora; **ninguno documenta el cruce
+de medianoche** (→ entrada en `DIFERENCIADORES.md`). **Toast es el único que documenta el
+instante de evaluación: cuando el ítem se envía a cocina**, no al pagar — con el ejemplo
+de la cerveza pedida 16:30 que no entra al happy hour de 17:00 aunque se pague adentro.
+→ Este hallazgo **reabrió la decisión del instante** y produjo la decisión 4 del owner.
+Fuente: [Toast — discount availability](https://doc.toasttab.com/doc/platformguide/adminDiscountAvailability.html).
+
+**5 · Ticket y prorrateo.** La promo como **línea nombrada** es la norma (Toast con
+nombre configurable en el recibo; Square con `name` en la API; Clover distingue
+orden/línea) → coincide con nuestro ticket nombrado. Del prorrateo de un combo a precio
+fijo, **solo Toast documenta la fórmula** (reparto proporcional al precio original, con
+el impuesto recalculado sobre el monto ya prorrateado) → coincide con nuestro reparto a
+prorrata del neto; el residuo determinista por mayores restos es nuestro
+(→ `DIFERENCIADORES.md`).
+Fuente: [Toast — effect of discounts on prices](https://doc.toasttab.com/doc/platformguide/adminDiscountPricing.html).
+
+**6 · Pata chilena.**
+- **NORMA — la fecha de fin obligatoria tiene respaldo legal**, no solo de diseño: Ley
+  19.496 art. 35 — *"En toda promoción u oferta se deberá informar al consumidor sobre
+  las bases de la misma y el tiempo o plazo de su duración."*
+  ([SERNAC — art. 35](https://www.sernac.cl/portal/609/w3-propertyvalue-58789.html))
+- **NORMA — el "2x1 como descuento del 100%" es un caso previsto por el formato:** el
+  manual de boleta electrónica valida `DescuentoPct` *"entre 0 y 100 incluidos"*, y el
+  Formato DTE contempla `MontoItem = 0` con texto de impresión (*"s/valor, sin costo"*).
+  ([Formato DTE v2.5](https://www.sii.cl/factura_electronica/factura_mercado/formato_dte_202602.pdf) ·
+  [Boletas v4.2](https://www.sii.cl/factura_electronica/factura_mercado/formato_boleta_electronica.pdf))
+- **NORMA + INFERENCIA — el camino que NO tomamos era un hoyo fiscal:** la entrega
+  gratuita promocional **sin venta asociada** es hecho gravado especial (art. 8 letra d)
+  Ley del IVA: retiro, tributa sobre valor de mercado). Modelar el 2x1 como línea
+  regalada habría rozado esa figura; como descuento del 100% **dentro de la venta**,
+  reduce la base de la línea y no genera hecho gravado aparte. No hay oficio SII
+  específico sobre 2x1 (buscado y no hallado): es inferencia razonable desde la mecánica
+  del formato, no ratificación directa.
+  ([SII — FAQ entregas promocionales](https://www.sii.cl/preguntas_frecuentes/impuestos_mensuales/001_130_4528.htm))
+- **El único mandato normativo sobre descuento global:** si el documento mezcla
+  afectos/exentos, `DscRcgGlobal` debe ir en % o separado por tipo de afectación (Formato
+  DTE §D). Nuestro beneficio aterriza **por línea**, así que ni lo pisa — se anota para
+  el día que exista emisión SII (ADR-010: esto es formateo, no hecho).
+- **PRÁCTICA — los POS chilenos no publican su motor** (Bsale solo UI/API superficial;
+  Toteat y Defontana detrás de login). La señal chilena es la norma, como anticipaba la
+  plantilla de investigación.
+
+**Síntesis del cruce:** ninguna decisión quedó refutada; una (el instante) se reabrió con
+evidencia y el owner la re-decidió el mismo día (decisión 4); dos ganaron respaldo de
+NORMA (fecha de fin, descuento 100%); y dos huecos de documentación del mercado quedaron
+anotados como diferenciadores en `DIFERENCIADORES.md`.
+
 ## Pendiente antes de pasar a plan
 
-- [ ] **Cruce con la investigación de mercado del 2026-08-27** (dos pasadas lanzadas:
-  motores de promos en POS internacionales, y norma chilena — SII/DTE, IVA del "gratis",
-  SERNAC sobre vigencia). Regla del cruce: insumo para adaptar; si contradice una
-  decisión del owner, se le presenta como opción con el porqué — no se re-decide solo.
-  Los puntos que la investigación puede tocar: el criterio pro-cliente (P2), el default
-  del interruptor (P1), la presentación en ticket/DTE (P5 y pata chilena), y si el "100%
-  de descuento" del 2x1 tiene tratamiento fiscal especial en Chile.
+- [x] Cruce con la investigación de mercado — hecho el 2026-08-27, sección anterior.
 - [ ] Revisión final del owner sobre este documento.
 - [ ] Recién después: `writing-plans` → plan ejecutable.
