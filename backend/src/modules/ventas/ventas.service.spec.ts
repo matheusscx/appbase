@@ -21,6 +21,7 @@ import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
+import { VentaPromocion } from './entities/venta-promocion.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -840,6 +841,81 @@ describe('VentasService', () => {
       ]);
     });
 
+    it('congela la promo por línea, cruzada por índice (2 trazas, líneas 0 y 1)', async () => {
+      const trazaPromo = (over: Record<string, unknown> = {}) => ({
+        id: 'promo-1',
+        nombre: '2x1 martes',
+        tipo: 'nxm',
+        monto: '500.0000',
+        valorEfectivo: '1.0000',
+        aplicacion: 1,
+        ...over,
+      });
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [
+          {
+            ...mockResultadoVenta.lineas[0],
+            trazas: {
+              descuentos: [],
+              recargos: [],
+              impuestos: [],
+              promociones: [trazaPromo()],
+            },
+          },
+          {
+            ...mockResultadoVenta.lineas[0],
+            trazas: {
+              descuentos: [],
+              recargos: [],
+              impuestos: [],
+              promociones: [trazaPromo({ monto: '300.0000', aplicacion: 2 })],
+            },
+          },
+        ],
+      });
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        lineas: [
+          { itemId: ITEM_ID, cantidad: '1' },
+          { itemId: ITEM_ID, cantidad: '1' },
+        ],
+      });
+
+      // Un solo round-trip con las dos filas adentro.
+      const savesPromo = manager.save.mock.calls.filter(
+        (call) => call[0] === VentaPromocion,
+      );
+      expect(savesPromo).toHaveLength(1);
+
+      const filas = savesPromo[0][1] as Record<string, unknown>[];
+      expect(filas).toEqual([
+        expect.objectContaining({
+          ventaId: 'venta-uuid-001',
+          detalleId: 'detalle-uuid-001',
+          promocionId: 'promo-1',
+          nombrePromocion: '2x1 martes',
+          tipo: 'nxm',
+          valorEfectivo: '1.0000',
+          monto: '500.0000',
+          aplicacion: 1,
+        }),
+        expect.objectContaining({
+          // La segunda línea, no la primera: mismo bug que atrapa el test
+          // gemelo de descuentos, acá con el cruce traza→detalle por índice.
+          detalleId: 'detalle-uuid-002',
+          promocionId: 'promo-1',
+          monto: '300.0000',
+          aplicacion: 2,
+        }),
+      ]);
+    });
+
     it('congela la regla y la atribuye a SU línea, no a la primera', async () => {
       // La misma regla en dos líneas producía dos filas indistinguibles.
       const traza = (over: Record<string, unknown> = {}) => ({
@@ -996,6 +1072,9 @@ describe('VentasService', () => {
       expect(entidadesGuardadas).not.toContain(VentaDescuento);
       expect(entidadesGuardadas).not.toContain(VentaRecargo);
       expect(entidadesGuardadas).not.toContain(VentaImpuesto);
+      // El fixture base trae `trazas.promociones: []`: cero trazas de promo,
+      // cero filas y cero round-trip extra — mismo criterio que las otras tres.
+      expect(entidadesGuardadas).not.toContain(VentaPromocion);
     });
 
     it('congela la clasificación tributaria del item en el detalle', async () => {
@@ -2853,6 +2932,87 @@ describe('VentasService', () => {
       await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
 
       expect(sqlCabecera()).toContain('cta.tenant_id = v.tenant_id');
+    });
+  });
+
+  /**
+   * Precedente que motiva este test: `config_calculo` se escribió meses en
+   * la cabecera sin que el SELECT de `findOne` lo trajera — nadie lo notó
+   * porque nada afirmaba sobre la respuesta. Acá el SELECT nuevo entra CON
+   * su test: que la API además lo DEVUELVA, no solo que la fila exista.
+   */
+  describe('findOne() — expone las promociones congeladas', () => {
+    const USUARIO = 'usuario-uuid-promos';
+    const VENTA_ID = 'venta-uuid-promos';
+
+    const cabecera = {
+      venta_id: VENTA_ID,
+      caja_id: CAJA_ID,
+      moneda_id: MONEDA_OFICIAL_ID,
+      tipo_documento_id: null,
+      canal: 'fisico',
+      estado: 'pagada',
+      total_bruto: '5000.0000',
+      total_descuentos: '500.0000',
+      total_recargos: '0',
+      total_impuestos: '0',
+      total_final: '4500.0000',
+      comentario: null,
+      fecha: new Date('2026-08-27'),
+      creado_el: new Date('2026-08-27'),
+      venta_referencia_id: null,
+      tipo_documento_codigo: null,
+      tipo_documento_nombre: null,
+      tiene_lineas_despachadas: false,
+    };
+
+    it('devuelve las columnas congeladas de ventas_promociones, filtrando eliminado_el', async () => {
+      dataSourceMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM ventas v')) return Promise.resolve([cabecera]);
+        if (sql.includes('FROM ventas_promociones')) {
+          expect(sql).toContain('eliminado_el IS NULL');
+          return Promise.resolve([
+            {
+              venta_promocion_id: 'vp-1',
+              detalle_id: 'detalle-uuid-001',
+              aplicacion: 1,
+              promocion_id: 'promo-1',
+              nombre_promocion: '2x1 martes',
+              tipo: 'nxm',
+              valor_efectivo: '1.0000',
+              monto: '500.0000',
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const res = await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(res.promociones).toEqual([
+        {
+          id: 'vp-1',
+          detalleId: 'detalle-uuid-001',
+          aplicacion: 1,
+          promocionId: 'promo-1',
+          nombre: '2x1 martes',
+          tipo: 'nxm',
+          valorEfectivo: '1.0000',
+          monto: '500.0000',
+        },
+      ]);
+    });
+
+    it('sin promos, la respuesta trae el array vacío', async () => {
+      dataSourceMock.query.mockImplementation((sql: string) =>
+        sql.includes('FROM ventas v')
+          ? Promise.resolve([cabecera])
+          : Promise.resolve([]),
+      );
+
+      const res = await service.findOne(TENANT_ID, VENTA_ID, USUARIO, true);
+
+      expect(res.promociones).toEqual([]);
     });
   });
 });

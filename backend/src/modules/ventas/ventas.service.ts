@@ -34,6 +34,7 @@ import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
+import { VentaPromocion } from './entities/venta-promocion.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -585,6 +586,7 @@ export class VentasService {
     const filasDescuento: VentaDescuento[] = [];
     const filasRecargo: VentaRecargo[] = [];
     const filasImpuesto: VentaImpuesto[] = [];
+    const filasPromocion: VentaPromocion[] = [];
 
     // Un `porcentaje_aplicado` solo tiene sentido si la regla ERA un
     // porcentaje. En una de monto fijo va `null` explícito: un `0` se leería
@@ -640,6 +642,23 @@ export class VentasService {
           }),
         );
       }
+      // Siempre por línea, nunca a nivel venta: el beneficio de una promo
+      // aterriza en líneas (ver `TrazaPromo`), así que no hay un
+      // `resultado.trazasVenta.promociones` equivalente al de descuentos/recargos.
+      for (const traza of rLinea.trazas.promociones) {
+        filasPromocion.push(
+          manager.create(VentaPromocion, {
+            ventaId: venta.id,
+            detalleId,
+            aplicacion: traza.aplicacion,
+            promocionId: traza.id,
+            nombrePromocion: traza.nombre,
+            tipo: traza.tipo,
+            valorEfectivo: traza.valorEfectivo,
+            monto: traza.monto,
+          }),
+        );
+      }
     });
 
     // Las de nivel venta no pertenecen a ninguna línea: `detalleId` queda null.
@@ -684,6 +703,9 @@ export class VentasService {
     }
     if (filasImpuesto.length > 0) {
       await manager.save(VentaImpuesto, filasImpuesto);
+    }
+    if (filasPromocion.length > 0) {
+      await manager.save(VentaPromocion, filasPromocion);
     }
 
     // 7e. Customer (opcional)
@@ -2008,6 +2030,14 @@ export class VentasService {
        FROM ventas_impuestos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
+    // Congelado igual que las tres de arriba: nombre, tipo y valorEfectivo
+    // sobreviven aunque la promo del catálogo cambie o se borre.
+    const promociones: Row[] = await this.db.query(
+      `SELECT venta_promocion_id, detalle_id, aplicacion, promocion_id,
+              nombre_promocion, tipo, valor_efectivo, monto
+       FROM ventas_promociones WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
     const customerRows: Row[] = await this.db.query(
       `SELECT customer_id, tercero_id, nombre, rut, direccion, telefono, email
        FROM venta_customer WHERE venta_id = $1 AND eliminado_el IS NULL`,
@@ -2220,6 +2250,16 @@ export class VentasService {
         valorAplicado: imp['valor_aplicado'],
         porcentajeAplicado: imp['porcentaje_aplicado'],
         aplicadoEn: imp['aplicado_en'],
+      })),
+      promociones: promociones.map((p) => ({
+        id: p['venta_promocion_id'],
+        detalleId: p['detalle_id'],
+        aplicacion: p['aplicacion'],
+        promocionId: p['promocion_id'],
+        nombre: p['nombre_promocion'],
+        tipo: p['tipo'],
+        valorEfectivo: p['valor_efectivo'],
+        monto: p['monto'],
       })),
       customer: customerRow
         ? {

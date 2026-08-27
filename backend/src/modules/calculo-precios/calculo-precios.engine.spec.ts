@@ -2881,6 +2881,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           {
             id: 'promo-1',
             nombre: '2x1 martes',
+            tipo: 'nxm',
             monto: '500.000000',
             valorEfectivo: '1.0000',
             aplicacion: 1,

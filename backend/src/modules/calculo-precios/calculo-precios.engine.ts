@@ -263,6 +263,8 @@ export interface TrazaPromo {
   /** `promocionId`. */
   id: string;
   nombre: string;
+  /** El tipo de la promo (`AplicacionPromoResuelta.tipo`) — dato congelable. */
+  tipo: string;
   monto: string;
   valorEfectivo: string;
   aplicacion: number;
@@ -619,6 +621,8 @@ interface ResultadoPaso {
 interface PromoEnLinea {
   id: string;
   nombre: string;
+  /** El tipo de promo (`AplicacionPromoResuelta.tipo`) — congelable en la venta. */
+  tipo: string;
   /** Fino, tal como lo emitió el evaluador. */
   monto: Decimal;
   valorEfectivo: string;
@@ -924,6 +928,7 @@ function procesarReglas(
     trazasPromos.push({
       id: promo.id,
       nombre: promo.nombre,
+      tipo: promo.tipo,
       monto: fmt(montoQ, params.cfg),
       valorEfectivo: promo.valorEfectivo,
       aplicacion: promo.aplicacion,
@@ -1676,6 +1681,7 @@ function resolverPromociones(
       lista.push({
         id: ap.promocionId,
         nombre: ap.nombre,
+        tipo: ap.tipo,
         monto: new Decimal(m.monto),
         valorEfectivo: ap.valorEfectivo,
         aplicacion: numero,
