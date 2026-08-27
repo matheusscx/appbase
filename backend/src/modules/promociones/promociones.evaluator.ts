@@ -5,10 +5,17 @@ import Decimal from 'decimal.js';
  * `calculo-precios.engine.ts`.
  *
  * Recibe promos ya resueltas por el service (elegibles por `activo`/fecha, con sus
- * scopes e ítems cargados) y las líneas de la venta, ya con el neto unitario
- * convertido a moneda oficial y el instante local en que se pidieron. Devuelve
- * **aplicaciones candidatas** en plata FINA (sin cuantizar) — el motor las suma
- * como un descuento más al cerrar su paso, y ese cierre es quien cuantiza.
+ * scopes e ítems cargados) y las líneas de la venta, ya con el **precio de lista**
+ * unitario convertido a moneda oficial y el instante local en que se pidieron.
+ * Devuelve **aplicaciones candidatas** en plata FINA (sin cuantizar) — el motor
+ * las suma como un descuento más al cerrar su paso, y ese cierre es quien
+ * cuantiza.
+ *
+ * ⚠️ **Todo lo de acá vive en el dominio del precio de LISTA** —lo que el cliente
+ * ve— y no en el del neto: un "20%" es 20% de la etiqueta, y un combo de $9.990
+ * es lo que el cliente paga por el conjunto. La conversión al neto que el
+ * documento declara la hace el MOTOR, línea por línea, con el mismo factor
+ * `1 + Σ tasas` con el que esa línea desbrutea. Ver `LineaPromo.precioListaUnitario`.
  *
  * Conoce los tres tipos: `porcentaje`, `nxm` y `precio_fijo` (combo). Cada tipo
  * genera sus candidatas de forma INDEPENDIENTE, sin saber nada de las otras
@@ -64,7 +71,26 @@ export interface LineaPromo {
   itemId: string;
   categoriaId: string | null;
   cantidad: string; // canónica (Decimal string)
-  netoUnitario: string; // convertido a oficial, ANTES de descuentos
+  /**
+   * **El precio de LISTA unitario: lo que el cliente VE**, ya convertido a
+   * moneda oficial y antes de cualquier descuento. En una línea con
+   * `precio_incluye_impuesto` es el precio de góndola (bruto); en el resto es
+   * el neto, que ahí también es lo que se muestra.
+   *
+   * ⚠️ Se llamaba `netoUnitario` y el nombre mentía en el caso de góndola: el
+   * evaluador recibía el bruto igual, así que un "20%" de promo se calculaba
+   * sobre 993 y el motor lo restaba contra un neto de 834 — cobrando **756**
+   * donde un descuento de catálogo del 20% cobraba **794** (medido). El
+   * beneficio se PROMETE en el dominio que el cliente lee (`20% de lo que dice
+   * la etiqueta`, `el combo sale $9.990`), así que la matemática de acá vive en
+   * ese dominio; la conversión a neto —el dominio en que el documento declara—
+   * la hace el motor al aplicar el monto a la línea, con el MISMO factor
+   * `1 + Σ tasas` con el que esa línea desbrutea.
+   *
+   * Es el mismo patrón que el motor ya usa para las reglas de nivel venta: se
+   * evalúan contra la plata cobrada y se declaran en neto.
+   */
+  precioListaUnitario: string;
   instante: InstanteLocal; // cuándo se pidió (decisión 4 del owner)
 }
 
@@ -143,9 +169,9 @@ function perteneceAScope(
 
 /**
  * Happy hour: cada línea del scope, dentro de su propia franja horaria, recibe
- * `valorPorcentaje × neto × cantidad`. Es el único tipo que trabaja con la
+ * `valorPorcentaje × precioLista × cantidad`. Es el único tipo que trabaja con la
  * LÍNEA entera —no con unidades enteras— porque una cantidad fraccionaria
- * (venta al peso) participa con su neto proporcional; `nxm`/`precio_fijo`
+ * (venta al peso) participa con su precio proporcional; `nxm`/`precio_fijo`
  * exigen unidad entera, que acá no aplica.
  *
  * Todas las líneas que califican se agrupan en UNA sola aplicación (a
@@ -173,7 +199,7 @@ function evaluarPorcentaje(
     if (!perteneceAScope(scope, linea)) continue;
     if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
 
-    const monto = valor.times(linea.netoUnitario).times(linea.cantidad);
+    const monto = valor.times(linea.precioListaUnitario).times(linea.cantidad);
     if (monto.greaterThan(ZERO)) {
       montosPorLinea.push({ lineaIndex: linea.index, monto: monto.toString() });
       unidadesPorLinea.push({
@@ -203,19 +229,19 @@ function evaluarPorcentaje(
 /** Una unidad concreta del carrito, explotada de su línea de origen. */
 interface UnidadNxm {
   lineaIndex: number;
-  neto: Decimal;
+  precioLista: Decimal;
 }
 
 /**
  * NxM (2x1, "2do al 50%", etc.): explota las líneas del scope —dentro de su
  * franja— en unidades enteras (`⌊cantidad⌋`; una cantidad fraccionaria como
- * '0.7' no aporta ninguna, a diferencia de `porcentaje`), las ordena por neto
+ * '0.7' no aporta ninguna, a diferencia de `porcentaje`), las ordena por precio de lista
  * DESCENDENTE y arma grupos completos de `cadaN` consecutivos. En cada grupo,
  * la unidad más barata —la última tras ordenar desc— recibe
- * `valorPorcentaje × neto` (2x1 = 100% de la más barata: "paga la más cara").
+ * `valorPorcentaje × precioLista` (2x1 = 100% de la más barata: "paga la más cara").
  * Un grupo incompleto al final no aplica.
  *
- * Desempate de neto por `lineaIndex` ASCENDENTE: sin él, dos unidades del
+ * Desempate de precio por `lineaIndex` ASCENDENTE: sin él, dos unidades del
  * mismo precio en líneas distintas dejarían el resultado a merced del orden
  * de entrada del array (que en este evaluador es estable, pero dos llamadas
  * con el mismo carrito armado en otro orden darían grupos distintos).
@@ -247,14 +273,14 @@ function evaluarNxm(
     if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
 
     const cantidadEntera = new Decimal(linea.cantidad).floor().toNumber();
-    const neto = new Decimal(linea.netoUnitario);
+    const precioLista = new Decimal(linea.precioListaUnitario);
     for (let u = 0; u < cantidadEntera; u++) {
-      unidades.push({ lineaIndex: linea.index, neto });
+      unidades.push({ lineaIndex: linea.index, precioLista });
     }
   }
 
   unidades.sort((a, b) => {
-    const cmp = b.neto.comparedTo(a.neto);
+    const cmp = b.precioLista.comparedTo(a.precioLista);
     return cmp !== 0 ? cmp : a.lineaIndex - b.lineaIndex;
   });
 
@@ -266,7 +292,7 @@ function evaluarNxm(
     const grupo = unidades.slice(inicio, inicio + cadaN);
     // Ordenado desc: la última del grupo es la más barata.
     const barata = grupo[grupo.length - 1];
-    const monto = valor.times(barata.neto);
+    const monto = valor.times(barata.precioLista);
     if (monto.greaterThan(ZERO)) {
       const conteo = new Map<number, number>();
       for (const u of grupo) {
@@ -303,19 +329,19 @@ function evaluarNxm(
  * Arma tantos combos completos como alcancen las unidades disponibles,
  * tomando SIEMPRE las unidades MÁS CARAS de cada slot primero (decisión 3
  * del owner: criterio pro-cliente, maximiza el descuento) — mismo
- * ordenamiento que `evaluarNxm` (desc por neto, empate por `lineaIndex`
+ * ordenamiento que `evaluarNxm` (desc por precio de lista, empate por `lineaIndex`
  * ascendente). Cada combo consume sus unidades antes de intentar el
  * siguiente, así que un segundo combo de una promo repetible usa lo que
  * sobró del primero (unidades más baratas).
  *
- * `descuento = Σ netos del combo − valorMonto`. Si no es positivo —el combo
+ * `descuento = Σ precios de lista del combo − valorMonto`. Si no es positivo —el combo
  * encarecería o empataría con comprar suelto, una promo nunca encarece—, esa
  * combinación no se arma. Como los combos siguientes de la misma promo solo
  * pueden ser más baratos (consumen unidades cada vez menos caras que la
  * anterior), no tiene sentido seguir probando: se corta ahí.
  *
  * El descuento de cada combo se reparte entre las líneas que aportaron
- * unidades, a prorrata del neto aportado — ver `repartirDescuentoCombo`.
+ * unidades, a prorrata del precio aportado — ver `repartirDescuentoCombo`.
  *
  * Para el greedy, cada candidata pide las unidades que efectivamente tomó de
  * cada línea (conteo, no solo la línea): dos combos repetidos sobre líneas de
@@ -335,13 +361,13 @@ function evaluarPrecioFijo(
       if (!instanteEnVentana(promo.ventana, linea.instante)) continue;
 
       const cantidadEntera = new Decimal(linea.cantidad).floor().toNumber();
-      const neto = new Decimal(linea.netoUnitario);
+      const precioLista = new Decimal(linea.precioListaUnitario);
       for (let u = 0; u < cantidadEntera; u++) {
-        unidades.push({ lineaIndex: linea.index, neto });
+        unidades.push({ lineaIndex: linea.index, precioLista });
       }
     }
     unidades.sort((a, b) => {
-      const cmp = b.neto.comparedTo(a.neto);
+      const cmp = b.precioLista.comparedTo(a.precioLista);
       return cmp !== 0 ? cmp : a.lineaIndex - b.lineaIndex;
     });
     return { cantidad: scope.cantidad, unidades, cursor: 0 };
@@ -366,8 +392,11 @@ function evaluarPrecioFijo(
     if (!alcanza) break;
 
     const unidadesCombo = tomas.flat();
-    const sumaNetos = unidadesCombo.reduce((a, u) => a.plus(u.neto), ZERO);
-    const descuento = sumaNetos.minus(valorMonto);
+    const sumaListas = unidadesCombo.reduce(
+      (a, u) => a.plus(u.precioLista),
+      ZERO,
+    );
+    const descuento = sumaListas.minus(valorMonto);
     if (!descuento.greaterThan(ZERO)) break;
 
     for (const pool of pools) pool.cursor += pool.cantidad;
@@ -377,7 +406,7 @@ function evaluarPrecioFijo(
     for (const u of unidadesCombo) {
       pesosPorLinea.set(
         u.lineaIndex,
-        (pesosPorLinea.get(u.lineaIndex) ?? ZERO).plus(u.neto),
+        (pesosPorLinea.get(u.lineaIndex) ?? ZERO).plus(u.precioLista),
       );
       conteoPorLinea.set(
         u.lineaIndex,
@@ -407,7 +436,7 @@ function evaluarPrecioFijo(
 
 /**
  * Reparte `descuento` entre las líneas que aportaron unidades al combo, a
- * prorrata del neto aportado. Cada parte se calcula por proporción, fina
+ * prorrata del precio aportado. Cada parte se calcula por proporción, fina
  * (sin cuantizar a la escala de moneda — eso lo hace el cierre del motor,
  * no acá). La SUMA de las partes es EXACTAMENTE igual a `descuento`: el
  * único resto que puede aparecer es el de precisión de `Decimal` cuando el
@@ -460,7 +489,7 @@ function repartirDescuentoCombo(
  * `evaluarNxm`/`evaluarPrecioFijo` no saben nada de las otras promos ni del
  * resultado del greedy) — pero cada candidata interna sabe cuántas unidades
  * DISCRETAS consume de cada línea (no solo qué líneas toca). Las unidades de
- * una línea son fungibles (mismo ítem, mismo neto), así que no hace falta
+ * una línea son fungibles (mismo ítem, mismo precio), así que no hace falta
  * identidad por unidad física: alcanza con un CONTADOR de unidades
  * consumidas por línea. `porcentaje` sigue operando a nivel línea completa
  * (sin cambio de semántica): su candidata pide `⌊cantidad⌋` — la línea

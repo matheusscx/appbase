@@ -152,6 +152,40 @@ export interface ConfigCalculo {
    * que seguir siendo interpretable con lo que valía entonces.
    */
   decimalesMoneda: number;
+  /**
+   * ¿Una promoción y un descuento de catálogo que tocan la misma línea se
+   * SUMAN, o aplica solo la rebaja mayor? Preferencia del tenant.
+   *
+   * Requerido a propósito, igual que `decimalesMoneda`: opcional significaría
+   * que olvidarse de mapearlo cambia plata en silencio —el default de un
+   * `?? false` haría desaparecer descuentos que el tenant sí quería sumar—. Y
+   * viaja en el congelado por la misma razón que el resto de la config: el
+   * mismo monto de promo da otro total según cuál de las dos posiciones regía.
+   *
+   * Cómo se resuelve el conflicto: ver `calcularVenta`.
+   */
+  promosAcumulanDescuentos: boolean;
+}
+
+/**
+ * Una promoción ya evaluada por `promociones.evaluator.ts`, lista para que el
+ * motor la reste. **Referencia sus líneas por ÍNDICE, nunca por `itemId`**: el
+ * mismo ítem puede estar en dos líneas con personalizaciones distintas.
+ *
+ * Los montos llegan **finos** (sin cuantizar): el motor los cierra en la escala
+ * de la moneda al cerrar el paso de descuentos, como a cualquier otro monto.
+ *
+ * Una aplicación es la unidad indivisible del beneficio: los tres grupos de un
+ * 2x1 sobre 6 cervezas son tres aplicaciones, y un combo que toca dos líneas es
+ * UNA sola. Esa granularidad es la que compara el interruptor.
+ */
+export interface AplicacionPromoResuelta {
+  promocionId: string;
+  nombre: string;
+  tipo: string;
+  /** El % decimal o el precio fijo con el que se armó — para el ticket. */
+  valorEfectivo: string;
+  montosPorLinea: { lineaIndex: number; monto: string }[];
 }
 
 export interface VentaResuelta {
@@ -159,6 +193,16 @@ export interface VentaResuelta {
   metodoPagoId: string | null;
   descuentosVenta: ReglaResuelta[];
   recargosVenta: ReglaResuelta[];
+  /**
+   * Las promociones que ganaron el arbitraje **entre promos** (el greedy del
+   * evaluador). Lo que queda por resolver acá es el otro conflicto: promo
+   * contra descuento de catálogo, que lo gobierna
+   * `config.promosAcumulanDescuentos`.
+   *
+   * Requerido a propósito, igual que `promosAcumulanDescuentos`: un campo
+   * opcional que decide plata es un campo que alguien se olvida de mapear.
+   */
+  promociones: AplicacionPromoResuelta[];
   config: ConfigCalculo;
 }
 
@@ -197,6 +241,31 @@ export interface TrazaImpuesto {
   nombre: string;
   monto: string;
   tasa: string;
+}
+
+/**
+ * Lo que una promoción restó **en esta línea**. Familia propia y no una
+ * `TrazaRegla` más, aunque el monto haya entrado en el mismo agregado: el
+ * ticket la imprime NOMBRADA (`2x1 martes  −$5.000`) porque es la promesa que
+ * el cliente vino a buscar, y fundirla con los descuentos de catálogo es
+ * justamente lo que hace discutir en caja.
+ *
+ * `monto` es fino a `escala_calculo` en su formato, igual que `TrazaRegla.monto`
+ * —el valor ya viene cuantizado por el cierre del paso, es la misma convención
+ * que las demás trazas—.
+ *
+ * `aplicacion` agrupa: es 1-based POR PROMO, así que dos grupos de un 2x1 sobre
+ * la misma línea son `1` y `2`, y una aplicación cross-línea deja el MISMO
+ * número en las dos líneas que tocó. Sin él, el drawer no puede distinguir "dos
+ * veces el 2x1" de "el 2x1 repartido en dos líneas".
+ */
+export interface TrazaPromo {
+  /** `promocionId`. */
+  id: string;
+  nombre: string;
+  monto: string;
+  valorEfectivo: string;
+  aplicacion: number;
 }
 
 /**
@@ -244,6 +313,12 @@ export interface ResultadoLinea {
     descuentos: TrazaRegla[];
     recargos: TrazaRegla[];
     impuestos: TrazaImpuesto[];
+    /**
+     * Las promos que restaron en esta línea. Van aparte de `descuentos` aunque
+     * su monto haya sumado en `descuentoAplicado`: la separación promo/catálogo
+     * vive en la traza y en el congelado, no en los agregados. Ver `TrazaPromo`.
+     */
+    promociones: TrazaPromo[];
   };
   /** Descuentos topeados por el piso en cero en esta línea. */
   advertencias: AdvertenciaPrecio[];
@@ -525,10 +600,29 @@ interface ResultadoPaso {
    * Suma de los montos tal como quedaron en las trazas. Con cuantización es
    * `Σ trazas_Q`, que es justo lo que el documento declara; sin ella coincide
    * con `acc − acc_inicial` (con signo).
+   *
+   * **Incluye las promos**: el beneficio ES un descuento (ADR-010 portable), así
+   * que suma en `descuentoAplicado` y en `totales.totalDescuentos`.
    */
   total: Decimal;
   trazas: TrazaRegla[];
+  /** Vacío salvo en el paso `descuentos` de una línea con promos. */
+  trazasPromos: TrazaPromo[];
   advertencias: AdvertenciaPrecio[];
+}
+
+/**
+ * Una aplicación de promo bajada a UNA línea: lo que le toca restar acá.
+ * Interna del motor — el llamador habla en `AplicacionPromoResuelta`, que es
+ * por venta; `calcularVenta` la reparte y numera.
+ */
+interface PromoEnLinea {
+  id: string;
+  nombre: string;
+  /** Fino, tal como lo emitió el evaluador. */
+  monto: Decimal;
+  valorEfectivo: string;
+  aplicacion: number;
 }
 
 /**
@@ -658,6 +752,27 @@ function procesarReglas(
      * mide `anti-patterns.md` en su entrada de cuantización.
      */
     cuantizar?: Cuantizador;
+    /**
+     * Promos que restan en ESTA línea, **después** de las reglas de catálogo.
+     * Solo las pasa el paso `descuentos` de `calcularLinea`.
+     *
+     * Van por el mismo camino que las reglas —mismo `disponible`, mismo piso en
+     * cero, mismo cuantizador— y no por una función aparte a propósito: para la
+     * aritmética de cierre una promo es un descuento más, y duplicar el tope o
+     * la cuantización sería abrir un segundo camino de redondeo sobre plata.
+     */
+    promos?: PromoEnLinea[];
+    /**
+     * Interruptor en "no acumulan" y la promo GANÓ esta línea: las reglas de
+     * catálogo no aportan monto pero **siguen apareciendo** en la traza con
+     * monto `0` y su `valorEfectivo` intacto — el patrón "No aplicó" que ya usa
+     * una regla cuyo método de pago no coincide.
+     *
+     * No es lo mismo que no pasarlas: una regla que desaparece de la traza es
+     * una regla que el ticket no puede explicar, y el cliente que negoció ese
+     * descuento merece ver por qué no se le aplicó.
+     */
+    anularReglas?: boolean;
   },
 ): ResultadoPaso {
   let { acc } = params;
@@ -665,6 +780,7 @@ function procesarReglas(
   let disponible = params.disponible ?? params.acc;
   let total = ZERO;
   const trazas: TrazaRegla[] = [];
+  const trazasPromos: TrazaPromo[] = [];
   const advertencias: AdvertenciaPrecio[] = [];
 
   for (const regla of ordenarReglas(reglas)) {
@@ -693,6 +809,25 @@ function procesarReglas(
       monto: params.neto,
       metodoPagoId: params.metodoPagoId,
     });
+    // La regla perdió contra la promo: deja su traza sin monto. Se evalúa
+    // igual —y por eso el `continue` va acá y no antes— porque el
+    // `valorEfectivo` es lo que permite decir "este 10% no aplicó"; con la
+    // regla por tramos ese valor solo se conoce después de elegir el tramo.
+    if (params.anularReglas) {
+      trazas.push({
+        id: regla.id,
+        nombre: regla.nombre,
+        monto: fmt(ZERO, params.cfg),
+        modo: regla.modo,
+        valorEfectivo: evaluacion.valorEfectivo,
+        // Igual que `monto`: la regla no pidió nada porque no llegó a pedir.
+        // Dejar acá lo que habría valido haría leer la traza como un descuento
+        // TOPEADO, que es otra cosa (ver el docblock de `valorSolicitado`).
+        valorSolicitado: fmt(ZERO, params.cfg),
+      });
+      continue;
+    }
+
     let monto = redondear(evaluacion.monto, params.cfg);
 
     // Ninguna regla aporta una magnitud negativa: el signo lo pone el TIPO de
@@ -751,7 +886,78 @@ function procesarReglas(
     });
   }
 
-  return { acc, total, trazas, advertencias };
+  /**
+   * **Las promos van al final del paso, después de las reglas de catálogo.**
+   *
+   * Coherente con "porcentajes antes que montos fijos": el monto de la promo ya
+   * viene resuelto en plata por el evaluador, así que es un fijo — y los fijos
+   * van últimos. La consecuencia buscada es la misma que documenta
+   * `ordenarReglas`: **el último es el que se recorta** cuando el piso en cero
+   * entra, y una promo recortada se explica en el ticket ("el 2x1 de 5.000
+   * aplicó 3.000") mientras que un porcentaje recortado no.
+   *
+   * No hay evaluación que hacer —no hay tramos, ni método de pago, ni
+   * `activo`/`vigente`: eso lo resolvió el evaluador contra el instante de la
+   * línea— así que arranca directo en el piso y el tope, compartiendo
+   * `disponible`, `total` y `q` con las reglas de arriba.
+   */
+  for (const promo of params.promos ?? []) {
+    let monto = Decimal.max(redondear(promo.monto, params.cfg), ZERO);
+
+    const tope = Decimal.max(disponible, ZERO);
+    if (monto.greaterThan(tope)) {
+      // Mismo criterio que el descuento topeado: el recorte se aplica siempre,
+      // el aviso solo si sobrevive a la cuantización.
+      if (q(monto).greaterThan(q(tope))) {
+        advertencias.push({
+          titulo: `Promoción "${promo.nombre}"`,
+          detalle: 'no se aplicó completo porque superaba el monto disponible',
+        });
+      }
+      monto = tope;
+    }
+
+    const montoQ = q(monto);
+    acc = acc.minus(monto);
+    disponible = disponible.minus(montoQ);
+    total = total.plus(montoQ);
+    trazasPromos.push({
+      id: promo.id,
+      nombre: promo.nombre,
+      monto: fmt(montoQ, params.cfg),
+      valorEfectivo: promo.valorEfectivo,
+      aplicacion: promo.aplicacion,
+    });
+  }
+
+  return { acc, total, trazas, trazasPromos, advertencias };
+}
+
+/**
+ * **El factor que separa el precio de LISTA del NETO en esta línea**: `1 + Σ
+ * tasas vigentes` cuando el precio ya incluye impuesto, y `1` en el resto (ahí
+ * la lista YA es el neto, así que la conversión es la identidad).
+ *
+ * Es UNA función y no dos cuentas iguales porque tiene DOS consumidores que no
+ * pueden discrepar: el desbruteo del precio unitario y la conversión de los
+ * montos de promoción, que llegan en el dominio de la lista (ver
+ * `LineaPromo.precioListaUnitario`). Si divergieran, la promo restaría contra
+ * una base que no es la suya — que es exactamente el bug medido: un "20%" de
+ * promo cobrando 756 donde el 20% de catálogo cobraba 794.
+ *
+ * ⚠️ Mira `impuestos.activo`, igual que el desbruteo: un impuesto pausado no
+ * infla el divisor. Que la lista de vigentes se calcule una sola vez por línea
+ * y se pase acá sería una micro-optimización que no vale el parámetro extra;
+ * `calcularLinea` reusa el `factorLista` que sale de acá para todo.
+ */
+function factorListaANeto(linea: LineaResuelta): Decimal {
+  const vigentes = linea.impuestos.filter((imp) => imp.activo);
+  if (!linea.precioIncluyeImpuesto || vigentes.length === 0) {
+    return new Decimal(1);
+  }
+  return new Decimal(1).plus(
+    vigentes.reduce((a, imp) => a.plus(imp.porcentaje), ZERO),
+  );
 }
 
 /**
@@ -796,6 +1002,21 @@ function calcularLinea(
    * reparto— y con su valor en la segunda.
    */
   ajusteVenta: Decimal = ZERO,
+  /**
+   * Lo que las promociones dejaron para esta línea. `aplicadas` son los montos
+   * que restan (ya arbitrados entre promos por el evaluador y contra el
+   * catálogo por `calcularVenta`); `anularCatalogo` dice si en esta línea ganó
+   * la promo con el interruptor en "no acumulan".
+   *
+   * Va en un objeto y no como dos parámetros sueltos porque los dos son la
+   * misma decisión —quién aplica en esta línea— y separarlos invita a pasar uno
+   * y olvidarse del otro, que es el estado en que la línea cobra la promo Y el
+   * descuento con el interruptor apagado.
+   */
+  promos: { aplicadas: PromoEnLinea[]; anularCatalogo: boolean } = {
+    aplicadas: [],
+    anularCatalogo: false,
+  },
 ): ResultadoLinea {
   const cantidad = new Decimal(linea.cantidad);
   const bruto = new Decimal(linea.precioUnitario);
@@ -833,15 +1054,36 @@ function calcularLinea(
   // abajo y el neto quedaría mal aunque el impuesto no se cobrara.
   const impuestosVigentes = linea.impuestos.filter((imp) => imp.activo);
 
-  // Neto unitario: desbrutear si el precio ya incluye impuestos.
-  let netoUnitario = bruto;
-  if (linea.precioIncluyeImpuesto && impuestosVigentes.length > 0) {
-    const sumaTasas = impuestosVigentes.reduce(
-      (acc, imp) => acc.plus(imp.porcentaje),
-      ZERO,
-    );
-    netoUnitario = bruto.dividedBy(new Decimal(1).plus(sumaTasas));
-  }
+  // Neto unitario: desbrutear si el precio ya incluye impuestos. El divisor es
+  // el mismo con el que se convierten los montos de promoción, abajo.
+  const factorLista = factorListaANeto(linea);
+  const netoUnitario = bruto.dividedBy(factorLista);
+
+  /**
+   * **Las promos llegan en el dominio del precio de LISTA y acá pasan a NETO.**
+   *
+   * El evaluador promete el beneficio como lo lee el cliente —20% de la
+   * etiqueta, el combo sale $9.990— porque eso es lo que el local anunció. El
+   * documento, en cambio, declara todo en neto: `descuentoAplicado`,
+   * `totalDescuentos` y la base imponible viven ahí. Sin esta conversión el
+   * monto de góndola se restaba contra una base neta y la promo cobraba de
+   * más: medido, un "20%" sobre una etiqueta de 993 dejaba la línea en **756**
+   * mientras el 20% de catálogo la dejaba en **794**, y un combo anunciado en
+   * $9.990 se cobraba $9.247.
+   *
+   * Es el patrón que el motor ya usa para las reglas de nivel venta —"se
+   * evalúan contra la plata cobrada y se declaran en neto", ver el bloque de
+   * `netoDescuentoVenta` en `calcularVenta`—, con la diferencia de que acá la
+   * conversión es exacta por línea (cada línea tiene SU factor) en vez de
+   * necesitar un factor agregado.
+   *
+   * En una línea que no incluye impuesto el factor es 1 y esto es la identidad,
+   * así que el caso más común no paga nada.
+   */
+  const promosEnNeto = promos.aplicadas.map((p) => ({
+    ...p,
+    monto: p.monto.dividedBy(factorLista),
+  }));
   // El primer monto de la cadena nace ya cuantizado: es el neto que el
   // documento declara, y la base de todo lo que sigue.
   const subtotalNeto = q(redondear(netoUnitario.times(cantidad), cfg));
@@ -855,6 +1097,12 @@ function calcularLinea(
   // entera como neto, una afecta la parte entre neto e IVA. Es la prorrata de
   // la decisión (c) sin necesidad de tratar las dos bases por separado.
   let ajusteVentaNeto = ZERO;
+  /** Lo que la promo restó de esta línea, en NETO (parte de `descuentoAplicado`). */
+  let descuentoPromoNeto = ZERO;
+  /** Lo mismo, en el dominio de LISTA: es lo que corre el ancla del cierre. */
+  let promoListaAplicada = ZERO;
+  /** `false` si el piso en cero topeó la promo — ver el paso `descuentos`. */
+  let promoAnclable = true;
   // El aviso del impuesto pausado solo tiene sentido si la fórmula del tenant
   // aplica impuestos: si el paso no está, ese impuesto no se iba a cobrar de
   // todos modos y "no se aplicó" describe la fórmula, no la pausa. Se armaba
@@ -872,6 +1120,7 @@ function calcularLinea(
     descuentos: [] as TrazaRegla[],
     recargos: [] as TrazaRegla[],
     impuestos: [] as TrazaImpuesto[],
+    promociones: [] as TrazaPromo[],
   };
 
   /**
@@ -882,12 +1131,20 @@ function calcularLinea(
    * Si el tenant puso los impuestos primero, lo aplicado todavía no se conoce:
    * con reglas en la lista se asume que van a mover el monto y se usa la
    * fórmula normal, que es la rama segura.
+   *
+   * ⚠️ **Las promos cuentan como reglas del paso `descuentos`**, y omitirlas era
+   * un agujero real: con la fórmula `['impuestos','descuentos',…]` y una línea
+   * SIN descuentos de catálogo pero CON promo, `linea.descuentos.length > 0`
+   * daba `false`, la línea anclaba a góndola y declaraba el IVA de la etiqueta
+   * (159 sobre una base real de 750). El monto de la promo se resta en ese paso
+   * igual que un descuento: si va después del impuesto, mueve el acumulado
+   * después del impuesto.
    */
   const hayReglasDespuesDelImpuesto = cfg.formula
     .slice(cfg.formula.indexOf('impuestos') + 1)
     .some((p) =>
       p === 'descuentos'
-        ? linea.descuentos.length > 0
+        ? linea.descuentos.length > 0 || promosEnNeto.length > 0
         : p === 'recargos' && linea.recargos.length > 0,
     );
 
@@ -903,6 +1160,8 @@ function calcularLinea(
         metodoPagoId,
         cfg,
         cuantizar: q,
+        promos: promosEnNeto,
+        anularReglas: promos.anularCatalogo,
       });
       descuentoAplicado = r.total;
       // Cierre del paso: el acumulado se rearma con el total DECLARADO, no con
@@ -910,7 +1169,31 @@ function calcularLinea(
       // paso). Sin cuantizar los dos valores coinciden exactamente.
       acc = alAbrir.minus(descuentoAplicado);
       trazas.descuentos = r.trazas;
+      trazas.promociones = r.trazasPromos;
       advertencias.push(...r.advertencias);
+
+      // Lo que la promo restó, en los DOS dominios: el neto entró en
+      // `descuentoAplicado`, y el de lista es el que mueve el ancla del cierre
+      // (ver el paso `impuestos`). Se capturan acá porque es el único lugar que
+      // sabe cuánto se aplicó de verdad, después del piso en cero.
+      descuentoPromoNeto = r.trazasPromos.reduce(
+        (a, t) => a.plus(t.monto),
+        ZERO,
+      );
+      const promoNetoPedido = promosEnNeto.reduce(
+        (a, p) => a.plus(q(redondear(Decimal.max(p.monto, ZERO), cfg))),
+        ZERO,
+      );
+      // Una promo TOPEADA por el piso en cero no puede anclar: la línea se fue
+      // a cero y ya no hay un "precio prometido" contra el que cerrar — el
+      // ancla `lista − promo` sería negativa. Esa línea vuelve a la fórmula.
+      promoAnclable = descuentoPromoNeto.eq(promoNetoPedido);
+      promoListaAplicada = q(
+        redondear(
+          promos.aplicadas.reduce((a, p) => a.plus(p.monto), ZERO),
+          cfg,
+        ),
+      );
     } else if (paso === 'recargos') {
       const alAbrir = acc;
       const r = procesarReglas(linea.recargos, {
@@ -965,11 +1248,21 @@ function calcularLinea(
        * ignora el descuento— y restar contra góndola−descuento da 159, cuando
        * el correcto es 143. Esa línea la excluye la comparación de bases sola,
        * sin necesitar el guard viejo.
+       *
+       * ⚠️ **La promo es la excepción, y por la misma razón que el descuento de
+       * nivel venta: no apaga el cierre, le MUEVE el ancla** (ver el bloque de
+       * abajo). Un descuento de catálogo es un porcentaje sobre el neto y no
+       * promete ninguna cifra en la vidriera; una promo SÍ —"el combo sale
+       * $9.990", "el segundo va gratis"— y esa cifra está en el dominio de la
+       * lista. Por eso la comparación descuenta lo que la promo restó: la línea
+       * sigue siendo "una línea que cierra a lo prometido", solo que lo
+       * prometido ya no es la etiqueta pelada.
        */
       const cierraAGondola =
         linea.precioIncluyeImpuesto &&
         impuestosVigentes.length > 0 &&
-        baseSinAjuste.eq(subtotalNeto) &&
+        baseSinAjuste.eq(subtotalNeto.minus(descuentoPromoNeto)) &&
+        promoAnclable &&
         !hayReglasDespuesDelImpuesto;
 
       /**
@@ -989,11 +1282,28 @@ function calcularLinea(
        * reglas después, el acumulado va a seguir cambiando y el ancla mentiría.
        * Ahí el ajuste entra como corrimiento de la base y los impuestos van por
        * su fórmula, que es la rama segura.
+       *
+       * **Las promociones corren el ancla igual, y COMPONEN con el ajuste de
+       * venta**: `etiqueta − promo − parte del descuento global`. Es la misma
+       * decisión y el mismo mecanismo — el ancla se mueve, no se apaga— porque
+       * el problema es el mismo: la promo le promete al cliente una cifra ("el
+       * combo sale $9.990", "el segundo gratis") y esa cifra es lo que la línea
+       * tiene que cobrar AL PESO. Derivando el impuesto por resta cierra por
+       * construcción; con `tasa × base` no: medido, el combo del ejemplo cerraba
+       * en 9.991 y un 2x1 sobre una etiqueta de 993 dejaba la unidad "gratis"
+       * costando un peso.
+       *
+       * El orden importa y es el del recibo: primero la promo —que es un precio
+       * de la línea, lo que el cliente vino a buscar— y sobre ese subtotal el
+       * descuento de documento, que se reparte proporcionalmente a lo que cada
+       * línea aporta DESPUÉS de su promo.
        */
       const puedeAnclar = !hayReglasDespuesDelImpuesto;
-      let ancla: Decimal | null = cierraAGondola
-        ? q(redondear(bruto.times(cantidad), cfg))
+      /** `etiqueta − promo`: lo prometido por la línea, antes del documento. */
+      const anclaDeLinea: Decimal | null = cierraAGondola
+        ? q(redondear(bruto.times(cantidad), cfg)).minus(promoListaAplicada)
         : null;
+      let ancla: Decimal | null = anclaDeLinea;
       if (!ajusteVenta.isZero() && puedeAnclar) {
         const sinAjuste =
           ancla ??
@@ -1008,10 +1318,65 @@ function calcularLinea(
       }
 
       if (ancla !== null) {
+        /**
+         * La base que implica el ancla de la LÍNEA (ya con la promo, todavía
+         * sin el documento). Sin promo es `baseSinAjuste` y todo esto es la
+         * identidad de siempre.
+         *
+         * Se deriva del ancla en vez de usar el neto que el paso `descuentos`
+         * dejó, porque son dos caminos hasta el mismo número y solo uno cierra:
+         * dividir el monto de promo y cuantizarlo puede caer un minor unit al
+         * lado de lo que el ancla exige. El ancla manda —es lo que el cliente
+         * paga— y la diferencia se le devuelve al descuento de promo, abajo.
+         */
+        const basePromo =
+          anclaDeLinea !== null && !descuentoPromoNeto.isZero()
+            ? q(
+                redondear(
+                  anclaDeLinea.dividedBy(new Decimal(1).plus(sumaTasas)),
+                  cfg,
+                ),
+              )
+            : baseSinAjuste;
+
+        /**
+         * Lo que le falta (o le sobra) al descuento de promo para que la base
+         * caiga exactamente donde el ancla la pone. Es a lo sumo un minor unit
+         * y va al descuento —no a `ajusteVenta`, que significa otra cosa: la
+         * parte de esta línea en las reglas de DOCUMENTO— porque su origen es
+         * la promo. Medido: un 2x1 sobre dos etiquetas de 993 pide 835 de
+         * descuento neto y la división da 834; sin esta corrección la unidad
+         * "gratis" le costaba un peso al cliente.
+         */
+        const correccionPromo = baseSinAjuste.minus(basePromo);
+        if (!correccionPromo.isZero() && trazas.promociones.length > 0) {
+          descuentoAplicado = descuentoAplicado.plus(correccionPromo);
+          // Se la lleva la aplicación de mayor monto: es la que menos se
+          // distorsiona en términos relativos, mismo criterio que
+          // `elegirAbsorbente` con el residuo del desbruteo. Con una sola
+          // aplicación —el caso normal— no hay nada que elegir.
+          const absorbe = trazas.promociones.reduce(
+            (mejor, t, i, todas) =>
+              new Decimal(t.monto).greaterThan(new Decimal(todas[mejor].monto))
+                ? i
+                : mejor,
+            0,
+          );
+          trazas.promociones[absorbe] = {
+            ...trazas.promociones[absorbe],
+            monto: fmt(
+              new Decimal(trazas.promociones[absorbe].monto).plus(
+                correccionPromo,
+              ),
+              cfg,
+            ),
+          };
+        }
+
         const baseImponible = ajusteVenta.isZero()
-          ? baseSinAjuste
+          ? basePromo
           : q(redondear(ancla.dividedBy(new Decimal(1).plus(sumaTasas)), cfg));
-        ajusteVentaNeto = baseImponible.minus(baseSinAjuste);
+        ajusteVentaNeto = baseImponible.minus(basePromo);
         // Lo que queda entre el ancla y el neto ES el impuesto de la línea.
         const residuo = ancla.minus(baseImponible);
 
@@ -1190,6 +1555,141 @@ function reescalarTrazas(
   }));
 }
 
+// ── Promociones: numeración e interruptor promo-vs-catálogo ─────────────────
+
+/**
+ * Baja las aplicaciones de promo a cada línea, resolviendo antes el **conflicto
+ * promo-vs-descuento de catálogo** que gobierna `promosAcumulanDescuentos`.
+ * Devuelve, por índice de línea, qué promos restan ahí y si el catálogo queda
+ * anulado.
+ *
+ * **La unidad de comparación es la APLICACIÓN, no la línea.** Un combo que toca
+ * dos líneas se compara ENTERO: es un precio por el conjunto, y dejarlo en la
+ * línea donde gana y sacarlo de la otra cobraría medio combo — que no es un
+ * producto que exista. Consecuencia buscada: una aplicación puede perder aunque
+ * en una de sus líneas, sola, hubiera ganado.
+ *
+ * **Contra qué se compara:** los descuentos de catálogo que esas líneas
+ * aplicarían **en la pasada normal**, calculados una sola vez acá y usados como
+ * baseline para TODAS las aplicaciones. Que el baseline no se actualice a
+ * medida que las aplicaciones ganan no es un descuido: si se recalculara, dos
+ * aplicaciones sobre la misma línea competirían contra un catálogo que la
+ * primera ya apagó, y la segunda ganaría por default. El baseline fijo hace
+ * que el resultado no dependa del orden de la lista.
+ *
+ * **Los dos lados se miden en NETO y cuantizados** (con el mismo `q` de la
+ * línea) porque lo que se compara es plata declarada, no el valor fino
+ * intermedio: sin eso, dos rebajas que en CLP valen lo mismo podrían decidirse
+ * por un decimal que el documento nunca va a mostrar. Los montos de promo
+ * llegan en precio de LISTA, así que se convierten con el factor de su línea
+ * antes de compararlos — ver `factorListaANeto`.
+ *
+ * **Empate: gana el catálogo.** Si la promo iguala al descuento, no cambia la
+ * plata que el cliente paga, y la opción que no mueve nada es la que menos
+ * sorprende — además de dejar en el ticket la regla que ya estaba.
+ *
+ * ⚠️ Esta pasada preliminar cuesta un recálculo completo de las líneas, y solo
+ * corre con el interruptor apagado Y con promos en la venta. Es aritmética pura
+ * —ni una consulta—, el mismo argumento con el que `calcularVenta` se permite
+ * sus dos pasadas.
+ */
+function resolverPromociones(
+  venta: VentaResuelta,
+  q: Cuantizador,
+): (lineaIndex: number) => {
+  aplicadas: PromoEnLinea[];
+  anularCatalogo: boolean;
+} {
+  const { config: cfg } = venta;
+  const sinPromos = { aplicadas: [] as PromoEnLinea[], anularCatalogo: false };
+  if (venta.promociones.length === 0) return () => sinPromos;
+
+  /**
+   * El factor de cada línea, para traer los montos de promo al dominio en que
+   * está el otro lado de la comparación. **Las dos familias se miden en NETO**:
+   * `descuentoAplicado` ya lo está, y el monto de promo llega en precio de
+   * lista. Comparar sin convertir haría ganar a la promo por el solo hecho de
+   * venir de una línea con IVA incluido —un 19% de ventaja gratis—.
+   */
+  const factorPorLinea = venta.lineas.map(factorListaANeto);
+  const promoEnNetoQ = (m: { lineaIndex: number; monto: string }) =>
+    q(
+      redondear(
+        new Decimal(m.monto).dividedBy(factorPorLinea[m.lineaIndex] ?? 1),
+        cfg,
+      ),
+    );
+
+  let ganadoras = venta.promociones;
+  const catalogoAnuladoEn = new Set<number>();
+
+  if (!cfg.promosAcumulanDescuentos) {
+    const descuentoDeCatalogo = venta.lineas.map(
+      (l) =>
+        new Decimal(
+          calcularLinea(l, venta.metodoPagoId, cfg).descuentoAplicado,
+        ),
+    );
+
+    ganadoras = [];
+    for (const ap of venta.promociones) {
+      const rebajaPromo = ap.montosPorLinea.reduce(
+        (a, m) => a.plus(promoEnNetoQ(m)),
+        ZERO,
+      );
+      const lineasTocadas = new Set(ap.montosPorLinea.map((m) => m.lineaIndex));
+      const rebajaCatalogo = [...lineasTocadas].reduce(
+        (a, i) => a.plus(descuentoDeCatalogo[i] ?? ZERO),
+        ZERO,
+      );
+
+      // Perdió: la aplicación se descarta ENTERA y **sin traza**, igual que la
+      // regla fuera de vigencia. No es un "aplicó 0" —la promo rige y el
+      // cliente califica—: es que en este tenant las dos familias no conviven,
+      // y eso lo explica la pantalla de configuración, no una línea del ticket.
+      if (!rebajaPromo.greaterThan(rebajaCatalogo)) continue;
+
+      ganadoras.push(ap);
+      for (const i of lineasTocadas) catalogoAnuladoEn.add(i);
+    }
+  }
+
+  /**
+   * `aplicacion` es 1-based POR PROMO: dos grupos del mismo 2x1 son 1 y 2.
+   *
+   * ⚠️ Se numera **después** del filtro, no antes. Numerando antes, una promo
+   * con dos aplicaciones donde la primera pierde dejaba la superviviente
+   * marcada como «2» sin que existiera una «1», y el drawer agrupa por este
+   * número: el cajero leía un hueco que no corresponde a nada.
+   */
+  const contadorPorPromo = new Map<string, number>();
+  const numeradas = ganadoras.map((ap) => {
+    const numero = (contadorPorPromo.get(ap.promocionId) ?? 0) + 1;
+    contadorPorPromo.set(ap.promocionId, numero);
+    return { ap, numero };
+  });
+
+  const porLinea = new Map<number, PromoEnLinea[]>();
+  for (const { ap, numero } of numeradas) {
+    for (const m of ap.montosPorLinea) {
+      const lista = porLinea.get(m.lineaIndex) ?? [];
+      lista.push({
+        id: ap.promocionId,
+        nombre: ap.nombre,
+        monto: new Decimal(m.monto),
+        valorEfectivo: ap.valorEfectivo,
+        aplicacion: numero,
+      });
+      porLinea.set(m.lineaIndex, lista);
+    }
+  }
+
+  return (lineaIndex) => ({
+    aplicadas: porLinea.get(lineaIndex) ?? [],
+    anularCatalogo: catalogoAnuladoEn.has(lineaIndex),
+  });
+}
+
 // ── Cálculo de la venta completa ────────────────────────────────────────────
 
 export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
@@ -1230,8 +1730,10 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
     return { neto, desc, rec, imp, ajuste, total, cant };
   };
 
-  let lineas = venta.lineas.map((l) =>
-    calcularLinea(l, venta.metodoPagoId, cfg),
+  const promosDeLinea = resolverPromociones(venta, q);
+
+  let lineas = venta.lineas.map((l, i) =>
+    calcularLinea(l, venta.metodoPagoId, cfg, ZERO, promosDeLinea(i)),
   );
   let t = totalizar(lineas);
   const subtotalNeto = t.neto;
@@ -1243,16 +1745,20 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
   // líneas pueden llevar tasas distintas (IVA + ILA) y no existe una tasa única
   // aplicable al agregado.
   let accVenta = t.total;
+  // Las promos son de LÍNEA: una regla de nivel venta no las lleva nunca, y
+  // por eso estos dos arrancan con `trazasPromos` vacío y nadie lo llena.
   let dv: ResultadoPaso = {
     acc: accVenta,
     total: ZERO,
     trazas: [],
+    trazasPromos: [],
     advertencias: [],
   };
   let rv: ResultadoPaso = {
     acc: accVenta,
     total: ZERO,
     trazas: [],
+    trazasPromos: [],
     advertencias: [],
   };
 
@@ -1314,7 +1820,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
       cfg,
     );
     lineas = venta.lineas.map((l, i) =>
-      calcularLinea(l, venta.metodoPagoId, cfg, partes[i]),
+      calcularLinea(l, venta.metodoPagoId, cfg, partes[i], promosDeLinea(i)),
     );
     t = totalizar(lineas);
   }

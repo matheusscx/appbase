@@ -90,7 +90,7 @@ function linea(over: Partial<LineaPromo> = {}): LineaPromo {
     itemId: 'item-1',
     categoriaId: null,
     cantidad: '1',
-    netoUnitario: '1000',
+    precioListaUnitario: '1000',
     instante: instante(),
     ...over,
   };
@@ -221,8 +221,8 @@ describe('evaluarPromos — canal', () => {
 describe('evaluarPromos — porcentaje', () => {
   it('20% sobre 2 líneas del scope → una aplicación con 2 montos', () => {
     const p = promo({ valorPorcentaje: '0.20' });
-    const l1 = linea({ index: 0, netoUnitario: '1000', cantidad: '2' });
-    const l2 = linea({ index: 1, netoUnitario: '500', cantidad: '3' });
+    const l1 = linea({ index: 0, precioListaUnitario: '1000', cantidad: '2' });
+    const l2 = linea({ index: 1, precioListaUnitario: '500', cantidad: '3' });
     const res = evaluarPromos({
       promos: [p],
       lineas: [l1, l2],
@@ -292,12 +292,12 @@ describe('evaluarPromos — porcentaje', () => {
     const dentro = linea({
       index: 0,
       categoriaId: 'cat-bebidas',
-      netoUnitario: '1000',
+      precioListaUnitario: '1000',
     });
     const fuera = linea({
       index: 1,
       categoriaId: 'cat-comida',
-      netoUnitario: '2000',
+      precioListaUnitario: '2000',
     });
     const res = evaluarPromos({
       promos: [p],
@@ -311,8 +311,8 @@ describe('evaluarPromos — porcentaje', () => {
 describe('evaluarPromos — nxm', () => {
   it('2x1: 2 cervezas $5.000 y $3.000 → 1 aplicación, monto $3.000 en la línea de la barata', () => {
     const p = nxmPromo();
-    const cara = linea({ index: 0, netoUnitario: '5000' });
-    const barata = linea({ index: 1, netoUnitario: '3000' });
+    const cara = linea({ index: 0, precioListaUnitario: '5000' });
+    const barata = linea({ index: 1, precioListaUnitario: '3000' });
     const res = evaluarPromos({
       promos: [p],
       lineas: [cara, barata],
@@ -324,10 +324,10 @@ describe('evaluarPromos — nxm', () => {
   it('4 unidades → 2 aplicaciones', () => {
     const p = nxmPromo();
     const lineas = [
-      linea({ index: 0, netoUnitario: '5000' }),
-      linea({ index: 1, netoUnitario: '4000' }),
-      linea({ index: 2, netoUnitario: '3000' }),
-      linea({ index: 3, netoUnitario: '2000' }),
+      linea({ index: 0, precioListaUnitario: '5000' }),
+      linea({ index: 1, precioListaUnitario: '4000' }),
+      linea({ index: 2, precioListaUnitario: '3000' }),
+      linea({ index: 3, precioListaUnitario: '2000' }),
     ];
     const res = evaluarPromos({ promos: [p], lineas, canal: 'fisico' });
     expect(res).toHaveLength(2);
@@ -338,9 +338,9 @@ describe('evaluarPromos — nxm', () => {
   it('3 unidades → 1 aplicación (grupo incompleto afuera)', () => {
     const p = nxmPromo();
     const lineas = [
-      linea({ index: 0, netoUnitario: '5000' }),
-      linea({ index: 1, netoUnitario: '4000' }),
-      linea({ index: 2, netoUnitario: '3000' }),
+      linea({ index: 0, precioListaUnitario: '5000' }),
+      linea({ index: 1, precioListaUnitario: '4000' }),
+      linea({ index: 2, precioListaUnitario: '3000' }),
     ];
     const res = evaluarPromos({ promos: [p], lineas, canal: 'fisico' });
     expect(montos(res)).toEqual([{ lineaIndex: 1, monto: '4000' }]);
@@ -348,15 +348,15 @@ describe('evaluarPromos — nxm', () => {
 
   it('2 unidades en la MISMA línea (cantidad 2) → monto = 1 × neto unitario en esa línea', () => {
     const p = nxmPromo();
-    const l = linea({ index: 0, netoUnitario: '3000', cantidad: '2' });
+    const l = linea({ index: 0, precioListaUnitario: '3000', cantidad: '2' });
     const res = evaluarPromos({ promos: [p], lineas: [l], canal: 'fisico' });
     expect(montos(res)).toEqual([{ lineaIndex: 0, monto: '3000' }]);
   });
 
   it("'2do al 50%' → 50% de la más barata", () => {
     const p = nxmPromo({ valorPorcentaje: '0.5' });
-    const cara = linea({ index: 0, netoUnitario: '5000' });
-    const barata = linea({ index: 1, netoUnitario: '3000' });
+    const cara = linea({ index: 0, precioListaUnitario: '5000' });
+    const barata = linea({ index: 1, precioListaUnitario: '3000' });
     const res = evaluarPromos({
       promos: [p],
       lineas: [cara, barata],
@@ -369,10 +369,14 @@ describe('evaluarPromos — nxm', () => {
     const p = nxmPromo();
     const fraccionaria = linea({
       index: 0,
-      netoUnitario: '5000',
+      precioListaUnitario: '5000',
       cantidad: '0.7',
     });
-    const entera = linea({ index: 1, netoUnitario: '3000', cantidad: '1' });
+    const entera = linea({
+      index: 1,
+      precioListaUnitario: '3000',
+      cantidad: '1',
+    });
     const res = evaluarPromos({
       promos: [p],
       lineas: [fraccionaria, entera],
@@ -384,8 +388,8 @@ describe('evaluarPromos — nxm', () => {
 
   it('empate de precios → resultado determinista (desempate por index ascendente)', () => {
     const p = nxmPromo();
-    const a = linea({ index: 0, netoUnitario: '3000' });
-    const b = linea({ index: 1, netoUnitario: '3000' });
+    const a = linea({ index: 0, precioListaUnitario: '3000' });
+    const b = linea({ index: 1, precioListaUnitario: '3000' });
     const res = evaluarPromos({ promos: [p], lineas: [a, b], canal: 'fisico' });
     // Empatadas en neto: el orden lo fija el índice ascendente, así que la
     // "más barata" del grupo (última tras ordenar) es siempre la de mayor índice.
@@ -394,7 +398,7 @@ describe('evaluarPromos — nxm', () => {
 
   it('UNA línea con cantidad=4 y cadaN=2 → 2 aplicaciones (no chocan entre sí, greedy por conteo)', () => {
     const p = nxmPromo();
-    const l = linea({ index: 0, netoUnitario: '5000', cantidad: '4' });
+    const l = linea({ index: 0, precioListaUnitario: '5000', cantidad: '4' });
     const res = evaluarPromos({ promos: [p], lineas: [l], canal: 'fisico' });
 
     // 4 unidades / cadaN=2 = 2 grupos completos, ambos con la misma línea
@@ -418,8 +422,16 @@ function sumaMontos(res: AplicacionPromo[]): Decimal {
 describe('evaluarPromos — precio_fijo (combo)', () => {
   it('1 pizza + 1 bebida = $9.990: descuento a prorrata del neto, suma exacta', () => {
     const p = precioFijoPromo();
-    const pizza = linea({ index: 0, itemId: 'pizza', netoUnitario: '8000' });
-    const bebida = linea({ index: 1, itemId: 'bebida', netoUnitario: '3500' });
+    const pizza = linea({
+      index: 0,
+      itemId: 'pizza',
+      precioListaUnitario: '8000',
+    });
+    const bebida = linea({
+      index: 1,
+      itemId: 'bebida',
+      precioListaUnitario: '3500',
+    });
 
     const res = evaluarPromos({
       promos: [p],
@@ -472,9 +484,9 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
         },
       ],
     });
-    const la = linea({ index: 0, itemId: 'a', netoUnitario: '3330' });
-    const lb = linea({ index: 1, itemId: 'b', netoUnitario: '3330' });
-    const lc = linea({ index: 2, itemId: 'c', netoUnitario: '3340' });
+    const la = linea({ index: 0, itemId: 'a', precioListaUnitario: '3330' });
+    const lb = linea({ index: 1, itemId: 'b', precioListaUnitario: '3330' });
+    const lc = linea({ index: 2, itemId: 'c', precioListaUnitario: '3340' });
 
     const res = evaluarPromos({
       promos: [p],
@@ -520,9 +532,9 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
         },
       ],
     });
-    const la = linea({ index: 0, itemId: 'a', netoUnitario: '5000' });
-    const lb = linea({ index: 1, itemId: 'b', netoUnitario: '5000' });
-    const lc = linea({ index: 2, itemId: 'c', netoUnitario: '5000' });
+    const la = linea({ index: 0, itemId: 'a', precioListaUnitario: '5000' });
+    const lb = linea({ index: 1, itemId: 'b', precioListaUnitario: '5000' });
+    const lc = linea({ index: 2, itemId: 'c', precioListaUnitario: '5000' });
 
     const res = evaluarPromos({
       promos: [p],
@@ -556,9 +568,21 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
         },
       ],
     });
-    const pizza1 = linea({ index: 0, itemId: 'pizza', netoUnitario: '8000' });
-    const pizza2 = linea({ index: 1, itemId: 'pizza', netoUnitario: '6000' });
-    const bebida = linea({ index: 2, itemId: 'bebida', netoUnitario: '3500' });
+    const pizza1 = linea({
+      index: 0,
+      itemId: 'pizza',
+      precioListaUnitario: '8000',
+    });
+    const pizza2 = linea({
+      index: 1,
+      itemId: 'pizza',
+      precioListaUnitario: '6000',
+    });
+    const bebida = linea({
+      index: 2,
+      itemId: 'bebida',
+      precioListaUnitario: '3500',
+    });
 
     // Con una sola pizza no alcanza el slot (cantidad: 2) → no arma combo.
     expect(
@@ -583,14 +607,18 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
     const pizzaCara = linea({
       index: 0,
       itemId: 'pizza',
-      netoUnitario: '8000',
+      precioListaUnitario: '8000',
     });
     const pizzaBarata = linea({
       index: 1,
       itemId: 'pizza',
-      netoUnitario: '6000',
+      precioListaUnitario: '6000',
     });
-    const bebida = linea({ index: 2, itemId: 'bebida', netoUnitario: '3500' });
+    const bebida = linea({
+      index: 2,
+      itemId: 'bebida',
+      precioListaUnitario: '3500',
+    });
 
     const res = evaluarPromos({
       promos: [p],
@@ -609,8 +637,16 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
 
   it('combo que encarece (valorMonto ≥ Σ netos) → 0 aplicaciones', () => {
     const p = precioFijoPromo({ valorMonto: '20000' });
-    const pizza = linea({ index: 0, itemId: 'pizza', netoUnitario: '8000' });
-    const bebida = linea({ index: 1, itemId: 'bebida', netoUnitario: '3500' });
+    const pizza = linea({
+      index: 0,
+      itemId: 'pizza',
+      precioListaUnitario: '8000',
+    });
+    const bebida = linea({
+      index: 1,
+      itemId: 'bebida',
+      precioListaUnitario: '3500',
+    });
     const res = evaluarPromos({
       promos: [p],
       lineas: [pizza, bebida],
@@ -621,17 +657,25 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
 
   it('repetible: unidades para 2 combos → 2 aplicaciones', () => {
     const p = precioFijoPromo({ valorMonto: '9000' });
-    const pizza1 = linea({ index: 0, itemId: 'pizza', netoUnitario: '8000' });
-    const pizza2 = linea({ index: 1, itemId: 'pizza', netoUnitario: '7000' });
+    const pizza1 = linea({
+      index: 0,
+      itemId: 'pizza',
+      precioListaUnitario: '8000',
+    });
+    const pizza2 = linea({
+      index: 1,
+      itemId: 'pizza',
+      precioListaUnitario: '7000',
+    });
     const bebida1 = linea({
       index: 2,
       itemId: 'bebida',
-      netoUnitario: '3500',
+      precioListaUnitario: '3500',
     });
     const bebida2 = linea({
       index: 3,
       itemId: 'bebida',
-      netoUnitario: '3000',
+      precioListaUnitario: '3000',
     });
 
     const res = evaluarPromos({
@@ -651,13 +695,13 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
     const pizza = linea({
       index: 0,
       itemId: 'pizza',
-      netoUnitario: '8000',
+      precioListaUnitario: '8000',
       cantidad: '2',
     });
     const bebida = linea({
       index: 1,
       itemId: 'bebida',
-      netoUnitario: '3500',
+      precioListaUnitario: '3500',
       cantidad: '2',
     });
 
@@ -680,8 +724,16 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
 
 describe('evaluarPromos — greedy entre promos', () => {
   it('la misma cerveza califica para 2x1 y happy hour → gana el 2x1 (mayor monto)', () => {
-    const cara = linea({ index: 0, itemId: 'cerveza', netoUnitario: '5000' });
-    const barata = linea({ index: 1, itemId: 'cerveza', netoUnitario: '3000' });
+    const cara = linea({
+      index: 0,
+      itemId: 'cerveza',
+      precioListaUnitario: '5000',
+    });
+    const barata = linea({
+      index: 1,
+      itemId: 'cerveza',
+      precioListaUnitario: '3000',
+    });
 
     const dosPorUno = nxmPromo({
       id: 'promo-2x1',
@@ -726,8 +778,16 @@ describe('evaluarPromos — greedy entre promos', () => {
   });
 
   it('con los montos invertidos, gana la otra promo', () => {
-    const cara = linea({ index: 0, itemId: 'cerveza', netoUnitario: '5000' });
-    const barata = linea({ index: 1, itemId: 'cerveza', netoUnitario: '3000' });
+    const cara = linea({
+      index: 0,
+      itemId: 'cerveza',
+      precioListaUnitario: '5000',
+    });
+    const barata = linea({
+      index: 1,
+      itemId: 'cerveza',
+      precioListaUnitario: '3000',
+    });
 
     const dosPorUno = nxmPromo({
       id: 'promo-2x1',
@@ -776,12 +836,12 @@ describe('evaluarPromos — greedy entre promos', () => {
     const cara = linea({
       index: 0,
       itemId: 'cerveza-cara',
-      netoUnitario: '5000',
+      precioListaUnitario: '5000',
     });
     const barata = linea({
       index: 1,
       itemId: 'cerveza-barata',
-      netoUnitario: '3000',
+      precioListaUnitario: '3000',
     });
 
     const dosPorUno = nxmPromo({
@@ -827,10 +887,10 @@ describe('evaluarPromos — greedy entre promos', () => {
   it('una unidad ya usada por la aplicación #1 de una promo no entra en la #2 de la misma', () => {
     const p = nxmPromo({ id: 'promo-2x1' });
     const lineas = [
-      linea({ index: 0, netoUnitario: '5000' }),
-      linea({ index: 1, netoUnitario: '4000' }),
-      linea({ index: 2, netoUnitario: '3000' }),
-      linea({ index: 3, netoUnitario: '2000' }),
+      linea({ index: 0, precioListaUnitario: '5000' }),
+      linea({ index: 1, precioListaUnitario: '4000' }),
+      linea({ index: 2, precioListaUnitario: '3000' }),
+      linea({ index: 3, precioListaUnitario: '2000' }),
     ];
     const res = evaluarPromos({ promos: [p], lineas, canal: 'fisico' });
 
@@ -850,13 +910,13 @@ describe('evaluarPromos — greedy entre promos', () => {
     const cerveza = linea({
       index: 0,
       itemId: 'cerveza',
-      netoUnitario: '5000',
+      precioListaUnitario: '5000',
       cantidad: '3',
     });
     const refresco = linea({
       index: 1,
       itemId: 'refresco',
-      netoUnitario: '4000',
+      precioListaUnitario: '4000',
       cantidad: '1',
     });
 

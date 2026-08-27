@@ -475,6 +475,10 @@ export class VentasService {
       descuentosVentaIds: dto.descuentosVentaIds,
       recargosVentaIds: dto.recargosVentaIds,
       cuentaId,
+      // El canal REAL de la venta, no el que pudo venir en una
+      // previsualización: es lo que filtra las promos que rigen en un solo
+      // canal. Mismo criterio que `cuentaId` — lo pone el servidor.
+      canal,
     };
 
     // 5. Calcular importes (sin persistencia)

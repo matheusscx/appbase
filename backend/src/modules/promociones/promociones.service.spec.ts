@@ -471,6 +471,162 @@ describe('PromocionesService', () => {
     });
   });
 
+  // ─── cargarVigentes ───────────────────────────────────────────────────────
+
+  describe('cargarVigentes', () => {
+    /** Una fila cruda del `LEFT JOIN`, con los defaults de una promo simple. */
+    const fila = (over: Record<string, unknown> = {}) => ({
+      promocion_id: 'promo-1',
+      nombre: 'Happy Hour',
+      tipo: 'porcentaje',
+      valor_porcentaje: '0.2000',
+      cada_n: null,
+      valor_monto: null,
+      fecha_inicio: '2026-01-01',
+      fecha_fin: '2026-12-31',
+      hora_inicio: '18:00',
+      hora_fin: '20:00',
+      dias_semana: [1, 2],
+      canal: null,
+      scope_id: 'scope-1',
+      slot: 0,
+      tipo_scope: 'venta',
+      categoria_id: null,
+      cantidad: 1,
+      item_id: null,
+      ...over,
+    });
+
+    it('arma el PromoElegible completo desde las filas del JOIN', async () => {
+      dataSourceMock.query.mockResolvedValue([fila()]);
+
+      const promos = await service.cargarVigentes(TENANT, '2026-06-15');
+
+      expect(promos).toEqual([
+        {
+          id: 'promo-1',
+          nombre: 'Happy Hour',
+          tipo: 'porcentaje',
+          valorPorcentaje: '0.2000',
+          cadaN: null,
+          valorMonto: null,
+          ventana: {
+            fechaInicio: '2026-01-01',
+            fechaFin: '2026-12-31',
+            horaInicio: '18:00',
+            horaFin: '20:00',
+            diasSemana: [1, 2],
+            canal: null,
+          },
+          scopes: [
+            {
+              slot: 0,
+              tipoScope: 'venta',
+              categoriaId: null,
+              cantidad: 1,
+              itemIds: [],
+            },
+          ],
+        },
+      ]);
+    });
+
+    // El `LEFT JOIN` desnormaliza: un combo de 2 slots con 2 ítems en el
+    // primero llega como 3 filas de la misma promo. El ensamblado tiene que
+    // colapsarlas sin duplicar ni el scope ni la promo.
+    it('colapsa las filas repetidas del JOIN en scopes e itemIds', async () => {
+      dataSourceMock.query.mockResolvedValue([
+        fila({
+          promocion_id: 'promo-combo',
+          tipo: 'precio_fijo',
+          valor_porcentaje: null,
+          valor_monto: '9990.0000',
+          scope_id: 'sc-a',
+          slot: 0,
+          tipo_scope: 'items',
+          cantidad: 1,
+          item_id: 'item-pizza',
+        }),
+        fila({
+          promocion_id: 'promo-combo',
+          tipo: 'precio_fijo',
+          valor_porcentaje: null,
+          valor_monto: '9990.0000',
+          scope_id: 'sc-a',
+          slot: 0,
+          tipo_scope: 'items',
+          cantidad: 1,
+          item_id: 'item-pizza-xl',
+        }),
+        fila({
+          promocion_id: 'promo-combo',
+          tipo: 'precio_fijo',
+          valor_porcentaje: null,
+          valor_monto: '9990.0000',
+          scope_id: 'sc-b',
+          slot: 1,
+          tipo_scope: 'categoria',
+          categoria_id: CATEGORIA_ID,
+          cantidad: 2,
+          item_id: null,
+        }),
+      ]);
+
+      const promos = await service.cargarVigentes(TENANT, '2026-06-15');
+
+      expect(promos).toHaveLength(1);
+      expect(promos[0].scopes).toEqual([
+        {
+          slot: 0,
+          tipoScope: 'items',
+          categoriaId: null,
+          cantidad: 1,
+          itemIds: ['item-pizza', 'item-pizza-xl'],
+        },
+        {
+          slot: 1,
+          tipoScope: 'categoria',
+          categoriaId: CATEGORIA_ID,
+          cantidad: 2,
+          itemIds: [],
+        },
+      ]);
+    });
+
+    // Una promo sin scopes vivos no puede llegar por catálogo (`validarScopes`
+    // exige al menos uno), pero el `LEFT JOIN` la devolvería con las columnas
+    // del scope en NULL si alguien borrara el scope por SQL. Sin este guard,
+    // el evaluador armaría un scope fantasma con `tipoScope: null`.
+    it('descarta la promo cuyo LEFT JOIN no trajo ningún scope vivo', async () => {
+      dataSourceMock.query.mockResolvedValue([
+        fila({ scope_id: null, slot: null, tipo_scope: null, cantidad: null }),
+      ]);
+
+      expect(await service.cargarVigentes(TENANT, '2026-06-15')).toEqual([]);
+    });
+
+    // El filtro real lo cubre el e2e (acá el mock devuelve lo que se le pida);
+    // lo que se prueba es la FORMA del SQL: que las tres condiciones estén y
+    // que la fecha entre por parámetro, nunca interpolada.
+    it('filtra por tenant, vivas, activas y en fecha — en UNA sola query', async () => {
+      dataSourceMock.query.mockResolvedValue([]);
+
+      await service.cargarVigentes(TENANT, '2026-06-15');
+
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSourceMock.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('p.activo = true');
+      expect(sql).toContain('p.fecha_inicio <= $2::date');
+      expect(sql).toContain('p.fecha_fin >= $2::date');
+      // Las tres tablas del JOIN filtran borrado.
+      expect(sql.match(/eliminado_el IS NULL/g)).toHaveLength(3);
+      expect(params).toEqual([TENANT, '2026-06-15']);
+    });
+  });
+
   // ─── DTO: decoradores que un test de service no ejerce ─────────────────────
   //
   // `horaFin`/`diasSemana` se validan con class-validator puro (`@Matches`,

@@ -1046,6 +1046,16 @@ export class SalonesService {
       }
       const lineas = await manager.find(CuentaLinea, {
         where: { tenantId, cuentaId },
+        // El orden de las líneas del cobro es CONTRATO, no cosmética: el motor
+        // de precios cruza cada línea de la venta con su fila de
+        // `cuenta_lineas` por ítem + consumo POR ORDEN para saber en qué
+        // instante se pidió (es lo que decide si una promo de happy hour
+        // aplica). Sin `order`, Postgres devuelve el heap order, que cambia con
+        // cualquier `UPDATE` de una fila —marcar cantidad enviada a cocina, sin
+        // ir más lejos— y el cruce empezaría a asignar el instante equivocado
+        // en silencio. `creadoEl` es además el orden en que el cliente pidió,
+        // que es el que el ticket imprime.
+        order: { creadoEl: 'ASC' },
       });
       if (lineas.length === 0) {
         throw new BadRequestException('La cuenta no tiene productos');

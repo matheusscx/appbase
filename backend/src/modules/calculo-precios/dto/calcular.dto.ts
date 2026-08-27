@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsNumberString,
   IsOptional,
   IsString,
@@ -100,4 +101,26 @@ export class CalcularVentaDto {
   @IsOptional()
   @IsUUID('4')
   cuentaId?: string;
+
+  /**
+   * Canal de la venta, para las promociones que rigen en uno solo. Default
+   * `'fisico'`.
+   *
+   * ⚠️ **Este campo solo puede mentir en pantalla porque los dos caminos que
+   * COBRAN lo pisan.** No es una propiedad del DTO: es una invariante que
+   * sostienen `ventas.service.ts` —que pasa el canal real de la venta— y
+   * `OnlineService.prepararLineasCheckout` —que fuerza `'online'`—. La versión
+   * anterior de este comentario afirmaba lo mismo cuando solo el primero lo
+   * hacía, y era falso: el checkout de la tienda reenviaba el `canal` del body
+   * al cálculo que autoriza el monto contra la tarjeta, así que un navegador
+   * mandando `'fisico'` colaba una promo de local en una compra online.
+   *
+   * O sea: si mañana aparece un tercer llamador que cobra, tiene que pisarlo
+   * también, o este comentario vuelve a ser mentira. El campo existe para que
+   * una previsualización pueda pedir la vista del otro canal, nada más — mismo
+   * argumento que `cuentaId`: lo que decide plata lo pone el servidor.
+   */
+  @IsOptional()
+  @IsIn(['fisico', 'online'])
+  canal?: 'fisico' | 'online';
 }

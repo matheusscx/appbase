@@ -81,6 +81,7 @@ const mockConfigCalculo: ConfigCalculo = {
   // 4 = el máximo que admite el sistema (UF); el motor todavía no cuantiza
   // con este valor (Task 5).
   decimalesMoneda: 4,
+  promosAcumulanDescuentos: false,
 };
 
 const mockResultadoVenta = {
@@ -95,7 +96,7 @@ const mockResultadoVenta = {
       ajusteVenta: '0',
       impuestoAplicado: '0.0000',
       totalLinea: '100.0000',
-      trazas: { descuentos: [], recargos: [], impuestos: [] },
+      trazas: { descuentos: [], recargos: [], impuestos: [], promociones: [] },
       advertencias: [],
     },
   ],
@@ -697,6 +698,7 @@ describe('VentasService', () => {
                 },
               ],
               impuestos: [],
+              promociones: [],
             },
           },
         ],
@@ -765,6 +767,7 @@ describe('VentasService', () => {
           descuentos: [traza(`desc-${sufijo}`, '1.0000')],
           recargos: [traza(`rec-${sufijo}`, '2.0000')],
           impuestos: [{ ...traza(`imp-${sufijo}`, '3.0000'), tasa: '0.19' }],
+          promociones: [],
         },
       });
       calculoPreciosService.calcular.mockResolvedValueOnce({
@@ -857,6 +860,7 @@ describe('VentasService', () => {
               descuentos: [traza()],
               recargos: [],
               impuestos: [],
+              promociones: [],
             },
           },
           {
@@ -873,6 +877,7 @@ describe('VentasService', () => {
               ],
               recargos: [],
               impuestos: [],
+              promociones: [],
             },
           },
         ],
@@ -932,6 +937,7 @@ describe('VentasService', () => {
               ],
               recargos: [],
               impuestos: [],
+              promociones: [],
             },
           },
         ],

@@ -334,7 +334,20 @@ export class OnlineService {
       // vigencia y descuadraría el cargo contra lo que la venta persiste después
       // (el callback recalcula sin `cuentaId`, o sea con "ahora"). La tienda
       // online no tiene noción de cuenta de salón: el instante siempre es ahora.
-      calcularDto: { ...dto, cuentaId: undefined, lineas: calcularLineas },
+      //
+      // `canal` va por el MISMO motivo y con el mismo peso: decide qué
+      // promociones aplican, y este camino cobra. Reenviarlo del body dejaba
+      // que el navegador mandara `'fisico'` y colara en una compra online una
+      // promo que solo rige en el local — con el agravante de que el monto
+      // autorizado contra la tarjeta sale de ACÁ y el callback después
+      // persiste la venta con su canal real (`'online'`), o sea otro total.
+      // Este service SABE que es la tienda: no se lo pregunta al cliente.
+      calcularDto: {
+        ...dto,
+        cuentaId: undefined,
+        canal: 'online' as const,
+        lineas: calcularLineas,
+      },
       lineasSnapshot,
     };
   }

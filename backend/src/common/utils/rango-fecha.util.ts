@@ -216,8 +216,27 @@ export async function instanteLocalTenant(
   tenantId: string,
   instante: Date,
 ): Promise<InstanteLocal> {
-  const zona = await zonaHorariaTenant(db, tenantId);
+  return instanteLocalEnZona(await zonaHorariaTenant(db, tenantId), instante);
+}
 
+/**
+ * La mitad PURA de `instanteLocalTenant`: colapsa el instante con una zona ya
+ * resuelta, sin tocar la base.
+ *
+ * Existe porque hay un llamador que colapsa **muchos** instantes del mismo
+ * tenant —las promociones miden su ventana contra el `creado_el` de CADA línea
+ * de la cuenta— y `instanteLocalTenant` resuelve la zona con una consulta cada
+ * vez: una cuenta de 12 líneas serían 12 viajes idénticos a `tenants`, que es
+ * un N+1 de manual. Con esto la zona se resuelve UNA vez
+ * (`zonaHorariaTenant`) y el resto es aritmética de `Intl`.
+ *
+ * No es una versión "rápida" con otra semántica: `instanteLocalTenant` es hoy
+ * esta función más la consulta de la zona, así que las dos no pueden derivar.
+ */
+export function instanteLocalEnZona(
+  zona: string,
+  instante: Date,
+): InstanteLocal {
   const fecha = new Intl.DateTimeFormat('en-CA', { timeZone: zona }).format(
     instante,
   );

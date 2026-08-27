@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import {
   calcularVenta,
   cuantizar,
+  type AplicacionPromoResuelta,
   type ConfigCalculo,
   type ImpuestoResuelto,
   type LineaResuelta,
@@ -26,6 +27,9 @@ const config = (over: Partial<ConfigCalculo> = {}): ConfigCalculo => ({
   // a 4 y formatear a 6 deja igual a casi todos los casos de este archivo: por
   // eso las cifras siguen siendo las de antes de que el motor cuantizara.
   decimalesMoneda: 4,
+  // El default del tenant: la rebaja mayor gana, no se suman. Los casos que
+  // acumulan lo dicen explícito.
+  promosAcumulanDescuentos: false,
   ...over,
 });
 
@@ -86,6 +90,7 @@ const venta = (over: Partial<VentaResuelta> = {}): VentaResuelta => ({
   metodoPagoId: null,
   descuentosVenta: [],
   recargosVenta: [],
+  promociones: [],
   config: config(),
   ...over,
 });
@@ -2046,6 +2051,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         metodoPagoId: null,
         descuentosVenta: [],
         recargosVenta: [],
+        promociones: [],
         lineas: [
           linea({
             precioUnitario: '1000',
@@ -2807,6 +2813,785 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.totales.totalFinal).toBe('893.000000');
       expect(r.lineas[0].subtotalNeto).toBe('834.000000');
       expect(identidadDocumento(r)).toBe(true);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Promociones
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('promociones', () => {
+    const aplicacion = (
+      over: Partial<AplicacionPromoResuelta> = {},
+    ): AplicacionPromoResuelta => ({
+      promocionId: 'promo-1',
+      nombre: '2x1 martes',
+      tipo: 'nxm',
+      valorEfectivo: '1.0000',
+      montosPorLinea: [{ lineaIndex: 0, monto: '500' }],
+      ...over,
+    });
+
+    /** La identidad aditiva de UNA línea, que es lo que el ticket imprime. */
+    const identidadLinea = (l: ResultadoLinea): boolean =>
+      new Decimal(l.subtotalNeto)
+        .minus(l.descuentoAplicado)
+        .plus(l.recargoAplicado)
+        .plus(l.ajusteVenta)
+        .plus(l.impuestoAplicado)
+        .eq(l.totalLinea);
+
+    const descuentoFijo = (
+      valorMonto: string,
+      over: Partial<ReglaResuelta> = {},
+    ) =>
+      regla({
+        id: 'd-cat',
+        nombre: 'Descuento catálogo',
+        modo: 'monto_fijo',
+        valorPorcentaje: null,
+        valorMonto,
+        ...over,
+      });
+
+    describe('acumulando con los descuentos de catálogo', () => {
+      it('la promo resta dentro del paso de descuentos, después del catálogo', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '1000',
+                descuentos: [descuentoFijo('100')],
+              }),
+            ],
+            promociones: [aplicacion()],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        // El beneficio ES un descuento: suma dentro del agregado, no al lado.
+        expect(l.descuentoAplicado).toBe('600.000000');
+        expect(r.totales.totalDescuentos).toBe('600.000000');
+        expect(l.totalLinea).toBe('400.000000');
+        // La separación promo/catálogo vive en las trazas, no en los totales.
+        expect(l.trazas.descuentos).toHaveLength(1);
+        expect(l.trazas.descuentos[0].monto).toBe('100.000000');
+        expect(l.trazas.promociones).toEqual([
+          {
+            id: 'promo-1',
+            nombre: '2x1 martes',
+            monto: '500.000000',
+            valorEfectivo: '1.0000',
+            aplicacion: 1,
+          },
+        ]);
+        expect(identidadLinea(l)).toBe(true);
+        expect(identidadDocumento(r)).toBe(true);
+      });
+
+      /**
+       * El ORDEN dentro del paso, no solo la suma. Con dos montos fijos el
+       * total es el mismo vayan como vayan; lo que el orden decide es **cuál
+       * se recorta** cuando el piso en cero entra. Acá el catálogo pide 800 y
+       * la promo 500 sobre una línea de 1.000: con la promo última se aplica
+       * 800 + 200 y el aviso es de la PROMO. Invertido, el aviso sería del
+       * descuento y las trazas dirían 500 + 500 — mismo total, otro ticket.
+       */
+      it('la promo va DESPUÉS del catálogo: es la que se recorta', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '1000',
+                descuentos: [descuentoFijo('800')],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '500' }],
+              }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.trazas.descuentos[0].monto).toBe('800.000000');
+        expect(l.trazas.promociones[0].monto).toBe('200.000000');
+        expect(l.descuentoAplicado).toBe('1000.000000');
+        expect(l.advertencias).toEqual([
+          {
+            titulo: 'Promoción "2x1 martes"',
+            detalle:
+              'no se aplicó completo porque superaba el monto disponible',
+          },
+        ]);
+      });
+
+      it('el piso en cero topea la promo y avisa, igual que un descuento', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ precioUnitario: '3000' })],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '5000' }],
+              }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        expect(r.lineas[0].descuentoAplicado).toBe('3000.000000');
+        expect(r.lineas[0].totalLinea).toBe('0.000000');
+        expect(r.lineas[0].advertencias).toEqual([
+          {
+            titulo: 'Promoción "2x1 martes"',
+            detalle:
+              'no se aplicó completo porque superaba el monto disponible',
+          },
+        ]);
+      });
+
+      /**
+       * **Una promo topeada por el piso NO puede anclar.** El ancla de la línea
+       * es `etiqueta − promo`, y con una promo mayor que la etiqueta ese número
+       * es NEGATIVO: la línea cerraría contra un monto que no existe. Medido sin
+       * el guard, sobre una etiqueta de 1.190 con una promo de 5.000: ancla
+       * −3.810 y la línea declarando **−608** — el local pagándole al cliente,
+       * que es justo lo que el piso en cero existe para impedir.
+       *
+       * Con el guard la línea vuelve a la fórmula: descuenta lo que había, queda
+       * en cero y avisa.
+       */
+      it('una promo topeada no ancla: la línea queda en cero, no en negativo', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '1190',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '5000' }],
+              }),
+            ],
+            config: config({
+              decimalesMoneda: 0,
+              promosAcumulanDescuentos: true,
+            }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.subtotalNeto).toBe('1000.000000');
+        expect(l.descuentoAplicado).toBe('1000.000000');
+        expect(l.totalLinea).toBe('0.000000');
+        expect(l.impuestoAplicado).toBe('0.000000');
+        expect(identidadLinea(l)).toBe(true);
+      });
+
+      it('el IVA de la línea sale de la base ya descontada por la promo', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({ precioUnitario: '1000', impuestos: [impuesto()] }),
+            ],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '200' }] }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        // 19% de 800, no de 1000.
+        expect(r.lineas[0].impuestoAplicado).toBe('152.000000');
+        expect(r.lineas[0].totalLinea).toBe('952.000000');
+      });
+
+      /**
+       * **La promo MUEVE el ancla de la línea, no la apaga.** La etiqueta deja
+       * de ser el monto que la línea tiene que dar y pasa a serlo
+       * `etiqueta − promo`: 993 − 100 = 893, y el IVA es lo que sobra sobre el
+       * neto declarado.
+       *
+       * Lo que la promo NO hace es dejar el ancla quieta en la etiqueta. Ese
+       * mutante —medido aplicándolo, no razonado— produce
+       * `descuentoAplicado 0 / IVA 159 / total 993`, con la traza de la promo
+       * en `'0'`: el ancla sin mover pide una base de 834, la corrección de
+       * `basePromo` vale −84 y **borra el descuento de la promo**, así que el
+       * cliente termina pagando la etiqueta entera como si la promo no
+       * existiera. El test lo caza en `descuentoAplicado`.
+       */
+      it('una promo mueve el ancla de la línea a lo prometido', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '993',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+              }),
+            ],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '100' }] }),
+            ],
+            config: config({
+              decimalesMoneda: 0,
+              promosAcumulanDescuentos: true,
+            }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.subtotalNeto).toBe('834.000000');
+        // 100 de góndola son 84 de neto (100 / 1,19).
+        expect(l.descuentoAplicado).toBe('84.000000');
+        expect(l.impuestoAplicado).toBe('143.000000'); // 19% de 750, no 159
+        expect(l.totalLinea).toBe('893.000000'); // la etiqueta − 100
+        expect(identidadLinea(l)).toBe(true);
+      });
+
+      /**
+       * **El caso que dio origen a la corrección del dominio.** La promo se
+       * promete sobre lo que el cliente ve; el motor la declara en neto. Si el
+       * evaluador entrega góndola y el motor la resta contra el neto sin
+       * convertir, un "20%" de promo cobra 756 donde un 20% de catálogo cobra
+       * 794 — la misma oferta, 38 pesos de diferencia según de qué familia
+       * venga.
+       */
+      it('un 20% de promo cobra lo mismo que un 20% de catálogo', () => {
+        const gondola = () =>
+          linea({
+            precioUnitario: '993',
+            precioIncluyeImpuesto: true,
+            impuestos: [impuesto()],
+          });
+        const cfgCLP = config({
+          decimalesMoneda: 0,
+          promosAcumulanDescuentos: true,
+        });
+
+        const conPromo = calcularVenta(
+          venta({
+            lineas: [gondola()],
+            // Lo que emite el evaluador: 20% del precio de LISTA.
+            promociones: [
+              aplicacion({
+                tipo: 'porcentaje',
+                valorEfectivo: '0.2000',
+                montosPorLinea: [{ lineaIndex: 0, monto: '198.6' }],
+              }),
+            ],
+            config: cfgCLP,
+          }),
+        );
+        const conCatalogo = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                ...gondola(),
+                descuentos: [regla({ valorPorcentaje: '0.20' })],
+              }),
+            ],
+            config: cfgCLP,
+          }),
+        );
+
+        expect(conPromo.totales.totalFinal).toBe('794.000000');
+        expect(conCatalogo.totales.totalFinal).toBe(
+          conPromo.totales.totalFinal,
+        );
+        expect(conPromo.lineas[0].descuentoAplicado).toBe(
+          conCatalogo.lineas[0].descuentoAplicado,
+        );
+      });
+
+      /**
+       * **El combo se anuncia como "estos productos, $9.990" y el cliente paga
+       * $9.990 — al peso, no "más o menos".** Sin la conversión de dominio se
+       * cobraba $9.247; con la conversión pero sin mover el ancla, $9.991 en
+       * CLP, porque los tres redondeos de cada línea (neto, descuento,
+       * impuesto) no se cancelan solos.
+       *
+       * Lo que cierra el peso es el ancla movida: la línea cierra contra
+       * `etiqueta − promo` y el IVA sale por RESTA, igual que con un descuento
+       * de nivel venta. Se corre en las dos escalas porque el residuo aparece
+       * en la del peso (CLP, 0 decimales) y no en la de 4.
+       */
+      it('un combo de precio fijo cobra su precio anunciado, al peso', () => {
+        const combo = (decimalesMoneda: number) =>
+          calcularVenta(
+            venta({
+              lineas: [
+                linea({
+                  itemId: 'pizza',
+                  precioUnitario: '11900',
+                  precioIncluyeImpuesto: true,
+                  impuestos: [impuesto()],
+                }),
+                linea({
+                  itemId: 'bebida',
+                  precioUnitario: '2000',
+                  precioIncluyeImpuesto: true,
+                  impuestos: [impuesto()],
+                }),
+              ],
+              // Lo que emite `evaluarPrecioFijo`: Σ lista − valorMonto = 3.910,
+              // repartido a prorrata del precio de lista aportado.
+              promociones: [
+                aplicacion({
+                  tipo: 'precio_fijo',
+                  valorEfectivo: '9990',
+                  montosPorLinea: [
+                    { lineaIndex: 0, monto: '3347.410071942446043165' },
+                    { lineaIndex: 1, monto: '562.589928057553956835' },
+                  ],
+                }),
+              ],
+              config: config({
+                decimalesMoneda,
+                promosAcumulanDescuentos: true,
+              }),
+            }),
+          );
+
+        const enCLP = combo(0);
+        expect(enCLP.totales.totalFinal).toBe('9990.000000');
+        expect(enCLP.lineas.map((l) => l.totalLinea)).toEqual([
+          '8553.000000',
+          '1437.000000',
+        ]);
+        expect(enCLP.lineas.every(identidadLinea)).toBe(true);
+        expect(identidadDocumento(enCLP)).toBe(true);
+
+        const conCentavos = combo(4);
+        expect(conCentavos.totales.totalFinal).toBe('9990.000000');
+        expect(identidadDocumento(conCentavos)).toBe(true);
+      });
+
+      /**
+       * **La unidad regalada sale gratis AL PESO.** Un 2x1 sobre dos etiquetas
+       * de 993 tiene que cobrar 993: ni 992 ni 994. Es el caso que más se nota
+       * en el mostrador, porque el cliente puede hacer la resta de memoria.
+       *
+       * El neto de dos unidades (1.669) menos el neto de una (834) da 835, no
+       * 834: la corrección de un peso que el ancla exige va al descuento de la
+       * promo, no a `ajusteVenta` —que significa otra cosa—. Sin ella la unidad
+       * "gratis" costaba un peso.
+       */
+      it('un 2x1 sobre góndola deja la unidad regalada en cero, al peso', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                itemId: 'cerveza',
+                cantidad: '2',
+                precioUnitario: '993',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+              }),
+            ],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '993' }] }),
+            ],
+            config: config({
+              decimalesMoneda: 0,
+              promosAcumulanDescuentos: true,
+            }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.totalLinea).toBe('993.000000');
+        expect(l.subtotalNeto).toBe('1669.000000');
+        expect(l.descuentoAplicado).toBe('835.000000');
+        expect(l.impuestoAplicado).toBe('159.000000');
+        // La corrección vive en la traza de la promo, no en `ajusteVenta`.
+        expect(l.trazas.promociones[0].monto).toBe('835.000000');
+        expect(l.ajusteVenta).toBe('0.000000');
+        expect(identidadLinea(l)).toBe(true);
+      });
+
+      /**
+       * **Promo y descuento de documento componen sobre la misma línea**: el
+       * ancla se corre por las DOS partes. Etiqueta 993, promo de 100 y un
+       * descuento global de 50 → el cliente paga 843, y cada término declara lo
+       * suyo en neto (84 de promo, −42 de ajuste de venta).
+       */
+      it('la promo y el descuento de venta corren el ancla juntos', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '993',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+              }),
+            ],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '100' }] }),
+            ],
+            descuentosVenta: [
+              regla({
+                modo: 'monto_fijo',
+                valorPorcentaje: null,
+                valorMonto: '50',
+              }),
+            ],
+            config: config({
+              decimalesMoneda: 0,
+              promosAcumulanDescuentos: true,
+            }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.totalLinea).toBe('843.000000'); // 993 − 100 − 50
+        expect(l.descuentoAplicado).toBe('84.000000');
+        expect(l.ajusteVenta).toBe('-42.000000');
+        expect(l.impuestoAplicado).toBe('135.000000');
+        expect(identidadLinea(l)).toBe(true);
+        expect(identidadDocumento(r)).toBe(true);
+      });
+
+      /**
+       * Cada línea convierte con SU factor: el combo toca una línea afecta a
+       * IVA y otra exenta, y usar un factor único —el de la primera, o un
+       * promedio— desplazaría plata de una a la otra.
+       */
+      it('un combo con tasas mezcladas convierte por el factor de cada línea', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                itemId: 'afecta',
+                precioUnitario: '11900',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+              }),
+              linea({
+                itemId: 'exenta',
+                precioUnitario: '2000',
+                precioIncluyeImpuesto: true,
+                clasificacionTributaria: 'exento',
+                impuestos: [],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                tipo: 'precio_fijo',
+                valorEfectivo: '9990',
+                montosPorLinea: [
+                  { lineaIndex: 0, monto: '3347.410071942446043165' },
+                  { lineaIndex: 1, monto: '562.589928057553956835' },
+                ],
+              }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        // La afecta convierte por 1,19; la exenta por 1 (su lista YA es neto).
+        expect(r.lineas[0].descuentoAplicado).toBe('2812.949700');
+        expect(r.lineas[1].descuentoAplicado).toBe('562.589900');
+        expect(new Decimal(r.totales.totalFinal).toFixed(2)).toBe('9990.00');
+        expect(identidadDocumento(r)).toBe(true);
+      });
+
+      /**
+       * Con los impuestos PRIMERO en la fórmula, el guard que decide si la
+       * línea puede anclar a góndola tiene que contar la promo como una regla
+       * pendiente. Sin eso —una línea sin descuentos de catálogo pero con
+       * promo— anclaba y declaraba el IVA de la etiqueta (159) sobre una base
+       * que la promo iba a mover.
+       */
+      it('con impuestos primero, la promo impide el ancla a góndola', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '993',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+              }),
+            ],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '100' }] }),
+            ],
+            config: config({
+              formula: ['impuestos', 'descuentos', 'recargos'],
+              decimalesMoneda: 0,
+              promosAcumulanDescuentos: true,
+            }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        // 19% de 834 por la fórmula, no 159 = 993 − 834 por el ancla.
+        expect(l.impuestoAplicado).toBe('158.000000');
+        expect(l.descuentoAplicado).toBe('84.000000');
+        expect(l.totalLinea).toBe('908.000000');
+        expect(identidadLinea(l)).toBe(true);
+      });
+
+      it('dos aplicaciones de la misma promo se numeran 1 y 2', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ precioUnitario: '5000', cantidad: '4' })],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '500' }] }),
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '300' }] }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        expect(r.lineas[0].trazas.promociones.map((t) => t.aplicacion)).toEqual(
+          [1, 2],
+        );
+        expect(r.lineas[0].descuentoAplicado).toBe('800.000000');
+      });
+
+      it('una aplicación cross-línea deja su traza en cada línea que tocó', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({ itemId: 'a', precioUnitario: '8000' }),
+              linea({ itemId: 'b', precioUnitario: '3500' }),
+            ],
+            promociones: [
+              aplicacion({
+                tipo: 'precio_fijo',
+                montosPorLinea: [
+                  { lineaIndex: 0, monto: '1050.4' },
+                  { lineaIndex: 1, monto: '459.6' },
+                ],
+              }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        expect(r.lineas[0].trazas.promociones[0].monto).toBe('1050.400000');
+        expect(r.lineas[1].trazas.promociones[0].monto).toBe('459.600000');
+        // Las dos son la MISMA aplicación: el drawer las agrupa por este número.
+        expect(r.lineas[0].trazas.promociones[0].aplicacion).toBe(1);
+        expect(r.lineas[1].trazas.promociones[0].aplicacion).toBe(1);
+        expect(r.totales.totalDescuentos).toBe('1510.000000');
+      });
+    });
+
+    describe('interruptor: las promos NO acumulan con los descuentos', () => {
+      const sinAcumular = config({ promosAcumulanDescuentos: false });
+
+      it('si la promo es mayor, el descuento de catálogo queda en traza con monto 0', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '10000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '3000' }],
+              }),
+            ],
+            config: sinAcumular,
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.descuentoAplicado).toBe('3000.000000');
+        // "No aplicó": la regla sigue en el ticket, con su valor y sin monto.
+        expect(l.trazas.descuentos).toHaveLength(1);
+        expect(l.trazas.descuentos[0].monto).toBe('0.000000');
+        expect(l.trazas.descuentos[0].valorSolicitado).toBe('0.000000');
+        expect(l.trazas.descuentos[0].valorEfectivo).toBe('1000');
+        expect(l.trazas.promociones).toHaveLength(1);
+        expect(identidadLinea(l)).toBe(true);
+      });
+
+      it('si el descuento es mayor, la promo desaparece sin traza', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '10000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+            ],
+            promociones: [
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '500' }] }),
+            ],
+            config: sinAcumular,
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.descuentoAplicado).toBe('1000.000000');
+        expect(l.trazas.descuentos[0].monto).toBe('1000.000000');
+        // Sin traza, como la regla fuera de vigencia: la promo no aplicó
+        // porque no rige acá, no porque haya aportado cero.
+        expect(l.trazas.promociones).toEqual([]);
+        expect(l.advertencias).toEqual([]);
+      });
+
+      /**
+       * Una aplicación cross-línea se compara ENTERA: repartirla —dejarla en
+       * la línea donde gana y sacarla de la otra— rompería el combo, que es un
+       * precio por el CONJUNTO. Acá gana el catálogo (2.000 contra 1.510) y la
+       * aplicación se cae completa, incluida la línea 0 donde por sí sola
+       * habría ganado (1.050,4 contra 1.000).
+       */
+      it('una aplicación cross-línea se descarta entera, no se parte', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                itemId: 'a',
+                precioUnitario: '8000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+              linea({
+                itemId: 'b',
+                precioUnitario: '3500',
+                descuentos: [descuentoFijo('1000', { id: 'd-cat-b' })],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                tipo: 'precio_fijo',
+                montosPorLinea: [
+                  { lineaIndex: 0, monto: '1050.4' },
+                  { lineaIndex: 1, monto: '459.6' },
+                ],
+              }),
+            ],
+            config: sinAcumular,
+          }),
+        );
+
+        expect(r.lineas[0].trazas.promociones).toEqual([]);
+        expect(r.lineas[1].trazas.promociones).toEqual([]);
+        expect(r.lineas[0].descuentoAplicado).toBe('1000.000000');
+        expect(r.lineas[1].descuentoAplicado).toBe('1000.000000');
+        expect(r.totales.totalDescuentos).toBe('2000.000000');
+      });
+
+      /**
+       * **La comparación es neto contra neto.** El descuento de catálogo ya
+       * está en neto; el monto de promo llega en precio de lista. Sin
+       * convertirlo, una promo sobre una línea de góndola llega inflada por el
+       * IVA y gana comparaciones que en la plata real pierde — un 19% de
+       * ventaja por el solo hecho de venir de una línea con impuesto incluido.
+       *
+       * Acá: línea de góndola 1.190 (neto 1.000), catálogo fijo de 900 y una
+       * promo de 1.000 de LISTA, que en neto son 840. Comparando en lista la
+       * promo ganaría (1.000 > 900) y el cliente pagaría 190 en vez de 119.
+       */
+      it('compara en neto: una promo de góndola no gana por el IVA', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '1190',
+                precioIncluyeImpuesto: true,
+                impuestos: [impuesto()],
+                descuentos: [descuentoFijo('900')],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '1000' }],
+              }),
+            ],
+            config: config({
+              decimalesMoneda: 0,
+              promosAcumulanDescuentos: false,
+            }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.trazas.promociones).toEqual([]);
+        expect(l.descuentoAplicado).toBe('900.000000');
+        expect(l.totalLinea).toBe('119.000000');
+      });
+
+      // La numeración se asigna DESPUÉS del filtro. Con dos aplicaciones de la
+      // misma promo donde la primera pierde, numerar antes dejaba la
+      // superviviente marcada como «2» sin que existiera una «1» — y el drawer
+      // agrupa por ese número.
+      it('la numeración no deja huecos cuando una aplicación pierde', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                itemId: 'a',
+                precioUnitario: '10000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+              linea({ itemId: 'b', precioUnitario: '10000' }),
+            ],
+            promociones: [
+              // Pierde: 500 contra los 1.000 del catálogo de la línea 0.
+              aplicacion({ montosPorLinea: [{ lineaIndex: 0, monto: '500' }] }),
+              // Gana: la línea 1 no tiene descuentos.
+              aplicacion({ montosPorLinea: [{ lineaIndex: 1, monto: '500' }] }),
+            ],
+            config: sinAcumular,
+          }),
+        );
+
+        expect(r.lineas[0].trazas.promociones).toEqual([]);
+        expect(r.lineas[1].trazas.promociones[0].aplicacion).toBe(1);
+      });
+
+      // El interruptor solo apaga el catálogo en las líneas que la promo
+      // GANÓ: una línea ajena conserva su descuento intacto.
+      it('la línea que la promo no toca conserva su descuento', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                itemId: 'a',
+                precioUnitario: '10000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+              linea({
+                itemId: 'b',
+                precioUnitario: '10000',
+                descuentos: [descuentoFijo('1000', { id: 'd-cat-b' })],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '3000' }],
+              }),
+            ],
+            config: sinAcumular,
+          }),
+        );
+
+        expect(r.lineas[0].descuentoAplicado).toBe('3000.000000');
+        expect(r.lineas[1].descuentoAplicado).toBe('1000.000000');
+        expect(r.lineas[1].trazas.descuentos[0].monto).toBe('1000.000000');
+      });
+    });
+
+    // Sin el interruptor congelado, una venta vieja no se puede reinterpretar:
+    // el mismo monto de promo da otro total según si el catálogo convivía.
+    it('promosAcumulanDescuentos viaja en la config congelada', () => {
+      const r = calcularVenta(
+        venta({ config: config({ promosAcumulanDescuentos: true }) }),
+      );
+      expect(r.config.promosAcumulanDescuentos).toBe(true);
     });
   });
 });

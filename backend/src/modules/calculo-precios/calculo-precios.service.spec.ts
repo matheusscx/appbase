@@ -8,10 +8,12 @@ import { DescuentosService } from '../descuentos/descuentos.service';
 import { RecargosService } from '../recargos/recargos.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { MonedasService } from '../monedas/monedas.service';
+import { PromocionesService } from '../promociones/promociones.service';
 import { Db } from '../../common/db/db.service';
 import * as rangoFechaUtil from '../../common/utils/rango-fecha.util';
 
 const TENANT = 't-1';
+const CUENTA_ID = '550e8400-e29b-41d4-a716-446655440777';
 
 const prefs = {
   calculoDescuentos: 'base',
@@ -21,6 +23,7 @@ const prefs = {
   modoRedondeo: 'HALF_UP',
   nivelRedondeo: 'linea',
   montoTolerancia: '0',
+  promosAcumulanDescuentos: false,
 };
 
 describe('CalculoPreciosService', () => {
@@ -34,6 +37,8 @@ describe('CalculoPreciosService', () => {
   let recargosService: { findAll: jest.Mock };
   let tenantsService: { getPreferenciasFinancieras: jest.Mock };
   let monedasService: { findMonedas: jest.Mock; decimalesOficiales: jest.Mock };
+  let promocionesService: { cargarVigentes: jest.Mock };
+  let db: { query: jest.Mock };
 
   const base = (over: Record<string, unknown> = {}) => ({
     id: 'item-1',
@@ -151,6 +156,11 @@ describe('CalculoPreciosService', () => {
       .spyOn(rangoFechaUtil, 'fechaLocalTenant')
       .mockResolvedValue('2026-01-01');
 
+    // Un tenant sin promos es el caso base de todo el resto del spec: la
+    // lista vacía corta antes del evaluador y nada cambia.
+    promocionesService = { cargarVigentes: jest.fn().mockResolvedValue([]) };
+    db = { query: jest.fn().mockResolvedValue([]) };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         CalculoPreciosService,
@@ -160,7 +170,8 @@ describe('CalculoPreciosService', () => {
         { provide: RecargosService, useValue: recargosService },
         { provide: TenantsService, useValue: tenantsService },
         { provide: MonedasService, useValue: monedasService },
-        { provide: Db, useValue: { query: jest.fn() } },
+        { provide: PromocionesService, useValue: promocionesService },
+        { provide: Db, useValue: db },
       ],
     }).compile();
 
@@ -913,6 +924,315 @@ describe('CalculoPreciosService', () => {
       });
 
       expect(r.lineas[0].descuentoAplicado).toBe('10.000000');
+    });
+  });
+
+  // ─── promociones ──────────────────────────────────────────────────────────
+  //
+  // El evaluador NO se mockea: es puro, y mockearlo dejaría sin probar
+  // justamente lo que este service arma para él (los netos, el índice, la
+  // categoría y —lo que más importa— el instante de cada línea). Lo que sí se
+  // observa es qué recibe el motor, porque la aplicación del monto es Task 7.
+
+  describe('promociones', () => {
+    /** Happy hour 20% sobre toda la venta, 18:00–20:00 en zona del tenant. */
+    const promoHappyHour = (over: Record<string, unknown> = {}) => ({
+      id: 'promo-1',
+      nombre: 'Happy Hour',
+      tipo: 'porcentaje',
+      valorPorcentaje: '0.2000',
+      cadaN: null,
+      valorMonto: null,
+      ventana: {
+        fechaInicio: '2026-01-01',
+        fechaFin: '2026-12-31',
+        horaInicio: '18:00',
+        horaFin: '20:00',
+        diasSemana: null,
+        canal: null,
+        ...((over.ventana as Record<string, unknown>) ?? {}),
+      },
+      scopes: [
+        {
+          slot: 0,
+          tipoScope: 'venta',
+          categoriaId: null,
+          cantidad: 1,
+          itemIds: [],
+        },
+      ],
+    });
+
+    /** Lo que `calcularVenta` recibió: la lista de aplicaciones ya resueltas. */
+    const promocionesQueVieronElMotor = () =>
+      (
+        calcularVentaSpy.mock.calls[0][0] as {
+          promociones: { promocionId: string; montosPorLinea: unknown[] }[];
+        }
+      ).promociones;
+
+    let calcularVentaSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      // Zona fija: los instantes de las líneas se colapsan con ella, y sin
+      // fijarla el test dependería de la zona del runner.
+      jest.spyOn(rangoFechaUtil, 'zonaHorariaTenant').mockResolvedValue('UTC');
+      calcularVentaSpy = jest.spyOn(engine, 'calcularVenta');
+      // Los espías sobreviven entre tests (el proyecto no usa `clearMocks`), y
+      // sin esto `mock.calls[0]` sería la llamada del PRIMER test del bloque.
+      jest.clearAllMocks();
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-15T19:00:00Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('carga las promos con la fecha local del tenant', async () => {
+      await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      expect(promocionesService.cargarVigentes).toHaveBeenCalledWith(
+        TENANT,
+        '2026-01-01', // lo que devuelve el mock de `fechaLocalTenant`
+      );
+    });
+
+    // Un tenant sin promos no paga NADA por esta feature: ni la zona horaria,
+    // ni las líneas de la cuenta, ni el evaluador.
+    it('sin promos vigentes no resuelve instantes ni consulta la cuenta', async () => {
+      await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      expect(rangoFechaUtil.zonaHorariaTenant).not.toHaveBeenCalled();
+      expect(promocionesQueVieronElMotor()).toEqual([]);
+    });
+
+    it('con una promo vigente el motor recibe la aplicación evaluada', async () => {
+      promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+
+      await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      expect(promocionesQueVieronElMotor()).toEqual([
+        {
+          promocionId: 'promo-1',
+          nombre: 'Happy Hour',
+          tipo: 'porcentaje',
+          valorEfectivo: '0.2000',
+          // 20% de 100 (el precio ya convertido a moneda oficial).
+          montosPorLinea: [{ lineaIndex: 0, monto: '20' }],
+        },
+      ]);
+    });
+
+    it('el neto que se evalúa es el convertido a moneda oficial', async () => {
+      promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+      mockItems({ precioBase: '10', monedaId: 'moneda-usd' }); // tasa 950
+
+      await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+      expect(promocionesQueVieronElMotor()[0].montosPorLinea).toEqual([
+        { lineaIndex: 0, monto: '1900' }, // 20% de 9.500
+      ]);
+    });
+
+    describe('instante por línea', () => {
+      it('sin cuentaId todas las líneas evalúan con "ahora"', async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+
+        await service.calcular(TENANT, {
+          lineas: [
+            { itemId: 'item-1', cantidad: '1' },
+            { itemId: 'item-2', cantidad: '1' },
+          ],
+        });
+
+        // 19:00 UTC cae en la franja: las DOS líneas entran.
+        expect(promocionesQueVieronElMotor()[0].montosPorLinea).toEqual([
+          { lineaIndex: 0, monto: '20' },
+          { lineaIndex: 1, monto: '20' },
+        ]);
+      });
+
+      // El contrato de la spec: el instante sale de la BD (el `creado_el` de la
+      // línea de cuenta), jamás del body. Acá se prueba que dos líneas de la
+      // misma venta evalúan con instantes DISTINTOS — que es lo que separa
+      // "cuándo se pidió" de "cuándo se cobra".
+      it('con cuentaId cada línea usa el creado_el de su línea de cuenta', async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+        db.query.mockImplementation((sql: string) => {
+          if (sql.includes('FROM cuentas')) {
+            return Promise.resolve([
+              { abierta_el: new Date('2026-06-15T19:00:00Z') },
+            ]);
+          }
+          return Promise.resolve([
+            // pedida a las 19:00 → DENTRO de la franja
+            {
+              item_id: 'item-1',
+              creado_el: new Date('2026-06-15T19:00:00Z'),
+            },
+            // pedida a las 21:00 → FUERA
+            {
+              item_id: 'item-2',
+              creado_el: new Date('2026-06-15T21:00:00Z'),
+            },
+          ]);
+        });
+
+        await service.calcular(TENANT, {
+          cuentaId: CUENTA_ID,
+          lineas: [
+            { itemId: 'item-1', cantidad: '1' },
+            { itemId: 'item-2', cantidad: '1' },
+          ],
+        });
+
+        expect(promocionesQueVieronElMotor()[0].montosPorLinea).toEqual([
+          { lineaIndex: 0, monto: '20' },
+        ]);
+      });
+
+      // Una línea agregada en el cobro (no está en la cuenta) usa "ahora": el
+      // fallback no puede ser "sin instante", porque entonces la promo no
+      // aplicaría a algo que el cliente sí acaba de pedir.
+      it('una línea del DTO sin fila de cuenta usa "ahora"', async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+        db.query.mockImplementation((sql: string) =>
+          Promise.resolve(
+            sql.includes('FROM cuentas')
+              ? [{ abierta_el: new Date('2026-06-15T19:00:00Z') }]
+              : [
+                  {
+                    item_id: 'item-1',
+                    creado_el: new Date('2026-06-15T21:00:00Z'), // FUERA
+                  },
+                ],
+          ),
+        );
+
+        await service.calcular(TENANT, {
+          cuentaId: CUENTA_ID,
+          lineas: [
+            { itemId: 'item-1', cantidad: '1' },
+            { itemId: 'item-2', cantidad: '1' }, // sin fila: "ahora" = 19:00
+          ],
+        });
+
+        expect(promocionesQueVieronElMotor()[0].montosPorLinea).toEqual([
+          { lineaIndex: 1, monto: '20' },
+        ]);
+      });
+
+      // Las líneas de cuenta se consumen POR ORDEN dentro del mismo ítem: dos
+      // líneas del mismo producto pedidas en momentos distintos no pueden
+      // colapsar en el instante de la primera.
+      it('dos líneas del mismo ítem consumen sus filas por orden', async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+        db.query.mockImplementation((sql: string) =>
+          Promise.resolve(
+            sql.includes('FROM cuentas')
+              ? [{ abierta_el: new Date('2026-06-15T19:00:00Z') }]
+              : [
+                  {
+                    item_id: 'item-1',
+                    creado_el: new Date('2026-06-15T19:00:00Z'), // DENTRO
+                  },
+                  {
+                    item_id: 'item-1',
+                    creado_el: new Date('2026-06-15T21:00:00Z'), // FUERA
+                  },
+                ],
+          ),
+        );
+
+        await service.calcular(TENANT, {
+          cuentaId: CUENTA_ID,
+          lineas: [
+            { itemId: 'item-1', cantidad: '1' },
+            { itemId: 'item-1', cantidad: '1' },
+          ],
+        });
+
+        expect(promocionesQueVieronElMotor()[0].montosPorLinea).toEqual([
+          { lineaIndex: 0, monto: '20' },
+        ]);
+      });
+
+      // La zona se resuelve UNA vez para todas las líneas: `instanteLocalTenant`
+      // por línea sería un viaje a `tenants` por cada producto de la cuenta.
+      it('resuelve la zona horaria una sola vez', async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
+        db.query.mockImplementation((sql: string) =>
+          Promise.resolve(
+            sql.includes('FROM cuentas')
+              ? [{ abierta_el: new Date('2026-06-15T19:00:00Z') }]
+              : [
+                  { item_id: 'item-1', creado_el: new Date() },
+                  { item_id: 'item-2', creado_el: new Date() },
+                  { item_id: 'item-3', creado_el: new Date() },
+                ],
+          ),
+        );
+
+        await service.calcular(TENANT, {
+          cuentaId: CUENTA_ID,
+          lineas: [
+            { itemId: 'item-1', cantidad: '1' },
+            { itemId: 'item-2', cantidad: '1' },
+            { itemId: 'item-3', cantidad: '1' },
+          ],
+        });
+
+        expect(rangoFechaUtil.zonaHorariaTenant).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('canal', () => {
+      it('el default es fisico: una promo de canal físico aplica', async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([
+          promoHappyHour({ ventana: { canal: 'fisico' } }),
+        ]);
+
+        await service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        });
+
+        expect(promocionesQueVieronElMotor()).toHaveLength(1);
+      });
+
+      it("canal 'online' descarta la promo de canal físico", async () => {
+        promocionesService.cargarVigentes.mockResolvedValue([
+          promoHappyHour({ ventana: { canal: 'fisico' } }),
+        ]);
+
+        await service.calcular(TENANT, {
+          canal: 'online',
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        });
+
+        expect(promocionesQueVieronElMotor()).toEqual([]);
+      });
+    });
+
+    // El interruptor es parte del congelado: sin él en `config_calculo`, una
+    // venta vieja no se puede reinterpretar (el mismo monto de promo da otro
+    // total según si el descuento de catálogo convivía o no).
+    it('cargarConfig incluye promosAcumulanDescuentos', async () => {
+      tenantsService.getPreferenciasFinancieras.mockResolvedValue({
+        ...prefs,
+        promosAcumulanDescuentos: true,
+      });
+
+      expect(await service.cargarConfig(TENANT, 4)).toMatchObject({
+        promosAcumulanDescuentos: true,
+      });
     });
   });
 });
