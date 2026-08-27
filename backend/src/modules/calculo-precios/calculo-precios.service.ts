@@ -6,8 +6,19 @@ import { DescuentosService } from '../descuentos/descuentos.service';
 import { RecargosService } from '../recargos/recargos.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { MonedasService } from '../monedas/monedas.service';
+import { PromocionesService } from '../promociones/promociones.service';
+import {
+  evaluarPromos,
+  type AplicacionPromo,
+  type InstanteLocal,
+  type LineaPromo,
+} from '../promociones/promociones.evaluator';
 import { Db } from '../../common/db/db.service';
-import { fechaLocalTenant } from '../../common/utils/rango-fecha.util';
+import {
+  fechaLocalTenant,
+  instanteLocalEnZona,
+  zonaHorariaTenant,
+} from '../../common/utils/rango-fecha.util';
 import { NivelRegla } from '../../common/enums/reglas.enums';
 import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
 import {
@@ -59,6 +70,7 @@ export class CalculoPreciosService {
     private readonly recargosService: RecargosService,
     private readonly tenantsService: TenantsService,
     private readonly monedasService: MonedasService,
+    private readonly promocionesService: PromocionesService,
     private readonly db: Db,
   ) {}
 
@@ -84,6 +96,7 @@ export class CalculoPreciosService {
       escalaCalculo: prefs.escalaCalculo,
       modoRedondeo: prefs.modoRedondeo,
       nivelRedondeo: prefs.nivelRedondeo,
+      promosAcumulanDescuentos: prefs.promosAcumulanDescuentos,
       decimalesMoneda,
     };
   }
@@ -261,8 +274,17 @@ export class CalculoPreciosService {
       ),
     );
 
+    const promociones = await this.resolverPromociones(
+      tenantId,
+      dto,
+      lineas,
+      itemsBase,
+      fechaLocal,
+    );
+
     const resultado = calcularVenta({
       lineas,
+      promociones,
       metodoPagoId: dto.metodoPagoId ?? null,
       descuentosVenta: this.resolverReglas(
         dto.descuentosVentaIds ?? [],
@@ -282,6 +304,126 @@ export class CalculoPreciosService {
     this.advertirItemsPausados(dto, itemsBase, resultado);
 
     return resultado;
+  }
+
+  /**
+   * Las promos del tenant que este carrito gana, ya arbitradas entre sí.
+   *
+   * **Cero costo para el tenant sin promos:** si `cargarVigentes` vuelve vacía
+   * se corta acá, antes de resolver la zona horaria y antes de tocar
+   * `cuenta_lineas`. La única consulta que paga ese tenant es la de promos, y
+   * es la misma para un carrito de 1 línea que para uno de 40.
+   *
+   * **Secuencial a propósito**, igual que los loaders de arriba: esto corre
+   * dentro de `crearEnTransaccion` → `db.transaccion(...)`, o sea sobre un
+   * único `pg.Client`. Un `Promise.all` entre la carga de promos y los
+   * instantes las dispararía concurrentes sobre ese cliente y `pg@9` tira.
+   *
+   * El evaluador es **puro**: recibe las promos, las líneas ya resueltas
+   * (precio de LISTA unitario convertido a moneda oficial, categoría e
+   * instante) y devuelve las aplicaciones que sobreviven al conflicto entre
+   * promos. El conflicto promo-vs-descuento de catálogo NO se decide acá — es
+   * del motor, que es quien conoce lo que el catálogo terminó aplicando en cada
+   * línea.
+   *
+   * ⚠️ **Lo que se le pasa es el precio que el cliente VE**, no el neto: en una
+   * línea con `precio_incluye_impuesto` eso es la góndola. Es deliberado —la
+   * promo se promete sobre la etiqueta— y el motor convierte cada monto a neto
+   * al aplicarlo. Ver `LineaPromo.precioListaUnitario` y `factorListaANeto`.
+   */
+  private async resolverPromociones(
+    tenantId: string,
+    dto: CalcularVentaDto,
+    lineas: LineaResuelta[],
+    itemsBase: ItemsBaseMap,
+    fechaLocal: string,
+  ): Promise<AplicacionPromo[]> {
+    const promos = await this.promocionesService.cargarVigentes(
+      tenantId,
+      fechaLocal,
+    );
+    if (promos.length === 0) return [];
+
+    const instantes = await this.instantesDeLineas(tenantId, dto);
+
+    const lineasPromo: LineaPromo[] = lineas.map((linea, index) => ({
+      index,
+      // El id CANÓNICO (el que devolvió la BD), no el del body: el scope trae
+      // sus `itemIds` en minúsculas y `@IsUUID('4')` acepta mayúsculas, así
+      // que cruzar por el del request dejaría la promo sin aplicar según cómo
+      // el cliente escribió el UUID.
+      itemId: linea.itemId,
+      categoriaId: itemsBase.get(linea.itemId)?.categoriaId ?? null,
+      cantidad: linea.cantidad,
+      precioListaUnitario: linea.precioUnitario,
+      instante: instantes[index],
+    }));
+
+    return evaluarPromos({
+      promos,
+      lineas: lineasPromo,
+      canal: dto.canal ?? 'fisico',
+    });
+  }
+
+  /**
+   * El instante local con el que cada línea mide la ventana de una promo.
+   *
+   * **Es POR LÍNEA y sale de la BD, jamás del body** (decisión 4 del owner):
+   * lo que vale es cuándo se PIDIÓ el producto, no cuándo se cobra la mesa. Un
+   * happy hour de 18 a 20 tiene que seguir aplicando a la cerveza pedida a las
+   * 19:00 aunque la cuenta se cierre a las 23:00 — y no puede aplicar a la que
+   * se pidió a las 21:00 en esa misma cuenta. Aceptar el instante del cliente
+   * sería la forma de hacer que cualquier promo aplique siempre.
+   *
+   * Sin `cuentaId` no hay historia que leer: la venta se está armando ahora y
+   * todas las líneas comparten "ahora".
+   *
+   * **El cruce DTO ↔ `cuenta_lineas` es por `itemId` + consumo por orden.** No
+   * hay un id de línea de cuenta en el DTO —el carrito del cobro se arma desde
+   * la cuenta pero viaja como lista de ítems— así que las filas se ponen en una
+   * cola por ítem, ordenadas por `creado_el`, y cada línea del DTO consume la
+   * siguiente de su ítem. Es exacto mientras la venta conserve el orden de la
+   * cuenta, que es lo que hace `ventas.service.ts`. Una línea que no encuentra
+   * fila usa "ahora": es una línea AGREGADA en el cobro, y negarle la promo
+   * sería no aplicarle un beneficio que el cliente sí acaba de ganar.
+   *
+   * ⚠️ **UNA query a `cuenta_lineas` y UNA a la zona horaria**, no una por
+   * línea: `instanteLocalTenant` resuelve la zona con una consulta cada vez,
+   * así que colapsar N instantes con él serían N viajes idénticos a `tenants`.
+   * Por eso la zona se resuelve una sola vez y el colapso lo hace la mitad
+   * pura (`instanteLocalEnZona`).
+   */
+  private async instantesDeLineas(
+    tenantId: string,
+    dto: CalcularVentaDto,
+  ): Promise<InstanteLocal[]> {
+    const zona = await zonaHorariaTenant(this.db, tenantId);
+    const ahora = instanteLocalEnZona(zona, new Date());
+    if (!dto.cuentaId) return dto.lineas.map(() => ahora);
+
+    const filas: { item_id: string; creado_el: Date }[] = await this.db.query(
+      `SELECT item_id, creado_el
+         FROM cuenta_lineas
+        WHERE cuenta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+        ORDER BY creado_el`,
+      [dto.cuentaId, tenantId],
+    );
+
+    // Minúsculas, mismo motivo que `advertirItemsPausados`: el body puede
+    // traer el UUID en mayúsculas y la BD lo devuelve canónico.
+    const colaPorItem = new Map<string, Date[]>();
+    for (const fila of filas) {
+      const clave = fila.item_id.toLowerCase();
+      const cola = colaPorItem.get(clave);
+      if (cola) cola.push(fila.creado_el);
+      else colaPorItem.set(clave, [fila.creado_el]);
+    }
+
+    return dto.lineas.map((linea) => {
+      const creado = colaPorItem.get(linea.itemId.toLowerCase())?.shift();
+      return creado ? instanteLocalEnZona(zona, creado) : ahora;
+    });
   }
 
   /**

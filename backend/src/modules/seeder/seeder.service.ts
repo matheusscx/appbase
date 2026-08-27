@@ -40,6 +40,9 @@ import { Turno } from '../turnos/entities/turno.entity';
 import { Impresora } from '../impresoras/entities/impresora.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
+import { Promocion } from '../promociones/entities/promocion.entity';
+import { PromocionScope } from '../promociones/entities/promocion-scope.entity';
+import { PromocionScopeItem } from '../promociones/entities/promocion-scope-item.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
@@ -137,6 +140,12 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly propinaConfigRepo: Repository<PropinaConfiguracion>,
     @InjectRepository(PropinaGrupoDistribucion)
     private readonly propinaGrupoRepo: Repository<PropinaGrupoDistribucion>,
+    @InjectRepository(Promocion)
+    private readonly promocionRepo: Repository<Promocion>,
+    @InjectRepository(PromocionScope)
+    private readonly promocionScopeRepo: Repository<PromocionScope>,
+    @InjectRepository(PromocionScopeItem)
+    private readonly promocionScopeItemRepo: Repository<PromocionScopeItem>,
     private readonly credencialesService: CredencialesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -165,6 +174,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
     await this.seedRecuentoInventarioLineaIndex();
+    await this.seedPromocionesIndices();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -181,6 +191,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedRecargoTramos();
     await this.seedRecargoMetodosPago();
     await this.seedItems();
+    await this.seedPromociones();
     await this.seedTiposDocumentoTributario();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
@@ -1296,6 +1307,24 @@ export class SeederService implements OnApplicationBootstrap {
     await this.dataSource.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_recuento_linea_item_vivo
       ON recuento_inventario_linea (recuento_id, item_id) WHERE eliminado_el IS NULL
+    `);
+  }
+
+  /**
+   * Solo el índice, sin demo rows: el seed de promos vive en una tarea
+   * aparte del plan (no se siembra ninguna al crear tenant — no es parte
+   * del kit mínimo rol/fórmula/caja virtual). Mismo molde que
+   * `seedDescuentos()` — `lower(nombre)` no lo puede expresar `@Index` de
+   * TypeORM, así que va acá con SQL cruda — pero separado porque acá no
+   * hay filas que sembrar todavía.
+   * `PromocionesService.validarNombreUnico` + `traducirColisionDeNombre`
+   * asumen este índice para traducir la carrera de nombre (23505) al mismo
+   * 400 que el pre-chequeo; sin él, esa rama nunca dispara.
+   */
+  private async seedPromocionesIndices(): Promise<void> {
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_promociones_tenant_nombre_vivo
+      ON promociones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
   }
 
@@ -3275,6 +3304,157 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPapasFritas();
     await this.seedGruposModificadores();
     await this.seedComboEspecial();
+  }
+
+  /**
+   * Dos promos demo (Tarea 10 del plan de motor de promociones), va DESPUÉS de
+   * `seedItems()` porque el scope de la primera cuelga de ítems reales — no
+   * antes, como `seedPromocionesIndices()` (esa es solo el índice, sin filas;
+   * ver su docblock: al crear tenant no se siembra ninguna promo, esto es
+   * aparte y demo-only).
+   *
+   * "2x1 de la casa (martes)": `nxm` cadaN=2 (paga 1 de cada 2), franja
+   * 18:00–20:00, solo martes (`diasSemana=[2]`, ISO-8601 1=lunes). Nombre
+   * genérico a propósito: el seed no tiene bebidas, así que el scope usa los
+   * vendibles reales que sí existen (nada de ingredientes) — un nombre
+   * temático a un rubro que el demo no cubre ("tragos") confundía a quien lo
+   * abriera y viera hamburguesas descontadas. "Producto demo (unidad · CLP)"
+   * (…440116, `seedProductoDemoVentas`), "Papas fritas" (…440281,
+   * `seedPapasFritas`) y "Hamburguesa Especial" (…440294, tipo `receta` con
+   * precio propio, `seedGruposModificadores`) — 3 tipos vendibles distintos
+   * (producto/receta) a propósito, para que el demo no dependa de una sola
+   * fila.
+   *
+   * "Happy hour 20%": `porcentaje` 0.20, sin `diasSemana` (todos los días),
+   * franja 18:00–02:00 — cruza medianoche a propósito (horaInicio > horaFin),
+   * es el diferenciador que el demo tiene que mostrar. Scope `venta`: aplica
+   * a toda la venta, sin ítems ni categoría.
+   *
+   * Fechas 2026-01-01→2027-12-31: rango largo para cubrir la demo, pero CON
+   * fin — el guardarraíl heredado de `promocional` (nunca sin fecha de
+   * término) vale también acá.
+   *
+   * **Las dos nacen `activo: false` (pausadas).** Paris (…440007) es el único
+   * tenant con catálogo del seed y trece specs e2e afirman totales exactos
+   * sobre él (p. ej. `calculo-precios.e2e-spec.ts` espera `'100.000000'` /
+   * `'0.000000'` de descuento) — activar una promo de scope `'venta'` sin
+   * filtro de ítems/categoría cambia la plata de CUALQUIER venta de Paris que
+   * caiga en su franja horaria, y con `promos_acumulan_descuentos` en su
+   * default también puede anular el descuento de catálogo en vez de sumarse.
+   * El otro tenant del seed (Falabella, …440040) tiene el mismo problema: lo
+   * usan igual de specs e2e, así que no hay un tenant "libre" donde sembrarlas
+   * activas (ambos tenants del seed están comprometidos). La trampa para el
+   * próximo agente: sembrar una promo ACTIVA de scope `'venta'` —o de scope
+   * `'items'` sobre ítems que otros e2e también usan— en un tenant que corre
+   * suites ajenas rompe esas suites sin que el diff que las rompe se vea
+   * relacionado. El valor del demo no se pierde: la pantalla muestra ambas
+   * con badge "Pausada" y se activan con un clic desde
+   * `configuracion/promociones.vue`.
+   */
+  private async seedPromociones(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+
+    const DOSXUNO_ID = '550e8400-e29b-41d4-a716-446655440365';
+    const DOSXUNO_SCOPE_ID = '550e8400-e29b-41d4-a716-446655440366';
+    const HAPPYHOUR_ID = '550e8400-e29b-41d4-a716-446655440367';
+    const HAPPYHOUR_SCOPE_ID = '550e8400-e29b-41d4-a716-446655440368';
+
+    const ITEM_PRODUCTO_DEMO = '550e8400-e29b-41d4-a716-446655440116';
+    const ITEM_PAPAS_FRITAS = '550e8400-e29b-41d4-a716-446655440281';
+    const ITEM_HAMBURGUESA_ESPECIAL = '550e8400-e29b-41d4-a716-446655440294';
+
+    const promociones: Partial<Promocion>[] = [
+      {
+        id: DOSXUNO_ID,
+        tenantId: PARIS,
+        nombre: '2x1 de la casa (martes)',
+        descripcion: 'Lleva 2 y paga 1, los martes de 18:00 a 20:00.',
+        activo: false,
+        fechaInicio: '2026-01-01',
+        fechaFin: '2027-12-31',
+        horaInicio: '18:00',
+        horaFin: '20:00',
+        diasSemana: [2],
+        canal: null,
+        tipo: 'nxm',
+        valorPorcentaje: '1.0000',
+        cadaN: 2,
+        valorMonto: null,
+      },
+      {
+        id: HAPPYHOUR_ID,
+        tenantId: PARIS,
+        nombre: 'Happy hour 20%',
+        descripcion: '20% de descuento en toda la venta, de 18:00 a 02:00.',
+        activo: false,
+        fechaInicio: '2026-01-01',
+        fechaFin: '2027-12-31',
+        horaInicio: '18:00',
+        horaFin: '02:00',
+        diasSemana: null,
+        canal: null,
+        tipo: 'porcentaje',
+        valorPorcentaje: '0.2000',
+        cadaN: null,
+        valorMonto: null,
+      },
+    ];
+
+    for (const data of promociones) {
+      const exists = await this.promocionRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.promocionRepo.save(this.promocionRepo.create(data));
+      }
+    }
+
+    const scopes: Partial<PromocionScope>[] = [
+      {
+        id: DOSXUNO_SCOPE_ID,
+        promocionId: DOSXUNO_ID,
+        slot: 0,
+        tipoScope: 'items',
+        categoriaId: null,
+        cantidad: 1,
+      },
+      {
+        id: HAPPYHOUR_SCOPE_ID,
+        promocionId: HAPPYHOUR_ID,
+        slot: 0,
+        tipoScope: 'venta',
+        categoriaId: null,
+        cantidad: 1,
+      },
+    ];
+
+    for (const data of scopes) {
+      const exists = await this.promocionScopeRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.promocionScopeRepo.save(
+          this.promocionScopeRepo.create(data),
+        );
+      }
+    }
+
+    const scopeItems: Partial<PromocionScopeItem>[] = [
+      { scopeId: DOSXUNO_SCOPE_ID, itemId: ITEM_PRODUCTO_DEMO },
+      { scopeId: DOSXUNO_SCOPE_ID, itemId: ITEM_PAPAS_FRITAS },
+      { scopeId: DOSXUNO_SCOPE_ID, itemId: ITEM_HAMBURGUESA_ESPECIAL },
+    ];
+
+    for (const data of scopeItems) {
+      const exists = await this.promocionScopeItemRepo.findOne({
+        where: { scopeId: data.scopeId, itemId: data.itemId },
+      });
+      if (!exists) {
+        await this.promocionScopeItemRepo.save(
+          this.promocionScopeItemRepo.create(data),
+        );
+      }
+    }
   }
 
   /**

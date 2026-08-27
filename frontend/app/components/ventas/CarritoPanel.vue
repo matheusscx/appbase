@@ -207,6 +207,7 @@ watch(clienteDrawerOpen, (open) => {
               {{ formatMonto(convertirAMonedaOficial(linea.precioUnitarioOverride ?? linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
             <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
+            <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
           </div>
           <AppCantidadInput
             :model-value="presentacionLinea(linea)"

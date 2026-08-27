@@ -10,6 +10,7 @@ import {
   type BoletaCliente,
   type BoletaItem,
   type ImpuestoBoleta,
+  type PromoBoleta,
 } from '~/utils/ticket-builder'
 import { conTimeout } from '~/utils/con-timeout'
 
@@ -239,6 +240,7 @@ export function useImpresoras() {
     items: BoletaItem[]
     totales: TicketTotales
     impuestos: ImpuestoBoleta[]
+    promociones?: PromoBoleta[]
     propinaSugerida?: { porcentaje: string, monto: string }
     formatMonto: (v: string) => string
   }): Promise<void> {
@@ -257,6 +259,7 @@ export function useImpresoras() {
     items: BoletaItem[]
     totales: TicketTotales
     impuestos: ImpuestoBoleta[]
+    promociones?: PromoBoleta[]
     propina?: { monto: string }
     pagos: TicketPago[]
     vuelto?: string

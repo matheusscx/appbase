@@ -72,6 +72,23 @@ interface ReglaCongelada {
   aplicadoEn: string
 }
 
+/**
+ * Una promoción tal como quedó CONGELADA en la venta (T8: `ventas_promociones`).
+ * `detalleId` la cruza con su línea, igual que `ReglaCongelada`; `tipo` decide
+ * qué significa `valorEfectivo` — porcentaje decimal en `porcentaje`/`nxm`,
+ * monto fijo en `precio_fijo` (ver `TrazaPromo` del motor).
+ */
+interface PromocionCongelada {
+  id: string
+  detalleId: string | null
+  aplicacion: number
+  promocionId: string
+  nombre: string
+  tipo: string
+  valorEfectivo: string
+  monto: string
+}
+
 interface Reembolso {
   id: string
   monto: string
@@ -115,6 +132,7 @@ interface VentaDetalle {
   descuentos: ReglaCongelada[]
   recargos: ReglaCongelada[]
   impuestos: ReglaCongelada[]
+  promociones: PromocionCongelada[]
   /**
    * La config con la que se calculó, congelada. `formula` es el orden en que se
    * aplicaron los pasos y es lo que ordena el desglose; los dos `calculo*` son
@@ -369,6 +387,35 @@ function filaDeRegla(familia: string, r: ReglaCongelada): FilaDetalle {
 }
 
 /**
+ * Fila de una promoción congelada — misma forma que `filaDeRegla`, familia
+ * `'Promoción'` propia (no `'Descuento'`): la separación promo/catálogo vive
+ * en la traza, igual que en `TrazaPromo` del motor. El signo siempre resta,
+ * como cualquier descuento; a diferencia de una regla, acá no hay tope por
+ * piso en cero que reportar (`valorSolicitado` no existe en la promo).
+ */
+function filaDePromocion(p: PromocionCongelada): FilaDetalle {
+  // `valorEfectivo` es un % decimal en 'porcentaje'/'nxm' y el precio fijo del
+  // combo en 'precio_fijo' — mismo contrato que `TrazaPromo.valorEfectivo`.
+  const valor = p.tipo === 'precio_fijo'
+    ? formatMonto(p.valorEfectivo)
+    : formatPorcentaje(p.valorEfectivo)
+
+  return {
+    clave: p.id,
+    tipoFila: 'regla',
+    concepto: p.nombre,
+    familia: 'Promoción',
+    cantidad: null,
+    valor,
+    monto: p.monto,
+    rotuloMonto: null,
+    signo: '-',
+    recorte: null,
+    sinEfecto: new Decimal(p.monto).isZero(),
+  }
+}
+
+/**
  * Qué líneas tienen el desglose abierto. Se vacía al cargar otra venta: dejarlo
  * con ids de la venta anterior abriría filas que ya no existen.
  */
@@ -385,7 +432,7 @@ const lineasConReglas = computed<Set<string>>(() => {
   const v = venta.value
   if (!v) return new Set()
   return new Set(
-    [...v.descuentos, ...v.recargos, ...v.impuestos]
+    [...v.descuentos, ...v.recargos, ...v.impuestos, ...v.promociones]
       .map(r => r.detalleId)
       .filter((id): id is string => id !== null),
   )
@@ -441,13 +488,21 @@ const filasDetalle = computed<FilaDetalle[]>(() => {
 
   // Recorre los pasos en el orden de la fórmula y se queda con las reglas de
   // un `detalleId` dado: así cada ítem las lleva en el orden en que corrieron.
+  // Las promociones no son un paso propio de la fórmula —el motor las resta en
+  // el mismo paso que los descuentos de catálogo, dentro de `descuentoAplicado`—
+  // así que viajan pegadas al paso `descuentos`, después de sus reglas.
   const reglasDe = (detalleId: string | null): FilaDetalle[] =>
     formulaVenta.value.flatMap((paso) => {
       const familia = PASO_A_TIPO[paso]
       if (!familia) return []
-      return (porPaso[paso] ?? [])
+      const reglas = (porPaso[paso] ?? [])
         .filter(r => r.detalleId === detalleId)
         .map(r => filaDeRegla(familia, r))
+      if (paso !== 'descuentos') return reglas
+      const promos = v.promociones
+        .filter(p => p.detalleId === detalleId)
+        .map(p => filaDePromocion(p))
+      return [...reglas, ...promos]
     })
 
   const filas = v.detalles.flatMap<FilaDetalle>((d) => {
@@ -519,7 +574,7 @@ const detalleColumns: TableColumn<FilaDetalle>[] = [
 ]
 
 function familiaColor(familia: string | null): 'success' | 'warning' | 'neutral' {
-  if (familia === 'Descuento') return 'success'
+  if (familia === 'Descuento' || familia === 'Promoción') return 'success'
   if (familia === 'Recargo') return 'warning'
   return 'neutral'
 }

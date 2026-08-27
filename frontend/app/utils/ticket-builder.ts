@@ -30,6 +30,38 @@ export function agregarImpuestosVenta(
   return orden.map(id => acc.get(id)!)
 }
 
+export interface PromoBoleta {
+  id: string
+  nombre: string
+  monto: string
+}
+
+/**
+ * Agrega las trazas de promoción de todas las líneas de una venta agrupando
+ * por id. Mismo molde que `agregarImpuestosVenta`: dos aplicaciones de la
+ * MISMA promo repartidas en dos líneas (un 2x1 sobre líneas distintas) se
+ * funden en una sola fila del ticket — es una promo, no dos.
+ */
+export function agregarPromocionesVenta(
+  lineas: { trazas: { promociones: { id: string, nombre: string, monto: string }[] } }[],
+): PromoBoleta[] {
+  const orden: string[] = []
+  const acc = new Map<string, PromoBoleta>()
+  for (const linea of lineas) {
+    for (const promo of linea.trazas.promociones) {
+      const prev = acc.get(promo.id)
+      if (prev) {
+        prev.monto = new Decimal(prev.monto).plus(promo.monto).toString()
+      }
+      else {
+        orden.push(promo.id)
+        acc.set(promo.id, { id: promo.id, nombre: promo.nombre, monto: new Decimal(promo.monto).toString() })
+      }
+    }
+  }
+  return orden.map(id => acc.get(id)!)
+}
+
 /** '0.19' -> '19%'; '0.195' -> '19,5%'. Sin decimales innecesarios, coma decimal es-CL. */
 export function formatTasaPorcentaje(tasa: string): string {
   const pct = new Decimal(tasa).times(100).toDecimalPlaces(2)
@@ -223,19 +255,35 @@ function lineasItem(
 }
 
 /**
- * Subtotal, Descuento?, Recargo?, Neto, una línea por impuesto (nombre + tasa).
- * NO incluye la línea de total final (su etiqueta varía entre boleta/precuenta).
+ * Subtotal, Descuento?, promociones nombradas?, Recargo?, Neto, una línea por
+ * impuesto (nombre + tasa). NO incluye la línea de total final (su etiqueta
+ * varía entre boleta/precuenta).
+ *
+ * `totalDescuentos` ya trae la plata de las promos sumada (el motor las cierra
+ * en el mismo paso que los descuentos de catálogo) — así que "Descuento" acá
+ * muestra solo la parte de CATÁLOGO (`totalDescuentos − Σ promociones`) y cada
+ * promo aparece en su propia línea, nombrada. Sin la resta, la promo se vería
+ * dos veces: fundida en el agregado Y de nuevo en su línea.
  */
 function lineasTotalesConImpuestos(
   totales: TicketTotales,
+  promociones: PromoBoleta[],
   impuestos: ImpuestoBoleta[],
   formatMonto: (v: string) => string,
   width: number,
 ): string[] {
   const out: string[] = []
   out.push(padLR('Subtotal', formatMonto(totales.subtotalNeto), width))
-  if (new Decimal(totales.totalDescuentos || '0').gt(0)) {
-    out.push(padLR('Descuento', `-${formatMonto(totales.totalDescuentos)}`, width))
+  const totalPromos = promociones.reduce((a, p) => a.plus(p.monto), new Decimal(0))
+  const descuentoCatalogo = new Decimal(totales.totalDescuentos || '0').minus(totalPromos)
+  if (descuentoCatalogo.gt(0)) {
+    out.push(padLR('Descuento', `-${formatMonto(descuentoCatalogo.toString())}`, width))
+  }
+  for (const promo of promociones) {
+    // Igual que los recargos en cero: una promo sin monto no se imprime.
+    if (new Decimal(promo.monto).gt(0)) {
+      out.push(padLR(promo.nombre, `-${formatMonto(promo.monto)}`, width))
+    }
   }
   if (new Decimal(totales.totalRecargos || '0').gt(0)) {
     out.push(padLR('Recargo', `+${formatMonto(totales.totalRecargos)}`, width))
@@ -284,6 +332,8 @@ export function buildPrecuentaTicket(input: {
   items: BoletaItem[]
   totales: TicketTotales
   impuestos: ImpuestoBoleta[]
+  /** Promos nombradas — ver `agregarPromocionesVenta`. Opcional: sin ellas, `[]`. */
+  promociones?: PromoBoleta[]
   propinaSugerida?: { porcentaje: string, monto: string }
   fecha: Date
   formatMonto: (v: string) => string
@@ -303,7 +353,7 @@ export function buildPrecuentaTicket(input: {
     out.push(...lineasItem(item, formatMonto, BOLETA_WIDTH))
   }
   out.push(separador(BOLETA_WIDTH))
-  out.push(...lineasTotalesConImpuestos(input.totales, input.impuestos, formatMonto, BOLETA_WIDTH))
+  out.push(...lineasTotalesConImpuestos(input.totales, input.promociones ?? [], input.impuestos, formatMonto, BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
   out.push(padLR('TOTAL', formatMonto(input.totales.totalFinal), BOLETA_WIDTH))
   if (input.propinaSugerida) {
@@ -350,6 +400,8 @@ export function buildBoletaTicket(input: {
   items: BoletaItem[]
   totales: TicketTotales
   impuestos: ImpuestoBoleta[]
+  /** Promos nombradas — ver `agregarPromocionesVenta`. Opcional: sin ellas, `[]`. */
+  promociones?: PromoBoleta[]
   propina?: { monto: string }
   pagos: TicketPago[]
   /** Excedente devuelto en efectivo — 0 o ausente cuando el pago fue con tarjeta/transferencia. */
@@ -403,7 +455,7 @@ export function buildBoletaTicket(input: {
   out.push(separador(BOLETA_WIDTH))
 
   // Totales: Subtotal, Descuento?, Recargo?, Neto, impuestos*, TOTAL BOLETA
-  out.push(...lineasTotalesConImpuestos(input.totales, input.impuestos, formatMonto, BOLETA_WIDTH))
+  out.push(...lineasTotalesConImpuestos(input.totales, input.promociones ?? [], input.impuestos, formatMonto, BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
   out.push(padLR('TOTAL BOLETA', formatMonto(input.totales.totalFinal), BOLETA_WIDTH))
 

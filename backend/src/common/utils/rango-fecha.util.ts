@@ -1,6 +1,7 @@
 import type { DataSource, EntityManager } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import type { Db } from '../db/db.service';
+import type { InstanteLocal } from '../../modules/promociones/promociones.evaluator';
 
 /**
  * Bordes de rango por fecha en filtros de listado.
@@ -181,4 +182,74 @@ export async function fechaLocalTenant(
 ): Promise<string> {
   const zona = await zonaHorariaTenant(db, tenantId);
   return new Intl.DateTimeFormat('en-CA', { timeZone: zona }).format(instante);
+}
+
+/** `Intl` con locale `en-US` y `weekday: 'short'` devuelve estos tres literales. */
+const DIA_ISO_POR_WEEKDAY_CORTO: Record<string, number> = {
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+};
+
+/**
+ * Colapsa un instante al `{fecha, hora, diaIso}` LOCAL del tenant (zona de la
+ * provincia). Mismo mecanismo `Intl` que `fechaLocalTenant` y por la misma
+ * razón (colapsar en memoria, no expandir en SQL — ver su docblock arriba):
+ * acá además reusa esa misma función para la fecha y su resolución de zona
+ * (`zonaHorariaTenant`), en vez de repetir la query.
+ *
+ * El retorno calza con `InstanteLocal` de `promociones.evaluator.ts` (el
+ * consumidor): `hora` en `'HH:mm'` de 24 horas y `diaIso` en 1..7 con
+ * 1=lunes..7=domingo (ISO 8601), no el 0=domingo de `Date#getDay`.
+ *
+ * ⚠️ `hourCycle: 'h23'` explícito para la hora, no `hour12: false` a secas:
+ * con algún locale, `hour12: false` deja que el default de `hourCycle` del
+ * locale gane y la medianoche exacta sale `'24:00'` en vez de `'00:00'` —
+ * cubierto por el test de borde en el spec.
+ */
+export async function instanteLocalTenant(
+  db: DataSource | EntityManager | Db,
+  tenantId: string,
+  instante: Date,
+): Promise<InstanteLocal> {
+  return instanteLocalEnZona(await zonaHorariaTenant(db, tenantId), instante);
+}
+
+/**
+ * La mitad PURA de `instanteLocalTenant`: colapsa el instante con una zona ya
+ * resuelta, sin tocar la base.
+ *
+ * Existe porque hay un llamador que colapsa **muchos** instantes del mismo
+ * tenant —las promociones miden su ventana contra el `creado_el` de CADA línea
+ * de la cuenta— y `instanteLocalTenant` resuelve la zona con una consulta cada
+ * vez: una cuenta de 12 líneas serían 12 viajes idénticos a `tenants`, que es
+ * un N+1 de manual. Con esto la zona se resuelve UNA vez
+ * (`zonaHorariaTenant`) y el resto es aritmética de `Intl`.
+ *
+ * No es una versión "rápida" con otra semántica: `instanteLocalTenant` es hoy
+ * esta función más la consulta de la zona, así que las dos no pueden derivar.
+ */
+export function instanteLocalEnZona(
+  zona: string,
+  instante: Date,
+): InstanteLocal {
+  const fecha = new Intl.DateTimeFormat('en-CA', { timeZone: zona }).format(
+    instante,
+  );
+  const hora = new Intl.DateTimeFormat('en-GB', {
+    timeZone: zona,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(instante);
+  const weekdayCorto = new Intl.DateTimeFormat('en-US', {
+    timeZone: zona,
+    weekday: 'short',
+  }).format(instante);
+
+  return { fecha, hora, diaIso: DIA_ISO_POR_WEEKDAY_CORTO[weekdayCorto] };
 }

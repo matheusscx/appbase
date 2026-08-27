@@ -38,7 +38,7 @@ function resultadoDe(ids: string[]): ResultadoVenta {
       recargoAplicado: '0',
       impuestoAplicado: '0',
       totalLinea: '100',
-      trazas: { descuentos: [], recargos: [], impuestos: [] },
+      trazas: { descuentos: [], recargos: [], impuestos: [], promociones: [] },
       advertencias: [{ titulo: `Aviso de ${id}`, detalle: 'topeado' }],
     })),
     totales: {

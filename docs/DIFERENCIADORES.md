@@ -156,6 +156,37 @@ apuntarle a un número cuando no sumás vos.
 **Evidencia:** [investigación §8.3](agent/investigaciones/2026-07-23-gestion-caja.md).
 **Estado:** 📐 Decidido 2026-08-11, sin construir.
 
+### El happy hour que cruza la medianoche está definido, no indefinido
+
+**Nosotros:** la franja horaria de una promoción admite `hora_inicio > hora_fin` con
+semántica explícita de cruce de medianoche (18:00–02:00), fijada en el esquema y con test.
+**El mercado:** los cuatro POS internacionales relevados por documentación oficial (Toast,
+Square, Lightspeed, Clover) programan promociones por día y hora, y **ninguno de los
+cuatro documenta qué pasa cuando la ventana cruza medianoche**.
+**Por qué le importa a quien compra:** el happy hour de un bar termina a las 2 AM, no a
+las 23:59 — el caso que nadie especifica es el caso normal del rubro nocturno.
+⚠️ Regla 3 de este archivo: lo relevado es documentación pública; que no lo documenten no
+prueba que no lo manejen.
+**Evidencia:** [spec del motor de promociones §investigación](superpowers/specs/2026-08-27-motor-promociones-design.md#investigación-de-mercado-2026-08-27-y-su-cruce-contra-este-diseño).
+**Estado:** 📐 Diseñado 2026-08-27, sin construir.
+
+### El reparto del combo a precio fijo es determinista y auditable
+
+**Nosotros:** el descuento de un combo a precio fijo se reparte entre sus líneas a
+prorrata del neto, con el residuo asignado por mayores restos — el mismo mecanismo
+determinista que el motor ya usa para las reglas de documento — y queda congelado por
+línea en `ventas_promociones`.
+**El mercado:** de los cuatro relevados, **solo Toast documenta una fórmula de prorrateo**
+(proporcional al precio original, impuesto recalculado post-prorrateo); Square declara que
+"apportions" sin publicar la fórmula, y Lightspeed y Clover no documentan nada. Ninguno
+documenta qué pasa con el residuo del reparto.
+**Por qué le importa a quien compra:** el impuesto de cada componente sale de un reparto
+que se puede explicar peso por peso, y dos cierres del mismo combo dan el mismo ticket.
+⚠️ Regla 3: ausencia de documentación pública ≠ ausencia de la función.
+**Evidencia:** [spec del motor de promociones §investigación](superpowers/specs/2026-08-27-motor-promociones-design.md#investigación-de-mercado-2026-08-27-y-su-cruce-contra-este-diseño) ·
+[Toast — effect of discounts on prices](https://doc.toasttab.com/doc/platformguide/adminDiscountPricing.html).
+**Estado:** 📐 Diseñado 2026-08-27, sin construir.
+
 ---
 
 ## 💡 Hallazgos sin diseñar

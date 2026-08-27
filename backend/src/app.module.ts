@@ -146,6 +146,11 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
 import { RecuentoInventario } from './modules/recuentos/entities/recuento-inventario.entity';
 import { RecuentoInventarioLinea } from './modules/recuentos/entities/recuento-inventario-linea.entity';
 import { RecuentosModule } from './modules/recuentos/recuentos.module';
+import { Promocion } from './modules/promociones/entities/promocion.entity';
+import { PromocionScope } from './modules/promociones/entities/promocion-scope.entity';
+import { PromocionScopeItem } from './modules/promociones/entities/promocion-scope-item.entity';
+import { VentaPromocion } from './modules/ventas/entities/venta-promocion.entity';
+import { PromocionesModule } from './modules/promociones/promociones.module';
 
 @Module({
   imports: [
@@ -269,6 +274,10 @@ import { RecuentosModule } from './modules/recuentos/recuentos.module';
           ItemGrupoModificadorOpcion,
           RecuentoInventario,
           RecuentoInventarioLinea,
+          Promocion,
+          PromocionScope,
+          PromocionScopeItem,
+          VentaPromocion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -312,6 +321,7 @@ import { RecuentosModule } from './modules/recuentos/recuentos.module';
     MotivosDiferenciaModule,
     MotivosDiferenciaInventarioModule,
     RecuentosModule,
+    PromocionesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

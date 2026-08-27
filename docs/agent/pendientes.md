@@ -96,6 +96,52 @@ del cambio de nivel— salió a [`resueltos.md`](resueltos.md). Que esté vacía
 no haya trabajo chico: significa que el trabajo chico que queda **no es mecánico**, o sea que
 tiene una decisión adentro por más que el diff sea de tres líneas.
 
+### Los residuos que dejó el frente de promociones (2026-08-27)
+
+Ninguno es un bug de promo mal calculada: el fix de cada uno ya está identificado y no
+requiere preguntarle nada al owner. Se juntaron en una entrada por la misma razón que los
+minors del redondeo — se resuelven en una sola pasada.
+
+- [ ] **`nivelRedondeo: 'documento'` + promo puede dejar el total del documento a ±1 peso,
+  sin test que lo cubra** (backend, `calculo-precios.engine.ts:1710` y `:1884`) — con
+  `nivelRedondeo === 'documento'` las líneas quedan finas y solo el cierre del documento
+  cuantiza; una promo participa de ese mismo camino, así que hereda la misma holgura de
+  redondeo que ya tenían `descuentos`/`recargos` de nivel venta antes de que existiera este
+  módulo. **No es una regresión**: se midió durante la review de T6+7 (barrido de 11.604
+  casos, 0 fallos en el camino `nivelRedondeo: 'linea'`, que es el default de todos los
+  tenants) que la promo no empeora el caso `'documento'` respecto de lo que ya pasaba con
+  descuentos de venta. Lo que falta es un test que fije esa cota (`nivelRedondeo:
+  'documento'` + una promo + un descuento de venta, verificando que el total nunca se
+  desvía más de 1 unidad de la escala) para que quede protegido y no solo medido a mano una
+  vez.
+- [ ] **`PromocionesAplicadas.vue` no filtra el monto `'0'` donde el ticket sí**
+  (`frontend/app/components/PromocionesAplicadas.vue`) — el ticket
+  (`ticket-builder.ts:284`) omite una promo con `monto <= 0` (la familia perdedora del
+  interruptor, que llega con traza pero sin plata). Este componente —el desglose del
+  carrito, no del ticket impreso— dibuja todas las filas de `promociones` sin ese filtro:
+  inconsistencia cosmética entre las dos superficies, no un cálculo mal hecho (el monto que
+  se ve, cuando aparece, es correcto). Cierre: agregar el mismo `.filter(p => new
+  Decimal(p.monto).gt(0))` antes del `v-for`.
+- [ ] **`VentaDetalleDrawer.vue` sigue sin spec propio** (frontend,
+  `frontend/app/components/ventas/VentaDetalleDrawer.vue`) — no es nuevo de este frente
+  (`docs/features/descuentos-recargos.md` ya lo señalaba para la regla de nivel), pero
+  promociones le agregó `filaDePromocion` y la familia `'Promoción'` sin agregar cobertura:
+  la regla de qué rótulo lleva el total y cómo se agrupa una aplicación cross-línea por
+  `aplicacion` queda sin test automatizado, solo con la revisión manual que aprobó T12.
+  Cierre: un spec de render (mismo molde que `promociones.nuxt.spec.ts`) que monte el drawer
+  con una venta congelada de ejemplo (incluida una aplicación cross-línea) y afirme las
+  filas y el total.
+- [ ] **`suscripciones.service.ts` calcula sin pasar `canal`, así que cae al default
+  `'fisico'`** (backend, `backend/src/modules/suscripciones/suscripciones.service.ts:112`) —
+  la llamada a `calculoPreciosService.calcular` no manda `canal`, y `CalcularVentaDto` lo
+  completa a `'fisico'` cuando falta. Una suscripción es intrínsecamente el canal online (no
+  hay caja física de por medio); `online.service.ts:348` ya pasa `canal: 'online' as const`
+  explícito en su propia llamada a `calcular` — mismo molde, una línea. **Hoy es benigno**
+  (el seed no tiene ninguna promo con `canal` fijado sobre el ítem de suscripción demo, así
+  que no hay ningún caso real donde esto cobre distinto), pero una promo futura scoped a
+  `canal: 'fisico'` aplicaría por error a una suscripción, y una scoped a `'online'` nunca
+  le aplicaría. Cierre: agregar `canal: 'online' as const` al DTO de esa llamada.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
@@ -610,12 +656,29 @@ abriendo las superficies, no leyendo la entrada.
 
 - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
-  el documento completo es
+
+  ✅ **ACTUALIZACIÓN 2026-08-27: diseñado E implementado.** El título de esta entrada ya no
+  describe el estado real y se deja sin reescribir a propósito —mismo criterio que
+  `descuentos-recargos.md` usa con sus citas vencidas— porque el texto de abajo (lo ya
+  decidido, la premisa corregida, el requisito heredado) sigue siendo el contexto correcto
+  para quien retome el frente. Lo que cambió: arquitectura diseñada
+  ([`2026-08-27-motor-promociones-design.md`](../superpowers/specs/2026-08-27-motor-promociones-design.md)),
+  plan ejecutado (13 tareas, [`2026-08-27-motor-promociones.md`](../superpowers/plans/2026-08-27-motor-promociones.md)),
+  backend + frontend construidos y documentados
+  ([`docs/features/motor-promociones.md`](../features/motor-promociones.md),
+  [ADR-023](../adr/023-promociones-familia-propia-del-motor.md)). **Lo único que falta es el
+  gate con stack** —`test:e2e` completo, `--verificar`, smoke de navegador,
+  `verify-feature` final— porque el desarrollo corrió con Docker ocupado por otra sesión
+  (orden del owner). Esta entrada se muda a `resueltos.md` recién cuando ese gate corra en
+  verde, no antes — no la des por cerrada leyendo solo hasta acá.
+
+  El documento completo del análisis original es
   [`specs/2026-07-22-motor-promociones-analisis.md`](../superpowers/specs/2026-07-22-motor-promociones-analisis.md)
   y está **más avanzado de lo que nadie recuerda**: alcance de Fase 1 **cerrado**, las cuatro
   preguntas abiertas resueltas, e investigación de mercado (Toast/Square/Lightspeed) hecha.
-  **Lo único que falta es diseñar la arquitectura** —esquema de tablas Promoción/Condición/
-  Beneficio y forma del evaluador— para promoverlo a `-design.md` y plan.
+  ⚠️ *Esta frase decía "lo único que falta es diseñar la arquitectura" — dejó de ser cierto
+  el 2026-08-27, ver la actualización arriba: la arquitectura ya está diseñada Y
+  construida.*
 
   ⚠️ **Por qué está acá y no se acordaba nadie: no lo nombraba ningún backlog.** Su único
   puntero era desde `investigacion-mercado.md`, como *ejemplo* de investigación. Esta entrada

@@ -408,6 +408,44 @@ describe('OnlineService', () => {
     expect(calcularDto.cuentaId).toBeUndefined();
   });
 
+  it("pagar: fuerza canal 'online' aunque el body diga otra cosa", async () => {
+    // Mismo peligro que el `cuentaId` de arriba, en la otra punta: el `canal`
+    // decide qué promociones aplican, y este camino AUTORIZA el cargo contra la
+    // tarjeta con el total que sale de este cálculo. Un navegador mandando
+    // `'fisico'` colaría una promo que solo rige en el local, mientras el
+    // callback persiste la venta con canal `'online'` — otro total.
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([
+      { metodoPagoId: 'mp-credito', nombre: 'Crédito', habilitada: true },
+    ]);
+    pagosRedirect.iniciar.mockResolvedValue({
+      ordenId: 'orden-5',
+      urlWebpay: 'https://webpay/redirect',
+    });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', {
+      ...dto,
+      canal: 'fisico',
+    });
+
+    const [, calcularDto] = calculo.calcular.mock.calls[0] as [
+      string,
+      { canal?: string },
+    ];
+    expect(calcularDto.canal).toBe('online');
+  });
+
+  it("checkout: fuerza canal 'online' aunque el body diga otra cosa", async () => {
+    await service.checkout(TENANT_ID, { ...dto, canal: 'fisico' });
+
+    const [, calcularDto] = calculo.calcular.mock.calls[0] as [
+      string,
+      { canal?: string },
+    ];
+    expect(calcularDto.canal).toBe('online');
+  });
+
   it('resultadoOrden: mapea a { estado, ventaId, detalle del pago }', async () => {
     pagosRedirect.obtenerResultado.mockResolvedValue({
       ordenId: 'orden-1',

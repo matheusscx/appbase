@@ -7,6 +7,8 @@ import {
   Min,
   Max,
   IsNumberString,
+  IsOptional,
+  IsBoolean,
 } from 'class-validator';
 import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -73,4 +75,13 @@ export class UpdatePreferenciasFinancierasDto {
   @IsDecimalNoNegativo()
   @EsMontoCobrado()
   umbralDescuadreAlto: string;
+
+  /**
+   * Si una promo puede convivir con un descuento en la misma línea o venta.
+   * Opcional para no romper clientes que aún no la envían: omitida, el
+   * service la persiste como `false` (el default de la columna).
+   */
+  @IsOptional()
+  @IsBoolean()
+  promosAcumulanDescuentos?: boolean;
 }

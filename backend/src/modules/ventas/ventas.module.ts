@@ -19,6 +19,7 @@ import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
+import { VentaPromocion } from './entities/venta-promocion.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
 import { TipoDocumentoTributario } from './entities/tipo-documento-tributario.entity';
 import { PasarelaModule } from '../pasarela/pasarela.module';
@@ -32,6 +33,7 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
       VentaDescuento,
       VentaRecargo,
       VentaImpuesto,
+      VentaPromocion,
       VentaCustomer,
       TipoDocumentoTributario,
     ]),

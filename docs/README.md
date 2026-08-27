@@ -41,6 +41,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [configuracion-monedas.md](./features/configuracion-monedas.md) | Monedas por tenant (multi-moneda + tasa de cambio) |
 | [preferencias-financieras.md](./features/preferencias-financieras.md) | Preferencias financieras (modos de cálculo, fórmula de precios) |
 | [descuentos-recargos.md](./features/descuentos-recargos.md) | Descuentos/recargos — formularios dinámicos por tipo de regla |
+| [motor-promociones.md](./features/motor-promociones.md) | Promociones (2x1/NxM, happy hour %, combo a precio fijo) — evaluador puro, interruptor de tenant, congelado propio |
 | [motor-calculo-precios.md](./features/motor-calculo-precios.md) | Motor de cálculo de precios (neto → pasos → total) |
 | [inventario-kardex.md](./features/inventario-kardex.md) | Kardex de movimientos de stock |
 | [inventario-serializado.md](./features/inventario-serializado.md) | Inventario por serie y por lote (`modo_inventario`) |

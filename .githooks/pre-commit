@@ -106,13 +106,19 @@ fi
 # solo-frontend.
 #
 # El recibo ata la revisión a ESTE diff: si cambiás algo después de revisar, el
-# hash deja de coincidir y hay que revisar de nuevo. Vive en .git/ — no se
-# commitea y muere con el clone.
+# hash deja de coincidir y hay que revisar de nuevo. Vive en el git-dir — no se
+# commitea y muere con el clone. La ruta se resuelve con `git rev-parse
+# --git-dir` y no con `.git/` literal porque en un worktree `.git` es un
+# ARCHIVO (gitfile): el literal no se podía ni leer ni escribir, así que el
+# gate bloqueaba ahí sin salida (medido 2026-08-27). Cada worktree tiene su
+# git-dir propio, o sea su recibo propio — que es lo correcto: el recibo es
+# del diff staged de ESE checkout.
 needs_review=$(git diff --cached --name-only --diff-filter=ACM \
                | grep -E 'backend/src/.*\.service\.ts$|frontend/app/(pages|components)/.*\.vue$' || true)
 
 if [ -n "$needs_review" ]; then
-  recorded=$(cat .git/verify-feature.receipt 2>/dev/null || echo '')
+  receipt_file="$(git rev-parse --git-dir)/verify-feature.receipt"
+  recorded=$(cat "$receipt_file" 2>/dev/null || echo '')
   actual=$(git diff --cached | git hash-object --stdin)
   if [ "$actual" != "$recorded" ]; then
     red "✗ Este diff no pasó la revisión independiente (verify-feature paso 7)."
@@ -120,7 +126,7 @@ if [ -n "$needs_review" ]; then
     ylw "  Archivos que la exigen:"
     echo "$needs_review" | sed 's/^/    /'
     ylw "  Corré el skill verify-feature. Al cerrar en LIMPIO deja el recibo con:"
-    ylw "    git diff --cached | git hash-object --stdin > .git/verify-feature.receipt"
+    ylw "    git diff --cached | git hash-object --stdin > \"\$(git rev-parse --git-dir)/verify-feature.receipt\""
     fail=1
   fi
 fi

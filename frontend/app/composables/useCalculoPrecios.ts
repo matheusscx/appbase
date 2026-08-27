@@ -29,6 +29,14 @@ export interface CalcularVentaInput {
    * cobrado con descuento.
    */
   cuentaId?: string
+  /**
+   * Canal de la venta, para las promociones que rigen en uno solo. Default
+   * `'fisico'` en el backend. Solo la Tienda lo manda —`'online'`— en su
+   * previsualización: los dos caminos que COBRAN (`ventas.service.ts` y
+   * `OnlineService.prepararLineasCheckout`) lo pisan con el canal real, así
+   * que acá solo puede mentir en pantalla, nunca en lo cobrado.
+   */
+  canal?: 'fisico' | 'online'
 }
 
 export interface TrazaRegla {
@@ -38,6 +46,26 @@ export interface TrazaRegla {
 }
 export interface TrazaImpuesto extends TrazaRegla {
   tasa: string
+}
+
+/**
+ * Lo que una promoción restó EN ESTA línea. Familia propia y no una
+ * `TrazaRegla` más: el ticket y el drawer la muestran NOMBRADA
+ * (`2x1 martes  −$5.000`), separada de los descuentos de catálogo, aunque su
+ * monto haya entrado en el mismo `descuentoAplicado`.
+ *
+ * `aplicacion` agrupa 1-based POR PROMO: dos grupos de un 2x1 sobre la misma
+ * línea son `1` y `2`.
+ */
+export interface TrazaPromo {
+  /** `promocionId`. */
+  id: string
+  nombre: string
+  /** `'porcentaje' | 'nxm' | 'precio_fijo'`. */
+  tipo: string
+  monto: string
+  valorEfectivo: string
+  aplicacion: number
 }
 
 /**
@@ -64,6 +92,8 @@ export interface ResultadoLinea {
     descuentos: TrazaRegla[]
     recargos: TrazaRegla[]
     impuestos: TrazaImpuesto[]
+    /** Las promos que restaron en esta línea. Ver `TrazaPromo`. */
+    promociones: TrazaPromo[]
   }
   /** Descuentos topeados por el piso en cero en esta línea. */
   advertencias: AdvertenciaPrecio[]

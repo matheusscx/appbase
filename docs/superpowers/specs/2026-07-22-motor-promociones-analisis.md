@@ -1,12 +1,20 @@
 # Análisis: Motor de promociones
 
-**Status**: Alcance de Fase 1 CERRADO — falta diseñar la arquitectura (tablas +
-evaluador). Todavía NO es plan ejecutable.
-**Dónde se reclama**: [`pendientes.md`](../../agent/pendientes.md) § 3. ⚠️ Estuvo **huérfano
-hasta el 2026-08-23** —ningún backlog lo nombraba— y por eso se lo dio por perdido más de una
-vez. Si este documento vuelve a quedar sin entrada que lo reclame, se pierde otra vez.
+**Status**: ✅ **PROMOVIDO** (2026-08-27) a
+[`2026-08-27-motor-promociones-design.md`](2026-08-27-motor-promociones-design.md), que a su
+vez se implementó — ver [`docs/features/motor-promociones.md`](../../features/motor-promociones.md)
+y [ADR-023](../../adr/023-promociones-familia-propia-del-motor.md). Este documento queda como
+el análisis de origen, no como el estado vigente: el alcance de Fase 1 que cierra acá es la
+autoridad sobre **qué** se decidió construir, pero la arquitectura y el detalle de lo
+construido viven en el diseño y en el feature doc, no acá.
+**Dónde se reclama**: [`pendientes.md`](../../agent/pendientes.md) § 3, con la nota de
+2026-08-27 de que el frente ya tiene diseño e implementación y solo le falta el gate con
+stack. ⚠️ Estuvo **huérfano hasta el 2026-08-23** —ningún backlog lo nombraba— y por eso se lo
+dio por perdido más de una vez. Si este documento vuelve a quedar sin entrada que lo reclame,
+se pierde otra vez.
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-22
+**Last Updated**: 2026-08-27 (header actualizado al promoverse; el cuerpo del análisis es el
+original del 2026-07-22 y no se reescribió)
 
 > Documento de exploración. Captura el mapa de casos, la investigación de
 > mercado, las decisiones ya tomadas y las preguntas abiertas. Cuando el

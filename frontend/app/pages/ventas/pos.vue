@@ -5,7 +5,7 @@ import { personalizacionVacia, type PersonalizacionPayload } from '~/composables
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
-import { agregarImpuestosVenta, type PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
+import { agregarImpuestosVenta, agregarPromocionesVenta, type PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { fetchPorcentajeSugeridoVenta, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 
@@ -268,6 +268,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
           }),
           totales: resultadoVenta.totales,
           impuestos: agregarImpuestosVenta(resultadoVenta.lineas),
+          promociones: agregarPromocionesVenta(resultadoVenta.lineas),
           pagos: pagos.map((p) => ({
             nombre: metodos.value.find((m) => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
             monto: p.monto,
