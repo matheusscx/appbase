@@ -78,6 +78,18 @@ export interface AplicacionPromo {
 
 const ZERO = new Decimal(0);
 
+/**
+ * Candidata interna del greedy — no se expone, `evaluarPromos` la traduce a
+ * `AplicacionPromo[]` al final. Además de la aplicación pública, lleva
+ * cuántas unidades DISCRETAS consume de cada línea (`unidadesPorLinea`): el
+ * greedy arbitra por CONTEO, no por presencia/ausencia de la línea — ver el
+ * docblock de `evaluarPromos`.
+ */
+interface CandidataGreedy {
+  aplicacion: AplicacionPromo;
+  unidadesPorLinea: { lineaIndex: number; unidades: number }[];
+}
+
 // ── Ventana / elegibilidad ───────────────────────────────────────────────────
 
 /**
@@ -140,14 +152,22 @@ function perteneceAScope(
  * diferencia de `nxm`, que emite una aplicación por grupo — ver `evaluarNxm`):
  * un 20% no tiene "grupos" que repetir, es el mismo porcentaje sobre cada
  * línea que entra.
+ *
+ * Para el greedy de `evaluarPromos`, esta candidata pide la línea ENTERA
+ * (`⌊cantidad⌋` unidades) de cada línea que toca — no unidades sueltas, sigue
+ * sin operar por unidad. Consecuencia: si otra promo ya consumió parte de esa
+ * línea (ej. un `nxm` que tomó 2 de un bar con `cantidad`=3), esta candidata
+ * no entra aunque quede una unidad libre — limitación aceptada, documentada
+ * en `evaluarPromos`.
  */
 function evaluarPorcentaje(
   promo: PromoElegible,
   scope: ScopePromoResuelto,
   lineas: LineaPromo[],
-): AplicacionPromo[] {
+): CandidataGreedy[] {
   const valor = new Decimal(promo.valorPorcentaje as string);
   const montosPorLinea: { lineaIndex: number; monto: string }[] = [];
+  const unidadesPorLinea: { lineaIndex: number; unidades: number }[] = [];
 
   for (const linea of lineas) {
     if (!perteneceAScope(scope, linea)) continue;
@@ -156,17 +176,24 @@ function evaluarPorcentaje(
     const monto = valor.times(linea.netoUnitario).times(linea.cantidad);
     if (monto.greaterThan(ZERO)) {
       montosPorLinea.push({ lineaIndex: linea.index, monto: monto.toString() });
+      unidadesPorLinea.push({
+        lineaIndex: linea.index,
+        unidades: new Decimal(linea.cantidad).floor().toNumber(),
+      });
     }
   }
 
   if (montosPorLinea.length === 0) return [];
   return [
     {
-      promocionId: promo.id,
-      nombre: promo.nombre,
-      tipo: promo.tipo,
-      valorEfectivo: promo.valorPorcentaje as string,
-      montosPorLinea,
+      aplicacion: {
+        promocionId: promo.id,
+        nombre: promo.nombre,
+        tipo: promo.tipo,
+        valorEfectivo: promo.valorPorcentaje as string,
+        montosPorLinea,
+      },
+      unidadesPorLinea,
     },
   ];
 }
@@ -197,12 +224,20 @@ interface UnidadNxm {
  * sola, a diferencia de `porcentaje`): 4 cervezas en el 2x1 son 2 aplicaciones,
  * cada una con su propia línea beneficiada — así lo pide la spec (§El
  * evaluador) y así lo espera el desglose de venta, que nombra cada aplicación.
+ *
+ * Para el greedy, cada candidata pide las unidades de TODO su grupo, no solo
+ * de la barata que aparece en `montosPorLinea`: la "cara" del grupo no recibe
+ * descuento, pero igual ocupa una unidad física — si no se contara, otra
+ * candidata podría creerla libre y pisarla. Cuando el grupo cae entero dentro
+ * de la MISMA línea (ej. una línea con `cantidad`='4' y `cadaN`=2), dos
+ * grupos de esa línea piden 2+2 unidades — el greedy por conteo (no por
+ * presencia de línea) los deja convivir sin chocar entre sí.
  */
 function evaluarNxm(
   promo: PromoElegible,
   scope: ScopePromoResuelto,
   lineas: LineaPromo[],
-): AplicacionPromo[] {
+): CandidataGreedy[] {
   const cadaN = promo.cadaN as number;
   const valor = new Decimal(promo.valorPorcentaje as string);
 
@@ -224,7 +259,7 @@ function evaluarNxm(
   });
 
   const gruposCompletos = Math.floor(unidades.length / cadaN);
-  const aplicaciones: AplicacionPromo[] = [];
+  const candidatas: CandidataGreedy[] = [];
 
   for (let g = 0; g < gruposCompletos; g++) {
     const inicio = g * cadaN;
@@ -233,19 +268,28 @@ function evaluarNxm(
     const barata = grupo[grupo.length - 1];
     const monto = valor.times(barata.neto);
     if (monto.greaterThan(ZERO)) {
-      aplicaciones.push({
-        promocionId: promo.id,
-        nombre: promo.nombre,
-        tipo: promo.tipo,
-        valorEfectivo: promo.valorPorcentaje as string,
-        montosPorLinea: [
-          { lineaIndex: barata.lineaIndex, monto: monto.toString() },
-        ],
+      const conteo = new Map<number, number>();
+      for (const u of grupo) {
+        conteo.set(u.lineaIndex, (conteo.get(u.lineaIndex) ?? 0) + 1);
+      }
+      candidatas.push({
+        aplicacion: {
+          promocionId: promo.id,
+          nombre: promo.nombre,
+          tipo: promo.tipo,
+          valorEfectivo: promo.valorPorcentaje as string,
+          montosPorLinea: [
+            { lineaIndex: barata.lineaIndex, monto: monto.toString() },
+          ],
+        },
+        unidadesPorLinea: [...conteo.entries()].map(
+          ([lineaIndex, unidades]) => ({ lineaIndex, unidades }),
+        ),
       });
     }
   }
 
-  return aplicaciones;
+  return candidatas;
 }
 
 // ── `precio_fijo` (combo) ────────────────────────────────────────────────
@@ -272,11 +316,16 @@ function evaluarNxm(
  *
  * El descuento de cada combo se reparte entre las líneas que aportaron
  * unidades, a prorrata del neto aportado — ver `repartirDescuentoCombo`.
+ *
+ * Para el greedy, cada candidata pide las unidades que efectivamente tomó de
+ * cada línea (conteo, no solo la línea): dos combos repetidos sobre líneas de
+ * `cantidad`=2 (una por slot) piden 1+1 cada uno, y el conteo los deja
+ * convivir sin que el segundo choque con el primero por compartir `lineaIndex`.
  */
 function evaluarPrecioFijo(
   promo: PromoElegible,
   lineas: LineaPromo[],
-): AplicacionPromo[] {
+): CandidataGreedy[] {
   const valorMonto = new Decimal(promo.valorMonto as string);
 
   const pools = promo.scopes.map((scope) => {
@@ -298,7 +347,7 @@ function evaluarPrecioFijo(
     return { cantidad: scope.cantidad, unidades, cursor: 0 };
   });
 
-  const aplicaciones: AplicacionPromo[] = [];
+  const candidatas: CandidataGreedy[] = [];
 
   for (;;) {
     const tomas: UnidadNxm[][] = [];
@@ -324,26 +373,36 @@ function evaluarPrecioFijo(
     for (const pool of pools) pool.cursor += pool.cantidad;
 
     const pesosPorLinea = new Map<number, Decimal>();
+    const conteoPorLinea = new Map<number, number>();
     for (const u of unidadesCombo) {
       pesosPorLinea.set(
         u.lineaIndex,
         (pesosPorLinea.get(u.lineaIndex) ?? ZERO).plus(u.neto),
+      );
+      conteoPorLinea.set(
+        u.lineaIndex,
+        (conteoPorLinea.get(u.lineaIndex) ?? 0) + 1,
       );
     }
     const aportes = [...pesosPorLinea.entries()]
       .map(([lineaIndex, peso]) => ({ lineaIndex, peso }))
       .sort((a, b) => a.lineaIndex - b.lineaIndex);
 
-    aplicaciones.push({
-      promocionId: promo.id,
-      nombre: promo.nombre,
-      tipo: promo.tipo,
-      valorEfectivo: promo.valorMonto as string,
-      montosPorLinea: repartirDescuentoCombo(descuento, aportes),
+    candidatas.push({
+      aplicacion: {
+        promocionId: promo.id,
+        nombre: promo.nombre,
+        tipo: promo.tipo,
+        valorEfectivo: promo.valorMonto as string,
+        montosPorLinea: repartirDescuentoCombo(descuento, aportes),
+      },
+      unidadesPorLinea: [...conteoPorLinea.entries()].map(
+        ([lineaIndex, unidades]) => ({ lineaIndex, unidades }),
+      ),
     });
   }
 
-  return aplicaciones;
+  return candidatas;
 }
 
 /**
@@ -396,42 +455,60 @@ function repartirDescuentoCombo(
  * instante): una promo con `ventana.canal` fijado que no coincide con el
  * canal de la venta queda fuera entera, antes de mirar sus líneas.
  *
- * **Conflicto greedy entre promos.** Cada promo genera sus candidatas de
- * forma INDEPENDIENTE (`evaluarPorcentaje`/`evaluarNxm`/`evaluarPrecioFijo`
- * no saben nada de las otras promos ni del resultado del greedy). Todas las
- * candidatas de TODAS las promos se juntan en una sola lista y se ordenan
- * por monto total DESCENDENTE — desempate por `id` de promo ascendente, y si
- * aun así empatan, por el orden en que se generaron. Se recorren en ese
- * orden marcando qué líneas quedan tomadas; una candidata que pisa una línea
- * ya tomada se descarta ENTERA (no se recorta ni se regenera parcial —
- * simplicidad F1, ver más abajo). El greedy compite también ENTRE TIPOS
- * distintos (un 2x1 y una happy hour por la misma unidad, por ejemplo).
+ * **Conflicto greedy entre promos, por CONTEO de unidades.** Cada promo
+ * genera sus candidatas de forma INDEPENDIENTE (`evaluarPorcentaje`/
+ * `evaluarNxm`/`evaluarPrecioFijo` no saben nada de las otras promos ni del
+ * resultado del greedy) — pero cada candidata interna sabe cuántas unidades
+ * DISCRETAS consume de cada línea (no solo qué líneas toca). Las unidades de
+ * una línea son fungibles (mismo ítem, mismo neto), así que no hace falta
+ * identidad por unidad física: alcanza con un CONTADOR de unidades
+ * consumidas por línea. `porcentaje` sigue operando a nivel línea completa
+ * (sin cambio de semántica): su candidata pide `⌊cantidad⌋` — la línea
+ * entera —, así que solo entra si esa línea tiene CERO unidades consumidas
+ * todavía.
+ *
+ * Todas las candidatas de TODAS las promos se juntan en una sola lista y se
+ * ordenan por monto total DESCENDENTE — desempate por `id` de promo
+ * ascendente, y si aun así empatan, por el orden en que se generaron. Se
+ * recorren en ese orden: una candidata entra si, en TODAS sus líneas,
+ * `consumidas + necesarias <= ⌊cantidad⌋` de esa línea; si entra, suma sus
+ * unidades al contador de cada línea que tocó. Si no entra, se descarta
+ * ENTERA (no se recorta ni se regenera parcial — simplicidad F1, ver más
+ * abajo). El greedy compite tanto ENTRE TIPOS distintos (un 2x1 y una happy
+ * hour por la misma unidad) como DENTRO de la misma promo: dos grupos `nxm`
+ * de una única línea con `cantidad`='4' y `cadaN`=2 piden 2+2 unidades de esa
+ * línea y conviven sin chocar (antes, con conflicto por LÍNEA en vez de por
+ * conteo, el segundo grupo se descartaba por completo — bug medido: $5.000
+ * de descuento en vez de $10.000 en ese escenario).
  *
  * **No se busca un óptimo global**: una combinación distinta de aplicaciones
  * podría dejar más descuento total sobre la mesa. La regla es "gana la de
  * mayor descuento", no la mejor combinación posible — eso es intencional
  * (simplicidad F1), no un defecto a corregir.
  *
- * El chequeo de conflicto es por LÍNEA, no por unidad física dentro de la
- * línea: `AplicacionPromo` no distingue qué unidad concreta tomó cada
- * aplicación de una línea con `cantidad` > 1 (solo trae `lineaIndex` +
- * monto), así que es el grano más fino que se puede arbitrar entre promos
- * DISTINTAS acá. Dentro de una misma promo esto no genera falsos choques en
- * los casos que cubre este evaluador —cada grupo de `nxm` y cada combo de
- * `precio_fijo` avanzan sus propios cursores sin repetir unidades—, salvo
- * un caso no cubierto: una única línea con `cantidad` grande que alimenta
- * DOS aplicaciones de la MISMA promo (ej. 4 cervezas en una sola línea,
- * `nxm` cada 2) generaría dos candidatas con el mismo `lineaIndex`, y la
- * segunda se descartaría por chocar con la primera. Es una limitación
- * conocida de esta simplicidad F1, no algo que este evaluador resuelva.
+ * **Limitación aceptada (F1):** como `porcentaje` pide la línea ENTERA, una
+ * línea PARCIALMENTE consumida por otra promo (ej. un bar con `cantidad`=3
+ * donde un `nxm` ya tomó 2 unidades) queda COMPLETA e indisponible para
+ * `porcentaje`, aunque en teoría podría descontar solo la unidad libre —
+ * `porcentaje` no opera por unidad, así que no hay forma de ofrecerle "una
+ * parte" de la línea sin cambiarle la semántica. Coherente con "no busca
+ * óptimo global": se acepta la plata que se deja sobre la mesa acá.
  */
 export function evaluarPromos(input: {
   promos: PromoElegible[];
   lineas: LineaPromo[];
   canal: 'fisico' | 'online';
 }): AplicacionPromo[] {
+  const capacidadPorLinea = new Map<number, number>();
+  for (const linea of input.lineas) {
+    capacidadPorLinea.set(
+      linea.index,
+      new Decimal(linea.cantidad).floor().toNumber(),
+    );
+  }
+
   const candidatas: {
-    aplicacion: AplicacionPromo;
+    candidata: CandidataGreedy;
     monto: Decimal;
     promoId: string;
     orden: number;
@@ -443,7 +520,7 @@ export function evaluarPromos(input: {
       continue;
     }
 
-    let generadas: AplicacionPromo[] = [];
+    let generadas: CandidataGreedy[] = [];
     switch (promo.tipo) {
       case 'porcentaje': {
         const scope = promo.scopes[0];
@@ -460,13 +537,13 @@ export function evaluarPromos(input: {
         break;
     }
 
-    for (const aplicacion of generadas) {
-      const monto = aplicacion.montosPorLinea.reduce(
+    for (const candidata of generadas) {
+      const monto = candidata.aplicacion.montosPorLinea.reduce(
         (a, m) => a.plus(m.monto),
         ZERO,
       );
       candidatas.push({
-        aplicacion,
+        candidata,
         monto,
         promoId: promo.id,
         orden: orden++,
@@ -481,13 +558,25 @@ export function evaluarPromos(input: {
     return a.orden - b.orden;
   });
 
-  const lineasTomadas = new Set<number>();
+  const consumidasPorLinea = new Map<number, number>();
   const resultado: AplicacionPromo[] = [];
-  for (const { aplicacion } of candidatas) {
-    const indices = aplicacion.montosPorLinea.map((m) => m.lineaIndex);
-    if (indices.some((i) => lineasTomadas.has(i))) continue;
-    indices.forEach((i) => lineasTomadas.add(i));
-    resultado.push(aplicacion);
+  for (const { candidata } of candidatas) {
+    const alcanza = candidata.unidadesPorLinea.every(
+      ({ lineaIndex, unidades }) => {
+        const capacidad = capacidadPorLinea.get(lineaIndex) ?? 0;
+        const consumidas = consumidasPorLinea.get(lineaIndex) ?? 0;
+        return consumidas + unidades <= capacidad;
+      },
+    );
+    if (!alcanza) continue;
+
+    for (const { lineaIndex, unidades } of candidata.unidadesPorLinea) {
+      consumidasPorLinea.set(
+        lineaIndex,
+        (consumidasPorLinea.get(lineaIndex) ?? 0) + unidades,
+      );
+    }
+    resultado.push(candidata.aplicacion);
   }
 
   return resultado;

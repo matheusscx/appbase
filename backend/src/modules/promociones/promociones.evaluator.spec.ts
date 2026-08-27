@@ -391,6 +391,22 @@ describe('evaluarPromos — nxm', () => {
     // "más barata" del grupo (última tras ordenar) es siempre la de mayor índice.
     expect(montos(res)).toEqual([{ lineaIndex: 1, monto: '3000' }]);
   });
+
+  it('UNA línea con cantidad=4 y cadaN=2 → 2 aplicaciones (no chocan entre sí, greedy por conteo)', () => {
+    const p = nxmPromo();
+    const l = linea({ index: 0, netoUnitario: '5000', cantidad: '4' });
+    const res = evaluarPromos({ promos: [p], lineas: [l], canal: 'fisico' });
+
+    // 4 unidades / cadaN=2 = 2 grupos completos, ambos con la misma línea
+    // (es la única disponible): $5.000 cada uno, $10.000 en total. Con el
+    // greedy anterior (conflicto por LÍNEA, no por conteo de unidades) el
+    // segundo grupo se descartaba por "chocar" con el primero pese a usar
+    // unidades físicas distintas — bug medido, esto lo fija.
+    expect(res).toHaveLength(2);
+    expect(res[0].montosPorLinea).toEqual([{ lineaIndex: 0, monto: '5000' }]);
+    expect(res[1].montosPorLinea).toEqual([{ lineaIndex: 0, monto: '5000' }]);
+    expect(sumaMontos(res).toString()).toBe('10000');
+  });
 });
 
 function sumaMontos(res: AplicacionPromo[]): Decimal {
@@ -628,6 +644,38 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
     expect(sumaMontos([res[0]]).toString()).toBe('2500'); // 11500 − 9000
     expect(sumaMontos([res[1]]).toString()).toBe('1000'); // 10000 − 9000
   });
+
+  it('repetible con pizza y bebida en UNA sola línea cada una (cantidad=2) → 2 combos, suma exacta', () => {
+    const p = precioFijoPromo();
+    // Pizza: una línea con cantidad=2 (no dos líneas separadas). Bebida: ídem.
+    const pizza = linea({
+      index: 0,
+      itemId: 'pizza',
+      netoUnitario: '8000',
+      cantidad: '2',
+    });
+    const bebida = linea({
+      index: 1,
+      itemId: 'bebida',
+      netoUnitario: '3500',
+      cantidad: '2',
+    });
+
+    const res = evaluarPromos({
+      promos: [p],
+      lineas: [pizza, bebida],
+      canal: 'fisico',
+    });
+
+    // Cada línea aporta 2 unidades → alcanza para 2 combos (1 pizza + 1
+    // bebida cada uno). Con el greedy anterior (conflicto por LÍNEA) el
+    // segundo combo chocaba con el primero por repetir lineaIndex 0 y 1 —
+    // bug medido, esto lo fija.
+    expect(res).toHaveLength(2);
+    expect(sumaMontos([res[0]]).toString()).toBe('1510'); // 11500 − 9990
+    expect(sumaMontos([res[1]]).toString()).toBe('1510');
+    expect(sumaMontos(res).toString()).toBe('3020');
+  });
 });
 
 describe('evaluarPromos — greedy entre promos', () => {
@@ -795,5 +843,70 @@ describe('evaluarPromos — greedy entre promos', () => {
     );
     expect(new Set(indices).size).toBe(indices.length);
     expect(indices.sort()).toEqual([1, 3]);
+  });
+
+  it('conteo parcial: una promo toma 2 de una línea cantidad=3, y otro grupo (de otra promo) toma la unidad que sobra', () => {
+    // Bar: cerveza con cantidad=3 (una sola línea), refresco con cantidad=1.
+    const cerveza = linea({
+      index: 0,
+      itemId: 'cerveza',
+      netoUnitario: '5000',
+      cantidad: '3',
+    });
+    const refresco = linea({
+      index: 1,
+      itemId: 'refresco',
+      netoUnitario: '4000',
+      cantidad: '1',
+    });
+
+    const promoA = nxmPromo({
+      id: 'promo-a',
+      scopes: [
+        {
+          slot: 0,
+          tipoScope: 'items',
+          categoriaId: null,
+          cantidad: 1,
+          itemIds: ['cerveza'],
+        },
+      ],
+    });
+    // Solo ve la cerveza: 3 unidades → 1 grupo completo, consume 2 de las 3
+    // ($5.000, línea 0).
+
+    const promoB = nxmPromo({
+      id: 'promo-b',
+      scopes: [
+        {
+          slot: 0,
+          tipoScope: 'items',
+          categoriaId: null,
+          cantidad: 1,
+          itemIds: ['cerveza', 'refresco'],
+        },
+      ],
+    });
+    // Ve cerveza Y refresco: 3+1 = 4 unidades → 2 grupos. El primer grupo
+    // (2 cervezas) pide las MISMAS 2 unidades que promoA — choca y se
+    // descarta. El segundo grupo (la cerveza que sobra + el refresco) solo
+    // necesita 1 unidad más de la línea 0 (lo que quedó libre) — no choca.
+
+    const res = evaluarPromos({
+      promos: [promoA, promoB],
+      lineas: [cerveza, refresco],
+      canal: 'fisico',
+    });
+
+    expect(res).toHaveLength(2);
+    const porPromo = new Map(res.map((ap) => [ap.promocionId, ap]));
+    expect(porPromo.get('promo-a')?.montosPorLinea).toEqual([
+      { lineaIndex: 0, monto: '5000' },
+    ]);
+    // El grupo de promo-b que pisaba la línea 0 entera (2 unidades) se
+    // descarta; sobrevive el que solo pedía la unidad restante + el refresco.
+    expect(porPromo.get('promo-b')?.montosPorLinea).toEqual([
+      { lineaIndex: 1, monto: '4000' },
+    ]);
   });
 });
