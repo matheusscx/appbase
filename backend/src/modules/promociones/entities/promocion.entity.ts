@@ -27,6 +27,15 @@ export type TipoPromocion = 'porcentaje' | 'nxm' | 'precio_fijo';
    OR ("tipo" = 'nxm' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NOT NULL AND "valor_monto" IS NULL)
    OR ("tipo" = 'precio_fijo' AND "valor_monto" IS NOT NULL AND "valor_porcentaje" IS NULL AND "cada_n" IS NULL)`,
 )
+/** Todo elemento de `dias_semana` entre 1 y 7 (ISO-8601, 1=lunes…7=domingo). */
+@Check(
+  'chk_promociones_dias_semana',
+  `"dias_semana" IS NULL OR "dias_semana" <@ ARRAY[1,2,3,4,5,6,7]::SMALLINT[]`,
+)
+@Check(
+  'chk_promociones_canal',
+  `"canal" IS NULL OR "canal" IN ('fisico','online')`,
+)
 export class Promocion {
   @PrimaryGeneratedColumn('uuid', { name: 'promocion_id' })
   id: string;

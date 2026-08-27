@@ -109,7 +109,14 @@ export class SuscripcionesService {
     //    un campo que ya no existe. Este comentario decía que "si dejaran de
     //    coincidir, la buena sigue siendo la de la venta"; ya no hay dos que
     //    puedan dejar de coincidir.
+    // `canal` explícito por el mismo motivo que `online.service.ts:348`: decide
+    // qué promociones aplican, y `totalFinal` de ESTE cálculo es lo que se
+    // autoriza contra la tarjeta en el paso 7. Sin el `canal`, `calcular` cae
+    // al default `'fisico'` — un conjunto de promos distinto del que la venta
+    // usa al persistirse con `canal: 'online'` en el paso 9 — y lo cobrado
+    // dejaría de coincidir con lo registrado.
     const resultado = await this.calculoPreciosService.calcular(tenantId, {
+      canal: 'online' as const,
       lineas: [{ itemId: dto.itemId, cantidad: '1' }],
     });
     const totalFinal = resultado.totales.totalFinal;

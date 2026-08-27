@@ -198,6 +198,10 @@ CREATE TABLE "tenants" (
   "nivel_redondeo"     TEXT        NOT NULL DEFAULT 'linea',   -- 'linea' | 'documento'
   "monto_tolerancia"   NUMERIC(18,6) NOT NULL DEFAULT 0,      -- tolerancia en conciliaciones
   "arqueo_ciego"       BOOLEAN     NOT NULL DEFAULT false,     -- cierre ciego: retiene el esperado durante el conteo
+  -- Si una promo puede convivir con un descuento en la misma línea o venta.
+  -- Conducta de precio, igual que fórmula y redondeo: viaja al motor por
+  -- "ConfigCalculo" y se congela en "ventas"."config_calculo".
+  "promos_acumulan_descuentos" BOOLEAN NOT NULL DEFAULT false,
   -- Umbrales del descuadre al cerrar caja. `0` DESACTIVA el nivel (al revés
   -- que "monto_tolerancia", donde 0 es "cero tolerancia"): con 0 activo
   -- cualquier peso dispararía, y un control que avisa siempre deja de avisar.
@@ -969,6 +973,74 @@ CREATE TABLE "recuento_inventario_linea" (
 CREATE UNIQUE INDEX "uq_recuento_linea_item_vivo"
   ON "recuento_inventario_linea" ("recuento_id", "item_id") WHERE "eliminado_el" IS NULL;
 
+-- Una campaña de promoción (Fase 1). El beneficio va inline: una promo tiene
+-- exactamente un beneficio, y sus columnas son las de su "tipo" — el resto
+-- NULL (CHECKs de forma: una fila no puede decir dos cosas).
+CREATE TABLE "promociones" (
+  "promocion_id"     UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"           TEXT          NOT NULL,
+  "descripcion"      TEXT,
+  "activo"           BOOLEAN       NOT NULL DEFAULT true,
+  -- Los dos NOT NULL: el guardarraíl heredado de eliminar "promocional".
+  "fecha_inicio"     DATE          NOT NULL,
+  "fecha_fin"        DATE          NOT NULL,
+  -- Franja en hora local del tenant; inicio > fin = cruza medianoche.
+  "hora_inicio"      TIME,
+  "hora_fin"         TIME,
+  "dias_semana"      SMALLINT[],   -- ISO-8601: 1=lunes…7=domingo. NULL = todos los días.
+  "canal"            TEXT,         -- 'fisico' | 'online'; NULL = ambos.
+  "tipo"             TEXT          NOT NULL,   -- 'porcentaje' | 'nxm' | 'precio_fijo'
+  "valor_porcentaje" NUMERIC(7,4),   -- decimal: 2x1 = '1.0000', "2do al 50%" = '0.5000'
+  "cada_n"           SMALLINT,
+  "valor_monto"      NUMERIC(18,4),   -- precio del conjunto en moneda oficial (precio_fijo)
+  "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ,
+  CONSTRAINT "chk_promociones_horario_paridad" CHECK (
+    ("hora_inicio" IS NULL) = ("hora_fin" IS NULL)
+  ),
+  CONSTRAINT "chk_promociones_valor_segun_tipo" CHECK (
+    ("tipo" = 'porcentaje' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NULL AND "valor_monto" IS NULL)
+    OR ("tipo" = 'nxm' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NOT NULL AND "valor_monto" IS NULL)
+    OR ("tipo" = 'precio_fijo' AND "valor_monto" IS NOT NULL AND "valor_porcentaje" IS NULL AND "cada_n" IS NULL)
+  ),
+  CONSTRAINT "chk_promociones_dias_semana" CHECK (
+    "dias_semana" IS NULL OR "dias_semana" <@ ARRAY[1,2,3,4,5,6,7]::SMALLINT[]
+  ),
+  CONSTRAINT "chk_promociones_canal" CHECK ("canal" IS NULL OR "canal" IN ('fisico','online'))
+);
+CREATE UNIQUE INDEX "uq_promociones_tenant_nombre_vivo"
+  ON "promociones" ("tenant_id", LOWER("nombre")) WHERE "eliminado_el" IS NULL;
+
+-- Un slot de la promo: qué se le pide al cliente para que aplique (N ítems,
+-- una categoría, o toda la venta).
+CREATE TABLE "promocion_scopes" (
+  "scope_id"       UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
+  "promocion_id"   UUID     NOT NULL REFERENCES "promociones" ("promocion_id"),
+  "slot"           SMALLINT NOT NULL,   -- orden del slot dentro de la promo (0-based)
+  "tipo_scope"     TEXT     NOT NULL,   -- 'items' | 'categoria' | 'venta' (todo el pedido)
+  "categoria_id"   UUID     REFERENCES "categorias" ("categoria_id"),
+  "cantidad"       SMALLINT NOT NULL DEFAULT 1,  -- unidades que pide el slot; solo significa algo en precio_fijo
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  CONSTRAINT "chk_promocion_scopes_categoria" CHECK (
+    ("tipo_scope" = 'categoria') = ("categoria_id" IS NOT NULL)
+  )
+);
+
+-- Bridge: qué ítems concretos satisfacen un scope "tipo_scope = 'items'".
+-- Molde: "descuento_metodo_pago" (PK compuesta + soft delete).
+CREATE TABLE "promocion_scope_items" (
+  "scope_id"       UUID NOT NULL REFERENCES "promocion_scopes" ("scope_id"),
+  "item_id"        UUID NOT NULL REFERENCES "items" ("item_id"),
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  PRIMARY KEY ("scope_id", "item_id")
+);
+
 -- =============================================================
 -- 8. CAJAS
 -- =============================================================
@@ -1358,6 +1430,24 @@ CREATE TABLE "ventas_impuestos" (
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
   "porcentaje_aplicado" NUMERIC(7,4),
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',
+  "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"      TIMESTAMPTZ,
+  "eliminado_el"        TIMESTAMPTZ
+);
+
+-- Congelado: qué promo aplicó, sobre qué línea, y cuánto restó. Molde:
+-- "ventas_descuentos", mismas precisiones. "aplicacion" agrupa: la aplicación
+-- Nº del 2x1 (por ejemplo) tocó estas filas.
+CREATE TABLE "ventas_promociones" (
+  "venta_promocion_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
+  "detalle_id"          UUID          NOT NULL REFERENCES "venta_detalles" ("detalle_id"),
+  "aplicacion"          SMALLINT      NOT NULL,
+  "promocion_id"        UUID          NOT NULL REFERENCES "promociones" ("promocion_id"),
+  "nombre_promocion"    TEXT          NOT NULL,
+  "tipo"                TEXT          NOT NULL,
+  "valor_efectivo"      NUMERIC(18,4) NOT NULL,
+  "monto"               NUMERIC(18,4) NOT NULL,
   "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"      TIMESTAMPTZ,
   "eliminado_el"        TIMESTAMPTZ

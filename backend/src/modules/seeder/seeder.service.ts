@@ -3333,6 +3333,23 @@ export class SeederService implements OnApplicationBootstrap {
    * Fechas 2026-01-01→2027-12-31: rango largo para cubrir la demo, pero CON
    * fin — el guardarraíl heredado de `promocional` (nunca sin fecha de
    * término) vale también acá.
+   *
+   * **Las dos nacen `activo: false` (pausadas).** Paris (…440007) es el único
+   * tenant con catálogo del seed y trece specs e2e afirman totales exactos
+   * sobre él (p. ej. `calculo-precios.e2e-spec.ts` espera `'100.000000'` /
+   * `'0.000000'` de descuento) — activar una promo de scope `'venta'` sin
+   * filtro de ítems/categoría cambia la plata de CUALQUIER venta de Paris que
+   * caiga en su franja horaria, y con `promos_acumulan_descuentos` en su
+   * default también puede anular el descuento de catálogo en vez de sumarse.
+   * El otro tenant del seed (Falabella, …440040) tiene el mismo problema: lo
+   * usan igual de specs e2e, así que no hay un tenant "libre" donde sembrarlas
+   * activas (ambos tenants del seed están comprometidos). La trampa para el
+   * próximo agente: sembrar una promo ACTIVA de scope `'venta'` —o de scope
+   * `'items'` sobre ítems que otros e2e también usan— en un tenant que corre
+   * suites ajenas rompe esas suites sin que el diff que las rompe se vea
+   * relacionado. El valor del demo no se pierde: la pantalla muestra ambas
+   * con badge "Pausada" y se activan con un clic desde
+   * `configuracion/promociones.vue`.
    */
   private async seedPromociones(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
@@ -3352,7 +3369,7 @@ export class SeederService implements OnApplicationBootstrap {
         tenantId: PARIS,
         nombre: '2x1 de la casa (martes)',
         descripcion: 'Lleva 2 y paga 1, los martes de 18:00 a 20:00.',
-        activo: true,
+        activo: false,
         fechaInicio: '2026-01-01',
         fechaFin: '2027-12-31',
         horaInicio: '18:00',
@@ -3369,7 +3386,7 @@ export class SeederService implements OnApplicationBootstrap {
         tenantId: PARIS,
         nombre: 'Happy hour 20%',
         descripcion: '20% de descuento en toda la venta, de 18:00 a 02:00.',
-        activo: true,
+        activo: false,
         fechaInicio: '2026-01-01',
         fechaFin: '2027-12-31',
         horaInicio: '18:00',

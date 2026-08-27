@@ -244,6 +244,21 @@ describe('SuscripcionesService', () => {
       ]);
     });
 
+    // El cálculo del paso 5 AUTORIZA el cargo a la tarjeta (`totalFinal` va a
+    // `cobrosServiceMock.cobrar`), y la venta del paso 9 se persiste con
+    // `canal: 'online'`. Sin `canal` explícito en la llamada del paso 5,
+    // `calcular` cae al default `'fisico'` — otro conjunto de promos que el
+    // de la venta — y lo cobrado divergiría de lo registrado. Mismo molde que
+    // `online.service.spec.ts` ("pagar: fuerza canal 'online' aunque el body
+    // diga otra cosa").
+    it("cobra con canal 'online' explícito, no el default 'fisico' del motor", async () => {
+      await service.crear(TENANT_ID, USUARIO_ID, dto);
+
+      const [, calcularDto] = calculoPreciosServiceMock.calcular.mock
+        .calls[0] as [string, { canal?: string }];
+      expect(calcularDto.canal).toBe('online');
+    });
+
     it('cobro rechazado → BadRequestException y NO crea venta/suscripción', async () => {
       cobrosServiceMock.cobrar.mockResolvedValueOnce({
         ordenId: ORDEN_ID,
