@@ -79,12 +79,23 @@ describe('Concurrencia: el pool de conexiones no se deadlockea (e2e)', () => {
     expect(item.status).toBe(201);
     itemId = (item.body as { id: string }).id;
 
-    // La ráfaga va por HTTP real: supertest levanta un listener efímero por
-    // request y N simultáneas lo tumban con ECONNRESET — fallaría siempre,
-    // por la razón equivocada (ver rbac-y-contrasena.e2e-spec.ts:330).
+    // La ráfaga va por HTTP real contra un puerto (ver rbac-y-contrasena).
+    // ⚠️ El motivo escrito acá era "supertest levanta un listener efímero por
+    // request y N simultáneas lo tumban con ECONNRESET". **Esa premisa murió el
+    // 2026-08-27**: con el bind hecho en `init()`, supertest ya no levanta ni
+    // cierra server propio (`test/setup-supertest.ts`). Si hoy la ráfaga andaría
+    // igual por supertest NO se midió, así que el arreglo se deja como está: se
+    // corrige la razón, no la conducta.
     const server = app.getHttpServer() as Server;
     if (!server.listening) {
-      await new Promise<void>((resolve) => server.listen(0, resolve));
+      // El host va explícito por la misma razón que en `setup-supertest.ts`:
+      // `listen(0)` bindea el wildcard y acá abajo se le habla a 127.0.0.1, y ese
+      // desencuentro es el `401` fantasma. Hoy este bloque no corre —`init()` ya
+      // dejó el server escuchando— pero si algún día vuelve a correr, que no reabra
+      // el agujero.
+      await new Promise<void>((resolve) =>
+        server.listen(0, '127.0.0.1', resolve),
+      );
     }
     port = (server.address() as AddressInfo).port;
   });

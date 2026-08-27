@@ -2,6 +2,8 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { type App } from 'supertest/types';
+import { type Server } from 'http';
+import { type AddressInfo } from 'net';
 import { AppModule } from './../src/app.module';
 
 describe('AppController (e2e)', () => {
@@ -24,7 +26,7 @@ describe('AppController (e2e)', () => {
   });
 
   /**
-   * El servidor de los tests escucha en `127.0.0.1`, no en el wildcard.
+   * El servidor de los tests **queda atado** a `127.0.0.1`, no al wildcard.
    *
    * Vive acá porque es la única red del arreglo de `test/setup-supertest.ts`, y
    * ese arreglo es **invisible**: si alguien saca el parche, nada se pone rojo
@@ -38,18 +40,32 @@ describe('AppController (e2e)', () => {
    * mismo puerto, y la conexión se la lleva el más específico. Si ese puerto
    * efímero lo tiene cualquier otro programa de la máquina, sus respuestas
    * pasan por nuestras. Detalle completo en el docblock de `setup-supertest.ts`.
+   *
+   * ⚠️ **Este test afirmaba la LLAMADA (`toHaveBeenCalledWith(0, '127.0.0.1')`)
+   * y por eso estaba verde con el sistema roto.** La llamada siempre ocurrió; lo
+   * que no ocurría era el bind, porque `listen` con host resuelve el nombre por
+   * `dns.lookup` y **bindea asincrónicamente** — para cuando el handle existe,
+   * supertest ya bindeó el wildcard en el mismo tick y ganó. Un espía sobre el
+   * llamado no puede ver eso. Se afirma sobre `address()`, que es el estado.
    */
-  it('el server de los tests se ata a 127.0.0.1, no al wildcard', async () => {
-    // Se afirma sobre la LLAMADA y no sobre `address()`: supertest cierra el
-    // server al terminar el request, así que después ya no tiene dirección que
-    // preguntar. Sin el parche esto sale llamado con `(0)` a secas.
-    const server = app.getHttpServer() as { listen: (...a: unknown[]) => void };
-    const espia = jest.spyOn(server, 'listen');
+  it('el server de los tests queda atado a 127.0.0.1, no al wildcard', async () => {
+    const server = app.getHttpServer() as Server;
+
+    // Antes de cualquier request: si el bind no se esperó, acá no hay dirección
+    // que preguntar (`null`) o hay una del wildcard (`::`).
+    const alIniciar = server.address() as AddressInfo | null;
+    expect(alIniciar).not.toBeNull();
+    expect(alIniciar?.address).toBe('127.0.0.1');
 
     await request(app.getHttpServer()).get('/').expect(200);
 
-    expect(espia).toHaveBeenCalledWith(0, '127.0.0.1');
-    espia.mockRestore();
+    // Y sigue siendo el MISMO puerto después del request: con la dirección ya
+    // puesta, supertest no levanta server propio y por lo tanto no lo cierra.
+    // Si lo cerrara, cada request volvería a sortear puerto y la exposición
+    // sería por request y no por archivo.
+    const trasRequest = server.address() as AddressInfo | null;
+    expect(trasRequest?.address).toBe('127.0.0.1');
+    expect(trasRequest?.port).toBe(alIniciar?.port);
   });
 
   afterEach(async () => {

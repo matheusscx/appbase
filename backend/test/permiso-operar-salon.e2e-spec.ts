@@ -419,7 +419,7 @@ describe('Salones (e2e): el encargado puede dar el permiso de operar, y solo ese
       .set('Authorization', `Bearer ${tokenAdmin}`);
     // Antes de castear: un 401 devuelve un objeto, y `.find` sobre un objeto
     // es un `TypeError` que no dice qué contestó el servidor (ver el
-    // intermitente de auth en `docs/agent/pendientes.md`).
+    // intermitente de auth, cerrado el 2026-08-27 en `docs/agent/resueltos.md`).
     expect(res.status).toBe(200);
     const fila = (res.body as GarzonResponse[]).find((g) => g.id === garzonId);
     expect(fila).toBeTruthy();

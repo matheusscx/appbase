@@ -28,7 +28,8 @@ import { CajaTestigo } from '../src/modules/caja/entities/caja-testigo.entity';
  * `docs/agent/README.md` / memoria de sesión): dos garzones nuevos (A sin
  * vínculo, B vinculado por API a `vendedor@paris.cl`) y un turno propio,
  * todo creado en `beforeAll` y limpiado en `afterAll` con status afirmado
- * (mitigación registrada del 401 intermitente, `docs/agent/pendientes.md`).
+ * (mitigación registrada del 401 intermitente, hoy cerrado en
+ * `docs/agent/resueltos.md`).
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 

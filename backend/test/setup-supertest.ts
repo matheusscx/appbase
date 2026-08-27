@@ -38,46 +38,76 @@
  * a function` del avistaje de `caja`: un body vacío no es un array.
  *
  * ────────────────────────────────────────────────────────────────────────────
- * EL ARREGLO
+ * EL ARREGLO — segunda versión. La primera NO cerraba nada.
  * ────────────────────────────────────────────────────────────────────────────
  *
- * Que el bind coincida con la dirección a la que se habla: `listen(0, '127.0.0.1')`.
- * Ahí el puerto ocupado **sí** da conflicto y el sistema entrega otro libre, en
- * vez de dejarnos con uno que contesta otro. Se parchea `serverAddress` en vez
- * de cada spec: son 50 y ninguno tiene por qué saber esto.
+ * Que el bind coincida con la dirección a la que se habla: `127.0.0.1`. Ahí el
+ * puerto ocupado **sí** da conflicto y el sistema entrega otro libre, en vez de
+ * dejarnos con uno que contesta otro.
+ *
+ * ⛔ **La primera versión parcheaba `Test.prototype.serverAddress`** —
+ * `if (!app.address()) app.listen(0, '127.0.0.1')` antes de delegar— y se dio
+ * por buena razonando que después de eso `app.address()` ya no sería null. **Es
+ * falso, y medido** (node v22.18):
+ *
+ * ```
+ * listen(0)             -> address() inmediato: {"address":"::",...}
+ * listen(0,'127.0.0.1') -> address() inmediato: null
+ *   ...tras setImmediate:                       {"address":"127.0.0.1",...}
+ * ```
+ *
+ * `listen` con host pasa por `dns.lookup` y **bindea asincrónicamente**. Así que
+ * en el mismo tick `serverAddress` seguía viendo `null`, hacía su
+ * `this._server = app.listen(0)` —**wildcard, y sincrónico**— y ganaba la
+ * carrera; cuando el lookup volvía, el handle ya existía y su bind era un no-op.
+ * Medido sobre la secuencia exacta: el server terminaba en `::`. O sea el estado
+ * vulnerable, con el parche puesto. Y como supertest cierra el server que él
+ * levantó (`test/…/test.js:141`), el sorteo de puerto se repetía **en cada
+ * request**, no una vez por archivo. Por eso el `401` volvió a las pocas horas,
+ * en cuatro specs distintos el mismo día.
+ *
+ * ✅ **Esta versión bindea donde SÍ se puede esperar el bind: `app.init()`**, que
+ * es async y que los 50 specs ya hacen `await`. Con la dirección puesta antes del
+ * primer request, el `if (!addr)` de supertest no se cumple nunca, `_server`
+ * queda `undefined` y el server no se cierra ni se re-bindea en toda la corrida.
+ * No hay carrera que perder porque no hay nada sincrónico compitiendo.
+ *
+ * 📌 La red está en `app.e2e-spec.ts` y afirma sobre `address()`, el **estado**.
+ * El test anterior espiaba la **llamada** (`toHaveBeenCalledWith(0,'127.0.0.1')`)
+ * y por eso estuvo verde todo el tiempo que el arreglo no funcionó.
  *
  * ⚠️ **No se arregla cerrando Battle.net.** Hoy es ése; mañana es cualquier
  * programa que escuche en el rango efímero, y el síntoma vuelve sin relación
  * aparente con nada.
  */
 import { appendFileSync } from 'fs';
+import { type Server } from 'http';
 import { resolve } from 'path';
 import supertest from 'supertest';
+import { NestApplication } from '@nestjs/core';
 
 const ARCHIVO = resolve(__dirname, 'tmp-401.jsonl');
 
-interface TestSupertest {
-  serverAddress: (app: AppConDireccion, path: string) => string;
-}
-interface AppConDireccion {
-  address: () => { port: number } | null;
-  listen: (puerto: number, host?: string) => unknown;
-}
+const initOriginal = NestApplication.prototype.init;
 
-const Test = (supertest as unknown as { Test: { prototype: TestSupertest } })
-  .Test;
-
-const direccionOriginal = Test.prototype.serverAddress;
-Test.prototype.serverAddress = function (
-  this: { _server?: unknown },
-  app: AppConDireccion,
-  path: string,
-): string {
-  // Adelantarse al `listen(0)` pelado de supertest: si el server todavía no
-  // escucha, lo levantamos nosotros atado a 127.0.0.1. Después su `if (!addr)`
-  // ya no se cumple y el resto de su lógica corre igual.
-  if (!app.address()) app.listen(0, '127.0.0.1');
-  return direccionOriginal.call(this, app, path);
+NestApplication.prototype.init = async function (
+  this: NestApplication,
+): Promise<NestApplication> {
+  const app = (await initOriginal.call(this)) as NestApplication;
+  const server = this.getHttpServer() as Server | undefined;
+  // `listening` es el guard de idempotencia: `init()` es idempotente en Nest y
+  // un segundo bind tiraría ERR_SERVER_ALREADY_LISTEN.
+  if (server && typeof server.listen === 'function' && !server.listening) {
+    await new Promise<void>((listo, falla) => {
+      const alFallar = (e: Error) => falla(e);
+      server.once('error', alFallar);
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', alFallar);
+        listo();
+      });
+    });
+  }
+  return app;
 };
 
 /**
@@ -116,11 +146,14 @@ proto.end = function (
     try {
       if (res && res.status === 401) {
         const url: string = this.url ?? '';
-        // La ruta, no la URL: supertest levanta un puerto efímero por request
-        // (`http://127.0.0.1:54028/api/…`), así que comparar contra la URL
-        // entera marcaba como sospechoso hasta un 401 esperado. Medido al
-        // estrenar esto: los 3 legítimos de `rbac-y-contrasena` salían
-        // marcados, o sea el filtro no filtraba nada.
+        // La ruta, no la URL: la URL trae el puerto (`http://127.0.0.1:54028/api/…`)
+        // y comparar contra ella entera marcaba como sospechoso hasta un 401
+        // esperado. Medido al estrenar esto: los 3 legítimos de
+        // `rbac-y-contrasena` salían marcados, o sea el filtro no filtraba nada.
+        // ℹ️ La premisa original era "supertest levanta un puerto efímero por
+        // request", y desde el parche de `init()` **ya no es cierta**: el puerto
+        // es uno por app. La conclusión no cambia —sigue variando entre archivos
+        // y entre corridas—, pero el motivo sí.
         let ruta = url;
         try {
           ruta = new URL(url).pathname;

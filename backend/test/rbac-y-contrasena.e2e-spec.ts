@@ -53,7 +53,8 @@ async function login(
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
     .send({ email, password });
-  // El `expect` que la entrada del 401 intermitente pide para los 23 helpers
+  // El `expect` que la entrada del 401 intermitente —cerrada el 2026-08-27,
+  // `docs/agent/resueltos.md`— pide para los 23 helpers
   // que no lo tienen: sin esto, un login fallido deja `token` en `undefined` y
   // el rojo aparece dos requests más tarde, en otra ruta.
   // 200, no 201: los dos llevan `@HttpCode(HttpStatus.OK)` explícito.
@@ -328,25 +329,36 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
      * falla con un status feo, se **cuelga**.
      */
     it('una ráfaga de 15 refresh simultáneos no traba el pool de conexiones', async () => {
-      // ⚠️ El armado va en SERIE a propósito. Montar las 15 sesiones en
-      // paralelo satura el listener efímero que supertest levanta por request y
-      // revienta con `ECONNRESET` — un rojo que no dice nada del pool y que
-      // volvería este test flaky. Lo que tiene que ser simultáneo es la ráfaga
-      // de abajo, no la preparación.
+      // ⚠️ El armado va en SERIE a propósito. El motivo escrito era que montar
+      // las 15 sesiones en paralelo saturaba el listener efímero que supertest
+      // levantaba por request y reventaba con `ECONNRESET`. **Ese listener ya no
+      // existe** (2026-08-27, `test/setup-supertest.ts`: el bind se hace una vez
+      // en `init()`), así que la razón no se sostiene y **paralelizarlo no está
+      // medido ni a favor ni en contra**. Se deja en serie porque lo que este
+      // test mide es la ráfaga de abajo, no la preparación: paralelizar el armado
+      // no compra nada y arriesga volverlo flaky por otro lado.
       const sesiones: { cookie: string }[] = [];
       for (let i = 0; i < 15; i++) {
         sesiones.push(await registrar(`rafaga-${i}`));
       }
 
-      // ⚠️ **HTTP real contra un puerto, no supertest.** `request(server)`
-      // levanta un listener efímero por llamada, y quince a la vez lo tumban
-      // con `ECONNRESET` antes de que el pool llegue a importar: el test
-      // fallaría siempre, por la razón equivocada. Con el server escuchando de
-      // verdad, las quince requests comparten el mismo proceso y lo que se mide
-      // es lo que se quiere medir.
+      // ⚠️ **HTTP real contra un puerto, no supertest.** El motivo original:
+      // `request(server)` levantaba un listener efímero por llamada y quince a la
+      // vez lo tumbaban con `ECONNRESET`, antes de que el pool llegara a importar.
+      // **Premisa muerta desde el 2026-08-27** —el bind es uno solo, hecho en
+      // `init()`—; si hoy quince por supertest andarían, no se midió. Lo que sigue
+      // valiendo sin depender de eso: con las quince requests contra el mismo
+      // puerto, lo que se mide es el pool y no el harness.
       const server = app.getHttpServer() as Server;
       if (!server.listening) {
-        await new Promise<void>((resolve) => server.listen(0, resolve));
+        // El host va explícito por la misma razón que en `setup-supertest.ts`:
+        // `listen(0)` bindea el wildcard y acá abajo se le habla a 127.0.0.1, y ese
+        // desencuentro es el `401` fantasma. Hoy este bloque no corre —`init()` ya
+        // dejó el server escuchando— pero si algún día vuelve a correr, que no reabra
+        // el agujero.
+        await new Promise<void>((resolve) =>
+          server.listen(0, '127.0.0.1', resolve),
+        );
       }
       const { port } = server.address() as AddressInfo;
 

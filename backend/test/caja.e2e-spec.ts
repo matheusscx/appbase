@@ -2151,7 +2151,8 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
      *  ENTRE el disparo del control y esta bandera —un `ds.query` del sondeo,
      *  o el propio `rollbackTransaction()`—, la request en vuelo commitea sus
      *  $1.000 y nadie los devuelve. Es mucho más angosta que la que esto
-     *  arregla (aquélla la disparaba el `401` fantasma, que está vivo) y
+     *  arregla (aquélla la disparaba el `401` fantasma, cuyo mecanismo se cerró el
+     *  2026-08-27 — `docs/agent/resueltos.md`) y
      *  cerrarla pediría leer el efectivo de la caja en el `finally` en vez de
      *  llevar bandera: más maquinaria de la que el riesgo justifica, hoy. Atarlo
      *  a "la disparé" saca $1.000 que nunca entraron cuando la request muere en

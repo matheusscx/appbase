@@ -833,9 +833,14 @@ trampa: `docs/patterns/frontend.md` §1.1.
 
 ### ❌ Test verde que no ejerce lo que dice probar
 
-Cuatro caras del mismo error, todas descubiertas **apagando el fix a mano**, nunca leyendo el
-test. Si con el fix apagado sigue verde, no prueba lo que dice: son treinta segundos y es lo
-único que separa un test real de uno decorativo.
+Cinco caras del mismo error, **ninguna descubierta leyendo el test**: cuatro apagando el fix a
+mano, y la quinta —**(e)**— porque el bug volvió estando el test verde. Si con el fix apagado
+sigue verde, no prueba lo que dice: son treinta segundos y es lo primero que hay que correr.
+
+⚠️ **Pero apagar el fix no alcanza, y (e) es el contraejemplo:** ese test **moría** con el fix
+apagado y aun así no probaba nada. El mutante confirma que el test *toca* el fix; no confirma
+que mire **el efecto** del fix. Cuando la aserción es sobre la llamada, las dos cosas se
+separan.
 
 **(a) El mock ya trae la respuesta**, así que el branch del título nunca se ejerce.
 
@@ -889,6 +894,38 @@ expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled()
 La misma aserción pasaba en verde sobre `aplicar()`, que **sí** mueve stock: buscaba un
 string que el código bajo prueba no puede producir. Antes de asertar la ausencia de algo,
 verificar que ese algo podría aparecer si el bug existiera.
+
+**(e) La aserción mira la LLAMADA, no el estado que la llamada tenía que producir.** (Salió del
+harness e2e, pero la forma no depende de eso.) Un espía prueba que pediste algo; no prueba que
+haya pasado. Si entre el llamado y el efecto hay asincronía, el test queda verde con el sistema
+roto — y encima **tapa** el bug, porque el próximo que lo lea va a creer que ese frente tiene
+red.
+
+```ts
+// MAL — el `401` fantasma del e2e (ago-2026). El arreglo llamaba
+// `app.listen(0, '127.0.0.1')`; el test afirmaba el llamado.
+expect(espia).toHaveBeenCalledWith(0, '127.0.0.1')
+
+// BIEN — afirmar el estado resultante
+expect((server.address() as AddressInfo).address).toBe('127.0.0.1')
+```
+
+`listen` con host resuelve por `dns.lookup` y **bindea asincrónicamente**: para cuando el
+handle existía, supertest ya había bindeado el wildcard en el mismo tick y ganado. El llamado
+siempre ocurrió; el bind nunca. El test estuvo verde los dos días que el arreglo no funcionó,
+y el síntoma reapareció en cuatro specs distintos sin que nada se pusiera rojo.
+
+⛔ **Y el mutante no lo habría salvado.** Sacando el parche, el espía veía `listen(0)` a secas
+y el test se ponía rojo: la receta de "apagar el fix" daba verde-rojo correcto sobre un test
+que no probaba nada. Lo que no se descubrió fue **por qué** se ponía rojo — porque cambiaba la
+llamada, no porque cambiara el bind. De ahí la regla de arriba: leer qué afirma la aserción,
+no solo si muere.
+
+⚠️ **El olor a buscar:** el sujeto de la aserción es un espía, un mock o un contador, y el
+título del test habla de un **resultado**. Si el título dice "queda atado a", "termina en",
+"se guarda", "quedó cerrado" —un estado— y la aserción dice `toHaveBeenCalledWith`, no son la
+misma afirmación. Preguntar qué API de abajo hace el trabajo y si es síncrona: cuando no lo
+es, entre la llamada y el estado hay una carrera que el espía no puede ver.
 
 **Regla:** construir el escenario de modo que **la regla bajo prueba sea la única que puede
 fallar**, y aseverar el mensaje, no sólo el status. Dos tests con títulos distintos y setup

@@ -275,12 +275,20 @@ describe('Orden de bloqueo de filas en ítems compuestos (e2e)', () => {
     );
     for (const f of filas) propuestoPorId.set(f.itemId, f.costoPropuesto);
 
-    // Por HTTP real contra un puerto bindeado: supertest levanta un listener
-    // efímero por request y varias simultáneas lo tumban con ECONNRESET —
-    // fallaría siempre, por la razón equivocada (ver concurrencia-pool:82).
+    // Por HTTP real contra un puerto bindeado (ver concurrencia-pool).
+    // ⚠️ Misma premisa muerta que allá: el listener efímero por request de
+    // supertest dejó de existir el 2026-08-27, y que la ráfaga anduviera hoy por
+    // supertest no se midió. Se corrige la razón, no la conducta.
     const server = app.getHttpServer() as Server;
     if (!server.listening) {
-      await new Promise<void>((resolve) => server.listen(0, resolve));
+      // El host va explícito por la misma razón que en `setup-supertest.ts`:
+      // `listen(0)` bindea el wildcard y acá abajo se le habla a 127.0.0.1, y ese
+      // desencuentro es el `401` fantasma. Hoy este bloque no corre —`init()` ya
+      // dejó el server escuchando— pero si algún día vuelve a correr, que no reabra
+      // el agujero.
+      await new Promise<void>((resolve) =>
+        server.listen(0, '127.0.0.1', resolve),
+      );
     }
     port = (server.address() as AddressInfo).port;
   }, 120000);

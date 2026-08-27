@@ -17,6 +17,172 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El `401` fantasma: la carrera que el primer arreglo perdía (2026-08-27)
+
+**Venía de la sección 2.** Es la **segunda** vez que esta entrada se cierra, y la primera fue
+un cierre falso: el arreglo del 2026-08-25 no bindeaba donde decía bindear. Texto verbatim de
+la entrada tal como estaba:
+
+> - [ ] **El `401` fantasma del e2e REAPARECIÓ después de darlo por cerrado** (harness de test,
+>   medido 2026-08-25 19:52) — se cerró esa misma mañana
+>   ([`resueltos.md`](resueltos.md) § *"El `401` fantasma no era nuestro"*) con
+>   `listen(0, '127.0.0.1')` en `backend/test/setup-supertest.ts`, y **volvió a aparecer a las
+>   pocas horas**, en `papelera.e2e-spec.ts` → *"la promesa de la feature: item con impuesto propio
+>   + descuento + recargo…"*: `401` donde esperaba `403`.
+>
+>   **La firma es la misma que la caracterizada**, y la caja negra la capturó entera:
+>
+> ```json
+> {"t":"2026-08-25T19:52:00.010Z","metodo":"POST",
+>  "url":"http://127.0.0.1:56561/api/items/2c9d…/restaurar",
+>  "sospechoso":true,"body":{},"texto":"",
+>  "headers":{"content-length":"0","date":"…","connection":"close"},
+>  "autorizacion":"presente(len=330)","cookie":"ausente"}
+> ```
+>
+>   Body vacío, **sin `x-powered-by`** —o sea que la respuesta no pasó por Express— y con el token
+>   presente. Y `lsof -nP -i :56561` inmediatamente después mostró el puerto tomado por el **mismo
+>   proceso** que se identificó a la mañana: `Agent` (Battle.net), en `127.0.0.1:56561`.
+>
+>   ⛔ **Lo que esto refuta es MI propio cierre, no el diagnóstico.** La causa sigue siendo la
+>   descrita —otro proceso en el rango efímero—, pero el arreglo **no la elimina**, y la entrada de
+>   `resueltos.md` afirma que sí. Eso hay que corregirlo donde se descubra, que es acá.
+>
+>   ❓ **Por qué se coló: NO SE SABE, y las dos hipótesis obvias ya están descartadas.** Se
+>   descartaron leyendo la fuente, no razonando:
+>
+>   - ⛔ **(a) Una ventana entre el `close()` de un request y el `listen()` del siguiente —
+>     REFUTADA.** `supertest/lib/test.js:63` solo asigna `this._server` **si él hizo el listen**, y
+>     `:141` solo cierra `if (server && server._handle)`. Con el guard puesto, `app.address()` ya
+>     no es null, supertest no lista, `_server` queda `undefined` y **nunca cierra**: el server
+>     queda atado a `127.0.0.1` para todo el archivo. No hay ventana que aprovechar.
+>   - ⛔ **(b) Que el server ya estuviera en el WILDCARD por un `listen` propio del spec —
+>     NO APLICA ACÁ.** Tres specs hacen `server.listen(0, cb)` sin host (`rbac-y-contrasena:349`,
+>     `concurrencia-pool:87`, `orden-locks-desfases:283`) y en ésos el guard es un no-op — pero
+>     **`papelera` no es uno de ellos**, y es el que falló. Con `maxWorkers: 1` comparten proceso,
+>     pero cada archivo tiene su propio server, así que el bind ajeno no lo explica.
+>
+>   ➕ **Reapareció TRES veces más el 2026-08-25, en specs distintos** (mismo día, corridas del
+>   gate de otros dos frentes): `liquidacion-propinas.e2e-spec.ts:484` —`401` donde esperaba
+>   `201`—, `suscripcion-precio.e2e-spec.ts:99` ídem, y `uso-reglas.e2e-spec.ts` —`401` donde
+>   esperaba `400`—. Con `papelera` van **cuatro archivos distintos**, y ninguno de los cuatro es
+>   de los que hacen `listen` sin host.
+>
+>   📌 **El de `uso-reglas` merece una nota porque es el caso que más se puede confundir:** cayó
+>   en la misma corrida en que ese archivo se estaba modificando, o sea que parecía una regresión
+>   propia. No lo era —dos pases sobre base limpia dieron 18/18—, y lo que lo delata sin correr
+>   nada es la forma: esperaba **400** y recibió **401**. El guard que ese test ejercita ya pasó
+>   la autenticación; un 401 no es "el guard decidió distinto", es "no hubo request".
+>
+>   **Eso es dato, no anécdota, y apunta en una dirección:** si fuera un bug del harness ligado a
+>   un spec, caería siempre en el mismo; que rote entre archivos sin relación es lo que se espera
+>   de un proceso ajeno tomando un puerto del rango efímero al azar. Refuerza el diagnóstico y
+>   debilita cualquier hipótesis de "algo que hace ESE spec".
+>
+>   📌 **Los tres pasaron al volver a correrlos solos sobre base limpia**, así que el criterio para
+>   no confundirlo con una regresión sigue siendo el mismo: re-correr el spec aislado. Pero eso
+>   **no lo cierra** — un intermitente no se cierra sin correrlo en loop, que es la lección que
+>   dejó el cierre falso de la mañana.
+>
+>   ➡️ **Por dónde seguir:** queda el **primer** request de un archivo, que es el único instante en
+>   que nada nuestro tiene el puerto. Medirlo es barato: registrar en la caja negra si la captura
+>   fue el primer request de su spec. Y aunque no explique éste, a los tres `listen` sin host
+>   conviene pasarles `'127.0.0.1'` igual — hoy dependen de que nadie les gane el puerto.
+
+### La causa de la reaparición: `listen` con host no bindea sincrónicamente
+
+El arreglo anterior parcheaba `Test.prototype.serverAddress`:
+
+```ts
+if (!app.address()) app.listen(0, '127.0.0.1');
+return direccionOriginal.call(this, app, path);
+```
+
+y se dio por bueno **razonando** que después de esa línea `app.address()` ya no sería `null`,
+de modo que el `if (!addr) this._server = app.listen(0)` de supertest no correría. Medido en
+node v22.18, que es lo que la entrada nunca hizo:
+
+```
+listen(0)             -> address() inmediato: {"address":"::","family":"IPv6",...}
+listen(0,'127.0.0.1') -> address() inmediato: null
+  ...tras setImmediate:                       {"address":"127.0.0.1","family":"IPv4",...}
+```
+
+`listen` con host pasa por `dns.lookup` —incluso con un literal IP— y **bindea de forma
+asincrónica**. `listen(0)` a secas no. Sobre la secuencia exacta del parche, medida entera:
+
+| Paso | `address()` después |
+|---|---|
+| nuestro `listen(0, '127.0.0.1')` | `null` |
+| el `listen(0)` de supertest, mismo tick (**no tira**, el handle todavía no existe) | `{"address":"::",…}` |
+| estado final, tras el lookup | `{"address":"::",…}` — el bind tardío encuentra el handle puesto y es un **no-op** |
+
+O sea: **el server terminaba en el wildcard, con el parche puesto.** El estado vulnerable
+exacto que el parche decía cerrar. Y como supertest cierra el server que él levantó
+(`supertest/lib/test.js:141`), el sorteo de puerto se repetía **en cada request**, no una vez
+por archivo. Eso explica por qué el síntoma volvió a las pocas horas y en cuatro specs
+distintos el mismo día.
+
+### El arreglo: bindear donde el bind se puede esperar
+
+`app.init()` es async y **los 50 specs ya lo esperan**, así que no hace falta que ninguno se
+entere de nada. `backend/test/setup-supertest.ts` parchea
+`NestApplication.prototype.init` y, después del init original, espera el bind a `127.0.0.1`.
+Con la dirección puesta antes del primer request, el `if (!addr)` de supertest no se cumple
+nunca, su `_server` queda `undefined` y **el server no se cierra ni se re-bindea**. No hay
+carrera que perder porque no queda nada sincrónico compitiendo.
+
+⚠️ El alcance de ese "no se cierra" es **por app**, no por corrida: `app.close()` del
+`afterAll`/`afterEach` lo cierra igual, y hay archivos con varias apps (`papelera` 8, `caja` 7,
+`recuentos` 5), o sea varios binds secuenciales por archivo. La conducta cambió para los 50
+specs, no solo para los que este cierre tocó: el server ahora **está escuchando de verdad**
+cuando `app.close()` corre. Medido en la suite completa: cierra sin colgarse y jest termina
+solo, sin handles abiertos.
+
+El parche de `serverAddress` se sacó: con `init()` cubriendo el caso, era código muerto que
+seguía sugiriendo que ahí estaba la defensa.
+
+➕ Los tres `listen(0, resolve)` manuales que la entrada nombraba —`rbac-y-contrasena:349`,
+`concurrencia-pool:87`, `orden-locks-desfases:283`, **líneas de ANTES del arreglo**, que es
+donde se los verificó uno por uno; el propio cambio las corrió unas pocas— llevan el host
+explícito. **Hoy ninguno corre**: los tres están detrás de un `if (!server.listening)` y
+`init()` ya dejó el server escuchando. Se corrigen igual para que no reabran el agujero si
+alguna vez vuelven a correr.
+
+### La red, y por qué la anterior no servía
+
+Ya existía un test en `app.e2e-spec.ts`, y **estuvo verde todo el tiempo que el arreglo no
+funcionó**: afirmaba la **llamada**.
+
+```ts
+expect(espia).toHaveBeenCalledWith(0, '127.0.0.1');   // ✅ pasaba: la llamada SIEMPRE ocurrió
+```
+
+Lo que no ocurría era el bind. Un espía sobre el llamado no puede ver una carrera que se
+pierde después del llamado. Ahora afirma el **estado** —`server.address().address`— antes del
+primer request y después de uno, y esa segunda mitad fija además que supertest no volvió a
+cerrar el server.
+
+**Mutante:** se restauró el archivo anterior entero (`git show HEAD:backend/test/setup-supertest.ts`),
+no una línea rota a mano — que es lo único que prueba que el test habría cazado **este** bug y
+no uno cualquiera. Rojo: `expect(alIniciar).not.toBeNull()` → `Received: null`. Restaurado,
+verde.
+
+### Lo que NO se hizo, para que nadie lo lea como más de lo que es
+
+**No se corrió en loop.** Sí se corrió **la suite e2e completa sobre base limpia** —50 suites,
+636 tests, exit 0, y `reset-db.sh --verificar` confirmando que la base no se re-sembró abajo—,
+que es lo que cubre el cambio de ciclo de vida del server en los 50 specs. Lo que no se hizo es
+repetirla muchas veces. Lo que está cerrado con evidencia es el **mecanismo**: el bind
+coincide con la dirección a la que se habla, y eso lo afirma un test de estado que falla con
+el código anterior. La ausencia del *síntoma* no está medida sobre muchas corridas.
+
+La diferencia con el cierre falso del 2026-08-25 es esa y conviene tenerla presente: aquella
+vez no había ningún test que mirara el estado, así que el arreglo pudo no funcionar sin que
+nada se pusiera rojo. Si el `401` reaparece igual, lo primero es correr
+`app.e2e-spec.ts`: si sigue verde, la causa es **otra** y esta entrada ya no es el lugar donde
+buscar.
+
 ## La pantalla simulada dejó de prometer un cargo que no hace (2026-08-26)
 
 **Venía de la sección 3.** Texto verbatim:
@@ -1507,9 +1673,20 @@ Idéntica, byte por byte, a lo capturado en el e2e.
 ### El arreglo
 
 Que el bind coincida con la dirección a la que se habla: `listen(0, '127.0.0.1')`. Ahí el
-puerto ocupado **sí** da conflicto y el sistema entrega otro libre. Se parchea
-`serverAddress` una vez, en `backend/test/setup-supertest.ts`: son 50 specs y ninguno tiene
-por qué saber esto.
+puerto ocupado **sí** da conflicto y el sistema entrega otro libre. Se parchea una vez, en
+`backend/test/setup-supertest.ts`: son 50 specs y ninguno tiene por qué saber esto.
+
+⛔ **La PRIMERA versión de este arreglo no cerraba nada, y esta sección lo afirmaba igual.**
+Parcheaba `Test.prototype.serverAddress` con
+`if (!app.address()) app.listen(0, '127.0.0.1')` antes de delegar, razonando que después de
+eso `app.address()` ya no sería `null`. **Medido el 2026-08-27: `listen` con host pasa por
+`dns.lookup` y bindea de forma asincrónica**, así que en el mismo tick supertest seguía
+viendo `null`, hacía su `listen(0)` —wildcard, sincrónico— y ganaba la carrera. El server
+terminaba en `::`, o sea el estado vulnerable, con el parche puesto. Por eso el síntoma
+reapareció a las pocas horas en cuatro specs distintos. La versión que sí bindea —en
+`app.init()`, que es async y que los 50 specs ya esperan— y la red que lo afirma sobre el
+**estado** están en la entrada *"El `401` fantasma: la carrera que el primer arreglo perdía"*
+de este mismo archivo.
 
 ⚠️ **No se arregla cerrando Battle.net.** Hoy es ése; mañana es cualquier programa que
 escuche en el rango efímero, y el síntoma vuelve sin relación aparente con nada.
