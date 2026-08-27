@@ -40,6 +40,7 @@ const mockTenant: Tenant = {
   umbralDescuadreAviso: '0',
   umbralDescuadreAlto: '0',
   arqueoCiego: false,
+  promosAcumulanDescuentos: false,
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,
@@ -611,6 +612,19 @@ describe('TenantsService', () => {
         service.getPreferenciasFinancieras('no-existe'),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('las preferencias incluyen promosAcumulanDescuentos y su default es false', async () => {
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      const result = await service.getPreferenciasFinancieras('tenant-uuid');
+
+      expect(result.promosAcumulanDescuentos).toBe(false);
+    });
   });
 
   describe('updatePreferenciasFinancieras', () => {
@@ -671,6 +685,7 @@ describe('TenantsService', () => {
           'linea',
           '2000',
           '10000',
+          false,
           'tenant-uuid',
         ],
       );
@@ -819,6 +834,7 @@ describe('TenantsService', () => {
           'documento',
           '0',
           '0',
+          false,
           'tenant-uuid',
         ],
       );
@@ -861,6 +877,29 @@ describe('TenantsService', () => {
 
       expect(r.umbralDescuadreAviso).toBe('2000');
       expect(r.umbralDescuadreAlto).toBe('0');
+    });
+
+    it('el PATCH de preferencias acepta promosAcumulanDescuentos', async () => {
+      const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager),
+      );
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      const r = await service.updatePreferenciasFinancieras('tenant-uuid', {
+        ...prefsValidas,
+        promosAcumulanDescuentos: true,
+      });
+
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('promos_acumulan_descuentos'),
+        expect.arrayContaining([true]),
+      );
+      expect(r.promosAcumulanDescuentos).toBe(true);
     });
   });
 

@@ -80,6 +80,19 @@ export class Tenant {
   arqueoCiego: boolean;
 
   /**
+   * Si una promo puede convivir con un descuento en la misma línea o venta.
+   * Conducta de precio, igual que fórmula y redondeo — viaja al motor por
+   * `ConfigCalculo` y se congela en `ventas.config_calculo`
+   * (docs/superpowers/specs/2026-08-27-motor-promociones-design.md).
+   */
+  @Column({
+    name: 'promos_acumulan_descuentos',
+    type: 'boolean',
+    default: false,
+  })
+  promosAcumulanDescuentos: boolean;
+
+  /**
    * Umbral de AVISO del descuadre al cierre, en plata de la moneda oficial. Si
    * el |diferencia| de alguna línea del arqueo lo **supera**, el cajero ve la
    * advertencia, confirma y cierra. Nunca bloquea (owner, 2026-08-23).

@@ -1413,6 +1413,7 @@ export class TenantsService {
     montoTolerancia: string;
     umbralDescuadreAviso: string;
     umbralDescuadreAlto: string;
+    promosAcumulanDescuentos: boolean;
   }> {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     if (!tenant)
@@ -1431,6 +1432,7 @@ export class TenantsService {
       montoTolerancia: tenant.montoTolerancia,
       umbralDescuadreAviso: tenant.umbralDescuadreAviso,
       umbralDescuadreAlto: tenant.umbralDescuadreAlto,
+      promosAcumulanDescuentos: tenant.promosAcumulanDescuentos,
     };
   }
 
@@ -1447,6 +1449,7 @@ export class TenantsService {
     montoTolerancia: string;
     umbralDescuadreAviso: string;
     umbralDescuadreAlto: string;
+    promosAcumulanDescuentos: boolean;
   }> {
     // Validate no duplicates (DTO only validates each element is valid, not uniqueness)
     const unique = new Set(dto.formula);
@@ -1514,14 +1517,18 @@ export class TenantsService {
       );
     }
 
+    // Opcional en el DTO para no romper clientes que aún no la envían: omitida,
+    // se persiste como `false` — el mismo default de la columna.
+    const promosAcumulanDescuentos = dto.promosAcumulanDescuentos ?? false;
+
     await this.db.transaccion(async (manager) => {
       await manager.query(
         `UPDATE tenants
          SET calculo_descuentos = $1, calculo_recargos = $2,
              escala_calculo = $3, modo_redondeo = $4, monto_tolerancia = $5,
              nivel_redondeo = $6, umbral_descuadre_aviso = $7,
-             umbral_descuadre_alto = $8
-         WHERE tenant_id = $9`,
+             umbral_descuadre_alto = $8, promos_acumulan_descuentos = $9
+         WHERE tenant_id = $10`,
         [
           dto.calculoDescuentos,
           dto.calculoRecargos,
@@ -1531,6 +1538,7 @@ export class TenantsService {
           dto.nivelRedondeo,
           dto.umbralDescuadreAviso,
           dto.umbralDescuadreAlto,
+          promosAcumulanDescuentos,
           tenantId,
         ],
       );
@@ -1561,6 +1569,7 @@ export class TenantsService {
       montoTolerancia: dto.montoTolerancia,
       umbralDescuadreAviso: dto.umbralDescuadreAviso,
       umbralDescuadreAlto: dto.umbralDescuadreAlto,
+      promosAcumulanDescuentos,
     };
   }
 }
