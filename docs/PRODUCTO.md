@@ -373,6 +373,15 @@ costo directo — solo existe en la creación del item, como costo de apertura. 
 de gestión (margen, food-cost, valorización de mermas), no la valorización tributaria de
 existencias: esa la produce el contador. Detalle y porqué: [ADR-016](./adr/016-costeo-promedio-ponderado-movil.md).
 
+**El costo se carga al comprar o en el producto — nunca al mermar.** Una merma no tiene
+campo de costo: se valoriza sola con el `costo_actual` vigente del ítem al momento de
+mermar. Si el ítem no tiene costo cargado, la merma se registra igual, sin valorizar, y
+**queda así para siempre** — no existe un camino que le ponga costo después a una merma
+vieja. Es el mismo criterio que congela el precio de una venta ya emitida, y el mismo
+principio que [ADR-010](./adr/010-preparacion-sii-datos-fiscales.md) aplica al hecho
+fiscal: el número vale lo que valía cuando el hecho ocurrió, no lo que se sabe después.
+Detalle: [`mermas-valorizadas.md`](./features/mermas-valorizadas.md).
+
 **Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos,
 FIFO o método de costeo elegible por tenant.
 

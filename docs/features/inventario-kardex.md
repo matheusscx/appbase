@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: SDD Team  
-**Last Updated**: 2026-07-26
+**Last Updated**: 2026-08-28
 
 ---
 
@@ -251,6 +251,32 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
 Delega en `InventarioService.registrarMovimiento` (ver "Regla de costo" arriba)
 dentro de una transacción: no repite sus validaciones ni escribe
 `costo_actual` directamente — ese `UPDATE` está centralizado ahí.
+
+---
+
+## Ítems sin costo: marca y filtro
+
+Un producto o ingrediente puede llegar a tener movimientos —incluso mermas— sin
+que nadie le haya cargado nunca un `costo_actual`: `costo` es opcional al crear
+el ítem y `costoUnitario` es opcional al ingresar stock por compra. Mientras
+eso no pase, **todas** sus mermas se registran sin valorizar (ver
+[`mermas-valorizadas.md`](./mermas-valorizadas.md)), porque el costo se maneja
+en el producto y nunca se tipea al mermar. El agujero no se ve mermando —ahí ya
+se perdió la mercadería—, así que la vista de conjunto vive donde se puede
+corregir antes de que duela:
+
+- `GET /items?sinCosto=true` — filtra ítems `tipo IN ('producto', 'ingrediente')`
+  cuyo `costo_actual` es `NULL`. La condición es la misma que arma la columna
+  `costoActual` de la fila (`COALESCE` sobre `item_producto`/`item_receta`/
+  `item_combo`), así que el filtro nunca queda desincronizado de lo que la
+  pantalla muestra.
+- El listado de ítems marca cada fila sin costo con un badge **Sin costo**, y
+  ofrece el checkbox **Solo sin costo** para sentarse a cargarlos todos de una.
+- El drawer de entrada por compra (`configuracion/items.vue`) muestra un
+  cartel no bloqueante cuando el producto elegido no tiene costo — el aviso
+  llega donde el dato de verdad existe (quien compra sabe cuánto pagó), sin
+  exigirlo: el owner descartó hacerlo obligatorio porque frenaría a quien
+  tiene la mercadería en la puerta y la factura no.
 
 ---
 

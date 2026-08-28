@@ -174,6 +174,19 @@ tarea pendiente.
   nadie revisa, y cada aserción nueva puede destapar un test que estaba verde sin ejercitar
   nada (le pasó a `ventas` en la barrida del token).
 
+### El residuo que dejó el frente de la merma sin costo tipeado (2026-08-28)
+
+- [ ] **`useUnidadConversion.ts` → `convertirCosto` quedó sin consumidores productivos**
+  (frontend, `frontend/app/composables/useUnidadConversion.ts:44-50`) — este frente le sacó
+  el último llamador: era el prefill del costo en `mermas.vue`, que la regla 3 de
+  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+  eliminó junto con todo el campo de costo del formulario. **Verificado con grep del repo
+  entero el 2026-08-28**: hoy solo lo referencia su propio spec
+  (`useUnidadConversion.spec.ts`), ningún `.vue` ni service lo importa. `convertirCantidad`
+  —la otra función del mismo composable— **sigue con consumidores** y no se toca. El
+  arreglo es borrar `convertirCosto` y los tests que solo prueban esa función, no el
+  composable entero.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
@@ -1109,6 +1122,23 @@ abriendo las superficies, no leyendo la entrada.
   y la acción correcta —vincular desde adentro de la sesión, en el perfil— es una feature que
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
+
+- [ ] **Regla 6 de la spec del costo sin tipear: cuando exista un reporte de mermas, tiene
+  que decir cuántas quedaron sin valorizar** (backend + producto, decisión del owner
+  2026-08-28, [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+  §2 regla 6 y §4) — **hoy no existe ningún reporte de mermas.**
+  `mermas.controller.ts` tiene solo el `GET` de listado (paginado, sin agregación) y el
+  `POST`; no hay nada que arreglar todavía.
+  ⚠️ **Ojo con cómo se lee el hueco: `costoPerdido` no es una columna.** Se deriva en la
+  lectura (`mermas.service.ts` → `mapRow`, `cantidad × costo_unitario` a la escala de
+  costo cuando `costo_unitario` no es `null`; `null` si no hay costo) — verificado
+  2026-08-28. El camino de lectura de hoy funciona sin cambios: esto no es "falta un
+  `SUM`", porque no hay ningún `SUM` roto. Es una cuenta futura que va a nacer mal si nadie
+  la avisa: el día que se construya un reporte que agregue `costoPerdido`, cualquier
+  `SUM`/promedio que simplemente ignore las filas con `costoUnitario: null` va a informar
+  **menos pérdida que la real, sin decirlo** — exactamente lo que el congelado de la regla
+  2 hace posible. **Al construir el reporte:** contar esas filas aparte (cuántas mermas
+  quedaron sin valorizar, no solo omitirlas del total).
 
 ---
 
@@ -2215,6 +2245,18 @@ La que tiene condición de reapertura la dice adentro.
   un tenant con más de 100 ítems vendibles sigue sin verlos todos en el POS. Preexistente y
   sin caso reportado; se anota para no perderlo, porque la nota anterior vivía pegada a la
   entrada del filtro que se cerró.
+
+- ℹ️ **`mermas.controller.ts` sigue aplicando `@Body(EscalaMonedaPipe)` sobre un
+  `CreateMermaDto` que ya no tiene ningún campo `@EsCosto()`** (backend, residuo del
+  frente `merma-sin-costo-tipeado`, 2026-08-28) — `CreateMermaDto` perdió su único
+  candidato (`costoUnitario`) al sacarle el campo de costo al formulario de merma (regla 3
+  de la spec del costo sin tipear, ver la entrada de la regla 6 más arriba en § 3). El pipe
+  solo dispara su consulta de escala cuando el DTO tiene algún campo marcado con
+  `@EsCosto()`/`@EsMontoCobrado`: sin ninguno, es un no-op. **Verificado 2026-08-28: es
+  inocuo, no rompe nada y no hace nada.** No se tocó a propósito —es cambio de código y el
+  frente que lo dejó así era de documentación—; se anota para que quien lo redescubra no lo
+  lea como bug nuevo. Se limpia solo, sin urgencia, la próxima vez que alguien toque ese
+  controller.
 
 ### Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
 
