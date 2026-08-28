@@ -2344,6 +2344,16 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" :decimales="4" class="w-full" />
           </UFormField>
 
+          <UAlert
+            v-if="ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'
+              && stockItem?.costoActual == null && !ajusteForm.costoUnitario"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            title="Este producto todavía no tiene costo"
+            description="Si registras la compra sin el costo, el producto queda sin valorizar: sus mermas no van a poder calcularse, y eso después no se corrige."
+          />
+
           <!-- Modo cantidad: cantidad + unidad opcional -->
           <template v-if="stockItem?.modoInventario === 'cantidad' || !stockItem?.modoInventario">
             <UFormField label="Cantidad" required>
