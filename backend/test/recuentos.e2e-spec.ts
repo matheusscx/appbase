@@ -673,6 +673,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
       .send({ itemIds });
+    expect(resCreate.status).toBe(201);
     return (resCreate.body as RecuentoCreateResponse).id;
   };
 
@@ -977,6 +978,7 @@ describe('Recuentos — aplicar (e2e)', () => {
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
       .send({ itemIds });
+    expect(resCreate.status).toBe(201);
     return (resCreate.body as RecuentoCreateResponse).id;
   };
 

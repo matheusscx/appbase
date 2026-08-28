@@ -424,6 +424,7 @@ describe('Modo personal del garzón (e2e)', () => {
           .post('/api/garzones')
           .set('Authorization', `Bearer ${tokenAdmin}`)
           .send({ nombre });
+        expect(res.status).toBe(201);
         return (res.body as { id: string }).id;
       };
       const primero = await crearGarzon(`Primero ${Date.now()}`);

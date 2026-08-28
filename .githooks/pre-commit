@@ -6,6 +6,7 @@
 #   · casing tenant_id (req.user.tenant_id → undefined)
 #   · DELETE físico en SQL raw
 #   · lint:check (eslint sin --fix) sobre los .ts de backend staged
+#   · helpers de e2e que leen el body sin mirar el status de la respuesta
 #
 # NO cubre el juicio (N+1, SELECT sin `eliminado_el IS NULL`): eso es la revisión
 # independiente por sub-agente del skill `verify-feature`, que un hook de shell no
@@ -90,6 +91,22 @@ if [ -n "$staged_md" ]; then
   # (dependencia nueva descartada).
   if ! node scripts/check-md-tables.mjs --staged ; then
     red "✗ Tabla de markdown rota en .md staged (ver arriba)."
+    fail=1
+  fi
+fi
+
+# ── Guard 7: helpers de e2e que leen el body sin mirar el status ─────────────
+# Un helper que hace `return (res.body as X).id` sin aseverar el status reparte
+# `undefined` a TODOS sus llamadores cuando la llamada falla, y el rojo aparece
+# lejos de su causa (una falla de inventario se leyó como `costoActual:
+# undefined` y se diagnosticó en el módulo equivocado). El commit 9784e1b6
+# barrió el mismo modo de falla para los tokens; este guard es para que no
+# vuelva a crecer. Chequeo propio y no un regex acá porque hay que mirar hacia
+# atrás dentro de la función, cosa que grep no hace.
+staged_e2e=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/test/*.ts')
+if [ -n "$staged_e2e" ]; then
+  if ! node scripts/check-e2e-status.mjs --staged ; then
+    red "✗ Helper de e2e que lee el body sin mirar el status (ver arriba)."
     fail=1
   fi
 fi

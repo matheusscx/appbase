@@ -84,6 +84,7 @@ async function abrirCaja(
     .post('/api/caja/abrir')
     .set('Authorization', `Bearer ${token}`)
     .send({ cajonId, saldoInicial: '10000.0000', comentario: 'Apertura E2E' });
+  expect(res.status).toBe(201);
   return (res.body as CajaResponse).id;
 }
 

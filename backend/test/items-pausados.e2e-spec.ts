@@ -78,6 +78,7 @@ async function abrirCaja(
       saldoInicial: '100000.0000',
       comentario: 'Apertura E2E ítems pausados',
     });
+  expect(res.status).toBe(201);
   return (res.body as CajaResponse).id;
 }
 

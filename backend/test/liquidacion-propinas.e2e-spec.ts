@@ -111,6 +111,7 @@ async function abrirCaja(
       saldoInicial: '10000.0000',
       comentario: 'Apertura E2E propinas',
     });
+  expect(res.status).toBe(201);
   return (res.body as { id: string }).id;
 }
 

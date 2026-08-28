@@ -117,6 +117,7 @@ async function abrirOReusarCaja(
   const resActiva = await request(app.getHttpServer())
     .get('/api/caja/activa')
     .set('Authorization', `Bearer ${token}`);
+  expect(resActiva.status).toBe(200);
   return (resActiva.body as CajaResponse).id;
 }
 
