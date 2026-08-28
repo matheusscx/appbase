@@ -39,6 +39,8 @@ interface ProductoCosto {
   id: string
   nombre: string
   costoActual: string | null
+  unidadMedida: string | null
+  modoInventario: string | null
   monedaId: string
 }
 
@@ -134,13 +136,40 @@ const ajusteCostoOpen = ref(false)
 const ajustandoCosto = ref(false)
 
 function emptyAjusteCostoForm() {
-  return { itemId: '', costoNuevo: '', comentario: '' }
+  return { itemId: '', costoNuevo: '', unidadCodigo: '', comentario: '' }
 }
 const ajusteCostoForm = ref(emptyAjusteCostoForm())
 
 const productoAjusteSeleccionado = computed(() =>
   productos.value.find(p => p.id === ajusteCostoForm.value.itemId) ?? null,
 )
+
+const unidadesAjusteOpts = computed(() => {
+  const magnitud = unidadesMedidaStore.magnitudDe(productoAjusteSeleccionado.value?.unidadMedida)
+  if (!magnitud) return []
+  return unidadesMedidaStore.unidades
+    .filter(u => u.magnitud === magnitud)
+    .map(u => ({ label: `${u.nombre} (${u.codigo})`, value: u.codigo }))
+})
+
+const mostrarSelectorUnidadAjuste = computed(() =>
+  productoAjusteSeleccionado.value?.modoInventario === 'cantidad'
+  && unidadesAjusteOpts.value.length > 1,
+)
+
+/** El costo se ingresa "por la unidad seleccionada", no por la unidad base: la
+ * precisión la da elegir la unidad, no teclear decimales que la moneda no tiene.
+ * Ver docs/superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md */
+const costoNuevoLabel = computed(() => {
+  const unidad = ajusteCostoForm.value.unidadCodigo || productoAjusteSeleccionado.value?.unidadMedida
+  return unidad ? `Costo nuevo (por ${unidad})` : 'Costo nuevo'
+})
+
+watch(() => ajusteCostoForm.value.itemId, (itemId) => {
+  const prod = productos.value.find(p => p.id === itemId)
+  if (!prod) return
+  ajusteCostoForm.value.unidadCodigo = prod.unidadMedida ?? 'unidad'
+})
 
 // Simulador de impacto de costos en recetas y combos: se dispara tras un ajuste de
 // costo exitoso, igual que tras una compra en configuracion/items.vue.
@@ -160,13 +189,20 @@ async function registrarAjusteCosto() {
   }
   ajustandoCosto.value = true
   try {
+    const body: Record<string, string> = {
+      itemId: f.itemId,
+      costoNuevo: f.costoNuevo,
+      comentario: f.comentario.trim(),
+    }
+    // Solo si difiere de la base: el DTO valida `@IsNotEmpty()`, así que una
+    // cadena vacía sería un 400.
+    const base = productoAjusteSeleccionado.value?.unidadMedida
+    if (f.unidadCodigo && f.unidadCodigo !== base) {
+      body.unidadCodigo = f.unidadCodigo
+    }
     await useApiFetch(`${apiUrl}/inventario/ajustes-costo`, {
       method: 'POST',
-      body: {
-        itemId: f.itemId,
-        costoNuevo: f.costoNuevo,
-        comentario: f.comentario.trim(),
-      },
+      body,
     })
     toast.add({ title: 'Costo ajustado', color: 'success' })
     ajusteCostoOpen.value = false
@@ -343,7 +379,19 @@ async function registrarAjusteCosto() {
                 />
               </UFormField>
 
-              <UFormField label="Costo nuevo" required>
+              <UFormField
+                v-if="mostrarSelectorUnidadAjuste"
+                label="Unidad"
+              >
+                <USelectMenu
+                  v-model="ajusteCostoForm.unidadCodigo"
+                  :items="unidadesAjusteOpts"
+                  value-key="value"
+                  class="w-full"
+                />
+              </UFormField>
+
+              <UFormField :label="costoNuevoLabel" required>
                 <MoneyInput
                   v-model="ajusteCostoForm.costoNuevo"
                   :moneda-id="productoAjusteSeleccionado?.monedaId"
