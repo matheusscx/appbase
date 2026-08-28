@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CARNE_MOLIDA_ID = '550e8400-e29b-41d4-a716-446655440257';
 const CAUSA_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -20,11 +21,14 @@ interface CausaMermaItem {
   nombre: string;
   esFijo: boolean;
 }
+interface ItemResponse {
+  id: string;
+}
 interface MermaResponse {
   movimientoId: string;
   stockResultante: string;
-  costoUnitario: string;
-  costoPerdido: string;
+  costoUnitario: string | null;
+  costoPerdido: string | null;
   causaNombre: string;
 }
 interface MermaListItem {
@@ -243,5 +247,43 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .delete(`/api/causas-merma/${roturaCausaId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(resDelete.status).toBe(400);
+  });
+
+  it('la merma de un producto sin costo se registra sin valorizar', async () => {
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Insumo sin costo E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'kg',
+      });
+    expect(resCreate.status).toBe(201);
+    const itemSinCostoId = (resCreate.body as ItemResponse).id;
+
+    // Entrada de stock SIN costoUnitario, para que costo_actual quede en NULL.
+    const resEntrada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemSinCostoId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'inventario_inicial',
+        cantidad: '5',
+      });
+    expect(resEntrada.status).toBe(200);
+
+    const resMerma = await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: itemSinCostoId,
+        cantidad: '1',
+        causaMermaId: CAUSA_VENCIMIENTO_ID,
+      });
+    expect(resMerma.status).toBe(201);
+    expect((resMerma.body as MermaResponse).costoPerdido).toBeNull();
+    expect((resMerma.body as MermaResponse).costoUnitario).toBeNull();
   });
 });
