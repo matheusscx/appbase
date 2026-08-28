@@ -189,6 +189,7 @@ describe('Salones (e2e): el encargado puede dar el permiso de operar, y solo ese
     const roles = await request(app.getHttpServer())
       .get('/api/roles')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(roles.status).toBe(200);
     const deSistema = (roles.body as Rol[]).filter((r) => r.esSistema);
     expect(deSistema).toHaveLength(1);
   });
@@ -252,6 +253,7 @@ describe('Salones (e2e): el encargado puede dar el permiso de operar, y solo ese
       const roles = await request(app.getHttpServer())
         .get('/api/roles')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(roles.status).toBe(200);
       const rol = (roles.body as Rol[]).find((r) => r.esSistema);
       expect(rol).toBeTruthy();
       // No es fijo: si lo fuera daría acceso TOTAL por el short-circuit de
@@ -312,6 +314,7 @@ describe('Salones (e2e): el encargado puede dar el permiso de operar, y solo ese
       const roles = await request(app.getHttpServer())
         .get('/api/roles')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(roles.status).toBe(200);
       const cualquiera = (roles.body as Rol[]).find(
         (r) => !r.esFijo && !r.esSistema,
       );

@@ -254,6 +254,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     const resGet = await request(app.getHttpServer())
       .get(`/api/items/${recetaId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resGet.status).toBe(200);
     // 500*1 + 8000*0.15 + 6000*0.02 = 1820
     expect((resGet.body as ItemResponse).costoActual).toBe('1820.0000');
   });
@@ -315,6 +316,7 @@ describe('Recetas — flujo completo (e2e)', () => {
           },
         ],
       });
+    expect(resReceta.status).toBe(201);
     const recetaId = (resReceta.body as ItemResponse).id;
 
     // 5. Disponible: pan floor(10/1)=10, carne floor(1000g/150g)=6 → mínimo 6.
@@ -322,6 +324,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     const resListado = await request(app.getHttpServer())
       .get('/api/items?tipo=receta&pageSize=100')
       .set('Authorization', `Bearer ${token}`);
+    expect(resListado.status).toBe(200);
     const recetaListada = (
       resListado.body as { data: ItemResponse[] }
     ).data.find((i) => i.id === recetaId);
@@ -441,6 +444,7 @@ describe('Recetas — flujo completo (e2e)', () => {
     const resPalta = await request(app.getHttpServer())
       .get(`/api/items/${paltaId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resPalta.status).toBe(200);
     expect((resPalta.body as ItemResponse).stock).toBe('4.9800');
   });
 
@@ -811,6 +815,7 @@ describe('Recetas — flujo completo (e2e)', () => {
           },
         ],
       });
+    expect(resReceta.status).toBe(201);
     const recetaId = (resReceta.body as ItemResponse).id;
 
     const resVenta = await request(app.getHttpServer())

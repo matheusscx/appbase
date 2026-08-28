@@ -262,6 +262,7 @@ describe('Salones — fusionar cuentas (e2e)', () => {
     const resCuentas = await request(app.getHttpServer())
       .get(`/api/mesas/${mesaId}/cuentas`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resCuentas.status).toBe(200);
     const abiertas = (resCuentas.body as CuentaDetalle[]).filter(
       (c) => c.estado === 'abierta',
     );
@@ -275,16 +276,19 @@ describe('Salones — fusionar cuentas (e2e)', () => {
       .post('/api/salones')
       .set('Authorization', `Bearer ${token}`)
       .send({ nombre: `Salón fusión ajena E2E ${Date.now()}` });
+    expect(resOtroSalon.status).toBe(201);
     const resOtraMesa = await request(app.getHttpServer())
       .post(`/api/salones/${(resOtroSalon.body as IdResponse).id}/mesas`)
       .set('Authorization', `Bearer ${token}`)
       .send({ nombre: 'Mesa ajena' });
+    expect(resOtraMesa.status).toBe(201);
     const ajenaMesaId = (resOtraMesa.body as IdResponse).id;
 
     const resAjena = await request(app.getHttpServer())
       .post(`/api/mesas/${ajenaMesaId}/cuentas`)
       .set('Authorization', `Bearer ${token}`)
       .send({ garzonId: garzon.id, pin: garzon.pin });
+    expect(resAjena.status).toBe(201);
     const ajena = resAjena.body as CuentaDetalle;
 
     const res = await request(app.getHttpServer())
@@ -302,6 +306,7 @@ describe('Salones — fusionar cuentas (e2e)', () => {
     const resAjenaDespues = await request(app.getHttpServer())
       .get(`/api/mesas/${ajenaMesaId}/cuentas`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resAjenaDespues.status).toBe(200);
     expect(
       (resAjenaDespues.body as CuentaDetalle[]).find((c) => c.id === ajena.id)
         ?.estado,

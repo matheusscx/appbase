@@ -114,6 +114,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
     const roles = await request(app.getHttpServer())
       .get('/api/roles')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(roles.status).toBe(200);
     rolIdParis = (roles.body as { id: string }[])[0].id;
     rolIdParisOtro = (roles.body as { id: string }[])[1].id;
 
@@ -132,6 +133,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
     const rolesFalabella = await request(app.getHttpServer())
       .get('/api/roles')
       .set('Authorization', `Bearer ${tokenFalabella}`);
+    expect(rolesFalabella.status).toBe(200);
     rolIdFalabella = (rolesFalabella.body as { id: string }[])[0].id;
   });
 

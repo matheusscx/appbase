@@ -232,6 +232,7 @@ describe('Simulador impacto costos (e2e)', () => {
     const previa = await request(app.getHttpServer())
       .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
+    expect(previa.status).toBe(200);
     const filaPrevia = (previa.body as DesfaseItemResponse[]).find(
       (r) => r.itemId === recetaId,
     );
@@ -254,6 +255,7 @@ describe('Simulador impacto costos (e2e)', () => {
     let bandeja = await request(app.getHttpServer())
       .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
+    expect(bandeja.status).toBe(200);
     expect(
       (bandeja.body as DesfaseItemResponse[]).some(
         (r) => r.itemId === recetaId,
@@ -269,6 +271,7 @@ describe('Simulador impacto costos (e2e)', () => {
     bandeja = await request(app.getHttpServer())
       .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
+    expect(bandeja.status).toBe(200);
     expect(
       (bandeja.body as DesfaseItemResponse[]).some(
         (r) => r.itemId === recetaId,
@@ -332,6 +335,7 @@ describe('Simulador impacto costos (e2e)', () => {
     const previa = await request(app.getHttpServer())
       .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
+    expect(previa.status).toBe(200);
     const visto = (previa.body as DesfaseItemResponse[]).find(
       (r) => r.itemId === recetaId,
     )?.costoPropuesto;
@@ -376,6 +380,7 @@ describe('Simulador impacto costos (e2e)', () => {
     const despues = await request(app.getHttpServer())
       .get('/api/desfases')
       .set('Authorization', `Bearer ${token}`);
+    expect(despues.status).toBe(200);
     const fila = (despues.body as DesfaseItemResponse[]).find(
       (r) => r.itemId === recetaId,
     );

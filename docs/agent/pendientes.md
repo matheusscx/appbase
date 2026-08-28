@@ -172,6 +172,16 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   de esta tanda les insertó una aserción idéntica dos líneas más arriba, y la revisión
   independiente la marcó como duplicación. Se sacaron. El detector ahora mira también las 3
   líneas siguientes al `.body`.
+  ✅ **Tercera tanda, 2026-08-28: `recetas`, `salones-fusion`, `simulador-costos`,
+  `permiso-operar-salon` y `alta-usuarios-tenant`** — 20 aserciones. Quedan **78 sitios en 27
+  archivos** por el detector; descontando los 11 que no son trabajo, **67 reales**.
+  📌 **Cuarta forma de falso NEGATIVO —y ésta esconde deuda en vez de inventarla—: la
+  variable reasignada.** `let bandeja = await request(...)` con su aserción, y más abajo
+  `bandeja = await request(...)` **sin** ninguna: el heurístico buscaba hacia atrás la
+  *declaración*, encontraba la primera y le hacía heredar su aserción. Lo levantó la revisión
+  independiente en `simulador-costos.e2e-spec.ts:271`, ya corregido. El detector ahora corta
+  en la declaración **o en la reasignación**, lo que venga primero; recontado, esa forma
+  aportaba exactamente ese sitio en todo el repo.
   📌 **Y una excepción que parecía higiene y no lo era:** el `cerrarCaja` de
   `ventas.e2e-spec.ts` corre en teardown, pero su docblock dice *"el teardown **asegura** el
   cierre en vez de ignorar el status"*. Ahí la aserción va. Lo que decide no es dónde corre
@@ -1178,9 +1188,10 @@ prohíbe.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-**Quedan cuatro abiertas** —los dos carteles de la tarjeta, la forma de importe que avisa por
-un camino y no por los otros, la nota de crédito (fiscal, frente propio) y la contradicción de
-`costo: '0'`—; el conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+**Quedan cinco abiertas** —los helpers de caja copiados en 8 specs (llegó el 2026-08-28), los
+dos carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros, la
+nota de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se
+recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 
 ⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
 memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
@@ -1254,6 +1265,28 @@ terminan en una pregunta al owner. Es exactamente el error que el párrafo de ar
 corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+- [ ] **`abrirCaja` y `cerrarCaja` están copiados en 8 specs e2e cada uno, y ya derivaron**
+  (backend/tests; **medido el 2026-08-28** barriendo la entrada de las lecturas sin status) —
+  `costeo-cpp`, `combos`, `grupos-modificadores`, `grupos-modificadores-overrides`,
+  `items-pausados`, `liquidacion-propinas`, `recetas` y `ventas` tienen cada uno su propia
+  copia. **No son idénticas** (los 8 md5 del cuerpo de `abrirCaja` difieren): `costeo-cpp`
+  afirma `expect([200, 201]).toContain(res.status)` donde las otras siete afirman
+  `toBe(201)`, y el `saldoInicial` va `100000` en seis y `10000` en `ventas`. O sea que la
+  copia **ya se está desincronizando en la conducta que verifica**, no solo en un string.
+  La convención del repo es *"duplicar dos veces es aceptable, se extrae a la tercera"* y van
+  ocho.
+  ❓ **La pregunta, que es de estructura y no de código:** un helper compartido necesita un
+  archivo nuevo en `backend/test/` —hoy no hay ninguno: cada spec es autocontenido— y
+  `CLAUDE.md` dice no crear archivos nuevos si la implementación cabe en uno existente. Acá
+  no cabe. Entonces: **(a)** `backend/test/helpers/caja.ts` (o similar) y los 8 specs lo
+  importan — el diff toca 9 archivos de una y hay que correr el e2e completo; **(b)** dejarlas
+  copiadas y anotar la deriva como aceptada. Lo que compra (a) es que la próxima diferencia
+  de conducta entre copias no pase inadvertida; lo que cuesta es un patrón nuevo en
+  `backend/test/` que después hay que sostener.
+  📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
+  agregar aserciones, no reorganizar los specs.
+
 
 - [ ] **Dos carteles más que prometen una tarjeta que ese flujo no usa** (frontend, chico;
   los levantó la revisión independiente del 2026-08-26 al cerrar el de la pantalla demo, →
