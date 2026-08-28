@@ -7,6 +7,7 @@ import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { InventarioService } from './inventario.service';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
+import { CatalogService } from '../catalog/catalog.service';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
@@ -21,10 +22,12 @@ describe('InventarioService', () => {
   let service: InventarioService;
   let managerMock: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
+  let catalogService: { convertirUnidad: jest.Mock };
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
     dataSource = { query: jest.fn(), transaction: jest.fn() };
+    catalogService = { convertirUnidad: jest.fn() };
     // Delega en `dataSource.*` en el momento de la llamada: varios tests de
     // `registrarAjusteCosto` reasignan `dataSource.transaction` DESPUÉS de
     // compilar el módulo, y `Db.transaccion` tiene que ver ese reemplazo.
@@ -40,6 +43,7 @@ describe('InventarioService', () => {
         InventarioService,
         { provide: getRepositoryToken(MovimientoInventario), useValue: {} },
         { provide: Db, useValue: dbMock },
+        { provide: CatalogService, useValue: catalogService },
       ],
     }).compile();
 
@@ -1275,6 +1279,68 @@ describe('InventarioService', () => {
         }),
       ).rejects.toThrow('El costo nuevo es igual al vigente');
       expect(managerMock.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('convierte el costo cuando se ingresa en una unidad distinta de la base', async () => {
+      // Producto en gramos; la persona carga el costo por kilo.
+      // 1 kg = 1000 g ⇒ 5050/kg debe persistirse como 5.0500/g.
+      dataSource.transaction = jest.fn(
+        (cb: (m: typeof managerMock) => unknown) => cb(managerMock),
+      );
+      catalogService.convertirUnidad.mockResolvedValueOnce('1000');
+
+      managerMock.query
+        .mockResolvedValueOnce([
+          { tipo: 'producto', costo_actual: '4.0000', unidad_medida: 'g' },
+        ])
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4.0000' },
+        ])
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-ac3' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      const res = await service.registrarAjusteCosto(TENANT, USER_ID, {
+        itemId: ITEM_ID,
+        costoNuevo: '5050',
+        unidadCodigo: 'kg',
+        comentario: 'Ajuste por unidad',
+      });
+
+      expect(res.costoNuevo).toBe('5.0500');
+      // Conversión de TASA: cuánto vale UNA unidad elegida en unidades base.
+      expect(catalogService.convertirUnidad).toHaveBeenCalledWith(
+        '1',
+        'kg',
+        'g',
+      );
+      // El costo que entra al kardex es el ya convertido, no el tipeado.
+      const insert = managerMock.query.mock.calls[2] as [string, unknown[]];
+      expect(insert[1]).toContain('5.0500');
+    });
+
+    it('sin unidadCodigo el costo se interpreta en unidad base, como hasta hoy', async () => {
+      dataSource.transaction = jest.fn(
+        (cb: (m: typeof managerMock) => unknown) => cb(managerMock),
+      );
+
+      managerMock.query
+        .mockResolvedValueOnce([
+          { tipo: 'producto', costo_actual: '4.0000', unidad_medida: 'g' },
+        ])
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4.0000' },
+        ])
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-ac4' }])
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.registrarAjusteCosto(TENANT, USER_ID, {
+        itemId: ITEM_ID,
+        costoNuevo: '7',
+        comentario: 'Ajuste sin unidad',
+      });
+
+      expect(res.costoNuevo).toBe('7.0000');
+      expect(catalogService.convertirUnidad).not.toHaveBeenCalled();
     });
   });
 

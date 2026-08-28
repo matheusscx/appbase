@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
+import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
 import Decimal from 'decimal.js';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
@@ -15,6 +16,7 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
+import { CatalogService } from '../catalog/catalog.service';
 import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import {
@@ -103,6 +105,7 @@ export class InventarioService {
     @InjectRepository(MovimientoInventario)
     private readonly movimientoRepo: Repository<MovimientoInventario>,
     private readonly db: Db,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async registrarMovimiento(
@@ -354,14 +357,17 @@ export class InventarioService {
     const costoNuevo = new Decimal(dto.costoNuevo);
 
     return this.db.transaccion(async (manager) => {
-      const rows: { tipo: string; costo_actual: string | null }[] =
-        await manager.query(
-          `SELECT i.tipo, p.costo_actual
+      const rows: {
+        tipo: string;
+        costo_actual: string | null;
+        unidad_medida: string | null;
+      }[] = await manager.query(
+        `SELECT i.tipo, p.costo_actual, p.unidad_medida
              FROM items i
              JOIN item_producto p ON p.item_id = i.item_id
             WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-          [dto.itemId, tenantId],
-        );
+        [dto.itemId, tenantId],
+      );
       if (!rows.length) {
         throw new NotFoundException('Item no encontrado');
       }
@@ -376,10 +382,33 @@ export class InventarioService {
       // difiere más allá del 4º decimal se persiste idéntico al vigente y
       // dejaría en el kardex un ajuste que no cambió nada.
       const costoAnterior = rows[0].costo_actual;
+      // `costoNuevo` viene "por la unidad elegida" (dto.unidadCodigo), no por la
+      // unidad base. El ajuste mueve cantidad 0, así que NO sirve la conversión
+      // de operación de las mermas: esa divide por la cantidad convertida ⇒
+      // división por cero. Acá la conversión es de TASA —cuánto vale una unidad
+      // base si una unidad elegida vale `costoNuevo`—, y sale del mismo util
+      // pasándole cantidad 1 y el factor de la unidad elegida como divisor. No
+      // se escribe aritmética nueva.
+      // Ver docs/superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md
+      let costoEnBase = costoNuevo;
+      const unidadBase = rows[0].unidad_medida ?? 'unidad';
+      if (dto.unidadCodigo && dto.unidadCodigo !== unidadBase) {
+        const factor = await this.catalogService.convertirUnidad(
+          '1',
+          dto.unidadCodigo,
+          unidadBase,
+        );
+        costoEnBase = new Decimal(
+          convertirCostoUnitario('1', costoNuevo.toString(), factor),
+        );
+      }
       // Escala de captura: el número lo tipeó una persona en este ajuste y se
       // lleva a la escala de costo (ESCALA_COSTO). No mira modo_redondeo a
       // propósito — esa perilla es la política de lo cobrado, no de captura.
-      const costoNuevo4 = costoNuevo.toFixed(ESCALA_COSTO);
+      // Va sobre el costo YA convertido, y por eso la comparación de abajo
+      // también: cargar 5050/kg en un producto que ya vale 5,0500/g no cambia
+      // nada y tiene que rebotar igual que si lo hubieran tipeado en gramos.
+      const costoNuevo4 = costoEnBase.toFixed(ESCALA_COSTO);
       if (
         costoAnterior != null &&
         costoNuevo4 === new Decimal(costoAnterior).toFixed(ESCALA_COSTO)

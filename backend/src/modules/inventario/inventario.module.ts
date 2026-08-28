@@ -5,6 +5,7 @@ import { MovimientoInventarioDetalle } from './entities/movimiento-inventario-de
 import { InventarioService } from './inventario.service';
 import { InventarioController } from './inventario.controller';
 import { MonedasModule } from '../monedas/monedas.module';
+import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
@@ -15,6 +16,9 @@ import { MonedasModule } from '../monedas/monedas.module';
     // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
     // ESTE módulo: sin este import el @Body del controller falla en runtime.
     MonedasModule,
+    // `registrarAjusteCosto` convierte el costo tipeado en otra unidad a la
+    // unidad base del producto vía `CatalogService.convertirUnidad`.
+    CatalogModule,
   ],
   controllers: [InventarioController],
   providers: [InventarioService],
