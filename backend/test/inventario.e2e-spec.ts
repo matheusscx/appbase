@@ -131,6 +131,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resGet2 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resGet2.status).toBe(200);
     expect((resGet2.body as ItemResponse).costoActual).toBe('4500.0000');
 
     // 3. El movimiento de compra quedó con costoUnitario 4500
@@ -181,11 +182,13 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resGet3 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resGet3.status).toBe(200);
     expect((resGet3.body as ItemResponse).costoActual).toBe('4300.0000');
 
     const resMovs2 = await request(app.getHttpServer())
       .get(`/api/inventario/movimientos?itemId=${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resMovs2.status).toBe(200);
     const movs2 = (resMovs2.body as PaginatedMovimientos).data;
     expect(movs2.length).toBe(cantidadMovimientosAntes + 1);
     const movAjuste = movs2.find((m) => m.motivo === 'ajuste_costo');
@@ -209,6 +212,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resGet4 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resGet4.status).toBe(200);
     expect((resGet4.body as ItemResponse).costoActual).toBe('4300.0000');
   });
 
@@ -242,6 +246,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resGet1 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resGet1.status).toBe(200);
     expect((resGet1.body as ItemResponse).stock).toBe('0.5000');
 
     // 3. Salida manual de 250 g → 0,25 kg (merma va por POST /mermas)
@@ -265,6 +270,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resGet2 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resGet2.status).toBe(200);
     expect((resGet2.body as ItemResponse).stock).toBe('0.2500');
 
     // 4. Cross-magnitud: litros sobre un producto en kg → rechazado
