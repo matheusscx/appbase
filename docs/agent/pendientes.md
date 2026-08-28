@@ -1129,6 +1129,13 @@ abriendo las superficies, no leyendo la entrada.
 
 ### Con `'documento'` y un descuento de nivel venta, el desvío del total crece sin techo (2026-08-28)
 
+✅ **DECIDIDO POR EL OWNER el 2026-08-28: va la salida (b)** — arreglar la causa en el motor,
+no taparla con un guard de configuración. O sea que `repartirProporcional` y la conversión del
+descuento de venta a neto tienen que respetar `nivelRedondeo` en vez de cuantizar siempre.
+⚠️ **Es trabajo del motor de cálculo: abre su propio frente, con su propia sesión y el sistema
+quieto** (`CLAUDE.md`). No se toma de arrastre ni se cuelga de otra tarea. La entrada se queda
+acá —con la medición completa, que es el insumo del diseño— hasta que ese frente la cierre.
+
 - [ ] **`nivelRedondeo: 'documento'` cumple su promesa salvo en un caso, y ahí es peor que
   `'linea'` sin cota** (backend, `calculo-precios.engine.ts:1510` y `:1856`; **medido el
   2026-08-28**, contra aritmética de alta precisión —el mismo carrito con escala y moneda de
