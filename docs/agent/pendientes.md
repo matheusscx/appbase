@@ -131,16 +131,13 @@ minors del redondeo — se resuelven en una sola pasada.
   Cierre: un spec de render (mismo molde que `promociones.nuxt.spec.ts`) que monte el drawer
   con una venta congelada de ejemplo (incluida una aplicación cross-línea) y afirme las
   filas y el total.
-- [ ] **`suscripciones.service.ts` calcula sin pasar `canal`, así que cae al default
-  `'fisico'`** (backend, `backend/src/modules/suscripciones/suscripciones.service.ts:112`) —
-  la llamada a `calculoPreciosService.calcular` no manda `canal`, y `CalcularVentaDto` lo
-  completa a `'fisico'` cuando falta. Una suscripción es intrínsecamente el canal online (no
-  hay caja física de por medio); `online.service.ts:348` ya pasa `canal: 'online' as const`
-  explícito en su propia llamada a `calcular` — mismo molde, una línea. **Hoy es benigno**
-  (el seed no tiene ninguna promo con `canal` fijado sobre el ítem de suscripción demo, así
-  que no hay ningún caso real donde esto cobre distinto), pero una promo futura scoped a
-  `canal: 'fisico'` aplicaría por error a una suscripción, y una scoped a `'online'` nunca
-  le aplicaría. Cierre: agregar `canal: 'online' as const` al DTO de esa llamada.
+✅ **Un cuarto residuo de este grupo ya se cerró, en el propio cierre del frente:**
+`suscripciones.service.ts` calculaba sin pasar `canal` y caía al default `'fisico'` de
+`CalcularVentaDto`. El commit `c32f1d53` (2026-08-27, revisión de rama completa) agregó
+`canal: 'online' as const` a la llamada de `calculoPreciosService.calcular`
+(`suscripciones.service.ts:119`), mismo molde que `online.service.ts:348`. Verificado leyendo
+el código: el `as const` ya está en el archivo. Se saca de esta lista porque ya no es una
+tarea pendiente.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -653,67 +650,6 @@ que el que la tome se va a encontrar**, y eso es lo que las hizo construibles. P
 modificadores decía que faltaba un input y lo que estaba roto era un número **mostrado** con
 la moneda equivocada, en una tercera pantalla que la entrada no nombraba. El mapa se hace
 abriendo las superficies, no leyendo la entrada.
-
-- [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
-  (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
-
-  ✅ **ACTUALIZACIÓN 2026-08-27: diseñado E implementado.** El título de esta entrada ya no
-  describe el estado real y se deja sin reescribir a propósito —mismo criterio que
-  `descuentos-recargos.md` usa con sus citas vencidas— porque el texto de abajo (lo ya
-  decidido, la premisa corregida, el requisito heredado) sigue siendo el contexto correcto
-  para quien retome el frente. Lo que cambió: arquitectura diseñada
-  ([`2026-08-27-motor-promociones-design.md`](../superpowers/specs/2026-08-27-motor-promociones-design.md)),
-  plan ejecutado (13 tareas, [`2026-08-27-motor-promociones.md`](../superpowers/plans/2026-08-27-motor-promociones.md)),
-  backend + frontend construidos y documentados
-  ([`docs/features/motor-promociones.md`](../features/motor-promociones.md),
-  [ADR-023](../adr/023-promociones-familia-propia-del-motor.md)). **Lo único que falta es el
-  gate con stack** —`test:e2e` completo, `--verificar`, smoke de navegador,
-  `verify-feature` final— porque el desarrollo corrió con Docker ocupado por otra sesión
-  (orden del owner). Esta entrada se muda a `resueltos.md` recién cuando ese gate corra en
-  verde, no antes — no la des por cerrada leyendo solo hasta acá.
-
-  El documento completo del análisis original es
-  [`specs/2026-07-22-motor-promociones-analisis.md`](../superpowers/specs/2026-07-22-motor-promociones-analisis.md)
-  y está **más avanzado de lo que nadie recuerda**: alcance de Fase 1 **cerrado**, las cuatro
-  preguntas abiertas resueltas, e investigación de mercado (Toast/Square/Lightspeed) hecha.
-  ⚠️ *Esta frase decía "lo único que falta es diseñar la arquitectura" — dejó de ser cierto
-  el 2026-08-27, ver la actualización arriba: la arquitectura ya está diseñada Y
-  construida.*
-
-  ⚠️ **Por qué está acá y no se acordaba nadie: no lo nombraba ningún backlog.** Su único
-  puntero era desde `investigacion-mercado.md`, como *ejemplo* de investigación. Esta entrada
-  existe para que tenga quién lo reclame; **si vuelve a quedar sin ella, se pierde otra vez.**
-
-  **Lo que ya está decidido** (no re-preguntarlo): solo la familia que descuenta líneas ya
-  pedidas —2x1/NxM, happy hour %, precio fijo de combo—, activación solo automática, sin
-  acumulación (gana la de mayor descuento), scope declarado por cada promo (lista de ítems /
-  categoría / todo el pedido), y todo beneficio expresado como **descuento portable** para no
-  inventar concepto fiscal de ningún país (ADR-010).
-
-  ⛔ **Y una premisa suya que ya se corrigió, porque invalidaba el diseño:** citaba que los
-  descuentos estaban *"definidos pero NO aplicados al vender"*. **Es falso** — lo sacaba de una
-  lista desactualizada de `descuentos-recargos.md`, corregida el 2026-08-23 en los dos lados.
-  El motor **sí** aplica valor plano, tramos y método de pago. Quien retome esto tiene que
-  releer la § 6 de este archivo antes de diseñar: el punto de integración cambió de forma.
-
-  ✅ **DECIDIDO (owner, 2026-08-23): el tipo de regla `promocional` se ELIMINA y su caso pasa a
-  este módulo.** No fue por el choque de nombres sino por duplicación: la Fase 1 de este
-  documento ya incluye *"happy hour %"*, que es un descuento porcentual acotado a una ventana —
-  o sea `promocional` con granularidad más fina. Mantener los dos era construir la misma
-  capacidad dos veces y hacer que el local adivine cuál usar. Se ejecuta dentro del frente de
-  vigencia por fecha
-  ([spec](../superpowers/specs/2026-08-23-vigencia-por-fecha-design.md)), donde `directo` gana
-  fechas opcionales para que la capacidad no desaparezca.
-
-  ⚠️ **REQUISITO QUE ESTE MÓDULO HEREDA, y no es opcional:** al eliminar `promocional` se pierde
-  su guardarraíl —era el único tipo que **obligaba** a poner las dos fechas—, y eso es lo que
-  previene el *"20% de aniversario"* corriendo tres años. **Una campaña sin fecha de fin no
-  debería aceptarse acá.** Entre la eliminación del tipo y la existencia de este módulo hay una
-  ventana sin ese control: es un costo aceptado a sabiendas, no un olvido.
-
-  ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y el propio
-  análisis lo dice: el evaluador es **una etapa nueva sobre el carrito entero**, no una rama más
-  en `evaluarRegla`.
 
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de

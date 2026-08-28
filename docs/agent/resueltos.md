@@ -17,6 +17,143 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El motor de promociones: catálogo, evaluador cross-carrito y familia propia del motor (cerrado 2026-08-27)
+
+**Venía de la sección 3** ("Ya decidido, falta construir"). Entrada mudada verbatim desde
+`pendientes.md`, con toda su historia de actualizaciones acumuladas:
+
+> - [ ] **El motor de promociones: alcance cerrado desde julio, sin arquitectura y sin dueño**
+>   (backend + producto; análisis del 2026-07-22, **rescatado de la orfandad el 2026-08-23**) —
+>
+>   ✅ **ACTUALIZACIÓN 2026-08-27: diseñado E implementado.** El título de esta entrada ya no
+>   describe el estado real y se deja sin reescribir a propósito —mismo criterio que
+>   `descuentos-recargos.md` usa con sus citas vencidas— porque el texto de abajo (lo ya
+>   decidido, la premisa corregida, el requisito heredado) sigue siendo el contexto correcto
+>   para quien retome el frente. Lo que cambió: arquitectura diseñada
+>   ([`2026-08-27-motor-promociones-design.md`](../superpowers/specs/2026-08-27-motor-promociones-design.md)),
+>   plan ejecutado (13 tareas, [`2026-08-27-motor-promociones.md`](../superpowers/plans/2026-08-27-motor-promociones.md)),
+>   backend + frontend construidos y documentados
+>   ([`docs/features/motor-promociones.md`](../features/motor-promociones.md),
+>   [ADR-023](../adr/023-promociones-familia-propia-del-motor.md)). **Lo único que falta es el
+>   gate con stack** —`test:e2e` completo, `--verificar`, smoke de navegador,
+>   `verify-feature` final— porque el desarrollo corrió con Docker ocupado por otra sesión
+>   (orden del owner). Esta entrada se muda a `resueltos.md` recién cuando ese gate corra en
+>   verde, no antes — no la des por cerrada leyendo solo hasta acá.
+>
+>   El documento completo del análisis original es
+>   [`specs/2026-07-22-motor-promociones-analisis.md`](../superpowers/specs/2026-07-22-motor-promociones-analisis.md)
+>   y está **más avanzado de lo que nadie recuerda**: alcance de Fase 1 **cerrado**, las cuatro
+>   preguntas abiertas resueltas, e investigación de mercado (Toast/Square/Lightspeed) hecha.
+>   ⚠️ *Esta frase decía "lo único que falta es diseñar la arquitectura" — dejó de ser cierto
+>   el 2026-08-27, ver la actualización arriba: la arquitectura ya está diseñada Y
+>   construida.*
+>
+>   ⚠️ **Por qué está acá y no se acordaba nadie: no lo nombraba ningún backlog.** Su único
+>   puntero era desde `investigacion-mercado.md`, como *ejemplo* de investigación. Esta entrada
+>   existe para que tenga quién lo reclame; **si vuelve a quedar sin ella, se pierde otra vez.**
+>
+>   **Lo que ya está decidido** (no re-preguntarlo): solo la familia que descuenta líneas ya
+>   pedidas —2x1/NxM, happy hour %, precio fijo de combo—, activación solo automática, sin
+>   acumulación (gana la de mayor descuento), scope declarado por cada promo (lista de ítems /
+>   categoría / todo el pedido), y todo beneficio expresado como **descuento portable** para no
+>   inventar concepto fiscal de ningún país (ADR-010).
+>
+>   ⛔ **Y una premisa suya que ya se corrigió, porque invalidaba el diseño:** citaba que los
+>   descuentos estaban *"definidos pero NO aplicados al vender"*. **Es falso** — lo sacaba de una
+>   lista desactualizada de `descuentos-recargos.md`, corregida el 2026-08-23 en los dos lados.
+>   El motor **sí** aplica valor plano, tramos y método de pago. Quien retome esto tiene que
+>   releer la § 6 de este archivo antes de diseñar: el punto de integración cambió de forma.
+>
+>   ✅ **DECIDIDO (owner, 2026-08-23): el tipo de regla `promocional` se ELIMINA y su caso pasa a
+>   este módulo.** No fue por el choque de nombres sino por duplicación: la Fase 1 de este
+>   documento ya incluye *"happy hour %"*, que es un descuento porcentual acotado a una ventana —
+>   o sea `promocional` con granularidad más fina. Mantener los dos era construir la misma
+>   capacidad dos veces y hacer que el local adivine cuál usar. Se ejecuta dentro del frente de
+>   vigencia por fecha
+>   ([spec](../superpowers/specs/2026-08-23-vigencia-por-fecha-design.md)), donde `directo` gana
+>   fechas opcionales para que la capacidad no desaparezca.
+>
+>   ⚠️ **REQUISITO QUE ESTE MÓDULO HEREDA, y no es opcional:** al eliminar `promocional` se pierde
+>   su guardarraíl —era el único tipo que **obligaba** a poner las dos fechas—, y eso es lo que
+>   previene el *"20% de aniversario"* corriendo tres años. **Una campaña sin fecha de fin no
+>   debería aceptarse acá.** Entre la eliminación del tipo y la existencia de este módulo hay una
+>   ventana sin ese control: es un costo aceptado a sabiendas, no un olvido.
+>
+>   ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`). Y el propio
+>   análisis lo dice: el evaluador es **una etapa nueva sobre el carrito entero**, no una rama más
+>   en `evaluarRegla`.
+
+### Cómo se cerró
+
+**Qué se construyó** (backend + frontend, 2026-08-27): un catálogo de campañas con tres
+tipos —`porcentaje`, `nxm`, `precio_fijo`—, un evaluador puro cross-carrito
+(`promociones.evaluator.ts`) que decide qué unidades del carrito gana cada promo sin tocar
+BD ni NestJS, y su aplicación como **familia propia** dentro del paso de descuentos del motor
+de precios — trazable y congelada aparte de `descuentos`/`recargos`, nunca fundida con ellos.
+El congelado vive en `ventas_promociones` (molde de `ventas_descuentos`), hay pantalla de
+configuración (`/configuracion/promociones`), desglose en el drawer de venta y en el ticket.
+Documentación completa: [`docs/features/motor-promociones.md`](../features/motor-promociones.md),
+[ADR-023](../adr/023-promociones-familia-propia-del-motor.md), la spec de diseño
+([`2026-08-27-motor-promociones-design.md`](../superpowers/specs/2026-08-27-motor-promociones-design.md))
+y el plan ejecutado (13 tareas,
+[`2026-08-27-motor-promociones.md`](../superpowers/plans/2026-08-27-motor-promociones.md)).
+
+**Las decisiones del owner que lo gobiernan (2026-08-27, además de la eliminación de
+`promocional` que ya venía del 2026-08-23 — ver blockquote arriba):**
+
+1. **Interruptor único por TENANT**, no por promo — vive en Preferencias financieras.
+2. **Default: NO acumula.** Sin tocar el interruptor, el día de la promo aplica solo la
+   rebaja mayor entre la promo y el descuento de catálogo que tocarían la misma línea.
+3. **Criterio pro-cliente** al armar aplicaciones: al combo entran las unidades más caras de
+   cada slot, el 2x1 regala la más barata del par más caro.
+4. **El instante que decide la promo es cuándo se PIDE el ítem** (el `creado_el` de la línea
+   en salones), no la apertura de la cuenta ni el pago — asimetría deliberada con la vigencia
+   por fecha de `descuentos`/`recargos`, que sigue decidiéndose por apertura de cuenta.
+5. **El precio del combo es el precio FINAL que paga el cliente**: un combo declarado
+   "$9.990" cierra en exactamente $9.990, IVA adentro — no $9.991.
+
+**Lo que la ejecución corrigió respecto del plan**, porque es lo que le sirve al próximo que
+lea la spec de diseño (dos bugs medidos en revisión, resueltos con el owner en el momento;
+detalle en la feature § "Cambios respecto al diseño original"):
+
+1. **Dominio de la promesa: LISTA, no neto.** El evaluador calculaba originalmente sobre el
+   neto. Medido: un 20% de promo sobre una etiqueta de 993 (bruto) cobraba **756**, donde el
+   mismo 20% de descuento de catálogo —que sí operaba en el dominio correcto— cobraba **794**
+   sobre la misma etiqueta. Se corrigió a que la promo prometa en dominio de precio de
+   **LISTA** (lo que el cliente ve) y el motor la convierta a **NETO** al aplicarla, mismo
+   patrón que ya usan las reglas de nivel documento.
+2. **El ancla del cierre se corre con la promo.** Igual que un descuento de nivel venta mueve
+   el ancla del cierre-por-resta del motor (el mecanismo que deriva el impuesto restando en
+   vez de `tasa × base`, del frente de redondeo del 2026-08-21), la promo la corre a
+   `etiqueta − promo`. Es lo que hace que el combo cierre exacto en su precio declarado y que
+   el 2x1 no le cueste un peso a la unidad "gratis".
+3. **Conflicto entre promos: por conteo de unidades, no por línea entera** (secundario, sin
+   decisión del owner de por medio). El primer greedy descartaba una candidata completa si
+   tocaba una línea ya usada por otra promo: dos grupos de un mismo 2x1 sobre una línea de 4
+   unidades colisionaban entre sí y solo se cobraba la mitad del descuento esperado ($5.000 en
+   vez de $10.000, medido). Se corrigió a contar unidades consumidas por línea.
+
+**Qué NO incluye la Fase 1** (diferido a propósito, ver la spec § "Qué NO entra en Fase 1"):
+la familia (B) que **agrega** líneas —regalar un ítem no pedido—, cupones o activación
+manual, stacking configurable entre promos (hoy es todo-o-nada por tenant vía el interruptor
+único) y tope de aplicaciones por ticket.
+
+**Lo que queda vivo, deliberadamente, en `pendientes.md` § 1** (no se mudan con esta
+entrada): los cuatro residuos chicos que dejó el frente. Al revisarlos para este cierre, uno
+—`suscripciones.service.ts` calculando sin `canal` explícito— ya estaba arreglado en el
+propio commit de cierre de rama (`c32f1d53`) y se sacó de la lista; los otros tres —el ±1
+peso de `nivelRedondeo: 'documento'` sin test que lo acote, el filtro de monto `'0'` que le
+falta a `PromocionesAplicadas.vue`, y el spec de render que le falta a
+`VentaDetalleDrawer.vue`— siguen sin construirse y siguen anotados ahí.
+
+**El gate de esta rama** (`test:e2e` completo con `reset-db.sh`, `--verificar`, smoke de
+navegador y `verify-feature` final) es lo único que la entrada original señalaba como
+faltante y corre como parte del cierre general de la rama, no de este commit documental — el
+diseño y la construcción del módulo ya estaban completos y documentados antes de esta mudanza.
+`docs/ESTADO.md` refleja el resultado del gate cuando termine.
+
+---
+
 ## El `401` fantasma: la carrera que el primer arreglo perdía (2026-08-27)
 
 **Venía de la sección 2.** Es la **segunda** vez que esta entrada se cierra, y la primera fue
