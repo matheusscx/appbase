@@ -430,7 +430,8 @@ Reglas:
   un reset) sí. Verificado tecla por tecla en el navegador: USD `12.50`, UF `5,0500`
   —persistido `5.0500` en la base—, y CLP `1.500` sigue siendo mil quinientos.
   ⚠️ El prop `decimales` (`ESCALA_COSTO` = 4, fijo e independiente de la moneda del ítem)
-  ya se puede usar: era el punto fijo lo que lo tenía sin usar.
+  ya no está roto —era el punto fijo lo que lo tenía sin usar—, pero **dejó de ser la forma
+  correcta para un campo de costo.** Ver el bullet de abajo.
 
   **Lo que el arreglo revive solo:** los siete `MoneyInput` atados a `:moneda-id` de
   `items.vue` e `inventario/index.vue` — el precio del catálogo de un ítem en USD o UF ya
@@ -439,7 +440,10 @@ Reglas:
   `grupos-modificadores.vue` (`precioExtra`, `lotePrecio`), porque `MoneyInput` necesita
   una moneda y ninguna de las dos la tenía a mano. **Estado al 2026-08-26:**
   - `mermas.vue` **migrado**: el costo unitario va con `MoneyInput` atado a
-    `productoSeleccionado?.monedaId` y `:decimales="4"`.
+    `productoSeleccionado?.monedaId` y `:decimales="4"`. ⚠️ Ese `:decimales="4"` **sigue
+    ahí a propósito** — ver el bullet de abajo: sacarlo en mermas no es lo que hay que
+    hacer, y el campo se va entero en
+    [`plans/2026-08-28-merma-sin-costo-tipeado.md`](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
   - `grupos-modificadores.vue` **se queda sin `MoneyInput`, y es deliberado**, con dos
     razones distintas según el campo. En el drawer del grupo no hay ítem, así que no hay
     moneda que resolver (la opción hereda la del ítem al que se aplica — owner
@@ -450,6 +454,43 @@ Reglas:
   - Lo que se arregló ahí fue otra cosa: el precio extra **se mostraba** con la moneda
     oficial del tenant. Ahora `GET /grupos-modificadores/:id/items` devuelve el
     `monedaId` de cada receta y la pantalla formatea con él.
+
+- ⭐ **Un input de costo sigue los decimales de la moneda del ítem: la precisión la da el
+  selector de unidad, no el prop `decimales`** (owner, 2026-08-28 —
+  [spec](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md)). Se tipea
+  *"5.050 por kilo"* en pesos enteros, no *"5,0500 por gramo"*. El motivo es el bullet de
+  arriba: un campo de 4 decimales sobre un ítem en pesos es el **único** caso donde
+  `1.500` significa a la vez `1500` y `1,5`, y maska elige una lectura en silencio. Con 0
+  o 2 decimales la ambigüedad no existe (medido: 0 casos sobre 3332 cadenas). La escala
+  del backend **no** cambia: `ESCALA_COSTO` sigue en 4 porque CPP genera fracciones al
+  promediar; lo que sigue a la moneda es el teclado humano, y la conversión de unidad es
+  el puente. Aplicado en el drawer de ajuste de costo de `inventario/index.vue`
+  (`unidadCodigo` opcional en `POST /inventario/ajustes-costo`, 2026-08-28).
+
+  ⚠️ **Dónde vale, y dónde NO — medido el 2026-08-28.** La regla vale donde el costo se
+  tipea **sin cantidad**, que es exactamente el caso del ajuste de costo: ahí el selector
+  de unidad es el único que decide la precisión y no arrastra nada más.
+  **Donde un mismo selector gobierna la cantidad y el costo a la vez, no vale**, y sacar
+  el prop rompe plata: en `mermas.vue` elegir "gramo" para mermar 100 g de un producto en
+  kilos lleva el costo a `6,5`/g, que en CLP **no es representable**. Y ahí `MoneyInput`
+  **no avisa: redondea y emite en silencio.** El mecanismo es maska, no el `watch` —el
+  `watch` solo escribe `display` (`formatMontoDisplay` → `toFixed(0)` → `"7"`), pero ese
+  `display` entra al `<input>` con `v-maska`, dispara `onMaska` → `syncFromMaska` → `emit`.
+  Medido sacando el prop: el POST llevó `"7"` donde el campo decía `6.5`, **7,69% de
+  sobrevaloración**, y sin que nadie toque el campo, porque viene prefilleado.
+  📌 Precisión del mecanismo (revisión independiente, 2026-08-28): el re-emit **no** depende
+  de que el valor sea irrepresentable — `v-maska` corre en `mounted` **y en `updated`**, así
+  que **todo** valor que entra de afuera vuelve a emitirse. Cuando es representable el emit
+  devuelve el mismo número y no se nota; cuando no lo es, devuelve el redondeado. O sea que
+  el componente **nunca** garantiza que el modelo conserve lo que el padre le pasó.
+  📌 Corolario: **esto corrige el §4 de la spec**, que da por bueno que "el modelo NO se
+  trunca solo" a partir del `watch`. Es cierto del `watch` y falso del componente.
+  📌 Por eso `mermas.vue` **no** se toca acá: el campo de costo se saca entero del
+  formulario y el costo se maneja en el producto — frente propio, con
+  [spec](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md) y
+  [plan](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
+  📌 Antes de sacar un `:decimales="4"` de cualquier otro campo (quedan 6 en `items.vue`),
+  la pregunta no es "¿tiene selector?" sino **"¿ese selector gobierna solo el costo?"**.
 
 Archivos: `app/stores/monedas.ts`, `app/types/moneda.ts`,
 `app/utils/currency-format.ts` (+ `.spec.ts`), `app/composables/useCurrency.ts`,

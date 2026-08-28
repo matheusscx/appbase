@@ -190,17 +190,22 @@ Authorization: Bearer <token>
 Request:
 {
   "itemId": "uuid",
-  "costoNuevo": "250.00",
+  "costoNuevo": "5050",
+  "unidadCodigo": "kg",
   "comentario": "Corrección de costo mal cargado en la carga inicial"
 }
 
 Response (201):
 {
   "movimientoId": "uuid",
-  "costoAnterior": "150.0000",
-  "costoNuevo": "250.0000"
+  "costoAnterior": "4.0000",
+  "costoNuevo": "5.0500"
 }
 ```
+
+⚠️ **El `costoNuevo` de la respuesta está siempre en unidad base**, aunque el request
+haya venido en otra: sobre un producto en gramos, `5050` por `kg` se persiste como
+`5.0500`/g.
 
 **Permiso:** `Inventario/Actualizar` (RBAC estándar — admin del tenant lo tiene
 por short-circuit).
@@ -212,7 +217,22 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
 
 **Request Body (`AjusteCostoDto`):**
 - `itemId` (required): UUID del item.
-- `costoNuevo` (required): string numérico, costo nuevo. Debe ser `> 0`.
+- `costoNuevo` (required): string numérico, costo nuevo. Debe ser `> 0`. Se interpreta
+  **por `unidadCodigo`**, no por la unidad base.
+- `unidadCodigo` (optional, desde el **2026-08-28**): unidad en la que la persona tipeó el
+  costo. Ausente o igual a la base ⇒ comportamiento histórico, el número se toma tal cual.
+  Existe para que la precisión venga de **elegir la unidad** y no de teclear decimales que
+  la moneda del ítem no admite: en un insumo por gramo se carga `5050` por `kg`, no
+  `5,0500` por `g`. Ver
+  [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md).
+  ⚠️ **La conversión acá es de TASA, no de operación.** El ajuste mueve cantidad `0`, así
+  que el camino de las mermas —`convertirCostoUnitario(cantidadIngresada, costo,
+  cantidadBase)`, que divide por la cantidad convertida— sería una división por cero. Se
+  reusa el **mismo** util con `cantidadIngresada = '1'` y como divisor el factor
+  `convertirUnidad('1', unidadElegida, unidadBase)`; no hay aritmética nueva.
+  ⚠️ La comparación "igual al vigente" corre sobre el costo **ya convertido**: cargar
+  `5050`/kg en un producto que ya vale `5.0500`/g rebota con 400, igual que si lo hubieran
+  tipeado en gramos.
 - `comentario` (required): texto libre, no vacío. Un ajuste de costo es una
   corrección y tiene que quedar explicada; a diferencia de las mermas, no lleva
   causa tipificada (es un evento puntual, no un fenómeno recurrente que se
@@ -223,8 +243,10 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
 - `404` si el item no existe en el tenant (o está soft-deleted).
 - `400` si el item no es de `tipo='producto'` ni `'ingrediente'` (solo esos
   tienen costo propio en `item_producto`).
-- `400` si `costoNuevo` es igual al `costo_actual` vigente (no hay nada que
-  ajustar).
+- `400` si `costoNuevo` (ya convertido a unidad base) es igual al `costo_actual`
+  vigente (no hay nada que ajustar).
+- `400` si `unidadCodigo` no existe o su magnitud es incompatible con la unidad base
+  del producto — lo lanza `CatalogService.convertirUnidad`, no una validación propia.
 
 Delega en `InventarioService.registrarMovimiento` (ver "Regla de costo" arriba)
 dentro de una transacción: no repite sus validaciones ni escribe
@@ -324,7 +346,9 @@ agregue mañana sin ese filtro.
   `item_producto.stock` ni genera filas en `movimiento_inventario_detalle`) y requiere
   `costoUnitario` (el costo nuevo). El kardex guarda ambos lados del ajuste: `costo_anterior`
   (el `costo_actual` vigente antes) y `costo_unitario` (el nuevo, que también pasa a ser el
-  `costo_actual` de `item_producto`).
+  `costo_actual` de `item_producto`). Desde el **2026-08-28** el costo puede llegar en otra
+  unidad (`unidadCodigo`), y como acá la cantidad es `0` la conversión es de **tasa**, no de
+  operación — ver `POST /inventario/ajustes-costo` arriba.
 - Costos `<= 0` se rechazan.
 - En `ajustarStock`, la fila `item_producto` se bloquea con `FOR UPDATE` antes de convertir unidades.
 - **`costoUnitario` se ingresa "por la unidad elegida" (`unidadCodigo`), nunca por la unidad
@@ -453,7 +477,11 @@ agregue mañana sin ese filtro.
 
 ### Pages
 
-- `pages/inventario.vue` — Vista global del kardex
+⚠️ Los sub-bullets en imperativo ("agregar…", "opcional") son del **diseño original**, no un
+inventario de lo que existe hoy. Lo que sí está fechado describe estado real.
+
+- `pages/inventario/index.vue` — Vista global del kardex (era `pages/inventario.vue` en el
+  diseño original)
   - Tabla de movimientos con columnas: Item, Tipo, Motivo, Cantidad, Stock Anterior, Stock Resultante, Usuario, Fecha
   - Cantidad y Stock Resultante formateados por magnitud vía `formatStock`
     (`useFormatters`) — `MovimientoListItem.unidadMedida` (viene de
@@ -461,6 +489,13 @@ agregue mañana sin ese filtro.
   - Filtros laterales: por item (select/search), por motivo (select multi), por rango de fechas
   - Paginación
   - Botón "Exportar a CSV" (opcional)
+  - Drawer "Ajustar costo": desde el **2026-08-28** lleva selector de unidad (misma
+    forma que `mermas.vue`: solo si `modoInventario === 'cantidad'` y la magnitud tiene
+    más de una unidad) y la etiqueta dice *"Costo nuevo (por {unidad})"*. El
+    `unidadCodigo` viaja en el body **solo si difiere de la base** — el DTO lo valida con
+    `@IsNotEmpty()`, así que una cadena vacía sería un 400. El `MoneyInput` va atado a
+    `:moneda-id` y **sin** prop `decimales`: la precisión la da la unidad
+    ([`patterns/frontend.md`](../patterns/frontend.md) §8)
 
 - `pages/configuracion/items.vue` — Modificación: agregar modal "Historial"
   - En la fila de cada producto, agregar botón/enlace "Historial"

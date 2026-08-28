@@ -87,8 +87,31 @@ esos argumentos; **no se escribe aritmética nueva.**
 
 ## 4. Lo que este diseño da por bueno, y conviene saberlo
 
-`DesfasesPanel` muestra una sugerencia de 4 decimales en un input de 0 decimales. **Medido:
-el modelo NO se trunca solo** — el `watch` de `MoneyInput` solo escribe `display`, nunca
-emite. La sugerencia se aplica exacta si nadie toca el campo; si la editan, queda en pesos
-enteros. Bajo esta decisión eso **es el comportamiento correcto**, no un bug: el motor
-propone con su precisión, la persona corrige con la suya.
+> ⛔ **CORREGIDO el 2026-08-28 — lo que sigue es falso a nivel componente.** El `watch` no
+> emite, cierto; pero lo que escribe va a `display`, y `display` entra al `<input>` con
+> `v-maska`: maska lo reformatea, dispara `onMaska` → `syncFromMaska` → **`emit`**. O sea que
+> `MoneyInput` **sí redondea y emite en silencio** cuando el valor entrante no es
+> representable en los decimales de la moneda. Medido en `mermas.vue` sacando el prop
+> `:decimales="4"`: un costo de `6.5` en CLP salió al POST como `"7"` — 7,69% de
+> sobrevaloración, sin que nadie tocara el campo. Por eso la Task 4 del plan **no se ejecutó**
+> y `mermas.vue` va a su propio frente
+> ([`2026-08-28-merma-sin-costo-tipeado-design.md`](2026-08-28-merma-sin-costo-tipeado-design.md)).
+> La regla del §2 **sigue en pie** donde el costo se tipea sin cantidad —el ajuste de costo—;
+> lo que no vale es extenderla a un campo cuyo selector gobierna cantidad y costo a la vez.
+> Detalle y criterio: [`docs/patterns/frontend.md`](../../patterns/frontend.md) §8.
+> ⚠️ **Lo que esto le hace al párrafo de abajo NO se midió.** Por el mismo mecanismo, la
+> sugerencia de 4 decimales de `DesfasesPanel` en un `MoneyInput oficial` (CLP, 0 decimales)
+> debería redondearse sola al montar, sin que nadie toque el campo — pero eso es deducción,
+> no medición: el número del 7,69% salió de `mermas.vue`, no de este panel. **Antes de citar
+> el párrafo siguiente en cualquier dirección, medirlo.**
+
+**Texto original, SUPERADO — se conserva porque es lo que se le prometió al owner al decidir,
+no porque siga valiendo. No citarlo:**
+
+> ~~`DesfasesPanel` muestra una sugerencia de 4 decimales en un input de 0 decimales.
+> **Medido: el modelo NO se trunca solo** — el `watch` de `MoneyInput` solo escribe
+> `display`, nunca emite. La sugerencia se aplica exacta si nadie toca el campo; si la
+> editan, queda en pesos enteros. Bajo esta decisión eso **es el comportamiento correcto**,
+> no un bug: el motor propone con su precisión, la persona corrige con la suya.~~
+
+Lo que hay que hacer con `DesfasesPanel`, entonces: **medirlo**, no deducirlo de acá.

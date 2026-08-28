@@ -28,7 +28,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Catálogo de items (productos y servicios) | ✅ Implementado |
 | Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
 | Inventario serializado (modo `serie`) y por lote (modo `lote`) | ✅ Implementado (2026-06-28) |
-| Costeo por promedio ponderado móvil (CPP) + ajuste de costo auditado. Desde el 2026-08-22 las **reversiones** (`anulacion`, `devolucion`) también entran al promedio, con el costo que la salida original congeló en el kardex: revertir deja de inflar la valorización del inventario | ✅ Implementado (2026-07-26) |
+| Costeo por promedio ponderado móvil (CPP) + ajuste de costo auditado. Desde el 2026-08-22 las **reversiones** (`anulacion`, `devolucion`) también entran al promedio, con el costo que la salida original congeló en el kardex: revertir deja de inflar la valorización del inventario. Desde el **2026-08-28** el ajuste manual acepta el costo **por la unidad elegida** (`unidadCodigo` opcional en `POST /inventario/ajustes-costo`, conversión de tasa; el drawer gana el selector): la precisión la da elegir la unidad —`5050` por kilo— y no teclear decimales que la moneda del ítem no tiene | ✅ Implementado (2026-07-26) |
 | Conversión de unidades de medida (catálogo global + conversión en movimientos) | ✅ Implementado (2026-07-14) |
 | Tipo item ingrediente (insumos no vendibles) | ✅ Implementado (2026-07-15) |
 | Recetas + criticidad de ingredientes (bloqueante/no bloqueante) | ✅ Implementado (2026-07-15) |

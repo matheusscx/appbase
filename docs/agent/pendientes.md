@@ -139,6 +139,41 @@ minors del redondeo — se resuelven en una sola pasada.
 el código: el `as const` ya está en el archivo. Se saca de esta lista porque ya no es una
 tarea pendiente.
 
+### El e2e lee el body sin mirar el status, y por eso un fallo se diagnostica por el síntoma (2026-08-28)
+
+- [ ] **183 sitios en 33 specs e2e leen un campo del body de una respuesta sin haber
+  verificado su status** (`backend/test/*.e2e-spec.ts`; **medido el 2026-08-28**) — cuando la
+  request falla, el campo sale `undefined` **en silencio** y el rojo aparece más adelante, en
+  otra aserción y con otra cara. Vivido ese mismo día: una falla del e2e de inventario se
+  presentó como `costoActual: undefined` y se diagnosticó **por el síntoma** en vez de por el
+  código que había devuelto el POST, que nadie miró porque nadie lo afirmaba.
+  **Ejemplos verificados abriendo la línea:** `backend/test/caja.e2e-spec.ts:120` — el helper
+  `abrirCaja` hace `return (resActiva.body as CajaResponse).id;` sobre el `GET /caja/activa`
+  del camino 409, sin afirmar su status (el `POST` de arriba sí lo mira, en un `if`) — y
+  `backend/test/recuentos.e2e-spec.ts:306`, `expect((resItem.body as ItemResponse).stock)`
+  sobre un `GET /items/:id` que nunca se verificó.
+  **Es el mismo modo de falla que el commit `9784e1b6` ya barrió, pero para otra cosa:** ese
+  cubrió el **token** (29 archivos, 71 sitios, `access_token` leído sin status ⇒ `Bearer
+  undefined` ⇒ 401 en la ruta siguiente, no en la que falló). Los **ids y campos del body**
+  quedaron afuera, y son estos.
+  **Cómo se contó, para que se pueda recontar:** por cada `X.body` de un `*.e2e-spec.ts` se
+  busca hacia atrás la última declaración de `X` y se pregunta si en ese tramo aparece
+  `X.status`/`X.statusCode` o un `.expect(NNN)` encadenado; si no aparece ninguno, es un
+  sitio. Denominador: **992** ocurrencias de `.body` en 49 archivos
+  (`grep -o '\.body' backend/test/*.e2e-spec.ts | wc -l`), o sea que ~81% ya está cubierto y
+  esto es la cola. ⚠️ El número es de un heurístico, no de un parser: entra algún
+  falso positivo (un status mirado dentro de un `if` que envuelve el `.body`, como el propio
+  helper de caja) y quedan afuera los helpers cuyo llamador verifica. Sirve para dimensionar
+  y para ordenar por archivo (`caja` 46, `papelera` 21, `recuentos` 12, `ventas` 11), no como
+  cifra exacta.
+  **Cierre:** una aserción de status antes de cada lectura, con el molde que ya dejó
+  `9784e1b6`. No hay nada que preguntar ni diseñar; sí hay que **buscar por conducta y no por
+  forma** —hay varias formas de helper y ninguna búsqueda de texto las cubre todas—, que es
+  la lección que ese commit dejó escrita.
+  📌 Va de a un archivo por commit o en tandas chicas: tocar 33 specs de una es un diff que
+  nadie revisa, y cada aserción nueva puede destapar un test que estaba verde sin ejercitar
+  nada (le pasó a `ventas` en la barrida del token).
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
@@ -637,8 +672,8 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   riesgo**, porque la oficial de todos los tenants del seed es el peso: mismo `.` como
   agrupador, mismo entero que ningún validador ve. Y hay dos más atados a un `:moneda-id`
   dinámico y sin prop `decimales`, que tampoco están en la cuenta de los 7:
-  `inventario/index.vue:347` (`costoNuevo` del ajuste) y `propinas/index.vue:330` (el monto
-  manual del reparto). Se contaron aparte los de escala fija
+  `inventario/index.vue:395` (`costoNuevo` del ajuste — era `:347` antes del selector de
+  unidad del 2026-08-28) y `propinas/index.vue:330` (el monto manual del reparto). Se contaron aparte los de escala fija
   porque ahí el decimal es *legítimo* (un costo de `5,0500`/g) y el error es más fácil de
   cometer; en un campo de 0 decimales teclear un separador ya es un tecleo sin sentido. En
   todos, teclear el separador equivocado guarda ×10 en silencio.
@@ -654,6 +689,43 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   "precio extra" del **aplicar en lote** de `grupos-modificadores.vue` se quedó con `UInput`
   pelado el 2026-08-26 en vez de estrenar `MoneyInput` — ahí el mismo número se aplica a **N
   recetas de una sola vez**, así que el ×10 se multiplica por N. Está escrito en el template.
+
+  ✅ **Achicado el 2026-08-28: el caso genuinamente ambiguo se saca, no se resuelve.** La
+  ambigüedad de verdad —donde `1.500` significa a la vez `1500` y `1,5`— vive **solo** en un
+  campo de 4 decimales sobre un ítem en pesos; con 0 o 2 decimales no hay ningún caso
+  (medido: 0 sobre un corpus de 3332 cadenas —
+  [`investigaciones/2026-08-28-separador-decimal-vs-miles.md`](investigaciones/2026-08-28-separador-decimal-vs-miles.md)).
+  Decisión del owner: **los inputs de costo siguen los decimales de la moneda del ítem, y la
+  precisión la da elegir la unidad** —
+  [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md),
+  [`plans/2026-08-28-ajuste-costo-por-unidad.md`](../superpowers/plans/2026-08-28-ajuste-costo-por-unidad.md).
+  **Aplicado en el ajuste de costo** (`inventario/index.vue`): `POST
+  /inventario/ajustes-costo` acepta `unidadCodigo`, el drawer tiene selector y el campo
+  nunca tuvo el prop, así que ahí el ×10 ya no puede venir de un decimal legítimo.
+
+  **Lo que queda abierto de esta entrada, tras ese recorte:**
+  1. Que `MoneyInput` **rechace** una cadena inválida en 0 decimales en vez de inventar un
+     número. Es la mitad que el owner decidió en concepto y no está construida: toca el
+     contrato del componente y obliga a reescribir 3 tests que hoy documentan el bug.
+  2. El **barrido de los `:decimales="4"` restantes** — recontados el 2026-08-28 con el
+     mismo grep: siguen siendo 7, los 6 de `items.vue` (`:1620`, `:1691`, `:1823`, `:1969`,
+     `:2121`, `:2344`) más `mermas.vue:468`. ⚠️ Y el criterio para sacarlos **cambió**: no
+     alcanza con que el campo tenga selector de unidad, tiene que ser un selector que
+     gobierne **solo el costo**. Medido el 2026-08-28 en `mermas.vue`: ahí el mismo selector
+     gobierna la cantidad y el costo, así que mermar 100 g de un producto en kilos arrastra
+     el costo a `6,5`/g, que en CLP no existe — y sacando el prop el POST llevó `"7"` en vez
+     de `"6.5"`, **7,69% de sobrevaloración**, sin que nadie toque el campo porque viene
+     prefilleado. `MoneyInput` no avisa: **redondea y emite en silencio** (el `watch` solo
+     escribe `display`, pero ese `display` entra al `<input>` con `v-maska`, dispara
+     `onMaska` y emite). Eso corrige el §4 de la spec, que da por bueno lo contrario.
+  3. `ReembolsoModal` (moneda del tenant contra una orden siempre CLP) — ortogonal, sigue.
+
+  📌 **El caso de `mermas.vue` se fue a un frente propio y NO se resuelve acá:** el costo se
+  maneja en el producto y el formulario de merma deja de pedirlo —
+  [`specs/2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md),
+  [`plans/2026-08-28-merma-sin-costo-tipeado.md`](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
+  Mientras ese frente no cierre, `mermas.vue:468` **conserva** su `:decimales="4"` a
+  propósito: sacarlo sin sacar el campo es el 7,69% de arriba.
 
 ### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
 
@@ -728,6 +800,42 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   [`resueltos.md`](resueltos.md)—. Para el pool **no hace falta inventar nada**: `setup-pool.ts`
   ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
   tiempo entre `createQueryRunner()` y el `BEGIN`.
+
+### El drawer de ajuste de costo cambia de unidad y no toca el número ya tipeado (2026-08-28)
+
+- [ ] **En `frontend/app/pages/inventario/index.vue` (selector en `:381-392`, `MoneyInput` en
+  `:394-399`), cambiar la unidad después de tipear reinterpreta el número sin avisar**
+  (frontend; lo levantó la revisión independiente del propio frente que agregó el selector).
+  Tipear `5050` con la unidad en `g` y después pasar el selector a `kg` manda `5050` "por kg":
+  el backend lo divide por 1000 y persiste `5.0500`/g. **Lo único que cambia en pantalla es la
+  etiqueta** (*"Costo nuevo (por kg)"*), y el campo "Costo vigente" de arriba (`:373-379`) se
+  muestra **sin unidad** —siempre en base— justo al lado, que es la comparación que más induce
+  a error en el caso que la feature vino a habilitar. No viola ninguna invariante: se manda
+  exactamente lo tipeado bajo la unidad visible. Es riesgo de plata mal cargada, ×1000.
+  ⚠️ **El molde de `mermas.vue` NO se copia tal cual.** Ahí hay un `watch(() =>
+  form.value.unidadCodigo)` (`mermas.vue:162-165`) que llama `prefillCostoUnitario()`, o sea
+  **repone el costo del producto y pisa lo tipeado**. En el ajuste no hay prefill —el campo
+  nace vacío—, así que ese watch no transfiere.
+  **Lo que falta es elegir el cierre, y las dos opciones son baratas:** (a) convertir lo
+  tipeado al cambiar de unidad, que preserva la intención pero mueve un número que la persona
+  escribió; (b) limpiar el campo al cambiar de unidad, que no adivina nada y obliga a
+  retipear. En cualquiera de las dos, mostrar el "Costo vigente" **también** en la unidad
+  elegida cierra la mitad visual del problema.
+
+### El factor de conversión se cuantiza a 4 decimales, y como factor eso es el peor caso (2026-08-28)
+
+- [ ] **`convertirConMapa` hace `toDecimalPlaces(4, ROUND_HALF_UP)`
+  (`backend/src/modules/catalog/catalog.service.ts:173-176`), y `registrarAjusteCosto` lo usa
+  como divisor con cantidad `1`** (`inventario.service.ts:396-403`) — con una cantidad real el
+  redondeo es proporcionalmente chico; con cantidad 1 es el peor caso de precisión relativa.
+  **Hoy no se manifiesta y por eso no es urgente:** los factores del catálogo sembrado son `1`,
+  `100` y `1000` (`seeder.service.ts:287-346`), todos exactos. Se anota porque una unidad
+  futura con factor que no sea potencia de 10 (lb, oz) mete error relativo en el costo, y una
+  con factor menor a `1e-4` respecto de la base dispara el `BadRequestException` de
+  `catalog.service.ts:180-183` con un mensaje **engañoso** para este camino: habla de "la
+  precisión de stock" en un ajuste que no mueve stock. Cierre mínimo: anotar el límite en el
+  comentario de `registrarAjusteCosto` (`inventario.service.ts:381-392`), que hoy explica por
+  qué se reusa el util pero no que el util cuantiza.
 
 ## 3. Ya decidido, falta construir
 

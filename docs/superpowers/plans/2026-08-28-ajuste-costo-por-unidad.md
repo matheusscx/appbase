@@ -4,7 +4,7 @@
 
 **Goal:** Que el ajuste manual de costo acepte el costo "por la unidad elegida" —igual que ya hacen la merma y la entrada de stock—, para que la precisión venga de elegir la unidad y no de teclear decimales que la moneda no tiene.
 
-**Architecture:** `AjusteCostoDto` gana un `unidadCodigo` opcional. `registrarAjusteCosto` lee la unidad base del producto y, si difieren, convierte la **tasa** reutilizando `convertirCostoUnitario` con `cantidadIngresada = '1'` y como divisor el factor `convertirUnidad('1', elegida, base)`. Sin `unidadCodigo` el comportamiento es idéntico al de hoy. En el frontend, el drawer de ajuste replica el selector que `mermas.vue` ya tiene, y el input de costo de mermas deja de forzar 4 decimales.
+**Architecture:** `AjusteCostoDto` gana un `unidadCodigo` opcional. `registrarAjusteCosto` lee la unidad base del producto y, si difieren, convierte la **tasa** reutilizando `convertirCostoUnitario` con `cantidadIngresada = '1'` y como divisor el factor `convertirUnidad('1', elegida, base)`. Sin `unidadCodigo` el comportamiento es idéntico al de hoy. En el frontend, el drawer de ajuste replica el selector que `mermas.vue` ya tiene. (El plan original también sacaba los 4 decimales del costo de mermas; **eso se descartó** — ver Task 4.)
 
 **Tech Stack:** NestJS + TypeORM (SQL raw vía `manager.query`), PostgreSQL 15, Decimal.js, Jest + supertest (e2e), Nuxt 4 + Nuxt UI, Vitest.
 
@@ -36,7 +36,7 @@
 | `backend/src/modules/inventario/inventario.service.spec.ts` | Unit de la conversión de tasa | 1 |
 | `backend/test/inventario.e2e-spec.ts` | E2E del ajuste con unidad distinta de la base | 2 |
 | `frontend/app/pages/inventario/index.vue` | Selector de unidad + etiqueta "Costo nuevo (por X)" | 3 |
-| `frontend/app/pages/mermas.vue` | Sacar `:decimales="4"` del costo unitario | 4 |
+| `frontend/app/pages/mermas.vue` | ⛔ Sacar `:decimales="4"` del costo unitario — **descartado, ver Task 4** | 4 |
 | `docs/features/inventario-kardex.md` · `docs/ESTADO.md` · `docs/agent/pendientes.md` | Documentación viva | 5 |
 
 ---
@@ -53,7 +53,7 @@
 - Consumes: `convertirCostoUnitario(cantidadIngresada, costoUnitario, cantidadConvertidaABase): string` de `common/utils/costo-conversion-unidad.util.ts`; `CatalogService.convertirUnidad(cantidad, codigoDesde, codigoHacia): Promise<string>`.
 - Produces: `AjusteCostoDto.unidadCodigo?: string`. `registrarAjusteCosto` mantiene su firma y su retorno `{ movimientoId, costoAnterior, costoNuevo }`; `costoNuevo` es siempre **en unidad base**.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 En `inventario.service.spec.ts`, siguiendo el molde de los tests que ya existen para `registrarAjusteCosto`:
 
@@ -82,12 +82,12 @@ it('sin unidadCodigo el costo se interpreta en unidad base, como hasta hoy', asy
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd backend && npx jest inventario.service.spec --silent`
 Expected: FAIL — el primero por `5050.0000` en vez de `5.0500` (hoy no convierte); el segundo debería pasar ya (es la regresión que protege el camino actual).
 
-- [ ] **Step 3: Agregar el campo al DTO**
+- [x] **Step 3: Agregar el campo al DTO**
 
 En `ajuste-costo.dto.ts`, junto a los campos existentes:
 
@@ -105,7 +105,7 @@ En `ajuste-costo.dto.ts`, junto a los campos existentes:
 
 Agregar `IsOptional` al import de `class-validator` (hoy no está).
 
-- [ ] **Step 4: Importar `CatalogModule` e inyectar `CatalogService`**
+- [x] **Step 4: Importar `CatalogModule` e inyectar `CatalogService`**
 
 `InventarioModule` **no** importa `CatalogModule` hoy. Agregarlo a `imports` (verificado: `CatalogModule` no importa `InventarioModule`, así que no hay ciclo):
 
@@ -116,7 +116,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 
 E inyectar `private readonly catalogService: CatalogService` en el constructor de `InventarioService`.
 
-- [ ] **Step 5: Convertir la tasa en `registrarAjusteCosto`**
+- [x] **Step 5: Convertir la tasa en `registrarAjusteCosto`**
 
 Agregar `p.unidad_medida` al `SELECT` que ya existe (línea ~358, el que trae `i.tipo, p.costo_actual` — mantiene su `eliminado_el IS NULL`), y convertir **antes** del `toFixed(ESCALA_COSTO)`:
 
@@ -142,16 +142,16 @@ const costoNuevo4 = costoEnBase.toFixed(ESCALA_COSTO);
 
 Reemplazar el `costoNuevo.toFixed(ESCALA_COSTO)` de hoy por `costoEnBase`, y dejar el resto (la comparación contra el costo vigente y el `registrarMovimiento`) intacto — **la comparación "igual al vigente" tiene que correr sobre el costo ya convertido**, o cargar 5050/kg sobre un producto que ya vale 5,05/g dejaría un ajuste que no cambia nada.
 
-- [ ] **Step 6: Correr los tests y verificar que pasan**
+- [x] **Step 6: Correr los tests y verificar que pasan**
 
 Run: `cd backend && npx jest inventario.service.spec --silent`
 Expected: PASS los dos.
 
-- [ ] **Step 7: Matar un mutante**
+- [x] **Step 7: Matar un mutante**
 
 Borrar el bloque `if (dto.unidadCodigo && …)` y correr de nuevo: el primer test tiene que fallar. **Revertir el mutante y verificar en los logs del contenedor que el backend reinició** antes de seguir.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/modules/inventario backend/src/modules/inventario/inventario.module.ts
@@ -168,7 +168,7 @@ git commit -m "feat(inventario): el ajuste de costo acepta el costo por la unida
 **Interfaces:**
 - Consumes: `POST /api/inventario/ajustes-costo` con `{ itemId, costoNuevo, unidadCodigo, comentario }`.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ⚠️ Este archivo tiene **6 aserciones de status agregadas en la sesión del 2026-08-28 y sin commitear**. Si siguen sin commitear al empezar, commitearlas aparte antes de tocar nada.
 
@@ -210,17 +210,17 @@ it('el ajuste de costo acepta el costo por una unidad distinta de la base', asyn
 });
 ```
 
-- [ ] **Step 2: Resetear la base y correr**
+- [x] **Step 2: Resetear la base y correr**
 
 Run: `./scripts/reset-db.sh && cd backend && npm run test:e2e -- inventario`
 Expected: FAIL en la aserción de `5.0500` si Task 1 no está, PASS si está.
 
-- [ ] **Step 3: Verificar que la base no se movió**
+- [x] **Step 3: Verificar que la base no se movió**
 
 Run: `./scripts/reset-db.sh --verificar`
 Expected: `1 solo 'Seed complete'`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/test/inventario.e2e-spec.ts
@@ -238,25 +238,25 @@ git commit -m "test(inventario): e2e del ajuste de costo por unidad elegida"
 - Consumes: `useUnidadesMedidaStore()` (`magnitudDe`, `unidades`), el mismo que usa `mermas.vue:51,118-128`.
 - Produces: `ajusteCostoForm.unidadCodigo: string` — se manda en el body solo si no está vacío.
 
-- [ ] **Step 1: Leer el molde antes de escribir**
+- [x] **Step 1: Leer el molde antes de escribir**
 
 Abrir `frontend/app/pages/mermas.vue:51`, `:102`, `:118-137` y copiar la forma: `unidadesOpts`, la condición de mostrar el selector (solo si hay más de una unidad en la magnitud) y la etiqueta dinámica *"Costo unitario (por {unidad})"*. **No inventar una forma nueva** — el proyecto ya tiene esta.
 
-- [ ] **Step 2: Agregar el campo al form y el selector al template**
+- [x] **Step 2: Agregar el campo al form y el selector al template**
 
 `ajusteCostoForm` gana `unidadCodigo: ''`. El `UFormField` de "Costo nuevo" pasa a usar la etiqueta dinámica, y arriba se agrega el selector con la misma condición que mermas. El `MoneyInput` **se deja como está** — con `:moneda-id` y sin `:decimales`, que es exactamente lo que la spec quiere.
 
-- [ ] **Step 3: Mandar `unidadCodigo` solo si está elegida**
+- [x] **Step 3: Mandar `unidadCodigo` solo si está elegida**
 
 En la función que arma el body del `POST /inventario/ajustes-costo`, agregar el campo condicionalmente (mandar `''` haría fallar el `@IsNotEmpty()`).
 
-- [ ] **Step 4: Verificar en el navegador, no solo compilando**
+- [x] **Step 4: Verificar en el navegador, no solo compilando**
 
 Run: `cd frontend && npm run build && npm run typecheck:ratchet && npm run design:check`
 Después, con `docker-compose up`: abrir `/inventario`, elegir un producto en gramos, comprobar que el selector aparece, que la etiqueta dice "por kg", cargar `5050` y verificar que el detalle del ítem queda en `5.0500`.
 ⚠️ Este drawer no tiene test unitario: build y typecheck **no ven** bugs de runtime (auto-import de Nuxt, campos que no viajan en el body). El smoke de navegador no es opcional.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/app/pages/inventario/index.vue
@@ -266,6 +266,18 @@ git commit -m "feat(inventario): selector de unidad en el ajuste de costo"
 ---
 
 ### Task 4: La merma deja de forzar 4 decimales
+
+⛔ **NO SE EJECUTÓ — y no se va a ejecutar desde este plan (2026-08-28).** Paró en el gate
+de su propio Step 1: en `mermas.vue` el selector de unidad gobierna la **cantidad y el costo
+a la vez**, así que mermar 100 g de un producto en kilos arrastra el costo a `6,5`/g, que en
+CLP no existe; sacando el prop el POST llevó `"7"` en vez de `"6.5"` — **7,69% de
+sobrevaloración**, sin que nadie toque el campo porque viene prefilleado, y sin aviso
+(`MoneyInput` redondea y emite en silencio vía maska). Decisión del owner: el costo se maneja
+**en el producto** y el formulario de merma deja de pedirlo. Eso reemplaza a esta tarea y
+vive en su propio frente —
+[spec](../specs/2026-08-28-merma-sin-costo-tipeado-design.md) ·
+[plan](2026-08-28-merma-sin-costo-tipeado.md).
+`mermas.vue` **conserva** su `:decimales="4"` hasta que ese frente cierre.
 
 **Files:**
 - Modify: `frontend/app/pages/mermas.vue` (el `MoneyInput` de costo unitario, línea ~465)
@@ -301,19 +313,19 @@ git commit -m "fix(mermas): el costo unitario sigue los decimales de la moneda, 
 **Files:**
 - Modify: `docs/features/inventario-kardex.md`, `docs/ESTADO.md`, `docs/agent/pendientes.md`, `docs/patterns/frontend.md`
 
-- [ ] **Step 1: Documentar la regla nueva**
+- [x] **Step 1: Documentar la regla nueva**
 
 En `docs/patterns/frontend.md`, junto a lo que ya dice de `MoneyInput`: **los inputs de costo siguen los decimales de la moneda del ítem; la precisión viene del selector de unidad, no del prop `decimales`.** Corregir ahí la parte que hoy presenta el prop `decimales` como la forma correcta para costos.
 
-- [ ] **Step 2: Actualizar el feature doc y el estado**
+- [x] **Step 2: Actualizar el feature doc y el estado**
 
 `docs/features/inventario-kardex.md`: el ajuste de costo acepta `unidadCodigo`. `docs/ESTADO.md`: la fila del CPP/ajuste de costo menciona la unidad elegible, con fecha.
 
-- [ ] **Step 3: Actualizar el backlog**
+- [x] **Step 3: Actualizar el backlog**
 
 En `docs/agent/pendientes.md`, la entrada del `MoneyInput` ×10: dejar asentado que el frente ambiguo de 4 decimales **se cerró sacándolo** en los campos de costo, y que lo que queda abierto es solo el rechazo en 0 decimales y el barrido de los `:decimales="4"` de `items.vue`. Enlazar la investigación y esta spec.
 
-- [ ] **Step 4: Gate completo**
+- [x] **Step 4: Gate completo**
 
 ```bash
 cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
@@ -322,11 +334,25 @@ cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run
 
 ⚠️ `reset-db.sh` **antes** del `test:e2e`, y `reset-db.sh --verificar` después. El e2e va **completo**, no un subset.
 
-- [ ] **Step 5: Revisión independiente**
+✅ **Corrido el 2026-08-28, los 10 comandos con exit code 0** (leído el `$?`, no la última
+línea): `reset-db.sh` (1 seed, 18s) · backend `lint:check` (0 errores, 161 warnings
+preexistentes) · `typecheck` · `test` (113 suites, 2354 tests) · `test:e2e` **completo**
+(51 suites pasadas + 2 skipped, 653 tests, 139,5s) · `reset-db.sh --verificar` ("mismo
+contenedor y 1 solo 'Seed complete'") · frontend `build` · `test` (80 files, 902 tests) ·
+`typecheck:ratchet` (0 regresiones) · `design:check` (125 `.vue`, 0 hardcodeados).
+
+- [x] **Step 5: Revisión independiente**
 
 Invocar `verify-feature` (paso 7) sobre el diff completo. El pre-commit exige el recibo.
 
-- [ ] **Step 6: Commit**
+✅ `domain-reviewer` sobre el diff de los **tres commits + las docs**: veredicto **LIMPIO**
+(sin invariantes violadas, sin N+1, aritmética de la conversión verificada, los dos punteros
+`archivo:línea` citados en el backlog abiertos y correctos). Los hallazgos que devolvió y que
+**no** se arreglaron acá —por ser código y esta tarea ser solo documentación— quedaron
+anotados en [`pendientes.md`](../../agent/pendientes.md) §2: el selector que reinterpreta el
+número ya tipeado, y el factor de conversión cuantizado a 4 decimales usado con cantidad 1.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/
