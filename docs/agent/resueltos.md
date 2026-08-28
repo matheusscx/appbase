@@ -17,6 +17,138 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los tres residuos del frente de promociones, y la cota que resultó ser otra (cerrado 2026-08-28)
+
+**Venía de la sección 1** ("Mecánico — no hay nada que preguntar ni diseñar"). Entrada
+mudada verbatim desde `pendientes.md`:
+
+> - [ ] **`nivelRedondeo: 'documento'` + promo puede dejar el total del documento a ±1 peso,
+>   sin test que lo cubra** (backend, `calculo-precios.engine.ts:1710` y `:1884`) — (…) Lo que
+>   falta es un test que fije esa cota (`nivelRedondeo: 'documento'` + una promo + un
+>   descuento de venta, verificando que el total nunca se desvía más de 1 unidad de la
+>   escala) para que quede protegido y no solo medido a mano una vez.
+> - [ ] **`PromocionesAplicadas.vue` no filtra el monto `'0'` donde el ticket sí** (…) Cierre:
+>   agregar el mismo `.filter(p => new Decimal(p.monto).gt(0))` antes del `v-for`.
+> - [ ] **`VentaDetalleDrawer.vue` sigue sin spec propio** (…) Cierre: un spec de render
+>   (mismo molde que `promociones.nuxt.spec.ts`) que monte el drawer con una venta congelada
+>   de ejemplo (incluida una aplicación cross-línea) y afirme las filas y el total.
+
+**Los tres salieron. Dos de ellos con la entrada corregida por lo medido**, que es lo que
+hace que valga la pena leer este cierre.
+
+### 1. El filtro del monto `'0'`: la causa que la entrada nombraba no existe
+
+La entrada decía que el monto `'0'` lo trae *"la familia perdedora del interruptor
+promo-vs-catálogo, que llega con traza pero sin plata"*. **Falso, y lo desmiente la doc del
+propio módulo** ([`motor-promociones.md`](../features/motor-promociones.md)): la promo
+perdedora *"se descarta **entera y sin traza**"*; el que deja traza en `'0'` es el
+**descuento de catálogo** perdedor, que es otra familia y no pasa por este componente.
+
+Antes de escribir un filtro sobre un estado posiblemente imposible se buscó de dónde SÍ sale
+un `TrazaPromo` con monto cero, leyendo el motor: sale del **piso en cero**
+(`calculo-precios.engine.ts`, el `for (const promo of params.promos ?? [])`), donde
+`monto = tope` y `tope = Decimal.max(disponible, ZERO)`. Con el catálogo llevándose la línea
+entera, `disponible` es `0`, la promo se recorta a `0` **y la traza igual se empuja**, con su
+advertencia al lado.
+
+Eso se fijó primero, del lado del motor —`calculo-precios.engine.spec.ts`, *"un descuento que
+se lleva la línea entera deja la promo en traza con monto 0"*— y recién después se agregó el
+filtro. El orden importa: un filtro sobre un estado inalcanzable es código muerto que además
+se lee como si cubriera algo.
+
+El filtro va sobre una `computed`, no inline en el `v-for`, porque el `v-if` del contenedor
+tiene que mirar **la lista ya filtrada**: mirando la cruda queda un `div` vacío ocupando el
+`gap` del carrito. Los tres consumidores (`CarritoPanel.vue`, `CarritoOnline.vue`,
+`salones/index.vue`) pasan la misma expresión verbatim, así que el componente los cubre a los
+tres. Spec nuevo: `PromocionesAplicadas.nuxt.spec.ts`, 3 casos. **Mutante:** volver el
+template al `promociones` crudo mata 2 de los 3.
+
+### 2. El spec del drawer, y una suposición de la entrada que el código no sostiene
+
+La entrada pedía afirmar *"cómo se agrupa una aplicación cross-línea por `aplicacion`"*. El
+drawer **no agrupa por `aplicacion`**: el campo viaja en `PromocionCongelada` y **ningún
+lector lo lee**. Cada fila congelada se filtra por `detalleId` y baja bajo su propia línea. El
+spec fija lo que el código hace —una fila por línea, cada una con su plata— y no la agrupación
+que la entrada daba por existente.
+
+`VentaDetalleDrawer.nuxt.spec.ts`, 4 casos, con las cuatro reglas que promociones agregó sin
+cobertura: familia propia `'Promoción'` (no `'Descuento'`), la aplicación cross-línea sin
+agrupar, la promo **después** del catálogo dentro del paso `descuentos`, y el total rotulado
+"Descuentos" **incluyendo** la plata de la promo —al revés que el ticket, que la resta del
+agregado y la nombra aparte—. **Cuatro mutantes, uno por caso**, cada uno matando exactamente
+su test: cambiar la familia a `'Descuento'`; invertir `[...reglas, ...promos]`; hacer que el
+total reste las promos (o sea, darle al drawer la regla del ticket); y agrupar la aplicación
+cross-línea en una sola fila sumada —el mutante que implementa justamente lo que la entrada
+suponía—. Ese último mata **dos** (también el de la familia, porque al sumar cambia el monto
+de la fila): matar de más es más fuerte que matar de menos, pero no es "uno por caso".
+
+Dos cosas del montaje que costaron y quedan como molde: el drawer se monta **cerrado** y se
+abre después (`watch` sin `immediate`: uno que nace abierto nunca pide la venta), y el
+fallback del mock de `useApiFetch` devuelve `[]` y **nunca `null`** — el drawer dispara
+`ensureLoaded()` de stores que a este spec no le importan, y esos stores asignan lo que
+venga: con `null` el store queda en `null` y explota más tarde adentro de una `computed`,
+dejando `vitest run` en exit 1. Hidratar el store a mano **no** hace falta (se probó
+sacándolo: sigue en verde), y decir que sí hacía falta fue el primer intento de este mismo
+cierre, corregido por la revisión independiente. `AppDrawer` stubeado, mismo motivo que en
+`inventario/index.nuxt.spec.ts`.
+
+### 3. La cota de `documento`: la entrada pedía fijar un número equivocado
+
+La entrada pedía un test *"verificando que el total nunca se desvía más de 1 unidad de la
+escala"*. Se midió antes de escribirlo, y la cota **no es esa ni es una constante**.
+
+Primero hubo que descartar el barrido inicial entero: se corrió sobre CLP con
+`escalaCalculo: 6`, y esa config **no se puede pedir** — `tenants.service.ts:1468` rechaza
+`'documento'` con moneda de 0 decimales y `:1495` lo rechaza con `escalaCalculo > 4`. El
+número que salía de ahí (3,37 pesos) describía un estado inalcanzable. Rehecho sobre una
+forma que sí se puede pedir —moneda de 2 decimales, escala 4— (⚠️ **medición superada: la
+referencia de esta tabla resultó ser mala, ver los dos párrafos siguientes**):
+
+| Líneas del carrito | 1 | 2 | 3 | 5 | 8 |
+|---|---|---|---|---|---|
+| Desvío peor, en unidades de la escala | 2,22 | 3,23 | 4,31 | 6,39 | 9,23 |
+
+O sea **~1 unidad por línea**, no ±1 en total. Sin descuento de nivel venta el desvío cae a
+0,0099 (por debajo de una unidad), que es el caso del que salía la cifra vieja. La causa no es
+el nivel: son `repartirProporcional` y la conversión del descuento de venta a neto, que
+cuantizan **siempre, sin mirar `nivelRedondeo`**, amplificadas después por el IVA —verificado
+por mutante: sacando el `cuantizar` del reparto, el desvío del caso congelado cae de 0,0323 a
+0,0023—.
+
+Y ahí hubo que medir **dos veces más**, porque las dos primeras redacciones generalizaron
+más allá de lo medido y la revisión independiente bloqueó por eso las dos veces:
+
+- La segunda decía que con `escalaCalculo == decimalesMoneda` el desvío era **exactamente
+  cero**. Era un artefacto: la referencia "fina" del test es `decimalesMoneda ==
+  escalaCalculo`, así que en esas configs se estaba comparando **la config contra sí misma**.
+- La tercera —contra aritmética de alta precisión, escala y moneda de 10 decimales— dice lo
+  que de verdad pasa. Lo que se va a cero no es el desvío: es la **penalidad de `documento`
+  sobre `linea`**. Debajo queda un piso de 1,4 a 3,0 unidades que **`linea` también tiene**,
+  y que no es un defecto del nivel sino el precio de redondear.
+
+Con esa referencia aparecieron dos cosas que ninguna medición anterior mostraba. Primero, que
+**hacen falta las dos condiciones juntas** (`'documento'` Y `escalaCalculo > decimalesMoneda`):
+con `'linea'`, subir la escala por encima de los decimales no agrega nada. Y segundo, que
+**sin descuento de nivel venta `documento` GANA**: se queda plano en ~1 unidad mientras
+`linea` acumula el redondeo de cada línea. El nivel cumple lo que promete; el hueco es la
+combinación con el descuento de venta, donde crece ~1 unidad por línea **sin techo** y `linea`
+crece sublineal. La tabla completa está en
+[`motor-calculo-precios.md`](../features/motor-calculo-precios.md).
+
+Lo que sí quedó probado, y es más fuerte que la cota que se pedía: **el camino de la promo es
+bit-idéntico al de un descuento de catálogo por la misma plata** (61.353 casos, coinciden en
+todos, incluido el peor). "La promo no empeora el redondeo" es verdad porque la promo **no
+tiene camino propio** de redondeo, no porque su desvío sea chico. Ese es el test que protege
+de verdad la afirmación, y es el primero de los dos que se escribieron.
+
+El segundo congela el desvío —**congela, no aprueba**—. Achicarlo exige tocar el motor, que
+por `CLAUDE.md` va solo: quedó como entrada de la sección 4, con la pregunta al owner.
+
+**El motor no se tocó**: `git diff --stat` del `.engine.ts` vacío al terminar, tras revertir
+los dos mutantes que se le aplicaron para verificar los tests.
+
+---
+
 ## El motor de promociones: catálogo, evaluador cross-carrito y familia propia del motor (cerrado 2026-08-27)
 
 **Venía de la sección 3** ("Ya decidido, falta construir"). Entrada mudada verbatim desde

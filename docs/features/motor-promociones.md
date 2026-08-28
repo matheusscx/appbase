@@ -202,16 +202,29 @@ que un 2x1 sobre una etiqueta de $993 no le cuesta un peso a la unidad "gratis".
   congelado. `config_calculo` gana `promosAcumulanDescuentos`.
 - **Drawer de venta** (`frontend/app/components/ventas/VentaDetalleDrawer.vue`): familia
   propia `'Promoción'` en el desglose expandido de la línea, mismo formato que
-  descuento/recargo/impuesto. Una aplicación cross-línea (combo) se lee línea por línea, con
-  el nombre repetido — es la derivación del total de ESA línea.
+  descuento/recargo/impuesto, y **después** de las reglas de catálogo dentro del paso
+  `descuentos` — el orden en que el motor las restó. Una aplicación cross-línea (combo) se
+  lee línea por línea, con el nombre repetido — es la derivación del total de ESA línea; el
+  campo `aplicacion` viaja en el congelado y esta pantalla **no** agrupa por él.
+  ⚠️ El total rotulado **"Descuentos"** del panel de totales **incluye la plata de las
+  promos** (`totalDescuentos` ya las trae sumadas), al revés que el ticket, que las resta del
+  agregado y las nombra aparte. Es deliberado: acá el desglose por línea ya nombra cada
+  promo, así que restarlas dejaría un agregado que no cuadra con nada. Congelado en
+  `VentaDetalleDrawer.nuxt.spec.ts` desde el 2026-08-28.
 - **Ticket** (`frontend/app/utils/ticket-builder.ts`): cada promo se imprime **nombrada**
   (`2x1 martes  −$5.000`), separada del agregado `Descuento` — `agregarPromocionesVenta`
   funde las aplicaciones de la misma promo en una sola fila, y
   `descuentoCatalogo = totalDescuentos − Σ promociones` evita contar la plata de promo dos
   veces (una en el agregado, otra en su fila nombrada). Igual que los recargos en cero: una
-  promo sin monto (perdió el interruptor) no se imprime.
+  promo sin monto no se imprime — y esa promo **no** es la que perdió el interruptor (esa se
+  descarta entera y sin traza, ver arriba), sino la que el **piso en cero** recortó hasta la
+  nada porque el catálogo ya se había llevado la línea.
 - **Carrito (POS / Salones / Tienda)**: la previsualización corre el mismo cálculo; la promo
-  aparece en el desglose con su nombre. Sin toasts nuevos.
+  aparece en el desglose con su nombre (`PromocionesAplicadas.vue`, el mismo componente en
+  las tres pantallas). Sin toasts nuevos. **Una promo con monto `'0'` no se dibuja**, igual
+  que en el ticket: la produce el piso en cero cuando el catálogo ya se llevó la línea
+  entera, y lo que hay que contar en ese caso lo cuenta el aviso de al lado, no una fila
+  `-$0`. Alineado desde el 2026-08-28; hasta entonces el carrito la mostraba y el ticket no.
 
 ---
 

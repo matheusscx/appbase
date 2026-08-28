@@ -776,6 +776,29 @@ Dos consecuencias del stub que cuestan un rato descubrir:
 - **El contenido stubeado NO se teletransporta**, así que sus botones se buscan
   en el wrapper y no en `document.body` como los de un `UModal`.
 
+### Spec del COMPONENTE drawer (no de la página que lo abre)
+
+Montar el drawer directo —`mountSuspended(VentaDetalleDrawer, …)`— agrega dos
+trampas propias, las dos medidas el 2026-08-28:
+
+- **Se monta CERRADO y se abre después.** El `watch` que dispara la carga mira
+  `[open, ventaId]` y **no es `immediate`**: un drawer que nace con `open: true`
+  nunca pide su dato y el spec renderiza el estado vacío ("No se encontró la
+  venta") sin fallar. La forma correcta reproduce lo que hace la app:
+  `props: { open: false }` y después `await wrapper.setProps({ open: true })`.
+- **El fallback del mock de `useApiFetch` devuelve `[]`, nunca `null`.** El
+  drawer dispara `ensureLoaded()` de stores que al spec no le importan
+  (`useUnidadesMedidaStore`), y esos stores **asignan lo que venga**: con `null`
+  el store queda en `null` y explota más tarde adentro de una `computed`, como
+  *unhandled rejection*. Medido: `vitest run` en **exit 1** y los 4 tests en rojo
+  por una URL que el spec ni nombra. Hidratar el store a mano **no** hace falta
+  —`unidades` arranca en `[]` y `esFraccionaria` tiene fallback—: lo único que
+  hace falta es que el mock no devuelva `null`. (Verificado sacando el `hydrate`:
+  sigue en verde.)
+
+⚠️ De los dos casos: leer la última línea de `npm test` **no alcanza**. Un spec
+puede decir "4 passed" y salir 1. Se mira el exit code.
+
 ---
 
 ## 16. `truncate` + `min-w-0`: cuándo hace falta y cuándo es ruido

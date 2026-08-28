@@ -329,6 +329,45 @@ tiene que dar `totalFinal` exacto.
   decimales: no hay nada que ganar y las líneas quedarían con decimales que la moneda no
   tiene. Ver [preferencias-financieras.md](./preferencias-financieras.md).
 
+⚠️ **Lo que `documento` cuesta de más que `linea`, medido el 2026-08-28.** La comparación es
+contra **aritmética de alta precisión** (el mismo carrito con escala y moneda de 10
+decimales, donde no se cuantiza nada), no contra otra config del sistema: comparar una config
+contra sí misma da cero por definición y no mide nada. Carritos con IVA, moneda de 2
+decimales y `escalaCalculo` 4, peor caso sobre 2.103 carritos por tamaño, en unidades de la
+escala:
+
+| | `linea` | `documento` |
+|---|---|---|
+| **con** descuento de nivel venta, 1 / 2 / 3 / 5 / 8 líneas | 1,40 / 1,88 / 2,09 / 2,51 / 2,59 | 2,11 / 3,22 / 4,32 / 6,40 / **9,17** |
+| **sin** descuento de nivel venta, 1 / 2 / 3 / 5 / 8 líneas | 1,07 / 1,85 / 2,02 / 2,46 / 2,43 | 0,99 / 1,00 / 0,96 / 0,97 / **0,95** |
+
+Dos lecturas, y ninguna es "documento redondea peor":
+
+- **Sin descuento de nivel venta, `documento` es MEJOR** y además **plano** (~1 unidad,
+  no crece con el carrito), mientras `linea` acumula el redondeo de cada línea. Es la
+  promesa del nivel, cumplida.
+- **Con descuento de nivel venta, `documento` crece ~1 unidad por línea y no tiene techo**,
+  mientras `linea` crece **sublineal** (2,59 con ocho líneas). Ahí está el hueco.
+
+**La condición que lo enciende son las dos cosas juntas: `nivelRedondeo: 'documento'` Y
+`escalaCalculo > decimalesMoneda`.** Ninguna sola alcanza — barriendo las diez combinaciones
+`(decimalesMoneda, escalaCalculo)` que los guards dejan pedir, con `escalaCalculo ==
+decimalesMoneda` la penalidad de `documento` sobre `linea` es **0,00 en las cuatro configs
+donde eso pasa**, y con `'linea'` subir la escala por encima de los decimales no agrega nada.
+Lo que queda debajo de esa penalidad —el ~1,4 a 3,0 unidades que las dos columnas comparten—
+**no es un defecto del nivel: es lo que cuesta redondear**, y `linea`, el default de todos los
+tenants, lo tiene igual.
+
+**Por qué pasa:** `repartirProporcional` (el reparto del descuento de venta por línea) y la
+conversión de ese descuento a neto cuantizan **siempre, sin mirar `nivelRedondeo`**
+(`calculo-precios.engine.ts:1510` y `:1856`). Eso es inofensivo cuando la línea ya corre
+cuantizada, y es el hueco cuando corre fina. Verificado por mutante: sacando el `cuantizar`
+del reparto, el desvío del caso congelado cae de 0,0323 a 0,0023. La identidad aditiva del
+documento cierra en todos los casos medidos: el desvío es contra la aritmética, no entre las
+partes del comprobante. Congelado en `calculo-precios.engine.spec.ts` ("el cierre por
+documento se desvía de la aritmética fina más de una unidad de la escala") y
+[abierto como decisión](../agent/pendientes.md).
+
 **Lo que hereda por construcción.** Nada fuera del motor tuvo que cambiar: el vuelto de un
 pago en efectivo (`pagos.vuelto`, que llegaba a persistir `994942.5000`) queda entero
 porque se calcula sobre un total que ya lo está. Un monto que no pasa por el motor no se

@@ -2930,6 +2930,47 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         ]);
       });
 
+      /**
+       * El estado del que depende el filtro de las pantallas: una promo puede
+       * quedar en traza con monto `'0'`. **No es la promo que perdió el
+       * interruptor** —esa se descarta entera y sin traza— sino la que el piso
+       * en cero recortó hasta la nada porque el catálogo ya se había llevado la
+       * línea. La traza queda para poder explicarla, y el aviso la acompaña.
+       *
+       * Lo consumen `PromocionesAplicadas.vue` y `ticket-builder.ts`, que no la
+       * dibujan: una fila `-$0` no informa nada que el aviso no diga mejor.
+       */
+      it('un descuento que se lleva la línea entera deja la promo en traza con monto 0', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '1000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '500' }],
+              }),
+            ],
+            config: config({ promosAcumulanDescuentos: true }),
+          }),
+        );
+
+        const l = r.lineas[0];
+        expect(l.trazas.promociones).toHaveLength(1);
+        expect(l.trazas.promociones[0].monto).toBe('0.000000');
+        expect(l.descuentoAplicado).toBe('1000.000000');
+        expect(l.advertencias).toEqual([
+          {
+            titulo: 'Promoción "2x1 martes"',
+            detalle:
+              'no se aplicó completo porque superaba el monto disponible',
+          },
+        ]);
+      });
+
       it('el piso en cero topea la promo y avisa, igual que un descuento', () => {
         const r = calcularVenta(
           venta({
@@ -3583,6 +3624,149 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         expect(r.lineas[0].descuentoAplicado).toBe('3000.000000');
         expect(r.lineas[1].descuentoAplicado).toBe('1000.000000');
         expect(r.lineas[1].trazas.descuentos[0].monto).toBe('1000.000000');
+      });
+    });
+
+    /**
+     * `nivelRedondeo: 'documento'` deja las líneas finas y cuantiza solo el
+     * cierre. Estos casos usan una config **alcanzable** por la perilla del
+     * tenant, y por eso no reusan `cfgCLP`: `tenants.service.ts` rechaza
+     * `'documento'` cuando la moneda oficial no admite decimales, y también
+     * cuando `escalaCalculo > 4` (las columnas de plata son `NUMERIC(18,4)`).
+     * Moneda de 2 decimales + escala 4 pasa los dos guards.
+     */
+    describe('con nivelRedondeo documento', () => {
+      const cfgDocumento = config({
+        nivelRedondeo: 'documento',
+        decimalesMoneda: 2,
+        escalaCalculo: 4,
+      });
+      /**
+       * La misma venta con la moneda en la escala de cálculo: ahí `cuantizar`
+       * es la identidad, así que sus totales son los del motor **sin cuantizar
+       * a la moneda** — no aritmética exacta, que sería una escala mucho mayor
+       * (ver el ⚠️ del segundo caso). Alcanza como referencia para aislar lo
+       * que agrega la cuantización, y es una config real (una moneda de 4
+       * decimales, como la UF).
+       */
+      const cfgFino = config({
+        nivelRedondeo: 'documento',
+        decimalesMoneda: 4,
+        escalaCalculo: 4,
+      });
+
+      // Los montos de la promo son los del peor caso de un barrido que se corrió
+      // fuera del repo (no hay barrido en este archivo), no números redondos:
+      // con cifras que caen justo en la escala no hay nada que cuantizar y el
+      // caso no discrimina. Las cifras del barrido están en
+      // `docs/features/motor-calculo-precios.md`.
+      const PROMO_A = '152.8861';
+      const PROMO_B = '225.2085';
+
+      const carrito = (over: Partial<VentaResuelta> = {}): VentaResuelta =>
+        venta({
+          lineas: [
+            linea({
+              itemId: 'a',
+              precioUnitario: '997.30',
+              impuestos: [impuesto()],
+            }),
+            linea({
+              itemId: 'b',
+              precioUnitario: '1034.49',
+              impuestos: [impuesto()],
+            }),
+          ],
+          descuentosVenta: [regla({ valorPorcentaje: '0.10' })],
+          config: cfgDocumento,
+          ...over,
+        });
+
+      const conPromo = (over: Partial<VentaResuelta> = {}) =>
+        carrito({
+          promociones: [
+            aplicacion({
+              tipo: 'porcentaje',
+              valorEfectivo: '0.1500',
+              montosPorLinea: [
+                { lineaIndex: 0, monto: PROMO_A },
+                { lineaIndex: 1, monto: PROMO_B },
+              ],
+            }),
+          ],
+          ...over,
+        });
+
+      /**
+       * Lo que hace verdadera la frase "la promo no empeora el redondeo": no es
+       * que el desvío sea chico, es que la promo **no tiene camino propio** de
+       * redondeo. Su plata entra al mismo `descuentoAplicado` que el catálogo,
+       * así que por la misma plata el documento cierra igual, dígito por dígito.
+       * Barrido de 61.353 casos (2026-08-28): los dos caminos coinciden en
+       * TODOS, incluido el peor.
+       */
+      it('la promo cierra igual que un descuento de catálogo por la misma plata', () => {
+        const catalogo = calcularVenta(
+          carrito({
+            lineas: [
+              linea({
+                itemId: 'a',
+                precioUnitario: '997.30',
+                impuestos: [impuesto()],
+                descuentos: [descuentoFijo(PROMO_A)],
+              }),
+              linea({
+                itemId: 'b',
+                precioUnitario: '1034.49',
+                impuestos: [impuesto()],
+                descuentos: [descuentoFijo(PROMO_B, { id: 'd-cat-b' })],
+              }),
+            ],
+          }),
+        );
+
+        expect(calcularVenta(conPromo()).totales).toEqual(catalogo.totales);
+      });
+
+      /**
+       * El desvío que el cierre por documento se permite contra la aritmética
+       * de la escala de cálculo. **Medido el 2026-08-28, y NO es "una unidad de
+       * la escala"** como decía la entrada que pidió este test.
+       *
+       * ⚠️ La referencia de ACÁ (`cfgFino`) es el mismo motor sin cuantizar a la
+       * moneda, no aritmética exacta: sirve para aislar lo que agrega la
+       * cuantización, y no para medir el error absoluto. El barrido que compara
+       * contra alta precisión —y la tabla `linea` vs `documento` que sale de
+       * él— está en `docs/features/motor-calculo-precios.md`. En corto: con un
+       * descuento de nivel venta el desvío de `documento` crece ~1 unidad por
+       * línea y **no tiene techo** (2,11 con 1 línea, 9,17 con 8), mientras
+       * `linea` crece **sublineal** (2,59 con ocho líneas); **sin** descuento de nivel venta
+       * `documento` se queda plano en ~1 unidad y le gana a `linea`.
+       *
+       * No lo aporta la promo, que ni siquiera tiene camino propio (el caso de
+       * arriba): lo aportan las dos cuantizaciones que corren **siempre**, sin
+       * mirar `nivelRedondeo` —el reparto del descuento de venta por línea
+       * (`repartirProporcional`) y su conversión a neto—, amplificadas después
+       * por el IVA.
+       *
+       * Este test **congela la conducta, no la aprueba**: cambiar el motor para
+       * achicarla es territorio del owner (`CLAUDE.md`, "el motor va solo").
+       */
+      it('el cierre por documento se desvía de la aritmética fina más de una unidad de la escala', () => {
+        const doc = calcularVenta(conPromo());
+        const fino = calcularVenta(conPromo({ config: cfgFino }));
+
+        expect(doc.totales.totalFinal).toBe('1771.1400');
+        expect(fino.totales.totalFinal).toBe('1771.1077');
+        // 0,0323 sobre una escala de 0,01: 3,23 unidades, no 1.
+        expect(
+          new Decimal(doc.totales.totalFinal)
+            .minus(fino.totales.totalFinal)
+            .abs()
+            .toString(),
+        ).toBe('0.0323');
+        // Lo que el desvío NO rompe: el documento sigue sumando sus partes.
+        expect(identidadDocumento(doc)).toBe(true);
       });
     });
 
