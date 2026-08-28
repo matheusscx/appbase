@@ -128,6 +128,11 @@ async function abrirOReusarCaja(
  * con los motivos de `justificar` (vacío si no se pasa). Devuelve la respuesta
  * de la fase que terminó cerrando el flujo — `{estado, arqueo}` si auto-cerró
  * en fase 1, o `{caja, arqueo}` si necesitó la fase 2.
+ *
+ * **No afirma el status adentro, a propósito**: la mitad de los llamadores la
+ * usan como higiene de `afterAll` y descartan la respuesta, así que una
+ * aserción acá convertiría una limpieza fallida en un rojo del test. El que
+ * lee el body de lo que devuelve afirma su `.status` (201) en el llamador.
  */
 async function cerrarEnDosFases(
   app: INestApplication<App>,
@@ -289,6 +294,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       .post('/api/cajones')
       .set('Authorization', `Bearer ${tokenSupervisor}`)
       .send({ nombre: `E2E Owner-only ${Date.now()}` });
+    expect(resCajon.status).toBe(201);
     cajonDelCajeroId = (resCajon.body as CajonResponse).id;
   }, 60000);
 
@@ -352,6 +358,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ nombre: `E2E Admin Owner ${Date.now()}` });
+      expect(r.status).toBe(201);
       cajonDelAdminId = (r.body as CajonResponse).id;
     });
 
@@ -436,6 +443,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ nombre: `E2E Apertura ${Date.now()}` });
+      expect(r.status).toBe(201);
       cajonId = (r.body as CajonResponse).id;
     });
 
@@ -503,6 +511,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const disp = await request(app.getHttpServer())
         .get('/api/caja/cajones-disponibles')
         .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(disp.status).toBe(200);
       expect(
         (disp.body as CajonDisponible[]).some((c) => c.cajonId === cajonId),
       ).toBe(false);
@@ -594,6 +603,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ nombre: `E2E Arqueo ${Date.now()}` });
+      expect(r.status).toBe(201);
       cajonArqueoId = (r.body as CajonResponse).id;
 
       const item = await request(app.getHttpServer())
@@ -605,6 +615,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           monedaId: CLP_MONEDA_ID,
           tipo: 'servicio',
         });
+      expect(item.status).toBe(201);
       itemId = (item.body as { id: string }).id;
     });
 
@@ -722,6 +733,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const motivos = await request(app.getHttpServer())
         .get('/api/motivos-diferencia?soloActivas=true')
         .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(motivos.status).toBe(200);
       const motivoId = (motivos.body as { id: string }[])[0]?.id;
       const cerrar = await cerrarEnDosFases(
         app,
@@ -1013,6 +1025,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         const arqueoFinal = await request(app.getHttpServer())
           .get(`/api/caja/${cajaId}/arqueo`)
           .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(arqueoFinal.status).toBe(200);
         const lineasFinal = (arqueoFinal.body as { lineas: ArqueoLinea[] })
           .lineas;
         expect(lineasFinal.find((l) => l.esEfectivo)?.motivoNombre).toBe(
@@ -1039,6 +1052,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ nombre: `E2E Motivo ${Date.now()}` });
+      expect(r.status).toBe(201);
       cajonMotivoId = (r.body as CajonResponse).id;
     });
 
@@ -1091,6 +1105,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const arqueoTrasFallo = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}/arqueo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(arqueoTrasFallo.status).toBe(200);
       const efectivoTrasFallo = (
         arqueoTrasFallo.body as { lineas: ArqueoLinea[] }
       ).lineas.find((l) => l.esEfectivo);
@@ -1147,6 +1162,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const detalle = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}`)
         .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(detalle.status).toBe(200);
       expect((detalle.body as { estado: string }).estado).toBe(
         'en_conciliacion',
       );
@@ -1181,6 +1197,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ nombre: `E2E Estado ${Date.now()}` });
+      expect(r.status).toBe(201);
       cajonEstadoId = (r.body as CajonResponse).id;
 
       // Servicio (sin stock): no compite por el stock del producto demo.
@@ -1193,6 +1210,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           monedaId: CLP_MONEDA_ID,
           tipo: 'servicio',
         });
+      expect(item.status).toBe(201);
       itemEstadoId = (item.body as { id: string }).id;
     });
 
@@ -1224,6 +1242,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const cierre = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
         { metodoPagoId: null, montoContado: '10000.0000' },
       ]);
+      expect(cierre.status).toBe(201);
       expect((cierre.body as { estado?: string }).estado).toBe('cerrada');
 
       const r = await movimiento(cajaId);
@@ -1236,6 +1255,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '9000.0000' }] });
+      expect(conteo.status).toBe(201);
       expect((conteo.body as { estado: string }).estado).toBe(
         'en_conciliacion',
       );
@@ -1280,6 +1300,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '1000.0000' }] });
+      expect(conteo.status).toBe(201);
       expect((conteo.body as { estado: string }).estado).toBe(
         'en_conciliacion',
       );
@@ -1322,6 +1343,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ nombre: `E2E Justificacion ${Date.now()}` });
+      expect(r.status).toBe(201);
       cajonJustificacionId = (r.body as CajonResponse).id;
     });
 
@@ -1488,6 +1510,7 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
       .post('/api/cajones')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ nombre: `E2E Ciego Resumen ${Date.now()}` });
+    expect(r.status).toBe(201);
     cajonId = (r.body as CajonResponse).id;
   }, 60000);
 
@@ -1549,17 +1572,20 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
       .post(`/api/caja/${cajaId}/conteo`)
       .set('Authorization', `Bearer ${token}`)
       .send({ lineas: [{ metodoPagoId: null, montoContado: '12345.0000' }] });
+    expect(conteo.status).toBe(201);
     expect((conteo.body as { estado: string }).estado).toBe('en_conciliacion');
 
     const resumenReveal = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos/resumen`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resumenReveal.status).toBe(200);
     const rr = resumenReveal.body as Record<string, unknown>;
     expect(rr.ciego).toBe(false);
     expect(rr.totalSalidas).toBe('500.0000');
     const movsReveal = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos`)
       .set('Authorization', `Bearer ${token}`);
+    expect(movsReveal.status).toBe(200);
     expect((movsReveal.body as { meta: { total: number } }).meta.total).toBe(1);
 
     // Higiene (evita caja colgada en_conciliacion en reruns locales): fase 2 con un
@@ -1567,6 +1593,7 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
     const motivos = await request(app.getHttpServer())
       .get('/api/motivos-diferencia?soloActivas=true')
       .set('Authorization', `Bearer ${adminToken}`);
+    expect(motivos.status).toBe(200);
     const motivoId = (motivos.body as { id: string }[])[0]?.id;
     await request(app.getHttpServer())
       .post(`/api/caja/${cajaId}/cerrar`)
@@ -1583,6 +1610,7 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
     const resumen = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos/resumen`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resumen.status).toBe(200);
     const rb = resumen.body as Record<string, unknown>;
     expect(rb.ciego).toBe(false);
     expect(rb.saldoEsperado).toBe('10000.0000');
@@ -1620,6 +1648,7 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
       .post('/api/cajones')
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ nombre: `E2E Ciego Admin ${Date.now()}` });
+    expect(r.status).toBe(201);
     cajonId = (r.body as CajonResponse).id;
   }, 60000);
 
@@ -1660,23 +1689,27 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
     const rCajero = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos/resumen`)
       .set('Authorization', `Bearer ${tokenCajero}`);
+    expect(rCajero.status).toBe(200);
     expect((rCajero.body as { ciego: boolean }).ciego).toBe(true);
     expect((rCajero.body as { totalSalidas: unknown }).totalSalidas).toBeNull();
     const mCajero = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos`)
       .set('Authorization', `Bearer ${tokenCajero}`);
+    expect(mCajero.status).toBe(200);
     expect((mCajero.body as { meta: { total: number } }).meta.total).toBe(0);
 
     // Admin del tenant (verTodas) → completo, aun estando la caja abierta y el tenant ciego.
     const rAdmin = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos/resumen`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(rAdmin.status).toBe(200);
     const adminBody = rAdmin.body as { ciego: boolean; totalSalidas: unknown };
     expect(adminBody.ciego).toBe(false);
     expect(typeof adminBody.totalSalidas).toBe('string');
     const mAdmin = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/movimientos`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(mAdmin.status).toBe(200);
     expect(
       (mAdmin.body as { meta: { total: number } }).meta.total,
     ).toBeGreaterThanOrEqual(1);
@@ -1686,10 +1719,12 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
     const aCajero = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/arqueo`)
       .set('Authorization', `Bearer ${tokenCajero}`);
+    expect(aCajero.status).toBe(200);
     expect((aCajero.body as { ciego: boolean }).ciego).toBe(true);
     const aAdmin = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/arqueo`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(aAdmin.status).toBe(200);
     expect((aAdmin.body as { ciego: boolean }).ciego).toBe(false);
 
     // Higiene: apagar ciego y cerrar la caja (con motivo por si descuadra).
@@ -1700,6 +1735,7 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
     const motivos = await request(app.getHttpServer())
       .get('/api/motivos-diferencia?soloActivas=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(motivos.status).toBe(200);
     const motivoId = (motivos.body as { id: string }[])[0]?.id;
     await cerrarEnDosFases(
       app,
@@ -1741,6 +1777,7 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
       .post('/api/cajones')
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ nombre: `E2E Ciego Supervisor ${Date.now()}` });
+    expect(r.status).toBe(201);
     cajonId = (r.body as CajonResponse).id;
   }, 60000);
 
@@ -1759,6 +1796,9 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
       // Si el test falló antes de su cierre, el cajero se queda con la caja
       // abierta y el 409 aparece varias suites más allá, lejos de la causa
       // (ver `docs/agent/pendientes.md`). Liberarlo acá, pase lo que pase.
+      // Las requests de esta limpieza NO afirman su status a propósito —mismo
+      // criterio que `liberarCajeroSiQuedoOcupado`—: es una red, no una
+      // aserción, y un rojo suyo taparía el del test que sí falló.
       const activa = await request(app.getHttpServer())
         .get('/api/caja/activa')
         .set('Authorization', `Bearer ${tokenCajero}`);
@@ -1830,6 +1870,7 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
     const gAdmin = await request(app.getHttpServer())
       .get('/api/caja/cajones-estado')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(gAdmin.status).toBe(200);
     const sesionAdmin = filaDe(gAdmin.body)?.sesion;
     expect(sesionAdmin?.saldoEsperado).not.toBeNull();
 
@@ -1854,6 +1895,7 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
     const aAdmin = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/arqueo`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(aAdmin.status).toBe(200);
     expect((aAdmin.body as { ciego: boolean }).ciego).toBe(false);
 
     // El apagado del ciego y el cierre de la caja los hace el `afterAll`, que
@@ -1924,6 +1966,7 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
     const disp = await request(app.getHttpServer())
       .get('/api/caja/cajones-disponibles')
       .set('Authorization', `Bearer ${tokenParis}`);
+    expect(disp.status).toBe(200);
     const cajonId = (disp.body as { cajonId: string }[])[0]?.cajonId;
     const abrir = await request(app.getHttpServer())
       .post('/api/caja/abrir')
@@ -2288,6 +2331,7 @@ describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cie
       .post('/api/cajones')
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ nombre: `E2E Encargado ${Date.now()}` });
+    expect(r.status).toBe(201);
     cajonId = (r.body as CajonResponse).id;
   }, 60000);
 
@@ -2408,6 +2452,7 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
       .post('/api/cajones')
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ nombre: `E2E Ciego Encargado ${Date.now()}` });
+    expect(r.status).toBe(201);
     cajonId = (r.body as CajonResponse).id;
   }, 60000);
 
@@ -2423,6 +2468,8 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
         'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
         [PARIS_TENANT_ID],
       );
+      // Higiene best-effort, sin afirmar status: ver el `afterAll` gemelo de
+      // más arriba.
       const activa = await request(app.getHttpServer())
         .get('/api/caja/activa')
         .set('Authorization', `Bearer ${tokenCajero}`);

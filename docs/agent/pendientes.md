@@ -121,11 +121,13 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   otra aserción y con otra cara. Vivido ese mismo día: una falla del e2e de inventario se
   presentó como `costoActual: undefined` y se diagnosticó **por el síntoma** en vez de por el
   código que había devuelto el POST, que nadie miró porque nadie lo afirmaba.
-  **Ejemplos verificados abriendo la línea:** `backend/test/caja.e2e-spec.ts:120` — el helper
-  `abrirCaja` hace `return (resActiva.body as CajaResponse).id;` sobre el `GET /caja/activa`
-  del camino 409, sin afirmar su status (el `POST` de arriba sí lo mira, en un `if`) — y
-  `backend/test/recuentos.e2e-spec.ts:306`, `expect((resItem.body as ItemResponse).stock)`
-  sobre un `GET /items/:id` que nunca se verificó.
+  **Ejemplo verificado abriendo la línea:** `backend/test/recuentos.e2e-spec.ts:306`,
+  `expect((resItem.body as ItemResponse).stock)` sobre un `GET /items/:id` que nunca se
+  verificó.
+  ⚠️ **El otro ejemplo que traía esta entrada ya no existe**: `caja.e2e-spec.ts:120` (el
+  helper `abrirOReusarCaja`, que la entrada llamaba `abrirCaja`) lo arregló `8b9bb94c` esa
+  misma mañana, en la barrida de los 11 helpers. La entrada se escribió sin mirar que ese
+  commit ya había pasado.
   **Es el mismo modo de falla que el commit `9784e1b6` ya barrió, pero para otra cosa:** ese
   cubrió el **token** (29 archivos, 71 sitios, `access_token` leído sin status ⇒ `Bearer
   undefined` ⇒ 401 en la ruta siguiente, no en la que falló). Los **ids y campos del body**
@@ -147,6 +149,24 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   📌 Va de a un archivo por commit o en tandas chicas: tocar 33 specs de una es un diff que
   nadie revisa, y cada aserción nueva puede destapar un test que estaba verde sin ejercitar
   nada (le pasó a `ventas` en la barrida del token).
+
+  ✅ **Primera tanda, 2026-08-28: `caja` y `papelera`** — 56 aserciones, gate completo en
+  verde. Quedan **117 sitios en 31 specs** (`recuentos`, `ventas` y `garzon-modo-personal`
+  van 10 cada uno; el resto, de a menos de 10).
+  📌 **Lo que esa tanda corrigió de esta entrada: no todos los sitios son bugs.** De los 66
+  de esos dos archivos, **9 son higiene deliberada** —las requests de un `afterAll` de
+  limpieza y los helpers best-effort como `liberarCajeroSiQuedoOcupado`, cuyo docblock ya
+  decía *"sin afirmar el status"*—. Afirmarles el status convierte una limpieza fallida en un
+  rojo que tapa el del test que de verdad falló. Se dejaron sin aserción **y con el porqué
+  escrito al lado**, que es lo que distingue la excepción del olvido (misma regla que el
+  filtro de borrado). O sea: **183 es el tamaño de la revisión, no el de la deuda** — contar
+  ~14% de exclusiones por archivo.
+  📌 **El cierre del frente incluye ampliar la red.** `scripts/check-e2e-status.mjs` hoy mira
+  **solo helpers** (`return (res.body as X)`) porque ése fue el alcance que eligió el owner
+  en `8b9bb94c`; una lectura suelta dentro de un `it()` no la ve nadie. Cuando los 31 specs
+  estén barridos, ampliarlo a toda lectura es un cambio de dos líneas y no necesita
+  mecanismo nuevo — **pero el alcance del checker lo decidió el owner, así que se pregunta
+  antes de ampliarlo**, no se da por hecho.
 
 ### El residuo que dejó el frente de la merma sin costo tipeado (2026-08-28)
 

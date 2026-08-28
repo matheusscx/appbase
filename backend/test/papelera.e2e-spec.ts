@@ -181,6 +181,7 @@ describe('Papelera (e2e) — categorías, patrón de referencia', () => {
     const listado = await request(app.getHttpServer())
       .get('/api/categorias')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const categorias = listado.body as CategoriaItem[];
     expect(categorias.find((c) => c.id === categoriaId)).toBeDefined();
   });
@@ -751,6 +752,7 @@ describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', 
     const listado = await request(app.getHttpServer())
       .get('/api/causas-merma?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const causas = listado.body as CausaMermaItem[];
     const viva = causas.find((c) => c.id === otraId);
     const borrada = causas.find((c) => c.id === causaId);
@@ -776,6 +778,7 @@ describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', 
     const listado = await request(app.getHttpServer())
       .get('/api/causas-merma')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const causas = listado.body as CausaMermaItem[];
     expect(causas.find((c) => c.id === causaId)).toBeDefined();
   });
@@ -931,6 +934,7 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
     const resGet = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resGet.status).toBe(200);
     expect((resGet.body as ItemResponse).activo).toBe(false);
 
     // El histórico de la venta emitida ANTES del borrado no se altera:
@@ -1211,6 +1215,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
     const resListarDespues = await request(app.getHttpServer())
       .get('/api/salones?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resListarDespues.status).toBe(200);
     const salonDespues = (resListarDespues.body as SalonListItem[]).find(
       (s) => s.id === salonId,
     );
@@ -1227,6 +1232,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
     const resListarNormalDespues = await request(app.getHttpServer())
       .get('/api/salones')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resListarNormalDespues.status).toBe(200);
     const salonNormalDespues = (
       resListarNormalDespues.body as SalonListItem[]
     ).find((s) => s.id === salonId);
@@ -1311,6 +1317,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
     const resListar = await request(app.getHttpServer())
       .get('/api/salones?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resListar.status).toBe(200);
     const salon = (resListar.body as SalonListItem[]).find(
       (s) => s.id === salonId,
     );
@@ -1504,6 +1511,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       const resListarDespues = await request(app.getHttpServer())
         .get(`/api/${recurso.path}`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resListarDespues.status).toBe(200);
       expect(
         (resListarDespues.body as RecursoConAuditoria[]).find(
           (r) => r.id === id,
@@ -1556,6 +1564,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/cajones?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const cajones = listado.body as RecursoConAuditoria[];
     expect(cajones.find((c) => c.id === otroId)?.eliminadoEl).toBeFalsy();
     expect(cajones.find((c) => c.id === originalId)?.eliminadoEl).toBeTruthy();
@@ -1620,6 +1629,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/descuentos?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const descuentos = listado.body as RecursoConAuditoria[];
     expect(descuentos.find((d) => d.id === otroId)?.eliminadoEl).toBeFalsy();
     expect(
@@ -1701,6 +1711,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/descuentos')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const nombres = (listado.body as { id: string; nombre: string }[])
       .filter((d) => [originalId, otroId, otro2Id].includes(d.id))
       .map((d) => d.nombre)
@@ -1779,6 +1790,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/recargos?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const recargos = listado.body as RecursoConAuditoria[];
     expect(recargos.find((r) => r.id === otroId)?.eliminadoEl).toBeFalsy();
     expect(recargos.find((r) => r.id === originalId)?.eliminadoEl).toBeTruthy();
@@ -1852,6 +1864,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/recargos')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const nombres = (listado.body as { id: string; nombre: string }[])
       .filter((r) => [originalId, otroId, otro2Id].includes(r.id))
       .map((r) => r.nombre)
@@ -1929,6 +1942,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/turnos?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const turnos = listado.body as RecursoConAuditoria[];
     expect(turnos.find((t) => t.id === otroId)?.eliminadoEl).toBeFalsy();
     expect(turnos.find((t) => t.id === originalId)?.eliminadoEl).toBeTruthy();
@@ -1996,6 +2010,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     const listado = await request(app.getHttpServer())
       .get('/api/turnos')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
     const nombres = (listado.body as { id: string; nombre: string }[])
       .filter((t) => [originalId, otroId, otro2Id].includes(t.id))
       .map((t) => t.nombre)
@@ -2236,6 +2251,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     const disp = await request(app.getHttpServer())
       .get('/api/caja/cajones-disponibles')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(disp.status).toBe(200);
     const cajonId = (disp.body as { cajonId: string }[])[0]?.cajonId;
     const resCaja = await request(app.getHttpServer())
       .post('/api/caja/abrir')
@@ -2245,6 +2261,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
         saldoInicial: '10000.0000',
         comentario: 'Apertura E2E papelera — colisión Mostrador Falabella',
       });
+    expect(resCaja.status).toBe(201);
     cajaId = (resCaja.body as { id: string }).id;
   }, 60000);
 
@@ -2258,6 +2275,8 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     try {
       // Deja la caja cerrada para no bloquear el cajón/usuario en otras suites
       // (mismo patrón defensivo que `ventas.e2e-spec.ts` → `cerrarCaja`).
+      // Sus requests NO afirman el status a propósito: es una red de limpieza,
+      // y un rojo suyo taparía el del test que realmente falló.
       const conteo = await request(app.getHttpServer())
         .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenAdmin}`)
@@ -2534,6 +2553,7 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
       const resListarDespues = await request(app.getHttpServer())
         .get(`/api/${recurso.path}`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resListarDespues.status).toBe(200);
       expect(
         (resListarDespues.body as RecursoSqlCrudoItem[]).find(
           (r) => r[recurso.idField] === id,
@@ -2583,6 +2603,7 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
       const listado = await request(app.getHttpServer())
         .get(`/api/${recurso.path}?incluirEliminados=true`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(listado.status).toBe(200);
       const items = listado.body as RecursoSqlCrudoItem[];
       const viva = items.find((r) => r[recurso.idField] === otraId);
       const borrada = items.find((r) => r[recurso.idField] === originalId);
