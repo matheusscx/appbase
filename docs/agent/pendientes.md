@@ -187,6 +187,25 @@ tarea pendiente.
   arreglo es borrar `convertirCosto` y los tests que solo prueban esa función, no el
   composable entero.
 
+- [ ] **La causa de merma "Rotura envase" no se limpia entre corridas, y por eso
+  `mermas.e2e-spec.ts` no es repetible sin reset** (backend,
+  `backend/test/mermas.e2e-spec.ts:130-139`; medido el 2026-08-28 al verificar el hallazgo 2
+  de la revisión final de este mismo frente — no es una regresión de los 6 hallazgos, es
+  preexistente). **Síntoma medido:** correr el archivo completo dos veces seguidas sin
+  `reset-db.sh` en el medio falla **5 de 9** tests, todos en cascada desde el primero.
+  **Causa:** `POST /causas-merma crea causa custom Rotura envase` crea la causa con nombre
+  fijo (`nombre: 'Rotura envase'`) y nunca la limpia — el test de más abajo
+  (`PATCH causa fija y DELETE causa en uso devuelven 400`) espera justamente que borrarla dé
+  `400` por estar en uso, así que un `DELETE` real nunca corre. En la segunda corrida,
+  `assertNombreUnico` (`causas-merma.service.ts:103`) rebota el `INSERT` con `400` porque el
+  nombre ya existe para el tenant, y todo lo que depende de `roturaCausaId` cae detrás.
+  **No lo detecta `reset-db.sh --verificar` por diseño**: ese chequeo mide si el seed corrió
+  más de una vez, no si un test dejó residuo propio. **Arreglo:** soft delete de la causa en
+  el `afterAll` (`UPDATE causas_merma SET eliminado_el = NOW() WHERE causa_merma_id = $1`),
+  nunca `DELETE` físico — mismo molde que el cleanup de ítems de
+  `items-pausados.e2e-spec.ts:814-824` (y el que este mismo frente le agregó a
+  `mermas.e2e-spec.ts` para el ítem "Insumo sin costo E2E").
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
@@ -720,25 +739,29 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   1. Que `MoneyInput` **rechace** una cadena inválida en 0 decimales en vez de inventar un
      número. Es la mitad que el owner decidió en concepto y no está construida: toca el
      contrato del componente y obliga a reescribir 3 tests que hoy documentan el bug.
-  2. El **barrido de los `:decimales="4"` restantes** — recontados el 2026-08-28 con el
-     mismo grep: siguen siendo 7, los 6 de `items.vue` (`:1620`, `:1691`, `:1823`, `:1969`,
-     `:2121`, `:2344`) más `mermas.vue:468`. ⚠️ Y el criterio para sacarlos **cambió**: no
-     alcanza con que el campo tenga selector de unidad, tiene que ser un selector que
-     gobierne **solo el costo**. Medido el 2026-08-28 en `mermas.vue`: ahí el mismo selector
-     gobierna la cantidad y el costo, así que mermar 100 g de un producto en kilos arrastra
-     el costo a `6,5`/g, que en CLP no existe — y sacando el prop el POST llevó `"7"` en vez
-     de `"6.5"`, **7,69% de sobrevaloración**, sin que nadie toque el campo porque viene
-     prefilleado. `MoneyInput` no avisa: **redondea y emite en silencio** (el `watch` solo
-     escribe `display`, pero ese `display` entra al `<input>` con `v-maska`, dispara
-     `onMaska` y emite). Eso corrige el §4 de la spec, que da por bueno lo contrario.
+  2. El **barrido de los `:decimales="4"` restantes** — recontados el 2026-08-28 (mismo
+     grep, corrido de nuevo tras el cierre del frente de la merma sin costo tipeado ese
+     mismo día): quedan **6**, todos en `items.vue` (`:1620`, `:1691`, `:1823`, `:1969`,
+     `:2121`, `:2344`). `mermas.vue:468` **ya no cuenta**: ese campo de costo se sacó
+     entero del formulario (ver el 📌 de abajo), así que no hay prop que barrer ahí. ⚠️ Y el
+     criterio para sacar el prop **cambió**: no alcanza con que el campo tenga selector de
+     unidad, tiene que ser un selector que gobierne **solo el costo**. Ejemplo ya medido —
+     por qué `mermas.vue` no se resolvía sacando el prop sin más, sino sacando el campo
+     entero: ahí el mismo selector gobernaba la cantidad y el costo a la vez, así que mermar
+     100 g de un producto en kilos arrastraba el costo a `6,5`/g, que en CLP no existe — y
+     sacando solo el prop el POST llevaba `"7"` en vez de `"6.5"`, **7,69% de
+     sobrevaloración**, sin que nadie tocara el campo porque venía prefilleado. `MoneyInput`
+     no avisaba: **redondeaba y emitía en silencio** (el `watch` solo escribía `display`,
+     pero ese `display` entraba al `<input>` con `v-maska`, disparaba `onMaska` y emitía).
+     Eso corrige el §4 de la spec, que daba por bueno lo contrario.
   3. `ReembolsoModal` (moneda del tenant contra una orden siempre CLP) — ortogonal, sigue.
 
-  📌 **El caso de `mermas.vue` se fue a un frente propio y NO se resuelve acá:** el costo se
-  maneja en el producto y el formulario de merma deja de pedirlo —
+  📌 **El caso de `mermas.vue` se resolvió en un frente propio, ya cerrado el 2026-08-28:**
+  el costo se maneja en el producto y el formulario de merma dejó de pedirlo —
   [`specs/2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md),
   [`plans/2026-08-28-merma-sin-costo-tipeado.md`](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
-  Mientras ese frente no cierre, `mermas.vue:468` **conserva** su `:decimales="4"` a
-  propósito: sacarlo sin sacar el campo es el 7,69% de arriba.
+  El campo de costo —y con él su `:decimales="4"`— se sacó entero del formulario: no queda
+  nada que barrer ahí.
 
 ### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
 
@@ -825,10 +848,16 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   muestra **sin unidad** —siempre en base— justo al lado, que es la comparación que más induce
   a error en el caso que la feature vino a habilitar. No viola ninguna invariante: se manda
   exactamente lo tipeado bajo la unidad visible. Es riesgo de plata mal cargada, ×1000.
-  ⚠️ **El molde de `mermas.vue` NO se copia tal cual.** Ahí hay un `watch(() =>
-  form.value.unidadCodigo)` (`mermas.vue:162-165`) que llama `prefillCostoUnitario()`, o sea
-  **repone el costo del producto y pisa lo tipeado**. En el ajuste no hay prefill —el campo
-  nace vacío—, así que ese watch no transfiere.
+  ⚠️ **La comparación con `mermas.vue` que esta entrada tenía ya no aplica — verificado hoy,
+  no de memoria.** Cuando se escribió, `mermas.vue` tenía un `watch` sobre `unidadCodigo` que
+  llamaba a `prefillCostoUnitario()` y pisaba lo tipeado, y la entrada advertía no copiar ese
+  molde. Medido el 2026-08-28: `mermas.vue` hoy tiene **un solo** `watch` (sobre `itemId`,
+  `mermas.vue:121`, que solo resetea la unidad al elegir producto); `prefillCostoUnitario` no
+  existe más. El campo de costo se sacó entero del formulario en ese mismo frente —el costo
+  se maneja en el producto, no se tipea al mermar (`docs/features/mermas-valorizadas.md`)—,
+  así que no queda molde de `mermas.vue` con el que comparar. La elección de cierre de abajo
+  para `inventario/index.vue` no depende de esa comparación y sigue en pie por sus propios
+  méritos.
   **Lo que falta es elegir el cierre, y las dos opciones son baratas:** (a) convertir lo
   tipeado al cambiar de unidad, que preserva la intención pero mueve un número que la persona
   escribió; (b) limpiar el campo al cambiar de unidad, que no adivina nada y obliga a
@@ -1326,6 +1355,22 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
+
+- [ ] **`costo: '0'` está documentado como real y a la vez rechazado — DTO y service se
+  contradicen** (backend; preexistente, medido el 2026-08-28 en la revisión final del frente
+  de la merma sin costo tipeado) — `create-item.dto.ts:231-233` comenta que `costo >= 0` es
+  válido porque *"mercadería de donación o muestra tiene costo 0 de verdad"*, distinto de
+  "sin costo" (`null`). Pero `ItemsController.crear` llama a `validarCostoPositivo` cuando
+  `dto.costo != null` (`items.service.ts:886`), y ese helper (`:3196-3206`) rechaza
+  `costo <= 0` con *"El costo debe ser mayor a 0"*. `registrarMovimiento` hace lo mismo con
+  `costoUnitario` en una entrada de stock. O sea: **hoy no existe ningún camino por API para
+  que un ítem quede con `costo_actual = '0'`** — el caso que el comentario del DTO da por
+  bueno es inalcanzable.
+  ❓ **La pregunta al owner:** ¿el costo `0` de donación/muestra es una regla de negocio real
+  que hay que habilitar (aflojar `validarCostoPositivo` para permitir `0`, dejando `<= 0`
+  estricto solo para negativos), o el comentario del DTO quedó de una decisión que se
+  revirtió y hay que borrarlo? Ninguna de las dos se puede elegir sin saber cuál era la
+  intención original.
 
 ## 5. Carreras de concurrencia
 

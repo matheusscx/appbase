@@ -198,17 +198,19 @@ describe('MermasService', () => {
       expect(result.merma.costoPerdido).toBeNull();
     });
 
-    it('costo_actual = "0" (donación/muestra) se registra valorizado en cero, sin pasar costoUnitario a registrarMovimiento', async () => {
-      // create-item.dto.ts:231-233 documenta que '0' es un costo real
-      // (donación/muestra), distinto de "sin costo" (null, Regla 1). Antes
-      // de este fix, `registrar` pasaba el costo congelado explícito a
-      // `registrarMovimiento`, y ese '0' explícito chocaba con la validación
-      // de costo > 0 del callee (inventario.service.ts) — un 400 al revés
-      // de la Regla 1. Ahora `registrar` nunca pasa `costoUnitario`, así que
-      // ese camino de validación no se dispara sea cual sea el costo leído.
-      // `registrarMovimiento` está mockeado acá: lo que este test fija es
-      // que no se le pasa `costoUnitario`. El 400 real (o su ausencia) lo
-      // cubre el e2e de la Task 2, contra el servicio real.
+    it('costo_actual = "0" se registra valorizado en cero, sin pasar costoUnitario a registrarMovimiento', async () => {
+      // '0' acá es un valor límite del mock, no un estado real alcanzable:
+      // `create-item.dto.ts:231-233` documenta '0' como costo real
+      // (donación/muestra, distinto de "sin costo" = null, Regla 1), pero
+      // `ItemsService.validarCostoPositivo` (`items.service.ts:3196-3206`) y
+      // el rechazo de `costoUnitario <= 0` en `registrarMovimiento` lo
+      // frenan antes con 400 — contradicción DTO↔service preexistente
+      // (no la introduce este fix), anotada en `docs/agent/pendientes.md`.
+      // Lo que este test fija: `registrar` nunca pasa `costoUnitario` a
+      // `registrarMovimiento` (mockeado acá), sea cual sea el costo leído
+      // — así que ese callee no puede rebotar, ni con este valor límite ni
+      // con ninguno. El e2e de la Task 2 cubre el camino contra el
+      // servicio real.
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,

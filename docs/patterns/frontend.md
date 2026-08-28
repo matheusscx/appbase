@@ -439,11 +439,13 @@ Reglas:
   **Lo que NO revivía solo** eran `mermas.vue` (`costoUnitario`) y
   `grupos-modificadores.vue` (`precioExtra`, `lotePrecio`), porque `MoneyInput` necesita
   una moneda y ninguna de las dos la tenía a mano. **Estado al 2026-08-26:**
-  - `mermas.vue` **migrado**: el costo unitario va con `MoneyInput` atado a
-    `productoSeleccionado?.monedaId` y `:decimales="4"`. ⚠️ Ese `:decimales="4"` **sigue
-    ahí a propósito** — ver el bullet de abajo: sacarlo en mermas no es lo que hay que
-    hacer, y el campo se va entero en
-    [`plans/2026-08-28-merma-sin-costo-tipeado.md`](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
+  - `mermas.vue` **migrado el 2026-08-26** con `MoneyInput` atado a
+    `productoSeleccionado?.monedaId` y `:decimales="4"` — y **ese campo entero se sacó
+    del formulario el 2026-08-28**: el costo se maneja en el producto, no se tipea al
+    mermar (owner,
+    [spec](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)). `mermas.vue`
+    hoy no tiene input de costo; el filo del `:decimales="4"` que este bullet documentaba
+    quedó sin efecto porque el campo ya no existe.
   - `grupos-modificadores.vue` **se queda sin `MoneyInput`, y es deliberado**, con dos
     razones distintas según el campo. En el drawer del grupo no hay ítem, así que no hay
     moneda que resolver (la opción hereda la del ítem al que se aplica — owner
@@ -485,8 +487,9 @@ Reglas:
   el componente **nunca** garantiza que el modelo conserve lo que el padre le pasó.
   📌 Corolario: **esto corrige el §4 de la spec**, que da por bueno que "el modelo NO se
   trunca solo" a partir del `watch`. Es cierto del `watch` y falso del componente.
-  📌 Por eso `mermas.vue` **no** se toca acá: el campo de costo se saca entero del
-  formulario y el costo se maneja en el producto — frente propio, con
+  📌 Por eso `mermas.vue` **no se tocó acá**: el campo de costo se sacó entero del
+  formulario en un frente propio, ya cerrado — el costo se maneja en el producto, no se
+  tipea al mermar. Ver
   [spec](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md) y
   [plan](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
   📌 Antes de sacar un `:decimales="4"` de cualquier otro campo (quedan 6 en `items.vue`),

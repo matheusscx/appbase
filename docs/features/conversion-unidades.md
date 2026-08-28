@@ -267,14 +267,19 @@ persistía en márgenes, food-cost y valorización de mermas.
 
 **Dónde aplica:**
 - `ItemsService.ajustarStock` — siempre que venga `costoUnitario` y haya conversión de cantidad.
-- `MermasService.registrar` — **solo** cuando `costoUnitario` viene explícito en el DTO. Cuando
-  no viene y el service usa `costo_actual` del producto para valorizar la merma, **no** se
-  convierte: `costo_actual` ya está en unidad base.
+- `MermasService.registrar` — **no aplica.** Desde
+  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+  el `POST /mermas` no acepta `costoUnitario`: el service valoriza siempre con `costo_actual`
+  del producto, que ya está en unidad base, así que no hay nada que convertir. Si el producto
+  no tiene costo, la merma se registra igual y queda sin valorizar.
 
-**Frontend:** el prefill de costo en `mermas.vue` (costo actual del producto) y el label del
-input en ambos formularios ("Costo unitario (por _unidad_)") siguen la misma regla — ver
-`frontend/app/composables/useUnidadConversion.ts` (`convertirCosto`), espejo del cálculo del
-backend documentado acá (no hay workspace compartido entre backend y frontend).
+**Frontend:** el label del input de costo ("Costo unitario (por _unidad_)") en el drawer de
+ajuste de stock de `configuracion/items.vue` describe la misma convención (el costo se tipea
+"por la unidad elegida"), pero es texto fijo — no llama a `convertirCosto`. La conversión real
+la hace el backend al recibir `costoUnitario` + `unidadCodigo`. `mermas.vue` ya no tiene input
+de costo ni prefill: el campo se sacó entero del formulario. `useUnidadConversion.ts`
+(`convertirCosto`) quedó sin consumidores productivos tras sacarlo — ver
+`docs/agent/pendientes.md`.
 
 ---
 

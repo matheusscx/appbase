@@ -52,7 +52,7 @@
 - Produces: `MermaResponse.costoUnitario: string | null` y `MermaResponse.costoPerdido: string | null` (hoy son `string` a secas, líneas 30-31). `MermaListItem` ya los tiene nullable (líneas 42-43) — no se toca.
 - `CreateMermaDto` queda: `itemId`, `cantidad`, `unidadCodigo?`, `causaMermaId`, `comentario?`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 En `mermas.service.spec.ts`. **Antes de escribirlos, abrir el archivo y copiar el molde real** — los tests existentes de `registrar` son de mock puro (`managerMock.query.mockResolvedValueOnce(...)` encadenado). Adaptar estos al molde, no al revés:
 
@@ -84,16 +84,16 @@ it('valoriza con el costo del producto, sin que nadie lo tipee', async () => {
 
 Y **actualizar el test que hoy afirma lo contrario**: `mermas.service.spec.ts:110` (`'rechaza sin costo_actual ni costoUnitario'`, que espera el mensaje de la línea 126). Ese test documenta la regla vieja; se borra, y en su lugar queda el primero de arriba. **Dejar escrito en el test por qué cambió**, con link a la spec.
 
-- [ ] **Step 2: Correr y verificar que fallan**
+- [x] **Step 2: Correr y verificar que fallan**
 
 Run: `cd backend && npx jest mermas.service.spec --silent`
 Expected: FAIL — el primero por el `BadRequestException` que todavía se lanza.
 
-- [ ] **Step 3: Sacar el campo del DTO**
+- [x] **Step 3: Sacar el campo del DTO**
 
 En `create-merma.dto.ts`, borrar el bloque `costoUnitario` completo (líneas 25-33, con su comentario). Sacar del import de `class-validator` y de los decoradores propios lo que quede sin uso — **verificar uno por uno**: `IsNumberString` lo sigue usando `cantidad`; `IsDecimalPositivo` y `EsCosto` probablemente queden sin uso en este archivo.
 
-- [ ] **Step 4: Simplificar `registrar`**
+- [x] **Step 4: Simplificar `registrar`**
 
 En `mermas.service.ts`, entre las líneas 156 y 184, borrar:
 - el `throw new BadRequestException('El producto no tiene costo actual; …')` (líneas 159-166);
@@ -124,16 +124,16 @@ Ampliar `MermaResponse` (líneas 30-31) a `string | null` en los dos campos.
 
 ⚠️ **Verificar antes de asumir**: que `movimientos_inventario.costo_unitario` acepta `NULL` en la entity (`registrarMovimiento` ya calcula `costoUnitarioCongelado = params.costoUnitario ?? costoActualPrevio`, `inventario.service.ts:260-261`, y con los dos en null queda null). Si la columna es `NOT NULL`, **parar y reportar** — cambia el alcance.
 
-- [ ] **Step 5: Correr los tests y verificar que pasan**
+- [x] **Step 5: Correr los tests y verificar que pasan**
 
 Run: `cd backend && npx jest mermas.service.spec --silent`
 Expected: PASS todos. Si otro test del archivo asumía el override, actualizarlo dejando escrito por qué.
 
-- [ ] **Step 6: Matar un mutante**
+- [x] **Step 6: Matar un mutante**
 
 Cambiar `costoCongelado == null ? null : …` por que siempre calcule: el primer test tiene que fallar. **Revertir y verificar en los logs del contenedor que el backend reinició** antes de seguir — el fuente limpio no prueba que el proceso lo esté.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/modules/mermas
@@ -150,7 +150,7 @@ git commit -m "feat(mermas): el costo sale del producto, no se tipea al registra
 **Interfaces:**
 - Consumes: `POST /api/mermas` con `{ itemId, cantidad, unidadCodigo?, causaMermaId, comentario? }`.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Con producto propio (no del seed: el stock del seed es acumulativo entre corridas locales y contamina). Crear un producto **sin** `costo`, darle stock con una entrada, y mermarlo:
 
@@ -182,23 +182,23 @@ it('la merma de un producto sin costo se registra sin valorizar', async () => {
 
 ✅ **Ya medido: el escenario es alcanzable por API.** `costo` es opcional en `CreateItemDto` y `costoUnitario` es opcional en `AjusteStockDto` (`ajuste-stock.dto.ts:76-81`), así que un producto puede tener stock y `costo_actual` en `NULL`. **No montar el escenario con SQL directo** — si por lo que sea no sale por API, parar y reportar en vez de forzarlo.
 
-- [ ] **Step 2: Actualizar el test que afirma lo viejo**
+- [x] **Step 2: Actualizar el test que afirma lo viejo**
 
 `mermas.e2e-spec.ts:143` (`expect(body.costoUnitario).toBeTruthy()`) sigue siendo válido para el producto **con** costo. Verificar que su producto lo tiene; si el test mandaba `costoUnitario` en el body, sacarlo — el endpoint ya no lo acepta.
 
-- [ ] **Step 3: Resetear la base y correr**
+- [x] **Step 3: Resetear la base y correr**
 
 Run: `./scripts/reset-db.sh && cd backend && npm run test:e2e -- mermas`
 Expected: PASS. Usar el **exit code**, no la última línea.
 
 ⚠️ No tocar ningún `.ts` del backend mientras el e2e corre: el watcher recompila, reinicia y vuelve a sembrar.
 
-- [ ] **Step 4: Verificar que la base no se movió**
+- [x] **Step 4: Verificar que la base no se movió**
 
 Run: `./scripts/reset-db.sh --verificar`
 Expected: `1 solo 'Seed complete'`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/test/mermas.e2e-spec.ts
@@ -212,7 +212,7 @@ git commit -m "test(mermas): e2e de la merma sin valorizar"
 **Files:**
 - Modify: `frontend/app/pages/mermas.vue`
 
-- [ ] **Step 1: Borrar el campo y su maquinaria**
+- [x] **Step 1: Borrar el campo y su maquinaria**
 
 Sacar, verificando cada referencia con un grep antes de borrar:
 - el `UFormField` del costo con su `MoneyInput` (líneas 455-471) y el `UAlert` de "Sin costo actual" (473-480);
@@ -225,7 +225,7 @@ Sacar, verificando cada referencia con un grep antes de borrar:
 
 ⚠️ Los `watch` de `itemId` (151-160) y de `unidadCodigo` (162-165) llaman a `prefillCostoUnitario`. El de `unidadCodigo` puede quedar vacío: si no le queda cuerpo, borrarlo entero.
 
-- [ ] **Step 2: El cartel que no frena**
+- [x] **Step 2: El cartel que no frena**
 
 Donde estaba el campo, un `UAlert` gobernado por `sinCostoActual`, con tokens semánticos de Nuxt UI (nunca Tailwind hardcodeado) y el mismo estilo del `UAlert` que se borró:
 
@@ -242,22 +242,22 @@ Donde estaba el campo, un `UAlert` gobernado por `sinCostoActual`, con tokens se
 
 No agrega confirmación ni deshabilita el botón: **avisa y deja pasar** (regla 4 de la spec).
 
-- [ ] **Step 3: El toast contempla el caso sin monto**
+- [x] **Step 3: El toast contempla el caso sin monto**
 
 Hoy (línea 254) el toast interpola `res.costoPerdido` siempre. Tipar la respuesta con `costoPerdido: string | null` (línea 231) y cambiar el título cuando venga en `null` — por ejemplo *"Merma registrada · sin valorizar"*.
 
-- [ ] **Step 4: Gate del frontend**
+- [x] **Step 4: Gate del frontend**
 
 Run: `cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
 Expected: PASS los cuatro, por **exit code**. Si algún test afirmaba sobre el campo de costo de mermas, actualizarlo dejando escrito por qué.
 
-- [ ] **Step 5: Smoke de navegador — no es opcional**
+- [x] **Step 5: Smoke de navegador — no es opcional**
 
 Esta página no tiene test unitario: build y typecheck **no ven** bugs de runtime (auto-import de Nuxt, campos que no viajan en el body). Con **chrome-devtools MCP** (no Claude Browser: el owner mira la ventana real de Chrome):
 - Producto **con** costo: registrar la merma y verificar en el log de red que el body **no** lleva `costoUnitario`, y que el costo perdido del listado es el que corresponde.
 - Producto **sin** costo: verificar que aparece el cartel, que el botón registra igual, y que la fila queda en `—`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Corre `domain-reviewer` sobre el diff staged y generar el recibo (paso 7 de `verify-feature`): el pre-commit lo exige porque el diff toca un `.vue` de `pages`.
 
@@ -277,7 +277,7 @@ Regla 4 de la spec: el aviso va también donde el dato de verdad existe — cuan
 recibe mercadería y sabe cuánto pagó. **No lo hace obligatorio** (el owner lo descartó:
 frenaría a quien tiene la mercadería en la puerta y la factura no).
 
-- [ ] **Step 1: Leer el contexto real antes de escribir**
+- [x] **Step 1: Leer el contexto real antes de escribir**
 
 Abrir `configuracion/items.vue:2340-2345`. El campo del costo aparece solo con
 `ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'`, y **no** tiene `required`.
@@ -285,7 +285,7 @@ Ubicar también `stockItem` (el ítem sobre el que se abre el drawer) y confirma
 `costoActual` — si no lo expone, **parar y reportar**: sin ese dato no se puede decidir
 cuándo mostrar el cartel.
 
-- [ ] **Step 2: Agregar el cartel**
+- [x] **Step 2: Agregar el cartel**
 
 Debajo del `UFormField` del costo, gobernado por "el producto no tiene costo hoy":
 
@@ -306,18 +306,18 @@ tiene costo y esta compra no lo trae, el costo viejo sigue vigente y las mermas 
 igual: ahí el cartel sería una mentira. Tokens semánticos de Nuxt UI, nunca Tailwind
 hardcodeado.
 
-- [ ] **Step 3: Gate del frontend**
+- [x] **Step 3: Gate del frontend**
 
 Run: `cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
 Expected: PASS los cuatro, por **exit code**.
 
-- [ ] **Step 4: Smoke de navegador**
+- [x] **Step 4: Smoke de navegador**
 
 Con **chrome-devtools MCP**: abrir el ajuste de stock de un producto **sin** costo, motivo
 compra → el cartel aparece; tipear un costo → desaparece. Repetir sobre un producto **con**
 costo → el cartel **no** aparece nunca.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Correr `domain-reviewer` sobre el diff staged y generar el recibo (paso 7 de `verify-feature`).
 
@@ -340,7 +340,7 @@ git commit -m "feat(items): avisar al comprar que el producto va a quedar sin co
 - Produces: `QueryItemsDto.sinCosto?: boolean`. Ausente no filtra nada; `true` deja solo los
   ítems sin costo. **Es de dos estados, no de tres** — a diferencia de `activo`.
 
-- [ ] **Step 1: Escribir el test del DTO que falla**
+- [x] **Step 1: Escribir el test del DTO que falla**
 
 En `query-items.dto.spec.ts`, siguiendo el molde de los tests que ya existen ahí. El DTO
 tiene un comentario largo sobre la coerción de `activo` (tres estados) frente a la de
@@ -348,17 +348,17 @@ tiene un comentario largo sobre la coerción de `activo` (tres estados) frente a
 —`value === 'true' || value === true`— porque acá no existe el caso "solo los que sí
 tienen costo".
 
-- [ ] **Step 2: Escribir el test del service que falla**
+- [x] **Step 2: Escribir el test del service que falla**
 
 Que con `sinCosto: true` el `where` incluya la condición y el parámetro viaje. **Ojo con el
 `toContain`:** afirmar sobre un fragmento que también aparece en un comentario SQL da un
 verde falso — acotar la aserción a la cláusula.
 
-- [ ] **Step 3: Correr y verificar que fallan**
+- [x] **Step 3: Correr y verificar que fallan**
 
 Run: `cd backend && npx jest query-items.dto items.service --silent`
 
-- [ ] **Step 4: Implementar**
+- [x] **Step 4: Implementar**
 
 ⚠️ **`costo_actual` no es una columna de `items`:** el SELECT lo arma con
 `COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual)` (`items.service.ts:198`), o
@@ -379,33 +379,33 @@ importan para la merma:
 Sin parámetro: no hay valor del usuario en la cláusula. Mantiene el `eliminado_el IS NULL`
 que ya trae el `where`.
 
-- [ ] **Step 5: Correr los tests y matar un mutante**
+- [x] **Step 5: Correr los tests y matar un mutante**
 
 Run: `cd backend && npx jest query-items.dto items.service --silent` → PASS.
 Mutante: invertir el `IS NULL` por `IS NOT NULL` — el test del service tiene que fallar.
 **Revertir y verificar en los logs del contenedor que el backend reinició.**
 
-- [ ] **Step 6: La marca en la fila**
+- [x] **Step 6: La marca en la fila**
 
 En `configuracion/items.vue:1493-1495`, donde hoy el costo ausente se dibuja como `—` a
 secas, marcarlo para que se distinga de un vistazo: un `UBadge` o el ícono
 `i-lucide-circle-alert` con el título *"Sin costo"*, siguiendo el molde de los badges que la
 fila ya tiene (`modoInventario`, línea 1496). **Sin Tailwind hardcodeado.**
 
-- [ ] **Step 7: El filtro en la barra**
+- [x] **Step 7: El filtro en la barra**
 
 Junto al `USelect` de `filtroTipo` (línea 1435), un control "Solo sin costo" que agregue
 `sinCosto: true` a la query (línea 252) y entre en `busquedaActiva`/el reset (258/262) igual
 que `filtroTipo`. **Copiar el molde de `filtroTipo`, no inventar uno nuevo.**
 
-- [ ] **Step 8: Gate del frontend y smoke**
+- [x] **Step 8: Gate del frontend y smoke**
 
 Run: `cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
 Smoke con **chrome-devtools MCP**: prender el filtro y verificar en el log de red que
 `sinCosto=true` viaja en la query, que la lista se achica a los que están sin costo, y que
 la marca se ve en esas filas. Apagarlo y verificar que vuelve la lista completa.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Correr `domain-reviewer` sobre el diff staged y generar el recibo.
 
@@ -421,15 +421,15 @@ git commit -m "feat(items): marcar y filtrar los productos que están sin costo"
 **Files:**
 - Modify: `docs/features/mermas-valorizadas.md`, `docs/PRODUCTO.md`, `docs/ESTADO.md`, `docs/agent/pendientes.md`
 
-- [ ] **Step 1: La regla de negocio**
+- [x] **Step 1: La regla de negocio**
 
 `docs/features/mermas-valorizadas.md`: el costo sale del producto, no se tipea; la merma sin costo se registra sin valorizar y **queda así para siempre**; el override por movimiento **ya no existe**. `docs/PRODUCTO.md`: la regla del congelado, con el porqué (mismo criterio que el precio de la venta y que **ADR-010**), y que el costo se carga al comprar o en el producto — nunca al mermar. `docs/features/inventario-kardex.md`: el filtro `sinCosto` del listado de ítems.
 
-- [ ] **Step 2: Estado y backlog**
+- [x] **Step 2: Estado y backlog**
 
 `docs/ESTADO.md`: la fila de mermas y la del catálogo de ítems (filtro `sinCosto`), con fecha. En `docs/agent/pendientes.md`, entrada nueva para la **regla 6**: *cuando se construya el reporte de mermas, tiene que mostrar cuántas quedaron sin valorizar*. Ojo con el enunciado: **`costo_perdido` no es una columna**, se deriva en la lectura (`mermas.service.ts:351-352`), así que no hay un `SUM` que arreglar — hay una cuenta futura que va a nacer mal si nadie la avisa.
 
-- [ ] **Step 3: Gate completo**
+- [x] **Step 3: Gate completo**
 
 ```bash
 cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
@@ -438,11 +438,11 @@ cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run
 
 ⚠️ `reset-db.sh` **antes** del `test:e2e`, y `reset-db.sh --verificar` después. El e2e va **completo**, no un subset: sacar un campo de un DTO compartido ya rompió specs lejanas antes.
 
-- [ ] **Step 4: Revisión independiente**
+- [x] **Step 4: Revisión independiente**
 
 `verify-feature` paso 7 sobre el diff completo del frente, no solo del último commit.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/

@@ -3,6 +3,7 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -64,11 +65,14 @@ async function login(app: INestApplication<App>): Promise<string> {
 
 describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
   let app: INestApplication<App>;
+  let ds: DataSource;
   let token: string;
   let itemId: string;
   let roturaCausaId: string;
   let mermaMovimientoId: string;
   let stockAntesDeLaMerma: string;
+  // Sembrado por el test "sin costo" (más abajo); soft-deleted en el afterAll.
+  let itemSinCostoId: string | undefined;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -85,11 +89,27 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     );
     await app.init();
 
+    ds = app.get(DataSource);
     token = await login(app);
   });
 
   afterAll(async () => {
-    await app.close();
+    // Soft delete, no `DELETE`: mismo molde que
+    // `items-pausados.e2e-spec.ts:814-824`. Sin esto, cada corrida local sin
+    // `reset-db.sh` deja un ítem más sembrado en el tenant, y con
+    // `ORDER BY i.nombre ASC` + el `pageSize` máximo (100) la acumulación
+    // puede terminar empujando los fixtures del filtro `sinCosto` fuera de la
+    // página — intermitente en vez de repetible.
+    try {
+      if (itemSinCostoId) {
+        await ds.query(
+          `UPDATE items SET eliminado_el = NOW() WHERE item_id = $1`,
+          [itemSinCostoId],
+        );
+      }
+    } finally {
+      await app.close();
+    }
   });
 
   it('GET /causas-merma devuelve al menos 5 causas fijas del seed', async () => {
@@ -275,7 +295,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       });
     expect(resCreate.status).toBe(201);
     const itemCreado = resCreate.body as ItemResponse;
-    const itemSinCostoId = itemCreado.id;
+    itemSinCostoId = itemCreado.id;
 
     // Verifica el setup aparte de la aserción bajo prueba: si esto fallara,
     // tiene que verse como "el item nació con costo" y no confundirse con

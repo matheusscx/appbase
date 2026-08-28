@@ -400,8 +400,8 @@ const columns: TableColumn<MermaListItem>[] = [
             color="warning"
             variant="subtle"
             icon="i-lucide-circle-alert"
-            title="Este producto no tiene costo cargado"
-            description="La merma se va a registrar igual, pero no va a quedar valorizada — y después no se puede corregir. Para valorizarla, cárgale el costo al producto antes de mermarlo."
+            title="Este ítem no tiene costo cargado"
+            description="La merma se va a registrar igual, pero no va a quedar valorizada — y después no se puede corregir. Para valorizarla, cárgale el costo al ítem antes de mermarlo."
           />
 
           <UFormField label="Comentario">

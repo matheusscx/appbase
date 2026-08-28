@@ -2366,8 +2366,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             color="warning"
             variant="subtle"
             icon="i-lucide-circle-alert"
-            title="Este producto todavía no tiene costo"
-            description="Si registras la compra sin el costo, el producto queda sin valorizar: sus mermas no van a poder calcularse, y eso después no se corrige."
+            title="Este ítem todavía no tiene costo"
+            description="La compra se va a registrar igual. Pero mientras el ítem no tenga costo, sus mermas no van a quedar valorizadas — y esas no se corrigen después. Podés cargarle el costo cuando quieras, no hace falta ahora."
           />
 
           <!-- Modo cantidad: cantidad + unidad opcional -->

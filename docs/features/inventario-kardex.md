@@ -226,10 +226,13 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
   `5,0500` por `g`. Ver
   [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md).
   ⚠️ **La conversión acá es de TASA, no de operación.** El ajuste mueve cantidad `0`, así
-  que el camino de las mermas —`convertirCostoUnitario(cantidadIngresada, costo,
-  cantidadBase)`, que divide por la cantidad convertida— sería una división por cero. Se
+  que reusar tal cual el camino de una compra (`ItemsService.ajustarStock`, que llama a
+  `convertirCostoUnitario(cantidadIngresada, costo, cantidadBase)` con la cantidad real del
+  movimiento) sería una división por cero acá — la cantidad convertida es el divisor. Se
   reusa el **mismo** util con `cantidadIngresada = '1'` y como divisor el factor
-  `convertirUnidad('1', unidadElegida, unidadBase)`; no hay aritmética nueva.
+  `convertirUnidad('1', unidadElegida, unidadBase)`; no hay aritmética nueva. Mermas **no**
+  llama a `convertirCostoUnitario`: el `POST /mermas` no acepta costo tipeado, valoriza
+  siempre con `costo_actual` del producto (ver "Ítems sin costo" más abajo).
   ⚠️ La comparación "igual al vigente" corre sobre el costo **ya convertido**: cargar
   `5050`/kg en un producto que ya vale `5.0500`/g rebota con 400, igual que si lo hubieran
   tipeado en gramos.
@@ -381,9 +384,12 @@ agregue mañana sin ese filtro.
   base.** Si hubo conversión de cantidad (`unidadCodigo` distinto de la base del producto), el
   costo se convierte junto con ella preservando el valor total de la operación
   (`cantidadIngresada × costoUnitario == cantidadBase × costoBase`); función pura
-  `convertirCostoUnitario` en `backend/src/common/utils/costo-conversion-unidad.util.ts`. En
-  mermas, esto **solo** aplica al `costoUnitario` explícito del DTO — cuando no se envía y se usa
-  `costo_actual` del producto (ya en unidad base), no hay conversión. Detalle y ejemplo:
+  `convertirCostoUnitario` en `backend/src/common/utils/costo-conversion-unidad.util.ts`. Esto
+  vale para `ItemsService.ajustarStock` (entrada por compra) y para el ajuste manual de costo
+  (`POST /inventario/ajustes-costo`). **No aplica a mermas**: el `POST /mermas` no acepta
+  `costoUnitario` — el ítem sin costo se marca en "Ítems sin costo" arriba, y `registrar`
+  siempre valoriza con `costo_actual` del producto (ya en unidad base), sin conversión.
+  Detalle y ejemplo:
   [Conversión de Unidades — Conversión de Costo](./conversion-unidades.md#conversión-de-costo-junto-con-la-cantidad).
 
 **Regla del recuento: delta, no absoluto (`motivo='recuento'`):**
