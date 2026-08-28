@@ -1129,11 +1129,19 @@ abriendo las superficies, no leyendo la entrada.
 
 ## 4. Necesita que el owner conteste
 
-✅ **Vacía otra vez desde el 2026-08-28**: la única entrada abierta —el desvío sin techo de
-`'documento'` con un descuento de nivel venta— se contestó y **se construyó el mismo día**
-([`resueltos.md`](resueltos.md)). Cuando vuelva a poblarse, cada entrada lleva su pregunta
-concreta adentro y mientras no se conteste **no se empieza**: elegir por cuenta propia una
-regla de negocio no documentada es justo lo que `CLAUDE.md` prohíbe.
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
+
+✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
+venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
+**Quedan cuatro abiertas** —los dos carteles de la tarjeta, la forma de importe que avisa por
+un camino y no por los otros, la nota de crédito (fiscal, frente propio) y la contradicción de
+`costo: '0'`—; el conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+
+⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
+memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
+anotado. Un conteo escrito acá se corre antes, no se recuerda.
 
 ✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner;
 volvió a poblarse con lo que fueron destapando las tandas siguientes (identidad el 2026-08-16,
