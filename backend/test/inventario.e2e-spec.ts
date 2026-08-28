@@ -293,6 +293,46 @@ describe('Inventario — flujo de costo (e2e)', () => {
     expect(resCambio.status).toBe(400);
   });
 
+  it('el ajuste de costo acepta el costo por una unidad distinta de la base', async () => {
+    // Producto propio (no del seed): el stock del seed es acumulativo entre
+    // corridas locales y contamina.
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Insumo por gramo E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'g',
+        costo: '4',
+      });
+    expect(resCreate.status).toBe(201);
+    const itemId = (resCreate.body as ItemResponse).id;
+
+    // La persona tipea el costo por kilo sobre un producto stockeado en gramos:
+    // 1 kg = 1000 g ⇒ 5050/kg se persiste como 5,0500/g. Sin la conversión de
+    // tasa esto quedaría en 5050,0000/g (error ×1000).
+    const resAjuste = await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        costoNuevo: '5050',
+        unidadCodigo: 'kg',
+        comentario: 'Costo por kilo E2E',
+      });
+    expect(resAjuste.status).toBe(201);
+    expect((resAjuste.body as AjusteCostoResponse).costoNuevo).toBe('5.0500');
+
+    // El costo que queda persistido es SIEMPRE en unidad base.
+    const resGet = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resGet.status).toBe(200);
+    expect((resGet.body as ItemResponse).costoActual).toBe('5.0500');
+  });
+
   it('rechaza crear un producto con una unidad fuera del catálogo', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/items')
