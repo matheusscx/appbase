@@ -437,6 +437,31 @@ decisión que no es mía).
   esa conexión, no la enlentece. ⚠️ Si la atribución cayera, cae también esta lectura — es la
   misma inferencia, no una segunda evidencia.
 
+  🔍 **Primera cacería con la sonda correlacionada: 20 corridas limpias (2026-08-27, ~13.000
+  tests, 1 h).** Cero timeouts. El loop de caza está en
+  `docs/agent/caza-timeout-pool.sh`; frena al primer positivo y **no resetea**, porque el
+  `down -v` de `reset-db.sh` se lleva el contenedor y con él el log de Postgres — que es lo que
+  impidió peritar el fallo original.
+
+  ✅ **Y el detector tiene control positivo**, que es lo que hace que "20 limpias" signifique
+  algo: corriendo el control (`CONTROL_SONDA=1`), que fabrica timeouts, el mismo detector los
+  cuenta (3 de 3). Sin eso, 20 vueltas limpias no distinguen "no pasó" de "no lo habría visto" —
+  el error exacto que costó una tarde en el frente del `401`.
+
+  📊 **La distribución de esas 20 corridas** (10.842 registros; 1.038 pedidos que crearon cliente,
+  9.804 servidos con un idle):
+
+  | | p50 | p95 | p99 | máx |
+  |---|---|---|---|---|
+  | Establecer la conexión (`clienteMs`) | 6 ms | 10 ms | 14 ms | **74 ms** |
+  | Atraso del event loop (`loopMax`) | 178 ms | — | 531 ms | **946 ms** |
+
+  ⚠️ **Lo que esto NO dice**, porque es la misma trampa que ya se cayó una vez en esta entrada:
+  son corridas **verdes**, así que no restringen el instante del fallo. Que el loop no haya pasado
+  de 946 ms acá **no** refuta el bloqueo de ~4900 ms que la hipótesis necesita — en estas 20 no
+  falló nada. Lo que sí dice es que el fallo no es la cola de estas distribuciones: entre 74 ms y
+  5000 ms no hay nada, así que es una discontinuidad, no un margen que a veces se pasa.
+
   ➡️ **Lo que falta: una sola cosa, que vuelva a pasar con las sondas puestas.** Ya no hay nada que
   construir. Cuando caiga, el registro del timeout va a traer su `pedido` y su `via`, el
   `capa: 'client.connect'` del **mismo** `pedido` va a decir cuánto tardó esa conexión, `loopMax` y
