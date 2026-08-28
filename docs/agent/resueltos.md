@@ -11444,3 +11444,125 @@ los tramos guardados, pero por otro motivo.
   porcentaje —el campo queda **vacío**, no arrastra el 1000—, guardar 0.10 y verlo como
   `10% (porcentaje)`, y crear una regla por tramos en monto fijo. Verificado en la base que la
   columna abandonada queda en `NULL` y que los dos tramos aterrizan en `valor_monto`.
+
+---
+
+## El drawer de ajuste de costo cambiaba de unidad sin tocar el número ya tipeado (cerrado 2026-08-28)
+
+**Venía de la sección 2** ("Medir primero"). Entrada mudada verbatim desde `pendientes.md`:
+
+> ### El drawer de ajuste de costo cambia de unidad y no toca el número ya tipeado (2026-08-28)
+>
+> - [ ] **En `frontend/app/pages/inventario/index.vue` (selector en `:381-392`, `MoneyInput` en
+>   `:394-399`), cambiar la unidad después de tipear reinterpreta el número sin avisar**
+>   (frontend; lo levantó la revisión independiente del propio frente que agregó el selector).
+>   Tipear `5050` con la unidad en `g` y después pasar el selector a `kg` manda `5050` "por kg":
+>   el backend lo divide por 1000 y persiste `5.0500`/g. **Lo único que cambia en pantalla es la
+>   etiqueta** (*"Costo nuevo (por kg)"*), y el campo "Costo vigente" de arriba (`:373-379`) se
+>   muestra **sin unidad** —siempre en base— justo al lado, que es la comparación que más induce
+>   a error en el caso que la feature vino a habilitar. No viola ninguna invariante: se manda
+>   exactamente lo tipeado bajo la unidad visible. Es riesgo de plata mal cargada, ×1000.
+>   ⚠️ **La comparación con `mermas.vue` que esta entrada tenía ya no aplica — verificado hoy,
+>   no de memoria.** Cuando se escribió, `mermas.vue` tenía un `watch` sobre `unidadCodigo` que
+>   llamaba a `prefillCostoUnitario()` y pisaba lo tipeado, y la entrada advertía no copiar ese
+>   molde. Medido el 2026-08-28: `mermas.vue` hoy tiene **un solo** `watch` (sobre `itemId`,
+>   `mermas.vue:121`, que solo resetea la unidad al elegir producto); `prefillCostoUnitario` no
+>   existe más. El campo de costo se sacó entero del formulario en ese mismo frente —el costo
+>   se maneja en el producto, no se tipea al mermar (`docs/features/mermas-valorizadas.md`)—,
+>   así que no queda molde de `mermas.vue` con el que comparar. La elección de cierre de abajo
+>   para `inventario/index.vue` no depende de esa comparación y sigue en pie por sus propios
+>   méritos.
+>   **Lo que falta es elegir el cierre, y las dos opciones son baratas:** (a) convertir lo
+>   tipeado al cambiar de unidad, que preserva la intención pero mueve un número que la persona
+>   escribió; (b) limpiar el campo al cambiar de unidad, que no adivina nada y obliga a
+>   retipear. En cualquiera de las dos, mostrar el "Costo vigente" **también** en la unidad
+>   elegida cierra la mitad visual del problema.
+
+**Cómo se cerró.** El owner eligió, sobre la escena concreta —harina a $1.500 el kilo, el
+selector movido de `kg` a `g` con el campo ya lleno—, entre las dos opciones que la entrada
+dejaba abiertas: **limpiar el campo**, no convertir lo tipeado.
+
+⚠️ **Y la decisión se tomó con un dato que la entrada NO tenía, medido al abrir el frente:**
+la opción (a) —convertir— no era la alternativa amable, era la peligrosa. Convertir hacia
+una unidad más chica produce el caso irrepresentable: `1500`/kg → `1,5`/g, y en CLP
+`MoneyInput` **no rechaza esa fracción, la redondea a `2` y la emite** (el mecanismo de
+`v-maska` que ya estaba medido en [`patterns/frontend.md`](../patterns/frontend.md) §8 con
+el 7,69% de `mermas.vue`). O sea que (a) habría cambiado un error ×1000 que la persona
+puede ver por uno del 33% que nadie ve. La entrada presentaba las dos opciones como
+igualmente baratas porque nadie había cruzado esa conversión con ese mecanismo.
+
+**Lo que se hizo** (`frontend/app/pages/inventario/index.vue`):
+
+1. Un `watch` sobre `ajusteCostoForm.unidadCodigo` vacía `costoNuevo` cuando la unidad
+   cambia de verdad (no en la asignación inicial, donde `anterior` es `''`).
+2. El **"Costo vigente"** —la otra mitad, la visual— pasa a mostrarse en la **misma unidad
+   que el selector**, con su etiqueta *"Costo vigente (por {unidad})"*. Era la comparación
+   lado a lado que inducía el error, y la entrada ya lo señalaba.
+3. Como ese vigente es una **tasa convertida**, cae en fracciones que la moneda no
+   representa. Se agregó `formatCostoDisplay` (`app/utils/currency-format.ts`) y su
+   `formatCosto` en `useCurrency`: los decimales de la moneda son el **piso**, no el techo,
+   hasta `ESCALA_COSTO` = 4. **Solo lectura** — un campo editable no puede usarlo, porque
+   ahí lo que se teclea se cobra.
+
+**Qué lo fija, y con qué mutante se verificó.** `app/pages/inventario/index.nuxt.spec.ts`
+(nuevo: la pantalla no tenía spec) monta el drawer y maneja los `USelectMenu` emitiendo
+`update:modelValue`, mismo molde que `descuentos.nuxt.spec.ts`. Los cuatro mutantes son
+**reversiones al código anterior**, no roturas:
+
+| Mutante | Resultado |
+|---|---|
+| Sacar el `watch` que limpia | ✗ *"cambiar de unidad limpia el costo ya tipeado"* |
+| Volver el vigente a `formatMonto(costoActual)` con la etiqueta fija | ✗ *"el costo vigente se muestra en la unidad elegida"* |
+| Dejar de mandar `unidadCodigo` en el body del POST | ✗ *"tras limpiar, lo retipeado viaja con la unidad elegida"* |
+| `formatCostoDisplay` sin el piso de decimales | ✗ 4 tests (3 del util + el del vigente) |
+
+⚠️ **El spec stubea `AppDrawer`, y no es cosmético:** con el `UDrawer` real, **cerrarlo**
+bajo happy-dom tira dos unhandled rejections (`usePresence` de reka-ui leyendo `display` de
+un nodo desprendido) y `vitest run` sale con **exit 1** aunque los tests pasen. Lo cazó
+correr el comando y mirar su código de salida, no su última línea: `npm test | tail` la
+oculta, porque el status del pipe es el del `tail`. El molde del stub —y el `attachTo:
+document.body` que necesita el botón `type="submit" form="…"`— sale de
+`configuracion/garzones.nuxt.spec.ts`, que ya había medido y documentado exactamente esto.
+
+📌 **Lo que la revisión independiente cambió del cierre**, porque las tres valían: (a) el
+tercer test era una tautología —emitir el mismo valor no dispara ningún `watch` de Vue, así
+que pasaba con el código viejo *y* con el guard mutado—, y se reemplazó por el que afirma
+sobre el **body del POST**; (b) `formatCosto` se reexpone por `useFormatters` en vez de
+importar `useCurrency` en la página, que habría sido el primer `.vue` del repo en hacerlo;
+(c) el guard perdió su mitad muerta (`nueva === anterior`, inalcanzable por semántica de
+`watch`). También levantó una contradicción de fechas entre dos docs **del mismo diff**.
+
+📌 **Lo que este cierre NO toca:** los seis `:decimales="4"` de `items.vue` y el rechazo de
+cadenas inválidas en `MoneyInput` siguen siendo frentes propios. Y **cambiar de producto**
+—no de unidad— conserva el costo tipeado: es el vecino inmediato, quedó anotado en
+[`pendientes.md`](pendientes.md) porque el owner decidió sobre la unidad, no sobre el ítem. Y el ×1000 de esta entrada
+era el del **selector**; el `.`→×10 de maska es otro y sigue abierto.
+
+---
+
+## `convertirCosto` volvió a tener consumidor antes de que se borrara (cerrada 2026-08-28)
+
+**Venía de la sección 1** ("Mecánico"). Entrada mudada verbatim desde `pendientes.md`:
+
+> - [ ] **`useUnidadConversion.ts` → `convertirCosto` quedó sin consumidores productivos**
+>   (frontend, `frontend/app/composables/useUnidadConversion.ts:44-50`) — este frente le sacó
+>   el último llamador: era el prefill del costo en `mermas.vue`, que la regla 3 de
+>   [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
+>   eliminó junto con todo el campo de costo del formulario. **Verificado con grep del repo
+>   entero el 2026-08-28**: hoy solo lo referencia su propio spec
+>   (`useUnidadConversion.spec.ts`), ningún `.vue` ni service lo importa. `convertirCantidad`
+>   —la otra función del mismo composable— **sigue con consumidores** y no se toca. El
+>   arreglo es borrar `convertirCosto` y los tests que solo prueban esa función, no el
+>   composable entero.
+
+**No se cerró haciéndola: se cerró porque su premisa dejó de ser cierta**, el mismo día y
+por el frente de al lado. El cierre del ×1000 del drawer de ajuste de costo necesita
+convertir el "Costo vigente" a la unidad elegida, y esa conversión es exactamente
+`convertirCosto` —tasa, no cantidad—, así que `frontend/app/pages/inventario/index.vue`
+pasó a importarla. Borrarla habría obligado a reescribirla dos horas después.
+
+📌 **La lección, que vale más que la entrada:** *"quedó sin consumidores"* es un hecho
+fechado, no una propiedad. Cuando el hueco que dejó vacío a un helper es el mismo que otro
+frente abierto va a llenar, la entrada mecánica está compitiendo con trabajo ya en la cola.
+Verificar consumidores **al tomar** la entrada, no al escribirla — que es la misma regla que
+`pendientes.md` ya tiene para las citas de línea.

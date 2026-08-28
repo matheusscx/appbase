@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import { formatMontoDisplay, parseMontoInput } from '~/utils/currency-format'
+import { formatCostoDisplay, formatMontoDisplay, parseMontoInput } from '~/utils/currency-format'
 import type { MonedaDisplayConfig } from '~/types/moneda'
 
 export function useCurrency() {
@@ -16,6 +16,17 @@ export function useCurrency() {
     const cfg = store.getById(monedaId)
     if (!cfg) return '—'
     return formatMontoDisplay(value, cfg)
+  }
+
+  /** Costo (tasa) solo de lectura: los decimales de la moneda son el piso.
+   * Ver `formatCostoDisplay`. */
+  function formatCosto(
+    value: string | Decimal | null | undefined,
+    monedaId: string,
+  ): string {
+    const cfg = store.getById(monedaId)
+    if (!cfg) return '—'
+    return formatCostoDisplay(value, cfg)
   }
 
   function formatOficial(value: string | Decimal | null | undefined): string {
@@ -38,6 +49,7 @@ export function useCurrency() {
 
   return {
     format,
+    formatCosto,
     formatOficial,
     parse,
     parseOficial,

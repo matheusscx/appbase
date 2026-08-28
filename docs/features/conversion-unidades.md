@@ -277,9 +277,15 @@ persistía en márgenes, food-cost y valorización de mermas.
 ajuste de stock de `configuracion/items.vue` describe la misma convención (el costo se tipea
 "por la unidad elegida"), pero es texto fijo — no llama a `convertirCosto`. La conversión real
 la hace el backend al recibir `costoUnitario` + `unidadCodigo`. `mermas.vue` ya no tiene input
-de costo ni prefill: el campo se sacó entero del formulario. `useUnidadConversion.ts`
-(`convertirCosto`) quedó sin consumidores productivos tras sacarlo — ver
-`docs/agent/pendientes.md`.
+de costo ni prefill: el campo se sacó entero del formulario.
+
+`useUnidadConversion.convertirCosto` **sí tiene consumidor, desde el 2026-08-28**: el drawer
+de ajuste de costo de `inventario/index.vue` lo usa para mostrar el **"Costo vigente" en la
+unidad elegida** en el selector, que es solo lectura. Estuvo un rato marcado como código
+muerto —`mermas.vue` era su único llamador— y esa nota era correcta cuando se escribió;
+lo que la venció fue el frente del ×1000 del selector, **del mismo 2026-08-28**
+([`resueltos.md`](../agent/resueltos.md)). ⚠️ Sigue sin llamarse para **lo que se teclea**:
+al cambiar de unidad el campo de costo nuevo se **limpia**, no se convierte.
 
 ---
 

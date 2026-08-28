@@ -495,8 +495,26 @@ Reglas:
   📌 Antes de sacar un `:decimales="4"` de cualquier otro campo (quedan 6 en `items.vue`),
   la pregunta no es "¿tiene selector?" sino **"¿ese selector gobierna solo el costo?"**.
 
+- ⭐ **Cambiar el selector de unidad LIMPIA el campo de costo; convertir lo tipeado es la
+  trampa** (owner, 2026-08-28). Es la contracara del bullet de arriba: el mismo mecanismo
+  que impide *sacar* el prop `decimales` impide *convertir* hacia una unidad más chica.
+  `1500` por kilo son `1,5` por gramo, y en CLP eso no es representable — `MoneyInput` no
+  rechaza, redondea a `2` y lo emite. O sea que la opción "amable" persiste un costo 33%
+  más alto **sin que nadie toque el campo**, que es exactamente el modo de falla del
+  7,69% medido arriba. Limpiar cuesta un retipeo y no puede inventar nada.
+  Aplicado en el drawer de ajuste de costo de `inventario/index.vue`; fijado en
+  `app/pages/inventario/index.nuxt.spec.ts`.
+  📌 La otra mitad del mismo problema es **visual**: un "Costo vigente" en unidad base al
+  lado de un "Costo nuevo (por g)" son dos números que no se pueden comparar. El vigente
+  sigue al selector, y como es una **tasa convertida** puede caer en fracciones que la
+  moneda no tiene → se formatea con **`formatCosto`** (`useCurrency`) y no con
+  `formatMonto`: los decimales de la moneda son el **piso**, no el techo, hasta
+  `ESCALA_COSTO` = 4. ⚠️ Solo para **lectura**. En un campo editable la escala la manda
+  la moneda, porque lo que se teclea se cobra.
+
 Archivos: `app/stores/monedas.ts`, `app/types/moneda.ts`,
-`app/utils/currency-format.ts` (+ `.spec.ts`), `app/composables/useCurrency.ts`,
+`app/utils/currency-format.ts` (+ `.spec.ts`, `formatMontoDisplay` para montos y
+`formatCostoDisplay` para tasas), `app/composables/useCurrency.ts`,
 `app/composables/useFormatters.ts`, `app/components/MoneyInput.vue`.
 
 Tests: `cd frontend && npm test -- --run app/utils/currency-format.spec.ts app/stores/monedas.spec.ts`

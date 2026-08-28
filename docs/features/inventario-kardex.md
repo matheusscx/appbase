@@ -528,6 +528,18 @@ inventario de lo que existe hoy. Lo que sí está fechado describe estado real.
     `@IsNotEmpty()`, así que una cadena vacía sería un 400. El `MoneyInput` va atado a
     `:moneda-id` y **sin** prop `decimales`: la precisión la da la unidad
     ([`patterns/frontend.md`](../patterns/frontend.md) §8)
+  - **Cambiar la unidad limpia el costo ya tipeado** (owner, 2026-08-28). No lo
+    convierte: `1500` por kilo son `1,5` por gramo, y en una moneda sin decimales
+    `MoneyInput` no rechaza eso —redondea a `2` y lo emite en silencio—, o sea un costo
+    33% más alto que nadie tecleó. El campo vacío obliga a retipear, que es la única de
+    las dos salidas que no puede inventar un número
+    ([`patterns/frontend.md`](../patterns/frontend.md) §8)
+  - El **"Costo vigente"** se muestra en la **misma unidad que el selector**, con su
+    etiqueta *"Costo vigente (por {unidad})"*. Mostrarlo siempre en unidad base al lado
+    de un *"Costo nuevo (por g)"* era la comparación que inducía a cargar el número
+    ×1000. Como es una tasa convertida puede caer en fracciones que la moneda no tiene,
+    se formatea con `formatCosto` (`useCurrency`), que toma los decimales de la moneda
+    como **piso** y no como techo — es solo lectura, así que no hay nada que teclear
 
 - `pages/configuracion/items.vue` — Modificación: agregar modal "Historial"
   - En la fila de cada producto, agregar botón/enlace "Historial"

@@ -176,17 +176,6 @@ tarea pendiente.
 
 ### El residuo que dejó el frente de la merma sin costo tipeado (2026-08-28)
 
-- [ ] **`useUnidadConversion.ts` → `convertirCosto` quedó sin consumidores productivos**
-  (frontend, `frontend/app/composables/useUnidadConversion.ts:44-50`) — este frente le sacó
-  el último llamador: era el prefill del costo en `mermas.vue`, que la regla 3 de
-  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
-  eliminó junto con todo el campo de costo del formulario. **Verificado con grep del repo
-  entero el 2026-08-28**: hoy solo lo referencia su propio spec
-  (`useUnidadConversion.spec.ts`), ningún `.vue` ni service lo importa. `convertirCantidad`
-  —la otra función del mismo composable— **sigue con consumidores** y no se toca. El
-  arreglo es borrar `convertirCosto` y los tests que solo prueban esa función, no el
-  composable entero.
-
 - [ ] **La causa de merma "Rotura envase" no se limpia entre corridas, y por eso
   `mermas.e2e-spec.ts` no es repetible sin reset** (backend,
   `backend/test/mermas.e2e-spec.ts:130-139`; medido el 2026-08-28 al verificar el hallazgo 2
@@ -837,32 +826,25 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
   tiempo entre `createQueryRunner()` y el `BEGIN`.
 
-### El drawer de ajuste de costo cambia de unidad y no toca el número ya tipeado (2026-08-28)
+### Cambiar de PRODUCTO conserva el costo tipeado, y puede cambiar la moneda debajo (2026-08-28)
 
-- [ ] **En `frontend/app/pages/inventario/index.vue` (selector en `:381-392`, `MoneyInput` en
-  `:394-399`), cambiar la unidad después de tipear reinterpreta el número sin avisar**
-  (frontend; lo levantó la revisión independiente del propio frente que agregó el selector).
-  Tipear `5050` con la unidad en `g` y después pasar el selector a `kg` manda `5050` "por kg":
-  el backend lo divide por 1000 y persiste `5.0500`/g. **Lo único que cambia en pantalla es la
-  etiqueta** (*"Costo nuevo (por kg)"*), y el campo "Costo vigente" de arriba (`:373-379`) se
-  muestra **sin unidad** —siempre en base— justo al lado, que es la comparación que más induce
-  a error en el caso que la feature vino a habilitar. No viola ninguna invariante: se manda
-  exactamente lo tipeado bajo la unidad visible. Es riesgo de plata mal cargada, ×1000.
-  ⚠️ **La comparación con `mermas.vue` que esta entrada tenía ya no aplica — verificado hoy,
-  no de memoria.** Cuando se escribió, `mermas.vue` tenía un `watch` sobre `unidadCodigo` que
-  llamaba a `prefillCostoUnitario()` y pisaba lo tipeado, y la entrada advertía no copiar ese
-  molde. Medido el 2026-08-28: `mermas.vue` hoy tiene **un solo** `watch` (sobre `itemId`,
-  `mermas.vue:121`, que solo resetea la unidad al elegir producto); `prefillCostoUnitario` no
-  existe más. El campo de costo se sacó entero del formulario en ese mismo frente —el costo
-  se maneja en el producto, no se tipea al mermar (`docs/features/mermas-valorizadas.md`)—,
-  así que no queda molde de `mermas.vue` con el que comparar. La elección de cierre de abajo
-  para `inventario/index.vue` no depende de esa comparación y sigue en pie por sus propios
-  méritos.
-  **Lo que falta es elegir el cierre, y las dos opciones son baratas:** (a) convertir lo
-  tipeado al cambiar de unidad, que preserva la intención pero mueve un número que la persona
-  escribió; (b) limpiar el campo al cambiar de unidad, que no adivina nada y obliga a
-  retipear. En cualquiera de las dos, mostrar el "Costo vigente" **también** en la unidad
-  elegida cierra la mitad visual del problema.
+- [ ] **En el drawer de ajuste de costo (`frontend/app/pages/inventario/index.vue:200-204`,
+  el `watch` de `itemId`) elegir otro producto no toca `costoNuevo`** — lo levantó la revisión
+  independiente del frente que cerró el ×1000 del **selector de unidad**, y es el vecino
+  inmediato de ese caso, no el mismo: acá lo que cambia es el ítem. Escena: se elige Harina
+  (base `kg`), se tipea `1500`, se cambia el producto a otro cuya base también es `kg` → el
+  watch de la unidad **no dispara** (mismo valor) y el número sobrevive aplicado a otro ítem.
+  ⚠️ **Y el ítem nuevo puede estar en otra moneda:** `MoneyInput` va atado a
+  `:moneda-id="productoAjusteSeleccionado?.monedaId"`, así que reemite el mismo número bajo
+  otra escala.
+  **No es una regresión** —es preexistente al frente del selector, que solo cubrió el cambio
+  de unidad— y por eso no salió de arrastre: el owner ya decidió *limpiar* para la unidad
+  ([`resueltos.md`](resueltos.md)), pero **no se le preguntó por el cambio de producto**, y no
+  es obvio que la respuesta sea la misma: cambiar de producto puede ser corregir un click
+  errado, donde perder lo tipeado molesta más de lo que protege.
+  **Antes de tomarla, medir:** ¿el costo tipeado sobrevive de verdad al cambio de producto en
+  el navegador, y qué muestra `MoneyInput` cuando la moneda nueva tiene otros decimales? La
+  entrada sale del razonamiento sobre el código, no de una corrida.
 
 ### El factor de conversión se cuantiza a 4 decimales, y como factor eso es el peor caso (2026-08-28)
 

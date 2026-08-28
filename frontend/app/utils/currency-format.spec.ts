@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import Decimal from 'decimal.js'
 import {
+  formatCostoDisplay,
   formatMontoDisplay,
   formatMontoManual,
   isIso4217Currency,
@@ -78,6 +79,39 @@ describe('formatMontoDisplay', () => {
   it('vacío devuelve em dash', () => {
     expect(formatMontoDisplay('', clp)).toBe('—')
     expect(formatMontoDisplay(null, clp)).toBe('—')
+  })
+})
+
+describe('formatCostoDisplay', () => {
+  // El caso que motiva la función: $1.500 por kilo son $1,5 por gramo, y en CLP
+  // eso no es representable. Con `formatMontoDisplay` se vería "$2" —un 33% más
+  // caro— al lado del campo donde se teclea el costo nuevo.
+  it('muestra la fracción que la moneda no tiene, en vez de redondearla', () => {
+    expect(formatCostoDisplay('1.5', clp)).toBe('$1,5')
+    expect(formatMontoDisplay('1.5', clp)).toBe('$2')
+  })
+
+  it('un costo entero se ve igual que un monto: la moneda es el piso', () => {
+    expect(formatCostoDisplay('1500', clp)).toBe('$1.500')
+    expect(formatCostoDisplay('1500.0000', clp)).toBe('$1.500')
+  })
+
+  it('no recorta los decimales que la moneda sí tiene', () => {
+    expect(formatCostoDisplay('1500.5', usd)).toBe('$1,500.50')
+  })
+
+  it('corta en la escala con que el backend guarda el costo', () => {
+    expect(formatCostoDisplay('0.123456', clp)).toBe('$0,1235')
+  })
+
+  it('vacío devuelve em dash', () => {
+    expect(formatCostoDisplay('', clp)).toBe('—')
+    expect(formatCostoDisplay(null, clp)).toBe('—')
+    expect(formatCostoDisplay(undefined, clp)).toBe('—')
+  })
+
+  it('acepta un Decimal, que es lo que devuelve la conversión de unidad', () => {
+    expect(formatCostoDisplay(new Decimal('1500').div(1000), clp)).toBe('$1,5')
   })
 })
 

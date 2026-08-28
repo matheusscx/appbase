@@ -5,7 +5,8 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const toast = useToast()
-const { formatFecha, formatMonto, formatStock } = useFormatters()
+const { formatFecha, formatMonto, formatCosto, formatStock } = useFormatters()
+const { convertirCosto } = useUnidadConversion()
 const { pageSize } = useUserPreferences()
 
 // El nav abre esta página con Inventario/Leer, pero POST /inventario/ajustes-costo
@@ -160,9 +161,40 @@ const mostrarSelectorUnidadAjuste = computed(() =>
 /** El costo se ingresa "por la unidad seleccionada", no por la unidad base: la
  * precisión la da elegir la unidad, no teclear decimales que la moneda no tiene.
  * Ver docs/superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md */
-const costoNuevoLabel = computed(() => {
-  const unidad = ajusteCostoForm.value.unidadCodigo || productoAjusteSeleccionado.value?.unidadMedida
-  return unidad ? `Costo nuevo (por ${unidad})` : 'Costo nuevo'
+const unidadAjusteVisible = computed(() =>
+  ajusteCostoForm.value.unidadCodigo || productoAjusteSeleccionado.value?.unidadMedida || '',
+)
+
+const costoNuevoLabel = computed(() =>
+  unidadAjusteVisible.value ? `Costo nuevo (por ${unidadAjusteVisible.value})` : 'Costo nuevo',
+)
+
+const costoVigenteLabel = computed(() =>
+  unidadAjusteVisible.value ? `Costo vigente (por ${unidadAjusteVisible.value})` : 'Costo vigente',
+)
+
+/** El vigente se muestra en la MISMA unidad que el selector. Mostrarlo siempre
+ * en unidad base al lado de un "Costo nuevo (por g)" es la comparación que
+ * inducía a cargar el número ×1000 (owner, 2026-08-28). */
+const costoVigenteEnUnidad = computed(() => {
+  const prod = productoAjusteSeleccionado.value
+  const base = prod?.unidadMedida
+  if (!prod?.costoActual || !base) return prod?.costoActual ?? null
+  return convertirCosto(prod.costoActual, base, unidadAjusteVisible.value || base)
+})
+
+/** Cambiar de unidad NO reinterpreta lo ya tipeado: limpia el campo y se
+ * retipea. Convertirlo parece más amable y es la trampa: `1500` por kilo son
+ * `1,5` por gramo, y en una moneda sin decimales `MoneyInput` no rechaza —
+ * redondea a `2` y lo emite en silencio (mecanismo medido en
+ * `docs/patterns/frontend.md` §8), o sea un costo 33% más alto que nadie
+ * tecleó. Decisión del owner, 2026-08-28. */
+watch(() => ajusteCostoForm.value.unidadCodigo, (_nueva, anterior) => {
+  // `!anterior` es la asignación inicial (el watch de `itemId`, abajo), no un
+  // cambio de unidad. Vue no dispara con el mismo valor, así que comparar
+  // `nueva === anterior` sería una rama muerta.
+  if (!anterior) return
+  ajusteCostoForm.value.costoNuevo = ''
 })
 
 watch(() => ajusteCostoForm.value.itemId, (itemId) => {
@@ -371,9 +403,9 @@ async function registrarAjusteCosto() {
                 />
               </UFormField>
 
-              <UFormField v-if="productoAjusteSeleccionado" label="Costo vigente">
+              <UFormField v-if="productoAjusteSeleccionado" :label="costoVigenteLabel">
                 <UInput
-                  :model-value="formatMonto(productoAjusteSeleccionado.costoActual, productoAjusteSeleccionado.monedaId)"
+                  :model-value="formatCosto(costoVigenteEnUnidad, productoAjusteSeleccionado.monedaId)"
                   disabled
                   class="w-full"
                 />

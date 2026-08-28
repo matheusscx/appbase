@@ -57,3 +57,33 @@ export function parseMontoInput(raw: string, cfg: MonedaDisplayConfig): Decimal 
     return new Decimal(0)
   }
 }
+
+/**
+ * Escala de un costo en el backend (`ESCALA_COSTO`, `common/decorators/es-costo`).
+ * Duplicada acá a propósito: no hay workspace compartido entre backend y
+ * frontend todavía. Si cambia allá, cambia acá.
+ */
+const ESCALA_COSTO = 4
+
+/**
+ * Un costo es una **tasa**, no un monto cobrado, así que los decimales de la
+ * moneda son su **piso, no su techo**: convertir un costo a otra unidad puede
+ * dar una fracción que la moneda no representa —$1.500 por kilo son $1,5 por
+ * gramo— y formatearla con `formatMontoDisplay` la redondearía a `$2`, un
+ * número que no es el costo. Acá se agregan los decimales que el valor traiga,
+ * hasta la escala con que el backend lo guarda.
+ *
+ * Solo para **lectura**. Un campo editable no puede usar esto: ahí la escala la
+ * manda la moneda, porque lo que se teclea se cobra
+ * (`docs/patterns/frontend.md` §8).
+ */
+export function formatCostoDisplay(
+  value: string | Decimal | null | undefined,
+  cfg: MonedaDisplayConfig,
+): string {
+  if (value === null || value === undefined || value === '') return '—'
+
+  const d = value instanceof Decimal ? value : new Decimal(value)
+  const decimals = Math.max(cfg.decimals, Math.min(d.decimalPlaces(), ESCALA_COSTO))
+  return formatMontoManual(d, { ...cfg, decimals })
+}

@@ -9,7 +9,7 @@ const dateFmt = new Intl.DateTimeFormat('es-CL', {
 const dateOnlyFmt = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium' })
 
 export function useFormatters() {
-  const { format: formatCurrency, formatOficial } = useCurrency()
+  const { format: formatCurrency, formatCosto, formatOficial } = useCurrency()
 
   function formatMonto(
     value: string | Decimal | null | undefined,
@@ -72,5 +72,9 @@ export function useFormatters() {
     }
   }
 
-  return { formatMonto, formatFecha, formatStock, formatTipoPago, formatPorcentaje }
+  // `formatCosto` se reexpone tal cual: un costo es una tasa y su formato tiene
+  // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
+  // Va por acá y no importando `useCurrency` en la página porque las pantallas
+  // formatean por `useFormatters` — una sola puerta, no dos.
+  return { formatMonto, formatCosto, formatFecha, formatStock, formatTipoPago, formatPorcentaje }
 }
