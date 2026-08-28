@@ -254,10 +254,16 @@ export interface TrazaImpuesto {
  * —el valor ya viene cuantizado por el cierre del paso, es la misma convención
  * que las demás trazas—.
  *
- * `aplicacion` agrupa: es 1-based POR PROMO, así que dos grupos de un 2x1 sobre
- * la misma línea son `1` y `2`, y una aplicación cross-línea deja el MISMO
- * número en las dos líneas que tocó. Sin él, el drawer no puede distinguir "dos
- * veces el 2x1" de "el 2x1 repartido en dos líneas".
+ * `aplicacion` es 1-based POR PROMO: dos grupos de un 2x1 sobre la misma línea
+ * son `1` y `2`, y una aplicación cross-línea deja el MISMO número en las dos
+ * líneas que tocó. Es lo que distingue "dos veces el 2x1" de "el 2x1 repartido
+ * en dos líneas".
+ *
+ * ⚠️ **Ningún lector lo consume hoy**: viaja en el congelado y nadie agrupa por
+ * él. El ticket agrupa por `id` (`ticket-builder.ts`, `agregarPromocionesVenta`)
+ * y el drawer no agrupa —fijado en `VentaDetalleDrawer.nuxt.spec.ts`—.
+ * Verificado el 2026-08-28: el campo se guarda para poder explicar una venta
+ * vieja, no porque una pantalla lo lea.
  */
 export interface TrazaPromo {
   /** `promocionId`. */
@@ -1494,11 +1500,48 @@ function calcularLinea(
  * Con `Σ pesos = 0` (una venta que no cobra nada) reparte todo en la primera
  * línea: no hay proporción que calcular y el `disponible` de arriba ya garantizó
  * que el monto sea cero, así que es un borde defensivo, no un caso real.
+ *
+ * **`q` es el cuantizador del NIVEL, no `cuantizar` a secas.** Con
+ * `nivelRedondeo: 'documento'` nada intermedio se cierra en la escala de la
+ * moneda, y este reparto no es la excepción: cuantizar acá metía un redondeo
+ * por línea que el nivel promete no hacer.
+ *
+ * Y por eso el residuo se reparte en dos tramos. Medido sobre 20.000 repartos
+ * con moneda de 2 decimales:
+ *
+ * | qué entra | repartos que NO suman `monto` | peor error |
+ * |---|---|---|
+ * | monto cuantizado, partes cuantizadas (`'linea'`) | 0 % | 0 |
+ * | monto fino, partes cuantizadas (lo que hacía `'documento'`) | 99,02 % | 0,0799 |
+ * | monto fino, partes finas, con pasos de unidad a secas | 23,69 % | 0,0800 |
+ *
+ * La causa de las dos filas rotas es la misma: si lo que sobra no es un número
+ * entero de unidades, el paso de unidad nunca lo lleva a cero y el loop le suma
+ * un centavo **a cada línea** —de ahí el error de ~0,01 × líneas—. Con partes
+ * finas el sobrante ni siquiera es un centavo: es el epsilon de la división de
+ * Decimal.js (~2e-16), que aparece en el 23,69 % de los repartos porque
+ * `monto × peso / total` redondea a 20 dígitos significativos.
+ *
+ * ⚠️ Los porcentajes salen de un generador de carritos que **no quedó en el
+ * repo**. Repetida la medición con otro generador dio 0 % / 100 % / 24,5 %: los
+ * dígitos se mueven, las tres filas no. Lo que el repo sí puede volver a
+ * comprobar son los totales fijados en el spec.
+ *
+ * Entonces: pasos de unidad **mientras quepa una entera**, y lo que queda —que
+ * por definición es menos que una unidad— va entero a la parte de mayor resto.
+ * Con `'linea'` el sobrante siempre es un número entero de unidades, así que el
+ * segundo tramo no se ejecuta y el reparto sale idéntico al de antes: medido,
+ * 0 de 20.000 repartos cambian.
+ *
+ * El segundo tramo no es idioma nuevo: es el mismo que ya usaba
+ * `repartirDescuentoCombo` (`promociones.evaluator.ts`), que reparte fino y le
+ * da el resto de precisión a la línea de mayor resto fraccionario.
  */
 function repartirProporcional(
   monto: Decimal,
   pesos: Decimal[],
   cfg: ConfigCalculo,
+  q: Cuantizador,
 ): Decimal[] {
   const total = pesos.reduce((a, p) => a.plus(p), ZERO);
   if (pesos.length === 0) return [];
@@ -1507,7 +1550,7 @@ function repartirProporcional(
   }
 
   const finas = pesos.map((peso) => monto.times(peso).dividedBy(total));
-  const partes = finas.map((f) => cuantizar(f, cfg));
+  const partes = finas.map((f) => q(f));
   const repartido = partes.reduce((a, p) => a.plus(p), ZERO);
   let sobra = monto.minus(repartido);
   if (sobra.isZero()) return partes;
@@ -1521,9 +1564,20 @@ function repartirProporcional(
       return cmp !== 0 ? cmp : a.i - b.i;
     });
   for (const { i } of orden) {
-    if (sobra.isZero()) break;
+    if (sobra.abs().lt(unidad.abs())) break;
     partes[i] = partes[i].plus(unidad);
     sobra = sobra.minus(unidad);
+  }
+  // Lo que queda es menos que una unidad: no hay paso que lo represente, así
+  // que va entero a la primera parte del mismo orden que reparte los pasos.
+  // Con el cuantizador identidad —el único caso donde este tramo corre— las
+  // partes SON las finas, así que todos los restos valen 0 y el desempate por
+  // posición manda el residuo a la línea 0, siempre. El criterio se escribe
+  // igual que arriba para que las dos mitades sigan la misma regla el día que
+  // alguien cuantice a una escala intermedia. Ver la tabla del docblock.
+  if (!sobra.isZero()) {
+    const k = orden[0].i;
+    partes[k] = partes[k].plus(sobra);
   }
   return partes;
 }
@@ -1533,18 +1587,27 @@ function repartirProporcional(
  * respetando sus proporciones. Se usa al convertir las reglas de documento de
  * plata cobrada a neto: el monto de cada regla cambia, la proporción entre
  * ellas no, y `Σ trazas = lo declarado` tiene que seguir valiendo.
+ *
+ * ⚠️ Esa igualdad es exacta **en los Decimal**, y en los strings emitidos lo es
+ * con `'linea'`. Con `'documento'` las partes salen finas y `fmt` las recorta a
+ * `escalaCalculo`: medido, en ~34 % de los repartos la suma de los strings se
+ * corre hasta 0,0002 —cincuenta veces menos que el centavo que el propio nivel
+ * cuantiza al cerrar el documento—. Auditar regla por regla sigue
+ * cerrando a la vista; al último decimal de `escalaCalculo`, no.
  */
 function reescalarTrazas(
   trazas: TrazaRegla[],
   total: Decimal,
   factor: Decimal,
   cfg: ConfigCalculo,
+  q: Cuantizador,
 ): TrazaRegla[] {
   if (trazas.length === 0) return trazas;
   const partes = repartirProporcional(
     total,
     trazas.map((tz) => new Decimal(tz.monto)),
     cfg,
+    q,
   );
   return trazas.map((tz, i) => ({
     ...tz,
@@ -1553,10 +1616,7 @@ function reescalarTrazas(
     // no tiene que sumar nada, pero SÍ tiene que seguir siendo comparable con
     // `monto` —su docblock promete que son iguales salvo en un descuento
     // topeado— y dejarlo en plata cobrada rompería justo esa comparación.
-    valorSolicitado: fmt(
-      cuantizar(new Decimal(tz.valorSolicitado).times(factor), cfg),
-      cfg,
-    ),
+    valorSolicitado: fmt(q(new Decimal(tz.valorSolicitado).times(factor)), cfg),
   }));
 }
 
@@ -1664,8 +1724,9 @@ function resolverPromociones(
    *
    * ⚠️ Se numera **después** del filtro, no antes. Numerando antes, una promo
    * con dos aplicaciones donde la primera pierde dejaba la superviviente
-   * marcada como «2» sin que existiera una «1», y el drawer agrupa por este
-   * número: el cajero leía un hueco que no corresponde a nada.
+   * marcada como «2» sin que existiera una «1»: un hueco en el congelado que
+   * no corresponde a nada. Quién lee este número —hoy, nadie— lo dice el
+   * docblock de `TrazaPromo`.
    */
   const contadorPorPromo = new Map<string, number>();
   const numeradas = ganadoras.map((ap) => {
@@ -1824,6 +1885,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
       ajusteBruto,
       lineas.map((l) => new Decimal(l.totalLinea)),
       cfg,
+      q,
     );
     lineas = venta.lineas.map((l, i) =>
       calcularLinea(l, venta.metodoPagoId, cfg, partes[i], promosDeLinea(i)),
@@ -1853,10 +1915,10 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
   let netoRecargoVenta = ZERO;
   if (!ajusteBruto.isZero()) {
     const factor = t.ajuste.dividedBy(ajusteBruto);
-    netoDescuentoVenta = cuantizar(dv.total.times(factor), cfg);
+    netoDescuentoVenta = q(dv.total.times(factor));
     netoRecargoVenta = netoDescuentoVenta.plus(t.ajuste);
-    dv.trazas = reescalarTrazas(dv.trazas, netoDescuentoVenta, factor, cfg);
-    rv.trazas = reescalarTrazas(rv.trazas, netoRecargoVenta, factor, cfg);
+    dv.trazas = reescalarTrazas(dv.trazas, netoDescuentoVenta, factor, cfg, q);
+    rv.trazas = reescalarTrazas(rv.trazas, netoRecargoVenta, factor, cfg, q);
   }
 
   const totalDescuentos = t.desc.plus(netoDescuentoVenta);

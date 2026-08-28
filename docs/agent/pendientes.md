@@ -107,7 +107,9 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   antes un test del motor que prueba que ese estado es alcanzable, para no dejar un filtro
   sobre algo imposible.
 - El test de la cota con `nivelRedondeo: 'documento'` **refutó la cota que la entrada pedía
-  fijar**: no es "±1 unidad de la escala". Ver la entrada nueva de la sección 4.
+  fijar**: entonces no era "±1 unidad de la escala" sino 3,23. Lo que destapó abrió su propio
+  frente, contestado y construido el 2026-08-28 → [`resueltos.md`](resueltos.md); hoy ese
+  mismo carrito se desvía 0,23.
 - `VentaDetalleDrawer.vue` ya tiene spec (4 casos). De paso quedó fijado que su total
   "Descuentos" incluye la plata de las promos, al revés que el ticket.
 
@@ -1127,74 +1129,11 @@ abriendo las superficies, no leyendo la entrada.
 
 ## 4. Necesita que el owner conteste
 
-### Con `'documento'` y un descuento de nivel venta, el desvío del total crece sin techo (2026-08-28)
-
-✅ **DECIDIDO POR EL OWNER el 2026-08-28: va la salida (b)** — arreglar la causa en el motor,
-no taparla con un guard de configuración. O sea que `repartirProporcional` y la conversión del
-descuento de venta a neto tienen que respetar `nivelRedondeo` en vez de cuantizar siempre.
-⚠️ **Es trabajo del motor de cálculo: abre su propio frente, con su propia sesión y el sistema
-quieto** (`CLAUDE.md`). No se toma de arrastre ni se cuelga de otra tarea. La entrada se queda
-acá —con la medición completa, que es el insumo del diseño— hasta que ese frente la cierre.
-
-- [ ] **`nivelRedondeo: 'documento'` cumple su promesa salvo en un caso, y ahí es peor que
-  `'linea'` sin cota** (backend, `calculo-precios.engine.ts:1510` y `:1856`; **medido el
-  2026-08-28**, contra aritmética de alta precisión —el mismo carrito con escala y moneda de
-  10 decimales, donde no se cuantiza nada—). Peor caso sobre 2.103 carritos por tamaño,
-  moneda de 2 decimales y `escalaCalculo` 4, en unidades de la escala:
-
-  | | `linea` | `documento` |
-  |---|---|---|
-  | **sin** descuento de venta (1 / 2 / 3 / 5 / 8 líneas) | 1,07 / 1,85 / 2,02 / 2,46 / 2,43 | 0,99 / 1,00 / 0,96 / 0,97 / 0,95 |
-  | **con** descuento de venta (1 / 2 / 3 / 5 / 8 líneas) | 1,40 / 1,88 / 2,09 / 2,51 / 2,59 | 2,11 / 3,22 / 4,32 / 6,40 / 9,17 |
-
-  **Sin descuento de nivel venta el nivel funciona**: `documento` se queda plano en ~1 unidad
-  y le gana a `linea`, que acumula el redondeo de cada línea. **Con descuento de nivel venta
-  crece ~1 unidad por línea y no tiene techo**, mientras `linea` crece **sublineal** (2,59 con ocho líneas).
-  El ~1,4 a 3,0 que las dos columnas comparten **no es un defecto del nivel**: es lo que
-  cuesta redondear, y `linea` —el default de todos los tenants— lo tiene igual.
-  **Causa:** `repartirProporcional` (el reparto del descuento de venta por línea) y la
-  conversión de ese descuento a neto cuantizan **siempre, sin mirar `nivelRedondeo`**.
-  Inofensivo cuando la línea ya corre cuantizada; el hueco cuando corre fina. Verificado por
-  mutante: sacando el `cuantizar` del reparto, el desvío del caso congelado cae de 0,0323 a
-  0,0023.
-  **Hacen falta las dos condiciones juntas**, y esto se midió porque la primera redacción de
-  esta entrada culpaba a una sola: con `escalaCalculo == decimalesMoneda` la penalidad de
-  `documento` sobre `linea` es **0,00 en las cuatro configs alcanzables donde eso pasa**, y
-  con `'linea'` subir la escala por encima de los decimales no agrega nada.
-  **Lo que NO es:** no lo aporta la promo. Se midió que el camino de la promo es
-  **bit-idéntico** al de un descuento de catálogo por la misma plata (61.353 casos, coinciden
-  en todos), así que "la promo no empeora el caso documento" es verdad — y por una razón más
-  fuerte que una cota: la promo no tiene camino propio de redondeo. Tampoco rompe la
-  identidad aditiva: el documento sigue sumando sus partes en todos los casos medidos.
-  **La conducta ya está congelada** en `calculo-precios.engine.spec.ts` ("el cierre por
-  documento se desvía de la aritmética fina más de una unidad de la escala") y escrita en
-  [`motor-calculo-precios.md`](../features/motor-calculo-precios.md). El test **congela, no
-  aprueba**.
-  ❓ **La pregunta al owner, con las dos salidas y lo que cada una compra:**
-  (a) **No tocar el motor**: un tercer guard que prohíba `escalaCalculo > decimalesMoneda`
-  cuando el nivel es `'documento'`, al lado de los dos que ya existen. Borra la penalidad
-  entera (medido: 0,00) y deja el desvío de `documento` **igual al de `linea`** — no en cero,
-  porque el piso del redondeo no lo saca nadie. Es barata y no toca plata; lo que hay que
-  preguntar antes es si alguien quiere de verdad calcular con más decimales de los que la
-  moneda tiene mientras cierra por documento.
-  (b) **Achicarlo en el motor**: que `repartirProporcional` y la conversión a neto respeten
-  `nivelRedondeo` en vez de cuantizar siempre. Ataca la causa y sirve incluso si alguien
-  quiere escala mayor; por `CLAUDE.md` va solo y con el sistema quieto.
-  No se toma de arrastre en ninguno de los dos casos.
-  📌 **Residuo que este frente destapó y NO se arregló** (tocar el motor va solo): el
-  comentario de `calculo-precios.engine.ts:1667` justifica numerar las aplicaciones después
-  del filtro diciendo *"y el drawer agrupa por este número"*. **El drawer no agrupa por
-  `aplicacion`** —el campo viaja en el congelado y ningún lector lo lee, verificado el
-  2026-08-28 y fijado en `VentaDetalleDrawer.nuxt.spec.ts`—. La numeración sigue haciendo
-  falta (distingue dos aplicaciones de la misma promo), pero la razón escrita no es la
-  verdadera. Corregir el comentario entra en la pasada que conteste esta entrada.
-  📌 **Contexto que baja la urgencia, no la pregunta:** el default de todos los tenants es
-  `'linea'`, y `'documento'` está además bloqueado para monedas de 0 decimales, así que hoy
-  ningún tenant sembrado puede llegar a este camino.
-
-Cada una lleva su pregunta concreta adentro. Mientras no se conteste **no se empiezan**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
+✅ **Vacía otra vez desde el 2026-08-28**: la única entrada abierta —el desvío sin techo de
+`'documento'` con un descuento de nivel venta— se contestó y **se construyó el mismo día**
+([`resueltos.md`](resueltos.md)). Cuando vuelva a poblarse, cada entrada lleva su pregunta
+concreta adentro y mientras no se conteste **no se empieza**: elegir por cuenta propia una
+regla de negocio no documentada es justo lo que `CLAUDE.md` prohíbe.
 
 ✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner;
 volvió a poblarse con lo que fueron destapando las tandas siguientes (identidad el 2026-08-16,

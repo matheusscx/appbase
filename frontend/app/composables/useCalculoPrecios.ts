@@ -54,8 +54,10 @@ export interface TrazaImpuesto extends TrazaRegla {
  * (`2x1 martes  −$5.000`), separada de los descuentos de catálogo, aunque su
  * monto haya entrado en el mismo `descuentoAplicado`.
  *
- * `aplicacion` agrupa 1-based POR PROMO: dos grupos de un 2x1 sobre la misma
- * línea son `1` y `2`.
+ * `aplicacion` es 1-based POR PROMO: dos grupos de un 2x1 sobre la misma línea
+ * son `1` y `2`. **Ningún componente agrupa por él** —el ticket agrupa por `id`
+ * (`ticket-builder.ts`) y el drawer no agrupa—: viaja en el congelado para
+ * poder explicar una venta vieja. Ver `TrazaPromo` en el motor (backend).
  */
 export interface TrazaPromo {
   /** `promocionId`. */

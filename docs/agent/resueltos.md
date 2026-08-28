@@ -11698,3 +11698,161 @@ fechado, no una propiedad. Cuando el hueco que dejó vacío a un helper es el mi
 frente abierto va a llenar, la entrada mecánica está compitiendo con trabajo ya en la cola.
 Verificar consumidores **al tomar** la entrada, no al escribirla — que es la misma regla que
 `pendientes.md` ya tiene para las citas de línea.
+
+
+---
+
+## El desvío sin techo de `'documento'` con un descuento de nivel venta (cerrado 2026-08-28)
+
+**Venía de la sección 4** ("Necesita que el owner conteste"), que con esto vuelve a quedar
+vacía. Entrada mudada verbatim desde `pendientes.md`:
+
+> ✅ **DECIDIDO POR EL OWNER el 2026-08-28: va la salida (b)** — arreglar la causa en el motor,
+> no taparla con un guard de configuración. O sea que `repartirProporcional` y la conversión del
+> descuento de venta a neto tienen que respetar `nivelRedondeo` en vez de cuantizar siempre.
+> ⚠️ **Es trabajo del motor de cálculo: abre su propio frente, con su propia sesión y el sistema
+> quieto** (`CLAUDE.md`). No se toma de arrastre ni se cuelga de otra tarea. La entrada se queda
+> acá —con la medición completa, que es el insumo del diseño— hasta que ese frente la cierre.
+>
+> - [ ] **`nivelRedondeo: 'documento'` cumple su promesa salvo en un caso, y ahí es peor que
+>   `'linea'` sin cota** (backend, `calculo-precios.engine.ts:1510` y `:1856`; **medido el
+>   2026-08-28**, contra aritmética de alta precisión —el mismo carrito con escala y moneda de
+>   10 decimales, donde no se cuantiza nada—). Peor caso sobre 2.103 carritos por tamaño,
+>   moneda de 2 decimales y `escalaCalculo` 4, en unidades de la escala:
+>
+>   | | `linea` | `documento` |
+>   |---|---|---|
+>   | **sin** descuento de venta (1 / 2 / 3 / 5 / 8 líneas) | 1,07 / 1,85 / 2,02 / 2,46 / 2,43 | 0,99 / 1,00 / 0,96 / 0,97 / 0,95 |
+>   | **con** descuento de venta (1 / 2 / 3 / 5 / 8 líneas) | 1,40 / 1,88 / 2,09 / 2,51 / 2,59 | 2,11 / 3,22 / 4,32 / 6,40 / 9,17 |
+>
+>   **Sin descuento de nivel venta el nivel funciona**: `documento` se queda plano en ~1 unidad
+>   y le gana a `linea`, que acumula el redondeo de cada línea. **Con descuento de nivel venta
+>   crece ~1 unidad por línea y no tiene techo**, mientras `linea` crece **sublineal** (2,59 con ocho líneas).
+>   El ~1,4 a 3,0 que las dos columnas comparten **no es un defecto del nivel**: es lo que
+>   cuesta redondear, y `linea` —el default de todos los tenants— lo tiene igual.
+>   **Causa:** `repartirProporcional` (el reparto del descuento de venta por línea) y la
+>   conversión de ese descuento a neto cuantizan **siempre, sin mirar `nivelRedondeo`**.
+>   Inofensivo cuando la línea ya corre cuantizada; el hueco cuando corre fina. Verificado por
+>   mutante: sacando el `cuantizar` del reparto, el desvío del caso congelado cae de 0,0323 a
+>   0,0023.
+>   **Hacen falta las dos condiciones juntas**, y esto se midió porque la primera redacción de
+>   esta entrada culpaba a una sola: con `escalaCalculo == decimalesMoneda` la penalidad de
+>   `documento` sobre `linea` es **0,00 en las cuatro configs alcanzables donde eso pasa**, y
+>   con `'linea'` subir la escala por encima de los decimales no agrega nada.
+>   **Lo que NO es:** no lo aporta la promo. Se midió que el camino de la promo es
+>   **bit-idéntico** al de un descuento de catálogo por la misma plata (61.353 casos, coinciden
+>   en todos), así que "la promo no empeora el caso documento" es verdad — y por una razón más
+>   fuerte que una cota: la promo no tiene camino propio de redondeo. Tampoco rompe la
+>   identidad aditiva: el documento sigue sumando sus partes en todos los casos medidos.
+>   **La conducta ya está congelada** en `calculo-precios.engine.spec.ts` ("el cierre por
+>   documento se desvía de la aritmética fina más de una unidad de la escala") y escrita en
+>   [`motor-calculo-precios.md`](../features/motor-calculo-precios.md). El test **congela, no
+>   aprueba**.
+>   ❓ **La pregunta al owner, con las dos salidas y lo que cada una compra:**
+>   (a) **No tocar el motor**: un tercer guard que prohíba `escalaCalculo > decimalesMoneda`
+>   cuando el nivel es `'documento'`, al lado de los dos que ya existen. Borra la penalidad
+>   entera (medido: 0,00) y deja el desvío de `documento` **igual al de `linea`** — no en cero,
+>   porque el piso del redondeo no lo saca nadie. Es barata y no toca plata; lo que hay que
+>   preguntar antes es si alguien quiere de verdad calcular con más decimales de los que la
+>   moneda tiene mientras cierra por documento.
+>   (b) **Achicarlo en el motor**: que `repartirProporcional` y la conversión a neto respeten
+>   `nivelRedondeo` en vez de cuantizar siempre. Ataca la causa y sirve incluso si alguien
+>   quiere escala mayor; por `CLAUDE.md` va solo y con el sistema quieto.
+>   No se toma de arrastre en ninguno de los dos casos.
+>   📌 **Residuo que este frente destapó y NO se arregló** (tocar el motor va solo): el
+>   comentario de `calculo-precios.engine.ts:1667` justifica numerar las aplicaciones después
+>   del filtro diciendo *"y el drawer agrupa por este número"*. **El drawer no agrupa por
+>   `aplicacion`** —el campo viaja en el congelado y ningún lector lo lee, verificado el
+>   2026-08-28 y fijado en `VentaDetalleDrawer.nuxt.spec.ts`—. La numeración sigue haciendo
+>   falta (distingue dos aplicaciones de la misma promo), pero la razón escrita no es la
+>   verdadera. Corregir el comentario entra en la pasada que conteste esta entrada.
+>   📌 **Contexto que baja la urgencia, no la pregunta:** el default de todos los tenants es
+>   `'linea'`, y `'documento'` está además bloqueado para monedas de 0 decimales, así que hoy
+>   ningún tenant sembrado puede llegar a este camino.
+
+⚠️ **Los números de esa tabla no son comparables con los del cierre.** Salieron de un
+generador de carritos y el cierre midió con otro, corrido dos veces (motor viejo y motor
+nuevo) para que el antes/después sí lo fuera. La tabla vigente —tres columnas, un solo
+generador— está en
+[`motor-calculo-precios.md`](../features/motor-calculo-precios.md).
+
+### Lo que la entrada decía mal: pasar el cuantizador NO alcanzaba
+
+La salida (b) que el owner eligió era "que `repartirProporcional` y la conversión a neto
+respeten `nivelRedondeo` en vez de cuantizar siempre". El spike midió que eso solo **arregla
+tres de cada cuatro repartos y rompe el otro en silencio**.
+
+La causa real es el **reparto del residuo**, no la cuantización sola. `repartirProporcional`
+salda lo que falta en pasos de la unidad mínima de la moneda, y corta cuando la sobra llega a
+cero. Con las partes finas, la sobra no es un número entero de unidades: es el epsilon de
+`monto × peso / total`, que Decimal.js redondea a 20 dígitos significativos. El paso de
+unidad nunca la lleva a cero, así que el loop **le suma un centavo a cada línea** — que es
+exactamente el "~1 unidad por línea" que la entrada había medido. Sobre 20.000 repartos con
+moneda de 2 decimales:
+
+| qué entra al reparto | repartos que NO suman `monto` | peor error |
+|---|---|---|
+| monto cuantizado, partes cuantizadas (`'linea'`) | 0 % | 0 |
+| monto fino, partes cuantizadas (lo que hacía `'documento'`) | 99,02 % | 0,0799 |
+| monto fino, partes finas, con pasos de unidad a secas (la salida (b) literal) | 23,69 % | 0,0800 |
+
+### Qué se hizo
+
+1. El cuantizador que ya se elegía por nivel (`cfg.nivelRedondeo === 'linea' ? … :
+   SIN_CUANTIZAR`) **viaja hasta el reparto**: `repartirProporcional` y `reescalarTrazas`
+   lo reciben como parámetro, y `netoDescuentoVenta` lo usa en vez de `cuantizar` a secas.
+   Son los dos sitios que la entrada nombraba **más un tercero que no nombraba**: el
+   `valorSolicitado` de las trazas reescaladas. Antes cuantizaban los dos; arreglando solo
+   los dos sitios de la entrada, el `monto` de la traza habría quedado fino y su
+   `valorSolicitado` cuantizado — y que los dos sean comparables es justo lo que promete el
+   docblock de `valorSolicitado`.
+2. El residuo se salda **en dos tramos**: pasos de unidad mientras quepa una entera, y lo
+   que queda —menos que una unidad por definición— va entero a la parte de mayor resto. No
+   es idioma nuevo: es el que ya usaba `repartirDescuentoCombo` en el evaluador de promos.
+
+Con `'linea'` el reparto sale **idéntico**: 0 de 20.000 repartos cambian, y los 138 tests
+del motor que ya existían pasaron sin tocarse.
+
+### Qué lo fija
+
+- **`"con 'documento' el desvío del total no crece con las líneas"`** (nuevo) — mide el
+  desvío contra alta precisión para 1, 3 y 8 líneas (0,25 / 0,13 / 0,11 unidades) y fija los
+  dígitos exactos de un carrito que distingue **los dos mutantes**: cuantizar el reparto
+  (lo de antes) da `4366.6000`, y saldar el residuo con pasos de unidad a secas da
+  `4366.6600`. El carrito salió de barrer carritos de esa forma hasta dar con uno que
+  distinguiera los dos: el primer mutante cambia casi cualquiera, el segundo no. ⚠️ Los
+  conteos de ese barrido no están acá a propósito — dependen del generador, que no quedó
+  commiteado, y lo que el repo puede volver a comprobar son los dígitos.
+- **`"el carrito que se desviaba 3,23 unidades ahora se desvía 0,23"`** — es el test
+  que **congelaba** la conducta vieja (3,23 unidades) y ahora fija 0,23. Era el que la
+  entrada anunciaba que iba a tener que cambiar.
+
+### El residuo que la entrada dejó anotado, corregido en la misma pasada
+
+El comentario que justificaba numerar las aplicaciones de promo después del filtro decía
+*"y el drawer agrupa por este número"*. No es cierto: ningún lector consume `aplicacion` —el
+ticket agrupa por `id` (`ticket-builder.ts`) y el drawer no agrupa (`VentaDetalleDrawer.nuxt.spec.ts`)—.
+La numeración sigue haciendo falta por otra razón, que ahora está escrita: distingue dos
+aplicaciones de la misma promo dentro de una venta.
+
+⚠️ **Y estaba en cinco lugares, no en uno — hicieron falta dos rondas de revisión para
+enumerarlos.** La primera pasada corrigió el comentario que la entrada nombraba y declaró
+cerrado el punto; la revisión encontró el gemelo 1.450 líneas más arriba en el mismo archivo
+(el docblock de `TrazaPromo`, *"Sin él, el drawer no puede distinguir…"*) y el del composable
+del frontend (`useCalculoPrecios.ts`, *"`aplicacion` agrupa"*). Corregidos esos tres, la
+**segunda** ronda encontró otros dos, en los comentarios del propio spec del motor.
+
+Hoy **ninguna afirmación de que una pantalla agrupe por `aplicacion` queda en pie**: la única
+descripción de quién lo lee vive en el docblock de `TrazaPromo` (y en su espejo del
+frontend, que remata apuntando al del motor), y los demás comentarios apuntan ahí. (La ficha de la tabla en `motor-promociones.md` sigue diciendo *"`aplicacion`
+agrupa (1-based por promo)"* —el rol de la columna en el congelado, no una afirmación sobre
+un lector— y el mismo documento aclara más abajo que el drawer no agrupa por ella.)
+
+📌 Lo que hay que aprender de las dos rondas no es "faltó un lugar": es que **la afirmación de
+cierre se escribió antes del grep**. "Vive una sola vez" es falsable en un comando; escribirla
+de memoria la volvió falsa dos veces seguidas.
+
+📌 **La lección:** la decisión del owner nombraba una causa, y la causa nombrada era la
+mitad. Un frente que se abre con la causa ya escrita igual empieza por medirla — acá el
+spike costó minutos y evitó un arreglo que rompía el 23,69 % de los repartos sin que ningún
+test existente lo dijera.

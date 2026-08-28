@@ -2230,6 +2230,87 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(sumaLineas.eq(r.totales.totalFinal)).toBe(true);
       expect(identidadDocumento(r)).toBe(true);
     });
+
+    /**
+     * Con `nivelRedondeo: 'documento'` el reparto del descuento de venta por
+     * línea y su conversión a neto **no cuantizan**: son pasos intermedios, y
+     * lo que el nivel promete es que la plata se cierra una sola vez, al final
+     * del documento.
+     *
+     * Lo que esto arregla es un desvío que **crecía con las líneas**. Medido
+     * sobre estos mismos carritos contra el mismo motor a alta precisión
+     * (`escalaCalculo` y `decimalesMoneda` en 10, donde no cuantiza nada), en
+     * unidades de la escala de la moneda (0,01):
+     *
+     * | carrito | `linea` | `documento` antes | `documento` ahora |
+     * |---|---|---|---|
+     * | 1 línea | 0,25 | 0,75 | 0,25 |
+     * | 3 líneas | 0,13 | 2,87 | 0,13 |
+     * | 8 líneas | 0,11 | 6,89 | 0,11 |
+     *
+     * ~1 unidad por línea, sin techo. Y la causa no era solo "cuantiza de
+     * más": era que el residuo del reparto llegaba en fracción de centavo y el
+     * paso de unidad nunca lo llevaba a cero, así que le sumaba un centavo a
+     * **cada** línea. Por eso el arreglo son dos cosas y no una — ver la tabla
+     * de `repartirProporcional`.
+     */
+    it("con 'documento' el desvío del total no crece con las líneas", () => {
+      const cfgDoc = config({
+        nivelRedondeo: 'documento',
+        decimalesMoneda: 2,
+        escalaCalculo: 4,
+      });
+      // Referencia INDEPENDIENTE de lo medido: una escala muy superior a
+      // todas las comparadas, donde `cuantizar` es identidad. No es `cfgDoc`
+      // con otro nivel — eso compararía la config contra sí misma.
+      const cfgAltaPrecision = config({
+        nivelRedondeo: 'documento',
+        decimalesMoneda: 10,
+        escalaCalculo: 10,
+      });
+      const carrito = (precios: string[], cfg: ConfigCalculo): VentaResuelta =>
+        venta({
+          config: cfg,
+          descuentosVenta: [
+            regla({ id: 'dv', nombre: 'Dsc 7%', valorPorcentaje: '0.07' }),
+          ],
+          lineas: precios.map((precioUnitario, i) =>
+            linea({
+              itemId: `i${i}`,
+              cantidad: '3',
+              precioUnitario,
+              impuestos: [impuesto()],
+            }),
+          ),
+        });
+      const desvio = (precios: string[]) =>
+        new Decimal(calcularVenta(carrito(precios, cfgDoc)).totales.totalFinal)
+          .minus(
+            calcularVenta(carrito(precios, cfgAltaPrecision)).totales
+              .totalFinal,
+          )
+          .abs()
+          .dividedBy('0.01');
+
+      const tres = ['219.33', '438.77', '657.11'];
+      const ocho = [...tres, '17.77', '2999.99', '1.11', '88.88', '4567.89'];
+
+      // Ninguno llega a una unidad, y ocho líneas no desvían más que una.
+      expect(desvio(tres.slice(0, 1)).toFixed(2)).toBe('0.25');
+      expect(desvio(tres).toFixed(2)).toBe('0.13');
+      expect(desvio(ocho).toFixed(2)).toBe('0.11');
+
+      // Los dígitos exactos, que son los que distinguen los dos mutantes:
+      // cuantizando el reparto (lo de antes) da '4366.6000' / '276.2200';
+      // repartiendo el residuo con pasos de unidad a secas, '4366.6600' /
+      // '276.1700'. El carrito se eligió barriendo carritos de esta misma forma
+      // hasta dar con uno que distinguiera los DOS mutantes: hay muchos, pero
+      // el primer mutante cambia casi cualquiera y el segundo no.
+      const r = calcularVenta(carrito(tres, cfgDoc));
+      expect(r.totales.totalFinal).toBe('4366.6300');
+      expect(r.totales.totalDescuentos).toBe('276.1900');
+      expect(identidadDocumento(r)).toBe(true);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -3420,7 +3501,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
         expect(r.lineas[0].trazas.promociones[0].monto).toBe('1050.400000');
         expect(r.lineas[1].trazas.promociones[0].monto).toBe('459.600000');
-        // Las dos son la MISMA aplicación: el drawer las agrupa por este número.
+        // Las dos son la MISMA aplicación, y por eso llevan el mismo número.
         expect(r.lineas[0].trazas.promociones[0].aplicacion).toBe(1);
         expect(r.lineas[1].trazas.promociones[0].aplicacion).toBe(1);
         expect(r.totales.totalDescuentos).toBe('1510.000000');
@@ -3568,8 +3649,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
       // La numeración se asigna DESPUÉS del filtro. Con dos aplicaciones de la
       // misma promo donde la primera pierde, numerar antes dejaba la
-      // superviviente marcada como «2» sin que existiera una «1» — y el drawer
-      // agrupa por ese número.
+      // superviviente marcada como «2» sin que existiera una «1»: un hueco en
+      // el congelado que no corresponde a nada. Quién lee el número —hoy,
+      // nadie— lo dice el docblock de `TrazaPromo`.
       it('la numeración no deja huecos cuando una aplicación pierde', () => {
         const r = calcularVenta(
           venta({
@@ -3730,41 +3812,36 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
       /**
        * El desvío que el cierre por documento se permite contra la aritmética
-       * de la escala de cálculo. **Medido el 2026-08-28, y NO es "una unidad de
-       * la escala"** como decía la entrada que pidió este test.
+       * de la escala de cálculo. **Este test antes congelaba 3,23 unidades** —
+       * la conducta que abrió el frente— y ahora fija 0,23: el arreglo del
+       * reparto (ver `repartirProporcional`) entró el 2026-08-28.
        *
        * ⚠️ La referencia de ACÁ (`cfgFino`) es el mismo motor sin cuantizar a la
        * moneda, no aritmética exacta: sirve para aislar lo que agrega la
-       * cuantización, y no para medir el error absoluto. El barrido que compara
-       * contra alta precisión —y la tabla `linea` vs `documento` que sale de
-       * él— está en `docs/features/motor-calculo-precios.md`. En corto: con un
-       * descuento de nivel venta el desvío de `documento` crece ~1 unidad por
-       * línea y **no tiene techo** (2,11 con 1 línea, 9,17 con 8), mientras
-       * `linea` crece **sublineal** (2,59 con ocho líneas); **sin** descuento de nivel venta
-       * `documento` se queda plano en ~1 unidad y le gana a `linea`.
+       * cuantización, y no para medir el error absoluto. La medición contra
+       * alta precisión —antes y después— está en el caso `con 'documento' el
+       * desvío del total no crece con las líneas` y en
+       * `docs/features/motor-calculo-precios.md`.
        *
-       * No lo aporta la promo, que ni siquiera tiene camino propio (el caso de
-       * arriba): lo aportan las dos cuantizaciones que corren **siempre**, sin
-       * mirar `nivelRedondeo` —el reparto del descuento de venta por línea
-       * (`repartirProporcional`) y su conversión a neto—, amplificadas después
-       * por el IVA.
-       *
-       * Este test **congela la conducta, no la aprueba**: cambiar el motor para
-       * achicarla es territorio del owner (`CLAUDE.md`, "el motor va solo").
+       * La promo no aporta desvío propio: ni siquiera tiene camino propio de
+       * redondeo (el caso de arriba). Lo que aportaba eran las dos
+       * cuantizaciones que corrían **siempre**, sin mirar `nivelRedondeo`,
+       * amplificadas después por el IVA.
        */
-      it('el cierre por documento se desvía de la aritmética fina más de una unidad de la escala', () => {
+      it('el carrito que se desviaba 3,23 unidades ahora se desvía 0,23', () => {
         const doc = calcularVenta(conPromo());
         const fino = calcularVenta(conPromo({ config: cfgFino }));
 
-        expect(doc.totales.totalFinal).toBe('1771.1400');
+        expect(doc.totales.totalFinal).toBe('1771.1100');
         expect(fino.totales.totalFinal).toBe('1771.1077');
-        // 0,0323 sobre una escala de 0,01: 3,23 unidades, no 1.
+        // 0,0023 sobre una escala de 0,01: 0,23 unidades. Antes del arreglo
+        // este mismo carrito daba '1771.1400' — 3,23 unidades.
         expect(
           new Decimal(doc.totales.totalFinal)
             .minus(fino.totales.totalFinal)
             .abs()
             .toString(),
-        ).toBe('0.0323');
+        ).toBe('0.0023');
         // Lo que el desvío NO rompe: el documento sigue sumando sus partes.
         expect(identidadDocumento(doc)).toBe(true);
       });
