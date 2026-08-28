@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Las cinco reglas del owner** están en el §2 de la spec. Si una tarea empuja a violar una, **parar y reportar**.
+- **Las seis reglas del owner** están en el §2 de la spec. Si una tarea empuja a violar una, **parar y reportar**.
 - **`tenant_id` y `usuario_id` salen del token**, nunca del body.
 - **Dinero y tasas con Decimal.js**, nunca `number` nativo. `ESCALA_COSTO` (4) no se toca.
 - **Soft delete:** toda `SELECT`/`JOIN` nueva filtra `eliminado_el IS NULL`. Nunca `DELETE` físico.
@@ -21,7 +21,7 @@
 - **No hay datos productivos:** no se diseñan backfills, migraciones incrementales ni deprecaciones. Se cambia el contrato, se actualiza el seeder si hace falta, se resetea.
 - **Trabajar y commitear directo sobre `main`.** No ramas ni PRs. **Nunca `git commit --no-verify`.**
 - **Documentación en el mismo commit que el código.**
-- **Gate obligatorio antes de dar por terminada la última tarea** (Task 4).
+- **Gate obligatorio antes de dar por terminada la última tarea** (Task 6).
 
 ---
 
@@ -34,7 +34,10 @@
 | `backend/src/modules/mermas/mermas.service.spec.ts` | Unit del registro sin costo y del congelado | 1 |
 | `backend/test/mermas.e2e-spec.ts` | E2E del camino sin costo | 2 |
 | `frontend/app/pages/mermas.vue` | Sacar campo/prefill/modal; cartel no bloqueante | 3 |
-| `docs/features/mermas-valorizadas.md` · `docs/ESTADO.md` · `docs/PRODUCTO.md` · `docs/agent/pendientes.md` | Documentación viva | 4 |
+| `frontend/app/pages/configuracion/items.vue` | Cartel en la entrada por compra | 4 |
+| `backend/src/modules/items/dto/query-items.dto.ts` · `items.service.ts` | Filtro `sinCosto` | 5 |
+| `frontend/app/pages/configuracion/items.vue` | Marca en la fila + filtro en la barra | 5 |
+| `docs/features/mermas-valorizadas.md` · `docs/ESTADO.md` · `docs/PRODUCTO.md` · `docs/agent/pendientes.md` | Documentación viva | 6 |
 
 ---
 
@@ -177,7 +180,7 @@ it('la merma de un producto sin costo se registra sin valorizar', async () => {
 });
 ```
 
-⚠️ **Paso previo obligatorio:** verificar en el código real que se puede dejar un producto con `costo_actual` en `NULL` **y** con stock. Si la entrada de stock exige costo, el escenario no se monta por API — y entonces sospechar que el estado "producto con stock y sin costo" es inalcanzable y **parar y reportar**, en vez de montarlo con SQL directo.
+✅ **Ya medido: el escenario es alcanzable por API.** `costo` es opcional en `CreateItemDto` y `costoUnitario` es opcional en `AjusteStockDto` (`ajuste-stock.dto.ts:76-81`), así que un producto puede tener stock y `costo_actual` en `NULL`. **No montar el escenario con SQL directo** — si por lo que sea no sale por API, parar y reportar en vez de forzarlo.
 
 - [ ] **Step 2: Actualizar el test que afirma lo viejo**
 
@@ -265,18 +268,166 @@ git commit -m "feat(mermas): el formulario ya no pide el costo, lo avisa cuando 
 
 ---
 
-### Task 4: Documentación y gate
+### Task 4: El mismo cartel al comprar
+
+**Files:**
+- Modify: `frontend/app/pages/configuracion/items.vue` (drawer de ajuste de stock, `UFormField` del costo en las líneas 2340-2345)
+
+Regla 4 de la spec: el aviso va también donde el dato de verdad existe — cuando alguien
+recibe mercadería y sabe cuánto pagó. **No lo hace obligatorio** (el owner lo descartó:
+frenaría a quien tiene la mercadería en la puerta y la factura no).
+
+- [ ] **Step 1: Leer el contexto real antes de escribir**
+
+Abrir `configuracion/items.vue:2340-2345`. El campo del costo aparece solo con
+`ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'`, y **no** tiene `required`.
+Ubicar también `stockItem` (el ítem sobre el que se abre el drawer) y confirmar que expone
+`costoActual` — si no lo expone, **parar y reportar**: sin ese dato no se puede decidir
+cuándo mostrar el cartel.
+
+- [ ] **Step 2: Agregar el cartel**
+
+Debajo del `UFormField` del costo, gobernado por "el producto no tiene costo hoy":
+
+```vue
+          <UAlert
+            v-if="ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'
+              && stockItem?.costoActual == null && !ajusteForm.costoUnitario"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            title="Este producto todavía no tiene costo"
+            description="Si registras la compra sin el costo, el producto queda sin valorizar: sus mermas no van a poder calcularse, y eso después no se corrige."
+          />
+```
+
+⚠️ La condición es `costoActual == null`, **no** "el campo está vacío". Si el producto ya
+tiene costo y esta compra no lo trae, el costo viejo sigue vigente y las mermas valorizan
+igual: ahí el cartel sería una mentira. Tokens semánticos de Nuxt UI, nunca Tailwind
+hardcodeado.
+
+- [ ] **Step 3: Gate del frontend**
+
+Run: `cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
+Expected: PASS los cuatro, por **exit code**.
+
+- [ ] **Step 4: Smoke de navegador**
+
+Con **chrome-devtools MCP**: abrir el ajuste de stock de un producto **sin** costo, motivo
+compra → el cartel aparece; tipear un costo → desaparece. Repetir sobre un producto **con**
+costo → el cartel **no** aparece nunca.
+
+- [ ] **Step 5: Commit**
+
+Correr `domain-reviewer` sobre el diff staged y generar el recibo (paso 7 de `verify-feature`).
+
+```bash
+git add frontend/app/pages/configuracion/items.vue
+git commit -m "feat(items): avisar al comprar que el producto va a quedar sin costo"
+```
+
+---
+
+### Task 5: Ver todos los que están sin costo
+
+**Files:**
+- Modify: `backend/src/modules/items/dto/query-items.dto.ts`
+- Modify: `backend/src/modules/items/items.service.ts` (armado del `where`, líneas 252-280)
+- Test: `backend/src/modules/items/dto/query-items.dto.spec.ts` y el spec del service
+- Modify: `frontend/app/pages/configuracion/items.vue` (fila del listado, línea 1493-1495; barra de filtros, `filtroTipo` en 236/252/258/262 y su `USelect` en 1435)
+
+**Interfaces:**
+- Produces: `QueryItemsDto.sinCosto?: boolean`. Ausente no filtra nada; `true` deja solo los
+  ítems sin costo. **Es de dos estados, no de tres** — a diferencia de `activo`.
+
+- [ ] **Step 1: Escribir el test del DTO que falla**
+
+En `query-items.dto.spec.ts`, siguiendo el molde de los tests que ya existen ahí. El DTO
+tiene un comentario largo sobre la coerción de `activo` (tres estados) frente a la de
+`incluirEliminados` (dos): **leerlo antes de elegir**, y usar la de `incluirEliminados`
+—`value === 'true' || value === true`— porque acá no existe el caso "solo los que sí
+tienen costo".
+
+- [ ] **Step 2: Escribir el test del service que falla**
+
+Que con `sinCosto: true` el `where` incluya la condición y el parámetro viaje. **Ojo con el
+`toContain`:** afirmar sobre un fragmento que también aparece en un comentario SQL da un
+verde falso — acotar la aserción a la cláusula.
+
+- [ ] **Step 3: Correr y verificar que fallan**
+
+Run: `cd backend && npx jest query-items.dto items.service --silent`
+
+- [ ] **Step 4: Implementar**
+
+⚠️ **`costo_actual` no es una columna de `items`:** el SELECT lo arma con
+`COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual)` (`items.service.ts:198`), o
+sea que sale de tres tablas distintas según el tipo. El filtro tiene que usar **la misma
+expresión**, y **verificar primero que los tres alias existen en el `FROM` de esa query** —
+si el `where` se compone para otra query que no los tiene, parar y reportar.
+
+Acotar a los tipos que muestran costo en la fila (`producto`, `ingrediente`), que son los que
+importan para la merma:
+
+```ts
+    if (query.sinCosto) {
+      where += ` AND i.tipo IN ('producto','ingrediente')
+                 AND COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual) IS NULL`;
+    }
+```
+
+Sin parámetro: no hay valor del usuario en la cláusula. Mantiene el `eliminado_el IS NULL`
+que ya trae el `where`.
+
+- [ ] **Step 5: Correr los tests y matar un mutante**
+
+Run: `cd backend && npx jest query-items.dto items.service --silent` → PASS.
+Mutante: invertir el `IS NULL` por `IS NOT NULL` — el test del service tiene que fallar.
+**Revertir y verificar en los logs del contenedor que el backend reinició.**
+
+- [ ] **Step 6: La marca en la fila**
+
+En `configuracion/items.vue:1493-1495`, donde hoy el costo ausente se dibuja como `—` a
+secas, marcarlo para que se distinga de un vistazo: un `UBadge` o el ícono
+`i-lucide-circle-alert` con el título *"Sin costo"*, siguiendo el molde de los badges que la
+fila ya tiene (`modoInventario`, línea 1496). **Sin Tailwind hardcodeado.**
+
+- [ ] **Step 7: El filtro en la barra**
+
+Junto al `USelect` de `filtroTipo` (línea 1435), un control "Solo sin costo" que agregue
+`sinCosto: true` a la query (línea 252) y entre en `busquedaActiva`/el reset (258/262) igual
+que `filtroTipo`. **Copiar el molde de `filtroTipo`, no inventar uno nuevo.**
+
+- [ ] **Step 8: Gate del frontend y smoke**
+
+Run: `cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check`
+Smoke con **chrome-devtools MCP**: prender el filtro y verificar en el log de red que
+`sinCosto=true` viaja en la query, que la lista se achica a los que están sin costo, y que
+la marca se ve en esas filas. Apagarlo y verificar que vuelve la lista completa.
+
+- [ ] **Step 9: Commit**
+
+Correr `domain-reviewer` sobre el diff staged y generar el recibo.
+
+```bash
+git add backend/src/modules/items frontend/app/pages/configuracion/items.vue
+git commit -m "feat(items): marcar y filtrar los productos que están sin costo"
+```
+
+---
+
+### Task 6: Documentación y gate
 
 **Files:**
 - Modify: `docs/features/mermas-valorizadas.md`, `docs/PRODUCTO.md`, `docs/ESTADO.md`, `docs/agent/pendientes.md`
 
 - [ ] **Step 1: La regla de negocio**
 
-`docs/features/mermas-valorizadas.md`: el costo sale del producto, no se tipea; la merma sin costo se registra sin valorizar y **queda así para siempre**; el override por movimiento **ya no existe**. `docs/PRODUCTO.md`: la regla del congelado, con el porqué (mismo criterio que el precio de la venta y que **ADR-010**).
+`docs/features/mermas-valorizadas.md`: el costo sale del producto, no se tipea; la merma sin costo se registra sin valorizar y **queda así para siempre**; el override por movimiento **ya no existe**. `docs/PRODUCTO.md`: la regla del congelado, con el porqué (mismo criterio que el precio de la venta y que **ADR-010**), y que el costo se carga al comprar o en el producto — nunca al mermar. `docs/features/inventario-kardex.md`: el filtro `sinCosto` del listado de ítems.
 
 - [ ] **Step 2: Estado y backlog**
 
-`docs/ESTADO.md`: la fila de mermas, con fecha. En `docs/agent/pendientes.md`, entrada nueva para la **regla 5**: *cuando se construya el reporte de mermas, tiene que mostrar cuántas quedaron sin valorizar* — un `SUM(costo_perdido)` que ignore los `NULL` reporta menos pérdida de la real sin decirlo.
+`docs/ESTADO.md`: la fila de mermas y la del catálogo de ítems (filtro `sinCosto`), con fecha. En `docs/agent/pendientes.md`, entrada nueva para la **regla 6**: *cuando se construya el reporte de mermas, tiene que mostrar cuántas quedaron sin valorizar*. Ojo con el enunciado: **`costo_perdido` no es una columna**, se deriva en la lectura (`mermas.service.ts:351-352`), así que no hay un `SUM` que arreglar — hay una cuenta futura que va a nacer mal si nadie la avisa.
 
 - [ ] **Step 3: Gate completo**
 
