@@ -29,12 +29,6 @@ interface ProductoOpt {
   costoActual: string | null
   unidadMedida: string | null
   modoInventario: string | null
-  // `GET /items` ya lo devuelve; lo que faltaba era declararlo acá. Lo necesita
-  // `MoneyInput` para resolver separadores y locale del costo.
-  // NO nullable: `items.moneda_id` es `NOT NULL` (ver `item.entity.ts`), así que
-  // el campo queda deshabilitado solo mientras no haya producto elegido — nunca
-  // por un producto sin moneda.
-  monedaId: string
 }
 
 interface CausaOpt {
@@ -49,7 +43,6 @@ const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 const unidadesMedidaStore = useUnidadesMedidaStore()
-const { convertirCosto } = useUnidadConversion()
 
 // El nav abre esta página con Inventario/Leer, pero POST /mermas exige
 // Inventario/Crear (ver docs/patterns/frontend.md §1.1).
@@ -92,8 +85,6 @@ const causasFormOpts = computed<Opt[]>(() =>
 
 const drawerOpen = ref(false)
 const saving = ref(false)
-const costoSinActualModalOpen = ref(false)
-const costoSinActualAck = ref(false)
 
 function emptyForm() {
   return {
@@ -102,7 +93,6 @@ function emptyForm() {
     unidadCodigo: '',
     causaMermaId: '',
     comentario: '',
-    costoUnitario: '',
   }
 }
 const form = ref(emptyForm())
@@ -128,40 +118,10 @@ const mostrarSelectorUnidad = computed(() =>
   && unidadesOpts.value.length > 1,
 )
 
-/** El costo se ingresa "por la unidad seleccionada", no por la unidad base. */
-const costoUnitarioLabel = computed(() => {
-  const unidad = form.value.unidadCodigo || productoSeleccionado.value?.unidadMedida
-  return unidad ? `Costo unitario (por ${unidad})` : 'Costo unitario'
-})
-
-/** costoUnitario significa "costo por la unidad seleccionada": el prefill
- * (costo_actual, que está en unidad base) se convierte a la unidad elegida. */
-function prefillCostoUnitario() {
-  const prod = productoSeleccionado.value
-  if (!prod || prod.costoActual == null) {
-    form.value.costoUnitario = prod?.costoActual ?? ''
-    return
-  }
-  const base = prod.unidadMedida ?? 'unidad'
-  const seleccionada = form.value.unidadCodigo || base
-  const convertido = convertirCosto(prod.costoActual, base, seleccionada)
-  form.value.costoUnitario = convertido ? convertido.toString() : prod.costoActual
-}
-
 watch(() => form.value.itemId, (itemId) => {
   const prod = productos.value.find(p => p.id === itemId)
   if (!prod) return
   form.value.unidadCodigo = prod.unidadMedida ?? 'unidad'
-  prefillCostoUnitario()
-  costoSinActualAck.value = false
-  if (prod.costoActual == null) {
-    costoSinActualModalOpen.value = true
-  }
-})
-
-watch(() => form.value.unidadCodigo, () => {
-  if (!form.value.itemId) return
-  prefillCostoUnitario()
 })
 
 async function cargarCatalogos() {
@@ -184,29 +144,13 @@ async function cargarCatalogos() {
 
 function abrirRegistrar() {
   form.value = emptyForm()
-  costoSinActualAck.value = false
   drawerOpen.value = true
-}
-
-function confirmarCostoSinActual() {
-  costoSinActualAck.value = true
-  costoSinActualModalOpen.value = false
 }
 
 async function registrar() {
   if (!form.value.itemId || !form.value.cantidad || !form.value.causaMermaId) {
     toast.add({ title: 'Completa producto, cantidad y causa', color: 'error' })
     return
-  }
-  if (sinCostoActual.value) {
-    if (!costoSinActualAck.value) {
-      costoSinActualModalOpen.value = true
-      return
-    }
-    if (!form.value.costoUnitario.trim()) {
-      toast.add({ title: 'Indica el costo unitario para valorizar la merma', color: 'error' })
-      return
-    }
   }
 
   saving.value = true
@@ -223,12 +167,9 @@ async function registrar() {
     if (form.value.comentario.trim()) {
       body.comentario = form.value.comentario.trim()
     }
-    if (form.value.costoUnitario.trim()) {
-      body.costoUnitario = form.value.costoUnitario.trim()
-    }
 
     const res = await useApiFetch<{
-      costoPerdido: string
+      costoPerdido: string | null
       causaNombre: string
       merma: MermaListItem
     }>(
@@ -251,7 +192,9 @@ async function registrar() {
       }
     }
     toast.add({
-      title: `Merma registrada · costo perdido ${formatMonto(res.costoPerdido, res.merma.monedaId)}`,
+      title: res.costoPerdido != null
+        ? `Merma registrada · costo perdido ${formatMonto(res.costoPerdido, res.merma.monedaId)}`
+        : 'Merma registrada · sin valorizar',
       color: 'success',
     })
     drawerOpen.value = false
@@ -452,31 +395,13 @@ const columns: TableColumn<MermaListItem>[] = [
             />
           </UFormField>
 
-          <UFormField
-            :label="costoUnitarioLabel"
-            :required="sinCostoActual"
-            :help="sinCostoActual
-              ? 'Obligatorio: valoriza solo esta merma, no actualiza el costo del producto.'
-              : 'Prefill con el costo actual; puedes ajustarlo solo para este movimiento.'"
-          >
-            <!-- `decimales` en 4 y no los de la moneda: el backend valida este
-                 campo con `@EsCosto()`, que es escala FIJA — un costo de
-                 `5,0500`/g es válido incluso en un ítem en CLP. -->
-            <MoneyInput
-              v-model="form.costoUnitario"
-              :moneda-id="productoSeleccionado?.monedaId"
-              :decimales="4"
-              class="w-full"
-            />
-          </UFormField>
-
           <UAlert
             v-if="sinCostoActual"
             color="warning"
             variant="subtle"
             icon="i-lucide-circle-alert"
-            title="Sin costo actual"
-            description="El monto que indiques valoriza solo esta merma y no actualiza el costo del producto."
+            title="Este producto no tiene costo cargado"
+            description="La merma se va a registrar igual, pero no va a quedar valorizada — y después no se puede corregir. Para valorizarla, cárgale el costo al producto antes de mermarlo."
           />
 
           <UFormField label="Comentario">
@@ -506,31 +431,6 @@ const columns: TableColumn<MermaListItem>[] = [
         </UButton>
       </template>
     </AppDrawer>
-
-    <UModal
-      v-model:open="costoSinActualModalOpen"
-      title="Producto sin costo actual"
-    >
-      <template #body>
-        <p class="text-sm text-default">
-          Este producto no tiene costo actual. El monto que indiques valoriza solo esta merma y no actualiza el costo del producto.
-        </p>
-      </template>
-      <template #footer>
-        <AppModalFooter>
-          <UButton
-            color="neutral"
-            variant="ghost"
-            @click="() => { costoSinActualModalOpen = false }"
-          >
-            Entendido
-          </UButton>
-          <UButton @click="confirmarCostoSinActual">
-            Continuar
-          </UButton>
-        </AppModalFooter>
-      </template>
-    </UModal>
       </div>
     </template>
   </UDashboardPanel>
