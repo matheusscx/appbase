@@ -145,8 +145,8 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local, con siete
-  causas descartadas y cuatro ramas vivas** (backend/tests, visto y medido el 2026-08-18 en el cierre del
+- [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local: la firma
+  reproduce entera y quedan tres explicaciones de por qué esa conexión no volvió** (backend/tests, visto y medido el 2026-08-18 en el cierre del
   contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
   reportó 10 tests en rojo. **Los 10 son un solo fallo**: la aserción está en un `beforeAll`
   (`items-pausados.e2e-spec.ts:224`, un `POST /calculo-precios/calcular` que devolvió 500), y
@@ -261,6 +261,65 @@ decisión que no es mía).
   negra**. Era el arrastre —el primer test se cayó por el timeout y dejó la caja abierta—, no la
   causa. La sonda ya tenía la respuesta.
 
+  🎯 **LA FIRMA DE LAS DOS CAPTURAS SE REPRODUCE ENTERA, Y DICE POR QUÉ CAMINO SALIÓ EL
+  PEDIDO (2026-08-27).** Lo que faltaba era el `despues {total:3, idle:2}` —dos clientes
+  creados y ociosos mientras el nuestro caducaba—, que ninguna hipótesis explicaba. Sale
+  determinista con un proxy TCP que demora **una** conexión elegida
+  (`backend/test/control-sonda-pool.e2e-spec.ts`, apagado salvo `CONTROL_SONDA=1`):
+
+  1. el pool queda en `total 1, idle 1`;
+  2. dos pedidos entran **en el mismo tick**: el primero se encola porque hay un idle, y el
+     segundo ve `antes {total:1, idle:1, esperando:1, max:10}` — la firma capturada;
+  3. **cada uno de los dos agenda su propio `process.nextTick(_pulseQueue)`**
+     (`node_modules/pg-pool/index.js:198-203`), y ahí está la mecánica: el primer pulso le da el
+     idle al primero, y el **segundo** encuentra la cola con el nuestro, sin idles y el pool no
+     lleno, así que le crea un **cliente propio** (`:165-167`). Devolver el primero **con error**
+     no es lo que crea ese cliente —eso ya pasó—: es lo que saca del pool al cliente reusado para
+     que el `total` final dé 3 y no 4;
+  4. ese `connect()` es el demorado por el proxy, y **dos pedidos posteriores saltean la cola**
+     (el caveat de abajo), se crean clientes y quedan idle → `despues {total:3, idle:2,
+     esperando:0}` con el mensaje **de la cola**, porque su timer arrancó antes.
+
+  Del control, **recortando `t`, `test` y `loopPicos: []`** (van en toda línea y acá no aportan);
+  el resto es literal:
+
+```json
+{"ms":1502,"error":"timeout exceeded when trying to connect","pedido":3,"via":"nuevo",
+ "clienteMs":null,
+ "antes":{"total":1,"idle":1,"esperando":1,"max":10,"conectando":0},
+ "despues":{"total":3,"idle":2,"esperando":0,"max":10,"conectando":1},"loopMax":2}
+{"capa":"client.connect","pedido":3,"ms":1516,"error":"Connection terminated unexpectedly",
+ "loopMax":2}
+```
+
+  📌 **El `clienteMs: null` de la primera línea es el campo que más dice**, y por eso no se
+  recorta: al vencer el pedido, la conexión que le habían creado **todavía no había vuelto**. La
+  segunda línea es esa misma conexión settleando 14 ms después, cuando el timer del propio
+  `newClient` la mata — mismo `pedido`, que es la correlación entera en dos líneas.
+
+  ➡️ **La rama "el pedido se quedó esperando el pulso de la cola" queda descartada para estas
+  dos capturas** — y conviene ser exacto sobre en qué se apoya, porque **no** es la lectura del
+  campo en el fallo real (`via` no existía en agosto 25 ni 27). Se apoya en tres cosas medidas:
+
+  1. el control reproduce `antes` **y** `despues` por el camino "cliente nuevo para el encolado";
+  2. un `release` con alguien en cola lo **desencola en el mismo frame** (tercer caso del control:
+     `waitingCount` pasa de 1 a 0 sin ceder el loop), así que no pueden convivir clientes idle con
+     un encolado sin atender — y todo camino que produce un idle pulsa la cola en el acto
+     (el único `_idle.push` es `index.js:427-428`; los `_remove` pasan `_pulseQueue` de callback,
+     `:397`; y el camino de error de `newClient` pulsa en `:280`);
+  3. el otro camino, medido y aserto en el control, sale con `via: null` y
+     `despues {total:1, idle:0}` — que **no** es la firma.
+
+  O sea: **mecanismo + repro sintético**, no observación directa. Es lo más fuerte que se puede
+  decir hasta que el intermitente vuelva a caer con la sonda nueva puesta, y alcanza para sacar la
+  rama de la tabla porque lo que la sostenía era justamente no poder distinguirla.
+
+  ⚠️ **Y una salvedad sobre el punto 3, para no estirarlo:** el control demuestra que en **esa**
+  configuración el otro camino da otra firma; la imposibilidad general de que dé la firma
+  capturada viene del mecanismo del punto 2, no del control. El `connectionTimeoutMillis` del
+  control es 1500 ms y no 5000, para que tarde 30 s y no dos minutos: cambia los números, no la
+  mecánica.
+
   🎯 **EL EVENT LOOP TAPADO ES LA ÚNICA HIPÓTESIS QUE ALGUIEN REPRODUJO — y estuvo un rato
   marcada acá como refutada, por un argumento que parecía cerrado y no lo era.** El argumento
   era: si el loop estuviera bloqueado más de 5 s, el timer del `connectionTimeoutMillis` correría
@@ -278,10 +337,13 @@ decisión que no es mía).
   Postgres y Docker perfectamente sanos. La conclusión correcta es la de la primera fila, no "el
   loop estaba libre".
 
-  ⚠️ **Pero no reproduce la firma entera, y lo que falta es lo que más información tiene:** el
-  repro deja `despues {total:2, idle:0}` y las dos capturas dicen `despues {total:3, idle:2}`. En
-  el fallo real **se crearon dos clientes que quedaron ociosos** mientras nuestro pedido caducaba
-  en la cola. Eso el bloqueo del loop no lo explica, y es por donde conviene seguir tirando.
+  ⚠️ **El bloqueo del loop, solo, no reproduce la firma entera** —deja `despues {total:2,
+  idle:0}`—, y eso **ya no es un hueco**: el `despues {total:3, idle:2}` lo explica el control de
+  arriba, que es de dónde salen los dos clientes ociosos. Las dos cosas encajan sin competir: el
+  control dice **qué** pasó (a nuestro pedido encolado le crearon un cliente y su `connect()` no
+  volvió a tiempo) y el loop tapado sigue siendo una de las tres explicaciones posibles de **por
+  qué** ese `connect()` no volvió — la única, además, que se reprodujo con Postgres y Docker
+  sanos.
   ⚠️ Lo levantó la revisión independiente corriendo el experimento; acá estaba escrito ⛔
   REFUTADO, que es lo que habría mandado al próximo a peritar Docker con la única pista viva
   tachada.
@@ -308,39 +370,79 @@ decisión que no es mía).
   No hay un problema de línea base ni un desbalance entre familias de direcciones: el fallo pasa
   **bajo carga**, no porque el camino sea lento de por sí.
 
-  ➡️ **Las ramas que quedan vivas, y son cuatro, no una.** La versión anterior de este párrafo
-  decía *"apunta afuera del proyecto"* y *"queda una sola pregunta"*, y eso se apoyaba en dar por
-  refutado el event loop. Con la refutación caída, el mapa es:
+  ➡️ **El mapa se achicó de cuatro ramas paralelas a una pregunta con tres respuestas
+  posibles.** Eran cuatro mientras no se podía distinguir si al pedido le habían dado cliente; con
+  el control y el mecanismo de arriba, la única lectura compatible con la firma es que **sí**, y
+  las tres que quedan son explicaciones de **por qué ese `connect()` no volvió en 5 s**:
 
-  | rama | dónde vive | cómo se distingue |
+  | rama | dónde vive | cómo se distingue en el próximo fallo |
   |---|---|---|
-  | El **event loop** tapado terminando justo antes del vencimiento | adentro | muestrear el atraso del loop **en la corrida que falle**; única parcialmente reproducida (falta el `despues`) |
-  | El pedido esperando el **pulso de la cola** de `pg-pool` | adentro | ⚠️ **hoy no se distingue afirmativamente** — ver el párrafo de "leer por ausencia" |
-  | El **TCP** hacia el puerto publicado de Docker | afuera | `capa: 'client.connect'` con `ms` alto, y el log de Postgres SIN la conexión a esa hora |
+  | El **event loop** tapado terminando justo antes del vencimiento | adentro | `loopMax` / `loopPicos`, que ahora van en **todos** los registros; única parcialmente reproducida |
+  | El **TCP** hacia el puerto publicado de Docker | afuera | `capa: 'client.connect'` **con el mismo `pedido`** y `ms` alto, y el log de Postgres SIN esa conexión a esa hora |
   | El arranque del **backend de Postgres** | afuera | ídem, pero el log del servidor SÍ la registra tarde |
 
-  ⚠️ La segunda rama merece una nota porque es sutil: en `pg-pool`, un encolado solo se atiende
-  vía `_pulseQueue`, mientras que un `connect()` **posterior** que llegue con la cola vacía de
-  idles y el pool no lleno se va directo a `newClient` y **saltea la cola**. Así que el
-  `despues {total:3}` de las capturas **no prueba** que esos clientes nuevos sean nuestros.
+  ⛔ **Descartada, y por eso ya no está en la tabla:** *el pedido esperando el pulso de la cola*.
+  Ver el control de arriba — es la rama que se leía por ausencia y ahora se lee por el campo.
+
+  ⚠️ **Un caveat que sigue valiendo para leer cualquier captura**, y que era el que volvía
+  indistinguibles a dos de las ramas: en `pg-pool` un encolado solo se atiende vía `_pulseQueue`,
+  mientras que un `connect()` **posterior** que llegue con la cola vacía de idles y el pool no
+  lleno se va directo a `newClient` y **saltea la cola**. Por eso el `despues {total:3}` no prueba
+  por sí solo que esos clientes sean nuestros — lo que lo prueba es el `pedido`, y antes de que
+  existiera no había con qué.
 
   ✅ **Lo que la sonda agregó (2026-08-27):** `setup-pool.ts` parchea también
   `Client.prototype.connect` —registra con `capa: 'client.connect'` lo que pase de `LENTO_MS` o
   falle— y lleva un contador `conectando` de conexiones en vuelo que va en cada registro del pool.
   Verificado que engancha bajando el umbral a 0 antes de creerle a un archivo vacío.
 
-  ⛔ **Lo que NO resuelve, y una versión anterior de este párrafo decía que sí:** el problema de
-  **leer por ausencia** sigue en pie. Se agregó `conectando` con la idea de volver afirmativa la
-  rama de la cola, y no alcanza —es global y de un instante, ver abajo—; y `capa: 'client.connect'`
-  **no lleva identidad de pool ni de pedido**, así que un registro lento en la ventana del fallo
-  puede ser de otro pedido (el caveat de arriba: un `connect()` posterior saltea la cola). Para
-  atribuir haría falta un id de correlación entre el pedido que caduca y el `client.connect` que
-  lo estaba sirviendo. **Eso todavía no está.**
+  ✅ **Y lo que agregó la del 2026-08-27:** el `pedido` correlativo con su `via`, el muestreo del
+  atraso del **event loop** en todos los registros (`loopMax`, y `loopPicos` en los de error), y el
+  control positivo `backend/test/control-sonda-pool.e2e-spec.ts`. El control **no corre en el
+  gate**: es `describe.skip` salvo `CONTROL_SONDA=1`, porque tarda ~30 s, levanta un proxy TCP y
+  bloquea el loop a propósito.
 
-  ➡️ **Lo que falta:** que vuelva a pasar con las sondas puestas, y **un id de correlación** que
-  hoy no existe. Con lo que hay, `capa: 'client.connect'` con `ms` alto en la ventana del fallo
-  dice que **alguna** conexión tardó —no necesariamente la nuestra—, y recién ahí el `t` contra el
-  log de Postgres parte esa demora entre Docker y el servidor. Es indicio fuerte, no atribución.
+  ```bash
+  CONTROL_SONDA=1 npx jest --config ./test/jest-e2e.json \
+    --runTestsByPath test/control-sonda-pool.e2e-spec.ts
+  ```
+
+  📌 **El control se verificó con un mutante, no solo por estar verde:** sacándole el etiquetado
+  del ítem encolado —o sea el código anterior a esta pasada— el fallo sale con `via: null`, que es
+  exactamente lo que la sonda vieja podía decir, y el control se pone rojo.
+
+  ✅ **El id de correlación existe desde el 2026-08-27, y con él se cerró el "leer por
+  ausencia".** Se puede correlacionar porque `pool.connect()` decide **sincrónicamente**
+  (`node_modules/pg-pool/index.js:190-237`): o empuja su `PendingItem` a la cola, o llama a
+  `newClient()`, que construye el `Client` y lo conecta en el mismo frame (`:240-266`). Entonces
+  cada `pool.connect()` lleva un `pedido` correlativo; si encoló, la etiqueta viaja **colgada del
+  ítem**, que es como se lo sigue cuando `_pulseQueue` lo atiende mucho después; y `newClient`
+  publica el pedido para que el parche de `Client.prototype.connect` lo levante. Cada registro
+  ahora dice `pedido`, `via` (`'idle'` / `'nuevo'` / `null` = nunca le asignaron cliente) y
+  `clienteMs`.
+
+  ⚠️ **`conectando` sigue siendo lo que era** —contexto, no regla— y ya **no** es lo que sostiene
+  ninguna atribución: eso ahora lo hace `pedido`. Se deja porque es gratis y porque en el `despues`
+  de un fallo dice cuántas conexiones había en vuelo en ese instante.
+
+  📊 **La línea base que la correlación destapó, medida en la corrida verde del 2026-08-27**
+  (652 tests, 541 registros): el estado `antes {total:1, idle:1, esperando:1}` con `via: 'nuevo'`
+  —la configuración exacta de las dos capturas— ocurre **27 veces por corrida** y resuelve en
+  **6 ms de mediana, 12 ms el peor**. Establecer la conexión, sobre los 52 pedidos que crearon
+  cliente: **p50 6 ms, p95 11 ms, máximo 13 ms**.
+
+  ➡️ **Eso cambia la forma de la pregunta**, con la atribución de arriba puesta: lo que en 27
+  casos por corrida tarda 6 ms se fue a **más de 5000**, un outlier de ~400×. No es un margen
+  apretado que a veces se pasa, así que no se lee como saturación ni como carga: algo **detiene**
+  esa conexión, no la enlentece. ⚠️ Si la atribución cayera, cae también esta lectura — es la
+  misma inferencia, no una segunda evidencia.
+
+  ➡️ **Lo que falta: una sola cosa, que vuelva a pasar con las sondas puestas.** Ya no hay nada que
+  construir. Cuando caiga, el registro del timeout va a traer su `pedido` y su `via`, el
+  `capa: 'client.connect'` del **mismo** `pedido` va a decir cuánto tardó esa conexión, `loopMax` y
+  `loopPicos` van a decir si el loop estaba tapado en esos 10 s, y el `t` contra el log de Postgres
+  parte lo que quede entre Docker y el servidor. Es la primera vez que las tres ramas se distinguen
+  con una sola captura.
 
   ⚠️ **`conectando` es una ayuda, NO una regla de decisión.** Es un contador **global del
   proceso** leído en **un instante**: medido en una suite entera llega a 8 en las ráfagas, así que
