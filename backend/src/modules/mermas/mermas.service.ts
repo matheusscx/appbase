@@ -11,7 +11,6 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
-import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
 import {
   bordeFechaSql,
   bordeHastaSql,
@@ -27,8 +26,8 @@ import { FindMermasDto } from './dto/find-mermas.dto';
 export interface MermaResponse {
   movimientoId: string;
   stockResultante: string;
-  costoUnitario: string;
-  costoPerdido: string;
+  costoUnitario: string | null;
+  costoPerdido: string | null;
   causaNombre: string;
   /** Fila lista para upsert en el front (sin re-fetch). */
   merma: MermaListItem;
@@ -92,11 +91,14 @@ export class MermasService {
     dto: CreateMermaDto,
   ): Promise<MermaResponse> {
     return this.db.transaccion(async (manager) => {
+      // No selecciona `p.costo_actual`: este SELECT toma `FOR UPDATE OF i`
+      // (lockea `items`, no `item_producto`), así que sería una lectura
+      // pre-lock del costo — ver el comentario grande más abajo, donde
+      // `registrar` usa en cambio `mov.costoActualPrevio`.
       const itemRows: {
         tipo: string;
         unidad_medida: string | null;
         modo_inventario: string | null;
-        costo_actual: string | null;
         nombre: string;
         moneda_id: string;
       }[] = await manager.query(
@@ -104,7 +106,7 @@ export class MermasService {
         // listado sin refetch, así que sin la moneda del ítem la merma recién
         // creada se formatea con la oficial del tenant hasta que alguien
         // recargue. Mismo motivo que en el SELECT de `findAll`.
-        `SELECT i.tipo, i.nombre, p.unidad_medida, p.modo_inventario, p.costo_actual,
+        `SELECT i.tipo, i.nombre, p.unidad_medida, p.modo_inventario,
                 i.moneda_id
          FROM items i
          LEFT JOIN item_producto p ON p.item_id = i.item_id
@@ -137,7 +139,6 @@ export class MermasService {
       let cantidadStr = cantidad.toString();
 
       const unidadBase = itemRows[0].unidad_medida ?? 'unidad';
-      const cantidadIngresada = cantidad;
       const huboConversion =
         !!dto.unidadCodigo && dto.unidadCodigo !== unidadBase;
       if (huboConversion) {
@@ -153,37 +154,20 @@ export class MermasService {
         );
       }
 
-      const costoActual = itemRows[0].costo_actual;
-      let costoUnitarioParam: string | null | undefined =
-        dto.costoUnitario ?? null;
-      if (
-        costoActual == null &&
-        (dto.costoUnitario == null || dto.costoUnitario === '')
-      ) {
-        throw new BadRequestException(
-          'El producto no tiene costo actual; indica costoUnitario para valorizar esta merma',
-        );
-      }
-      if (dto.costoUnitario != null && dto.costoUnitario !== '') {
-        const c = new Decimal(dto.costoUnitario);
-        if (c.isNaN() || c.lessThanOrEqualTo(0)) {
-          throw new BadRequestException('El costo unitario debe ser mayor a 0');
-        }
-        // costoUnitario es "costo por la unidad ingresada" (dto.unidadCodigo),
-        // no por la unidad base: si hubo conversión de cantidad, se convierte
-        // junto con ella preservando el valor total. costo_actual, en cambio,
-        // ya está en unidad base y nunca pasa por acá.
-        costoUnitarioParam = huboConversion
-          ? convertirCostoUnitario(
-              cantidadIngresada.toString(),
-              dto.costoUnitario,
-              cantidadStr,
-            )
-          : c.toString();
-      } else {
-        costoUnitarioParam = undefined;
-      }
-
+      // El costo NO se tipea: sale del producto. No se pasa `costoUnitario` a
+      // `registrarMovimiento` — que congele con su propia lectura, bajo
+      // `FOR UPDATE OF ip` (inventario.service.ts:155), que es el chokepoint
+      // real de `item_producto.costo_actual`. El SELECT de acá arriba toma
+      // `FOR UPDATE OF i` — lockea `items`, no `item_producto`
+      // (inventario.service.ts:134-137 explica por qué a propósito) — así que
+      // `itemRows[0].costo_actual` es una lectura pre-lock: bajo READ
+      // COMMITTED, una compra concurrente que commitea entre esta lectura y
+      // el lock de `registrarMovimiento` ya cambió el valor ahí, y usar el
+      // pre-lock acá desincroniza la respuesta del kardex (rompería la regla
+      // 2 de la spec: lo que se guardó y lo que se muestra tienen que
+      // coincidir). El congelado de la respuesta sale de
+      // `mov.costoActualPrevio`, que sí se leyó bajo ese lock.
+      // Ver docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md
       const mov = await this.inventarioService.registrarMovimiento(manager, {
         tenantId,
         itemId: dto.itemId,
@@ -193,17 +177,17 @@ export class MermasService {
         cantidad: cantidadStr,
         comentario: dto.comentario ?? null,
         causaMermaId: dto.causaMermaId,
-        costoUnitario: costoUnitarioParam,
       });
 
-      const costoCongelado = costoUnitarioParam ?? costoActual!;
+      const costoCongelado = mov.costoActualPrevio;
       // Proyección de lectura: cantidad × costo congelado del kardex, a escala de
       // costo (4). Nadie paga este número y no se persiste. Redondearlo con la config
       // vigente haría que el historial cambie al cambiar la preferencia del tenant;
       // el formateo a moneda es de presentación, no de acá.
-      const costoPerdido = new Decimal(cantidadStr)
-        .mul(costoCongelado)
-        .toFixed(ESCALA_COSTO);
+      const costoPerdido =
+        costoCongelado == null
+          ? null
+          : new Decimal(cantidadStr).mul(costoCongelado).toFixed(ESCALA_COSTO);
 
       return {
         movimientoId: mov.movimientoId,

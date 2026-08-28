@@ -11,12 +11,34 @@ const USER = 'user-uuid';
 const ITEM = 'item-uuid';
 const CAUSA = 'causa-uuid';
 
+// No incluye `costo_actual`: desde el fix de concurrencia (revisión
+// independiente, fix round 1) el SELECT de `mermas.service.ts` ya no lo
+// selecciona — lockea `items` (`FOR UPDATE OF i`), no `item_producto`, así
+// que sería una lectura pre-lock. El costo congelado sale de
+// `mov.costoActualPrevio`, que devuelve el mock de `registrarMovimiento`
+// abajo. Un test puntual agrega `costo_actual` como override para probar
+// justamente que, si estuviera, `registrar` lo ignora.
 const itemRow = (overrides: Record<string, unknown> = {}) => ({
   tipo: 'producto',
   nombre: 'Harina',
   unidad_medida: 'kg',
   modo_inventario: 'cantidad',
-  costo_actual: '100',
+  ...overrides,
+});
+
+// Devuelve el shape completo de `registrarMovimiento` incluyendo
+// `costoActualPrevio`/`costoActual` (la lectura bajo `FOR UPDATE OF ip`,
+// inventario.service.ts:155) — el valor que `mermas.service.ts` usa para
+// congelar la respuesta. Sin este helper, un mock que solo trajera
+// `movimientoId`/`stockResultante` dejaría `costoActualPrevio` en
+// `undefined` y el test no distinguiría "sin costo" (`null`, correcto) de
+// "mock incompleto" (`undefined`, un olvido).
+const movimientoResult = (overrides: Record<string, unknown> = {}) => ({
+  movimientoId: 'mov-1',
+  stockAnterior: '10',
+  stockResultante: '9',
+  costoActualPrevio: '100',
+  costoActual: '100',
   ...overrides,
 });
 
@@ -61,17 +83,15 @@ describe('MermasService', () => {
   });
 
   describe('registrar', () => {
-    it('con costo_actual congela vigente y calcula costoPerdido', async () => {
+    it('congela costoUnitario/costoPerdido con lo que devuelve el movimiento, y no se lo pasa como override', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,
         nombre: 'Vencimiento',
       });
-      inventarioService.registrarMovimiento.mockResolvedValueOnce({
-        movimientoId: 'mov-1',
-        stockAnterior: '10',
-        stockResultante: '9',
-      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({ movimientoId: 'mov-1', stockResultante: '9' }),
+      );
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
@@ -79,19 +99,24 @@ describe('MermasService', () => {
         causaMermaId: CAUSA,
       });
 
-      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          tenantId: TENANT,
-          itemId: ITEM,
-          usuarioId: USER,
-          tipo: 'salida',
-          motivo: 'merma',
-          cantidad: '1',
-          causaMermaId: CAUSA,
-          costoUnitario: undefined,
-        }),
-      );
+      // `registrar` ya no le pasa `costoUnitario` a `registrarMovimiento` en
+      // absoluto (ni siquiera `undefined` explícito): que congele con su
+      // propia lectura bajo `FOR UPDATE OF ip` (inventario.service.ts:155),
+      // el chokepoint real de `item_producto.costo_actual`. Fix de
+      // concurrencia — revisión independiente, fix round 1. Ver
+      // docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md
+      const [, params] = inventarioService.registrarMovimiento.mock
+        .calls[0] as [unknown, Record<string, unknown>];
+      expect(params).not.toHaveProperty('costoUnitario');
+      expect(params).toMatchObject({
+        tenantId: TENANT,
+        itemId: ITEM,
+        usuarioId: USER,
+        tipo: 'salida',
+        motivo: 'merma',
+        cantidad: '1',
+        causaMermaId: CAUSA,
+      });
       expect(result).toMatchObject({
         movimientoId: 'mov-1',
         stockResultante: '9',
@@ -107,62 +132,129 @@ describe('MermasService', () => {
       });
     });
 
-    it('rechaza sin costo_actual ni costoUnitario', async () => {
+    it('el costo congelado en la respuesta sale de mov.costoActualPrevio, no de la lectura previa del ítem', async () => {
+      // itemRow trae costo_actual: '999' — una lectura pre-lock que ya no
+      // selecciona el SELECT real (ver comentario de `itemRow` arriba), pero
+      // que este mock igual puede simular. registrarMovimiento resuelve
+      // costoActualPrevio: '100' — la lectura bajo FOR UPDATE OF ip, la que
+      // de verdad quedó en el kardex. Si `registrar` tomara el costo de
+      // `itemRows` en vez de `mov.costoActualPrevio`, este test vería '999'
+      // y fallaría: es la única forma de que la aserción distinga una
+      // fuente de la otra.
       transactionQueryMock.mockResolvedValueOnce([
-        itemRow({ costo_actual: null }),
+        itemRow({ costo_actual: '999' }),
       ]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,
         nombre: 'Vencimiento',
       });
-
-      await expect(
-        service.registrar(TENANT, USER, {
-          itemId: ITEM,
-          cantidad: '1',
-          causaMermaId: CAUSA,
-        }),
-      ).rejects.toThrow(
-        'El producto no tiene costo actual; indica costoUnitario para valorizar esta merma',
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({ costoActualPrevio: '100', costoActual: '100' }),
       );
-      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '1',
+        causaMermaId: CAUSA,
+      });
+
+      expect(result.costoUnitario).toBe('100');
+      expect(result.costoPerdido).toBe('100.0000');
+      expect(result.merma.costoPerdido).toBe('100.0000');
     });
 
-    it('registra con costoUnitario explícito sin actualizar costo_actual', async () => {
-      transactionQueryMock.mockResolvedValueOnce([
-        itemRow({ costo_actual: null }),
-      ]);
+    // El costo se maneja en el producto, no se tipea al mermar (owner, 2026-08-28).
+    // Regla 1: la merma sin costo se registra igual, sin valorizar — nunca se
+    // inventa un costo. Antes esto era un 400 ("rechaza sin costo_actual ni
+    // costoUnitario"); el test se borró junto con el override de `costoUnitario`
+    // en el DTO. Ver docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md
+    it('registra la merma sin valorizar cuando el producto no tiene costo', async () => {
+      transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,
-        nombre: 'Rotura',
+        nombre: 'Vencimiento',
       });
-      inventarioService.registrarMovimiento.mockResolvedValueOnce({
-        movimientoId: 'mov-2',
-        stockAnterior: '5',
-        stockResultante: '4',
-      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({
+          movimientoId: 'mov-2',
+          stockAnterior: '5',
+          stockResultante: '3',
+          costoActualPrevio: null,
+          costoActual: null,
+        }),
+      );
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
         cantidad: '2',
         causaMermaId: CAUSA,
-        costoUnitario: '50',
       });
 
-      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          motivo: 'merma',
-          costoUnitario: '50',
+      const [, params] = inventarioService.registrarMovimiento.mock
+        .calls[0] as [unknown, Record<string, unknown>];
+      expect(params).not.toHaveProperty('costoUnitario');
+      expect(result.costoUnitario).toBeNull();
+      expect(result.costoPerdido).toBeNull();
+      expect(result.merma.costoPerdido).toBeNull();
+    });
+
+    it('costo_actual = "0" (donación/muestra) se registra valorizado en cero, sin pasar costoUnitario a registrarMovimiento', async () => {
+      // create-item.dto.ts:231-233 documenta que '0' es un costo real
+      // (donación/muestra), distinto de "sin costo" (null, Regla 1). Antes
+      // de este fix, `registrar` pasaba el costo congelado explícito a
+      // `registrarMovimiento`, y ese '0' explícito chocaba con la validación
+      // de costo > 0 del callee (inventario.service.ts) — un 400 al revés
+      // de la Regla 1. Ahora `registrar` nunca pasa `costoUnitario`, así que
+      // ese camino de validación no se dispara sea cual sea el costo leído.
+      // `registrarMovimiento` está mockeado acá: lo que este test fija es
+      // que no se le pasa `costoUnitario`. El 400 real (o su ausencia) lo
+      // cubre el e2e de la Task 2, contra el servicio real.
+      transactionQueryMock.mockResolvedValueOnce([itemRow()]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({ costoActualPrevio: '0', costoActual: '0' }),
+      );
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '1',
+        causaMermaId: CAUSA,
+      });
+
+      const [, params] = inventarioService.registrarMovimiento.mock
+        .calls[0] as [unknown, Record<string, unknown>];
+      expect(params).not.toHaveProperty('costoUnitario');
+      expect(result.costoUnitario).toBe('0');
+      expect(result.costoPerdido).toBe('0.0000');
+    });
+
+    it('valoriza con el costo del producto, sin que nadie lo tipee', async () => {
+      transactionQueryMock.mockResolvedValueOnce([itemRow()]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({
+          movimientoId: 'mov-3',
+          stockAnterior: '2',
+          stockResultante: '1.5',
+          costoActualPrevio: '100.0000',
+          costoActual: '100.0000',
         }),
       );
-      const updateCostoCalls = transactionQueryMock.mock.calls.filter(
-        ([sql]: [string]) =>
-          typeof sql === 'string' &&
-          sql.includes('UPDATE item_producto SET costo_actual'),
-      );
-      expect(updateCostoCalls).toHaveLength(0);
-      expect(result.costoPerdido).toBe('100.0000');
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '0.5',
+        causaMermaId: CAUSA,
+      });
+
+      expect(result.costoUnitario).toBe('100.0000');
+      expect(result.costoPerdido).toBe('50.0000');
     });
 
     it('convierte unidad cuando unidadCodigo difiere de la base', async () => {
@@ -196,53 +288,31 @@ describe('MermasService', () => {
       );
     });
 
-    it('convierte costoUnitario junto con la cantidad preservando el valor total', async () => {
-      // Producto en base 'g'; el usuario merma 2 kg a $5.000/kg.
+    // El test que conmutaba costoUnitario explícito + conversión de unidad
+    // ('convierte costoUnitario junto con la cantidad preservando el valor
+    // total') se borró: `convertirCostoUnitario` solo se llamaba desde la
+    // rama de override que la regla 3 elimina — el costo ya no se tipea, así
+    // que no hay costo por convertir. La conversión de CANTIDAD sigue
+    // cubierta arriba ('convierte unidad cuando unidadCodigo difiere...').
+
+    it('con conversión de unidad, el costo congelado sigue viniendo de mov.costoActualPrevio sin convertir', async () => {
       transactionQueryMock.mockResolvedValueOnce([
-        itemRow({ unidad_medida: 'g' }),
-      ]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
-        nombre: 'Vencimiento',
-      });
-      catalogService.convertirUnidad.mockResolvedValueOnce('2000'); // 2 kg → 2000 g
-      inventarioService.registrarMovimiento.mockResolvedValueOnce({
-        movimientoId: 'mov-4',
-        stockAnterior: '3000',
-        stockResultante: '1000',
-      });
-
-      const result = await service.registrar(TENANT, USER, {
-        itemId: ITEM,
-        cantidad: '2',
-        unidadCodigo: 'kg',
-        causaMermaId: CAUSA,
-        costoUnitario: '5000',
-      });
-
-      // Valor total preservado: 2 kg × 5.000/kg = 10.000 = 2000 g × 5/g.
-      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ cantidad: '2000', costoUnitario: '5.0000' }),
-      );
-      expect(result.costoUnitario).toBe('5.0000');
-      expect(result.costoPerdido).toBe('10000.0000');
-    });
-
-    it('sin costoUnitario explícito usa costo_actual (ya en unidad base) sin convertir', async () => {
-      transactionQueryMock.mockResolvedValueOnce([
-        itemRow({ unidad_medida: 'kg', costo_actual: '100' }),
+        itemRow({ unidad_medida: 'kg' }),
       ]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,
         nombre: 'Vencimiento',
       });
       catalogService.convertirUnidad.mockResolvedValueOnce('0.5'); // 500 g → 0.5 kg
-      inventarioService.registrarMovimiento.mockResolvedValueOnce({
-        movimientoId: 'mov-5',
-        stockAnterior: '10',
-        stockResultante: '9.5',
-      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({
+          movimientoId: 'mov-5',
+          stockAnterior: '10',
+          stockResultante: '9.5',
+          costoActualPrevio: '100',
+          costoActual: '100',
+        }),
+      );
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
@@ -251,11 +321,13 @@ describe('MermasService', () => {
         causaMermaId: CAUSA,
       });
 
-      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ cantidad: '0.5', costoUnitario: undefined }),
-      );
-      expect(result.costoUnitario).toBe('100'); // costo_actual tal cual, sin convertir
+      const [, params] = inventarioService.registrarMovimiento.mock
+        .calls[0] as [unknown, Record<string, unknown>];
+      expect(params).not.toHaveProperty('costoUnitario');
+      expect(params).toMatchObject({ cantidad: '0.5' });
+      // costo_actual ya está en unidad base (kg): no se convierte junto con
+      // la cantidad, a diferencia de lo que hacía el viejo override tipeado.
+      expect(result.costoUnitario).toBe('100');
       expect(result.costoPerdido).toBe('50.0000'); // 0.5 kg × 100/kg
     });
 
@@ -283,11 +355,13 @@ describe('MermasService', () => {
         id: CAUSA,
         nombre: 'Vencimiento',
       });
-      inventarioService.registrarMovimiento.mockResolvedValueOnce({
-        movimientoId: 'mov-ing',
-        stockAnterior: '10',
-        stockResultante: '9',
-      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult({
+          movimientoId: 'mov-ing',
+          stockAnterior: '10',
+          stockResultante: '9',
+        }),
+      );
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
