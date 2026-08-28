@@ -151,8 +151,31 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   nada (le pasó a `ventas` en la barrida del token).
 
   ✅ **Primera tanda, 2026-08-28: `caja` y `papelera`** — 56 aserciones, gate completo en
-  verde. Quedan **117 sitios en 31 specs** (`recuentos`, `ventas` y `garzon-modo-personal`
-  van 10 cada uno; el resto, de a menos de 10).
+  verde.
+  ✅ **Segunda tanda, 2026-08-28: `recuentos`, `ventas` y `garzon-modo-personal`** — 24
+  aserciones. Esos tres archivos quedan **en cero**. El detector marca **98 sitios en 31
+  archivos**, de los cuales **11 no son trabajo** (los 9 de higiene deliberada de la primera
+  tanda y 2 falsos positivos, abajo): quedan **87 reales**, ninguno con más de 8 por archivo
+  (`reglas-valor` y `garzones-selector` 8, `recetas` 7, `rbac-y-contrasena` e
+  `items-pausados` 6).
+  📌 **Y el conteo tiene falsos positivos por una forma más:** en
+  `garzon-modo-personal.e2e-spec.ts:243-244` las dos respuestas salen de un
+  `const [fuera, dentro] = await Promise.all([...])` y **ya tienen** su
+  `expect(...).toBe(200)` dos líneas antes; el heurístico no las ve porque busca la
+  declaración por nombre. Es la misma advertencia que la entrada ya traía —el número
+  dimensiona, no es exacto—, ahora con la forma nombrada.
+  📌 **Tercera forma de falso positivo, y la más cara: el status afirmado una línea DESPUÉS
+  de la asignación.** `const venta = res.body as VentaResponse;` y en la línea siguiente
+  `expect(res.status).toBe(201)` — el heurístico lo cuenta como sitio porque mira el tramo
+  entre la declaración y el `.body`, pero **el status se afirma antes de que el valor se use**,
+  que es lo único que importa. Son 4 sitios de `ventas` y **no eran deuda**: la primera versión
+  de esta tanda les insertó una aserción idéntica dos líneas más arriba, y la revisión
+  independiente la marcó como duplicación. Se sacaron. El detector ahora mira también las 3
+  líneas siguientes al `.body`.
+  📌 **Y una excepción que parecía higiene y no lo era:** el `cerrarCaja` de
+  `ventas.e2e-spec.ts` corre en teardown, pero su docblock dice *"el teardown **asegura** el
+  cierre en vez de ignorar el status"*. Ahí la aserción va. Lo que decide no es dónde corre
+  la request, sino qué promete el bloque que la rodea.
   📌 **Lo que esa tanda corrigió de esta entrada: no todos los sitios son bugs.** De los 66
   de esos dos archivos, **9 son higiene deliberada** —las requests de un `afterAll` de
   limpieza y los helpers best-effort como `liberarCajeroSiQuedoOcupado`, cuyo docblock ya

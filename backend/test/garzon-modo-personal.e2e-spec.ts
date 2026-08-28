@@ -280,6 +280,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const turnos = await request(app.getHttpServer())
         .get('/api/turnos')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(turnos.status).toBe(200);
       const turnoId = (turnos.body as { id: string; activo: boolean }[]).find(
         (t) => t.activo,
       )!.id;
@@ -302,6 +303,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const turnos = await request(app.getHttpServer())
         .get('/api/turnos')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(turnos.status).toBe(200);
       const turnoId = (turnos.body as { id: string; activo: boolean }[]).find(
         (t) => t.activo,
       )!.id;
@@ -329,6 +331,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const members = await request(app.getHttpServer())
         .get('/api/tenants/members')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(members.status).toBe(200);
       const totem = (
         members.body as { usuarioId: string; correo: string }[]
       ).find((m) => m.correo === TOTEM.email)!;
@@ -343,6 +346,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const members = await request(app.getHttpServer())
         .get('/api/tenants/members')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(members.status).toBe(200);
       const ana = (
         members.body as { usuarioId: string; correo: string }[]
       ).find((m) => m.correo === PERSONAL.email)!;
@@ -367,6 +371,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const otros = await request(app.getHttpServer())
         .get('/api/garzones')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(otros.status).toBe(200);
       const otroGarzon = (
         otros.body as { id: string; usuarioId: string | null }[]
       ).find((g) => g.id !== GARZON_ANA && !g.usuarioId)!;
@@ -374,6 +379,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const members = await request(app.getHttpServer())
         .get('/api/tenants/members')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(members.status).toBe(200);
       const ana = (
         members.body as { usuarioId: string; correo: string }[]
       ).find((m) => m.correo === PERSONAL.email)!;
@@ -405,6 +411,7 @@ describe('Modo personal del garzón (e2e)', () => {
       const roles = await request(app.getHttpServer())
         .get('/api/roles')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(roles.status).toBe(200);
       const rolId = (roles.body as { id: string; nombre: string }[]).find(
         (r) => r.nombre === 'Salón',
       )!.id;
@@ -417,6 +424,7 @@ describe('Modo personal del garzón (e2e)', () => {
           correo: `disputada-${Date.now()}@paris.cl`,
           rolIds: [rolId],
         });
+      expect(alta.status).toBe(201);
       const usuarioId = (alta.body as { usuarioId: string }).usuarioId;
 
       const crearGarzon = async (nombre: string) => {

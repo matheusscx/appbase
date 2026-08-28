@@ -303,6 +303,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resItem = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resItem.status).toBe(200);
     expect((resItem.body as ItemResponse).stock).toBe('10.0000');
 
     // 2. Crear la sesión de recuento sobre ese producto
@@ -388,6 +389,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
           monedaId: CLP_MONEDA_ID,
           tipo: 'producto',
         });
+      expect(resCreateItem.status).toBe(201);
       const id = (resCreateItem.body as ItemResponse).id;
       await request(app.getHttpServer())
         .patch(`/api/items/${id}/stock`)
@@ -430,6 +432,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resDetalle = await request(app.getHttpServer())
       .get(`/api/recuentos/${recuentoId}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(resDetalle.status).toBe(200);
     const lineas = (resDetalle.body as RecuentoDetalleResponse).lineas;
     const lineaA = lineas.find((l) => l.itemId === itemAId)!;
     const lineaB = lineas.find((l) => l.itemId === itemBId)!;
@@ -446,6 +449,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resListaConConteo = await request(app.getHttpServer())
       .get('/api/recuentos')
       .set('Authorization', `Bearer ${token}`);
+    expect(resListaConConteo.status).toBe(200);
     const filaConConteo = (
       resListaConConteo.body as { data: RecuentoListItem[] }
     ).data.find((r) => r.id === recuentoId)!;
@@ -583,12 +587,14 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
         monedaId: CLP_MONEDA_ID,
         tipo: 'producto',
       });
+    expect(resCreateItem.status).toBe(201);
     const itemId = (resCreateItem.body as ItemResponse).id;
 
     const resBorrador = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
       .send({ itemIds: [itemId] });
+    expect(resBorrador.status).toBe(201);
     const recuentoBorradorId = (resBorrador.body as RecuentoCreateResponse).id;
 
     // Ítem propio para la sesión que se cancela: un producto no puede estar en
@@ -604,12 +610,14 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
         monedaId: CLP_MONEDA_ID,
         tipo: 'producto',
       });
+    expect(resItemCancelado.status).toBe(201);
     const itemCanceladoId = (resItemCancelado.body as ItemResponse).id;
 
     const resParaCancelar = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
       .send({ itemIds: [itemCanceladoId] });
+    expect(resParaCancelar.status).toBe(201);
     const recuentoCanceladoId = (resParaCancelar.body as RecuentoCreateResponse)
       .id;
     await request(app.getHttpServer())
@@ -655,6 +663,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
         monedaId: CLP_MONEDA_ID,
         tipo: 'producto',
       });
+    expect(resCreateItem.status).toBe(201);
     const id = (resCreateItem.body as ItemResponse).id;
     await request(app.getHttpServer())
       .patch(`/api/items/${id}/stock`)
@@ -960,6 +969,7 @@ describe('Recuentos — aplicar (e2e)', () => {
         monedaId: CLP_MONEDA_ID,
         tipo: 'producto',
       });
+    expect(resCreateItem.status).toBe(201);
     const id = (resCreateItem.body as ItemResponse).id;
     await request(app.getHttpServer())
       .patch(`/api/items/${id}/stock`)

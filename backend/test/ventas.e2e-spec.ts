@@ -79,6 +79,7 @@ async function abrirCaja(
   const disp = await request(app.getHttpServer())
     .get('/api/caja/cajones-disponibles')
     .set('Authorization', `Bearer ${token}`);
+  expect(disp.status).toBe(200);
   const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
   const res = await request(app.getHttpServer())
     .post('/api/caja/abrir')
@@ -106,6 +107,7 @@ async function cerrarCaja(
     .set('Authorization', `Bearer ${token}`)
     .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
 
+  expect(conteo.status).toBe(201);
   if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
     // El conteo declara solo el saldo inicial, así que las ventas en efectivo de
     // esta suite SIEMPRE descuadran. La fase 2 exige un motivo por línea
@@ -113,6 +115,7 @@ async function cerrarCaja(
     const motivos = await request(app.getHttpServer())
       .get('/api/motivos-diferencia?soloActivas=true')
       .set('Authorization', `Bearer ${token}`);
+    expect(motivos.status).toBe(200);
     const motivoId = (motivos.body as { id: string }[])[0]?.id;
     const cierre = await request(app.getHttpServer())
       .post(`/api/caja/${cajaId}/cerrar`)
@@ -562,6 +565,7 @@ describe('Ventas (e2e)', () => {
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '200.0000' }],
           customer: { nombre: 'Juan Pérez', rut: '12.345.678-9' },
         });
+      expect(res.status).toBe(201);
       ventaId = (res.body as VentaResponse).id;
     });
 
@@ -582,6 +586,7 @@ describe('Ventas (e2e)', () => {
         .get('/api/ventas/resumen')
         .set('Authorization', `Bearer ${token}`);
 
+      expect(res.status).toBe(200);
       const body = res.body as {
         totalVentas: number;
         totalFacturado: string;
@@ -1347,6 +1352,7 @@ describe('Ventas (e2e)', () => {
       const detalle = await request(app.getHttpServer())
         .get(`/api/ventas/${(venta.body as VentaResponse).id}`)
         .set('Authorization', `Bearer ${token}`);
+      expect(detalle.status).toBe(200);
       const [linea] = (
         detalle.body as { detalles: { unidadCodigoBase: string }[] }
       ).detalles;
