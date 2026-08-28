@@ -278,6 +278,25 @@ export class ItemsService {
       where += ` AND i.activo = $${idx++}`;
       params.push(query.activo);
     }
+    // Regla 5 de docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md:
+    // vista de conjunto de los ítems sin costo. Este `where` alimenta DOS
+    // queries (el COUNT sin JOIN de `findAll` y el `BASE_QUERY` con los LEFT
+    // JOIN de ip/ir/icb) — no puede referenciar esos alias directamente o
+    // rompe el COUNT con `42P01`. Subconsultas correlacionadas por `i.item_id`
+    // en su lugar, sobre las MISMAS tres tablas que arma
+    // `COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual)` en
+    // `BASE_QUERY` (arriba), para que el filtro signifique exactamente lo
+    // mismo que la columna `costoActual` que muestra la fila. Ninguna de las
+    // tres tiene `eliminado_el` (el borrado vive en `items`, ya filtrado
+    // arriba), así que no se les agrega ese filtro.
+    if (query.sinCosto) {
+      where += ` AND i.tipo IN ('producto','ingrediente')
+                 AND COALESCE(
+                       (SELECT ip2.costo_actual  FROM item_producto ip2  WHERE ip2.item_id = i.item_id),
+                       (SELECT ir2.costo_actual  FROM item_receta   ir2  WHERE ir2.item_id = i.item_id),
+                       (SELECT icb2.costo_actual FROM item_combo    icb2 WHERE icb2.item_id = i.item_id)
+                     ) IS NULL`;
+    }
 
     return { where, params };
   }

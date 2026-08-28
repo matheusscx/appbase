@@ -332,6 +332,71 @@ describe('ItemsService', () => {
       expect(result.data[0].eliminadoPor).toBe(USUARIO);
       expect(result.data[0].eliminadoPorNombre).toBe('admin');
     });
+
+    // Regla 5 de docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md.
+    // El `toContain` se acota a la cláusula propia del filtro (el `IN` de
+    // tipos y los alias de las tres subconsultas correlacionadas), no a
+    // `IS NULL` a secas: la query YA trae `eliminado_el IS NULL` sin este
+    // filtro, así que afirmar sobre ese fragmento daría un verde falso incluso
+    // sin la feature. El whitespace del SQL se normaliza a un solo espacio
+    // antes de afirmar: el alineado del template literal (los espacios extra
+    // que alinean `item_producto`/`item_receta`/`item_combo` entre sí) es
+    // cosmético, y una aserción acoplada a esa alineación se rompe con un
+    // reindent que no cambia ningún comportamiento.
+    it('sinCosto=true agrega el filtro por subconsultas correlacionadas, sin parámetro nuevo', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { sinCosto: true });
+
+      const sql = (dataSource.query.mock.calls[0][0] as string).replace(
+        /\s+/g,
+        ' ',
+      );
+      expect(sql).toContain(`i.tipo IN ('producto','ingrediente')`);
+      expect(sql).toContain(
+        'FROM item_producto ip2 WHERE ip2.item_id = i.item_id',
+      );
+      expect(sql).toContain(
+        'FROM item_receta ir2 WHERE ir2.item_id = i.item_id',
+      );
+      expect(sql).toContain(
+        'FROM item_combo icb2 WHERE icb2.item_id = i.item_id',
+      );
+      expect(sql).toContain(') IS NULL');
+      // Sin valor de usuario en la cláusula: el único parámetro sigue siendo
+      // el tenant.
+      expect(dataSource.query.mock.calls[0][1]).toEqual([TENANT]);
+    });
+
+    it('sin sinCosto no agrega el filtro por costo', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {});
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).not.toContain('item_producto ip2');
+    });
+
+    // `sinCosto` se activa por truthiness (`if (query.sinCosto)`), no por
+    // `!== undefined` como su vecino `activo` (línea ~265). Sin este test,
+    // cambiar el `if` al molde de `activo` pasaría los dos tests de arriba
+    // igual —siguen mandando `true`/ausente— y filtraría también con
+    // `sinCosto=false`, que el DTO acepta como valor válido (dos estados:
+    // ausente no filtra, `true` sí).
+    it('sinCosto=false no agrega el filtro (evita que un `!== undefined` lo active)', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { sinCosto: false });
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).not.toContain('item_producto ip2');
+    });
   });
 
   // ── disponible de combo ────────────────────────────────────────────────────

@@ -60,3 +60,29 @@ describe('QueryItemsDto', () => {
     expect(dto.pageSize).toBe(10);
   });
 });
+
+// `sinCosto` es de DOS estados, no de tres como `activo`: no existe "solo los
+// que sí tienen costo". Por eso copia la coerción de `incluirEliminados`
+// (`value === 'true'`), no la de `activo`.
+describe('QueryItemsDto.sinCosto', () => {
+  it('sinCosto=true (string, como llega en el query) se parsea como boolean true', async () => {
+    const dto = plainToInstance(QueryItemsDto, { sinCosto: 'true' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.sinCosto).toBe(true);
+  });
+
+  it('un valor que no es exactamente "true" se parsea como false', async () => {
+    const dto = plainToInstance(QueryItemsDto, { sinCosto: 'cualquier-cosa' });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.sinCosto).toBe(false);
+  });
+
+  it('sin el parámetro, sinCosto queda falsy (no filtra)', async () => {
+    const dto = plainToInstance(QueryItemsDto, {});
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.sinCosto).toBeFalsy();
+  });
+});

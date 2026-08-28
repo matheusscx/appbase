@@ -70,4 +70,15 @@ export class QueryItemsDto extends PaginationQueryDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  /**
+   * Filtra los ítems (`producto`/`ingrediente`) sin costo cargado. **Dos
+   * estados, no tres** —a diferencia de `activo`—: no existe "solo los que sí
+   * tienen costo", así que la coerción es la de `incluirEliminados`
+   * (`value === 'true' || value === true`), no la de `activo`.
+   */
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsOptional()
+  @IsBoolean()
+  sinCosto?: boolean;
 }

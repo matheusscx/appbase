@@ -234,6 +234,7 @@ const {
 const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
+const filtroSinCosto = ref(false)
 const busqueda = ref('')
 const busquedaActiva = ref('')
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('items')
@@ -252,14 +253,19 @@ const listFilters = computed(() => ({
   tipo: filtroTipo.value === 'todos' ? undefined : filtroTipo.value,
   search: busquedaActiva.value || undefined,
   incluirEliminados: verEliminados.value ? 'true' : undefined,
+  sinCosto: filtroSinCosto.value ? 'true' : undefined,
 }))
 
 const hayFiltrosActivos = computed(
-  () => filtroTipo.value !== 'todos' || !!busquedaActiva.value,
+  () =>
+    filtroTipo.value !== 'todos' ||
+    !!busquedaActiva.value ||
+    filtroSinCosto.value,
 )
 
 function limpiarFiltros() {
   filtroTipo.value = 'todos'
+  filtroSinCosto.value = false
   busqueda.value = ''
   busquedaActiva.value = ''
 }
@@ -1438,6 +1444,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         class="w-44"
         placeholder="Filtrar por tipo"
       />
+      <UCheckbox v-model="filtroSinCosto" label="Solo sin costo" />
       <UButton
         v-if="hayFiltrosActivos"
         label="Limpiar filtros"
@@ -1493,6 +1500,15 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <span v-if="row.original.tipo === 'producto' || row.original.tipo === 'ingrediente'" class="font-mono">
                 · Costo: {{ row.original.costoActual ? formatMonto(row.original.costoActual, row.original.monedaId) : '—' }}
               </span>
+              <UBadge
+                v-if="(row.original.tipo === 'producto' || row.original.tipo === 'ingrediente') && !row.original.costoActual"
+                label="Sin costo"
+                icon="i-lucide-circle-alert"
+                color="warning"
+                variant="soft"
+                size="xs"
+                title="Este ítem todavía no tiene costo cargado: sus mermas quedan sin valorizar"
+              />
               <UBadge
                 v-if="row.original.tipo === 'producto' && row.original.modoInventario && row.original.modoInventario !== 'cantidad'"
                 :label="row.original.modoInventario"

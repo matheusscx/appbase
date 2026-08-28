@@ -738,3 +738,117 @@ describe('Categoría y tercero pausados: el backend rechaza la asignación nueva
     );
   });
 });
+
+/**
+ * Regla 5 de
+ * `docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md`: el
+ * filtro `sinCosto` de `GET /items` es la vista de conjunto que hace visible
+ * el agujero (`costo` opcional al crear el ítem, `costoUnitario` opcional al
+ * ingresar stock) sin entrar ítem por ítem.
+ *
+ * Vive acá y no en un spec nuevo porque este archivo ya es el que ejercita
+ * filtros de `GET /items` contra Postgres real (ver "el catálogo de venta"
+ * arriba, para `activo`).
+ *
+ * ⚠️ Es la aserción que el spec del service NO puede dar: `ItemsService`
+ * mockea `db.query`, así que un alias mal resuelto en el `where` (por
+ * ejemplo si `sinCosto` referenciara `ip`/`ir`/`icb` en vez de subconsultas
+ * correlacionadas) pasaría en verde ahí y solo revienta acá, porque el
+ * mismo `where` alimenta el COUNT de `findAll`, que corre SIN los `LEFT
+ * JOIN` de esos alias — un `42P01` real de Postgres.
+ */
+describe('Filtro sinCosto en GET /items (e2e)', () => {
+  let app: INestApplication<App>;
+  let ds: DataSource;
+  let token: string;
+  let itemSinCostoId: string;
+  let itemConCostoId: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    ds = app.get(DataSource);
+    token = await login(app);
+
+    const sinCosto = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Item sin costo E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '5',
+      });
+    expect(sinCosto.status).toBe(201);
+    itemSinCostoId = (sinCosto.body as { id: string }).id;
+
+    const conCosto = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Item con costo E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '5',
+        costo: '400',
+      });
+    expect(conCosto.status).toBe(201);
+    itemConCostoId = (conCosto.body as { id: string }).id;
+  }, 60000);
+
+  afterAll(async () => {
+    // Soft delete, no `DELETE`: mismo molde que el describe anterior
+    // (`terceros`, línea ~735). Sin esto, cada corrida local sin
+    // `reset-db.sh` deja dos productos más sembrados en el tenant, y con
+    // `ORDER BY i.nombre ASC` + el `pageSize` máximo (100) la acumulación
+    // puede terminar empujando estos ítems fuera de la página — intermitente
+    // en vez de repetible.
+    try {
+      await ds.query(
+        `UPDATE items SET eliminado_el = NOW() WHERE item_id = ANY($1)`,
+        [[itemSinCostoId, itemConCostoId]],
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('devuelve 200 y solo trae ítems con costoActual null (ejercita el COUNT contra Postgres real)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/items?tipo=producto&pageSize=100&sinCosto=true')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      data: { id: string; costoActual: string | null }[];
+    };
+    expect(body.data.some((i) => i.id === itemSinCostoId)).toBe(true);
+    expect(body.data.some((i) => i.id === itemConCostoId)).toBe(false);
+    expect(body.data.every((i) => i.costoActual === null)).toBe(true);
+  });
+
+  it('sin sinCosto, el ítem con costo sigue apareciendo', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/items?tipo=producto&pageSize=100')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const body = res.body as { data: { id: string }[] };
+    expect(body.data.some((i) => i.id === itemConCostoId)).toBe(true);
+    expect(body.data.some((i) => i.id === itemSinCostoId)).toBe(true);
+  });
+});
