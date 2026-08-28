@@ -23,6 +23,7 @@ interface CausaMermaItem {
 }
 interface ItemResponse {
   id: string;
+  costoActual: string | null;
 }
 interface MermaResponse {
   movimientoId: string;
@@ -146,7 +147,19 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     expect(body.causaNombre).toBe('Vencimiento');
     expect(body.costoUnitario).toBeTruthy();
     expect(body.costoPerdido).toBeTruthy();
-    expect(parseFloat(body.costoPerdido)).toBeGreaterThan(0);
+
+    // Producto CON costo (Carne molida, seed): costoPerdido no puede ser
+    // null acá. Narrow explícito en vez de ensanchar la aserción — si el
+    // endpoint alguna vez devolviera null para este producto, el `throw`
+    // hace fallar el test con un mensaje claro en vez de un TS2345 en
+    // `npm run typecheck` (que `ts-jest` no corre por `isolatedModules`).
+    const costoPerdido = body.costoPerdido;
+    if (costoPerdido === null) {
+      throw new Error(
+        'costoPerdido no debería ser null: el producto tiene costo',
+      );
+    }
+    expect(parseFloat(costoPerdido)).toBeGreaterThan(0);
 
     // El efecto de una merma sobre el saldo no lo fijaba NADA de extremo a
     // extremo, y ésta es la única capa que corre contra Postgres real. La
@@ -261,7 +274,13 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
         unidadMedida: 'kg',
       });
     expect(resCreate.status).toBe(201);
-    const itemSinCostoId = (resCreate.body as ItemResponse).id;
+    const itemCreado = resCreate.body as ItemResponse;
+    const itemSinCostoId = itemCreado.id;
+
+    // Verifica el setup aparte de la aserción bajo prueba: si esto fallara,
+    // tiene que verse como "el item nació con costo" y no confundirse con
+    // el comportamiento nuevo de la merma.
+    expect(itemCreado.costoActual).toBeNull();
 
     // Entrada de stock SIN costoUnitario, para que costo_actual quede en NULL.
     const resEntrada = await request(app.getHttpServer())
@@ -283,7 +302,23 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
         causaMermaId: CAUSA_VENCIMIENTO_ID,
       });
     expect(resMerma.status).toBe(201);
-    expect((resMerma.body as MermaResponse).costoPerdido).toBeNull();
-    expect((resMerma.body as MermaResponse).costoUnitario).toBeNull();
+    const bodyMerma = resMerma.body as MermaResponse;
+    expect(bodyMerma.costoPerdido).toBeNull();
+    expect(bodyMerma.costoUnitario).toBeNull();
+
+    // Y contra lo persistido, no solo contra lo que el POST dice de sí
+    // mismo (mismo criterio que la Regla 2 de la spec: sin valorizar
+    // "para siempre" vive en el kardex, y GET /mermas deriva costoPerdido
+    // de esa columna — un bug que devolviera null en el POST pero
+    // congelara otra cosa en movimientos_inventario recién se vería acá).
+    const resLista = await request(app.getHttpServer())
+      .get('/api/mermas')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resLista.status).toBe(200);
+    const filaMerma = (resLista.body as PaginatedMermas).data.find(
+      (m) => m.id === bodyMerma.movimientoId,
+    );
+    expect(filaMerma).toBeDefined();
+    expect(filaMerma?.costoPerdido).toBeNull();
   });
 });
