@@ -234,6 +234,8 @@ describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
         if ((conteo.body as { estado?: string }).estado !== 'en_conciliacion') {
           return 200;
         }
+        // Sin aserción: este helper DEVUELVE el status en vez de afirmarlo (mirá
+        // el `return conteo.status` de arriba), y quien lo llama decide.
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${token}`);

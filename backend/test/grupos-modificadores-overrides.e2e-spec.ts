@@ -85,6 +85,7 @@ async function abrirCaja(
   const disp = await request(app.getHttpServer())
     .get('/api/caja/cajones-disponibles')
     .set('Authorization', `Bearer ${token}`);
+  expect(disp.status).toBe(200);
   const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
   const res = await request(app.getHttpServer())
     .post('/api/caja/abrir')
@@ -126,6 +127,7 @@ async function cerrarCaja(
     const motivos = await request(app.getHttpServer())
       .get('/api/motivos-diferencia?soloActivas=true')
       .set('Authorization', `Bearer ${token}`);
+    expect(motivos.status).toBe(200);
     const motivoId = (motivos.body as { id: string }[])[0]?.id;
     const cierre = await request(app.getHttpServer())
       .post(`/api/caja/${cajaId}/cerrar`)

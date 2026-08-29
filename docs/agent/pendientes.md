@@ -182,6 +182,22 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   independiente en `simulador-costos.e2e-spec.ts:271`, ya corregido. El detector ahora corta
   en la declaración **o en la reasignación**, lo que venga primero; recontado, esa forma
   aportaba exactamente ese sitio en todo el repo.
+  ✅ **Cuarta tanda, 2026-08-28: el grupo de los helpers de caja copiados** —
+  `combos`, `costeo-cpp`, los dos `grupos-modificadores`, `items-pausados`,
+  `liquidacion-propinas`, `recetas`, `promociones` y `salones-comanda`: 15 aserciones, más
+  6 sitios que quedan tolerantes **con su porqué escrito**.
+  📌 **El criterio que ordenó esa tanda, y que costó un bloqueo:** la aserción va donde el
+  helper **ya afirma todo lo demás** (`abrirCaja` ya tenía su `expect(res.status).toBe(201)`
+  sobre el POST, así que su `disp` también la lleva), y NO va donde el helper es tolerante
+  **por diseño escrito**: higiene que debe salirse en silencio, o un helper que **devuelve**
+  el status en vez de afirmarlo (`promociones`, `vigencia-cuenta`). El bloqueo fue en
+  `visibilidad-ventas-pagos.e2e-spec.ts:148`: leí *"lo único que sí se verifica"* como que ese
+  paso afirmaba su status, y lo que verifica es **el valor devuelto**. Su docblock dice
+  *"devuelve un problema describible en vez de tirar, para que el `afterAll` pueda intentar
+  liberar TAMBIÉN al otro usuario"* — la aserción habría abortado el `afterAll` antes de
+  liberar la segunda caja, que es el `409` en otra suite que ese diseño evita a propósito.
+  Revertida. **Lo que decide no es dónde corre la request, sino qué promete por escrito el
+  bloque que la rodea**, y eso hay que leerlo entero, no por una frase.
   📌 **Y una excepción que parecía higiene y no lo era:** el `cerrarCaja` de
   `ventas.e2e-spec.ts` corre en teardown, pero su docblock dice *"el teardown **asegura** el
   cierre en vez de ignorar el status"*. Ahí la aserción va. Lo que decide no es dónde corre

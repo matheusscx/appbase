@@ -175,7 +175,11 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
     return nivel;
   }
 
-  /** Deja al cajero sin caja activa, venga como venga de otra suite. */
+  /**
+   * Deja al cajero sin caja activa, venga como venga de otra suite. Sin aserción
+   * de status: si el GET falla, se sale sin hacer nada en vez de tirar un rojo
+   * de limpieza encima del fallo real.
+   */
   async function liberarCajero(): Promise<void> {
     const activa = await request(app.getHttpServer())
       .get('/api/caja/activa')

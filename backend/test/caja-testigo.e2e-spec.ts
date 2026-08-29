@@ -215,6 +215,9 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
    * que en realidad es un solo fallo real más arriba.
    */
   async function cerrarCualquierCajaAbiertaDelVendedor(): Promise<void> {
+    // Sin aserción de status a propósito: si el GET falla, `activa` sale vacío y
+    // la higiene se va sin hacer nada. Afirmarlo convertiría un tropiezo de la
+    // limpieza en un rojo que tapa el fallo real que la hizo falta.
     const resActiva = await request(app.getHttpServer())
       .get('/api/caja/activa')
       .set('Authorization', `Bearer ${tokenVendedor}`);

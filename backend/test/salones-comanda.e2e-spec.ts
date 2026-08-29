@@ -525,6 +525,7 @@ describe('Salones — comanda a cocina (e2e)', () => {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${token}`);
+        expect(motivos.status).toBe(200);
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         const cierre = await request(app.getHttpServer())
           .post(`/api/caja/${cajaId}/cerrar`)

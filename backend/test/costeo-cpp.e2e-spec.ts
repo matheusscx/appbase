@@ -66,6 +66,7 @@ async function abrirCaja(
   const disp = await request(app.getHttpServer())
     .get('/api/caja/cajones-disponibles')
     .set('Authorization', `Bearer ${token}`);
+  expect(disp.status).toBe(200);
   const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
   const res = await request(app.getHttpServer())
     .post('/api/caja/abrir')

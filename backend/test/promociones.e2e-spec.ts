@@ -302,6 +302,7 @@ describe('Motor de promociones (e2e)', () => {
       const activa = await request(app.getHttpServer())
         .get('/api/caja/activa')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(activa.status).toBe(200);
       cajaFisicaId = (activa.body as CajaResponse).id;
     }
   }, 60000);
@@ -338,6 +339,8 @@ describe('Motor de promociones (e2e)', () => {
         if ((conteo.body as { estado?: string }).estado !== 'en_conciliacion') {
           return 200;
         }
+        // Sin aserción: este helper DEVUELVE el status en vez de afirmarlo (mirá
+        // el `return conteo.status` de arriba), y quien lo llama decide.
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${tokenAdmin}`);
