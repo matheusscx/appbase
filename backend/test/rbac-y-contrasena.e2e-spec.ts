@@ -154,6 +154,8 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
           .set('Authorization', `Bearer ${tokenVendedor}`),
       ]);
 
+      expect(resVendedor.status).toBe(200);
+      expect(resAdmin.status).toBe(200);
       // Las dos ramas devuelven algo distinto: prueba que el short-circuit del
       // rol fijo y el JOIN completo no colapsaron al mismo resultado.
       expect((resVendedor.body as string[]).length).toBeLessThan(

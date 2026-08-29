@@ -113,121 +113,6 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
 - `VentaDetalleDrawer.vue` ya tiene spec (4 casos). De paso quedó fijado que su total
   "Descuentos" incluye la plata de las promos, al revés que el ticket.
 
-### El e2e lee el body sin mirar el status, y por eso un fallo se diagnostica por el síntoma (2026-08-28)
-
-- [ ] **183 sitios en 33 specs e2e leen un campo del body de una respuesta sin haber
-  verificado su status** (`backend/test/*.e2e-spec.ts`; **medido el 2026-08-28**) — cuando la
-  request falla, el campo sale `undefined` **en silencio** y el rojo aparece más adelante, en
-  otra aserción y con otra cara. Vivido ese mismo día: una falla del e2e de inventario se
-  presentó como `costoActual: undefined` y se diagnosticó **por el síntoma** en vez de por el
-  código que había devuelto el POST, que nadie miró porque nadie lo afirmaba.
-  **Ejemplo verificado abriendo la línea:** `backend/test/recuentos.e2e-spec.ts:306`,
-  `expect((resItem.body as ItemResponse).stock)` sobre un `GET /items/:id` que nunca se
-  verificó.
-  ⚠️ **El otro ejemplo que traía esta entrada ya no existe**: `caja.e2e-spec.ts:120` (el
-  helper `abrirOReusarCaja`, que la entrada llamaba `abrirCaja`) lo arregló `8b9bb94c` esa
-  misma mañana, en la barrida de los 11 helpers. La entrada se escribió sin mirar que ese
-  commit ya había pasado.
-  **Es el mismo modo de falla que el commit `9784e1b6` ya barrió, pero para otra cosa:** ese
-  cubrió el **token** (29 archivos, 71 sitios, `access_token` leído sin status ⇒ `Bearer
-  undefined` ⇒ 401 en la ruta siguiente, no en la que falló). Los **ids y campos del body**
-  quedaron afuera, y son estos.
-  **Cómo se contó, para que se pueda recontar:** por cada `X.body` de un `*.e2e-spec.ts` se
-  busca hacia atrás la última declaración de `X` y se pregunta si en ese tramo aparece
-  `X.status`/`X.statusCode` o un `.expect(NNN)` encadenado; si no aparece ninguno, es un
-  sitio. Denominador: **992** ocurrencias de `.body` en 49 archivos
-  (`grep -o '\.body' backend/test/*.e2e-spec.ts | wc -l`), o sea que ~81% ya está cubierto y
-  esto es la cola. ⚠️ El número es de un heurístico, no de un parser: entra algún
-  falso positivo (un status mirado dentro de un `if` que envuelve el `.body`, como el propio
-  helper de caja) y quedan afuera los helpers cuyo llamador verifica. Sirve para dimensionar
-  y para ordenar por archivo (`caja` 46, `papelera` 21, `recuentos` 12, `ventas` 11), no como
-  cifra exacta.
-  **Cierre:** una aserción de status antes de cada lectura, con el molde que ya dejó
-  `9784e1b6`. No hay nada que preguntar ni diseñar; sí hay que **buscar por conducta y no por
-  forma** —hay varias formas de helper y ninguna búsqueda de texto las cubre todas—, que es
-  la lección que ese commit dejó escrita.
-  📌 Va de a un archivo por commit o en tandas chicas: tocar 33 specs de una es un diff que
-  nadie revisa, y cada aserción nueva puede destapar un test que estaba verde sin ejercitar
-  nada (le pasó a `ventas` en la barrida del token).
-
-  ✅ **Primera tanda, 2026-08-28: `caja` y `papelera`** — 56 aserciones, gate completo en
-  verde.
-  ✅ **Segunda tanda, 2026-08-28: `recuentos`, `ventas` y `garzon-modo-personal`** — 24
-  aserciones. Esos tres archivos quedan **en cero**. El detector marca **98 sitios en 31
-  archivos**, de los cuales **11 no son trabajo** (los 9 de higiene deliberada de la primera
-  tanda y 2 falsos positivos, abajo): quedan **87 reales**, ninguno con más de 8 por archivo
-  (`reglas-valor` y `garzones-selector` 8, `recetas` 7, `rbac-y-contrasena` e
-  `items-pausados` 6).
-  📌 **Y el conteo tiene falsos positivos por una forma más:** en
-  `garzon-modo-personal.e2e-spec.ts:243-244` las dos respuestas salen de un
-  `const [fuera, dentro] = await Promise.all([...])` y **ya tienen** su
-  `expect(...).toBe(200)` dos líneas antes; el heurístico no las ve porque busca la
-  declaración por nombre. Es la misma advertencia que la entrada ya traía —el número
-  dimensiona, no es exacto—, ahora con la forma nombrada.
-  📌 **Tercera forma de falso positivo, y la más cara: el status afirmado una línea DESPUÉS
-  de la asignación.** `const venta = res.body as VentaResponse;` y en la línea siguiente
-  `expect(res.status).toBe(201)` — el heurístico lo cuenta como sitio porque mira el tramo
-  entre la declaración y el `.body`, pero **el status se afirma antes de que el valor se use**,
-  que es lo único que importa. Son 4 sitios de `ventas` y **no eran deuda**: la primera versión
-  de esta tanda les insertó una aserción idéntica dos líneas más arriba, y la revisión
-  independiente la marcó como duplicación. Se sacaron. El detector ahora mira también las 3
-  líneas siguientes al `.body`.
-  ✅ **Tercera tanda, 2026-08-28: `recetas`, `salones-fusion`, `simulador-costos`,
-  `permiso-operar-salon` y `alta-usuarios-tenant`** — 20 aserciones. Quedan **78 sitios en 27
-  archivos** por el detector; descontando los 11 que no son trabajo, **67 reales**.
-  📌 **Cuarta forma de falso NEGATIVO —y ésta esconde deuda en vez de inventarla—: la
-  variable reasignada.** `let bandeja = await request(...)` con su aserción, y más abajo
-  `bandeja = await request(...)` **sin** ninguna: el heurístico buscaba hacia atrás la
-  *declaración*, encontraba la primera y le hacía heredar su aserción. Lo levantó la revisión
-  independiente en `simulador-costos.e2e-spec.ts:271`, ya corregido. El detector ahora corta
-  en la declaración **o en la reasignación**, lo que venga primero; recontado, esa forma
-  aportaba exactamente ese sitio en todo el repo.
-  ✅ **Cuarta tanda, 2026-08-28: el grupo de los helpers de caja copiados** —
-  `combos`, `costeo-cpp`, los dos `grupos-modificadores`, `items-pausados`,
-  `liquidacion-propinas`, `recetas`, `promociones` y `salones-comanda`: 15 aserciones, más
-  6 sitios que quedan tolerantes **con su porqué escrito**.
-  📌 **El criterio que ordenó esa tanda, y que costó un bloqueo:** la aserción va donde el
-  helper **ya afirma todo lo demás** (`abrirCaja` ya tenía su `expect(res.status).toBe(201)`
-  sobre el POST, así que su `disp` también la lleva), y NO va donde el helper es tolerante
-  **por diseño escrito**: higiene que debe salirse en silencio, o un helper que **devuelve**
-  el status en vez de afirmarlo (`promociones`, `vigencia-cuenta`). El bloqueo fue en
-  `visibilidad-ventas-pagos.e2e-spec.ts:148`: leí *"lo único que sí se verifica"* como que ese
-  paso afirmaba su status, y lo que verifica es **el valor devuelto**. Su docblock dice
-  *"devuelve un problema describible en vez de tirar, para que el `afterAll` pueda intentar
-  liberar TAMBIÉN al otro usuario"* — la aserción habría abortado el `afterAll` antes de
-  liberar la segunda caja, que es el `409` en otra suite que ese diseño evita a propósito.
-  Revertida. **Lo que decide no es dónde corre la request, sino qué promete por escrito el
-  bloque que la rodea**, y eso hay que leerlo entero, no por una frase.
-  ✅ **Quinta tanda, 2026-08-28: las lecturas sueltas simples** — `cajones`,
-  `invitacion-y-reset`, `membresia-ultimo-admin`, `motivos-diferencia`,
-  `rastro-intentos-rechazados`, `tendencia-descuadres`, `umbral-descuadre`,
-  `tenants-members`, `uso-reglas` y `visibilidad-ventas-pagos`: 17 aserciones.
-  📌 **De paso cayó un comentario que afirmaba un bug de producción inexistente**
-  (`motivos-diferencia.e2e-spec.ts`): decía que `MotivosDiferenciaService.update()` no
-  desenvuelve la tupla `[rows, rowCount]` del `UPDATE...RETURNING` y que por eso el body sale
-  `{}`. El service hace `unwrap<Row>(...)`. El comentario se escribió el 2026-07-24 a las
-  21:01 (`b793c74b`) y el arreglo entró **a las 21:57 del mismo día** (`6e74ed5f`): nació
-  cierto y quedó viejo en menos de una hora. Corregido con las dos fechas adentro, para que
-  el próximo no vuelva a salir a cazarlo.
-  📌 **Y una excepción que parecía higiene y no lo era:** el `cerrarCaja` de
-  `ventas.e2e-spec.ts` corre en teardown, pero su docblock dice *"el teardown **asegura** el
-  cierre en vez de ignorar el status"*. Ahí la aserción va. Lo que decide no es dónde corre
-  la request, sino qué promete el bloque que la rodea.
-  📌 **Lo que esa tanda corrigió de esta entrada: no todos los sitios son bugs.** De los 66
-  de esos dos archivos, **9 son higiene deliberada** —las requests de un `afterAll` de
-  limpieza y los helpers best-effort como `liberarCajeroSiQuedoOcupado`, cuyo docblock ya
-  decía *"sin afirmar el status"*—. Afirmarles el status convierte una limpieza fallida en un
-  rojo que tapa el del test que de verdad falló. Se dejaron sin aserción **y con el porqué
-  escrito al lado**, que es lo que distingue la excepción del olvido (misma regla que el
-  filtro de borrado). O sea: **183 es el tamaño de la revisión, no el de la deuda** — contar
-  ~14% de exclusiones por archivo.
-  📌 **El cierre del frente incluye ampliar la red.** `scripts/check-e2e-status.mjs` hoy mira
-  **solo helpers** (`return (res.body as X)`) porque ése fue el alcance que eligió el owner
-  en `8b9bb94c`; una lectura suelta dentro de un `it()` no la ve nadie. Cuando los 31 specs
-  estén barridos, ampliarlo a toda lectura es un cambio de dos líneas y no necesita
-  mecanismo nuevo — **pero el alcance del checker lo decidió el owner, así que se pregunta
-  antes de ampliarlo**, no se da por hecho.
-
 ### El residuo que dejó el frente de la merma sin costo tipeado (2026-08-28)
 
 - [ ] **La causa de merma "Rotura envase" no se limpia entre corridas, y por eso
@@ -1215,10 +1100,11 @@ prohíbe.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-**Quedan cinco abiertas** —los helpers de caja copiados en 8 specs (llegó el 2026-08-28), los
-dos carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros, la
-nota de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se
-recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+**Quedan seis abiertas** —dos llegaron el 2026-08-28 del barrido de las lecturas sin status:
+si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs; más los dos
+carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros, la nota
+de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se recuenta
+con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 
 ⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
 memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
@@ -1292,6 +1178,28 @@ terminan en una pregunta al owner. Es exactamente el error que el párrafo de ar
 corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+- [ ] **¿`check-e2e-status.mjs` pasa a mirar toda lectura del body, y no solo los helpers?**
+  (backend/tests + hook; llegó el 2026-08-28 al cerrar el barrido de las lecturas sin status →
+  [`resueltos.md`](resueltos.md)) — hoy el checker falla solo cuando un **helper** hace
+  `return (res.body as X)` sin que nadie haya mirado el status. Ése fue **tu alcance** en
+  `8b9bb94c` (*"un helper roto desorienta a todo un archivo; una lectura suelta dentro de un
+  `it()` miente solo sobre su propio test"*). Ahora las lecturas sueltas también están
+  barridas: 135 aserciones en 27 specs. La pregunta es si la red se amplía para que no vuelvan
+  a crecer.
+  ❓ **Lo que hay que decidir, con lo que cuesta cada opción:**
+  **(a) Ampliarlo a toda lectura.** Son ~dos líneas en el script. Lo que compra: nadie vuelve a
+  agregar una lectura a ciegas sin que el pre-commit chille. Lo que cuesta: el checker tiene
+  que aprender las **tres formas de falso positivo** que el barrido encontró —destructuring,
+  status afirmado una línea después, y el parámetro de una arrow function— o va a bloquear
+  commits correctos; y **no puede** distinguir la higiene tolerante (18 sitios que quedan sin
+  aserción a propósito) de un olvido, así que necesitaría una marca en el código —un comentario
+  con una palabra fija— para saltearlos.
+  **(b) Dejarlo como está.** No cuesta nada hoy y la deuda vuelve a crecer de a poco, que es
+  exactamente cómo llegó a 183.
+  📌 Si sale (a): el trabajo real no es ampliar el checker, es **enseñarle las tres formas**.
+  Están medidas y documentadas en [`resueltos.md`](resueltos.md), con un ejemplo de cada una.
+
 
 - [ ] **`abrirCaja` y `cerrarCaja` están copiados en 8 specs e2e cada uno, y ya derivaron**
   (backend/tests; **medido el 2026-08-28** barriendo la entrada de las lecturas sin status) —

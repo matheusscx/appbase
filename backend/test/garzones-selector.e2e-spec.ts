@@ -138,6 +138,8 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
   // tenants. Sin esta afirmación, la fuga se commitea sin que nada chille.
   it('NO filtra un garzón activo de otro tenant', async () => {
     const [fuera, dentro] = await Promise.all([pedir(false), pedir(true)]);
+    expect(dentro.status).toBe(200);
+    expect(fuera.status).toBe(200);
     const todos = [
       ...(fuera.body as GarzonSelector[]),
       ...(dentro.body as GarzonSelector[]),
@@ -156,6 +158,8 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
   // el placeholder no se cuele por ningún otro camino.
   it('excluye al placeholder Mostrador de las dos listas', async () => {
     const [fuera, dentro] = await Promise.all([pedir(false), pedir(true)]);
+    expect(dentro.status).toBe(200);
+    expect(fuera.status).toBe(200);
     const nombres = [
       ...(fuera.body as GarzonSelector[]),
       ...(dentro.body as GarzonSelector[]),
@@ -197,6 +201,7 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
         .send({ garzonId: BRUNO.id, pin: BRUNO.pin });
 
       const antes = await pedir(false);
+      expect(antes.status).toBe(200);
       expect((antes.body as GarzonSelector[]).map((g) => g.garzonId)).toContain(
         BRUNO.id,
       );
@@ -209,10 +214,12 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
       expect([200, 201]).toContain(res.status);
       sesionCreada = true;
       const dentro = await pedir(true);
+      expect(dentro.status).toBe(200);
       expect(
         (dentro.body as GarzonSelector[]).map((g) => g.garzonId),
       ).toContain(BRUNO.id);
       const fuera = await pedir(false);
+      expect(fuera.status).toBe(200);
       expect(
         (fuera.body as GarzonSelector[]).map((g) => g.garzonId),
       ).not.toContain(BRUNO.id);

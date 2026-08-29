@@ -333,6 +333,7 @@ describe('Ítem pausado según el canal (e2e)', () => {
     expect(res.status).toBe(201);
 
     const calc = await calcular();
+    expect(calc.status).toBe(201);
     expect((calc.body as ResultadoVentaResponse).advertencias).toHaveLength(0);
   });
 
@@ -392,6 +393,8 @@ describe('Ítem pausado según el canal (e2e)', () => {
         // Sin filtrar = la suma exacta de las dos mitades. Comparar contra un
         // número fijo no serviría: la base de dev arrastra pausados de otras
         // corridas, y en CI arranca solo con los del seed.
+        expect(pausados.status).toBe(200);
+        expect(vendibles.status).toBe(200);
         expect(body.meta.total).toBe(
           (vendibles.body as CatalogoResponse).meta.total +
             (pausados.body as CatalogoResponse).meta.total,

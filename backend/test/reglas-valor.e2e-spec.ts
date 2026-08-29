@@ -267,6 +267,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const listado = await request(app.getHttpServer())
       .get('/api/descuentos')
       .set('Authorization', `Bearer ${token}`);
+    expect(listado.status).toBe(200);
     const fila = (listado.body as ReglaResponse[]).find((d) => d.id === id);
     expect(fila?.valorPorcentaje).toBe('0.1500');
   });
@@ -294,6 +295,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const listado = await request(app.getHttpServer())
       .get('/api/recargos')
       .set('Authorization', `Bearer ${token}`);
+    expect(listado.status).toBe(200);
     const fila = (listado.body as ReglaResponse[]).find((r) => r.id === id);
     expect(fila?.valorPorcentaje).toBe('0.0500');
   });
@@ -347,6 +349,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       modo: 'porcentaje',
       tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
     });
+    expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
 
     // El `tramos: []` es parte de "lo que el nuevo exige" desde el 2026-08-26:
@@ -368,6 +371,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const listado = await request(app.getHttpServer())
       .get('/api/descuentos')
       .set('Authorization', `Bearer ${token}`);
+    expect(listado.status).toBe(200);
     const fila = (listado.body as ReglaResponse[]).find((d) => d.id === id);
     expect(fila?.valorPorcentaje).toBe('0.2500');
   });
@@ -383,6 +387,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       modo: 'porcentaje',
       tramos: [{ minimoCantidad: '10', valorPorcentaje: '0.05' }],
     });
+    expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
 
     const res = await request(app.getHttpServer())
@@ -409,6 +414,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       modo: 'porcentaje',
       valorPorcentaje: '0.20',
     });
+    expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
 
     const res = await request(app.getHttpServer())
@@ -432,6 +438,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       modo: 'porcentaje',
       valorPorcentaje: '0.20',
     });
+    expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
 
     const res = await request(app.getHttpServer())
@@ -455,6 +462,7 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
       modo: 'porcentaje',
       valorPorcentaje: '0.20',
     });
+    expect(creado.status).toBe(201);
     const id = (creado.body as ReglaResponse).id;
     const nuevoNombre = `Directo renombrado E2E ${Date.now()}`;
 
