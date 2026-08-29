@@ -91,10 +91,14 @@ eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó le
 detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
 de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
 
-✅ **Vuelve a estar vacía el 2026-08-26.** Su última entrada —el tope de nombres del mensaje
-del cambio de nivel— salió a [`resueltos.md`](resueltos.md). Que esté vacía no significa que
-no haya trabajo chico: significa que el trabajo chico que queda **no es mecánico**, o sea que
-tiene una decisión adentro por más que el diff sea de tres líneas.
+✅ **Vuelve a estar vacía el 2026-08-28.** Su última entrada —la causa de merma que quedaba
+sembrada entre corridas— salió a [`resueltos.md`](resueltos.md). Que esté vacía no significa
+que no haya trabajo chico: significa que el trabajo chico que queda **no es mecánico**, o sea
+que tiene una decisión adentro por más que el diff sea de tres líneas.
+
+⚠️ **Y esa última mostró que ni siquiera "mecánico" se puede dar por leído**: el arreglo que la
+entrada traía escrito era correcto y **no alcanzaba**, porque la entrada atribuía a una sola
+causa cinco rojos que tenían dos. La mitad que quedó abrió entrada propia en la § 4.
 
 ### Los residuos que dejó el frente de promociones (2026-08-27)
 
@@ -112,27 +116,6 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   mismo carrito se desvía 0,23.
 - `VentaDetalleDrawer.vue` ya tiene spec (4 casos). De paso quedó fijado que su total
   "Descuentos" incluye la plata de las promos, al revés que el ticket.
-
-### El residuo que dejó el frente de la merma sin costo tipeado (2026-08-28)
-
-- [ ] **La causa de merma "Rotura envase" no se limpia entre corridas, y por eso
-  `mermas.e2e-spec.ts` no es repetible sin reset** (backend,
-  `backend/test/mermas.e2e-spec.ts:130-139`; medido el 2026-08-28 al verificar el hallazgo 2
-  de la revisión final de este mismo frente — no es una regresión de los 6 hallazgos, es
-  preexistente). **Síntoma medido:** correr el archivo completo dos veces seguidas sin
-  `reset-db.sh` en el medio falla **5 de 9** tests, todos en cascada desde el primero.
-  **Causa:** `POST /causas-merma crea causa custom Rotura envase` crea la causa con nombre
-  fijo (`nombre: 'Rotura envase'`) y nunca la limpia — el test de más abajo
-  (`PATCH causa fija y DELETE causa en uso devuelven 400`) espera justamente que borrarla dé
-  `400` por estar en uso, así que un `DELETE` real nunca corre. En la segunda corrida,
-  `assertNombreUnico` (`causas-merma.service.ts:103`) rebota el `INSERT` con `400` porque el
-  nombre ya existe para el tenant, y todo lo que depende de `roturaCausaId` cae detrás.
-  **No lo detecta `reset-db.sh --verificar` por diseño**: ese chequeo mide si el seed corrió
-  más de una vez, no si un test dejó residuo propio. **Arreglo:** soft delete de la causa en
-  el `afterAll` (`UPDATE causas_merma SET eliminado_el = NOW() WHERE causa_merma_id = $1`),
-  nunca `DELETE` físico — mismo molde que el cleanup de ítems de
-  `items-pausados.e2e-spec.ts:814-824` (y el que este mismo frente le agregó a
-  `mermas.e2e-spec.ts` para el ítem "Insumo sin costo E2E").
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1100,11 +1083,12 @@ prohíbe.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-**Quedan seis abiertas** —dos llegaron el 2026-08-28 del barrido de las lecturas sin status:
-si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs; más los dos
-carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros, la nota
-de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se recuenta
-con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+**Quedan siete abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
+una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida); más
+los dos carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros,
+la nota de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se
+recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 
 ⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
 memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
@@ -1221,6 +1205,40 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   `backend/test/` que después hay que sostener.
   📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
   agregar aserciones, no reorganizar los specs.
+
+
+- [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
+  seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
+  al cerrar la limpieza de la causa → [`resueltos.md`](resueltos.md)) — con la causa ya
+  limpiándose sola, correr el archivo dos veces sin `reset-db.sh` en el medio falla **2 de 9**:
+  `POST /mermas registra merma con Vencimiento` responde `400 "Stock insuficiente para la
+  salida"` (verificado pidiéndoselo a la API, no deducido), y el `GET` que busca esa merma cae
+  detrás. **La cuenta cierra exacta:** Carne molida nace con **1,5 kg**
+  (`seeder.service.ts:3554`) y una corrida del spec se lleva **1,1** — 1 kg la merma con
+  Vencimiento y 0,1 la merma con causa custom—, así que quedan 0,4 y el pedido de 1 kg de la
+  corrida siguiente no entra. Medido en tres corridas seguidas: 1,5 → 0,4 → 0,3 → 0,2.
+  ⚠️ **El seed lo eligió a propósito y lo dice**: *"stock bajo para probar descuentos, con
+  margen sobre el consumo del e2e (mermas 1 kg + combos 0.15 kg)"*. El margen está calculado
+  para **una** pasada de la suite, que es el flujo que manda `CLAUDE.md` (`reset-db.sh` antes
+  de cada `test:e2e`). No es un descuido: es una decisión que choca con querer correr un spec
+  suelto dos veces.
+  ❓ **Las tres salidas, con lo que cuesta cada una:**
+  **(a) Subir el stock sembrado.** Una línea. Compra N corridas en vez de una y **no** da
+  repetibilidad: la corre para más adelante. Toca el seeder, o sea re-siembra para todos.
+  **(b) Que el spec se siembre su propio producto con costo** y lo soft-borre en el `afterAll`
+  —el molde ya está en el mismo archivo, el del "Insumo sin costo E2E"—. Da repetibilidad de
+  verdad y deja de gastar un fixture compartido. Lo que cuesta: **contradice una intención
+  escrita del seed**, que declara a Carne molida *"el producto seed que ejercita el flujo de
+  mermas"* (`seeder.service.ts:3501-3502`).
+  **(c) Aceptarlo y dejarlo escrito**: `mermas` exige reset, como ya lo exige el gate. Costo
+  cero hoy; a cambio, el próximo que corra el spec suelto vuelve a peritar 2 rojos que no son
+  regresión.
+  📌 **La pregunta es de fixtures compartidos, no de este archivo:** `combos.e2e-spec.ts` come
+  del mismo kilo y medio.
+  ⛔ **Lo que NO se puede hacer, para no redescubrirlo:** devolver el stock en el `afterAll`.
+  Por API es escribir en `movimientos_inventario` (`CLAUDE.md`: detenerse y preguntar), y por
+  SQL directo sobre `item_producto.stock` desincroniza el saldo materializado del kardex, que
+  es exactamente lo que la invariante protege.
 
 
 - [ ] **Dos carteles más que prometen una tarjeta que ese flujo no usa** (frontend, chico;

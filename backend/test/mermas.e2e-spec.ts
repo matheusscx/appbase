@@ -100,11 +100,30 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     // `ORDER BY i.nombre ASC` + el `pageSize` máximo (100) la acumulación
     // puede terminar empujando los fixtures del filtro `sinCosto` fuera de la
     // página — intermitente en vez de repetible.
+    //
+    // La causa "Rotura envase" se limpia por SQL y no por la API porque el
+    // `DELETE` de una causa en uso devuelve 400 a propósito —lo afirma el
+    // test de más abajo, que además la deja en uso con la merma que él mismo
+    // registra—. Su nombre es fijo, así que sin esta limpieza la segunda
+    // corrida sin `reset-db.sh` rebota en `assertNombreUnico` y arrastra 5 de
+    // 9 tests (medido el 2026-08-28). El soft delete alcanza para liberar el
+    // nombre porque el índice único es parcial (`WHERE eliminado_el IS NULL`,
+    // `seeder.service.ts:1174`). Consecuencia asumida: la merma que quedó
+    // registrada con esa causa pasa a listarse con `causaNombre: null`, porque
+    // el JOIN de `mermas.service.ts:263` filtra igual — es lo mismo que
+    // pasaría con un borrado real, y no lo mira ningún test.
     try {
       if (itemSinCostoId) {
         await ds.query(
           `UPDATE items SET eliminado_el = NOW() WHERE item_id = $1`,
           [itemSinCostoId],
+        );
+      }
+      if (roturaCausaId) {
+        await ds.query(
+          `UPDATE causas_merma SET eliminado_el = NOW()
+             WHERE causa_merma_id = $1`,
+          [roturaCausaId],
         );
       }
     } finally {

@@ -12078,3 +12078,59 @@ de memoria la volvió falsa dos veces seguidas.
 mitad. Un frente que se abre con la causa ya escrita igual empieza por medirla — acá el
 spike costó minutos y evitó un arreglo que rompía el 23,69 % de los repartos sin que ningún
 test existente lo dijera.
+
+
+## La causa de merma que quedaba sembrada — y los otros dos rojos, que eran otra cosa (cerrado 2026-08-28)
+
+Última entrada de la § 1 (mecánico) de [`pendientes.md`](pendientes.md). Decía: `POST
+/causas-merma crea causa custom Rotura envase` siembra una causa con **nombre fijo** y nunca la
+limpia, así que la segunda corrida de `mermas.e2e-spec.ts` sin `reset-db.sh` rebota en
+`assertNombreUnico` y **falla 5 de 9 tests, todos en cascada desde el primero**. Arreglo
+escrito en la propia entrada: soft delete de la causa en el `afterAll`.
+
+**El arreglo era correcto. La atribución no.** Medido antes de tocar nada —reset, una corrida
+verde, y una segunda sin reset en el medio—, los 5 rojos son **dos causas, no una**:
+
+| Test en rojo (2ª corrida, sin el fix) | Causa real |
+|---|---|
+| `POST /causas-merma crea causa custom Rotura envase` | la causa duplicada |
+| `PATCH de una causa con el nombre vacío…` | cascada de la anterior (`roturaCausaId` sin valor) |
+| `PATCH causa fija y DELETE causa en uso…` | cascada de la anterior |
+| `POST /mermas registra merma con Vencimiento y costoPerdido` | **stock del seed agotado** |
+| `GET /mermas incluye causaNombre y costoPerdido` | cascada del anterior |
+
+**Lo que se hizo (la mitad que era mecánica).** La causa se soft-borra en el `afterAll` que ya
+existía para el ítem "Insumo sin costo E2E", por SQL y no por la API: el `DELETE` de una causa
+en uso devuelve `400` **a propósito** —lo afirma el test de más abajo, que además la deja en
+uso con la merma que él mismo registra—, así que no hay camino por la API que la limpie.
+
+**Dos cosas que la entrada no decía y que son las que hacen que el soft delete alcance** (las
+dos verificadas, no supuestas):
+
+1. **El índice único es parcial.** `uq_causas_merma_tenant_nombre` es
+   `ON causas_merma (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL`
+   (`seeder.service.ts:1174`), y `assertNombreUnico` filtra igual
+   (`causas-merma.service.ts:315-323`). Si cualquiera de los dos ignorara `eliminado_el`, el
+   arreglo escrito en la entrada **no habría funcionado** y el `INSERT` seguiría rebotando.
+2. **El residuo no ensucia la papelera.** El `UPDATE` deja `eliminado_por` en NULL, y el
+   listado trae borrados solo si `eliminado_por IS NOT NULL` —*"un borrado del sistema no es
+   restaurable ni visible"*, decisión del owner—, así que la fila desaparece de las dos vistas
+   en vez de acumularse como basura visible en la papelera de los demás specs.
+
+**Medición del cierre**, con `reset-db.sh` antes de la primera y **nada** en el medio:
+
+| | corrida 1 | corrida 2 | corrida 3 |
+|---|---|---|---|
+| Sin el fix | 9/9 | **5 fallidos** | — |
+| Con el fix | 9/9 | **2 fallidos** | 2 fallidos |
+
+O sea: 3 de los 5 rojos salieron, y los otros 2 **no los podía sacar este arreglo**. Son el
+stock de Carne molida —1,5 kg sembrados, 1,1 kg por corrida— y abrieron entrada propia en la
+§ 4 de [`pendientes.md`](pendientes.md), porque las tres salidas posibles tocan o el seeder o
+una intención escrita del seed.
+
+📌 **La lección, que ya está anotada dos veces en este archivo y volvió a pasar:** una entrada
+de backlog es un punto de partida, no un enunciado verificado — y acá lo que estaba mal no era
+el arreglo sino **el alcance que prometía**. Haberla implementado sin medir antes habría dejado
+un commit que dice "ahora es repetible" sobre un archivo que sigue fallando 2 de 9, que es peor
+que no haberla tomado: el próximo la lee cerrada y peritan de cero.
