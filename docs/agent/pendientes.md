@@ -566,33 +566,6 @@ veces por corrida **no es evidencia de nada**: sale del `Promise.all` interno de
 `DataSource.synchronize`, una vez por app de test (ya medido el 2026-08-21), y su conteo es
 casi idéntico con y sin el spec nuevo (45 vs 44).
 
-### El ticket imprime el precio extra con la moneda oficial, sobre un monto que no lo está (2026-08-26)
-
-- [ ] **El extra de una personalización se imprime con la moneda equivocada, y el ticket no
-  suma** (frontend + backend; **medido el 2026-08-26**, leyendo el código de las tres capas) —
-  `ticket-builder.ts:102` imprime cada extra con `formatMonto(d.monto)`, y ese `formatMonto`
-  se lo inyectan las páginas **sin moneda** (`pos.vue:276`, `salones/index.vue:1158` y
-  `:1249`), o sea con la **oficial del tenant**. El número que formatea sale de
-  `backend/src/common/utils/personalizacion-receta.util.ts:99` como `precioExtra × unidades`
-  **sin convertir**, o sea en la moneda del ítem. Mientras tanto, en el mismo ticket, el
-  precio de la línea **sí** viaja convertido (`ventas.service.ts:436-447`:
-  `precioBase + precioExtraTotal` → `convertirAMonedaOficial`).
-  Consecuencia para una receta en USD: el ticket muestra `+ Extra Queso $1.000` —símbolo y
-  separadores de peso sobre un número en dólares— **al lado de un total que sí está en
-  pesos**. Ni la moneda es la del ítem (que es lo que decidió el owner el 2026-08-25 para el
-  `precioExtra`), ni las dos cifras del ticket pertenecen a la misma escala.
-  **Es preexistente**: no lo introdujo el frente del 2026-08-26, que arregló la otra
-  superficie (el drawer de configuración). Lo encontró la revisión independiente de ese
-  diff, al pedirle explícitamente que buscara un consumidor que el diff no tocara.
-  **Lo que falta decidir, y por eso no salió de arrastre:** el arreglo puede ir por dos
-  lados —convertir el `monto` en el backend, como ya hace la línea, o hacer viajar el
-  `monedaId` hasta el ticket y formatear con él— y la primera opción toca la **conversión de
-  plata**, que es territorio del motor de cálculo (⚠️ `CLAUDE.md`: va sola y con el sistema
-  quieto). La segunda es de presentación y no toca el motor, pero hay que ver qué pasa con un
-  ticket que mezcla dos monedas en la misma columna.
-  ⚠️ **Antes de tomarla, verificar si el detalle de personalización tiene el `monedaId` a
-  mano** en las tres páginas que arman el ticket: la entrada no lo midió.
-
 ### El `.` que multiplica por 10 no lo ataja ningún 400: la red que la doc promete no existe (2026-08-26)
 
 - [ ] **`MoneyInput` en una moneda con separador de miles `.` convierte `800.5` en `8005`, y
@@ -1068,9 +1041,10 @@ prohíbe.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-**Quedan siete abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+**Quedan ocho abiertas** —cuatro llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
-una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida); más
+una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida) y
+una que **bajó de la § 2** al medirla: la moneda del extra en el ticket; más
 los dos carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros,
 la nota de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se
 recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
@@ -1191,6 +1165,46 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
   agregar aserciones, no reorganizar los specs.
 
+
+### El ticket imprime el precio extra con la moneda oficial, sobre un monto que no lo está (2026-08-26)
+
+- [ ] **El extra de una personalización se imprime con la moneda equivocada, y el ticket no
+  suma** (frontend + backend; **medido el 2026-08-26**, y la medición que la entrada pedía
+  antes de tomarla **se hizo el 2026-08-28** — por eso baja de la § 2 a acá) —
+  `ticket-builder.ts` imprime cada extra con el `formatMonto` que le inyectan las páginas, y
+  las tres se lo pasan **sin moneda** (`pos.vue:277`, `salones/index.vue:1159` y `:1251`), o
+  sea con la oficial del tenant. El número que formatea sale de
+  `personalizacion-receta.util.ts` como `precioExtra × unidades` **sin convertir**, o sea en la
+  moneda del ítem. Mientras tanto, en el mismo ticket, el precio de la línea **sí** viaja
+  convertido (`ventas.service.ts:436-448`: `precioBase + precioExtraTotal` →
+  `convertirAMonedaOficial`).
+  **La escena, para una receta en USD:** el ticket muestra `+ Extra Queso $1.000` —símbolo y
+  separadores de peso sobre un número en dólares— **al lado de un total que sí está en pesos**.
+  Ni la moneda es la del ítem (que es lo que decidiste el 2026-08-25 para el `precioExtra`), ni
+  las dos cifras del ticket pertenecen a la misma escala.
+  **Es preexistente**: no lo introdujo el frente del 2026-08-26. Lo encontró la revisión
+  independiente de ese diff, al pedirle que buscara un consumidor que el diff no tocara.
+
+  ✅ **Lo que la medición del 2026-08-28 contestó, y cambia el precio de una de las salidas:**
+  el detalle de personalización **no lleva moneda** —ni la interfaz del backend
+  (`personalizacion-receta.util.ts`, `PersonalizacionDetalleLinea`: `nombre`, `tipo`,
+  `unidades`, `monto`) ni la del frontend (`ticket-builder.ts:110`)—, **pero las tres páginas
+  sí tienen la moneda del ítem a mano**: `pos.vue` la tiene en `ln.item.monedaId`
+  (`ItemCatalogo.monedaId`, `useVenta.ts:20-25`) y `salones/index.vue` en `linea.monedaId`, que
+  ya usa para otra cosa en `:1560`. Y `formatMonto` **ya acepta** una moneda opcional
+  (`useFormatters.ts:14-20`): las tres páginas simplemente lo llaman sin ella.
+
+  ❓ **Entonces la pregunta ya no es técnica, es tuya, y son dos monedas en un mismo papel:**
+  **(a) Convertir el extra a la moneda oficial en el backend**, como ya hace la línea. El
+  ticket queda entero en una sola moneda y las cifras suman. Cuesta: toca **conversión de
+  plata**, o sea territorio del motor de cálculo — `CLAUDE.md` manda frente propio y sistema
+  quieto.
+  **(b) Imprimir el extra en la moneda del ítem, con su símbolo.** No toca el motor y es
+  chico: llevar el `monedaId` hasta la línea del ticket y dejar que el formateador inyectado
+  lo reciba —las dos piezas ya existen—. Cuesta: el ticket muestra dos monedas en la misma
+  columna, y el `+ Extra US$1` no va a sumar contra el total en pesos que está tres líneas más
+  abajo. Es honesto sobre la escala y confuso sobre la cuenta.
+  📌 Lo que hoy pasa no es ninguna de las dos: es el número de (b) con el símbolo de (a).
 
 - [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
   seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
