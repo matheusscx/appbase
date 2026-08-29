@@ -356,6 +356,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
       .get('/api/pagos/resumen')
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(suyo.status).toBe(200);
+    expect(todo.status).toBe(200);
     expect((suyo.body as { totalPagos: number }).totalPagos).toBeLessThan(
       (todo.body as { totalPagos: number }).totalPagos,
     );

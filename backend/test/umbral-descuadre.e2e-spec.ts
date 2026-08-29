@@ -269,6 +269,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
     const resMiembros = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMiembros.status).toBe(200);
     const miembros = resMiembros.body as Member[];
     cajeroId = miembros.find((m) => m.correo === VENDEDOR_EMAIL)!.usuarioId;
     adminId = miembros.find((m) => m.correo === ADMIN_EMAIL)!.usuarioId;
@@ -336,6 +337,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
       const detalle = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(detalle.status).toBe(200);
       expect((detalle.body as { estado: string }).estado).toBe('cerrada');
 
       const fila = (await bandeja(tokenSupervisor)).find(
@@ -382,6 +384,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
       const detalle = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(detalle.status).toBe(200);
       const cuerpo = detalle.body as {
         revisadoPor: string;
         revisadoEl: string;

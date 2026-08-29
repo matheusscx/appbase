@@ -177,17 +177,20 @@ describe('Motivos de diferencia (e2e) — CRUD admin-only + reglas de es_fijo', 
         .send({ activo: false });
       expect(res.status).toBe(200);
 
-      // Nota: no se afirma sobre `res.body` acá — el UPDATE...RETURNING vía
-      // TypeORM+pg devuelve la tupla `[rows, rowCount]` (no `rows` directo);
-      // `MotivosDiferenciaService.update()` no la desenvuelve (a diferencia
-      // de `liquidacion-propinas.service.ts:854`, que sí lo hace para el
-      // mismo gotcha), así que el body de ESTA respuesta puntual sale `{}`.
-      // Es un bug de producción real fuera del alcance de esta tarea
-      // (solo test files) — se reporta en el informe de la tarea. El efecto
-      // (persistencia) se verifica acá vía GET, que sí es de solo lectura.
+      // ⚠️ Este comentario decía que `MotivosDiferenciaService.update()` no
+      // desenvolvía la tupla `[rows, rowCount]` del `UPDATE...RETURNING` y que
+      // por eso el body salía `{}` — "un bug de producción real". **Ya no es
+      // cierto, y nunca lo fue por mucho**: se escribió el 2026-07-24 a las
+      // 21:01 (`b793c74b`) y el `unwrap` entró a las 21:57 del mismo día
+      // (`6e74ed5f`). Verificado el 2026-08-28: el service hace
+      // `unwrap<Row>(...)` y devuelve `toItem(rows[0])`.
+      // Lo que sigue en pie es el criterio de este test: la persistencia se
+      // comprueba con un GET aparte, que es la lectura que le importa al
+      // usuario, y no con el eco del PATCH.
       const verificar = await request(app.getHttpServer())
         .get('/api/motivos-diferencia')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(verificar.status).toBe(200);
       const motivo = (verificar.body as MotivoItem[]).find(
         (m) => m.id === ERROR_OPERACIONAL_ID,
       );

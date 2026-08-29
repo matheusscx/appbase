@@ -89,6 +89,7 @@ describe('Tenants — miembros (e2e): el roster es admin-only', () => {
     const res = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
     miembroExistenteId = (res.body as Member[])[0].usuarioId;
   }, 60000);
 

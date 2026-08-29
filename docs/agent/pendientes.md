@@ -198,6 +198,17 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
   liberar la segunda caja, que es el `409` en otra suite que ese diseño evita a propósito.
   Revertida. **Lo que decide no es dónde corre la request, sino qué promete por escrito el
   bloque que la rodea**, y eso hay que leerlo entero, no por una frase.
+  ✅ **Quinta tanda, 2026-08-28: las lecturas sueltas simples** — `cajones`,
+  `invitacion-y-reset`, `membresia-ultimo-admin`, `motivos-diferencia`,
+  `rastro-intentos-rechazados`, `tendencia-descuadres`, `umbral-descuadre`,
+  `tenants-members`, `uso-reglas` y `visibilidad-ventas-pagos`: 17 aserciones.
+  📌 **De paso cayó un comentario que afirmaba un bug de producción inexistente**
+  (`motivos-diferencia.e2e-spec.ts`): decía que `MotivosDiferenciaService.update()` no
+  desenvuelve la tupla `[rows, rowCount]` del `UPDATE...RETURNING` y que por eso el body sale
+  `{}`. El service hace `unwrap<Row>(...)`. El comentario se escribió el 2026-07-24 a las
+  21:01 (`b793c74b`) y el arreglo entró **a las 21:57 del mismo día** (`6e74ed5f`): nació
+  cierto y quedó viejo en menos de una hora. Corregido con las dos fechas adentro, para que
+  el próximo no vuelva a salir a cazarlo.
   📌 **Y una excepción que parecía higiene y no lo era:** el `cerrarCaja` de
   `ventas.e2e-spec.ts` corre en teardown, pero su docblock dice *"el teardown **asegura** el
   cierre en vez de ignorar el status"*. Ahí la aserción va. Lo que decide no es dónde corre

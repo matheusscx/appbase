@@ -264,6 +264,7 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
         .post('/api/cajones')
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ nombre: `E2E AllowList ${Date.now()}` });
+      expect(resCajon.status).toBe(201);
       cajonId = (resCajon.body as CajonResponse).id;
       creados.push(cajonId);
     });
@@ -293,6 +294,7 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
       const resGet = await request(app.getHttpServer())
         .get(`/api/cajones/${cajonId}/usuarios`)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resGet.status).toBe(200);
       expect(resGet.body as string[]).toEqual([miembros[0]]);
     });
 

@@ -188,6 +188,7 @@ describe('Rastro de intentos rechazados (e2e)', () => {
     const resFlag = await request(app.getHttpServer())
       .get('/api/caja/arqueo-ciego')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resFlag.status).toBe(200);
     ciegoOriginal = (resFlag.body as { arqueoCiego: boolean }).arqueoCiego;
 
     const resCajon = await request(app.getHttpServer())
@@ -200,6 +201,7 @@ describe('Rastro de intentos rechazados (e2e)', () => {
     const resMiembros = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMiembros.status).toBe(200);
     cajeroId = (resMiembros.body as Member[]).find(
       (m) => m.correo === VENDEDOR_EMAIL,
     )!.usuarioId;
@@ -319,6 +321,7 @@ describe('Rastro de intentos rechazados (e2e)', () => {
       const resMiembros = await request(app.getHttpServer())
         .get('/api/tenants/members')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resMiembros.status).toBe(200);
       const adminId = (resMiembros.body as Member[]).find(
         (m) => m.correo === ADMIN_EMAIL,
       )!.usuarioId;

@@ -438,6 +438,7 @@ describe('Membresía (e2e): la baja pregunta por el garzón vinculado', () => {
     const miembros = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${token}`);
+    expect(miembros.status).toBe(200);
     expect(
       (miembros.body as { usuarioId: string }[]).some(
         (m) => m.usuarioId === usuarioId,

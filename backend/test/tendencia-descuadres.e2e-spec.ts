@@ -218,6 +218,7 @@ describe('Tendencia de descuadres (e2e)', () => {
     const resMiembros = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMiembros.status).toBe(200);
     cajeroId = (resMiembros.body as Member[]).find(
       (m) => m.correo === VENDEDOR_EMAIL,
     )!.usuarioId;
@@ -354,6 +355,7 @@ describe('Tendencia de descuadres (e2e)', () => {
     const resMiembros = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resMiembros.status).toBe(200);
     const deParis = new Set(
       (resMiembros.body as Member[]).map((m) => m.usuarioId),
     );

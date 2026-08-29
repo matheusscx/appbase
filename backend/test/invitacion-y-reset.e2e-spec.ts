@@ -68,6 +68,7 @@ describe('Invitación y reset (e2e)', () => {
     const roles = await request(app.getHttpServer())
       .get('/api/roles')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(roles.status).toBe(200);
     rolId = (roles.body as { id: string; nombre: string }[]).find(
       (r) => r.nombre === 'Salón',
     )!.id;

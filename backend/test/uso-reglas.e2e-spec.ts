@@ -493,6 +493,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
       const antes = await request(app.getHttpServer())
         .get(url)
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(antes.status).toBe(200);
       const fila = (antes.body as UsoResponse).items.find(
         (i) => i.id === itemId,
       );
@@ -549,6 +550,7 @@ describe('Uso de reglas (e2e) — GET /descuentos|recargos|impuestos/:id/uso', (
     const uso = await request(app.getHttpServer())
       .get(`/api/descuentos/${DESCUENTO_SIN_CONDICION_ID}/uso`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(uso.status).toBe(200);
     const fila = (uso.body as UsoResponse).items.find((i) => i.id === itemId);
     expect(fila).toBeDefined();
     expect(fila!.eliminado).toBe(true);
