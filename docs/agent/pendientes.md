@@ -721,26 +721,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
   tiempo entre `createQueryRunner()` y el `BEGIN`.
 
-### Cambiar de PRODUCTO conserva el costo tipeado, y puede cambiar la moneda debajo (2026-08-28)
-
-- [ ] **En el drawer de ajuste de costo (`frontend/app/pages/inventario/index.vue:200-204`,
-  el `watch` de `itemId`) elegir otro producto no toca `costoNuevo`** — lo levantó la revisión
-  independiente del frente que cerró el ×1000 del **selector de unidad**, y es el vecino
-  inmediato de ese caso, no el mismo: acá lo que cambia es el ítem. Escena: se elige Harina
-  (base `kg`), se tipea `1500`, se cambia el producto a otro cuya base también es `kg` → el
-  watch de la unidad **no dispara** (mismo valor) y el número sobrevive aplicado a otro ítem.
-  ⚠️ **Y el ítem nuevo puede estar en otra moneda:** `MoneyInput` va atado a
-  `:moneda-id="productoAjusteSeleccionado?.monedaId"`, así que reemite el mismo número bajo
-  otra escala.
-  **No es una regresión** —es preexistente al frente del selector, que solo cubrió el cambio
-  de unidad— y por eso no salió de arrastre: el owner ya decidió *limpiar* para la unidad
-  ([`resueltos.md`](resueltos.md)), pero **no se le preguntó por el cambio de producto**, y no
-  es obvio que la respuesta sea la misma: cambiar de producto puede ser corregir un click
-  errado, donde perder lo tipeado molesta más de lo que protege.
-  **Antes de tomarla, medir:** ¿el costo tipeado sobrevive de verdad al cambio de producto en
-  el navegador, y qué muestra `MoneyInput` cuando la moneda nueva tiene otros decimales? La
-  entrada sale del razonamiento sobre el código, no de una corrida.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -1041,10 +1021,11 @@ prohíbe.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-**Quedan ocho abiertas** —cuatro llegaron el 2026-08-28: dos del barrido de las lecturas sin
+**Quedan nueve abiertas** —cinco llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
-una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida) y
-una que **bajó de la § 2** al medirla: la moneda del extra en el ticket; más
+una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida), y
+dos que **bajaron de la § 2** al medirlas: la moneda del extra en el ticket y el
+costo tipeado que sobrevive al cambio de producto; más
 los dos carteles de la tarjeta, la forma de importe que avisa por un camino y no por los otros,
 la nota de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se
 recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
@@ -1167,6 +1148,46 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
 
 
 ### El ticket imprime el precio extra con la moneda oficial, sobre un monto que no lo está (2026-08-26)
+
+### Cambiar de PRODUCTO conserva el costo tipeado, y puede cambiar la moneda debajo (2026-08-28)
+
+- [ ] **En el drawer de ajuste de costo, cambiar de producto deja el número tipeado
+  aplicado al producto nuevo — y si la moneda cambia, lo reinterpreta** (frontend,
+  `frontend/app/pages/inventario/index.vue:200-204`, el `watch` de `itemId`; **medido en el
+  navegador el 2026-08-28**, que es lo que esta entrada pedía antes de tomarse — por eso baja
+  de la § 2 a acá) — lo levantó la revisión independiente del frente que cerró el ×1000 del
+  **selector de unidad**, y es el vecino inmediato de ese caso, no el mismo: acá lo que cambia
+  es el ítem.
+
+  ✅ **Lo medido, con los números en pantalla** (Demo Restaurante, drawer "Ajustar costo"):
+
+  | Paso | Producto | Costo vigente | Campo "Costo nuevo" |
+  |---|---|---|---|
+  | Se tipea `1500` | Carne molida (CLP, base kg) | $8.000 | `1.500` |
+  | Se cambia el producto (misma base kg) | Carne Mixta (CLP) | $10.000 | **`1.500`** — sobrevive |
+  | Se cambia a un producto en **otra moneda** | sonda USD (2 decimales) | $7.50 | **`1,500.00`** |
+
+  ⚠️ **El tercer renglón es el que cambia el tamaño del problema.** No es "quedó un número
+  viejo": el mismo valor crudo se **re-renderiza bajo la escala nueva**, porque `MoneyInput`
+  está atado a `:moneda-id="productoAjusteSeleccionado?.monedaId"` y en USD el `.` es decimal y
+  el `,` es de miles —al revés que en CLP—. Mil quinientos pesos (≈ US$1,6) se convierten en
+  **US$1.500** sobre un producto cuyo costo vigente es US$7,50, y el formulario los muestra uno
+  al lado del otro sin decir nada. El `watch` de la unidad no ataja nada de esto: las dos bases
+  eran `kg`, así que **no dispara** (Vue no emite con el mismo valor).
+
+  📌 La sonda USD se creó por API para poder medirlo —el seed tiene los 102 productos de Paris
+  en CLP— y quedó soft-borrada.
+
+  ❓ **La pregunta es tuya y es la misma forma que ya contestaste para la unidad, pero el caso
+  no es el mismo:** ¿al cambiar de producto el campo "Costo nuevo" **se limpia**?
+  **(a) Limpiar**, como ya se hace al cambiar de unidad. Costo: si elegiste mal el producto de
+  la lista y corregís el click, perdés lo tipeado y hay que escribirlo de nuevo.
+  **(b) Dejarlo.** Costo: lo de arriba — un costo que nadie tecleó para ese producto, y en otra
+  moneda, con la escala cambiada en silencio.
+  ⚠️ Cuando contestaste por la unidad (2026-08-28) el argumento fue que el número tipeado
+  pertenece a la unidad en la que se tipeó. Acá vale igual o más: pertenece **al producto** y a
+  su moneda. Pero es tu llamada, no la mía: la entrada la abrió el razonamiento y ahora la
+  medición, no una decisión de producto.
 
 - [ ] **El extra de una personalización se imprime con la moneda equivocada, y el ticket no
   suma** (frontend + backend; **medido el 2026-08-26**, y la medición que la entrada pedía
