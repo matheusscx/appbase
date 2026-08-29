@@ -107,6 +107,14 @@ async function rechazar() {
             </div>
           </template>
 
+          <!--
+            Este mensaje NO repite la marca de simulación a propósito (decisión del
+            owner, 2026-08-29): el encabezado "Pasarela de pago (simulada)" está
+            fuera de este v-if y sigue a la vista en el estado aprobado. Se anota
+            porque ya se levantó dos veces como promesa sin marca — el porqué está
+            en docs/agent/resueltos.md, "Dos carteles que prometían una tarjeta
+            que ese flujo no usa".
+          -->
           <div v-if="estado === 'aprobada'" class="text-center py-6 space-y-3">
             <UIcon name="i-lucide-circle-check-big" class="text-success size-12 mx-auto" />
             <p class="font-medium">Pago aprobado</p>

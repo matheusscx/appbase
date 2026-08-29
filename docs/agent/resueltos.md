@@ -12244,3 +12244,50 @@ ahora dice que se cerró, y **conserva la advertencia que sigue siendo cierta**:
 constraint en la base, hay dos puertas que no se cruzan. Un camino nuevo que escriba
 `item_descuentos` / `item_recargos` sin pasar por `validarReglas` reabre el agujero sin que
 nada avise.
+
+---
+
+## Dos carteles que prometían una tarjeta que ese flujo no usa (cerrado 2026-08-29)
+
+Los dos los levantó la revisión independiente del 2026-08-26 al cerrar el frente de la
+pantalla demo: la misma clase de afirmación que se acababa de sacar de la pasarela simulada,
+en dos superficies que aquel diff no tocó. Ninguno tocaba datos —los dos eran texto de
+pantalla—, y por eso la entrada esperaba en la § 4: lo único que faltaba era la decisión.
+
+**Decisión del owner (2026-08-29), una por cartel:**
+
+1. **La pantalla de éxito de la pasarela demo** (`pasarela.vue:120` tras este diff; `:112`
+   cuando se midió el problema) se queda como está. El encabezado *"Pasarela de pago
+   (simulada)"* (`:106`) vive en el slot `#header` del `UCard`, o sea **fuera** del
+   `v-if="estado === 'aprobada'"` (que arranca en `:118`), así que sigue a la vista cuando
+   aparece el *"Pago aprobado"*. Como ya se levantó
+   dos veces como promesa sin marca, el porqué quedó escrito **en el propio template**, arriba
+   del bloque: un comentario que dice que la omisión es deliberada y apunta acá. Sin ese
+   comentario, la tercera revisión lo vuelve a levantar.
+2. **`medios-pago.vue:109`** pasa a nombrar el único uso real: *"Tarjetas inscritas en Webpay
+   Oneclick **para tus suscripciones**"*. Antes decía *"para pagar en la tienda online"*, y el
+   checkout del carrito **nunca** usa la tarjeta guardada: `CobrosService.cobrar` lo llaman
+   solo `suscripciones.service.ts:130` y `pasarela-api.controller.ts:75` (la API externa de
+   terceros); la compra normal sale por `PagosRedirectService` —Webpay Plus, redirect, donde
+   la tarjeta se vuelve a tipear— o por la demo. Del lado del frontend se ve en
+   `tienda/index.vue:67-69`: si el modo es `'webpay'`, la página se va a `res.urlWebpay`.
+
+**Lo que se verificó antes de escribir, y no estaba en la entrada:**
+
+- **Las tres citas de línea se abrieron, y la verificación falló igual — dos veces y por
+  motivos distintos.** La primera fue contar mal: `medios-pago.vue:109` estaba bien, y al
+  verificarla se le reportó al owner que había corrido a `:108`; `grep -n` la deja en 109. La
+  segunda es la que importa, porque ninguna lectura cuidadosa la habría evitado. De
+  `pasarela.vue`, `:106` y `:112` estaban bien **contra el archivo de antes**: el comentario
+  que este mismo cierre agrega empuja el *"Pago aprobado"* a `:120`, así que el primer texto
+  de acá citaba `:112`, que post-diff cae **adentro del propio comentario**. Lo cazó la
+  revisión independiente. ⚠️ Es la misma trampa de siempre —**el diff corre las líneas que el
+  diff cita**—, y verificar antes de editar no alcanza: la cita se vuelve a medir **después**
+  del último cambio al archivo, no antes.
+- **Se buscó el gemelo del texto en el resto del repo antes de darlo por cerrado**
+  (`grep -rn "tienda online"` + los archivos que nombran Oneclick). El cartel de `:109` es el
+  **único** lugar de la UI que le promete la tienda a la tarjeta guardada: los otros usos de
+  "tienda online" son del backend y hablan de métodos de pago habilitados, que es otra cosa.
+  Los demás textos de `medios-pago.vue` dicen "cobros" a secas, que sigue siendo cierto.
+- **Ningún test fijaba la cadena vieja** (`medios-pago.vue` no tiene spec; el de la pasarela
+  no la menciona), así que no hubo que espejar nada.

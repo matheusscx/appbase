@@ -106,7 +106,7 @@ const columns: TableColumn<Tarjeta>[] = [
       <div class="w-full space-y-6">
         <CrudPageHeader
           title="Medios de pago"
-          description="Tarjetas inscritas en Webpay Oneclick para pagar en la tienda online. Nunca guardamos el número: solo la marca y los últimos 4 dígitos."
+          description="Tarjetas inscritas en Webpay Oneclick para tus suscripciones. Nunca guardamos el número: solo la marca y los últimos 4 dígitos."
         >
           <template #actions>
             <UButton
