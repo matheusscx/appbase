@@ -1393,10 +1393,13 @@ Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qu�
 bloquea y en qué orden en cada camino—, no cinco parches. Son **dos moldes distintos**, y
 conviene no confundirlos:
 
-- **Cuatro del molde "no toma lock"** —el guard del nivel de una regla, `remove()` de ítems,
-  borrar un ítem contra agregarlo a una cuenta, y `PATCH /items/:id` contra `DELETE`—: un
-  `SELECT` de validación sin lock, y otra transacción que escribe entre el chequeo y el
-  commit. Cada entrada lo dice por su cuenta.
+- **Tres del molde "no toma lock"** —`remove()` de ítems, borrar un ítem contra agregarlo a
+  una cuenta, y `PATCH /items/:id` contra `DELETE`—: un `SELECT` de validación sin lock, y
+  otra transacción que escribe entre el chequeo y el commit. Cada entrada lo dice por su
+  cuenta. ✅ **Eran cuatro hasta el 2026-08-28**: el guard del nivel de una regla salió
+  primero porque su par de puertas se cerraba con una sola fila bloqueada, y de paso dejó
+  escrito el orden que las otras tres necesitan —[`../patterns/backend.md`](../patterns/backend.md)
+  § 15, *"Las reglas van antes que todo eso"*— → [`resueltos.md`](resueltos.md).
 - **Una del molde "lockea en orden no determinista"** —la de la auditoría de `inventario`,
   los tres caminos que revierten stock—: el lock sí se toma, pero el orden lo decide el
   cliente. El arreglo es el contrario —no agregar un lock sino fijar un orden—, y las piezas
@@ -1433,24 +1436,6 @@ locks sino **fijar el orden en que sus `UPDATE` los toman solos**—, y el orden
 proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de
 bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cinco
 entradas de esta sección.
-
-- [ ] **El guard del nivel de una regla valida sin lock y fuera de la transacción**
-  (backend; anotado 2026-08-25 al cerrar el frente del nivel, → [`resueltos.md`](resueltos.md)
-  § *"Una regla dice dónde se aplica"*) — **del molde "no toma lock"**, y por eso vive
-  acá y no como frente propio. `validarCambioDeNivel` (`descuentos.service.ts`,
-  `recargos.service.ts`) hace un `COUNT` sobre la tabla puente **antes** de `db.transaccion`;
-  un `PATCH /items` que asocie esa misma regla entre el `COUNT` y el `save` deja una regla de
-  nivel venta colgada de un ítem — el estado que las dos puertas existen para impedir.
-  Síntoma: el ítem no se puede vender (400 de `resolverReglas`). Salida: quitar la asociación.
-  ⚠️ **No se parchea suelto**: cerrarla pide un `FOR UPDATE` sobre la fila de la regla dentro
-  de la transacción, y agregar un lock cambia el orden de bloqueo — materia de
-  [`../patterns/backend.md`](../patterns/backend.md) § 15 y del precedente de
-  `ventas.service.ts → crear()`, que es exactamente lo que el encabezado de esta sección dice
-  no querer hacer de a uno. (**No** citar ADR-020 acá: su deadlock es de agotamiento del pool
-  y lo dice con todas las letras, *"no de locks de fila"*; peor, bajo ADR-020 mover el `COUNT`
-  adentro de la transacción **no cuesta una conexión extra**, así que leído entero argumenta a
-  favor de hacerlo.) El docblock de `resolverReglas` acota la inalcanzabilidad con esta misma
-  ventana.
 
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el

@@ -292,9 +292,12 @@ export class RecargosService {
     await this.validarNombreUnico(tenantId, dto.nombre ?? recargo.nombre, id);
     this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
     await this.validarEstadoResultante(tipoRegla.codigo, recargo, dto);
-    await this.validarCambioDeNivel(tenantId, recargo, dto);
-
     const escritura = this.db.transaccion(async (manager) => {
+      // Adentro de la transacción, y primero de todo: el guard toma el
+      // `FOR UPDATE` de la fila de la regla y recién después cuenta. Ver su
+      // docblock — moverlo afuera lo vuelve a convertir en un phantom, sin que
+      // nada falle a la vista.
+      await this.validarCambioDeNivel(tenantId, recargo, dto);
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
       const tiposConDias = ['pronto_pago', 'mora'];
       const condicionValor =
@@ -555,6 +558,22 @@ export class RecargosService {
    * El filtro por tenant va por el JOIN a `items` porque la tabla puente no
    * tiene `tenant_id` propio — misma defensa que `cargarReglasPorIds`.
    */
+  /**
+   * ⚠️ **Corre DENTRO de `db.transaccion` y toma el `FOR UPDATE` de la fila de la
+   * regla antes de contar.** Las dos cosas juntas son el arreglo: afuera de la
+   * transacción el lock se suelta al instante y el guard vuelve a ser un
+   * phantom —un `PATCH /items` que asocie esta regla entre el `COUNT` y el
+   * `UPDATE` deja una fila de `item_recargos` con una regla de nivel venta, que
+   * es el estado que las dos puertas existen para impedir—.
+   *
+   * Bajo ADR-020 estar adentro **no cuesta una conexión más**: `db.query` reusa
+   * el manager de la transacción activa (docs/patterns/backend.md § 9).
+   *
+   * Orden de adquisición: la regla antes que `items`. La otra puerta
+   * (`ItemsService.validarReglas`) toma `FOR SHARE` sobre esta misma fila y
+   * después escribe la tabla puente, así que las dos van en el mismo sentido y
+   * no hay ciclo (docs/patterns/backend.md § 15).
+   */
   private async validarCambioDeNivel(
     tenantId: string,
     recargo: Recargo,
@@ -562,6 +581,18 @@ export class RecargosService {
   ): Promise<void> {
     if (dto.nivel !== NivelRegla.VENTA) return;
     if (recargo.nivel === NivelRegla.VENTA) return;
+    // El lock ANTES del `COUNT`, y los dos dentro de la transacción del
+    // `update()`: es el par lo que cierra la carrera, no cada mitad. La otra
+    // puerta —`ItemsService.validarReglas`, que asocia la regla a un ítem—
+    // toma `FOR SHARE` sobre esta misma fila, así que o esperamos a que
+    // termine (y entonces el `COUNT` la ve) o espera ella (y entonces lee el
+    // `nivel` ya cambiado, por EvalPlanQual). Sin el lock, las dos commitean.
+    await this.db.query(
+      `SELECT 1 FROM recargos
+        WHERE recargo_id = $1 AND tenant_id = $2
+        FOR UPDATE`,
+      [recargo.id, tenantId],
+    );
     const filas: { cnt: string }[] = await this.db.query(
       `SELECT COUNT(*) AS cnt
          FROM item_recargos ir

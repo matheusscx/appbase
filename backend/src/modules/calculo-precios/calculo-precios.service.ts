@@ -669,17 +669,19 @@ export class CalculoPreciosService {
    * `validarCambioDeNivel` al cambiar el nivel, que cuenta también los ítems en
    * la papelera).
    *
-   * ⚠️ **Esa inalcanzabilidad vale salvo una ventana, y va dicha acá para que no
-   * se lea como garantía estructural:** `validarCambioDeNivel` corre FUERA de
-   * `db.transaccion`, así que un `PATCH /items` que asocie la regla entre su
-   * `COUNT` y el `save` deja la fila puente con una regla de venta. Es la misma
-   * forma que las otras tres carreras anotadas en `docs/agent/pendientes.md` § 5
-   * —validación sin lock, escritura ajena en el medio— y se resuelve con ellas,
-   * no con un parche suelto: cerrar la carrera pide un `FOR UPDATE`, y agregar un
-   * lock de fila acá cambia el orden de bloqueo — que es materia de
-   * `docs/patterns/backend.md` § 15, "Orden de bloqueo de filas en ítems
-   * compuestos", y del precedente de `ventas.service.ts → crear()` (orden
-   * determinista por `itemId` + reintento ante `40P01`).
+   * ✅ **La ventana que este párrafo declaraba se cerró el 2026-08-28.** Decía que
+   * `validarCambioDeNivel` corría FUERA de `db.transaccion`, así que un
+   * `PATCH /items` que asociara la regla entre su `COUNT` y el `save` dejaba la
+   * fila puente con una regla de venta. Hoy las dos puertas se serializan sobre
+   * la fila de la regla: el guard corre adentro de la transacción y toma
+   * `FOR UPDATE`; `ItemsService.validarReglas` toma `FOR SHARE` en el mismo
+   * statement que lee `nivel`. El orden de bloqueo está en
+   * `docs/patterns/backend.md` § 15 — reglas antes que `items`, sin ciclo.
+   *
+   * ⚠️ Sigue sin ser una garantía **estructural**: no hay constraint en la base
+   * que impida la fila, lo que hay son dos puertas que ahora no se cruzan. Un
+   * camino nuevo que escriba `item_descuentos` / `item_recargos` sin pasar por
+   * `validarReglas` reabre el agujero sin que nada avise.
    *
    * Si esa carrera se materializa, el síntoma es este 400 al vender y el arreglo
    * es quitar la asociación. Si el estado se volviera alcanzable **por catálogo**

@@ -12176,3 +12176,71 @@ los factores sembrados sean exactos, es que **no hay manera de crear otros** —
 `CatalogController` es de solo lectura (sus cinco rutas son `@Get`) y el único `save` de la
 tabla vive en `seeder.service.ts:338`, así que el catálogo de unidades solo cambia editando el
 seeder. El día que se agregue `lb` u `oz`, el docblock está en el camino.
+
+
+## El guard del nivel de una regla: dos puertas que ahora se serializan sobre la misma fila (cerrado 2026-08-28)
+
+Primera de las cinco de la § 5 de [`pendientes.md`](pendientes.md), del molde *"no toma
+lock"*. `validarCambioDeNivel` (`descuentos.service.ts`, `recargos.service.ts`) contaba las
+filas puente **antes** de `db.transaccion`; un `PATCH /items` que asociara esa misma regla
+entre el `COUNT` y el `UPDATE` dejaba una regla de nivel venta colgada de un ítem — el estado
+que las dos puertas existen para impedir, y cuyo síntoma es un 400 al vender.
+
+**Salió sola, y la sección pedía lo contrario.** El encabezado de la § 5 dice que las cinco
+piden *"un solo análisis de orden de locks, no cinco parches"*. Lo que salió primero fue el
+análisis, y con él a la vista ésta se cierra con **una sola fila bloqueada** —la de la regla—:
+no toca `items`, no toca las tablas de ítems compuestos, y por lo tanto no depende de nada de
+lo que las otras cuatro tengan que decidir. Las otras tres del mismo molde sí comparten un
+problema entre ellas (bloquear la fila de `items` en `remove()` **y** en cada camino que crea
+una referencia), y siguen juntas.
+
+**El arreglo, que son dos mitades y ninguna sirve sola:**
+
+| Puerta | Qué hace ahora |
+|---|---|
+| La regla (`descuentos`/`recargos` → `update`) | el guard corre **dentro** de `db.transaccion` y toma `FOR UPDATE` sobre la fila de la regla **antes** de contar |
+| El ítem (`ItemsService.validarReglas`) | `FOR SHARE` sobre esas mismas filas, en el **mismo statement** que lee `nivel` |
+
+- **`FOR SHARE` de un lado y `FOR UPDATE` del otro** porque dos asociaciones de la misma regla
+  a ítems distintos no tienen por qué estorbarse; lo único que hay que excluir es el cambio de
+  nivel.
+- **El lock va en el statement que lee `nivel`** a propósito: cuando la espera se resuelve,
+  Postgres reevalúa la fila ya actualizada (EvalPlanQual), así que el `nivel` comparado es el
+  de después del commit ajeno. Si el lock fuera un statement aparte, la lectura seguiría siendo
+  la vieja.
+- **Afuera de la transacción el `FOR UPDATE` no arregla nada**: se suelta al terminar su
+  statement. Por eso el guard se movió adentro, y bajo ADR-020 eso **no cuesta una conexión
+  más** — `db.query` reusa el manager activo.
+- **Sin ciclo de deadlock:** el orden de adquisición queda
+  `recargos → descuentos → item_receta → item_combo → items`, verificado contra los dos
+  llamadores de `validarReglas` (los dos piden recargos antes que descuentos) y contra el
+  resto de `update()`. El otro lado no toca `items`. Quedó escrito en
+  [`../patterns/backend.md`](../patterns/backend.md) § 15.
+
+**Los tests fijan las dos mitades, y cada uno se verificó con su mutante**: sacar el
+`FOR UPDATE` deja el `COUNT` solo → falla; devolver el guard afuera de la transacción deja el
+lock pero se suelta → falla; sacar el `FOR SHARE` de `validarReglas` → falla. Las tres
+versiones mutantes **contestan lo mismo** en cualquier corrida sin concurrencia, que es
+exactamente por qué el test no puede ser de conducta.
+
+⛔ **Y ese tercero no estaba, mientras el cierre ya afirmaba que sí.** La primera versión de
+este commit testeó con mutante solo el lado `descuentos`/`recargos` y escribió *"los tests
+fijan las dos mitades"*; la revisión independiente lo refutó del único modo que vale —revirtió
+el `FOR SHARE` y corrió la suite: **354/354 en verde**— y bloqueó. La mitad sin test era
+justamente la que sostiene el argumento de EvalPlanQual del que depende todo el cierre. Y no
+era falta de precedente: `items.service.spec.ts` ya fijaba así los locks hermanos de
+`item_producto`, `item_receta` e `item_combo`.
+
+⚠️ **Lo que el lock cuesta, que tampoco estaba escrito:** el `FOR SHARE` se sostiene hasta el
+commit de **toda** la transacción del ítem, no hasta el final de su `SELECT`. O sea que un
+`PATCH /descuentos/:id` que solo renombra o pausa la regla ahora también espera. Es
+catálogo/admin, no ruta de venta, así que se acepta — pero queda dicho acá y en
+[`../patterns/backend.md`](../patterns/backend.md) § 15, porque es exactamente la clase de
+cosa que después se descubre como un timeout raro.
+
+📌 **El docblock del motor se actualizó en el mismo commit.** `calculo-precios.service.ts`
+declaraba esta ventana como la excepción a la inalcanzabilidad del 400 de `resolverReglas`;
+ahora dice que se cerró, y **conserva la advertencia que sigue siendo cierta**: no hay
+constraint en la base, hay dos puertas que no se cruzan. Un camino nuevo que escriba
+`item_descuentos` / `item_recargos` sin pasar por `validarReglas` reabre el agujero sin que
+nada avise.

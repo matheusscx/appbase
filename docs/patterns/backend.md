@@ -736,6 +736,49 @@ unit tests de la tabla de arriba; **el alta no tiene test de orden de locks y no
 necesita** —no participa del orden, por lo dicho más arriba—. Leer ese encabezado antes
 de citarlo como evidencia de algo más ancho.
 
+### Las reglas van antes que todo eso (2026-08-28)
+
+La cadena completa, con las tablas de reglas al frente:
+
+```
+recargos  →  descuentos  →  item_receta  →  item_combo  →  items
+```
+
+`ItemsService.validarReglas` toma **`FOR SHARE`** sobre las filas de la regla —en el
+mismo statement que lee `nivel`— antes de escribir la tabla puente, y lo hace en ese
+orden entre las dos tablas en sus dos llamadores (`create` y `update`). El otro lado,
+`validarCambioDeNivel` de `descuentos.service.ts` / `recargos.service.ts`, corre
+**dentro** de `db.transaccion` y toma **`FOR UPDATE`** sobre la misma fila antes de
+contar las filas puente.
+
+**Por qué `FOR SHARE` de un lado y `FOR UPDATE` del otro.** Dos asociaciones de la
+misma regla a ítems distintos no tienen por qué estorbarse; lo único que hay que
+excluir es el cambio de nivel. Y el lock va en el mismo statement que lee `nivel`
+porque, cuando la espera se resuelve, Postgres reevalúa la fila ya actualizada
+(EvalPlanQual): el `nivel` que se compara es el de después del commit ajeno.
+
+**Por qué el `COUNT` no alcanza sin el lock, y el lock no alcanza fuera de la
+transacción.** Es el par. Afuera de `db.transaccion` el `FOR UPDATE` se suelta al
+terminar su statement, así que el guard vuelve a ser un phantom sin que nada falle a
+la vista — de ahí que los dos unit tests que lo fijan (uno por servicio) afirmen las
+dos mitades: que el lock precede al `COUNT`, y que la transacción se abrió antes del
+primer query. Bajo ADR-020 estar adentro no cuesta una conexión más (§ 9).
+
+**Un solo statement con `ANY(...)` no necesita `ORDER BY`**: las filas se lockean en
+orden de plan, igual para las dos transacciones. El `ORDER BY` hace falta cuando el
+camino toma los locks en statements separados, que es el caso del resto de esta
+sección.
+
+⚠️ **Lo que este lock cuesta, para que no se descubra como sorpresa:** un lock se
+sostiene hasta el commit, no hasta el final de su statement. `validarReglas` corre al
+principio de `create()`/`update()` de un ítem, así que el `FOR SHARE` queda tomado
+durante **toda** la transacción del ítem —que sigue con el costeo de receta/combo, los
+`registrarMovimiento` y los inserts de tablas hijas—. Consecuencia: un
+`PATCH /descuentos/:id` que **no** toca `nivel` —renombrar, pausar— también espera,
+porque su `UPDATE` conflictúa con el `FOR SHARE`. Es catálogo/admin y no ruta de venta,
+así que se aceptó; si alguna vez la transacción del ítem se alarga (o alguien la usa en
+un lote), esto es lo primero que hay que volver a mirar.
+
 El porqué completo, con los ciclos que se cerraron y el que quedó abierto, en
 [`agent/resueltos.md`](../agent/resueltos.md) § "El orden de bloqueo de filas de la
 bandeja de desfases".

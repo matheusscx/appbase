@@ -4765,9 +4765,29 @@ export class ItemsService {
     tabla: string,
     pkCol: string,
   ): Promise<void> {
+    // `FOR SHARE`, no `FOR UPDATE`: dos asociaciones concurrentes de la misma
+    // regla a ítems distintos no tienen por qué estorbarse, y lo único que hay
+    // que excluir es el cambio de nivel de la regla, que toma `FOR UPDATE`
+    // (`descuentos.service.ts` / `recargos.service.ts` → `validarCambioDeNivel`).
+    // Sin este lock la validación es un phantom: bajo READ COMMITTED el `COUNT`
+    // de esa otra puerta puede correr antes de este `INSERT` y su `UPDATE`
+    // después, y queda una fila puente con una regla de nivel venta — el estado
+    // que las dos puertas existen para impedir.
+    //
+    // Va en el MISMO statement que lee `nivel` a propósito: cuando el lock se
+    // espera, Postgres reevalúa la fila ya actualizada (EvalPlanQual), así que
+    // el `nivel` que se compara abajo es el de después del commit ajeno, no el
+    // que se leyó antes de bloquear.
+    //
+    // Un solo statement con `ANY(...)`: las filas se lockean en orden de plan,
+    // igual para las dos transacciones, así que no hace falta un `ORDER BY`
+    // para evitar el cruce entre dos asociaciones (misma refutación que en
+    // `fusionarCuentas`). El orden ENTRE tablas sí importa y es el de acá:
+    // reglas antes que `items` (docs/patterns/backend.md § 15).
     const rows: { nivel: NivelRegla }[] = await manager.query(
       `SELECT nivel FROM ${tabla}
-       WHERE ${pkCol} = ANY($1::uuid[]) AND tenant_id = $2 AND eliminado_el IS NULL`,
+       WHERE ${pkCol} = ANY($1::uuid[]) AND tenant_id = $2 AND eliminado_el IS NULL
+       FOR SHARE`,
       [ids, tenantId],
     );
     if (rows.length !== ids.length) {

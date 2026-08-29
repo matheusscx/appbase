@@ -1599,6 +1599,63 @@ describe('DescuentosService', () => {
       expect(managerMock.save).not.toHaveBeenCalled();
     });
 
+    /**
+     * Las dos mitades del arreglo de la carrera, cada una con su mutante:
+     * sacar el `FOR UPDATE` (queda el `COUNT` solo) y volver a llamar al guard
+     * afuera de `db.transaccion` (queda el lock, pero se suelta al instante).
+     * Ninguna de las dos rompe nada visible sin estos tests — el guard sigue
+     * contestando lo mismo en cualquier corrida sin concurrencia.
+     */
+    it('el guard toma el `FOR UPDATE` de la fila de la regla ANTES de contar', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-directo',
+        nivel: NivelRegla.LINEA,
+        valorPorcentaje: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      dataSourceMock.query.mockResolvedValue([{ cnt: '0' }]);
+
+      await service.update(TENANT, 'd1', { nivel: NivelRegla.VENTA });
+
+      const sqls = dataSourceMock.query.mock.calls.map(
+        (c) => (c as [string])[0],
+      );
+      const iLock = sqls.findIndex((q) => q.includes('FOR UPDATE'));
+      const iCount = sqls.findIndex((q) => q.includes('COUNT(*)'));
+      expect(iLock).toBeGreaterThanOrEqual(0);
+      expect(iCount).toBeGreaterThanOrEqual(0);
+      expect(iLock).toBeLessThan(iCount);
+      // Sobre la fila de la regla, no sobre la tabla puente: lockear
+      // `item_descuentos` no serializa contra el cambio de nivel.
+      expect(sqls[iLock]).toContain('FROM descuentos');
+      expect(sqls[iLock]).toContain('descuento_id = $1');
+    });
+
+    it('el guard corre DENTRO de la transacción del update', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-directo',
+        nivel: NivelRegla.LINEA,
+        valorPorcentaje: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      dataSourceMock.query.mockResolvedValue([{ cnt: '0' }]);
+
+      await service.update(TENANT, 'd1', { nivel: NivelRegla.VENTA });
+
+      // Un lock tomado afuera de la transacción se suelta al terminar su
+      // statement: el orden de invocación es lo único que distingue el arreglo
+      // de la versión que no arregla nada.
+      const abrio = dataSourceMock.transaction.mock.invocationCallOrder[0];
+      const primerQuery = dataSourceMock.query.mock.invocationCallOrder[0];
+      expect(abrio).toBeLessThan(primerQuery);
+    });
+
     it('pasar a nivel venta SIN ítems asociados pasa (ancla positiva)', async () => {
       descuentoRepoMock.findOne.mockResolvedValue({
         id: 'd1',

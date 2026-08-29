@@ -1820,6 +1820,44 @@ describe('ItemsService', () => {
       expect(lectura).toContain('FOR UPDATE');
     });
 
+    it('lee la regla con FOR SHARE al asociarla, en el mismo statement que el nivel', async () => {
+      // La otra mitad del par que cierra la carrera del nivel de una regla: el
+      // cambio de nivel toma `FOR UPDATE` sobre esta misma fila
+      // (`descuentos.service.ts` / `recargos.service.ts` →
+      // `validarCambioDeNivel`). Sin este lock la lectura es un phantom: bajo
+      // READ COMMITTED las dos transacciones commitean y queda una regla de
+      // nivel venta asociada a un ítem, que es el estado que las dos puertas
+      // existen para impedir.
+      //
+      // Se afirma también que `nivel` viaja en el MISMO statement, porque de
+      // eso depende el arreglo: al resolverse la espera, Postgres reevalúa la
+      // fila ya actualizada (EvalPlanQual) y el nivel comparado es el nuevo.
+      // Un `SELECT ... FOR SHARE` aparte del que lee `nivel` volvería a
+      // comparar el valor viejo.
+      managerMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM descuentos'))
+          return Promise.resolve([{ nivel: 'linea' }]);
+        if (sql.includes('FROM items'))
+          return Promise.resolve([{ item_id: ITEM_ID, tipo: 'producto' }]);
+        return Promise.resolve([]);
+      });
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        descuentosIds: ['desc-1'],
+      });
+
+      const lectura = managerMock.query.mock.calls
+        .map((c: unknown[]) => c[0] as string)
+        .find((sql) => sql.includes('FROM descuentos'));
+      // Anclado al `SELECT`, no un `toContain('nivel')` suelto: un statement de
+      // solo-lock con un comentario SQL que diga "nivel" contiene las dos
+      // substrings sin que el lock y la lectura estén juntos, y el test pasaría
+      // con el arreglo roto (es el mismo modo de falla que ya está anotado en
+      // `docs/agent/anti-patterns.md` sobre afirmar contra el SQL).
+      expect(lectura).toContain('FOR SHARE');
+      expect(lectura).toMatch(/SELECT\s+nivel\s+FROM descuentos/);
+    });
+
     it('permite reenviar el mismo modoInventario con movimientos al actualizar costo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
