@@ -768,21 +768,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   el navegador, y qué muestra `MoneyInput` cuando la moneda nueva tiene otros decimales? La
   entrada sale del razonamiento sobre el código, no de una corrida.
 
-### El factor de conversión se cuantiza a 4 decimales, y como factor eso es el peor caso (2026-08-28)
-
-- [ ] **`convertirConMapa` hace `toDecimalPlaces(4, ROUND_HALF_UP)`
-  (`backend/src/modules/catalog/catalog.service.ts:173-176`), y `registrarAjusteCosto` lo usa
-  como divisor con cantidad `1`** (`inventario.service.ts:396-403`) — con una cantidad real el
-  redondeo es proporcionalmente chico; con cantidad 1 es el peor caso de precisión relativa.
-  **Hoy no se manifiesta y por eso no es urgente:** los factores del catálogo sembrado son `1`,
-  `100` y `1000` (`seeder.service.ts:287-346`), todos exactos. Se anota porque una unidad
-  futura con factor que no sea potencia de 10 (lb, oz) mete error relativo en el costo, y una
-  con factor menor a `1e-4` respecto de la base dispara el `BadRequestException` de
-  `catalog.service.ts:180-183` con un mensaje **engañoso** para este camino: habla de "la
-  precisión de stock" en un ajuste que no mueve stock. Cierre mínimo: anotar el límite en el
-  comentario de `registrarAjusteCosto` (`inventario.service.ts:381-392`), que hoy explica por
-  qué se reusa el util pero no que el util cuantiza.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño

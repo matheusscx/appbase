@@ -389,6 +389,10 @@ export class InventarioService {
       // base si una unidad elegida vale `costoNuevo`—, y sale del mismo util
       // pasándole cantidad 1 y el factor de la unidad elegida como divisor. No
       // se escribe aritmética nueva.
+      // ⚠️ Lo que el util NO dice en su firma: cuantiza el factor a 4 decimales
+      // (ver su docblock). Con cantidad 1 ese redondeo es el peor caso de
+      // precisión relativa; hoy es inocuo porque todos los factores sembrados
+      // son potencias de 10.
       // Ver docs/superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md
       let costoEnBase = costoNuevo;
       const unidadBase = rows[0].unidad_medida ?? 'unidad';

@@ -1581,6 +1581,10 @@ export class ItemsService {
         if (costoAReconvertir) {
           // 1 unidad vieja equivale a N nuevas (1 kg = 1000 g), así que el
           // costo por unidad nueva es el viejo dividido por N.
+          // ⚠️ Ese N sale cuantizado a 4 decimales (docblock de
+          // `convertirConMapa`), y con cantidad 1 es el peor caso de precisión
+          // relativa: mismo molde que `registrarAjusteCosto`. Inocuo mientras
+          // los factores sean potencias de 10.
           // Entre magnitudes distintas (unidad → kg) no hay N posible, y el
           // error de convertirUnidad ("no se puede convertir de conteo a masa")
           // no dice qué lo bloqueó: acá es el costo, no la cantidad.

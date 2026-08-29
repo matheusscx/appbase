@@ -129,7 +129,26 @@ export class CatalogService {
       this.convertirConMapa(cantidad, desde, hacia, mapa);
   }
 
-  /** Cálculo puro de conversión sobre un mapa de unidades ya cargado. */
+  /**
+   * Cálculo puro de conversión sobre un mapa de unidades ya cargado.
+   *
+   * ⚠️ **Cuantiza a 4 decimales**, que es la escala de `cantidad` en el kardex,
+   * y eso pesa distinto según para qué se llame. Con una cantidad real el error
+   * relativo es despreciable; con `cantidad = '1'` es el **peor caso**, porque
+   * el redondeo cae sobre el factor entero y después se usa como divisor. Hay
+   * dos llamadores así, y los dos reconvierten un COSTO, no una cantidad:
+   * `inventario.registrarAjusteCosto` (`inventario.service.ts:400`) e
+   * `items.update` al cambiar la unidad de un ítem (`items.service.ts:1593`).
+   *
+   * Hoy no se manifiesta: las unidades sembradas tienen factor 1, 100 o 1000
+   * (`seeder.service.ts:287-346`) y no hay forma de crear otras — el
+   * `CatalogController` es de solo lectura (sus cinco rutas son `@Get`) y el único
+   * `save` de la tabla vive en el seeder. Una unidad futura
+   * con factor que no sea potencia de 10 (lb, oz) mete error relativo en el
+   * costo; una con factor menor a 1e-4 respecto de la base cae en el
+   * `BadRequestException` de más abajo, cuyo mensaje habla de *"la precisión de
+   * stock"* — y en esos dos caminos no hay stock que mover.
+   */
   private convertirConMapa(
     cantidad: string,
     codigoDesde: string,

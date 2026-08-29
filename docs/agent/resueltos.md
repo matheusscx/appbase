@@ -12134,3 +12134,45 @@ de backlog es un punto de partida, no un enunciado verificado — y acá lo que 
 el arreglo sino **el alcance que prometía**. Haberla implementado sin medir antes habría dejado
 un commit que dice "ahora es repetible" sobre un archivo que sigue fallando 2 de 9, que es peor
 que no haberla tomado: el próximo la lee cerrada y peritan de cero.
+
+
+## El factor de conversión cuantizado a 4 decimales: anotado en la fuente, y eran dos llamadores (cerrado 2026-08-28)
+
+Entrada de la § 2 de [`pendientes.md`](pendientes.md). Decía: `convertirConMapa` hace
+`toDecimalPlaces(4, ROUND_HALF_UP)` y `registrarAjusteCosto` lo usa **como divisor con
+cantidad `1`**, que es el peor caso de precisión relativa; hoy inocuo porque todos los factores
+sembrados son potencias de 10. Cierre pedido: anotar el límite en el comentario de
+`registrarAjusteCosto`.
+
+**Todo lo falsable de la entrada resistió la verificación** —la cuantización
+(`catalog.service.ts`, dentro de `convertirConMapa`), el uso con cantidad `1`
+(`inventario.service.ts:396-403`) y los factores `1`/`100`/`1000` del seed
+(`seeder.service.ts:287-346`)— **menos el alcance: los llamadores con esa forma son dos, no
+uno.** El gemelo es `items.update` al cambiar la unidad de un ítem
+(`items.service.ts:1589-1602`): pide `convertirUnidad('1', desde, hacia)` y con ese N
+reconvierte el costo vigente, exactamente el mismo molde. Salió de grepear la **conducta** en vez de leer el sitio que la entrada
+nombraba: los 7 llamadores de `convertirUnidad`/`convertirUnidades` fuera del propio service,
+más la forma closure (`crearConversor`): 10 sitios que lo **crean** —donde no hay
+cantidad que pasar, la factory no toma argumentos— y **7 invocaciones reales** del closure
+devuelto, las siete en `items.service.ts`. Ninguno de los otros pasa el literal `'1'`:
+convierten cantidades reales (`cantidadPorReceta`, `ing.cantidad`, `efectivaCantidad`…), donde
+el redondeo es proporcionalmente despreciable.
+
+➕ **Y el gemelo agrega un pliegue que la entrada no podía ver:** su `try/catch` reescribe
+**cualquier** error de `convertirUnidad` como *"no se puede reconvertir entre magnitudes
+distintas"*. O sea que, si algún día el factor cae bajo `1e-4`, ese camino no solo no dice
+"precisión": dice una causa **equivocada**. Es la misma familia que el mensaje engañoso que la
+entrada ya anotaba para el otro llamador ("la precisión de stock" en un ajuste que no mueve
+stock).
+
+**Lo que se hizo:** el límite se anotó **en la fuente** —el docblock de `convertirConMapa`, que
+es donde lo va a leer cualquiera de los 7 llamadores— con los dos sitios de riesgo nombrados, y
+una línea en cada uno de esos dos apuntando ahí. Sin cambio de conducta: los mensajes quedan
+como están, porque hoy son inalcanzables y cambiarlos toca un util compartido con tests que los
+afirman.
+
+📌 **Por qué "hoy no se manifiesta" es más fuerte de lo que la entrada decía:** no es solo que
+los factores sembrados sean exactos, es que **no hay manera de crear otros** — el
+`CatalogController` es de solo lectura (sus cinco rutas son `@Get`) y el único `save` de la
+tabla vive en `seeder.service.ts:338`, así que el catálogo de unidades solo cambia editando el
+seeder. El día que se agregue `lb` u `oz`, el docblock está en el camino.
