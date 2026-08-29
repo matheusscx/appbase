@@ -117,7 +117,7 @@ adentro.
 
 Cada tanda cerró con el gate completo en verde por exit code —`reset-db.sh` antes,
 `--verificar` después— y con revisión independiente. Commits: `ca75e1ef`, `ef4d7bbb`,
-`75140818`, `f37941f6`, `2dd2fe73` y el de la tanda 6.
+`75140818`, `f37941f6`, `2dd2fe73` y `eca6dd01`.
 
 <details>
 <summary>La entrada, como estaba en <code>pendientes.md</code></summary>
