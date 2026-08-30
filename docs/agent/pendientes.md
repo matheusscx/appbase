@@ -1027,9 +1027,9 @@ y construida el mismo día, también ([`resueltos.md`](resueltos.md)).
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs),
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida) y
 una que **bajó de la § 2** al medirla, la moneda del extra en el ticket; más
-la forma de importe que avisa por un camino y no por los otros,
-la nota de crédito (fiscal, frente propio) y la contradicción de `costo: '0'`—; el conteo se
-recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+la nota de crédito (fiscal, frente propio), la contradicción de `costo: '0'` y el **modo** que
+se da vuelta al cambiar de tipo, abierta el 2026-08-29 al cerrar la de la forma de importe—; el
+conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 ⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
 tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
 recordado.
@@ -1224,31 +1224,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   SQL directo sobre `item_producto.stock` desincroniza el saldo materializado del kardex, que
   es exactamente lo que la invariante protege.
 
-- [ ] **Perder la forma de importe avisa por un camino y no por los otros** (frontend + producto;
-  2026-08-26, salió del frente del guardia de forma de importe →
-  [`resueltos.md`](resueltos.md)) — hay **tres** maneras de que una regla pierda la forma de
-  importe que tenía guardada, y las tres se comportan distinto:
-  1. **Cambiar el tipo** a uno que no usa esa forma —en las **dos** direcciones: escalones →
-     valor único, y valor único → escalones— → desde el 2026-08-26 el drawer **avisa**
-     (*"«X» tiene 2 escalones. El tipo que elegiste no lo usa…"*) y recién después manda el
-     vaciado.
-  2. **Mover el radio a "valor único"** en los tipos por método de pago, que ELIGEN forma →
-     los borra **sin preguntar**, como se decidió el 2026-08-25.
-  3. **Cambiar entre dos tipos que los dos usan escalones** → el formulario se vacía y el
-     backend contesta *"requiere al menos un tramo"*, sin aviso previo. Es el caso más benigno
-     —la sección queda a la vista, vacía, así que el usuario ve lo que pasó— pero es una
-     tercera conducta para la misma familia de pérdida, y lo levantó la revisión independiente
-     al notar que esta entrada enumeraba dos.
-  **El argumento para dejarlo así:** en el caso 2 el usuario está mirando los escalones cuando
-  mueve el radio, y en el 3 ve el formulario vacío; en el 1 el campo ya desapareció de la
-  pantalla en el mismo gesto que dispara el borrado. O sea que la asimetría **no es un olvido**,
-  responde a que en un caso no queda nada a la vista y en los otros sí.
-  **El argumento para unificarlo:** es la misma pérdida, y una pantalla que a veces pregunta y
-  a veces no enseña a no leer el modal.
-  ❓ **La pregunta al owner, chica:** ¿los casos 2 y 3 también avisan, o se quedan como están?
-  Si avisan, es la misma condición del caso 1 con `eligeForma` adentro y los tests espejados;
-  si no, esta entrada se cierra escribiendo el porqué donde hoy está el comentario.
-
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
   `ventas.service.ts:982` `crearNotaCredito` — la cita vieja decía `:854`, que hoy es otra
@@ -1327,6 +1302,36 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   estricto solo para negativos), o el comentario del DTO quedó de una decisión que se
   revirtió y hay que borrarlo? Ninguna de las dos se puede elegir sin saber cuál era la
   intención original.
+
+- [ ] **Cambiar de tipo da vuelta el MODO y se lleva puesto el valor tipeado** (frontend;
+  medido 2026-08-29, al lado del frente de *"perder la forma de importe"* →
+  [`resueltos.md`](resueltos.md)) — editar un descuento `directo` en **porcentaje** con `0.10`
+  cargado y cambiarle el tipo a `metodo_pago` manda al backend
+  `{ modo: "monto_fijo", valorMonto: "" }`. El `0.10` no viaja en ninguna columna.
+  **Es otra pérdida que la del frente vecino, y por eso va aparte:** allá se pierde la
+  **forma** (escalones vs valor único), acá la **unidad** (porcentaje vs plata). Son los dos
+  ejes que el propio código insiste en no mezclar — ver el comentario de `formaImporteOptions`
+  (`descuentos.vue:88-92`).
+  **Lo que se abrió y se midió:**
+  - el body de arriba salió de una sonda corrida en el harness de `descuentos.nuxt.spec.ts`
+    (fila `directo` en porcentaje → tipo `metodo_pago` → Guardar), no de leer el código;
+  - `onTipoChange` fuerza el modo del tipo nuevo sin mirar el viejo
+    (`descuentos.vue:189`: `config.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'`), y
+    para los **dos** tipos `libre` eso es siempre `monto_fijo`, aunque el tipo viejo también
+    fuera `libre` y el valor siguiera siendo expresable;
+  - el campo queda **a la vista y vacío**: `mostrarValor` sigue en `true`, así que no es un
+    borrado a espaldas del usuario — es la misma forma que el camino 3 del frente vecino.
+  **Lo INFERIDO, que no se corrió contra la API:** que ese body rebota. El DTO declara
+  `@IsOptional() @IsNumberString()` sobre `valorMonto` (`create-descuento.dto.ts:60-63`,
+  abierto), y `@IsOptional()` saltea `null`/`undefined` pero no `''`; de ahí se sigue que el
+  400 lo tira el `ValidationPipe` (*"valorMonto must be a number string"*) y que
+  `validarFormaDeImporte` ni corre. **No está medido end-to-end**: el harness del drawer
+  mockea `useApiFetch`, así que la respuesta real no se vio.
+  ❓ **La pregunta al owner, y por eso está en esta sección:** ¿el cambio de tipo **conserva**
+  el modo cuando el tipo nuevo también lo admite (los dos `libre`), o **avisa** como los cuatro
+  caminos del frente vecino? Conservar es la respuesta chica, pero cambia una conducta que hoy
+  es incondicional y que se escribió a propósito — el reset del modo existe para que un `0.10`
+  de porcentaje no quede mostrándose como `0` de plata (ver el docblock de `onModoChange`).
 
 ## 5. Carreras de concurrencia
 

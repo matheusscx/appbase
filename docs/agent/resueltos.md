@@ -12372,3 +12372,106 @@ abiertas"* y eran **ocho** antes de sacar esta —los dos carteles de la tarjeta
 `0820e414` sin tocar ese párrafo—. Quedó en **siete**, corrido el `awk` que el propio párrafo
 manda correr.
 
+---
+
+## Perder la forma de importe: los cuatro caminos avisan (cerrado 2026-08-29)
+
+Cerró la entrada *"Perder la forma de importe avisa por un camino y no por los otros"*
+(abierta el 2026-08-26, sección 4). **Decisión del owner, 2026-08-29: avisan todos.** Hasta
+ese día avisaba solo el primero.
+
+**Qué se hizo**, en `configuracion/descuentos.vue` y su gemelo `recargos.vue` —los dos se
+mueven juntos, siempre—: `escalonesAPerder` dejó de preguntarle al TIPO y pasó a preguntarle
+a la PANTALLA. Lo que decide si el body lleva escalones es `mostrarTramos`, así que *"no están
+a la vista"* ya es *"se van"*. Toda la condición nueva es esto:
+
+```ts
+if (mostrarTramos.value && form.value.tramos.length) return 0
+return escalonesGuardados.value
+```
+
+| Camino | Gesto | Antes | Ahora |
+|---|---|---|---|
+| 1 | cambiar el tipo a uno que no usa esa forma (las dos direcciones) | avisaba | igual, mismo texto |
+| 2 | mover el radio de forma en un tipo que ELIGE (las dos direcciones) | borraba callado | avisa |
+| 3 | cambiar entre dos tipos que los dos usan escalones | 400 sin aviso previo | avisa antes del 400 |
+| 4 | cambiar a un tipo que ELIGE forma: el radio queda en "valor único" | borraba callado | avisa |
+
+**Un solo modal, no cuatro:** `avisoPerdida` devuelve título, texto y label del botón juntos,
+y entre las variantes cambia **quién** dejó de usar el importe — el tipo o la forma. El conteo
+de escalones sale de la fila (`escalonesGuardados`), no de una constante.
+
+📌 **El texto dice "la forma que quedó elegida", no "que elegiste", y es a propósito:** en el
+camino 4 el usuario no eligió nada, `onTipoChange` dejó el radio ahí solo.
+
+**El camino 3 no promete un borrado, y eso no es cosmético:** ahí el tipo nuevo SÍ usa
+escalones, el backend rechaza el guardado vacío (*"Este tipo requiere al menos un tramo"*,
+`descuentos.service.ts:797-798`) y la fila queda como estaba. Su botón dice **"Guardar
+igual"**, no *"Guardar y borrar"*. Ese 400 es del backend y **se queda como está**: lo único
+que cambia es que el usuario se entera antes de llegar ahí.
+
+**Qué decía mal la entrada** — cuatro cosas, y la primera es la que importa:
+
+1. **Decía tres caminos y son cuatro.** El que faltaba, el 4: nadie mueve el radio, la sección
+   desaparece y los escalones se borran igual de callados. Es la **tercera** vez que esta
+   enumeración sale corta — nació con dos, una revisión independiente levantó el 3, y el 4
+   apareció al implementar los otros. Por eso la condición final **pregunta por la pantalla en
+   vez de enumerar gestos**: un gesto nuevo que esconda la sección queda cubierto sin que
+   nadie lo tenga que ver venir. El owner lo decidió el mismo día, con la escena medida
+   delante: *"por mayor"* con 2 escalones → *"por método de pago"* → completar lo que el
+   formulario pide → guarda bien y los escalones desaparecen sin decir nada. ⚠️ **Lo que
+   pide son DOS cosas, no una**, y quien reproduzca la escena llenando solo el valor único
+   recibe *"Selecciona al menos un método de pago"* en vez del guardado: `onTipoChange`
+   también vacía `metodoPagoIds`, y el backend los exige. Lo levantó la revisión
+   independiente sobre este mismo texto.
+2. **Del camino 2 nombraba una sola dirección** ("mover el radio a valor único"). La otra
+   —mover el radio a "por escalones", que esconde el campo del valor y lo apaga con su
+   `null`— es igual de real, y el propio pedido la contemplaba al decir *"los tests
+   espejados"*. Entraron las dos.
+3. **La hipótesis de la entrada no generalizaba.** Decía *"es la misma condición del caso 1
+   con `eligeForma` adentro"*: eso cubre los caminos 1, 2 y 4, pero **no** el 3, donde la
+   sección sigue a la vista y lo que la vacía es `onTipoChange`. El 3 necesitó su propia rama
+   —`mostrarTramos && form.tramos.length`— y su propio texto.
+4. **El argumento "en el caso 2 el usuario está mirando los escalones" no vale para todos.**
+   Vale cuando mueve el radio a mano; no vale en el camino 4, donde los escalones
+   desaparecieron en el gesto anterior. Es el argumento del camino 1, no el del 2 — y fue lo
+   que inclinó la decisión del owner.
+
+**Qué lo fija.** 14 tests nuevos, 7 por pantalla, en `descuentos.nuxt.spec.ts` y
+`recargos.nuxt.spec.ts`. **Mutante corrido en las dos pantallas**: revertir `escalonesAPerder`
+y `valorAPerder` a las condiciones del 2026-08-26 pone en rojo exactamente los **5** tests de
+conducta nueva de cada archivo (10 de 70) y deja verdes los anclas. O sea que los tests
+**habrían cazado el bug**, no solo se rompen si se toca la línea.
+
+Dos anclas cuidan el modo de falla contrario, que es el modal que sale siempre y enseña a
+confirmar sin leer:
+
+- una regla por escalones que **no cambia nada** guarda derecho — si el camino 3 mirara el
+  tipo en vez del formulario, el modal saldría en cada guardado de cada regla por escalones;
+- **volver a cargar un escalón lo apaga**, que es lo que prueba que el aviso mira el
+  formulario y no el cambio de tipo.
+
+Y el conteo se fija con **dos** escalones en los tests nuevos mientras los del 2026-08-26 usan
+uno: entre los dos, un `2` hardcodeado no pasa.
+
+⚠️ **Lo que corrigió la revisión independiente, y vale para el próximo que escriba un test de
+este drawer:** el test del camino 2 confirmaba el borrado **sin cargar el valor único**, o sea
+congelaba como correcto un body (`valorPorcentaje: ''`) que la API **rechaza** — `@IsOptional()`
+saltea `null`/`undefined`, no `''`, así que muere en el `ValidationPipe` y el borrado que el
+modal promete nunca pasa. El test ahora tipea el valor antes de confirmar, que es el flujo
+real. **El mock de `useApiFetch` contesta 200 donde el backend contestaría 400**: un body que
+el test da por bueno no está validado por nadie.
+
+⚠️ **Una asimetría real entre las dos pantallas, que no es una omisión:** el camino 3 de
+recargos sale de `recargo_metodo_pago` en forma "por escalones", no de dos tipos por
+escalones como en descuentos. `RECARGO_CONFIG` tiene **un solo** tipo por escalones puro
+(`recargo_por_monto_venta`), así que ese par no existe de ese lado.
+
+📌 **Lo que se extrajo, por la regla de la tercera:** `radioPorValor` subió a nivel módulo en
+`descuentos.nuxt.spec.ts` —lo usan los describes de modo, de nivel y ahora el de la forma—,
+igual que había pasado con `abrirEdicionDeLaFila`. En `recargos.nuxt.spec.ts` el click de
+radio va por la segunda copia y queda local.
+
+📌 **Lo que quedó afuera, medido y anotado:** cambiar entre dos tipos de valor único con
+distinto `modo` pierde el **valor tipeado** — es perder la *unidad*, no la *forma*, y abrió su
+propia entrada en [`pendientes.md`](pendientes.md).

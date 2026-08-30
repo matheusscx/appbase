@@ -370,32 +370,46 @@ async function descripcionDeUso(): Promise<string | undefined> {
 }
 
 /**
- * Los escalones guardados que el tipo nuevo ya no puede usar: al guardar hay
- * que limpiarlos, porque el backend solo reemplaza los hijos que vengan en el
- * body y dejarlos vivos deja la fila diciendo dos cosas — el motor cobraría el
- * escalón y no el valor que se acaba de escribir (400 desde el 2026-08-26).
+ * Los escalones guardados que NO van a sobrevivir a este guardado.
  *
- * ⚠️ **No cubre el interruptor de los tipos que ELIGEN forma** (método de pago):
- * ahí volver a valor único también borra los escalones y sigue haciéndolo sin
- * preguntar, como se decidió el 2026-08-25. La asimetría está anotada en
- * `docs/agent/pendientes.md`; unificarla es decisión del owner, no de acá.
+ * Perderlos tiene CUATRO caminos y hasta el 2026-08-29 avisaba uno solo; el
+ * owner los unificó ese día. La condición no mira el TIPO sino la PANTALLA, y
+ * ése es el cambio: lo que decide si el body lleva escalones es `mostrarTramos`,
+ * así que *"no están a la vista"* ya es *"se van"*, venga eso del gesto que
+ * venga:
+ *   1. **el tipo nuevo no tiene el campo** (`campoTramos: false`);
+ *   2. **el radio de forma se movió a "un valor único"** en un tipo que ELIGE
+ *      forma;
+ *   3. **la sección quedó a la vista pero SIN NINGUNO** — `onTipoChange` la
+ *      vacía al cambiar entre dos tipos que los dos usan escalones. Es el único
+ *      de los cuatro que **no borra nada**, porque el backend rechaza el
+ *      guardado vacío, así que su aviso dice otra cosa (ver `avisoPerdida`);
+ *   4. **el tipo nuevo ELIGE forma** y `onTipoChange` deja el radio en "un valor
+ *      único": nadie mueve el radio y los escalones se van igual.
+ *
+ * ⚠️ **Por qué pregunta por la pantalla y no enumera gestos:** esta lista salió
+ * corta tres veces seguidas —nació con dos, una revisión independiente levantó
+ * el 3, y el 4 apareció recién al implementar los otros—. Un gesto nuevo que
+ * esconda la sección queda cubierto sin que nadie lo tenga que ver venir.
  */
-const escalonesAPerder = computed(
-  () => (editingId.value && !eligeForma.value && !config.value?.campoTramos
-    ? escalonesGuardados.value
-    : 0),
-)
+const escalonesAPerder = computed(() => {
+  if (!editingId.value || !escalonesGuardados.value) return 0
+  // Con la sección a la vista, lo que decide es si quedó alguno cargado (camino
+  // 3). Con la sección fuera de pantalla, se van.
+  if (mostrarTramos.value && form.value.tramos.length) return 0
+  return escalonesGuardados.value
+})
 
 /**
  * La dirección espejo, que es igual de real y se olvidó en la primera versión:
- * pasar de un tipo de valor único a uno POR ESCALONES. El campo del valor
- * tampoco está en pantalla —`campoValor: false`— así que el usuario no puede
- * borrarlo a mano, y el backend rechaza con 400 la fila que queda diciendo las
- * dos cosas.
+ * el valor único que la fila tenía cargado y que la pantalla ya no muestra. Pasa
+ * al cambiar a un tipo POR ESCALONES (`campoValor: false`) y también al mover el
+ * radio a "Por escalones" en un tipo que elige forma. El campo no está en
+ * pantalla, así que el usuario no puede borrarlo a mano, y el backend rechaza con
+ * 400 la fila que queda diciendo las dos cosas.
  */
 const valorAPerder = computed(
-  () => !!(editingId.value && !eligeForma.value && !config.value?.campoValor
-    && valorGuardado.value),
+  () => !!(editingId.value && valorGuardado.value && !mostrarValor.value),
 )
 
 /** Qué se pierde al guardar, en palabras, o `null` si no se pierde nada. */
@@ -409,20 +423,60 @@ const perdidaDeImporte = computed<string | null>(() => {
 })
 
 /**
+ * El aviso entero —título, texto y label del botón—, o `null` cuando no hay nada
+ * que avisar, que es también el portón de `guardar()`.
+ *
+ * Las variantes viven juntas a propósito: es el MISMO modal con las palabras que
+ * cada camino necesita, no cuatro modales. Entre las variantes cambia una sola
+ * cosa —quién dejó de usar el importe, el tipo o la forma—.
+ *
+ * La tercera cambia además qué promete el botón, y no es cosmético: ahí el tipo
+ * SÍ usa escalones y el backend rechaza el guardado vacío, así que prometer un
+ * borrado sería prometer algo que no pasa.
+ */
+const avisoPerdida = computed(() => {
+  const perdida = perdidaDeImporte.value
+  if (!perdida) return null
+  if (escalonesAPerder.value && mostrarTramos.value) {
+    return {
+      titulo: 'El importe quedó sin cargar',
+      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó sin ninguno. Cargalos de nuevo: al guardar así, el servidor lo rechaza.`,
+      confirmLabel: 'Guardar igual',
+    }
+  }
+  // "Quedó elegida" y no "elegiste", que sería más natural: en el camino 4 el
+  // usuario no eligió nada — `onTipoChange` dejó el radio en "un valor único" al
+  // entrar al tipo nuevo. El texto tiene que ser cierto en los dos.
+  if (eligeForma.value) {
+    return {
+      titulo: 'La forma elegida no usa ese importe',
+      mensaje: `«${form.value.nombre}» tiene ${perdida}. La forma de importe que quedó elegida no lo usa, así que al guardar se borra.`,
+      confirmLabel: 'Guardar y borrar',
+    }
+  }
+  return {
+    titulo: 'El tipo nuevo no usa ese importe',
+    mensaje: `«${form.value.nombre}» tiene ${perdida}. El tipo que elegiste no lo usa, así que al guardar se borra.`,
+    confirmLabel: 'Guardar y borrar',
+  }
+})
+
+/**
  * El portón. Va bindeado al submit del formulario, así que no puede recibir
  * parámetros propios —el evento ocupa el primero—: por eso el camino
  * confirmado entra por `guardarAhora`, no por un flag.
  *
  * Frena y pregunta una sola vez. El owner eligió avisar por sobre borrar
- * callado (2026-08-26): al elegir el tipo nuevo la sección de escalones
- * desaparece del formulario, así que sin este modal el usuario pierde algo que
- * ya no tiene a la vista.
+ * callado (2026-08-26 el primer camino, 2026-08-29 los otros tres): perder la
+ * forma de importe que la fila tenía guardada avisa **siempre**, venga el
+ * borrado del tipo nuevo, del radio de forma o de una sección que quedó vacía.
+ * Los cuatro caminos, uno por uno: `escalonesAPerder`.
  */
 async function guardar() {
   await checkNombre()
   if (nombreError.value) return
 
-  if (perdidaDeImporte.value) {
+  if (avisoPerdida.value) {
     confirmEscalonesOpen.value = true
     return
   }
@@ -982,16 +1036,17 @@ const columns: TableColumn<Regla>[] = [
       @confirm="confirmarPausar"
     />
 
-    <!-- Cambiar el tipo a uno que no usa la forma de importe que la fila tenía
-         —escalones o valor único, las dos direcciones— la borra. Se avisa antes
-         (decisión del owner, 2026-08-26) porque al elegir el tipo nuevo el
-         campo donde se veía ya desapareció del formulario: sin este modal el
-         usuario pierde algo que dejó de estar a la vista. -->
+    <!-- Perder la forma de importe que la fila tenía guardada —escalones o valor
+         único, las dos direcciones— avisa antes, y desde el 2026-08-29 por los
+         CUATRO caminos que llevan ahí, no solo por el cambio de tipo (decisión
+         del owner). UN modal, no cuatro: lo que cambia son las palabras, y viven
+         juntas en `avisoPerdida`. -->
     <CrudModal
+      v-if="avisoPerdida"
       v-model:open="confirmEscalonesOpen"
-      title="El tipo nuevo no usa ese importe"
-      :message="`«${form.nombre}» tiene ${perdidaDeImporte}. El tipo que elegiste no lo usa, así que al guardar se borra.`"
-      confirm-label="Guardar y borrar"
+      :title="avisoPerdida.titulo"
+      :message="avisoPerdida.mensaje"
+      :confirm-label="avisoPerdida.confirmLabel"
       :loading="saving"
       @cancel="confirmEscalonesOpen = false"
       @confirm="() => { confirmEscalonesOpen = false; guardarAhora() }"

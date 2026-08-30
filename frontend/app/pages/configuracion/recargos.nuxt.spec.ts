@@ -46,6 +46,15 @@ const TIPOS_REGLA = [
     codigo: 'recargo_por_monto_venta',
     descripcion: null,
   },
+  // Entró el 2026-08-29 con los caminos nuevos de perder la forma de importe: es
+  // el único tipo de recargos con las DOS banderas, o sea el único donde
+  // aparece el radio "Cómo cobra".
+  {
+    id: 'tipo-3',
+    nombre: 'Por método de pago',
+    codigo: 'recargo_metodo_pago',
+    descripcion: null,
+  },
 ]
 
 /** Sin la moneda oficial, `MoneyInput` no resuelve config y se rinde
@@ -154,6 +163,20 @@ function dialogo(): HTMLElement | null {
 }
 
 /**
+ * Un radio del drawer por su `value`. Reka UI los rinde como
+ * `button[role="radio"]`, no como `<input type=radio>`.
+ *
+ * Vive a nivel módulo porque lo usan tres describes —modo, nivel y, desde el
+ * 2026-08-29, la forma de importe—: el tercer uso es el umbral que fija
+ * `CLAUDE.md`. Gemelo de `radioPorValor` en `descuentos.nuxt.spec.ts`.
+ */
+function radioPorValor(valor: string): HTMLElement {
+  const radio = dialogo()?.querySelector<HTMLElement>(`[role="radio"][value="${valor}"]`)
+  expect(radio, `radio "${valor}" dentro del drawer`).toBeTruthy()
+  return radio!
+}
+
+/**
  * Gemelo del de descuentos. ⚠️ **Cuál de los dos tests caza el bug cambió con las
  * columnas partidas:** el primero —de porcentaje a monto fijo— ya NO muere si se
  * apaga el reset, porque `abrirEditar` puebla `valorMonto` desde la fila y en una
@@ -190,11 +213,8 @@ describe('configuracion/recargos — cambiar de modo no deja un valor de la otra
     return input!
   }
 
-  /** Reka UI rinde los radios como `button[role="radio"]`, no `<input type=radio>`. */
   async function clickModo(valor: string) {
-    const radio = dialogo()?.querySelector<HTMLElement>(`[role="radio"][value="${valor}"]`)
-    expect(radio, `radio de modo "${valor}"`).toBeTruthy()
-    radio!.click()
+    radioPorValor(valor).click()
     await new Promise(r => setTimeout(r, 20))
   }
 
@@ -357,11 +377,7 @@ describe('configuracion/recargos — el tipo empuja el nivel, sin bloquearlo', (
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
 
-  function radioNivel(valor: string): HTMLElement {
-    const el = dialogo()?.querySelector<HTMLElement>(`[role="radio"][value="${valor}"]`)
-    expect(el, `radio de nivel "${valor}"`).toBeTruthy()
-    return el!
-  }
+  const radioNivel = radioPorValor
 
   function nivelElegido(): string | null {
     for (const valor of ['linea', 'venta']) {
@@ -500,10 +516,20 @@ describe('configuracion/recargos — el tipo empuja el nivel, sin bloquearlo', (
 })
 
 /**
- * Cambiar el tipo de una regla a uno que no usa escalones **borra** los que
- * tenía, porque el backend rechaza con 400 la fila que dice dos cosas
- * (`validarValorUnico`, 2026-08-26) y solo reemplaza los hijos que vengan en el
- * body. El owner eligió **avisar antes** de borrarlos (2026-08-26).
+ * Perder la forma de importe que la fila tenía guardada **avisa antes**
+ * (owner: 2026-08-26 el primer camino, 2026-08-29 los otros tres), porque el
+ * backend rechaza con 400 la fila que dice dos cosas (`validarValorUnico`) y
+ * solo reemplaza los hijos que vengan en el body.
+ *
+ * Gemelo del describe homónimo de `descuentos.nuxt.spec.ts`, y por el mismo
+ * motivo que el resto de este archivo: la simetría entre las dos pantallas es
+ * una intención, no una garantía, y nada avisa si una la pierde.
+ *
+ * ⚠️ **Una diferencia real, no una omisión:** el camino 3 —cambiar entre dos
+ * tipos que los dos usan escalones— acá sale de `recargo_metodo_pago` en forma
+ * "por escalones", no de dos tipos por escalones como en descuentos.
+ * `RECARGO_CONFIG` tiene **un solo** tipo por escalones puro
+ * (`recargo_por_monto_venta`), así que el par no existe de este lado.
  *
  * Es de RUNTIME y por eso vive acá: el freno depende de `escalonesGuardados`,
  * que se llena al abrir la edición y que `onTipoChange` **no** puede reponer —
@@ -511,11 +537,15 @@ describe('configuracion/recargos — el tipo empuja el nivel, sin bloquearlo', (
  * la sección donde se veían desapareció de la pantalla—. Ni el build ni el
  * typecheck ven eso.
  *
- * `abrirEdicionDeLaFila` se extrajo a nivel módulo al escribir este describe:
- * era su TERCER uso, y `CLAUDE.md` manda extraer a la tercera. `elegirTipo`
- * sigue duplicado —va por la segunda— y por eso queda local.
+ * `abrirEdicionDeLaFila` y `radioPorValor` se extrajeron a nivel módulo al
+ * escribir este describe: era el TERCER uso de cada uno, y `CLAUDE.md` manda
+ * extraer a la tercera. ⚠️ La primera versión de este comentario decía que el
+ * click de radio "iba por la segunda" y **era falso**: ya estaba en `clickModo`
+ * y en `radioNivel`, o sea que éste era el tercero — un conteo escrito de
+ * memoria en vez de grepeado, cazado por la revisión del diff integrado.
+ * `elegirTipo` sí va por la segunda y por eso queda local.
  */
-describe('configuracion/recargos — cambiar a un tipo sin escalones avisa antes de borrarlos', () => {
+describe('configuracion/recargos — perder la forma de importe avisa por los cuatro caminos', () => {
   beforeEach(() => {
     // Una regla POR ESCALONES, que es la única que tiene algo que perder.
     recargosBackend = [fila({
@@ -579,6 +609,31 @@ describe('configuracion/recargos — cambiar a un tipo sin escalones avisa antes
     boton!.click()
     await new Promise(r => setTimeout(r, 60))
   }
+
+  /** El radio "Cómo cobra", que solo existe en los tipos que ELIGEN forma
+   *  (`recargo_metodo_pago` acá) y que es el gesto del segundo camino. */
+  async function elegirForma(valor: 'valor' | 'tramos') {
+    radioPorValor(valor).click()
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  /** El campo "Valor" del drawer, en su rama de porcentaje. Con la forma en "un
+   *  valor único" la sección de escalones no está montada, así que es el único
+   *  input con `inputmode="decimal"` adentro del drawer. */
+  async function tipearValor(valor: string) {
+    const input = dialogo()?.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
+    expect(input, 'campo "Valor" dentro del drawer').toBeTruthy()
+    input!.value = valor
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  /** Dos escalones, no uno: el aviso tiene que decir el número REAL, y con uno
+   *  solo un `2` hardcodeado pasaría igual. */
+  const DOS_ESCALONES = [
+    { minimo: '50000', valorMonto: null, valorPorcentaje: '0.10' },
+    { minimo: '90000', valorMonto: null, valorPorcentaje: '0.15' },
+  ]
 
   it('frena con el aviso en vez de guardar', async () => {
     const wrapper = await montar()
@@ -672,6 +727,168 @@ describe('configuracion/recargos — cambiar a un tipo sin escalones avisa antes
     // la columna que el body tiene que apagar es `valorMonto`. El `null` TIENE
     // que viajar: omitirlo deja vivo el valor persistido y el backend da 400.
     expect(patchesGuardar[0]?.body.valorMonto).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  // ── Camino 2: el radio de forma, en los tipos que ELIGEN ──────────────────
+  //
+  // Hasta el 2026-08-29 este camino borraba los escalones **sin preguntar**
+  // (decisión del 2026-08-25), y era la asimetría que abrió la entrada del
+  // backlog: la misma pérdida preguntaba por un camino y no por el otro.
+
+  it('mover el radio a "un valor único" también avisa, y dice cuántos escalones', async () => {
+    recargosBackend = [fila({ tipoReglaId: 'tipo-3', tramos: DOS_ESCALONES })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await elegirForma('valor')
+    await clickGuardar()
+
+    // El número sale de la fila, no de una constante del código.
+    expect(document.body.textContent).toContain('tiene 2 escalones')
+    // Y no dice "el tipo": acá el tipo no cambió, cambió la forma.
+    expect(document.body.textContent).toContain('La forma de importe que quedó elegida no lo usa')
+    expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('y al confirmar manda `tramos: []`, que es lo que de verdad los borra', async () => {
+    recargosBackend = [fila({ tipoReglaId: 'tipo-3', tramos: DOS_ESCALONES })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirForma('valor')
+    // El valor único va ANTES de confirmar, y no es decoración: es el flujo
+    // real. Sin él el body viaja con `valorPorcentaje: ''`, que muere en el
+    // `ValidationPipe` (`@IsOptional()` saltea `null`/`undefined`, no `''`), o
+    // sea que el borrado que el modal promete nunca llega a pasar y el test
+    // congelaría como correcto un estado que la API rechaza. Lo levantó la
+    // revisión independiente.
+    await tipearValor('0.03')
+    await clickGuardar()
+
+    const confirmar = botonPorTexto('Guardar y borrar')
+    expect(confirmar, 'botón de confirmación del aviso').toBeTruthy()
+    confirmar!.click()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(patchesGuardar).toHaveLength(1)
+    expect(patchesGuardar[0]?.body.tramos).toEqual([])
+    expect(patchesGuardar[0]?.body.valorPorcentaje).toBe('0.03')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * La dirección espejo del camino 2, que la entrada del backlog nunca nombró
+   * —enumeraba solo "mover el radio a valor único"—.
+   */
+  it('y el espejo: mover el radio a "por escalones" avisa por el valor único', async () => {
+    recargosBackend = [fila({ tipoReglaId: 'tipo-3', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await elegirForma('tramos')
+    await clickGuardar()
+
+    expect(document.body.textContent).toContain('un valor único cargado')
+    expect(document.body.textContent).toContain('La forma de importe que quedó elegida no lo usa')
+    expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  // ── Camino 3: el tipo nuevo también usa escalones, y la sección queda vacía ─
+
+  /**
+   * `recargo_metodo_pago` en forma "por escalones" (tipo-3) →
+   * `recargo_por_monto_venta` (tipo-2): los dos usan escalones, así que la
+   * sección NO desaparece; `onTipoChange` la deja vacía y el guardado se iba
+   * derecho al 400 *"requiere al menos un tramo"*. Ese 400 sigue siendo del
+   * backend y no se toca: lo que cambia es que el usuario se entera antes.
+   */
+  it('cambiar a otro tipo que también usa escalones avisa, con la sección a la vista', async () => {
+    recargosBackend = [fila({ tipoReglaId: 'tipo-3', tramos: DOS_ESCALONES })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-2')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).toContain('tiene 2 escalones, y el formulario quedó sin ninguno')
+    // El único de los cuatro que NO promete un borrado, porque no lo hay: el
+    // backend rechaza el guardado vacío y la fila queda como estaba.
+    expect(botonPorTexto('Guardar igual'), 'botón "Guardar igual"').toBeTruthy()
+    expect(botonPorTexto('Guardar y borrar'), 'el label del borrado NO va acá').toBeFalsy()
+    expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  /**
+   * El ancla del camino 3, y la que evita el modal que sale siempre: el aviso
+   * mira lo que quedó EN EL FORMULARIO, no el cambio de tipo.
+   */
+  it('pero volver a cargar un escalón lo apaga', async () => {
+    recargosBackend = [fila({ tipoReglaId: 'tipo-3', tramos: DOS_ESCALONES })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-2')
+
+    const agregar = botonPorTexto('Agregar tramo')
+    expect(agregar, 'botón "Agregar tramo" de la sección de escalones').toBeTruthy()
+    agregar!.click()
+    await new Promise(r => setTimeout(r, 20))
+
+    await clickGuardar()
+
+    expect(document.body.textContent).not.toContain('quedó sin ninguno')
+    expect(patchesGuardar).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
+  /**
+   * La otra ancla: una regla POR ESCALONES que no cambia nada tiene
+   * `escalonesGuardados > 0` todo el tiempo. Si el camino 3 mirara el tipo en
+   * vez del formulario, el modal saldría en CADA guardado.
+   */
+  it('un recargo por escalones que no cambia nada guarda derecho, sin preguntar', async () => {
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await clickGuardar()
+
+    expect(document.body.textContent).not.toContain('quedó sin ninguno')
+    expect(document.body.textContent).not.toContain('no usa ese importe')
+    expect(patchesGuardar).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
+  // ── Camino 4: el tipo nuevo ELIGE forma, y el radio queda en "valor único" ─
+
+  /**
+   * `recargo_por_monto_venta` (tipo-2) → `recargo_metodo_pago` (tipo-3). Es el
+   * camino que la entrada del backlog **no enumeraba** y que apareció al
+   * implementar los otros tres: nadie mueve el radio —`onTipoChange` lo deja en
+   * "un valor único"—, la sección desaparece y los escalones se borraban
+   * callados. Owner, 2026-08-29: avisa como los demás.
+   */
+  it('el cuarto camino también avisa: cambiar a un tipo que ELIGE forma', async () => {
+    recargosBackend = [fila({ tipoReglaId: 'tipo-2', tramos: DOS_ESCALONES })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-3')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).toContain('tiene 2 escalones')
+    // Dice "la forma", no "el tipo": el tipo nuevo SÍ usa escalones. Lo que no
+    // los usa es la forma en la que el cambio de tipo dejó el radio.
+    expect(document.body.textContent).toContain('La forma de importe que quedó elegida no lo usa')
+    expect(patchesGuardar).toEqual([])
 
     wrapper.unmount()
   })
