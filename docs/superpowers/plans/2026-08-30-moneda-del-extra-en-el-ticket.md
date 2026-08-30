@@ -25,6 +25,33 @@ suma"*—, con las tres respuestas del owner del 2026-08-30 y su plan en cinco p
 
 ---
 
+## ✅ Ejecutado el 2026-08-30 (`3a2f1c92`, `98a36254`, `ae4694a5`, `2a3f4505`)
+
+Gate completo en verde: backend `lint:check` 0 errores, `typecheck`, `test` (2386/2387) y
+`test:e2e` **completo** (51 suites, 664 tests) con `reset-db.sh` antes y `--verificar` después;
+frontend `build`, `test` (931), `typecheck:ratchet` y `design:check`. Cada commit con revisión
+independiente `domain-reviewer` sobre su diff exacto.
+
+**El 1 de 2387 en rojo es preexistente y no es de esta tarea:** el unitario de vigencia de
+tokens afirma que 7 días son 168 horas y cruzando el cambio de hora son 167. Se reprodujo
+idéntico en un worktree de `149d3bc3`, el commit anterior a este trabajo. Quedó anotado en
+`pendientes.md` § 1.
+
+**Tres desviaciones del plan, las tres por medición:**
+
+1. **Las tareas 3 y 4 fueron un solo commit.** La 3 sola dejaba el campo del carrito muerto
+   entre commits, y son la misma causa.
+2. **El punto 5 asumía un preview que no existe.** El drawer nunca renderizó el detalle
+   priceado —muestra el resumen de texto y el total—: lo calculaba **solo** para pasárselo al
+   carrito. Al sacar el campo del carrito, `detallePersonalizacionPreview` quedó muerta entera,
+   así que se borró con su spec en vez de dejarle un docblock describiendo un consumidor
+   inexistente. Lo encontró la revisión independiente del frontend.
+3. **La Tarea 2 necesitó mocks nuevos en `salones.service.spec.ts`**, que el plan no preveía:
+   cambiar el constructor de un service rompe su unitario, y correr solo el e2e dirigido de esa
+   tarea no lo mostró. Se arreglaron en el commit de cierre.
+
+---
+
 ## Global Constraints
 
 - **Dinero con Decimal.js**, nunca `number` nativo. La conversión se hace **siempre**
@@ -105,7 +132,7 @@ frente**: este plan hace los cinco puntos y el hallazgo queda anotado en el back
   personalización; `monto` viene con 4 decimales (`ESCALA_PERSISTIDA`) y **en moneda
   oficial**. La Tarea 3 lo consume.
 
-- [ ] **Step 1: Escribir el test e2e que falla**
+- [x] **Step 1: Escribir el test e2e que falla**
 
 En `backend/test/recetas.e2e-spec.ts`, agregar al principio del archivo (junto a las
 otras constantes de id):
@@ -219,13 +246,13 @@ un `describe` con su propia app**: el archivo levanta una sola y así queda.
 ⚠️ Antes de correrlo: `./scripts/reset-db.sh` (~30s). El e2e no se corre con el
 watcher del backend recompilando — no tocar ningún `.ts` del backend mientras corre.
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd backend && npm run test:e2e -- recetas.e2e-spec.ts -t "el monto de un extra en USD"`
 Expected: FAIL. `extra` es `undefined` (el campo `personalizacionDetalle` todavía no
 existe en la respuesta), así que la aserción rompe en `expect(undefined).toBe('950.0000')`.
 
-- [ ] **Step 3: Agregar el resolvedor batcheado de nombres**
+- [x] **Step 3: Agregar el resolvedor batcheado de nombres**
 
 En `backend/src/modules/ventas/ventas.service.ts`, agregar el import:
 
@@ -273,7 +300,7 @@ private async nombresIngredientesPersonalizacion(
 }
 ```
 
-- [ ] **Step 4: Convertir el detalle y devolverlo**
+- [x] **Step 4: Convertir el detalle y devolverlo**
 
 En `crearEnTransaccion`, reemplazar el `return` final (hoy
 `return { ...venta, detalles, advertencias };`, línea ~921) por:
@@ -321,12 +348,12 @@ En `crearEnTransaccion`, reemplazar el `return` final (hoy
 ~601) para atar las reglas aplicadas a su línea. Lo que cambia es lo que se
 devuelve, no lo que se guardó.
 
-- [ ] **Step 5: Correr el test y verificar que pasa**
+- [x] **Step 5: Correr el test y verificar que pasa**
 
 Run: `cd backend && npm run test:e2e -- recetas.e2e-spec.ts -t "el monto de un extra en USD"`
 Expected: PASS
 
-- [ ] **Step 6: Verificar que el test cazaría el bug (mutante)**
+- [x] **Step 6: Verificar que el test cazaría el bug (mutante)**
 
 Sacar la conversión, dejando `monto: linea.monto`. Correr el test: tiene que dar
 FAIL con `'1'` en vez de `'950.0000'`. Revertir el mutante y **confirmar en los logs
@@ -334,7 +361,7 @@ del contenedor que el backend reinició** antes de seguir (`docker logs --tail 5
 tecnica_backend`): el watcher recompila, y el fuente limpio no prueba que el proceso
 lo esté.
 
-- [ ] **Step 7: Actualizar la doc y commitear**
+- [x] **Step 7: Actualizar la doc y commitear**
 
 En `docs/features/personalizacion-recetas.md`, en la sección del detalle priceado,
 agregar:
@@ -373,7 +400,7 @@ git commit -m "feat(ventas): el detalle de personalización sale convertido a mo
   moneda oficial. El contrato del campo no cambia (mismo nombre, mismo tipo): lo que
   cambia es la moneda del número. El frontend de salones no necesita cambios.
 
-- [ ] **Step 1: Escribir el test e2e que falla**
+- [x] **Step 1: Escribir el test e2e que falla**
 
 Primero, **subir cuatro constantes de scope**: `MESA_4_ID`, `BRUNO_PIN`, `BRUNO_ID` y
 `TURNO_MANANA_ID` están declaradas dentro del describe anidado del test 12
@@ -491,13 +518,13 @@ Después, en el mismo describe de arriba de todo, al lado del `it` de la Tarea 1
 de un garzón es única, el test 12 usa el mismo Bruno y la misma mesa, y una sesión
 viva al terminar hace fallar corridas locales repetidas.
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd backend && npm run test:e2e -- recetas.e2e-spec.ts -t "la cuenta de salón devuelve el extra"`
 Expected: FAIL con `Expected: "950.0000" / Received: "1"` — el detalle se produce, pero
 sin convertir.
 
-- [ ] **Step 3: Inyectar las dependencias en `SalonesService`**
+- [x] **Step 3: Inyectar las dependencias en `SalonesService`**
 
 En `backend/src/modules/salones/salones.module.ts`, agregar el import:
 
@@ -516,7 +543,7 @@ En `backend/src/modules/salones/salones.service.ts`, agregar al constructor:
 
 con sus imports correspondientes.
 
-- [ ] **Step 4: Convertir cada extra al leer la cuenta**
+- [x] **Step 4: Convertir cada extra al leer la cuenta**
 
 En `detalleCuenta`, después de resolver `nombres` y antes del `return cuentas.map(...)`:
 
@@ -597,19 +624,19 @@ y en el armado de la línea (hoy `:1540`):
         }));
 ```
 
-- [ ] **Step 5: Correr el test y verificar que pasa**
+- [x] **Step 5: Correr el test y verificar que pasa**
 
 Run: `cd backend && npm run test:e2e -- recetas.e2e-spec.ts -t "la cuenta de salón devuelve el extra"`
 Expected: PASS
 
-- [ ] **Step 6: Verificar que no se rompió la comanda ni la cuenta en CLP**
+- [x] **Step 6: Verificar que no se rompió la comanda ni la cuenta en CLP**
 
 Run: `cd backend && npm run test:e2e -- salones-comanda.e2e-spec.ts combos.e2e-spec.ts vigencia-cuenta.e2e-spec.ts`
 Expected: PASS. Con la moneda oficial la tasa es `1`, así que el monto solo gana
 decimales (`'1000'` → `'1000.0000'`); si alguna aserción comparaba el string exacto,
 ese es el lugar donde salta.
 
-- [ ] **Step 7: Commitear**
+- [x] **Step 7: Commitear**
 
 ```bash
 git add backend/src/modules/salones/salones.service.ts backend/src/modules/salones/salones.module.ts backend/test/recetas.e2e-spec.ts
@@ -630,7 +657,7 @@ git commit -m "feat(salones): la cuenta devuelve el extra de personalización co
 - Produces: nada nuevo. `lineasVenta[i].personalizacionDetalle` deja de leerse (la
   Tarea 4 lo saca del carrito).
 
-- [ ] **Step 1: Tipar la respuesta de `POST /ventas`**
+- [x] **Step 1: Tipar la respuesta de `POST /ventas`**
 
 En `pos.vue`, reemplazar:
 
@@ -655,7 +682,7 @@ por:
     }>(`${apiUrl}/ventas`, {
 ```
 
-- [ ] **Step 2: Imprimir el detalle de la respuesta, no el del carrito**
+- [x] **Step 2: Imprimir el detalle de la respuesta, no el del carrito**
 
 En el `items:` del `imprimirBoleta`, reemplazar el bloque:
 
@@ -686,19 +713,19 @@ y agregar, junto a `const ln = lineasVenta[i]`:
 ⚠️ `ln` **sigue usándose** para el nombre y la cantidad (`ln?.item.nombre`,
 `unidadBaseItem(ln.item)`): no borrarlo.
 
-- [ ] **Step 3: Verificar tipos y build**
+- [x] **Step 3: Verificar tipos y build**
 
 Run: `cd frontend && npm run typecheck:ratchet && npm run build`
 Expected: PASS, sin nuevos errores en el ratchet.
 
-- [ ] **Step 4: Smoke test en el navegador**
+- [x] **Step 4: Smoke test en el navegador**
 
 El ticket del POS no tiene test unitario: `build` y `typecheck` no ven un auto-import
 roto ni un índice corrido. Con `docker-compose up`, en el POS: agregar una receta,
 personalizarla con un extra pago, cobrar, y mirar el ticket generado. El extra tiene
 que imprimirse con el mismo símbolo y separadores que el P.UNIT de su línea.
 
-- [ ] **Step 5: Commitear**
+- [x] **Step 5: Commitear**
 
 ```bash
 git add frontend/app/pages/ventas/pos.vue
@@ -723,7 +750,7 @@ git commit -m "fix(pos): el ticket imprime el detalle de personalización que de
   `confirm` del drawer pierden su último parámetro. `detallePersonalizacionPreview`
   queda con un solo consumidor: el drawer.
 
-- [ ] **Step 1: Sacar el campo del carrito**
+- [x] **Step 1: Sacar el campo del carrito**
 
 En `useVenta.ts`: borrar `personalizacionDetalle?: PersonalizacionDetalleLinea[]` de
 `CarritoLinea` (`:47`), el parámetro `personalizacionDetalle` de `agregarLinea`
@@ -732,7 +759,7 @@ En `useVenta.ts`: borrar `personalizacionDetalle?: PersonalizacionDetalleLinea[]
 (`:435`). Si el import de `PersonalizacionDetalleLinea` (`:16`) queda sin uso,
 borrarlo también.
 
-- [ ] **Step 2: Sacar el parámetro del emit del drawer**
+- [x] **Step 2: Sacar el parámetro del emit del drawer**
 
 En `ItemPersonalizacionDrawer.vue`, borrar `detallePreview.value` del `emit('confirm', ...)`
 (`:324`) y el cuarto parámetro de la declaración de `defineEmits`. **`detallePreview`
@@ -758,7 +785,7 @@ function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, preci
 ⚠️ `salones/index.vue` ya ignora ese parámetro (`onRecetaConfirm(payload, _resumen,
 _precioPreview?)`): no necesita cambios.
 
-- [ ] **Step 3: Dejar escrito para qué queda el preview**
+- [x] **Step 3: Dejar escrito para qué queda el preview**
 
 En `useRecetaPersonalizacion.ts`, reemplazar el docblock de
 `detallePersonalizacionPreview` por:
@@ -779,20 +806,20 @@ En `useRecetaPersonalizacion.ts`, reemplazar el docblock de
  */
 ```
 
-- [ ] **Step 4: Borrar los tests del campo muerto**
+- [x] **Step 4: Borrar los tests del campo muerto**
 
 En `useVenta.spec.ts`, borrar los dos tests de `:503-534`
 (`'agregarLinea guarda personalizacionDetalle solo cuando hay personalización'` y
 `'agregarLinea merge mantiene personalizacionDetalle'`). Si el archivo queda con un
 import de `PersonalizacionDetalleLinea` sin uso, sacarlo.
 
-- [ ] **Step 5: Correr los tests del frontend**
+- [x] **Step 5: Correr los tests del frontend**
 
 Run: `cd frontend && npm test && npm run typecheck:ratchet && npm run build`
 Expected: PASS. Los specs de `useRecetaPersonalizacion` y `ticket-builder` no cambian:
 la función pura y el renderizado del ticket siguen igual.
 
-- [ ] **Step 6: Commitear**
+- [x] **Step 6: Commitear**
 
 ```bash
 git add frontend/app/composables/useVenta.ts frontend/app/composables/useVenta.spec.ts frontend/app/composables/useRecetaPersonalizacion.ts frontend/app/components/ventas/ItemPersonalizacionDrawer.vue frontend/app/pages/ventas/pos.vue
@@ -808,7 +835,7 @@ git commit -m "refactor(pos): el detalle priceado del cliente queda solo para el
   hallazgo del override)
 - Modify: `docs/agent/resueltos.md` (entrada cerrada, con lo medido)
 
-- [ ] **Step 1: Mover la entrada cerrada a `resueltos.md`**
+- [x] **Step 1: Mover la entrada cerrada a `resueltos.md`**
 
 Mover la entrada completa de la § 3 a `resueltos.md`, agregando qué quedó construido:
 el productor único en el backend, la conversión por extra en los dos caminos, el POS
@@ -816,7 +843,7 @@ imprimiendo desde la respuesta y el preview acotado al drawer. Dejar escrito **q
 premisa de la entrada era parcialmente falsa** y cómo se midió — que el P.UNIT de una
 línea con extras tampoco viaja convertido, y que eso se decidió no arreglar.
 
-- [ ] **Step 2: Anotar el hallazgo del override como entrada nueva**
+- [x] **Step 2: Anotar el hallazgo del override como entrada nueva**
 
 En `docs/agent/pendientes.md` § 4 (*Necesita que el owner conteste*), agregar:
 
@@ -845,12 +872,12 @@ En `docs/agent/pendientes.md` § 4 (*Necesita que el owner conteste*), agregar:
   cuando hay personalización — así que quizás lo que sobra es el override.
 ```
 
-- [ ] **Step 3: Actualizar el párrafo de "Detenerse y preguntar" si hiciera falta**
+- [x] **Step 3: Actualizar el párrafo de "Detenerse y preguntar" si hiciera falta**
 
 `CLAUDE.md` nombra los frentes abiertos que hacen frenar. Esta entrada nueva **no**
 va ahí: no es una tanda, es una entrada de § 4 como las demás. No tocar `CLAUDE.md`.
 
-- [ ] **Step 4: Gate completo**
+- [x] **Step 4: Gate completo**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
@@ -864,7 +891,7 @@ cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run
 después. El e2e va **completo**, no un subset: un cambio en una respuesta compartida
 rompe specs que el subset local no mira.
 
-- [ ] **Step 5: Revisión independiente y commit final**
+- [x] **Step 5: Revisión independiente y commit final**
 
 Correr el paso 7 del skill `verify-feature` (sub-agente `domain-reviewer` de contexto
 fresco sobre el diff staged) — el pre-commit lo exige y sin el recibo bloquea.
