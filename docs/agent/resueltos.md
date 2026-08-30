@@ -17,6 +17,47 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El unitario de vigencia de tokens se cae una semana por año, por el cambio de hora (cerrado 2026-08-30)
+
+- [ ] **`tokens-acceso.service.spec.ts` afirma que 7 días son 168 horas, y cruzando el cambio
+  de hora son 167** (backend/tests; encontrado el 2026-08-30 corriendo el gate de otra tarea,
+  **no es una regresión de ese trabajo**: se reprodujo idéntico en un worktree de `149d3bc3`,
+  el commit anterior) — el test *"la invitación vive 7 días y el reset 1 hora"*
+  (`tokens-acceso.service.spec.ts:65-75`) mide `expiraEl - Date.now()` y lo compara contra
+  `24 * 7` horas. El código hace `expiraEl.setDate(expiraEl.getDate() + 7)`
+  (`tokens-acceso.service.ts:58`), que son 7 días **de calendario en hora local**.
+  **El bug está en el test, no en el código:** una invitación que "vive 7 días" tiene que
+  vencer el mismo día de la semana a la misma hora, que es lo que `setDate` hace. Lo que no
+  vale es traducir eso a horas fijas: en Chile el horario de verano arranca en septiembre, así
+  que del ~30 de agosto al 6 de septiembre la cuenta da 167 y en abril da 169.
+  **El arreglo:** afirmar sobre la fecha —que `expiraEl` caiga 7 días de calendario después—
+  en vez de sobre la diferencia en horas. El reset (1 hora) no tiene el problema: `setHours`
+  suma una hora real.
+  ⚠️ Mientras no se arregle, `npm test` del backend cierra en rojo esa semana y el próximo que
+  corra el gate va a peritar un fallo que no es suyo.
+
+**Cómo se arregló.** El test afirma ahora **días de calendario y hora de pared** en vez de una
+diferencia en horas, y **congela el reloj** (`jest.useFakeTimers().setSystemTime`) en una fecha
+cuyo +7 cruza el cambio de horario en Santiago, para que la fecha real deje de decidir el
+resultado. En una TZ sin cambio de hora pasa igual: lo que se afirma vale en las dos.
+
+**Los dos mutantes, medidos.** Bajar la constante a 6 días → rojo por `toDateString`. Sumar
+168 horas **reales** (`setTime(getTime() + 7*24*3600000)`) → rojo por `getHours()`, que da 12
+en vez de 11.
+
+⚠️ **Y uno que NO es mutante, anotado en el propio test para que nadie lo intente:**
+`setHours(getHours() + 24*7)` **sobrevive**, y con razón — hace la misma aritmética de campos
+locales que `setDate(+7)` y da exactamente el mismo instante, cambio de hora incluido. La
+primera pasada lo usó como mutante A, pasó en verde, y el reflejo fácil habría sido debilitar
+el test. Lo que rompe la semántica de "7 días" es hacer la cuenta sobre el epoch, no sobre los
+campos.
+
+📌 **Por qué nadie lo había visto:** la TZ no está fijada en ninguna config —sale de la
+máquina— y CI corre en UTC, que no tiene cambio de hora. Solo falla en una máquina con DST y
+solo la semana de la transición.
+
+---
+
 ## La moneda del extra en el ticket: un solo productor, y el backend convierte (cerrado 2026-08-30)
 
 Procedencia: § 3 *"Ya decidido, falta construir"*, adonde había llegado desde la § 4 el mismo

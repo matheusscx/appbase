@@ -62,16 +62,49 @@ describe('TokensAccesoService', () => {
 
     // Los dos vencimientos son distintos a propósito: el reset lo dispara
     // cualquiera que sepa un correo, la invitación la dispara un admin.
-    it('la invitación vive 7 días y el reset 1 hora', async () => {
-      const antes = Date.now();
-      await service.emitir(USUARIO, TipoTokenAcceso.INVITACION);
-      const invitacion = guardado.expiraEl!.getTime() - antes;
-      await service.emitir(USUARIO, TipoTokenAcceso.RESET);
-      const reset = guardado.expiraEl!.getTime() - antes;
+    //
+    // ⚠️ **La invitación se afirma en días de CALENDARIO, no en horas**, y el
+    // reloj se congela para que la fecha real no decida el resultado. El código
+    // usa `setDate(+7)`, que conserva la hora de pared: cruzando el cambio de
+    // horario esos 7 días son 167 horas, y en abril 169. Este test afirmaba
+    // `24 * 7` y se caía una semana por año — el 2026-08-30 daba 167 en
+    // `America/Santiago`, donde el horario de verano arranca el 6 de septiembre.
+    // No lo cazaba nadie porque la TZ no está fijada en ningún lado (sale de la
+    // máquina) y CI corre en UTC, que no tiene cambio de hora.
+    it('la invitación vive 7 días de calendario y el reset 1 hora', async () => {
+      // Una fecha cuyo +7 cruza el cambio de horario en Santiago. En una TZ sin
+      // cambio de hora el test pasa igual: lo que se afirma —misma hora de
+      // pared, 7 días después— vale en las dos.
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-30T15:00:00Z'));
+      try {
+        const antes = new Date();
+        await service.emitir(USUARIO, TipoTokenAcceso.INVITACION);
+        const invitacion = guardado.expiraEl!;
+        await service.emitir(USUARIO, TipoTokenAcceso.RESET);
+        const reset = guardado.expiraEl!;
 
-      const HORA = 3_600_000;
-      expect(invitacion / HORA).toBeCloseTo(24 * 7, 0);
-      expect(reset / HORA).toBeCloseTo(1, 0);
+        // Las dos mitades importan y cazan mutantes distintos, los dos medidos:
+        // la fecha pinea los 7 días —el `7` va literal acá, no leído de la
+        // constante, así que bajarlo a 6 pone esto en rojo—, y la hora de pared
+        // caza sumar 168 horas REALES (`setTime(getTime() + 7*24*3600000)`),
+        // que en esta semana aterriza a las 12 en vez de a las 11.
+        //
+        // 📌 Ojo con cuál es el mutante: `setHours(getHours() + 24*7)` **no** lo
+        // es. Hace la misma aritmética de campos locales que `setDate(+7)` y da
+        // exactamente lo mismo, cambio de hora incluido. Lo que rompe la
+        // semántica es hacer la cuenta sobre el epoch.
+        const esperado = new Date(antes);
+        esperado.setDate(esperado.getDate() + 7);
+        expect(invitacion.toDateString()).toBe(esperado.toDateString());
+        expect(invitacion.getHours()).toBe(antes.getHours());
+        expect(invitacion.getMinutes()).toBe(antes.getMinutes());
+
+        // El reset sí son horas reales: `setHours` suma horas, no días.
+        const HORA = 3_600_000;
+        expect((reset.getTime() - antes.getTime()) / HORA).toBeCloseTo(1, 0);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     // El `if/else` que había mandaba al `else` —la hora del reset— a cualquier

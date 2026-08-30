@@ -59,25 +59,6 @@ detalle de las dos tandas, con los errores que se cometieron en el camino, está
 [`resueltos.md`](resueltos.md). Volvió a poblarse con los minors del frente de redondeo, que
 son de una sola pasada y están agrupados abajo.
 
-### El unitario de vigencia de tokens se cae una semana por año, por el cambio de hora (2026-08-30)
-
-- [ ] **`tokens-acceso.service.spec.ts` afirma que 7 días son 168 horas, y cruzando el cambio
-  de hora son 167** (backend/tests; encontrado el 2026-08-30 corriendo el gate de otra tarea,
-  **no es una regresión de ese trabajo**: se reprodujo idéntico en un worktree de `149d3bc3`,
-  el commit anterior) — el test *"la invitación vive 7 días y el reset 1 hora"*
-  (`tokens-acceso.service.spec.ts:65-75`) mide `expiraEl - Date.now()` y lo compara contra
-  `24 * 7` horas. El código hace `expiraEl.setDate(expiraEl.getDate() + 7)`
-  (`tokens-acceso.service.ts:58`), que son 7 días **de calendario en hora local**.
-  **El bug está en el test, no en el código:** una invitación que "vive 7 días" tiene que
-  vencer el mismo día de la semana a la misma hora, que es lo que `setDate` hace. Lo que no
-  vale es traducir eso a horas fijas: en Chile el horario de verano arranca en septiembre, así
-  que del ~30 de agosto al 6 de septiembre la cuenta da 167 y en abril da 169.
-  **El arreglo:** afirmar sobre la fecha —que `expiraEl` caiga 7 días de calendario después—
-  en vez de sobre la diferencia en horas. El reset (1 hora) no tiene el problema: `setHours`
-  suma una hora real.
-  ⚠️ Mientras no se arregle, `npm test` del backend cierra en rojo esa semana y el próximo que
-  corra el gate va a peritar un fallo que no es suyo.
-
 ### Los minors que dejó el frente de redondeo de plata (2026-08-21)
 
 Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tests que no
