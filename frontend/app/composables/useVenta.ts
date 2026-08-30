@@ -13,7 +13,6 @@ import {
   unidadBaseItem,
   type UnidadCat,
 } from '~/utils/cantidad-presentacion'
-import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -43,8 +42,6 @@ export interface CarritoLinea {
   personalizacion?: PersonalizacionPayload
   /** texto UI precomputado al confirmar drawer */
   personalizacionResumen?: string
-  /** detalle priceado (omitidos/extras) para boleta/precuenta */
-  personalizacionDetalle?: PersonalizacionDetalleLinea[]
   /** base+extras cuando la receta está personalizada */
   precioUnitarioOverride?: string
 }
@@ -101,7 +98,6 @@ export function agregarLinea(
   personalizacion?: PersonalizacionPayload,
   personalizacionResumen?: string,
   precioUnitarioOverride?: string,
-  personalizacionDetalle?: PersonalizacionDetalleLinea[],
 ): CarritoLinea[] {
   const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
   const resumen = pers ? personalizacionResumen : undefined
@@ -111,7 +107,6 @@ export function agregarLinea(
   const precioOverride = personalizacionAfectaPrecio(pers)
     ? precioUnitarioOverride
     : undefined
-  const detalle = pers ? personalizacionDetalle : undefined
   const unidadBase = unidadBaseItem(item)
 
   const idx = lineas.findIndex(
@@ -160,7 +155,6 @@ export function agregarLinea(
     if (precioOverride != null && precioOverride !== '') {
       nueva.precioUnitarioOverride = precioOverride
     }
-    if (detalle) nueva.personalizacionDetalle = detalle
   }
   return [...lineas, nueva]
 }
@@ -423,7 +417,6 @@ export function useVenta() {
     personalizacion?: PersonalizacionPayload,
     personalizacionResumen?: string,
     precioUnitarioOverride?: string,
-    personalizacionDetalle?: PersonalizacionDetalleLinea[],
   ) {
     lineas.value = agregarLinea(
       lineas.value,
@@ -432,7 +425,6 @@ export function useVenta() {
       personalizacion,
       personalizacionResumen,
       precioUnitarioOverride,
-      personalizacionDetalle,
     )
   }
   function quitar(index: number) {

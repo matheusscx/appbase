@@ -3,7 +3,6 @@ import {
   buildPersonalizacionPayload,
   precioConExtras,
   resumenPersonalizacion,
-  detallePersonalizacionPreview,
   sinStock,
   opcionSinStock,
   type PersonalizacionPayload,
@@ -13,14 +12,13 @@ import {
   type GrupoPersonalizacion,
   type GrupoOpcionPersonalizacion,
 } from '~/composables/useRecetaPersonalizacion'
-import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
 const props = defineProps<{
   itemId: string | null
 }>()
 
 const emit = defineEmits<{
-  confirm: [PersonalizacionPayload, string, string, PersonalizacionDetalleLinea[]]
+  confirm: [PersonalizacionPayload, string, string]
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -261,18 +259,6 @@ const resumenPreview = computed(() => {
   return resumenPersonalizacion(nombresOmitidos, extras, comentario.value, gruposResumen.value)
 })
 
-const detallePreview = computed<PersonalizacionDetalleLinea[]>(() => {
-  if (!detalle.value) return []
-  const nombresOmitidos = detalle.value.ingredientes
-    .filter((ing) => !incluidos.value[ing.ingredienteItemId])
-    .map((ing) => ing.ingredienteNombre)
-  const extras = extrasSeleccionados.value.map((e) => ({
-    nombre: e.ingredienteNombre,
-    unidades: e.unidades,
-    precioExtra: e.precioExtra,
-  }))
-  return detallePersonalizacionPreview(nombresOmitidos, extras)
-})
 
 const confirmDisabled = computed(() =>
   loading.value || !detalle.value || !gruposValidos.value || !componentesValidos.value,
@@ -321,7 +307,6 @@ function agregar() {
     buildPersonalizacionPayload(omitidos, extras, comentario.value, grupos, componentes),
     resumenPreview.value,
     precioPreview.value,
-    detallePreview.value,
   )
   open.value = false
 }

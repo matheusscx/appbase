@@ -62,14 +62,14 @@ function onCatalogoAdd(item: ItemCatalogo) {
   add(item)
 }
 
-function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string, detalle: PersonalizacionDetalleLinea[]) {
+function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string) {
   const item = items.value.find((i) => i.id === recetaItemId.value)
   if (!item) return
   if (personalizacionVacia(payload)) {
     add(item)
   }
   else {
-    add(item, payload, resumen || undefined, precioPreview, detalle)
+    add(item, payload, resumen || undefined, precioPreview)
   }
   recetaDrawerOpen.value = false
   recetaItemId.value = null
@@ -224,7 +224,18 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     const resultadoVenta = await asegurarVigente()
     const lineasVenta = [...lineas.value]
 
-    const venta = await useApiFetch<{ estado: string; advertencias?: string[] }>(`${apiUrl}/ventas`, {
+    // `detalles` viene en el mismo orden que `body.lineas` —y que `lineasVenta`—:
+    // el backend arma las filas desde `resultado.lineas`, que el motor devuelve
+    // 1:1 con `dto.lineas`. Es el mismo cruce por índice que `ventas.service.ts`
+    // ya usa para atar cada regla aplicada a su línea.
+    const venta = await useApiFetch<{
+      estado: string
+      advertencias?: string[]
+      detalles: {
+        personalizacion?: { comentario?: string } | null
+        personalizacionDetalle?: PersonalizacionDetalleLinea[]
+      }[]
+    }>(`${apiUrl}/ventas`, {
       method: 'POST',
       body,
     })
@@ -248,6 +259,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             : undefined,
           items: resultadoVenta.lineas.map((l, i) => {
             const ln = lineasVenta[i]
+            const vd = venta.detalles[i]
             return {
               nombre: ln?.item.nombre ?? '',
               cantidad: formatCantidadLinea(
@@ -261,8 +273,12 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
               ),
               precioUnitario: l.precioUnitario,
               totalLinea: l.totalLinea,
-              ...(ln?.personalizacionDetalle
-                ? { personalizacionDetalle: ln.personalizacionDetalle, comentario: ln.personalizacion?.comentario }
+              // El detalle sale de la VENTA, no del carrito: el backend es el
+              // único que lo produce y el único que lo convierte a moneda
+              // oficial. El carrito lo calculaba en la moneda del ítem y el
+              // ticket lo formateaba con la oficial, que era el bug.
+              ...(vd?.personalizacionDetalle
+                ? { personalizacionDetalle: vd.personalizacionDetalle, comentario: vd.personalizacion?.comentario }
                 : ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
             }
           }),
