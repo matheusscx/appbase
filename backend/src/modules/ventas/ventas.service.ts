@@ -42,6 +42,10 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+import {
+  detallePersonalizacion,
+  type PersonalizacionRecetaSnapshot,
+} from '../../common/utils/personalizacion-receta.util';
 
 /**
  * Reintentos ante deadlock. Dos son suficientes: el deadlock exige que dos
@@ -918,7 +922,75 @@ export class VentasService {
     );
     venta.estado = estadoFinal;
 
-    return { ...venta, detalles, advertencias };
+    // Detalle priceado de la personalización, con cada extra YA convertido a
+    // moneda oficial. Es el ÚNICO productor: el POS lo imprime desde acá en vez
+    // de recalcularlo en el cliente, que era donde el monto salía en la moneda
+    // del ítem y después se formateaba con la oficial.
+    //
+    // Cada extra se convierte POR SU CUENTA, sin reparto por mayores restos: el
+    // ticket no imprime `precioBase`, así que este desglose es transparencia
+    // sobre el P.UNIT que ya está arriba, no un sumando que alguien pueda cerrar
+    // contra el papel. Si algún día se imprime la base, esto se reabre.
+    const nombresPersonalizacion =
+      await this.nombresIngredientesPersonalizacion(
+        manager,
+        tenantId,
+        detalles,
+      );
+    const detallesRespuesta = detalles.map((detalle, i) => {
+      const lineasDetalle = detallePersonalizacion(
+        detalle.personalizacion,
+        nombresPersonalizacion,
+      );
+      if (lineasDetalle.length === 0) return detalle;
+      const monedaOrigen = lineasConversion[i].item.monedaId;
+      return {
+        ...detalle,
+        personalizacionDetalle: lineasDetalle.map((linea) => ({
+          ...linea,
+          monto: this.calculoPreciosService.convertirAMonedaOficial(
+            linea.monto,
+            monedaOrigen,
+            tasaMap,
+            configCalculo.modoRedondeo,
+          ),
+        })),
+      };
+    });
+
+    return { ...venta, detalles: detallesRespuesta, advertencias };
+  }
+
+  /**
+   * Nombres de los ingredientes que aparecen en las personalizaciones de estas
+   * líneas, en UNA query. El snapshot guarda ids, no nombres, y el detalle
+   * priceado que se imprime en el ticket los necesita.
+   *
+   * Gemelo deliberado de `SalonesService.nombresIngredientesPersonalizacion`:
+   * son los dos caminos que producen ticket, y comparten la regla de que el
+   * nombre se resuelve en batch, nunca uno por línea. Si aparece un tercero,
+   * se extrae.
+   */
+  private async nombresIngredientesPersonalizacion(
+    manager: EntityManager,
+    tenantId: string,
+    filas: { personalizacion: PersonalizacionRecetaSnapshot | null }[],
+  ): Promise<Map<string, string>> {
+    const ids = new Set<string>();
+    for (const fila of filas) {
+      const p = fila.personalizacion;
+      if (!p) continue;
+      for (const id of p.omitidos ?? []) ids.add(id);
+      for (const e of p.extras ?? []) ids.add(e.ingredienteItemId);
+    }
+    if (ids.size === 0) return new Map();
+    const filasNombre: { item_id: string; nombre: string }[] =
+      await manager.query(
+        `SELECT item_id, nombre FROM items
+          WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [[...ids], tenantId],
+      );
+    return new Map(filasNombre.map((r) => [r.item_id, r.nombre]));
   }
 
   /**

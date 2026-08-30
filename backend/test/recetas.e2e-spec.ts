@@ -9,6 +9,8 @@ import { AppModule } from '../src/app.module';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+// USD: habilitada para Paris con valor_del_dia '950' (`seedTenantMonedas`).
+const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -959,5 +961,104 @@ describe('Recetas — flujo completo (e2e)', () => {
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
       .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+  });
+
+  // ── El detalle de personalización viaja convertido a moneda oficial ───────
+  //
+  // USD tiene `valor_del_dia = '950'` para Paris (`seedTenantMonedas`): entre un
+  // monto convertido y uno crudo hay tres órdenes de magnitud, así que este caso
+  // distingue de verdad. Con la moneda oficial (tasa 1) multiplicar o no da lo
+  // mismo y el test no probaría nada.
+  //
+  // Los ingredientes van en CLP a propósito: lo que decide la moneda del extra es
+  // la moneda del ítem RECETA (`precioExtra` es parte del precio de la receta),
+  // así que dejarlos en CLP prueba que se usa esa y no la del ingrediente.
+  it('el monto de un extra sale convertido a moneda oficial, no en la moneda del ítem', async () => {
+    const sufijo = Date.now();
+    const panId = await crearIngrediente(
+      app,
+      token,
+      'Pan extra-moneda',
+      'unidad',
+      '100',
+      '1',
+    );
+    const quesoId = await crearIngrediente(
+      app,
+      token,
+      'Queso extra-moneda',
+      'unidad',
+      '100',
+      '1',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa extra-moneda ${sufijo}`,
+        precioBase: '10',
+        monedaId: USD_MONEDA_ID,
+        tipo: 'receta',
+        clasificacionTributaria: 'afecto',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: quesoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '2',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    // 10 USD (base) + 2 USD (extra) = 12 USD → x950 = 11.400 CLP + 19% IVA = 13.566.
+    // Los números están elegidos para caer en enteros exactos: CLP no admite
+    // decimales, y así el test no depende del `modo_redondeo` del tenant.
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [
+          {
+            itemId: recetaId,
+            cantidad: '1',
+            personalizacion: {
+              omitidos: [],
+              extras: [{ ingredienteItemId: quesoId, unidades: 1 }],
+            },
+          },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '13566' }],
+      });
+    expect(resVenta.status).toBe(201);
+
+    const detalle = (
+      resVenta.body as {
+        detalles: {
+          personalizacionDetalle?: {
+            nombre: string;
+            tipo: string;
+            monto: string;
+          }[];
+        }[];
+      }
+    ).detalles[0];
+
+    const extra = detalle.personalizacionDetalle?.find(
+      (d) => d.tipo === 'extra',
+    );
+    // 2 USD x 950 = 1.900. Sin convertir daría '2': la distancia entre las dos
+    // conductas es de tres órdenes de magnitud, no de redondeo.
+    expect(extra?.monto).toBe('1900.0000');
   });
 });

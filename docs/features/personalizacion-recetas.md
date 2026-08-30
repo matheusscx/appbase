@@ -185,7 +185,25 @@ Merge por `(itemId, hash(personalizacion))`. Al cerrar cuenta, el snapshot pasa 
 - **Ventas**: `LineaVentaDto.personalizacion`; precio y stock con snapshot en `VentasService`.
 - **Salones**: `AddLineaDto.personalizacion`; persistencia JSONB; merge; comanda con `nota` (`textoComandaPersonalizacion`).
 - **Impresión**: `TicketItem.nota` en comanda / precuenta / boleta (omitidos, extras, comentario).
-- **Util**: `personalizacion-receta.util` — hash estable para merge de líneas.
+- **Util**: `personalizacion-receta.util` — hash estable para merge de líneas y detalle priceado.
+
+### La moneda del detalle priceado
+
+El **monto de cada extra que se imprime viaja convertido a la moneda oficial del
+tenant**, y lo produce el backend: `POST /ventas` (en la respuesta, por línea) y la
+lectura de la cuenta de salón. El ticket lo formatea con la moneda oficial, igual que
+el P.UNIT de su línea, así que los dos números hablan la misma moneda.
+
+Antes había **dos productores** —el backend para salones y un cálculo del cliente para
+el POS— y ninguno convertía: en una receta en moneda extranjera el ticket imprimía
+dólares con símbolo y separadores de peso. Hoy el cálculo del cliente
+(`detallePersonalizacionPreview`) queda **solo para el preview del drawer**, donde el
+número se formatea con la moneda del ítem y por eso está bien sin convertir.
+
+Cada extra se convierte **por su cuenta**, sin reparto por mayores restos: el ticket no
+imprime `precioBase`, así que el desglose es transparencia sobre el P.UNIT que ya está
+arriba, no un sumando que el cliente pueda cerrar contra el papel. Si algún día se
+imprime la base, la decisión se reabre.
 
 ### Key methods
 
