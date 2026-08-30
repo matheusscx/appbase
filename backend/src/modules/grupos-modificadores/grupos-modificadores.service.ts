@@ -17,6 +17,7 @@ import {
 } from './dto/create-grupo-modificador.dto';
 import { UpdateGrupoModificadorDto } from './dto/update-grupo-modificador.dto';
 import { AplicarOverridesDto } from './dto/aplicar-overrides.dto';
+import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 
 export type FamiliaEfecto = 'ingrediente' | 'vendible';
@@ -48,6 +49,7 @@ export class GruposModificadoresService {
   constructor(
     private readonly db: Db,
     private readonly catalogService: CatalogService,
+    private readonly itemsService: ItemsService,
   ) {}
 
   private familiaDeTipo(tipo: string): FamiliaEfecto {
@@ -520,6 +522,29 @@ export class GruposModificadoresService {
       // Opciones que desaparecieron: soft-delete de la opción y de sus overrides.
       const eliminadas = vivas.filter((r) => !itemsEntrantes.has(r.item_id));
       if (eliminadas.length) {
+        // Una opción que una mesa ya eligió no se saca del grupo: la línea
+        // deja de poder tasarse ("La opción X no pertenece al grupo") en la
+        // precuenta Y al cerrar, y la mesa queda incobrable sin que nadie se
+        // entere hasta que el garzón intenta cobrar. Misma regla y mismo campo
+        // que las dos puertas de `ItemsService`, por eso la pregunta vive allá.
+        //
+        // Va sobre `eliminadas`, que este service ya calculaba: se pregunta por
+        // las que SE SACAN, no por la lista. Repreciar o reordenar una opción
+        // que una mesa eligió no rompe nada y tiene que seguir pasando.
+        const pedidas = await this.itemsService.cuentasAbiertasConOpcionDeGrupo(
+          manager,
+          tenantId,
+          grupoId,
+          eliminadas.map((r) => r.item_id),
+        );
+        if (pedidas.length) {
+          throw new BadRequestException(
+            `No se puede sacar del grupo una opción ya pedida: ${pedidas
+              .map((p) => `"${p.opcion}" está pedida en ${p.cuenta}`)
+              .join('; ')}`,
+          );
+        }
+
         const idsEliminadas = eliminadas.map((r) => r.grupo_opcion_id);
         await manager.query(
           `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()

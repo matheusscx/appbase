@@ -2123,6 +2123,74 @@ export class ItemsService {
     );
   }
 
+  /**
+   * ¿Qué cuentas **abiertas** eligieron alguna de estas opciones **de este
+   * grupo**? La hermana de `cuentasAbiertasConExtra`, para la tercera puerta:
+   * `PATCH /grupos-modificadores/:id` soft-borra las opciones que desaparecen,
+   * y si una mesa ya eligió una, su línea deja de poder tasarse ("La opción X
+   * no pertenece al grupo") en la precuenta y al cerrar.
+   *
+   * Vive acá y no en `GruposModificadoresService` porque la pregunta es sobre
+   * `cuenta_lineas.personalizacion`, que es el mismo campo y la misma regla que
+   * las otras dos puertas. `GruposModificadoresModule` importa `ItemsModule`
+   * para llamarla; no hay ciclo, `ItemsModule` no conoce a los grupos.
+   *
+   * **Dos niveles, dos containments**, porque el snapshot guarda la elección en
+   * dos lugares distintos según de quién sea el grupo:
+   *   - `grupos[]` — grupo propio del ítem de la línea (receta o combo).
+   *   - `componentes[].grupos[]` — grupo de un componente receta del combo.
+   *
+   * El `grupoId` va **dentro** del mismo objeto que las opciones, no como una
+   * condición aparte: containment exige que las dos claves caigan en el mismo
+   * elemento del array, así que una opción elegida en el grupo G1 no matchea la
+   * pregunta "esa opción dentro de G2". Verificado contra Postgres real.
+   *
+   * A diferencia de `cuentasAbiertasConExtra`, acá **no** hay `cl.item_id` que
+   * acote —un grupo puede colgar de muchos ítems y cualquiera de ellos rompe—,
+   * así que ésta sí se apoya en `idx_cuenta_lineas_personalizacion` (GIN).
+   */
+  async cuentasAbiertasConOpcionDeGrupo(
+    manager: EntityManager | Db,
+    tenantId: string,
+    grupoId: string,
+    opcionItemIds: string[],
+  ): Promise<{ opcion: string; cuenta: string }[]> {
+    if (!opcionItemIds.length) return [];
+    return manager.query(
+      `SELECT DISTINCT i.nombre AS opcion,
+              m.nombre || ' · ' || COALESCE(c.nombre, 'cuenta ' || c.numero)
+                AS cuenta
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $1 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+         JOIN mesas m ON m.mesa_id = c.mesa_id
+          AND m.tenant_id = $1 AND m.eliminado_el IS NULL
+         CROSS JOIN LATERAL unnest($3::uuid[]) AS x(id)
+         JOIN items i ON i.item_id = x.id
+          AND i.tenant_id = $1 AND i.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+          AND (cl.personalizacion @> jsonb_build_object(
+                 'grupos',
+                 jsonb_build_array(jsonb_build_object(
+                   'grupoId', $2::uuid,
+                   'opciones',
+                   jsonb_build_array(
+                     jsonb_build_object('itemId', x.id)))))
+            OR cl.personalizacion @> jsonb_build_object(
+                 'componentes',
+                 jsonb_build_array(jsonb_build_object(
+                   'grupos',
+                   jsonb_build_array(jsonb_build_object(
+                     'grupoId', $2::uuid,
+                     'opciones',
+                     jsonb_build_array(
+                       jsonb_build_object('itemId', x.id))))))))
+        ORDER BY 1, 2`,
+      [tenantId, grupoId, opcionItemIds],
+    );
+  }
+
   async obtenerUso(tenantId: string, itemId: string): Promise<UsoItem> {
     const item = await this.itemRepo.findOne({
       where: { id: itemId, tenantId },

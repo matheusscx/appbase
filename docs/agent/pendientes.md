@@ -786,24 +786,32 @@ abriendo las superficies, no leyendo la entrada.
   `useCalculoPrecios` se traga el error a propósito y `lineaSubtotal` dibuja `—` en todas
   las líneas, sin decir por qué. Al cerrar, el mismo 400.
 
-  ✅ **Cerradas** (commits `dce84899` y el que sigue): `DELETE /items/:id` del ingrediente
-  pedido como **extra** —rama nueva del `UNION` de `obtenerUsoItem`, con índice GIN—, y
-  `PATCH /items/:id` con `extrasPermitidos` —diff de la lista, bloquea solo los que se
-  sacan—. (El `DELETE` del ítem que **es** la línea ya estaba cerrado desde antes.)
+  ✅ **Cerradas** (`dce84899`, `d42a36e7` y el que sigue): `DELETE /items/:id` del
+  ingrediente pedido como **extra** —rama nueva del `UNION` de `obtenerUsoItem`, con
+  índice GIN—, `PATCH /items/:id` con `extrasPermitidos`, y
+  `PATCH /grupos-modificadores/:id` sacando una opción. (El `DELETE` del ítem que **es**
+  la línea ya estaba cerrado desde antes.)
 
-  🔲 **Abiertas, las tres del mismo molde:**
+  🔲 **Abiertas, las dos del mismo molde, y las dos en `PATCH /items/:id`:**
 
   | Camino | Qué rompe al re-tasar |
   |---|---|
-  | `PATCH /grupos-modificadores/:id` sacando una opción | *"La opción X no pertenece al grupo"* |
-  | `PATCH /items/:id` con `ingredientes`, sacando uno que una línea abierta **omitió** | *"Ingrediente omitido no pertenece a la receta"* |
-  | `PATCH /items/:id` con `gruposModificadores`, desasociando un grupo que una línea eligió | *"Grupo de modificadores no asociado a este item"* |
+  | con `ingredientes`, sacando uno que una línea abierta **omitió** | *"Ingrediente omitido no pertenece a la receta"* |
+  | con `gruposModificadores`, desasociando un grupo que una línea eligió | *"Grupo de modificadores no asociado a este item"* |
 
-  📌 La forma de cerrarlas ya está probada dos veces y es la misma: calcular el **diff**
-  (lo que se saca, no lo que cambia), preguntar en **una** consulta si algo de eso está en
-  la personalización de una cuenta abierta, y 400 nombrando la mesa. El molde está en
-  `ItemsService.cuentasAbiertasConExtra`. Lo único distinto por camino es el nivel del
-  JSONB: `omitidos` es un array plano de uuids, `grupos[].grupoId` un objeto anidado.
+  📌 La forma de cerrarlas ya está probada **tres** veces y es siempre la misma: calcular
+  el **diff** (lo que se saca, no lo que cambia), preguntar en **una** consulta si algo de
+  eso está en la personalización de una cuenta abierta, y 400 nombrando la mesa. Los dos
+  moldes están en `ItemsService.cuentasAbiertasConExtra` (acotado al ítem) y
+  `cuentasAbiertasConOpcionDeGrupo` (acotado al grupo, dos niveles de JSONB). Lo único
+  distinto acá es el nivel: `omitidos` es un array plano de uuids —containment sobre un
+  array de escalares, no de objetos— y la desasociación de grupo se pregunta por
+  `grupoId` sin mirar opciones.
+
+  ⚠️ **El e2e de las dos que faltan tiene una trampa conocida**: el fixture no puede usar
+  grupos ni recetas del seed, porque sacarles una opción los rompe para las demás suites.
+  Los dos tests ya escritos (`grupos-modificadores.e2e-spec.ts`, `recetas.e2e-spec.ts`
+  test 16) arman su propio catálogo — copiar de ahí.
 
   ⚠️ **Las dos últimas no estaban en el plan original** (`docs/superpowers/plans/2026-08-30-lo-pedido-no-se-saca-del-catalogo.md`),
   que hablaba de tres puertas: salieron de la revisión independiente del 2026-08-30 y se

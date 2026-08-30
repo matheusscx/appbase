@@ -130,6 +130,9 @@ async function crearProducto(
   nombre: string,
   stock: string,
   costo: string,
+  /** `'ingrediente'` para lo que va a ser ingrediente de una receta: ese campo
+   *  no acepta productos. Todo lo demás es idéntico. */
+  tipo: 'producto' | 'ingrediente' = 'producto',
 ): Promise<string> {
   const res = await request(app.getHttpServer())
     .post('/api/items')
@@ -138,7 +141,7 @@ async function crearProducto(
       nombre: `${nombre} ${Date.now()}`,
       precioBase: costo,
       monedaId: CLP_MONEDA_ID,
-      tipo: 'producto',
+      tipo,
       unidadMedida: 'unidad',
       stock,
       costo,
@@ -328,6 +331,256 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
   // creaba en dev sobre `nombre` PELADO (no sabe expresar `LOWER()`), así que
   // dev enforzaba una regla distinta de la de `startup-pos.sql`. Ahora lo crea
   // el seeder con SQL cruda, igual que `causas_merma`.
+
+  // ── Lo que una mesa ya eligió no se saca del grupo ───────────────────────
+  //
+  // Tercera puerta del mismo agujero que `dce84899` y `d42a36e7` cerraron por
+  // el lado de los extras: `PATCH /grupos-modificadores/:id` soft-borra las
+  // opciones que desaparecen y nunca consultaba cuentas. Si una mesa ya eligió
+  // esa opción, la línea deja de poder tasarse —"La opción X no pertenece al
+  // grupo"— en la precuenta y al cerrar: la mesa queda incobrable.
+  //
+  // El fixture es de este test y no del seed a propósito: el grupo Proteína del
+  // seed lo comparten varias suites, y sacarle una opción las rompería.
+  //
+  // Un solo combo cubre los DOS niveles del snapshot, que son dos ramas
+  // distintas de la consulta: `grupos[]` (el grupo propio del combo) y
+  // `componentes[].grupos[]` (el grupo de su componente receta). Sin el segundo,
+  // un mutante que borre esa rama pasa.
+  const MESA_1_ID = '550e8400-e29b-41d4-a716-446655440232';
+  // Bruno, no Ana: Ana está vinculada desde el seed y vincular invalida el PIN.
+  const BRUNO_PIN = '222222';
+  const BRUNO_ID = '550e8400-e29b-41d4-a716-446655440239';
+  const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+
+  it('sacar del grupo una opción que una mesa ya eligió se rechaza — en los dos niveles del snapshot', async () => {
+    const sufijo = Date.now();
+    const salsaId = await crearProducto(
+      app,
+      token,
+      'Salsa GM E2E',
+      '20',
+      '200',
+    );
+    // El reemplazo tiene que ser de la MISMA familia que la salsa (vendible):
+    // `validarYResolverOpciones` exige homogeneidad dentro del grupo.
+    const ketchupId = await crearProducto(
+      app,
+      token,
+      'Ketchup GM E2E',
+      '20',
+      '250',
+    );
+    const panId = await crearProducto(
+      app,
+      token,
+      'Pan GM E2E',
+      '20',
+      '400',
+      'ingrediente',
+    );
+    // Grupo propio también para el nivel de arriba: `grupoBebidaId` lo crea el
+    // test 2 y usarlo ataría este test al orden de la suite (con `-t` no corre)
+    // además de mutar un fixture compartido.
+    const jugoId = await crearProducto(app, token, 'Jugo GM E2E', '20', '300');
+    const aguaId = await crearProducto(app, token, 'Agua GM E2E', '20', '300');
+    const resGrupoJugo = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Jugo GM E2E ${sufijo}`,
+        opciones: [{ itemId: jugoId, cantidad: '1', precioExtra: '300' }],
+      });
+    expect(resGrupoJugo.status).toBe(201);
+    const grupoJugoId = (resGrupoJugo.body as GrupoModificadorResponse)
+      .grupoModificadorId;
+
+    const resGrupoSalsa = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Salsa GM E2E ${sufijo}`,
+        opciones: [{ itemId: salsaId, cantidad: '1', precioExtra: '200' }],
+      });
+    expect(resGrupoSalsa.status).toBe(201);
+    const grupoSalsaId = (resGrupoSalsa.body as GrupoModificadorResponse)
+      .grupoModificadorId;
+
+    // Receta con el grupo de salsa asociado: va a ser el componente del combo,
+    // y es la que produce el nivel `componentes[].grupos[]`.
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa GM E2E ${sufijo}`,
+        precioBase: '2000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: grupoSalsaId, min: 1, max: 1 },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    const resCombo = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo dos niveles GM E2E ${sufijo}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: recetaId, cantidad: '1', bloqueante: true },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: grupoJugoId, min: 1, max: 1 },
+        ],
+      });
+    expect(resCombo.status).toBe(201);
+    const comboDosNivelesId = (resCombo.body as ItemResponse).id;
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN, turnoId: TURNO_MANANA_ID });
+
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_1_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    // Una sola línea que elige en los dos niveles.
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: comboDosNivelesId,
+        cantidad: '1',
+        personalizacion: {
+          grupos: [
+            {
+              grupoId: grupoJugoId,
+              opciones: [{ itemId: jugoId, unidades: 1 }],
+            },
+          ],
+          componentes: [
+            {
+              componenteItemId: recetaId,
+              unidad: 1,
+              grupos: [
+                {
+                  grupoId: grupoSalsaId,
+                  opciones: [{ itemId: salsaId, unidades: 1 }],
+                },
+              ],
+            },
+          ],
+        },
+      });
+    expect(resLinea.status).toBe(201);
+
+    const patchGrupo = (grupoId: string, opciones: unknown[]) =>
+      request(app.getHttpServer())
+        .patch(`/api/grupos-modificadores/${grupoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ opciones });
+
+    // Control: repreciar la opción elegida no la saca del grupo. Tiene que
+    // pasar, o el guard bloquearía por "la lista cambió" en vez de por "esta
+    // opción se saca".
+    const resRepreciar = await patchGrupo(grupoSalsaId, [
+      { itemId: salsaId, cantidad: '1', precioExtra: '500' },
+    ]);
+    expect(resRepreciar.status).toBe(200);
+
+    // Nivel `componentes[].grupos[]`: sacar la salsa que la mesa eligió.
+    const resSacarSalsa = await patchGrupo(grupoSalsaId, [
+      { itemId: ketchupId, cantidad: '1', precioExtra: '250' },
+    ]);
+    expect(resSacarSalsa.status).toBe(400);
+    expect((resSacarSalsa.body as { message: string }).message).toContain(
+      'Mesa',
+    );
+
+    // Control del `grupoId` DENTRO de la containment, para las DOS ramas. Un
+    // mismo ítem puede ser opción de varios grupos (`uq_grupo_opcion_item_vivo`
+    // es por grupo+ítem), así que este grupo ajeno ofrece el jugo Y la salsa que
+    // la mesa eligió — pero en OTRO grupo, que nadie eligió. Sacarlos de acá
+    // tiene que pasar.
+    //
+    // Va una vez por rama a propósito: el mutante que saca el `grupoId` de la
+    // containment se aplica a una rama por vez, y un control que solo toque la
+    // otra lo deja vivo (medido: pasó dos veces antes de partirlo en dos).
+    const resGrupoAjeno = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Grupo ajeno GM E2E ${sufijo}`,
+        opciones: [
+          { itemId: jugoId, cantidad: '1', precioExtra: '300' },
+          { itemId: salsaId, cantidad: '1', precioExtra: '200' },
+          { itemId: ketchupId, cantidad: '1', precioExtra: '250' },
+        ],
+      });
+    expect(resGrupoAjeno.status).toBe(201);
+    const grupoAjenoId = (resGrupoAjeno.body as GrupoModificadorResponse)
+      .grupoModificadorId;
+
+    // Rama `grupos[]`: el jugo está elegido, pero en `grupoJugoId`.
+    const resSacarJugoAjeno = await patchGrupo(grupoAjenoId, [
+      { itemId: salsaId, cantidad: '1', precioExtra: '200' },
+      { itemId: ketchupId, cantidad: '1', precioExtra: '250' },
+    ]);
+    expect(resSacarJugoAjeno.status).toBe(200);
+
+    // Rama `componentes[].grupos[]`: la salsa está elegida, pero en `grupoSalsaId`.
+    const resSacarSalsaAjena = await patchGrupo(grupoAjenoId, [
+      { itemId: ketchupId, cantidad: '1', precioExtra: '250' },
+    ]);
+    expect(resSacarSalsaAjena.status).toBe(200);
+
+    // Nivel `grupos[]`: sacar el jugo que la misma línea eligió.
+    const resSacarJugo = await patchGrupo(grupoJugoId, [
+      { itemId: aguaId, cantidad: '1', precioExtra: '300' },
+    ]);
+    expect(resSacarJugo.status).toBe(400);
+    expect((resSacarJugo.body as { message: string }).message).toContain(
+      'Mesa',
+    );
+
+    // Cancelada la cuenta, la salsa se puede sacar: el bloqueo es por mesa
+    // viva.
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+
+    const resSacarTrasCancelar = await patchGrupo(grupoSalsaId, [
+      { itemId: ketchupId, cantidad: '1', precioExtra: '250' },
+    ]);
+    expect(resSacarTrasCancelar.status).toBe(200);
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+  });
 
   it('el índice único de nombre existe y es sobre lower(nombre)', async () => {
     const rows: { indexdef: string }[] = await ds.query(

@@ -277,10 +277,10 @@ previsualización como en `cerrarCuenta`**: la mesa queda incobrable.
       agregar uno nuevo no rompe ninguna cuenta y tiene que seguir pasando. Un test por
       cada uno de esos tres casos, o el guard va a bloquear ediciones legítimas.
 - [x] **Paso 4 — Gate + revisión + commit.** Gate entero en verde (lint 0, typecheck 0,
-      2393 unitarios, 667 e2e, `--verificar` limpio). **Cuatro mutantes, cuatro muertos:**
-      sacar `cl.item_id` muere en la receta de control (`:1285`), preguntar por todos los
+      2393 unitarios, 667 e2e, `--verificar` limpio). **Tres mutantes, tres muertos:**
+      sacar `cl.item_id` muere en la receta de control (`:1286`), preguntar por todos los
       extras en vez de por los que se sacan muere en el reordenar (`:1237`) **y** en los dos
-      unitarios nuevos, y `estado = 'abierta' OR TRUE` muere después de cancelar (`:1310`).
+      unitarios nuevos, y `estado = 'abierta' OR TRUE` muere después de cancelar (`:1311`).
 
 ### Lo que la revisión independiente destapó, y es lo más importante de esta tarea
 
@@ -318,17 +318,55 @@ mesa sentada—, pero por otro motivo.
 - ✅ **Sin ciclo, verificado:** `GruposModificadoresModule` no importa `ItemsModule` y
   `ItemsModule` no importa grupos, así que agregar el import va en una sola dirección.
 
-- [ ] **Paso 1 — Test e2e que falla.** Cuenta abierta con un combo que eligió la opción
+- [x] **Paso 1 — Test e2e que falla** (`grupos-modificadores.e2e-spec.ts`). Cuenta abierta con un combo que eligió la opción
       "Chuleta" → `PATCH /grupos-modificadores/:id` sin esa opción responde 400 y nombra la
       mesa.
-- [ ] **Paso 2 — Correrlo y verlo fallar.**
-- [ ] **Paso 3 — Implementar.** El service ya calcula `eliminadas` (las opciones que
+- [x] **Paso 2 — Corrido y visto fallar.**
+- [x] **Paso 3 — Implementado.** El service ya calcula `eliminadas` (las opciones que
       desaparecieron) justo antes de soft-borrarlas: ahí va la pregunta, con los ids de
       esas opciones y el `grupoId`.
       ⚠️ **`ItemsService` en el constructor rompe el unitario de este service**: arma el
       provider a mano. Abrir su `.spec.ts` en el mismo momento y agregar el mock — y que el
       mock devuelva lista vacía por default, no `undefined`.
-- [ ] **Paso 4 — Gate + revisión + commit.**
+- [x] **Paso 4 — Gate + revisión + commit.** Gate entero en verde (lint 0, typecheck 0,
+      2396 unitarios, 668 e2e, `--verificar` limpio). El aviso del plan sobre el unitario
+      se cumplió tal cual: `Nest can't resolve … ItemsService at index [2]` en los 32 tests,
+      arreglado con el provider a mano y el mock devolviendo `[]`.
+
+### El fixture no puede salir del seed
+
+El plan proponía usar el combo y el grupo Proteína del seed. **No sirve**: sacarle una
+opción a un grupo del seed lo rompe para las demás suites que lo usan. El test arma su
+propio catálogo entero (dos grupos, una receta con grupo asociado, un combo con esa receta
+de componente) y así una sola línea cubre **los dos niveles** del snapshot.
+
+### Cinco mutantes, y uno sobrevivió dos veces antes de morir
+
+Líneas de `backend/test/grupos-modificadores.e2e-spec.ts`, **releídas del archivo** después
+del último cambio al test (ver la nota de abajo):
+
+| Mutante | Muere en |
+|---|---|
+| borrar la rama `componentes[].grupos[]` | `:516` — `resSacarSalsa` 400 |
+| borrar la rama `grupos[]` | `:562` — `resSacarJugo` 400 |
+| sacar el `grupoId` de la containment, rama `grupos[]` | `:550` — `resSacarJugoAjeno` 200 |
+| sacar el `grupoId` de la containment, rama `componentes` | `:556` — `resSacarSalsaAjena` 200 |
+| `estado = 'abierta' OR TRUE` | `:577` — `resSacarTrasCancelar` 200 |
+
+📌 **El del `grupoId` sobrevivió dos veces.** La primera, porque el test no tenía control:
+un mismo ítem puede ser opción de varios grupos (`uq_grupo_opcion_item_vivo` es por
+grupo+ítem), así que sin el `grupoId` dentro del match, sacar una opción de un grupo ajeno
+quedaría bloqueada por una mesa que la eligió en otro. La segunda, porque el control que
+agregué tocaba **una sola** de las dos ramas, y el mutante se aplica de a una: hubo que
+partirlo en dos controles. Es el mismo error de método dos veces seguidas — un control
+que no ejercita la línea mutada mide otra cosa.
+
+⚠️ **Y un tercer error de método, en la tabla misma, que encontró la revisión:** las cinco
+citas estaban mal. Las copié de la salida de cada corrida y **después** agregué el control
+partido en dos, que corrió todo para abajo. Una cita de línea no se toma de un log viejo:
+se relee del archivo como quedó — y **después** del último cambio al test, no antes: la
+segunda pasada de esta misma tabla también quedó corrida, porque entre releerla y commitear
+saqué un helper duplicado. Valía igual para las dos citas de la Task 3 acá arriba.
 
 ---
 

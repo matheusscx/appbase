@@ -497,15 +497,16 @@ customer (`min`/`max`).
   vuelve a ser borrable — es un bloqueo por mesa viva, no un endurecimiento del
   catálogo.
 
-  **Alcance hoy (2026-08-30):** la regla está puesta en **dos** de las cinco
+  **Alcance hoy (2026-08-30):** la regla está puesta en **tres** de las cinco
   formas de sacar del catálogo algo ya pedido —el borrado (`DELETE /items/:id`),
-  para el item de la línea y para el ingrediente pedido como extra, y la edición
-  de los extras de la receta (`PATCH /items/:id` con `extrasPermitidos`)—. En la
-  edición se compara el **diff**: bloquea el extra que *se saca*, no la lista que
-  cambia, así que reordenar, repreciar o agregar siguen pasando. Siguen **sin**
-  aplicarla: sacar una opción de un grupo de modificadores, sacar un ingrediente
-  que una línea abierta omitió, y desasociar un grupo que una línea abierta
-  eligió. Detalle y estado: `docs/agent/pendientes.md` § 2.
+  para el item de la línea y para el ingrediente pedido como extra; la edición de
+  los extras de la receta (`PATCH /items/:id` con `extrasPermitidos`); y la
+  edición de las opciones de un grupo (`PATCH /grupos-modificadores/:id`)—. En
+  las dos **ediciones** se compara el **diff**: bloquean lo que *se saca*, no la
+  lista que cambia, así que reordenar, repreciar o agregar siguen pasando. Siguen **sin**
+  aplicarla dos caminos, los dos en `PATCH /items/:id`: sacar un ingrediente que
+  una línea abierta omitió, y desasociar un grupo que una línea abierta eligió.
+  Detalle y estado: `docs/agent/pendientes.md` § 3.
 
 **Fuera de alcance (diferido, no un olvido):** la **impresión térmica** de la
 opción elegida de un grupo en comanda/precuenta/boleta queda para un ticket

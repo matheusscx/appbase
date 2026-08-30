@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-07-22
+**Last Updated**: 2026-08-30
 
 ---
 
@@ -457,6 +457,20 @@ Response (201):
   sugerencia hoy la calcula solo `restaurar()` (`grupos-modificadores.service.ts`
   → `errorDeColisionNombreSQL`), así que no hay contra qué armar acá el modal de
   renombrado. Ver "Modelo de datos → `grupo_modificador_opciones`".
+  ⚠️ **Un tercer `400` (desde el 2026-08-30): una opción que una cuenta de salón
+  abierta ya eligió no se saca del grupo** — *"No se puede sacar del grupo una
+  opción ya pedida: "Coca" está pedida en Mesa 4 · cuenta 1"*. Sin eso, la línea
+  de esa mesa deja de poder tasarse (*"La opción X no pertenece al grupo"*) en la
+  precuenta **y** al cerrar, y la mesa queda **incobrable** sin que nadie se
+  entere hasta que el garzón intenta cobrar. Se pregunta por las opciones que
+  **se sacan** (las `eliminadas` que el service ya calculaba), no por la lista:
+  reordenar y repreciar siguen pasando. La pregunta vive en
+  `ItemsService.cuentasAbiertasConOpcionDeGrupo` —es sobre
+  `cuenta_lineas.personalizacion`, el mismo campo que las otras puertas de la
+  misma regla— y mira los **dos** niveles del snapshot: `grupos[]` (grupo propio
+  del ítem) y `componentes[].grupos[]` (grupo de un componente receta del combo).
+  El `grupoId` va **dentro** del match, así que una opción elegida en otro grupo
+  no bloquea la edición de éste. Cancelada o cerrada la cuenta, se puede sacar.
 - `DELETE /grupos-modificadores/:id` — `400` si el grupo está asociado a algún
   item vivo (`item_grupos_modificadores`).
 - `GET /grupos-modificadores/:id/items` — drawer de recetas: cada asociación

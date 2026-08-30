@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { GruposModificadoresService } from './grupos-modificadores.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { ItemsService } from '../items/items.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440000';
 const ITEM_ING_A = '550e8400-e29b-41d4-a716-4466554400a1';
@@ -18,10 +19,12 @@ describe('GruposModificadoresService', () => {
   let managerMock: { query: jest.Mock };
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
   let convertirUnidad: jest.Mock;
+  let cuentasAbiertasConOpcionDeGrupo: jest.Mock;
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
     convertirUnidad = jest.fn().mockResolvedValue('1');
+    cuentasAbiertasConOpcionDeGrupo = jest.fn().mockResolvedValue([]);
     dataSourceMock = {
       transaction: jest.fn((cb: (m: typeof managerMock) => unknown) =>
         cb(managerMock),
@@ -38,6 +41,14 @@ describe('GruposModificadoresService', () => {
         GruposModificadoresService,
         { provide: Db, useValue: dbMock },
         { provide: CatalogService, useValue: { convertirUnidad } },
+        // Lista VACÍA por default, no `undefined`: el guard de `update()` hace
+        // `.length` sobre lo que devuelve, así que un mock sin valor haría
+        // fallar por TypeError todos los tests que sacan una opción — un rojo
+        // que no dice nada sobre lo que el test quería probar.
+        {
+          provide: ItemsService,
+          useValue: { cuentasAbiertasConOpcionDeGrupo },
+        },
       ],
     }).compile();
     service = moduleRef.get(GruposModificadoresService);
@@ -387,6 +398,111 @@ describe('GruposModificadoresService', () => {
           /UPDATE grupo_modificador_opciones SET eliminado_el/i.test(c[0]),
       );
       expect(opcionDelete).toBeTruthy();
+    });
+
+    // El e2e prueba que el guard bloquea de verdad contra Postgres; acá se fija
+    // el contrato con `ItemsService`, que el e2e no puede ver: por QUÉ opciones
+    // se pregunta, y que no se pregunte cuando no se saca ninguna.
+    it('pregunta por las opciones que SE SACAN antes de borrarlas, y no por las que siguen', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ])
+        .mockResolvedValueOnce([
+          { grupo_opcion_id: 'O-GONE', item_id: ITEM_PROD },
+          { grupo_opcion_id: 'O-STAY', item_id: ITEM_PROD_2 },
+        ]) // vivas actuales
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Fanta',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ])
+        // `ITEM_PROD_2` ya venía vivo (`O-STAY`), así que ésta es la rama
+        // UPDATE de `validarYResolverOpciones`, no la INSERT.
+        .mockResolvedValueOnce([]) // UPDATE de la opción que sigue
+        .mockResolvedValueOnce([]) // soft-delete overrides
+        .mockResolvedValueOnce([]) // soft-delete opción
+        .mockResolvedValueOnce([]); // cargarGrupo
+
+      await service.update(TENANT_ID, 'G1', {
+        opciones: [{ itemId: ITEM_PROD_2, cantidad: '1', precioExtra: '0' }],
+      });
+
+      expect(cuentasAbiertasConOpcionDeGrupo).toHaveBeenCalledTimes(1);
+      const [, tenantId, grupoId, itemIds] = cuentasAbiertasConOpcionDeGrupo
+        .mock.calls[0] as [unknown, string, string, string[]];
+      expect(tenantId).toBe(TENANT_ID);
+      expect(grupoId).toBe('G1');
+      // Solo la que se va. `ITEM_PROD_2` sigue en el grupo: preguntar por ella
+      // bloquearía reordenar o repreciar, que son ediciones legítimas.
+      expect(itemIds).toEqual([ITEM_PROD]);
+    });
+
+    it('no pregunta ni borra nada si ninguna opción se saca', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ])
+        .mockResolvedValueOnce([
+          { grupo_opcion_id: 'O-STAY', item_id: ITEM_PROD_2 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Fanta',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ])
+        .mockResolvedValueOnce([]) // UPDATE de la opción que sigue viva
+        .mockResolvedValueOnce([]);
+
+      await service.update(TENANT_ID, 'G1', {
+        opciones: [{ itemId: ITEM_PROD_2, cantidad: '1', precioExtra: '999' }],
+      });
+
+      expect(cuentasAbiertasConOpcionDeGrupo).not.toHaveBeenCalled();
+    });
+
+    it('si una cuenta abierta la eligió, tira 400 y NO borra la opción', async () => {
+      cuentasAbiertasConOpcionDeGrupo.mockResolvedValueOnce([
+        { opcion: 'Coca', cuenta: 'Mesa 4 · cuenta 1' },
+      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ])
+        .mockResolvedValueOnce([
+          { grupo_opcion_id: 'O-GONE', item_id: ITEM_PROD },
+        ])
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Fanta',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ])
+        .mockResolvedValueOnce([{ grupo_opcion_id: 'O-NEW' }]);
+
+      await expect(
+        service.update(TENANT_ID, 'G1', {
+          opciones: [{ itemId: ITEM_PROD_2, cantidad: '1', precioExtra: '0' }],
+        }),
+      ).rejects.toThrow(/"Coca" está pedida en Mesa 4 · cuenta 1/);
+
+      // El guard va ANTES del soft-delete: si tirara después, la opción ya
+      // estaría borrada y solo el rollback de la transacción la salvaría.
+      expect(
+        managerMock.query.mock.calls.filter(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' &&
+            /UPDATE grupo_modificador_opciones SET eliminado_el/i.test(c[0]),
+        ),
+      ).toHaveLength(0);
     });
 
     it('renombra sin reemplazar opciones (rama solo-rename) y verifica disponibilidad', async () => {
