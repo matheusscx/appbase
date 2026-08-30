@@ -13,6 +13,9 @@
 //      "Costo nuevo (por g)" — la comparación que inducía el error.
 //   3. Ese vigente convertido cae en fracciones que la moneda no representa
 //      ($1,5 por gramo en CLP) y `formatMonto` las redondearía a `$2`.
+//   4. Cambiar de PRODUCTO dejaba el número tipeado aplicado al producto nuevo
+//      —el watch de la unidad no lo atajaba con dos bases `kg` iguales— y, si
+//      la moneda cambiaba, lo re-renderizaba bajo la escala nueva.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Inventario from './index.vue'
@@ -31,6 +34,21 @@ const CLP = {
   valorDelDia: null,
 }
 
+/** Los separadores AL REVÉS que CLP: acá el `.` es decimal y el `,` de miles. */
+const USD = {
+  monedaId: 'usd-1',
+  nombre: 'Dólar estadounidense',
+  codigoIso: 'USD',
+  simbolo: 'US$',
+  decimales: 2,
+  separadorDecimal: '.',
+  separadorMiles: ',',
+  locale: 'en-US',
+  habilitada: true,
+  esOficial: false,
+  valorDelDia: null,
+}
+
 const UNIDADES = [
   { unidadMedidaId: 'u-kg', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
   { unidadMedidaId: 'u-g', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
@@ -43,6 +61,28 @@ const HARINA = {
   nombre: 'Harina',
   costoActual: '1500.0000',
   monedaId: 'clp-1',
+  unidadMedida: 'kg',
+  modoInventario: 'cantidad',
+}
+
+/** Misma moneda y **misma unidad base** que la harina: es el caso que el watch
+ * de la unidad no puede atajar, porque `kg` → `kg` no dispara. */
+const AZUCAR = {
+  id: 'item-azucar',
+  nombre: 'Azúcar',
+  costoActual: '900.0000',
+  monedaId: 'clp-1',
+  unidadMedida: 'kg',
+  modoInventario: 'cantidad',
+}
+
+/** El producto en otra moneda, con el costo vigente que se midió el 2026-08-28
+ * (US$7,50). Base `kg` también: lo único que cambia es la moneda. */
+const SONDA_USD = {
+  id: 'item-sonda-usd',
+  nombre: 'Sonda USD',
+  costoActual: '7.5000',
+  monedaId: 'usd-1',
   unidadMedida: 'kg',
   modoInventario: 'cantidad',
 }
@@ -66,7 +106,8 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve(UNIDADES)
     if (url.includes('/items?tipo=producto')) {
-      return Promise.resolve({ data: [HARINA], meta: { page: 1, pageSize: 100, total: 1, totalPages: 1 } })
+      const data = [HARINA, AZUCAR, SONDA_USD]
+      return Promise.resolve({ data, meta: { page: 1, pageSize: 100, total: data.length, totalPages: 1 } })
     }
     if (url.includes('/items?tipo=ingrediente')) {
       return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
@@ -109,7 +150,7 @@ async function montar() {
       },
     },
   })
-  useMonedasStore().hydrate([CLP], 'tenant-1')
+  useMonedasStore().hydrate([CLP, USD], 'tenant-1')
   await new Promise(r => setTimeout(r, 20))
   return wrapper
 }
@@ -140,6 +181,12 @@ function selectConOpcion(wrapper: Wrapper, valor: string, sinValor?: string) {
 const selectProducto = (w: Wrapper) => selectConOpcion(w, HARINA.id, 'todos')
 const selectUnidad = (w: Wrapper) => selectConOpcion(w, 'kg')
 const campoCosto = (w: Wrapper) => w.findComponent({ name: 'MoneyInput' })
+
+/** El texto ENMASCARADO que se ve en el campo, no el crudo del `v-model`: el
+ * bug de la moneda es visual —el mismo crudo bajo otra escala— y mirar solo el
+ * modelo lo dejaría pasar. */
+const textoCosto = (w: Wrapper) =>
+  campoCosto(w).findComponent({ name: 'UInput' }).props('modelValue') as string
 
 const campoComentario = (w: Wrapper) => w.findComponent({ name: 'UTextarea' })
 
@@ -237,6 +284,78 @@ describe('inventario — el drawer de ajuste de costo y la unidad', () => {
       costoNuevo: '2',
       unidadCodigo: 'g',
       comentario: 'Corrección del proveedor',
+    }])
+    wrapper.unmount()
+  })
+})
+
+describe('inventario — el drawer de ajuste de costo y el producto', () => {
+  beforeEach(() => {
+    ajustesEnviados = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  // El caso que el watch de la unidad NO puede atajar: las dos bases son `kg`,
+  // no cambia nada y Vue no dispara con el mismo valor. Medido en el navegador
+  // el 2026-08-28: el `1.500` sobrevivía intacto al cambio de producto.
+  it('cambiar de producto limpia el costo tipeado, aunque la unidad base sea la misma', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await emitir(selectProducto(wrapper), HARINA.id)
+    await emitir(campoCosto(wrapper), '1500')
+    expect(campoCosto(wrapper).props('modelValue')).toBe('1500')
+
+    await emitir(selectProducto(wrapper), AZUCAR.id)
+
+    // Si sobreviviera, sería el costo de la harina aplicado al azúcar: un
+    // número que nadie tecleó para ese producto.
+    expect(campoCosto(wrapper).props('modelValue')).toBe('')
+    wrapper.unmount()
+  })
+
+  // El renglón que cambia el TAMAÑO del problema: no es "quedó un número
+  // viejo", es el mismo número re-enmascarado bajo la escala nueva. Medido con
+  // el borrado sacado: el crudo ni siquiera sobrevive igual, vuelve del
+  // componente como `1500.00` (maska re-emite con `fraction: 2`), y en el
+  // navegador el campo mostraba `1,500.00` al lado de un vigente de US$7,50.
+  it('cambiar a un producto en otra moneda no deja el número reinterpretado en pantalla', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await emitir(selectProducto(wrapper), HARINA.id)
+    await emitir(campoCosto(wrapper), '1500')
+    // Sin símbolo: maska re-enmascara lo que el watch escribió y se queda con
+    // el número. Es el mismo `1.500` que se midió en pantalla el 2026-08-28.
+    expect(textoCosto(wrapper)).toBe('1.500')
+
+    await emitir(selectProducto(wrapper), SONDA_USD.id)
+
+    expect(campoCosto(wrapper).props('modelValue')).toBe('')
+    expect(textoCosto(wrapper)).toBe('')
+    wrapper.unmount()
+  })
+
+  // El cierre completo: limpiar no puede dejar el formulario a medias. Lo
+  // retipeado viaja con el producto NUEVO. No se manda `unidadCodigo` porque
+  // los dos productos son base `kg` y el watch la reasignó a la del nuevo: el
+  // envío la omite cuando coincide con la base.
+  // ⚠️ Este test NO mata el mutante —retipear pisa lo que hubiera sobrevivido—:
+  // es guarda de regresión del envío, no prueba del borrado. Eso lo hacen los
+  // dos de arriba.
+  it('tras limpiar, lo retipeado viaja con el producto nuevo', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await emitir(selectProducto(wrapper), HARINA.id)
+    await emitir(campoCosto(wrapper), '1500')
+
+    await emitir(selectProducto(wrapper), SONDA_USD.id)
+    await emitir(campoCosto(wrapper), '8.25')
+    await emitir(campoComentario(wrapper), 'Precio nuevo del proveedor')
+    await enviar(wrapper)
+
+    expect(ajustesEnviados).toEqual([{
+      itemId: SONDA_USD.id,
+      costoNuevo: '8.25',
+      comentario: 'Precio nuevo del proveedor',
     }])
     wrapper.unmount()
   })

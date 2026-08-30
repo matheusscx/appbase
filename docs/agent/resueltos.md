@@ -11889,8 +11889,10 @@ importar `useCurrency` en la página, que habría sido el primer `.vue` del repo
 📌 **Lo que este cierre NO toca:** los seis `:decimales="4"` de `items.vue` y el rechazo de
 cadenas inválidas en `MoneyInput` siguen siendo frentes propios. Y **cambiar de producto**
 —no de unidad— conserva el costo tipeado: es el vecino inmediato, quedó anotado en
-[`pendientes.md`](pendientes.md) porque el owner decidió sobre la unidad, no sobre el ítem. Y el ×1000 de esta entrada
-era el del **selector**; el `.`→×10 de maska es otro y sigue abierto.
+[`pendientes.md`](pendientes.md) porque el owner decidió sobre la unidad, no sobre el ítem.
+✅ **Ese vecino se cerró el 2026-08-29** y ya no está en `pendientes.md`: su cierre es la
+sección *"Cambiar de producto conservaba el costo tipeado"* de este mismo archivo. Y el ×1000
+de esta entrada era el del **selector**; el `.`→×10 de maska es otro y sigue abierto.
 
 ---
 
@@ -12291,3 +12293,82 @@ pantalla—, y por eso la entrada esperaba en la § 4: lo único que faltaba era
   Los demás textos de `medios-pago.vue` dicen "cobros" a secas, que sigue siendo cierto.
 - **Ningún test fijaba la cadena vieja** (`medios-pago.vue` no tiene spec; el de la pasarela
   no la menciona), así que no hubo que espejar nada.
+
+---
+
+## Cambiar de producto conservaba el costo tipeado, y con otra moneda lo reinterpretaba (cerrado 2026-08-29)
+
+Vecino inmediato del ×1000 del selector de unidad, y **no el mismo caso**: ahí lo que cambiaba
+era la unidad, acá el ítem. Lo levantó la revisión independiente de aquel frente, lo midió el
+navegador el 2026-08-28 y esperaba en la § 4 porque lo único que faltaba era la decisión.
+
+**Decisión del owner (2026-08-29): el campo "Costo nuevo" se limpia al cambiar de producto**,
+igual que ya se limpiaba al cambiar de unidad, y con el mismo costo aceptado: si el click en la
+lista fue un error, el número se retipea.
+
+**Lo medido el 2026-08-28, tal como lo traía la entrada** (Demo Restaurante, drawer "Ajustar
+costo"). Se archiva acá verbatim porque el commit que cierra esto la saca de `pendientes.md`:
+
+| Paso | Producto | Costo vigente | Campo "Costo nuevo" |
+|---|---|---|---|
+| Se tipea `1500` | Carne molida (CLP, base kg) | $8.000 | `1.500` |
+| Se cambia el producto (misma base kg) | Carne Mixta (CLP) | $10.000 | **`1.500`** — sobrevive |
+| Se cambia a un producto en **otra moneda** | sonda USD (2 decimales) | $7.50 | **`1,500.00`** |
+
+📌 La sonda USD se creó por API para poder medirlo —el seed tiene los 102 productos de Paris
+en CLP— y quedó soft-borrada. El spec la reproduce como fixture (`SONDA_USD`), así que el caso
+ya no depende de que alguien vuelva a crearla a mano.
+
+**Qué se hizo.** Una línea en el `watch` de `itemId` de `inventario/index.vue` —
+`ajusteCostoForm.value.costoNuevo = ''`— más su docblock. Sigue la forma que ya existía (el
+`watch` de `unidadCodigo`, el inmediatamente anterior en el archivo) en vez de inventar una
+nueva.
+
+- **Limpia por su cuenta, no por rebote del watch de la unidad.** Es el punto que la entrada
+  dejó dicho y que la implementación no podía ignorar: entre dos productos de base `kg` la
+  unidad no cambia y **Vue no dispara con el mismo valor**, así que delegar el borrado ahí
+  deja el caso medido sin atajar.
+- **El borrado va ANTES del `if (!prod) return`.** Si el producto no aparece en la lista, el
+  `watch` sale por el `return` y lo tipeado quedaría vivo y huérfano — encima con el
+  `MoneyInput` deshabilitado, porque sin producto no hay `monedaId`. Ponerlo antes no cuesta
+  nada y cubre la rama. ⚠️ **No se midió que esa rama sea alcanzable desde la pantalla** (el
+  `USelectMenu` solo emite valores de su lista): es colocación defensiva, no un bug reproducido.
+- **Sin guard `!anterior`**, a diferencia del `watch` de la unidad. Ahí el guard existe porque
+  la asignación inicial la hace este mismo `watch`; acá la primera selección encuentra
+  `costoNuevo` ya vacío (`abrirAjusteCosto()` resetea el form) y el borrado es un no-op. Un
+  guard sería una rama muerta.
+
+**Qué decía mal la entrada** — poco, y el detalle importa:
+
+- **La cita estaba bien.** `frontend/app/pages/inventario/index.vue:200-204` era exactamente el
+  `watch` de `itemId`; se abrió el archivo antes de creerle y coincidía.
+- **Pero se quedó corta en el mecanismo.** La entrada dice que *"el mismo valor crudo se
+  re-renderiza bajo la escala nueva"*, o sea que el problema es de pantalla. Medido acá con el
+  borrado sacado, **el crudo tampoco queda quieto**: el `1500` vuelve del componente como
+  `1500.00`, porque al cambiar `cfg` el `watch` de `MoneyInput` reformatea, maska re-enmascara
+  con `fraction: 2` y **re-emite**. O sea que lo que se mandaría al backend tampoco es lo que
+  se tecleó. No contradice la medición del navegador —`1.500` (CLP) se ve `1,500.00` (USD)—,
+  la agrava.
+
+**Qué test lo fija.** Tres casos nuevos en `app/pages/inventario/index.nuxt.spec.ts`, en su
+propio `describe`, con dos productos y una moneda que el archivo no tenía: `AZUCAR` (CLP, base
+`kg` — el caso que el watch de la unidad no puede atajar) y `SONDA_USD` (US$7,50, separadores
+al revés que CLP).
+
+1. Cambiar de producto con la **misma** unidad base limpia el campo.
+2. Cambiar a un producto en **otra moneda** no deja el número reinterpretado: se asierta sobre
+   el **texto enmascarado del input**, no solo sobre el modelo, porque el bug medido era visual.
+3. Tras limpiar, lo retipeado viaja con el producto nuevo (que el borrado no rompa el envío).
+
+**La prueba del mutante, con números.** Sacada la línea `costoNuevo = ''` —o sea el `watch` tal
+como estaba antes de este cierre—: **2 failed / 4 passed**, y falla donde tiene que fallar
+(`'1500'` en el caso de misma moneda, `'1500.00'` en el de moneda distinta, donde se esperaba
+`''`). Con la línea puesta: **6/6 en verde**. Revertir y volver a correr es lo que prueba que
+el test toca la línea nueva; que pase en verde, solo. ⚠️ El revert se confirmó además contra
+`git diff` (solo `+`, ningún `-` sobre el archivo original), no mirando el archivo.
+
+📌 **De paso, un conteo que ya estaba mal:** el intro de la § 4 de `pendientes.md` decía *"nueve
+abiertas"* y eran **ocho** antes de sacar esta —los dos carteles de la tarjeta se cerraron en
+`0820e414` sin tocar ese párrafo—. Quedó en **siete**, corrido el `awk` que el propio párrafo
+manda correr.
+

@@ -197,7 +197,22 @@ watch(() => ajusteCostoForm.value.unidadCodigo, (_nueva, anterior) => {
   ajusteCostoForm.value.costoNuevo = ''
 })
 
+/** Cambiar de PRODUCTO limpia el costo por su cuenta, no por rebote del watch
+ * de arriba: lo tipeado pertenece al producto en el que se tipeó y a su moneda.
+ * Delegarlo en la unidad no alcanza —medido en el navegador el 2026-08-28—:
+ * entre dos productos de base `kg` la unidad no cambia, Vue no dispara con el
+ * mismo valor y el `1500` sobrevive. Y si el producto nuevo está en otra moneda
+ * es peor que un número viejo: `MoneyInput` re-enmascara ese mismo número bajo
+ * la escala nueva, así que `1.500` (CLP, `.` de miles) se lee `1,500.00` (USD,
+ * `.` decimal) al lado de un costo vigente de US$7,50 —medido en el navegador—,
+ * y el crudo tampoco queda quieto: en el spec de acá vuelve del componente como
+ * `1500.00`, o sea que no es solo visual. Decisión del owner,
+ * 2026-08-29: se limpia, con el mismo costo que ya se aceptó para la unidad —si
+ * el click en la lista fue un error, el número se retipea. */
 watch(() => ajusteCostoForm.value.itemId, (itemId) => {
+  // Antes del `find`: si el producto no está en la lista, lo tipeado queda
+  // igual de huérfano y el campo tiene que vaciarse lo mismo.
+  ajusteCostoForm.value.costoNuevo = ''
   const prod = productos.value.find(p => p.id === itemId)
   if (!prod) return
   ajusteCostoForm.value.unidadCodigo = prod.unidadMedida ?? 'unidad'

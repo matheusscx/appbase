@@ -504,6 +504,12 @@ Reglas:
   7,69% medido arriba. Limpiar cuesta un retipeo y no puede inventar nada.
   Aplicado en el drawer de ajuste de costo de `inventario/index.vue`; fijado en
   `app/pages/inventario/index.nuxt.spec.ts`.
+  📌 **Cambiar de PRODUCTO limpia igual, y por su cuenta** (owner, 2026-08-29). El número
+  tipeado pertenece al producto tanto como a la unidad, y encima el producto puede traer
+  **otra moneda**: ahí no queda un número viejo, queda el mismo número re-enmascarado bajo la
+  escala nueva —`1.500` en CLP se lee `1,500.00` en USD, y el crudo vuelve del componente como
+  `1500.00`—. ⚠️ **No se puede delegar en el watch de la unidad**: entre dos productos de base
+  `kg` la unidad no cambia y Vue no dispara con el mismo valor. Cada watch limpia lo suyo.
   📌 La otra mitad del mismo problema es **visual**: un "Costo vigente" en unidad base al
   lado de un "Costo nuevo (por g)" son dos números que no se pueden comparar. El vigente
   sigue al selector, y como es una **tasa convertida** puede caer en fracciones que la
