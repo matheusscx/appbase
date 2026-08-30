@@ -370,24 +370,59 @@ saqué un helper duplicado. Valía igual para las dos citas de la Task 3 acá ar
 
 ---
 
-## Task 5: Documentación y cierre
+## Task 5: Documentación y cierre — HECHA
 
 **Files:**
-- Modify: `docs/features/salones-cuentas.md` (o el que documente el ciclo de la cuenta —
-  confirmar cuál con `docs/README.md`)
-- Modify: `docs/features/personalizacion-recetas.md`
-- Modify: `docs/agent/pendientes.md` (sacar la entrada de § 2)
-- Modify: `docs/agent/resueltos.md`
+- Modify: `docs/features/salones-mesas.md` (es el que documenta el ciclo de la cuenta;
+  el plan decía `salones-cuentas.md`, que **no existe**)
+- Modify: `docs/features/recetas.md`, `docs/features/personalizacion-recetas.md`,
+  `docs/features/grupos-modificadores.md`
+- Modify: `docs/PRODUCTO.md`, `docs/ESTADO.md`, `docs/agent/pendientes.md`
 
-- [ ] **Paso 1 — La regla, en una línea citable:** *lo que una cuenta abierta ya pidió no
-      se saca del catálogo*, con las cuatro puertas donde está puesta y el porqué (dejar
-      una mesa incobrable no es una decisión que nadie tomó).
-- [ ] **Paso 2 — El cierre en `resueltos.md`**, con lo que la entrada no sabía: que eran
-      tres puertas y no una, que el agujero es anterior a la tanda del override, y que la
-      opción de grupo estaba cerrada por otra regla.
-- [ ] **Paso 3 — ¿Queda algo?** La entrada original proponía además que el composable deje
-      de tragarse el error del preview. Con las cuatro puertas cerradas, el 400 deja de ser
-      alcanzable **por acción de catálogo** — pero no es lo mismo que "imposible". Decidir
-      con evidencia si queda una entrada residual (¿hay otro camino que invalide una
-      personalización ya pedida?) o si se cierra entera.
-- [ ] **Paso 4 — Commit.**
+- [x] **Paso 1 — La regla, en una línea citable.** Vive en
+      `salones-mesas.md` § "Ítem eliminado con la cuenta abierta", con la tabla de las
+      **cinco** puertas y su estado, y el porqué que importa: no es integridad
+      referencial, es que el cobro re-tasa contra el catálogo vivo. Replicada, acotada a
+      lo que cada archivo cubre, en `PRODUCTO.md`, `recetas.md`,
+      `personalizacion-recetas.md` y `grupos-modificadores.md`.
+
+- [x] **Paso 2 — NO va a `resueltos.md`.** El plan lo daba por cerrado; no lo está.
+      Quedan dos puertas, así que la entrada **se queda en `pendientes.md`**, reescrita
+      con lo medido y **movida de § 2 ("medir primero") a § 3 ("ya decidido, falta
+      construir")**: ya no queda nada que medir, queda construir. Dejarla en § 2 habría
+      mandado al próximo a re-medir lo mismo.
+
+- [x] **Paso 3 — Sí queda, y más de lo que el plan creía.**
+      1. **Dos puertas más**, las dos en `PATCH /items/:id` (`ingredientes` con un
+         omitido, `gruposModificadores` desasociando un grupo elegido). No estaban en el
+         plan; salieron de la revisión independiente y se verificaron leyendo
+         `resolverPersonalizacionReceta`.
+      2. **El composable sigue tragándose el error.** Con las cinco puertas cerradas el
+         400 deja de ser alcanzable *por acción de catálogo*, que no es lo mismo que
+         imposible. Es una decisión aparte y mucho más barata que las dos puertas.
+
+- [x] **Paso 4 — Commit.**
+
+---
+
+## Lo que este plan enseñó, más allá del código
+
+1. **La entrada de backlog subestimaba el frente por más de la mitad.** Decía una puerta,
+   el plan encontró tres midiendo, la revisión encontró cinco. La cuenta final: 3 cerradas,
+   2 abiertas. **El mapa se hace abriendo las superficies**, no leyendo la entrada — y
+   tampoco leyendo el plan.
+
+2. **Una cita de línea se relee del archivo, después del último cambio.** Falló dos veces
+   en la misma tabla: primero por copiarla del log de cada mutante, después por releerla y
+   *luego* editar el test. La segunda vez ya sabiendo lo primero.
+
+3. **Un control que no ejercita la línea mutada mide otra cosa.** El mutante del `grupoId`
+   sobrevivió dos veces: sin control, y con un control que tocaba la otra rama.
+
+4. **Un `grep` que parece exhaustivo puede no serlo.** Descarté el índice GIN afirmando que
+   TypeORM no lo soportaba, porque grepeé `IndexOptions` por `unique|spatial|fulltext|
+   parser|where` y no por `type`. La revisión lo encontró y **cambió la decisión**, no solo
+   el texto: 778 ms → 0,16 ms.
+
+5. **Escribí en tres archivos una justificación falsa** ("el precio viaja congelado en el
+   snapshot") sin trazarla. Era falsable en dos saltos de código.

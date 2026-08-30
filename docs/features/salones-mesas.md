@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-16 (responsable vigente y transferencias)
+**Last Updated**: 2026-08-30 (lo que una cuenta abierta ya pidió no se saca del catálogo)
 
 ---
 
@@ -262,7 +262,33 @@ Backfill al arrancar: cuentas existentes sin responsable reciben
 ### Ítem eliminado con la cuenta abierta
 
 Borrar del catálogo un ítem que está pedido en una cuenta abierta **está bloqueado**
-(`GET /items/:id/uso` → clase `'cuenta'`, ver [recetas.md](./recetas.md)). Para los
+(`GET /items/:id/uso` → clase `'cuenta'`, ver [recetas.md](./recetas.md)).
+
+**La regla, en una línea: lo que una cuenta abierta ya pidió no se saca del catálogo**
+—esté en `cuenta_lineas.item_id` o **adentro** de su `personalizacion`—. El motivo no es
+integridad referencial: la precuenta y el cierre **re-tasan la línea contra el catálogo
+vivo**, así que sacarle una pieza a algo ya pedido hace que esa línea no se pueda tasar y
+la mesa quede **incobrable**, con un error que nadie ve hasta que el garzón intenta cobrar.
+Cancelada o cerrada la cuenta, todo vuelve a ser borrable: el bloqueo es por **mesa viva**,
+no un endurecimiento del catálogo.
+
+Dónde está puesta hoy (2026-08-30) — **tres de las cinco** formas de sacar algo del
+catálogo:
+
+| Camino | Estado |
+|---|---|
+| `DELETE /items/:id` del ítem de la línea | ✅ desde antes |
+| `DELETE /items/:id` de un ingrediente pedido como **extra** | ✅ `dce84899` |
+| `PATCH /items/:id` con `extrasPermitidos` | ✅ `d42a36e7` |
+| `PATCH /grupos-modificadores/:id` sacando una opción | ✅ `bdc4d870` |
+| `PATCH /items/:id` con `ingredientes` (un **omitido** que se va) | 🔲 abierta |
+| `PATCH /items/:id` con `gruposModificadores` (grupo elegido que se desasocia) | 🔲 abierta |
+
+Las tres ediciones comparan el **diff**: bloquean lo que *se saca*, no la lista que cambia,
+así que reordenar, repreciar o agregar siguen pasando. Las dos que faltan están en
+[`../agent/pendientes.md`](../agent/pendientes.md) § 3 con el molde ya probado.
+
+Para los
 casos que ya existan, el detalle de la cuenta **muestra la línea marcada**
 (`itemEliminado: true`) en vez de esconderla: el `JOIN` a `items` de `armarDetalle` no
 filtra lo eliminado a propósito. Filtrarlo hacía desaparecer la línea de la pantalla
