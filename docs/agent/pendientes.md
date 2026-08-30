@@ -59,6 +59,25 @@ detalle de las dos tandas, con los errores que se cometieron en el camino, está
 [`resueltos.md`](resueltos.md). Volvió a poblarse con los minors del frente de redondeo, que
 son de una sola pasada y están agrupados abajo.
 
+### El unitario de vigencia de tokens se cae una semana por año, por el cambio de hora (2026-08-30)
+
+- [ ] **`tokens-acceso.service.spec.ts` afirma que 7 días son 168 horas, y cruzando el cambio
+  de hora son 167** (backend/tests; encontrado el 2026-08-30 corriendo el gate de otra tarea,
+  **no es una regresión de ese trabajo**: se reprodujo idéntico en un worktree de `149d3bc3`,
+  el commit anterior) — el test *"la invitación vive 7 días y el reset 1 hora"*
+  (`tokens-acceso.service.spec.ts:65-75`) mide `expiraEl - Date.now()` y lo compara contra
+  `24 * 7` horas. El código hace `expiraEl.setDate(expiraEl.getDate() + 7)`
+  (`tokens-acceso.service.ts:58`), que son 7 días **de calendario en hora local**.
+  **El bug está en el test, no en el código:** una invitación que "vive 7 días" tiene que
+  vencer el mismo día de la semana a la misma hora, que es lo que `setDate` hace. Lo que no
+  vale es traducir eso a horas fijas: en Chile el horario de verano arranca en septiembre, así
+  que del ~30 de agosto al 6 de septiembre la cuenta da 167 y en abril da 169.
+  **El arreglo:** afirmar sobre la fecha —que `expiraEl` caiga 7 días de calendario después—
+  en vez de sobre la diferencia en horas. El reset (1 hora) no tiene el problema: `setHours`
+  suma una hora real.
+  ⚠️ Mientras no se arregle, `npm test` del backend cierra en rojo esa semana y el próximo que
+  corra el gate va a peritar un fallo que no es suyo.
+
 ### Los minors que dejó el frente de redondeo de plata (2026-08-21)
 
 Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tests que no
@@ -756,10 +775,13 @@ revisión independiente no lo pudo reproducir, con razón.
 ➕ **Y una llegó de la § 4 el 2026-08-25 y salió el 2026-08-26**: los tipos de valor único, que
 el owner decidió **cerrar** → [`resueltos.md`](resueltos.md).
 
-➕ **Y otra llegó de la § 4 el 2026-08-30**: la moneda del extra en el ticket. Llega **con las
-tres preguntas de diseño contestadas y el plan en cinco puntos**, pero también con una
-corrección de su propia premisa —"convertir en el backend" no alcanzaba para el POS— y con la
-instrucción de verificar esos cinco puntos antes de escribir. Va en sesión propia.
+➕ **Y otra llegó de la § 4 el 2026-08-30 y salió el mismo día**: la moneda del extra en el
+ticket, construida en sesión propia → [`resueltos.md`](resueltos.md). Llegó con las tres
+preguntas contestadas, un plan en cinco puntos y la instrucción de verificarlos antes de
+escribir — y **verificarlos falsificó dos**: el precio de la línea no viajaba convertido en el
+ticket (queda como entrada nueva en la § 4, el owner decidió no ampliar el frente) y el
+preview del drawer que el punto 5 preservaba no existía. La instrucción de verificar era lo
+que hacía falta.
 
 ➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner, y **las
 cinco están construidas**: cuatro el mismo día —el descarte de desfases, los dos tipos por
@@ -1016,74 +1038,6 @@ abriendo las superficies, no leyendo la entrada.
   2 hace posible. **Al construir el reporte:** contar esas filas aparte (cuántas mermas
   quedaron sin valorizar, no solo omitirlas del total).
 
----
-
-- [ ] **El extra de una personalización se imprime con la moneda equivocada, y el ticket no
-  suma** (frontend + backend; medido el 2026-08-26, remedido el 2026-08-28 y **decidido por el
-  owner el 2026-08-30**; nació en la § 2, bajó a la § 4 al medirla el 2026-08-28 y llegó acá el
-  2026-08-30) — `ticket-builder.ts` imprime cada extra con el
-  `formatMonto` que le inyectan las páginas, y las tres se lo pasan **sin moneda**
-  (`ventas/pos.vue:277`, `salones/index.vue:1159` y `:1251`), o sea con la oficial del tenant. El
-  número que formatea sale de `personalizacion-receta.util.ts` como `precioExtra × unidades`
-  **sin convertir**, o sea en la moneda del ítem. Mientras tanto, en el mismo ticket, el precio
-  de la línea **sí** viaja convertido (`ventas.service.ts:436-448`).
-  **La escena, para una receta en USD:** el ticket muestra `+ Extra Queso $1.000` —símbolo y
-  separadores de peso sobre un número en dólares— **al lado de un P.UNIT que sí está en pesos**.
-  Es preexistente; lo encontró la revisión independiente del frente del 2026-08-26.
-
-  ✅ **DECIDIDO (owner, 2026-08-30). Las tres respuestas, y por qué la pregunta cambió:**
-
-  1. **Un solo productor: el backend.** `POST /ventas` devuelve, por línea, el detalle de
-     personalización con el `monto` **ya convertido**, en el mismo punto donde ya convierte
-     `precioUnitario` (`ventas.service.ts:460`, que ya tiene el snapshot, el `tasaMap` y el
-     `modoRedondeo` a mano). `salones.service.ts:1540` convierte igual al leer la cuenta.
-  2. **Cada extra se convierte por su cuenta** con `convertirAMonedaOficial`. Sin reparto por
-     mayores restos: ver abajo por qué no hace falta.
-  3. **Nada nuevo que persistir.** Ver abajo.
-
-  ⚠️ **Lo que la medición del 2026-08-30 corrigió de esta misma entrada, y es la razón de que
-  el punto 1 diga "un solo productor":** *"convertir en el backend" NO alcanza para el POS*, que
-  es el camino principal. El ticket del POS arma cada línea con dos fuentes distintas
-  (`ventas/pos.vue:250-266`): `precioUnitario` y `totalLinea` salen de `resultadoVenta` —del
-  backend, convertidos—, pero `personalizacionDetalle` sale de `lineasVenta[i]`, **el carrito**,
-  calculado en el cliente por `detallePersonalizacionPreview`
-  (`useRecetaPersonalizacion.ts:233`). Hay **dos productores del detalle**, uno por lado, con la
-  aritmética duplicada. Convertir solo en el backend arreglaría salones y dejaría el POS igual.
-
-  📌 **Por qué NO se reparte con mayores restos** (se evaluó, con la pieza ya existente
-  `repartirMayoresRestos` de propinas): la fila del ítem imprime `cantidad · nombre · P.UNIT ·
-  TOTAL` (`ticket-builder.ts:245-251`) y **`precioBase` no se imprime**. El P.UNIT ya es
-  `convert(precioBase + precioExtraTotal)`, así que el desglose de extras es **transparencia
-  sobre un número que ya está arriba, no un sumando**. No hay cuenta que el cliente pueda
-  cerrar contra el papel, así que un peso de diferencia entre Σ(extras convertidos) y la
-  porción de extras del P.UNIT **no se ve en ningún lado**. Si algún día se imprime la base,
-  esto se reabre.
-
-  📌 **Por qué no hay campo nuevo:** `venta_detalles` ya persiste `precio_unitario_origen`,
-  `tasa_cambio`, `moneda_id_origen` y el snapshot de personalización completo
-  (`venta-detalle.entity.ts:26,41,152`), o sea todo lo necesario para reproducir el extra
-  convertido de una venta vieja **con la tasa de ese día**. Y todavía no hace falta: grepeados
-  los consumidores del builder (`useImpresoras.ts` es el único que lo importa), **ningún camino
-  reimprime una venta pasada** — el ticket se arma siempre contra estado vivo.
-
-  **El plan, en cinco puntos:** (1) el `POST /ventas` devuelve el detalle convertido; (2) cada
-  extra convertido por su cuenta; (3) `salones.service.ts:1540` igual al leer la cuenta; (4) el
-  POS deja de imprimir el detalle del carrito y usa el de la respuesta —el drawer sigue
-  previsualizando con el carrito—; (5) `detallePersonalizacionPreview` queda **solo** para el
-  preview del drawer, y eso hay que dejarlo escrito, porque hoy nada lo distingue.
-
-  ⚠️ **Va en sesión propia con el sistema quieto** (decisión del owner, 2026-08-30), aunque la
-  medición mostró que el cambio **no modifica el motor**: llama a `convertirAMonedaOficial` para
-  producir un número que se imprime, sin tocar una fórmula, un paso ni un valor persistido. El
-  owner prefirió mantener la precaución. Si al implementarlo aparece que hay que tocar el
-  cálculo de verdad, **frenar y volver a preguntar**.
-
-  ⚠️ **Verificar los cinco puntos contra el código antes de escribir nada.** Esta entrada ya se
-  movió dos veces por medición: el **2026-08-28** se resolvió una incógnita que abarataba una de
-  las salidas (las tres páginas sí tienen la moneda del ítem a mano), y el **2026-08-30** se
-  encontró que su premisa era **falsa** —"convertir en el backend" no llegaba al POS, que arma
-  el detalle en el cliente—. Un enunciado de backlog es un punto de partida, no algo verificado.
-
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1095,13 +1049,16 @@ venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos
 ✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
 contradicción de `costo: '0'` —cada una contestada y construida el mismo día
 ([`resueltos.md`](resueltos.md))—.
-✅ **Y una más el 2026-08-30**: la moneda del extra en el ticket, contestada en tres preguntas
-y **mudada a la § 3** con el plan escrito (no construida: va en sesión propia).
-**Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+✅ **Y una más el 2026-08-30**: la moneda del extra en el ticket, contestada en tres
+preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**
+([`resueltos.md`](resueltos.md)). Al construirla apareció una entrada nueva acá abajo —el
+override de `precioUnitario` sin convertir—, que el owner decidió no tomar de arrastre.
+**Quedan seis abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
-más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
-tipo, abierta el 2026-08-29 al cerrar la de la forma de importe—; el
+más la nota de crédito (fiscal, frente propio), el **modo** que se da vuelta al cambiar de
+tipo, abierta el 2026-08-29 al cerrar la de la forma de importe, y el **override de
+`precioUnitario` sin convertir**, abierta el 2026-08-30 al construir la moneda del extra—; el
 conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 ⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
 tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
@@ -1224,7 +1181,33 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   agregar aserciones, no reorganizar los specs.
 
 
-### El ticket imprime el precio extra con la moneda oficial, sobre un monto que no lo está (2026-08-26)
+- [ ] **El override de `precioUnitario` no se convierte, así que una línea personalizada en
+  moneda extranjera se cobra en la magnitud equivocada** (backend + frontend; medido el
+  2026-08-30 al construir la conversión del extra en el ticket, y el owner decidió **ese mismo
+  día no ampliar aquel frente**, así que nace como entrada propia) — para una línea con extras
+  pagos, POS y salones mandan `precioUnitario` como override con `precioBase + extras` **en la
+  moneda del ítem** (`useVenta.ts:213`, `useSalones.ts:235-237`), y el motor usa el override tal
+  cual: `linea.precioUnitario !== undefined ? linea.precioUnitario :
+  this.convertirAMonedaOficial(...)` (`calculo-precios.service.ts:591-598`). **Las dos ramas
+  están fijadas por tests contiguos y a propósito**: `calculo-precios.service.spec.ts:202`
+  ("respeta el override") y `:209`, titulado *"convierte el precio del ítem a moneda oficial
+  **cuando no hay override**"*. O sea que no es un olvido: es una semántica que nadie cruzó
+  contra el multi-moneda.
+  **La escena, medida end-to-end en el navegador contra el stack real** (receta en USD a 10 con
+  extra de 2, tasa 950, IVA 19%): el POS muestra `Total $14`, ofrece cobrar `$15` con propina y
+  la venta queda **`pagada_parcial`** con `totalFinal: "13566.0000"`. El cajero cobró quince
+  pesos por una venta de trece mil quinientos sesenta y seis. En la misma pantalla el carrito
+  muestra `$11.400 c/u` —convertido— al lado de un total sin convertir: las dos cuentas
+  conviven en la misma vista.
+  ⚠️ **No le pasa a nadie hoy:** ningún ítem personalizable está en moneda extranjera, igual
+  que con la UF como oficial. Nada lo impide, y el seed ya trae USD habilitada con tasa 950.
+  ⛔ **Toca el motor de cálculo**, así que va solo y con el sistema quieto.
+  **La pregunta para el owner:** ¿el override viaja convertido desde el cliente, o el motor lo
+  convierte como ya convierte `precioBase`? Son la misma cuenta en dos lugares distintos — y
+  hay un tercer camino que sugiere una salida más simple: `ventas.service.ts` **ignora** el
+  override cuando la línea tiene personalización y recalcula `precioBase + precioExtraTotal`
+  por su cuenta (`:436-439`). Si el que cobra ya no le cree al override, quizás lo que sobra es
+  el override.
 
 - [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
   seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**

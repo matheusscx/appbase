@@ -1,4 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import Decimal from 'decimal.js';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
@@ -13,6 +14,8 @@ import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
+import { MonedasService } from '../monedas/monedas.service';
+import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 
 const UNIDADES_CATALOGO = [
@@ -128,6 +131,11 @@ describe('SalonesService', () => {
     resolverPersonalizacionCombo: jest.Mock;
   };
   let catalog: { findAllUnidadesMedida: jest.Mock };
+  let monedas: { findMonedas: jest.Mock };
+  let calculoPrecios: {
+    cargarConfig: jest.Mock;
+    convertirAMonedaOficial: jest.Mock;
+  };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
@@ -189,6 +197,30 @@ describe('SalonesService', () => {
       findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES_CATALOGO),
     };
 
+    // El detalle priceado de la personalización se devuelve convertido a moneda
+    // oficial. El mock CONVIERTE de verdad (no devuelve la entrada tal cual):
+    // un mock identidad dejaría pasar el bug que la conversión arregla, y estos
+    // specs afirman sobre el detalle de la cuenta.
+    monedas = {
+      findMonedas: jest.fn().mockResolvedValue([
+        {
+          monedaId: 'moneda-1',
+          decimales: 0,
+          esOficial: true,
+          valorDelDia: '1',
+        },
+        { monedaId: 'clp', decimales: 0, esOficial: false, valorDelDia: '1' },
+        { monedaId: 'usd', decimales: 2, esOficial: false, valorDelDia: '950' },
+      ]),
+    };
+    calculoPrecios = {
+      cargarConfig: jest.fn().mockResolvedValue({ modoRedondeo: 'HALF_UP' }),
+      convertirAMonedaOficial: jest.fn(
+        (precio: string, monedaId: string, tasaMap: Map<string, string>) =>
+          new Decimal(precio).times(tasaMap.get(monedaId) ?? '1').toFixed(4),
+      ),
+    };
+
     manager = {
       query: jest.fn(),
       findOne: jest.fn(),
@@ -224,6 +256,8 @@ describe('SalonesService', () => {
         { provide: CuentaAsignacionesService, useValue: asignaciones },
         { provide: ItemsService, useValue: items },
         { provide: CatalogService, useValue: catalog },
+        { provide: MonedasService, useValue: monedas },
+        { provide: CalculoPreciosService, useValue: calculoPrecios },
       ],
     }).compile();
 

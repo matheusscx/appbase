@@ -17,6 +17,112 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La moneda del extra en el ticket: un solo productor, y el backend convierte (cerrado 2026-08-30)
+
+Procedencia: § 3 *"Ya decidido, falta construir"*, adonde había llegado desde la § 4 el mismo
+día con las tres respuestas del owner y un plan en cinco puntos. Plan ejecutado:
+[`2026-08-30-moneda-del-extra-en-el-ticket.md`](../superpowers/plans/2026-08-30-moneda-del-extra-en-el-ticket.md).
+
+**Qué se hizo.** El detalle priceado de la personalización pasa a tener **un solo productor,
+el backend**, y sale convertido a moneda oficial por los dos caminos que producen ticket:
+`POST /ventas` lo devuelve por línea (`ventas.service.ts`), y la lectura de la cuenta de salón
+lo convierte al leer (`salones.service.ts`). El POS dejó de imprimir el detalle del carrito y
+usa el de la respuesta. Cada extra se convierte por su cuenta, sin reparto por mayores restos:
+el ticket no imprime `precioBase`, así que el desglose es transparencia sobre el P.UNIT, no un
+sumando que el cliente pueda cerrar contra el papel.
+
+**Qué lo fija.** Dos e2e en `recetas.e2e-spec.ts`, uno por camino, con una receta en USD (tasa
+950) y un extra de 2 USD: el monto tiene que salir `1900.0000`. El mutante —dejar el monto sin
+convertir, que es exactamente la conducta anterior— los pone en rojo con `"2"`. Verificado
+además en el navegador contra el stack real: la respuesta que recibe el POS trae el extra en
+`1900.0000`.
+
+### Dos cosas que la entrada daba por ciertas y no lo eran
+
+1. **"El precio de la línea sí viaja convertido"** — en el ticket no, y justo en las líneas que
+   tienen extras. Ver la entrada del override en `pendientes.md` § 4: el owner decidió el
+   2026-08-30 no ampliar el frente, así que se construyó lo decidido y el hallazgo quedó
+   anotado aparte.
+2. **"`detallePersonalizacionPreview` queda solo para el preview del drawer"** — no había tal
+   preview. El drawer calculaba ese detalle **únicamente** para pasárselo al carrito; nunca lo
+   renderizó (muestra el resumen de texto y el total, cada uno con la moneda del ítem). Al
+   sacar el campo del carrito la función quedó muerta entera, así que se borró junto con su
+   spec, en vez de dejarla con un docblock que describiera un consumidor inexistente. Lo
+   encontró la revisión independiente del frontend.
+
+Es la tercera vez que esta entrada se mueve por medición —2026-08-28, 2026-08-30 al escribir el
+plan, y 2026-08-30 al ejecutarlo—, que es el argumento de por qué se verifica cada punto contra
+el código antes de escribir. El texto original, con las tres respuestas del owner:
+
+- [ ] **El extra de una personalización se imprime con la moneda equivocada, y el ticket no
+  suma** (frontend + backend; medido el 2026-08-26, remedido el 2026-08-28 y **decidido por el
+  owner el 2026-08-30**; nació en la § 2, bajó a la § 4 al medirla el 2026-08-28 y llegó acá el
+  2026-08-30) — `ticket-builder.ts` imprime cada extra con el
+  `formatMonto` que le inyectan las páginas, y las tres se lo pasan **sin moneda**
+  (`ventas/pos.vue:277`, `salones/index.vue:1159` y `:1251`), o sea con la oficial del tenant. El
+  número que formatea sale de `personalizacion-receta.util.ts` como `precioExtra × unidades`
+  **sin convertir**, o sea en la moneda del ítem. Mientras tanto, en el mismo ticket, el precio
+  de la línea **sí** viaja convertido (`ventas.service.ts:436-448`).
+  **La escena, para una receta en USD:** el ticket muestra `+ Extra Queso $1.000` —símbolo y
+  separadores de peso sobre un número en dólares— **al lado de un P.UNIT que sí está en pesos**.
+  Es preexistente; lo encontró la revisión independiente del frente del 2026-08-26.
+
+  ✅ **DECIDIDO (owner, 2026-08-30). Las tres respuestas, y por qué la pregunta cambió:**
+
+  1. **Un solo productor: el backend.** `POST /ventas` devuelve, por línea, el detalle de
+     personalización con el `monto` **ya convertido**, en el mismo punto donde ya convierte
+     `precioUnitario` (`ventas.service.ts:460`, que ya tiene el snapshot, el `tasaMap` y el
+     `modoRedondeo` a mano). `salones.service.ts:1540` convierte igual al leer la cuenta.
+  2. **Cada extra se convierte por su cuenta** con `convertirAMonedaOficial`. Sin reparto por
+     mayores restos: ver abajo por qué no hace falta.
+  3. **Nada nuevo que persistir.** Ver abajo.
+
+  ⚠️ **Lo que la medición del 2026-08-30 corrigió de esta misma entrada, y es la razón de que
+  el punto 1 diga "un solo productor":** *"convertir en el backend" NO alcanza para el POS*, que
+  es el camino principal. El ticket del POS arma cada línea con dos fuentes distintas
+  (`ventas/pos.vue:250-266`): `precioUnitario` y `totalLinea` salen de `resultadoVenta` —del
+  backend, convertidos—, pero `personalizacionDetalle` sale de `lineasVenta[i]`, **el carrito**,
+  calculado en el cliente por `detallePersonalizacionPreview`
+  (`useRecetaPersonalizacion.ts:233`). Hay **dos productores del detalle**, uno por lado, con la
+  aritmética duplicada. Convertir solo en el backend arreglaría salones y dejaría el POS igual.
+
+  📌 **Por qué NO se reparte con mayores restos** (se evaluó, con la pieza ya existente
+  `repartirMayoresRestos` de propinas): la fila del ítem imprime `cantidad · nombre · P.UNIT ·
+  TOTAL` (`ticket-builder.ts:245-251`) y **`precioBase` no se imprime**. El P.UNIT ya es
+  `convert(precioBase + precioExtraTotal)`, así que el desglose de extras es **transparencia
+  sobre un número que ya está arriba, no un sumando**. No hay cuenta que el cliente pueda
+  cerrar contra el papel, así que un peso de diferencia entre Σ(extras convertidos) y la
+  porción de extras del P.UNIT **no se ve en ningún lado**. Si algún día se imprime la base,
+  esto se reabre.
+
+  📌 **Por qué no hay campo nuevo:** `venta_detalles` ya persiste `precio_unitario_origen`,
+  `tasa_cambio`, `moneda_id_origen` y el snapshot de personalización completo
+  (`venta-detalle.entity.ts:26,41,152`), o sea todo lo necesario para reproducir el extra
+  convertido de una venta vieja **con la tasa de ese día**. Y todavía no hace falta: grepeados
+  los consumidores del builder (`useImpresoras.ts` es el único que lo importa), **ningún camino
+  reimprime una venta pasada** — el ticket se arma siempre contra estado vivo.
+
+  **El plan, en cinco puntos:** (1) el `POST /ventas` devuelve el detalle convertido; (2) cada
+  extra convertido por su cuenta; (3) `salones.service.ts:1540` igual al leer la cuenta; (4) el
+  POS deja de imprimir el detalle del carrito y usa el de la respuesta —el drawer sigue
+  previsualizando con el carrito—; (5) `detallePersonalizacionPreview` queda **solo** para el
+  preview del drawer, y eso hay que dejarlo escrito, porque hoy nada lo distingue.
+
+  ⚠️ **Va en sesión propia con el sistema quieto** (decisión del owner, 2026-08-30), aunque la
+  medición mostró que el cambio **no modifica el motor**: llama a `convertirAMonedaOficial` para
+  producir un número que se imprime, sin tocar una fórmula, un paso ni un valor persistido. El
+  owner prefirió mantener la precaución. Si al implementarlo aparece que hay que tocar el
+  cálculo de verdad, **frenar y volver a preguntar**.
+
+  ⚠️ **Verificar los cinco puntos contra el código antes de escribir nada.** Esta entrada ya se
+  movió dos veces por medición: el **2026-08-28** se resolvió una incógnita que abarataba una de
+  las salidas (las tres páginas sí tienen la moneda del ítem a mano), y el **2026-08-30** se
+  encontró que su premisa era **falsa** —"convertir en el backend" no llegaba al POS, que arma
+  el detalle en el cliente—. Un enunciado de backlog es un punto de partida, no algo verificado.
+
+
+---
+
 ## El e2e leía el body sin mirar el status: 135 aserciones en 27 specs (cerrado 2026-08-28)
 
 El modo de falla: una request falla, nadie mira su status, el campo que se lee del body sale
