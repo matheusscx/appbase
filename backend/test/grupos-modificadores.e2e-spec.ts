@@ -582,6 +582,233 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
       .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
   });
 
+  // La quinta puerta, y la última: no hace falta tocar el grupo para romper la
+  // mesa, alcanza con **desasociarlo del ítem** (`PATCH /items/:id` con
+  // `gruposModificadores`). Los dos niveles del snapshot se prueban en ítems
+  // DISTINTOS a propósito —el grupo propio en el combo, el del componente en la
+  // receta—, así cada rama de la consulta tiene un testigo que solo ella
+  // encuentra y un mutante que borre una de las dos no sobrevive.
+  const MESA_2_ID = '550e8400-e29b-41d4-a716-446655440233';
+
+  it('desasociar del ítem un grupo que una mesa ya eligió se rechaza — en los dos niveles del snapshot', async () => {
+    const sufijo = Date.now();
+    const jugoId = await crearProducto(
+      app,
+      token,
+      'Jugo desa E2E',
+      '20',
+      '300',
+    );
+    const salsaId = await crearProducto(
+      app,
+      token,
+      'Salsa desa E2E',
+      '20',
+      '200',
+    );
+    const panId = await crearProducto(
+      app,
+      token,
+      'Pan desa E2E',
+      '20',
+      '400',
+      'ingrediente',
+    );
+
+    const crearGrupo = async (
+      nombre: string,
+      itemId: string,
+      precio: string,
+    ) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/grupos-modificadores')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `${nombre} ${sufijo}`,
+          opciones: [{ itemId, cantidad: '1', precioExtra: precio }],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as GrupoModificadorResponse).grupoModificadorId;
+    };
+    const grupoJugoId = await crearGrupo('Jugo desa E2E', jugoId, '300');
+    const grupoSalsaId = await crearGrupo('Salsa desa E2E', salsaId, '200');
+
+    const crearReceta = async (nombre: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `${nombre} ${sufijo}`,
+          precioBase: '2000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'receta',
+          ingredientes: [
+            {
+              ingredienteItemId: panId,
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              bloqueante: true,
+            },
+          ],
+          gruposModificadores: [
+            { grupoModificadorId: grupoSalsaId, min: 1, max: 1 },
+          ],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as ItemResponse).id;
+    };
+    const recetaId = await crearReceta('Hamburguesa desa E2E');
+
+    const crearCombo = async (nombre: string, componenteId: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `${nombre} ${sufijo}`,
+          precioBase: '4000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'combo',
+          componentes: [
+            { componenteItemId: componenteId, cantidad: '1', bloqueante: true },
+          ],
+          gruposModificadores: [
+            { grupoModificadorId: grupoJugoId, min: 1, max: 1 },
+          ],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as ItemResponse).id;
+    };
+    const comboId = await crearCombo('Combo desa E2E', recetaId);
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN, turnoId: TURNO_MANANA_ID });
+
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_2_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    // Una línea que elige en los dos niveles: el jugo es del combo, la salsa
+    // del componente receta.
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: comboId,
+        cantidad: '1',
+        personalizacion: {
+          grupos: [
+            {
+              grupoId: grupoJugoId,
+              opciones: [{ itemId: jugoId, unidades: 1 }],
+            },
+          ],
+          componentes: [
+            {
+              componenteItemId: recetaId,
+              unidad: 1,
+              grupos: [
+                {
+                  grupoId: grupoSalsaId,
+                  opciones: [{ itemId: salsaId, unidades: 1 }],
+                },
+              ],
+            },
+          ],
+        },
+      });
+    expect(resLinea.status).toBe(201);
+
+    const patchGrupos = (itemId: string, grupos: unknown[]) =>
+      request(app.getHttpServer())
+        .patch(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gruposModificadores: grupos });
+
+    // Control 1: cambiarle el min/max al grupo elegido no lo desasocia. Pasa,
+    // o el guard estaría bloqueando por "la lista cambió".
+    const resMinMax = await patchGrupos(recetaId, [
+      { grupoModificadorId: grupoSalsaId, min: 1, max: 2 },
+    ]);
+    expect(resMinMax.status).toBe(200);
+
+    // Control 2: agregarle otro grupo a la receta. `min: 0` a propósito — con
+    // `min: 1` el PATCH pasa igual pero la línea abierta deja de poder tasarse,
+    // y eso es otro agujero (ver `pendientes.md`), no lo que mide este test.
+    const grupoExtraId = await crearGrupo('Extra desa E2E', jugoId, '300');
+    const resAgregar = await patchGrupos(recetaId, [
+      { grupoModificadorId: grupoSalsaId, min: 1, max: 2 },
+      { grupoModificadorId: grupoExtraId, min: 0, max: 1 },
+    ]);
+    expect(resAgregar.status).toBe(200);
+
+    // Control 3: sacar el grupo que NADIE eligió. Pasa: se compara el diff.
+    const resSacarNoElegido = await patchGrupos(recetaId, [
+      { grupoModificadorId: grupoSalsaId, min: 1, max: 2 },
+    ]);
+    expect(resSacarNoElegido.status).toBe(200);
+
+    // Controles del alcance por ítem, uno por rama. Un grupo cuelga de muchos
+    // ítems: que la mesa lo haya elegido en ESTE combo no puede congelar los
+    // grupos de todos los demás.
+    const otraRecetaId = await crearReceta('Sandwich desa E2E');
+    const otroComboId = await crearCombo('Combo ajeno desa E2E', otraRecetaId);
+
+    // Rama `grupos[]`: el jugo está elegido, pero en el combo de la mesa.
+    const resSacarJugoAjeno = await patchGrupos(otroComboId, []);
+    expect(resSacarJugoAjeno.status).toBe(200);
+
+    // Rama `componentes[].grupos[]`: la salsa está elegida, pero en el
+    // componente del combo de la mesa, no en esta receta.
+    const resSacarSalsaAjena = await patchGrupos(otraRecetaId, []);
+    expect(resSacarSalsaAjena.status).toBe(200);
+
+    // Rama `componentes[].grupos[]`: desasociar de la RECETA la salsa que el
+    // componente de la línea eligió.
+    //
+    // ⚠️ Acá la receta queda con CERO grupos, y ése es el caso feo: sin el
+    // guard esto no daría 400 sino 200 con la salsa borrada del precio
+    // —`resolverPersonalizacionCombo` saltea el componente entero cuando no le
+    // queda ningún grupo asociado (`if (!catalogo.asociados.length) continue`)—.
+    // El 400 que se afirma abajo es el del guard, no el del resolver. Medido el
+    // 2026-08-30: 4500 con todo vivo, 4300 sacando el último grupo a mano.
+    const resSacarSalsa = await patchGrupos(recetaId, []);
+    expect(resSacarSalsa.status).toBe(400);
+    expect((resSacarSalsa.body as { message: string }).message).toContain(
+      'Mesa',
+    );
+
+    // Rama `grupos[]`: desasociar del COMBO el jugo que la línea eligió. El
+    // combo conserva su componente, así que no queda huérfano.
+    const resSacarJugo = await patchGrupos(comboId, []);
+    expect(resSacarJugo.status).toBe(400);
+    expect((resSacarJugo.body as { message: string }).message).toContain(
+      'Mesa',
+    );
+
+    // Cancelada la cuenta, las dos se pueden desasociar.
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+
+    expect((await patchGrupos(recetaId, [])).status).toBe(200);
+    expect((await patchGrupos(comboId, [])).status).toBe(200);
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+  });
+
   it('el índice único de nombre existe y es sobre lower(nombre)', async () => {
     const rows: { indexdef: string }[] = await ds.query(
       `SELECT indexdef FROM pg_indexes

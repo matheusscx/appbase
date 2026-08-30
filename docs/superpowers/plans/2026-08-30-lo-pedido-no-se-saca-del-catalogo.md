@@ -293,8 +293,14 @@ dos en el **mismo endpoint** que esta tarea endurece:
 | `PATCH /items/:id` con `ingredientes`, sacando uno que una línea abierta **omitió** | *"Ingrediente omitido no pertenece a la receta"* |
 | `PATCH /items/:id` con `gruposModificadores`, desasociando un grupo ya elegido | *"Grupo de modificadores no asociado a este item"* |
 
-Quedan **fuera del alcance de este plan** —el owner aprobó tres puertas, no cinco— y están
-anotadas en `pendientes.md` § 3 con el molde ya probado. Es decisión del owner si se toman.
+Quedaron **fuera del alcance de este plan** —el owner aprobó tres puertas, no cinco—.
+
+✅ **Se cerraron el mismo día**, en una tanda aparte que el owner pidió al leer este cierre.
+Y esa tanda destapó que **cerrar las cinco no cierra la clase**: lo que rompe la mesa no es
+solo *sacar*, porque re-tasar **re-valida** el snapshot contra el catálogo vivo. La entrada
+de backlog se reescribió entera por eso y **subió a `pendientes.md` § 4** —lo que queda
+depende de una decisión del owner, no de otro guard—; el puntero de arriba a la § 3 quedó
+viejo y se deja como está, que es lo que el documento decía cuando se escribió.
 
 📌 **Y una afirmación mía que salió falsa:** escribí, en tres archivos, que repreciar un
 extra no afecta a la mesa abierta "porque el precio viaja congelado en el snapshot".

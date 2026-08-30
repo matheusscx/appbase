@@ -503,6 +503,34 @@ se requiere al menos uno de los dos (nunca ambos vacíos). `PATCH` reemplaza
 `item_grupo_id` para el grupo que sigue asociado, mismo `item_grupo_opcion_id`
 para el override que sigue viniendo) — ver `docs/patterns/backend.md` §14.
 
+⚠️ **Un grupo que una cuenta de salón abierta ya eligió no se desasocia del ítem**
+(desde el 2026-08-30) — `400`: *"No se puede desasociar del ítem un grupo ya elegido:
+"Salsa" está elegido en Mesa 2 · cuenta 1"*. Es la misma regla que el `PATCH` del grupo,
+por la otra puerta. Sin ella el daño toma **dos** formas, medidas el 2026-08-30. Si el
+grupo es del ítem de la línea, o de un componente que conserva otros grupos vivos, la línea
+deja de poder tasarse (*"Grupo de modificadores no asociado a este item"*) y la mesa queda
+incobrable. Pero si era el **último** grupo vivo de un componente de combo,
+`resolverPersonalizacionCombo` saltea ese componente entero
+(`if (!catalogo.asociados.length) continue`) y la opción elegida **desaparece del precio
+en silencio** — la mesa paga de menos y nadie se entera. La segunda es la peor, y el
+silencio es exclusivo del componente: el grupo propio del ítem grita siempre. Se pregunta por las
+asociaciones que **se van** (las `eliminadas` que `asociarGruposModificadores` ya
+calculaba), así que cambiar `min`/`max`, el orden o los overrides, y asociar grupos
+nuevos, siguen pasando. La consulta
+(`ItemsService.cuentasAbiertasConGrupoElegido`) mira los dos niveles del snapshot y
+acota cada uno a **este** ítem: `cl.item_id` para el grupo propio, `componenteItemId`
+dentro del containment para el del componente — un grupo cuelga de muchos ítems y
+desasociarlo de otro no rompe esta mesa.
+
+📌 De arrastre, esto también cubre `DELETE /grupos-modificadores/:id`: ese borrado ya se
+rechaza si el grupo está asociado a algún ítem vivo, y para que una mesa lo haya elegido
+tiene que estar asociado.
+
+⚠️ **Lo que se agrega o se endurece no tiene regla** (medido el 2026-08-30): asociar un
+grupo nuevo con `min ≥ 1` a un ítem con líneas abiertas las deja sin poder tasarse
+(*"El grupo X requiere elegir entre 1 y 1 unidades"*), y lo mismo subir el `min` o bajar
+el `max` de uno ya asociado. Ver [`../agent/pendientes.md`](../agent/pendientes.md).
+
 `GET /items/:id` de un combo o receta agrega:
 
 ```

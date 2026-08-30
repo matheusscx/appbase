@@ -778,50 +778,6 @@ modificadores decía que faltaba un input y lo que estaba roto era un número **
 la moneda equivocada, en una tercera pantalla que la entrada no nombraba. El mapa se hace
 abriendo las superficies, no leyendo la entrada.
 
-- [ ] **Lo que una cuenta abierta ya pidió se puede sacar del catálogo por tres caminos
-  todavía, y cada uno deja la mesa incobrable** (backend; medido el 2026-08-30, dos de
-  las cinco puertas ya cerradas) — el cobro y la precuenta **re-tasan la línea contra el
-  catálogo vivo**, así que sacarle una pieza a algo ya pedido hace que la línea no se
-  pueda tasar: `POST /calculo-precios/calcular` responde 400 para **toda** la cuenta,
-  `useCalculoPrecios` se traga el error a propósito y `lineaSubtotal` dibuja `—` en todas
-  las líneas, sin decir por qué. Al cerrar, el mismo 400.
-
-  ✅ **Cerradas** (`dce84899`, `d42a36e7` y el que sigue): `DELETE /items/:id` del
-  ingrediente pedido como **extra** —rama nueva del `UNION` de `obtenerUsoItem`, con
-  índice GIN—, `PATCH /items/:id` con `extrasPermitidos`, y
-  `PATCH /grupos-modificadores/:id` sacando una opción. (El `DELETE` del ítem que **es**
-  la línea ya estaba cerrado desde antes.)
-
-  🔲 **Abiertas, las dos del mismo molde, y las dos en `PATCH /items/:id`:**
-
-  | Camino | Qué rompe al re-tasar |
-  |---|---|
-  | con `ingredientes`, sacando uno que una línea abierta **omitió** | *"Ingrediente omitido no pertenece a la receta"* |
-  | con `gruposModificadores`, desasociando un grupo que una línea eligió | *"Grupo de modificadores no asociado a este item"* |
-
-  📌 La forma de cerrarlas ya está probada **tres** veces y es siempre la misma: calcular
-  el **diff** (lo que se saca, no lo que cambia), preguntar en **una** consulta si algo de
-  eso está en la personalización de una cuenta abierta, y 400 nombrando la mesa. Los dos
-  moldes están en `ItemsService.cuentasAbiertasConExtra` (acotado al ítem) y
-  `cuentasAbiertasConOpcionDeGrupo` (acotado al grupo, dos niveles de JSONB). Lo único
-  distinto acá es el nivel: `omitidos` es un array plano de uuids —containment sobre un
-  array de escalares, no de objetos— y la desasociación de grupo se pregunta por
-  `grupoId` sin mirar opciones.
-
-  ⚠️ **El e2e de las dos que faltan tiene una trampa conocida**: el fixture no puede usar
-  grupos ni recetas del seed, porque sacarles una opción los rompe para las demás suites.
-  Los dos tests ya escritos (`grupos-modificadores.e2e-spec.ts`, `recetas.e2e-spec.ts`
-  test 16) arman su propio catálogo — copiar de ahí.
-
-  ⚠️ **Las dos últimas no estaban en el plan original** (`docs/superpowers/plans/2026-08-30-lo-pedido-no-se-saca-del-catalogo.md`),
-  que hablaba de tres puertas: salieron de la revisión independiente del 2026-08-30 y se
-  verificaron leyendo `resolverPersonalizacionReceta`. Nombrarlas acá es lo que evita dar
-  el frente por cerrado cuando le falta más de la mitad.
-
-  ❓ **Lo que sigue sin decidir:** aunque se cierren las cinco, el 400 no queda
-  *imposible* —solo deja de ser alcanzable por acción de catálogo—. Si el composable debe
-  dejar de tragarse el error y decir qué línea lo causó es una decisión aparte, y más
-  barata que las tres de arriba.
 
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
@@ -1079,12 +1035,13 @@ contradicción de `costo: '0'` —cada una contestada y construida el mismo día
 preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**— y, ese mismo
 día, el **override de `precioUnitario`**, que había nacido acá al construir la primera y que
 el owner mandó sacar unas horas después ([`resueltos.md`](resueltos.md)).
-**Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+**Quedan seis abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
-más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
-tipo, abierta el 2026-08-29 al cerrar la de la forma de importe—; el conteo se recuenta con
-`awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+más la nota de crédito (fiscal, frente propio), el **modo** que se da vuelta al cambiar de
+tipo (2026-08-29, al cerrar la de la forma de importe) y la re-validación al re-tasar, que
+**subió desde la § 3** el 2026-08-30 al cerrar sus cinco puertas y descubrir que la clase no
+se cerraba con ellas—; el conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 ⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
 tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
 recordado.
@@ -1161,6 +1118,74 @@ terminan en una pregunta al owner. Es exactamente el error que el párrafo de ar
 corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+- [ ] **Re-tasar una línea ya pedida no solo la re-precia: la re-valida contra el catálogo
+  vivo, y por eso cada cambio de carta puede romper una mesa abierta** (backend; los cinco
+  caminos que *sacan* algo ya están cerrados, lo que queda es otra familia, medida el
+  2026-08-30) — la causa de fondo es una sola: `resolverPersonalizacionReceta` /
+  `resolverPersonalizacionCombo` vuelven a validar el snapshot congelado contra el catálogo
+  de hoy. Si algo ya no cuadra, la cuenta entera responde 400 al cerrar y la mesa queda
+  **incobrable**.
+
+  ✅ **Los cinco caminos que sacan algo del catálogo están cerrados**, todos con el mismo
+  molde —diff de lo que se saca, una consulta sobre `cuenta_lineas.personalizacion`, 400
+  nombrando la mesa—: `DELETE /items/:id` (el ítem de la línea, y el ingrediente pedido
+  como extra, `dce84899`), `PATCH /items/:id` con `extrasPermitidos` (`d42a36e7`), con
+  `ingredientes` y con `gruposModificadores`, y `PATCH /grupos-modificadores/:id`
+  (`bdc4d870`). Las cuatro consultas hermanas viven en `ItemsService`:
+  `cuentasAbiertasConExtra`, `cuentasAbiertasConIngredienteOmitido`,
+  `cuentasAbiertasConOpcionDeGrupo` y `cuentasAbiertasConGrupoElegido`. De arrastre,
+  `DELETE /grupos-modificadores/:id` también quedó cubierto: ya se rechazaba con el grupo
+  asociado a un ítem vivo.
+
+  🔲 **Lo que queda abierto no es "sacar", y por eso no lo cierra el mismo molde:**
+
+  | Camino | Qué pasa al re-tasar | Medido |
+  |---|---|---|
+  | `PATCH /items/:id` con `componentes`: sacar de un combo un componente que la línea personalizó | *"El componente no pertenece a este combo o no admite grupos"* | ✅ sonda 2026-08-30 (PATCH 200 → `calcular` 400) |
+  | `PATCH /items/:id` con `gruposModificadores`: asociar un grupo con `min ≥ 1` a un ítem con líneas abiertas | *"El grupo X requiere elegir entre 1 y 1 unidades"* | ✅ sonda 2026-08-30 (PATCH 200 → `calcular` 400) |
+  | lo mismo, subiendo el `min` o bajando el `max` de un grupo ya asociado | idem | 🔲 misma línea (`totalUnidades.lt(asoc.min)`), **no medido** |
+  | `PATCH /items/:id` con `componentes`: bajar la `cantidad` de un componente por debajo de la `unidad` que la línea eligió | *"Unidad inválida para el componente X"* | 🔲 leído en `resolverPersonalizacionCombo`, **no medido** |
+  | `PATCH /grupos-modificadores/:id`: dejar una opción elegida sin `cantidad` | *"La opción X no tiene cantidad configurada para este item (pendiente)"* | 🔲 leído, **no medido** |
+
+  📌 **La primera fila se puede tomar hoy sin preguntar nada** (por eso esta entrada
+  también sería de § 3): es del mismo molde (un diff de lo que se saca, ahora sobre
+  `combo_componentes`) y se cierra copiando `cuentasAbiertasConGrupoElegido`. Los otros
+  cuatro no: no hay nada que se saque, hay un requisito que se agrega o se endurece, y la
+  pregunta ya no es "¿alguien pidió esto?" sino "¿lo que alguien pidió sigue cumpliendo la
+  regla nueva?".
+
+  ❓ **La decisión de fondo, que es del owner y está sin tomar:** ¿re-tasar una línea ya
+  pedida debe **re-validar**? Hoy sí, y por eso hicieron falta cinco guards que no cierran
+  la clase. La alternativa —re-preciar sin re-validar, tratando el snapshot como lo que ya
+  se pidió y no como una entrada del cliente— cerraría todas las filas de la tabla de
+  arriba de una, pero cambia una regla de producto: hoy el sistema garantiza que lo que se
+  cobra es consistente con la carta de hoy. Vale también la inversa como opción barata:
+  dejar que rompa, pero que **avise dónde** (ver el ⚠️ del composable, abajo).
+
+  ⚠️ **Dos trampas medidas que el que tome esto se va a encontrar:**
+  1. **La precuenta no valida todo lo que valida el cierre.** `puedeCostar()`
+     (`calculo-precios.service.ts`) saltea el resolver cuando la línea no tiene extras,
+     grupos ni componentes, así que una línea con **solo** `omitidos` rotos muestra precio
+     normal en la precuenta y explota recién al cobrar. Reproducir por la precuenta y
+     concluir "no pasa nada" es el error fácil.
+  2. **No todo lo que rompe grita.** Si un componente de combo se queda sin **ningún**
+     grupo asociado, `resolverPersonalizacionCombo` hace
+     `if (!catalogo.asociados.length) continue` y la opción elegida **desaparece del
+     precio en silencio** (medido: 4500 → 4300). Hoy no es alcanzable por acción de
+     catálogo, pero solo porque lo tapan tres guards distintos —la desasociación, el
+     borrado del grupo y el borrado del componente—; si alguno se afloja, vuelve, y vuelve
+     callado.
+
+  ⚠️ **El e2e de todo esto tiene una trampa conocida**: el fixture no puede usar grupos ni
+  recetas del seed, porque sacarles una pieza los rompe para las demás suites. Los cuatro
+  tests ya escritos (`grupos-modificadores.e2e-spec.ts` ×2, `recetas.e2e-spec.ts` tests 16
+  y 17) arman su propio catálogo — copiar de ahí.
+
+  ❓ **Y lo de siempre, aparte:** `useCalculoPrecios` se traga el 400 a propósito y
+  `lineaSubtotal` dibuja `—` en todas las líneas sin decir por qué. Que el composable diga
+  **qué línea** lo causó es una decisión chica y barata, independiente de todo lo de
+  arriba.
 
 - [ ] **¿`check-e2e-status.mjs` pasa a mirar toda lectura del body, y no solo los helpers?**
   (backend/tests + hook; llegó el 2026-08-28 al cerrar el barrido de las lecturas sin status →

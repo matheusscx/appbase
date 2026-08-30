@@ -497,16 +497,24 @@ customer (`min`/`max`).
   vuelve a ser borrable — es un bloqueo por mesa viva, no un endurecimiento del
   catálogo.
 
-  **Alcance hoy (2026-08-30):** la regla está puesta en **tres** de las cinco
-  formas de sacar del catálogo algo ya pedido —el borrado (`DELETE /items/:id`),
-  para el item de la línea y para el ingrediente pedido como extra; la edición de
-  los extras de la receta (`PATCH /items/:id` con `extrasPermitidos`); y la
-  edición de las opciones de un grupo (`PATCH /grupos-modificadores/:id`)—. En
-  las dos **ediciones** se compara el **diff**: bloquean lo que *se saca*, no la
-  lista que cambia, así que reordenar, repreciar o agregar siguen pasando. Siguen **sin**
-  aplicarla dos caminos, los dos en `PATCH /items/:id`: sacar un ingrediente que
-  una línea abierta omitió, y desasociar un grupo que una línea abierta eligió.
-  Detalle y estado: `docs/agent/pendientes.md` § 3.
+  **Alcance hoy (2026-08-30):** la regla está puesta en los **cinco** caminos que
+  sacan del catálogo algo ya pedido: el borrado (`DELETE /items/:id`), para el
+  item de la línea y para el ingrediente pedido como extra; las tres ediciones de
+  `PATCH /items/:id` —`ingredientes`, `extrasPermitidos` y `gruposModificadores`—;
+  y `PATCH /grupos-modificadores/:id`. En las ediciones se compara el **diff**:
+  bloquean lo que *se saca*, no la lista que cambia, así que reordenar, repreciar,
+  cambiar min/max o agregar siguen pasando **por estos guards** — lo que no
+  quiere decir que sean inocuos, ver la advertencia de abajo.
+
+  ⚠️ **Sacar no es lo único que rompe la mesa** (medido el 2026-08-30, al cerrar
+  el quinto camino). La re-tasación no solo re-precia: **re-valida** el snapshot
+  congelado contra el catálogo vivo, así que también la rompen cosas que se
+  *agregan* o se *endurecen* —asociar un grupo con `min ≥ 1`, subir el `min` de
+  uno ya asociado— y una que sí es un "sacar" pero por otro campo: quitar de un
+  combo un componente que la línea personalizó. Cerrar esos de a uno es la misma
+  carrera; la alternativa de fondo —que re-tasar una línea ya pedida re-precie
+  **sin** re-validar— es decisión de producto y está sin tomar.
+  Detalle, medición y molde: `docs/agent/pendientes.md` § 4.
 
 **Fuera de alcance (diferido, no un olvido):** la **impresión térmica** de la
 opción elegida de un grupo en comanda/precuenta/boleta queda para un ticket

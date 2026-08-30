@@ -1710,6 +1710,52 @@ export class ItemsService {
             tenantId,
             dto.ingredientes,
           );
+
+          // Mismo molde que los extras de más abajo, y por la misma razón: el
+          // `UPDATE` que sigue borra la lista ENTERA, así que el diff se calcula
+          // antes. Sacar de la receta un ingrediente que una mesa abierta pidió
+          // **sin** él deja esa cuenta incobrable: al re-tasar,
+          // `resolverPersonalizacionReceta` rechaza el omitido que ya no
+          // pertenece a la receta ("Ingrediente omitido no pertenece a la
+          // receta").
+          //
+          // ⚠️ **Esta puerta avisa más tarde que las otras cuatro, no antes.**
+          // Medido el 2026-08-30: una línea cuya personalización es SOLO
+          // `omitidos` ni siquiera pasa por el resolver en
+          // `POST /calculo-precios/calcular` —`puedeCostar()` la saltea porque
+          // sin extras ni grupos no puede mover el precio, y saltearse el
+          // resolver es saltearse sus validaciones—, así que la precuenta
+          // muestra un precio normal y el 400 recién aparece **al cerrar**. El
+          // garzón no ve nada raro hasta que intenta cobrar.
+          //
+          // Solo los que se sacan, a propósito: cambiarle la cantidad, la unidad
+          // o el bloqueante a un ingrediente ya omitido no rompe ninguna mesa
+          // —el omitido guarda un id, no una cantidad— y agregar tampoco.
+          const vivos: { ingrediente_item_id: string }[] = await manager.query(
+            `SELECT ingrediente_item_id FROM receta_ingredientes
+             WHERE receta_item_id = $1 AND tenant_id = $2
+               AND eliminado_el IS NULL`,
+            [itemId, tenantId],
+          );
+          const entrantes = new Set(
+            dto.ingredientes.map((i) => i.ingredienteItemId),
+          );
+          const omitidos = await this.cuentasAbiertasConIngredienteOmitido(
+            manager,
+            tenantId,
+            itemId,
+            vivos
+              .map((v) => v.ingrediente_item_id)
+              .filter((id) => !entrantes.has(id)),
+          );
+          if (omitidos.length) {
+            throw new BadRequestException(
+              `No se puede sacar de la receta un ingrediente que una mesa pidió sin él: ${omitidos
+                .map((o) => `"${o.ingrediente}" está omitido en ${o.cuenta}`)
+                .join('; ')}`,
+            );
+          }
+
           // Soft delete de la lista anterior — nunca hard DELETE
           await manager.query(
             `UPDATE receta_ingredientes
@@ -1978,13 +2024,15 @@ export class ItemsService {
    * ⚠️ La tercera puerta —el ítem elegido como **opción de un grupo**— no tiene
    * rama acá porque la rama `'opcion'` ya bloquea ese borrado haya mesas o no…
    * **pero solo mientras la opción siga viva en el grupo** (esa rama filtra
-   * `o.eliminado_el IS NULL`). Y sacarla del grupo es justamente lo que
-   * `PATCH /grupos-modificadores/:id` hace hoy sin consultar cuentas: primero
-   * se desarma la cobertura, después el `DELETE` pasa, y la mesa queda
-   * incobrable igual. **Ese camino todavía no está cerrado.**
+   * `o.eliminado_el IS NULL`). Sacarla del grupo desarmaría esa cobertura, y por
+   * eso el guard vive del otro lado: `PATCH /grupos-modificadores/:id` consulta
+   * cuentas antes de soft-borrar la opción (`cuentasAbiertasConOpcionDeGrupo`,
+   * cerrado el 2026-08-30).
    *
-   * El de `PATCH /items/:id` con `extrasPermitidos` sí lo está, y no acá sino en
-   * `update()`, con `cuentasAbiertasConExtra`: mismo agujero, distinta puerta.
+   * Las tres puertas de `PATCH /items/:id` —`extrasPermitidos`, `ingredientes` y
+   * `gruposModificadores`— tampoco están acá sino en `update()` y en
+   * `asociarGruposModificadores`, con las tres consultas hermanas: mismo
+   * agujero, distintas puertas.
    *
    * El filtro por tenant va sobre la entidad padre de cada rama (`items`, o
    * `grupos_modificadores` en la de opciones), no sobre la tabla puente. A
@@ -2124,6 +2172,54 @@ export class ItemsService {
   }
 
   /**
+   * ¿Qué cuentas **abiertas** pidieron esta receta **sin** alguno de estos
+   * ingredientes? La cuarta puerta, y la única de las cinco donde el
+   * containment cae sobre un array de **escalares**: `omitidos` es una lista
+   * plana de uuids, así que la pregunta es `@> {"omitidos":["<id>"]}`, sin
+   * `jsonb_build_object` adentro. Verificado contra Postgres real:
+   * `jsonb_build_array($n::uuid)` serializa el uuid como string JSON y matchea
+   * el elemento.
+   *
+   * El `cl.item_id = $2` acota a esta receta y la cota es **exacta**: un combo
+   * nunca produce omitidos —`resolverPersonalizacionCombo` devuelve
+   * `omitidos: []` siempre, y la personalización de un componente son solo sus
+   * grupos—, así que acá no hay un segundo nivel donde mirar como en
+   * `cuentasAbiertasConOpcionDeGrupo`. Por lo mismo tampoco se apoya en el GIN:
+   * arranca por `idx_cuenta_lineas_item`.
+   *
+   * ⚠️ Misma ventana de carrera que sus hermanas: lee sin lock y el `UPDATE`
+   * que sigue borra.
+   */
+  private async cuentasAbiertasConIngredienteOmitido(
+    manager: EntityManager | Db,
+    tenantId: string,
+    recetaItemId: string,
+    ingredienteItemIds: string[],
+  ): Promise<{ ingrediente: string; cuenta: string }[]> {
+    if (!ingredienteItemIds.length) return [];
+    return manager.query(
+      `SELECT DISTINCT i.nombre AS ingrediente,
+              m.nombre || ' · ' || COALESCE(c.nombre, 'cuenta ' || c.numero)
+                AS cuenta
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $1 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+         JOIN mesas m ON m.mesa_id = c.mesa_id
+          AND m.tenant_id = $1 AND m.eliminado_el IS NULL
+         CROSS JOIN LATERAL unnest($3::uuid[]) AS x(id)
+         JOIN items i ON i.item_id = x.id
+          AND i.tenant_id = $1 AND i.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+          AND cl.item_id = $2
+          AND cl.personalizacion @> jsonb_build_object(
+                'omitidos', jsonb_build_array(x.id))
+        ORDER BY 1, 2`,
+      [tenantId, recetaItemId, ingredienteItemIds],
+    );
+  }
+
+  /**
    * ¿Qué cuentas **abiertas** eligieron alguna de estas opciones **de este
    * grupo**? La hermana de `cuentasAbiertasConExtra`, para la tercera puerta:
    * `PATCH /grupos-modificadores/:id` soft-borra las opciones que desaparecen,
@@ -2188,6 +2284,88 @@ export class ItemsService {
                        jsonb_build_object('itemId', x.id))))))))
         ORDER BY 1, 2`,
       [tenantId, grupoId, opcionItemIds],
+    );
+  }
+
+  /**
+   * ¿Qué cuentas **abiertas** eligieron alguno de estos grupos **en este ítem**?
+   * La quinta puerta: `PATCH /items/:id` con `gruposModificadores` reescribe las
+   * asociaciones y soft-borra las que desaparecen.
+   *
+   * **Lo que rompe no es siempre lo mismo**, y por eso el guard cubre las dos
+   * (medido el 2026-08-30 sobre un combo real, con la línea valiendo 4500):
+   *   - Si el grupo es del **ítem de la línea** (receta suelta o combo), la
+   *     línea deja de poder tasarse siempre —conserve o no otros grupos vivos—:
+   *     `resolverGruposDeItem` se llama sin condición y rechaza el `grupoId`
+   *     que ya no está asociado ("Grupo de modificadores no asociado a este
+   *     item") → 400, mesa incobrable. Lo mismo si es de un **componente** que
+   *     conserva otros grupos vivos.
+   *   - Si era el **último** grupo vivo de un componente de combo, no hay error:
+   *     `resolverPersonalizacionCombo` hace `if (!catalogo.asociados.length)
+   *     continue` y nunca consume lo elegido, así que la opción desaparece del
+   *     snapshot y la mesa **paga de menos, en silencio** (4300 en la medición).
+   *     El error grita; éste no, y es el peor de los dos.
+   *
+   * **Dos niveles otra vez, pero acotados distinto**, y ésa es la diferencia con
+   * `cuentasAbiertasConOpcionDeGrupo`:
+   *   - `grupos[]` — grupo propio del ítem de la línea. La cota va **afuera**,
+   *     en `cl.item_id = $2`: el snapshot no repite ahí de quién es el grupo.
+   *   - `componentes[].grupos[]` — grupo de un componente receta de un combo. La
+   *     cota va **adentro** del containment, como `componenteItemId`, porque
+   *     containment exige que las dos claves caigan en el mismo elemento del
+   *     array. Verificado contra Postgres real: con dos componentes eligiendo
+   *     grupos distintos, preguntar por (componente A, grupo de B) da `false`.
+   *
+   * Sin las dos cotas el guard bloquearía de más: un grupo cuelga de muchos
+   * ítems, y desasociarlo de la Pizza no rompe la mesa que lo eligió en el Lomo.
+   *
+   * El `JOIN` a `grupos_modificadores` filtra `eliminado_el IS NULL` y eso
+   * además es la semántica correcta: si el grupo ya está borrado, esa mesa ya
+   * está rota por el borrado y bloquear la limpieza de la asociación muerta no
+   * la salva.
+   *
+   * 📌 Con esta puerta cerrada, `DELETE /grupos-modificadores/:id` queda cubierto
+   * **de arrastre**: ese borrado ya se rechaza si el grupo está asociado a algún
+   * ítem vivo, y para que una mesa lo haya elegido tiene que estar asociado.
+   *
+   * ⚠️ Misma ventana de carrera que sus hermanas: lee sin lock y el `UPDATE` que
+   * sigue borra.
+   */
+  private async cuentasAbiertasConGrupoElegido(
+    manager: EntityManager | Db,
+    tenantId: string,
+    itemId: string,
+    grupoIds: string[],
+  ): Promise<{ grupo: string; cuenta: string }[]> {
+    if (!grupoIds.length) return [];
+    return manager.query(
+      `SELECT DISTINCT g.nombre AS grupo,
+              m.nombre || ' · ' || COALESCE(c.nombre, 'cuenta ' || c.numero)
+                AS cuenta
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $1 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+         JOIN mesas m ON m.mesa_id = c.mesa_id
+          AND m.tenant_id = $1 AND m.eliminado_el IS NULL
+         CROSS JOIN LATERAL unnest($3::uuid[]) AS x(id)
+         JOIN grupos_modificadores g ON g.grupo_modificador_id = x.id
+          AND g.tenant_id = $1 AND g.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+          AND ((cl.item_id = $2
+                AND cl.personalizacion @> jsonb_build_object(
+                      'grupos',
+                      jsonb_build_array(
+                        jsonb_build_object('grupoId', x.id))))
+            OR cl.personalizacion @> jsonb_build_object(
+                 'componentes',
+                 jsonb_build_array(jsonb_build_object(
+                   'componenteItemId', $2::uuid,
+                   'grupos',
+                   jsonb_build_array(
+                     jsonb_build_object('grupoId', x.id))))))
+        ORDER BY 1, 2`,
+      [tenantId, itemId, grupoIds],
     );
   }
 
@@ -5409,6 +5587,31 @@ export class ItemsService {
       (r) => !gruposEntrantes.has(r.grupo_modificador_id),
     );
     if (eliminadas.length) {
+      // Antes de borrarlas: lo que una cuenta abierta ya eligió no se saca del
+      // catálogo. Desasociar un grupo que una mesa eligió rompe su línea de una
+      // de **dos** maneras según lo que quede vivo, y las dos hay que
+      // bloquearlas (medidas el 2026-08-30, ver el docblock de
+      // `cuentasAbiertasConGrupoElegido`): o la línea deja de poder tasarse
+      // ("Grupo de modificadores no asociado a este item"), o —si era el último
+      // grupo vivo de un componente de combo— la elección **desaparece en
+      // silencio** y la mesa paga de menos. Igual que en las otras cuatro
+      // puertas, se pregunta por el **diff**:
+      // solo por los grupos que se van, así que cambiarles el orden, el min/max
+      // o los overrides, y agregar grupos nuevos, siguen pasando.
+      const elegidos = await this.cuentasAbiertasConGrupoElegido(
+        manager,
+        tenantId,
+        itemId,
+        eliminadas.map((r) => r.grupo_modificador_id),
+      );
+      if (elegidos.length) {
+        throw new BadRequestException(
+          `No se puede desasociar del ítem un grupo ya elegido: ${elegidos
+            .map((e) => `"${e.grupo}" está elegido en ${e.cuenta}`)
+            .join('; ')}`,
+        );
+      }
+
       const ids = eliminadas.map((r) => r.item_grupo_id);
       await manager.query(
         `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()

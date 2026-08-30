@@ -272,8 +272,7 @@ la mesa quede **incobrable**, con un error que nadie ve hasta que el garzón int
 Cancelada o cerrada la cuenta, todo vuelve a ser borrable: el bloqueo es por **mesa viva**,
 no un endurecimiento del catálogo.
 
-Dónde está puesta hoy (2026-08-30) — **tres de las cinco** formas de sacar algo del
-catálogo:
+Dónde está puesta hoy (2026-08-30) — **los cinco caminos que sacan algo del catálogo**:
 
 | Camino | Estado |
 |---|---|
@@ -281,12 +280,32 @@ catálogo:
 | `DELETE /items/:id` de un ingrediente pedido como **extra** | ✅ `dce84899` |
 | `PATCH /items/:id` con `extrasPermitidos` | ✅ `d42a36e7` |
 | `PATCH /grupos-modificadores/:id` sacando una opción | ✅ `bdc4d870` |
-| `PATCH /items/:id` con `ingredientes` (un **omitido** que se va) | 🔲 abierta |
-| `PATCH /items/:id` con `gruposModificadores` (grupo elegido que se desasocia) | 🔲 abierta |
+| `PATCH /items/:id` con `ingredientes` (un **omitido** que se va) | ✅ 2026-08-30 |
+| `PATCH /items/:id` con `gruposModificadores` (grupo elegido que se desasocia) | ✅ 2026-08-30 |
+| `DELETE /grupos-modificadores/:id` | ✅ de arrastre, **transitivo** (ver abajo) |
 
-Las tres ediciones comparan el **diff**: bloquean lo que *se saca*, no la lista que cambia,
-así que reordenar, repreciar o agregar siguen pasando. Las dos que faltan están en
-[`../agent/pendientes.md`](../agent/pendientes.md) § 3 con el molde ya probado.
+El arrastre del `DELETE` del grupo se apoya en tres guards, no en uno: ese borrado se
+rechaza si el grupo está asociado a un ítem **vivo**, y para que siga asociado hacen falta
+la desasociación bloqueada (fila de arriba) y que el ítem no se pueda borrar —rama
+`'cuenta'` de `obtenerUsoItem` si es el ítem de la línea, rama `'combo'` si es un
+componente—. Si alguno se afloja, el ✅ se cae.
+
+Las cuatro ediciones comparan el **diff**: bloquean lo que *se saca*, no la lista que
+cambia, así que reordenar, repreciar, cambiar min/max o agregar siguen pasando.
+
+⚠️ **Cerrar los cinco no cierra la clase, y eso es lo que hay que saber antes de confiar en
+esta tabla.** El cobro y la precuenta no solo re-precian: **re-validan** el snapshot contra
+el catálogo de hoy, así que también rompen la mesa cosas que *no* sacan nada —asociar un
+grupo con `min ≥ 1`, subir el `min` de uno ya asociado— y una que saca por otro campo:
+quitar de un combo un componente que la línea personalizó. Las tres están medidas en
+[`../agent/pendientes.md`](../agent/pendientes.md) § 4, junto con la decisión de fondo que
+las cerraría todas de una: si re-tasar una línea ya pedida debe re-validar.
+
+⚠️ **Dos cosas que no se ven desde acá.** La precuenta valida **menos** que el cierre
+(`puedeCostar()` saltea el resolver cuando la línea solo tiene `omitidos`, así que ese caso
+muestra precio normal y explota al cobrar); y no todo lo que rompe grita: un componente de
+combo que se queda sin ningún grupo asociado hace desaparecer la opción elegida **del
+precio**, sin error. Detalle y medición, en la misma entrada.
 
 Para los
 casos que ya existan, el detalle de la cuenta **muestra la línea marcada**
