@@ -29,7 +29,10 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
-import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
+import {
+  assertCostoNoColapsaACero,
+  convertirCostoUnitario,
+} from '../../common/utils/costo-conversion-unidad.util';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   PersonalizacionRecetaDto,
@@ -883,7 +886,7 @@ export class ItemsService {
       }
     }
     if (dto.costo != null) {
-      this.validarCostoPositivo(dto.costo);
+      this.validarCostoNoNegativo(dto.costo);
     }
     // Respuesta armada con RETURNING + valores ya conocidos en la mutación
     // (sin findOne post-write = sin refetch en el servidor).
@@ -1605,6 +1608,14 @@ export class ItemsService {
             costoAReconvertir.costo,
             unaUnidadVieja,
           );
+          // Un costo vigente de 0 (mercadería donada) reconvierte a 0 y sigue
+          // de largo: cambiarle la unidad a ese producto es legítimo. Lo que se
+          // corta es el costo positivo que se pierde en la reconversión.
+          assertCostoNoColapsaACero(
+            costoAReconvertir.costo,
+            costoNuevo,
+            costoAReconvertir.hacia,
+          );
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId,
@@ -2170,10 +2181,18 @@ export class ItemsService {
             unidadBase,
           );
           if (costoUnitario != null) {
+            const costoTipeado = costoUnitario;
             costoUnitario = convertirCostoUnitario(
               cantidadIngresada,
               costoUnitario,
               cantidad,
+            );
+            // El 0 TIPEADO pasa —es el caso que se habilitó—; lo que rebota es
+            // el costo positivo que se pierde en la conversión.
+            assertCostoNoColapsaACero(
+              costoTipeado,
+              costoUnitario,
+              unidadBase ?? 'unidad',
             );
           }
         }
@@ -3196,16 +3215,26 @@ export class ItemsService {
 
   // ── private helpers ────────────────────────────────────────────────────────
 
-  /** Rechaza costos presentes que no sean > 0 (NULL = sin costo sigue permitido). */
-  private validarCostoPositivo(costo: string): void {
+  /**
+   * Rechaza costos presentes que sean NEGATIVOS. El `0` pasa: mercadería de
+   * donación o muestra cuesta 0 de verdad, y ese es un costo conocido —distinto
+   * de `NULL`, que es "no sé cuánto costó" y es lo que filtra `sinCosto`
+   * (`IS NULL`, no `= 0`). Decisión del owner, 2026-08-29.
+   *
+   * Hasta entonces el helper exigía `> 0` y contradecía al propio
+   * `CreateItemDto`, que documenta y valida `>= 0` (`@IsDecimalNoNegativo`)
+   * desde antes: el caso que el comentario del DTO daba por bueno era
+   * inalcanzable por API. Lo que estaba mal era la validación, no el comentario.
+   */
+  private validarCostoNoNegativo(costo: string): void {
     let value: Decimal;
     try {
       value = new Decimal(costo);
     } catch {
-      throw new BadRequestException('El costo debe ser mayor a 0');
+      throw new BadRequestException('El costo no puede ser negativo');
     }
-    if (value.isNaN() || value.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('El costo debe ser mayor a 0');
+    if (value.isNaN() || value.lessThan(0)) {
+      throw new BadRequestException('El costo no puede ser negativo');
     }
   }
 

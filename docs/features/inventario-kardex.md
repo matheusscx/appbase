@@ -217,8 +217,11 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
 
 **Request Body (`AjusteCostoDto`):**
 - `itemId` (required): UUID del item.
-- `costoNuevo` (required): string numérico, costo nuevo. Debe ser `> 0`. Se interpreta
-  **por `unidadCodigo`**, no por la unidad base.
+- `costoNuevo` (required): string numérico, costo nuevo. Debe ser `> 0` — el `0` que sí se
+  habilitó (donación) es el de una **entrada**, no el de un ajuste, que anularía el promedio.
+  Se interpreta **por `unidadCodigo`**, no por la unidad base; si al convertirlo a la unidad
+  base cae por debajo del 4º decimal, se rechaza con 400 (`assertCostoNoColapsaACero`) en vez
+  de persistir un `0` que nadie tipeó.
 - `unidadCodigo` (optional, desde el **2026-08-28**): unidad en la que la persona tipeó el
   costo. Ausente o igual a la base ⇒ comportamiento histórico, el número se toma tal cual.
   Existe para que la precisión venga de **elegir la unidad** y no de teclear decimales que
@@ -261,7 +264,9 @@ dentro de una transacción: no repite sus validaciones ni escribe
 
 Un producto o ingrediente puede llegar a tener movimientos —incluso mermas— sin
 que nadie le haya cargado nunca un `costo_actual`: `costo` es opcional al crear
-el ítem y `costoUnitario` es opcional al ingresar stock por compra. Mientras
+el ítem y `costoUnitario` es opcional al ingresar stock por compra. **Ausente no
+es lo mismo que `0`**: el `0` es un costo cargado (donación o muestra) y el ítem
+NO aparece acá — el filtro es `IS NULL`, no una comparación con cero. Mientras
 eso no pase, **todas** sus mermas se registran sin valorizar (ver
 [`mermas-valorizadas.md`](./mermas-valorizadas.md)), porque el costo se maneja
 en el producto y nunca se tipea al mermar. El agujero no se ve mermando —ahí ya
@@ -378,7 +383,27 @@ agregue mañana sin ese filtro.
   `costo_actual` de `item_producto`). Desde el **2026-08-28** el costo puede llegar en otra
   unidad (`unidadCodigo`), y como acá la cantidad es `0` la conversión es de **tasa**, no de
   operación — ver `POST /inventario/ajustes-costo` arriba.
-- Costos `<= 0` se rechazan.
+- **`registrarMovimiento` rechaza costos negativos y nada más. El `0` pasa, en cualquier
+  motivo.** Un costo de `0` es un costo **conocido** —mercadería de donación o muestra cuesta
+  0 de verdad— y es distinto de `NULL`, que es "no sé cuánto costó" (decisión del owner,
+  2026-08-29). El `0` pesa en el promedio como cualquier otro costo; omitir `costoUnitario`
+  es lo que deja el CPP intacto.
+  ⚠️ **No agregar acá un `> 0` por motivo.** Se intentó —prohibir el `0` en `ajuste_costo`,
+  para que el ajuste no anule el promedio— y rompía un camino legítimo: la reconversión de
+  costo al cambiar `unidad_medida` (`ItemsService.update`) usa **ese mismo motivo**, así que
+  un producto donado no podía corregir su unidad. Y como el cambio de unidad solo se permite
+  sin movimientos, era justo el ítem recién creado.
+- **El `0` que se rechaza es el que nadie escribió: el costo positivo que COLAPSA al
+  convertirse de unidad.** `convertirCostoUnitario` cuantiza a 4 decimales, así que 0,0001/kg
+  aterriza en 0,0000/g. Lo valida la función pura `assertCostoNoColapsaACero`
+  (`common/utils/costo-conversion-unidad.util.ts`) desde los **tres** lugares donde un costo
+  se convierte de unidad: `ItemsService.ajustarStock` (compra en otra unidad),
+  `ItemsService.update` (cambio de `unidad_medida`) e `InventarioService.registrarAjusteCosto`
+  (costo tipeado por la unidad elegida). Vive ahí y no en el kardex porque es el único lugar
+  donde existe el valor de **antes** de convertir.
+- **El `ajuste_costo` sí exige `> 0` sobre lo TIPEADO**, en `AjusteCostoDto`
+  (`@IsDecimalPositivo`): ahí el cero no informaría un costo, anularía el promedio. Es un
+  contrato de DTO, no del kardex.
 - En `ajustarStock`, la fila `item_producto` se bloquea con `FOR UPDATE` antes de convertir unidades.
 - **`costoUnitario` se ingresa "por la unidad elegida" (`unidadCodigo`), nunca por la unidad
   base.** Si hubo conversión de cantidad (`unidadCodigo` distinto de la base del producto), el

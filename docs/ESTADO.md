@@ -76,7 +76,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Habilitar propina por canal (POS/Salones) — `propina_configuracion.habilitado_pos`/`habilitado_salones` (default `true`), toggles en `/configuracion/propinas-distribucion`; canal deshabilitado ignora la propina de `POST /ventas` (venta sin `venta_propina`, no rechazada) | ✅ Implementado (2026-07-23) |
 | Impresión Térmica (comandas cocina/barra por categoría via claim atómico + QZ Tray, precuenta, boleta) | ✅ Implementado (2026-07-13; claim atómico 2026-07-15) |
 | Boleta POS — plantilla unificada (emisor con RUT, DOCUMENTO INTERNO / slot electrónico dormante, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina sugerida | ✅ Implementado (2026-07-18) |
-| Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |
+| Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base > 0, costo ≥ 0 —el `> 0` del costo se aflojó el 2026-08-29: el 0 es donación/muestra, solo `ajuste_costo` lo sigue exigiendo—) | ✅ Implementado (2026-07-15) |
 | Catálogo de impuestos del sistema + clasificación tributaria | ✅ Implementado (2026-07-19) |
 | Combos (paquetes con precio propio fijo, componentes producto/receta/servicio bloqueantes, una línea de venta, disponibilidad conservadora) | ✅ Implementado (2026-07-20) |
 | Grupos de modificadores reutilizables (asociables a combos/recetas, familia derivada ingrediente/vendible, min/max en unidades, precio en el grupo, opción siempre bloqueante, snapshot congelado; impresión térmica de la opción elegida diferida) | ✅ Implementado (2026-07-20) |

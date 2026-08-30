@@ -1021,14 +1021,15 @@ prohíbe.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-✅ **Y otra el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto —contestada
-y construida el mismo día, también ([`resueltos.md`](resueltos.md)).
-**Quedan siete abiertas** —cuatro llegaron el 2026-08-28: dos del barrido de las lecturas sin
+✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
+contradicción de `costo: '0'` —cada una contestada y construida el mismo día
+([`resueltos.md`](resueltos.md))—.
+**Quedan seis abiertas** —cuatro llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs),
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida) y
 una que **bajó de la § 2** al medirla, la moneda del extra en el ticket; más
-la nota de crédito (fiscal, frente propio), la contradicción de `costo: '0'` y el **modo** que
-se da vuelta al cambiar de tipo, abierta el 2026-08-29 al cerrar la de la forma de importe—; el
+la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de tipo,
+abierta el 2026-08-29 al cerrar la de la forma de importe—; el
 conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 ⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
 tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
@@ -1286,22 +1287,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
-
-- [ ] **`costo: '0'` está documentado como real y a la vez rechazado — DTO y service se
-  contradicen** (backend; preexistente, medido el 2026-08-28 en la revisión final del frente
-  de la merma sin costo tipeado) — `create-item.dto.ts:231-233` comenta que `costo >= 0` es
-  válido porque *"mercadería de donación o muestra tiene costo 0 de verdad"*, distinto de
-  "sin costo" (`null`). Pero `ItemsController.crear` llama a `validarCostoPositivo` cuando
-  `dto.costo != null` (`items.service.ts:886`), y ese helper (`:3196-3206`) rechaza
-  `costo <= 0` con *"El costo debe ser mayor a 0"*. `registrarMovimiento` hace lo mismo con
-  `costoUnitario` en una entrada de stock. O sea: **hoy no existe ningún camino por API para
-  que un ítem quede con `costo_actual = '0'`** — el caso que el comentario del DTO da por
-  bueno es inalcanzable.
-  ❓ **La pregunta al owner:** ¿el costo `0` de donación/muestra es una regla de negocio real
-  que hay que habilitar (aflojar `validarCostoPositivo` para permitir `0`, dejando `<= 0`
-  estricto solo para negativos), o el comentario del DTO quedó de una decisión que se
-  revirtió y hay que borrarlo? Ninguna de las dos se puede elegir sin saber cuál era la
-  intención original.
 
 - [ ] **Cambiar de tipo da vuelta el MODO y se lleva puesto el valor tipeado** (frontend;
   medido 2026-08-29, al lado del frente de *"perder la forma de importe"* →

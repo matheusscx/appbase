@@ -199,17 +199,17 @@ describe('MermasService', () => {
     });
 
     it('costo_actual = "0" se registra valorizado en cero, sin pasar costoUnitario a registrarMovimiento', async () => {
-      // '0' acá es un valor límite del mock, no un estado real alcanzable:
-      // `create-item.dto.ts:231-233` documenta '0' como costo real
-      // (donación/muestra, distinto de "sin costo" = null, Regla 1), pero
-      // `ItemsService.validarCostoPositivo` (`items.service.ts:3196-3206`) y
-      // el rechazo de `costoUnitario <= 0` en `registrarMovimiento` lo
-      // frenan antes con 400 — contradicción DTO↔service preexistente
-      // (no la introduce este fix), anotada en `docs/agent/pendientes.md`.
+      // '0' YA es un estado alcanzable por API: desde el 2026-08-29 se puede
+      // crear un ítem con `costo: '0'` y comprar a costo 0 (mercadería de
+      // donación o muestra, distinta de "sin costo" = null, Regla 1). Cuando
+      // este test se escribió no lo era —`validarCostoPositivo` y el guard de
+      // `costoUnitario` en `registrarMovimiento` exigían `> 0` y contradecían
+      // al propio `CreateItemDto`—, así que era un valor límite del mock; el
+      // fix de esa contradicción no cambió nada acá, solo volvió real el caso.
       // Lo que este test fija: `registrar` nunca pasa `costoUnitario` a
       // `registrarMovimiento` (mockeado acá), sea cual sea el costo leído
-      // — así que ese callee no puede rebotar, ni con este valor límite ni
-      // con ninguno. El e2e de la Task 2 cubre el camino contra el
+      // — así que ese callee no puede rebotar, ni con este costo ni con
+      // ninguno. El e2e de la Task 2 cubre el camino contra el
       // servicio real.
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       causasService.assertCausaActiva.mockResolvedValueOnce({

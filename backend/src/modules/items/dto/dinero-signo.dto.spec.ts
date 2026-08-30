@@ -4,6 +4,7 @@ import { validate, type ValidationError } from 'class-validator';
 import { CreateItemDto } from './create-item.dto';
 import { UpdateItemDto } from './update-item.dto';
 import { AplicarDesfaseItemDto } from './aplicar-desfases.dto';
+import { AjusteStockDto } from './ajuste-stock.dto';
 
 const MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440101';
@@ -250,5 +251,52 @@ describe('AplicarDesfaseItemDto.precioBase — signo', () => {
     });
     const errores = await validate(dto);
     expect(propiedadesConError(errores)).toContain('precioBase');
+  });
+});
+
+/**
+ * `AjusteStockDto.costoUnitario` es lo que se PAGÓ en una entrada: alimenta el
+ * promedio ponderado y se congela en el kardex. Admite `0` desde el 2026-08-29
+ * (decisión del owner): la mercadería de donación o muestra entra con costo 0 de
+ * verdad, igual que el `costo` de `CreateItemDto` de más arriba. Ausente sigue
+ * significando "no sé cuánto costó" y no toca el CPP — el `0` sí lo mueve.
+ *
+ * El que NO admite `0` es `AjusteCostoDto.costoNuevo` (`inventario/dto/`): ahí el
+ * cero anularía el promedio en vez de informarlo, y su comentario lo dice.
+ */
+describe('AjusteStockDto.costoUnitario — signo', () => {
+  const entrada = { cantidad: '10', tipo: 'entrada', motivo: 'compra' };
+
+  it('acepta costoUnitario en 0 (entrada de mercadería donada)', async () => {
+    const dto = plainToInstance(AjusteStockDto, {
+      ...entrada,
+      costoUnitario: '0',
+    });
+    const errores = await validate(dto);
+    expect(propiedadesConError(errores)).not.toContain('costoUnitario');
+  });
+
+  it('acepta costoUnitario ausente (compra sin costo declarado)', async () => {
+    const dto = plainToInstance(AjusteStockDto, entrada);
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(0);
+  });
+
+  it('rechaza costoUnitario negativo', async () => {
+    const dto = plainToInstance(AjusteStockDto, {
+      ...entrada,
+      costoUnitario: '-1',
+    });
+    const errores = await validate(dto);
+    expect(propiedadesConError(errores)).toContain('costoUnitario');
+  });
+
+  // La cantidad no se aflojó junto con el costo: un movimiento de 0 unidades no
+  // mueve nada, y el único que registra cantidad 0 es el `ajuste_costo`, que no
+  // pasa por este DTO.
+  it('sigue rechazando cantidad en 0', async () => {
+    const dto = plainToInstance(AjusteStockDto, { ...entrada, cantidad: '0' });
+    const errores = await validate(dto);
+    expect(propiedadesConError(errores)).toContain('cantidad');
   });
 });

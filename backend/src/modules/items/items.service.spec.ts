@@ -1622,6 +1622,53 @@ describe('ItemsService', () => {
       expect(insertProducto?.[1]).toContain('4000');
     });
 
+    it('create producto persiste costo_actual = 0 (mercadería de donación)', async () => {
+      // Decisión del owner (2026-08-29): el 0 es un costo conocido —donación o
+      // muestra—, distinto de `null` = "no sé cuánto costó". Hasta acá
+      // `validarCostoPositivo` lo rechazaba con 400 y contradecía al propio
+      // `CreateItemDto`, que documenta y valida `>= 0` desde antes: no había
+      // ningún camino por API para dejar un ítem en `costo_actual = '0'`.
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
+        .mockResolvedValueOnce([]); // INSERT item_producto
+
+      await service.create(TENANT, 'user-uuid', {
+        nombre: 'Merchandising de muestra',
+        precioBase: '0',
+        monedaId: 'moneda-uuid',
+        tipo: 'producto',
+        costo: '0',
+      });
+
+      const insertProducto = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          c[0].includes('INSERT INTO item_producto'),
+      );
+      // Por índice y no con `toContain`: los params de este INSERT ya llevan
+      // un '0' (el stock inicial), así que un `toContain('0')` pasaría con el
+      // costo en null. El costo es el último.
+      // Y es '0', NO null: el ítem no queda "sin costo" —`sinCosto` filtra por
+      // `IS NULL`, así que este producto no aparece en esa bandeja.
+      const paramsProducto = insertProducto?.[1] as unknown[];
+      expect(paramsProducto[paramsProducto.length - 1]).toBe('0');
+    });
+
+    it('create rechaza un costo negativo', async () => {
+      // Lo que el 0 habilitado NO arrastra: el negativo entra a `costo_actual`
+      // sin que ninguna regla lo neutralice y ensucia el CPP.
+      await expect(
+        service.create(TENANT, 'user-uuid', {
+          nombre: 'Costo imposible',
+          precioBase: '6000',
+          monedaId: 'moneda-uuid',
+          tipo: 'producto',
+          costo: '-1',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('persiste la clasificación tributaria y la devuelve en la respuesta', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
@@ -2763,6 +2810,74 @@ describe('ItemsService', () => {
       );
     });
 
+    it('cambiar la unidad de un producto a costo 0 no rebota (mercadería donada)', async () => {
+      // Reproduce el bug que cazó la revisión independiente: prohibir el 0 en
+      // `registrarMovimiento` por motivo `ajuste_costo` tumbaba ESTE camino —el
+      // mismo motivo lo usa la reconversión interna—, así que un producto de
+      // donación no podía corregir su unidad de medida. Y `:1470` solo permite
+      // cambiar la unidad de un producto SIN movimientos, o sea justo el recién
+      // creado: el caso quedaba sin salida.
+      // ⚠️ Este test es un ANCLA, no la red: `inventarioService` está mockeado,
+      // así que no puede ver el guard que causaba el 400. Lo que caza la
+      // regresión de verdad es el e2e homónimo de `costeo-cpp.e2e-spec.ts`
+      // —medido: con el guard por motivo puesto, este test sigue verde—.
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          {
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: '0.0000',
+          },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValue([]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('1000');
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-donado',
+      });
+
+      await service.update('tenant-uuid', USUARIO, 'item-uuid', {
+        unidadMedida: 'g',
+      });
+
+      // 0 por kg sigue siendo 0 por gramo: se reconvierte igual que cualquier
+      // otro costo, sin caso especial.
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          motivo: 'ajuste_costo',
+          costoUnitario: '0.0000',
+        }),
+      );
+    });
+
+    it('rechaza el cambio de unidad que hace desaparecer un costo positivo', async () => {
+      // La otra mitad de la regla: 0,0001/kg reconvertido a gramos es
+      // 0,0000001/g ⇒ '0.0000'. Ese 0 no lo eligió nadie, y dejarlo pasar
+      // convertiría un producto costeado en uno costeado en cero, en silencio.
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          {
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: '0.0001',
+          },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValue([]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('1000');
+
+      await expect(
+        service.update('tenant-uuid', USUARIO, 'item-uuid', {
+          unidadMedida: 'g',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
     it('no toca el costo si la unidad cambia pero no hay costo vigente', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }])
@@ -2838,6 +2953,60 @@ describe('ItemsService', () => {
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({ cantidad: '2000', costoUnitario: '5.0000' }),
+      );
+    });
+
+    it('rechaza el costo positivo que se pierde al convertirlo a la unidad base', async () => {
+      // 0,0001/kg en un producto por gramo son 0,0000001/g, y
+      // `convertirCostoUnitario` cuantiza a 4 decimales ⇒ '0.0000'. Antes lo
+      // frenaba el guard de `registrarMovimiento` ("debe ser mayor a 0"); desde
+      // que el 0 es un costo legítimo ese guard ya no lo ve, y sin este chequeo
+      // la compra quedaría costeada en 0 en silencio. Lo que se pierde no es el
+      // 0 que alguien quiso poner: es un costo positivo que nadie escribió como 0.
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { unidad_medida: 'g', modo_inventario: 'cantidad' },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('1000'); // 1 kg → 1000 g
+
+      await expect(
+        service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+          cantidad: 1,
+          tipo: 'entrada',
+          motivo: 'compra',
+          unidadCodigo: 'kg',
+          costoUnitario: '0.0001',
+        } as never),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    it('deja pasar el costo 0 TIPEADO aunque haya conversión de unidad', async () => {
+      // El chequeo de arriba mira el costo tipeado, no el convertido: 0 × lo
+      // que sea es 0, y ese 0 es el caso que el owner habilitó.
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { unidad_medida: 'g', modo_inventario: 'cantidad' },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('1000');
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        stockResultante: '1000',
+      });
+
+      await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        cantidad: 1,
+        tipo: 'entrada',
+        motivo: 'compra',
+        unidadCodigo: 'kg',
+        costoUnitario: '0',
+      } as never);
+
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ cantidad: '1000', costoUnitario: '0.0000' }),
       );
     });
 

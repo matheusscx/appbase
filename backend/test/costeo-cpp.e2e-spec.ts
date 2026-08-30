@@ -34,6 +34,9 @@ interface MovimientoListItem {
 interface PaginatedMovimientos {
   data: MovimientoListItem[];
 }
+interface PaginatedItems {
+  data: { id: string }[];
+}
 
 async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
@@ -478,5 +481,220 @@ describe('Costeo CPP (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ modoInventario: 'lote' })
       .expect(200);
+  });
+
+  /**
+   * El costo `0` es un costo CONOCIDO —mercadería de donación o muestra—, no la
+   * ausencia de dato (esa es `null`, y es lo único que cae en "sin costo").
+   * Decisión del owner, 2026-08-29.
+   *
+   * Estos cuatro tests van por la API a propósito: el `0` ya estaba documentado
+   * y validado en `CreateItemDto` (`dinero-signo.dto.spec.ts` lo fija desde
+   * antes), y aun así **ningún camino por API lo alcanzaba** — el service lo
+   * rechazaba después del DTO. Un test de DTO no habría visto la contradicción.
+   */
+  it('POST /items acepta costo 0 y el ítem NO queda "sin costo"', async () => {
+    const nombre = `CPP Donacion ${Date.now()}`;
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        costo: '0',
+      });
+    expect(resCreate.status).toBe(201);
+    const donadoId = (resCreate.body as ItemResponse).id;
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/items/${donadoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((detalle as ItemResponse).costoActual).not.toBeNull();
+    expect(new Decimal((detalle as ItemResponse).costoActual!).toFixed(4)).toBe(
+      '0.0000',
+    );
+
+    // La otra mitad de la regla: `sinCosto` filtra por `IS NULL`, así que un
+    // costo de 0 no manda el ítem a la bandeja de "sin costo". Si el filtro
+    // fuera por truthiness o por `= 0`, este ítem aparecería acá.
+    const { body: listado } = await request(app.getHttpServer())
+      .get(`/api/items?sinCosto=true&search=${encodeURIComponent(nombre)}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((listado as PaginatedItems).data.map((i) => i.id)).not.toContain(
+      donadoId,
+    );
+  });
+
+  it('POST /items rechaza un costo negativo', async () => {
+    await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Costo negativo ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        costo: '-1',
+      })
+      .expect(400);
+  });
+
+  it('una entrada a costo 0 entra al promedio como cualquier otro costo', async () => {
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Entrada donada ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+      });
+    expect(resCreate.status).toBe(201);
+    const mixtoId = (resCreate.body as ItemResponse).id;
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${mixtoId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        cantidad: '10',
+        tipo: 'entrada',
+        motivo: 'compra',
+        costoUnitario: '100',
+      })
+      .expect(200);
+
+    // 10 donadas a 0. El 0 PESA en el promedio: es la diferencia con omitir
+    // `costoUnitario`, que deja el CPP intacto porque no se sabe qué costó.
+    await request(app.getHttpServer())
+      .patch(`/api/items/${mixtoId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        cantidad: '10',
+        tipo: 'entrada',
+        motivo: 'compra',
+        costoUnitario: '0',
+      })
+      .expect(200);
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/items/${mixtoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // (10 × 100 + 10 × 0) / 20 = 50.
+    expect(new Decimal((detalle as ItemResponse).costoActual!).toFixed(4)).toBe(
+      '50.0000',
+    );
+  });
+
+  it('el ajuste de costo sigue rechazando el 0 TIPEADO (contrato del DTO)', async () => {
+    // El 0 habilitado es el de una ENTRADA: lo que costó la mercadería. El
+    // ajuste de costo corrige el promedio ponderado, no lo anula
+    // (`AjusteCostoDto.costoNuevo` lo dice en su comentario).
+    // ⚠️ Este 400 lo tira el DTO (`@IsDecimalPositivo`), que este frente NO
+    // tocó: es un ancla del contrato, no la red del costo convertido. Esa es
+    // el test de abajo, y a nivel unitario `registrarAjusteCosto`.
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Ajuste a cero ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        costo: '500',
+      });
+    expect(resCreate.status).toBe(201);
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: (resCreate.body as ItemResponse).id,
+        costoNuevo: '0',
+        comentario: 'No debería poder anular el promedio',
+      })
+      .expect(400);
+  });
+
+  it('el ajuste de costo rechaza el costo positivo que se pierde al convertirlo', async () => {
+    // El costo tipeado es positivo, así que el DTO lo deja pasar; 0,0001/kg en
+    // un producto por gramo son 0,0000001/g y la conversión cuantiza a 4
+    // decimales ⇒ '0.0000'. Antes de habilitar el 0 lo frenaba de rebote el
+    // guard genérico de `registrarMovimiento`; ahora lo frena el chequeo que
+    // compara el costo de antes contra el convertido.
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Costo que no cabe ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        unidadMedida: 'g',
+        costo: '4',
+      });
+    expect(resCreate.status).toBe(201);
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: (resCreate.body as ItemResponse).id,
+        costoNuevo: '0.0001',
+        unidadCodigo: 'kg',
+        comentario: 'Un costo que no cabe en la escala',
+      })
+      .expect(400);
+  });
+
+  it('un producto a costo 0 puede corregir su unidad de medida', async () => {
+    // Lo cazó la revisión independiente y no lo veía ningún test: la
+    // reconversión de costo por cambio de `unidadMedida` va por
+    // `registrarMovimiento` con motivo `ajuste_costo`. Prohibir el 0 en ese
+    // motivo dejaba al producto de donación sin poder corregir su unidad —y
+    // como el cambio de unidad solo se permite SIN movimientos, era justo el
+    // ítem recién creado, con un 400 que además hablaba de un "costo nuevo"
+    // que nadie había tipeado.
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Donado cambia unidad ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        unidadMedida: 'kg',
+        modoInventario: 'cantidad',
+        costo: '0',
+      });
+    expect(resCreate.status).toBe(201);
+    const donadoId = (resCreate.body as ItemResponse).id;
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${donadoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ unidadMedida: 'g', modoInventario: 'cantidad' })
+      .expect(200);
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/items/${donadoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // 0 por kg sigue siendo 0 por gramo.
+    expect(new Decimal((detalle as ItemResponse).costoActual!).toFixed(4)).toBe(
+      '0.0000',
+    );
   });
 });

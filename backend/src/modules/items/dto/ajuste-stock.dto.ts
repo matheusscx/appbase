@@ -10,7 +10,10 @@ import {
   IsNumberString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsDecimalPositivo,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
@@ -74,10 +77,15 @@ export class AjusteStockDto {
   @IsOptional()
   unidadCodigo?: string;
 
-  // Costo pagado en la entrada por compra (actualiza costo_actual + congela en el kardex)
+  // Costo pagado en la entrada por compra (actualiza costo_actual + congela en el kardex).
+  // `>= 0`, no `> 0`: mercadería de donación o muestra entra con costo 0 de
+  // verdad (decisión del owner, 2026-08-29), igual que el `costo` de
+  // `CreateItemDto`. Ausente sigue siendo "no sé cuánto costó" y no toca el CPP.
+  // El negativo lo mata el decorador; el `AjusteCostoDto` es el que conserva el
+  // `@IsDecimalPositivo`, porque ahí el 0 anularía el promedio en vez de informarlo.
   @IsOptional()
   @IsNumberString()
-  @IsDecimalPositivo()
+  @IsDecimalNoNegativo()
   @EsCosto()
   costoUnitario?: string;
 

@@ -229,8 +229,15 @@ export class CreateItemDto {
   fechaVencimiento?: string;
 
   // Dinero: entra a `costo_actual`, base del costeo (CPP) y del margen. `>= 0` —
-  // mercadería de donación o muestra tiene costo 0 de verdad. En `UpdateItemDto` no
-  // hace falta: ahí el campo lo rechaza entero `CostoNoEditableConstraint`.
+  // mercadería de donación o muestra tiene costo 0 de verdad, distinto de "no sé
+  // cuánto costó" (`null`, que es lo único que cae en `?sinCosto=true`). En
+  // `UpdateItemDto` no hace falta: ahí el campo lo rechaza entero
+  // `CostoNoEditableConstraint`.
+  // ⚠️ Este comentario describió durante meses un caso INALCANZABLE: el service
+  // exigía `> 0` después del DTO, así que ningún ítem podía quedar en
+  // `costo_actual = '0'`. Se alineó el 2026-08-29 (`validarCostoNoNegativo`), y
+  // por eso el caso lo fija un e2e —`costeo-cpp.e2e-spec.ts`— y no solo el test
+  // de este DTO, que pasaba en verde mientras la API rebotaba.
   @IsNumberString()
   @IsDecimalNoNegativo()
   @EsCosto()

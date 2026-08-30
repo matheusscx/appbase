@@ -366,6 +366,18 @@ manda tal cual (no hay masa que promediar). Ninguna otra entrada ni ninguna sali
 el costo — ni siquiera la devolución de venta, porque la unidad que vuelve ya salió con
 un costo congelado y re-promediarla mezclaría costo de venta con costo de compra.
 
+**Costo `0` y "sin costo" son estados distintos, y el sistema no los mezcla** (decisión
+del owner, 2026-08-29). El `0` es un costo **conocido**: mercadería de donación o muestra
+cuesta 0 de verdad, y como tal pesa en el promedio ponderado y valoriza sus mermas en
+cero. `NULL` es "no sé cuánto costó": no mueve el promedio, deja las mermas sin valorizar
+y es lo único que cae en la bandeja "Ítems sin costo" (`GET /items?sinCosto=true`, que
+filtra por `IS NULL`). Se puede crear un ítem con `costo: '0'`, y **cualquier** movimiento manual puede traer
+`costoUnitario: '0'`: en una entrada por `compra` o `devolucion` ese cero **recalcula** el
+promedio; en las demás entradas y en las salidas solo se congela en el kardex. Lo que ningún
+camino acepta es un costo **negativo**. La excepción
+es el `ajuste_costo`, que exige `> 0`: ahí el cero no informaría un costo, anularía el
+promedio.
+
 Corregir un costo mal cargado (typo, migración) tiene una vía explícita y auditada: la
 operación `ajuste_costo` (`tipo = 'ajuste'`), que exige un comentario y deja registrado
 en el kardex el costo anterior y el nuevo. `PATCH /items/:id` **no** puede escribir el

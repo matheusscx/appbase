@@ -12469,9 +12469,156 @@ escalones como en descuentos. `RECARGO_CONFIG` tiene **un solo** tipo por escalo
 
 📌 **Lo que se extrajo, por la regla de la tercera:** `radioPorValor` subió a nivel módulo en
 `descuentos.nuxt.spec.ts` —lo usan los describes de modo, de nivel y ahora el de la forma—,
-igual que había pasado con `abrirEdicionDeLaFila`. En `recargos.nuxt.spec.ts` el click de
-radio va por la segunda copia y queda local.
+igual que había pasado con `abrirEdicionDeLaFila`. ⚠️ Este párrafo decía que en
+`recargos.nuxt.spec.ts` el click de radio "va por la segunda copia y queda local", y **era
+falso**: iba por la tercera, y la **integración** de las dos lanes lo extrajo también ahí
+(`recargos.nuxt.spec.ts:173`, con `radioNivel = radioPorValor`). Es la clase de deriva que
+**solo ve la revisión del diff integrado**: cada rama, sola, estaba bien.
 
 📌 **Lo que quedó afuera, medido y anotado:** cambiar entre dos tipos de valor único con
 distinto `modo` pierde el **valor tipeado** — es perder la *unidad*, no la *forma*, y abrió su
 propia entrada en [`pendientes.md`](pendientes.md).
+
+---
+
+## El costo `0` era una regla real y el service la rechazaba — habilitado (2026-08-29)
+
+**Entrada cerrada:** *"`costo: '0'` está documentado como real y a la vez rechazado — DTO y
+service se contradicen"* (§ 4 de [`pendientes.md`](pendientes.md), abierta el 2026-08-28 en la
+revisión final del frente de la merma sin costo tipeado).
+
+**Decisión del owner (2026-08-29): se habilita el `0`.** Mercadería de donación o muestra
+cuesta 0 de verdad, y ese es un costo **conocido**, distinto de "no sé cuánto costó"
+(`null`). El comentario del DTO describía la intención correcta desde el principio; lo que
+estaba mal era la validación. El owner autorizó además que el arreglo tocara la entrada de
+stock (`movimientos_inventario`), que `CLAUDE.md` marca como "detenerse y preguntar".
+
+### La entrada nombraba dos guards y eran cuatro
+
+Es la quinta vez que una entrada de este backlog subcuenta el hueco, así que vale escribir el
+número: el grep fue **por conducta** (comparaciones de signo, decoradores de dinero, mensajes
+"mayor a 0"), no por nombre de archivo.
+
+Las líneas de la izquierda son las **de antes** del fix (las que citaba la entrada); las de la
+derecha, dónde quedó cada cosa **después**, que es lo que se abre hoy.
+
+| Dónde rechazaba el `0` (pre-fix) | Qué rechazaba | Quedó (post-fix) |
+|---|---|---|
+| `items.service.ts:886` → helper (`:3196-3206`) | crear un ítem con `costo` | `validarCostoNoNegativo` (`:3229`): solo el negativo |
+| `inventario.service.ts:229` | `costoUnitario` de cualquier movimiento | `:246` solo el negativo, sin caso por motivo |
+| `ajuste-stock.dto.ts:80` — **no estaba en la entrada** | `costoUnitario` de la compra manual | `@IsDecimalNoNegativo()` (`:88`) |
+| `ajuste-costo.dto.ts:18` — **no estaba en la entrada** | `costoNuevo` del ajuste | **sin tocar**, a propósito (ver abajo) |
+
+Aflojar solo los dos que la entrada nombraba habría dejado el frente **cerrado en el papel y
+abierto en la API**: el DTO del ajuste de stock rebota antes de que el service opine, así que
+`PATCH /items/:id/stock` con `costoUnitario: '0'` habría seguido tirando 400.
+
+### El intento que hubo que deshacer: el guard "por motivo"
+
+⚠️ **Esta sección es el corazón del frente, y la primera versión del fix estaba mal.**
+
+`AjusteCostoDto` dice en su comentario que el 0 ahí no informa un costo, lo borra —*el ajuste
+corrige el promedio ponderado, no lo anula*—. Pero su `@IsDecimalPositivo` mira lo **tipeado**,
+y `registrarAjusteCosto` convierte el número a la unidad base y lo cuantiza a 4 decimales antes
+de registrar el movimiento: un costo positivo puede aterrizar en `'0.0000'` (0,0001/kg son
+0,0000001/g). Como el único que veía el valor ya convertido era el guard genérico de
+`registrarMovimiento`, la primera versión lo dejó rechazando el 0 **cuando el motivo es
+`ajuste_costo`**.
+
+**Y eso rompía un camino legítimo.** `ItemsService.update` reconvierte el `costo_actual` cuando
+cambia `unidad_medida`, y lo hace **por el mismo motivo `ajuste_costo`** (choke point de
+ADR-016: la llamada a `registrarMovimiento` en `items.service.ts:1619-1628`). Con el guard por motivo puesto, un producto de donación no
+podía corregir su unidad de medida:
+
+```
+POST /api/items {costo:'0', unidadMedida:'kg'}   → 201
+PATCH /api/items/<id> {unidadMedida:'g'}          → 400 "El costo nuevo debe ser mayor a 0"
+```
+
+Peor por dos razones: el cambio de unidad **solo se permite en un producto sin movimientos**
+(`items.service.ts:1470`), o sea justo el ítem recién creado que se quiere corregir; y el 400
+habla de un *"costo nuevo"* que nadie tipeó. Lo cazó la **revisión independiente**, que lo
+reprodujo contra la API.
+
+**La regla que quedó, y por qué es la correcta:** lo que hay que atajar nunca fue el *motivo*,
+sino el **costo positivo que colapsa a 0 al convertirse**. Y eso solo se puede ver donde está
+el valor de ANTES de convertir, que no es `registrarMovimiento`. Así que el guard genérico
+volvió a mirar solo el signo, y el chequeo del colapso vive en una función pura,
+`assertCostoNoColapsaACero` (`common/utils/costo-conversion-unidad.util.ts`), llamada desde los
+**tres** lugares donde un costo se convierte de unidad:
+
+| Llamador | Qué convierte | Qué pasa con el 0 |
+|---|---|---|
+| `ItemsService.ajustarStock` | compra en otra unidad | el 0 tipeado pasa; el positivo que colapsa, 400 |
+| `ItemsService.update` | reconversión por cambio de `unidad_medida` | 0/kg → 0/g pasa; el positivo que colapsa, 400 |
+| `InventarioService.registrarAjusteCosto` | costo tipeado por la unidad elegida | el 0 tipeado ya lo corta el DTO; el colapso, 400 acá |
+
+Se extrajo a util **por la regla de la tercera**: el mismo `if` iba a quedar copiado tres veces
+en dos services distintos (en `HEAD` no había ninguna copia — el chequeo no existía). La distinción que sostiene la función entera, y que conviene no perder:
+**se rechaza el 0 que nadie escribió, nunca el que alguien eligió.**
+
+### Lo que el cambio destraba, y no se había pedido
+
+Tres caminos de `ventas.service.ts` (anulación, y las dos devoluciones/NC) reingresan la
+mercadería pasando como `costoUnitario` el costo **congelado** en la salida original. Con
+`costo_actual = '0'` ahora alcanzable, ese valor es `'0.0000'` y el guard viejo habría
+respondido 400: **anular la venta de un producto donado habría fallado**. No es alcance
+agregado —no se tocó nada de ventas— pero conviene saber que el 400 que no existe salió de
+acá. Lo fiscal (la nota de crédito en sí) no se tocó: sigue siendo frente propio.
+
+### Lo que NO cambió, y está medido
+
+- **La bandeja "sin costo" sigue significando lo mismo.** `?sinCosto=true` filtra por
+  `IS NULL`, no por truthiness ni por `= 0`, así que un ítem a costo 0 **no** aparece ahí. Lo
+  fija el e2e, no la lectura del SQL.
+- **El frontend ya mandaba el `0`.** `MoneyInput` emite `detail.unmasked || ''` y el `"0"` es
+  un string truthy; los tres guards de pantalla (`items.vue:1063`, `:1084`, `:1302`) son
+  truthiness sobre el string, no sobre el número. Medido, no supuesto: no hizo falta tocar
+  ningún `.vue`.
+- **El CPP no se divide por el costo.** `calcularCostoPromedio` divide por
+  `stockAnterior + cantidad`; un costo 0 entra al promedio como cualquier otro número y lo
+  baja. Que **pese** en el promedio es justo la diferencia con omitir `costoUnitario`, que lo
+  deja intacto — dos cosas distintas que antes eran indistinguibles porque una era imposible.
+
+### Qué lo fija
+
+23 tests nuevos (4 de DTO, 4 de la util nueva, 9 unitarios de service, 6 e2e) y uno reescrito
+—el que afirmaba el rechazo del `0` en una entrada, que pasó a afirmar el del negativo—.
+
+**Los cinco mutantes corridos** —revertir cada guard a su forma anterior, uno por uno— ponen en
+rojo exactamente el test que le corresponde: los tests **habrían cazado** los bugs, no solo se
+rompen si se toca la línea.
+
+⚠️ **Y un sexto mutante deja en verde justo el test que uno miraría.** Restaurar el guard "por
+motivo" pone en rojo el e2e del cambio de unidad y el unitario de
+`inventario.service.spec.ts` —los dos, medido—, pero **el unitario del cambio de unidad**
+(`items.service.spec.ts`) sigue **verde**: ahí `InventarioService` está mockeado y el guard vive
+del otro lado del mock. Por eso ese unitario lleva escrito que es un **ancla, no la red**. Es la
+lección de siempre en su forma más cara: **el test que mockea al colaborador no puede ver la
+regla del colaborador**, y el bug vivía exactamente ahí. La corrección de este párrafo también
+salió de la revisión independiente: la primera versión decía *"lo caza solo el e2e"*, y era una
+afirmación medida a medias.
+
+⚠️ **Por qué los seis e2e, si ya había un test de DTO desde antes.** `dinero-signo.dto.spec.ts`
+fijaba *"acepta costo en 0"* y pasaba **en verde mientras la API devolvía 400**: el DTO valida,
+el service rechaza después, y un test de DTO no ve el service. Esa contradicción vivió meses
+en verde. La regla que deja: **un caso que el DTO declara válido se prueba por el camino de la
+app**, o el test certifica el contrato equivocado.
+
+📌 **Un detalle de decimal.js que la revisión midió y conviene no re-descubrir:**
+`new Decimal('NaN')` **no tira**, así que el string `'NaN'` no entra al `catch` de
+`registrarMovimiento` sino a la rama `isNaN()`. Las dos ramas son inalcanzables por API
+—`@IsNumberString()` las corta—, y por eso no se tocó el orden: se anota para el que algún día
+quiera apoyarse en ese `catch` para algo real.
+
+📌 **Un e2e que parece red y no lo es, anotado por la revisión:** *"el ajuste de costo sigue
+rechazando el 0 TIPEADO"* recibe su 400 del **DTO** (`@IsDecimalPositivo`), que este frente no
+tocó — pasaría igual con el chequeo del colapso borrado. Es un ancla del contrato, y su nombre
+ahora lo dice. La red del costo **convertido** son el e2e de al lado y el unitario de
+`registrarAjusteCosto`.
+
+📌 **Lo que se corrigió en dos specs vecinos, y no es alcance agregado:** el test de mermas
+`costo_actual = "0"` declaraba en su comentario que el `'0'` era *"un valor límite del mock, no
+un estado real alcanzable"* y citaba los dos guards por línea. Cerrar el frente sin tocar ese
+comentario habría dejado una afirmación falsa exactamente donde el próximo la va a leer.
+

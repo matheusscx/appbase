@@ -8,7 +8,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
-import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
+import {
+  assertCostoNoColapsaACero,
+  convertirCostoUnitario,
+} from '../../common/utils/costo-conversion-unidad.util';
 import Decimal from 'decimal.js';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
@@ -219,15 +222,33 @@ export class InventarioService {
 
     const costoActualPrevio = productoRows[0].costo_actual ?? null;
 
+    // El `0` es un costo REAL —mercadería de donación o muestra— y por eso
+    // cualquier movimiento lo acepta (decisión del owner, 2026-08-29). Acá se
+    // valida el SIGNO y nada más.
+    //
+    // ⚠️ No agregar acá un `> 0` por motivo. Se intentó —prohibir el 0 en
+    // `ajuste_costo`, para que ese ajuste no anule el promedio— y rompía un
+    // camino legítimo: `ItemsService.update` reconvierte el costo al cambiar
+    // `unidad_medida` usando este mismo motivo, así que un producto donado (costo
+    // 0) no podía corregir su unidad. Lo que hay que atajar no es el motivo sino
+    // el costo positivo que COLAPSA a 0 al convertirse, y eso solo se ve donde
+    // está el valor de antes: `assertCostoNoColapsaACero`, en los tres
+    // llamadores que convierten.
     if (params.costoUnitario != null) {
       let costoIngresado: Decimal;
       try {
         costoIngresado = new Decimal(params.costoUnitario);
       } catch {
-        throw new BadRequestException('El costo unitario debe ser mayor a 0');
+        // Mensaje propio: lo que falló no es el signo. Por API no se llega
+        // —`@IsNumberString()` corta antes—, pero un llamador interno pasa
+        // strings leídos de la base y un 400 que hable del signo manda a mirar
+        // el número equivocado.
+        throw new BadRequestException('El costo unitario no es un número');
       }
-      if (costoIngresado.isNaN() || costoIngresado.lessThanOrEqualTo(0)) {
-        throw new BadRequestException('El costo unitario debe ser mayor a 0');
+      if (costoIngresado.isNaN() || costoIngresado.lessThan(0)) {
+        throw new BadRequestException(
+          'El costo unitario no puede ser negativo',
+        );
       }
     }
 
@@ -351,9 +372,10 @@ export class InventarioService {
     costoAnterior: string | null;
     costoNuevo: string;
   }> {
-    // El signo lo valida `AjusteCostoDto` (`@IsDecimalPositivo`), y
-    // `registrarMovimiento` lo vuelve a exigir sobre el costo ya redondeado a 4
-    // decimales, que es el que entra al kardex.
+    // El signo lo valida `AjusteCostoDto` (`@IsDecimalPositivo`): acá el 0 no
+    // informaría un costo, anularía el promedio. Ese `> 0` es sobre lo TIPEADO;
+    // el costo ya convertido y cuantizado lo cuida `assertCostoNoColapsaACero`
+    // más abajo, porque `registrarMovimiento` solo valida el signo.
     const costoNuevo = new Decimal(dto.costoNuevo);
 
     return this.db.transaccion(async (manager) => {
@@ -413,6 +435,9 @@ export class InventarioService {
       // también: cargar 5050/kg en un producto que ya vale 5,0500/g no cambia
       // nada y tiene que rebotar igual que si lo hubieran tipeado en gramos.
       const costoNuevo4 = costoEnBase.toFixed(ESCALA_COSTO);
+      // `costoNuevo` es `> 0` por DTO, así que un '0.0000' acá solo puede venir
+      // de la conversión de unidad: es el 0 que nadie escribió.
+      assertCostoNoColapsaACero(costoNuevo.toString(), costoNuevo4, unidadBase);
       if (
         costoAnterior != null &&
         costoNuevo4 === new Decimal(costoAnterior).toFixed(ESCALA_COSTO)

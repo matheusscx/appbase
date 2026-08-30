@@ -265,8 +265,22 @@ costoBase = (cantidadIngresada × costoUnitario) / cantidadConvertidaABase
 `2000 g × 5.000/g` — 1000× el valor real. El error se propagaba a `item_producto.costo_actual` y
 persistía en márgenes, food-cost y valorización de mermas.
 
+**El costo que se pierde en la conversión se rechaza, no se persiste.** `convertirCostoUnitario`
+cuantiza a `ESCALA_COSTO` (4 decimales), así que un costo chico por una unidad grande puede
+aterrizar en `'0.0000'` (0,0001/kg son 0,0000001/g). Desde el **2026-08-29** el `0` es un costo
+legítimo —mercadería de donación— y el guard de signo de `registrarMovimiento` ya no lo frena,
+así que ese colapso se persistiría **en silencio**. Lo corta `assertCostoNoColapsaACero` (misma
+util), llamada desde los tres sitios de abajo: rechaza el `0` que nadie escribió, nunca el que
+alguien eligió. Sin la conversión de por medio no hay caso — el DTO no deja tipear más de 4
+decimales.
+
 **Dónde aplica:**
 - `ItemsService.ajustarStock` — siempre que venga `costoUnitario` y haya conversión de cantidad.
+- `ItemsService.update` — al cambiar `unidad_medida`, reconvierte el `costo_actual` vigente
+  (conversión de **tasa**, cantidad 0) por el choke point de ADR-016: `registrarMovimiento`
+  con motivo `ajuste_costo`.
+- `InventarioService.registrarAjusteCosto` — el costo tipeado por la unidad elegida
+  (conversión de **tasa**, ver `inventario-kardex.md`).
 - `MermasService.registrar` — **no aplica.** Desde
   [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md)
   el `POST /mermas` no acepta `costoUnitario`: el service valoriza siempre con `costo_actual`
