@@ -1061,4 +1061,111 @@ describe('Recetas — flujo completo (e2e)', () => {
     // conductas es de tres órdenes de magnitud, no de redondeo.
     expect(extra?.monto).toBe('1900.0000');
   });
+
+  // Gemelo del anterior por el otro camino que produce ticket: la cuenta de
+  // salón, que arma su detalle al LEER (`SalonesService.detalleCuenta`) en vez
+  // de al vender. La precuenta y la boleta de salones salen de acá.
+  it('la cuenta de salón devuelve el extra convertido a moneda oficial', async () => {
+    const sufijo = Date.now();
+    const panId = await crearIngrediente(
+      app,
+      token,
+      'Pan cuenta-moneda',
+      'unidad',
+      '100',
+      '1',
+    );
+    const quesoId = await crearIngrediente(
+      app,
+      token,
+      'Queso cuenta-moneda',
+      'unidad',
+      '100',
+      '1',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa cuenta-moneda ${sufijo}`,
+        precioBase: '10',
+        monedaId: USD_MONEDA_ID,
+        tipo: 'receta',
+        clasificacionTributaria: 'afecto',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: quesoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '2',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    // Bruno, no Ana ni Carla: ver el comentario largo de arriba. El cerrar
+    // previo deja la sesión idempotente ante corridas locales repetidas.
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    const resSesion = await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN, turnoId: TURNO_MANANA_ID });
+    expect(resSesion.status).toBe(201);
+
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_4_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: recetaId,
+        cantidad: '1',
+        personalizacion: {
+          omitidos: [],
+          extras: [{ ingredienteItemId: quesoId, unidades: 1 }],
+        },
+      });
+    expect(resLinea.status).toBe(201);
+
+    const cuenta = resLinea.body as {
+      lineas: {
+        personalizacionDetalle?: { tipo: string; monto: string }[];
+      }[];
+    };
+    const extra = cuenta.lineas[0]?.personalizacionDetalle?.find(
+      (d) => d.tipo === 'extra',
+    );
+    // 2 USD x 950 = 1.900. Sin convertir daría '2'.
+    expect(extra?.monto).toBe('1900.0000');
+
+    // La cuenta queda cancelada y la sesión cerrada: la sesión de un garzón es
+    // única y el test 12 usa el mismo Bruno y la misma mesa.
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+    const resCerrar = await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    expect(resCerrar.status).toBe(201);
+  });
 });

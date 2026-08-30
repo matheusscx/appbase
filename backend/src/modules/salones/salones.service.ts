@@ -31,6 +31,8 @@ import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
+import { MonedasService } from '../monedas/monedas.service';
+import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type { CuentaAsignacionDetalle } from './cuenta-asignaciones.service';
 import {
   assertPresentacionPareada,
@@ -198,6 +200,8 @@ export class SalonesService {
     private readonly cuentaAsignacionesService: CuentaAsignacionesService,
     private readonly itemsService: ItemsService,
     private readonly catalogService: CatalogService,
+    private readonly monedasService: MonedasService,
+    private readonly calculoPreciosService: CalculoPreciosService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -1497,12 +1501,59 @@ export class SalonesService {
       lineas,
       runner,
     );
+    // El detalle priceado de la personalización se devuelve convertido a moneda
+    // oficial: es el número que la precuenta y la boleta de salón imprimen al
+    // lado del P.UNIT, que también viaja convertido. Sin esto una receta en
+    // moneda extranjera imprimía dólares con símbolo y separadores de peso.
+    //
+    // La config se carga SOLO si alguna línea tiene extras: esto corre cada vez
+    // que se abre o refresca una mesa, y la enorme mayoría de las líneas no
+    // tiene ninguno. Son dos consultas por request cuando hace falta, nunca una
+    // por línea. Las dos resuelven el manager de la transacción activa por
+    // `TxContext` (ADR-020), así que no toman una segunda conexión del pool.
+    //
+    // ⚠️ La condición mira SOLO `extras`, y eso es exacto —no aproximado—
+    // porque `detallePersonalizacion` produce líneas únicamente desde
+    // `omitidos` (monto fijo en '0', que convertido sigue siendo cero) y desde
+    // `extras`. NO priced `grupos` ni `componentes`, aunque sus opciones
+    // tengan `precioExtra`. Si algún día se los agrega allá, este gate queda
+    // rezagado en silencio: se amplía acá en el mismo commit.
+    const hayExtras = lineas.some(
+      (l) => (l.personalizacion?.extras?.length ?? 0) > 0,
+    );
+    let convertir: (monto: string, monedaId: string) => string = (monto) =>
+      monto;
+    if (hayExtras) {
+      const monedas = await this.monedasService.findMonedas(tenantId);
+      const oficial = monedas.find((m) => m.esOficial);
+      if (!oficial) {
+        throw new BadRequestException(
+          'El tenant no tiene moneda oficial configurada',
+        );
+      }
+      const tasaMap = new Map(
+        monedas.map((m) => [m.monedaId, m.valorDelDia ?? '1']),
+      );
+      const config = await this.calculoPreciosService.cargarConfig(
+        tenantId,
+        oficial.decimales,
+      );
+      convertir = (monto, monedaId) =>
+        this.calculoPreciosService.convertirAMonedaOficial(
+          monto,
+          monedaId,
+          tasaMap,
+          config.modoRedondeo,
+        );
+    }
+
     return cuentas.map((cuenta) =>
       this.mapearDetalle(
         cuenta,
         porCuenta.get(cuenta.id) ?? [],
         nombresGarzon,
         nombres,
+        convertir,
       ),
     );
   }
@@ -1512,6 +1563,7 @@ export class SalonesService {
     lineas: LineaDetalleRow[],
     nombresGarzon: Record<string, string>,
     nombres: Map<string, string>,
+    convertir: (monto: string, monedaId: string) => string,
   ): CuentaDetalle {
     return {
       id: cuenta.id,
@@ -1537,10 +1589,16 @@ export class SalonesService {
           l.personalizacion,
           nombres,
         );
+        // Cada extra convertido POR SU CUENTA, sin reparto por mayores restos:
+        // el ticket no imprime `precioBase`, así que el desglose es
+        // transparencia sobre el P.UNIT, no un sumando que cierre contra el papel.
         const personalizacionDetalle = detallePersonalizacion(
           l.personalizacion,
           nombres,
-        );
+        ).map((linea) => ({
+          ...linea,
+          monto: convertir(linea.monto, l.moneda_id),
+        }));
         return {
           id: l.cuenta_linea_id,
           itemId: l.item_id,

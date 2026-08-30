@@ -17,6 +17,7 @@ import { ItemsModule } from '../items/items.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { TurnosModule } from '../turnos/turnos.module';
 import { MonedasModule } from '../monedas/monedas.module';
+import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
 
 @Module({
   imports: [
@@ -29,6 +30,9 @@ import { MonedasModule } from '../monedas/monedas.module';
     // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
     // ESTE módulo: sin este import el @Body del controller falla en runtime.
     MonedasModule,
+    // El detalle priceado de la personalización se devuelve convertido a
+    // moneda oficial: `convertirAMonedaOficial` + `cargarConfig` salen de acá.
+    CalculoPreciosModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService, CuentaAsignacionesService],
