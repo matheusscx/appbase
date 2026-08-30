@@ -2213,6 +2213,100 @@ describe('ItemsService', () => {
       ]);
     });
 
+    // El e2e prueba que el guard bloquea; lo que NO puede ver es la forma de la
+    // consulta. Estos dos fijan eso: un solo viaje para los N extras que se
+    // sacan (no uno por extra), acotado a esta receta y a cuentas abiertas.
+    it('extrasPermitidos: pregunta por los N extras que se sacan en UNA sola consulta', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([
+          {
+            item_id: 'ingrediente-queso',
+            tipo: 'ingrediente',
+            nombre: 'Queso',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+          },
+        ]) // lookup batch de extras
+        .mockResolvedValueOnce([
+          { ingrediente_item_id: 'ingrediente-queso' },
+          { ingrediente_item_id: 'ingrediente-tocino' },
+          { ingrediente_item_id: 'ingrediente-cebolla' },
+        ]) // extras vivos
+        .mockResolvedValueOnce([]) // guard: ninguna cuenta abierta los pidió
+        .mockResolvedValueOnce([]) // soft-delete
+        .mockResolvedValueOnce([]); // INSERT
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        extrasPermitidos: [
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '600',
+          },
+        ],
+      });
+
+      const guardCalls = managerMock.query.mock.calls.filter(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
+      );
+      expect(guardCalls).toHaveLength(1);
+      // Los dos que se sacan, juntos. El queso sigue entrando: no se pregunta
+      // por él, y ésa es la mitad que separa "este extra se saca" de "la lista
+      // cambió".
+      expect(guardCalls[0][1]).toEqual([
+        TENANT,
+        ITEM_ID,
+        ['ingrediente-tocino', 'ingrediente-cebolla'],
+      ]);
+      const sql = guardCalls[0][0] as string;
+      expect(sql).toMatch(/c\.estado = 'abierta'/);
+      expect(sql).toMatch(/cl\.item_id = \$2/);
+      expect(sql).toMatch(/cl\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/c\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/m\.eliminado_el IS NULL/);
+    });
+
+    it('extrasPermitidos: no pregunta nada si no se saca ninguno', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([
+          {
+            item_id: 'ingrediente-queso',
+            tipo: 'ingrediente',
+            nombre: 'Queso',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+          },
+        ])
+        .mockResolvedValueOnce([{ ingrediente_item_id: 'ingrediente-queso' }])
+        .mockResolvedValueOnce([]) // soft-delete
+        .mockResolvedValueOnce([]); // INSERT
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        extrasPermitidos: [
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '900',
+          },
+        ],
+      });
+
+      // Repreciar sin sacar a nadie no toca `cuenta_lineas`: sin este test, un
+      // guard que pregunta siempre pasa igual el e2e y cuesta una consulta por
+      // cada edición de receta del sistema.
+      expect(
+        managerMock.query.mock.calls.filter(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
+        ),
+      ).toHaveLength(0);
+    });
+
     it.each([
       { field: 'impuestosIds', value: ['imp-1'] },
       { field: 'recargosIds', value: ['rec-1'] },

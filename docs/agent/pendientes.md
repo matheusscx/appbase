@@ -123,25 +123,6 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **Si una opción del menú desaparece con la mesa sentada, la precuenta entera queda en
-  guiones y sin un mensaje** (frontend/backend; visto el 2026-08-30 al cerrar el override de
-  `precioUnitario`, no reproducido todavía contra el stack) — desde ese día
-  `cuentaToCalcularInput` manda la personalización de cada línea y el backend la **re-tasa
-  contra el catálogo vivo**, que es lo que hace que la pantalla y el cobro coincidan. El
-  reverso: si un extra salió de la carta o una opción de grupo se borró después de que la
-  mesa pidió, `POST /calculo-precios/calcular` responde 400 para **toda** la cuenta,
-  `useCalculoPrecios` se traga el error a propósito y `lineaSubtotal` dibuja `—` en todas las
-  líneas, sin decir por qué.
-  ⚠️ Esa línea igual no se podía cobrar antes de este cambio —`cerrarCuenta` re-tasa por el
-  mismo camino y devolvía el mismo 400—, así que lo que cambió no es si se puede cobrar sino
-  **cuándo se entera el garzón y con qué mensaje**: antes veía la cuenta y el error salía al
-  cobrar; ahora la cuenta se apaga entera y en silencio.
-  ❓ **Qué medir primero:** si el 400 es realmente alcanzable con el flujo de borrado que hay
-  (¿el soft-delete de un ítem usado en una cuenta abierta ya está bloqueado? Hay un e2e que
-  dice que sí para el ítem de la línea, pero no para un **extra** ni para una **opción de
-  grupo**). Si no es alcanzable, se cierra como "no pasa"; si lo es, la salida barata es que
-  el composable deje de tragarse el error y la pantalla muestre qué línea lo causó.
-
 - [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local: la firma
   reproduce entera y quedan tres explicaciones de por qué esa conexión no volvió** (backend/tests, visto y medido el 2026-08-18 en el cierre del
   contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
@@ -796,6 +777,43 @@ que el que la tome se va a encontrar**, y eso es lo que las hizo construibles. P
 modificadores decía que faltaba un input y lo que estaba roto era un número **mostrado** con
 la moneda equivocada, en una tercera pantalla que la entrada no nombraba. El mapa se hace
 abriendo las superficies, no leyendo la entrada.
+
+- [ ] **Lo que una cuenta abierta ya pidió se puede sacar del catálogo por tres caminos
+  todavía, y cada uno deja la mesa incobrable** (backend; medido el 2026-08-30, dos de
+  las cinco puertas ya cerradas) — el cobro y la precuenta **re-tasan la línea contra el
+  catálogo vivo**, así que sacarle una pieza a algo ya pedido hace que la línea no se
+  pueda tasar: `POST /calculo-precios/calcular` responde 400 para **toda** la cuenta,
+  `useCalculoPrecios` se traga el error a propósito y `lineaSubtotal` dibuja `—` en todas
+  las líneas, sin decir por qué. Al cerrar, el mismo 400.
+
+  ✅ **Cerradas** (commits `dce84899` y el que sigue): `DELETE /items/:id` del ingrediente
+  pedido como **extra** —rama nueva del `UNION` de `obtenerUsoItem`, con índice GIN—, y
+  `PATCH /items/:id` con `extrasPermitidos` —diff de la lista, bloquea solo los que se
+  sacan—. (El `DELETE` del ítem que **es** la línea ya estaba cerrado desde antes.)
+
+  🔲 **Abiertas, las tres del mismo molde:**
+
+  | Camino | Qué rompe al re-tasar |
+  |---|---|
+  | `PATCH /grupos-modificadores/:id` sacando una opción | *"La opción X no pertenece al grupo"* |
+  | `PATCH /items/:id` con `ingredientes`, sacando uno que una línea abierta **omitió** | *"Ingrediente omitido no pertenece a la receta"* |
+  | `PATCH /items/:id` con `gruposModificadores`, desasociando un grupo que una línea eligió | *"Grupo de modificadores no asociado a este item"* |
+
+  📌 La forma de cerrarlas ya está probada dos veces y es la misma: calcular el **diff**
+  (lo que se saca, no lo que cambia), preguntar en **una** consulta si algo de eso está en
+  la personalización de una cuenta abierta, y 400 nombrando la mesa. El molde está en
+  `ItemsService.cuentasAbiertasConExtra`. Lo único distinto por camino es el nivel del
+  JSONB: `omitidos` es un array plano de uuids, `grupos[].grupoId` un objeto anidado.
+
+  ⚠️ **Las dos últimas no estaban en el plan original** (`docs/superpowers/plans/2026-08-30-lo-pedido-no-se-saca-del-catalogo.md`),
+  que hablaba de tres puertas: salieron de la revisión independiente del 2026-08-30 y se
+  verificaron leyendo `resolverPersonalizacionReceta`. Nombrarlas acá es lo que evita dar
+  el frente por cerrado cuando le falta más de la mitad.
+
+  ❓ **Lo que sigue sin decidir:** aunque se cierren las cinco, el 400 no queda
+  *imposible* —solo deja de ser alcanzable por acción de catálogo—. Si el composable debe
+  dejar de tragarse el error y decir qué línea lo causó es una decisión aparte, y más
+  barata que las tres de arriba.
 
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de

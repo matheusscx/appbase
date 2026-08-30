@@ -126,6 +126,8 @@ Response (201): { "id": "<uuid>", "extrasPermitidos": [ ... ], ... }
 
 Con `extrasPermitidos` (reemplazo total): soft-delete de filas vivas + INSERT de la nueva lista (mismo patrón que `ingredientes`). Respuesta mergeable incluye `extrasPermitidos`.
 
+**Un extra que una cuenta abierta ya pidió no se puede sacar** → `400` nombrando el extra y la mesa. Se compara el **diff** contra las filas vivas, así que solo bloquea los extras que *desaparecen*: reordenar, repreciar o agregar siguen pasando. El porqué —y por qué repreciar sí cambia lo que esa mesa paga— está en [recetas.md](./recetas.md#patch-itemsid).
+
 ### GET /items/:id (receta)
 
 Incluye `ingredientes[]` y `extrasPermitidos[]` con `stock` por fila para el drawer. `ingredientes` y `extrasPermitidos` en POST/PATCH/GET sin `findOne` post-write.

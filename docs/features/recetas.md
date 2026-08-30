@@ -90,6 +90,26 @@ Costo = Σ (costo_actual del ingrediente × cantidad convertida a su unidad base
 
 Con `ingredientes` (reemplazo total): soft-delete de filas vivas + insert de la nueva lista + update de `item_receta.costo_actual`. Lista vacía → `400`.
 
+Con `extrasPermitidos` (también reemplazo total), rige la misma regla que el borrado:
+**un extra que una cuenta abierta ya pidió no se saca de la receta** → `400` nombrando
+el extra y la mesa. Lo que se compara es el **diff**, no la lista: se pregunta solo por
+los extras que *desaparecen*, así que **reordenar, cambiarle el precio a un extra ya
+pedido o agregar uno nuevo siguen pasando** — un guard por "la lista cambió" dejaría la
+carta congelada mientras haya una mesa sentada. La pregunta va acotada a *esta* receta:
+que el mismo ingrediente esté pedido como extra de otra no bloquea nada acá.
+
+⚠️ **Repreciar sí cambia lo que esa mesa paga.** El cierre manda solo
+`{ingredienteItemId, unidades}` y el servidor re-tasa con el `precio_extra` del catálogo
+vivo, así que la línea abierta se cobra al precio nuevo. Es la doctrina general —el
+precio de una línea lo calcula el servidor contra el catálogo vivo— y no algo que este
+guard introduzca; lo que el guard evita es que la línea deje de poder tasarse.
+
+⚠️ **`ingredientes` y `gruposModificadores` del mismo endpoint NO tienen esta regla
+todavía** (medido el 2026-08-30): sacar un ingrediente que una línea abierta *omitió*
+hace fallar la re-tasación con *"Ingrediente omitido no pertenece a la receta"*, y
+desasociar un grupo que una línea abierta eligió, con *"Grupo de modificadores no
+asociado a este item"*. Las dos dejan la mesa incobrable igual.
+
 ### GET /items?tipo=receta
 
 Cada item incluye `disponible: number | null` — mínimo de `floor(stock / cantidadBase)` entre ingredientes **bloqueantes**; `null` si no hay bloqueantes. Productos/servicios/suscripciones llevan `disponible: null`.

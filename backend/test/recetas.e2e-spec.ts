@@ -1120,6 +1120,202 @@ describe('Recetas — flujo completo (e2e)', () => {
       .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
   });
 
+  /**
+   * La segunda puerta del mismo agujero: no hace falta borrar el queso para
+   * dejar la mesa incobrable — alcanza con **editar la receta** y sacarlo de sus
+   * extras permitidos. `PATCH /items/:id` reescribe la lista entera
+   * (soft-delete + reinsert) y hasta el 2026-08-30 no miraba cuentas.
+   *
+   * Lo que este test cuida tanto como el bloqueo es lo que **tiene que seguir
+   * pasando**: reordenar la lista, cambiarle el precio a un extra pedido, o
+   * agregar uno nuevo no rompe ninguna mesa. Un guard que bloquee por "la lista
+   * cambió" en vez de por "este extra se saca" rompe la edición de catálogo
+   * completa, y los tres casos legítimos van antes del bloqueo a propósito.
+   */
+  it('16. sacar de la receta un extra que una mesa ya pidió se rechaza; reordenar, repreciar y agregar no', async () => {
+    const panId = await crearIngrediente(
+      app,
+      token,
+      'Pan patch-extras E2E',
+      'unidad',
+      '100',
+      '500',
+    );
+    const quesoId = await crearIngrediente(
+      app,
+      token,
+      'Queso patch-extras E2E',
+      'unidad',
+      '100',
+      '700',
+    );
+    const tocinoId = await crearIngrediente(
+      app,
+      token,
+      'Tocino patch-extras E2E',
+      'unidad',
+      '100',
+      '900',
+    );
+    const cebollaId = await crearIngrediente(
+      app,
+      token,
+      'Cebolla patch-extras E2E',
+      'unidad',
+      '100',
+      '300',
+    );
+
+    const extra = (id: string, precio: string) => ({
+      ingredienteItemId: id,
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      precioExtra: precio,
+    });
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa patch-extras E2E ${Date.now()}`,
+        precioBase: '5000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [extra(quesoId, '700'), extra(tocinoId, '900')],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN, turnoId: TURNO_MANANA_ID });
+
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_4_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: recetaId,
+        cantidad: '1',
+        personalizacion: {
+          omitidos: [],
+          extras: [{ ingredienteItemId: quesoId, unidades: 1 }],
+        },
+      });
+    expect(resLinea.status).toBe(201);
+
+    const patchExtras = (extras: unknown[]) =>
+      request(app.getHttpServer())
+        .patch(`/api/items/${recetaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ extrasPermitidos: extras });
+
+    // 1. Reordenar: el queso sigue estando. Tiene que pasar.
+    const resReordenar = await patchExtras([
+      extra(tocinoId, '900'),
+      extra(quesoId, '700'),
+    ]);
+    expect(resReordenar.status).toBe(200);
+
+    // 2. Repreciar el extra que la mesa pidió: sigue estando. Tiene que pasar.
+    //    ⚠️ Que pase no quiere decir que la mesa no se entere: al cerrar, el
+    //    servidor re-tasa con el precio nuevo del catálogo vivo. Lo que este
+    //    guard cuida es que la línea SE PUEDA tasar, no que el precio no cambie.
+    const resRepreciar = await patchExtras([
+      extra(tocinoId, '900'),
+      extra(quesoId, '1200'),
+    ]);
+    expect(resRepreciar.status).toBe(200);
+
+    // 3. Agregar uno nuevo: nadie pierde nada. Tiene que pasar.
+    const resAgregar = await patchExtras([
+      extra(tocinoId, '900'),
+      extra(quesoId, '1200'),
+      extra(cebollaId, '300'),
+    ]);
+    expect(resAgregar.status).toBe(200);
+
+    // 3b. Otra receta que también ofrece el queso como extra, y que NADIE pidió:
+    //     sacarle el queso tiene que pasar. Es el control del `cl.item_id`: sin
+    //     esa condición, una mesa que pidió queso en la Hamburguesa volvería
+    //     inmodificables los extras de todas las demás recetas del tenant.
+    const resOtra = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Sandwich patch-extras E2E ${Date.now()}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [extra(quesoId, '700'), extra(tocinoId, '900')],
+      });
+    expect(resOtra.status).toBe(201);
+    const otraRecetaId = (resOtra.body as ItemResponse).id;
+
+    const resSacarDeOtra = await request(app.getHttpServer())
+      .patch(`/api/items/${otraRecetaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ extrasPermitidos: [extra(tocinoId, '900')] });
+    expect(resSacarDeOtra.status).toBe(200);
+
+    // 4. Sacar el queso, que la Mesa 4 ya pidió: se rechaza.
+    const resSacar = await patchExtras([
+      extra(tocinoId, '900'),
+      extra(cebollaId, '300'),
+    ]);
+    expect(resSacar.status).toBe(400);
+    expect((resSacar.body as { message: string }).message).toContain('Mesa');
+
+    // 5. Sacar el tocino, que NADIE pidió: pasa. Es la mitad que separa
+    //    "este extra se saca y hay una mesa esperándolo" de "la lista cambió".
+    const resSacarOtro = await patchExtras([
+      extra(quesoId, '1200'),
+      extra(cebollaId, '300'),
+    ]);
+    expect(resSacarOtro.status).toBe(200);
+
+    // 6. Cancelada la cuenta, el queso se puede sacar.
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+
+    const resSacarTrasCancelar = await patchExtras([extra(cebollaId, '300')]);
+    expect(resSacarTrasCancelar.status).toBe(200);
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+  });
+
   // ── El detalle de personalización viaja convertido a moneda oficial ───────
   //
   // USD tiene `valor_del_dia = '950'` para Paris (`seedTenantMonedas`): entre un

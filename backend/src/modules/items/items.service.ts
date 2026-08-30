@@ -1747,6 +1747,54 @@ export class ItemsService {
             tenantId,
             dto.extrasPermitidos,
           );
+
+          // Este `UPDATE` borra la lista ENTERA y después reinserta la nueva,
+          // así que el diff hay que calcularlo antes: los extras que **se
+          // sacan** son los vivos que el dto ya no trae. Sacar uno que una mesa
+          // abierta ya pidió deja esa cuenta incobrable —al re-tasar la línea,
+          // `resolverPersonalizacionReceta` la rechaza con "Extra no permitido
+          // para esta receta"—, que es el mismo agujero que la rama nueva de
+          // `obtenerUsoItem` cierra del lado del borrado.
+          //
+          // Solo los que se sacan, a propósito: reordenar la lista, cambiarle el
+          // precio a un extra ya pedido o agregar uno nuevo no rompe ninguna
+          // mesa, y un guard por "la lista cambió" mataría la edición de
+          // catálogo entera —dejaría la carta congelada mientras haya UNA mesa
+          // sentada—.
+          //
+          // ⚠️ Que repreciar no rompa la mesa NO quiere decir que no la afecte:
+          // `cerrarCuenta` manda solo `{ingredienteItemId, unidades}` y el
+          // servidor re-tasa con el `precio_extra` del **catálogo vivo**
+          // (`resolverPersonalizacionReceta`), así que la mesa abierta paga el
+          // precio nuevo. Es la doctrina de siempre —el precio de una línea lo
+          // calcula el servidor contra el catálogo vivo—, no un efecto de este
+          // guard, y no es lo que este frente arregla: lo que se arregla acá es
+          // que la línea deje de poder tasarse **en absoluto**.
+          const vivos: { ingrediente_item_id: string }[] = await manager.query(
+            `SELECT ingrediente_item_id FROM receta_extras_permitidos
+             WHERE receta_item_id = $1 AND tenant_id = $2
+               AND eliminado_el IS NULL`,
+            [itemId, tenantId],
+          );
+          const entrantes = new Set(
+            dto.extrasPermitidos.map((e) => e.ingredienteItemId),
+          );
+          const pedidos = await this.cuentasAbiertasConExtra(
+            manager,
+            tenantId,
+            itemId,
+            vivos
+              .map((v) => v.ingrediente_item_id)
+              .filter((id) => !entrantes.has(id)),
+          );
+          if (pedidos.length) {
+            throw new BadRequestException(
+              `No se puede sacar de la receta un extra ya pedido: ${pedidos
+                .map((p) => `"${p.ingrediente}" está pedido en ${p.cuenta}`)
+                .join('; ')}`,
+            );
+          }
+
           await manager.query(
             `UPDATE receta_extras_permitidos
              SET eliminado_el = NOW(), actualizado_el = NOW()
@@ -1933,9 +1981,10 @@ export class ItemsService {
    * `o.eliminado_el IS NULL`). Y sacarla del grupo es justamente lo que
    * `PATCH /grupos-modificadores/:id` hace hoy sin consultar cuentas: primero
    * se desarma la cobertura, después el `DELETE` pasa, y la mesa queda
-   * incobrable igual. Ese camino **todavía no está cerrado**, como tampoco lo
-   * está `PATCH /items/:id` con `extrasPermitidos`, que reescribe la lista
-   * entera sin mirar mesas.
+   * incobrable igual. **Ese camino todavía no está cerrado.**
+   *
+   * El de `PATCH /items/:id` con `extrasPermitidos` sí lo está, y no acá sino en
+   * `update()`, con `cuentasAbiertasConExtra`: mismo agujero, distinta puerta.
    *
    * El filtro por tenant va sobre la entidad padre de cada rama (`items`, o
    * `grupos_modificadores` en la de opciones), no sobre la tabla puente. A
@@ -2013,6 +2062,65 @@ export class ItemsService {
       else uso.bloqueos.push(ref);
     }
     return uso;
+  }
+
+  /**
+   * ¿Qué cuentas **abiertas** pidieron alguno de estos ingredientes como
+   * **extra de esta receta**? Es la misma pregunta que la sexta rama del `UNION`
+   * de `obtenerUsoItem`, con dos diferencias que la hacen otra consulta:
+   *
+   * - **Varios ids de una.** El `PATCH` de la receta puede sacar N extras en un
+   *   request, y eso es **una** consulta —`CROSS JOIN LATERAL unnest($3)`— y no N.
+   * - **Acotada a la receta.** El borrado pregunta por el ingrediente en
+   *   cualquier línea; acá el ingrediente puede estar pedido como extra de
+   *   *otra* receta y esa mesa no se rompe por editar ésta. Sin el
+   *   `cl.item_id = $2` el guard bloquearía ediciones legítimas.
+   *
+   * Proyecta también el nombre del ingrediente —de ahí el `JOIN items`— porque
+   * si el request saca tres extras y uno solo está pedido, "no se puede" sin
+   * decir cuál no le sirve a nadie.
+   *
+   * A diferencia de la rama de `obtenerUsoItem`, ésta **no depende del GIN**: el
+   * `cl.item_id = $2` la ancla en `idx_cuenta_lineas_item` y el containment cae
+   * como filtro sobre las pocas líneas de esa receta. Medido con `EXPLAIN`
+   * contra el compose: el plan arranca por `idx_cuenta_lineas_item`, el GIN no
+   * aparece.
+   *
+   * ⚠️ Lee sin lock y después el `UPDATE` borra: bajo READ COMMITTED, una línea
+   * que se agregue a una cuenta en el medio se pierde esta verificación y queda
+   * huérfana igual. La ventana es chica y la puerta del `DELETE` tiene la misma
+   * forma, así que es consistente con lo que ya había — no una regresión, pero
+   * tampoco una garantía.
+   */
+  private async cuentasAbiertasConExtra(
+    manager: EntityManager | Db,
+    tenantId: string,
+    recetaItemId: string,
+    ingredienteItemIds: string[],
+  ): Promise<{ ingrediente: string; cuenta: string }[]> {
+    if (!ingredienteItemIds.length) return [];
+    return manager.query(
+      `SELECT DISTINCT i.nombre AS ingrediente,
+              m.nombre || ' · ' || COALESCE(c.nombre, 'cuenta ' || c.numero)
+                AS cuenta
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $1 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+         JOIN mesas m ON m.mesa_id = c.mesa_id
+          AND m.tenant_id = $1 AND m.eliminado_el IS NULL
+         CROSS JOIN LATERAL unnest($3::uuid[]) AS x(id)
+         JOIN items i ON i.item_id = x.id
+          AND i.tenant_id = $1 AND i.eliminado_el IS NULL
+        WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL
+          AND cl.item_id = $2
+          AND cl.personalizacion @> jsonb_build_object(
+                'extras',
+                jsonb_build_array(
+                  jsonb_build_object('ingredienteItemId', x.id)))
+        ORDER BY 1, 2`,
+      [tenantId, recetaItemId, ingredienteItemIds],
+    );
   }
 
   async obtenerUso(tenantId: string, itemId: string): Promise<UsoItem> {

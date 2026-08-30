@@ -265,17 +265,43 @@ previsualización como en `cerrarCuenta`**: la mesa queda incobrable.
 **Interfaces:**
 - Consume: el primitivo de la Task 1, acotado a **esta receta**.
 
-- [ ] **Paso 1 — Test e2e que falla.** Cuenta abierta con hamburguesa + queso →
+- [x] **Paso 1 — Test e2e que falla** (`recetas.e2e-spec.ts`, test 16). Cuenta abierta con hamburguesa + queso →
       `PATCH /items/:hamburguesaId` con `extrasPermitidos` **sin** el queso responde 400 y
       nombra la mesa. Hoy responde 200 y deja la mesa incobrable.
-- [ ] **Paso 2 — Correrlo y verlo fallar.**
-- [ ] **Paso 3 — Implementar.** Antes del `UPDATE … SET eliminado_el` que borra la lista:
+- [x] **Paso 2 — Corrido y visto fallar** (200 donde el test pide 400), con los tres casos
+      legítimos ya en verde antes del fix.
+- [x] **Paso 3 — Implementado.** Antes del `UPDATE … SET eliminado_el` que borra la lista:
       calcular qué extras **se sacan** (los vivos que no están en el dto) y preguntar por
       esos ids acotando a esta receta. Si hay cuentas, 400 con el nombre de la mesa.
       ⚠️ **Solo los que se sacan.** Reordenar la lista, cambiarle el precio a un extra o
       agregar uno nuevo no rompe ninguna cuenta y tiene que seguir pasando. Un test por
       cada uno de esos tres casos, o el guard va a bloquear ediciones legítimas.
-- [ ] **Paso 4 — Gate + revisión + commit.**
+- [x] **Paso 4 — Gate + revisión + commit.** Gate entero en verde (lint 0, typecheck 0,
+      2393 unitarios, 667 e2e, `--verificar` limpio). **Cuatro mutantes, cuatro muertos:**
+      sacar `cl.item_id` muere en la receta de control (`:1285`), preguntar por todos los
+      extras en vez de por los que se sacan muere en el reordenar (`:1237`) **y** en los dos
+      unitarios nuevos, y `estado = 'abierta' OR TRUE` muere después de cancelar (`:1310`).
+
+### Lo que la revisión independiente destapó, y es lo más importante de esta tarea
+
+**El frente tiene CINCO puertas, no tres.** El plan (y la entrada de backlog de la que
+salió) nombraba tres. Verificado leyendo `resolverPersonalizacionReceta`, faltaban dos, las
+dos en el **mismo endpoint** que esta tarea endurece:
+
+| Camino | Qué rompe al re-tasar |
+|---|---|
+| `PATCH /items/:id` con `ingredientes`, sacando uno que una línea abierta **omitió** | *"Ingrediente omitido no pertenece a la receta"* |
+| `PATCH /items/:id` con `gruposModificadores`, desasociando un grupo ya elegido | *"Grupo de modificadores no asociado a este item"* |
+
+Quedan **fuera del alcance de este plan** —el owner aprobó tres puertas, no cinco— y están
+anotadas en `pendientes.md` § 3 con el molde ya probado. Es decisión del owner si se toman.
+
+📌 **Y una afirmación mía que salió falsa:** escribí, en tres archivos, que repreciar un
+extra no afecta a la mesa abierta "porque el precio viaja congelado en el snapshot".
+**Falso**: `cerrarCuenta` manda solo `{ingredienteItemId, unidades}` y el servidor re-tasa
+con el `precio_extra` del catálogo vivo. Repreciar **sí** cambia lo que esa mesa paga. Que
+el caso deba pasar sigue siendo cierto —lo contrario congela la carta mientras haya una
+mesa sentada—, pero por otro motivo.
 
 ---
 
