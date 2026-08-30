@@ -1897,17 +1897,45 @@ export class ItemsService {
   }
 
   /**
-   * Los cinco lugares donde un item puede estar en uso, en una sola query.
+   * Los seis lugares donde un item puede estar en uso, en una sola query.
    * `UNION` y no `UNION ALL`: el dedupe es el mismo `DISTINCT` que hacía cada
-   * query por separado. El `ORDER BY` es por determinismo — sin él el orden lo
-   * decide el plan y el modal lista los motivos distinto entre llamadas.
+   * query por separado —y es también lo que evita que una cuenta que pidió el
+   * ítem como línea *y* como extra salga nombrada dos veces en el mensaje—. El
+   * `ORDER BY` es por determinismo: sin él el orden lo decide el plan y el modal
+   * lista los motivos distinto entre llamadas.
    *
-   * Cuatro son de **catálogo** y la quinta (`cuenta_lineas`) es **operativa**:
-   * el ítem está pedido en una cuenta de salón abierta. Esa se acota además por
-   * `estado = 'abierta'` y por el borrado de la línea, la cuenta y la mesa —sin
-   * el filtro de estado, una cuenta ya cerrada volvería el ítem inborrable para
-   * siempre—, y va primero en el mensaje de `remove()` porque es la única con
-   * alguien esperando en la mesa.
+   * Cuatro son de **catálogo**. Las otras dos son la misma pregunta operativa
+   * —*¿hay una mesa esperando por esto?*— sobre `cuenta_lineas`, y las dos
+   * devuelven `'cuenta'` a propósito, porque el mensaje de `remove()` es el
+   * mismo y hay e2e que lo afirman:
+   *
+   *   1. `cl.item_id`: el ítem **es** la línea (la hamburguesa pedida).
+   *   2. `cl.personalizacion @> {"extras":[…]}`: el ítem está **adentro** de la
+   *      línea (el queso que esa hamburguesa lleva como extra). Sin esta rama,
+   *      borrar el queso devolvía 200 y soft-borraba su fila de
+   *      `receta_extras_permitidos`; a partir de ahí `resolverPersonalizacionReceta`
+   *      rechaza esa línea con "Extra no permitido para esta receta" al re-tasar,
+   *      y la mesa queda **incobrable** —en la precuenta y al cerrar—. Es
+   *      containment y no `jsonb_array_elements` por dos razones medidas contra
+   *      Postgres real: con la clave ausente devuelve `false` en vez de tirar, y
+   *      exige que las coincidencias caigan en el **mismo** objeto —una opción
+   *      elegida dentro del grupo G1 no matchea la pregunta "esa opción dentro
+   *      de G2"—, que es lo que hace falta cuando el alcance es un grupo.
+   *
+   * Ambas se acotan por `estado = 'abierta'` y por el borrado de la línea, la
+   * cuenta y la mesa —sin el filtro de estado, una cuenta ya cerrada volvería el
+   * ítem inborrable para siempre—, y `'cuenta'` va primero en el mensaje de
+   * `remove()` porque es la única clase con alguien esperando en la mesa.
+   *
+   * ⚠️ La tercera puerta —el ítem elegido como **opción de un grupo**— no tiene
+   * rama acá porque la rama `'opcion'` ya bloquea ese borrado haya mesas o no…
+   * **pero solo mientras la opción siga viva en el grupo** (esa rama filtra
+   * `o.eliminado_el IS NULL`). Y sacarla del grupo es justamente lo que
+   * `PATCH /grupos-modificadores/:id` hace hoy sin consultar cuentas: primero
+   * se desarma la cobertura, después el `DELETE` pasa, y la mesa queda
+   * incobrable igual. Ese camino **todavía no está cerrado**, como tampoco lo
+   * está `PATCH /items/:id` con `extrasPermitidos`, que reescribe la lista
+   * entera sin mirar mesas.
    *
    * El filtro por tenant va sobre la entidad padre de cada rama (`items`, o
    * `grupos_modificadores` en la de opciones), no sobre la tabla puente. A
@@ -1915,9 +1943,9 @@ export class ItemsService {
    * defensa posible porque sus tablas puente (`item_impuestos`, `item_descuentos`,
    * `item_recargos`) no tienen `tenant_id` propio—, acá las cinco tablas puente
    * (`receta_ingredientes`, `combo_componentes`, `grupo_modificador_opciones`,
-   * `receta_extras_permitidos`, `cuenta_lineas`) sí lo tienen. En la de cuentas
-   * se filtra por la puente **y** por los padres, que es lo que hace falta para
-   * no contar cuentas o mesas en la papelera.
+   * `receta_extras_permitidos`, `cuenta_lineas`) sí lo tienen. En las dos de
+   * cuentas se filtra por la puente **y** por los padres, que es lo que hace
+   * falta para no contar cuentas o mesas en la papelera.
    */
   private async obtenerUsoItem(
     manager: EntityManager | Db,
@@ -1954,6 +1982,20 @@ export class ItemsService {
           AND m.tenant_id = $2 AND m.eliminado_el IS NULL
         WHERE cl.item_id = $1 AND cl.tenant_id = $2
           AND cl.eliminado_el IS NULL
+       UNION
+       SELECT 'cuenta',
+              m.nombre || ' · ' || COALESCE(c.nombre, 'cuenta ' || c.numero)
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $2 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+         JOIN mesas m ON m.mesa_id = c.mesa_id
+          AND m.tenant_id = $2 AND m.eliminado_el IS NULL
+        WHERE cl.tenant_id = $2 AND cl.eliminado_el IS NULL
+          AND cl.personalizacion @> jsonb_build_object(
+                'extras',
+                jsonb_build_array(
+                  jsonb_build_object('ingredienteItemId', $1::uuid)))
        UNION
        SELECT 'extra', r.nombre
          FROM receta_extras_permitidos re

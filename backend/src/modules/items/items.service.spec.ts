@@ -6697,16 +6697,24 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
-      const rama = (managerMock.query.mock.calls[0][0] as string)
+      // Las DOS ramas que leen `cuenta_lineas`, no la primera que aparezca: el
+      // ítem puede estar pedido como línea (`cl.item_id`) o adentro de la
+      // personalización de una línea (el extra), y las dos tienen que llevar
+      // los mismos cuatro filtros. Un `find` miraba solo la primera y dejaba la
+      // otra sin cubrir.
+      const ramas = (managerMock.query.mock.calls[0][0] as string)
         .split(/\bUNION\b/)
-        .find((r) => r.includes('cuenta_lineas'));
+        .filter((r) => r.includes('cuenta_lineas'));
+      expect(ramas).toHaveLength(2);
       // Sin `estado = 'abierta'` una cuenta cerrada hace inborrable al ítem
       // para siempre; sin los filtros de borrado, una cuenta o una mesa en la
       // papelera hacen lo mismo.
-      expect(rama).toMatch(/c\.estado = 'abierta'/);
-      expect(rama).toMatch(/c\.eliminado_el IS NULL/);
-      expect(rama).toMatch(/cl\.eliminado_el IS NULL/);
-      expect(rama).toMatch(/m\.eliminado_el IS NULL/);
+      for (const rama of ramas) {
+        expect(rama).toMatch(/c\.estado = 'abierta'/);
+        expect(rama).toMatch(/c\.eliminado_el IS NULL/);
+        expect(rama).toMatch(/cl\.eliminado_el IS NULL/);
+        expect(rama).toMatch(/m\.eliminado_el IS NULL/);
+      }
     });
 
     it('acota la consulta de uso por tenant', async () => {
@@ -6723,10 +6731,10 @@ describe('ItemsService', () => {
       // Afirmar sobre los params no alcanza: si alguien saca la condición de
       // tenant de UNA sola rama del UNION, los params ($1, $2) no cambian y una
       // aserción solo de parámetros seguiría en verde. Partir el SQL por `UNION`
-      // y exigir la condición de tenant en cada una de las cinco ramas.
+      // y exigir la condición de tenant en cada una de las seis ramas.
       const sql = managerMock.query.mock.calls[0][0] as string;
       const ramas = sql.split(/\bUNION\b/);
-      expect(ramas).toHaveLength(5);
+      expect(ramas).toHaveLength(6);
       for (const rama of ramas) {
         expect(rama).toMatch(/tenant_id = \$2/);
       }

@@ -100,7 +100,7 @@ Si es receta, agrega `ingredientes: { ingredienteItemId, ingredienteNombre, cant
 
 ### GET /items/:id/uso
 
-Antes de confirmar un borrado, clasifica en una sola query (`UNION` sobre los cinco
+Antes de confirmar un borrado, clasifica en una sola query (`UNION` sobre los seis
 usos posibles) dónde se usa el item: `{ bloqueos: [{tipo, nombre}], advertencias:
 [{tipo, nombre}] }`, con `tipo` = `'cuenta' | 'ingrediente' | 'combo' | 'opcion'` en
 `bloqueos` y `'extra'` en `advertencias`. Guard `Items:Eliminar` (mismo permiso que el
@@ -108,9 +108,20 @@ borrado).
 
 `'cuenta'` es el uso **operativo** —el ítem está pedido en una cuenta de salón abierta—
 y va **primero** en el mensaje: los otros tres son de catálogo y el admin los resuelve
-cuando quiera, pero una cuenta abierta tiene a alguien esperando en la mesa. Su rama
-acota por `estado = 'abierta'` y por los tres filtros de borrado (línea, cuenta y mesa):
-sin el filtro de estado, una cuenta ya cerrada volvería inborrable al ítem para siempre.
+cuando quiera, pero una cuenta abierta tiene a alguien esperando en la mesa.
+
+Ese uso operativo se busca por **dos** caminos, y los dos devuelven `'cuenta'` porque el
+mensaje es el mismo:
+
+1. **El ítem es la línea** (`cuenta_lineas.item_id`): la hamburguesa que la mesa pidió.
+2. **El ítem está adentro de la línea** (`cuenta_lineas.personalizacion`): el queso que
+   esa hamburguesa lleva como extra. Se resuelve con containment `jsonb` (`@>`), que
+   con la clave ausente devuelve `false` —y no un error—, así que una línea sin
+   extras no necesita guarda aparte.
+
+Las dos ramas acotan por `estado = 'abierta'` y por los tres filtros de borrado (línea,
+cuenta y mesa): sin el filtro de estado, una cuenta ya cerrada volvería inborrable al
+ítem para siempre.
 
 ### DELETE /items/:id
 
@@ -121,7 +132,17 @@ y los nombres de esos usos: sin ese item la receta, el combo o el grupo quedan
 incompletos. Ser **extra permitido** (`receta_extras_permitidos`) no bloquea, porque un
 extra es opcional por definición y su ausencia no rompe ninguna receta — pero sí
 **advierte**, porque el efecto (dejar de ofrecerse como extra en esas recetas) no es
-obvio desde la ficha del ingrediente. Al confirmar el borrado, se marcan `eliminado_el`
+obvio desde la ficha del ingrediente.
+
+⚠️ **Con una mesa que ya lo pidió, sí bloquea** (desde el 2026-08-30). Un extra es
+opcional *antes* de pedirlo; una vez que está en la personalización de una línea de una
+cuenta **abierta**, sacarlo del catálogo deja esa mesa **incobrable**: al re-tasar la
+línea —en la precuenta y al cerrar— `resolverPersonalizacionReceta` la rechaza con
+`400 "Extra no permitido para esta receta"`, y nadie se entera hasta que el garzón
+intenta cobrar. El bloqueo sale como `'cuenta'`, con el mismo mensaje *"está pedido en
+Mesa 4 · cuenta 1"* del ítem que es la línea. Cancelada o cerrada la cuenta, el
+ingrediente vuelve a ser borrable: es un bloqueo por la **mesa viva**, no un
+endurecimiento del catálogo. Al confirmar el borrado, se marcan `eliminado_el`
 —en la misma transacción que el soft-delete del item— las filas de
 `receta_extras_permitidos` en las **dos direcciones**: donde el item borrado es el
 **ingrediente extra** (`ingrediente_item_id`) y donde es la **receta** que ofrece ese

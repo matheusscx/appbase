@@ -487,6 +487,21 @@ customer (`min`/`max`).
 - **Bloqueo de borrado en ambos sentidos.** Un item que es opción viva de un
   grupo no puede eliminarse; un grupo asociado a items vivos no puede
   eliminarse.
+- **Lo que una mesa ya pidió no se saca del catálogo** (2026-08-30). La regla
+  anterior mira el catálogo; ésta mira la **operación**: si una cuenta de salón
+  **abierta** ya pidió un item —sea como la línea misma o **adentro** de su
+  personalización—, ese item no se elimina. El motivo no es integridad
+  referencial sino que el cobro re-tasa la línea contra el catálogo vivo:
+  sacarle una pieza deja la mesa **incobrable**, con un error que nadie ve hasta
+  que el garzón intenta cerrar la cuenta. Cerrada o cancelada la cuenta, el item
+  vuelve a ser borrable — es un bloqueo por mesa viva, no un endurecimiento del
+  catálogo.
+
+  **Alcance hoy:** la regla está puesta en el borrado (`DELETE /items/:id`),
+  para el item de la línea y para el ingrediente pedido como **extra**. Las
+  otras dos formas de sacar del catálogo algo ya pedido —reescribir los extras
+  permitidos de una receta, y sacar una opción de un grupo de modificadores—
+  **todavía no la aplican**: ver `docs/agent/pendientes.md`.
 
 **Fuera de alcance (diferido, no un olvido):** la **impresión térmica** de la
 opción elegida de un grupo en comanda/precuenta/boleta queda para un ticket

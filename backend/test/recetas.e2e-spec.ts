@@ -964,6 +964,162 @@ describe('Recetas — flujo completo (e2e)', () => {
       .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
   });
 
+  /**
+   * El test 12 cubre el ítem que ES la línea. Éste cubre el que está **adentro**
+   * de su personalización, que hasta el 2026-08-30 no miraba nadie: borrar el
+   * queso que una mesa ya pidió como extra devolvía 200, soft-borraba su fila de
+   * `receta_extras_permitidos`, y a partir de ahí `resolverPersonalizacionReceta`
+   * tiraba `400 "Extra no permitido para esta receta"` al re-tasar esa línea —
+   * en la precuenta Y al cobrar. La mesa quedaba **incobrable** y nadie se
+   * enteraba hasta que el garzón intentaba cerrarla.
+   *
+   * El control (`quesoSueltoId`) es la mitad que importa: es extra permitido de
+   * la MISMA receta pero la línea no lo eligió. Sin él, un mutante que borre la
+   * containment y bloquee por "la línea tiene alguna personalización" pasaría.
+   */
+  it('15. un ingrediente pedido como EXTRA en una cuenta abierta tampoco se puede borrar', async () => {
+    const panId = await crearIngrediente(
+      app,
+      token,
+      'Pan extra-en-cuenta E2E',
+      'unidad',
+      '100',
+      '500',
+    );
+    const quesoId = await crearIngrediente(
+      app,
+      token,
+      'Queso extra-en-cuenta E2E',
+      'unidad',
+      '100',
+      '700',
+    );
+    const quesoSueltoId = await crearIngrediente(
+      app,
+      token,
+      'Queso no elegido E2E',
+      'unidad',
+      '100',
+      '700',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa extra-en-cuenta E2E ${Date.now()}`,
+        precioBase: '5000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: quesoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '700',
+          },
+          {
+            ingredienteItemId: quesoSueltoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '700',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN, turnoId: TURNO_MANANA_ID });
+
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_4_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: recetaId,
+        cantidad: '1',
+        personalizacion: {
+          omitidos: [],
+          extras: [{ ingredienteItemId: quesoId, unidades: 1 }],
+        },
+      });
+    expect(resLinea.status).toBe(201);
+
+    type Uso = {
+      bloqueos: { tipo: string; nombre: string }[];
+      advertencias: { tipo: string; nombre: string }[];
+    };
+    const uso = async (id: string): Promise<Uso> => {
+      const r = await request(app.getHttpServer())
+        .get(`/api/items/${id}/uso`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(r.status).toBe(200);
+      return r.body as Uso;
+    };
+
+    const usoQueso = await uso(quesoId);
+    const bloqueoCuenta = usoQueso.bloqueos.find((b) => b.tipo === 'cuenta');
+    expect(bloqueoCuenta).toBeDefined();
+    expect(bloqueoCuenta?.nombre).toContain('Mesa');
+
+    // El extra permitido que la línea NO eligió sigue siendo solo advertencia.
+    const usoSuelto = await uso(quesoSueltoId);
+    expect(usoSuelto.bloqueos.some((b) => b.tipo === 'cuenta')).toBe(false);
+    expect(usoSuelto.advertencias.map((a) => a.tipo)).toContain('extra');
+
+    const resDel = await request(app.getHttpServer())
+      .delete(`/api/items/${quesoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDel.status).toBe(400);
+    expect((resDel.body as { message: string }).message).toContain(
+      'está pedido en',
+    );
+
+    // Cancelada la cuenta, el queso vuelve a ser borrable: el bloqueo es por la
+    // mesa viva, no un endurecimiento del catálogo (el test 9 fija que borrar un
+    // ingrediente usado solo como extra es legítimo).
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+
+    const usoTrasCancelar = await uso(quesoId);
+    expect(usoTrasCancelar.bloqueos.some((b) => b.tipo === 'cuenta')).toBe(
+      false,
+    );
+
+    const resDelOk = await request(app.getHttpServer())
+      .delete(`/api/items/${quesoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDelOk.status).toBe(200);
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
+  });
+
   // ── El detalle de personalización viaja convertido a moneda oficial ───────
   //
   // USD tiene `valor_del_dia = '950'` para Paris (`seedTenantMonedas`): entre un
