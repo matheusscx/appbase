@@ -1,9 +1,8 @@
-import Decimal from 'decimal.js'
 import { useApiFetch } from './useApiFetch'
 import type { CalcularVentaInput } from './useCalculoPrecios'
-import {
-  personalizacionAfectaPrecio,
-  type PersonalizacionPayload,
+import type {
+  PersonalizacionGrupoPayload,
+  PersonalizacionPayload,
 } from './useRecetaPersonalizacion'
 import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
@@ -189,34 +188,53 @@ export interface CerrarCuentaBody {
 }
 
 /**
- * precioBase + Σ extras + Σ opciones de grupo (propios del combo/receta) + Σ opciones de
- * grupo por componente (combos con grupos anidados) cuando la línea tiene recargo.
+ * El snapshot congelado de la línea, de vuelta a la forma que el motor espera:
+ * **ids y unidades, ningún precio**.
+ *
+ * Es la MISMA transformación que hace `cerrarCuenta` en el backend
+ * (`salones.service.ts`) para armar el body de la venta, y eso es lo que la
+ * vuelve correcta: la previsualización y el cobro le mandan al motor
+ * exactamente lo mismo, así que tasan lo mismo por construcción.
+ *
+ * ⚠️ Hasta el 2026-08-30 acá se mandaba un precio calculado en el cliente
+ * (`precioUnitarioLinea`: `precioBase + Σ precioExtra` del snapshot, **sin
+ * convertir a moneda oficial**). Tenía dos problemas encima del otro: el precio
+ * viajaba en la moneda del ítem, y salía del `precioExtra` **congelado** al
+ * agregar la línea, mientras el cobro re-tasaba contra el catálogo vivo. Con un
+ * extra que cambiaba de precio con la mesa sentada, pantalla y boleta no
+ * coincidían.
+ *
+ * `unidades` ausente en un snapshot viejo vale 1, igual que en el backend
+ * (`PersonalizacionRecetaSnapshot.unidades`: "ausente en snapshots antiguos = 1").
  */
-export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
-  const base = new Decimal(linea.precioBase || '0')
-  const extras = linea.personalizacion?.extras ?? []
-  const gruposOpciones = (linea.personalizacion?.grupos ?? []).flatMap((g) => g.opciones)
-  const componentesOpciones = (linea.personalizacion?.componentes ?? []).flatMap((c) =>
-    c.grupos.flatMap((g) => g.opciones),
-  )
-  if (extras.length === 0 && gruposOpciones.length === 0 && componentesOpciones.length === 0) {
-    return base.toString()
+function personalizacionDesdeSnapshot(
+  p: NonNullable<CuentaLineaDetalle['personalizacion']>,
+): PersonalizacionPayload {
+  const grupo = (g: CuentaLineaGrupoSnapshot): PersonalizacionGrupoPayload => ({
+    grupoId: g.grupoId,
+    opciones: g.opciones.map((o) => ({
+      itemId: o.itemId,
+      unidades: Number(o.unidades || '1'),
+    })),
+  })
+  return {
+    omitidos: p.omitidos,
+    extras: p.extras.map((e) => ({
+      ingredienteItemId: e.ingredienteItemId,
+      unidades: Number(e.unidades || '1'),
+    })),
+    ...(p.comentario ? { comentario: p.comentario } : {}),
+    ...(p.grupos?.length ? { grupos: p.grupos.map(grupo) } : {}),
+    ...(p.componentes?.length
+      ? {
+          componentes: p.componentes.map((c) => ({
+            componenteItemId: c.componenteItemId,
+            unidad: c.unidad,
+            grupos: c.grupos.map(grupo),
+          })),
+        }
+      : {}),
   }
-  return [...extras, ...gruposOpciones, ...componentesOpciones]
-    .reduce(
-      (acc, o) => acc.plus(new Decimal(o.precioExtra || '0').mul(o.unidades || '1')),
-      base,
-    )
-    .toString()
-}
-
-/**
- * Criterio único del proyecto ("sacar no cobra, agregar sí"), compartido con el
- * POS. Vivía duplicado acá y en `personalizacionVacia`, con criterios distintos
- * alimentando el mismo campo del mismo endpoint.
- */
-function tienePersonalizacionConRecargo(l: CuentaLineaDetalle): boolean {
-  return personalizacionAfectaPrecio(l.personalizacion)
 }
 
 /**
@@ -231,16 +249,17 @@ function tienePersonalizacionConRecargo(l: CuentaLineaDetalle): boolean {
 export function cuentaToCalcularInput(cuenta: CuentaDetalle): CalcularVentaInput {
   return {
     cuentaId: cuenta.id,
-    lineas: cuenta.lineas.map((l) => {
-      const precioUnitario = tienePersonalizacionConRecargo(l)
-        ? precioUnitarioLinea(l)
-        : undefined
-      return {
-        itemId: l.itemId,
-        cantidad: l.cantidad,
-        ...(precioUnitario ? { precioUnitario } : {}),
-      }
-    }),
+    lineas: cuenta.lineas.map((l) => ({
+      itemId: l.itemId,
+      cantidad: l.cantidad,
+      // Va SIEMPRE que haya personalización, no solo cuando tiene recargo: el
+      // criterio "sacar no cobra, agregar sí" se mudó al servidor, que devuelve
+      // `precioExtraTotal` 0 cuando solo se omite. Filtrarlo acá volvería a
+      // partir el criterio en dos implementaciones.
+      ...(l.personalizacion
+        ? { personalizacion: personalizacionDesdeSnapshot(l.personalizacion) }
+        : {}),
+    })),
   }
 }
 

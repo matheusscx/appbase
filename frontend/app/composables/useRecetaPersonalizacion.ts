@@ -154,8 +154,12 @@ export function buildPersonalizacionPayload(
  * ¿Hay algo que **registrar**? Un "sin cebolla" o un comentario cuentan: tienen
  * que viajar a la comanda de cocina aunque no muevan el precio.
  *
- * No confundir con [`personalizacionAfectaPrecio`]: son dos preguntas distintas
- * y aplanarlas fue justo el bug — ver el docblock de esa función.
+ * ⚠️ No es la pregunta de si la línea cambia de precio. Esa vivía al lado, en
+ * `personalizacionAfectaPrecio` ("sacar no cobra, agregar sí"), y se borró el
+ * 2026-08-30 junto con el override de `precioUnitario`: **el precio lo calcula
+ * el servidor**, cuyo resolver ya devuelve `precioExtraTotal` 0 cuando lo único
+ * que se hizo fue omitir. Aplanar las dos preguntas fue un bug una vez; tener el
+ * criterio de precio duplicado en el cliente fue otro.
  */
 export function personalizacionVacia(p?: PersonalizacionPayload): boolean {
   if (!p) return true
@@ -166,38 +170,6 @@ export function personalizacionVacia(p?: PersonalizacionPayload): boolean {
     && !(p.grupos && p.grupos.length > 0)
     && !(p.componentes && p.componentes.length > 0)
   )
-}
-
-/**
- * ¿Esta personalización cambia el **precio** de la línea?
- *
- * **Criterio único del proyecto: sacar no cobra, agregar sí.** Quitar un
- * ingrediente nunca genera recargo ni marca la línea como personalizada a
- * efectos de precio; agregar extras, elegir opciones de grupo o sumar
- * componentes sí.
- *
- * Antes había dos criterios distintos para lo mismo, alimentando el mismo campo
- * del mismo endpoint: `personalizacionVacia` (para la que un "sin cebolla" ya
- * contaba) en el POS, y `tienePersonalizacionConRecargo` en salones (que lo
- * ignoraba). Ganó el segundo, y este es el único lugar donde vive.
- *
- * ⚠️ **"No afecta el precio" NO es "no se registra".** El *sin cebolla* sigue
- * viajando a la comanda — eso lo decide `personalizacionVacia`. Lo que se
- * unificó acá es el criterio de recargo, no el de trazabilidad.
- */
-export function personalizacionAfectaPrecio(
-  // Estructural y no `PersonalizacionPayload`: los dos llamadores traen la
-  // personalización con tipos distintos (el payload del drawer y la línea de
-  // una cuenta de salón). Pedir el tipo nominal obligaría a castear en uno de
-  // los dos, que es como se llega a tener dos criterios de nuevo.
-  p?: {
-    extras?: { length: number }
-    grupos?: { length: number }
-    componentes?: { length: number }
-  } | null,
-): boolean {
-  if (!p) return false
-  return Boolean(p.extras?.length || p.grupos?.length || p.componentes?.length)
 }
 
 export function resumenPersonalizacion(

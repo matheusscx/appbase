@@ -9,7 +9,7 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 
 export class LineaDto {
   @IsUUID('4')
@@ -27,30 +27,26 @@ export class LineaDto {
   unidadCodigoPresentacion?: string;
 
   /**
-   * Override opcional del precio_base del ítem: nunca negativo. Sin esto, `-100`
-   * pasaba —`cantidad` sí se valida en `resolverLinea` y este campo no— y el
-   * endpoint devolvía `totalFinal: -100`.
+   * Qué se pidió en esta línea, no cuánto vale: los ids de lo que se saca y de
+   * lo que se agrega. **El precio lo calcula el servidor** —`precioBase + Σ
+   * extras`, convertido a moneda oficial una sola vez—, igual que en el cobro y
+   * con los mismos resolvers de `ItemsService`.
    *
-   * ⚠️ **El `0` sigue siendo válido acá, a diferencia de `LineaVentaDto`, que el
-   * 2026-08-11 pasó a exigir `> 0`.** La divergencia es deliberada y medida: este
-   * campo NO es el mismo canal en los dos endpoints. Al de venta no lo manda
-   * nadie (`toVentaLineasBody` no lo incluye), pero a este lo alimentan dos
-   * composables con el precio ya calculado de la línea —`useVenta.ts:197` y
-   * `useSalones.ts:200`—, y ese precio es `precioBase + extras`, que da `0`
-   * legítimamente cuando el ítem vale 0 (`create-item.dto.ts`: el `0` es
-   * legítimo) y la personalización no agrega nada pago.
-   *
-   * Rechazarlo acá rompía el cobro **en silencio**: `useCalculoPrecios` se traga
-   * el error a propósito, así que el carrito nunca vuelve a estar vigente y el
-   * modal de cobro no abre, sin un solo mensaje para el cajero. Y ni siquiera
-   * protegía nada: `ventas.service.ts` ignora el override cuando la línea tiene
-   * personalización —recalcula `precioBase + precioExtraTotal`—, o sea que el
-   * preview habría quedado más estricto que la venta.
+   * ⚠️ Hasta el 2026-08-30 acá había un `precioUnitario` que el cliente podía
+   * fijar, y era el **único lugar del sistema donde un precio cruzaba la
+   * frontera sin convertir**: `resolverLinea` lo usaba tal cual y la conversión
+   * vivía en la rama del `else`. POS y salones lo alimentaban con
+   * `precioBase + extras` en la moneda del ítem, así que una receta en USD se
+   * previsualizaba en dólares mientras la venta —que siempre re-tasó por su
+   * cuenta— se persistía en pesos. Se sacó entero; el canal interno que usa
+   * `ventas.service` para no re-resolver lo que ya resolvió se llama
+   * `precioUnitarioResuelto` y NO es parte de este DTO, así que el
+   * `ValidationPipe` (`whitelist: true`) lo saca de cualquier body.
    */
   @IsOptional()
-  @IsNumberString()
-  @IsDecimalNoNegativo()
-  precioUnitario?: string;
+  @ValidateNested()
+  @Type(() => PersonalizacionRecetaDto)
+  personalizacion?: PersonalizacionRecetaDto;
 
   /** Si se pasa, reemplaza los descuentos asociados al ítem. */
   @IsOptional()
@@ -124,3 +120,27 @@ export class CalcularVentaDto {
   @IsIn(['fisico', 'online'])
   canal?: 'fisico' | 'online';
 }
+
+/**
+ * La entrada real de `CalculoPreciosService.calcular()`, más ancha que el DTO
+ * HTTP en un solo campo.
+ *
+ * `precioUnitarioResuelto` es el precio de la línea **ya convertido a moneda
+ * oficial**, y solo lo pone `ventas.service`: cuando la venta llega acá ya
+ * resolvió la personalización —la necesita para el snapshot y para el stock— y
+ * ya convirtió con el mismo `modo_redondeo`. Sin este canal, `calcular` volvería
+ * a resolverla y `POST /ventas` pagaría las consultas dos veces.
+ *
+ * ⛔ **No es un override y no puede llegar de afuera.** No está en `LineaDto`,
+ * así que el `ValidationPipe` global (`whitelist: true`, `main.ts`) lo saca de
+ * cualquier body antes de que el controller lo vea. Esa es toda la garantía que
+ * necesita **este** endpoint.
+ *
+ * El otro canal que existía —`LineaVentaDto.precioUnitario`, en `POST /ventas`—
+ * salió en este mismo commit: ningún endpoint acepta ya un precio de línea.
+ */
+export type LineaCalculo = LineaDto & { precioUnitarioResuelto?: string };
+
+export type CalcularVentaInput = Omit<CalcularVentaDto, 'lineas'> & {
+  lineas: LineaCalculo[];
+};

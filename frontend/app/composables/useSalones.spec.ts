@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cuentaToCalcularInput, precioUnitarioLinea, type CuentaDetalle, type CuentaLineaDetalle } from './useSalones'
+import { cuentaToCalcularInput, type CuentaDetalle, type CuentaLineaDetalle } from './useSalones'
 
 function linea(personalizacion: CuentaLineaDetalle['personalizacion']): CuentaLineaDetalle {
   return {
@@ -33,79 +33,109 @@ function cuenta(overrides: Partial<CuentaDetalle> = {}): CuentaDetalle {
   }
 }
 
-describe('precioUnitarioLinea', () => {
-  it('sin personalización devuelve el precioBase', () => {
-    expect(precioUnitarioLinea(linea(null))).toBe('4300')
-  })
-
-  it('suma extras y opciones de grupo propio (combo/receta)', () => {
-    const l = linea({
-      omitidos: [],
-      extras: [{ ingredienteItemId: 'e1', cantidad: '1', unidadCodigo: 'un', precioExtra: '200', unidades: '1' }],
-      grupos: [{
-        grupoId: 'g1',
-        grupoNombre: 'Bebida',
-        opciones: [{ itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra: '500', unidades: '1' }],
-      }],
-    })
-    expect(precioUnitarioLinea(l)).toBe('5000')
-  })
-
-  it('suma el recargo de grupos de COMPONENTE (grupos anidados en combos) aunque no haya extras ni grupos propios', () => {
-    // Combo cuyo único recargo viene de un grupo del componente "Chuleta" (el chuleta 1500 del e2e de backend).
-    const l = linea({
-      omitidos: [],
-      extras: [],
-      componentes: [
-        {
-          componenteItemId: 'chuleta-1',
-          componenteNombre: 'Chuleta',
-          unidad: 1,
-          grupos: [{
-            grupoId: 'g-carne',
-            grupoNombre: 'Tipo de carne',
-            opciones: [{ itemId: 'carne-premium', nombre: 'Premium', cantidad: '1', precioExtra: '1500', unidades: '1' }],
-          }],
-        },
-      ],
-    })
-    // 4300 (precioBase del combo) + 1500 (recargo del grupo del componente) = 5800, igual al total del e2e de backend.
-    expect(precioUnitarioLinea(l)).toBe('5800')
-  })
-
-  it('suma múltiples opciones de múltiples componentes y unidades, respetando unidades × precioExtra', () => {
-    const l = linea({
-      omitidos: [],
-      extras: [],
-      componentes: [
-        {
-          componenteItemId: 'chuleta-1',
-          componenteNombre: 'Chuleta',
-          unidad: 1,
-          grupos: [{
-            grupoId: 'g-carne',
-            grupoNombre: 'Tipo de carne',
-            opciones: [{ itemId: 'carne-premium', nombre: 'Premium', cantidad: '1', precioExtra: '1500', unidades: '2' }],
-          }],
-        },
-        {
-          componenteItemId: 'papas-1',
-          componenteNombre: 'Papas',
-          unidad: 1,
-          grupos: [{
-            grupoId: 'g-salsa',
-            grupoNombre: 'Salsa',
-            opciones: [{ itemId: 'mayo', nombre: 'Mayo', cantidad: '1', precioExtra: '300', unidades: '1' }],
-          }],
-        },
-      ],
-    })
-    // 4300 + (1500 × 2) + (300 × 1) = 7600
-    expect(precioUnitarioLinea(l)).toBe('7600')
-  })
-})
-
 describe('cuentaToCalcularInput', () => {
+  /**
+   * El invariante que reemplaza a los tests de `precioUnitarioLinea` que vivían
+   * arriba: esa función sumaba `precioBase + Σ precioExtra` del snapshot **en la
+   * moneda del ítem** y el resultado viajaba como `precioUnitario`. Ahora la
+   * línea manda qué se pidió y el precio lo calcula el servidor.
+   *
+   * La aserción fuerte no es la forma del payload sino la última: **ningún
+   * número de plata cruza**. Un `precioExtra` que se colara de nuevo sería
+   * exactamente el bug de vuelta, y el `toMatchObject` de arriba no lo vería
+   * porque no mira las claves de más.
+   */
+  it('manda la personalización con ids y unidades, sin un solo precio', () => {
+    const l = linea({
+      omitidos: ['cebolla-1'],
+      extras: [
+        {
+          ingredienteItemId: 'queso-1',
+          cantidad: '1',
+          unidadCodigo: 'unidad',
+          precioExtra: '1500',
+          unidades: '2',
+        },
+      ],
+      comentario: 'Bien cocido',
+      grupos: [
+        {
+          grupoId: 'grupo-salsa',
+          grupoNombre: 'Salsa',
+          opciones: [
+            {
+              itemId: 'salsa-bbq',
+              nombre: 'BBQ',
+              cantidad: '1',
+              precioExtra: '300',
+              unidades: '1',
+            },
+          ],
+        },
+      ],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          componenteNombre: 'Burger',
+          unidad: 1,
+          grupos: [
+            {
+              grupoId: 'grupo-proteina',
+              grupoNombre: 'Proteína',
+              opciones: [
+                {
+                  itemId: 'proteina-carne',
+                  nombre: 'Carne',
+                  cantidad: '1',
+                  precioExtra: '0',
+                  unidades: '1',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    const input = cuentaToCalcularInput(cuenta({ lineas: [l] }))
+    const enviada = input.lineas[0]!
+
+    expect(enviada).not.toHaveProperty('precioUnitario')
+    expect(enviada.personalizacion).toEqual({
+      omitidos: ['cebolla-1'],
+      extras: [{ ingredienteItemId: 'queso-1', unidades: 2 }],
+      comentario: 'Bien cocido',
+      grupos: [
+        {
+          grupoId: 'grupo-salsa',
+          opciones: [{ itemId: 'salsa-bbq', unidades: 1 }],
+        },
+      ],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [
+            {
+              grupoId: 'grupo-proteina',
+              opciones: [{ itemId: 'proteina-carne', unidades: 1 }],
+            },
+          ],
+        },
+      ],
+    })
+    // Ni el `precioExtra` de los extras, ni el de las opciones, ni el
+    // `precioBase` de la línea: el body no lleva plata.
+    expect(JSON.stringify(input)).not.toContain('1500')
+    expect(JSON.stringify(input)).not.toContain('300')
+    expect(JSON.stringify(input)).not.toContain('4300')
+  })
+
+  it('una línea sin personalización manda solo qué y cuánto', () => {
+    const input = cuentaToCalcularInput(cuenta())
+    expect(input.lineas[0]).toEqual({ itemId: 'combo-1', cantidad: '1' })
+  })
+
   it('manda el cuentaId de la cuenta, no solo las líneas', () => {
     // Sin esto la previsualización del salón evalúa vigencia de reglas por
     // fecha contra "ahora" mientras el cobro evalúa `abierta_el`: la mesa que

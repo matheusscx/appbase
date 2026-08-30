@@ -314,6 +314,18 @@ export class OnlineService {
       calcularLineas.push({
         ...linea,
         cantidad: cantidadCanonica,
+        // `personalizacion` se descarta por el MISMO motivo que `cuentaId` y
+        // `canal` más abajo: este camino cobra. Desde el 2026-08-30 el motor
+        // tasa la personalización, así que reenviarla haría que `pagar()`
+        // autorice contra la tarjeta un total CON extras mientras
+        // `lineasSnapshot` —que es lo que materializa la venta en el callback—
+        // no los lleva: el cliente pagaría extras y recibiría una venta sin
+        // ellos. La tienda online no ofrece personalización (ningún componente
+        // de `frontend/app/components/tienda/` la manda), así que no se pierde
+        // nada; el día que la ofrezca, el campo tiene que entrar por
+        // `CheckoutLineaSnapshot` y por el `CreateVentaDto` del callback, no
+        // solo por acá.
+        personalizacion: undefined,
       });
       lineasSnapshot.push({
         itemId: linea.itemId,

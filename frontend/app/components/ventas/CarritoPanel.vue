@@ -65,9 +65,27 @@ const docItems = computed(() =>
 )
 
 const { formatMonto } = useFormatters()
-const { convertirAMonedaOficial } = useMonedaConversion()
 
 const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaId))
+
+/**
+ * El precio unitario de la línea, **tal como lo calculó el backend**: ya
+ * convertido a moneda oficial y ya con los extras de la personalización adentro.
+ *
+ * Hasta el 2026-08-30 esta cuenta se hacía acá (`precioBase + extras`, convertido
+ * en el cliente) y convivía en la misma vista con un total que el motor calculaba
+ * de otra forma: para una receta en moneda extranjera la fila decía `$11.400 c/u`
+ * al lado de un total de `$14`. Ahora hay un solo productor.
+ *
+ * Va por `calculoVigente` —no por `resultado`— por la misma razón que las
+ * advertencias y las promos de esta misma fila: se atribuye a una línea POR
+ * ÍNDICE, y con un cálculo que no corresponde al carrito actual el índice puede
+ * apuntar a otra línea. Un guión por 300 ms es mejor que el precio del vecino.
+ */
+function precioUnitarioLinea(index: number): string {
+  const precio = calculoVigente.value?.lineas[index]?.precioUnitario
+  return precio ? formatMonto(precio) : '—'
+}
 
 // El input de cantidad arranca readonly para que el autocompletado de direcciones
 // de Chrome (que ignora autocomplete="off") no lo rellene. Se vuelve editable al
@@ -204,7 +222,7 @@ watch(clienteDrawerOpen, (open) => {
               {{ linea.personalizacionResumen }}
             </p>
             <p class="text-xs text-muted font-mono">
-              {{ formatMonto(convertirAMonedaOficial(linea.precioUnitarioOverride ?? linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
+              {{ precioUnitarioLinea(index) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
             <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
             <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />

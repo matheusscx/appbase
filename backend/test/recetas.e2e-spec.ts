@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -1060,6 +1061,107 @@ describe('Recetas — flujo completo (e2e)', () => {
     // 2 USD x 950 = 1.900. Sin convertir daría '2': la distancia entre las dos
     // conductas es de tres órdenes de magnitud, no de redondeo.
     expect(extra?.monto).toBe('1900.0000');
+  });
+
+  /**
+   * La **previsualización** de la misma línea, que es el número que el cajero
+   * mira antes de cobrar. Hasta el 2026-08-30 el POS le mandaba al motor
+   * `precioBase + extras` en la moneda del ítem y el motor lo usaba tal cual:
+   * la pantalla decía `$14` (12 USD + IVA, leídos como pesos) mientras la venta
+   * se persistía en `13.566`. El cajero cobraba contra el número falso.
+   *
+   * Que el preview y la venta den lo mismo es el invariante, no el `13566`
+   * suelto: por eso el test cobra la venta con el total que devolvió el preview.
+   * Si vuelven a divergir, el pago queda corto y la venta `pagada_parcial`, que
+   * es exactamente el síntoma que se midió en el navegador.
+   */
+  it('la previsualización del extra da el mismo total que la venta (moneda extranjera)', async () => {
+    const sufijo = Date.now();
+    const panId = await crearIngrediente(
+      app,
+      token,
+      'Pan preview-moneda',
+      'unidad',
+      '100',
+      '1',
+    );
+    const quesoId = await crearIngrediente(
+      app,
+      token,
+      'Queso preview-moneda',
+      'unidad',
+      '100',
+      '1',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa preview-moneda ${sufijo}`,
+        precioBase: '10',
+        monedaId: USD_MONEDA_ID,
+        tipo: 'receta',
+        clasificacionTributaria: 'afecto',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: quesoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '2',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    const linea = {
+      itemId: recetaId,
+      cantidad: '1',
+      personalizacion: {
+        omitidos: [],
+        extras: [{ ingredienteItemId: quesoId, unidades: 1 }],
+      },
+    };
+
+    const resPreview = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [linea] });
+    expect(resPreview.status).toBe(201);
+    const totalPreview = (
+      resPreview.body as { totales: { totalFinal: string } }
+    ).totales.totalFinal;
+    // (10 + 2) USD x 950 = 11.400 + 19% IVA. Sin convertir daría 14,28: la
+    // distancia es de tres órdenes de magnitud, no de redondeo.
+    expect(new Decimal(totalPreview).toFixed(4)).toBe('13566.0000');
+
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [linea],
+        // Se paga lo que dijo la pantalla. Si el preview mintiera, esto deja la
+        // venta `pagada_parcial` en vez de `pagada`.
+        pagos: [
+          {
+            metodoPagoId: EFECTIVO_ID,
+            monto: new Decimal(totalPreview).toFixed(0),
+          },
+        ],
+      });
+    expect(resVenta.status).toBe(201);
+    const venta = resVenta.body as { estado: string; totalFinal: string };
+    expect(venta.totalFinal).toBe('13566.0000');
+    expect(venta.estado).toBe('pagada');
   });
 
   // Gemelo del anterior por el otro camino que produce ticket: la cuenta de

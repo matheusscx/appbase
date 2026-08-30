@@ -78,9 +78,10 @@ describe('Venta de total $0 (e2e)', () => {
 
     token = await login(app);
 
-    // `precioBase: '0'` es válido (`@IsDecimalNoNegativo`) y es la forma más
-    // directa de llegar a un total 0 por API: `precioUnitario` de la línea sí
-    // exige positivo en `CreateVentaDto`.
+    // `precioBase: '0'` es válido (`@IsDecimalNoNegativo`) y desde el 2026-08-30
+    // es la ÚNICA forma de llegar a un total 0 por API con un ítem gratis: la
+    // línea de `CreateVentaDto` ya no acepta ningún precio (antes tenía un
+    // `precioUnitario` opcional, que además exigía > 0).
     const resGratis = await request(app.getHttpServer())
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)

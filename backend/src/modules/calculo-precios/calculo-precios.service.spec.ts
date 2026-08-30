@@ -31,6 +31,9 @@ describe('CalculoPreciosService', () => {
   let itemsService: {
     cargarBasePorIds: jest.Mock;
     cargarReglasPorIds: jest.Mock;
+    cargarCatalogosPersonalizacion: jest.Mock;
+    resolverPersonalizacionReceta: jest.Mock;
+    resolverPersonalizacionCombo: jest.Mock;
   };
   let impuestosService: { findAll: jest.Mock };
   let descuentosService: { findAll: jest.Mock };
@@ -81,6 +84,20 @@ describe('CalculoPreciosService', () => {
     itemsService = {
       cargarBasePorIds: jest.fn(),
       cargarReglasPorIds: jest.fn(),
+      // El catálogo por lote: una consulta para todas las líneas, en vez de
+      // tres por línea. El mock devuelve mapas vacíos —los resolvers están
+      // mockeados igual—; lo que los tests afirman es QUIÉN se llama y con qué.
+      cargarCatalogosPersonalizacion: jest.fn().mockResolvedValue({
+        ingredientes: new Map(),
+        extras: new Map(),
+        grupos: new Map(),
+        componentesCombo: new Map(),
+      }),
+      // Sin personalización en el body no se llaman nunca: el default tira si
+      // alguien los alcanza sin querer, para que el caso base no pase por acá
+      // en silencio.
+      resolverPersonalizacionReceta: jest.fn(),
+      resolverPersonalizacionCombo: jest.fn(),
     };
     mockItems();
     impuestosService = {
@@ -200,14 +217,165 @@ describe('CalculoPreciosService', () => {
     expect(r.lineas[0].descuentoAplicado).toBe('20.000000'); // usa desc-2 (0.20)
   });
 
-  it('respeta el override de precioUnitario', async () => {
-    const r = await service.calcular(TENANT, {
-      lineas: [{ itemId: 'item-1', cantidad: '1', precioUnitario: '200' }],
+  /**
+   * El precio de una línea lo calcula el servidor. Hasta el 2026-08-30 el cliente
+   * podía fijarlo con un `precioUnitario` en el body, y el motor lo usaba tal cual
+   * —o sea **sin convertir**: la conversión vivía en la rama del `else`—. Como POS y
+   * salones lo alimentaban con `precioBase + extras` en la moneda del ítem, una
+   * receta en USD se previsualizaba en dólares y se cobraba en pesos.
+   *
+   * Estos dos tests son el par que reemplaza a aquel par: la conversión ya no
+   * depende de que el cliente se calle, y el extra entra ANTES de convertir.
+   */
+  it('tasa la personalización en el servidor y convierte el total a moneda oficial', async () => {
+    mockItems({ precioBase: '10', monedaId: 'moneda-usd', tipo: 'receta' });
+    itemsService.resolverPersonalizacionReceta.mockResolvedValue({
+      snapshot: { omitidos: [], extras: [] },
+      precioExtraTotal: '2.0000',
     });
-    expect(r.lineas[0].subtotalNeto).toBe('200.000000');
+    const r = await service.calcular(TENANT, {
+      lineas: [
+        {
+          itemId: 'item-usd',
+          cantidad: '1',
+          descuentoIds: [],
+          personalizacion: { extras: [{ ingredienteItemId: 'ing-1' }] },
+        },
+      ],
+    });
+    // (10 + 2) × 950, no (10 + 2) ni 10 × 950.
+    expect(r.lineas[0].subtotalNeto).toBe('11400.000000');
   });
 
-  it('convierte el precio del ítem a moneda oficial cuando no hay override', async () => {
+  /**
+   * **El guard del N+1.** Los catálogos que necesitan los resolvers son por
+   * ÍTEM —`(tenantId, itemId)`, nada de la línea—, así que se precargan por lote
+   * UNA vez para todo el cálculo. Sin esto, tres líneas personalizadas costaban
+   * tres relecturas de ingredientes, extras y grupos, en el endpoint que corre
+   * con cada tecleo del carrito (debounce de 300 ms).
+   *
+   * El test afirma las dos mitades: **una sola** carga por lote, y que a cada
+   * resolver le llegue el catálogo precargado (si no, lo lee él y el lote no
+   * sirvió de nada).
+   */
+  it('precarga los catálogos de personalización UNA vez para todas las líneas', async () => {
+    mockItems({ precioBase: '10', tipo: 'receta' });
+    itemsService.resolverPersonalizacionReceta.mockResolvedValue({
+      snapshot: { omitidos: [], extras: [] },
+      precioExtraTotal: '1.0000',
+    });
+    const conExtra = (itemId: string) => ({
+      itemId,
+      cantidad: '1',
+      descuentoIds: [],
+      personalizacion: { extras: [{ ingredienteItemId: 'ing-1' }] },
+    });
+
+    await service.calcular(TENANT, {
+      lineas: [
+        conExtra('receta-1'),
+        conExtra('receta-2'),
+        conExtra('receta-3'),
+      ],
+    });
+
+    expect(itemsService.cargarCatalogosPersonalizacion).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(itemsService.resolverPersonalizacionReceta).toHaveBeenCalledTimes(3);
+    for (const llamada of itemsService.resolverPersonalizacionReceta.mock
+      .calls) {
+      // 5º argumento: el catálogo precargado.
+      expect(llamada[4]).toBeDefined();
+    }
+  });
+
+  /**
+   * La otra mitad del guard: una línea que no puede costar nada tampoco entra al
+   * lote. Con un carrito entero de "sin cebolla" no se toca la base.
+   */
+  it('no precarga nada si ninguna línea puede agregar precio', async () => {
+    mockItems({ precioBase: '10', tipo: 'receta' });
+    await service.calcular(TENANT, {
+      lineas: [
+        {
+          itemId: 'receta-1',
+          cantidad: '1',
+          descuentoIds: [],
+          personalizacion: { omitidos: ['cebolla'], extras: [] },
+        },
+      ],
+    });
+    expect(itemsService.cargarCatalogosPersonalizacion).not.toHaveBeenCalled();
+  });
+
+  /**
+   * El gemelo por la otra rama del discriminador. No es simetría decorativa:
+   * `resolverPersonalizacionCombo` es el ÚNICO que recorre `componentes` —los
+   * grupos anidados de un combo—, así que un mutante que llamara siempre a la
+   * variante receta devolvería un `precioExtraTotal` sin las opciones pagas de
+   * los componentes, y el preview volvería a quedar por debajo del cobro.
+   */
+  it('un combo se tasa por resolverPersonalizacionCombo, no por el de receta', async () => {
+    mockItems({ precioBase: '10', monedaId: 'moneda-usd', tipo: 'combo' });
+    itemsService.resolverPersonalizacionCombo.mockResolvedValue({
+      snapshot: { omitidos: [], extras: [] },
+      precioExtraTotal: '2.0000',
+    });
+    const r = await service.calcular(TENANT, {
+      lineas: [
+        {
+          itemId: 'combo-usd',
+          cantidad: '1',
+          descuentoIds: [],
+          personalizacion: {
+            componentes: [
+              {
+                componenteItemId: 'burger-1',
+                unidad: 1,
+                grupos: [
+                  { grupoId: 'g-1', opciones: [{ itemId: 'proteina-1' }] },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(itemsService.resolverPersonalizacionCombo).toHaveBeenCalled();
+    expect(itemsService.resolverPersonalizacionReceta).not.toHaveBeenCalled();
+    expect(r.lineas[0].subtotalNeto).toBe('11400.000000');
+  });
+
+  /**
+   * El criterio "sacar no cobra, agregar sí", que hasta el 2026-08-30 vivía
+   * duplicado en los dos clientes y ahora vive solo acá. El test afirma las dos
+   * mitades: el precio no se mueve **y** no se paga ni una consulta — que es lo
+   * que evita que tasar la personalización le agregue costo a una precuenta
+   * llena de "sin cebolla".
+   */
+  it('una personalización que solo omite no mueve el precio ni consulta nada', async () => {
+    mockItems({ precioBase: '100', tipo: 'receta' });
+    const r = await service.calcular(TENANT, {
+      lineas: [
+        {
+          itemId: 'receta-1',
+          cantidad: '1',
+          descuentoIds: [],
+          personalizacion: {
+            omitidos: ['ingrediente-cebolla'],
+            extras: [],
+            comentario: 'Bien cocido',
+          },
+        },
+      ],
+    });
+    expect(r.lineas[0].subtotalNeto).toBe('100.000000');
+    expect(itemsService.resolverPersonalizacionReceta).not.toHaveBeenCalled();
+    expect(itemsService.resolverPersonalizacionCombo).not.toHaveBeenCalled();
+  });
+
+  it('convierte el precio del ítem a moneda oficial', async () => {
     mockItems({ precioBase: '10', monedaId: 'moneda-usd' });
     const r = await service.calcular(TENANT, {
       lineas: [{ itemId: 'item-usd', cantidad: '1', descuentoIds: [] }],

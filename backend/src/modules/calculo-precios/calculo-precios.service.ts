@@ -20,7 +20,11 @@ import {
   zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
 import { NivelRegla } from '../../common/enums/reglas.enums';
-import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
+import {
+  CalcularVentaDto,
+  CalcularVentaInput,
+  LineaCalculo,
+} from './dto/calcular.dto';
 import {
   calcularVenta,
   modoToRounding,
@@ -55,6 +59,31 @@ type ReglaResueltaConNivel = ReglaResuelta & { nivel: NivelRegla };
 
 type ItemsBaseMap = Awaited<ReturnType<ItemsService['cargarBasePorIds']>>;
 type ItemsReglasMap = Awaited<ReturnType<ItemsService['cargarReglasPorIds']>>;
+
+/**
+ * **"Sacar no cobra, agregar sí"** — el criterio único del proyecto, y desde el
+ * 2026-08-30 su **única** implementación: una línea que solo omite ingredientes o
+ * deja un comentario no puede mover el precio, así que no se resuelve y no cuesta
+ * ni una consulta. Vivía duplicado en los dos clientes
+ * (`personalizacionAfectaPrecio` en el POS, `tienePersonalizacionConRecargo` en
+ * salones); los dos se borraron.
+ *
+ * ⚠️ Saltarse el resolver también se saltea sus **validaciones** (omitido que no
+ * pertenece a la receta, grupo obligatorio sin elegir). Es la misma conducta que
+ * tenía la previsualización antes de que el motor tasara la personalización —no
+ * resolvía nada— y el cobro sigue validando todo: una previsualización más
+ * permisiva que la venta es tolerable; una más estricta rompería el carrito sin
+ * decir por qué.
+ */
+function puedeCostar(linea: LineaCalculo): boolean {
+  const p = linea.personalizacion;
+  if (!p) return false;
+  return (
+    (p.extras?.length ?? 0) > 0 ||
+    (p.grupos?.length ?? 0) > 0 ||
+    (p.componentes?.length ?? 0) > 0
+  );
+}
 
 /**
  * Capa de servicio del motor: carga los datos del tenant (ítems, catálogos de
@@ -112,7 +141,7 @@ export class CalculoPreciosService {
    */
   async calcular(
     tenantId: string,
-    dto: CalcularVentaDto,
+    dto: CalcularVentaInput,
     configPrecargada?: ConfigCalculo,
   ): Promise<ResultadoVenta> {
     // Sin `configPrecargada` (la previsualización), acá es donde se resuelve
@@ -260,9 +289,108 @@ export class CalculoPreciosService {
       itemIds,
     );
 
-    const lineas: LineaResuelta[] = dto.lineas.map((linea) =>
+    /**
+     * El precio de cada línea, decidido **en el servidor**. Tres orígenes, en
+     * este orden:
+     *
+     * 1. `precioUnitarioResuelto` — lo pone `ventas.service`, que ya resolvió la
+     *    personalización (para el snapshot y el stock) y ya convirtió con este
+     *    mismo `modo_redondeo`. No es parte del DTO HTTP.
+     * 2. `precioBase + precioExtraTotal`, convertido acá — la previsualización de
+     *    una línea personalizada. Es el camino que antes cubría un
+     *    `precioUnitario` del cliente, que llegaba **sin convertir**.
+     * 3. `undefined` — el resto. `resolverLinea` convierte `item.precioBase`.
+     *
+     * **Secuencial a propósito**, por el mismo motivo que los dos loaders de
+     * arriba: en el camino de la venta esto corre dentro de `db.transaccion` y
+     * los resolvers pegan al `EntityManager` del contexto ALS, o sea un único
+     * `pg.Client`. Un `Promise.all` los encolaría igual y en `pg@9` la segunda
+     * tira.
+     *
+     * **Y secuencial no significa una consulta por línea:** los catálogos que
+     * los resolvers necesitan son por ÍTEM —`(tenantId, itemId)`, nada de la
+     * línea—, así que se precargan por lote acá abajo y el loop no toca la base.
+     * Lo que queda por línea es cuenta en memoria.
+     *
+     * ⚠️ La personalización sobre un ítem que no es receta ni combo se **ignora**,
+     * que es exactamente lo que hace `ventas.service.ts` al armar sus
+     * personalizaciones. La previsualización tiene que coincidir con el cobro,
+     * no ser más estricta que él: `salones.service.agregarLinea` sí la rechaza,
+     * pero eso pasa mucho antes, al agregar la línea a la cuenta.
+     */
+    // Los catálogos que necesita resolver una personalización son **por ítem, no
+    // por línea** —las tres consultas toman `(tenantId, itemId)` y nada de la
+    // línea—, así que se precargan por lote una vez y no una vez por línea. Sin
+    // esto, una precuenta de 5 líneas con extras costaba ~18 consultas; con esto,
+    // entre 2 y 5 según qué haya en el carrito —son techos, no valores fijos: el
+    // catálogo de grupos corta temprano si nadie tiene—, y **no crecen con las
+    // líneas**.
+    // En el camino de la venta esta lista queda vacía (todas las líneas traen
+    // `precioUnitarioResuelto`) y no se consulta nada.
+    const itemsAPreCargar = dto.lineas
+      .filter((l) => l.precioUnitarioResuelto === undefined && puedeCostar(l))
+      .map((l) => itemsBase.get(l.itemId)!)
+      .filter((i) => i.tipo === 'receta' || i.tipo === 'combo')
+      .map((i) => ({ itemId: i.id, tipo: i.tipo }));
+    const catalogosPersonalizacion = itemsAPreCargar.length
+      ? await this.itemsService.cargarCatalogosPersonalizacion(
+          this.db,
+          tenantId,
+          itemsAPreCargar,
+        )
+      : undefined;
+
+    const preciosResueltos: (string | undefined)[] = [];
+    for (const linea of dto.lineas) {
+      if (linea.precioUnitarioResuelto !== undefined) {
+        preciosResueltos.push(linea.precioUnitarioResuelto);
+        continue;
+      }
+      const item = itemsBase.get(linea.itemId)!;
+      const pers = linea.personalizacion;
+      if (
+        !pers ||
+        !puedeCostar(linea) ||
+        (item.tipo !== 'receta' && item.tipo !== 'combo')
+      ) {
+        preciosResueltos.push(undefined);
+        continue;
+      }
+      const { precioExtraTotal } =
+        item.tipo === 'combo'
+          ? await this.itemsService.resolverPersonalizacionCombo(
+              this.db,
+              tenantId,
+              item.id,
+              pers,
+              catalogosPersonalizacion,
+            )
+          : await this.itemsService.resolverPersonalizacionReceta(
+              this.db,
+              tenantId,
+              item.id,
+              pers,
+              catalogosPersonalizacion,
+            );
+      // El `.toFixed(4)` NO redondea: los dos sumandos ya vienen con 4 decimales
+      // exactos (`precio_base` es `NUMERIC(18,4)` y `precioExtraTotal` sale ya
+      // redondeado de `items.service.ts`). Solo formatea. El único redondeo de
+      // esta cuenta es el de la conversión, que sí toma el modo del tenant.
+      // Mismo razonamiento —y misma cuenta— que `ventas.service.ts`.
+      preciosResueltos.push(
+        this.convertirAMonedaOficial(
+          new Decimal(item.precioBase).plus(precioExtraTotal).toFixed(4),
+          item.monedaId,
+          tasaMap,
+          config.modoRedondeo,
+        ),
+      );
+    }
+
+    const lineas: LineaResuelta[] = dto.lineas.map((linea, i) =>
       this.resolverLinea(
         linea,
+        preciosResueltos[i],
         itemsBase,
         reglasPorItem,
         impuestoMap,
@@ -568,7 +696,8 @@ export class CalculoPreciosService {
   }
 
   private resolverLinea(
-    linea: LineaDto,
+    linea: LineaCalculo,
+    precioResuelto: string | undefined,
     itemsBase: ItemsBaseMap,
     reglasPorItem: ItemsReglasMap,
     impuestoMap: Map<string, ImpuestoResuelto & { tipo: string }>,
@@ -588,15 +717,17 @@ export class CalculoPreciosService {
     const descuentoIds = linea.descuentoIds ?? reglas?.descuentosIds ?? [];
     const recargoIds = linea.recargoIds ?? reglas?.recargosIds ?? [];
 
+    // `precioResuelto` ya viene convertido —lo decidió `calcular()`—; el resto
+    // de las líneas se convierten acá desde el precio de catálogo. Ninguna de
+    // las dos ramas puede traer un precio del cliente.
     const precioUnitario =
-      linea.precioUnitario !== undefined
-        ? linea.precioUnitario
-        : this.convertirAMonedaOficial(
-            item.precioBase,
-            item.monedaId,
-            tasaMap,
-            modoRedondeo,
-          );
+      precioResuelto ??
+      this.convertirAMonedaOficial(
+        item.precioBase,
+        item.monedaId,
+        tasaMap,
+        modoRedondeo,
+      );
 
     // El IVA de una línea lo decide la clasificación tributaria, NUNCA la lista
     // de impuestos: se saca cualquier 'iva' que venga —del ítem o pisado por la

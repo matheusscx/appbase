@@ -539,6 +539,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           {
+            receta_item_id: 'receta-uuid',
             ingrediente_item_id: 'ingrediente-pan',
             ingrediente_nombre: 'Pan',
             cantidad: '1',
@@ -549,6 +550,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            receta_item_id: 'receta-uuid',
             ingrediente_item_id: 'ingrediente-queso',
             ingrediente_nombre: 'Queso',
             cantidad: '20',
@@ -3084,6 +3086,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            receta_item_id: RECETA_ID,
             ingrediente_item_id: PAN_ID,
             ingrediente_nombre: 'Pan',
             ingrediente_unidad_medida: 'unidad',
@@ -3092,6 +3095,7 @@ describe('ItemsService', () => {
             bloqueante: true,
           },
           {
+            receta_item_id: RECETA_ID,
             ingrediente_item_id: TOMATE_ID,
             ingrediente_nombre: 'Tomate',
             ingrediente_unidad_medida: 'kg',
@@ -3102,6 +3106,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            receta_item_id: RECETA_ID,
             ingrediente_item_id: QUESO_ID,
             ingrediente_nombre: 'Queso',
             cantidad: '30',
@@ -3112,6 +3117,94 @@ describe('ItemsService', () => {
         // resolverGruposDeItem: la receta no tiene grupos de modificadores asociados.
         .mockResolvedValueOnce([]);
     }
+
+    /**
+     * El guard del lote, y del modo de falla que se le escapó a la primera
+     * versión: los mapas tienen que traer **clave para todo id pedido**, aunque
+     * ese ítem no tenga filas. Si el mapa solo se puebla con lo que la consulta
+     * devuelve, una receta sin extras da `undefined`, el `??` del resolver cae
+     * al método de un solo id y vuelve la consulta por línea que el lote vino a
+     * matar. Y el caso "sin filas" es el del seed: no siembra ni una fila de
+     * `receta_extras_permitidos`.
+     */
+    it('con los catálogos precargados no toca la base, ni siquiera si la receta no tiene extras', async () => {
+      const catalogos = await (async () => {
+        // Consultas del lote: componentes (no hay combos → no se llama),
+        // ingredientes, extras (vacío: la receta no tiene) y las de grupos, que
+        // son UNA sola acá: `cargarCatalogoGrupos` corta después de las
+        // asociaciones cuando nadie tiene grupos asociados.
+        managerMock.query
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              ingrediente_item_id: PAN_ID,
+              ingrediente_nombre: 'Pan',
+              ingrediente_unidad_medida: 'unidad',
+              cantidad: '1',
+              unidad_codigo: 'unidad',
+              bloqueante: true,
+            },
+          ])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([]);
+        return service.cargarCatalogosPersonalizacion(
+          managerMock as any,
+          TENANT,
+          [{ itemId: RECETA_ID, tipo: 'receta' }],
+        );
+      })();
+
+      // La clave existe aunque no haya filas: eso es lo que corta el `??`.
+      expect(catalogos.extras.has(RECETA_ID)).toBe(true);
+      expect(catalogos.extras.get(RECETA_ID)).toEqual([]);
+
+      managerMock.query.mockClear();
+      const result = await service.resolverPersonalizacionReceta(
+        managerMock as any,
+        TENANT,
+        RECETA_ID,
+        { omitidos: [PAN_ID], extras: [] },
+        catalogos,
+      );
+
+      expect(managerMock.query).not.toHaveBeenCalled();
+      expect(result.precioExtraTotal).toBe('0.0000');
+    });
+
+    /**
+     * El gemelo del de arriba por el segundo mapa del lote —el tercero está en
+     * `resolverPersonalizacionCombo`—. Van los tres y no uno porque el
+     * pre-poblado se revierte **por loader**: un mutante sobre
+     * `obtenerIngredientesRecetaPorIds` o sobre `obtenerComponentesComboPorIds`
+     * sobrevivía la suite entera cuando el único caso montado era el de extras.
+     * Lo que se protege es siempre lo mismo: el ítem SIN filas tiene que quedar
+     * en el mapa igual, o el `??` del resolver vuelve a consultar por línea.
+     */
+    it('una receta SIN ingredientes tampoco toca la base con el catálogo precargado', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // ingredientes: ninguno
+        .mockResolvedValueOnce([]) // extras: ninguno
+        .mockResolvedValueOnce([]); // grupos: sin asociaciones (corta acá)
+      const catalogos = await service.cargarCatalogosPersonalizacion(
+        managerMock as any,
+        TENANT,
+        [{ itemId: RECETA_ID, tipo: 'receta' }],
+      );
+      expect(catalogos.ingredientes.get(RECETA_ID)).toEqual([]);
+
+      managerMock.query.mockClear();
+      const result = await service.resolverPersonalizacionReceta(
+        managerMock as any,
+        TENANT,
+        RECETA_ID,
+        { omitidos: [], extras: [] },
+        catalogos,
+      );
+
+      expect(managerMock.query).not.toHaveBeenCalled();
+      expect(result.precioExtraTotal).toBe('0.0000');
+    });
 
     it('suma precios de extras del catálogo y arma snapshot', async () => {
       mockIngredientesYExtras();
@@ -3399,6 +3492,125 @@ describe('ItemsService', () => {
   });
 
   describe('resolverPersonalizacionCombo', () => {
+    /**
+     * El tercero de los mapas del lote —los otros dos están en
+     * `resolverPersonalizacionReceta`—. Si `obtenerComponentesComboPorIds` no
+     * pre-poblara clave para todo id pedido, un combo sin componentes receta
+     * daría `undefined`, el `??` caería a la lectura de un solo id y volvería la
+     * consulta por línea.
+     */
+    it('un combo SIN componentes receta tampoco toca la base con el catálogo precargado', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // combo_componentes: ninguno de tipo receta
+        .mockResolvedValueOnce([]); // grupos: sin asociaciones (corta acá)
+      const catalogos = await service.cargarCatalogosPersonalizacion(
+        managerMock as any,
+        TENANT,
+        [{ itemId: COMBO_ID, tipo: 'combo' }],
+      );
+      expect(catalogos.componentesCombo.get(COMBO_ID)).toEqual([]);
+
+      managerMock.query.mockClear();
+      const result = await service.resolverPersonalizacionCombo(
+        managerMock as any,
+        TENANT,
+        COMBO_ID,
+        { omitidos: [], extras: [] },
+        catalogos,
+      );
+
+      expect(managerMock.query).not.toHaveBeenCalled();
+      expect(result.precioExtraTotal).toBe('0.0000');
+    });
+
+    /**
+     * El `every` del combo, que hasta esta línea era una rama que ningún test
+     * ejercitaba (medido: su mutante sobrevivía la suite entera). Hoy es
+     * inalcanzable por construcción —el único productor de
+     * `CatalogosPersonalizacion` carga los grupos del combo Y de sus
+     * componentes—, así que el catálogo se arma **a mano** para montar el
+     * escenario del segundo productor futuro que precargue de menos.
+     *
+     * Lo que se protege es que un precargado incompleto cueste una consulta y no
+     * PLATA: sin el `every`, `catalogoDe` devolvería catálogo vacío para el
+     * componente, el `continue` saltearía sus grupos y el combo se cobraría más
+     * barato, sin excepción ni advertencia.
+     */
+    it('con un precargado al que le falta un componente, relee en vez de cobrar de menos', async () => {
+      const COMPONENTE_ID = 'componente-receta-uuid';
+      const OPCION_ID = 'opcion-cara-uuid';
+      const GRUPO_ID = 'grupo-uuid';
+      const ITEM_GRUPO = 'item-grupo-uuid';
+      // Precargado MUTILADO: trae al combo pero no a su componente.
+      const catalogosIncompletos = {
+        ingredientes: new Map(),
+        extras: new Map(),
+        grupos: new Map([
+          [COMBO_ID, { asociados: [], opcionesPorGrupo: new Map() }],
+        ]),
+        componentesCombo: new Map([
+          [
+            COMBO_ID,
+            [
+              {
+                componente_item_id: COMPONENTE_ID,
+                nombre: 'Hamburguesa',
+                cantidad: '1',
+              },
+            ],
+          ],
+        ]),
+      };
+
+      // Al releer, el catálogo real sí trae el grupo pago del componente.
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            item_id: COMPONENTE_ID,
+            grupo_modificador_id: GRUPO_ID,
+            item_grupo_id: ITEM_GRUPO,
+            nombre: 'Proteína',
+            min: 1,
+            max: 1,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_grupo_id: ITEM_GRUPO,
+            grupo_modificador_id: GRUPO_ID,
+            item_id: OPCION_ID,
+            nombre: 'Chuleta',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '1500.0000',
+          },
+        ]);
+
+      const result = await service.resolverPersonalizacionCombo(
+        managerMock as any,
+        TENANT,
+        COMBO_ID,
+        {
+          omitidos: [],
+          extras: [],
+          componentes: [
+            {
+              componenteItemId: COMPONENTE_ID,
+              unidad: 1,
+              grupos: [
+                { grupoId: GRUPO_ID, opciones: [{ itemId: OPCION_ID }] },
+              ],
+            },
+          ],
+        },
+        catalogosIncompletos,
+      );
+
+      // Releyó (no se quedó con el catálogo mutilado) y cobró el grupo.
+      expect(managerMock.query).toHaveBeenCalled();
+      expect(result.precioExtraTotal).toBe('1500.0000');
+    });
+
     const RECETA_ID = 'receta-combo-uuid';
     const PROTEINA_ID = 'proteina-uuid';
     const ITEM_GRUPO_ID = 'item-grupo-uuid';
@@ -3444,6 +3656,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            combo_item_id: COMBO_ID,
             componente_item_id: RECETA_ID,
             nombre: 'Hamburguesa',
             cantidad: '2',
@@ -3510,8 +3723,18 @@ describe('ItemsService', () => {
       // regreso al N+1 reventaba con un mock agotado y el error no decía nada
       // de lo que este test protege.
       const componentes = [
-        { componente_item_id: RECETA_ID, nombre: 'Hamburguesa', cantidad: '3' },
-        { componente_item_id: RECETA_B_ID, nombre: 'Pizza', cantidad: '3' },
+        {
+          combo_item_id: COMBO_ID,
+          componente_item_id: RECETA_ID,
+          nombre: 'Hamburguesa',
+          cantidad: '3',
+        },
+        {
+          combo_item_id: COMBO_ID,
+          componente_item_id: RECETA_B_ID,
+          nombre: 'Pizza',
+          cantidad: '3',
+        },
       ];
       const asociados = [
         {
@@ -3596,6 +3819,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            combo_item_id: COMBO_ID,
             componente_item_id: RECETA_ID,
             nombre: 'Hamburguesa',
             cantidad: '2',
@@ -3624,6 +3848,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            combo_item_id: COMBO_ID,
             componente_item_id: RECETA_ID,
             nombre: 'Hamburguesa',
             cantidad: '2',
@@ -3779,6 +4004,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            receta_item_id: 'receta-uuid',
             ingrediente_item_id: 'b',
             ingrediente_nombre: 'B',
             ingrediente_unidad_medida: 'unidad',
@@ -3824,20 +4050,28 @@ describe('ItemsService', () => {
       // Postgres — un mock devuelve lo que se le pida. Sin `ORDER BY` el orden
       // es el físico del heap, que cambia solo con cada UPDATE de la tabla, así
       // que dos ventas de la MISMA receta pueden bloquear en orden distinto.
+      //
+      // Desde el 2026-08-30 la consulta es la del loader por lote
+      // (`obtenerIngredientesRecetaPorIds`), así que ordena primero por receta:
+      // lo que importa acá es que `ingrediente_item_id` siga siendo la clave
+      // **final**, porque dentro de una receta ese es el orden de bloqueo.
       managerMock.query.mockResolvedValueOnce([]);
 
       await service.venderIngredientesReceta(managerMock as any, PARAMS);
 
       expect(managerMock.query).toHaveBeenNthCalledWith(
         1,
-        expect.stringMatching(/ORDER BY\s+ri\.ingrediente_item_id/),
-        ['receta-uuid', TENANT],
+        expect.stringMatching(
+          /ORDER BY\s+ri\.receta_item_id,\s*ri\.ingrediente_item_id/,
+        ),
+        [['receta-uuid'], TENANT],
       );
     });
 
     it('genera un movimiento de salida por cada ingrediente con la cantidad convertida', async () => {
       managerMock.query.mockResolvedValueOnce([
         {
+          receta_item_id: 'receta-uuid',
           ingrediente_item_id: 'pan',
           ingrediente_nombre: 'Pan',
           ingrediente_unidad_medida: 'unidad',
@@ -3846,6 +4080,7 @@ describe('ItemsService', () => {
           bloqueante: true,
         },
         {
+          receta_item_id: 'receta-uuid',
           ingrediente_item_id: 'carne',
           ingrediente_nombre: 'Carne',
           ingrediente_unidad_medida: 'kg',
@@ -3895,6 +4130,7 @@ describe('ItemsService', () => {
     it('propaga el error si un ingrediente bloqueante no tiene stock (aborta la venta)', async () => {
       managerMock.query.mockResolvedValueOnce([
         {
+          receta_item_id: 'receta-uuid',
           ingrediente_item_id: 'carne',
           ingrediente_nombre: 'Carne',
           ingrediente_unidad_medida: 'kg',
@@ -3916,6 +4152,7 @@ describe('ItemsService', () => {
     it('omite el movimiento y agrega advertencia si un ingrediente no bloqueante no tiene stock', async () => {
       managerMock.query.mockResolvedValueOnce([
         {
+          receta_item_id: 'receta-uuid',
           ingrediente_item_id: 'queso',
           ingrediente_nombre: 'Queso',
           ingrediente_unidad_medida: 'kg',
@@ -3946,6 +4183,7 @@ describe('ItemsService', () => {
     it('no engulle errores distintos de stock insuficiente en no-bloqueantes', async () => {
       managerMock.query.mockResolvedValueOnce([
         {
+          receta_item_id: 'receta-uuid',
           ingrediente_item_id: 'queso',
           ingrediente_nombre: 'Queso',
           ingrediente_unidad_medida: 'kg',
@@ -3968,6 +4206,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
+            receta_item_id: 'receta-uuid',
             ingrediente_item_id: 'pan',
             ingrediente_nombre: 'Pan',
             ingrediente_unidad_medida: 'unidad',
@@ -3976,6 +4215,7 @@ describe('ItemsService', () => {
             bloqueante: true,
           },
           {
+            receta_item_id: 'receta-uuid',
             ingrediente_item_id: 'tomate',
             ingrediente_nombre: 'Tomate',
             ingrediente_unidad_medida: 'kg',

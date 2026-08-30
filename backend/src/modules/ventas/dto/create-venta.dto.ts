@@ -14,10 +14,7 @@ import {
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
-import {
-  EsCosto,
-  EsMontoCobrado,
-} from '../../../common/decorators/escala-moneda.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 
@@ -35,27 +32,6 @@ export class LineaVentaDto {
   @IsOptional()
   @IsString()
   unidadCodigoPresentacion?: string;
-
-  /**
-   * Override opcional del `precio_base` del ítem. **Estrictamente positivo
-   * (decisión del owner, 2026-08-11):** el `0` era el único camino para dejar
-   * una línea en cero sin que quede rastro de quién la regaló.
-   *
-   * Prohibirlo no cierra ninguna venta gratis legítima: el campo es opcional y
-   * sin él el precio sale de `item.precioBase` (`ventas.service.ts`), que puede
-   * ser 0; y un regalo puntual se modela con un descuento, que sí deja traza.
-   */
-  //
-  // `@EsCosto()` (escala 4) y no `@EsMontoCobrado()`: es el precio **por
-  // unidad** de la línea, o sea una tasa. El monto aparece recién cuando el
-  // motor lo multiplica por `cantidad`, que es donde se cruza la frontera
-  // tasa→monto. Tratarlo como monto cobrado significaría que en CLP no se
-  // puede vender nada a un precio con decimales, cuando la columna persiste 4.
-  @IsOptional()
-  @IsNumberString()
-  @IsDecimalPositivo()
-  @EsCosto()
-  precioUnitario?: string;
 
   @IsOptional()
   @IsUUID(undefined, { each: true })

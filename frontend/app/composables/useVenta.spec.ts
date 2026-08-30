@@ -38,79 +38,66 @@ const item = (id: string, precio = '100'): ItemCatalogo => ({
   activo: true,
 })
 
-// ── Criterio único de precio: "sacar no cobra, agregar sí" ──────────────────
+// ── Qué viaja al motor: qué se pidió, nunca cuánto vale ─────────────────────
 //
-// Había DOS criterios distintos alimentando el mismo campo del mismo endpoint:
-// `personalizacionVacia` (para la que un "sin cebolla" ya contaba) en el POS, y
-// `tienePersonalizacionConRecargo` en salones (que lo ignoraba). Ganó el
-// segundo. Lo que estos casos fijan es que la unificación **no aplanó** las dos
-// preguntas: qué se registra y qué se cobra son cosas distintas.
-describe('personalización: qué se registra vs qué cambia el precio', () => {
+// Hasta el 2026-08-30 este composable decidía acá el precio de la línea
+// (`precioBase + extras`) y se lo mandaba al motor en `precioUnitario`. Lo hacía
+// **en la moneda del ítem**, así que una receta en USD se previsualizaba en
+// dólares y se cobraba en pesos. El precio pasó al servidor; lo que el cliente
+// manda es la personalización, y la manda IGUAL a los dos endpoints.
+describe('personalización: viaja qué se pidió, no cuánto vale', () => {
   const receta = (): ItemCatalogo => ({ ...item('receta-1'), tipo: 'receta' })
 
-  it('solo omitidos: la personalización viaja, el override de precio NO', () => {
+  it('solo omitidos: la personalización viaja al motor, ningún precio', () => {
     const pers: PersonalizacionPayload = {
       omitidos: ['ingrediente-cebolla'],
       extras: [],
     }
-    const r = agregarLinea([], receta(), CAT, pers, 'Sin cebolla', '999')
+    const r = agregarLinea([], receta(), CAT, pers, 'Sin cebolla')
 
     // Trazabilidad: el "sin cebolla" tiene que llegar a la comanda de cocina.
     expect(r[0]!.personalizacion).toEqual(pers)
     expect(r[0]!.personalizacionResumen).toBe('Sin cebolla')
-    // Precio: sacar no cobra, así que no se fija precio de línea.
-    expect(r[0]!.precioUnitarioOverride).toBeUndefined()
-    expect(toCalcularInput(r).lineas[0]).not.toHaveProperty('precioUnitario')
+    const linea = toCalcularInput(r).lineas[0]!
+    expect(linea).not.toHaveProperty('precioUnitario')
+    expect(linea.personalizacion).toMatchObject({
+      omitidos: ['ingrediente-cebolla'],
+    })
   })
 
-  it('un comentario tampoco cambia el precio, pero también viaja', () => {
+  it('con extras: viaja la personalización, tampoco el precio', () => {
     const pers: PersonalizacionPayload = {
       omitidos: [],
-      extras: [],
+      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
+    }
+    const r = agregarLinea([], receta(), CAT, pers, '+ Queso')
+
+    const linea = toCalcularInput(r).lineas[0]!
+    expect(linea).not.toHaveProperty('precioUnitario')
+    expect(linea.personalizacion).toMatchObject({
+      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
+    })
+  })
+
+  /**
+   * El invariante que reemplaza al criterio "sacar no cobra, agregar sí" que
+   * vivía acá: ese criterio se mudó al servidor (el resolver devuelve
+   * `precioExtraTotal` 0 cuando solo se omite). Lo que queda del lado del
+   * cliente, y es lo único que puede volver a romperse acá, es que la
+   * previsualización y el cobro le manden al backend **la misma** personalización.
+   * Si divergen, la pantalla tasa una cosa y la venta cobra otra.
+   */
+  it('toCalcularInput y toVentaLineasBody mandan la misma personalización', () => {
+    const pers: PersonalizacionPayload = {
+      omitidos: ['cebolla'],
+      extras: [{ ingredienteItemId: 'queso', unidades: 2 }],
       comentario: 'Bien cocido',
     }
-    const r = agregarLinea([], receta(), CAT, pers, 'Bien cocido', '999')
+    const r = agregarLinea([], receta(), CAT, pers, '+ Queso')
 
-    expect(r[0]!.personalizacion).toEqual(pers)
-    expect(r[0]!.precioUnitarioOverride).toBeUndefined()
-  })
-
-  it('con extras sí se fija el precio de la línea', () => {
-    const pers: PersonalizacionPayload = {
-      omitidos: [],
-      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
-    }
-    const r = agregarLinea([], receta(), CAT, pers, '+ Queso', '150')
-
-    expect(r[0]!.precioUnitarioOverride).toBe('150')
-    expect(toCalcularInput(r).lineas[0]).toMatchObject({ precioUnitario: '150' })
-  })
-
-  it('un override de "0" viaja, antes y ahora: el truthy sobre un string no filtraba nada', () => {
-    // `'0'` es truthy en JS, así que el chequeo viejo (`if (precioOverride)`) ya
-    // dejaba pasar el cero: la condición nueva NO cambia la conducta, solo dice
-    // lo que quiere decir. Lo que este caso fija es que el cero siga siendo un
-    // monto válido —`calcular` lo acepta a propósito— el día que alguien
-    // "arregle" el filtro creyendo que filtraba algo.
-    const pers: PersonalizacionPayload = {
-      omitidos: [],
-      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
-    }
-    const r = agregarLinea([], receta(), CAT, pers, '+ Queso', '0')
-
-    expect(r[0]!.precioUnitarioOverride).toBe('0')
-    expect(toCalcularInput(r).lineas[0]).toMatchObject({ precioUnitario: '0' })
-  })
-
-  it('un override vacío no viaja', () => {
-    const pers: PersonalizacionPayload = {
-      omitidos: [],
-      extras: [{ ingredienteItemId: 'queso', unidades: 1 }],
-    }
-    const r = agregarLinea([], receta(), CAT, pers, '+ Queso', '')
-
-    expect(r[0]!.precioUnitarioOverride).toBeUndefined()
-    expect(toCalcularInput(r).lineas[0]).not.toHaveProperty('precioUnitario')
+    expect(toCalcularInput(r).lineas[0]!.personalizacion).toEqual(
+      toVentaLineasBody(r)[0]!.personalizacion,
+    )
   })
 })
 
@@ -453,14 +440,12 @@ describe('carrito helpers', () => {
     })
   })
 
-  it('toCalcularInput incluye precioUnitario cuando hay override', () => {
-    const r = toCalcularInput([
-      { item: item('a'), cantidad: '2', precioUnitarioOverride: '1500' },
-    ])
-    expect(r).toEqual({ lineas: [{ itemId: 'a', cantidad: '2', precioUnitario: '1500' }] })
+  it('toCalcularInput de una línea sin personalización manda solo qué y cuánto', () => {
+    const r = toCalcularInput([{ item: item('a'), cantidad: '2' }])
+    expect(r).toEqual({ lineas: [{ itemId: 'a', cantidad: '2' }] })
   })
 
-  it('agregarLinea merge mantiene precioUnitarioOverride', () => {
+  it('agregarLinea merge suma la cantidad y conserva la personalización', () => {
     const receta = { ...item('r', '1000'), tipo: 'receta' }
     const pers: PersonalizacionPayload = {
       omitidos: [],
@@ -470,15 +455,14 @@ describe('carrito helpers', () => {
       item: receta,
       cantidad: '1',
       personalizacion: pers,
-      precioUnitarioOverride: '1500',
     }
-    const r = agregarLinea([linea], receta, CAT, pers, undefined, '1500')
+    const r = agregarLinea([linea], receta, CAT, pers, undefined)
     expect(r).toHaveLength(1)
     expect(r[0]!.cantidad).toBe('2')
-    expect(r[0]!.precioUnitarioOverride).toBe('1500')
+    expect(r[0]!.personalizacion).toEqual(pers)
   })
 
-  it('agregarLinea mantiene precioUnitarioOverride cuando la única personalización es de componentes (combo sin grupos propios)', () => {
+  it('agregarLinea conserva la personalización cuando lo único elegido son componentes (combo sin grupos propios)', () => {
     // Regresión: "Combo Especial" (burger con elección de Proteína, sin grupos
     // propios del combo) se descartaba en pos.vue/salones porque su
     // personalizacionVacia local no chequeaba `componentes`.
@@ -494,10 +478,15 @@ describe('carrito helpers', () => {
         },
       ],
     }
-    const r = agregarLinea([], combo, CAT, pers, 'Proteína: Carne', '7300')
+    const r = agregarLinea([], combo, CAT, pers, 'Proteína: Carne')
     expect(r).toHaveLength(1)
     expect(r[0]!.personalizacion).toEqual(pers)
-    expect(r[0]!.precioUnitarioOverride).toBe('7300')
+    // Y sobrevive el viaje al motor: desde que el precio lo calcula el servidor,
+    // perder los `componentes` acá ya no es "se cobra el combo pelado" sino
+    // "se cobra un combo distinto del que se pidió".
+    expect(
+      toCalcularInput(r).lineas[0]!.personalizacion?.componentes,
+    ).toHaveLength(1)
   })
 
   it('descontarStockCatalogo resta las cantidades vendidas', () => {

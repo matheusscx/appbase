@@ -79,7 +79,9 @@ Columnas:
 
 ### Precio
 
-`precioUnitario` efectivo = `item.precioBase + Σ (precioExtra × unidades)` de extras elegidos. El backend recalcula y valida; no confía en el precio enviado por el cliente. Omitir ingredientes **no** reduce el precio.
+`precioUnitario` efectivo = `item.precioBase + Σ (precioExtra × unidades)` de extras elegidos, convertido a moneda oficial. Omitir ingredientes **no** reduce el precio.
+
+**El cliente no manda ningún precio, ni siquiera para previsualizar** (2026-08-30). Antes sí: el POS y salones calculaban `precioBase + extras` y se lo mandaban al motor en `precioUnitario` —en la moneda del ítem, así que una receta en moneda extranjera se previsualizaba con la magnitud equivocada—. Hoy los dos endpoints reciben la **personalización** y el precio lo calcula el servidor con los mismos resolvers, así que la pantalla y la boleta no pueden discrepar. Ver `docs/features/motor-calculo-precios.md` § *El precio de una línea lo calcula el servidor*.
 
 ### Stock
 

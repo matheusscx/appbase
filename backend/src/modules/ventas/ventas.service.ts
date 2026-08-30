@@ -436,10 +436,17 @@ export class VentasService {
       // el redondeo real va a ocurrir **en esos tres `toFixed` de
       // `items.service.ts`**, no acá: esta línea va a seguir sin redondear. El
       // modo hay que dárselo allá.
+      // Sin `??`: desde el 2026-08-30 no hay override que preferirle al catálogo.
+      // `LineaVentaDto` tenía un `precioUnitario` opcional que esta línea
+      // honraba, pero no lo alimentaba ningún cliente —`toVentaLineasBody` del
+      // POS no lo incluye, la tienda lo evita a propósito (`online.service.ts`)
+      // y `cerrarCuenta` arma el body en el servidor— y era el segundo canal por
+      // el que un precio podía entrar desde afuera. El primero era el
+      // `precioUnitario` de `LineaDto`, que salió en el mismo commit.
       const precioOrigen =
         pers != null
           ? new Decimal(item.precioBase).plus(pers.precioExtraTotal).toFixed(4)
-          : (linea.precioUnitario ?? item.precioBase);
+          : item.precioBase;
       // La conversión sí redondea, y es la que se persiste en
       // `venta_detalles.precio_unitario`. Comparte función con la
       // previsualización: si las dos no redondean igual, el POS muestra un precio
@@ -470,7 +477,12 @@ export class VentasService {
         ({ linea, precioConvertido, cantidadCanonica }) => ({
           itemId: linea.itemId,
           cantidad: cantidadCanonica,
-          precioUnitario: precioConvertido,
+          // Canal interno del motor, no un override del cliente: el precio ya
+          // está convertido a moneda oficial y la personalización ya está
+          // resuelta acá arriba (para el snapshot y el stock). Sin esto
+          // `calcular` la resolvería de nuevo y esta venta pagaría las
+          // consultas dos veces. Ver `LineaCalculo` en `calcular.dto.ts`.
+          precioUnitarioResuelto: precioConvertido,
           descuentoIds: linea.descuentoIds,
           recargoIds: linea.recargoIds,
           impuestoIds: linea.impuestoIds,

@@ -56,7 +56,8 @@ Request:
 {
   "lineas": [
     { "itemId": "uuid", "cantidad": "2",
-      "precioUnitario": "100",            // opcional (override de precio_base)
+      "personalizacion": { ... },         // opcional; el precio de la línea lo
+                                           // calcula el servidor a partir de esto
       "descuentoIds": ["uuid"],           // opcional (reemplaza los del ítem)
       "recargoIds": [],                   // opcional (reemplaza los del ítem)
       "impuestoIds": []                   // opcional (reemplaza los ADICIONALES del
@@ -204,7 +205,72 @@ desempate entre reglas del mismo modo, donde el orden no mueve el total.
 ### DTOs
 
 - `CalcularVentaDto` / `LineaDto` (`dto/calcular.dto.ts`) — validación con
-  `class-validator`. `cantidad`/`precioUnitario` como `@IsNumberString`.
+  `class-validator`. `cantidad` como `@IsNumberString`, `personalizacion` como
+  `@ValidateNested`.
+- `CalcularVentaInput` / `LineaCalculo` (mismo archivo) — la entrada **del
+  service**, un campo más ancha que el DTO HTTP. Ver la regla de abajo.
+
+### El precio de una línea lo calcula el servidor (2026-08-30)
+
+**Regla:** el cliente manda **qué se pidió** —`itemId`, `cantidad`,
+`personalizacion`—, nunca **cuánto vale**. El precio de la línea sale de
+`item.precioBase` más lo que agregue la personalización, y se convierte a moneda
+oficial **una sola vez**.
+
+Hasta esta fecha `LineaDto` aceptaba un `precioUnitario` que el cliente calculaba
+(`precioBase + Σ extras`) y `resolverLinea` usaba **tal cual**: la conversión a
+moneda oficial vivía en la rama del `else`. Era el único lugar del sistema donde
+un precio cruzaba la frontera sin convertir, y el POS y salones lo alimentaban en
+la moneda del ítem. Una receta en USD se previsualizaba en dólares y se cobraba
+en pesos: pantalla `$14`, venta `13.566`, y el cajero cobrando contra el número
+falso. El cobro nunca estuvo mal —`ventas.service` siempre re-tasó por su
+cuenta—; lo que mentía era la previsualización.
+
+**Cómo se decide el precio, en orden:**
+
+1. `precioUnitarioResuelto` — el **canal interno** que usa `ventas.service`, que
+   ya resolvió la personalización (la necesita para el snapshot y para el stock) y
+   ya convirtió con el mismo `modo_redondeo`. No está en `LineaDto`, así que el
+   `ValidationPipe` (`whitelist: true`) lo saca de cualquier body: no hay forma de
+   fijarlo desde afuera. Sin este canal, `POST /ventas` resolvería la
+   personalización dos veces.
+2. `precioBase + precioExtraTotal`, convertido — la previsualización de una línea
+   personalizada. Usa los mismos resolvers de `ItemsService` que el cobro.
+3. `precioBase` convertido — el resto de las líneas.
+
+**Una línea que solo omite no cuesta nada.** El criterio *"sacar no cobra, agregar
+sí"* se evalúa **antes** de resolver: si la personalización no trae extras, grupos
+ni componentes, el precio es `precioBase` y no se consulta la base. Vivía duplicado
+en los dos clientes (`personalizacionAfectaPrecio` en el POS,
+`tienePersonalizacionConRecargo` en salones); los dos se borraron y esta es su única
+implementación. El costo, al saltear el resolver, es que la previsualización tampoco
+valida esa línea —la venta sí—: una previsualización **más permisiva** que el cobro
+es tolerable; una más estricta rompería el carrito sin decir por qué.
+
+**Los catálogos se leen por lote, no por línea.** Resolver una personalización
+necesita tres catálogos —ingredientes de la receta, extras permitidos, grupos de
+modificadores— y los tres son **por ítem**: sus consultas toman `(tenantId, itemId)`
+y nada de la línea. `calcular()` los precarga una vez para todos los ítems
+personalizados del cálculo (`ItemsService.cargarCatalogosPersonalizacion`: los
+componentes de los combos primero, porque los grupos de un combo incluyen los de
+sus componentes) y se los pasa a los resolvers, que ya no tocan la base. Son
+**entre 2 y 5 consultas según qué haya en el carrito** —techos, no valores fijos:
+solo recetas ≤ 4, solo combos ≤ 3, mezcla ≤ 5, y `cargarCatalogoGrupos` corta
+después de las asociaciones si nadie tiene grupos— y **no crecen con la cantidad
+de líneas**. Sin esto, una
+precuenta de cinco líneas con extras costaba ~18 consultas en un endpoint que
+corre con cada tecleo del carrito.
+
+⚠️ **Los mapas del precargado traen clave para todo id pedido, aunque el ítem no
+tenga filas.** No es un detalle: si solo se poblaran con lo que devuelve la
+consulta, una receta sin extras daría `undefined`, el resolver caería a su lectura
+de un solo id y volvería la consulta por línea. Y el caso "sin filas" es el del
+seed, que no siembra ninguna fila de `receta_extras_permitidos`. Lo fija un test
+con su mutante (`items.service.spec.ts`).
+
+⚠️ **El camino de la venta no paga nada de esto**: llega con
+`precioUnitarioResuelto` en todas las líneas, así que la lista a precargar queda
+vacía y no se consulta nada.
 
 ### Algoritmo (núcleo)
 
@@ -709,8 +775,9 @@ cd backend && npm test            # incluye los specs del motor y del servicio
   fórmula, tramos, método de pago, reglas diferidas, redondeo, nivel venta, y el
   congelado en la traza (`modo`, `valorEfectivo` incluido el de una regla por
   tramos, `valorSolicitado` de un descuento topeado).
-- `calculo-precios.service.spec.ts` — resolución de reglas asociadas vs override,
-  errores (regla inexistente, cantidad ≤ 0).
+- `calculo-precios.service.spec.ts` — resolución de reglas asociadas vs las de la
+  línea, tasación de la personalización, conversión a moneda oficial, errores
+  (regla inexistente, cantidad ≤ 0).
 
 ### E2E (Backend)
 

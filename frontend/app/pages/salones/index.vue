@@ -6,7 +6,6 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
   cuentaToCalcularInput,
-  precioUnitarioLinea,
   type SalonConMesas,
   type MesaResumen,
   type CuentaDetalle,
@@ -1013,7 +1012,7 @@ async function addProducto(item: ItemCatalogo) {
   }
 }
 
-async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string, _precioPreview?: string) {
+async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string) {
   if (!activeCuenta.value || !recetaItemId.value) return
   try {
     const personalizacion = personalizacionVacia(payload) ? undefined : payload
@@ -1061,8 +1060,34 @@ async function quitarLinea(linea: CuentaLineaDetalle) {
   }
 }
 
-function lineaSubtotal(linea: CuentaLineaDetalle): string {
-  return new Decimal(precioUnitarioLinea(linea)).times(linea.cantidad || '0').toString()
+/**
+ * El subtotal de la línea, sobre el precio unitario **que calculó el backend**:
+ * ya convertido a moneda oficial y ya con los extras de la personalización
+ * adentro.
+ *
+ * Hasta el 2026-08-30 el precio unitario se calculaba acá, sobre el
+ * `precioExtra` congelado del snapshot y sin convertir. Dos números distintos
+ * del mismo pedido convivían en la pantalla: este, en la moneda del ítem, y el
+ * total, que el motor calculaba aparte.
+ *
+ * ⚠️ **`precioUnitario`, no `subtotalNeto`.** Los dos coinciden para un ítem
+ * normal, pero `subtotalNeto` viene **desbruteado** cuando el ítem tiene
+ * `precio_incluye_impuesto = true` (precio de góndola): un plato de carta de
+ * $10.000 se dibujaría $8.403 debajo del nombre mientras el Total de abajo sigue
+ * en bruto, o sea las líneas dejarían de sumar el total en la misma pantalla —
+ * justo lo que este cambio vino a matar. Tampoco `totalLinea`, que ya trae
+ * descuentos e impuestos y cambiaría el significado de la fila.
+ * El POS elige el mismo campo (`CarritoPanel.vue`): una sola base para las dos
+ * pantallas.
+ *
+ * Va por `calculoVigente` por lo mismo que las advertencias y las promos de esta
+ * misma fila: se atribuye a una línea POR ÍNDICE, y con un cálculo que no
+ * corresponde a la cuenta que se está viendo el índice puede apuntar a otra.
+ */
+function lineaSubtotal(index: number, linea: CuentaLineaDetalle): string {
+  const unitario = calculoVigente.value?.lineas[index]?.precioUnitario
+  if (!unitario) return '—'
+  return formatMonto(new Decimal(unitario).times(linea.cantidad || '0').toString())
 }
 
 // ── Comanda / precuenta ─────────────────────────────────────────────────────
@@ -1557,7 +1582,7 @@ async function cerrarCuentaConPin(
                       <p v-if="linea.personalizacionTexto" class="text-xs text-muted">
                         {{ linea.personalizacionTexto }}
                       </p>
-                      <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
+                      <p class="text-xs text-muted">{{ lineaSubtotal(index, linea) }}</p>
                       <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
                       <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
                     </div>

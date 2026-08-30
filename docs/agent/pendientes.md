@@ -123,6 +123,25 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **Si una opción del menú desaparece con la mesa sentada, la precuenta entera queda en
+  guiones y sin un mensaje** (frontend/backend; visto el 2026-08-30 al cerrar el override de
+  `precioUnitario`, no reproducido todavía contra el stack) — desde ese día
+  `cuentaToCalcularInput` manda la personalización de cada línea y el backend la **re-tasa
+  contra el catálogo vivo**, que es lo que hace que la pantalla y el cobro coincidan. El
+  reverso: si un extra salió de la carta o una opción de grupo se borró después de que la
+  mesa pidió, `POST /calculo-precios/calcular` responde 400 para **toda** la cuenta,
+  `useCalculoPrecios` se traga el error a propósito y `lineaSubtotal` dibuja `—` en todas las
+  líneas, sin decir por qué.
+  ⚠️ Esa línea igual no se podía cobrar antes de este cambio —`cerrarCuenta` re-tasa por el
+  mismo camino y devolvía el mismo 400—, así que lo que cambió no es si se puede cobrar sino
+  **cuándo se entera el garzón y con qué mensaje**: antes veía la cuenta y el error salía al
+  cobrar; ahora la cuenta se apaga entera y en silencio.
+  ❓ **Qué medir primero:** si el 400 es realmente alcanzable con el flujo de borrado que hay
+  (¿el soft-delete de un ítem usado en una cuenta abierta ya está bloqueado? Hay un e2e que
+  dice que sí para el ítem de la línea, pero no para un **extra** ni para una **opción de
+  grupo**). Si no es alcanzable, se cierra como "no pasa"; si lo es, la salida barata es que
+  el composable deje de tragarse el error y la pantalla muestre qué línea lo causó.
+
 - [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local: la firma
   reproduce entera y quedan tres explicaciones de por qué esa conexión no volvió** (backend/tests, visto y medido el 2026-08-18 en el cierre del
   contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
@@ -1030,17 +1049,16 @@ venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos
 ✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
 contradicción de `costo: '0'` —cada una contestada y construida el mismo día
 ([`resueltos.md`](resueltos.md))—.
-✅ **Y una más el 2026-08-30**: la moneda del extra en el ticket, contestada en tres
-preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**
-([`resueltos.md`](resueltos.md)). Al construirla apareció una entrada nueva acá abajo —el
-override de `precioUnitario` sin convertir—, que el owner decidió no tomar de arrastre.
-**Quedan seis abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+✅ **Y dos más el 2026-08-30**: la moneda del extra en el ticket —contestada en tres
+preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**— y, ese mismo
+día, el **override de `precioUnitario`**, que había nacido acá al construir la primera y que
+el owner mandó sacar unas horas después ([`resueltos.md`](resueltos.md)).
+**Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
-más la nota de crédito (fiscal, frente propio), el **modo** que se da vuelta al cambiar de
-tipo, abierta el 2026-08-29 al cerrar la de la forma de importe, y el **override de
-`precioUnitario` sin convertir**, abierta el 2026-08-30 al construir la moneda del extra—; el
-conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
+tipo, abierta el 2026-08-29 al cerrar la de la forma de importe—; el conteo se recuenta con
+`awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
 ⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
 tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
 recordado.
@@ -1161,34 +1179,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
   agregar aserciones, no reorganizar los specs.
 
-
-- [ ] **El override de `precioUnitario` no se convierte, así que una línea personalizada en
-  moneda extranjera se cobra en la magnitud equivocada** (backend + frontend; medido el
-  2026-08-30 al construir la conversión del extra en el ticket, y el owner decidió **ese mismo
-  día no ampliar aquel frente**, así que nace como entrada propia) — para una línea con extras
-  pagos, POS y salones mandan `precioUnitario` como override con `precioBase + extras` **en la
-  moneda del ítem** (`useVenta.ts:213`, `useSalones.ts:235-237`), y el motor usa el override tal
-  cual: `linea.precioUnitario !== undefined ? linea.precioUnitario :
-  this.convertirAMonedaOficial(...)` (`calculo-precios.service.ts:591-598`). **Las dos ramas
-  están fijadas por tests contiguos y a propósito**: `calculo-precios.service.spec.ts:202`
-  ("respeta el override") y `:209`, titulado *"convierte el precio del ítem a moneda oficial
-  **cuando no hay override**"*. O sea que no es un olvido: es una semántica que nadie cruzó
-  contra el multi-moneda.
-  **La escena, medida end-to-end en el navegador contra el stack real** (receta en USD a 10 con
-  extra de 2, tasa 950, IVA 19%): el POS muestra `Total $14`, ofrece cobrar `$15` con propina y
-  la venta queda **`pagada_parcial`** con `totalFinal: "13566.0000"`. El cajero cobró quince
-  pesos por una venta de trece mil quinientos sesenta y seis. En la misma pantalla el carrito
-  muestra `$11.400 c/u` —convertido— al lado de un total sin convertir: las dos cuentas
-  conviven en la misma vista.
-  ⚠️ **No le pasa a nadie hoy:** ningún ítem personalizable está en moneda extranjera, igual
-  que con la UF como oficial. Nada lo impide, y el seed ya trae USD habilitada con tasa 950.
-  ⛔ **Toca el motor de cálculo**, así que va solo y con el sistema quieto.
-  **La pregunta para el owner:** ¿el override viaja convertido desde el cliente, o el motor lo
-  convierte como ya convierte `precioBase`? Son la misma cuenta en dos lugares distintos — y
-  hay un tercer camino que sugiere una salida más simple: `ventas.service.ts` **ignora** el
-  override cuando la línea tiene personalización y recalcula `precioBase + precioExtraTotal`
-  por su cuenta (`:436-439`). Si el que cobra ya no le cree al override, quizás lo que sobra es
-  el override.
 
 - [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
   seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**

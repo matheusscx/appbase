@@ -151,40 +151,38 @@ describe('Cálculo de precios (e2e)', () => {
   });
 
   /**
-   * `cantidad` se valida con `<= 0` en `resolverLinea`, `precioUnitario` no: con
-   * `@IsNumberString()` a secas un `-100` pasaba y el endpoint devolvía
-   * `totalFinal: -100`. Se alinea con el camino real de venta, que exige
-   * `IsDecimalPositivo`.
+   * El contrato que reemplaza a los dos tests que vivían acá —"rechaza un
+   * `precioUnitario` negativo" y "acepta un `precioUnitario` en 0"—: **el campo
+   * ya no existe**, así que no hay signo ni cero que validar. Lo que hay que
+   * proteger es que su desaparición sea real y no cosmética.
+   *
+   * ⚠️ El `ValidationPipe` corre con `whitelist: true` y **sin**
+   * `forbidNonWhitelisted` (`main.ts`), o sea que un cliente viejo que lo siga
+   * mandando NO recibe un 400: se le ignora en silencio. El test fija esa
+   * conducta —201 en las dos— porque es la que hay; lo que de verdad protege es
+   * la igualdad de los totales, que es lo que se rompe si el número del cliente
+   * vuelve a decidir la plata.
+   *
+   * Si algún día se activa `forbidNonWhitelisted`, este test se cae por el
+   * `conCampo.status` y **hay que actualizarlo a 400, no relajarlo**: rechazar
+   * también es una conducta correcta, pero es otra, y el test tiene que decir
+   * cuál rige.
    */
-  it('rechaza un precioUnitario negativo', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/calculo-precios/calcular')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        lineas: [{ itemId: ITEM_ID, cantidad: '1', precioUnitario: '-100' }],
-      });
+  it('ignora un precioUnitario en el body: el precio sale del catálogo', async () => {
+    const pedir = (linea: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId: ITEM_ID, cantidad: '1', ...linea }] });
 
-    expect(res.status).toBe(400);
-  });
+    const sinCampo = await pedir({});
+    const conCampo = await pedir({ precioUnitario: '999999' });
 
-  /**
-   * El contrario del de arriba, y no es simetría decorativa: `LineaVentaDto`
-   * pasó a exigir `> 0` el 2026-08-11 y este endpoint **no** lo siguió. Acá el
-   * `0` llega de dos composables que mandan el precio ya calculado de la línea
-   * (`useVenta.ts:197`, `useSalones.ts:200`), y vale 0 cuando el ítem vale 0 y
-   * la personalización no agrega nada pago. Este test fija esa divergencia:
-   * endurecerlo por simetría rompe el cobro en silencio — `useCalculoPrecios`
-   * se traga el error y el carrito nunca vuelve a estar vigente.
-   */
-  it('acepta un precioUnitario en 0 (ítem sin precio, personalización sin recargo)', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/calculo-precios/calcular')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        lineas: [{ itemId: ITEM_ID, cantidad: '1', precioUnitario: '0' }],
-      });
-
-    expect(res.status).toBe(201);
+    expect(sinCampo.status).toBe(201);
+    expect(conCampo.status).toBe(201);
+    const a = (sinCampo.body as ResultadoVentaResponse).totales.totalFinal;
+    const b = (conCampo.body as ResultadoVentaResponse).totales.totalFinal;
+    expect(b).toBe(a);
   });
 
   /**

@@ -62,14 +62,14 @@ function onCatalogoAdd(item: ItemCatalogo) {
   add(item)
 }
 
-function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string) {
+function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string) {
   const item = items.value.find((i) => i.id === recetaItemId.value)
   if (!item) return
   if (personalizacionVacia(payload)) {
     add(item)
   }
   else {
-    add(item, payload, resumen || undefined, precioPreview)
+    add(item, payload, resumen || undefined)
   }
   recetaDrawerOpen.value = false
   recetaItemId.value = null

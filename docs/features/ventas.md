@@ -67,7 +67,7 @@ Request:
     {
       "itemId": "uuid",
       "cantidad": "1",
-      "precioUnitario": "optional-override",    // opcional y > 0; usa precio_base del item si omite
+      "personalizacion": { ... },               // opcional (recetas y combos)
       "descuentoIds": ["uuid"],                 // opcional
       "recargoIds":   ["uuid"],                 // opcional
       "impuestoIds":  ["uuid"],                 // opcional
@@ -100,24 +100,23 @@ Response (201):
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
-- `400` — `precioUnitario` en `0` o negativo (ver regla abajo)
 
-**`precioUnitario` es estrictamente positivo (decisión del owner, 2026-08-11).** El
-campo es un *override* opcional del `precio_base` del ítem, y el `0` era el único camino
-para dejar una línea sin monto **sin rastro de quién la regaló**. Prohibirlo no cierra
-ninguna venta gratis legítima: se omite el campo y el precio sale de `item.precioBase`
-—que sí puede ser 0—, o el regalo se modela con un descuento, que queda en la traza del
-cálculo con su regla y su monto.
+**Una línea no lleva precio (2026-08-30).** El precio sale de `item.precioBase` —más lo
+que agregue la personalización— y lo calcula el servidor. Hasta esa fecha había un
+`precioUnitario` opcional y estrictamente positivo (decisión del owner del 2026-08-11: el
+`0` era el único camino para dejar una línea sin monto **sin rastro de quién la regaló**).
+Se sacó entero: no lo alimentaba ningún cliente —el POS no lo incluye en
+`toVentaLineasBody`, la tienda lo evita a propósito y `cerrarCuenta` arma el body en el
+servidor— y era el segundo canal por el que un precio podía entrar desde afuera. La venta
+gratis legítima sigue existiendo por los dos caminos de siempre: un ítem con
+`precio_base` 0, o un descuento, que queda en la traza del cálculo con su regla y su monto.
 
-⚠️ **La regla NO se extiende a `POST /api/calculo-precios/calcular`**, que sigue
-aceptando `0`. Parece el mismo campo y no es el mismo canal: al de venta no lo manda
-ningún productor (`toVentaLineasBody` no lo incluye), mientras que al de cálculo lo
-alimentan `useVenta.ts` y `useSalones.ts` con el precio **ya calculado** de la línea
-(`precioBase + extras`), que da 0 legítimamente cuando el ítem vale 0 y la
-personalización no agrega nada pago. Además `crear()` **ignora el override si la línea
-tiene personalización** —recalcula `precioBase + precioExtraTotal`—, así que endurecer
-el preview lo dejaría más estricto que la venta. Razón completa en el docblock de
-`calcular.dto.ts`.
+⚠️ El `ValidationPipe` corre con `whitelist: true` y **sin** `forbidNonWhitelisted`, así
+que un cliente que todavía mande `precioUnitario` no recibe un 400: se le **ignora en
+silencio** y la venta se cobra al precio de catálogo. Mismo comportamiento en
+`POST /api/calculo-precios/calcular`, donde el campo también se fue.
+Ver `docs/features/motor-calculo-precios.md` § *El precio de una línea lo calcula el
+servidor*.
 
 ### POST /api/ventas/:id/anular
 

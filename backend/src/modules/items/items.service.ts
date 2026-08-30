@@ -88,6 +88,42 @@ type GrupoDetalle = {
   }[];
 };
 
+export interface IngredienteReceta {
+  ingredienteItemId: string;
+  ingredienteNombre: string;
+  ingredienteUnidadMedida: string;
+  cantidad: string;
+  unidadCodigo: string;
+  bloqueante: boolean;
+}
+
+export interface ExtraPermitido {
+  ingredienteItemId: string;
+  ingredienteNombre: string;
+  ingredienteUnidadMedida: string;
+  cantidad: string;
+  unidadCodigo: string;
+  precioExtra: string;
+}
+
+export interface ComponenteCombo {
+  componente_item_id: string;
+  nombre: string;
+  cantidad: string;
+}
+
+/**
+ * Los catálogos que `resolverPersonalizacionReceta`/`…Combo` leerían por su
+ * cuenta, precargados por lote para varias líneas. Ver
+ * `cargarCatalogosPersonalizacion`.
+ */
+export interface CatalogosPersonalizacion {
+  ingredientes: Map<string, IngredienteReceta[]>;
+  extras: Map<string, ExtraPermitido[]>;
+  grupos: Map<string, CatalogoGrupos>;
+  componentesCombo: Map<string, ComponenteCombo[]>;
+}
+
 /**
  * Catálogo de grupos de modificadores de UN item: qué grupos tiene asociados y
  * qué opciones ofrece cada uno, con el override por `item_grupo_id` ya aplicado.
@@ -2284,21 +2320,30 @@ export class ItemsService {
     }));
   }
 
-  async obtenerIngredientesReceta(
+  /**
+   * Los ingredientes de VARIAS recetas en una consulta.
+   *
+   * Existe porque los tres catálogos que necesita `resolverPersonalizacionReceta`
+   * son **por ítem, no por línea** (`(tenantId, itemId)` y nada más), así que
+   * resolver las N líneas de un carrito los releía N veces. `calcular()` los
+   * precarga de una y se los pasa por `precargado`. La versión de un solo id
+   * quedó como envoltorio: una sola SQL, no dos que se puedan ir separando.
+   */
+  async obtenerIngredientesRecetaPorIds(
     manager: EntityManager | Db,
     tenantId: string,
-    recetaItemId: string,
-  ): Promise<
-    {
-      ingredienteItemId: string;
-      ingredienteNombre: string;
-      ingredienteUnidadMedida: string;
-      cantidad: string;
-      unidadCodigo: string;
-      bloqueante: boolean;
-    }[]
-  > {
+    recetaItemIds: string[],
+  ): Promise<Map<string, IngredienteReceta[]>> {
+    const ids = [...new Set(recetaItemIds)];
+    // Clave para TODO id pedido, aunque no tenga filas — ver
+    // `obtenerComponentesComboPorIds`.
+    const porReceta = new Map<string, IngredienteReceta[]>(
+      ids.map((id) => [id, []]),
+    );
+    if (!ids.length) return porReceta;
+
     const rows: {
+      receta_item_id: string;
       ingrediente_item_id: string;
       ingrediente_nombre: string;
       ingrediente_unidad_medida: string;
@@ -2306,41 +2351,67 @@ export class ItemsService {
       unidad_codigo: string;
       bloqueante: boolean;
     }[] = await manager.query(
-      `SELECT ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
+      `SELECT ri.receta_item_id, ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
               ip.unidad_medida AS ingrediente_unidad_medida,
               ri.cantidad, ri.unidad_codigo, ri.bloqueante
        FROM receta_ingredientes ri
        JOIN items i ON i.item_id = ri.ingrediente_item_id AND i.eliminado_el IS NULL
        JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
-       WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL
-       ORDER BY ri.ingrediente_item_id`,
-      [recetaItemId, tenantId],
+       WHERE ri.receta_item_id = ANY($1::uuid[]) AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL
+       ORDER BY ri.receta_item_id, ri.ingrediente_item_id`,
+      [ids, tenantId],
     );
-    return rows.map((r) => ({
-      ingredienteItemId: r.ingrediente_item_id,
-      ingredienteNombre: r.ingrediente_nombre,
-      ingredienteUnidadMedida: r.ingrediente_unidad_medida,
-      cantidad: r.cantidad,
-      unidadCodigo: r.unidad_codigo,
-      bloqueante: r.bloqueante,
-    }));
+    for (const r of rows) {
+      const lista = porReceta.get(r.receta_item_id) ?? [];
+      lista.push({
+        ingredienteItemId: r.ingrediente_item_id,
+        ingredienteNombre: r.ingrediente_nombre,
+        ingredienteUnidadMedida: r.ingrediente_unidad_medida,
+        cantidad: r.cantidad,
+        unidadCodigo: r.unidad_codigo,
+        bloqueante: r.bloqueante,
+      });
+      porReceta.set(r.receta_item_id, lista);
+    }
+    return porReceta;
   }
 
-  async obtenerExtrasPermitidos(
+  async obtenerIngredientesReceta(
     manager: EntityManager | Db,
     tenantId: string,
     recetaItemId: string,
-  ): Promise<
-    {
-      ingredienteItemId: string;
-      ingredienteNombre: string;
-      ingredienteUnidadMedida: string;
-      cantidad: string;
-      unidadCodigo: string;
-      precioExtra: string;
-    }[]
-  > {
+  ): Promise<IngredienteReceta[]> {
+    // Se aplanan todos los grupos en vez de pedir `.get(recetaItemId)`: la
+    // consulta lleva un solo id en el `ANY`, así que toda fila que vuelve es de
+    // esa receta. Depender de la clave haría que este método devolviera vacío el
+    // día que el `SELECT` deje de proyectar la columna del agrupamiento, que es
+    // un detalle del lote y no del contrato de acá.
+    return [
+      ...(
+        await this.obtenerIngredientesRecetaPorIds(manager, tenantId, [
+          recetaItemId,
+        ])
+      ).values(),
+    ].flat();
+  }
+
+  /** Los extras permitidos de VARIAS recetas en una consulta. Ver
+   *  `obtenerIngredientesRecetaPorIds` para el porqué. */
+  async obtenerExtrasPermitidosPorIds(
+    manager: EntityManager | Db,
+    tenantId: string,
+    recetaItemIds: string[],
+  ): Promise<Map<string, ExtraPermitido[]>> {
+    const ids = [...new Set(recetaItemIds)];
+    // Clave para TODO id pedido, aunque no tenga filas — ver
+    // `obtenerComponentesComboPorIds`.
+    const porReceta = new Map<string, ExtraPermitido[]>(
+      ids.map((id) => [id, []]),
+    );
+    if (!ids.length) return porReceta;
+
     const rows: {
+      receta_item_id: string;
       ingrediente_item_id: string;
       ingrediente_nombre: string;
       ingrediente_unidad_medida: string;
@@ -2348,23 +2419,149 @@ export class ItemsService {
       unidad_codigo: string;
       precio_extra: string;
     }[] = await manager.query(
-      `SELECT re.ingrediente_item_id, i.nombre AS ingrediente_nombre,
+      `SELECT re.receta_item_id, re.ingrediente_item_id, i.nombre AS ingrediente_nombre,
               ip.unidad_medida AS ingrediente_unidad_medida,
               re.cantidad, re.unidad_codigo, re.precio_extra
        FROM receta_extras_permitidos re
        JOIN items i ON i.item_id = re.ingrediente_item_id AND i.eliminado_el IS NULL
        JOIN item_producto ip ON ip.item_id = re.ingrediente_item_id
-       WHERE re.receta_item_id = $1 AND re.tenant_id = $2 AND re.eliminado_el IS NULL`,
-      [recetaItemId, tenantId],
+       WHERE re.receta_item_id = ANY($1::uuid[]) AND re.tenant_id = $2 AND re.eliminado_el IS NULL`,
+      [ids, tenantId],
     );
-    return rows.map((r) => ({
-      ingredienteItemId: r.ingrediente_item_id,
-      ingredienteNombre: r.ingrediente_nombre,
-      ingredienteUnidadMedida: r.ingrediente_unidad_medida,
-      cantidad: r.cantidad,
-      unidadCodigo: r.unidad_codigo,
-      precioExtra: r.precio_extra,
-    }));
+    for (const r of rows) {
+      const lista = porReceta.get(r.receta_item_id) ?? [];
+      lista.push({
+        ingredienteItemId: r.ingrediente_item_id,
+        ingredienteNombre: r.ingrediente_nombre,
+        ingredienteUnidadMedida: r.ingrediente_unidad_medida,
+        cantidad: r.cantidad,
+        unidadCodigo: r.unidad_codigo,
+        precioExtra: r.precio_extra,
+      });
+      porReceta.set(r.receta_item_id, lista);
+    }
+    return porReceta;
+  }
+
+  async obtenerExtrasPermitidos(
+    manager: EntityManager | Db,
+    tenantId: string,
+    recetaItemId: string,
+  ): Promise<ExtraPermitido[]> {
+    // Se aplanan todos los grupos en vez de pedir `.get(recetaItemId)`: la
+    // consulta lleva un solo id en el `ANY`, así que toda fila que vuelve es de
+    // esa receta. Depender de la clave haría que este método devolviera vacío el
+    // día que el `SELECT` deje de proyectar la columna del agrupamiento, que es
+    // un detalle del lote y no del contrato de acá.
+    return [
+      ...(
+        await this.obtenerExtrasPermitidosPorIds(manager, tenantId, [
+          recetaItemId,
+        ])
+      ).values(),
+    ].flat();
+  }
+
+  /** Los componentes receta de VARIOS combos en una consulta. */
+  async obtenerComponentesComboPorIds(
+    manager: EntityManager | Db,
+    tenantId: string,
+    comboItemIds: string[],
+  ): Promise<Map<string, ComponenteCombo[]>> {
+    const ids = [...new Set(comboItemIds)];
+    // Clave para TODO id pedido, aunque no tenga filas. Sin esto un ítem sin
+    // componentes no queda en el mapa, el `??` del llamador cae al método de un
+    // solo id y vuelve la consulta por línea que este lote vino a matar — y el
+    // caso "sin filas" no es raro: el seed no siembra una sola fila de
+    // `receta_extras_permitidos`. Mismo criterio que `cargarCatalogoGrupos`.
+    const porCombo = new Map<string, ComponenteCombo[]>(
+      ids.map((id) => [id, []]),
+    );
+    if (!ids.length) return porCombo;
+
+    const rows: (ComponenteCombo & { combo_item_id: string })[] =
+      await manager.query(
+        `SELECT cc.combo_item_id, cc.componente_item_id, i.nombre, cc.cantidad
+       FROM combo_componentes cc
+       JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+       WHERE cc.combo_item_id = ANY($1::uuid[]) AND cc.tenant_id = $2
+         AND cc.eliminado_el IS NULL AND i.tipo = 'receta'`,
+        [ids, tenantId],
+      );
+    for (const r of rows) {
+      const lista = porCombo.get(r.combo_item_id) ?? [];
+      lista.push({
+        componente_item_id: r.componente_item_id,
+        nombre: r.nombre,
+        cantidad: r.cantidad,
+      });
+      porCombo.set(r.combo_item_id, lista);
+    }
+    return porCombo;
+  }
+
+  /**
+   * Precarga, en **dos a cinco consultas que no crecen con la cantidad de
+   * líneas**, todo lo que
+   * `resolverPersonalizacionReceta` y `…Combo` leerían por su cuenta una vez por
+   * llamada.
+   *
+   * Existe porque esos catálogos son **por ítem, no por línea**: las tres
+   * consultas que dispara resolver una personalización toman `(tenantId, itemId)`
+   * y nada de la línea. Resolver las N líneas de un carrito las repetía N veces,
+   * y `POST /calculo-precios/calcular` corre en cada recálculo del carrito o de
+   * la cuenta (debounce de 300 ms), no una vez por venta.
+   *
+   * El rango sale de qué hay en el carrito: `combo_componentes` solo si hay
+   * combos, ingredientes y extras solo si hay recetas, y `cargarCatalogoGrupos`
+   * son **una o dos** —corta después de las asociaciones si nadie tiene grupos—.
+   * O sea que los números son techos, no valores: solo recetas ≤ 4, solo combos
+   * ≤ 3, mezcla ≤ 5, y el piso es 2 (combos sin grupos asociados).
+   *
+   * Los componentes van primero porque los grupos de un combo incluyen los de
+   * sus **componentes**: hay que saber quiénes son antes de pedirlos.
+   */
+  async cargarCatalogosPersonalizacion(
+    manager: EntityManager | Db,
+    tenantId: string,
+    items: { itemId: string; tipo: string }[],
+  ): Promise<CatalogosPersonalizacion> {
+    const recetaIds = items
+      .filter((i) => i.tipo === 'receta')
+      .map((i) => i.itemId);
+    const comboIds = items
+      .filter((i) => i.tipo === 'combo')
+      .map((i) => i.itemId);
+
+    const componentesCombo = await this.obtenerComponentesComboPorIds(
+      manager,
+      tenantId,
+      comboIds,
+    );
+    const componenteIds = [...componentesCombo.values()]
+      .flat()
+      .map((c) => c.componente_item_id);
+
+    // Secuenciales por el mismo motivo que el resto del módulo: dentro de una
+    // transacción comparten el `pg.Client` del contexto ALS y un `Promise.all`
+    // las encolaría igual (en `pg@9` la segunda tira). Ver ADR-020.
+    const ingredientes = await this.obtenerIngredientesRecetaPorIds(
+      manager,
+      tenantId,
+      recetaIds,
+    );
+    const extras = await this.obtenerExtrasPermitidosPorIds(
+      manager,
+      tenantId,
+      recetaIds,
+    );
+    const grupos = await this.cargarCatalogoGrupos(manager, tenantId, [
+      ...recetaIds,
+      ...comboIds,
+      ...componenteIds,
+    ]);
+
+    return { ingredientes, extras, grupos, componentesCombo };
   }
 
   async resolverPersonalizacionReceta(
@@ -2372,6 +2569,9 @@ export class ItemsService {
     tenantId: string,
     recetaItemId: string,
     dto?: PersonalizacionRecetaDto,
+    /** Catálogos ya cargados por lote. Si vienen, este método no lee la base
+     *  salvo lo que `resolverGruposDeItem` necesite y no esté acá. */
+    precargado?: CatalogosPersonalizacion,
   ): Promise<{
     snapshot: PersonalizacionRecetaSnapshot;
     precioExtraTotal: string;
@@ -2388,16 +2588,12 @@ export class ItemsService {
       throw new BadRequestException('Extra duplicado en la personalización');
     }
 
-    const ingredientes = await this.obtenerIngredientesReceta(
-      manager,
-      tenantId,
-      recetaItemId,
-    );
-    const extrasCat = await this.obtenerExtrasPermitidos(
-      manager,
-      tenantId,
-      recetaItemId,
-    );
+    const ingredientes =
+      precargado?.ingredientes.get(recetaItemId) ??
+      (await this.obtenerIngredientesReceta(manager, tenantId, recetaItemId));
+    const extrasCat =
+      precargado?.extras.get(recetaItemId) ??
+      (await this.obtenerExtrasPermitidos(manager, tenantId, recetaItemId));
 
     for (const id of dto?.omitidos ?? []) {
       if (!ingredientes.some((i) => i.ingredienteItemId === id)) {
@@ -2439,6 +2635,7 @@ export class ItemsService {
       tenantId,
       recetaItemId,
       dto?.grupos,
+      precargado?.grupos.get(recetaItemId),
     );
     const precioExtraTotalFinal = precioExtraTotal.plus(
       gruposResueltos.precioExtraTotal,
@@ -2647,24 +2844,22 @@ export class ItemsService {
     tenantId: string,
     comboItemId: string,
     dto?: PersonalizacionRecetaDto,
+    /** Ver `resolverPersonalizacionReceta`. */
+    precargado?: CatalogosPersonalizacion,
   ): Promise<{
     snapshot: PersonalizacionRecetaSnapshot;
     precioExtraTotal: string;
   }> {
     // 1. Componentes receta del combo con sus cantidades (para validar
     //    pertenencia y rango de unidad, y saber cuántas unidades esperar).
-    const compRows: {
-      componente_item_id: string;
-      nombre: string;
-      cantidad: string;
-    }[] = await manager.query(
-      `SELECT cc.componente_item_id, i.nombre, cc.cantidad
-       FROM combo_componentes cc
-       JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
-       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2
-         AND cc.eliminado_el IS NULL AND i.tipo = 'receta'`,
-      [comboItemId, tenantId],
-    );
+    const compRows: ComponenteCombo[] =
+      precargado?.componentesCombo.get(comboItemId) ??
+      (
+        await this.obtenerComponentesComboPorIds(manager, tenantId, [
+          comboItemId,
+        ])
+      ).get(comboItemId) ??
+      [];
     const compById = new Map(compRows.map((c) => [c.componente_item_id, c]));
 
     // 2. El catálogo de grupos del combo Y de sus componentes receta, de una.
@@ -2673,10 +2868,24 @@ export class ItemsService {
     //    (componente × unidad). El lote contesta las dos con dos consultas
     //    fijas: quien no aparece con grupos asociados, no tiene.
     const recetaIds = compRows.map((c) => c.componente_item_id);
-    const catalogos = await this.cargarCatalogoGrupos(manager, tenantId, [
-      comboItemId,
-      ...recetaIds,
-    ]);
+    // El precargado se usa **solo si trae a todos** los que hacen falta. La
+    // asimetría con los otros tres importa: acá un miss no cuesta una consulta,
+    // cuesta PLATA — `catalogoDe` devolvería catálogo vacío, el `continue` de
+    // más abajo saltearía los grupos de ese componente y el combo se cobraría
+    // más barato, sin excepción ni advertencia. Ante la duda se relee.
+    //
+    // ⚠️ **Hoy este `every` no puede dar false por el camino de la app**: el
+    // único productor de `CatalogosPersonalizacion` es
+    // `cargarCatalogosPersonalizacion`, que carga los grupos de los combos **y**
+    // de sus componentes. Es defensa contra un SEGUNDO productor que precargue
+    // de menos, y lo fija un test que arma el catálogo mutilado a mano
+    // (`items.service.spec.ts`, *"con un precargado al que le falta un
+    // componente…"*): sin el `every`, ese test cobra 0 en vez de 1500.
+    const idsDeGrupos = [comboItemId, ...recetaIds];
+    const catalogos =
+      precargado && idsDeGrupos.every((id) => precargado.grupos.has(id))
+        ? precargado.grupos
+        : await this.cargarCatalogoGrupos(manager, tenantId, idsDeGrupos);
     const catalogoDe = (itemId: string): CatalogoGrupos =>
       catalogos.get(itemId) ?? { asociados: [], opcionesPorGrupo: new Map() };
 

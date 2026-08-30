@@ -17,6 +17,104 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El override de `precioUnitario`: sale del sistema, y el que mentía era el preview (cerrado 2026-08-30)
+
+Venía de la § 4 (*necesita que el owner conteste*), donde había nacido unas horas antes al
+construir la moneda del extra en el ticket. El owner contestó *"saquemos el override"* el
+mismo día.
+
+**La premisa de la entrada era falsa en su mitad más importante, y se verificó antes de
+escribir código.** Decía que POS y salones mandan el override **en la venta** y que el motor
+lo cobra sin convertir. Medido:
+
+| | Qué mandaba | Qué pasaba |
+|---|---|---|
+| `POST /ventas` | **Nadie** mandaba `precioUnitario` | `ventas.service.ts:441` recalculaba `precioBase + precioExtraTotal` y **convertía**. El cobro estaba bien. |
+| `POST /calculo-precios/calcular` | POS y salones mandaban `precioBase + extras` sin convertir | `resolverLinea` lo usaba tal cual. **La pantalla mentía.** |
+
+El `calcular.dto.ts` ya lo decía por escrito (*"al de venta no lo manda nadie"*) y la entrada
+lo contradecía. O sea que la venta de USD 12 nunca se cobró mal: se persistía en `13.566`.
+Lo que estaba roto era que el POS mostraba `$14` y el cajero cobraba contra ese número, y la
+venta quedaba `pagada_parcial`.
+
+**Lo que se construyó** (un commit para el contrato, porque partirlo dejaba `main` peor: sin
+la mitad del cliente, el preview perdía los extras enteros **en todas las monedas**, no solo
+en las extranjeras — lo bloqueó la revisión independiente):
+
+1. `LineaDto` cambia `precioUnitario` por `personalizacion`, y `calcular()` tasa la
+   personalización con los mismos resolvers de `ItemsService` que usa el cobro, convirtiendo
+   una sola vez. El canal interno que usa `ventas.service` para no re-resolver lo que ya
+   resolvió se llama `precioUnitarioResuelto`, **no está en el DTO**, y el `ValidationPipe`
+   (`whitelist: true`) lo saca de cualquier body: `POST /ventas` no paga ni una consulta nueva.
+2. El POS y salones mandan la personalización y ningún precio. Se borraron
+   `precioUnitarioLinea`, `precioUnitarioOverride`, `tienePersonalizacionConRecargo` y
+   `personalizacionAfectaPrecio`: **el criterio "sacar no cobra, agregar sí" vive ahora en el
+   servidor**, cuyo resolver devuelve `precioExtraTotal` 0 cuando lo único que se hizo fue
+   omitir.
+3. `LineaVentaDto.precioUnitario` también sale: no lo alimentaba ningún cliente, pero era el
+   segundo canal por el que un precio podía entrar desde afuera.
+
+**Un hallazgo extra, del mismo tipo y hasta entonces sin anotar:** en salones el preview
+tasaba desde el **snapshot congelado** de la línea mientras `cerrarCuenta` mapea ese snapshot
+de vuelta a ids y deja que `ventas.service` **re-tase contra el catálogo vivo**. Un extra que
+cambiaba de precio con la mesa sentada hacía diferir pantalla y boleta. Cerrado por
+construcción: ahora los dos mandan lo mismo.
+
+**Qué lo fija.** Unitarios: una receta en USD a 10 con extra de 2 y tasa 950 da
+`subtotalNeto '11400.000000'` —el mutante que devuelve el precio sin convertir da
+`'12.000000'`, que es exactamente la conducta vieja— y un combo se tasa por
+`resolverPersonalizacionCombo` —el mutante que llama siempre a la variante receta lo caza;
+sin ese test sobrevivía la suite entera y en producción devolvería un `precioExtraTotal` sin
+los grupos de los componentes—. E2E: el preview y la venta del mismo pedido dan `13.566`, y
+la venta se cobra **con el total que devolvió el preview**, así que si vuelven a divergir el
+pago queda corto y la venta `pagada_parcial`. Frontend: `toCalcularInput` y
+`toVentaLineasBody` mandan la misma personalización, y el body de salones no lleva un solo
+número de plata.
+
+**Tres cosas que la revisión independiente encontró y no eran del diff que yo miraba:** la
+tienda online reenviaba el campo nuevo al monto que se autoriza contra la tarjeta pero no al
+snapshot que materializa la venta (se descarta ahí, junto a `cuentaId` y `canal`, por la
+misma doctrina de "este camino cobra"); la rama de combo no la tocaba ningún test; y un
+comentario del e2e bendecía un `forbidNonWhitelisted` que el propio test habría hecho fallar.
+
+📌 **El costo, y qué se hizo con él.** La segunda revisión bloqueó por un N+1 nuevo en el
+camino que más se invoca, y la tercera lo volvió a bloquear con la corrección de rumbo que
+hacía falta: yo había escrito que la relectura por línea era *"inherente"*, y es falso — las
+tres consultas toman `(tenantId, itemId)` y **nada** de la línea, o sea que son catálogo por
+ítem y se batchean enteras. Se sacó en el momento, que es lo que manda `CLAUDE.md`:
+
+- `ItemsService.cargarCatalogosPersonalizacion` precarga los tres catálogos en **2 a 5
+  consultas que no crecen con las líneas** (los componentes de los combos primero: los grupos
+  de un combo incluyen los de sus componentes), y `resolverPersonalizacionReceta`/`…Combo` los
+  reciben por un parámetro opcional — sin él se comportan exactamente como antes, así que el
+  cobro no cambia. ⚠️ Y **el cobro no lo usa**: `ventas.service` sigue resolviendo la
+  personalización con un `await` por línea, como antes de este frente. No es deuda que este
+  cambio agregue —está igual que en `HEAD`— pero el lote nuevo lo resolvería con dos líneas, y
+  lo que se midió acá es la **precuenta**, no la venta.
+- `obtenerIngredientesReceta` y `obtenerExtrasPermitidos` pasaron a ser envoltorios de sus
+  gemelos por lote: una sola SQL cada uno, no dos que se puedan ir separando.
+- Y antes de todo eso, el corto circuito: una línea que solo omite ingredientes no se resuelve
+  y no consulta nada. El criterio *"sacar no cobra, agregar sí"*, que hasta ese día vivía
+  duplicado en los dos clientes, ahora se evalúa en el servidor antes de tocar la base.
+
+Una precuenta de cinco líneas con extras pasó de ~18 consultas a **3 o 4** —según si alguna
+receta tiene grupos asociados; los números de arriba son techos, no valores fijos—. Lo fijan
+cuatro mutantes: quitarle el catálogo precargado a los resolvers hace fallar el test que cuenta las
+llamadas al lote, y revertir el pre-poblado de **cada uno** de los tres mapas hace fallar su
+propio caso —receta sin extras, receta sin ingredientes, combo sin componentes receta—. Ese
+segundo modo de falla se le escapó a la primera versión del lote y lo cazó la cuarta revisión
+(es el caso del seed, que no siembra ninguna fila de `receta_extras_permitidos`); que hiciera
+falta **un caso por mapa** y no uno solo lo midió la quinta, con un mutante por loader.
+
+📌 **Y un bug que solo la revisión vio:** el monto de línea del salón había quedado leyendo
+`subtotalNeto`, que viene **desbruteado** cuando el ítem tiene `precio_incluye_impuesto`. Un
+plato de carta de $10.000 se habría dibujado $8.403 debajo del nombre, con el Total de abajo
+en bruto: las líneas dejando de sumar el total en la misma pantalla, que es exactamente el
+síntoma que este frente vino a matar. El seed trae la columna en `false`, así que ni el e2e ni
+el smoke lo veían. Va por `precioUnitario × cantidad`, el mismo campo que elige el POS.
+
+---
+
 ## El unitario de vigencia de tokens se cae una semana por año, por el cambio de hora (cerrado 2026-08-30)
 
 - [ ] **`tokens-acceso.service.spec.ts` afirma que 7 días son 168 horas, y cruzando el cambio

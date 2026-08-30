@@ -3,7 +3,6 @@ import Decimal from 'decimal.js'
 import { useResultadoCalculado, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import {
-  personalizacionAfectaPrecio,
   personalizacionVacia,
   type PersonalizacionPayload,
 } from './useRecetaPersonalizacion'
@@ -42,8 +41,6 @@ export interface CarritoLinea {
   personalizacion?: PersonalizacionPayload
   /** texto UI precomputado al confirmar drawer */
   personalizacionResumen?: string
-  /** base+extras cuando la receta está personalizada */
-  precioUnitarioOverride?: string
 }
 
 export interface PagoInput {
@@ -97,16 +94,9 @@ export function agregarLinea(
   catalogo: UnidadCat[],
   personalizacion?: PersonalizacionPayload,
   personalizacionResumen?: string,
-  precioUnitarioOverride?: string,
 ): CarritoLinea[] {
   const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
   const resumen = pers ? personalizacionResumen : undefined
-  // El override de precio se rige por el criterio de RECARGO, no por el de
-  // trazabilidad: una línea con solo "sin cebolla" viaja a la comanda pero no
-  // fija precio. Ver `personalizacionAfectaPrecio`.
-  const precioOverride = personalizacionAfectaPrecio(pers)
-    ? precioUnitarioOverride
-    : undefined
   const unidadBase = unidadBaseItem(item)
 
   const idx = lineas.findIndex(
@@ -147,14 +137,6 @@ export function agregarLinea(
   if (pers) {
     nueva.personalizacion = pers
     if (resumen) nueva.personalizacionResumen = resumen
-    // `!= null` y no truthy. **No cambia la conducta**: `precioOverride` es un
-    // STRING y `'0'` ya era truthy, así que el cero viajaba antes y viaja ahora.
-    // Lo que cambia es que la condición diga lo que quiere decir — el truthy
-    // sobre un string parecía filtrar el cero y no filtraba nada, y es la clase
-    // de chequeo que se cae solo el día que alguien endurece el DTO.
-    if (precioOverride != null && precioOverride !== '') {
-      nueva.precioUnitarioOverride = precioOverride
-    }
   }
   return [...lineas, nueva]
 }
@@ -193,6 +175,30 @@ export function setCantidad(
   return lineas.map((l, i) => (i === index ? { ...l, cantidad } : l))
 }
 
+/**
+ * La personalización tal como la esperan los dos endpoints, en un solo lugar.
+ *
+ * Que `toCalcularInput` y `toVentaLineasBody` manden **exactamente la misma
+ * forma** no es prolijidad: desde el 2026-08-30 el precio de una línea
+ * personalizada lo calcula el servidor a partir de esto, así que si las dos
+ * formas divergen, la pantalla y el cobro tasan cosas distintas. Antes divergían
+ * a propósito —el preview mandaba un `precioUnitario` calculado acá y la venta
+ * mandaba la personalización—, y esa era justamente la grieta: el precio
+ * viajaba sin convertir a moneda oficial.
+ */
+function personalizacionBody(p: PersonalizacionPayload) {
+  return {
+    omitidos: p.omitidos,
+    extras: p.extras.map((e) => ({
+      ingredienteItemId: e.ingredienteItemId,
+      unidades: e.unidades,
+    })),
+    ...(p.comentario ? { comentario: p.comentario } : {}),
+    ...(p.grupos?.length ? { grupos: p.grupos } : {}),
+    ...(p.componentes?.length ? { componentes: p.componentes } : {}),
+  }
+}
+
 export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
   return {
     lineas: lineas.map((l) => ({
@@ -204,8 +210,8 @@ export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
             unidadCodigoPresentacion: l.unidadCodigoPresentacion,
           }
         : {}),
-      ...(l.precioUnitarioOverride != null && l.precioUnitarioOverride !== ''
-        ? { precioUnitario: l.precioUnitarioOverride }
+      ...(l.personalizacion
+        ? { personalizacion: personalizacionBody(l.personalizacion) }
         : {}),
     })),
   }
@@ -222,24 +228,7 @@ export function toVentaLineasBody(lineas: CarritoLinea[]) {
         }
       : {}),
     ...(l.personalizacion
-      ? {
-          personalizacion: {
-            omitidos: l.personalizacion.omitidos,
-            extras: l.personalizacion.extras.map((e) => ({
-              ingredienteItemId: e.ingredienteItemId,
-              unidades: e.unidades,
-            })),
-            ...(l.personalizacion.comentario
-              ? { comentario: l.personalizacion.comentario }
-              : {}),
-            ...(l.personalizacion.grupos?.length
-              ? { grupos: l.personalizacion.grupos }
-              : {}),
-            ...(l.personalizacion.componentes?.length
-              ? { componentes: l.personalizacion.componentes }
-              : {}),
-          },
-        }
+      ? { personalizacion: personalizacionBody(l.personalizacion) }
       : {}),
   }))
 }
@@ -416,7 +405,6 @@ export function useVenta() {
     item: ItemCatalogo,
     personalizacion?: PersonalizacionPayload,
     personalizacionResumen?: string,
-    precioUnitarioOverride?: string,
   ) {
     lineas.value = agregarLinea(
       lineas.value,
@@ -424,7 +412,6 @@ export function useVenta() {
       catalogo(),
       personalizacion,
       personalizacionResumen,
-      precioUnitarioOverride,
     )
   }
   function quitar(index: number) {

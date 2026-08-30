@@ -18,7 +18,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  confirm: [PersonalizacionPayload, string, string]
+  confirm: [PersonalizacionPayload, string]
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -302,11 +302,14 @@ function agregar() {
       })
     }
   }
+  // `precioPreview` NO viaja: desde el 2026-08-30 el precio de la línea lo
+  // calcula el servidor. Acá sigue vivo para el label del botón ("Agregar ·
+  // $X"), que muestra el precio del ítem en SU moneda y es una ayuda visual,
+  // no el número que se cobra.
   emit(
     'confirm',
     buildPersonalizacionPayload(omitidos, extras, comentario.value, grupos, componentes),
     resumenPreview.value,
-    precioPreview.value,
   )
   open.value = false
 }

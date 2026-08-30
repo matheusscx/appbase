@@ -1421,7 +1421,6 @@ describe('VentasService', () => {
           {
             itemId: 'receta-uuid',
             cantidad: '1',
-            precioUnitario: '9999.0000',
             personalizacion: {
               extras: [{ ingredienteItemId: QUESO_ID }],
             },
@@ -1477,7 +1476,9 @@ describe('VentasService', () => {
           lineas: [
             expect.objectContaining({
               itemId: 'receta-uuid',
-              precioUnitario: '4000.0000',
+              // El canal interno del motor, no un override del cliente: la venta
+              // ya resolvió la personalización y ya convirtió. Ver `LineaCalculo`.
+              precioUnitarioResuelto: '4000.0000',
             }),
           ],
         }),

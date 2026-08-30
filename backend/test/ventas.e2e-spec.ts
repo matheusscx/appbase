@@ -319,12 +319,31 @@ describe('Ventas (e2e)', () => {
     // arqueo. Un guard de "monto > 0" sobre el movimiento tumbaría la venta
     // entera con 422 — la regresión que casi meto al endurecer el signo.
     it('acepta una venta donde un pago se devuelve entero (movimiento de caja en cero)', async () => {
-      const precio = '500.0000';
+      // El escenario necesita un total EXACTO y conocido (595): con dos pagos de
+      // 300 y 595, el segundo cubre la venta entera y el primero queda neto cero.
+      // Hasta el 2026-08-30 ese precio se fijaba con un `precioUnitario` en el
+      // body; ese campo ya no existe, así que el precio viene de donde tiene que
+      // venir: un ítem propio del test. `exento` va EXPLÍCITO —invariante 5 de
+      // `CLAUDE.md`— y además es lo que hace que `precioBase` sea el total: con
+      // IVA encima el segundo pago no cubriría la venta y el escenario se cae.
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio vuelto entero E2E ${Date.now()}`,
+          precioBase: '595',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
         .set('Authorization', `Bearer ${token}`)
         .send({
-          lineas: [{ itemId: ITEM_ID, cantidad: '1', precioUnitario: precio }],
+          lineas: [{ itemId: servicioId, cantidad: '1' }],
           pagos: [
             { metodoPagoId: EFECTIVO_ID, monto: '300.0000' },
             { metodoPagoId: EFECTIVO_ID, monto: '595.0000' },
@@ -343,6 +362,49 @@ describe('Ventas (e2e)', () => {
         [ventaId],
       );
       expect(movimientos.map((m) => Number(m.monto))).toContain(0);
+    });
+
+    /**
+     * El `precioUnitario` de la línea se fue el 2026-08-30: el precio lo calcula
+     * el servidor. Este e2e reemplaza al describe `LineaVentaDto` de
+     * `create-venta.dto.spec.ts`, que afirmaba sobre el signo de ese campo — y
+     * que además no podía probar esto: `plainToInstance` + `validate` no corre
+     * el `ValidationPipe`, así que el strip del whitelist solo se ve por HTTP.
+     *
+     * ⚠️ El pipe corre con `whitelist: true` **sin** `forbidNonWhitelisted`
+     * (`main.ts`), así que un cliente viejo NO recibe 400: se le ignora en
+     * silencio y se le cobra el precio de catálogo. Si algún día se activa
+     * `forbidNonWhitelisted`, este test se cae por el `status` y hay que
+     * actualizarlo a 400, no relajarlo.
+     */
+    it('ignora un precioUnitario en el body de la venta: cobra el precio de catálogo', async () => {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio sin override E2E ${Date.now()}`,
+          precioBase: '595',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: servicioId, cantidad: '1', precioUnitario: '999999' },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '595.0000' }],
+        });
+
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse & { totalFinal: string };
+      expect(venta.totalFinal).toBe('595.0000');
+      expect(venta.estado).toBe('pagada');
     });
 
     it('retorna 400 con payload vacío (validación DTO)', async () => {

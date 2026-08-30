@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import { useApiFetch } from './useApiFetch'
+import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 
 // ── Tipos del contrato del motor de cálculo de precios ──────────────────────
 
@@ -8,8 +9,16 @@ export interface CalcularLineaInput {
   cantidad: string
   cantidadPresentacion?: string
   unidadCodigoPresentacion?: string
-  /** Override opcional del precio_base del ítem. */
-  precioUnitario?: string
+  /**
+   * Qué se pidió en esta línea. **El precio lo calcula el servidor** a partir de
+   * esto (`precioBase + Σ extras`, convertido a moneda oficial una sola vez).
+   *
+   * Hasta el 2026-08-30 acá había un `precioUnitario` que el cliente calculaba y
+   * mandaba: era `precioBase + extras` **en la moneda del ítem**, y el motor lo
+   * usaba tal cual. Una receta en USD se previsualizaba en dólares y se cobraba
+   * en pesos. Gemelo de `LineaDto` (backend): al tocar una punta, tocar la otra.
+   */
+  personalizacion?: PersonalizacionPayload
   /** Si se pasa, reemplaza las reglas asociadas al ítem. */
   descuentoIds?: string[]
   recargoIds?: string[]

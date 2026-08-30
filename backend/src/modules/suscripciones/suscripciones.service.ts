@@ -97,8 +97,9 @@ export class SuscripcionesService {
     //    Hoy los dos conjuntos son idénticos: la venta llama a `calcular` con
     //    argumentos equivalentes (mismo tenant, mismo ítem, cantidad 1, sin
     //    `metodoPagoId` ni reglas a nivel venta en ninguno de los dos; la venta
-    //    manda además `precioUnitario`, que `resolverLinea` deriva igual cuando
-    //    falta), y las advertencias que la venta agrega por su cuenta son de
+    //    manda además `precioUnitarioResuelto` —el canal interno del motor,
+    //    desde el 2026-08-30—, que `resolverLinea` deriva igual cuando falta), y
+    //    las advertencias que la venta agrega por su cuenta son de
     //    recetas y combos, inalcanzables acá porque el paso 1 rechaza todo lo que
     //    no sea `tipo='suscripcion'`.
     //    Que sean idénticos ya NO es una coincidencia: desde el 2026-08-21 los

@@ -201,6 +201,9 @@ Lo mínimo para decidir si hay que leer más. El detalle vive en un solo lugar.
   `tenants.calculo_descuentos`. **Cada paso cierra cuantizado a la escala de la moneda
   oficial** (`moneda.decimales`, el minor unit) con el `modo_redondeo` del tenant; los
   totales se **derivan** de sus componentes, nunca se cuantizan aparte.
+  **El precio de una línea lo calcula el servidor**: el cliente manda qué se pidió
+  (`itemId`, `cantidad`, `personalizacion`), nunca cuánto vale. Ningún endpoint acepta
+  un precio de línea, ni siquiera para previsualizar.
   → Antes de tocarlo: `docs/features/motor-calculo-precios.md`.
 - **Fiscal (SII)** — la emisión electrónica llega a futuro; se diseña compatible sin
   integrarla. Regla: congelar el hecho fiscal en la transacción, diferir lo que solo
