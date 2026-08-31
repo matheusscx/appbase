@@ -26,6 +26,9 @@ una línea ya pedida tiene que re-preciar, no re-validar"*, más la regla en
 2. **El extra se cobra al precio que tenía cuando se pidió** ($700, no $1.200).
 3. **El plato también** — *"¿cuál carta? si la hamburguesa se pidió en 5 mil se paga en
    5 mil"*. Una sola regla, sin excepciones entre plato y extras.
+4. **Los descuentos y recargos de catálogo también se congelan.** Poner un 20% con la mesa
+   sentada **no** le llega a esa mesa, y sacarlo tampoco se lo quita. La regla no tiene
+   excepciones: lo que la mesa tenía al pedir es lo que paga.
 
 ## Global Constraints
 
@@ -34,8 +37,13 @@ una línea ya pedida tiene que re-preciar, no re-validar"*, más la regla en
 - **Lo fiscal queda afuera, explícitamente.** Impuestos, tasas y documentos tributarios se
   siguen leyendo del catálogo vivo al cobrar. La regla del owner, llevada hasta el final,
   también los congelaría — pero eso es **ADR-010** y abre su propio frente, con su propia
-  sesión. No decidirlo acá. Lo mismo para descuentos y recargos de catálogo: ver
-  "Preguntas abiertas".
+  sesión. No decidirlo acá.
+- **Se congela lo que ENTRA, no lo que sale.** Es lo que hace convivir la decisión 4 con la
+  frontera fiscal. La línea guarda sus **insumos** —precio unitario, y qué descuentos y
+  recargos regían con qué valor cuando se pidió— y el motor sigue corriendo su pipeline
+  completo al cobrar, con los impuestos vivos. Congelar el **resultado** (el total de la
+  línea) sería más fácil y está mal: mete lo fiscal adentro del congelado por la ventana,
+  justo lo que ADR-010 no quiere.
 - **Dinero con Decimal.js**, nunca `number`. Cada paso cierra cuantizado a la escala de la
   moneda oficial con el `modo_redondeo` del tenant.
 - **El cliente nunca manda un precio** (`1970ccbd`). Esto no lo reabre: el precio lo sigue
@@ -78,7 +86,12 @@ código exacto, porque dependen de lo que se resuelva acá.
 
 **Interfaces:**
 - Produce: `CuentaLinea.precioUnitario: string` — **ya convertido a moneda oficial**,
-  `NUMERIC(18,4)`, no nulo. Es lo que T2 y T3 consumen.
+  `NUMERIC(18,4)`, no nulo.
+- Produce: las **reglas congeladas** de la línea — qué descuentos y recargos regían sobre
+  ese ítem cuando se pidió, **y con qué valor** (un 20% que pasa a 30% no puede alcanzar a
+  la mesa sentada, igual que uno que se agrega). Forma a decidir en el paso 1: columna
+  `jsonb` en `cuenta_lineas` o tabla puente. **Impuestos NO** — siguen vivos.
+- Las dos las consumen T2 y T3.
 
 - [ ] **Paso 1: decidir de dónde sale la cuenta, y escribirlo antes de codear**
 
@@ -136,6 +149,20 @@ código exacto, porque dependen de lo que se resuelva acá.
 
   El merge pasa a exigir **hash + precio unitario iguales**. Test dedicado: pedir, cambiar
   el precio del ítem, volver a pedir lo mismo → **dos líneas**, cada una con su precio.
+
+- [ ] **Paso 5-bis: congelar las reglas, con su valor**
+
+  Hoy los descuentos y recargos de la línea salen de `cargarReglasPorIds`
+  (`items.service.ts:659`) **al cobrar**, o sea vivos. Con la decisión 4 tienen que salir de
+  la línea. Dos cosas que no se pueden confundir: cuáles regían (ids) **y** cuánto valían
+  (`valor`) — congelar solo los ids deja pasar el cambio de 20% a 30%.
+
+  ⚠️ **Los `descuentoIds`/`recargoIds` que hoy manda el DTO por línea** —el override que ya
+  existe en `LineaDto`— siguen siendo entrada del cliente y no cambian: son "esta venta
+  lleva estos", no "esto es lo que regía". Distinguirlos al implementar.
+
+  Test: poner un descuento de 20% con la mesa sentada → la mesa paga sin descuento; sacarlo
+  → la mesa lo conserva; subirlo a 30% → la mesa sigue con el 20% con el que pidió.
 
 - [ ] **Paso 6: verificación**
 
@@ -249,19 +276,19 @@ código exacto, porque dependen de lo que se resuelva acá.
 
 ---
 
-## Preguntas abiertas — contestar ANTES de empezar, no durante
+## Preguntas abiertas — **ninguna queda** (ronda cerrada el 2026-08-30)
 
-1. **Descuentos y recargos de catálogo.** Hoy se leen vivos al cobrar. La regla del owner
-   los congelaría también, pero no se preguntó por ellos y **no son lo mismo que un precio**
-   (una promo que arranca a las 20:00 con la mesa sentada desde las 19:00, ¿aplica?). Hoy la
-   vigencia por fecha ya se evalúa con `cuenta.abierta_el`, o sea que esa parte **ya** está
-   del lado de "cuando se sentó". Preguntar antes de tocar.
-2. **Impuestos: no preguntar acá.** Es fiscal, va solo (ADR-010).
-3. **`PATCH /cuentas/:id/lineas/:lineaId`** cambia la cantidad, no el precio unitario —
-   confirmar leyendo el método, no asumiendo.
-4. **Una línea cuyo ítem se borró del catálogo** hoy hace fallar el cierre con un 400 que
-   nombra el ítem. Con el precio congelado podría cobrarse igual. ¿Se quiere? El ítem sigue
-   existiendo (soft delete), así que técnicamente se puede.
+1. ✅ **Descuentos y recargos de catálogo: se congelan** (owner). Es la decisión 4 de
+   arriba. Las promos **con fecha** ya estaban del lado correcto: su vigencia se evalúa con
+   `cuenta.abierta_el` (`calculo-precios.service.ts:570-576`), no con "ahora".
+2. ⛔ **Impuestos: no se preguntan acá.** Fiscal, frente propio, ADR-010.
+3. ✅ **`PATCH /cuentas/:id/lineas/:lineaId` no toca el precio unitario** — verificado
+   leyendo: solo resuelve cantidad y unidad (`salones.service.ts:751-758`). No hay nada que
+   hacer ahí.
+4. ✅ **La línea con el ítem borrado no es una decisión de producto.** Borrar un ítem que
+   una cuenta abierta pidió **ya está bloqueado** (`dce84899`), así que el caso solo llega
+   por la carrera borrar-vs-agregar, que tiene su propia entrada en `pendientes.md`. Se deja
+   como está.
 
 ## Lo que este plan da por medido (no re-medir, sí re-verificar si algo no cierra)
 
