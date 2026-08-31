@@ -142,13 +142,22 @@ código exacto, porque dependen de lo que se resuelva acá.
 - [ ] **Paso 5: ⚠️ el merge por hash deja de ser correcto y hay que arreglarlo**
 
   `agregarLinea` fusiona la nueva línea con una existente cuando coincide el hash de la
-  personalización (`salones.service.ts:688-690`). Con el precio congelado, dos pedidos del
-  mismo plato **a precios distintos** son dos hechos distintos y fusionarlos mezcla plata:
-  la mesa pide una hamburguesa a $5.000, sube la carta, pide otra, y las dos se cobrarían a
-  uno solo de los dos precios.
+  personalización (`salones.service.ts:688-690`). Con lo congelado, dos pedidos del mismo
+  plato **con insumos distintos** son dos hechos distintos y fusionarlos mezcla plata.
 
-  El merge pasa a exigir **hash + precio unitario iguales**. Test dedicado: pedir, cambiar
-  el precio del ítem, volver a pedir lo mismo → **dos líneas**, cada una con su precio.
+  **El owner lo confirmó como conducta esperada, con su propia escena (2026-08-30):** me
+  siento y pido una hamburguesa a $5.000; sale un 20% en hamburguesas; pido otra — *"esa sí
+  sale con el descuento"*. Misma mesa, misma cuenta, **dos líneas**: una a $5.000 sin
+  descuento y otra a $4.000. Hoy el sistema las juntaría en un `2 × Hamburguesa` y cobraría
+  las dos igual.
+
+  El merge pasa a exigir **hash + precio unitario + reglas congeladas iguales** — los tres,
+  no solo el precio: el caso del owner cambia el descuento sin tocar el precio, así que un
+  merge que compare solo precio lo deja pasar.
+
+  Tests, uno por insumo: (a) pedir, subir el precio del ítem, volver a pedir → dos líneas
+  con precios distintos; (b) pedir, **agregar un descuento** al ítem, volver a pedir → dos
+  líneas, la segunda con descuento y la primera sin — la escena del owner, literal.
 
 - [ ] **Paso 5-bis: congelar las reglas, con su valor**
 
