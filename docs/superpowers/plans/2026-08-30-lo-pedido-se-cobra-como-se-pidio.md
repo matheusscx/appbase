@@ -288,8 +288,20 @@ código exacto, porque dependen de lo que se resuelva acá.
 ## Preguntas abiertas — **ninguna queda** (ronda cerrada el 2026-08-30)
 
 1. ✅ **Descuentos y recargos de catálogo: se congelan** (owner). Es la decisión 4 de
-   arriba. Las promos **con fecha** ya estaban del lado correcto: su vigencia se evalúa con
-   `cuenta.abierta_el` (`calculo-precios.service.ts:570-576`), no con "ahora".
+   arriba.
+
+   ⚠️ **Acá había un error mío que el owner destapó con su escena de las cervezas**
+   (2026-08-30): escribí que las promos con fecha "ya se evalúan con `cuenta.abierta_el`".
+   Falso, y en la dirección cómoda. Hay **dos** referencias distintas en el mismo servicio:
+
+   | Referencia | Qué decide | De dónde sale |
+   |---|---|---|
+   | `instantesDeLineas` (`:525-556`) | la **hora** de cada línea, para la ventana de la promo | `cuenta_lineas.creado_el`, **por línea** |
+   | `instanteDeVigencia` (`:565-577`) | el **día local** de la venta entera | `cuenta.abierta_el`, uno para toda la cuenta |
+
+   O sea que la escena del owner —2x1 de 20:00 a 21:00, cervezas pedidas antes, durante y
+   después— **ya funciona hoy para las promociones**, línea por línea. Lo que no funciona
+   así es lo que la decisión 4 viene a congelar.
 2. ⛔ **Impuestos: no se preguntan acá.** Fiscal, frente propio, ADR-010.
 3. ✅ **`PATCH /cuentas/:id/lineas/:lineaId` no toca el precio unitario** — verificado
    leyendo: solo resuelve cantidad y unidad (`salones.service.ts:751-758`). No hay nada que
@@ -298,6 +310,25 @@ código exacto, porque dependen de lo que se resuelva acá.
    una cuenta abierta pidió **ya está bloqueado** (`dce84899`), así que el caso solo llega
    por la carrera borrar-vs-agregar, que tiene su propia entrada en `pendientes.md`. Se deja
    como está.
+
+## Grieta encontrada al contestar las preguntas (2026-08-30) — entra al frente
+
+**El día de la promo sale de cuándo se sentó la mesa, no de cuándo se pidió la línea.**
+`fechaLocal` se calcula una vez, desde `abierta_el` (`calculo-precios.service.ts:156-162`),
+y con ese día `cargarVigentes` decide **qué promos se cargan**. La hora sí es por línea,
+pero si el día no cargó la promo, la hora nunca llega a mirarse.
+
+Escena: la mesa se sienta el **lunes 23:30** y pide cerveza el **martes 00:30**. El 2x1 de
+los martes no se carga, así que esa cerveza no lo lleva — que es exactamente el bug de la
+escena del owner, un nivel más arriba. Al revés también: mesa del martes que pide el
+miércoles a las 00:30 se llevaría el 2x1 del martes.
+
+Es la misma regla del owner —*lo que decide es cuándo se pidió*— así que **entra al
+frente**, no al backlog. Va como tarea propia porque toca a `cargarVigentes`: hay que cargar
+las promos de **todos los días** que toquen las líneas de la cuenta, no de uno.
+
+⚠️ **Leído, no medido.** Antes de tocarlo, montar el caso del cruce de medianoche y
+verificar que falla como dice acá. Si no falla, esta sección está mal y hay que reescribirla.
 
 ## Lo que este plan da por medido (no re-medir, sí re-verificar si algo no cierra)
 
