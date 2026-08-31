@@ -298,8 +298,10 @@ esta tabla.** El cobro y la precuenta no solo re-precian: **re-validan** el snap
 el catálogo de hoy, así que también rompen la mesa cosas que *no* sacan nada —asociar un
 grupo con `min ≥ 1`, subir el `min` de uno ya asociado— y una que saca por otro campo:
 quitar de un combo un componente que la línea personalizó. Las tres están medidas en
-[`../agent/pendientes.md`](../agent/pendientes.md) § 4, junto con la decisión de fondo que
-las cerraría todas de una: si re-tasar una línea ya pedida debe re-validar.
+[`../agent/pendientes.md`](../agent/pendientes.md) § 3, junto con la decisión que las
+cierra todas de una y que el owner ya tomó el 2026-08-30 —al cobrar manda lo que la mesa
+pidió, con el precio de cuando lo pidió; re-tasar re-precia y deja de re-validar—, sin
+construir todavía.
 
 ⚠️ **Dos cosas que no se ven desde acá.** La precuenta valida **menos** que el cierre
 (`puedeCostar()` saltea el resolver cuando la línea solo tiene `omitidos`, así que ese caso

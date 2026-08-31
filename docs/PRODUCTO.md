@@ -514,7 +514,16 @@ customer (`min`/`max`).
   combo un componente que la línea personalizó. Cerrar esos de a uno es la misma
   carrera; la alternativa de fondo —que re-tasar una línea ya pedida re-precie
   **sin** re-validar— es decisión de producto y está sin tomar.
-  Detalle, medición y molde: `docs/agent/pendientes.md` § 4.
+  ✅ **DECIDIDO (owner, 2026-08-30), sin construir todavía:** al cobrar **manda lo
+  que la mesa ya pidió, no la carta de hoy**. Re-tasar una línea de una cuenta
+  abierta pasa a **re-preciar sin re-validar** —la personalización congelada es un
+  hecho, no una entrada del cliente que haya que volver a aprobar— y **el precio es
+  el de cuando se pidió**: si el extra de queso valía $700 y sube a $1.200 con la
+  mesa sentada, esa mesa paga $700. No reabre la regla de que **el precio de una
+  línea lo calcula el servidor**: sigue calculándolo él, leyendo la foto que él
+  mismo congeló. Es motor de cálculo, así que va como frente propio.
+  Detalle, medición y lo que la decisión todavía no contesta (el `precioBase` del
+  ítem): `docs/agent/pendientes.md` § 3.
 
 **Fuera de alcance (diferido, no un olvido):** la **impresión térmica** de la
 opción elegida de un grupo en comanda/precuenta/boleta queda para un ticket
