@@ -964,6 +964,15 @@ abriendo las superficies, no leyendo la entrada.
   hasta lo despachado también. En la pantalla el tacho queda deshabilitado con el motivo.
   Detalle en [`features/salones-mesas.md`](../features/salones-mesas.md).
 
+  🔗 **Cruza con la reserva de stock al pedir** (spec del 2026-09-01,
+  [`specs/2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md)).
+  Esa feature **no cierra ésta**: achica el caso, no lo borra —una merma o un ajuste manual
+  siguen pudiendo dejar la mesa sin poder cobrar y sin poder sacar la línea—. Y su § 5 dice
+  cómo componen: sacar la línea con motivo baja el comprometido y baja el stock a la vez,
+  neto cero y automático. ⚠️ **Salvo que este frente decida conservar la línea marcada como
+  anulada** en vez de sacarla o bajarle la cantidad: en ese caso la consulta del comprometido
+  necesita una condición más para dejar de contarla. Una línea de SQL, pero hay que acordarse.
+
   ⏳ **Lo que sigue abierto es lo que esta entrada siempre dijo que faltaba: el camino con
   motivo.** Bloquear evita la pérdida silenciosa; **no da la salida legítima**. Un plato que
   se quemó o que se regala tiene que poder salir de la cuenta **con motivo** (merma o
