@@ -74,12 +74,18 @@ una línea ya pedida tiene que re-preciar, no re-validar"*, más la regla en
 **Es la tarea que decide el frente.** Las tres siguientes llevan intención y contrato, no
 código exacto, porque dependen de lo que se resuelva acá.
 
-✅ **Partida en dos al ejecutarla (2026-08-31).** La mitad del **precio** salió en
-`dd54f81d`; la de las **reglas congeladas** (paso 5-bis, y el tercer término del merge)
-sigue abierta y es lo próximo. La revisión independiente avaló la partición con una
-condición que se cumplió: que el criterio del merge **no** se escriba como definitivo
-mientras le falta un término — la doc dice explícitamente que la escena del descuento
-todavía fusiona.
+✅ **Task 1 completa (2026-08-31), partida en dos commits**: el **precio** en `dd54f81d` y
+las **reglas congeladas** —con el tercer término del merge— en `617a714b`. La revisión independiente avaló la partición con una
+condición que se cumplió mientras duró: que el criterio del merge no se escribiera como
+definitivo mientras le faltaba un término.
+
+📌 **Lo que costó cada mitad, para calibrar lo que falta:** dos rondas de revisión cada
+una, y las cuatro bloquearon con razón. Los dos hallazgos que ninguna lectura mía hubiera
+encontrado son del mismo tipo —**una comparación que decide plata y no mira todo lo que
+debería**—: `fusionarCuentas` sin el precio, y la huella sin `codigo`. El segundo arreglo
+introdujo su propia regresión (perder el orden de `metodoPagoIds`), que también encontró la
+revisión. Conclusión para las tareas que siguen: donde este frente compara o congela algo,
+la pregunta que paga es *¿qué NO está mirando?*.
 
 📌 **Lo que la ejecución agregó y el plan no tenía:** el merge vive en **dos** lugares, no
 uno. `fusionarCuentas` tenía su propia `claveFusion` (`itemId|hash`) y sin el precio
@@ -171,7 +177,7 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
   con precios distintos; (b) pedir, **agregar un descuento** al ítem, volver a pedir → dos
   líneas, la segunda con descuento y la primera sin — la escena del owner, literal.
 
-- [ ] **Paso 5-bis: congelar las reglas, con su valor**
+- [x] **Paso 5-bis: congelar las reglas, con su valor**
 
   Hoy los descuentos y recargos de la línea salen de `cargarReglasPorIds`
   (`items.service.ts:659`) **al cobrar**, o sea vivos. Con la decisión 4 tienen que salir de
