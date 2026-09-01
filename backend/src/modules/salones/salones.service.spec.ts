@@ -425,6 +425,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_A,
         itemId: 'item-1',
         cantidad: '1',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '1',
       };
       const lineaOrigenMismoItem = {
@@ -433,6 +434,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: 'item-1',
         cantidad: '2',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '2',
       };
       const lineaOrigenOtroItem = {
@@ -441,6 +443,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: 'item-2',
         cantidad: '1',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
       };
 
@@ -541,6 +544,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_A,
         itemId: 'item-1',
         cantidad: '1',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
         personalizacion: null,
       };
@@ -550,6 +554,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: 'item-1',
         cantidad: '2',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
         personalizacion: SNAPSHOT,
       };
@@ -609,6 +614,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_A,
         itemId: ITEM,
         cantidad: '200',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
         cantidadPresentacion: '200',
         unidadCodigoPresentacion: 'g',
@@ -620,6 +626,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_A,
         itemId: ITEM_2,
         cantidad: '100',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
         cantidadPresentacion: '100',
         unidadCodigoPresentacion: 'g',
@@ -631,6 +638,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: ITEM,
         cantidad: '300',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
         cantidadPresentacion: '0.3',
         unidadCodigoPresentacion: 'kg',
@@ -642,6 +650,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: ITEM_2,
         cantidad: '400',
+        precioUnitario: '1000.0000',
         cantidadEnviada: '0',
         cantidadPresentacion: '0.4',
         unidadCodigoPresentacion: 'kg',
@@ -668,8 +677,20 @@ describe('SalonesService', () => {
       manager.query.mockImplementation((sql: string) =>
         typeof sql === 'string' && sql.includes('FROM items i')
           ? Promise.resolve([
-              { item_id: ITEM, tipo: 'producto', unidad_medida: 'g' },
-              { item_id: ITEM_2, tipo: 'producto', unidad_medida: 'g' },
+              {
+                item_id: ITEM,
+                tipo: 'producto',
+                unidad_medida: 'g',
+                precio_base: '1000',
+                moneda_id: 'clp',
+              },
+              {
+                item_id: ITEM_2,
+                tipo: 'producto',
+                unidad_medida: 'g',
+                precio_base: '1000',
+                moneda_id: 'clp',
+              },
             ])
           : Promise.resolve([]),
       );
@@ -744,6 +765,7 @@ describe('SalonesService', () => {
           cuentaId: c.id,
           itemId: `item-${i}-${j}`,
           cantidad: '1',
+          precioUnitario: '1000.0000',
           cantidadEnviada: '0',
           personalizacion: null,
         })),
@@ -813,6 +835,7 @@ describe('SalonesService', () => {
           cuentaId: 'origen-1',
           itemId: ITEM,
           cantidad: '2',
+          precioUnitario: '1000.0000',
           cantidadEnviada: '0',
           personalizacion: null,
         },
@@ -822,6 +845,7 @@ describe('SalonesService', () => {
           cuentaId: 'origen-2',
           itemId: ITEM,
           cantidad: '3',
+          precioUnitario: '1000.0000',
           cantidadEnviada: '1',
           personalizacion: null,
         },
@@ -850,6 +874,73 @@ describe('SalonesService', () => {
         id: 'l-2',
         tenantId: TENANT,
       });
+    });
+
+    it('el mismo ítem con precios congelados distintos NO se acumula', async () => {
+      // El control del test de arriba, y la mitad que el e2e no puede fijar
+      // barato: la clave de fusión lleva el precio congelado desde el
+      // 2026-08-31. Sin él, dos pedidos del mismo plato a precios distintos
+      // colapsan sobre el precio de la línea de destino y la plata de la otra
+      // desaparece — medido por API antes del arreglo: 3000 + 4000 quedaban
+      // como 2 × 3000.
+      const destino = {
+        id: 'destino',
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 1,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const origen = {
+        id: 'origen-1',
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 2,
+        estado: EstadoCuenta.ABIERTA,
+        cerradaEl: null as Date | null,
+      };
+      const lineas = [
+        {
+          id: 'l-destino',
+          tenantId: TENANT,
+          cuentaId: 'destino',
+          itemId: ITEM,
+          cantidad: '1',
+          precioUnitario: '3000.0000',
+          cantidadEnviada: '0',
+          personalizacion: null,
+        },
+        {
+          id: 'l-origen',
+          tenantId: TENANT,
+          cuentaId: 'origen-1',
+          itemId: ITEM,
+          cantidad: '1',
+          precioUnitario: '4000.0000',
+          cantidadEnviada: '0',
+          personalizacion: null,
+        },
+      ];
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
+          if (entity === Cuenta) return Promise.resolve([destino, origen]);
+          const ids = idsDe(opts?.where?.cuentaId);
+          return Promise.resolve(
+            lineas.filter((l) => ids.includes(l.cuentaId)),
+          );
+        },
+      );
+      manager.query.mockResolvedValue([]);
+
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: ['destino', 'origen-1'],
+      });
+
+      // La de origen se MUDA con su precio intacto; no se suma ni se borra.
+      expect(lineas[1].cuentaId).toBe('destino');
+      expect(lineas[1].precioUnitario).toBe('4000.0000');
+      expect(lineas[0].cantidad).toBe('1');
+      expect(manager.softDelete).not.toHaveBeenCalled();
     });
   });
 
@@ -967,7 +1058,13 @@ describe('SalonesService', () => {
       dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
           return Promise.resolve([
-            { item_id: ITEM, tipo: 'producto', unidad_medida: 'kg' },
+            {
+              item_id: ITEM,
+              tipo: 'producto',
+              unidad_medida: 'kg',
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
           ]);
         return Promise.resolve([]);
       });
@@ -1001,12 +1098,21 @@ describe('SalonesService', () => {
       dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
           return Promise.resolve([
-            { item_id: ITEM, tipo: 'producto', unidad_medida: 'g' },
+            {
+              item_id: ITEM,
+              tipo: 'producto',
+              unidad_medida: 'g',
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
           ]);
         return Promise.resolve([]);
       });
       const existente = {
         id: 'linea-1',
+        // Congelado al pedir: precio_base '1000' × tasa 1. Sin esto el merge
+        // ni siquiera compara: `new Decimal(undefined)` tira `DecimalError`.
+        precioUnitario: '1000.0000',
         cantidad: '200',
         cantidadPresentacion: '200',
         unidadCodigoPresentacion: 'g',
@@ -1035,6 +1141,9 @@ describe('SalonesService', () => {
     it('una línea sin presentación sigue sin presentación después del merge', async () => {
       const existente = {
         id: 'linea-1',
+        // Congelado al pedir: precio_base '1000' × tasa 1. Sin esto el merge
+        // ni siquiera compara: `new Decimal(undefined)` tira `DecimalError`.
+        precioUnitario: '1000.0000',
         cantidad: '2',
         cantidadPresentacion: null,
         unidadCodigoPresentacion: null,
@@ -1112,7 +1221,12 @@ describe('SalonesService', () => {
 
     it('suma la cantidad si el ítem ya está en la cuenta sin personalización', async () => {
       manager.find.mockResolvedValue([
-        { id: 'linea-1', cantidad: '2', personalizacion: null },
+        {
+          id: 'linea-1',
+          cantidad: '2',
+          personalizacion: null,
+          precioUnitario: '1000.0000',
+        },
       ]);
 
       await service.agregarLinea(TENANT, CUENTA, {
@@ -1130,7 +1244,13 @@ describe('SalonesService', () => {
       dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
           return Promise.resolve([
-            { item_id: RECETA, tipo: 'receta', unidad_medida: null },
+            {
+              item_id: RECETA,
+              tipo: 'receta',
+              unidad_medida: null,
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
           ]);
         return Promise.resolve([]);
       });
@@ -1165,7 +1285,13 @@ describe('SalonesService', () => {
       dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
           return Promise.resolve([
-            { item_id: COMBO, tipo: 'combo', unidad_medida: null },
+            {
+              item_id: COMBO,
+              tipo: 'combo',
+              unidad_medida: null,
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
           ]);
         return Promise.resolve([]);
       });
@@ -1208,12 +1334,21 @@ describe('SalonesService', () => {
       dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
           return Promise.resolve([
-            { item_id: RECETA, tipo: 'receta', unidad_medida: null },
+            {
+              item_id: RECETA,
+              tipo: 'receta',
+              unidad_medida: null,
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
           ]);
         return Promise.resolve([]);
       });
       const lineaMisma = {
         id: 'linea-1',
+        // Congelado al pedir: precio_base '1000' × tasa 1. Sin esto el merge
+        // ni siquiera compara: `new Decimal(undefined)` tira `DecimalError`.
+        precioUnitario: '1000.0000',
         cantidad: '1',
         personalizacion: SNAPSHOT,
       };
@@ -1303,7 +1438,13 @@ describe('SalonesService', () => {
       manager.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
           return Promise.resolve([
-            { item_id: ITEM, tipo: 'producto', unidad_medida: 'kg' },
+            {
+              item_id: ITEM,
+              tipo: 'producto',
+              unidad_medida: 'kg',
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
           ]);
         if (sql.includes('cl.cuenta_linea_id'))
           return Promise.resolve([

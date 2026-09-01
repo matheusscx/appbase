@@ -129,14 +129,31 @@ interface LineaDetalleRow {
   personalizacion: PersonalizacionRecetaSnapshot | null;
   cantidad_enviada: string;
   item_eliminado: boolean;
+  precio_unitario: string;
 }
 
 export interface CuentaLineaDetalle {
   id: string;
   itemId: string;
   nombre: string;
+  /**
+   * El precio que el ítem tiene HOY en el catálogo, en la moneda del ítem.
+   * **No es lo que se cobra** —eso es `precioUnitario`, congelado al pedir— y
+   * hoy **ninguna pantalla lo usa**: viaja por compatibilidad del contrato
+   * (está en el tipo de `useSalones.ts` y en dos fixtures, en ningún `.vue`).
+   * Candidato a sacar cuando la pantalla se toque; no en este commit.
+   */
   precioBase: string;
   monedaId: string;
+  /**
+   * Lo que esta línea paga por unidad, **congelado al pedirla** y en moneda
+   * oficial (owner, 2026-08-30: *lo pedido se cobra como se pidió*).
+   *
+   * ⚠️ Hoy **todavía no manda al cobrar**: `cerrarCuenta` sigue desarmando la
+   * línea a ids y `ventas.service` re-tasa contra el catálogo vivo. Congelarlo
+   * es la primera mitad del frente; conectarlo al cobro es la segunda.
+   */
+  precioUnitario: string;
   cantidad: string;
   cantidadPresentacion?: string | null;
   unidadCodigoPresentacion?: string | null;
@@ -651,6 +668,7 @@ export class SalonesService {
     }
 
     let snapshot: PersonalizacionRecetaSnapshot | null = null;
+    let precioExtraTotal = '0';
     if (dto.personalizacion) {
       if (item.tipo !== 'receta' && item.tipo !== 'combo') {
         throw new BadRequestException(
@@ -672,9 +690,22 @@ export class SalonesService {
               dto.personalizacion,
             );
       snapshot = resolved.snapshot;
+      precioExtraTotal = resolved.precioExtraTotal;
     }
 
     const hash = hashPersonalizacion(snapshot);
+
+    // **Lo pedido se cobra como se pidió** (owner, 2026-08-30): el precio de la
+    // línea se congela ACÁ, al pedirla, y no se vuelve a leer del catálogo.
+    // `precioBase + Σ extras`, convertido a moneda oficial una sola vez — la
+    // misma cuenta que hace `calculo-precios.service.ts` para una línea
+    // personalizada, con el mismo conversor, para que precuenta y cobro no
+    // puedan divergir por redondeo.
+    const convertir = await this.conversorAMonedaOficial(tenantId);
+    const precioUnitario = convertir(
+      new Decimal(item.precioBase).plus(precioExtraTotal).toFixed(4),
+      item.monedaId,
+    );
 
     return this.db.transaccion(async (manager) => {
       const cuenta = await this.getCuentaAbiertaConLock(
@@ -685,8 +716,16 @@ export class SalonesService {
       const existentes = await manager.find(CuentaLinea, {
         where: { tenantId, cuentaId, itemId: dto.itemId },
       });
+      // El merge exige **misma personalización Y mismo precio congelado**. Con
+      // el precio adentro de la línea, dos pedidos del mismo plato a precios
+      // distintos son dos hechos distintos y fusionarlos mezcla plata: la mesa
+      // pide una hamburguesa a $5.000, sube la carta, pide otra, y las dos se
+      // cobrarían a uno solo de los dos precios. Al mismo precio siguen
+      // fusionándose, que es lo que el garzón espera ver ("2 ×", no "1 + 1").
       const match = existentes.find(
-        (l) => hashPersonalizacion(l.personalizacion) === hash,
+        (l) =>
+          hashPersonalizacion(l.personalizacion) === hash &&
+          new Decimal(l.precioUnitario).eq(precioUnitario),
       );
       if (match) {
         match.cantidad = new Decimal(match.cantidad)
@@ -709,6 +748,7 @@ export class SalonesService {
             cantidadPresentacion: resuelta.cantidadPresentacion,
             unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
             personalizacion: snapshot,
+            precioUnitario,
           }),
         );
       }
@@ -908,15 +948,26 @@ export class SalonesService {
         else porOrigen.set(l.cuentaId, [l]);
       }
 
+      // La clave lleva el **precio congelado**, igual que el merge de
+      // `agregarLinea`, y por el mismo motivo: dos líneas del mismo plato con
+      // precios distintos son dos hechos distintos. Sin el precio acá, fusionar
+      // dos cuentas colapsaba las dos sobre el precio de la de destino y la
+      // plata de la otra desaparecía —medido: 3000 + 4000 quedaban como
+      // 2 × 3000—. `toFixed(4)` canoniza: la escala persistida es la misma para
+      // las dos, pero comparar strings de plata sin normalizar es la clase de
+      // igualdad que se rompe sola.
       const claveFusion = (l: CuentaLinea) =>
-        `${l.itemId}|${hashPersonalizacion(l.personalizacion)}`;
+        `${l.itemId}|${hashPersonalizacion(l.personalizacion)}|${new Decimal(
+          l.precioUnitario,
+        ).toFixed(4)}`;
       const enDestino = new Map<string, CuentaLinea>();
       for (const l of await manager.find(CuentaLinea, {
         where: { tenantId, cuentaId: destino.id },
       })) {
-        // Si el destino ya trajera dos líneas con la misma clave —estado que
-        // `agregarLinea` no produce, porque mergea— da igual sobre cuál se
-        // sume: el total de la cuenta es el mismo.
+        // Si el destino ya trajera dos líneas con la misma clave —mismo ítem,
+        // misma personalización Y mismo precio congelado, estado que
+        // `agregarLinea` no produce porque mergea— da igual sobre cuál se sume:
+        // el total de la cuenta es el mismo.
         enDestino.set(claveFusion(l), l);
       }
 
@@ -1470,7 +1521,7 @@ export class SalonesService {
       // `lineaId` de algo que no se renderizaba. Ahora se muestra marcada.
       `SELECT cl.cuenta_id, cl.cuenta_linea_id, cl.item_id, cl.cantidad,
               cl.cantidad_presentacion, cl.unidad_codigo_presentacion,
-              cl.personalizacion, cl.cantidad_enviada,
+              cl.personalizacion, cl.cantidad_enviada, cl.precio_unitario,
               i.nombre, i.precio_base, i.moneda_id,
               i.eliminado_el IS NOT NULL AS item_eliminado
          FROM cuenta_lineas cl
@@ -1523,29 +1574,7 @@ export class SalonesService {
     );
     let convertir: (monto: string, monedaId: string) => string = (monto) =>
       monto;
-    if (hayExtras) {
-      const monedas = await this.monedasService.findMonedas(tenantId);
-      const oficial = monedas.find((m) => m.esOficial);
-      if (!oficial) {
-        throw new BadRequestException(
-          'El tenant no tiene moneda oficial configurada',
-        );
-      }
-      const tasaMap = new Map(
-        monedas.map((m) => [m.monedaId, m.valorDelDia ?? '1']),
-      );
-      const config = await this.calculoPreciosService.cargarConfig(
-        tenantId,
-        oficial.decimales,
-      );
-      convertir = (monto, monedaId) =>
-        this.calculoPreciosService.convertirAMonedaOficial(
-          monto,
-          monedaId,
-          tasaMap,
-          config.modoRedondeo,
-        );
-    }
+    if (hayExtras) convertir = await this.conversorAMonedaOficial(tenantId);
 
     return cuentas.map((cuenta) =>
       this.mapearDetalle(
@@ -1605,6 +1634,7 @@ export class SalonesService {
           nombre: l.nombre,
           precioBase: l.precio_base,
           monedaId: l.moneda_id,
+          precioUnitario: l.precio_unitario,
           cantidad: l.cantidad,
           ...(l.cantidad_presentacion && l.unidad_codigo_presentacion
             ? {
@@ -1620,6 +1650,51 @@ export class SalonesService {
         };
       }),
     };
+  }
+
+  /**
+   * El conversor a moneda oficial del tenant, con su `modo_redondeo`.
+   *
+   * ⚠️ **Cuesta tres consultas, no dos**: `findMonedas`, y `cargarConfig` que
+   * por dentro son dos (`tenants.service.ts` → `tenantRepo.findOne` +
+   * `tenantFormulaPrecioRepo.find`). Son constantes por llamada, nunca por
+   * línea. Pero `agregarLinea` las paga **siempre** desde el 2026-08-31 —antes
+   * solo se pagaban en `armarDetalles`, y solo si la cuenta tenía extras—, así
+   * que un POST de línea con extras las paga **dos veces**: una para congelar el
+   * precio y otra al armar el detalle de vuelta. Pasarle el conversor ya armado
+   * a `armarDetalle` lo bajaría a la mitad, pero le cambia la firma a los once
+   * sitios que lo llaman (9 de `armarDetalle` + 2 de `armarDetalles`) por tres
+   * consultas constantes que no son un N+1: se deja medido y no hecho.
+   *
+   * Vive acá y no duplicado en cada llamador porque redondea plata: dos lugares
+   * con la misma aritmética es el modo de falla que este repo ya pagó
+   * (`resueltos.md`, redondeo de plata). La cuenta en sí es de
+   * `CalculoPreciosService`; esto solo le arma los insumos.
+   */
+  private async conversorAMonedaOficial(
+    tenantId: string,
+  ): Promise<(monto: string, monedaId: string) => string> {
+    const monedas = await this.monedasService.findMonedas(tenantId);
+    const oficial = monedas.find((m) => m.esOficial);
+    if (!oficial) {
+      throw new BadRequestException(
+        'El tenant no tiene moneda oficial configurada',
+      );
+    }
+    const tasaMap = new Map(
+      monedas.map((m) => [m.monedaId, m.valorDelDia ?? '1']),
+    );
+    const config = await this.calculoPreciosService.cargarConfig(
+      tenantId,
+      oficial.decimales,
+    );
+    return (monto, monedaId) =>
+      this.calculoPreciosService.convertirAMonedaOficial(
+        monto,
+        monedaId,
+        tasaMap,
+        config.modoRedondeo,
+      );
   }
 
   private async nombresIngredientesPersonalizacion(
@@ -1801,13 +1876,22 @@ export class SalonesService {
     tenantId: string,
     itemId: string,
     runner?: EntityManager | Db,
-  ): Promise<{ itemId: string; tipo: string; unidadMedida: string | null }> {
+  ): Promise<{
+    itemId: string;
+    tipo: string;
+    unidadMedida: string | null;
+    /** Para congelar el precio de la línea al pedirla — ver `agregarLinea`. */
+    precioBase: string;
+    monedaId: string;
+  }> {
     const rows: {
       item_id: string;
       tipo: string;
       unidad_medida: string | null;
+      precio_base: string;
+      moneda_id: string;
     }[] = await (runner ?? this.db).query(
-      `SELECT i.item_id, i.tipo, ip.unidad_medida
+      `SELECT i.item_id, i.tipo, ip.unidad_medida, i.precio_base, i.moneda_id
          FROM items i
          LEFT JOIN item_producto ip ON ip.item_id = i.item_id
         WHERE i.item_id = $1 AND i.tenant_id = $2
@@ -1821,6 +1905,8 @@ export class SalonesService {
       itemId: rows[0].item_id,
       tipo: rows[0].tipo,
       unidadMedida: rows[0].unidad_medida,
+      precioBase: rows[0].precio_base,
+      monedaId: rows[0].moneda_id,
     };
   }
 }

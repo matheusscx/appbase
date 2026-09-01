@@ -94,6 +94,28 @@ export class CuentaLinea {
   @Column({ type: 'jsonb', nullable: true })
   personalizacion: PersonalizacionRecetaSnapshot | null;
 
+  /**
+   * **Lo que la mesa paga por una unidad de esta línea, congelado al pedirla.**
+   * Decisión del owner (2026-08-30): *"¿cuál carta? si la hamburguesa se pidió
+   * en 5 mil se paga en 5 mil"*. Hasta acá el precio salía del catálogo vivo
+   * cada vez que se tasaba la línea, así que repreciar un ítem con la mesa
+   * sentada le movía la cuenta sin que nadie se enterara.
+   *
+   * Es `precioBase + Σ precioExtra de la personalización`, **ya convertido a la
+   * moneda oficial del tenant** con su `modo_redondeo` — no la moneda del ítem.
+   * Esa distinción no es cosmética: el bug de la moneda del extra
+   * (`resueltos.md`, 2026-08-26) fue exactamente guardar/mostrar el número sin
+   * convertir, y una receta en USD se veía en dólares y se cobraba en pesos.
+   *
+   * ⚠️ **Impuestos y reglas NO están acá adentro.** Se congela lo que ENTRA al
+   * motor, no lo que sale: el pipeline completo (descuentos, recargos,
+   * impuestos) se sigue corriendo al cobrar. Congelar el total de la línea
+   * metería lo fiscal adentro del congelado por la ventana, que es lo que
+   * ADR-010 no quiere.
+   */
+  @Column({ name: 'precio_unitario', type: 'numeric', precision: 18, scale: 4 })
+  precioUnitario: string;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

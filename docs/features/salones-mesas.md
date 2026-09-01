@@ -325,6 +325,33 @@ desaparecía del ticket de cocina sin ningún aviso —"Enviar a cocina" respond
 `cantidad_enviada` no avanzaba nunca—, que es el mismo bug de la pantalla movido de
 lugar.
 
+### El precio de la línea se congela al pedirla (2026-08-31)
+
+**Decisión del owner (2026-08-30): lo pedido se cobra como se pidió.** *"¿Cuál carta? Si la
+hamburguesa se pidió en 5 mil se paga en 5 mil."* `cuenta_lineas.precio_unitario` guarda,
+al agregar la línea, `precioBase + Σ precioExtra` **ya convertido a la moneda oficial** del
+tenant con su `modo_redondeo`. Repreciar el ítem con la mesa sentada ya no le mueve el
+número a esa línea, y el detalle de la cuenta lo expone como `precioUnitario`.
+
+⚠️ **Esta es la primera mitad del frente.** El congelado existe pero **todavía no manda al
+cobrar**: `cerrarCuenta` sigue desarmando la línea y `ventas.service` la re-tasa contra el
+catálogo vivo. Hasta que eso cambie, la pantalla muestra el precio congelado y el cobro usa
+el de hoy. Plan completo:
+[`../superpowers/plans/2026-08-30-lo-pedido-se-cobra-como-se-pidio.md`](../superpowers/plans/2026-08-30-lo-pedido-se-cobra-como-se-pidio.md).
+
+**Dos líneas se juntan solo si comparten ítem, personalización Y precio congelado.** Antes
+alcanzaba con las dos primeras: subís la carta con la mesa sentada, se pide lo mismo otra
+vez, y las dos unidades se cobraban a un solo precio. Vale en los **dos** lugares que
+fusionan: `agregarLinea` y `fusionarCuentas` — el segundo tenía su propia clave y sin el
+precio colapsaba `3000 + 4000` en `2 × 3000`, perdiendo $1.000 (medido).
+
+⚠️ **Son dos términos, no tres, y falta uno.** La escena del owner que da origen a la regla
+—*pedís una hamburguesa a $5.000, sale un 20% en hamburguesas, pedís otra: "esa sí sale con
+el descuento"*— **todavía fusiona** (medido el 2026-08-31 por API: una sola línea de
+`2 × 5000`). Un descuento de catálogo no toca `precio_unitario`, así que el criterio actual
+no lo ve. El tercer término —las reglas congeladas de la línea— llega con la segunda mitad
+del frente, y recién ahí esa escena da dos líneas.
+
 ### Lo ya despachado a cocina no se borra ni se reduce en silencio (2026-08-16)
 
 **Decisión del owner (2026-08-08).** El plato ya se hizo, así que sacar la línea del
