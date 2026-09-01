@@ -36,6 +36,7 @@ describe('RecargosService', () => {
     delete: jest.Mock;
     softDelete: jest.Mock;
     update: jest.Mock;
+    query: jest.Mock;
   };
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
   let recargoRepoMock: {
@@ -72,6 +73,7 @@ describe('RecargosService', () => {
       delete: jest.fn().mockResolvedValue(undefined),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      query: jest.fn().mockResolvedValue([]),
     };
 
     dataSourceMock = {
@@ -825,7 +827,7 @@ describe('RecargosService', () => {
       ).rejects.toThrow(/al menos un tramo/);
     });
 
-    it('replaces metodoPagoIds on update via soft-stamp', async () => {
+    it('revives the soft-stamped row instead of inserting a new one', async () => {
       const existing = {
         id: 'r-1',
         tenantId: TENANT,
@@ -851,9 +853,20 @@ describe('RecargosService', () => {
         { recargoId: 'r-1' },
         expect.objectContaining({ eliminadoEl: expect.any(Date) }),
       );
-      const typedCalls = managerMock.save.mock.calls as Array<[unknown[]]>;
-      const lastCallArgs = typedCalls[typedCalls.length - 1];
-      expect(lastCallArgs[0]).toHaveLength(1);
+      // Apagar y volver a prender. Lo que NO puede hacer es insertar una fila
+      // nueva: la puente tiene PK compuesta, así que el método que ya estuvo en
+      // la lista tiene una fila apagada esperando, y `save()` la dejaba muerta
+      // (ver el comentario del service). La prueba de conducta contra Postgres
+      // real vive en `test/reglas-valor.e2e-spec.ts`; acá solo se fija que el
+      // camino sea el que revive.
+      const [sql, params] = managerMock.query.mock.calls.at(-1) as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toMatch(
+        /ON CONFLICT \(recargo_id, metodo_pago_id\)\s+DO UPDATE SET eliminado_el = NULL/,
+      );
+      expect(params).toEqual(['r-1', 'mp-5']);
     });
 
     it('does not touch children when not in dto (partial update)', async () => {

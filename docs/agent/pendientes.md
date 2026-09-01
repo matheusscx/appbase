@@ -117,25 +117,11 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
 - `VentaDetalleDrawer.vue` ya tiene spec (4 casos). De paso quedó fijado que su total
   "Descuentos" incluye la plata de las promos, al revés que el ticket.
 
-### Un descuento por método de pago deja de aplicarse en silencio al editarlo (2026-08-31)
-
-- [ ] **`PATCH /descuentos/:id` con `metodoPagoIds` deja la regla SIN métodos de pago**
-  (backend; medido el 2026-08-31 por API, salió de la revisión independiente del frente de
-  congelado, no de una lectura) — las filas viejas de `descuento_metodo_pago` quedan con
-  `eliminado_el` seteado y **no se inserta ninguna nueva**. Sospecha, **sin confirmar**:
-  colisión con la PK compuesta de la fila ya borrada; confirmarlo es el primer paso.
-
-  **Por qué importa y no es cosmético:** `evaluarRegla` exige que el método de pago del
-  cobro esté en la lista. Una regla que se queda sin lista **no se aplica nunca más**, y no
-  avisa: el descuento simplemente deja de descontar. Es plata, y del lado de cobrar de más.
-
-  📌 Es preexistente —`descuentos.service.ts` no lo tocó ningún commit de este frente— y
-  vale también para recargos, que copian la misma forma. El fix natural es **revivir** la
-  fila borrada en vez de insertar una nueva, que es el mismo patrón upsert-preservando que
-  ya usan `asociarGruposModificadores` y `upsertOverridesDeGrupo`.
-
-  ⚠️ Verificar antes de escribir el fix si el `PATCH` que **agrega** un método a una regla
-  que nunca tuvo ninguno funciona: la medición cubrió el reemplazo, no el alta.
+✅ **Y la sección volvió a quedar vacía el 2026-09-01.** Su última entrada —el `PATCH` que
+dejaba a un descuento sin métodos de pago— salió ese día, y de paso se corrigió: la causa no
+era la colisión de PK que la entrada sospechaba, y el daño era más ancho de lo que decía
+(agregar un método también borraba el que ya estaba). El detalle, con la tabla de los tres
+casos medidos, en [`resueltos.md`](resueltos.md).
 
 ## 2. Medir primero — no es una pregunta para el owner
 

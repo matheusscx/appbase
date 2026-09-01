@@ -669,10 +669,82 @@ Ver `docs/features/grupos-modificadores.md` § "Cantidades de consumo por
 item" y [ADR-014](../adr/014-cantidades-consumo-por-item.md).
 
 **Cuándo NO hace falta:** si nada referencia el UUID del hijo (soft-delete +
-insert es más simple y suficiente) o si la llave de negocio no es estable
-(ej. un texto libre editable) — ahí no hay forma de saber con certeza qué fila
-entrante "es" cuál existente, y forzar el upsert arriesga más que soft-delete
-+ insert.
+insert es más simple y suficiente, **salvo el caso de §14b**) o si la llave de
+negocio no es estable (ej. un texto libre editable) — ahí no hay forma de saber
+con certeza qué fila entrante "es" cuál existente, y forzar el upsert arriesga
+más que soft-delete + insert.
+
+### 14b. La puente con PK compuesta se revive, no se reinserta (2026-09-01)
+
+La excepción al párrafo de arriba, y costó plata. Cuando el hijo **no tiene UUID
+propio** sino PK compuesta `(padre_id, referencia_id)` —las puentes
+`descuento_metodo_pago`, `recargo_metodo_pago`—, soft-delete + insert no alcanza
+porque **no hay fila nueva que insertar**: la que corresponde ya existe, apagada.
+
+`manager.save()` no avisa de eso, y su conducta es contraintuitiva: TypeORM carga
+los subjects **con** los borrados (`withDeleted: true`, en
+`SubjectDatabaseEntityLoader`), así que encuentra la fila apagada por su PK y
+resuelve el save como `UPDATE` en vez de `INSERT`; y como la entidad recién
+creada trae `eliminadoEl: undefined`, el computador de columnas cambiadas la
+saltea —`undefined` significa "no cambió"— y `eliminado_el` nunca se limpia. La
+fila queda muerta, la asociación desaparece y la respuesta es 200.
+
+❌ **Mal**
+
+```ts
+await manager.update(
+  DescuentoMetodoPago,
+  { descuentoId: id },
+  { eliminadoEl: new Date() },
+);
+await manager.save(
+  ids.map((mid) =>
+    manager.create(DescuentoMetodoPago, { descuentoId: id, metodoPagoId: mid }),
+  ),
+);
+```
+
+✅ **Bien** — una sola sentencia para los N, y revive lo apagado:
+
+```ts
+await manager.query(
+  `INSERT INTO descuento_metodo_pago (descuento_id, metodo_pago_id, creado_el, actualizado_el)
+   VALUES ${ids.map((_, i) => `($1, $${i + 2}, NOW(), NOW())`).join(', ')}
+   ON CONFLICT (descuento_id, metodo_pago_id)
+   DO UPDATE SET eliminado_el = NULL, actualizado_el = NOW()`,
+  [id, ...ids],
+);
+```
+
+Mismo molde que `roles.service.ts` con `roles_usuarios` y `tenants.service.ts`.
+
+⚠️ **La lista entrante tiene que venir sin repetidos, y eso lo pide el DTO**
+(`@ArrayUnique()`, como las listas de ids de `propinas` y `recuentos`): `ON
+CONFLICT DO UPDATE` no puede tocar la misma fila dos veces en una sentencia
+(Postgres 21000). Deduplicar dentro del service en vez de validar en el borde
+deja la respuesta haciendo eco de una lista que no es la que se guardó.
+
+**Para UNA fila** hay respuesta tipada y no hace falta bajar a SQL cruda:
+`metodos-pago.service.ts` (`upsertRow`, sobre `tenant_metodo_pago`, que también
+es PK compuesta con soft delete) hace `findOne({ withDeleted: true })` →
+`eliminadoEl = null` → `save`. El `ON CONFLICT` gana cuando son N y no se quiere
+una query por id.
+
+⚠️ **Por qué pasó inadvertido tanto tiempo:** el método que *nunca* estuvo en la
+lista sí entra —no tiene fila previa que lo bloquee—, así que **reemplazar la
+lista entera por otra distinta funciona** y lo que se rompe es agregarle uno a la
+que ya está, o devolver uno que se sacó. La cara peor es la lista que se achica:
+ahí ninguna fila es nueva y la regla queda **sin ningún método**, que para una
+regla por método de pago significa que deja de aplicarse. Medido por API el
+2026-09-01 y fijado en `backend/test/reglas-valor.e2e-spec.ts`.
+
+📌 **El seeder todavía tiene la forma ❌** (`seedDescuentoMetodosPago` /
+`seedRecargoMetodosPago`: `findOne` —que excluye borrados— → `save`). No se tocó
+porque es dev-only, pero el escenario no es teórico: las filas sembradas cuelgan
+de reglas de tenant **editables desde la pantalla** —"Descuento pago en efectivo
+3%", de Paris, es una—, así que un `PATCH` local que les cambie el método las
+deja apagadas, el re-seed las "recrea" muertas y el síntoma va a parecer
+contaminación de la base.
 
 ---
 

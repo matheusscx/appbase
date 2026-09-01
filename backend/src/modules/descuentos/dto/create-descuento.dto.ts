@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -71,8 +72,14 @@ export class CreateDescuentoDto {
   @IsString()
   modo?: string | null;
 
+  // `@ArrayUnique` no es cosmético: la lista se guarda con un
+  // `INSERT … ON CONFLICT DO UPDATE`, que en Postgres no puede tocar la misma
+  // fila dos veces en una sentencia (21000). Sin esto, un id repetido cortaba
+  // con un 500 —en `POST` desde siempre, por la PK compuesta de la puente—.
+  // Mismo decorador que usan las listas de ids de `propinas` y `recuentos`.
   @IsOptional()
   @IsArray()
+  @ArrayUnique()
   @IsUUID('4', { each: true })
   metodoPagoIds?: string[];
 

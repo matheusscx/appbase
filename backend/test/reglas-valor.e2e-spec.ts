@@ -26,6 +26,12 @@ import { AppModule } from '../src/app.module';
  * No vive en `calculo-precios.e2e-spec.ts` (que consume estas reglas) porque
  * esto es validación de CRUD, no aritmética de precios; y no había ningún e2e
  * de descuentos/recargos donde meterlo.
+ *
+ * Desde el 2026-09-01 cubre una segunda garantía del mismo CRUD —por eso el
+ * `describe` dice "CRUD" y ya no solo "todo expresa su monto"—: editar la lista
+ * de métodos de pago de una regla no puede dejarla sin ninguno. Vive acá por el
+ * mismo motivo que el resto: el unit mockea el repositorio, y lo que fallaba era
+ * la decisión INSERT-vs-UPDATE del ORM contra Postgres real.
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
@@ -36,6 +42,12 @@ const TIPO_DESCUENTO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
 const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
 const TIPO_RECARGO_POR_MONTO = '550e8400-e29b-41d4-a716-446655440353';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+const TIPO_DESCUENTO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440118';
+const TIPO_RECARGO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440124';
+
+// Métodos de pago del catálogo global (`seeder.service.ts` → `seedMetodosPago`).
+const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+const TARJETA_CREDITO_ID = '550e8400-e29b-41d4-a716-446655440107';
 
 interface TokenResponse {
   access_token: string;
@@ -65,7 +77,7 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
+describe('Descuentos y recargos (e2e) — CRUD', () => {
   let app: INestApplication<App>;
   let token: string;
 
@@ -870,5 +882,154 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     const codigos = (res.body as { codigo: string }[]).map((t) => t.codigo);
     expect(codigos).not.toContain('promocional');
     expect(codigos).toContain('directo');
+  });
+  // ─── Editar los métodos de pago no puede dejar la regla muda ──────────────
+
+  describe('los métodos de pago sobreviven al PATCH', () => {
+    // `PATCH { metodoPagoIds }` reemplaza la lista entera: apaga las filas
+    // viejas de la tabla puente y guarda las nuevas. La puente tiene PK
+    // compuesta `(descuento_id, metodo_pago_id)`, así que un método que ya
+    // estuvo en la lista **reusa su fila** —no hay una nueva que insertar— y
+    // ahí es donde se perdía.
+    //
+    // Por qué es plata y no cosmética: `evaluarRegla` exige que el método de
+    // pago del cobro esté en la lista de la regla. Un método que desaparece de
+    // la lista deja de descontar en ese método **y no lo dice**: el PATCH
+    // contesta 200 con la lista que le mandaron, porque la respuesta hace eco
+    // del DTO en vez de releer la tabla. Por eso los tests leen del `GET`.
+    //
+    // Va como e2e y no como unit porque lo que decide el resultado es el ORM
+    // contra Postgres real —INSERT de una fila nueva vs UPDATE de la que ya
+    // está—; el unit mockea el repositorio y esa decisión no existe.
+
+    const metodosDe = async (
+      recurso: 'descuentos' | 'recargos',
+      id: string,
+    ): Promise<string[]> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/${recurso}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const regla = (
+        res.body as { id: string; metodoPagoIds: string[] }[]
+      ).find((r) => r.id === id);
+      expect(regla).toBeDefined();
+      return [...regla!.metodoPagoIds].sort();
+    };
+
+    const crearPorMetodoPago = async (
+      recurso: 'descuentos' | 'recargos',
+      metodoPagoIds: string[],
+    ): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/${recurso}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Por metodo de pago E2E ${recurso} ${Date.now()}`,
+          tipoReglaId:
+            recurso === 'descuentos'
+              ? TIPO_DESCUENTO_METODO_PAGO
+              : TIPO_RECARGO_METODO_PAGO,
+          modo: 'porcentaje',
+          valorPorcentaje: '0.10',
+          metodoPagoIds,
+        });
+      expect(res.status).toBe(201);
+      return (res.body as ReglaResponse).id;
+    };
+
+    const editarMetodos = async (
+      recurso: 'descuentos' | 'recargos',
+      id: string,
+      metodoPagoIds: string[],
+    ): Promise<void> => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/${recurso}/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ metodoPagoIds });
+      expect(res.status).toBe(200);
+    };
+
+    it('agregar un método conserva el que el descuento ya tenía', async () => {
+      // La escena: el descuento aplica en tarjeta de crédito y el local decide
+      // que también aplique en efectivo. Lo que no puede pasar es que sumar
+      // efectivo le saque la tarjeta.
+      const id = await crearPorMetodoPago('descuentos', [TARJETA_CREDITO_ID]);
+      await editarMetodos('descuentos', id, [TARJETA_CREDITO_ID, EFECTIVO_ID]);
+
+      expect(await metodosDe('descuentos', id)).toEqual(
+        [TARJETA_CREDITO_ID, EFECTIVO_ID].sort(),
+      );
+    });
+
+    it('sacar un método y volver a ponerlo lo revive', async () => {
+      // El caso que obliga a revivir en vez de insertar: la fila
+      // `(descuento, efectivo)` ya existe apagada, y su PK compuesta no deja
+      // meter otra igual.
+      const id = await crearPorMetodoPago('descuentos', [
+        TARJETA_CREDITO_ID,
+        EFECTIVO_ID,
+      ]);
+      await editarMetodos('descuentos', id, [TARJETA_CREDITO_ID]);
+      expect(await metodosDe('descuentos', id)).toEqual([TARJETA_CREDITO_ID]);
+
+      await editarMetodos('descuentos', id, [TARJETA_CREDITO_ID, EFECTIVO_ID]);
+      expect(await metodosDe('descuentos', id)).toEqual(
+        [TARJETA_CREDITO_ID, EFECTIVO_ID].sort(),
+      );
+    });
+
+    it('reemplazar la lista entera deja exactamente la nueva', async () => {
+      // Ancla del otro lado: revivir no puede convertir el reemplazo en una
+      // suma. El método que se sacó tiene que quedar afuera.
+      const id = await crearPorMetodoPago('descuentos', [TARJETA_CREDITO_ID]);
+      await editarMetodos('descuentos', id, [EFECTIVO_ID]);
+
+      expect(await metodosDe('descuentos', id)).toEqual([EFECTIVO_ID]);
+    });
+
+    it('el mismo método repetido en el body es 400, no un 500 de Postgres', async () => {
+      // La lista se guarda con un `ON CONFLICT DO UPDATE`, que en Postgres no
+      // puede tocar la misma fila dos veces en una sentencia; y en el `POST` el
+      // repetido ya reventaba contra la PK compuesta de la puente desde
+      // siempre. Lo ataja el `@ArrayUnique()` del DTO —el mismo decorador que
+      // usan las listas de ids de propinas y recuentos—, así que los dos verbos
+      // contestan igual en vez de un 500 en uno y un 200 a medias en el otro.
+      const creado = await request(app.getHttpServer())
+        .post('/api/descuentos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Metodos repetidos E2E ${Date.now()}`,
+          tipoReglaId: TIPO_DESCUENTO_METODO_PAGO,
+          modo: 'porcentaje',
+          valorPorcentaje: '0.10',
+          metodoPagoIds: [EFECTIVO_ID, EFECTIVO_ID],
+        });
+      expect(creado.status).toBe(400);
+
+      const id = await crearPorMetodoPago('descuentos', [TARJETA_CREDITO_ID]);
+      const patch = await request(app.getHttpServer())
+        .patch(`/api/descuentos/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ metodoPagoIds: [EFECTIVO_ID, EFECTIVO_ID] });
+      expect(patch.status).toBe(400);
+      // Y la regla queda como estaba. Lo que esta línea fija es el estado, que
+      // es lo que le importa a quien editaba: NO distingue de dónde vino el
+      // rechazo —`update` corre en transacción, así que un 400 del service
+      // después del soft-stamp dejaría lo mismo—. Que sea del pipe lo dice el
+      // mensaje (`All metodoPagoIds's elements must be unique`).
+      expect(await metodosDe('descuentos', id)).toEqual([TARJETA_CREDITO_ID]);
+    });
+
+    it('y en recargos, que copian la misma forma, pasa lo mismo', async () => {
+      const id = await crearPorMetodoPago('recargos', [TARJETA_CREDITO_ID]);
+      await editarMetodos('recargos', id, [TARJETA_CREDITO_ID, EFECTIVO_ID]);
+      expect(await metodosDe('recargos', id)).toEqual(
+        [TARJETA_CREDITO_ID, EFECTIVO_ID].sort(),
+      );
+
+      await editarMetodos('recargos', id, [EFECTIVO_ID]);
+      expect(await metodosDe('recargos', id)).toEqual([EFECTIVO_ID]);
+    });
   });
 });

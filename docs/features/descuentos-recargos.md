@@ -501,9 +501,21 @@ el importe vive en una columna que el modo nuevo deja fuera de juego. Ese `PATCH
 
 Todas con soft delete (`eliminado_el`) y timestamps.
 
+⚠️ **Las dos puentes se REVIVEN, no se reinsertan.** Un `PATCH { metodoPagoIds }`
+reemplaza la lista entera, pero como la PK es el par `(regla, método)`, un método que
+ya estuvo asociado no tiene fila nueva que insertar: tiene una apagada que hay que
+volver a prender (`ON CONFLICT … DO UPDATE SET eliminado_el = NULL`). Hasta el
+2026-09-01 se hacía con `manager.save()`, que resolvía esas filas como `UPDATE` sin
+limpiar `eliminado_el` y las dejaba muertas: agregarle un método a una regla le sacaba
+el que ya tenía, y achicar la lista la dejaba **sin ninguno** —o sea, sin aplicarse—
+con 200 en la respuesta. El mecanismo y el molde correcto están en
+`docs/patterns/backend.md` §14b.
+
 ### DTOs (extendidos)
 
-- `CreateDescuentoDto` / `UpdateDescuentoDto`: nuevos campos `metodoPagoIds?: string[]`,
+- `CreateDescuentoDto` / `UpdateDescuentoDto`: nuevos campos `metodoPagoIds?: string[]`
+  (con `@ArrayUnique()`: un id repetido es 400 en los dos verbos, porque la puente se
+  guarda con `ON CONFLICT DO UPDATE` y Postgres no deja tocar la misma fila dos veces),
   `tramos?: TramoDto[]`, `diasVencimiento?: number`, `fechaInicio?: string`, `fechaFin?: string`
 - `TramoDto`: `{ minimoCantidad?, minimoMonto?, valorMonto?, valorPorcentaje? }` (strings
   para `@IsNumberString`). Los cuatro son opcionales **en el DTO** porque cuál corresponde

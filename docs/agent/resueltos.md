@@ -17,6 +17,79 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un descuento por método de pago dejaba de aplicarse al editarlo — y la sospecha de la entrada era errada (cerrado 2026-09-01)
+
+Venía de la § 1 (*mecánico*), donde había entrado el 2026-08-31 desde la revisión
+independiente del frente de congelado de precios. Era la única entrada viva de esa sección.
+
+**La entrada acertó el síntoma, erró la causa y se quedó corta con el alcance.** Decía que
+la culpa era una *"colisión con la PK compuesta de la fila ya borrada"*. No hay ninguna
+colisión: TypeORM carga los subjects de un `save()` **con** los borrados (`withDeleted:
+true`, en `SubjectDatabaseEntityLoader`), así que **encuentra** la fila apagada por su PK y
+resuelve el guardado como `UPDATE` en vez de `INSERT`. Y como la entidad recién creada trae
+`eliminadoEl: undefined`, el computador de columnas cambiadas la saltea —`undefined`
+significa "no cambió"— y `eliminado_el` nunca se limpia. La fila queda muerta, sin error y
+con 200 en la respuesta.
+
+La diferencia importa porque cambia **qué se rompe**. Medido por API el 2026-09-01, sobre la
+base recién sembrada:
+
+| Edición de la lista | Con qué quedaba | Qué significa en el local |
+|---|---|---|
+| `[tarjeta]` → `[tarjeta, efectivo]` | **`[efectivo]`** | agregar un método le saca el que ya tenía |
+| `[tarjeta, efectivo]` → `[tarjeta]` | **`[]`** | achicar la lista la deja sin ninguno: deja de aplicarse |
+| `[tarjeta]` → `[efectivo]` | `[efectivo]` ✅ | reemplazar por métodos nuevos siempre funcionó |
+
+La tercera fila es la que lo mantuvo escondido: la prueba más obvia —cambiar un método por
+otro— pasa. La entrada había medido la segunda, y por eso su título decía *"deja la regla
+SIN métodos de pago"*: es uno de los tres casos, no el general.
+
+**Lo que se construyó.** Las dos ramas de `update` —`descuentos.service.ts` y su gemelo
+`recargos.service.ts`— cambian el `save()` por un `INSERT … ON CONFLICT (<fk>,
+metodo_pago_id) DO UPDATE SET eliminado_el = NULL`, una sola sentencia para los N métodos.
+Es el molde que ya usaban `roles.service.ts` (`roles_usuarios`) y `tenants.service.ts`.
+
+De arrastre, `metodoPagoIds` ganó `@ArrayUnique()` en los dos DTO de creación (los de update
+son `PartialType`, así que cubre los dos verbos). No es adorno: `ON CONFLICT DO UPDATE` no
+puede tocar la misma fila dos veces en una sentencia (Postgres 21000). El primer intento lo
+tapaba deduplicando con un `Set` dentro del service, con una justificación **medida como
+falsa** por la revisión: decía que validar convertiría en 400 *"un body que hoy acepta"*, y
+lo que ese body devolvía era un **500** (`23505` contra la PK compuesta, en `POST`, desde
+siempre). Deduplicar en el service además dejaba la respuesta haciendo eco de una lista que
+no era la guardada. `@ArrayUnique()` es lo que el repo ya usa para listas de ids
+(`propinas`, `recuentos`), deja los dos verbos contestando igual, y no hay dos mecanismos
+para lo mismo.
+
+**Qué lo fija.** Cinco tests nuevos en `backend/test/reglas-valor.e2e-spec.ts` y el unitario
+de cada service, que pasó de afirmar el `save()` a afirmar el `ON CONFLICT`. **Tres de los
+cinco revierten** —las dos primeras filas de la tabla y el gemelo de recargos—: se corrieron
+contra el código viejo antes de tocarlo y fallaron ahí. Los otros dos son anclas y conviene
+decir que lo son, porque el que las confunda va a creer que la suite caza más de lo que
+caza: el de la tercera fila (`[tarjeta]` → `[efectivo]`) **pasa igual con el `save()` viejo**
+y está para que revivir no convierta el reemplazo en unión; el de los ids repetidos fija el
+400 nuevo. Van como e2e porque lo que decide el resultado es el ORM contra Postgres real: el
+unit mockea el repositorio y esa decisión ahí no existe.
+
+**La ⚠️ que la entrada dejaba abierta, contestada.** Preguntaba si el `PATCH` que *agrega* un
+método a una regla que nunca tuvo ninguno funcionaba. Para los dos tipos por método de pago
+ese estado es **inalcanzable**: crear exige al menos uno (`descuentos.service.ts`,
+`TIPOS_CON_METODOS`) y actualizar rechaza la lista vacía. Y para una regla de otro tipo que
+recibe métodos por primera vez no hay ninguna fila apagada que revivir, así que ese camino
+nunca estuvo roto — el bug vivía entero en el reuso.
+
+**Lo que NO se tocó, a propósito.** `create` sigue con `save()`: una regla recién creada no
+tiene filas apagadas que revivir. Las puentes de `promociones.service.ts` tampoco, porque
+soft-borran por el `scopeId` viejo e insertan scopes con UUID nuevo: ahí no hay PK que se
+reuse. Y el seeder conserva la forma vieja (`findOne` sin borrados → `save`), anotado en el
+§14b: es dev-only, pero si alguna vez un `PATCH` local apaga una fila puente sembrada, el
+re-seed la recrea muerta y el síntoma va a parecer contaminación de la base.
+
+El patrón quedó escrito en [`docs/patterns/backend.md`](../patterns/backend.md) §14b, como
+excepción al *"cuándo NO hace falta"* del §14 —que decía, sin la salvedad, que soft-delete +
+insert alcanza cuando nada referencia el UUID del hijo—.
+
+---
+
 ## El override de `precioUnitario`: sale del sistema, y el que mentía era el preview (cerrado 2026-08-30)
 
 Venía de la § 4 (*necesita que el owner conteste*), donde había nacido unas horas antes al

@@ -341,13 +341,25 @@ export class DescuentosService {
           { eliminadoEl: new Date() },
         );
         if (dto.metodoPagoIds.length) {
-          const metodos = dto.metodoPagoIds.map((mid) =>
-            manager.create(DescuentoMetodoPago, {
-              descuentoId: id,
-              metodoPagoId: mid,
-            }),
+          // Apagar y volver a PRENDER, no apagar e insertar: la puente tiene PK
+          // compuesta `(descuento_id, metodo_pago_id)`, así que un método que ya estuvo
+          // en la lista no tiene una fila nueva que insertar sino una apagada
+          // que revivir. `manager.save()` la dejaba muerta y la regla perdía el
+          // método sin avisar y con 200 — el mecanismo, y qué medía cada caso,
+          // en `docs/patterns/backend.md` §14b. Fijado por
+          // `test/reglas-valor.e2e-spec.ts`.
+          //
+          // Una sola sentencia para los N métodos: nunca una query por id. Que
+          // no vengan repetidos lo garantiza el `@ArrayUnique()` del DTO, y es
+          // lo que impide que `ON CONFLICT DO UPDATE` toque la misma fila dos
+          // veces en la misma sentencia (Postgres 21000).
+          await manager.query(
+            `INSERT INTO descuento_metodo_pago (descuento_id, metodo_pago_id, creado_el, actualizado_el)
+             VALUES ${dto.metodoPagoIds.map((_, i) => `($1, $${i + 2}, NOW(), NOW())`).join(', ')}
+             ON CONFLICT (descuento_id, metodo_pago_id)
+             DO UPDATE SET eliminado_el = NULL, actualizado_el = NOW()`,
+            [id, ...dto.metodoPagoIds],
           );
-          await manager.save(metodos);
         }
       }
 
