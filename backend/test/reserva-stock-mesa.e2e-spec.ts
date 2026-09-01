@@ -68,6 +68,8 @@ describe('Reserva de stock al pedir (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let mesaId: string;
+  /** Segunda mesa del MISMO salón: la que choca contra la reserva de la otra. */
+  let mesaBId: string;
   let garzon: GarzonCreado;
   let cajaId: string;
   /** Cuentas abiertas por los tests, para cancelarlas en el `afterAll`. */
@@ -114,18 +116,18 @@ describe('Reserva de stock al pedir (e2e)', () => {
   async function crearIngrediente(
     nombre: string,
     stock: string,
-  ): Promise<string> {
-    return (
-      await post<IdResponse>('/api/items', {
-        nombre: nombreUnico(nombre),
-        precioBase: '100',
-        monedaId: CLP_MONEDA_ID,
-        tipo: 'ingrediente',
-        unidadMedida: 'unidad',
-        stock,
-        costo: '100',
-      })
-    ).id;
+  ): Promise<{ id: string; nombre: string }> {
+    const nombreFinal = nombreUnico(nombre);
+    const { id } = await post<IdResponse>('/api/items', {
+      nombre: nombreFinal,
+      precioBase: '100',
+      monedaId: CLP_MONEDA_ID,
+      tipo: 'ingrediente',
+      unidadMedida: 'unidad',
+      stock,
+      costo: '100',
+    });
+    return { id, nombre: nombreFinal };
   }
 
   async function crearReceta(
@@ -151,8 +153,8 @@ describe('Reserva de stock al pedir (e2e)', () => {
     return { id, nombre: nombreFinal };
   }
 
-  async function abrirCuenta(): Promise<string> {
-    const { id } = await post<IdResponse>(`/api/mesas/${mesaId}/cuentas`, {
+  async function abrirCuenta(mesa: string = mesaId): Promise<string> {
+    const { id } = await post<IdResponse>(`/api/mesas/${mesa}/cuentas`, {
       garzonId: garzon.id,
       pin: garzon.pin,
     });
@@ -166,6 +168,23 @@ describe('Reserva de stock al pedir (e2e)', () => {
     cantidad: string,
   ): Promise<void> {
     await post(`/api/cuentas/${cuentaId}/lineas`, { itemId, cantidad });
+  }
+
+  /** El `POST` de línea crudo: para afirmar sobre un rechazo y su mensaje. */
+  async function intentarLinea(
+    cuentaId: string,
+    itemId: string,
+    cantidad: string,
+  ): Promise<{ status: number; message: string }> {
+    const res = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId, cantidad });
+    const message = (res.body as { message?: string | string[] }).message;
+    return {
+      status: res.status,
+      message: Array.isArray(message) ? message.join(' ') : (message ?? ''),
+    };
   }
 
   async function cancelarCuenta(cuentaId: string): Promise<void> {
@@ -238,6 +257,11 @@ describe('Reserva de stock al pedir (e2e)', () => {
     mesaId = (
       await post<IdResponse>(`/api/salones/${salonId}/mesas`, {
         nombre: 'Mesa reserva',
+      })
+    ).id;
+    mesaBId = (
+      await post<IdResponse>(`/api/salones/${salonId}/mesas`, {
+        nombre: 'Mesa reserva B',
       })
     ).id;
 
@@ -387,8 +411,8 @@ describe('Reserva de stock al pedir (e2e)', () => {
     });
 
     it('una receta descuenta lo que las cuentas abiertas comprometieron de su ingrediente', async () => {
-      const ingredienteId = await crearIngrediente('Insumo reserva', '10');
-      const receta = await crearReceta('Receta reserva', ingredienteId, '2');
+      const ingrediente = await crearIngrediente('Insumo reserva', '10');
+      const receta = await crearReceta('Receta reserva', ingrediente.id, '2');
 
       // 10 de insumo / 2 por receta = 5 porciones.
       expect((await filaDelCatalogo(receta.nombre, receta.id)).disponible).toBe(
@@ -402,6 +426,59 @@ describe('Reserva de stock al pedir (e2e)', () => {
       expect((await filaDelCatalogo(receta.nombre, receta.id)).disponible).toBe(
         2,
       );
+    });
+  });
+
+  describe('Tarea 3 — pedir de más rebota al PEDIR, no al cobrar', () => {
+    /**
+     * La sonda que abrió el frente, tal cual. Antes de este guard la mesa B
+     * respondía `201` y el choque aparecía recién al **cobrar** —"Stock
+     * insuficiente para la salida"—, con la comida servida y la línea ya
+     * despachada, o sea imposible de sacar: la mesa quedaba trabada.
+     */
+    it('la última unidad que la mesa A ya pidió le rebota a la mesa B, nombrando el producto', async () => {
+      const producto = await crearProducto('Producto único', '1');
+
+      const cuentaA = await abrirCuenta();
+      await agregarLinea(cuentaA, producto.id, '1');
+
+      const cuentaB = await abrirCuenta(mesaBId);
+      const rechazo = await intentarLinea(cuentaB, producto.id, '1');
+
+      expect(rechazo.status).toBe(400);
+      // Nombra QUÉ faltó: con "no hay stock" el garzón no sabe qué ofrecer.
+      expect(rechazo.message).toContain(producto.nombre);
+
+      // Y la línea no se escribió: sigue comprometida UNA sola unidad, la de la
+      // mesa A. Si el rechazo hubiera dejado la fila puesta, esto sería -1.
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('0.0000');
+    });
+
+    /**
+     * El caso que justifica que el mensaje lleve nombre propio: lo que falta no
+     * es el plato —del plato no hay stock, hay ingredientes— sino UNO de sus
+     * insumos. Un plato de seis ingredientes con "no hay stock" no le dice al
+     * garzón qué ofrecer en su lugar.
+     */
+    it('una receta rebota nombrando el INGREDIENTE que faltó, no el plato', async () => {
+      const ingrediente = await crearIngrediente('Insumo escaso', '3');
+      const receta = await crearReceta('Plato escaso', ingrediente.id, '2');
+
+      const cuentaA = await abrirCuenta();
+      await agregarLinea(cuentaA, receta.id, '1'); // toma 2 de 3
+
+      const cuentaB = await abrirCuenta(mesaBId);
+      const rechazo = await intentarLinea(cuentaB, receta.id, '1'); // pide 2, queda 1
+
+      expect(rechazo.status).toBe(400);
+      expect(rechazo.message).toContain(ingrediente.nombre);
+      expect(rechazo.message).not.toContain(receta.nombre);
+      // Y dice los dos números que hacen falta para entenderlo, con su unidad:
+      // queda 1 de insumo y este plato necesita 2.
+      expect(rechazo.message).toContain('quedan 1 unidad');
+      expect(rechazo.message).toContain('necesita 2 unidad');
     });
   });
 });

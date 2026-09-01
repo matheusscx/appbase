@@ -5808,7 +5808,7 @@ describe('ItemsService', () => {
 
     it('un producto suelto se consume a sí mismo, sin expandir nada', async () => {
       dataSource.query.mockResolvedValueOnce([
-        { item_id: PAPAS, tipo: 'producto' },
+        { item_id: PAPAS, tipo: 'producto', nombre: 'Papas fritas' },
       ]);
 
       const consumo = await service.consumoDeLineas(TENANT, [
@@ -5818,6 +5818,9 @@ describe('ItemsService', () => {
       expect(consumo.get(PAPAS)).toEqual({
         cantidad: new Decimal('2'),
         bloqueante: true,
+        // El nombre viaja con el consumo para que el rechazo al pedir pueda
+        // decir QUÉ faltó; sale de la misma consulta del tipo.
+        nombre: 'Papas fritas',
       });
       // Ni receta ni combo ni grupos: una sola consulta, la del tipo.
       expect(dataSource.query).toHaveBeenCalledTimes(1);
@@ -5837,11 +5840,15 @@ describe('ItemsService', () => {
       expect(consumo.get(PAN)).toEqual({
         cantidad: new Decimal('2'),
         bloqueante: true,
+        // El nombre que va a nombrar el faltante es el del INGREDIENTE, no el
+        // del plato: "no hay stock" no le dice al garzón qué ofrecer.
+        nombre: 'Pan de hamburguesa',
       });
       // 20 g × 2 = 40 g, y el queso se guarda en kg.
       expect(consumo.get(QUESO)).toEqual({
         cantidad: new Decimal('0.04'),
         bloqueante: false,
+        nombre: 'Queso laminado',
       });
     });
 
@@ -5893,6 +5900,8 @@ describe('ItemsService', () => {
       expect(consumo.get(CARNE)).toEqual({
         cantidad: new Decimal('0.3'),
         bloqueante: false,
+        // El de un extra sale del catálogo de extras, no de la receta.
+        nombre: 'Carne molida',
       });
     });
 
@@ -6046,14 +6055,15 @@ describe('ItemsService', () => {
       // inverso y no probaría nada.
       dataSource.query
         .mockResolvedValueOnce([
-          { item_id: COMBO, tipo: 'combo' },
-          { item_id: PAPAS, tipo: 'producto' },
+          { item_id: COMBO, tipo: 'combo', nombre: 'Combo Especial' },
+          { item_id: PAPAS, tipo: 'producto', nombre: 'Papas fritas' },
         ])
         .mockResolvedValueOnce([
           {
             combo_item_id: COMBO,
             componente_item_id: PAPAS,
             tipo: 'producto',
+            nombre: 'Papas fritas',
             cantidad: '1',
             bloqueante: false,
           },
@@ -6067,6 +6077,7 @@ describe('ItemsService', () => {
       expect(consumo.get(PAPAS)).toEqual({
         cantidad: new Decimal('2'),
         bloqueante: false,
+        nombre: 'Papas fritas',
       });
     });
 
@@ -6155,6 +6166,177 @@ describe('ItemsService', () => {
 
       // Los cinco niveles, una consulta cada uno.
       expect(dataSource.query).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('validarStockAlPedir', () => {
+    const PAPAS = 'papas-uuid';
+    const NOMBRE = 'Papas fritas';
+
+    /**
+     * La secuencia REAL de consultas de un pedido de un producto suelto, que
+     * es el caso de la sonda del frente:
+     *
+     * | # | Quién | Qué |
+     * |---|---|---|
+     * | 1 | `consumoDeLineas` | tipo del ítem pedido |
+     * | 2 | el guard | `item_producto … FOR UPDATE OF ip` |
+     * | 3 | `comprometidoPorItem` | líneas de las cuentas abiertas |
+     * | 4 | `consumoDeLineas` (otra vez) | tipo de los ítems de esas líneas |
+     *
+     * Que la 2 vaya antes que la 3 **es el contrato** (paso 3 del docblock):
+     * leer el comprometido sin el lock tomado deja pasar dos pedidos del último.
+     */
+    const mockearPedidoDeProducto = (params: {
+      stock: string | null;
+      /** Cantidad que las cuentas abiertas ya tienen tomada. `null` = ninguna. */
+      comprometido: string | null;
+      /** `false` = el ítem no tiene fila en `item_producto`. */
+      conFilaDeStock?: boolean;
+    }): void => {
+      const tipoRows = [{ item_id: PAPAS, tipo: 'producto', nombre: NOMBRE }];
+      dataSource.query
+        .mockResolvedValueOnce(tipoRows)
+        .mockResolvedValueOnce(
+          params.conFilaDeStock === false
+            ? []
+            : [
+                {
+                  item_id: PAPAS,
+                  stock: params.stock,
+                  unidad_medida: 'unidad',
+                },
+              ],
+        )
+        .mockResolvedValueOnce(
+          params.comprometido === null
+            ? []
+            : [
+                {
+                  item_id: PAPAS,
+                  cantidad: params.comprometido,
+                  personalizacion: null,
+                },
+              ],
+        )
+        .mockResolvedValueOnce(tipoRows);
+    };
+
+    const pedir = (cantidad: string) =>
+      service.validarStockAlPedir(TENANT, [
+        { itemId: PAPAS, cantidad, personalizacion: null },
+      ]);
+
+    it('toma el lock de stock ANTES de leer el comprometido — el orden es el contrato', async () => {
+      mockearPedidoDeProducto({ stock: '3', comprometido: '1' });
+
+      await pedir('1');
+
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      const iLock = sqls.findIndex((sql) => sql.includes('FOR UPDATE OF ip'));
+      const iComprometido = sqls.findIndex((sql) =>
+        sql.includes('FROM cuenta_lineas cl'),
+      );
+      expect(iLock).toBeGreaterThanOrEqual(0);
+      expect(iComprometido).toBeGreaterThanOrEqual(0);
+      // Invertirlos es el mutante que este test existe para matar: sin el lock
+      // tomado, dos transacciones leen el mismo comprometido y las dos pasan.
+      expect(iLock).toBeLessThan(iComprometido);
+    });
+
+    it('el lock ordena por item_id, es solo sobre item_producto y filtra el borrado', async () => {
+      mockearPedidoDeProducto({ stock: '3', comprometido: null });
+
+      await pedir('1');
+
+      const sql = (
+        dataSource.query.mock.calls.find((c) =>
+          (c[0] as string).includes('FOR UPDATE OF ip'),
+        ) as [string, unknown[]]
+      )[0];
+      // `ORDER BY` explícito: es lo que fija el orden de bloqueo dentro del
+      // statement (el nodo `LockRows` va por encima del `Sort`).
+      expect(sql).toContain('ORDER BY ip.item_id');
+      // `OF ip` y no `FOR UPDATE` a secas: sin el `OF` se lockea también
+      // `items`, huella de locks nueva en el camino más caliente.
+      expect(sql.trimEnd()).toMatch(/FOR UPDATE OF ip$/);
+      // El soft delete: `item_producto` no tiene la columna, así que el filtro
+      // solo puede vivir en el JOIN al padre.
+      expect(sql).toContain('i.eliminado_el IS NULL');
+    });
+
+    it('rechaza cuando lo comprometido más lo pedido pasa el stock, y nombra el ítem', async () => {
+      // 3 físicos, 2 ya tomados por otra mesa, se piden 2 más.
+      mockearPedidoDeProducto({ stock: '3', comprometido: '2' });
+
+      await expect(pedir('2')).rejects.toThrow(BadRequestException);
+    });
+
+    it('el mensaje dice cuánto queda y cuánto se pidió, con la unidad', async () => {
+      mockearPedidoDeProducto({ stock: '3', comprometido: '2' });
+
+      await expect(pedir('2')).rejects.toThrow(
+        `Stock insuficiente de "${NOMBRE}": quedan 1 unidad y este pedido necesita 2 unidad`,
+      );
+    });
+
+    it('deja pasar lo que entra JUSTO: el tope es estricto, no off-by-one', async () => {
+      // El control de los dos de arriba. Sin él, un guard que rechazara SIEMPRE
+      // los haría pasar igual y nadie vería que rompe el camino normal.
+      // 3 − 2 = 1 disponible, se pide exactamente 1.
+      mockearPedidoDeProducto({ stock: '3', comprometido: '2' });
+
+      await expect(pedir('1')).resolves.toBeUndefined();
+    });
+
+    it('un ítem NO bloqueante no frena, y ni siquiera se lockea su stock', async () => {
+      // Un combo con su único componente no bloqueante: `consumoDeLineas` lo
+      // marca `bloqueante: false` y el guard sale antes de tocar stock. Es la
+      // decisión 4 del owner (spec § 4.2) y lo que la Tarea 5 va a fijar
+      // end-to-end; acá se fija que la rama existe.
+      dataSource.query
+        .mockResolvedValueOnce([
+          { item_id: COMBO_ID, tipo: 'combo', nombre: 'Combo' },
+        ])
+        .mockResolvedValueOnce([
+          {
+            combo_item_id: COMBO_ID,
+            componente_item_id: PAPAS,
+            tipo: 'producto',
+            nombre: NOMBRE,
+            cantidad: '1',
+            bloqueante: false,
+          },
+        ]);
+
+      await expect(
+        service.validarStockAlPedir(TENANT, [
+          { itemId: COMBO_ID, cantidad: '99', personalizacion: null },
+        ]),
+      ).resolves.toBeUndefined();
+
+      // Las dos de la expansión y ninguna más: sin `FOR UPDATE` no hay lock que
+      // sostener por algo que no frena.
+      expect(dataSource.query).toHaveBeenCalledTimes(2);
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      expect(sqls.some((sql) => sql.includes('FOR UPDATE'))).toBe(false);
+    });
+
+    it('un bloqueante SIN fila en item_producto rechaza en vez de saltearse en silencio', async () => {
+      // La carrera real: alguien borra (soft) el ingrediente entre la expansión
+      // y el lock. Saltearlo dejaría sin tope un ítem que la venta SÍ va a
+      // descontar —`registrarMovimiento` no filtra el borrado a propósito—, o
+      // sea sobreventa silenciosa. Era la única salida muda del camino que
+      // enforcea.
+      mockearPedidoDeProducto({
+        stock: null,
+        comprometido: null,
+        conFilaDeStock: false,
+      });
+
+      await expect(pedir('1')).rejects.toThrow(
+        `No se puede verificar el stock de "${NOMBRE}": el ítem ya no está disponible en el catálogo`,
+      );
     });
   });
 

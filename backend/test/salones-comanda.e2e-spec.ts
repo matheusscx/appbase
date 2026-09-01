@@ -181,12 +181,20 @@ describe('Salones — comanda a cocina (e2e)', () => {
       })
     ).id;
 
+    // ⚠️ `stock` explícito desde el 2026-09-01: pedir una línea ahora verifica
+    // que quede stock (`ItemsService.validarStockAlPedir`), así que un producto
+    // sin carga inicial rebota con 400 al agregarlo a la cuenta. No es una
+    // exigencia nueva del negocio —la venta ya rechazaba la salida al cerrar—;
+    // lo que cambió es que el rechazo llega al pedir. Holgado: estos ítems se
+    // piden en todos los tests del spec y el stock no se repone entre ellos.
     const item = (nombre: string, categoriaId?: string) => ({
       nombre: `${nombre} E2E ${marca}`,
       tipo: 'producto',
       precioBase: '5000',
       monedaId: CLP_MONEDA_ID,
       unidadMedida: 'unidad',
+      stock: '1000',
+      costo: '100',
       ...(categoriaId ? { categoriaId } : {}),
     });
     platoId = (await post<IdResponse>('/api/items', item('Plato', catCocinaId)))

@@ -50,6 +50,35 @@ import {
   type PersonalizacionDetalleLinea,
 } from '../../common/utils/personalizacion-receta.util';
 
+/**
+ * Reintentos ante deadlock de `agregarLinea`. Dos, por lo mismo que en
+ * `ventas.service.ts`: el deadlock exige que dos transacciones se crucen en el
+ * mismo instante, y la que sobrevive libera sus locks al commitear, así que el
+ * reintento entra a una BD ya despejada.
+ *
+ * ⚠️ **Duplicado a mano de `ventas.service.ts`** (misma constante, misma
+ * `esDeadlock` de abajo). Es deliberado: allá son privados del módulo de
+ * ventas y extraerlos obliga a tocar el camino de la venta, que es más
+ * riesgoso que estas diez líneas. Regla del repo: se duplica dos veces y se
+ * extrae a la tercera — **ésta es la segunda; el que necesite una tercera
+ * extrae las tres.** Al tocar una, tocar la otra.
+ */
+const MAX_REINTENTOS_DEADLOCK = 2;
+
+/**
+ * `40P01` = `deadlock_detected`. TypeORM envuelve el error del driver en
+ * `QueryFailedError`, que copia el `code` del driver pero también lo deja en
+ * `driverError`: se miran los dos porque cuál de las dos formas llega depende
+ * de dónde se lance, y confundirse acá significa no reintentar nunca.
+ *
+ * ⚠️ Gemelo de `esDeadlock` en `ventas.service.ts` — ver el ⚠️ de
+ * `MAX_REINTENTOS_DEADLOCK`, arriba.
+ */
+function esDeadlock(error: unknown): boolean {
+  const e = error as { code?: string; driverError?: { code?: string } };
+  return e?.code === '40P01' || e?.driverError?.code === '40P01';
+}
+
 // `eliminadoEl`/`eliminadoPorNombre` solo se completan cuando se pide
 // `incluirEliminados`: el listado normal sigue devolviendo la forma de
 // siempre, sin esas columnas (ver categorias.service.ts → findAll).
@@ -724,60 +753,104 @@ export class SalonesService {
       );
     const hashReglas = hashReglasCongeladas(reglasCongeladas);
 
-    return this.db.transaccion(async (manager) => {
-      const cuenta = await this.getCuentaAbiertaConLock(
-        manager,
-        tenantId,
-        cuentaId,
-      );
-      const existentes = await manager.find(CuentaLinea, {
-        where: { tenantId, cuentaId, itemId: dto.itemId },
-      });
-      // El merge exige **los tres**: misma personalización, mismo precio
-      // congelado y mismas reglas congeladas. Cada uno cubre una forma distinta
-      // de que dos pedidos del mismo plato sean dos hechos distintos:
-      //   - el precio → la mesa pide a $5.000, sube la carta, pide otra;
-      //   - las reglas → la mesa pide, sale un 20%, pide otra ("esa sí sale con
-      //     el descuento", owner 2026-08-30). El precio de lista no se movió, así
-      //     que sin este término se fusionaban y la segunda perdía su descuento.
-      // Con los tres iguales siguen fusionándose, que es lo que el garzón espera
-      // ver ("2 ×", no "1 + 1").
-      const match = existentes.find(
-        (l) =>
-          hashPersonalizacion(l.personalizacion) === hash &&
-          new Decimal(l.precioUnitario).eq(precioUnitario) &&
-          hashReglasCongeladas(l.reglasCongeladas) === hashReglas,
-      );
-      if (match) {
-        match.cantidad = new Decimal(match.cantidad)
-          .plus(resuelta.cantidadCanonica)
-          .toString();
-        // La presentación se REESCRIBE, no se suma: la línea puede estar
-        // mostrando `g` y lo que entra venir en `kg`, así que sumar los dos
-        // números daría una unidad que no existe. Se recalcula desde la
-        // canónica ya sumada, en la unidad que esa línea ya mostraba.
-        this.sincronizarPresentacion(match, item, catalogo);
-        await manager.save(CuentaLinea, match);
-      } else {
-        await manager.save(
-          CuentaLinea,
-          manager.create(CuentaLinea, {
+    // **Reintento ante `40P01`.** Desde el 2026-09-01 esta transacción toma un
+    // `FOR UPDATE` sobre `item_producto` (`validarStockAlPedir`) y entra a
+    // competir con el mismo lock que toma la venta al descontar. Ordenar por
+    // `item_id` baja la frecuencia del ciclo pero **no lo cierra**: el orden
+    // global de la venta es *(orden de línea) × (orden dentro de la línea)*,
+    // que no es ascendente (`docs/agent/anti-patterns.md` § "Tomar
+    // `FOR UPDATE` en un orden que decide el cliente"). El cierre de esta clase
+    // es reintentar, igual que `ventas.crear()`, y sin él el 500 caería del
+    // lado del **cobro** — el modo de falla exacto que este frente vino a
+    // eliminar.
+    //
+    // Reintentar es seguro porque el deadlock **aborta la transacción entera**:
+    // Postgres revierte todo antes de devolver el error, así que no queda línea
+    // a medio escribir que deduplicar. Y `agregarLinea` abre una transacción de
+    // NIVEL SUPERIOR —su único llamador es el controller—, a diferencia de
+    // `cerrarCuenta`, que llama a la venta anidada y por eso se saltea el loop.
+    // Sin esa condición el reintento correría sobre la MISMA transacción ya
+    // abortada y fallaría tres veces con `25P02`.
+    //
+    // Solo `40P01`: reintentar un error de negocio lo convierte en tres
+    // intentos silenciosos. Todo lo anterior a este punto (catálogo, precio
+    // congelado, reglas) queda afuera del bucle: no depende del estado de la
+    // cuenta y rehacerlo sería trabajo tirado.
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.db.transaccion(async (manager) => {
+          const cuenta = await this.getCuentaAbiertaConLock(
+            manager,
             tenantId,
             cuentaId,
-            itemId: dto.itemId,
-            cantidad: resuelta.cantidadCanonica,
-            cantidadPresentacion: resuelta.cantidadPresentacion,
-            unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
-            personalizacion: snapshot,
-            precioUnitario,
-            precioUnitarioOrigen,
-            tasaCambio,
-            reglasCongeladas,
-          }),
-        );
+          );
+          // **Pedir de más rebota acá, no al cobrar.** Hasta el 2026-09-01 dos
+          // mesas podían pedir la misma última unidad: nadie miraba el stock al
+          // pedir y el choque estallaba al cerrar la cuenta, con la comida servida
+          // y la línea ya despachada (o sea, imposible de sacar). El guard va
+          // DESPUÉS del lock de la cuenta y toma su propio lock sobre
+          // `item_producto` — mismo orden que `cerrarCuenta`, que también lockea la
+          // cuenta antes de que la venta toque stock.
+          await this.itemsService.validarStockAlPedir(tenantId, [
+            {
+              itemId: dto.itemId,
+              cantidad: resuelta.cantidadCanonica,
+              personalizacion: snapshot,
+            },
+          ]);
+          const existentes = await manager.find(CuentaLinea, {
+            where: { tenantId, cuentaId, itemId: dto.itemId },
+          });
+          // El merge exige **los tres**: misma personalización, mismo precio
+          // congelado y mismas reglas congeladas. Cada uno cubre una forma distinta
+          // de que dos pedidos del mismo plato sean dos hechos distintos:
+          //   - el precio → la mesa pide a $5.000, sube la carta, pide otra;
+          //   - las reglas → la mesa pide, sale un 20%, pide otra ("esa sí sale con
+          //     el descuento", owner 2026-08-30). El precio de lista no se movió, así
+          //     que sin este término se fusionaban y la segunda perdía su descuento.
+          // Con los tres iguales siguen fusionándose, que es lo que el garzón espera
+          // ver ("2 ×", no "1 + 1").
+          const match = existentes.find(
+            (l) =>
+              hashPersonalizacion(l.personalizacion) === hash &&
+              new Decimal(l.precioUnitario).eq(precioUnitario) &&
+              hashReglasCongeladas(l.reglasCongeladas) === hashReglas,
+          );
+          if (match) {
+            match.cantidad = new Decimal(match.cantidad)
+              .plus(resuelta.cantidadCanonica)
+              .toString();
+            // La presentación se REESCRIBE, no se suma: la línea puede estar
+            // mostrando `g` y lo que entra venir en `kg`, así que sumar los dos
+            // números daría una unidad que no existe. Se recalcula desde la
+            // canónica ya sumada, en la unidad que esa línea ya mostraba.
+            this.sincronizarPresentacion(match, item, catalogo);
+            await manager.save(CuentaLinea, match);
+          } else {
+            await manager.save(
+              CuentaLinea,
+              manager.create(CuentaLinea, {
+                tenantId,
+                cuentaId,
+                itemId: dto.itemId,
+                cantidad: resuelta.cantidadCanonica,
+                cantidadPresentacion: resuelta.cantidadPresentacion,
+                unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
+                personalizacion: snapshot,
+                precioUnitario,
+                precioUnitarioOrigen,
+                tasaCambio,
+                reglasCongeladas,
+              }),
+            );
+          }
+          return this.armarDetalle(tenantId, cuenta, manager);
+        });
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
       }
-      return this.armarDetalle(tenantId, cuenta, manager);
-    });
+    }
   }
 
   async actualizarLinea(

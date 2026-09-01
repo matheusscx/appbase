@@ -144,6 +144,11 @@ describe('Salones — fusionar cuentas (e2e)', () => {
         precioBase: '10000',
         monedaId: CLP_MONEDA_ID,
         unidadMedida: 'kg',
+        // ⚠️ `stock` explícito desde el 2026-09-01: agregar una línea verifica
+        // que quede stock (`ItemsService.validarStockAlPedir`), y sin carga
+        // inicial el `POST` de línea rebota con 400.
+        stock: '1000',
+        costo: '100',
       });
     expect(resItemKg.status).toBe(201);
     itemKgId = (resItemKg.body as IdResponse).id;
@@ -157,6 +162,9 @@ describe('Salones — fusionar cuentas (e2e)', () => {
         precioBase: '2500',
         monedaId: CLP_MONEDA_ID,
         unidadMedida: 'unidad',
+        // Ver el ⚠️ del ítem de arriba.
+        stock: '1000',
+        costo: '100',
       });
     expect(resItemOtro.status).toBe(201);
     itemOtroId = (resItemOtro.body as IdResponse).id;

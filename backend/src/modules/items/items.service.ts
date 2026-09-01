@@ -203,10 +203,17 @@ export interface LineaConsumo {
  * Lo que un conjunto de líneas consume de UN ingrediente o producto.
  * `cantidad` está en la unidad de stock de ese ítem. `bloqueante` es `false` si
  * alguna de las líneas lo consume sin frenar por falta de stock.
+ *
+ * `nombre` existe para que el rechazo al pedir pueda decir **qué** faltó
+ * (`validarStockAlPedir`): "no hay stock" manda al garzón a adivinar cuál de
+ * los seis ingredientes del plato es el que falta. Sale de las mismas
+ * consultas que ya hace la expansión —ninguna consulta de más—, y por eso es
+ * el nombre del ítem **consumido**, no el del plato que lo pidió.
  */
 export interface ConsumoDeItem {
   cantidad: Decimal;
   bloqueante: boolean;
+  nombre: string;
 }
 
 /**
@@ -3994,6 +4001,7 @@ export class ItemsService {
 
     const sumar = (
       itemId: string,
+      nombre: string,
       cantidad: string,
       bloqueante: boolean,
     ): void => {
@@ -4003,18 +4011,23 @@ export class ItemsService {
         // El más permisivo gana: basta que un camino no frene para que el
         // conjunto no frene.
         bloqueante: (previo?.bloqueante ?? true) && bloqueante,
+        // Es el mismo ítem en las dos ramas, así que da igual cuál queda; se
+        // conserva el primero por no reescribir sin motivo.
+        nombre: previo?.nombre ?? nombre,
       });
     };
 
     // 1) Tipo de cada ítem pedido: decide si la línea se consume a sí misma
     //    (producto) o si se expande (receta/combo).
-    const tipoRows: { item_id: string; tipo: string }[] = await this.db.query(
-      `SELECT item_id, tipo FROM items
+    const tipoRows: { item_id: string; tipo: string; nombre: string }[] =
+      await this.db.query(
+        `SELECT item_id, tipo, nombre FROM items
         WHERE item_id = ANY($1::uuid[]) AND tenant_id = $2
           AND eliminado_el IS NULL`,
-      [[...new Set(lineas.map((l) => l.itemId))], tenantId],
-    );
+        [[...new Set(lineas.map((l) => l.itemId))], tenantId],
+      );
     const tipos = new Map(tipoRows.map((r) => [r.item_id, r.tipo]));
+    const nombres = new Map(tipoRows.map((r) => [r.item_id, r.nombre]));
 
     /**
      * Los grupos que una línea consume. Los de sus componentes solo cuentan en
@@ -4039,11 +4052,12 @@ export class ItemsService {
       combo_item_id: string;
       componente_item_id: string;
       tipo: string;
+      nombre: string;
       cantidad: string;
       bloqueante: boolean;
     }[] = comboIds.length
       ? await this.db.query(
-          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo,
+          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, i.nombre,
                   cc.cantidad, cc.bloqueante
              FROM combo_componentes cc
              JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
@@ -4069,10 +4083,11 @@ export class ItemsService {
     const opcionRows: {
       item_id: string;
       tipo: string;
+      nombre: string;
       unidad_medida: string | null;
     }[] = opcionIds.length
       ? await this.db.query(
-          `SELECT i.item_id, i.tipo, ip.unidad_medida
+          `SELECT i.item_id, i.tipo, i.nombre, ip.unidad_medida
              FROM items i
              LEFT JOIN item_producto ip ON ip.item_id = i.item_id
             WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
@@ -4132,6 +4147,7 @@ export class ItemsService {
           .toString();
         sumar(
           ing.ingredienteItemId,
+          ing.ingredienteNombre,
           conv(cantidad, ing.unidadCodigo, ing.ingredienteUnidadMedida),
           ing.bloqueante && bloqueanteDelContexto,
         );
@@ -4160,6 +4176,7 @@ export class ItemsService {
         // de los ingredientes de receta ni el de los componentes de combo.
         sumar(
           op.itemId,
+          cat.nombre,
           cat.tipo === 'ingrediente' && op.unidadCodigo
             ? conv(cantidadTotal, op.unidadCodigo, cat.unidad_medida!)
             : cantidadTotal,
@@ -4197,7 +4214,12 @@ export class ItemsService {
               comp.bloqueante,
             );
           } else {
-            sumar(comp.componente_item_id, cantidadTotal, comp.bloqueante);
+            sumar(
+              comp.componente_item_id,
+              comp.nombre,
+              cantidadTotal,
+              comp.bloqueante,
+            );
           }
         }
       } else {
@@ -4208,7 +4230,12 @@ export class ItemsService {
         // producto o ingrediente: la línea se consume a sí misma. `cantidad` ya
         // viene en la unidad base del ítem (la venta la resuelve antes, ver
         // `cantidadCanonica` en `ventas.service.ts`), así que no se convierte.
-        sumar(linea.itemId, linea.cantidad, true);
+        sumar(
+          linea.itemId,
+          nombres.get(linea.itemId) ?? '',
+          linea.cantidad,
+          true,
+        );
       }
 
       // Los grupos NO se multiplican por la cantidad del componente: el
@@ -4228,6 +4255,148 @@ export class ItemsService {
     }
 
     return consumo;
+  }
+
+  /**
+   * **El tope al PEDIR.** Rechaza con `400` un pedido que, sumado a lo que las
+   * cuentas abiertas del tenant ya tienen tomado, se pasaría del stock de algún
+   * ingrediente o producto **bloqueante**.
+   *
+   * Hasta hoy nadie frenaba acá: dos mesas pedían la misma última unidad y el
+   * choque estallaba al **cobrar**, con "Stock insuficiente para la salida", la
+   * comida ya servida y la línea imposible de sacar por estar despachada. La
+   * mesa quedaba trabada. Este guard mueve ese rechazo al momento en que
+   * todavía se puede pedir otra cosa.
+   *
+   * **Solo frena lo bloqueante** (decisión del owner, spec § 4.2). Lo no
+   * bloqueante igual suma al comprometido —lo hace `comprometidoPorItem`— y por
+   * eso su disponible puede quedar negativo: ocupa, pero no impide pedir.
+   *
+   * ## Los tres pasos, y por qué ese orden es el contrato
+   *
+   * 1. `consumoDeLineas` de lo que se está pidiendo. Va **antes** del lock: lee
+   *    catálogo y recetas, nada de stock, y alargar el lock con eso no compra
+   *    nada. Acá el conversor es el **estricto**: una unidad que ya no se puede
+   *    convertir hace lanzar `BadRequestException` y el pedido se rechaza, que
+   *    es lo correcto en el camino que enforcea — apartar de menos en silencio
+   *    sobrevende. (`comprometidoPorItem` toma la decisión contraria porque
+   *    cuelga de `GET /items`; ver su docblock.)
+   * 2. `SELECT … FOR UPDATE OF ip` sobre `item_producto`, **en un solo
+   *    statement y ordenado por `item_id`**. Es **el mismo lock** que ya toma
+   *    la venta al descontar (`InventarioService.registrarMovimiento`).
+   *
+   *    ⚠️ **El mismo lock, pero NO el mismo orden, y eso es lo que hay que
+   *    saber.** La venta bloquea en *(orden de línea) × (orden dentro de la
+   *    línea)*, que **no es ascendente global** —el contraejemplo está en
+   *    `docs/agent/anti-patterns.md` § "Tomar `FOR UPDATE` en un orden que
+   *    decide el cliente", y por eso `ventas.crear()` reintenta—. Acá el orden
+   *    sí es ascendente, que es lo mejor que puede hacer un statement único,
+   *    pero contra la venta el ciclo sigue siendo posible. Por eso el cierre
+   *    real es el reintento del `40P01`, que `SalonesService.agregarLinea`
+   *    tiene (ver su bucle y el de `ventas.service.ts` → `crear`).
+   *
+   *    La regla que gobierna este caso es la de `anti-patterns.md` + el bloque
+   *    `ordenLocks` de `ventas.service.ts`; **NO** es la § 15 de
+   *    `docs/patterns/backend.md`, cuya cadena
+   *    (`recargos → descuentos → item_receta → item_combo → items`) no menciona
+   *    `item_producto`. Citarla acá mandaba al próximo a la sección equivocada.
+   * 3. Recién **después** del lock se lee el comprometido. El orden es
+   *    load-bearing: bajo READ COMMITTED, la consulta que corre después de
+   *    esperar el lock ve la línea que la otra transacción acababa de
+   *    commitear. Leerlo antes haría que dos pedidos simultáneos del último
+   *    vieran los dos "queda 1" y pasaran los dos, que es exactamente el bug.
+   *    Lo fija `toma el lock de stock ANTES de leer el comprometido…` en
+   *    `items.service.spec.ts`.
+   *
+   * ⚠️ **Lo que este guard NO cierra.** Una línea de `tipo='ingrediente'` se
+   * puede seguir agregando a una cuenta y la venta la **rechaza al cerrar**
+   * (`ventas.service.ts` → "Los ingredientes no se pueden vender
+   * directamente"). Es otro camino a la mesa trabada, preexistente y ajeno a
+   * esta feature: acá el ingrediente se reserva como cualquier otro consumo.
+   */
+  async validarStockAlPedir(
+    tenantId: string,
+    lineasNuevas: LineaConsumo[],
+  ): Promise<void> {
+    const consumoNuevo = await this.consumoDeLineas(tenantId, lineasNuevas);
+    const bloqueantes = [...consumoNuevo].filter(([, c]) => c.bloqueante);
+    if (!bloqueantes.length) return;
+
+    const ids = bloqueantes.map(([itemId]) => itemId);
+    const stockRows: {
+      item_id: string;
+      stock: string | null;
+      unidad_medida: string;
+    }[] = await this.db.query(
+      // `FOR UPDATE OF ip` y no `FOR UPDATE` a secas, por lo mismo que
+      // `registrarMovimiento`: sin el `OF`, Postgres lockearía también la fila
+      // de `items`, huella de locks nueva en el camino más caliente.
+      // `item_producto` no tiene `tenant_id` ni `eliminado_el` (extensión con
+      // PK compartida), así que el acote por tenant y el filtro de borrado
+      // viven los dos en el JOIN al padre.
+      //
+      // El `ORDER BY` es el que fija el orden de bloqueo: el nodo `LockRows`
+      // va por encima del `Sort`, así que las filas se lockean ya ordenadas.
+      `SELECT ip.item_id, ip.stock, ip.unidad_medida
+         FROM item_producto ip
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+          AND i.eliminado_el IS NULL
+        ORDER BY ip.item_id
+        FOR UPDATE OF ip`,
+      [ids, tenantId],
+    );
+    const stockPorItem = new Map(stockRows.map((r) => [r.item_id, r]));
+
+    // ⚠️ Esto corre **sosteniendo el lock de arriba** —tiene que ser así, ver
+    // el paso 3 del docblock—, así que su costo es tiempo de lock sobre los
+    // ítems que se están pidiendo. La ventana está medida y acotada: con los
+    // dos índices que agregó la Tarea 2 (`cuenta_lineas(tenant_id, cuenta_id)`
+    // y `cuentas(tenant_id, estado)`) la consulta del comprometido mide
+    // 0,36 ms. Si esa medición deja de valer —muchísimas cuentas abiertas, un
+    // índice que se cae— esto es lo primero que hay que volver a mirar, porque
+    // dos garzones pidiendo el mismo ítem se serializan acá.
+    const comprometido = await this.comprometidoPorItem(tenantId);
+
+    for (const [itemId, c] of bloqueantes) {
+      const fila = stockPorItem.get(itemId);
+      // **Ruidoso a propósito: era la única salida silenciosa del camino que
+      // enforcea.** Un ítem bloqueante SIN fila en `item_producto` no es un
+      // caso de negocio: todo lo que llega acá con `bloqueante` es un
+      // `producto` o un `ingrediente` —los tipos que sí tienen extensión—,
+      // porque un componente de combo solo puede ser producto/receta/servicio
+      // (`validarComponentesCombo`), una opción de grupo suma esos cuatro
+      // (`grupos-modificadores.service.ts`), el `servicio` se saltea antes y la
+      // `receta` se re-expande. Un combo dentro de otro combo, que es lo que
+      // este comentario decía antes, **es imposible**: el alta lo rechaza.
+      //
+      // Lo que SÍ puede pasar es la carrera: alguien borra (soft) el
+      // ingrediente entre la expansión y esta consulta —READ COMMITTED, el
+      // commit ajeno ya se ve— y el `i.eliminado_el IS NULL` lo deja afuera.
+      // Saltearlo ahí significaría no topear un ítem que la venta **sí** va a
+      // descontar (`registrarMovimiento` no filtra el borrado a propósito), o
+      // sea sobrevender en silencio. Se rechaza el pedido, que es el mismo
+      // criterio del conversor estricto del paso 1.
+      if (!fila) {
+        throw new BadRequestException(
+          `No se puede verificar el stock de "${c.nombre}": el ítem ya no está disponible en el catálogo`,
+        );
+      }
+      const restante = new Decimal(fila.stock ?? '0').minus(
+        comprometido.get(itemId) ?? 0,
+      );
+      if (c.cantidad.greaterThan(restante)) {
+        // El mensaje nombra el ítem que faltó, no el plato: en una receta de
+        // seis ingredientes "no hay stock" manda al garzón a adivinar. Y
+        // `restante` se muestra tal cual, negativo incluido —lo no bloqueante
+        // puede haberlo pasado—: clamplear a 0 escondería justo el número que
+        // el encargado necesita ver.
+        throw new BadRequestException(
+          `Stock insuficiente de "${c.nombre}": quedan ${restante.toString()} ${fila.unidad_medida} ` +
+            `y este pedido necesita ${c.cantidad.toString()} ${fila.unidad_medida}`,
+        );
+      }
+    }
   }
 
   // ── private helpers ────────────────────────────────────────────────────────

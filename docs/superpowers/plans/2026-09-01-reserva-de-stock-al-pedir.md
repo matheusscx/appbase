@@ -202,27 +202,27 @@ Es el test que da sentido a todo el frente: reproduce la sonda que abrió el fre
 - Produces: `POST /cuentas/:id/lineas` responde `400` **nombrando el ingrediente que faltó**
   cuando el comprometido más lo pedido supera el stock de un ingrediente **bloqueante**.
 
-- [ ] **Paso 1: escribir el e2e que falla — la sonda, tal cual**
+- [x] **Paso 1: escribir el e2e que falla — la sonda, tal cual**
 
 Producto con `stock = 1`, dos mesas del mismo salón. La mesa A pide 1 → `201`. La mesa B pide
 1 → **`400`**, y el mensaje nombra el producto. Hoy da `201` y el choque aparece al cobrar.
 
-- [ ] **Paso 2: correr y confirmar que falla con `201`**
+- [x] **Paso 2: correr y confirmar que falla con `201`**
 
-- [ ] **Paso 3: implementar el tope en `agregarLinea`**
+- [x] **Paso 3: implementar el tope en `agregarLinea`**
 
 Bajo el **mismo lock ordenado que la venta ya toma** al descontar
 (`docs/patterns/backend.md` §15): se lee el comprometido de las otras líneas vivas, se suma
 lo que la línea nueva consumiría, y si supera el stock de un ingrediente bloqueante → `400`
 nombrándolo. El mensaje tiene que decir **qué faltó**, no "no hay stock".
 
-- [ ] **Paso 4: correr el e2e y confirmar que pasa**
+- [x] **Paso 4: correr el e2e y confirmar que pasa**
 
-- [ ] **Paso 5: mutante — sacar el guard y confirmar que el test vuelve a `201`**
+- [x] **Paso 5: mutante — sacar el guard y confirmar que el test vuelve a `201`**
 
 Esto prueba que el test **revierte**, no solo que rompe.
 
-- [ ] **Paso 6: gate completo y commit**
+- [x] **Paso 6: gate completo y commit**
 
 ```bash
 cd /Users/m2pro/cmatheus/startup-app && ./scripts/reset-db.sh

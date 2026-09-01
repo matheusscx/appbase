@@ -54,6 +54,12 @@ import {
  * la que sobrevive libera sus locks al commitear, así que el reintento entra
  * a una BD ya despejada. Un número alto solo alargaría el tiempo hasta
  * devolverle el error a un cajero que está esperando.
+ *
+ * ⚠️ **Tiene un gemelo en `salones.service.ts`** (misma constante y misma
+ * `esDeadlock`), desde que `agregarLinea` empezó a tomar `FOR UPDATE` sobre
+ * `item_producto` para topear el stock al pedir. Está duplicado a propósito:
+ * extraerlo obligaba a tocar este camino, el de la venta. Al tocar uno, tocar
+ * el otro; el que necesite una tercera copia, extrae las tres.
  */
 const MAX_REINTENTOS_DEADLOCK = 2;
 
@@ -62,6 +68,9 @@ const MAX_REINTENTOS_DEADLOCK = 2;
  * `QueryFailedError`, que copia el `code` del driver pero también lo deja en
  * `driverError`: se miran los dos porque cuál de las dos formas llega depende
  * de dónde se lance, y confundirse acá significa no reintentar nunca.
+ *
+ * ⚠️ Gemelo de `esDeadlock` en `salones.service.ts` — ver el ⚠️ de
+ * `MAX_REINTENTOS_DEADLOCK`, arriba.
  */
 function esDeadlock(error: unknown): boolean {
   const e = error as { code?: string; driverError?: { code?: string } };

@@ -129,6 +129,7 @@ describe('SalonesService', () => {
   let items: {
     resolverPersonalizacionReceta: jest.Mock;
     resolverPersonalizacionCombo: jest.Mock;
+    validarStockAlPedir: jest.Mock;
   };
   let catalog: { findAllUnidadesMedida: jest.Mock };
   let monedas: { findMonedas: jest.Mock };
@@ -192,6 +193,11 @@ describe('SalonesService', () => {
         snapshot: SNAPSHOT_COMBO,
         precioExtraTotal: '1500.0000',
       }),
+      // El tope de stock al pedir tiene su conducta cubierta por el e2e
+      // (`test/reserva-stock-mesa.e2e-spec.ts`), que es donde hay stock de
+      // verdad. Acá solo deja pasar, para que estos specs sigan hablando del
+      // merge y de la presentación.
+      validarStockAlPedir: jest.fn().mockResolvedValue(undefined),
     };
 
     catalog = {
@@ -1154,6 +1160,121 @@ describe('SalonesService', () => {
         return Promise.resolve([]);
       });
       manager.query.mockResolvedValue([]);
+    });
+
+    /**
+     * El bucle de reintento que `agregarLinea` ganó el 2026-09-01, cuando pasó
+     * a tomar `FOR UPDATE` sobre `item_producto` (`validarStockAlPedir`) y
+     * entró a competir por el mismo lock que la venta. Ordenar por `item_id`
+     * baja la frecuencia del ciclo pero no lo cierra —el orden global de la
+     * venta no es ascendente—, así que el cierre real es reintentar, igual que
+     * en `ventas.crear()`.
+     */
+    it('reintenta la transacción ante un deadlock 40P01 y devuelve el resultado del segundo intento', async () => {
+      manager.find.mockResolvedValue([]);
+      const real = dataSource.transaction.getMockImplementation()!;
+      dataSource.transaction
+        .mockRejectedValueOnce(
+          Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+        )
+        .mockImplementationOnce(real);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '2',
+      });
+
+      // Dos intentos: el que murió y el que escribió.
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
+      expect(manager.save).toHaveBeenCalled();
+    });
+
+    it('reconoce el 40P01 que llega envuelto en driverError, no solo el pelado', async () => {
+      // TypeORM envuelve el error del driver en `QueryFailedError`: según dónde
+      // se lance, el código llega en `code` o solo en `driverError.code`.
+      // Mirar uno solo significa no reintentar nunca en la mitad de los casos.
+      manager.find.mockResolvedValue([]);
+      const real = dataSource.transaction.getMockImplementation()!;
+      dataSource.transaction
+        .mockRejectedValueOnce(
+          Object.assign(new Error('QueryFailedError'), {
+            driverError: { code: '40P01' },
+          }),
+        )
+        .mockImplementationOnce(real);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '2',
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('NO reintenta un error de negocio: se propaga en el primer intento', async () => {
+      // El control del test de arriba. Reintentar un 400 lo convertiría en tres
+      // intentos silenciosos, que es justo lo que el `esDeadlock` evita.
+      manager.find.mockResolvedValue([]);
+      dataSource.transaction.mockRejectedValueOnce(
+        new BadRequestException('Stock insuficiente de "Papas"'),
+      );
+
+      await expect(
+        service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '2' }),
+      ).rejects.toThrow('Stock insuficiente de "Papas"');
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('deja de reintentar el deadlock y lo propaga: no reintenta para siempre', async () => {
+      manager.find.mockResolvedValue([]);
+      const deadlock = () =>
+        Object.assign(new Error('deadlock detected'), { code: '40P01' });
+      dataSource.transaction
+        .mockRejectedValueOnce(deadlock())
+        .mockRejectedValueOnce(deadlock())
+        .mockRejectedValueOnce(deadlock());
+
+      await expect(
+        service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '2' }),
+      ).rejects.toThrow('deadlock detected');
+      // Intento original + 2 reintentos (`MAX_REINTENTOS_DEADLOCK`), y para.
+      expect(dataSource.transaction).toHaveBeenCalledTimes(3);
+    });
+
+    it('el tope de stock corre DENTRO de la transacción y después del lock de la cuenta', async () => {
+      // Correrlo afuera —o antes del `findOne` con `pessimistic_write`— deja la
+      // ventana que el frente vino a cerrar: entre verificar y escribir, otra
+      // mesa mete su línea.
+      manager.find.mockResolvedValue([]);
+      const orden: string[] = [];
+      manager.findOne.mockImplementation(() => {
+        orden.push('lock-cuenta');
+        return Promise.resolve({
+          id: CUENTA,
+          tenantId: TENANT,
+          estado: EstadoCuenta.ABIERTA,
+        });
+      });
+      items.validarStockAlPedir.mockImplementation(() => {
+        orden.push('tope-stock');
+        return Promise.resolve(undefined);
+      });
+      manager.save.mockImplementation(() => {
+        orden.push('save');
+        return Promise.resolve({});
+      });
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '2',
+      });
+
+      expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save']);
+      // Y con lo que la línea REALMENTE va a escribir: la cantidad canónica,
+      // no la de presentación.
+      expect(items.validarStockAlPedir).toHaveBeenCalledWith(TENANT, [
+        { itemId: ITEM, cantidad: '2', personalizacion: null },
+      ]);
     });
 
     it('lee la cuenta con FOR UPDATE dentro de la transacción', async () => {
