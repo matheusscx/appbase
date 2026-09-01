@@ -134,7 +134,10 @@ describe('ItemsService', () => {
             duracion_estimada: null,
             requiere_cita: null,
           },
-        ]);
+        ])
+        // Un producto en la página dispara la lectura de lo comprometido por
+        // las cuentas abiertas; sin cuentas abiertas no hay nada que restar.
+        .mockResolvedValueOnce([]);
 
       const result = await service.findAll(TENANT, {});
 
@@ -195,9 +198,12 @@ describe('ItemsService', () => {
             frecuencia: null,
           },
         ])
+        // Lo comprometido por las cuentas abiertas: acá no hay ninguna.
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           {
             receta_item_id: 'receta-uuid',
+            ingrediente_item_id: 'pan-uuid',
             cantidad: '1',
             unidad_codigo: 'unidad',
             ingrediente_unidad_medida: 'unidad',
@@ -205,6 +211,7 @@ describe('ItemsService', () => {
           }, // pan
           {
             receta_item_id: 'receta-uuid',
+            ingrediente_item_id: 'carne-uuid',
             cantidad: '150',
             unidad_codigo: 'g',
             ingrediente_unidad_medida: 'kg',
@@ -222,38 +229,84 @@ describe('ItemsService', () => {
       expect(result.data[0].disponible).toBe(6);
     });
 
-    it('producto: disponible siempre es null', async () => {
+    /** La fila de `BASE_QUERY` de un producto con stock, para los tests de abajo. */
+    const filaProducto = (stock: string) => ({
+      item_id: ITEM_ID,
+      nombre: 'Smartphone',
+      descripcion: null,
+      tipo: 'producto',
+      activo: true,
+      precio_base: '100000',
+      precio_incluye_impuesto: false,
+      moneda_id: MONEDA_ID,
+      moneda_codigo: 'CLP',
+      moneda_simbolo: '$',
+      categoria_id: null,
+      categoria_nombre: null,
+      creado_el: new Date(),
+      stock,
+      unidad_medida: 'unidad',
+      fecha_elaboracion: null,
+      fecha_vencimiento: null,
+      modo_inventario: 'cantidad',
+      costo_actual: null,
+      duracion_estimada: null,
+      requiere_cita: null,
+      frecuencia: null,
+    });
+
+    // Hasta el 2026-09-01 un producto no tenía número: `disponible` era `null` y
+    // la pantalla mostraba `stock`. Ahora lo que todavía se puede pedir viaja en
+    // `stockDisponible` —campo propio, string, escala de `stock`— y `disponible`
+    // se queda como el conteo de porciones de receta/combo (decisión del owner
+    // 2026-09-01, que enmienda la § 4.1b de la spec).
+    it('producto: stockDisponible es su stock cuando ninguna cuenta abierta lo tomó', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }])
-        .mockResolvedValueOnce([
-          {
-            item_id: ITEM_ID,
-            nombre: 'Smartphone',
-            descripcion: null,
-            tipo: 'producto',
-            activo: true,
-            precio_base: '100000',
-            precio_incluye_impuesto: false,
-            moneda_id: MONEDA_ID,
-            moneda_codigo: 'CLP',
-            moneda_simbolo: '$',
-            categoria_id: null,
-            categoria_nombre: null,
-            creado_el: new Date(),
-            stock: '10',
-            unidad_medida: 'unidad',
-            fecha_elaboracion: null,
-            fecha_vencimiento: null,
-            modo_inventario: 'cantidad',
-            costo_actual: null,
-            duracion_estimada: null,
-            requiere_cita: null,
-            frecuencia: null,
-          },
-        ]);
+        .mockResolvedValueOnce([filaProducto('10')])
+        .mockResolvedValueOnce([]); // sin cuentas abiertas
 
       const result = await service.findAll(TENANT, {});
+      expect(result.data[0].stockDisponible).toBe('10.0000');
+      // `disponible` NO cambió de significado: sigue siendo porciones, y un
+      // producto no tiene porciones.
       expect(result.data[0].disponible).toBeNull();
+      // `stock` sigue siendo lo que hay físicamente.
+      expect(result.data[0].stock).toBe('10');
+    });
+
+    it('producto: stockDisponible descuenta lo que una cuenta abierta ya pidió', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([filaProducto('10')])
+        // Lo comprometido: una mesa con 4 unidades pedidas y sin cobrar.
+        .mockResolvedValueOnce([
+          { item_id: ITEM_ID, cantidad: '4', personalizacion: null },
+        ])
+        // `consumoDeLineas`: el tipo de los ítems pedidos. Un producto se
+        // consume a sí mismo, así que no expande nada más.
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]);
+
+      const result = await service.findAll(TENANT, {});
+
+      expect(result.data[0].stockDisponible).toBe('6.0000');
+      expect(result.data[0].disponible).toBeNull();
+      // El stock NO se toca: la venta lo descuenta recién al cerrar la cuenta.
+      expect(result.data[0].stock).toBe('10');
+
+      // Solo las cuentas ABIERTAS comprometen: una cerrada ya descontó stock de
+      // verdad y restarla otra vez contaría dos veces.
+      const sqlComprometido = dataSource.query.mock.calls[2][0] as string;
+      expect(sqlComprometido).toContain("c.estado = 'abierta'");
+      expect(sqlComprometido).toContain('cl.eliminado_el IS NULL');
+      expect(sqlComprometido).toContain('c.eliminado_el IS NULL');
+      // Una sola consulta para las líneas de TODAS las cuentas abiertas, no
+      // una por cuenta ni por ítem.
+      expect(
+        (dataSource.query.mock.calls as [string, unknown[]][]).filter(([sql]) =>
+          sql.includes('FROM cuenta_lineas cl'),
+        ),
+      ).toHaveLength(1);
     });
 
     it('sin incluirEliminados filtra eliminado_el IS NULL y no trae auditoría', async () => {
@@ -299,6 +352,7 @@ describe('ItemsService', () => {
             frecuencia: null,
           },
         ]) // filas
+        .mockResolvedValueOnce([]) // comprometido por cuentas abiertas: ninguna
         .mockResolvedValueOnce([
           {
             item_id: ITEM_ID,
@@ -325,9 +379,9 @@ describe('ItemsService', () => {
       expect(dataSource.query.mock.calls[0][0]).not.toContain(
         'AND i.eliminado_el IS NULL',
       );
-      // 3 llamadas totales (count + filas + UNA de auditoría): la de
-      // auditoría es batch por página, no una por fila.
-      expect(dataSource.query).toHaveBeenCalledTimes(3);
+      // 4 llamadas totales (count + filas + UNA de comprometido + UNA de
+      // auditoría): las dos últimas son batch por página, no una por fila.
+      expect(dataSource.query).toHaveBeenCalledTimes(4);
       expect(result.data[0].eliminadoEl).toBe('2026-07-31T12:00:00.000Z');
       expect(result.data[0].eliminadoPor).toBe(USUARIO);
       expect(result.data[0].eliminadoPorNombre).toBe('admin');
@@ -406,6 +460,8 @@ describe('ItemsService', () => {
       // producto stock 10, cantidad 2 → 5 ; receta disponible 3, cantidad 1 → 3 ; servicio ignorado
       // se espera 3
       dataSource.query
+        // 0) comprometido por las cuentas abiertas: ninguna
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           // 1) combo_componentes bloqueantes
           {
@@ -434,6 +490,7 @@ describe('ItemsService', () => {
           // 2) ingredientes bloqueantes de receta-uuid → disponibilidad 3
           {
             receta_item_id: 'receta-uuid',
+            ingrediente_item_id: 'ing-uuid',
             cantidad: '1',
             unidad_codigo: 'unidad',
             ingrediente_unidad_medida: 'unidad',
@@ -446,19 +503,150 @@ describe('ItemsService', () => {
         TENANT,
         [],
         [COMBO_ID],
+        [],
       );
-      expect(disp.get(COMBO_ID)).toBe(3);
+      expect(disp.disponible.get(COMBO_ID)).toBe(3);
     });
 
     it('devuelve null si el combo no tiene componentes bloqueantes', async () => {
-      dataSource.query.mockResolvedValueOnce([]);
+      dataSource.query
+        .mockResolvedValueOnce([]) // comprometido
+        .mockResolvedValueOnce([]); // combo_componentes
 
       const disp = await (service as any).calcularDisponibilidadBatch(
         TENANT,
         [],
         [COMBO_SIN_BLOQUEANTES_ID],
+        [],
       );
-      expect(disp.get(COMBO_SIN_BLOQUEANTES_ID)).toBeNull();
+      expect(disp.disponible.get(COMBO_SIN_BLOQUEANTES_ID)).toBeNull();
+    });
+  });
+
+  // ── disponible descuenta lo comprometido ───────────────────────────────────
+
+  /**
+   * `disponible` = stock − lo que las cuentas ABIERTAS ya pidieron. El caso del
+   * producto suelto vive arriba, en `findAll`; acá quedan las dos ramas que
+   * también dividen stock (ingrediente de receta y componente de combo) y el
+   * degradado del error de unidad, que ningún e2e puede montar porque la API no
+   * deja crear una unidad rota.
+   *
+   * Plan: `docs/superpowers/plans/2026-09-01-reserva-de-stock-al-pedir.md`.
+   */
+  describe('disponible descuenta lo comprometido por las cuentas abiertas', () => {
+    it('receta: el stock del ingrediente se reparte YA descontado', async () => {
+      dataSource.query
+        // 0) líneas vivas de cuentas abiertas: 4 del ingrediente
+        .mockResolvedValueOnce([
+          { item_id: 'ing-uuid', cantidad: '4', personalizacion: null },
+        ])
+        // `consumoDeLineas`: tipo de lo pedido
+        .mockResolvedValueOnce([{ item_id: 'ing-uuid', tipo: 'ingrediente' }])
+        // 2) ingredientes bloqueantes de la receta
+        .mockResolvedValueOnce([
+          {
+            receta_item_id: 'receta-uuid',
+            ingrediente_item_id: 'ing-uuid',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            ingrediente_unidad_medida: 'unidad',
+            stock: '10',
+          },
+        ]);
+      catalogServiceMock.convertirUnidades.mockResolvedValueOnce(['1']);
+
+      const disp = await (service as any).calcularDisponibilidadBatch(
+        TENANT,
+        ['receta-uuid'],
+        [],
+        [],
+      );
+
+      // (10 − 4) / 1 = 6, no 10.
+      expect(disp.disponible.get('receta-uuid')).toBe(6);
+    });
+
+    it('combo: el stock del componente se divide YA descontado', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([
+          { item_id: 'prod-uuid', cantidad: '4', personalizacion: null },
+        ])
+        .mockResolvedValueOnce([{ item_id: 'prod-uuid', tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          {
+            combo_item_id: COMBO_ID,
+            componente_item_id: 'prod-uuid',
+            tipo: 'producto',
+            cantidad: '2',
+            stock: '10',
+          },
+        ]);
+
+      const disp = await (service as any).calcularDisponibilidadBatch(
+        TENANT,
+        [],
+        [COMBO_ID],
+        [],
+      );
+
+      // floor((10 − 4) / 2) = 3, no floor(10/2) = 5.
+      expect(disp.disponible.get(COMBO_ID)).toBe(3);
+    });
+
+    /**
+     * El ruling del frente: `consumoDeLineas` LANZA cuando una unidad ya no se
+     * puede convertir —el camino que enforcea tiene que fallar ruidoso— pero
+     * este cuelga de `GET /items` y un throw acá deja al tenant sin menú. El
+     * ítem con la unidad rota conserva su comportamiento de antes del cambio
+     * (stock sin descontar) y los demás siguen descontando.
+     */
+    it('una unidad que ya no se puede convertir NO tumba el listado: cuenta 0 y el resto sigue descontando', async () => {
+      conversorMock.mockImplementation(() => {
+        throw new BadRequestException(
+          'No se puede convertir de litro a kg (magnitudes distintas)',
+        );
+      });
+      dataSource.query
+        // 0) dos líneas vivas: una receta con la unidad rota y un producto sano
+        .mockResolvedValueOnce([
+          { item_id: 'receta-uuid', cantidad: '1', personalizacion: null },
+          { item_id: 'prod-uuid', cantidad: '2', personalizacion: null },
+        ])
+        // `consumoDeLineas`: tipos
+        .mockResolvedValueOnce([
+          { item_id: 'receta-uuid', tipo: 'receta' },
+          { item_id: 'prod-uuid', tipo: 'producto' },
+        ])
+        // `consumoDeLineas`: ingredientes de la receta, con la unidad rota
+        .mockResolvedValueOnce([
+          {
+            receta_item_id: 'receta-uuid',
+            ingrediente_item_id: 'ing-roto',
+            ingrediente_nombre: 'Insumo con unidad rota',
+            ingrediente_unidad_medida: 'kg',
+            cantidad: '1',
+            unidad_codigo: 'litro',
+            bloqueante: true,
+          },
+        ]);
+
+      const disp = await (service as any).calcularDisponibilidadBatch(
+        TENANT,
+        [],
+        [],
+        [
+          { itemId: 'prod-uuid', stock: '10' },
+          { itemId: 'ing-roto', stock: '5' },
+        ],
+      );
+
+      // La conversión se intentó de verdad (si no, el test no probaría nada).
+      expect(conversorMock).toHaveBeenCalled();
+      // El sano SÍ descuenta.
+      expect(disp.stockDisponible.get('prod-uuid')).toBe('8.0000');
+      // El roto queda como estaba antes de este cambio: su stock, sin restar.
+      expect(disp.stockDisponible.get('ing-roto')).toBe('5.0000');
     });
   });
 

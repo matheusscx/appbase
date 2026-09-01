@@ -370,7 +370,25 @@ export class ItemsService {
   ): Promise<
     PaginatedResponse<
       ReturnType<typeof this.mapRow> & {
+        /**
+         * Receta y combo: **cuántas porciones se pueden armar** (entero), ya
+         * descontado lo que las cuentas abiertas comprometieron. `null` para
+         * todo lo demás — no cambió de significado ni de tipo.
+         */
         disponible: number | null;
+        /**
+         * Producto e ingrediente: **cuánto queda por pedir**, en la unidad y la
+         * escala de `stock` (string, 4 decimales). `null` para todo lo demás.
+         *
+         * Campo propio y no un valor más dentro de `disponible` (decisión del
+         * owner, 2026-09-01): son dos preguntas distintas —"cuántas porciones
+         * armo" es un conteo entero, "cuánto queda" es una cantidad que puede
+         * ser 1,5 kg— y meterlas en un mismo nombre las confunde. String y no
+         * `number` porque es una cantidad, y una cantidad no viaja en un float
+         * (el frontend además hace `.floor()` sobre `disponible`, que dejaría
+         * 1,5 kg en 1).
+         */
+        stockDisponible: string | null;
         // Solo se completan con `incluirEliminados`: el listado normal no
         // trae estas columnas, así que el tipo las deja opcionales en vez de
         // forzar `null` en cada fila de la ruta de siempre.
@@ -418,19 +436,28 @@ export class ItemsService {
       comboIdsConGrupos = new Set(grupoItemRows.map((r) => r.item_id));
     }
 
-    // Disponibilidad de recetas/combos en un nº CONSTANTE de queries (batch),
-    // no una por fila (N+1).
+    // Disponibilidad de recetas/combos/productos en un nº CONSTANTE de queries
+    // (batch), no una por fila (N+1).
     const recetaIds = rows
       .filter((r) => r.tipo === 'receta')
       .map((r) => r.item_id);
     const comboIds = rows
       .filter((r) => r.tipo === 'combo')
       .map((r) => r.item_id);
-    const disponibilidad = await this.calcularDisponibilidadBatch(
-      tenantId,
-      recetaIds,
-      comboIds,
-    );
+    // `producto` e `ingrediente` son los dos tipos con fila en `item_producto`,
+    // o sea los dos que tienen stock propio del que descontar. El `stock` ya
+    // viene en la fila (`BASE_QUERY`), así que sumarlos al batch no cuesta una
+    // query más.
+    const productos = rows
+      .filter((r) => r.tipo === 'producto' || r.tipo === 'ingrediente')
+      .map((r) => ({ itemId: r.item_id, stock: r.stock }));
+    const { disponible: dispPorId, stockDisponible: stockDispPorId } =
+      await this.calcularDisponibilidadBatch(
+        tenantId,
+        recetaIds,
+        comboIds,
+        productos,
+      );
 
     // Papelera: nombre de quien borró por JOIN en UNA query batch acotada a
     // los ids de esta página (no N+1). Sin filtrar el `eliminado_el` de
@@ -464,19 +491,22 @@ export class ItemsService {
 
     const data = rows.map((r) => {
       const base = this.mapRow(r);
-      const disponible =
-        base.tipo === 'receta' || base.tipo === 'combo'
-          ? (disponibilidad.get(base.id) ?? null)
-          : null;
+      // Sin ramificar por tipo acá: cada `Map` trae clave solo para los tipos
+      // que le corresponden (porciones para receta/combo, cantidad para
+      // producto/ingrediente), así que un servicio o una suscripción no está en
+      // ninguno de los dos y sigue dando `null` en ambos.
+      const disponible = dispPorId.get(base.id) ?? null;
+      const stockDisponible = stockDispPorId.get(base.id) ?? null;
       const disponibleCondicional =
         base.tipo === 'combo' && comboIdsConGrupos.has(base.id);
       if (!query.incluirEliminados) {
-        return { ...base, disponible, disponibleCondicional };
+        return { ...base, disponible, stockDisponible, disponibleCondicional };
       }
       const audit = auditoriaPorId.get(r.item_id);
       return {
         ...base,
         disponible,
+        stockDisponible,
         disponibleCondicional,
         eliminadoEl: audit?.eliminado_el ?? null,
         eliminadoPor: audit?.eliminado_por ?? null,
@@ -4277,18 +4307,69 @@ export class ItemsService {
   }
 
   /**
-   * Disponibilidad de todas las recetas/combos de una página en un nº CONSTANTE
-   * de queries, en vez de una por fila (N+1). Mismo resultado que
-   * `calcularDisponibleReceta`/`calcularDisponibleCombo` fila a fila: el mínimo
-   * de unidades que el stock de los componentes BLOQUEANTES permite armar.
+   * Disponibilidad de todas las recetas/combos/productos de una página en un nº
+   * CONSTANTE de queries, en vez de una por fila (N+1).
+   *
+   * **Lo que todavía se PUEDE PEDIR, no lo que hay.** El stock del que se
+   * reparte sale de restarle lo que las cuentas `abierta` del tenant ya
+   * comprometieron (`comprometidoPorItem`), porque el sistema no aparta stock al
+   * pedir: la venta descuenta recién al cerrar la cuenta, así que sin este
+   * descuento dos mesas podían pedir la misma última unidad y el choque
+   * estallaba al cobrar. `stock` sigue significando lo que hay **físicamente**
+   * — es el saldo materializado de `movimientos_inventario` y cambiarle el
+   * sentido sería mucho peor.
+   *
+   * **Devuelve dos mapas porque son dos preguntas distintas** (decisión del
+   * owner, 2026-09-01, que enmienda la § 4.1b de la spec):
+   *
+   * - `disponible` — receta y combo: el mínimo de unidades que permiten armar
+   *   sus componentes **bloqueantes**, igual que
+   *   `calcularDisponibleReceta`/`calcularDisponibleCombo` fila a fila. Es un
+   *   **conteo entero de porciones** y no cambió de tipo ni de significado; lo
+   *   único que cambia es que el stock que se divide ya viene descontado.
+   * - `stockDisponible` — producto e ingrediente: **cuánta cantidad queda por
+   *   pedir**, string en la escala de `stock` (4 decimales, la del kardex).
+   *   Hasta el 2026-09-01 estos tipos no tenían número.
+   *
+   * Meter las dos en un solo campo confundía un conteo con una cantidad —1,5 kg
+   * de queso no es "una porción y media"— y obligaba a devolver la cantidad como
+   * `number`, que para plata o cantidades es lo que el proyecto no hace.
+   *
+   * ⚠️ **Los dos pueden ser negativos, y es correcto que se vea.** Lo
+   * comprometido incluye lo NO bloqueante (spec § 4.2: suma al comprometido
+   * pero no frena al pedir), así que un ingrediente que solo entra como no
+   * bloqueante puede pasarse del stock. Clamplear a 0 escondería justo el caso
+   * que el encargado necesita ver.
    */
   private async calcularDisponibilidadBatch(
     tenantId: string,
     recetaIds: string[],
     comboIds: string[],
-  ): Promise<Map<string, number | null>> {
+    /** Los ítems con stock propio de la página, con el `stock` ya leído. */
+    productos: { itemId: string; stock: string | null }[],
+  ): Promise<{
+    disponible: Map<string, number | null>;
+    stockDisponible: Map<string, string>;
+  }> {
     const resultado = new Map<string, number | null>();
-    if (!recetaIds.length && !comboIds.length) return resultado;
+    const resultadoStock = new Map<string, string>();
+    if (!recetaIds.length && !comboIds.length && !productos.length) {
+      return { disponible: resultado, stockDisponible: resultadoStock };
+    }
+
+    // 0) Lo que las cuentas abiertas ya comprometieron, de TODO el tenant: un
+    // ingrediente de esta página puede estar tomado por una receta que no está
+    // listada. Es una sola llamada para toda la página, nunca una por ítem.
+    const comprometido = await this.comprometidoPorItem(tenantId);
+
+    /**
+     * El stock del que se reparte: lo físico menos lo ya pedido. Único punto
+     * donde `ip.stock` deja de leerse pelado, para que las tres ramas
+     * (ingrediente de receta, componente de combo y producto suelto) no puedan
+     * discrepar.
+     */
+    const stockDisponible = (itemId: string, stock: string | null): Decimal =>
+      new Decimal(stock ?? '0').minus(comprometido.get(itemId) ?? 0);
 
     // 1) Componentes bloqueantes de todos los combos (una query).
     const comboRows: {
@@ -4319,13 +4400,14 @@ export class ItemsService {
     // 2) Ingredientes bloqueantes de todas las recetas (una query).
     const ingRows: {
       receta_item_id: string;
+      ingrediente_item_id: string;
       cantidad: string;
       unidad_codigo: string;
       ingrediente_unidad_medida: string;
       stock: string;
     }[] = todasRecetas.length
       ? await this.db.query(
-          `SELECT ri.receta_item_id, ri.cantidad, ri.unidad_codigo,
+          `SELECT ri.receta_item_id, ri.ingrediente_item_id, ri.cantidad, ri.unidad_codigo,
                   ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
            FROM receta_ingredientes ri
            JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
@@ -4359,7 +4441,9 @@ export class ItemsService {
       const posibles =
         cantidadBase === null
           ? new Decimal(0)
-          : new Decimal(r.stock).div(cantidadBase).floor();
+          : stockDisponible(r.ingrediente_item_id, r.stock)
+              .div(cantidadBase)
+              .floor();
       const actual = dispReceta.get(r.receta_item_id) ?? null;
       if (actual === null || posibles.lessThan(actual)) {
         dispReceta.set(r.receta_item_id, posibles);
@@ -4382,7 +4466,9 @@ export class ItemsService {
         if (disp === null) continue;
         posibles = disp.div(r.cantidad).floor();
       } else {
-        posibles = new Decimal(r.stock ?? '0').div(r.cantidad).floor();
+        posibles = stockDisponible(r.componente_item_id, r.stock)
+          .div(r.cantidad)
+          .floor();
       }
       const actual = dispCombo.get(r.combo_item_id) ?? null;
       if (actual === null || posibles.lessThan(actual)) {
@@ -4394,7 +4480,102 @@ export class ItemsService {
       resultado.set(id, d === null ? null : d.toNumber());
     }
 
-    return resultado;
+    // 6) Un producto o ingrediente suelto vale su propio stock descontado. No
+    // hay mínimo que sacar ni unidad que convertir: la línea se consume a sí
+    // misma en su unidad base (ver `consumoDeLineas`).
+    //
+    // Va a `stockDisponible` y NO a `disponible`: es una cantidad, no un conteo
+    // de porciones. `toFixed(4)` la deja en la misma escala que `stock`
+    // —`numeric(18,4)`, la del kardex— para que las dos columnas de la fila se
+    // puedan comparar sin reformatear, y como string por la misma razón que el
+    // resto de las cantidades del proyecto.
+    for (const p of productos) {
+      resultadoStock.set(
+        p.itemId,
+        stockDisponible(p.itemId, p.stock).toFixed(4),
+      );
+    }
+
+    return { disponible: resultado, stockDisponible: resultadoStock };
+  }
+
+  /**
+   * Cuánto de cada ingrediente o producto tienen ya tomado las cuentas
+   * **abiertas** del tenant. Es la reserva que el sistema no tenía: pedir en una
+   * mesa no escribe en `movimientos_inventario` —la venta descuenta recién al
+   * cerrar la cuenta—, así que sin esta resta dos mesas podían pedir la misma
+   * última unidad.
+   *
+   * **Una sola consulta para las líneas de TODAS las cuentas abiertas, y una
+   * sola llamada a `consumoDeLineas`.** Nunca una por ítem ni por cuenta: esto
+   * cuelga de `GET /items`, que es el menú del POS.
+   *
+   * Solo `estado = 'abierta'`: una cuenta cerrada ya descontó stock de verdad al
+   * generar su venta y volver a restarla contaría dos veces; una cancelada nunca
+   * va a consumir nada. No se une a `mesas` —`obtenerUsoItem` sí lo hace, pero
+   * porque necesita el nombre de la mesa para el mensaje—: `eliminarMesa`
+   * rechaza borrar una mesa con cuentas abiertas, así que acá no hay huérfanas
+   * que filtrar.
+   *
+   * Suma lo bloqueante Y lo no bloqueante: `bloqueante` decide quién FRENA al
+   * pedir, no quién ocupa (spec § 4.2). Por eso el resultado se resta entero.
+   *
+   * ⚠️ **Degrada el error de unidad en vez de heredarlo.** `consumoDeLineas`
+   * lanza `BadRequestException` cuando una unidad ya no se puede convertir
+   * —para el camino que enforcea es lo correcto: mejor rechazar el pedido que
+   * apartar de menos en silencio—, pero acá un throw deja `GET /items` caído
+   * para todo el tenant, que es exactamente el incidente que ya hizo tolerante a
+   * `CatalogService.convertirUnidades`. Entonces la conversión rota vale `0`
+   * consumido: ese ítem conserva su comportamiento de antes de este cambio
+   * (stock sin descontar) mientras los demás sí descuentan, en vez de tumbar el
+   * menú entero. El costo de equivocarse es sobrevender ese ítem, que es
+   * estrictamente lo de hoy; el 500 sería peor.
+   */
+  private async comprometidoPorItem(
+    tenantId: string,
+  ): Promise<Map<string, Decimal>> {
+    const rows: {
+      item_id: string;
+      cantidad: string;
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    }[] = await this.db.query(
+      `SELECT cl.item_id, cl.cantidad, cl.personalizacion
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $1 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+        WHERE cl.tenant_id = $1 AND cl.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    if (!rows.length) return new Map();
+
+    const estricto = await this.catalogService.crearConversor();
+    const tolerante: ConvertirUnidad = (cantidad, desde, hacia) => {
+      try {
+        return estricto(cantidad, desde, hacia);
+      } catch (e) {
+        // Acotado al error esperado —unidad desconocida, magnitud
+        // incompatible—, no un `catch {}` pelado: un fallo inesperado acá
+        // alimenta un número de negocio, así que tiene que seguir saliendo como
+        // 500 ruidoso en vez de disfrazarse de "unidad rota". Mismo criterio y
+        // misma redacción que `CatalogService.convertirUnidades`.
+        if (e instanceof BadRequestException) return '0';
+        throw e;
+      }
+    };
+
+    const consumo = await this.consumoDeLineas(
+      tenantId,
+      rows.map((r) => ({
+        itemId: r.item_id,
+        // `cuenta_lineas.cantidad` ya es la canónica (la de presentación vive
+        // aparte en `cantidad_presentacion`), que es lo que `LineaConsumo` pide.
+        cantidad: r.cantidad,
+        personalizacion: r.personalizacion,
+      })),
+      tolerante,
+    );
+    return new Map([...consumo].map(([itemId, c]) => [itemId, c.cantidad]));
   }
 
   /**

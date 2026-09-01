@@ -91,16 +91,33 @@ Hoy el POS muestra dos cosas distintas según el tipo: `stock` para un producto 
 
 **La decisión, y su porqué:** `stock` sigue significando **lo que hay físicamente** —es el
 saldo materializado de `movimientos_inventario` y cambiarle el sentido sería mucho peor— y
-`disponible` pasa a ser, **para todos los tipos**, *lo que todavía se puede pedir*. La
-pantalla muestra `disponible` cuando existe y cae a `stock` cuando no.
+lo que todavía se puede pedir se expone **sin pisar el campo que ya existe**.
+
+⚠️ **Corregido el 2026-09-01, durante la ejecución del plan** (ruling del controlador, tras
+medirlo la revisión de la Tarea 2). La primera versión de esta sección decía que `disponible`
+pasaba a ser *"para todos los tipos, lo que todavía se puede pedir"*. **Está mal por dos
+razones y se cambió:**
+
+1. Son **dos magnitudes distintas con un solo nombre**. Para una receta `disponible` es
+   *cuántas porciones puedo armar* —un entero—; para un producto sería *cuánto queda*, una
+   cantidad que puede ser fraccionaria (1,5 kg). Meterlas en el mismo campo es el patrón de
+   los dos nombres que compiten.
+2. `disponible` viaja como `number` nativo, y una cantidad en `number` **viola la constraint
+   global de Decimal**. Peor: el frontend ya hace `.floor()` sobre él
+   (`useVenta.ts:267-275`), así que 1,5 kg se mostraría como 1.
+
+**Lo que rige:** `disponible` **no cambia** —entero, porciones, solo receta y combo—. Para
+`producto` e `ingrediente` el número descontado viaja en un campo propio, **`stockDisponible`,
+string, misma escala que `stock`**. La pantalla usa `stockDisponible` cuando existe y cae a
+`stock` cuando no.
 
 Lo que eso obliga a tocar, y va en el plan como trabajo, no como efecto colateral:
 
-- `useVenta.ts` — la rama de `disponible !== null` deja de distinguir producto de receta.
-- `descontarStockCatalogo` — hoy descuenta `stock` y `disponible` por separado; con
-  `disponible` presente en productos hay que revisar que la pantalla no muestre un número
-  descontado dos veces.
-- Los specs de pantalla que fijan hoy el `disponible: null` de un producto.
+- `useVenta.ts` — la rama de `disponible !== null` sigue siendo la de receta/combo; el
+  producto pasa a leer `stockDisponible` en vez de `stock`.
+- `descontarStockCatalogo` — hoy descuenta `stock` y `disponible` por separado; hay que
+  decidir qué hace con `stockDisponible` para no mostrar un número descontado dos veces.
+- Los specs de pantalla que fijan hoy el `stock` de un producto.
 
 ### 4.2 El enforcement: un solo punto
 

@@ -25,6 +25,25 @@ export enum EstadoCuenta {
  */
 @Index('idx_cuentas_venta', ['tenantId', 'ventaId'])
 @Index('idx_cuentas_responsable', ['tenantId', 'garzonResponsableId'])
+/**
+ * `idx_cuentas_estado`: lo pide `ItemsService.comprometidoPorItem`, la consulta
+ * que le resta a `disponible`/`stockDisponible` lo que las cuentas ABIERTAS ya
+ * pidieron. Cuelga de `GET /items`, o sea del menú del POS, y las pantallas
+ * disparan **tres `GET /items` en paralelo** por carga (`pos.vue:138,141,144` y
+ * `salones/index.vue:598-600`), así que el costo se multiplica por tres.
+ *
+ * ⚠️ **Solo no sirve de nada, y eso está medido con un control**: agregándolo
+ * sin `idx_cuenta_lineas_cuenta` la consulta pasa de 13,99 ms a 12,52 ms — sigue
+ * barriendo `cuenta_lineas` entera. El que cambia el plan es aquel (1,22 ms);
+ * este recorta el lado chico una vez que el grande dejó de ser un seq scan
+ * (0,36 ms con los dos, y el scan de `cuentas` cae de 124 buffers a 3). Las
+ * cuatro corridas y su escala están en el docblock de `idx_cuenta_lineas_cuenta`.
+ * **Va junto con aquel o no va.**
+ *
+ * `estado` y no solo `tenant_id` porque el filtro selectivo es justamente ese:
+ * de 8.031 cuentas del tenant, 31 están abiertas.
+ */
+@Index('idx_cuentas_estado', ['tenantId', 'estado'])
 @Entity('cuentas')
 export class Cuenta {
   @PrimaryGeneratedColumn('uuid', { name: 'cuenta_id' })

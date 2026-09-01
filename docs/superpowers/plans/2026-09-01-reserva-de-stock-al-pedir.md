@@ -152,14 +152,14 @@ git commit -m "feat(items): qué consume un conjunto de líneas, sin escribir mo
 - Produces: `GET /items` devuelve `disponible` **descontando** lo que las cuentas `abierta`
   ya pidieron, para **todos** los tipos —incluido `producto`, que hoy devuelve `null`—.
 
-- [ ] **Paso 1: escribir el e2e que falla**
+- [x] **Paso 1: escribir el e2e que falla**
 
 Producto con `stock = 3`. Una mesa pide 2. `GET /items` tiene que devolver `disponible: 1`.
 
 ⚠️ El spec necesita **garzón propio con sesión y turno, salón y mesa propios**: el garzón del
 seed lo comparten seis specs y la sesión es única por garzón.
 
-- [ ] **Paso 2: correr y confirmar que falla**
+- [x] **Paso 2: correr y confirmar que falla**
 
 ```bash
 cd /Users/m2pro/cmatheus/startup-app && ./scripts/reset-db.sh
@@ -167,20 +167,20 @@ cd backend && npx jest --config ./test/jest-e2e.json --testPathPatterns reserva-
 ```
 Esperado: FAIL — hoy devuelve `disponible: null` para un producto.
 
-- [ ] **Paso 3: implementar el descuento**
+- [x] **Paso 3: implementar el descuento**
 
 Una sola consulta para traer las líneas vivas de cuentas `abierta` del tenant, y **una sola**
 llamada a `consumoDeLineas` con todas. Nunca una por ítem.
 
-- [ ] **Paso 4: correr el e2e y confirmar que pasa**
+- [x] **Paso 4: correr el e2e y confirmar que pasa**
 
-- [ ] **Paso 5: mutante — probar que el test sirve**
+- [x] **Paso 5: mutante — probar que el test sirve**
 
 Revertir el descuento (volver a leer `ip.stock` pelado) y confirmar que el e2e se pone rojo.
 Restaurar con una copia guardada y `diff -q`, **nunca** con `git checkout` (borra cambios sin
 commitear del working tree).
 
-- [ ] **Paso 6: gate y commit**
+- [x] **Paso 6: gate y commit**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test

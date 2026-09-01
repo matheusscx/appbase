@@ -52,6 +52,35 @@ import type { ReglasCongeladas } from '../../../common/dto/reglas-congeladas.dto
  * con el volumen transaccional. Postgres no indexa las FK por su cuenta.
  */
 @Index('idx_cuenta_lineas_item', ['itemId'])
+/**
+ * `idx_cuenta_lineas_cuenta`: lo pide `ItemsService.comprometidoPorItem` —la
+ * consulta que le resta a `disponible`/`stockDisponible` lo que las cuentas
+ * ABIERTAS ya pidieron—, que corre en cada `GET /items` y por lo tanto **tres
+ * veces por carga de pantalla** (`pos.vue:138,141,144` y
+ * `salones/index.vue:598-600` disparan tres listados en paralelo).
+ *
+ * Sin él el plan es un **seq scan de `cuenta_lineas` entera** para devolver las
+ * pocas líneas que están en una mesa hoy, y esta tabla crece con la historia
+ * transaccional del tenant, soft-deletes incluidos: lo que se barre no son las
+ * mesas sentadas, es todo lo que alguna vez se pidió.
+ *
+ * `EXPLAIN (ANALYZE, BUFFERS)` contra el Postgres del compose, con 60.217
+ * líneas / 8.031 cuentas / 31 abiertas / 16 MB, devolviendo 248 filas:
+ *
+ *   sin ninguno de los dos          13,99 ms  1.525 buffers  (barre las 60.217)
+ *   + este                           1,22 ms    434 buffers
+ *   + `idx_cuentas_estado`           0,36 ms    313 buffers
+ *   solo `idx_cuentas_estado`       12,52 ms  1.404 buffers  ← vuelve al seq scan
+ *
+ * **Este es el que cambia el plan** (de Hash Join + seq scan a Nested Loop); la
+ * última fila es el control que lo prueba: el de `cuentas` solo deja el barrido
+ * igual, porque el lado caro del join es éste. Van los dos o ninguno.
+ *
+ * `(tenant_id, cuenta_id)` y no `cuenta_id` solo: la consulta filtra por tenant
+ * en las dos tablas, y ese es además el orden en que se acota. Postgres no
+ * indexa las FK por su cuenta.
+ */
+@Index('idx_cuenta_lineas_cuenta', ['tenantId', 'cuentaId'])
 @Entity('cuenta_lineas')
 export class CuentaLinea {
   @PrimaryGeneratedColumn('uuid', { name: 'cuenta_linea_id' })
