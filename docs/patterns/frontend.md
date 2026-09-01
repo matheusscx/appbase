@@ -412,7 +412,12 @@ Reglas:
 - `MoneyInput` bloquea tipear más decimales de los que la moneda resuelta admite
   (`number.fraction` de maska) — la contraparte en pantalla del rechazo 400 del backend
   (`EscalaMonedaPipe`).
-  ⚠️ **Limitación conocida, y solo en el TECLEO:** en una moneda con miles `.`, maska
+  📌 **Contrato de teclas, confirmado por el owner el 2026-09-01** (y ya implementado): el
+  separador de **miles no se tipea** —maska agrupa sola— y el único que se puede tipear es
+  el **decimal del país**, que abre la parte decimal si la moneda la admite. Medido tecla
+  por tecla en CLP: `1`,`0`,`0`,`0` → `1.000`; después `,` → `1.000,` y el `5` da `1.000,5`;
+  después `.` → inerte.
+  ⚠️ **Limitación conocida, aceptada por el owner el mismo día, y solo en el TECLEO:** en una moneda con miles `.`, maska
   lee ese punto como agrupador, así que teclear `1000.5` en CLP da `10005` **y se
   guarda** (ver el bullet de arriba: ningún 400 lo ataja). NO intentar taparlo desde el
   input: ya se probó con un `preProcess` con memoria de la última tecla y salió peor

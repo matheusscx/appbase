@@ -647,7 +647,29 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   resuelve: `12.345` en un campo de 4 decimales es `12345` en es-CL y `12,345` en en-US, y
   el componente elige siempre la chilena.
 
-  1. **El TECLEO sigue abierto, y ahora se sabe por qué no se puede desde el input.** La
+  ✅ **El TECLEO se decidió el 2026-09-01: se deja como está.** El owner, al ver la
+  medición: *"el separador de miles no hace nada, solo se puede tipear el separador decimal
+  que le corresponda al país"*. Eso **ya es lo que el componente hace**, medido tecla por
+  tecla en Chrome sobre el campo de precio de `items.vue` (4 decimales, tenant en CLP):
+
+  | Tecla | Qué pasa |
+  |---|---|
+  | `1` `0` `0` `0` | `1.000` — maska agrupa sola, el punto no hay que tipearlo |
+  | después `,` (decimal de es-CL) | `1.000,` y el `5` da `1.000,5` ✅ |
+  | después `.` (miles de es-CL) | `1.000` — inerte; y el `5` que sigue da `10.005` ❌ |
+
+  O sea que la regla del owner está implementada y **el ×10 tecleando queda aceptado**. La
+  razón por la que no se puede cerrar respetándola: a mitad de número el punto tiene **dos
+  significados legítimos** —`1.000` + `.` va a `1.000.500` (un millón quinientos, el hábito
+  chileno) o a `1.000,5`—, y cuál era solo se sabe por lo que se teclee después, que es
+  justo lo que la máscara ya colapsó. Mapear el punto al decimal cerraría el ×10 y rompería
+  el hábito; se le ofreció al owner y eligió no romperlo.
+
+  📌 **Lo que sigue SIN decidir es otra cosa**: si el campo debería mostrar el monto de
+  vuelta de una forma que se note —en palabras, o contra el valor anterior al editar—. Eso
+  no cambia qué teclas funcionan; cubre el error una vez cometido. No se preguntó todavía.
+
+  1. ~~**El TECLEO sigue abierto, y ahora se sabe por qué no se puede desde el input.**~~ La
      información no está ahí: `1`,`.`,`5`,`0`,`0` (mil quinientos) y `1`,`0`,`0`,`.`,`5`
      (ochocientos y medio) son el **mismo gesto**, y lo único que los separa son los dígitos
      que siguen al punto — que maska ya colapsó cuando llegan. Medido el 2026-09-01 contra
