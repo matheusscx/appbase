@@ -74,6 +74,18 @@ una línea ya pedida tiene que re-preciar, no re-validar"*, más la regla en
 **Es la tarea que decide el frente.** Las tres siguientes llevan intención y contrato, no
 código exacto, porque dependen de lo que se resuelva acá.
 
+✅ **Partida en dos al ejecutarla (2026-08-31).** La mitad del **precio** salió en
+`dd54f81d`; la de las **reglas congeladas** (paso 5-bis, y el tercer término del merge)
+sigue abierta y es lo próximo. La revisión independiente avaló la partición con una
+condición que se cumplió: que el criterio del merge **no** se escriba como definitivo
+mientras le falta un término — la doc dice explícitamente que la escena del descuento
+todavía fusiona.
+
+📌 **Lo que la ejecución agregó y el plan no tenía:** el merge vive en **dos** lugares, no
+uno. `fusionarCuentas` tenía su propia `claveFusion` (`itemId|hash`) y sin el precio
+colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000 + 4000` →
+`2 × 3000`). Cuando se agregue el tercer término, va en las dos.
+
 **Files:**
 - Modify: `backend/src/modules/salones/entities/cuenta-linea.entity.ts`
 - Modify: `backend/src/modules/salones/salones.service.ts:640-720` (`agregarLinea`)
@@ -93,7 +105,7 @@ código exacto, porque dependen de lo que se resuelva acá.
   `jsonb` en `cuenta_lineas` o tabla puente. **Impuestos NO** — siguen vivos.
 - Las dos las consumen T2 y T3.
 
-- [ ] **Paso 1: decidir de dónde sale la cuenta, y escribirlo antes de codear**
+- [x] **Paso 1: decidir de dónde sale la cuenta, y escribirlo antes de codear**
 
   El número a congelar es exactamente el que hoy calcula
   `calculo-precios.service.ts:381-387`:
@@ -113,7 +125,7 @@ código exacto, porque dependen de lo que se resuelva acá.
   `agregarLinea` — `ventas.service.ts:455` y `:963` muestran el patrón de llamada desde
   afuera.
 
-- [ ] **Paso 2: el test que falla — el precio no se mueve cuando cambia la carta**
+- [x] **Paso 2: el test que falla — el precio no se mueve cuando cambia la carta**
 
   e2e, por el camino de la app (nunca SQL directo):
   1. receta a `$5.000`, se agrega a una cuenta abierta;
@@ -122,7 +134,7 @@ código exacto, porque dependen de lo que se resuelva acá.
 
   Hoy el paso 3 no tiene dónde mirar: **ese es el punto**, la línea no guarda precio.
 
-- [ ] **Paso 3: la columna**
+- [x] **Paso 3: la columna**
 
   ```ts
   @Column({ name: 'precio_unitario', type: 'numeric', precision: 18, scale: 4 })
@@ -133,13 +145,13 @@ código exacto, porque dependen de lo que se resuelva acá.
   está en **moneda oficial**, no en la del ítem — el bug de la moneda del extra
   (`resueltos.md`, 2026-08-26) nació de esa confusión exacta.
 
-- [ ] **Paso 4: `agregarLinea` la escribe**
+- [x] **Paso 4: `agregarLinea` la escribe**
 
   Ya resuelve la personalización ahí mismo (`salones.service.ts:653-674`) y tiene el
   `precioExtraTotal` a mano: hoy lo descarta. Guardar `precioBase + precioExtraTotal`
   convertido.
 
-- [ ] **Paso 5: ⚠️ el merge por hash deja de ser correcto y hay que arreglarlo**
+- [x] **Paso 5 (parcial: dos términos de tres): ⚠️ el merge por hash deja de ser correcto y hay que arreglarlo**
 
   `agregarLinea` fusiona la nueva línea con una existente cuando coincide el hash de la
   personalización (`salones.service.ts:688-690`). Con lo congelado, dos pedidos del mismo
@@ -173,7 +185,7 @@ código exacto, porque dependen de lo que se resuelva acá.
   Test: poner un descuento de 20% con la mesa sentada → la mesa paga sin descuento; sacarlo
   → la mesa lo conserva; subirlo a 30% → la mesa sigue con el 20% con el que pidió.
 
-- [ ] **Paso 6: verificación**
+- [x] **Paso 6: verificación**
 
   ```bash
   cd backend && npm run lint:check && npm run typecheck && npm test
@@ -181,10 +193,10 @@ código exacto, porque dependen de lo que se resuelva acá.
   Reset + e2e del spec de cuentas. `synchronize` crea la columna sola; si el seed inserta
   líneas de cuenta, se cae por el `NOT NULL` — actualizarlo en el mismo commit.
 
-- [ ] **Paso 7: mutantes** — al menos dos: (a) leer `precioBase` del catálogo en vez de la
+- [x] **Paso 7: mutantes** — salieron cinco, no dos. — al menos dos: (a) leer `precioBase` del catálogo en vez de la
   columna congelada; (b) volver el merge al hash solo. Los dos tienen que morir.
 
-- [ ] **Paso 8: revisión independiente + commit** (paso 7 de `verify-feature`, recibo atado
+- [x] **Paso 8: revisión independiente + commit** — bloqueó dos veces, las dos con razón (`fusionarCuentas`, y una doc que daba por resuelta la escena del descuento). (paso 7 de `verify-feature`, recibo atado
   al diff staged).
 
 ---
