@@ -6193,10 +6193,17 @@ describe('ItemsService', () => {
       comprometido: string | null;
       /** `false` = el ítem no tiene fila en `item_producto`. */
       conFilaDeStock?: boolean;
+      /**
+       * `true` = se está EDITANDO una línea, así que además de la expansión de
+       * lo nuevo hay una segunda de lo viejo (`lineasPrevias`), también antes
+       * del lock.
+       */
+      editando?: boolean;
     }): void => {
       const tipoRows = [{ item_id: PAPAS, tipo: 'producto', nombre: NOMBRE }];
+      dataSource.query.mockResolvedValueOnce(tipoRows);
+      if (params.editando) dataSource.query.mockResolvedValueOnce(tipoRows);
       dataSource.query
-        .mockResolvedValueOnce(tipoRows)
         .mockResolvedValueOnce(
           params.conFilaDeStock === false
             ? []
@@ -6275,9 +6282,83 @@ describe('ItemsService', () => {
     it('el mensaje dice cuánto queda y cuánto se pidió, con la unidad', async () => {
       mockearPedidoDeProducto({ stock: '3', comprometido: '2' });
 
+      // "lo que se está agregando" y no "este pedido": el número es el NETO, y
+      // al SUBIR una línea que ya existía es la diferencia, no lo que el garzón
+      // tipeó (ver el mensaje en `items.service.ts`).
       await expect(pedir('2')).rejects.toThrow(
-        `Stock insuficiente de "${NOMBRE}": quedan 1 unidad y este pedido necesita 2 unidad`,
+        `Stock insuficiente de "${NOMBRE}": quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
       );
+    });
+
+    /**
+     * `lineasPrevias` = editar una línea que ya existe. `comprometidoPorItem` ya
+     * la cuenta con su cantidad ACTUAL, así que lo que se topea es el NETO.
+     */
+    it('editar una línea compara el neto contra el resto, no la cantidad absoluta', async () => {
+      // 3 físicos, 2 tomados por ESTA misma línea. Subirla a 3 pide 1 más y
+      // entra justo; comparando la absoluta (3 > 3−2 = 1) rebotaría.
+      mockearPedidoDeProducto({
+        stock: '3',
+        comprometido: '2',
+        editando: true,
+      });
+
+      await expect(
+        service.validarStockAlPedir(
+          TENANT,
+          [{ itemId: PAPAS, cantidad: '3', personalizacion: null }],
+          [{ itemId: PAPAS, cantidad: '2', personalizacion: null }],
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it('editar expande los DOS extremos, y las dos expansiones van antes del lock', async () => {
+      mockearPedidoDeProducto({
+        stock: '3',
+        comprometido: '2',
+        editando: true,
+      });
+
+      await service.validarStockAlPedir(
+        TENANT,
+        [{ itemId: PAPAS, cantidad: '3', personalizacion: null }],
+        [{ itemId: PAPAS, cantidad: '2', personalizacion: null }],
+      );
+
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      const iLock = sqls.findIndex((sql) => sql.includes('FOR UPDATE OF ip'));
+      const expansiones = sqls
+        .slice(0, iLock)
+        .filter((sql) =>
+          sql.includes('SELECT item_id, tipo, nombre FROM items'),
+        );
+      // **Dos, no una.** Restar las cantidades y expandir el resultado una sola
+      // vez da distinto: la expansión convierte unidades y la conversión
+      // redondea a 4 decimales (y lanza por debajo), así que `consumo(a − b)`
+      // no es `consumo(a) − consumo(b)`. Es el bug que este arreglo cerró.
+      expect(expansiones).toHaveLength(2);
+      // Y las dos ANTES del lock: no leen stock, alargar el lock con ellas no
+      // compra nada (paso 1 del contrato).
+      expect(iLock).toBeGreaterThan(0);
+    });
+
+    it('bajar la cantidad no llega ni a lockear: el neto negativo se filtra antes', async () => {
+      // Solo la expansión de lo nuevo y la de lo viejo: sin lock ni comprometido.
+      const tipoRows = [{ item_id: PAPAS, tipo: 'producto', nombre: NOMBRE }];
+      dataSource.query
+        .mockResolvedValueOnce(tipoRows)
+        .mockResolvedValueOnce(tipoRows);
+
+      await expect(
+        service.validarStockAlPedir(
+          TENANT,
+          [{ itemId: PAPAS, cantidad: '1', personalizacion: null }],
+          [{ itemId: PAPAS, cantidad: '2', personalizacion: null }],
+        ),
+      ).resolves.toBeUndefined();
+
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      expect(sqls.some((sql) => sql.includes('FOR UPDATE OF ip'))).toBe(false);
     });
 
     it('deja pasar lo que entra JUSTO: el tope es estricto, no off-by-one', async () => {

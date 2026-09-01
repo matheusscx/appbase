@@ -243,24 +243,24 @@ git add -A && git commit -m "feat(salones): pedir de más rebota al pedir, no al
 - Produces: `PATCH` de la línea con una cantidad **mayor** aplica el mismo tope. Bajarla
   **no** valida nada: solo libera.
 
-- [ ] **Paso 1: escribir los dos e2e que faltan**
+- [x] **Paso 1: escribir los dos e2e que faltan**
 
 Con `stock = 2` y una línea de 1: subirla a 3 → `400`; bajarla a 0.5 → `200`. El segundo es
 el ancla: sin él, un guard que valide siempre pasaría igual y nadie vería que rompe el
 camino de bajar.
 
-- [ ] **Paso 2: correr y confirmar que el primero falla**
+- [x] **Paso 2: correr y confirmar que el primero falla**
 
-- [ ] **Paso 3: implementar, validando SOLO cuando la cantidad sube**
+- [x] **Paso 3: implementar, validando SOLO cuando la cantidad sube**
 
 Ojo: `actualizarLinea` recibe un valor **absoluto**, no un delta. El comprometido a comparar
 es el de las otras líneas más la cantidad nueva de ésta, no la suma de las dos.
 
-- [ ] **Paso 4: correr los dos e2e**
+- [x] **Paso 4: correr los dos e2e**
 
-- [ ] **Paso 5: mutante — validar también al bajar, y confirmar que el ancla se pone roja**
+- [x] **Paso 5: mutante — validar también al bajar, y confirmar que el ancla se pone roja**
 
-- [ ] **Paso 6: gate y commit**
+- [x] **Paso 6: gate y commit**
 
 ---
 

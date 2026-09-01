@@ -34,6 +34,10 @@ interface GarzonCreado {
   id: string;
   pin: string;
 }
+/** Lo mínimo de `CuentaDetalle` que este spec mira: el id de la línea recién creada. */
+interface CuentaDetalleLineas {
+  lineas: { id: string; itemId: string; cantidad: string }[];
+}
 interface FilaItem {
   id: string;
   nombre: string;
@@ -116,6 +120,7 @@ describe('Reserva de stock al pedir (e2e)', () => {
   async function crearIngrediente(
     nombre: string,
     stock: string,
+    unidadMedida = 'unidad',
   ): Promise<{ id: string; nombre: string }> {
     const nombreFinal = nombreUnico(nombre);
     const { id } = await post<IdResponse>('/api/items', {
@@ -123,7 +128,7 @@ describe('Reserva de stock al pedir (e2e)', () => {
       precioBase: '100',
       monedaId: CLP_MONEDA_ID,
       tipo: 'ingrediente',
-      unidadMedida: 'unidad',
+      unidadMedida,
       stock,
       costo: '100',
     });
@@ -134,6 +139,8 @@ describe('Reserva de stock al pedir (e2e)', () => {
     nombre: string,
     ingredienteId: string,
     cantidad: string,
+    bloqueante = true,
+    unidadCodigo = 'unidad',
   ): Promise<{ id: string; nombre: string }> {
     const nombreFinal = nombreUnico(nombre);
     const { id } = await post<IdResponse>('/api/items', {
@@ -145,8 +152,8 @@ describe('Reserva de stock al pedir (e2e)', () => {
         {
           ingredienteItemId: ingredienteId,
           cantidad,
-          unidadCodigo: 'unidad',
-          bloqueante: true,
+          unidadCodigo,
+          bloqueante,
         },
       ],
     });
@@ -162,12 +169,22 @@ describe('Reserva de stock al pedir (e2e)', () => {
     return id;
   }
 
+  /** Devuelve el id de la línea creada: lo necesita el `PATCH` de la Tarea 4. */
   async function agregarLinea(
     cuentaId: string,
     itemId: string,
     cantidad: string,
-  ): Promise<void> {
-    await post(`/api/cuentas/${cuentaId}/lineas`, { itemId, cantidad });
+  ): Promise<string> {
+    const detalle = await post<CuentaDetalleLineas>(
+      `/api/cuentas/${cuentaId}/lineas`,
+      { itemId, cantidad },
+    );
+    // **Exactamente una**, no la primera: el día que un test agregue dos líneas
+    // del mismo ítem sin fusionar, devolver `find` daría el id equivocado y las
+    // aserciones que cuelgan de él se apagarían en silencio.
+    const lineas = detalle.lineas.filter((l) => l.itemId === itemId);
+    expect(lineas).toHaveLength(1);
+    return lineas[0].id;
   }
 
   /** El `POST` de línea crudo: para afirmar sobre un rechazo y su mensaje. */
@@ -180,6 +197,27 @@ describe('Reserva de stock al pedir (e2e)', () => {
       .post(`/api/cuentas/${cuentaId}/lineas`)
       .set('Authorization', `Bearer ${token}`)
       .send({ itemId, cantidad });
+    const message = (res.body as { message?: string | string[] }).message;
+    return {
+      status: res.status,
+      message: Array.isArray(message) ? message.join(' ') : (message ?? ''),
+    };
+  }
+
+  /**
+   * El `PATCH` de la línea crudo: el bypass que la Tarea 4 cierra. Devuelve
+   * status y mensaje para poder afirmar sobre los dos, igual que
+   * `intentarLinea`.
+   */
+  async function intentarActualizarLinea(
+    cuentaId: string,
+    lineaId: string,
+    cantidad: string,
+  ): Promise<{ status: number; message: string }> {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/cuentas/${cuentaId}/lineas/${lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidad });
     const message = (res.body as { message?: string | string[] }).message;
     return {
       status: res.status,
@@ -479,6 +517,151 @@ describe('Reserva de stock al pedir (e2e)', () => {
       // queda 1 de insumo y este plato necesita 2.
       expect(rechazo.message).toContain('quedan 1 unidad');
       expect(rechazo.message).toContain('necesita 2 unidad');
+    });
+  });
+
+  describe('Tarea 4 — subir la cantidad de una línea también hace cumplir el tope', () => {
+    /**
+     * El bypass que dejaba abierto el guard del `POST`: se pedía 1, que entra,
+     * y se subía a 100 por el `PATCH`, que no pasaba por ningún tope. La mesa
+     * terminaba comprometiendo stock que no existe y el choque volvía a
+     * estallar al cobrar, que es el modo de falla que este frente vino a
+     * eliminar.
+     */
+    it('subir por encima de lo que queda rebota con 400, y la línea no se mueve', async () => {
+      const producto = await crearProducto('Producto que sube', '2');
+      const cuentaId = await abrirCuenta();
+      const lineaId = await agregarLinea(cuentaId, producto.id, '1');
+
+      const rechazo = await intentarActualizarLinea(cuentaId, lineaId, '3');
+
+      expect(rechazo.status).toBe(400);
+      expect(rechazo.message).toContain(producto.nombre);
+      // **Los dos números son los del DELTA, y ahí se ve la trampa de esta
+      // tarea.** `comprometidoPorItem` ya cuenta esta línea con su cantidad
+      // ACTUAL (1), así que lo que se pide de más es `3 − 1 = 2` contra el
+      // `2 − 1 = 1` que queda. Validando la cantidad absoluta el mensaje diría
+      // "necesita 3": rechazaría igual, pero por la cuenta equivocada.
+      expect(rechazo.message).toContain('quedan 1 unidad');
+      expect(rechazo.message).toContain('necesita 2 unidad');
+
+      // Y la línea quedó como estaba: sigue comprometiendo 1 de los 2.
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('1.0000');
+    });
+
+    /**
+     * El control del de arriba, y el que hace falsable la cuenta del delta:
+     * subir hasta consumir justo lo que queda es legítimo. Validando la
+     * cantidad **absoluta** esto daría 400 —contaría dos veces lo que la propia
+     * línea ya tenía tomado— y un garzón no podría subir de 1 a 2 con stock 2.
+     */
+    it('subir hasta justo lo que queda pasa: el delta se compara contra el resto', async () => {
+      const producto = await crearProducto('Producto al borde', '2');
+      const cuentaId = await abrirCuenta();
+      const lineaId = await agregarLinea(cuentaId, producto.id, '1');
+
+      const res = await intentarActualizarLinea(cuentaId, lineaId, '2');
+
+      expect(res.status).toBe(200);
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('0.0000');
+    });
+
+    /**
+     * **El ancla: bajar no valida nada, solo libera.** Sin este caso un guard
+     * que corriera en las dos direcciones pasaría los tests de arriba igual, y
+     * nadie vería que rompió el camino de corregir un pedido hacia abajo — que
+     * es el que el garzón usa cuando el cliente cambia de idea.
+     */
+    it('bajar la cantidad no valida stock: pasa aunque la línea tenga tomado todo el stock', async () => {
+      const producto = await crearProducto('Producto que baja', '2');
+      const cuentaId = await abrirCuenta();
+      // La línea toma el stock ENTERO: con la cantidad absoluta, cualquier
+      // valor nuevo se compararía contra un restante de 0 y rebotaría.
+      const lineaId = await agregarLinea(cuentaId, producto.id, '2');
+
+      const res = await intentarActualizarLinea(cuentaId, lineaId, '0.5');
+
+      expect(res.status).toBe(200);
+      // Liberó 1,5: eso es lo único que hace bajar una línea.
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('1.5000');
+    });
+
+    /**
+     * **La resta va entre consumos expandidos, no entre cantidades.** La
+     * expansión no solo multiplica: después CONVIERTE, y
+     * `CatalogService.convertirConMapa` redondea a 4 decimales y **lanza** si lo
+     * convertido cae por debajo de esa precisión. Expandir `nueva − vieja` en vez
+     * de restar `consumo(nueva) − consumo(vieja)` cruzaba ese escalón y rebotaba
+     * una subida legítima con un 400 sobre "precisión de stock" que no tiene nada
+     * que ver con lo que hizo el garzón.
+     *
+     * Los números: insumo stockeado en **kg**, receta que lleva **5 g**, línea en
+     * 1, stock de sobra (10 kg). Subirla a 1,005 consume `5,025 g = 0,0050 kg`
+     * contra los `0,0050 kg` que ya tenía → neto 0, pasa. Expandiendo la resta,
+     * en cambio, `0,005 × 5 g = 0,025 g → 0,0000 kg` y lanza.
+     */
+    it('subir una fracción de una receta con un insumo en otra unidad no rebota por precisión', async () => {
+      const insumo = await crearIngrediente('Insumo en kg', '10', 'kg');
+      const receta = await crearReceta(
+        'Plato de 5 g',
+        insumo.id,
+        '5',
+        true,
+        'g',
+      );
+
+      const cuentaId = await abrirCuenta();
+      const lineaId = await agregarLinea(cuentaId, receta.id, '1');
+
+      const res = await intentarActualizarLinea(cuentaId, lineaId, '1.005');
+
+      expect(res.status).toBe(200);
+      // Y no rebotó por lo que rebotaba antes: el 400 hablaba de precisión.
+      expect(res.message).not.toContain('precisión de stock');
+    });
+
+    /**
+     * La misma ancla, con el escenario que **también** mata al mutante que
+     * valida al bajar pasándole el delta (negativo): con el disponible ya en
+     * negativo, `−1,5 > −2` y el pedido rebotaría.
+     *
+     * El disponible negativo no es un caso inventado: lo **no bloqueante** suma
+     * al comprometido pero no frena al pedir (spec § 4.2), así que una receta
+     * con su insumo en `bloqueante: false` puede pasarse del stock sin que
+     * nadie la rechace. Parado ahí, bajar una línea tiene que seguir andando.
+     */
+    it('bajar libera incluso con el disponible ya en negativo por lo no bloqueante', async () => {
+      const insumo = await crearIngrediente('Insumo sobregirado', '2');
+      // Primero la línea directa sobre el insumo: con 0 comprometido entra.
+      const cuentaDirecta = await abrirCuenta();
+      const lineaId = await agregarLinea(cuentaDirecta, insumo.id, '2');
+
+      // Y ahora una receta que lo consume SIN bloquear: suma al comprometido y
+      // el tope no la mira, así que el disponible se va a −2.
+      const receta = await crearReceta(
+        'Plato sin bloquear',
+        insumo.id,
+        '2',
+        false,
+      );
+      const cuentaReceta = await abrirCuenta(mesaBId);
+      await agregarLinea(cuentaReceta, receta.id, '1');
+      expect(
+        (await filaDelCatalogo(insumo.nombre, insumo.id)).stockDisponible,
+      ).toBe('-2.0000');
+
+      const res = await intentarActualizarLinea(cuentaDirecta, lineaId, '0.5');
+
+      expect(res.status).toBe(200);
+      expect(
+        (await filaDelCatalogo(insumo.nombre, insumo.id)).stockDisponible,
+      ).toBe('-0.5000');
     });
   });
 });

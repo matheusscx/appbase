@@ -1669,6 +1669,10 @@ describe('SalonesService', () => {
                 tenantId: TENANT,
                 cuentaId: CUENTA,
                 itemId: ITEM,
+                // La cantidad ACTUAL de la línea: es contra ésta que se calcula
+                // el delta que hace cumplir el tope de stock.
+                cantidad: '1',
+                personalizacion: null,
                 // Nada despachado: el guard de "no bajar de lo enviado" no
                 // aplica y estos tests siguen midiendo lo suyo.
                 cantidadEnviada: '0',
@@ -1842,6 +1846,8 @@ describe('SalonesService', () => {
                 tenantId: TENANT,
                 cuentaId: CUENTA,
                 itemId: ITEM,
+                cantidad: '2',
+                personalizacion: null,
                 cantidadEnviada: '2',
               },
         ),
@@ -1856,10 +1862,16 @@ describe('SalonesService', () => {
       );
     });
 
-    it('SUBIR la cantidad sigue libre, y bajar hasta lo despachado también', async () => {
+    it('dejar la cantidad en lo ya despachado pasa, y SUBIRLA también', async () => {
       // El contraste que hace falsable al de arriba: un guard escrito con `lte`
       // en vez de `lessThan` bloquearía dejarla en 2, que es legítimo —no se
       // regala nada— y este test lo caza.
+      //
+      // Los DOS casos, y con la fila coherente (`cantidad >= cantidadEnviada`,
+      // que es lo único que la base puede tener): dejarla en 2 es el borde del
+      // guard —y con neto 0 no toca el tope de stock—, y subirla a 3 es el que
+      // de verdad sube. Antes este test decía "SUBIR sigue libre" y no subía
+      // nada: mockeaba `cantidad: '2'` contra un dto de '2'.
       manager.findOne.mockImplementation((entidad: unknown) =>
         Promise.resolve(
           entidad === Cuenta
@@ -1869,14 +1881,24 @@ describe('SalonesService', () => {
                 tenantId: TENANT,
                 cuentaId: CUENTA,
                 itemId: ITEM,
+                cantidad: '2',
+                personalizacion: null,
                 cantidadEnviada: '2',
               },
         ),
       );
 
+      // Borde exacto del guard de despachados, y neto 0: no valida stock.
       await expect(
         service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '2' }),
       ).resolves.toBeDefined();
+      expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+
+      // Y subirla de verdad: pasa el guard de despachados y ahora sí topea.
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '3' }),
+      ).resolves.toBeDefined();
+      expect(items.validarStockAlPedir).toHaveBeenCalledTimes(1);
     });
 
     it('rechaza operar sobre una cuenta no abierta', async () => {
@@ -1889,6 +1911,115 @@ describe('SalonesService', () => {
       await expect(
         service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '1' }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    /**
+     * El bypass que el `POST` dejaba abierto: se pedía 1, que entra, y se subía
+     * a 100 por el `PATCH`, que no pasaba por ningún tope.
+     *
+     * Lo que se valida es el **delta** —la línea ya está contada en el
+     * comprometido con su cantidad actual, así que la absoluta la contaría dos
+     * veces— y el tope corre DENTRO de la transacción, después del lock de la
+     * cuenta: afuera queda la misma ventana que el frente vino a cerrar.
+     */
+    it('subir la cantidad valida el DELTA, dentro de la transacción y después del lock', async () => {
+      const orden: string[] = [];
+      manager.findOne.mockImplementation((entidad: unknown) => {
+        if (entidad === Cuenta) {
+          orden.push('lock-cuenta');
+          return Promise.resolve({
+            id: CUENTA,
+            tenantId: TENANT,
+            estado: EstadoCuenta.ABIERTA,
+          });
+        }
+        return Promise.resolve({
+          id: 'linea-1',
+          tenantId: TENANT,
+          cuentaId: CUENTA,
+          itemId: ITEM,
+          cantidad: '1',
+          personalizacion: null,
+          cantidadEnviada: '0',
+        });
+      });
+      items.validarStockAlPedir.mockImplementation(() => {
+        orden.push('tope-stock');
+        return Promise.resolve(undefined);
+      });
+      manager.save.mockImplementation(() => {
+        orden.push('save');
+        return Promise.resolve({});
+      });
+
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '3',
+      });
+
+      expect(orden).toEqual(['lock-cuenta', 'tope-stock', 'save']);
+      // **Las dos cantidades, no su resta.** El tope compara
+      // `consumo(3) − consumo(1)`; pasarle un `'2'` ya restado hace que la
+      // expansión convierta la resta, y ahí el redondeo de unidades cambia la
+      // respuesta (ver el `netoDe` de `items.service.ts`).
+      expect(items.validarStockAlPedir).toHaveBeenCalledWith(
+        TENANT,
+        [{ itemId: ITEM, cantidad: '3', personalizacion: null }],
+        [{ itemId: ITEM, cantidad: '1', personalizacion: null }],
+      );
+    });
+
+    /**
+     * El ancla. Bajar no valida nada: solo libera, y soltar stock no puede
+     * sobrevender. Sin este caso, un guard que corriera en las dos direcciones
+     * pasaría el test de arriba igual — y rompería el camino de corregir un
+     * pedido hacia abajo, que además puede correr con el disponible en negativo
+     * (lo NO bloqueante ocupa sin frenar) y ahí rebotaría hasta un delta
+     * negativo.
+     */
+    it('bajar la cantidad NO valida stock: solo libera', async () => {
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '0.5',
+      });
+
+      expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({ cantidad: '0.5' }),
+      );
+    });
+
+    /**
+     * El mismo bucle que `agregarLinea`, y por lo mismo: desde que subir la
+     * cantidad toma `FOR UPDATE` sobre `item_producto`, este camino compite con
+     * el lock de la venta y el ciclo se puede cerrar.
+     */
+    it('reintenta la transacción ante un deadlock 40P01', async () => {
+      const real = dataSource.transaction.getMockImplementation()!;
+      dataSource.transaction
+        .mockRejectedValueOnce(
+          Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+        )
+        .mockImplementationOnce(real);
+
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '3',
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
+      expect(manager.save).toHaveBeenCalled();
+    });
+
+    it('NO reintenta un error de negocio: se propaga en el primer intento', async () => {
+      // El control del de arriba: reintentar un 400 lo convierte en tres
+      // intentos silenciosos, que es justo lo que el `esDeadlock` evita.
+      dataSource.transaction.mockRejectedValueOnce(
+        new BadRequestException('Stock insuficiente de "Papas"'),
+      );
+
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '3' }),
+      ).rejects.toThrow('Stock insuficiente de "Papas"');
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     });
   });
 

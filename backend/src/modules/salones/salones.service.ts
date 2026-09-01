@@ -51,7 +51,9 @@ import {
 } from '../../common/utils/personalizacion-receta.util';
 
 /**
- * Reintentos ante deadlock de `agregarLinea`. Dos, por lo mismo que en
+ * Reintentos ante deadlock de `agregarLinea` y `actualizarLinea` —los dos
+ * caminos por los que una mesa toma stock, y los dos que lockean
+ * `item_producto`—. Dos, por lo mismo que en
  * `ventas.service.ts`: el deadlock exige que dos transacciones se crucen en el
  * mismo instante, y la que sobrevive libera sus locks al commitear, así que el
  * reintento entra a una BD ya despejada.
@@ -869,54 +871,129 @@ export class SalonesService {
     // conexión del pool tomada mientras se sostiene el `FOR UPDATE`— lo cerró
     // ADR-020: el contexto ALS ya no deja tomarla por olvido.)
     const catalogo = await this.loadCatalogoUnidades();
-    return this.db.transaccion(async (manager) => {
-      const cuenta = await this.getCuentaAbiertaConLock(
-        manager,
-        tenantId,
-        cuentaId,
-      );
-      const linea = await manager.findOne(CuentaLinea, {
-        where: { id: lineaId, tenantId, cuentaId },
-      });
-      if (!linea) throw new NotFoundException(`Línea ${lineaId} no encontrada`);
+    // **Reintento ante `40P01`, mismo molde que `agregarLinea`.** Desde que
+    // subir la cantidad hace cumplir el tope, esta transacción también toma un
+    // `FOR UPDATE` sobre `item_producto` y compite con el mismo lock que la
+    // venta al descontar; el orden global de la venta no es ascendente, así que
+    // el ciclo sigue siendo posible y el cierre real es reintentar (ver el
+    // bloque largo de `agregarLinea` y `docs/agent/anti-patterns.md` § "Tomar
+    // `FOR UPDATE` en un orden que decide el cliente"). Es seguro porque el
+    // deadlock aborta la transacción entera —no queda nada a medio escribir— y
+    // porque el único llamador de este método es el controller, o sea que la
+    // transacción es de nivel superior: reintentar una anidada correría sobre
+    // la misma transacción ya abortada y fallaría con `25P02`.
+    //
+    // No se extrajo un `actualizarLineaEnTransaccion`, por lo mismo que en
+    // `agregarLinea`: el único llamador del cuerpo es este bucle, así que el
+    // método nuevo solo agregaría una firma que nadie más usa. `ventas` sí lo
+    // extrajo, pero porque allá hay dos llamadores.
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.db.transaccion(async (manager) => {
+          const cuenta = await this.getCuentaAbiertaConLock(
+            manager,
+            tenantId,
+            cuentaId,
+          );
+          const linea = await manager.findOne(CuentaLinea, {
+            where: { id: lineaId, tenantId, cuentaId },
+          });
+          if (!linea)
+            throw new NotFoundException(`Línea ${lineaId} no encontrada`);
 
-      const item = await this.getItemVendibleOrThrow(
-        tenantId,
-        linea.itemId,
-        manager,
-      );
-      const resuelta = this.resolverCantidadLinea({
-        cantidad: dto.cantidad,
-        cantidadPresentacion: dto.cantidadPresentacion,
-        unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
-        item,
-        catalogo,
-        syncPresentacionLegado: true,
-      });
-      if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
-        throw new BadRequestException('La cantidad debe ser mayor a cero');
-      }
-      // Mismo motivo que el guard de `quitarLinea`, por el otro camino: bajar
-      // la cantidad por debajo de lo ya despachado regala la diferencia sin
-      // registro. `actualizarLinea` recibe un valor ABSOLUTO, no un delta, así
-      // que sin este chequeo "2 → 1" sobre una línea con 2 enviados pasa igual
-      // que cualquier corrección. Subirla sigue siendo libre.
-      if (
-        new Decimal(resuelta.cantidadCanonica).lessThan(linea.cantidadEnviada)
-      ) {
-        throw new BadRequestException(
-          `Ya se despacharon ${linea.cantidadEnviada} a cocina: no se puede ` +
-            `bajar la cantidad por debajo de eso. Si lo despachado no se va a ` +
-            `cobrar, registralo como merma o cortesía para que quede el rastro.`,
-        );
-      }
+          const item = await this.getItemVendibleOrThrow(
+            tenantId,
+            linea.itemId,
+            manager,
+          );
+          const resuelta = this.resolverCantidadLinea({
+            cantidad: dto.cantidad,
+            cantidadPresentacion: dto.cantidadPresentacion,
+            unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
+            item,
+            catalogo,
+            syncPresentacionLegado: true,
+          });
+          if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
+            throw new BadRequestException('La cantidad debe ser mayor a cero');
+          }
+          // Mismo motivo que el guard de `quitarLinea`, por el otro camino: bajar
+          // la cantidad por debajo de lo ya despachado regala la diferencia sin
+          // registro. `actualizarLinea` recibe un valor ABSOLUTO, no un delta, así
+          // que sin este chequeo "2 → 1" sobre una línea con 2 enviados pasa igual
+          // que cualquier corrección. Subirla sigue siendo libre.
+          if (
+            new Decimal(resuelta.cantidadCanonica).lessThan(
+              linea.cantidadEnviada,
+            )
+          ) {
+            throw new BadRequestException(
+              `Ya se despacharon ${linea.cantidadEnviada} a cocina: no se puede ` +
+                `bajar la cantidad por debajo de eso. Si lo despachado no se va a ` +
+                `cobrar, registralo como merma o cortesía para que quede el rastro.`,
+            );
+          }
 
-      linea.cantidad = resuelta.cantidadCanonica;
-      linea.cantidadPresentacion = resuelta.cantidadPresentacion;
-      linea.unidadCodigoPresentacion = resuelta.unidadCodigoPresentacion;
-      await manager.save(CuentaLinea, linea);
-      return this.armarDetalle(tenantId, cuenta, manager);
-    });
+          // **Subir la cantidad también hace cumplir el tope.** El guard de
+          // `agregarLinea` solo no alcanzaba: se pedía 1, que entra, y se subía a
+          // 100 por acá sin que nadie mirara el stock — el mismo bypass, por otra
+          // puerta. Va DESPUÉS del lock de la cuenta y toma su propio lock sobre
+          // `item_producto`, igual orden que `agregarLinea` y `cerrarCuenta`.
+          //
+          // **Lo que se topea es lo que se pide DE MÁS**, y es la trampa de este
+          // método: `comprometidoPorItem` ya cuenta esta línea con su cantidad
+          // ACTUAL, así que validar la absoluta la contaría dos veces y rebotaría
+          // un "de 1 a 2" con stock 2, que entra perfecto.
+          //
+          // Se le pasan **las dos cantidades**, no su resta. `validarStockAlPedir`
+          // expande cada extremo y compara `consumo(nueva) − consumo(vieja)`;
+          // expandir la resta da distinto —la expansión convierte unidades y la
+          // conversión redondea y lanza bajo 4 decimales— y ese "distinto"
+          // rebotaba una subida legítima con un 400 sobre precisión de stock.
+          // El porqué completo, con el caso medido, está en el `netoDe` de
+          // `items.service.ts`.
+          //
+          // **Bajar no valida nada: solo libera.** Por eso el guard mira el
+          // signo antes de llamar. Validar también hacia abajo rompe el camino de
+          // corregir un pedido —el disponible puede estar en negativo por lo NO
+          // bloqueante (spec § 4.2), y ahí hasta un neto negativo rebotaría—, y
+          // no protege nada: soltar stock nunca sobrevende.
+          if (
+            new Decimal(resuelta.cantidadCanonica).greaterThan(linea.cantidad)
+          ) {
+            // La personalización NO se edita por acá: es la misma de los dos
+            // lados, y es la que dice qué consume cada unidad.
+            const personalizacion = linea.personalizacion;
+            await this.itemsService.validarStockAlPedir(
+              tenantId,
+              [
+                {
+                  itemId: linea.itemId,
+                  cantidad: resuelta.cantidadCanonica,
+                  personalizacion,
+                },
+              ],
+              [
+                {
+                  itemId: linea.itemId,
+                  cantidad: linea.cantidad,
+                  personalizacion,
+                },
+              ],
+            );
+          }
+
+          linea.cantidad = resuelta.cantidadCanonica;
+          linea.cantidadPresentacion = resuelta.cantidadPresentacion;
+          linea.unidadCodigoPresentacion = resuelta.unidadCodigoPresentacion;
+          await manager.save(CuentaLinea, linea);
+          return this.armarDetalle(tenantId, cuenta, manager);
+        });
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
   }
 
   async quitarLinea(

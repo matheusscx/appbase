@@ -4272,9 +4272,20 @@ export class ItemsService {
    * bloqueante igual suma al comprometido —lo hace `comprometidoPorItem`— y por
    * eso su disponible puede quedar negativo: ocupa, pero no impide pedir.
    *
+   * ## `lineasPrevias`: para EDITAR una línea, no para agregar una
+   *
+   * `agregarLinea` no lo pasa: lo que pide es todo nuevo. `actualizarLinea` sí
+   * —la línea en su estado ACTUAL—, porque `comprometidoPorItem` ya la cuenta
+   * con esa cantidad y sin descontarla se contaría dos veces (subir de 1 a 2
+   * con stock 2 rebotaría, y es un pedido que entra). Lo que se compara es
+   * entonces `consumo(nueva) − consumo(vieja)`, **expandiendo los dos
+   * extremos**; ver el comentario del `netoDe` de abajo para por qué expandir
+   * la resta en su lugar da distinto y no sirve.
+   *
    * ## Los tres pasos, y por qué ese orden es el contrato
    *
-   * 1. `consumoDeLineas` de lo que se está pidiendo. Va **antes** del lock: lee
+   * 1. `consumoDeLineas` de lo que se está pidiendo —y de `lineasPrevias`, si
+   *    vinieron—. Va **antes** del lock: lee
    *    catálogo y recetas, nada de stock, y alargar el lock con eso no compra
    *    nada. Acá el conversor es el **estricto**: una unidad que ya no se puede
    *    convertir hace lanzar `BadRequestException` y el pedido se rechaza, que
@@ -4317,9 +4328,39 @@ export class ItemsService {
   async validarStockAlPedir(
     tenantId: string,
     lineasNuevas: LineaConsumo[],
+    lineasPrevias: LineaConsumo[] = [],
   ): Promise<void> {
     const consumoNuevo = await this.consumoDeLineas(tenantId, lineasNuevas);
-    const bloqueantes = [...consumoNuevo].filter(([, c]) => c.bloqueante);
+    // Segunda expansión, también ANTES del lock: no lee stock, así que alargar
+    // el lock con ella no compra nada (mismo criterio que el paso 1).
+    const consumoPrevio = lineasPrevias.length
+      ? await this.consumoDeLineas(tenantId, lineasPrevias)
+      : null;
+
+    // `neto` = lo que se pide DE MÁS, y se calcula como
+    // `consumo(nueva) − consumo(vieja)`, **nunca** como `consumo(nueva − vieja)`.
+    // No son lo mismo y la diferencia es alcanzable: `consumoDeLineas` no solo
+    // multiplica, después CONVIERTE, y `CatalogService.convertirConMapa`
+    // redondea a 4 decimales y **lanza** si lo convertido cae por debajo de esa
+    // precisión. Medido: una receta con 5 g de un insumo stockeado en kg, línea
+    // en 1 → subirla a 1,005 expande el delta como `0,025 g → 0,0000 kg` y
+    // rebota con un 400 sobre "precisión de stock" que no tiene nada que ver
+    // con lo que pidió el garzón; expandiendo los dos extremos da
+    // `0,0050 − 0,0050 = 0`, que es la respuesta correcta. Custodiado por
+    // "subir una fracción de una receta con un insumo… no rebota por precisión"
+    // en `reserva-stock-mesa.e2e-spec.ts`.
+    const netoDe = (itemId: string, c: ConsumoDeItem): Decimal =>
+      consumoPrevio
+        ? c.cantidad.minus(consumoPrevio.get(itemId)?.cantidad ?? 0)
+        : c.cantidad;
+
+    // Un neto ≤ 0 no se mira ni se lockea: bajar la cantidad solo LIBERA, y
+    // soltar stock no puede sobrevender. Filtrar acá —antes del lock— además
+    // achica la huella de locks del camino que baja, en vez de agrandarla.
+    const bloqueantes = [...consumoNuevo]
+      .filter(([, c]) => c.bloqueante)
+      .map(([itemId, c]) => [itemId, c, netoDe(itemId, c)] as const)
+      .filter(([, , neto]) => neto.greaterThan(0));
     if (!bloqueantes.length) return;
 
     const ids = bloqueantes.map(([itemId]) => itemId);
@@ -4358,7 +4399,7 @@ export class ItemsService {
     // dos garzones pidiendo el mismo ítem se serializan acá.
     const comprometido = await this.comprometidoPorItem(tenantId);
 
-    for (const [itemId, c] of bloqueantes) {
+    for (const [itemId, c, neto] of bloqueantes) {
       const fila = stockPorItem.get(itemId);
       // **Ruidoso a propósito: era la única salida silenciosa del camino que
       // enforcea.** Un ítem bloqueante SIN fila en `item_producto` no es un
@@ -4385,15 +4426,22 @@ export class ItemsService {
       const restante = new Decimal(fila.stock ?? '0').minus(
         comprometido.get(itemId) ?? 0,
       );
-      if (c.cantidad.greaterThan(restante)) {
+      if (neto.greaterThan(restante)) {
         // El mensaje nombra el ítem que faltó, no el plato: en una receta de
         // seis ingredientes "no hay stock" manda al garzón a adivinar. Y
         // `restante` se muestra tal cual, negativo incluido —lo no bloqueante
         // puede haberlo pasado—: clamplear a 0 escondería justo el número que
         // el encargado necesita ver.
+        //
+        // **"lo que se está agregando", y no "este pedido"**, porque el número
+        // es el NETO y los dos llamadores lo leen distinto: al agregar una línea
+        // coincide con lo que el garzón tipeó, pero al SUBIR una que ya existía
+        // es la diferencia (tipeó 3 sobre una línea de 1 y el número es 2).
+        // "Este pedido necesita 2" invitaba a leer el 3 y no entender de dónde
+        // salía el 2; así la frase es cierta desde los dos lados.
         throw new BadRequestException(
           `Stock insuficiente de "${c.nombre}": quedan ${restante.toString()} ${fila.unidad_medida} ` +
-            `y este pedido necesita ${c.cantidad.toString()} ${fila.unidad_medida}`,
+            `y lo que se está agregando necesita ${neto.toString()} ${fila.unidad_medida}`,
         );
       }
     }
