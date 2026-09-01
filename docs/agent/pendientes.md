@@ -1215,6 +1215,50 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+### Dos mesas pueden pedir la MISMA última unidad, y la segunda queda trabada (2026-09-01)
+
+- [ ] **Pedir una línea en una mesa no mira el stock ni lo reserva; el choque estalla al
+  cobrar, con la comida ya servida** (backend + producto; **reproducido end-to-end** contra
+  el stack el 2026-09-01, no leído) — lo levantó el owner mientras diseñábamos la anulación
+  de una línea despachada, y es un frente propio.
+
+  **La corrida, tal cual salió** (producto con `stock = 1`, dos mesas del mismo salón):
+
+  | Paso | Resultado |
+  |---|---|
+  | mesa A pide 1 | `201` |
+  | mesa B pide 1 | `201` — y el stock sigue en `1.0000` |
+  | las dos comandas a cocina | `201` y `201`, `cantidad_enviada` avanza a 1 en las dos |
+  | mesa A cobra | `201`, stock queda en `0.0000` |
+  | mesa B cobra | **`400` "Stock insuficiente para la salida"** |
+  | mesa B intenta sacar la línea | **`400` "ya se despachó a cocina… registralo como merma o cortesía"** |
+
+  **Por qué pasa:** el stock **no sale al pedir ni al despachar, sale al cerrar la cuenta en
+  venta** (`ventas.service.ts:840`, y `venderIngredientesReceta` para una receta). Entre el
+  pedido y el cobro no hay ninguna retención: `salones.service.ts` **no menciona `stock` ni
+  una sola vez** y no existe ningún concepto de reserva en el backend.
+
+  **Por qué importa más que un 400 feo:** la mesa queda **trabada**. No se puede cobrar
+  —el cierre entero revienta— y no se puede sacar la línea —el guard de agosto lo impide—.
+  La única salida hoy es un ajuste de inventario a mano. Y el mensaje de error manda a
+  *"merma o cortesía"*, que **no existe**: es una promesa de la UI sin nada detrás.
+
+  ⚠️ **Toca `movimientos_inventario` y una regla de negocio no documentada**, así que por
+  `CLAUDE.md` se para y se pregunta. **La decisión es del owner** y son tres caminos con
+  costos distintos: (a) **reservar** al pedir —hay que modelar la retención, una cuenta
+  abierta tres horas inmoviliza stock y cancelarla tiene que devolverlo—; (b) **avisar** al
+  pedir y dejar pedir igual —no lo elimina, pero deja de ser silencioso—; (c) **bloquear**
+  al pedir —en un restorán la cocina a veces consigue más, y bloquear en el sistema estorba—.
+
+  📌 **Cruza con la anulación de una línea despachada** (§3, *"Anular o reducir una línea ya
+  enviada a cocina"*): la salida con motivo que ahí falta es también la salida de esta mesa
+  trabada. Se diseñan por separado, pero el que tome uno tiene que mirar el otro.
+
+  📌 La sonda que lo reprodujo no se commiteó (es una medición, no un test). Lo que hizo, por
+  si hay que repetirla: producto con categoría **que tenga impresora** —sin eso la comanda
+  devuelve `{"estaciones":[]}` y `cantidad_enviada` nunca avanza, y el caso parece no
+  reproducir—, garzón propio con sesión y turno, caja abierta, dos mesas del mismo salón.
+
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
 ✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
