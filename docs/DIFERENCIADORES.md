@@ -193,6 +193,30 @@ que se puede explicar peso por peso, y dos cierres del mismo combo dan el mismo 
 
 > Oportunidades detectadas. No hay ni diseño.
 
+### Anular por CANTIDAD un plato ya despachado, y valorizar lo que se perdió
+
+**El hueco:** de los **6 productos relevados** para esto —Toast, Square, Lightspeed
+(K-Series), y del lado chileno Toteat, Bsale y Defontana— **ninguno documenta qué pasa al
+anular parte de una línea**: los tres internacionales hablan de *"el ítem"*, nunca de la
+cantidad, así que se despacharon 3 y se anula 1 no tiene respuesta pública. Y **ninguno
+documenta a qué costo registra lo anulado**: Lightspeed mueve la unidad de stock según el
+flag `Reverse stock` de la razón, pero no dice con qué valorización.
+
+**Por qué nos toca a nosotros:** `cuenta_lineas.cantidad_enviada` es una **cantidad, no un
+flag**, así que en nuestro modelo la anulación parcial es expresable sin agregar nada — el
+eje que el mercado no documenta ya está medido por línea. Y el módulo `mermas` ya registra
+salida de inventario **con costo valorizado**, que es más de lo que tiene Square: su propia
+comunidad reconoce que no hay seguimiento de mermas y que la gente usa razones de *comp*
+como sustituto.
+
+**Estado: 💡 hallazgo, sin diseño y sin decisión.** Hoy el sistema **bloquea** quitar una
+línea despachada y no ofrece salida: el mensaje manda a *"merma o cortesía"* y **cortesía no
+existe** en el código. O sea que hoy esto es un hueco nuestro, no una ventaja; se vuelve
+diferenciador solo si se construye.
+⚠️ Regla 3: lo relevado es documentación pública. Que Toast no publique la anulación parcial
+no prueba que no la tenga.
+**Evidencia:** [investigación 2026-09-01 §4 y §5](agent/investigaciones/2026-09-01-anular-linea-despachada.md).
+
 ### Descomponer el IVA de una nota de crédito emitida por monto
 
 **El hueco:** **ninguno de los 7 productos relevados** —Square, Toast, Clover, Lightspeed,
