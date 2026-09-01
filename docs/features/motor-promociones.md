@@ -104,12 +104,23 @@ cobra la cuenta:
 - El instante **nunca viaja por valor desde el cliente**: sale siempre de la BD
   (`instantesDeLineas` en `calculo-precios.service.ts`).
 
-⚠️ **La vigencia por fecha de las reglas comunes (`descuentos`/`recargos`) NO se tocó**: sigue
-decidiéndose por `cuenta.abierta_el`, como la construyó el frente de vigencia
-(2026-08-23/24). La asimetría es deliberada, no un descuido: la regla común es por **día**
-(el borde es marginal — cruzar la medianoche), la promo es por **franja horaria** (el borde
-es el caso central de un bar — la mesa abierta antes del happy hour que pide adentro).
-Unificar los dos instantes, si algún día molesta, es una decisión aparte del owner.
+✅ **La asimetría se cerró el 2026-08-31, y la cerró el owner.** Hasta entonces la vigencia
+por fecha de las reglas comunes (`descuentos`/`recargos`) se decidía por `cuenta.abierta_el`
+mientras la de las promos ya era por línea, y esta nota decía que unificarlas era "una
+decisión aparte del owner". Lo fue: al decidir que **lo pedido se cobra como se pidió**, la
+línea pasó a congelar sus descuentos y recargos al pedirse, con su vigencia ya resuelta. Los
+dos instantes son ahora el mismo — cuándo se pidió la línea.
+
+Lo que eso cambia en la práctica, y está fijado por test
+(`vigencia-cuenta.e2e-spec.ts`): una cuenta abierta la semana pasada con una línea pedida
+hoy **ya no** lleva la promo de la semana pasada; y una línea pedida con el descuento vivo
+lo conserva aunque venza antes de cobrar.
+
+⚠️ **Queda una asimetría más chica, y es la grieta abierta del frente**: `fechaLocal` —el
+día que decide **qué promos se cargan**— sigue saliendo de `cuenta.abierta_el`. La hora es
+por línea, pero si el día no cargó la promo, la hora nunca se mira. Mesa que se sienta el
+lunes 23:30 y pide el martes 00:30: el 2x1 de los martes no se evalúa. Detalle en
+[`../agent/pendientes.md`](../agent/pendientes.md).
 
 ---
 

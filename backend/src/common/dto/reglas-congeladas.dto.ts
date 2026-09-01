@@ -1,3 +1,5 @@
+import type { ReglaResuelta } from '../../modules/calculo-precios/calculo-precios.engine';
+
 /**
  * Las reglas de catálogo —descuentos y recargos— que regían sobre un ítem
  * **cuando se pidió** una línea de cuenta, resueltas y congeladas ahí.
@@ -17,15 +19,23 @@
  * escribe (`SalonesService.agregarLinea`). Tenerlo en cualquiera de esos dos
  * ataba la entidad de un módulo al service de otro.
  *
- * El tipo **solo promete `id`**, y eso también es deliberado: lo que se persiste
- * es la regla resuelta entera (`ReglaResueltaConNivel` le calza), pero nombrar
- * sus campos acá obligaría a este archivo a seguir al motor. Con `id` alcanza
- * para lo único que el consumidor genérico necesita —ordenar— y el jsonb guarda
- * el resto igual. La huella que compara dos líneas serializa la regla entera
- * justamente por eso (`hashReglasCongeladas`): una lista blanca de campos falla
- * en silencio cada vez que el motor gana uno, y ya falló una vez con `codigo`.
+ * Lo que se persiste **es la regla resuelta del motor**, así que el tipo la
+ * nombra en vez de re-declararla: `ReglaResuelta` vive en
+ * `calculo-precios.engine.ts`, que es puro —su único import es `decimal.js`, sin
+ * NestJS ni entidades— y es la definición canónica de qué es una regla ya
+ * resuelta. Copiar sus campos acá crearía una segunda definición que deriva; un
+ * tipo laxo (`{ id: string }`) obligaría al motor a castear para leer la plata.
+ *
+ * El objeto guardado lleva además `nivel`, que el motor no lee: la validación de
+ * nivel corre al **asociar** y al resolver por id, y una línea que trae sus
+ * reglas congeladas no pasa por ahí. Viaja igual, en el jsonb.
+ *
+ * ⚠️ La huella que compara dos líneas serializa la regla **entera**
+ * (`hashReglasCongeladas`), no una lista de campos elegidos: una lista blanca
+ * falla en silencio cada vez que el motor gana un campo, y ya falló una vez con
+ * `codigo`.
  */
-export type ReglaCongelada = { id: string };
+export type ReglaCongelada = ReglaResuelta;
 
 export interface ReglasCongeladas {
   descuentos: ReglaCongelada[];

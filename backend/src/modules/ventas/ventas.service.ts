@@ -5,6 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { EntityManager, IsNull } from 'typeorm';
+import type { ReglasCongeladas } from '../../common/dto/reglas-congeladas.dto';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
@@ -127,6 +128,22 @@ export interface TipoDocumentoResponse {
   customerRequerido: boolean;
 }
 
+/**
+ * Lo que una línea de cuenta de salón congeló al pedirse. Ver el parámetro
+ * `lineasCongeladas` de `crearEnTransaccion`: es un canal **interno**, nunca un
+ * campo de DTO, porque lleva plata ya resuelta.
+ */
+export interface LineaCongelada {
+  personalizacion: PersonalizacionRecetaSnapshot | null;
+  /** Ya en moneda oficial y ya redondeado con el `modo_redondeo` del tenant. */
+  precioUnitario: string;
+  /** El mismo precio en la moneda del ítem, y la tasa que los une. Van los tres
+   *  o `venta_detalles` guarda una trazabilidad que se contradice. */
+  precioUnitarioOrigen: string;
+  tasaCambio: string;
+  reglasCongeladas: ReglasCongeladas;
+}
+
 @Injectable()
 export class VentasService {
   constructor(
@@ -198,6 +215,30 @@ export class VentasService {
     // una cuenta abierta en diciembre y mandar su id en marzo para cobrar con
     // la promo de verano. Solo `salones.cerrarCuenta` lo pasa.
     cuentaId?: string,
+    /**
+     * **Lo que cada línea de la cuenta congeló al pedirse**: su personalización
+     * ya resuelta, su precio unitario (en moneda oficial) y las reglas de
+     * catálogo que regían en ese momento. Posicional, 1:1 con `dto.lineas` y en
+     * el mismo orden — que es el mismo contrato de orden del que ya depende
+     * `instantesDeLineas`.
+     *
+     * Va como parámetro y **no** en el DTO por la misma razón que `cuentaId`,
+     * pero más fuerte: lleva plata. Un cliente que pudiera mandar esto se
+     * cobraría lo que quisiera. Solo `salones.cerrarCuenta` lo pasa, leyendo lo
+     * que el servidor congeló.
+     *
+     * Cuando viene, esta venta **no re-resuelve la personalización** (que es lo
+     * que rompía la mesa cuando la carta cambiaba), **ni re-precia, ni re-lee
+     * los descuentos y recargos**.
+     *
+     * ⚠️ Lo que **sí** sigue saliendo del catálogo vivo, medido: los impuestos y
+     * `precio_incluye_impuesto` del ítem. Los primeros porque son fiscales
+     * (ADR-010); el segundo porque decide cómo se interpreta el precio frente al
+     * impuesto y linda con lo mismo. Togglear `precio_incluye_impuesto` con la
+     * mesa sentada **sí** mueve lo que paga, sin mover el precio congelado. Es
+     * defendible, pero no es "no vuelve al catálogo para nada".
+     */
+    lineasCongeladas?: (LineaCongelada | undefined)[],
   ) {
     const canal = dto.canal ?? 'fisico';
 
@@ -378,7 +419,19 @@ export class VentasService {
     )[] = [];
     for (const [i, linea] of dto.lineas.entries()) {
       const item = items[i];
-      if (item.tipo === 'receta') {
+      const congelada = lineasCongeladas?.[i];
+      if (congelada) {
+        // Lo pedido se cobra como se pidió: la personalización ya la resolvió y
+        // la validó `agregarLinea`, y el precio ya está calculado y convertido.
+        // Volver a resolverla acá es lo que rompía la mesa cuando el catálogo
+        // cambiaba —el extra que se sacó, el grupo que se hizo obligatorio— y lo
+        // que le movía el precio sin avisarle a nadie.
+        personalizaciones.push(
+          congelada.personalizacion
+            ? { snapshot: congelada.personalizacion, precioExtraTotal: '0' }
+            : null,
+        );
+      } else if (item.tipo === 'receta') {
         personalizaciones.push(
           await this.itemsService.resolverPersonalizacionReceta(
             manager,
@@ -444,14 +497,18 @@ export class VentasService {
       // el que un precio podía entrar desde afuera. El primero era el
       // `precioUnitario` de `LineaDto`, que salió en el mismo commit.
       const precioOrigen =
-        pers != null
+        lineasCongeladas?.[i]?.precioUnitarioOrigen ??
+        (pers != null
           ? new Decimal(item.precioBase).plus(pers.precioExtraTotal).toFixed(4)
-          : item.precioBase;
+          : item.precioBase);
       // La conversión sí redondea, y es la que se persiste en
       // `venta_detalles.precio_unitario`. Comparte función con la
       // previsualización: si las dos no redondean igual, el POS muestra un precio
       // y la venta guarda otro.
+      // El congelado gana: ya está en moneda oficial y ya se redondeó con el
+      // `modo_redondeo` del tenant cuando se pidió la línea.
       const precioConvertido =
+        lineasCongeladas?.[i]?.precioUnitario ??
         this.calculoPreciosService.convertirAMonedaOficial(
           precioOrigen,
           item.monedaId,
@@ -466,7 +523,7 @@ export class VentasService {
         unidadCodigoPresentacion,
         unidadBaseCodigo,
         precioOrigen,
-        tasa: tasa.toFixed(6),
+        tasa: lineasCongeladas?.[i]?.tasaCambio ?? tasa.toFixed(6),
         precioConvertido,
         personalizacion: pers?.snapshot ?? null,
       };
@@ -474,7 +531,7 @@ export class VentasService {
 
     const calcularDto = {
       lineas: lineasConversion.map(
-        ({ linea, precioConvertido, cantidadCanonica }) => ({
+        ({ linea, precioConvertido, cantidadCanonica }, i) => ({
           itemId: linea.itemId,
           cantidad: cantidadCanonica,
           // Canal interno del motor, no un override del cliente: el precio ya
@@ -483,6 +540,7 @@ export class VentasService {
           // `calcular` la resolvería de nuevo y esta venta pagaría las
           // consultas dos veces. Ver `LineaCalculo` en `calcular.dto.ts`.
           precioUnitarioResuelto: precioConvertido,
+          reglasCongeladas: lineasCongeladas?.[i]?.reglasCongeladas,
           descuentoIds: linea.descuentoIds,
           recargoIds: linea.recargoIds,
           impuestoIds: linea.impuestoIds,

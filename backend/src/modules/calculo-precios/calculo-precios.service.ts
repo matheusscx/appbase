@@ -145,6 +145,29 @@ export class CalculoPreciosService {
     dto: CalcularVentaInput,
     configPrecargada?: ConfigCalculo,
   ): Promise<ResultadoVenta> {
+    // **La precuenta de una cuenta se arma del lado del servidor.** Con
+    // `cuentaId` y sin datos internos en el body —o sea: viene por HTTP— las
+    // líneas se releen de `cuenta_lineas` con su precio y sus reglas congeladas,
+    // y las del body se ignoran. Sin esto la pantalla previsualiza contra el
+    // catálogo vivo y el cierre cobra lo congelado: dos números distintos para la
+    // misma mesa, y el garzón cobrando el de la pantalla (medido: 7.140 contra
+    // 5.950).
+    //
+    // La condición mira `precioUnitarioResuelto` y no `cuentaId` solo, porque
+    // `ventas.service` **también** llama con `cuentaId` —y ya trae las líneas
+    // congeladas armadas—: releerlas ahí sería una consulta al pedo y, peor, una
+    // segunda lectura que podría ver la cuenta ya cambiada.
+    const dtoLineas = dto.lineas;
+    if (
+      dto.cuentaId &&
+      !dtoLineas.some((l) => l.precioUnitarioResuelto !== undefined)
+    ) {
+      dto = {
+        ...dto,
+        lineas: await this.lineasDeCuenta(tenantId, dto.cuentaId),
+      };
+    }
+
     // Sin `configPrecargada` (la previsualización), acá es donde se resuelve
     // la escala de la moneda oficial: una consulta más, no una por línea.
     const config =
@@ -701,14 +724,16 @@ export class CalculoPreciosService {
    * resueltas y listas para congelarse en una línea de cuenta.
    *
    * Usa el mismo `indexarReglas` que `calcular()` —mismos tramos, mismo
-   * `activo`, misma forma— pero **el instante NO es el mismo**, y la diferencia
-   * es intencional: acá se congela contra **ahora**, que es cuando se pidió la
-   * línea, y `calcular()` evalúa la vigencia contra `cuentas.abierta_el`, que es
-   * cuando se sentó la mesa. Con una cuenta que cruza la medianoche los dos
-   * difieren, y el que tiene razón es éste: la regla del owner es *lo que regía
-   * cuando se pidió*. Que `calcular()` mire la apertura es la grieta que este
-   * mismo frente cierra en su tarea de promociones — hasta entonces, los dos
-   * números conviven y este docblock es el aviso.
+   * `activo`, misma forma— y el instante es **cuándo se pidió la línea**, que es
+   * la regla del owner. Desde el 2026-08-31 esto ya **no** convive con otro
+   * criterio para las reglas de línea: `resolverLinea` usa lo congelado y no
+   * vuelve a evaluar vigencia contra `cuentas.abierta_el`.
+   *
+   * ⚠️ **Lo que sigue saliendo de la apertura de la cuenta es `fechaLocal`**, el
+   * día que decide qué **promociones** se cargan (`instanteDeVigencia`). La hora
+   * de cada promo ya es por línea; el día todavía no. Mesa que se sienta el lunes
+   * 23:30 y pide el martes 00:30: el 2x1 de los martes no se evalúa. Es la grieta
+   * abierta del frente y está en `docs/agent/pendientes.md`.
    *
    * ⚠️ **Cuesta hasta diez consultas, no cuatro** (medido con `log_statement=all`
    * sobre un `POST /cuentas/:id/lineas`): la zona horaria (1), y si el ítem tiene
@@ -760,6 +785,48 @@ export class CalculoPreciosService {
     };
   }
 
+  /**
+   * Las líneas de una cuenta abierta **tal como se van a cobrar**: leídas de
+   * `cuenta_lineas`, con su precio y sus reglas congeladas.
+   *
+   * Existe para que la precuenta no pueda mentir. Desde que `cerrarCuenta` cobra
+   * con lo congelado, previsualizar con lo que manda el cliente —que arma sus
+   * líneas del catálogo vivo— daba **otro número**: medido, la pantalla decía
+   * 7.140 y la venta guardaba 5.950 para la misma mesa. El garzón le cobraba al
+   * cliente lo que decía la pantalla.
+   *
+   * Por eso, con `cuentaId` presente, **las líneas del body se ignoran** y salen
+   * de la base. No es defensa contra un cliente malicioso —para eso ya está que
+   * los campos internos no pasen el `whitelist`— sino contra el desfase: el
+   * cliente no tiene con qué armar la línea congelada aunque quiera.
+   *
+   * `cantidad` sale de la línea, no del body, por lo mismo. Y el orden es
+   * `creado_el`, el mismo contrato del que ya depende `instantesDeLineas`.
+   */
+  private async lineasDeCuenta(
+    tenantId: string,
+    cuentaId: string,
+  ): Promise<LineaCalculo[]> {
+    const filas: {
+      item_id: string;
+      cantidad: string;
+      precio_unitario: string;
+      reglas_congeladas: ReglasCongeladas;
+    }[] = await this.db.query(
+      `SELECT item_id, cantidad, precio_unitario, reglas_congeladas
+         FROM cuenta_lineas
+        WHERE cuenta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+        ORDER BY creado_el`,
+      [cuentaId, tenantId],
+    );
+    return filas.map((f) => ({
+      itemId: f.item_id,
+      cantidad: f.cantidad,
+      precioUnitarioResuelto: f.precio_unitario,
+      reglasCongeladas: f.reglas_congeladas,
+    }));
+  }
+
   private resolverLinea(
     linea: LineaCalculo,
     precioResuelto: string | undefined,
@@ -781,6 +848,17 @@ export class CalculoPreciosService {
     const impuestoIds = linea.impuestoIds ?? reglas?.impuestosIds ?? [];
     const descuentoIds = linea.descuentoIds ?? reglas?.descuentosIds ?? [];
     const recargoIds = linea.recargoIds ?? reglas?.recargosIds ?? [];
+
+    // **Los impuestos NO tienen rama congelada, y es deliberado** (ADR-010):
+    // son fiscales y se leen vivos aunque la línea traiga todo lo demás
+    // congelado. Congelarlos es otro frente.
+    //
+    // Las reglas sí: si la línea viene con las suyas —solo `cerrarCuenta` las
+    // pone— se usan tal cual y las asociaciones vivas del ítem no se miran.
+    // Pisan también a `linea.descuentoIds`, el override del cliente: en el
+    // cobro de una cuenta ese override no existe (`cerrarCuenta` no lo manda) y
+    // si algún día existiera, lo que la mesa pidió gana.
+    const congeladas = linea.reglasCongeladas;
 
     // `precioResuelto` ya viene convertido —lo decidió `calcular()`—; el resto
     // de las líneas se convierten acá desde el precio de catálogo. Ninguna de
@@ -823,18 +901,22 @@ export class CalculoPreciosService {
       precioIncluyeImpuesto: item.precioIncluyeImpuesto,
       clasificacionTributaria: item.clasificacionTributaria,
       impuestos: impuestosLinea,
-      descuentos: this.resolverReglas(
-        descuentoIds,
-        descuentoMap,
-        'descuento',
-        NivelRegla.LINEA,
-      ),
-      recargos: this.resolverReglas(
-        recargoIds,
-        recargoMap,
-        'recargo',
-        NivelRegla.LINEA,
-      ),
+      descuentos:
+        congeladas?.descuentos ??
+        this.resolverReglas(
+          descuentoIds,
+          descuentoMap,
+          'descuento',
+          NivelRegla.LINEA,
+        ),
+      recargos:
+        congeladas?.recargos ??
+        this.resolverReglas(
+          recargoIds,
+          recargoMap,
+          'recargo',
+          NivelRegla.LINEA,
+        ),
     };
   }
 

@@ -150,9 +150,8 @@ export interface CuentaLineaDetalle {
    * Lo que esta línea paga por unidad, **congelado al pedirla** y en moneda
    * oficial (owner, 2026-08-30: *lo pedido se cobra como se pidió*).
    *
-   * ⚠️ Hoy **todavía no manda al cobrar**: `cerrarCuenta` sigue desarmando la
-   * línea a ids y `ventas.service` re-tasa contra el catálogo vivo. Congelarlo
-   * es la primera mitad del frente; conectarlo al cobro es la segunda.
+   * **Es lo que se cobra**: `cerrarCuenta` se lo pasa a `ventas.service` por un
+   * canal interno y la venta se arma con eso, sin volver al catálogo.
    */
   precioUnitario: string;
   cantidad: string;
@@ -702,18 +701,22 @@ export class SalonesService {
     // misma cuenta que hace `calculo-precios.service.ts` para una línea
     // personalizada, con el mismo conversor, para que precuenta y cobro no
     // puedan divergir por redondeo.
-    const convertir = await this.conversorAMonedaOficial(tenantId);
-    const precioUnitario = convertir(
-      new Decimal(item.precioBase).plus(precioExtraTotal).toFixed(4),
-      item.monedaId,
-    );
+    const { convertir, tasaDe } = await this.conversorAMonedaOficial(tenantId);
+    // Los tres números que la venta necesita para explicarse: el precio en la
+    // moneda del ítem, la tasa, y el resultado. Congelar solo el último dejaba
+    // el registro contradiciéndose (medido: se cobraba 9.500 y la venta decía
+    // "20 USD a tasa 950").
+    const precioUnitarioOrigen = new Decimal(item.precioBase)
+      .plus(precioExtraTotal)
+      .toFixed(4);
+    const tasaCambio = tasaDe(item.monedaId);
+    const precioUnitario = convertir(precioUnitarioOrigen, item.monedaId);
     // Y lo mismo con las reglas de catálogo (owner, 2026-08-30). Se congelan
     // resueltas, no por id, para que cambiarle el valor a la regla tampoco
     // alcance a esta línea.
     //
-    // ⚠️ Congelar no es todavía cobrar: hasta que `cerrarCuenta` lea esto en vez
-    // de re-tasar, un descuento nuevo SÍ le llega a la mesa sentada. Lo único
-    // que estas reglas deciden hoy es si dos pedidos son una línea o dos.
+    // Esto es lo que se cobra: `cerrarCuenta` se lo pasa a `ventas.service` y el
+    // motor lo usa tal cual. Decide además si dos pedidos son una línea o dos.
     const reglasCongeladas =
       await this.calculoPreciosService.congelarReglasDeItem(
         tenantId,
@@ -767,6 +770,8 @@ export class SalonesService {
             unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
             personalizacion: snapshot,
             precioUnitario,
+            precioUnitarioOrigen,
+            tasaCambio,
             reglasCongeladas,
           }),
         );
@@ -1204,42 +1209,13 @@ export class SalonesService {
                 unidadCodigoPresentacion: l.unidadCodigoPresentacion,
               }
             : {}),
-          personalizacion: l.personalizacion
-            ? {
-                omitidos: l.personalizacion.omitidos,
-                extras: l.personalizacion.extras.map((e) => ({
-                  ingredienteItemId: e.ingredienteItemId,
-                  ...(e.unidades ? { unidades: Number(e.unidades) } : {}),
-                })),
-                comentario: l.personalizacion.comentario,
-                ...(l.personalizacion.grupos?.length
-                  ? {
-                      grupos: l.personalizacion.grupos.map((g) => ({
-                        grupoId: g.grupoId,
-                        opciones: g.opciones.map((o) => ({
-                          itemId: o.itemId,
-                          unidades: Number(o.unidades),
-                        })),
-                      })),
-                    }
-                  : {}),
-                ...(l.personalizacion.componentes?.length
-                  ? {
-                      componentes: l.personalizacion.componentes.map((c) => ({
-                        componenteItemId: c.componenteItemId,
-                        unidad: c.unidad,
-                        grupos: c.grupos.map((g) => ({
-                          grupoId: g.grupoId,
-                          opciones: g.opciones.map((o) => ({
-                            itemId: o.itemId,
-                            unidades: Number(o.unidades),
-                          })),
-                        })),
-                      })),
-                    }
-                  : {}),
-              }
-            : undefined,
+          // ⚠️ **La personalización NO viaja en el DTO** desde el 2026-08-31.
+          // Hasta acá esta línea desarmaba el snapshot congelado en puros ids y
+          // `ventas.service` lo volvía a resolver contra el catálogo de hoy: de
+          // ahí salían las dos conductas que este frente arregla —la mesa que
+          // no se podía cobrar porque la carta cambió, y el precio que se movía
+          // sin avisar—. Ahora la foto entera va por `lineasCongeladas`, el
+          // canal interno de `crearEnTransaccion`, que no es un campo del body.
         })),
         pagos: dto.pagos,
         tipoDocumentoId: dto.tipoDocumentoId,
@@ -1262,6 +1238,16 @@ export class SalonesService {
         usuarioId,
         ventaDto,
         cuentaId,
+        // La foto de cada línea, en el mismo orden que `ventaDto.lineas` —las
+        // dos salen del mismo `lineas`, ya ordenado por `creadoEl`—. Es el canal
+        // interno: lleva plata resuelta y por eso no puede ser un campo del body.
+        lineas.map((l) => ({
+          personalizacion: l.personalizacion,
+          precioUnitario: l.precioUnitario,
+          precioUnitarioOrigen: l.precioUnitarioOrigen,
+          tasaCambio: l.tasaCambio,
+          reglasCongeladas: l.reglasCongeladas,
+        })),
       );
 
       cuenta.estado = EstadoCuenta.CERRADA;
@@ -1597,7 +1583,8 @@ export class SalonesService {
     );
     let convertir: (monto: string, monedaId: string) => string = (monto) =>
       monto;
-    if (hayExtras) convertir = await this.conversorAMonedaOficial(tenantId);
+    if (hayExtras)
+      convertir = (await this.conversorAMonedaOficial(tenantId)).convertir;
 
     return cuentas.map((cuenta) =>
       this.mapearDetalle(
@@ -1694,9 +1681,11 @@ export class SalonesService {
    * (`resueltos.md`, redondeo de plata). La cuenta en sí es de
    * `CalculoPreciosService`; esto solo le arma los insumos.
    */
-  private async conversorAMonedaOficial(
-    tenantId: string,
-  ): Promise<(monto: string, monedaId: string) => string> {
+  private async conversorAMonedaOficial(tenantId: string): Promise<{
+    convertir: (monto: string, monedaId: string) => string;
+    /** La tasa que usó `convertir`, para congelarla junto al precio. */
+    tasaDe: (monedaId: string) => string;
+  }> {
     const monedas = await this.monedasService.findMonedas(tenantId);
     const oficial = monedas.find((m) => m.esOficial);
     if (!oficial) {
@@ -1711,13 +1700,17 @@ export class SalonesService {
       tenantId,
       oficial.decimales,
     );
-    return (monto, monedaId) =>
-      this.calculoPreciosService.convertirAMonedaOficial(
-        monto,
-        monedaId,
-        tasaMap,
-        config.modoRedondeo,
-      );
+    return {
+      convertir: (monto, monedaId) =>
+        this.calculoPreciosService.convertirAMonedaOficial(
+          monto,
+          monedaId,
+          tasaMap,
+          config.modoRedondeo,
+        ),
+      tasaDe: (monedaId) =>
+        new Decimal(tasaMap.get(monedaId) ?? '1').toFixed(6),
+    };
   }
 
   private async nombresIngredientesPersonalizacion(

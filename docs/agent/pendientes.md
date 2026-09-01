@@ -1059,22 +1059,40 @@ abriendo las superficies, no leyendo la entrada.
   `DELETE /grupos-modificadores/:id` también quedó cubierto: ya se rechazaba con el grupo
   asociado a un ítem vivo.
 
-  🔲 **Lo que queda abierto no es "sacar", y por eso no lo cierra el mismo molde:**
+  ✅ **Y las cinco filas de abajo se cerraron el 2026-08-31, todas de una y sin un guard
+  por forma**: la línea de cuenta abierta dejó de re-validarse. `cerrarCuenta` le pasa a
+  `ventas.service` la foto congelada y la precuenta se arma del lado del servidor, así que
+  ninguna de estas ediciones de catálogo puede volver a romper una mesa sentada. Las dos
+  primeras están fijadas por e2e (`cuenta-precio-congelado.e2e-spec.ts`, tests 14 y 15).
 
-  | Camino | Qué pasa al re-tasar | Medido |
-  |---|---|---|
-  | `PATCH /items/:id` con `componentes`: sacar de un combo un componente que la línea personalizó | *"El componente no pertenece a este combo o no admite grupos"* | ✅ sonda 2026-08-30 (PATCH 200 → `calcular` 400) |
-  | `PATCH /items/:id` con `gruposModificadores`: asociar un grupo con `min ≥ 1` a un ítem con líneas abiertas | *"El grupo X requiere elegir entre 1 y 1 unidades"* | ✅ sonda 2026-08-30 (PATCH 200 → `calcular` 400) |
-  | lo mismo, subiendo el `min` o bajando el `max` de un grupo ya asociado | idem | 🔲 misma línea (`totalUnidades.lt(asoc.min)`), **no medido** |
-  | `PATCH /items/:id` con `componentes`: bajar la `cantidad` de un componente por debajo de la `unidad` que la línea eligió | *"Unidad inválida para el componente X"* | 🔲 leído en `resolverPersonalizacionCombo`, **no medido** |
-  | `PATCH /grupos-modificadores/:id`: dejar una opción elegida sin `cantidad` | *"La opción X no tiene cantidad configurada para este item (pendiente)"* | 🔲 leído, **no medido** |
+  | Camino que rompía al re-tasar | Qué pasaba |
+  |---|---|
+  | `PATCH /items/:id` con `componentes`: sacar de un combo un componente que la línea personalizó | *"El componente no pertenece a este combo o no admite grupos"* |
+  | `PATCH /items/:id` con `gruposModificadores`: asociar un grupo con `min ≥ 1` | *"El grupo X requiere elegir entre 1 y 1 unidades"* |
+  | lo mismo, subiendo el `min` o bajando el `max` de un grupo ya asociado | idem |
+  | `PATCH /items/:id` con `componentes`: bajar la `cantidad` de un componente por debajo de la `unidad` elegida | *"Unidad inválida para el componente X"* |
+  | `PATCH /grupos-modificadores/:id`: dejar una opción elegida sin `cantidad` | *"La opción X no tiene cantidad configurada para este item (pendiente)"* |
 
-  📌 **La primera fila se puede tomar hoy sin preguntar nada** (por eso esta entrada
-  también sería de § 3): es del mismo molde (un diff de lo que se saca, ahora sobre
-  `combo_componentes`) y se cierra copiando `cuentasAbiertasConGrupoElegido`. Los otros
-  cuatro no: no hay nada que se saque, hay un requisito que se agrega o se endurece, y la
-  pregunta ya no es "¿alguien pidió esto?" sino "¿lo que alguien pidió sigue cumpliendo la
-  regla nueva?".
+  🔲 **Lo que queda abierto del frente es otra cosa: el DÍA de las promociones.**
+  `fechaLocal` —el día que decide **qué promos se cargan**— sigue saliendo de
+  `cuentas.abierta_el` (`calculo-precios.service.ts`, `instanteDeVigencia`). La **hora** de
+  cada promo ya es por línea, pero si el día no cargó la promo, la hora nunca se mira.
+
+  Escena: la mesa se sienta el **lunes 23:30** y pide cerveza el **martes 00:30**. El 2x1 de
+  los martes no se carga, así que esa cerveza no lo lleva. Al revés también: mesa del martes
+  que pide el miércoles 00:30 se llevaría el 2x1 del martes.
+
+  Es la misma regla del owner —*lo que decide es cuándo se pidió*—, así que no necesita
+  preguntarle nada. Toca `cargarVigentes`: hay que cargar las promos de **todos los días**
+  que toquen las líneas de la cuenta, no de uno.
+
+  ⚠️ **Leído, no medido.** Antes de tocarlo, montar el cruce de medianoche y verificar que
+  falla como dice acá.
+
+  📌 **Ninguna de esas cinco necesitó un guard.** El plan las iba a cerrar de a una, con la
+  misma consulta que las cinco puertas anteriores; lo que las cerró de golpe fue atacar la
+  causa —que re-tasar re-validaba— en vez del síntoma. Vale como criterio para la próxima
+  familia de bugs que se repita con formas distintas.
 
   ✅ **DECIDIDO (owner, 2026-08-30), en dos respuestas que juntas definen el frente:**
 

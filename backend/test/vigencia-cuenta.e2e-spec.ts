@@ -8,20 +8,27 @@ import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 
 /**
- * La vigencia por fecha (Task 3) evalúa las reglas contra un instante — hasta
- * acá, siempre "ahora". Esta tarea hace que, cuando la venta nace de una
- * cuenta de salón, el instante que decide sea el momento en que **se abrió
- * la cuenta**: la mesa que se sienta con una promo vigente y paga después de
- * que venció tiene que llevar el descuento igual.
+ * **El instante que decide la vigencia por fecha es cuándo se PIDIÓ la línea.**
  *
- * El caso real —cuenta abierta DENTRO de la vigencia, cerrada FUERA— no se
- * puede fabricar por API: no hay forma de pedirle a `POST /mesas/:id/cuentas`
- * que abra "hace una semana". Se **controla el reloj por SQL** después de
- * abrir la cuenta de verdad, mismo criterio que
- * `filtros-fecha-zona.e2e-spec.ts` usa para `movimientos_inventario.creado_el`:
- * no es fabricar un estado inalcanzable (una cuenta abierta hace una semana
- * y cerrada hoy ocurre todos los días en un local real), es controlar el
- * instante, que por API no se puede.
+ * Historia, porque este archivo cambió de premisa y el cambio importa: la Task 3
+ * de vigencia (2026-08-23/24) hizo que una venta nacida de una cuenta evaluara
+ * contra **la apertura de la cuenta** en vez de "ahora", para que la mesa que se
+ * sienta con una promo vigente no la perdiera al pagar tarde. El 2026-08-31, al
+ * decidir el owner que *lo pedido se cobra como se pidió*, la línea pasó a
+ * congelar sus descuentos y recargos —con su vigencia ya resuelta— **en el
+ * momento en que se pide**. Los dos criterios se unificaron en el más fino.
+ *
+ * Lo que eso cambia, y está fijado por los dos últimos tests de este archivo:
+ *   - una línea pedida con el descuento vivo lo conserva aunque venza antes de
+ *     cobrar (el caso que la Task 3 vino a resolver: sigue funcionando);
+ *   - una cuenta abierta hace una semana con una línea pedida hoy **ya no**
+ *     lleva la promo de la semana pasada (esto sí cambió).
+ *
+ * El caso real ya **no** necesita controlar el reloj: se arma por API abriendo y
+ * cerrando la ventana del descuento alrededor del pedido. El SQL directo quedó
+ * solo para el caso inverso —cuenta vieja con línea nueva—, que por API no se
+ * puede fabricar porque no hay forma de pedirle a `POST /mesas/:id/cuentas` que
+ * abra hace una semana. Mismo criterio que `filtros-fecha-zona.e2e-spec.ts`.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -75,7 +82,7 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
+describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let ds: DataSource;
@@ -300,7 +307,7 @@ describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
     expect(res.status).toBe(400);
   });
 
-  describe('la cuenta abierta DENTRO de la vigencia y cerrada FUERA lleva el descuento', () => {
+  describe('lo pedido con el descuento vigente lo conserva; lo pedido fuera, no', () => {
     let descuentoId: string;
     let itemId: string;
 
@@ -349,18 +356,36 @@ describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
       expect(Number(linea!.descuentoAplicado)).toBe(0);
     });
 
-    it('con la cuenta backdateada DENTRO de la ventana, lo lleva aunque se cierre hoy', async () => {
+    it('la línea PEDIDA con el descuento vigente lo lleva aunque venza antes de cobrar', async () => {
+      // ⚠️ **Este test cambió de premisa el 2026-08-31, y el cambio es de regla,
+      // no de fixture.** Antes backdateaba `cuentas.abierta_el` y afirmaba que
+      // el instante lo decidía **la apertura de la cuenta**. Desde que la línea
+      // congela sus reglas al pedirse (owner: *lo pedido se cobra como se
+      // pidió*), el instante lo decide **cuándo se pidió la línea**, que es más
+      // fino y es lo que el owner describió con su escena de las cervezas: las
+      // pedidas antes de las 20:00 no llevan el 2x1 y las de 20:15 sí, aunque
+      // sea la misma mesa.
+      //
+      // La consecuencia práctica: una cuenta abierta hace una semana con una
+      // línea pedida hoy ya **no** lleva la promo de la semana pasada. Esa
+      // combinación era la que el test viejo fabricaba por SQL.
+      //
+      // Y el caso real —pedir con la promo viva, cobrar después de que venció—
+      // ahora se arma **sin tocar el reloj**: se pide con la ventana abierta y
+      // se la vence antes de cobrar.
+      const resAbrir = await request(app.getHttpServer())
+        .patch(`/api/descuentos/${descuentoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaInicio: '2026-08-15', fechaFin: '2099-12-31' });
+      expect(resAbrir.status).toBe(200);
+
       const cuenta = await abrirCuentaCon(itemId);
 
-      // Controla el reloj: la cuenta "se abrió" el 17 de agosto —dentro de la
-      // ventana del descuento (15 al 20)—, aunque el cierre de abajo ocurre
-      // en la fecha real de la corrida. Mediodía UTC para no depender de qué
-      // huso horario resuelva `zonaHorariaTenant`: a esa hora, cualquier
-      // offset razonable sigue cayendo en el 17 local.
-      await ds.query(
-        `UPDATE cuentas SET abierta_el = '2026-08-17T12:00:00Z' WHERE cuenta_id = $1`,
-        [cuenta.id],
-      );
+      const resVencer = await request(app.getHttpServer())
+        .patch(`/api/descuentos/${descuentoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaInicio: '2026-08-15', fechaFin: '2026-08-20' });
+      expect(resVencer.status).toBe(200);
 
       const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
 
@@ -371,6 +396,24 @@ describe('Vigencia por fecha — el instante lo decide la cuenta (e2e)', () => {
       const linea = venta.detalles.find((d) => d.itemId === itemId);
       expect(linea).toBeDefined();
       expect(Number(linea!.descuentoAplicado)).toBeCloseTo(2000, 4);
+    });
+
+    it('y una cuenta VIEJA con una línea pedida hoy NO lo lleva', async () => {
+      // El reverso del anterior, y lo que cambió de verdad: acá el reloj sí se
+      // controla, para dejar la cuenta abierta dentro de la ventana con la línea
+      // pedida fuera. Antes esto llevaba descuento (mandaba la apertura); ahora
+      // no (manda el pedido).
+      const cuenta = await abrirCuentaCon(itemId);
+      await ds.query(
+        `UPDATE cuentas SET abierta_el = '2026-08-17T12:00:00Z' WHERE cuenta_id = $1`,
+        [cuenta.id],
+      );
+
+      const venta = await detalleVenta(await cerrarSinCobrar(cuenta.id));
+
+      expect(Number(venta.totalDescuentos)).toBe(0);
+      const linea = venta.detalles.find((d) => d.itemId === itemId);
+      expect(Number(linea!.descuentoAplicado)).toBe(0);
     });
   });
 });

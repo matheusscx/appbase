@@ -3,6 +3,7 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 
 /**
@@ -52,6 +53,18 @@ interface CuentaLineaDetalle {
 interface CuentaDetalle {
   id: string;
   lineas: CuentaLineaDetalle[];
+}
+interface VentaDetalle {
+  totalFinal: string;
+  totalDescuentos: string;
+  detalles: {
+    itemId: string;
+    precioUnitario: string;
+    precioUnitarioOrigen: string;
+    tasaCambio: string;
+    descuentoAplicado: string;
+    personalizacion: unknown;
+  }[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -182,6 +195,100 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     const cuenta = (res.body as CuentaDetalle[]).find((c) => c.id === cuentaId);
     expect(cuenta).toBeDefined();
     return cuenta!;
+  }
+
+  async function crearIngrediente(nombre: string): Promise<string> {
+    return (
+      await post<IdResponse>('/api/items', {
+        nombre: `${nombre} ${Date.now()}`,
+        precioBase: '100',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '100',
+        costo: '100',
+      })
+    ).id;
+  }
+
+  async function crearReceta(
+    nombre: string,
+    ingredienteId: string,
+    gruposModificadores: unknown[] = [],
+  ): Promise<string> {
+    return (
+      await post<IdResponse>('/api/items', {
+        nombre: `${nombre} ${Date.now()}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: ingredienteId,
+            cantidad: '1',
+            unidadCodigoPresentacion: undefined,
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        ...(gruposModificadores.length ? { gruposModificadores } : {}),
+      })
+    ).id;
+  }
+
+  async function crearGrupo(nombre: string, itemId: string): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `${nombre} ${Date.now()}`,
+        opciones: [{ itemId, cantidad: '1', precioExtra: '300' }],
+      });
+    expect(res.status).toBe(201);
+    return (res.body as { grupoModificadorId: string }).grupoModificadorId;
+  }
+
+  /**
+   * La precuenta, por el mismo camino que la pantalla: manda `cuentaId` y las
+   * líneas armadas del catálogo vivo. El servidor tiene que ignorar esas líneas.
+   *
+   * ⚠️ **La personalización va en el body a propósito.** Sin ella `calcular` ni
+   * siquiera intenta resolver el combo, así que devuelve 201 también en el mundo
+   * roto y la aserción no cierra nada: medido, con el arreglo desactivado los
+   * tests que la omitían seguían pasando. La pantalla manda el snapshot
+   * remapeado, y es lo que producía el 400.
+   */
+  async function precuenta(
+    cuentaId: string,
+    lineas: unknown[],
+  ): Promise<{ status: number; totalFinal?: string }> {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cuentaId, lineas });
+    return {
+      status: res.status,
+      totalFinal: (res.body as { totales?: { totalFinal: string } }).totales
+        ?.totalFinal,
+    };
+  }
+
+  /** Cierra sin cobrar (pagos vacíos): alcanza para leer los totales congelados. */
+  async function cerrar(cuentaId: string): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: garzon.id, pin: garzon.pin, pagos: [] });
+    expect(res.status).toBe(201);
+    return (res.body as { ventaId: string }).ventaId;
+  }
+
+  async function venta(ventaId: string): Promise<VentaDetalle> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/ventas/${ventaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return res.body as VentaDetalle;
   }
 
   async function cancelar(cuentaId: string): Promise<void> {
@@ -427,7 +534,140 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await cancelar(cuentaId);
   });
 
-  it('7. subirle el valor al descuento también parte la línea', async () => {
+  it('7. AL COBRAR se usa el precio congelado, no el de la carta de hoy', async () => {
+    // La mitad que hace que todo lo anterior sirva. Hasta el 2026-08-31
+    // `cerrarCuenta` desarmaba la línea y el motor la re-tasaba contra el
+    // catálogo vivo: la mesa pagaba $6.000 por algo que pidió a $5.000.
+    const itemId = await crearProducto('Lomito del cobro', '5000');
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    await repreciar(itemId, '6000');
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    const linea = detalleVenta.detalles.find((d) => d.itemId === itemId);
+    expect(linea?.precioUnitario).toBe('5000.0000');
+  });
+
+  it('8. AL COBRAR el descuento es el congelado: uno nuevo no alcanza a la mesa sentada', async () => {
+    // *"Poner un 20% con la mesa sentada no le llega a esa mesa"* (owner).
+    const itemId = await crearProducto('Ceviche del cobro', '10000');
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    const descuentoId = await crearDescuento('Promo ceviche', '0.20');
+    await asociarDescuento(itemId, descuentoId);
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].descuentoAplicado).toBe('0.0000');
+  });
+
+  it('9. AL COBRAR el descuento que SÍ regía se aplica, aunque después se saque', async () => {
+    // La otra dirección, y el control del anterior: sin él, un guard que
+    // simplemente ignorara los descuentos pasaría el test 8 y estaría mal.
+    const itemId = await crearProducto('Machas del cobro', '10000');
+    const descuentoId = await crearDescuento('Promo machas', '0.20');
+    await asociarDescuento(itemId, descuentoId);
+
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    await desasociarDescuentos(itemId);
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].descuentoAplicado).toBe('2000.0000');
+  });
+
+  it('10. la venta guarda un precio COHERENTE: origen × tasa = lo cobrado', async () => {
+    // `venta_detalles` guarda las tres cosas —precio en la moneda del ítem, tasa
+    // y precio final— y son la trazabilidad de por qué se cobró eso. Congelar
+    // solo el final las deja contradiciéndose: el ítem en USD repreciado daría
+    // un origen de hoy contra un final de ayer. En CLP (tasa 1) no se ve, así
+    // que el caso va en USD a propósito.
+    const itemId = await crearProducto('Malbec del cobro', '10', USD_MONEDA_ID);
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    await repreciar(itemId, '20');
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    const d = detalleVenta.detalles[0];
+    expect(d.precioUnitario).toBe('9500.0000');
+    expect(
+      new Decimal(d.precioUnitarioOrigen).times(d.tasaCambio).toFixed(4),
+    ).toBe(d.precioUnitario);
+  });
+
+  it('11. si cambia la TASA de cambio, la mesa igual paga lo congelado', async () => {
+    // El caso que hace falta el precio congelado y no solo el origen: con la
+    // tasa de hoy, convertir el origen congelado da lo mismo y el congelado
+    // parece redundante. Cambiando la tasa deja de serlo — y sin este test un
+    // mutante que ignore `precioUnitario` sobrevive (medido).
+    const itemId = await crearProducto('Whisky del cobro', '10', USD_MONEDA_ID);
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    const resTasa = await request(app.getHttpServer())
+      .patch(`/api/monedas/${USD_MONEDA_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ valorDelDia: '1900' });
+    expect(resTasa.status).toBe(200);
+
+    try {
+      const d = (await venta(await cerrar(cuentaId))).detalles[0];
+      // 10 USD × 950 (la tasa de cuando pidió), no × 1900.
+      expect(d.precioUnitario).toBe('9500.0000');
+      expect(d.tasaCambio).toBe('950.000000');
+      expect(
+        new Decimal(d.precioUnitarioOrigen).times(d.tasaCambio).toFixed(4),
+      ).toBe(d.precioUnitario);
+    } finally {
+      // La tasa es del tenant y la comparten todas las suites: dejarla movida
+      // rompe cualquier spec que convierta USD después de ésta.
+      const restaurar = await request(app.getHttpServer())
+        .patch(`/api/monedas/${USD_MONEDA_ID}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ valorDelDia: '950' });
+      expect(restaurar.status).toBe(200);
+    }
+  });
+
+  it('12. la PRECUENTA muestra exactamente lo que se va a cobrar', async () => {
+    // El bug que aparece si el cobro se congela y la pantalla no: el garzón ve
+    // un total y la venta guarda otro. Medido antes del arreglo: la precuenta
+    // decía 7.140 y la venta 5.950 para la misma mesa, y el cajero le cobraba
+    // al cliente el de la pantalla.
+    const itemId = await crearProducto('Pastel del cobro', '5000');
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    await repreciar(itemId, '6000');
+
+    // El body que arma la pantalla: las líneas salen del catálogo vivo, así que
+    // mandan el precio nuevo. El servidor tiene que ignorarlas.
+    const resPrecuenta = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cuentaId, lineas: [{ itemId, cantidad: '1' }] });
+    expect(resPrecuenta.status).toBe(201);
+    const precuenta = resPrecuenta.body as {
+      totales: { totalFinal: string };
+      lineas: { precioUnitario: string }[];
+    };
+    expect(precuenta.lineas[0].precioUnitario).toBe('5000.0000');
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('5000.0000');
+    // Y el total de punta a punta, que es lo que el cliente paga.
+    // Comparación numérica y no de string: la previsualización devuelve 6
+    // decimales y la venta persiste 4 — diferencia de formato preexistente, no
+    // de plata.
+    expect(
+      new Decimal(detalleVenta.totalFinal).eq(precuenta.totales.totalFinal),
+    ).toBe(true);
+  });
+
+  it('13. subirle el valor al descuento también parte la línea', async () => {
     // El tercer escenario del plan, y el que prueba que se congela el VALOR y no
     // el id: la regla es la misma —mismo id, mismo nombre, sigue asociada— y lo
     // único que cambió es cuánto descuenta.
@@ -453,7 +693,175 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await cancelar(cuentaId);
   });
 
-  it('8. fusionar dos cuentas no mezcla precios congelados distintos', async () => {
+  it('14. la mesa se cobra aunque le agreguen un grupo OBLIGATORIO al plato', async () => {
+    // El agujero medido el 2026-08-30: `PATCH /items/:id` asociando un grupo con
+    // `min: 1` devuelve 200, y a partir de ahí toda línea abierta de ese plato
+    // deja de poder tasarse ("El grupo X requiere elegir entre 1 y 1 unidades").
+    // La mesa quedaba incobrable y nadie se enteraba hasta el cobro.
+    const ingredienteId = await crearIngrediente('Pan incobrable');
+    const recetaId = await crearReceta('Hamburguesa incobrable', ingredienteId);
+
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, recetaId);
+
+    const opcionId = await crearProducto('Punto de cocción', '0');
+    const grupoId = await crearGrupo('Punto incobrable', opcionId);
+    const resPatch = await request(app.getHttpServer())
+      .patch(`/api/items/${recetaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        gruposModificadores: [{ grupoModificadorId: grupoId, min: 1, max: 1 }],
+      });
+    expect(resPatch.status).toBe(200);
+
+    // Y la PANTALLA también: si la precuenta se rompiera, el garzón no podría ni
+    // abrir el cobro —`abrirCobro()` gatea en el cálculo— y la mesa seguiría
+    // trabada aunque el cierre funcione por API.
+    //
+    // ⚠️ En ESTE caso la precuenta nunca estuvo rota: sin extras ni grupos
+    // elegidos, `puedeCostar` saltea el resolver y no llega a validar el grupo
+    // obligatorio, así que devolvía 201 igual. Es un control de que no se rompa,
+    // no el candado del arreglo — ése es el test 15, cuyo combo sí re-resolvía.
+    expect(
+      (
+        await precuenta(cuentaId, [
+          {
+            itemId: recetaId,
+            cantidad: '1',
+            personalizacion: { omitidos: [], extras: [] },
+          },
+        ])
+      ).status,
+    ).toBe(201);
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('4000.0000');
+  });
+
+  it('15. y aunque le saquen al combo el componente que la línea personalizó', async () => {
+    // El otro agujero medido: `PATCH /items/:id` con `componentes` sacando el
+    // componente que la línea eligió → "El componente no pertenece a este combo
+    // o no admite grupos" al re-tasar.
+    const ingredienteId = await crearIngrediente('Pan combo incobrable');
+    const opcionId = await crearProducto('Salsa combo', '0');
+    const grupoId = await crearGrupo('Salsa combo grupo', opcionId);
+    const recetaId = await crearReceta(
+      'Hamburguesa combo incobrable',
+      ingredienteId,
+      [{ grupoModificadorId: grupoId, min: 1, max: 1 }],
+    );
+    const bebidaId = await crearProducto('Bebida combo', '1000');
+    const comboId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Combo incobrable ${Date.now()}`,
+        precioBase: '6000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: recetaId, cantidad: '1', bloqueante: true },
+          { componenteItemId: bebidaId, cantidad: '1', bloqueante: true },
+        ],
+      })
+    ).id;
+
+    const cuentaId = await abrirCuenta();
+    await post(`/api/cuentas/${cuentaId}/lineas`, {
+      itemId: comboId,
+      cantidad: '1',
+      personalizacion: {
+        componentes: [
+          {
+            componenteItemId: recetaId,
+            unidad: 1,
+            grupos: [
+              { grupoId, opciones: [{ itemId: opcionId, unidades: 1 }] },
+            ],
+          },
+        ],
+      },
+    });
+
+    const resPatch = await request(app.getHttpServer())
+      .patch(`/api/items/${comboId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        componentes: [
+          { componenteItemId: bebidaId, cantidad: '1', bloqueante: true },
+        ],
+      });
+    expect(resPatch.status).toBe(200);
+
+    expect(
+      // El body que arma la pantalla de verdad: el snapshot remapeado. Es lo
+      // que producía el 400 antes del arreglo.
+      (
+        await precuenta(cuentaId, [
+          {
+            itemId: comboId,
+            cantidad: '1',
+            personalizacion: {
+              omitidos: [],
+              extras: [],
+              componentes: [
+                {
+                  componenteItemId: recetaId,
+                  unidad: 1,
+                  grupos: [
+                    { grupoId, opciones: [{ itemId: opcionId, unidades: 1 }] },
+                  ],
+                },
+              ],
+            },
+          },
+        ])
+      ).status,
+    ).toBe(201);
+
+    // Se cobra —antes era un 400 para la cuenta entera— y con el precio que se
+    // congeló: 6.000 del combo + 300 de la salsa que el cliente eligió. La
+    // opción sigue cobrándose aunque su componente ya no esté en el combo, que
+    // es exactamente lo que "lo pedido se cobra como se pidió" quiere decir.
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('6300.0000');
+    // Y el snapshot llegó ENTERO, medido por su efecto: la salsa que el cliente
+    // eligió se descontó del stock. Si la personalización se hubiera vuelto a
+    // resolver, ese componente ya no está en el combo y la opción no se
+    // consumiría — sin esta aserción, el test pasaba solo por el precio
+    // congelado y un mutante que re-resolviera sobrevivía (medido).
+    const resSalsa = await request(app.getHttpServer())
+      .get(`/api/items/${opcionId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resSalsa.status).toBe(200);
+    expect((resSalsa.body as { stock: string }).stock).toBe('99.0000');
+  });
+
+  it('16. una línea BORRADA de la cuenta no se previsualiza ni se cobra', async () => {
+    // El candado del `eliminado_el IS NULL` de la consulta que arma la precuenta
+    // desde la cuenta. Sin ese filtro vuelve exactamente la divergencia que este
+    // frente mató: medido con el filtro sacado, la precuenta daba 3.570 y la
+    // venta 1.190. El código lo tiene; esto impide que alguien lo saque.
+    const itemId = await crearProducto('Sopaipilla borrada', '1000');
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId, '2');
+
+    const { lineas } = await detalle(cuentaId);
+    const resQuitar = await request(app.getHttpServer())
+      .delete(`/api/cuentas/${cuentaId}/lineas/${lineas[0].id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resQuitar.status).toBe(200);
+
+    const otroId = await crearProducto('Sopaipilla viva', '1000');
+    await agregarLinea(cuentaId, otroId);
+
+    const pre = await precuenta(cuentaId, [{ itemId: otroId, cantidad: '1' }]);
+    expect(pre.status).toBe(201);
+
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles).toHaveLength(1);
+    expect(new Decimal(detalleVenta.totalFinal).eq(pre.totalFinal!)).toBe(true);
+  });
+
+  it('17. fusionar dos cuentas no mezcla precios congelados distintos', async () => {
     // La otra puerta del mismo merge, y la más fácil de olvidar: `agregarLinea`
     // compara el precio, pero `fusionarCuentas` tenía su propia clave
     // (`itemId|hash`) y sin el precio colapsaba las dos líneas sobre la de
@@ -485,7 +893,7 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await cancelar(fusionada.id);
   });
 
-  it('9. fusionar tampoco mezcla reglas congeladas distintas', async () => {
+  it('18. fusionar tampoco mezcla reglas congeladas distintas', async () => {
     // El tercer término, por la puerta de la fusión. Los dos criterios de merge
     // tienen que moverse juntos: cuando el precio entró, esta puerta quedó
     // afuera y hubo que volver.
@@ -514,7 +922,7 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await cancelar(fusionada.id);
   });
 
-  it('10. fusionar SÍ junta las líneas que comparten precio congelado', async () => {
+  it('19. fusionar SÍ junta las líneas que comparten precio congelado', async () => {
     // El control del anterior: sin él, meter el precio en la clave de fusión
     // partiría toda línea repetida y la fusión dejaría de fusionar.
     const itemId = await crearProducto('Ron congelado', '2500');

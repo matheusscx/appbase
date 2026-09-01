@@ -118,6 +118,28 @@ export class CuentaLinea {
   precioUnitario: string;
 
   /**
+   * El mismo precio, **en la moneda del ítem** y sin convertir, más la tasa con
+   * la que se convirtió. Son los dos que `venta_detalles` persiste al lado del
+   * final (`precio_unitario_origen`, `tasa_cambio`) para poder explicar por qué
+   * se cobró eso.
+   *
+   * ⚠️ **Van congelados o el registro de la venta se contradice.** Medido el
+   * 2026-08-31: con solo el final congelado, un ítem en USD repreciado de 10 a
+   * 20 se cobraba 9.500 —correcto— y la venta declaraba "20 USD a tasa 950", que
+   * son 19.000. La trazabilidad decía una cosa y el cobro otra.
+   */
+  @Column({
+    name: 'precio_unitario_origen',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+  })
+  precioUnitarioOrigen: string;
+
+  @Column({ name: 'tasa_cambio', type: 'numeric', precision: 18, scale: 6 })
+  tasaCambio: string;
+
+  /**
    * **Los descuentos y recargos de catálogo que regían sobre el ítem cuando se
    * pidió esta línea**, resueltos (con su valor, sus tramos y su vigencia ya
    * decidida). Decisión del owner (2026-08-30): poner un 20% con la mesa
@@ -127,8 +149,8 @@ export class CuentaLinea {
    * pasar el cambio de un 20% a un 30%: la regla seguiría siendo la misma y el
    * valor no. Los produce `CalculoPreciosService.congelarReglasDeItem`.
    *
-   * ⚠️ Igual que `precioUnitario`, **todavía no manda al cobrar**: `cerrarCuenta`
-   * sigue re-tasando contra el catálogo vivo. Hoy lo único que cambian es si dos
+   * Igual que `precioUnitario`, **son lo que se cobra**: el motor las usa tal
+   * cual y no mira las asociaciones vivas del ítem. Deciden además si dos
    * pedidos son una línea o dos.
    *
    * ⚠️ **Impuestos no están acá.** Son fiscales y se siguen leyendo vivos al

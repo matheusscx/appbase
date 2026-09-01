@@ -1958,36 +1958,28 @@ describe('SalonesService', () => {
           lock: { mode: 'pessimistic_write' },
         }),
       );
-      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
-        manager,
-        TENANT,
-        USUARIO,
-        expect.objectContaining({
-          canal: 'fisico',
-          lineas: [
-            {
-              itemId: ITEM,
-              cantidad: '2',
-              personalizacion: {
-                omitidos: [ING],
-                extras: [],
-                comentario: 'sin cebolla',
-              },
-            },
-          ],
-          propinaCierreMesa: expect.objectContaining({
-            montoPagado: '0',
-            montoSugerido: '0',
-            porcentajeSugerido: '0.10',
-            garzonId: GARZON_RESPONSABLE,
-            sesionGarzonId: SESION_RESPONSABLE,
-            turnoId: TURNO,
-            tipoGarzon: TipoGarzon.GARZON,
-            estrategia: 'no_vuelto',
-          }),
-        }),
-        CUENTA,
-      );
+      // Desde el 2026-08-31 la personalización **no viaja en el DTO**: el body
+      // solo lleva ítem y cantidad, y la foto de la línea —snapshot, precio
+      // congelado, tasa y reglas— va por el sexto parámetro, que es interno.
+      // Reconstruirla en el DTO era lo que dejaba que el motor la re-resolviera
+      // contra el catálogo de hoy.
+      const [, , , dtoEnviado, cuentaEnviada, congeladas] = ventas
+        .crearEnTransaccion.mock.calls[0] as [
+        unknown,
+        unknown,
+        unknown,
+        { canal: string; lineas: Record<string, unknown>[] },
+        string,
+        { personalizacion: unknown }[],
+      ];
+      expect(dtoEnviado.canal).toBe('fisico');
+      expect(dtoEnviado.lineas).toEqual([{ itemId: ITEM, cantidad: '2' }]);
+      expect(cuentaEnviada).toBe(CUENTA);
+      expect(congeladas[0].personalizacion).toEqual({
+        omitidos: [ING],
+        extras: [],
+        comentario: 'sin cebolla',
+      });
       expect(sesiones.buscarSesionAbierta).toHaveBeenCalledWith(
         TENANT,
         GARZON_RESPONSABLE,
@@ -2032,28 +2024,20 @@ describe('SalonesService', () => {
         pagos: [{ metodoPagoId: 'mp-1', monto: '1500' }],
       });
 
-      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
-        manager,
-        TENANT,
-        USUARIO,
-        expect.objectContaining({
-          lineas: [
-            expect.objectContaining({
-              itemId: COMBO,
-              cantidad: '1',
-              personalizacion: expect.objectContaining({
-                grupos: [
-                  {
-                    grupoId: GRUPO,
-                    opciones: [{ itemId: OPCION_ITEM, unidades: 1 }],
-                  },
-                ],
-              }),
-            }),
-          ],
-        }),
-        CUENTA,
-      );
+      // El snapshot del combo viaja VERBATIM por el canal interno: no se
+      // desarma ni se vuelve a resolver.
+      const congeladasCombo = ventas.crearEnTransaccion.mock.calls[0][5] as {
+        personalizacion: { grupos: unknown[] };
+      }[];
+      // `toMatchObject` y no `toEqual`: el snapshot viaja ENTERO —con el nombre
+      // del grupo, la cantidad de la opción, su precio—, que es justamente lo
+      // que se perdía al reconstruirlo campo por campo.
+      expect(congeladasCombo[0].personalizacion.grupos).toMatchObject([
+        {
+          grupoId: GRUPO,
+          opciones: [{ itemId: OPCION_ITEM, unidades: '1' }],
+        },
+      ]);
     });
 
     it('preserva las unidades de un extra al reconstruir la venta al cerrar', async () => {
@@ -2080,21 +2064,16 @@ describe('SalonesService', () => {
         pagos: [{ metodoPagoId: 'mp-1', monto: '500' }],
       });
 
-      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
-        manager,
-        TENANT,
-        USUARIO,
-        expect.objectContaining({
-          lineas: [
-            expect.objectContaining({
-              personalizacion: expect.objectContaining({
-                extras: [{ ingredienteItemId: ING, unidades: 3 }],
-              }),
-            }),
-          ],
-        }),
-        CUENTA,
-      );
+      // Las unidades del extra sobreviven porque el snapshot viaja entero, no
+      // reconstruido: antes se re-armaba campo por campo y perderlas era un
+      // olvido de una línea.
+      const congeladasExtra = ventas.crearEnTransaccion.mock.calls[0][5] as {
+        personalizacion: { extras: { unidades: string }[] };
+      }[];
+      expect(congeladasExtra[0].personalizacion.extras[0]).toMatchObject({
+        ingredienteItemId: ING,
+        unidades: '3',
+      });
     });
 
     it('pasa propinaCierreMesa con el monto y el garzón responsable', async () => {
@@ -2139,6 +2118,8 @@ describe('SalonesService', () => {
           }),
         }),
         CUENTA,
+        // El sexto: la foto de cada línea (canal interno, 2026-08-31).
+        expect.any(Array),
       );
     });
 
@@ -2183,6 +2164,8 @@ describe('SalonesService', () => {
           }),
         }),
         CUENTA,
+        // El sexto: la foto de cada línea (canal interno, 2026-08-31).
+        expect.any(Array),
       );
     });
 

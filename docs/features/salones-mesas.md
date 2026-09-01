@@ -333,10 +333,35 @@ al agregar la línea, `precioBase + Σ precioExtra` **ya convertido a la moneda 
 tenant con su `modo_redondeo`. Repreciar el ítem con la mesa sentada ya no le mueve el
 número a esa línea, y el detalle de la cuenta lo expone como `precioUnitario`.
 
-⚠️ **Esta es la primera mitad del frente.** El congelado existe pero **todavía no manda al
-cobrar**: `cerrarCuenta` sigue desarmando la línea y `ventas.service` la re-tasa contra el
-catálogo vivo. Hasta que eso cambie, la pantalla muestra el precio congelado y el cobro usa
-el de hoy. Plan completo:
+**Y es lo que se cobra**: desde el 2026-08-31 `cerrarCuenta` ya no desarma la línea para que
+el motor la re-resuelva — le pasa la foto entera (personalización, precio, tasa y reglas) por
+un canal interno, y la venta se arma con eso: no se re-resuelve la personalización, no se
+re-precia y no se re-leen los descuentos.
+
+⚠️ **Lo que sí sigue saliendo del catálogo vivo** son los impuestos —fiscales, ADR-010— y
+`precio_incluye_impuesto` del ítem, que decide cómo se interpreta el precio frente al
+impuesto. Togglear ese flag con la mesa sentada mueve lo que paga aunque el precio congelado
+no se mueva (medido).
+
+Dos consecuencias que se ven en el local:
+
+- **La mesa ya no puede quedar incobrable por un cambio de carta.** Los dos casos medidos
+  —agregarle un grupo obligatorio al plato, sacarle a un combo el componente que la línea
+  personalizó— antes devolvían `400` para la cuenta entera; ahora se cobran **y la precuenta
+  también funciona**, que es lo que el garzón necesita: el cobro se abre desde la pantalla y
+  la pantalla gatea en el cálculo. Cerrar solo el cierre habría dejado la mesa igual de
+  trabada en el local.
+- **La trazabilidad de la venta es coherente**: `venta_detalles` guarda el precio en la
+  moneda del ítem, la tasa y el final, y los tres son los de cuando se pidió. Congelar solo
+  el final los dejaba contradiciéndose (medido: se cobraba 9.500 y la venta declaraba
+  "20 USD a tasa 950").
+
+- **La precuenta se arma del lado del servidor.** `POST /calculo-precios/calcular` con
+  `cuentaId` **ignora las líneas del body** y las relee de `cuenta_lineas`. Sin eso la
+  pantalla previsualiza contra el catálogo vivo y el cierre cobra lo congelado: medido, 7.140
+  contra 5.950 para la misma mesa, y el cajero cobrando el de la pantalla.
+
+Plan completo:
 [`../superpowers/plans/2026-08-30-lo-pedido-se-cobra-como-se-pidio.md`](../superpowers/plans/2026-08-30-lo-pedido-se-cobra-como-se-pidio.md).
 
 **Los descuentos y recargos de catálogo también se congelan** (`reglas_congeladas`, jsonb):
@@ -345,9 +370,12 @@ congelar el id dejaría pasar el cambio de un 20% a un 30%, que es justo lo que 
 evita—. **Los impuestos no**: son fiscales, se leen vivos al cobrar (ADR-010) y congelarlos
 es otro frente.
 
-⚠️ **Congelar todavía no es cobrar, tampoco acá.** Hasta que el cierre lea lo congelado, un
-descuento que se pone o se saca con la mesa sentada **sí le llega**, igual que el precio. Lo
-único que las reglas congeladas deciden hoy es si dos pedidos son una línea o dos.
+📌 **Y esto cambió cuál es el instante que decide la vigencia por fecha.** Hasta el
+2026-08-30 la de descuentos y recargos se resolvía contra `cuentas.abierta_el` —cuándo se
+sentó la mesa— mientras la de las promos ya era por línea. Ahora las dos son lo mismo:
+**cuándo se pidió**. Una cuenta abierta la semana pasada con una línea pedida hoy ya no
+lleva la promo de la semana pasada. Detalle en
+[`motor-promociones.md`](./motor-promociones.md).
 
 **Dos líneas se juntan solo si comparten ítem, personalización, precio congelado Y reglas
 congeladas.** Los tres últimos cubren tres formas distintas de que dos pedidos del mismo

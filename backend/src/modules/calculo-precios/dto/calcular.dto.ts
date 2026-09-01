@@ -1,4 +1,5 @@
 import { Type } from 'class-transformer';
+import type { ReglasCongeladas } from '../../../common/dto/reglas-congeladas.dto';
 import {
   ArrayMinSize,
   IsArray,
@@ -139,7 +140,22 @@ export class CalcularVentaDto {
  * El otro canal que existía —`LineaVentaDto.precioUnitario`, en `POST /ventas`—
  * salió en este mismo commit: ningún endpoint acepta ya un precio de línea.
  */
-export type LineaCalculo = LineaDto & { precioUnitarioResuelto?: string };
+export type LineaCalculo = LineaDto & {
+  precioUnitarioResuelto?: string;
+  /**
+   * Los descuentos y recargos **congelados en la línea de cuenta cuando se
+   * pidió** (owner, 2026-08-30: *lo pedido se cobra como se pidió*). Cuando
+   * vienen, el motor los usa tal cual y **no** mira las asociaciones vivas del
+   * ítem: poner o sacar un descuento con la mesa sentada no le llega a lo que
+   * ya se pidió.
+   *
+   * ⚠️ Igual que `precioUnitarioResuelto`, **no es parte de este DTO HTTP** y no
+   * puede serlo: lleva los valores de las reglas, o sea plata, y un cliente que
+   * pudiera mandarlas se auto-descontaría lo que quisiera. Solo lo pone
+   * `cerrarCuenta`, leyendo lo que el servidor congeló.
+   */
+  reglasCongeladas?: ReglasCongeladas;
+};
 
 export type CalcularVentaInput = Omit<CalcularVentaDto, 'lineas'> & {
   lineas: LineaCalculo[];

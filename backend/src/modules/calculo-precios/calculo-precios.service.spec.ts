@@ -1244,11 +1244,23 @@ describe('CalculoPreciosService', () => {
             // pedida a las 19:00 → DENTRO de la franja
             {
               item_id: 'item-1',
+              // La consulta que arma las líneas de la precuenta desde la cuenta
+              // (2026-08-31) lee de la misma tabla: sin estos tres campos las
+              // líneas salen sin cantidad ni precio congelado.
+              cantidad: '1',
+              precio_unitario: '100.0000',
+              reglas_congeladas: { descuentos: [], recargos: [] },
               creado_el: new Date('2026-06-15T19:00:00Z'),
             },
             // pedida a las 21:00 → FUERA
             {
               item_id: 'item-2',
+              // La consulta que arma las líneas de la precuenta desde la cuenta
+              // (2026-08-31) lee de la misma tabla: sin estos tres campos las
+              // líneas salen sin cantidad ni precio congelado.
+              cantidad: '1',
+              precio_unitario: '100.0000',
+              reglas_congeladas: { descuentos: [], recargos: [] },
               creado_el: new Date('2026-06-15T21:00:00Z'),
             },
           ]);
@@ -1270,7 +1282,13 @@ describe('CalculoPreciosService', () => {
       // Una línea agregada en el cobro (no está en la cuenta) usa "ahora": el
       // fallback no puede ser "sin instante", porque entonces la promo no
       // aplicaría a algo que el cliente sí acaba de pedir.
-      it('una línea del DTO sin fila de cuenta usa "ahora"', async () => {
+      // ⚠️ **Este caso solo existe por el camino de `ventas.service`.** Desde el
+      // 2026-08-31, una precuenta con `cuentaId` que llega por HTTP **ignora las
+      // líneas del body** y las relee de `cuenta_lineas`, así que ahí no puede
+      // haber una línea sin fila. `ventas.service` sí manda las suyas —ya
+      // congeladas, con `precioUnitarioResuelto`— y ese es el caso que se
+      // simula acá: una línea agregada en el cobro, sin fila en la cuenta.
+      it('una línea sin fila de cuenta usa "ahora" (camino de la venta)', async () => {
         promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);
         db.query.mockImplementation((sql: string) =>
           Promise.resolve(
@@ -1279,6 +1297,12 @@ describe('CalculoPreciosService', () => {
               : [
                   {
                     item_id: 'item-1',
+                    // La consulta que arma las líneas de la precuenta desde la cuenta
+                    // (2026-08-31) lee de la misma tabla: sin estos tres campos las
+                    // líneas salen sin cantidad ni precio congelado.
+                    cantidad: '1',
+                    precio_unitario: '100.0000',
+                    reglas_congeladas: { descuentos: [], recargos: [] },
                     creado_el: new Date('2026-06-15T21:00:00Z'), // FUERA
                   },
                 ],
@@ -1288,8 +1312,16 @@ describe('CalculoPreciosService', () => {
         await service.calcular(TENANT, {
           cuentaId: CUENTA_ID,
           lineas: [
-            { itemId: 'item-1', cantidad: '1' },
-            { itemId: 'item-2', cantidad: '1' }, // sin fila: "ahora" = 19:00
+            {
+              itemId: 'item-1',
+              cantidad: '1',
+              precioUnitarioResuelto: '100.0000',
+            },
+            {
+              itemId: 'item-2',
+              cantidad: '1',
+              precioUnitarioResuelto: '100.0000',
+            }, // sin fila: "ahora" = 19:00
           ],
         });
 
@@ -1310,10 +1342,22 @@ describe('CalculoPreciosService', () => {
               : [
                   {
                     item_id: 'item-1',
+                    // La consulta que arma las líneas de la precuenta desde la cuenta
+                    // (2026-08-31) lee de la misma tabla: sin estos tres campos las
+                    // líneas salen sin cantidad ni precio congelado.
+                    cantidad: '1',
+                    precio_unitario: '100.0000',
+                    reglas_congeladas: { descuentos: [], recargos: [] },
                     creado_el: new Date('2026-06-15T19:00:00Z'), // DENTRO
                   },
                   {
                     item_id: 'item-1',
+                    // La consulta que arma las líneas de la precuenta desde la cuenta
+                    // (2026-08-31) lee de la misma tabla: sin estos tres campos las
+                    // líneas salen sin cantidad ni precio congelado.
+                    cantidad: '1',
+                    precio_unitario: '100.0000',
+                    reglas_congeladas: { descuentos: [], recargos: [] },
                     creado_el: new Date('2026-06-15T21:00:00Z'), // FUERA
                   },
                 ],
@@ -1342,9 +1386,27 @@ describe('CalculoPreciosService', () => {
             sql.includes('FROM cuentas')
               ? [{ abierta_el: new Date('2026-06-15T19:00:00Z') }]
               : [
-                  { item_id: 'item-1', creado_el: new Date() },
-                  { item_id: 'item-2', creado_el: new Date() },
-                  { item_id: 'item-3', creado_el: new Date() },
+                  {
+                    item_id: 'item-1',
+                    cantidad: '1',
+                    precio_unitario: '100.0000',
+                    reglas_congeladas: { descuentos: [], recargos: [] },
+                    creado_el: new Date(),
+                  },
+                  {
+                    item_id: 'item-2',
+                    cantidad: '1',
+                    precio_unitario: '100.0000',
+                    reglas_congeladas: { descuentos: [], recargos: [] },
+                    creado_el: new Date(),
+                  },
+                  {
+                    item_id: 'item-3',
+                    cantidad: '1',
+                    precio_unitario: '100.0000',
+                    reglas_congeladas: { descuentos: [], recargos: [] },
+                    creado_el: new Date(),
+                  },
                 ],
           ),
         );
