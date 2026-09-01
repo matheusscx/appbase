@@ -20,6 +20,7 @@ import {
   zonaHorariaTenant,
 } from '../../common/utils/rango-fecha.util';
 import { NivelRegla } from '../../common/enums/reglas.enums';
+import type { ReglasCongeladas } from '../../common/dto/reglas-congeladas.dto';
 import {
   CalcularVentaDto,
   CalcularVentaInput,
@@ -693,6 +694,70 @@ export class CalculoPreciosService {
         },
       ]),
     );
+  }
+
+  /**
+   * Las reglas de catálogo que rigen sobre un ítem **en este instante**, ya
+   * resueltas y listas para congelarse en una línea de cuenta.
+   *
+   * Usa el mismo `indexarReglas` que `calcular()` —mismos tramos, mismo
+   * `activo`, misma forma— pero **el instante NO es el mismo**, y la diferencia
+   * es intencional: acá se congela contra **ahora**, que es cuando se pidió la
+   * línea, y `calcular()` evalúa la vigencia contra `cuentas.abierta_el`, que es
+   * cuando se sentó la mesa. Con una cuenta que cruza la medianoche los dos
+   * difieren, y el que tiene razón es éste: la regla del owner es *lo que regía
+   * cuando se pidió*. Que `calcular()` mire la apertura es la grieta que este
+   * mismo frente cierra en su tarea de promociones — hasta entonces, los dos
+   * números conviven y este docblock es el aviso.
+   *
+   * ⚠️ **Cuesta hasta diez consultas, no cuatro** (medido con `log_statement=all`
+   * sobre un `POST /cuentas/:id/lineas`): la zona horaria (1), y si el ítem tiene
+   * alguna regla asociada, los catálogos completos de descuentos y recargos
+   * (4 + 4, cada uno con sus tramos, métodos de pago y tipos). Por eso las
+   * asociaciones se leen **primero**: un ítem sin descuentos ni recargos —el caso
+   * común de una carta— sale con **una sola** consulta y no paga los catálogos.
+   * Ninguna crece con las líneas de la cuenta; crecen con el tamaño del catálogo
+   * del tenant. Un loader por ids lo dejaría en costo fijo y es la mejora
+   * evidente si algún día molesta.
+   *
+   * **Impuestos quedan afuera a propósito** (ADR-010): son fiscales y se leen
+   * vivos al cobrar.
+   */
+  async congelarReglasDeItem(
+    tenantId: string,
+    itemId: string,
+  ): Promise<ReglasCongeladas> {
+    const reglasPorItem = await this.itemsService.cargarReglasPorIds(tenantId, [
+      itemId,
+    ]);
+    const delItem = reglasPorItem.get(itemId);
+    const sinReglas =
+      !delItem?.descuentosIds.length && !delItem?.recargosIds.length;
+    if (sinReglas) return { descuentos: [], recargos: [] };
+
+    // Secuencial, no `Promise.all`: en el camino de la venta esto corre dentro
+    // de `db.transaccion` y las tres resuelven contra el mismo `pg.Client` del
+    // contexto ALS. Mismo motivo que documentan los loaders de `calcular()`.
+    const fechaLocal = await fechaLocalTenant(this.db, tenantId, new Date());
+    const descuentos = await this.descuentosService.findAll(tenantId);
+    const recargos = await this.recargosService.findAll(tenantId);
+    const descuentoMap = this.indexarReglas(descuentos, fechaLocal);
+    const recargoMap = this.indexarReglas(recargos, fechaLocal);
+    // Un id asociado que ya no está en el catálogo se ignora en vez de tirar, y
+    // eso **cambia** lo que pasa hoy: con la regla borrada, `calcular()` corta
+    // con 400 (`requerir`) y la venta no se puede emitir, mientras que agregar la
+    // línea sigue funcionando. Congelar sin ella es lo que la decisión del owner
+    // pide —la mesa se cobra con lo que regía— y de paso saca ese 400 del camino
+    // cuando el cobro pase a leer lo congelado. Negarse acá dejaría al garzón sin
+    // poder tomar el pedido por una edición de catálogo.
+    const resolver = (
+      ids: string[] | undefined,
+      mapa: Map<string, ReglaResueltaConNivel>,
+    ) => (ids ?? []).flatMap((id) => (mapa.has(id) ? [mapa.get(id)!] : []));
+    return {
+      descuentos: resolver(delItem?.descuentosIds, descuentoMap),
+      recargos: resolver(delItem?.recargosIds, recargoMap),
+    };
   }
 
   private resolverLinea(

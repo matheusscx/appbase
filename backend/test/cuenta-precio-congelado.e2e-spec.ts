@@ -29,6 +29,8 @@ const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+// Tipo sembrado (`seedTiposRegla`): un descuento `directo` solo exige su valor.
+const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 
 interface TokenResponse {
   access_token: string;
@@ -106,6 +108,40 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
         costo: '1',
       })
     ).id;
+  }
+
+  async function crearDescuento(
+    nombre: string,
+    valorPorcentaje: string,
+  ): Promise<string> {
+    return (
+      await post<IdResponse>('/api/descuentos', {
+        nombre: `${nombre} ${Date.now()}`,
+        tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+        modo: 'porcentaje',
+        valorPorcentaje,
+        nivel: 'linea',
+      })
+    ).id;
+  }
+
+  async function asociarDescuento(
+    itemId: string,
+    descuentoId: string,
+  ): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ descuentosIds: [descuentoId] });
+    expect(res.status).toBe(200);
+  }
+
+  async function desasociarDescuentos(itemId: string): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ descuentosIds: [] });
+    expect(res.status).toBe(200);
   }
 
   async function repreciar(itemId: string, precioBase: string): Promise<void> {
@@ -340,7 +376,84 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await cancelar(cuentaId);
   });
 
-  it('5. fusionar dos cuentas no mezcla precios congelados distintos', async () => {
+  it('5. la escena del owner: sale un descuento con la mesa sentada y el próximo pedido es OTRA línea', async () => {
+    // *"Me siento y pido una hamburguesa a $5.000. Sale un descuento para la
+    // misma hamburguesa. Si me pido otra, esa sí sale con el descuento."*
+    // (owner, 2026-08-30). El precio de lista NO se mueve, así que el primer
+    // término del criterio —el precio congelado— no ve nada: lo que distingue
+    // las dos líneas son las reglas congeladas.
+    const itemId = await crearProducto('Hamburguesa del owner', '5000');
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    const descuentoId = await crearDescuento('Promo hamburguesa', '0.20');
+    await asociarDescuento(itemId, descuentoId);
+
+    await agregarLinea(cuentaId, itemId);
+
+    const { lineas } = await detalle(cuentaId);
+    expect(lineas).toHaveLength(2);
+    // Las dos al mismo precio de lista: lo que las separa es el descuento.
+    for (const l of lineas) {
+      expect(l.precioUnitario).toBe('5000.0000');
+      expect(l.cantidad).toBe('1.0000');
+    }
+
+    await cancelar(cuentaId);
+  });
+
+  it('6. sacar el descuento también parte la línea, y volver a ponerlo la reúne', async () => {
+    // Las dos direcciones del mismo término, y el control de que la huella no
+    // es "cambió algo" sino "cambió a QUÉ": con el descuento puesto de nuevo, el
+    // tercer pedido vuelve a fusionarse con el segundo.
+    const itemId = await crearProducto('Papas del owner', '2000');
+    const descuentoId = await crearDescuento('Promo papas', '0.10');
+    await asociarDescuento(itemId, descuentoId);
+
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    await desasociarDescuentos(itemId);
+    await agregarLinea(cuentaId, itemId);
+
+    await asociarDescuento(itemId, descuentoId);
+    await agregarLinea(cuentaId, itemId);
+
+    const { lineas } = await detalle(cuentaId);
+    // Con descuento: la 1ª y la 3ª, fusionadas. Sin descuento: la 2ª, sola.
+    expect(lineas).toHaveLength(2);
+    expect(lineas.map((l) => l.cantidad).sort()).toEqual(['1.0000', '2.0000']);
+
+    await cancelar(cuentaId);
+  });
+
+  it('7. subirle el valor al descuento también parte la línea', async () => {
+    // El tercer escenario del plan, y el que prueba que se congela el VALOR y no
+    // el id: la regla es la misma —mismo id, mismo nombre, sigue asociada— y lo
+    // único que cambió es cuánto descuenta.
+    const itemId = await crearProducto('Completo del owner', '3500');
+    const descuentoId = await crearDescuento('Promo completo', '0.20');
+    await asociarDescuento(itemId, descuentoId);
+
+    const cuentaId = await abrirCuenta();
+    await agregarLinea(cuentaId, itemId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${descuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ valorPorcentaje: '0.30' });
+    expect(res.status).toBe(200);
+
+    await agregarLinea(cuentaId, itemId);
+
+    const { lineas } = await detalle(cuentaId);
+    expect(lineas).toHaveLength(2);
+    for (const l of lineas) expect(l.cantidad).toBe('1.0000');
+
+    await cancelar(cuentaId);
+  });
+
+  it('8. fusionar dos cuentas no mezcla precios congelados distintos', async () => {
     // La otra puerta del mismo merge, y la más fácil de olvidar: `agregarLinea`
     // compara el precio, pero `fusionarCuentas` tenía su propia clave
     // (`itemId|hash`) y sin el precio colapsaba las dos líneas sobre la de
@@ -372,7 +485,36 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await cancelar(fusionada.id);
   });
 
-  it('6. fusionar SÍ junta las líneas que comparten precio congelado', async () => {
+  it('9. fusionar tampoco mezcla reglas congeladas distintas', async () => {
+    // El tercer término, por la puerta de la fusión. Los dos criterios de merge
+    // tienen que moverse juntos: cuando el precio entró, esta puerta quedó
+    // afuera y hubo que volver.
+    const itemId = await crearProducto('Chorrillana del owner', '8000');
+
+    const cuentaA = await abrirCuenta();
+    await agregarLinea(cuentaA, itemId);
+
+    const descuentoId = await crearDescuento('Promo chorrillana', '0.15');
+    await asociarDescuento(itemId, descuentoId);
+
+    const cuentaB = await abrirCuenta();
+    await agregarLinea(cuentaB, itemId);
+
+    const fusionada = await post<CuentaDetalle>(
+      `/api/mesas/${mesaId}/cuentas/fusionar`,
+      { cuentaIds: [cuentaA, cuentaB] },
+    );
+
+    expect(fusionada.lineas).toHaveLength(2);
+    for (const l of fusionada.lineas) {
+      expect(l.precioUnitario).toBe('8000.0000');
+      expect(l.cantidad).toBe('1.0000');
+    }
+
+    await cancelar(fusionada.id);
+  });
+
+  it('10. fusionar SÍ junta las líneas que comparten precio congelado', async () => {
     // El control del anterior: sin él, meter el precio en la clave de fusión
     // partiría toda línea repetida y la fusión dejaría de fusionar.
     const itemId = await crearProducto('Ron congelado', '2500');

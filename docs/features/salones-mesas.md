@@ -339,18 +339,33 @@ catálogo vivo. Hasta que eso cambie, la pantalla muestra el precio congelado y 
 el de hoy. Plan completo:
 [`../superpowers/plans/2026-08-30-lo-pedido-se-cobra-como-se-pidio.md`](../superpowers/plans/2026-08-30-lo-pedido-se-cobra-como-se-pidio.md).
 
-**Dos líneas se juntan solo si comparten ítem, personalización Y precio congelado.** Antes
-alcanzaba con las dos primeras: subís la carta con la mesa sentada, se pide lo mismo otra
-vez, y las dos unidades se cobraban a un solo precio. Vale en los **dos** lugares que
-fusionan: `agregarLinea` y `fusionarCuentas` — el segundo tenía su propia clave y sin el
-precio colapsaba `3000 + 4000` en `2 × 3000`, perdiendo $1.000 (medido).
+**Los descuentos y recargos de catálogo también se congelan** (`reglas_congeladas`, jsonb):
+la línea guarda cuáles regían sobre el ítem cuando se pidió, **resueltos y no por id** —
+congelar el id dejaría pasar el cambio de un 20% a un 30%, que es justo lo que la decisión
+evita—. **Los impuestos no**: son fiscales, se leen vivos al cobrar (ADR-010) y congelarlos
+es otro frente.
 
-⚠️ **Son dos términos, no tres, y falta uno.** La escena del owner que da origen a la regla
-—*pedís una hamburguesa a $5.000, sale un 20% en hamburguesas, pedís otra: "esa sí sale con
-el descuento"*— **todavía fusiona** (medido el 2026-08-31 por API: una sola línea de
-`2 × 5000`). Un descuento de catálogo no toca `precio_unitario`, así que el criterio actual
-no lo ve. El tercer término —las reglas congeladas de la línea— llega con la segunda mitad
-del frente, y recién ahí esa escena da dos líneas.
+⚠️ **Congelar todavía no es cobrar, tampoco acá.** Hasta que el cierre lea lo congelado, un
+descuento que se pone o se saca con la mesa sentada **sí le llega**, igual que el precio. Lo
+único que las reglas congeladas deciden hoy es si dos pedidos son una línea o dos.
+
+**Dos líneas se juntan solo si comparten ítem, personalización, precio congelado Y reglas
+congeladas.** Los tres últimos cubren tres formas distintas de que dos pedidos del mismo
+plato sean dos hechos distintos:
+
+| Cambia | Escena |
+|---|---|
+| la personalización | una con queso y otra sin |
+| el precio | pedís, sube la carta, pedís otra |
+| las reglas | pedís, sale un 20%, pedís otra — *"esa sí sale con el descuento"* (owner) |
+
+El caso de las reglas es el que **no** se ve en el precio: el de lista no se movió, así que
+sin ese término las dos se fusionaban y la segunda perdía su descuento.
+
+⚠️ **El criterio vive en DOS lugares y tienen que moverse juntos**: `agregarLinea` y
+`fusionarCuentas`. El segundo tenía su propia clave y quedó afuera cuando entró el precio —
+medido: dos cuentas con el mismo ítem a `3000` y `4000` colapsaban en `2 × 3000`, perdiendo
+$1.000. El que agregue un cuarto término, que lo agregue en los dos.
 
 ### Lo ya despachado a cocina no se borra ni se reduce en silencio (2026-08-16)
 

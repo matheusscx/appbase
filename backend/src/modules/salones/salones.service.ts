@@ -45,6 +45,7 @@ import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personaliza
 import {
   detallePersonalizacion,
   hashPersonalizacion,
+  hashReglasCongeladas,
   textoComandaPersonalizacion,
   type PersonalizacionDetalleLinea,
 } from '../../common/utils/personalizacion-receta.util';
@@ -706,6 +707,19 @@ export class SalonesService {
       new Decimal(item.precioBase).plus(precioExtraTotal).toFixed(4),
       item.monedaId,
     );
+    // Y lo mismo con las reglas de catálogo (owner, 2026-08-30). Se congelan
+    // resueltas, no por id, para que cambiarle el valor a la regla tampoco
+    // alcance a esta línea.
+    //
+    // ⚠️ Congelar no es todavía cobrar: hasta que `cerrarCuenta` lea esto en vez
+    // de re-tasar, un descuento nuevo SÍ le llega a la mesa sentada. Lo único
+    // que estas reglas deciden hoy es si dos pedidos son una línea o dos.
+    const reglasCongeladas =
+      await this.calculoPreciosService.congelarReglasDeItem(
+        tenantId,
+        dto.itemId,
+      );
+    const hashReglas = hashReglasCongeladas(reglasCongeladas);
 
     return this.db.transaccion(async (manager) => {
       const cuenta = await this.getCuentaAbiertaConLock(
@@ -716,16 +730,20 @@ export class SalonesService {
       const existentes = await manager.find(CuentaLinea, {
         where: { tenantId, cuentaId, itemId: dto.itemId },
       });
-      // El merge exige **misma personalización Y mismo precio congelado**. Con
-      // el precio adentro de la línea, dos pedidos del mismo plato a precios
-      // distintos son dos hechos distintos y fusionarlos mezcla plata: la mesa
-      // pide una hamburguesa a $5.000, sube la carta, pide otra, y las dos se
-      // cobrarían a uno solo de los dos precios. Al mismo precio siguen
-      // fusionándose, que es lo que el garzón espera ver ("2 ×", no "1 + 1").
+      // El merge exige **los tres**: misma personalización, mismo precio
+      // congelado y mismas reglas congeladas. Cada uno cubre una forma distinta
+      // de que dos pedidos del mismo plato sean dos hechos distintos:
+      //   - el precio → la mesa pide a $5.000, sube la carta, pide otra;
+      //   - las reglas → la mesa pide, sale un 20%, pide otra ("esa sí sale con
+      //     el descuento", owner 2026-08-30). El precio de lista no se movió, así
+      //     que sin este término se fusionaban y la segunda perdía su descuento.
+      // Con los tres iguales siguen fusionándose, que es lo que el garzón espera
+      // ver ("2 ×", no "1 + 1").
       const match = existentes.find(
         (l) =>
           hashPersonalizacion(l.personalizacion) === hash &&
-          new Decimal(l.precioUnitario).eq(precioUnitario),
+          new Decimal(l.precioUnitario).eq(precioUnitario) &&
+          hashReglasCongeladas(l.reglasCongeladas) === hashReglas,
       );
       if (match) {
         match.cantidad = new Decimal(match.cantidad)
@@ -749,6 +767,7 @@ export class SalonesService {
             unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
             personalizacion: snapshot,
             precioUnitario,
+            reglasCongeladas,
           }),
         );
       }
@@ -948,18 +967,22 @@ export class SalonesService {
         else porOrigen.set(l.cuentaId, [l]);
       }
 
-      // La clave lleva el **precio congelado**, igual que el merge de
+      // La clave lleva **los mismos tres términos** que el merge de
       // `agregarLinea`, y por el mismo motivo: dos líneas del mismo plato con
-      // precios distintos son dos hechos distintos. Sin el precio acá, fusionar
-      // dos cuentas colapsaba las dos sobre el precio de la de destino y la
-      // plata de la otra desaparecía —medido: 3000 + 4000 quedaban como
-      // 2 × 3000—. `toFixed(4)` canoniza: la escala persistida es la misma para
-      // las dos, pero comparar strings de plata sin normalizar es la clase de
-      // igualdad que se rompe sola.
+      // precio o reglas distintas son dos hechos distintos. Sin el precio acá,
+      // fusionar dos cuentas colapsaba las dos sobre la de destino y la plata de
+      // la otra desaparecía —medido: 3000 + 4000 quedaban como 2 × 3000—.
+      // `toFixed(4)` canoniza: la escala persistida es la misma para las dos,
+      // pero comparar strings de plata sin normalizar es la clase de igualdad
+      // que se rompe sola.
+      //
+      // ⚠️ Los dos criterios tienen que moverse juntos. Cuando el precio entró
+      // acá se olvidó esta puerta y hubo que volver; el que agregue un cuarto
+      // término, que lo agregue en los dos.
       const claveFusion = (l: CuentaLinea) =>
         `${l.itemId}|${hashPersonalizacion(l.personalizacion)}|${new Decimal(
           l.precioUnitario,
-        ).toFixed(4)}`;
+        ).toFixed(4)}|${hashReglasCongeladas(l.reglasCongeladas)}`;
       const enDestino = new Map<string, CuentaLinea>();
       for (const l of await manager.find(CuentaLinea, {
         where: { tenantId, cuentaId: destino.id },

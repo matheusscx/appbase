@@ -8,6 +8,7 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 import type { PersonalizacionRecetaSnapshot } from '../../../common/dto/personalizacion-receta.dto';
+import type { ReglasCongeladas } from '../../../common/dto/reglas-congeladas.dto';
 
 /**
  * `idx_cuenta_lineas_personalizacion` (GIN): lo pide la SEGUNDA rama `'cuenta'`
@@ -115,6 +116,26 @@ export class CuentaLinea {
    */
   @Column({ name: 'precio_unitario', type: 'numeric', precision: 18, scale: 4 })
   precioUnitario: string;
+
+  /**
+   * **Los descuentos y recargos de catálogo que regían sobre el ítem cuando se
+   * pidió esta línea**, resueltos (con su valor, sus tramos y su vigencia ya
+   * decidida). Decisión del owner (2026-08-30): poner un 20% con la mesa
+   * sentada **no** le llega a esa mesa, y sacarlo tampoco se lo quita.
+   *
+   * Se guardan **resueltos y no por id** porque congelar solo los ids dejaría
+   * pasar el cambio de un 20% a un 30%: la regla seguiría siendo la misma y el
+   * valor no. Los produce `CalculoPreciosService.congelarReglasDeItem`.
+   *
+   * ⚠️ Igual que `precioUnitario`, **todavía no manda al cobrar**: `cerrarCuenta`
+   * sigue re-tasando contra el catálogo vivo. Hoy lo único que cambian es si dos
+   * pedidos son una línea o dos.
+   *
+   * ⚠️ **Impuestos no están acá.** Son fiscales y se siguen leyendo vivos al
+   * cobrar (ADR-010): congelarlos es otro frente, con su propia sesión.
+   */
+  @Column({ name: 'reglas_congeladas', type: 'jsonb' })
+  reglasCongeladas: ReglasCongeladas;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

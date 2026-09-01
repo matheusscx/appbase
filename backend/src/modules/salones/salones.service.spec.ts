@@ -135,6 +135,7 @@ describe('SalonesService', () => {
   let calculoPrecios: {
     cargarConfig: jest.Mock;
     convertirAMonedaOficial: jest.Mock;
+    congelarReglasDeItem: jest.Mock;
   };
   let manager: {
     query: jest.Mock;
@@ -219,6 +220,11 @@ describe('SalonesService', () => {
         (precio: string, monedaId: string, tasaMap: Map<string, string>) =>
           new Decimal(precio).times(tasaMap.get(monedaId) ?? '1').toFixed(4),
       ),
+      // Lista vacía, no `undefined`: el merge hashea lo que venga y un
+      // `undefined` haría pasar tests que con reglas reales fallarían.
+      congelarReglasDeItem: jest
+        .fn()
+        .mockResolvedValue({ descuentos: [], recargos: [] }),
     };
 
     manager = {
@@ -942,6 +948,85 @@ describe('SalonesService', () => {
       expect(lineas[0].cantidad).toBe('1');
       expect(manager.softDelete).not.toHaveBeenCalled();
     });
+
+    it('el mismo ítem al mismo precio pero con REGLAS distintas tampoco se acumula', async () => {
+      // El tercer término, por la puerta de la fusión: el precio de lista no se
+      // movió —las dos líneas valen 5000— y lo único que las separa es que una
+      // se pidió antes del descuento y la otra después.
+      const destino = {
+        id: 'destino',
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 1,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const origen = {
+        id: 'origen-1',
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 2,
+        estado: EstadoCuenta.ABIERTA,
+        cerradaEl: null as Date | null,
+      };
+      const conDescuento = {
+        descuentos: [
+          {
+            id: 'desc-1',
+            modo: 'porcentaje',
+            valorMonto: null,
+            valorPorcentaje: '0.20',
+            activo: true,
+            vigente: true,
+            tramos: [],
+            metodoPagoIds: [],
+          },
+        ],
+        recargos: [],
+      };
+      const lineas = [
+        {
+          id: 'l-destino',
+          tenantId: TENANT,
+          cuentaId: 'destino',
+          itemId: ITEM,
+          cantidad: '1',
+          precioUnitario: '5000.0000',
+          reglasCongeladas: { descuentos: [], recargos: [] },
+          cantidadEnviada: '0',
+          personalizacion: null,
+        },
+        {
+          id: 'l-origen',
+          tenantId: TENANT,
+          cuentaId: 'origen-1',
+          itemId: ITEM,
+          cantidad: '1',
+          precioUnitario: '5000.0000',
+          reglasCongeladas: conDescuento,
+          cantidadEnviada: '0',
+          personalizacion: null,
+        },
+      ];
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
+          if (entity === Cuenta) return Promise.resolve([destino, origen]);
+          const ids = idsDe(opts?.where?.cuentaId);
+          return Promise.resolve(
+            lineas.filter((l) => ids.includes(l.cuentaId)),
+          );
+        },
+      );
+      manager.query.mockResolvedValue([]);
+
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: ['destino', 'origen-1'],
+      });
+
+      expect(lineas[1].cuentaId).toBe('destino');
+      expect(lineas[0].cantidad).toBe('1');
+      expect(manager.softDelete).not.toHaveBeenCalled();
+    });
   });
 
   describe('crear/actualizar de salón y mesa — no devuelven el interno', () => {
@@ -1217,6 +1302,42 @@ describe('SalonesService', () => {
         cantidadPresentacion: '500',
         unidadCodigoPresentacion: 'g',
       });
+    });
+
+    it('NO suma si las reglas congeladas difieren, aunque el precio sea el mismo', async () => {
+      // La puerta caliente del tercer término, y la que el e2e cubre pero el
+      // unitario no cubría: el precio de lista no se mueve cuando sale un
+      // descuento, así que este caso pasa por el `find` con los dos primeros
+      // términos iguales y solo lo separa la huella de reglas.
+      manager.find.mockResolvedValue([
+        {
+          id: 'linea-1',
+          cantidad: '1',
+          personalizacion: null,
+          precioUnitario: '1000.0000',
+          reglasCongeladas: { descuentos: [], recargos: [] },
+        },
+      ]);
+      calculoPrecios.congelarReglasDeItem.mockResolvedValueOnce({
+        descuentos: [
+          {
+            id: 'desc-1',
+            modo: 'porcentaje',
+            valorPorcentaje: '0.20',
+            activo: true,
+            vigente: true,
+          },
+        ],
+        recargos: [],
+      });
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '1',
+      });
+
+      // Línea nueva, no merge.
+      expect(manager.create).toHaveBeenCalled();
     });
 
     it('suma la cantidad si el ítem ya está en la cuenta sin personalización', async () => {
