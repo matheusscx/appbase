@@ -514,16 +514,22 @@ customer (`min`/`max`).
   combo un componente que la línea personalizó. Cerrar esos de a uno es la misma
   carrera; la alternativa de fondo —que re-tasar una línea ya pedida re-precie
   **sin** re-validar— es decisión de producto y está sin tomar.
-  ✅ **DECIDIDO (owner, 2026-08-30), sin construir todavía:** al cobrar **manda lo
-  que la mesa ya pidió, no la carta de hoy**. Re-tasar una línea de una cuenta
+  ✅ **DECIDIDO (owner, 2026-08-30) y CONSTRUIDO el 2026-08-31:** al cobrar **manda
+  lo que la mesa ya pidió, no la carta de hoy**. Re-tasar una línea de una cuenta
   abierta pasa a **re-preciar sin re-validar** —la personalización congelada es un
   hecho, no una entrada del cliente que haya que volver a aprobar— y **el precio es
   el de cuando se pidió**: si el extra de queso valía $700 y sube a $1.200 con la
   mesa sentada, esa mesa paga $700. No reabre la regla de que **el precio de una
   línea lo calcula el servidor**: sigue calculándolo él, leyendo la foto que él
   mismo congeló. Es motor de cálculo, así que va como frente propio.
-  Detalle, medición y lo que la decisión todavía no contesta (el `precioBase` del
-  ítem): `docs/agent/pendientes.md` § 3.
+  La línea de cuenta congela al pedirse su precio (en la moneda del ítem, la tasa
+  y el convertido) y sus descuentos y recargos resueltos; el cierre y la precuenta
+  se arman con eso. Dos pedidos del mismo plato se juntan en una sola línea solo
+  si comparten personalización, precio y reglas. Detalle:
+  `docs/features/salones-mesas.md`.
+
+  ⚠️ **Los impuestos siguen vivos**, y `precio_incluye_impuesto` del ítem también:
+  son materia fiscal (ADR-010) y congelarlos es otro frente.
 
 **Fuera de alcance (diferido, no un olvido):** la **impresión térmica** de la
 opción elegida de un grupo en comanda/precuenta/boleta queda para un ticket

@@ -116,10 +116,12 @@ Lo que eso cambia en la práctica, y está fijado por test
 hoy **ya no** lleva la promo de la semana pasada; y una línea pedida con el descuento vivo
 lo conserva aunque venza antes de cobrar.
 
-⚠️ **Queda una asimetría más chica, y es la grieta abierta del frente**: `fechaLocal` —el
-día que decide **qué promos se cargan**— sigue saliendo de `cuenta.abierta_el`. La hora es
-por línea, pero si el día no cargó la promo, la hora nunca se mira. Mesa que se sienta el
-lunes 23:30 y pide el martes 00:30: el 2x1 de los martes no se evalúa. Detalle en
+⚠️ **Queda un borde angosto en la PRECARGA, y no es el que parece.** El día de la semana y
+la hora se evalúan por línea (`instanteEnVentana`), así que la cerveza pedida el martes 00:30
+sí recibe el 2x1 de los martes aunque la mesa se haya sentado el lunes. Lo que sale de
+`cuenta.abierta_el` es el filtro que decide **qué promos se cargan**, y solo por su rango de
+fechas: una promo cuyo rango empieza o termina entre la apertura y el pedido no se carga y su
+ventana nunca se mira. Una promo de un solo día es el caso puro. Detalle y estado en
 [`../agent/pendientes.md`](../agent/pendientes.md).
 
 ---

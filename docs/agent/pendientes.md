@@ -1073,21 +1073,37 @@ abriendo las superficies, no leyendo la entrada.
   | `PATCH /items/:id` con `componentes`: bajar la `cantidad` de un componente por debajo de la `unidad` elegida | *"Unidad inválida para el componente X"* |
   | `PATCH /grupos-modificadores/:id`: dejar una opción elegida sin `cantidad` | *"La opción X no tiene cantidad configurada para este item (pendiente)"* |
 
-  🔲 **Lo que queda abierto del frente es otra cosa: el DÍA de las promociones.**
-  `fechaLocal` —el día que decide **qué promos se cargan**— sigue saliendo de
-  `cuentas.abierta_el` (`calculo-precios.service.ts`, `instanteDeVigencia`). La **hora** de
-  cada promo ya es por línea, pero si el día no cargó la promo, la hora nunca se mira.
+  🔲 **Lo que queda abierto del frente es angosto, y más angosto de lo que se creyó.**
 
-  Escena: la mesa se sienta el **lunes 23:30** y pide cerveza el **martes 00:30**. El 2x1 de
-  los martes no se carga, así que esa cerveza no lo lleva. Al revés también: mesa del martes
-  que pide el miércoles 00:30 se llevaría el 2x1 del martes.
+  **La escena del 2x1 de los martes NO es la grieta, y la corrección importa.** El día de la
+  semana y la hora de una promo se evalúan **por línea**, contra el instante en que se pidió
+  (`promociones.evaluator.ts`, `instanteEnVentana`: mira `fecha`, `diaIso` y `hora` del
+  instante de la línea). O sea que la cerveza pedida el martes 00:30 **sí** recibe el 2x1 de
+  los martes aunque la mesa se haya sentado el lunes — siempre que la promo esté cargada.
+  
+  **Lo que sí sale de `cuentas.abierta_el` es el filtro de PRECARGA**: `cargarVigentes` trae
+  solo las promos cuyo **rango de fechas** contiene ese día (`fecha_inicio <= $2 <= fecha_fin`).
+  Si el rango no cubre el día en que se abrió la cuenta, la promo no se carga y su ventana
+  nunca se mira, por más que la línea caiga adentro.
+  
+  Queda entonces un caso, más angosto que el que el plan describía: **una promo cuyo rango de
+  fechas empieza o termina entre la apertura de la cuenta y el pedido de la línea.** Una promo
+  de un solo día es el ejemplo puro: mesa abierta el 30 a las 23:30, cerveza pedida el 31 a
+  las 00:30, promo válida solo el 31 → no se carga. Al revés no hay problema: si se carga de
+  más, `instanteEnVentana` la descarta por línea.
+  
+  ⚠️ **Leído en el código, no medido con una sonda.** Medirlo pide un fixture propio (promoción
+  con rango de un día + cuenta de salón + control del reloj por SQL) que todavía no existe.
+  Antes de arreglarlo, montarlo y confirmar que falla así.
+  
+  📌 **Y la primera versión de esta nota estaba mal**: decía que el 2x1 de los martes no se
+  cargaba. La escribí leyendo `fechaLocal` y sin abrir el evaluador, que es donde el día de la
+  semana sí se mira por línea. La corrección salió de ir a medirla.
 
-  Es la misma regla del owner —*lo que decide es cuándo se pidió*—, así que no necesita
-  preguntarle nada. Toca `cargarVigentes`: hay que cargar las promos de **todos los días**
-  que toquen las líneas de la cuenta, no de uno.
-
-  ⚠️ **Leído, no medido.** Antes de tocarlo, montar el cruce de medianoche y verificar que
-  falla como dice acá.
+  El arreglo, si se toma: `cargarVigentes` tiene que cargar las promos cuyo rango toque
+  **cualquiera** de los días de las líneas de la cuenta, no solo el de la apertura. Es la
+  misma regla del owner, así que no necesita preguntarle nada — pero es un caso de borde,
+  no el agujero que el frente vino a cerrar.
 
   📌 **Ninguna de esas cinco necesitó un guard.** El plan las iba a cerrar de a una, con la
   misma consulta que las cinco puertas anteriores; lo que las cerró de golpe fue atacar la

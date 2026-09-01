@@ -207,7 +207,20 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
 
 ---
 
-## Task 2: cerrar la cuenta con la foto, sin volver a la carta
+## Task 2 + Task 3: cerrar con la foto, y que la precuenta muestre lo mismo
+
+⚠️ **Se ejecutaron juntas, y separarlas era el error.** El plan las tenía como pasos
+distintos. La revisión independiente midió el estado intermedio: con el cobro congelado y la
+pantalla no, la precuenta decía **7.140** y la venta guardaba **5.950** para la misma mesa —
+y el cajero le cobra al cliente lo que muestra la pantalla—. Además la mesa seguía trabada
+en el local, porque el garzón no puede abrir el cobro si la precuenta falla. Entre las dos
+tareas el sistema quedaba **peor que antes**. Salieron en `92000105`.
+
+📌 Para la próxima descomposición: dos tareas que tocan **el mismo número visto desde dos
+lados** no son dos tareas. La pregunta que lo detecta es *¿qué ve el usuario entre una y
+otra?*.
+
+## Task 2 (histórico): cerrar la cuenta con la foto, sin volver a la carta
 
 **Files:**
 - Modify: `backend/src/modules/salones/salones.service.ts:1123-1167` (el desarmado)
@@ -224,23 +237,23 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
   `CreateVentaDto`. Un campo del DTO acá dejaría a un cliente mandar `precioExtra`
   arbitrario, que es exactamente lo que `1970ccbd` cerró.
 
-- [ ] **Paso 1: los tests que fallan** — los casos que hoy dejan la mesa incobrable pasan a
+- [x] **Paso 1: los tests que fallan** — los casos que hoy dejan la mesa incobrable pasan a
   **cobrarse**. Al menos tres, y los tres ya están medidos (`pendientes.md` § 3):
   agregarle al plato un grupo obligatorio (`min ≥ 1`); sacarle a un combo un componente que
   la línea personalizó; y el precio del extra movido, que tiene que cobrarse **al viejo**.
 
-- [ ] **Paso 2: `cerrarCuenta` deja de desarmar.** Borrar el `.map` de
+- [x] **Paso 2: `cerrarCuenta` deja de desarmar.** Borrar el `.map` de
   `salones.service.ts:1133-1167` y pasar el snapshot tal cual, con su precio.
 
-- [ ] **Paso 3: `ventas.service` saltea el resolver** cuando la línea trae su par resuelto.
+- [x] **Paso 3: `ventas.service` saltea el resolver** cuando la línea trae su par resuelto.
   El snapshot se **copia** a `venta_detalle.personalizacion`, no se recalcula.
 
-- [ ] **Paso 4: lo que NO cambia, y hay que probar que no cambió.** El POS y la Tienda
+- [x] **Paso 4: lo que NO cambia, y hay que probar que no cambió.** El POS y la Tienda
   siguen resolviendo y validando contra el catálogo vivo: ahí el cliente **está eligiendo
   ahora**, no recordando lo que pidió. El consumo de stock por ingrediente
   (`venderIngredientesReceta`) sigue leyendo el snapshot igual. Un test por cada uno.
 
-- [ ] **Paso 5: verificación + mutantes + revisión + commit.** Mutante obligatorio: volver a
+- [x] **Paso 5: verificación + mutantes + revisión + commit.** Mutante obligatorio: volver a
   resolver aunque venga el par → los tests de los tres agujeros tienen que revivir.
 
 ---
@@ -255,7 +268,7 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
 **Interfaces:**
 - Consume: T1 y T2.
 
-- [ ] **Paso 1: el problema, antes de tocar nada.** Hoy la precuenta la arma el **cliente**:
+- [x] **Paso 1: el problema, antes de tocar nada.** Hoy la precuenta la arma el **cliente**:
   manda las líneas a `POST /calculo-precios/calcular` y el servidor las re-resuelve. Con el
   precio congelado eso ya no sirve —el cliente no puede mandar plata— así que **la precuenta
   de una cuenta se arma del lado del servidor**, desde `cuentaId`. El campo ya existe en el
@@ -263,18 +276,18 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
   fecha): decidir si se amplía su significado o si va un endpoint propio, y **escribir por
   qué**.
 
-- [ ] **Paso 2: el test que falla** — precuenta y cobro dan el mismo total después de
+- [x] **Paso 2: el test que falla** — precuenta y cobro dan el mismo total después de
   cambiarle el precio al ítem con la mesa sentada. Hoy los dos dan el precio nuevo; con T1 y
   T2, el cobro da el viejo y la precuenta seguiría mintiendo.
 
-- [ ] **Paso 3: implementar. Paso 4: el front deja de mandar líneas** para ese caso.
+- [x] **Paso 3: implementar.** El front **no** hizo falta tocarlo: el servidor ignora las líneas que ya manda. Paso 4 innecesario — para ese caso.
 
-- [ ] **Paso 5: ⚠️ mirar de paso —sin arreglarlo acá— el `—` mudo.** `useCalculoPrecios` se
+- [x] **Paso 5: ⚠️ mirar de paso —sin arreglarlo acá— el `—` mudo.** `useCalculoPrecios` se
   traga el 400 y `lineaSubtotal` dibuja un guion en todas las líneas sin decir por qué.
   Después de este frente el 400 casi no va a pasar, así que la urgencia baja; sigue siendo
   entrada propia en el backlog. **No tomarla de arrastre.**
 
-- [ ] **Paso 6: gate completo de las dos puntas + revisión + commit.**
+- [x] **Paso 6: gate completo de las dos puntas + revisión + commit.**
 
 ---
 
@@ -288,17 +301,17 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
 - Posible ADR: la regla "lo pedido se cobra como se pidió" es decisión técnica **y** de
   producto, y contradice la lectura ingenua de `1970ccbd`. Evaluar un ADR corto.
 
-- [ ] **Paso 1: los cinco guards de `ab802b32` y anteriores NO se tiran.** Cambia lo que
+- [x] **Paso 1: los cinco guards de `ab802b32` y anteriores NO se tiran.** Cambia lo que
   significan, y eso hay que escribirlo: dejan de ser *"si sacás esto, la mesa queda
   incobrable"* —ya no lo queda— y pasan a ser *"hay alguien sentado esperando esto"*, que es
   un dato de operación. El mensaje que nombra la mesa es hoy lo único que se lo dice al
   admin. **Si alguien propone borrarlos porque "ya no hace falta", esta línea es la
   respuesta.**
 
-- [ ] **Paso 2: la tabla de las cinco puertas** (`salones-mesas.md`) se reescribe con el
+- [x] **Paso 2: la tabla de las cinco puertas** (`salones-mesas.md`) se reescribe con el
   motivo nuevo, y las dos ⚠️ que hoy explican la re-validación se van.
 
-- [ ] **Paso 3: mover la entrada de `pendientes.md` § 3 a `resueltos.md`** con el texto de
+- [x] **Paso 3: mover la entrada de `pendientes.md` § 3 a `resueltos.md`** con el texto de
   su cierre, y anotar qué quedó afuera a propósito (lo fiscal).
 
 ---
@@ -329,24 +342,32 @@ colapsaba dos líneas sobre el precio de destino, perdiendo plata (medido: `3000
    por la carrera borrar-vs-agregar, que tiene su propia entrada en `pendientes.md`. Se deja
    como está.
 
-## Grieta encontrada al contestar las preguntas (2026-08-30) — entra al frente
+## Grieta de la precarga de promociones — corregida el 2026-08-31
 
-**El día de la promo sale de cuándo se sentó la mesa, no de cuándo se pidió la línea.**
-`fechaLocal` se calcula una vez, desde `abierta_el` (`calculo-precios.service.ts:156-162`),
-y con ese día `cargarVigentes` decide **qué promos se cargan**. La hora sí es por línea,
-pero si el día no cargó la promo, la hora nunca llega a mirarse.
+**La escena del 2x1 de los martes NO es la grieta, y la corrección importa.** El día de la
+semana y la hora de una promo se evalúan **por línea**, contra el instante en que se pidió
+(`promociones.evaluator.ts`, `instanteEnVentana`: mira `fecha`, `diaIso` y `hora` del
+instante de la línea). O sea que la cerveza pedida el martes 00:30 **sí** recibe el 2x1 de
+los martes aunque la mesa se haya sentado el lunes — siempre que la promo esté cargada.
 
-Escena: la mesa se sienta el **lunes 23:30** y pide cerveza el **martes 00:30**. El 2x1 de
-los martes no se carga, así que esa cerveza no lo lleva — que es exactamente el bug de la
-escena del owner, un nivel más arriba. Al revés también: mesa del martes que pide el
-miércoles a las 00:30 se llevaría el 2x1 del martes.
+**Lo que sí sale de `cuentas.abierta_el` es el filtro de PRECARGA**: `cargarVigentes` trae
+solo las promos cuyo **rango de fechas** contiene ese día (`fecha_inicio <= $2 <= fecha_fin`).
+Si el rango no cubre el día en que se abrió la cuenta, la promo no se carga y su ventana
+nunca se mira, por más que la línea caiga adentro.
 
-Es la misma regla del owner —*lo que decide es cuándo se pidió*— así que **entra al
-frente**, no al backlog. Va como tarea propia porque toca a `cargarVigentes`: hay que cargar
-las promos de **todos los días** que toquen las líneas de la cuenta, no de uno.
+Queda entonces un caso, más angosto que el que el plan describía: **una promo cuyo rango de
+fechas empieza o termina entre la apertura de la cuenta y el pedido de la línea.** Una promo
+de un solo día es el ejemplo puro: mesa abierta el 30 a las 23:30, cerveza pedida el 31 a
+las 00:30, promo válida solo el 31 → no se carga. Al revés no hay problema: si se carga de
+más, `instanteEnVentana` la descarta por línea.
 
-⚠️ **Leído, no medido.** Antes de tocarlo, montar el caso del cruce de medianoche y
-verificar que falla como dice acá. Si no falla, esta sección está mal y hay que reescribirla.
+⚠️ **Leído en el código, no medido con una sonda.** Medirlo pide un fixture propio (promoción
+con rango de un día + cuenta de salón + control del reloj por SQL) que todavía no existe.
+Antes de arreglarlo, montarlo y confirmar que falla así.
+
+📌 **Y la primera versión de esta nota estaba mal**: decía que el 2x1 de los martes no se
+cargaba. La escribí leyendo `fechaLocal` y sin abrir el evaluador, que es donde el día de la
+semana sí se mira por línea. La corrección salió de ir a medirla.
 
 ## Lo que este plan da por medido (no re-medir, sí re-verificar si algo no cierra)
 
