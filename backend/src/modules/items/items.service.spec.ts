@@ -5533,6 +5533,443 @@ describe('ItemsService', () => {
     });
   });
 
+  // ── consumoDeLineas ────────────────────────────────────────────────────────
+
+  describe('consumoDeLineas', () => {
+    // Ítems y cantidades REALES del seed (`seeder.service.ts`:
+    // `seedIngredientesBase`, `seedPapasFritas`, `seedGruposModificadores`,
+    // `seedComboEspecial`). Se usan los del seed y no números inventados
+    // porque un test que afirma una cantidad que nadie sirvió pasa igual y no
+    // prueba nada.
+    const uuid = (n: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+    const PAN = uuid(256); // ingrediente, se compra por unidad
+    const CARNE = uuid(257); // ingrediente, se compra en kg
+    const QUESO = uuid(258); // ingrediente, se compra en kg
+    const PAPAS = uuid(281); // producto, se vende y se compra por unidad
+    const PROTEINA = uuid(290); // grupo modificador "Proteína"
+    const HAMBURGUESA = uuid(294); // receta: pan 1 unidad + queso 20 g
+    const COMBO = uuid(313); // combo: Hamburguesa Especial + Papas fritas
+
+    /** Las dos filas de `receta_ingredientes` de la Hamburguesa Especial. */
+    const ingredientesHamburguesa = [
+      {
+        receta_item_id: HAMBURGUESA,
+        ingrediente_item_id: PAN,
+        ingrediente_nombre: 'Pan de hamburguesa',
+        ingrediente_unidad_medida: 'unidad',
+        cantidad: '1',
+        unidad_codigo: 'unidad',
+        bloqueante: true,
+      },
+      {
+        receta_item_id: HAMBURGUESA,
+        ingrediente_item_id: QUESO,
+        ingrediente_nombre: 'Queso laminado',
+        ingrediente_unidad_medida: 'kg',
+        cantidad: '20',
+        unidad_codigo: 'g',
+        bloqueante: false,
+      },
+    ];
+
+    /** La opción "Carne molida" del grupo Proteína: 150 g por elección. */
+    const opcionCarne = {
+      itemId: CARNE,
+      nombre: 'Carne molida',
+      cantidad: '150',
+      unidadCodigo: 'g',
+      precioExtra: '0',
+      unidades: '1',
+    };
+
+    it('una línea que omite un ingrediente no lo consume', async () => {
+      dataSource.query
+        // 1) tipo de los ítems de las líneas
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        // 2) catálogo de las opciones de grupo elegidas
+        .mockResolvedValueOnce([
+          { item_id: CARNE, tipo: 'ingrediente', unidad_medida: 'kg' },
+        ])
+        // 3) ingredientes de las recetas involucradas
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        {
+          itemId: HAMBURGUESA,
+          cantidad: '1',
+          personalizacion: {
+            omitidos: [QUESO],
+            extras: [],
+            grupos: [
+              {
+                grupoId: PROTEINA,
+                grupoNombre: 'Proteína',
+                opciones: [opcionCarne],
+              },
+            ],
+          },
+        },
+      ]);
+
+      expect(consumo.has(QUESO)).toBe(false);
+      // 150 g de carne en la unidad de STOCK del ingrediente (kg).
+      expect(consumo.get(CARNE)!.cantidad.toString()).toBe('0.15');
+      expect(consumo.get(PAN)!.cantidad.toString()).toBe('1');
+    });
+
+    it('un producto suelto se consume a sí mismo, sin expandir nada', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        { item_id: PAPAS, tipo: 'producto' },
+      ]);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: PAPAS, cantidad: '2', personalizacion: null },
+      ]);
+
+      expect(consumo.get(PAPAS)).toEqual({
+        cantidad: new Decimal('2'),
+        bloqueante: true,
+      });
+      // Ni receta ni combo ni grupos: una sola consulta, la del tipo.
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('una receta sin personalización consume sus ingredientes por la cantidad pedida', async () => {
+      dataSource.query
+        // 1) tipos
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        // 2) ingredientes de la receta
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: HAMBURGUESA, cantidad: '2', personalizacion: null },
+      ]);
+
+      expect(consumo.get(PAN)).toEqual({
+        cantidad: new Decimal('2'),
+        bloqueante: true,
+      });
+      // 20 g × 2 = 40 g, y el queso se guarda en kg.
+      expect(consumo.get(QUESO)).toEqual({
+        cantidad: new Decimal('0.04'),
+        bloqueante: false,
+      });
+    });
+
+    it('convierte a la unidad de stock: una receta en gramos sobre un ingrediente en kilos', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: HAMBURGUESA, cantidad: '3', personalizacion: null },
+      ]);
+
+      // Se convierte DESPUÉS de multiplicar, una sola vez: 20 g × 3 = 60 g.
+      expect(conversorMock).toHaveBeenCalledWith('60', 'g', 'kg');
+      expect(consumo.get(QUESO)!.cantidad.toString()).toBe('0.06');
+    });
+
+    it('un extra pagado suma su porción por las veces que se agregó, y no bloquea', async () => {
+      dataSource.query
+        // 1) tipos
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        // 2) ingredientes de la receta
+        .mockResolvedValueOnce(ingredientesHamburguesa)
+        // 3) catálogo de los extras del snapshot
+        .mockResolvedValueOnce([
+          { item_id: CARNE, nombre: 'Carne molida', unidad_medida: 'kg' },
+        ]);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        {
+          itemId: HAMBURGUESA,
+          cantidad: '1',
+          personalizacion: {
+            omitidos: [],
+            extras: [
+              {
+                ingredienteItemId: CARNE,
+                cantidad: '150',
+                unidadCodigo: 'g',
+                precioExtra: '1500',
+                unidades: '2',
+              },
+            ],
+          },
+        },
+      ]);
+
+      // 150 g × 2 veces = 300 g = 0.3 kg. Un extra nunca frena la venta.
+      expect(consumo.get(CARNE)).toEqual({
+        cantidad: new Decimal('0.3'),
+        bloqueante: false,
+      });
+    });
+
+    it('un combo consume sus componentes, y los grupos elegidos para ellos', async () => {
+      dataSource.query
+        // 1) tipos
+        .mockResolvedValueOnce([{ item_id: COMBO, tipo: 'combo' }])
+        // 2) componentes del combo
+        .mockResolvedValueOnce([
+          {
+            combo_item_id: COMBO,
+            componente_item_id: HAMBURGUESA,
+            tipo: 'receta',
+            cantidad: '1',
+            bloqueante: true,
+          },
+          {
+            combo_item_id: COMBO,
+            componente_item_id: PAPAS,
+            tipo: 'producto',
+            cantidad: '1',
+            bloqueante: true,
+          },
+        ])
+        // 3) catálogo de las opciones elegidas para el componente receta
+        .mockResolvedValueOnce([
+          { item_id: CARNE, tipo: 'ingrediente', unidad_medida: 'kg' },
+        ])
+        // 4) ingredientes de la receta que es componente
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      // DOS combos, no uno: con `cantidad: '1'` los tres factores de la
+      // multiplicación valen lo mismo que no multiplicar, y el test pasa igual
+      // con la aritmética rota.
+      const consumo = await service.consumoDeLineas(TENANT, [
+        {
+          itemId: COMBO,
+          cantidad: '2',
+          personalizacion: {
+            omitidos: [],
+            extras: [],
+            componentes: [
+              {
+                componenteItemId: HAMBURGUESA,
+                componenteNombre: 'Hamburguesa Especial',
+                unidad: 1,
+                grupos: [
+                  {
+                    grupoId: PROTEINA,
+                    grupoNombre: 'Proteína',
+                    opciones: [opcionCarne],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ]);
+
+      // 1 papa por combo × 2 combos.
+      expect(consumo.get(PAPAS)!.cantidad.toString()).toBe('2');
+      // 1 hamburguesa por combo × 2 → 2 panes y 40 g de queso.
+      expect(consumo.get(PAN)!.cantidad.toString()).toBe('2');
+      expect(consumo.get(QUESO)!.cantidad.toString()).toBe('0.04');
+      // El grupo del COMPONENTE cuenta igual que si la receta se hubiera
+      // pedido suelta, y también escala: 150 g × 2 = 300 g.
+      expect(consumo.get(CARNE)!.cantidad.toString()).toBe('0.3');
+    });
+
+    it('una opción de grupo escala por sus unidades Y por la cantidad pedida', async () => {
+      // Los dos factores por encima de 1 y distintos entre sí (2 y 3): si
+      // fueran iguales, cambiarlos de lugar daría el mismo número y el test no
+      // distinguiría un factor del otro.
+      dataSource.query
+        // 1) tipos
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        // 2) catálogo de las opciones elegidas
+        .mockResolvedValueOnce([
+          { item_id: CARNE, tipo: 'ingrediente', unidad_medida: 'kg' },
+        ])
+        // 3) ingredientes de la receta
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        {
+          itemId: HAMBURGUESA,
+          cantidad: '3',
+          personalizacion: {
+            omitidos: [],
+            extras: [],
+            grupos: [
+              {
+                grupoId: PROTEINA,
+                grupoNombre: 'Proteína',
+                // Doble proteína.
+                opciones: [{ ...opcionCarne, unidades: '2' }],
+              },
+            ],
+          },
+        },
+      ]);
+
+      // 150 g × 2 unidades × 3 hamburguesas = 900 g = 0.9 kg.
+      expect(consumo.get(CARNE)!.cantidad.toString()).toBe('0.9');
+      // Y los ingredientes fijos escalan solo por la cantidad pedida.
+      expect(consumo.get(PAN)!.cantidad.toString()).toBe('3');
+      expect(consumo.get(QUESO)!.cantidad.toString()).toBe('0.06');
+    });
+
+    it('un componente de combo no bloqueante arrastra a sus ingredientes: el combo entero se puede omitir', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ item_id: COMBO, tipo: 'combo' }])
+        .mockResolvedValueOnce([
+          {
+            combo_item_id: COMBO,
+            componente_item_id: HAMBURGUESA,
+            tipo: 'receta',
+            cantidad: '1',
+            // El componente no frena: `venderComponentesCombo` lo omite entero
+            // en vez de tirar la venta, así que su pan tampoco frena.
+            bloqueante: false,
+          },
+        ])
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: COMBO, cantidad: '1', personalizacion: null },
+      ]);
+
+      expect(consumo.get(PAN)!.bloqueante).toBe(false);
+    });
+
+    it('dos líneas del mismo ingrediente se suman', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        .mockResolvedValueOnce(ingredientesHamburguesa);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: HAMBURGUESA, cantidad: '1', personalizacion: null },
+        { itemId: HAMBURGUESA, cantidad: '2', personalizacion: null },
+      ]);
+
+      expect(consumo.get(PAN)!.cantidad.toString()).toBe('3');
+      // 20 g + 40 g = 60 g → 0.06 kg.
+      expect(consumo.get(QUESO)!.cantidad.toString()).toBe('0.06');
+    });
+
+    it('el más permisivo gana: si un solo camino no frena, el ingrediente no frena', async () => {
+      // El no bloqueante va PRIMERO a propósito: si la última línea pisara el
+      // flag en vez de combinarlo, este test pasaría igual con el orden
+      // inverso y no probaría nada.
+      dataSource.query
+        .mockResolvedValueOnce([
+          { item_id: COMBO, tipo: 'combo' },
+          { item_id: PAPAS, tipo: 'producto' },
+        ])
+        .mockResolvedValueOnce([
+          {
+            combo_item_id: COMBO,
+            componente_item_id: PAPAS,
+            tipo: 'producto',
+            cantidad: '1',
+            bloqueante: false,
+          },
+        ]);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: COMBO, cantidad: '1', personalizacion: null },
+        { itemId: PAPAS, cantidad: '1', personalizacion: null },
+      ]);
+
+      expect(consumo.get(PAPAS)).toEqual({
+        cantidad: new Decimal('2'),
+        bloqueante: false,
+      });
+    });
+
+    it('un servicio no consume stock', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        { item_id: 'servicio-uuid', tipo: 'servicio' },
+      ]);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        { itemId: 'servicio-uuid', cantidad: '3', personalizacion: null },
+      ]);
+
+      expect(consumo.size).toBe(0);
+    });
+
+    it('sin líneas no consulta nada', async () => {
+      const consumo = await service.consumoDeLineas(TENANT, []);
+
+      expect(consumo.size).toBe(0);
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('hace lecturas CONSTANTES en la cantidad de líneas: una por nivel, no una por línea', async () => {
+      // 12 líneas de tres formas distintas, y las recetas van CON
+      // personalización a propósito: sin extras ni grupos, los niveles 3 y 5
+      // no se consultan nunca y un cambio que los hiciera por línea pasaría
+      // este test igual. Si la expansión consultara por línea —el N+1 que este
+      // método existe para no cometer— serían ≥ 12.
+      dataSource.query
+        // 1) tipos de los tres ítems distintos
+        .mockResolvedValueOnce([
+          { item_id: HAMBURGUESA, tipo: 'receta' },
+          { item_id: COMBO, tipo: 'combo' },
+          { item_id: PAPAS, tipo: 'producto' },
+        ])
+        // 2) componentes de TODOS los combos
+        .mockResolvedValueOnce([
+          {
+            combo_item_id: COMBO,
+            componente_item_id: PAPAS,
+            tipo: 'producto',
+            cantidad: '1',
+            bloqueante: true,
+          },
+        ])
+        // 3) catálogo de TODAS las opciones de grupo elegidas
+        .mockResolvedValueOnce([
+          { item_id: CARNE, tipo: 'ingrediente', unidad_medida: 'kg' },
+        ])
+        // 4) ingredientes de TODAS las recetas
+        .mockResolvedValueOnce(ingredientesHamburguesa)
+        // 5) catálogo de TODOS los extras
+        .mockResolvedValueOnce([
+          { item_id: QUESO, nombre: 'Queso laminado', unidad_medida: 'kg' },
+        ]);
+
+      const lineas = Array.from({ length: 4 }).flatMap(() => [
+        {
+          itemId: HAMBURGUESA,
+          cantidad: '1',
+          personalizacion: {
+            omitidos: [],
+            extras: [
+              {
+                ingredienteItemId: QUESO,
+                cantidad: '20',
+                unidadCodigo: 'g',
+                precioExtra: '500',
+                unidades: '1',
+              },
+            ],
+            grupos: [
+              {
+                grupoId: PROTEINA,
+                grupoNombre: 'Proteína',
+                opciones: [opcionCarne],
+              },
+            ],
+          },
+        },
+        { itemId: COMBO, cantidad: '1', personalizacion: null },
+        { itemId: PAPAS, cantidad: '1', personalizacion: null },
+      ]);
+
+      await service.consumoDeLineas(TENANT, lineas);
+
+      // Los cinco niveles, una consulta cada uno.
+      expect(dataSource.query).toHaveBeenCalledTimes(5);
+    });
+  });
+
   describe('desfases de costo', () => {
     const RECETA_ID = 'receta-1';
     const CARNE_ID = 'carne-1';

@@ -186,6 +186,30 @@ export type ConvertirUnidad = (
 ) => string;
 
 /**
+ * Una línea ya pedida, tal como la mira `consumoDeLineas`: qué se pidió, cuánto
+ * y con qué personalización. **Nunca cuánto vale** — el precio no es asunto de
+ * esta pregunta.
+ *
+ * `cantidad` va en la unidad base del ítem (la `cantidadCanonica` que resuelve
+ * `ventas.service.ts` antes de tocar stock), no en la de presentación.
+ */
+export interface LineaConsumo {
+  itemId: string;
+  cantidad: string;
+  personalizacion: PersonalizacionRecetaSnapshot | null;
+}
+
+/**
+ * Lo que un conjunto de líneas consume de UN ingrediente o producto.
+ * `cantidad` está en la unidad de stock de ese ítem. `bloqueante` es `false` si
+ * alguna de las líneas lo consume sin frenar por falta de stock.
+ */
+export interface ConsumoDeItem {
+  cantidad: Decimal;
+  bloqueante: boolean;
+}
+
+/**
  * Clases de uso que devuelve `GET /items/:id/uso`.
  *
  * ⚠️ Duplicado a mano en el frontend (`pages/configuracion/items.vue`, tipo
@@ -3378,6 +3402,120 @@ export class ItemsService {
   }
 
   /**
+   * Nombre y unidad de STOCK de los ingredientes que un snapshot usa como
+   * extra. La unidad es propiedad del ingrediente (`item_producto.unidad_medida`),
+   * no de la lista de extras de la receta — ver el porqué largo en
+   * `expandirIngredientesPersonalizados`.
+   *
+   * Vive aparte porque la piden los dos caminos de expansión: el que **escribe**
+   * movimientos (`venderIngredientesReceta`, un id de receta por llamada) y el
+   * que solo **pregunta** (`consumoDeLineas`, todos los extras del carrito en
+   * una sola consulta). Misma consulta, distinto tamaño del `ANY`.
+   */
+  private async catalogoDeExtras(
+    manager: EntityManager | Db,
+    tenantId: string,
+    ingredienteIds: string[],
+  ): Promise<Map<string, { nombre: string; unidad_medida: string }>> {
+    const ids = [...new Set(ingredienteIds)];
+    if (!ids.length) return new Map();
+    const rows: {
+      item_id: string;
+      nombre: string;
+      unidad_medida: string;
+    }[] = await manager.query(
+      `SELECT i.item_id, i.nombre, ip.unidad_medida
+         FROM items i
+         JOIN item_producto ip ON ip.item_id = i.item_id
+        WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+          AND i.eliminado_el IS NULL`,
+      [ids, tenantId],
+    );
+    return new Map(
+      rows.map((r) => [
+        r.item_id,
+        { nombre: r.nombre, unidad_medida: r.unidad_medida },
+      ]),
+    );
+  }
+
+  /**
+   * Los ingredientes que consume **UNA unidad** de una receta, ya modulados por
+   * la personalización: se quitan los omitidos y se suman los extras del
+   * snapshot. Las cantidades quedan **como las declara la receta** (sin
+   * multiplicar por lo pedido y sin convertir de unidad): eso lo hace cada
+   * llamador, que es donde tiene sentido.
+   *
+   * **Por qué existe.** Es la única parte de la expansión que comparten el
+   * camino que escribe movimientos y el que solo pregunta cuánto se consumiría;
+   * tenerla dos veces es exactamente el modo de falla que este repo ya pagó
+   * (dos expansiones que derivan). Lo que NO comparten, y por eso queda afuera:
+   * quién bloquea a quién ante falta de stock, el `FOR UPDATE` por fila, las
+   * advertencias de stock insuficiente y el pre-chequeo de un componente de
+   * combo no bloqueante — todo eso solo tiene sentido cuando se escribe.
+   *
+   * El orden es por `ingredienteItemId` y es parte del contrato: quien escribe
+   * toma `FOR UPDATE` en ese orden (`docs/patterns/backend.md` §15). Los extras
+   * NO se concatenan al final —salen del snapshot, o sea del orden en que el
+   * cliente los agregó al carrito— sino que entran al mismo orden global.
+   *
+   * La unidad de stock de un extra es propiedad del ingrediente
+   * (`item_producto.unidad_medida`), no de la lista de extras de la receta.
+   * Resolverla desde el catálogo de extras la ataba a que el extra siguiera en
+   * la carta, con un fallback a la unidad de la PORCIÓN que hacía que
+   * `convertirUnidad` convirtiera una unidad a sí misma (20 g de queso
+   * descontados como 20 kg).
+   */
+  private expandirIngredientesPersonalizados(params: {
+    ingredientesBase: IngredienteReceta[];
+    /** De `catalogoDeExtras`. Un extra ausente acá ya no está en el catálogo. */
+    extrasCat: Map<string, { nombre: string; unidad_medida: string }>;
+    snapshot: PersonalizacionRecetaSnapshot | undefined;
+    recetaNombre: string;
+  }): { ingredientes: IngredienteReceta[]; advertencias: string[] } {
+    const omitidos = new Set(params.snapshot?.omitidos ?? []);
+    const fijos = params.ingredientesBase.filter(
+      (ing) => !omitidos.has(ing.ingredienteItemId),
+    );
+
+    const advertencias: string[] = [];
+    const extras = (params.snapshot?.extras ?? []).flatMap((extra) => {
+      const cat = params.extrasCat.get(extra.ingredienteItemId);
+      if (!cat) {
+        // Ingrediente borrado del catálogo: no se mueve stock de un ítem que
+        // ya no existe. Mismo criterio que `venderOpcionesGrupos` con una
+        // opción borrada, más la advertencia que aquel no emite.
+        advertencias.push(
+          `${params.recetaNombre}: no se pudo descontar un extra porque su ingrediente ya no está en el catálogo`,
+        );
+        return [];
+      }
+      // Porción del extra × cuántas veces se agregó (unidades). Snapshots
+      // antiguos sin `unidades` equivalen a 1.
+      const cantidad = new Decimal(extra.cantidad)
+        .mul(extra.unidades ?? '1')
+        .toString();
+      return [
+        {
+          ingredienteItemId: extra.ingredienteItemId,
+          ingredienteNombre: cat.nombre,
+          ingredienteUnidadMedida: cat.unidad_medida,
+          cantidad,
+          unidadCodigo: extra.unidadCodigo,
+          bloqueante: false,
+        },
+      ];
+    });
+
+    return {
+      ingredientes: [...fijos, ...extras].sort((a, b) =>
+        a.ingredienteItemId.localeCompare(b.ingredienteItemId),
+      ),
+      advertencias,
+    };
+  }
+
+  /**
    * Vende N unidades de una receta: expande a un movimiento de salida por
    * ingrediente. Un ingrediente bloqueante sin stock deja que
    * registrarMovimiento lance su validación de "salida no negativa" —
@@ -3411,81 +3549,28 @@ export class ItemsService {
       params.tenantId,
       params.recetaItemId,
     );
-    const omitidos = new Set(params.snapshot?.omitidos ?? []);
-    const ingredientes = ingredientesBase.filter(
-      (ing) => !omitidos.has(ing.ingredienteItemId),
+    // Hoy el fallback de unidad que documenta `expandirIngredientesPersonalizados`
+    // no se alcanza —todo snapshot se re-resuelve contra la carta viva en esta
+    // misma transacción, así que un extra fuera de carta ya falló con 400 más
+    // arriba—, pero la dependencia entre unidad de stock y carta no tenía por
+    // qué existir.
+    const extrasCat = await this.catalogoDeExtras(
+      manager,
+      params.tenantId,
+      params.snapshot?.extras.map((e) => e.ingredienteItemId) ?? [],
     );
 
-    // La unidad de STOCK de un extra es propiedad del ingrediente
-    // (`item_producto.unidad_medida`), no de la lista de extras de la receta.
-    // Resolverla desde el catálogo de extras la ataba a que el extra siguiera
-    // en la carta, con un fallback a la unidad de la PORCIÓN que hacía que
-    // `convertirUnidad` convirtiera una unidad a sí misma (20 g de queso
-    // descontados como 20 kg). Hoy ese fallback no se alcanza —todo snapshot se
-    // re-resuelve contra la carta viva en esta misma transacción, así que un
-    // extra fuera de carta ya falló con 400 más arriba—, pero la dependencia
-    // entre unidad de stock y carta no tenía por qué existir.
-    const idsExtras = [
-      ...new Set(params.snapshot?.extras.map((e) => e.ingredienteItemId) ?? []),
-    ];
-    const extrasCatRows: {
-      item_id: string;
-      nombre: string;
-      unidad_medida: string;
-    }[] = idsExtras.length
-      ? await manager.query(
-          `SELECT i.item_id, i.nombre, ip.unidad_medida
-             FROM items i
-             JOIN item_producto ip ON ip.item_id = i.item_id
-            WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
-              AND i.eliminado_el IS NULL`,
-          [idsExtras, params.tenantId],
-        )
-      : [];
-    const extrasCat = new Map(extrasCatRows.map((r) => [r.item_id, r]));
-
-    const advertencias: string[] = [];
-
-    const extrasIngredientes = (params.snapshot?.extras ?? []).flatMap(
-      (extra) => {
-        const cat = extrasCat.get(extra.ingredienteItemId);
-        if (!cat) {
-          // Ingrediente borrado del catálogo: no se mueve stock de un ítem que
-          // ya no existe. Mismo criterio que `venderOpcionesGrupos` con una
-          // opción borrada, más la advertencia que aquel no emite.
-          advertencias.push(
-            `${params.recetaNombre}: no se pudo descontar un extra porque su ingrediente ya no está en el catálogo`,
-          );
-          return [];
-        }
-        // Porción del extra × cuántas veces se agregó (unidades). Snapshots
-        // antiguos sin `unidades` equivalen a 1.
-        const cantidad = new Decimal(extra.cantidad)
-          .mul(extra.unidades ?? '1')
-          .toString();
-        return [
-          {
-            ingredienteItemId: extra.ingredienteItemId,
-            ingredienteNombre: cat.nombre,
-            ingredienteUnidadMedida: cat.unidad_medida,
-            cantidad,
-            unidadCodigo: extra.unidadCodigo,
-            bloqueante: false,
-          },
-        ];
-      },
-    );
-
-    // Ordenado por id, no concatenado: `ingredientes` viene ordenado de la
-    // query, pero `extrasIngredientes` sale del snapshot —o sea del orden en
-    // que el cliente agregó los extras al carrito—, así que pegarlos uno detrás
-    // del otro devolvía el orden del cliente a la mitad del bloqueo. Es el
-    // mismo defecto que en `venderOpcionesGrupos`, un nivel adentro.
-    // Efecto lateral aceptado: el orden de las advertencias de stock ahora es
-    // por id y no el del snapshot. Determinista, que es lo que se busca.
-    const todosIngredientes = [...ingredientes, ...extrasIngredientes].sort(
-      (a, b) => a.ingredienteItemId.localeCompare(b.ingredienteItemId),
-    );
+    // El orden por id (y no el del snapshot) lo fija la expansión compartida:
+    // es el orden de bloqueo. Efecto lateral aceptado: el orden de las
+    // advertencias de stock es por id y no el del snapshot. Determinista, que
+    // es lo que se busca.
+    const { ingredientes: todosIngredientes, advertencias } =
+      this.expandirIngredientesPersonalizados({
+        ingredientesBase,
+        extrasCat,
+        snapshot: params.snapshot,
+        recetaNombre: params.recetaNombre,
+      });
 
     for (const ing of todosIngredientes) {
       const cantidadPorReceta = new Decimal(ing.cantidad)
@@ -3816,6 +3901,303 @@ export class ItemsService {
         ventaId: params.ventaId,
       });
     }
+  }
+
+  /**
+   * Cuánto consume de cada ingrediente o producto un conjunto de líneas ya
+   * pedidas. **No escribe nada**: es la pregunta que `venderIngredientesReceta`
+   * y `venderComponentesCombo` no saben contestar porque solo saben ejecutar.
+   *
+   * La clave del `Map` es el `itemId` del ingrediente o producto **consumido**,
+   * y la cantidad está en la unidad de STOCK de ese ítem (`item_producto.unidad_medida`),
+   * ya convertida. `bloqueante` es `false` si **alguna** de las líneas lo
+   * consume de forma no bloqueante: el más permisivo gana, porque si un solo
+   * camino no frena, no frena.
+   *
+   * ## Qué comparte con los tres caminos de expansión que ya existen
+   *
+   * | | Común | Propio de cada uno |
+   * |---|---|---|
+   * | `venderIngredientesReceta` | omitidos + extras (`expandirIngredientesPersonalizados`), `cantidad × pedido` y la conversión a la unidad de stock | el `FOR UPDATE` por fila, el orden de bloqueo, degradar a advertencia lo no bloqueante |
+   * | `venderComponentesCombo` | `cantidad del componente × pedido`, servicio sin efecto, receta que se re-expande | el pre-chequeo de disponibilidad del componente no bloqueante y el filtro de `componentesOmitidos` que de él se deriva |
+   * | `venderOpcionesGrupos` | `cantidad × unidades × pedido` y que solo un `ingrediente` convierte de unidad | que toda opción propaga el error (no existe "no bloqueante" ahí) |
+   * | `calcularDisponibilidadBatch` | leer en lote con `= ANY($1)` en vez de por fila | que solo mira lo **bloqueante** y que tolera una unidad rota devolviendo 0 |
+   *
+   * Lo común de la primera fila **está extraído de verdad**
+   * (`expandirIngredientesPersonalizados`), que es la parte cara de equivocarse:
+   * qué ingredientes quedan después de la personalización. Lo demás es
+   * aritmética de una línea y vive acá y allá, porque compartirlo obligaría a
+   * meter en la función pura el manejo de errores que solo tiene sentido cuando
+   * se escribe.
+   *
+   * ## Enfoque (la decisión del paso 2 del brief)
+   *
+   * **Se carga en lote y se expande en JS**, no se expande en SQL leyendo el
+   * `jsonb` de `personalizacion`. Es la opción que no duplica la lógica de
+   * personalización —reusa `expandirIngredientesPersonalizados`, la misma que
+   * usa la venta—, y cuesta consultas de más, no una consulta por línea: el
+   * total es **constante en la cantidad de líneas** (a lo sumo cinco), porque
+   * cada nivel de la expansión se resuelve con un `= ANY($1)` sobre todos los
+   * ids de ese nivel. Expandir en SQL habría sido una segunda implementación
+   * del snapshot, en un lenguaje donde el primer error se ve en producción.
+   *
+   * El anidamiento tiene fondo, y por eso los niveles son fijos: un ingrediente
+   * de receta siempre es `producto`/`ingrediente` (la consulta hace `JOIN
+   * item_producto`), y una opción de grupo que es receta se expande sin
+   * snapshot propio. No hay recursión sin fondo que batchear.
+   *
+   * ⚠️ **Una unidad que ya no se puede convertir hace lanzar `BadRequestException`**,
+   * igual que en la venta. `calcularDisponibilidadBatch` toma la decisión
+   * contraria a propósito (tolera y cuenta 0) porque cuelga de `GET /items` y un
+   * throw ahí dejaba al tenant sin menú; quien llame desde un listado tiene que
+   * decidir qué hace con ese error, no heredarlo por descuido.
+   */
+  async consumoDeLineas(
+    tenantId: string,
+    lineas: LineaConsumo[],
+    convertir?: ConvertirUnidad,
+  ): Promise<Map<string, ConsumoDeItem>> {
+    const consumo = new Map<string, ConsumoDeItem>();
+    if (!lineas.length) return consumo;
+
+    const conv = convertir ?? (await this.catalogService.crearConversor());
+
+    const sumar = (
+      itemId: string,
+      cantidad: string,
+      bloqueante: boolean,
+    ): void => {
+      const previo = consumo.get(itemId);
+      consumo.set(itemId, {
+        cantidad: (previo?.cantidad ?? new Decimal(0)).plus(cantidad),
+        // El más permisivo gana: basta que un camino no frene para que el
+        // conjunto no frene.
+        bloqueante: (previo?.bloqueante ?? true) && bloqueante,
+      });
+    };
+
+    // 1) Tipo de cada ítem pedido: decide si la línea se consume a sí misma
+    //    (producto) o si se expande (receta/combo).
+    const tipoRows: { item_id: string; tipo: string }[] = await this.db.query(
+      `SELECT item_id, tipo FROM items
+        WHERE item_id = ANY($1::uuid[]) AND tenant_id = $2
+          AND eliminado_el IS NULL`,
+      [[...new Set(lineas.map((l) => l.itemId))], tenantId],
+    );
+    const tipos = new Map(tipoRows.map((r) => [r.item_id, r.tipo]));
+
+    /**
+     * Los grupos que una línea consume. Los de sus componentes solo cuentan en
+     * un combo — `venderIngredientesReceta` ignora `snapshot.componentes`. Se
+     * usa para juntar los ids Y para acumular, así que las dos pasadas no
+     * pueden discrepar.
+     */
+    const gruposDeLinea = (linea: LineaConsumo): SnapshotGrupo[] => {
+      const propios = linea.personalizacion?.grupos ?? [];
+      if (tipos.get(linea.itemId) !== 'combo') return propios;
+      return [
+        ...propios,
+        ...(linea.personalizacion?.componentes ?? []).flatMap((c) => c.grupos),
+      ];
+    };
+
+    // 2) Componentes de todos los combos pedidos, en una consulta.
+    const comboIds = lineas
+      .filter((l) => tipos.get(l.itemId) === 'combo')
+      .map((l) => l.itemId);
+    const componenteRows: {
+      combo_item_id: string;
+      componente_item_id: string;
+      tipo: string;
+      cantidad: string;
+      bloqueante: boolean;
+    }[] = comboIds.length
+      ? await this.db.query(
+          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo,
+                  cc.cantidad, cc.bloqueante
+             FROM combo_componentes cc
+             JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+            WHERE cc.combo_item_id = ANY($1::uuid[]) AND cc.tenant_id = $2
+              AND cc.eliminado_el IS NULL`,
+          [[...new Set(comboIds)], tenantId],
+        )
+      : [];
+    const componentes = new Map<string, typeof componenteRows>();
+    for (const r of componenteRows) {
+      componentes.set(r.combo_item_id, [
+        ...(componentes.get(r.combo_item_id) ?? []),
+        r,
+      ]);
+    }
+
+    // 3) Catálogo de TODAS las opciones de grupo elegidas, en una consulta: qué
+    //    es cada una y en qué unidad se guarda su stock. `LEFT JOIN` porque una
+    //    opción puede ser una receta, que no tiene fila en `item_producto`.
+    const opcionIds = lineas.flatMap((l) =>
+      gruposDeLinea(l).flatMap((g) => g.opciones.map((op) => op.itemId)),
+    );
+    const opcionRows: {
+      item_id: string;
+      tipo: string;
+      unidad_medida: string | null;
+    }[] = opcionIds.length
+      ? await this.db.query(
+          `SELECT i.item_id, i.tipo, ip.unidad_medida
+             FROM items i
+             LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+            WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+              AND i.eliminado_el IS NULL`,
+          [[...new Set(opcionIds)], tenantId],
+        )
+      : [];
+    const opcionesCat = new Map(opcionRows.map((r) => [r.item_id, r]));
+
+    // 4) Ingredientes de TODAS las recetas que van a expandirse —pedidas
+    //    directo, como componente de un combo o como opción de un grupo— en una
+    //    consulta. Los tres orígenes se juntan antes de consultar justamente
+    //    para que sea una y no tres.
+    const recetaIds = [
+      ...new Set([
+        ...lineas
+          .filter((l) => tipos.get(l.itemId) === 'receta')
+          .map((l) => l.itemId),
+        ...componenteRows
+          .filter((r) => r.tipo === 'receta')
+          .map((r) => r.componente_item_id),
+        ...opcionRows.filter((r) => r.tipo === 'receta').map((r) => r.item_id),
+      ]),
+    ];
+    const ingredientesPorReceta = await this.obtenerIngredientesRecetaPorIds(
+      this.db,
+      tenantId,
+      recetaIds,
+    );
+
+    // 5) Catálogo de los extras de todos los snapshots, en una consulta.
+    const extrasCat = await this.catalogoDeExtras(
+      this.db,
+      tenantId,
+      lineas.flatMap(
+        (l) => l.personalizacion?.extras.map((e) => e.ingredienteItemId) ?? [],
+      ),
+    );
+
+    const acumularReceta = (
+      recetaItemId: string,
+      cantidadPedida: string,
+      personalizacion: PersonalizacionRecetaSnapshot | null,
+      bloqueanteDelContexto: boolean,
+    ): void => {
+      const { ingredientes } = this.expandirIngredientesPersonalizados({
+        ingredientesBase: ingredientesPorReceta.get(recetaItemId) ?? [],
+        extrasCat,
+        snapshot: personalizacion ?? undefined,
+        // Solo alimenta advertencias, que acá se descartan: preguntar cuánto se
+        // consumiría no le avisa nada a nadie.
+        recetaNombre: '',
+      });
+      for (const ing of ingredientes) {
+        const cantidad = new Decimal(ing.cantidad)
+          .mul(cantidadPedida)
+          .toString();
+        sumar(
+          ing.ingredienteItemId,
+          conv(cantidad, ing.unidadCodigo, ing.ingredienteUnidadMedida),
+          ing.bloqueante && bloqueanteDelContexto,
+        );
+      }
+    };
+
+    const acumularGrupos = (
+      grupos: SnapshotGrupo[],
+      cantidadPedida: string,
+    ): void => {
+      for (const op of grupos.flatMap((g) => g.opciones)) {
+        const cat = opcionesCat.get(op.itemId);
+        // Opción borrada del catálogo: no consume stock de un ítem que ya no
+        // existe. Mismo criterio que `venderOpcionesGrupos`.
+        if (!cat || cat.tipo === 'servicio') continue;
+        const cantidadTotal = new Decimal(op.cantidad)
+          .mul(op.unidades)
+          .mul(cantidadPedida)
+          .toString();
+        if (cat.tipo === 'receta') {
+          acumularReceta(op.itemId, cantidadTotal, null, true);
+          continue;
+        }
+        // Una opción de grupo SIEMPRE bloquea: `venderOpcionesGrupos` propaga
+        // el error de stock sin capturarlo, no existe ahí el "no bloqueante"
+        // de los ingredientes de receta ni el de los componentes de combo.
+        sumar(
+          op.itemId,
+          cat.tipo === 'ingrediente' && op.unidadCodigo
+            ? conv(cantidadTotal, op.unidadCodigo, cat.unidad_medida!)
+            : cantidadTotal,
+          true,
+        );
+      }
+    };
+
+    for (const linea of lineas) {
+      const tipo = tipos.get(linea.itemId);
+      // Ítem borrado o de otro tenant: no consume nada.
+      if (!tipo) continue;
+      if (tipo === 'servicio' || tipo === 'suscripcion') continue;
+
+      if (tipo === 'receta') {
+        acumularReceta(
+          linea.itemId,
+          linea.cantidad,
+          linea.personalizacion,
+          true,
+        );
+      } else if (tipo === 'combo') {
+        for (const comp of componentes.get(linea.itemId) ?? []) {
+          if (comp.tipo === 'servicio') continue;
+          const cantidadTotal = new Decimal(comp.cantidad)
+            .mul(linea.cantidad)
+            .toString();
+          if (comp.tipo === 'receta') {
+            // Sin snapshot: la personalización de un componente vive en
+            // `snapshot.componentes[].grupos`, que se acumula abajo.
+            acumularReceta(
+              comp.componente_item_id,
+              cantidadTotal,
+              null,
+              comp.bloqueante,
+            );
+          } else {
+            sumar(comp.componente_item_id, cantidadTotal, comp.bloqueante);
+          }
+        }
+      } else {
+        // ⚠️ Una línea `tipo='ingrediente'` se reserva acá pero la venta la
+        // RECHAZA al cerrar (un ingrediente no tiene clasificación tributaria).
+        // Es preexistente y no se arregla acá: abre otro frente.
+        //
+        // producto o ingrediente: la línea se consume a sí misma. `cantidad` ya
+        // viene en la unidad base del ítem (la venta la resuelve antes, ver
+        // `cantidadCanonica` en `ventas.service.ts`), así que no se convierte.
+        sumar(linea.itemId, linea.cantidad, true);
+      }
+
+      // Los grupos NO se multiplican por la cantidad del componente: el
+      // snapshot ya los enumera por unidad. Se pasan la cantidad de la línea,
+      // igual que `venderComponentesCombo`.
+      //
+      // ⚠️ Esto corre para TODA línea, `producto`/`ingrediente` incluidos, y la
+      // venta no las expande así: `venderIngredientesReceta` y
+      // `venderComponentesCombo` son los únicos que miran los grupos. Hoy es
+      // inalcanzable —`salones.service.ts:673` rechaza con 400 la
+      // personalización sobre algo que no sea receta o combo, así que un
+      // producto nunca llega acá con grupos—. **Si ese guard se relaja, esta
+      // línea hace que reservar y descontar divergan**: se apartaría stock de
+      // una opción que después nadie descuenta. Es el único eje que esta
+      // feature no puede permitirse, porque la divergencia no tira error.
+      acumularGrupos(gruposDeLinea(linea), linea.cantidad);
+    }
+
+    return consumo;
   }
 
   // ── private helpers ────────────────────────────────────────────────────────

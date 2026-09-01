@@ -82,7 +82,7 @@ gasta queso, la que lleva doble carne gasta el doble, y un combo se abre en sus 
   es `false` si **alguna** de las líneas lo consume de forma no bloqueante (el más
   permisivo gana: si un solo camino no frena, no frena).
 
-- [ ] **Paso 1: leer los tres caminos de expansión que ya existen y anotar qué comparten**
+- [x] **Paso 1: leer los tres caminos de expansión que ya existen y anotar qué comparten**
 
 Leer, sin escribir nada todavía: `venderIngredientesReceta` (`:3389`),
 `venderComponentesCombo`, y `calcularDisponibilidadBatch` (`:3903`). Anotar en el mismo
@@ -90,7 +90,7 @@ commit, como comentario del docblock de `consumoDeLineas`, **qué parte de la ex
 común y cuál no**. Esto no es ceremonia: el repo ya pagó caro tener dos expansiones que
 derivan.
 
-- [ ] **Paso 2: decidir y ESCRIBIR la decisión antes de implementar**
+- [x] **Paso 2: decidir y ESCRIBIR la decisión antes de implementar**
 
 Elegir entre: (a) una consulta agregada que expanda en SQL leyendo el `jsonb` de
 `personalizacion`; (b) cargar las líneas y expandir en JS reusando lo que ya existe. Escribir
@@ -98,7 +98,7 @@ la decisión y su porqué en el docblock. **Criterio:** gana lo que no duplique 
 personalización, aunque cueste una query más. Si la opción elegida no puede batchearse sin
 N+1, **parar y reportar** en vez de aceptar el N+1.
 
-- [ ] **Paso 3: escribir el test que falla — la personalización manda**
+- [x] **Paso 3: escribir el test que falla — la personalización manda**
 
 ```ts
 it('una línea que omite un ingrediente no lo consume', async () => {
@@ -110,29 +110,29 @@ it('una línea que omite un ingrediente no lo consume', async () => {
 });
 ```
 
-- [ ] **Paso 4: correr el test y confirmar que falla**
+- [x] **Paso 4: correr el test y confirmar que falla**
 
 ```bash
 cd backend && npx jest items.service.spec -t 'omite un ingrediente'
 ```
 Esperado: FAIL, `service.consumoDeLineas is not a function`.
 
-- [ ] **Paso 5: implementar según lo decidido en el paso 2**
+- [x] **Paso 5: implementar según lo decidido en el paso 2**
 
-- [ ] **Paso 6: agregar los casos que la expansión tiene que cubrir**
+- [x] **Paso 6: agregar los casos que la expansión tiene que cubrir**
 
 Uno por cada forma, porque son caminos distintos y un solo test no los toca: producto suelto
 (consumo directo), receta simple, receta con extra pagado, combo con componentes, opción de
 grupo elegida, y **dos líneas del mismo ingrediente que se suman**. Más uno de conversión de
 unidades (una receta en gramos sobre un ingrediente en kilos).
 
-- [ ] **Paso 7: correr los tests y el gate**
+- [x] **Paso 7: correr los tests y el gate**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test
 ```
 
-- [ ] **Paso 8: commit**
+- [x] **Paso 8: commit**
 
 ```bash
 git add backend/src/modules/items/items.service.ts backend/src/modules/items/items.service.spec.ts
