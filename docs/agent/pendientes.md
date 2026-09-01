@@ -626,24 +626,58 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   nunca tuvo el prop, así que ahí el ×10 ya no puede venir de un decimal legítimo.
 
   **Lo que queda abierto de esta entrada, tras ese recorte:**
-  1. Que `MoneyInput` **rechace** una cadena inválida en 0 decimales en vez de inventar un
-     número. Es la mitad que el owner decidió en concepto y no está construida: toca el
-     contrato del componente y obliga a reescribir 3 tests que hoy documentan el bug.
-  2. El **barrido de los `:decimales="4"` restantes** — recontados el 2026-08-28 (mismo
-     grep, corrido de nuevo tras el cierre del frente de la merma sin costo tipeado ese
-     mismo día): quedan **6**, todos en `items.vue` (`:1620`, `:1691`, `:1823`, `:1969`,
-     `:2121`, `:2344`). `mermas.vue:468` **ya no cuenta**: ese campo de costo se sacó
-     entero del formulario (ver el 📌 de abajo), así que no hay prop que barrer ahí. ⚠️ Y el
-     criterio para sacar el prop **cambió**: no alcanza con que el campo tenga selector de
-     unidad, tiene que ser un selector que gobierne **solo el costo**. Ejemplo ya medido —
-     por qué `mermas.vue` no se resolvía sacando el prop sin más, sino sacando el campo
-     entero: ahí el mismo selector gobernaba la cantidad y el costo a la vez, así que mermar
-     100 g de un producto en kilos arrastraba el costo a `6,5`/g, que en CLP no existe — y
-     sacando solo el prop el POST llevaba `"7"` en vez de `"6.5"`, **7,69% de
+
+  ✅ **El PEGADO se atajó el 2026-09-01** (`MoneyInput.onPaste` + `parseMontoPegado`, puro y
+  con sus casos en `currency-format.spec.ts`). Ahí la cadena llega entera, así que la
+  agrupación se puede juzgar: `1.500` agrupa de a 3 y es mil quinientos, `1000.5` no agrupa
+  nada y ese punto era el decimal. Cuando el valor cabe en la escala del campo se reescribe
+  con el separador de la moneda; cuando no cabe **no se guarda nada** —ni redondeado ni
+  recortado, que son las dos formas de guardar un número que nadie escribió, y recortar es
+  justo lo que hacía el intento revertido—. Lo que decide es el valor y no el largo de la
+  cola: `1.500,00` son mil quinientos y entra en pesos.
+
+  ⚠️ **No digas que el pegado "está cerrado": cubre el que REEMPLAZA el campo entero.**
+  Medido el 2026-09-01 por la revisión independiente, con el fix puesto: con el caret al
+  final y sin seleccionar, pegar `1000.5` sobre un `750` deja `75010005`. Es límite
+  deliberado —el texto que queda no es el del portapapeles, así que opinar sería adivinar—
+  y tiene su test con el `75010005` adentro, pero es un camino vivo. La otra condición:
+  solo se opina sobre **dígitos y los dos separadores de la moneda** (más el espacio que
+  agrupa y el signo, que se normalizan), así que un `(1.000,5)` contable sigue dando
+  `10005`. Queda además la ambigüedad que ninguna lectura
+  resuelve: `12.345` en un campo de 4 decimales es `12345` en es-CL y `12,345` en en-US, y
+  el componente elige siempre la chilena.
+
+  1. **El TECLEO sigue abierto, y ahora se sabe por qué no se puede desde el input.** La
+     información no está ahí: `1`,`.`,`5`,`0`,`0` (mil quinientos) y `1`,`0`,`0`,`.`,`5`
+     (ochocientos y medio) son el **mismo gesto**, y lo único que los separa son los dígitos
+     que siguen al punto — que maska ya colapsó cuando llegan. Medido el 2026-09-01 contra
+     el helper `tipear` del spec: la heurística "separador seguido de 1 o 2 dígitos" tampoco
+     sirve, porque la produce **el backspace** sobre un número ya agrupado (`1.234` →
+     `1.23`), que tiene su propio test. Lo que queda no es un parche de máscara sino una de
+     dos decisiones de producto, y las dos son del owner: **(a)** mostrar el monto de vuelta
+     como confirmación antes de guardar —no depende de maska y cubre tecleo *y* pegado—, o
+     **(b)** el selector de unidad del punto 2.
+  2. ⚠️ **Los 6 `:decimales="4"` de `items.vue` NO se barren: sacarlos rompe.** Esta entrada
+     decía lo contrario y estaba mal — medido el 2026-09-01 leyendo el DTO, no la pantalla.
+     Los seis campos son `@EsCosto()` (escala 4) en el backend **a propósito** y está escrito
+     en `create-item.dto.ts:163-167`: son dinero **por unidad**, una tasa, y la frontera
+     tasa→monto se cruza al multiplicar por la cantidad, no en el campo. Cuantizar un precio
+     por gramo a peso entero mete **error ×1000 al vender un kilo**. El prop está espejando
+     al backend, que es su trabajo.
+     Lo que la regla del owner del 2026-08-28 pide no es sacar el prop sino **dar la
+     precisión eligiendo la unidad**: el campo sigue los decimales de la moneda del ítem y
+     el costo se expresa por kilo en vez de por gramo. Eso es cambio de producto en 6
+     lugares de `items.vue`, con su propio diseño, y arrastra el criterio que ya costó una
+     medición: el selector tiene que gobernar **solo el precio**. Ejemplo medido — en
+     `mermas.vue` el mismo selector gobernaba la cantidad y el costo a la vez, así que mermar
+     100 g de un producto en kilos arrastraba el costo a `6,5`/g, que en CLP no existe, y
+     sacando solo el prop el POST llevaba `"7"` en vez de `"6.5"`: **7,69% de
      sobrevaloración**, sin que nadie tocara el campo porque venía prefilleado. `MoneyInput`
      no avisaba: **redondeaba y emitía en silencio** (el `watch` solo escribía `display`,
      pero ese `display` entraba al `<input>` con `v-maska`, disparaba `onMaska` y emitía).
      Eso corrige el §4 de la spec, que daba por bueno lo contrario.
+     📌 Las líneas de los 6 se corrieron al crecer el archivo: hoy son `:1636`, `:1707`,
+     `:1839`, `:1985`, `:2137` y `:2360`. `mermas.vue:468` no cuenta (ver el 📌 de abajo).
   3. `ReembolsoModal` (moneda del tenant contra una orden siempre CLP) — ortogonal, sigue.
 
   📌 **El caso de `mermas.vue` se resolvió en un frente propio, ya cerrado el 2026-08-28:**

@@ -412,12 +412,30 @@ Reglas:
 - `MoneyInput` bloquea tipear más decimales de los que la moneda resuelta admite
   (`number.fraction` de maska) — la contraparte en pantalla del rechazo 400 del backend
   (`EscalaMonedaPipe`).
-  ⚠️ **Limitación conocida:** en una moneda con miles `.`, maska lee ese punto como
-  agrupador, así que teclear `1000.5` en CLP da `10005` **y se guarda** (ver el bullet
-  de arriba: ningún 400 lo ataja). NO intentar taparlo desde el input: ya se probó con
-  un `preProcess` con memoria de la última tecla y salió peor (rompía el caso chileno
-  normal `1.500` → `1`, o sea montos válidos y MENORES guardados en silencio). El
-  contrato exacto está fijado en `MoneyInput.spec.ts`, describe "limitación conocida".
+  ⚠️ **Limitación conocida, y solo en el TECLEO:** en una moneda con miles `.`, maska
+  lee ese punto como agrupador, así que teclear `1000.5` en CLP da `10005` **y se
+  guarda** (ver el bullet de arriba: ningún 400 lo ataja). NO intentar taparlo desde el
+  input: ya se probó con un `preProcess` con memoria de la última tecla y salió peor
+  (rompía el caso chileno normal `1.500` → `1`, o sea montos válidos y MENORES guardados
+  en silencio). **La información no está ahí**: `1`,`.`,`5`,`0`,`0` (mil quinientos) y
+  `1`,`0`,`0`,`.`,`5` (ochocientos y medio) son el mismo gesto, y lo único que los
+  separa son los dígitos que siguen al punto, que maska ya colapsó cuando llegan. El
+  contrato está fijado en `MoneyInput.spec.ts`, describe "limitación conocida".
+  ✅ **El PEGADO está atajado desde el 2026-09-01, con límites que conviene saber.**
+  Ahí la cadena llega entera, así que la agrupación se puede juzgar: `MoneyInput`
+  escucha el evento `paste` y decide con `parseMontoPegado` (puro, en
+  `utils/currency-format.ts`), que reescribe cuando el valor cabe en la escala del campo
+  y **rechaza sin guardar nada** cuando no cabe. No redondea ni recorta: las dos guardan
+  un número que nadie escribió. Lo que decide es el **valor**, no cuántos caracteres
+  trae la cola —`1.500,00` en pesos son mil quinientos y entra—.
+  ⚠️ **Cubre el pegado que REEMPLAZA el campo entero, y solo cadenas de dígitos con los
+  dos separadores de la moneda** (más el espacio que agrupa y el signo, que se
+  normalizan). Con el caret en medio de lo ya escrito, el texto que queda no es el del
+  portapapeles y el handler no opina; y un `(1.000,5)` contable o dos celdas de una
+  planilla siguen de largo hasta la máscara, con lo que eso da. Ahí sigue pasando lo del
+  tecleo. Y queda una ambigüedad que **no se puede resolver leyendo**:
+  `12.345` en un campo de 4 decimales es `12345` en es-CL y `12,345` en en-US, y el
+  componente elige la chilena — no es que no adivine, es que adivina siempre igual.
   ✅ **El punto fijo con monedas de más de 0 decimales está arreglado (2026-08-21).**
   Hasta entonces `MoneyInput` quedaba **muerto tras la primera tecla** con `decimals > 0`
   (o con el prop `decimales`): el `watch` de `modelValue` reformateaba con

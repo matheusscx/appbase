@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { vMaska } from 'maska/vue'
 import type { MaskaDetail } from 'maska'
-import { formatMontoDisplay } from '~/utils/currency-format'
+import { formatMontoDisplay, parseMontoPegado } from '~/utils/currency-format'
 
 const props = withDefaults(
   defineProps<{
@@ -118,6 +118,12 @@ function syncFromMaska(detail: MaskaDetail) {
  * guardaban en silencio. Revertido. Antes de intentarlo de nuevo, ver en
  * `MoneyInput.spec.ts` el describe "limitación conocida (documentada, no resuelta)"
  * y, sobre todo, el de "tecleo real": cualquier parche tiene que pasar los dos.
+ *
+ * 📌 **Y no es que se haya intentado mal: tecleando la información no existe.**
+ * `1`,`.`,`5`,`0`,`0` y `1`,`0`,`0`,`.`,`5` son el mismo gesto; lo único que los
+ * distingue son los dígitos que siguen al punto, y maska ya colapsó el texto
+ * cuando llegan. Por eso el arreglo que sí se pudo hacer vive en `onPaste`, que
+ * es el camino donde la cadena entra entera.
  */
 const maskaOptions = computed(() => {
   const c = cfg.value
@@ -131,6 +137,46 @@ const maskaOptions = computed(() => {
     onMaska: syncFromMaska,
   }
 })
+
+/**
+ * El pegado es el **único** camino donde se puede saber qué quiso decir la
+ * persona, y por eso se ataja acá y no en la máscara.
+ *
+ * Tecleando la información no existe (ver el docblock de `maskaOptions`): en
+ * es-CL, `1`,`.`,`5`,`0`,`0` y `1`,`0`,`0`,`.`,`5` son el mismo gesto y solo los
+ * dígitos que siguen al punto los distinguen — que es justo lo que maska ya
+ * colapsó cuando llegan. Pegando, la cadena entra entera y la agrupación se
+ * puede juzgar: `1.500` agrupa de a 3, `1000.5` no agrupa nada. El veredicto lo
+ * da `parseMontoPegado`, que es puro y tiene sus casos en
+ * `currency-format.spec.ts`.
+ *
+ * ⚠️ **No se redondea ni se recorta lo que no cabe.** Pegar `1000,5` en pesos no
+ * guarda `1001` ni `1000`: no guarda nada y el campo queda como estaba, que es
+ * lo único visible. Recortar en silencio es exactamente lo que hacía el intento
+ * revertido —montos válidos y MENORES guardados sin avisar—.
+ */
+function onPaste(evento: ClipboardEvent) {
+  const c = cfg.value
+  if (!c) return
+  const el = evento.target as HTMLInputElement | null
+  if (!el) return
+  // Solo cuando el pegado REEMPLAZA el campo entero. Pegar sobre parte de lo ya
+  // escrito produce un texto que no es el del portapapeles, y ahí volver a
+  // opinar sería adivinar.
+  const reemplazaTodo = el.selectionStart === 0 && el.selectionEnd === el.value.length
+  if (!reemplazaTodo) return
+
+  const veredicto = parseMontoPegado(evento.clipboardData?.getData('text') ?? '', c)
+  if (veredicto.tipo === 'sin-cambios') return
+
+  evento.preventDefault()
+  if (veredicto.tipo === 'rechazado') return
+
+  // Reescrito con el separador decimal de la moneda: maska lo lee bien y el
+  // camino de emitir sigue siendo el de siempre (`syncFromMaska`).
+  el.value = veredicto.texto
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+}
 
 watch(
   [() => props.modelValue, cfg],
@@ -170,5 +216,6 @@ watch(
     :class="props.class"
     inputmode="decimal"
     autocomplete="off"
+    @paste="onPaste"
   />
 </template>

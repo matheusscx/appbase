@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
-import { ref, type Ref } from 'vue'
+import { nextTick, ref, type Ref } from 'vue'
 import MoneyInput from './MoneyInput.vue'
 import type { MonedaTenantApi } from '~/types/moneda'
 
@@ -116,6 +116,27 @@ async function tipear(input: DOMWrapper<HTMLInputElement>, teclas: string[]) {
     // Secuencial a propósito: cada tecla depende del DOM que dejó la anterior.
     await input.setValue(input.element.value + tecla)
   }
+}
+
+/**
+ * Simula un pegado real, que NO es un `setValue`: lo que distingue pegar de
+ * tipear es el **evento**, y es toda la información que hace resoluble este caso
+ * (ver `parseMontoPegado`). Un `setValue` entra por el mismo camino que una
+ * tecla, así que un test que use `setValue` no puede probar nada de esto.
+ *
+ * happy-dom no trae un `ClipboardEvent` con datos ni inserta el texto solo, así
+ * que las dos mitades se arman acá: el evento con su `clipboardData`, y —si
+ * nadie lo frenó— la inserción que el navegador haría después.
+ */
+async function pegar(input: DOMWrapper<HTMLInputElement>, texto: string) {
+  const el = input.element
+  el.setSelectionRange(0, el.value.length)
+  const evento = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(evento, 'clipboardData', { value: { getData: () => texto } })
+  el.dispatchEvent(evento)
+  await nextTick()
+  if (!evento.defaultPrevented) await input.setValue(texto)
+  await nextTick()
 }
 
 /** Simula un backspace: le saca el último carácter al valor actual del input. */
@@ -310,6 +331,87 @@ describe('MoneyInput', () => {
     })
   })
 
+  describe('pegado: el único camino donde se puede saber qué quiso decir', () => {
+    // La escena: un costo copiado de una planilla. Es el camino más probable en
+    // un campo de 4 decimales, justamente porque ahí el decimal es legítimo.
+    it('en un campo de 4 decimales, pegar "1000.5" guarda 1000.5 y no 10005', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1', decimales: 4 })
+
+      await pegar(input, '1000.5')
+
+      expect(modelo.value).toBe('1000.5')
+    })
+
+    // En el peso el monto no existe, así que no hay nada correcto que guardar:
+    // redondear a 1001 o recortar a 1000 son las dos formas de guardar un número
+    // que nadie escribió, y recortar es exactamente lo que hacía el intento
+    // revertido. El campo se queda como estaba y se ve que el pegado no entró.
+    it('en CLP, pegar "1000.5" no guarda nada: el peso no tiene decimales', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' }, '750')
+
+      await pegar(input, '1000.5')
+
+      expect(modelo.value).toBe('750')
+    })
+
+    it('en CLP, pegar "1000,5" tampoco: la coma es su decimal y tampoco cabe', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' }, '750')
+
+      await pegar(input, '1000,5')
+
+      expect(modelo.value).toBe('750')
+    })
+
+    // Ancla del otro lado, y la que rompió el intento anterior: en Chile "1.500"
+    // ES mil quinientos. Si esto se rompe, el arreglo está guardando de MENOS.
+    it('en CLP, pegar "1.500" sigue siendo mil quinientos', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
+
+      await pegar(input, '1.500')
+
+      expect(modelo.value).toBe('1500')
+    })
+
+    it('un pegado PARCIAL no se toca: el texto que queda no es el del portapapeles', async () => {
+      // Límite deliberado, y anotado como tal en las docs: con el caret en medio
+      // de lo ya escrito, lo que queda en el campo no es lo que llegó pegado, y
+      // volver a opinar sería adivinar. Este test existe para que el límite se
+      // vea, no para bendecirlo.
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' }, '750')
+      const el = input.element
+      el.setSelectionRange(el.value.length, el.value.length)
+      const evento = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(evento, 'clipboardData', { value: { getData: () => '1000.5' } })
+      el.dispatchEvent(evento)
+      await nextTick()
+
+      expect(evento.defaultPrevented).toBe(false)
+      // Y el navegador inserta, como en cualquier pegado que nadie frena. Lo que
+      // queda medido —y no solo narrado en las docs— es la consecuencia: los dos
+      // números se pegan y sale un monto que no es ninguno de los dos.
+      await input.setValue(el.value + '1000.5')
+      expect(modelo.value).toBe('75010005')
+    })
+
+    it('en CLP, pegar "1.500,00" guarda mil quinientos y no ciento cincuenta mil', async () => {
+      // El entero como lo escribe cualquier planilla. Con `fraction: 0` la
+      // máscara se comía los dos separadores y salía 150000, ×100.
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
+
+      await pegar(input, '1.500,00')
+
+      expect(modelo.value).toBe('1500')
+    })
+
+    it('en USD, pegar "1000.5" pasa derecho: ahí el punto ES el decimal', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'usd-1' })
+
+      await pegar(input, '1000.5')
+
+      expect(modelo.value).toBe('1000.5')
+    })
+  })
+
   /**
    * ⚠️ Estos tests DOCUMENTAN una limitación conocida y preexistente. NO la
    * resuelven, y el valor que afirman NO es el deseable: es el que el componente
@@ -334,9 +436,16 @@ describe('MoneyInput', () => {
    *
    * Antes de intentar parchearlo de nuevo: lo que haga falta escribir acá tiene que
    * pasar TODO el describe de "tecleo real" de arriba, montado con `v-model` real.
+   *
+   * ✅ **El PEGADO ya no está acá: se atajó el 2026-09-01** y vive en el describe
+   * "pegado" de arriba. Estos tres siguen siendo del camino de TECLEO —`setValue`
+   * entra por donde entra una tecla, no por donde entra un pegado—, y ahí la
+   * información para distinguir `1.500` de `1000.5` no existe. Lo que cambió es
+   * que ya no son *todo* lo que pasa: el mismo `1000.5` copiado de una planilla
+   * hoy no se guarda.
    */
   describe('limitación conocida (documentada, no resuelta): el separador se lee como miles', () => {
-    it('documenta que en CLP teclear "1000.5" da 10005 — y que eso se guarda, nadie lo rechaza', async () => {
+    it('documenta que en CLP TECLEAR "1000.5" da 10005, y que ahí nadie lo ataja', async () => {
       const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
 
       await tipear(input, ['1', '0', '0', '0', '.', '5'])
@@ -352,7 +461,7 @@ describe('MoneyInput', () => {
       expect(modelo.value).toBe('10005')
     })
 
-    it('documenta que pegar "1000.5" de una sola vez en CLP también da 10005', async () => {
+    it('documenta que SETEAR el valor de una sola vez en CLP también da 10005', async () => {
       const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
 
       await input.setValue('1000.5')
