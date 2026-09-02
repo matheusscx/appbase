@@ -274,22 +274,22 @@ es el de las otras líneas más la cantidad nueva de ésta, no la suma de las do
 - Produces: un ingrediente **no bloqueante** sin stock **no impide pedir**, y su `disponible`
   puede quedar **negativo**.
 
-- [ ] **Paso 1: escribir el e2e**
+- [x] **Paso 1: escribir el e2e**
 
 Receta con un ingrediente bloqueante con stock de sobra y uno no bloqueante en `0`. Pedir el
 plato → `201`. `GET /items` muestra el no bloqueante en negativo.
 
-- [ ] **Paso 2: correr — puede pasar ya, y está bien**
+- [x] **Paso 2: correr — puede pasar ya, y está bien**
 
 Si la Tarea 3 filtró por `bloqueante` como corresponde, este test pasa sin código nuevo. **No
 es un test de más:** fija una decisión explícita del owner que un refactor podría borrar sin
 darse cuenta. Si falla, la Tarea 3 estaba frenando de más.
 
-- [ ] **Paso 3: mutante — hacer que el guard mire también los no bloqueantes**
+- [x] **Paso 3: mutante — hacer que el guard mire también los no bloqueantes**
 
 Confirmar que el e2e se pone rojo. Ése es el valor del test.
 
-- [ ] **Paso 4: gate y commit**
+- [x] **Paso 4: gate y commit**
 
 ---
 
@@ -300,7 +300,7 @@ Es la tarea que fija el argumento entero del enfoque elegido.
 **Files:**
 - Test: `backend/test/reserva-stock-mesa.e2e-spec.ts`
 
-- [ ] **Paso 1: escribir los tres e2e**
+- [x] **Paso 1: escribir los tres e2e**
 
 Con `stock = 1` y la mesa A con la línea puesta (la mesa B rebota):
 1. la mesa A **quita la línea** (sin despachar) → la mesa B ahora puede pedir;
@@ -308,11 +308,11 @@ Con `stock = 1` y la mesa A con la línea puesta (la mesa B rebota):
 3. la mesa A **cierra y cobra** → la mesa B **sigue sin poder**, porque ahora el stock es 0
    de verdad. Este tercero es el que distingue "se soltó" de "se consumió".
 
-- [ ] **Paso 2: correr — los tres tienen que pasar sin código nuevo**
+- [x] **Paso 2: correr — los tres tienen que pasar sin código nuevo**
 
 Si alguno falla, el enfoque tiene un agujero y hay que **parar y reportar**, no parchear.
 
-- [ ] **Paso 3: commit**
+- [x] **Paso 3: commit**
 
 ```bash
 git commit -m "test(salones): soltar la reserva no necesita código, y queda probado"
@@ -329,24 +329,24 @@ git commit -m "test(salones): soltar la reserva no necesita código, y queda pro
 - Produces: con `stock = 1` y dos `POST` de línea **concurrentes**, exactamente uno responde
   `201` y el otro `400`. Nunca los dos `201`.
 
-- [ ] **Paso 1: escribir el e2e concurrente**
+- [x] **Paso 1: escribir el e2e concurrente**
 
 `Promise.all` de los dos `POST`. Afirmar sobre el **conjunto** de status —uno `201`, uno
 `400`—, no sobre cuál ganó: cuál gana es una carrera y fijarlo haría el test intermitente.
 
-- [ ] **Paso 2: correrlo varias veces seguidas**
+- [x] **Paso 2: correrlo varias veces seguidas**
 
 ```bash
 cd backend && for i in 1 2 3 4 5; do npx jest --config ./test/jest-e2e.json --testPathPatterns reserva-stock-mesa -t concurrent; done
 ```
 Un test de concurrencia que se corre una sola vez no probó nada.
 
-- [ ] **Paso 3: si los dos dan `201`, el lock no alcanza — parar y reportar**
+- [x] **Paso 3: si los dos dan `201`, el lock no alcanza — parar y reportar**
 
 No inventar un lock nuevo: el orden de bloqueo de filas es materia del §15 de
 `docs/patterns/backend.md` y tocarlo mal produce deadlocks que ya se pagaron una vez.
 
-- [ ] **Paso 4: gate y commit**
+- [x] **Paso 4: gate y commit**
 
 ---
 

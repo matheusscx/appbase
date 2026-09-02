@@ -230,6 +230,19 @@ describe('Reserva de stock al pedir (e2e)', () => {
   }
 
   /**
+   * Saca la línea de la cuenta. Solo funciona con la línea **sin despachar**
+   * (`cantidad_enviada = 0`): el guard de agosto bloquea quitar lo que ya salió
+   * a cocina, y este spec nunca confirma comanda, así que sus líneas siempre
+   * están de este lado.
+   */
+  async function quitarLinea(cuentaId: string, lineaId: string): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .delete(`/api/cuentas/${cuentaId}/lineas/${lineaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+  }
+
+  /**
    * Cierra sin cobrar (pagos vacíos). Genera la venta `canal='fisico'` —de ahí
    * la caja abierta del `beforeAll`— y con ella el descuento REAL de stock.
    */
@@ -662,6 +675,215 @@ describe('Reserva de stock al pedir (e2e)', () => {
       expect(
         (await filaDelCatalogo(insumo.nombre, insumo.id)).stockDisponible,
       ).toBe('-0.5000');
+    });
+  });
+
+  describe('Tarea 5 — lo no bloqueante ocupa, pero no frena', () => {
+    /**
+     * **La decisión 4 de la spec (§ 4.2), fijada como test.** Un ingrediente en
+     * `bloqueante: false` —la guarnición, la salsa, lo que el local sirve igual
+     * aunque el sistema diga que no queda— **suma al comprometido** pero **no
+     * frena al pedir**. De ahí que su `stockDisponible` pueda quedar negativo, y
+     * que sea correcto mostrarlo: ese número es lo que el encargado repuso de
+     * menos, y clamplearlo a 0 lo escondería.
+     *
+     * Pasa sin código nuevo —la Tarea 3 filtró por `bloqueante` como
+     * correspondía— y **no por eso sobra**: lo que custodia es el
+     * `filter(([, c]) => c.bloqueante)` de `validarStockAlPedir`. Un refactor
+     * que lo borre ("total, si igual suma al comprometido") convierte una
+     * decisión explícita del owner en un rechazo que nadie pidió. Medido con el
+     * mutante (`filter(([, c]) => c.bloqueante || true)`): se ponen rojos **dos**
+     * tests, éste —`400` donde tiene que haber `201`— y el "bajar libera incluso
+     * con el disponible ya en negativo" de la Tarea 4, que **arma** su escenario
+     * con esta misma decisión. Ése lo cubre de rebote y solo mientras siga
+     * necesitando un disponible negativo para existir; éste la afirma de frente.
+     *
+     * Los dos ingredientes van en la misma receta a propósito: con el
+     * bloqueante sobrado, el único motivo posible de un 400 es el otro.
+     */
+    it('un ingrediente no bloqueante en cero no impide pedir, y su disponible queda negativo', async () => {
+      const bloqueante = await crearIngrediente('Insumo que frena', '10');
+      const opcional = await crearIngrediente('Insumo opcional', '0');
+      const nombreReceta = nombreUnico('Plato con guarnición opcional');
+      const { id: recetaId } = await post<IdResponse>('/api/items', {
+        nombre: nombreReceta,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: bloqueante.id,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: opcional.id,
+            cantidad: '2',
+            unidadCodigo: 'unidad',
+            bloqueante: false,
+          },
+        ],
+      });
+
+      const cuentaId = await abrirCuenta();
+      const res = await intentarLinea(cuentaId, recetaId, '1');
+
+      // Entra: del opcional no queda NADA y aun así el pedido pasa.
+      expect(res.status).toBe(201);
+
+      // Y ocupó igual: 0 − 2 = −2. Ocupar y frenar son cosas distintas.
+      expect(
+        (await filaDelCatalogo(opcional.nombre, opcional.id)).stockDisponible,
+      ).toBe('-2.0000');
+      // El bloqueante, en cambio, se reserva como cualquier otro: 10 − 1.
+      expect(
+        (await filaDelCatalogo(bloqueante.nombre, bloqueante.id))
+          .stockDisponible,
+      ).toBe('9.0000');
+    });
+  });
+
+  describe('Tarea 6 — soltar la reserva no necesita código', () => {
+    /**
+     * **El argumento entero del enfoque, puesto a prueba.** La reserva no se
+     * guarda en ningún lado: es `stock − (lo que las cuentas ABIERTAS tienen
+     * pedido)`. Por eso todo lo que hace desaparecer una línea de ese conjunto
+     * —quitarla, cancelar la cuenta, cerrarla— la suelta **sin una sola línea de
+     * código que la suelte**. Si alguno de estos tres fallara, el enfoque
+     * tendría un agujero y habría que rediseñar, no parchear.
+     *
+     * Los tres arrancan igual —`stock = 1`, mesa A adentro, mesa B rebotada— y
+     * se separan en lo que pasa después. El tercero es el que distingue
+     * **soltar** de **consumir**.
+     */
+    it('quitar la línea (sin despachar) suelta la reserva: la mesa B ahora puede pedir', async () => {
+      const producto = await crearProducto('Producto que se devuelve', '1');
+      const cuentaA = await abrirCuenta();
+      const lineaId = await agregarLinea(cuentaA, producto.id, '1');
+
+      const cuentaB = await abrirCuenta(mesaBId);
+      expect((await intentarLinea(cuentaB, producto.id, '1')).status).toBe(400);
+
+      await quitarLinea(cuentaA, lineaId);
+
+      // La línea ya no está en ninguna cuenta abierta → no compromete nada.
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('1.0000');
+      const ahora = await intentarLinea(cuentaB, producto.id, '1');
+      expect(ahora.status).toBe(201);
+    });
+
+    it('cancelar la cuenta suelta la reserva: la mesa B ahora puede pedir', async () => {
+      const producto = await crearProducto('Producto de cuenta cancelada', '1');
+      const cuentaA = await abrirCuenta();
+      await agregarLinea(cuentaA, producto.id, '1');
+
+      const cuentaB = await abrirCuenta(mesaBId);
+      expect((await intentarLinea(cuentaB, producto.id, '1')).status).toBe(400);
+
+      await cancelarCuenta(cuentaA);
+
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('1.0000');
+      const ahora = await intentarLinea(cuentaB, producto.id, '1');
+      expect(ahora.status).toBe(201);
+    });
+
+    /**
+     * **El que distingue "se soltó" de "se consumió", y el único de los tres que
+     * termina en 400.** Al cerrar, la cuenta deja de estar `abierta` —así que la
+     * reserva se suelta, igual que arriba— pero su venta descuenta stock de
+     * verdad: el kardex baja a 0 y la mesa B sigue sin poder pedir. Si el
+     * comprometido no distinguiera `cerrada` de `abierta`, acá se restaría dos
+     * veces; si soltar fuera todo lo que pasa al cerrar, acá entraría un pedido
+     * que no tiene mercadería atrás.
+     *
+     * ⚠️ **Solapa a medias con "cerrar la cuenta descuenta stock de verdad…" de
+     * la Tarea 2, y por eso no lo reemplaza.** Aquél mira los dos números del
+     * catálogo (`stock` y `stockDisponible`) después de cerrar; éste mira lo que
+     * hace el **guard** parado en ese estado, que es el 400 de la mesa B. Son
+     * los dos lados de la misma transición y ninguno implica al otro: el guard
+     * podría leer bien el catálogo y no rechazar igual.
+     *
+     * Lo que consume el stock es **cerrar** (la venta), no el pago: se cierra
+     * con `pagos: []` como el resto del spec, y la venta queda `pendiente` con
+     * el kardex ya movido.
+     */
+    it('cerrar y cobrar NO suelta nada: la mesa B sigue sin poder, porque ya no hay stock', async () => {
+      const producto = await crearProducto('Producto ya cobrado', '1');
+      const cuentaA = await abrirCuenta();
+      await agregarLinea(cuentaA, producto.id, '1');
+
+      const cuentaB = await abrirCuenta(mesaBId);
+      expect((await intentarLinea(cuentaB, producto.id, '1')).status).toBe(400);
+
+      await cerrarCuenta(cuentaA);
+
+      const fila = await filaDelCatalogo(producto.nombre, producto.id);
+      // El stock físico se fue: la venta lo movió.
+      expect(fila.stock).toBe('0.0000');
+      // Y el disponible es ESE stock, no `0 − 1 = −1`: la cuenta cerrada dejó
+      // de comprometer al mismo tiempo que consumió.
+      expect(fila.stockDisponible).toBe('0.0000');
+
+      const sigueRebotando = await intentarLinea(cuentaB, producto.id, '1');
+      expect(sigueRebotando.status).toBe(400);
+      expect(sigueRebotando.message).toContain(producto.nombre);
+    });
+  });
+
+  describe('Tarea 7 — dos garzones pidiendo el último a la vez', () => {
+    /**
+     * **La carrera, tal cual.** Dos `POST` de línea en vuelo al mismo tiempo
+     * sobre un producto con `stock = 1`: exactamente uno entra. Los dos `201`
+     * serían el bug original con otra ropa —la reserva calculada en vez de
+     * guardada no sirve de nada si dos transacciones la leen antes de que la
+     * otra escriba—, y lo que lo cierra es el orden del guard: `FOR UPDATE` sobre
+     * `item_producto` **antes** de leer el comprometido. El segundo espera el
+     * lock, y cuando entra ya ve la línea que el primero commiteó.
+     *
+     * Se afirma sobre el **conjunto** de status, no sobre cuál ganó: quién llega
+     * primero es una carrera y fijarlo haría el test intermitente. Corrido cinco
+     * veces seguidas antes de darlo por bueno — un test de concurrencia que se
+     * corre una vez no probó nada.
+     *
+     * ⚠️ **Lo que prueba y lo que NO, medido.** Prueba la propiedad —nunca los
+     * dos `201`— y que los dos `POST` están de verdad en vuelo a la vez:
+     * inyectando 500 ms de espera dentro del guard, los dos leen el comprometido
+     * en `0` con 47 ms de diferencia y el test se pone rojo con `[201, 201]`.
+     * Pero **no mata al mutante que invierte el orden** (leer el comprometido
+     * ANTES del `FOR UPDATE`): sin esa espera, la ventana real entre leer y
+     * commitear es más chica que el desfase con que llegan las dos requests, así
+     * que la primera ya commiteó cuando la segunda mira. Corrido 5 veces con ese
+     * mutante: 5 verdes. **El orden lo custodia el unitario** "toma el lock de
+     * stock ANTES de leer el comprometido — el orden es el contrato"
+     * (`items.service.spec.ts`), verificado que sí lo mata. Este e2e es la red de
+     * que la propiedad se cumple de punta a punta, no la prueba del mecanismo:
+     * quien afloje el orden acá no se va a enterar por este test.
+     */
+    it('dos POST concurrentes por la última unidad: uno 201 y el otro 400, nunca los dos', async () => {
+      const producto = await crearProducto('Producto disputado', '1');
+      const cuentaA = await abrirCuenta();
+      const cuentaB = await abrirCuenta(mesaBId);
+
+      const [a, b] = await Promise.all([
+        intentarLinea(cuentaA, producto.id, '1'),
+        intentarLinea(cuentaB, producto.id, '1'),
+      ]);
+
+      expect([a.status, b.status].sort()).toEqual([201, 400]);
+      // El que perdió lo hizo por stock, no por un 500 de deadlock disfrazado:
+      // `agregarLinea` reintenta el `40P01`, así que un 400 acá es el guard.
+      const perdedor = a.status === 400 ? a : b;
+      expect(perdedor.message).toContain(producto.nombre);
+
+      // Y quedó apartada UNA unidad, no dos: el disponible es 0, no −1.
+      expect(
+        (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
+      ).toBe('0.0000');
     });
   });
 });
