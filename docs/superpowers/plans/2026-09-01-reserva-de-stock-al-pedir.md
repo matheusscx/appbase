@@ -364,7 +364,7 @@ Implementa la § 4.1b de la spec: el contrato con el frontend cambia.
 - Consumes: `GET /items` con `disponible` presente en productos (Tarea 2).
 - Produces: la pantalla muestra `disponible` cuando existe y cae a `stock` cuando no.
 
-- [ ] **Paso 1: encontrar y listar los consumidores**
+- [x] **Paso 1: encontrar y listar los consumidores**
 
 ```bash
 cd frontend && grep -rn 'disponible' app/ --include='*.vue' --include='*.ts' | grep -v spec
@@ -372,26 +372,26 @@ cd frontend && grep -rn 'disponible' app/ --include='*.vue' --include='*.ts' | g
 Anotar la lista en el commit. **Cerrar en un consumidor no es cerrar**: el texto de la UI es
 uno más.
 
-- [ ] **Paso 2: escribir los tests de pantalla que fallan**
+- [x] **Paso 2: escribir los tests de pantalla que fallan**
 
 Un producto con `disponible: 1` y `stock: 3` tiene que mostrar **1**. Hoy muestra 3.
 
-- [ ] **Paso 3: correr y confirmar que fallan**
+- [x] **Paso 3: correr y confirmar que fallan**
 
-- [ ] **Paso 4: implementar**
+- [x] **Paso 4: implementar**
 
-- [ ] **Paso 5: gate del frontend**
+- [x] **Paso 5: gate del frontend**
 
 ```bash
 cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check
 ```
 
-- [ ] **Paso 6: smoke en el navegador, no solo tests**
+- [x] **Paso 6: smoke en el navegador, no solo tests**
 
 Abrir el POS con un producto de stock 1 tomado por una mesa y confirmar que se ve como no
 disponible. Los tests de pantalla mockean `useApiFetch` y no ven bugs de runtime.
 
-- [ ] **Paso 7: commit**
+- [x] **Paso 7: commit**
 
 ---
 

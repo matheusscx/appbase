@@ -7,6 +7,7 @@ import {
   toCalcularInput,
   toVentaLineasBody,
   descontarStockCatalogo,
+  stockPedible,
   sumaPagos,
   resumenCobro,
   setMontoPago,
@@ -541,6 +542,100 @@ describe('carrito helpers', () => {
     }
     const r = descontarStockCatalogo([receta], [{ item: receta, cantidad: '10' }])
     expect(r[0]!.disponible).toBe(0)
+  })
+})
+
+// ── Lo que queda por pedir vs. lo que hay en la bodega ──────────────────────
+//
+// Desde el 2026-09-01 `GET /items` manda dos números para un producto: `stock`
+// —el saldo materializado del kardex, lo que hay físicamente— y
+// `stockDisponible` —ese stock menos lo que las cuentas abiertas del tenant ya
+// pidieron—. Las pantallas de venta siempre quieren el segundo: mostrar el
+// primero es prometer la última unidad que otra mesa ya se llevó.
+//
+// Y son dos magnitudes distintas de las de `disponible` (porciones de una
+// receta, entero): `stockDisponible` es una CANTIDAD, string, que puede ser
+// fraccionaria y puede ser negativa.
+describe('stockPedible: qué número muestra la pantalla de venta', () => {
+  it('prefiere stockDisponible sobre stock', () => {
+    expect(stockPedible({ stock: '3.0000', stockDisponible: '1.0000' })).toBe('1.0000')
+  })
+
+  it('cae a stock cuando el servidor no manda stockDisponible', () => {
+    // Receta, servicio, o cualquier respuesta anterior al campo.
+    expect(stockPedible({ stock: '3.0000', stockDisponible: null })).toBe('3.0000')
+    expect(stockPedible({ stock: '3.0000' })).toBe('3.0000')
+  })
+
+  it('un stockDisponible en cero se muestra tal cual, no lo reemplaza el stock de bodega', () => {
+    // Un producto que las mesas agotaron tiene que quedar en 0 aunque en la
+    // bodega haya 3: es lo que apaga la tarjeta.
+    //
+    // ⚠️ Este test NO separa `??` de `||`, y decir que sí lo hacía era falso:
+    // `'0.0000'` es un string **truthy** —el único string falsy es `''`— así
+    // que los dos operadores devuelven lo mismo acá. Medido: el mutante `??`
+    // → `||` deja los 77 tests en verde. La distinción quedaría en `''`, que
+    // el servidor no produce (`toFixed(4)` o `null`), y un test de ese caso
+    // fijaría un estado inalcanzable. Lo que este test sí mata es la
+    // implementación que ignora el campo y devuelve `item.stock`.
+    expect(stockPedible({ stock: '3.0000', stockDisponible: '0.0000' })).toBe('0.0000')
+  })
+
+  it('sin ninguno de los dos devuelve null', () => {
+    expect(stockPedible({ stock: null, stockDisponible: null })).toBeNull()
+  })
+})
+
+describe('descontarStockCatalogo y stockDisponible', () => {
+  const producto = (stockDisponible: string | null): ItemCatalogo => ({
+    ...item('p'),
+    stock: '10',
+    stockDisponible,
+  })
+
+  it('resta del stockDisponible lo que está en el carrito', () => {
+    // El carrito del POS todavía no existe para el servidor, así que este
+    // descuento no duplica nada: es lo único que mueve el número mientras el
+    // vendedor arma la venta.
+    const r = descontarStockCatalogo([producto('10.0000')], [
+      { item: item('p'), cantidad: '3' },
+    ])
+    expect(r[0]!.stockDisponible).toBe('7')
+  })
+
+  it('conserva la fracción: 1,5 kg menos 0,25 no es un entero', () => {
+    // `disponible` viaja como `number` y se le hace `.floor()`; si este número
+    // pasara por ahí, 1,5 kg se mostraría como 1. Por eso es un campo aparte.
+    const r = descontarStockCatalogo([producto('1.5000')], [
+      { item: item('p'), cantidad: '0.25' },
+    ])
+    expect(r[0]!.stockDisponible).toBe('1.25')
+  })
+
+  it('deja el negativo en negativo: no lo pisa a cero como a `stock`', () => {
+    // Por contrato el campo admite negativos —un ingrediente no bloqueante
+    // puede quedar comprometido de más y es correcto que se vea—. Clamplearlo
+    // acá le daría dos comportamientos según quién lo tocó último.
+    const r = descontarStockCatalogo([producto('1.0000')], [
+      { item: item('p'), cantidad: '3' },
+    ])
+    expect(r[0]!.stockDisponible).toBe('-2')
+    // El `stock` físico sí sigue con su piso en cero, como antes.
+    expect(r[0]!.stock).toBe('7')
+  })
+
+  it('no toca stockDisponible cuando el ítem no lo trae', () => {
+    const r = descontarStockCatalogo([producto(null)], [
+      { item: item('p'), cantidad: '3' },
+    ])
+    expect(r[0]!.stockDisponible).toBeNull()
+    expect(r[0]!.stock).toBe('7')
+  })
+
+  it('no muta el catálogo original', () => {
+    const catalogo = [producto('10.0000')]
+    descontarStockCatalogo(catalogo, [{ item: item('p'), cantidad: '1' }])
+    expect(catalogo[0]!.stockDisponible).toBe('10.0000')
   })
 })
 

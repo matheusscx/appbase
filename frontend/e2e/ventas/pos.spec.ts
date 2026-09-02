@@ -240,7 +240,12 @@ test('vender descuenta el stock: queda el movimiento auditable y el saldo al dí
   // El catálogo ya descuenta lo que está en el carrito, ANTES de cobrar: es
   // aritmética de cliente para no dejar vender lo que ya está reservado en la
   // pantalla. Lo que pasó de verdad se verifica abajo, contra el servidor.
-  await expect(tarjeta).toContainText(`Stock: ${STOCK_RESULTANTE}`)
+  //
+  // La etiqueta dice "Disponible" y no "Stock" desde el 2026-09-01: la tarjeta
+  // muestra lo que todavía se puede pedir (`stockDisponible`, el stock menos lo
+  // que las mesas abiertas ya comprometieron), no el saldo del kardex. Acá los
+  // dos coinciden porque el producto se siembra sin ninguna cuenta abierta.
+  await expect(tarjeta).toContainText(`Disponible: ${STOCK_RESULTANTE}`)
 
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })

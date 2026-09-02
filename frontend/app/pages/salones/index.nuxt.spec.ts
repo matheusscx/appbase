@@ -86,6 +86,18 @@ let cuentasDeLaMesa: unknown[] = []
 /** Las URLs completas del catálogo. Ver la rama `/items` del mock. */
 let urlsCatalogo: string[] = []
 /**
+ * Lo que devuelven los tres `GET /items`. Vacío por defecto —a los tests que
+ * solo cuentan URLs no les importa el contenido— y lo llena el `describe` de la
+ * disponibilidad, que sí necesita una tarjeta con números en el DOM.
+ */
+let catalogoItemsMock: unknown[] = []
+/** Los bodies de cada `POST /cuentas/:id/lineas`. Ver la rama del mock. */
+let lineasAgregadas: { itemId?: string, cantidad?: string }[] = []
+/** Cada `PATCH` de cantidad recibido, en orden. Ver la rama del mock. */
+let patchesDeCantidad: { lineaId: string, cantidad: string }[] = []
+/** Cada `POST /calculo-precios/calcular`. Es la señal de que la pantalla movió el carrito. */
+let calculosPedidos: string[] = []
+/**
  * `POST /calculo-precios/calcular` falla. Es lo que hace el backend real cuando
  * una línea apunta a un ítem borrado del catálogo: 404, porque el motor resuelve
  * los ítems contra el catálogo vivo.
@@ -181,7 +193,49 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(cuentasDeLaMesa)
     }
 
+    // `POST /cuentas/:id/lineas` — agregar un ítem a la cuenta abierta. Lo usa
+    // el describe de la disponibilidad: es la única forma de mover lo pedido
+    // SIN cambiar de mesa ni de cuenta, que es la conducta que ahí se fija.
+    // Devuelve la cuenta con la línea nueva, como el backend.
+    if (/\/cuentas\/[^/]+\/lineas$/.test(ruta) && method === 'POST') {
+      const body = (opts?.body ?? {}) as { itemId?: string, cantidad?: string }
+      lineasAgregadas.push(body)
+      const cuenta = cuentasDeLaMesa[0] as { lineas: unknown[] }
+      return Promise.resolve({
+        ...cuenta,
+        lineas: [
+          ...cuenta.lineas,
+          {
+            id: `linea-nueva-${lineasAgregadas.length}`,
+            itemId: body.itemId,
+            nombre: 'Agregado',
+            precioBase: '1500',
+            monedaId: CLP_ID,
+            cantidad: body.cantidad ?? '1',
+          },
+        ],
+      })
+    }
+
+    // `PATCH /cuentas/:id/lineas/:lineaId` — cambiar la cantidad de una línea.
+    // Devuelve la cantidad **tal cual la mandó el cliente**, que es el caso que
+    // interesa: cuando el eco del servidor coincide string a string con lo que
+    // el optimista ya pintó, la firma del watch no cambia por formato.
+    const patchLinea = ruta.match(/\/cuentas\/[^/]+\/lineas\/([^/]+)$/)
+    if (patchLinea && method === 'PATCH') {
+      const body = (opts?.body ?? {}) as { cantidad?: string }
+      patchesDeCantidad.push({ lineaId: patchLinea[1] ?? '', cantidad: body.cantidad ?? '' })
+      const cuenta = cuentasDeLaMesa[0] as { lineas: { id: string }[] }
+      return Promise.resolve({
+        ...cuenta,
+        lineas: cuenta.lineas.map(l =>
+          l.id === patchLinea[1] ? { ...l, cantidad: body.cantidad } : l,
+        ),
+      })
+    }
+
     if (ruta.endsWith('/calculo-precios/calcular')) {
+      calculosPedidos.push(ruta)
       // El backend responde 404 si una línea apunta a un ítem borrado: el motor
       // resuelve los ítems contra el catálogo vivo (`items.service.ts` →
       // `cargarBasePorIds` filtra `eliminado_el IS NULL`).
@@ -273,7 +327,17 @@ mockNuxtImport('useApiFetch', () => {
         err.data = { message: 'No tienes permiso para esta acción' }
         return Promise.reject(err)
       }
-      return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
+      // Filtrado por `tipo` como lo hace el backend: la pantalla hace TRES
+      // llamadas y las concatena, así que devolver el mismo ítem en las tres lo
+      // dejaría tres veces en la grilla.
+      const tipo = url.match(/tipo=(\w+)/)?.[1]
+      const data = catalogoItemsMock.filter(
+        i => (i as { tipo?: string }).tipo === tipo,
+      )
+      return Promise.resolve({
+        data,
+        meta: { total: data.length, page: 1, pageSize: 100 },
+      })
     }
     if (ruta.endsWith('/tipos-documento')) {
       if (catalogoRechaza403) {
@@ -344,6 +408,10 @@ function reiniciarMock() {
   bodiesAbrirCuenta = []
   urlsSelector = []
   urlsCatalogo = []
+  catalogoItemsMock = []
+  lineasAgregadas = []
+  patchesDeCantidad = []
+  calculosPedidos = []
   sinSesionDeTrabajo = false
   abrirCuentaRetenido = null
   vinculoPersonal = null
@@ -1258,5 +1326,242 @@ describe('salones — aviso de PIN invalidado (modo personal)', () => {
     // asignar pese al 404 de `miPin()`.
     expect(tecladoPin()).toBeUndefined()
     expect(postsAbrirCuenta).toHaveLength(1)
+  })
+})
+
+/**
+ * El catálogo del salón muestra **lo que el servidor dejó disponible**.
+ *
+ * Desde el 2026-09-01 `GET /items` devuelve `stockDisponible` (producto e
+ * ingrediente) y `disponible` (receta y combo) ya restados de todo lo que las
+ * cuentas ABIERTAS del tenant pidieron — las de esta mesa incluidas—. Esta
+ * pantalla, que hasta entonces mantenía el número con `descontarStockCatalogo`,
+ * tuvo que dejar de hacerlo: restar de nuevo las líneas de la mesa las contaba
+ * dos veces y dejaba en 0 —tarjeta gris, click bloqueado, sin ningún mensaje—
+ * un producto del que todavía quedaban unidades.
+ *
+ * El mutante que estos tests tienen que matar es justamente el código anterior:
+ * `descontarStockCatalogo(items.value, líneas de las cuentas)`. Con un producto
+ * de `stock: 3` que la mesa ya pidió 2 veces, el servidor manda
+ * `stockDisponible: 1` y ese mutante lo deja en **-1**.
+ */
+describe('salones — el catálogo no vuelve a descontar lo que el servidor ya apartó', () => {
+  const PRODUCTO_ID = 'item-coca'
+
+  /** Producto con las dos magnitudes distintas: 3 en la bodega, 1 pedible. */
+  function producto(stock: string, stockDisponible: string | null) {
+    return {
+      id: PRODUCTO_ID,
+      nombre: 'Coca-Cola',
+      descripcion: null,
+      precioBase: '1500',
+      monedaId: CLP_ID,
+      monedaSimbolo: '$',
+      stock,
+      stockDisponible,
+      unidadMedida: 'unidad',
+      tipo: 'producto',
+      activo: true,
+      disponible: null,
+    }
+  }
+
+  /** Una cuenta abierta con `cantidad` unidades del producto ya pedidas. */
+  function cuentaConPedido(cantidad: string) {
+    return {
+      id: 'cuenta-9',
+      numero: 9,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      lineas: [{
+        id: 'linea-1',
+        itemId: PRODUCTO_ID,
+        nombre: 'Coca-Cola',
+        precioBase: '1500',
+        monedaId: CLP_ID,
+        cantidad,
+      }],
+    }
+  }
+
+  /** Selecciona la mesa y entra a su única cuenta: la grilla vive ahí adentro. */
+  async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await seleccionarMesa(wrapper)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(20)
+  }
+
+  /** El texto de la tarjeta del producto en la grilla del catálogo. */
+  function tarjetaDelProducto(): string {
+    const tarjeta = drawerMesa()?.querySelector(`[data-qa="item-catalogo-${PRODUCTO_ID}"]`)
+    return tarjeta?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+  }
+
+  beforeEach(reiniciarMock)
+
+  it('la mesa que ya pidió 2 ve el 1 que queda, no un descuento aplicado dos veces', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('2')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+
+    // El número del servidor, tal cual. Con el descuento local encima daría -1.
+    expect(tarjetaDelProducto()).toContain('Disponible: 1')
+    // Y sigue siendo clickeable: queda una unidad de verdad.
+    expect(tarjetaDelProducto()).not.toContain('Disponible: -1')
+  })
+
+  it('muestra lo pedible y no el saldo de bodega: 3 en el kardex, 1 en la tarjeta', async () => {
+    // El contraejemplo del de arriba: si la tarjeta leyera `stock` diría 3 —el
+    // bug que este frente vino a cerrar— y el test de arriba pasaría igual con
+    // `stockDisponible` ignorado.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('2')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+
+    expect(tarjetaDelProducto()).not.toContain('Disponible: 3')
+  })
+
+  it('cambiar lo pedido vuelve a preguntarle al servidor, sin cambiar de mesa ni de cuenta', async () => {
+    // La contraparte de haber sacado la aritmética local: si el número no se
+    // recalcula, tiene que volver a pedirse. Y tiene que pedirse **por lo
+    // pedido**, no solo por navegar.
+    //
+    // ⚠️ La aserción va sobre el conteo DESPUÉS de entrar a la cuenta y contra
+    // un `agregarLinea` que no toca la mesa ni la cuenta activa. Un
+    // `> alMontar` medido tras abrir la mesa no fijaba nada: la selección sola
+    // ya lo cumplía, y el mutante que borra las líneas de la fuente del watch
+    // —dejándola en `activeCuenta.id`— pasaba con la suite entera en verde.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('2')]
+
+    const wrapper = await montar()
+    expect(urlsCatalogo).toHaveLength(3)
+
+    await abrirLaCuenta(wrapper)
+    // El refresco sale con debounce (`REFRESCO_ITEMS_MS`), así que la espera es
+    // mayor que él a propósito.
+    await esperar(400)
+    const trasEntrarALaCuenta = urlsCatalogo.length
+
+    // Ahora lo único que cambia es lo pedido: mismo drawer, misma cuenta.
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>(`[data-qa="item-catalogo-${PRODUCTO_ID}"]`)
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(400)
+
+    expect(lineasAgregadas).toHaveLength(1)
+    expect(urlsCatalogo.length).toBe(trasEntrarALaCuenta + 3)
+    for (const url of urlsCatalogo) expect(url).toContain('activo=true')
+  })
+
+  it('una edición de cantidad a medio camino no dispara el refresco', async () => {
+    // El orden importa y era determinista, no una carrera: `onCantidadChange`
+    // pinta la cantidad en el acto y recién manda el PATCH 300 ms después, así
+    // que el refresco salía a los 250 ms —ANTES del PATCH— y volvía con el
+    // número viejo. Que casi siempre se curara era accidente de formato: el
+    // optimista deja `'3'` y el servidor devuelve `'3.0000'`, así que la firma
+    // del watch cambiaba de casualidad y disparaba un segundo refresco. Con una
+    // cantidad que ya trae 4 decimales los dos strings coinciden y ese segundo
+    // refresco no existía.
+    //
+    // ⚠️ **La otra mitad —que al confirmar el servidor SÍ salga el refresco— no
+    // se afirma acá, y no es una omisión.** `patchLineaCantidad` hace
+    // `structuredClone(activeCuenta.value)`, y `activeCuenta.value` es el Proxy
+    // reactivo de un `ref`: ni Node ni Chrome clonan Proxies. Medido en Chrome
+    // real (2026-09-01, `/salones` con una cuenta abierta): tira
+    // `DataCloneError` ANTES de `inflight.add`, o sea que **el PATCH de cantidad
+    // nunca se manda**. Es un bug preexistente y ajeno a este frente —ningún
+    // test cubría ese camino, por eso nadie lo vio—. Mientras viva, el servidor
+    // no confirma nada y el refresco posterior es un estado inalcanzable.
+    //
+    // Por eso el test saca la cuenta de pantalla antes de los 300 ms: así el
+    // timer pendiente encuentra `activeCuenta` en `null`, corta antes del
+    // `structuredClone` y la suite no arrastra un `unhandled rejection` ajeno
+    // —que deja `vitest` en exit 1 aunque todos los tests pasen—.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('0.3333')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    const antesDeEditar = urlsCatalogo.length
+    const calculosAntes = calculosPedidos.length
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(input).toBeTruthy()
+    input!.vm.$emit('change', {
+      presentacion: '0.6666',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '0.6666',
+    })
+
+    // Un tick: alcanza para que el watch corra con la cuenta TODAVÍA abierta,
+    // que es la condición que hace falta para estar probando el guard de la
+    // edición pendiente y no el de "la grilla está en pantalla".
+    await esperar(10)
+    // Y el pintado optimista ocurrió de verdad (`patchLineaOptimista`
+    // recalcula): sin esta aserción el test pasaría por no haber hecho nada,
+    // que es la forma barata de un falso verde.
+    expect(calculosPedidos.length).toBeGreaterThan(calculosAntes)
+
+    botonEn(drawerMesa(), 'Cuentas')?.click()
+    await esperar(600)
+
+    // En toda la ventana no salió ni un GET de catálogo, aunque la firma del
+    // watch sí cambió: la línea editada sale de ella mientras está pendiente.
+    expect(urlsCatalogo.length).toBe(antesDeEditar)
+  })
+
+  it('un refresco que falla deja la grilla como estaba, no la vacía', async () => {
+    // Mientras el catálogo se pedía UNA vez en `onMounted`, un blip de red no
+    // lo podía borrar. Ahora se pide muchas veces por turno: asignar
+    // `?.data ?? []` a ciegas dejaba al garzón con "No hay ítems para mostrar"
+    // a mitad de servicio por un corte de dos segundos, sin aviso y sin nada
+    // que reintentara. El refresco conserva lo que ya estaba.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('2')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    expect(tarjetaDelProducto()).toContain('Disponible: 1')
+
+    // Se corta la red y se dispara un refresco.
+    catalogoRechaza403 = true
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>(`[data-qa="item-catalogo-${PRODUCTO_ID}"]`)
+    tarjeta!.click()
+    await esperar(400)
+
+    expect(tarjetaDelProducto()).toContain('Disponible: 1')
+    expect(drawerMesa()?.textContent).not.toContain('No hay ítems para mostrar')
+  })
+
+  it('pasear por las mesas sin entrar a una cuenta no pide el catálogo', async () => {
+    // La grilla solo existe en la rama de detalle de cuenta. Sin este guard,
+    // seis mesas miradas de paso eran 18 GET `/items` para no mostrar nada.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('2')]
+
+    const wrapper = await montar()
+    expect(urlsCatalogo).toHaveLength(3)
+
+    await seleccionarMesa(wrapper)
+    await esperar(400)
+
+    expect(urlsCatalogo).toHaveLength(3)
   })
 })

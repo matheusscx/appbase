@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import { descontarStockCatalogo, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
@@ -64,13 +64,26 @@ const cuentas = ref<CuentaDetalle[]>([])
 const loadingCuentas = ref(false)
 const activeCuenta = ref<CuentaDetalle | null>(null)
 
-/** Catálogo restando lo ya pedido en las cuentas abiertas de la mesa (stock / disponible). */
-const itemsVisibles = computed(() => {
-  const reservas = cuentas.value.flatMap(c =>
-    c.lineas.map(l => ({ item: { id: l.itemId }, cantidad: l.cantidad })),
-  )
-  return descontarStockCatalogo(items.value, reservas)
-})
+/**
+ * ── El catálogo se vuelve a preguntar; ya no se recalcula acá ───────────────
+ *
+ * Hasta el 2026-09-01 esta pantalla mantenía sus números con aritmética de
+ * cliente: `descontarStockCatalogo(items, líneas de la mesa)`. Desde que el
+ * servidor aparta lo pedido, eso quedó mal de dos formas:
+ *
+ * 1. **Doble descuento.** `disponible` y `stockDisponible` ya vienen restados
+ *    de lo que pidieron TODAS las cuentas abiertas del tenant — las de esta
+ *    mesa incluidas—, así que restarlas otra vez acá las contaba dos veces.
+ * 2. **Ciego a las otras mesas.** El cliente solo conoce las cuentas de la mesa
+ *    que tiene abierta, que es exactamente el agujero que este frente vino a
+ *    cerrar.
+ *
+ * Por eso la grilla recibe `items` tal como los mandó el servidor. Quién
+ * dispara el refresco, y las tres condiciones que lo gobiernan, están en el
+ * `watch` que vive junto a `pendingByLinea`/`inflight` —tiene que estar abajo
+ * de esas dos declaraciones, porque las lee para saber si hay una edición de
+ * cantidad a medio camino—.
+ */
 // Sin `debounceMs`: acá el carrito no cambia tecla a tecla sino por request, y
 // la página ya sabe en qué punto la línea quedó firme (`recalcular()` explícito).
 const {
@@ -581,11 +594,87 @@ function patchMesaOcupacion(mesaId: string, deltaAbiertas: number) {
   }
 }
 
+/**
+ * Cuántos ms espera un refresco del catálogo antes de salir. Abrir una mesa
+ * mueve dos veces lo que el `watch` mira (primero la mesa, después sus cuentas)
+ * y agregar tres ítems seguidos, tres: con el debounce cada ráfaga es UNA
+ * llamada. Corto a propósito — es tiempo que la tarjeta pasa mostrando el
+ * número anterior.
+ */
+const REFRESCO_ITEMS_MS = 250
+
+/**
+ * Descarta la respuesta que llega tarde: dos refrescos encimados no vuelven
+ * necesariamente en orden, y el más viejo dejaría en pantalla el número de
+ * antes hasta el refresco siguiente.
+ */
+let secuenciaItems = 0
+let refrescoItemsPendiente: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Los tres `/items` del catálogo, y nada más. **No toca `loadingCatalogo`**: un
+ * refresco de fondo que vaciara la grilla para volver a dibujarla haría
+ * parpadear el catálogo en cada ítem que el garzón agrega.
+ *
+ * ⚠️ **Una llamada que falla NO borra lo que ya está en pantalla.** Cada tipo
+ * conserva sus ítems anteriores si SU consulta no respondió; con las tres
+ * caídas, el catálogo queda exactamente como estaba. Esto no es defensa
+ * decorativa: mientras el catálogo se pedía una sola vez en `onMounted`, un
+ * blip de red no lo podía borrar; ahora se pide muchas veces por turno, y
+ * asignar `?.data ?? []` a ciegas dejaba al garzón con "No hay ítems para
+ * mostrar" a mitad de servicio por un corte de wifi de dos segundos, sin
+ * ningún aviso y sin nada que reintentara hasta el próximo cambio.
+ *
+ * El `.catch(() => null)` por llamada se mantiene —lo puso el 403 del garzón
+ * sin permiso de catálogo, medido en el smoke del 2026-08-15—, pero acá
+ * significa otra cosa: **"esta tanda no trajo nada, quedate con lo de antes"**.
+ * Sigue sin toast a propósito: un aviso rojo por cada blip, en una pantalla que
+ * el garzón usa con las dos manos, es ruido que no puede accionar — y lo que de
+ * verdad protege el stock es el 400 del backend al pedir, no este número.
+ */
+async function refrescarItems() {
+  const turno = ++secuenciaItems
+  const [productosRes, recetasRes, combosRes] = await Promise.all([
+    useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=producto&activo=true&pageSize=100`).catch(() => null),
+    useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=receta&activo=true&pageSize=100`).catch(() => null),
+    useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=combo&activo=true&pageSize=100`).catch(() => null),
+  ])
+  if (turno !== secuenciaItems) return
+  // En la carga inicial `previos` está vacío, así que el 403 del garzón sigue
+  // dejando el catálogo vacío igual que antes: esto conserva, no inventa.
+  const previos = items.value
+  const conservando = (
+    res: PaginatedResponse<ItemCatalogo> | null,
+    tipo: string,
+  ) => res?.data ?? previos.filter(i => i.tipo === tipo)
+  // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
+  // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
+  // así que en un catálogo grande empujaba fuera del salón a uno vendible—.
+  items.value = [
+    ...conservando(productosRes, 'producto'),
+    ...conservando(recetasRes, 'receta'),
+    ...conservando(combosRes, 'combo'),
+  ]
+}
+
+function programarRefrescoItems() {
+  if (refrescoItemsPendiente) clearTimeout(refrescoItemsPendiente)
+  refrescoItemsPendiente = setTimeout(() => {
+    refrescoItemsPendiente = null
+    void refrescarItems()
+  }, REFRESCO_ITEMS_MS)
+}
+
+onBeforeUnmount(() => {
+  if (refrescoItemsPendiente) clearTimeout(refrescoItemsPendiente)
+})
+
 async function cargarCatalogo() {
   loadingCatalogo.value = true
   try {
     // Solo tipos vendibles (producto + receta + combo). Los ingredientes (y resto) no van al catálogo.
-    // `/items` (×3) y `/tipos-documento` llevan `.catch(() => null)` propio,
+    // `/items` (×3, dentro de `refrescarItems`) y `/tipos-documento` llevan
+    // `.catch(() => null)` propio,
     // mismo motivo que `cargarActiva` en `onMounted`: son datos del POS que un
     // garzón no tiene permiso de leer, y esta carga es de fondo — no una acción
     // que el garzón haya pedido. Sin el catch, ese 403 volteaba el `Promise.all`
@@ -594,17 +683,11 @@ async function cargarCatalogo() {
     // se abría la pantalla (medido en el smoke del 2026-08-15). `/metodos-pago`
     // se queda SIN catch propio a propósito: si esa sí falla, es un error real
     // y tiene que avisar.
-    const [productosRes, recetasRes, combosRes, metodosRes, tiposRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=producto&activo=true&pageSize=100`).catch(() => null),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=receta&activo=true&pageSize=100`).catch(() => null),
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=combo&activo=true&pageSize=100`).catch(() => null),
+    const [, metodosRes, tiposRes] = await Promise.all([
+      refrescarItems(),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`).catch(() => null),
     ])
-    // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
-    // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
-    // así que en un catálogo grande empujaba fuera del salón a uno vendible—.
-    items.value = [...(productosRes?.data ?? []), ...(recetasRes?.data ?? []), ...(combosRes?.data ?? [])]
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes ?? []
   }
@@ -890,6 +973,63 @@ async function abrirHistorial() {
 // ── Líneas de la cuenta ────────────────────────────────────────────────────
 const pendingByLinea = new Map<string, ReturnType<typeof setTimeout>>()
 const inflight = ref(new Set<string>())
+
+/**
+ * ── El catálogo se vuelve a preguntar; ya no se recalcula acá ───────────────
+ *
+ * Hasta el 2026-09-01 esta pantalla mantenía sus números con aritmética de
+ * cliente: `descontarStockCatalogo(items, líneas de la mesa)`. Desde que el
+ * servidor aparta lo pedido, eso quedó mal de dos formas:
+ *
+ * 1. **Doble descuento.** `disponible` y `stockDisponible` ya vienen restados
+ *    de lo que pidieron TODAS las cuentas abiertas del tenant — las de esta
+ *    mesa incluidas—. Restarlas otra vez acá dejaba en 0 (tarjeta gris, click
+ *    bloqueado) un producto del que todavía quedaban unidades reales, y sin
+ *    ningún mensaje: el garzón no podía vender lo que estaba en el
+ *    refrigerador.
+ * 2. **Ciego a las otras mesas.** El cliente solo conoce las cuentas de la mesa
+ *    que tiene abierta, que es exactamente el agujero que este frente vino a
+ *    cerrar.
+ *
+ * Entonces el número no se recalcula: se vuelve a pedir cuando cambia lo que
+ * las cuentas tienen pedido y al entrar a una cuenta. `GET /items` es la
+ * lectura más caliente del producto, así que va con debounce —una ráfaga de
+ * taps es un solo refresco—, descartando la respuesta que llegue tarde, y con
+ * dos condiciones más:
+ *
+ * - **Solo si la grilla está en pantalla.** `VentasCatalogoGrid` se rinde en la
+ *   rama de detalle de cuenta, así que pasear por las mesas sin entrar a
+ *   ninguna no tiene por qué pedir el catálogo: seis mesas miradas eran 18 GET
+ *   `/items` para no mostrar nada. Por eso la fuente mira `activeCuenta` y no
+ *   la mesa.
+ * - **Nunca con una edición de cantidad a medio camino.** `onCantidadChange`
+ *   pinta la cantidad nueva en el acto (`patchLineaOptimista`) y recién manda
+ *   el PATCH 300 ms después; sin este guard el refresco salía a los 250 ms, o
+ *   sea **antes** del PATCH, y volvía con el número viejo. No era una carrera:
+ *   era determinista. Que casi siempre se curara era accidente de formato —el
+ *   optimista deja `'3'` y el servidor devuelve `'3.0000'`, así que la firma
+ *   cambiaba de casualidad y disparaba un segundo refresco—; con una cantidad
+ *   que ya trae 4 decimales (`'0.3333'` de un ítem que se pesa) los dos strings
+ *   coinciden, no había segundo refresco y el número quedaba alto.
+ *
+ * Las líneas con edición pendiente o en vuelo salen de la firma justamente para
+ * que ese segundo disparo no dependa del formato: la línea **desaparece** de la
+ * firma al empezar la edición y **vuelve** con el valor del servidor al
+ * terminarla, así que la firma cambia siempre, coincida o no la cantidad.
+ */
+watch(
+  () => [
+    activeCuenta.value?.id ?? '',
+    ...cuentas.value.flatMap(c => c.lineas
+      .filter(l => !pendingByLinea.has(l.id) && !inflight.value.has(l.id))
+      .map(l => `${l.itemId}:${l.cantidad}`)),
+  ].join('#'),
+  () => {
+    if (!mesaDrawerOpen.value || !activeCuenta.value) return
+    if (pendingByLinea.size > 0 || inflight.value.size > 0) return
+    programarRefrescoItems()
+  },
+)
 
 function unidadBaseLinea(linea: CuentaLineaDetalle): string {
   const catalogItem = items.value.find(i => i.id === linea.itemId)
@@ -1520,7 +1660,7 @@ async function cerrarCuentaConPin(
           <div v-else class="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-5">
             <div class="flex min-h-0 flex-col overflow-hidden lg:col-span-3">
               <VentasCatalogoGrid
-                :items="itemsVisibles"
+                :items="items"
                 :loading="loadingCatalogo"
                 @add="addProducto"
               />

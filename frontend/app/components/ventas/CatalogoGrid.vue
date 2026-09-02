@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { ItemCatalogo } from '~/composables/useVenta'
+import { stockPedible, type ItemCatalogo } from '~/composables/useVenta'
 
 const props = defineProps<{ items: ItemCatalogo[]; loading?: boolean }>()
 const emit = defineEmits<{ add: [item: ItemCatalogo] }>()
@@ -9,10 +9,17 @@ const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMoneda
 const { formatStock } = useFormatters()
 const busqueda = ref('')
 
+/**
+ * Mide sobre lo que todavía se puede pedir, no sobre el stock físico: desde el
+ * 2026-09-01 lo que las mesas abiertas pidieron ya está apartado, y atenuar por
+ * `stock` mostraba como vendible la última unidad que otra mesa ya se llevó —el
+ * garzón se enteraba recién con el 400 del pedido.
+ */
 function tieneStock(item: ItemCatalogo): boolean {
-  if (item.stock === null || item.stock === '') return false
+  const pedible = stockPedible(item)
+  if (pedible === null || pedible === '') return false
   try {
-    return new Decimal(item.stock).greaterThan(0)
+    return new Decimal(pedible).greaterThan(0)
   }
   catch {
     return false
@@ -101,8 +108,13 @@ function onAgregar(item: ItemCatalogo) {
                 muted
               />
             </div>
+            <!-- "Disponible" y ya no "Stock": el número dejó de ser lo que hay en
+                 la bodega y pasó a ser lo que todavía se puede pedir. Con dos mesas
+                 abiertas los dos difieren, y la etiqueta vieja convertía la
+                 diferencia en un "el sistema está mal" — el garzón cuenta tres
+                 botellas en el refrigerador y la tarjeta decía "Stock: 1". -->
             <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
-              Stock: {{ formatStock(item.stock, item.unidadMedida) }}
+              Disponible: {{ formatStock(stockPedible(item), item.unidadMedida) }}
             </span>
             <span v-else-if="item.tipo === 'combo' && item.disponibleCondicional" class="text-xs text-muted shrink-0">
               <UTooltip text="La disponibilidad final depende de la opción elegida">

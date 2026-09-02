@@ -27,9 +27,46 @@ export interface ItemCatalogo {
   tipo: string
   /** Un ítem pausado (`false`) no se ofrece en ningún catálogo de venta. */
   activo: boolean
+  /**
+   * Receta y combo: **cuántas porciones se pueden armar** con lo que queda por
+   * pedir. Conteo entero, `null` para el resto de los tipos.
+   */
   disponible?: number | null
+  /**
+   * Producto e ingrediente: **cuánta cantidad queda por pedir** — el `stock`
+   * menos lo que las cuentas abiertas del tenant ya comprometieron—, string en
+   * la escala de `stock` (4 decimales). `null` o ausente en el resto de los
+   * tipos, y también en cualquier respuesta anterior al 2026-09-01: por eso se
+   * lee siempre por `stockPedible`, que cae a `stock`.
+   *
+   * ⚠️ **Campo propio y no un valor más dentro de `disponible`** (ruling del
+   * owner, 2026-09-01, spec § 4.1b): son dos preguntas distintas. `disponible`
+   * cuenta PORCIONES —entero—; esto es una CANTIDAD, que puede ser
+   * fraccionaria (1,5 kg) y puede ser **negativa** cuando un ingrediente no
+   * bloqueante quedó comprometido de más. Por eso viaja como string y no como
+   * `number`, y por eso no se le hace `.floor()` ni se lo pisa a 0: clamplearlo
+   * escondería justo el caso que el encargado necesita ver.
+   */
+  stockDisponible?: string | null
   /** Combos con al menos un grupo de modificadores asociado: la disponibilidad final depende de la opción elegida. */
   disponibleCondicional?: boolean
+}
+
+/**
+ * Lo que de un ítem con stock propio **todavía se puede pedir**: `stockDisponible`
+ * si el servidor lo mandó, y el `stock` físico si no.
+ *
+ * Es la única puerta por la que las pantallas de venta leen ese número. Existe
+ * porque los dos campos significan cosas distintas —`stock` es el saldo
+ * materializado del kardex, lo que hay en la bodega; `stockDisponible` es lo que
+ * queda después de lo que las mesas abiertas ya pidieron— y la pantalla de venta
+ * siempre quiere el segundo. El fallback no es defensivo de más: `stockDisponible`
+ * viene `null` en todo lo que no sea producto o ingrediente.
+ */
+export function stockPedible(
+  item: Pick<ItemCatalogo, 'stock' | 'stockDisponible'>,
+): string | null {
+  return item.stockDisponible ?? item.stock
 }
 
 export interface CarritoLinea {
@@ -235,8 +272,16 @@ export function toVentaLineasBody(lineas: CarritoLinea[]) {
 
 /**
  * Descuenta del catálogo cantidades reservadas/vendidas (sin recargar desde API).
- * Productos: baja `stock`. Recetas: baja `disponible` (porciones).
- * Acepta líneas de carrito o de cuenta (`{ item: { id }, cantidad }`).
+ * Productos: baja `stock` y `stockDisponible`. Recetas: baja `disponible`
+ * (porciones). Acepta líneas de carrito o de cuenta (`{ item: { id }, cantidad }`).
+ *
+ * ⚠️ **Solo para líneas que el servidor TODAVÍA NO conoce** — el carrito del POS
+ * y el de la tienda, que viven en el navegador hasta que se cobra. Desde el
+ * 2026-09-01 `disponible` y `stockDisponible` llegan ya descontados de todo lo
+ * que las cuentas abiertas del tenant pidieron, así que pasarle por acá una
+ * línea que el servidor ya contó la resta dos veces y deja al vendedor sin
+ * poder pedir lo que sí existe. Por eso `salones/index.vue` no lo usa: sus
+ * líneas están en la base, y lo que hace es volver a preguntar.
  */
 export function descontarStockCatalogo(
   items: ItemCatalogo[],
@@ -263,6 +308,19 @@ export function descontarStockCatalogo(
         }
       }
       catch { /* mantener stock */ }
+    }
+    // Sin `Decimal.max(0, …)`, a diferencia de `stock`: este número admite
+    // negativos por contrato (un ingrediente no bloqueante puede quedar
+    // comprometido de más, y es correcto que se vea). Pisarlo a 0 acá le daría
+    // al mismo campo dos comportamientos según quién lo tocó último.
+    if (item.stockDisponible !== null && item.stockDisponible !== undefined && item.stockDisponible !== '') {
+      try {
+        next = {
+          ...next,
+          stockDisponible: new Decimal(item.stockDisponible).minus(vendido).toString(),
+        }
+      }
+      catch { /* mantener stockDisponible */ }
     }
     if (item.disponible !== null && item.disponible !== undefined) {
       try {
