@@ -422,7 +422,7 @@ pedir**, que es cuando todavía puede ofrecer otra cosa.
   al cerrar la cuenta ([`inventario-kardex.md`](./features/inventario-kardex.md)).
 
 Dos reglas **nuevas desde el 2026-09-01**. La primera se siente en el local desde el primer
-día; **la segunda todavía no**, y el porqué está en su propia viñeta:
+día; **la segunda recién desde el 2026-09-02**, y el porqué está en su propia viñeta:
 
 - **Un ítem sin stock cargado ya no se puede pedir en una mesa.** El tope compara contra el
   stock, y un producto en `0` —o que nunca tuvo stock cargado— rechaza el pedido con `400`.
@@ -435,10 +435,11 @@ día; **la segunda todavía no**, y el porqué está en su propia viñeta:
   Pasar de 1 a 3 se mide como un pedido de 2 y puede rechazarse. **Bajarla solo libera y
   nunca se rechaza por stock** — soltar mercadería no puede sobrevender. (El guard de agosto
   sigue: no se puede bajar por debajo de lo ya enviado a cocina.)
-  ⚠️ **Esta segunda regla todavía no se siente en el local, aunque el backend la haga cumplir:**
-  el cambio de cantidad desde `/salones` **no llega al servidor** por un bug de la pantalla
-  anterior a este frente, así que hoy solo se la alcanza por API. Entrada propia en
-  [`agent/pendientes.md`](./agent/pendientes.md) § 3.
+  📌 **Esta segunda regla recién se siente en el local desde el 2026-09-02.** El backend la
+  hacía cumplir desde el 2026-09-01, pero el cambio de cantidad desde `/salones` **no llegaba
+  al servidor** —un bug de la pantalla anterior a este frente—, así que hasta ese día solo se
+  la alcanzaba por API. Se cerró junto con el rollback, que el mismo camino tenía roto:
+  [`agent/resueltos.md`](./agent/resueltos.md).
 
 ⚠️ **Esto achica el caso de la mesa trabada, no lo borra.** Una merma, un recuento o un
 ajuste manual pueden dejar el stock por debajo de lo ya comprometido, y esa mesa vuelve a

@@ -103,6 +103,30 @@ let calculosPedidos: string[] = []
  * los ítems contra el catálogo vivo.
  */
 let calculoFalla = false
+let patchCantidadFalla = false
+/**
+ * Retiene la respuesta del `PATCH` de cantidad hasta que el test la suelte —
+ * mismo patrón que `abrirCuentaRetenido`. Es lo único que abre la ventana
+ * "`PATCH` en vuelo": sin esto el mock contesta en el mismo microtask y esa
+ * ventana no existe.
+ */
+let patchCantidadRetenido: Promise<void> | null = null
+/**
+ * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
+ *
+ * Sin esto, servidor y pantalla son EL MISMO objeto: el `GET` devuelve
+ * `cuentasDeLaMesa` tal cual, la página se lo queda en `cuentas.value` y el
+ * pintado optimista escribe adentro del fixture (`cuentas.value[idx] = patched`,
+ * sobre el array que el mock devolvió). Con eso, la respuesta de cualquier
+ * `PATCH` ya trae lo que la pantalla pintó y **ningún test puede distinguir "lo
+ * que el servidor tiene" de "lo que la pantalla cree"** — que es exactamente la
+ * diferencia que el flush de varias líneas se comía.
+ *
+ * Se clona en el primer `GET`, antes de que la pantalla toque nada, y cada
+ * `PATCH` lo persiste. El `GET` sigue devolviendo el fixture tal cual: separar
+ * también esa mitad no hace falta acá y movería el piso de los otros tests.
+ */
+let cuentasServidor: { lineas: { id: string, cantidad: string }[] }[] | null = null
 /** Lo que devuelve `POST /caja/testigos/pendientes`. */
 let pendientesTestigoMock: unknown[] = []
 /** Cada `POST /caja/testigos/pendientes` recibido, con su body (la credencial). */
@@ -190,6 +214,9 @@ mockNuxtImport('useApiFetch', () => {
           ? abrirCuentaRetenido.then(() => cuenta)
           : Promise.resolve(cuenta)
       }
+      // El snapshot del servidor se toma acá, en el primer `GET`: es el único
+      // momento en que el fixture todavía no pasó por la pantalla.
+      cuentasServidor ??= structuredClone(cuentasDeLaMesa) as NonNullable<typeof cuentasServidor>
       return Promise.resolve(cuentasDeLaMesa)
     }
 
@@ -225,13 +252,25 @@ mockNuxtImport('useApiFetch', () => {
     if (patchLinea && method === 'PATCH') {
       const body = (opts?.body ?? {}) as { cantidad?: string }
       patchesDeCantidad.push({ lineaId: patchLinea[1] ?? '', cantidad: body.cantidad ?? '' })
-      const cuenta = cuentasDeLaMesa[0] as { lineas: { id: string }[] }
-      return Promise.resolve({
-        ...cuenta,
-        lineas: cuenta.lineas.map(l =>
-          l.id === patchLinea[1] ? { ...l, cantidad: body.cantidad } : l,
-        ),
-      })
+      const responder = () => {
+        // El 400 del tope de stock de `actualizarLinea`, que hasta el 2026-09-02
+        // era inalcanzable desde la pantalla.
+        if (patchCantidadFalla) {
+          return Promise.reject(new Error('Stock insuficiente de "Carne": quedan 1 unidad'))
+        }
+        const cuenta = cuentasServidor?.[0]
+        // Falla ruidosa a propósito: un `PATCH` sin `GET` previo es un test mal
+        // armado, y un fallback silencioso al fixture devolvería justo el estado
+        // compartido con la pantalla que este mock vino a separar.
+        if (!cuenta) return Promise.reject(new Error('PATCH sin GET previo de cuentas'))
+        cuenta.lineas = cuenta.lineas.map(l =>
+          l.id === patchLinea[1] ? { ...l, cantidad: body.cantidad ?? l.cantidad } : l,
+        )
+        return Promise.resolve(structuredClone(cuenta))
+      }
+      // Sin retención contesta de una, como en producción; con retención el test
+      // decide cuándo, y ahí es donde vive la ventana del `PATCH` en vuelo.
+      return patchCantidadRetenido ? patchCantidadRetenido.then(responder) : responder()
     }
 
     if (ruta.endsWith('/calculo-precios/calcular')) {
@@ -417,6 +456,9 @@ function reiniciarMock() {
   vinculoPersonal = null
   cuentasDeLaMesa = []
   calculoFalla = false
+  patchCantidadFalla = false
+  patchCantidadRetenido = null
+  cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
   resolucionesTestigo = []
@@ -1392,6 +1434,30 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     }
   }
 
+  /**
+   * La misma cuenta con **dos** líneas. Hace falta una segunda para el flush:
+   * el agujero que fija ese test es que la respuesta del `PATCH` de la primera
+   * pisa el optimista de la que todavía está pendiente, y con una sola línea no
+   * hay nada que pisar.
+   */
+  function cuentaConDosPedidos() {
+    const base = cuentaConPedido('1.0000')
+    return {
+      ...base,
+      lineas: [
+        ...base.lineas,
+        {
+          id: 'linea-2',
+          itemId: 'item-papas',
+          nombre: 'Papas fritas',
+          precioBase: '2000',
+          monedaId: CLP_ID,
+          cantidad: '2.0000',
+        },
+      ],
+    }
+  }
+
   /** Selecciona la mesa y entra a su única cuenta: la grilla vive ahí adentro. */
   async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
     await seleccionarMesa(wrapper)
@@ -1468,6 +1534,197 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     for (const url of urlsCatalogo) expect(url).toContain('activo=true')
   })
 
+  it('cuando el servidor confirma la cantidad, el catálogo se vuelve a pedir', async () => {
+    // La mitad que la Tarea 8 no pudo afirmar porque el PATCH nunca salía. El
+    // guard frena el refresco MIENTRAS la edición está pendiente; una vez que el
+    // servidor confirma, el catálogo tiene que volver a pedirse — si no, el
+    // disponible que ve el garzón se queda con el número de antes de su cambio.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    const antesDeEditar = urlsCatalogo.length
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(600)
+
+    expect(patchesDeCantidad).toHaveLength(1)
+    expect(urlsCatalogo.length).toBe(antesDeEditar + 3)
+  })
+
+  it('cambiar la cantidad de una línea MANDA el PATCH al servidor', async () => {
+    // Existía `patchesDeCantidad` —el mock lo llenaba y se reseteaba entre
+    // tests— y **nadie lo afirmaba nunca**. Por eso `patchLineaCantidad` pudo
+    // pasar un mes y medio sin mandar un solo PATCH: `structuredClone` sobre el
+    // Proxy reactivo de `activeCuenta` tira `DataCloneError` antes de llamar a
+    // la API, y como estaba fuera del `try`, el error no salía ni por el toast.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(input).toBeTruthy()
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(400)
+
+    expect(patchesDeCantidad).toHaveLength(1)
+    expect(patchesDeCantidad[0]!.cantidad).toBe('3.0000')
+  })
+
+  it('si el servidor rechaza la cantidad, avisa y deja de mostrar la que no se guardó', async () => {
+    // La otra mitad del mismo camino muerto: el `catch` que hace rollback y
+    // avisa tampoco corría nunca. Con el tope de stock de `actualizarLinea` ya
+    // construido, éste es el caso real — el garzón sube a 3 y el servidor dice
+    // que quedaba 1.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    patchCantidadFalla = true
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(400)
+
+    expect(patchesDeCantidad).toHaveLength(1)
+    expect(toasts.some(t => /Stock insuficiente/.test(t.title ?? ''))).toBe(true)
+    expect(toasts.find(t => /Stock insuficiente/.test(t.title ?? ''))?.color).toBe('error')
+    // Y la cantidad vuelve a la que el servidor tiene, no queda pintada la que
+    // no se guardó.
+    //
+    // ⚠️ Se afirma sobre el `model-value` del input, NO sobre `wrapper.text()`:
+    // el texto muestra la PRESENTACIÓN (`3`) y no la canónica (`3.0000`), así
+    // que un `not.toContain('3.0000')` pasa con y sin rollback. Medido con el
+    // mutante que borra el `syncCuenta(snapshot)` del `catch`: sobrevivía.
+    const inputTrasFallar = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    // `'1.0000'` y no `'1'`: la línea del fixture no trae `cantidadPresentacion`,
+    // así que la presentación cae a la canónica — y es exactamente lo que el
+    // input mostraba ANTES de editar, que es lo que el rollback tiene que devolver.
+    expect(inputTrasFallar!.props('modelValue')).toBe('1.0000')
+  })
+
+  it('dos ediciones seguidas: deshacer vuelve a lo que había ANTES de la primera', async () => {
+    // El garzón corrige dos veces antes de que salga el PATCH (1 → 2 → 3) y el
+    // servidor rechaza. Deshacer tiene que devolver a **1**, no a 2: el 2 nunca
+    // se guardó tampoco. Por eso `previo` se toma solo en la primera edición de
+    // la ráfaga — en la segunda la línea ya trae lo que pintó el optimista.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    patchCantidadFalla = true
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
+    await esperar(50)
+    input!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(400)
+
+    // Un solo PATCH, el del último valor: el debounce colapsa la ráfaga.
+    expect(patchesDeCantidad).toHaveLength(1)
+    expect(patchesDeCantidad[0]!.cantidad).toBe('3.0000')
+
+    const tras = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(tras!.props('modelValue')).toBe('1.0000')
+  })
+
+  it('con el PATCH en vuelo, la segunda edición sigue deshaciendo hasta lo que el servidor tiene', async () => {
+    // La misma ráfaga del test de arriba pero en una ventana más chica: la que
+    // se abre entre que el timer del debounce dispara —y borra la entrada de
+    // `pendingByLinea`— y el servidor contesta. Ahí ya no hay pendiente, así que
+    // el `previo` se recalculaba **desde la línea**, que trae el optimista sin
+    // confirmar: con las dos respuestas rechazadas quedaba pintado un 2 que el
+    // servidor nunca aceptó. No son 300 ms de margen sino la latencia de la red,
+    // que es donde el garzón corrige de verdad.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    patchCantidadFalla = true
+    let soltarServidor: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarServidor = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const primero = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    primero!.vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
+    // 400 > 300: el timer ya disparó y el PATCH del 2 está EN VUELO, retenido.
+    await esperar(400)
+    expect(patchesDeCantidad).toHaveLength(1)
+
+    const enVuelo = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    enVuelo!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+    soltarServidor()
+    await esperar(500)
+
+    // Los dos salieron y los dos los rechazó el servidor.
+    expect(patchesDeCantidad.map(p => p.cantidad)).toEqual(['2.0000', '3.0000'])
+    // Y la pantalla vuelve a **1**, la única cantidad que el servidor confirmó
+    // alguna vez. Con el `previo` recalculado desde la línea acá quedaba `'2'`.
+    const tras2 = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(tras2!.props('modelValue')).toBe('1.0000')
+  })
+
+  it('el flush manda lo que el garzón puso en CADA línea, no lo que devolvió el PATCH anterior', async () => {
+    // "Enviar a cocina" dentro de los 300 ms: `flushPendientes` recorre las
+    // líneas pendientes de a una y **espera** cada PATCH, y el camino feliz de
+    // cada uno hace `syncCuenta` con la cuenta ENTERA del servidor — que trae la
+    // otra línea con su valor persistido y pisa el optimista todavía pendiente.
+    // Releyendo la pantalla en la iteración siguiente, el 5 del garzón se perdía
+    // y la comanda salía con la cantidad vieja, sin ningún toast.
+    //
+    // ⚠️ Esto solo se ve con un estado de servidor **independiente** del de la
+    // pantalla: ver el docblock de `cuentasServidor`.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const inputs = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    expect(inputs).toHaveLength(2)
+    inputs[0]!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    inputs[1]!.vm.$emit('change', { presentacion: '5', unidadCodigo: 'unidad', cantidadCanonica: '5.0000' })
+    // Bien adentro de los 300 ms: los dos timers siguen pendientes cuando el
+    // garzón aprieta el botón, que es la escena que importa.
+    await esperar(20)
+    expect(patchesDeCantidad).toHaveLength(0)
+
+    const enviar = botonEn(drawerMesa(), 'Enviar a cocina')
+    expect(enviar).toBeTruthy()
+    enviar!.click()
+    await esperar(500)
+
+    expect(patchesDeCantidad).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '5.0000' },
+    ])
+    const trasFlush = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    expect(trasFlush[1]!.props('modelValue')).toBe('5.0000')
+  })
+
   it('una edición de cantidad a medio camino no dispara el refresco', async () => {
     // El orden importa y era determinista, no una carrera: `onCantidadChange`
     // pinta la cantidad en el acto y recién manda el PATCH 300 ms después, así
@@ -1478,20 +1735,18 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // cantidad que ya trae 4 decimales los dos strings coinciden y ese segundo
     // refresco no existía.
     //
-    // ⚠️ **La otra mitad —que al confirmar el servidor SÍ salga el refresco— no
-    // se afirma acá, y no es una omisión.** `patchLineaCantidad` hace
-    // `structuredClone(activeCuenta.value)`, y `activeCuenta.value` es el Proxy
-    // reactivo de un `ref`: ni Node ni Chrome clonan Proxies. Medido en Chrome
-    // real (2026-09-01, `/salones` con una cuenta abierta): tira
-    // `DataCloneError` ANTES de `inflight.add`, o sea que **el PATCH de cantidad
-    // nunca se manda**. Es un bug preexistente y ajeno a este frente —ningún
-    // test cubría ese camino, por eso nadie lo vio—. Mientras viva, el servidor
-    // no confirma nada y el refresco posterior es un estado inalcanzable.
+    // ⚠️ **Este test cubre solo la mitad "todavía no confirmó".** La otra —que al
+    // confirmar el servidor SÍ salga el refresco— vive en su propio test, abajo.
     //
-    // Por eso el test saca la cuenta de pantalla antes de los 300 ms: así el
-    // timer pendiente encuentra `activeCuenta` en `null`, corta antes del
-    // `structuredClone` y la suite no arrastra un `unhandled rejection` ajeno
-    // —que deja `vitest` en exit 1 aunque todos los tests pasen—.
+    // 📌 Hasta el 2026-09-02 esa otra mitad era **inalcanzable** y acá estaba
+    // escrito así: `patchLineaCantidad` hacía `structuredClone` sobre el Proxy
+    // reactivo de `activeCuenta`, tiraba `DataCloneError` fuera del `try`, y el
+    // `PATCH` no se mandaba nunca. Se arregló, así que la afirmación cambió: ya
+    // no es un estado imposible, es un caso con test.
+    //
+    // El test igual saca la cuenta de pantalla antes de los 300 ms, y ahora por
+    // otro motivo: es la única forma de dejar el timer pendiente sin que el
+    // PATCH salga, que es exactamente el estado que este test quiere fijar.
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('0.3333')]
 

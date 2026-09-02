@@ -971,8 +971,43 @@ async function abrirHistorial() {
 }
 
 // ── Líneas de la cuenta ────────────────────────────────────────────────────
-const pendingByLinea = new Map<string, ReturnType<typeof setTimeout>>()
-const inflight = ref(new Set<string>())
+/**
+ * Edición de cantidad **pendiente** por línea: el timer del debounce, lo que el
+ * garzón puso (`payload`) y la cantidad que la línea tenía **antes de la primera
+ * edición de la ráfaga** (`previo`).
+ *
+ * - **`payload` viaja acá y no se re-deriva de la pantalla al mandarlo.**
+ *   `flushPendientes` manda de a una y espera, y el camino feliz de cada `PATCH`
+ *   hace `syncCuenta` con la cuenta **entera** del servidor — que trae las otras
+ *   líneas con su valor persistido y pisa el optimista de las que todavía están
+ *   pendientes. Releyendo `activeCuenta` en la iteración siguiente se mandaba la
+ *   cantidad vieja de la segunda línea: la comanda salía mal y no había toast.
+ *   El camino solo-debounce se curaba solo porque ahí el payload va en el
+ *   closure; el agujero era exclusivo del flush.
+ * - **`previo` es lo que permite deshacer.** El optimista pinta apenas se toca el
+ *   stepper, así que para cuando el `PATCH` sale el estado en pantalla YA es el
+ *   nuevo — un snapshot tomado ahí restauraría justo lo que hay que revertir.
+ *   Medido el 2026-09-02: el `catch` parecía hacer rollback y no lo hacía.
+ */
+const pendingByLinea = new Map<
+  string,
+  { timer: ReturnType<typeof setTimeout>, payload: CantidadPayload, previo: CantidadPayload }
+>()
+/**
+ * Líneas con un `PATCH` **en vuelo**, cada una con el `previo` de ese request.
+ *
+ * Es un `Map` y no un `Set` para que el `previo` sobreviva la ventana que se
+ * abre cuando el timer borra la entrada de `pendingByLinea` y todavía no
+ * contestó el servidor: una segunda edición que caiga ahí adentro no encontraba
+ * pendiente y recalculaba el `previo` **desde la línea**, que ya trae el
+ * optimista sin confirmar. Con las dos respuestas rechazadas quedaba pintada una
+ * cantidad que el servidor nunca aceptó — el mismo síntoma que el rollback vino
+ * a cerrar, en una ventana más chica (la latencia, no los 300 ms del debounce).
+ *
+ * Las claves son las mismas de siempre, así que el guard del refresco de acá
+ * abajo (`size` / `has`) no cambia de conducta.
+ */
+const inflight = ref(new Map<string, CantidadPayload>())
 
 /**
  * ── El catálogo se vuelve a preguntar; ya no se recalcula acá ───────────────
@@ -1044,10 +1079,13 @@ function unidadPresLinea(linea: CuentaLineaDetalle): string {
   return linea.unidadCodigoPresentacion ?? unidadBaseLinea(linea)
 }
 
-function patchLineaOptimista(
-  lineaId: string,
-  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
-) {
+type CantidadPayload = {
+  presentacion: string
+  unidadCodigo: string
+  cantidadCanonica: string
+}
+
+function patchLineaOptimista(lineaId: string, payload: CantidadPayload) {
   if (!activeCuenta.value) return
   const cuentaId = activeCuenta.value.id
   const patched: CuentaDetalle = {
@@ -1071,13 +1109,13 @@ function patchLineaOptimista(
 
 async function patchLineaCantidad(
   lineaId: string,
-  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+  payload: CantidadPayload,
+  previo: CantidadPayload,
 ) {
   if (!activeCuenta.value) return
   const cuentaId = activeCuenta.value.id
-  const snapshot = structuredClone(activeCuenta.value)
 
-  inflight.value.add(lineaId)
+  inflight.value.set(lineaId, previo)
   try {
     const cuenta = await salonesApi.actualizarLinea(cuentaId, lineaId, {
       cantidad: payload.cantidadCanonica,
@@ -1087,7 +1125,15 @@ async function patchLineaCantidad(
     syncCuenta(cuenta)
   }
   catch (e: unknown) {
-    syncCuenta(snapshot)
+    // Se deshace **solo esta línea**, con la misma función que la pintó. Antes
+    // acá había un `syncCuenta(structuredClone(activeCuenta.value))` y fallaba
+    // dos veces: `.value` es el Proxy reactivo de un `ref` y `structuredClone`
+    // no clona Proxies —tiraba `DataCloneError` FUERA del `try`, así que el
+    // `PATCH` no salía nunca y el toast tampoco—; y aun arreglando eso, el
+    // snapshot se tomaba después del optimista, o sea que restauraba el valor
+    // que había que revertir. Restaurar la cuenta entera además pisaba la
+    // edición optimista de otra línea de la misma ráfaga.
+    patchLineaOptimista(lineaId, previo)
     toast.add({ title: apiErrorMsg(e, 'Error al actualizar la cantidad'), color: 'error' })
   }
   finally {
@@ -1095,24 +1141,33 @@ async function patchLineaCantidad(
   }
 }
 
-function onCantidadChange(
-  linea: CuentaLineaDetalle,
-  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
-) {
+function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
   if (!activeCuenta.value || new Decimal(payload.cantidadCanonica || '0').lte(0)) return
+
+  const pendiente = pendingByLinea.get(linea.id)
+  // El `previo` se toma de la línea SOLO en la primera edición de la ráfaga: en
+  // la segunda la línea ya trae lo que pintó el optimista, y guardarlo haría que
+  // deshacer devuelva a un valor que tampoco se guardó nunca. Por eso, si no hay
+  // pendiente, se busca antes en `inflight`: entre que el timer dispara y el
+  // servidor contesta la ráfaga sigue siendo la misma, pero la entrada del
+  // debounce ya no está.
+  const previo: CantidadPayload = pendiente?.previo ?? inflight.value.get(linea.id) ?? {
+    presentacion: presentacionLinea(linea),
+    unidadCodigo: unidadPresLinea(linea),
+    cantidadCanonica: linea.cantidad,
+  }
+  if (pendiente) clearTimeout(pendiente.timer)
 
   patchLineaOptimista(linea.id, payload)
 
-  const prev = pendingByLinea.get(linea.id)
-  if (prev) clearTimeout(prev)
-
-  pendingByLinea.set(
-    linea.id,
-    setTimeout(() => {
+  pendingByLinea.set(linea.id, {
+    payload,
+    previo,
+    timer: setTimeout(() => {
       pendingByLinea.delete(linea.id)
-      void patchLineaCantidad(linea.id, payload)
+      void patchLineaCantidad(linea.id, payload, previo)
     }, 300),
-  )
+  })
 }
 
 async function flushPendientes() {
@@ -1120,16 +1175,17 @@ async function flushPendientes() {
   // que quedaron sin responsable, y sombrearlo acá deja dos cosas sin relación
   // llamadas igual en el mismo archivo.
   const lineasPendientes = [...pendingByLinea.entries()]
-  for (const [lineaId, timer] of lineasPendientes) {
+  for (const [lineaId, { timer, payload, previo }] of lineasPendientes) {
     clearTimeout(timer)
     pendingByLinea.delete(lineaId)
-    const linea = activeCuenta.value?.lineas.find(l => l.id === lineaId)
-    if (!linea) continue
-    await patchLineaCantidad(lineaId, {
-      presentacion: linea.cantidadPresentacion ?? linea.cantidad,
-      unidadCodigo: linea.unidadCodigoPresentacion ?? unidadBaseLinea(linea),
-      cantidadCanonica: linea.cantidad,
-    })
+    // Quitar una línea no cancela su timer, así que puede haber salido de la
+    // cuenta dentro de la ventana del debounce: mandarle el `PATCH` sería un 404
+    // y un toast por algo que el garzón ya deshizo.
+    if (!activeCuenta.value?.lineas.some(l => l.id === lineaId)) continue
+    // `payload` sale del Map y NO se relee de `activeCuenta`: el `syncCuenta` de
+    // la iteración anterior ya pisó el optimista de esta línea. Ver el docblock
+    // de `pendingByLinea`.
+    await patchLineaCantidad(lineaId, payload, previo)
   }
   while (inflight.value.size > 0) {
     await new Promise(resolve => setTimeout(resolve, 50))

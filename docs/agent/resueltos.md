@@ -17,6 +17,100 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+
+## El `PATCH` de cantidad de una línea nunca llegaba al servidor — y el rollback tampoco funcionaba (cerrado 2026-09-02)
+
+Venía de la § 3, anotado el 2026-09-01 al cerrar el frente de la reserva de stock. Era
+**preexistente**: `3c24b26b`, del 2026-07-16, mes y medio antes.
+
+**Lo que pasaba.** El garzón cambiaba la cantidad de una línea, veía el número nuevo en
+pantalla… y el servidor seguía con el viejo. `patchLineaCantidad` hacía
+`structuredClone(activeCuenta.value)`, y `.value` es el **Proxy reactivo** de un `ref`: ni
+Node ni Chrome clonan Proxies, así que tiraba `DataCloneError`. Y como esa línea estaba
+**fuera del `try`**, el `catch` no corría: no salía el toast, no había reconciliación, y la
+cantidad optimista quedaba pintada como si se hubiera guardado.
+
+**Por qué vivió mes y medio sin que nadie lo viera, y es la parte que vale para la próxima:**
+el spec de la pantalla **ya tenía** un array `patchesDeCantidad`, el mock lo llenaba y se
+reseteaba entre tests — **y nadie lo afirmaba nunca**. Había toda la plomería para cazarlo y
+faltaba el `expect`.
+
+**El segundo bug, que solo apareció al encender el camino.** Con el `PATCH` saliendo, el
+`catch` pasó a correr por primera vez… y no deshacía nada. El snapshot se tomaba **después**
+del pintado optimista, así que restaurarlo devolvía exactamente el valor que había que
+revertir. Un mutante que borra el rollback entero pasaba en verde. Y restaurar la **cuenta
+completa** además pisaba la edición optimista de otra línea de la misma ráfaga.
+
+**Cómo quedó.** El `structuredClone` **se borró**, no se parchó: el rollback restaura **solo
+la línea editada**, con la misma función que la pintó (`patchLineaOptimista`), y el valor
+previo se captura en `onCantidadChange` **antes** de pintar. En una ráfaga sobre la misma
+línea el previo se toma solo en la primera edición: si el garzón corrige 1 → 2 → 3 y el
+servidor rechaza, deshacer vuelve a **1**, no a 2 — el 2 tampoco se guardó nunca.
+
+**Y la revisión independiente encontró dos ventanas más del mismo síntoma**, las dos cerradas
+el mismo día:
+
+- **La ráfaga con el `PATCH` en vuelo.** El timer borra la entrada del debounce **antes** de
+  mandar el request, así que una segunda edición que caiga entre eso y la respuesta no
+  encontraba pendiente y recalculaba el previo **desde la línea** — que ya trae el optimista
+  sin confirmar. Con las dos respuestas rechazadas quedaba pintado el mismo 2 que el párrafo de
+  arriba declara cerrado, solo que en la ventana de la latencia y no en la de los 300 ms. El
+  previo ahora vive también en `inflight`, que pasó de `Set` a `Map` para eso; las claves son
+  las mismas, así que el guard del refresco no cambió.
+- **El flush perdía una edición entera, sin avisar.** `flushPendientes` —lo que corre al tocar
+  *Enviar a cocina* o al cobrar— manda de a una y espera, y el camino feliz de cada `PATCH`
+  hace `syncCuenta` con la cuenta **entera** del servidor, que pisa el optimista de las líneas
+  que siguen pendientes. Como el payload de la iteración siguiente se releía de la pantalla, el
+  garzón subía dos líneas, tocaba *Enviar a cocina* y **la comanda salía con la cantidad vieja
+  de la segunda**, sin toast. El payload ahora viaja en el `Map` del debounce y no se relee.
+  ⚠️ El camino **solo-debounce** se curaba solo —ahí el payload va en el closure—: el agujero
+  era exclusivo del flush, y por eso ninguno de los cuatro tests anteriores lo veía.
+
+**Qué lo fija.** Seis tests de pantalla: que el `PATCH` sale, que el rechazo avisa y deshace,
+que la ráfaga vuelve al valor correcto, que con el `PATCH` **en vuelo** sigue deshaciendo hasta
+lo que el servidor tiene, que el **flush** manda lo que el garzón puso en **cada** línea, y —la
+mitad que la Tarea 8 del frente de reserva **no pudo afirmar porque era inalcanzable**— que al
+confirmar el servidor el catálogo se vuelve a pedir.
+
+**Cuatro mutantes verificados, los cuatro mueren:** borrar el rollback; pisar el previo en la
+ráfaga; que el flush relea el payload de la pantalla en vez del que guardó (manda `2.0000`
+donde el garzón puso `5.0000`); y buscar el previo solo en el debounce y no en lo que está en
+vuelo (deja pintado el `2` que el servidor rechazó). El más informativo es el **quinto**, que
+no rompe sino que **revierte**: volver a poner el `structuredClone` de julio mata los **seis**
+tests y deja **seis** `Unhandled Rejection: DataCloneError`, o sea que los tests no solo cubren
+la línea nueva — habrían cazado el bug original.
+
+📌 **Una aserción que no medía nada, y el mutante que lo mostró fue el primero, no un tercero.**
+La primera versión del test del rollback afirmaba `not.toContain('3.0000')` sobre el texto del
+drawer y **sobrevivía al mutante que borra el rollback**, porque la pantalla muestra la
+presentación (`3`) y no la canónica. Se cambió por una sobre el `model-value` del input. (Esto
+estuvo mal escrito acá un día: decía *"un tercer mutante"*, y era el mismo primero midiendo el
+test en vez del código.)
+
+📌 **El mock del spec no podía ver el bug del flush**, y eso es reusable: `GET /cuentas`
+devolvía el array del fixture **tal cual**, y la pantalla escribe el optimista adentro
+(`cuentas.value[idx] = patched`). Servidor y pantalla eran el mismo objeto, así que la
+respuesta de cualquier `PATCH` ya traía lo que la pantalla había pintado y **ninguna aserción
+podía distinguir "lo que el servidor tiene" de "lo que la pantalla cree"**. Se agregó un
+`cuentasServidor` clonado en el primer `GET`.
+
+**Smoke en Chrome real**, que la entrada exigía: mesa abierta, se agrega Papas fritas
+(disponible 40 → 39), se cambia la cantidad a 3 → `PATCH … 200` en la red seguido de los tres
+`GET` del catálogo, disponible 39 → 37, y **tras recargar la página la cantidad sigue en 3**.
+Antes del arreglo, recargar mostraba 1.
+
+⚠️ **Lo que NO cierra, y quedó anotado el mismo día:** si un `PATCH` intermedio **sale bien**
+a mitad de ráfaga, el `previo` guardado no se re-tasa, así que un rechazo posterior deshace
+hasta un valor viejo y la pantalla queda en desacuerdo con el servidor —medido: pantalla
+`1.0000`, servidor `2.0000`— **sin autocorregirse** hasta que el garzón salga de la mesa y la
+vuelva a elegir. Tiene entrada propia en [`pendientes.md`](pendientes.md) § 3, con la medición
+y el arreglo propuesto. No entró acá porque abre una rama nueva del camino feliz sin test que
+la cubra, y este frente ya cerraba tres huecos.
+
+📌 **Lo que esto destraba:** el tope de stock al subir la cantidad —construido y testeado en
+la Tarea 4 del frente de reserva— hasta hoy solo era alcanzable por API. Ahora la pantalla
+llega a él, y su `400` se ve como toast.
+
 ## Dos mesas ya no pueden pedir la misma última unidad: lo que la mesa pide queda apartado (cerrado 2026-09-01)
 
 Venía de la § 4 (*necesita que el owner conteste*), donde había entrado ese mismo día
@@ -131,9 +225,10 @@ descuento local se queda, porque ahí el carrito todavía no existe para el serv
   anotado en la § 6 de la spec para cuando se encare.
 - **Una línea de `tipo='ingrediente'`** se sigue pudiendo agregar a una cuenta y la venta la
   rechaza al cerrar: otro camino a la mesa trabada, preexistente y con entrada propia.
-- **El `PATCH` de cantidad no llega al servidor desde la pantalla** (`DataCloneError`
-  preexistente, de julio): el tope del `PATCH` está y tiene sus e2e, pero por API. Entrada
-  propia, y es la más grave de las cuatro que este frente dejó.
+- ~~**El `PATCH` de cantidad no llega al servidor desde la pantalla**~~ — era la más grave de
+  las cuatro que este frente dejó, y **se cerró el 2026-09-02** (entrada propia arriba). Con
+  eso el tope del `PATCH`, que hasta entonces solo era alcanzable por API, quedó al alcance de
+  la pantalla.
 - **Una cuenta olvidada inmoviliza stock hasta que alguien la cierre o la cancele.** No es un
   descuido: es el trade-off que el owner **aceptó explícitamente** al elegir que la reserva dure
   mientras dure la cuenta, sin vencimiento por tiempo (§ 8 de la spec). La salida es cerrar o

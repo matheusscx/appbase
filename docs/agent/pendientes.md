@@ -1285,36 +1285,15 @@ es **el mismo error que este frente ya cometió y corrigió una vez** —atribui
 una regresión propia, ver el doble descuento en [`resueltos.md`](resueltos.md)—. La atribución
 se cruza con la fecha del commit, no se recuerda.
 
-Están acá y no en la § 1 porque ninguno es mecánico —el primero enciende un camino muerto, los
-otros tres son trabajo de backend— y no en la § 4 porque **ninguno espera una respuesta del
-owner**: la decisión que los gobierna ya está tomada (*lo que la mesa pide queda apartado, y la
+Están acá y no en la § 1 porque ninguno es mecánico: los **tres que siguen abiertos** son
+trabajo de backend, y el primero —ya cerrado— estaba acá porque encendía un camino muerto. Y no
+en la § 4 porque **ninguno espera una respuesta del owner**: la decisión que los gobierna ya está tomada (*lo que la mesa pide queda apartado, y la
 pantalla muestra lo que se puede pedir*). Contexto del frente:
 [`resueltos.md`](resueltos.md).
 
-- [ ] 🔴 **El `PATCH` de cantidad de una línea de mesa NUNCA llega al servidor, y el error
-  tampoco se ve** (frontend; **reproducido en Chrome real el 2026-09-01**, no leído) — el más
-  grave de los cuatro. *(El 🔴 marca la severidad de ESTA entrada; no reabre la tanda 🔴, que
-  se cerró el 2026-08-21 y no vuelve.)* `patchLineaCantidad`
-  (`frontend/app/pages/salones/index.vue:1072-1096`) hace
-  `structuredClone(activeCuenta.value)` y `activeCuenta` es un `ref`, así que `.value` es un
-  **Proxy reactivo**: ni Node ni Chrome clonan Proxies y la llamada tira `DataCloneError`.
-  Salta **antes** de `inflight.add`, o sea que el `PATCH` no se manda nunca.
-  **Y hay una segunda mitad, peor que la primera:** el `structuredClone` está **fuera del
-  `try`**, así que el `catch` no corre — no sale el toast de error y no hay reconciliación. La
-  cantidad optimista queda pintada en pantalla **como si hubiera funcionado**. El garzón
-  cambia 1 por 3, ve 3, y el servidor sigue teniendo 1.
-  **Preexistente**: viene de `3c24b26b` (2026-07-16). Ningún test cubría ese camino, por eso
-  nadie lo vio en un mes y medio; hoy queda anotado en el docblock de *"una edición de cantidad
-  a medio camino no dispara el refresco"* (`index.nuxt.spec.ts`), que evita el
-  `unhandled rejection` sacando la cuenta de pantalla antes del timer.
-  **El arreglo es una línea** —clonar sobre `toRaw(...)`, que es lo que desarma el Proxy—,
-  **pero enciende por primera vez
-  un camino que estuvo muerto un mes y medio**: recién ahí van a correr de verdad el `PATCH`,
-  su reconciliación, su toast y el refresco del catálogo que ese confirm dispara. Por eso va
-  como frente propio con su propia verificación en navegador, y no como remate de otra tarea.
-  ⚠️ Y ojo con el orden de lectura: **el tope de stock al subir la cantidad
-  (`actualizarLinea`) hoy solo es alcanzable por API**, no desde el salón. El backend está y
-  tiene sus e2e; lo que no llega es la pantalla.
+✅ **El `PATCH` de cantidad que nunca llegaba se cerró el 2026-09-02.** Salió con un segundo
+bug adentro que solo se vio al encender el camino —el rollback tampoco funcionaba— y con el
+smoke en Chrome que la entrada pedía. Detalle en [`resueltos.md`](resueltos.md).
 
 - [ ] **El drawer de personalización decide "Sin stock disponible" con el stock FÍSICO**
   (backend + frontend; medido el 2026-09-01 al cerrar la Tarea 8) — `ItemPersonalizacionDrawer`
@@ -1360,7 +1339,7 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
 - [ ] **Una línea de `tipo='ingrediente'` se agrega a la cuenta y la venta la rechaza al
   cerrar: otro camino a la mesa trabada** (backend; preexistente. **Leído en el código el
   2026-09-01**, durante la Tarea 1: no hay sonda que lo haya reproducido, a diferencia de la
-  entrada del `DataCloneError` de arriba, que sí se corrió en Chrome) — `SalonesService.agregarLinea` no valida el `tipo` del ítem (solo rechaza
+  entrada del `DataCloneError` —cerrada el 2026-09-02—, que sí se corrió en Chrome) — `SalonesService.agregarLinea` no valida el `tipo` del ítem (solo rechaza
   **personalización** sobre lo que no es receta ni combo), así que un `ingrediente` entra a la
   cuenta como cualquier otra línea; al cerrar, `ventas.service.ts:295` corta con *"Los
   ingredientes no se pueden vender directamente"* y **la cuenta entera deja de poder cobrarse**.
@@ -1374,6 +1353,52 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
   ingredientes fueran vendibles, eso **sí** es una pregunta de producto y no es esta entrada.
   ⚠️ Al tomarlo, revisar también los **otros** tipos que la cuenta acepta y la venta no: la
   lista se hace grepeando los `throw` de `ventas.service.ts` por `item.tipo`, no de memoria.
+
+### El residuo que dejó el arreglo del `PATCH` de cantidad (2026-09-02)
+
+Uno solo, y no es de la misma familia que los cuatro de arriba: lo dejó el **arreglo**, no el
+frente de la reserva. Está acá y no en la § 4 porque **la regla ya está decidida** y es la que
+ese mismo arreglo estableció —*deshacer devuelve la línea a lo último que el servidor
+confirmó*—; lo que falta es construir la mitad que quedó afuera, con su test.
+
+- [ ] **Tras un éxito a mitad de ráfaga, deshacer vuelve a un valor viejo y la pantalla queda
+  en desacuerdo con el servidor** (frontend; **medido el 2026-09-02**, al cerrar los hallazgos
+  de la revisión del `PATCH` de cantidad — [`resueltos.md`](resueltos.md)) —
+  `patchLineaCantidad` guarda el `previo` **de antes de la ráfaga** y no lo re-tasa cuando un
+  `PATCH` intermedio **sale bien**, así que un rechazo posterior deshace más de lo que
+  corresponde.
+
+  **La escena.** La línea está en 1. El garzón la sube a 2; el `PATCH` sale y **el servidor lo
+  acepta**. Con ese request todavía en vuelo el garzón la sube a 3, y ese segundo `PATCH`
+  rebota por stock. Deshacer lo devuelve a **1**, pero el servidor tiene **2**.
+
+  **Lo medido**, con una sonda temporal sobre `salones/index.nuxt.spec.ts` (un estado de
+  servidor independiente del de la pantalla, el `cuentasServidor` que ese frente agregó):
+
+  | | pantalla | servidor |
+  |---|---|---|
+  | tras el `PATCH` del 2 (aceptado) | `2.0000` | `2.0000` |
+  | tras el `PATCH` del 3 (rechazado) | **`1.0000`** | **`2.0000`** |
+
+  ⚠️ **Y no se autocorrige.** La única lectura de `GET /cuentas` en toda la pantalla es
+  `cargarCuentas`, y la llama **un solo llamador**: `onSelectMesa` (`index.vue`). Ni
+  `volverACuentas`, ni el refresco del catálogo —que pide `/items`, no `/cuentas`— la
+  disparan. O sea que el número equivocado sobrevive a salir de la cuenta y volver a entrar
+  desde el listado; se cura recién cuando el garzón sale de la mesa y la vuelve a elegir.
+
+  📌 **No es silencioso**, y eso lo distingue de los tres huecos que el frente sí cerró: el
+  toast del rechazo **sí sale** (medido: *"Error al actualizar la cantidad: Stock insuficiente
+  de …"*). Lo que está mal es el número con el que queda la línea, no la falta de aviso. Por
+  eso es un residuo y no un bloqueante.
+
+  **El arreglo propuesto:** en el camino feliz de `patchLineaCantidad`, después del
+  `syncCuenta(cuenta)`, re-tasar el `previo` guardado con la cantidad que **confirmó el
+  servidor** — para la entrada de `pendingByLinea` si sigue habiendo una edición pendiente de
+  esa línea. Son unas pocas líneas; lo que lo saca de aquel diff es que abre una rama nueva del
+  camino feliz **sin test que la cubra**, y ese frente ya cerraba tres huecos con cuatro
+  mutantes. El test va con un `PATCH` retenido que **se acepta** y un segundo que rebota — la
+  plomería (`patchCantidadRetenido`, `patchCantidadFalla`, `cuentasServidor`) ya está en el
+  spec.
 
 ## 4. Necesita que el owner conteste
 
@@ -1395,13 +1420,14 @@ queda trabada"*. De las tres salidas que la entrada ofrecía —apartar, avisar,
 owner eligió **apartar**, y el frente se construyó ese mismo día → [`resueltos.md`](resueltos.md).
 ⚠️ **No cierra la salida con motivo**, que sigue viva en la § 3 y que la propia entrada
 nombraba como su cruce: apartar achica el caso de la mesa trabada, **no lo borra**.
-**Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+**Quedan seis abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
-más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
-tipo (2026-08-29, al cerrar la de la forma de importe)—; el conteo se recuenta con
-`awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el **2026-09-01** al sacar la de
-las dos mesas: siguen siendo esas cinco.
+más la nota de crédito (fiscal, frente propio), el **modo** que se da vuelta al cambiar de
+tipo (2026-08-29, al cerrar la de la forma de importe) y, desde el **2026-09-02**, qué pasa
+con una edición de cantidad cuando el garzón **se va de la cuenta**—; el conteo se recuenta con
+`awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el **2026-09-02** al agregar la
+última: son seis.
 
 ✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
 desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
@@ -1653,6 +1679,44 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   caminos del frente vecino? Conservar es la respuesta chica, pero cambia una conducta que hoy
   es incondicional y que se escribió a propósito — el reset del modo existe para que un `0.10`
   de porcentaje no quede mostrándose como `0` de plata (ver el docblock de `onModoChange`).
+
+- [ ] **Salir de la cuenta con una edición de cantidad a medio camino: ¿se guarda o se
+  descarta?** (frontend; **medido el 2026-09-02**, en la revisión del frente del `PATCH` de
+  cantidad — [`resueltos.md`](resueltos.md)) — el tercer hueco de la misma familia que ese
+  frente cerró, y el único que **no se arregló**, porque la respuesta es una decisión de
+  producto y no una de implementación.
+
+  **La escena.** El garzón cambia una línea de 1 a 3 y, antes de que pasen los 300 ms del
+  debounce, toca *Cuentas* para volver al listado (o cambia de mesa). `volverACuentas` deja
+  `activeCuenta` en `null`, así que cuando el timer dispara `patchLineaCantidad` corta en su
+  primera línea (`if (!activeCuenta.value) return`).
+
+  **Lo medido**, con una sonda temporal sobre `salones/index.nuxt.spec.ts`: **cero `PATCH`**,
+  **cero toasts**, y al volver a entrar a la cuenta desde el listado —que no pega ninguna
+  llamada— el input muestra **`3`**. O sea: la cantidad que el garzón puso queda pintada como
+  si se hubiera guardado, y el servidor sigue con `1`. Es el mismo síntoma que el frente
+  cerró en las otras dos ventanas (los 300 ms y la latencia del request), pero acá **no hay
+  arreglo obvio**: no es un bug de rollback, es que nadie decidió qué significa salir.
+
+  ❓ **La pregunta, con las tres salidas y lo que cuesta cada una:**
+
+  1. **Salir guarda.** Al abandonar la cuenta sale el `PATCH`, igual que cuando el garzón
+     toca *Enviar a cocina* (`flushPendientes` ya hace exactamente eso). Costo: el `PATCH`
+     puede rebotar por el tope de stock **con la pantalla ya en otra cuenta**, y hay que
+     decidir dónde se ve ese error — un toast que habla de una mesa que ya no está en
+     pantalla es peor que no avisar.
+  2. **Salir descarta.** La pantalla revierte el pintado optimista y la cuenta vuelve a
+     mostrar lo que el servidor tiene. Costo: el garzón que cambió a 3 y salió tranquilo ve
+     `1` la próxima vez que entre, sin que nada le diga que su cambio se perdió.
+  3. **Salir pregunta.** Un aviso de *"tenés un cambio sin guardar"* con las dos salidas.
+     Costo: un modal más en el camino más caliente de la pantalla, y el criterio del propio
+     owner para estos casos fue **frenar cuando el alcance es grande** — acá el alcance es una
+     línea de una cuenta.
+
+  📌 **Para el que la tome:** el arreglo mecánico de cualquiera de las tres es chico —
+  `pendingByLinea` ya guarda el `payload` y el `previo` de cada línea, así que "mandar" y
+  "deshacer" son las dos funciones que ya existen. Lo que falta es la respuesta.
+
 
 ## 5. Carreras de concurrencia
 

@@ -427,11 +427,13 @@ es el único guard y lo llaman las dos:
 | `POST /cuentas/:id/lineas` | lo que la línea nueva consumiría, contra `stock − comprometido` |
 | `PATCH /cuentas/:id/lineas/:lineaId` | **solo si la cantidad sube**, y por la diferencia |
 
-⚠️ **La segunda fila hoy no se alcanza desde `/salones`.** `patchLineaCantidad` clona el Proxy
-reactivo de un `ref` y tira `DataCloneError` **antes** de mandar el `PATCH`, así que ese request
-nunca sale de la pantalla. El bug es anterior a este frente (`3c24b26b`, 2026-07-16) y tiene
-entrada propia en [`../agent/pendientes.md`](../agent/pendientes.md) § 3. El guard del backend
-está y tiene sus e2e; **lo que no llega es el camino de la UI.**
+✅ **La segunda fila se alcanza desde `/salones` desde el 2026-09-02.** Hasta ese día no:
+`patchLineaCantidad` clonaba el Proxy reactivo de un `ref` y tiraba `DataCloneError` **antes**
+de mandar el `PATCH`, así que el request nunca salía de la pantalla y este guard —que está y
+tiene sus e2e— solo se ejercía por API. El bug era anterior a este frente (`3c24b26b`,
+2026-07-16) y se cerró junto con el rollback, que el mismo camino tenía roto y que solo se pudo
+ver al encenderlo → [`../agent/resueltos.md`](../agent/resueltos.md). Su `400` ahora llega al
+garzón como toast, y la cantidad vuelve a la que el servidor tiene.
 
 El `400` **nombra el ingrediente que faltó** y con cuánto se quedó, no un "no hay stock"
 genérico: en una receta de seis ingredientes eso manda al garzón a adivinar. Solo frena lo
