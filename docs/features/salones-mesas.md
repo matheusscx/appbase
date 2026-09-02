@@ -601,7 +601,7 @@ vigente en `CuentaDetalle`, aislamiento por tenant.
 Reproduce la sonda que abrió el frente —dos mesas del mismo salón sobre un producto con
 `stock = 1`— y cubre la receta, el `PATCH` que sube y el que baja, el no bloqueante en
 negativo, las **dos** formas de liberar (quitar la línea y cancelar la cuenta), el
-**contra-caso** de cerrar —el test se llama *"cerrar y cobrar NO suelta nada"*, y es el que
+**contra-caso** de cerrar —el test se llama *"cerrar la cuenta NO suelta nada"*, y es el que
 distingue *"se soltó"* de *"se consumió"*— y la carrera de dos `POST` simultáneos.
 
 El bloque *"Revisión final"* agrega el extra del **mismo** ingrediente que la receta ya lleva,

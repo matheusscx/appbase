@@ -236,19 +236,6 @@ describe('Reserva de stock al pedir (e2e)', () => {
   }
 
   /**
-   * Saca la línea de la cuenta. Solo funciona con la línea **sin despachar**
-   * (`cantidad_enviada = 0`): el guard de agosto bloquea quitar lo que ya salió
-   * a cocina, y este spec nunca confirma comanda, así que sus líneas siempre
-   * están de este lado.
-   */
-  async function quitarLinea(cuentaId: string, lineaId: string): Promise<void> {
-    const res = await request(app.getHttpServer())
-      .delete(`/api/cuentas/${cuentaId}/lineas/${lineaId}`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(200);
-  }
-
-  /**
    * Cierra sin cobrar (pagos vacíos). Genera la venta `canal='fisico'` —de ahí
    * la caja abierta del `beforeAll`— y con ella el descuento REAL de stock.
    */
@@ -843,6 +830,28 @@ describe('Reserva de stock al pedir (e2e)', () => {
       expect(
         (await filaDelCatalogo(insumo.nombre, insumo.id)).stockDisponible,
       ).toBe('-1.0000');
+
+      // **Y la cuenta cierra.** Esto es lo que custodia el otro medio invariante
+      // del que depende el arreglo: la venta enforcea POR OCURRENCIA y procesa
+      // los ingredientes en el orden que le da
+      // `expandirIngredientesPersonalizados` —`[...fijos, ...extras]` y un
+      // `sort` por `ingredienteItemId` que, siendo estable, deja el empate como
+      // vino: la base ANTES que el extra—. Si ese empate se invirtiera, el extra
+      // (no bloqueante) se comería la única unidad y la base (bloqueante)
+      // reventaría con 'Stock insuficiente para la salida': el `POST` seguiría
+      // dando 201 y la mesa quedaría trabada al cobrar, que es exactamente el
+      // bug que este describe vino a cerrar. Verificado con el mutante
+      // (`[...extras, ...fijos]`): sin esta línea el test queda verde, con ella
+      // se pone rojo acá.
+      await cerrarCuenta(cuentaId);
+
+      const fila = await filaDelCatalogo(insumo.nombre, insumo.id);
+      // La base se llevó la única unidad; la porción del extra se degradó a
+      // advertencia. Eso es "ocupar y no frenar" visto desde el cobro.
+      expect(fila.stock).toBe('0.0000');
+      // Cerrada la cuenta, deja de comprometer: el disponible vuelve a ser el
+      // stock, sin el −1 de recién.
+      expect(fila.stockDisponible).toBe('0.0000');
     });
   });
 
@@ -867,7 +876,14 @@ describe('Reserva de stock al pedir (e2e)', () => {
       const cuentaB = await abrirCuenta(mesaBId);
       expect((await intentarLinea(cuentaB, producto.id, '1')).status).toBe(400);
 
-      await quitarLinea(cuentaA, lineaId);
+      // Sacar la línea, inline: es el único lugar del spec que lo hace. Solo
+      // funciona con la línea **sin despachar** (`cantidad_enviada = 0`) —el
+      // guard de agosto bloquea quitar lo que ya salió a cocina, y este spec
+      // nunca confirma comanda, así que sus líneas siempre están de este lado—.
+      const resQuitar = await request(app.getHttpServer())
+        .delete(`/api/cuentas/${cuentaA}/lineas/${lineaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(resQuitar.status).toBe(200);
 
       // La línea ya no está en ninguna cuenta abierta → no compromete nada.
       expect(
@@ -914,8 +930,8 @@ describe('Reserva de stock al pedir (e2e)', () => {
      * con `pagos: []` como el resto del spec, y la venta queda `pendiente` con
      * el kardex ya movido.
      */
-    it('cerrar y cobrar NO suelta nada: la mesa B sigue sin poder, porque ya no hay stock', async () => {
-      const producto = await crearProducto('Producto ya cobrado', '1');
+    it('cerrar la cuenta NO suelta nada: la mesa B sigue sin poder, porque ya no hay stock', async () => {
+      const producto = await crearProducto('Producto ya vendido', '1');
       const cuentaA = await abrirCuenta();
       await agregarLinea(cuentaA, producto.id, '1');
 

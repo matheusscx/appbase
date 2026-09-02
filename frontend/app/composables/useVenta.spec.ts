@@ -533,7 +533,13 @@ describe('carrito helpers', () => {
     expect(receta.disponible).toBe(31)
   })
 
-  it('descontarStockCatalogo no baja disponible bajo cero', () => {
+  it('descontarStockCatalogo deja el disponible en negativo, igual que stockDisponible', () => {
+    // Hasta el 2026-09-02 este número tenía piso en 0 y `stockDisponible` no,
+    // así que el mismo dato se comportaba de dos formas según quién lo tocó
+    // último: el −2 que la API manda a propósito (un ingrediente no bloqueante
+    // comprometido de más) se perdía apenas el carrito descontaba el primer
+    // ítem, y la tarjeta pasaba a decir "Disponibles: 0". La atenuación no
+    // depende de esto: `sinStockVisual` compara `<= 0`.
     const receta: ItemCatalogo = {
       ...item('r'),
       tipo: 'receta',
@@ -541,7 +547,21 @@ describe('carrito helpers', () => {
       disponible: 3,
     }
     const r = descontarStockCatalogo([receta], [{ item: receta, cantidad: '10' }])
-    expect(r[0]!.disponible).toBe(0)
+    expect(r[0]!.disponible).toBe(-7)
+    expect(receta.disponible).toBe(3)
+  })
+
+  it('descontarStockCatalogo redondea el disponible hacia abajo también en negativo', () => {
+    // `disponible` es un conteo entero de porciones, así que el `.floor()` se
+    // queda: media porción de más es una porción de más, no media.
+    const receta: ItemCatalogo = {
+      ...item('r'),
+      tipo: 'receta',
+      stock: null,
+      disponible: 1,
+    }
+    const r = descontarStockCatalogo([receta], [{ item: receta, cantidad: '2.5' }])
+    expect(r[0]!.disponible).toBe(-2)
   })
 })
 

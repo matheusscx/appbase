@@ -322,13 +322,20 @@ export function descontarStockCatalogo(
       }
       catch { /* mantener stockDisponible */ }
     }
+    // Mismo criterio que `stockDisponible` y por el mismo motivo: desde el
+    // 2026-09-01 `disponible` es `stock − comprometido` y el servidor lo manda
+    // negativo a propósito. Con el piso en 0 que tenía acá, el −2 que llegaba de
+    // la API se perdía apenas el vendedor agregaba el primer ítem al carrito y
+    // la tarjeta pasaba a decir "Disponibles: 0" — el mismo dato tratado de dos
+    // formas según quién lo tocó último. La atenuación no cambia
+    // (`sinStockVisual` compara `<= 0`, `CatalogoGrid.vue`). El `.floor()` se
+    // queda: `disponible` es un conteo entero de porciones, y hacia abajo
+    // también en negativo (−1,5 porciones es −2, no −1).
     if (item.disponible !== null && item.disponible !== undefined) {
       try {
         next = {
           ...next,
-          disponible: Decimal.max(0, new Decimal(item.disponible).minus(vendido))
-            .floor()
-            .toNumber(),
+          disponible: new Decimal(item.disponible).minus(vendido).floor().toNumber(),
         }
       }
       catch { /* mantener disponible */ }

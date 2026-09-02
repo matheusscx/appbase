@@ -17,6 +17,67 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los cinco mecánicos que dejó el frente de la reserva de stock (cerrado 2026-09-02)
+
+Venían de la § 1, en dos secciones: los **dos residuos de la revisión de rama** (anotados el
+2026-09-02) y los **tres minors de tests** (anotados el 2026-09-01). Salieron en una sola
+pasada porque cuatro de los cinco caen sobre el mismo archivo. Con esto la § 1 vuelve a quedar
+vacía.
+
+**1. Cerrar la cuenta en el e2e `la porción del extra ocupa pero NO frena` — el único que
+guardaba un invariante.** El fix del ingrediente que aparece dos veces en una línea (base
+bloqueante + extra del mismo ítem, `93dcc04e`) se apoya en que la venta procese la ocurrencia
+**base antes que el extra**, y ese orden no está escrito en ningún lado: sale de
+`[...fijos, ...extras]` más la estabilidad de `Array.sort` sobre el empate de
+`ingredienteItemId` (`expandirIngredientesPersonalizados`). El test afirmaba el `201` del
+`POST` y el `stockDisponible: -1.0000`, y ahí paraba. Ahora cierra la cuenta y afirma los dos
+números de después (`stock` y `stockDisponible` en `0.0000`): la base se llevó la única unidad
+y la porción del extra se degradó a advertencia, que es lo que *"ocupa y no frena"* significa
+visto desde el cobro.
+
+**Medido, no argumentado.** Con el mutante `[...extras, ...fijos]` el extra se come la unidad
+primero y la base revienta con *"Stock insuficiente para la salida"*: el spec se pone rojo
+**en `cerrarCuenta`, 400 donde va 201**, y en ese único test —los otros 17 del archivo pasan—.
+Sin la línea nueva el mismo mutante deja todo verde, que es la definición de la red que
+faltaba: el `POST` seguiría dando 201 y la mesa quedaría trabada al cobrar.
+
+**2. `descontarStockCatalogo` alineado: `disponible` ya no se clampea a 0**
+(`frontend/app/composables/useVenta.ts`). El servidor manda el negativo a propósito —un
+ingrediente no bloqueante comprometido de más queda negativo, y es correcto que se vea— pero el
+descuento local del carrito lo subía a 0, así que el −2 se perdía apenas el vendedor agregaba
+el primer ítem y la tarjeta decía "Disponibles: 0". **Ruling del owner: alinear los dos SIN
+clamp**, que era el punto de fondo —el mismo dato tratado de dos formas según quién lo tocó
+último—. El `.floor()` se queda: `disponible` es un conteo entero de porciones, y redondea
+hacia abajo también en negativo. La atenuación de la tarjeta no cambió: `sinStockVisual` compara
+`<= 0` (`CatalogoGrid.vue`). Lo fijan dos tests de `useVenta.spec.ts` —el que reemplazó al viejo
+*"no baja disponible bajo cero"*, ahora afirmando −7, y uno del `.floor()` en negativo—;
+verificado que **los dos** mueren si se devuelve el `Decimal.max(0, …)`.
+
+**3. `quitarLinea` inlineado.** Tenía un solo call-site contra los ≥2 del resto de los helpers
+del archivo, y la regla del repo es *"sin helpers de un solo uso"*. Se conservaron las dos cosas
+que valían: el `expect(res.status).toBe(200)` —lo que el hook de lecturas sin status exige— y el
+porqué que estaba en el docblock (la línea nunca está despachada en este spec, así que el guard
+de agosto no aplica).
+
+**4. El test *"cerrar y cobrar NO suelta nada"* pasó a *"cerrar la cuenta NO suelta nada"*.**
+Manda `pagos: []`: no hay ningún cobro. El cuerpo estaba bien —lo que consume el stock es
+**cerrar**, y su propio docblock ya lo decía—, así que sobraba la palabra, no faltaba un pago.
+El nombre se citaba desde dos docs: `docs/features/salones-mesas.md` se corrigió (es texto vivo)
+y la mención en este archivo quedó como estaba, que es la regla de acá.
+
+**5. El docblock del e2e de concurrencia: ya estaba hecho, y esa es la parte que vale.** La
+entrada pedía ensancharlo —que dijera que tampoco caza **quitar** el `FOR UPDATE` entero, 10 de
+10 corridas en verde, y que la red real es el unitario de `items.service.spec.ts`—. Al abrir el
+archivo, el docblock ya lo decía **palabra por palabra**: lo escribió `93dcc04e`, unas horas
+después de que la entrada se anotara y en el mismo commit que agregó la otra sección de § 1 que
+esta pasada vino a cerrar.
+
+⚠️ **La lección, que no es la de siempre.** El backlog ya sabe que una entrada puede subcontar
+el hueco o citar líneas corridas; el aviso nuevo es que una entrada puede nacer **ya arreglada**,
+sin que nada en ella lo insinúe: su *"citas verificadas el 2026-09-01"* era de ese mismo día y
+quedó vieja igual, porque el arreglo entró después de anotarla. Verificar contra el código no es
+un chequeo de frescura de fechas.
+
 
 ## El `PATCH` de cantidad de una línea nunca llegaba al servidor — y el rollback tampoco funcionaba (cerrado 2026-09-02)
 

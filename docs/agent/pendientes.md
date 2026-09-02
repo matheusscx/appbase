@@ -102,27 +102,13 @@ causa cinco rojos que tenían dos. La mitad que quedó abrió entrada propia en 
 
 ### Los dos residuos de la revisión de rama de la reserva de stock (2026-09-02)
 
-Los dos salieron de la re-revisión del arreglo final y **ninguno bloqueaba**, pero el primero
-guarda un invariante del que depende ese arreglo, así que no conviene perderlo.
-
-- [ ] **Cerrar la cuenta en el e2e `la porción del extra ocupa pero NO frena`, para custodiar
-  el orden base-antes-que-extra** (`backend/test/reserva-stock-mesa.e2e-spec.ts`) — el fix del
-  ingrediente que aparece dos veces en una línea (base bloqueante + extra del mismo ítem) se
-  apoya en que la venta procese la ocurrencia **base antes que el extra**, y ese orden sale
-  solo de `[...fijos, ...extras]` más la estabilidad de `Array.sort`
-  (`items.service.ts:3565`). Si ese empate se invirtiera, el extra se comería el stock
-  primero, la base tiraría *"Stock insuficiente para la salida"* al cobrar —la mesa trabada de
-  vuelta— y **ningún test lo vería**: el e2e afirma el `201` y el `stockDisponible: -1.0000`
-  pero **no cierra la cuenta**. Cerrarla es una línea y convierte ese test en la red del
-  invariante completo.
-
-- [ ] **`descontarStockCatalogo` clampea `disponible` a 0 y `stockDisponible` no**
-  (`frontend/app/composables/useVenta.ts:329`) — el servidor manda `disponible` negativo a
-  propósito, pero el descuento local del carrito lo sube a 0, así que en POS y tienda el
-  número se pierde tras el primer ítem agregado (se ve "Disponibles: 0" en vez de −2). No
-  cambia la atenuación de la tarjeta —el `<= 0` la deja igual— así que es **cosmético**, pero
-  es el mismo dato tratado de dos formas: `stockDisponible` conserva el signo a propósito
-  (comentario en `useVenta.ts:312-315`) y `disponible` no.
+✅ **Cerrados el 2026-09-02, los dos en una pasada.** El primero era el que importaba: el e2e
+`la porción del extra ocupa pero NO frena` ahora **cierra la cuenta**, y con eso custodia el
+orden base-antes-que-extra del que depende el fix del ingrediente repetido. Verificado con el
+mutante que invierte la expansión (`[...extras, ...fijos]`): pone rojo ese test y **solo** ese,
+justo en el cierre. El segundo —el clamp de `disponible` en `useVenta.ts`— quedó alineado con
+`stockDisponible` **sin** piso en cero, por ruling del owner. Detalle en
+[`resueltos.md`](resueltos.md).
 
 ### Los residuos que dejó el frente de promociones (2026-08-27)
 
@@ -145,33 +131,27 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
 última entrada de entonces —el `PATCH` que dejaba a un descuento sin métodos de pago— salió
 ese día, y de paso se corrigió: la causa no era la colisión de PK que la entrada sospechaba, y
 el daño era más ancho de lo que decía (agregar un método también borraba el que ya estaba). El
-detalle, con la tabla de los tres casos medidos, en [`resueltos.md`](resueltos.md). Lo que hay
-abajo llegó después, del frente de la reserva de stock, y no tiene nada que ver con eso.
+detalle, con la tabla de los tres casos medidos, en [`resueltos.md`](resueltos.md). Lo que la
+volvió a poblar esa tarde vino del frente de la reserva de stock —las dos secciones que la
+rodean— y no tiene nada que ver con eso; las dos se cerraron el 2026-09-02.
 
 ### Los tres minors de tests que dejó el frente de la reserva de stock (2026-09-01)
 
-Ninguno es un bug: son un helper de más, un título que promete lo que su cuerpo no hace y un
-docblock que se quedó corto respecto de lo que después se midió. Se juntan porque salen en una
-sola pasada sobre **un solo archivo** —`backend/test/reserva-stock-mesa.e2e-spec.ts`— y ninguno
-vale una entrada propia. Los tres los levantó la revisión independiente de las tareas 5-7.
-**Citas verificadas el 2026-09-01.**
+✅ **Cerrada el 2026-09-02, y con una corrección: eran dos, no tres.** El tercero —ensanchar
+el docblock del e2e de concurrencia para que dijera que tampoco caza **quitar** el `FOR UPDATE`—
+ya estaba hecho: lo hizo `93dcc04e`, el mismo commit que abrió la sección *"Los dos residuos…"*, unas horas
+después de que esta entrada se escribiera. Los otros dos —inlinear `quitarLinea` y renombrar el
+test *"cerrar y cobrar"*, que manda `pagos: []`, a *"cerrar la cuenta"*— salieron acá. Detalle en
+[`resueltos.md`](resueltos.md).
 
-- [ ] **Los tres del spec de la reserva de stock** (backend/tests):
-  1. **`quitarLinea` tiene un solo call-site** (`reserva-stock-mesa.e2e-spec.ts:238`, usado
-     únicamente en `:768`). El resto de los helpers del archivo tienen ≥2. Roza la regla del
-     repo de *"sin helpers de un solo uso"*. **El arreglo:** inlinear la llamada, conservando
-     el `expect(res.status).toBe(200)` —que es lo que el hook de lecturas sin status exige— y
-     el porqué del docblock (la línea nunca está despachada en este spec).
-  2. **El test se llama *"cerrar y cobrar"* y manda `pagos: []`** (`:815`): no hay ningún
-     cobro. El cuerpo es correcto —lo que consume el stock es **cerrar**, no el pago, y su
-     propio docblock lo dice—, así que lo que sobra es la palabra: **renombrarlo** a lo que
-     hace, no agregarle un pago que el test no necesita.
-  3. **El docblock del e2e de concurrencia se quedó corto** (`:853` y siguientes). Dice que el
-     test no caza la **inversión** del orden del lock —lo que midió el implementador—, pero lo
-     medido después por la revisión es **más ancho**: tampoco caza **quitar el `FOR UPDATE`
-     entero** (10 corridas de 10 en verde). **El arreglo:** que el docblock lo diga, porque tal
-     como está hoy deja creer que ese e2e custodia la presencia del lock y no la custodia
-     —quien lo saque no se va a enterar por ahí; la red es el unitario de `items.service.spec.ts`.
+✅ **La § 1 vuelve a quedar vacía el 2026-09-02**, con esas dos secciones. Igual que las veces
+anteriores: que esté vacía no dice que no quede trabajo chico, dice que el que queda **no es
+mecánico**.
+
+⚠️ **Y volvió a salir el aviso de siempre, esta vez por un camino nuevo:** una de las tres
+sub-entradas ya estaba arreglada **antes de que se pudiera leer**. No es que la cita estuviera
+vieja: la entrada nació al mismo tiempo que su arreglo, en commits del mismo día. Un
+*"citas verificadas el ..."* con la fecha de hoy no garantiza nada — abrir el código igual.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
