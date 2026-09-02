@@ -32,9 +32,18 @@ function puedeAgregar(item: ItemCatalogo): boolean {
   return tieneStock(item)
 }
 
-/** Solo atenúa visualmente — no bloquea el click en recetas/combos. */
+/**
+ * Solo atenúa visualmente — no bloquea el click en recetas/combos.
+ *
+ * `<= 0` y no `=== 0`: desde el 2026-09-01 `disponible` es `stock − comprometido`
+ * y **puede ser negativo** (un ingrediente no bloqueante se pasa del stock,
+ * spec § 4.2). Con `=== 0`, un plato en −2 no se atenuaba y encima ordenaba
+ * como si tuviera existencias: el peor de los tres estados se veía mejor que
+ * el de cero. El `?? 1` deja intacto el `null`, que significa "no hay
+ * bloqueantes que limiten" y no es falta de stock.
+ */
 function sinStockVisual(item: ItemCatalogo): boolean {
-  if (item.tipo === 'receta' || item.tipo === 'combo') return item.disponible === 0
+  if (item.tipo === 'receta' || item.tipo === 'combo') return (item.disponible ?? 1) <= 0
   return !tieneStock(item)
 }
 

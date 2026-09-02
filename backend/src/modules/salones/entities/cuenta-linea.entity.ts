@@ -55,9 +55,14 @@ import type { ReglasCongeladas } from '../../../common/dto/reglas-congeladas.dto
 /**
  * `idx_cuenta_lineas_cuenta`: lo pide `ItemsService.comprometidoPorItem` —la
  * consulta que le resta a `disponible`/`stockDisponible` lo que las cuentas
- * ABIERTAS ya pidieron—, que corre en cada `GET /items` y por lo tanto **tres
- * veces por carga de pantalla** (`pos.vue:138,141,144` y
- * `salones/index.vue:598-600` disparan tres listados en paralelo).
+ * ABIERTAS ya pidieron—, que corre en cada `GET /items`, y las pantallas
+ * disparan **tres listados en paralelo** cada vez (`pos.vue:138,141,144` y
+ * `salones/index.vue:638-640`).
+ *
+ * En el POS son tres por carga de pantalla. En `/salones` son tres **por cada
+ * ráfaga de mutación**: desde que el catálogo se refresca solo (`refrescarItems`,
+ * debounce de 250 ms) la consulta no corre una vez al entrar sino cada vez que
+ * el garzón agrega, edita o quita algo.
  *
  * Sin él el plan es un **seq scan de `cuenta_lineas` entera** para devolver las
  * pocas líneas que están en una mesa hoy, y esta tabla crece con la historia

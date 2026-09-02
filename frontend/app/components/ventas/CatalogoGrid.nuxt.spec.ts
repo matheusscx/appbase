@@ -122,6 +122,36 @@ describe('CatalogoGrid — recetas y combos siguen con su propio número', () =>
     expect(textoTarjeta(wrapper, 'receta-1')).toContain('Disponibles: 4')
   })
 
+  it('una receta con disponible NEGATIVO se atenúa igual que la de cero', async () => {
+    // `disponible` cambió de dominio el 2026-09-01: es `stock − comprometido` y
+    // puede ser negativo. Con el `=== 0` de antes, el plato en −2 —el que menos
+    // se puede servir— era el único que NO se atenuaba.
+    const wrapper = await montar([
+      producto({ id: 'receta-1', tipo: 'receta', stock: null, disponible: -2, stockDisponible: null }),
+    ])
+
+    expect(wrapper.find('[data-qa="item-catalogo-receta-1"]').classes()).toContain('opacity-50')
+  })
+
+  it('el disponible negativo también ordena al final, no como si hubiera stock', async () => {
+    const wrapper = await montar([
+      producto({ id: 'receta-negativa', nombre: 'AAA agotadísima', tipo: 'receta', stock: null, disponible: -2, stockDisponible: null }),
+      producto({ id: 'receta-con-stock', nombre: 'ZZZ con stock', tipo: 'receta', stock: null, disponible: 3, stockDisponible: null }),
+    ])
+
+    // Va segunda pese a ganar por nombre: el orden mira primero si hay o no.
+    const orden = wrapper.findAll('[data-qa^="item-catalogo-"]').map(c => c.attributes('data-qa'))
+    expect(orden).toEqual(['item-catalogo-receta-con-stock', 'item-catalogo-receta-negativa'])
+  })
+
+  it('disponible null no se atenúa: es "sin bloqueantes", no "sin stock"', async () => {
+    const wrapper = await montar([
+      producto({ id: 'receta-1', tipo: 'receta', stock: null, disponible: null, stockDisponible: null }),
+    ])
+
+    expect(wrapper.find('[data-qa="item-catalogo-receta-1"]').classes()).not.toContain('opacity-50')
+  })
+
   it('una receta sin stock igual se puede clickear: la valida el backend', async () => {
     const wrapper = await montar([
       producto({ id: 'receta-1', tipo: 'receta', stock: null, disponible: 0, stockDisponible: null }),

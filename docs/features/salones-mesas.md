@@ -437,6 +437,17 @@ El `400` **nombra el ingrediente que faltó** y con cuánto se quedó, no un "no
 genérico: en una receta de seis ingredientes eso manda al garzón a adivinar. Solo frena lo
 **bloqueante**; lo no bloqueante suma al comprometido y sigue.
 
+⚠️ **Lo bloqueante se cuenta POR OCURRENCIA, no por ítem** (corregido el 2026-09-02, revisión
+final de rama). El mismo ingrediente puede entrar dos veces con distinto `bloqueante`: el caso
+canónico es un **extra permitido que la receta ya lleva** —"extra queso" sobre una receta con
+queso—, que nada impide configurar (`validarExtrasPermitidos` solo mira duplicados entre los
+extras). Mientras el consumo llevó un solo flag por ítem, mergeado con AND, la porción del
+extra apagaba el tope de la porción base: el pedido entraba con `201`, se despachaba y
+reventaba **al cobrar** con *"Stock insuficiente para la salida"* — medido, con la línea ya
+imposible de quitar por despachada. Era la mesa trabada de vuelta, por el camino que la tiene
+que cerrar. Ahora `ConsumoDeItem` lleva **dos cantidades** (`cantidad`, que ocupa, y
+`cantidadBloqueante`, que topea) y las dos cuentas —reservar y descontar— se hacen igual.
+
 ⚠️ **La comparación del `PATCH` es `consumo(nueva) − consumo(vieja)`, no `consumo(diferencia)`,
 y no son lo mismo.** La conversión de unidades redondea a 4 decimales y **lanza** si lo
 convertido cae bajo esa precisión: medido, una receta con 5 g de un insumo stockeado en kg
@@ -590,6 +601,11 @@ Reproduce la sonda que abrió el frente —dos mesas del mismo salón sobre un p
 negativo, las **dos** formas de liberar (quitar la línea y cancelar la cuenta), el
 **contra-caso** de cerrar —el test se llama *"cerrar y cobrar NO suelta nada"*, y es el que
 distingue *"se soltó"* de *"se consumió"*— y la carrera de dos `POST` simultáneos.
+
+El bloque *"Revisión final"* agrega el extra del **mismo** ingrediente que la receta ya lleva,
+en dos mitades que no se pisan: la primera **revierte** el bug del flag mergeado (`400` donde
+antes había `201`), la segunda es el control que descarta el arreglo fácil de invertir el
+merge —la porción del extra sigue sin frenar, solo ocupa, que es la decisión 4 del owner—.
 
 ⚠️ **El e2e concurrente prueba la propiedad, NO el mecanismo, y está medido.** Afirma que
 nunca salen dos `201`, pero **no mata al mutante que invierte el orden** (leer el

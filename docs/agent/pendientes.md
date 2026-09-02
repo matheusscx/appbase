@@ -100,6 +100,30 @@ que tiene una decisión adentro por más que el diff sea de tres líneas.
 entrada traía escrito era correcto y **no alcanzaba**, porque la entrada atribuía a una sola
 causa cinco rojos que tenían dos. La mitad que quedó abrió entrada propia en la § 4.
 
+### Los dos residuos de la revisión de rama de la reserva de stock (2026-09-02)
+
+Los dos salieron de la re-revisión del arreglo final y **ninguno bloqueaba**, pero el primero
+guarda un invariante del que depende ese arreglo, así que no conviene perderlo.
+
+- [ ] **Cerrar la cuenta en el e2e `la porción del extra ocupa pero NO frena`, para custodiar
+  el orden base-antes-que-extra** (`backend/test/reserva-stock-mesa.e2e-spec.ts`) — el fix del
+  ingrediente que aparece dos veces en una línea (base bloqueante + extra del mismo ítem) se
+  apoya en que la venta procese la ocurrencia **base antes que el extra**, y ese orden sale
+  solo de `[...fijos, ...extras]` más la estabilidad de `Array.sort`
+  (`items.service.ts:3565`). Si ese empate se invirtiera, el extra se comería el stock
+  primero, la base tiraría *"Stock insuficiente para la salida"* al cobrar —la mesa trabada de
+  vuelta— y **ningún test lo vería**: el e2e afirma el `201` y el `stockDisponible: -1.0000`
+  pero **no cierra la cuenta**. Cerrarla es una línea y convierte ese test en la red del
+  invariante completo.
+
+- [ ] **`descontarStockCatalogo` clampea `disponible` a 0 y `stockDisponible` no**
+  (`frontend/app/composables/useVenta.ts:329`) — el servidor manda `disponible` negativo a
+  propósito, pero el descuento local del carrito lo sube a 0, así que en POS y tienda el
+  número se pierde tras el primer ítem agregado (se ve "Disponibles: 0" en vez de −2). No
+  cambia la atenuación de la tarjeta —el `<= 0` la deja igual— así que es **cosmético**, pero
+  es el mismo dato tratado de dos formas: `stockDisponible` conserva el signo a propósito
+  (comentario en `useVenta.ts:312-315`) y `disponible` no.
+
 ### Los residuos que dejó el frente de promociones (2026-08-27)
 
 ✅ **Cerrada el 2026-08-28.** Las tres entradas salieron en una sola pasada; el detalle —y

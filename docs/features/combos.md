@@ -191,7 +191,8 @@ bloqueante sin stock: se captura el error, se agrega un mensaje a
   `tipo=combo`; un combo se agrega con un click, como un producto (nunca abre
   drawer en este ticket — no hay grupos de modificadores todavía).
 - `components/ventas/CatalogoGrid.vue` — combo nunca bloquea el click; se
-  atenúa si `disponible === 0`; badge "Disponibles: N".
+  atenúa si `disponible <= 0` —desde el 2026-09-01 el número es
+  `stock − comprometido` y **puede ser negativo**—; badge "Disponibles: N".
 - `composables/useVenta.ts` — `ItemCatalogo.disponible?: number | null` (mismo
   campo que productos/recetas).
 

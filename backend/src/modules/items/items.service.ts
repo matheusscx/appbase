@@ -200,9 +200,26 @@ export interface LineaConsumo {
 }
 
 /**
- * Lo que un conjunto de líneas consume de UN ingrediente o producto.
- * `cantidad` está en la unidad de stock de ese ítem. `bloqueante` es `false` si
- * alguna de las líneas lo consume sin frenar por falta de stock.
+ * Lo que un conjunto de líneas consume de UN ingrediente o producto, en la
+ * unidad de stock de ese ítem.
+ *
+ * **Son DOS cantidades y no una cantidad + un flag, y esa es la corrección de
+ * la revisión final de rama (2026-09-02).** El mismo `itemId` puede entrar por
+ * caminos con distinto `bloqueante` —el caso canónico: "extra queso" sobre una
+ * receta que YA lleva queso, que `expandirIngredientesPersonalizados` devuelve
+ * dos veces, la base con su flag real y el extra siempre en `false`—, y
+ * mientras hubo un solo flag por ítem se mergeaba con AND: una sola ocurrencia
+ * no bloqueante apagaba el tope para TODO el consumo del ítem, la base
+ * incluida. La venta, en cambio, enforcea **por ocurrencia**
+ * (`venderIngredientesReceta` procesa la entrada base y esa sí frena), así que
+ * el pedido entraba con `201`, se despachaba, y reventaba al cobrar con "Stock
+ * insuficiente para la salida" dejando la mesa trabada — el bug que este frente
+ * vino a eliminar, reintroducido por el camino que lo cierra.
+ *
+ * - `cantidad` — el total. Es lo que OCUPA, y lo que lee `comprometidoPorItem`:
+ *   lo no bloqueante también aparta (spec § 4.2, decisión 4 del owner).
+ * - `cantidadBloqueante` — solo las ocurrencias que frenan. Es lo que TOPEA, y
+ *   lo único que mira `validarStockAlPedir`.
  *
  * `nombre` existe para que el rechazo al pedir pueda decir **qué** faltó
  * (`validarStockAlPedir`): "no hay stock" manda al garzón a adivinar cuál de
@@ -212,7 +229,7 @@ export interface LineaConsumo {
  */
 export interface ConsumoDeItem {
   cantidad: Decimal;
-  bloqueante: boolean;
+  cantidadBloqueante: Decimal;
   nombre: string;
 }
 
@@ -3946,10 +3963,11 @@ export class ItemsService {
    * y `venderComponentesCombo` no saben contestar porque solo saben ejecutar.
    *
    * La clave del `Map` es el `itemId` del ingrediente o producto **consumido**,
-   * y la cantidad está en la unidad de STOCK de ese ítem (`item_producto.unidad_medida`),
-   * ya convertida. `bloqueante` es `false` si **alguna** de las líneas lo
-   * consume de forma no bloqueante: el más permisivo gana, porque si un solo
-   * camino no frena, no frena.
+   * y las cantidades están en la unidad de STOCK de ese ítem
+   * (`item_producto.unidad_medida`), ya convertidas. Son **dos**: `cantidad` es
+   * todo lo que se consume y `cantidadBloqueante` solo las ocurrencias que
+   * frenan — el mismo ítem puede entrar por los dos lados y no se colapsan (ver
+   * `ConsumoDeItem`).
    *
    * ## Qué comparte con los tres caminos de expansión que ya existen
    *
@@ -4006,11 +4024,17 @@ export class ItemsService {
       bloqueante: boolean,
     ): void => {
       const previo = consumo.get(itemId);
+      const bloqueantePrevia = previo?.cantidadBloqueante ?? new Decimal(0);
       consumo.set(itemId, {
         cantidad: (previo?.cantidad ?? new Decimal(0)).plus(cantidad),
-        // El más permisivo gana: basta que un camino no frene para que el
-        // conjunto no frene.
-        bloqueante: (previo?.bloqueante ?? true) && bloqueante,
+        // **Se acumula por ocurrencia, no se mergea un flag.** Un `&&` acá
+        // —lo que había hasta el 2026-09-02— hacía que un solo consumo no
+        // bloqueante del ítem apagara el tope de todos los demás; la venta
+        // frena por ocurrencia, así que reservar y descontar divergían. Ver
+        // `ConsumoDeItem`.
+        cantidadBloqueante: bloqueante
+          ? bloqueantePrevia.plus(cantidad)
+          : bloqueantePrevia,
         // Es el mismo ítem en las dos ramas, así que da igual cuál queda; se
         // conserva el primero por no reescribir sin motivo.
         nombre: previo?.nombre ?? nombre,
@@ -4245,12 +4269,19 @@ export class ItemsService {
       // ⚠️ Esto corre para TODA línea, `producto`/`ingrediente` incluidos, y la
       // venta no las expande así: `venderIngredientesReceta` y
       // `venderComponentesCombo` son los únicos que miran los grupos. Hoy es
-      // inalcanzable —`salones.service.ts:673` rechaza con 400 la
+      // inalcanzable —`salones.service.ts:704` rechaza con 400 la
       // personalización sobre algo que no sea receta o combo, así que un
       // producto nunca llega acá con grupos—. **Si ese guard se relaja, esta
       // línea hace que reservar y descontar divergan**: se apartaría stock de
-      // una opción que después nadie descuenta. Es el único eje que esta
-      // feature no puede permitirse, porque la divergencia no tira error.
+      // una opción que después nadie descuenta.
+      //
+      // Ese eje —que la reserva y el descuento cuenten distinto— es el que esta
+      // feature no puede permitirse, porque la divergencia no tira error: se ve
+      // en la mesa que no puede cobrar. Y ya mordió una vez por otro lado: hasta
+      // el 2026-09-02 el consumo llevaba un flag `bloqueante` por ítem mergeado
+      // con AND mientras la venta frena **por ocurrencia**
+      // (ver `ConsumoDeItem`). Que este camino sea inalcanzable no es garantía
+      // de nada; lo que la da es que las dos cuentas se hagan igual.
       acumularGrupos(gruposDeLinea(linea), linea.cantidad);
     }
 
@@ -4271,6 +4302,14 @@ export class ItemsService {
    * **Solo frena lo bloqueante** (decisión del owner, spec § 4.2). Lo no
    * bloqueante igual suma al comprometido —lo hace `comprometidoPorItem`— y por
    * eso su disponible puede quedar negativo: ocupa, pero no impide pedir.
+   *
+   * ⚠️ **Lo bloqueante es una CANTIDAD, no un flag del ítem**
+   * (`ConsumoDeItem.cantidadBloqueante`). El mismo ingrediente puede entrar por
+   * un camino que frena y por otro que no —receta con queso + "extra queso"—, y
+   * lo que se topea es solo la porción que frena. Colapsarlo en un flag por ítem
+   * apagaba el tope de la porción base y dejaba la mesa trabada al cobrar; ver
+   * `ConsumoDeItem` y los dos tests de "Revisión final" en
+   * `reserva-stock-mesa.e2e-spec.ts`.
    *
    * ## `lineasPrevias`: para EDITAR una línea, no para agregar una
    *
@@ -4349,16 +4388,31 @@ export class ItemsService {
     // `0,0050 − 0,0050 = 0`, que es la respuesta correcta. Custodiado por
     // "subir una fracción de una receta con un insumo… no rebota por precisión"
     // en `reserva-stock-mesa.e2e-spec.ts`.
+    //
+    // Y se calcula sobre `cantidadBloqueante` **en los dos extremos**, nunca
+    // sobre el total: el tope compara contra el stock lo que FRENA, y el total
+    // arrastra además lo que solo ocupa. `actualizarLinea` no edita la
+    // personalización —es la misma de los dos lados—, así que la diferencia no
+    // se cancela: se duplica. Medido, con una receta que lleva un ingrediente
+    // bloqueante y un extra del mismo ítem, subir la línea de 1 a 2 necesita
+    // **una** ración más y con los totales pediría dos, o sea rebota un pedido
+    // que entra. Lo custodia "editar un plato con extra netea solo lo que frena,
+    // no el total" en `items.service.spec.ts`.
     const netoDe = (itemId: string, c: ConsumoDeItem): Decimal =>
       consumoPrevio
-        ? c.cantidad.minus(consumoPrevio.get(itemId)?.cantidad ?? 0)
-        : c.cantidad;
+        ? c.cantidadBloqueante.minus(
+            consumoPrevio.get(itemId)?.cantidadBloqueante ?? 0,
+          )
+        : c.cantidadBloqueante;
 
+    // Solo entra al tope lo que tiene AL MENOS UNA ocurrencia bloqueante, y
+    // entra por esa cantidad: lo no bloqueante ocupa pero no frena (spec § 4.2).
+    //
     // Un neto ≤ 0 no se mira ni se lockea: bajar la cantidad solo LIBERA, y
     // soltar stock no puede sobrevender. Filtrar acá —antes del lock— además
     // achica la huella de locks del camino que baja, en vez de agrandarla.
     const bloqueantes = [...consumoNuevo]
-      .filter(([, c]) => c.bloqueante)
+      .filter(([, c]) => c.cantidadBloqueante.greaterThan(0))
       .map(([itemId, c]) => [itemId, c, netoDe(itemId, c)] as const)
       .filter(([, , neto]) => neto.greaterThan(0));
     if (!bloqueantes.length) return;

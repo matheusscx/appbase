@@ -192,11 +192,17 @@ describe('Reserva de stock al pedir (e2e)', () => {
     cuentaId: string,
     itemId: string,
     cantidad: string,
+    /** Solo el caso del extra la usa; el resto pide el plato tal cual sale. */
+    personalizacion?: Record<string, unknown>,
   ): Promise<{ status: number; message: string }> {
     const res = await request(app.getHttpServer())
       .post(`/api/cuentas/${cuentaId}/lineas`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemId, cantidad });
+      .send(
+        personalizacion
+          ? { itemId, cantidad, personalizacion }
+          : { itemId, cantidad },
+      );
     const message = (res.body as { message?: string | string[] }).message;
     return {
       status: res.status,
@@ -744,6 +750,102 @@ describe('Reserva de stock al pedir (e2e)', () => {
     });
   });
 
+  describe('Revisión final — un extra del MISMO ingrediente no apaga el tope', () => {
+    /**
+     * **El agujero que la revisión final de rama encontró, medido acá.** Si el
+     * tenant permite como extra un ingrediente que la receta YA lleva —"extra
+     * queso" sobre una receta con queso, el caso canónico—, la expansión
+     * devuelve ese `ingredienteItemId` **dos veces**: la base con su
+     * `bloqueante` real y el extra siempre en `false`
+     * (`expandirIngredientesPersonalizados`). Nada lo impide:
+     * `validarExtrasPermitidos` solo mira duplicados entre los extras.
+     *
+     * Mientras `consumoDeLineas` mergeó las dos ocurrencias en UN flag por ítem
+     * (`bloqueante: previo && bloqueante`), la ocurrencia no bloqueante apagaba
+     * el tope para todo el ítem, la base incluida: el `POST` entraba con `201`,
+     * la línea se despachaba, y al cerrar `venderIngredientesReceta` —que sí
+     * procesa la entrada base, bloqueante— reventaba con "Stock insuficiente
+     * para la salida". La cuenta no se podía cerrar y la línea no se podía sacar
+     * por despachada: **la misma mesa trabada que este frente vino a eliminar,
+     * por el camino que la tiene que cerrar.**
+     *
+     * La causa de fondo: la venta enforcea **por ocurrencia** y la reserva
+     * mergeaba **por ítem**. Los dos tests de acá son las dos mitades del
+     * arreglo y ninguno sobra:
+     *
+     * - el primero **revierte**: con el flag mergeado da `201`, con las dos
+     *   cantidades da `400`;
+     * - el segundo es el control que descarta el arreglo fácil (`||` en vez de
+     *   `&&`): la porción del EXTRA sigue sin frenar —decisión 4 del owner—,
+     *   solo ocupa. Con el `||` este daría `400` y sería un rechazo que nadie
+     *   pidió.
+     */
+    async function crearRecetaConExtraDelMismoInsumo(
+      insumoId: string,
+    ): Promise<string> {
+      const { id } = await post<IdResponse>('/api/items', {
+        nombre: nombreUnico('Plato con extra del mismo insumo'),
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: insumoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: insumoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '500',
+          },
+        ],
+      });
+      return id;
+    }
+
+    it('el ingrediente bloqueante sigue frenando aunque el extra sea el mismo ítem', async () => {
+      const insumo = await crearIngrediente(
+        'Insumo que se pide dos veces',
+        '0',
+      );
+      const recetaId = await crearRecetaConExtraDelMismoInsumo(insumo.id);
+      const cuentaId = await abrirCuenta();
+
+      const res = await intentarLinea(cuentaId, recetaId, '1', {
+        extras: [{ ingredienteItemId: insumo.id, unidades: 1 }],
+      });
+
+      expect(res.status).toBe(400);
+      // Nombra el INGREDIENTE, no el plato: es el mismo contrato de mensaje que
+      // el resto del guard.
+      expect(res.message).toContain(insumo.nombre);
+    });
+
+    it('la porción del extra ocupa pero NO frena: con stock para la base, el pedido entra', async () => {
+      // Stock 1: alcanza para la porción base (bloqueante) y no para la del
+      // extra (no bloqueante). Entra igual, y el disponible queda en −1.
+      const insumo = await crearIngrediente('Insumo justo para la base', '1');
+      const recetaId = await crearRecetaConExtraDelMismoInsumo(insumo.id);
+      const cuentaId = await abrirCuenta();
+
+      const res = await intentarLinea(cuentaId, recetaId, '1', {
+        extras: [{ ingredienteItemId: insumo.id, unidades: 1 }],
+      });
+
+      expect(res.status).toBe(201);
+      // Ocupa las DOS porciones: 1 − (1 + 1) = −1. Ocupar y frenar son cosas
+      // distintas (spec § 4.2, decisión 4 del owner).
+      expect(
+        (await filaDelCatalogo(insumo.nombre, insumo.id)).stockDisponible,
+      ).toBe('-1.0000');
+    });
+  });
+
   describe('Tarea 6 — soltar la reserva no necesita código', () => {
     /**
      * **El argumento entero del enfoque, puesto a prueba.** La reserva no se
@@ -854,15 +956,21 @@ describe('Reserva de stock al pedir (e2e)', () => {
      * dos `201`— y que los dos `POST` están de verdad en vuelo a la vez:
      * inyectando 500 ms de espera dentro del guard, los dos leen el comprometido
      * en `0` con 47 ms de diferencia y el test se pone rojo con `[201, 201]`.
-     * Pero **no mata al mutante que invierte el orden** (leer el comprometido
-     * ANTES del `FOR UPDATE`): sin esa espera, la ventana real entre leer y
-     * commitear es más chica que el desfase con que llegan las dos requests, así
-     * que la primera ya commiteó cuando la segunda mira. Corrido 5 veces con ese
-     * mutante: 5 verdes. **El orden lo custodia el unitario** "toma el lock de
-     * stock ANTES de leer el comprometido — el orden es el contrato"
-     * (`items.service.spec.ts`), verificado que sí lo mata. Este e2e es la red de
-     * que la propiedad se cumple de punta a punta, no la prueba del mecanismo:
-     * quien afloje el orden acá no se va a enterar por este test.
+     *
+     * Pero **este e2e no custodia el lock, ni su orden ni su existencia.** No
+     * mata al mutante que invierte el orden —leer el comprometido ANTES del
+     * `FOR UPDATE`, 5 corridas en verde— **ni al que saca el `FOR UPDATE`
+     * entero: 10 de 10 corridas en verde**. Sin espera inyectada, la ventana
+     * real entre leer y commitear es más chica que el desfase con que llegan las
+     * dos requests, así que la primera ya commiteó cuando la segunda mira.
+     *
+     * **La red real del orden Y de la presencia del lock es el unitario** "toma
+     * el lock de stock ANTES de leer el comprometido — el orden es el contrato"
+     * (`items.service.spec.ts`), verificado que muere con los dos mutantes. Este
+     * e2e es la red de que la propiedad se cumple de punta a punta, no la prueba
+     * del mecanismo: quien afloje el lock acá no se va a enterar por este test.
+     * Se prefirió documentarlo antes que ensanchar la ventana con ganchos de
+     * test en el camino caliente del POS.
      */
     it('dos POST concurrentes por la última unidad: uno 201 y el otro 400, nunca los dos', async () => {
       const producto = await crearProducto('Producto disputado', '1');

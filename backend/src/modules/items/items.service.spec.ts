@@ -5817,7 +5817,9 @@ describe('ItemsService', () => {
 
       expect(consumo.get(PAPAS)).toEqual({
         cantidad: new Decimal('2'),
-        bloqueante: true,
+        // Una línea de producto suelto siempre frena: la venta la descuenta y
+        // propaga el error de stock.
+        cantidadBloqueante: new Decimal('2'),
         // El nombre viaja con el consumo para que el rechazo al pedir pueda
         // decir QUÉ faltó; sale de la misma consulta del tipo.
         nombre: 'Papas fritas',
@@ -5839,15 +5841,16 @@ describe('ItemsService', () => {
 
       expect(consumo.get(PAN)).toEqual({
         cantidad: new Decimal('2'),
-        bloqueante: true,
+        cantidadBloqueante: new Decimal('2'),
         // El nombre que va a nombrar el faltante es el del INGREDIENTE, no el
         // del plato: "no hay stock" no le dice al garzón qué ofrecer.
         nombre: 'Pan de hamburguesa',
       });
-      // 20 g × 2 = 40 g, y el queso se guarda en kg.
+      // 20 g × 2 = 40 g, y el queso se guarda en kg. No bloquea, así que ocupa
+      // los 0,04 y topea 0.
       expect(consumo.get(QUESO)).toEqual({
         cantidad: new Decimal('0.04'),
-        bloqueante: false,
+        cantidadBloqueante: new Decimal('0'),
         nombre: 'Queso laminado',
       });
     });
@@ -5896,12 +5899,70 @@ describe('ItemsService', () => {
         },
       ]);
 
-      // 150 g × 2 veces = 300 g = 0.3 kg. Un extra nunca frena la venta.
+      // 150 g × 2 veces = 300 g = 0.3 kg. Un extra nunca frena la venta: ocupa
+      // los 0,3 y no topea nada.
       expect(consumo.get(CARNE)).toEqual({
         cantidad: new Decimal('0.3'),
-        bloqueante: false,
+        cantidadBloqueante: new Decimal('0'),
         // El de un extra sale del catálogo de extras, no de la receta.
         nombre: 'Carne molida',
+      });
+    });
+
+    /**
+     * **El agujero que cerró la revisión final de rama (2026-09-02).** Un extra
+     * permitido puede ser un ingrediente que la receta YA lleva —"extra queso"
+     * sobre una receta con queso— y nada lo impide: `validarExtrasPermitidos`
+     * solo mira duplicados ENTRE los extras. La expansión devuelve entonces el
+     * mismo `ingredienteItemId` dos veces, la base con su `bloqueante` real y el
+     * extra siempre en `false`.
+     *
+     * Con un flag por ítem mergeado con AND el resultado era `false` para las
+     * dos porciones, y `validarStockAlPedir` no topeaba ni lockeaba NADA de ese
+     * ingrediente. La venta, en cambio, procesa la entrada base y esa sí frena:
+     * el pedido entraba con 201 y reventaba al cobrar. Con las dos cantidades,
+     * la porción base sigue topeando y la del extra sigue sin frenar.
+     */
+    it('un extra del MISMO ingrediente de la receta suma al total pero no a lo que frena', async () => {
+      dataSource.query
+        // 1) tipos
+        .mockResolvedValueOnce([{ item_id: HAMBURGUESA, tipo: 'receta' }])
+        // 2) ingredientes de la receta (el pan va bloqueante)
+        .mockResolvedValueOnce(ingredientesHamburguesa)
+        // 3) catálogo de los extras del snapshot: el MISMO pan
+        .mockResolvedValueOnce([
+          {
+            item_id: PAN,
+            nombre: 'Pan de hamburguesa',
+            unidad_medida: 'unidad',
+          },
+        ]);
+
+      const consumo = await service.consumoDeLineas(TENANT, [
+        {
+          itemId: HAMBURGUESA,
+          cantidad: '1',
+          personalizacion: {
+            omitidos: [],
+            extras: [
+              {
+                ingredienteItemId: PAN,
+                cantidad: '1',
+                unidadCodigo: 'unidad',
+                precioExtra: '500',
+                unidades: '1',
+              },
+            ],
+          },
+        },
+      ]);
+
+      expect(consumo.get(PAN)).toEqual({
+        // Ocupa las dos porciones: la de la receta y la del extra.
+        cantidad: new Decimal('2'),
+        // Pero solo frena la de la receta.
+        cantidadBloqueante: new Decimal('1'),
+        nombre: 'Pan de hamburguesa',
       });
     });
 
@@ -6031,7 +6092,10 @@ describe('ItemsService', () => {
         { itemId: COMBO, cantidad: '1', personalizacion: null },
       ]);
 
-      expect(consumo.get(PAN)!.bloqueante).toBe(false);
+      // Ocupa su unidad de pan pero no topea nada: el componente no frena, así
+      // que el ingrediente que llega por él tampoco.
+      expect(consumo.get(PAN)!.cantidad.toString()).toBe('1');
+      expect(consumo.get(PAN)!.cantidadBloqueante.toString()).toBe('0');
     });
 
     it('dos líneas del mismo ingrediente se suman', async () => {
@@ -6049,10 +6113,15 @@ describe('ItemsService', () => {
       expect(consumo.get(QUESO)!.cantidad.toString()).toBe('0.06');
     });
 
-    it('el más permisivo gana: si un solo camino no frena, el ingrediente no frena', async () => {
-      // El no bloqueante va PRIMERO a propósito: si la última línea pisara el
-      // flag en vez de combinarlo, este test pasaría igual con el orden
+    it('una ocurrencia que no frena NO apaga a la que sí: se llevan las dos cantidades', async () => {
+      // El no bloqueante va PRIMERO a propósito: si la última ocurrencia pisara
+      // lo acumulado en vez de sumarlo, este test pasaría igual con el orden
       // inverso y no probaría nada.
+      //
+      // Hasta el 2026-09-02 esto era un flag mergeado con AND y el resultado
+      // era `bloqueante: false` para las DOS unidades: la papa pedida suelta
+      // —que sí frena, porque la venta la descuenta y propaga el error— dejaba
+      // de topearse porque el combo la consumía sin frenar. Ver `ConsumoDeItem`.
       dataSource.query
         .mockResolvedValueOnce([
           { item_id: COMBO, tipo: 'combo', nombre: 'Combo Especial' },
@@ -6074,9 +6143,10 @@ describe('ItemsService', () => {
         { itemId: PAPAS, cantidad: '1', personalizacion: null },
       ]);
 
+      // Ocupa 2 —la del combo y la suelta— y topea 1: solo la suelta frena.
       expect(consumo.get(PAPAS)).toEqual({
         cantidad: new Decimal('2'),
-        bloqueante: false,
+        cantidadBloqueante: new Decimal('1'),
         nombre: 'Papas fritas',
       });
     });
@@ -6401,6 +6471,146 @@ describe('ItemsService', () => {
       expect(dataSource.query).toHaveBeenCalledTimes(2);
       const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
       expect(sqls.some((sql) => sql.includes('FOR UPDATE'))).toBe(false);
+    });
+
+    /**
+     * El gemelo unitario de los dos e2e de "Revisión final": el mismo
+     * ingrediente entra por la receta (frena) y por el extra (no frena), y el
+     * tope tiene que seguir viendo la porción que frena. Antes del 2026-09-02 el
+     * flag mergeado hacía que el guard ni siquiera lockeara el ítem.
+     *
+     * Stock 1 y comprometido 0: alcanza justo para la porción de la receta, así
+     * que pedir **dos** raciones —2 que frenan contra 1 que queda— rebota. Con
+     * el AND de antes esto resolvía sin tocar `item_producto`.
+     */
+    it('un extra del mismo ingrediente no apaga el tope de la porción que sí frena', async () => {
+      const RECETA = 'receta-extra-uuid';
+      dataSource.query
+        // 1) tipo del ítem pedido
+        .mockResolvedValueOnce([
+          { item_id: RECETA, tipo: 'receta', nombre: 'Plato' },
+        ])
+        // 2) ingredientes de la receta
+        .mockResolvedValueOnce([
+          {
+            receta_item_id: RECETA,
+            ingrediente_item_id: PAPAS,
+            ingrediente_nombre: NOMBRE,
+            ingrediente_unidad_medida: 'unidad',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            bloqueante: true,
+          },
+        ])
+        // 3) catálogo de extras: el MISMO ítem
+        .mockResolvedValueOnce([
+          { item_id: PAPAS, nombre: NOMBRE, unidad_medida: 'unidad' },
+        ])
+        // 4) el lock sobre item_producto
+        .mockResolvedValueOnce([
+          { item_id: PAPAS, stock: '1', unidad_medida: 'unidad' },
+        ])
+        // 5) el comprometido: ninguna cuenta abierta
+        .mockResolvedValueOnce([]);
+
+      await expect(
+        service.validarStockAlPedir(TENANT, [
+          {
+            itemId: RECETA,
+            cantidad: '2',
+            personalizacion: {
+              omitidos: [],
+              extras: [
+                {
+                  ingredienteItemId: PAPAS,
+                  cantidad: '1',
+                  unidadCodigo: 'unidad',
+                  precioExtra: '500',
+                  unidades: '1',
+                },
+              ],
+            },
+          },
+        ]),
+      ).rejects.toThrow(
+        `Stock insuficiente de "${NOMBRE}": quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
+      );
+
+      // Y lo lockeó de verdad: el flag mergeado ni llegaba a esta consulta.
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      expect(sqls.some((sql) => sql.includes('FOR UPDATE OF ip'))).toBe(true);
+    });
+
+    /**
+     * La otra mitad del mismo arreglo: el neto de una EDICIÓN también se calcula
+     * sobre `cantidadBloqueante`, en los dos extremos. Restar totales
+     * —`cantidad(nueva) − cantidad(vieja)`— mete en la cuenta la porción del
+     * extra, que no frena, y pide de más: acá subir de 1 a 2 necesita **una**
+     * ración más y no dos.
+     *
+     * Medido con el mutante: cambiar solo `netoDe` a `c.cantidad` sobrevive a
+     * los otros 245 unitarios; con este test se pone rojo.
+     */
+    it('editar un plato con extra netea solo lo que frena, no el total', async () => {
+      const RECETA = 'receta-edit-extra-uuid';
+      const ingredientes = [
+        {
+          receta_item_id: RECETA,
+          ingrediente_item_id: PAPAS,
+          ingrediente_nombre: NOMBRE,
+          ingrediente_unidad_medida: 'unidad',
+          cantidad: '1',
+          unidad_codigo: 'unidad',
+          bloqueante: true,
+        },
+      ];
+      const extrasCat = [
+        { item_id: PAPAS, nombre: NOMBRE, unidad_medida: 'unidad' },
+      ];
+      const tipoReceta = [{ item_id: RECETA, tipo: 'receta', nombre: 'Plato' }];
+      dataSource.query
+        // 1-3) expansión de lo nuevo (2 raciones: 2 frenan, 2 no)
+        .mockResolvedValueOnce(tipoReceta)
+        .mockResolvedValueOnce(ingredientes)
+        .mockResolvedValueOnce(extrasCat)
+        // 4-6) expansión de lo viejo (1 ración: 1 frena, 1 no)
+        .mockResolvedValueOnce(tipoReceta)
+        .mockResolvedValueOnce(ingredientes)
+        .mockResolvedValueOnce(extrasCat)
+        // 7) el lock: 3 físicas
+        .mockResolvedValueOnce([
+          { item_id: PAPAS, stock: '3', unidad_medida: 'unidad' },
+        ])
+        // 8) el comprometido: 2 ya tomadas (esta misma línea, base + extra)
+        .mockResolvedValueOnce([
+          { item_id: PAPAS, cantidad: '2', personalizacion: null },
+        ])
+        // 9) el tipo de lo comprometido
+        .mockResolvedValueOnce([
+          { item_id: PAPAS, tipo: 'producto', nombre: NOMBRE },
+        ]);
+
+      const conExtra = (cantidad: string) => ({
+        itemId: RECETA,
+        cantidad,
+        personalizacion: {
+          omitidos: [],
+          extras: [
+            {
+              ingredienteItemId: PAPAS,
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '500',
+              unidades: '1',
+            },
+          ],
+        },
+      });
+
+      // Queda 1 (3 − 2) y el neto que frena es 1: entra justo.
+      await expect(
+        service.validarStockAlPedir(TENANT, [conExtra('2')], [conExtra('1')]),
+      ).resolves.toBeUndefined();
     });
 
     it('un bloqueante SIN fila en item_producto rechaza en vez de saltearse en silencio', async () => {

@@ -221,7 +221,7 @@ Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad conve
 
 - `pages/configuracion/items.vue` — tipo Receta + editor de filas (ingrediente, cantidad, unidad por magnitud, bloqueante); selector de insumos vía `GET /items?tipo=ingrediente`; costo de solo lectura al editar. Al pedir borrar un item, consulta `GET /items/:id/uso` antes de abrir el modal de confirmación: con `bloqueos` muestra "No se puede eliminar" + motivos y solo el botón "Entendido"; con solo `advertencias` nombra las recetas donde deja de ofrecerse como extra y deja confirmar; sin usos, el texto genérico de siempre.
 - `pages/ventas/pos.vue` — fetch paralelo `tipo=producto` y `tipo=receta`; toasts `warning` por cada `advertencias`.
-- `components/ventas/CatalogoGrid.vue` — receta nunca bloquea el click; se atenúa si `disponible === 0`; badge "Disponibles: N".
+- `components/ventas/CatalogoGrid.vue` — receta nunca bloquea el click; se atenúa si `disponible <= 0` —desde el 2026-09-01 el número es `stock − comprometido` y **puede ser negativo**—; badge "Disponibles: N".
 - `composables/useVenta.ts` — `ItemCatalogo.disponible?: number | null`.
 
 ---

@@ -234,7 +234,7 @@ imprime la base, la decisión se reabre.
 ### POS
 
 - `pages/ventas/pos.vue` — intercepta click en `tipo === 'receta'` → drawer → `add` con personalización; `POST /ventas` envía snapshot por línea.
-- `components/ventas/CatalogoGrid.vue` — recetas siempre clickeables; atenuación si `disponible === 0`.
+- `components/ventas/CatalogoGrid.vue` — recetas siempre clickeables; atenuación si `disponible <= 0` (desde el 2026-09-01 el número es `stock − comprometido` y puede ser negativo).
 - `composables/useVenta.ts` — línea en memoria con `personalizacion`.
 
 ### Salones
