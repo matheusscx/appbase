@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: SDD Team  
-**Last Updated**: 2026-08-28
+**Last Updated**: 2026-09-01 (lo apartado por una mesa no escribe movimientos)
 
 ---
 
@@ -322,6 +322,52 @@ e `inventario.registrarAjusteCosto` y `mermas.registrar` cortan con `404`;
 `recuentos.aplicar` descarta la línea; recetas y combos excluyen al ingrediente
 borrado de la expansión—. La regla vive en el chokepoint para el llamador que se
 agregue mañana sin ese filtro.
+
+---
+
+## Lo que una mesa apartó NO está en el kardex (2026-09-01)
+
+**Si estás buscando acá la reserva de una mesa, no está, y es a propósito.** Desde el
+2026-09-01 lo que una cuenta de salón abierta pidió queda **apartado**: la segunda mesa que
+quiera la última unidad rebota al pedir, y el catálogo muestra un `stockDisponible` menor
+que el `stock`. Nada de eso escribe un movimiento.
+
+**Por qué no.** Se evaluó modelarlo como un movimiento con motivo `reserva` y su reverso, y
+se descartó: **mezclaría lo comprometido con lo que salió físicamente** —que es justamente lo
+que este kardex existe para separar— y ensuciaría la valorización del costo, porque el CPP
+promedia sobre movimientos reales. También se descartó una tabla o columna de reserva: sería
+un segundo saldo materializado que puede derivar, con cada camino que toca una línea obligado
+a acordarse de liberar.
+
+**Qué es entonces.** Lo comprometido se **deduce** cuando se pregunta: la suma de lo que
+consumirían las líneas vivas de las cuentas `abierta` del tenant, expandiendo receta, combo,
+opción de grupo y personalización igual que lo hace la venta
+(`ItemsService.comprometidoPorItem` → `consumoDeLineas`). No hay fila que buscar.
+
+**Qué NO cambió, y es lo importante para quien lee este archivo:**
+
+- `movimientos_inventario` **sigue siendo la fuente de verdad de lo que se movió**, y el
+  único evento que descuenta stock por una mesa sigue siendo el **cierre de la cuenta**, que
+  genera la venta y su `salida`/`motivo='venta'`.
+- `item_producto.stock` sigue siendo el saldo materializado de esos movimientos. **Nunca
+  significa "lo que se puede pedir"**: eso viaja aparte, en `stockDisponible` de
+  `GET /items`, y es `stock − comprometido`.
+- El kardex de un producto disputado por dos mesas **no muestra nada** hasta que una cobra.
+  Ese silencio es el diseño, no un movimiento perdido.
+- **Cerrar la cuenta no "devuelve" lo apartado: lo convierte en la `salida` de la venta.** Lo
+  comprometido baja y el `stock` baja lo mismo, así que el disponible no se mueve. Quien espere
+  ver stock liberarse al cobrar está leyendo mal el número: lo que libera es **quitar la línea,
+  bajarle la cantidad o cancelar la cuenta**, y esos tres no dejan rastro acá porque no son
+  movimientos.
+
+⚠️ **La reserva no protege al kardex de quedar corto.** Una merma, un recuento o un ajuste
+manual pueden dejar el `stock` por debajo de lo que las mesas ya comprometieron —ninguno de
+esos caminos mira lo comprometido— y esa cuenta vuelve a no poder cobrarse. Achica el caso,
+no lo borra: ver [`salones-mesas.md`](./salones-mesas.md) y la salida con motivo, todavía
+pendiente, en [`../agent/pendientes.md`](../agent/pendientes.md) § 3.
+
+Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace cumplir:
+[`salones-mesas.md`](./salones-mesas.md).
 
 ---
 

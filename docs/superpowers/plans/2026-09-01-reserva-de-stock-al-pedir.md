@@ -7,10 +7,13 @@
 **Goal:** que pedir una línea en una mesa aparte el stock que esa línea va a consumir, para
 que dos mesas no puedan pedir la misma última unidad y el choque no aparezca recién al cobrar.
 
-**Architecture:** la reserva **no se guarda en ningún lado**. `disponible` pasa a ser
-`stock − comprometido`, donde el comprometido se deduce de las líneas vivas de cuentas
-`abierta`. Cerrar, cancelar, quitar la línea, bajarle la cantidad y fusionar cuentas sueltan
-la reserva sin código nuevo, porque la reserva no es un estado: es una consecuencia.
+**Architecture:** la reserva **no se guarda en ningún lado**. Lo que el catálogo publica pasa a
+descontar el comprometido —`stockDisponible` para producto/ingrediente, y las porciones de
+`disponible` calculadas sobre `stock − comprometido`—, donde el comprometido se deduce de las
+líneas vivas de cuentas `abierta`. Ninguno de los caminos que tocan una línea necesita código nuevo, porque la
+reserva no es un estado: es una consecuencia. Quitar la línea, bajarle la cantidad y cancelar
+la cuenta **liberan**; **cerrarla no libera: convierte** la reserva en salida real; y fusionar
+dos cuentas es **neutro** —la cantidad total se conserva—.
 
 **Tech Stack:** NestJS + TypeORM + PostgreSQL 15 (backend), Nuxt 4 (frontend), Decimal.js
 para toda la aritmética.
@@ -39,7 +42,7 @@ para toda la aritmética.
 | `backend/src/modules/items/items.service.ts` | **Modificar.** Nace `consumoDeLineas` (la expansión pura, Tarea 1) y `calcularDisponibilidadBatch` pasa a descontar el comprometido (Tarea 2) |
 | `backend/src/modules/salones/salones.service.ts` | **Modificar.** `agregarLinea` y `actualizarLinea` hacen cumplir el tope (Tareas 3 y 4) |
 | `backend/test/reserva-stock-mesa.e2e-spec.ts` | **Crear.** El spec del frente: el choque, la receta, el soltar, el no bloqueante y la concurrencia |
-| `frontend/app/composables/useVenta.ts` | **Modificar.** `disponible` deja de distinguir producto de receta (Tarea 8) |
+| `frontend/app/composables/useVenta.ts` | **Modificar.** La pantalla pasa a leer `stockDisponible` y deja de descontar localmente en salones (Tarea 8) |
 | Docs vivas | `features/salones-mesas.md`, `features/inventario-kardex.md`, `PRODUCTO.md`, `ESTADO.md`, `agent/pendientes.md` (Tarea 9) |
 
 ⚠️ **No se crea ningún archivo de servicio nuevo.** `consumoDeLineas` vive en
@@ -141,7 +144,7 @@ git commit -m "feat(items): qué consume un conjunto de líneas, sin escribir mo
 
 ---
 
-## Tarea 2 — `disponible` descuenta lo comprometido
+## Tarea 2 — El catálogo descuenta lo comprometido
 
 **Files:**
 - Modify: `backend/src/modules/items/items.service.ts` (`calcularDisponibilidadBatch`, `:3903`)
@@ -149,12 +152,22 @@ git commit -m "feat(items): qué consume un conjunto de líneas, sin escribir mo
 
 **Interfaces:**
 - Consumes: `consumoDeLineas` de la Tarea 1.
-- Produces: `GET /items` devuelve `disponible` **descontando** lo que las cuentas `abierta`
-  ya pidieron, para **todos** los tipos —incluido `producto`, que hoy devuelve `null`—.
+- Produces: `GET /items` devuelve, **descontando** lo que las cuentas `abierta` ya pidieron:
+  `disponible` para receta/combo (sin cambio de tipo ni de significado) y **`stockDisponible`,
+  string**, para producto/ingrediente.
+
+  ⚠️ **Corregido durante la ejecución (2026-09-01).** Esta tarea decía originalmente que
+  `disponible` pasaba a descontar "para **todos** los tipos, incluido `producto`". Se cambió
+  al medir que son dos magnitudes distintas —porciones (entero) vs. cuánto queda (cantidad,
+  puede ser 1,5 kg)— y que `disponible` viaja como `number` con `.floor()` en el frontend.
+  El porqué completo está en la § 4.1b de la spec. Se corrige acá, en el texto, porque un
+  plan que sobrevive en el repo se vuelve a leer.
 
 - [x] **Paso 1: escribir el e2e que falla**
 
-Producto con `stock = 3`. Una mesa pide 2. `GET /items` tiene que devolver `disponible: 1`.
+Producto con `stock = 3`. Una mesa pide 2. `GET /items` tiene que devolver
+`stockDisponible: '1.0000'` — y `stock` **sin tocar** en `'3.0000'`, que es lo que hay en
+bodega. (Decía `disponible: 1`; corregido con el resto de la tarea, ver el ⚠️ de arriba.)
 
 ⚠️ El spec necesita **garzón propio con sesión y turno, salón y mesa propios**: el garzón del
 seed lo comparten seis specs y la sesión es única por garzón.
@@ -271,8 +284,8 @@ es el de las otras líneas más la cantidad nueva de ésta, no la suma de las do
 - Modify: solo si la Tarea 3 no dejó ya la rama correcta.
 
 **Interfaces:**
-- Produces: un ingrediente **no bloqueante** sin stock **no impide pedir**, y su `disponible`
-  puede quedar **negativo**.
+- Produces: un ingrediente **no bloqueante** sin stock **no impide pedir**, y su
+  `stockDisponible` puede quedar **negativo**.
 
 - [x] **Paso 1: escribir el e2e**
 
@@ -350,7 +363,7 @@ No inventar un lock nuevo: el orden de bloqueo de filas es materia del §15 de
 
 ---
 
-## Tarea 8 — El POS deja de distinguir producto de receta
+## Tarea 8 — La pantalla muestra lo que se puede pedir
 
 Implementa la § 4.1b de la spec: el contrato con el frontend cambia.
 
@@ -361,8 +374,9 @@ Implementa la § 4.1b de la spec: el contrato con el frontend cambia.
   producto.
 
 **Interfaces:**
-- Consumes: `GET /items` con `disponible` presente en productos (Tarea 2).
-- Produces: la pantalla muestra `disponible` cuando existe y cae a `stock` cuando no.
+- Consumes: `GET /items` con `stockDisponible` presente en productos e ingredientes (Tarea 2).
+- Produces: la pantalla muestra `stockDisponible` cuando existe y cae a `stock` cuando no.
+  `disponible` sigue siendo el de receta/combo (ver la corrección de la Tarea 2).
 
 - [x] **Paso 1: encontrar y listar los consumidores**
 
@@ -374,7 +388,7 @@ uno más.
 
 - [x] **Paso 2: escribir los tests de pantalla que fallan**
 
-Un producto con `disponible: 1` y `stock: 3` tiene que mostrar **1**. Hoy muestra 3.
+Un producto con `stockDisponible: '1.0000'` y `stock: '3.0000'` tiene que mostrar **1**. Hoy muestra 3.
 
 - [x] **Paso 3: correr y confirmar que fallan**
 
@@ -402,25 +416,25 @@ disponible. Los tests de pantalla mockean `useApiFetch` y no ven bugs de runtime
   `docs/PRODUCTO.md`, `docs/ESTADO.md`, `docs/agent/pendientes.md`,
   `docs/agent/resueltos.md`
 
-- [ ] **Paso 1: la regla de negocio, en `PRODUCTO.md`**
+- [x] **Paso 1: la regla de negocio, en `PRODUCTO.md`**
 
 Que lo pedido en una cuenta abierta queda apartado; que dura mientras dura la cuenta; que un
 plato aparta sus ingredientes; que el no bloqueante suma pero no frena.
 
-- [ ] **Paso 2: `features/salones-mesas.md` y `features/inventario-kardex.md`**
+- [x] **Paso 2: `features/salones-mesas.md` y `features/inventario-kardex.md`**
 
 Dónde se hace cumplir, y **que la reserva no escribe movimientos** — un lector del kardex
 tiene que saber por qué no encuentra la reserva ahí.
 
-- [ ] **Paso 3: `ESTADO.md`**
+- [x] **Paso 3: `ESTADO.md`**
 
 Fila de salones y fila de inventario, con la fecha.
 
-- [ ] **Paso 4: mover la entrada de `pendientes.md` § 4 a `resueltos.md`**
+- [x] **Paso 4: mover la entrada de `pendientes.md` § 4 a `resueltos.md`**
 
 Con el texto de cierre: qué se construyó, qué lo fija, y **qué no arregla**.
 
-- [ ] **Paso 5: ⚠️ DEJAR VIVA la salida con motivo, y cruzarla**
+- [x] **Paso 5: ⚠️ DEJAR VIVA la salida con motivo, y cruzarla**
 
 **La entrada *"Anular o reducir una línea ya enviada a cocina"* de `pendientes.md` § 3 NO se
 cierra.** Sigue abierta, y en este paso gana dos cosas:

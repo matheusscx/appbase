@@ -17,6 +17,135 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Dos mesas ya no pueden pedir la misma última unidad: lo que la mesa pide queda apartado (cerrado 2026-09-01)
+
+Venía de la § 4 (*necesita que el owner conteste*), donde había entrado ese mismo día
+**reproducida end-to-end contra el stack**, no leída. La corrida que la abrió, tal cual salió
+(producto con `stock = 1`, dos mesas del mismo salón):
+
+| Paso | Resultado |
+|---|---|
+| mesa A pide 1 | `201` |
+| mesa B pide 1 | `201` — y el stock sigue en `1.0000` |
+| las dos comandas a cocina | `201` y `201`, `cantidad_enviada` avanza a 1 en las dos |
+| mesa A cobra | `201`, stock queda en `0.0000` |
+| mesa B cobra | **`400` "Stock insuficiente para la salida"** |
+| mesa B intenta sacar la línea | **`400` "ya se despachó a cocina… registralo como merma o cortesía"** |
+
+La mesa B quedaba **trabada**: no se podía cobrar —el cierre entero reventaba— y no se podía
+sacar la línea —el guard de agosto lo impedía—. La única salida era un ajuste de inventario a
+mano, y el mensaje de error mandaba a *"merma o cortesía"*, que **no existe**.
+
+**La decisión del owner (2026-09-01)**, entre las tres que la entrada ofrecía —apartar, avisar,
+bloquear—: **apartar**, con tres precisiones que decidieron la arquitectura. (1) Dura **mientras
+viva la cuenta**, sin vencimiento por tiempo; (2) un plato aparta **sus ingredientes**,
+expandiendo la receta igual que la venta; (3) **también los no bloqueantes**, que suman al
+comprometido sin frenar y pueden quedar en negativo. **La primera es la que define todo lo
+demás:** *"vive exactamente mientras vive la cuenta"* **no es un estado que haya que mantener,
+es una derivación**.
+
+**Lo que se construyó**, en nueve tareas sobre `main` (spec:
+[`2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md),
+plan: [`2026-09-01-reserva-de-stock-al-pedir.md`](../superpowers/plans/2026-09-01-reserva-de-stock-al-pedir.md)):
+
+| Commit | Qué |
+|---|---|
+| `06dc26e8` | `ItemsService.consumoDeLineas` — qué consume un conjunto de líneas, **sin escribir movimientos**, con la personalización de cada línea aplicada |
+| `0c8aa1b2` | `GET /items` descuenta lo comprometido por las cuentas `abierta`: nace `stockDisponible` + dos índices |
+| `5cee4bbd` | El tope al **pedir**: `validarStockAlPedir` en `agregarLinea`, con `FOR UPDATE` y reintento de `40P01` |
+| `ce00b122` | El mismo tope al **subir** la cantidad por `PATCH`; bajar solo libera |
+| `da815641` | Las tres propiedades del enfoque, fijadas en tests: no bloqueante, soltar, concurrencia |
+| `c6489ecd` | La pantalla muestra lo que se puede pedir, no lo que hay en bodega |
+
+**Por qué no hay tabla, columna ni movimiento.** Se evaluaron tres enfoques y ganó el que
+**no guarda nada**: `disponible = stock − comprometido`, calculado sobre las líneas vivas de
+las cuentas abiertas. Una tabla `reservas_stock` o un `stock_reservado` sería **otro saldo
+materializado que puede derivar** —el proyecto ya tiene uno, `item_producto.stock` sobre
+`movimientos_inventario`— y obligaría a cada camino que toca una línea a acordarse de liberar;
+olvidarse de uno deja stock apartado para siempre, que es justo el modo de falla que la
+decisión del owner quiso evitar. Un movimiento con motivo `reserva` mezclaría lo
+**comprometido** con lo que **salió físicamente** en el kardex y ensuciaría la valorización del
+costo. Lo que el enfoque elegido compró: **cerrar la cuenta, cancelarla, quitar la línea,
+bajarle la cantidad y fusionar dos cuentas no necesitaron una sola línea de código nueva.**
+
+**Qué lo fija.** El e2e `backend/test/reserva-stock-mesa.e2e-spec.ts` reproduce la sonda tal
+cual y agrega la receta, el `PATCH` que sube y el que baja, el no bloqueante en negativo, las
+**dos** formas de liberar (quitar la línea, cancelar la cuenta), el **contra-caso** de cerrar
+—cuyo test se llama *"cerrar y cobrar NO suelta nada"*: ahí la reserva no se suelta, se
+**consume**— y la carrera. Los mutantes que se corrieron y **murieron** —varios
+verificados por un tercero, no por quien los escribió—: sacar el guard entero (el test vuelve a
+`201`, o sea **revierte**, no solo rompe), leer el comprometido **antes** del lock, quitar el
+`ORDER BY`, reintentar cualquier error en vez de solo `40P01`, contar las cuentas `cerrada`
+como comprometidas (doble descuento, `-1.0000`), volver a `consumo(delta)` en el `PATCH`, y
+tres `.mul()` de la expansión que **sub-reservaban** y que ningún test cazaba porque todos los
+casos de combo y grupos usaban cantidad 1.
+
+⚠️ **Un límite que se midió en vez de suponerse:** el e2e concurrente **no custodia el lock**.
+No solo no caza la inversión del orden —lo que se midió primero, con 500 ms de espera inyectada
+para probar que la carrera existe—, sino que **tampoco caza quitar el `FOR UPDATE` entero**: 10
+corridas de 10 en verde. La red real es el unitario *"toma el lock de stock ANTES de leer el
+comprometido"* de `items.service.spec.ts`, que sí muere con los dos mutantes. Se prefirió
+documentarlo antes que ensanchar la ventana con ganchos de test en el camino caliente del POS.
+
+**Dos reglas de negocio nuevas que salieron implementando y que nadie había escrito** (las dos
+quedaron en [`PRODUCTO.md`](../PRODUCTO.md) § 8b):
+
+1. **Un ítem sin stock cargado ya no se puede pedir en una mesa.** Es coherente —hoy tampoco se
+   podía cobrar, la cuenta reventaba al cerrar— pero **lo siente cualquier tenant que nunca
+   cargó inventario**, que hasta ese día pedía igual. No se ablandó el guard: exceptuar el `0`
+   sería incoherente con rechazar el cuarto pedido de un stock de 3. Dos specs de fixture
+   crearon sus productos sin stock y hubo que cargárselo.
+2. **Subir la cantidad de una línea es un pedido nuevo por la diferencia y se topea; bajarla
+   solo libera y nunca se rechaza por stock.** Y la comparación es
+   `consumo(nueva) − consumo(vieja)`, **no** `consumo(diferencia)`: no son lo mismo, porque la
+   conversión de unidades redondea a 4 decimales y **lanza** si lo convertido cae bajo esa
+   precisión. Medido: una receta con 5 g de un insumo en kg, línea en 1, subida a `1.005`
+   rebotaba con un 400 sobre *"precisión de stock"* que no tenía nada que ver con lo que hizo el
+   garzón.
+
+**Lo que este frente ROMPIÓ y arregló dentro del mismo frente**, porque conviene que quede
+dicho: al hacer que el servidor descontara lo comprometido, el salón quedó descontando **dos
+veces** —él ya lo hacía localmente—, y una receta con 4 porciones y 2 pedidas se veía en **0** y
+gris. La primera atribución dijo que era deuda heredada y **estaba mal**: la revisión la corrigió
+cruzando la fecha del commit (`0c8aa1b2` es la Tarea 2 de este mismo frente). En POS y tienda el
+descuento local se queda, porque ahí el carrito todavía no existe para el servidor.
+
+### Qué NO arregla — y por qué decirlo importa
+
+- **No elimina la mesa trabada.** Una merma, un recuento o un ajuste manual pueden dejar el
+  stock **por debajo de lo ya comprometido** —ninguno de esos caminos mira lo comprometido— y
+  esa mesa vuelve a quedar sin poder cobrar y sin poder sacar la línea. **Achica el caso, no lo
+  borra.**
+- **La salida con motivo sigue sin existir**, y sigue haciendo falta: es la entrada *"Anular o
+  reducir una línea ya enviada a cocina"* de [`pendientes.md`](pendientes.md) § 3, que **no se
+  cerró**. El mensaje de error que manda a *"merma o cortesía"* sigue prometiendo algo que no
+  está. Cuando ese frente aterrice compone solo con éste —sacar la línea con motivo baja el
+  comprometido y baja el stock a la vez, **neto cero**—, ⚠️ salvo que decida **conservar** la
+  línea marcada como anulada: ahí la consulta del comprometido necesita una condición más para
+  dejar de contarla.
+- **El drawer de personalización sigue mirando el stock físico**: `GET /items/:id` no expone
+  `stockDisponible`, así que ahí adentro se sigue ofreciendo lo que otra mesa ya comprometió.
+  Entrada propia en `pendientes.md` § 3.
+- **La tienda online tiene el mismo hueco por otro camino** —el carrito vive en el navegador y
+  entre la orden de pasarela y el callback de pago nadie retiene nada—. No se tocó; queda
+  anotado en la § 6 de la spec para cuando se encare.
+- **Una línea de `tipo='ingrediente'`** se sigue pudiendo agregar a una cuenta y la venta la
+  rechaza al cerrar: otro camino a la mesa trabada, preexistente y con entrada propia.
+- **El `PATCH` de cantidad no llega al servidor desde la pantalla** (`DataCloneError`
+  preexistente, de julio): el tope del `PATCH` está y tiene sus e2e, pero por API. Entrada
+  propia, y es la más grave de las cuatro que este frente dejó.
+- **Una cuenta olvidada inmoviliza stock hasta que alguien la cierre o la cancele.** No es un
+  descuido: es el trade-off que el owner **aceptó explícitamente** al elegir que la reserva dure
+  mientras dure la cuenta, sin vencimiento por tiempo (§ 8 de la spec). La salida es cerrar o
+  cancelar, que ya existen; no hay expiración automática y no se diseñó una.
+- **Y un costo recurrente que este frente SÍ agregó**: cada mutación de una cuenta ahora agenda
+  un refresco del catálogo del salón —tres `GET /items`, con debounce de 250 ms—, donde antes
+  esos tres GET salían solo en la carga inicial de la pantalla. Es el precio de que el número
+  lo calcule el servidor, y tiene entrada propia con su destino (0 GET) en
+  [`pendientes.md`](pendientes.md) § 3.
+
+---
+
 ## Un descuento por método de pago dejaba de aplicarse al editarlo — y la sospecha de la entrada era errada (cerrado 2026-09-01)
 
 Venía de la § 1 (*mecánico*), donde había entrado el 2026-08-31 desde la revisión

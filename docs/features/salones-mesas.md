@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-08-30 (lo que una cuenta abierta ya pidió no se saca del catálogo)
+**Last Updated**: 2026-09-01 (lo que la mesa pide queda apartado; pedir de más rebota al pedir)
 
 ---
 
@@ -395,6 +395,90 @@ sin ese término las dos se fusionaban y la segunda perdía su descuento.
 medido: dos cuentas con el mismo ítem a `3000` y `4000` colapsaban en `2 × 3000`, perdiendo
 $1.000. El que agregue un cuarto término, que lo agregue en los dos.
 
+### Lo que la mesa pide queda apartado, y pedir de más rebota al pedir (2026-09-01)
+
+**Decisión del owner (2026-09-01):** *lo que una mesa pide queda apartado desde que lo
+pide*, y la segunda mesa que quiera lo mismo se entera **al pedir**, no al cobrar. La regla
+de negocio completa —cuánto dura, qué aparta un plato, qué pasa con lo no bloqueante— vive
+en [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Acá va **dónde se hace cumplir**.
+
+**La reserva no es un estado: es una consecuencia.** No hay tabla, columna ni entidad nueva.
+Lo comprometido se **deduce** de las líneas vivas de las cuentas `abierta` del tenant
+(`ItemsService.comprometidoPorItem`, una sola consulta y una sola llamada a
+`consumoDeLineas`), así que **ningún camino que toca una línea necesitó código nuevo para que
+el número quede bien** — los estados ya juegan a favor. Cada uno hace lo suyo solo:
+
+| Camino | Qué le pasa a lo apartado |
+|---|---|
+| quitar la línea · bajarle la cantidad · cancelar la cuenta | **se libera** — vuelve a estar disponible |
+| **cerrar la cuenta** | **NO se libera: se convierte en salida real.** La venta descuenta el stock, así que el disponible no se mueve (`stock` y `stockDisponible` quedan los dos en el mismo número) |
+| fusionar dos cuentas | **neutro** — `fusionarCuentas` mueve o suma las líneas dentro de otra cuenta `abierta`, y la cantidad total se conserva |
+
+Se descartó guardarla en una tabla o columna justamente por eso: sería otro saldo
+materializado que puede derivar, y cada camino que toca una línea tendría que acordarse de
+liberar. El porqué completo de los tres enfoques está en la
+[spec](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md) § 3.
+
+**Dos puertas crean compromiso, y las dos están topeadas** — `ItemsService.validarStockAlPedir`
+es el único guard y lo llaman las dos:
+
+| Camino | Qué valida |
+|---|---|
+| `POST /cuentas/:id/lineas` | lo que la línea nueva consumiría, contra `stock − comprometido` |
+| `PATCH /cuentas/:id/lineas/:lineaId` | **solo si la cantidad sube**, y por la diferencia |
+
+⚠️ **La segunda fila hoy no se alcanza desde `/salones`.** `patchLineaCantidad` clona el Proxy
+reactivo de un `ref` y tira `DataCloneError` **antes** de mandar el `PATCH`, así que ese request
+nunca sale de la pantalla. El bug es anterior a este frente (`3c24b26b`, 2026-07-16) y tiene
+entrada propia en [`../agent/pendientes.md`](../agent/pendientes.md) § 3. El guard del backend
+está y tiene sus e2e; **lo que no llega es el camino de la UI.**
+
+El `400` **nombra el ingrediente que faltó** y con cuánto se quedó, no un "no hay stock"
+genérico: en una receta de seis ingredientes eso manda al garzón a adivinar. Solo frena lo
+**bloqueante**; lo no bloqueante suma al comprometido y sigue.
+
+⚠️ **La comparación del `PATCH` es `consumo(nueva) − consumo(vieja)`, no `consumo(diferencia)`,
+y no son lo mismo.** La conversión de unidades redondea a 4 decimales y **lanza** si lo
+convertido cae bajo esa precisión: medido, una receta con 5 g de un insumo stockeado en kg
+subida de 1 a 1,005 expandía el delta como `0,025 g → 0,0000 kg` y rebotaba con un 400 sobre
+*"precisión de stock"* que no tiene nada que ver con lo que hizo el garzón. Expandiendo los
+dos extremos da 0, que es la respuesta correcta.
+
+**El orden de los tres pasos del guard es el contrato**, no un detalle de implementación:
+expandir lo pedido → `SELECT … FOR UPDATE OF ip` sobre `item_producto` en un solo statement
+y `ORDER BY item_id` → **recién ahí** leer el comprometido. Bajo READ COMMITTED, leerlo antes
+haría que dos pedidos simultáneos del último vieran los dos *"queda 1"* y pasaran los dos,
+que es exactamente el bug. Lo custodia un unitario (`items.service.spec.ts`); el e2e
+concurrente prueba la propiedad de punta a punta pero **no** el mecanismo — ver la advertencia
+de Testing más abajo.
+
+📌 **Las dos puertas reintentan el `40P01`** (`agregarLinea` y `actualizarLinea`, con el mismo
+bucle). Este guard mete un `FOR UPDATE` nuevo en el camino más frecuente del POS, que compite
+con el mismo lock que toma la venta al descontar. Ordenar
+por `item_id` baja la frecuencia del ciclo pero no lo cierra —el orden de la venta lo decide
+el cliente, `docs/agent/anti-patterns.md`—, y sin el reintento el 500 caería del lado del
+**cobro**, que es el modo de falla que este frente vino a eliminar. `esDeadlock` está
+duplicado desde `ventas.service.ts` a propósito (segunda aparición; a la tercera se extrae),
+con referencia cruzada en los dos docblocks.
+
+**Lo que la pantalla muestra** es `stockDisponible` —lo que todavía se puede pedir— y cae a
+`stock` cuando el backend no lo manda. `disponible` **no cambió de forma ni de significado**:
+sigue siendo el entero *"cuántas porciones puedo armar"* de receta y combo, y por eso lo nuevo
+viajó en un campo propio — son dos magnitudes distintas y meterlas en un solo campo era el
+patrón de los dos nombres que compiten. ⚠️ **Pero su VALOR sí cambió, y hay que decirlo:** las
+porciones se calculan sobre `stock − comprometido` de cada ingrediente o componente (el helper
+`stockDisponible()` de `calcularDisponibilidadBatch`), así que **una receta también descuenta
+lo que las mesas ya pidieron**. Lo que quedó igual es el nombre y el tipo, no el número. ⚠️ **El salón ya no descuenta
+localmente lo que la cuenta pidió**: el servidor ya lo resta desde esta feature, y hacer las
+dos cosas mostraba una receta con 4 porciones y 2 pedidas en **0** y gris. En POS y tienda el
+descuento local se queda, porque ahí el carrito todavía no existe para el servidor.
+
+⚠️ **Lo que esto NO cierra**, y hay que saberlo antes de creer que la mesa trabada
+desapareció: una merma, un recuento o un ajuste manual pueden dejar el stock por debajo de lo
+ya comprometido y volver a trabar la mesa. **La salida con motivo sigue pendiente**
+([`../agent/pendientes.md`](../agent/pendientes.md) § 3), y con ella este número compone solo: sacar la línea con
+motivo baja el comprometido y baja el stock a la vez, neto cero.
+
 ### Lo ya despachado a cocina no se borra ni se reduce en silencio (2026-08-16)
 
 **Decisión del owner (2026-08-08).** El plato ya se hizo, así que sacar la línea del
@@ -499,6 +583,23 @@ Cubre: número de cuenta correlativo, agregar/merge/quitar líneas, cierre que i
 transferencias PIN/admin, cierre de tramos al cancelar/cerrar/fusionar, responsable
 vigente en `CuentaDetalle`, aislamiento por tenant.
 
+### El stock apartado (`backend/test/reserva-stock-mesa.e2e-spec.ts`)
+
+Reproduce la sonda que abrió el frente —dos mesas del mismo salón sobre un producto con
+`stock = 1`— y cubre la receta, el `PATCH` que sube y el que baja, el no bloqueante en
+negativo, las **dos** formas de liberar (quitar la línea y cancelar la cuenta), el
+**contra-caso** de cerrar —el test se llama *"cerrar y cobrar NO suelta nada"*, y es el que
+distingue *"se soltó"* de *"se consumió"*— y la carrera de dos `POST` simultáneos.
+
+⚠️ **El e2e concurrente prueba la propiedad, NO el mecanismo, y está medido.** Afirma que
+nunca salen dos `201`, pero **no mata al mutante que invierte el orden** (leer el
+comprometido antes del `FOR UPDATE`) **ni al que saca el `FOR UPDATE` entero**: 10 corridas
+en verde con el lock quitado. Sin espera inyectada, la ventana entre leer y commitear es más
+chica que el desfase con que llegan las dos requests. **La red real del orden y de la
+presencia del lock es el unitario** *"toma el lock de stock ANTES de leer el comprometido"*
+en `items.service.spec.ts`, que sí muere con los dos mutantes. Se prefirió documentarlo antes
+que ensanchar la ventana con ganchos de test en el camino caliente del POS.
+
 ### Manual (Frontend)
 
 1. `docker-compose up`. El seeder crea el módulo Salones y salones/mesas demo para el
@@ -534,3 +635,5 @@ vigente en `CuentaDetalle`, aislamiento por tenant.
 - [roles-permisos.md](./roles-permisos.md) — módulo RBAC `Salones` y permiso `Operar`.
 - [garzones.md](./garzones.md) — identificación por PIN.
 - [turnos-garzones.md](./turnos-garzones.md) — sesión obligatoria para operar cuentas.
+- [inventario-kardex.md](./inventario-kardex.md) — por qué lo apartado al pedir **no**
+  aparece en el kardex, y quién sí escribe movimientos.

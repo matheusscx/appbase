@@ -117,11 +117,37 @@ las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.m
 - `VentaDetalleDrawer.vue` ya tiene spec (4 casos). De paso quedó fijado que su total
   "Descuentos" incluye la plata de las promos, al revés que el ticket.
 
-✅ **Y la sección volvió a quedar vacía el 2026-09-01.** Su última entrada —el `PATCH` que
-dejaba a un descuento sin métodos de pago— salió ese día, y de paso se corrigió: la causa no
-era la colisión de PK que la entrada sospechaba, y el daño era más ancho de lo que decía
-(agregar un método también borraba el que ya estaba). El detalle, con la tabla de los tres
-casos medidos, en [`resueltos.md`](resueltos.md).
+✅ **Quedó vacía el 2026-09-01 por la mañana, y volvió a poblarse esa misma tarde.** Su
+última entrada de entonces —el `PATCH` que dejaba a un descuento sin métodos de pago— salió
+ese día, y de paso se corrigió: la causa no era la colisión de PK que la entrada sospechaba, y
+el daño era más ancho de lo que decía (agregar un método también borraba el que ya estaba). El
+detalle, con la tabla de los tres casos medidos, en [`resueltos.md`](resueltos.md). Lo que hay
+abajo llegó después, del frente de la reserva de stock, y no tiene nada que ver con eso.
+
+### Los tres minors de tests que dejó el frente de la reserva de stock (2026-09-01)
+
+Ninguno es un bug: son un helper de más, un título que promete lo que su cuerpo no hace y un
+docblock que se quedó corto respecto de lo que después se midió. Se juntan porque salen en una
+sola pasada sobre **un solo archivo** —`backend/test/reserva-stock-mesa.e2e-spec.ts`— y ninguno
+vale una entrada propia. Los tres los levantó la revisión independiente de las tareas 5-7.
+**Citas verificadas el 2026-09-01.**
+
+- [ ] **Los tres del spec de la reserva de stock** (backend/tests):
+  1. **`quitarLinea` tiene un solo call-site** (`reserva-stock-mesa.e2e-spec.ts:238`, usado
+     únicamente en `:768`). El resto de los helpers del archivo tienen ≥2. Roza la regla del
+     repo de *"sin helpers de un solo uso"*. **El arreglo:** inlinear la llamada, conservando
+     el `expect(res.status).toBe(200)` —que es lo que el hook de lecturas sin status exige— y
+     el porqué del docblock (la línea nunca está despachada en este spec).
+  2. **El test se llama *"cerrar y cobrar"* y manda `pagos: []`** (`:815`): no hay ningún
+     cobro. El cuerpo es correcto —lo que consume el stock es **cerrar**, no el pago, y su
+     propio docblock lo dice—, así que lo que sobra es la palabra: **renombrarlo** a lo que
+     hace, no agregarle un pago que el test no necesita.
+  3. **El docblock del e2e de concurrencia se quedó corto** (`:853` y siguientes). Dice que el
+     test no caza la **inversión** del orden del lock —lo que midió el implementador—, pero lo
+     medido después por la revisión es **más ancho**: tampoco caza **quitar el `FOR UPDATE`
+     entero** (10 corridas de 10 en verde). **El arreglo:** que el docblock lo diga, porque tal
+     como está hoy deja creer que ese e2e custodia la presencia del lock y no la custodia
+     —quien lo saque no se va a enterar por ahí; la red es el unitario de `items.service.spec.ts`.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -964,13 +990,17 @@ abriendo las superficies, no leyendo la entrada.
   hasta lo despachado también. En la pantalla el tacho queda deshabilitado con el motivo.
   Detalle en [`features/salones-mesas.md`](../features/salones-mesas.md).
 
-  🔗 **Cruza con la reserva de stock al pedir** (spec del 2026-09-01,
+  🔗 **Cruza con la reserva de stock al pedir, que se CONSTRUYÓ el 2026-09-01**
+  ([`resueltos.md`](resueltos.md); spec:
   [`specs/2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md)).
-  Esa feature **no cierra ésta**: achica el caso, no lo borra —una merma o un ajuste manual
-  siguen pudiendo dejar la mesa sin poder cobrar y sin poder sacar la línea—. Y su § 5 dice
-  cómo componen: sacar la línea con motivo baja el comprometido y baja el stock a la vez,
-  neto cero y automático. ⚠️ **Salvo que este frente decida conservar la línea marcada como
+  **Esa feature no cierra ésta, y hay que decirlo porque ahora que existe es fácil creer que
+  sí**: achica el caso, no lo borra —una merma, un recuento o un ajuste manual siguen pudiendo
+  dejar el stock por debajo de lo ya comprometido, y esa mesa vuelve a quedar sin poder cobrar
+  y sin poder sacar la línea—. Y su § 5 dice cómo componen: sacar la línea con motivo baja el
+  comprometido y baja el stock a la vez, **neto cero y automático**, sin que nadie tenga que
+  acordarse de liberar nada. ⚠️ **Salvo que este frente decida conservar la línea marcada como
   anulada** en vez de sacarla o bajarle la cantidad: en ese caso la consulta del comprometido
+  —`ItemsService.comprometidoPorItem`, que hoy suma toda línea viva de una cuenta `abierta`—
   necesita una condición más para dejar de contarla. Una línea de SQL, pero hay que acordarse.
 
   ⏳ **Lo que sigue abierto es lo que esta entrada siempre dijo que faltaba: el camino con
@@ -1218,55 +1248,114 @@ abriendo las superficies, no leyendo la entrada.
   **qué línea** lo causó es una decisión chica y barata, independiente de todo lo de
   arriba.
 
+### Los cuatro que dejó el frente de la reserva de stock (2026-09-01)
+
+Los cuatro salieron de ese frente, pero **no todos son ajenos a él, y eso hay que decirlo
+bien**: la 1 y la 4 son **preexistentes** (julio, y de siempre); la 2 es un hueco viejo que
+**este frente volvió sub-descuento** —hasta el 2026-09-01 no existía ningún número descontado,
+así que el drawer no mostraba de más—; y la 3 **la introdujo este frente**, medido con
+`git log -L` sobre `salones/index.vue`: `refrescarItems` y `programarRefrescoItems` nacen en
+`c6489ecd` (Tarea 8) y antes los tres `GET /items` salían **solo en la carga inicial**.
+⚠️ Se escribe así porque la primera versión de este párrafo decía *"ninguno lo introduce"*, que
+es **el mismo error que este frente ya cometió y corrigió una vez** —atribuir a deuda heredada
+una regresión propia, ver el doble descuento en [`resueltos.md`](resueltos.md)—. La atribución
+se cruza con la fecha del commit, no se recuerda.
+
+Están acá y no en la § 1 porque ninguno es mecánico —el primero enciende un camino muerto, los
+otros tres son trabajo de backend— y no en la § 4 porque **ninguno espera una respuesta del
+owner**: la decisión que los gobierna ya está tomada (*lo que la mesa pide queda apartado, y la
+pantalla muestra lo que se puede pedir*). Contexto del frente:
+[`resueltos.md`](resueltos.md).
+
+- [ ] 🔴 **El `PATCH` de cantidad de una línea de mesa NUNCA llega al servidor, y el error
+  tampoco se ve** (frontend; **reproducido en Chrome real el 2026-09-01**, no leído) — el más
+  grave de los cuatro. *(El 🔴 marca la severidad de ESTA entrada; no reabre la tanda 🔴, que
+  se cerró el 2026-08-21 y no vuelve.)* `patchLineaCantidad`
+  (`frontend/app/pages/salones/index.vue:1072-1096`) hace
+  `structuredClone(activeCuenta.value)` y `activeCuenta` es un `ref`, así que `.value` es un
+  **Proxy reactivo**: ni Node ni Chrome clonan Proxies y la llamada tira `DataCloneError`.
+  Salta **antes** de `inflight.add`, o sea que el `PATCH` no se manda nunca.
+  **Y hay una segunda mitad, peor que la primera:** el `structuredClone` está **fuera del
+  `try`**, así que el `catch` no corre — no sale el toast de error y no hay reconciliación. La
+  cantidad optimista queda pintada en pantalla **como si hubiera funcionado**. El garzón
+  cambia 1 por 3, ve 3, y el servidor sigue teniendo 1.
+  **Preexistente**: viene de `3c24b26b` (2026-07-16). Ningún test cubría ese camino, por eso
+  nadie lo vio en un mes y medio; hoy queda anotado en el docblock de *"una edición de cantidad
+  a medio camino no dispara el refresco"* (`index.nuxt.spec.ts`), que evita el
+  `unhandled rejection` sacando la cuenta de pantalla antes del timer.
+  **El arreglo es una línea** —clonar sobre `toRaw(...)`, que es lo que desarma el Proxy—,
+  **pero enciende por primera vez
+  un camino que estuvo muerto un mes y medio**: recién ahí van a correr de verdad el `PATCH`,
+  su reconciliación, su toast y el refresco del catálogo que ese confirm dispara. Por eso va
+  como frente propio con su propia verificación en navegador, y no como remate de otra tarea.
+  ⚠️ Y ojo con el orden de lectura: **el tope de stock al subir la cantidad
+  (`actualizarLinea`) hoy solo es alcanzable por API**, no desde el salón. El backend está y
+  tiene sus e2e; lo que no llega es la pantalla.
+
+- [ ] **El drawer de personalización decide "Sin stock disponible" con el stock FÍSICO**
+  (backend + frontend; medido el 2026-09-01 al cerrar la Tarea 8) — `ItemPersonalizacionDrawer`
+  e `ItemPersonalizacionGrupo` (`frontend/app/components/ventas/`) resuelven `sinStock(...)` y
+  `opcionSinStock(...)` sobre el `stock` que trae `GET /items/:id`, y **ese endpoint no expone
+  `stockDisponible`**: sus consultas de ingredientes, extras y opciones leen `ip.stock` pelado
+  (`items.service.ts` → `findOne`). O sea que el drawer **ofrece como disponible lo que otra
+  mesa ya comprometió** — es sub-descuento, el mismo bug que este frente cerró en la grilla del
+  catálogo, sobreviviendo un nivel más adentro. **Qué se ve en el local, y no es lo mismo en
+  las tres superficies** (medido leyendo el código, no corrido):
+
+  - una **opción de grupo** —que **siempre bloquea**— se ofrece disponible aunque otra mesa ya
+    se la haya llevado, y el pedido rebota recién **al confirmar**, con el `400` del guard
+    nuevo: el garzón arma el plato entero para que se lo rechacen al final;
+  - un **extra** es **no bloqueante**, así que no rebota: entra igual y el disponible de ese
+    ingrediente queda negativo — coherente con la decisión del owner, pero el drawer igual lo
+    mostró como si hubiera de sobra;
+  - un ingrediente **no bloqueante** ya comprometido sigue naciendo **tildado**, porque el
+    `resetForm` que lo destildaría mira ese mismo `stock` físico.
+
+  **Necesita backend**: `findOne` tiene que devolver el descontado igual que el listado, o el
+  drawer tiene que pedirlo aparte. No se hizo en el frente porque la Tarea 8 era frontend y
+  cambiar `findOne` es contrato de otro endpoint, con sus propios consumidores que hay que
+  listar antes (*"cerrar en un consumidor no es cerrar"*).
+
+- [ ] **El refresco del catálogo del salón cuesta tres `GET /items` y podría costar cero**
+  (backend + frontend; **lo introdujo este frente**, `c6489ecd` / Tarea 8, y lo señaló su propia
+  revisión) — hoy cada mutación de una cuenta agenda `refrescarItems()`, que vuelve a pedir el
+  catálogo entero **tres veces** (uno por tipo: producto, receta, combo), con un debounce de
+  250 ms y un guard de secuencia que descarta la respuesta que llega tarde
+  (`frontend/app/pages/salones/index.vue`). **Antes de `c6489ecd` esos tres GET salían solo en
+  la carga inicial de la pantalla**: lo que la Tarea 8 agregó es colgarlos de cada mutación,
+  porque el número pasó a calcularlo el servidor.
+  **Eso es el estado de esa tarea, no el diseño final**, y conviene que quede escrito para que
+  el próximo no lo lea como la forma elegida. **El destino:** las respuestas de mutación de
+  salones ya devuelven `CuentaDetalle`; si además cargaran la disponibilidad **del ítem
+  afectado**, el refresco costaría **0 GET** y el número sería exacto en vez de eventual.
+  ⚠️ Antes de tomarlo hay que medir si el problema existe: el debounce ya colapsa la ráfaga
+  —tres ítems seguidos son una sola tanda— y el costo por `GET /items` está medido en 0,36 ms
+  del lado del comprometido gracias a los índices de este frente. Lo que sí cambia es la
+  latencia percibida y el tráfico de una tablet con wifi de restaurante.
+
+- [ ] **Una línea de `tipo='ingrediente'` se agrega a la cuenta y la venta la rechaza al
+  cerrar: otro camino a la mesa trabada** (backend; preexistente. **Leído en el código el
+  2026-09-01**, durante la Tarea 1: no hay sonda que lo haya reproducido, a diferencia de la
+  entrada del `DataCloneError` de arriba, que sí se corrió en Chrome) — `SalonesService.agregarLinea` no valida el `tipo` del ítem (solo rechaza
+  **personalización** sobre lo que no es receta ni combo), así que un `ingrediente` entra a la
+  cuenta como cualquier otra línea; al cerrar, `ventas.service.ts:295` corta con *"Los
+  ingredientes no se pueden vender directamente"* y **la cuenta entera deja de poder cobrarse**.
+  Es la misma forma de falla que este frente vino a eliminar, por otra puerta.
+  📌 **No es alcanzable desde la pantalla**: el salón pide el catálogo con `tipo=producto`,
+  `tipo=receta` y `tipo=combo` (`index.vue`), así que un ingrediente no se ofrece nunca. Se
+  llega por API. Eso lo hace menos urgente, no menos real.
+  **La salida coherente es cerrar la puerta de entrada**, no abrir la de salida: la venta ya
+  decidió que un ingrediente no se vende directo, y el guard nuevo solo mueve ese rechazo al
+  momento en que la línea todavía se puede no crear. Si en cambio se quisiera que los
+  ingredientes fueran vendibles, eso **sí** es una pregunta de producto y no es esta entrada.
+  ⚠️ Al tomarlo, revisar también los **otros** tipos que la cuenta acepta y la venta no: la
+  lista se hace grepeando los `throw` de `ventas.service.ts` por `item.tipo`, no de memoria.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-### Dos mesas pueden pedir la MISMA última unidad, y la segunda queda trabada (2026-09-01)
-
-- [ ] **Pedir una línea en una mesa no mira el stock ni lo reserva; el choque estalla al
-  cobrar, con la comida ya servida** (backend + producto; **reproducido end-to-end** contra
-  el stack el 2026-09-01, no leído) — lo levantó el owner mientras diseñábamos la anulación
-  de una línea despachada, y es un frente propio.
-
-  **La corrida, tal cual salió** (producto con `stock = 1`, dos mesas del mismo salón):
-
-  | Paso | Resultado |
-  |---|---|
-  | mesa A pide 1 | `201` |
-  | mesa B pide 1 | `201` — y el stock sigue en `1.0000` |
-  | las dos comandas a cocina | `201` y `201`, `cantidad_enviada` avanza a 1 en las dos |
-  | mesa A cobra | `201`, stock queda en `0.0000` |
-  | mesa B cobra | **`400` "Stock insuficiente para la salida"** |
-  | mesa B intenta sacar la línea | **`400` "ya se despachó a cocina… registralo como merma o cortesía"** |
-
-  **Por qué pasa:** el stock **no sale al pedir ni al despachar, sale al cerrar la cuenta en
-  venta** (`ventas.service.ts:840`, y `venderIngredientesReceta` para una receta). Entre el
-  pedido y el cobro no hay ninguna retención: `salones.service.ts` **no menciona `stock` ni
-  una sola vez** y no existe ningún concepto de reserva en el backend.
-
-  **Por qué importa más que un 400 feo:** la mesa queda **trabada**. No se puede cobrar
-  —el cierre entero revienta— y no se puede sacar la línea —el guard de agosto lo impide—.
-  La única salida hoy es un ajuste de inventario a mano. Y el mensaje de error manda a
-  *"merma o cortesía"*, que **no existe**: es una promesa de la UI sin nada detrás.
-
-  ⚠️ **Toca `movimientos_inventario` y una regla de negocio no documentada**, así que por
-  `CLAUDE.md` se para y se pregunta. **La decisión es del owner** y son tres caminos con
-  costos distintos: (a) **reservar** al pedir —hay que modelar la retención, una cuenta
-  abierta tres horas inmoviliza stock y cancelarla tiene que devolverlo—; (b) **avisar** al
-  pedir y dejar pedir igual —no lo elimina, pero deja de ser silencioso—; (c) **bloquear**
-  al pedir —en un restorán la cocina a veces consigue más, y bloquear en el sistema estorba—.
-
-  📌 **Cruza con la anulación de una línea despachada** (§3, *"Anular o reducir una línea ya
-  enviada a cocina"*): la salida con motivo que ahí falta es también la salida de esta mesa
-  trabada. Se diseñan por separado, pero el que tome uno tiene que mirar el otro.
-
-  📌 La sonda que lo reprodujo no se commiteó (es una medición, no un test). Lo que hizo, por
-  si hay que repetirla: producto con categoría **que tenga impresora** —sin eso la comanda
-  devuelve `{"estaciones":[]}` y `cantidad_enviada` nunca avanza, y el caso parece no
-  reproducir—, garzón propio con sesión y turno, caja abierta, dos mesas del mismo salón.
 
 ✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
 venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
@@ -1277,12 +1366,18 @@ contradicción de `costo: '0'` —cada una contestada y construida el mismo día
 preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**— y, ese mismo
 día, el **override de `precioUnitario`**, que había nacido acá al construir la primera y que
 el owner mandó sacar unas horas después ([`resueltos.md`](resueltos.md)).
+✅ **Y una más el 2026-09-01**: *"Dos mesas pueden pedir la MISMA última unidad, y la segunda
+queda trabada"*. De las tres salidas que la entrada ofrecía —apartar, avisar, bloquear— el
+owner eligió **apartar**, y el frente se construyó ese mismo día → [`resueltos.md`](resueltos.md).
+⚠️ **No cierra la salida con motivo**, que sigue viva en la § 3 y que la propia entrada
+nombraba como su cruce: apartar achica el caso de la mesa trabada, **no lo borra**.
 **Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
 más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
 tipo (2026-08-29, al cerrar la de la forma de importe)—; el conteo se recuenta con
-`awk '/^## /{s=$0} /^- \[ \]/{print s}'`.
+`awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el **2026-09-01** al sacar la de
+las dos mesas: siguen siendo esas cinco.
 
 ✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
 desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,

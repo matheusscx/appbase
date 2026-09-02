@@ -394,8 +394,61 @@ principio que [ADR-010](./adr/010-preparacion-sii-datos-fiscales.md) aplica al h
 fiscal: el número vale lo que valía cuando el hecho ocurrió, no lo que se sabe después.
 Detalle: [`mermas-valorizadas.md`](./features/mermas-valorizadas.md).
 
+**Lo que una mesa pide queda apartado desde que lo pide** (decisión del owner, 2026-09-01;
+construido ese mismo día). Hasta entonces pedir en una mesa **no miraba el stock**: dos
+mesas podían pedir la misma última unidad y el choque estallaba **al cobrar**, con la comida
+ya servida y la línea imposible de sacar por estar despachada. La mesa quedaba trabada y la
+única salida era un ajuste de inventario a mano. Ahora la segunda mesa se entera **al
+pedir**, que es cuando todavía puede ofrecer otra cosa.
+
+- **Dura mientras dure la cuenta**, sin vencimiento por tiempo. **Quitar la línea, bajarle la
+  cantidad o cancelar la cuenta liberan** lo apartado — vuelve a estar disponible para otra
+  mesa. ⚠️ **Cerrar la cuenta NO libera nada: convierte lo apartado en salida real**, porque
+  ahí la venta descuenta el stock de verdad. Es la diferencia que más se presta a confusión, y
+  el número que ve la otra mesa es el mismo antes y después de que la primera cobre. **Fusionar
+  dos cuentas es neutro**: las líneas siguen vivas en una cuenta abierta, así que el
+  comprometido no se mueve. Una cuenta **olvidada** inmoviliza stock hasta que alguien la cierre
+  o la cancele: es un trade-off **aceptado a propósito** por el owner, no un descuido.
+- **Un plato aparta sus ingredientes, no el plato.** Se expande la receta —o los componentes
+  del combo, o la opción de grupo elegida— **modulada por la personalización de esa línea**,
+  igual que lo hace la venta: la hamburguesa sin queso no aparta queso y la de doble
+  proteína aparta el doble.
+- **Lo no bloqueante suma pero no frena.** Un ingrediente no bloqueante ocupa lo que le toca
+  y **no** impide pedir; por eso su disponible puede quedar **negativo**, y se muestra así a
+  propósito: clamplearlo a cero escondería justo el número que el encargado necesita ver.
+- **Nada se escribe.** No hay reserva guardada ni columna nueva: lo apartado es la suma de
+  lo que consumirían las líneas vivas de las cuentas **abiertas**, calculada cuando se
+  pregunta. La reserva **no toca `movimientos_inventario`** y el stock sigue saliendo recién
+  al cerrar la cuenta ([`inventario-kardex.md`](./features/inventario-kardex.md)).
+
+Dos reglas **nuevas desde el 2026-09-01**. La primera se siente en el local desde el primer
+día; **la segunda todavía no**, y el porqué está en su propia viñeta:
+
+- **Un ítem sin stock cargado ya no se puede pedir en una mesa.** El tope compara contra el
+  stock, y un producto en `0` —o que nunca tuvo stock cargado— rechaza el pedido con `400`.
+  Es coherente con lo que ya pasaba al cobrar (esa cuenta reventaba al cerrar), pero **lo
+  siente cualquier tenant que nunca cargó inventario**: hasta ayer podía pedir igual. No se
+  exceptúa el `0` a propósito — exceptuarlo sería incoherente con rechazar el cuarto pedido
+  de un stock de 3. Los `servicio` y las `suscripcion` no se ven afectados (no consumen nada),
+  y una receta cuyos ingredientes en cero sean todos **no bloqueantes** tampoco.
+- **Subir la cantidad de una línea es un pedido nuevo por la diferencia, y se topea igual.**
+  Pasar de 1 a 3 se mide como un pedido de 2 y puede rechazarse. **Bajarla solo libera y
+  nunca se rechaza por stock** — soltar mercadería no puede sobrevender. (El guard de agosto
+  sigue: no se puede bajar por debajo de lo ya enviado a cocina.)
+  ⚠️ **Esta segunda regla todavía no se siente en el local, aunque el backend la haga cumplir:**
+  el cambio de cantidad desde `/salones` **no llega al servidor** por un bug de la pantalla
+  anterior a este frente, así que hoy solo se la alcanza por API. Entrada propia en
+  [`agent/pendientes.md`](./agent/pendientes.md) § 3.
+
+⚠️ **Esto achica el caso de la mesa trabada, no lo borra.** Una merma, un recuento o un
+ajuste manual pueden dejar el stock por debajo de lo ya comprometido, y esa mesa vuelve a
+quedar sin poder cobrar y sin poder sacar la línea. **La salida con motivo —merma o
+cortesía— sigue sin existir** y sigue haciendo falta ([`agent/pendientes.md`](./agent/pendientes.md) § 3).
+
 **Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos,
-FIFO o método de costeo elegible por tenant.
+FIFO o método de costeo elegible por tenant. La **tienda online** tiene el mismo hueco por
+otro camino —el carrito vive en el navegador y entre la orden de pasarela y el callback de
+pago nadie retiene nada—: no se tocó, se anota para cuando se encare.
 
 ---
 
