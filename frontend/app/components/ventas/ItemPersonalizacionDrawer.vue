@@ -44,7 +44,7 @@ function resetForm(det: RecetaDetallePersonalizacion) {
   const nextIncluidos: Record<string, boolean> = {}
   for (const ing of det.ingredientes) {
     nextIncluidos[ing.ingredienteItemId] =
-      !(!ing.bloqueante && sinStock(ing.stock))
+      !(!ing.bloqueante && sinStock(ing))
   }
   incluidos.value = nextIncluidos
   extrasCantidad.value = {}
@@ -100,17 +100,17 @@ watch(
 )
 
 function ingredienteDeshabilitado(ing: RecetaDetallePersonalizacion['ingredientes'][number]): boolean {
-  return !ing.bloqueante && sinStock(ing.stock)
+  return !ing.bloqueante && sinStock(ing)
 }
 
 function extraDeshabilitado(extra: RecetaDetallePersonalizacion['extrasPermitidos'][number]): boolean {
-  return sinStock(extra.stock)
+  return sinStock(extra)
 }
 
 // ── Grupos de modificadores ──────────────────────────────────────────────
 
 function opcionDeshabilitada(o: GrupoOpcionPersonalizacion): boolean {
-  return !!o.esPendiente || opcionSinStock(o.stock)
+  return !!o.esPendiente || opcionSinStock(o)
 }
 
 /** Grupo obligatorio (min ≥ 1) sin ninguna opción disponible: nunca se puede cumplir. */
@@ -378,7 +378,7 @@ function agregar() {
                   <span v-if="ing.bloqueante"> · Bloqueante</span>
                 </p>
                 <p
-                  v-if="sinStock(ing.stock) && incluidos[ing.ingredienteItemId]"
+                  v-if="sinStock(ing) && incluidos[ing.ingredienteItemId]"
                   class="flex items-center gap-1 text-xs text-warning"
                 >
                   <UIcon name="i-lucide-triangle-alert" class="size-3.5 shrink-0" />

@@ -725,6 +725,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]) // comprometido por las cuentas abiertas (ninguna)
         .mockResolvedValueOnce([
           {
             receta_item_id: 'receta-uuid',
@@ -759,6 +760,9 @@ describe('ItemsService', () => {
           unidadCodigo: 'unidad',
           bloqueante: true,
           stock: '8',
+          // Sin cuentas abiertas, lo pedible es el stock — en la escala del
+          // kardex, la misma en la que ya viaja `stockDisponible` de `GET /items`.
+          stockDisponible: '8.0000',
         },
       ]);
       expect(result.extrasPermitidos).toEqual([
@@ -769,13 +773,153 @@ describe('ItemsService', () => {
           unidadCodigo: 'g',
           precioExtra: '500',
           stock: '2.5',
+          stockDisponible: '2.5000',
         },
       ]);
-      const ingQuery = dataSource.query.mock.calls[4][0] as string;
+      const ingQuery = dataSource.query.mock.calls[5][0] as string;
       expect(ingQuery).toContain('ip.stock');
-      const extrasQuery = dataSource.query.mock.calls[5][0] as string;
+      const extrasQuery = dataSource.query.mock.calls[6][0] as string;
       expect(extrasQuery).toContain('receta_extras_permitidos');
       expect(extrasQuery).toContain('ip.stock');
+    });
+
+    /**
+     * **Lo que el drawer de personalización lee.** Abre por `GET /items/:id` y
+     * decidía "Sin stock disponible" con `ip.stock` pelado: ofrecía los 250 g de
+     * carne que la mesa 8 ya se había llevado y los rechazaba recién al
+     * confirmar. La grilla del catálogo ya leía lo descontado
+     * (`calcularDisponibilidadBatch`); esto le da el mismo número a las tres
+     * filas anidadas que el drawer mira.
+     *
+     * Los nueve números son distintos a propósito —stocks 10, 11 y 4; tomados 6,
+     * 9 y 3; pedibles 4, 2 y 1—: devolver el stock físico falla las tres, y
+     * **cruzarle a una fila el descuento de otra también**. Esto último no se
+     * cumplía cuando el ingrediente y el extra compartían el 6 (lo marcó la
+     * revisión): intercambiados daban el mismo número y el test pasaba igual.
+     */
+    it('descuenta lo comprometido en ingredientes, extras y opciones de grupo', async () => {
+      const baseRow = {
+        item_id: ITEM_ID,
+        nombre: 'Hamburguesa',
+        descripcion: null,
+        tipo: 'receta',
+        activo: true,
+        precio_base: '3500',
+        precio_incluye_impuesto: false,
+        moneda_id: MONEDA_ID,
+        moneda_codigo: 'CLP',
+        moneda_simbolo: '$',
+        categoria_id: null,
+        categoria_nombre: null,
+        creado_el: new Date(),
+        stock: null,
+        unidad_medida: null,
+        fecha_elaboracion: null,
+        fecha_vencimiento: null,
+        modo_inventario: null,
+        costo_actual: '1700',
+        duracion_estimada: null,
+        requiere_cita: null,
+        frecuencia: null,
+      };
+      dataSource.query
+        .mockResolvedValueOnce([baseRow])
+        .mockResolvedValueOnce([]) // impuestos
+        .mockResolvedValueOnce([]) // recargos
+        .mockResolvedValueOnce([]) // descuentos
+        // Las líneas de las cuentas abiertas del tenant: lo que ya está tomado.
+        .mockResolvedValueOnce([
+          { item_id: 'ingrediente-pan', cantidad: '6', personalizacion: null },
+          {
+            item_id: 'ingrediente-queso',
+            cantidad: '9',
+            personalizacion: null,
+          },
+          { item_id: 'item-salsa-bbq', cantidad: '3', personalizacion: null },
+        ])
+        // `consumoDeLineas`: el tipo de cada ítem pedido. Los tres son
+        // ingredientes, así que cada línea se consume a sí misma y no hay
+        // expansión que consultar.
+        .mockResolvedValueOnce([
+          { item_id: 'ingrediente-pan', tipo: 'ingrediente', nombre: 'Pan' },
+          {
+            item_id: 'ingrediente-queso',
+            tipo: 'ingrediente',
+            nombre: 'Queso',
+          },
+          {
+            item_id: 'item-salsa-bbq',
+            tipo: 'ingrediente',
+            nombre: 'Salsa BBQ',
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            receta_item_id: ITEM_ID,
+            ingrediente_item_id: 'ingrediente-pan',
+            ingrediente_nombre: 'Pan',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            bloqueante: true,
+            stock: '10',
+          },
+        ]) // ingredientes
+        .mockResolvedValueOnce([
+          {
+            receta_item_id: ITEM_ID,
+            ingrediente_item_id: 'ingrediente-queso',
+            ingrediente_nombre: 'Queso',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            precio_extra: '500',
+            stock: '11',
+          },
+        ]) // extras permitidos
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            grupo_modificador_id: 'grupo-1',
+            item_grupo_id: 'item-grupo-1',
+            nombre: 'Salsas',
+            min: 0,
+            max: 1,
+            orden: 0,
+          },
+        ]) // cargarGruposPorItem: asoc
+        .mockResolvedValueOnce([
+          {
+            item_grupo_id: 'item-grupo-1',
+            grupo_opcion_id: 'op-1',
+            item_id: 'item-salsa-bbq',
+            item_nombre: 'Salsa BBQ',
+            tipo: 'ingrediente',
+            cantidad_efectiva: '1',
+            cantidad_default: '1',
+            unidad_codigo: 'unidad',
+            precio_extra: '300',
+            orden: 0,
+            stock: '4',
+          },
+        ]); // cargarGruposPorItem: ops
+
+      const result = await service.findOne(TENANT, ITEM_ID);
+
+      expect(result.ingredientes[0]).toMatchObject({
+        stock: '10',
+        stockDisponible: '4.0000',
+      });
+      expect(result.extrasPermitidos[0]).toMatchObject({
+        stock: '11',
+        stockDisponible: '2.0000',
+      });
+      expect(result.grupos[0].opciones[0]).toMatchObject({
+        stock: '4',
+        stockDisponible: '1.0000',
+      });
+
+      // UNA sola consulta del comprometido para toda la respuesta, no una por
+      // fila anidada: con tres filas, pedirlo por fila daría 12 o más.
+      expect(dataSource.query).toHaveBeenCalledTimes(10);
     });
 
     it('findOne combo incluye componentes bloqueantes y no bloqueantes', async () => {
@@ -808,6 +952,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]) // comprometido por las cuentas abiertas (ninguna)
         .mockResolvedValueOnce([
           {
             componente_item_id: 'ingrediente-pan',
@@ -839,6 +984,9 @@ describe('ItemsService', () => {
           cantidad: '1',
           bloqueante: true,
           stock: null,
+          // Un componente sin fila en `item_producto` no lleva stock, y la
+          // ausencia de stock no es falta de stock: `null`, nunca `0`.
+          stockDisponible: null,
           grupos: [],
         },
         {
@@ -848,13 +996,14 @@ describe('ItemsService', () => {
           cantidad: '1',
           bloqueante: false,
           stock: null,
+          stockDisponible: null,
           grupos: [],
         },
       ]);
       expect(result.componentes.some((c) => c.bloqueante === true)).toBe(true);
       expect(result.componentes.some((c) => c.bloqueante === false)).toBe(true);
 
-      const compQuery = dataSource.query.mock.calls[4][0] as string;
+      const compQuery = dataSource.query.mock.calls[5][0] as string;
       expect(compQuery).toContain('combo_componentes');
       expect(compQuery).toContain('ip.stock');
       expect(compQuery).not.toContain('cc.bloqueante = true');
@@ -890,6 +1039,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // impuestos
         .mockResolvedValueOnce([]) // recargos
         .mockResolvedValueOnce([]) // descuentos
+        .mockResolvedValueOnce([]) // comprometido por las cuentas abiertas (ninguna)
         .mockResolvedValueOnce([]) // componentes (combo)
         // Los grupos del propio ítem se resuelven con `cargarGruposPorItem`:
         // 2 queries fijas (asociaciones + opciones de todas ellas), no una de
@@ -950,6 +1100,7 @@ describe('ItemsService', () => {
           precioExtra: '300',
           orden: 0,
           stock: '10',
+          stockDisponible: '10.0000',
           esPendiente: false,
         },
         {
@@ -963,19 +1114,21 @@ describe('ItemsService', () => {
           precioExtra: '0',
           orden: 1,
           stock: '5',
+          stockDisponible: '5.0000',
           esPendiente: true,
         },
       ]);
 
-      const opQueryCall = dataSource.query.mock.calls[6];
+      const opQueryCall = dataSource.query.mock.calls[7];
       expect(opQueryCall[0]).toContain('grupo_modificador_opciones');
       expect(opQueryCall[0]).toContain('COALESCE');
       // Las opciones se piden para TODAS las asociaciones de una (array de
       // `item_grupo_id`), no de a un grupo por vez: si alguien vuelve al loop,
       // el parámetro deja de ser un array y este assert falla.
       expect(opQueryCall[1]).toEqual([['item-grupo-1'], TENANT]);
-      // Y no hay una séptima query: 2 fijas para los grupos, no 1 + N.
-      expect(dataSource.query).toHaveBeenCalledTimes(7);
+      // Y no hay una novena query: 2 fijas para los grupos, no 1 + N. La
+      // octava es la del comprometido, UNA para toda la respuesta.
+      expect(dataSource.query).toHaveBeenCalledTimes(8);
     });
 
     it('adjunta los grupos de cada componente receta en el detalle del combo', async () => {
@@ -1010,6 +1163,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // impuestos
         .mockResolvedValueOnce([]) // recargos
         .mockResolvedValueOnce([]) // descuentos
+        .mockResolvedValueOnce([]) // comprometido por las cuentas abiertas (ninguna)
         .mockResolvedValueOnce([
           {
             componente_item_id: RECETA_ID,

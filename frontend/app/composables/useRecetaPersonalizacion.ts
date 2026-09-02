@@ -7,6 +7,8 @@ export interface RecetaIngredientePersonalizacion {
   unidadCodigo: string
   bloqueante: boolean
   stock: string
+  /** Ver `stock` vs `stockDisponible` en `sinStock`. */
+  stockDisponible?: string | null
 }
 
 export interface RecetaExtraPersonalizacion {
@@ -16,6 +18,8 @@ export interface RecetaExtraPersonalizacion {
   unidadCodigo: string
   precioExtra: string
   stock: string
+  /** Ver `stock` vs `stockDisponible` en `sinStock`. */
+  stockDisponible?: string | null
 }
 
 /** Opción elegible dentro de un grupo de modificadores (receta o combo). */
@@ -30,6 +34,8 @@ export interface GrupoOpcionPersonalizacion {
   orden: number
   /** null = ítem no rastrea stock (no bloquea la opción). */
   stock: string | null
+  /** Ver `stock` vs `stockDisponible` en `sinStock`. */
+  stockDisponible?: string | null
   /** true = sin cantidad default ni override: no vendible en este item (nunca seleccionable). */
   esPendiente?: boolean
 }
@@ -97,9 +103,30 @@ export interface PersonalizacionPayload {
   componentes?: PersonalizacionComponentePayload[]
 }
 
-export function sinStock(stock: string): boolean {
+/**
+ * Lo que de una fila del drawer **todavía se puede pedir**: `stockDisponible`
+ * si el servidor lo mandó, y el `stock` físico si no.
+ *
+ * Gemela de `stockPedible` (useVenta.ts), que hace lo mismo para la grilla del
+ * catálogo. Duplicada a propósito y no importada: `useVenta.ts` importa
+ * `personalizacionVacia` de este archivo, así que traerla para acá cerraría un
+ * ciclo de imports en runtime. Si aparece un tercer lector, ahí sí se extrae.
+ */
+function pedible(fila: { stock: string | null, stockDisponible?: string | null }): string | null {
+  return fila.stockDisponible ?? fila.stock
+}
+
+/**
+ * Decide si una fila con stock propio ya no se puede incluir.
+ *
+ * Lee lo **pedible**, no el `stock` físico: pedir en una mesa aparta el
+ * ingrediente aunque el kardex todavía no se haya movido —la venta descuenta al
+ * cerrar la cuenta—, así que mirar `stock` ofrecía lo que otra mesa ya se había
+ * llevado y lo rechazaba recién al confirmar.
+ */
+export function sinStock(fila: { stock: string, stockDisponible?: string | null }): boolean {
   try {
-    return new Decimal(stock || '0').lte(0)
+    return new Decimal(pedible(fila) || '0').lte(0)
   }
   catch {
     return true
@@ -107,9 +134,10 @@ export function sinStock(stock: string): boolean {
 }
 
 /** Como `sinStock`, pero para opciones de grupo: `stock === null` = no rastreado, nunca bloquea. */
-export function opcionSinStock(stock: string | null): boolean {
-  if (stock === null) return false
-  return sinStock(stock)
+export function opcionSinStock(o: { stock: string | null, stockDisponible?: string | null }): boolean {
+  const p = pedible(o)
+  if (p === null) return false
+  return sinStock({ stock: p })
 }
 
 export function precioConExtras(

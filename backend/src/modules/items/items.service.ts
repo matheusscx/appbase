@@ -84,9 +84,42 @@ type GrupoDetalle = {
     precioExtra: string;
     orden: number;
     stock: string | null;
+    /** `stock` menos lo que las cuentas abiertas ya apartaron. Ver `findOne`. */
+    stockDisponible: string | null;
     esPendiente: boolean;
   }[];
 };
+
+/**
+ * Lo que de una fila con stock propio **todavía se puede pedir**: su `stock`
+ * físico menos lo que las cuentas abiertas del tenant ya apartaron.
+ *
+ * Existe porque `GET /items/:id` devuelve `ip.stock` pelado en cuatro lugares
+ * anidados —ingredientes de la receta, extras permitidos, componentes del combo
+ * y opciones de grupo— y el drawer de personalización decidía "sin stock" con
+ * ese número, o sea ofrecía lo que otra mesa ya se había llevado y recién lo
+ * rechazaba al confirmar. La grilla del catálogo ya leía el descontado
+ * (`calcularDisponibilidadBatch`); esto le da a las cuatro el mismo criterio en
+ * un solo lugar, para que no puedan discrepar.
+ *
+ * `stock === null` (el ítem no lleva stock: un servicio como opción de grupo)
+ * sale `null`, no `0`: la ausencia de stock no es falta de stock.
+ *
+ * `toFixed(4)` y no la escala de la moneda: es una CANTIDAD en la escala del
+ * kardex (`numeric(18,4)`), la misma en la que viaja `stock`, para que las dos
+ * se puedan comparar sin reformatear. Y **puede dar negativo**, igual que el
+ * `stockDisponible` de `GET /items`: lo no bloqueante suma al comprometido sin
+ * frenar al pedir (spec § 4.2), así que clamplear a 0 escondería justo el caso
+ * que el encargado necesita ver.
+ */
+function disponibleDe(
+  comprometido: Map<string, Decimal>,
+  itemId: string,
+  stock: string | null,
+): string | null {
+  if (stock === null) return null;
+  return new Decimal(stock).minus(comprometido.get(itemId) ?? 0).toFixed(4);
+}
 
 export interface IngredienteReceta {
   ingredienteItemId: string;
@@ -548,10 +581,16 @@ export class ItemsService {
    * Carga los grupos de modificadores (con opciones y override efectivo) de un
    * conjunto de items, en un nº constante de queries (batch, sin N+1). Devuelve
    * un Map itemId → grupos con la MISMA forma que el `grupos[]` de findOne.
+   *
+   * `comprometido` viene de afuera —lo calcula `findOne` una sola vez para toda
+   * la respuesta— y no se consulta acá: esta función corre dos veces por ítem
+   * (los grupos del combo y los de cada componente receta), así que pedirlo
+   * adentro duplicaría la consulta sin cambiar el resultado.
    */
   private async cargarGruposPorItem(
     tenantId: string,
     itemIds: string[],
+    comprometido: Map<string, Decimal>,
   ): Promise<Map<string, GrupoDetalle[]>> {
     const out = new Map<string, GrupoDetalle[]>();
     if (!itemIds.length) return out;
@@ -635,6 +674,7 @@ export class ItemsService {
           precioExtra: r.precio_extra,
           orden: r.orden,
           stock: r.stock,
+          stockDisponible: disponibleDe(comprometido, r.item_id, r.stock),
           esPendiente: r.cantidad_efectiva == null,
         })),
       });
@@ -811,6 +851,23 @@ export class ItemsService {
       [itemId],
     );
 
+    // Lo que las cuentas abiertas ya apartaron, UNA sola vez para todas las
+    // filas anidadas de la respuesta (ingredientes, extras, componentes y
+    // opciones de grupo) — **nunca una consulta por fila**. Con el salón vacío
+    // es UNA consulta que corta ahí; con cuentas abiertas se suman las de
+    // `consumoDeLineas`, que son constantes en la cantidad de líneas (tipos,
+    // combos, opciones, ingredientes, extras), no una por línea.
+    //
+    // Solo la paga `receta` y `combo`: los demás tipos no cargan ninguna fila
+    // anidada, así que `disponibleDe` ni llega a correr. ⚠️ Pero la condición
+    // es el TIPO, no quién pregunta: el form de edición de
+    // `configuracion/items.vue` y el restore de la papelera también la pagan
+    // sobre una receta, aunque no lean el número.
+    const comprometido =
+      rows[0].tipo === 'receta' || rows[0].tipo === 'combo'
+        ? await this.comprometidoPorItem(tenantId)
+        : new Map<string, Decimal>();
+
     let ingredientes: {
       ingredienteItemId: string;
       ingredienteNombre: string;
@@ -818,6 +875,7 @@ export class ItemsService {
       unidadCodigo: string;
       bloqueante: boolean;
       stock: string;
+      stockDisponible: string | null;
     }[] = [];
     let extrasPermitidos: {
       ingredienteItemId: string;
@@ -826,6 +884,7 @@ export class ItemsService {
       unidadCodigo: string;
       precioExtra: string;
       stock: string;
+      stockDisponible: string | null;
     }[] = [];
     let componentes: {
       componenteItemId: string;
@@ -834,6 +893,7 @@ export class ItemsService {
       cantidad: string;
       bloqueante: boolean;
       stock: string | null;
+      stockDisponible: string | null;
       grupos: GrupoDetalle[];
     }[] = [];
     if (rows[0].tipo === 'receta') {
@@ -860,6 +920,11 @@ export class ItemsService {
         unidadCodigo: r.unidad_codigo,
         bloqueante: r.bloqueante,
         stock: r.stock,
+        stockDisponible: disponibleDe(
+          comprometido,
+          r.ingrediente_item_id,
+          r.stock,
+        ),
       }));
 
       const extraRows: {
@@ -885,6 +950,11 @@ export class ItemsService {
         unidadCodigo: r.unidad_codigo,
         precioExtra: r.precio_extra,
         stock: r.stock,
+        stockDisponible: disponibleDe(
+          comprometido,
+          r.ingrediente_item_id,
+          r.stock,
+        ),
       }));
     }
 
@@ -910,6 +980,7 @@ export class ItemsService {
         compRows
           .filter((r) => r.tipo === 'receta')
           .map((r) => r.componente_item_id),
+        comprometido,
       );
       componentes = compRows.map((r) => ({
         componenteItemId: r.componente_item_id,
@@ -918,6 +989,11 @@ export class ItemsService {
         cantidad: r.cantidad,
         bloqueante: r.bloqueante,
         stock: r.stock,
+        stockDisponible: disponibleDe(
+          comprometido,
+          r.componente_item_id,
+          r.stock,
+        ),
         grupos: gruposPorComp.get(r.componente_item_id) ?? [],
       }));
     }
@@ -928,8 +1004,9 @@ export class ItemsService {
     // así que un ítem sin grupos sigue costando cero.
     const grupos: GrupoDetalle[] =
       rows[0].tipo === 'combo' || rows[0].tipo === 'receta'
-        ? ((await this.cargarGruposPorItem(tenantId, [itemId])).get(itemId) ??
-          [])
+        ? ((
+            await this.cargarGruposPorItem(tenantId, [itemId], comprometido)
+          ).get(itemId) ?? [])
         : [];
 
     return {

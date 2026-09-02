@@ -350,8 +350,11 @@ opción de grupo y personalización igual que lo hace la venta
   único evento que descuenta stock por una mesa sigue siendo el **cierre de la cuenta**, que
   genera la venta y su `salida`/`motivo='venta'`.
 - `item_producto.stock` sigue siendo el saldo materializado de esos movimientos. **Nunca
-  significa "lo que se puede pedir"**: eso viaja aparte, en `stockDisponible` de
-  `GET /items`, y es `stock − comprometido`.
+  significa "lo que se puede pedir"**: eso viaja aparte, en `stockDisponible`, y es
+  `stock − comprometido`. Lo devuelven `GET /items` (la fila del catálogo) y, desde el
+  **2026-09-02**, también `GET /items/:id` en cada fila anidada con stock propio —ingredientes
+  de la receta, extras permitidos, componentes del combo y opciones de grupo—, que es lo que
+  lee el drawer de personalización.
 - El kardex de un producto disputado por dos mesas **no muestra nada** hasta que una cobra.
   Ese silencio es el diseño, no un movimiento perdido.
 - **Cerrar la cuenta no "devuelve" lo apartado: lo convierte en la `salida` de la venta.** Lo

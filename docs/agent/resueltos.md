@@ -17,6 +17,71 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El drawer de personalización ofrecía lo que otra mesa ya se había llevado (cerrado 2026-09-02)
+
+Venía de "Los cuatro que dejó el frente de la reserva de stock". El drawer abre por
+`GET /items/:id`, y ese endpoint devolvía `ip.stock` pelado en las tres filas anidadas que el
+drawer mira: ingredientes de la receta, extras permitidos y opciones de grupo. O sea que
+decidía *"Sin stock disponible"* con **lo que hay en la bodega**, no con lo que se puede
+pedir: ofrecía los 250 g de carne que la mesa 8 ya tenía apartados y los rechazaba recién al
+confirmar. Era el mismo sub-descuento que el frente cerró en la grilla del catálogo,
+sobreviviendo un nivel más adentro.
+
+**La entrada pedía listar los consumidores antes de tocar el contrato, y eso decidió el
+enfoque.** Son **cuatro**: dos pantallas —`configuracion/items.vue` (el form de edición, que
+lee el `stock` del ítem, no el de las filas anidadas) e `ItemPersonalizacionDrawer.vue`— y dos
+reusos internos del backend —el restore de la papelera del propio service y
+`SuscripcionesService.crear`, que valida el ítem suscribible—. Ninguno rompe con un campo
+nuevo. ⚠️ **La primera versión de este párrafo decía "son tres" y se comía el de
+suscripciones**, que lo encontró la revisión independiente: la enumeración es justamente el
+argumento con el que se justifica que el cambio sea aditivo, así que una lista incompleta
+manda al próximo a saltarse un camino. Con eso sobre la mesa, el owner eligió que **`findOne`
+devuelva el descontado** en vez de que el drawer lo pida aparte: el mismo dato viviendo en dos
+endpoints con dos formas de calcularlo es la clase de cosa que después deriva.
+
+**Qué se hizo.** `findOne` calcula el comprometido **una sola vez** para toda la respuesta
+(`comprometidoPorItem`, la misma que ya usa el listado) y agrega `stockDisponible` junto al
+`stock` de cada fila anidada, con un helper único —`disponibleDe`— para que las cuatro no
+puedan discrepar. Lo extra **solo lo pagan `receta` y `combo`**: los demás tipos no cargan
+ninguna fila anidada. Y no es *una* consulta: es una si el salón está vacío —ahí corta— y las
+de `consumoDeLineas` si hay cuentas abiertas, que son **constantes en la cantidad de líneas**,
+nunca una por línea. La condición es el tipo del ítem, no quién pregunta, así que el form de
+edición y el restore de la papelera también lo pagan sobre una receta sin leer el número.
+
+En el frontend, `sinStock` y `opcionSinStock` pasan a recibir la fila en vez del string y leen
+lo pedible (`stockDisponible ?? stock`) — así el `resetForm` que destilda un ingrediente no
+bloqueante agotado, el extra deshabilitado y la opción de grupo con su leyenda quedan los tres
+con el mismo criterio, que era el tercer efecto que la entrada listaba. La regla quedó
+duplicada a propósito respecto de `stockPedible` (useVenta.ts): importarla cerraría un ciclo
+de imports, y está anotado en los dos lados.
+
+**Qué lo fija.** Un e2e por el camino de la app —`GET /items/:id` con una cuenta abierta que
+ya pidió— con los seis números distintos entre sí (stocks 10, 6 y 4; tomados 6, 6 y 3;
+pedibles 4, 0 y 1), de forma que devolver el stock físico falle las tres filas y cruzarle a una
+el descuento de otra también. Y dos unitarios que **revierten**: mutar `disponibleDe` a
+devolver el `stock` mata 3 tests del backend, y mutar el `?? ` del frontend a `fila.stock` mata
+2 del composable, uno por cada dirección (lo apartado que ya no está, y el stock que se acaba
+de liberar). Los nueve números del escenario son distintos entre sí —stocks 10, 11 y 4;
+tomados 6, 9 y 3; pedibles 4, 2 y 1— para que **cruzarle a una fila el descuento de otra**
+también falle: en la primera versión el ingrediente y el extra compartían el 6, así que
+intercambiados daban el mismo número y el test pasaba igual.
+
+**Y el smoke en Chrome, que para el drawer no es opcional** —no tiene spec de componente, así
+que ni el build ni el typecheck ni la revisión ven un error de runtime—. Con el pan de una
+receta en **9 unidades físicas en bodega** y una mesa que ya pidió las 9, el drawer ahora
+abre diciendo *"Sin stock disponible"* sobre ese pan: el kardex no se movió (nada se vendió) y
+la pantalla igual muestra lo que corresponde.
+
+⚠️ **Un efecto que conviene tener escrito**, porque va un paso más allá de "el número no
+miente": el drawer **deshabilita** el extra y **destilda** el ingrediente no bloqueante cuyo
+pedible llegó a 0, y el servidor a ese pedido lo aceptaría (lo no bloqueante ocupa pero no
+frena, spec § 4.2). No es una regla nueva —la pantalla ya deshabilitaba con `stock` físico en
+0—, es la misma regla aplicada al número correcto, y es literalmente el tercer efecto que la
+entrada listaba como defecto (*"sigue naciendo tildado"*). Queda dicho por si el owner
+prefiere que ahí la pantalla avise en vez de bloquear.
+
+---
+
 ## Los cinco mecánicos que dejó el frente de la reserva de stock (cerrado 2026-09-02)
 
 Venían de la § 1, en dos secciones: los **dos residuos de la revisión de rama** (anotados el

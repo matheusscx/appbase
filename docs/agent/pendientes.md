@@ -1265,8 +1265,9 @@ es **el mismo error que este frente ya cometió y corrigió una vez** —atribui
 una regresión propia, ver el doble descuento en [`resueltos.md`](resueltos.md)—. La atribución
 se cruza con la fecha del commit, no se recuerda.
 
-Están acá y no en la § 1 porque ninguno es mecánico: los **tres que siguen abiertos** son
-trabajo de backend, y el primero —ya cerrado— estaba acá porque encendía un camino muerto. Y no
+Están acá y no en la § 1 porque ninguno es mecánico: los **dos que siguen abiertos** son
+trabajo de backend, y los dos ya cerrados estaban acá porque uno encendía un camino muerto y
+el otro era contrato de otro endpoint. Y no
 en la § 4 porque **ninguno espera una respuesta del owner**: la decisión que los gobierna ya está tomada (*lo que la mesa pide queda apartado, y la
 pantalla muestra lo que se puede pedir*). Contexto del frente:
 [`resueltos.md`](resueltos.md).
@@ -1275,29 +1276,10 @@ pantalla muestra lo que se puede pedir*). Contexto del frente:
 bug adentro que solo se vio al encender el camino —el rollback tampoco funcionaba— y con el
 smoke en Chrome que la entrada pedía. Detalle en [`resueltos.md`](resueltos.md).
 
-- [ ] **El drawer de personalización decide "Sin stock disponible" con el stock FÍSICO**
-  (backend + frontend; medido el 2026-09-01 al cerrar la Tarea 8) — `ItemPersonalizacionDrawer`
-  e `ItemPersonalizacionGrupo` (`frontend/app/components/ventas/`) resuelven `sinStock(...)` y
-  `opcionSinStock(...)` sobre el `stock` que trae `GET /items/:id`, y **ese endpoint no expone
-  `stockDisponible`**: sus consultas de ingredientes, extras y opciones leen `ip.stock` pelado
-  (`items.service.ts` → `findOne`). O sea que el drawer **ofrece como disponible lo que otra
-  mesa ya comprometió** — es sub-descuento, el mismo bug que este frente cerró en la grilla del
-  catálogo, sobreviviendo un nivel más adentro. **Qué se ve en el local, y no es lo mismo en
-  las tres superficies** (medido leyendo el código, no corrido):
-
-  - una **opción de grupo** —que **siempre bloquea**— se ofrece disponible aunque otra mesa ya
-    se la haya llevado, y el pedido rebota recién **al confirmar**, con el `400` del guard
-    nuevo: el garzón arma el plato entero para que se lo rechacen al final;
-  - un **extra** es **no bloqueante**, así que no rebota: entra igual y el disponible de ese
-    ingrediente queda negativo — coherente con la decisión del owner, pero el drawer igual lo
-    mostró como si hubiera de sobra;
-  - un ingrediente **no bloqueante** ya comprometido sigue naciendo **tildado**, porque el
-    `resetForm` que lo destildaría mira ese mismo `stock` físico.
-
-  **Necesita backend**: `findOne` tiene que devolver el descontado igual que el listado, o el
-  drawer tiene que pedirlo aparte. No se hizo en el frente porque la Tarea 8 era frontend y
-  cambiar `findOne` es contrato de otro endpoint, con sus propios consumidores que hay que
-  listar antes (*"cerrar en un consumidor no es cerrar"*).
+✅ **El drawer de personalización se cerró el 2026-09-02**, por la vía que la propia entrada
+pedía verificar primero: `GET /items/:id` devuelve el descontado, listados los consumidores
+antes de tocar el contrato (dos en el frontend y un reuso interno, todos aditivos). Detalle en
+[`resueltos.md`](resueltos.md).
 
 - [ ] **El refresco del catálogo del salón cuesta tres `GET /items` y podría costar cero**
   (backend + frontend; **lo introdujo este frente**, `c6489ecd` / Tarea 8, y lo señaló su propia

@@ -31,12 +31,12 @@ function reglaGrupo(g: GrupoPersonalizacion): string {
 }
 
 function opcionDeshabilitada(o: GrupoOpcionPersonalizacion): boolean {
-  return !!o.esPendiente || opcionSinStock(o.stock)
+  return !!o.esPendiente || opcionSinStock(o)
 }
 
 function opcionMotivo(o: GrupoOpcionPersonalizacion): string | undefined {
   if (o.esPendiente) return 'No configurada para este item'
-  if (opcionSinStock(o.stock)) return 'Sin stock disponible'
+  if (opcionSinStock(o)) return 'Sin stock disponible'
   return undefined
 }
 

@@ -49,6 +49,19 @@ interface FilaItem {
   /** Producto e ingrediente: cuánta cantidad queda por pedir (escala de `stock`). */
   stockDisponible: string | null;
 }
+/**
+ * Lo que de `GET /items/:id` mira el drawer de personalización: las tres filas
+ * anidadas con stock propio. Cada una trae el físico y el pedible.
+ */
+interface FilaConStock {
+  stock: string | null;
+  stockDisponible: string | null;
+}
+interface DetalleDrawer {
+  ingredientes: (FilaConStock & { ingredienteItemId: string })[];
+  extrasPermitidos: (FilaConStock & { ingredienteItemId: string })[];
+  grupos: { opciones: (FilaConStock & { itemId: string })[] }[];
+}
 
 async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
@@ -1008,6 +1021,99 @@ describe('Reserva de stock al pedir (e2e)', () => {
       expect(
         (await filaDelCatalogo(producto.nombre, producto.id)).stockDisponible,
       ).toBe('0.0000');
+    });
+  });
+
+  describe('El drawer de personalización lee lo pedible, no el stock físico', () => {
+    /**
+     * El drawer abre por `GET /items/:id`, que devolvía `ip.stock` pelado en las
+     * tres filas que el drawer mira. Decidía "Sin stock disponible" con lo que
+     * hay en la bodega: ofrecía los 250 g de carne que la mesa 8 ya se había
+     * llevado y los rechazaba recién al confirmar. La grilla del catálogo ya
+     * leía lo descontado (Tarea 2); esto le da a las tres el mismo número.
+     *
+     * **Los nueve números son distintos a propósito.** Stocks 10, 11 y 4;
+     * tomados 6, 9 y 3; pedibles 4, 2 y 1. Ninguna fila puede pasar por
+     * casualidad: devolver el stock físico falla las tres, y **cruzarle a una
+     * fila el descuento de otra también** —que es lo que no pasaba cuando el
+     * ingrediente y el extra compartían el 6, y lo marcó la revisión—.
+     */
+    async function crearGrupo(nombre: string, itemId: string): Promise<string> {
+      const { grupoModificadorId } = await post<{
+        grupoModificadorId: string;
+      }>('/api/grupos-modificadores', {
+        nombre: nombreUnico(nombre),
+        // `unidadCodigo` no es opcional acá: una opción ingrediente CON cantidad
+        // default la exige (`grupos-modificadores.service.ts`).
+        opciones: [
+          { itemId, cantidad: '1', unidadCodigo: 'unidad', precioExtra: '300' },
+        ],
+      });
+      return grupoModificadorId;
+    }
+
+    /** El detalle por el mismo camino que el drawer: `GET /items/:id`. */
+    async function detalleDelItem(itemId: string): Promise<DetalleDrawer> {
+      const res = await request(app.getHttpServer())
+        .get(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as DetalleDrawer;
+    }
+
+    it('el ingrediente, el extra y la opción de grupo vienen ya descontados', async () => {
+      const base = await crearIngrediente('Insumo base drawer', '10');
+      const extra = await crearIngrediente('Insumo extra drawer', '11');
+      const opcion = await crearIngrediente('Insumo opción drawer', '4');
+      const grupoId = await crearGrupo('Grupo drawer', opcion.id);
+
+      const { id: recetaId } = await post<IdResponse>('/api/items', {
+        nombre: nombreUnico('Plato del drawer'),
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: base.id,
+            cantidad: '2',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: extra.id,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '500',
+          },
+        ],
+        gruposModificadores: [{ grupoModificadorId: grupoId, min: 0, max: 1 }],
+      });
+
+      const cuentaId = await abrirCuenta();
+      await post(`/api/cuentas/${cuentaId}/lineas`, {
+        itemId: recetaId,
+        cantidad: '3',
+        personalizacion: {
+          omitidos: [],
+          extras: [{ ingredienteItemId: extra.id, unidades: 3 }],
+          grupos: [{ grupoId, opciones: [{ itemId: opcion.id, unidades: 1 }] }],
+        },
+      });
+
+      const detalle = await detalleDelItem(recetaId);
+
+      // 3 platos × 2 de base = 6 tomados.
+      expect(detalle.ingredientes[0].stock).toBe('10.0000');
+      expect(detalle.ingredientes[0].stockDisponible).toBe('4.0000');
+      // 3 platos × 1 del extra × 3 unidades = 9 tomados.
+      expect(detalle.extrasPermitidos[0].stock).toBe('11.0000');
+      expect(detalle.extrasPermitidos[0].stockDisponible).toBe('2.0000');
+      // 3 platos × 1 de la opción elegida = 3 tomados.
+      const op = detalle.grupos[0].opciones.find((o) => o.itemId === opcion.id);
+      expect(op?.stock).toBe('4.0000');
+      expect(op?.stockDisponible).toBe('1.0000');
     });
   });
 });

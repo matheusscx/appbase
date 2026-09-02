@@ -9,30 +9,52 @@ import {
 
 describe('opcionSinStock', () => {
   it('null = no rastreado, nunca bloquea', () => {
-    expect(opcionSinStock(null)).toBe(false)
+    expect(opcionSinStock({ stock: null, stockDisponible: null })).toBe(false)
   })
 
   it('true si 0 o negativo', () => {
-    expect(opcionSinStock('0')).toBe(true)
-    expect(opcionSinStock('-1')).toBe(true)
+    expect(opcionSinStock({ stock: '0' })).toBe(true)
+    expect(opcionSinStock({ stock: '-1' })).toBe(true)
   })
 
   it('false si hay stock positivo', () => {
-    expect(opcionSinStock('5')).toBe(false)
+    expect(opcionSinStock({ stock: '5' })).toBe(false)
+  })
+
+  // Las dos direcciones, y con números que no coinciden: si la opción volviera a
+  // leer `stock`, el primer caso diría "hay 3" (falso, las mesas se los llevaron)
+  // y el segundo diría "no hay" sobre stock que alguien acaba de liberar.
+  it('manda lo disponible sobre el stock físico', () => {
+    expect(opcionSinStock({ stock: '3', stockDisponible: '0' })).toBe(true)
+    expect(opcionSinStock({ stock: '0', stockDisponible: '2' })).toBe(false)
   })
 })
 
 describe('sinStock', () => {
-  it('sinStock true si 0', () => expect(sinStock('0')).toBe(true))
+  it('sinStock true si 0', () => expect(sinStock({ stock: '0' })).toBe(true))
 
   it('sinStock false si hay stock positivo', () => {
-    expect(sinStock('1')).toBe(false)
-    expect(sinStock('0.5')).toBe(false)
+    expect(sinStock({ stock: '1' })).toBe(false)
+    expect(sinStock({ stock: '0.5' })).toBe(false)
   })
 
   it('sinStock true si negativo o vacío', () => {
-    expect(sinStock('-1')).toBe(true)
-    expect(sinStock('')).toBe(true)
+    expect(sinStock({ stock: '-1' })).toBe(true)
+    expect(sinStock({ stock: '' })).toBe(true)
+  })
+
+  // El bug que cierra este cambio: el drawer ofrecía los 250 g de carne que la
+  // mesa 8 ya se había llevado, y los rechazaba recién al confirmar.
+  it('manda lo disponible sobre el stock físico', () => {
+    expect(sinStock({ stock: '3', stockDisponible: '0' })).toBe(true)
+    expect(sinStock({ stock: '0', stockDisponible: '2' })).toBe(false)
+  })
+
+  // Una respuesta sin el campo (o un tipo que no lo trae) sigue decidiendo por
+  // el stock físico, que es exactamente lo de antes de este cambio.
+  it('sin stockDisponible cae al stock', () => {
+    expect(sinStock({ stock: '4' })).toBe(false)
+    expect(sinStock({ stock: '4', stockDisponible: null })).toBe(false)
   })
 })
 

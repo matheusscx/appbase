@@ -486,6 +486,14 @@ localmente lo que la cuenta pidió**: el servidor ya lo resta desde esta feature
 dos cosas mostraba una receta con 4 porciones y 2 pedidas en **0** y gris. En POS y tienda el
 descuento local se queda, porque ahí el carrito todavía no existe para el servidor.
 
+**El drawer de personalización lee el mismo número desde el 2026-09-02.** Abre por
+`GET /items/:id`, que hasta ese día devolvía el `stock` físico en sus filas anidadas: el
+drawer ofrecía el ingrediente que otra mesa ya tenía apartado y lo rechazaba recién al
+confirmar —el garzón armaba el plato entero para que se lo rebotaran al final—. Ahora ese
+endpoint devuelve `stockDisponible` junto al `stock` en ingredientes, extras permitidos,
+componentes y opciones de grupo, calculando el comprometido **una sola vez por respuesta**;
+solo lo paga el ítem que tiene filas anidadas (receta o combo).
+
 ⚠️ **Lo que esto NO cierra**, y hay que saberlo antes de creer que la mesa trabada
 desapareció: una merma, un recuento o un ajuste manual pueden dejar el stock por debajo de lo
 ya comprometido y volver a trabar la mesa. **La salida con motivo sigue pendiente**
