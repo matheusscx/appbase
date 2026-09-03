@@ -76,11 +76,22 @@ un 200**, y catorce mutantes sobre la pantalla, cada uno matando el test de su r
 **Verificado en el navegador real, las dos mitades**: tenant argentino (modo trabado con la
 cita de ARCA/AFIP, nivel libre) y mexicano (nivel trabado con la del SAT, modo libre).
 
-**Lo que dejó abierto** → `pendientes.md` § 3, *"Los tres que dejó el frente del redondeo
-por país"*: el candado podría exigir un valor que otra validación rechaza (inalcanzable
-hoy), `create` replica una de las dos validaciones del guardado, y **los 6 decimales del
-Anexo 20 no entran en columnas `NUMERIC(18,4)`** — esa última es decisión del owner y es
-fiscal.
+**Lo que dejó abierto**, en dos lugares distintos:
+
+- `pendientes.md` **§ 3**, *"Los tres que dejó el frente del redondeo por país"*: el candado
+  podría exigir un valor que otra validación rechaza (inalcanzable hoy), `create` replica una
+  de las dos validaciones del guardado, y **los 6 decimales del Anexo 20 no entran en columnas
+  `NUMERIC(18,4)`** — esa última es decisión del owner y es fiscal.
+- `pendientes.md` **§ 4** (necesita respuesta), y es **lo más pesado que dejó el frente**:
+  sembrar una provincia por país volvió alcanzable dar de alta un tenant en AR/CO/MX, y esos
+  países no tienen tipos de documento tributario ni impuestos de sistema. Peor: la **nota de
+  crédito por reembolso usa una constante hardcodeada que es la fila chilena** (código 61), sin
+  mirar el país. Los métodos de pago —la mitad que no era decisión de nadie— se arreglaron en
+  el mismo commit que lo destapó; el resto es fiscal y lo decide el owner (ADR-010).
+
+📌 **Los dos huecos fiscales los cazó la revisión de RAMA, no las de tarea.** Ninguna revisión
+por-commit podía verlos: la tarea que siembra la provincia es correcta sola, y la que da de
+alta el tenant también.
 
 ---
 

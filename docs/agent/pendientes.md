@@ -1550,11 +1550,61 @@ dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se
 cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
 escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
 
-**Queda UNA abierta: la nota de crédito**, y no es casual que sea la que sobra. Es **fiscal**,
-así que no se cuelga del final de una ronda de preguntas de producto ni se toma de arrastre:
-abre su propio frente, con su propia sesión y su propia verificación (`CLAUDE.md`, ADR-010).
-El conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el
-**2026-09-03** al mudar las cuatro: es una.
+### Un tenant de Argentina, Colombia o México no tiene documentos tributarios propios — y emite el chileno (2026-09-03)
+
+Lo destapó la **revisión de rama** del frente del redondeo por país, que es la única que
+podía verlo: la tarea que siembra una provincia por país nuevo y la que da de alta el tenant
+son correctas por separado.
+
+**Qué pasa:** sembrar la provincia volvió alcanzable `POST /admin/tenants` con un
+`provinciaId` de AR/CO/MX. El país gobierna **tres** catálogos, y hasta este frente los tres
+tenían solo Chile:
+
+- **Métodos de pago** — ✅ **arreglado en el mismo commit que lo destapó.** Sin ellos el tenant
+  no podía cobrar **ninguna** venta (`PagosService` rechaza con 400 todo método que no esté en
+  `tenant_metodo_pago`) y tampoco arreglarlo por pantalla, que se arma con el mismo `JOIN`.
+  Los cuatro son universales (efectivo, débito, crédito, transferencia), así que sembrarlos en
+  los cuatro países no requería ninguna decisión. Hay e2e que lo fija.
+- **Impuestos de sistema** — 🟡 **no arreglado, pero tiene salida.** El seed solo trae el IVA
+  chileno (`seedImpuestos`, `paisId: CHILE`) y los ítems resuelven con
+  `i.tenant_id = $2 OR i.pais_id = <país del tenant>`, así que un tenant AR/CO/MX nace sin
+  ningún impuesto de sistema. **Sí puede crearse los suyos** desde la pantalla de impuestos
+  (`TenantAdminGuard`), así que no queda trabado — pero es fiscal igual y el porcentaje lo pone
+  el owner, no un seeder.
+- **Tipos de documento tributario** — ⛔ **esto es lo que pesa.** `seedTiposDocumentoTributario`
+  sigue siendo solo Chile.
+
+⚠️ **Y acá está el dato que da vuelta la pregunta.** No es que ese tenant "no emita": la nota
+de crédito por reembolso usa una constante **hardcodeada** —`TIPO_DOCUMENTO_NC_ID`
+(`ventas/entities/tipo-documento-tributario.entity.ts`), que es la fila **chilena código 61**—
+sin mirar el país del tenant (`VentasService`, la creación de la NC). O sea: **una devolución
+en un tenant argentino congela hoy un hecho fiscal con un tipo de documento chileno.** Es un
+documento interno, sin emisión al SII —así lo dice su propia descripción en el seed—, pero
+queda persistido en la venta, y ADR-010 es explícito en que lo que se congela en la
+transacción es justo lo que no se puede corregir después.
+
+**La pregunta para el owner, concreta:** ¿se corta la nota de crédito fuera de Chile hasta que
+existan los tipos de documento del país, o se abre el frente fiscal ahora para relevarlos?
+Qué documentos emite un local en Argentina (factura A/B/C, ticket fiscal), en Colombia
+(factura electrónica, documento soporte) o en México (CFDI con su uso y su régimen) **no es
+algo que un agente deba inventar desde un seeder**: [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
+y el punto *"Lo fiscal va solo"* de `CLAUDE.md` dicen que abre su propio frente, con su propia
+sesión, y que la regla la pone el owner.
+
+📌 Mientras no se conteste, **el alta en esos países no está prohibida**: bloquearla rompería
+la propia feature del redondeo por país, y el tenant sí puede vender y cobrar. Lo que no se
+puede es seguir diciendo que "todavía no emite documentos" — emite el de otro país.
+
+**Quedan DOS abiertas, y las dos son fiscales** — la nota de crédito y la entrada de arriba
+(los documentos tributarios de los países nuevos). No es casual que sean las que sobran: lo
+fiscal no se cuelga del final de una ronda de preguntas de producto ni se toma de arrastre.
+Abre su propio frente, con su propia sesión y su propia verificación (`CLAUDE.md`, ADR-010).
+Y las dos se cruzan: la NC por reembolso es **el documento** que hoy un tenant argentino emite
+con el tipo chileno, así que probablemente se contesten juntas.
+
+⚠️ **El `awk` cuenta `- [ ]` y no ve la entrada de arriba, que es un `###`.** El conteo
+mecánico —`awk '/^## /{s=$0} /^- \[ \]/{print s}'`— sigue diciendo **una**; el número honesto
+es **dos**. Se recontó así el **2026-09-03**.
 
 ✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
 desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,

@@ -352,4 +352,43 @@ describe('preferencias financieras — el candado del país', () => {
     const wrapper = await mountSuspended(PreferenciasFinancieras)
     expect(wrapper.find('input[type="number"]').attributes('max')).toBe('12')
   })
+
+  it('si el admin elige "Por documento", la escala baja ahí mismo y no al guardar', async () => {
+    // El `max="4"` en un input controlado por Vue no clampea: sin el watcher la
+    // pantalla muestra "0–4" con un 6 adentro y el 400 llega igual al guardar.
+    const wrapper = await mountSuspended(PreferenciasFinancieras)
+    const vm = wrapper.vm as unknown as {
+      escalaCalculo: number
+      nivelRedondeo: string
+      guardar: () => Promise<void>
+    }
+    expect(vm.escalaCalculo).toBe(6)
+
+    vm.nivelRedondeo = 'documento'
+    await nextTick()
+
+    expect(vm.escalaCalculo).toBe(4)
+    await vm.guardar()
+    expect(guardado?.escalaCalculo).toBe(4)
+  })
+
+  it('al volver a "Por línea" la escala NO se toca: ahí 6 es válido', async () => {
+    // El control del `nivel === 'documento'`. El caso es alcanzable de verdad:
+    // el `max="4"` frena la flechita del spinner pero **no impide tipear** un 6,
+    // así que un admin puede quedar en 'documento' con escala 6 y después
+    // volver a 'linea' — donde 6 es perfectamente válido. Un watcher que
+    // clampeara en cualquier cambio de nivel le pisaría ese número.
+    const wrapper = await mountSuspended(PreferenciasFinancieras)
+    const vm = wrapper.vm as unknown as { escalaCalculo: number, nivelRedondeo: string }
+
+    vm.nivelRedondeo = 'documento'
+    await nextTick()
+    expect(vm.escalaCalculo).toBe(4)
+
+    vm.escalaCalculo = 6 // lo que el admin puede tipear igual
+    vm.nivelRedondeo = 'linea'
+    await nextTick()
+
+    expect(vm.escalaCalculo).toBe(6)
+  })
 })

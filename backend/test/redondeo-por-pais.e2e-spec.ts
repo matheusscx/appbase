@@ -287,6 +287,23 @@ describe('Redondeo por país (e2e)', () => {
       expect(res.status).toBe(200);
     });
 
+    it('el tenant nuevo nace pudiendo COBRAR, no solo con su regla de redondeo', async () => {
+      // Sembrar la provincia de un país volvió alcanzable dar de alta un tenant
+      // ahí. Sin métodos de pago habilitados, ese tenant no puede cobrar
+      // ninguna venta (`PagosService` rechaza con 400 el método que no esté en
+      // `tenant_metodo_pago`) y tampoco puede arreglarlo por pantalla: la de
+      // métodos de pago se arma con el mismo `JOIN` a `metodo_pago_pais`.
+      // Nace inoperable y sin salida — y el redondeo correcto no sirve de nada
+      // en un tenant que no cobra.
+      const tenant = await crearTenantEn(PROV_CABA);
+      const [{ n }]: { n: string }[] = await ds.query(
+        `SELECT COUNT(*) AS n FROM tenant_metodo_pago
+          WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+        [tenant.id],
+      );
+      expect(Number(n)).toBeGreaterThan(0);
+    });
+
     it('una provincia que no existe corta con 400, no con un 500 de Postgres', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/admin/tenants')

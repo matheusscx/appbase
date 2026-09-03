@@ -189,6 +189,22 @@ function motivoDelCandado(
  */
 const escalaMaxima = computed(() => (nivelRedondeo.value === 'documento' ? 4 : 12))
 
+// Y se aplica, no solo se dibuja: un `max` en un input controlado por Vue no
+// clampea nada, así que sin esto la pantalla se contradice —muestra "0–4" con
+// un 6 adentro— y el 400 llega igual al guardar. `flush: 'sync'` para que
+// corra DENTRO de `cargar()`, donde `loading` todavía es `true`: ahí el que
+// manda es el candado del país (y a un tenant sin ley no se le toca la escala
+// que él eligió). Acá se baja solo cuando el cambio lo hace el admin, viéndolo.
+watch(
+  nivelRedondeo,
+  (nivel) => {
+    if (!loading.value && nivel === 'documento' && escalaCalculo.value > 4) {
+      escalaCalculo.value = 4
+    }
+  },
+  { flush: 'sync' },
+)
+
 const formState = computed(() => ({
   calculoDescuentos: calculoDescuentos.value,
   calculoRecargos: calculoRecargos.value,

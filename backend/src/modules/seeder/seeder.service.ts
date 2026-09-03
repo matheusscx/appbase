@@ -2859,8 +2859,25 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
+  /**
+   * Qué métodos de pago existen en cada país. **Va para los cuatro países**, no
+   * solo Chile: `TenantsService.create` habilita los métodos del tenant con un
+   * `INSERT … SELECT FROM metodo_pago_pais WHERE pais_id = $2`, así que un país
+   * sin filas acá produce un tenant que **no puede cobrar nada** —`PagosService`
+   * rechaza con 400 todo método que no esté en `tenant_metodo_pago`— y que
+   * tampoco puede arreglarlo desde la pantalla de métodos de pago, que se arma
+   * con el mismo `JOIN`.
+   *
+   * Los cuatro son universales (efectivo, débito, crédito, transferencia): no
+   * hay nada específico de un país en habilitarlos en los cuatro.
+   */
   private async seedMetodoPagoPais(): Promise<void> {
-    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const paisIds = [
+      '550e8400-e29b-41d4-a716-446655440000', // Chile
+      '550e8400-e29b-41d4-a716-446655440372', // Argentina
+      '550e8400-e29b-41d4-a716-446655440373', // Colombia
+      '550e8400-e29b-41d4-a716-446655440374', // México
+    ];
     const metodoPagoIds = [
       '550e8400-e29b-41d4-a716-446655440105', // Efectivo
       '550e8400-e29b-41d4-a716-446655440106', // Tarjeta débito
@@ -2868,14 +2885,16 @@ export class SeederService implements OnApplicationBootstrap {
       '550e8400-e29b-41d4-a716-446655440108', // Transferencia
     ];
 
-    for (const metodoPagoId of metodoPagoIds) {
-      const exists = await this.metodoPagoPaisRepo.findOne({
-        where: { paisId: CHILE, metodoPagoId },
-      });
-      if (!exists) {
-        await this.metodoPagoPaisRepo.save(
-          this.metodoPagoPaisRepo.create({ paisId: CHILE, metodoPagoId }),
-        );
+    for (const paisId of paisIds) {
+      for (const metodoPagoId of metodoPagoIds) {
+        const exists = await this.metodoPagoPaisRepo.findOne({
+          where: { paisId, metodoPagoId },
+        });
+        if (!exists) {
+          await this.metodoPagoPaisRepo.save(
+            this.metodoPagoPaisRepo.create({ paisId, metodoPagoId }),
+          );
+        }
       }
     }
   }
