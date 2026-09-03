@@ -59,22 +59,33 @@ default recomendado y editable, que es exactamente lo que corresponde a una **in
 
 ## 4. Modelo de datos
 
-### 4.1. `pais` gana cuatro columnas
+### 4.1. `pais` gana seis columnas — un **trío** por perilla
 
 ```ts
-// pais.entity.ts — el par (valor sugerido, ¿es ley?) por perilla.
+// pais.entity.ts — (valor sugerido, ¿es ley?, qué norma lo dice) por perilla.
 @Column({ name: 'modo_redondeo_sugerido', type: 'varchar', nullable: true })
 modoRedondeoSugerido: ModoRedondeo | null;
 
 @Column({ name: 'modo_redondeo_es_ley', type: 'boolean', default: false })
 modoRedondeoEsLey: boolean;
 
+@Column({ name: 'modo_redondeo_norma', type: 'text', nullable: true })
+modoRedondeoNorma: string | null;
+
 @Column({ name: 'nivel_redondeo_sugerido', type: 'text', nullable: true })
 nivelRedondeoSugerido: NivelRedondeo | null;
 
 @Column({ name: 'nivel_redondeo_es_ley', type: 'boolean', default: false })
 nivelRedondeoEsLey: boolean;
+
+@Column({ name: 'nivel_redondeo_norma', type: 'text', nullable: true })
+nivelRedondeoNorma: string | null;
 ```
+
+📌 **La `norma` no es decorativa, y por eso es una columna y no un comentario del seed:** es
+literalmente lo que la pantalla le muestra al tenant cuando la perilla está bloqueada (§ 5.3), y
+lo que el panel de superadmin va a necesitar cuando exista. **Un candado sin motivo se lee como
+un bug del sistema, no como una regla del país.**
 
 ⛔ **El `type` explícito NO es opcional y no se puede sacar.** TypeORM infiere el tipo de
 columna de `design:type`, y una unión importada con `import type` se borra al compilar: el
