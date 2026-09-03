@@ -4,6 +4,17 @@
 
 **Goal:** que el redondeo se configure por tenant, con el default puesto por su país, y que donde la norma lo fija el tenant no lo pueda cambiar.
 
+> ✅ **EJECUTADO ENTERO el 2026-09-03**, cinco tareas en cinco commits
+> (`b1385023`, `2f594dc8`, `f9fb7740`, `71553274`, `d77be38b`). Cierre y lo que quedó
+> abierto: [`resueltos.md`](../../agent/resueltos.md).
+>
+> Tres cosas se decidieron **durante** la ejecución y no estaban en este plan, las tres
+> anotadas en el cierre: el seed siembra además **una provincia por país** (sin ella no hay
+> tenant posible en ese país y el catálogo queda de adorno); con `'documento'` la **escala
+> nace en 4** (el único valor con el que el tenant mexicano no nace en un estado que su
+> propia API rechaza — y es materia fiscal, escalada al owner); y se cerró el agujero de
+> **mudarse de país por un PATCH**, que este mismo frente destapó al sembrar más de un país.
+
 **Architecture:** `pais` gana un trío *(valor sugerido, ¿es ley?, norma que lo dice)* por cada una de las dos perillas de redondeo. `TenantsService.create` lee el sugerido del país en vez de un default global, y `actualizarPreferenciasFinancieras` rechaza cambiar una perilla marcada como ley. La pantalla la muestra deshabilitada con el motivo a la vista.
 
 **Tech Stack:** NestJS + TypeORM (`synchronize: true`), PostgreSQL 15, Nuxt 4 + Nuxt UI.
@@ -43,7 +54,7 @@
 - Produces: `Pais.modoRedondeoSugerido`, `.modoRedondeoEsLey`, `.modoRedondeoNorma`, `.nivelRedondeoSugerido`, `.nivelRedondeoEsLey`, `.nivelRedondeoNorma`.
 - Consumes: `ModoRedondeo` y `NivelRedondeo` de `../../calculo-precios/calculo-precios.engine`.
 
-- [ ] **Paso 1: Agregar las seis columnas y los dos `@Check`**
+- [x] **Paso 1: Agregar las seis columnas y los dos `@Check`**
 
 En `pais.entity.ts`, importar los tipos y `Check`, y agregar sobre la clase:
 
@@ -94,7 +105,7 @@ y adentro, después de `monedaOficialId`:
   nivelRedondeoNorma: string | null;
 ```
 
-- [ ] **Paso 2: Escribir el test del `CHECK`, y verlo fallar**
+- [x] **Paso 2: Escribir el test del `CHECK`, y verlo fallar**
 
 Crear `backend/test/redondeo-por-pais.e2e-spec.ts` con el molde de los otros e2e (login + `switch-tenant` a Paris, `cookieParser`, `ValidationPipe`). Primer test:
 
@@ -118,7 +129,7 @@ it('un país no puede declarar "es ley" sin decir cuál es la ley', async () => 
 Run: `cd backend && npx jest --config ./test/jest-e2e.json test/redondeo-por-pais.e2e-spec.ts`
 Expected: FAIL — la columna no existe todavía si el paso 1 no se aplicó, o el INSERT pasa si falta el `@Check`.
 
-- [ ] **Paso 3: Correr el e2e completo y verlo pasar**
+- [x] **Paso 3: Correr el e2e completo y verlo pasar**
 
 ⚠️ **Obligatorio, no opcional:** agregar columnas con tipo estrechado es exactamente el caso que tumba el arranque y que **solo el e2e ve**.
 
@@ -126,7 +137,7 @@ Expected: FAIL — la columna no existe todavía si el paso 1 no se aplicó, o e
 ./scripts/reset-db.sh && cd backend && npm run test:e2e
 ```
 
-- [ ] **Paso 4: Commit**
+- [x] **Paso 4: Commit**
 
 ```bash
 git add -A && git commit -m "feat(paises): el país lleva la regla de redondeo de cada perilla"
@@ -144,7 +155,7 @@ git add -A && git commit -m "feat(paises): el país lleva la regla de redondeo d
 - Consumes: las columnas de la Tarea 1.
 - Produces: `pais` con cuatro filas (Chile, Argentina, Colombia, México) y `moneda` con ARS/COP/MXN.
 
-- [ ] **Paso 1: Tres monedas nuevas en `seedMonedas`**
+- [x] **Paso 1: Tres monedas nuevas en `seedMonedas`**
 
 Agregar al array, siguiendo el mismo shape que las tres que ya están:
 
@@ -169,7 +180,7 @@ Agregar al array, siguiendo el mismo shape que las tres que ya están:
 },
 ```
 
-- [ ] **Paso 2: Generalizar `seedPais` a los cuatro, con su regla**
+- [x] **Paso 2: Generalizar `seedPais` a los cuatro, con su regla**
 
 Reemplazar el cuerpo de `seedPais` por un loop sobre una tabla. **La cita de la norma va al lado del valor, no en otro archivo** — es donde mira quien lo quiera cambiar:
 
@@ -241,11 +252,11 @@ private async seedPais(): Promise<void> {
 }
 ```
 
-- [ ] **Paso 3: `seedPaisMonedas` para los tres nuevos**
+- [x] **Paso 3: `seedPaisMonedas` para los tres nuevos**
 
 Generalizar el método para que cada país habilite su propia moneda oficial (Chile mantiene sus tres: CLP, UF, USD).
 
-- [ ] **Paso 4: Los tests del seed**
+- [x] **Paso 4: Los tests del seed**
 
 ```ts
 it('Argentina y Colombia nacen con half-even, y es ley', async () => {
@@ -285,7 +296,7 @@ it('Chile queda SIN candado: lo que tenemos es una inferencia', async () => {
 });
 ```
 
-- [ ] **Paso 5: Gate + commit**
+- [x] **Paso 5: Gate + commit**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e
@@ -304,7 +315,7 @@ git add -A && git commit -m "feat(seed): Argentina, Colombia y México con su re
 - Consumes: `pais.modo_redondeo_sugerido` / `nivel_redondeo_sugerido` (Tarea 2).
 - Produces: un tenant nuevo nace con las preferencias de su país.
 
-- [ ] **Paso 1: Escribir el test primero**
+- [x] **Paso 1: Escribir el test primero**
 
 ```ts
 it('un tenant nuevo en Argentina nace con HALF_EVEN, no con el default de sistema', async () => {
@@ -324,7 +335,7 @@ it('un tenant nuevo en Chile sigue naciendo con el default de sistema', async ()
 
 Run: FAIL con `Received: "HALF_UP"` en el primero.
 
-- [ ] **Paso 2: Resolver el país en UNA query dentro de `create`**
+- [x] **Paso 2: Resolver el país en UNA query dentro de `create`**
 
 Antes del `manager.create(Tenant, …)`:
 
@@ -352,7 +363,7 @@ y en el `create`:
 
 📌 **Es el mismo patrón que ya existe dos veces** —el tipo empuja el nivel de una regla, y la moneda oficial se deriva del país (ADR-021)—: no se estrena mecanismo.
 
-- [ ] **Paso 3: Correr los tests y verlos pasar. Gate + commit.**
+- [x] **Paso 3: Correr los tests y verlos pasar. Gate + commit.**
 
 ---
 
@@ -365,7 +376,7 @@ y en el `create`:
 **Interfaces:**
 - Produces: el GET de preferencias devuelve `modoRedondeoBloqueado`, `modoRedondeoNorma`, `nivelRedondeoBloqueado`, `nivelRedondeoNorma`. Los consume la Tarea 5.
 
-- [ ] **Paso 1: Los tres tests, y el tercero es el que importa**
+- [x] **Paso 1: Los tres tests, y el tercero es el que importa**
 
 ```ts
 it('un tenant argentino no puede cambiar el modo: 400 nombrando la norma', async () => {
@@ -389,7 +400,7 @@ it('un tenant chileno cambia su modo libremente', async () => {
 });
 ```
 
-- [ ] **Paso 2: El guard, junto a las tres validaciones que ya existen**
+- [x] **Paso 2: El guard, junto a las tres validaciones que ya existen**
 
 ```ts
 // El país manda sobre la preferencia cuando la norma lo fija. Se compara
@@ -405,11 +416,11 @@ if (pais.modoRedondeoEsLey && dto.modoRedondeo !== pais.modoRedondeoSugerido) {
 
 y su gemelo para el nivel.
 
-- [ ] **Paso 3: El GET expone el candado y su motivo**
+- [x] **Paso 3: El GET expone el candado y su motivo**
 
 Sin esto la pantalla tendría que adivinar, o peor: dejar tocar la perilla y descubrirlo recién al guardar.
 
-- [ ] **Paso 4: Gate + commit.**
+- [x] **Paso 4: Gate + commit.**
 
 ---
 
@@ -422,7 +433,7 @@ Sin esto la pantalla tendría que adivinar, o peor: dejar tocar la perilla y des
 **Interfaces:**
 - Consumes: los cuatro campos que la Tarea 4 agregó al GET.
 
-- [ ] **Paso 1: El test**
+- [x] **Paso 1: El test**
 
 ```ts
 it('con la perilla bloqueada por ley, el control está deshabilitado y el motivo a la vista', async () => {
@@ -444,18 +455,18 @@ it('sin ley, el control sigue habilitado y sin aviso', async () => {
 })
 ```
 
-- [ ] **Paso 2: Deshabilitar el `URadioGroup` y mostrar el motivo en el `description` del `UFormField`.** Tokens semánticos de Nuxt UI, nunca Tailwind hardcodeado.
+- [x] **Paso 2: Deshabilitar el `URadioGroup` y mostrar el motivo en el `description` del `UFormField`.** Tokens semánticos de Nuxt UI, nunca Tailwind hardcodeado.
 
-- [ ] **Paso 3: Gate del frontend + smoke en Chrome**
+- [x] **Paso 3: Gate del frontend + smoke en Chrome**
 
 ⚠️ **El smoke no es opcional acá:** el estado deshabilitado depende de datos que llegan del backend, y ni el build ni el typecheck ven que el control quedó tocable.
 
-- [ ] **Paso 4: Commit**
+- [x] **Paso 4: Commit**
 
 ---
 
 ## Cierre del frente
 
-- [ ] **Docs en el mismo commit que el código**: `docs/features/` (la feature de preferencias financieras), fila en `docs/ESTADO.md`, y el ADR-024 pasa de *"decisión 2 reabierta"* a **resuelta**, apuntando a esta spec.
-- [ ] **Sacar la entrada de `pendientes.md`** y escribir el cierre en `resueltos.md`.
-- [ ] **Revisión independiente** (`domain-reviewer`) sobre el diff completo del frente, no solo por tarea: es la que caza las contradicciones ENTRE tareas — acá el riesgo concreto es que el seed de la Tarea 2 cambie la plata de suites e2e ajenas al agregar países y monedas.
+- [x] **Docs en el mismo commit que el código**: `docs/features/` (la feature de preferencias financieras), fila en `docs/ESTADO.md`, y el ADR-024 pasa de *"decisión 2 reabierta"* a **resuelta**, apuntando a esta spec.
+- [x] **Sacar la entrada de `pendientes.md`** y escribir el cierre en `resueltos.md`.
+- [x] **Revisión independiente** (`domain-reviewer`) sobre el diff completo del frente, no solo por tarea: es la que caza las contradicciones ENTRE tareas — acá el riesgo concreto es que el seed de la Tarea 2 cambie la plata de suites e2e ajenas al agregar países y monedas.

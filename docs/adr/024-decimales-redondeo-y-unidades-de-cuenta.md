@@ -1,12 +1,26 @@
 # ADR-024: Decimales y redondeo — un criterio, tres capas, y el nivel lo fija el país
 
-**Status**: Accepted **en parte** — las decisiones **2 y 3 quedaron REABIERTAS por el owner
-el mismo 2026-09-03**, unas horas después de contestarlas. Ver el bloque de abajo antes de
-tomar nada de este ADR.
+**Status**: Accepted **en parte**. Las decisiones **2 y 3** quedaron reabiertas el
+2026-09-03; **la 2 se cerró ese mismo día y ya está construida**. La **3 —la UF— sigue
+reabierta y sin decidir**, y con ella el tema entero sigue pausado.
 
 **Date**: 2026-09-03
 
-> 🛑 **NO ARRANCAR POR ACÁ. El owner pausó el tema para una sesión propia (2026-09-03).**
+> ✅ **DECISIÓN 2 — RESUELTA Y CONSTRUIDA (2026-09-03).** No quedó como decía este ADR
+> (*"el nivel lo fija el país"*) sino en la forma que propuso el owner: **la
+> configuración sigue siendo del tenant, con el default puesto por su país, y candado
+> solo donde es ley**. Dos correcciones sobre la versión original: el candado va **por
+> perilla** —México fija el nivel y Argentina el modo, así que "por país" habría trabado
+> de más— y alcanza también al **`modo_redondeo`**, que este ADR no había tocado y era
+> lo urgente: Argentina y Colombia exigen half-even y el default del sistema es
+> `HALF_UP`.
+>
+> → Diseño: [`specs/2026-09-03-redondeo-por-pais-design.md`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md)
+> · Conducta: [`features/preferencias-financieras.md`](../features/preferencias-financieras.md)
+> · Cierre: [`agent/resueltos.md`](../agent/resueltos.md)
+>
+> 🛑 **PERO NO ARRANCAR POR ACÁ IGUAL: el tema sigue pausado por la decisión 3 (la UF),
+> que es la que más frenó al owner y sigue sin decidir.**
 >
 > Contestó las cinco preguntas por la mañana y a la tarde, al ofrecerle la medición que faltaba,
 > dijo textual: *"esto tengo que analizarlo bien y profundo… no tengo el alcance de lo que
@@ -18,9 +32,9 @@ tomar nada de este ADR.
 > documento · **5** una sola columna de decimales.
 >
 > **Qué está REABIERTO y no se construye:**
-> - **2 — el nivel de redondeo lo fija el país.** El owner no sabe si la ley es la misma en
->   todos los países, y la decisión se tomó sobre dos ejemplos opuestos (UK y México). Antes de
->   moverlo hace falta saber **para cuántos países tenemos la regla**, no dos.
+> - ~~**2 — el nivel de redondeo lo fija el país.**~~ ✅ **Cerrada y construida** — ver
+>   arriba. Lo que la desbloqueó fue justamente lo que el owner pedía: el relevamiento de
+>   **ocho países**, no dos.
 > - **3 — la UF solo cotiza.** Es lo que más lo frenó, y el escenario que describió **no está
 >   contestado por la decisión tal como está escrita**: *"pueden llevar toda su operación en UF,
 >   pero esas UF al final se convierten a pesos para poder pagar"*. Eso suena compatible con

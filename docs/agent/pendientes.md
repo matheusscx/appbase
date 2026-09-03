@@ -1876,18 +1876,21 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
 - [ ] 🔵 **Decimales, redondeo y unidades de cuenta — tema propio, EN CURSO** (backend + BD +
   producto, abierto por el owner el 2026-08-15) — **el tema activo.** Es la tercera pata de la
-  tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido.
+  tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido. **Una de sus dos
+  decisiones reabiertas —el redondeo por país— ya se construyó el 2026-09-03; la otra —la
+  UF— es la que mantiene el tema abierto.**
 
   > 🛑 **PAUSADO OTRA VEZ POR EL OWNER, PARA UNA SESIÓN PROPIA (2026-09-03).** Contestó las
   > cinco preguntas de la §9 esa mañana y **reabrió dos de ellas esa misma tarde**, al ofrecerle
   > la medición que faltaba: *"quedé super confundido, creo que dejemos esto para una sesión
-  > sola"*.
+  > sola"*. **De esas dos, la del país ya está construida** (ver más abajo); **la UF sigue
+  > sin decidir y es la que pesa.**
   >
   > **Al retomar, arrancar por [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)**,
-  > que en su encabezado dice qué quedó firme y qué se reabrió. En una línea: firmes el criterio
-  > único, el congelado en el documento y la columna única; **reabiertos el nivel por país** —no
-  > sabe si la ley es la misma en todos, y se decidió sobre dos ejemplos opuestos— y **la UF**,
-  > que es lo que más lo frenó.
+  > que en su encabezado dice qué quedó firme, qué se cerró y qué sigue abierto. En una línea:
+  > firmes el criterio único, el congelado en el documento y la columna única; **cerrado y
+  > construido el redondeo por país**; **abierta la UF**, que es lo que más lo frenó y lo único
+  > que queda por decidir acá.
   >
   > ⚠️ **El escenario de la UF que el owner describió, textual, porque no está contestado por la
   > decisión como está escrita:** *"pueden llevar toda su operación en UF, pero esas UF al final
@@ -1899,9 +1902,19 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
-  > 📋 **PLAN ESCRITO (2026-09-03)** →
+  > ✅ **EL PLAN SE EJECUTÓ ENTERO (2026-09-03)** →
   > [`plans/2026-09-03-redondeo-por-pais.md`](../superpowers/plans/2026-09-03-redondeo-por-pais.md),
-  > cinco tareas. **Listo para ejecutar**: el owner lo edita si quiere y pasa la ruta.
+  > cinco tareas, cinco commits. **La decisión 2 del ADR-024 quedó cerrada y construida**:
+  > el redondeo lo configura el tenant, con default por país y candado por perilla donde
+  > es ley. Detalle del cierre en [`resueltos.md`](resueltos.md); conducta en
+  > [`features/preferencias-financieras.md`](../features/preferencias-financieras.md).
+  >
+  > ⚠️ **Eso NO cierra esta entrada.** Lo que sigue abierto es la **decisión 3, la UF** —
+  > que es la que más frenó al owner— y con ella el tema entero sigue pausado para una
+  > sesión propia. Lo que el frente dejó de deuda propia está en la § 3 de este archivo,
+  > *"Los tres que dejó el frente del redondeo por país"*, y uno de esos tres (los 6
+  > decimales del Anexo 20 contra columnas `NUMERIC(18,4)`) **es fiscal y lo decide el
+  > owner**.
   >
   > 📐 **SPEC ESCRITA (2026-09-03)** →
   > [`specs/2026-09-03-redondeo-por-pais-design.md`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md),

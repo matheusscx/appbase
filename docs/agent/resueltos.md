@@ -17,6 +17,73 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El redondeo lo configura el tenant, con default por país y candado donde es ley (cerrado 2026-09-03)
+
+Cierra la **decisión 2 de [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)**,
+que estaba reabierta. ⚠️ **No cierra el tema de decimales**: la decisión 3 —la UF— sigue
+abierta y con ella el tema sigue pausado para una sesión propia.
+
+**El problema medido:** el default del sistema es `HALF_UP` y Argentina y Colombia exigen
+**half-even** por norma citable. Un tenant de cualquiera de los dos **incumplía sin tocar
+nada**. El ADR había puesto el foco en el nivel; el relevamiento de ocho países lo dio
+vuelta — de ocho, el **nivel** lo fija **uno** (México) y el **modo** lo fijan **dos**.
+
+**La forma que se construyó** (propuesta del owner, no la del ADR): la configuración sigue
+siendo **del tenant**, el **país pone el default**, y hay **candado solo donde es ley** —
+libertad donde no la hay, y ahí solo se sugiere. Con dos correcciones sobre la idea
+original: el candado va **por perilla** (México fija el nivel y deja libre el modo; si
+fuera por país, le trabaríamos el modo sin norma que lo respalde) y alcanza también al
+`modo_redondeo`, que el ADR no había tocado.
+
+**Qué quedó en el código:**
+
+- `pais` gana **seis columnas** —un trío *(sugerido, ¿es ley?, norma)* por perilla— y dos
+  `@Check` que impiden declarar "es ley" sin un valor que imponer. Sin ellos, un país mal
+  cargado dejaría el candado cerrado contra `NULL` y **ningún tenant suyo podría guardar
+  sus preferencias nunca más**.
+- El seed carga **Chile, Argentina, Colombia y México** con la cita de la norma **al lado
+  del valor**, más su moneda oficial y una provincia cada uno. **Chile queda sin candado a
+  propósito**: que sus totales vayan enteros es una **inferencia** del formato del DTE, no
+  una frase del SII, y poner un candado sobre una inferencia es prohibirle algo a un
+  cliente por una regla que no leímos.
+- `TenantsService.create` toma el default del país en **una sola query** para las dos
+  perillas. Con `'documento'` la escala nace en **4** y no en 6: es el único valor con el
+  que el tenant mexicano no nace en un estado que su propia API rechaza.
+- El guardado corta con 400 nombrando país, valor y norma, comparando contra el **VALOR**
+  y no contra "vino la clave" —la pantalla manda la config entera en cada guardado—, y el
+  `GET` viaja con el candado, el valor impuesto y la norma.
+- La pantalla deshabilita la perilla con el motivo **debajo de su propio control**, muestra
+  el valor de la norma cuando lo guardado difiere (y lo dice, y deja de decirlo al
+  guardar), y baja la escala a 4 cuando el nivel impuesto lo obliga.
+
+**Lo que la revisión independiente cazó, y que sin ella se iba a `main`:**
+
+1. Un test del seed con `LEFT JOIN pais_moneda` **sin filtro de borrado** y una aserción
+   `COUNT >= 1` que habría pasado con la moneda equivocada.
+2. El mismo agujero de "mudarse de país" abierto en la ruta gemela de superadmin —lo
+   demostró creando por API un tenant que su propia API rechaza— y mi guard **fallando
+   abierto** cuando la provincia de origen no resolvía.
+3. Del lado de la pantalla, tres rondas: la perilla del **nivel** sin ninguna cobertura, un
+   aviso que **sobrevivía al guardado exitoso**, y una baja de escala que le sacaba al
+   admin una decisión que sí podía tomar.
+
+**Lo que lo fija:** los `@Check` por SQL directo (mutante: sacarlos mata los dos tests), el
+seed por `codigo_iso` (mutante: soft-deletear la habilitación de ARS tira el test de `'ARS'`
+a `null`), `HALF_EVEN` como valor discriminante —**no** es el default del sistema, así que
+un `create` que ignorara el país no pasaría—, el control de que **mandar el mismo valor es
+un 200**, y catorce mutantes sobre la pantalla, cada uno matando el test de su rama.
+
+**Verificado en el navegador real, las dos mitades**: tenant argentino (modo trabado con la
+cita de ARCA/AFIP, nivel libre) y mexicano (nivel trabado con la del SAT, modo libre).
+
+**Lo que dejó abierto** → `pendientes.md` § 3, *"Los tres que dejó el frente del redondeo
+por país"*: el candado podría exigir un valor que otra validación rechaza (inalcanzable
+hoy), `create` replica una de las dos validaciones del guardado, y **los 6 decimales del
+Anexo 20 no entran en columnas `NUMERIC(18,4)`** — esa última es decisión del owner y es
+fiscal.
+
+---
+
 ## Cambiar el tipo de un descuento avisa antes de perder el importe — quinto camino (cerrado 2026-09-03)
 
 Venía de la § 4 y la contestó el owner: **avisar**, igual que los cuatro caminos del frente
