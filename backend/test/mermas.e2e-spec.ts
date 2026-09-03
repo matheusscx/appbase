@@ -7,7 +7,6 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
-const CARNE_MOLIDA_ID = '550e8400-e29b-41d4-a716-446655440257';
 const CAUSA_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
@@ -73,6 +72,9 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
   let stockAntesDeLaMerma: string;
   // Sembrado por el test "sin costo" (más abajo); soft-deleted en el afterAll.
   let itemSinCostoId: string | undefined;
+  // Ídem, el producto CON costo que esta suite se siembra para no comerse el
+  // stock de un fixture compartido — ver el docblock de su test.
+  let itemConCostoId: string | undefined;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -113,10 +115,11 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     // el JOIN de `mermas.service.ts:263` filtra igual — es lo mismo que
     // pasaría con un borrado real, y no lo mira ningún test.
     try {
-      if (itemSinCostoId) {
+      for (const id of [itemSinCostoId, itemConCostoId]) {
+        if (!id) continue;
         await ds.query(
           `UPDATE items SET eliminado_el = NOW() WHERE item_id = $1`,
-          [itemSinCostoId],
+          [id],
         );
       }
       if (roturaCausaId) {
@@ -157,13 +160,80 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     expect(roturaCausaId).toBeDefined();
   });
 
-  it('usa producto seed Carne molida con stock y costo', async () => {
+  /**
+   * ⚠️ **Se siembra el producto acá y no se usa el del seed** (decisión del
+   * owner, 2026-09-03). Hasta entonces esto tomaba `Carne molida`, que nace con
+   * **1,5 kg**; una corrida de este archivo se lleva **1,1** —1 kg la merma con
+   * Vencimiento y 0,1 la de causa custom—, así que la segunda corrida sin
+   * `reset-db.sh` en el medio fallaba **2 de 9** con *"Stock insuficiente para
+   * la salida"*, y el `GET` que busca esa merma caía detrás. Medido en tres
+   * corridas seguidas: 1,5 → 0,4 → 0,3 → 0,2.
+   *
+   * El seed no estaba mal: su margen está calculado para **una** pasada, que es
+   * el flujo que manda `CLAUDE.md` (`reset-db.sh` antes de cada `test:e2e`). Lo
+   * que cambia es de quién es el fixture: `combos.e2e-spec.ts` come del mismo
+   * kilo y medio, así que gastarlo acá era pisarle el margen a otra suite.
+   *
+   * Molde: el mismo del *"Insumo sin costo E2E"* de más abajo, con soft delete
+   * en el `afterAll`. ⛔ Lo que NO se puede hacer, para no redescubrirlo:
+   * devolver el stock al final. Por API es escribir en `movimientos_inventario`
+   * (`CLAUDE.md`: detenerse y preguntar) y por SQL directo sobre
+   * `item_producto.stock` desincroniza el saldo materializado del kardex.
+   */
+  it('siembra su propio producto con stock y costo', async () => {
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Insumo con costo E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        // `ingrediente` y no `producto`, a propósito: es lo que era `Carne
+        // molida` (el seeder la migra a ingrediente), y sembrarlo como producto
+        // dejaba a la suite e2e **sin ningún caso de merma sobre un
+        // ingrediente** — un mutante que estreche el guard de `mermas.service`
+        // a `tipo !== 'producto'` habría sobrevivido el e2e entero. Lo levantó
+        // la revisión del diff. El test "sin costo" de más abajo sigue siendo
+        // `producto`, así que la suite cubre los dos.
+        tipo: 'ingrediente',
+        unidadMedida: 'kg',
+      });
+    expect(resCreate.status).toBe(201);
+    itemId = (resCreate.body as ItemResponse).id;
+    itemConCostoId = itemId;
+
+    // Entrada CON `costoUnitario`: sin él `costo_actual` queda NULL y los tests
+    // de `costoPerdido` de más abajo dejarían de probar lo que dicen. 5 kg
+    // contra los 1,1 que la suite consume; el margen sobra porque el producto
+    // nace de cero en cada corrida — con 1,2 alcanzaría igual.
+    //
+    // ⚠️ **Dentro de este endpoint**, `motivo` no es indistinto: solo
+    // `['compra', 'anulacion', 'devolucion']` recalculan el CPP
+    // (`MOTIVOS_QUE_RECALCULAN_CPP`, `inventario.service.ts`), así que con
+    // `inventario_inicial` el stock entra igual y el costo queda en NULL —
+    // medido acá, con los tres tests de costo en rojo antes de corregirlo.
+    //
+    // 📌 Y hay OTRA forma de hacerlo, que no es esta: `POST /items` acepta
+    // `stock` y `costo` juntos y deja `costo_actual` no-NULL en una sola
+    // llamada. Se usa el alta en dos pasos por el mismo motivo que
+    // `costeo-cpp.e2e-spec`: una compra de 5 kg a 2.500 es una operación real
+    // del dominio, y el fixture queda con un kardex que se puede leer.
+    const resEntrada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: '5',
+        costoUnitario: '2500',
+      });
+    expect(resEntrada.status).toBe(200);
+
     const res = await request(app.getHttpServer())
-      .get(`/api/items/${CARNE_MOLIDA_ID}`)
+      .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    itemId = CARNE_MOLIDA_ID;
     expect(res.body.costoActual).toBeTruthy();
     expect(parseFloat(res.body.stock as string)).toBeGreaterThan(0);
     stockAntesDeLaMerma = res.body.stock as string;
@@ -187,7 +257,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     expect(body.costoUnitario).toBeTruthy();
     expect(body.costoPerdido).toBeTruthy();
 
-    // Producto CON costo (Carne molida, seed): costoPerdido no puede ser
+    // Producto CON costo (el que siembra esta suite): costoPerdido no puede ser
     // null acá. Narrow explícito en vez de ensanchar la aserción — si el
     // endpoint alguna vez devolviera null para este producto, el `throw`
     // hace fallar el test con un mensaje claro en vez de un TS2345 en

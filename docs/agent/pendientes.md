@@ -1437,47 +1437,21 @@ confirmó*—; lo que falta es construir la mitad que quedó afuera, con su test
   plomería (`patchCantidadRetenido`, `patchCantidadFalla`, `cuentasServidor`) ya está en el
   spec.
 
-### Las cuatro que el owner contestó el 2026-09-03
+### Las cuatro que el owner contestó el 2026-09-03 — **queda una**
 
-Las cuatro estaban en la § 4 y salieron en una sola ronda. **Tres son de la suite de tests y
-ninguna se ve en la app**; la cuarta sí. Se agrupan acá porque comparten la forma de la
-respuesta —invertir ahora en vez de aceptar la deuda— pero **no son una tanda**: cada una toca
-archivos distintos y ninguna depende de otra.
+Las cuatro estaban en la § 4 y salieron en una sola ronda. Tres eran de la suite de tests y no
+se ven en la app; la cuarta sí.
+
+✅ **Las tres de tests se construyeron el mismo día**: el checker de lecturas ampliado a toda
+lectura, los helpers de caja extraídos de sus 8 copias, y `mermas` sembrándose su propio
+producto. Detalle de cada una en [`resueltos.md`](resueltos.md).
+
+**Queda la cuarta, que es la única que se ve en la app** — el aviso al cambiar el tipo de un
+descuento—, y está abajo.
 
 ⚠️ **La quinta pregunta de esa ronda NO se contestó y no se preguntó**: la nota de crédito es
 **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`, ADR-010).
 Sigue en la § 4, sola.
-
-- [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
-  seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
-  al cerrar la limpieza de la causa → [`resueltos.md`](resueltos.md)) — con la causa ya
-  limpiándose sola, correr el archivo dos veces sin `reset-db.sh` en el medio falla **2 de 9**:
-  `POST /mermas registra merma con Vencimiento` responde `400 "Stock insuficiente para la
-  salida"` (verificado pidiéndoselo a la API, no deducido), y el `GET` que busca esa merma cae
-  detrás. **La cuenta cierra exacta:** Carne molida nace con **1,5 kg**
-  (`seeder.service.ts:3554`) y una corrida del spec se lleva **1,1** — 1 kg la merma con
-  Vencimiento y 0,1 la merma con causa custom—, así que quedan 0,4 y el pedido de 1 kg de la
-  corrida siguiente no entra. Medido en tres corridas seguidas: 1,5 → 0,4 → 0,3 → 0,2.
-  ⚠️ **El seed lo eligió a propósito y lo dice**: *"stock bajo para probar descuentos, con
-  margen sobre el consumo del e2e (mermas 1 kg + combos 0.15 kg)"*. El margen está calculado
-  para **una** pasada de la suite, que es el flujo que manda `CLAUDE.md` (`reset-db.sh` antes
-  de cada `test:e2e`). No es un descuido: es una decisión que choca con querer correr un spec
-  suelto dos veces.
-  ✅ **Decisión del owner (2026-09-03): que el spec se siembre su propio producto con costo** y
-  lo soft-borre en el `afterAll` — el molde ya está en el mismo archivo, el del *"Insumo sin
-  costo E2E"*. Es la única de las tres que da repetibilidad **de verdad**; subir el stock
-  sembrado solo corría el problema para más adelante y aceptarlo dejaba al próximo peritando
-  2 rojos que no son regresión.
-  📌 **Y hay que tocar el seed igual, aunque no sea para subir el número:** la decisión
-  contradice una intención escrita ahí, que declara a Carne molida *"el producto seed que
-  ejercita el flujo de mermas"* (`seeder.service.ts:3501-3502`). O ese comentario se corrige, o
-  el próximo lee que el fixture sigue siendo el de mermas y vuelve a atarle un spec.
-  📌 **La pregunta es de fixtures compartidos, no de este archivo:** `combos.e2e-spec.ts` come
-  del mismo kilo y medio.
-  ⛔ **Lo que NO se puede hacer, para no redescubrirlo:** devolver el stock en el `afterAll`.
-  Por API es escribir en `movimientos_inventario` (`CLAUDE.md`: detenerse y preguntar), y por
-  SQL directo sobre `item_producto.stock` desincroniza el saldo materializado del kardex, que
-  es exactamente lo que la invariante protege.
 
 - [ ] **Cambiar de tipo da vuelta el MODO y se lleva puesto el valor tipeado** (frontend;
   medido 2026-08-29, al lado del frente de *"perder la forma de importe"* →

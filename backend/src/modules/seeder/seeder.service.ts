@@ -3498,10 +3498,17 @@ export class SeederService implements OnApplicationBootstrap {
   /**
    * Ingredientes base del cluster food-service demo: pan, carne molida y
    * queso laminado, con stock inicial. Los consume "Hamburguesa Especial"
-   * (pan/queso fijos) y el grupo "Proteína" (carne como opción). Carne molida
-   * también es el producto seed que ejercita el flujo de mermas.
+   * (pan/queso fijos) y el grupo "Proteína" (carne como opción).
    * Carne/queso se compran en kg; las recetas los consumen en gramos, para
    * ejercitar la conversión de unidades.
+   *
+   * ⚠️ **Carne molida ya NO es "el producto seed que ejercita el flujo de
+   * mermas"** (2026-09-03). Lo decía este docblock y por eso `mermas.e2e-spec`
+   * se le colgaba: con **1,5 kg** sembrados y **1,1** consumidos por corrida, el
+   * archivo no era repetible sin `reset-db.sh` en el medio. Ahora esa suite se
+   * siembra su propio producto. **No volver a atarle un spec a este stock**: el
+   * margen está calculado para una sola pasada y `combos.e2e-spec` ya come del
+   * mismo kilo y medio.
    */
   private async seedIngredientesBase(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
@@ -3550,7 +3557,12 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Carne molida',
         unidad: 'kg',
         // 1.5 kg: stock bajo para probar descuentos, con margen sobre el
-        // consumo del e2e (mermas 1 kg + combos 0.15 kg).
+        // consumo del e2e — hoy **solo combos**, 0.15 kg por corrida.
+        // ⚠️ Decía "mermas 1 kg + combos 0.15" hasta el 2026-09-03: `mermas`
+        // dejó de comer de acá y se siembra el suyo, justamente porque este
+        // margen alcanza para UNA pasada. No volver a atarle un spec: el
+        // comentario está pegado al número porque es acá donde mira quien lo
+        // quiera cambiar.
         stock: '1.5',
         costo: '8000',
       },

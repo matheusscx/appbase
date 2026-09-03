@@ -17,6 +17,49 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `mermas.e2e-spec` se siembra su propio producto y vuelve a ser repetible (cerrado 2026-09-03)
+
+Venía de la § 4 y la contestó el owner: **que el spec siembre el suyo**. De las tres salidas
+—subir el stock del seed, sembrar propio, aceptarlo— es la única que da repetibilidad de
+verdad; subir el número solo corría el problema para más adelante.
+
+**El caso, medido en agosto:** `Carne molida` nace con **1,5 kg** y una corrida del archivo se
+lleva **1,1** —1 kg la merma con Vencimiento y 0,1 la de causa custom—, así que la segunda
+corrida sin `reset-db.sh` fallaba **2 de 9** con *"Stock insuficiente para la salida"*. Tres
+corridas seguidas daban 1,5 → 0,4 → 0,3 → 0,2.
+
+**Ahora la suite crea su producto con 5 kg y lo soft-borra en el `afterAll`**, con el mismo
+molde que ya usaba para el *"Insumo sin costo E2E"*. Verificado con **tres corridas seguidas
+sin resetear la base entre medio: 9/9 las tres veces**, contra el 9 → 7 → 7 de antes.
+
+📌 **Una cosa que no estaba en la entrada y costó los tres tests de costo:** la entrada de
+stock tiene que ir con `motivo: 'compra'`, no `'inventario_inicial'`. Solo
+`['compra', 'anulacion', 'devolucion']` recalculan el CPP
+(`MOTIVOS_QUE_RECALCULAN_CPP`, `inventario.service.ts`); con `inventario_inicial` el stock
+entra igual pero `costo_actual` queda en NULL, y los tests de `costoPerdido` dejan de probar lo
+que dicen. Se descubrió en rojo, no leyendo — el mismo camino que ya había recorrido
+`costeo-cpp.e2e-spec`, que usa `'compra'` por esta razón.
+
+⚠️ **Y se corrigió el seed, que era la causa de fondo.** El docblock de `seedIngredientesBase`
+declaraba a Carne molida *"el producto seed que ejercita el flujo de mermas"*, y por eso el
+spec se le colgaba. Ahora dice lo contrario y avisa por qué: **no volver a atarle un spec a ese
+stock**, porque el margen está calculado para una sola pasada y `combos.e2e-spec` ya come del
+mismo kilo y medio.
+
+🎯 **Y de paso se recuperó cobertura que el cambio se estaba llevando puesta, sin que nadie la
+nombrara.** `Carne molida` es `tipo='ingrediente'` (el seeder la migra), y el fixture nuevo nació
+como `producto`: con eso, **ningún e2e mermaba un ingrediente**, y un mutante que estrechara el
+guard de `mermas.service` a `tipo !== 'producto'` habría sobrevivido la suite entera. Lo levantó
+la revisión del diff. El fixture pasó a `ingrediente` —el test *"sin costo"* sigue siendo
+`producto`, así que ahora la suite cubre los dos— y el mutante **mata 3 tests**.
+
+⛔ **Lo que NO se hizo, y quedó escrito en el propio test para no redescubrirlo:** devolver el
+stock en el `afterAll`. Por API es escribir en `movimientos_inventario` (`CLAUDE.md`: detenerse
+y preguntar), y por SQL directo sobre `item_producto.stock` desincroniza el saldo materializado
+del kardex.
+
+---
+
 ## El checker de lecturas sin status pasa a mirar TODA lectura, y encontró cero deuda nueva (cerrado 2026-09-03)
 
 Venía de la § 4 y la contestó el owner: **ampliarlo**. Hasta hoy `check-e2e-status.mjs` fallaba
