@@ -159,6 +159,64 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **El flush pisa una re-edición con el payload viejo, y la cantidad del garzón se
+  pierde** (frontend; **medido el 2026-09-02** por la revisión del diff de *"salir de la cuenta
+  guarda"*, contra control — [`resueltos.md`](resueltos.md)) — es la única de esta familia que
+  **pierde trabajo del garzón** en vez de dejar un aviso confuso, y por eso va aparte.
+
+  **La escena.** Dos líneas con edición pendiente y el garzón toca *Enviar a cocina*.
+  `flushPendientes` toma una foto de lo pendiente y las manda **de a una, esperando cada
+  `PATCH`**. Si mientras viaja el de la primera el garzón vuelve a tocar el stepper de la
+  segunda, `onCantidadChange` arma una entrada **nueva con timer nuevo**; el loop, al llegar a
+  esa línea, borra la entrada nueva pero **no cancela su timer**, y despacha el payload **de la
+  foto**. Con el primer `PATCH` tardando más que los 300 ms de la re-edición, los dos salen al
+  revés:
+
+  ```
+  orden de envío = [linea-1:3.0000, linea-2:5.0000, linea-2:4.0000]
+  linea-2 queda en 4.0000     ← el garzón tipeó 5
+  ```
+
+  **Preexistente**, verificado contra la estructura anterior: el frente del 2026-09-02 no lo
+  introduce ni lo agranda. Y **no está tapado por los tests**: la suite afirma sobre el orden
+  de los `PATCH` y sobre el rollback, no sobre cuál gana cuando hay dos de la misma línea.
+
+  **Las dos salidas plausibles** —y es la misma decisión que las tres de la entrada de abajo,
+  así que conviene tomarlas juntas: que el loop **relea la entrada viva** en vez de la foto
+  (choca con el docblock de `pendingByLinea`, que exige NO releer de la pantalla: habría que
+  releer del Map, no de la línea), o que **cancele el timer que encuentre al borrar**.
+
+- [ ] **El `PATCH` de cantidad en vuelo puede aterrizar sobre una cuenta que dejó de estar
+  abierta** (frontend; **medido el 2026-09-02** por la revisión del diff que hizo que salir de
+  la cuenta guarde — [`resueltos.md`](resueltos.md)) — desde ese día salir manda lo pendiente
+  **sin `await`**, así que el garzón vuelve al listado con el request en vuelo. En esa ventana
+  —la latencia del request, no los 300 ms del debounce— el listado ya ofrece *Fusionar
+  cuentas*, y fusionar deja las cuentas de origen `cancelada`: el `PATCH` cae sobre una cuenta
+  que ya no está abierta y vuelve con `400 La cuenta no está abierta` y un toast que nombra una
+  cuenta que el garzón acaba de fusionar. **Antes no podía pasar** porque no salía ningún
+  `PATCH`. El daño es un toast confuso, no plata ni datos: la fusión ya movió las líneas.
+
+  **Del mismo molde, y por eso van juntas** (las tres se arreglan con la misma decisión):
+
+  - **Cancelar la cuenta con el timer a punto de disparar.** `descartarPendientes()` corre
+    después del `await` de `cancelarCuenta` —y tiene que ser así: descartando antes, un
+    cancelar que falla perdía la edición en silencio—, así que si los 300 ms se cumplen
+    mientras el request viaja, el `PATCH` ya salió y no queda nada que tirar: rechazo y toast
+    por una línea de la cuenta que el garzón acaba de cancelar. **Es el más alcanzable de los
+    tres**: basta confirmar el cancelar dentro de la ventana del debounce, sin carreras raras.
+    Medido el 2026-09-02 por la revisión del diff. **No es regresión**: antes el `PATCH` salía
+    igual, porque `activeCuenta` seguía viva durante el `await`.
+  - **Navegar fuera de `/salones`.** `onBeforeUnmount` limpia el timer del refresco del
+    catálogo pero **no** los de `pendingByLinea`, así que salir de la página dentro de la
+    ventana deja saliendo un `PATCH` y un `toast.add` con el componente ya desmontado.
+
+  **Qué medir antes de tocar:** si la secuencia de la fusión es alcanzable a mano (exige salir
+  y fusionar en la latencia de un request) y si el toast del desmontado se ve o se pierde. La
+  del cancelar ya está medida y es la que manda el diseño. Las salidas plausibles son las
+  mismas para las tres —esperar el flush antes de habilitar la acción destructiva, o descartar
+  el toast cuando la pantalla ya no es la que lo pidió—, así que conviene decidirlas juntas y
+  no de a una.
+
 - [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local: la firma
   reproduce entera y quedan tres explicaciones de por qué esa conexión no volvió** (backend/tests, visto y medido el 2026-08-18 en el cierre del
   contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
@@ -1382,14 +1440,19 @@ queda trabada"*. De las tres salidas que la entrada ofrecía —apartar, avisar,
 owner eligió **apartar**, y el frente se construyó ese mismo día → [`resueltos.md`](resueltos.md).
 ⚠️ **No cierra la salida con motivo**, que sigue viva en la § 3 y que la propia entrada
 nombraba como su cruce: apartar achica el caso de la mesa trabada, **no lo borra**.
-**Quedan seis abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
+✅ **Y una más el 2026-09-02**, el mismo día que se anotó: *"salir de la cuenta con una
+edición de cantidad a medio camino"*. De las tres salidas —guardar, descartar, preguntar— el
+owner eligió **guardar**, y con eso quedó contestado también su costo: el rechazo que llega
+con la pantalla ya en otra cuenta **avisa nombrando la mesa y la cuenta**, en vez de callarse
+o de tirar un error sin dueño → [`resueltos.md`](resueltos.md).
+
+**Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
 status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
 una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
-más la nota de crédito (fiscal, frente propio), el **modo** que se da vuelta al cambiar de
-tipo (2026-08-29, al cerrar la de la forma de importe) y, desde el **2026-09-02**, qué pasa
-con una edición de cantidad cuando el garzón **se va de la cuenta**—; el conteo se recuenta con
-`awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el **2026-09-02** al agregar la
-última: son seis.
+más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
+tipo (2026-08-29, al cerrar la de la forma de importe)—; el conteo se recuenta con
+`awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el **2026-09-02** al cerrar la
+de salir de la cuenta: son cinco.
 
 ✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
 desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
@@ -1641,43 +1704,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   caminos del frente vecino? Conservar es la respuesta chica, pero cambia una conducta que hoy
   es incondicional y que se escribió a propósito — el reset del modo existe para que un `0.10`
   de porcentaje no quede mostrándose como `0` de plata (ver el docblock de `onModoChange`).
-
-- [ ] **Salir de la cuenta con una edición de cantidad a medio camino: ¿se guarda o se
-  descarta?** (frontend; **medido el 2026-09-02**, en la revisión del frente del `PATCH` de
-  cantidad — [`resueltos.md`](resueltos.md)) — el tercer hueco de la misma familia que ese
-  frente cerró, y el único que **no se arregló**, porque la respuesta es una decisión de
-  producto y no una de implementación.
-
-  **La escena.** El garzón cambia una línea de 1 a 3 y, antes de que pasen los 300 ms del
-  debounce, toca *Cuentas* para volver al listado (o cambia de mesa). `volverACuentas` deja
-  `activeCuenta` en `null`, así que cuando el timer dispara `patchLineaCantidad` corta en su
-  primera línea (`if (!activeCuenta.value) return`).
-
-  **Lo medido**, con una sonda temporal sobre `salones/index.nuxt.spec.ts`: **cero `PATCH`**,
-  **cero toasts**, y al volver a entrar a la cuenta desde el listado —que no pega ninguna
-  llamada— el input muestra **`3`**. O sea: la cantidad que el garzón puso queda pintada como
-  si se hubiera guardado, y el servidor sigue con `1`. Es el mismo síntoma que el frente
-  cerró en las otras dos ventanas (los 300 ms y la latencia del request), pero acá **no hay
-  arreglo obvio**: no es un bug de rollback, es que nadie decidió qué significa salir.
-
-  ❓ **La pregunta, con las tres salidas y lo que cuesta cada una:**
-
-  1. **Salir guarda.** Al abandonar la cuenta sale el `PATCH`, igual que cuando el garzón
-     toca *Enviar a cocina* (`flushPendientes` ya hace exactamente eso). Costo: el `PATCH`
-     puede rebotar por el tope de stock **con la pantalla ya en otra cuenta**, y hay que
-     decidir dónde se ve ese error — un toast que habla de una mesa que ya no está en
-     pantalla es peor que no avisar.
-  2. **Salir descarta.** La pantalla revierte el pintado optimista y la cuenta vuelve a
-     mostrar lo que el servidor tiene. Costo: el garzón que cambió a 3 y salió tranquilo ve
-     `1` la próxima vez que entre, sin que nada le diga que su cambio se perdió.
-  3. **Salir pregunta.** Un aviso de *"tenés un cambio sin guardar"* con las dos salidas.
-     Costo: un modal más en el camino más caliente de la pantalla, y el criterio del propio
-     owner para estos casos fue **frenar cuando el alcance es grande** — acá el alcance es una
-     línea de una cuenta.
-
-  📌 **Para el que la tome:** el arreglo mecánico de cualquiera de las tres es chico —
-  `pendingByLinea` ya guarda el `payload` y el `previo` de cada línea, así que "mandar" y
-  "deshacer" son las dos funciones que ya existen. Lo que falta es la respuesta.
 
 
 ## 5. Carreras de concurrencia

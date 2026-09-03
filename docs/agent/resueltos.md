@@ -17,6 +17,108 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Salir de la cuenta con una edición de cantidad a medio camino: ahora se guarda (cerrado 2026-09-02)
+
+Venía de la § 4 —necesitaba que el owner contestara— y era **la tercera ventana de la misma
+familia** que cerró el frente del `PATCH` de cantidad; la única que quedó abierta, porque la
+respuesta era de producto y no de implementación.
+
+**La escena.** El garzón cambia una línea de 1 a 3 y, antes de que pasen los 300 ms del
+debounce, toca *Cuentas* para volver al listado. `volverACuentas` dejaba `activeCuenta` en
+`null`, así que cuando el timer disparaba, `patchLineaCantidad` cortaba en su primera línea:
+**cero `PATCH`, cero avisos**, y al volver a entrar el input mostraba **3**. La cantidad
+quedaba pintada como guardada y el servidor seguía en 1.
+
+**La decisión del owner: salir guarda.** De las tres salidas que la entrada ofrecía
+—guardar, descartar, preguntar—, guardar es la que no pierde trabajo del garzón sin decírselo.
+Preguntar se descartó por lo que el propio owner ya había fijado para estos casos: se frena
+con un modal cuando el alcance es grande, y acá el alcance es una línea de una cuenta.
+
+**El costo que la entrada nombraba, contestado.** El `PATCH` puede rebotar por el tope de
+stock **con la pantalla ya en otra cuenta**, y un toast que habla de una mesa que no está en
+pantalla es peor que no avisar. Por eso el aviso **lleva la mesa y la cuenta adentro** —`Mesa
+3 · Cuenta 1`, congeladas al empezar la edición, no leídas al fallar—, y se omite cuando la
+cuenta sigue en pantalla, donde el contexto sobra.
+
+**Qué se hizo.** La edición pendiente pasó a viajar con su `cuentaId` y su contexto
+(`EdicionCantidad`), y las dos funciones que la aplican dejaron de leer `activeCuenta`: pintan
+y deshacen **por id**, sobre `cuentas.value`, con `aplicarCuentaActualizada` —que ya existía y
+ya tenía el criterio correcto: tocar `activeCuenta` solo si sigue siendo la misma—. Salir del
+detalle manda lo pendiente **sin `await`**, para que volver al listado siga siendo instantáneo:
+`flushPendientes` cancela los timers de forma sincrónica antes de su primer `await`, así que
+no queda ninguno que pueda disparar después. Cambiar de mesa hace lo mismo.
+
+⚠️ **Y apareció el reverso, que no estaba en la entrada:** mientras salir descartaba,
+**cancelar** una cuenta con una edición pendiente también se curaba solo —el timer disparaba y
+`patchLineaCantidad` se iba callado por no haber cuenta activa—. Al hacer que el `PATCH` salga
+igual, ese silencio dejó de existir: cancelar habría terminado en un rechazo por una línea de
+una cuenta que ya no existe. Cancelar ahora **descarta** lo pendiente a mano.
+
+**La revisión del diff bloqueó, y tenía razón.** El descarte de cancelar corría **antes** del
+request, y cancelar falla de verdad (`400 La cuenta no está abierta` cuando otra tablet ya la
+cerró). En ese camino el garzón se quedaba dentro de la cuenta con la cantidad pintada, sin
+`PATCH`, sin rollback y sin timer que lo mandara después: **el mismo bug que este frente vino a
+cerrar, reintroducido por la puerta de al lado**. Ahora el descarte va después del `await`, así
+que si cancelar falla la cuenta sigue viva y la edición se manda.
+
+La misma revisión midió otras dos, que salieron en el mismo commit:
+
+- **`flushPendientes` cancelaba los timers dentro del loop**, o sea solo el de la primera
+  línea: los de 2..N seguían armados durante la espera de red del primero y disparaban solos,
+  así que la segunda línea salía con **dos `PATCH`** (y dos toasts idénticos si el servidor
+  rechazaba). Preexistente —se alcanzaba desde *Enviar a cocina*—, pero este cambio le agregaba
+  dos llamadores nuevos, y el docblock afirmaba lo contrario. Los timers se cancelan **todos**
+  antes del primer `await`.
+- **Cerrar el drawer de la mesa era una quinta salida sin dueño**: no tocaba `activeCuenta` ni
+  lo pendiente, así que la edición se guardaba de rebote (por el timer) y —peor— el toast de
+  rechazo se creía "en la cuenta" con **nada** en pantalla y se comía el contexto, que es justo
+  el caso para el que ese texto existe. Cerrar ahora hace lo mismo que tocar *Cuentas*.
+
+⚠️ **Y la segunda vuelta de la revisión volvió a bloquear, sobre el arreglo del punto
+anterior.** Cancelar los timers arriba estaba bien; **vaciar el `Map` entero arriba, no**: entre
+ese `clear()` y el dispatch de las líneas 2..N quedaba una ventana en la que
+`onCantidadChange` no encontraba ni pendiente ni `inflight`, y recalculaba el `previo`
+**desde la línea** —que ya trae el optimista sin confirmar—. Re-editar la segunda línea
+mientras viajaba el `PATCH` de la primera dejaba pintada una cantidad que el servidor había
+rechazado **tres veces**: la ventana hermana exacta de la que el `Map` de `inflight` había
+cerrado, reabierta por el costado. Medido contra control. La entrada se saca ahora **pegada al
+dispatch**, que es donde `inflight` la recoge sin hueco entre medio.
+
+📌 **Las dos vueltas dicen lo mismo:** los tres arreglos que bloquearon —el descarte antes del
+`await`, el `clear()` antes del loop— eran cada uno *"mover una línea un poco más arriba"*, y
+los tres abrieron el mismo bug por otra puerta. En este archivo el orden **es** la lógica.
+
+**Qué lo fija.** Ocho tests nuevos en `salones/index.nuxt.spec.ts`, cada uno verificado con el
+mutante que revierte **su** línea: salir manda (sacarle el flush), cancelar no manda (sacarle
+el descarte), cancelar que **falla** sí manda (devolver el descarte al principio), el rechazo
+que llega afuera avisa con contexto y deshace (dos mutantes: volver a mirar `activeCuenta` en
+el rollback, y vaciar el `description`), el flush de dos líneas manda uno por línea (devolver
+el `clearTimeout` adentro del loop), re-editar durante el flush deshace hasta lo del servidor
+(devolver el `clear()` arriba: pinta `4`, la cantidad rechazada), el flush libera la entrada
+—si no, el refresco del catálogo queda muerto para el resto de la sesión— y cerrar el drawer
+manda (sacarle el `@update:open`).
+
+📌 **Y lo que la tercera vuelta dejó anotado sin arreglar:** el loop del flush pisa una
+re-edición con el payload de su foto —el garzón tipea 5 y queda 4—, y el `delete` de la entrada
+no tenía ningún test que lo matara aunque su ausencia deja el refresco del catálogo muerto para
+toda la sesión. Lo segundo se cubrió acá; lo primero está medido como **preexistente contra
+control** y quedó en [`pendientes.md`](pendientes.md) § 2, junto a sus hermanas, porque es la
+misma decisión.
+
+📌 **Un detalle del test del drawer que vale para el próximo:** monta con `AppDrawer`
+**stubeado**. Cerrar el drawer de verdad dispara la transición de salida de reka, y
+`usePresence` lee `display` de un `getComputedStyle` que happy-dom rechaza — la suite quedaba
+verde con dos *unhandled rejections*, o sea el gate en rojo con todos los tests pasando.
+
+📌 **Y el test de "salir manda" enseñó algo:** su primera versión esperaba 400 ms después de
+tocar *Cuentas* y **el mutante sobrevivía** — a los 300 el timer del debounce disparaba solo y
+mandaba el `PATCH` lo mismo. Lo que hay que afirmar no es que el `PATCH` salga, sino que salga
+**en el acto**: el test mide 50 ms desde la edición, bien adentro de la ventana. Es la misma
+clase de error que el fixture que no discrimina —un test que **recorre** la línea sin
+**probarla**—, esta vez por el tiempo de espera y no por el valor.
+
+---
+
 ## El drawer de personalización ofrecía lo que otra mesa ya se había llevado (cerrado 2026-09-02)
 
 Venía de "Los cuatro que dejó el frente de la reserva de stock". El drawer abre por

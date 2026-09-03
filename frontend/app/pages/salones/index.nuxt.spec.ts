@@ -112,6 +112,12 @@ let patchCantidadFalla = false
  */
 let patchCantidadRetenido: Promise<void> | null = null
 /**
+ * `POST /cuentas/:id/cancelar` rechaza. Es el caso real: otro dispositivo ya
+ * cerró la cuenta y el backend contesta `400 La cuenta no está abierta`
+ * (`salones.service.ts`, `getCuentaAbiertaConLock`).
+ */
+let cancelarFalla = false
+/**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
  * Sin esto, servidor y pantalla son EL MISMO objeto: el `GET` devuelve
@@ -163,7 +169,7 @@ let metodosPagoRechaza = false
  * lo único que permite afirmar el COLOR: un toast que saliera con otro color
  * se vería igual en un assert sobre el texto del wrapper.
  */
-let toasts: { title?: string, color?: string }[] = []
+let toasts: { title?: string, description?: string, color?: string }[] = []
 
 mockNuxtImport('useToast', () => {
   return () => ({
@@ -350,6 +356,10 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/garzones/verificar-pin')) {
       return Promise.resolve({ garzonId: 'g1', nombre: 'Ana' })
     }
+    if (/\/cuentas\/[^/]+\/cancelar$/.test(ruta)) {
+      if (cancelarFalla) return Promise.reject(new Error('La cuenta no está abierta'))
+      return Promise.resolve({ ok: true })
+    }
     if (ruta.endsWith('/salones/operacion')) {
       return Promise.resolve(salonesMock)
     }
@@ -458,6 +468,7 @@ function reiniciarMock() {
   calculoFalla = false
   patchCantidadFalla = false
   patchCantidadRetenido = null
+  cancelarFalla = false
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -1723,6 +1734,327 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     ])
     const trasFlush = wrapper.findAllComponents({ name: 'AppCantidadInput' })
     expect(trasFlush[1]!.props('modelValue')).toBe('5.0000')
+  })
+
+  it('salir de la cuenta manda la edición que quedó a medio camino', async () => {
+    // La tercera ventana de la misma familia, y la única que quedó abierta
+    // cuando se cerró el `PATCH` que no llegaba: el garzón cambia 1 → 3 y toca
+    // *Cuentas* ANTES de los 300 ms. Hasta el 2026-09-02 no salía ningún PATCH
+    // ni ningún toast, y al volver a entrar el input mostraba 3: la cantidad
+    // quedaba pintada como guardada y el servidor seguía en 1.
+    //
+    // Decisión del owner: salir guarda.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    // Bien adentro de la ventana del debounce: si el test esperara los 300 ms
+    // el PATCH saldría solo y no probaría nada de salir.
+    await esperar(20)
+    expect(patchesDeCantidad).toHaveLength(0)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    // ⚠️ **50 ms desde la edición, no 400.** Con 400 el test pasaba igual sin el
+    // flush: el timer del debounce disparaba solo a los 300 y mandaba el PATCH
+    // lo mismo, así que el mutante que le saca el flush a `salirDeCuenta`
+    // sobrevivía. Salir tiene que mandarlo **en el acto** —si el garzón cierra
+    // la pantalla en esa ventana no hay timer que valga—, y eso es lo que se
+    // afirma acá.
+    await esperar(30)
+
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+  })
+
+  it('si el rechazo llega con el garzón ya afuera, el aviso dice de qué cuenta es y la cantidad se deshace', async () => {
+    // La contra de que salir guarde, y el costo que la entrada del backlog
+    // nombraba: el rechazo del tope de stock puede llegar con la pantalla ya en
+    // el listado. Un *"Stock insuficiente"* suelto ahí no le dice al garzón a
+    // qué mesa volver, así que el aviso lleva la mesa y la cuenta congeladas al
+    // empezar la edición.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    patchCantidadFalla = true
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(400)
+
+    const aviso = toasts.find(t => /Stock insuficiente/.test(t.title ?? ''))
+    expect(aviso).toBeTruthy()
+    // 'Mesa 1 · Cuenta 9': las dos del fixture. Sin esto el garzón lee el error
+    // de una mesa que ya no está en pantalla y no sabe cuál es.
+    expect(aviso!.description).toBe('Mesa 1 · Cuenta 9')
+
+    // Y el rollback corrió aunque la cuenta ya no fuera la activa: volver a
+    // entrar —que no pega ninguna llamada— muestra lo que el servidor tiene.
+    // Se afirma sobre el `model-value` y no sobre el texto por lo mismo que el
+    // test de rollback de arriba: el texto muestra la presentación.
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    tarjeta!.click()
+    await esperar(50)
+    const trasVolver = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(trasVolver!.props('modelValue')).toBe('1.0000')
+  })
+
+  it('cancelar la cuenta NO manda la edición pendiente: esa cuenta ya no existe', async () => {
+    // El reverso de "salir guarda", y la regresión que introduciría hacerlo sin
+    // pensar: mientras salir descartaba, el timer de una cuenta cancelada
+    // disparaba y `patchLineaCantidad` cortaba callado al no encontrar cuenta
+    // activa. Ahora manda igual, así que cancelar tiene que tirar lo pendiente
+    // a mano — si no, el garzón cancela y recibe un rechazo por una línea de
+    // una cuenta que ya no existe.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+    // El de confirmar vive en el modal, que es OTRO diálogo: el del drawer ya
+    // se usó arriba y buscarlo de nuevo devolvería el mismo botón.
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(400)
+
+    expect(patchesDeCantidad).toHaveLength(0)
+  })
+
+  it('si CANCELAR falla, la edición no se pierde: se manda igual', async () => {
+    // El reverso del reverso, y la regresión que introdujo la primera versión de
+    // este cambio: descartar lo pendiente ANTES del request. Cancelar falla de
+    // verdad —`400` si otro dispositivo ya cerró la cuenta—, y ahí el garzón se
+    // quedaba dentro de la cuenta con la cantidad pintada, sin `PATCH`, sin
+    // rollback y sin timer: el mismo "quedó guardado y el servidor no se
+    // enteró" que este frente vino a cerrar. Lo midió la revisión del diff.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    cancelarFalla = true
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(500)
+
+    expect(toasts.some(t => /no está abierta/.test(t.title ?? ''))).toBe(true)
+    // La cuenta sigue abierta, así que la edición vale y tiene que llegar.
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+  })
+
+  it('el flush con dos líneas manda UN PATCH por línea, no dos de la segunda', async () => {
+    // `flushPendientes` cancelaba los timers DENTRO del loop, así que solo moría
+    // el de la primera línea: los de 2..N seguían armados durante la espera de
+    // red del primero y disparaban solos. La segunda línea salía dos veces —y
+    // con el servidor rechazando, dos toasts idénticos—. Se ve solo con el
+    // `PATCH` retenido más de los 300 ms del debounce.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const inputs = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    inputs[0]!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    inputs[1]!.vm.$emit('change', { presentacion: '5', unidadCodigo: 'unidad', cantidadCanonica: '5.0000' })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    // Más que los 300 ms del debounce con el primer PATCH todavía sin contestar:
+    // es la ventana exacta en la que el timer de la segunda línea disparaba.
+    await esperar(400)
+    soltar()
+    await esperar(400)
+
+    expect(patchesDeCantidad).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '5.0000' },
+    ])
+  })
+
+  /**
+   * `AppDrawer` stubeado (patrón de `docs/patterns/frontend.md` §15, igual que
+   * `CajaCierreDrawer.nuxt.spec.ts`). **Solo lo usa el test de cerrar el
+   * drawer**, y por un motivo concreto: cerrar el drawer de verdad dispara la
+   * transición de salida de reka, y `usePresence` lee `display` de un
+   * `getComputedStyle` que happy-dom rechaza con *"Receiver must be an instance
+   * of class CSSStyleDeclaration"*. La suite quedaba en verde pero con dos
+   * unhandled rejections, o sea el gate en rojo.
+   *
+   * Con el stub el contenido **no se teletransporta**: se busca en el wrapper,
+   * no en `document.body`.
+   */
+  const stubDrawer = {
+    AppDrawer: {
+      name: 'AppDrawer',
+      props: ['open', 'width', 'ui'],
+      emits: ['update:open'],
+      template: '<div v-if="open"><slot name="header" /><slot name="body" /><slot name="actions" /></div>',
+    },
+  }
+
+  it('después del flush el catálogo vuelve a pedirse: el pendiente quedó liberado', async () => {
+    // El gemelo del test de arriba, pero por el camino del **flush** en vez del
+    // debounce: `flushPendientes` saca cada entrada de `pendingByLinea` antes de
+    // despacharla, y si no lo hiciera el `size > 0` del guard dejaría el
+    // refresco del catálogo muerto **para el resto de la sesión** —el garzón
+    // seguiría viendo el disponible de antes de su cambio, en todas las mesas—.
+    //
+    // Lo pidió la revisión del diff: esa línea se reubicó en este cambio y
+    // ningún test la cubría.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    const antesDeEditar = urlsCatalogo.length
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+    // El flush, no el timer: se sale de la cuenta dentro de los 300 ms.
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(700)
+
+    expect(patchesDeCantidad).toHaveLength(1)
+    expect(urlsCatalogo.length).toBeGreaterThan(antesDeEditar)
+  })
+
+  it('re-editar la segunda línea DURANTE el flush deshace hasta lo que el servidor tiene', async () => {
+    // La ventana que abrió el arreglo del doble `PATCH`: vaciar `pendingByLinea`
+    // entero antes del loop dejaba a las líneas 2..N sin entrada **y** sin
+    // `inflight` hasta que el loop las alcanzara, así que una re-edición ahí
+    // adentro recalculaba el `previo` desde la línea —que ya trae el optimista
+    // sin confirmar— y dejaba pintada una cantidad que el servidor rechazó.
+    //
+    // Es la ventana hermana de la que cerró el `Map` de `inflight`, y la
+    // encontró la revisión del diff midiendo contra control.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    patchCantidadFalla = true
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const inputs = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    inputs[0]!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    inputs[1]!.vm.$emit('change', { presentacion: '4', unidadCodigo: 'unidad', cantidadCanonica: '4.0000' })
+    await esperar(20)
+
+    // *Enviar a cocina* y no *Cuentas*: el flush tiene que correr con la cuenta
+    // **todavía en pantalla**, porque lo que se prueba es una re-edición hecha
+    // mientras el primer `PATCH` viaja. Saliendo al listado no hay stepper que
+    // tocar y el test se apagaría solo.
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(50)
+    // El flush está esperando el PATCH de la primera línea. El garzón vuelve a
+    // tocar el stepper de la segunda: el input no se deshabilita mientras se
+    // envía, así que en servicio es un gesto normal.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[1]!
+      .vm.$emit('change', { presentacion: '5', unidadCodigo: 'unidad', cantidadCanonica: '5.0000' })
+    await esperar(20)
+    soltar()
+    await esperar(700)
+
+    // El servidor rechazó TODO, así que la segunda línea tiene que volver a lo
+    // que tenía antes de la ráfaga: `2.0000` del fixture. Ni `4` ni `5`, que son
+    // las dos cantidades que nunca se guardaron.
+    const trasTodo = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    expect(trasTodo[1]!.props('modelValue')).toBe('2.0000')
+  })
+
+  it('cerrar el drawer de la mesa también manda, y el aviso conserva el contexto', async () => {
+    // La quinta salida, y la única que no tenía dueño: cerrar el drawer (ESC,
+    // backdrop) no tocaba `activeCuenta` ni lo pendiente. La edición se guardaba
+    // de rebote —por el timer— y, con `activeCuenta` viva y nada en pantalla, el
+    // toast de rechazo se creía "en la cuenta" y se comía el contexto, que es
+    // justo el caso para el que ese texto existe.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    patchCantidadFalla = true
+
+    const wrapper = await mountSuspended(Salones, { global: { stubs: stubDrawer } })
+    montado = wrapper
+    await esperar(0)
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', mesa())
+    await esperar(20)
+    // Con el stub la cuenta se busca en el wrapper, no en el body.
+    const drawerStub = wrapper.findComponent({ name: 'AppDrawer' })
+    ;(drawerStub.element.querySelector('.cursor-pointer') as HTMLElement).click()
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    // Cerrar el drawer como lo cierra el usuario: el componente emite el
+    // `update:open` en `false`.
+    wrapper.findComponent({ name: 'AppDrawer' }).vm.$emit('update:open', false)
+    await esperar(60)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    await esperar(300)
+    const aviso = toasts.find(t => /Stock insuficiente/.test(t.title ?? ''))
+    expect(aviso?.description).toBe('Mesa 1 · Cuenta 9')
   })
 
   it('una edición de cantidad a medio camino no dispara el refresco', async () => {

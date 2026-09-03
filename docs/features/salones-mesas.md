@@ -561,6 +561,38 @@ que filtrar la entrada las desfasa.
 - `pages/configuracion/salones.vue` — Administración (dentro de Configuración): CRUD
   de salones/mesas + editor de plano con drag & drop y "Guardar distribución".
 
+#### Cambiar la cantidad de una línea: qué pasa si el garzón se va antes (2026-09-02)
+
+La cantidad se pinta en el acto y el `PATCH` sale **300 ms después** (debounce: una ráfaga de
+taps en el stepper es un solo request). De esa ventana se sale por cinco puertas **que la
+pantalla maneja**, y cuatro de ellas **guardan** (la sexta —navegar fuera de `/salones`— no
+está manejada: guarda de rebote, porque el timer termina disparando; anotada en
+[`../agent/pendientes.md`](../agent/pendientes.md) § 2):
+
+| El garzón… | Qué pasa con lo pendiente |
+|---|---|
+| toca *Enviar a cocina* | se manda y se **espera**, antes de imprimir la comanda |
+| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor |
+| toca *Cuentas* o cambia de mesa | se manda **sin esperar**: volver al listado es instantáneo |
+| **cierra el drawer** de la mesa (ESC, backdrop) | igual que *Cuentas*: se manda y la cuenta se suelta |
+| **cancela la cuenta** | se **descarta**, pero **solo si cancelar salió bien**. Si el backend rechaza —otra tablet ya la cerró— la cuenta sigue viva y la edición se manda igual. ⚠️ No es garantía: si el timer dispara mientras el request de cancelar viaja, el `PATCH` ya salió (§ 2 del backlog) |
+
+**Decisión del owner (2026-09-02):** salir guarda. Hasta ese día salir descartaba **en
+silencio** —ni request ni aviso— y al volver a entrar el input mostraba la cantidad que nunca
+se guardó.
+
+⚠️ **Por eso el aviso de rechazo lleva la mesa y la cuenta adentro.** El tope de stock puede
+rebotar el `PATCH` con la pantalla ya en otra cuenta, y ahí un *"no alcanza el stock"* sin
+dueño no le dice al garzón a qué mesa volver. El contexto se **congela al empezar la edición**,
+no se lee al fallar; con la cuenta todavía en pantalla se omite.
+
+📌 **Corolario para quien toque esto.** Las funciones que pintan y deshacen la cantidad eligen
+**sobre qué cuenta actuar por `cuentaId`**, nunca por `activeCuenta`: la respuesta puede llegar
+cuando ya no hay ninguna activa, y ahí la versión vieja se iba en su primera línea y el
+rollback no ocurría. `activeCuenta` se sigue consultando, pero solo para decidir **si además
+hay que repintar lo que está en pantalla** (recalcular el total, omitir el contexto del toast)
+— nunca para saber a qué cuenta pertenece el cambio.
+
 ### Components
 
 - `components/salones/SalonPlano.vue` — Lienzo que posiciona las mesas por

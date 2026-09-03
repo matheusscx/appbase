@@ -754,6 +754,9 @@ onMounted(async () => {
 
 // ── Selección de mesa ──────────────────────────────────────────────────────
 async function onSelectMesa(mesa: MesaResumen) {
+  // Cambiar de mesa es la otra forma de abandonar una cuenta, y vale lo mismo
+  // que tocar *Cuentas*: lo pendiente se manda (ver `salirDeCuenta`).
+  void flushPendientes()
   selectedMesa.value = mesa
   activeCuenta.value = null
   limpiarResultado()
@@ -989,9 +992,26 @@ async function abrirHistorial() {
  *   nuevo — un snapshot tomado ahí restauraría justo lo que hay que revertir.
  *   Medido el 2026-09-02: el `catch` parecía hacer rollback y no lo hacía.
  */
+/**
+ * Una edición de cantidad a medio camino, con **todo lo que hace falta para
+ * mandarla o deshacerla sin la pantalla delante**.
+ *
+ * `cuentaId` y `contexto` se congelan al empezar la edición porque desde el
+ * 2026-09-02 **salir de la cuenta la manda** (decisión del owner): el `PATCH`
+ * puede salir y contestar con el garzón ya en el listado o en otra mesa, y ahí
+ * `activeCuenta` y `selectedMesa` ya no dicen de quién era ese cambio.
+ */
+type EdicionCantidad = {
+  cuentaId: string
+  /** `Mesa 3 · Cuenta 1` — solo para el toast que llega después de salir. */
+  contexto: string
+  payload: CantidadPayload
+  previo: CantidadPayload
+}
+
 const pendingByLinea = new Map<
   string,
-  { timer: ReturnType<typeof setTimeout>, payload: CantidadPayload, previo: CantidadPayload }
+  EdicionCantidad & { timer: ReturnType<typeof setTimeout> }
 >()
 /**
  * Líneas con un `PATCH` **en vuelo**, cada una con el `previo` de ese request.
@@ -1085,12 +1105,30 @@ type CantidadPayload = {
   cantidadCanonica: string
 }
 
-function patchLineaOptimista(lineaId: string, payload: CantidadPayload) {
-  if (!activeCuenta.value) return
-  const cuentaId = activeCuenta.value.id
-  const patched: CuentaDetalle = {
-    ...activeCuenta.value,
-    lineas: activeCuenta.value.lineas.map(l =>
+/**
+ * Pinta la cantidad nueva —o la deshace— sobre la cuenta **por id**, no sobre
+ * la que está en pantalla.
+ *
+ * Leía `activeCuenta` hasta el 2026-09-02, y eso alcanzaba mientras salir de la
+ * cuenta descartara la edición. Ahora salir la manda, así que el rollback puede
+ * tener que correr con `activeCuenta` ya en `null`: ahí la versión vieja se iba
+ * en su primera línea y la cantidad que el servidor rechazó quedaba pintada.
+ *
+ * `activeCuenta` se toca solo si sigue siendo la misma cuenta — mismo criterio
+ * que `aplicarCuentaActualizada`, que es quien aplica—. Si el garzón se fue a
+ * otra mesa, `cargarCuentas` ya reemplazó `cuentas.value` y acá no hay nada que
+ * pintar: volver a esa mesa la vuelve a pedir al servidor.
+ */
+function patchLineaOptimista(
+  cuentaId: string,
+  lineaId: string,
+  payload: CantidadPayload,
+) {
+  const cuenta = cuentas.value.find(c => c.id === cuentaId)
+  if (!cuenta) return
+  aplicarCuentaActualizada({
+    ...cuenta,
+    lineas: cuenta.lineas.map(l =>
       l.id === lineaId
         ? {
             ...l,
@@ -1100,20 +1138,12 @@ function patchLineaOptimista(lineaId: string, payload: CantidadPayload) {
           }
         : l,
     ),
-  }
-  activeCuenta.value = patched
-  const idx = cuentas.value.findIndex(c => c.id === cuentaId)
-  if (idx !== -1) cuentas.value[idx] = patched
-  void recalcular()
+  })
+  if (activeCuenta.value?.id === cuentaId) void recalcular()
 }
 
-async function patchLineaCantidad(
-  lineaId: string,
-  payload: CantidadPayload,
-  previo: CantidadPayload,
-) {
-  if (!activeCuenta.value) return
-  const cuentaId = activeCuenta.value.id
+async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
+  const { cuentaId, contexto, payload, previo } = edicion
 
   inflight.value.set(lineaId, previo)
   try {
@@ -1122,7 +1152,12 @@ async function patchLineaCantidad(
       cantidadPresentacion: payload.presentacion,
       unidadCodigoPresentacion: payload.unidadCodigo,
     })
-    syncCuenta(cuenta)
+    // `aplicarCuentaActualizada` y no `syncCuenta`: éste pisa `activeCuenta` sin
+    // mirar de quién es la respuesta, y desde que salir manda la edición la
+    // respuesta puede llegar con el garzón en OTRA cuenta — le pintaría encima
+    // la cuenta que dejó atrás.
+    aplicarCuentaActualizada(cuenta)
+    if (activeCuenta.value?.id === cuentaId) void recalcular()
   }
   catch (e: unknown) {
     // Se deshace **solo esta línea**, con la misma función que la pintó. Antes
@@ -1133,8 +1168,16 @@ async function patchLineaCantidad(
     // snapshot se tomaba después del optimista, o sea que restauraba el valor
     // que había que revertir. Restaurar la cuenta entera además pisaba la
     // edición optimista de otra línea de la misma ráfaga.
-    patchLineaOptimista(lineaId, previo)
-    toast.add({ title: apiErrorMsg(e, 'Error al actualizar la cantidad'), color: 'error' })
+    patchLineaOptimista(cuentaId, lineaId, previo)
+    toast.add({
+      title: apiErrorMsg(e, 'Error al actualizar la cantidad'),
+      // El rechazo puede llegar con el garzón ya en el listado o en otra mesa
+      // —salir manda lo pendiente—, y ahí *"no alcanza el stock"* solo no le
+      // dice a quién culpar: el `description` nombra la mesa y la cuenta. Con
+      // la cuenta todavía en pantalla se omite, porque ahí sobra.
+      description: activeCuenta.value?.id === cuentaId ? undefined : contexto,
+      color: 'error',
+    })
   }
   finally {
     inflight.value.delete(lineaId)
@@ -1144,6 +1187,8 @@ async function patchLineaCantidad(
 function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
   if (!activeCuenta.value || new Decimal(payload.cantidadCanonica || '0').lte(0)) return
 
+  const cuentaId = activeCuenta.value.id
+  const contexto = `${selectedMesa.value?.nombre ?? 'Mesa'} · Cuenta ${activeCuenta.value.numero}`
   const pendiente = pendingByLinea.get(linea.id)
   // El `previo` se toma de la línea SOLO en la primera edición de la ráfaga: en
   // la segunda la línea ya trae lo que pintó el optimista, y guardarlo haría que
@@ -1158,14 +1203,16 @@ function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
   }
   if (pendiente) clearTimeout(pendiente.timer)
 
-  patchLineaOptimista(linea.id, payload)
+  patchLineaOptimista(cuentaId, linea.id, payload)
 
   pendingByLinea.set(linea.id, {
+    cuentaId,
+    contexto,
     payload,
     previo,
     timer: setTimeout(() => {
       pendingByLinea.delete(linea.id)
-      void patchLineaCantidad(linea.id, payload, previo)
+      void patchLineaCantidad(linea.id, { cuentaId, contexto, payload, previo })
     }, 300),
   })
 }
@@ -1175,21 +1222,107 @@ async function flushPendientes() {
   // que quedaron sin responsable, y sombrearlo acá deja dos cosas sin relación
   // llamadas igual en el mismo archivo.
   const lineasPendientes = [...pendingByLinea.entries()]
-  for (const [lineaId, { timer, payload, previo }] of lineasPendientes) {
-    clearTimeout(timer)
+  // **Los timers se cancelan todos acá, antes del primer `await`.** Cancelarlos
+  // dentro del loop —como estaba— solo alcanzaba al de la primera línea: los de
+  // 2..N seguían armados durante la espera de red del primero y disparaban
+  // solos, así que la segunda línea salía con DOS `PATCH` (y dos toasts
+  // idénticos si el servidor rechazaba). Medido el 2026-09-02 por la revisión
+  // del diff, con el `PATCH` retenido más de 300 ms.
+  for (const [, { timer }] of lineasPendientes) clearTimeout(timer)
+  // Foto de las cuentas al empezar, como RESPALDO del guard de abajo:
+  // `onSelectMesa` manda lo pendiente y acto seguido `cargarCuentas` reemplaza
+  // `cuentas.value` por la lista de otra mesa, y ahí leer solo lo vivo daría
+  // "la línea ya no está" para todas menos la primera y se comería ediciones.
+  const cuentasAlEmpezar = cuentas.value
+  for (const [lineaId, { timer: _timer, ...edicion }] of lineasPendientes) {
+    // ⚠️ **La entrada se saca acá, no arriba junto con los timers.** Vaciar el
+    // Map entero antes del loop —como estaba— abría una ventana entre el
+    // `clear()` y el dispatch de las líneas 2..N en la que `onCantidadChange`
+    // no encontraba ni pendiente ni `inflight`, y recalculaba el `previo`
+    // **desde la línea**, que ya trae el optimista sin confirmar: re-editar la
+    // segunda línea mientras viajaba el `PATCH` de la primera dejaba pintada
+    // una cantidad que el servidor había rechazado. Es exactamente lo que el
+    // `Map` de `inflight` cerró en su ventana hermana. Medido el 2026-09-02 por
+    // la revisión del diff, contra control.
     pendingByLinea.delete(lineaId)
     // Quitar una línea no cancela su timer, así que puede haber salido de la
     // cuenta dentro de la ventana del debounce: mandarle el `PATCH` sería un 404
-    // y un toast por algo que el garzón ya deshizo.
-    if (!activeCuenta.value?.lineas.some(l => l.id === lineaId)) continue
-    // `payload` sale del Map y NO se relee de `activeCuenta`: el `syncCuenta` de
-    // la iteración anterior ya pisó el optimista de esta línea. Ver el docblock
+    // y un toast por algo que el garzón ya deshizo. Se mira **lo vivo primero**
+    // —`aplicarCuentaActualizada` reemplaza el array, así que la foto envejece
+    // en la primera vuelta— y la foto solo cuando la lista ya no es de esta
+    // mesa.
+    const cuenta = cuentas.value.find(c => c.id === edicion.cuentaId)
+      ?? cuentasAlEmpezar.find(c => c.id === edicion.cuentaId)
+    if (!cuenta?.lineas.some(l => l.id === lineaId)) continue
+    // `payload` sale del Map y NO se relee de la cuenta: la respuesta de la
+    // iteración anterior ya pisó el optimista de esta línea. Ver el docblock
     // de `pendingByLinea`.
-    await patchLineaCantidad(lineaId, payload, previo)
+    await patchLineaCantidad(lineaId, edicion)
   }
   while (inflight.value.size > 0) {
     await new Promise(resolve => setTimeout(resolve, 50))
   }
+}
+
+/**
+ * Tira las ediciones pendientes **sin mandarlas**. Único caso: la cuenta deja
+ * de existir (se cancela), y ahí el `PATCH` sería un rechazo con toast por una
+ * línea de una cuenta que ya no está.
+ *
+ * Mientras salir descartaba, esto no hacía falta: el timer disparaba,
+ * `patchLineaCantidad` veía `activeCuenta` en `null` y cortaba callado. Al
+ * hacer que salir mande, ese silencio dejó de existir y el caso hay que
+ * nombrarlo.
+ *
+ * ⚠️ **No es una garantía, es una ventana más chica.** Corre después del
+ * `await` de `cancelarCuenta` —tiene que ser así: descartando antes, un
+ * cancelar que falla perdía la edición en silencio—, así que si el timer de los
+ * 300 ms dispara **mientras el request de cancelar viaja**, el `PATCH` ya salió
+ * y acá no queda nada que tirar. Ese caso —y sus hermanos, el `PATCH` en vuelo
+ * que cae sobre una cuenta fusionada o sobre el componente desmontado— está
+ * anotado en `docs/agent/pendientes.md` § 2, porque los tres se arreglan con la
+ * misma decisión y no de a uno.
+ */
+function descartarPendientes() {
+  for (const { timer } of pendingByLinea.values()) clearTimeout(timer)
+  pendingByLinea.clear()
+}
+
+/**
+ * Volver al listado de cuentas **manda lo que quedó a medio camino** (decisión
+ * del owner, 2026-09-02).
+ *
+ * La escena que cierra: el garzón cambia una línea de 1 a 3 y toca *Cuentas*
+ * antes de que pasen los 300 ms del debounce. Hasta ese día no salía ningún
+ * `PATCH` ni ningún toast, y al volver a entrar el input mostraba **3** — la
+ * cantidad quedaba pintada como guardada y el servidor seguía en 1.
+ *
+ * **Sin `await`**: volver al listado es instantáneo, no espera la red.
+ * `flushPendientes` cancela **todos** los timers de forma sincrónica antes de su
+ * primer `await`, así que para cuando `volverACuentas` corre ya no queda ninguno
+ * que pueda disparar después. Si el servidor rechaza, el rollback y el toast
+ * llegan igual —por eso el toast nombra la mesa y la cuenta—.
+ */
+function salirDeCuenta() {
+  void flushPendientes()
+  volverACuentas()
+}
+
+/**
+ * Cerrar el drawer de la mesa —ESC, el backdrop, arrastrarlo— es la **quinta
+ * salida** de una cuenta, y era la única sin dueño: no tocaba `activeCuenta` ni
+ * lo pendiente, así que la edición se guardaba solo de rebote, porque el timer
+ * de 300 ms terminaba disparando.
+ *
+ * Peor que eso: con `activeCuenta` viva y **nada** en pantalla, el toast de
+ * rechazo se creía "en la cuenta" y se comía el `Mesa 3 · Cuenta 1`, que es
+ * justo el caso para el que ese texto existe. Lo encontró la revisión del diff.
+ *
+ * Cerrar hace lo mismo que tocar *Cuentas*: manda lo pendiente y suelta la
+ * cuenta.
+ */
+function onDrawerMesaToggle(abierto: boolean) {
+  if (!abierto && activeCuenta.value) salirDeCuenta()
 }
 
 async function addProducto(item: ItemCatalogo) {
@@ -1394,6 +1527,13 @@ async function confirmarCancelar() {
   try {
     const mesaId = selectedMesa.value.id
     await salonesApi.cancelarCuenta(activeCuenta.value.id)
+    // Descartar va acá y **no antes del request**: cancelar falla de verdad
+    // —`400` si otro dispositivo ya la cerró, `404`, red—, y descartando primero
+    // el garzón se quedaba dentro de la cuenta con la cantidad pintada, sin
+    // `PATCH`, sin rollback y sin timer que lo mandara después. O sea el mismo
+    // "quedó guardado y el servidor no se enteró" que este frente vino a cerrar,
+    // reintroducido por la puerta de al lado. Lo midió la revisión del diff.
+    descartarPendientes()
     toast.add({ title: 'Cuenta cancelada', color: 'success' })
     cuentas.value = cuentas.value.filter(c => c.id !== activeCuenta.value?.id)
     patchMesaOcupacion(mesaId, -1)
@@ -1604,7 +1744,12 @@ async function cerrarCuentaConPin(
       </div>
 
       <!-- Drawer de la mesa: lista de cuentas o detalle de una cuenta -->
-      <AppDrawer v-model:open="mesaDrawerOpen" width="90%" :ui="drawerBodyUi">
+      <AppDrawer
+        v-model:open="mesaDrawerOpen"
+        width="90%"
+        :ui="drawerBodyUi"
+        @update:open="onDrawerMesaToggle"
+      >
         <template #header>
           <div class="flex items-center gap-2 sm:gap-3">
             <UButton
@@ -1614,7 +1759,7 @@ async function cerrarCuentaConPin(
               color="neutral"
               variant="subtle"
               size="sm"
-              @click="volverACuentas"
+              @click="salirDeCuenta"
             />
             <span class="font-semibold text-default">
               {{ selectedMesa?.nombre }}
