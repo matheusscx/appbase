@@ -4,6 +4,10 @@
 
 **Date**: 2026-09-03
 
+> 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
+> código. Leerla antes de estimar: **dos de las cinco decisiones de acá ya están construidas** y
+> el delta real son tres puntos concretos, no el ADR entero.
+
 ## Context
 
 El owner abrió el tema el **2026-08-15** con una frase: *"los redondeos son para montos; hay
@@ -25,7 +29,7 @@ investigación suponía.
 | **Cálculo** | `tenants.escala_calculo` (default 6) | La precisión del **borrador**. Está escrito que *"no decide nada de lo persistido"* |
 | **Lo que se guarda** | `moneda.decimales` (el minor unit, `CHECK 0..4`) | El valor final de **todo monto que la venta guarda** |
 | **Cómo se redondea** | `tenants.modo_redondeo` | El modo (half-up, etc.) |
-| **Dónde cierra** | `nivelRedondeo` (preferencia del tenant, default `linea`) | `linea` = cada línea cierra y el total es la suma; `documento` = las líneas corren finas y **solo los totales** se cuantizan al final |
+| **Dónde cierra** | `nivelRedondeo` (preferencia del tenant, default `linea`) | `linea` = cada línea cierra y el total es la suma; `documento` = las líneas corren finas y **solo los totales** se cuantizan al final. ⚠️ Medido en [ADR-025](./025-decimales-estado-actual.md): con `documento` la línea **se persiste sin cuantizar**, con `escala_calculo` decimales — de ahí las tres combinaciones que la API rechaza |
 
 Y la intuición del owner de que *"hay montos que no necesitan toda esta precisión"* también
 existe, **al revés de como la recordaba**: `ESCALA_COSTO = 4` es la escala de **costos y
@@ -96,6 +100,10 @@ Propinas ya resuelve bien el reparto de centavos: unidades mínimas enteras, **m
 - **Se generaliza congelar los decimales en el documento** — a ventas y pagos. Una venta
   guardada hoy no puede cambiar de significado porque mañana alguien reconfigure la moneda, y
   tiene que quedar escrito con cuántos decimales se emitió.
+  ⚠️ **Corrección del 2026-09-03, medida:** en **ventas ya está construido** —`decimalesMoneda`
+  viaja dentro de `ConfigCalculo` y se persiste en `ventas.config_calculo`, con el porqué en su
+  propio docblock— y las notas de crédito lo heredan. Lo que falta es **pagos**. Detalle y
+  medición en [ADR-025](./025-decimales-estado-actual.md) § 4.
 - **NO se generaliza el reparto por mayores restos.** Solo tiene sentido donde hay un sobrante
   que repartir entre varios; en una venta no hay nada que repartir, y llevar maquinaria de
   reparto a donde no reparte nada es código que nadie ejercita y que se rompe en silencio.
