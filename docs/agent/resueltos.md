@@ -17,6 +17,46 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los helpers de caja copiados en 8 specs, y el agujero que escondía la copia más vieja (cerrado 2026-09-03)
+
+Venía de la § 4 y la contestó el owner ese mismo día: **extraerlos**. `abrirCaja` y `cerrarCaja`
+estaban copiados en `costeo-cpp`, `combos`, `grupos-modificadores`,
+`grupos-modificadores-overrides`, `items-pausados`, `liquidacion-propinas`, `recetas` y
+`ventas`. La convención del repo es *"duplicar dos veces es aceptable, se extrae a la tercera"*
+y ya iban ocho.
+
+**Lo que la medición encontró, y por qué no se podía uniformar a ojo:**
+
+| Diferencia | Qué había | Qué quedó canónico |
+|---|---|---|
+| `saldoInicial` | `100000` en seis y `10000` en **dos** —`ventas` y `liquidacion-propinas`— | Parametrizable, default `100000` |
+| Status de `abrir` | `[200, 201]` en `costeo-cpp`, `toBe(201)` en las otras siete | `toBe(201)`: ningún POST de `caja.controller.ts` declara `@HttpCode`, así que el rango era ruido |
+| Fase 2 del cierre | **`costeo-cpp` no la tenía** | Siempre |
+| `comentarioDiferencia` | Solo en `items-pausados` | Siempre |
+
+⚠️ **La entrada decía "`10000` en `ventas`" y eran dos specs, no uno.** Corregido al medir.
+
+**Y el saldo no era libre como parecía: es un PAR.** Las ocho copias contaban al cerrar
+exactamente lo que habían abierto, y tiene que ser así — *el conteo declara solo el saldo
+inicial*, nunca las ventas, así que una suite que vendió en efectivo **siempre** descuadra y la
+fase 2 existe para resolverlo con un motivo. Con las dos funciones separadas, la coherencia del
+par dependía de que ocho archivos se acordaran de tocar los dos números a la vez. Ahora
+`cerrarCaja` **cuenta lo que `abrirCaja` declaró**, así que desincronizarlos no es posible.
+
+🎯 **El agujero real, y era latente.** El `cerrarCaja` de `costeo-cpp` hacía **solo la fase 1**.
+Nunca falló porque esa suite no vende en efectivo (`EFECTIVO_ID`: cero usos), así que su caja
+siempre cuadra y auto-cierra. Medido con el mutante que saca la fase 2 del helper: **147 tests
+en rojo**, y en suites que este cambio ni toca —`salones-comanda`, `promociones`—, porque el
+cajón queda ocupado y la siguiente suite se estrella con un `409` al abrir. `costeo-cpp` estaba
+a **una venta en efectivo** de provocar eso, en un archivo ajeno y sin ninguna pista de dónde
+venía.
+
+**Qué lo fija.** El e2e completo, verde antes y después (714). No hay test que cubra la
+ausencia de la fase 2 en un spec suelto —es justamente por eso que la copia pudo derivar— así
+que lo que la fija es que ahora hay **una sola implementación**, y su mutante mata 147 tests.
+
+---
+
 ## Salir de la cuenta con una edición de cantidad a medio camino: ahora se guarda (cerrado 2026-09-02)
 
 Venía de la § 4 —necesitaba que el owner contestara— y era **la tercera ventana de la misma

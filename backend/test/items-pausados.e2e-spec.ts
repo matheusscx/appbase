@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -20,9 +21,6 @@ const ADMIN_PASS = 'admin';
 
 interface TokenResponse {
   access_token: string;
-}
-interface CajaResponse {
-  id: string;
 }
 interface AdvertenciaResponse {
   titulo: string;
@@ -60,66 +58,6 @@ async function login(app: INestApplication<App>): Promise<string> {
     .send({ tenantId: PARIS_TENANT_ID });
   expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
-}
-
-async function abrirCaja(
-  app: INestApplication<App>,
-  token: string,
-): Promise<string> {
-  const disp = await request(app.getHttpServer())
-    .get('/api/caja/cajones-disponibles')
-    .set('Authorization', `Bearer ${token}`);
-  expect(disp.status).toBe(200);
-  const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
-  const res = await request(app.getHttpServer())
-    .post('/api/caja/abrir')
-    .set('Authorization', `Bearer ${token}`)
-    .send({
-      cajonId,
-      saldoInicial: '100000.0000',
-      comentario: 'Apertura E2E ítems pausados',
-    });
-  expect(res.status).toBe(201);
-  return (res.body as CajaResponse).id;
-}
-
-/**
- * Cierre en DOS fases (patrón de `caja.e2e-spec.ts`): `conteo` congela el arqueo
- * y auto-cierra si cuadra; si descuadra pasa a `en_conciliacion` y hay que
- * resolver con `cerrar` + motivo por línea. Llamar solo a `cerrar` deja el cajón
- * ocupado y la suite siguiente ve un 409 críptico al abrir.
- */
-async function cerrarCaja(
-  app: INestApplication<App>,
-  token: string,
-  cajaId: string,
-): Promise<void> {
-  const conteo = await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/conteo`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({ lineas: [{ metodoPagoId: null, montoContado: '100000' }] });
-  expect([200, 201]).toContain(conteo.status);
-
-  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
-    const motivos = await request(app.getHttpServer())
-      .get('/api/motivos-diferencia?soloActivas=true')
-      .set('Authorization', `Bearer ${token}`);
-    expect(motivos.status).toBe(200);
-    const motivoId = (motivos.body as { id: string }[])[0]?.id;
-    const cierre = await request(app.getHttpServer())
-      .post(`/api/caja/${cajaId}/cerrar`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        lineas: [
-          {
-            metodoPagoId: null,
-            motivoDiferenciaId: motivoId,
-            comentarioDiferencia: 'Cierre de la suite e2e',
-          },
-        ],
-      });
-    expect([200, 201]).toContain(cierre.status);
-  }
 }
 
 async function getStock(ds: DataSource, itemId: string): Promise<number> {
@@ -160,7 +98,7 @@ describe('Ítem pausado según el canal (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
-  let cajaId: string;
+  let caja: CajaAbierta;
   let itemId: string;
   let nombreItem: string;
   let totalActivo: string;
@@ -204,7 +142,9 @@ describe('Ítem pausado según el canal (e2e)', () => {
 
     ds = app.get(DataSource);
     token = await login(app);
-    cajaId = await abrirCaja(app, token);
+    caja = await abrirCaja(app, token, {
+      comentario: 'Apertura E2E ítems pausados',
+    });
 
     nombreItem = `Item pausable canal E2E ${Date.now()}`;
     const resItem = await request(app.getHttpServer())
@@ -315,9 +255,9 @@ describe('Ítem pausado según el canal (e2e)', () => {
       }
       // `cerrarCaja` afirma sus status adentro: acá solo hay que evitar que su
       // fallo se lleve puesto el `close`, y dejar registro de que falló.
-      if (cajaId) {
+      if (caja) {
         await limpiar('cerrar caja', async () => {
-          await cerrarCaja(app, token, cajaId);
+          await cerrarCaja(app, token, caja);
           return 200;
         });
       }
@@ -544,7 +484,7 @@ describe('Categoría y tercero pausados: el backend rechaza la asignación nueva
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
-  let cajaId: string;
+  let caja: CajaAbierta;
   let categoriaId: string;
   let itemPrevioId: string;
   let terceroId: string;
@@ -593,7 +533,9 @@ describe('Categoría y tercero pausados: el backend rechaza la asignación nueva
 
     ds = app.get(DataSource);
     token = await login(app);
-    cajaId = await abrirCaja(app, token);
+    caja = await abrirCaja(app, token, {
+      comentario: 'Apertura E2E ítems pausados',
+    });
 
     const resCat = await request(app.getHttpServer())
       .post('/api/categorias')
@@ -627,7 +569,7 @@ describe('Categoría y tercero pausados: el backend rechaza la asignación nueva
     // su `@Cron` escribiéndole a la base durante las suites siguientes.
     // Ver `docs/agent/pendientes.md` § 1.
     try {
-      if (cajaId) await cerrarCaja(app, token, cajaId);
+      if (caja) await cerrarCaja(app, token, caja);
     } finally {
       await app.close();
     }

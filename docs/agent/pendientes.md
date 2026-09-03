@@ -1471,31 +1471,6 @@ Sigue en la § 4, sola.
   📌 El trabajo real no es ampliar el checker, es **enseñarle las tres formas**.
   Están medidas y documentadas en [`resueltos.md`](resueltos.md), con un ejemplo de cada una.
 
-- [ ] **`abrirCaja` y `cerrarCaja` están copiados en 8 specs e2e cada uno, y ya derivaron**
-  (backend/tests; **medido el 2026-08-28** barriendo la entrada de las lecturas sin status) —
-  `costeo-cpp`, `combos`, `grupos-modificadores`, `grupos-modificadores-overrides`,
-  `items-pausados`, `liquidacion-propinas`, `recetas` y `ventas` tienen cada uno su propia
-  copia. **No son idénticas** (los 8 md5 del cuerpo de `abrirCaja` difieren): `costeo-cpp`
-  afirma `expect([200, 201]).toContain(res.status)` donde las otras siete afirman
-  `toBe(201)`, y el `saldoInicial` va `100000` en seis y `10000` en `ventas`. O sea que la
-  copia **ya se está desincronizando en la conducta que verifica**, no solo en un string.
-  La convención del repo es *"duplicar dos veces es aceptable, se extrae a la tercera"* y van
-  ocho.
-  ✅ **Decisión del owner (2026-09-03): extraerlo.** `backend/test/helpers/caja.ts` (o
-  similar) y los 8 specs lo importan. La pregunta era de estructura y no de código: un helper
-  compartido **estrena un patrón** en `backend/test/` —hoy cada spec es autocontenido, y
-  `CLAUDE.md` dice no crear archivos nuevos si la implementación cabe en uno existente; acá no
-  cabe—. Se aceptó ese costo, más el de un diff que toca 9 archivos de una y exige el e2e
-  completo, a cambio de que la próxima diferencia de conducta entre copias no pase
-  inadvertida.
-  📌 **Al extraer hay que decidir qué queda como conducta única**, porque las copias ya
-  divergen: el `expect([200, 201])` de `costeo-cpp` contra el `toBe(201)` de las otras siete, y
-  el `saldoInicial` de `10000` en `ventas` contra `100000` en las demás. Eso **no se resuelve
-  uniformando a ojo**: hay que mirar por qué `costeo-cpp` toleraba los dos status y si `ventas`
-  depende de su saldo más chico.
-  📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
-  agregar aserciones, no reorganizar los specs.
-
 - [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
   seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
   al cerrar la limpieza de la causa → [`resueltos.md`](resueltos.md)) — con la causa ya

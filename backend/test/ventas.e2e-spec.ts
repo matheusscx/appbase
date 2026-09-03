@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import { VentasService } from '../src/modules/ventas/ventas.service';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
@@ -33,9 +34,6 @@ const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 
 interface TokenResponse {
   access_token: string;
-}
-interface CajaResponse {
-  id: string;
 }
 interface VentaResponse {
   id: string;
@@ -70,59 +68,6 @@ async function login(app: INestApplication<App>): Promise<string> {
     .send({ tenantId: PARIS_TENANT_ID });
   expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
-}
-
-async function abrirCaja(
-  app: INestApplication<App>,
-  token: string,
-): Promise<string> {
-  const disp = await request(app.getHttpServer())
-    .get('/api/caja/cajones-disponibles')
-    .set('Authorization', `Bearer ${token}`);
-  expect(disp.status).toBe(200);
-  const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
-  const res = await request(app.getHttpServer())
-    .post('/api/caja/abrir')
-    .set('Authorization', `Bearer ${token}`)
-    .send({ cajonId, saldoInicial: '10000.0000', comentario: 'Apertura E2E' });
-  expect(res.status).toBe(201);
-  return (res.body as CajaResponse).id;
-}
-
-/**
- * El cierre es en DOS fases: `POST /:id/conteo` congela el arqueo y auto-cierra
- * si cuadra; si descuadra pasa a `en_conciliacion` y hay que resolver la fase 2
- * con `POST /:id/cerrar`. Llamar solo a `cerrar` no cierra nada y el cajón queda
- * ocupado para las suites siguientes (409 al abrir). El teardown **asegura** el
- * cierre en vez de ignorar el status: si vuelve a romperse, se ve acá y no como
- * una falla críptica en otra suite.
- */
-async function cerrarCaja(
-  app: INestApplication<App>,
-  token: string,
-  cajaId: string,
-): Promise<void> {
-  const conteo = await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/conteo`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
-
-  expect(conteo.status).toBe(201);
-  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
-    // El conteo declara solo el saldo inicial, así que las ventas en efectivo de
-    // esta suite SIEMPRE descuadran. La fase 2 exige un motivo por línea
-    // descuadrada: mandar `lineas: []` da 400 y deja el cajón ocupado.
-    const motivos = await request(app.getHttpServer())
-      .get('/api/motivos-diferencia?soloActivas=true')
-      .set('Authorization', `Bearer ${token}`);
-    expect(motivos.status).toBe(200);
-    const motivoId = (motivos.body as { id: string }[])[0]?.id;
-    const cierre = await request(app.getHttpServer())
-      .post(`/api/caja/${cajaId}/cerrar`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }] });
-    expect([200, 201]).toContain(cierre.status);
-  }
 }
 
 /** Lo efectivamente aplicado A LA VENTA (excluye la parte que fue a propina). */
@@ -168,7 +113,7 @@ describe('Ventas (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
-  let cajaId: string;
+  let caja: CajaAbierta;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -187,7 +132,10 @@ describe('Ventas (e2e)', () => {
 
     ds = app.get(DataSource);
     token = await login(app);
-    cajaId = await abrirCaja(app, token);
+    caja = await abrirCaja(app, token, {
+      saldoInicial: '10000.0000',
+      comentario: 'Apertura E2E',
+    });
   }, 60000);
 
   afterAll(async () => {
@@ -197,7 +145,7 @@ describe('Ventas (e2e)', () => {
     // fallo sigue propagando; lo que cambia es que ya no se lleva el cierre
     // puesto. Ver `docs/agent/pendientes.md` § 1.
     try {
-      if (cajaId) await cerrarCaja(app, token, cajaId);
+      if (caja) await cerrarCaja(app, token, caja);
     } finally {
       await app.close();
     }

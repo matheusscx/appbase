@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 // Seed PARIS (docs/features/liquidacion-propinas-motor.md + seeder.service.ts):
 // config de distribución 0.10 con un único grupo "Garzones" (tipo_garzon=garzon,
@@ -95,66 +96,11 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-async function abrirCaja(
-  app: INestApplication<App>,
-  token: string,
-): Promise<string> {
-  const disp = await request(app.getHttpServer())
-    .get('/api/caja/cajones-disponibles')
-    .set('Authorization', `Bearer ${token}`);
-  expect(disp.status).toBe(200);
-  const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
-  const res = await request(app.getHttpServer())
-    .post('/api/caja/abrir')
-    .set('Authorization', `Bearer ${token}`)
-    .send({
-      cajonId,
-      saldoInicial: '10000.0000',
-      comentario: 'Apertura E2E propinas',
-    });
-  expect(res.status).toBe(201);
-  return (res.body as { id: string }).id;
-}
-
-/**
- * El cierre es en DOS fases: `POST /:id/conteo` congela el arqueo y auto-cierra
- * si cuadra; si descuadra pasa a `en_conciliacion` y hay que resolver la fase 2
- * con `POST /:id/cerrar`, que exige un motivo por línea descuadrada. Esta suite
- * vende en efectivo por montos grandes, así que SIEMPRE descuadra contra el
- * conteo del saldo inicial. Llamar solo a `cerrar` —y encima con el body de la
- * fase 1— no cerraba nada: el cajón quedaba ocupado y la suite siguiente que
- * intentaba abrir se llevaba un 409 críptico. El teardown **asevera** el cierre.
- */
-async function cerrarCaja(
-  app: INestApplication<App>,
-  token: string,
-  cajaId: string,
-): Promise<void> {
-  const conteo = await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/conteo`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
-  expect([200, 201]).toContain(conteo.status);
-
-  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
-    const motivos = await request(app.getHttpServer())
-      .get('/api/motivos-diferencia?soloActivas=true')
-      .set('Authorization', `Bearer ${token}`);
-    expect(motivos.status).toBe(200);
-    const motivoId = (motivos.body as { id: string }[])[0]?.id;
-    const cierre = await request(app.getHttpServer())
-      .post(`/api/caja/${cajaId}/cerrar`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }] });
-    expect([200, 201]).toContain(cierre.status);
-  }
-}
-
 describe('Liquidación de propinas — reparto (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
-  let cajaId: string;
+  let caja: CajaAbierta;
 
   // Rango amplio que cubre "ahora": el pool selecciona por creado_el. Las
   // aserciones son por reconciliación (suma == pool) y por deltas relativos,
@@ -300,7 +246,10 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
     ds = app.get(DataSource);
     token = await login(app);
-    cajaId = await abrirCaja(app, token);
+    caja = await abrirCaja(app, token, {
+      saldoInicial: '10000.0000',
+      comentario: 'Apertura E2E propinas',
+    });
 
     // Receptores del período: Ana, Bruno y Carla trabajaron (tip propio).
     await sembrarTipGarzon(ANA_ID, '1000');
@@ -315,7 +264,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
     // fallo sigue propagando; lo que cambia es que ya no se lleva el cierre
     // puesto. Ver `docs/agent/pendientes.md` § 1.
     try {
-      if (cajaId) await cerrarCaja(app, token, cajaId);
+      if (caja) await cerrarCaja(app, token, caja);
     } finally {
       await app.close();
     }

@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -57,54 +58,11 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-/**
- * La venta `pendiente` (sin pagos) del test de anulación es del canal físico,
- * que exige una caja abierta — `online` no sirve: rechaza con "las ventas
- * online requieren el pago completo", y una venta pagada no es anulable.
- */
-async function abrirCaja(
-  app: INestApplication<App>,
-  token: string,
-): Promise<string> {
-  const disp = await request(app.getHttpServer())
-    .get('/api/caja/cajones-disponibles')
-    .set('Authorization', `Bearer ${token}`);
-  expect(disp.status).toBe(200);
-  const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
-  const res = await request(app.getHttpServer())
-    .post('/api/caja/abrir')
-    .set('Authorization', `Bearer ${token}`)
-    .send({
-      cajonId,
-      saldoInicial: '100000.0000',
-      comentario: 'Apertura E2E costeo CPP',
-    });
-  expect([200, 201]).toContain(res.status);
-  return (res.body as { id: string }).id;
-}
-
-/**
- * Cierra por las DOS fases reales (conteo → auto-cierre si cuadra). Sin esto
- * el cajón queda ocupado y la fuga reaparece como un `409` críptico al abrir
- * en otra suite. Mismo patrón que `recetas.e2e-spec.ts`.
- */
-async function cerrarCaja(
-  app: INestApplication<App>,
-  token: string,
-  cajaId: string,
-): Promise<void> {
-  const conteo = await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/conteo`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({ lineas: [{ metodoPagoId: null, montoContado: '100000' }] });
-  expect([200, 201]).toContain(conteo.status);
-}
-
 describe('Costeo CPP (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let itemId: string;
-  let cajaId: string;
+  let caja: CajaAbierta;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -122,7 +80,9 @@ describe('Costeo CPP (e2e)', () => {
     await app.init();
 
     token = await login(app);
-    cajaId = await abrirCaja(app, token);
+    caja = await abrirCaja(app, token, {
+      comentario: 'Apertura E2E costeo CPP',
+    });
   });
 
   afterAll(async () => {
@@ -132,7 +92,7 @@ describe('Costeo CPP (e2e)', () => {
     // fallo sigue propagando; lo que cambia es que ya no se lleva el cierre
     // puesto. Ver `docs/agent/pendientes.md` § 1.
     try {
-      if (cajaId) await cerrarCaja(app, token, cajaId);
+      if (caja) await cerrarCaja(app, token, caja);
     } finally {
       await app.close();
     }

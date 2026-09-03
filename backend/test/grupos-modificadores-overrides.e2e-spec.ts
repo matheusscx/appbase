@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
@@ -16,9 +17,6 @@ const ADMIN_PASS = 'admin';
 
 interface TokenResponse {
   access_token: string;
-}
-interface CajaResponse {
-  id: string;
 }
 interface ItemResponse {
   id: string;
@@ -78,73 +76,6 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-async function abrirCaja(
-  app: INestApplication<App>,
-  token: string,
-): Promise<string> {
-  const disp = await request(app.getHttpServer())
-    .get('/api/caja/cajones-disponibles')
-    .set('Authorization', `Bearer ${token}`);
-  expect(disp.status).toBe(200);
-  const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
-  const res = await request(app.getHttpServer())
-    .post('/api/caja/abrir')
-    .set('Authorization', `Bearer ${token}`)
-    .send({
-      cajonId,
-      saldoInicial: '100000.0000',
-      comentario: 'Apertura E2E grupos-modificadores-overrides',
-    });
-  expect(res.status).toBe(201);
-  return (res.body as CajaResponse).id;
-}
-
-/**
- * Cierra la caja por las DOS fases reales: `POST /:id/conteo` congela el arqueo y
- * auto-cierra si cuadra; si alguna línea descuadra pasa a `en_conciliacion` y hay
- * que finalizar con `POST /:id/cerrar` + un motivo por línea descuadrada.
- * Antes esto llamaba SOLO a la fase 2 sobre una caja `abierta` e ignoraba el
- * status: no cerraba nada, el cajón quedaba ocupado y la fuga reaparecía como un
- * `409` críptico al abrir en otra suite. Por eso asevera las dos fases.
- * Patrón de referencia: `cerrarEnDosFases` en `caja.e2e-spec.ts`.
- */
-async function cerrarCaja(
-  app: INestApplication<App>,
-  token: string,
-  cajaId: string,
-): Promise<void> {
-  const conteo = await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/conteo`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({ lineas: [{ metodoPagoId: null, montoContado: '100000' }] });
-  expect([200, 201]).toContain(conteo.status);
-
-  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
-    // El conteo declara un monto fijo, así que las ventas en efectivo de esta
-    // suite descuadran. La fase 2 exige motivo por línea descuadrada: mandar
-    // `lineas: []` da 400 y deja el cajón ocupado. El comentario va siempre para
-    // no depender de si el primer motivo activo pide `requiereComentario`.
-    const motivos = await request(app.getHttpServer())
-      .get('/api/motivos-diferencia?soloActivas=true')
-      .set('Authorization', `Bearer ${token}`);
-    expect(motivos.status).toBe(200);
-    const motivoId = (motivos.body as { id: string }[])[0]?.id;
-    const cierre = await request(app.getHttpServer())
-      .post(`/api/caja/${cajaId}/cerrar`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        lineas: [
-          {
-            metodoPagoId: null,
-            motivoDiferenciaId: motivoId,
-            comentarioDiferencia: 'Cierre de la suite e2e',
-          },
-        ],
-      });
-    expect([200, 201]).toContain(cierre.status);
-  }
-}
-
 async function crearIngrediente(
   app: INestApplication<App>,
   token: string,
@@ -173,7 +104,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
-  let cajaId: string;
+  let caja: CajaAbierta;
   let panBaseId: string;
   let carneId: string;
   let grupoProteinaId: string;
@@ -199,7 +130,9 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
 
     ds = app.get(DataSource);
     token = await login(app);
-    cajaId = await abrirCaja(app, token);
+    caja = await abrirCaja(app, token, {
+      comentario: 'Apertura E2E grupos-modificadores-overrides',
+    });
 
     // Ingrediente base (bloqueante, no participa del override) para que ambas
     // recetas puedan crearse (una receta requiere al menos un ingrediente).
@@ -230,7 +163,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     // fallo sigue propagando; lo que cambia es que ya no se lleva el cierre
     // puesto. Ver `docs/agent/pendientes.md` § 1.
     try {
-      if (cajaId) await cerrarCaja(app, token, cajaId);
+      if (caja) await cerrarCaja(app, token, caja);
     } finally {
       await app.close();
     }
