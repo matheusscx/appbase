@@ -1599,6 +1599,25 @@ facturación la dejamos para después, pero la estructura tiene que ser escalabl
 condición frente al IVA en Argentina, el régimen + CP + uso del CFDI en México), y eso
 depende de una respuesta previa: **si AR/CO/MX van a emitir de verdad o son catálogo demo.**
 
+✅ **Contestada esa mitad el 2026-09-03** (owner): *"van a emitir de verdad, los tres, pero
+será progresivo"*. Lo que cambia:
+
+- **No son catálogo demo.** Los campos fiscales del receptor (eje D de la investigación) hay
+  que capturarlos; no es opcional. Lo que hoy los hace **no urgentes** es otra cosa, y
+  conviene decirla con nombre: **no hay datos productivos** — no se está perdiendo ningún
+  hecho fiscal todavía. El reloj arranca con el **primer tenant real vendiendo en cada país**,
+  no con esta respuesta.
+- **"Progresivo" agrega un requisito que la investigación no tenía:** en todo momento va a
+  haber países emitiendo y países que todavía no. O sea que **"emite / no emite" es estado por
+  país, no un interruptor global del sistema** — y el país que entra segundo **no puede obligar
+  a migrar el historial del primero**. Eso descarta de entrada la solución barata de
+  "agregamos las columnas de Chile ahora y ya veremos": las columnas de Chile son las de Chile.
+
+⛔ **Lo que sigue abierto es la otra mitad, y es la que tiene un bug adentro:** qué hace hoy un
+reembolso en un tenant de AR/CO/MX, que congela el tipo de documento **chileno**. Que los tres
+vayan a emitir no lo contesta —justamente porque es progresivo, van a pasar meses con esos
+tenants operando sin sus tipos de documento—.
+
 📌 Mientras no se conteste, **el alta en esos países no está prohibida**: bloquearla rompería
 la propia feature del redondeo por país, y el tenant sí puede vender y cobrar. Lo que no se
 puede es seguir diciendo que "todavía no emite documentos" — emite el de otro país.
