@@ -35,8 +35,19 @@ tomar nada de este ADR.
 > 📊 **Los pros y contras de las dos reabiertas ya están analizados contra el código**, a pedido
 > del owner: [`2026-09-03-uf-y-nivel-por-pais-analisis.md`](../agent/investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
 > Recomienda **mantener "la UF solo cotiza"** (por una razón distinta de la que decía este ADR)
-> y **NO mover todavía el nivel al país**, porque la regla del único país que tenemos es una
-> inferencia, no una norma citada.
+> y **mover al país las DOS perillas** — `nivelRedondeo` y también `modo_redondeo`, que este ADR
+> no había tocado.
+>
+> ⛔ **El análisis se corrigió en el camino, y el error fue de premisa:** su primera versión
+> razonó *"hay un solo país, entonces YAGNI"* y el owner lo corrigió — **el producto es
+> multi-tenant para América Latina**, así que multi-país es el objetivo de diseño, no una
+> hipótesis. Con eso, de los cinco países relevados **dos son LatAm y los dos tienen regla
+> citada, distinta entre sí**: México obliga a redondear al total y Colombia exige half-to-even.
+> Hoy los dos **incumplirían por default**.
+>
+> ⚠️ Y aparece una contradicción adentro de la investigación de agosto: afirma que *"las normas
+> que fijan un modo exigen half-up"* y su propia tabla dice que Colombia exige **half-to-even**.
+> Ese era el argumento con el que se dejó el modo en manos del tenant.
 >
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
 > código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este

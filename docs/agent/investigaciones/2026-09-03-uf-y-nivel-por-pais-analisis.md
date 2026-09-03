@@ -25,9 +25,15 @@ números.
 
 ## 1. Los hechos del producto — medidos, no recordados
 
+> ⛔ **CORRECCIÓN DE PREMISA (owner, 2026-09-03).** La primera versión de este documento razonó
+> con *"hay un solo país, entonces YAGNI"*. **Está mal de raíz:** el producto es multi-tenant
+> **para América Latina**, así que multi-país es el **objetivo de diseño**, no una hipótesis
+> lejana. Que hoy haya una fila en `pais` es el estado, no el alcance. La § 3 se reescribió
+> entera con la premisa correcta y **la recomendación se dio vuelta**.
+
 | Hecho | Medido en |
 |---|---|
-| **Hay UN solo país**: Chile. Moneda oficial CLP (0 decimales); habilitadas CLP, UF y USD | `pais` / `pais_moneda`, base de dev |
+| **Hoy hay un país cargado**: Chile. Moneda oficial CLP (0 decimales); habilitadas CLP, UF y USD. ⚠️ El objetivo es **LatAm**: esto es el estado, no el alcance | `pais` / `pais_moneda`, base de dev |
 | **Un ítem ya se puede cotizar en UF hoy.** `validarMoneda` acepta cualquier moneda que esté en `pais_moneda` del país del tenant — no exige la oficial | `items.service.ts` → `validarMoneda` |
 | **Cada línea de venta ya congela el origen**: `moneda_id_origen`, `precio_unitario_origen` y `tasa_cambio` (escala **6**) | `venta-detalle.entity.ts` + `ventas.service.ts` |
 | **NO hay historial de tasas.** `tenant_moneda` es (tenant, moneda) con un `valor_del_dia` que se **pisa**: sin fechas de vigencia | `tenant-moneda.entity.ts` |
@@ -135,44 +141,69 @@ el umbral de 135 UF **en pesos una sola vez al año**, no lo recalcula venta a v
 
 ---
 
-## 3. El nivel de redondeo por país
+## 3. El nivel de redondeo por país — **reescrita con la premisa correcta**
 
-### 3.1. El hecho que cambia la pregunta
+> La primera versión decía *"hay un país, no lo muevas todavía"*. Con **LatAm como objetivo**,
+> ese argumento no se sostiene: la recomendación **se da vuelta**.
 
-**Hay un solo país en el sistema.** La decisión *"lo fija el país"* se tomó sobre una tabla de
-**una fila**, y sobre exactamente **dos ejemplos** de la investigación —Reino Unido obliga por
-línea, México obliga al total—, ninguno de los cuales es Chile.
+### 3.1. La región es el caso, no la excepción
 
-Y para Chile, lo que la investigación encontró es que **el dato no está**: la fila de Chile de
-la tabla comparativa fue **corregida el 2026-08-20** — que los totales vayan enteros en CLP es
-**[INFERENCIA]** desde el silencio del formato, no una frase literal del SII. La regla que
-justifica mover la perilla al país, para nuestro país, **no la tenemos escrita**.
+De los cinco países que la investigación relevó, **dos son LatAm y los dos tienen la regla
+citada** — y no coinciden entre sí ni con Chile:
 
-### 3.2. Las tres opciones
+| País | Qué fija su norma | Qué perilla nuestra es |
+|---|---|---|
+| **México** (SAT, Anexo 20) | sumar a hasta 6 decimales y redondear **una sola vez al total** | `nivelRedondeo = documento` |
+| **Colombia** (DIAN, NTC 3711) | **half-to-even**, con tolerancias de ±$5 en IVA | `modo_redondeo` |
+| **Chile** (SII) | totales enteros en CLP — ⛔ **[INFERENCIA]**, corregida el 2026-08-20 | `nivelRedondeo` (sin confirmar) |
+
+Con LatAm como objetivo, **esto deja de ser hipotético**: el segundo tenant de la región puede
+entrar con una regla distinta de la del primero, y hoy la perilla es una **preferencia del
+tenant** que nadie le va a saber configurar.
+
+### 3.2. ⭐ El hallazgo nuevo: el país gobierna DOS perillas, no una
+
+El ADR-024 movió al país solo el **nivel**. Pero la única regla LatAm citada sobre el **modo**
+—Colombia, half-to-even— también es del país, y hoy `modo_redondeo` es **preferencia del
+tenant con default `HALF_UP`**. O sea: **un tenant colombiano que no toque nada queda fuera de
+su norma**, y nada se lo dice.
+
+⚠️ **Y la investigación se contradice a sí misma justo ahí.** Su § 1 afirma que *"las normas
+que sí fijan un modo exigen **half-up**"* (Reglamento CE 1103/97, IRS) y lo usa para respaldar
+que `modo_redondeo` sea configurable. Su propia § 6 dice que **Colombia exige half-to-even**.
+La generalización es falsa, y la falsifica un país de nuestra región. **No es un detalle
+académico:** es el argumento con el que se decidió dejar el modo en manos del tenant.
+
+### 3.3. Las tres opciones, con la premisa corregida
 
 | Opción | Pro | Contra |
 |---|---|---|
-| **Lo fija el país, el tenant no lo toca** (ADR-024) | Es una regla tributaria, no un gusto; el molde existe (la moneda oficial ya sale del país) | Se decide sobre **un** país cuya regla **no está confirmada**, y con dos ejemplos ajenos. Deja sin salida al caso raro |
-| **Del tenant, con el default puesto por su país** | Arranca bien sin configurar; deja escape | El tenant puede elegir algo que su país no permite, y el error se ve en un documento emitido |
-| **Como está hoy: del tenant, default `linea`** | Costo cero; nada que romper | Un tenant mexicano no puede cumplir su regla sin que alguien la configure a mano, y nada se lo avisa |
+| **Lo fija el país** (ADR-024, extendido al modo) | Es donde vive la norma. Con LatAm como objetivo el caso es real, no futuro. El molde existe: la moneda oficial ya sale del país. Cierra el agujero de Colombia, que hoy nadie ve | Hay que sembrar la regla de cada país, y **la de Chile no la tenemos citada**. Deja sin salida al caso raro que la norma no contemple |
+| **Del tenant, con el default puesto por su país** | Arranca cumpliendo sin configurar, y deja escape | El tenant puede moverlo a algo que su país no permite, y el error se ve en un documento ya emitido |
+| **Como está hoy: del tenant, defaults `linea` + `HALF_UP`** | Costo cero | Un tenant mexicano y uno colombiano incumplen **por default**, y nada se los avisa |
 
-### 3.3. Recomendación
+### 3.4. Recomendación
 
-**No mover la perilla todavía. Anotar la regla por país cuando exista el segundo país.**
+**Mover las dos perillas al país** —`nivelRedondeo` y `modo_redondeo`— y que el tenant no las
+contradiga. Con LatAm de objetivo, dejarlas en el tenant significa que **el default incumple**
+en al menos dos de los países a los que apuntamos, y el incumplimiento se ve en un documento ya
+emitido.
 
-El razonamiento es el mismo YAGNI que el owner ya aplicó a la columna de decimales
-(*"estamos muy lejos de tener casos como el afgani"*), y acá es más fuerte: **la regla del único
-país que tenemos no está confirmada**, así que mover el dato a la tabla de países significaría
-sembrar ahí una inferencia, no una norma. Un dato inventado en la tabla que dice "acá vive la
-ley" es peor que no tener el dato.
+⚠️ **Pero con una regla de carga que no se puede saltear: cada país entra con su norma
+CITADA.** Hoy tenemos dos de LatAm citadas (México, Colombia) y **la de Chile es una
+inferencia**. Sembrar una inferencia en la tabla que dice *"acá vive la ley"* es peor que no
+tener el dato: el próximo la lee como norma. Entonces:
 
-⚠️ **Lo que sí conviene hacer ahora, y es barato:** dejar escrito en la config del tenant que
-**esa perilla es candidata a mudarse al país**, y que quien agregue el segundo país tiene que
-traer su regla **citada**, no inferida. Cuesta un comentario; evita que el próximo la mude
-"porque el ADR lo dice" sobre la misma inferencia.
+1. **México y Colombia se siembran con su regla y su cita.**
+2. **Chile entra marcado como inferencia** —o no entra y usa el default— hasta que alguien traiga
+   la norma. Ese es el dato que más falta, porque es donde opera el producto hoy.
+3. **El default de un país sin regla cargada** tiene que ser explícito y conservador, no un
+   silencio que parezca decisión.
 
-📌 **Esto NO reabre la decisión 1** (un criterio, con el número puesto por la moneda), que sigue
-firme y ya está construida.
+📌 **Lo que cambia respecto de la primera versión de este análisis:** antes dije "no lo muevas
+hasta que exista el segundo país". Con LatAm como objetivo eso es esperar a que el problema
+llegue con un cliente adentro. Lo que sí sostengo es la otra mitad: **no inventar la regla de
+Chile** para poder mover la perilla.
 
 ---
 
@@ -181,7 +212,13 @@ firme y ya está construida.
 Marcado para que nadie lo lea como resuelto:
 
 - **La regla de redondeo de Chile**, citada de una norma y no inferida del formato del DTE. Es
-  el dato que destraba la decisión 2.
+  el dato que destraba la decisión 2, y el que más falta: es donde el producto opera hoy.
+- **El resto de LatAm.** Tenemos México y Colombia citados; faltan Argentina, Perú, Uruguay,
+  Ecuador, Bolivia, Paraguay… Con la región como objetivo, **relevar la regla de redondeo por
+  país es un frente propio**, y conviene saberlo antes de prometer el multi-país.
+- **Si la contradicción de la investigación cambia algo más.** Afirma que *"las normas que fijan
+  un modo exigen half-up"* y su propia tabla dice que Colombia exige half-to-even. Hay que ver
+  qué otras conclusiones colgaban de esa generalización.
 - **Qué valor de UF aplica a un documento** (emisión / vencimiento / pago). La investigación no
   halló la circular; la fuente es secundaria. Solo importa cuando se construya lo fiscal.
 - **De dónde sale la tasa de la UF.** No se halló API oficial del Banco Central; hay terceros
