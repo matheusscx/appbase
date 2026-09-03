@@ -89,12 +89,19 @@ tomar nada de este ADR.
 >    tributario ni el impuesto"*; el colombiano toca **el impuesto del documento**. Tenemos el
 >    concepto nombrado y solo del lado de la caja.
 >
-> **Lo que la propuesta todavía no dice, y hay que decidir al construirla:**
-> - **Qué pasa con un tenant ya configurado** cuando se carga (o cambia) la ley de su país y su
->   valor queda fuera. Hoy sale gratis —no hay datos productivos— pero el mecanismo hay que
->   elegirlo: ¿se migra, se avisa, se bloquea al guardar?
-> - **Quién mantiene la tabla.** Una ley cambia y alguien tiene que actualizar el seed; sin un
->   dueño, la tabla que dice "acá vive la ley" envejece en silencio.
+> ✅ **Las dos preguntas que faltaban, contestadas por el owner (2026-09-03):**
+> - **Qué pasa con un tenant ya configurado → NO APLICA.** *"No tenemos ningún tenant operando,
+>   aún estamos en desarrollo."* Es la regla que el proyecto ya sigue: no se diseñan backfills ni
+>   migraciones incrementales — se cambia el esquema, se actualiza el seeder y se resetea.
+> - **Quién mantiene la tabla → el panel de SUPERADMIN**, donde también se van a crear los
+>   tenants. ⚠️ **Ese panel todavía no existe**: `frontend/app/pages/admin.vue` es un placeholder
+>   que dice *"próximamente disponible"*. Lo que sí existe es el eje —`SuperadminGuard`,
+>   `es_superadmin` en el JWT y `@Controller('admin/tenants')`—.
+>
+> 📌 **Consecuencia práctica, para que nadie busque una pantalla que no está:** hasta que el
+> panel se construya, **las reglas por país viven en el seeder**. Eso es aceptable justamente
+> porque no hay tenants operando; el día que los haya, editarlas sin panel deja de ser una
+> opción.
 >
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
 > código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este

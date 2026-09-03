@@ -1871,6 +1871,11 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > de \$10 es un **escalón**, la misma forma que `cashRounding` pero sobre el impuesto. Detalle
   > en el ADR.
   >
+  > ✅ **Y las dos preguntas que quedaban, contestadas el mismo día:** la migración de un tenant
+  > ya configurado **no aplica** —no hay ninguno operando, y el proyecto no diseña backfills—, y
+  > la tabla la va a mantener el **panel de superadmin**, que **todavía no existe** (hoy
+  > `admin.vue` es un placeholder). Hasta entonces las reglas por país **viven en el seeder**.
+  >
   > 🌎 **Y se relevaron ocho países de LatAm** (2026-09-03, con tres fuentes primarias) →
   > [`investigaciones/2026-09-03-redondeo-por-pais-latam.md`](investigaciones/2026-09-03-redondeo-por-pais-latam.md).
   > **Da vuelta la prioridad:** lo urgente es el **modo**, no el nivel — Argentina y Colombia
