@@ -54,6 +54,7 @@ describe('TenantsService', () => {
     find: jest.Mock;
     softDelete: jest.Mock;
     create: jest.Mock;
+    query: jest.Mock;
   };
   let razonSocialRepo: {
     find: jest.Mock;
@@ -100,6 +101,8 @@ describe('TenantsService', () => {
       find: jest.fn(),
       softDelete: jest.fn(),
       create: jest.fn(),
+      // `assertMismoPais` resuelve las dos provincias por SQL crudo.
+      query: jest.fn(),
     };
     razonSocialRepo = {
       find: jest.fn(),
@@ -197,40 +200,106 @@ describe('TenantsService', () => {
     const PROVINCIA_ID = 'provincia-uuid';
     const CREADOR_ID = 'creador-uuid';
 
-    /** El manager de la transacción, con lo mínimo para que `create()` no tire. */
-    function managerFake() {
+    /** La regla de redondeo que el país le pasa al tenant al nacer. */
+    interface ReglaPais {
+      modo_redondeo_sugerido: string | null;
+      nivel_redondeo_sugerido: string | null;
+    }
+
+    /**
+     * El manager de la transacción, con lo mínimo para que `create()` no tire.
+     * La primera query que hace `create` es la del país —de ahí salen los
+     * defaults de las dos perillas de redondeo—, así que el fake la contesta
+     * con la regla recibida; el resto devuelve `[]`. Con `null`, tampoco esa:
+     * es el caso de la provincia que no existe.
+     */
+    function managerFake(regla: ReglaPais | null) {
       return {
         create: jest.fn((_entidad: unknown, datos: object) => datos),
         save: jest.fn((_entidad: unknown, datos: object) =>
           Promise.resolve({ id: 'tenant-nuevo', ...datos }),
         ),
-        query: jest.fn().mockResolvedValue([]),
+        // Discrimina por COLUMNA y no por `FROM provincia prov`: `create` hace
+        // tres queries sobre esa misma tabla (la regla, la moneda oficial y
+        // los métodos de pago del país) y un match por el `FROM` les
+        // contestaría la regla a las tres, apagando en silencio los dos
+        // sembrados de abajo.
+        query: jest.fn((sql: string) =>
+          Promise.resolve(
+            regla && sql.includes('modo_redondeo_sugerido') ? [regla] : [],
+          ),
+        ),
       };
     }
 
     let manager: ReturnType<typeof managerFake>;
 
-    beforeEach(() => {
-      manager = managerFake();
+    function conRegla(regla: ReglaPais | null) {
+      manager = managerFake(regla);
       dataSource.transaction.mockImplementation(
         (cb: (m: typeof manager) => unknown) => cb(manager),
       );
-    });
+    }
 
-    it('el alta de un tenant fija el nivel de redondeo por línea', async () => {
+    /** El objeto con el que nace el tenant: `manager.create(Tenant, {...})`. */
+    function datosDelTenant(): object {
+      const [, datos] = manager.create.mock.calls.find(
+        ([entidad]) => entidad === Tenant,
+      )!;
+      return datos;
+    }
+
+    it('sin regla en el país, el tenant nace con el default de sistema', async () => {
+      conRegla({ modo_redondeo_sugerido: null, nivel_redondeo_sugerido: null });
+
       await service.create(
         { provinciaId: PROVINCIA_ID, nombre: 'Tenant nuevo', correo: 'a@b.cl' },
         CREADOR_ID,
       );
 
-      // manager.create(Tenant, {...}) — el objeto con el que nace el tenant
-      const [, datos] = manager.create.mock.calls.find(
-        ([entidad]) => entidad === Tenant,
-      )!;
-      expect(datos).toMatchObject({
+      expect(datosDelTenant()).toMatchObject({
         nivelRedondeo: 'linea',
-        modoRedondeo: 'HALF_UP', // el vecino que ya existía: si este falla, el mock cambió
+        modoRedondeo: 'HALF_UP',
+        escalaCalculo: 6,
       });
+    });
+
+    it('con regla en el país gana el país, y "documento" se lleva la escala consigo', async () => {
+      // `HALF_EVEN` discrimina porque NO es el default de sistema: con un país
+      // que sugiriera `HALF_UP`, este test pasaría aunque `create` ignorara el
+      // país por completo. Y la escala baja a 4 porque con 'documento' las
+      // líneas se persisten sin cuantizar en columnas NUMERIC(18,4).
+      conRegla({
+        modo_redondeo_sugerido: 'HALF_EVEN',
+        nivel_redondeo_sugerido: 'documento',
+      });
+
+      await service.create(
+        { provinciaId: PROVINCIA_ID, nombre: 'Tenant nuevo', correo: 'a@b.cl' },
+        CREADOR_ID,
+      );
+
+      expect(datosDelTenant()).toMatchObject({
+        nivelRedondeo: 'documento',
+        modoRedondeo: 'HALF_EVEN',
+        escalaCalculo: 4,
+      });
+    });
+
+    it('una provincia que no existe corta con 400 antes de guardar nada', async () => {
+      conRegla(null);
+
+      await expect(
+        service.create(
+          {
+            provinciaId: PROVINCIA_ID,
+            nombre: 'Tenant nuevo',
+            correo: 'a@b.cl',
+          },
+          CREADOR_ID,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.save).not.toHaveBeenCalled();
     });
   });
 
@@ -262,6 +331,56 @@ describe('TenantsService', () => {
       await expect(
         service.updateMine('tenant-uuid', { correo: 'otro@tenant.cl' }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    /**
+     * Las dos ramas de `assertMismoPais` que el e2e no puede montar: para que
+     * una provincia no resuelva hay que borrarla del catálogo, y `provincia` no
+     * tiene API de escritura. El caso de "otro país" sí vive en el e2e
+     * (`test/redondeo-por-pais.e2e-spec.ts`), que es donde vale.
+     */
+    describe('mudarse de provincia', () => {
+      beforeEach(() => {
+        tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+        tenantRepo.save.mockImplementation((row: unknown) =>
+          Promise.resolve(row),
+        );
+      });
+
+      it('la provincia de destino no existe: corta y no guarda', async () => {
+        tenantRepo.query.mockResolvedValue([
+          { provincia_id: 'prov-uuid', pais_id: 'cl', pais: 'Chile' },
+        ]);
+        await expect(
+          service.updateMine('tenant-uuid', { provinciaId: 'fantasma' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(tenantRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('la provincia ACTUAL no resuelve: corta igual, no deja pasar', async () => {
+        // La rama que antes fallaba abierta. Sin `origen` no se puede saber de
+        // qué país viene el tenant, y un guard cuya rama de "no sé" es dejar
+        // pasar no es un guard: sin este corte, la mudanza a otro país entra.
+        tenantRepo.query.mockResolvedValue([
+          { provincia_id: 'destino', pais_id: 'ar', pais: 'Argentina' },
+        ]);
+        await expect(
+          service.updateMine('tenant-uuid', { provinciaId: 'destino' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(tenantRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('misma provincia: ni siquiera consulta el catálogo', async () => {
+        // El control de la salida temprana: la pantalla de empresa manda la
+        // provincia en cada guardado, así que el caso normal no puede pagar
+        // una query — ni arriesgarse a un 400 por un catálogo movido.
+        await service.updateMine('tenant-uuid', {
+          provinciaId: mockTenant.provinciaId,
+          nombre: 'Paris',
+        });
+        expect(tenantRepo.query).not.toHaveBeenCalled();
+        expect(tenantRepo.save).toHaveBeenCalled();
+      });
     });
   });
 

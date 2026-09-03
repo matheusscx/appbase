@@ -13,6 +13,7 @@ import { Db } from '../../common/db/db.service';
 import { Usuario } from '../users/usuario.entity';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
+import { MODO_REDONDEO_DEFAULT } from '../calculo-precios/calculo-precios.engine';
 import type {
   ModoRedondeo,
   NivelRedondeo,
@@ -197,6 +198,50 @@ export class TenantsService {
 
   async create(dto: CreateTenantDto, creadorId: string): Promise<Tenant> {
     return this.db.transaccion(async (manager) => {
+      // 0. El país del tenant sale de su provincia, y con él el default de sus
+      // dos perillas de redondeo. UNA sola query para las dos — nunca una por
+      // perilla. Es el mismo patrón que ya usa la moneda oficial (ADR-021):
+      // derivar del país en vez de pedirle el dato a quien crea el tenant.
+      const filas: {
+        modo_redondeo_sugerido: ModoRedondeo | null;
+        nivel_redondeo_sugerido: NivelRedondeo | null;
+      }[] = await manager.query(
+        `SELECT p.modo_redondeo_sugerido, p.nivel_redondeo_sugerido
+           FROM provincia prov
+           JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+          WHERE prov.provincia_id = $1 AND prov.eliminado_el IS NULL`,
+        [dto.provinciaId],
+      );
+      // Sin fila la provincia no existe. El `@IsUUID` del DTO solo mira la
+      // forma; sin este corte el `INSERT` moriría más abajo en la FK y el
+      // superadmin vería un 500 de Postgres en vez de un 400 que se entiende.
+      if (filas.length === 0) {
+        throw new BadRequestException(
+          `La provincia ${dto.provinciaId} no existe.`,
+        );
+      }
+      const [reglas] = filas;
+
+      const nivelRedondeo = reglas.nivel_redondeo_sugerido ?? 'linea';
+      // Con 'documento' las líneas se persisten SIN cuantizar, con
+      // `escalaCalculo` decimales, en columnas NUMERIC(18,4): con la escala 6
+      // del default el recorte lo terminaría decidiendo el cast de Postgres,
+      // fuera del modo de redondeo del tenant. Es la misma regla que
+      // `updatePreferenciasFinancieras` ya rechaza — sin esto, un tenant
+      // mexicano nacería en un estado que su propia API no lo deja guardar.
+      //
+      // ⚠️ El 4 es lo que la COLUMNA admite, no lo que la norma pide: el Anexo
+      // 20 del SAT habla de hasta 6 decimales por línea. El costo está medido:
+      // cada llamada a `redondear()` mete a lo sumo 5e-5, y una línea pasa por
+      // una en el subtotal y una por cada paso de la fórmula (reglas, promos,
+      // impuestos), así que el peor caso por línea es ~1,5e-4 a 2,5e-4 — medio
+      // centavo a las 20-35 líneas, no a las 100. Sub-centavo igual: solo
+      // movería el total en un empate exacto. Llevar el sistema a 6 decimales
+      // de verdad es cambiar la escala de todas las columnas de plata de
+      // `venta_detalles` — motor de cálculo + fiscal, frente propio. Anotado en
+      // `docs/agent/pendientes.md`.
+      const escalaCalculo = nivelRedondeo === 'documento' ? 4 : 6;
+
       // 1. Create tenant
       const tenant = manager.create(Tenant, {
         provinciaId: dto.provinciaId,
@@ -206,9 +251,9 @@ export class TenantsService {
         direccion: dto.direccion ?? null,
         calculoDescuentos: 'base',
         calculoRecargos: 'base',
-        escalaCalculo: 6,
-        modoRedondeo: 'HALF_UP',
-        nivelRedondeo: 'linea',
+        escalaCalculo,
+        modoRedondeo: reglas.modo_redondeo_sugerido ?? MODO_REDONDEO_DEFAULT,
+        nivelRedondeo,
         montoTolerancia: '0',
         // Umbrales de descuadre APAGADOS al nacer el tenant: el número correcto
         // sale de mirar la distribución real de sus propios cierres
@@ -380,8 +425,73 @@ export class TenantsService {
 
   async update(id: string, dto: UpdateTenantDto): Promise<Tenant> {
     const tenant = await this.findOne(id);
+    // El mismo corte que `updateMine`: esta ruta es de superadmin, pero el
+    // tenant que queda roto es igual de roto. Si algún día mudar un tenant de
+    // país es una operación legítima, va a ser una migración con su propio
+    // procedimiento —moneda, métodos de pago, documentos tributarios— y no un
+    // PATCH de los datos de la empresa.
+    await this.assertMismoPais(tenant, dto.provinciaId);
     Object.assign(tenant, dto);
     return this.tenantRepo.save(tenant);
+  }
+
+  /**
+   * Mudarse de provincia se permite; mudarse de PAÍS no. El país es de dónde
+   * salen la moneda oficial (y sus decimales), los métodos de pago, los tipos
+   * de documento tributario y la regla de redondeo: cambiarlo por un PATCH
+   * deja al tenant con sus ventas históricas convertidas a una oficial que ya
+   * no es la suya y sin catálogo del país nuevo.
+   *
+   * No es una regla nueva — la pantalla de empresa ya trae el selector de país
+   * `disabled` (`configuracion/empresa.vue`). Lo que faltaba era el enforcement
+   * del lado del servidor, que es donde tiene que estar: hasta que este frente
+   * sembró AR/CO/MX toda provincia era chilena y el agujero era inerte.
+   *
+   * Las dos provincias se resuelven en UNA query con `= ANY($1)`.
+   */
+  private async assertMismoPais(
+    tenant: Tenant,
+    provinciaId: string | undefined,
+  ): Promise<void> {
+    // Se compara por PAÍS y no por "vino la clave": la pantalla de empresa
+    // manda la provincia en cada guardado, así que rechazar por presencia
+    // rompería todo guardado de los datos de la empresa.
+    if (provinciaId === undefined || provinciaId === tenant.provinciaId) return;
+
+    const filas: { provincia_id: string; pais_id: string; pais: string }[] =
+      await this.tenantRepo.query(
+        `SELECT prov.provincia_id, prov.pais_id, p.nombre AS pais
+           FROM provincia prov
+           JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+          WHERE prov.provincia_id = ANY($1) AND prov.eliminado_el IS NULL`,
+        [[provinciaId, tenant.provinciaId]],
+      );
+    const destino = filas.find((f) => f.provincia_id === provinciaId);
+    const origen = filas.find((f) => f.provincia_id === tenant.provinciaId);
+
+    if (!destino) {
+      throw new BadRequestException(
+        `La provincia ${provinciaId} no existe o su país fue dado de baja.`,
+      );
+    }
+    // Sin `origen` no sabemos de dónde viene el tenant (su provincia o su país
+    // quedaron soft-deleted). Un guard cuya rama de "no sé" es dejar pasar no
+    // es un guard: acá corta, y el mensaje dice qué hay que arreglar primero.
+    if (!origen) {
+      throw new BadRequestException(
+        `La provincia actual del tenant (${tenant.provinciaId}) no existe o su ` +
+          `país fue dado de baja: no se puede verificar que la provincia nueva ` +
+          `sea del mismo país. Corregí primero el catálogo.`,
+      );
+    }
+    if (destino.pais_id !== origen.pais_id) {
+      throw new BadRequestException(
+        `Esa provincia es de otro país (${destino.pais}) y el tenant opera en ` +
+          `${origen.pais}. Cambiar de país cambia la moneda oficial, los ` +
+          `métodos de pago y los documentos tributarios: no se hace desde los ` +
+          `datos de la empresa.`,
+      );
+    }
   }
 
   async remove(id: string): Promise<void> {
@@ -1316,6 +1426,9 @@ export class TenantsService {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     if (!tenant)
       throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
+
+    await this.assertMismoPais(tenant, dto.provinciaId);
+
     Object.assign(tenant, dto);
     try {
       return await this.tenantRepo.save(tenant);
