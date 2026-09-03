@@ -1,7 +1,8 @@
 # Spec: el redondeo se configura por tenant, con default por país y candado donde es ley
 
 **Fecha:** 2026-09-03
-**Estado:** diseño aprobado por el owner, listo para plan
+**Estado:** diseño aprobado por el owner — **plan escrito**, listo para ejecutar
+**Plan:** [`../plans/2026-09-03-redondeo-por-pais.md`](../plans/2026-09-03-redondeo-por-pais.md)
 **Decisión que implementa:** la propuesta del owner en
 [ADR-024](../../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)
 **Investigación que la sostiene:**

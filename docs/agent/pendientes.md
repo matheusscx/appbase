@@ -1862,6 +1862,10 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
+  > 📋 **PLAN ESCRITO (2026-09-03)** →
+  > [`plans/2026-09-03-redondeo-por-pais.md`](../superpowers/plans/2026-09-03-redondeo-por-pais.md),
+  > cinco tareas. **Listo para ejecutar**: el owner lo edita si quiere y pasa la ruta.
+  >
   > 📐 **SPEC ESCRITA (2026-09-03)** →
   > [`specs/2026-09-03-redondeo-por-pais-design.md`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md),
   > con el alcance aprobado por el owner: **solo el redondeo**. La UF, el escalón del IVA
