@@ -101,8 +101,11 @@ describe('TenantsService', () => {
       find: jest.fn(),
       softDelete: jest.fn(),
       create: jest.fn(),
-      // `assertMismoPais` resuelve las dos provincias por SQL crudo.
-      query: jest.fn(),
+      // Las dos queries crudas del service (`assertMismoPais` y la regla de
+      // redondeo del país) van por acá. Sin fila = país no resuelto = ninguna
+      // perilla cerrada, que es el default de todos los tests salvo los que la
+      // sobreescriben.
+      query: jest.fn().mockResolvedValue([]),
     };
     razonSocialRepo = {
       find: jest.fn(),
@@ -300,6 +303,139 @@ describe('TenantsService', () => {
         ),
       ).rejects.toThrow(BadRequestException);
       expect(manager.save).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * El candado del país. El default del `query` de `tenantRepo` es `[]` —país
+   * no resuelto, ninguna perilla cerrada—, así que sin estos tests el guard y
+   * los seis campos nuevos del GET no tendrían NINGUNA cobertura unitaria: un
+   * mutante que devuelva `bloqueado: false` siempre sobreviviría la suite.
+   */
+  describe('el candado que pone el país', () => {
+    const REGLA_AR = {
+      pais: 'Argentina',
+      modo_redondeo_sugerido: 'HALF_EVEN',
+      modo_redondeo_es_ley: true,
+      modo_redondeo_norma: 'ARCA/AFIP, RG 4291.',
+      nivel_redondeo_sugerido: null,
+      nivel_redondeo_es_ley: false,
+      nivel_redondeo_norma: null,
+    };
+
+    const PREFS_VALIDAS = {
+      calculoDescuentos: 'base',
+      calculoRecargos: 'base',
+      formula: ['descuentos', 'recargos', 'impuestos'],
+      escalaCalculo: 6,
+      modoRedondeo: 'HALF_EVEN' as const,
+      nivelRedondeo: 'linea' as const,
+      montoTolerancia: '0',
+      umbralDescuadreAviso: '0',
+      umbralDescuadreAlto: '0',
+    };
+
+    it('el GET dice qué perilla está cerrada, con qué valor y por qué', async () => {
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantFormulaPrecioRepo.find.mockResolvedValue([]);
+      tenantRepo.query.mockResolvedValue([REGLA_AR]);
+
+      const res = await service.getPreferenciasFinancieras('tenant-uuid');
+
+      expect(res.modoRedondeoBloqueado).toBe(true);
+      // El valor impuesto NO es redundante con el guardado: `mockTenant` tiene
+      // 'HALF_UP' persistido, que es justo el caso del tenant creado antes de
+      // que la regla existiera.
+      expect(res.modoRedondeoImpuesto).toBe('HALF_EVEN');
+      expect(res.modoRedondeoNorma).toContain('RG 4291');
+      // La otra perilla del MISMO país sigue abierta: si el candado fuera por
+      // país y no por perilla, esto sería true.
+      expect(res.nivelRedondeoBloqueado).toBe(false);
+      expect(res.nivelRedondeoImpuesto).toBeNull();
+      expect(res.nivelRedondeoNorma).toBeNull();
+    });
+
+    it('sin país resuelto no se cierra ninguna perilla', async () => {
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantFormulaPrecioRepo.find.mockResolvedValue([]);
+      tenantRepo.query.mockResolvedValue([]);
+
+      const res = await service.getPreferenciasFinancieras('tenant-uuid');
+
+      expect(res.modoRedondeoBloqueado).toBe(false);
+      expect(res.nivelRedondeoBloqueado).toBe(false);
+    });
+
+    it('guardar OTRO valor en la perilla cerrada corta nombrando la norma', async () => {
+      tenantRepo.query.mockResolvedValue([REGLA_AR]);
+
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', {
+          ...PREFS_VALIDAS,
+          modoRedondeo: 'HALF_UP',
+        }),
+      ).rejects.toThrow(/Argentina.*HALF_EVEN/s);
+    });
+
+    it('el valor impuesto solo sale cuando ES ley, no cuando el país sugiere', async () => {
+      // Chile sugiere HALF_UP/linea sin ley. Sin este gate, la pantalla
+      // recibiría una sugerencia con cara de imposición y le trabaría la
+      // perilla a un tenant chileno que puede elegir lo que quiera.
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantFormulaPrecioRepo.find.mockResolvedValue([]);
+      tenantRepo.query.mockResolvedValue([
+        {
+          pais: 'Chile',
+          modo_redondeo_sugerido: 'HALF_UP',
+          modo_redondeo_es_ley: false,
+          modo_redondeo_norma: null,
+          nivel_redondeo_sugerido: 'linea',
+          nivel_redondeo_es_ley: false,
+          nivel_redondeo_norma: null,
+        },
+      ]);
+
+      const res = await service.getPreferenciasFinancieras('tenant-uuid');
+
+      expect(res.modoRedondeoBloqueado).toBe(false);
+      expect(res.modoRedondeoImpuesto).toBeNull();
+      expect(res.nivelRedondeoBloqueado).toBe(false);
+      expect(res.nivelRedondeoImpuesto).toBeNull();
+    });
+
+    it('la perilla del NIVEL tiene su propio candado, no el del modo', async () => {
+      // México al revés que Argentina: fija el nivel y deja libre el modo. Sin
+      // este test, la rama del nivel del guard no la toca ningún unitario.
+      tenantRepo.query.mockResolvedValue([
+        {
+          pais: 'México',
+          modo_redondeo_sugerido: null,
+          modo_redondeo_es_ley: false,
+          modo_redondeo_norma: null,
+          nivel_redondeo_sugerido: 'documento',
+          nivel_redondeo_es_ley: true,
+          nivel_redondeo_norma: 'SAT, Anexo 20.',
+        },
+      ]);
+
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', PREFS_VALIDAS),
+      ).rejects.toThrow(/México.*documento/s);
+    });
+
+    it('guardar el MISMO valor no es un error', async () => {
+      // El control que descarta el guard escrito "por presencia de la clave":
+      // la pantalla manda la config entera en cada guardado, así que rechazar
+      // por presencia rompería el guardado de todas las otras preferencias.
+      // Que llegue hasta `decimalesOficiales` prueba que pasó el guard.
+      tenantRepo.query.mockResolvedValue([REGLA_AR]);
+      monedasService.decimalesOficiales.mockRejectedValue(
+        new Error('llegó hasta acá'),
+      );
+
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', PREFS_VALIDAS),
+      ).rejects.toThrow('llegó hasta acá');
     });
   });
 

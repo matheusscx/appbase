@@ -348,4 +348,112 @@ describe('Redondeo por país (e2e)', () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe('el candado al guardar las preferencias', () => {
+    async function prefs(
+      tokenTenant: string,
+    ): Promise<Record<string, unknown>> {
+      const res = await request(app.getHttpServer())
+        .get('/api/tenants/preferencias-financieras')
+        .set('Authorization', `Bearer ${tokenTenant}`);
+      expect(res.status).toBe(200);
+      return res.body as Record<string, unknown>;
+    }
+
+    function guardar(
+      tokenTenant: string,
+      body: Record<string, unknown>,
+    ): request.Test {
+      return request(app.getHttpServer())
+        .put('/api/tenants/preferencias-financieras')
+        .set('Authorization', `Bearer ${tokenTenant}`)
+        .send(body);
+    }
+
+    it('el GET dice qué perilla está cerrada y por qué', async () => {
+      // Sin esto la pantalla tendría que adivinar, o peor: dejar tocar la
+      // perilla y descubrirlo recién al guardar.
+      const tenant = await crearTenantEn(PROV_CABA);
+      const tokenAR = await entrarA(tenant.id);
+      const body = await prefs(tokenAR);
+
+      expect(body.modoRedondeoBloqueado).toBe(true);
+      // El VALOR que impone la norma, no solo el candado: la pantalla lo
+      // necesita para un tenant cuyo valor guardado no sea el de la ley — si
+      // solo deshabilitara el control sobre lo guardado, ese tenant no podría
+      // guardar NINGUNA preferencia desde la UI.
+      expect(body.modoRedondeoImpuesto).toBe('HALF_EVEN');
+      expect(body.modoRedondeoNorma).toContain('RG 4291');
+      // La otra perilla del MISMO tenant sigue abierta: Argentina no fija el
+      // nivel. Si el candado fuera por país y no por perilla, esto sería true.
+      expect(body.nivelRedondeoBloqueado).toBe(false);
+      expect(body.nivelRedondeoImpuesto).toBeNull();
+      expect(body.nivelRedondeoNorma).toBeNull();
+    });
+
+    it('un tenant argentino no puede cambiar el modo: 400 nombrando la norma', async () => {
+      const tenant = await crearTenantEn(PROV_CABA);
+      const tokenAR = await entrarA(tenant.id);
+      const res = await guardar(tokenAR, {
+        ...(await prefs(tokenAR)),
+        modoRedondeo: 'HALF_UP',
+      });
+      expect(res.status).toBe(400);
+      const msg = (res.body as { message: string }).message;
+      expect(msg).toContain('Argentina');
+      expect(msg).toContain('HALF_EVEN');
+      expect(msg).toContain('RG 4291');
+    });
+
+    it('mandar el MISMO valor NO es un error', async () => {
+      // El control que descarta el guard escrito "por presencia de la clave".
+      // Sin él, un guard roto pasa el test de arriba igual — y rompe el
+      // guardado de cualquier OTRA preferencia, porque la pantalla manda la
+      // config entera en cada guardado.
+      const tenant = await crearTenantEn(PROV_CABA);
+      const tokenAR = await entrarA(tenant.id);
+      const res = await guardar(tokenAR, {
+        ...(await prefs(tokenAR)),
+        modoRedondeo: 'HALF_EVEN',
+        montoTolerancia: '10',
+      });
+      expect(res.status).toBe(200);
+      expect((res.body as { montoTolerancia: string }).montoTolerancia).toBe(
+        '10',
+      );
+    });
+
+    it('un tenant chileno cambia su modo libremente', async () => {
+      const tenant = await crearTenantEn(PROV_RM);
+      const tokenCL = await entrarA(tenant.id);
+      const res = await guardar(tokenCL, {
+        ...(await prefs(tokenCL)),
+        modoRedondeo: 'FLOOR',
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it('el mexicano no puede tocar el NIVEL, pero sí el modo', async () => {
+      // Las dos mitades del mismo tenant, y juntas son la prueba de que el
+      // candado es por perilla: con un guard por país, la segunda daría 400.
+      const tenant = await crearTenantEn(PROV_CDMX);
+      const tokenMX = await entrarA(tenant.id);
+      const base = await prefs(tokenMX);
+
+      const cerrada = await guardar(tokenMX, {
+        ...base,
+        nivelRedondeo: 'linea',
+      });
+      expect(cerrada.status).toBe(400);
+      expect((cerrada.body as { message: string }).message).toContain(
+        'Anexo 20',
+      );
+
+      const abierta = await guardar(tokenMX, {
+        ...base,
+        modoRedondeo: 'HALF_EVEN',
+      });
+      expect(abierta.status).toBe(200);
+    });
+  });
 });

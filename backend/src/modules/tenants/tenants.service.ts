@@ -167,6 +167,17 @@ function mailDeConfirmacion(
   };
 }
 
+/** Una fila de `pais` con las dos perillas de redondeo y su norma. */
+interface ReglaRedondeoPais {
+  pais: string;
+  modo_redondeo_sugerido: ModoRedondeo | null;
+  modo_redondeo_es_ley: boolean;
+  modo_redondeo_norma: string | null;
+  nivel_redondeo_sugerido: NivelRedondeo | null;
+  nivel_redondeo_es_ley: boolean;
+  nivel_redondeo_norma: string | null;
+}
+
 @Injectable()
 export class TenantsService {
   constructor(
@@ -1516,6 +1527,85 @@ export class TenantsService {
   // Preferencias financieras
   // ─────────────────────────────────────────────────────────────────────────
 
+  /**
+   * La regla de redondeo del país del tenant: qué impone cada perilla, si es
+   * ley y con qué norma. UNA query para las dos perillas — nunca una por
+   * perilla. `null` cuando el tenant no resuelve país (provincia o país dados
+   * de baja): sin regla conocida no se cierra ninguna perilla.
+   *
+   * 📌 Ese `null` no es una puerta abierta al guardado: `decimalesOficiales`
+   * (`MonedasService`) hace el MISMO join y corta con 400 unas líneas más
+   * abajo en el mismo `PUT`. O sea que un tenant sin país no escribe igual —
+   * lo que este `null` decide es solo qué mensaje ve, y que el GET no le
+   * muestre un candado que no sabemos justificar.
+   */
+  private async reglaDeRedondeoDelPais(
+    tenantId: string,
+  ): Promise<ReglaRedondeoPais | null> {
+    const filas: ReglaRedondeoPais[] = await this.tenantRepo.query(
+      `SELECT p.nombre AS pais,
+              p.modo_redondeo_sugerido, p.modo_redondeo_es_ley,
+              p.modo_redondeo_norma,
+              p.nivel_redondeo_sugerido, p.nivel_redondeo_es_ley,
+              p.nivel_redondeo_norma
+         FROM tenants t
+         JOIN provincia prov
+           ON prov.provincia_id = t.provincia_id AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    return filas[0] ?? null;
+  }
+
+  /**
+   * Donde la norma del país fija una perilla, el tenant no la cambia.
+   *
+   * Se compara contra el VALOR y no contra "vino la clave": la pantalla manda
+   * la configuración entera en cada guardado, así que rechazar por presencia
+   * rompería el guardado de todas las demás preferencias. Y se evalúa perilla
+   * por perilla, no por país: México fija el nivel y deja libre el modo.
+   *
+   * El mensaje nombra el país, el valor que impone y la norma, porque es el
+   * único lugar donde el tenant se entera de por qué no lo dejan.
+   */
+  private async assertRedondeoPermitido(
+    tenantId: string,
+    dto: UpdatePreferenciasFinancierasDto,
+  ): Promise<void> {
+    const regla = await this.reglaDeRedondeoDelPais(tenantId);
+    if (!regla) return;
+
+    // ⚠️ Nada impide hoy que un país imponga un valor que las validaciones de
+    // más abajo rechacen — un `nivel_redondeo_sugerido = 'documento'` con ley y
+    // moneda oficial de 0 decimales dejaría a sus tenants sin NINGUNA
+    // configuración guardable, con los dos mensajes contradiciéndose. Con el
+    // seed actual es inalcanzable (el único país con 'documento' es México, y
+    // el peso mexicano tiene dos decimales). Anotado en `docs/agent/pendientes.md`
+    // § 3, "Los tres que dejó el frente del redondeo por país", junto con la
+    // otra dirección del mismo agujero: `modo_redondeo_sugerido` es un varchar
+    // sin CHECK de dominio.
+    if (
+      regla.modo_redondeo_es_ley &&
+      dto.modoRedondeo !== regla.modo_redondeo_sugerido
+    ) {
+      throw new BadRequestException(
+        `El modo de redondeo de ${regla.pais} lo fija la norma: tiene que ser ` +
+          `${regla.modo_redondeo_sugerido}. ${regla.modo_redondeo_norma ?? ''}`.trim(),
+      );
+    }
+    if (
+      regla.nivel_redondeo_es_ley &&
+      dto.nivelRedondeo !== regla.nivel_redondeo_sugerido
+    ) {
+      throw new BadRequestException(
+        `El nivel de redondeo de ${regla.pais} lo fija la norma: tiene que ` +
+          `ser "${regla.nivel_redondeo_sugerido}". ` +
+          `${regla.nivel_redondeo_norma ?? ''}`.trim(),
+      );
+    }
+  }
+
   async getPreferenciasFinancieras(tenantId: string): Promise<{
     calculoDescuentos: string;
     calculoRecargos: string;
@@ -1527,6 +1617,12 @@ export class TenantsService {
     umbralDescuadreAviso: string;
     umbralDescuadreAlto: string;
     promosAcumulanDescuentos: boolean;
+    modoRedondeoBloqueado: boolean;
+    modoRedondeoImpuesto: ModoRedondeo | null;
+    modoRedondeoNorma: string | null;
+    nivelRedondeoBloqueado: boolean;
+    nivelRedondeoImpuesto: NivelRedondeo | null;
+    nivelRedondeoNorma: string | null;
   }> {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     if (!tenant)
@@ -1535,6 +1631,18 @@ export class TenantsService {
       where: { tenantId },
       order: { paso: 'ASC' },
     });
+    // El candado, el VALOR que impone y su motivo viajan con la configuración.
+    // Sin esto la pantalla tendría que adivinar, o peor: dejar tocar la perilla
+    // y descubrirlo recién al guardar. Y la norma no es decorativa — es lo que
+    // se le muestra al tenant como motivo; un candado sin explicación se lee
+    // como un bug del sistema, no como una regla del país.
+    //
+    // ⚠️ El `Impuesto` no es redundante con lo guardado: un tenant creado en un
+    // país con ley ANTES de que existiera esta regla tiene persistido otro
+    // valor. Si la pantalla solo deshabilitara el control sobre lo guardado, a
+    // ese tenant le rebotarían con 400 TODOS sus guardados —incluidos los de
+    // las otras preferencias— sin ninguna salida por la UI.
+    const regla = await this.reglaDeRedondeoDelPais(tenantId);
     return {
       calculoDescuentos: tenant.calculoDescuentos,
       calculoRecargos: tenant.calculoRecargos,
@@ -1546,6 +1654,20 @@ export class TenantsService {
       umbralDescuadreAviso: tenant.umbralDescuadreAviso,
       umbralDescuadreAlto: tenant.umbralDescuadreAlto,
       promosAcumulanDescuentos: tenant.promosAcumulanDescuentos,
+      modoRedondeoBloqueado: regla?.modo_redondeo_es_ley ?? false,
+      modoRedondeoImpuesto: regla?.modo_redondeo_es_ley
+        ? regla.modo_redondeo_sugerido
+        : null,
+      modoRedondeoNorma: regla?.modo_redondeo_es_ley
+        ? regla.modo_redondeo_norma
+        : null,
+      nivelRedondeoBloqueado: regla?.nivel_redondeo_es_ley ?? false,
+      nivelRedondeoImpuesto: regla?.nivel_redondeo_es_ley
+        ? regla.nivel_redondeo_sugerido
+        : null,
+      nivelRedondeoNorma: regla?.nivel_redondeo_es_ley
+        ? regla.nivel_redondeo_norma
+        : null,
     };
   }
 
@@ -1564,6 +1686,12 @@ export class TenantsService {
     umbralDescuadreAlto: string;
     promosAcumulanDescuentos: boolean;
   }> {
+    // El país manda sobre la preferencia cuando la norma lo fija. Va ANTES de
+    // las otras validaciones porque es la que el tenant no puede resolver
+    // cambiando otro campo: las demás le dicen "ajustá esto", esta le dice
+    // "esto no se toca".
+    await this.assertRedondeoPermitido(tenantId, dto);
+
     // Validate no duplicates (DTO only validates each element is valid, not uniqueness)
     const unique = new Set(dto.formula);
     if (unique.size !== 3) {

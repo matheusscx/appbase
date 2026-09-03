@@ -1355,6 +1355,43 @@ abriendo las superficies, no leyendo la entrada.
   **qué línea** lo causó es una decisión chica y barata, independiente de todo lo de
   arriba.
 
+### Los tres que dejó el frente del redondeo por país (2026-09-03)
+
+Los tres salen del frente que hizo que el redondeo del tenant tenga su default puesto por su
+país y quede bloqueado donde la norma lo fija ([spec](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md)).
+Ninguno de los tres rompe nada hoy — los tres son **alcanzables mañana con una edición del
+seeder**, que es exactamente lo que este frente acaba de hacer.
+
+1. **El candado del país puede exigir un valor que la validación de más abajo rechaza.**
+   `TenantsService.assertRedondeoPermitido` obliga a que `nivelRedondeo` sea el que impone la
+   norma; catorce líneas después, `updatePreferenciasFinancieras` rechaza `'documento'` cuando
+   la moneda oficial tiene 0 decimales. Un país sembrado con `nivel_redondeo_sugerido =
+   'documento' + es_ley` y moneda de 0 decimales deja a **todos sus tenants sin ninguna
+   configuración guardable**, con los dos mensajes contradiciéndose. Hoy es inalcanzable: el
+   único país con `'documento'` es México y el peso mexicano tiene dos decimales. Nada lo
+   impide — no hay `@Check` ni test que ate las dos reglas.
+
+   El mismo agujero tiene una segunda dirección que conviene arreglar junta:
+   `pais.modo_redondeo_sugerido` es un `varchar` **sin CHECK de dominio**, así que un país con
+   un modo fuera de `['HALF_UP','HALF_EVEN','FLOOR','CEIL']` produce el mismo deadlock, solo
+   que el rechazo llega del `ValidationPipe` en vez del service.
+
+2. **`TenantsService.create` replica UNA de las dos validaciones del guardado.** Cubre
+   `escalaCalculo > 4` con `'documento'` (por eso el tenant mexicano nace con escala 4) y no
+   cubre `'documento'` + moneda de 0 decimales. Es la otra cara de la 1: si la 1 se cierra con
+   un `@Check` en `pais`, esta desaparece sola.
+
+3. **Los 6 decimales del Anexo 20 no entran en las columnas.** El tenant mexicano nace con
+   `escalaCalculo: 4` porque toda columna de plata de `venta_detalles` es `NUMERIC(18,4)` y con
+   `'documento'` las líneas se persisten **sin cuantizar**: con escala 6 el recorte lo
+   terminaría decidiendo el cast de Postgres, fuera del modo de redondeo del tenant. El SAT
+   habla de hasta **6** decimales por línea. El costo de la diferencia está medido —cada
+   `redondear()` mete a lo sumo 5e-5 y una línea pasa por uno por paso de la fórmula, o sea
+   ~1,5e-4 a 2,5e-4 por línea: medio centavo a las 20-35 líneas— así que solo movería un total
+   en un empate exacto. **Es decisión del owner y es fiscal**: llevar el sistema a 6 decimales
+   de verdad es cambiar la escala de todas las columnas de plata de `venta_detalles` — motor de
+   cálculo + fiscal, frente propio (ADR-010).
+
 ### Los cuatro que dejó el frente de la reserva de stock (2026-09-01)
 
 Los cuatro salieron de ese frente, pero **no todos son ajenos a él, y eso hay que decirlo
