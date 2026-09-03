@@ -182,10 +182,27 @@ académico:** es el argumento con el que se decidió dejar el modo en manos del 
 | **Del tenant, con el default puesto por su país** | Arranca cumpliendo sin configurar, y deja escape | El tenant puede moverlo a algo que su país no permite, y el error se ve en un documento ya emitido |
 | **Como está hoy: del tenant, defaults `linea` + `HALF_UP`** | Costo cero | Un tenant mexicano y uno colombiano incumplen **por default**, y nada se los avisa |
 
-### 3.4. Recomendación
+### 3.4. ⭐ Lo que la investigación de países confirmó y dio vuelta (2026-09-03, mismo día)
+
+Se relevaron ocho países →
+[`2026-09-03-redondeo-por-pais-latam.md`](./2026-09-03-redondeo-por-pais-latam.md). Tres cosas
+cambian lo de arriba:
+
+1. **El modo está peor que el nivel.** Argentina lo fija **literal** en el manual de ARCA
+   (*"Round Half Even"*) y Colombia por NTC 3711: **los dos únicos países de LatAm donde se
+   halló un modo fijado piden half-even, y nuestro default es half-up**. Si algo se mueve al
+   país primero, es **el modo**, no el nivel.
+2. **El nivel casi nadie lo fija.** De ocho países, **uno solo** fija el nivel (México, al
+   total). El resto no lo fija o valida con **tolerancia**. La tabla por país arrancaría con una
+   fila con dato y el resto en default.
+3. **Ningún país de la región obliga por línea.** El único que lo hace es Reino Unido, fuera
+   del mercado.
+
+### 3.5. Recomendación
 
 **Mover las dos perillas al país** —`nivelRedondeo` y `modo_redondeo`— y que el tenant no las
-contradiga. Con LatAm de objetivo, dejarlas en el tenant significa que **el default incumple**
+contradiga, **pero empezando por el modo**, que es donde hay datos suficientes para afirmar que
+el default de hoy incumple. Con LatAm de objetivo, dejarlas en el tenant significa que **el default incumple**
 en al menos dos de los países a los que apuntamos, y el incumplimiento se ve en un documento ya
 emitido.
 

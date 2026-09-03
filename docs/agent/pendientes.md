@@ -1862,6 +1862,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
+  > 🌎 **Y se relevaron ocho países de LatAm** (2026-09-03, con tres fuentes primarias) →
+  > [`investigaciones/2026-09-03-redondeo-por-pais-latam.md`](investigaciones/2026-09-03-redondeo-por-pais-latam.md).
+  > **Da vuelta la prioridad:** lo urgente es el **modo**, no el nivel — Argentina y Colombia
+  > exigen **half-even** y nuestro default es `HALF_UP`, así que un tenant de cualquiera de los
+  > dos incumple sin tocar nada. Del **nivel**, de ocho países lo fija **uno**.
+  >
   > 📊 **Los pros y contras ya están hechos**, a pedido del owner el mismo día:
   > [`investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md`](investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
   > Su hallazgo principal cambia la pregunta: **cuatro de los cinco huecos del escenario de la UF

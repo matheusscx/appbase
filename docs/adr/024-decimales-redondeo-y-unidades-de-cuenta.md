@@ -49,6 +49,20 @@ tomar nada de este ADR.
 > que fijan un modo exigen half-up"* y su propia tabla dice que Colombia exige **half-to-even**.
 > Ese era el argumento con el que se dejó el modo en manos del tenant.
 >
+> 🌎 **Se relevaron ocho países de LatAm** (2026-09-03) →
+> [`2026-09-03-redondeo-por-pais-latam.md`](../agent/investigaciones/2026-09-03-redondeo-por-pais-latam.md),
+> con tres fuentes primarias extraídas de los PDF oficiales. **Da vuelta la prioridad de este
+> ADR:**
+> - **El MODO es lo urgente, no el nivel.** Argentina lo fija **literal** (*"El criterio de
+>   redondeo que utilizamos en este servicio es Round Half Even"*) y Colombia por NTC 3711. Los
+>   **dos únicos** países de la región donde se halló un modo fijado piden **half-even**, y
+>   nuestro default es `HALF_UP`: un tenant de cualquiera de los dos **incumple sin tocar nada**.
+>   Este ADR ni siquiera movió esa perilla.
+> - **El NIVEL casi nadie lo fija:** de ocho países, **uno** (México, al total). El resto no lo
+>   fija o valida con **tolerancia**. La tabla por país arrancaría con una fila con dato.
+> - **Ningún país de LatAm obliga por línea** — el único es Reino Unido, fuera del mercado, y era
+>   la mitad del argumento con el que se decidió mover el nivel.
+>
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
 > código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este
 > tema que se puede leer sin riesgo.
