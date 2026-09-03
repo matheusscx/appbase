@@ -1591,6 +1591,14 @@ algo que un agente deba inventar desde un seeder**: [ADR-010](../adr/010-prepara
 y el punto *"Lo fiscal va solo"* de `CLAUDE.md` dicen que abre su propio frente, con su propia
 sesión, y que la regla la pone el owner.
 
+✅ **Se corrió la investigación de las cuatro autoridades el 2026-09-03** (owner: *"la
+facturación la dejamos para después, pero la estructura tiene que ser escalable"*) →
+[`investigaciones/2026-09-03-facturacion-electronica-latam.md`](investigaciones/2026-09-03-facturacion-electronica-latam.md).
+**No contesta esta entrada** —sigue siendo decisión del owner— pero sí acota la pregunta: lo
+único irrecuperable es **qué datos fiscales del receptor se congelan en la venta** (la
+condición frente al IVA en Argentina, el régimen + CP + uso del CFDI en México), y eso
+depende de una respuesta previa: **si AR/CO/MX van a emitir de verdad o son catálogo demo.**
+
 📌 Mientras no se conteste, **el alta en esos países no está prohibida**: bloquearla rompería
 la propia feature del redondeo por país, y el tenant sí puede vender y cobrar. Lo que no se
 puede es seguir diciendo que "todavía no emite documentos" — emite el de otro país.
