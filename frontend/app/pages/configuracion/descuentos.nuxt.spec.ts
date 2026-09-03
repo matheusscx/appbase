@@ -1301,7 +1301,7 @@ describe('configuracion/descuentos — el tipo empuja el nivel, sin bloquearlo',
  * backend rechaza con 400 la fila que dice dos cosas (`validarValorUnico`) y
  * solo reemplaza los hijos que vengan en el body.
  *
- * Los cuatro caminos que cubre este describe — cuatro gestos distintos con la
+ * Los CINCO caminos que cubre este describe — cinco gestos distintos con la
  * misma consecuencia:
  *   1. **cambiar el tipo** a uno que no usa esa forma, en las dos direcciones;
  *   2. **mover el radio "Cómo descuenta"** en un tipo que elige forma, también
@@ -1309,7 +1309,10 @@ describe('configuracion/descuentos — el tipo empuja el nivel, sin bloquearlo',
  *   3. **cambiar entre dos tipos que los dos usan escalones**, donde la sección
  *      queda a la vista pero vacía y el guardado terminaba en un 400 sin aviso;
  *   4. **cambiar a un tipo que ELIGE forma**, donde nadie mueve el radio y
- *      `onTipoChange` lo deja igual en "un valor único".
+ *      `onTipoChange` lo deja igual en "un valor único";
+ *   5. **cambiar a un tipo que da vuelta la UNIDAD** (de porcentaje a plata),
+ *      donde el campo sigue a la vista y queda vacío — el gemelo del 3 para el
+ *      valor único, agregado el 2026-09-03.
  *
  * ⚠️ El 4 apareció **al implementar los otros tres**, y es la tercera vez que
  * esta enumeración sale corta: la entrada del backlog nació con dos caminos y
@@ -1327,7 +1330,7 @@ describe('configuracion/descuentos — el tipo empuja el nivel, sin bloquearlo',
  * salió por lo mismo al sumarse los caminos nuevos. `elegirTipo` sigue duplicado
  * —va por la segunda— y por eso queda local.
  */
-describe('configuracion/descuentos — perder la forma de importe avisa por los cuatro caminos', () => {
+describe('configuracion/descuentos — perder la forma de importe avisa por los cinco caminos', () => {
   beforeEach(() => {
     // Una regla POR ESCALONES, que es la única que tiene algo que perder.
     descuentosBackend = [descuento({
@@ -1487,6 +1490,119 @@ describe('configuracion/descuentos — perder la forma de importe avisa por los 
     // la columna que el body tiene que apagar es `valorMonto`. El `null` TIENE
     // que viajar: omitirlo deja vivo el valor persistido y el backend da 400.
     expect(patchesGuardar[0]?.body.valorMonto).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  // ── Camino 5: el tipo nuevo da vuelta la UNIDAD y el campo queda vacío ────
+  //
+  // El gemelo del camino 3, pero sobre el valor único en vez de los escalones.
+  // Decisión del owner (2026-09-03): avisar, igual que los otros cuatro.
+  //
+  // El gesto: editar un descuento en PORCENTAJE y pasarlo a un tipo cuyo modo es
+  // `monto_fijo`. `onTipoChange` da vuelta el `modo` y el `0.10` deja de viajar
+  // —el body manda solo la columna del modo—, pero el campo SIGUE a la vista, así
+  // que ninguno de los cuatro caminos anteriores lo cubría.
+
+  it('cambiar a un tipo que cobra en plata avisa que el importe quedó sin cargar', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    // `tipo-3` es `metodo_pago`: `libre`, así que `onTipoChange` lo deja en
+    // `monto_fijo`. El campo del valor no desaparece — por eso este camino se le
+    // escapaba a `valorAPerder`, que pregunta por `!mostrarValor`.
+    await elegirTipo(wrapper, 'tipo-3')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).toContain('El importe quedó sin cargar')
+    expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('y al confirmar NO manda la columna vacía: el rechazo pasa a decir qué falta', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-3')
+    await clickGuardar()
+
+    // "Guardar igual" y no "Guardar y borrar": acá no se borra nada, el servidor
+    // rechaza. Prometer un borrado sería prometer algo que no pasa.
+    const confirmar = botonPorTexto('Guardar igual')
+    expect(confirmar, 'botón de confirmación del aviso').toBeTruthy()
+    confirmar!.click()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(patchesGuardar).toHaveLength(1)
+    // ⚠️ La aserción que importa: `null`, **nunca `''` ni ausente**. Los tres
+    // cuerpos, medidos contra la API el 2026-09-03:
+    //   `''`      → 400 *"valorMonto must be a number string"* (el
+    //               `ValidationPipe`: `@IsOptional()` saltea `null`/`undefined`
+    //               pero no `''`). Feo, pero no guarda nada.
+    //   ausente   → **200**: el backend lee el valor persistido y guarda. Es el
+    //               agujero que la revisión del diff midió — ver el test de más
+    //               abajo, sobre un tipo que NO elige forma.
+    //   `null`    → 400 con el motivo en castellano, que es lo que el modal
+    //               acaba de prometer.
+    expect(patchesGuardar[0]?.body.valorMonto).toBeNull()
+    expect(patchesGuardar[0]?.body).not.toHaveProperty('valorPorcentaje')
+
+    wrapper.unmount()
+  })
+
+  it('si el usuario carga el importe nuevo, no avisa nada y guarda ese valor', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await elegirTipo(wrapper, 'tipo-3')
+    // El control que descarta un modal que aparezca SIEMPRE: cargado el importe
+    // no hay nada que avisar, y `5000` es distinto del `0.10` de la fila, así que
+    // guardar el viejo por accidente también fallaría acá.
+    await tipearValor('5000')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).not.toContain('El importe quedó sin cargar')
+    expect(patchesGuardar).toHaveLength(1)
+    expect(patchesGuardar[0]?.body.valorMonto).toBe('5000')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * El agujero que la revisión del diff midió, y el motivo por el que la columna
+   * vacía viaja como `null` y no ausente.
+   *
+   * `tipo-1` es `directo`: NO elige forma, así que la rama `else if` del body no
+   * dispara. Con la clave ausente, el backend lee el valor **persistido**
+   * (`importeResultante`) y **guarda con 200** — verificado contra la API el
+   * 2026-09-03 sobre un `directo` con `valorMonto: 5000`: la fila quedaba
+   * cobrando los 5.000 mientras la pantalla mostraba el campo vacío, y el modal
+   * acababa de prometer que el servidor lo rechazaba.
+   *
+   * O sea que el aviso mentía justo en el tipo más común, y era peor que el `''`
+   * de antes: aquél era feo pero no guardaba nada.
+   */
+  it('en un tipo que NO elige forma, la columna vacía viaja como null y no ausente', async () => {
+    descuentosBackend = [descuento({ tipoReglaId: 'tipo-1', valorPorcentaje: '0.10' })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    // Sin cambiar de tipo: el usuario borra el importe a mano. El campo es
+    // `required` decorativo, así que nada lo frena antes de guardar.
+    await tipearValor('')
+
+    await clickGuardar()
+    expect(document.body.textContent).toContain('El importe quedó sin cargar')
+
+    botonPorTexto('Guardar igual')!.click()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(patchesGuardar).toHaveLength(1)
+    // `null`, no ausente: ausente es 200 y la fila se queda con el valor viejo.
+    expect(patchesGuardar[0]?.body).toHaveProperty('valorPorcentaje')
+    expect(patchesGuardar[0]?.body.valorPorcentaje).toBeNull()
 
     wrapper.unmount()
   })

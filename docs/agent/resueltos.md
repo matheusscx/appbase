@@ -17,6 +17,55 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cambiar el tipo de un descuento avisa antes de perder el importe — quinto camino (cerrado 2026-09-03)
+
+Venía de la § 4 y la contestó el owner: **avisar**, igual que los cuatro caminos del frente
+vecino. Se descartó *conservar el modo cuando el tipo nuevo también lo admite*: el aviso deja la
+pantalla coherente consigo misma y no toca una conducta que hoy es incondicional y está escrita
+a propósito —el reset del modo existe para que un `0.10` de porcentaje no quede mostrándose
+como `0` de plata—.
+
+**El gesto y por qué se escapaba.** Editar un descuento en porcentaje y cambiarlo a un tipo que
+cobra en plata: `onTipoChange` da vuelta el `modo` y el `0.10` deja de viajar, porque el body
+manda **solo la columna del modo**. Pero el campo **sigue a la vista y queda vacío**, así que
+ninguno de los cuatro caminos anteriores lo cubría —los cuatro preguntan por lo que **no** está
+en pantalla—. Es el **gemelo del camino 3** para el valor único.
+
+**Y por eso el aviso promete un rechazo, no un borrado.** Medido contra la API antes de elegir
+las palabras: sin importe el backend contesta *"Esta regla tiene que expresar su importe: un
+valor único o al menos un escalón"* — no se guarda nada, así que prometer *"se borra"* sería
+prometer algo que no pasa. Mismas palabras que el camino 3, con el botón en *"Guardar igual"*.
+
+🎯 **De arrastre, el mensaje de error dejó de ser de programador** — pero elegir cómo mandar la
+columna vacía **no era indistinto**, y la primera versión de este cierre lo eligió mal. Los tres
+cuerpos, medidos contra la API:
+
+| Body | Qué pasa |
+|---|---|
+| `valorMonto: ''` | **400** *"valorMonto must be a number string"* — el `ValidationPipe`: `@IsOptional()` saltea `null`/`undefined` pero **no** `''`. Feo, pero no guarda nada |
+| **sin la clave** | ⚠️ **200**. El backend lee el valor **persistido** (`importeResultante`) y guarda: en un tipo de valor único la fila sigue cobrando lo de antes mientras la pantalla mostraba el campo vacío |
+| `valorMonto: null` | **400** con el motivo en castellano. El único que cumple lo que el modal promete |
+
+⛔ **La primera versión omitía la clave, y la revisión del diff lo bloqueó midiéndolo:** el
+aviso prometía un rechazo que en `directo` y `pronto_pago` no ocurría, y el guardado que antes
+moría en 400 pasaba a entrar con 200 dejando pantalla y base diciendo cosas distintas. **Era
+peor que el bug original.** Ahora viaja `null`.
+
+📌 **Y el mensaje del 400 depende del tipo, así que no se cita uno solo:** `metodo_pago` —el
+único con tramos opcionales— contesta *"Esta regla tiene que expresar su importe: un valor único
+o al menos un escalón"* (`validarFormaDeImporte`), y `directo`/`pronto_pago` contestan *"El
+valor es requerido para este tipo"* (`validarValorUnico`). Los dos son lenguaje de humano, que
+era el objetivo; lo que no se sostiene es citar el primero como si fuera el de todos.
+
+**Qué lo fija.** Cuatro tests nuevos en `descuentos.nuxt.spec.ts` —avisa; el body manda `null` y
+no `''`; el control de que con el importe cargado no avisa nada y guarda ese valor; y el que la
+revisión dejó pedido, sobre un tipo que **no** elige forma, que es donde la clave ausente
+guardaba con 200—, los cuatro verificados con su mutante. Y el **smoke en Chrome**, que acá no es opcional: el flujo entero
+—editar, cambiar el tipo, ver el campo vaciarse, guardar, leer el aviso, confirmar— con el
+descuento quedando **intacto** en la base y el mensaje bueno en pantalla.
+
+---
+
 ## `mermas.e2e-spec` se siembra su propio producto y vuelve a ser repetible (cerrado 2026-09-03)
 
 Venía de la § 4 y la contestó el owner: **que el spec siembre el suyo**. De las tres salidas

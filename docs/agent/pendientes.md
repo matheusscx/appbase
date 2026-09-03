@@ -159,6 +159,34 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **`recargos.vue` no tiene el quinto camino de aviso que sí tiene `descuentos.vue`**
+  (frontend; **medido el 2026-09-03** por la revisión del diff que cerró el de descuentos —
+  [`resueltos.md`](resueltos.md)) — el mismo gesto sigue vivo en recargos: editar un
+  `interes_simple` (modo `porcentaje`) y cambiarlo a `general` (`libre`, así que `onTipoChange`
+  fuerza `monto_fijo`) manda `valorMonto: ''` y el usuario lee *"valorMonto must be a number
+  string"*, **sin aviso previo**.
+
+  **No es alcance agregado que quedó afuera**: la decisión del owner nombraba descuentos, y
+  descuentos es donde estaba medido el caso. Pero la asimetría es exactamente la que abrió la
+  entrada del frente vecino —*"la misma pérdida preguntaba por un camino y no por el otro"*—,
+  ahora entre dos pantallas en vez de entre dos gestos.
+
+  ⚠️ **Y hay un tercer sitio del mismo hecho, adentro de `descuentos.vue`**: el `''` que ese
+  frente sacó del valor único **sigue vivo en los escalones** (`minimoMonto`/`minimoCantidad` y
+  el importe de cada tramo). Vaciar el importe de un escalón manda
+  `{ minimoMonto: "", valorPorcentaje: "" }` y el usuario vuelve a leer el mensaje del
+  `ValidationPipe`, **sin aviso** —`escalonesAPerder` da 0 porque la sección tiene escalones: lo
+  que está vacío es su contenido—. Preexistente, medido el 2026-09-03 por la revisión del diff.
+  Los tres van juntos porque son el mismo hecho tres veces.
+
+  **Qué medir antes de tomarla:** si los caminos de aviso de `descuentos.vue` se pueden extraer
+  a algo compartido o si hay que copiarlos. Hoy las dos pantallas comparten
+  `reglas-form-config.ts` pero **no** la lógica del aviso.
+  📌 Ojo con una cita que ya se atribuyó mal una vez: el *"los dos se mueven juntos, siempre"*
+  de `reglas-form-config.ts:80-81` habla de los dos **tipos** gemelos (`metodo_pago` y
+  `recargo_metodo_pago`), **no** de las dos pantallas. Que las pantallas se muevan juntas es
+  cierto en los hechos, pero no lo dice esa línea.
+
 - [ ] **El flush pisa una re-edición con el payload viejo, y la cantidad del garzón se
   pierde** (frontend; **medido el 2026-09-02** por la revisión del diff de *"salir de la cuenta
   guarda"*, contra control — [`resueltos.md`](resueltos.md)) — es la única de esta familia que
@@ -1437,58 +1465,21 @@ confirmó*—; lo que falta es construir la mitad que quedó afuera, con su test
   plomería (`patchCantidadRetenido`, `patchCantidadFalla`, `cuentasServidor`) ya está en el
   spec.
 
-### Las cuatro que el owner contestó el 2026-09-03 — **queda una**
+### Las cuatro que el owner contestó el 2026-09-03 — ✅ **las cuatro construidas**
 
-Las cuatro estaban en la § 4 y salieron en una sola ronda. Tres eran de la suite de tests y no
-se ven en la app; la cuarta sí.
+Las cuatro estaban en la § 4, salieron en una sola ronda y **se construyeron el mismo día**: el
+checker de lecturas ampliado a toda lectura, los helpers de caja extraídos de sus 8 copias,
+`mermas` sembrándose su propio producto, y el aviso al cambiar el tipo de un descuento — la
+única de las cuatro que se ve en la app. Detalle de cada una en [`resueltos.md`](resueltos.md).
 
-✅ **Las tres de tests se construyeron el mismo día**: el checker de lecturas ampliado a toda
-lectura, los helpers de caja extraídos de sus 8 copias, y `mermas` sembrándose su propio
-producto. Detalle de cada una en [`resueltos.md`](resueltos.md).
-
-**Queda la cuarta, que es la única que se ve en la app** — el aviso al cambiar el tipo de un
-descuento—, y está abajo.
+📌 **Las tres de tests no encontraron deuda nueva, y eso también es un resultado**: la red del
+checker se amplió y los 21 sitios que marcó eran higiene ya documentada. Lo que sí apareció fue
+un agujero **latente** en los helpers de caja —una copia sin la fase 2 del cierre, a una venta
+en efectivo de estrellar suites ajenas— y una cobertura que se perdía en `mermas`.
 
 ⚠️ **La quinta pregunta de esa ronda NO se contestó y no se preguntó**: la nota de crédito es
 **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`, ADR-010).
 Sigue en la § 4, sola.
-
-- [ ] **Cambiar de tipo da vuelta el MODO y se lleva puesto el valor tipeado** (frontend;
-  medido 2026-08-29, al lado del frente de *"perder la forma de importe"* →
-  [`resueltos.md`](resueltos.md)) — editar un descuento `directo` en **porcentaje** con `0.10`
-  cargado y cambiarle el tipo a `metodo_pago` manda al backend
-  `{ modo: "monto_fijo", valorMonto: "" }`. El `0.10` no viaja en ninguna columna.
-  **Es otra pérdida que la del frente vecino, y por eso va aparte:** allá se pierde la
-  **forma** (escalones vs valor único), acá la **unidad** (porcentaje vs plata). Son los dos
-  ejes que el propio código insiste en no mezclar — ver el comentario de `formaImporteOptions`
-  (`descuentos.vue:88-92`).
-  **Lo que se abrió y se midió:**
-  - el body de arriba salió de una sonda corrida en el harness de `descuentos.nuxt.spec.ts`
-    (fila `directo` en porcentaje → tipo `metodo_pago` → Guardar), no de leer el código;
-  - `onTipoChange` fuerza el modo del tipo nuevo sin mirar el viejo
-    (`descuentos.vue:189`: `config.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'`), y
-    para los **dos** tipos `libre` eso es siempre `monto_fijo`, aunque el tipo viejo también
-    fuera `libre` y el valor siguiera siendo expresable;
-  - el campo queda **a la vista y vacío**: `mostrarValor` sigue en `true`, así que no es un
-    borrado a espaldas del usuario — es la misma forma que el camino 3 del frente vecino.
-  **Lo que era inferencia y ahora está MEDIDO (2026-09-03, contra la API viva):** el body
-  rebota con `400` y el mensaje crudo **`"valorMonto must be a number string"`**, que es el del
-  `ValidationPipe` — o sea `validarFormaDeImporte` ni corre, tal como se había deducido del DTO
-  (`@IsOptional()` saltea `null`/`undefined` pero no `''`). El descuento **queda intacto**
-  (`Descuento pronto pago 10%` sigue en `porcentaje` con `0.1000`), así que no hay pérdida en
-  la base: la pérdida es en pantalla y el costo es que el usuario ve un mensaje de programador
-  donde debería ver por qué no puede guardar.
-  ✅ **Decisión del owner (2026-09-03): avisar antes de borrarlo**, igual que los cuatro
-  caminos del frente vecino. **No conservar**: se ofreció conservar el modo cuando el tipo
-  nuevo también lo admite (los dos `libre`) y el owner eligió el aviso, que deja la pantalla
-  coherente consigo misma y no toca una conducta que hoy es incondicional y está escrita a
-  propósito — el reset del modo existe para que un `0.10` de porcentaje no quede mostrándose
-  como `0` de plata (docblock de `onModoChange`).
-  📌 **Y de arrastre, el mensaje de error.** Hoy, si el usuario guarda sin mirar, lo que ve es
-  `"valorMonto must be a number string"`. El aviso previo lo vuelve improbable, pero el camino
-  sigue existiendo (dos pestañas, un guardado viejo), así que conviene que ese 400 diga algo
-  entendible en la misma pasada.
-
 
 ## 4. Necesita que el owner conteste
 

@@ -412,13 +412,47 @@ const valorAPerder = computed(
   () => !!(editingId.value && valorGuardado.value && !mostrarValor.value),
 )
 
+/** El importe que el formulario tiene cargado HOY, en la unidad del modo vigente. */
+const valorEnElForm = computed(() =>
+  form.value.modo === 'monto_fijo'
+    ? form.value.valorMonto
+    : form.value.valorPorcentaje,
+)
+
+/**
+ * **Quinto camino, y es el gemelo del 3 para el valor único** (decisión del
+ * owner, 2026-09-03): la fila tenía un importe, el campo SIGUE a la vista, y
+ * quedó vacío.
+ *
+ * El gesto que lo produce es cambiar el tipo: `onTipoChange` da vuelta el
+ * `modo` —de `porcentaje` a `monto_fijo` para los dos tipos `libre`— y el
+ * `0.10` que estaba en `valorPorcentaje` deja de viajar, porque el body manda
+ * **solo la columna del modo**. A diferencia de `onModoChange`, `onTipoChange`
+ * no limpia la columna abandonada: el valor sigue en el form, invisible.
+ *
+ * ⚠️ **Y por eso el aviso no promete un borrado, promete un rechazo.** Medido
+ * contra la API el 2026-09-03: sin importe el backend contesta *"Esta regla
+ * tiene que expresar su importe: un valor único o al menos un escalón"*. Igual
+ * que el camino 3, prometer *"se borra"* sería prometer algo que no pasa — no
+ * se guarda nada.
+ */
+const valorSinCargar = computed(
+  () =>
+    !!(
+      editingId.value &&
+      valorGuardado.value &&
+      mostrarValor.value &&
+      !valorEnElForm.value
+    ),
+)
+
 /** Qué se pierde al guardar, en palabras, o `null` si no se pierde nada. */
 const perdidaDeImporte = computed<string | null>(() => {
   if (escalonesAPerder.value) {
     const n = escalonesAPerder.value
     return `${n} ${n === 1 ? 'escalón' : 'escalones'}`
   }
-  if (valorAPerder.value) return 'un valor único cargado'
+  if (valorAPerder.value || valorSinCargar.value) return 'un valor único cargado'
   return null
 })
 
@@ -441,6 +475,16 @@ const avisoPerdida = computed(() => {
     return {
       titulo: 'El importe quedó sin cargar',
       mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó sin ninguno. Cargalos de nuevo: al guardar así, el servidor lo rechaza.`,
+      confirmLabel: 'Guardar igual',
+    }
+  }
+  // El gemelo del de arriba para el valor único (camino 5). Mismas palabras a
+  // propósito: es el mismo hecho —el importe quedó sin cargar y el servidor va a
+  // rechazar— contado sobre el otro campo.
+  if (valorSinCargar.value) {
+    return {
+      titulo: 'El importe quedó sin cargar',
+      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó vacío. Cargalo de nuevo: al guardar así, el servidor lo rechaza.`,
       confirmLabel: 'Guardar igual',
     }
   }
@@ -500,9 +544,22 @@ async function guardarAhora() {
       // Solo la columna del modo. Mandar las dos —o la abandonada en `''`— es
       // 400: el backend rechaza el importe expresado en dos unidades.
       const enMonto = form.value.modo === 'monto_fijo'
+      // La columna vacía viaja como `null`. **Los tres cuerpos dan cosas
+      // distintas** y hay que elegir a sabiendas — medido contra la API el
+      // 2026-09-03:
+      //   `''`      → 400 del `ValidationPipe`, *"valorMonto must be a number
+      //               string"*: `@IsOptional()` saltea `null`/`undefined` pero
+      //               no `''`. Feo, pero no guarda nada.
+      //   ausente   → ⚠️ **200**. El backend lee el valor PERSISTIDO
+      //               (`importeResultante`) y guarda: en un tipo de valor único
+      //               la fila sigue cobrando lo de antes mientras la pantalla
+      //               mostraba el campo vacío. Lo cazó la revisión del diff.
+      //   `null`    → 400 con el motivo en castellano. Es el único que cumple
+      //               lo que el modal promete.
+      const importe = valorEnElForm.value || null
       if (mostrarValor.value) {
-        if (enMonto) body.valorMonto = form.value.valorMonto
-        else body.valorPorcentaje = form.value.valorPorcentaje
+        if (enMonto) body.valorMonto = importe
+        else body.valorPorcentaje = importe
       }
       // Pasar a escalones tiene que APAGAR el valor único explícitamente. Sin
       // este `null`, un PATCH que solo agrega tramos deja la fila con las dos
