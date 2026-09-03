@@ -1420,6 +1420,133 @@ confirmó*—; lo que falta es construir la mitad que quedó afuera, con su test
   plomería (`patchCantidadRetenido`, `patchCantidadFalla`, `cuentasServidor`) ya está en el
   spec.
 
+### Las cuatro que el owner contestó el 2026-09-03
+
+Las cuatro estaban en la § 4 y salieron en una sola ronda. **Tres son de la suite de tests y
+ninguna se ve en la app**; la cuarta sí. Se agrupan acá porque comparten la forma de la
+respuesta —invertir ahora en vez de aceptar la deuda— pero **no son una tanda**: cada una toca
+archivos distintos y ninguna depende de otra.
+
+⚠️ **La quinta pregunta de esa ronda NO se contestó y no se preguntó**: la nota de crédito es
+**fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`, ADR-010).
+Sigue en la § 4, sola.
+
+- [ ] **¿`check-e2e-status.mjs` pasa a mirar toda lectura del body, y no solo los helpers?**
+  (backend/tests + hook; llegó el 2026-08-28 al cerrar el barrido de las lecturas sin status →
+  [`resueltos.md`](resueltos.md)) — hoy el checker falla solo cuando un **helper** hace
+  `return (res.body as X)` sin que nadie haya mirado el status. Ése fue **tu alcance** en
+  `8b9bb94c` (*"un helper roto desorienta a todo un archivo; una lectura suelta dentro de un
+  `it()` miente solo sobre su propio test"*). Ahora las lecturas sueltas también están
+  barridas: 135 aserciones en 27 specs. La pregunta es si la red se amplía para que no vuelvan
+  a crecer.
+  ✅ **Decisión del owner (2026-09-03): (a), ampliarlo a toda lectura.** El argumento que
+  pesó es el costo de no hacerlo: la deuda ya creció a 183 una vez, sin que nadie la viera
+  crecer. Las dos opciones que se le ofrecieron, para que se entienda qué se descartó:
+  **(a) Ampliarlo a toda lectura.** Son ~dos líneas en el script. Lo que compra: nadie vuelve a
+  agregar una lectura a ciegas sin que el pre-commit chille. Lo que cuesta: el checker tiene
+  que aprender las **tres formas de falso positivo** que el barrido encontró —destructuring,
+  status afirmado una línea después, y el parámetro de una arrow function— o va a bloquear
+  commits correctos; y **no puede** distinguir la higiene tolerante (18 sitios que quedan sin
+  aserción a propósito) de un olvido, así que necesitaría una marca en el código —un comentario
+  con una palabra fija— para saltearlos.
+  **(b) Dejarlo como está.** No cuesta nada hoy y la deuda vuelve a crecer de a poco, que es
+  exactamente cómo llegó a 183.
+  📌 El trabajo real no es ampliar el checker, es **enseñarle las tres formas**.
+  Están medidas y documentadas en [`resueltos.md`](resueltos.md), con un ejemplo de cada una.
+
+- [ ] **`abrirCaja` y `cerrarCaja` están copiados en 8 specs e2e cada uno, y ya derivaron**
+  (backend/tests; **medido el 2026-08-28** barriendo la entrada de las lecturas sin status) —
+  `costeo-cpp`, `combos`, `grupos-modificadores`, `grupos-modificadores-overrides`,
+  `items-pausados`, `liquidacion-propinas`, `recetas` y `ventas` tienen cada uno su propia
+  copia. **No son idénticas** (los 8 md5 del cuerpo de `abrirCaja` difieren): `costeo-cpp`
+  afirma `expect([200, 201]).toContain(res.status)` donde las otras siete afirman
+  `toBe(201)`, y el `saldoInicial` va `100000` en seis y `10000` en `ventas`. O sea que la
+  copia **ya se está desincronizando en la conducta que verifica**, no solo en un string.
+  La convención del repo es *"duplicar dos veces es aceptable, se extrae a la tercera"* y van
+  ocho.
+  ✅ **Decisión del owner (2026-09-03): extraerlo.** `backend/test/helpers/caja.ts` (o
+  similar) y los 8 specs lo importan. La pregunta era de estructura y no de código: un helper
+  compartido **estrena un patrón** en `backend/test/` —hoy cada spec es autocontenido, y
+  `CLAUDE.md` dice no crear archivos nuevos si la implementación cabe en uno existente; acá no
+  cabe—. Se aceptó ese costo, más el de un diff que toca 9 archivos de una y exige el e2e
+  completo, a cambio de que la próxima diferencia de conducta entre copias no pase
+  inadvertida.
+  📌 **Al extraer hay que decidir qué queda como conducta única**, porque las copias ya
+  divergen: el `expect([200, 201])` de `costeo-cpp` contra el `toBe(201)` de las otras siete, y
+  el `saldoInicial` de `10000` en `ventas` contra `100000` en las demás. Eso **no se resuelve
+  uniformando a ojo**: hay que mirar por qué `costeo-cpp` toleraba los dos status y si `ventas`
+  depende de su saldo más chico.
+  📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
+  agregar aserciones, no reorganizar los specs.
+
+- [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
+  seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
+  al cerrar la limpieza de la causa → [`resueltos.md`](resueltos.md)) — con la causa ya
+  limpiándose sola, correr el archivo dos veces sin `reset-db.sh` en el medio falla **2 de 9**:
+  `POST /mermas registra merma con Vencimiento` responde `400 "Stock insuficiente para la
+  salida"` (verificado pidiéndoselo a la API, no deducido), y el `GET` que busca esa merma cae
+  detrás. **La cuenta cierra exacta:** Carne molida nace con **1,5 kg**
+  (`seeder.service.ts:3554`) y una corrida del spec se lleva **1,1** — 1 kg la merma con
+  Vencimiento y 0,1 la merma con causa custom—, así que quedan 0,4 y el pedido de 1 kg de la
+  corrida siguiente no entra. Medido en tres corridas seguidas: 1,5 → 0,4 → 0,3 → 0,2.
+  ⚠️ **El seed lo eligió a propósito y lo dice**: *"stock bajo para probar descuentos, con
+  margen sobre el consumo del e2e (mermas 1 kg + combos 0.15 kg)"*. El margen está calculado
+  para **una** pasada de la suite, que es el flujo que manda `CLAUDE.md` (`reset-db.sh` antes
+  de cada `test:e2e`). No es un descuido: es una decisión que choca con querer correr un spec
+  suelto dos veces.
+  ✅ **Decisión del owner (2026-09-03): que el spec se siembre su propio producto con costo** y
+  lo soft-borre en el `afterAll` — el molde ya está en el mismo archivo, el del *"Insumo sin
+  costo E2E"*. Es la única de las tres que da repetibilidad **de verdad**; subir el stock
+  sembrado solo corría el problema para más adelante y aceptarlo dejaba al próximo peritando
+  2 rojos que no son regresión.
+  📌 **Y hay que tocar el seed igual, aunque no sea para subir el número:** la decisión
+  contradice una intención escrita ahí, que declara a Carne molida *"el producto seed que
+  ejercita el flujo de mermas"* (`seeder.service.ts:3501-3502`). O ese comentario se corrige, o
+  el próximo lee que el fixture sigue siendo el de mermas y vuelve a atarle un spec.
+  📌 **La pregunta es de fixtures compartidos, no de este archivo:** `combos.e2e-spec.ts` come
+  del mismo kilo y medio.
+  ⛔ **Lo que NO se puede hacer, para no redescubrirlo:** devolver el stock en el `afterAll`.
+  Por API es escribir en `movimientos_inventario` (`CLAUDE.md`: detenerse y preguntar), y por
+  SQL directo sobre `item_producto.stock` desincroniza el saldo materializado del kardex, que
+  es exactamente lo que la invariante protege.
+
+- [ ] **Cambiar de tipo da vuelta el MODO y se lleva puesto el valor tipeado** (frontend;
+  medido 2026-08-29, al lado del frente de *"perder la forma de importe"* →
+  [`resueltos.md`](resueltos.md)) — editar un descuento `directo` en **porcentaje** con `0.10`
+  cargado y cambiarle el tipo a `metodo_pago` manda al backend
+  `{ modo: "monto_fijo", valorMonto: "" }`. El `0.10` no viaja en ninguna columna.
+  **Es otra pérdida que la del frente vecino, y por eso va aparte:** allá se pierde la
+  **forma** (escalones vs valor único), acá la **unidad** (porcentaje vs plata). Son los dos
+  ejes que el propio código insiste en no mezclar — ver el comentario de `formaImporteOptions`
+  (`descuentos.vue:88-92`).
+  **Lo que se abrió y se midió:**
+  - el body de arriba salió de una sonda corrida en el harness de `descuentos.nuxt.spec.ts`
+    (fila `directo` en porcentaje → tipo `metodo_pago` → Guardar), no de leer el código;
+  - `onTipoChange` fuerza el modo del tipo nuevo sin mirar el viejo
+    (`descuentos.vue:189`: `config.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'`), y
+    para los **dos** tipos `libre` eso es siempre `monto_fijo`, aunque el tipo viejo también
+    fuera `libre` y el valor siguiera siendo expresable;
+  - el campo queda **a la vista y vacío**: `mostrarValor` sigue en `true`, así que no es un
+    borrado a espaldas del usuario — es la misma forma que el camino 3 del frente vecino.
+  **Lo que era inferencia y ahora está MEDIDO (2026-09-03, contra la API viva):** el body
+  rebota con `400` y el mensaje crudo **`"valorMonto must be a number string"`**, que es el del
+  `ValidationPipe` — o sea `validarFormaDeImporte` ni corre, tal como se había deducido del DTO
+  (`@IsOptional()` saltea `null`/`undefined` pero no `''`). El descuento **queda intacto**
+  (`Descuento pronto pago 10%` sigue en `porcentaje` con `0.1000`), así que no hay pérdida en
+  la base: la pérdida es en pantalla y el costo es que el usuario ve un mensaje de programador
+  donde debería ver por qué no puede guardar.
+  ✅ **Decisión del owner (2026-09-03): avisar antes de borrarlo**, igual que los cuatro
+  caminos del frente vecino. **No conservar**: se ofreció conservar el modo cuando el tipo
+  nuevo también lo admite (los dos `libre`) y el owner eligió el aviso, que deja la pantalla
+  coherente consigo misma y no toca una conducta que hoy es incondicional y está escrita a
+  propósito — el reset del modo existe para que un `0.10` de porcentaje no quede mostrándose
+  como `0` de plata (docblock de `onModoChange`).
+  📌 **Y de arrastre, el mensaje de error.** Hoy, si el usuario guarda sin mirar, lo que ve es
+  `"valorMonto must be a number string"`. El aviso previo lo vuelve improbable, pero el camino
+  sigue existiendo (dos pestañas, un guardado viejo), así que conviene que ese 400 diga algo
+  entendible en la misma pasada.
+
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1446,13 +1573,17 @@ owner eligió **guardar**, y con eso quedó contestado también su costo: el rec
 con la pantalla ya en otra cuenta **avisa nombrando la mesa y la cuenta**, en vez de callarse
 o de tirar un error sin dueño → [`resueltos.md`](resueltos.md).
 
-**Quedan cinco abiertas** —tres llegaron el 2026-08-28: dos del barrido de las lecturas sin
-status (si el checker pasa a mirar toda lectura, y los helpers de caja copiados en 8 specs) y
-una del cierre de la causa de merma (el stock del seed dimensionado para una sola corrida);
-más la nota de crédito (fiscal, frente propio) y el **modo** que se da vuelta al cambiar de
-tipo (2026-08-29, al cerrar la de la forma de importe)—; el conteo se recuenta con
-`awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el **2026-09-02** al cerrar la
-de salir de la cuenta: son cinco.
+✅ **Y cuatro más el 2026-09-03**, en una sola ronda: el checker de lecturas sin status
+(**ampliarlo**), los helpers de caja copiados en 8 specs (**extraerlos**), el stock de merma
+dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se da vuelta al
+cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
+escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
+
+**Queda UNA abierta: la nota de crédito**, y no es casual que sea la que sobra. Es **fiscal**,
+así que no se cuelga del final de una ronda de preguntas de producto ni se toma de arrastre:
+abre su propio frente, con su propia sesión y su propia verificación (`CLAUDE.md`, ADR-010).
+El conteo se recuenta con `awk '/^## /{s=$0} /^- \[ \]/{print s}'`, y se recontó así el
+**2026-09-03** al mudar las cuatro: es una.
 
 ✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
 desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
@@ -1535,83 +1666,6 @@ habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una 
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
 
 
-- [ ] **¿`check-e2e-status.mjs` pasa a mirar toda lectura del body, y no solo los helpers?**
-  (backend/tests + hook; llegó el 2026-08-28 al cerrar el barrido de las lecturas sin status →
-  [`resueltos.md`](resueltos.md)) — hoy el checker falla solo cuando un **helper** hace
-  `return (res.body as X)` sin que nadie haya mirado el status. Ése fue **tu alcance** en
-  `8b9bb94c` (*"un helper roto desorienta a todo un archivo; una lectura suelta dentro de un
-  `it()` miente solo sobre su propio test"*). Ahora las lecturas sueltas también están
-  barridas: 135 aserciones en 27 specs. La pregunta es si la red se amplía para que no vuelvan
-  a crecer.
-  ❓ **Lo que hay que decidir, con lo que cuesta cada opción:**
-  **(a) Ampliarlo a toda lectura.** Son ~dos líneas en el script. Lo que compra: nadie vuelve a
-  agregar una lectura a ciegas sin que el pre-commit chille. Lo que cuesta: el checker tiene
-  que aprender las **tres formas de falso positivo** que el barrido encontró —destructuring,
-  status afirmado una línea después, y el parámetro de una arrow function— o va a bloquear
-  commits correctos; y **no puede** distinguir la higiene tolerante (18 sitios que quedan sin
-  aserción a propósito) de un olvido, así que necesitaría una marca en el código —un comentario
-  con una palabra fija— para saltearlos.
-  **(b) Dejarlo como está.** No cuesta nada hoy y la deuda vuelve a crecer de a poco, que es
-  exactamente cómo llegó a 183.
-  📌 Si sale (a): el trabajo real no es ampliar el checker, es **enseñarle las tres formas**.
-  Están medidas y documentadas en [`resueltos.md`](resueltos.md), con un ejemplo de cada una.
-
-
-- [ ] **`abrirCaja` y `cerrarCaja` están copiados en 8 specs e2e cada uno, y ya derivaron**
-  (backend/tests; **medido el 2026-08-28** barriendo la entrada de las lecturas sin status) —
-  `costeo-cpp`, `combos`, `grupos-modificadores`, `grupos-modificadores-overrides`,
-  `items-pausados`, `liquidacion-propinas`, `recetas` y `ventas` tienen cada uno su propia
-  copia. **No son idénticas** (los 8 md5 del cuerpo de `abrirCaja` difieren): `costeo-cpp`
-  afirma `expect([200, 201]).toContain(res.status)` donde las otras siete afirman
-  `toBe(201)`, y el `saldoInicial` va `100000` en seis y `10000` en `ventas`. O sea que la
-  copia **ya se está desincronizando en la conducta que verifica**, no solo en un string.
-  La convención del repo es *"duplicar dos veces es aceptable, se extrae a la tercera"* y van
-  ocho.
-  ❓ **La pregunta, que es de estructura y no de código:** un helper compartido necesita un
-  archivo nuevo en `backend/test/` —hoy no hay ninguno: cada spec es autocontenido— y
-  `CLAUDE.md` dice no crear archivos nuevos si la implementación cabe en uno existente. Acá
-  no cabe. Entonces: **(a)** `backend/test/helpers/caja.ts` (o similar) y los 8 specs lo
-  importan — el diff toca 9 archivos de una y hay que correr el e2e completo; **(b)** dejarlas
-  copiadas y anotar la deriva como aceptada. Lo que compra (a) es que la próxima diferencia
-  de conducta entre copias no pase inadvertida; lo que cuesta es un patrón nuevo en
-  `backend/test/` que después hay que sostener.
-  📌 No se toma de arrastre en la tanda de las aserciones de status: ahí el alcance es
-  agregar aserciones, no reorganizar los specs.
-
-
-- [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
-  seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
-  al cerrar la limpieza de la causa → [`resueltos.md`](resueltos.md)) — con la causa ya
-  limpiándose sola, correr el archivo dos veces sin `reset-db.sh` en el medio falla **2 de 9**:
-  `POST /mermas registra merma con Vencimiento` responde `400 "Stock insuficiente para la
-  salida"` (verificado pidiéndoselo a la API, no deducido), y el `GET` que busca esa merma cae
-  detrás. **La cuenta cierra exacta:** Carne molida nace con **1,5 kg**
-  (`seeder.service.ts:3554`) y una corrida del spec se lleva **1,1** — 1 kg la merma con
-  Vencimiento y 0,1 la merma con causa custom—, así que quedan 0,4 y el pedido de 1 kg de la
-  corrida siguiente no entra. Medido en tres corridas seguidas: 1,5 → 0,4 → 0,3 → 0,2.
-  ⚠️ **El seed lo eligió a propósito y lo dice**: *"stock bajo para probar descuentos, con
-  margen sobre el consumo del e2e (mermas 1 kg + combos 0.15 kg)"*. El margen está calculado
-  para **una** pasada de la suite, que es el flujo que manda `CLAUDE.md` (`reset-db.sh` antes
-  de cada `test:e2e`). No es un descuido: es una decisión que choca con querer correr un spec
-  suelto dos veces.
-  ❓ **Las tres salidas, con lo que cuesta cada una:**
-  **(a) Subir el stock sembrado.** Una línea. Compra N corridas en vez de una y **no** da
-  repetibilidad: la corre para más adelante. Toca el seeder, o sea re-siembra para todos.
-  **(b) Que el spec se siembre su propio producto con costo** y lo soft-borre en el `afterAll`
-  —el molde ya está en el mismo archivo, el del "Insumo sin costo E2E"—. Da repetibilidad de
-  verdad y deja de gastar un fixture compartido. Lo que cuesta: **contradice una intención
-  escrita del seed**, que declara a Carne molida *"el producto seed que ejercita el flujo de
-  mermas"* (`seeder.service.ts:3501-3502`).
-  **(c) Aceptarlo y dejarlo escrito**: `mermas` exige reset, como ya lo exige el gate. Costo
-  cero hoy; a cambio, el próximo que corra el spec suelto vuelve a peritar 2 rojos que no son
-  regresión.
-  📌 **La pregunta es de fixtures compartidos, no de este archivo:** `combos.e2e-spec.ts` come
-  del mismo kilo y medio.
-  ⛔ **Lo que NO se puede hacer, para no redescubrirlo:** devolver el stock en el `afterAll`.
-  Por API es escribir en `movimientos_inventario` (`CLAUDE.md`: detenerse y preguntar), y por
-  SQL directo sobre `item_producto.stock` desincroniza el saldo materializado del kardex, que
-  es exactamente lo que la invariante protege.
-
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
   `ventas.service.ts:982` `crearNotaCredito` — la cita vieja decía `:854`, que hoy es otra
@@ -1674,37 +1728,6 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   dependen de esa respuesta.
   ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
   parar. Lo que cambió es que ahora la decisión tiene material abajo.
-
-- [ ] **Cambiar de tipo da vuelta el MODO y se lleva puesto el valor tipeado** (frontend;
-  medido 2026-08-29, al lado del frente de *"perder la forma de importe"* →
-  [`resueltos.md`](resueltos.md)) — editar un descuento `directo` en **porcentaje** con `0.10`
-  cargado y cambiarle el tipo a `metodo_pago` manda al backend
-  `{ modo: "monto_fijo", valorMonto: "" }`. El `0.10` no viaja en ninguna columna.
-  **Es otra pérdida que la del frente vecino, y por eso va aparte:** allá se pierde la
-  **forma** (escalones vs valor único), acá la **unidad** (porcentaje vs plata). Son los dos
-  ejes que el propio código insiste en no mezclar — ver el comentario de `formaImporteOptions`
-  (`descuentos.vue:88-92`).
-  **Lo que se abrió y se midió:**
-  - el body de arriba salió de una sonda corrida en el harness de `descuentos.nuxt.spec.ts`
-    (fila `directo` en porcentaje → tipo `metodo_pago` → Guardar), no de leer el código;
-  - `onTipoChange` fuerza el modo del tipo nuevo sin mirar el viejo
-    (`descuentos.vue:189`: `config.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'`), y
-    para los **dos** tipos `libre` eso es siempre `monto_fijo`, aunque el tipo viejo también
-    fuera `libre` y el valor siguiera siendo expresable;
-  - el campo queda **a la vista y vacío**: `mostrarValor` sigue en `true`, así que no es un
-    borrado a espaldas del usuario — es la misma forma que el camino 3 del frente vecino.
-  **Lo INFERIDO, que no se corrió contra la API:** que ese body rebota. El DTO declara
-  `@IsOptional() @IsNumberString()` sobre `valorMonto` (`create-descuento.dto.ts:60-63`,
-  abierto), y `@IsOptional()` saltea `null`/`undefined` pero no `''`; de ahí se sigue que el
-  400 lo tira el `ValidationPipe` (*"valorMonto must be a number string"*) y que
-  `validarFormaDeImporte` ni corre. **No está medido end-to-end**: el harness del drawer
-  mockea `useApiFetch`, así que la respuesta real no se vio.
-  ❓ **La pregunta al owner, y por eso está en esta sección:** ¿el cambio de tipo **conserva**
-  el modo cuando el tipo nuevo también lo admite (los dos `libre`), o **avisa** como los cuatro
-  caminos del frente vecino? Conservar es la respuesta chica, pero cambia una conducta que hoy
-  es incondicional y que se escribió a propósito — el reset del modo existe para que un `0.10`
-  de porcentaje no quede mostrándose como `0` de plata (ver el docblock de `onModoChange`).
-
 
 ## 5. Carreras de concurrencia
 
