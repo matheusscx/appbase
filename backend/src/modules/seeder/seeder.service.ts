@@ -250,6 +250,42 @@ export class SeederService implements OnApplicationBootstrap {
         separadorMiles: ',',
         locale: 'en-US',
       },
+      // Las oficiales de los otros tres países de `seedPais`. El país no puede
+      // existir sin su moneda oficial: `pais.moneda_oficial_id` es de dónde
+      // sale la moneda del tenant, y el tenant no la elige.
+      {
+        monedaId: '550e8400-e29b-41d4-a716-446655440369',
+        nombre: 'Peso Argentino',
+        codigoIso: 'ARS',
+        codigoNumero: '032',
+        simbolo: '$',
+        decimales: 2,
+        separadorDecimal: ',',
+        separadorMiles: '.',
+        locale: 'es-AR',
+      },
+      {
+        monedaId: '550e8400-e29b-41d4-a716-446655440370',
+        nombre: 'Peso Colombiano',
+        codigoIso: 'COP',
+        codigoNumero: '170',
+        simbolo: '$',
+        decimales: 2,
+        separadorDecimal: ',',
+        separadorMiles: '.',
+        locale: 'es-CO',
+      },
+      {
+        monedaId: '550e8400-e29b-41d4-a716-446655440371',
+        nombre: 'Peso Mexicano',
+        codigoIso: 'MXN',
+        codigoNumero: '484',
+        simbolo: '$',
+        decimales: 2,
+        separadorDecimal: '.',
+        separadorMiles: ',',
+        locale: 'es-MX',
+      },
     ];
 
     for (const data of monedas) {
@@ -347,44 +383,143 @@ export class SeederService implements OnApplicationBootstrap {
     );
   }
 
+  /**
+   * Catálogo de países, con la regla de redondeo de cada uno **citada al lado
+   * del valor** — no en otro archivo: acá es donde mira quien lo quiera
+   * cambiar. `es_ley` cierra la perilla para todo tenant del país; sin ley, el
+   * valor es solo el default con el que nace.
+   *
+   * La investigación que respalda cada cita:
+   * `docs/agent/investigaciones/2026-09-03-redondeo-por-pais-latam.md`.
+   */
   private async seedPais(): Promise<void> {
-    const paisId = '550e8400-e29b-41d4-a716-446655440000';
-    let pais = await this.paisRepo.findOne({ where: { paisId } });
-
-    if (!pais) {
-      pais = this.paisRepo.create({
-        paisId,
+    const paises: (Partial<Pais> & { paisId: string })[] = [
+      {
+        paisId: '550e8400-e29b-41d4-a716-446655440000',
         nombre: 'Chile',
         codigoIso: 'CL',
         zonaHorariaPrincipal: 'America/Santiago',
-        monedaOficialId: null,
-      });
-      await this.paisRepo.save(pais);
-    }
-
-    // Siempre asegurar que monedaOficialId quede seteado
-    await this.paisRepo.update(
-      { paisId },
-      { monedaOficialId: '550e8400-e29b-41d4-a716-446655440003' },
-    );
-  }
-
-  private async seedPaisMonedas(): Promise<void> {
-    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
-    const monedaIds = [
-      '550e8400-e29b-41d4-a716-446655440003', // CLP
-      '550e8400-e29b-41d4-a716-446655440004', // UF
-      '550e8400-e29b-41d4-a716-446655440005', // USD
+        monedaOficialId: '550e8400-e29b-41d4-a716-446655440003', // CLP
+        // ⛔ Chile NO lleva candado, y es deliberado: que sus totales vayan
+        // enteros es una INFERENCIA del formato del DTE, no una frase del SII.
+        // Poner un candado sobre una inferencia es prohibirle algo a un
+        // cliente por una regla que no leímos.
+        modoRedondeoSugerido: 'HALF_UP',
+        modoRedondeoEsLey: false,
+        modoRedondeoNorma: null,
+        nivelRedondeoSugerido: 'linea',
+        nivelRedondeoEsLey: false,
+        nivelRedondeoNorma: null,
+      },
+      {
+        paisId: '550e8400-e29b-41d4-a716-446655440372',
+        nombre: 'Argentina',
+        codigoIso: 'AR',
+        zonaHorariaPrincipal: 'America/Argentina/Buenos_Aires',
+        monedaOficialId: '550e8400-e29b-41d4-a716-446655440369', // ARS
+        modoRedondeoSugerido: 'HALF_EVEN',
+        modoRedondeoEsLey: true,
+        modoRedondeoNorma:
+          'ARCA/AFIP, manual del desarrollador (RG 4291): "El criterio de ' +
+          'redondeo que utilizamos en este servicio es Round Half Even".',
+        // El nivel NO lo fija: valida la suma con tolerancia (error relativo
+        // ≤ 0,01%), así que ahí el tenant elige.
+        nivelRedondeoSugerido: null,
+        nivelRedondeoEsLey: false,
+        nivelRedondeoNorma: null,
+      },
+      {
+        paisId: '550e8400-e29b-41d4-a716-446655440373',
+        nombre: 'Colombia',
+        codigoIso: 'CO',
+        zonaHorariaPrincipal: 'America/Bogota',
+        monedaOficialId: '550e8400-e29b-41d4-a716-446655440370', // COP
+        modoRedondeoSugerido: 'HALF_EVEN',
+        modoRedondeoEsLey: true,
+        modoRedondeoNorma:
+          'DIAN, anexo técnico v1.9 (Resolución 000165 del 01/11/2023) ' +
+          '§ 5.2.1: round-half-to-even, norma técnica colombiana NTC 3711.',
+        // Tampoco fija el nivel: admite que el total difiera de la suma de
+        // parciales y pide declarar la diferencia (fiscal, ADR-010).
+        nivelRedondeoSugerido: null,
+        nivelRedondeoEsLey: false,
+        nivelRedondeoNorma: null,
+      },
+      {
+        paisId: '550e8400-e29b-41d4-a716-446655440374',
+        nombre: 'México',
+        codigoIso: 'MX',
+        zonaHorariaPrincipal: 'America/Mexico_City',
+        monedaOficialId: '550e8400-e29b-41d4-a716-446655440371', // MXN
+        // México es el que prueba que el candado es por PERILLA y no por país:
+        // el modo lo deja libre, el nivel no.
+        modoRedondeoSugerido: null,
+        modoRedondeoEsLey: false,
+        modoRedondeoNorma: null,
+        nivelRedondeoSugerido: 'documento',
+        nivelRedondeoEsLey: true,
+        nivelRedondeoNorma:
+          'SAT, Anexo 20: sumar las líneas a hasta 6 decimales y redondear ' +
+          'una sola vez al total.',
+      },
     ];
 
-    for (const monedaId of monedaIds) {
-      const exists = await this.paisMonedaRepo.findOne({
-        where: { paisId: CHILE, monedaId },
-      });
+    for (const data of paises) {
+      const { paisId, ...campos } = data;
+      const exists = await this.paisRepo.findOne({ where: { paisId } });
       if (!exists) {
-        await this.paisMonedaRepo.save(
-          this.paisMonedaRepo.create({ paisId: CHILE, monedaId }),
-        );
+        await this.paisRepo.save(this.paisRepo.create(data));
+      }
+      // El `update` incondicional se conserva del código anterior: asegura que
+      // la moneda oficial y la regla queden al día aunque la fila ya venga de
+      // una corrida vieja. La PK sale del payload — no se re-escribe a sí misma.
+      //
+      // Por eso cada país declara las SEIS columnas del redondeo, con `null`
+      // explícito donde no aplica: `update` arma el `SET` solo con las claves
+      // presentes, así que una omitida no se limpia. Un país que dejara de ser
+      // ley conservaría su `norma` vieja colgando — y esa norma es el texto
+      // que la pantalla le muestra al tenant como motivo del candado.
+      await this.paisRepo.update({ paisId }, campos);
+    }
+  }
+
+  /**
+   * Qué monedas puede habilitar cada país. Chile lleva tres (CLP, UF, USD)
+   * porque la UF y el dólar se usan de verdad como unidades de cuenta; los
+   * otros tres, solo su oficial.
+   */
+  private async seedPaisMonedas(): Promise<void> {
+    const porPais: Record<string, string[]> = {
+      // Chile
+      '550e8400-e29b-41d4-a716-446655440000': [
+        '550e8400-e29b-41d4-a716-446655440003', // CLP
+        '550e8400-e29b-41d4-a716-446655440004', // UF
+        '550e8400-e29b-41d4-a716-446655440005', // USD
+      ],
+      // Argentina
+      '550e8400-e29b-41d4-a716-446655440372': [
+        '550e8400-e29b-41d4-a716-446655440369', // ARS
+      ],
+      // Colombia
+      '550e8400-e29b-41d4-a716-446655440373': [
+        '550e8400-e29b-41d4-a716-446655440370', // COP
+      ],
+      // México
+      '550e8400-e29b-41d4-a716-446655440374': [
+        '550e8400-e29b-41d4-a716-446655440371', // MXN
+      ],
+    };
+
+    for (const [paisId, monedaIds] of Object.entries(porPais)) {
+      for (const monedaId of monedaIds) {
+        const exists = await this.paisMonedaRepo.findOne({
+          where: { paisId, monedaId },
+        });
+        if (!exists) {
+          await this.paisMonedaRepo.save(
+            this.paisMonedaRepo.create({ paisId, monedaId }),
+          );
+        }
       }
     }
   }
@@ -443,6 +578,29 @@ export class SeederService implements OnApplicationBootstrap {
         paisId: '550e8400-e29b-41d4-a716-446655440000',
         nombre: 'Isla de Pascua',
         zonaHoraria: 'Pacific/Easter',
+      },
+      // Una por cada país nuevo. No es decoración del catálogo: un tenant se
+      // crea con una `provinciaId` y de ahí sale su país, así que sin
+      // provincia no hay forma de tener un tenant argentino, colombiano ni
+      // mexicano — y por lo tanto tampoco de que el país le empuje su regla
+      // de redondeo.
+      {
+        provinciaId: '550e8400-e29b-41d4-a716-446655440375',
+        paisId: '550e8400-e29b-41d4-a716-446655440372',
+        nombre: 'Ciudad Autónoma de Buenos Aires',
+        zonaHoraria: 'America/Argentina/Buenos_Aires',
+      },
+      {
+        provinciaId: '550e8400-e29b-41d4-a716-446655440376',
+        paisId: '550e8400-e29b-41d4-a716-446655440373',
+        nombre: 'Bogotá D.C.',
+        zonaHoraria: 'America/Bogota',
+      },
+      {
+        provinciaId: '550e8400-e29b-41d4-a716-446655440377',
+        paisId: '550e8400-e29b-41d4-a716-446655440374',
+        nombre: 'Ciudad de México',
+        zonaHoraria: 'America/Mexico_City',
       },
     ];
 
