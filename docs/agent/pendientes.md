@@ -1068,9 +1068,26 @@ abriendo las superficies, no leyendo la entrada.
   ⏳ **Lo que sigue abierto es lo que esta entrada siempre dijo que faltaba: el camino con
   motivo.** Bloquear evita la pérdida silenciosa; **no da la salida legítima**. Un plato que
   se quemó o que se regala tiene que poder salir de la cuenta **con motivo** (merma o
-  cortesía), y eso es lo que falta diseñar — ahí sí entra la investigación de mercado
-  (Toast, Square y Lightspeed manejan *voids* de ítems despachados). Sin eso, hoy el garzón
-  que se equivocó de plato después de mandar la comanda no tiene ninguna salida.
+  cortesía). Sin eso, hoy el garzón que se equivocó de plato después de mandar la comanda no
+  tiene ninguna salida.
+
+  ✅ **LAS SEIS REGLAS DECIDIDAS POR EL OWNER (2026-09-03).** La investigación de mercado
+  ([`investigaciones/2026-09-01-anular-linea-despachada.md`](investigaciones/2026-09-01-anular-linea-despachada.md))
+  dejó tres preguntas que el mercado no contesta; se preguntaron esas más tres que salieron
+  del diseño. **Con esto se puede escribir la spec.**
+
+  | Qué | Decisión | Lo que se descartó, y por qué importa |
+  |---|---|---|
+  | **La cortesía y el stock** | **Descuenta**, y se reporta **aparte** de la merma | No descontar deja el stock mintiendo —la carne salió— y reabre la mesa trabada. Mezclarlo con merma arruina el costo de comida: *"se me cayó al piso"* y *"se lo regalé"* dejan de ser distinguibles |
+  | **Dónde viven los motivos** | **Un catálogo único con tipo**: se renombra el actual a algo neutro y cada motivo dice si es merma o cortesía | Reusar `causas_merma` tal cual deja una tabla cuyo nombre miente. Dos catálogos separados son dos pantallas casi idénticas para una diferencia de una palabra |
+  | **Quién puede** | **Permiso propio**, que nace en el rol de encargado y el admin reparte | Que lo haga cualquier garzón deja el control a posteriori y permite tapar el propio error. Solo el admin deja la mesa trabada en un turno sin el dueño, o sea no resuelve el caso |
+  | **Parcial** | **Sí**: se despacharon 3, se saca 1 | Nuestro modelo ya lo permite (`cantidad_enviada` es una cantidad, no un flag) y **ningún POS relevado lo documenta**. Sacar la línea entera obliga a anular 3 y re-pedir 2, ensuciando comanda, reporte y kardex con movimientos que no pasaron |
+  | **La línea** | **Queda marcada como anulada**, con motivo y quién autorizó | Que desaparezca deja la cuenta sin rastro del plato regalado. ⚠️ El costo está medido y hay que acordarse: `ItemsService.comprometidoPorItem` suma toda línea viva de una cuenta `abierta`, así que **necesita una condición más** para dejar de contar la anulada — si no, la mesa sigue apartando stock de un plato que ya no está |
+  | **La precuenta** | **Muestra el plato en $0 con la palabra "cortesía"** | Que no aparezca pierde el gesto comercial: regalaste un plato y el cliente no se entera |
+
+  ⛔ **Lo que NO se decidió y no se pregunta acá: qué muestra la BOLETA.** El documento
+  tributario es fiscal y abre su propio frente (`CLAUDE.md`, ADR-010). La precuenta no es un
+  documento tributario, por eso sí se decidió.
 
   🔗 La pieza **C** de la partición (el default destildado del modal de anulación) se
   **construyó el 2026-08-23** — ver [`resueltos.md`](resueltos.md) § *"El checkbox de
@@ -1907,14 +1924,30 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   producto, abierto por el owner el 2026-08-15) — **el tema activo.** Es la tercera pata de la
   tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido.
 
-  > 🛑 **DÓNDE QUEDÓ (2026-08-15).** La investigación está **corrida, cerrada y commiteada**;
-  > el cruce contra el código también. **El owner la pausó acá para analizarla mejor antes de
-  > decidir** — no es un bloqueo del trabajo, es una pausa pedida.
-  > **Al retomar:** leer
-  > [`investigaciones/2026-08-15-decimales-y-redondeo.md`](investigaciones/2026-08-15-decimales-y-redondeo.md)
-  > entero y arrancar por **las cinco preguntas de su §9**. Hasta que estén contestadas **no
-  > se escribe spec ni se toca código**: esto es el motor de precios e impuestos, y `CLAUDE.md`
-  > obliga a consultar. La primera pregunta destraba a las otras cuatro.
+  > ✅ **CONTESTADO EL 2026-09-03 → [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md).**
+  > Las cinco preguntas de la §9 de la investigación están respondidas y la decisión vive en el
+  > ADR, no acá. **Leer el ADR antes que esta entrada**: lo de abajo es el material con el que
+  > se decidió, no la decisión.
+  >
+  > **Lo primero que apareció al retomar es que la pregunta estaba peor planteada que el
+  > sistema.** El owner describió tres capas —cálculo, presentación y redondeo al final— y las
+  > tres **ya estaban construidas con esos mismos nombres** (`escala_calculo`,
+  > `moneda.decimales`, `nivelRedondeo`). Tres de las cinco preguntas se cerraron sin construir
+  > nada. Corolario para el próximo: **antes de llevarle al owner las preguntas de una
+  > investigación, cruzarlas contra lo que el código ya resuelve** — varias pueden estar
+  > contestadas.
+  >
+  > **Lo que sí queda, y es una MEDICIÓN, no una decisión:** `nivelRedondeo = documento` se
+  > rechaza con 400 si la moneda oficial tiene 0 decimales, y esa prohibición hay que volver a
+  > medirla — lo medido apunta al revés (con descuento de nivel venta, `documento` se queda
+  > plano y `linea` crece con el carrito) y **su premisa es falsa**: lo señaló el owner, un
+  > tenant chileno puede cotizar en **UF** y otro puede llegar a decimales por **conversión
+  > desde dólar**, así que *"moneda sin decimales ⇒ nada tiene decimales"* no se sostiene. Los
+  > tres casos que la medición tiene que cubrir están listados en el ADR.
+  >
+  > 🛑 **Sigue valiendo lo de siempre:** esto es el motor de precios e impuestos. Con el ADR
+  > escrito se puede hacer la medición y redactar la spec; **tocar el motor no**, hasta que la
+  > spec esté aprobada.
   > Lo de abajo es el material que la investigación usó como punto de partida; lo que la
   > investigación **corrigió o agregó** está más abajo, en el bloque ✅ de resultados.
 
@@ -2009,10 +2042,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   - **Medido en el código:** la escala 4 está escrita a mano en **97 sitios de 17 archivos**;
     `ESCALA_PERSISTIDA` tiene **3 usos**, los tres en un solo archivo; y `moneda.decimales`
     **no tiene ningún consumidor fuera de propinas**.
-  ❓ **Cinco preguntas abiertas para el owner en §9 del documento** — la primera es si
-  *"un solo criterio"* significa un solo criterio o un solo número (ningún ERP relevado tiene
-  redondeo global: SAP lo pone por empresa+moneda, Odoo por moneda). **No resolverlas solo:**
-  esto es el motor de precios e impuestos, y `CLAUDE.md` obliga a consultar.
+  ✅ **Las cinco preguntas de la §9 se contestaron el 2026-09-03** → [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md).
+  En una línea cada una: un solo **criterio** con el número puesto por la moneda; el **nivel de
+  redondeo lo fija el país** y el tenant no lo toca; la **UF solo cotiza**, nunca es moneda
+  oficial; se **congelan los decimales en el documento** pero el reparto por mayores restos no
+  se generaliza; y **una sola columna de decimales por moneda** (YAGNI explícito del owner:
+  *"estamos muy lejos de tener casos como el afgani"*), con su costo anotado.
 
   <details><summary>Lo que se le pidió a la investigación (histórico)</summary>
 
