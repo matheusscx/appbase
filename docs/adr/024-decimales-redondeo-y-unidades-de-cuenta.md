@@ -103,6 +103,11 @@ tomar nada de este ADR.
 > porque no hay tenants operando; el día que los haya, editarlas sin panel deja de ser una
 > opción.
 >
+> 📐 **La spec del redondeo está escrita** →
+> [`2026-09-03-redondeo-por-pais-design.md`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md).
+> Implementa la propuesta del owner con alcance acotado: **solo el redondeo**. La UF sigue
+> reabierta y fuera de esa spec.
+>
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
 > código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este
 > tema que se puede leer sin riesgo.

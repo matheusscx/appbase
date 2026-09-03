@@ -1862,6 +1862,17 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
+  > 📐 **SPEC ESCRITA (2026-09-03)** →
+  > [`specs/2026-09-03-redondeo-por-pais-design.md`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md),
+  > con el alcance aprobado por el owner: **solo el redondeo**. La UF, el escalón del IVA
+  > colombiano, `PayableRoundingAmount` y la medición pendiente quedan **explícitamente afuera**,
+  > cada uno con su motivo. Lista para plan.
+  >
+  > ✅ **Colombia quedó con fuente primaria antes de escribirla** (era el requisito para ponerle
+  > candado): se abrió el anexo de la DIAN y la cita de half-even es literal. De paso trajo que
+  > su aproximación del IVA es **opcional** (*"se podrá aproximar"*), así que **no era un hueco
+  > de cumplimiento** como se había anotado.
+  >
   > ✅ **El owner propuso la forma que las cubre a todas (2026-09-03):** la config sigue siendo
   > del **tenant**, con **default por país**, y **candado solo donde es ley** — libertad donde no
   > la hay, y ahí solo se recomienda. Verificada contra las ocho reglas relevadas: las expresa

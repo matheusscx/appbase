@@ -26,7 +26,7 @@
 | País | ¿Por línea o al total? | Modo de redondeo | Decimales de importes | Precio unit. / cantidad | Evidencia |
 |---|---|---|---|---|---|
 | **Argentina** (ARCA/AFIP) | **No lo fija.** Valida la suma con **tolerancia**: error relativo ≤ 0,01% **o** error absoluto ≤ 0,01 × cantidad de alícuotas | **Round Half Even** — literal | 13 enteros + **2** | tasa `MonCotiz`: 4 + **6** | **[PRIMARIA]** |
-| **Colombia** (DIAN) | — | **Half-to-even** (NTC 3711 / JIS Z 8401). Además **aproxima el IVA a múltiplos de $10**, con tolerancia de $5 en IVA y −$2 en el resto | — | — | **[SECUNDARIA]** concordante |
+| **Colombia** (DIAN) | **No lo fija**: si el total calculado difiere de la suma de parciales, se declara en `PayableRoundingAmount` | **Half-to-even** (NTC 3711 / JIS Z 8401) — **literal**. Tolerancia ±2.00 en valores monetarios. La aproximación del IVA a múltiplos de \$10 es **OPCIONAL** (*"se podrá aproximar"*), con ±\$5 | — | — | **[PRIMARIA]** ✅ verificada el 2026-09-03 |
 | **México** (SAT, Anexo 20) | **Al total**, una sola vez, sumando las líneas a hasta 6 decimales | — | — | — | investigación 2026-08-15 |
 | **Perú** (SUNAT, UBL 2.1) | **No lo fija.** Contempla un *"monto de redondeo aplicable"* dentro del valor de venta, y `PayableAmount` como total a pagar | **No lo fija** | `n(12,2)` — hasta **2** | — | **[PRIMARIA]** |
 | **Ecuador** (SRI) | **No lo fija** | **No lo fija** — la ficha técnica **no menciona la palabra "redondeo"** | máximo **2** | hasta **6** | **[PRIMARIA]** |
@@ -53,6 +53,24 @@ y, sobre cómo valida:
 
 **Perú** — guía de elaboración de documentos XML (UBL 2.1): los importes son `n(12,2)`, y el
 valor de venta total *"incluye cualquier **monto de redondeo** aplicable"*.
+
+**Colombia** — anexo técnico de la factura electrónica de venta v1.9, Resolución 000165
+(01/NOV/2023), § 5.2.1, nota al pie 2 — ✅ **verificado abriendo el PDF el 2026-09-03**, ya no es
+secundaria:
+
+> *"La fórmula de redondeo utilizada en estos momentos es la **round-half-to-even** (…) y
+> corresponde a la norma técnica colombiana **NTC 3711** (Norma técnica internacional JIS Z
+> 8401)."*
+
+y tres cosas más del mismo numeral, que la pasada secundaria no tenía:
+
+- **§ 5.2.1** — *"En caso de que (…) haya diferencia entre los totales calculados y la suma de
+  los parciales (…) se deberá utilizar el elemento `cbc:PayableRoundingAmount` para informar la
+  diferencia."* 👉 **Colombia no obliga línea ni total: admite la diferencia y pide declararla.**
+- **§ 5.2.1.1** — *"Los elementos que definen valores monetarios permitirán una tolerancia de
+  error + o - 2.00."*
+- **§ 5.2.1.2** — la aproximación del IVA a múltiplos de \$10 (Decreto 1625 de 2016) dice
+  *"dicha fracción **se podrá** aproximar"*: **es opcional, no obligatoria.**
 
 ---
 
@@ -159,8 +177,8 @@ Nada de esta pasada la toca. Sigue valiendo el análisis de
 - **Uruguay**: no se halló la regla de redondeo del CFE.
 - **Brasil, Bolivia, Paraguay, Costa Rica y República Dominicana**: **no relevados**. Brasil es
   el hueco más grande por tamaño de mercado y por tener un modelo fiscal propio (NF-e).
-- **Colombia**: las fuentes son secundarias y concordantes, pero **no se abrió el anexo técnico
-  de la DIAN**. Antes de sembrar half-even para Colombia hay que verificarlo en el original.
+- ~~**Colombia**: fuentes secundarias~~ → ✅ **cerrado el 2026-09-03**: se abrió el anexo de la
+  DIAN y la cita es literal. Ver arriba.
 - **Argentina**: la frase de half-even está en la sección de **margen de error** del manual, o
   sea que describe cómo **valida ARCA**. No se confirmó si además obliga al emisor a usar el
   mismo criterio al calcular.
