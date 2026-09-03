@@ -22,7 +22,15 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
-import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
+
+/**
+ * El tipo "nota de crédito" que el service resuelve por país. Antes era una
+ * constante exportada por la entidad; desde el 2026-09-03 sale del catálogo
+ * (`es_nota_credito` + país del tenant), así que acá es lo que devuelve el
+ * mock de `db.query` — el valor sigue siendo el de la fila chilena, que es el
+ * país del tenant de estos tests.
+ */
+const TIPO_DOCUMENTO_NC_ID = '550e8400-e29b-41d4-a716-446655440218';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440056';
@@ -224,7 +232,16 @@ describe('VentasService', () => {
       // `db.query` para las filas de moneda. Ojo: el nombre `dataSourceMock`
       // es histórico — el service inyecta `Db`, y `db.query` resuelve el
       // manager de la transacción si hay una en contexto (ADR-020).
-      query: jest.fn().mockResolvedValue(MONEDA_ROWS),
+      // Despacha por SQL: la resolución del tipo "nota de crédito" del país es
+      // la única consulta que nombra `es_nota_credito`; todo lo demás que pasa
+      // por `db.query` en estos tests son las filas de moneda.
+      query: jest
+        .fn()
+        .mockImplementation((sql: string) =>
+          typeof sql === 'string' && sql.includes('es_nota_credito')
+            ? Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }])
+            : Promise.resolve(MONEDA_ROWS),
+        ),
     };
     const dbMock = {
       transaccion: dataSourceMock.transaction,
@@ -1751,6 +1768,40 @@ describe('VentasService', () => {
       comentario: 'NC por reembolso orden O-1',
     };
 
+    it('la NC se marca con el tipo de documento DEL PAÍS del tenant, no con una constante', async () => {
+      // El bug que esto cierra: hasta el 2026-09-03 el tipo salía de una
+      // constante con la fila CHILENA código 61 y se usaba sin mirar el país,
+      // así que un reembolso en un tenant argentino congelaba un documento
+      // chileno — y ADR-010 dice que lo congelado no se corrige después.
+      dataSourceMock.query.mockImplementation((sql: string) =>
+        sql.includes('es_nota_credito')
+          ? Promise.resolve([{ tipo_documento_id: 'nc-de-argentina' }])
+          : Promise.resolve(MONEDA_ROWS),
+      );
+
+      await service.crearNotaCredito(baseParams);
+
+      expect(ncManager.save).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ tipoDocumentoId: 'nc-de-argentina' }),
+      );
+    });
+
+    it('un país sin nota de crédito sembrada rechaza el reembolso y no escribe nada', async () => {
+      // Sin tipo, la NC quedaría sin marcar y dejaría de encontrarse a sí misma
+      // —el tope de reembolso la busca por ese id—, así que se corta antes.
+      dataSourceMock.query.mockImplementation((sql: string) =>
+        sql.includes('es_nota_credito')
+          ? Promise.resolve([])
+          : Promise.resolve(MONEDA_ROWS),
+      );
+
+      await expect(service.crearNotaCredito(baseParams)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(ncManager.save).not.toHaveBeenCalled();
+    });
+
     it('NC sin líneas: totales copiados del monto, estado pagada, referencia y caja/canal/moneda de la original; sin detalles ni movimientos', async () => {
       const res = await service.crearNotaCredito(baseParams);
       expect(res.id).toBeDefined();
@@ -1955,6 +2006,10 @@ describe('VentasService', () => {
       // comparar por código daría false y el drawer ofrecería emitir una NC
       // sobre una NC. Solo mirar el id acierta.
       dataSourceMock.query.mockImplementation((sql: string) => {
+        // La resolución del tipo NC del país corre en el mismo `db.query`; sin
+        // esta rama devolvería las filas de abajo y el id saldría cualquiera.
+        if (sql.includes('es_nota_credito'))
+          return Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }]);
         if (sql.includes('FROM ventas'))
           return Promise.resolve([
             {
@@ -2170,6 +2225,10 @@ describe('VentasService', () => {
 
     it('listar mapea totalReembolsado y esNotaCredito', async () => {
       dataSourceMock.query.mockImplementation((sql: string) => {
+        // La resolución del tipo NC del país corre en el mismo `db.query`; sin
+        // esta rama devolvería las filas de abajo y el id saldría cualquiera.
+        if (sql.includes('es_nota_credito'))
+          return Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }]);
         if (sql.includes('COUNT(*)')) return Promise.resolve([{ total: 2 }]);
         return Promise.resolve([
           {
@@ -2221,11 +2280,15 @@ describe('VentasService', () => {
     });
 
     it('resumen excluye las notas de crédito de los KPIs', async () => {
-      dataSourceMock.query.mockResolvedValueOnce([
-        { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
-      ]);
+      // `resumen` resuelve primero el tipo NC del país y recién después arma
+      // los KPIs: la cola de mocks respeta ese orden.
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }])
+        .mockResolvedValueOnce([
+          { total_ventas: 5, total_facturado: '100', saldo_pendiente: '0' },
+        ]);
       await service.resumen(TENANT_ID, 'u-test', true);
-      const [sql, params] = dataSourceMock.query.mock.calls[0] as [
+      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
         string,
         unknown[],
       ];
@@ -2233,6 +2296,26 @@ describe('VentasService', () => {
       expect(sql).toContain("pa.tipo = 'venta'");
       expect(sql).toContain('pago_aplicaciones');
       expect(params).toContain(TIPO_DOCUMENTO_NC_ID);
+    });
+
+    it('resumen en un país sin nota de crédito no filtra por tipo de documento', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { total_ventas: 1, total_facturado: '10', saldo_pendiente: '0' },
+        ]);
+
+      await service.resumen(TENANT_ID, 'u-test', true);
+
+      const [sql, params] = dataSourceMock.query.mock.calls[1] as [
+        string,
+        unknown[],
+      ];
+      // El filtro se cae ENTERO, no se compara contra null: un
+      // `IS DISTINCT FROM NULL` dejaría afuera toda venta SIN tipo de
+      // documento —que son la mayoría— y el resumen daría casi cero.
+      expect(sql).not.toContain('IS DISTINCT FROM');
+      expect(params).toEqual([TENANT_ID]);
     });
 
     it('registrarDevolucionesPorReembolso liga los movimientos a la venta original y no crea cabecera', async () => {
@@ -2727,11 +2810,13 @@ describe('VentasService', () => {
   describe('el eje "lo mío / todo"', () => {
     const USUARIO = 'usuario-uuid-eje';
 
+    // Saltea la resolución del tipo "nota de crédito" del país: es una consulta
+    // de apoyo que corre en varios de estos métodos y correría los índices.
     const sqlDe = (llamada: number): string =>
-      (dataSourceMock.query.mock.calls[llamada][0] as string).replace(
-        /\s+/g,
-        ' ',
-      );
+      dataSourceMock.query.mock.calls
+        .map((c: unknown[]) => c[0] as string)
+        .filter((sql: string) => !sql.includes('es_nota_credito'))
+        [llamada].replace(/\s+/g, ' ');
 
     it('sin alcance completo, listar acota a las cajas del usuario', async () => {
       dataSourceMock.query
@@ -2784,12 +2869,17 @@ describe('VentasService', () => {
     });
 
     it('resumen acota igual, y con alcance completo no', async () => {
-      dataSourceMock.query.mockResolvedValueOnce([{}]);
+      const encolarResumen = () =>
+        dataSourceMock.query
+          .mockResolvedValueOnce([{ tipo_documento_id: 'tipo-nc' }])
+          .mockResolvedValueOnce([{}]);
+
+      encolarResumen();
       await service.resumen(TENANT_ID, USUARIO, false);
       expect(sqlDe(0)).toContain('c.usuario_id =');
 
       dataSourceMock.query.mockClear();
-      dataSourceMock.query.mockResolvedValueOnce([{}]);
+      encolarResumen();
       await service.resumen(TENANT_ID, USUARIO, true);
       expect(sqlDe(0)).not.toContain('c.usuario_id =');
     });

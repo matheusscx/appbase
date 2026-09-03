@@ -90,10 +90,10 @@ Response (200): orden pública + extras
 
 ## Backend
 
-- **Nota de crédito** = venta con `tipo_documento_id` = "Nota de Crédito"
-  (código 61 Chile, seed `550e8400-e29b-41d4-a716-446655440218`, `activo: false`
-  para que no aparezca en el selector del POS), `venta_referencia_id` → venta
-  original, estado `pagada`, caja/canal/moneda copiados de la original, y
+- **Nota de crédito** = venta con `tipo_documento_id` = la fila "Nota de Crédito"
+  **del país del tenant** (`activo: false`, para que no aparezca en el selector
+  del POS), `venta_referencia_id` → venta original, estado `pagada`,
+  caja/canal/moneda copiados de la original, y
   **totales copiados del monto reembolsado** (sin motor de precios). Líneas solo
   si se eligieron ítems; movimientos `entrada / motivo='devolucion'` ligados a la
   NC (o a la venta original si no hubo NC). **La venta original nunca cambia de
@@ -112,6 +112,32 @@ Response (200): orden pública + extras
   ejecutado por el proveedor).
 - Índices nuevos: `pasarela_ordenes(venta_id)`, `pasarela_transacciones(orden_id)`
   (para el agregado de REFUNDs del listado de ventas).
+
+## Cuál fila es la nota de crédito la dice el catálogo, no el código (2026-09-03)
+
+`tipos_documento_tributario` lleva **`es_nota_credito`**, y el flujo de reembolso
+resuelve `tenant → provincia → país → la fila marcada de ese país`. Sin ese tipo,
+el reembolso se rechaza con 400: una NC sin marcar dejaría de encontrarse a sí
+misma, porque **el tope de reembolso la busca por ese id**.
+
+**El bug que esto cierra.** Hasta esa fecha el id salía de una constante
+`TIPO_DOCUMENTO_NC_ID` con la fila **chilena código 61**, y se usaba sin mirar el
+país: una devolución en un tenant argentino congelaba un documento chileno.
+[ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) es explícito en que lo
+que se congela en la transacción es justo lo que después no se corrige.
+
+**Qué se sembró y qué no.** Chile mantiene sus documentos de verdad (39/33/61).
+De Argentina, Colombia y México se sembró **solo la nota de crédito interna** —sin
+código tributario, `activo: false`, sin emisión—, que no es un documento
+tributario sino el marcador que el reembolso necesita. Qué emite un local en esos
+países entra cuando abra el frente fiscal de cada uno, que el owner decidió que va
+a ser **progresivo** (2026-09-03). Relevamiento de las cuatro autoridades:
+[`agent/investigaciones/2026-09-03-facturacion-electronica-latam.md`](../agent/investigaciones/2026-09-03-facturacion-electronica-latam.md).
+
+⚠️ **El resumen de KPIs excluye las NC, y ese filtro se cae ENTERO si el país no
+tiene el tipo.** No se compara contra `null`: un `IS DISTINCT FROM NULL` dejaría
+afuera toda venta **sin** tipo de documento —que son la mayoría— y los KPIs darían
+casi cero. Hay un test que lo fija.
 
 ## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
 

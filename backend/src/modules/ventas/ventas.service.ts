@@ -37,7 +37,6 @@ import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaPromocion } from './entities/venta-promocion.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
-import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
@@ -1299,6 +1298,51 @@ export class VentasService {
    * documenta la devolución). Las líneas son opcionales e informativas: solo
    * los ítems elegidos para devolver a stock, sin validar cruce con el monto.
    */
+  /**
+   * El tipo de documento "nota de crédito" del país del tenant.
+   *
+   * Hasta el 2026-09-03 esto era una constante con la fila **chilena** código 61,
+   * usada sin mirar el país: un reembolso en un tenant argentino congelaba un
+   * documento chileno (ADR-010: lo que se congela en la transacción es justo lo
+   * que no se corrige después). Ahora sale del catálogo, por `es_nota_credito`.
+   *
+   * `null` cuando el país todavía no la tiene sembrada. Los **lectores** tratan
+   * ese null como "ninguna venta es NC", que es lo correcto y no una degradación:
+   * sin ese tipo tampoco pudo crearse ninguna.
+   */
+  private async tipoNotaCreditoDelTenant(
+    tenantId: string,
+  ): Promise<string | null> {
+    const rows: { tipo_documento_id: string }[] = await this.db.query(
+      `SELECT td.tipo_documento_id
+       FROM tenants t
+       JOIN provincia prov ON prov.provincia_id = t.provincia_id
+            AND prov.eliminado_el IS NULL
+       JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+       JOIN tipos_documento_tributario td ON td.pais_id = p.pais_id
+            AND td.eliminado_el IS NULL AND td.es_nota_credito = true
+       WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
+       LIMIT 1`,
+      [tenantId],
+    );
+    return rows[0]?.tipo_documento_id ?? null;
+  }
+
+  /**
+   * Igual, para el flujo que la va a **escribir**. Acá el null no se puede
+   * tragar: sin tipo de documento la NC quedaría sin marcar y dejaría de
+   * encontrarse a sí misma (el tope de reembolso la busca por este id).
+   */
+  private async exigirTipoNotaCredito(tenantId: string): Promise<string> {
+    const id = await this.tipoNotaCreditoDelTenant(tenantId);
+    if (!id)
+      throw new BadRequestException(
+        'El país de este tenant no tiene un tipo de documento de nota de ' +
+          'crédito configurado: no se puede emitir el reembolso.',
+      );
+    return id;
+  }
+
   async crearNotaCredito(
     params: CrearNotaCreditoParams,
   ): Promise<NotaCreditoCreada> {
@@ -1318,6 +1362,7 @@ export class VentasService {
     params: CrearNotaCreditoParams,
   ): Promise<NotaCreditoCreada> {
     return this.db.transaccion(async (manager) => {
+      const tipoNotaCredito = await this.exigirTipoNotaCredito(params.tenantId);
       const original = await this.lockVentaOriginal(
         manager,
         params.tenantId,
@@ -1325,7 +1370,7 @@ export class VentasService {
       );
 
       if (params.validarVentaElegible) {
-        if (original.tipo_documento_id === TIPO_DOCUMENTO_NC_ID)
+        if (original.tipo_documento_id === tipoNotaCredito)
           throw new BadRequestException(
             'No se puede emitir una nota de crédito sobre otra nota de crédito',
           );
@@ -1357,7 +1402,7 @@ export class VentasService {
          FROM ventas
          WHERE venta_referencia_id = $1 AND tipo_documento_id = $2
            AND eliminado_el IS NULL`,
-        [params.ventaOriginalId, TIPO_DOCUMENTO_NC_ID],
+        [params.ventaOriginalId, tipoNotaCredito],
       );
       const previas = new Decimal(previasRows[0]?.total ?? '0');
       const disponible = new Decimal(original.total_final).minus(previas);
@@ -1379,7 +1424,7 @@ export class VentasService {
           cajaId: original.caja_id,
           monedaId: original.moneda_id,
           canal: original.canal,
-          tipoDocumentoId: TIPO_DOCUMENTO_NC_ID,
+          tipoDocumentoId: tipoNotaCredito,
           ventaReferenciaId: params.ventaOriginalId,
           estado: EstadoVenta.PAGADA,
           totalBruto: params.monto,
@@ -1493,7 +1538,7 @@ export class VentasService {
                    AND nc.tipo_documento_id = $2
                    AND nc.eliminado_el IS NULL
                ), 0)::text AS devuelto`,
-            [params.ventaOriginalId, TIPO_DOCUMENTO_NC_ID],
+            [params.ventaOriginalId, tipoNotaCredito],
           );
         const devolvibleEfectivo = new Decimal(
           efectivoRows[0]?.cobrado ?? '0',
@@ -1882,7 +1927,19 @@ export class VentasService {
     usuarioId: string,
     verTodas: boolean,
   ): Promise<VentasResumen> {
-    const params: unknown[] = [tenantId, TIPO_DOCUMENTO_NC_ID];
+    const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
+    const params: unknown[] = [tenantId];
+
+    // El resumen no cuenta las notas de crédito. Si el país todavía no tiene el
+    // tipo sembrado no hay ninguna que excluir y el filtro se cae ENTERO: un
+    // `IS DISTINCT FROM NULL` dejaría afuera las ventas sin tipo de documento,
+    // que son la mayoría, y el resumen daría casi cero.
+    let filtroNotaCredito = '';
+    if (tipoNotaCredito) {
+      params.push(tipoNotaCredito);
+      filtroNotaCredito = `AND v.tipo_documento_id IS DISTINCT FROM $${params.length}`;
+    }
+
     let filtroPropio = '';
     if (!verTodas) {
       params.push(usuarioId);
@@ -1907,7 +1964,7 @@ export class VentasService {
               ), 0)::text AS saldo_pendiente
        FROM ventas v
        WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
-         AND v.tipo_documento_id IS DISTINCT FROM $2
+         ${filtroNotaCredito}
          ${filtroPropio}`,
       params,
     );
@@ -1984,8 +2041,10 @@ export class VentasService {
       listParams,
     );
 
+    const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
+
     return {
-      data: rows.map((r) => this.mapVentaListRow(r)),
+      data: rows.map((r) => this.mapVentaListRow(r, tipoNotaCredito)),
       meta: buildPaginationMeta(page, pageSize, total),
     };
   }
@@ -2019,17 +2078,20 @@ export class VentasService {
     return { filters, params };
   }
 
-  private mapVentaListRow(r: {
-    venta_id: string;
-    canal: string;
-    estado: string;
-    total_final: string;
-    fecha: Date;
-    creado_el: Date;
-    monto_pagado: string;
-    total_reembolsado: string;
-    tipo_documento_id: string | null;
-  }): VentaListItem {
+  private mapVentaListRow(
+    r: {
+      venta_id: string;
+      canal: string;
+      estado: string;
+      total_final: string;
+      fecha: Date;
+      creado_el: Date;
+      monto_pagado: string;
+      total_reembolsado: string;
+      tipo_documento_id: string | null;
+    },
+    tipoNotaCredito: string | null,
+  ): VentaListItem {
     return {
       id: r.venta_id,
       canal: r.canal,
@@ -2042,7 +2104,8 @@ export class VentasService {
         .minus(new Decimal(r.monto_pagado))
         .toFixed(4),
       totalReembolsado: new Decimal(r.total_reembolsado).toFixed(4),
-      esNotaCredito: r.tipo_documento_id === TIPO_DOCUMENTO_NC_ID,
+      esNotaCredito:
+        tipoNotaCredito !== null && r.tipo_documento_id === tipoNotaCredito,
     };
   }
 
@@ -2272,6 +2335,7 @@ export class VentasService {
     const propinaRow = propinaRows[0] ?? null;
 
     const customerRow = customerRows[0];
+    const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
 
     return {
       id: v.venta_id,
@@ -2289,7 +2353,10 @@ export class VentasService {
       // `codigo`. El frontend lo reconstruía comparando `codigo === '61'`, que
       // es nullable y varía por país — con otro código, el drawer ofrecía
       // "Nota de crédito" sobre una NC mientras el listado sí la marcaba.
-      esNotaCredito: v.tipo_documento_id === TIPO_DOCUMENTO_NC_ID,
+      // Y desde el 2026-09-03 el ID también varía por país: se resuelve desde
+      // el catálogo (`es_nota_credito`), ya no contra una constante chilena.
+      esNotaCredito:
+        tipoNotaCredito !== null && v.tipo_documento_id === tipoNotaCredito,
       ventaReferenciaId: v.venta_referencia_id,
       // La venta vino de una cuenta de salón con al menos una línea YA ENVIADA a
       // cocina. Lo consume el modal de anulación: reponer comida que ya se cocinó

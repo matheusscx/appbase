@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,14 +8,16 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
-/**
- * Tipo de documento "Nota de Crédito" (código 61 Chile), sembrado con
- * `activo: false` para que no aparezca en el selector del POS. Las NC se
- * crean solo desde el flujo de reembolso usando este ID directamente.
- */
-export const TIPO_DOCUMENTO_NC_ID = '550e8400-e29b-41d4-a716-446655440218';
-
 @Entity('tipos_documento_tributario')
+/**
+ * Una sola nota de crédito por país. La resolución del flujo de reembolso toma
+ * la primera fila marcada: con dos, el tipo congelado en la venta dependería del
+ * orden que elija el planner. Mismo patrón que `uq_sesion_garzon_abierta`.
+ */
+@Index('uq_tipo_documento_nota_credito_pais', ['paisId'], {
+  unique: true,
+  where: `"es_nota_credito" = true AND "eliminado_el" IS NULL`,
+})
 export class TipoDocumentoTributario {
   @PrimaryGeneratedColumn('uuid', { name: 'tipo_documento_id' })
   id: string;
@@ -36,6 +39,23 @@ export class TipoDocumentoTributario {
 
   @Column({ name: 'customer_requerido', default: false })
   customerRequerido: boolean;
+
+  /**
+   * Marca cuál fila de este país es la nota de crédito, para que el flujo de
+   * reembolso la resuelva desde el catálogo en vez de una constante.
+   *
+   * Hasta el 2026-09-03 acá había un `TIPO_DOCUMENTO_NC_ID` hardcodeado con la
+   * fila **chilena** código 61, y se usaba sin mirar el país: un reembolso en un
+   * tenant argentino congelaba un documento de otro país, que es justo lo que
+   * ADR-010 dice que después no se puede corregir. El owner decidió ese día que
+   * AR/CO/MX **van a emitir de verdad, progresivamente**, y que mientras tanto
+   * cada país tiene su propia nota de crédito **interna** (sin emisión, sin
+   * código tributario) — no un documento inventado desde el seeder.
+   *
+   * Sembrada `activo: false`: no aparece en el selector del POS.
+   */
+  @Column({ name: 'es_nota_credito', default: false })
+  esNotaCredito: boolean;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

@@ -17,6 +17,48 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La nota de crédito la marca el catálogo, no una constante chilena (cerrado 2026-09-03)
+
+Sale de [`pendientes.md` § 4](pendientes.md), donde había entrado el 2026-09-03 destapada por
+la **revisión de rama** del frente del redondeo por país. **Cierra solo la mitad de aquella
+entrada**: los impuestos de sistema de AR/CO/MX siguen esperando al owner, y los documentos
+tributarios de verdad de esos países quedaron como proyecto agendado (el owner decidió que el
+frente fiscal entra **progresivo**, país por país).
+
+**El bug.** `TIPO_DOCUMENTO_NC_ID` era una constante exportada por la entidad con la fila
+**chilena código 61**, y el flujo de reembolso la usaba en ocho puntos **sin mirar el país**.
+Una devolución en un tenant argentino congelaba un hecho fiscal con un documento chileno —y
+[ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) dice que lo que se congela en la
+transacción es justo lo que no se corrige después.
+
+**Qué se hizo.** `tipos_documento_tributario` lleva ahora **`es_nota_credito`**, y el service
+resuelve `tenant → provincia → país → la fila marcada`. La constante se borró. Se sembró en
+Argentina, Colombia y México una nota de crédito **interna** —sin código tributario,
+`activo: false`, sin emisión—: es el marcador que el reembolso necesita, no un documento
+tributario inventado desde un seeder.
+
+**Dos cosas que el cambio destapó y hubo que resolver aparte:**
+
+- **El `resumen` de KPIs excluía las NC con `IS DISTINCT FROM $2`.** Con un país sin tipo NC
+  ese parámetro sería `null`, y `IS DISTINCT FROM NULL` deja afuera toda venta **sin** tipo de
+  documento —la mayoría—: los KPIs habrían dado casi cero. El filtro se cae **entero** cuando
+  no hay tipo.
+- **El write path no puede tragarse el null**: sin tipo, la NC quedaría sin marcar y dejaría
+  de encontrarse a sí misma, porque el tope de reembolso la busca por ese id. Se rechaza con 400.
+
+**Qué lo fija.** Tres tests unitarios nuevos, cada uno verificado con su mutante —volver a la
+constante chilena, sacar la guarda del null, y filtrar siempre en el `resumen`—: **cayó uno
+por test, ninguno sobrevivió.** Más `test/nota-credito-por-pais.e2e-spec.ts`, que fija la forma
+del catálogo (una sola NC por país, oculta del POS, código solo en Chile). Que el flujo la
+**resuelva** contra la base real lo cubre el bloque de NC de `ventas.e2e-spec.ts`, que dejaría
+de encontrar su tipo si la resolución se rompiera.
+
+ℹ️ **Hallazgo lateral, fuera de alcance:** escribiendo el e2e se pegó a `/api/ventas/tipos-documento`
+—que no existe— y devolvió **500**, no 404: `GET /api/ventas/:id` no valida que el id sea UUID
+y el string llega crudo a Postgres. Quedó anotado como tarea aparte, no se tocó acá.
+
+---
+
 ## El redondeo lo configura el tenant, con default por país y candado donde es ley (cerrado 2026-09-03)
 
 Cierra la **decisión 2 de [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)**,

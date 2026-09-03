@@ -32,6 +32,14 @@ todo compatible con SII, sin integrarlo.
   el kardex inmutable, [ADR-007] y punto 2.2 del análisis food-service).
 - **Tipo de documento tributario por venta**: ya existe `tipos_documento_tributario` por
   país (33 factura, 39 boleta, 61 NC); la venta debe guardar cuál fue.
+
+  ⚠️ **Actualización 2026-09-03 — "por país" no alcanzaba si el código lo ignora.** La tabla
+  era por país desde el principio, pero el flujo de reembolso resolvía la nota de crédito con
+  una **constante** apuntando a la fila chilena, así que un tenant argentino congelaba un
+  documento de otro país: la regla estaba en el esquema y rota en el código. Ahora la fila la
+  marca el propio catálogo (`es_nota_credito`) y se resuelve por el país del tenant.
+  **La lección generaliza:** un dato fiscal "gobernado por el país" hay que verificarlo en el
+  camino que lo escribe, no solo en la tabla que lo guarda.
 - **Datos de emisor/receptor disponibles**: RUT + giro del receptor para factura; el modelo
   `customer`/`terceros` debe poder alojarlos.
 

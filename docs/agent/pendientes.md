@@ -1571,20 +1571,32 @@ tenían solo Chile:
   ningún impuesto de sistema. **Sí puede crearse los suyos** desde la pantalla de impuestos
   (`TenantAdminGuard`), así que no queda trabado — pero es fiscal igual y el porcentaje lo pone
   el owner, no un seeder.
-- **Tipos de documento tributario** — ⛔ **esto es lo que pesa.** `seedTiposDocumentoTributario`
-  sigue siendo solo Chile.
+- **Tipos de documento tributario** — 🟡 **la mitad urgente se cerró el 2026-09-03**, la otra
+  quedó agendada. `seedTiposDocumentoTributario` ya siembra en los cuatro países la **nota de
+  crédito interna** —sin código tributario, `activo: false`, sin emisión—, que es el marcador
+  que el reembolso necesita, y el flujo la resuelve por `es_nota_credito` + país en vez de la
+  constante chilena (detalle en [`resueltos.md`](resueltos.md)). Lo que **no** se sembró son
+  los documentos tributarios de verdad de AR/CO/MX: eso entra con el frente fiscal de cada
+  país, que el owner decidió que va a ser **progresivo**.
 
-⚠️ **Y acá está el dato que da vuelta la pregunta.** No es que ese tenant "no emita": la nota
-de crédito por reembolso usa una constante **hardcodeada** —`TIPO_DOCUMENTO_NC_ID`
-(`ventas/entities/tipo-documento-tributario.entity.ts`), que es la fila **chilena código 61**—
-sin mirar el país del tenant (`VentasService`, la creación de la NC). O sea: **una devolución
-en un tenant argentino congela hoy un hecho fiscal con un tipo de documento chileno.** Es un
-documento interno, sin emisión al SII —así lo dice su propia descripción en el seed—, pero
-queda persistido en la venta, y ADR-010 es explícito en que lo que se congela en la
-transacción es justo lo que no se puede corregir después.
+✅ **El dato que daba vuelta la pregunta ya no está vivo, pero se deja escrito porque explica
+por qué esto se tomó.** La nota de crédito por reembolso usaba una constante **hardcodeada**
+—`TIPO_DOCUMENTO_NC_ID`, la fila **chilena código 61**— sin mirar el país, así que una
+devolución en un tenant argentino congelaba un hecho fiscal con un documento chileno, que es
+exactamente lo que ADR-010 dice que después no se corrige. **Cerrado el 2026-09-03**: la
+constante ya no existe y el tipo sale del catálogo.
 
-**La pregunta para el owner, concreta:** ¿se corta la nota de crédito fuera de Chile hasta que
-existan los tipos de documento del país, o se abre el frente fiscal ahora para relevarlos?
+**La pregunta que quedaba** —¿se corta la nota de crédito fuera de Chile, o se abre el frente
+fiscal ahora?— **la contestó el owner el 2026-09-03**: que siga saliendo, con una nota de
+crédito **interna propia de cada país**, porque cortar el reembolso deja un agujero en una
+operación diaria y con la entrada progresiva serían meses. Construido ese mismo día.
+
+⛔ **Lo que sigue necesitando al owner es la otra mitad: los impuestos de sistema de AR/CO/MX**
+(el punto 🟡 de arriba). El porcentaje lo pone el owner, no un seeder — y no queda trabado,
+porque el tenant puede crearse los suyos desde la pantalla de impuestos.
+
+**Y lo que queda como proyecto agendado, ya sin pregunta:** los documentos tributarios de
+verdad de cada país.
 Qué documentos emite un local en Argentina (factura A/B/C, ticket fiscal), en Colombia
 (factura electrónica, documento soporte) o en México (CFDI con su uso y su régimen) **no es
 algo que un agente deba inventar desde un seeder**: [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)

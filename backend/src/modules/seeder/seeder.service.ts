@@ -4137,8 +4137,44 @@ export class SeederService implements OnApplicationBootstrap {
     );
   }
 
+  /**
+   * ⚠️ Solo **Chile** tiene acá sus documentos tributarios de verdad (39/33/61).
+   * De Argentina, Colombia y México se siembra **únicamente la nota de crédito
+   * interna**, que no es un documento tributario: no lleva código, no se emite y
+   * no aparece en el selector. Existe porque el flujo de reembolso necesita
+   * marcar la venta que corrige, y hasta el 2026-09-03 la marcaba con la fila
+   * **chilena** en cualquier país.
+   *
+   * Qué emite un local en cada uno de esos tres países —factura A/B/C, documento
+   * equivalente electrónico, CFDI con su uso y su régimen— **no se inventa desde
+   * un seeder**: entra cuando abra el frente fiscal de ese país, que el owner
+   * decidió que va a ser progresivo. Relevamiento de las cuatro autoridades en
+   * `docs/agent/investigaciones/2026-09-03-facturacion-electronica-latam.md`.
+   */
   private async seedTiposDocumentoTributario(): Promise<void> {
     const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const ARGENTINA = '550e8400-e29b-41d4-a716-446655440372';
+    const COLOMBIA = '550e8400-e29b-41d4-a716-446655440373';
+    const MEXICO = '550e8400-e29b-41d4-a716-446655440374';
+
+    /** La NC interna de un país que todavía no emite: sin código, invisible. */
+    const notaCreditoInterna = (
+      id: string,
+      paisId: string,
+      pais: string,
+    ): Partial<TipoDocumentoTributario> => ({
+      id,
+      paisId,
+      nombre: 'Nota de Crédito',
+      codigo: null,
+      descripcion:
+        `Nota de crédito interna por reembolso (${pais}: sin emisión, ` +
+        `sin código tributario — el documento real entra con el frente fiscal)`,
+      activo: false,
+      customerRequerido: false,
+      esNotaCredito: true,
+    });
+
     const tipos: Partial<TipoDocumentoTributario>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440145',
@@ -4148,6 +4184,7 @@ export class SeederService implements OnApplicationBootstrap {
         descripcion: 'Boleta electrónica de venta al consumidor final',
         activo: true,
         customerRequerido: false,
+        esNotaCredito: false,
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440146',
@@ -4157,10 +4194,11 @@ export class SeederService implements OnApplicationBootstrap {
         descripcion: 'Factura electrónica afecta a IVA',
         activo: true,
         customerRequerido: true,
+        esNotaCredito: false,
       },
       {
-        // activo:false — no aparece en el selector del POS; solo lo usa el
-        // flujo de reembolso vía TIPO_DOCUMENTO_NC_ID.
+        // activo:false — no aparece en el selector del POS; solo la usa el
+        // flujo de reembolso, que la resuelve por `es_nota_credito` + país.
         id: '550e8400-e29b-41d4-a716-446655440218',
         paisId: CHILE,
         nombre: 'Nota de Crédito',
@@ -4168,7 +4206,23 @@ export class SeederService implements OnApplicationBootstrap {
         descripcion: 'Nota de crédito interna por reembolso (sin emisión SII)',
         activo: false,
         customerRequerido: false,
+        esNotaCredito: true,
       },
+      notaCreditoInterna(
+        '550e8400-e29b-41d4-a716-446655440378',
+        ARGENTINA,
+        'Argentina',
+      ),
+      notaCreditoInterna(
+        '550e8400-e29b-41d4-a716-446655440379',
+        COLOMBIA,
+        'Colombia',
+      ),
+      notaCreditoInterna(
+        '550e8400-e29b-41d4-a716-446655440380',
+        MEXICO,
+        'México',
+      ),
     ];
 
     for (const data of tipos) {
