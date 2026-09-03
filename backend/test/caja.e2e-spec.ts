@@ -145,6 +145,7 @@ async function cerrarEnDosFases(
     .post(`/api/caja/${cajaId}/conteo`)
     .set('Authorization', `Bearer ${token}`)
     .send({ lineas: contadas });
+  // status-tolerante: cerrarEnDosFases no afirma adentro a propósito; el llamador que lee el body afirma su status
   if ((c.body as { estado?: string }).estado === 'en_conciliacion') {
     return request(app.getHttpServer())
       .post(`/api/caja/${cajaId}/cerrar`)
@@ -177,6 +178,7 @@ async function liberarCajeroSiQuedoOcupado(
   const activa = await request(app.getHttpServer())
     .get('/api/caja/activa')
     .set('Authorization', `Bearer ${tokenCajero}`);
+  // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
   const caja = activa.body as (CajaResponse & { estado?: string }) | null;
   if (!caja?.id) return;
 
@@ -221,6 +223,7 @@ async function liberarCajeroSiQuedoOcupado(
     const resMotivos = await request(app.getHttpServer())
       .get('/api/motivos-diferencia?soloActivas=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
+    // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
     motivoId = (resMotivos.body as { id: string }[])?.[0]?.id;
   }
   await request(app.getHttpServer())
@@ -1802,11 +1805,13 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
       const activa = await request(app.getHttpServer())
         .get('/api/caja/activa')
         .set('Authorization', `Bearer ${tokenCajero}`);
+      // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
       const abiertaId = (activa.body as CajaResponse | null)?.id;
       if (abiertaId) {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${tokenAdmin}`);
+        // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         await cerrarEnDosFases(
           app,
@@ -2473,11 +2478,13 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
       const activa = await request(app.getHttpServer())
         .get('/api/caja/activa')
         .set('Authorization', `Bearer ${tokenCajero}`);
+      // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
       const abiertaId = (activa.body as CajaResponse | null)?.id;
       if (abiertaId) {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${tokenAdmin}`);
+        // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         await cerrarEnDosFases(
           app,

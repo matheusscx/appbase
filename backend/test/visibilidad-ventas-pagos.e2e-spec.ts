@@ -80,6 +80,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
     const activa = await request(app.getHttpServer())
       .get('/api/caja/activa')
       .set('Authorization', `Bearer ${token}`);
+    // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
     const caja = activa.body as { id?: string; estado?: string } | null;
     if (!caja?.id) return null;
     const cajaId = caja.id;
@@ -124,6 +125,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
       const resMotivos = await request(app.getHttpServer())
         .get('/api/motivos-diferencia?soloActivas=true')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
       motivoId = (resMotivos.body as { id: string }[])?.[0]?.id;
     }
     await request(app.getHttpServer())
@@ -145,6 +147,7 @@ describe('Visibilidad de ventas y pagos por usuario (e2e)', () => {
     const quedo = await request(app.getHttpServer())
       .get('/api/caja/activa')
       .set('Authorization', `Bearer ${token}`);
+    // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
     const restante = quedo.body as { id?: string; estado?: string } | null;
     return restante?.id
       ? `la caja ${restante.id} quedó ${restante.estado ?? 'ocupada'}`

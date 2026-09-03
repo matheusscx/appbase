@@ -391,6 +391,7 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${token}`);
+        // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         return (
           await request(app.getHttpServer())

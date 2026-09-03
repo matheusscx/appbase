@@ -377,6 +377,7 @@ describe('Reserva de stock al pedir (e2e)', () => {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${token}`);
+        // status-tolerante: red de limpieza: acumula el fallo en `fallos` en vez de afirmar
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         const cierre = await request(app.getHttpServer())
           .post(`/api/caja/${cajaId}/cerrar`)

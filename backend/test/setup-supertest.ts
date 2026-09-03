@@ -175,6 +175,7 @@ proto.end = function (
             // El body es el discriminador: `error: 'Unauthorized'` presente
             // significa que lo tiró código de la app, ausente que lo tiró
             // Passport. Ver la tabla del docblock.
+            // status-tolerante: diagnóstico del 401 anómalo: reporta el body, no lo consume
             body: res.body,
             // ⚠️ Agregados el 2026-08-25, después de la PRIMERA captura: el 401
             // anómalo vino con `body: {}` **vacío**, que no es ninguna de las dos

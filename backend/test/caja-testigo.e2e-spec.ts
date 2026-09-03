@@ -221,6 +221,7 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
     const resActiva = await request(app.getHttpServer())
       .get('/api/caja/activa')
       .set('Authorization', `Bearer ${tokenVendedor}`);
+    // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
     const activa = resActiva.body as CajaResponse | null;
     if (!activa?.id) return;
 

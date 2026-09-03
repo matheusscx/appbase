@@ -2281,10 +2281,12 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
         .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+      // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
       if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${tokenAdmin}`);
+        // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         await request(app.getHttpServer())
           .post(`/api/caja/${cajaId}/cerrar`)

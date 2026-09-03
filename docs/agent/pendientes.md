@@ -1448,29 +1448,6 @@ archivos distintos y ninguna depende de otra.
 **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`, ADR-010).
 Sigue en la § 4, sola.
 
-- [ ] **¿`check-e2e-status.mjs` pasa a mirar toda lectura del body, y no solo los helpers?**
-  (backend/tests + hook; llegó el 2026-08-28 al cerrar el barrido de las lecturas sin status →
-  [`resueltos.md`](resueltos.md)) — hoy el checker falla solo cuando un **helper** hace
-  `return (res.body as X)` sin que nadie haya mirado el status. Ése fue **tu alcance** en
-  `8b9bb94c` (*"un helper roto desorienta a todo un archivo; una lectura suelta dentro de un
-  `it()` miente solo sobre su propio test"*). Ahora las lecturas sueltas también están
-  barridas: 135 aserciones en 27 specs. La pregunta es si la red se amplía para que no vuelvan
-  a crecer.
-  ✅ **Decisión del owner (2026-09-03): (a), ampliarlo a toda lectura.** El argumento que
-  pesó es el costo de no hacerlo: la deuda ya creció a 183 una vez, sin que nadie la viera
-  crecer. Las dos opciones que se le ofrecieron, para que se entienda qué se descartó:
-  **(a) Ampliarlo a toda lectura.** Son ~dos líneas en el script. Lo que compra: nadie vuelve a
-  agregar una lectura a ciegas sin que el pre-commit chille. Lo que cuesta: el checker tiene
-  que aprender las **tres formas de falso positivo** que el barrido encontró —destructuring,
-  status afirmado una línea después, y el parámetro de una arrow function— o va a bloquear
-  commits correctos; y **no puede** distinguir la higiene tolerante (18 sitios que quedan sin
-  aserción a propósito) de un olvido, así que necesitaría una marca en el código —un comentario
-  con una palabra fija— para saltearlos.
-  **(b) Dejarlo como está.** No cuesta nada hoy y la deuda vuelve a crecer de a poco, que es
-  exactamente cómo llegó a 183.
-  📌 El trabajo real no es ampliar el checker, es **enseñarle las tres formas**.
-  Están medidas y documentadas en [`resueltos.md`](resueltos.md), con un ejemplo de cada una.
-
 - [ ] **`mermas.e2e-spec.ts` sigue sin ser repetible: se come el stock de un producto del
   seed que está dimensionado para una sola corrida** (backend/tests; **medido el 2026-08-28**
   al cerrar la limpieza de la causa → [`resueltos.md`](resueltos.md)) — con la causa ya

@@ -184,6 +184,7 @@ describe('Umbral de descuadre al cierre (e2e)', () => {
     const activa = await request(app.getHttpServer())
       .get('/api/caja/activa')
       .set('Authorization', `Bearer ${tokenCajero}`);
+    // status-tolerante: red de limpieza: un rojo de la higiene taparía el del test que la hizo falta
     const caja = activa.body as { id?: string; estado?: string } | null;
     if (!caja?.id) return;
     if (caja.estado === 'abierta') {

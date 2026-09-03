@@ -246,6 +246,7 @@ describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
         const motivos = await request(app.getHttpServer())
           .get('/api/motivos-diferencia?soloActivas=true')
           .set('Authorization', `Bearer ${token}`);
+        // status-tolerante: el helper DEVUELVE el status en vez de afirmarlo; decide el llamador
         const motivoId = (motivos.body as { id: string }[])[0]?.id;
         return (
           await request(app.getHttpServer())

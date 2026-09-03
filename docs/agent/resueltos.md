@@ -17,6 +17,45 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El checker de lecturas sin status pasa a mirar TODA lectura, y encontró cero deuda nueva (cerrado 2026-09-03)
+
+Venía de la § 4 y la contestó el owner: **ampliarlo**. Hasta hoy `check-e2e-status.mjs` fallaba
+solo cuando un **helper** hacía `return (res.body as X)` sin que nadie mirara el status — el
+alcance original del owner: *"un helper roto desorienta a todo un archivo; una lectura suelta
+dentro de un `it()` miente solo sobre su propio test"*. El argumento para ampliar fue el costo
+de no hacerlo: la deuda ya creció a 183 una vez, sin que nadie la viera crecer.
+
+**El trabajo real no era ampliar el `LECTURA`, era enseñarle las formas** que el barrido de
+agosto dejó medidas. Las cuatro están implementadas y comentadas en el script:
+
+| Forma | Qué hacía mal | Cómo se resolvió |
+|---|---|---|
+| Destructuring (`const [a, b] = await Promise.all([…])`) | buscaba la declaración por nombre y no la encontraba, así que no veía la aserción que sí estaba | `declaracionDe` reconoce `[…]` y `{…}` |
+| Status afirmado una línea **después** de la asignación | contaba el sitio aunque el status se afirmara **antes del primer uso** del valor | mira también las 3 líneas siguientes |
+| El **parámetro de una arrow** que se llama como una respuesta | no hay status que mirar | `ES_PARAMETRO`, barriendo la ventana hacia atrás |
+| **Falso NEGATIVO**: la variable reasignada | `let x = await …` con aserción y más abajo `x = await …` sin ninguna: le hacía heredar la primera | `declaracionDe` ya cubría la reasignación |
+
+📌 **La tercera forma la encontró este trabajo, no el barrido.** En `garzones-selector` la
+flecha está en la línea **anterior** a la lectura (`const ids = (r: { body: unknown }) =>` y
+abajo `(r.body as …)`), así que mirar solo la línea que lee no alcanzaba.
+
+**La marca de higiene tolerante: `// status-tolerante: <motivo>`.** Hay lecturas que no llevan
+aserción a propósito y ningún heurístico las distingue de un olvido. La marca **exige texto
+después de los dos puntos** —verificado con un mutante: `// status-tolerante:` a secas no
+silencia nada—, para que callar al checker cueste lo mismo que explicar por qué.
+
+🎯 **Y el resultado que importa: la red ampliada encontró 21 sitios y los 21 eran higiene
+deliberada, ya documentada en prosa.** Cero deuda nueva. O sea que el barrido de agosto sí
+cerró lo que decía haber cerrado, y lo único que faltaba era volver esa prosa legible por la
+máquina. Los 18 de entonces son 21 bajo la red más ancha, porque cuenta formas que la anterior
+ni miraba.
+
+**Qué lo fija.** Tres mutantes sobre el checker ya andando: una lectura ciega **nueva** insertada
+en `caja.e2e-spec.ts` la caza; sacarle la marca a un sitio tolerante la caza; y una marca sin
+motivo **sigue** contando como sitio. Más `--staged`, que es el modo del hook.
+
+---
+
 ## Los helpers de caja copiados en 8 specs, y el agujero que escondía la copia más vieja (cerrado 2026-09-03)
 
 Venía de la § 4 y la contestó el owner ese mismo día: **extraerlos**. `abrirCaja` y `cerrarCaja`
