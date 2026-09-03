@@ -1,12 +1,40 @@
 # ADR-024: Decimales y redondeo — un criterio, tres capas, y el nivel lo fija el país
 
-**Status**: Accepted (con una medición pendiente, ver *Lo que queda abierto*)
+**Status**: Accepted **en parte** — las decisiones **2 y 3 quedaron REABIERTAS por el owner
+el mismo 2026-09-03**, unas horas después de contestarlas. Ver el bloque de abajo antes de
+tomar nada de este ADR.
 
 **Date**: 2026-09-03
 
+> 🛑 **NO ARRANCAR POR ACÁ. El owner pausó el tema para una sesión propia (2026-09-03).**
+>
+> Contestó las cinco preguntas por la mañana y a la tarde, al ofrecerle la medición que faltaba,
+> dijo textual: *"esto tengo que analizarlo bien y profundo… no tengo el alcance de lo que
+> implica si solo cotiza o no… lo de los países no sé si en todos la ley… quedé super
+> confundido, creo que dejemos esto para una sesión sola"*.
+>
+> **Qué sigue firme** (contestado y consistente con lo que el código ya hace):
+> **1** un criterio con el número puesto por la moneda · **4** congelar los decimales en el
+> documento · **5** una sola columna de decimales.
+>
+> **Qué está REABIERTO y no se construye:**
+> - **2 — el nivel de redondeo lo fija el país.** El owner no sabe si la ley es la misma en
+>   todos los países, y la decisión se tomó sobre dos ejemplos opuestos (UK y México). Antes de
+>   moverlo hace falta saber **para cuántos países tenemos la regla**, no dos.
+> - **3 — la UF solo cotiza.** Es lo que más lo frenó, y el escenario que describió **no está
+>   contestado por la decisión tal como está escrita**: *"pueden llevar toda su operación en UF,
+>   pero esas UF al final se convierten a pesos para poder pagar"*. Eso suena compatible con
+>   *"solo cotiza"*, pero **nadie midió qué implica** — qué pasa con los reportes históricos, con
+>   la lista de precios, con la contabilidad, y qué se rompe si el negocio piensa en UF todo el
+>   día y el sistema le guarda pesos.
+>
+> **Y la medición pendiente de más abajo NO se corrió, a propósito**: afina una prohibición que
+> depende de las decisiones reabiertas. Medir antes de saber qué queremos es afinar lo que capaz
+> no queremos.
+>
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
-> código. Leerla antes de estimar: **dos de las cinco decisiones de acá ya están construidas** y
-> el delta real son tres puntos concretos, no el ADR entero.
+> código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este
+> tema que se puede leer sin riesgo.
 
 ## Context
 

@@ -1841,10 +1841,30 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   producto, abierto por el owner el 2026-08-15) — **el tema activo.** Es la tercera pata de la
   tanda 🔴 (*"redondeo de plata"*), acá con el alcance completo y medido.
 
-  > ✅ **CONTESTADO EL 2026-09-03 → [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md).**
-  > Las cinco preguntas de la §9 de la investigación están respondidas y la decisión vive en el
-  > ADR, no acá. **Leer el ADR antes que esta entrada**: lo de abajo es el material con el que
-  > se decidió, no la decisión.
+  > 🛑 **PAUSADO OTRA VEZ POR EL OWNER, PARA UNA SESIÓN PROPIA (2026-09-03).** Contestó las
+  > cinco preguntas de la §9 esa mañana y **reabrió dos de ellas esa misma tarde**, al ofrecerle
+  > la medición que faltaba: *"quedé super confundido, creo que dejemos esto para una sesión
+  > sola"*.
+  >
+  > **Al retomar, arrancar por [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)**,
+  > que en su encabezado dice qué quedó firme y qué se reabrió. En una línea: firmes el criterio
+  > único, el congelado en el documento y la columna única; **reabiertos el nivel por país** —no
+  > sabe si la ley es la misma en todos, y se decidió sobre dos ejemplos opuestos— y **la UF**,
+  > que es lo que más lo frenó.
+  >
+  > ⚠️ **El escenario de la UF que el owner describió, textual, porque no está contestado por la
+  > decisión como está escrita:** *"pueden llevar toda su operación en UF, pero esas UF al final
+  > se convierten a pesos para poder pagar"*. Suena compatible con *"la UF solo cotiza"*, y ahí
+  > está la trampa: **nadie midió qué implica**. Qué pasa con los reportes históricos, con la
+  > lista de precios y con la contabilidad si el negocio piensa en UF todo el día y el sistema le
+  > guarda pesos. Eso es lo que hay que traerle resuelto, no una pregunta más.
+  >
+  > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
+  > las decisiones reabiertas.
+  >
+  > ✅ Lo que **sí** quedó y no se toca: [ADR-025](../adr/025-decimales-estado-actual.md), el
+  > estado actual medido contra el código. Es lo único del tema que se puede leer sin riesgo, y
+  > vale igual pase lo que pase con las decisiones.
   >
   > **Lo primero que apareció al retomar es que la pregunta estaba peor planteada que el
   > sistema.** El owner describió tres capas —cálculo, presentación y redondeo al final— y las
@@ -1959,7 +1979,8 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   - **Medido en el código:** la escala 4 está escrita a mano en **97 sitios de 17 archivos**;
     `ESCALA_PERSISTIDA` tiene **3 usos**, los tres en un solo archivo; y `moneda.decimales`
     **no tiene ningún consumidor fuera de propinas**.
-  ✅ **Las cinco preguntas de la §9 se contestaron el 2026-09-03** → [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md).
+  ⚠️ **Las cinco preguntas de la §9 se contestaron el 2026-09-03 y DOS se reabrieron ese mismo
+  día** → [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md).
   En una línea cada una: un solo **criterio** con el número puesto por la moneda; el **nivel de
   redondeo lo fija el país** y el tenant no lo toca; la **UF solo cotiza**, nunca es moneda
   oficial; se **congelan los decimales en el documento** pero el reparto por mayores restos no

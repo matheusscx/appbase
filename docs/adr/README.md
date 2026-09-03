@@ -35,7 +35,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [021](./021-una-sola-moneda-oficial.md) | Una sola noción de moneda oficial — se elimina `tenant_moneda.es_default` | Accepted | 2026-08-21 |
 | [022](./022-navegador-un-solo-origen.md) | El navegador habla con un solo origen — el frontend hace de proxy de `/api` | Accepted | 2026-08-23 |
 | [023](./023-promociones-familia-propia-del-motor.md) | Promociones: evaluador puro afuera del motor, aplicación y conflicto adentro, familia propia de traza y congelado | Accepted | 2026-08-27 |
-| [024](./024-decimales-redondeo-y-unidades-de-cuenta.md) | Decimales y redondeo: un criterio con el número puesto por la moneda, el nivel lo fija el país, la UF solo cotiza | Accepted | 2026-09-03 |
+| [024](./024-decimales-redondeo-y-unidades-de-cuenta.md) | Decimales y redondeo: un criterio con el número puesto por la moneda, el nivel lo fija el país, la UF solo cotiza | ⚠️ Accepted en parte — el nivel por país y la UF **reabiertos** por el owner | 2026-09-03 |
 | [025](./025-decimales-estado-actual.md) | Estado actual de los decimales — línea base medida contra la que se mide ADR-024, con las cinco preguntas contestadas desde el código | Accepted | 2026-09-03 |
 
 ## Creating a New ADR
