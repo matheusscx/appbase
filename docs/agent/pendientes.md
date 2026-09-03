@@ -1862,6 +1862,13 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
+  > 📊 **Los pros y contras ya están hechos**, a pedido del owner el mismo día:
+  > [`investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md`](investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
+  > Su hallazgo principal cambia la pregunta: **cuatro de los cinco huecos del escenario de la UF
+  > no se resuelven haciéndola moneda oficial** —se resuelven con un reporte y con historial de
+  > tasas—, y el monto en UF **ya está persistido por línea**, así que el costo que el ADR daba
+  > por aceptado era falso.
+  >
   > ✅ Lo que **sí** quedó y no se toca: [ADR-025](../adr/025-decimales-estado-actual.md), el
   > estado actual medido contra el código. Es lo único del tema que se puede leer sin riesgo, y
   > vale igual pase lo que pase con las decisiones.

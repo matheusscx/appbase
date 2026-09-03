@@ -32,6 +32,12 @@ tomar nada de este ADR.
 > depende de las decisiones reabiertas. Medir antes de saber qué queremos es afinar lo que capaz
 > no queremos.
 >
+> 📊 **Los pros y contras de las dos reabiertas ya están analizados contra el código**, a pedido
+> del owner: [`2026-09-03-uf-y-nivel-por-pais-analisis.md`](../agent/investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
+> Recomienda **mantener "la UF solo cotiza"** (por una razón distinta de la que decía este ADR)
+> y **NO mover todavía el nivel al país**, porque la regla del único país que tenemos es una
+> inferencia, no una norma citada.
+>
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
 > código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este
 > tema que se puede leer sin riesgo.
@@ -116,9 +122,15 @@ Se descartó lo contrario porque implicaría guardar totales en una unidad que c
 todos los días y con la que nadie paga: toda la plata que entra a caja necesitaría conversión
 y habría que resolver a qué fecha se congela cada una.
 
-⚠️ **Costo aceptado y explícito:** un tenant que piensa en UF ve sus reportes históricos en
-pesos, así que comparar dos meses le mezcla la inflación. Es el precio de que la moneda
-oficial sea con lo que se paga.
+⛔ **CORRECCIÓN MEDIDA (2026-09-03), y la escribí mal acá:** este ADR declaraba como costo
+aceptado que *"un tenant que piensa en UF ve sus reportes históricos en pesos, así que comparar
+dos meses le mezcla la inflación"*. **Es falso.** Cada línea de venta ya persiste
+`moneda_id_origen`, `precio_unitario_origen` y `tasa_cambio` (escala 6) — el monto en UF **está
+guardado**, y su docblock dice que el campo existe justamente para poder auditar la conversión.
+El costo real es otro y mucho más chico: **no existe la pantalla** que lo muestre. Lo escribí
+sin medir. Análisis completo, con los cinco huecos del escenario y cuáles dependen de esta
+decisión (spoiler: cuatro de cinco **no**):
+[`../agent/investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md`](../agent/investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
 
 ### 4. Los decimales del documento se **congelan**; el reparto por mayores restos **no** se generaliza
 
