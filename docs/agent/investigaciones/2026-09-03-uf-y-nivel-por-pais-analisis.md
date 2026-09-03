@@ -200,9 +200,24 @@ cambian lo de arriba:
 
 ### 3.5. Recomendación
 
+✅ **SUPERADA por la propuesta del owner (2026-09-03), que es mejor** — ver el bloque en
+[ADR-024](../../adr/024-decimales-redondeo-y-unidades-de-cuenta.md): **la config sigue siendo
+del tenant, con default por país, y candado solo donde es ley**. Cubre las ocho reglas
+relevadas y resuelve el problema que tenía mi versión —"lo fija el país" a secas—: **no inventa
+una ley donde no la hay**, que era justo el riesgo con Chile, que es inferencia.
+
+Lo que sobrevive de mi recomendación es el orden: **empezar por el modo**, que es donde hay
+datos suficientes para afirmar que el default de hoy incumple (Argentina y Colombia exigen
+half-even; nuestro default es half-up).
+
+<details><summary>Mi recomendación anterior, para que no se pierda el razonamiento</summary>
+
 **Mover las dos perillas al país** —`nivelRedondeo` y `modo_redondeo`— y que el tenant no las
-contradiga, **pero empezando por el modo**, que es donde hay datos suficientes para afirmar que
-el default de hoy incumple. Con LatAm de objetivo, dejarlas en el tenant significa que **el default incumple**
+contradiga, **pero empezando por el modo**. El agujero que tenía: obliga a sembrar una regla por
+país aunque no exista, y con Chile eso significaba sembrar una inferencia en la tabla que dice
+*"acá vive la ley"*.
+
+</details> Con LatAm de objetivo, dejarlas en el tenant significa que **el default incumple**
 en al menos dos de los países a los que apuntamos, y el incumplimiento se ve en un documento ya
 emitido.
 

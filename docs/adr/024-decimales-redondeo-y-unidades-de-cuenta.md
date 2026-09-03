@@ -63,6 +63,39 @@ tomar nada de este ADR.
 > - **Ningún país de LatAm obliga por línea** — el único es Reino Unido, fuera del mercado, y era
 >   la mitad del argumento con el que se decidió mover el nivel.
 >
+> ✅ **PROPUESTA DEL OWNER (2026-09-03), que resuelve la decisión 2** — y que la investigación
+> de países sostiene. Textual:
+>
+> > *"verificar si podemos cubrir estas diferentes formas de configuraciones, y dejarlo a nivel
+> > de configuración de tenant, establecer default por país, y en los países que sea ley no
+> > dejarlo cambiar. Con esto cubrimos los países que exigen una configuración por ley
+> > manteniendo la libertad en los países que no, y solo recomendar."*
+>
+> **Verificado contra las ocho reglas relevadas: las cubre todas.** Argentina y Colombia
+> (modo = half-even, por norma) → default + candado. México (nivel = al total, por norma) →
+> default + candado. Perú, Ecuador, Uruguay y Chile (no la fijan) → default recomendado y
+> editable. Y resuelve el problema que tenía "lo fija el país" a secas: **no inventa una ley
+> donde no la hay** — que era justo el riesgo con Chile, que es inferencia.
+>
+> **Dos refinamientos que hacen falta para que sea expresable, y salen de los mismos datos:**
+> 1. **El candado va por PERILLA, no por país.** México fija el **nivel** y deja libre el modo;
+>    Argentina fija el **modo** y deja libre el nivel. Un candado a nivel país —"acá no se toca
+>    nada"— no puede expresar ninguno de los dos. Cada perilla necesita su par
+>    *(valor sugerido, ¿es ley?)*.
+> 2. **Colombia no entra entera.** Además del modo exige **aproximar el IVA a múltiplos de
+>    \$10**, que no es un modo ni un nivel: es un **escalón**. No tenemos perilla para eso.
+>    ⚠️ Es la **misma forma** que `cashRounding` —pendiente, § 3— pero aplicada a otra cosa: aquél
+>    es el escalón del **efectivo que se paga** y dice explícitamente que *"no toca el documento
+>    tributario ni el impuesto"*; el colombiano toca **el impuesto del documento**. Tenemos el
+>    concepto nombrado y solo del lado de la caja.
+>
+> **Lo que la propuesta todavía no dice, y hay que decidir al construirla:**
+> - **Qué pasa con un tenant ya configurado** cuando se carga (o cambia) la ley de su país y su
+>   valor queda fuera. Hoy sale gratis —no hay datos productivos— pero el mecanismo hay que
+>   elegirlo: ¿se migra, se avisa, se bloquea al guardar?
+> - **Quién mantiene la tabla.** Una ley cambia y alguien tiene que actualizar el seed; sin un
+>   dueño, la tabla que dice "acá vive la ley" envejece en silencio.
+>
 > 📌 **La línea base está en [ADR-025](./025-decimales-estado-actual.md)**, medida contra el
 > código, y **ésa no la reabre nada**: describe lo que el sistema hace hoy. Es lo único de este
 > tema que se puede leer sin riesgo.

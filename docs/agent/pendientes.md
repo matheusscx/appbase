@@ -1862,6 +1862,15 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
+  > ✅ **El owner propuso la forma que las cubre a todas (2026-09-03):** la config sigue siendo
+  > del **tenant**, con **default por país**, y **candado solo donde es ley** — libertad donde no
+  > la hay, y ahí solo se recomienda. Verificada contra las ocho reglas relevadas: las expresa
+  > todas, y **no obliga a inventar una ley** donde no la hay, que era el agujero de "lo fija el
+  > país" a secas. Con dos refinamientos: el candado va **por perilla** (México fija el nivel y
+  > Argentina el modo), y **Colombia no entra entera** porque su aproximación del IVA a múltiplos
+  > de \$10 es un **escalón**, la misma forma que `cashRounding` pero sobre el impuesto. Detalle
+  > en el ADR.
+  >
   > 🌎 **Y se relevaron ocho países de LatAm** (2026-09-03, con tres fuentes primarias) →
   > [`investigaciones/2026-09-03-redondeo-por-pais-latam.md`](investigaciones/2026-09-03-redondeo-por-pais-latam.md).
   > **Da vuelta la prioridad:** lo urgente es el **modo**, no el nivel — Argentina y Colombia
