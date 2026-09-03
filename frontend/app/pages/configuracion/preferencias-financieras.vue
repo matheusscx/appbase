@@ -24,6 +24,22 @@ const umbralDescuadreAviso = ref<string>('0')
 const umbralDescuadreAlto = ref<string>('0')
 const promosAcumulanDescuentos = ref<boolean>(false)
 
+// El candado que pone el país. Lo manda el backend junto con la config: la
+// pantalla no lo deduce, porque la regla vive en la tabla `pais` y cambia por
+// país. `norma` es el motivo que se le muestra al tenant — un candado sin
+// explicación se lee como un bug del sistema, no como una regla del país.
+const modoRedondeoBloqueado = ref(false)
+const modoRedondeoNorma = ref<string | null>(null)
+const nivelRedondeoBloqueado = ref(false)
+const nivelRedondeoNorma = ref<string | null>(null)
+// Lo guardado ≠ lo que impone la norma. Solo pasa con un tenant creado antes de
+// que la regla existiera, y hay que decirlo: hasta que alguien guarde, el motor
+// de precios sigue calculando con el valor viejo.
+const modoRedondeoDesalineado = ref(false)
+const nivelRedondeoDesalineado = ref(false)
+// El nivel 'documento' arrastra la escala: ver el comentario en `cargar()`.
+const escalaBajadaPorElNivel = ref(false)
+
 const calculoOptions = [
   { value: 'base', label: 'Sobre monto base', description: 'Todos se calculan sobre el precio neto' },
   { value: 'compuesto', label: 'En cascada (compuesto)', description: 'Cada uno se aplica sobre el resultado del anterior' },
@@ -66,13 +82,57 @@ async function cargar() {
       umbralDescuadreAviso: string
       umbralDescuadreAlto: string
       promosAcumulanDescuentos: boolean
+      modoRedondeoBloqueado: boolean
+      modoRedondeoImpuesto: string | null
+      modoRedondeoNorma: string | null
+      nivelRedondeoBloqueado: boolean
+      nivelRedondeoImpuesto: string | null
+      nivelRedondeoNorma: string | null
     }>(`${apiUrl}/tenants/preferencias-financieras`)
     calculoDescuentos.value = data.calculoDescuentos as 'base' | 'compuesto'
     calculoRecargos.value = data.calculoRecargos as 'base' | 'compuesto'
     formula.value = data.formula
     escalaCalculo.value = data.escalaCalculo
-    modoRedondeo.value = data.modoRedondeo
-    nivelRedondeo.value = data.nivelRedondeo
+    modoRedondeoBloqueado.value = data.modoRedondeoBloqueado
+    modoRedondeoNorma.value = data.modoRedondeoNorma
+    nivelRedondeoBloqueado.value = data.nivelRedondeoBloqueado
+    nivelRedondeoNorma.value = data.nivelRedondeoNorma
+    // Con la perilla cerrada mostramos el valor que impone la norma, no el
+    // guardado. No suelen diferir —el tenant nace con el de su país— pero uno
+    // creado antes de que la regla existiera tiene persistido otro: si la
+    // pantalla le mostrara ese, el backend le rebotaría con 400 TODOS sus
+    // guardados, incluidos los de las demás preferencias, y sin salida por acá.
+    //
+    // Y cuando difieren se dice, porque el motor de precios sigue calculando
+    // con el valor viejo hasta que alguien guarde: sin la frase, la pantalla
+    // afirmaría en presente algo que todavía no es cierto.
+    modoRedondeo.value = data.modoRedondeoBloqueado
+      ? (data.modoRedondeoImpuesto ?? data.modoRedondeo)
+      : data.modoRedondeo
+    nivelRedondeo.value = data.nivelRedondeoBloqueado
+      ? (data.nivelRedondeoImpuesto ?? data.nivelRedondeo)
+      : data.nivelRedondeo
+    modoRedondeoDesalineado.value
+      = data.modoRedondeoBloqueado && data.modoRedondeo !== modoRedondeo.value
+    nivelRedondeoDesalineado.value
+      = data.nivelRedondeoBloqueado && data.nivelRedondeo !== nivelRedondeo.value
+    // 'documento' no admite una escala mayor que 4 y el backend lo rechaza con
+    // 400. Un tenant legado nació con escala 6 y nivel 'linea': si le pisamos
+    // solo el nivel, el guardado que la norma le OBLIGA a hacer es imposible —
+    // y la salida que sugiere el mensaje del backend, «usá linea», es justo el
+    // radio que acabamos de deshabilitar. Es la misma regla que aplica
+    // `TenantsService.create` al nacer el tenant, acá para el que nació antes.
+    //
+    // ⚠️ Pide `Bloqueado`, y no solo que el nivel sea 'documento': sin candado
+    // el admin SÍ tiene salida —volver a «Por línea», que ahí es un radio
+    // habilitado— y bajarle la escala en silencio sería tomarle una decisión
+    // que él puede tomar. Con candado no hay tal salida y hay que sacarlo del
+    // pozo; sin candado, se le deja.
+    escalaBajadaPorElNivel.value
+      = data.nivelRedondeoBloqueado
+        && nivelRedondeo.value === 'documento'
+        && escalaCalculo.value > 4
+    if (escalaBajadaPorElNivel.value) escalaCalculo.value = 4
     montoTolerancia.value = data.montoTolerancia
     umbralDescuadreAviso.value = data.umbralDescuadreAviso
     umbralDescuadreAlto.value = data.umbralDescuadreAlto
@@ -86,6 +146,48 @@ async function cargar() {
   }
 }
 onMounted(cargar)
+
+/**
+ * El texto que acompaña a una perilla cerrada. La norma va siempre que exista:
+ * es lo único que distingue una regla del país de un bug del sistema.
+ *
+ * ⚠️ Un candado SIN norma no es un estado que el backend deba producir —el
+ * `@Check` de `pais` exige el valor y el `GET` gatea la norma por `es_ley`— y
+ * si llegara, la frase sola no rescata a nadie: ese tenant tampoco puede
+ * guardar por API. Es display honesto, no una red.
+ */
+function motivoDelCandado(
+  norma: string | null,
+  desalineado: boolean,
+  escalaBajada = false,
+): string {
+  return [
+    'Lo fija la norma de tu país: no se puede cambiar.',
+    desalineado
+      ? 'Tu configuración guardada todavía tiene otro valor y el cálculo lo '
+        + 'sigue usando: se corrige cuando guardes.'
+      : null,
+    // Independiente del desalineado: la escala puede bajar aunque el nivel
+    // guardado ya sea el que impone la norma (un legado con 'documento' y
+    // escala 6 existe — la validación de la escala llegó después que el nivel).
+    // Cambiarle un número al admin sin decírselo no es opción en ninguno.
+    escalaBajada
+      ? 'También bajamos la escala de cálculo a 4, que es el máximo que este '
+        + 'nivel admite.'
+      : null,
+    norma,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * Con el nivel "Por documento" el backend rechaza toda escala mayor que 4
+ * (`updatePreferenciasFinancieras`): las líneas se persisten sin cuantizar y
+ * las columnas de plata son NUMERIC(18,4). El input no lo deja tipear, mismo
+ * criterio que `MoneyInput oficial` con los decimales de la moneda.
+ */
+const escalaMaxima = computed(() => (nivelRedondeo.value === 'documento' ? 4 : 12))
 
 const formState = computed(() => ({
   calculoDescuentos: calculoDescuentos.value,
@@ -122,6 +224,12 @@ async function guardar() {
     // (usada en catálogo/carrito para la vista previa "≈ $X c/u") seguiría mostrando
     // el modo viejo cacheado por el resto de la sesión SPA.
     resetModoRedondeoTenant()
+    // Lo que está guardado ES lo que se muestra: el aviso de "tu configuración
+    // todavía tiene otro valor" pasó a ser falso en este mismo instante, y
+    // dejarlo puesto debajo del toast de éxito es el mismo bug al revés.
+    modoRedondeoDesalineado.value = false
+    nivelRedondeoDesalineado.value = false
+    escalaBajadaPorElNivel.value = false
     toast.add({ title: 'Preferencias actualizadas', color: 'success' })
   }
   catch (e: unknown) {
@@ -224,21 +332,37 @@ function moverAbajo(index: number) {
               Controla la precisión de los cálculos intermedios y cómo se redondean los resultados.
             </p>
 
-            <UFormField label="Escala de cálculo" hint="Decimales usados en cálculos internos (0–12)">
+            <!--
+              El tope no es fijo: con el nivel "Por documento" las líneas se
+              persisten sin cuantizar en columnas NUMERIC(18,4) y el backend
+              rechaza con 400 toda escala mayor que 4. Dejarlo tipear 12 y
+              enterarse al guardar es el mismo bug que este frente vino a
+              cerrar en las perillas de al lado — y con el nivel trabado por
+              ley, la salida que sugiere ese 400 ("usá linea") ni siquiera
+              existe.
+            -->
+            <UFormField
+              label="Escala de cálculo"
+              :hint="`Decimales usados en cálculos internos (0–${escalaMaxima})`"
+            >
               <UInput
                 v-model.number="escalaCalculo"
                 type="number"
                 :min="0"
-                :max="12"
+                :max="escalaMaxima"
                 class="w-32"
               />
             </UFormField>
 
-            <UFormField label="Modo de redondeo">
+            <UFormField
+              label="Modo de redondeo"
+              :description="modoRedondeoBloqueado ? motivoDelCandado(modoRedondeoNorma, modoRedondeoDesalineado) : undefined"
+            >
               <URadioGroup
                 v-model="modoRedondeo"
                 :items="modoRedondeoOptions"
                 value-key="value"
+                :disabled="modoRedondeoBloqueado"
               >
                 <template #description="{ item }">
                   {{ item.description }}
@@ -250,11 +374,13 @@ function moverAbajo(index: number) {
             <UFormField
               label="Nivel de redondeo"
               hint="Cuándo se ajustan los centavos: en cada línea de la venta, o solo una vez al final del documento. Si no te lo exige una normativa, dejá «Por línea»."
+              :description="nivelRedondeoBloqueado ? motivoDelCandado(nivelRedondeoNorma, nivelRedondeoDesalineado, escalaBajadaPorElNivel) : undefined"
             >
               <URadioGroup
                 v-model="nivelRedondeo"
                 :items="nivelRedondeoOptions"
                 value-key="value"
+                :disabled="nivelRedondeoBloqueado"
               >
                 <template #description="{ item }">
                   {{ item.description }}

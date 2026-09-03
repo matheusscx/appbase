@@ -39,6 +39,9 @@ Diferentes tipos de negocio y regímenes fiscales requieren distintas estrategia
     moneda oficial, y `documento` con `escalaCalculo` mayor que 4
   - Persistencia en `tenants.calculo_descuentos`, `tenants.calculo_recargos`,
     `tenants.nivel_redondeo`, y tabla `tenant_formula_precio`
+  - **El candado del país sobre las dos perillas de redondeo** (2026-09-03): el país
+    fija el default con el que nace el tenant y, donde la norma lo exige, la perilla
+    queda cerrada. Ver *"El país manda donde la norma lo dice"*, más abajo
   - Acceso restringido a admin del tenant (guard RBAC)
   
 - **NOT included (future):**
@@ -66,7 +69,17 @@ Response (200):
   "escalaCalculo": 6,
   "modoRedondeo": "HALF_UP",
   "nivelRedondeo": "linea",
-  "montoTolerancia": "0"
+  "montoTolerancia": "0",
+
+  // El candado del país, por perilla. `Impuesto` es el valor que la norma
+  // obliga y NO es redundante con el guardado de arriba; `Norma` es el texto
+  // que la pantalla muestra como motivo. Los tres salen sólo con `es_ley`.
+  "modoRedondeoBloqueado": false,
+  "modoRedondeoImpuesto": null,
+  "modoRedondeoNorma": null,
+  "nivelRedondeoBloqueado": false,
+  "nivelRedondeoImpuesto": null,
+  "nivelRedondeoNorma": null
 }
 ```
 
@@ -241,6 +254,46 @@ las tres existen por la misma razón: que ninguna combinación configurable devu
   por el `@Check` de `moneda.decimales`) y lo que agrega el formateo son ceros — por eso
   el default sembrado (escala 6, nivel `'linea'`) sigue siendo válido.
 
+### El país manda donde la norma lo dice
+
+Las dos perillas de redondeo no son solo preferencia: en varios países de LatAm la
+norma fija el criterio. Cada fila de `pais` lleva **un trío por perilla** — el valor
+sugerido, si además es **ley**, y la **norma** que lo dice — y dos `@Check` impiden
+declarar "es ley" sin un valor que imponer.
+
+| País | Modo | Nivel | Norma citada |
+|---|---|---|---|
+| Chile | `HALF_UP` sugerido, sin ley | `linea` sugerido, sin ley | — (lo que tenemos es una **inferencia** del formato del DTE, no una frase del SII: por eso no lleva candado) |
+| Argentina | **`HALF_EVEN`, es ley** | libre | ARCA/AFIP, manual del desarrollador (RG 4291) |
+| Colombia | **`HALF_EVEN`, es ley** | libre | DIAN, anexo técnico v1.9 (Res. 000165/2023) § 5.2.1, NTC 3711 |
+| México | libre | **`documento`, es ley** | SAT, Anexo 20 |
+
+Tres consecuencias que no se deducen de la tabla:
+
+1. **El candado es por PERILLA, no por país.** México fija el nivel y deja libre el
+   modo; Argentina al revés. Un guard "el tenant es de un país con ley" sería incorrecto.
+2. **Al crear el tenant el país empuja su default** (`TenantsService.create`, una sola
+   query para las dos perillas). Y con `'documento'` la escala nace en **4**, no en 6:
+   es la única forma de que el tenant no nazca en un estado que su propia API rechaza
+   (ver la tercera validación de más abajo). El Anexo 20 habla de 6 decimales por línea
+   y las columnas admiten 4 — la diferencia está medida y anotada en
+   [`pendientes.md`](../agent/pendientes.md) § 3.
+3. **El guard compara contra el VALOR, no contra "vino la clave".** La pantalla manda la
+   configuración entera en cada guardado: rechazar por presencia rompería el guardado de
+   todas las demás preferencias. Mandar el mismo valor que impone la norma es un `200`.
+
+El `GET` viaja con `<perilla>Bloqueado`, `<perilla>Impuesto` y `<perilla>Norma`. El
+**valor impuesto no es redundante** con el guardado: un tenant creado antes de que la
+regla existiera tiene persistido otro, y una pantalla que solo deshabilitara el control
+sobre lo guardado le rebotaría con 400 **todos** sus guardados, sin salida por la UI.
+
+La norma tampoco es decorativa: es literalmente el texto que la pantalla muestra como
+motivo. Un candado sin explicación se lee como un bug del sistema, no como una regla del
+país.
+
+→ Diseño y relevamiento: [`spec`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md)
+y [la investigación de ocho países](../agent/investigaciones/2026-09-03-redondeo-por-pais-latam.md).
+
 ### Key Methods
 
 **Service**:
@@ -265,10 +318,18 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
 - `URadioGroup` para `calculoDescuentos` y `calculoRecargos`
 - Lista reordenable (botones arriba/abajo) para `formula`
 - Sección "Precisión y redondeo":
-  - `UInput type="number"` para `escalaCalculo` (entero real → excepción del patrón, @IsInt)
+  - `UInput type="number"` para `escalaCalculo` (entero real → excepción del patrón, @IsInt).
+    Su `max` **no es fijo**: baja a **4** cuando el nivel es `'documento'`, porque el
+    backend rechaza con 400 toda escala mayor con ese nivel. Mismo criterio que
+    `MoneyInput oficial` con los decimales de la moneda: no dejar tipear lo que el
+    backend va a rechazar
   - `URadioGroup` con 4 opciones para `modoRedondeo`
   - `URadioGroup` con 2 opciones para `nivelRedondeo` ("Por línea" / "Por documento"),
     con texto de ayuda en lenguaje de negocio, no técnico
+  - **Los dos vienen `:disabled` cuando el país los fija por ley**, con la norma en el
+    `description` de su `UFormField` — el motivo va debajo de **su** perilla, no de la
+    vecina. Y cuando lo guardado no coincide con lo que impone la norma, el texto lo
+    dice: hasta que alguien guarde, el motor de precios sigue calculando con el viejo
   - `MoneyInput oficial` para `montoTolerancia` (string end-to-end): es un monto cobrado
     en la moneda oficial y el backend lo rechaza con 400 si trae más decimales de los que
     ésta admite, así que el input no lo deja tipear. Era un `UInput inputmode="decimal"`
@@ -292,8 +353,50 @@ La página usa estado local (`ref`) — sin Pinia store. Secciones del formulari
   montoTolerancia: string                  — ref (default '0', string end-to-end)
   umbralDescuadreAviso: string             — ref (default '0' = desactivado)
   umbralDescuadreAlto: string              — ref (default '0' = desactivado)
+
+  // El candado del país. Los dos `Bloqueado` y los dos `Norma` llegan del GET;
+  // los `Desalineado` los deriva `cargar()` comparando lo que vino guardado
+  // contra el valor que quedó en la perilla — el `Impuesto` no vive en un ref
+  // porque su único uso es pisar ese valor al cargar.
+  modoRedondeoBloqueado: boolean           — ref (default false)
+  modoRedondeoNorma: string | null         — ref
+  modoRedondeoDesalineado: boolean         — ref (default false)
+  nivelRedondeoBloqueado: boolean          — ref (default false)
+  nivelRedondeoNorma: string | null        — ref
+  nivelRedondeoDesalineado: boolean        — ref (default false)
+  escalaBajadaPorElNivel: boolean          — ref (default false)
 }
 ```
+
+⚠️ **Con la perilla bloqueada, `cargar()` pisa el valor guardado con el que impone la
+norma.** No es cosmética: el `PUT` rechaza con 400 cualquier otro valor, y la pantalla
+manda la configuración **entera** en cada guardado — así que mostrar el valor viejo
+dejaría a ese tenant sin poder guardar **ninguna** preferencia, ni las que nada tienen
+que ver con el redondeo.
+
+Tres consecuencias de ese pisado, y las tres tienen test:
+
+1. **Cuando pisa, lo dice.** Hasta que alguien guarde, el motor de precios sigue
+   calculando con el valor viejo: el aviso no puede afirmar en presente lo que todavía
+   no es cierto.
+2. **Y deja de decirlo al guardar.** `guardar()` apaga los tres flags en el éxito —
+   dejar la frase debajo del toast de "Preferencias actualizadas" es el mismo bug al
+   revés.
+3. **Con el nivel `'documento'` impuesto por ley, la escala baja a 4 en la misma
+   pasada** — y también se dice. Un tenant legado nació con escala 6 y nivel `'linea'`;
+   pisarle solo el nivel lo deja sin salida, porque `'documento'` con escala 6 es un 400
+   y el escape que sugiere ese error (*"usá linea"*) es justo el radio recién
+   deshabilitado. Es la misma regla que aplica `TenantsService.create` al nacer el
+   tenant, acá para el que nació antes.
+
+   ⚠️ **Pide el candado, no solo el nivel.** Un tenant con `'documento'` elegido y **sin**
+   ley sí tiene salida —volver a «Por línea», que ahí es un radio habilitado—, así que la
+   escala no se le toca: bajársela sería tomarle una decisión que él puede tomar. Esa
+   cláusula es **deliberadamente defensiva**: el backend de hoy no produce ese estado
+   (rechaza `'documento'` con escala > 4). Y la frase de la escala es independiente del
+   aviso de desalineado: un legado cuyo nivel ya coincide con la norma pero con escala 6
+   igual pierde el número, y hay que decírselo — mientras que el mexicano recién creado,
+   que nace con escala 4, no lee ninguna de las dos frases.
 
 **Actions**:
 - `fetch()` — `GET /api/tenants/preferencias-financieras`
