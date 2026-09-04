@@ -21,6 +21,7 @@ import {
 import {
   CFG_SIN_CONGELAR,
   descomponer,
+  escalarDevoluciones,
   repartirAjuste,
   tasaEfectiva,
 } from './nota-credito-composicion';
@@ -1501,33 +1502,73 @@ export class VentasService {
           yaAcreditado.get(r.clasificacion) ?? new Decimal(0),
         ),
       }));
+      // 3. Las líneas se escalan para sumar, como máximo, el monto de la nota.
+      // Acreditar menos de lo que vale la mercadería es un caso real —cargo por
+      // reposición, producto que vuelve dañado, un monto acordado en el
+      // mostrador— y desde el 2026-09-04 se acepta en vez de rechazarse: ni el
+      // SII lo prohíbe (cantidad y precio unitario son CONDICIONALES en la Zona
+      // Detalle de una nota de crédito) ni el mercado lo rechaza (de 11
+      // productos relevados, uno solo).
+      const brutosEscalados = escalarDevoluciones(
+        devoluciones.map((l) => l.bruto),
+        new Decimal(params.monto),
+        cfgReparto,
+        q,
+      );
+      const escaladas = devoluciones.map((l, i) => ({
+        ...l,
+        bruto: brutosEscalados[i],
+      }));
+      const seEscalo = new Decimal(params.monto).lt(valorDevuelto);
+
+      // El motivo pasa a ser obligatorio cuando la línea vale menos que la
+      // mercadería: es lo único que va a explicar, en el documento, por qué. Es
+      // el patrón de Square y Toast —donde el monto es libre, el motivo es
+      // obligatorio— y reemplaza a la confirmación modal, que ninguno de los 11
+      // productos relevados usa.
+      //
+      // La glosa va a la cabecera Y pegada al nombre del ítem en cada línea
+      // escalada (ver el armado de `lineasNC`): pegada y no en su lugar, porque
+      // la línea tiene que seguir diciendo QUÉ volvió.
+      //
+      // Guardado con `validarVentaElegible` por lo mismo de siempre: por el
+      // webhook un throw pierde el evento. Hoy el handler siempre manda glosa
+      // (`NC por reembolso orden X`), así que el guard no cambia nada — está
+      // para que un llamador futuro sin glosa no pierda una nota.
+      if (seEscalo && !params.comentario?.trim() && params.validarVentaElegible)
+        throw new BadRequestException(
+          `La mercadería a devolver vale ${valorDevuelto.toString()} y la nota acredita ` +
+            `${new Decimal(params.monto).toString()}: indicá el motivo, que queda escrito en el documento.`,
+        );
+
       // Lo que ESTA nota acredita por mercadería cuenta igual que una NC
       // previa: si no se descontara, el ajuste podría acreditar de una porción
       // más de lo que esa porción tenía, y la nota siguiente arrancaría con un
       // remanente NEGATIVO — una línea en negativo, con impuesto negativo.
       // Medido con el reparto real, no supuesto.
+      //
+      // ⚠️ Sobre las líneas YA ESCALADAS, y por eso este bloque va DESPUÉS del
+      // escalado: sobre los valores crudos el tope de abajo rechazaría casos
+      // que el escalado deja perfectamente adentro —devolver 2.380 acreditando
+      // 500 asigna 500 a la porción afecta, no 2.380—.
       const devueltoAhora = new Map<string, Decimal>();
-      for (const l of devoluciones)
+      for (const l of escaladas)
         devueltoAhora.set(
           l.clasificacionTributaria,
           (devueltoAhora.get(l.clasificacionTributaria) ?? new Decimal(0)).plus(
             l.bruto,
           ),
         );
-      // 3. ¿Entra esta devolución en el documento? Dos motivos para que no:
-      //
-      //   a) vale más que lo que la nota acredita — devolver mercadería y
-      //      acreditar plata son dos operaciones distintas, y cuál se hace la
-      //      elige el operador (decisión del owner);
-      //   b) su porción fiscal ya está acreditada por notas anteriores. Este
-      //      segundo corte no es teórico: sin él, una nota por monto libre se
-      //      come capacidad AFECTA que la devolución siguiente necesita, y la
-      //      SERIE termina acreditando más IVA del que la venta cobró —cada
-      //      documento cerrando bien por separado—. Medido: venta de 8.330
-      //      afecto (IVA 1.330) + 3.000 exento, una nota libre de 1.000 y otra
-      //      que devuelve las 7 unidades ⇒ 1.447 de IVA acreditado contra
-      //      1.330 cobrado. El tope global contra `disponible` no lo ve porque
-      //      mira el bruto, no la porción.
+      // 4. El único rechazo que sobrevive: la porción fiscal ya acreditada por
+      // notas anteriores. Queda —y el de "vale más que el monto" se fue— porque
+      // este es INVARIANTE FISCAL y no preferencia de producto: sin él, una
+      // nota por monto libre se come capacidad AFECTA que la devolución
+      // siguiente necesita, y la SERIE termina acreditando más IVA del que la
+      // venta cobró, con cada documento cerrando bien por separado. Medido:
+      // venta de 8.330 afecto (IVA 1.330) + 3.000 exento, una nota libre de
+      // 1.000 y otra que devuelve las 7 unidades ⇒ 1.447 de IVA acreditado
+      // contra 1.330 cobrado. El tope global contra `disponible` no lo ve
+      // porque mira el bruto, no la porción.
       const acreditablePorPorcion = new Map(
         remanentesPrevios.map((r) => [r.clasificacion, r.peso]),
       );
@@ -1535,30 +1576,21 @@ export class VentasService {
         ([clasificacion, monto]) =>
           monto.gt(acreditablePorPorcion.get(clasificacion) ?? new Decimal(0)),
       );
-      const noEntraEnElDocumento =
-        new Decimal(params.monto).lt(valorDevuelto) ||
-        porcionAgotada !== undefined;
+      const noEntraEnElDocumento = porcionAgotada !== undefined;
 
-      if (noEntraEnElDocumento && params.validarVentaElegible) {
-        if (porcionAgotada)
-          // El mensaje NO dice "ya se acreditó casi todo": la causa puede ser
-          // esa, o puede ser el redondeo de partir el mismo ítem en varias
-          // notas —con `total_linea` 1.001 en 3 unidades, cada una vale 334
-          // cuantizado y la tercera pide 334 contra 333 que quedan—. Atribuirlo
-          // a notas anteriores mandaría al operador a buscar algo que no está.
-          throw new BadRequestException(
-            `La mercadería a devolver vale ${porcionAgotada[1].toString()} en lo ` +
-              `${porcionAgotada[0]} de esta venta, y solo quedan ` +
-              `${(acreditablePorPorcion.get(porcionAgotada[0]) ?? new Decimal(0)).toString()} por ` +
-              `acreditar —por notas anteriores, o por el redondeo de partir el mismo ítem en varias ` +
-              `notas—. Emití la nota por lo que queda, o registrá la vuelta a stock desde Inventario.`,
-          );
+      if (porcionAgotada && params.validarVentaElegible)
+        // El mensaje NO dice "ya se acreditó casi todo": la causa puede ser
+        // esa, o puede ser el redondeo de partir el mismo ítem en varias
+        // notas —con `total_linea` 1.001 en 3 unidades, cada una vale 334
+        // cuantizado y la tercera pide 334 contra 333 que quedan—. Atribuirlo
+        // a notas anteriores mandaría al operador a buscar algo que no está.
         throw new BadRequestException(
-          `La mercadería a devolver vale ${valorDevuelto.toString()} en esta venta, más que ` +
-            `los ${new Decimal(params.monto).toString()} que acredita la nota. Emití la nota por ` +
-            `el valor devuelto, o registrá la vuelta a stock desde Inventario.`,
+          `La mercadería a devolver vale ${porcionAgotada[1].toString()} en lo ` +
+            `${porcionAgotada[0]} de esta venta, y solo quedan ` +
+            `${(acreditablePorPorcion.get(porcionAgotada[0]) ?? new Decimal(0)).toString()} por ` +
+            `acreditar —por notas anteriores, o por el redondeo de partir el mismo ítem en varias ` +
+            `notas—. Emití la nota por lo que queda, o registrá la vuelta a stock desde Inventario.`,
         );
-      }
 
       // El rechazo es del camino MANUAL, donde el operador está mirando y puede
       // corregir. Por el webhook de reembolso (decisión P3) la plata ya volvió
@@ -1576,10 +1608,29 @@ export class VentasService {
       // la mitad exenta de una devolución mixta cuya mitad afecta no entra
       // partiría el documento a la mitad sin decírselo a nadie. El mensaje
       // nombra la porción que topeó; la operación se rechaza completa.
-      const devolucionesDelDocumento = noEntraEnElDocumento ? [] : devoluciones;
-      const ajusteTotal = noEntraEnElDocumento
-        ? new Decimal(params.monto)
-        : new Decimal(params.monto).minus(valorDevuelto);
+      // Las que el escalado dejó en CERO no van al documento. Es la misma regla
+      // que `repartirAjuste` ya aplica a sus partes —"una línea de importe cero
+      // es ruido en el documento y puede no ser válida al emitirlo"— y no puede
+      // valer para un reparto y no para el otro. Pasa cuando el monto es chico
+      // frente a lo devuelto y las líneas tienen tamaños dispares: devolver un
+      // televisor y tres accesorios acreditando 10 dejaba dos líneas diciendo
+      // "Accesorio, 1 unidad, $300 c/u, total $0".
+      //
+      // ⚠️ Sale del DOCUMENTO, no de la operación: la mercadería vuelve al
+      // stock igual —el loop de inventario recorre `devoluciones`, no esto— y
+      // qué volvió queda en `movimientos_inventario` con su costo congelado.
+      const devolucionesDelDocumento = noEntraEnElDocumento
+        ? []
+        : escaladas.filter((l) => !l.bruto.isZero());
+      // Una sola resta para los tres casos, sin ramas: con las líneas escaladas
+      // da 0, con lugar de sobra da el resto, y con las líneas fuera del
+      // documento da el monto entero.
+      const ajusteTotal = new Decimal(params.monto).minus(
+        devolucionesDelDocumento.reduce(
+          (a, l) => a.plus(l.bruto),
+          new Decimal(0),
+        ),
+      );
 
       const remanentes = remanentesPrevios
         .map((r) => ({
@@ -1617,7 +1668,7 @@ export class VentasService {
       const partir = (bruto: Decimal, clasificacion: string) =>
         descomponer(bruto, tasas.get(clasificacion) ?? new Decimal(0), q);
 
-      // 4. Las líneas de la nota, primero en memoria: la cabecera se guarda
+      // 5. Las líneas de la nota, primero en memoria: la cabecera se guarda
       // DESPUÉS porque sus totales se derivan de acá.
       interface LineaNotaCredito {
         itemId: string;
@@ -1635,6 +1686,7 @@ export class VentasService {
         /** `null` en la línea de ajuste: es lo que decide el inventario. */
         itemDevuelto: string | null;
       }
+      const glosa = params.comentario?.trim();
       const lineasNC: LineaNotaCredito[] = devolucionesDelDocumento.map((l) => {
         const { subtotal, impuesto } = partir(
           l.bruto,
@@ -1642,17 +1694,47 @@ export class VentasService {
         );
         return {
           itemId: l.itemId,
-          descripcion: l.descripcion,
+          // Cuando la línea vale menos que la mercadería, la glosa va PEGADA al
+          // nombre del ítem y no en su lugar: el documento tiene que decir las
+          // dos cosas —qué volvió y por qué se acreditó menos— y el modelo
+          // tiene una sola columna de texto por línea. Pisar el nombre
+          // reabriría por la otra punta lo que se acaba de arreglar (la nota
+          // decía "Ajuste" en vez del nombre del plato).
+          //
+          // Sin escalado no se toca: ahí el importe habla solo, y la glosa ya
+          // viaja en las líneas de ajuste.
+          // `l.descripcion` es nullable: sin el ternario, una línea sin nombre
+          // saldría con un bullet huérfano ("· Volvieron abiertas"), que
+          // `.trim()` no saca porque el espacio no es el problema.
+          descripcion:
+            seEscalo && glosa
+              ? l.descripcion
+                ? `${l.descripcion} · ${glosa}`
+                : glosa
+              : l.descripcion,
           clasificacion: l.clasificacionTributaria,
           cantidad: l.cantidad,
-          // Cambia de significado respecto de antes: el valor EFECTIVO por
-          // unidad —lo que esa unidad costó en esta boleta— y no el precio de
-          // lista, que es lo que el documento tiene que mostrar al lado de la
-          // cantidad. ⚠️ NO promete `precio × cantidad = total_linea`: sale de
-          // una división (`Σ total_linea / Σ cantidad`) recortada a 4
-          // decimales, así que con 3 unidades de 1.000 da 333,3333 × 3 =
-          // 999,9999. El que cierra exacto es `total_linea`.
-          precioUnitario: new Decimal(l.valorUnitarioBruto).toFixed(4),
+          // El valor EFECTIVO por unidad —lo que esa unidad costó en esta
+          // boleta— y no el precio de lista, que es lo que el documento tiene
+          // que mostrar al lado de la cantidad.
+          //
+          // ⚠️ NO promete `precio × cantidad = total_linea`: sale de una
+          // división (`Σ total_linea / Σ cantidad`) recortada a 4 decimales,
+          // así que con 3 unidades de 1.000 da 333,3333 × 3 = 999,9999. El que
+          // cierra exacto es `total_linea`.
+          //
+          // **Solo la línea ESCALADA lo deriva de su propio importe**, y ahí no
+          // hay alternativa: con el valor congelado la pantalla afirmaría
+          // `7 × $1.190 = $368`. La línea no escalada sigue con el valor de la
+          // boleta a propósito — derivarlo también ahí cambiaría el número
+          // persistido en más de la mitad de las líneas (medido: 52,6 % en CLP,
+          // por el recorte de `q`) y volvería el precio unitario una propiedad
+          // de CADA NOTA en vez de una de la venta: dos notas parciales del
+          // mismo ítem quedarían con precios distintos. Eso es materia del
+          // owner (ADR-010), y este frente no lo necesita.
+          precioUnitario: seEscalo
+            ? l.bruto.dividedBy(l.cantidad).toFixed(4)
+            : new Decimal(l.valorUnitarioBruto).toFixed(4),
           precioUnitarioOrigen: l.precioUnitarioOrigen,
           tasaCambio: l.tasaCambio,
           monedaIdOrigen: l.monedaIdOrigen,
@@ -1664,6 +1746,23 @@ export class VentasService {
         };
       });
 
+      // Un ajuste NEGATIVO significaría que las líneas ya suman más que el
+      // monto, o sea un documento que no cierra. Es inalcanzable mientras la
+      // escala validada en el borde sea la misma que la congelada en la venta
+      // —y hoy lo es— pero el `if` de abajo lo descartaba en silencio, que es
+      // exactamente el modo de falla que este frente vino a cerrar.
+      //
+      // ⚠️ NO va detrás de `validarVentaElegible`: si alguna vez se vuelve
+      // alcanzable será por el webhook, y ahí el throw pierde el evento (P3).
+      // Se elige igual —un documento que no cierra es peor que un reembolso sin
+      // nota— pero el día que dispare, el warning de `cobros.service.ts` es el
+      // único rastro.
+      if (ajusteTotal.isNegative())
+        throw new BadRequestException(
+          `La nota de crédito de la venta ${params.ventaOriginalId} salió con líneas por ` +
+            `${new Decimal(params.monto).minus(ajusteTotal).toString()} contra un monto de ` +
+            `${new Decimal(params.monto).toString()}: no se emite un documento que no cierra.`,
+        );
       if (ajusteTotal.isPositive()) {
         // Sin porciones no hay dónde repartir y `repartirAjuste` devolvería
         // `[]`: el documento saldría con las líneas sin sumar su total, en
@@ -1717,7 +1816,7 @@ export class VentasService {
         }
       }
 
-      // 5. Los totales de la cabecera se DERIVAN de las líneas. `total_bruto`
+      // 6. Los totales de la cabecera se DERIVAN de las líneas. `total_bruto`
       // es el NETO, igual que en una venta normal (`crear`), no el cobrado.
       const sumaSubtotales = lineasNC.reduce(
         (a, l) => a.plus(l.subtotal),
@@ -1756,7 +1855,7 @@ export class VentasService {
         }),
       );
 
-      // 6. Las líneas, en un solo `save` con el array entero: el orden del
+      // 7. Las líneas, en un solo `save` con el array entero: el orden del
       // resultado es el del array, así que `detalles[i]` cruza con
       // `lineasNC[i]` para las filas de impuesto de abajo.
       const detalles = await manager.save(
@@ -1785,7 +1884,7 @@ export class VentasService {
         ),
       );
 
-      // 7. Las filas de impuesto de la nota, derivadas de las del original.
+      // 8. Las filas de impuesto de la nota, derivadas de las del original.
       await this.escribirImpuestosNotaCredito(
         manager,
         params.ventaOriginalId,
@@ -1800,7 +1899,7 @@ export class VentasService {
         q,
       );
 
-      // 8. Inventario: **solo las líneas de devolución**. La de ajuste cuelga
+      // 9. Inventario: **solo las líneas de devolución**. La de ajuste cuelga
       // de un `servicio`, y `registrarMovimiento` rechaza con 400 todo lo que
       // no sea producto (`inventario.service.ts`): sin este corte, agregar la
       // línea de ajuste haría fallar el reembolso ENTERO.

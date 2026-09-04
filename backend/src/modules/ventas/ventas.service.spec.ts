@@ -1971,11 +1971,11 @@ describe('VentasService', () => {
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledTimes(1);
     });
 
-    it('por el webhook, mercadería que vale más que el monto NO pierde el evento: nota por el monto y stock devuelto', async () => {
-      // El rechazo con 400 es del camino MANUAL, donde el operador está mirando.
-      // Acá (decisión P3) la plata ya volvió por el proveedor y el hook corre
-      // después del commit: un throw se traga como warning y se perderían la
-      // nota Y el movimiento de stock.
+    it('mercadería que vale más que el monto: la línea se ESCALA, no se saca del documento', async () => {
+      // Hasta el 2026-09-04 esto se rechazaba con 400 en el camino manual y por
+      // el webhook la devolución quedaba fuera del documento —que salía entero
+      // de ajuste, sin decir qué había vuelto—. Hoy la línea se escala a
+      // prorrata y suma el monto.
       //
       // 3 unidades valen 300 en esa boleta y la nota acredita 200.
       const res = await service.crearNotaCredito({
@@ -1987,18 +1987,19 @@ describe('VentasService', () => {
 
       const lineas = ncManager.save.mock.calls[1][1] as {
         itemId: string;
+        cantidad: string;
         totalLinea: string;
       }[];
-      // La devolución queda FUERA del documento —incluirla rompería
-      // `Σ líneas = total_final`— y el documento sale entero de ajuste.
-      expect(lineas.every((l) => l.itemId === ITEM_AJUSTE_ID)).toBe(true);
-      expect(
-        lineas
-          .reduce((a, l) => a.plus(l.totalLinea), new Decimal(0))
-          .toFixed(4),
-      ).toBe('200.0000');
+      // Una sola línea, la de la mercadería, escalada. Sin ajuste: el monto
+      // entero lo explica lo que volvió.
+      expect(lineas).toHaveLength(1);
+      expect(lineas[0].itemId).toBe(ITEM_ID);
+      expect(new Decimal(lineas[0].totalLinea).toFixed(4)).toBe('200.0000');
+      // Lo que se escala es la PLATA: la cantidad sigue siendo la que volvió.
+      expect(lineas[0].cantidad).toBe('3');
 
-      // Pero el stock vuelve igual: eso no se pierde.
+      // Y el stock vuelve por las 3, no por las 2 que la plata escalada
+      // "pagaría".
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         ncManager,
         expect.objectContaining({

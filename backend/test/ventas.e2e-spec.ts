@@ -1565,10 +1565,12 @@ describe('Ventas (e2e)', () => {
 
     it('la línea de la NC no persiste decimales que la moneda no tiene', async () => {
       const { ventaId, itemId } = await crearVentaConCantidadFraccionaria();
-      // El kilo devuelto vale 1.235 en esta boleta (1.852 / 1,5, cuantizado), y
-      // desde que las líneas de la nota tienen que sumar su total, acreditar
-      // menos que eso se rechaza: la nota va por 1.300, o sea el kilo devuelto
-      // más 65 de ajuste. Las dos líneas pasan por el mismo cuantizador.
+      // El kilo devuelto vale 1.235 en esta boleta (1.852 / 1,5, cuantizado). La
+      // nota va por 1.300, o sea el kilo devuelto más 65 de ajuste: lo que se
+      // prueba acá son las DOS líneas pasando por el mismo cuantizador.
+      // (Acreditar menos que eso ya no se rechaza desde el 2026-09-04 — se
+      // escala—, pero entonces no habría línea de ajuste y el caso perdería su
+      // objeto.)
       const nc = await emitirNotaCredito(ventaId, {
         monto: '1300.0000',
         devoluciones: [{ itemId, cantidad: '1' }],

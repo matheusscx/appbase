@@ -109,6 +109,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   interface LineaNC {
     itemId: string;
     descripcion: string | null;
+    precioUnitario: string;
     clasificacionTributaria: string;
     subtotal: string;
     impuestoAplicado: string;
@@ -116,6 +117,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   }
   interface NotaCredito {
     detalles: LineaNC[];
+    comentario: string | null;
     totalBruto: string;
     totalImpuestos: string;
     totalFinal: string;
@@ -546,18 +548,145 @@ describe('Nota de crédito compuesta (e2e)', () => {
       expect(new Decimal(nc.baseVentasSinImpuestos).toString()).toBe('883');
     });
 
-    it('devolver mercadería que vale más que la nota se rechaza', async () => {
+    it('acreditar menos de lo que vale la mercadería: las líneas se escalan', async () => {
       const ventaId = await crearVentaMixta();
-      // 2 unidades valen 2.380 en esa boleta; la nota acredita 1.
+      // 2 unidades valen 2.380 en esa boleta; se acreditan 500. Hasta el
+      // 2026-09-04 esto se rechazaba con 400.
+      const { id } = await emitirNC(ventaId, {
+        monto: '500',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: '2' }],
+        comentario: 'Volvieron abiertas',
+      });
+
+      const nc = await leerNC(id);
+      // Una sola línea, la de la devolución, escalada al monto. Sin ajuste.
+      expect(nc.detalles).toHaveLength(1);
+      expect(nc.detalles[0].itemId).toBe(itemAfectoId);
+      expect(new Decimal(nc.detalles[0].totalLinea).toString()).toBe('500');
+      expect(suma(nc.detalles, 'totalLinea')).toBe(
+        new Decimal(nc.totalFinal).toString(),
+      );
+      // La línea dice las DOS cosas: qué volvió —que es lo que la tarea
+      // anterior vino a arreglar— y por qué vale menos que la mercadería.
+      expect(nc.detalles[0].descripcion).toContain('NC afecto E2E');
+      expect(nc.detalles[0].descripcion).toContain('Volvieron abiertas');
+      expect(nc.comentario).toBe('Volvieron abiertas');
+      // Y el precio unitario sale del importe ESCALADO: 500 / 2 = 250. Con el
+      // valor congelado (1.190) la pantalla afirmaría `2 × $1.190 = $500`.
+      expect(new Decimal(nc.detalles[0].precioUnitario).toString()).toBe('250');
+
+      // Y el stock volvió igual, atado a la nota: lo que se escala es la plata,
+      // no las unidades.
+      const movs: { cantidad: string }[] = await ds.query(
+        `SELECT cantidad FROM movimientos_inventario
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [id],
+      );
+      expect(movs).toHaveLength(1);
+      expect(new Decimal(movs[0].cantidad).toString()).toBe('2');
+    });
+
+    it('sin motivo, acreditar menos de lo que vale se rechaza', async () => {
+      const ventaId = await crearVentaMixta();
       const res = await request(app.getHttpServer())
         .post(`/api/ventas/${ventaId}/notas-credito`)
         .set('Authorization', `Bearer ${token}`)
         .send({
-          monto: '1',
+          monto: '500',
           devoluciones: [{ itemId: itemAfectoId, cantidad: '2' }],
         });
       expect(res.status).toBe(400);
-      expect((res.body as { message: string }).message).toContain('2380');
+      expect((res.body as { message: string }).message).toContain('motivo');
+    });
+
+    it('el escalado de varias líneas reparte el residuo y no corre la porción', async () => {
+      const ventaId = await crearVentaMixta();
+      // Se devuelve TODO —7 afectas (8.330) + el servicio exento (3.000)— y se
+      // acreditan 501. Un solo ítem no discrimina nada: es acá, con dos
+      // porciones y un factor que no divide exacto, donde dividir línea por
+      // línea deja la suma corrida.
+      const { id } = await emitirNC(ventaId, {
+        monto: '501',
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
+          { itemId: itemExentoId, cantidad: '1' },
+        ],
+        comentario: 'Se anula el pedido completo',
+      });
+
+      const nc = await leerNC(id);
+      expect(nc.detalles).toHaveLength(2);
+      const afecta = nc.detalles.find(
+        (l) => l.clasificacionTributaria === 'afecto',
+      )!;
+      const exenta = nc.detalles.find(
+        (l) => l.clasificacionTributaria === 'exento',
+      )!;
+      // 501 × 8.330/11.330 = 368,35… → 368; 501 × 3.000/11.330 = 132,65… → 133.
+      // Los dos números calculados a mano desde el fixture, no leídos del
+      // resultado.
+      expect(new Decimal(afecta.totalLinea).toString()).toBe('368');
+      expect(new Decimal(exenta.totalLinea).toString()).toBe('133');
+      expect(suma(nc.detalles, 'totalLinea')).toBe('501');
+      // Y el IVA sale de la línea escalada, no de la cruda: 368 / 1,19 = 309,24
+      // → neto 309, impuesto 59.
+      expect(new Decimal(afecta.subtotal).toString()).toBe('309');
+      expect(new Decimal(afecta.impuestoAplicado).toString()).toBe('59');
+      expect(new Decimal(exenta.impuestoAplicado).isZero()).toBe(true);
+    });
+
+    it('una línea que el escalado deja en cero no se escribe', async () => {
+      const ventaId = await crearVentaMixta();
+      // Se devuelve todo acreditando 1: la parte exenta cae a 0 (1 × 3.000 /
+      // 11.330 = 0,26). Sin el filtro, la nota saldría diciendo "servicio, 1
+      // unidad, total $0".
+      const { id } = await emitirNC(ventaId, {
+        monto: '1',
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
+          { itemId: itemExentoId, cantidad: '1' },
+        ],
+        comentario: 'Cortesía total',
+      });
+
+      const nc = await leerNC(id);
+      expect(nc.detalles).toHaveLength(1);
+      expect(nc.detalles[0].itemId).toBe(itemAfectoId);
+      expect(new Decimal(nc.detalles[0].totalLinea).toString()).toBe('1');
+      expect(nc.detalles.some((l) => new Decimal(l.totalLinea).isZero())).toBe(
+        false,
+      );
+    });
+
+    it('cuando lo devuelto entra en el monto, nada se escala', async () => {
+      const ventaId = await crearVentaMixta();
+      // 1 unidad vale 1.190 y se acreditan 2.000: la línea va a su valor real y
+      // los 810 restantes salen como ajuste. Es la conducta de antes.
+      const { id } = await emitirNC(ventaId, {
+        monto: '2000',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: '1' }],
+      });
+      const nc = await leerNC(id);
+      const devuelta = nc.detalles.find((l) => l.itemId === itemAfectoId)!;
+      expect(new Decimal(devuelta.totalLinea).toString()).toBe('1190');
+      expect(nc.detalles.length).toBeGreaterThan(1);
+    });
+
+    it('el tope por porción se evalúa sobre las líneas YA escaladas', async () => {
+      const ventaId = await crearVentaMixta();
+      // Una nota previa por monto libre se lleva 735 de la porción afecta.
+      await emitirNC(ventaId, { monto: '1000' });
+      // Ahora se devuelven las 7 unidades (8.330) acreditando solo 500:
+      // escalado, eso asigna 500 a la porción afecta, que tiene 7.595 libres.
+      // Evaluar el tope sobre los valores CRUDOS rechazaría este caso, que es
+      // perfectamente válido.
+      const { id } = await emitirNC(ventaId, {
+        monto: '500',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
+        comentario: 'Cortesía',
+      });
+      const nc = await leerNC(id);
+      expect(suma(nc.detalles, 'totalLinea')).toBe('500');
     });
 
     it('la línea de ajuste no dispara movimiento de inventario', async () => {

@@ -50,14 +50,18 @@ const montoValido = computed(() => {
   return m.gt(0) && m.lte(new Decimal(props.disponible))
 })
 
-// ⚠️ NO hay pre-chequeo de "la mercadería vale más que la nota". El backend lo
-// rechaza con 400 desde el 2026-09-04 y el mensaje trae los dos números y las
-// dos salidas, así que el operador lo ve; anticiparlo acá exige valuar cada
-// línea a `Σ total_linea / Σ cantidad` **y cuantizarla a la escala de la
-// moneda con el `modo_redondeo` congelado de esa venta**, que es replicar el
-// cuantizador del motor en el navegador. Se intentó sin cuantizar y quedaba
-// peor que no tenerlo: con 3 unidades de 1.000, el modal deshabilitaba el botón
-// para una nota que el backend acepta, mostrando "vale $333, más que los $333".
+// ⚠️ NO hay pre-chequeo de "la mercadería vale más que la nota", y desde el
+// 2026-09-04 tampoco hay 400 que anticipar: ese caso ya no se rechaza, las
+// líneas se escalan a prorrata y lo que el backend exige a cambio es el
+// MOTIVO. Pedirlo acá es tarea aparte (tarea 5 del plan de este frente).
+//
+// Y sigue sin haber cuenta de plata en el navegador: anticipar cualquiera de
+// las dos cosas con exactitud exige valuar cada línea a `Σ total_linea /
+// Σ cantidad` **y cuantizarla a la escala de la moneda con el `modo_redondeo`
+// congelado de esa venta**, o sea replicar el cuantizador del motor acá. Se
+// intentó sin cuantizar y quedaba peor que no tenerlo: con 3 unidades de
+// 1.000, el modal deshabilitaba el botón para una nota que el backend acepta,
+// mostrando "vale $333, más que los $333".
 // Anotado en `pendientes.md` como frente propio.
 const puedeConfirmar = computed(() => montoValido.value && filasValidas.value)
 

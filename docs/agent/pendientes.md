@@ -178,31 +178,31 @@ decisión que no es mía).
   `motivo = 'devolucion'`. **Medir con volumen sembrado, no con la base de desarrollo**: hoy
   tiene 157 ventas y cualquier plan sale seq scan igual.
 
-- [ ] **El modal de nota de crédito no anticipa el 400 de "la mercadería vale más que la nota"**
-  (frontend; **medido el 2026-09-04** por la revisión independiente del cierre del frente de la
-  NC compuesta — [`resueltos.md`](resueltos.md)) — el backend rechaza con 400 desde `7a1e934d`,
-  con un mensaje que trae los dos números y las dos salidas, así que el operador **lo ve**: lo
-  que no tiene es aviso antes de apretar Confirmar.
+- [ ] **El modal de nota de crédito no tiene cuenta de plata propia — y ahora lo que le falta
+  anticipar es el MOTIVO, no un rechazo** (frontend; **medido el 2026-09-04**, reescrita ese
+  mismo día) — la entrada nació pidiendo anticipar el 400 de *"la mercadería vale más que la
+  nota"*. **Ese 400 ya no existe**: el frente de la devolución con crédito parcial lo sacó y en
+  su lugar el backend exige el `comentario` cuando la nota acredita menos que lo devuelto. O sea
+  que el aviso que hace falta cambió de signo — de *"no podés"* a *"contame por qué"*— y la
+  tarea 5 de ese plan lo construye.
 
-  **Por qué no entró en ese frente, y no es pereza.** Anticiparlo exige valuar cada línea a
-  `Σ total_linea / Σ cantidad` **y cuantizarla a la escala de la moneda con el `modo_redondeo`
-  congelado de esa venta** — o sea replicar el cuantizador del motor en el navegador, que sería
-  el tercer hogar de una regla de plata. Se escribió sin cuantizar y **quedaba peor que no
-  tenerlo**: con 3 unidades de 1.000, `333,3333 > 333` deshabilitaba el botón para una nota que
-  el backend acepta, y el mensaje —formateado con `formatMonto`, que trunca— decía *"vale $333,
-  más que los $333"*. Se sacó entero.
+  **Lo que sobrevive de la entrada, que es lo que vale:** el navegador **no puede calcular ese
+  umbral con exactitud**. Valuar cada línea a `Σ total_linea / Σ cantidad` y cuantizarla a la
+  escala de la moneda con el `modo_redondeo` **congelado de esa venta** es replicar el
+  cuantizador del motor acá. Se escribió sin cuantizar y **quedaba peor que no tenerlo**: con 3
+  unidades de 1.000, `333,3333 > 333` deshabilitaba el botón para una nota que el backend
+  acepta, y el mensaje —pasado por `formatMonto`, que trunca— decía *"vale $333, más que los
+  $333"*. Por eso lo que la tarea 5 va a construir **pide** el motivo con `≥` (pedirlo un peso
+  antes de tiempo no molesta; comerse un 400 que no se anticipó, sí) y **nunca deshabilita el
+  botón**: el único guard es el del backend.
 
-  **Lo que hace falta para tomarla:** decidir cómo viaja el criterio de redondeo congelado de la
-  venta hasta el modal (el drawer ya lo tiene en `venta.configCalculo`; el modal recibe hoy
-  `ventaId`, `disponible` y `detalles`), y si conviene un cuantizador compartido en el frontend o
-  esperar al workspace compartido. ⚠️ **El tipo de `configCalculo` en el drawer declara cinco
-  campos y NO `decimalesMoneda`**, que es justamente el que `cuantizar` usa: el JSON congelado sí
-  lo trae, así que es agregarlo al tipo —no ir a buscarlo al store de monedas, que daría la escala
-  de HOY y no la congelada—. Emparentada con la deuda de `unidadBaseItem` /
-  `resolverUnidadBaseDeItem`, que es la misma clase de gemelo sin enlace de compilación.
-
-  ⚠️ **Mientras tanto la conducta es correcta**, solo tardía: el guard del backend es la
-  autoridad (invariante 6) y no se tocó.
+  **Lo que sigue abierto:** si alguna vez hace falta una cuenta EXACTA en el navegador, decidir
+  cómo viaja el criterio de redondeo congelado hasta el modal. ⚠️ **El tipo de `configCalculo`
+  en el drawer declara cinco campos y NO `decimalesMoneda`**, que es justamente el que
+  `cuantizar` usa: el JSON congelado sí lo trae, así que es agregarlo al tipo —no ir a buscarlo
+  al store de monedas, que daría la escala de HOY y no la congelada—. Emparentada con la deuda
+  de `unidadBaseItem` / `resolverUnidadBaseDeItem`, que es la misma clase de gemelo sin enlace
+  de compilación.
 
 - [ ] **`recargos.vue` no tiene el quinto camino de aviso que sí tiene `descuentos.vue`**
   (frontend; **medido el 2026-09-03** por la revisión del diff que cerró el de descuentos —
