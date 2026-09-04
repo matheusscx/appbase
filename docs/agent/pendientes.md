@@ -1872,9 +1872,20 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   [`investigaciones/2026-07-26-inventario.md`](investigaciones/2026-07-26-inventario.md):
   1. **¿El traslado entre bodegas emite guía de despacho**, o se registra sin documento y el
      tenant la emite por fuera? ⛔ **Fiscal** — frente propio (ADR-010).
-  2. **¿"Bodega" es realmente sucursal?** ⚠️ **Si lo es, esto no es una tarea de inventario**:
-     toca cajas, ventas y usuarios. Es la que más conviene contestar primero, porque cambia el
-     tamaño de las otras.
+  2. ~~**¿"Bodega" es realmente sucursal?**~~ ✅ **Relevada el 2026-09-03** →
+     [`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
+     **No son lo mismo, y no es una discusión de nombres.** Bsale corta por *"desde una bodega
+     no podrás hacer ventas"*, y el SII lo endurece: la **sucursal es una entidad fiscal** —se
+     declara al SII dentro de dos meses y su código viaja en cada documento (`CdgSIISucur`)—
+     mientras que **la bodega no tiene existencia fiscal ninguna**.
+     **Lo que queda para el owner ya no es "¿son lo mismo?" sino "¿cuál hace falta?"**: son dos
+     ejes independientes y **hoy no tenemos ninguno** (verificado: ni `bodega` ni `sucursal`
+     existen en el código, el stock es un escalar por ítem y las cajas no tienen ubicación). La
+     **bodega** vive adentro de inventario y no toca nada fiscal; la **sucursal** toca cajas,
+     ventas, usuarios y el DTE.
+     ⛔ **Y trae una consecuencia de ADR-010:** si van a existir sucursales, **de qué sucursal
+     salió cada venta es un hecho fiscal** — barato de registrar antes del primer local real,
+     imposible de reconstruir después.
   3. **¿La recepción de compra parte de un DTE del SII o se digita?** ⛔ **Fiscal** — define si
      compras es un módulo interno o el primer punto de integración con el SII.
   4. **¿El objetivo real es el reporte de varianza (AVT)?** Si sí, el orden natural es recuento
