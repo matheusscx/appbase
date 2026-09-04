@@ -1550,100 +1550,16 @@ dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se
 cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
 escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
 
-### Un tenant de Argentina, Colombia o México no tiene documentos tributarios propios — y emite el chileno (2026-09-03)
+**Queda UNA abierta, y es fiscal** — la nota de crédito que no descompone su monto. Lo fiscal
+no se cuelga del final de una ronda de preguntas de producto ni se toma de arrastre: abre su
+propio frente, con su propia sesión y su propia verificación (`CLAUDE.md`, ADR-010).
 
-Lo destapó la **revisión de rama** del frente del redondeo por país, que es la única que
-podía verlo: la tarea que siembra una provincia por país nuevo y la que da de alta el tenant
-son correctas por separado.
-
-**Qué pasa:** sembrar la provincia volvió alcanzable `POST /admin/tenants` con un
-`provinciaId` de AR/CO/MX. El país gobierna **tres** catálogos, y hasta este frente los tres
-tenían solo Chile:
-
-- **Métodos de pago** — ✅ **arreglado en el mismo commit que lo destapó.** Sin ellos el tenant
-  no podía cobrar **ninguna** venta (`PagosService` rechaza con 400 todo método que no esté en
-  `tenant_metodo_pago`) y tampoco arreglarlo por pantalla, que se arma con el mismo `JOIN`.
-  Los cuatro son universales (efectivo, débito, crédito, transferencia), así que sembrarlos en
-  los cuatro países no requería ninguna decisión. Hay e2e que lo fija.
-- **Impuestos de sistema** — 🟡 **no arreglado, pero tiene salida.** El seed solo trae el IVA
-  chileno (`seedImpuestos`, `paisId: CHILE`) y los ítems resuelven con
-  `i.tenant_id = $2 OR i.pais_id = <país del tenant>`, así que un tenant AR/CO/MX nace sin
-  ningún impuesto de sistema. **Sí puede crearse los suyos** desde la pantalla de impuestos
-  (`TenantAdminGuard`), así que no queda trabado — pero es fiscal igual y el porcentaje lo pone
-  el owner, no un seeder.
-- **Tipos de documento tributario** — 🟡 **la mitad urgente se cerró el 2026-09-03**, la otra
-  quedó agendada. `seedTiposDocumentoTributario` ya siembra en los cuatro países la **nota de
-  crédito interna** —sin código tributario, `activo: false`, sin emisión—, que es el marcador
-  que el reembolso necesita, y el flujo la resuelve por `es_nota_credito` + país en vez de la
-  constante chilena (detalle en [`resueltos.md`](resueltos.md)). Lo que **no** se sembró son
-  los documentos tributarios de verdad de AR/CO/MX: eso entra con el frente fiscal de cada
-  país, que el owner decidió que va a ser **progresivo**.
-
-✅ **El dato que daba vuelta la pregunta ya no está vivo, pero se deja escrito porque explica
-por qué esto se tomó.** La nota de crédito por reembolso usaba una constante **hardcodeada**
-—`TIPO_DOCUMENTO_NC_ID`, la fila **chilena código 61**— sin mirar el país, así que una
-devolución en un tenant argentino congelaba un hecho fiscal con un documento chileno, que es
-exactamente lo que ADR-010 dice que después no se corrige. **Cerrado el 2026-09-03**: la
-constante ya no existe y el tipo sale del catálogo.
-
-**La pregunta que quedaba** —¿se corta la nota de crédito fuera de Chile, o se abre el frente
-fiscal ahora?— **la contestó el owner el 2026-09-03**: que siga saliendo, con una nota de
-crédito **interna propia de cada país**, porque cortar el reembolso deja un agujero en una
-operación diaria y con la entrada progresiva serían meses. Construido ese mismo día.
-
-⛔ **Lo que sigue necesitando al owner es la otra mitad: los impuestos de sistema de AR/CO/MX**
-(el punto 🟡 de arriba). El porcentaje lo pone el owner, no un seeder — y no queda trabado,
-porque el tenant puede crearse los suyos desde la pantalla de impuestos.
-
-**Y lo que queda como proyecto agendado, ya sin pregunta:** los documentos tributarios de
-verdad de cada país.
-Qué documentos emite un local en Argentina (factura A/B/C, ticket fiscal), en Colombia
-(factura electrónica, documento soporte) o en México (CFDI con su uso y su régimen) **no es
-algo que un agente deba inventar desde un seeder**: [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
-y el punto *"Lo fiscal va solo"* de `CLAUDE.md` dicen que abre su propio frente, con su propia
-sesión, y que la regla la pone el owner.
-
-✅ **Se corrió la investigación de las cuatro autoridades el 2026-09-03** (owner: *"la
-facturación la dejamos para después, pero la estructura tiene que ser escalable"*) →
-[`investigaciones/2026-09-03-facturacion-electronica-latam.md`](investigaciones/2026-09-03-facturacion-electronica-latam.md).
-**No contesta esta entrada** —sigue siendo decisión del owner— pero sí acota la pregunta: lo
-único irrecuperable es **qué datos fiscales del receptor se congelan en la venta** (la
-condición frente al IVA en Argentina, el régimen + CP + uso del CFDI en México), y eso
-depende de una respuesta previa: **si AR/CO/MX van a emitir de verdad o son catálogo demo.**
-
-✅ **Contestada esa mitad el 2026-09-03** (owner): *"van a emitir de verdad, los tres, pero
-será progresivo"*. Lo que cambia:
-
-- **No son catálogo demo.** Los campos fiscales del receptor (eje D de la investigación) hay
-  que capturarlos; no es opcional. Lo que hoy los hace **no urgentes** es otra cosa, y
-  conviene decirla con nombre: **no hay datos productivos** — no se está perdiendo ningún
-  hecho fiscal todavía. El reloj arranca con el **primer tenant real vendiendo en cada país**,
-  no con esta respuesta.
-- **"Progresivo" agrega un requisito que la investigación no tenía:** en todo momento va a
-  haber países emitiendo y países que todavía no. O sea que **"emite / no emite" es estado por
-  país, no un interruptor global del sistema** — y el país que entra segundo **no puede obligar
-  a migrar el historial del primero**. Eso descarta de entrada la solución barata de
-  "agregamos las columnas de Chile ahora y ya veremos": las columnas de Chile son las de Chile.
-
-⛔ **Lo que sigue abierto es la otra mitad, y es la que tiene un bug adentro:** qué hace hoy un
-reembolso en un tenant de AR/CO/MX, que congela el tipo de documento **chileno**. Que los tres
-vayan a emitir no lo contesta —justamente porque es progresivo, van a pasar meses con esos
-tenants operando sin sus tipos de documento—.
-
-📌 Mientras no se conteste, **el alta en esos países no está prohibida**: bloquearla rompería
-la propia feature del redondeo por país, y el tenant sí puede vender y cobrar. Lo que no se
-puede es seguir diciendo que "todavía no emite documentos" — emite el de otro país.
-
-**Quedan DOS abiertas, y las dos son fiscales** — la nota de crédito y la entrada de arriba
-(los documentos tributarios de los países nuevos). No es casual que sean las que sobran: lo
-fiscal no se cuelga del final de una ronda de preguntas de producto ni se toma de arrastre.
-Abre su propio frente, con su propia sesión y su propia verificación (`CLAUDE.md`, ADR-010).
-Y las dos se cruzan: la NC por reembolso es **el documento** que hoy un tenant argentino emite
-con el tipo chileno, así que probablemente se contesten juntas.
-
-⚠️ **El `awk` cuenta `- [ ]` y no ve la entrada de arriba, que es un `###`.** El conteo
-mecánico —`awk '/^## /{s=$0} /^- \[ \]/{print s}'`— sigue diciendo **una**; el número honesto
-es **dos**. Se recontó así el **2026-09-03**.
+⚠️ **Volvió a ser UNA el 2026-09-03, y el `awk` ahora sí coincide.** Ese día llegó a **dos**
+con la entrada de AR/CO/MX, que era un `###` y el conteo mecánico no veía. Esa entrada **se
+fue a la § 6**: su mitad de la nota de crédito se construyó, y de las otras dos el owner
+contestó la que era pregunta —los tres países emiten, progresivamente— mientras que la de los
+impuestos de sistema **dejó de ser pregunta al relevarla**: falta modelo, no un porcentaje.
+Corrido el `awk`, no recordado.
 
 ✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
 desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
@@ -2343,6 +2259,124 @@ calculado. Su magnitud sigue siendo `codigo === 'por_mayor' ? ctx.cantidad : ctx
 plazo es agregarle una dimensión, no una rama.
 
 ⛔ **Toca el motor de precios: va solo y con el sistema quieto** (`CLAUDE.md`).
+
+### El frente fiscal de Argentina, Colombia y México — documentos tributarios e impuestos de sistema (agendado 2026-09-03)
+
+ℹ️ **Vino de la § 4**, donde entró el 2026-09-03 como pregunta al owner y salió el mismo día:
+el owner contestó que **los tres países van a emitir de verdad, progresivamente**, y el
+relevamiento de las tasas mostró que lo que falta no es una respuesta suya sino **modelo**. Se
+conserva el texto con el que se tomó, porque explica por qué existe.
+
+**Los dos frentes que quedan, uno por país:** los **documentos tributarios** de verdad
+(factura A/B/C en Argentina, documento equivalente electrónico en Colombia, CFDI en México) y
+los **impuestos de sistema**, que no son un porcentaje sino tres decisiones de modelo
+distintas —ver el punto 🟡 más abajo y la
+[investigación § 3](investigaciones/2026-09-03-facturacion-electronica-latam.md).
+
+Lo destapó la **revisión de rama** del frente del redondeo por país, que es la única que
+podía verlo: la tarea que siembra una provincia por país nuevo y la que da de alta el tenant
+son correctas por separado.
+
+**Qué pasa:** sembrar la provincia volvió alcanzable `POST /admin/tenants` con un
+`provinciaId` de AR/CO/MX. El país gobierna **tres** catálogos, y hasta este frente los tres
+tenían solo Chile:
+
+- **Métodos de pago** — ✅ **arreglado en el mismo commit que lo destapó.** Sin ellos el tenant
+  no podía cobrar **ninguna** venta (`PagosService` rechaza con 400 todo método que no esté en
+  `tenant_metodo_pago`) y tampoco arreglarlo por pantalla, que se arma con el mismo `JOIN`.
+  Los cuatro son universales (efectivo, débito, crédito, transferencia), así que sembrarlos en
+  los cuatro países no requería ninguna decisión. Hay e2e que lo fija.
+- **Impuestos de sistema** — 🟡 **no arreglado, y la pregunta estaba mal planteada.** El seed
+  solo trae el IVA chileno (`seedImpuestos`, `paisId: CHILE`) y los ítems resuelven con
+  `i.tenant_id = $2 OR i.pais_id = <país del tenant>`, así que un tenant AR/CO/MX nace sin
+  ningún impuesto de sistema. **Sí puede crearse los suyos** desde la pantalla de impuestos
+  (`TenantAdminGuard`), así que no queda trabado.
+
+  ⛔ **Corregido el 2026-09-03: esto NO es "falta que el owner diga el porcentaje".** El owner
+  preguntó cuáles serían, se relevaron, y lo que apareció fue que **el porcentaje es lo fácil**
+  — sembrarlo destapa tres decisiones de modelo, distintas en cada país
+  ([investigación § 3](investigaciones/2026-09-03-facturacion-electronica-latam.md)):
+
+  1. **"El IVA del país" deja de ser un número.** [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)
+     deriva el IVA de la clasificación del ítem. Con una tasa sola cierra; con dos o tres
+     —AR 21/10,5 · CO 19/5/excluido · MX 16/0— `afecto | exento` ya no alcanza para saber
+     **qué tasa** le toca a **ese** ítem.
+  2. **Colombia rompe el significado de la clasificación.** Un restaurante colombiano no cobra
+     IVA: cobra **INC 8%** (impoconsumo). Eso cae como `tipo: 'otro'` y **no pasa por el
+     mecanismo derivado**, así que `afecto` significa una cosa en Chile y otra en Colombia
+     dentro del mismo motor. Y si el tenant es franquicia, vuelve a IVA 19%.
+  3. **México pide el impuesto colgado de la LÍNEA, no del ítem.** Por el art. 2-A, la misma
+     comida va a 0% empaquetada para llevar y a 16% servida en el local: el criterio es el
+     contexto de la venta, no el producto.
+
+  📌 Así que esto **no se destraba con una respuesta del owner**: es frente fiscal propio, uno
+  por país, del mismo modo que los documentos tributarios. Las tasas relevadas están en la
+  investigación, **sin verificar contra la norma** — antes de sembrar cualquiera va la cita al
+  lado del valor, mismo criterio que el frente de redondeo.
+- **Tipos de documento tributario** — 🟡 **la mitad urgente se cerró el 2026-09-03**, la otra
+  quedó agendada. `seedTiposDocumentoTributario` ya siembra en los cuatro países la **nota de
+  crédito interna** —sin código tributario, `activo: false`, sin emisión—, que es el marcador
+  que el reembolso necesita, y el flujo la resuelve por `es_nota_credito` + país en vez de la
+  constante chilena (detalle en [`resueltos.md`](resueltos.md)). Lo que **no** se sembró son
+  los documentos tributarios de verdad de AR/CO/MX: eso entra con el frente fiscal de cada
+  país, que el owner decidió que va a ser **progresivo**.
+
+✅ **El dato que daba vuelta la pregunta ya no está vivo, pero se deja escrito porque explica
+por qué esto se tomó.** La nota de crédito por reembolso usaba una constante **hardcodeada**
+—`TIPO_DOCUMENTO_NC_ID`, la fila **chilena código 61**— sin mirar el país, así que una
+devolución en un tenant argentino congelaba un hecho fiscal con un documento chileno, que es
+exactamente lo que ADR-010 dice que después no se corrige. **Cerrado el 2026-09-03**: la
+constante ya no existe y el tipo sale del catálogo.
+
+**La pregunta que quedaba** —¿se corta la nota de crédito fuera de Chile, o se abre el frente
+fiscal ahora?— **la contestó el owner el 2026-09-03**: que siga saliendo, con una nota de
+crédito **interna propia de cada país**, porque cortar el reembolso deja un agujero en una
+operación diaria y con la entrada progresiva serían meses. Construido ese mismo día.
+
+**Y lo que queda como proyecto agendado, ya sin pregunta para el owner:** los documentos
+tributarios de verdad de cada país **y los impuestos de sistema** — el punto 🟡 de arriba dejó
+de ser una pregunta el 2026-09-03, cuando se relevaron las tasas y resultó que lo que falta es
+modelo, no un número.
+Qué documentos emite un local en Argentina (factura A/B/C, ticket fiscal), en Colombia
+(factura electrónica, documento soporte) o en México (CFDI con su uso y su régimen) **no es
+algo que un agente deba inventar desde un seeder**: [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
+y el punto *"Lo fiscal va solo"* de `CLAUDE.md` dicen que abre su propio frente, con su propia
+sesión, y que la regla la pone el owner.
+
+✅ **Se corrió la investigación de las cuatro autoridades el 2026-09-03** (owner: *"la
+facturación la dejamos para después, pero la estructura tiene que ser escalable"*) →
+[`investigaciones/2026-09-03-facturacion-electronica-latam.md`](investigaciones/2026-09-03-facturacion-electronica-latam.md).
+**No contesta esta entrada** —sigue siendo decisión del owner— pero sí acota la pregunta: lo
+único irrecuperable es **qué datos fiscales del receptor se congelan en la venta** (la
+condición frente al IVA en Argentina, el régimen + CP + uso del CFDI en México), y eso
+depende de una respuesta previa: **si AR/CO/MX van a emitir de verdad o son catálogo demo.**
+
+✅ **Contestada esa mitad el 2026-09-03** (owner): *"van a emitir de verdad, los tres, pero
+será progresivo"*. Lo que cambia:
+
+- **No son catálogo demo.** Los campos fiscales del receptor (eje D de la investigación) hay
+  que capturarlos; no es opcional. Lo que hoy los hace **no urgentes** es otra cosa, y
+  conviene decirla con nombre: **no hay datos productivos** — no se está perdiendo ningún
+  hecho fiscal todavía. El reloj arranca con el **primer tenant real vendiendo en cada país**,
+  no con esta respuesta.
+- **"Progresivo" agrega un requisito que la investigación no tenía:** en todo momento va a
+  haber países emitiendo y países que todavía no. O sea que **"emite / no emite" es estado por
+  país, no un interruptor global del sistema** — y el país que entra segundo **no puede obligar
+  a migrar el historial del primero**. Eso descarta de entrada la solución barata de
+  "agregamos las columnas de Chile ahora y ya veremos": las columnas de Chile son las de Chile.
+
+✅ **Esa otra mitad —el reembolso que congelaba el tipo de documento chileno— se construyó el
+mismo día** (`fc1bfa84`): cada país tiene su nota de crédito interna y el flujo la resuelve por
+`es_nota_credito` + país. Detalle en [`resueltos.md`](resueltos.md). Sigue valiendo el motivo
+por el que no se podía esperar: con la entrada progresiva, esos tenants iban a pasar **meses**
+operando sin sus tipos de documento.
+
+📌 **El alta en esos países no está prohibida** y no va a estarlo: bloquearla rompería la
+propia feature del redondeo por país, y el tenant vende, cobra y ahora también reembolsa con el
+documento de su país. Lo que **no** se puede decir es que "ya emite": lo que tiene es un
+marcador interno, no un documento tributario.
+
+---
 
 ## 7. Acción del owner fuera del código
 

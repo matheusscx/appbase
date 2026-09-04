@@ -120,25 +120,56 @@ fiscal.
 
 ---
 
-## 3. El impuesto no es un eje — y esa es la buena noticia
+## 3. El impuesto SÍ es un eje — corrección del 2026-09-03
 
-El motor ya absorbe los cuatro países **sin cambio de esquema**: `impuestos` lleva porcentaje
-y tipo, y `ventas_impuestos` congela por línea el `nombre_regla`, el `porcentaje_aplicado` y
-el `valor_aplicado`.
+⛔ **Esta sección decía lo contrario y era falsa.** Afirmaba que *"el impuesto no es un eje —
+y esa es la buena noticia"*, que el motor absorbe los cuatro países **sin cambio de esquema**,
+y que el INC colombiano *"entra como una fila más gracias a ADR-018"*, cerrando con un *"no hay
+nada que hacer acá"*. Se escribió mirando **dónde se guarda** el impuesto y no **cómo se
+decide cuál corresponde**. Lo destapó el owner preguntando, simplemente, cuáles serían los
+impuestos de sistema de AR/CO/MX.
 
-| País | Lo típico de un local gastronómico |
-|---|---|
-| **Chile** | IVA 19% + adicionales (ILA) |
-| **Argentina** | IVA 21% / 10,5% + percepciones y IIBB provincial **[NO VERIFICADO]** |
-| **Colombia** | ⚠️ **INC 8%** — la mayoría de los restaurantes cobra impuesto nacional al consumo, **no IVA** |
-| **México** | IVA 16% (8% en frontera) + IEPS |
+Lo que sigue en pie: `ventas_impuestos` congela por línea el `nombre_regla`, el
+`porcentaje_aplicado` y el `valor_aplicado`, así que **guardar** cualquiera de estos impuestos
+no requiere migrar nada. Lo que se cae es lo otro: **elegir** cuál aplica.
 
-El caso colombiano es el que valida el diseño: un impuesto que **no es IVA**, con otra base y
-otro nombre, entra como una fila más gracias a [ADR-018](../../adr/018-iva-derivado-de-la-clasificacion.md)
-(el IVA se deriva de la clasificación, los demás se leen del catálogo). No hay nada que hacer
-acá.
+### Las tasas, por país y por tipo de local
 
----
+Hoy Chile es **una sola fila** —IVA 19%, `tipo: 'iva'`— y alcanza porque Chile tiene **una**
+tasa.
+
+| País | Restaurante | Minimarket / retail |
+|---|---|---|
+| **Chile** | IVA 19% | IVA 19% |
+| **Argentina** | IVA **21%** | 21% general + **10,5%** reducida (varios alimentos básicos) |
+| **Colombia** | **INC 8%** — *no es IVA* (impoconsumo, art. 512-1 ET). Excepción: las franquicias facturan IVA 19% | IVA **19%** general, **5%** algunos procesados, y muchos alimentos básicos **excluidos** |
+| **México** | IVA **16%** (8% en zona fronteriza) | **0%** alimentos básicos sin industrializar, **16%** preparados |
+
+**[SECUNDARIA]** salvo el artículo 2-A de la Ley del IVA mexicana, que es del SAT.
+⚠️ **Ninguna de estas tasas debería sembrarse sin verificarla contra la norma**, con el mismo
+criterio que se usó en el frente de redondeo: la cita al lado del valor.
+
+### Los tres problemas de modelo que esto destapa
+
+**1. "El IVA del país" deja de ser un número.** [ADR-018](../../adr/018-iva-derivado-de-la-clasificacion.md)
+deriva el IVA de la **clasificación** del ítem en vez de leerlo de `item_impuestos`. Con una
+tasa sola eso cierra. Con dos o tres —21/10,5 · 19/5/excluido · 16/0— la clasificación
+`afecto | exento` ya no alcanza: hay que saber **qué tasa** le toca a **ese** ítem.
+
+**2. Colombia rompe el significado de la clasificación, no solo el número.** Un restaurante
+colombiano **no cobra IVA**: cobra 8% de impoconsumo. En este modelo eso cae como
+`tipo: 'otro'`, y entonces **no pasa por el mecanismo derivado**. O sea que `afecto` significa
+una cosa en Chile y otra en Colombia, dentro del mismo motor. Y el mismo tenant, si opera bajo
+franquicia, vuelve a IVA 19%.
+
+**3. México: el mismo ítem con dos tasas según cómo se venda.** El criterio del art. 2-A no es
+el producto sino el **contexto de la venta**: la misma comida va a 0% empaquetada para llevar
+y a 16% servida para consumir en el local. Hoy el impuesto cuelga del **ítem**; esto lo pide
+colgado de la **línea**.
+
+📌 **Consecuencia para el backlog:** la pregunta *"¿qué porcentaje sembramos?"* está mal
+planteada. **El porcentaje es lo fácil**; lo que falta es una decisión de modelo, y es
+distinta en cada uno de los tres países. Frente fiscal propio, uno por país.
 
 ## 4. El cruce contra lo que ya existe
 
@@ -147,7 +178,7 @@ acá.
 | Decisión existente | Por qué aguanta los cuatro países |
 |---|---|
 | `tipos_documento_tributario` **por país, desde tabla y no enum** | Es exactamente el eje que varía; agregar país es agregar filas |
-| `ventas_impuestos` congelado por línea, con nombre y porcentaje | Absorbe INC, IEPS y adicionales sin migrar (§ 3) |
+| `ventas_impuestos` congelado por línea, con nombre y porcentaje | Absorbe **guardar** INC, IEPS y adicionales sin migrar. ⚠️ **Elegir** cuál aplica es otra historia — § 3 |
 | ADR-010: **PK ≠ folio** | Correcto; sólo hay que extenderlo a tres identificadores (eje A) |
 | `ventas.config_calculo` en `jsonb` | Ya existe el precedente de **congelar el contexto** de una venta |
 | `razones_sociales` por tenant (emisor) | La forma es correcta; le faltan campos por país |
@@ -221,7 +252,8 @@ equivocado venía de fuentes secundarias que citan el texto viejo.
 [Resolución 000165 de 2023](https://www.dian.gov.co/normatividad/Normatividad/Resoluci%C3%B3n%20000165%20de%2001-11-2023.pdf) ·
 [INC en restaurantes](https://blog.alegra.com/colombia/inc-o-iva-en-restaurantes-colombia/)
 
-**México (SAT)** — [guía de llenado del CFDI global 4.0](http://omawww.sat.gob.mx/tramitesyservicios/Paginas/documentos/GuiallenadoCFDIglobal311221.pdf)
+**México (SAT)** — [artículo 2-A de la Ley del IVA](https://wwwmatnp.sat.gob.mx/articulo/06071/articulo-2-a) (tasa 0% vs 16% según el contexto de la venta) ·
+[guía de llenado del CFDI global 4.0](http://omawww.sat.gob.mx/tramitesyservicios/Paginas/documentos/GuiallenadoCFDIglobal311221.pdf)
 (⚠️ el host rechazó la conexión al intentar abrirlo el 2026-09-03; queda **[NO VERIFICADO]**) ·
 [motivos de cancelación](https://www.facturapi.io/blog/cfdi-substitution-reason-01-cancellation) ·
 [RFC genérico](https://rfcgenerico.com.mx/rfc-generico-nacional/)
