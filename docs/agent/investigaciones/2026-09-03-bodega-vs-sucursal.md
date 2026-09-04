@@ -138,10 +138,18 @@ bodegas tiene que registrar **origen, destino y motivo** desde el primer día. N
 nada: para que el día que entre la emisión, el dato esté. Un traslado registrado como un ajuste
 sin origen ni destino **no se reconstruye**.
 
-⛔ **Lo que queda abierto y es del owner** (pregunta 1 de la entrada de inventario): si el
-sistema **emite** la guía o el tenant la sigue emitiendo por fuera. Es fiscal, abre su propio
-frente, y **no bloquea** construir bodegas mientras el movimiento capture lo que la guía va a
-necesitar.
+✅ **Decidido por el owner el 2026-09-03: se maneja como la nota de crédito.** El traslado
+genera un documento **interno**, sin emisión, y la integración con el SII entra después. Mismo
+criterio de ADR-010 que ya se aplicó a la NC, y reusa maquinaria que existe.
+
+⛔ **Con una salvedad que no hay que perder de vista:** el documento chileno del traslado es el
+**DTE 52**, *"exigida por el SII y Carabineros durante controles en carretera"* — **viaja con la
+mercadería**. Un registro interno **no lo reemplaza**: el tenant lo emite por fuera, igual que
+hoy hace con las boletas. **Tener el traslado registrado no es lo mismo que estar en regla.**
+
+📌 Y el SII **distingue tipos de traslado** —venta, ventas por efectuar, consignaciones,
+entregas gratuitas, **traslados internos**—, así que el motivo conviene que nazca **tipado** y
+no como texto libre.
 
 ---
 

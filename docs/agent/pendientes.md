@@ -1720,11 +1720,34 @@ Sigue en la § 4, sola.
   sola bolsa por tenant. Pasa a ser stock **por ubicación**, y los movimientos de
   `movimientos_inventario` ganan **origen y destino**.
   ⛔ **Toca `movimientos_inventario`, así que por `CLAUDE.md` se consulta antes de escribir.**
-  📌 **Lo que hay que capturar desde el primer día, aunque no se emita nada** (ADR-010): el
-  traslado tiene que registrar **origen, destino y motivo**. En Chile mover mercadería entre
-  establecimientos propios exige guía de despacho, y un traslado guardado como un ajuste sin
-  origen ni destino **no se reconstruye** después. Si eso además **emite** la guía es la
-  pregunta 1 de la entrada de inventario en la § 4 — es fiscal, va aparte, y **no bloquea esto**.
+  ## El traslado lleva guía interna, como la NC ✅ *(owner, 2026-09-03)*
+
+  El traslado genera un documento **interno** —sin emisión al SII— **con el mismo criterio que
+  la nota de crédito**: se congela el hecho, se difiere lo que solo transmite (ADR-010). La
+  integración con el SII entra después.
+
+  **Lo que hay que capturar desde el primer día**: **origen, destino y motivo**. Un traslado
+  guardado como un ajuste sin origen ni destino **no se reconstruye** — y a diferencia del caso
+  de sucursal, acá el dato **sí se pierde de verdad**, porque hay dos lugares posibles desde el
+  día uno.
+
+  **Cuatro cosas para el que lo construya:**
+
+  1. ⛔ **La guía interna NO hace legal el traslado.** El documento chileno es el **DTE 52**, y
+     es *"exigida por el SII y Carabineros durante controles en carretera"* **[SECUNDARIA]**:
+     tiene que viajar **con la mercadería**. Nuestro registro interno no la reemplaza — el
+     tenant la emite por fuera, igual que hoy hace con las boletas. **No confundir "lo tenemos
+     registrado" con "está en regla".**
+  2. ⚠️ **No repetir el bug que se arregló el 2026-09-03.** Lo que marque "este es el documento
+     de traslado" tiene que **resolverse por país**, como ahora hace `es_nota_credito`, y no
+     ser una constante apuntando a la fila chilena. Ese error ya se cometió una vez con la NC
+     ([`resueltos.md`](resueltos.md)).
+  3. **Un traslado NO es una venta.** La NC es una fila de `ventas` con su `tipo_documento_id`;
+     un traslado es un movimiento de inventario. La analogía es de **criterio**, no de tabla:
+     los campos del documento necesitan su propio lugar, no colgarse de `ventas`.
+  4. **El motivo es un campo tipado, no texto libre.** El SII distingue tipos de traslado
+     —venta, ventas por efectuar, consignaciones, entregas gratuitas, **traslados internos**—,
+     así que conviene nacer con esa forma en vez de migrar después.
   ℹ️ **Sucursal queda explícitamente afuera** y sigue sin decidirse. Si algún día entra, trae su
   propia consecuencia de ADR-010: de qué sucursal salió cada venta es un hecho fiscal.
 
@@ -1890,14 +1913,11 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   **de gestión**. Eso **desbloqueó** las otras, que la investigación daba por trabadas.
   **Las que siguen vivas**, detalle en
   [`investigaciones/2026-07-26-inventario.md`](investigaciones/2026-07-26-inventario.md):
-  1. **¿El traslado entre bodegas emite guía de despacho**, o se registra sin documento y el
-     tenant la emite por fuera? ⛔ **Fiscal** — frente propio (ADR-010).
-     ⚠️ **Subió de prioridad al decidirse bodega (2026-09-03)**, aunque **no bloquea**: en Chile
-     mover mercadería entre establecimientos propios **exige** guía, y la electrónica **se envía
-     al SII** —no es un documento interno— **[SECUNDARIA]**. No bloquea porque el sistema no
-     emite **ningún** DTE hoy, así que el tenant ya la emitiría por fuera como hace con las
-     boletas. Lo que sí obliga es a **capturar origen, destino y motivo** en el movimiento desde
-     el primer día.
+  1. ~~**¿El traslado entre bodegas emite guía de despacho?**~~ ✅ **Decidido por el owner el
+     2026-09-03: se maneja como la nota de crédito** —documento **interno**, sin emisión— y la
+     integración con el SII entra después. Es el mismo criterio de ADR-010 que ya se aplicó a la
+     NC, y reusa maquinaria que existe. **Se movió a la entrada de bodegas, en la § 3**, porque
+     es parte de construirla.
   2. ~~**¿"Bodega" es realmente sucursal?**~~ ✅ **Relevada el 2026-09-03** →
      [`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
      **No son lo mismo, y no es una discusión de nombres.** Bsale corta por *"desde una bodega
