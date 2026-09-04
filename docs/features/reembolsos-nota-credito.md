@@ -113,6 +113,12 @@ Response (200): orden pública + extras
   llevar impuestos distintos y no existe "la tasa" que leer. La NC corrige aquel
   documento, así que hereda su criterio — el mismo principio que el redondeo.
 
+  ⛔ **REGLA REABIERTA POR EL OWNER (2026-09-04).** Lo de abajo es lo que el
+  código hace hoy, no una decisión firme: el owner reabrió la regla del mostrador
+  al ver que los dos caminos hacen cosas distintas con el mismo hecho. **No
+  "arreglar" la asimetría por cuenta propia** — la decisión y sus opciones están
+  en `pendientes.md` § 4.
+
   **Devolver mercadería que vale más que la nota se rechaza con 400 — en el
   camino manual.** No se acomoda solo: son dos operaciones distintas —acreditar
   plata y reponer stock— y la elección es del operador. El mensaje trae los dos

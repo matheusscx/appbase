@@ -40,6 +40,11 @@ todo compatible con SII, sin integrarlo.
   de este ADR aplicado un nivel más abajo: la NC hereda el criterio de aquel documento, no el de
   hoy. Detalle en [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md).
 
+  ⛔ **La FORMA del rechazo quedó reabierta el mismo día** (owner, 2026-09-04): los dos caminos
+  —mostrador y pasarela— hacen cosas distintas con el mismo hecho, porque por la pasarela el
+  chequeo llega después de que la plata salió. Lo que sigue vale como invariante fiscal; **cómo
+  se le presenta al operador está sin decidir**, en `pendientes.md` § 4.
+
   **Dos decisiones que salieron de construirlo, las dos fiscales:**
   - **Ninguna porción se acredita dos veces.** El tope de reembolso mira el bruto y no ve la
     porción, así que una nota por monto libre se comía capacidad afecta y la devolución

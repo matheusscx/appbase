@@ -1895,6 +1895,71 @@ proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § 
 bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cinco
 entradas de esta sección.
 
+- [ ] **Devolver mercadería que vale más que la nota de crédito: los dos caminos hacen cosas
+  distintas, y la regla del mostrador se reabrió** ⛔ *(owner, 2026-09-04: "la decisión del
+  mostrador la tomé mal — dejemos esto anotado para decidir bien y dejar las 2 partes coherentes
+  y bien decididas")*
+
+  ## La escena, con números
+
+  Cliente pide delivery y paga **$11.330** con tarjeta. Se queja. El encargado le reembolsa
+  **$500** y en el mismo formulario marca *"devolver 2 empanadas al stock"*. Esas 2 empanadas
+  valieron **$2.380** en esa boleta. O sea: acredita $500 y devuelve $2.380 de mercadería.
+
+  ## Qué hace hoy cada camino — y son distintos
+
+  | | Mostrador (`POST /ventas/:id/notas-credito`) | Pasarela (`POST /cobros/:ordenId/reembolsos`) |
+  |---|---|---|
+  | Conducta | **400**, no se emite nada | La nota sale **por $500**, sin las líneas de devolución |
+  | Stock | no vuelve | **vuelve**, en `movimientos_inventario` atado al id de esa nota |
+  | Qué ve el operador | el 400 con los dos números y las dos salidas | un `warning` con el detalle |
+
+  **La asimetría no es un descuido, es el síntoma:** por la pasarela el chequeo llega *después*
+  de que la plata salió (`cobros.service.ts`, el hook post-commit), así que un `throw` ahí no
+  rechaza nada — solo dejaría un reembolso hecho **sin nota de crédito y con mercadería física en
+  el local que el sistema cree vendida**. Por eso el 400 quedó acotado al camino manual el
+  2026-09-04, y por eso el owner reabrió la regla entera: no puede haber dos conductas para el
+  mismo hecho.
+
+  ## Las opciones, con su costo
+
+  1. **Aceptar en los dos caminos**, con la nota por su monto y la mercadería volviendo al stock
+     (o sea: lo que hoy hace la pasarela, también en el mostrador). Fiscalmente cierra —la nota
+     declara lo que acredita, el stock queda en el kardex, nada se acredita de más—. **Costo:**
+     el operador puede devolver de un gesto mercadería que vale mucho más de lo que acredita, por
+     error, y nada lo frena.
+  2. **Igual que 1, pero con confirmación explícita en el mostrador** —*"estás devolviendo $2.380
+     de mercadería y acreditando $500, ¿confirmás?"*—. Por la pasarela no hay a quién preguntarle,
+     así que ahí pasa directo. Es el criterio que el owner ya eligió para otras acciones de
+     alcance grande: **frena aunque sea reversible**.
+  3. **Rechazar en los dos** (la regla original). ⛔ **Por la pasarela es inaplicable**: la plata
+     ya salió. Solo se puede si primero se valida **antes** de llamar al proveedor (ver abajo).
+  4. **Dejarlo asimétrico**, que es lo de hoy. El owner ya dijo que no.
+
+  ## Lo que destraba la opción 3, y es un frente propio
+
+  **Validar la coherencia ANTES de mover la plata.** Hoy `reembolsar` llama al proveedor, comitea,
+  y recién ahí arma la nota. Si el formulario validara contra la venta antes del cobro, el
+  encargado vería el error en el momento correcto y la asimetría desaparecería sola. El patrón ya
+  existe: `ReembolsoCallbackRegistry` deja que ventas se registre sin que pasarela la importe —
+  un hook de validación por el mismo riel respeta esa frontera. **No es parte de esta decisión,
+  pero la condiciona:** sin esto, la opción 3 no se puede elegir.
+
+  ## Un rechazo vecino que NO es lo mismo
+
+  Hay un segundo 400 con la misma forma —*"esa porción ya está acreditada"*— y **ese no es
+  preferencia de producto, es invariante fiscal**: sin él, la serie de notas acredita más IVA del
+  que la venta cobró (medido: 1.447 contra 1.330). 📌 **Pero si se elige la opción 1 o 2, los dos
+  rechazos desaparecen juntos y sin romper nada**: si las líneas de devolución no entran al
+  documento, no acreditan, así que no hay IVA de más que evitar. Conviene decidirlos de una.
+
+  (backend + frontend, **medido el 2026-09-04** al cerrar el frente de la nota de crédito
+  compuesta. Estado actual en `ventas.service.ts` → `crearNotaCreditoEnTransaccion`, el bloque
+  `noEntraEnElDocumento`; y en
+  [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md)) —
+  **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse ante
+  impuestos y documentos tributarios; **ADR-010**).
+
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el
   lock **sí** se toma, lo que no es determinista es **el orden**. (Decía "los tres de arriba",

@@ -282,6 +282,11 @@ docblock: es el precio de derivar de hechos congelados en vez de recalcular con 
 
 ### 6.1 Devolver más mercadería que plata → 400
 
+⛔ **REABIERTA POR EL OWNER EL 2026-09-04**, el mismo día, al ver que el camino de la pasarela no
+puede aplicarla: *"la decisión del mostrador la tomé mal — dejemos esto anotado para decidir bien
+y dejar las 2 partes coherentes"*. Lo de abajo describe **lo que se construyó**, no lo que va a
+quedar. Las opciones y su costo, en `docs/agent/pendientes.md` § 4.
+
 **Decisión del owner, 2026-09-04.** Escena: el cliente devuelve 2 empanadas que en esa boleta
 costaron $3.000, y se le acredita $1.000.
 
