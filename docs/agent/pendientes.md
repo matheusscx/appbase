@@ -1723,22 +1723,34 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   **Lectura recomendada al owner el 2026-09-03, para que el que lo tome no arranque de cero**
   (es recomendación, no decisión tomada):
 
-  1. **Partir el flujo en dos**, que es la pregunta 6 y resultó ser la que manda. El motivo es
-     de código, no de gusto: el reembolso de la pasarela entra por
-     `reembolso-callback.handler.ts:45` con las devoluciones que traiga el evento —que pueden
-     venir **vacías**— y ahí **la plata ya se movió**; rechazarlo por falta de líneas no
-     deshace el cobro, solo pierde el evento (decisión P3, ya escrita en el código).
-     **"Exigir líneas" no se puede aplicar en todos lados.**
-  2. **NC desde el POS → exigir líneas.** Hay un humano que puede decir qué se devuelve, es lo
-     único con precedente en el mercado (§ 4), y cierra la zona Detalle chilena.
-  3. **NC desde la pasarela → prorratear**, porque no hay alternativa y ARCA lo exige.
-  4. **El orden importa, y no por lo que parece:** lo irrecuperable **no** es el número del
-     IVA —se recalcula después desde la venta original congelada más el monto— sino **qué se
-     devolvió**. Si el cajero devuelve un monto suelto, ninguna regla futura reconstruye qué
-     era. Así que **la mitad del POS va primero**.
+  1. **El reembolso es UN proceso interno, y la pasarela es solo el riel por donde vuelve la
+     plata** (owner, 2026-09-03 — corrige la primera versión de esta recomendación, escrita
+     el mismo día, que decía lo contrario). El proceso de devolución conoce la venta y las
+     líneas; al final se bifurca **solo en cómo vuelve el dinero**: efectivo sale de la caja,
+     tarjeta llama a `POST /cobros/:ordenId/reembolsos`. Ese endpoint manda **solo el monto
+     porque es lo único que la pasarela necesita**, no porque sea lo único que sabemos.
+  2. **Entonces exigir líneas SÍ se puede en todos lados**, porque se piden **arriba, una sola
+     vez**, en el proceso de devolución — el único lugar con contexto para darlas. Los dos
+     rieles heredan eso y el endpoint de la pasarela **no se toca**.
 
-  ⚠️ **Contra, que el owner tiene que pesar:** exigir líneas **le saca al cajero el "devolvé
-  $5.000 y listo"**, y eso es decisión de producto tanto como fiscal.
+     ⛔ **La versión anterior de este punto era falsa** y conviene saber por qué, porque el
+     error es fácil de repetir: se leyó el DTO de la pasarela (`devoluciones?` opcional) y el
+     callback (`reembolso-callback.handler.ts:45`, donde la plata ya se movió y por P3 no se
+     puede rechazar) y se concluyó que "no se pueden exigir líneas en ese camino". Lo que P3
+     impide es **rechazar en el callback**, no **validar en la entrada**.
+  3. **Lo que sí está mal hoy, y es de fondo:** `generarNotaCredito` y `devoluciones` viven en
+     el DTO **de la pasarela** (`create-reembolso.dto.ts`), o sea que el riel de la plata
+     decide un hecho fiscal y un movimiento de inventario. Está **invertido**: la NC debería
+     nacer del proceso de devolución y el reembolso ser el último paso. Se nota en que hay
+     **dos entradas** a `crearNotaCredito` —el controller de ventas y el callback— en vez de
+     una.
+  4. **El prorrateo queda solo para el caso residual:** devolver un **monto suelto** por gesto
+     comercial, si se decide que eso siga existiendo (decisión de producto). Con líneas, el
+     IVA sale de ellas y no hay nada que prorratear. Si el monto suelto sobrevive, **ARCA
+     obliga a descomponerlo igual**.
+  5. **Lo irrecuperable no es el número del IVA** —se recalcula desde la venta original
+     congelada más el monto— **sino qué se devolvió.** Ninguna regla futura reconstruye qué
+     plato era. Por eso el orden es: primero el proceso de devolución con sus líneas.
 
   ⚠️ **Sigue sin decidirse y sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a parar.
   **No urge hoy** —no hay datos productivos, así que no se está perdiendo ningún hecho— pero

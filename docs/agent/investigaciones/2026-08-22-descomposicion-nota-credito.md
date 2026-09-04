@@ -385,6 +385,12 @@ cosas. Y muere el argumento *"la autoridad no lo revisa"*: **ARCA lo revisa y bl
 6. **¿Vale separar "NC itemizada" (ligada a `devoluciones`/líneas reales) de "NC por monto
    libre" como dos flujos con reglas fiscales distintas**, en vez de un único
    `crearNotaCredito`? Es lo que hacen Toast y Square al nombrar tipos de refund distintos.
+   ⚠️ **Replanteada por el owner el 2026-09-03:** no son dos flujos fiscales sino **uno solo**
+   —el proceso de devolución, que conoce las líneas— **con dos rieles de plata**: efectivo
+   sale de la caja, tarjeta llama al endpoint de la pasarela, que manda **solo el monto porque
+   es lo único que la pasarela necesita**. Con eso, la pregunta deja de ser "¿dos flujos?" y
+   pasa a ser **"¿se permite devolver un monto suelto sin líneas?"**, que es decisión de
+   producto. Si se permite, ARCA obliga a descomponerlo (§ 7 bis).
 
 ---
 
