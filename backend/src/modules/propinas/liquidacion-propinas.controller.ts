@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -74,7 +75,7 @@ export class LiquidacionPropinasController {
 
   @Get(':id')
   @RequiresPermiso('Propinas', 'Leer')
-  detalle(@Req() req: Request, @Param('id') id: string) {
+  detalle(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.liquidaciones.detalle(user.tenantId!, id);
   }
@@ -83,7 +84,7 @@ export class LiquidacionPropinasController {
   @RequiresPermiso('Propinas', 'Liquidar')
   actualizar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: UpdateLiquidacionDto,
   ) {
     const user = req.user as JwtUser;
@@ -92,14 +93,17 @@ export class LiquidacionPropinasController {
 
   @Post(':id/actualizar-config')
   @RequiresPermiso('Propinas', 'Liquidar')
-  actualizarConfig(@Req() req: Request, @Param('id') id: string) {
+  actualizarConfig(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const user = req.user as JwtUser;
     return this.liquidaciones.actualizarConfig(user.tenantId!, user.id, id);
   }
 
   @Post(':id/confirmar')
   @RequiresPermiso('Propinas', 'Liquidar')
-  confirmar(@Req() req: Request, @Param('id') id: string) {
+  confirmar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.liquidaciones.confirmar(user.tenantId!, user.id, id);
   }
@@ -108,7 +112,7 @@ export class LiquidacionPropinasController {
   @RequiresPermiso('Propinas', 'Liquidar')
   anular(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AnularLiquidacionDto,
   ) {
     const user = req.user as JwtUser;

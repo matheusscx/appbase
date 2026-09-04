@@ -1,16 +1,17 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
-  HttpCode,
-  HttpStatus,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -49,7 +50,7 @@ export class MotivosDiferenciaController {
   @Patch(':id')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateMotivoDiferenciaDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -59,7 +60,7 @@ export class MotivosDiferenciaController {
   @UseGuards(TenantAdminGuard)
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.service.remove(user.tenantId!, user.id, id);
   }
@@ -70,7 +71,7 @@ export class MotivosDiferenciaController {
   @Post(':id/restaurar')
   restaurar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RestaurarDto,
   ) {
     const user = req.user as JwtUser;

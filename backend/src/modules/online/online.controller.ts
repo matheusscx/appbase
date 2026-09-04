@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
@@ -40,7 +41,10 @@ export class OnlineController {
 
   @Get('orden/:ordenId')
   @RequiresPermiso('Tienda Online', 'Leer')
-  async orden(@Req() req: Request, @Param('ordenId') ordenId: string) {
+  async orden(
+    @Req() req: Request,
+    @Param('ordenId', ParseUUIDPipe) ordenId: string,
+  ) {
     const u = req.user as JwtUser;
     return this.onlineService.resultadoOrden(u.tenantId ?? '', ordenId);
   }

@@ -1,16 +1,17 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
-  HttpCode,
-  HttpStatus,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -114,7 +115,7 @@ export class GarzonesController {
   )
   actualizar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateGarzonDto,
   ) {
     const user = req.user as JwtUser;
@@ -141,7 +142,10 @@ export class GarzonesController {
     { modulo: 'Salones', permiso: 'Actualizar' },
     { modulo: 'Propinas', permiso: 'Actualizar' },
   )
-  otorgarPermisoOperar(@Req() req: Request, @Param('id') id: string) {
+  otorgarPermisoOperar(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const user = req.user as JwtUser;
     return this.garzonesService.otorgarPermisoOperar(user.tenantId!, id);
   }
@@ -152,7 +156,7 @@ export class GarzonesController {
     { modulo: 'Salones', permiso: 'Actualizar' },
     { modulo: 'Propinas', permiso: 'Actualizar' },
   )
-  regenerarPin(@Req() req: Request, @Param('id') id: string) {
+  regenerarPin(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.regenerarPin(user.tenantId!, user.id, id);
   }
@@ -166,7 +170,10 @@ export class GarzonesController {
     { modulo: 'Salones', permiso: 'Leer' },
     { modulo: 'Propinas', permiso: 'Leer' },
   )
-  listarEventosPin(@Req() req: Request, @Param('id') id: string) {
+  listarEventosPin(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const user = req.user as JwtUser;
     return this.garzonesService.listarEventosPin(user.tenantId!, id);
   }
@@ -176,7 +183,7 @@ export class GarzonesController {
     { modulo: 'Salones', permiso: 'Eliminar' },
     { modulo: 'Propinas', permiso: 'Eliminar' },
   )
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.eliminar(user.tenantId!, user.id, id);
   }
@@ -186,7 +193,7 @@ export class GarzonesController {
     { modulo: 'Salones', permiso: 'Eliminar' },
     { modulo: 'Propinas', permiso: 'Eliminar' },
   )
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.garzonesService.restaurar(user.tenantId!, id);
   }

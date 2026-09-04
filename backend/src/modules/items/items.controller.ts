@@ -1,13 +1,14 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Param,
   Body,
-  Req,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -36,14 +37,14 @@ export class ItemsController {
 
   @Get(':id/afectados')
   @RequiresPermiso('Items', 'Leer')
-  afectados(@Req() req: Request, @Param('id') id: string) {
+  afectados(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.itemsAfectadosPorInsumo(tenantId, id);
   }
 
   @Get(':id')
   @RequiresPermiso('Items', 'Leer')
-  findOne(@Req() req: Request, @Param('id') id: string) {
+  findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.findOne(tenantId, id);
   }
@@ -62,7 +63,7 @@ export class ItemsController {
   @RequiresPermiso('Items', 'Actualizar')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: UpdateItemDto,
   ) {
     const { tenantId, id: usuarioId } = req.user as {
@@ -86,14 +87,14 @@ export class ItemsController {
    */
   @Get(':id/uso')
   @RequiresPermiso('Items', 'Eliminar')
-  obtenerUso(@Req() req: Request, @Param('id') id: string) {
+  obtenerUso(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.obtenerUso(tenantId, id);
   }
 
   @Delete(':id')
   @RequiresPermiso('Items', 'Eliminar')
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
       id: string;
@@ -107,7 +108,7 @@ export class ItemsController {
   // lectura.
   @Post(':id/restaurar')
   @RequiresPermiso('Items', 'Eliminar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.restaurar(tenantId, id);
   }
@@ -116,7 +117,7 @@ export class ItemsController {
   @RequiresPermiso('Items', 'Actualizar')
   ajustarStock(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: AjusteStockDto,
   ) {
     const { tenantId, id: usuarioId } = req.user as {
@@ -130,7 +131,7 @@ export class ItemsController {
   @RequiresPermiso('Items', 'Leer')
   findUnidades(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('estado') estado?: string,
   ) {
     const { tenantId } = req.user as { tenantId: string };
@@ -139,7 +140,7 @@ export class ItemsController {
 
   @Get(':id/lotes')
   @RequiresPermiso('Items', 'Leer')
-  findLotes(@Req() req: Request, @Param('id') id: string) {
+  findLotes(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.findLotes(tenantId, id);
   }

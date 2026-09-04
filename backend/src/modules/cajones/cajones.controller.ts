@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -47,7 +48,7 @@ export class CajonesController {
   @Patch(':id')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCajonDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -56,7 +57,7 @@ export class CajonesController {
 
   @RequiresPermiso('Cajas', 'Eliminar')
   @Delete(':id')
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.cajonesService.remove(user.tenantId!, user.id, id);
   }
@@ -67,7 +68,7 @@ export class CajonesController {
   @Post(':id/restaurar')
   restaurar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RestaurarDto,
   ) {
     const user = req.user as JwtUser;
@@ -76,7 +77,7 @@ export class CajonesController {
 
   @RequiresPermiso('Cajas', 'Leer')
   @Get(':id/usuarios')
-  getUsuarios(@Req() req: Request, @Param('id') id: string) {
+  getUsuarios(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as { tenantId: string };
     return this.cajonesService.getUsuarios(user.tenantId, id);
   }
@@ -85,7 +86,7 @@ export class CajonesController {
   @Put(':id/usuarios')
   setUsuarios(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetCajonUsuariosDto,
   ) {
     const user = req.user as { tenantId: string };

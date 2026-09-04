@@ -1,9 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
-  Patch,
-  Body,
   Param,
+  ParseUUIDPipe,
+  Patch,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -29,7 +30,7 @@ export class MonedasController {
   @Patch(':monedaId')
   updateMoneda(
     @Req() req: Request,
-    @Param('monedaId') monedaId: string,
+    @Param('monedaId', ParseUUIDPipe) monedaId: string,
     @Body() dto: UpdateTenantMonedaDto,
   ) {
     const user = req.user as { tenantId: string };

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -47,7 +48,7 @@ export class VentasController {
   @RequiresPermiso('Ventas', 'Nota de crédito')
   async crearNotaCredito(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: CreateNotaCreditoDto,
   ) {
     const u = req.user as JwtUser;
@@ -66,7 +67,7 @@ export class VentasController {
   @RequiresPermiso('Ventas', 'Anular')
   async anular(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelarVentaDto,
   ) {
     const u = req.user as JwtUser;
@@ -113,7 +114,7 @@ export class VentasController {
 
   @Get(':id')
   @RequiresPermiso('Ventas', 'Leer')
-  async findOne(@Req() req: Request, @Param('id') id: string) {
+  async findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
       u.id,

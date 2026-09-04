@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -46,13 +47,13 @@ export class GruposModificadoresController {
   }
 
   @Get(':id')
-  findOne(@Req() req: Request, @Param('id') id: string) {
+  findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.service.findOne(tenantId, id);
   }
 
   @Get(':id/items')
-  itemsUsando(@Req() req: Request, @Param('id') id: string) {
+  itemsUsando(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.service.itemsUsando(tenantId, id);
   }
@@ -61,7 +62,7 @@ export class GruposModificadoresController {
   @UseGuards(TenantAdminGuard)
   aplicarOverrides(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: AplicarOverridesDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
@@ -72,7 +73,7 @@ export class GruposModificadoresController {
   @UseGuards(TenantAdminGuard)
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: UpdateGrupoModificadorDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
@@ -82,7 +83,7 @@ export class GruposModificadoresController {
   @Delete(':id')
   @UseGuards(TenantAdminGuard)
   @HttpCode(204)
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.service.remove(user.tenantId!, user.id, id);
   }
@@ -93,7 +94,7 @@ export class GruposModificadoresController {
   @UseGuards(TenantAdminGuard)
   restaurar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RestaurarDto,
   ) {
     const user = req.user as JwtUser;

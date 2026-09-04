@@ -632,6 +632,30 @@ describe('Ventas (e2e)', () => {
       expect(res.status).toBe(404);
     });
 
+    /**
+     * `/api/ventas/tipos-documento` **no es una ruta**: la de verdad es
+     * `/api/tipos-documento` (`TiposDocumentoController`, mismo archivo). Al no
+     * existir, Express la entrega al comodín `GET :id` y `tipos-documento`
+     * llega al service como si fuera un id. Ahí Postgres intenta castearlo a
+     * `uuid`, revienta con `22P02` y la excepción sin manejar sale como 500.
+     *
+     * Medido el 2026-09-03: 500 con body `{"statusCode":500,"message":"Internal
+     * server error"}`. Un path inexistente que devuelve error de servidor
+     * ensucia el monitoreo —parece caída de la app, no request mal formado—, así
+     * que el borde lo rechaza antes de tocar la base.
+     *
+     * ⚠️ El caso vecino NO sirve de red: un id que **sí** es UUID pero no existe
+     * responde 404 (el test de arriba), y ese camino nunca pasó por Postgres con
+     * un texto inválido. Lo que fija este test es el rechazo por formato.
+     */
+    it('responde 400 —no 500— cuando el id no tiene forma de UUID', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas/tipos-documento')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(400);
+    });
+
     it('rollback completo ante stock insuficiente — no crea venta ni movimientos', async () => {
       // Pedir más stock del disponible
       const stockActual = await getStock(ds, ITEM_ID);

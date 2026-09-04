@@ -44,6 +44,34 @@ entities y falla si una columna `*_id` no declara `type: 'uuid'` (con allowlist 
 externos como `google_id`). El porqué (JOINs raw fallan `varchar` vs `uuid`) vive en
 [ADR-004](../adr/004-uuid-column-types.md). Regla movida del `.md` al test.
 
+### ❌ `@Param('id')` de un UUID sin `ParseUUIDPipe` (2026-09-03)
+
+```ts
+// ❌ El string del path llega crudo al service, Postgres lo castea a uuid,
+//    revienta con 22P02 y la excepción sin manejar sale como 500.
+@Get(':id')
+async findOne(@Req() req: Request, @Param('id') id: string) {
+
+// ✅
+@Get(':id')
+async findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+```
+
+Estaba en **148 de los 155 `@Param`** del backend, o sea era el estado por defecto y no un
+descuido puntual. Lo peor no es el cliente mal portado: `GET /api/ventas/tipos-documento` es
+un **path que no existe** —la ruta real es `/api/tipos-documento`— y Express se lo entrega al
+comodín `@Get(':id')`, así que **un 404 salía como 500** y disparaba alarma de monitoreo.
+Medido: 14 de 26 rutas `GET :id` daban 500, en 8 módulos distintos.
+
+⚠️ **La excepción son los 7 `@Param('token')`** (`auth.controller.ts`,
+`tenants.controller.ts`): esos tokens son `randomBytes(32).toString('base64url')`, no UUIDs,
+y el pipe rompería invitaciones, verificación de correo y reset. El porqué está escrito en
+esos dos controllers — antes de "corregir" el olvido aparente, leerlo.
+
+📌 **Ni el `lint` ni el `typecheck` ni los unitarios ven este hueco**: solo aparece pidiendo
+la ruta de verdad. Lo fija `ventas.e2e-spec.ts` › *"responde 400 —no 500— cuando el id no
+tiene forma de UUID"*. Detalle del patrón: `docs/patterns/backend.md` § 4.
+
 ### ✅ Columna de fecha sin `type: 'timestamptz'` explícito — AUTOMATIZADO
 
 Mismo molde que el de arriba, misma causa: sin `type`, TypeORM elige por vos y para fechas

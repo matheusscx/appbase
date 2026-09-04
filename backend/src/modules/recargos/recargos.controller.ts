@@ -1,11 +1,12 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -59,7 +60,7 @@ export class RecargosController {
   // Quien agregue un tercero: el default de este endpoint los INCLUYE.
   @UseGuards(TenantAdminGuard)
   @Get(':id/uso')
-  obtenerUso(@Req() req: Request, @Param('id') id: string) {
+  obtenerUso(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as { tenantId: string };
     return this.recargosService.obtenerUso(user.tenantId, id);
   }
@@ -75,7 +76,7 @@ export class RecargosController {
   @Patch(':id')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: UpdateRecargoDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -84,7 +85,7 @@ export class RecargosController {
 
   @UseGuards(TenantAdminGuard)
   @Delete(':id')
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.recargosService.remove(user.tenantId!, user.id, id);
   }
@@ -95,7 +96,7 @@ export class RecargosController {
   @Post(':id/restaurar')
   restaurar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RestaurarDto,
   ) {
     const user = req.user as JwtUser;

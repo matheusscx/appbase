@@ -66,6 +66,15 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  /**
+   * ⚠️ Estos `@Param('token')` van **sin `ParseUUIDPipe`**, y no es un olvido: el
+   * resto de los `@Param` del backend sí lo lleva (`docs/patterns/backend.md` § 4).
+   *
+   * El token de un link **no es un UUID**: sale de
+   * `randomBytes(32).toString('base64url')` en `tokens-acceso.service.ts`, o sea
+   * 43 caracteres de base64url. Ponerle el pipe devolvería 400 a *todos* los links
+   * válidos de verificación, invitación y reset.
+   */
   @Post('verificar/:token')
   @HttpCode(HttpStatus.OK)
   verificarCorreo(@Param('token') token: string) {

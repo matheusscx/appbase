@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -64,7 +65,7 @@ export class SesionesGarzonController {
 
   @Post(':id/cerrar')
   @RequiresPermiso('Salones', 'Actualizar')
-  cerrarAdmin(@Req() req: Request, @Param('id') id: string) {
+  cerrarAdmin(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as { tenantId: string; id: string };
     return this.sesionesService.cerrarAdmin(user.tenantId, id, user.id);
   }

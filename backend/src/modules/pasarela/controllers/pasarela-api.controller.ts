@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -53,12 +54,18 @@ export class PasarelaApiController {
   }
 
   @Get('inscripciones/:id')
-  obtenerInscripcion(@Req() req: ApiRequest, @Param('id') id: string) {
+  obtenerInscripcion(
+    @Req() req: ApiRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.inscripciones.obtener(req.pasarelaAuth.tenantId, id);
   }
 
   @Delete('inscripciones/:id')
-  eliminarInscripcion(@Req() req: ApiRequest, @Param('id') id: string) {
+  eliminarInscripcion(
+    @Req() req: ApiRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.inscripciones.eliminar(req.pasarelaAuth.tenantId, id);
   }
 
@@ -83,19 +90,19 @@ export class PasarelaApiController {
   @Post('cobros/:ordenId/reembolsos')
   reembolsar(
     @Req() req: ApiRequest,
-    @Param('ordenId') ordenId: string,
+    @Param('ordenId', ParseUUIDPipe) ordenId: string,
     @Body() dto: CreateReembolsoDto,
   ) {
     return this.cobros.reembolsar(req.pasarelaAuth.tenantId, ordenId, dto);
   }
 
   @Post('ordenes/:id/verificar')
-  verificar(@Req() req: ApiRequest, @Param('id') id: string) {
+  verificar(@Req() req: ApiRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.cobros.verificar(req.pasarelaAuth.tenantId, id);
   }
 
   @Get('ordenes/:id')
-  obtenerOrden(@Req() req: ApiRequest, @Param('id') id: string) {
+  obtenerOrden(@Req() req: ApiRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.cobros.obtenerOrden(req.pasarelaAuth.tenantId, id);
   }
 }

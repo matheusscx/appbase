@@ -210,6 +210,44 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
 > Ocultar el link en el sidebar (`can(modulo, permiso)`) es complementario, no un
 > sustituto del enforcement en el backend.
 
+### Todo `@Param` que sea un UUID lleva `ParseUUIDPipe` (2026-09-03)
+
+```ts
+@Get(':id')
+@RequiresPermiso('Ventas', 'Leer')
+async findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+```
+
+**Por qué.** Sin el pipe, el string del path llega al service y de ahí a Postgres,
+que intenta castearlo a `uuid`, falla con `22P02` y la excepción sin manejar sale
+como **500**. Un request mal formado tiene que ser 400: el 500 dice "se cayó la
+app" y ensucia el monitoreo con una alarma que no corresponde a ninguna falla.
+
+El caso que lo trajo es el más incómodo de todos, porque **ni siquiera hace falta
+un cliente mal portado**: `GET /api/ventas/tipos-documento` es un path que no
+existe —la ruta de verdad es `/api/tipos-documento`— y Express se lo entrega al
+comodín `@Get(':id')`. O sea que **un 404 se disfrazaba de 500**.
+
+**No era un bug de ventas.** Medido el 2026-09-03 sobre 26 rutas `GET :id` con un
+id no-UUID: **14 devolvían 500**, repartidas en `items`, `caja`, `recuentos`,
+`grupos-modificadores`, `descuentos`, `impuestos`, `recargos` y `cajones`. Las
+otras 12 daban 404 por motivos mezclados —algunas manejadas, otras simplemente
+porque *esa ruta no existía*—, así que 14 era un piso, no un techo. Por eso el
+pipe se aplicó de una vez a los **148 `@Param` de UUID** de los 30 controllers,
+en lugar de ruta por ruta.
+
+⚠️ **Los 7 `@Param('token')` quedan afuera, y no es un olvido.** Esos tokens se
+generan con `randomBytes(32).toString('base64url')`
+(`auth/tokens-acceso.service.ts:51`): son base64url de 43 caracteres, **no son
+UUID**. Ponerles el pipe devolvería 400 a *todos* los links válidos de
+verificación de correo, invitación y reset de contraseña. Antes de agregar el
+pipe a un `@Param` nuevo, la pregunta no es "¿es un id?" sino **"¿es un uuid?"**.
+
+📌 El `lint`/`typecheck` **no** ve la ausencia del pipe, y el unitario tampoco: el
+hueco solo aparece pidiendo la ruta de verdad. Lo fija
+`ventas.e2e-spec.ts` › *"responde 400 —no 500— cuando el id no tiene forma de
+UUID"*.
+
 ### Tablas sin `tenant_id`
 
 **No todas las tablas lo llevan, y eso no es un olvido.**

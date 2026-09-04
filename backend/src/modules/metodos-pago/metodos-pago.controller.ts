@@ -1,9 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
-  Patch,
-  Body,
   Param,
+  ParseUUIDPipe,
+  Patch,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -29,7 +30,7 @@ export class MetodosPagoController {
   @Patch(':metodoPagoId')
   updateMetodoPago(
     @Req() req: Request,
-    @Param('metodoPagoId') metodoPagoId: string,
+    @Param('metodoPagoId', ParseUUIDPipe) metodoPagoId: string,
     @Body() dto: UpdateTenantMetodoPagoDto,
   ) {
     const user = req.user as { tenantId: string };

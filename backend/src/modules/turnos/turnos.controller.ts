@@ -1,11 +1,12 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -48,7 +49,7 @@ export class TurnosController {
   @RequiresPermiso('Salones', 'Actualizar')
   actualizar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTurnoDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -57,7 +58,7 @@ export class TurnosController {
 
   @Delete(':id')
   @RequiresPermiso('Salones', 'Eliminar')
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.turnosService.eliminar(user.tenantId!, user.id, id);
   }
@@ -68,7 +69,7 @@ export class TurnosController {
   @RequiresPermiso('Salones', 'Eliminar')
   restaurar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RestaurarDto,
   ) {
     const user = req.user as JwtUser;

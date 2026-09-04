@@ -1,11 +1,12 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -44,7 +45,7 @@ export class TercerosController {
   @RequiresPermiso('Terceros', 'Actualizar')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTerceroDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -53,14 +54,14 @@ export class TercerosController {
 
   @Delete(':id')
   @RequiresPermiso('Terceros', 'Eliminar')
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.tercerosService.remove(user.tenantId!, user.id, id);
   }
 
   @Post(':id/restaurar')
   @RequiresPermiso('Terceros', 'Eliminar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.tercerosService.restaurar(user.tenantId!, id);
   }

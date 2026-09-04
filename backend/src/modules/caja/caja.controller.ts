@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -231,7 +232,10 @@ export class CajaController {
   }
 
   @Get(':id/arqueo')
-  async arqueo(@Req() req: Request, @Param('id') cajaId: string) {
+  async arqueo(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) cajaId: string,
+  ) {
     const u = req.user as JwtUser;
     const [verTodas, esAdmin] = await Promise.all([
       this.resolverLecturaCompartida(u),
@@ -250,7 +254,7 @@ export class CajaController {
   @UseGuards(TenantAdminGuard)
   justificarDiferencias(
     @Req() req: Request,
-    @Param('id') cajaId: string,
+    @Param('id', ParseUUIDPipe) cajaId: string,
     @Body() dto: JustificarDiferenciasDto,
   ) {
     const u = req.user as JwtUser;
@@ -262,7 +266,10 @@ export class CajaController {
   }
 
   @Get(':id')
-  async detalle(@Req() req: Request, @Param('id') cajaId: string) {
+  async detalle(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) cajaId: string,
+  ) {
     const u = req.user as JwtUser;
     const verTodas = await this.resolverLecturaCompartida(u);
     return this.cajaService.findOne(u.tenantId!, u.id, cajaId, verTodas);
@@ -279,7 +286,7 @@ export class CajaController {
   @RequiresPermiso('MiCaja', 'Crear')
   registrarMovimiento(
     @Req() req: Request,
-    @Param('id') cajaId: string,
+    @Param('id', ParseUUIDPipe) cajaId: string,
     @Body(EscalaMonedaPipe) dto: CrearMovimientoDto,
   ) {
     const u = req.user as JwtUser;
@@ -298,7 +305,7 @@ export class CajaController {
   @Post(':id/conteo')
   async enviarConteo(
     @Req() req: Request,
-    @Param('id') cajaId: string,
+    @Param('id', ParseUUIDPipe) cajaId: string,
     @Body(EscalaMonedaPipe) dto: CerrarCajaDto,
   ) {
     const u = req.user as JwtUser;
@@ -327,7 +334,7 @@ export class CajaController {
   @Post(':id/cerrar')
   async cerrar(
     @Req() req: Request,
-    @Param('id') cajaId: string,
+    @Param('id', ParseUUIDPipe) cajaId: string,
     @Body() dto: FinalizarCierreDto,
   ) {
     const u = req.user as JwtUser;
@@ -345,7 +352,10 @@ export class CajaController {
    */
   @Post(':id/revisar')
   @RequiresPermiso('Cajas', 'Actualizar')
-  marcarRevisado(@Req() req: Request, @Param('id') cajaId: string) {
+  marcarRevisado(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) cajaId: string,
+  ) {
     const u = req.user as JwtUser;
     return this.cajaService.marcarRevisado(u.tenantId!, u.id, cajaId);
   }
@@ -355,7 +365,7 @@ export class CajaController {
   @RequiresPermiso('Cajas', 'Actualizar')
   solicitarTestigos(
     @Req() req: Request,
-    @Param('id') cajaId: string,
+    @Param('id', ParseUUIDPipe) cajaId: string,
     @Body() dto: SolicitarTestigoDto,
   ) {
     const u = req.user as JwtUser;
@@ -388,7 +398,7 @@ export class CajaController {
   @RequiresPermiso('Salones', 'Operar')
   resolverTestigo(
     @Req() req: Request,
-    @Param('testigoId') testigoId: string,
+    @Param('testigoId', ParseUUIDPipe) testigoId: string,
     @Body() dto: ResolverTestigoDto,
   ) {
     const u = req.user as JwtUser;
@@ -428,13 +438,19 @@ export class CajaController {
    */
   @Get(':id/testigos')
   @RequiresPermiso('Cajas', 'Leer')
-  listarTestigos(@Req() req: Request, @Param('id') cajaId: string) {
+  listarTestigos(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) cajaId: string,
+  ) {
     const u = req.user as JwtUser;
     return this.cajaTestigoService.listar(u.tenantId!, cajaId);
   }
 
   @Get(':id/movimientos/resumen')
-  async resumenMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
+  async resumenMovimientos(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) cajaId: string,
+  ) {
     const u = req.user as JwtUser;
     const [verTodas, esAdmin] = await Promise.all([
       this.resolverLecturaCompartida(u),
@@ -452,7 +468,7 @@ export class CajaController {
   @Get(':id/movimientos')
   async listarMovimientos(
     @Req() req: Request,
-    @Param('id') cajaId: string,
+    @Param('id', ParseUUIDPipe) cajaId: string,
     @Query() query: QueryMovimientosCajaDto,
   ) {
     const u = req.user as JwtUser;

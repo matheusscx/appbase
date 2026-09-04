@@ -1,17 +1,18 @@
 import {
+  Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
   Put,
-  Patch,
-  Delete,
-  Body,
-  Param,
   Query,
   Req,
   UseGuards,
-  HttpCode,
-  HttpStatus,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -52,23 +53,23 @@ export class AdminTenantsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.tenantsService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateTenantDto) {
     return this.tenantsService.update(id, dto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.tenantsService.remove(id);
   }
 
   @Post(':id/modules')
-  addModule(@Param('id') id: string, @Body() dto: AddModuleDto) {
+  addModule(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AddModuleDto) {
     return this.tenantsService.addModule(id, dto.moduloAppId);
   }
 }
@@ -86,6 +87,15 @@ export class AdminTenantsController {
 export class TenantsConfirmacionController {
   constructor(private readonly tenantsService: TenantsService) {}
 
+  /**
+   * ⚠️ Estos `@Param('token')` van **sin `ParseUUIDPipe`**, y no es un olvido: el
+   * resto de los `@Param` del backend sí lo lleva (`docs/patterns/backend.md` § 4).
+   *
+   * El token de un link **no es un UUID**: sale de
+   * `randomBytes(32).toString('base64url')` en `tokens-acceso.service.ts`, o sea
+   * 43 caracteres de base64url. Ponerle el pipe devolvería 400 a *todos* los links
+   * válidos de verificación, invitación y reset.
+   */
   /** Lo que necesita la pantalla para preguntar "¿entrás a X?". No quema nada. */
   @Get(':token')
   verificar(@Param('token') token: string) {
@@ -209,7 +219,7 @@ export class TenantsController {
   @Patch('members/:userId/totem')
   marcarTotem(
     @Req() req: Request,
-    @Param('userId') userId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: MarcarTotemDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -229,7 +239,7 @@ export class TenantsController {
   @Delete('members/:userId')
   removeMember(
     @Req() req: Request,
-    @Param('userId') userId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
     @Query() dto: BajaMiembroDto,
   ) {
     const user = req.user as { id: string; tenantId: string };
@@ -264,7 +274,7 @@ export class TenantsController {
   @Patch('razones-sociales/:id')
   updateRazonSocial(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateRazonSocialDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -274,14 +284,17 @@ export class TenantsController {
   @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
   @Delete('razones-sociales/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  removeRazonSocial(@Req() req: Request, @Param('id') id: string) {
+  removeRazonSocial(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.removeRazonSocial(user.tenantId, id);
   }
 
   @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
   @Patch('razones-sociales/:id/preferida')
-  setPreferida(@Req() req: Request, @Param('id') id: string) {
+  setPreferida(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.setPreferida(user.tenantId, id);
   }

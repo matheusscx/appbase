@@ -1,11 +1,12 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -65,7 +66,7 @@ export class ImpresorasController {
   @RequiresPermiso('Impresoras', 'Actualizar')
   actualizar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateImpresoraDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -74,14 +75,14 @@ export class ImpresorasController {
 
   @Delete(':id')
   @RequiresPermiso('Impresoras', 'Eliminar')
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.impresorasService.eliminar(user.tenantId!, user.id, id);
   }
 
   @Post(':id/restaurar')
   @RequiresPermiso('Impresoras', 'Eliminar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.impresorasService.restaurar(user.tenantId!, id);
   }

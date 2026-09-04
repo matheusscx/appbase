@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -47,14 +48,14 @@ export class MediosPagoOnlineController {
 
   @Delete(':id')
   @RequiresPermiso('Tienda Online', 'Crear')
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.mediosPago.eliminar(u.tenantId ?? '', u.id, id);
   }
 
   @Patch(':id/preferida')
   @RequiresPermiso('Tienda Online', 'Crear')
-  marcarPreferida(@Req() req: Request, @Param('id') id: string) {
+  marcarPreferida(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.mediosPago.marcarPreferida(u.tenantId ?? '', u.id, id);
   }

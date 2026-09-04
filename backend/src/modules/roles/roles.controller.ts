@@ -1,16 +1,17 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Put,
   Body,
-  Param,
-  Req,
-  UseGuards,
+  Controller,
+  Delete,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -50,7 +51,7 @@ export class RolesController {
   @Patch(':id')
   @UseGuards(TenantAdminGuard)
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() req: Request,
     @Body() dto: UpdateRolDto,
   ) {
@@ -61,7 +62,7 @@ export class RolesController {
   @Delete(':id')
   @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string, @Req() req: Request) {
+  remove(@Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
     const user = req.user as JwtUser;
     return this.rolesService.remove(id, user.tenantId!);
   }
@@ -69,7 +70,7 @@ export class RolesController {
   @Post(':id/users')
   @UseGuards(TenantAdminGuard)
   assignUser(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() req: Request,
     @Body() dto: AssignUserDto,
   ) {
@@ -81,8 +82,8 @@ export class RolesController {
   @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   removeUser(
-    @Param('id') id: string,
-    @Param('userId') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
     @Req() req: Request,
   ) {
     const user = req.user as JwtUser;
@@ -90,7 +91,7 @@ export class RolesController {
   }
 
   @Get(':id/permissions')
-  findPermissions(@Param('id') id: string, @Req() req: Request) {
+  findPermissions(@Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
     const user = req.user as JwtUser;
     return this.rolesService.findPermissions(id, user.tenantId!);
   }
@@ -98,8 +99,8 @@ export class RolesController {
   @Put(':id/modules/:moduloTenantId/permissions')
   @UseGuards(TenantAdminGuard)
   setPermissions(
-    @Param('id') id: string,
-    @Param('moduloTenantId') moduloTenantId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('moduloTenantId', ParseUUIDPipe) moduloTenantId: string,
     @Req() req: Request,
     @Body() dto: SetPermissionsDto,
   ) {

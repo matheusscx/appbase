@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -73,7 +74,7 @@ export class SalonesController {
   @RequiresPermiso('Salones', 'Actualizar')
   actualizar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSalonDto,
   ) {
     const u = req.user as JwtUser;
@@ -82,14 +83,14 @@ export class SalonesController {
 
   @Delete(':id')
   @RequiresPermiso('Salones', 'Eliminar')
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.eliminarSalon(u.tenantId ?? '', u.id, id);
   }
 
   @Post(':id/restaurar')
   @RequiresPermiso('Salones', 'Eliminar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.restaurarSalon(u.tenantId ?? '', id);
   }
@@ -99,7 +100,7 @@ export class SalonesController {
   @RequiresPermiso('Salones', 'Crear')
   crearMesa(
     @Req() req: Request,
-    @Param('salonId') salonId: string,
+    @Param('salonId', ParseUUIDPipe) salonId: string,
     @Body() dto: CreateMesaDto,
   ) {
     const u = req.user as JwtUser;
@@ -110,7 +111,7 @@ export class SalonesController {
   @RequiresPermiso('Salones', 'Actualizar')
   guardarLayout(
     @Req() req: Request,
-    @Param('salonId') salonId: string,
+    @Param('salonId', ParseUUIDPipe) salonId: string,
     @Body() dto: UpdateLayoutDto,
   ) {
     const u = req.user as JwtUser;
@@ -129,7 +130,7 @@ export class MesasController {
   @RequiresPermiso('Salones', 'Actualizar')
   actualizar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateMesaDto,
   ) {
     const u = req.user as JwtUser;
@@ -138,21 +139,21 @@ export class MesasController {
 
   @Delete(':id')
   @RequiresPermiso('Salones', 'Eliminar')
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.eliminarMesa(u.tenantId ?? '', u.id, id);
   }
 
   @Post(':id/restaurar')
   @RequiresPermiso('Salones', 'Eliminar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.restaurarMesa(u.tenantId ?? '', id);
   }
 
   @Get(':id/cuentas')
   @RequiresPermiso('Salones', 'Operar')
-  cuentas(@Req() req: Request, @Param('id') id: string) {
+  cuentas(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.listarCuentasDeMesa(u.tenantId ?? '', id);
   }
@@ -161,7 +162,7 @@ export class MesasController {
   @RequiresPermiso('Salones', 'Operar')
   abrirCuenta(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateCuentaDto,
   ) {
     const u = req.user as JwtUser;
@@ -172,7 +173,7 @@ export class MesasController {
   @RequiresPermiso('Salones', 'Operar')
   fusionarCuentas(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: FusionarCuentasDto,
   ) {
     const u = req.user as JwtUser;
@@ -191,7 +192,7 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Operar')
   agregarLinea(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddLineaDto,
   ) {
     const u = req.user as JwtUser;
@@ -200,14 +201,14 @@ export class CuentasController {
 
   @Get(':id/comanda/pendiente')
   @RequiresPermiso('Salones', 'Operar')
-  previewComanda(@Req() req: Request, @Param('id') id: string) {
+  previewComanda(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.previewComanda(u.tenantId ?? '', id);
   }
 
   @Post(':id/comanda/reclamar')
   @RequiresPermiso('Salones', 'Operar')
-  reclamarComanda(@Req() req: Request, @Param('id') id: string) {
+  reclamarComanda(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.reclamarComanda(u.tenantId ?? '', id);
   }
@@ -216,7 +217,7 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Operar')
   confirmarComanda(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ConfirmarComandaDto,
   ) {
     const u = req.user as JwtUser;
@@ -227,8 +228,8 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Operar')
   actualizarLinea(
     @Req() req: Request,
-    @Param('id') id: string,
-    @Param('lineaId') lineaId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineaId', ParseUUIDPipe) lineaId: string,
     @Body() dto: UpdateLineaDto,
   ) {
     const u = req.user as JwtUser;
@@ -244,8 +245,8 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Operar')
   quitarLinea(
     @Req() req: Request,
-    @Param('id') id: string,
-    @Param('lineaId') lineaId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineaId', ParseUUIDPipe) lineaId: string,
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.quitarLinea(u.tenantId ?? '', id, lineaId);
@@ -253,7 +254,7 @@ export class CuentasController {
 
   @Post(':id/cancelar')
   @RequiresPermiso('Salones', 'Operar')
-  cancelar(@Req() req: Request, @Param('id') id: string) {
+  cancelar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.cancelarCuenta(u.tenantId ?? '', id);
   }
@@ -262,7 +263,7 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Operar')
   cerrar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: CerrarCuentaDto,
   ) {
     const u = req.user as JwtUser;
@@ -273,7 +274,7 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Operar')
   transferir(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: TransferirCuentaDto,
   ) {
     const u = req.user as JwtUser;
@@ -289,7 +290,7 @@ export class CuentasController {
   @RequiresPermiso('Salones', 'Actualizar')
   transferirAdmin(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: TransferirCuentaAdminDto,
   ) {
     const u = req.user as JwtUser;
@@ -303,7 +304,7 @@ export class CuentasController {
 
   @Get(':id/asignaciones')
   @RequiresPermiso('Salones', 'Leer')
-  asignaciones(@Req() req: Request, @Param('id') id: string) {
+  asignaciones(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.salonesService.listarAsignacionesCuenta(u.tenantId ?? '', id);
   }

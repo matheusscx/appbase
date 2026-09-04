@@ -1,11 +1,12 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
   Body,
+  Controller,
+  Delete,
+  Get,
   Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -45,7 +46,7 @@ export class CategoriasController {
   @Patch(':id')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCategoriaDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -54,14 +55,14 @@ export class CategoriasController {
 
   @UseGuards(TenantAdminGuard)
   @Delete(':id')
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.categoriasService.remove(user.tenantId!, user.id, id);
   }
 
   @UseGuards(TenantAdminGuard)
   @Post(':id/restaurar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as JwtUser;
     return this.categoriasService.restaurar(user.tenantId!, id);
   }

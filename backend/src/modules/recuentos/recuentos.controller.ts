@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -44,7 +45,7 @@ export class RecuentosController {
 
   @Get(':id')
   @RequiresPermiso('Inventario', 'Leer')
-  findOne(@Req() req: Request, @Param('id') id: string) {
+  findOne(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.findOne(tenantId, id);
   }
@@ -53,8 +54,8 @@ export class RecuentosController {
   @RequiresPermiso('Inventario', 'Crear')
   updateLinea(
     @Req() req: Request,
-    @Param('id') id: string,
-    @Param('lineaId') lineaId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('lineaId', ParseUUIDPipe) lineaId: string,
     @Body() dto: UpdateRecuentoLineaDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
@@ -65,7 +66,7 @@ export class RecuentosController {
   @RequiresPermiso('Inventario', 'Crear')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateRecuentoDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
@@ -74,7 +75,7 @@ export class RecuentosController {
 
   @Post(':id/cancelar')
   @RequiresPermiso('Inventario', 'Crear')
-  cancelar(@Req() req: Request, @Param('id') id: string) {
+  cancelar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.cancelar(tenantId, id);
   }
@@ -84,7 +85,7 @@ export class RecuentosController {
   // necesariamente quien aprueba).
   @Post(':id/aplicar')
   @RequiresPermiso('Inventario', 'Actualizar')
-  aplicar(@Req() req: Request, @Param('id') id: string) {
+  aplicar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
       id: string;

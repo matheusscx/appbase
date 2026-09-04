@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -42,7 +43,7 @@ export class PromocionesController {
   @Patch(':id')
   update(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(EscalaMonedaPipe) dto: UpdatePromocionDto,
   ) {
     const user = req.user as { tenantId: string };
@@ -51,7 +52,7 @@ export class PromocionesController {
 
   @UseGuards(TenantAdminGuard)
   @Delete(':id')
-  remove(@Req() req: Request, @Param('id') id: string) {
+  remove(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const user = req.user as { tenantId: string };
     return this.promocionesService.remove(user.tenantId, id);
   }

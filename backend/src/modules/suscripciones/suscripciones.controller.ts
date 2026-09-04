@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -41,7 +42,7 @@ export class SuscripcionesController {
   @RequiresPermiso('Suscripciones', 'Actualizar')
   cambiarEstadoAdmin(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSuscripcionDto,
   ) {
     const u = req.user as JwtUser;
@@ -55,7 +56,7 @@ export class SuscripcionesController {
 
   @Delete('admin/:id')
   @RequiresPermiso('Suscripciones', 'Eliminar')
-  eliminar(@Req() req: Request, @Param('id') id: string) {
+  eliminar(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const u = req.user as JwtUser;
     return this.suscripcionesService.eliminar(u.tenantId ?? '', id);
   }
@@ -77,7 +78,7 @@ export class SuscripcionesController {
   @Patch(':id')
   cambiarEstado(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSuscripcionDto,
   ) {
     const u = req.user as JwtUser;
@@ -92,7 +93,7 @@ export class SuscripcionesController {
   @Patch(':id/tarjeta')
   cambiarTarjeta(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CambiarTarjetaDto,
   ) {
     const u = req.user as JwtUser;

@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -63,7 +64,7 @@ export class PasarelaAdminController {
   @RequiresPermiso('Pasarelas', 'Actualizar')
   actualizarConfig(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTenantPasarelaDto,
   ) {
     return this.tenantPasarelaService.actualizar(this.tenantId(req), id, dto);
@@ -71,7 +72,7 @@ export class PasarelaAdminController {
 
   @Delete('config/:id')
   @RequiresPermiso('Pasarelas', 'Eliminar')
-  eliminarConfig(@Req() req: Request, @Param('id') id: string) {
+  eliminarConfig(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     return this.tenantPasarelaService.eliminar(this.tenantId(req), id);
   }
 
@@ -89,7 +90,7 @@ export class PasarelaAdminController {
 
   @Delete('api-keys/:id')
   @RequiresPermiso('Pasarelas', 'Eliminar')
-  revocarApiKey(@Req() req: Request, @Param('id') id: string) {
+  revocarApiKey(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     return this.apiKeysService.revocar(this.tenantId(req), id);
   }
 
@@ -101,7 +102,7 @@ export class PasarelaAdminController {
 
   @Get('ordenes/:id')
   @RequiresPermiso('Pasarelas', 'Leer')
-  obtenerOrden(@Req() req: Request, @Param('id') id: string) {
+  obtenerOrden(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     return this.cobrosService.obtenerOrden(this.tenantId(req), id);
   }
 
@@ -109,7 +110,7 @@ export class PasarelaAdminController {
   @RequiresPermiso('Pasarelas', 'Reembolsar')
   reembolsar(
     @Req() req: Request,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateReembolsoDto,
   ) {
     return this.cobrosService.reembolsar(
