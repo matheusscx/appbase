@@ -27,6 +27,34 @@ describe('CreateReembolsoDto', () => {
     expect(errores).toHaveLength(0);
   });
 
+  it('acepta reponerStock por línea, y lo rechaza si no es booleano', async () => {
+    // El campo tiene que estar declarado ACÁ o el pipe global lo descarta
+    // (`whitelist: true`) y la política del webhook queda inalcanzable.
+    const ok = await validar({
+      monto: '1100',
+      devoluciones: [
+        {
+          itemId: '550e8400-e29b-41d4-a716-446655440116',
+          cantidad: '2',
+          reponerStock: false,
+        },
+      ],
+    });
+    expect(ok).toHaveLength(0);
+
+    const mal = await validar({
+      monto: '1100',
+      devoluciones: [
+        {
+          itemId: '550e8400-e29b-41d4-a716-446655440116',
+          cantidad: '2',
+          reponerStock: 'no',
+        },
+      ],
+    });
+    expect(mal.length).toBeGreaterThan(0);
+  });
+
   it('rechaza devoluciones con itemId no UUID', async () => {
     const errores = await validar({
       monto: '1100',

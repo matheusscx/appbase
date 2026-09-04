@@ -207,6 +207,13 @@ describe('VentasService', () => {
   };
   let catalogService: jest.Mocked<CatalogService>;
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
+  /**
+   * Unidades ya comprometidas por devoluciones previas, por ítem. Vive en el
+   * scope de afuera porque la consulta va por `db.query` —la misma para la
+   * transacción de la nota y para la lectura del detalle— y el mock de `db` se
+   * arma acá.
+   */
+  let unidadesComprometidasRows: { item_id: string; devuelto: string }[] = [];
 
   beforeEach(async () => {
     const manager = buildManagerMock();
@@ -236,13 +243,18 @@ describe('VentasService', () => {
       // Despacha por SQL: la resolución del tipo "nota de crédito" del país es
       // la única consulta que nombra `es_nota_credito`; todo lo demás que pasa
       // por `db.query` en estos tests son las filas de moneda.
-      query: jest
-        .fn()
-        .mockImplementation((sql: string) =>
-          typeof sql === 'string' && sql.includes('es_nota_credito')
-            ? Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }])
-            : Promise.resolve(MONEDA_ROWS),
-        ),
+      query: jest.fn().mockImplementation((sql: string) => {
+        if (typeof sql !== 'string') return Promise.resolve(MONEDA_ROWS);
+        if (sql.includes('es_nota_credito'))
+          return Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }]);
+        // El contador de unidades ya comprometidas por devoluciones previas.
+        // Va por `db.query` y no por el manager: adentro de la transacción
+        // `db.query` resuelve el manager activo (ADR-020), y afuera —en
+        // `findOne`— el pool.
+        if (sql.includes('WITH docs AS'))
+          return Promise.resolve(unidadesComprometidasRows);
+        return Promise.resolve(MONEDA_ROWS);
+      }),
     };
     const dbMock = {
       transaccion: dataSourceMock.transaction,
@@ -1717,6 +1729,8 @@ describe('VentasService', () => {
         tasa_cambio: '1.000000',
         moneda_id_origen: MONEDA_OFICIAL_ID,
         descripcion: 'Notebook serializado',
+        clasificacion_tributaria: 'afecto',
+        unidad_codigo_base: 'unidad',
         total_linea: '500.0000',
         modo_inventario: 'serie',
       },
@@ -1728,6 +1742,8 @@ describe('VentasService', () => {
         tasa_cambio: '1.000000',
         moneda_id_origen: MONEDA_OFICIAL_ID,
         descripcion: 'Instalación',
+        clasificacion_tributaria: 'afecto',
+        unidad_codigo_base: 'unidad',
         total_linea: '50.0000',
         modo_inventario: null,
       },
@@ -1737,7 +1753,6 @@ describe('VentasService', () => {
     // Resultados configurables por test para las queries dentro de la tx
     let ventaRows: unknown[];
     let ncPreviasTotal: string;
-    let devueltosRows: { item_id: string; devuelto: string }[];
     /**
      * La composición del documento original, por porción fiscal: de acá salen
      * la tasa efectiva de cada porción y el remanente que reparte el ajuste.
@@ -1760,7 +1775,7 @@ describe('VentasService', () => {
       ncManager = buildManagerMock();
       ventaRows = [ventaOriginalRow];
       ncPreviasTotal = '0';
-      devueltosRows = [];
+      unidadesComprometidasRows = [];
       composicionRows = [
         {
           es_nc: false,
@@ -1791,8 +1806,6 @@ describe('VentasService', () => {
           return Promise.resolve(detallesRows);
         if (sql.includes('costo_unitario'))
           return Promise.resolve(costosCongelados);
-        if (sql.includes('FROM movimientos_inventario'))
-          return Promise.resolve(devueltosRows);
         if (sql.includes('es_efectivo'))
           return Promise.resolve([
             { cobrado: efectivoCobrado, devuelto: efectivoDevuelto },
@@ -2077,7 +2090,7 @@ describe('VentasService', () => {
     });
 
     it('rechaza cantidad devuelta mayor a vendida menos ya devuelta', async () => {
-      devueltosRows = [{ item_id: ITEM_ID, devuelto: '2' }];
+      unidadesComprometidasRows = [{ item_id: ITEM_ID, devuelto: '2' }];
       await expect(
         service.crearNotaCredito({
           ...baseParams,
@@ -2097,24 +2110,64 @@ describe('VentasService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('rechaza ítems modo serie/lote antes de tocar inventario', async () => {
+    // Estos dos rechazos disparaban por NOMBRAR el ítem, y desde el 2026-09-04
+    // disparan solo cuando se pide que vuelva al stock. Los cuatro casos de
+    // abajo son las dos mitades del contrato nuevo.
+    it('pedir que un ítem modo serie/lote reponga se rechaza antes de tocar inventario', async () => {
       await expect(
         service.crearNotaCredito({
           ...baseParams,
-          devoluciones: [{ itemId: ITEM_SERIE_ID, cantidad: '1' }],
+          validarVentaElegible: true,
+          devoluciones: [
+            { itemId: ITEM_SERIE_ID, cantidad: '1', reponerStock: true },
+          ],
         }),
       ).rejects.toThrow(BadRequestException);
 
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
-    it('rechaza ítems sin stock (servicios) con mensaje propio', async () => {
+    it('pedir que un servicio reponga se rechaza con mensaje propio', async () => {
       await expect(
         service.crearNotaCredito({
           ...baseParams,
-          devoluciones: [{ itemId: SERVICIO_ID, cantidad: '1' }],
+          validarVentaElegible: true,
+          devoluciones: [
+            { itemId: SERVICIO_ID, cantidad: '1', reponerStock: true },
+          ],
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(/no maneja stock/);
+    });
+
+    it('sin pedir reposición, un servicio se acredita por línea y no mueve inventario', async () => {
+      await service.crearNotaCredito({
+        ...baseParams,
+        validarVentaElegible: true,
+        devoluciones: [{ itemId: SERVICIO_ID, cantidad: '1' }],
+      });
+
+      // La línea existe en el documento —con el nombre del servicio, no
+      // "Ajuste"— y el inventario no se toca.
+      const detalles = ncManager.save.mock.calls
+        .flatMap((c: unknown[]) => (Array.isArray(c[1]) ? c[1] : []))
+        .map((d) => d as { descripcion?: string });
+      expect(detalles.some((d) => d.descripcion === 'Instalación')).toBe(true);
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    it('por el webhook, pedir reposición imposible NO tira: se acredita y no repone', async () => {
+      // Un throw acá pierde el evento: el hook corre después del commit del
+      // reembolso y `cobros.service.ts` se lo traga como warning.
+      await expect(
+        service.crearNotaCredito({
+          ...baseParams,
+          devoluciones: [
+            { itemId: SERVICIO_ID, cantidad: '1', reponerStock: true },
+          ],
+        }),
+      ).resolves.toBeDefined();
+
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
     it('lanza NotFoundException si la venta no existe o es de otro tenant', async () => {
@@ -2146,6 +2199,11 @@ describe('VentasService', () => {
         // esta rama devolvería las filas de abajo y el id saldría cualquiera.
         if (sql.includes('es_nota_credito'))
           return Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }]);
+        // Antes que el genérico: el contador de unidades comprometidas TAMBIÉN
+        // nombra `FROM ventas`, y devolverle la cabecera lo dejaría sin
+        // `devuelto`.
+        if (sql.includes('WITH docs AS'))
+          return Promise.resolve(unidadesComprometidasRows);
         if (sql.includes('FROM ventas'))
           return Promise.resolve([
             {
@@ -2183,8 +2241,15 @@ describe('VentasService', () => {
 
     it('findOne expone referencia, tipo documento, modo/devuelto por detalle, reembolsos y NCs hijas', async () => {
       dataSourceMock.query.mockImplementation((sql: string) => {
-        if (sql.includes('FROM movimientos_inventario'))
-          return Promise.resolve([{ item_id: ITEM_ID, devuelto: '1' }]);
+        // Por el nombre de la consulta y no por `FROM movimientos_inventario`:
+        // la CTE `movs` del contador nombra esa tabla, así que el genérico
+        // acertaba por colisión de substring.
+        //
+        // Y el valor lleva los cuatro decimales que devuelve Postgres
+        // (`SUM(...)::text` → `'1.0000'`): con `'1'` el fixture no discrimina y
+        // la aserción de abajo pasaría diga lo que diga la API.
+        if (sql.includes('WITH docs AS'))
+          return Promise.resolve([{ item_id: ITEM_ID, devuelto: '1.0000' }]);
         if (sql.includes('pasarela_transacciones'))
           return Promise.resolve([
             {
@@ -2474,6 +2539,42 @@ describe('VentasService', () => {
           ventaId: VENTA_ORIG_ID,
         }),
       );
+    });
+
+    // El camino sin documento tiene su propia política: TODA línea tiene que
+    // reponer. Sin estos dos casos, abrir la validación de la nota de crédito
+    // abría también este camino, que no acredita nada: la línea desaparecía
+    // —repuesta contra lo pedido, o reventando adentro de `registrarMovimiento`
+    // después de haber escrito las anteriores del loop—.
+    it('registrarDevolucionesPorReembolso rechaza una línea con reponerStock false', async () => {
+      await expect(
+        service.registrarDevolucionesPorReembolso({
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          ventaOriginalId: VENTA_ORIG_ID,
+          devoluciones: [
+            { itemId: ITEM_ID, cantidad: '1', reponerStock: false },
+          ],
+        }),
+      ).rejects.toThrow(/solo registra la vuelta a inventario/);
+
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    it('registrarDevolucionesPorReembolso rechaza un servicio con su mensaje de negocio', async () => {
+      // Sin flag: `quiereReponer` es `false` y el corte de "pedir lo imposible"
+      // no dispara. El que corta es el de este camino, y con el mensaje viejo:
+      // el genérico de `registrarMovimiento` llegaría tarde y sin dominio.
+      await expect(
+        service.registrarDevolucionesPorReembolso({
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          ventaOriginalId: VENTA_ORIG_ID,
+          devoluciones: [{ itemId: SERVICIO_ID, cantidad: '1' }],
+        }),
+      ).rejects.toThrow(/no maneja stock/);
+
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
     describe('cancelar()', () => {

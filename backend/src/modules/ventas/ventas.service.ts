@@ -86,10 +86,17 @@ function esDeadlock(error: unknown): boolean {
   return e?.code === '40P01' || e?.driverError?.code === '40P01';
 }
 
-/** Ítem/cantidad a devolver a stock en un reembolso (solo modo 'cantidad'). */
+/**
+ * Ítem/cantidad que se acredita en una nota de crédito. Ya NO es "ítem a
+ * devolver a stock": desde el 2026-09-04 cualquier ítem vendido se acredita por
+ * línea y la reposición es una propiedad de la línea, no un requisito para
+ * nombrarla.
+ */
 export interface DevolucionReembolso {
   itemId: string;
   cantidad: string;
+  /** Ausente = repone si el ítem puede. Ver `DevolucionNotaCreditoDto`. */
+  reponerStock?: boolean;
 }
 
 export interface VentaListItem {
@@ -1425,6 +1432,9 @@ export class VentasService {
         manager,
         params.ventaOriginalId,
         params.devoluciones ?? [],
+        // `validarVentaElegible` es hoy el único discriminante entre el camino
+        // manual y el del webhook, y son exactamente las dos políticas.
+        params.validarVentaElegible === true ? 'rechazar-imposible' : 'ignorar',
       );
 
       // El cuantizador de la nota. **Ignora `nivelRedondeo` a propósito**: sus
@@ -1798,10 +1808,16 @@ export class VentasService {
       // Una sola lectura de costos para todas: los costos congelados son de la
       // venta ORIGINAL, no de la NC que se está creando. La NC por monto libre
       // —sin devoluciones, el caso más común— no paga la query.
-      const costosOriginales = devoluciones.length
+      //
+      // Y **solo las que reponen**: desde el 2026-09-04 una línea puede
+      // acreditarse sin volver al stock (producto que vuelve roto, receta que
+      // no se puede rearmar), y `registrarMovimiento` rechazaría con 400 todo
+      // lo que no sea producto.
+      const aReponer = devoluciones.filter((l) => l.reponeStock);
+      const costosOriginales = aReponer.length
         ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
         : new Map<string, string | null>();
-      for (const linea of devoluciones) {
+      for (const linea of aReponer) {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
           itemId: linea.itemId,
@@ -1966,10 +1982,16 @@ export class VentasService {
         params.tenantId,
         params.ventaOriginalId,
       );
+      // `'exigir'` aunque venga del webhook: este método existe SOLO para mover
+      // stock —no emite documento— así que una línea que no repone no tiene
+      // nada que hacer acá, y dejarla pasar en silencio la haría desaparecer
+      // sin que nada la acredite. Con esta política, TODAS las de abajo
+      // reponen.
       const lineas = await this.validarDevolucionesReembolso(
         manager,
         params.ventaOriginalId,
         params.devoluciones,
+        'exigir',
       );
       const costosOriginales = await this.costosDeSalidaPorItem(
         manager,
@@ -2065,16 +2087,101 @@ export class VentasService {
   }
 
   /**
+   * Cuántas unidades de cada ítem de una venta ya están comprometidas por
+   * devoluciones previas — el tope de `cantidad` de la devolución siguiente.
+   *
+   * Hasta el 2026-09-04 alcanzaba con contar `movimientos_inventario`: toda
+   * línea aceptada movía stock, así que el movimiento ERA el rastro de la
+   * unidad. Desde que una línea se puede acreditar **sin** reponer, ese
+   * contador se quedó ciego justo para las líneas nuevas: dos notas seguidas
+   * podían acreditar la misma receta y el documento afirmaba que volvieron 2
+   * unidades de una venta de 1. El tope por porción fiscal no lo tapa —mira
+   * PLATA por porción, no cantidad por ítem— así que basta con que otra línea
+   * afecta de la misma venta done capacidad.
+   *
+   * Por eso cuenta las dos cosas y se queda con la mayor **por documento**:
+   * - las líneas de las notas de crédito hijas (lo acreditado), y
+   * - los movimientos de devolución de esta venta o de sus notas (lo repuesto).
+   *
+   * `GREATEST` y no la suma porque la línea que repone deja las DOS huellas y
+   * sumarlas contaría doble. Los dos casos donde una sola huella existe son
+   * reales: `registrarDevolucionesPorReembolso` mueve stock sin emitir
+   * documento, y el webhook puede emitir la nota con las devoluciones fuera del
+   * documento.
+   *
+   * Filtra por `venta_referencia_id` sin mirar el tipo de documento porque esa
+   * columna la escribe un solo lugar —la creación de la nota de crédito—, mismo
+   * criterio que la consulta de composición.
+   */
+  private async unidadesComprometidasPorItem(
+    ventaOriginalId: string,
+  ): Promise<Map<string, Decimal>> {
+    // `this.db.query` resuelve el manager de la transacción activa (ADR-020):
+    // los dos llamadores —uno adentro de la transacción de la nota, otro en la
+    // lectura del detalle— comparten esta consulta sin enhebrar el manager.
+    const filas: { item_id: string; devuelto: string }[] = await this.db.query(
+      `WITH docs AS (
+         SELECT venta_id FROM ventas
+          WHERE venta_referencia_id = $1 AND eliminado_el IS NULL
+       ),
+       lineas AS (
+         SELECT d.venta_id, d.item_id, SUM(d.cantidad) AS cant
+           FROM venta_detalles d
+           JOIN docs ON docs.venta_id = d.venta_id
+          WHERE d.eliminado_el IS NULL
+          GROUP BY 1, 2
+       ),
+       movs AS (
+         SELECT m.venta_id, m.item_id, SUM(m.cantidad) AS cant
+           FROM movimientos_inventario m
+          WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
+            AND (m.venta_id = $1
+                 OR m.venta_id IN (SELECT venta_id FROM docs))
+          GROUP BY 1, 2
+       )
+       SELECT COALESCE(l.item_id, mv.item_id) AS item_id,
+              SUM(GREATEST(COALESCE(l.cant, 0), COALESCE(mv.cant, 0)))::text AS devuelto
+         FROM lineas l
+         FULL OUTER JOIN movs mv
+           ON mv.venta_id = l.venta_id AND mv.item_id = l.item_id
+        GROUP BY 1`,
+      [ventaOriginalId],
+    );
+    return new Map(filas.map((f) => [f.item_id, new Decimal(f.devuelto)]));
+  }
+
+  /**
    * Valida las devoluciones contra el detalle de la venta original y devuelve
-   * las líneas listas para persistir/mover stock. Solo ítems con
-   * `modo_inventario = 'cantidad'`: serie/lote requieren elegir unidades/lote
-   * (fase posterior) y los servicios no tienen stock. Se valida TODO antes de
-   * tocar inventario para fallar con un mensaje de negocio claro.
+   * las líneas listas para acreditar y, las que corresponda, para mover stock.
+   * Se valida TODO antes de tocar inventario para fallar con un mensaje de
+   * negocio claro.
+   *
+   * Hasta el 2026-09-04 exigía `modo_inventario = 'cantidad'` para TODAS: el
+   * ítem que no podía volver al stock tampoco podía nombrarse en la nota, y por
+   * eso recetas, combos y servicios caían al balde de ajuste —la nota decía
+   * "Ajuste" en vez del nombre del plato—. La razón de ese corte era el
+   * INVENTARIO, así que hoy dispara solo cuando se pide reponer.
    */
   private async validarDevolucionesReembolso(
     manager: EntityManager,
     ventaOriginalId: string,
     devoluciones: DevolucionReembolso[],
+    /**
+     * Qué hacer con una línea que NO va a volver al stock. Son tres caminos con
+     * tres políticas, y por eso no alcanza un booleano:
+     *
+     * - `'rechazar-imposible'` — nota de crédito manual. Solo rechaza si se
+     *   PIDIÓ reponer algo que no puede; lo que no repone se acredita igual.
+     * - `'ignorar'` — nota de crédito por el webhook de reembolso. Nunca
+     *   rechaza: el hook corre después del commit y un throw pierde el evento
+     *   (`cobros.service.ts` se lo traga como warning), así que se acredita y
+     *   no se repone.
+     * - `'exigir'` — devolución de stock SIN documento. Ese camino existe solo
+     *   para mover inventario: una línea que no repone no tiene nada que hacer
+     *   ahí y se rechaza, venga de un `reponerStock: false` explícito o de un
+     *   ítem que no puede.
+     */
+    politicaReposicion: 'rechazar-imposible' | 'ignorar' | 'exigir',
   ): Promise<
     {
       itemId: string;
@@ -2100,6 +2207,13 @@ export class VentasService {
        * mueve stock, no emite documento.
        */
       valorUnitarioBruto: string;
+      /**
+       * ¿Esta línea vuelve al inventario? Ya resuelto acá —lo pedido cruzado
+       * con lo que el ítem puede— para que el loop de inventario no vuelva a
+       * decidirlo. Una línea con `false` se acredita igual: es plata en el
+       * documento, no una unidad en el stock.
+       */
+      reponeStock: boolean;
     }[]
   > {
     if (!devoluciones.length) return [];
@@ -2139,22 +2253,8 @@ export class VentasService {
        WHERE d.venta_id = $1 AND d.eliminado_el IS NULL`,
       [ventaOriginalId],
     );
-    // Ya devuelto por ítem: movimientos 'devolucion' ligados a la venta
-    // original (devoluciones sin NC) o a sus NCs hijas (devoluciones con NC).
-    const devueltos: { item_id: string; devuelto: string }[] =
-      await manager.query(
-        `SELECT m.item_id, COALESCE(SUM(m.cantidad), 0) AS devuelto
-         FROM movimientos_inventario m
-         WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
-           AND (m.venta_id = $1 OR m.venta_id IN (
-             SELECT venta_id FROM ventas
-             WHERE venta_referencia_id = $1 AND eliminado_el IS NULL))
-         GROUP BY m.item_id`,
-        [ventaOriginalId],
-      );
-    const devueltoPorItem = new Map(
-      devueltos.map((d) => [d.item_id, new Decimal(d.devuelto)]),
-    );
+    const devueltoPorItem =
+      await this.unidadesComprometidasPorItem(ventaOriginalId);
 
     return devoluciones.map((dev) => {
       const filas = detalles.filter((d) => d.item_id === dev.itemId);
@@ -2167,14 +2267,34 @@ export class VentasService {
         throw new BadRequestException(
           'La cantidad a devolver debe ser mayor a cero',
         );
-      if (detalle.modo_inventario === null)
-        throw new BadRequestException(
-          `"${detalle.descripcion ?? dev.itemId}" no maneja stock (servicio): no admite devolución a inventario`,
+      // Este corte disparaba por el solo hecho de nombrar el ítem. Su razón es
+      // el INVENTARIO, así que hoy dispara según lo que el camino pida del
+      // stock; lo que no puede reponer se acredita igual en la nota.
+      const puedeReponer = detalle.modo_inventario === 'cantidad';
+      const quiereReponer = dev.reponerStock ?? puedeReponer;
+      const reponeStock = quiereReponer && puedeReponer;
+      const noPuedeReponer = () =>
+        new BadRequestException(
+          detalle.modo_inventario === null
+            ? `"${detalle.descripcion ?? dev.itemId}" no maneja stock (servicio): no admite devolución a inventario`
+            : `"${detalle.descripcion ?? dev.itemId}" usa inventario por ${detalle.modo_inventario}: la devolución debe registrarse manualmente desde Inventario`,
         );
-      if (detalle.modo_inventario !== 'cantidad')
-        throw new BadRequestException(
-          `"${detalle.descripcion ?? dev.itemId}" usa inventario por ${detalle.modo_inventario}: la devolución debe registrarse manualmente desde Inventario`,
-        );
+      if (!reponeStock && politicaReposicion !== 'ignorar') {
+        if (politicaReposicion === 'exigir') {
+          // El `false` explícito manda sobre el motivo del ítem: si el operador
+          // lo escribió, lo que necesita saber es que ESTE camino no acredita
+          // nada, no que el ítem no maneja stock.
+          if (dev.reponerStock === false)
+            throw new BadRequestException(
+              `"${detalle.descripcion ?? dev.itemId}" se pidió sin volver al stock, y este camino ` +
+                `solo registra la vuelta a inventario. Para acreditar sin reponer, emití la nota de crédito.`,
+            );
+          throw noPuedeReponer();
+        }
+        // `'rechazar-imposible'`: lo que no puede reponer se acredita igual, y
+        // solo se corta si alguien PIDIÓ que repusiera.
+        if (quiereReponer) throw noPuedeReponer();
+      }
       const vendida = filas.reduce(
         (acc, f) => acc.plus(f.cantidad),
         new Decimal(0),
@@ -2206,6 +2326,7 @@ export class VentasService {
               .reduce((a, f) => a.plus(f.total_linea), new Decimal(0))
               .dividedBy(vendida)
               .toString(),
+        reponeStock,
       };
     });
   }
@@ -2670,22 +2791,11 @@ export class VentasService {
        ORDER BY d.creado_el ASC, d.detalle_id ASC`,
       [ventaId],
     );
-    // Ya devuelto por ítem (movimientos 'devolucion' de esta venta o de sus NCs
-    // hijas): el modal de reembolso lo usa para capear las cantidades.
-    const devueltos: { item_id: string; devuelto: string }[] =
-      await this.db.query(
-        `SELECT m.item_id, COALESCE(SUM(m.cantidad), 0) AS devuelto
-         FROM movimientos_inventario m
-         WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
-           AND (m.venta_id = $1 OR m.venta_id IN (
-             SELECT venta_id FROM ventas
-             WHERE venta_referencia_id = $1 AND eliminado_el IS NULL))
-         GROUP BY m.item_id`,
-        [ventaId],
-      );
-    const devueltoPorItem = new Map(
-      devueltos.map((d) => [d.item_id, d.devuelto]),
-    );
+    // Ya comprometido por ítem: el mismo contador que aplica el tope al emitir
+    // la nota. Compartirlo no es DRY por gusto — que la pantalla ofrezca una
+    // unidad que el backend después rechaza es el modo de falla que este
+    // número existe para evitar.
+    const devueltoPorItem = await this.unidadesComprometidasPorItem(ventaId);
     // Reembolsos de la(s) orden(es) de pasarela vinculadas a esta venta.
     const reembolsos: Row[] = await this.db.query(
       `SELECT t.transaccion_id, t.monto, t.estado, t.fecha_transaccion,
@@ -2909,7 +3019,9 @@ export class VentasService {
         // null = servicio (sin fila en item_producto); el modal de reembolso
         // solo habilita devolución para modo 'cantidad'.
         modoInventario: d['modo_inventario'] ?? null,
-        cantidadDevuelta: devueltoPorItem.get(d['item_id'] as string) ?? '0',
+        cantidadDevuelta: (
+          devueltoPorItem.get(d['item_id'] as string) ?? new Decimal(0)
+        ).toString(),
       })),
       reembolsos: reembolsos.map((r) => ({
         id: r['transaccion_id'],

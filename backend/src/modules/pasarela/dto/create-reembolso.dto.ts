@@ -14,6 +14,16 @@ export class DevolucionLineaDto {
 
   @IsNumberString()
   cantidad: string;
+
+  /**
+   * ¿Vuelve al stock? Ausente = repone si el ítem puede. Va también acá —y no
+   * solo en el DTO de la nota de crédito manual— porque el pipe global usa
+   * `whitelist: true`: sin declararlo, el campo se descarta antes de llegar al
+   * service y la política del webhook queda inalcanzable.
+   */
+  @IsOptional()
+  @IsBoolean()
+  reponerStock?: boolean;
 }
 
 export class CreateReembolsoDto {
@@ -32,7 +42,15 @@ export class CreateReembolsoDto {
   @IsBoolean()
   generarNotaCredito?: boolean;
 
-  /** Ítems a devolver a stock (solo modo 'cantidad'); independiente de la NC. */
+  /**
+   * Ítems que se acreditan en la nota, con su reposición como propiedad de cada
+   * línea; independiente de la NC. Hasta el 2026-09-04 solo admitía
+   * `modo_inventario = 'cantidad'`.
+   *
+   * ⚠️ Sin `generarNotaCredito`, estas líneas van por el camino que SOLO mueve
+   * stock: ahí una línea que no repone se rechaza, porque no habría documento
+   * que la acredite.
+   */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

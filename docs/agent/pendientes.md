@@ -159,6 +159,25 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **`GET /ventas/:id` escanea `venta_detalles` entera, y ahora una vez más**
+  (backend; **medido el 2026-09-04** por la revisión independiente de la tarea 2 del frente de
+  la devolución con crédito parcial) — el contador de unidades ya comprometidas
+  (`VentasService.unidadesComprometidasPorItem`) entró al camino de lectura caliente, y su
+  `EXPLAIN` da **seq scan en las tres tablas**: `venta_detalles`, `ventas` y
+  `movimientos_inventario`.
+
+  **No es artefacto de tabla chica.** No existe índice sobre `venta_detalles.venta_id`, ni sobre
+  `ventas.venta_referencia_id`, ni sobre `movimientos_inventario.venta_id` — el único índice de
+  las tres es la PK de `ventas`. O sea que la falta es **preexistente** y este frente no la
+  creó; lo que agregó es un scan más de la tabla más ancha por cada `GET /ventas/:id` y por cada
+  nota de crédito emitida.
+
+  **No es N+1** (una consulta por request, no por fila), así que no cae bajo la regla de sacarlo
+  en el momento. Lo que hay que medir antes de decidir: con cuántas filas de `venta_detalles`
+  empieza a doler, y si los tres índices alcanzan o hace falta además un índice parcial por
+  `motivo = 'devolucion'`. **Medir con volumen sembrado, no con la base de desarrollo**: hoy
+  tiene 157 ventas y cualquier plan sale seq scan igual.
+
 - [ ] **El modal de nota de crédito no anticipa el 400 de "la mercadería vale más que la nota"**
   (frontend; **medido el 2026-09-04** por la revisión independiente del cierre del frente de la
   NC compuesta — [`resueltos.md`](resueltos.md)) — el backend rechaza con 400 desde `7a1e934d`,

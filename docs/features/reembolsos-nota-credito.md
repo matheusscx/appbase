@@ -16,7 +16,10 @@ el admin puede opcionalmente:
 - **Generar una nota de crédito interna** (documento sin emisión SII) por el monto
   reembolsado, que referencia la venta original.
 - **Devolver ítems a stock** (independiente de la NC): selecciona cantidades por
-  línea; solo ítems con `modo_inventario = 'cantidad'`.
+  línea. Sin nota de crédito de por medio ese camino solo mueve inventario, así
+  que **exige que toda línea reponga** (`modo_inventario = 'cantidad'`); con nota
+  de crédito, en cambio, cualquier ítem vendido se acredita y la reposición es
+  una elección por línea (2026-09-04).
 
 Además, el módulo de Ventas ahora **muestra los reembolsos siempre** (haya o no NC):
 sección "Reembolsos" y "Documentos relacionados" en el detalle de la venta, y badges
@@ -32,7 +35,9 @@ lista para el día en que se integre facturación electrónica.
 ### Scope
 
 - Incluido: NC interna elegible en el reembolso; devolución de stock elegible
-  (modo `cantidad`); visibilidad de reembolsos en detalle/listado de ventas;
+  (modo `cantidad`); **acreditación por línea de cualquier ítem vendido, reponga
+  o no el stock (2026-09-04)**; visibilidad de reembolsos en detalle/listado de
+  ventas;
   badges derivados (no son estados nuevos en BD); **NC manual desde el detalle
   de venta con egreso de caja elegible (2026-07-11)**.
 - NO incluido (futuro): emisión tributaria real (SII/folios); devolución para
@@ -187,8 +192,12 @@ Response (200): orden pública + extras
 - `VentasService.crearNotaCredito` / `registrarDevolucionesPorReembolso`
   (`ventas.service.ts`): transacción propia con `FOR UPDATE` sobre la venta
   original (serializa NCs concurrentes). Validaciones: Σ(NCs) ≤ `total_final`;
-  cantidad devuelta ≤ vendida − ya devuelta; solo modo `cantidad` (serie/lote y
-  servicios rechazados con mensaje de negocio antes de tocar inventario).
+  cantidad devuelta ≤ vendida − ya devuelta —contando lo acreditado por las notas
+  hijas y no solo los movimientos de stock, porque desde el 2026-09-04 una línea
+  se puede acreditar sin reponer—; y la política de reposición del camino
+  (`validarDevolucionesReembolso`): la nota manual rechaza solo si se PIDE
+  reponer lo que no puede, la nota por webhook nunca rechaza (un throw pierde el
+  evento) y la devolución sin documento exige que toda línea reponga.
 - **Borde de módulos**: `ReembolsoCallbackRegistry` en pasarela (mismo patrón §13
   que `PagoCallbackRegistry`); `VentasReembolsoHandler` (módulo ventas) se
   registra en `onModuleInit`. La pasarela nunca importa ventas.

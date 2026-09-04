@@ -28,6 +28,17 @@ const CANTIDAD_AFECTA = '7';
 const PRECIO_EXENTO = '3000';
 const TOTAL_VENTA = '11330';
 
+/**
+ * La receta: 4.000 neto + 19% = 4.760. Afecta, como el producto.
+ *
+ * Su venta lleva ADEMÁS las 7 unidades del producto afecto (8.330), y no por
+ * completar: sin esa plata sobrante, el tope global —`total_final` menos las
+ * notas previas— tapa el caso del tope por CANTIDAD y no se puede probar.
+ */
+const PRECIO_RECETA = '4000';
+const TOTAL_RECETA = '4760';
+const TOTAL_VENTA_RECETA = '13090';
+
 interface TokenResponse {
   access_token: string;
 }
@@ -42,6 +53,7 @@ describe('Nota de crédito compuesta (e2e)', () => {
   let token: string;
   let itemAfectoId: string;
   let itemExentoId: string;
+  let itemRecetaId: string;
 
   /** Una venta mixta nueva, pagada. Cada caso arma la suya: compartirla haría
    *  que el remanente de un test dependiera del que corrió antes. */
@@ -62,6 +74,34 @@ describe('Nota de crédito compuesta (e2e)', () => {
     expect(venta.status).toBe(201);
     expect((venta.body as { totalFinal: string }).totalFinal).toBe(
       `${TOTAL_VENTA}.0000`,
+    );
+    return (venta.body as { id: string }).id;
+  };
+
+  /**
+   * Una venta con una receta y las 7 unidades del producto afecto, pagada. La
+   * receta es el caso que más importa de este frente: no tiene fila en
+   * `item_producto`, así que su `modo_inventario` es `null` y hasta el
+   * 2026-09-04 no se podía acreditar por línea —la nota decía "Ajuste" en vez
+   * del nombre del plato—.
+   */
+  const crearVentaConReceta = async (): Promise<string> => {
+    const venta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        canal: 'online',
+        lineas: [
+          { itemId: itemRecetaId, cantidad: '1' },
+          { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
+        ],
+        pagos: [
+          { metodoPagoId: EFECTIVO, monto: `${TOTAL_VENTA_RECETA}.0000` },
+        ],
+      });
+    expect(venta.status).toBe(201);
+    expect((venta.body as { totalFinal: string }).totalFinal).toBe(
+      `${TOTAL_VENTA_RECETA}.0000`,
     );
     return (venta.body as { id: string }).id;
   };
@@ -156,7 +196,11 @@ describe('Nota de crédito compuesta (e2e)', () => {
         clasificacionTributaria: 'afecto',
         modoInventario: 'cantidad',
         unidadMedida: 'unidad',
-        stock: '100',
+        // Holgado a propósito: cada venta de este spec se lleva 7 unidades y ya
+        // van 13 ventas. Con el stock justo, el próximo caso que se agregue
+        // rompe con "stock insuficiente" y se lee como una regresión de la nota
+        // de crédito en vez de como un presupuesto de fixture agotado.
+        stock: '500',
       });
     expect(resAfecto.status).toBe(201);
     itemAfectoId = (resAfecto.body as { id: string }).id;
@@ -173,6 +217,43 @@ describe('Nota de crédito compuesta (e2e)', () => {
       });
     expect(resExento.status).toBe(201);
     itemExentoId = (resExento.body as { id: string }).id;
+
+    // Una receta con su ingrediente, copiando el patrón de `combos.e2e-spec.ts`:
+    // el ingrediente lleva el stock, la receta no tiene fila en `item_producto`.
+    const resIngrediente = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `NC ingrediente E2E ${sufijo}`,
+        precioBase: '0',
+        monedaId: CLP,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '100',
+        costo: '500',
+      });
+    expect(resIngrediente.status).toBe(201);
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `NC receta E2E ${sufijo}`,
+        precioBase: PRECIO_RECETA,
+        monedaId: CLP,
+        tipo: 'receta',
+        clasificacionTributaria: 'afecto',
+        ingredientes: [
+          {
+            ingredienteItemId: (resIngrediente.body as { id: string }).id,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    itemRecetaId = (resReceta.body as { id: string }).id;
   });
 
   afterAll(async () => {
@@ -314,6 +395,106 @@ describe('Nota de crédito compuesta (e2e)', () => {
         [TENANT_DEMO],
       );
       expect(sobrantes).toHaveLength(0);
+    });
+  });
+
+  describe('qué se acredita y qué vuelve al stock', () => {
+    it('una receta se acredita por línea, sin mover inventario', async () => {
+      const ventaId = await crearVentaConReceta();
+      const { id } = await emitirNC(ventaId, {
+        monto: TOTAL_RECETA,
+        devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
+      });
+
+      const nc = await leerNC(id);
+      const linea = nc.detalles.find((l) => l.itemId === itemRecetaId);
+      // Antes de esta tarea la receta caía al balde de ajuste: la nota decía
+      // "Ajuste" y no el nombre del plato.
+      expect(linea).toBeDefined();
+      expect(new Decimal(linea!.totalLinea).toString()).toBe(TOTAL_RECETA);
+
+      const movs: unknown[] = await ds.query(
+        `SELECT 1 FROM movimientos_inventario
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [id],
+      );
+      expect(movs).toHaveLength(0);
+    });
+
+    it('lo acreditado sin reponer igual gasta las unidades del ítem', async () => {
+      const ventaId = await crearVentaConReceta();
+      // La receta no mueve stock, así que hasta el 2026-09-04 el contador de
+      // "ya devuelto" —que solo miraba `movimientos_inventario`— se quedaba en
+      // cero y la MISMA unidad se podía acreditar dos veces. El tope por
+      // porción fiscal no lo tapa: mira plata por porción, y las 7 unidades
+      // afectas de esta venta le donan capacidad de sobra.
+      await emitirNC(ventaId, {
+        monto: TOTAL_RECETA,
+        devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
+      });
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: TOTAL_RECETA,
+          devoluciones: [{ itemId: itemRecetaId, cantidad: '1' }],
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'excede lo disponible (0)',
+      );
+    });
+
+    it('un producto con reponerStock false se acredita y NO vuelve al stock', async () => {
+      const ventaId = await crearVentaMixta();
+      const { id } = await emitirNC(ventaId, {
+        monto: '2000',
+        devoluciones: [
+          { itemId: itemAfectoId, cantidad: '1', reponerStock: false },
+        ],
+      });
+
+      const nc = await leerNC(id);
+      expect(nc.detalles.some((l) => l.itemId === itemAfectoId)).toBe(true);
+      const movs: unknown[] = await ds.query(
+        `SELECT 1 FROM movimientos_inventario
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [id],
+      );
+      expect(movs).toHaveLength(0);
+    });
+
+    it('sin el flag, un producto por cantidad sigue reponiendo como antes', async () => {
+      const ventaId = await crearVentaMixta();
+      const { id } = await emitirNC(ventaId, {
+        monto: '2000',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: '1' }],
+      });
+      const movs: { item_id: string }[] = await ds.query(
+        `SELECT item_id FROM movimientos_inventario
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [id],
+      );
+      expect(movs).toHaveLength(1);
+      expect(movs[0].item_id).toBe(itemAfectoId);
+    });
+
+    it('pedir que un servicio reponga se rechaza', async () => {
+      const ventaId = await crearVentaMixta();
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: '3000',
+          devoluciones: [
+            { itemId: itemExentoId, cantidad: '1', reponerStock: true },
+          ],
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'no maneja stock',
+      );
     });
   });
 

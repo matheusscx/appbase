@@ -12,7 +12,16 @@ export interface ReembolsoAprobadoEvento {
   ventaId: string;
   monto: string;
   generarNotaCredito: boolean;
-  devoluciones: { itemId: string; cantidad: string }[];
+  /**
+   * `reponerStock` ausente = repone si el ítem puede. Por este camino pedir que
+   * reponga algo que no puede NO se rechaza: se acredita igual y no se repone
+   * (ver `validarDevolucionesReembolso`), porque un throw acá pierde el evento.
+   */
+  devoluciones: {
+    itemId: string;
+    cantidad: string;
+    reponerStock?: boolean;
+  }[];
   usuarioId: string;
 }
 

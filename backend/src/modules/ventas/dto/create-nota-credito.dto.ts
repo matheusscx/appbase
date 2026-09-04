@@ -17,6 +17,16 @@ export class DevolucionNotaCreditoDto {
 
   @IsNumberString()
   cantidad: string;
+
+  /**
+   * ¿Vuelve al stock? Ausente = repone **si el ítem puede**, que es la conducta
+   * de antes de este campo. Para lo que no puede reponer —servicios, recetas,
+   * combos, y los modos `serie`/`lote`— pedirlo explícitamente se rechaza, para
+   * no confirmar en silencio algo que no pasó.
+   */
+  @IsOptional()
+  @IsBoolean()
+  reponerStock?: boolean;
 }
 
 export class CreateNotaCreditoDto {
@@ -35,7 +45,12 @@ export class CreateNotaCreditoDto {
   @IsBoolean()
   devolverDinero?: boolean;
 
-  /** Ítems a devolver a stock (solo modo 'cantidad'), independiente del dinero. */
+  /**
+   * Ítems que se ACREDITAN en la nota, con su reposición como propiedad de cada
+   * línea. Hasta el 2026-09-04 significaba "ítems a devolver a stock" y por eso
+   * solo admitía modo `cantidad`: hoy cualquier ítem vendido entra, y lo que
+   * `modo_inventario` decide es únicamente si puede volver al inventario.
+   */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
