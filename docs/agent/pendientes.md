@@ -1956,6 +1956,29 @@ entradas de esta sección.
   🔎 **El owner pidió una pasada de investigación de mercado antes de decidir (2026-09-04)**, que
   es el caso exacto que contempla [`investigacion-mercado.md`](investigacion-mercado.md): la
   regla no está en `docs/`, el mercado ya la resolvió y el owner no es experto del dominio.
+  ✅ **Corrida y cerrada el mismo día**:
+  [`investigaciones/2026-09-04-devolucion-con-credito-parcial.md`](investigaciones/2026-09-04-devolucion-con-credito-parcial.md)
+  —11 productos y la normativa chilena leída directamente—. **Lo que trajo, y que decide:**
+
+  - ⛔ **El rechazo no tiene fundamento normativo.** Una NC por $500 con una sola línea "Ajuste",
+    que no mencione las 2 unidades, **es un DTE válidamente formado**: en la Zona Detalle de una
+    nota de crédito solo `NroLinDet`, `NmbItem` y `MontoItem` son obligatorios; **cantidad y
+    precio unitario son condicionales**. Y el SII **no valida el contenido**: cinco causales
+    cerradas de rechazo, ninguna sobre el detalle.
+  - **Tampoco lo tiene de mercado.** De 11 productos, solo Lightspeed X lo prohíbe en el camino
+    ligado — y su escape lo habilita el fabricante, no el comercio.
+  - **Los cuatro POS chilenos tratan "acreditar menos" y "mover stock" como decisiones
+    independientes.** Bsale lo rotula literalmente: *"Ajuste de precios (nota de crédito, no
+    modifica stock)"*.
+  - 📌 **La fusión que causa el conflicto es nuestra**: exigir `Σ líneas = total_final` es
+    decisión de diseño, no requisito fiscal. El SII pide que `MntTotal` cuadre con neto + exento
+    + IVA, y eso se sigue cumpliendo.
+  - ❌ **La línea negativa de "cargo por reposición" se descarta**, por dos razones
+    independientes: ningún POS la usa (solo SAP y PeopleSoft), y **el DTE no tiene un campo con
+    esa semántica** — lo más cercano es un descuento global con glosa libre de 45 caracteres.
+  - 🔄 **La opción del modal cambia de forma.** Ningún POS usa confirmación modal; el patrón real
+    (Square, Toast) es **donde el monto es libre, el motivo es obligatorio**. Y la pieza ya
+    existe: `comentario` viaja como glosa de la línea de ajuste, solo que hoy es opcional.
 
   ## Las opciones, con su costo
 
@@ -1964,10 +1987,11 @@ entradas de esta sección.
      declara lo que acredita, el stock queda en el kardex, nada se acredita de más—. **Costo:**
      el operador puede devolver de un gesto mercadería que vale mucho más de lo que acredita, por
      error, y nada lo frena.
-  2. **Igual que 1, pero con confirmación explícita en el mostrador** —*"estás devolviendo $2.380
-     de mercadería y acreditando $500, ¿confirmás?"*—. Por la pasarela no hay a quién preguntarle,
-     así que ahí pasa directo. Es el criterio que el owner ya eligió para otras acciones de
-     alcance grande: **frena aunque sea reversible**.
+  2. **Igual que 1, pero con MOTIVO OBLIGATORIO** cuando la mercadería excede el monto — que es
+     el patrón que trajo la investigación, y **reemplaza a la confirmación modal** que proponía
+     la versión anterior de esta entrada (ningún POS usa modal). Cuesta poco: `comentario` ya
+     existe y ya viaja como glosa de la línea. Y **mejora el documento**, porque esa glosa es
+     justo el campo que el DTE deja libre para explicar por qué se acredita menos.
   3. **Rechazar en los dos** (la regla original). ⛔ **Por la pasarela es inaplicable**: la plata
      ya salió. Solo se puede si primero se valida **antes** de llamar al proveedor (ver abajo).
      Y aun con eso **sigue sin impedir el estado**, porque la puerta de Inventario queda abierta
