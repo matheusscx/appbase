@@ -1921,6 +1921,42 @@ entradas de esta sección.
   2026-09-04, y por eso el owner reabrió la regla entera: no puede haber dos conductas para el
   mismo hecho.
 
+  ## Lo medido el 2026-09-04 — y cambia la pregunta
+
+  El owner preguntó primero **si el caso es real**. Se midió contra el stack corriendo, no se
+  razonó:
+
+  1. **Siempre fue alcanzable.** Las dos validaciones existen pero **nunca se hablan**: el monto
+     se topea contra `disponible` (total − notas previas) y la cantidad contra lo vendido menos
+     lo ya devuelto. Ninguna mira a la otra. Antes del 2026-09-04 el caso pasaba entero y en
+     silencio.
+  2. **El rechazo no impide el estado.** La salida que ofrece el propio mensaje de error existe
+     y es legal: `PATCH /items/:id/stock` con `{tipo:'entrada', motivo:'devolucion'}` devolvió
+     **200** y las 2 unidades volvieron al stock. O sea que el operador llega al mismo lugar en
+     dos pasos.
+  3. ⚠️ **Y llega peor.** El movimiento de ese segundo paso queda **sin `venta_id`** —suelto en
+     el kardex—, mientras que el gesto combinado lo deja atado al id de la nota. Verificado en
+     `movimientos_inventario`.
+  4. 📌 **El documento sale IDÉNTICO en los dos casos.** Cuando la mercadería no entra, la nota
+     se emite solo con líneas de ajuste por su monto — exactamente el mismo documento que sale
+     al emitir la nota sola. **Aceptar y rechazar producen la misma nota de crédito**; lo único
+     que cambia es si el movimiento de stock queda atado a ella o suelto.
+
+  **Consecuencia para la decisión:** el rechazo no protege el documento ni el estado. Lo único
+  que hace, hoy, es **cortar el hilo de auditoría**.
+
+  ## ¿Es error de tipeo o una operación legítima?
+
+  Las dos, y por eso importa. **Error:** el modal precarga el monto en el disponible y las
+  devoluciones son campos sueltos más abajo, sin ninguna relación visual — bajar el monto y
+  olvidarse de destildar la mercadería es un gesto de un segundo. **Legítima:** devolución con
+  cargo por reposición, o mercadería que vuelve dañada y se acredita solo una parte; es normal
+  en retail, y si es eso, rechazarla es un bug.
+
+  🔎 **El owner pidió una pasada de investigación de mercado antes de decidir (2026-09-04)**, que
+  es el caso exacto que contempla [`investigacion-mercado.md`](investigacion-mercado.md): la
+  regla no está en `docs/`, el mercado ya la resolvió y el owner no es experto del dominio.
+
   ## Las opciones, con su costo
 
   1. **Aceptar en los dos caminos**, con la nota por su monto y la mercadería volviendo al stock
@@ -1934,6 +1970,8 @@ entradas de esta sección.
      alcance grande: **frena aunque sea reversible**.
   3. **Rechazar en los dos** (la regla original). ⛔ **Por la pasarela es inaplicable**: la plata
      ya salió. Solo se puede si primero se valida **antes** de llamar al proveedor (ver abajo).
+     Y aun con eso **sigue sin impedir el estado**, porque la puerta de Inventario queda abierta
+     (medido arriba): habría que cerrar las dos.
   4. **Dejarlo asimétrico**, que es lo de hoy. El owner ya dijo que no.
 
   ## Lo que destraba la opción 3, y es un frente propio
