@@ -1,11 +1,23 @@
 # Orden de aplicación de descuentos apilados — investigación de mercado (2026-08-11)
 
-> ⛔ **ABIERTA de verdad — y ahora tiene entrada en el backlog** (barrido del 2026-09-03).
+> ✅ **CONTESTADA el 2026-09-03 — y la premisa de la § 4 era falsa.**
 >
-> Se verificó contra el código: **ninguna de las cuatro opciones de la § 4 se construyó**. No
-> existe columna `orden` en el puente ítem↔descuento (la única `orden` del módulo está en
-> `descuento_tramo`, que es otra cosa), y el motor sigue con el par
-> `calculoDescuentos: 'base' | 'compuesto'` sin criterio de orden entre tipos.
+> **El motor ya tiene criterio de orden, y lo impone él mismo.** `ordenarReglas` pone **los
+> porcentajes antes que los montos fijos** y explícitamente **no hereda el `ORDER BY`** de la
+> base, con tres razones escritas en su docblock — la más fuerte: *el último es el que se
+> recorta* cuando entra el piso en cero, y un fijo recortado se explica en el ticket mientras
+> que un porcentaje recortado no. **Es la opción 2 de la § 4, y coincide con la lectura de
+> Square.** O sea que esta investigación medía un hueco que no existía en el eje que importa.
+>
+> **Lo que el owner decidió** (→ [`pendientes.md`](../pendientes.md) § 3): un **flag de
+> acumulación por regla** —cuáles se combinan, no cuántos—, y la **columna `orden` configurable
+> queda diferida**: solo serviría para que un tenant contradiga un criterio que ya tiene tres
+> razones detrás.
+>
+> ⚠️ **Lo único que sobrevive** es un residuo que el propio docblock declara y que **no estaba
+> anotado en ninguna parte**: entre reglas del **mismo** modo el orden lo trae la base
+> —*"determinista pero arbitrario"*— y con **tres o más porcentajes** el redondeo de paso puede
+> mover el último decimal. Ahora sí tiene entrada, en la § 2 (medir primero).
 >
 > Estaba con *"qué queda para decidir"* y **cero menciones en el backlog**, o sea que la
 > decisión se había perdido de vista. Ya no: [`pendientes.md`](../pendientes.md) § 4.

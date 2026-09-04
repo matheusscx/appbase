@@ -899,6 +899,25 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
   tiempo entre `createQueryRunner()` y el `BEGIN`.
 
+- [ ] **Con tres o más porcentajes, el orden entre ellos puede mover el último decimal**
+  (motor de precios, **anotado el 2026-09-03**) —
+  📌 **Esta entrada existe porque el código dice que existe.** El docblock de `ordenarReglas`
+  (`calculo-precios.engine.ts`) afirma *"con tres o más porcentajes puede mover el último
+  decimal por redondeo de paso, y eso está anotado en el backlog"* — y **no estaba**
+  (verificado 2026-09-03). Se escribe acá para que la afirmación del código sea cierta, en vez
+  de editar el motor, que obliga a parar y consultar.
+  **Lo que dice el docblock, sin interpretar:** el orden **entre reglas del mismo modo** lo trae
+  el llamador —hoy `ORDER BY … regla_id` en `items.service.ts`, *"determinista pero
+  arbitrario"*— y eso es aceptable porque dos porcentajes componen multiplicativamente y dos
+  fijos suman, o sea que **conmutan**. La excepción declarada son **tres o más porcentajes**,
+  donde el redondeo de cada paso puede no conmutar.
+  **Qué hay que medir antes de decidir nada:** si el desvío **existe de verdad** con la
+  cuantización actual, y de cuánto es. Puede que el cierre por derivación —los totales se
+  derivan de sus componentes, no se cuantizan aparte— ya lo absorba. **Es determinista igual**
+  (el `ORDER BY` fija el orden), así que no es una carrera: es un desvío estable pero arbitrario.
+  ⛔ **Toca el motor de cálculo de precios**, así que si la medición dice que hay que arreglarlo,
+  va solo y con el sistema quieto.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -1751,6 +1770,34 @@ Sigue en la § 4, sola.
   ℹ️ **Sucursal queda explícitamente afuera** y sigue sin decidirse. Si algún día entra, trae su
   propia consecuencia de ADR-010: de qué sucursal salió cada venta es un hecho fiscal.
 
+- [ ] **Descuentos: un flag de acumulación por regla** ✅ *(decidido por el owner el
+  2026-09-03; antes era "¿en qué orden se apilan?" en la § 4)* —
+  **La decisión:** cada descuento lleva un flag que dice **si se combina con otros**. Se eligió
+  el flag por sobre un número máximo (*"hasta 2 descuentos"*) porque un número contesta
+  *cuántos* y el flag contesta **cuáles**: con un número no se puede expresar *"el cupón de
+  bienvenida no se combina con nada, pero fidelidad y happy hour sí entre ellos"*. Es además lo
+  que hace el mercado — los cupones de Bsale son **exclusivos**, no limitados por cantidad.
+  **Hoy no existe nada de esto**: la entidad `descuento` tiene nivel, vigencia, modo, tramos y
+  valores, pero **ni acumulación ni orden** (verificado 2026-09-03).
+
+  ✅ **Y la pregunta del orden ya estaba contestada por el código, no hacía falta decidirla.**
+  El motor **impone su propio orden** y explícitamente **no lo hereda del `ORDER BY`** de la
+  base: `ordenarReglas` pone **los porcentajes antes que los montos fijos**, con tres razones
+  escritas. La que más pesa es la tercera: **el último es el que se recorta** cuando entra el
+  piso en cero, y un fijo recortado se explica en el ticket (*"el descuento de 1200 aplicó
+  1000"*) mientras que un porcentaje recortado no. Es, además, exactamente la lectura de Square.
+  **La columna `orden` configurable queda diferida**: solo serviría para que un tenant
+  contradiga un criterio que ya tiene tres razones detrás, y ningún POS del relevamiento la
+  ofrece.
+
+  ⚠️ **Dos cosas que hay que decidir al construirlo, y no son obvias:**
+  1. **¿El flag cruza niveles?** Un descuento de línea y uno de venta conviven hoy. Si el de
+     línea dice "no se combina", ¿bloquea también al de venta, o solo a otros de su nivel?
+  2. **¿Y bloquea promociones?** Las promos son **familia propia del motor**
+     ([ADR-023](../adr/023-promociones-familia-propia-del-motor.md)), no descuentos. Un
+     descuento exclusivo sobre una línea que ya trae promo es un caso real —"2x1 más cupón"— y
+     hoy nada lo impide.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1888,23 +1935,6 @@ habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una 
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
 
 
-
-- [ ] **Cuando se apilan dos descuentos de tipos distintos, ¿en qué orden se aplican?**
-  (motor de precios, relevado 2026-08-11, **anotado acá el 2026-09-03** tras un barrido de
-  investigaciones — la decisión llevaba tres semanas sin entrada) —
-  **⛔ Toca el motor de cálculo de precios: va solo y con el sistema quieto** (`CLAUDE.md`).
-  **Lo medido:** el problema es **más chico de lo que parecía**. Solo afecta al modo
-  `calculo_descuentos = 'compuesto'`; el default es `'base'`, donde el orden no cambia el
-  resultado. Y **no existe** columna `orden` en el puente ítem↔descuento — la única `orden` del
-  módulo está en `descuento_tramo`, que es otra cosa (verificado 2026-09-03).
-  **Las cuatro opciones, con lo que el mercado dice de cada una** —detalle y fuentes en
-  [`investigaciones/2026-08-11-orden-de-descuentos.md`](investigaciones/2026-08-11-orden-de-descuentos.md):
-  (1) columna `orden` reordenable —lo que el owner prefería, pero **ningún POS del relevamiento
-  lo hace** y es la más cara—; (2) regla fija en el motor —lo que hacen los cuatro, pero
-  **Toast y Square la eligieron al revés**, o sea que no hay una "correcta"—; (3) no apilar
-  —Lightspeed, Toast por default, Bsale con cupones: hace desaparecer la pregunta—; (4)
-  quedarse con el mayor, que es conmutativa y también la disuelve.
-  **Sin urgencia:** ningún tenant usa `'compuesto'` hoy.
 
 - [ ] **Las cuatro preguntas de inventario que ADR-016 no contestó**
   (relevado 2026-07-26, **anotado acá el 2026-09-03** tras el mismo barrido) —
