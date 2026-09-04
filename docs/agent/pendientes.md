@@ -1798,6 +1798,48 @@ Sigue en la § 4, sola.
      descuento exclusivo sobre una línea que ya trae promo es un caso real —"2x1 más cupón"— y
      hoy nada lo impide.
 
+- [ ] **Compras, alimentado por los DTE recibidos del SII** ✅ *(dos decisiones del owner el
+  2026-09-03: la varianza va **después** de compras, y la recepción **lee la factura del
+  proveedor desde el SII** en vez de digitarse; antes eran las preguntas 3 y 4 de la § 4)* —
+  ⛔ **Es la primera integración con el SII del sistema, y es de ENTRADA.** [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
+  difirió la **emisión**; leer documentos recibidos es otro eje. Queda registrado que el orden
+  se invierte respecto de lo que cualquiera supondría: **vamos a leer DTE antes de emitir uno**.
+  **Hoy no existe nada**: no hay módulo, ni entidad, ni directorio de compras (verificado
+  2026-09-03). Lo que sí existe es el motivo `compra` en `movimientos_inventario`, o sea el
+  lugar donde la recepción va a aterrizar.
+
+  ⚠️ **Cuatro cosas que hay que tener presentes, y la primera no es técnica:**
+
+  1. ⛔ **Leer facturas arrastra un reloj legal.** Por la **Ley 19.983** el comprador tiene
+     **8 días corridos** para reclamar una factura electrónica, y **el silencio es aceptación
+     tácita** **[SECUNDARIA]**. Mostrarle al tenant sus facturas recibidas lo deja **al lado**
+     de una decisión con plazo legal. **El alcance tiene que decir explícitamente si acepta y
+     reclama o solo lee** — y si solo lee, la pantalla tiene que dejar claro que aceptar o
+     reclamar se sigue haciendo en el portal del SII. Mismo riesgo que la guía de despacho:
+     *tenerlo a la vista no es haberlo hecho*.
+  2. **Lo caro NO es la integración: es el mapeo de ítems.** La factura dice
+     *"HARINA 25KG SACO"* y nosotros tenemos *"Harina"* medida en kilos. Hay que resolver
+     **qué ítem es** y **cuántas unidades base entran**, proveedor por proveedor. La conversión
+     de unidades ya existe como feature; el mapeo proveedor→ítem, no.
+  3. **La recepción no es solo stock: es la fuente del costo.** Una entrada con
+     `motivo='compra'` alimenta el **CPP** ([ADR-016](../adr/016-costeo-promedio-ponderado-movil.md)),
+     y de ahí salen márgenes, food-cost, mermas valorizadas y el simulador de impacto. Un costo
+     mal mapeado **no se queda en compras**.
+  4. **Credenciales fiscales por tenant.** Hay precedente de cómo guardarlas cifradas:
+     [ADR-008](../adr/008-cifrado-credenciales-pasarela.md), de la pasarela de pagos.
+
+- [ ] **Reporte de varianza (AVT) — después de compras** ✅ *(owner, 2026-09-03)* —
+  *"Según tus recetas debías usar 40 kilos y usaste 47"*: consumo **teórico** (lo que las
+  recetas dicen que se consumió, dado lo vendido) contra consumo **real**
+  (`inicial + compras − final`).
+  📌 **El repo ya lo declaraba como el próximo sub-proyecto desde julio**: la fila del recuento
+  en [`../ESTADO.md`](../ESTADO.md) dice *"Insumo que faltaba para el reporte de varianza (AVT),
+  sub-proyecto siguiente"*.
+  **Las piezas existen**: recuento implementado el 2026-07-26 (da inicial y final) y el motivo
+  `compra` en `movimientos_inventario` (da las entradas). **Técnicamente se podría hacer ya** —
+  el owner decidió esperar a compras **para que el insumo sea confiable**, no porque falte
+  maquinaria.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1830,10 +1872,16 @@ dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se
 cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
 escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
 
-⚠️ **Estuvo vacía unas horas el 2026-09-03 y volvió a tener dos entradas el mismo día** — no
-porque apareciera trabajo nuevo, sino porque **un barrido de las investigaciones encontró
-decisiones que se habían perdido de vista**. Contado de nuevo después del barrido: **2 y 0**
-(dos `- [ ]`, cero `###`).
+✅ **VACÍA otra vez al cierre del 2026-09-03 — contado, no recordado: 0 y 0.**
+
+Ese día la sección se vació, volvió a llenarse con **dos** entradas que un barrido de
+investigaciones rescató —decisiones que llevaban semanas perdidas de vista— y se vació de
+nuevo al contestarlas todas.
+
+📌 **Lo que hay que llevarse de ese ida y vuelta:** un cero acá **no prueba que no haya nada
+esperándote**. Prueba que nadie anotó lo que estaba esperando. Las dos entradas que
+aparecieron vivían desde julio y agosto en investigaciones con sección de *"preguntas
+abiertas"* y ninguna mención en este archivo.
 
 📌 **Ese es el dato que importa de este episodio:** la sección puede dar cero y no significar
 que no haya nada esperándote — significa que **nadie anotó lo que estaba esperando**. Las dos
@@ -1935,37 +1983,6 @@ habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una 
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
 
 
-
-- [ ] **Las cuatro preguntas de inventario que ADR-016 no contestó**
-  (relevado 2026-07-26, **anotado acá el 2026-09-03** tras el mismo barrido) —
-  ✅ Las dos primeras —¿costo de gestión o tributario? ¿método elegible por tenant?— **las
-  cerró [ADR-016](../adr/016-costeo-promedio-ponderado-movil.md)**: CPP, método único y fijo,
-  **de gestión**. Eso **desbloqueó** las otras, que la investigación daba por trabadas.
-  **Las que siguen vivas**, detalle en
-  [`investigaciones/2026-07-26-inventario.md`](investigaciones/2026-07-26-inventario.md):
-  1. ~~**¿El traslado entre bodegas emite guía de despacho?**~~ ✅ **Decidido por el owner el
-     2026-09-03: se maneja como la nota de crédito** —documento **interno**, sin emisión— y la
-     integración con el SII entra después. Es el mismo criterio de ADR-010 que ya se aplicó a la
-     NC, y reusa maquinaria que existe. **Se movió a la entrada de bodegas, en la § 3**, porque
-     es parte de construirla.
-  2. ~~**¿"Bodega" es realmente sucursal?**~~ ✅ **Relevada el 2026-09-03** →
-     [`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
-     **No son lo mismo, y no es una discusión de nombres.** Bsale corta por *"desde una bodega
-     no podrás hacer ventas"*, y el SII lo endurece: la **sucursal es una entidad fiscal** —se
-     declara al SII dentro de dos meses y su código viaja en cada documento (`CdgSIISucur`)—
-     mientras que **la bodega no tiene existencia fiscal ninguna**.
-     ✅ **Y el owner decidió el mismo día: bodega primero, sucursal después.** Son dos ejes
-     independientes y **hoy no tenemos ninguno** (verificado: ni `bodega` ni `sucursal` existen
-     en el código, el stock es un escalar por ítem y las cajas no tienen ubicación). La
-     **bodega** vive adentro de inventario y no toca nada fiscal; la **sucursal** toca cajas,
-     ventas, usuarios y el DTE. **La construcción de bodegas pasó a la § 3.**
-     ⛔ **Y trae una consecuencia de ADR-010:** si van a existir sucursales, **de qué sucursal
-     salió cada venta es un hecho fiscal** — barato de registrar antes del primer local real,
-     imposible de reconstruir después.
-  3. **¿La recepción de compra parte de un DTE del SII o se digita?** ⛔ **Fiscal** — define si
-     compras es un módulo interno o el primer punto de integración con el SII.
-  4. **¿El objetivo real es el reporte de varianza (AVT)?** Si sí, el orden natural es recuento
-     primero y compras después, para cerrar `inicial + compras − final`.
 
 ## 5. Carreras de concurrencia
 

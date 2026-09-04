@@ -1,7 +1,7 @@
 # Inventario — análisis de mercado vs. implementación
 
-> 🟡 **PARCIALMENTE CERRADA — dos de las seis preguntas ya están contestadas; las otras cuatro
-> siguen vivas y ahora tienen entrada en el backlog** (barrido del 2026-09-03).
+> ✅ **CERRADA — las seis preguntas contestadas el 2026-09-03**: dos por ADR-016 y cuatro por
+> el owner, todas el mismo día. Estuvo unas horas como *parcialmente cerrada* durante el barrido.
 >
 > Estaba en el peor estado posible: sección de *"preguntas abiertas para el owner"* y **cero
 > menciones en el backlog**, o sea que nadie estaba esperando esas decisiones y el que la
@@ -11,13 +11,18 @@
 >   por [ADR-016](../../adr/016-costeo-promedio-ponderado-movil.md)**: costo promedio ponderado
 >   móvil, **método único y fijo, de gestión** — no tributario, así que no hay elección por
 >   tenant que persistir. Ese ADR cita explícitamente la § 1 de esta investigación.
-> - **3, 4, 5 y 6 — guía de despacho en traslados · ¿bodega es sucursal? · recepción desde un
->   DTE · ¿el objetivo es el reporte de varianza?** ⛔ **Siguen abiertas**, y la 1 ya no las
->   bloquea. Anotadas en [`pendientes.md`](../pendientes.md).
+> - **3, 4, 5 y 6** ✅ **contestadas todas el 2026-09-03**, en la misma tarde:
+>   - **Guía de despacho en traslados** → documento **interno**, como la nota de crédito; la
+>     integración con el SII entra después.
+>   - **¿Bodega es sucursal?** → **no**, son dos ejes; se releva en
+>     [`2026-09-03-bodega-vs-sucursal.md`](2026-09-03-bodega-vs-sucursal.md) y se decide
+>     **bodega primero, sucursal después**.
+>   - **¿Recepción desde un DTE?** → **sí, se lee la factura del proveedor desde el SII.**
+>   - **¿El objetivo es la varianza?** → **sí, y va después de compras.**
 >
-> ⚠️ **Ojo con la 3 y la 5: son fiscales** (guía de despacho, DTE de compra) y por `CLAUDE.md`
-> abren su propio frente. La **4** no es de inventario: si "bodega" resulta ser **sucursal**,
-> toca cajas, ventas y usuarios.
+> 📌 **Con eso esta investigación queda cerrada**: sus seis preguntas están contestadas —dos por
+> ADR-016 y cuatro por el owner— y el trabajo que dejó vive en la § 3 de
+> [`pendientes.md`](../pendientes.md) como **bodegas**, **compras** y **varianza**.
 
 
 **Fecha:** 2026-07-26 (una pasada, cuatro ejes: costeo/valoración, bodegas/traslados, compras/recepción, recuento/ajustes)
