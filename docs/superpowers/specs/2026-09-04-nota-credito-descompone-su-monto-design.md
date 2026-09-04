@@ -282,10 +282,14 @@ docblock: es el precio de derivar de hechos congelados en vez de recalcular con 
 
 ### 6.1 Devolver más mercadería que plata → 400
 
-⛔ **REABIERTA POR EL OWNER EL 2026-09-04**, el mismo día, al ver que el camino de la pasarela no
-puede aplicarla: *"la decisión del mostrador la tomé mal — dejemos esto anotado para decidir bien
-y dejar las 2 partes coherentes"*. Lo de abajo describe **lo que se construyó**, no lo que va a
-quedar. Las opciones y su costo, en `docs/agent/pendientes.md` § 4.
+⛔ **REVERTIDA POR EL OWNER EL 2026-09-04**, el mismo día. Al ver que el camino de la pasarela no
+puede aplicarla dijo *"la decisión del mostrador la tomé mal"*, se corrió una investigación de
+mercado, y con sus resultados —**el SII acepta la nota por monto** (cantidad y precio unitario son
+condicionales en la Zona Detalle de una NC) y **de 11 productos relevados solo Lightspeed
+rechaza**— la regla quedó al revés: **se acepta**, con motivo obligatorio y con la opción de
+reponer o no el stock. Lo de abajo describe **lo que se construyó**, que ya no es lo que va a
+quedar. La decisión, en `docs/agent/pendientes.md` § 3; la evidencia, en
+`docs/agent/investigaciones/2026-09-04-devolucion-con-credito-parcial.md`.
 
 **Decisión del owner, 2026-09-04.** Escena: el cliente devuelve 2 empanadas que en esa boleta
 costaron $3.000, y se le acredita $1.000.

@@ -1002,6 +1002,148 @@ la moneda equivocada, en una tercera pantalla que la entrada no nombraba. El map
 abriendo las superficies, no leyendo la entrada.
 
 
+- [ ] **Devolver mercadería que vale más que la nota: se acepta, con motivo obligatorio y con
+  la opción de reponer o no el stock** ✅ *(decidido por el owner el 2026-09-04, después de la
+  investigación de mercado; antes vivía en la § 4)*
+
+  ## La decisión, en tres partes
+
+  1. **Se acepta, en los dos caminos.** Se saca el 400 de "la mercadería vale más que el monto".
+     La nota sale por su monto, la mercadería vuelve atada a ella, y mostrador y pasarela dejan
+     de hacer cosas distintas con el mismo hecho.
+  2. **Motivo obligatorio** cuando lo devuelto vale más que la nota. Es el patrón de Square y
+     Toast —*donde el monto es libre, el motivo es obligatorio*— y **reemplaza a la confirmación
+     modal**, que ningún POS usa. La pieza ya existe: `comentario` viaja como glosa de la línea
+     de ajuste; hoy es opcional.
+  3. 🆕 **Reponer o no el stock, elegible por línea** (owner, 2026-09-04). Tiene respaldo
+     directo: es el `restock_type` (`no_restock` / `cancel` / `return`) de Shopify y el *"Select
+     item(s) to restock or Skip this step"* de Square.
+
+  ## Lo que la parte 3 cambia, y hay que diseñar
+
+  ⚠️ **No es un flag más: le cambia el significado a `devoluciones`.** Hoy son *"ítems a devolver
+  a stock"*; pasan a ser *"ítems que se acreditan, repongan o no"*. Tres consecuencias que el que
+  lo tome se va a encontrar:
+
+  1. **La línea SÍ va al documento aunque no reponga.** Se está acreditando ese ítem; lo que no
+     hay es movimiento de inventario. Es exactamente el `no_restock` de Shopify.
+  2. 🔓 **Se abre acreditar por línea lo que hoy es imposible.** `validarDevolucionesReembolso`
+     rechaza servicios (*"no maneja stock"*) y los modos `serie`/`lote` (*"la devolución debe
+     registrarse manualmente"*) — **y los rechaza porque van a mover stock**. Sin reposición esa
+     razón desaparece: un servicio mal prestado podría acreditarse como línea propia en vez de
+     caer al balde de ajuste. **Es una ampliación real del alcance y conviene decidirla a
+     propósito**, no descubrirla implementando.
+  3. **El tope por porción sigue haciendo falta.** Es invariante fiscal, no preferencia: sin él
+     la serie de notas acredita más IVA del que la venta cobró. Lo que cambia es que ya no puede
+     traducirse en un 400 — hay que ver cómo se expresa cuando el caso se acepta.
+
+  ## Qué NO cambia
+
+  - **El segundo rechazo, el de "esa porción ya está acreditada"**, es el invariante fiscal de
+     arriba y no se toca sin resolver el punto 3.
+  - **El vínculo `movimiento → nota`**, que la investigación mostró que ningún producto del
+     mercado tiene. Es lo que esta decisión protege.
+
+  ---
+
+  ## Cómo se llegó acá
+
+  ## La escena, con números
+
+  Cliente pide delivery y paga **$11.330** con tarjeta. Se queja. El encargado le reembolsa
+  **$500** y en el mismo formulario marca *"devolver 2 empanadas al stock"*. Esas 2 empanadas
+  valieron **$2.380** en esa boleta. O sea: acredita $500 y devuelve $2.380 de mercadería.
+
+  ## Qué hace hoy cada camino — y son distintos
+
+  | | Mostrador (`POST /ventas/:id/notas-credito`) | Pasarela (`POST /cobros/:ordenId/reembolsos`) |
+  |---|---|---|
+  | Conducta | **400**, no se emite nada | La nota sale **por $500**, sin las líneas de devolución |
+  | Stock | no vuelve | **vuelve**, en `movimientos_inventario` atado al id de esa nota |
+  | Qué ve el operador | el 400 con los dos números y las dos salidas | un `warning` con el detalle |
+
+  **La asimetría no es un descuido, es el síntoma:** por la pasarela el chequeo llega *después*
+  de que la plata salió (`cobros.service.ts`, el hook post-commit), así que un `throw` ahí no
+  rechaza nada — solo dejaría un reembolso hecho **sin nota de crédito y con mercadería física en
+  el local que el sistema cree vendida**. Por eso el 400 quedó acotado al camino manual el
+  2026-09-04, y por eso el owner reabrió la regla entera: no puede haber dos conductas para el
+  mismo hecho.
+
+  ## Lo medido el 2026-09-04 — y cambia la pregunta
+
+  El owner preguntó primero **si el caso es real**. Se midió contra el stack corriendo, no se
+  razonó:
+
+  1. **Siempre fue alcanzable.** Las dos validaciones existen pero **nunca se hablan**: el monto
+     se topea contra `disponible` (total − notas previas) y la cantidad contra lo vendido menos
+     lo ya devuelto. Ninguna mira a la otra. Antes del 2026-09-04 el caso pasaba entero y en
+     silencio.
+  2. **El rechazo no impide el estado.** La salida que ofrece el propio mensaje de error existe
+     y es legal: `PATCH /items/:id/stock` con `{tipo:'entrada', motivo:'devolucion'}` devolvió
+     **200** y las 2 unidades volvieron al stock. O sea que el operador llega al mismo lugar en
+     dos pasos.
+  3. ⚠️ **Y llega peor.** El movimiento de ese segundo paso queda **sin `venta_id`** —suelto en
+     el kardex—, mientras que el gesto combinado lo deja atado al id de la nota. Verificado en
+     `movimientos_inventario`.
+  4. 📌 **El documento sale IDÉNTICO en los dos casos.** Cuando la mercadería no entra, la nota
+     se emite solo con líneas de ajuste por su monto — exactamente el mismo documento que sale
+     al emitir la nota sola. **Aceptar y rechazar producen la misma nota de crédito**; lo único
+     que cambia es si el movimiento de stock queda atado a ella o suelto.
+
+  **Consecuencia para la decisión:** el rechazo no protege el documento ni el estado. Lo único
+  que hace, hoy, es **cortar el hilo de auditoría**.
+
+  ## ¿Es error de tipeo o una operación legítima?
+
+  Las dos, y por eso importa. **Error:** el modal precarga el monto en el disponible y las
+  devoluciones son campos sueltos más abajo, sin ninguna relación visual — bajar el monto y
+  olvidarse de destildar la mercadería es un gesto de un segundo. **Legítima:** devolución con
+  cargo por reposición, o mercadería que vuelve dañada y se acredita solo una parte; es normal
+  en retail, y si es eso, rechazarla es un bug.
+
+  🔎 **El owner pidió una pasada de investigación de mercado antes de decidir (2026-09-04)**, que
+  es el caso exacto que contempla [`investigacion-mercado.md`](investigacion-mercado.md): la
+  regla no está en `docs/`, el mercado ya la resolvió y el owner no es experto del dominio.
+  ✅ **Corrida y cerrada el mismo día**:
+  [`investigaciones/2026-09-04-devolucion-con-credito-parcial.md`](investigaciones/2026-09-04-devolucion-con-credito-parcial.md)
+  —11 productos y la normativa chilena leída directamente—. **Lo que trajo, y que decide:**
+
+  - ⛔ **El rechazo no tiene fundamento normativo.** Una NC por $500 con una sola línea "Ajuste",
+    que no mencione las 2 unidades, **es un DTE válidamente formado**: en la Zona Detalle de una
+    nota de crédito solo `NroLinDet`, `NmbItem` y `MontoItem` son obligatorios; **cantidad y
+    precio unitario son condicionales**. Y el SII **no valida el contenido**: cinco causales
+    cerradas de rechazo, ninguna sobre el detalle.
+  - **Tampoco lo tiene de mercado.** De 11 productos, solo Lightspeed X lo prohíbe en el camino
+    ligado — y su escape lo habilita el fabricante, no el comercio.
+  - **Los cuatro POS chilenos tratan "acreditar menos" y "mover stock" como decisiones
+    independientes.** Bsale lo rotula literalmente: *"Ajuste de precios (nota de crédito, no
+    modifica stock)"*.
+  - 📌 **La fusión que causa el conflicto es nuestra**: exigir `Σ líneas = total_final` es
+    decisión de diseño, no requisito fiscal. El SII pide que `MntTotal` cuadre con neto + exento
+    + IVA, y eso se sigue cumpliendo.
+  - ❌ **La línea negativa de "cargo por reposición" se descarta**, por dos razones
+    independientes: ningún POS la usa (solo SAP y PeopleSoft), y **el DTE no tiene un campo con
+    esa semántica** — lo más cercano es un descuento global con glosa libre de 45 caracteres.
+  - 🔄 **La opción del modal cambia de forma.** Ningún POS usa confirmación modal; el patrón real
+    (Square, Toast) es **donde el monto es libre, el motivo es obligatorio**. Y la pieza ya
+    existe: `comentario` viaja como glosa de la línea de ajuste, solo que hoy es opcional.
+
+  ## Lo que se descartó, con su razón
+
+  - ❌ **La línea negativa de "cargo por reposición"**: ningún POS la usa (solo SAP y PeopleSoft
+     entre los ERP), y **el DTE no tiene un campo con esa semántica**.
+  - ❌ **La confirmación modal**: ninguno de los 11 productos relevados la usa. La reemplaza el
+     motivo obligatorio.
+  - ❌ **Rechazar en los dos caminos**: sin fundamento normativo (el SII acepta la nota por
+     monto) ni de mercado, y por la pasarela sería inaplicable sin construir antes la validación
+     previa al cobro.
+
+  (backend + frontend. Estado actual en `ventas.service.ts` → `crearNotaCreditoEnTransaccion`,
+  el bloque `noEntraEnElDocumento`) —
+  **⛔ Materia fiscal: abre su propio frente con su propia sesión** (`CLAUDE.md`, **ADR-010**).
+  ⚠️ **Mientras no se tome, el código sigue rechazando**, que es justo lo que el owner decidió
+  que no corresponde.
+
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
   medido 2026-08-22 al cerrar la anulación; el owner decidió que **va aparte**, no de
   arrastre) — el camino de la NC usa `LEFT JOIN item_producto` (`ventas.service.ts:1390`,
@@ -1894,133 +2036,6 @@ locks sino **fijar el orden en que sus `UPDATE` los toman solos**—, y el orden
 proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de
 bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cinco
 entradas de esta sección.
-
-- [ ] **Devolver mercadería que vale más que la nota de crédito: los dos caminos hacen cosas
-  distintas, y la regla del mostrador se reabrió** ⛔ *(owner, 2026-09-04: "la decisión del
-  mostrador la tomé mal — dejemos esto anotado para decidir bien y dejar las 2 partes coherentes
-  y bien decididas")*
-
-  ## La escena, con números
-
-  Cliente pide delivery y paga **$11.330** con tarjeta. Se queja. El encargado le reembolsa
-  **$500** y en el mismo formulario marca *"devolver 2 empanadas al stock"*. Esas 2 empanadas
-  valieron **$2.380** en esa boleta. O sea: acredita $500 y devuelve $2.380 de mercadería.
-
-  ## Qué hace hoy cada camino — y son distintos
-
-  | | Mostrador (`POST /ventas/:id/notas-credito`) | Pasarela (`POST /cobros/:ordenId/reembolsos`) |
-  |---|---|---|
-  | Conducta | **400**, no se emite nada | La nota sale **por $500**, sin las líneas de devolución |
-  | Stock | no vuelve | **vuelve**, en `movimientos_inventario` atado al id de esa nota |
-  | Qué ve el operador | el 400 con los dos números y las dos salidas | un `warning` con el detalle |
-
-  **La asimetría no es un descuido, es el síntoma:** por la pasarela el chequeo llega *después*
-  de que la plata salió (`cobros.service.ts`, el hook post-commit), así que un `throw` ahí no
-  rechaza nada — solo dejaría un reembolso hecho **sin nota de crédito y con mercadería física en
-  el local que el sistema cree vendida**. Por eso el 400 quedó acotado al camino manual el
-  2026-09-04, y por eso el owner reabrió la regla entera: no puede haber dos conductas para el
-  mismo hecho.
-
-  ## Lo medido el 2026-09-04 — y cambia la pregunta
-
-  El owner preguntó primero **si el caso es real**. Se midió contra el stack corriendo, no se
-  razonó:
-
-  1. **Siempre fue alcanzable.** Las dos validaciones existen pero **nunca se hablan**: el monto
-     se topea contra `disponible` (total − notas previas) y la cantidad contra lo vendido menos
-     lo ya devuelto. Ninguna mira a la otra. Antes del 2026-09-04 el caso pasaba entero y en
-     silencio.
-  2. **El rechazo no impide el estado.** La salida que ofrece el propio mensaje de error existe
-     y es legal: `PATCH /items/:id/stock` con `{tipo:'entrada', motivo:'devolucion'}` devolvió
-     **200** y las 2 unidades volvieron al stock. O sea que el operador llega al mismo lugar en
-     dos pasos.
-  3. ⚠️ **Y llega peor.** El movimiento de ese segundo paso queda **sin `venta_id`** —suelto en
-     el kardex—, mientras que el gesto combinado lo deja atado al id de la nota. Verificado en
-     `movimientos_inventario`.
-  4. 📌 **El documento sale IDÉNTICO en los dos casos.** Cuando la mercadería no entra, la nota
-     se emite solo con líneas de ajuste por su monto — exactamente el mismo documento que sale
-     al emitir la nota sola. **Aceptar y rechazar producen la misma nota de crédito**; lo único
-     que cambia es si el movimiento de stock queda atado a ella o suelto.
-
-  **Consecuencia para la decisión:** el rechazo no protege el documento ni el estado. Lo único
-  que hace, hoy, es **cortar el hilo de auditoría**.
-
-  ## ¿Es error de tipeo o una operación legítima?
-
-  Las dos, y por eso importa. **Error:** el modal precarga el monto en el disponible y las
-  devoluciones son campos sueltos más abajo, sin ninguna relación visual — bajar el monto y
-  olvidarse de destildar la mercadería es un gesto de un segundo. **Legítima:** devolución con
-  cargo por reposición, o mercadería que vuelve dañada y se acredita solo una parte; es normal
-  en retail, y si es eso, rechazarla es un bug.
-
-  🔎 **El owner pidió una pasada de investigación de mercado antes de decidir (2026-09-04)**, que
-  es el caso exacto que contempla [`investigacion-mercado.md`](investigacion-mercado.md): la
-  regla no está en `docs/`, el mercado ya la resolvió y el owner no es experto del dominio.
-  ✅ **Corrida y cerrada el mismo día**:
-  [`investigaciones/2026-09-04-devolucion-con-credito-parcial.md`](investigaciones/2026-09-04-devolucion-con-credito-parcial.md)
-  —11 productos y la normativa chilena leída directamente—. **Lo que trajo, y que decide:**
-
-  - ⛔ **El rechazo no tiene fundamento normativo.** Una NC por $500 con una sola línea "Ajuste",
-    que no mencione las 2 unidades, **es un DTE válidamente formado**: en la Zona Detalle de una
-    nota de crédito solo `NroLinDet`, `NmbItem` y `MontoItem` son obligatorios; **cantidad y
-    precio unitario son condicionales**. Y el SII **no valida el contenido**: cinco causales
-    cerradas de rechazo, ninguna sobre el detalle.
-  - **Tampoco lo tiene de mercado.** De 11 productos, solo Lightspeed X lo prohíbe en el camino
-    ligado — y su escape lo habilita el fabricante, no el comercio.
-  - **Los cuatro POS chilenos tratan "acreditar menos" y "mover stock" como decisiones
-    independientes.** Bsale lo rotula literalmente: *"Ajuste de precios (nota de crédito, no
-    modifica stock)"*.
-  - 📌 **La fusión que causa el conflicto es nuestra**: exigir `Σ líneas = total_final` es
-    decisión de diseño, no requisito fiscal. El SII pide que `MntTotal` cuadre con neto + exento
-    + IVA, y eso se sigue cumpliendo.
-  - ❌ **La línea negativa de "cargo por reposición" se descarta**, por dos razones
-    independientes: ningún POS la usa (solo SAP y PeopleSoft), y **el DTE no tiene un campo con
-    esa semántica** — lo más cercano es un descuento global con glosa libre de 45 caracteres.
-  - 🔄 **La opción del modal cambia de forma.** Ningún POS usa confirmación modal; el patrón real
-    (Square, Toast) es **donde el monto es libre, el motivo es obligatorio**. Y la pieza ya
-    existe: `comentario` viaja como glosa de la línea de ajuste, solo que hoy es opcional.
-
-  ## Las opciones, con su costo
-
-  1. **Aceptar en los dos caminos**, con la nota por su monto y la mercadería volviendo al stock
-     (o sea: lo que hoy hace la pasarela, también en el mostrador). Fiscalmente cierra —la nota
-     declara lo que acredita, el stock queda en el kardex, nada se acredita de más—. **Costo:**
-     el operador puede devolver de un gesto mercadería que vale mucho más de lo que acredita, por
-     error, y nada lo frena.
-  2. **Igual que 1, pero con MOTIVO OBLIGATORIO** cuando la mercadería excede el monto — que es
-     el patrón que trajo la investigación, y **reemplaza a la confirmación modal** que proponía
-     la versión anterior de esta entrada (ningún POS usa modal). Cuesta poco: `comentario` ya
-     existe y ya viaja como glosa de la línea. Y **mejora el documento**, porque esa glosa es
-     justo el campo que el DTE deja libre para explicar por qué se acredita menos.
-  3. **Rechazar en los dos** (la regla original). ⛔ **Por la pasarela es inaplicable**: la plata
-     ya salió. Solo se puede si primero se valida **antes** de llamar al proveedor (ver abajo).
-     Y aun con eso **sigue sin impedir el estado**, porque la puerta de Inventario queda abierta
-     (medido arriba): habría que cerrar las dos.
-  4. **Dejarlo asimétrico**, que es lo de hoy. El owner ya dijo que no.
-
-  ## Lo que destraba la opción 3, y es un frente propio
-
-  **Validar la coherencia ANTES de mover la plata.** Hoy `reembolsar` llama al proveedor, comitea,
-  y recién ahí arma la nota. Si el formulario validara contra la venta antes del cobro, el
-  encargado vería el error en el momento correcto y la asimetría desaparecería sola. El patrón ya
-  existe: `ReembolsoCallbackRegistry` deja que ventas se registre sin que pasarela la importe —
-  un hook de validación por el mismo riel respeta esa frontera. **No es parte de esta decisión,
-  pero la condiciona:** sin esto, la opción 3 no se puede elegir.
-
-  ## Un rechazo vecino que NO es lo mismo
-
-  Hay un segundo 400 con la misma forma —*"esa porción ya está acreditada"*— y **ese no es
-  preferencia de producto, es invariante fiscal**: sin él, la serie de notas acredita más IVA del
-  que la venta cobró (medido: 1.447 contra 1.330). 📌 **Pero si se elige la opción 1 o 2, los dos
-  rechazos desaparecen juntos y sin romper nada**: si las líneas de devolución no entran al
-  documento, no acreditan, así que no hay IVA de más que evitar. Conviene decidirlos de una.
-
-  (backend + frontend, **medido el 2026-09-04** al cerrar el frente de la nota de crédito
-  compuesta. Estado actual en `ventas.service.ts` → `crearNotaCreditoEnTransaccion`, el bloque
-  `noEntraEnElDocumento`; y en
-  [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md)) —
-  **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse ante
-  impuestos y documentos tributarios; **ADR-010**).
 
 - [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el

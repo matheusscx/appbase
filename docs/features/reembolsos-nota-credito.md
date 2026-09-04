@@ -113,11 +113,14 @@ Response (200): orden pública + extras
   llevar impuestos distintos y no existe "la tasa" que leer. La NC corrige aquel
   documento, así que hereda su criterio — el mismo principio que el redondeo.
 
-  ⛔ **REGLA REABIERTA POR EL OWNER (2026-09-04).** Lo de abajo es lo que el
-  código hace hoy, no una decisión firme: el owner reabrió la regla del mostrador
-  al ver que los dos caminos hacen cosas distintas con el mismo hecho. **No
-  "arreglar" la asimetría por cuenta propia** — la decisión y sus opciones están
-  en `pendientes.md` § 4.
+  ⛔ **REGLA YA DECIDIDA, TODAVÍA NO CONSTRUIDA (owner, 2026-09-04).** Lo de abajo
+  es lo que el código hace hoy y **el owner decidió que no corresponde**: tras la
+  investigación de mercado —el SII acepta la nota por monto y casi nadie en el
+  mercado rechaza— se resolvió **aceptar el caso**, con **motivo obligatorio** y
+  con **la opción de reponer o no el stock por línea**. La decisión completa, con
+  lo que hay que diseñar, está en `pendientes.md` § 3. **No implementarla por
+  partes ni "emparejar" la asimetría por cuenta propia**: es materia fiscal y abre
+  su propio frente.
 
   **Devolver mercadería que vale más que la nota se rechaza con 400 — en el
   camino manual.** No se acomoda solo: son dos operaciones distintas —acreditar
