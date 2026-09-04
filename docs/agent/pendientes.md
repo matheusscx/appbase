@@ -1610,6 +1610,14 @@ Sigue en la § 4, sola.
   afecto/exento de la venta es confiable. Detalle y cierre en
   [`investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md`](investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
 
+  ✍️ **Diseño escrito y aprobado (2026-09-04):**
+  [`specs/2026-09-04-nota-credito-descompone-su-monto-design.md`](../superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md).
+  Cierra las cuatro preguntas que quedaban: se **rechaza** devolver mercadería que valga más que
+  la nota; el alcance **incluye la pantalla** (que sale casi gratis: el drawer ya arma la tabla
+  de líneas); el IVA se **deriva de los importes congelados** de la venta que se corrige; y
+  `repartirProporcional` **se exporta donde está** en vez de mudarse —el motor ya es el hogar de
+  `cuantizar` y `ConfigCalculo`, que ventas importa hoy—.
+
   ⚠️ **Sigue sin empezarse, y va en su propio frente:** es materia fiscal, `CLAUDE.md` obliga a
   que abra su propia sesión con su propia verificación. **No urge** —sin datos productivos no se
   pierde ningún hecho— pero el reloj arranca con el primer local real vendiendo.
