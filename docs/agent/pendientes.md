@@ -1439,38 +1439,69 @@ abriendo las superficies, no leyendo la entrada.
 
 Los tres salen del frente que hizo que el redondeo del tenant tenga su default puesto por su
 país y quede bloqueado donde la norma lo fija ([spec](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md)).
-Ninguno de los tres rompe nada hoy — los tres son **alcanzables mañana con una edición del
-seeder**, que es exactamente lo que este frente acaba de hacer.
+Ninguno rompía nada hoy — los tres eran **alcanzables mañana con una edición del seeder**, que
+es exactamente lo que ese frente acababa de hacer.
 
-1. **El candado del país puede exigir un valor que la validación de más abajo rechaza.**
-   `TenantsService.assertRedondeoPermitido` obliga a que `nivelRedondeo` sea el que impone la
-   norma; catorce líneas después, `updatePreferenciasFinancieras` rechaza `'documento'` cuando
-   la moneda oficial tiene 0 decimales. Un país sembrado con `nivel_redondeo_sugerido =
-   'documento' + es_ley` y moneda de 0 decimales deja a **todos sus tenants sin ninguna
-   configuración guardable**, con los dos mensajes contradiciéndose. Hoy es inalcanzable: el
-   único país con `'documento'` es México y el peso mexicano tiene dos decimales. Nada lo
-   impide — no hay `@Check` ni test que ate las dos reglas.
+✅ **Los dos primeros se cerraron el 2026-09-04, y con una corrección al plan que la entrada
+proponía.** La entrada decía *"si la 1 se cierra con un `@Check` en `pais`, la 2 desaparece
+sola"*, y **un `@Check` no puede cerrar la 1**: la contradicción cruza dos tablas —el nivel lo
+sugiere `pais`, los decimales viven en `moneda`— y un CHECK no abarca dos tablas. Quedó
+partido en las dos mitades que sí se pueden atar:
 
-   El mismo agujero tiene una segunda dirección que conviene arreglar junta:
-   `pais.modo_redondeo_sugerido` es un `varchar` **sin CHECK de dominio**, así que un país con
-   un modo fuera de `['HALF_UP','HALF_EVEN','FLOOR','CEIL']` produce el mismo deadlock, solo
-   que el rechazo llega del `ValidationPipe` en vez del service.
+- **El dominio de las dos perillas, con `@Check`** (`chk_pais_modo_redondeo_dominio` y
+  `chk_pais_nivel_redondeo_dominio`, en `catalog/entities/pais.entity.ts`). Es la segunda
+  dirección del agujero, la que la entrada pedía arreglar junta: un país con un modo fuera de
+  la unión dejaba a todos sus tenants sin configuración guardable, y el rechazo llegaba del
+  `ValidationPipe` hablando de un campo que el tenant no escribió.
+- **La combinación imposible, con un test sobre los datos sembrados**
+  (`test/esquema.e2e-spec.ts`). Va sobre el seed y no sobre un rechazo porque `pais` **no
+  tiene endpoint de escritura** —el controller de catálogo es solo `@Get`—: la fila que hay
+  que cazar es la que alguien agregue al seeder. Con eso la 2 sí desaparece sola: si ningún
+  país sembrado produce la combinación, `TenantsService.create` no la puede heredar.
+  ⚠️ Y el alcance real es más ancho que el que la entrada decía: `create` toma el nivel del
+  país **aunque no sea ley**, así que el `es_ley` no era parte de la condición.
 
-2. **`TenantsService.create` replica UNA de las dos validaciones del guardado.** Cubre
-   `escalaCalculo > 4` con `'documento'` (por eso el tenant mexicano nace con escala 4) y no
-   cubre `'documento'` + moneda de 0 decimales. Es la otra cara de la 1: si la 1 se cierra con
-   un `@Check` en `pais`, esta desaparece sola.
+Detalle en [`resueltos.md`](resueltos.md). **Sigue abierto el tercero**, que es fiscal y va
+solo:
 
-3. **Los 6 decimales del Anexo 20 no entran en las columnas.** El tenant mexicano nace con
-   `escalaCalculo: 4` porque toda columna de plata de `venta_detalles` es `NUMERIC(18,4)` y con
-   `'documento'` las líneas se persisten **sin cuantizar**: con escala 6 el recorte lo
-   terminaría decidiendo el cast de Postgres, fuera del modo de redondeo del tenant. El SAT
-   habla de hasta **6** decimales por línea. El costo de la diferencia está medido —cada
-   `redondear()` mete a lo sumo 5e-5 y una línea pasa por uno por paso de la fórmula, o sea
-   ~1,5e-4 a 2,5e-4 por línea: medio centavo a las 20-35 líneas— así que solo movería un total
-   en un empate exacto. **Es decisión del owner y es fiscal**: llevar el sistema a 6 decimales
-   de verdad es cambiar la escala de todas las columnas de plata de `venta_detalles` — motor de
-   cálculo + fiscal, frente propio (ADR-010).
+- [ ] **Los 6 decimales del Anexo 20 no entran en las columnas.** El tenant mexicano nace con
+  `escalaCalculo: 4` porque toda columna de plata de `venta_detalles` es `NUMERIC(18,4)` y con
+  `'documento'` las líneas se persisten **sin cuantizar**: con escala 6 el recorte lo
+  terminaría decidiendo el cast de Postgres, fuera del modo de redondeo del tenant. El SAT
+  habla de hasta **6** decimales por línea. El costo de la diferencia está medido —cada
+  `redondear()` mete a lo sumo 5e-5 y una línea pasa por uno por paso de la fórmula, o sea
+  ~1,5e-4 a 2,5e-4 por línea: medio centavo a las 20-35 líneas— así que solo movería un total
+  en un empate exacto. **Es decisión del owner y es fiscal**: llevar el sistema a 6 decimales
+  de verdad es cambiar la escala de todas las columnas de plata de `venta_detalles` — motor de
+  cálculo + fiscal, frente propio (ADR-010).
+
+### El residuo que dejó cerrar el flush (2026-09-04)
+
+Lo dejó la tercera revisión del arreglo del `previo`, como hallazgo **no bloqueante**, y es
+preexistente: no lo introdujo ese arreglo.
+
+- [ ] **`flushPendientes` no espera lo que nació DURANTE el flush, y la comanda puede salir sin
+  eso** (frontend; **leído en el código el 2026-09-04** por la revisión independiente, no
+  reproducido con sonda) — `flushPendientes` fotografía `pendingByLinea` al empezar y recorre
+  esa foto, así que hay **dos** taps que se le escapan, y conviene tener los dos a la vista
+  porque el segundo es el que uno no busca: (a) el que cae sobre una línea que **no** estaba
+  pendiente al arrancar, y (b) el que cae sobre una línea que **sí** estaba en la foto y que el
+  loop **ya consumió** —el loop no vuelve a esa línea—. En los dos casos la entrada nueva
+  tampoco cuenta para el `while (inflight.size > 0)` del final, que solo mira los requests en
+  vuelo. Si su timer de 300 ms todavía no disparó, el flush **retorna sin ella**:
+  `enviarComanda` imprime y `confirmarCobro` puede cerrar la venta con esa línea sin `PATCH`.
+
+  📌 **Es la pariente de las dos ventanas que sí se cerraron el 2026-09-04** —las dos del
+  camino del flush, en [`resueltos.md`](resueltos.md)—, y por eso conviene tomarla con ellas a
+  la vista: aquéllas eran "la foto pisa lo vivo", ésta es "la foto no ve lo nuevo".
+
+  ⚠️ **Antes de tomarlo hay que medirlo**, y por eso está acá y no en la § 1: el enunciado sale
+  de leer el código, no de una sonda. La escena pide un tap sobre una línea sin edición previa
+  **después** de apretar el botón, así que hay que verificar primero que la pantalla lo permita
+  —el stepper no se deshabilita durante `enviandoComanda`, solo el botón lleva `:loading`, pero
+  eso se confirma corriéndolo—. **La salida probable** es reemplazar la foto por un bucle que
+  siga mientras quede algo pendiente, que es lo mismo que se acaba de hacer adentro del loop:
+  dejar de tratar la foto como la lista de trabajo.
 
 ### Los cuatro que dejó el frente de la reserva de stock (2026-09-01)
 
@@ -1485,9 +1516,10 @@ es **el mismo error que este frente ya cometió y corrigió una vez** —atribui
 una regresión propia, ver el doble descuento en [`resueltos.md`](resueltos.md)—. La atribución
 se cruza con la fecha del commit, no se recuerda.
 
-Están acá y no en la § 1 porque ninguno es mecánico: los **dos que siguen abiertos** son
-trabajo de backend, y los dos ya cerrados estaban acá porque uno encendía un camino muerto y
-el otro era contrato de otro endpoint. Y no
+Están acá y no en la § 1 porque ninguno es mecánico: **queda uno solo abierto** —el refresco
+del catálogo, que es frontend + backend y **pide medir antes de tomarse**—, y los tres ya
+cerrados estaban acá porque uno encendía un camino muerto, otro era contrato de otro endpoint
+y el tercero movía un rechazo de puerta. Y no
 en la § 4 porque **ninguno espera una respuesta del owner**: la decisión que los gobierna ya está tomada (*lo que la mesa pide queda apartado, y la
 pantalla muestra lo que se puede pedir*). Contexto del frente:
 [`resueltos.md`](resueltos.md).
@@ -1518,69 +1550,51 @@ antes de tocar el contrato (dos en el frontend y un reuso interno, todos aditivo
   del lado del comprometido gracias a los índices de este frente. Lo que sí cambia es la
   latencia percibida y el tráfico de una tablet con wifi de restaurante.
 
-- [ ] **Una línea de `tipo='ingrediente'` se agrega a la cuenta y la venta la rechaza al
-  cerrar: otro camino a la mesa trabada** (backend; preexistente. **Leído en el código el
-  2026-09-01**, durante la Tarea 1: no hay sonda que lo haya reproducido, a diferencia de la
-  entrada del `DataCloneError` —cerrada el 2026-09-02—, que sí se corrió en Chrome) — `SalonesService.agregarLinea` no valida el `tipo` del ítem (solo rechaza
-  **personalización** sobre lo que no es receta ni combo), así que un `ingrediente` entra a la
-  cuenta como cualquier otra línea; al cerrar, `ventas.service.ts:295` corta con *"Los
-  ingredientes no se pueden vender directamente"* y **la cuenta entera deja de poder cobrarse**.
-  Es la misma forma de falla que este frente vino a eliminar, por otra puerta.
-  📌 **No es alcanzable desde la pantalla**: el salón pide el catálogo con `tipo=producto`,
-  `tipo=receta` y `tipo=combo` (`index.vue`), así que un ingrediente no se ofrece nunca. Se
-  llega por API. Eso lo hace menos urgente, no menos real.
-  **La salida coherente es cerrar la puerta de entrada**, no abrir la de salida: la venta ya
-  decidió que un ingrediente no se vende directo, y el guard nuevo solo mueve ese rechazo al
-  momento en que la línea todavía se puede no crear. Si en cambio se quisiera que los
-  ingredientes fueran vendibles, eso **sí** es una pregunta de producto y no es esta entrada.
-  ⚠️ Al tomarlo, revisar también los **otros** tipos que la cuenta acepta y la venta no: la
-  lista se hace grepeando los `throw` de `ventas.service.ts` por `item.tipo`, no de memoria.
+✅ **El ingrediente que se agregaba a la cuenta y la venta rechazaba al cerrar se cerró el
+2026-09-04.** El guard vive en `SalonesService.getItemVendibleOrThrow` —que es lo que su
+nombre ya prometía y no miraba—, así que alcanza también al `PATCH` de cantidad; el mensaje
+es **el mismo** de `ventas.service.ts`, porque la regla no cambió, se dice antes. Grepeados
+los seis tipos: `ingrediente` es el único que la venta rechaza por `item.tipo`, y su hermano
+del mismo bucle (`clasificacionTributaria === null`) no agrega un caso porque ese NULL lo
+escribe `items.service.ts` exactamente cuando el tipo es ingrediente.
+
+⚠️ **Rompió dos e2e ajenos, y ahí está lo que hay que saber:** los dos se apoyaban en el
+agujero —uno usaba un ingrediente como fábrica genérica de ítem, el otro como la línea
+directa que baja de cantidad— y el segundo dejó un escenario **inconstruible por API**
+(un ítem no puede ser insumo de receta y pedible a la vez). Se rearmó con una receta
+bloqueante, que es lo único que ejercita el tope. Detalle en [`resueltos.md`](resueltos.md).
 
 ### El residuo que dejó el arreglo del `PATCH` de cantidad (2026-09-02)
 
-Uno solo, y no es de la misma familia que los cuatro de arriba: lo dejó el **arreglo**, no el
-frente de la reserva. Está acá y no en la § 4 porque **la regla ya está decidida** y es la que
-ese mismo arreglo estableció —*deshacer devuelve la línea a lo último que el servidor
-confirmó*—; lo que falta es construir la mitad que quedó afuera, con su test.
+✅ **Cerrado el 2026-09-04.** `patchLineaCantidad` re-tasa el `previo` de la edición que
+quedó pendiente con lo que **el servidor acaba de confirmar**, así que deshacer ya no
+devuelve la línea más atrás de lo que corresponde (la escena: 1 → 2 aceptado → 3 rechazado
+dejaba la pantalla en 1 y el servidor en 2, y no se autocorregía).
 
-- [ ] **Tras un éxito a mitad de ráfaga, deshacer vuelve a un valor viejo y la pantalla queda
-  en desacuerdo con el servidor** (frontend; **medido el 2026-09-02**, al cerrar los hallazgos
-  de la revisión del `PATCH` de cantidad — [`resueltos.md`](resueltos.md)) —
-  `patchLineaCantidad` guarda el `previo` **de antes de la ráfaga** y no lo re-tasa cuando un
-  `PATCH` intermedio **sale bien**, así que un rechazo posterior deshace más de lo que
-  corresponde.
+⚠️ **El arreglo que la entrada describía no alcanzaba, y hubo que ampliarlo DOS veces.**
+Primero: mutar el `previo` de la entrada del `Map` no llega a ningún lado mientras el timer
+del debounce se cierre sobre las variables locales de `onCantidadChange`, así que el timer
+pasó a **releer la edición del `Map`** —como ya hacía `flushPendientes`, que por eso deshacía
+distinto que el timer—. Y después: con eso el cierre se escribió igual y **era falso**, porque
+el arreglo solo cubre mientras la segunda edición siga siendo una entrada pendiente; pasados
+los 300 ms del debounce hay **dos `PATCH` en vuelo** y el segundo seguía deshaciendo hasta el
+valor de antes de la ráfaga. Lo midió la revisión independiente, con la escena idéntica.
 
-  **La escena.** La línea está en 1. El garzón la sube a 2; el `PATCH` sale y **el servidor lo
-  acepta**. Con ese request todavía en vuelo el garzón la sube a 3, y ese segundo `PATCH`
-  rebota por stock. Deshacer lo devuelve a **1**, pero el servidor tiene **2**.
+⚠️ **Y hubo una tercera pasada, en el camino del flush**, con las dos mitades que cazó la
+misma revisión: una regresión propia —desde que el timer relee el `Map`, un tap a mitad de
+`flushPendientes` encontraba su entrada ya borrada por el loop y **se perdía en silencio**— y
+una preexistente que el arreglo declaró cerrada sin estarlo: si el timer de ese tap alcanzaba
+a disparar, el loop mandaba **la foto encima**, o sea el valor de antes del tap, después del
+bueno. Las dos salían con la comanda impresa en el número viejo. Se cerraron sacando el
+fallback a la foto: el `Map` dice qué mandar, y si no hay nada vivo no se manda nada.
 
-  **Lo medido**, con una sonda temporal sobre `salones/index.nuxt.spec.ts` (un estado de
-  servidor independiente del de la pantalla, el `cuentasServidor` que ese frente agregó):
+📌 **Lo que queda de las tres pasadas:** el mismo dato vivía copiado en varios lugares con
+vidas distintas —el `previo` en la closure del timer, en `pendingByLinea` y en `inflight`; y
+la edición, en la foto del flush y en el `Map`— y cada copia era una ventana que había que
+cerrar aparte. El cierre real, las dos veces, fue dejar **un solo dueño**. Los mutantes
+—incluido **uno que sobrevive y se declara**— y el control que prueba que las piezas son
+independientes están en [`resueltos.md`](resueltos.md).
 
-  | | pantalla | servidor |
-  |---|---|---|
-  | tras el `PATCH` del 2 (aceptado) | `2.0000` | `2.0000` |
-  | tras el `PATCH` del 3 (rechazado) | **`1.0000`** | **`2.0000`** |
-
-  ⚠️ **Y no se autocorrige.** La única lectura de `GET /cuentas` en toda la pantalla es
-  `cargarCuentas`, y la llama **un solo llamador**: `onSelectMesa` (`index.vue`). Ni
-  `volverACuentas`, ni el refresco del catálogo —que pide `/items`, no `/cuentas`— la
-  disparan. O sea que el número equivocado sobrevive a salir de la cuenta y volver a entrar
-  desde el listado; se cura recién cuando el garzón sale de la mesa y la vuelve a elegir.
-
-  📌 **No es silencioso**, y eso lo distingue de los tres huecos que el frente sí cerró: el
-  toast del rechazo **sí sale** (medido: *"Error al actualizar la cantidad: Stock insuficiente
-  de …"*). Lo que está mal es el número con el que queda la línea, no la falta de aviso. Por
-  eso es un residuo y no un bloqueante.
-
-  **El arreglo propuesto:** en el camino feliz de `patchLineaCantidad`, después del
-  `syncCuenta(cuenta)`, re-tasar el `previo` guardado con la cantidad que **confirmó el
-  servidor** — para la entrada de `pendingByLinea` si sigue habiendo una edición pendiente de
-  esa línea. Son unas pocas líneas; lo que lo saca de aquel diff es que abre una rama nueva del
-  camino feliz **sin test que la cubra**, y ese frente ya cerraba tres huecos con cuatro
-  mutantes. El test va con un `PATCH` retenido que **se acepta** y un segundo que rebota — la
-  plomería (`patchCantidadRetenido`, `patchCantidadFalla`, `cuentasServidor`) ya está en el
-  spec.
 
 ### Las cuatro que el owner contestó el 2026-09-03 — ✅ **las cuatro construidas**
 

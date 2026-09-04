@@ -658,9 +658,29 @@ describe('Reserva de stock al pedir (e2e)', () => {
      */
     it('bajar libera incluso con el disponible ya en negativo por lo no bloqueante', async () => {
       const insumo = await crearIngrediente('Insumo sobregirado', '2');
-      // Primero la línea directa sobre el insumo: con 0 comprometido entra.
+      // La línea que se va a bajar va sobre una receta **bloqueante**: es la
+      // única que pasa por el tope, o sea la única que ejercita la línea que el
+      // mutante rompe. Una unidad de insumo por porción, así que los números de
+      // abajo son los mismos de siempre.
+      //
+      // ⚠️ Hasta el 2026-09-04 esta línea iba **directa sobre el insumo**, y
+      // andaba porque la cuenta no miraba el tipo del ítem: un ingrediente
+      // entraba como línea y el rechazo llegaba recién al cobrar, con la cuenta
+      // ya trabada (`SalonesService.getItemVendibleOrThrow`). Cerrada esa
+      // puerta, el escenario se arma con lo que de verdad se puede pedir.
+      const platoBloqueante = await crearReceta(
+        'Plato que bloquea',
+        insumo.id,
+        '1',
+        true,
+      );
+      // Con 0 comprometido entra justo: 2 porciones × 1 = los 2 de stock.
       const cuentaDirecta = await abrirCuenta();
-      const lineaId = await agregarLinea(cuentaDirecta, insumo.id, '2');
+      const lineaId = await agregarLinea(
+        cuentaDirecta,
+        platoBloqueante.id,
+        '2',
+      );
 
       // Y ahora una receta que lo consume SIN bloquear: suma al comprometido y
       // el tope no la mira, así que el disponible se va a −2.
@@ -1115,6 +1135,53 @@ describe('Reserva de stock al pedir (e2e)', () => {
       const op = detalle.grupos[0].opciones.find((o) => o.itemId === opcion.id);
       expect(op?.stock).toBe('4.0000');
       expect(op?.stockDisponible).toBe('1.0000');
+    });
+  });
+  describe('La cuenta no acepta lo que la venta no puede vender', () => {
+    /**
+     * **Otro camino a la mesa trabada, por la puerta de al lado.** Este spec
+     * nació porque dos mesas podían pedir la misma última unidad y el choque
+     * estallaba al cobrar; esto es la misma forma de falla con otro origen:
+     * `agregarLinea` no miraba el `tipo` del ítem —solo rechazaba
+     * personalización sobre lo que no es receta ni combo—, así que un
+     * `ingrediente` entraba a la cuenta como cualquier otra línea y recién al
+     * cerrar `ventas.service` cortaba con *"Los ingredientes no se pueden vender
+     * directamente"*. Con la comida ya pedida, la cuenta entera dejaba de poder
+     * cobrarse.
+     *
+     * 📌 **No es alcanzable desde la pantalla** —el salón pide el catálogo con
+     * `tipo=producto`, `tipo=receta` y `tipo=combo`, así que un ingrediente no
+     * se ofrece nunca—: se llega por API, que es como corre este test. Eso lo
+     * hace menos urgente, no menos real.
+     *
+     * La salida es cerrar la puerta de entrada, no abrir la de salida: la venta
+     * ya decidió que un ingrediente no se vende directo y el guard solo mueve
+     * ese rechazo al momento en que la línea todavía se puede no crear. Por eso
+     * el mensaje es **el mismo** de `ventas.service.ts`: es una sola regla
+     * dicha antes, no una regla nueva.
+     */
+    it('un ingrediente rebota al PEDIRLO, y no dentro de la cuenta al cobrar', async () => {
+      const ing = await crearIngrediente('Ingrediente que nadie vende', '10');
+      const cuentaId = await abrirCuenta();
+
+      const rechazo = await intentarLinea(cuentaId, ing.id, '1');
+
+      expect(rechazo.status).toBe(400);
+      expect(rechazo.message).toContain(
+        'Los ingredientes no se pueden vender directamente',
+      );
+      // Y la cuenta queda **sin la línea**: el rechazo tiene que ser antes de
+      // escribir, no un 400 con la línea ya adentro.
+      const res = await request(app.getHttpServer())
+        .get(`/api/mesas/${mesaId}/cuentas`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const cuentas = res.body as (CuentaDetalleLineas & { id: string })[];
+      const detalle = cuentas.find((c) => c.id === cuentaId);
+      expect(detalle).toBeDefined();
+      expect(detalle!.lineas.filter((l) => l.itemId === ing.id)).toHaveLength(
+        0,
+      );
     });
   });
 });

@@ -1697,6 +1697,234 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(tras2!.props('modelValue')).toBe('1.0000')
   })
 
+  it('si el PATCH de la ráfaga sale BIEN, deshacer el siguiente vuelve a lo que el servidor confirmó', async () => {
+    // La gemela del test de arriba con una sola diferencia, que es la que
+    // importa: el primer `PATCH` **lo acepta el servidor**. Ahí el `previo` que
+    // `onCantidadChange` guardó —el de antes de la ráfaga— dejó de ser "lo
+    // último que el servidor confirmó", y deshacer el rechazo posterior devolvía
+    // la línea más atrás de lo que corresponde.
+    //
+    // Medido el 2026-09-02 con una sonda sobre `cuentasServidor`: tras el 2
+    // aceptado los dos decían `2.0000`; tras el 3 rechazado la pantalla quedaba
+    // en `1.0000` y el servidor en `2.0000`. Y **no se autocorregía**: la única
+    // lectura de `GET /cuentas` es `onSelectMesa`, así que el número equivocado
+    // sobrevivía a salir de la cuenta y volver a entrar desde el listado.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarServidor: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarServidor = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const primero = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    primero!.vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
+    // 400 > 300: el timer ya disparó y el PATCH del 2 está EN VUELO, retenido.
+    await esperar(400)
+    expect(patchesDeCantidad).toHaveLength(1)
+
+    const enVuelo = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    enVuelo!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+
+    // El segundo ya no se retiene, y el primero se suelta **aceptado**.
+    patchCantidadRetenido = null
+    soltarServidor()
+    await esperar(20)
+    // Recién ahora el servidor empieza a rechazar: si se prendiera antes, el
+    // `responder` del primero leería el flag y este test sería el de arriba.
+    expect(cuentasServidor![0]!.lineas[0]!.cantidad).toBe('2.0000')
+    patchCantidadFalla = true
+    await esperar(500)
+
+    // Los dos salieron; el 2 quedó guardado y el 3 rebotó.
+    expect(patchesDeCantidad.map(p => p.cantidad)).toEqual(['2.0000', '3.0000'])
+    expect(cuentasServidor![0]!.lineas[0]!.cantidad).toBe('2.0000')
+    // Y la pantalla queda en **2**, no en el 1 de antes de la ráfaga: deshacer
+    // devuelve a lo último que el servidor confirmó, que ya no es lo que había
+    // cuando el garzón empezó a tocar.
+    const tras = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(tras!.props('modelValue')).toBe('2.0000')
+  })
+
+  it('con DOS PATCH en vuelo, el que rebota deshace hasta lo que confirmó el otro', async () => {
+    // **La segunda ventana del mismo bug, y la que el primer arreglo no vio.**
+    // La de arriba vive dentro de los 300 ms del debounce: cuando el servidor
+    // contesta, la segunda edición todavía es una entrada de `pendingByLinea` y
+    // re-tasarle el `previo` alcanza. Con la latencia POR ENCIMA de los 300 ms
+    // —la tablet con wifi de restaurante— el timer de la segunda ya disparó,
+    // así que el Map está vacío y hay **dos `PATCH` en vuelo sobre la misma
+    // línea**: el segundo quedaba cerrado sobre el `previo` de antes de la
+    // ráfaga y deshacía hasta ahí.
+    //
+    // Medido por la revisión independiente del diff que cerró la ventana de
+    // arriba: pantalla `1.0000`, servidor `2.0000` — la misma escena que ese
+    // arreglo declaraba cerrada.
+    //
+    // Las dos retenciones son promesas DISTINTAS a propósito: con una sola
+    // compartida los dos requests se sueltan juntos y no se puede aceptar el
+    // primero y rechazar el segundo, que es lo único que arma la escena.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarPrimero: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPrimero = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const primero = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    primero!.vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
+    await esperar(400)
+    expect(patchesDeCantidad).toHaveLength(1)
+
+    // El segundo tap, con su propia retención: así su timer puede disparar
+    // mientras el primero SIGUE en vuelo.
+    let soltarSegundo: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarSegundo = r
+    })
+    const enVuelo = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    enVuelo!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    // 400 > 300: el timer del segundo YA disparó, así que `pendingByLinea` está
+    // vacío y los dos requests están en vuelo a la vez.
+    await esperar(400)
+    expect(patchesDeCantidad).toHaveLength(2)
+
+    // El primero se acepta…
+    soltarPrimero()
+    await esperar(20)
+    expect(cuentasServidor![0]!.lineas[0]!.cantidad).toBe('2.0000')
+    // …y recién ahora el servidor empieza a rechazar, para que el segundo sea
+    // el único que rebota.
+    patchCantidadFalla = true
+    soltarSegundo()
+    await esperar(300)
+
+    expect(patchesDeCantidad.map(p => p.cantidad)).toEqual(['2.0000', '3.0000'])
+    expect(cuentasServidor![0]!.lineas[0]!.cantidad).toBe('2.0000')
+    // La pantalla queda en 2, no en el 1 de antes de la ráfaga.
+    const tras = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    expect(tras!.props('modelValue')).toBe('2.0000')
+  })
+
+  it('el tap que llega a mitad del flush sale, y sale una sola vez', async () => {
+    // **La ventana que abre el propio flush.** `flushPendientes` fotografía las
+    // entradas y cancela ESOS timers antes del primer `await`; después recorre
+    // las líneas de a una, esperando cada `PATCH`. Durante esa espera el garzón
+    // puede volver a tocar una línea que el loop todavía no atendió:
+    // `onCantidadChange` reemplaza la entrada y arma un timer nuevo, que el
+    // `clearTimeout` de arriba —hecho sobre la foto— no alcanzó.
+    //
+    // ⚠️ Este test entró con el arreglo del `previo`, porque ese arreglo lo
+    // rompió: desde que el timer relee el `Map`, el timer huérfano encontraba
+    // la entrada ya borrada por el loop y **el tap se perdía en silencio**. Lo
+    // cazó la revisión independiente. Antes de ese arreglo el tap salía igual,
+    // pero en un `PATCH` de más.
+    //
+    // Se afirma sobre el **servidor**, no sobre la pantalla: lo que estaba mal
+    // era que la comanda saliera con un número que el garzón ya había
+    // cambiado.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    let soltarPrimera: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPrimera = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const inputs = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    expect(inputs).toHaveLength(2)
+    inputs[0]!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    inputs[1]!.vm.$emit('change', { presentacion: '5', unidadCodigo: 'unidad', cantidadCanonica: '5.0000' })
+    await esperar(20)
+    expect(patchesDeCantidad).toHaveLength(0)
+
+    const enviar = botonEn(drawerMesa(), 'Enviar a cocina')
+    expect(enviar).toBeTruthy()
+    enviar!.click()
+    // El `PATCH` de la PRIMERA línea queda retenido, así que el loop está
+    // parado en su `await` y la segunda todavía no salió.
+    await esperar(50)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    // Y ahí el garzón corrige la segunda línea. 400 > 300, así que si su timer
+    // quedara vivo tendría tiempo de disparar por su cuenta.
+    const enMedio = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    enMedio[1]!.vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    patchCantidadRetenido = null
+    soltarPrimera()
+    await esperar(600)
+
+    // El 7 llegó al servidor…
+    expect(cuentasServidor![0]!.lineas[1]!.cantidad).toBe('7.0000')
+    // …y salió UNA sola vez: ni el 5 viejo después del 7, ni un `PATCH` de más
+    // del timer huérfano.
+    expect(patchesDeCantidad).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '7.0000' },
+    ])
+  })
+
+  it('si el timer del tap dispara durante el flush, el flush no lo pisa con lo viejo', async () => {
+    // **La hermana del test de arriba, con la latencia por encima del
+    // debounce**, que es la premisa de todo este arreglo. Ahí el tap de mitad
+    // del flush no espera al loop: su propio timer de 300 ms dispara primero y
+    // manda el `PATCH` bueno. El loop llega después, encuentra la entrada ya
+    // consumida… y mandaba **la foto**, o sea el valor de antes del tap,
+    // pisando lo nuevo.
+    //
+    // Medido por la revisión independiente sobre este mismo harness:
+    // `[linea-1:3, linea-2:7, linea-2:5]`, servidor y pantalla en 5 con el
+    // garzón habiendo puesto 7, sin ningún toast — y `enviarComanda` imprime
+    // justo después del flush.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    let soltarPrimera: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPrimera = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const inputs = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    inputs[0]!.vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    inputs[1]!.vm.$emit('change', { presentacion: '5', unidadCodigo: 'unidad', cantidadCanonica: '5.0000' })
+    await esperar(20)
+
+    const enviar = botonEn(drawerMesa(), 'Enviar a cocina')
+    enviar!.click()
+    await esperar(50)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    const enMedio = wrapper.findAllComponents({ name: 'AppCantidadInput' })
+    enMedio[1]!.vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    // **La diferencia con el test de arriba, y la única**: se dejan pasar los
+    // 300 ms ANTES de soltar la primera retención, así que el timer del tap
+    // dispara solo y el loop llega a una entrada que ya no está.
+    patchCantidadRetenido = null
+    await esperar(400)
+    soltarPrimera()
+    await esperar(600)
+
+    // El 7 salió una sola vez y nada lo pisó después.
+    expect(patchesDeCantidad).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '7.0000' },
+    ])
+    expect(cuentasServidor![0]!.lineas[1]!.cantidad).toBe('7.0000')
+  })
+
   it('el flush manda lo que el garzón puso en CADA línea, no lo que devolvió el PATCH anterior', async () => {
     // "Enviar a cocina" dentro de los 300 ms: `flushPendientes` recorre las
     // líneas pendientes de a una y **espera** cada PATCH, y el camino feliz de

@@ -21,6 +21,21 @@ import type {
   'chk_pais_nivel_redondeo_ley',
   '(NOT "nivel_redondeo_es_ley") OR ("nivel_redondeo_sugerido" IS NOT NULL)',
 )
+// Dominio de las dos perillas. Las columnas son `varchar`/`text` y hasta el
+// 2026-09-04 no lo ataba nada: un país sembrado con un modo fuera de la unión
+// —un typo alcanza— dejaba a TODOS sus tenants sin configuración guardable, y
+// el rechazo llegaba del `ValidationPipe` del `PATCH`, hablando de un campo que
+// el tenant no escribió. Es la contracara de los dos `@Check` de arriba: ésos
+// impiden declarar "es ley" sin valor, éstos impiden imponer un valor que no
+// existe. NULL pasa a propósito — es "el país no sugiere nada".
+@Check(
+  'chk_pais_modo_redondeo_dominio',
+  `"modo_redondeo_sugerido" IS NULL OR "modo_redondeo_sugerido" IN ('HALF_UP','HALF_EVEN','FLOOR','CEIL')`,
+)
+@Check(
+  'chk_pais_nivel_redondeo_dominio',
+  `"nivel_redondeo_sugerido" IS NULL OR "nivel_redondeo_sugerido" IN ('linea','documento')`,
+)
 export class Pais {
   @PrimaryGeneratedColumn('uuid', { name: 'pais_id' })
   paisId: string;

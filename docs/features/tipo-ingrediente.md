@@ -140,6 +140,29 @@ Rechaza en vez de rellenar el snapshot fiscal con `'afecto'`: el motor ya cobró
 cero al ver el NULL, así que ese relleno guardaría una línea que miente
 ([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
 
+### POST /cuentas/:id/lineas y PATCH /cuentas/:id/lineas/:lineaId
+
+Mismo rechazo, con el mismo texto, **antes de escribir la línea**:
+
+```
+400 Bad Request — "Los ingredientes no se pueden vender directamente"
+```
+
+Hasta el 2026-09-04 la cuenta de salón no miraba el `tipo` —su único guard por tipo era
+el de la personalización—, así que un ingrediente entraba como línea y el rechazo llegaba
+recién al **cobrar**, desde `POST /ventas`: con la comida ya pedida, la cuenta entera
+dejaba de poder cobrarse. Se cierra la puerta de entrada en vez de abrir la de salida —la
+regla de que un ingrediente no se vende directo no cambió, se dice antes—, y por eso el
+mensaje es el mismo.
+
+No es alcanzable desde la pantalla: el salón pide el catálogo con `tipo=producto`,
+`tipo=receta` y `tipo=combo`, así que un ingrediente nunca se ofrece. Se llegaba por API.
+
+El guard vive en `SalonesService.getItemVendibleOrThrow`, que es lo que su nombre ya
+prometía, y alcanza también al `PATCH` de cantidad sobre una línea ya existente: esa línea
+no se puede cobrar de ninguna manera, y sacarla tiene su propia puerta
+(`DELETE /cuentas/:id/lineas/:lineaId`), que no pasa por ahí.
+
 ### POST /mermas
 
 Acepta `itemId` de tipo `producto` o `ingrediente` (modo cantidad). Mensaje si otro tipo:

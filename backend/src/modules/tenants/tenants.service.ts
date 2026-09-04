@@ -1591,15 +1591,20 @@ export class TenantsService {
     const regla = await this.reglaDeRedondeoDelPais(tenantId);
     if (!regla) return;
 
-    // ⚠️ Nada impide hoy que un país imponga un valor que las validaciones de
-    // más abajo rechacen — un `nivel_redondeo_sugerido = 'documento'` con ley y
-    // moneda oficial de 0 decimales dejaría a sus tenants sin NINGUNA
-    // configuración guardable, con los dos mensajes contradiciéndose. Con el
-    // seed actual es inalcanzable (el único país con 'documento' es México, y
-    // el peso mexicano tiene dos decimales). Anotado en `docs/agent/pendientes.md`
-    // § 3, "Los tres que dejó el frente del redondeo por país", junto con la
-    // otra dirección del mismo agujero: `modo_redondeo_sugerido` es un varchar
-    // sin CHECK de dominio.
+    // ⚠️ **Que el país no pueda imponer un valor que las validaciones de más
+    // abajo rechacen NO lo garantiza este método** — no puede: la contradicción
+    // cruza dos tablas (`pais.nivel_redondeo_sugerido` contra
+    // `moneda.decimales`) y ningún CHECK abarca dos tablas. Con `'documento'` y
+    // una moneda oficial de 0 decimales, los tenants de ese país quedan sin
+    // NINGUNA configuración guardable, con los dos mensajes contradiciéndose.
+    //
+    // Lo que sí lo ata, desde el 2026-09-04: el dominio de las dos perillas es
+    // un `@Check` en `pais` (`catalog/entities/pais.entity.ts`), y la
+    // combinación imposible la caza un test sobre los datos sembrados
+    // (`test/esquema.e2e-spec.ts`, *"ningún país sugiere un nivel de redondeo
+    // que su moneda oficial no admite"*). Va sobre el seed y no sobre un
+    // rechazo porque `pais` no tiene endpoint de escritura: la fila que hay que
+    // cazar es la que alguien agregue al seeder.
     if (
       regla.modo_redondeo_es_ley &&
       dto.modoRedondeo !== regla.modo_redondeo_sugerido

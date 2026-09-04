@@ -17,6 +17,219 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Deshacer una cantidad vuelve a lo último que el servidor confirmó (cerrado 2026-09-04)
+
+Sale de [`pendientes.md` § 3](pendientes.md), *"El residuo que dejó el arreglo del `PATCH` de
+cantidad"*. La regla ya estaba decidida por ese mismo arreglo —*deshacer devuelve la línea a
+lo último que el servidor confirmó*—; faltaba la mitad que quedó afuera.
+
+**La escena.** La línea está en 1. El garzón la sube a 2, el servidor lo acepta. Con ese
+request todavía en vuelo la sube a 3, y ese segundo `PATCH` rebota por stock. Deshacer la
+devolvía a **1**, con el servidor en **2**. Y no se autocorregía: la única lectura de
+`GET /cuentas` es `onSelectMesa`, así que el número equivocado sobrevivía a salir de la cuenta
+y volver a entrar desde el listado.
+
+**Lo que se hizo.** Dos cambios en `frontend/app/pages/salones/index.vue`, y el segundo no
+estaba en la entrada:
+
+1. El camino feliz de `patchLineaCantidad` **re-tasa el `previo`** de la edición que quedó
+   pendiente, desde la línea que devolvió el servidor (no desde el `payload` que se mandó: el
+   que vale para deshacer es el que quedó guardado, con el formato que le dio el backend).
+2. El timer del debounce **relee la edición del `Map`** en vez de cerrarse sobre las variables
+   locales de `onCantidadChange`.
+
+⚠️ **Sin el 2, el 1 no hace nada**, y esto es lo que conviene llevarse: mutar la entrada del
+`Map` no llega a ningún lado mientras la closure del `setTimeout` ya se quedó con el `previo`
+viejo. Se descubrió con el test en rojo **después** de implementar el arreglo que la entrada
+describía. `flushPendientes` ya leía del `Map`, así que hasta acá los dos caminos deshacían
+distinto sin que nada lo dijera.
+
+### Y así y todo el bug seguía vivo: la segunda ventana
+
+⚠️ **Con esos dos cambios el cierre se escribió, y era falso.** Lo cazó la revisión
+independiente, midiéndolo: el arreglo solo alcanza mientras la segunda edición **todavía sea
+una entrada de `pendingByLinea`**, o sea mientras el servidor conteste dentro de los 300 ms
+del debounce. Por encima de esa latencia —la tablet con wifi de restaurante que la entrada
+describe— el timer de la segunda ya disparó, el `Map` está vacío y hay **dos `PATCH` en vuelo
+sobre la misma línea**: el segundo sigue cerrado sobre el `previo` de antes de la ráfaga y
+deshace hasta ahí. Reproducido con la misma escena: pantalla `1.0000`, servidor `2.0000`.
+
+**Lo que lo cierra de verdad:** el `previo` deja de vivir en la closure de cada request y pasa
+a vivir **una vez por línea**, en el `Map` de `inflight`, compartido por todos sus requests en
+vuelo. El éxito de cualquiera lo re-tasa para los demás; el rollback lo lee de ahí; y la
+entrada se borra cuando vuelve el **último** request, no el primero — de ahí el contador
+`pendientes`, sin el cual el `finally` del primero le sacaba el valor al segundo.
+
+📌 **La lección, que es la misma de la mitad de arriba:** el `previo` estaba guardado en tres
+lugares con vidas distintas (la closure, `pendingByLinea`, `inflight`) y el arreglo tocó uno
+por vez. Mientras el dato viva copiado, cada ventana hay que cerrarla aparte; el cierre real
+fue dejar **un solo dueño** por línea.
+
+### Y el camino del flush, que se llevó dos pasadas más
+
+`flushPendientes` fotografía las entradas y cancela **esos** timers antes del primer `await`;
+después recorre las líneas de a una, esperando cada `PATCH`. Un tap que llegue durante esa
+espera, sobre una línea que el loop todavía no atendió, cae en una de dos, y las dos estaban
+mal:
+
+**(a) La entrada sigue viva cuando el loop llega.** `onCantidadChange` la reemplazó y armó un
+timer nuevo que la cancelación de arriba —hecha sobre la foto— no alcanzó. Mandando la foto,
+el tap salía por ese timer huérfano en un `PATCH` de más; y **desde que el timer relee el
+`Map`** (la mitad de arriba de este mismo arreglo) ni siquiera eso: encontraba la entrada ya
+borrada por el loop y **el tap se perdía en silencio**. Ésta sí la introdujo este arreglo.
+
+**(b) La entrada ya no está**, porque su propio timer disparó durante el `await` anterior —la
+misma latencia > 300 ms de siempre—. Ahí el loop caía a la foto y mandaba **un segundo
+`PATCH` con el valor de antes del tap, después del bueno**: medido
+`[linea-1:3, linea-2:7, linea-2:5]`, servidor y pantalla en 5 con el garzón habiendo puesto 7,
+sin ningún toast, y `enviarComanda` imprimiendo justo después. Ésta es **preexistente**
+—verificado corriendo la misma sonda contra `HEAD`—, y lo que hizo el arreglo fue declararla
+cerrada sin estarlo, hasta que la revisión la midió.
+
+Se cerró sacando el fallback, no parcheándolo: **la foto dice QUÉ líneas atender, el `Map`
+dice qué mandar**, y si no hay nada vivo no se manda nada. Las tres puertas por las que una
+entrada puede desaparecer —su timer ya disparó, `descartarPendientes` la tiró porque la cuenta
+se canceló, otro flush concurrente ya la atendió— quieren decir las tres *"no mandar"*, así
+que no había ningún caso que el fallback sirviera. De paso cierra las otras dos: un
+`descartarPendientes` a mitad de flush ya no dispara un `PATCH` sobre la cuenta recién
+cancelada (404 + toast, justo lo que esa función existe para evitar), y dos flush concurrentes
+ya no duplican.
+
+**Los cuatro tests** (`salones/index.nuxt.spec.ts`): el de la ventana del debounce es el gemelo
+del que ya existía para la misma ráfaga con los dos `PATCH` rechazados, y la única diferencia
+es que el primero **se acepta**; el de los dos en vuelo usa **dos retenciones distintas**
+—con una sola compartida los dos requests se sueltan juntos y no se puede aceptar uno y
+rechazar el otro—; y los dos del flush son hermanos que se diferencian en **una sola línea**,
+que es la premisa de todo el frente: si la primera retención se suelta enseguida, el tap sigue
+vivo cuando el loop llega; si se dejan pasar los 300 ms, su timer disparó y el loop encuentra
+la entrada consumida. Los dos afirman sobre el **servidor**, no sobre la pantalla, porque lo
+que estaba mal era el número con el que salía la comanda. La plomería
+(`patchCantidadRetenido`, `patchCantidadFalla`, `cuentasServidor`) ya estaba: el estado del
+servidor independiente del de la pantalla es lo que permite afirmar los dos números por
+separado.
+
+**Siete mutantes muertos y uno vivo, que se declara.** Cada uno revierte una pieza al código
+anterior. Todos ponen en rojo **solo** su test —56 tests, 55 verdes— salvo *"el flush manda la
+foto en vez de lo vivo"*, que mata **dos** (54 verdes) porque es literalmente el código de
+antes de esta pasada y las dos ventanas del flush salen de ahí. ⚠️ No confundirlo con la fila
+del **fallback** (`?? { ...deLaFoto }`), que mata uno solo: ese `??` nunca fue el código de
+antes, nació y murió dentro de esta misma pasada:
+
+| Mutante | Resultado |
+|---|---|
+| El timer vuelve a la closure `{ cuentaId, contexto, payload, previo }` | 🔴 el test de la ventana del debounce |
+| Se saca el bloque que re-tasa `pendiente.previo` | 🔴 el test de la ventana del debounce |
+| El rollback vuelve a `patchLineaOptimista(cuentaId, lineaId, previo)` | 🔴 el test de los dos en vuelo |
+| El éxito deja de re-tasar `otrosEnVuelo.previo` | 🔴 el test de los dos en vuelo |
+| El `finally` vuelve a `inflight.value.delete(lineaId)` sin contador | 🔴 el test de los dos en vuelo |
+| El flush manda la foto en vez de lo vivo | 🔴 **los dos** del flush (54 verdes) |
+| El flush vuelve al fallback `?? { ...deLaFoto }` en vez de `continue` | 🔴 el test del timer que dispara durante el flush |
+| **`clearTimeout(viva.timer)` en el loop del flush** | 🟢 **SOBREVIVE — sin test** |
+
+⚠️ **El sobreviviente se deja escrito porque la revisión anterior lo pidió y tiene razón: una
+tabla que sobreafirma cobertura es peor que una fila incómoda.** Sin ese `clearTimeout` no se
+pierde ni se duplica nada: el timer queda armado, dispara, no encuentra su entrada y no hace
+nada. El único efecto observable es que si el garzón vuelve a tocar ESA línea en la ventana
+entre el flush y el disparo, el timer viejo consume la entrada nueva **antes** de sus 300 ms,
+o sea que el tap sale temprano. Un test de eso mide un adelanto de ~250 ms y sería frágil por
+tiempos; la línea se queda porque es la limpieza correcta, no porque esté cubierta.
+
+📌 **Y el control que conviene registrar:** revertir **solo** el timer, dejando el flush
+arreglado, pone en rojo únicamente el test de la ventana del debounce (55 verdes, 1 rojo). Los
+dos del flush siguen verdes, y no por lo que uno diría: **no** es que el huérfano mande igual
+—el loop le cancela el timer—, es que el loop ya manda lo vivo. La conclusión que importa es
+que las piezas son independientes y cada una tiene su propio test, no uno que las tape a
+todas.
+
+## Un ingrediente rebota al pedirlo, y no adentro de la cuenta al cobrar (cerrado 2026-09-04)
+
+Sale de [`pendientes.md` § 3](pendientes.md), *"Los cuatro que dejó el frente de la reserva de
+stock"*. Es la mesa trabada que ese frente vino a eliminar, por otra puerta:
+`SalonesService.agregarLinea` no miraba el `tipo` del ítem —su único guard por tipo era el de
+la personalización—, así que un `ingrediente` entraba a la cuenta como cualquier otra línea y
+al cerrar `ventas.service.ts` cortaba con *"Los ingredientes no se pueden vender
+directamente"*, con la cuenta entera ya sin poder cobrarse. No es alcanzable desde la
+pantalla (el salón pide el catálogo con `tipo=producto|receta|combo`): se llegaba por API.
+
+**Lo que se hizo.** El guard vive en `getItemVendibleOrThrow`, que es lo que su nombre ya
+prometía y no miraba, así que cubre las dos puertas que lo llaman —`agregarLinea` y el `PATCH`
+de cantidad— con **el mismo mensaje** de la venta: la regla no cambió, se dice antes. Que el
+`PATCH` también rebote es lo correcto: esa línea no se puede cobrar de ninguna manera, y
+sacarla tiene su propia puerta (`DELETE /cuentas/:id/lineas/:lineaId`), que no pasa por ahí.
+
+**La lista de tipos se grepeó, no se recordó.** De los seis tipos del `@IsIn` de
+`CreateItemDto`, `ingrediente` es el único que la venta rechaza por `item.tipo`. Su hermano
+del mismo bucle —`clasificacionTributaria === null`— no agrega un caso: ese NULL lo escribe
+`items.service.ts` exactamente cuando `tipo === 'ingrediente'`, en los dos lugares donde
+persiste la columna.
+
+⚠️ **Rompió dos e2e ajenos, y ahí está lo que hay que saber.** Los dos se apoyaban en el
+agujero, cada uno a su manera:
+
+| Test | Para qué usaba el ingrediente | Cómo se rearmó |
+|---|---|---|
+| `recetas` 12 — *"un ítem pedido en una cuenta abierta no se puede borrar"* | Fábrica genérica de ítem; el tipo le daba igual | `crearProducto`, los dos ítems del mismo tipo (la comparación es "pedido" contra "no pedido") |
+| `reserva-stock-mesa` — *"bajar libera incluso con el disponible ya en negativo"* | La línea directa que se baja de cantidad | Una receta **bloqueante** de 1 insumo por porción |
+
+El segundo es el que enseña algo: cerrada esa puerta, su escenario quedó **inconstruible por
+API** —un ítem no puede ser insumo de receta (`validarYCostearIngredientes` exige
+`tipo === 'ingrediente'`) y pedible a la vez—, así que no alcanzaba con cambiarle el tipo al
+ítem. Y la línea que se baja **tiene que pasar por el tope**, o el test deja de ejercitar la
+línea que su mutante rompe: lo no bloqueante no se mira al pedir. Por eso la receta nueva es
+bloqueante y la que sobregira sigue sin bloquear. Los números quedaron idénticos (stock 2,
+comprometido 4 → disponible −2; bajar a 0,5 → −0,5), así que el mutante del delta negativo
+—`−1,5 > −2` y el pedido rebotaría— sigue muriendo por la misma cuenta.
+
+**Mutante, muerto:** sacado el guard, el `POST` de la línea del ingrediente responde **201** en
+vez de 400. (El backend se reinició y volvió a sembrar en cada vuelta; el revert se verificó
+contra la hora del restart, no contra el fuente.)
+
+## El país no puede imponer un redondeo que no existe, ni uno que su moneda no admite (cerrado 2026-09-04)
+
+Sale de [`pendientes.md` § 3](pendientes.md), *"Los tres que dejó el frente del redondeo por
+país"* — los dos primeros; el tercero es fiscal y sigue abierto.
+
+**La entrada proponía un plan que no se podía ejecutar**, y eso es lo primero: decía *"si la 1
+se cierra con un `@Check` en `pais`, la 2 desaparece sola"*, y **un `@Check` no puede cerrar la
+1**. La contradicción cruza dos tablas —el nivel lo sugiere `pais`, los decimales viven en
+`moneda`— y un CHECK no abarca dos tablas. Quedó partido en las dos mitades que sí se pueden
+atar:
+
+- **El dominio de las dos perillas, con `@Check`** (`chk_pais_modo_redondeo_dominio` y
+  `chk_pais_nivel_redondeo_dominio`). Es la segunda dirección del mismo agujero, la que la
+  entrada pedía arreglar junta: las columnas son `varchar`/`text` y un typo en el seeder
+  dejaba a **todos** los tenants de ese país sin configuración guardable —
+  `assertRedondeoPermitido` exige el valor del país y el `@IsIn` del DTO no lo deja escribir,
+  así que el rechazo llegaba del `ValidationPipe` hablando de un campo que el tenant nunca
+  tocó. NULL pasa a propósito: es *"el país no sugiere nada"*.
+- **La combinación imposible, con un test sobre los datos sembrados**
+  (`test/esquema.e2e-spec.ts`, junto al de `moneda.decimales`, que es su hermano). Va sobre el
+  seed y no sobre un rechazo porque **`pais` no tiene endpoint de escritura**: el controller de
+  catálogo es solo `@Get`, así que la fila que hay que cazar es la que alguien agregue al
+  seeder. Con eso la 2 desaparece sola de verdad: si ningún país sembrado produce la
+  combinación, `TenantsService.create` no la puede heredar.
+
+⚠️ **El alcance real es más ancho que el que la entrada decía.** La entrada condicionaba el
+caso a `es_ley`, y `create` toma `nivel_redondeo_sugerido` **aunque no sea ley**: un país que
+solo *sugiere* `'documento'` con moneda de 0 decimales también hace nacer tenants que su
+propia API no deja guardar. El test no mira `es_ley`.
+
+**El control del test es explícito**, porque un `expect([])` sobre una query filtrada pasa
+igual cuando no hay filas que mirar: se afirma además que hay **al menos un** país con
+`'documento'` sembrado, contado **sobre el mismo JOIN**. Lo segundo lo pidió la revisión
+independiente y tiene razón: `moneda_oficial_id` es nullable, así que un país `'documento'`
+sin moneda se caería del JOIN y un control contado sobre `pais` sola seguiría en verde. Con el
+JOIN adentro, lo único que separa "vacío" de "encontró la fila" es el predicado de los
+decimales. Medido: la query sin ese predicado devuelve `MX|MXN|2`.
+
+El `@Check` no necesita mutante: el test afirma el **nombre de la constraint** en el error del
+`INSERT`. Sin la constraint el INSERT entra y el `rejects.toThrow` falla; y si fallara por otra
+cosa —un NOT NULL— el regex tampoco matchearía. Que pase es la prueba de que existe y de que
+es ella la que rechaza.
+
+El comentario de `assertRedondeoPermitido` que anunciaba el agujero se reescribió: ahora dice
+qué lo ata y por qué no puede ser un CHECK, en vez de apuntar al backlog.
+
 ## La devolución se acredita por línea, reponga o no el stock (cerrado 2026-09-04)
 
 Sale de [`pendientes.md` § 3](pendientes.md), donde el owner la decidió el 2026-09-04 —el mismo

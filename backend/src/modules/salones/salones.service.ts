@@ -2067,6 +2067,34 @@ export class SalonesService {
     if (rows.length === 0) {
       throw new NotFoundException(`Ítem ${itemId} no encontrado`);
     }
+    // **"Vendible" incluye el tipo, que es lo que este método prometía y no
+    // miraba.** Sin esto un `ingrediente` entraba a la cuenta como cualquier
+    // otra línea —el único guard por tipo era el de la personalización— y el
+    // rechazo llegaba recién al cerrar, desde `ventas.service.ts`: *"Los
+    // ingredientes no se pueden vender directamente"*, con la cuenta ya pedida
+    // y sin poder cobrarse. Es la misma mesa trabada que la reserva de stock
+    // vino a eliminar, por otra puerta.
+    //
+    // Se cierra la puerta de ENTRADA, no se abre la de salida: la venta ya
+    // decidió que un ingrediente no se vende directo, y esto solo mueve ese
+    // rechazo al momento en que la línea todavía se puede no crear. Por eso el
+    // mensaje es idéntico al de la venta — una sola regla dicha antes, no una
+    // regla nueva.
+    //
+    // `ingrediente` es el único tipo de los seis que la venta rechaza por
+    // `item.tipo` (grepeado, no recordado). Su hermano de ese mismo bucle
+    // —`clasificacionTributaria === null`— no agrega un caso: el NULL lo
+    // escribe `items.service.ts` exactamente cuando `tipo === 'ingrediente'`.
+    //
+    // El otro llamador es `actualizarLinea`, sobre una línea que ya existe. Que
+    // también rebote es lo correcto: esa línea no se puede cobrar de ninguna
+    // manera, y sacarla tiene su propia puerta (`DELETE .../lineas/:lineaId`),
+    // que no pasa por acá.
+    if (rows[0].tipo === 'ingrediente') {
+      throw new BadRequestException(
+        'Los ingredientes no se pueden vender directamente',
+      );
+    }
     return {
       itemId: rows[0].item_id,
       tipo: rows[0].tipo,

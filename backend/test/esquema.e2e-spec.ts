@@ -116,4 +116,91 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
     );
     expect(fuera).toEqual([]);
   });
+  /**
+   * Las dos perillas de redondeo del país solo pueden imponer valores que
+   * existen. Las columnas son `varchar`/`text`, así que hasta el 2026-09-04 un
+   * typo en el seeder dejaba a TODOS los tenants de ese país sin ninguna
+   * configuración guardable: `assertRedondeoPermitido` exige el valor del país
+   * y el `@IsIn` del DTO no lo deja escribir, así que el rechazo llega del
+   * `ValidationPipe` hablando de un campo que el tenant nunca tocó.
+   */
+  it('ningún país puede imponer un modo o un nivel de redondeo que no existe', async () => {
+    await expect(
+      ds.query(
+        `INSERT INTO pais (nombre, codigo_iso, zona_horaria_principal, modo_redondeo_sugerido)
+         VALUES ('País de prueba', 'XA', 'UTC', 'HALF_DOWN')`,
+      ),
+    ).rejects.toThrow(/chk_pais_modo_redondeo_dominio/);
+
+    await expect(
+      ds.query(
+        `INSERT INTO pais (nombre, codigo_iso, zona_horaria_principal, nivel_redondeo_sugerido)
+         VALUES ('País de prueba', 'XB', 'UTC', 'venta')`,
+      ),
+    ).rejects.toThrow(/chk_pais_nivel_redondeo_dominio/);
+
+    // Y los sembrados cumplen: si alguno no cumpliera, el CHECK no habría
+    // podido crearse y este test pasaría por el motivo equivocado.
+    const fuera: unknown[] = await ds.query(
+      // Sin filtrar `eliminado_el` a propósito: el CHECK tampoco distingue, así
+      // que una fila borrada que violara el dominio habría impedido crearlo
+      // igual. Filtrar acá escondería justo esa fila.
+      `SELECT codigo_iso FROM pais
+        WHERE modo_redondeo_sugerido NOT IN ('HALF_UP','HALF_EVEN','FLOOR','CEIL')
+           OR nivel_redondeo_sugerido NOT IN ('linea','documento')`,
+    );
+    expect(fuera).toEqual([]);
+  });
+
+  /**
+   * El agujero que un `@Check` NO puede tapar, porque cruza dos tablas: el
+   * nivel lo sugiere `pais` y los decimales viven en `moneda`.
+   *
+   * Con `nivel_redondeo_sugerido = 'documento'` y una moneda oficial de 0
+   * decimales, las dos reglas se contradicen y el tenant queda sin salida:
+   * `TenantsService.create` nace con ese nivel —lo toma del país aunque no sea
+   * ley— y `updatePreferenciasFinancieras` rechaza esa misma combinación con
+   * *"la moneda oficial del tenant no admite decimales"*. Ni una perilla ni la
+   * otra lo saca de ahí.
+   *
+   * Hoy es inalcanzable —el único país con `'documento'` es México y el peso
+   * mexicano tiene dos decimales— y **nada lo impide**: una edición del seeder
+   * alcanza. Por eso el test va sobre los datos sembrados y no sobre un
+   * rechazo: lo que hay que cazar es la fila que alguien agregue mañana.
+   */
+  it('ningún país sugiere un nivel de redondeo que su moneda oficial no admite', async () => {
+    const imposibles: unknown[] = await ds.query(
+      // `moneda` NO se filtra por `eliminado_el` a propósito: si la moneda
+      // oficial de un país estuviera borrada, excluirla escondería justo la
+      // fila que este test busca.
+      `SELECT p.codigo_iso, m.codigo_iso AS moneda, m.decimales
+         FROM pais p
+         JOIN moneda m ON m.moneda_id = p.moneda_oficial_id
+        WHERE p.eliminado_el IS NULL
+          AND p.nivel_redondeo_sugerido = 'documento'
+          AND m.decimales = 0`,
+    );
+    expect(imposibles).toEqual([]);
+
+    // Y el `WHERE` está mirando filas de verdad: sin al menos un país que
+    // sugiera 'documento', el vacío de arriba sale por falta de datos y no por
+    // la invariante — el mismo modo de falla que el test de la base vacía.
+    //
+    // ⚠️ El control cuenta **sobre el mismo JOIN**, no sobre `pais` sola:
+    // `moneda_oficial_id` es nullable, así que un país 'documento' sin moneda
+    // se caería del JOIN de arriba y un control sin él seguiría en verde. Con
+    // el JOIN adentro, lo único que separa "vacío" de "encontró la fila" es el
+    // predicado de los decimales, que es lo que se está probando.
+    const [{ total }]: { total: number }[] = await ds.query(
+      // `moneda` sin filtrar por `eliminado_el`, por el mismo motivo que la
+      // query de arriba: el control tiene que mirar exactamente el mismo
+      // conjunto que la invariante, o deja de ser su control.
+      `SELECT COUNT(*)::int AS total
+         FROM pais p
+         JOIN moneda m ON m.moneda_id = p.moneda_oficial_id
+        WHERE p.nivel_redondeo_sugerido = 'documento'
+          AND p.eliminado_el IS NULL`,
+    );
+    expect(total).toBeGreaterThan(0);
+  });
 });

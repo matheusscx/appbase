@@ -1014,7 +1014,8 @@ const pendingByLinea = new Map<
   EdicionCantidad & { timer: ReturnType<typeof setTimeout> }
 >()
 /**
- * Líneas con un `PATCH` **en vuelo**, cada una con el `previo` de ese request.
+ * Líneas con al menos un `PATCH` **en vuelo**, cada una con **el** `previo` de
+ * esa línea — uno solo, compartido por todos sus requests en vuelo.
  *
  * Es un `Map` y no un `Set` para que el `previo` sobreviva la ventana que se
  * abre cuando el timer borra la entrada de `pendingByLinea` y todavía no
@@ -1024,10 +1025,24 @@ const pendingByLinea = new Map<
  * cantidad que el servidor nunca aceptó — el mismo síntoma que el rollback vino
  * a cerrar, en una ventana más chica (la latencia, no los 300 ms del debounce).
  *
+ * ⚠️ **El `previo` vive acá y no en la closure de cada request, y ésa es la
+ * mitad que faltaba.** Con la latencia por encima de los 300 ms hay **dos
+ * `PATCH` en vuelo sobre la misma línea** y `pendingByLinea` está vacío, así
+ * que re-tasar solo la entrada pendiente no alcanzaba: el segundo request
+ * seguía cerrado sobre el `previo` de antes de la ráfaga y deshacía hasta ahí,
+ * con el servidor ya en otro número. Medido por la revisión independiente:
+ * pantalla 1, servidor 2, la misma escena que este arreglo vino a cerrar.
+ * Compartiendo el valor, el éxito del primero lo corrige para el segundo.
+ *
+ * `pendientes` cuenta los requests vivos de esa línea: la entrada se borra
+ * cuando vuelve el último, no cuando vuelve el primero.
+ *
  * Las claves son las mismas de siempre, así que el guard del refresco de acá
  * abajo (`size` / `has`) no cambia de conducta.
  */
-const inflight = ref(new Map<string, CantidadPayload>())
+const inflight = ref(
+  new Map<string, { previo: CantidadPayload, pendientes: number }>(),
+)
 
 /**
  * ── El catálogo se vuelve a preguntar; ya no se recalcula acá ───────────────
@@ -1145,7 +1160,9 @@ function patchLineaOptimista(
 async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
   const { cuentaId, contexto, payload, previo } = edicion
 
-  inflight.value.set(lineaId, previo)
+  const enVuelo = inflight.value.get(lineaId)
+  if (enVuelo) enVuelo.pendientes++
+  else inflight.value.set(lineaId, { previo, pendientes: 1 })
   try {
     const cuenta = await salonesApi.actualizarLinea(cuentaId, lineaId, {
       cantidad: payload.cantidadCanonica,
@@ -1158,6 +1175,37 @@ async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
     // la cuenta que dejó atrás.
     aplicarCuentaActualizada(cuenta)
     if (activeCuenta.value?.id === cuentaId) void recalcular()
+    // **Re-tasa el `previo` de la edición que quedó pendiente.** El que guardó
+    // `onCantidadChange` es el de antes de la ráfaga, y con este `PATCH`
+    // aceptado dejó de ser *lo último que el servidor confirmó* — que es la
+    // regla que gobierna el rollback—. Sin esto, un rechazo posterior deshace
+    // de más: la línea está en 1, el garzón la sube a 2 y el servidor lo
+    // acepta, la sube a 3 y eso rebota → la pantalla vuelve a **1** y el
+    // servidor tiene **2**. Y no se autocorrige: la única lectura de
+    // `GET /cuentas` es `onSelectMesa`, así que el número equivocado sobrevive
+    // a salir de la cuenta y volver a entrar desde el listado.
+    //
+    // Se re-tasa desde la línea que devolvió **el servidor**, no desde el
+    // `payload` que se mandó: el que vale para deshacer es el que quedó
+    // guardado, con el formato que le dio el backend.
+    //
+    // Se re-tasan los DOS lugares donde vive un `previo` de esta línea, que son
+    // dos ventanas distintas del mismo bug: la edición que todavía espera su
+    // timer (`pendingByLinea`) y la que ya salió y está esperando al servidor
+    // (`inflight`). Cerrar solo la primera deja viva la segunda apenas la
+    // latencia pasa los 300 ms — medido.
+    const confirmada = cuenta.lineas.find(l => l.id === lineaId)
+    if (confirmada) {
+      const confirmado: CantidadPayload = {
+        presentacion: presentacionLinea(confirmada),
+        unidadCodigo: unidadPresLinea(confirmada),
+        cantidadCanonica: confirmada.cantidad,
+      }
+      const pendiente = pendingByLinea.get(lineaId)
+      if (pendiente) pendiente.previo = confirmado
+      const otrosEnVuelo = inflight.value.get(lineaId)
+      if (otrosEnVuelo) otrosEnVuelo.previo = confirmado
+    }
   }
   catch (e: unknown) {
     // Se deshace **solo esta línea**, con la misma función que la pintó. Antes
@@ -1168,7 +1216,16 @@ async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
     // snapshot se tomaba después del optimista, o sea que restauraba el valor
     // que había que revertir. Restaurar la cuenta entera además pisaba la
     // edición optimista de otra línea de la misma ráfaga.
-    patchLineaOptimista(cuentaId, lineaId, previo)
+    // El `previo` **compartido**, no el que este request capturó al salir: si
+    // otro `PATCH` de la misma línea volvió bien mientras éste viajaba, lo que
+    // hay que restaurar es lo que ese otro dejó guardado. El `??` cubre el caso
+    // en que la entrada ya no esté (no debería: la baja es en el `finally`, que
+    // corre después).
+    patchLineaOptimista(
+      cuentaId,
+      lineaId,
+      inflight.value.get(lineaId)?.previo ?? previo,
+    )
     toast.add({
       title: apiErrorMsg(e, 'Error al actualizar la cantidad'),
       // El rechazo puede llegar con el garzón ya en el listado o en otra mesa
@@ -1180,7 +1237,11 @@ async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
     })
   }
   finally {
-    inflight.value.delete(lineaId)
+    // Baja del contador, no borrado: con dos `PATCH` en vuelo, borrar al volver
+    // el primero dejaría al segundo sin el `previo` compartido —y a
+    // `flushPendientes` creyendo que ya no queda nada esperando—.
+    const vivos = inflight.value.get(lineaId)
+    if (vivos && --vivos.pendientes <= 0) inflight.value.delete(lineaId)
   }
 }
 
@@ -1196,7 +1257,7 @@ function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
   // pendiente, se busca antes en `inflight`: entre que el timer dispara y el
   // servidor contesta la ráfaga sigue siendo la misma, pero la entrada del
   // debounce ya no está.
-  const previo: CantidadPayload = pendiente?.previo ?? inflight.value.get(linea.id) ?? {
+  const previo: CantidadPayload = pendiente?.previo ?? inflight.value.get(linea.id)?.previo ?? {
     presentacion: presentacionLinea(linea),
     unidadCodigo: unidadPresLinea(linea),
     cantidadCanonica: linea.cantidad,
@@ -1210,9 +1271,23 @@ function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
     contexto,
     payload,
     previo,
+    // ⚠️ **La edición se relee del `Map`, no se cierra sobre las variables de
+    // acá.** El camino feliz de `patchLineaCantidad` re-tasa el `previo` de la
+    // entrada pendiente cuando el servidor confirma, y una closure sobre el
+    // `previo` de arriba se quedaría con el de antes de la ráfaga: la mutación
+    // no llegaría nunca. `flushPendientes` ya lee del `Map`, así que sin esto
+    // los dos caminos deshacían distinto.
+    //
+    // Lo que hace seguro leer el `Map` acá es que **una entrada solo la puede
+    // disparar su propio timer**, y eso vale para los dos que borran entradas:
+    // `onCantidadChange` cancela el anterior antes de guardar el nuevo, y
+    // `flushPendientes` cancela el de la entrada que borra —lo vivo, no lo que
+    // fotografió—. Sin esa segunda mitad este `if (edicion)` se comía en
+    // silencio el tap que llegara a mitad del flush.
     timer: setTimeout(() => {
+      const edicion = pendingByLinea.get(linea.id)
       pendingByLinea.delete(linea.id)
-      void patchLineaCantidad(linea.id, { cuentaId, contexto, payload, previo })
+      if (edicion) void patchLineaCantidad(linea.id, edicion)
     }, 300),
   })
 }
@@ -1234,7 +1309,29 @@ async function flushPendientes() {
   // `cuentas.value` por la lista de otra mesa, y ahí leer solo lo vivo daría
   // "la línea ya no está" para todas menos la primera y se comería ediciones.
   const cuentasAlEmpezar = cuentas.value
-  for (const [lineaId, { timer: _timer, ...edicion }] of lineasPendientes) {
+  for (const [lineaId] of lineasPendientes) {
+    // ⚠️ **Se manda lo VIVO, y si ya no hay nada vivo NO se manda.** La foto
+    // sirve para saber QUÉ líneas atender; lo que se manda sale del `Map`, que
+    // es lo único que sabe qué puso el garzón recién. Durante el `await` de red
+    // de la línea anterior la entrada de ésta puede haber cambiado o
+    // desaparecido, y cada caso tiene su respuesta:
+    //
+    // - **Reemplazada** (el garzón volvió a tocar la línea): `onCantidadChange`
+    //   armó un timer nuevo que el `clearTimeout` de arriba —hecho sobre la
+    //   foto— no alcanzó. Se manda lo nuevo y se cancela ESE timer, así no
+    //   queda armado para disparar sobre una entrada que no es la suya.
+    // - **Desaparecida**: solo hay tres puertas —su propio timer ya disparó (y
+    //   entonces el `PATCH` ya salió), `descartarPendientes` la tiró porque la
+    //   cuenta se canceló, u otro flush concurrente ya la atendió— y **las tres
+    //   quieren decir "no mandar"**. Mandar la foto ahí pisaba lo nuevo con lo
+    //   viejo: medido, el garzón ponía 7, el timer mandaba 7 y el flush mandaba
+    //   5 después, sin toast y con la comanda saliendo en 5.
+    //
+    // Las dos mitades las cazó la revisión independiente, en dos pasadas.
+    const viva = pendingByLinea.get(lineaId)
+    if (!viva) continue
+    clearTimeout(viva.timer)
+    const { timer: _vivo, ...edicion } = viva
     // ⚠️ **La entrada se saca acá, no arriba junto con los timers.** Vaciar el
     // Map entero antes del loop —como estaba— abría una ventana entre el
     // `clear()` y el dispatch de las líneas 2..N en la que `onCantidadChange`

@@ -74,6 +74,40 @@ async function crearIngrediente(
   return (res.body as ItemResponse).id;
 }
 
+/**
+ * Igual que `crearIngrediente` pero **vendible**: un `producto`.
+ *
+ * Lo pide el test 12, que necesita un ítem que se pueda PEDIR en una cuenta.
+ * Usaba `crearIngrediente` y andaba de casualidad: hasta el 2026-09-04 la
+ * cuenta no miraba el tipo, así que un ingrediente entraba como línea y el
+ * rechazo llegaba recién al cobrar, con la cuenta ya trabada. Cerrada esa
+ * puerta (`SalonesService.getItemVendibleOrThrow`), el ítem del test tiene que
+ * ser uno que de verdad se venda.
+ */
+async function crearProducto(
+  app: INestApplication<App>,
+  token: string,
+  nombre: string,
+  unidad: string,
+  stock: string,
+  costo: string,
+): Promise<string> {
+  const res = await request(app.getHttpServer())
+    .post('/api/items')
+    .set('Authorization', `Bearer ${token}`)
+    .send({
+      nombre: `${nombre} ${Date.now()}`,
+      precioBase: costo,
+      monedaId: CLP_MONEDA_ID,
+      tipo: 'producto',
+      unidadMedida: unidad,
+      stock,
+      costo,
+    });
+  expect(res.status).toBe(201);
+  return (res.body as ItemResponse).id;
+}
+
 /** Stock persistido del ítem, por el camino de la app (NUMERIC(18,4)). */
 async function stockDe(
   app: INestApplication<App>,
@@ -798,7 +832,11 @@ describe('Recetas — flujo completo (e2e)', () => {
   const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
   it('12. un ítem pedido en una cuenta abierta no se puede borrar, y vuelve a poder cuando la cuenta se cierra', async () => {
-    const enLaCuentaId = await crearIngrediente(
+    // **Productos, no ingredientes**: este test los PIDE en una cuenta y desde
+    // el 2026-09-04 la cuenta no acepta ingredientes. Los dos del mismo tipo a
+    // propósito — la comparación de abajo es "pedido" contra "no pedido", y
+    // cambiarles el tipo de a uno metería una segunda diferencia.
+    const enLaCuentaId = await crearProducto(
       app,
       token,
       'Pastel de choclo E2E',
@@ -806,7 +844,7 @@ describe('Recetas — flujo completo (e2e)', () => {
       '10',
       '8000',
     );
-    const sueltoId = await crearIngrediente(
+    const sueltoId = await crearProducto(
       app,
       token,
       'Item sin cuenta E2E',
