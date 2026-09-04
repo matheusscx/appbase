@@ -1,5 +1,36 @@
 # Descuento de nivel venta vs. base del IVA — investigación (2026-08-21)
 
+> ✅ **CERRADA — el código contestó todo esto, y empezó el mismo día (cierre escrito 2026-09-03).**
+>
+> Esta investigación describe un defecto **que ya no existe**. Se corrió el 2026-08-21 y el
+> arreglo entró **ese mismo día**, así que quedó como foto de un problema resuelto horas
+> después. **No tiene entrada en el backlog y nadie está esperando estas respuestas** — si
+> llegaste acá buscando trabajo pendiente, no hay.
+>
+> **Los commits:**
+>
+> | Commit | Fecha | Qué cerró |
+> |---|---|---|
+> | `67a91028` | 2026-08-21 | **El arreglo.** El descuento de nivel venta baja **prorrateado a las líneas** y cada una recalcula su impuesto con **sus** tasas. También movió el ancla del cierre a góndola en vez de apagarlo |
+> | `c0a17dcd` | 2026-08-27 | Las promociones **componen** con el ajuste de venta: `etiqueta − promo − parte del descuento global` |
+> | `63ec1fb8` | 2026-08-28 | Con `nivel_redondeo = 'documento'`, el reparto deja de cuantizar y el residuo deja de inventar centavos |
+>
+> **La prorrata entre base afecta y exenta cae sola**, que era la pregunta 2 y el bloqueo del
+> hallazgo D. Como cada línea divide su parte por **sus** tasas, una exenta se lleva su parte
+> entera como neto y una afecta la parte — **sin que el motor necesite saber cuál es cuál**.
+> Medido en el propio commit: *"1 afecta + 1 exenta con 200 de descuento da neto 908 + IVA 173
+> + exento 909 = 1.990, y el cliente paga exactamente 200 menos"*.
+>
+> ⚠️ **Lo único que sobrevive, y es para cuando se integre el DTE:** el SII espera que el
+> emisor **declare** sobre qué base pega cada descuento (`IndExeDR`); nosotros lo **derivamos**
+> por prorrata. El resultado es equivalente, la forma de declararlo no.
+>
+> 📌 **Por qué se escribió este cierre.** El 2026-09-03 este documento se leyó como estado
+> actual y se le dijo al owner que la proporción afecto/exento *"ya sale mal hoy"* — falso
+> desde hacía dos semanas. Una investigación es la foto del día que se corrió; **si el código
+> la contesta, el cierre se escribe acá o el próximo la vuelve a creer.**
+
+
 > ⛔ **Esto no es diseño ni decisión.** Es la pasada de investigación que pide
 > [`investigacion-mercado.md`](../investigacion-mercado.md) cuando la regla de negocio no
 > está en `docs/`. Lo que trae el mercado es **insumo para cruzar**; si choca con nuestro
@@ -98,6 +129,22 @@ dar exactamente el descuento. Es un problema conocido y con soluciones distintas
 
 Esta es la parte que la investigación no podía traer y que decide el diseño. Todo lo de acá
 está verificado leyendo `calculo-precios.engine.ts` hoy, 2026-08-21.
+
+> ⛔ **Cuatro de estos hallazgos ya no describen el código** (verificado el 2026-09-03):
+>
+> - **A** — *"`totalImpuestos` intacto"*: **corregido**. El ajuste de venta baja a las líneas y
+>   `totalImpuestos` sale del recálculo. El comentario engañoso que A pedía arreglar también
+>   se reescribió.
+> - **D** — *"el motor no recibe el estado fiscal, sin eso `IndExeDR` no se puede implementar"*:
+>   **sorteado, no resuelto.** El motor **sigue sin** recibirlo, y no le hace falta: la prorrata
+>   por tasas propias produce la segregación sin etiquetar la línea.
+> - **E** — *"el descuento global cae sobre una bolsa mezclada"*: **ya no.**
+> - **F** — *"apagaría el cierre a góndola"*: **no lo apaga, le mueve el ancla.**
+>
+> **B, C y G siguen en pie**: B es un descarte de diseño que se sostiene, C es el precedente que
+> terminó usándose, y G describe la reachability (el endpoint acepta descuentos de nivel venta y
+> **ninguna pantalla los manda** — re-verificado el 2026-09-03: `descuentosVentaIds` solo aparece
+> declarado en `useCalculoPrecios.ts`, sin productores).
 
 ### A. El defecto se confirma, con las coordenadas corregidas
 
@@ -206,7 +253,19 @@ Para no sobreafirmar, y porque `DIFERENCIADORES.md` exige citar en vez de afirma
 - **No se resolvió** rechazo vs. observación del SII (§1).
 - **Toteat** no publicó nada útil, como la plantilla ya anticipaba.
 
-## 6. Preguntas abiertas — decisión del owner
+## 6. Preguntas abiertas — ✅ contestadas por el código, no por el owner
+
+⚠️ **Ninguna de estas cuatro sigue abierta.** Se dejan con su respuesta al lado en vez de
+borrarlas, porque el razonamiento de por qué se preguntaban sigue siendo útil.
+
+| # | Pregunta | Cómo quedó |
+|---|---|---|
+| 1 | ¿Prorrateo a las líneas? | **Sí** — `repartirProporcional` + recálculo de cada línea (`67a91028`) |
+| 2 | ¿Sobre qué base pega con afecto y exento? | **Cae sola**: cada línea desbrutea con sus tasas; la exenta se lleva su parte entera |
+| 3 | ¿Quién se come el residuo? | Al **resto más grande**, desempatando por posición (`67a91028`), y sin cuantizar en `'documento'` (`63ec1fb8`) |
+| 4 | ¿Un descuento global apaga el cierre a góndola? | **No lo apaga: le mueve el ancla.** El owner enmendó la decisión (e) tras el spike |
+
+### El texto original de las preguntas, para el registro
 
 1. **¿Prorrateo a las líneas?** Es lo único que soporta multi-tasa (§4.B) y lo que hace el
    mercado (§2). La alternativa de un paso a nivel documento queda descartada por el modelo,
