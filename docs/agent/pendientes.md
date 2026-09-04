@@ -169,8 +169,10 @@ decisión que no es mía).
   **No es artefacto de tabla chica.** No existe índice sobre `venta_detalles.venta_id`, ni sobre
   `ventas.venta_referencia_id`, ni sobre `movimientos_inventario.venta_id` — el único índice de
   las tres es la PK de `ventas`. O sea que la falta es **preexistente** y este frente no la
-  creó; lo que agregó es un scan más de la tabla más ancha por cada `GET /ventas/:id` y por cada
-  nota de crédito emitida.
+  creó; lo que agregó son **dos** scans de la tabla más ancha por cada `GET /ventas/:id` —el
+  contador de unidades y el remanente por porción (`disponibleNotaCredito`)— más uno de `ventas`
+  en el subplan, y uno más por cada nota de crédito emitida. Medido al volumen de hoy: 0,301 ms
+  la consulta del remanente, que es lo que hace que todavía no duela.
 
   **No es N+1** (una consulta por request, no por fila), así que no cae bajo la regla de sacarlo
   en el momento. Lo que hay que medir antes de decidir: con cuántas filas de `venta_detalles`

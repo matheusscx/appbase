@@ -2914,6 +2914,36 @@ export class VentasService {
        ORDER BY creado_el ASC`,
       [ventaId, tenantId],
     );
+    // El remanente acreditable por porción fiscal. Mismo criterio que la
+    // composición que usa `crearNotaCreditoEnTransaccion`, y por eso el modal
+    // muestra exactamente el número que el backend después va a exigir: sin
+    // esto el operador descubre el tope apretando Confirmar.
+    //
+    // **Lo calcula el backend a propósito.** Replicar acá lo que el navegador
+    // necesitaría —valuar cada línea y cuantizarla con el `modo_redondeo`
+    // congelado de la venta— ya se intentó el 2026-09-04 y bloqueaba notas que
+    // el backend acepta.
+    //
+    // Filtra por `venta_referencia_id` sin mirar el tipo de documento porque
+    // **esa columna la escribe un solo lugar**: la creación de la nota de
+    // crédito. Es el mismo criterio de la consulta de `notasCredito` de arriba.
+    const disponiblePorPorcion: { clasificacion: string; monto: string }[] =
+      await this.db.query(
+        `SELECT d.clasificacion_tributaria AS clasificacion,
+                COALESCE(SUM(
+                  CASE WHEN d.venta_id = $1 THEN d.total_linea ELSE -d.total_linea END
+                ), 0)::text AS monto
+           FROM venta_detalles d
+          WHERE d.eliminado_el IS NULL
+            AND (d.venta_id = $1
+                 OR d.venta_id IN (SELECT venta_id FROM ventas
+                                    WHERE venta_referencia_id = $1
+                                      AND tenant_id = $2
+                                      AND eliminado_el IS NULL))
+          GROUP BY 1
+          ORDER BY 1`,
+        [ventaId, tenantId],
+      );
     // Las tres traen lo congelado (`nombre_regla`, `modo`, `valor_solicitado`)
     // además del monto: el catálogo vivo pudo cambiar o desaparecer desde que
     // se cobró, así que la fila tiene que bastarse sola.
@@ -3028,6 +3058,38 @@ export class VentasService {
     const customerRow = customerRows[0];
     const tipoNotaCredito = await this.tipoNotaCreditoDelTenant(tenantId);
 
+    /**
+     * Gemelo de los CUATRO cortes de elegibilidad de
+     * `crearNotaCreditoEnTransaccion`: el país del tenant tiene un tipo de
+     * documento "nota de crédito" configurado (`exigirTipoNotaCredito`, que
+     * lanza antes que los otros tres), no se emite sobre otra nota de crédito,
+     * la venta está pagada o pagada parcialmente, y tiene `config_calculo`
+     * congelada.
+     *
+     * Existe porque `disponibleNotaCredito` es una PROMESA: publicar un monto
+     * acreditable sobre un documento que el POST rechaza de plano —medido: el
+     * 37 % de los documentos de la base de desarrollo, incluida la nota de
+     * crédito que se acreditaba a sí misma— es el modo de falla que ese campo
+     * vino a cerrar, invertido.
+     *
+     * ⚠️ Es un gemelo, con todo lo que eso implica: si allá se agrega un
+     * cuarto guard, acá hay que agregarlo. No se comparte porque aquéllos
+     * lanzan (y el mensaje es parte del contrato de la emisión) y éste
+     * solamente decide si hay número que mostrar.
+     */
+    const elegibleParaNotaCredito =
+      // Sin tipo de documento NC en el país, la emisión falla ANTES de mirar
+      // nada más. Hoy los cuatro países del seed lo tienen, así que es latente
+      // — pero es el caso que `tipoNotaCreditoDelTenant` nombra: agregar un
+      // país sin sembrarlo.
+      tipoNotaCredito !== null &&
+      v.tipo_documento_id !== tipoNotaCredito &&
+      ['pagada', 'pagada_parcial'].includes(v.estado) &&
+      // Literal al de la emisión (`!original.config_calculo`), no
+      // `!== null`: con jsonb no difieren, pero un gemelo que no es literal
+      // invita a que alguien "lo alinee" y mueva la conducta sin querer.
+      !!v.config_calculo;
+
     return {
       id: v.venta_id,
       cajaId: v.caja_id,
@@ -3066,6 +3128,49 @@ export class VentasService {
       totalFinal: v.total_final,
       baseVentasTotalFinal: v.base_ventas_total_final,
       baseVentasSinImpuestos: v.base_ventas_sin_impuestos,
+      /**
+       * Cuánto se puede acreditar todavía por nota de crédito, en total y por
+       * porción fiscal.
+       *
+       * `porPorcion` es una LISTA y no dos campos fijos: hoy las
+       * clasificaciones son `afecto` y `exento`, pero el resto del modelo ya
+       * las trata como dato (`clasificacion_tributaria` es `text`, no un enum)
+       * y ADR-010 anticipa países con más baldes.
+       *
+       * ⚠️ `total` sale de `total_final` menos las notas previas, **no** de la
+       * suma de las porciones. Hoy dan el mismo número —las líneas de toda nota
+       * suman su total— pero no está garantizado: el piso en cero de cada
+       * porción puede dejar la suma un minor unit arriba. El que el backend
+       * exige es `total`, y la pantalla tiene que mostrar el que se va a
+       * aplicar.
+       *
+       * ⚠️ Es el tope del DOCUMENTO. Con `devolverDinero` hay además un tope
+       * del EFECTIVO —lo que esa venta cobró en efectivo menos lo ya devuelto—
+       * que **no se publica a propósito**: exponerlo era la fuga 5 del modo
+       * ciego (ver el 422 de `crearNotaCreditoEnTransaccion`). Ese se sigue
+       * descubriendo al confirmar, y es deliberado.
+       *
+       * En cero cuando el documento no admite nota de crédito: prometer un
+       * monto que el POST rechaza de plano es el modo de falla que este campo
+       * vino a cerrar, invertido.
+       */
+      disponibleNotaCredito: elegibleParaNotaCredito
+        ? {
+            total: Decimal.max(
+              0,
+              new Decimal(v.total_final).minus(
+                notasCredito.reduce(
+                  (a, n) => a.plus(n['total_final'] as string),
+                  new Decimal(0),
+                ),
+              ),
+            ).toFixed(4),
+            porPorcion: disponiblePorPorcion.map((p) => ({
+              clasificacion: p.clasificacion,
+              monto: Decimal.max(0, new Decimal(p.monto)).toFixed(4),
+            })),
+          }
+        : { total: '0.0000', porPorcion: [] },
       // Sin esto el desglose congelado no se puede ORDENAR como se aplicó: el
       // orden de los pasos es del tenant y editable. `null` en las ventas
       // anteriores al congelado; las notas de crédito congelan la suya

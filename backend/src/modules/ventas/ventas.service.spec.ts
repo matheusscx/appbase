@@ -214,6 +214,11 @@ describe('VentasService', () => {
    * arma acá.
    */
   let unidadesComprometidasRows: { item_id: string; devuelto: string }[] = [];
+  /**
+   * El remanente acreditable por porción fiscal que `findOne` expone. Vive acá
+   * por lo mismo que el contador: la consulta va por `db.query`.
+   */
+  let disponiblePorPorcionRows: { clasificacion: string; monto: string }[] = [];
 
   beforeEach(async () => {
     const manager = buildManagerMock();
@@ -253,6 +258,8 @@ describe('VentasService', () => {
         // `findOne`— el pool.
         if (sql.includes('WITH docs AS'))
           return Promise.resolve(unidadesComprometidasRows);
+        if (sql.includes('AS clasificacion'))
+          return Promise.resolve(disponiblePorPorcionRows);
         return Promise.resolve(MONEDA_ROWS);
       }),
     };
@@ -1776,6 +1783,7 @@ describe('VentasService', () => {
       ventaRows = [ventaOriginalRow];
       ncPreviasTotal = '0';
       unidadesComprometidasRows = [];
+      disponiblePorPorcionRows = [];
       composicionRows = [
         {
           es_nc: false,
@@ -2205,6 +2213,16 @@ describe('VentasService', () => {
         // `devuelto`.
         if (sql.includes('WITH docs AS'))
           return Promise.resolve(unidadesComprometidasRows);
+        // Con porciones y SIN notas hijas: es lo que hace que el corte de
+        // elegibilidad se pueda distinguir. Devolviendo la cabecera también
+        // como "nota previa" —que es lo que hacía el genérico `FROM ventas`—
+        // el total daba 0 solo, y el caso pasaba sin guard.
+        if (sql.includes('AS clasificacion'))
+          return Promise.resolve([
+            { clasificacion: 'afecto', monto: '100.0000' },
+          ]);
+        if (sql.includes('venta_referencia_id = $1'))
+          return Promise.resolve([]);
         if (sql.includes('FROM ventas'))
           return Promise.resolve([
             {
@@ -2238,10 +2256,22 @@ describe('VentasService', () => {
       );
       expect(res.tipoDocumento?.codigo).toBe('9999');
       expect(res.esNotaCredito).toBe(true);
+      // Y no promete capacidad de acreditar sobre sí misma: sin este corte la
+      // subconsulta no encuentra hijas y devuelve las líneas de la PROPIA nota
+      // en positivo, o sea plata ya acreditada presentada como disponible.
+      expect(res.disponibleNotaCredito).toEqual({
+        total: '0.0000',
+        porPorcion: [],
+      });
     });
 
     it('findOne expone referencia, tipo documento, modo/devuelto por detalle, reembolsos y NCs hijas', async () => {
       dataSourceMock.query.mockImplementation((sql: string) => {
+        // Sin esta rama, `tipoNotaCreditoDelTenant` devuelve `null` y el caso
+        // afirmaba el disponible EN LA CONFIGURACIÓN QUE NO ADMITE emitir: un
+        // test defendiendo el hueco del cuarto guard.
+        if (sql.includes('es_nota_credito'))
+          return Promise.resolve([{ tipo_documento_id: TIPO_DOCUMENTO_NC_ID }]);
         // Por el nombre de la consulta y no por `FROM movimientos_inventario`:
         // la CTE `movs` del contador nombra esa tabla, así que el genérico
         // acertaba por colisión de substring.
@@ -2251,6 +2281,17 @@ describe('VentasService', () => {
         // la aserción de abajo pasaría diga lo que diga la API.
         if (sql.includes('WITH docs AS'))
           return Promise.resolve([{ item_id: ITEM_ID, devuelto: '1.0000' }]);
+        // Antes del genérico de `venta_detalles`: el remanente por porción
+        // también lee esa tabla. Porciones DISTINTAS a propósito — con dos
+        // iguales, mapear mal la clasificación pasaría igual.
+        if (sql.includes('AS clasificacion'))
+          return Promise.resolve([
+            { clasificacion: 'afecto', monto: '9905.0000' },
+            // 9.905 + 400 = 10.305, y el total es 10.205: los dos caminos
+            // dejan de dar el mismo número, que es lo único que distingue
+            // `total_final − Σ NC` de `Σ porPorcion`.
+            { clasificacion: 'exento', monto: '400.0000' },
+          ]);
         if (sql.includes('pasarela_transacciones'))
           return Promise.resolve([
             {
@@ -2347,6 +2388,10 @@ describe('VentasService', () => {
               total_recargos: '0',
               total_impuestos: '0',
               total_final: '11305.0000',
+              // La columna que la venta real siempre trae: sin ella el corte
+              // de elegibilidad la trataba como no congelada, y el caso pasaba
+              // por el lado equivocado.
+              config_calculo: { decimalesMoneda: 4 },
               comentario: null,
               fecha: new Date('2026-07-10'),
               creado_el: new Date('2026-07-10'),
@@ -2394,6 +2439,17 @@ describe('VentasService', () => {
           comentario: 'NC por reembolso orden O-1',
         }),
       ]);
+      // El disponible para nota de crédito. El TOTAL sale de `total_final`
+      // menos las notas previas (11.305 − 1.100 = 10.205) y NO de sumar las
+      // porciones, que acá dan 10.305 a propósito: es el número que el backend
+      // después exige. Las porciones viajan como lista, con su clasificación.
+      expect(res.disponibleNotaCredito).toEqual({
+        total: '10205.0000',
+        porPorcion: [
+          { clasificacion: 'afecto', monto: '9905.0000' },
+          { clasificacion: 'exento', monto: '400.0000' },
+        ],
+      });
       expect(res.propina).toEqual({
         id: 'vp-1',
         porcentajeSugerido: '0.100000',

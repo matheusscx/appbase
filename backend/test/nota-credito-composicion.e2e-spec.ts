@@ -818,6 +818,57 @@ describe('Nota de crédito compuesta (e2e)', () => {
       expect(ivaAcreditado.lte('1330')).toBe(true);
     });
 
+    it('el detalle de la venta trae el disponible por porción fiscal', async () => {
+      const ventaId = await crearVentaMixta();
+      await emitirNC(ventaId, { monto: '1000' }); // 735 afecto / 265 exento
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const d = (
+        res.body as {
+          disponibleNotaCredito: {
+            total: string;
+            porPorcion: { clasificacion: string; monto: string }[];
+          };
+        }
+      ).disponibleNotaCredito;
+
+      // 11.330 − 1.000. Es el tope que el backend EXIGE al emitir.
+      expect(new Decimal(d.total).toString()).toBe('10330');
+      const porClas = new Map(
+        d.porPorcion.map((p) => [p.clasificacion, p.monto]),
+      );
+      expect(new Decimal(porClas.get('afecto')!).toString()).toBe('7595');
+      expect(new Decimal(porClas.get('exento')!).toString()).toBe('2735');
+      // ⚠️ No se afirma `Σ porPorcion === total`. Hoy coinciden, pero el fuente
+      // NO lo garantiza —el piso en cero de cada porción puede dejar la suma un
+      // minor unit arriba— y congelar como invariante una coincidencia manda al
+      // próximo a defender algo que nadie prometió.
+    });
+
+    it('un documento que no admite nota de crédito no promete ninguna', async () => {
+      const ventaId = await crearVentaMixta();
+      const { id } = await emitirNC(ventaId, { monto: '1000' });
+
+      // Sobre la NC misma: la consulta no encuentra hijas, así que sin el corte
+      // de elegibilidad devolvería las líneas de la propia nota en positivo —
+      // plata ya acreditada ofrecida como disponible—. El POST la rechaza de
+      // plano ("no se puede emitir una nota de crédito sobre otra").
+      const res = await request(app.getHttpServer())
+        .get(`/api/ventas/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const body = res.body as {
+        esNotaCredito: boolean;
+        disponibleNotaCredito: { total: string; porPorcion: unknown[] };
+      };
+      expect(body.esNotaCredito).toBe(true);
+      expect(new Decimal(body.disponibleNotaCredito.total).isZero()).toBe(true);
+      expect(body.disponibleNotaCredito.porPorcion).toHaveLength(0);
+    });
+
     it('el mismo ítem dos veces en la devolución se rechaza', async () => {
       const ventaId = await crearVentaMixta();
       // Cada entrada se validaba contra el mismo disponible, así que esto

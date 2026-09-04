@@ -135,6 +135,22 @@ hecho fiscal que compensar ni dinero que devolver, así que se puede deshacer de
 y sigue siendo válido después de integrar el SII, que no permite anular un DTE aceptado.
 Todo lo demás se revierte con nota de crédito.
 
+**El detalle de la venta dice cuánto queda por acreditar** (2026-09-04). `GET /ventas/:id`
+devuelve `disponibleNotaCredito: { total, porPorcion: [{ clasificacion, monto }] }`, para que la
+pantalla muestre el tope **antes** de que el operador tipee en vez de que lo descubra con un 400.
+Lo calcula el backend a propósito: el navegador no replica la cuantización del motor.
+
+- `total` es `total_final − Σ notas previas`, que es el tope que la emisión **exige**; no la suma
+  de las porciones, que hoy coincide pero no está garantizado.
+- `porPorcion` es el remanente de cada porción fiscal, y es lo que decide si una devolución
+  entra: la serie de notas no puede acreditar más IVA del que la venta cobró.
+- **En cero cuando el documento no admite nota de crédito** — es otra nota de crédito, no está
+  pagada/pagada parcial, no tiene `config_calculo` congelada, o el país del tenant no tiene tipo
+  de documento NC. Prometer un monto sobre un documento que la emisión rechaza de plano es el
+  mismo error que el campo vino a evitar, al revés.
+- ⚠️ Es el tope del **documento**. Con `devolverDinero` hay además un tope del efectivo que **no
+  se publica**: exponerlo permitía sondear cuánto había en caja con un solo request rechazado.
+
 - `motivo` obligatorio, mínimo 10 caracteres: una anulación sin explicación no sirve como
   auditoría. Queda en `ventas.motivo_cancelacion`, junto con `cancelada_el` y
   `cancelada_por_usuario_id`.
