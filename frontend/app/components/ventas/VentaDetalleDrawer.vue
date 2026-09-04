@@ -130,6 +130,16 @@ interface VentaDetalle {
   esNotaCredito: boolean
   reembolsos: Reembolso[]
   notasCredito: NotaCredito[]
+  /**
+   * Cuánto queda por acreditar, del backend. `total` es el tope que la emisión
+   * exige —y 0 cuando el documento no admite nota de crédito—; `porPorcion` es
+   * el remanente de cada porción fiscal, que es lo que decide si una devolución
+   * entra.
+   */
+  disponibleNotaCredito: {
+    total: string
+    porPorcion: { clasificacion: string, monto: string }[]
+  }
   detalles: Detalle[]
   descuentos: ReglaCongelada[]
   recargos: ReglaCongelada[]
@@ -220,15 +230,13 @@ const puedeAbonar = computed(() =>
 // daba un resultado distinto al del listado sobre la misma venta.
 const esNotaCredito = computed(() => venta.value?.esNotaCredito === true)
 
-// Máximo emitible: total de la venta menos las NCs ya emitidas (validado también en backend)
-const disponibleNC = computed(() => {
-  if (!venta.value) return '0'
-  const previas = venta.value.notasCredito.reduce(
-    (acc, nc) => new Decimal(acc).plus(nc.totalFinal).toString(),
-    '0',
-  )
-  return Decimal.max(0, new Decimal(venta.value.totalFinal).minus(previas)).toString()
-})
+// Máximo emitible: lo dice el BACKEND (`disponibleNotaCredito.total`), que es
+// el mismo número que la emisión después exige — y que además da 0 cuando el
+// documento no admite nota de crédito. Restarlo acá era un número de plata
+// calculado en dos lados.
+const disponibleNC = computed(() =>
+  venta.value ? venta.value.disponibleNotaCredito.total : '0',
+)
 
 const puedeCrearNC = computed(() =>
   !!venta.value
@@ -650,6 +658,33 @@ function emitPatch() {
   })
 }
 
+/**
+ * Vuelve a pedir la venta después de una operación que la cambió por dentro.
+ * **No es `cargar`**, y la diferencia importa: no resetea las filas
+ * desplegadas, no vuelve a pedir los métodos de pago y —sobre todo— no cierra
+ * el drawer si falla, porque acá la operación YA salió bien y cerrar la
+ * pantalla encima del toast de éxito es peor que quedarse con un número viejo.
+ *
+ * Hace falta porque `disponibleNotaCredito` **lo calcula el backend**: el
+ * pintado optimista puede poner el estado o la nota recién emitida, pero no ese
+ * número — y calcularlo acá sería volver a recalcular plata en el navegador.
+ */
+async function resincronizar() {
+  const id = venta.value?.id
+  if (!id) return
+  try {
+    const datos = await useApiFetch<VentaDetalle>(`${apiUrl}/ventas/${id}`)
+    // Solo si el drawer sigue mostrando la misma venta: cerrarlo (o abrir otra)
+    // mientras esta request vuela no debe repoblarlo.
+    if (venta.value?.id === id) venta.value = datos
+  }
+  catch {
+    // Se queda con el número viejo hasta la próxima apertura. El backend sigue
+    // siendo el que rechaza lo que no corresponde, así que el costo es una
+    // pantalla desactualizada, no una operación mal hecha.
+  }
+}
+
 function onAbonoSuccess(payload: {
   pagos: Pago[]
   venta: { id: string, estado: string, saldo: string }
@@ -664,6 +699,12 @@ function onAbonoSuccess(payload: {
   )
   cajaStore.aplicarCobroLocal(neto.toFixed(4), payload.pagos.length)
   emitPatch()
+  // Cobrar cambia la ELEGIBILIDAD para nota de crédito: una venta `pendiente`
+  // no la admite y el backend le devuelve disponible 0, así que sin esto el
+  // botón no aparecía hasta cerrar y reabrir el drawer. Es el gemelo de la
+  // recarga de `onNcSuccess`, con el signo dado vuelta: allá se ofrecía lo
+  // imposible, acá se escondía lo posible.
+  void resincronizar()
 }
 
 function onAnularSuccess(payload: { estado: string }) {
@@ -701,6 +742,10 @@ function onNcSuccess(payload: {
     }
   }
   emitPatch()
+  // El disponible y las porciones los calcula el BACKEND: sin esto el drawer
+  // seguía ofreciendo el número viejo y el modal precargaba un monto que el
+  // POST rechaza. Va después de `emitPatch`, que lee `venta.value`.
+  void resincronizar()
 }
 </script>
 
@@ -1183,6 +1228,7 @@ function onNcSuccess(payload: {
     v-model:open="ncOpen"
     :venta-id="venta.id"
     :disponible="disponibleNC"
+    :por-porcion="venta.disponibleNotaCredito.porPorcion"
     :detalles="venta.detalles"
     @success="onNcSuccess"
   />

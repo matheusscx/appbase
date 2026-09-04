@@ -81,6 +81,16 @@ const VENTA = {
   esNotaCredito: false,
   reembolsos: [],
   notasCredito: [],
+  // Del backend. `total` NO es `totalFinal` a propósito: es el número que el
+  // modal tiene que mostrar, y si el drawer volviera a restarlo por su cuenta
+  // daría 7.500 y el caso lo caza.
+  disponibleNotaCredito: {
+    total: '6500.0000',
+    porPorcion: [
+      { clasificacion: 'afecto', monto: '5000.0000' },
+      { clasificacion: 'exento', monto: '1500.0000' },
+    ],
+  },
   detalles: [
     // 6.000 − 500 de catálogo − 1.200 de promo = 4.300
     detalle('det-1', 'Pizza grande', '6000.0000', '4300.0000'),
@@ -340,5 +350,55 @@ describe('VentaDetalleDrawer — nota de crédito compuesta', () => {
     const lineas = filas(wrapper)
     expect(lineas.some(f => f.includes('Pizza grande'))).toBe(true)
     expect(lineas.every(f => !f.includes('afecto'))).toBe(true)
+  })
+})
+
+describe('VentaDetalleDrawer — el disponible sale del backend', () => {
+  it('le pasa al modal el número del backend, no uno recalculado en el navegador', async () => {
+    // El drawer restaba las notas previas por su cuenta. Con este fixture eso
+    // daría 7.500 (`totalFinal`, sin notas), y el backend dice 6.500: el número
+    // que la emisión EXIGE es el suyo, y además da 0 cuando el documento no
+    // admite nota de crédito.
+    const wrapper = await montar()
+    const modal = wrapper.findComponent({ name: 'VentasNotaCreditoModal' })
+    expect(modal.exists()).toBe(true)
+    expect(modal.props('disponible')).toBe('6500.0000')
+    expect(modal.props('porPorcion')).toEqual([
+      { clasificacion: 'afecto', monto: '5000.0000' },
+      { clasificacion: 'exento', monto: '1500.0000' },
+    ])
+  })
+})
+
+describe('VentaDetalleDrawer — resincroniza lo que calcula el backend', () => {
+  /**
+   * Cobrar una venta pendiente CAMBIA su elegibilidad para nota de crédito, y
+   * eso solo lo sabe el backend: mientras está `pendiente` devuelve disponible
+   * 0. Pintar el estado nuevo en el navegador no alcanza — sin resincronizar,
+   * el botón "Nota de crédito" no aparecía hasta cerrar y reabrir el drawer.
+   */
+  it('después de cobrar, el botón de nota de crédito aparece sin cerrar el drawer', async () => {
+    documentoActual = {
+      ...VENTA,
+      estado: 'pendiente',
+      disponibleNotaCredito: { total: '0.0000', porPorcion: [] },
+    } as unknown as typeof VENTA
+    const wrapper = await montar()
+    const boton = () =>
+      wrapper.findAll('button').find(b => b.text().trim() === 'Nota de crédito')
+    expect(boton()).toBeUndefined()
+
+    // La venta ya cobrada es lo que el backend va a devolver en la recarga.
+    documentoActual = VENTA
+    wrapper
+      .findComponent({ name: 'PagosAbonoModal' })
+      .vm.$emit('success', {
+        pagos: [],
+        venta: { id: 'v-1', estado: 'pagada', saldo: '0.0000' },
+      })
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(boton()).toBeDefined()
+    documentoActual = VENTA
   })
 })

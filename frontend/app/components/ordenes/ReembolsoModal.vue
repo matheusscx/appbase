@@ -36,8 +36,34 @@ const monto = ref('')
 const generarNotaCredito = ref(false)
 const cargandoVenta = ref(false)
 const submitting = ref(false)
-const { filas, cargarDesdeDetalles, limpiar, setCantidad, filasValidas, devoluciones }
-  = useDevolucionInventario()
+const {
+  filas,
+  cargarDesdeDetalles,
+  limpiar,
+  setCantidad,
+  setReponer,
+  normalizarSoloStock,
+  filasValidas,
+  devoluciones,
+} = useDevolucionInventario()
+
+/**
+ * Con nota de crédito, cualquier ítem vendido se acredita y volver al stock es
+ * una elección por línea. **Sin** nota, estas líneas van por el camino que solo
+ * mueve inventario, y ahí el backend rechaza lo que no puede reponer — así que
+ * ni se ofrece.
+ */
+const modoLista = computed<'acredita' | 'solo-stock'>(() =>
+  generarNotaCredito.value ? 'acredita' : 'solo-stock',
+)
+
+// Destildar la nota manda estas líneas al camino que solo mueve stock, y ahí el
+// backend exige que TODAS repongan. Son dos casos: la que no puede reponer
+// pierde la cantidad, y la que el operador apagó con el switch vuelve a
+// reponer — porque el switch ya no está en pantalla para arreglarlo.
+watch(generarNotaCredito, (v) => {
+  if (!v) normalizarSoloStock()
+})
 
 async function cargarLineasVenta(ventaId: string) {
   cargandoVenta.value = true
@@ -135,7 +161,9 @@ async function confirmar() {
             :filas="filas"
             :valida="filasValidas"
             :cargando="cargandoVenta"
+            :modo="modoLista"
             @set-cantidad="setCantidad"
+            @set-reponer="setReponer"
           />
         </template>
       </div>
