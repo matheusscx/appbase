@@ -289,12 +289,84 @@ tarea fue no tocar ningún archivo fuera de este. Queda anotado acá para que no
 
 ---
 
+## 7 bis. Las otras tres autoridades — ARCA, DIAN y SAT (agregado 2026-09-03)
+
+**Por qué se agregó.** Esta investigación se corrió cuando el producto se pensaba solo para
+Chile, y la conclusión de la § 2 —*"el SII no valida la aritmética, así que emitir una NC sin
+descomponer se acepta igual"*— **no sobrevive** al mirar los otros tres países. El owner pidió
+relevarlos el 2026-09-03, después de que el frente de la nota de crédito por país dejara claro
+que AR/CO/MX **van a emitir de verdad, progresivamente**.
+
+### Argentina (ARCA / WSFEv1) — el espejo exacto de Chile · **[PRIMARIA]**
+
+Manual del desarrollador RG 4291, v4.7, extraído completo con `pdftotext -layout` y leído acá.
+
+**1. No existe zona Detalle.** La estructura `FECAEDetRequest` **no tiene ningún array de
+líneas**: lleva `Concepto`, documento del receptor, numeración (`CbteDesde`/`CbteHasta`),
+fechas, los importes, `CbtesAsoc`, `Tributos`, `Iva` y `Opcionales`. Nada más. El propio ARCA
+describe el servicio como para comprobantes *"sin detalle de ítem"*.
+
+**2. Los importes desagregados son obligatorios.** `ImpTotal`, `ImpTotConc`, `ImpNeto`,
+`ImpOpEx`, `ImpTrib` e `ImpIVA` están **todos** marcados `S` en la columna *Obligatorio*.
+
+**3. La aritmética SÍ se valida, y con rechazo.** Código de error **10048**, texto literal:
+
+> *"El campo 'Importe Total' `<ImpTotal>`, debe ser igual a la suma de ImpTotConc + ImpNeto +
+> ImpOpEx + ImpTrib + ImpIVA"*
+
+**4. Y el IVA va desagregado por alícuota.** Código **10018**:
+
+> *"Si `<ImpIVA>` es mayor a 0 el objeto `<IVA>` y `<AlicIva>` son obligatorios"*
+
+`AlicIva` lleva `Id` (alícuota del catálogo `FEParamGetTiposIva`), `BaseImp` e `Importe`.
+
+⛔ **Consecuencia directa sobre la pregunta 1 de la § 8.** En Chile se puede emitir una NC
+descuadrada porque el SII no revisa la cuenta (§ 2.4). **En Argentina no se obtiene el CAE**:
+sin `ImpNeto` e `ImpIVA` que sumen, ARCA rechaza y no hay comprobante. Y como ahí **no hay
+líneas donde apoyarse**, la única manera de llenar esos campos en una devolución por monto es
+**calcular el neto y el IVA de ese monto**. El prorrateo deja de ser una regla que inventamos
+—lo que la § 7 daba como hueco sin precedente— y pasa a ser **el requisito de una autoridad**.
+
+### México (SAT) — al menos un concepto, pero puede ser genérico · **[SECUNDARIA]**
+
+La nota de crédito es un **CFDI de Egreso**, exige al menos un `Concepto`, y la práctica
+documentada acepta uno **genérico**: clave de producto/servicio **84111506** *"Servicios de
+facturación"*, unidad **ACT**, con **UsoCFDI G02** *"Devoluciones, descuentos o
+bonificaciones"*. Ojo: es materia donde la regla cambió entre versiones del CFDI — verificar
+contra el Anexo 20 vigente antes de construir.
+
+### Colombia (DIAN) — `CreditNoteLine` en el UBL · **[SECUNDARIA]**
+
+La nota crédito es uno de los cinco documentos UBL del sistema (`Invoice`, **`CreditNote`**,
+`DebitNote`, `ApplicationResponse`, `AttachedDocument`), y el anexo técnico especifica la
+*"Línea de Nota Crédito: `CreditNoteLine`"*. **No se abrió el anexo**: queda por verificar si
+exige al menos una línea y si admite una genérica.
+
+### La pinza, que es lo que aclara el panorama
+
+| | ¿Exige líneas? | ¿Exige descomponer el impuesto? | ¿Valida la aritmética? |
+|---|---|---|---|
+| **Chile** (SII) | **Sí** — Detalle obligatoria en los 10 tipos | No — condicional | **No** (§ 2.4) |
+| **Argentina** (ARCA) | **No** — no existe la zona | **Sí** — obligatorio, por alícuota | **Sí** — error 10048 |
+| **México** (SAT) | Sí, ≥1 concepto — admite genérico | Sí | no relevado |
+| **Colombia** (DIAN) | `CreditNoteLine` — sin verificar | sin verificar | sin verificar |
+
+📌 **Los dos extremos se cubren mutuamente: Chile obliga a las líneas, Argentina obliga a la
+descomposición.** No es "uno o el otro" — un sistema que sirva a los dos necesita las dos
+cosas. Y muere el argumento *"la autoridad no lo revisa"*: **ARCA lo revisa y bloquea.**
+
+---
+
 ## 8. Qué queda para decidir — preguntas abiertas, no resueltas acá
 
-1. **¿La NC por monto pasa a declarar neto/exento/IVA, o se mantiene fuera del motor como
-   hoy?** El SII no rechaza automáticamente si no cuadra (§2.4), pero "condicional" (§2.3)
-   significa que se vuelve obligatorio *"si se cumple una cierta condición"* — ¿cuál es esa
-   condición para este sistema?
+1. ~~**¿La NC por monto pasa a declarar neto/exento/IVA, o se mantiene fuera del motor como
+   hoy?**~~ El SII no rechaza automáticamente si no cuadra (§2.4), pero "condicional" (§2.3)
+   significa que se vuelve obligatorio *"si se cumple una cierta condición"*.
+   ✅ **Contestada por la norma el 2026-09-03, y no por el SII: por ARCA** (§ 7 bis). En
+   Argentina `ImpNeto` e `ImpIVA` son **obligatorios**, la suma **se valida** (error 10048) y
+   **no hay líneas donde apoyarse**. O sea que para servir a Argentina la NC por monto
+   **tiene** que declarar su descomposición — no es una opción de diseño. Lo que queda abierto
+   ya no es *si*, sino *sobre qué base* (pregunta 4).
 2. **Si se decide declarar, ¿el criterio es prorratear o exigir que toda NC esté ligada a
    líneas reales** (las `devoluciones` que ya existen como parámetro opcional), eliminando la
    posibilidad de "monto suelto sin ninguna línea"? El mercado que sí documenta algo (Bsale,
@@ -338,6 +410,16 @@ tarea fue no tocar ningún archivo fuera de este. Queda anotado acá para que no
 - [Bsale — ¿Cómo realizar nota de crédito por un monto en específico?](https://ayuda.bsale.io/support/solutions/articles/151000212255--c%C3%B3mo-realizar-nota-de-cr%C3%A9dito-por-un-monto-en-espec%C3%ADfico-)
 - [Defontana — ¿Cómo emitir una Nota de Crédito corrige montos?](https://intercom.help/defontanaerp/es/articles/4092681-nota-de-credito-corrige-monto)
 - [Nubox — ¿Cómo emitir una nota de crédito?](https://help.nubox.com/es/articles/8156785-como-emitir-una-nota-de-credito)
+
+**ARCA (Argentina) — oficial, leído completo (PDF vía `pdftotext -layout`, 2026-09-03):**
+- [Manual para el desarrollador — Facturación RG 4291, WSFEv1 v4.7](https://www.afip.gob.ar/fe/ayuda/documentos/wsfev1-RG-4291.pdf)
+  — estructura `FECAEDetRequest` (sin array de líneas), tabla de obligatoriedad de importes,
+  códigos de error 10018 y 10048, estructura `AlicIva`.
+- [Webservices de factura electrónica — documentación](https://www.afip.gob.ar/ws/documentacion/ws-factura-electronica.asp)
+
+**SAT (México) y DIAN (Colombia) — secundarias, sin abrir el anexo:**
+- [Clave SAT 84111506 en notas de crédito](https://aluadn.com/insight/clave-sat-84111506-como-usarla/)
+- [Anexo técnico de la factura electrónica de venta v1.9 (DIAN)](https://www.dian.gov.co/impuestos/factura-electronica/Documents/Anexo-Tecnico-Factura-Electronica-de-Venta-vr-1-9.pdf)
 
 **Estándar de facturación electrónica (contexto, no chileno):**
 - [UBL 2.1 — `cac:CreditNoteLine` / `cac:TaxSubtotal`](https://www.datypic.com/sc/ubl21/e-cac_CreditNoteLine.html)

@@ -1643,9 +1643,10 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
 
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
-  (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** sobre
-  `ventas.service.ts:982` `crearNotaCredito` — la cita vieja decía `:854`, que hoy es otra
-  cosa) —
+  (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** y **re-verificado el
+  2026-09-03** sobre `ventas.service.ts:1430` `crearNotaCredito` — la cita decía `:982`, y
+  antes `:854`; la corrió el frente de la nota de crédito por país. Es la tercera vez que se
+  mueve: leer el símbolo, no el número) —
   **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
   ante impuestos y documentos tributarios; ver **ADR-010**).
   **Lo medido, sin interpretar:** la NC construye su fila de `ventas` **directo**, no por
@@ -1658,8 +1659,9 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   `:1035`), y el camino manual falla ruidoso si falta (decisiones P4/P5 del frente de
   redondeo). Verificado el 2026-08-22, se corrige acá porque este archivo es texto vivo;
   (c) `base_ventas_sin_impuestos` **sigue** quedándose en el default de la columna —se llena
-  solo en `crearEnTransaccion` (`:472`, `:491`), que la NC no usa—, y ese campo lo consume
-  `liquidacion-propinas.service.ts`.
+  solo en `crearEnTransaccion` (`:592`, `:611`), que la NC no usa—, y ese campo lo consume
+  `liquidacion-propinas.service.ts`. ✅ Los tres hardcodeos y este hueco **siguen tal cual**,
+  verificados el 2026-09-03.
   Los dos puntos de entrada (`crearNotaCreditoDesdeVenta`) desembocan en el mismo método.
   Lo que la NC **sí** congela es `descripcion` y `clasificacion_tributaria` por línea en
   `venta_detalles`, copiadas de la línea original.
@@ -1697,13 +1699,50 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
     por monto puro no tendría con qué armar la zona Detalle el día que se integre el SII.
 
   **Las 6 preguntas abiertas quedan en la §8 de la investigación** y no se copian acá para no
-  duplicar la fuente. La que las destraba a todas es la primera: **¿la NC por monto pasa a
-  declarar neto/exento/IVA, o se mantiene fuera del motor como hoy?** Las otras cinco
-  —prorrateo vs. exigir líneas, qué hacer con la zona Detalle vacía, sobre qué base prorratear,
-  quién decide si lleva IVA, y si conviene partir "NC itemizada" de "NC por monto libre"—
-  dependen de esa respuesta.
-  ⚠️ **Sigue sin decidirse, y sigue sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a
-  parar. Lo que cambió es que ahora la decisión tiene material abajo.
+  duplicar la fuente.
+
+  🆕 **La primera —la que destrababa a las otras cinco— la contestó la norma el 2026-09-03, y
+  no fue el SII: fue ARCA** (§ 7 bis de la investigación, ampliada ese día a pedido del owner
+  con las otras tres autoridades). Evidencia **primaria**, manual del desarrollador WSFEv1
+  v4.7 leído completo:
+
+  - **Argentina no tiene zona Detalle**: `FECAEDetRequest` no lleva ningún array de líneas.
+  - Pero `ImpNeto`, `ImpOpEx` e `ImpIVA` son **obligatorios**, y la suma **se valida con
+    rechazo** (error **10048**), con el IVA desagregado por alícuota (error **10018**).
+
+  ⛔ **Consecuencia:** el argumento *"la autoridad no lo revisa"* —cierto para el SII, § 2.4—
+  **es falso para ARCA, que bloquea**. Sin `ImpNeto`/`ImpIVA` que sumen no hay CAE, y sin
+  líneas donde apoyarse la única salida es **calcular** el neto y el IVA del monto. O sea que
+  el prorrateo dejó de ser una regla sin precedente que inventaríamos nosotros (lo que decía
+  la § 7) y pasó a ser **requisito de una autoridad**.
+
+  📌 **Y los dos extremos se cubren mutuamente: Chile obliga a las LÍNEAS, Argentina obliga a
+  la DESCOMPOSICIÓN.** Un sistema que sirva a los dos necesita las dos cosas — no es "uno o el
+  otro", que es como estaba planteada la entrada.
+
+  **Lectura recomendada al owner el 2026-09-03, para que el que lo tome no arranque de cero**
+  (es recomendación, no decisión tomada):
+
+  1. **Partir el flujo en dos**, que es la pregunta 6 y resultó ser la que manda. El motivo es
+     de código, no de gusto: el reembolso de la pasarela entra por
+     `reembolso-callback.handler.ts:45` con las devoluciones que traiga el evento —que pueden
+     venir **vacías**— y ahí **la plata ya se movió**; rechazarlo por falta de líneas no
+     deshace el cobro, solo pierde el evento (decisión P3, ya escrita en el código).
+     **"Exigir líneas" no se puede aplicar en todos lados.**
+  2. **NC desde el POS → exigir líneas.** Hay un humano que puede decir qué se devuelve, es lo
+     único con precedente en el mercado (§ 4), y cierra la zona Detalle chilena.
+  3. **NC desde la pasarela → prorratear**, porque no hay alternativa y ARCA lo exige.
+  4. **El orden importa, y no por lo que parece:** lo irrecuperable **no** es el número del
+     IVA —se recalcula después desde la venta original congelada más el monto— sino **qué se
+     devolvió**. Si el cajero devuelve un monto suelto, ninguna regla futura reconstruye qué
+     era. Así que **la mitad del POS va primero**.
+
+  ⚠️ **Contra, que el owner tiene que pesar:** exigir líneas **le saca al cajero el "devolvé
+  $5.000 y listo"**, y eso es decisión de producto tanto como fiscal.
+
+  ⚠️ **Sigue sin decidirse y sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a parar.
+  **No urge hoy** —no hay datos productivos, así que no se está perdiendo ningún hecho— pero
+  el reloj arranca con el primer local real vendiendo.
 
 ## 5. Carreras de concurrencia
 
