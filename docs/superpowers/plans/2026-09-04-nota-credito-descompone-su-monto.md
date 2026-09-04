@@ -16,6 +16,22 @@ corrige. La aritmética vive en un módulo puro y testeable; el service solo lee
 **Tech Stack:** NestJS + TypeORM (`db.transaccion` / `@InjectRepository`, ADR-020), Decimal.js,
 PostgreSQL 15 con `synchronize`, Jest + supertest, Nuxt 4 + Nuxt UI.
 
+> ✅ **Ejecutado el 2026-09-04**, las cinco tareas, en `20452024`, `405a4342`, `e24e94a7`,
+> `7a1e934d` y `4c691c96`. Cierre en
+> [`resueltos.md`](../../agent/resueltos.md).
+>
+> **Tres cosas salieron distinto de lo escrito acá, y conviene saber cuáles:**
+>
+> 1. **La Tarea 2 creció con lo que encontró la revisión.** Nacer pausado no alcanzaba para
+>    esconder el ítem de sistema: tres pantallas de configuración piden el listado sin filtrar
+>    `activo`. Se excluye del listado entero y `remove()` lo rechaza.
+> 2. **La Tarea 4 ganó un segundo tope, por porción fiscal**, que este plan no preveía: sin él
+>    la SERIE de notas acredita más IVA del que la venta cobró, con cada documento cerrando
+>    bien por separado. Y el remanente descuenta también lo que la propia nota devuelve.
+> 3. **El pre-chequeo del modal de la Tarea 5 se escribió y se sacó.** Para no divergir del
+>    backend había que replicar el cuantizador del motor en el navegador; sin eso bloqueaba
+>    notas que el backend acepta. Quedó en `pendientes.md` como frente propio.
+
 **Spec:** [`../specs/2026-09-04-nota-credito-descompone-su-monto-design.md`](../specs/2026-09-04-nota-credito-descompone-su-monto-design.md)
 
 ## Global Constraints
@@ -73,7 +89,7 @@ Además de las invariantes de `CLAUDE.md`, para este frente en particular:
 ⚠️ Este es **el único** cambio autorizado sobre el motor en todo el plan. Es un `export`, no un
 cambio de comportamiento: si el diff toca una línea que no sea la firma o el docblock, se detiene.
 
-- [ ] **Paso 1: agregar `export` al tipo y a la función**
+- [x] **Paso 1: agregar `export` al tipo y a la función**
 
 En `calculo-precios.engine.ts:452`:
 
@@ -88,7 +104,7 @@ En `calculo-precios.engine.ts:1540`:
 export function repartirProporcional(
 ```
 
-- [ ] **Paso 2: dejar escrito por qué se exporta y no se muda**
+- [x] **Paso 2: dejar escrito por qué se exporta y no se muda**
 
 Agregar al final del docblock de `repartirProporcional`:
 
@@ -104,7 +120,7 @@ Agregar al final del docblock de `repartirProporcional`:
  * un frente propio del motor.
 ```
 
-- [ ] **Paso 3: marcar en promociones que la copia NO es intercambiable**
+- [x] **Paso 3: marcar en promociones que la copia NO es intercambiable**
 
 El docblock de `repartirDescuentoCombo` dice hoy *"mismo idioma que `repartirProporcional` …
 sin su paso de cuantización"*, y eso invita a unificarlas. Reemplazar esa frase por:
@@ -118,7 +134,7 @@ sin su paso de cuantización"*, y eso invita a unificarlas. Reemplazar esa frase
  * `repartirProporcional` para la nota de crédito.
 ```
 
-- [ ] **Paso 4: verificar que el motor no se movió**
+- [x] **Paso 4: verificar que el motor no se movió**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test -- calculo-precios promociones
@@ -127,7 +143,7 @@ cd backend && npm run lint:check && npm run typecheck && npm test -- calculo-pre
 Esperado: verde, y `git diff --stat` sobre el motor muestra **solo** las líneas del `export` y
 los docblocks.
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/src/modules/calculo-precios/calculo-precios.engine.ts backend/src/modules/promociones/promociones.evaluator.ts
@@ -150,7 +166,7 @@ git commit -m "refactor(precios): exportar repartirProporcional para la nota de 
 - Produce: `ItemsService.asegurarItemAjuste(manager: EntityManager, tenantId: string, itemId?: string): Promise<Item>` — find-or-create idempotente, devuelve el ítem marcado del tenant.
 - Consume: nada de tareas anteriores.
 
-- [ ] **Paso 1: escribir el test e2e que falla**
+- [x] **Paso 1: escribir el test e2e que falla**
 
 Crear `backend/test/nota-credito-composicion.e2e-spec.ts`. Seguir el patrón de
 `backend/test/nota-credito-por-pais.e2e-spec.ts` para el bootstrap (app, token, DataSource).
@@ -188,7 +204,7 @@ it('el ítem "Ajuste" no aparece en el catálogo del POS', async () => {
 ⚠️ El segundo test asume la forma de respuesta de `GET /api/items`. **Abrir el controller y
 ajustar el acceso al body antes de escribirlo** — no adivinar la envoltura.
 
-- [ ] **Paso 2: correrlo y verlo fallar**
+- [x] **Paso 2: correrlo y verlo fallar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion
@@ -196,7 +212,7 @@ ajustar el acceso al body antes de escribirlo** — no adivinar la envoltura.
 
 Esperado: FAIL — la columna `es_ajuste_nota_credito` no existe.
 
-- [ ] **Paso 3: la columna y el índice**
+- [x] **Paso 3: la columna y el índice**
 
 En `item.entity.ts`, junto a `clasificacionTributaria`:
 
@@ -226,7 +242,7 @@ Y el índice parcial en el decorador de clase, con el mismo criterio que
 
 Con dos filas marcadas, cuál se usa dependería del orden que elija el planner.
 
-- [ ] **Paso 4: el find-or-create en `ItemsService`**
+- [x] **Paso 4: el find-or-create en `ItemsService`**
 
 ```ts
 /**
@@ -301,7 +317,7 @@ async asegurarItemAjuste(
 ⚠️ **`monedaId` es NOT NULL en `items`.** Resolverla como ya lo hace el service para cualquier
 ítem del tenant — abrir `create()` y copiar de ahí la resolución, no inventar una consulta nueva.
 
-- [ ] **Paso 5: sembrarlo al crear el tenant**
+- [x] **Paso 5: sembrarlo al crear el tenant**
 
 En `tenants.service.ts`, después del paso 6 (caja virtual) y junto a `asegurarMostrador`:
 
@@ -314,7 +330,7 @@ Inyectar `ItemsService` en el constructor e importar `ItemsModule` en `tenants.m
 Verificado el 2026-09-04: **no hay ciclo** — `ItemsModule` importa `InventarioModule`,
 `CatalogModule` y `MonedasModule`, y ninguno importa `TenantsModule`.
 
-- [ ] **Paso 6: el seeder**
+- [x] **Paso 6: el seeder**
 
 El seeder llama **al mismo find-or-create**, para que exista una sola forma de crear este
 ítem, pasándole el ID fijo que exige la convención del seed:
@@ -333,20 +349,20 @@ uno, cada uno lleva el siguiente número libre, y hay que verificar que `SeederS
 `ItemsService` inyectado (si no lo tiene, se inyecta; `SeederModule` no puede quedar con un
 ciclo).
 
-- [ ] **Paso 7: correr el e2e y verlo pasar**
+- [x] **Paso 7: correr el e2e y verlo pasar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion && ./scripts/reset-db.sh --verificar
 ```
 
-- [ ] **Paso 8: mutante — probar que el índice está vivo**
+- [x] **Paso 8: mutante — probar que el índice está vivo**
 
 Insertar a mano una segunda fila marcada para el mismo tenant, **dentro de una transacción con
 rollback garantizado** (patrón de `nota-credito-por-pais.e2e-spec.ts`: `ds.transaction` con
 `throw` incondicional, y la aserción sobre el error capturado). Esperado: violación de
 `uq_item_ajuste_nc_tenant`, y **cero** filas sobrantes después.
 
-- [ ] **Paso 9: commit**
+- [x] **Paso 9: commit**
 
 ```bash
 git add -A backend/src backend/test
@@ -369,7 +385,7 @@ git commit -m "feat(items): ítem de sistema Ajuste, del que cuelga la línea de
 Nada de esto toca la base ni el service: entra `Decimal`, sale `Decimal`. Es lo que permite que
 los ocho casos de la spec se prueben sin levantar Postgres.
 
-- [ ] **Paso 1: escribir los tests que fallan**
+- [x] **Paso 1: escribir los tests que fallan**
 
 En `nota-credito-composicion.spec.ts`. **Los valores tienen que discriminar**: nada de tasas 0
 ni proporciones 50/50, que dejan pasar un mutante que cambie el orden o el divisor.
@@ -499,7 +515,7 @@ los tests antes de dar por buena cualquier constante**: si uno no da, es el núm
 que se revisa contra la aritmética, no al revés — y si la aritmética es la que está mal, se
 arregla ahí.
 
-- [ ] **Paso 2: correrlos y verlos fallar**
+- [x] **Paso 2: correrlos y verlos fallar**
 
 ```bash
 cd backend && npm test -- nota-credito-composicion
@@ -507,7 +523,7 @@ cd backend && npm test -- nota-credito-composicion
 
 Esperado: FAIL, el módulo no existe.
 
-- [ ] **Paso 3: escribir el módulo**
+- [x] **Paso 3: escribir el módulo**
 
 ```ts
 import Decimal from 'decimal.js';
@@ -595,13 +611,13 @@ export function repartirAjuste(
 }
 ```
 
-- [ ] **Paso 4: correrlos y verlos pasar**
+- [x] **Paso 4: correrlos y verlos pasar**
 
 ```bash
 cd backend && npm test -- nota-credito-composicion && npm run lint:check && npm run typecheck
 ```
 
-- [ ] **Paso 5: mutantes — cada uno tiene que REVERTIR al código anterior, no solo romper**
+- [x] **Paso 5: mutantes — cada uno tiene que REVERTIR al código anterior, no solo romper**
 
 Guardar copia del archivo antes de cada mutante y restaurar con `diff -q`, **nunca** con
 `git checkout`.
@@ -615,7 +631,7 @@ Guardar copia del archivo antes de cada mutante y restaurar con `diff -q`, **nun
 Si un mutante **sobrevive**, sospechar del test antes que del código: probablemente el fixture
 no discrimina.
 
-- [ ] **Paso 6: commit**
+- [x] **Paso 6: commit**
 
 ```bash
 git add backend/src/modules/ventas/nota-credito-composicion.ts backend/src/modules/ventas/nota-credito-composicion.spec.ts
@@ -640,7 +656,7 @@ git commit -m "feat(ventas): la aritmética de la nota de crédito, pura y teste
 inventario deja el reembolso **peor que hoy**: falla entero con 400. Los dos cambios entran
 juntos o no entra ninguno.
 
-- [ ] **Paso 1: escribir los e2e que fallan**
+- [x] **Paso 1: escribir los e2e que fallan**
 
 En `backend/test/nota-credito-composicion.e2e-spec.ts`, sobre una venta **mixta** creada por la
 API (no por SQL: si el escenario necesita SQL directo, sospechar que ese estado es inalcanzable
@@ -754,13 +770,13 @@ medido sale por identidad y no prueba nada. `emitirNC` es un helper local del sp
 ⚠️ Los fixtures tienen que **discriminar**: una venta 50/50 con un ajuste que divide exacto pasa
 igual con el reparto mal escrito. Que la proporción sea despareja y el monto no divida entero.
 
-- [ ] **Paso 2: correrlos y verlos fallar**
+- [x] **Paso 2: correrlos y verlos fallar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion
 ```
 
-- [ ] **Paso 3: valuar la devolución a lo que costó, no al precio de lista**
+- [x] **Paso 3: valuar la devolución a lo que costó, no al precio de lista**
 
 `validarDevolucionesReembolso` ya lee las filas del ítem y agrega sus cantidades. Agregar a lo
 que devuelve el **valor bruto por unidad**, calculado sobre esas mismas filas:
@@ -780,7 +796,7 @@ abrir una segunda.
 El otro llamador (`registrarDevolucionesPorReembolso`, `:1644`) ignora el campo nuevo — no
 cambia de comportamiento.
 
-- [ ] **Paso 4: leer la composición del original y de las NC previas, en UNA query**
+- [x] **Paso 4: leer la composición del original y de las NC previas, en UNA query**
 
 Dentro de la transacción, después del lock:
 
@@ -803,7 +819,7 @@ De ahí salen las dos cosas: la **tasa** por porción (de las filas del original
 **remanente** por porción (original − NC previas). Una NC vieja sin líneas aporta `0`: no
 existe ese caso —no hay datos productivos— pero queda escrito para que no se lea como olvido.
 
-- [ ] **Paso 5: componer las líneas y escribirlas**
+- [x] **Paso 5: componer las líneas y escribirlas**
 
 Orden dentro de la transacción, después del tope contra `disponible`:
 
@@ -843,7 +859,7 @@ guard explícito, con el porqué:
 // ajuste haría fallar el reembolso ENTERO.
 ```
 
-- [ ] **Paso 6: las filas de `ventas_impuestos`**
+- [x] **Paso 6: las filas de `ventas_impuestos`**
 
 Una query agregada sobre el original:
 
@@ -868,7 +884,7 @@ dos impuestos repartidos entre líneas que no los comparten, el `porcentaje_apli
 describe la regla y no reproduce su propio importe: es el precio de derivar de hechos
 congelados.
 
-- [ ] **Paso 7: los totales derivados**
+- [x] **Paso 7: los totales derivados**
 
 Reemplazar los hardcodeos de `:1428-1436`:
 
@@ -886,13 +902,13 @@ baseVentasSinImpuestos: new Decimal(params.monto).minus(sumaImpuestos).toFixed(4
 Si el orden actual lo impide, se guarda la cabecera y se actualiza con los totales en la misma
 transacción — **no** se calculan dos veces.
 
-- [ ] **Paso 8: correr el e2e y verlo pasar**
+- [x] **Paso 8: correr el e2e y verlo pasar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion && ./scripts/reset-db.sh --verificar
 ```
 
-- [ ] **Paso 9: la suite entera, no un subset**
+- [x] **Paso 9: la suite entera, no un subset**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test
@@ -901,7 +917,7 @@ cd backend && npm run lint:check && npm run typecheck && npm test
 
 Un DTO o un constructor tocado rompe specs lejanos: el subset no lo ve.
 
-- [ ] **Paso 10: mutantes**
+- [x] **Paso 10: mutantes**
 
 | Mutante | Test que debe caer |
 |---|---|
@@ -913,13 +929,13 @@ Un DTO o un constructor tocado rompe specs lejanos: el subset no lo ve.
 ⚠️ Después de revertir un mutante, **verificar la hora del restart en los logs del backend**: el
 fuente limpio no prueba que el proceso lo esté.
 
-- [ ] **Paso 11: documentación viva, en este mismo commit**
+- [x] **Paso 11: documentación viva, en este mismo commit**
 
 `docs/features/reembolsos-nota-credito.md`: reescribir la sección de backend con cómo queda
 compuesta la NC (líneas, neto, IVA, totales derivados) y el rechazo por mercadería > monto.
 **Reescribir**, no anexar una corrección al final.
 
-- [ ] **Paso 12: revisión independiente y commit**
+- [x] **Paso 12: revisión independiente y commit**
 
 Lanzar `domain-reviewer` sobre el diff staged (N+1, soft delete, dinero-Decimal, alcance), atar
 el recibo al diff exacto y commitear. El arreglo que pida la revisión **se vuelve a revisar**.
@@ -941,7 +957,7 @@ git commit -m "feat(ventas): la nota de crédito descompone su monto en líneas,
 **Interfaces:**
 - Consume: la respuesta de `GET /ventas/:id` para una NC (Tarea 4).
 
-- [ ] **Paso 1: mirarlo de verdad, en el navegador**
+- [x] **Paso 1: mirarlo de verdad, en el navegador**
 
 Con `docker-compose up` y la base **reseteada antes** (no después): crear una venta mixta,
 emitir una NC con glosa, abrir su detalle en el drawer y mirar. El smoke test va por
@@ -951,32 +967,32 @@ Verificado el 2026-09-04 en el código: `filasDetalle` (`:479`) ya arma la tabla
 sus reglas congeladas y la fila "Impuestos" del total (`:887`) ya existe. **La expectativa es
 que se vea solo.** Lo que se busca es lo que chirríe.
 
-- [ ] **Paso 2: anotar lo que aparezca, antes de tocar nada**
+- [x] **Paso 2: anotar lo que aparezca, antes de tocar nada**
 
 Rótulos que digan "venta" donde ahora se lee una nota de crédito, columnas vacías, la glosa que
 no se lee. Si aparece algo que pide más que un rótulo, **se anota y se decide** — no se agranda
 el frente por dentro.
 
-- [ ] **Paso 3: corregir los rótulos, con su test**
+- [x] **Paso 3: corregir los rótulos, con su test**
 
 Solo lo anotado. Tokens semánticos de Nuxt UI, nunca Tailwind hardcodeado. Si se toca el
 componente, el spec de pantalla acompaña — y **verificar que el body que afirma el mock pasaría
 el DTO del backend**, o el test congela un caso imposible.
 
-- [ ] **Paso 4: el gate del frontend**
+- [x] **Paso 4: el gate del frontend**
 
 ```bash
 cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check
 ```
 
-- [ ] **Paso 5: cerrar la entrada del backlog**
+- [x] **Paso 5: cerrar la entrada del backlog**
 
 Mover la entrada de `pendientes.md` § 3 a `resueltos.md` con el detalle del fix y los commits;
 actualizar la fila de `docs/ESTADO.md`. **Listar todos los consumidores antes de redactar el
 cierre**: el texto de la UI es uno más, y declarar cerrado lo que sigue vivo manda al próximo a
 no buscarlo.
 
-- [ ] **Paso 6: commit y push**
+- [x] **Paso 6: commit y push**
 
 ```bash
 git add -A
