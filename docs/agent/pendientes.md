@@ -1518,131 +1518,64 @@ en efectivo de estrellar suites ajenas— y una cobertura que se perdía en `mer
 **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`, ADR-010).
 Sigue en la § 4, sola.
 
-## 4. Necesita que el owner conteste
+- [ ] **La nota de crédito descompone su monto — con línea de ajuste y glosa libre** ✅ *(decidido por el owner el 2026-09-03; antes vivía en la § 4)*
 
-Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
-elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
-prohíbe.
+  ## La decisión, en una línea
 
-✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
-venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
-contradicción de `costo: '0'` —cada una contestada y construida el mismo día
-([`resueltos.md`](resueltos.md))—.
-✅ **Y dos más el 2026-08-30**: la moneda del extra en el ticket —contestada en tres
-preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**— y, ese mismo
-día, el **override de `precioUnitario`**, que había nacido acá al construir la primera y que
-el owner mandó sacar unas horas después ([`resueltos.md`](resueltos.md)).
-✅ **Y una más el 2026-09-01**: *"Dos mesas pueden pedir la MISMA última unidad, y la segunda
-queda trabada"*. De las tres salidas que la entrada ofrecía —apartar, avisar, bloquear— el
-owner eligió **apartar**, y el frente se construyó ese mismo día → [`resueltos.md`](resueltos.md).
-⚠️ **No cierra la salida con motivo**, que sigue viva en la § 3 y que la propia entrada
-nombraba como su cruce: apartar achica el caso de la mesa trabada, **no lo borra**.
-✅ **Y una más el 2026-09-02**, el mismo día que se anotó: *"salir de la cuenta con una
-edición de cantidad a medio camino"*. De las tres salidas —guardar, descartar, preguntar— el
-owner eligió **guardar**, y con eso quedó contestado también su costo: el rechazo que llega
-con la pantalla ya en otra cuenta **avisa nombrando la mesa y la cuenta**, en vez de callarse
-o de tirar un error sin dueño → [`resueltos.md`](resueltos.md).
+  **El monto suelto se permite**, y se expresa como una **línea de ajuste con glosa libre** —no
+  como una nota de crédito sin líneas. Con eso la NC deja de registrar `total_impuestos = 0`.
 
-✅ **Y cuatro más el 2026-09-03**, en una sola ronda: el checker de lecturas sin status
-(**ampliarlo**), los helpers de caja copiados en 8 specs (**extraerlos**), el stock de merma
-dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se da vuelta al
-cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
-escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
+  **Por qué esa forma y no otra.** Resuelve tres problemas a la vez, y ninguno de los otros dos
+  caminos resolvía los tres:
 
-**Queda UNA abierta, y es fiscal** — la nota de crédito que no descompone su monto. Lo fiscal
-no se cuelga del final de una ronda de preguntas de producto ni se toma de arrastre: abre su
-propio frente, con su propia sesión y su propia verificación (`CLAUDE.md`, ADR-010).
+  1. **Chile**: la zona Detalle es obligatoria en los diez tipos de documento, NC incluida. La
+     línea de ajuste la llena.
+  2. **Argentina**: `ImpNeto`/`ImpIVA` son obligatorios y la suma **se valida con rechazo**
+     (error 10048). La línea declara su neto e IVA, y los números cierran.
+  3. **Inventario**: una línea de ajuste **no es un producto del catálogo**, así que no repone
+     nada. Exigir líneas reales habría metido al stock la pasta que el cliente ya se comió.
 
-⚠️ **Volvió a ser UNA el 2026-09-03, y el `awk` ahora sí coincide.** Ese día llegó a **dos**
-con la entrada de AR/CO/MX, que era un `###` y el conteo mecánico no veía. Esa entrada **se
-fue a la § 6**: su mitad de la nota de crédito se construyó, y de las otras dos el owner
-contestó la que era pregunta —los tres países emiten, progresivamente— mientras que la de los
-impuestos de sistema **dejó de ser pregunta al relevarla**: falta modelo, no un porcentaje.
-Corrido el `awk`, no recordado.
+  📌 Y saca de encima el prorrateo como regla inventada: no se reparte un monto contra la
+  composición de la venta, **se declara** qué es ese monto — que es exactamente lo que el SII
+  espera del emisor (`IndExeDR` es declarado, no derivado) y lo que ARCA necesita.
 
-✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
-desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
-y **volvió a la § 3 esa misma tarde** con las dos respuestas del owner adentro.
-⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
-tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
-recordado.
+  ## Las tres piezas, y la trampa
 
-⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
-memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
-anotado. Un conteo escrito acá se corre antes, no se recuerda.
+  Ninguna toca el esquema.
 
-✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner;
-volvió a poblarse con lo que fueron destapando las tandas siguientes (identidad el 2026-08-16,
-redondeo de plata el 2026-08-21) y con dos entradas que **subieron desde la sección 2** al
-medirlas y caer del lado que exige respuesta.
+  1. **Un ítem de sistema "Ajuste", de tipo `servicio`.** `venta_detalles.item_id` es **NOT
+     NULL**, así que la línea necesita colgar de algún ítem; y `servicio` —no `producto`—
+     porque en este sistema **solo `tipo='producto'` tiene stock**. Se siembra al crear el
+     tenant, junto al rol admin, la fórmula de precio y la caja virtual, que es un patrón que
+     ya existe. La glosa va en `descripcion`, que ya se congela por línea.
+  2. ⛔ **La trampa: hoy esa línea haría fallar el reembolso entero con un 400.**
+     `crearNotaCredito` llama a `registrarMovimiento` **por cada línea sin mirar el tipo de
+     ítem**, y ese método rechaza con *"El item no tiene control de stock"* si el ítem no es
+     producto (`inventario.service.ts`, el guard después del `SELECT ... FOR UPDATE OF ip`).
+     Hay que saltear el movimiento para lo que no es producto — **a propósito, no
+     descubriéndolo en producción**.
+  3. **`clasificacion_tributaria` de la línea** es NOT NULL (`afecto` | `exento`). Ver abajo.
 
-✅ **Segunda tanda completa el 2026-08-22: las 7 entradas abiertas se contestaron de una.**
-Ninguna se quedó sin destino, y cada una se mudó **con su decisión escrita y con las trampas
-que el que la tome se va a encontrar**:
+  ## Lo único que queda por decidir
 
-| Entrada | Decisión | Dónde quedó |
-|---|---|---|
-| `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Resuelto el 2026-08-22**: el spike salió, se migró y el plan B no hizo falta ([`resueltos.md`](resueltos.md)) |
-| El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Construido el 2026-08-23** ([`resueltos.md`](resueltos.md)) |
-| El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
-| El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Construido el 2026-08-22** ([`resueltos.md`](resueltos.md)) |
-| La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Corrida el 2026-08-22** → 0 hallazgos ([`resueltos.md`](resueltos.md)) |
-| Los roles de un alta pendiente | Siguen sin ser editables, y eso pasa a ser regla escrita | **Cerrada** → [`resueltos.md`](resueltos.md) |
+  **Qué clasificación lleva la línea de ajuste cuando la venta original es MIXTA** (afecto +
+  exento). Con la venta toda afecta o toda exenta se hereda y no hay nada que pensar.
 
-ℹ️ **Dos entradas cambiaron de premisa al contestarlas, y la corrección viaja con ellas:** la
-del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del handler de lectura
-—no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
-que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
+  Recomendación: **dos líneas de ajuste** repartidas en la proporción que la venta original ya
+  tiene congelada —es un hecho, no un criterio—, con el residuo al mismo criterio determinista
+  que ya usa el motor. La alternativa es que el operador elija, que es lo que hace Bsale, pero
+  le pone una decisión fiscal encima a un cajero.
 
-✅ **Tercera tanda completa el 2026-08-25: las 6 preguntas no fiscales se contestaron de una**, y
-cada entrada se mudó con su decisión escrita y con las trampas que el que la tome se va a
-encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
-moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
-**Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
-al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **cuatro se construyeron el mismo día** —el
-descarte de desfases, los dos tipos por método de pago, y las dos del frente del nivel— y ya no
-están en la § 3 → [`resueltos.md`](resueltos.md).
+  ✅ **Y esto ya se apoya en terreno firme**: que una venta mixta llegue **bien compuesta** era
+  el prerrequisito, y está resuelto desde el 2026-08-21 (`67a91028`) — el descuento de nivel
+  venta baja prorrateado a las líneas y cada una desbrutea con sus tasas, así que la proporción
+  afecto/exento de la venta es confiable. Detalle y cierre en
+  [`investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md`](investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
 
-✅ **Cuarta tanda, 2026-08-25: las dos entradas que habían llegado ese mismo día se
-contestaron ese mismo día.** Los tipos de valor único → **cerrar**, y se mudó a la § 3 con el
-porqué de que el precedente de su gemela **no** haya ganado. La redacción de la invariante 3
-de `CLAUDE.md` → **pasa a criterio**, ya escrita en el archivo → [`resueltos.md`](resueltos.md).
+  ⚠️ **Sigue sin empezarse, y va en su propio frente:** es materia fiscal, `CLAUDE.md` obliga a
+  que abra su propia sesión con su propia verificación. **No urge** —sin datos productivos no se
+  pierde ningún hecho— pero el reloj arranca con el primer local real vendiendo.
 
-**Quedan dos.** La de la nota de crédito **no espera una respuesta** sino la investigación de
-mercado que la destraba —lanzada el 2026-08-15, corrida y cerrada el 2026-08-22— y después una
-decisión fiscal, que por `CLAUDE.md` abre su propio frente con su propia sesión. La otra sí
-espera al owner, es chica, y llegó el 2026-08-26 de rebote del frente que cerró los tipos de
-valor único: hay tres maneras de que una regla pierda la forma de importe que tenía guardada,
-y solo una avisa.
-
-📌 **Esa entrada nació en la § 3 y se movió acá el mismo día**, que es la tercera vez en tres
-días que pasa lo mismo: el reflejo al escribirla es ponerla junto a sus parientes temáticos
-—habla de escalones, como media § 3— en vez de archivarla por **lo que hace falta para
-tomarla**, que es una respuesta tuya.
-
-⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
-pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
-documentos tributarios abren su propio frente, con su propia sesión.
-(La del login del demo entró y salió el mismo día: el owner eligió el proxy →
-[`resueltos.md`](resueltos.md).)
-
-➕ **Y tres llegaron el 2026-08-24 desde la § 3**, al revisar cuáles de sus entradas decían
-adentro que esperaban al owner. **Tres lo decían y nadie las había movido**, así que la § 3
-aparentaba 19 frentes construibles cuando eran 16. ⚠️ Al revisar salió también un falso
-positivo que conviene dejar dicho: *"el modal de pausa"* abre con *"Decisión del owner
-pendiente"* y **dos líneas más abajo tiene su `✅ DECIDIDO (owner, 2026-08-15)`**. Se la dio
-por bloqueada una vez leyendo solo la primera línea. Está bien en la § 3.
-
-➕ **Y dos más el 2026-08-25, por el mismo motivo y con un día de diferencia.** Las dos
-nacieron al cerrar el frente del nivel de la regla y se escribieron en la § 3 aunque las dos
-terminan en una pregunta al owner. Es exactamente el error que el párrafo de arriba acababa de
-corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
-habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
-ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
-
-
-- [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** y **re-verificado el
   2026-09-03** sobre `ventas.service.ts:1430` `crearNotaCredito` — la cita decía `:982`, y
   antes `:854`; la corrió el frente de la nota de crédito por país. Es la tercera vez que se
@@ -1755,6 +1688,137 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   ⚠️ **Sigue sin decidirse y sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a parar.
   **No urge hoy** —no hay datos productivos, así que no se está perdiendo ningún hecho— pero
   el reloj arranca con el primer local real vendiendo.
+
+## 4. Necesita que el owner conteste
+
+Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
+
+✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
+venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
+✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
+contradicción de `costo: '0'` —cada una contestada y construida el mismo día
+([`resueltos.md`](resueltos.md))—.
+✅ **Y dos más el 2026-08-30**: la moneda del extra en el ticket —contestada en tres
+preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**— y, ese mismo
+día, el **override de `precioUnitario`**, que había nacido acá al construir la primera y que
+el owner mandó sacar unas horas después ([`resueltos.md`](resueltos.md)).
+✅ **Y una más el 2026-09-01**: *"Dos mesas pueden pedir la MISMA última unidad, y la segunda
+queda trabada"*. De las tres salidas que la entrada ofrecía —apartar, avisar, bloquear— el
+owner eligió **apartar**, y el frente se construyó ese mismo día → [`resueltos.md`](resueltos.md).
+⚠️ **No cierra la salida con motivo**, que sigue viva en la § 3 y que la propia entrada
+nombraba como su cruce: apartar achica el caso de la mesa trabada, **no lo borra**.
+✅ **Y una más el 2026-09-02**, el mismo día que se anotó: *"salir de la cuenta con una
+edición de cantidad a medio camino"*. De las tres salidas —guardar, descartar, preguntar— el
+owner eligió **guardar**, y con eso quedó contestado también su costo: el rechazo que llega
+con la pantalla ya en otra cuenta **avisa nombrando la mesa y la cuenta**, en vez de callarse
+o de tirar un error sin dueño → [`resueltos.md`](resueltos.md).
+
+✅ **Y cuatro más el 2026-09-03**, en una sola ronda: el checker de lecturas sin status
+(**ampliarlo**), los helpers de caja copiados en 8 specs (**extraerlos**), el stock de merma
+dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se da vuelta al
+cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
+escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
+
+✅ **VACÍA — cero entradas, contado el 2026-09-03 y no recordado.** Corrido el `awk` de arriba
+y buscados los `###` a mano: **0 y 0**.
+
+Se vació en una sola tarde, y las tres salieron por caminos distintos, que es lo que conviene
+saber:
+
+| Entrada | Cómo salió | Dónde quedó |
+|---|---|---|
+| La nota de crédito de un tenant AR/CO/MX congelaba el tipo **chileno** | **Construida** | `fc1bfa84` → [`resueltos.md`](resueltos.md) |
+| Los documentos tributarios y los impuestos de sistema de AR/CO/MX | **Dejó de ser pregunta al relevarla**: falta modelo, no un porcentaje | **§ 6**, como frente fiscal por país |
+| La NC que no descompone su monto | **Contestada por el owner**: se permite el monto suelto, con línea de ajuste y glosa libre | **§ 3**, con las tres piezas y la trampa |
+
+⚠️ **Ese día la sección llegó a decir "dos" y después "una"**, y las dos veces el número
+escrito y el `awk` discrepaban porque una entrada era un `###` que el conteo mecánico no ve.
+La regla que queda: **el conteo se corre, no se recuerda** — y si el `awk` y el texto no
+coinciden, buscar los `###` antes de escribir un número.
+
+✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
+desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
+y **volvió a la § 3 esa misma tarde** con las dos respuestas del owner adentro.
+⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
+tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
+recordado.
+
+⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
+memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
+anotado. Un conteo escrito acá se corre antes, no se recuerda.
+
+✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner;
+volvió a poblarse con lo que fueron destapando las tandas siguientes (identidad el 2026-08-16,
+redondeo de plata el 2026-08-21) y con dos entradas que **subieron desde la sección 2** al
+medirlas y caer del lado que exige respuesta.
+
+✅ **Segunda tanda completa el 2026-08-22: las 7 entradas abiertas se contestaron de una.**
+Ninguna se quedó sin destino, y cada una se mudó **con su decisión escrita y con las trampas
+que el que la tome se va a encontrar**:
+
+| Entrada | Decisión | Dónde quedó |
+|---|---|---|
+| `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Resuelto el 2026-08-22**: el spike salió, se migró y el plan B no hizo falta ([`resueltos.md`](resueltos.md)) |
+| El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Construido el 2026-08-23** ([`resueltos.md`](resueltos.md)) |
+| El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
+| El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Construido el 2026-08-22** ([`resueltos.md`](resueltos.md)) |
+| La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Corrida el 2026-08-22** → 0 hallazgos ([`resueltos.md`](resueltos.md)) |
+| Los roles de un alta pendiente | Siguen sin ser editables, y eso pasa a ser regla escrita | **Cerrada** → [`resueltos.md`](resueltos.md) |
+
+ℹ️ **Dos entradas cambiaron de premisa al contestarlas, y la corrección viaja con ellas:** la
+del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del handler de lectura
+—no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
+que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
+
+✅ **Tercera tanda completa el 2026-08-25: las 6 preguntas no fiscales se contestaron de una**, y
+cada entrada se mudó con su decisión escrita y con las trampas que el que la tome se va a
+encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
+moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
+**Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
+al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **cuatro se construyeron el mismo día** —el
+descarte de desfases, los dos tipos por método de pago, y las dos del frente del nivel— y ya no
+están en la § 3 → [`resueltos.md`](resueltos.md).
+
+✅ **Cuarta tanda, 2026-08-25: las dos entradas que habían llegado ese mismo día se
+contestaron ese mismo día.** Los tipos de valor único → **cerrar**, y se mudó a la § 3 con el
+porqué de que el precedente de su gemela **no** haya ganado. La redacción de la invariante 3
+de `CLAUDE.md` → **pasa a criterio**, ya escrita en el archivo → [`resueltos.md`](resueltos.md).
+
+**Quedan dos.** La de la nota de crédito **no espera una respuesta** sino la investigación de
+mercado que la destraba —lanzada el 2026-08-15, corrida y cerrada el 2026-08-22— y después una
+decisión fiscal, que por `CLAUDE.md` abre su propio frente con su propia sesión. La otra sí
+espera al owner, es chica, y llegó el 2026-08-26 de rebote del frente que cerró los tipos de
+valor único: hay tres maneras de que una regla pierda la forma de importe que tenía guardada,
+y solo una avisa.
+
+📌 **Esa entrada nació en la § 3 y se movió acá el mismo día**, que es la tercera vez en tres
+días que pasa lo mismo: el reflejo al escribirla es ponerla junto a sus parientes temáticos
+—habla de escalones, como media § 3— en vez de archivarla por **lo que hace falta para
+tomarla**, que es una respuesta tuya.
+
+⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
+pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
+documentos tributarios abren su propio frente, con su propia sesión.
+(La del login del demo entró y salió el mismo día: el owner eligió el proxy →
+[`resueltos.md`](resueltos.md).)
+
+➕ **Y tres llegaron el 2026-08-24 desde la § 3**, al revisar cuáles de sus entradas decían
+adentro que esperaban al owner. **Tres lo decían y nadie las había movido**, así que la § 3
+aparentaba 19 frentes construibles cuando eran 16. ⚠️ Al revisar salió también un falso
+positivo que conviene dejar dicho: *"el modal de pausa"* abre con *"Decisión del owner
+pendiente"* y **dos líneas más abajo tiene su `✅ DECIDIDO (owner, 2026-08-15)`**. Se la dio
+por bloqueada una vez leyendo solo la primera línea. Está bien en la § 3.
+
+➕ **Y dos más el 2026-08-25, por el mismo motivo y con un día de diferencia.** Las dos
+nacieron al cerrar el frente del nivel de la regla y se escribieron en la § 3 aunque las dos
+terminan en una pregunta al owner. Es exactamente el error que el párrafo de arriba acababa de
+corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
+habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
+ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
+
+
 
 ## 5. Carreras de concurrencia
 
