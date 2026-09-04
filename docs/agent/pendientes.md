@@ -1556,15 +1556,34 @@ Sigue en la § 4, sola.
      descubriéndolo en producción**.
   3. **`clasificacion_tributaria` de la línea** es NOT NULL (`afecto` | `exento`). Ver abajo.
 
-  ## Lo único que queda por decidir
+  ## La venta mixta: dos líneas, con la proporción de la venta ✅
 
-  **Qué clasificación lleva la línea de ajuste cuando la venta original es MIXTA** (afecto +
-  exento). Con la venta toda afecta o toda exenta se hereda y no hay nada que pensar.
+  **Decidido por el owner el 2026-09-03.** Cuando la venta original es mixta (afecto + exento),
+  el ajuste se parte en **dos líneas**, repartidas en la proporción que la venta **ya tiene
+  congelada**. Con la venta toda afecta o toda exenta se hereda y sale una sola línea.
 
-  Recomendación: **dos líneas de ajuste** repartidas en la proporción que la venta original ya
-  tiene congelada —es un hecho, no un criterio—, con el residuo al mismo criterio determinista
-  que ya usa el motor. La alternativa es que el operador elija, que es lo que hace Bsale, pero
-  le pone una decisión fiscal encima a un cajero.
+  Lo importante de por qué esta y no "que elija el operador" (que es lo que hace Bsale): la
+  proporción es **un hecho ya persistido**, no un criterio que alguien inventa en el mostrador.
+  No se le pone una decisión fiscal encima a un cajero.
+
+  **Cuatro cosas que el que lo construya se va a encontrar:**
+
+  1. **La base de la proporción NO es la venta entera: es lo que queda por devolver.** Si ya
+     hubo notas de crédito antes, repartir sobre la venta original completa reparte de más
+     sobre un balde que ya se devolvió. Es el mismo criterio del tope de reembolso, que ya
+     existe y ya descuenta las NC previas bajo el lock.
+  2. **El residuo.** Partir un monto en dos casi nunca da exacto. Va al criterio determinista
+     que el motor ya usa: **resto más grande, desempate por posición**.
+  3. **Nada de líneas en cero.** Si la venta era toda afecta, o si el redondeo deja un balde en
+     cero —un ajuste chico sobre una venta casi toda afecta—, **sale una sola línea**. Una
+     línea de importe cero es ruido en el documento y puede no ser válida.
+  4. ⚠️ **Ese reparto ya está escrito dos veces en el repo**, y la NC sería el **tercer**
+     consumidor: `repartirProporcional` en `calculo-precios.engine.ts` (privado, cuantiza a la
+     escala de moneda) y `repartirDescuentoCombo` en `promociones.evaluator.ts`, cuyo propio
+     docblock lo declara *"mismo idioma que `repartirProporcional` del motor de cálculo de
+     precios, sin su paso de cuantización"*. La regla del repo —*"duplicar dos veces es
+     aceptable, se extrae a la tercera"*— **se dispara acá**. La NC necesita la variante que
+     **sí** cuantiza.
 
   ✅ **Y esto ya se apoya en terreno firme**: que una venta mixta llegue **bien compuesta** era
   el prerrequisito, y está resuelto desde el 2026-08-21 (`67a91028`) — el descuento de nivel
