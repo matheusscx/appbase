@@ -210,7 +210,7 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
 > Ocultar el link en el sidebar (`can(modulo, permiso)`) es complementario, no un
 > sustituto del enforcement en el backend.
 
-### Todo `@Param` que sea un UUID lleva `ParseUUIDPipe` (2026-09-03)
+### Todo id que entre del cliente y sea un UUID se valida como UUID (2026-09-03)
 
 ```ts
 @Get(':id')
@@ -247,6 +247,35 @@ pipe a un `@Param` nuevo, la pregunta no es "¿es un id?" sino **"¿es un uuid?"
 hueco solo aparece pidiendo la ruta de verdad. Lo fija
 `ventas.e2e-spec.ts` › *"responde 400 —no 500— cuando el id no tiene forma de
 UUID"*.
+
+**Son TRES los mecanismos por los que un id entra, no uno.** El primer barrido
+grepeó `@Param` y pareció exhaustivo; no lo era. El mapa completo, medido:
+
+| Mecanismo | Cómo se valida | Estado al 2026-09-03 |
+|---|---|---|
+| `@Param('id')` | `ParseUUIDPipe` | 148 puestos, 7 `token` exentos |
+| Campo `*Id` de un DTO (body o query) | `@IsUUID()` de `class-validator` | 121 de 124 ya lo tenían |
+| `@Query('algo')` **crudo**, sin DTO | `new ParseUUIDPipe({ optional: true })` | 4 puestos: `excludeId` ×3 + `paisId` |
+
+```ts
+// El @Query crudo no pasa por ningún DTO, así que class-validator no lo ve.
+// `optional: true` porque la pantalla de ALTA no manda excludeId.
+@Query('excludeId', new ParseUUIDPipe({ optional: true })) excludeId?: string,
+```
+
+⚠️ **El tercero es el que se escapa**, porque no lo encuentra ni un grep de
+`@Param` ni uno de DTOs. Son las rutas `nombre-disponible` de `descuentos`,
+`impuestos` y `recargos`, más `GET /catalog/provincias`: las 4 **seguían en 500
+después** del fix de `@Param`. Lo fija `ids-por-query.e2e-spec.ts`, que lleva el
+control en 200 al lado de cada 400 —con y sin el parámetro—, porque un
+`nombre-disponible` que contesta 400 siempre rompe la pantalla de edición sin que
+ningún test lo note.
+
+📌 Los 3 campos `*Id` de DTO sin `@IsUUID()` **no** son huecos, y se verificaron
+uno por uno: `turnoIds` sí lo tiene (un `@Transform` en el medio lo escondía del
+grep), los de `personalizacion-receta.dto.ts` son `interface` de snapshot y no un
+DTO validado, y `googleId` es un id externo de Google que legítimamente no es un
+UUID.
 
 ### Tablas sin `tenant_id`
 

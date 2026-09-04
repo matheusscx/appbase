@@ -42,7 +42,8 @@ export class DescuentosController {
   nombreDisponible(
     @Req() req: Request,
     @Query('nombre') nombre: string,
-    @Query('excludeId') excludeId?: string,
+    @Query('excludeId', new ParseUUIDPipe({ optional: true }))
+    excludeId?: string,
   ) {
     const user = req.user as { tenantId: string };
     return this.descuentosService.nombreDisponible(

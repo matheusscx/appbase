@@ -1,4 +1,10 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CatalogService } from './catalog.service';
@@ -26,7 +32,9 @@ export class CatalogController {
   }
 
   @Get('provincias')
-  findAllProvincias(@Query('paisId') paisId?: string) {
+  findAllProvincias(
+    @Query('paisId', new ParseUUIDPipe({ optional: true })) paisId?: string,
+  ) {
     return this.catalogService.findAllProvincias(paisId);
   }
 

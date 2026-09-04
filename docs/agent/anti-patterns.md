@@ -72,6 +72,23 @@ esos dos controllers — antes de "corregir" el olvido aparente, leerlo.
 la ruta de verdad. Lo fija `ventas.e2e-spec.ts` › *"responde 400 —no 500— cuando el id no
 tiene forma de UUID"*. Detalle del patrón: `docs/patterns/backend.md` § 4.
 
+### ❌ Barrer UN mecanismo y dar el frente por cerrado (2026-09-03)
+
+El mismo día y sobre el mismo bug. Se grepeó `@Param`, se arreglaron los 148, se corrió el
+gate entero en verde y se cerró. **Faltaban 4**, y el owner los encontró preguntando *"¿solo
+encontraste estos casos?"*.
+
+Un id entra por **tres** puertas, no una: `@Param`, campo `*Id` de un DTO, y **`@Query`
+crudo sin DTO**. La tercera no la ve ni un grep de `@Param` ni uno de DTOs, y era justo donde
+quedaba el agujero: `nombre-disponible` de `descuentos`/`impuestos`/`recargos` y
+`GET /catalog/provincias` **seguían devolviendo 500 después del fix**.
+
+📌 La regla no es "acordarse de `@Query`" —mañana es otra puerta—. Es: **antes de declarar
+cerrado un frente transversal, enumerar los mecanismos por los que el dato entra y probar
+uno de cada uno**, en vez de grepear el que originó el reporte. Emparentado con
+[[buscar-por-conducta-no-por-mecanismo]]: la conducta era "un id mal formado tira 500", y
+`@Param` era solo el mecanismo del primer caso visto.
+
 ### ✅ Columna de fecha sin `type: 'timestamptz'` explícito — AUTOMATIZADO
 
 Mismo molde que el de arriba, misma causa: sin `type`, TypeORM elige por vos y para fechas
