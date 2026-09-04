@@ -51,6 +51,7 @@ import { Cajon } from '../cajones/entities/cajon.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { CredencialesService } from '../pasarela/services/credenciales.service';
+import { ItemsService } from '../items/items.service';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
@@ -147,6 +148,7 @@ export class SeederService implements OnApplicationBootstrap {
     @InjectRepository(PromocionScopeItem)
     private readonly promocionScopeItemRepo: Repository<PromocionScopeItem>,
     private readonly credencialesService: CredencialesService,
+    private readonly itemsService: ItemsService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -191,6 +193,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedRecargoTramos();
     await this.seedRecargoMetodosPago();
     await this.seedItems();
+    await this.seedItemsAjuste();
     await this.seedPromociones();
     await this.seedTiposDocumentoTributario();
     await this.seedRazonesSociales();
@@ -3471,6 +3474,45 @@ export class SeederService implements OnApplicationBootstrap {
           this.recargoMetodoPagoRepo.create(data),
         );
       }
+    }
+  }
+
+  /**
+   * El ítem de sistema "Ajuste" de cada tenant del seed. Llama al MISMO
+   * find-or-create que usan el alta de tenant y la nota de crédito
+   * (`ItemsService.asegurarItemAjuste`) para que exista una sola forma de crear
+   * este ítem; lo único propio del seed es el ID fijo que exige la convención.
+   */
+  private async seedItemsAjuste(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const ajustes: [tenantId: string, itemId: string][] = [
+      [PARIS, '550e8400-e29b-41d4-a716-446655440381'],
+      [FALABELLA, '550e8400-e29b-41d4-a716-446655440382'],
+    ];
+    for (const [tenantId, itemId] of ajustes) {
+      // Chequeo por PK y SIN filtrar el borrado, igual que los otros seeds de
+      // items (`seedItems`): `asegurarItemAjuste` busca por
+      // `es_ajuste_nota_credito` entre los vivos, así que si alguien borró el
+      // ítem del seed no lo encontraría e intentaría insertar de nuevo el mismo
+      // ID fijo — violación de `items_pkey` que rompe el arranque del backend.
+      // Si la fila existe, viva o borrada, este seed no tiene nada que hacer:
+      // la nota de crédito crea el suyo por su cuenta cuando lo necesite.
+      const existe: unknown[] = await this.dataSource.query(
+        `SELECT 1 FROM items WHERE item_id = $1`,
+        [itemId],
+      );
+      if (existe.length) continue;
+
+      // En transacción: `asegurarItemAjuste` hace DOS escrituras (la fila de
+      // `items` y su extensión `item_servicio`). Sueltas, si la segunda falla
+      // queda un ítem marcado sin extensión, y ningún arranque posterior lo
+      // repara porque el find-or-create solo mira `items`. En los otros dos
+      // llamadores (alta de tenant y nota de crédito) la transacción ya viene
+      // abierta de afuera.
+      await this.dataSource.transaction(async (manager) => {
+        await this.itemsService.asegurarItemAjuste(manager, tenantId, itemId);
+      });
     }
   }
 

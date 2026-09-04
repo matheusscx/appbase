@@ -4,8 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { Repository, EntityManager, IsNull } from 'typeorm';
 import Decimal from 'decimal.js';
+import { randomUUID } from 'crypto';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
 import { NivelRegla } from '../../common/enums/reglas.enums';
@@ -356,6 +357,88 @@ export class ItemsService {
     };
   }
 
+  /**
+   * El ítem de sistema "Ajuste" del tenant, creándolo si no está. Del ítem que
+   * devuelve cuelga la línea con la que una nota de crédito expresa la parte de
+   * su monto que no corresponde a mercadería devuelta.
+   *
+   * Se llama al crear el tenant Y desde la transacción de la nota de crédito:
+   * ese segundo llamado no es redundancia, es lo que impide que el webhook de
+   * reembolso (decisión P3 de la spec) pierda un evento ya consumado —la plata
+   * ya volvió por el proveedor— por un dato de configuración faltante. Mismo
+   * patrón que `GarzonesService.asegurarMostrador`.
+   *
+   * `itemId` explícito solo lo usa el seeder, que necesita IDs fijos.
+   */
+  async asegurarItemAjuste(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string = randomUUID(),
+  ): Promise<Item> {
+    const existente = await manager.findOne(Item, {
+      where: { tenantId, esAjusteNotaCredito: true, eliminadoEl: IsNull() },
+    });
+    if (existente) return existente;
+
+    // `moneda_id` es NOT NULL. La moneda oficial NO la elige el tenant: sale
+    // del país (`tenant → provincia → país → moneda_oficial_id`). Misma cadena
+    // que usa `VentasService.crear` para saber en qué moneda persiste los
+    // totales, y no `validarMoneda` —que valida una moneda RECIBIDA contra
+    // `pais_moneda`— porque acá no hay quien la mande: es un ítem de sistema.
+    //
+    // El `JOIN moneda` no es decorativo: sin él, un `moneda_oficial_id` que
+    // apunta a una moneda soft-borrada haría nacer el ítem con una moneda
+    // muerta, y el listado —que joinea `moneda` filtrando el borrado— lo
+    // devolvería con `monedaCodigo: null`. Mismo filtro que
+    // `MonedasService.decimalesOficiales`.
+    const monedaRows: { moneda_oficial_id: string }[] = await manager.query(
+      `SELECT m.moneda_id AS moneda_oficial_id
+         FROM tenants t
+         JOIN provincia prov ON prov.provincia_id = t.provincia_id
+              AND prov.eliminado_el IS NULL
+         JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+         JOIN moneda m ON m.moneda_id = p.moneda_oficial_id
+              AND m.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    const monedaId = monedaRows[0]?.moneda_oficial_id;
+    if (!monedaId) {
+      throw new BadRequestException(
+        'El tenant no tiene moneda oficial configurada: no se puede crear el ítem de ajuste',
+      );
+    }
+
+    const item = await manager.save(
+      Item,
+      manager.create(Item, {
+        id: itemId,
+        tenantId,
+        monedaId,
+        nombre: 'Ajuste',
+        descripcion: 'Ítem de sistema: línea de ajuste de notas de crédito',
+        precioBase: '0',
+        precioIncluyeImpuesto: false,
+        // Fuera del catálogo que pide el POS (`activo=true`), igual que la fila
+        // de nota de crédito en `tipos_documento_tributario`.
+        activo: false,
+        tipo: 'servicio',
+        // La línea escribe su propia clasificación —afecto o exento según la
+        // porción que expresa—; acá va 'afecto' para no dejar un NULL, que en
+        // esta columna significa "no se vende" (ADR-018).
+        clasificacionTributaria: 'afecto',
+        esAjusteNotaCredito: true,
+      }),
+    );
+    // Todo `tipo='servicio'` tiene su fila de extensión — ver `create()`.
+    await manager.query(
+      `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita)
+       VALUES ($1, NULL, false)`,
+      [item.id],
+    );
+    return item;
+  }
+
   private buildFindAllFilters(
     tenantId: string,
     query: QueryItemsDto,
@@ -371,6 +454,21 @@ export class ItemsService {
     let where = query.incluirEliminados
       ? ` WHERE i.tenant_id = $1 AND (i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)`
       : ` WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL`;
+
+    // El ítem de sistema "Ajuste" no es catálogo: no se vende y no se elige
+    // (`PATCH /items/:id` todavía lo acepta —nombre, precio, activo—, y eso es
+    // inocuo mientras la nota de crédito derive sus importes de la venta
+    // congelada y no de `items.precio_base`). Se excluye del listado —de TODOS, también el de la papelera—
+    // porque este `findAll` es el que alimenta los selectores del negocio
+    // (scope de promociones, componentes de combo, opciones de un grupo de
+    // modificadores: `configuracion/promociones.vue`, `configuracion/items.vue`
+    // y `configuracion/grupos-modificadores.vue`, ninguno de los tres filtra
+    // `activo`). Nacer pausado NO alcanza para esconderlo, a diferencia de la
+    // fila de nota de crédito en `tipos_documento_tributario`, cuyo único
+    // lector sí filtra. Mismo criterio que `garzones.es_placeholder`
+    // (`garzones.service.ts:343` y `:1391`), que es el precedente que cita
+    // `item.entity.ts`.
+    where += ` AND i.es_ajuste_nota_credito = false`;
 
     if (query.tipo) {
       where += ` AND i.tipo = $${idx++}`;
@@ -2542,6 +2640,18 @@ export class ItemsService {
       where: { id: itemId, tenantId },
     });
     if (!item) throw new NotFoundException('Item no encontrado');
+    // El ítem de sistema "Ajuste" no se borra. No es una comodidad: sin este
+    // corte queda un camino a un 500: borrarlo hace que la siguiente nota de
+    // crédito cree otro (`asegurarItemAjuste` es find-or-create), y entonces
+    // `restaurar()` —que hace un `UPDATE eliminado_el = NULL` sin verificar
+    // nada— dejaría dos vivos y reventaría contra `uq_item_ajuste_nc_tenant`
+    // con un error de Postgres en vez de un 400 entendible. Cortando acá, ese
+    // segundo estado nunca existe.
+    if (item.esAjusteNotaCredito) {
+      throw new BadRequestException(
+        'El ítem "Ajuste" es de sistema: lo usan las notas de crédito y no se puede eliminar',
+      );
+    }
 
     await this.db.transaccion(async (manager) => {
       const { bloqueos } = await this.obtenerUsoItem(manager, tenantId, itemId);

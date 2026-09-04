@@ -16,6 +16,7 @@ import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { RazonSocial } from './entities/razon-social.entity';
 import { GarzonesService } from '../garzones/garzones.service';
+import { ItemsService } from '../items/items.service';
 import { RbacService } from '../rbac/rbac.service';
 import { TokensAccesoService } from '../auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../auth/entities/token-acceso.entity';
@@ -91,6 +92,7 @@ describe('TenantsService', () => {
     prepararPinPorBajaDeCuenta: jest.Mock;
     aplicarBajaDeCuenta: jest.Mock;
   };
+  let items: { asegurarItemAjuste: jest.Mock };
   let rbac: { administradoresDe: jest.Mock };
   let monedasService: { decimalesOficiales: jest.Mock };
 
@@ -141,6 +143,7 @@ describe('TenantsService', () => {
       quemar: jest.fn(),
     };
     mail = { enviar: jest.fn() };
+    items = { asegurarItemAjuste: jest.fn() };
     garzones = {
       asegurarMostrador: jest.fn(),
       // Por defecto la cuenta que se da de baja NO es credencial de ningún
@@ -186,6 +189,7 @@ describe('TenantsService', () => {
           provide: GarzonesService,
           useValue: garzones,
         },
+        { provide: ItemsService, useValue: items },
         { provide: RbacService, useValue: rbac },
         { provide: TokensAccesoService, useValue: tokensAcceso },
         // ⚠️ Mockeado, no real: un unit que mandara mail de verdad sería

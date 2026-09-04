@@ -11,6 +11,7 @@ import { RazonSocial } from './entities/razon-social.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { GarzonesModule } from '../garzones/garzones.module';
+import { ItemsModule } from '../items/items.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { TenantsService } from './tenants.service';
 import {
@@ -32,6 +33,11 @@ import {
       PropinaGrupoDistribucion,
     ]),
     GarzonesModule,
+    // Por `ItemsService.asegurarItemAjuste`: todo tenant nace con su ítem de
+    // sistema "Ajuste". `ItemsModule` importa `InventarioModule`,
+    // `CatalogModule` y `MonedasModule`, y ninguno importa `TenantsModule`
+    // — verificado el 2026-09-04, sin ciclo.
+    ItemsModule,
     // Por `MonedasService.decimalesOficiales`: la matriz de preferencias
     // financieras frena `nivelRedondeo = 'documento'` contra la moneda oficial
     // del tenant. `MonedasModule` no importa `TenantsModule` — sin ciclo.

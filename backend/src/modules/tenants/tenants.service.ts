@@ -27,6 +27,7 @@ import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { GarzonesService } from '../garzones/garzones.service';
+import { ItemsService } from '../items/items.service';
 import { RbacService } from '../rbac/rbac.service';
 import { TokensAccesoService } from '../auth/tokens-acceso.service';
 import {
@@ -195,6 +196,7 @@ export class TenantsService {
     private readonly razonSocialRepo: Repository<RazonSocial>,
     private readonly db: Db,
     private readonly garzonesService: GarzonesService,
+    private readonly itemsService: ItemsService,
     private readonly rbacService: RbacService,
     private readonly tokensAcceso: TokensAccesoService,
     private readonly mail: MailService,
@@ -348,6 +350,19 @@ export class TenantsService {
           orden: 0,
         }),
       );
+
+      // 6c. Ítem de sistema "Ajuste": del que cuelga la línea con la que una
+      // nota de crédito expresa la parte de su monto que no es mercadería
+      // devuelta. Se siembra acá —y no solo al emitir la primera nota— para
+      // que el tenant nazca completo.
+      //
+      // Falla el alta si el país del tenant no tiene moneda oficial viva. Es
+      // deliberado y no un efecto colateral: ese tenant tampoco podría vender
+      // (`VentasService.crear` corta con el mismo motivo), así que crearlo sería
+      // dejar una empresa muerta en la base. Hoy es teórico —los cuatro países
+      // del catálogo tienen su moneda—, pero el día que se cargue uno sin ella,
+      // el alta avisa en vez de esconderlo.
+      await this.itemsService.asegurarItemAjuste(manager, savedTenant.id);
 
       // 7. Sembrar causas de merma fijas del sistema
       for (const nombre of CAUSAS_MERMA_FIJAS) {

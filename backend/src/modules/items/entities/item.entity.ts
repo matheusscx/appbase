@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -8,6 +9,16 @@ import {
 } from 'typeorm';
 
 @Entity('items')
+/**
+ * Un solo ítem de ajuste por tenant. `asegurarItemAjuste` toma la primera fila
+ * marcada: con dos, de cuál cuelga la línea de la nota de crédito dependería
+ * del orden que elija el planner. Mismo patrón que
+ * `uq_tipo_documento_nota_credito_pais` y `uq_sesion_garzon_abierta`.
+ */
+@Index('uq_item_ajuste_nc_tenant', ['tenantId'], {
+  unique: true,
+  where: `"es_ajuste_nota_credito" = true AND "eliminado_el" IS NULL`,
+})
 export class Item {
   @PrimaryGeneratedColumn('uuid', { name: 'item_id' })
   id: string;
@@ -59,6 +70,18 @@ export class Item {
     default: 'afecto',
   })
   clasificacionTributaria: string | null; // 'afecto' | 'exento' | null
+
+  /**
+   * El ítem de sistema del que cuelga la línea de ajuste de una nota de
+   * crédito. `venta_detalles.item_id` es NOT NULL, así que esa línea necesita
+   * colgar de algún ítem, y tiene que ser un `servicio`: en este sistema solo
+   * `tipo='producto'` tiene stock, y una línea de ajuste no repone nada.
+   *
+   * Se marca con columna y no por nombre —que es editable— igual que
+   * `tipos_documento_tributario.es_nota_credito` y `garzones.es_placeholder`.
+   */
+  @Column({ name: 'es_ajuste_nota_credito', default: false })
+  esAjusteNotaCredito: boolean;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
