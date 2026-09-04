@@ -1611,7 +1611,11 @@ Sigue en la § 4, sola.
   [`investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md`](investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
 
   ✍️ **Diseño escrito y aprobado (2026-09-04):**
-  [`specs/2026-09-04-nota-credito-descompone-su-monto-design.md`](../superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md).
+  [`specs/2026-09-04-nota-credito-descompone-su-monto-design.md`](../superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md),
+  con su **plan ejecutable** en
+  [`plans/2026-09-04-nota-credito-descompone-su-monto.md`](../superpowers/plans/2026-09-04-nota-credito-descompone-su-monto.md)
+  (5 tareas; la 4 es indivisible: la línea de ajuste sin el corte del movimiento de inventario
+  deja el reembolso peor que hoy).
   Cierra las cuatro preguntas que quedaban: se **rechaza** devolver mercadería que valga más que
   la nota; el alcance **incluye la pantalla** (que sale casi gratis: el drawer ya arma la tabla
   de líneas); el IVA se **deriva de los importes congelados** de la venta que se corrige; y
