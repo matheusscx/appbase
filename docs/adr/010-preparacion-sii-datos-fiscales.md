@@ -30,6 +30,25 @@ todo compatible con SII, sin integrarlo.
 - **Snapshot fiscal inmutable por venta**: congelar en la venta los baldes `neto afecto /
   monto exento / IVA / adicionales`. Una venta emitida no se recalcula (mismo criterio que
   el kardex inmutable, [ADR-007] y punto 2.2 del análisis food-service).
+
+  ⚠️ **Actualización 2026-09-04 — la nota de crédito también es un documento, y hasta ese día
+  no tenía snapshot.** Guardaba `total_bruto = total_final = el monto` con impuestos en cero y
+  sin una fila de desglose: un documento fiscal que no declaraba ni su neto ni su IVA. Ahora se
+  compone —líneas, neto e IVA— **derivando de los importes congelados de la venta que corrige**,
+  no del catálogo vigente: `item_impuestos` es por ítem, así que dos líneas afectas de la misma
+  venta pueden llevar impuestos distintos y no existe "la tasa" que leer. Es el mismo principio
+  de este ADR aplicado un nivel más abajo: la NC hereda el criterio de aquel documento, no el de
+  hoy. Detalle en [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md).
+
+  **Dos decisiones que salieron de construirlo, las dos fiscales:**
+  - **Ninguna porción se acredita dos veces.** El tope de reembolso mira el bruto y no ve la
+    porción, así que una nota por monto libre se comía capacidad afecta y la devolución
+    siguiente la volvía a usar: cada documento cerraba bien y la **serie** acreditaba más IVA
+    del que la venta cobró (medido: 1.447 contra 1.330). Hay un segundo tope, por porción.
+  - **Queda un residuo de cuantización de hasta 2 minor units de IVA** en series de varias
+    notas, porque cada documento cierra a la escala de la moneda. **Sacarlo es decisión del
+    owner y no está tomada**: exigiría derivar el neto de cada nota contra el remanente de la
+    serie en vez de contra su propio bruto.
 - **Tipo de documento tributario por venta**: ya existe `tipos_documento_tributario` por
   país (33 factura, 39 boleta, 61 NC); la venta debe guardar cuál fue.
 

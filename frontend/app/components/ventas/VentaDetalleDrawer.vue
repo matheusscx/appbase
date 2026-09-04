@@ -49,6 +49,8 @@ interface Detalle {
   /** Neto de la línea: el punto de partida del que salen las reglas. */
   subtotal: string
   totalLinea: string
+  /** `'afecto'` | `'exento'`, congelada al vender. */
+  clasificacionTributaria: string | null
   modoInventario: string | null
   cantidadDevuelta: string
 }
@@ -147,6 +149,11 @@ interface VentaDetalle {
     /** Decimales con los que se calculó, y cómo se redondeó el último. */
     escalaCalculo: number
     modoRedondeo: string
+    // ⚠️ El JSON congelado trae también `decimalesMoneda` y
+    // `promosAcumulanDescuentos`; acá se declaran solo los campos que esta
+    // pantalla lee. El que necesite cuantizar como el motor —por ejemplo para
+    // anticipar el 400 del modal de nota de crédito— los tiene en la respuesta,
+    // pero tiene que agregarlos a este tipo primero.
   } | null
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
@@ -323,14 +330,26 @@ interface FilaDetalle {
   signo: string
   /** Presente solo si el piso en cero recortó la regla. */
   recorte: string | null
+  /**
+   * Estado fiscal de la línea, y **solo en una nota de crédito**. En una venta
+   * el concepto es el nombre del ítem y las líneas se distinguen solas; en una
+   * nota, las dos líneas de ajuste llevan la MISMA glosa —la que escribió el
+   * operador— y lo único que las separa es su porción: una afecta y una exenta.
+   * Sin esto, el documento muestra dos filas idénticas con importes distintos.
+   */
+  clasificacion: string | null
   /** La regla se evaluó y no aportó nada. Se muestra, atenuada. */
   sinEfecto: boolean
 }
 
 /**
  * Orden por defecto para ventas sin `configCalculo`: las anteriores al
- * congelado. Las notas de crédito también lo tienen null, pero ahí es
- * decorativo — no escriben filas de reglas, así que no hay nada que ordenar.
+ * congelado.
+ *
+ * ⚠️ Ya no vale para las notas de crédito, que **heredan** el `config_calculo`
+ * del documento que corrigen desde el 2026-08-21 y **sí escriben filas de
+ * impuesto** desde el 2026-09-04: su desglose se ordena con la fórmula heredada,
+ * como el de cualquier venta.
  */
 const FORMULA_DEFAULT = ['descuentos', 'recargos', 'impuestos']
 
@@ -383,6 +402,7 @@ function filaDeRegla(familia: string, r: ReglaCongelada): FilaDetalle {
     signo: familia === 'Descuento' ? '-' : '+',
     recorte,
     sinEfecto: new Decimal(r.valorAplicado).isZero(),
+    clasificacion: null,
   }
 }
 
@@ -412,6 +432,7 @@ function filaDePromocion(p: PromocionCongelada): FilaDetalle {
     signo: '-',
     recorte: null,
     sinEfecto: new Decimal(p.monto).isZero(),
+    clasificacion: null,
   }
 }
 
@@ -519,6 +540,7 @@ const filasDetalle = computed<FilaDetalle[]>(() => {
       signo: '',
       recorte: null,
       sinEfecto: false,
+      clasificacion: esNotaCredito.value ? d.clasificacionTributaria : null,
     }
     // Sin reglas no hay nada que expandir: el neto ya es el total.
     if (!reglas.length || !expandidas.value.has(d.id)) return [linea]
@@ -536,6 +558,7 @@ const filasDetalle = computed<FilaDetalle[]>(() => {
         signo: '',
         recorte: null,
         sinEfecto: false,
+        clasificacion: null,
       },
       ...reglas,
     ]
@@ -557,6 +580,7 @@ const filasDetalle = computed<FilaDetalle[]>(() => {
       signo: '',
       recorte: null,
       sinEfecto: false,
+      clasificacion: null,
     })
     filas.push(...deVenta)
   }
@@ -755,7 +779,7 @@ function onNcSuccess(payload: {
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-2">
               <h2 class="text-base font-semibold">
-                Líneas de venta
+                {{ esNotaCredito ? 'Líneas de la nota' : 'Líneas de venta' }}
               </h2>
               <span v-if="filasDetalle.some(f => f.tipoFila === 'regla')" class="text-xs text-muted">
                 Reglas del momento del cobro · orden: {{ ordenPasos.join(' → ') }}
@@ -787,6 +811,19 @@ function onNcSuccess(payload: {
                   size="sm"
                 >
                   {{ row.original.familia }}
+                </UBadge>
+                <!-- Solo en una nota de crédito, y en TODAS sus líneas —no
+                     solo en las de ajuste—. El motivo son las de ajuste, que
+                     llevan la misma glosa y no se distinguen de otro modo; que
+                     las de devolución también lo muestren es coherencia del
+                     documento, no un descuido. -->
+                <UBadge
+                  v-if="row.original.clasificacion"
+                  color="neutral"
+                  variant="subtle"
+                  size="sm"
+                >
+                  {{ row.original.clasificacion }}
                 </UBadge>
                 <span
                   :class="[

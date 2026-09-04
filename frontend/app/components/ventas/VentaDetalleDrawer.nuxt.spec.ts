@@ -53,6 +53,7 @@ const detalle = (
   unidadCodigoBase: 'unidad',
   subtotal,
   totalLinea,
+  clasificacionTributaria: 'afecto',
   modoInventario: null,
   cantidadDevuelta: '0',
 })
@@ -134,6 +135,49 @@ const VENTA = {
   propina: null,
 }
 
+/**
+ * Una NOTA DE CRÉDITO compuesta: sus dos líneas de ajuste llevan la MISMA glosa
+ * —la que escribió el operador— y lo único que las separa es su porción fiscal.
+ * 1.000 repartidos 735 afecto (con 117 de IVA) / 265 exento.
+ */
+const NOTA_CREDITO = {
+  ...VENTA,
+  id: 'nc-1',
+  esNotaCredito: true,
+  totalBruto: '883.0000',
+  totalDescuentos: '0.0000',
+  totalImpuestos: '117.0000',
+  totalFinal: '1000.0000',
+  ventaReferenciaId: 'v-1',
+  descuentos: [],
+  promociones: [],
+  impuestos: [
+    {
+      id: 'vi-1',
+      detalleId: 'nc-det-1',
+      nombreRegla: 'IVA',
+      modo: 'porcentaje',
+      valorAplicado: '117.0000',
+      valorSolicitado: '117.0000',
+      porcentajeAplicado: '0.19',
+      aplicadoEn: 'linea',
+    },
+  ],
+  detalles: [
+    {
+      ...detalle('nc-det-1', 'Cliente insatisfecho', '618.0000', '735.0000'),
+      clasificacionTributaria: 'afecto',
+    },
+    {
+      ...detalle('nc-det-2', 'Cliente insatisfecho', '265.0000', '265.0000'),
+      clasificacionTributaria: 'exento',
+    },
+  ],
+}
+
+/** Qué documento contesta el mock. Se cambia ANTES de montar. */
+let documentoActual: typeof VENTA = VENTA
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return true },
@@ -152,7 +196,7 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve([])
     if (url.includes('/metodos-pago')) return Promise.resolve([])
-    if (url.includes('/ventas/')) return Promise.resolve(structuredClone(VENTA))
+    if (url.includes('/ventas/')) return Promise.resolve(structuredClone(documentoActual))
     return Promise.resolve([])
   }
 })
@@ -265,5 +309,36 @@ describe('VentaDetalleDrawer — promociones congeladas', () => {
     const totales = wrapper.text().split('Totales')[1] ?? ''
     expect(totales).toContain('-$2.500')
     expect(totales).not.toContain('-$500')
+  })
+})
+
+describe('VentaDetalleDrawer — nota de crédito compuesta', () => {
+  it('distingue las dos líneas de ajuste por su porción fiscal, que es lo único que las separa', async () => {
+    documentoActual = NOTA_CREDITO as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      const texto = wrapper.text()
+
+      // El rótulo deja de decir "venta" sobre un documento que no lo es.
+      expect(texto).toContain('Líneas de la nota')
+      expect(texto).not.toContain('Líneas de venta')
+
+      // Las dos filas llevan la misma glosa: sin la porción son indistinguibles.
+      const lineas = filas(wrapper)
+      expect(lineas).toHaveLength(2)
+      expect(lineas.every(f => f.includes('Cliente insatisfecho'))).toBe(true)
+      expect(lineas.some(f => f.includes('afecto'))).toBe(true)
+      expect(lineas.some(f => f.includes('exento'))).toBe(true)
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('en una venta normal la porción no se muestra: el nombre del ítem ya distingue', async () => {
+    const wrapper = await montar()
+    const lineas = filas(wrapper)
+    expect(lineas.some(f => f.includes('Pizza grande'))).toBe(true)
+    expect(lineas.every(f => !f.includes('afecto'))).toBe(true)
   })
 })

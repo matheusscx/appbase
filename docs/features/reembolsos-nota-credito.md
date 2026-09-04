@@ -267,6 +267,20 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
 - `ventas/VentaDetalleDrawer.vue`: badges "Nota de Crédito" y
   "Reembolsada parcial/totalmente" (derivados); cards "Reembolsos" y
   "Documentos relacionados" (links venta original ↔ NCs vía `/ventas?venta=<id>`).
+  **Sobre una nota de crédito** (2026-09-04): el rótulo de la tabla dice "Líneas
+  de la nota" y cada línea muestra su **porción fiscal** (`afecto` / `exento`) en
+  un badge. No es cosmética: las dos líneas de ajuste llevan la misma glosa —la
+  que escribió el operador— y sin la porción el documento muestra dos filas
+  idénticas con importes distintos. El resto del drawer ya servía sin tocarlo:
+  la tabla de líneas con sus reglas congeladas y la fila "Impuestos" de los
+  totales existían desde antes.
+- ⚠️ `ventas/NotaCreditoModal.vue` **no anticipa** el 400 de "la mercadería vale
+  más que la nota": el operador lo ve al confirmar, con el mensaje del backend.
+  Anticiparlo exige valuar cada línea y **cuantizarla con el `modo_redondeo`
+  congelado de esa venta**, o sea replicar el cuantizador del motor en el
+  navegador. Se probó sin cuantizar y quedaba peor: con 3 unidades de 1.000 el
+  botón se deshabilitaba para una nota que el backend acepta, mostrando "vale
+  $333, más que los $333". Anotado en `pendientes.md` como frente propio.
 - `pages/ventas/index.vue`: badges "NC" / "Reemb. parcial" / "Reembolsada" junto
   al estado.
 

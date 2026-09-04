@@ -159,6 +159,32 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **El modal de nota de crédito no anticipa el 400 de "la mercadería vale más que la nota"**
+  (frontend; **medido el 2026-09-04** por la revisión independiente del cierre del frente de la
+  NC compuesta — [`resueltos.md`](resueltos.md)) — el backend rechaza con 400 desde `7a1e934d`,
+  con un mensaje que trae los dos números y las dos salidas, así que el operador **lo ve**: lo
+  que no tiene es aviso antes de apretar Confirmar.
+
+  **Por qué no entró en ese frente, y no es pereza.** Anticiparlo exige valuar cada línea a
+  `Σ total_linea / Σ cantidad` **y cuantizarla a la escala de la moneda con el `modo_redondeo`
+  congelado de esa venta** — o sea replicar el cuantizador del motor en el navegador, que sería
+  el tercer hogar de una regla de plata. Se escribió sin cuantizar y **quedaba peor que no
+  tenerlo**: con 3 unidades de 1.000, `333,3333 > 333` deshabilitaba el botón para una nota que
+  el backend acepta, y el mensaje —formateado con `formatMonto`, que trunca— decía *"vale $333,
+  más que los $333"*. Se sacó entero.
+
+  **Lo que hace falta para tomarla:** decidir cómo viaja el criterio de redondeo congelado de la
+  venta hasta el modal (el drawer ya lo tiene en `venta.configCalculo`; el modal recibe hoy
+  `ventaId`, `disponible` y `detalles`), y si conviene un cuantizador compartido en el frontend o
+  esperar al workspace compartido. ⚠️ **El tipo de `configCalculo` en el drawer declara cinco
+  campos y NO `decimalesMoneda`**, que es justamente el que `cuantizar` usa: el JSON congelado sí
+  lo trae, así que es agregarlo al tipo —no ir a buscarlo al store de monedas, que daría la escala
+  de HOY y no la congelada—. Emparentada con la deuda de `unidadBaseItem` /
+  `resolverUnidadBaseDeItem`, que es la misma clase de gemelo sin enlace de compilación.
+
+  ⚠️ **Mientras tanto la conducta es correcta**, solo tardía: el guard del backend es la
+  autoridad (invariante 6) y no se tocó.
+
 - [ ] **`recargos.vue` no tiene el quinto camino de aviso que sí tiene `descuentos.vue`**
   (frontend; **medido el 2026-09-03** por la revisión del diff que cerró el de descuentos —
   [`resueltos.md`](resueltos.md)) — el mismo gesto sigue vivo en recargos: editar un
@@ -1533,211 +1559,10 @@ checker se amplió y los 21 sitios que marcó eran higiene ya documentada. Lo qu
 un agujero **latente** en los helpers de caja —una copia sin la fase 2 del cierre, a una venta
 en efectivo de estrellar suites ajenas— y una cobertura que se perdía en `mermas`.
 
-⚠️ **La quinta pregunta de esa ronda NO se contestó y no se preguntó**: la nota de crédito es
-**fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`, ADR-010).
-Sigue en la § 4, sola.
-
-- [ ] **La nota de crédito descompone su monto — con línea de ajuste y glosa libre** ✅ *(decidido por el owner el 2026-09-03; antes vivía en la § 4)*
-
-  ## La decisión, en una línea
-
-  **El monto suelto se permite**, y se expresa como una **línea de ajuste con glosa libre** —no
-  como una nota de crédito sin líneas. Con eso la NC deja de registrar `total_impuestos = 0`.
-
-  **Por qué esa forma y no otra.** Resuelve tres problemas a la vez, y ninguno de los otros dos
-  caminos resolvía los tres:
-
-  1. **Chile**: la zona Detalle es obligatoria en los diez tipos de documento, NC incluida. La
-     línea de ajuste la llena.
-  2. **Argentina**: `ImpNeto`/`ImpIVA` son obligatorios y la suma **se valida con rechazo**
-     (error 10048). La línea declara su neto e IVA, y los números cierran.
-  3. **Inventario**: una línea de ajuste **no es un producto del catálogo**, así que no repone
-     nada. Exigir líneas reales habría metido al stock la pasta que el cliente ya se comió.
-
-  📌 Y saca de encima el prorrateo como regla inventada: no se reparte un monto contra la
-  composición de la venta, **se declara** qué es ese monto — que es exactamente lo que el SII
-  espera del emisor (`IndExeDR` es declarado, no derivado) y lo que ARCA necesita.
-
-  ## Las tres piezas, y la trampa
-
-  Ninguna toca el esquema.
-
-  1. **Un ítem de sistema "Ajuste", de tipo `servicio`.** `venta_detalles.item_id` es **NOT
-     NULL**, así que la línea necesita colgar de algún ítem; y `servicio` —no `producto`—
-     porque en este sistema **solo `tipo='producto'` tiene stock**. Se siembra al crear el
-     tenant, junto al rol admin, la fórmula de precio y la caja virtual, que es un patrón que
-     ya existe. La glosa va en `descripcion`, que ya se congela por línea.
-  2. ⛔ **La trampa: hoy esa línea haría fallar el reembolso entero con un 400.**
-     `crearNotaCredito` llama a `registrarMovimiento` **por cada línea sin mirar el tipo de
-     ítem**, y ese método rechaza con *"El item no tiene control de stock"* si el ítem no es
-     producto (`inventario.service.ts`, el guard después del `SELECT ... FOR UPDATE OF ip`).
-     Hay que saltear el movimiento para lo que no es producto — **a propósito, no
-     descubriéndolo en producción**.
-  3. **`clasificacion_tributaria` de la línea** es NOT NULL (`afecto` | `exento`). Ver abajo.
-
-  ## La venta mixta: dos líneas, con la proporción de la venta ✅
-
-  **Decidido por el owner el 2026-09-03.** Cuando la venta original es mixta (afecto + exento),
-  el ajuste se parte en **dos líneas**, repartidas en la proporción que la venta **ya tiene
-  congelada**. Con la venta toda afecta o toda exenta se hereda y sale una sola línea.
-
-  Lo importante de por qué esta y no "que elija el operador" (que es lo que hace Bsale): la
-  proporción es **un hecho ya persistido**, no un criterio que alguien inventa en el mostrador.
-  No se le pone una decisión fiscal encima a un cajero.
-
-  **Cuatro cosas que el que lo construya se va a encontrar:**
-
-  1. **La base de la proporción NO es la venta entera: es lo que queda por devolver.** Si ya
-     hubo notas de crédito antes, repartir sobre la venta original completa reparte de más
-     sobre un balde que ya se devolvió. Es el mismo criterio del tope de reembolso, que ya
-     existe y ya descuenta las NC previas bajo el lock.
-  2. **El residuo.** Partir un monto en dos casi nunca da exacto. Va al criterio determinista
-     que el motor ya usa: **resto más grande, desempate por posición**.
-  3. **Nada de líneas en cero.** Si la venta era toda afecta, o si el redondeo deja un balde en
-     cero —un ajuste chico sobre una venta casi toda afecta—, **sale una sola línea**. Una
-     línea de importe cero es ruido en el documento y puede no ser válida.
-  4. ⚠️ **Ese reparto ya está escrito dos veces en el repo**, y la NC sería el **tercer**
-     consumidor: `repartirProporcional` en `calculo-precios.engine.ts` (privado, cuantiza a la
-     escala de moneda) y `repartirDescuentoCombo` en `promociones.evaluator.ts`, cuyo propio
-     docblock lo declara *"mismo idioma que `repartirProporcional` del motor de cálculo de
-     precios, sin su paso de cuantización"*. La regla del repo —*"duplicar dos veces es
-     aceptable, se extrae a la tercera"*— **se dispara acá**. La NC necesita la variante que
-     **sí** cuantiza.
-
-  ✅ **Y esto ya se apoya en terreno firme**: que una venta mixta llegue **bien compuesta** era
-  el prerrequisito, y está resuelto desde el 2026-08-21 (`67a91028`) — el descuento de nivel
-  venta baja prorrateado a las líneas y cada una desbrutea con sus tasas, así que la proporción
-  afecto/exento de la venta es confiable. Detalle y cierre en
-  [`investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md`](investigaciones/2026-08-21-descuento-global-vs-base-del-iva.md).
-
-  ✍️ **Diseño escrito y aprobado (2026-09-04):**
-  [`specs/2026-09-04-nota-credito-descompone-su-monto-design.md`](../superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md),
-  con su **plan ejecutable** en
-  [`plans/2026-09-04-nota-credito-descompone-su-monto.md`](../superpowers/plans/2026-09-04-nota-credito-descompone-su-monto.md)
-  (5 tareas; la 4 es indivisible: la línea de ajuste sin el corte del movimiento de inventario
-  deja el reembolso peor que hoy).
-  Cierra las cuatro preguntas que quedaban: se **rechaza** devolver mercadería que valga más que
-  la nota; el alcance **incluye la pantalla** (que sale casi gratis: el drawer ya arma la tabla
-  de líneas); el IVA se **deriva de los importes congelados** de la venta que se corrige; y
-  `repartirProporcional` **se exporta donde está** en vez de mudarse —el motor ya es el hogar de
-  `cuantizar` y `ConfigCalculo`, que ventas importa hoy—.
-
-  ⚠️ **Sigue sin empezarse, y va en su propio frente:** es materia fiscal, `CLAUDE.md` obliga a
-  que abra su propia sesión con su propia verificación. **No urge** —sin datos productivos no se
-  pierde ningún hecho— pero el reloj arranca con el primer local real vendiendo.
-
-  (backend, medido 2026-08-02, **cruzado contra el código el 2026-08-22** y **re-verificado el
-  2026-09-03** sobre `ventas.service.ts:1430` `crearNotaCredito` — la cita decía `:982`, y
-  antes `:854`; la corrió el frente de la nota de crédito por país. Es la tercera vez que se
-  mueve: leer el símbolo, no el número) —
-  **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
-  ante impuestos y documentos tributarios; ver **ADR-010**).
-  **Lo medido, sin interpretar:** la NC construye su fila de `ventas` **directo**, no por
-  `crearEnTransaccion`, y hardcodea `totalDescuentos: '0'`, `totalRecargos: '0'` y
-  `totalImpuestos: '0'`, con `totalBruto = totalFinal = params.monto`. Consecuencias
-  encadenadas: (a) cero filas en `ventas_descuentos`/`ventas_recargos`/`ventas_impuestos`,
-  así que la NC no dice qué reglas revierte —se llega por la venta que referencia—;
-  (b) ~~`config_calculo` queda `null` en toda NC~~ — **falso desde el 2026-08-21**: la NC
-  **hereda** el criterio del documento que corrige (`cfgOriginal = original.config_calculo`,
-  `:1035`), y el camino manual falla ruidoso si falta (decisiones P4/P5 del frente de
-  redondeo). Verificado el 2026-08-22, se corrige acá porque este archivo es texto vivo;
-  (c) `base_ventas_sin_impuestos` **sigue** quedándose en el default de la columna —se llena
-  solo en `crearEnTransaccion` (`:592`, `:611`), que la NC no usa—, y ese campo lo consume
-  `liquidacion-propinas.service.ts`. ✅ Los tres hardcodeos y este hueco **siguen tal cual**,
-  verificados el 2026-09-03.
-  Los dos puntos de entrada (`crearNotaCreditoDesdeVenta`) desembocan en el mismo método.
-  Lo que la NC **sí** congela es `descripcion` y `clasificacion_tributaria` por línea en
-  `venta_detalles`, copiadas de la línea original.
-  **La pregunta para el owner, que NO me corresponde responder:** una NC sobre una venta con
-  IVA 19%, ¿tiene que declarar su propio IVA? Un DTE 61 lleva `MntNeto`/`IVA`/`MntTotal`
-  propios, y ADR-010 dice congelar el **hecho fiscal** en la transacción y diferir solo lo
-  que transmite o formatea — el corte neto/impuesto de una NC parece hecho fiscal, no
-  formato. Si lo es, hoy falta y no es solo un tema de auditoría.
-  **Contraargumento honesto a considerar:** la NC se emite **por monto** (`params.monto`,
-  con devoluciones de línea opcionales y sueltas del monto), así que "descomponer" exige
-  primero definir contra qué —¿prorrateo sobre el total original? ¿solo sobre las líneas
-  devueltas?—, y eso es regla de negocio, no implementación.
-  🔎 **El owner pidió una investigación de mercado antes de decidir (2026-08-15).** Es materia
-  fiscal, no es obvia, y el owner no es experto del dominio — el caso exacto que
-  [`investigacion-mercado.md`](investigacion-mercado.md) contempla. ✅ **Corrida y cerrada el 2026-08-22**:
-  [`investigaciones/2026-08-22-descomposicion-nota-credito.md`](investigaciones/2026-08-22-descomposicion-nota-credito.md),
-  con el Formato DTE v2.5 leído completo como fuente primaria.
-
-  **Lo que trajo, y que mueve la pregunta de lugar** (insumo, no decisión — la regla del cruce
-  sigue en pie: si el mercado dice A y el owner dice B, gana B):
-  - **El SII no obliga a descomponer, pero tampoco valida.** En un DTE 61 solo `MntTotal` es
-    obligatorio incondicional; `MntNeto`/`MntExe`/`IVA` son **condicionales**, y el validador
-    del SII *"no rechaza documentos por errores de contenido… como que el IVA no sea igual a
-    la tasa por el monto neto"*. O sea: el argumento a favor de descomponer **no puede ser
-    "si no, el SII lo rechaza"** — sería declarar un documento descuadrado que se acepta igual.
-  - **Nadie en el mercado resuelve nuestro caso.** Ninguno de los 7 productos relevados
-    documenta prorrateo de un monto libre: Square y Toast lo excluyen del desglose fiscal,
-    Clover lo prohíbe por API y obliga a itemizar, Bsale se lo deja a un humano por
-    transacción. Anotado en [`DIFERENCIADORES.md`](../DIFERENCIADORES.md) como hallazgo, no
-    como logro: hoy es un hueco que compartimos.
-  - 🆕 **Un hueco que esta entrada no tenía:** la zona **Detalle es obligatoria en los diez
-    tipos de documento del DTE, NC incluida** — y hoy, con `devoluciones` vacío,
-    `crearNotaCredito` inserta **cero filas** en `venta_detalles` (verificado: las líneas
-    salen de `validarDevolucionesReembolso(..., params.devoluciones ?? [])`, `:1053`). Una NC
-    por monto puro no tendría con qué armar la zona Detalle el día que se integre el SII.
-
-  **Las 6 preguntas abiertas quedan en la §8 de la investigación** y no se copian acá para no
-  duplicar la fuente.
-
-  🆕 **La primera —la que destrababa a las otras cinco— la contestó la norma el 2026-09-03, y
-  no fue el SII: fue ARCA** (§ 7 bis de la investigación, ampliada ese día a pedido del owner
-  con las otras tres autoridades). Evidencia **primaria**, manual del desarrollador WSFEv1
-  v4.7 leído completo:
-
-  - **Argentina no tiene zona Detalle**: `FECAEDetRequest` no lleva ningún array de líneas.
-  - Pero `ImpNeto`, `ImpOpEx` e `ImpIVA` son **obligatorios**, y la suma **se valida con
-    rechazo** (error **10048**), con el IVA desagregado por alícuota (error **10018**).
-
-  ⛔ **Consecuencia:** el argumento *"la autoridad no lo revisa"* —cierto para el SII, § 2.4—
-  **es falso para ARCA, que bloquea**. Sin `ImpNeto`/`ImpIVA` que sumen no hay CAE, y sin
-  líneas donde apoyarse la única salida es **calcular** el neto y el IVA del monto. O sea que
-  el prorrateo dejó de ser una regla sin precedente que inventaríamos nosotros (lo que decía
-  la § 7) y pasó a ser **requisito de una autoridad**.
-
-  📌 **Y los dos extremos se cubren mutuamente: Chile obliga a las LÍNEAS, Argentina obliga a
-  la DESCOMPOSICIÓN.** Un sistema que sirva a los dos necesita las dos cosas — no es "uno o el
-  otro", que es como estaba planteada la entrada.
-
-  **Lectura recomendada al owner el 2026-09-03, para que el que lo tome no arranque de cero**
-  (es recomendación, no decisión tomada):
-
-  1. **El reembolso es UN proceso interno, y la pasarela es solo el riel por donde vuelve la
-     plata** (owner, 2026-09-03 — corrige la primera versión de esta recomendación, escrita
-     el mismo día, que decía lo contrario). El proceso de devolución conoce la venta y las
-     líneas; al final se bifurca **solo en cómo vuelve el dinero**: efectivo sale de la caja,
-     tarjeta llama a `POST /cobros/:ordenId/reembolsos`. Ese endpoint manda **solo el monto
-     porque es lo único que la pasarela necesita**, no porque sea lo único que sabemos.
-  2. **Entonces exigir líneas SÍ se puede en todos lados**, porque se piden **arriba, una sola
-     vez**, en el proceso de devolución — el único lugar con contexto para darlas. Los dos
-     rieles heredan eso y el endpoint de la pasarela **no se toca**.
-
-     ⛔ **La versión anterior de este punto era falsa** y conviene saber por qué, porque el
-     error es fácil de repetir: se leyó el DTO de la pasarela (`devoluciones?` opcional) y el
-     callback (`reembolso-callback.handler.ts:45`, donde la plata ya se movió y por P3 no se
-     puede rechazar) y se concluyó que "no se pueden exigir líneas en ese camino". Lo que P3
-     impide es **rechazar en el callback**, no **validar en la entrada**.
-  3. **Lo que sí está mal hoy, y es de fondo:** `generarNotaCredito` y `devoluciones` viven en
-     el DTO **de la pasarela** (`create-reembolso.dto.ts`), o sea que el riel de la plata
-     decide un hecho fiscal y un movimiento de inventario. Está **invertido**: la NC debería
-     nacer del proceso de devolución y el reembolso ser el último paso. Se nota en que hay
-     **dos entradas** a `crearNotaCredito` —el controller de ventas y el callback— en vez de
-     una.
-  4. **El prorrateo queda solo para el caso residual:** devolver un **monto suelto** por gesto
-     comercial, si se decide que eso siga existiendo (decisión de producto). Con líneas, el
-     IVA sale de ellas y no hay nada que prorratear. Si el monto suelto sobrevive, **ARCA
-     obliga a descomponerlo igual**.
-  5. **Lo irrecuperable no es el número del IVA** —se recalcula desde la venta original
-     congelada más el monto— **sino qué se devolvió.** Ninguna regla futura reconstruye qué
-     plato era. Por eso el orden es: primero el proceso de devolución con sus líneas.
-
-  ⚠️ **Sigue sin decidirse y sin empezarse:** es materia fiscal y `CLAUDE.md` obliga a parar.
-  **No urge hoy** —no hay datos productivos, así que no se está perdiendo ningún hecho— pero
-  el reloj arranca con el primer local real vendiendo.
+⚠️ **La quinta pregunta de esa ronda no se contestó ese día y no se preguntó**: la nota de
+crédito es **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`,
+ADR-010). ✅ **Ese frente se abrió y se cerró el 2026-09-04**: la NC descompone su monto en
+líneas, neto e IVA (`7a1e934d`) → [`resueltos.md`](resueltos.md).
 
 - [ ] **Bodegas: el stock deja de ser un escalar por tenant** ✅ *(decidido por el owner el
   2026-09-03: bodega primero, sucursal después; antes era la pregunta 4 de la § 4)* —
@@ -1931,7 +1756,7 @@ saber:
 |---|---|---|
 | La nota de crédito de un tenant AR/CO/MX congelaba el tipo **chileno** | **Construida** | `fc1bfa84` → [`resueltos.md`](resueltos.md) |
 | Los documentos tributarios y los impuestos de sistema de AR/CO/MX | **Dejó de ser pregunta al relevarla**: falta modelo, no un porcentaje | **§ 6**, como frente fiscal por país |
-| La NC que no descompone su monto | **Contestada por el owner**: se permite el monto suelto, con línea de ajuste y glosa libre | **§ 3**, con las tres piezas y la trampa |
+| La NC que no descompone su monto | **Contestada por el owner**, y **construida el 2026-09-04** | `7a1e934d` → [`resueltos.md`](resueltos.md) |
 
 ⚠️ **Ese día la sección llegó a decir "dos" y después "una"**, y las dos veces el número
 escrito y el `awk` discrepaban porque una entrada era un `###` que el conteo mecánico no ve.
