@@ -1708,6 +1708,26 @@ Sigue en la § 4, sola.
   **No urge hoy** —no hay datos productivos, así que no se está perdiendo ningún hecho— pero
   el reloj arranca con el primer local real vendiendo.
 
+- [ ] **Bodegas: el stock deja de ser un escalar por tenant** ✅ *(decidido por el owner el
+  2026-09-03: bodega primero, sucursal después; antes era la pregunta 4 de la § 4)* —
+  Relevamiento y fuentes en
+  [`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
+  **Qué es una bodega, con el corte de Bsale:** una ubicación que **guarda stock y no vende**.
+  Ese es el criterio que la separa de una sucursal, y es también el que la mantiene **fuera de
+  lo fiscal**: una bodega no se declara al SII, no tiene código y no aparece en ningún
+  documento.
+  **Lo que cambia:** `item_producto.stock` es hoy **una columna, una fila por ítem** — o sea una
+  sola bolsa por tenant. Pasa a ser stock **por ubicación**, y los movimientos de
+  `movimientos_inventario` ganan **origen y destino**.
+  ⛔ **Toca `movimientos_inventario`, así que por `CLAUDE.md` se consulta antes de escribir.**
+  📌 **Lo que hay que capturar desde el primer día, aunque no se emita nada** (ADR-010): el
+  traslado tiene que registrar **origen, destino y motivo**. En Chile mover mercadería entre
+  establecimientos propios exige guía de despacho, y un traslado guardado como un ajuste sin
+  origen ni destino **no se reconstruye** después. Si eso además **emite** la guía es la
+  pregunta 1 de la entrada de inventario en la § 4 — es fiscal, va aparte, y **no bloquea esto**.
+  ℹ️ **Sucursal queda explícitamente afuera** y sigue sin decidirse. Si algún día entra, trae su
+  propia consecuencia de ADR-010: de qué sucursal salió cada venta es un hecho fiscal.
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1872,17 +1892,23 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
   [`investigaciones/2026-07-26-inventario.md`](investigaciones/2026-07-26-inventario.md):
   1. **¿El traslado entre bodegas emite guía de despacho**, o se registra sin documento y el
      tenant la emite por fuera? ⛔ **Fiscal** — frente propio (ADR-010).
+     ⚠️ **Subió de prioridad al decidirse bodega (2026-09-03)**, aunque **no bloquea**: en Chile
+     mover mercadería entre establecimientos propios **exige** guía, y la electrónica **se envía
+     al SII** —no es un documento interno— **[SECUNDARIA]**. No bloquea porque el sistema no
+     emite **ningún** DTE hoy, así que el tenant ya la emitiría por fuera como hace con las
+     boletas. Lo que sí obliga es a **capturar origen, destino y motivo** en el movimiento desde
+     el primer día.
   2. ~~**¿"Bodega" es realmente sucursal?**~~ ✅ **Relevada el 2026-09-03** →
      [`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
      **No son lo mismo, y no es una discusión de nombres.** Bsale corta por *"desde una bodega
      no podrás hacer ventas"*, y el SII lo endurece: la **sucursal es una entidad fiscal** —se
      declara al SII dentro de dos meses y su código viaja en cada documento (`CdgSIISucur`)—
      mientras que **la bodega no tiene existencia fiscal ninguna**.
-     **Lo que queda para el owner ya no es "¿son lo mismo?" sino "¿cuál hace falta?"**: son dos
-     ejes independientes y **hoy no tenemos ninguno** (verificado: ni `bodega` ni `sucursal`
-     existen en el código, el stock es un escalar por ítem y las cajas no tienen ubicación). La
+     ✅ **Y el owner decidió el mismo día: bodega primero, sucursal después.** Son dos ejes
+     independientes y **hoy no tenemos ninguno** (verificado: ni `bodega` ni `sucursal` existen
+     en el código, el stock es un escalar por ítem y las cajas no tienen ubicación). La
      **bodega** vive adentro de inventario y no toca nada fiscal; la **sucursal** toca cajas,
-     ventas, usuarios y el DTE.
+     ventas, usuarios y el DTE. **La construcción de bodegas pasó a la § 3.**
      ⛔ **Y trae una consecuencia de ADR-010:** si van a existir sucursales, **de qué sucursal
      salió cada venta es un hecho fiscal** — barato de registrar antes del primer local real,
      imposible de reconstruir después.

@@ -108,9 +108,51 @@ real vendiendo y se sepa que viene un segundo, registrar el origen de cada venta
 📌 **Lo que NO se sigue de esto:** que haya que construir sucursales ya. Bsale las vende como
 add-on justamente porque la mayoría de sus clientes tiene una sola. La decisión es del owner.
 
+## 5 bis. ✅ Decidido: bodega primero, sucursal después (owner, 2026-09-03)
+
+Y al decidirlo aparece lo que hay que mirar enseguida, porque **el traslado entre bodegas no
+es un movimiento interno para el SII**.
+
+**Lo relevado** —**[SECUNDARIA]**, no se abrió la resolución:
+
+- Mover mercadería **entre establecimientos propios** (casa matriz → sucursal, bodega →
+  tienda) **exige guía de despacho**. No es opcional por ser del mismo contribuyente.
+- **La guía electrónica se envía al SII**: no es un documento interno.
+- En el traslado propio **se puede omitir el precio**, siempre que el motivo esté indicado con
+  claridad —*"traslado entre bodegas propias"*, *"envío para reparación"*, *"distribución
+  interna"*—, dejando claro que no es una venta.
+- ⚠️ **Resolución Exenta N°154 (2025)** endurece los requisitos: más detalle de **origen,
+  destino y transporte**. Las fuentes secundarias **se contradicen en la fecha de entrada en
+  vigencia** (una dice mayo 2026, otra noviembre 2026) — **no verificado contra la resolución**,
+  y conviene hacerlo antes de diseñar el dato.
+
+### Qué se sigue para la construcción de bodegas
+
+**No convierte a la guía en prerrequisito**, y la razón es la misma de siempre
+([ADR-010](../../adr/010-preparacion-sii-datos-fiscales.md)): el sistema **no emite ningún
+DTE** hoy —ni boletas ni facturas—, así que el tenant ya emite sus documentos por fuera. La
+guía sería uno más de esa lista, no una regresión.
+
+📌 **Lo que sí obliga es a capturar el hecho, que es la regla de ADR-010.** El movimiento entre
+bodegas tiene que registrar **origen, destino y motivo** desde el primer día. No para emitir
+nada: para que el día que entre la emisión, el dato esté. Un traslado registrado como un ajuste
+sin origen ni destino **no se reconstruye**.
+
+⛔ **Lo que queda abierto y es del owner** (pregunta 1 de la entrada de inventario): si el
+sistema **emite** la guía o el tenant la sigue emitiendo por fuera. Es fiscal, abre su propio
+frente, y **no bloquea** construir bodegas mientras el movimiento capture lo que la guía va a
+necesitar.
+
+---
+
 ---
 
 ## 6. Fuentes
+
+**SII — guía de despacho en traslados propios (secundarias):**
+- [Guía de despacho y transporte de mercaderías](https://comprobante.cl/blog/guia-despacho-transporte-mercaderias) ·
+  [Resolución 154 y sus nuevos requisitos](https://sovos.com/es/blog/iva/guias-despacho-resolucion-154-sii-nuevos-requisitos-mayo-2026/)
+  ⚠️ **la fecha de vigencia no coincide entre fuentes; verificar contra la resolución**
 
 **Bsale — oficial:**
 - [Bodega Adicional](https://www.bsale.cl/product/bodega-adicional) — la frase de la diferencia,
