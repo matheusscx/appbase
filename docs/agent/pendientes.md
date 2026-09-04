@@ -1798,15 +1798,39 @@ Sigue en la § 4, sola.
      descuento exclusivo sobre una línea que ya trae promo es un caso real —"2x1 más cupón"— y
      hoy nada lo impide.
 
-- [ ] **Compras, alimentado por los DTE recibidos del SII** ✅ *(dos decisiones del owner el
-  2026-09-03: la varianza va **después** de compras, y la recepción **lee la factura del
-  proveedor desde el SII** en vez de digitarse; antes eran las preguntas 3 y 4 de la § 4)* —
+- [ ] **Compras: carga manual, y el DTE del SII como atajo encima** ✅ *(tres decisiones del
+  owner el 2026-09-03: la varianza va **después** de compras; la recepción **puede leer la
+  factura del proveedor desde el SII**; y esa lectura **no puede ser el único camino**. Antes
+  eran las preguntas 3 y 4 de la § 4)* —
   ⛔ **Es la primera integración con el SII del sistema, y es de ENTRADA.** [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
   difirió la **emisión**; leer documentos recibidos es otro eje. Queda registrado que el orden
   se invierte respecto de lo que cualquiera supondría: **vamos a leer DTE antes de emitir uno**.
   **Hoy no existe nada**: no hay módulo, ni entidad, ni directorio de compras (verificado
   2026-09-03). Lo que sí existe es el motivo `compra` en `movimientos_inventario`, o sea el
   lugar donde la recepción va a aterrizar.
+
+  ⛔ **La carga manual NO es un plan B: es el camino base** (owner, 2026-09-03, agregado el
+  mismo día que la decisión de leer del SII). Leer la factura **no puede ser el único camino**.
+
+  **Por qué, con los casos que lo fuerzan:**
+
+  - **Hay compras sin DTE.** El proveedor que no es emisor electrónico, la feria mayorista, el
+    productor chico que le vende la verdura al restorán. Existen y hoy quedarían inexpresables.
+  - **Y las que tienen DTE no lo tienen a tiempo.** La mercadería llega el lunes y el documento
+    aparece en el SII el miércoles. Si la recepción depende del documento, **el stock queda mal
+    dos días** — y el stock mal es una mesa trabada, no un problema contable.
+  - **Una caída del SII bloquearía recibir mercadería.** Es meter una dependencia externa en un
+    flujo diario del local.
+
+  📌 **La regla de diseño que se sigue, y es la que más importa:** hay **una sola recepción**,
+  con **dos formas de llenarla**. El DTE **pre-llena el mismo formulario** que alguien podría
+  tipear — no es un segundo flujo con su propia forma. Dos caminos que produzcan registros
+  distintos es exactamente lo que `CLAUDE.md` prohíbe, y acá se notaría enseguida: la varianza
+  y el CPP leen de un solo lugar.
+
+  ✅ **Y esto reordena la construcción a favor:** compras **manual se construye sin ninguna
+  integración**, así que la lectura del DTE queda como **segunda fase**. La varianza —que espera
+  a compras— deja de esperar además a que funcione una integración con el SII.
 
   ⚠️ **Cuatro cosas que hay que tener presentes, y la primera no es técnica:**
 
