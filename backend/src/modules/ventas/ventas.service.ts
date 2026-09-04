@@ -1310,13 +1310,6 @@ export class VentasService {
   }
 
   /**
-   * Crea una nota de crédito interna (sin SII) por un reembolso de pasarela.
-   * Los totales se COPIAN del monto reembolsado — nunca pasan por el motor de
-   * precios — y la venta original no se modifica (queda `pagada`; la NC
-   * documenta la devolución). Las líneas son opcionales e informativas: solo
-   * los ítems elegidos para devolver a stock, sin validar cruce con el monto.
-   */
-  /**
    * El tipo de documento "nota de crédito" del país del tenant.
    *
    * Hasta el 2026-09-03 esto era una constante con la fila **chilena** código 61,

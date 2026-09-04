@@ -19,6 +19,37 @@ PostgreSQL 15 con `synchronize`, Jest + supertest, Nuxt 4 + Nuxt UI.
 
 **Spec:** [`../specs/2026-09-04-devolucion-con-credito-parcial-design.md`](../specs/2026-09-04-devolucion-con-credito-parcial-design.md)
 
+---
+
+## ✅ Ejecutado el 2026-09-04 — y lo que salió distinto
+
+Las seis tareas están construidas y commiteadas (`ead5849c`, `f701b7c1`, `767c5227`, `e965903e`,
+`7fe7046b`, más el cierre). Cierre completo en
+[`resueltos.md`](../../agent/resueltos.md). Lo que el plan **no** anticipaba, todo encontrado por
+la revisión independiente y no por los tests que el plan pedía:
+
+1. **El tope por cantidad se quedó ciego** (tarea 2). Contaba `movimientos_inventario`, y eso era
+   fiel mientras toda línea aceptada moviera stock. Con líneas que se acreditan sin reponer, dos
+   notas seguidas podían acreditar la misma receta. Salió `unidadesComprometidasPorItem`, que
+   toma por documento el mayor entre lo acreditado en líneas y lo movido en stock.
+2. **La política de reposición son TRES, no dos** (tarea 2). El plan proponía un booleano
+   `rechazarReposicionImposible`; con él, `registrarDevolucionesPorReembolso` reponía lo que se
+   pidió no reponer. Quedó `politicaReposicion: 'rechazar-imposible' | 'ignorar' | 'exigir'`.
+3. **El escalado metía líneas en cero** en el documento (tarea 3), contra la regla que el propio
+   módulo ya aplicaba al reparto del ajuste. Se filtran.
+4. **La glosa** (tarea 3). El plan la ponía en la `descripcion` de la línea, pisando el nombre
+   del ítem — que es justo lo que la tarea 2 vino a arreglar. Va **pegada**: *"Empanada ·
+   Volvieron abiertas"*.
+5. **El `precio_unitario` de una línea escalada** (tarea 3). Sin tocarlo, la pantalla afirmaba
+   `7 × $1.190 = $368`. Se deriva del importe escalado — y **solo ahí**: derivarlo también en la
+   línea no escalada movía el número persistido en el 52,6 % de las líneas.
+6. **`disponibleNotaCredito` prometía sobre documentos inelegibles** (tarea 4), el 37 % de la
+   base. Salió el gemelo de los cuatro cortes de elegibilidad de la emisión.
+7. **El modo de la lista compartida no es fijo** (tarea 5): en el modal de reembolso depende del
+   checkbox "generar nota de crédito", así que cambia con el modal abierto.
+8. **Dos handlers del drawer** pintaban optimista un campo del que el disponible ahora depende
+   (tarea 5): uno ofrecía lo imposible, el otro escondía lo posible.
+
 ## Global Constraints
 
 Además de las invariantes de `CLAUDE.md`, para este frente:
@@ -72,7 +103,7 @@ Además de las invariantes de `CLAUDE.md`, para este frente:
 Entra `Decimal`, sale `Decimal`. No toca la base ni el service: es lo que permite probar el
 residuo sin levantar Postgres.
 
-- [ ] **Paso 1: escribir los tests que fallan**
+- [x] **Paso 1: escribir los tests que fallan**
 
 ⚠️ **Los valores tienen que discriminar.** Nada de dos ítems del mismo valor ni de factores que
 dividan exacto: con eso, un escalado que divida línea por línea pasa igual.
@@ -134,7 +165,7 @@ describe('escalarDevoluciones', () => {
 existe en ese spec). **Correr los tests antes de dar por buena cualquier constante**: si uno no
 da, se revisa el número contra la aritmética, no al revés.
 
-- [ ] **Paso 2: correrlos y verlos fallar**
+- [x] **Paso 2: correrlos y verlos fallar**
 
 ```bash
 cd backend && npm test -- nota-credito-composicion
@@ -142,7 +173,7 @@ cd backend && npm test -- nota-credito-composicion
 
 Esperado: FAIL — `escalarDevoluciones` no existe.
 
-- [ ] **Paso 3: escribir la función**
+- [x] **Paso 3: escribir la función**
 
 ```ts
 /**
@@ -177,13 +208,13 @@ export function escalarDevoluciones(
 }
 ```
 
-- [ ] **Paso 4: correrlos y verlos pasar**
+- [x] **Paso 4: correrlos y verlos pasar**
 
 ```bash
 cd backend && npm test -- nota-credito-composicion && npm run lint:check && npm run typecheck
 ```
 
-- [ ] **Paso 5: mutantes — cada uno tiene que REVERTIR al código anterior, no solo romper**
+- [x] **Paso 5: mutantes — cada uno tiene que REVERTIR al código anterior, no solo romper**
 
 Guardar copia antes de cada mutante y restaurar con `diff -q`, **nunca** con `git checkout`.
 
@@ -196,7 +227,7 @@ Guardar copia antes de cada mutante y restaurar con `diff -q`, **nunca** con `gi
 Si un mutante **sobrevive**, sospechar del test antes que del código: probablemente el fixture no
 discrimina.
 
-- [ ] **Paso 6: commit**
+- [x] **Paso 6: commit**
 
 ```bash
 git add backend/src/modules/ventas/nota-credito-composicion.ts backend/src/modules/ventas/nota-credito-composicion.spec.ts
@@ -223,7 +254,7 @@ git commit -m "feat(ventas): el escalado de las líneas de devolución, puro y t
 y después `registrarMovimiento` la rechace con 400: el reembolso entero falla, **peor que hoy**.
 El flag sin abrir la validación no hace nada. Los dos cambios entran juntos o no entra ninguno.
 
-- [ ] **Paso 1: escribir los e2e que fallan**
+- [x] **Paso 1: escribir los e2e que fallan**
 
 Sobre ítems propios del spec (no los del seed). El spec ya crea un producto afecto y un servicio
 exento; agregar **una receta** para el caso que más importa.
@@ -300,13 +331,13 @@ it('pedir que un servicio reponga se rechaza', async () => {
 ingrediente, como hace `items.e2e-spec.ts` — **abrir ese archivo y copiar el patrón**, no
 inventar el payload.
 
-- [ ] **Paso 2: correrlos y verlos fallar**
+- [x] **Paso 2: correrlos y verlos fallar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion
 ```
 
-- [ ] **Paso 3: el campo en el DTO y en el tipo**
+- [x] **Paso 3: el campo en el DTO y en el tipo**
 
 En `create-nota-credito.dto.ts`, dentro de `DevolucionNotaCreditoDto`:
 
@@ -336,7 +367,7 @@ export interface DevolucionReembolso {
 tocarlo** — verificarlo antes de darlo por hecho. Sí hay que agregar el campo al evento de
 `reembolso-callback.registry.ts:15`, que declara su propia forma.
 
-- [ ] **Paso 4: la validación deja de disparar por nombrar el ítem**
+- [x] **Paso 4: la validación deja de disparar por nombrar el ítem**
 
 En `validarDevolucionesReembolso`, reemplazar los dos `throw` de inventario. Hoy disparan por el
 solo hecho de aparecer en la lista; pasan a disparar **solo si se pide reponer**:
@@ -404,7 +435,7 @@ Y en el objeto que devuelve, junto a `valorUnitarioBruto`:
 
 Agregarlo también al tipo de retorno del método, con su docblock.
 
-- [ ] **Paso 5: el loop de inventario mira el flag**
+- [x] **Paso 5: el loop de inventario mira el flag**
 
 En `crearNotaCreditoEnTransaccion`, el loop que hoy recorre `devoluciones`:
 
@@ -420,13 +451,13 @@ En `crearNotaCreditoEnTransaccion`, el loop que hoy recorre `devoluciones`:
 stock; una devolución que no repone no tiene nada que hacer ahí. Verificar que sigue pasando sus
 devoluciones sin el flag, o sea reponiendo.
 
-- [ ] **Paso 6: correr el e2e y verlo pasar**
+- [x] **Paso 6: correr el e2e y verlo pasar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion && ./scripts/reset-db.sh --verificar
 ```
 
-- [ ] **Paso 7: la suite entera, no un subset**
+- [x] **Paso 7: la suite entera, no un subset**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test
@@ -435,7 +466,7 @@ cd backend && npm run lint:check && npm run typecheck && npm test
 
 Un DTO o un tipo tocado rompe specs lejanos: el subset no lo ve.
 
-- [ ] **Paso 8: mutantes**
+- [x] **Paso 8: mutantes**
 
 | Mutante | Test que debe caer |
 |---|---|
@@ -443,7 +474,7 @@ Un DTO o un tipo tocado rompe specs lejanos: el subset no lo ve.
 | El loop de inventario recorre `devoluciones` en vez de `aReponer` | "reponerStock false … NO vuelve al stock" |
 | `dev.reponerStock ?? puedeReponer` → `dev.reponerStock ?? false` | "sin el flag … sigue reponiendo como antes" |
 
-- [ ] **Paso 9: revisión independiente y commit**
+- [x] **Paso 9: revisión independiente y commit**
 
 Lanzar `domain-reviewer` sobre el diff staged, atar el recibo al diff exacto y commitear. El
 arreglo que pida la revisión **se vuelve a revisar**.
@@ -468,7 +499,7 @@ git commit -m "feat(ventas): cualquier ítem vendido se acredita por línea, rep
 ⚠️ **INDIVISIBLE.** Sacar el rechazo sin escalar las líneas deja un documento cuyas líneas no
 suman su total — que es exactamente lo que el frente anterior vino a arreglar.
 
-- [ ] **Paso 1: escribir los e2e que fallan**
+- [x] **Paso 1: escribir los e2e que fallan**
 
 ```ts
 it('acreditar menos de lo que vale la mercadería: las líneas se escalan', async () => {
@@ -559,13 +590,13 @@ it('la porción agotada sigue rechazándose, diciendo cuánto queda', async () =
 });
 ```
 
-- [ ] **Paso 2: correrlos y verlos fallar**
+- [x] **Paso 2: correrlos y verlos fallar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion
 ```
 
-- [ ] **Paso 3: escalar antes de mirar la porción**
+- [x] **Paso 3: escalar antes de mirar la porción**
 
 Reemplazar el bloque que hoy arranca en el comentario `// 3. ¿Entra esta devolución en el
 documento?`. El orden es el de la § 4.1 de la spec y **no es libre**:
@@ -621,7 +652,7 @@ documento?`. El orden es el de la § 4.1 de la spec y **no es libre**:
 ⚠️ El `devueltoAhora` de hoy se arma **antes** y sobre `devoluciones`: hay que moverlo acá y
 cambiarlo a `escaladas`. Dejarlo donde está es el bug que el cuarto e2e caza.
 
-- [ ] **Paso 4: el único rechazo que sobrevive**
+- [x] **Paso 4: el único rechazo que sobrevive**
 
 `acreditablePorPorcion` y `porcionAgotada` quedan como están. Lo que cambia es que
 `noEntraEnElDocumento` **deja de mirar el monto**:
@@ -652,13 +683,13 @@ del documento → el monto entero.
 stock son unidades, no plata: escalar el valor de la línea no cambia cuántas empanadas
 volvieron. Sigue recorriendo `aReponer`, derivado de `devoluciones` (Tarea 2, paso 5).
 
-- [ ] **Paso 5: correr el e2e y verlo pasar**
+- [x] **Paso 5: correr el e2e y verlo pasar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion && ./scripts/reset-db.sh --verificar
 ```
 
-- [ ] **Paso 6: la suite entera**
+- [x] **Paso 6: la suite entera**
 
 ```bash
 cd backend && npm run lint:check && npm run typecheck && npm test
@@ -670,7 +701,7 @@ cd backend && npm run lint:check && npm run typecheck && npm test
 tocan: el caso *"devolver mercadería que vale más que la nota se rechaza"* y el unitario del
 webhook.
 
-- [ ] **Paso 7: mutantes**
+- [x] **Paso 7: mutantes**
 
 | Mutante | Test que debe caer |
 |---|---|
@@ -682,7 +713,7 @@ webhook.
 ⚠️ Después de revertir un mutante, **verificar la hora del restart en los logs del backend**: el
 fuente limpio no prueba que el proceso lo esté.
 
-- [ ] **Paso 8: revisión independiente y commit**
+- [x] **Paso 8: revisión independiente y commit**
 
 ```bash
 git add -A
@@ -706,7 +737,7 @@ Es lo que hace que el rechazo de la Tarea 3 casi nunca dispare: el operador ve e
 de tipear. **El backend calcula, el frontend muestra** — no es duplicar lógica de plata, es el
 servidor diciendo el número.
 
-- [ ] **Paso 1: escribir el e2e que falla**
+- [x] **Paso 1: escribir el e2e que falla**
 
 ```ts
 it('el detalle de la venta trae el disponible por porción fiscal', async () => {
@@ -732,13 +763,13 @@ it('el detalle de la venta trae el disponible por porción fiscal', async () => 
 });
 ```
 
-- [ ] **Paso 2: correrlo y verlo fallar**
+- [x] **Paso 2: correrlo y verlo fallar**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion
 ```
 
-- [ ] **Paso 3: la consulta**
+- [x] **Paso 3: la consulta**
 
 En `findOne`, junto a las otras lecturas. **Una sola query agregada**, con el mismo criterio que
 la consulta de `notasCredito` que ya está ahí:
@@ -771,7 +802,7 @@ la consulta de `notasCredito` que ya está ahí:
       );
 ```
 
-- [ ] **Paso 4: exponerlo en la respuesta**
+- [x] **Paso 4: exponerlo en la respuesta**
 
 Junto a `baseVentasSinImpuestos` en el objeto que arma `findOne`:
 
@@ -809,20 +840,20 @@ el mismo número mientras las líneas de toda nota sumen su total —que es lo q
 garantizó— pero el tope que el backend **exige** es el primero, y el modal tiene que mostrar el
 que se va a aplicar.
 
-- [ ] **Paso 5: correr el e2e y la suite**
+- [x] **Paso 5: correr el e2e y la suite**
 
 ```bash
 ./scripts/reset-db.sh && cd backend && npm run test:e2e -- nota-credito-composicion && ./scripts/reset-db.sh --verificar
 cd backend && npm run lint:check && npm run typecheck && npm test
 ```
 
-- [ ] **Paso 6: mutante**
+- [x] **Paso 6: mutante**
 
 | Mutante | Test que debe caer |
 |---|---|
 | El `CASE WHEN` suma en vez de restar las notas previas | "el disponible por porción" (daría 9.065 / 3.265) |
 
-- [ ] **Paso 7: commit**
+- [x] **Paso 7: commit**
 
 ```bash
 git add -A backend
@@ -842,7 +873,7 @@ git commit -m "feat(ventas): el detalle de la venta dice cuánto queda por acred
 **Interfaces:**
 - Consume: `disponibleNotaCredito` (Tarea 4); `reponerStock` en el payload (Tarea 2).
 
-- [ ] **Paso 1: el flag por fila en el composable**
+- [x] **Paso 1: el flag por fila en el composable**
 
 `FilaDevolucion` gana `reponerStock: boolean` y `puedeReponer: boolean`, y
 `agruparFilasDevolucion` los completa desde `modoInventario`:
@@ -868,7 +899,7 @@ vuelve al stock"*.
 filas que no pueden reponer **no deben ofrecerse**. Verificarlo antes de cambiar el composable, y
 si hace falta, que el modal filtre en vez de que el composable cambie de contrato.
 
-- [ ] **Paso 2: los tests del composable**
+- [x] **Paso 2: los tests del composable**
 
 Con fixtures que discriminen —`modoInventario` distinto por fila— y afirmando que el payload
 lleva el flag:
@@ -886,7 +917,7 @@ it('el payload lleva la reposición de cada fila', () => {
 })
 ```
 
-- [ ] **Paso 3: el modal**
+- [x] **Paso 3: el modal**
 
 Tres cosas, con tokens semánticos de Nuxt UI (nunca Tailwind hardcodeado):
 
@@ -899,32 +930,32 @@ Tres cosas, con tokens semánticos de Nuxt UI (nunca Tailwind hardcodeado):
 cuantiza— así que se usa `≥` y no `>`: pedir el motivo un peso antes de tiempo no molesta;
 comerse un 400 que no se anticipó, sí. **El único guard es el del backend.**
 
-- [ ] **Paso 4: el drawer usa el número del backend**
+- [x] **Paso 4: el drawer usa el número del backend**
 
 `disponibleNC` (`VentaDetalleDrawer.vue:224`) hoy resta las notas previas en el navegador. Pasa a
 leer `venta.disponibleNotaCredito.total`, con el `computed` reducido a eso. **Un número menos
 calculado en dos lados.**
 
-- [ ] **Paso 5: spec de pantalla**
+- [x] **Paso 5: spec de pantalla**
 
 En `VentaDetalleDrawer.nuxt.spec.ts`, agregar el fixture de `disponibleNotaCredito` y un caso que
 afirme que el modal recibe el total del backend. ⚠️ **Verificar que el body que afirma el mock
 pasaría el DTO del backend**, o el test congela un caso imposible.
 
-- [ ] **Paso 6: el gate del frontend**
+- [x] **Paso 6: el gate del frontend**
 
 ```bash
 cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check
 ```
 
-- [ ] **Paso 7: mirarlo en el navegador**
+- [x] **Paso 7: mirarlo en el navegador**
 
 Con `docker-compose up` y la base **reseteada antes**: crear una venta mixta, abrir el modal y
 mirar el disponible por porción, el switch de reponer en un producto y en una receta, y el motivo
 apareciendo al bajar el monto. **Por chrome-devtools** (la ventana real de Chrome), no por el
 navegador embebido.
 
-- [ ] **Paso 8: revisión independiente y commit**
+- [x] **Paso 8: revisión independiente y commit**
 
 ```bash
 git add -A
@@ -942,30 +973,30 @@ git commit -m "feat(ventas): el modal de nota de crédito elige qué vuelve al s
   `docs/superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md`,
   `docs/adr/010-preparacion-sii-datos-fiscales.md`
 
-- [ ] **Paso 1: la documentación de la feature**
+- [x] **Paso 1: la documentación de la feature**
 
 Reescribir —no anexar— la sección de la nota de crédito en
 `docs/features/reembolsos-nota-credito.md`: qué se acredita por línea, la reposición elegible, el
 escalado con su motivo obligatorio, y el único rechazo que queda. **Sacar el banner de "REGLA YA
 DECIDIDA, TODAVÍA NO CONSTRUIDA"**, que deja de ser cierto.
 
-- [ ] **Paso 2: los otros dos banners**
+- [x] **Paso 2: los otros dos banners**
 
 `docs/superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md` § 6.1 y
 `docs/adr/010-preparacion-sii-datos-fiscales.md`: el rechazo que describen ya no existe. Que
 apunten a este frente en vez de anunciar una decisión pendiente.
 
-- [ ] **Paso 3: cerrar la entrada del backlog**
+- [x] **Paso 3: cerrar la entrada del backlog**
 
 Mover la de `pendientes.md` § 3 a `resueltos.md` con el detalle y los commits. **Listar todos los
 consumidores antes de redactar el cierre**: declarar cerrado lo que sigue vivo manda al próximo a
 no buscarlo.
 
-- [ ] **Paso 4: `ESTADO.md`**
+- [x] **Paso 4: `ESTADO.md`**
 
 Actualizar la fila de la nota de crédito compuesta: ahora acredita cualquier ítem por línea.
 
-- [ ] **Paso 5: commit y push**
+- [x] **Paso 5: commit y push**
 
 ```bash
 git add -A

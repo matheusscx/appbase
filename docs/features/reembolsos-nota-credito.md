@@ -40,10 +40,13 @@ lista para el día en que se integre facturación electrónica.
   ventas;
   badges derivados (no son estados nuevos en BD); **NC manual desde el detalle
   de venta con egreso de caja elegible (2026-07-11)**.
-- NO incluido (futuro): emisión tributaria real (SII/folios); devolución para
-  modos `serie`/`lote` (requiere elegir unidades/lote — se hace manual desde
+- NO incluido (futuro): emisión tributaria real (SII/folios); **la REPOSICIÓN**
+  en modos `serie`/`lote` (requiere elegir unidades/lote — se hace manual desde
   Inventario); egreso en el ledger de `pagos`; devolución de dinero por el
   método de pago original (el egreso es efectivo de caja).
+
+  ⚠️ **Ojo con el primero:** desde el 2026-09-04 un ítem `serie`/`lote` **sí se
+  acredita por línea**. Lo único que sigue afuera es que vuelva al stock.
 
 ---
 
@@ -85,6 +88,10 @@ Response (200): orden pública + extras
 - `reembolsos[]`: REFUNDs de las órdenes de pasarela vinculadas
   (`{id, monto, estado, fecha, ordenId, codigoOrden}`).
 - `notasCredito[]`: NCs hijas (`{id, totalFinal, fecha, comentario}`).
+- `disponibleNotaCredito` (2026-09-04): `{ total, porPorcion: [{clasificacion,
+  monto}] }` — cuánto queda por acreditar, en total y por porción fiscal, **en
+  cero cuando el documento no admite nota de crédito**. Detalle y su porqué en
+  [`ventas.md`](ventas.md).
 
 ### GET /ventas (listado)
 
@@ -118,28 +125,52 @@ Response (200): orden pública + extras
   llevar impuestos distintos y no existe "la tasa" que leer. La NC corrige aquel
   documento, así que hereda su criterio — el mismo principio que el redondeo.
 
-  ⛔ **REGLA YA DECIDIDA, TODAVÍA NO CONSTRUIDA (owner, 2026-09-04).** Lo de abajo
-  es lo que el código hace hoy y **el owner decidió que no corresponde**: tras la
-  investigación de mercado —el SII acepta la nota por monto y casi nadie en el
-  mercado rechaza— se resolvió **aceptar el caso**, con **motivo obligatorio** y
-  con **la opción de reponer o no el stock por línea**. La decisión completa, con
-  lo que hay que diseñar, está en `pendientes.md` § 3. **No implementarla por
-  partes ni "emparejar" la asimetría por cuenta propia**: es materia fiscal y abre
-  su propio frente.
+  **Cualquier ítem vendido se acredita por línea, reponga o no el stock**
+  (2026-09-04). `devoluciones` dejó de significar *"ítems a devolver a stock"* y
+  significa *"ítems que se acreditan"*; la reposición es una propiedad de cada
+  línea (`reponerStock`, ausente = repone si el ítem puede). Antes, nombrar un
+  ítem exigía `modo_inventario = 'cantidad'`, así que recetas, combos y
+  servicios no se podían acreditar por línea: caían al balde de ajuste y la nota
+  decía *"Ajuste"* en vez del nombre del plato. **La razón de ese corte era el
+  inventario**, así que hoy dispara según lo que el camino pida del stock:
 
-  **Devolver mercadería que vale más que la nota se rechaza con 400 — en el
-  camino manual.** No se acomoda solo: son dos operaciones distintas —acreditar
-  plata y reponer stock— y la elección es del operador. El mensaje trae los dos
-  números y las dos salidas (emitir la nota por el valor devuelto, o registrar
-  la vuelta a stock desde Inventario).
+  | Camino | Política ante una línea que no repone |
+  |---|---|
+  | Nota manual (`POST /ventas/:id/notas-credito`) | rechaza **solo si se PIDIÓ** reponer algo que no puede; lo que no repone se acredita igual |
+  | Nota por el webhook de reembolso | **nunca rechaza**: el hook corre después del commit y un throw pierde el evento (`cobros.service.ts` lo traga como warning). Se acredita y no se repone |
+  | Devolución sin documento (`registrarDevolucionesPorReembolso`) | **exige que toda línea reponga**: ese camino solo mueve inventario y no hay documento que acredite lo que no vuelve |
 
-  **Por el webhook de reembolso ese mismo caso NO se rechaza** (decisión P3): la
-  plata ya volvió por el proveedor y el hook corre después del commit, así que
-  un throw se traga como warning y se perderían la nota **y** el movimiento de
-  stock. Ahí la nota se emite por el monto que el proveedor devolvió, con las
-  líneas de devolución **fuera del documento** —incluirlas rompería `Σ líneas =
-  total_final`—, y el stock vuelve igual. Lo que se pierde es el detalle de qué
-  volvió *en la nota*; queda en `movimientos_inventario`.
+  **Acreditar menos de lo que vale la mercadería se acepta, y las líneas se
+  escalan** (2026-09-04). Es un caso real —cargo por reposición, producto que
+  vuelve dañado, un monto acordado en el mostrador— y hasta ese día se rechazaba
+  con 400 en el camino manual. Se revirtió tras la investigación de mercado: ni
+  el SII lo prohíbe (cantidad y precio unitario son **condicionales** en la Zona
+  Detalle de una NC) ni el mercado lo rechaza (de 11 productos relevados, uno
+  solo). Las líneas se bajan a prorrata con `repartirProporcional` para sumar
+  exactamente el monto —no dividiendo línea por línea, que con un factor que no
+  divide exacto deja la suma corrida— y **la que queda en cero no se escribe**,
+  misma regla que el reparto del ajuste.
+
+  - **El motivo pasa a ser obligatorio** cuando eso ocurre: es lo único que va a
+    explicar, en el documento, por qué la línea vale menos que la mercadería. Es
+    el patrón de Square y Toast —donde el monto es libre, el motivo es
+    obligatorio— y reemplaza a la confirmación modal, que ninguno de los 11
+    productos usa. Viaja **pegado al nombre del ítem** en la línea (*"Empanada ·
+    Volvieron abiertas"*), no en su lugar: el documento tiene que decir las dos
+    cosas.
+  - **El precio unitario de una línea escalada sale de su propio importe**
+    (`bruto / cantidad`), no del valor congelado: si no, la pantalla afirmaría
+    `7 × $1.190 = $368`. La línea **no** escalada conserva el valor de la boleta
+    — derivarlo también ahí movería el número persistido en más de la mitad de
+    las líneas y volvería el precio unitario una propiedad de cada nota.
+  - **Lo que se escala es la plata, no las unidades.** El movimiento de
+    inventario sigue siendo por lo que físicamente volvió.
+  - ⚠️ **Lo que se pierde, dicho de frente:** con las líneas escaladas el
+    documento deja de decir cuánto valía la mercadería. Square guarda los dos
+    números en campos distintos y nosotros no podemos, porque nuestras líneas
+    tienen que sumar `total_final` — **exigencia nuestra, no requisito fiscal**.
+    El dato no se pierde del todo: la cantidad devuelta queda en
+    `movimientos_inventario` con su costo congelado, atada a la nota.
 
   **Lo que la propia nota devuelve deja de atraer ajuste.** El remanente
   descuenta las NCs previas *y* las líneas de devolución de esta misma nota. Sin
@@ -159,6 +190,14 @@ Response (200): orden pública + extras
   se rechaza con 400 (camino manual) o queda fuera del documento (webhook), con
   el stock volviendo igual.
 
+  📌 **Es el único rechazo de los ANTERIORES que sobrevive** —el frente agregó
+  dos propios: motivo faltante al escalar, y pedir reponer lo que no puede— y
+  sobrevive porque es invariante
+  fiscal y no preferencia de producto: el error no se ve en el documento, se ve
+  sumando la serie. Y **se evalúa sobre las líneas ya escaladas**: sobre los
+  valores crudos rechazaría casos que el escalado deja perfectamente adentro
+  —devolver 2.380 acreditando 500 asigna 500 a la porción afecta, no 2.380—.
+
   ⚠️ **El corte cierra el bruto, no el último peso del IVA.** El bruto acreditado
   por porción nunca pasa el original (medido: 0 violaciones en 16.000 secuencias
   de hasta 4 notas), pero cada nota descompone su propio bruto y cuantiza a la
@@ -176,10 +215,20 @@ Response (200): orden pública + extras
   **completa**, no a medias: dejar la porción exenta adentro y la afecta afuera
   partiría el documento sin decírselo a nadie.
 
-  **El movimiento de inventario corre solo sobre las líneas de devolución.** La
-  de ajuste cuelga de un `servicio` y `registrarMovimiento` rechaza con 400 todo
-  lo que no sea producto: sin ese corte, agregar la línea de ajuste haría fallar
-  el reembolso entero.
+  **El movimiento de inventario corre solo sobre las líneas de devolución que
+  reponen.** La de ajuste cuelga de un `servicio` y `registrarMovimiento` rechaza
+  con 400 todo lo que no sea producto: sin ese corte, agregar la línea de ajuste
+  haría fallar el reembolso entero. Desde el 2026-09-04 se agrega el filtro por
+  `reponeStock`, porque una línea se puede acreditar sin volver al stock.
+
+  ⚠️ **Y por eso el tope por cantidad dejó de contar solo movimientos.** Mientras
+  toda línea aceptada movía stock, el movimiento ERA el rastro de la unidad; con
+  líneas que se acreditan sin reponer, ese contador se quedaba ciego y dos notas
+  seguidas podían acreditar la misma receta —el documento afirmando que volvieron
+  2 unidades de una venta de 1—. El tope por porción no lo tapa: mira plata, no
+  cantidad. Hoy `unidadesComprometidasPorItem` toma, **por documento**, el mayor
+  entre lo acreditado en líneas y lo movido en stock (mayor y no suma: la línea
+  que repone deja las dos huellas).
 - **El ítem de sistema "Ajuste"** (`items.es_ajuste_nota_credito`, único vivo por
   tenant vía índice parcial): `venta_detalles.item_id` es NOT NULL, así que la
   línea de ajuste necesita colgar de algún ítem, y tiene que ser un `servicio`
@@ -279,9 +328,18 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
 ## Frontend
 
 - `ordenes/ReembolsoModal.vue`: prop `ventaId`; con venta vinculada muestra
-  checkbox "Generar nota de crédito" y lista "Devolver a inventario" (inputs
-  decimales string; filas serie/lote/servicio deshabilitadas con nota; máximo =
-  vendida − ya devuelta). Respuesta con `warning` → toast warning.
+  checkbox "Generar nota de crédito" y la lista de líneas (inputs decimales
+  string; máximo = vendida − ya devuelta). Respuesta con `warning` → toast
+  warning.
+  ⚠️ **La lista es compartida con la NC y su modo depende del checkbox**
+  (2026-09-04), porque el camino del backend depende de él: con la nota tildada
+  se acredita cualquier ítem y hay switch de reponer por fila; **sin** ella las
+  líneas van al camino que solo mueve stock, que exige que todas repongan, así
+  que las de serie/lote/servicio quedan deshabilitadas. Al destildarlo se
+  normalizan las filas —la que el operador había apagado con el switch vuelve a
+  reponer, la que no puede pierde la cantidad—: ese `false` quedaba invisible
+  porque el switch desaparece del DOM, y su 400 llega **después** del commit del
+  reembolso.
 - `ventas/VentaDetalleDrawer.vue`: badges "Nota de Crédito" y
   "Reembolsada parcial/totalmente" (derivados); cards "Reembolsos" y
   "Documentos relacionados" (links venta original ↔ NCs vía `/ventas?venta=<id>`).
@@ -292,13 +350,19 @@ Dónde vive: `VentasReembolsoHandler.cuantizarMontoReembolso`
   idénticas con importes distintos. El resto del drawer ya servía sin tocarlo:
   la tabla de líneas con sus reglas congeladas y la fila "Impuestos" de los
   totales existían desde antes.
-- ⚠️ `ventas/NotaCreditoModal.vue` **no anticipa** el 400 de "la mercadería vale
-  más que la nota": el operador lo ve al confirmar, con el mensaje del backend.
-  Anticiparlo exige valuar cada línea y **cuantizarla con el `modo_redondeo`
-  congelado de esa venta**, o sea replicar el cuantizador del motor en el
-  navegador. Se probó sin cuantizar y quedaba peor: con 3 unidades de 1.000 el
-  botón se deshabilitaba para una nota que el backend acepta, mostrando "vale
-  $333, más que los $333". Anotado en `pendientes.md` como frente propio.
+- `ventas/NotaCreditoModal.vue` (2026-09-04): muestra el **disponible por porción
+  fiscal** debajo del total —solo si hay más de una: en una venta toda afecta
+  repetir el total es ruido—, un **switch de reponer por fila** (deshabilitado
+  con su nota en lo que no puede volver al stock) y **pide el motivo** cuando lo
+  marcado vale `≥` el monto.
+  ⚠️ **Pide, nunca bloquea.** Esa cuenta es aproximada: el backend valúa cada
+  línea y la **cuantiza con el `modo_redondeo` congelado de esa venta**, y
+  replicar ese cuantizador acá sería el tercer hogar de una regla de plata. Se
+  probó sin cuantizar y quedaba peor: con 3 unidades de 1.000 el botón se
+  deshabilitaba para una nota que el backend acepta, mostrando "vale $333, más
+  que los $333". Por eso se compara con `≥` y no con `>` —pedirlo un peso antes
+  de tiempo no molesta— y **queda una ventana de hasta un minor unit por línea**
+  donde el 400 llega igual. Anotado en `pendientes.md`.
 - `pages/ventas/index.vue`: badges "NC" / "Reemb. parcial" / "Reembolsada" junto
   al estado.
 
@@ -349,12 +413,17 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   devoluciones, validaciones de monto/cantidades/modo/tenant, la original no se
   toca), devoluciones sin NC, findOne/listar/resumen con los campos nuevos.
 - `nota-credito-composicion.spec.ts`: la aritmética sola —tasa efectiva,
-  descomposición por resta, reparto del ajuste— con `decimalesMoneda: 0`, que es
-  la escala que más residuo produce.
+  descomposición por resta, reparto del ajuste y **el escalado de las líneas de
+  devolución**— con `decimalesMoneda: 0`, que es la escala que más residuo
+  produce.
 - `nota-credito-composicion.e2e-spec.ts`: el camino de la app sobre una venta
-  mixta real — dos líneas y totales derivados, el rechazo por mercadería > monto,
-  el corte de inventario en la línea de ajuste, la proporción tomada del
-  remanente con una NC previa, y el find-or-create del ítem de sistema.
+  mixta real — dos líneas y totales derivados, el corte de inventario en la línea
+  de ajuste, la proporción tomada del remanente con una NC previa, el
+  find-or-create del ítem de sistema y, desde el 2026-09-04: **la receta
+  acreditada por línea sin mover inventario**, `reponerStock: false`, el
+  **escalado** con su motivo obligatorio, la línea que queda en cero y no se
+  escribe, el tope por porción sobre las líneas ya escaladas, y el disponible por
+  porción —también sobre un documento que no admite nota—.
 - `nota-credito-por-pais.e2e-spec.ts`: la forma del catálogo de documentos.
 - `reembolso-callback.handler.spec.ts`: registro en el registry y delegación.
 - `cobros.service.spec.ts`: hook post-commit (evento completo, warning sin

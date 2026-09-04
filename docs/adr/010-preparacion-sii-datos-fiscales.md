@@ -40,15 +40,16 @@ todo compatible con SII, sin integrarlo.
   de este ADR aplicado un nivel más abajo: la NC hereda el criterio de aquel documento, no el de
   hoy. Detalle en [`features/reembolsos-nota-credito.md`](../features/reembolsos-nota-credito.md).
 
-  ⛔ **La FORMA del rechazo se revirtió el mismo día** (owner, 2026-09-04). Una investigación
-  sobre el Formato DTE v2.5 y la Res. Ex. SII N°45/2003 mostró que **la norma no lo respalda**:
-  en la Zona Detalle de una nota de crédito solo `NroLinDet`, `NmbItem` y `MontoItem` son
-  obligatorios —**cantidad y precio unitario son condicionales**— y el SII **no valida el
-  contenido** (cinco causales cerradas de rechazo, ninguna sobre el detalle). Una NC por monto
-  que no enumere la mercadería es un DTE válidamente formado. La decisión pasó a **aceptar el
-  caso**, con motivo obligatorio; ver `pendientes.md` § 3.
-  📌 **Lo que sigue vale igual, y por otra razón: es invariante fiscal, no preferencia de
-  producto.**
+  ✅ **La FORMA del rechazo se revirtió el mismo día y ya está construida** (owner, 2026-09-04).
+  Una investigación sobre el Formato DTE v2.5 y la Res. Ex. SII N°45/2003 mostró que **la norma
+  no lo respalda**: en la Zona Detalle de una nota de crédito solo `NroLinDet`, `NmbItem` y
+  `MontoItem` son obligatorios —**cantidad y precio unitario son condicionales**— y el SII **no
+  valida el contenido** (cinco causales cerradas de rechazo, ninguna sobre el detalle). Una NC
+  por monto que no enumere la mercadería es un DTE válidamente formado. Devolver mercadería que
+  vale más que la nota **se acepta**: las líneas se escalan a prorrata y el motivo pasa a ser
+  obligatorio. Cerrado en [`resueltos.md`](../agent/resueltos.md).
+  📌 **El tope por porción, en cambio, sigue vigente, y por otra razón: es invariante fiscal, no
+  preferencia de producto.**
 
   **Dos decisiones que salieron de construirlo, las dos fiscales:**
   - **Ninguna porción se acredita dos veces.** El tope de reembolso mira el bruto y no ve la

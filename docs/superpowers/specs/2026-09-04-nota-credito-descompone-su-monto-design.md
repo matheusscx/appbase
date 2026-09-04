@@ -282,13 +282,19 @@ docblock: es el precio de derivar de hechos congelados en vez de recalcular con 
 
 ### 6.1 Devolver más mercadería que plata → 400
 
-⛔ **REVERTIDA POR EL OWNER EL 2026-09-04**, el mismo día. Al ver que el camino de la pasarela no
-puede aplicarla dijo *"la decisión del mostrador la tomé mal"*, se corrió una investigación de
-mercado, y con sus resultados —**el SII acepta la nota por monto** (cantidad y precio unitario son
-condicionales en la Zona Detalle de una NC) y **de 11 productos relevados solo Lightspeed
-rechaza**— la regla quedó al revés: **se acepta**, con motivo obligatorio y con la opción de
-reponer o no el stock. Lo de abajo describe **lo que se construyó**, que ya no es lo que va a
-quedar. La decisión, en `docs/agent/pendientes.md` § 3; la evidencia, en
+⛔ **REVERTIDA POR EL OWNER EL 2026-09-04**, el mismo día, y **ya reemplazada por código**. Al ver
+que el camino de la pasarela no puede aplicarla dijo *"la decisión del mostrador la tomé mal"*, se
+corrió una investigación de mercado, y con sus resultados —**el SII acepta la nota por monto**
+(cantidad y precio unitario son condicionales en la Zona Detalle de una NC) y **de 11 productos
+relevados solo Lightspeed rechaza**— la regla quedó al revés: **se acepta**, las líneas se escalan
+a prorrata y el motivo pasa a ser obligatorio, con la opción de reponer o no el stock por línea.
+
+📌 **Lo de abajo es historia: describe lo que este frente construyó, no lo que el sistema hace.**
+La conducta vigente está en
+[`features/reembolsos-nota-credito.md`](../../features/reembolsos-nota-credito.md); el frente que
+la reemplazó, en
+[`2026-09-04-devolucion-con-credito-parcial-design.md`](2026-09-04-devolucion-con-credito-parcial-design.md);
+la evidencia, en
 `docs/agent/investigaciones/2026-09-04-devolucion-con-credito-parcial.md`.
 
 **Decisión del owner, 2026-09-04.** Escena: el cliente devuelve 2 empanadas que en esa boleta
@@ -353,6 +359,14 @@ El movimiento corre **solo sobre las líneas de devolución**, que son las únic
 producto: `validarDevolucionesReembolso` ya rechaza servicios y los modos `serie`/`lote` antes
 de tocar inventario. La línea de ajuste no entra a ese loop **por decisión escrita en el
 código**, no porque no llegue.
+
+⛔ **La segunda mitad se derogó el 2026-09-04, igual que el § 6.1.** Hoy
+`validarDevolucionesReembolso` rechaza **solo si se PIDIÓ** reponer lo que no puede, así que las
+líneas de devolución ya NO son "las únicas que pueden ser producto": una receta o un servicio se
+acreditan por línea sin volver al stock. Lo que sigue en pie es la primera mitad —el corte que
+mantiene la línea de ajuste fuera del loop—, ahora expresado como un filtro por `reponeStock`.
+Conducta vigente en
+[`features/reembolsos-nota-credito.md`](../../features/reembolsos-nota-credito.md).
 
 ### 6.3 Sin `config_calculo` congelada
 
@@ -434,7 +448,7 @@ pruebas propias:
 5. Reparto que no divide exacto → el residuo va a la parte de mayor resto, y la suma cierra.
 6. Un balde que redondea a cero → **no** se escribe esa línea.
 7. Devolución + ajuste → las líneas suman el monto.
-8. Devolución que vale más que el monto → 400.
+8. Devolución que vale más que el monto → 400. ⛔ Revertido el 2026-09-04: hoy se escala (§ 6.1).
 
 **E2E** — el camino de la app, no SQL directo:
 
