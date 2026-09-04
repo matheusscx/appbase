@@ -6,6 +6,7 @@ import {
 } from '../calculo-precios/calculo-precios.engine';
 import {
   descomponer,
+  escalarDevoluciones,
   repartirAjuste,
   tasaEfectiva,
   type PorcionOriginal,
@@ -151,5 +152,64 @@ describe('repartirAjuste', () => {
     expect(partes).toHaveLength(1);
     expect(partes[0].clasificacion).toBe('afecto');
     expect(partes[0].bruto.toString()).toBe('1000');
+  });
+});
+
+describe('escalarDevoluciones', () => {
+  it('si lo devuelto entra en el monto, las líneas NO se tocan', () => {
+    const partes = escalarDevoluciones(
+      [new Decimal('1190'), new Decimal('3000')],
+      new Decimal('8000'),
+      CFG,
+      q,
+    );
+    expect(partes.map((p) => p.toString())).toEqual(['1190', '3000']);
+  });
+
+  it('si no entra, las líneas suman EXACTAMENTE el monto', () => {
+    // 3.000 + 5.000 = 8.000 devueltos, se acreditan 500. Las dos partes finas
+    // caen justo en el medio —187,5 y 312,5— así que HALF_UP sube LAS DOS y la
+    // suma se pasa en uno. Ahí es donde dividir línea por línea y repartir
+    // dejan de coincidir: la división daría 188 + 313 = 501. El paso de unidad
+    // se lo saca a la de mayor resto, y con restos empatados desempata la
+    // POSICIÓN.
+    const partes = escalarDevoluciones(
+      [new Decimal('3000'), new Decimal('5000')],
+      new Decimal('500'),
+      CFG,
+      q,
+    );
+    const suma = partes.reduce((a, p) => a.plus(p), new Decimal(0));
+    expect(suma.toString()).toBe('500');
+    expect(partes.map((p) => p.toString())).toEqual(['187', '313']);
+  });
+
+  it('el monto igual a lo devuelto no escala nada', () => {
+    const partes = escalarDevoluciones(
+      [new Decimal('1190'), new Decimal('3000')],
+      new Decimal('4190'),
+      CFG,
+      q,
+    );
+    expect(partes.map((p) => p.toString())).toEqual(['1190', '3000']);
+  });
+
+  it('sin devoluciones devuelve una lista vacía', () => {
+    expect(escalarDevoluciones([], new Decimal('1000'), CFG, q)).toEqual([]);
+  });
+
+  // El caso llega a `repartirProporcional` con monto 0 —lo clampea el
+  // `Decimal.min`— y ahí su rama de peso total cero devuelve el monto entero a
+  // la primera parte: 0. Sin el `min`, en cambio, mandaría los 1.000 a la
+  // primera línea, que es una línea de plata sacada de una devolución que no
+  // vale nada.
+  it('devoluciones que valen cero no dividen por cero', () => {
+    const partes = escalarDevoluciones(
+      [new Decimal(0), new Decimal(0)],
+      new Decimal('1000'),
+      CFG,
+      q,
+    );
+    expect(partes.map((p) => p.toString())).toEqual(['0', '0']);
   });
 });

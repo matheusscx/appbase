@@ -104,3 +104,40 @@ export function repartirAjuste(
     .map((p, i) => ({ clasificacion: p.clasificacion, bruto: partes[i] }))
     .filter((p) => !p.bruto.isZero());
 }
+
+/**
+ * Escala las líneas de devolución para que sumen, **como máximo**, el monto de
+ * la nota. Con `Σ devoluciones ≤ monto` las devuelve intactas —que es la
+ * conducta de siempre— y con `Σ devoluciones > monto` las baja a prorrata.
+ *
+ * Se acredita menos de lo que vale la mercadería en casos reales: cargo por
+ * reposición, producto que vuelve dañado, un monto acordado en el mostrador. El
+ * documento no puede mostrar el valor original **porque sus líneas tienen que
+ * sumar `total_final`**; el porqué lo lleva la glosa, que en ese caso es
+ * obligatoria. La alternativa —línea negativa de "cargo por reposición"— se
+ * descartó: ningún POS la usa y el DTE no tiene un campo con esa semántica
+ * (investigación del 2026-09-04).
+ *
+ * Reparte con `repartirProporcional` y no dividiendo línea por línea: con un
+ * factor que no divide exacto, dividir cada una por separado deja la suma
+ * corrida. Es la misma regla de residuo que usa el ajuste afecto/exento.
+ */
+export function escalarDevoluciones(
+  brutos: Decimal[],
+  monto: Decimal,
+  cfg: ConfigCalculo,
+  q: Cuantizador,
+): Decimal[] {
+  if (!brutos.length) return [];
+  const valorDevuelto = brutos.reduce((a, b) => a.plus(b), ZERO);
+  // El `min` es también lo que hace seguro el caso de devoluciones que no valen
+  // nada: manda un objetivo de 0 y `repartirProporcional`, sin peso que
+  // repartir, deja todas las partes en cero. Un guard aparte para eso sería
+  // código muerto.
+  return repartirProporcional(
+    q(Decimal.min(valorDevuelto, monto)),
+    brutos,
+    cfg,
+    q,
+  );
+}
