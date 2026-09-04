@@ -449,7 +449,7 @@ export function cuantizar(d: Decimal, cfg: ConfigCalculo): Decimal {
 }
 
 /** Cuantiza o no según el nivel de redondeo del tenant. Ver `calcularLinea`. */
-type Cuantizador = (d: Decimal) => Decimal;
+export type Cuantizador = (d: Decimal) => Decimal;
 
 /** Identidad: el monto queda a `escala_calculo`, como antes de que esto existiera. */
 const SIN_CUANTIZAR: Cuantizador = (d) => d;
@@ -1536,8 +1536,17 @@ function calcularLinea(
  * El segundo tramo no es idioma nuevo: es el mismo que ya usaba
  * `repartirDescuentoCombo` (`promociones.evaluator.ts`), que reparte fino y le
  * da el resto de precisión a la línea de mayor resto fraccionario.
+ *
+ * **Exportada, no mudada** (owner, 2026-09-04). La usa también la nota de
+ * crédito para repartir su ajuste entre las porciones afecta y exenta. Vive
+ * acá y no en un módulo común porque el motor YA es el hogar de esta familia:
+ * `ventas.service.ts` importa de este archivo `cuantizar`, `ConfigCalculo` y
+ * `TrazaRegla`, y `cuantizar` no tiene ningún otro importador fuera del motor.
+ * Sacar solo el reparto obligaría al módulo nuevo a importar `ConfigCalculo`
+ * de vuelta: más cableado y dos hogares para lo mismo. La mudanza completa es
+ * un frente propio del motor.
  */
-function repartirProporcional(
+export function repartirProporcional(
   monto: Decimal,
   pesos: Decimal[],
   cfg: ConfigCalculo,

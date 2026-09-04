@@ -442,9 +442,14 @@ function evaluarPrecioFijo(
  * único resto que puede aparecer es el de precisión de `Decimal` cuando el
  * reparto no divide exacto (ej. repartir 1.510 en proporción 8.000/11.500 no
  * termina), y ese resto se lo lleva la línea de mayor resto fraccionario,
- * desempate por `lineaIndex` ascendente — mismo idioma que
- * `repartirProporcional` del motor de cálculo de precios, sin su paso de
- * cuantización a la escala de moneda.
+ * desempate por `lineaIndex` ascendente.
+ *
+ * ⚠️ **NO es intercambiable con `repartirProporcional`** del motor de cálculo
+ * de precios, aunque se parezcan. Además de no cuantizar, **desempata
+ * distinto**: acá el resto se mide como parte fraccionaria (`f − floor(f)`) y
+ * allá como resto contra la parte ya cuantizada (`|f − parte|`). Unificarlas
+ * cambiaría el reparto de las promociones. Medido el 2026-09-04, al exportar
+ * `repartirProporcional` para la nota de crédito.
  */
 function repartirDescuentoCombo(
   descuento: Decimal,
