@@ -1,5 +1,20 @@
 # Orden de aplicación de descuentos apilados — investigación de mercado (2026-08-11)
 
+> ⛔ **ABIERTA de verdad — y ahora tiene entrada en el backlog** (barrido del 2026-09-03).
+>
+> Se verificó contra el código: **ninguna de las cuatro opciones de la § 4 se construyó**. No
+> existe columna `orden` en el puente ítem↔descuento (la única `orden` del módulo está en
+> `descuento_tramo`, que es otra cosa), y el motor sigue con el par
+> `calculoDescuentos: 'base' | 'compuesto'` sin criterio de orden entre tipos.
+>
+> Estaba con *"qué queda para decidir"* y **cero menciones en el backlog**, o sea que la
+> decisión se había perdido de vista. Ya no: [`pendientes.md`](../pendientes.md) § 4.
+>
+> 📌 **Sigue valiendo lo que la propia investigación medía:** el problema es **más chico de lo
+> que parecía** —solo afecta al modo `compuesto`, y el default es `base`— y **toca el motor de
+> precios**, así que va solo y con el sistema quieto.
+
+
 > ⛔ **Esto no es una decisión ni un diseño.** Es la foto de cómo lo resolvieron otros,
 > insumo para cruzar y adaptar. Regla del cruce en
 > [`investigacion-mercado.md`](../investigacion-mercado.md): si el mercado dice A y

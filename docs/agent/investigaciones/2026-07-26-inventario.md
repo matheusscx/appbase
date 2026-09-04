@@ -1,5 +1,25 @@
 # Inventario — análisis de mercado vs. implementación
 
+> 🟡 **PARCIALMENTE CERRADA — dos de las seis preguntas ya están contestadas; las otras cuatro
+> siguen vivas y ahora tienen entrada en el backlog** (barrido del 2026-09-03).
+>
+> Estaba en el peor estado posible: sección de *"preguntas abiertas para el owner"* y **cero
+> menciones en el backlog**, o sea que nadie estaba esperando esas decisiones y el que la
+> leyera no podía saber cuáles seguían vivas.
+>
+> - **1 y 2 — ¿costo de gestión o tributario? ¿método elegible por tenant?** ✅ **Contestadas
+>   por [ADR-016](../../adr/016-costeo-promedio-ponderado-movil.md)**: costo promedio ponderado
+>   móvil, **método único y fijo, de gestión** — no tributario, así que no hay elección por
+>   tenant que persistir. Ese ADR cita explícitamente la § 1 de esta investigación.
+> - **3, 4, 5 y 6 — guía de despacho en traslados · ¿bodega es sucursal? · recepción desde un
+>   DTE · ¿el objetivo es el reporte de varianza?** ⛔ **Siguen abiertas**, y la 1 ya no las
+>   bloquea. Anotadas en [`pendientes.md`](../pendientes.md).
+>
+> ⚠️ **Ojo con la 3 y la 5: son fiscales** (guía de despacho, DTE de compra) y por `CLAUDE.md`
+> abren su propio frente. La **4** no es de inventario: si "bodega" resulta ser **sucursal**,
+> toca cajas, ventas y usuarios.
+
+
 **Fecha:** 2026-07-26 (una pasada, cuatro ejes: costeo/valoración, bodegas/traslados, compras/recepción, recuento/ajustes)
 **Estado:** 🔎 En investigación — insumo, todavía no hay diseño ni decisión tomada. No se tocó código.
 **Features relacionadas:** [`inventario-kardex.md`](../../features/inventario-kardex.md) · [`inventario-serializado.md`](../../features/inventario-serializado.md) · [`mermas-valorizadas.md`](../../features/mermas-valorizadas.md) · [`recetas.md`](../../features/recetas.md) · [`simulador-impacto-costos.md`](../../features/simulador-impacto-costos.md) · [`terceros.md`](../../features/terceros.md)

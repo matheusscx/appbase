@@ -1740,8 +1740,15 @@ dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se
 cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
 escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
 
-✅ **VACÍA — cero entradas, contado el 2026-09-03 y no recordado.** Corrido el `awk` de arriba
-y buscados los `###` a mano: **0 y 0**.
+⚠️ **Estuvo vacía unas horas el 2026-09-03 y volvió a tener dos entradas el mismo día** — no
+porque apareciera trabajo nuevo, sino porque **un barrido de las investigaciones encontró
+decisiones que se habían perdido de vista**. Contado de nuevo después del barrido: **2 y 0**
+(dos `- [ ]`, cero `###`).
+
+📌 **Ese es el dato que importa de este episodio:** la sección puede dar cero y no significar
+que no haya nada esperándote — significa que **nadie anotó lo que estaba esperando**. Las dos
+entradas de abajo vivían desde julio y agosto en investigaciones con sección de "preguntas
+abiertas" y ninguna mención acá.
 
 Se vació en una sola tarde, y las tres salieron por caminos distintos, que es lo que conviene
 saber:
@@ -1838,6 +1845,40 @@ habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una 
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
 
 
+
+- [ ] **Cuando se apilan dos descuentos de tipos distintos, ¿en qué orden se aplican?**
+  (motor de precios, relevado 2026-08-11, **anotado acá el 2026-09-03** tras un barrido de
+  investigaciones — la decisión llevaba tres semanas sin entrada) —
+  **⛔ Toca el motor de cálculo de precios: va solo y con el sistema quieto** (`CLAUDE.md`).
+  **Lo medido:** el problema es **más chico de lo que parecía**. Solo afecta al modo
+  `calculo_descuentos = 'compuesto'`; el default es `'base'`, donde el orden no cambia el
+  resultado. Y **no existe** columna `orden` en el puente ítem↔descuento — la única `orden` del
+  módulo está en `descuento_tramo`, que es otra cosa (verificado 2026-09-03).
+  **Las cuatro opciones, con lo que el mercado dice de cada una** —detalle y fuentes en
+  [`investigaciones/2026-08-11-orden-de-descuentos.md`](investigaciones/2026-08-11-orden-de-descuentos.md):
+  (1) columna `orden` reordenable —lo que el owner prefería, pero **ningún POS del relevamiento
+  lo hace** y es la más cara—; (2) regla fija en el motor —lo que hacen los cuatro, pero
+  **Toast y Square la eligieron al revés**, o sea que no hay una "correcta"—; (3) no apilar
+  —Lightspeed, Toast por default, Bsale con cupones: hace desaparecer la pregunta—; (4)
+  quedarse con el mayor, que es conmutativa y también la disuelve.
+  **Sin urgencia:** ningún tenant usa `'compuesto'` hoy.
+
+- [ ] **Las cuatro preguntas de inventario que ADR-016 no contestó**
+  (relevado 2026-07-26, **anotado acá el 2026-09-03** tras el mismo barrido) —
+  ✅ Las dos primeras —¿costo de gestión o tributario? ¿método elegible por tenant?— **las
+  cerró [ADR-016](../adr/016-costeo-promedio-ponderado-movil.md)**: CPP, método único y fijo,
+  **de gestión**. Eso **desbloqueó** las otras, que la investigación daba por trabadas.
+  **Las que siguen vivas**, detalle en
+  [`investigaciones/2026-07-26-inventario.md`](investigaciones/2026-07-26-inventario.md):
+  1. **¿El traslado entre bodegas emite guía de despacho**, o se registra sin documento y el
+     tenant la emite por fuera? ⛔ **Fiscal** — frente propio (ADR-010).
+  2. **¿"Bodega" es realmente sucursal?** ⚠️ **Si lo es, esto no es una tarea de inventario**:
+     toca cajas, ventas y usuarios. Es la que más conviene contestar primero, porque cambia el
+     tamaño de las otras.
+  3. **¿La recepción de compra parte de un DTE del SII o se digita?** ⛔ **Fiscal** — define si
+     compras es un módulo interno o el primer punto de integración con el SII.
+  4. **¿El objetivo real es el reporte de varianza (AVT)?** Si sí, el orden natural es recuento
+     primero y compras después, para cerrar `inicial + compras − final`.
 
 ## 5. Carreras de concurrencia
 

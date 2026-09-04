@@ -1,5 +1,30 @@
 # Redondeo: ¿por línea o por total? — investigación
 
+> ✅ **CERRADA — las cuatro preguntas de la § 6 están contestadas (cierre escrito 2026-09-03).**
+>
+> Barrido del 2026-09-03: esta investigación tenía sección de *"preguntas abiertas para el
+> owner"* y **cero menciones en el backlog**, que es el patrón de una investigación ya superada
+> por el código. Lo estaba.
+>
+> | # | Pregunta | Cómo quedó |
+> |---|---|---|
+> | 1 | ¿El nivel de redondeo es configurable o se deriva del país? | **Las dos.** Cerrada acá mismo el 2026-08-20 (perilla configurable) y **construida** en el frente de redondeo de plata. El 2026-09-03 se agregó además la derivación por país **con candado donde la norma lo fija** — que es exactamente el *"fijado desde afuera"* que esta misma sección pedía dejar preparado |
+> | 2 | ¿Los costos quedan fuera del alcance? | **Sí** — decisión (a) de [`…-decisiones.md`](../../superpowers/specs/2026-08-20-redondeo-de-plata-decisiones.md): *"los costos no siguen el criterio de la moneda"*, quedan en **escala 4**. Los cinco sitios que esta sección anticipaba que se caían, se cayeron |
+> | 3 | La línea de ajuste no facturable, ¿se construye o se difiere? | **Contestada por el owner el 2026-09-03**, desde otro frente: se permite el monto suelto **con línea de ajuste y glosa libre**. Ver la entrada de la NC en [`pendientes.md`](../pendientes.md) § 3 |
+> | 4 | ¿`escala_calculo` sigue teniendo sentido? | **Sí, con roles separados**: `escala_calculo` es la precisión intermedia y la plata cierra en `moneda.decimales`. Dejaron de poder contradecirse |
+>
+> 📌 **La conexión que vale la pena notar:** la pregunta 3 y la tabla *"⚠️ Lo que la
+> investigación confirma que falta"* decían que *"el descuadre no tiene dónde ir — la forma
+> disponible es un ítem no facturable, que **nuestro modelo no tiene**"*. Trece días después,
+> el frente de la nota de crédito llegó **a la misma pieza por otro camino** —la línea de
+> ajuste— empujado por una norma distinta (la zona Detalle del DTE y el error 10048 de ARCA).
+> Dos problemas que parecían separados piden la misma cosa.
+>
+> Los otros tres huecos de esa tabla —el eje nivel de redondeo, los totales en CLP con
+> decimales, y la escala de la moneda sin participar del cálculo— **los cerró el frente de
+> redondeo de plata** (2026-08-21).
+
+
 **Fecha:** 2026-08-20
 **Estado:** 🔎 Investigación cerrada — **insumo, no diseño**. No se tocó código.
 **Continúa:** [`2026-08-15-decimales-y-redondeo.md`](2026-08-15-decimales-y-redondeo.md) —
