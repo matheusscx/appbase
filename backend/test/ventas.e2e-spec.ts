@@ -1565,8 +1565,12 @@ describe('Ventas (e2e)', () => {
 
     it('la línea de la NC no persiste decimales que la moneda no tiene', async () => {
       const { ventaId, itemId } = await crearVentaConCantidadFraccionaria();
+      // El kilo devuelto vale 1.235 en esta boleta (1.852 / 1,5, cuantizado), y
+      // desde que las líneas de la nota tienen que sumar su total, acreditar
+      // menos que eso se rechaza: la nota va por 1.300, o sea el kilo devuelto
+      // más 65 de ajuste. Las dos líneas pasan por el mismo cuantizador.
       const nc = await emitirNotaCredito(ventaId, {
-        monto: '1000.0000',
+        monto: '1300.0000',
         devoluciones: [{ itemId, cantidad: '1' }],
       });
 
@@ -1574,10 +1578,16 @@ describe('Ventas (e2e)', () => {
         `SELECT total_linea FROM venta_detalles WHERE venta_id = $1`,
         [nc.id],
       );
-      expect(lineas).toHaveLength(1);
+      expect(lineas).toHaveLength(2);
       // El precio unitario congelado (1234.5678) × 1 no es un peso entero:
       // sin cuantizar al criterio heredado, esto fallaba.
-      expect(new Decimal(lineas[0].total_linea).isInteger()).toBe(true);
+      for (const l of lineas)
+        expect(new Decimal(l.total_linea).isInteger()).toBe(true);
+      expect(
+        lineas
+          .reduce((a, l) => a.plus(l.total_linea), new Decimal(0))
+          .toString(),
+      ).toBe('1300');
     });
 
     it('la NC hereda el modo congelado de la venta original, no el vigente', async () => {

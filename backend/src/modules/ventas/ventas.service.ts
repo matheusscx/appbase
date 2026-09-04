@@ -11,9 +11,19 @@ import { Db } from '../../common/db/db.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type {
   ConfigCalculo,
+  Cuantizador,
   TrazaRegla,
 } from '../calculo-precios/calculo-precios.engine';
-import { cuantizar } from '../calculo-precios/calculo-precios.engine';
+import {
+  cuantizar,
+  repartirProporcional,
+} from '../calculo-precios/calculo-precios.engine';
+import {
+  CFG_SIN_CONGELAR,
+  descomponer,
+  repartirAjuste,
+  tasaEfectiva,
+} from './nota-credito-composicion';
 import { CajaService, IntentoRechazadoError } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
@@ -1411,10 +1421,301 @@ export class VentasService {
           `El monto excede lo disponible para nota de crédito (${disponible.toString()})`,
         );
 
-      const lineas = await this.validarDevolucionesReembolso(
+      const devueltas = await this.validarDevolucionesReembolso(
         manager,
         params.ventaOriginalId,
         params.devoluciones ?? [],
+      );
+
+      // El cuantizador de la nota. **Ignora `nivelRedondeo` a propósito**: sus
+      // líneas son plata efectivamente devuelta y tienen que sumar un `monto`
+      // que ya viene en escala de moneda. Es el mismo criterio que ya usaba el
+      // valor de línea de la NC, ahora explícito en vez de heredado.
+      //
+      // Sin `config_calculo` congelada —solo alcanzable por el webhook de
+      // reembolso, ver el guard de arriba— se cae al fallback documentado
+      // (decisión P3): no se pierde un evento ya consumado.
+      const q: Cuantizador = cfgOriginal
+        ? (d) => cuantizar(d, cfgOriginal)
+        : (d) => d.toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+      const cfgReparto = cfgOriginal ?? CFG_SIN_CONGELAR;
+
+      // 1. Lo que vale la mercadería devuelta EN ESTA BOLETA.
+      const devoluciones = devueltas.map((l) => ({
+        ...l,
+        bruto: q(new Decimal(l.valorUnitarioBruto).times(l.cantidad)),
+      }));
+      const valorDevuelto = devoluciones.reduce(
+        (a, l) => a.plus(l.bruto),
+        new Decimal(0),
+      );
+
+      // 2. La composición del documento que se corrige y la de sus NCs previas,
+      // en UNA sola consulta agregada: de acá salen las dos cosas que hacen
+      // falta —la TASA de cada porción (de las filas del original) y el
+      // REMANENTE por porción (original − NCs previas)—.
+      const composicion: {
+        es_nc: boolean;
+        clasificacion: string;
+        total: string;
+        impuesto: string;
+      }[] = await manager.query(
+        `SELECT (d.venta_id <> $1) AS es_nc,
+                d.clasificacion_tributaria AS clasificacion,
+                COALESCE(SUM(d.total_linea), 0)::text AS total,
+                COALESCE(SUM(d.impuesto_aplicado), 0)::text AS impuesto
+           FROM venta_detalles d
+          WHERE d.eliminado_el IS NULL
+            AND (d.venta_id = $1
+                 OR d.venta_id IN (SELECT venta_id FROM ventas
+                                    WHERE venta_referencia_id = $1
+                                      AND tipo_documento_id = $2
+                                      AND eliminado_el IS NULL))
+          GROUP BY 1, 2`,
+        [params.ventaOriginalId, tipoNotaCredito],
+      );
+      const porcionesOriginal = composicion.filter((r) => !r.es_nc);
+      const yaAcreditado = new Map<string, Decimal>();
+      for (const r of composicion) {
+        if (!r.es_nc) continue;
+        yaAcreditado.set(
+          r.clasificacion,
+          (yaAcreditado.get(r.clasificacion) ?? new Decimal(0)).plus(r.total),
+        );
+      }
+      // Lo que queda por acreditar de cada porción, ANTES de esta nota. Es el
+      // tope por porción y la base del reparto.
+      const remanentesPrevios = porcionesOriginal.map((r) => ({
+        clasificacion: r.clasificacion,
+        peso: new Decimal(r.total).minus(
+          yaAcreditado.get(r.clasificacion) ?? new Decimal(0),
+        ),
+      }));
+      // Lo que ESTA nota acredita por mercadería cuenta igual que una NC
+      // previa: si no se descontara, el ajuste podría acreditar de una porción
+      // más de lo que esa porción tenía, y la nota siguiente arrancaría con un
+      // remanente NEGATIVO — una línea en negativo, con impuesto negativo.
+      // Medido con el reparto real, no supuesto.
+      const devueltoAhora = new Map<string, Decimal>();
+      for (const l of devoluciones)
+        devueltoAhora.set(
+          l.clasificacionTributaria,
+          (devueltoAhora.get(l.clasificacionTributaria) ?? new Decimal(0)).plus(
+            l.bruto,
+          ),
+        );
+      // 3. ¿Entra esta devolución en el documento? Dos motivos para que no:
+      //
+      //   a) vale más que lo que la nota acredita — devolver mercadería y
+      //      acreditar plata son dos operaciones distintas, y cuál se hace la
+      //      elige el operador (decisión del owner);
+      //   b) su porción fiscal ya está acreditada por notas anteriores. Este
+      //      segundo corte no es teórico: sin él, una nota por monto libre se
+      //      come capacidad AFECTA que la devolución siguiente necesita, y la
+      //      SERIE termina acreditando más IVA del que la venta cobró —cada
+      //      documento cerrando bien por separado—. Medido: venta de 8.330
+      //      afecto (IVA 1.330) + 3.000 exento, una nota libre de 1.000 y otra
+      //      que devuelve las 7 unidades ⇒ 1.447 de IVA acreditado contra
+      //      1.330 cobrado. El tope global contra `disponible` no lo ve porque
+      //      mira el bruto, no la porción.
+      const acreditablePorPorcion = new Map(
+        remanentesPrevios.map((r) => [r.clasificacion, r.peso]),
+      );
+      const porcionAgotada = [...devueltoAhora.entries()].find(
+        ([clasificacion, monto]) =>
+          monto.gt(acreditablePorPorcion.get(clasificacion) ?? new Decimal(0)),
+      );
+      const noEntraEnElDocumento =
+        new Decimal(params.monto).lt(valorDevuelto) ||
+        porcionAgotada !== undefined;
+
+      if (noEntraEnElDocumento && params.validarVentaElegible) {
+        if (porcionAgotada)
+          // El mensaje NO dice "ya se acreditó casi todo": la causa puede ser
+          // esa, o puede ser el redondeo de partir el mismo ítem en varias
+          // notas —con `total_linea` 1.001 en 3 unidades, cada una vale 334
+          // cuantizado y la tercera pide 334 contra 333 que quedan—. Atribuirlo
+          // a notas anteriores mandaría al operador a buscar algo que no está.
+          throw new BadRequestException(
+            `La mercadería a devolver vale ${porcionAgotada[1].toString()} en lo ` +
+              `${porcionAgotada[0]} de esta venta, y solo quedan ` +
+              `${(acreditablePorPorcion.get(porcionAgotada[0]) ?? new Decimal(0)).toString()} por ` +
+              `acreditar —por notas anteriores, o por el redondeo de partir el mismo ítem en varias ` +
+              `notas—. Emití la nota por lo que queda, o registrá la vuelta a stock desde Inventario.`,
+          );
+        throw new BadRequestException(
+          `La mercadería a devolver vale ${valorDevuelto.toString()} en esta venta, más que ` +
+            `los ${new Decimal(params.monto).toString()} que acredita la nota. Emití la nota por ` +
+            `el valor devuelto, o registrá la vuelta a stock desde Inventario.`,
+        );
+      }
+
+      // El rechazo es del camino MANUAL, donde el operador está mirando y puede
+      // corregir. Por el webhook de reembolso (decisión P3) la plata ya volvió
+      // por el proveedor y el hook corre DESPUÉS del commit: un throw acá se
+      // traga como warning (`cobros.service.ts`) y se pierden la nota Y el
+      // movimiento de stock. Así que ahí el documento se emite igual, por el
+      // monto que el proveedor devolvió, **con las líneas de devolución fuera
+      // del documento** —incluirlas rompería `Σ líneas = total_final` o el IVA
+      // de la serie— y el stock vuelve igual: el movimiento de inventario se
+      // registra abajo sobre TODAS las devoluciones pedidas, no sobre las que
+      // quedaron en el documento. Lo que se pierde es el detalle de qué volvió
+      // EN LA NOTA, que igual queda en `movimientos_inventario`.
+      //
+      // ⚠️ Se vacía el bloque ENTERO, no solo la porción agotada: dejar adentro
+      // la mitad exenta de una devolución mixta cuya mitad afecta no entra
+      // partiría el documento a la mitad sin decírselo a nadie. El mensaje
+      // nombra la porción que topeó; la operación se rechaza completa.
+      const devolucionesDelDocumento = noEntraEnElDocumento ? [] : devoluciones;
+      const ajusteTotal = noEntraEnElDocumento
+        ? new Decimal(params.monto)
+        : new Decimal(params.monto).minus(valorDevuelto);
+
+      const remanentes = remanentesPrevios
+        .map((r) => ({
+          clasificacion: r.clasificacion,
+          // El piso en cero es red y no regla, pero **sí se alcanza**: con el
+          // corte de arriba la porción no puede quedar negativa por una
+          // devolución, y con el reparto tampoco debería, pero el residuo del
+          // paso de unidad puede correr una porción un minor unit por debajo.
+          // Preferible que deje de atraer ajuste a que el documento salga con
+          // plata negativa.
+          //
+          // Descuenta lo que esta nota devuelve **solo si esas líneas entran en
+          // el documento**: si quedaron afuera (camino del webhook), no
+          // acreditan nada y la porción sigue entera para el ajuste.
+          peso: Decimal.max(
+            r.peso.minus(
+              devolucionesDelDocumento.length
+                ? (devueltoAhora.get(r.clasificacion) ?? new Decimal(0))
+                : new Decimal(0),
+            ),
+            0,
+          ),
+        }))
+        // Orden fijo por clasificación: el desempate del reparto es por
+        // POSICIÓN, así que dejarlo al orden que devuelva el planner movería
+        // plata de una porción a la otra sin que nadie tocara nada.
+        .sort((a, b) => a.clasificacion.localeCompare(b.clasificacion));
+
+      const tasas = new Map(
+        porcionesOriginal.map((r) => [
+          r.clasificacion,
+          tasaEfectiva(porcionesOriginal, r.clasificacion),
+        ]),
+      );
+      const partir = (bruto: Decimal, clasificacion: string) =>
+        descomponer(bruto, tasas.get(clasificacion) ?? new Decimal(0), q);
+
+      // 4. Las líneas de la nota, primero en memoria: la cabecera se guarda
+      // DESPUÉS porque sus totales se derivan de acá.
+      interface LineaNotaCredito {
+        itemId: string;
+        descripcion: string | null;
+        clasificacion: string;
+        cantidad: string;
+        precioUnitario: string;
+        precioUnitarioOrigen: string | null;
+        tasaCambio: string | null;
+        monedaIdOrigen: string;
+        unidadCodigoBase: string;
+        bruto: Decimal;
+        subtotal: Decimal;
+        impuesto: Decimal;
+        /** `null` en la línea de ajuste: es lo que decide el inventario. */
+        itemDevuelto: string | null;
+      }
+      const lineasNC: LineaNotaCredito[] = devolucionesDelDocumento.map((l) => {
+        const { subtotal, impuesto } = partir(
+          l.bruto,
+          l.clasificacionTributaria,
+        );
+        return {
+          itemId: l.itemId,
+          descripcion: l.descripcion,
+          clasificacion: l.clasificacionTributaria,
+          cantidad: l.cantidad,
+          // Cambia de significado respecto de antes: el valor EFECTIVO por
+          // unidad —lo que esa unidad costó en esta boleta— y no el precio de
+          // lista, que es lo que el documento tiene que mostrar al lado de la
+          // cantidad. ⚠️ NO promete `precio × cantidad = total_linea`: sale de
+          // una división (`Σ total_linea / Σ cantidad`) recortada a 4
+          // decimales, así que con 3 unidades de 1.000 da 333,3333 × 3 =
+          // 999,9999. El que cierra exacto es `total_linea`.
+          precioUnitario: new Decimal(l.valorUnitarioBruto).toFixed(4),
+          precioUnitarioOrigen: l.precioUnitarioOrigen,
+          tasaCambio: l.tasaCambio,
+          monedaIdOrigen: l.monedaIdOrigen,
+          unidadCodigoBase: l.unidadCodigoBase,
+          bruto: l.bruto,
+          subtotal,
+          impuesto,
+          itemDevuelto: l.itemId,
+        };
+      });
+
+      if (ajusteTotal.isPositive()) {
+        // Sin porciones no hay dónde repartir y `repartirAjuste` devolvería
+        // `[]`: el documento saldría con las líneas sin sumar su total, en
+        // silencio. Hoy es inalcanzable —nadie borra líneas de una venta— y por
+        // eso es un error ruidoso y no una rama de negocio.
+        if (!remanentes.length)
+          throw new BadRequestException(
+            `La venta ${params.ventaOriginalId} no tiene líneas vivas: no hay porción fiscal ` +
+              `sobre la que componer la nota de crédito.`,
+          );
+        const partes = repartirAjuste(ajusteTotal, remanentes, cfgReparto, q);
+        // El ítem de sistema se pide solo si hay ajuste, y con find-or-create,
+        // para que el webhook de reembolso no pierda un evento ya consumado
+        // porque falte un dato de configuración.
+        //
+        // ⚠️ La cura no es absoluta y conviene no leerla así: si el ítem NO
+        // existe y dos notas del mismo tenant sobre ventas DISTINTAS corren en
+        // paralelo, cada una toma el lock de su propia venta y las dos intentan
+        // crearlo — una choca contra `uq_item_ajuste_nc_tenant` y aborta. Hoy
+        // hace falta que alguien lo haya borrado por SQL: se siembra al crear
+        // el tenant y `ItemsService.remove` lo rechaza.
+        const itemAjuste = await this.itemsService.asegurarItemAjuste(
+          manager,
+          params.tenantId,
+        );
+        const { unidadBaseCodigo } = resolverUnidadBaseDeItem({
+          tipo: itemAjuste.tipo,
+        });
+        for (const parte of partes) {
+          const { subtotal, impuesto } = partir(
+            parte.bruto,
+            parte.clasificacion,
+          );
+          lineasNC.push({
+            itemId: itemAjuste.id,
+            // La glosa que escribió el operador, que es lo que explica por qué
+            // se acredita plata que no corresponde a mercadería.
+            descripcion: params.comentario ?? 'Ajuste',
+            clasificacion: parte.clasificacion,
+            cantidad: '1',
+            precioUnitario: parte.bruto.toFixed(4),
+            precioUnitarioOrigen: null,
+            tasaCambio: null,
+            monedaIdOrigen: original.moneda_id,
+            unidadCodigoBase: unidadBaseCodigo,
+            bruto: parte.bruto,
+            subtotal,
+            impuesto,
+            itemDevuelto: null,
+          });
+        }
+      }
+
+      // 5. Los totales de la cabecera se DERIVAN de las líneas. `total_bruto`
+      // es el NETO, igual que en una venta normal (`crear`), no el cobrado.
+      const sumaSubtotales = lineasNC.reduce(
+        (a, l) => a.plus(l.subtotal),
+        new Decimal(0),
+      );
+      const sumaImpuestos = lineasNC.reduce(
+        (a, l) => a.plus(l.impuesto),
+        new Decimal(0),
       );
 
       const nc = await manager.save(
@@ -1427,11 +1728,17 @@ export class VentasService {
           tipoDocumentoId: tipoNotaCredito,
           ventaReferenciaId: params.ventaOriginalId,
           estado: EstadoVenta.PAGADA,
-          totalBruto: params.monto,
+          totalBruto: sumaSubtotales.toFixed(4),
           totalDescuentos: '0',
           totalRecargos: '0',
-          totalImpuestos: '0',
+          totalImpuestos: sumaImpuestos.toFixed(4),
           totalFinal: params.monto,
+          // Mismo cálculo que en `crear`. La NC copia `moneda_id` de la venta
+          // original, que ya es la oficial: no hay conversión que hacer.
+          baseVentasTotalFinal: new Decimal(params.monto).toFixed(4),
+          baseVentasSinImpuestos: new Decimal(params.monto)
+            .minus(sumaImpuestos)
+            .toFixed(4),
           comentario: params.comentario ?? null,
           // La NC congela lo que heredó (decisión P4): así puede leerse
           // sola, sin ir a buscar la venta que corrige.
@@ -1439,44 +1746,62 @@ export class VentasService {
         }),
       );
 
-      // Una sola lectura para todas las líneas: los costos congelados son de
-      // la venta ORIGINAL, no de la NC que se está creando. La NC por monto
-      // libre —sin líneas, que es el caso más común— no paga la query.
-      const costosOriginales = lineas.length
-        ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
-        : new Map<string, string | null>();
-      for (const linea of lineas) {
-        // El VALOR se cuantiza al criterio heredado, con la misma `cuantizar`
-        // que usa el motor de precios (no una fórmula propia): el string
-        // sigue formateándose a 4 decimales, la escala de la columna
-        // (`venta_detalles.total_linea` es NUMERIC(18,4)). Sin
-        // `config_calculo` congelada —solo alcanzable acá vía el webhook,
-        // ver el guard arriba— no hay criterio que heredar: se persiste
-        // igual que antes de este fix, sin cuantizar a la escala de la
-        // moneda, para no perder el evento (decisión P3).
-        const bruto = new Decimal(linea.precioUnitario).times(linea.cantidad);
-        const totalLinea = (
-          cfgOriginal
-            ? cuantizar(bruto, cfgOriginal)
-            : bruto.toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
-        ).toFixed(4);
-        await manager.save(
-          VentaDetalle,
+      // 6. Las líneas, en un solo `save` con el array entero: el orden del
+      // resultado es el del array, así que `detalles[i]` cruza con
+      // `lineasNC[i]` para las filas de impuesto de abajo.
+      const detalles = await manager.save(
+        VentaDetalle,
+        lineasNC.map((l) =>
           manager.create(VentaDetalle, {
             ventaId: nc.id,
-            itemId: linea.itemId,
-            monedaIdOrigen: linea.monedaIdOrigen,
-            precioUnitarioOrigen: linea.precioUnitarioOrigen,
-            tasaCambio: linea.tasaCambio,
-            precioUnitario: linea.precioUnitario,
-            descripcion: linea.descripcion,
-            clasificacionTributaria: linea.clasificacionTributaria,
-            unidadCodigoBase: linea.unidadCodigoBase,
-            cantidad: linea.cantidad,
-            subtotal: totalLinea,
-            totalLinea,
+            itemId: l.itemId,
+            monedaIdOrigen: l.monedaIdOrigen,
+            precioUnitarioOrigen: l.precioUnitarioOrigen,
+            tasaCambio: l.tasaCambio,
+            precioUnitario: l.precioUnitario,
+            descripcion: l.descripcion,
+            clasificacionTributaria: l.clasificacion,
+            unidadCodigoBase: l.unidadCodigoBase,
+            cantidad: l.cantidad,
+            subtotal: l.subtotal.toFixed(4),
+            // Una NC no negocia: no hay descuento, recargo ni prorrateo que
+            // aplicar sobre lo que se acredita.
+            descuentoAplicado: '0',
+            recargoAplicado: '0',
+            ajusteVenta: '0',
+            impuestoAplicado: l.impuesto.toFixed(4),
+            totalLinea: l.bruto.toFixed(4),
           }),
-        );
+        ),
+      );
+
+      // 7. Las filas de impuesto de la nota, derivadas de las del original.
+      await this.escribirImpuestosNotaCredito(
+        manager,
+        params.ventaOriginalId,
+        nc.id,
+        lineasNC.map((l, i) => ({
+          detalleId: detalles[i].id,
+          itemDevuelto: l.itemDevuelto,
+          clasificacion: l.clasificacion,
+          impuesto: l.impuesto,
+        })),
+        cfgReparto,
+        q,
+      );
+
+      // 8. Inventario: **solo las líneas de devolución**. La de ajuste cuelga
+      // de un `servicio`, y `registrarMovimiento` rechaza con 400 todo lo que
+      // no sea producto (`inventario.service.ts`): sin este corte, agregar la
+      // línea de ajuste haría fallar el reembolso ENTERO.
+      //
+      // Una sola lectura de costos para todas: los costos congelados son de la
+      // venta ORIGINAL, no de la NC que se está creando. La NC por monto libre
+      // —sin devoluciones, el caso más común— no paga la query.
+      const costosOriginales = devoluciones.length
+        ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
+        : new Map<string, string | null>();
+      for (const linea of devoluciones) {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
           itemId: linea.itemId,
@@ -1761,9 +2086,36 @@ export class VentasService {
       descripcion: string | null;
       clasificacionTributaria: string;
       unidadCodigoBase: string;
+      /**
+       * Lo que UNA unidad de ese ítem costó EN ESTA BOLETA: `Σ total_linea / Σ
+       * cantidad` sobre las filas del ítem. No el precio de lista: `total_linea`
+       * ya lleva adentro el descuento de línea, el recargo y la parte
+       * prorrateada del descuento de nivel venta (`venta-detalle.entity.ts`).
+       * Valuar al precio de lista acreditaría de más en toda venta con
+       * descuento — y desde que las líneas de la NC tienen que sumar su
+       * `total_final`, eso ya no es un número que nadie mira: descuadra el
+       * documento.
+       *
+       * `registrarDevolucionesPorReembolso` —el otro llamador— lo ignora: solo
+       * mueve stock, no emite documento.
+       */
+      valorUnitarioBruto: string;
     }[]
   > {
     if (!devoluciones.length) return [];
+    // Dos entradas del mismo ítem se validaban cada una contra el mismo
+    // disponible, así que `[{a,2},{a,2}]` pasaba con 3 vendidas. Antes eso
+    // "solo" duplicaba el movimiento de stock; ahora además duplica el valor
+    // devuelto, que es plata en un documento fiscal. Se rechaza en vez de
+    // sumarlas: si el operador quiere devolver 4, que pida 4.
+    const itemsPedidos = new Set<string>();
+    for (const dev of devoluciones) {
+      if (itemsPedidos.has(dev.itemId))
+        throw new BadRequestException(
+          'El mismo ítem viene dos veces en la devolución: mandá una sola línea con la cantidad total',
+        );
+      itemsPedidos.add(dev.itemId);
+    }
 
     const detalles: {
       item_id: string;
@@ -1775,11 +2127,12 @@ export class VentasService {
       descripcion: string | null;
       clasificacion_tributaria: string;
       unidad_codigo_base: string;
+      total_linea: string;
       modo_inventario: string | null;
     }[] = await manager.query(
       `SELECT d.item_id, d.cantidad, d.precio_unitario, d.precio_unitario_origen,
               d.tasa_cambio, d.moneda_id_origen, d.descripcion, d.clasificacion_tributaria,
-              d.unidad_codigo_base,
+              d.unidad_codigo_base, d.total_linea,
               ip.modo_inventario
        FROM venta_detalles d
        LEFT JOIN item_producto ip ON ip.item_id = d.item_id
@@ -1845,8 +2198,131 @@ export class VentasService {
         // Se copia de la línea original: la NC devuelve lo mismo que se vendió,
         // en la misma unidad, aunque el ítem haya cambiado de unidad después.
         unidadCodigoBase: detalle.unidad_codigo_base,
+        // Sobre las MISMAS filas que ya se leyeron para topear la cantidad: no
+        // hay consulta de más.
+        valorUnitarioBruto: vendida.isZero()
+          ? '0'
+          : filas
+              .reduce((a, f) => a.plus(f.total_linea), new Decimal(0))
+              .dividedBy(vendida)
+              .toString(),
       };
     });
+  }
+
+  /**
+   * Las filas de `ventas_impuestos` de una nota de crédito, derivadas de las del
+   * documento que corrige. No se recalculan contra el catálogo: `item_impuestos`
+   * pudo cambiar, y la NC corrige aquel documento con aquel criterio.
+   *
+   * De dónde sale la lista de impuestos de cada línea: para una **devolución**,
+   * los del ítem devuelto; para una línea de **ajuste**, los de su porción
+   * (afecta o exenta), que puede ser más de uno si distintos ítems afectos
+   * llevaban impuestos distintos. El importe de la línea se reparte entre ellos
+   * con `repartirProporcional`, en la proporción que tenían en el original, para
+   * que la suma dé exacto.
+   *
+   * ⚠️ Con **dos impuestos** repartidos entre líneas que no los comparten, el
+   * `porcentaje_aplicado` de la fila describe **la regla** y no reproduce su
+   * propio `valor_aplicado`. Es el precio de derivar de hechos congelados en vez
+   * de recalcular: con un solo impuesto —el caso normal— coinciden.
+   */
+  private async escribirImpuestosNotaCredito(
+    manager: EntityManager,
+    ventaOriginalId: string,
+    notaCreditoId: string,
+    lineas: {
+      detalleId: string;
+      itemDevuelto: string | null;
+      clasificacion: string;
+      impuesto: Decimal;
+    }[],
+    cfg: ConfigCalculo,
+    q: Cuantizador,
+  ): Promise<void> {
+    const conImpuesto = lineas.filter((l) => l.impuesto.gt(0));
+    if (!conImpuesto.length) return;
+
+    const filas: {
+      item_id: string;
+      clasificacion: string;
+      impuesto_id: string;
+      nombre_regla: string;
+      porcentaje_aplicado: string | null;
+      valor: string;
+    }[] = await manager.query(
+      `SELECT d.item_id,
+              d.clasificacion_tributaria AS clasificacion,
+              vi.impuesto_id, vi.nombre_regla, vi.porcentaje_aplicado,
+              COALESCE(SUM(vi.valor_aplicado), 0)::text AS valor
+         FROM ventas_impuestos vi
+         JOIN venta_detalles d ON d.detalle_id = vi.detalle_id
+              AND d.eliminado_el IS NULL
+        WHERE vi.venta_id = $1 AND vi.eliminado_el IS NULL
+          AND vi.aplicado_en = 'detalle'
+        GROUP BY 1, 2, 3, 4, 5
+        ORDER BY 3, 4, 5`,
+      [ventaOriginalId],
+    );
+    if (!filas.length) return;
+
+    const nuevas: VentaImpuesto[] = [];
+    for (const linea of conImpuesto) {
+      // Las reglas candidatas, agregadas por impuesto: un mismo impuesto puede
+      // venir de varias filas del original (dos ítems afectos, dos líneas).
+      const candidatas = new Map<
+        string,
+        { nombreRegla: string; porcentaje: string | null; peso: Decimal }
+      >();
+      for (const f of filas) {
+        const aplica =
+          linea.itemDevuelto !== null
+            ? f.item_id === linea.itemDevuelto
+            : f.clasificacion === linea.clasificacion;
+        if (!aplica) continue;
+        const previa = candidatas.get(f.impuesto_id);
+        candidatas.set(f.impuesto_id, {
+          // La PRIMERA del orden fijo de la consulta, no la última leída: un
+          // mismo `impuesto_id` puede venir con distinto nombre o porcentaje
+          // (dos ítems, una regla por tramos, un renombre entre líneas), y sin
+          // esto el par que se persiste en un documento fiscal dependería del
+          // orden que eligiera el planner.
+          nombreRegla: previa ? previa.nombreRegla : f.nombre_regla,
+          porcentaje: previa ? previa.porcentaje : f.porcentaje_aplicado,
+          peso: (previa?.peso ?? new Decimal(0)).plus(f.valor),
+        });
+      }
+      // Sin candidatas no hay regla que nombrar. No debería pasar —la línea
+      // solo lleva impuesto si su porción lo llevaba en el original— y por eso
+      // el importe NO se inventa una fila: queda en `total_impuestos` de la
+      // cabecera, que es lo que cierra contra las líneas.
+      if (!candidatas.size) continue;
+
+      const entradas = [...candidatas.entries()].sort((a, b) =>
+        a[0].localeCompare(b[0]),
+      );
+      const montos = repartirProporcional(
+        linea.impuesto,
+        entradas.map(([, v]) => v.peso),
+        cfg,
+        q,
+      );
+      entradas.forEach(([impuestoId, v], i) => {
+        if (montos[i].isZero()) return;
+        nuevas.push(
+          manager.create(VentaImpuesto, {
+            ventaId: notaCreditoId,
+            detalleId: linea.detalleId,
+            impuestoId,
+            nombreRegla: v.nombreRegla,
+            valorAplicado: montos[i].toFixed(4),
+            porcentajeAplicado: v.porcentaje,
+            aplicadoEn: 'detalle',
+          }),
+        );
+      });
+    }
+    if (nuevas.length) await manager.save(VentaImpuesto, nuevas);
   }
 
   async findTiposDocumento(tenantId: string): Promise<TipoDocumentoResponse[]> {
@@ -2181,11 +2657,17 @@ export class VentasService {
               d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
               d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.ajuste_venta,
               d.impuesto_aplicado, d.total_linea, d.cantidad_presentacion, d.unidad_codigo_presentacion,
-              d.unidad_codigo_base,
+              d.unidad_codigo_base, d.clasificacion_tributaria,
               ip.modo_inventario
        FROM venta_detalles d
        LEFT JOIN item_producto ip ON ip.item_id = d.item_id
-       WHERE d.venta_id = $1 AND d.eliminado_el IS NULL ORDER BY d.creado_el ASC`,
+       WHERE d.venta_id = $1 AND d.eliminado_el IS NULL
+       -- El desempate no es cosmético: las líneas se guardan en UN solo save,
+       -- así que comparten creado_el al microsegundo y el orden lo elegía el
+       -- planner. Con una nota de crédito de dos líneas de ajuste eso se ve:
+       -- la misma nota se renderizaba afecto/exento o exento/afecto según la
+       -- recarga. Medido en el navegador, no supuesto.
+       ORDER BY d.creado_el ASC, d.detalle_id ASC`,
       [ventaId],
     );
     // Ya devuelto por ítem (movimientos 'devolucion' de esta venta o de sus NCs
@@ -2412,6 +2894,10 @@ export class VentasService {
         tasaCambio: d['tasa_cambio'],
         monedaIdOrigen: d['moneda_id_origen'],
         subtotal: d['subtotal'],
+        // El estado fiscal de la línea. Lo pide el detalle de una nota de
+        // crédito, cuyas líneas de ajuste se separan justamente en una afecta y
+        // una exenta: sin este campo, las dos se leen iguales en pantalla.
+        clasificacionTributaria: d['clasificacion_tributaria'],
         descuentoAplicado: d['descuento_aplicado'],
         recargoAplicado: d['recargo_aplicado'],
         // Va sí o sí: sin él las partes que la pantalla muestra no suman el

@@ -120,7 +120,16 @@ Para cada porción `P ∈ {afecto, exento}`:
 ```
 restante_P = Σ total_linea de la venta original en P
            − Σ total_linea de las NC previas de esa venta en P
+           − Σ total_linea de las líneas de devolución de ESTA nota en P
 ```
+
+⚠️ **El tercer término se agregó al implementar (2026-09-04)**, y no es un detalle: la
+mercadería que esta misma nota devuelve tampoco está ya "por devolver". Sin él, el ajuste puede
+acreditar de una porción **más de lo que esa porción tenía** —medido: devolver las 7 unidades
+afectas de 8.330 acreditando 9.000 dejaba 493 de ajuste sobre la porción afecta— y la nota
+**siguiente** arranca con `restante_P` negativo: una línea de nota de crédito con importe e
+impuesto en negativo, y un `total_impuestos` que ninguna fila de `ventas_impuestos` reproduce.
+Detrás del descuento queda un piso en cero como red, no como regla.
 
 y entonces:
 
@@ -277,8 +286,45 @@ docblock: es el precio de derivar de hechos congelados en vez de recalcular con 
 costaron $3.000, y se le acredita $1.000.
 
 ```
-Σ valorDevuelto > params.monto  →  400
+Σ valorDevuelto > params.monto                     →  400   (solo en el camino MANUAL)
+Σ valorDevuelto en P > restante_P (previo a esta nota)  →  400   (ídem)
 ```
+
+⚠️ **El segundo corte se agregó al implementar (2026-09-04)** y no estaba en la spec. El tope
+global mira el bruto y no ve la porción fiscal: una nota por monto libre se come capacidad
+**afecta**, y la devolución siguiente —valuada a su valor congelado— la vuelve a usar. Cada
+documento cierra bien por separado y **la serie acredita más IVA del que la venta cobró**.
+Medido con las funciones reales: venta de 8.330 afecto (IVA 1.330) + 3.000 exento, una nota
+libre de 1.000 y otra que devuelve las 7 unidades ⇒ **1.447 de IVA acreditado contra 1.330
+cobrado**.
+
+El corte por porción cierra esa fuga —**medido: 0 violaciones de `Σ bruto acreditado por porción
+≤ el original` en 16.000 secuencias de hasta 4 notas**— pero **no la hace imposible en el IVA**, y
+conviene no escribirlo así. Cada nota descompone su propio bruto y cuantiza a la escala de la
+moneda, así que partir un mismo bruto en varios documentos acumula residuo: sobre 100.000 series,
+el **12,15 % acredita 1 o 2 minor units de IVA de más**, con **2 como techo medido**. No escala
+con el monto —lo acota la cantidad de notas, no la plata—. Sacarlo exigiría derivar el neto de
+cada nota contra el remanente de la serie en vez de contra su propio bruto: **decisión del owner,
+no la toma el agente**.
+
+Dos costos del corte, los dos medidos:
+
+- Una devolución legítima después de una nota por monto libre puede quedar topeada; el mensaje
+  dice cuánto queda por acreditar y ofrece la vuelta a stock desde Inventario.
+- **La última unidad de un ítem cuyo valor unitario no divide exacto puede no entrar.** Con
+  `total_linea` 1.001 en 3 unidades, cada unidad vale 334 cuantizado: la tercera pide 334 contra
+  333 que quedan. Es 1 minor unit y la mercadería vuelve igual desde Inventario, pero el operador
+  lo ve como un rechazo, así que el mensaje **no** lo atribuye solo a notas anteriores.
+
+⚠️ **Solo en el camino manual** (agregado al implementar, 2026-09-04). Por el webhook de
+reembolso el hook corre **después** del commit, con la plata ya devuelta por el proveedor, y un
+throw ahí se traga como warning: se perderían la nota **y** el movimiento de stock. Es el mismo
+principio de la decisión P3, que la § 4 aplica al ítem de sistema faltante. Así que por ese
+camino la nota se emite igual, por el monto que el proveedor devolvió, **con las líneas de
+devolución fuera del documento** —incluirlas rompería `Σ líneas = total_final`— y el movimiento
+de inventario corre sobre **todas** las devoluciones pedidas. Lo que se pierde es el detalle de
+qué volvió *en la nota*; queda en `movimientos_inventario`. **Decisión del agente, pendiente de
+confirmación del owner:** la alternativa es dejar el 400 también ahí y aceptar perder el evento.
 
 Mensaje, en lenguaje de mostrador: que lo devuelto vale más que la nota, con los dos números, y
 que para devolver el stock sin acreditarlo todo van dos operaciones — la NC por su monto, y la

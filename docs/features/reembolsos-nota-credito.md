@@ -93,11 +93,88 @@ Response (200): orden pública + extras
 - **Nota de crédito** = venta con `tipo_documento_id` = la fila "Nota de Crédito"
   **del país del tenant** (`activo: false`, para que no aparezca en el selector
   del POS), `venta_referencia_id` → venta original, estado `pagada`,
-  caja/canal/moneda copiados de la original, y
-  **totales copiados del monto reembolsado** (sin motor de precios). Líneas solo
-  si se eligieron ítems; movimientos `entrada / motivo='devolucion'` ligados a la
-  NC (o a la venta original si no hubo NC). **La venta original nunca cambia de
+  caja/canal/moneda copiados de la original. **La venta original nunca cambia de
   estado.**
+- **La NC se compone: tiene líneas, neto e IVA** (2026-09-04). Dejó de ser un
+  monto suelto con los totales copiados. Sigue sin pasar por el motor de precios
+  —no hay precio que calcular, hay plata que ya se devolvió— pero **todo se
+  deriva del documento que corrige**:
+
+  | | De dónde sale |
+  |---|---|
+  | Línea de devolución | el ítem devuelto, valuado a **lo que costó en esa boleta** (`Σ total_linea / Σ cantidad` del ítem), no al precio de lista: `total_linea` ya lleva adentro el descuento de línea, el recargo y el prorrateo del descuento de venta |
+  | Línea de ajuste | el resto del monto, en el ítem de sistema **"Ajuste"**, partido en una línea afecta y una exenta según la proporción del **remanente** (original − NCs previas − lo que esta misma nota devuelve) |
+  | Neto e IVA de cada línea | la **tasa efectiva** de esa porción en la venta original (`Σ impuesto / Σ neto`), y el impuesto **por resta** para que `neto + impuesto = bruto` cierre exacto |
+  | Totales de la cabecera | `total_bruto = Σ subtotal` (el neto, como en una venta normal), `total_impuestos = Σ impuesto`, `total_final = monto`, y las dos `base_ventas_*` como en `crear` |
+  | Filas de `ventas_impuestos` | los impuestos que esa porción llevaba en el original, con el importe repartido entre ellos a prorrata |
+
+  **La tasa se deriva de importes congelados y no se lee del catálogo** porque
+  `item_impuestos` es por ítem: dos líneas afectas de la misma venta pueden
+  llevar impuestos distintos y no existe "la tasa" que leer. La NC corrige aquel
+  documento, así que hereda su criterio — el mismo principio que el redondeo.
+
+  **Devolver mercadería que vale más que la nota se rechaza con 400 — en el
+  camino manual.** No se acomoda solo: son dos operaciones distintas —acreditar
+  plata y reponer stock— y la elección es del operador. El mensaje trae los dos
+  números y las dos salidas (emitir la nota por el valor devuelto, o registrar
+  la vuelta a stock desde Inventario).
+
+  **Por el webhook de reembolso ese mismo caso NO se rechaza** (decisión P3): la
+  plata ya volvió por el proveedor y el hook corre después del commit, así que
+  un throw se traga como warning y se perderían la nota **y** el movimiento de
+  stock. Ahí la nota se emite por el monto que el proveedor devolvió, con las
+  líneas de devolución **fuera del documento** —incluirlas rompería `Σ líneas =
+  total_final`—, y el stock vuelve igual. Lo que se pierde es el detalle de qué
+  volvió *en la nota*; queda en `movimientos_inventario`.
+
+  **Lo que la propia nota devuelve deja de atraer ajuste.** El remanente
+  descuenta las NCs previas *y* las líneas de devolución de esta misma nota. Sin
+  eso, el ajuste puede acreditar de una porción más de lo que esa porción tenía
+  y la nota siguiente arranca con remanente negativo: una línea de nota de
+  crédito con importe e impuesto en negativo. El piso en cero que sigue al
+  descuento es red, no regla.
+
+  **Ninguna porción fiscal se acredita más de una vez, y por eso hay un segundo
+  tope.** El tope global (`Σ NCs ≤ total_final`) mira el bruto y no ve la
+  porción: una nota por monto libre se come capacidad afecta, y la devolución
+  siguiente —valuada a su valor congelado— la vuelve a usar. Cada documento
+  cierra bien por separado y **la serie acredita más IVA del que la venta
+  cobró**. Medido: venta de 8.330 afecto (IVA 1.330) + 3.000 exento, una nota
+  libre de 1.000 y otra que devuelve las 7 unidades ⇒ 1.447 de IVA acreditado
+  contra 1.330 cobrado. Por eso una devolución cuya porción ya está acreditada
+  se rechaza con 400 (camino manual) o queda fuera del documento (webhook), con
+  el stock volviendo igual.
+
+  ⚠️ **El corte cierra el bruto, no el último peso del IVA.** El bruto acreditado
+  por porción nunca pasa el original (medido: 0 violaciones en 16.000 secuencias
+  de hasta 4 notas), pero cada nota descompone su propio bruto y cuantiza a la
+  escala de la moneda, así que partir un bruto en varios documentos acumula
+  residuo: **12,15 % de las series multi-nota acredita 1 o 2 minor units de IVA
+  de más, con 2 como techo** (100.000 series). No escala con el monto. Sacarlo
+  exigiría derivar el neto de cada nota contra el remanente de la serie: es
+  decisión del owner, no está tomada.
+
+  ⚠️ **Costo del corte, en el mostrador:** la última unidad de un ítem cuyo valor
+  unitario no divide exacto puede no entrar. Con `total_linea` 1.001 en 3
+  unidades cada una vale 334, y la tercera pide 334 contra 333 que quedan. Es 1
+  minor unit y la mercadería vuelve igual desde Inventario; por eso el mensaje
+  del 400 **no** lo atribuye solo a notas anteriores. La devolución se rechaza
+  **completa**, no a medias: dejar la porción exenta adentro y la afecta afuera
+  partiría el documento sin decírselo a nadie.
+
+  **El movimiento de inventario corre solo sobre las líneas de devolución.** La
+  de ajuste cuelga de un `servicio` y `registrarMovimiento` rechaza con 400 todo
+  lo que no sea producto: sin ese corte, agregar la línea de ajuste haría fallar
+  el reembolso entero.
+- **El ítem de sistema "Ajuste"** (`items.es_ajuste_nota_credito`, único vivo por
+  tenant vía índice parcial): `venta_detalles.item_id` es NOT NULL, así que la
+  línea de ajuste necesita colgar de algún ítem, y tiene que ser un `servicio`
+  porque solo `tipo='producto'` tiene stock. Se siembra al crear el tenant, se
+  excluye de todos los listados del catálogo y `remove()` lo rechaza. La NC lo
+  pide con **find-or-create**: el webhook de reembolso no puede perder un evento
+  ya consumado porque falte un dato de configuración.
+- La aritmética vive aparte, pura y testeable sin Postgres:
+  `ventas/nota-credito-composicion.ts`.
 - `VentasService.crearNotaCredito` / `registrarDevolucionesPorReembolso`
   (`ventas.service.ts`): transacción propia con `FOR UPDATE` sobre la venta
   original (serializa NCs concurrentes). Validaciones: Σ(NCs) ≤ `total_final`;
@@ -236,9 +313,17 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 
 ## Testing
 
-- `ventas.service.spec.ts`: crearNotaCredito (feliz sin/con líneas, validaciones
-  de monto/cantidades/modo/tenant, la original no se toca), devoluciones sin NC,
-  findOne/listar/resumen con los campos nuevos.
+- `ventas.service.spec.ts`: crearNotaCredito (composición por monto libre y con
+  devoluciones, validaciones de monto/cantidades/modo/tenant, la original no se
+  toca), devoluciones sin NC, findOne/listar/resumen con los campos nuevos.
+- `nota-credito-composicion.spec.ts`: la aritmética sola —tasa efectiva,
+  descomposición por resta, reparto del ajuste— con `decimalesMoneda: 0`, que es
+  la escala que más residuo produce.
+- `nota-credito-composicion.e2e-spec.ts`: el camino de la app sobre una venta
+  mixta real — dos líneas y totales derivados, el rechazo por mercadería > monto,
+  el corte de inventario en la línea de ajuste, la proporción tomada del
+  remanente con una NC previa, y el find-or-create del ítem de sistema.
+- `nota-credito-por-pais.e2e-spec.ts`: la forma del catálogo de documentos.
 - `reembolso-callback.handler.spec.ts`: registro en el registry y delegación.
 - `cobros.service.spec.ts`: hook post-commit (evento completo, warning sin
   revertir, rechazado no dispara, sin venta vinculada, regresión sin flags).

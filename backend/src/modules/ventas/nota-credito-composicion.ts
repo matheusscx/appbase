@@ -7,6 +7,29 @@ import {
 
 const ZERO = new Decimal(0);
 
+/**
+ * La config que usa el reparto cuando la venta original no tiene
+ * `config_calculo` congelada — solo alcanzable por el webhook de reembolso
+ * (decisión P3), que no puede perder un evento ya consumado por un dato de
+ * configuración faltante.
+ *
+ * `repartirProporcional` lee de acá **únicamente** `decimalesMoneda`, para el
+ * paso de la unidad mínima; los otros campos van con el default del sistema
+ * porque la interfaz los exige, no porque este reparto los mire. Los 4
+ * decimales son los del fallback de cuantización de ese mismo camino, así que
+ * el paso de unidad y la cuantización hablan de la misma escala.
+ */
+export const CFG_SIN_CONGELAR: ConfigCalculo = {
+  formula: ['descuentos', 'recargos', 'impuestos'],
+  calculoDescuentos: 'base',
+  calculoRecargos: 'base',
+  escalaCalculo: 4,
+  modoRedondeo: 'HALF_UP',
+  nivelRedondeo: 'linea',
+  decimalesMoneda: 4,
+  promosAcumulanDescuentos: false,
+};
+
 /** Lo que una porción (afecta o exenta) suma en un documento ya congelado. */
 export interface PorcionOriginal {
   clasificacion: string; // 'afecto' | 'exento'

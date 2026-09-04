@@ -5,9 +5,28 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 
 const TENANT_DEMO = '550e8400-e29b-41d4-a716-446655440007'; // Paris (Chile)
+const CLP = '550e8400-e29b-41d4-a716-446655440003';
+const EFECTIVO = '550e8400-e29b-41d4-a716-446655440105';
+
+/**
+ * La venta mixta de todos los casos de abajo, con los números elegidos para que
+ * discriminen (nada de 50/50 ni de divisiones exactas):
+ *
+ *   7 × producto afecto de 1.000 → neto 7.000 + IVA 1.330 = 8.330
+ *   1 × servicio exento de 3.000 →                          3.000
+ *                                                    total 11.330
+ *
+ * CLP tiene 0 decimales: la escala que más residuo produce y la que hace fallar
+ * un reparto mal escrito.
+ */
+const PRECIO_AFECTO = '1000';
+const CANTIDAD_AFECTA = '7';
+const PRECIO_EXENTO = '3000';
+const TOTAL_VENTA = '11330';
 
 interface TokenResponse {
   access_token: string;
@@ -21,6 +40,73 @@ describe('Nota de crédito compuesta (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
+  let itemAfectoId: string;
+  let itemExentoId: string;
+
+  /** Una venta mixta nueva, pagada. Cada caso arma la suya: compartirla haría
+   *  que el remanente de un test dependiera del que corrió antes. */
+  const crearVentaMixta = async (): Promise<string> => {
+    const venta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        // `'online'` para no depender de una caja física abierta: acá lo que se
+        // prueba es la composición del documento, no la caja.
+        canal: 'online',
+        lineas: [
+          { itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA },
+          { itemId: itemExentoId, cantidad: '1' },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO, monto: `${TOTAL_VENTA}.0000` }],
+      });
+    expect(venta.status).toBe(201);
+    expect((venta.body as { totalFinal: string }).totalFinal).toBe(
+      `${TOTAL_VENTA}.0000`,
+    );
+    return (venta.body as { id: string }).id;
+  };
+
+  interface LineaNC {
+    itemId: string;
+    descripcion: string | null;
+    clasificacionTributaria: string;
+    subtotal: string;
+    impuestoAplicado: string;
+    totalLinea: string;
+  }
+  interface NotaCredito {
+    detalles: LineaNC[];
+    totalBruto: string;
+    totalImpuestos: string;
+    totalFinal: string;
+    baseVentasTotalFinal: string;
+    baseVentasSinImpuestos: string;
+  }
+
+  const emitirNC = async (
+    ventaId: string,
+    body: Record<string, unknown>,
+  ): Promise<{ id: string }> => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/ventas/${ventaId}/notas-credito`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+    expect(res.status).toBe(201);
+    return res.body as { id: string };
+  };
+
+  const leerNC = async (ncId: string): Promise<NotaCredito> => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/ventas/${ncId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    return res.body as NotaCredito;
+  };
+
+  const suma = (lineas: LineaNC[], campo: keyof LineaNC): string =>
+    lineas
+      .reduce((a, l) => a.plus(new Decimal(l[campo] as string)), new Decimal(0))
+      .toString();
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -54,6 +140,39 @@ describe('Nota de crédito compuesta (e2e)', () => {
       .send({ tenantId: TENANT_DEMO });
     expect(resTenant.status).toBe(200);
     token = (resTenant.body as TokenResponse).access_token;
+
+    // Ítems PROPIOS de este spec: reusar los del seed haría que otros e2e
+    // muevan el stock y el remanente por debajo de estos casos.
+    const sufijo = Date.now();
+    const resAfecto = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `NC afecto E2E ${sufijo}`,
+        precioBase: PRECIO_AFECTO,
+        monedaId: CLP,
+        tipo: 'producto',
+        // Explícito, invariante 5 de CLAUDE.md.
+        clasificacionTributaria: 'afecto',
+        modoInventario: 'cantidad',
+        unidadMedida: 'unidad',
+        stock: '100',
+      });
+    expect(resAfecto.status).toBe(201);
+    itemAfectoId = (resAfecto.body as { id: string }).id;
+
+    const resExento = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `NC exento E2E ${sufijo}`,
+        precioBase: PRECIO_EXENTO,
+        monedaId: CLP,
+        tipo: 'servicio',
+        clasificacionTributaria: 'exento',
+      });
+    expect(resExento.status).toBe(201);
+    itemExentoId = (resExento.body as { id: string }).id;
   });
 
   afterAll(async () => {
@@ -195,6 +314,245 @@ describe('Nota de crédito compuesta (e2e)', () => {
         [TENANT_DEMO],
       );
       expect(sobrantes).toHaveLength(0);
+    });
+  });
+
+  describe('la nota se compone: líneas, neto e IVA', () => {
+    it('una NC por monto libre sale con dos líneas y sus totales derivados', async () => {
+      const ventaId = await crearVentaMixta();
+      const { id } = await emitirNC(ventaId, {
+        monto: '1000',
+        comentario: 'Cliente insatisfecho',
+      });
+
+      const nc = await leerNC(id);
+      expect(nc.detalles).toHaveLength(2);
+
+      // 1.000 repartido en la proporción 8.330 / 3.000 → 735 / 265. La
+      // proporción es despareja a propósito: con 50/50 un reparto mal escrito
+      // pasa igual.
+      const afecta = nc.detalles.find(
+        (l) => l.clasificacionTributaria === 'afecto',
+      )!;
+      const exenta = nc.detalles.find(
+        (l) => l.clasificacionTributaria === 'exento',
+      )!;
+      expect(new Decimal(afecta.totalLinea).toString()).toBe('735');
+      expect(new Decimal(exenta.totalLinea).toString()).toBe('265');
+
+      // La porción afecta se descompone con la tasa que ESA venta cobró
+      // (1.330 / 7.000 = 19%), y el impuesto sale por resta: 735 / 1,19 =
+      // 617,64… → neto 618, impuesto 117. Exactamente 735.
+      expect(new Decimal(afecta.subtotal).toString()).toBe('618');
+      expect(new Decimal(afecta.impuestoAplicado).toString()).toBe('117');
+      // La exenta no lleva impuesto: es un estado fiscal, no la ausencia de
+      // una tasa que no se pudo calcular.
+      expect(new Decimal(exenta.subtotal).toString()).toBe('265');
+      expect(new Decimal(exenta.impuestoAplicado).isZero()).toBe(true);
+
+      // La glosa que escribió el operador viaja a las dos líneas de ajuste.
+      expect(afecta.descripcion).toBe('Cliente insatisfecho');
+      expect(exenta.descripcion).toBe('Cliente insatisfecho');
+
+      // Los totales de la cabecera se DERIVAN de las líneas: no hay un solo
+      // número escrito a mano.
+      expect(suma(nc.detalles, 'totalLinea')).toBe(
+        new Decimal(nc.totalFinal).toString(),
+      );
+      expect(new Decimal(nc.totalImpuestos).toString()).toBe('117');
+      expect(new Decimal(nc.totalBruto).toString()).toBe('883');
+      expect(new Decimal(nc.baseVentasTotalFinal).eq(nc.totalFinal)).toBe(true);
+      expect(new Decimal(nc.baseVentasSinImpuestos).toString()).toBe('883');
+    });
+
+    it('devolver mercadería que vale más que la nota se rechaza', async () => {
+      const ventaId = await crearVentaMixta();
+      // 2 unidades valen 2.380 en esa boleta; la nota acredita 1.
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: '1',
+          devoluciones: [{ itemId: itemAfectoId, cantidad: '2' }],
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain('2380');
+    });
+
+    it('la línea de ajuste no dispara movimiento de inventario', async () => {
+      const ventaId = await crearVentaMixta();
+      // 1 unidad devuelta (1.190) + 810 de ajuste = 2.000.
+      const { id } = await emitirNC(ventaId, {
+        monto: '2000',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: '1' }],
+      });
+
+      // La línea de ajuste cuelga de un `servicio`, y `registrarMovimiento`
+      // rechaza con 400 todo lo que no sea producto: sin el corte, esta NC
+      // fallaría ENTERA.
+      const movs: { item_id: string }[] = await ds.query(
+        `SELECT item_id FROM movimientos_inventario
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [id],
+      );
+      expect(movs).toHaveLength(1);
+      expect(movs[0].item_id).toBe(itemAfectoId);
+
+      const nc = await leerNC(id);
+      // Devolución (1.190) + ajuste sobre el remanente que deja ESTA misma nota
+      // —afecto 8.330 − 1.190 = 7.140, exento 3.000— → 570 afecto y 240 exento.
+      expect(nc.detalles).toHaveLength(3);
+      expect(suma(nc.detalles, 'totalLinea')).toBe(
+        new Decimal(nc.totalFinal).toString(),
+      );
+      expect(suma(nc.detalles, 'subtotal')).toBe(
+        new Decimal(nc.totalBruto).toString(),
+      );
+      expect(suma(nc.detalles, 'impuestoAplicado')).toBe(
+        new Decimal(nc.totalImpuestos).toString(),
+      );
+    });
+
+    it('con una NC previa, la proporción sale del remanente y no de la venta original', async () => {
+      const ventaId = await crearVentaMixta();
+
+      // Primera NC: 5 unidades devueltas, 5 × 1.190 = 5.950, sin ajuste. Se
+      // lleva casi todo el balde AFECTO y nada del exento, así que el
+      // remanente queda 2.380 / 3.000 — la proporción se da vuelta.
+      await emitirNC(ventaId, {
+        monto: '5950',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: '5' }],
+      });
+
+      const segunda = await emitirNC(ventaId, { monto: '1000' });
+
+      const nc = await leerNC(segunda.id);
+      const exenta = nc.detalles.find(
+        (l) => l.clasificacionTributaria === 'exento',
+      )!;
+      // 1.000 × 3.000 / 5.380 = 557,62 → 558. Calculado a mano desde el
+      // fixture, no leído del resultado: una referencia definida en función de
+      // lo medido sale por identidad y no prueba nada.
+      //
+      // Repartir sobre la venta ORIGINAL daría 265: ese es el mutante que este
+      // caso mata, y por eso el número va exacto y no como desigualdad.
+      expect(new Decimal(exenta.totalLinea).toString()).toBe('558');
+      expect(suma(nc.detalles, 'totalLinea')).toBe(
+        new Decimal(nc.totalFinal).toString(),
+      );
+    });
+
+    it('lo que esta misma nota devuelve deja de atraer ajuste: ninguna línea sale negativa', async () => {
+      const ventaId = await crearVentaMixta();
+
+      // Se devuelven las 7 unidades afectas (8.330) y se acreditan 9.000: el
+      // ajuste son 670. Si el reparto no descontara lo que ESTA nota ya
+      // devuelve, esos 670 se repartirían sobre 8.330 / 3.000 y acreditarían de
+      // la porción afecta MÁS de lo que la porción tenía — y la nota siguiente
+      // arrancaría con un remanente negativo, o sea una línea de nota de
+      // crédito con importe e impuesto en negativo.
+      const primera = await emitirNC(ventaId, {
+        monto: '9000',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
+      });
+      const nc1 = await leerNC(primera.id);
+      const ajuste1 = nc1.detalles.filter((l) => l.itemId !== itemAfectoId);
+      expect(ajuste1).toHaveLength(1);
+      expect(ajuste1[0].clasificacionTributaria).toBe('exento');
+      expect(new Decimal(ajuste1[0].totalLinea).toString()).toBe('670');
+
+      // Y la segunda, sobre lo que queda: afecto 0, exento 3.000 − 670 = 2.330.
+      const segunda = await emitirNC(ventaId, { monto: '1000' });
+      const nc2 = await leerNC(segunda.id);
+      expect(nc2.detalles).toHaveLength(1);
+      expect(nc2.detalles[0].clasificacionTributaria).toBe('exento');
+      for (const l of [...nc1.detalles, ...nc2.detalles]) {
+        expect(new Decimal(l.totalLinea).isNegative()).toBe(false);
+        expect(new Decimal(l.impuestoAplicado).isNegative()).toBe(false);
+      }
+      expect(new Decimal(nc2.totalImpuestos).isZero()).toBe(true);
+    });
+
+    it('la SERIE de notas no puede acreditar más IVA del que la venta cobró', async () => {
+      const ventaId = await crearVentaMixta();
+
+      // Una nota por monto libre se lleva 735 de la porción afecta.
+      const primera = await emitirNC(ventaId, { monto: '1000' });
+      const nc1 = await leerNC(primera.id);
+      expect(new Decimal(nc1.totalImpuestos).toString()).toBe('117');
+
+      // Y ahora se quieren devolver las 7 unidades, que valen 8.330: más de
+      // los 7.595 que le quedan a la porción afecta. Cada documento cerraría
+      // bien por separado, pero la SERIE acreditaría 1.447 de IVA contra los
+      // 1.330 que la venta cobró. Se rechaza, y el mensaje dice qué queda.
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: '8330',
+          devoluciones: [{ itemId: itemAfectoId, cantidad: CANTIDAD_AFECTA }],
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain('7595');
+
+      // Por lo que SÍ queda, pasa: 6 unidades valen 7.140.
+      const segunda = await emitirNC(ventaId, {
+        monto: '7140',
+        devoluciones: [{ itemId: itemAfectoId, cantidad: '6' }],
+      });
+      const nc2 = await leerNC(segunda.id);
+      const ivaAcreditado = new Decimal(nc1.totalImpuestos).plus(
+        nc2.totalImpuestos,
+      );
+      // 117 + 1.140 = 1.257 ≤ 1.330. La serie nunca pasa el techo.
+      expect(ivaAcreditado.lte('1330')).toBe(true);
+    });
+
+    it('el mismo ítem dos veces en la devolución se rechaza', async () => {
+      const ventaId = await crearVentaMixta();
+      // Cada entrada se validaba contra el mismo disponible, así que esto
+      // pasaba con 7 vendidas — y ahora además duplicaría el valor devuelto,
+      // que es plata en un documento fiscal.
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          monto: '4760',
+          devoluciones: [
+            { itemId: itemAfectoId, cantidad: '2' },
+            { itemId: itemAfectoId, cantidad: '2' },
+          ],
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain('dos veces');
+    });
+
+    // ⚠️ ÚLTIMO del archivo a propósito: borra el ítem de sistema del tenant
+    // por SQL —la API lo rechaza— y deja en su lugar el que crea el
+    // find-or-create, con otro id. Es un estado consistente (uno solo vivo),
+    // pero ya no es el del seed: `reset-db.sh` lo repone.
+    it('sin el ítem "Ajuste", el reembolso no se pierde: se crea solo', async () => {
+      const ventaId = await crearVentaMixta();
+      await ds.query(
+        `UPDATE items SET eliminado_el = NOW()
+          WHERE tenant_id = $1 AND es_ajuste_nota_credito = true
+            AND eliminado_el IS NULL`,
+        [TENANT_DEMO],
+      );
+
+      // El camino del webhook de reembolso no puede fallar por configuración
+      // faltante: la plata ya volvió por el proveedor.
+      const { id } = await emitirNC(ventaId, { monto: '500' });
+
+      const nc = await leerNC(id);
+      expect(nc.detalles.length).toBeGreaterThan(0);
+      const vivos: unknown[] = await ds.query(
+        `SELECT 1 FROM items
+          WHERE tenant_id = $1 AND es_ajuste_nota_credito = true
+            AND eliminado_el IS NULL`,
+        [TENANT_DEMO],
+      );
+      expect(vivos).toHaveLength(1);
     });
   });
 });

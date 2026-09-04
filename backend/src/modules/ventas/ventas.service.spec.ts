@@ -38,6 +38,7 @@ const CAJA_ID = 'caja-uuid-001';
 const MONEDA_OFICIAL_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116';
+const ITEM_AJUSTE_ID = '550e8400-e29b-41d4-a716-446655440381';
 
 const mockCajaActiva = {
   id: CAJA_ID,
@@ -313,6 +314,13 @@ describe('VentasService', () => {
             resolverPersonalizacionCombo: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
             venderComponentesCombo: jest.fn().mockResolvedValue([]),
+            // El ítem de sistema del que cuelga la línea de ajuste de una nota
+            // de crédito. `tipo: 'servicio'` no es decorativo: de ahí sale la
+            // unidad base de esa línea (`resolverUnidadBaseDeItem`).
+            asegurarItemAjuste: jest.fn().mockResolvedValue({
+              id: ITEM_AJUSTE_ID,
+              tipo: 'servicio',
+            }),
           },
         },
         {
@@ -1695,6 +1703,10 @@ describe('VentasService', () => {
         moneda_id_origen: MONEDA_OFICIAL_ID,
         descripcion: 'Smartphone',
         clasificacion_tributaria: 'exento',
+        unidad_codigo_base: 'unidad',
+        // Bruto de la línea: 3 × 100, sin IVA porque es exenta. De acá sale el
+        // valor por unidad con el que la NC valúa la devolución.
+        total_linea: '300.0000',
         modo_inventario: 'cantidad',
       },
       {
@@ -1705,6 +1717,7 @@ describe('VentasService', () => {
         tasa_cambio: '1.000000',
         moneda_id_origen: MONEDA_OFICIAL_ID,
         descripcion: 'Notebook serializado',
+        total_linea: '500.0000',
         modo_inventario: 'serie',
       },
       {
@@ -1715,6 +1728,7 @@ describe('VentasService', () => {
         tasa_cambio: '1.000000',
         moneda_id_origen: MONEDA_OFICIAL_ID,
         descripcion: 'Instalación',
+        total_linea: '50.0000',
         modo_inventario: null,
       },
     ];
@@ -1724,6 +1738,17 @@ describe('VentasService', () => {
     let ventaRows: unknown[];
     let ncPreviasTotal: string;
     let devueltosRows: { item_id: string; devuelto: string }[];
+    /**
+     * La composición del documento original, por porción fiscal: de acá salen
+     * la tasa efectiva de cada porción y el remanente que reparte el ajuste.
+     * Suma el `total_final` de la venta original (11.305), como en la base real.
+     */
+    let composicionRows: {
+      es_nc: boolean;
+      clasificacion: string;
+      total: string;
+      impuesto: string;
+    }[];
     // Tope de la devolución en efectivo: por defecto la venta se cobró entera en
     // efectivo, así que no restringe y los tests preexistentes no cambian.
     let efectivoCobrado: string;
@@ -1736,6 +1761,20 @@ describe('VentasService', () => {
       ventaRows = [ventaOriginalRow];
       ncPreviasTotal = '0';
       devueltosRows = [];
+      composicionRows = [
+        {
+          es_nc: false,
+          clasificacion: 'afecto',
+          total: '11005.0000',
+          impuesto: '1757.1000',
+        },
+        {
+          es_nc: false,
+          clasificacion: 'exento',
+          total: '300.0000',
+          impuesto: '0.0000',
+        },
+      ];
       efectivoCobrado = '1100.0000';
       efectivoDevuelto = '0';
       costosCongelados = [{ item_id: ITEM_ID, costo_unitario: '50.0000' }];
@@ -1743,6 +1782,11 @@ describe('VentasService', () => {
         if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
         if (sql.includes('SUM(total_final)'))
           return Promise.resolve([{ total: ncPreviasTotal }]);
+        // Antes que el genérico: la consulta de composición TAMBIÉN lee
+        // `venta_detalles`, y devolverle las filas de devolución la dejaría sin
+        // `clasificacion` ni `total`.
+        if (sql.includes('AS es_nc')) return Promise.resolve(composicionRows);
+        if (sql.includes('FROM ventas_impuestos')) return Promise.resolve([]);
         if (sql.includes('FROM venta_detalles'))
           return Promise.resolve(detallesRows);
         if (sql.includes('costo_unitario'))
@@ -1802,7 +1846,7 @@ describe('VentasService', () => {
       expect(ncManager.save).not.toHaveBeenCalled();
     });
 
-    it('NC sin líneas: totales copiados del monto, estado pagada, referencia y caja/canal/moneda de la original; sin detalles ni movimientos', async () => {
+    it('NC por monto libre: sin devoluciones igual tiene líneas, una por porción fiscal del remanente', async () => {
       const res = await service.crearNotaCredito(baseParams);
       expect(res.id).toBeDefined();
       expect(res.totalFinal).toBe('1100.0000');
@@ -1816,27 +1860,71 @@ describe('VentasService', () => {
           cajaId: CAJA_VIRTUAL_ID,
           monedaId: MONEDA_OFICIAL_ID,
           canal: 'online',
-          totalBruto: '1100.0000',
+          // Los totales se DERIVAN de las líneas: `total_bruto` es el neto
+          // —igual que en una venta normal— y ya no una copia del monto.
+          // 1.100 repartido 11.005 / 300 → 1.070,8094 afecto y 29,1906 exento;
+          // la porción afecta se descompone al 19% que esa venta cobró.
+          totalBruto: '929.0305',
+          totalImpuestos: '170.9695',
           totalFinal: '1100.0000',
           totalDescuentos: '0',
           totalRecargos: '0',
-          totalImpuestos: '0',
+          baseVentasTotalFinal: '1100.0000',
+          baseVentasSinImpuestos: '929.0305',
           comentario: 'NC por reembolso orden O-1',
         }),
       );
-      // una sola persistencia: la cabecera (sin líneas)
-      expect(ncManager.save).toHaveBeenCalledTimes(1);
+
+      // Dos líneas de ajuste, una por porción, colgadas del ítem de sistema y
+      // con la glosa del operador. Suman el monto de la nota.
+      const lineas = ncManager.save.mock.calls[1][1] as {
+        itemId: string;
+        clasificacionTributaria: string;
+        descripcion: string;
+        totalLinea: string;
+        subtotal: string;
+        impuestoAplicado: string;
+      }[];
+      expect(lineas).toHaveLength(2);
+      expect(lineas.every((l) => l.itemId === ITEM_AJUSTE_ID)).toBe(true);
+      expect(
+        lineas.every((l) => l.descripcion === 'NC por reembolso orden O-1'),
+      ).toBe(true);
+      expect(lineas.map((l) => l.clasificacionTributaria)).toEqual([
+        'afecto',
+        'exento',
+      ]);
+      expect(
+        lineas
+          .reduce((a, l) => a.plus(l.totalLinea), new Decimal(0))
+          .toFixed(4),
+      ).toBe('1100.0000');
+      // Y cada línea cierra sola: neto + impuesto = su bruto.
+      for (const l of lineas)
+        expect(
+          new Decimal(l.subtotal).plus(l.impuestoAplicado).toFixed(4),
+        ).toBe(new Decimal(l.totalLinea).toFixed(4));
 
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
-    it('NC con devoluciones: crea la línea copiada y registra entrada/devolucion ligada a la NC', async () => {
+    it('NC con devoluciones: la línea se valúa a lo que costó en esa boleta y el resto va a ajuste', async () => {
       const res = await service.crearNotaCredito({
         ...baseParams,
         devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
       });
-      expect(ncManager.save).toHaveBeenCalledWith(
-        expect.anything(),
+      const lineas = ncManager.save.mock.calls[1][1] as {
+        itemId: string;
+        cantidad: string;
+        precioUnitario: string;
+        monedaIdOrigen: string;
+        totalLinea: string;
+        clasificacionTributaria: string;
+      }[];
+      // 300 de bruto entre 3 unidades vendidas → 100 por unidad. Con descuento
+      // de línea, ese número YA no es el precio de lista: por eso sale de
+      // `total_linea` y no de `precio_unitario`.
+      expect(lineas[0]).toEqual(
         expect.objectContaining({
           itemId: ITEM_ID,
           cantidad: '2',
@@ -1846,6 +1934,12 @@ describe('VentasService', () => {
           clasificacionTributaria: 'exento',
         }),
       );
+      // Los 900 restantes salen en líneas de ajuste, y el documento cierra.
+      expect(
+        lineas
+          .reduce((a, l) => a.plus(l.totalLinea), new Decimal(0))
+          .toFixed(4),
+      ).toBe('1100.0000');
 
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         ncManager,
@@ -1856,6 +1950,48 @@ describe('VentasService', () => {
           motivo: 'devolucion',
           cantidad: '2',
           usuarioId: USUARIO_ID,
+          ventaId: res.id,
+        }),
+      );
+      // Y SOLO por la devolución: la línea de ajuste cuelga de un servicio, que
+      // `registrarMovimiento` rechaza con 400.
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledTimes(1);
+    });
+
+    it('por el webhook, mercadería que vale más que el monto NO pierde el evento: nota por el monto y stock devuelto', async () => {
+      // El rechazo con 400 es del camino MANUAL, donde el operador está mirando.
+      // Acá (decisión P3) la plata ya volvió por el proveedor y el hook corre
+      // después del commit: un throw se traga como warning y se perderían la
+      // nota Y el movimiento de stock.
+      //
+      // 3 unidades valen 300 en esa boleta y la nota acredita 200.
+      const res = await service.crearNotaCredito({
+        ...baseParams,
+        monto: '200.0000',
+        devoluciones: [{ itemId: ITEM_ID, cantidad: '3' }],
+      });
+      expect(res.id).toBeDefined();
+
+      const lineas = ncManager.save.mock.calls[1][1] as {
+        itemId: string;
+        totalLinea: string;
+      }[];
+      // La devolución queda FUERA del documento —incluirla rompería
+      // `Σ líneas = total_final`— y el documento sale entero de ajuste.
+      expect(lineas.every((l) => l.itemId === ITEM_AJUSTE_ID)).toBe(true);
+      expect(
+        lineas
+          .reduce((a, l) => a.plus(l.totalLinea), new Decimal(0))
+          .toFixed(4),
+      ).toBe('200.0000');
+
+      // Pero el stock vuelve igual: eso no se pierde.
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        ncManager,
+        expect.objectContaining({
+          itemId: ITEM_ID,
+          motivo: 'devolucion',
+          cantidad: '3',
           ventaId: res.id,
         }),
       );
