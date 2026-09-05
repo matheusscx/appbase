@@ -17,6 +17,146 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El cobro que el garzón confirmaba con su PIN y se perdía en el camino (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"`cerrarCuentaConPin` lee `selectedMesa`
+después de tres `await`"* — la entrada que abrió, el mismo día, el cierre de la cuarta puerta
+(la sección de acá abajo). Es la **quinta** instancia de la forma *precondición antes del
+`await`, estado reactivo releído después*, y la de mayor consecuencia: acá lo que se pierde es
+un cobro.
+
+### La entrada nombraba tres lecturas y eran cuatro cosas, una de ellas mucho peor
+
+La entrada apuntaba a `cerrarCuentaConPin` y a sus tres lecturas vivas. Al abrir el frente
+apareció que **el problema empieza un escalón antes**, en `confirmarCobro`:
+
+```
+cobroOpen = false → solicitarPin(...) → await flushPendientes() → cerrarCuentaConPin(...)
+```
+
+`cerrarCuentaConPin` recién ahí hacía `if (!activeCuenta.value) return` y congelaba
+`cuentaCerrada`. O sea que **la foto se sacaba después de la espera**, y en ese tramo no hay
+ningún modal tapando el drawer: el de cobro ya cerró y el de PIN cierra al emitir `confirm`
+(en modo tablet no hay modal de PIN siquiera). Las cuatro fallas, medidas:
+
+| Qué hace el garzón durante el flush | Qué pasaba |
+|---|---|
+| vuelve al listado | el guard corta en seco: **ni venta, ni toast, ni nada**, con el PIN ya tecleado y la cuenta abierta |
+| se mete en otra cuenta | `POST /cuentas/:id/cerrar` sale con el id de **esa otra**: se cobra la que no era |
+| ídem | `asegurarVigente()` calcula el carrito **vivo**, así que la boleta se armaba con las líneas de la cobrada y **los totales de la otra** — y con esos totales se proyectaba la caja |
+| se cambia de mesa | `patchMesaOcupacion(selectedMesa.value.id, -1)` le resta la cuenta a la mesa equivocada: **dos** mesas mal pintadas hasta que alguien recargue, porque `cargarSalones()` solo corre en el `onMounted` |
+
+📌 **Y por eso fue un frente y no dos.** Arreglar solo lo primero —que el cobro salga— sin lo
+tercero habría dejado un estado que hoy no existe: hoy, irse a otra cuenta hace que **no pase
+nada**; con el cobro arreglado y el cálculo sin condicionar, la venta se genera **con los
+totales de otra cuenta**. El estado intermedio es peor que el inicial, o sea que era una sola
+tarea.
+
+### Qué se hizo
+
+La cuenta y la mesa se congelan en `confirmarCobro` —antes del PIN y antes del flush— y viajan
+como **argumentos** a `cerrarCuentaConPin` en vez de leerse adentro. El reintento del `catch`
+reusa la misma foto, así que tampoco puede cerrar otra cuenta. Después, una decisión por
+sentencia, según el corolario de
+[`../features/salones-mesas.md`](../features/salones-mesas.md):
+
+- **congelado** (lo que la acción usa): el id de la cuenta que se cierra, y la mesa cuyo
+  contador de ocupación baja — es la mesa que se liberó, no la que el garzón esté mirando;
+- **condicionado** (lo que pinta): `volverACuentas()` solo si sigue parado en la cuenta que se
+  cobró, igual que en cancelar — si abrió otra, sacarlo sería una expulsión;
+- **condicionado** (lo que calcula, categoría nueva): `asegurarVigente()` solo si sigue en esa
+  cuenta. Si no, `resultadoCerrado` queda en `null` y se cae al camino que **ya existía**: la
+  venta se genera igual y el aviso dice *"Venta generada, pero no se pudo generar la boleta"*.
+  Esa venta se queda sin boleta —no hay reimpresión, ver abajo—, y aun así es el platillo
+  liviano: hoy el mismo gesto la deja **sin generar**;
+- **congelado también, y esto lo agregó la revisión**: `propinaMonto` y `propinaSugerida`. El
+  primer intento las dejó vivas argumentando que el modal de cobro ya las había fijado, y la
+  revisión lo **midió** al revés: en la misma ventana el botón *Cerrar y cobrar* sigue
+  habilitado —`submitting` recién se prende adentro— y **un solo tap** reabre el modal, cuyo
+  `watch(open)` reescribe `propinaMonto`. Medido: cobro confirmado con propina **0** y
+  `POST .../cerrar` saliendo con **500**, contra unos `pagos` que sí estaban congelados. Es
+  plata, y el backend la persiste en `venta_propina`. `propinaPorcentaje` y `propinaHabilitada`
+  quedan vivas: solo se escriben en el `onMounted`;
+- **releído a propósito, y esto también salió de la revisión**: la cuenta que arma el **ticket**
+  no es la foto. El flush **reemplaza el objeto** de la cuenta, `itemsParaTicket` cruza líneas y
+  cálculo **por índice** y prefiere la `cantidadPresentacion` de la línea, así que la foto vieja
+  contra el cálculo fresco imprime una cantidad y cobra otra —basta un `PATCH` rebotado por
+  stock y su rollback—. Se relee junto al cálculo, después del `await` de `asegurarVigente()`,
+  que también espera. El id que se **cierra** sigue saliendo de la foto: son dos cosas distintas
+  que se llamaban igual;
+- **vivo a propósito**: el filtro de `cuentas` (sacar un id que no está es un no-op) y el
+  refresco de `selectedMesa` que hace `patchMesaOcupacion` adentro.
+
+⚠️ **Lo que NO se hizo, y el porqué corregido.** La primera versión de esta sección justificaba
+resignar la boleta con *"papel se reimprime"*. **Es falso, y este mismo archivo lo tenía
+medido**: ningún camino reimprime una venta pasada, el ticket siempre se arma contra estado
+vivo. O sea que esa venta se queda sin documento para el cliente, definitivamente. Se acepta
+igual, por dos razones que sí se sostienen: el otro platillo es peor —hoy ese mismo gesto deja
+la venta **sin generar**— y es el camino que el cálculo fallado **ya tenía**, con su aviso. La
+salida buena —recalcular la cuenta cobrada, por fuera de la maquinaria de vigencia de
+`useResultadoCalculado`— quedó en [`pendientes.md` § 2](pendientes.md), junto con el residuo que
+la revisión encontró en ese mismo camino: sin cálculo, `targetCobro` cae en `bruto` y la
+proyección local de caja se infla por el vuelto.
+
+### Lo que el barrido encontró, y por eso esto NO dice "la última"
+
+Antes de escribir el cierre se barrió el archivo entero buscando la forma —toda lectura de
+`activeCuenta`/`selectedMesa` posterior a un `await`—, en vez de dar por cerrada la familia.
+Apareció una **sexta**, con la forma dada vuelta: `syncCuenta` **escribe**
+`activeCuenta.value = cuenta` sin preguntar, desde tres llamadores, así que agregar un producto
+y volver al listado teletransporta al garzón de vuelta al detalle.
+
+⚠️ **Y mi barrido tampoco alcanzó**: la revisión encontró **dos más** de la misma forma —
+`abrirCuentaConPin`, que después de su `await` hace `cuentas.value.push()` y abre la cuenta sin
+condicionar (cambiar de mesa ahí inyecta una cuenta de la mesa A en el listado de la mesa B), y
+`cargarCuentas`, que asigna la respuesta sin chequear que la mesa siga siendo la pedida (dos
+taps rápidos y gana la última en llegar). Las tres quedaron en
+[`pendientes.md` § 2](pendientes.md). Dos secciones más abajo está anotado lo que cuesta
+declarar cerrada una familia sin barrerla: en ese cierre la frase *"la cuarta y última"* bloqueó
+la revisión dos veces — y este barrido, hecho a propósito para no repetirlo, **igual salió
+corto**. La conclusión no es "barrer mejor": es **no escribir el superlativo**.
+
+### Qué lo fija
+
+Cuatro tests en `salones/index.nuxt.spec.ts` (71 en el archivo, 1071 en el frontend) y una rama
+nueva del mock: `POST /cuentas/:id/cerrar`, que guarda el id y el body con el que salió. El
+cobro se dispara emitiendo `confirmar` en `VentasCobroModal` —que está siempre montado— para no
+meter la caja y los métodos en tests que no hablan de eso.
+
+**Los ocho mutantes se corrieron sobre el spec completo (71 tests), no sobre el subconjunto
+filtrado por nombre**, que fue el error de la tabla de la sección de abajo.
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **N1** — la foto sacada después del flush (el código de antes) | el estado previo al fix | ✝ mata 4 |
+| **N2** — `patchMesaOcupacion` con la mesa viva | congela cuenta, relee mesa | ✝ mata 1 |
+| **N3** — `asegurarVigente()` sin condicionar | congela todo, calcula vivo | ✝ mata 1 |
+| **N4** — `volverACuentas()` incondicional | congela todo, pinta sin preguntar | ✝ mata 1 |
+| **N5** — `confirmarCobro` no entra nunca | control | ✝ mata 4 |
+| **N6** — `meta.mesa` con la mesa viva | congela todo menos el nombre del ticket | **sobrevive** — declarado abajo |
+| **N7** — el ticket armado con la foto | congela de más, justo donde no va | **sobrevive** — mismo motivo que N6 |
+| **N8** — las propinas leídas vivas | el primer intento de este arreglo | ✝ mata 1 |
+
+⚠️ **N6 y N7 sobreviven por el mismo punto ciego, y está medido:** `imprimirBoleta()` hace
+`const impresora = await obtenerImpresoraBoleta(); if (!impresora) return` **antes** de
+`buildBoletaTicket`, y el mock no tiene impresora de boleta, así que ni `meta.mesa` ni los
+`items` se leen nunca. Llegar hasta ahí exige el tramo de QZ Tray, que importa el cliente real
+y le pide un `websocket.connect()` a localhost. Las dos variables sí tienen quien las mate en
+la sentencia que **escribe** o que **decide**: la mesa la mata N2, y la lectura del cálculo la
+mata N3.
+
+📌 **N8 es la fila que no habría existido sin la revisión**, y es la más cara de las ocho: el
+mutante *es* lo que este arreglo había escrito primero, con un comentario declarando que era
+seguro. Y ese comentario **sobrevivió a su propia refutación**: la corrección congeló las
+propinas y arregló los tres documentos, pero el docblock pegado a la firma de la función siguió
+diciendo que se leían vivas —una prosa que no describe un hecho sino que da una **instrucción**,
+justo el permiso para revertir a N8—. Lo levantó la segunda pasada. Es la misma lección que la
+frase *"la cuarta y última"* del cierre de abajo, en su forma más cara: **una afirmación
+falsable se corrige con un grep de la frase en el repo entero, no en el archivo donde la
+revisión la señaló**.
+
+---
+
 ## La comanda que no salía a cocina y le echaba la culpa a la impresora (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"`enviarComanda` relee la cuenta después de su

@@ -573,7 +573,7 @@ y ahí la cuenta sigue viva.
 | El garzón… | Qué pasa con lo pendiente |
 |---|---|
 | toca *Enviar a cocina* | se manda y se **espera**, antes de imprimir la comanda |
-| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor. ⚠️ El flush lo maneja bien, pero **lo que esta fila lee después de sus tres `await` no**: ver `cerrarCuentaConPin` en [`../agent/pendientes.md`](../agent/pendientes.md) § 2 |
+| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor |
 | toca *Cuentas* o cambia de mesa | se manda **sin esperar**: volver al listado es instantáneo |
 | **cierra el drawer** de la mesa (ESC, backdrop) | igual que *Cuentas*: se manda y la cuenta se suelta |
 | **cancela la cuenta** | se manda y se **espera**, y recién entonces se cancela |
@@ -623,7 +623,18 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   peor de los cuatro, porque el garzón se va tranquilo—; parado en **otra** cuenta no había
   `TypeError` y el claim salía con el id de esa otra, que le avanza la `cantidad_enviada` sin
   que nadie haya pedido su comida. Por eso se congela la cuenta entera y no solo el id: el
-  `numero` y el garzón se imprimen en el ticket.
+  `numero` y el garzón se imprimen en el ticket. *Cerrar y cobrar* hace lo mismo
+  (2026-09-05, la quinta; **no la última** —`syncCuenta` teletransporta de vuelta a la cuenta
+  desde tres llamadores, y `imprimirPrecuenta` sigue con lo suyo: los dos en
+  [`../agent/pendientes.md`](../agent/pendientes.md) § 2): la cuenta y la mesa se
+  congelan en `confirmarCobro`, **antes del PIN y antes del flush**, y viajan como argumentos
+  a `cerrarCuentaConPin` en vez de leerse adentro. Ahí el agujero era el más caro de los
+  cinco: releída después del flush, la cuenta podía ser `null` —y entonces el guard cortaba
+  en seco, **sin venta y sin aviso, con el PIN ya tecleado**— o ser **otra**, y entonces se
+  cobraba la que no era. La mesa importa por lo mismo y por una razón propia: es la que
+  pierde una cuenta abierta, así que su contador va con la mesa congelada, y leerlo vivo
+  dejaba **dos** mesas mal pintadas —una ocupada de más, la otra de menos— hasta que alguien
+  recargara, porque `cargarSalones()` solo corre en el `onMounted`.
 - **Lo que la acción PINTA se condiciona a dónde está parado el garzón, y la pregunta no es la
   misma en las dos.** Cancelar pregunta *"¿sigue en la cuenta que murió? entonces sacalo"*.
   Fusionar pregunta *"¿está en el listado, o en una de las que la fusión canceló? entonces
@@ -645,9 +656,37 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   Medido: destino 2 con 2 despachadas + origen 3 con 0 = 5 con 2 despachadas, y tipear 3 pasa
   comiéndose 2 unidades.
 
-⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en la
-cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
-todo", es "decidir cada lectura".
+📌 **Y una tercera cosa que decidir, que apareció en la quinta puerta: lo que la acción
+CALCULA.** `asegurarVigente()` no devuelve el cálculo de una cuenta, devuelve el del carrito
+**vivo**. De ahí salen los totales de la boleta y la proyección local de la caja, así que
+llamarlo después del flush con el garzón ya metido en otra cuenta armaba la boleta con las
+líneas de la cobrada y los totales de la otra. Va **condicionado a seguir parado en la cuenta
+que se cobra**.
+
+⚠️ **Y de ahí sale un corolario del corolario: lo que se congela y lo que se calcula tienen
+que ser del MISMO instante.** Las líneas del ticket y su cálculo se cruzan **por índice**, y
+el flush que corre antes **reemplaza el objeto de la cuenta**, así que armar el ticket con la
+foto de antes del flush y el cálculo de después imprime una cantidad y cobra otra —basta con
+que un `PATCH` rebote por stock y haga rollback—. Por eso la cuenta del **ticket** se relee
+junto al cálculo, aunque el id que se cierra siga saliendo de la foto: son dos cosas distintas
+que se llamaban igual. Lo levantó la revisión sobre el primer intento de este arreglo.
+
+⚠️ **Sin cálculo, esa venta se queda sin boleta y no hay dónde reimprimirla** (ningún camino
+reimprime una venta pasada: el ticket siempre se arma contra estado vivo). Se acepta porque el
+otro platillo es peor —hoy el mismo gesto deja la venta **sin generar**— y porque es el camino
+que el cálculo fallado ya tenía, con su aviso. La salida buena —recalcular la cuenta cobrada—
+pide llamar al motor por fuera de la maquinaria de vigencia de `useResultadoCalculado`: frente
+propio, anotado con el residuo que arrastra (sin cálculo, la proyección local de caja se infla
+por el vuelto).
+
+⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en
+la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
+todo", es "decidir cada lectura". Y decidirla **midiendo**: el primer intento de la quinta
+puerta dejó vivas las refs de propina argumentando que el modal ya las había fijado, y la
+revisión lo refutó tapeando *Cerrar y cobrar* durante la espera —el botón no está
+deshabilitado ahí— : el modal se reabre, su `watch(open)` reescribe `propinaMonto`, y el cobro
+salía con una propina que el garzón nunca confirmó. Van en la foto. `propinaPorcentaje` y
+`propinaHabilitada` no, que solo se escriben al montar.
 
 **Decisión del owner (2026-09-02):** salir guarda. Hasta ese día salir descartaba **en
 silencio** —ni request ni aviso— y al volver a entrar el input mostraba la cantidad que nunca

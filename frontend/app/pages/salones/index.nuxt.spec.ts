@@ -141,6 +141,16 @@ let impresorasComanda: unknown[] = []
  */
 let reclamosDeComanda: string[] = []
 /**
+ * Cada `POST /cuentas/:id/cerrar`, con el id que viajó en la URL.
+ *
+ * Es la prueba de que el cobro que el garzón ya confirmó **con su PIN** salió, y
+ * de qué cuenta cobró. Igual que con la comanda, el agujero no es solo "no
+ * salió": es "cerró la otra".
+ */
+let cierresDeCuenta: string[] = []
+/** El body de cada uno: con qué propina se cerró. Ver el test de la propina. */
+let bodiesDeCierre: Record<string, unknown>[] = []
+/**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
  * Sin esto, servidor y pantalla son EL MISMO objeto: el `GET` devuelve
@@ -462,6 +472,13 @@ mockNuxtImport('useApiFetch', () => {
         estado: (body as { firma?: boolean }).firma ? 'firmada' : 'rechazada',
       })
     }
+    const cerrarMatch = ruta.match(/\/cuentas\/([^/]+)\/cerrar$/)
+    if (cerrarMatch) {
+      cierresDeCuenta.push(cerrarMatch[1] ?? '')
+      bodiesDeCierre.push(opts?.body ?? {})
+      // La pantalla descarta la respuesta; lo que importa es que el POST salió.
+      return Promise.resolve({ cuenta: null, ventaId: 'venta-1' })
+    }
     if (ruta.endsWith('/impresoras')) {
       // La URL **entera**, como en `/items`: `listar()` manda el rol por query
       // y `obtenerImpresoraBoleta()` NO vuelve a filtrarlo del lado del
@@ -529,6 +546,8 @@ function reiniciarMock() {
   cuentasFusionadas = []
   impresorasComanda = []
   reclamosDeComanda = []
+  cierresDeCuenta = []
+  bodiesDeCierre = []
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -3185,5 +3204,258 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(reclamosDeComanda).toEqual(['cuenta-9'])
     expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  /**
+   * Los seis dígitos del PIN **sin** el paso de abrir el teclado: acá el modal lo
+   * abre `solicitarPin` desde el cobro, no un botón *Nueva cuenta*.
+   */
+  async function tipearPin(quien = 'Ana') {
+    const garzon = botonEn(tecladoPin(), quien)
+    expect(garzon).toBeTruthy()
+    garzon!.click()
+    await esperar(10)
+    for (let i = 0; i < 6; i++) {
+      botonEn(tecladoPin(), '1')!.click()
+      await esperar(1)
+    }
+    await esperar(20)
+  }
+
+  /**
+   * El cobro se dispara emitiendo `confirmar` en `VentasCobroModal`, que está
+   * siempre montado (`v-model:open`). Se saltea la UI del modal a propósito: lo
+   * que estos tests ejercitan es lo que pasa **después** del PIN, y montar el
+   * cobro entero metería la caja, los métodos y la propina en un test que no
+   * habla de nada de eso.
+   */
+  function confirmarElCobro(wrapper: Awaited<ReturnType<typeof montar>>) {
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit(
+      'confirmar',
+      [{ metodoPagoId: 'mp-1', monto: '5000' }],
+      '0',
+    )
+  }
+
+  it('volver al listado durante la espera no se come el cobro que el garzón ya confirmó', async () => {
+    /**
+     * La quinta puerta de la forma, y la mitad más cara: `confirmarCobro` valida
+     * la cuenta, abre el PIN y el callback hace `await flushPendientes()` — pero
+     * `cerrarCuentaConPin` recién ahí leía `activeCuenta` para congelarla, o sea
+     * **después** de la espera. Volviendo al listado en ese tramo, su
+     * `if (!activeCuenta.value) return` cortaba en seco: el garzón cobró, tecleó
+     * su PIN, y **no pasaba nada** — sin venta, sin toast, con la cuenta abierta.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    confirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+
+    // El garzón vuelve al listado con el flush todavía en vuelo.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(cierresDeCuenta).toEqual(['cuenta-9'])
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+    expect(toasts.some(t => t.title === 'Cuenta cerrada — venta generada')).toBe(true)
+  })
+
+  it('meterse en otra cuenta durante la espera no cobra esa otra ni le pide su cálculo', async () => {
+    /**
+     * Dos fallas en una escena, y la segunda es la que separa **congelar** de
+     * congelar tarde:
+     *
+     * 1. `cerrarCuentaConPin` congelaba `activeCuenta` recién **después** del
+     *    flush, así que el `POST /cuentas/:id/cerrar` salía con el id de la
+     *    cuenta en la que el garzón se acababa de meter. Cobraba la que no era.
+     * 2. `asegurarVigente()` calcula el carrito **vivo**. De ahí salen los
+     *    totales de la boleta y la proyección local de la caja, así que la
+     *    boleta se armaba con las líneas de la cuenta cobrada y los totales de
+     *    la otra.
+     *
+     * Con la cuenta congelada y el cálculo condicionado a seguir parado en ella,
+     * lo segundo se degrada al camino que ya existía para cuando no hay cálculo:
+     * la venta se genera igual y el aviso lo dice — y esa venta se queda sin
+     * boleta, porque acá no hay reimpresión. Se acepta igual: hoy ese mismo
+     * gesto deja la venta **sin generar**, que es peor, y es el camino que el
+     * cálculo fallado ya tenía. Ver `docs/agent/pendientes.md` § 2.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    confirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
+    expect(tarjetas?.length).toBe(2)
+    tarjetas![1]!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(cierresDeCuenta).toEqual(['cuenta-9'])
+    expect(toasts.some(t => t.title === 'Venta generada, pero no se pudo generar la boleta')).toBe(true)
+    // Y no se lo expulsa de donde está: el `volverACuentas()` del camino feliz
+    // se condiciona a seguir parado en la cuenta que se cobró. El botón
+    // *Cuentas* solo existe en el detalle, así que su presencia dice en qué
+    // vista quedó.
+    expect(botonEn(drawerMesa(), 'Cuentas')).toBeTruthy()
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+  })
+
+  it('cambiar de mesa durante la espera no le descuenta la ocupación a la otra mesa', async () => {
+    /**
+     * `patchMesaOcupacion(selectedMesa.value.id, -1)` leído vivo le restaba la
+     * cuenta a la mesa donde el garzón hubiera ido a parar. Y no se cura solo:
+     * `cargarSalones()` corre únicamente en el `onMounted`, así que las dos mesas
+     * quedaban mal pintadas —una ocupada de más, la otra de menos— el resto del
+     * turno.
+     *
+     * Las dos mesas arrancan con **una** cuenta abierta a propósito: con la
+     * segunda en cero, `Math.max(0, 0 - 1)` la deja en cero y el descuento
+     * equivocado sería invisible.
+     */
+    salonesMock = [{
+      id: 'salon-1',
+      nombre: 'Principal',
+      mesas: [
+        { ...mesa(), cuentasAbiertas: 1, ocupada: true },
+        { ...mesa(), id: 'mesa-2', nombre: 'Mesa 2', cuentasAbiertas: 1, ocupada: true },
+      ],
+    }]
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    confirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+
+    // Se va a la otra mesa con el flush en vuelo.
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', {
+      ...mesa(), id: 'mesa-2', nombre: 'Mesa 2', cuentasAbiertas: 1, ocupada: true,
+    })
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(cierresDeCuenta).toEqual(['cuenta-9'])
+    const mesas = wrapper.findComponent({ name: 'SalonesSalonPlano' }).props('mesas') as {
+      id: string, cuentasAbiertas: number, ocupada: boolean
+    }[]
+    expect(mesas.find(m => m.id === MESA_ID)).toMatchObject({ cuentasAbiertas: 0, ocupada: false })
+    expect(mesas.find(m => m.id === 'mesa-2')).toMatchObject({ cuentasAbiertas: 1, ocupada: true })
+  })
+
+  it('reabrir el cobro durante la espera no cambia la propina con la que se cierra', async () => {
+    /**
+     * **Lo midió la revisión, contra un comentario mío que decía lo contrario.**
+     * El primer arreglo de esta puerta congelaba la cuenta y la mesa y dejaba las
+     * propinas vivas, con el argumento de que el modal de cobro ya las había
+     * fijado. Pero en esa misma ventana el botón *Cerrar y cobrar* sigue
+     * habilitado —`submitting` recién se prende adentro de `cerrarCuentaConPin`—
+     * y **un solo tap** reabre el modal, cuyo `watch(open)` reescribe
+     * `propinaMonto` con la sugerencia.
+     *
+     * O sea: el garzón confirma sin propina y el `POST .../cerrar` sale con la
+     * sugerida. Es plata, y el backend la persiste en `venta_propina` contra unos
+     * `pagos` que sí estaban congelados.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    // Se confirma SIN propina: `propinaMonto` arranca en '0'.
+    confirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+
+    // El tap de más, con el flush todavía en vuelo.
+    const botonCobrar = botonEn(drawerMesa(), 'Cerrar y cobrar')
+    expect(botonCobrar?.disabled).toBe(false)
+    botonCobrar!.click()
+    await esperar(50)
+    // Y el modal efectivamente se reabrió: sin esto el test pasaría por no haber
+    // reproducido nada.
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(true)
+
+    soltar()
+    await esperar(300)
+
+    expect(cierresDeCuenta).toEqual(['cuenta-9'])
+    expect(bodiesDeCierre).toHaveLength(1)
+    expect(bodiesDeCierre[0]).toMatchObject({ propinaMonto: '0' })
   })
 })

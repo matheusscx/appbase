@@ -1838,32 +1838,107 @@ async function confirmarCancelar() {
 
 function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   if (!activeCuenta.value) return
+  // **Congeladas acá, antes del PIN y antes del flush**, y por eso viajan como
+  // argumentos en vez de leerse adentro. `cerrarCuentaConPin` corre después de
+  // `await flushPendientes()`, o sea con la pantalla clickeable: el modal de
+  // cobro ya cerró (dos líneas más abajo) y el de PIN cierra al emitir
+  // `confirm`, así que no queda ningún modal tapando el drawer — y en modo
+  // tablet no hay modal de PIN siquiera. Leyéndolas adentro, el garzón que
+  // volvía al listado en ese tramo se comía el cobro entero: el guard cortaba
+  // en seco y no había ni venta ni aviso, con el PIN ya tecleado.
+  //
+  // ⚠️ **Las propinas van en la foto, y el primer intento las dejó vivas** con el
+  // argumento de que el modal ya las había fijado. Lo refutó la revisión
+  // MIDIÉNDOLO: en esa misma ventana el botón *Cerrar y cobrar* sigue habilitado
+  // —`submitting` recién se prende adentro—, y un solo tap reabre el modal, cuyo
+  // `watch(open)` **reescribe** `propinaMonto`. Medido: cobro confirmado con
+  // propina 0 y `POST .../cerrar` saliendo con 500, contra unos `pagos` que sí
+  // estaban congelados. `propinaPorcentaje` y `propinaHabilitada` NO van: solo
+  // se escriben en el `onMounted`.
+  const cobro = {
+    cuenta: activeCuenta.value,
+    mesa: selectedMesa.value,
+    pagos,
+    vuelto,
+    propinaMonto: propinaMonto.value || '0',
+    propinaSugerida: propinaSugerida.value || propinaMonto.value || '0',
+  }
   // El cobro recolecta los pagos; el PIN identifica al garzón que cierra.
   cobroOpen.value = false
   solicitarPin('PIN del garzón para cerrar la cuenta', (garzonId, pin) => {
     void (async () => {
       await flushPendientes()
-      await cerrarCuentaConPin(pagos, garzonId, pin, vuelto)
+      await cerrarCuentaConPin(cobro, garzonId, pin)
     })()
   })
 }
 
+/**
+ * ⚠️ Todo lo que hay en `cobro` llega **por argumento**: es la foto de cuando el
+ * garzón confirmó, no lo que haya en pantalla cuando esto corre. Ver
+ * `confirmarCobro`, que la saca. El reintento del `catch` reusa esa misma foto,
+ * así que tampoco puede cerrar otra cuenta ni cobrar otra propina.
+ *
+ * Lo que se lee de un `ref` acá adentro es una decisión aparte, tomada de a una
+ * y escrita donde se toma. Las que quedan vivas —`propinaPorcentaje`,
+ * `propinaHabilitada`, `emisor`, `metodos`, `tiposDocumento`— se cargan las
+ * cinco en el `Promise.all` del arranque y nada de esta ventana las mueve.
+ */
 async function cerrarCuentaConPin(
-  pagos: PagoInput[],
+  cobro: {
+    cuenta: CuentaDetalle
+    mesa: MesaResumen | null
+    pagos: PagoInput[]
+    vuelto: string
+    propinaMonto: string
+    propinaSugerida: string
+  },
   garzonId: string,
   pin: string,
-  vuelto: string,
 ) {
-  if (!activeCuenta.value) return
   submitting.value = true
-  const cuentaCerrada = activeCuenta.value
-  const tipMonto = propinaMonto.value || '0'
-  const tipSugerida = propinaSugerida.value || tipMonto
+  // Todo lo que viene adentro de `cobro` es la foto; lo que se lee de un `ref`
+  // acá abajo es una decisión aparte, tomada de a una.
+  const { cuenta: cuentaCerrada, mesa: mesaCerrada, pagos, vuelto } = cobro
+  const tipMonto = cobro.propinaMonto
+  const tipSugerida = cobro.propinaSugerida
   try {
     // La boleta y la proyección local de la caja salen de acá: se espera el
     // cálculo de ESTA cuenta, no el que quedó de la mutación anterior. Dentro
     // del `try` para que un fallo no deje el drawer trabado en `submitting`.
-    const resultadoCerrado = await asegurarVigente()
+    //
+    // ⚠️ **Condicionado a seguir parado en la cuenta que se cobra**, porque
+    // `asegurarVigente()` calcula el carrito **vivo**: si el garzón se metió en
+    // otra durante el flush, devolvía el resultado de ESA, y la boleta salía con
+    // las líneas de una cuenta y los totales de la otra —y con esos totales se
+    // proyectaba la caja—.
+    //
+    // ⚠️ **Y la cuenta del ticket se toma acá, no de la foto**, porque el flush
+    // que acaba de correr REEMPLAZA el objeto de la cuenta: `itemsParaTicket`
+    // cruza líneas y cálculo **por índice** y prefiere la `cantidadPresentacion`
+    // de la línea, así que una foto vieja contra un cálculo fresco imprime una
+    // cantidad y cobra otra. Lo levantó la revisión: la primera versión de este
+    // arreglo pasaba `cuentaCerrada`, que es de antes del flush. Se relee
+    // después del `await` de `asegurarVigente()` porque ése también espera.
+    //
+    // Sin cálculo se cae al camino que ya existía más abajo: la venta se genera
+    // igual y el aviso lo dice. ⚠️ **Y esa venta se queda sin boleta, punto:**
+    // no hay reimpresión en el sistema (el ticket siempre se arma contra estado
+    // vivo). Se acepta porque el otro platillo es peor —hoy, ese mismo gesto
+    // deja la venta **sin generar**— y porque es el camino que el cálculo
+    // fallado ya tenía. La salida buena, recalcular la cuenta cobrada por
+    // fuera de la vigencia, es un frente propio (`pendientes.md` § 2), y ahí
+    // también entra que `targetCobro` cae en `bruto` y la proyección de caja
+    // se infla por el vuelto.
+    let resultadoCerrado: ResultadoVenta | null = null
+    let cuentaDelTicket: CuentaDetalle | null = null
+    if (activeCuenta.value?.id === cuentaCerrada.id) {
+      const res = await asegurarVigente()
+      if (res && activeCuenta.value?.id === cuentaCerrada.id) {
+        resultadoCerrado = res
+        cuentaDelTicket = activeCuenta.value
+      }
+    }
     await salonesApi.cerrarCuenta(cuentaCerrada.id, {
       ...credencialGarzon(garzonId, pin),
       pagos,
@@ -1879,16 +1954,16 @@ async function cerrarCuentaConPin(
       color: 'success',
     })
 
-    if (resultadoCerrado) {
+    if (resultadoCerrado && cuentaDelTicket) {
       try {
         await impresorasApi.imprimirBoleta({
           emisor: emisor.value,
           facturacionElectronica: false,
           meta: {
             cajero: authStore.user?.nombre ?? undefined,
-            mesa: selectedMesa.value?.nombre,
+            mesa: mesaCerrada?.nombre,
           },
-          items: itemsParaTicket(cuentaCerrada, resultadoCerrado),
+          items: itemsParaTicket(cuentaDelTicket, resultadoCerrado),
           totales: resultadoCerrado.totales,
           impuestos: agregarImpuestosVenta(resultadoCerrado.lineas),
           promociones: agregarPromocionesVenta(resultadoCerrado.lineas),
@@ -1911,9 +1986,18 @@ async function cerrarCuentaConPin(
       toast.add({ title: 'Venta generada, pero no se pudo generar la boleta', color: 'warning' })
     }
 
+    // El filtro va sin condicionar: si el garzón se cambió de mesa, `cuentas`
+    // ya es la lista de la otra y sacar un id que no está es un no-op —y al
+    // volver, `cargarCuentas` la vuelve a pedir—.
     cuentas.value = cuentas.value.filter(c => c.id !== cuentaCerrada.id)
-    if (selectedMesa.value) {
-      patchMesaOcupacion(selectedMesa.value.id, -1)
+    // La ocupación es de la mesa que se liberó, no de la que el garzón esté
+    // mirando: va con la mesa **congelada**. Leyéndola viva le restaba la cuenta
+    // a la mesa equivocada y dejaba las dos mal pintadas —una ocupada de más, la
+    // otra de menos— hasta que alguien recargara, porque `cargarSalones()` solo
+    // corre en el `onMounted`. (Adentro, `patchMesaOcupacion` sí decide vivo si
+    // le toca refrescar `selectedMesa`: eso es lo que se pinta.)
+    if (mesaCerrada) {
+      patchMesaOcupacion(mesaCerrada.id, -1)
     }
     const pagosConMonto = pagos.filter(p => new Decimal(p.monto || '0').gt(0))
     const bruto = pagosConMonto.reduce(
@@ -1925,10 +2009,12 @@ async function cerrarCuentaConPin(
       : bruto
     const neto = Decimal.min(bruto, targetCobro).toFixed(4)
     cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
-    volverACuentas()
+    // Lo que se PINTA se condiciona, igual que en cancelar: sacarlo de donde
+    // esté sería una expulsión si mientras tanto abrió otra cuenta.
+    if (activeCuenta.value?.id === cuentaCerrada.id) volverACuentas()
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al cerrar la cuenta', () => { void cerrarCuentaConPin(pagos, garzonId, pin, vuelto) })
+    toastErrorOperativo(e, 'Error al cerrar la cuenta', () => { void cerrarCuentaConPin(cobro, garzonId, pin) })
   }
   finally {
     submitting.value = false

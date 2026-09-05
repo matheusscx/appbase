@@ -159,49 +159,94 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **`cerrarCuentaConPin` lee `selectedMesa` después de tres `await`: le descuenta la
-  ocupación a la mesa equivocada y la boleta sale con el nombre de otra mesa** (frontend;
-  **medido el 2026-09-05** por la revisión independiente del diff que cerró `enviarComanda`, y
-  verificado línea por línea antes de escribir esto) — es la **quinta** instancia de la forma
-  *precondición antes del `await`, estado reactivo releído después*.
+- [ ] **`syncCuenta` reabre la cuenta que el garzón acababa de dejar: agregar un producto y
+  volver al listado lo teletransporta de vuelta** (frontend; **medido el 2026-09-05** al cerrar
+  la quinta puerta, barriendo el archivo entero en vez de fiarse de que era la última) — es la
+  **sexta** instancia de la familia, y la primera con la forma dada vuelta: no es una
+  **lectura** de estado reactivo después del `await`, es una **escritura**.
 
-  ⚠️ **No es "la peor de las cinco", y el primer borrador de esta entrada lo decía**: lo refutó
-  la revisión con el archivo hermano del mismo diff. La cuarta (`enviarComanda` parado en otra
-  cuenta) escribe **en la base** —el claim avanza `cantidad_enviada` bajo `FOR UPDATE`— y eso no
-  se deshace solo. Lo que ésta escribe es **estado local del cliente**: `patchMesaOcupacion` muta
-  el array `salones.value` y reasigna `selectedMesa`, sin mandar ningún request. Lo que la hace
-  cara es otra cosa: **no se cura hasta que alguien recarga**, porque `cargarSalones()` corre
-  únicamente en el `onMounted`, así que la mesa queda mal pintada el resto del turno.
+  `salones/index.vue`: `syncCuenta(cuenta)` hace `activeCuenta.value = cuenta` **sin
+  preguntar**, y lo llaman tres caminos, los tres después de un request: `addProducto`,
+  `onRecetaConfirm` y `quitarLinea`. Si el garzón toca *Cuentas* mientras ese request viaja,
+  la respuesta lo devuelve al detalle de la cuenta que acababa de soltar.
 
-  La función **sí** congela `cuentaCerrada`, y por eso el ticket sale coherente. Lo que no
-  congela es la mesa. Después de `flushPendientes()`, `asegurarVigente()` y
-  `POST /cuentas/:id/cerrar` quedan tres lecturas vivas en `salones/index.vue`:
+  📌 **El arreglo probablemente ya está escrito 7 líneas más abajo**: `aplicarCuentaActualizada`
+  es el gemelo condicionado —`if (activeCuenta.value?.id === actualizada.id)`— y lo usan otros
+  **cinco** llamadores. Lo que falta medir es si `syncCuenta` puede delegar en él o si los tres
+  llamadores necesitan algo que el otro no hace. La diferencia real, verificada línea por línea
+  después de que la revisión refutara la primera versión de esta entrada: `syncCuenta` fuerza
+  `recalcular()` y el otro no; **ninguno de los dos hace `push`** —los dos reemplazan si el id
+  ya está en la lista y si no, no hacen nada—. **No es un cambio de una línea a ciegas: son dos
+  funciones que se parecen y hay que ver qué las separa.**
 
-  - `mesa: selectedMesa.value?.nombre` — va impreso en una **boleta**, no en una comanda.
-  - `patchMesaOcupacion(selectedMesa.value.id, -1)` — **escribe**: parado en otra mesa le
-    descuenta la ocupación a esa otra, y la mesa que efectivamente se liberó **sigue pintada
-    ocupada** en el plano. Es exactamente el desvío que `fusionarSeleccionadas` cierra con
+  ⚠️ Y hay que decidir la otra mitad, la del corolario: quitar una línea o agregar un producto
+  **sí** cambia la cuenta, así que lo que la respuesta trae debe entrar a `cuentas` igual —lo
+  que se condiciona es solo si además se abre el detalle—.
+
+- [ ] **`abrirCuentaConPin` y `cargarCuentas`: la séptima y la octava de la misma familia**
+  (frontend; **medidas el 2026-09-05** por la revisión independiente del cierre de la quinta
+  puerta, después de que mi propio barrido las pasara por alto) — las dos escriben estado de
+  **la mesa** después de un `await`, sin preguntar si el garzón sigue en ella.
+
+  - `abrirCuentaConPin` congela bien el `mesaId` para la ocupación, pero después del `await`
+    hace `cuentas.value.push(cuenta)` y `abrirCuenta(cuenta)` sin condicionar. El modal de PIN
+    ya cerró (emite `confirm` y después se cierra), así que cambiar de mesa en ese tramo
+    **inyecta una cuenta de la mesa A en el listado de la mesa B** y teletransporta al garzón.
+    El gemelo protegido existe: `fusionarSeleccionadas` corta con
     `if (selectedMesa.value?.id !== mesaId) return`.
-  - `volverACuentas()` incondicional — expulsa al garzón de la cuenta que haya abierto durante
-    la espera, sin la pregunta que el corolario de
-    [`../features/salones-mesas.md`](../features/salones-mesas.md) exige para lo que **pinta**.
+  - `cargarCuentas` hace `cuentas.value = await salonesApi.listarCuentas(mesaId)` sin chequear
+    que la mesa siga siendo la pedida: dos taps rápidos en el plano y gana la respuesta que
+    llegue última, no la mesa que el garzón está mirando.
 
-  **Y es alcanzable, no teórico:** `confirmarCobro` cierra el modal de cobro **antes** de
-  arrancar, y `GarzonPinModal` emite `confirm` y recién después se cierra, así que durante los
-  tres `await` no hay ningún modal abierto y el drawer de la mesa está clickeable. En modo
-  tablet (`garzonPersonal`) ni siquiera hay modal de PIN.
+  **Falta medir** cuál de las dos se siente primero y si comparten arreglo con `syncCuenta`
+  (las tres son "escribir estado de otra pantalla después de un `await`"). Probablemente sea
+  **un solo frente con la entrada de arriba**, y conviene tomarlas juntas: separar la primera
+  deja las otras dos con el mismo síntoma y el próximo las lee como cerradas.
 
-  **Lo que falta medir**, y por eso está acá y no en la 1: si el arreglo es el mismo gesto de
-  las otras cuatro (congelar `mesaId`/`mesaNombre` y condicionar las dos que pintan) **o** si
-  `volverACuentas()` quiere la pregunta de cancelar (*"¿sigue en la cuenta que murió?"*), que no
-  es la misma. Y con qué test se fija: el camino pasa por el modal de cobro + PIN, que el spec
-  ya sabe manejar, pero el nombre de la mesa en la boleta cae en el mismo punto ciego que el M3
-  de la comanda (ver [`resueltos.md`](resueltos.md)) — el de la **ocupación**, en cambio, sí es
-  observable desde la pantalla.
+- [ ] **La misma ventana del cobro deja confirmarlo dos veces** (frontend; **medido el
+  2026-09-05** por la revisión del cierre de la quinta puerta, que encontró la segunda mitad de
+  una causa que ese cierre nombró y usó a medias) — **preexistente**: el frente de la quinta
+  puerta no lo introdujo.
 
-  ⚠️ **Lo fiscal va solo (ADR-010): esto NO es tocar la boleta**, es congelar de qué mesa habla.
-  Si al tomarlo aparece cualquier cosa del documento en sí, se detiene y se abre su propio
-  frente.
+  `confirmarCobro` no mira `submitting`, y `submitting` recién se prende adentro de
+  `cerrarCuentaConPin` —o sea después del flush—, así que en esa ventana el botón *Cerrar y
+  cobrar* sigue habilitado. De ahí salía la propina reescrita (ya cerrado), y de ahí sale
+  también que el garzón confirme **el mismo cobro dos veces**: en modo tablet `solicitarPin`
+  ejecuta la acción sin modal, así que ni siquiera hay un teclado que lo frene. El segundo
+  `POST .../cerrar` rebota y el garzón lee *"Error al cerrar la cuenta"* con oferta de
+  **reintento sobre una cuenta ya cobrada**.
+
+  **Lo que falta medir**: si alcanza con un guard de reentrancia como el de `abriendoCuenta`
+  —que existe justo para esto, con su porqué escrito— o si el botón tiene que deshabilitarse
+  desde `confirmarCobro`. Y qué pasa con el reintento que ofrece `toastErrorOperativo` en ese
+  caso: reintentar un cierre que rebotó porque ya se cobró no tiene sentido, pero el mismo
+  toast sirve para el rebote de red, que sí.
+
+- [ ] **La venta que se cierra sin cálculo queda sin boleta, y la caja se proyecta inflada por
+  el vuelto** (frontend; **medido el 2026-09-05** por la revisión del cierre de la quinta
+  puerta) — es el residuo **conocido y aceptado** de ese cierre, anotado para que no se
+  redescubra como bug.
+
+  Cuando `cerrarCuentaConPin` no puede tomar el cálculo —el garzón se fue de la cuenta durante
+  el flush, o el cálculo falla— la venta se genera igual y el aviso lo dice. Dos costos:
+
+  - **esa venta se queda sin boleta para siempre**: ningún camino reimprime una venta pasada,
+    el ticket siempre se arma contra estado vivo (medido y escrito en
+    [`resueltos.md`](resueltos.md), en el cierre de *"la moneda del extra en el ticket"*);
+  - `targetCobro` cae en `bruto`, así que `neto = bruto` y `cajaStore.aplicarCobroLocal` mueve
+    el `saldoEsperado` **incluyendo el vuelto**. Es proyección local, se corrige al recargar,
+    pero el comentario del código enumeraba el costo como "el papel" y esto no estaba.
+
+  **La salida buena para lo primero es recalcular la cuenta cobrada** en vez de resignar el
+  ticket. Pide llamar al motor por fuera de la maquinaria de vigencia de
+  `useResultadoCalculado` —que es la que garantiza que un resultado corresponda al carrito que
+  se está viendo—, o hacer que el flush devuelva la cuenta fresca que ya recibe de cada
+  `PATCH`. **Lo segundo se arregla con el `vuelto`, que ya es parámetro**, pero es plata en un
+  camino degradado: no se tocó de arrastre.
+
+  ⚠️ **Ojo con el alcance:** decidir que una venta puede quedar sin su boleta es materia del
+  owner y del documento (ADR-010). Lo que este frente hizo fue **no empeorarlo** —ese camino ya
+  existía para el cálculo fallado—; ampliarlo o cerrarlo es otra conversación.
 
 - [ ] **`imprimirPrecuenta`: salir de la cuenta mientras calcula termina en un rojo que culpa al
   cálculo, y meterse en otra puede sacar el papel de esa otra** (frontend; **leído el
@@ -228,8 +273,8 @@ decisión que no es mía).
   ⚠️ **El desvío del nombre de la mesa que esta entrada afirmaba, NO existe**, y se deja escrito
   para que no vuelva: `onSelectMesa` pone `activeCuenta.value = null` en el **mismo bloque
   sincrónico** en que cambia la mesa, así que el re-chequeo corta antes. Nunca sale la cuenta A
-  con el nombre de la mesa B. Ese desvío sí existe, pero en
-  `cerrarCuentaConPin` — la entrada de arriba.
+  con el nombre de la mesa B. Ese desvío sí existía, pero en
+  `cerrarCuentaConPin`, y **se cerró el 2026-09-05** ([`resueltos.md`](resueltos.md)).
 
   **Lo que falta medir**: si vale la pena tocarlo. El arreglo es el de siempre (congelar antes
   del `await`), pero el spec de la pantalla **no puede ver el nombre de la mesa**: la precuenta
