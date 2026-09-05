@@ -159,34 +159,83 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **`enviarComanda` relee la cuenta después de su `await`, y si el garzón se fue la comanda
-  no sale — culpando a la impresora** (frontend; **leído en el código el 2026-09-05** por la
-  tercera pasada de la revisión del diff de *"la acción espera"*, y verificado contra
-  `git show HEAD` que es **preexistente**: ese `await flushPendientes()` ya estaba) — es la
-  **cuarta** instancia de la forma que ese frente cerró en las otras tres puertas: precondición
-  antes del `await`, estado reactivo releído después.
+- [ ] **`cerrarCuentaConPin` lee `selectedMesa` después de tres `await`: le descuenta la
+  ocupación a la mesa equivocada y la boleta sale con el nombre de otra mesa** (frontend;
+  **medido el 2026-09-05** por la revisión independiente del diff que cerró `enviarComanda`, y
+  verificado línea por línea antes de escribir esto) — es la **quinta** instancia de la forma
+  *precondición antes del `await`, estado reactivo releído después*.
 
-  `salones/index.vue` valida `if (!activeCuenta.value || !selectedMesa.value) return`, hace
-  `await flushPendientes()` y **después** lee **cuatro** cosas:
-  `activeCuenta.value.id`, `selectedMesa.value.nombre`, `activeCuenta.value.numero` y
-  `activeCuenta.value.garzonResponsableNombre` —la cuarta la contó la revisión, la entrada nació
-  diciendo tres—. Durante esa espera el garzón puede
-  volver al listado —el mismo camino que el test *"salir de la cuenta durante la espera…"*
-  ejercita para cancelar—, y ahí el `try` muere con un `TypeError` que el `catch` muestra como
-  *"Error al enviar la comanda (¿QZ Tray está abierto?)"*: **culpa a la impresora y la comanda
-  no sale a cocina**. Es peor que el de cancelar, que al menos avisaba con el error de la API.
+  ⚠️ **No es "la peor de las cinco", y el primer borrador de esta entrada lo decía**: lo refutó
+  la revisión con el archivo hermano del mismo diff. La cuarta (`enviarComanda` parado en otra
+  cuenta) escribe **en la base** —el claim avanza `cantidad_enviada` bajo `FOR UPDATE`— y eso no
+  se deshace solo. Lo que ésta escribe es **estado local del cliente**: `patchMesaOcupacion` muta
+  el array `salones.value` y reasigna `selectedMesa`, sin mandar ningún request. Lo que la hace
+  cara es otra cosa: **no se cura hasta que alguien recarga**, porque `cargarSalones()` corre
+  únicamente en el `onMounted`, así que la mesa queda mal pintada el resto del turno.
 
-  **La salida ya está decidida por precedente, así que esto es medir y hacer**: congelar antes
-  del `await`, como quedaron `confirmarCancelar` (`cuentaId`/`mesaId`), `fusionarSeleccionadas`
-  (`aFusionar`/`mesaId`) y, desde antes, `cerrarCuentaConPin` (`cuentaCerrada`). Lo que falta
-  medir es el alcance real: cuáles de las cuatro lecturas hay que congelar y si el toast tiene que
-  cambiar de texto cuando la cuenta ya no está en pantalla.
+  La función **sí** congela `cuentaCerrada`, y por eso el ticket sale coherente. Lo que no
+  congela es la mesa. Después de `flushPendientes()`, `asegurarVigente()` y
+  `POST /cuentas/:id/cerrar` quedan tres lecturas vivas en `salones/index.vue`:
 
-  📌 **La hermana de fusionar ya NO está acá: se cerró el 2026-09-05** en el mismo frente, con
-  la cuarta pasada de la revisión. Se anota porque es el precedente que resuelve ésta:
-  `fusionarSeleccionadas` quedó con lo que **usa** congelado y lo que **pinta** condicionado a
-  que el garzón siga en la mesa —y la cuenta fusionada se abre sola solo si seguía en el
-  listado—. Detalle en [`resueltos.md`](resueltos.md).
+  - `mesa: selectedMesa.value?.nombre` — va impreso en una **boleta**, no en una comanda.
+  - `patchMesaOcupacion(selectedMesa.value.id, -1)` — **escribe**: parado en otra mesa le
+    descuenta la ocupación a esa otra, y la mesa que efectivamente se liberó **sigue pintada
+    ocupada** en el plano. Es exactamente el desvío que `fusionarSeleccionadas` cierra con
+    `if (selectedMesa.value?.id !== mesaId) return`.
+  - `volverACuentas()` incondicional — expulsa al garzón de la cuenta que haya abierto durante
+    la espera, sin la pregunta que el corolario de
+    [`../features/salones-mesas.md`](../features/salones-mesas.md) exige para lo que **pinta**.
+
+  **Y es alcanzable, no teórico:** `confirmarCobro` cierra el modal de cobro **antes** de
+  arrancar, y `GarzonPinModal` emite `confirm` y recién después se cierra, así que durante los
+  tres `await` no hay ningún modal abierto y el drawer de la mesa está clickeable. En modo
+  tablet (`garzonPersonal`) ni siquiera hay modal de PIN.
+
+  **Lo que falta medir**, y por eso está acá y no en la 1: si el arreglo es el mismo gesto de
+  las otras cuatro (congelar `mesaId`/`mesaNombre` y condicionar las dos que pintan) **o** si
+  `volverACuentas()` quiere la pregunta de cancelar (*"¿sigue en la cuenta que murió?"*), que no
+  es la misma. Y con qué test se fija: el camino pasa por el modal de cobro + PIN, que el spec
+  ya sabe manejar, pero el nombre de la mesa en la boleta cae en el mismo punto ciego que el M3
+  de la comanda (ver [`resueltos.md`](resueltos.md)) — el de la **ocupación**, en cambio, sí es
+  observable desde la pantalla.
+
+  ⚠️ **Lo fiscal va solo (ADR-010): esto NO es tocar la boleta**, es congelar de qué mesa habla.
+  Si al tomarlo aparece cualquier cosa del documento en sí, se detiene y se abre su propio
+  frente.
+
+- [ ] **`imprimirPrecuenta`: salir de la cuenta mientras calcula termina en un rojo que culpa al
+  cálculo, y meterse en otra puede sacar el papel de esa otra** (frontend; **leído el
+  2026-09-05** al cerrar `enviarComanda`, y **corregido el mismo día** por la revisión
+  independiente, que refutó la mitad de lo que la entrada decía en su primera versión) — misma
+  familia, **mucho menos grave**: lo que sale mal es papel, no un claim que avanza
+  `cantidad_enviada`.
+
+  **Lo que NO pasa, verificado:** no hay `TypeError` ni ticket mezclado. La función vuelve a
+  preguntar después del `await` (`if (!activeCuenta.value || !selectedMesa.value) return`), y
+  `asegurarVigente()` devuelve el resultado del carrito **vivo**, con las tres lecturas de abajo
+  todas del mismo instante sincrónico.
+
+  **Lo que sí queda, y es una carrera, no una conducta segura:** si el garzón se mete en otra
+  cuenta durante el cálculo, `asegurarVigente()` devuelve el resultado de **esa otra** —y sale su
+  precuenta— **solo si el `recalcular()` de la cuenta nueva aterrizó primero**; si no aterrizó,
+  `res` viene `null` y sale el toast rojo *"No se pudo calcular el total de la cuenta. Intentá de
+  nuevo."*, que le echa la culpa al cálculo de algo que no falló — el garzón se movió. El mismo
+  rojo sale al volver al listado o cambiar de mesa: `limpiarResultado()` deja `resultado` en
+  `null` con las dos claves en `null`, o sea **vigente**, y `asegurarVigente()` devuelve `null`
+  igual. Esto último está **trazado sobre el código, no corrido**: medirlo es parte de tomar la
+  entrada.
+
+  ⚠️ **El desvío del nombre de la mesa que esta entrada afirmaba, NO existe**, y se deja escrito
+  para que no vuelva: `onSelectMesa` pone `activeCuenta.value = null` en el **mismo bloque
+  sincrónico** en que cambia la mesa, así que el re-chequeo corta antes. Nunca sale la cuenta A
+  con el nombre de la mesa B. Ese desvío sí existe, pero en
+  `cerrarCuentaConPin` — la entrada de arriba.
+
+  **Lo que falta medir**: si vale la pena tocarlo. El arreglo es el de siempre (congelar antes
+  del `await`), pero el spec de la pantalla **no puede ver el nombre de la mesa**: la precuenta
+  no pasa por `estaciones`, corta en `obtenerImpresoraBoleta()` y arma con `buildPrecuentaTicket`,
+  y ahí `imprimirEn()` importa el cliente de QZ de verdad. Lo que sí se puede ver desde el spec
+  es **cuál** precuenta salió y **qué toast** salió.
 
 - [ ] **`GET /ventas/:id` escanea `venta_detalles` entera, y ahora una vez más**
   (backend; **medido el 2026-09-04** por la revisión independiente de la tarea 2 del frente de

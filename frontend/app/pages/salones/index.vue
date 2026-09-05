@@ -1644,12 +1644,38 @@ function lineaSubtotal(index: number, linea: CuentaLineaDetalle): string {
 async function enviarComanda() {
   if (!activeCuenta.value || !selectedMesa.value) return
   enviandoComanda.value = true
+  // **Congelado ANTES de la espera**, igual que `confirmarCancelar`,
+  // `fusionarSeleccionadas` y `cerrarCuentaConPin`: es la cuarta puerta de la
+  // misma forma —precondición antes del `await`, estado reactivo releído
+  // después—. Durante `flushPendientes()` el botón *Cuentas* sigue vivo (el
+  // `:loading` va solo al de comanda), y desde ahí `activeCuenta` queda en
+  // `null` o, peor, en OTRA cuenta si el garzón se mete en una.
+  //
+  // Lo medido con las cuatro lecturas sin congelar: con `null`, `TypeError:
+  // Cannot read properties of null (reading 'id')` adentro del `try`, que el
+  // `catch` de abajo muestra como *"Error al enviar la comanda (¿QZ Tray está
+  // abierto?)"* —**le echa la culpa a la impresora y la comanda no llega a
+  // cocina**—; con otra cuenta abierta, el claim salía con el id de esa otra,
+  // que avanza su `cantidad_enviada` sin que nadie haya pedido su comida.
+  //
+  // Se congela la cuenta entera, no solo el id: el `numero` y el garzón van
+  // impresos en el ticket, así que releerlos daría un papel de una cuenta y una
+  // comida de otra. Lo que **pinta** queda vivo a propósito, y son dos cosas: el
+  // toast, que es global y además dice la verdad —la comanda salió—, igual que
+  // en cancelar y en fusionar; y `enviandoComanda`, que es un `ref` de pantalla,
+  // no de cuenta: si el garzón se mete en OTRA cuenta durante la espera, el
+  // spinner y el `disabled` caen sobre el botón de esa otra. Volviendo al
+  // listado no cae en ningún lado, porque el botón vive dentro del bloque de
+  // `activeCuenta` y ahí no se rinde. Acotarlo pediría un flag por cuenta, y el
+  // `finally` lo baja igual.
+  const cuenta = activeCuenta.value
+  const mesaNombre = selectedMesa.value.nombre
   try {
     await flushPendientes()
-    const estaciones = await impresorasApi.imprimirComanda(activeCuenta.value.id, {
-      mesaNombre: selectedMesa.value.nombre,
-      cuentaNumero: activeCuenta.value.numero,
-      garzonNombre: activeCuenta.value.garzonResponsableNombre,
+    const estaciones = await impresorasApi.imprimirComanda(cuenta.id, {
+      mesaNombre,
+      cuentaNumero: cuenta.numero,
+      garzonNombre: cuenta.garzonResponsableNombre,
     })
     // null = no hay impresoras de comanda activas → se saltó el flujo sin toast.
     if (estaciones === null) return

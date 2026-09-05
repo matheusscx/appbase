@@ -126,6 +126,21 @@ let fusionesPedidas = 0
  *  que la pantalla tenga seleccionado cuando el request sale. */
 let cuentasFusionadas: string[] = []
 /**
+ * Lo que devuelve `GET /impresoras?rol=comanda`. Vacío por defecto: sin ninguna
+ * activa, `imprimirComanda()` se saltea el flujo entero —ni reclama ni imprime—
+ * y devuelve `null`, así que los tests que no hablan de comanda no se enteran.
+ */
+let impresorasComanda: unknown[] = []
+/**
+ * Cada `POST /cuentas/:id/comanda/reclamar`, con el id que viajó en la URL.
+ *
+ * Es LA señal de que la comanda salió a cocina, y de cuál cuenta: ese claim es
+ * lo que avanza `cantidad_enviada` en el backend. Se guarda el id y no un
+ * contador porque el agujero que estos tests fijan no es solo "no salió", sino
+ * "salió la de otra cuenta".
+ */
+let reclamosDeComanda: string[] = []
+/**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
  * Sin esto, servidor y pantalla son EL MISMO objeto: el `GET` devuelve
@@ -447,6 +462,23 @@ mockNuxtImport('useApiFetch', () => {
         estado: (body as { firma?: boolean }).firma ? 'firmada' : 'rechazada',
       })
     }
+    if (ruta.endsWith('/impresoras')) {
+      // La URL **entera**, como en `/items`: `listar()` manda el rol por query
+      // y `obtenerImpresoraBoleta()` NO vuelve a filtrarlo del lado del
+      // cliente, así que un mock que ignore el `?rol=` haría pasar una
+      // impresora de comanda por impresora de boleta.
+      return Promise.resolve(url.includes('rol=comanda') ? impresorasComanda : [])
+    }
+    const reclamarMatch = ruta.match(/\/cuentas\/([^/]+)\/comanda\/reclamar$/)
+    if (reclamarMatch) {
+      reclamosDeComanda.push(reclamarMatch[1] ?? '')
+      // Sin estaciones pendientes: `imprimirComanda()` corta ahí (`useImpresoras.ts`)
+      // y no entra a `imprimirEn()`, que importa el cliente real de `qz-tray` y le
+      // pide un `websocket.connect()` a QZ Tray en localhost — no hay ninguno
+      // corriendo en un test. Alcanza igual: lo que estos tests miden es que el
+      // claim salió y con qué cuenta.
+      return Promise.resolve({ estaciones: [] })
+    }
     // El resto del arranque (unidades, caja, emisor) no interviene en este flujo.
     return Promise.resolve([])
   }
@@ -495,6 +527,8 @@ function reiniciarMock() {
   patchesAlFusionar = -1
   fusionesPedidas = 0
   cuentasFusionadas = []
+  impresorasComanda = []
+  reclamosDeComanda = []
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -3013,5 +3047,143 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(400)
 
     expect(urlsCatalogo).toHaveLength(3)
+  })
+
+  /**
+   * Una impresora de comanda **activa**. Sin al menos una, `imprimirComanda()`
+   * devuelve `null` antes de tocar la red y estos tests estarían probando ese
+   * atajo en vez del envío.
+   */
+  function impresoraDeComanda() {
+    return {
+      id: 'imp-1',
+      nombre: 'Cocina',
+      rol: 'comanda',
+      activo: true,
+      tipoConexion: 'red',
+      host: '10.0.0.9',
+      puerto: 9100,
+      nombreCola: null,
+    }
+  }
+
+  it('"Enviar a cocina" reclama la comanda de la cuenta abierta', async () => {
+    // El control de los dos que siguen. Sin él, un `enviarComanda` que no
+    // llamara nunca al claim los haría pasar a los dos por el lado equivocado:
+    // "no reclamó la de otra cuenta" es cierto también cuando no reclamó nada.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasComanda = [impresoraDeComanda()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(100)
+
+    expect(reclamosDeComanda).toEqual(['cuenta-9'])
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('volver al listado durante la espera no impide que la comanda salga', async () => {
+    /**
+     * La cuarta puerta de la misma forma —precondición antes del `await`, estado
+     * reactivo releído después—. **No la última**: `cerrarCuentaConPin` es la
+     * quinta y sigue abierta (`docs/agent/pendientes.md` § 2). `enviarComanda`
+     * valida `activeCuenta`, hace `await flushPendientes()` y recién ahí lee
+     * `activeCuenta.value.id` —y su `numero`, y su garzón— para armar el claim.
+     *
+     * Durante esa espera el botón *Cuentas* sigue vivo (`:loading` va solo al de
+     * comanda) y pone `activeCuenta` en `null`. Lo medido con la lectura sin
+     * congelar: `TypeError` adentro del `try`, que el `catch` muestra como
+     * *"Error al enviar la comanda (¿QZ Tray está abierto?)"* — **le echa la
+     * culpa a la impresora y la comanda nunca llega a cocina**. Es el peor de
+     * los cuatro: el garzón se va tranquilo creyendo que es un problema de QZ.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasComanda = [impresoraDeComanda()]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    // Una edición a medio guardar: es lo único que abre la ventana del `await`.
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(20)
+
+    // El garzón vuelve al listado mientras el flush viaja.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(reclamosDeComanda).toEqual(['cuenta-9'])
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('meterse en otra cuenta durante la espera no manda la comanda de esa otra', async () => {
+    /**
+     * El gemelo de *"cancelar una cuenta no se lleva puesta la edición de OTRA"*,
+     * y lo que separa **congelar** de **volver a preguntar**: un
+     * `if (!activeCuenta.value) return` después del `await` **no crashea** —la
+     * cuenta existe— y manda el claim de la cuenta equivocada. (Ese guard rompe
+     * el test de arriba por el otro lado: con `activeCuenta` en `null` retorna y
+     * la comanda no sale. Por eso el mutante que lo pone mata a los dos.)
+     *
+     * Y no es un empate: el claim avanza `cantidad_enviada`, así que la 10 queda
+     * marcada como despachada sin que su comida se haya pedido, y la 9 —la que
+     * el garzón mandó— sigue esperando en cocina.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    impresorasComanda = [impresoraDeComanda()]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(20)
+
+    // Sale al listado y se mete en la OTRA cuenta, todo con el flush en vuelo.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
+    expect(tarjetas?.length).toBe(2)
+    tarjetas![1]!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(reclamosDeComanda).toEqual(['cuenta-9'])
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
   })
 })

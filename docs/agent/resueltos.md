@@ -17,6 +17,100 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La comanda que no salía a cocina y le echaba la culpa a la impresora (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"`enviarComanda` relee la cuenta después de su
+`await`"*. Es la **cuarta puerta** de la forma que cerró
+[*"Las tres acciones que pisaban un `PATCH` de cantidad en vuelo ahora esperan"*](#las-tres-acciones-que-pisaban-un-patch-de-cantidad-en-vuelo-ahora-esperan-cerrado-2026-09-05):
+precondición antes del `await`, estado reactivo releído después. La entrada la abrió la tercera
+pasada de la revisión de aquel diff, y dejaba dicho que era **preexistente** — verificado contra
+`git show HEAD`.
+
+### Lo que la entrada dejaba por medir, medido
+
+Eran dos preguntas, y las dos se contestaron corriendo el código, no leyéndolo:
+
+**1. Cuáles de las cuatro lecturas hay que congelar: las cuatro, por dos motivos distintos.**
+Con `activeCuenta` en `null` mueren las tres suyas —el toast real, capturado en la corrida roja,
+es *"Error al enviar la comanda (¿QZ Tray está abierto?): Cannot read properties of null
+(reading 'id')"*—. `selectedMesa` **no** puede quedar en `null`: se verificó que solo se le
+asigna (`onSelectMesa` y el refresco de ocupación), nunca se limpia. Igual se congela, porque el
+garzón puede cerrar el drawer y tocar **otra mesa** durante la espera, y `mesaNombre` va impreso
+en el ticket.
+
+**2. Si el toast tiene que cambiar de texto: no.** Manda el precedente de las otras tres puertas
+—cancelar y fusionar avisan con el mismo texto esté donde esté parado el garzón—, y acá además
+es cierto: la comanda **salió**. El toast es global, no pertenece a la pantalla de la cuenta.
+
+### Y una tercera falla que la entrada no nombraba
+
+La entrada describía el caso `null` (volver al listado). Meterse en **otra cuenta** durante la
+espera no da `TypeError` —`activeCuenta` existe— y manda el claim con **el id de la otra**:
+`POST /cuentas/:id/comanda/reclamar` avanza `cantidad_enviada` bajo `FOR UPDATE`, así que esa
+otra cuenta queda marcada como despachada sin que su comida se haya pedido, **y la que el garzón
+mandó sigue esperando en cocina**. Es el caso que separa *congelar* de *volver a preguntar*: un
+`if (!activeCuenta.value) return` después del `await` tapa el primero y deja el segundo.
+
+### Qué se hizo
+
+Dos consts antes del `try`, el molde de `cerrarCuentaConPin`: `const cuenta = activeCuenta.value`
+y `const mesaNombre = selectedMesa.value.nombre`. Se congela la cuenta **entera** y no solo el
+id porque el `numero` y el garzón se imprimen en el ticket.
+
+### Qué lo fija
+
+Tres tests en `salones/index.nuxt.spec.ts` (67 en el archivo, 1067 en el frontend) y dos ramas
+nuevas del mock de `useApiFetch`: `GET /impresoras` y `POST /cuentas/:id/comanda/reclamar`, que
+devuelve `{ estaciones: [] }` —alcanza para probar que el claim salió y con qué cuenta, y evita
+el tramo de QZ Tray, que importa el cliente real y abre un websocket—.
+
+**Los seis se corrieron sobre el spec completo de la pantalla (67 tests), no sobre el subconjunto
+filtrado por nombre** — la diferencia no es cosmética: M5 mata 3 con el filtro y 8 sin él, y la
+tabla decía 3 hasta que la revisión lo midió.
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **M1** — las cuatro lecturas vivas (el código de antes) | el estado previo al fix | ✝ mata 2: `[]` en vez de `['cuenta-9']` —el claim nunca sale— y `['cuenta-10']` en vez de `['cuenta-9']`. El `TypeError` ocurre y su toast es el citado arriba, pero el test muere antes, en la primera aserción. Es también la corrida roja del TDD, y se volvió a correr como mutante contra el spec final |
+| **M2** — congelar → **volver a preguntar** tras el `await` | el fix tentador | ✝ mata 2 |
+| **M3** — `mesaNombre` vivo | congela cuenta, relee mesa | **sobrevive** — declarado abajo |
+| **M4** — `cuentaNumero` vivo | congela id, relee número | ✝ mata 1 |
+| **M5** — `enviarComanda` no entra nunca | control | ✝ mata **8**: los 3 nuevos y 5 preexistentes que usan *Enviar a cocina* como disparador del flush |
+| **M6** — `garzonNombre` vivo | congela id, relee garzón | ✝ mata 1 |
+
+**M5 está para que los otros cinco signifiquen algo.** *"No reclamó la de otra cuenta"* también
+es cierto cuando no reclamó nada: sin un control que muera al no enviarse, los dos tests de la
+ventana pasarían por el lado equivocado. Que mate **8** y no 3 dice además algo que no se había
+notado: cinco tests preexistentes del flush usan *Enviar a cocina* como disparador, así que ese
+botón ya era una dependencia compartida del archivo.
+
+⚠️ **M3 sobrevive, y el motivo está medido, no supuesto.** `mesaNombre` no llega a ningún
+request: su único destino es `buildComandaTicket`, adentro de `useImpresoras`. Este spec usa el
+composable **real** y solo mockea HTTP, y con `estaciones: []` el ticket nunca se construye —
+llegar hasta ahí exige el tramo de QZ. Y como `selectedMesa` nunca queda en `null`, una lectura
+viva tampoco puede tirar. O sea: **no hay gesto en este spec que lo mate**; matarlo pide
+mockear `useImpresoras`, que es otro spec. M4 y M6, que son la misma forma sobre `activeCuenta`,
+sí mueren — y por eso el que sobrevive es exactamente el campo cuyo dueño no se anula nunca.
+
+⚠️ **"Cuarta" no quiere decir "última".** La primera versión de este cierre
+decía *"la cuarta y última puerta"*; lo refutó la revisión independiente, y con razón:
+`cerrarCuentaConPin` —la función que este mismo diff cita como precedente— congela
+`cuentaCerrada` pero deja `selectedMesa` **viva después de tres `await`**, y ahí no es papel
+solamente: `patchMesaOcupacion(selectedMesa.value.id, -1)` le descuenta la ocupación a la mesa
+equivocada, y no se cura hasta que alguien recarga (`cargarSalones()` solo corre en el
+`onMounted`). Quedó anotada en `pendientes.md` § 2, con la comparación hecha ahí: **no es "la
+peor de las cinco"** —ésta escribe estado local del cliente, mientras que la cuarta escribía en
+la **base**, avanzando `cantidad_enviada` bajo `FOR UPDATE`—. La lección es la de siempre acá:
+**declarar cerrado lo que sigue vivo manda al próximo a no buscarlo**, y esa frase lo habría
+mandado a no mirar una instancia viva.
+
+📌 **Lo que se midió de la función de al lado y NO se tocó:** `imprimirPrecuenta` tiene el mismo
+`await` y las mismas lecturas después, pero **sí** vuelve a preguntar, y `asegurarVigente()`
+devuelve el resultado del carrito vivo, con las lecturas de abajo todas del mismo instante: no
+hay `TypeError` ni ticket mezclado. Lo que le queda es una **carrera**, no una conducta segura,
+y quedó anotada en `pendientes.md` § 2.
+
+---
+
 ## Las dos pantallas de reglas: el quinto camino en recargos y el escalón a medio cargar (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"`recargos.vue` no tiene el quinto camino de

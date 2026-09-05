@@ -565,9 +565,7 @@ que filtrar la entrada las desfasa.
 
 La cantidad se pinta en el acto y el `PATCH` sale **300 ms después** (debounce: una ráfaga de
 taps en el stepper es un solo request). De esa ventana se sale por siete puertas, y **las siete
-manejan lo pendiente** (lo que no quiere decir que no quede nada: *Enviar a cocina* tiene su
-propio agujero abierto en [`../agent/pendientes.md`](../agent/pendientes.md) § 2, y no es del
-flush sino de lo que relee después). Todas guardan, y las tres **destructivas** —cancelar, fusionar, irse de la
+manejan lo pendiente**. Todas guardan, y las tres **destructivas** —cancelar, fusionar, irse de la
 pantalla— además **esperan**. Salir al listado y cerrar el drawer también sacan la cuenta de
 escena y **no** esperan: volver al listado es instantáneo por decisión del owner (2026-09-02),
 y ahí la cuenta sigue viva.
@@ -575,7 +573,7 @@ y ahí la cuenta sigue viva.
 | El garzón… | Qué pasa con lo pendiente |
 |---|---|
 | toca *Enviar a cocina* | se manda y se **espera**, antes de imprimir la comanda |
-| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor |
+| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor. ⚠️ El flush lo maneja bien, pero **lo que esta fila lee después de sus tres `await` no**: ver `cerrarCuentaConPin` en [`../agent/pendientes.md`](../agent/pendientes.md) § 2 |
 | toca *Cuentas* o cambia de mesa | se manda **sin esperar**: volver al listado es instantáneo |
 | **cierra el drawer** de la mesa (ESC, backdrop) | igual que *Cuentas*: se manda y la cuenta se suelta |
 | **cancela la cuenta** | se manda y se **espera**, y recién entonces se cancela |
@@ -615,7 +613,17 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   seleccionadas *al tocar el botón*, no las que queden seleccionadas cuando el request sale
   —durante la espera las tarjetas siguen clickeables y releerlas dejaba salir la fusión con una
   sola cuenta, que el backend rechaza—. Cancelar congela el id de su cuenta y el de la mesa: sin
-  eso el `try` moría con un `TypeError` y **el cancelar no salía**.
+  eso el `try` moría con un `TypeError` y **el cancelar no salía**. *Enviar a cocina* congela la
+  cuenta entera y el nombre de la mesa (2026-09-05, la cuarta puerta de esta forma —**no la
+  última**: `cerrarCuentaConPin` es la quinta y sigue abierta, ver
+  [`../agent/pendientes.md`](../agent/pendientes.md) § 2):
+  su `await` es el mismo flush, y ahí el botón *Cuentas* sigue vivo. Con `null` el `catch`
+  mostraba *"Error al enviar la comanda (¿QZ Tray está abierto?): Cannot read properties of null
+  (reading 'id')"* —**le echaba la culpa a la impresora y la comanda no llegaba a cocina**, el
+  peor de los cuatro, porque el garzón se va tranquilo—; parado en **otra** cuenta no había
+  `TypeError` y el claim salía con el id de esa otra, que le avanza la `cantidad_enviada` sin
+  que nadie haya pedido su comida. Por eso se congela la cuenta entera y no solo el id: el
+  `numero` y el garzón se imprimen en el ticket.
 - **Lo que la acción PINTA se condiciona a dónde está parado el garzón, y la pregunta no es la
   misma en las dos.** Cancelar pregunta *"¿sigue en la cuenta que murió? entonces sacalo"*.
   Fusionar pregunta *"¿está en el listado, o en una de las que la fusión canceló? entonces
