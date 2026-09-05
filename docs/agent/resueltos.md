@@ -17,6 +17,132 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La otra mitad de la familia: lo que la pantalla ESCRIBE después del `await` (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), de las dos entradas que abrieron los cierres de
+la cuarta y la quinta puerta: *"`syncCuenta` reabre la cuenta que el garzón acababa de dejar"*
+y *"`abrirCuentaConPin` y `cargarCuentas`: la séptima y la octava"*. Se tomaron **juntas, en un
+solo frente**, porque son la misma forma y separarlas dejaba a las otras dos con el síntoma
+vivo y el próximo leyéndolas como cerradas.
+
+### La forma, dada vuelta
+
+Las cinco puertas anteriores eran *leer* estado reactivo después de un `await`. Estas tres son
+**escribirlo**, y por eso el barrido que busca lecturas no las encontraba:
+
+| Función | Qué escribía sin preguntar | Qué se veía |
+|---|---|---|
+| `syncCuenta` (3 llamadores: agregar producto, confirmar receta, quitar línea) | `activeCuenta.value = cuenta` | tocás *Cuentas* con el request en vuelo y la pantalla te devuelve sola al detalle |
+| `abrirCuentaConPin` | `cuentas.value.push(cuenta)` + abrir el detalle | cambiás de mesa durante el POST y la cuenta de la mesa A aparece en el listado de la mesa B, con vos adentro |
+| `cargarCuentas` | `cuentas.value = await …` | dos taps seguidos en el plano y gana **la respuesta que llegue última**, no la mesa que estás mirando |
+
+### Qué se hizo, y la mitad que NO se condiciona
+
+El corolario de [`../features/salones-mesas.md`](../features/salones-mesas.md) se aplica igual,
+pero acá la pregunta cambia de lado: **el dato del servidor entra siempre; abrir el detalle es
+pintar**.
+
+- **`syncCuenta` delega en `aplicarCuentaActualizada`**, el gemelo condicionado que ya existía
+  cinco líneas más abajo con cinco llamadores. La cuenta **sí** cambió —se agregó o se quitó
+  una línea—, así que la respuesta entra a la lista pase lo que pase; lo que se condiciona es
+  `activeCuenta` y el `recalcular()` que arrastra (calcula el carrito vivo: dispararlo con el
+  garzón en otra pantalla es un request al pedo con el resultado de otra cosa).
+- **`abrirCuentaConPin`**: la ocupación y el aviso van con el `mesaId` **congelado y sin
+  condicionar** —la cuenta se abrió de verdad, esté donde esté parado el garzón—; el `push` y
+  el detalle van detrás de `if (selectedMesa.value?.id !== mesaId) return`, el mismo gesto de
+  `fusionarSeleccionadas`.
+- **`cargarCuentas` va con token de request**, que no es un patrón nuevo: `refrescarItems`, en
+  este mismo archivo, ya lo usa (`secuenciaItems`), y `useResultadoCalculado` también. El toast
+  de error queda **sin condicionar** a propósito: un `GET` que falla es una falla, y callarlo
+  dejaría el listado vacío sin explicación. El `finally` sí lleva el token, para que una
+  respuesta vieja no apague el spinner de la que sigue viva.
+
+📌 **Por qué token y no `if (mesaId === selectedMesa.value?.id)`**, que era lo obvio: pasar por
+la mesa B y **volver** a la A hace que la respuesta vieja de A encuentre la mesa A otra vez
+seleccionada y pase, pisando lo que trajo el segundo pedido. No es una intuición: es el cuarto
+test, y el mutante P6 —que pone exactamente ese guard— muere con él.
+
+### Qué lo fija
+
+Cinco tests en `salones/index.nuxt.spec.ts` (76 en el archivo, 1076 en el frontend) y tres
+ganchos nuevos en el mock: retención del `POST /cuentas/:id/lineas`, y `GET /mesas/:id/cuentas`
+**por mesa** —con su propia retención por mesa—, que es lo único que permite ver de qué mesa es
+la lista que quedó en pantalla.
+
+**Los ocho mutantes se corrieron sobre el spec completo (76 tests), y se volvieron a correr
+TODOS cuando entró el quinto test** — no solo el que ese test vino a matar. La primera versión
+de esta tabla decía que P5 mataba 2, que era su número **antes** del quinto test; lo cazó la
+revisión. Las dos mitades del token de `cargarCuentas` van en filas separadas justamente para
+que ese número no se pueda volver a escribir de memoria.
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **P1** — `syncCuenta` escribiendo `activeCuenta` a mano | el código de antes | ✝ mata 1 |
+| **P2** — `syncCuenta` condicionando **también** la lista | condicionar de más | ✝ mata 1 |
+| **P3** — `abrirCuentaConPin` sin el guard de mesa | el código de antes | ✝ mata 1 |
+| **P4** — `abrirCuentaConPin` condicionando **también** la ocupación | condicionar de más | ✝ mata 1 |
+| **P5** — `cargarCuentas` sin token en ningún lado | el código de antes, entero | ✝ mata 3 |
+| **P5b** — sin el token del `try`, con el del `finally` | media mitad | ✝ mata 2 |
+| **P6** — `cargarCuentas` con guard por id de mesa | el arreglo obvio y corto | ✝ mata 1 |
+| **P7** — sin el token del `finally`, con el del `try` | la otra media mitad | ✝ mata 1 |
+
+### El barrido, esta vez del lado de las escrituras
+
+El barrido anterior buscaba **lecturas** posteriores a un `await`, y por eso no veía estas
+tres. Se repitió buscando **escrituras** de estado compartido —`cuentas`, `activeCuenta`,
+`selectedMesa`, `salones`, `items`— y las llamadas que escriben por dentro. Lo que quedó, y por
+qué no es hallazgo:
+
+- `fusionarSeleccionadas`, `confirmarCancelar` y `cerrarCuentaConPin` escriben después del
+  `await`, pero **detrás de su guard o con el id congelado**: son los cierres de las puertas
+  anteriores;
+- `transferirCuentaConPin`, `confirmarTransferenciaAdmin`, `patchLineaCantidad` y
+  `pedirPinParaPendientes` ya pasaban por `aplicarCuentaActualizada`, o sea por el gemelo
+  condicionado —los dos primeros los nombró la primera versión de esta lista, el cuarto lo
+  agregó la revisión—;
+- `patchMesaOcupacion`, que es el otro escritor de `selectedMesa` y se llama después de un
+  `await` desde **cuatro** funciones —`abrirCuentaConPin`, `fusionarSeleccionadas`,
+  `confirmarCancelar` y `cerrarCuentaConPin`—, decide **adentro** si le toca refrescarla
+  (`?.id === mesaId`);
+- `refrescarItems` **ya tenía token** (`secuenciaItems`) desde antes;
+- `cargarSalones` asigna `salones.value` sin guard, pero solo corre en el `onMounted`: un solo
+  request, sin carrera posible hoy.
+
+⚠️ **Fuera de esos cinco refs aparece una sub-forma distinta: el modal que se abre DESPUÉS de
+un `await`.** La primera versión de este párrafo decía *"sigue viva en dos lugares"* y nombraba
+dos que no son bug; la revisión encontró tres más, y al medirlas una por una el reparto quedó
+así (todas **preexistentes**, ninguna tocada por este frente):
+
+| Función | Estado, medido |
+|---|---|
+| `abrirTransferenciaAdmin` | **Bug real, y el peor de la sub-forma.** Valida la cuenta, `await garzonesApi.listar()`, y abre el modal sin volver a preguntar. `confirmarTransferenciaAdmin` relee `activeCuenta` **vivo**: el modal abierto para la cuenta A **transfiere la B** |
+| `abrirCobro` | **Bug real, menor.** `cobroOpen = true` después de `await asegurarVigente()` sin rechequear: el modal de cobro se abre sobre el listado, y `confirmarCobro` corta en su guard — el tap no hace nada |
+| `abrirHistorial` | **No es bug**: congela `const cuenta = activeCuenta.value` y abre el modal **antes** del `await`; lo que asigna después son los datos de esa misma cuenta |
+| `cargarPendientesTestigo` | **No es bug**: no está atada a la cuenta, son las firmas pendientes del garzón |
+| `abrirEntrarTurno` | **No es bug** por la misma razón: los turnos no son de una cuenta |
+
+Las dos primeras quedaron en [`pendientes.md` § 2](pendientes.md); las tres últimas se anotan
+acá **con su motivo** para que el próximo barrido no las vuelva a levantar como sospechosas. Y
+esta tabla no lleva conteo a propósito: el *"dos lugares"* que reemplaza era un número escrito
+sin medir, en el párrafo que existe justamente para eso.
+
+No se declara nada cerrado más allá de eso: lo que se afirma es **qué se barrió y con qué
+criterio**. La frase *"la cuarta y última"* del cierre de dos secciones más abajo costó dos
+bloqueos de la revisión, y el barrido que la reemplazó —hecho a propósito para no repetirla—
+igual salió corto y le faltaron dos.
+
+📌 **P7 la agregó la revisión**, y no porque la tabla mintiera: el `return` del `try` estaba
+fijado por dos tests y el `finally` por ninguno, así que un mutante que quitara **solo** ese
+guard sobrevivía los 75. El quinto test lo cierra — una respuesta vieja apagando el spinner
+deja el listado en *"La mesa no tiene cuentas abiertas"* mientras el request que importa todavía
+viaja.
+
+📌 **P2 y P4 son las filas que valen doble**: no revierten el bug, revierten *de más*. La regla
+del corolario tiene dos lados y sin ellas la suite solo defendería uno — un arreglo que
+condicionara la escritura entera perdería la línea recién agregada y nadie se enteraría.
+
+---
+
 ## El cobro que el garzón confirmaba con su PIN y se perdía en el camino (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"`cerrarCuentaConPin` lee `selectedMesa`

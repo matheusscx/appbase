@@ -151,6 +151,21 @@ let cierresDeCuenta: string[] = []
 /** El body de cada uno: con qué propina se cerró. Ver el test de la propina. */
 let bodiesDeCierre: Record<string, unknown>[] = []
 /**
+ * Retiene el `POST /cuentas/:id/lineas`, igual que `abrirCuentaRetenido`. Es lo
+ * que abre la ventana "agregué un producto y me fui": sin esto el mock contesta
+ * en el mismo microtask.
+ */
+let agregarLineaRetenido: Promise<void> | null = null
+/**
+ * Lo que devuelve `GET /mesas/:id/cuentas` **por mesa**. Sin entrada, cae en
+ * `cuentasDeLaMesa` — el fixture único que usan casi todos los tests—. Con
+ * entrada, cada mesa tiene lo suyo, que es lo único que permite ver de qué mesa
+ * es la lista que quedó en pantalla.
+ */
+let cuentasPorMesa: Record<string, unknown[]> = {}
+/** Retiene ese `GET` **por mesa**: la carrera de dos mesas necesita frenar una sola. */
+let listarCuentasRetenido: Record<string, Promise<void>> = {}
+/**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
  * Sin esto, servidor y pantalla son EL MISMO objeto: el `GET` devuelve
@@ -221,7 +236,9 @@ mockNuxtImport('useApiFetch', () => {
     const method = opts?.method ?? 'GET'
     const ruta = url.split('?')[0] ?? ''
 
-    if (/\/mesas\/[^/]+\/cuentas$/.test(ruta)) {
+    const mesaCuentas = ruta.match(/\/mesas\/([^/]+)\/cuentas$/)
+    if (mesaCuentas) {
+      const mesaPedida = mesaCuentas[1] ?? ''
       if (method === 'POST') {
         postsAbrirCuenta.push(ruta)
         bodiesAbrirCuenta.push(opts?.body ?? {})
@@ -256,7 +273,9 @@ mockNuxtImport('useApiFetch', () => {
       // El snapshot del servidor se toma acá, en el primer `GET`: es el único
       // momento en que el fixture todavía no pasó por la pantalla.
       cuentasServidor ??= structuredClone(cuentasDeLaMesa) as NonNullable<typeof cuentasServidor>
-      return Promise.resolve(cuentasDeLaMesa)
+      const lista = cuentasPorMesa[mesaPedida] ?? cuentasDeLaMesa
+      const retenido = listarCuentasRetenido[mesaPedida]
+      return retenido ? retenido.then(() => lista) : Promise.resolve(lista)
     }
 
     // `POST /cuentas/:id/lineas` — agregar un ítem a la cuenta abierta. Lo usa
@@ -267,7 +286,7 @@ mockNuxtImport('useApiFetch', () => {
       const body = (opts?.body ?? {}) as { itemId?: string, cantidad?: string }
       lineasAgregadas.push(body)
       const cuenta = cuentasDeLaMesa[0] as { lineas: unknown[] }
-      return Promise.resolve({
+      const conLinea = {
         ...cuenta,
         lineas: [
           ...cuenta.lineas,
@@ -280,7 +299,10 @@ mockNuxtImport('useApiFetch', () => {
             cantidad: body.cantidad ?? '1',
           },
         ],
-      })
+      }
+      return agregarLineaRetenido
+        ? agregarLineaRetenido.then(() => conLinea)
+        : Promise.resolve(conLinea)
     }
 
     // `PATCH /cuentas/:id/lineas/:lineaId` — cambiar la cantidad de una línea.
@@ -548,6 +570,9 @@ function reiniciarMock() {
   reclamosDeComanda = []
   cierresDeCuenta = []
   bodiesDeCierre = []
+  agregarLineaRetenido = null
+  cuentasPorMesa = {}
+  listarCuentasRetenido = {}
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -3457,5 +3482,231 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     expect(bodiesDeCierre).toHaveLength(1)
     expect(bodiesDeCierre[0]).toMatchObject({ propinaMonto: '0' })
+  })
+
+  /** Las dos mesas del salón, para los tests que necesitan cambiar de mesa. */
+  function dosMesas(abiertas = 0) {
+    return [{
+      id: 'salon-1',
+      nombre: 'Principal',
+      mesas: [
+        { ...mesa(), cuentasAbiertas: abiertas, ocupada: abiertas > 0 },
+        { ...mesa(), id: 'mesa-2', nombre: 'Mesa 2', cuentasAbiertas: abiertas, ocupada: abiertas > 0 },
+      ],
+    }]
+  }
+
+  function mesasEnPantalla(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper.findComponent({ name: 'SalonesSalonPlano' }).props('mesas') as {
+      id: string, cuentasAbiertas: number, ocupada: boolean
+    }[]
+  }
+
+  it('agregar un producto y volver al listado no te devuelve a la cuenta', async () => {
+    /**
+     * La familia tiene una mitad con la forma **dada vuelta**: no es leer estado
+     * reactivo después del `await`, es **escribirlo**. `syncCuenta` hacía
+     * `activeCuenta.value = cuenta` sin preguntar, y lo llaman los tres caminos
+     * que mutan la cuenta por request (`addProducto`, `onRecetaConfirm`,
+     * `quitarLinea`). Tocar *Cuentas* mientras ese request viajaba y ver la
+     * pantalla saltar sola de vuelta al detalle.
+     *
+     * El gemelo condicionado ya existía siete líneas más abajo
+     * (`aplicarCuentaActualizada`), con cinco llamadores.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    agregarLineaRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    drawerMesa()!.querySelector<HTMLElement>(`[data-qa="item-catalogo-${PRODUCTO_ID}"]`)!.click()
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    // Sigue en el listado: el botón *Cuentas* solo existe en el detalle.
+    expect(botonEn(drawerMesa(), 'Cuentas')).toBeUndefined()
+
+    // Y lo que el servidor contestó **sí** entró a la lista: condicionar la
+    // escritura entera —congelar de más— habría perdido la línea agregada.
+    drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!.click()
+    await esperar(50)
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })).toHaveLength(2)
+  })
+
+  it('abrir una cuenta y cambiar de mesa no mete esa cuenta en el listado de la otra', async () => {
+    /**
+     * `abrirCuentaConPin` congela bien el `mesaId` para la ocupación, pero
+     * después del `await` hacía `cuentas.value.push(cuenta)` y `abrirCuenta()`
+     * sin preguntar. El modal de PIN ya cerró —emite `confirm` y después se
+     * cierra—, así que cambiar de mesa en ese tramo metía una cuenta de la mesa
+     * A en el listado de la mesa B, y encima teletransportaba al garzón adentro.
+     *
+     * Lo levantó la revisión independiente, barriendo el archivo después de que
+     * mi propio barrido la pasara por alto.
+     */
+    salonesMock = dosMesas()
+    cuentasPorMesa = { [MESA_ID]: [], 'mesa-2': [] }
+    let soltar!: () => void
+    abrirCuentaRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    expect(await rondaDePin()).toBe(true)
+
+    // Se va a la otra mesa con el POST en vuelo.
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', {
+      ...mesa(), id: 'mesa-2', nombre: 'Mesa 2',
+    })
+    await esperar(50)
+
+    soltar()
+    await esperar(300)
+
+    // El listado que se está mirando es el de la mesa 2, y sigue vacío.
+    expect(drawerMesa()?.querySelectorAll('.cursor-pointer').length).toBe(0)
+    expect(botonEn(drawerMesa(), 'Cuentas')).toBeUndefined()
+    // Pero la cuenta se abrió de verdad, y la ocupación la cuenta la mesa 1:
+    // eso va con el `mesaId` congelado, no condicionado.
+    expect(postsAbrirCuenta).toHaveLength(1)
+    expect(mesasEnPantalla(wrapper).find(m => m.id === MESA_ID)).toMatchObject({ cuentasAbiertas: 1 })
+    expect(mesasEnPantalla(wrapper).find(m => m.id === 'mesa-2')).toMatchObject({ cuentasAbiertas: 0 })
+  })
+
+  it('dos mesas seguidas: la lista que queda es la de la mesa que se está mirando', async () => {
+    /**
+     * `cargarCuentas` asignaba `cuentas.value = await …` sin mirar si la mesa
+     * seguía siendo la pedida: dos taps rápidos en el plano y ganaba la
+     * respuesta que llegara última, no la mesa que el garzón está mirando.
+     *
+     * El guard es un token de request, como el de `useResultadoCalculado`: un
+     * `if (mesaId === selectedMesa.value?.id)` no alcanza —volver a la mesa A
+     * después de pasar por B deja pasar la respuesta vieja de A—.
+     */
+    salonesMock = dosMesas(1)
+    cuentasPorMesa = { [MESA_ID]: [cuentaConPedido('1.0000')], 'mesa-2': [otraCuentaConPedido('1.0000')] }
+    let soltar!: () => void
+    listarCuentasRetenido = {
+      [MESA_ID]: new Promise<void>((r) => {
+        soltar = r
+      }),
+    }
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', {
+      ...mesa(), id: 'mesa-2', nombre: 'Mesa 2', cuentasAbiertas: 1, ocupada: true,
+    })
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+
+    // Llega tarde la de la mesa 1.
+    soltar()
+    await esperar(300)
+
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+    expect(drawerMesa()?.textContent).not.toContain('Cuenta 9')
+  })
+
+  it('volver a la mesa que dejaste no deja entrar la respuesta vieja de esa mesa', async () => {
+    /**
+     * El caso que separa el **token** de un `if (mesaId === selectedMesa.value?.id)`.
+     * Con el guard por id, la respuesta vieja de la mesa 1 encuentra la mesa 1
+     * otra vez seleccionada y pasa, pisando la lista que el segundo pedido —el
+     * que el garzón realmente está mirando— acaba de traer. Sin este test, la
+     * frase "un guard por id no alcanza" escrita en el código sería una
+     * afirmación sin medir.
+     */
+    salonesMock = dosMesas(1)
+    const mesa2 = { ...mesa(), id: 'mesa-2', nombre: 'Mesa 2', cuentasAbiertas: 1, ocupada: true }
+    cuentasPorMesa = { [MESA_ID]: [cuentaConPedido('1.0000')], 'mesa-2': [otraCuentaConPedido('1.0000')] }
+    let soltar!: () => void
+    listarCuentasRetenido = {
+      [MESA_ID]: new Promise<void>((r) => {
+        soltar = r
+      }),
+    }
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+
+    // Pasa por la mesa 2 y vuelve. La segunda vuelta a la mesa 1 ya no está
+    // retenida, y el servidor mientras tanto tiene otra cosa.
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', mesa2)
+    await esperar(50)
+    listarCuentasRetenido = {}
+    cuentasPorMesa = { ...cuentasPorMesa, [MESA_ID]: [terceraCuentaConPedido('1.0000')] }
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', mesa())
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 11')
+
+    // Llega la primera respuesta de la mesa 1, la vieja.
+    soltar()
+    await esperar(300)
+
+    expect(drawerMesa()?.textContent).toContain('Cuenta 11')
+    expect(drawerMesa()?.textContent).not.toContain('Cuenta 9')
+  })
+
+  it('la respuesta vieja no apaga el spinner de la mesa que todavía está cargando', async () => {
+    /**
+     * La otra mitad del token, la del `finally`. Sin él, la respuesta de la mesa
+     * que el garzón ya dejó apaga el indicador de la que **sí** está esperando, y
+     * el listado se ve vacío —"La mesa no tiene cuentas abiertas"— mientras el
+     * request viaja.
+     *
+     * Lo señaló la revisión: el `return` del `try` estaba fijado por dos tests y
+     * el `finally` por ninguno, así que un mutante que quitara solo ese guard
+     * sobrevivía la suite entera.
+     */
+    salonesMock = dosMesas(1)
+    cuentasPorMesa = { [MESA_ID]: [cuentaConPedido('1.0000')], 'mesa-2': [otraCuentaConPedido('1.0000')] }
+    let soltarUno!: () => void
+    let soltarDos!: () => void
+    listarCuentasRetenido = {
+      [MESA_ID]: new Promise<void>((r) => {
+        soltarUno = r
+      }),
+      'mesa-2': new Promise<void>((r) => {
+        soltarDos = r
+      }),
+    }
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+    wrapper.findComponent({ name: 'SalonesSalonPlano' }).vm.$emit('select', {
+      ...mesa(), id: 'mesa-2', nombre: 'Mesa 2', cuentasAbiertas: 1, ocupada: true,
+    })
+    await esperar(50)
+    expect(drawerMesa()?.querySelector('.animate-spin')).toBeTruthy()
+
+    // Llega la de la mesa 1, que ya nadie está mirando.
+    soltarUno()
+    await esperar(200)
+
+    expect(drawerMesa()?.querySelector('.animate-spin')).toBeTruthy()
+    expect(drawerMesa()?.textContent).not.toContain('La mesa no tiene cuentas abiertas')
+
+    // Y cuando llega la que importa, sí se apaga.
+    soltarDos()
+    await esperar(200)
+    expect(drawerMesa()?.querySelector('.animate-spin')).toBeFalsy()
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
   })
 })

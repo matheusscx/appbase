@@ -789,16 +789,32 @@ async function onSelectMesa(mesa: MesaResumen) {
   await cargarCuentas(mesa.id)
 }
 
+/**
+ * Token de request, mismo mecanismo que `useResultadoCalculado`: dos taps
+ * seguidos en el plano son dos `GET` en vuelo, y sin esto ganaba **el que
+ * llegara último**, no la mesa que el garzón está mirando. Un
+ * `if (mesaId === selectedMesa.value?.id)` no alcanza: pasar por la mesa B y
+ * volver a la A deja entrar la respuesta vieja de A.
+ */
+let tokenCuentas = 0
+
 async function cargarCuentas(mesaId: string) {
+  const mio = ++tokenCuentas
   loadingCuentas.value = true
   try {
-    cuentas.value = await salonesApi.listarCuentas(mesaId)
+    const lista = await salonesApi.listarCuentas(mesaId)
+    if (mio !== tokenCuentas) return
+    cuentas.value = lista
   }
   catch (e: unknown) {
+    // El aviso sale igual aunque la respuesta sea de una mesa que el garzón ya
+    // dejó: un `GET` que falla es una falla, y callarla dejaría el listado vacío
+    // sin explicación si vuelve.
     toast.add({ title: apiErrorMsg(e, 'Error al cargar cuentas'), color: 'error' })
   }
   finally {
-    loadingCuentas.value = false
+    // Mismo token: la respuesta vieja no apaga el spinner de la que sigue viva.
+    if (mio === tokenCuentas) loadingCuentas.value = false
   }
 }
 
@@ -822,10 +838,17 @@ async function abrirCuentaConPin(
   try {
     const mesaId = selectedMesa.value.id
     const cuenta = await salonesApi.abrirCuenta(mesaId, garzonId, pin)
-    cuentas.value.push(cuenta)
+    // La ocupación y el aviso van con la mesa **congelada** y sin condicionar:
+    // la cuenta se abrió de verdad, esté donde esté parado el garzón.
     patchMesaOcupacion(mesaId, 1)
-    abrirCuenta(cuenta)
     toast.add({ title: `Cuenta abierta por ${nombre}`, color: 'success' })
+    // Lo que PINTA, no: el modal de PIN ya cerró —emite `confirm` y después se
+    // cierra—, así que durante el `await` el garzón puede tocar otra mesa. Sin
+    // este guard, la cuenta de la mesa A entraba al listado de la mesa B y
+    // encima lo teletransportaba adentro. Mismo gesto que `fusionarSeleccionadas`.
+    if (selectedMesa.value?.id !== mesaId) return
+    cuentas.value.push(cuenta)
+    abrirCuenta(cuenta)
   }
   catch (e: unknown) {
     toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(garzonId, pin, nombre) })
@@ -976,11 +999,26 @@ async function fusionarSeleccionadas() {
   }
 }
 
+/**
+ * La respuesta de los tres caminos que mutan la cuenta por request
+ * (`addProducto`, `onRecetaConfirm`, `quitarLinea`).
+ *
+ * ⚠️ Delega en `aplicarCuentaActualizada` en vez de escribir `activeCuenta` a
+ * mano, que es lo que hacía: la cuenta **sí** cambió, así que lo que el servidor
+ * contesta entra a la lista pase lo que pase —condicionar eso perdería la línea
+ * recién agregada—, pero **abrir el detalle es pintar**. Sin el guard, tocar
+ * *Cuentas* con el request en vuelo devolvía al garzón a la cuenta que acababa
+ * de soltar, solo. Es la misma forma que las cinco puertas del cobro y la
+ * comanda, dada vuelta: acá el problema no era leer estado reactivo después del
+ * `await`, era **escribirlo**.
+ *
+ * El `recalcular()` va con el mismo guard: calcula el carrito vivo, así que
+ * dispararlo desde acá con el garzón en otra pantalla es un request al pedo con
+ * el resultado de otra cosa.
+ */
 function syncCuenta(cuenta: CuentaDetalle) {
-  activeCuenta.value = cuenta
-  const idx = cuentas.value.findIndex(c => c.id === cuenta.id)
-  if (idx !== -1) cuentas.value[idx] = cuenta
-  void recalcular()
+  aplicarCuentaActualizada(cuenta)
+  if (activeCuenta.value?.id === cuenta.id) void recalcular()
 }
 
 function aplicarCuentaActualizada(actualizada: CuentaDetalle) {
@@ -1275,10 +1313,12 @@ async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
       cantidadPresentacion: payload.presentacion,
       unidadCodigoPresentacion: payload.unidadCodigo,
     })
-    // `aplicarCuentaActualizada` y no `syncCuenta`: éste pisa `activeCuenta` sin
-    // mirar de quién es la respuesta, y desde que salir manda la edición la
-    // respuesta puede llegar con el garzón en OTRA cuenta — le pintaría encima
-    // la cuenta que dejó atrás.
+    // `aplicarCuentaActualizada`: la respuesta puede llegar con el garzón en OTRA
+    // cuenta —desde que salir manda la edición, esa ventana existe— y pintarle
+    // encima la que dejó atrás. Hasta el 2026-09-05 esto era la diferencia con
+    // `syncCuenta`, que escribía `activeCuenta` sin mirar; desde que `syncCuenta`
+    // delega en esta misma función, las dos hacen lo mismo y la elección de acá
+    // dejó de ser una decisión.
     aplicarCuentaActualizada(cuenta)
     if (activeCuenta.value?.id === cuentaId) void recalcular()
     // **Re-tasa el `previo` de la edición que quedó pendiente.** El que guardó

@@ -159,49 +159,29 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **`syncCuenta` reabre la cuenta que el garzón acababa de dejar: agregar un producto y
-  volver al listado lo teletransporta de vuelta** (frontend; **medido el 2026-09-05** al cerrar
-  la quinta puerta, barriendo el archivo entero en vez de fiarse de que era la última) — es la
-  **sexta** instancia de la familia, y la primera con la forma dada vuelta: no es una
-  **lectura** de estado reactivo después del `await`, es una **escritura**.
+- [ ] **El modal que se abre después de un `await`: la transferencia sale sobre la cuenta
+  equivocada, y el cobro se abre sobre el listado** (frontend; **medidas el 2026-09-05** por la
+  revisión del cierre de la familia, y **verificadas una por una** antes de escribir esto) — es
+  una **sub-forma** de la misma familia que no había aparecido: la acción congela o valida antes
+  del `await`, pero lo que se abre **después** es un modal, y el modal no lleva adentro de qué
+  cuenta habla.
 
-  `salones/index.vue`: `syncCuenta(cuenta)` hace `activeCuenta.value = cuenta` **sin
-  preguntar**, y lo llaman tres caminos, los tres después de un request: `addProducto`,
-  `onRecetaConfirm` y `quitarLinea`. Si el garzón toca *Cuentas* mientras ese request viaja,
-  la respuesta lo devuelve al detalle de la cuenta que acababa de soltar.
+  - **`abrirTransferenciaAdmin` es la grave.** Valida `activeCuenta`, hace
+    `await garzonesApi.listar()` y abre el modal **sin volver a preguntar**; y
+    `confirmarTransferenciaAdmin` relee `activeCuenta` **vivo**. O sea que el modal abierto para
+    la cuenta A **transfiere la B**: cambia el garzón responsable de una cuenta que nadie tocó.
+    Es el mismo desvío de destinatario que cerró el frente de la comanda.
+  - **`abrirCobro` es la menor**: `cobroOpen = true` después de `await asegurarVigente()` sin
+    rechequear, así que el modal de cobro se abre sobre el listado. Ahí `confirmarCobro` corta
+    en su propio guard y el tap no hace nada — molesto, no peligroso.
 
-  📌 **El arreglo probablemente ya está escrito 7 líneas más abajo**: `aplicarCuentaActualizada`
-  es el gemelo condicionado —`if (activeCuenta.value?.id === actualizada.id)`— y lo usan otros
-  **cinco** llamadores. Lo que falta medir es si `syncCuenta` puede delegar en él o si los tres
-  llamadores necesitan algo que el otro no hace. La diferencia real, verificada línea por línea
-  después de que la revisión refutara la primera versión de esta entrada: `syncCuenta` fuerza
-  `recalcular()` y el otro no; **ninguno de los dos hace `push`** —los dos reemplazan si el id
-  ya está en la lista y si no, no hacen nada—. **No es un cambio de una línea a ciegas: son dos
-  funciones que se parecen y hay que ver qué las separa.**
+  **Lo que falta medir es el costo del test, no el arreglo**: el arreglo es el gesto de siempre
+  (comparar identidad después del `await`), pero el botón *Transferir* vive detrás de
+  `puedeTransferirAdmin`, así que el spec necesita montar permisos que hoy no monta.
 
-  ⚠️ Y hay que decidir la otra mitad, la del corolario: quitar una línea o agregar un producto
-  **sí** cambia la cuenta, así que lo que la respuesta trae debe entrar a `cuentas` igual —lo
-  que se condiciona es solo si además se abre el detalle—.
-
-- [ ] **`abrirCuentaConPin` y `cargarCuentas`: la séptima y la octava de la misma familia**
-  (frontend; **medidas el 2026-09-05** por la revisión independiente del cierre de la quinta
-  puerta, después de que mi propio barrido las pasara por alto) — las dos escriben estado de
-  **la mesa** después de un `await`, sin preguntar si el garzón sigue en ella.
-
-  - `abrirCuentaConPin` congela bien el `mesaId` para la ocupación, pero después del `await`
-    hace `cuentas.value.push(cuenta)` y `abrirCuenta(cuenta)` sin condicionar. El modal de PIN
-    ya cerró (emite `confirm` y después se cierra), así que cambiar de mesa en ese tramo
-    **inyecta una cuenta de la mesa A en el listado de la mesa B** y teletransporta al garzón.
-    El gemelo protegido existe: `fusionarSeleccionadas` corta con
-    `if (selectedMesa.value?.id !== mesaId) return`.
-  - `cargarCuentas` hace `cuentas.value = await salonesApi.listarCuentas(mesaId)` sin chequear
-    que la mesa siga siendo la pedida: dos taps rápidos en el plano y gana la respuesta que
-    llegue última, no la mesa que el garzón está mirando.
-
-  **Falta medir** cuál de las dos se siente primero y si comparten arreglo con `syncCuenta`
-  (las tres son "escribir estado de otra pantalla después de un `await`"). Probablemente sea
-  **un solo frente con la entrada de arriba**, y conviene tomarlas juntas: separar la primera
-  deja las otras dos con el mismo síntoma y el próximo las lee como cerradas.
+  ⚠️ **Y lo que NO hay que volver a levantar, con su motivo medido**: `abrirHistorial` congela
+  la cuenta y abre el modal **antes** del `await`; `cargarPendientesTestigo` y
+  `abrirEntrarTurno` no están atadas a una cuenta. Las tres tienen la forma pero no el bug.
 
 - [ ] **La misma ventana del cobro deja confirmarlo dos veces** (frontend; **medido el
   2026-09-05** por la revisión del cierre de la quinta puerta, que encontró la segunda mitad de

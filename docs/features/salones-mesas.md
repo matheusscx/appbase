@@ -614,9 +614,7 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   —durante la espera las tarjetas siguen clickeables y releerlas dejaba salir la fusión con una
   sola cuenta, que el backend rechaza—. Cancelar congela el id de su cuenta y el de la mesa: sin
   eso el `try` moría con un `TypeError` y **el cancelar no salía**. *Enviar a cocina* congela la
-  cuenta entera y el nombre de la mesa (2026-09-05, la cuarta puerta de esta forma —**no la
-  última**: `cerrarCuentaConPin` es la quinta y sigue abierta, ver
-  [`../agent/pendientes.md`](../agent/pendientes.md) § 2):
+  cuenta entera y el nombre de la mesa (2026-09-05, la cuarta puerta de esta forma):
   su `await` es el mismo flush, y ahí el botón *Cuentas* sigue vivo. Con `null` el `catch`
   mostraba *"Error al enviar la comanda (¿QZ Tray está abierto?): Cannot read properties of null
   (reading 'id')"* —**le echaba la culpa a la impresora y la comanda no llegaba a cocina**, el
@@ -624,9 +622,7 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   `TypeError` y el claim salía con el id de esa otra, que le avanza la `cantidad_enviada` sin
   que nadie haya pedido su comida. Por eso se congela la cuenta entera y no solo el id: el
   `numero` y el garzón se imprimen en el ticket. *Cerrar y cobrar* hace lo mismo
-  (2026-09-05, la quinta; **no la última** —`syncCuenta` teletransporta de vuelta a la cuenta
-  desde tres llamadores, y `imprimirPrecuenta` sigue con lo suyo: los dos en
-  [`../agent/pendientes.md`](../agent/pendientes.md) § 2): la cuenta y la mesa se
+  (2026-09-05, la quinta): la cuenta y la mesa se
   congelan en `confirmarCobro`, **antes del PIN y antes del flush**, y viajan como argumentos
   a `cerrarCuentaConPin` en vez de leerse adentro. Ahí el agujero era el más caro de los
   cinco: releída después del flush, la cuenta podía ser `null` —y entonces el guard cortaba
@@ -678,6 +674,27 @@ que el cálculo fallado ya tenía, con su aviso. La salida buena —recalcular l
 pide llamar al motor por fuera de la maquinaria de vigencia de `useResultadoCalculado`: frente
 propio, anotado con el residuo que arrastra (sin cálculo, la proyección local de caja se infla
 por el vuelto).
+
+📌 **La familia tiene una segunda mitad, con la forma dada vuelta: lo que la acción
+ESCRIBE** (2026-09-05, tres de ellas; **quedan miembros vivos**, ver
+[`../agent/pendientes.md`](../agent/pendientes.md) § 2 y el barrido de
+[`../agent/resueltos.md`](../agent/resueltos.md)). No es releer estado reactivo después del
+`await`, es escribirlo encima:
+
+- `syncCuenta` —la respuesta de agregar un producto, confirmar una receta o quitar una
+  línea— hacía `activeCuenta.value = cuenta` sin preguntar, así que tocar *Cuentas* con el
+  request en vuelo devolvía al garzón, solo, a la cuenta que acababa de soltar. Ahora delega
+  en `aplicarCuentaActualizada`, el gemelo condicionado que ya existía cinco líneas más
+  abajo: **la cuenta cambió, así que la respuesta entra a la lista igual; abrir el detalle
+  es pintar y se condiciona**.
+- `abrirCuentaConPin` congelaba bien el `mesaId` para la ocupación, pero hacía
+  `cuentas.value.push()` y abría el detalle sin condicionar: cambiar de mesa durante el POST
+  metía la cuenta de la mesa A en el listado de la mesa B.
+- `cargarCuentas` asignaba la respuesta sin más, así que dos taps seguidos en el plano
+  dejaban ganar **al que llegara último**. Va con **token de request**, como `refrescarItems`
+  en este mismo archivo y `useResultadoCalculado`; un `if (mesaId === selectedMesa.value?.id)`
+  no alcanza, porque
+  pasar por la mesa B y volver a la A deja entrar la respuesta vieja de A.
 
 ⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en
 la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
