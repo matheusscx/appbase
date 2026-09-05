@@ -125,6 +125,8 @@ let fusionesPedidas = 0
 /** Los `cuentaIds` con los que salió la fusión: lo que el garzón pidió, no lo
  *  que la pantalla tenga seleccionado cuando el request sale. */
 let cuentasFusionadas: string[] = []
+/** Retiene el `POST /mesas/:id/cuentas/fusionar`: la fusión que aterriza tarde. */
+let fusionRetenida: Promise<void> | null = null
 /**
  * Lo que devuelve `GET /impresoras?rol=comanda`. Vacío por defecto: sin ninguna
  * activa, `imprimirComanda()` se saltea el flujo entero —ni reclama ni imprime—
@@ -165,6 +167,18 @@ let agregarLineaRetenido: Promise<void> | null = null
 let cuentasPorMesa: Record<string, unknown[]> = {}
 /** Retiene ese `GET` **por mesa**: la carrera de dos mesas necesita frenar una sola. */
 let listarCuentasRetenido: Record<string, Promise<void>> = {}
+/**
+ * Lo que devuelve `GET /garzones` —la lista completa que carga el modal de
+ * transferencia, distinta del `/garzones/para-selector` del PIN—. Dos garzones
+ * a propósito: `garzonesTransferibles` saca al responsable de la cuenta, así que
+ * con uno solo la lista quedaría vacía y el botón *Confirmar* deshabilitado, o
+ * sea que el test no podría llegar a la conducta que fija.
+ */
+let garzonesLista: unknown[] = []
+/** Retiene ese `GET`: es la ventana en la que el modal se abre "a destiempo". */
+let listarGarzonesRetenido: Promise<void> | null = null
+/** Cada `POST /cuentas/:id/transferir-admin`, con el id que viajó en la URL. */
+let transferenciasAdmin: string[] = []
 /**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
@@ -385,6 +399,16 @@ mockNuxtImport('useApiFetch', () => {
         { id: 'turno-1', nombre: 'Mañana', activo: true },
       ])
     }
+    const transferAdminMatch = ruta.match(/\/cuentas\/([^/]+)\/transferir-admin$/)
+    if (transferAdminMatch) {
+      transferenciasAdmin.push(transferAdminMatch[1] ?? '')
+      return Promise.resolve({ id: transferAdminMatch[1], lineas: [] })
+    }
+    if (ruta.endsWith('/garzones')) {
+      return listarGarzonesRetenido
+        ? listarGarzonesRetenido.then(() => garzonesLista)
+        : Promise.resolve(garzonesLista)
+    }
     if (ruta.endsWith('/garzones/para-selector')) {
       urlsSelector.push(url)
       // Dos garzones a propósito: con uno solo, un selector que ignorara la
@@ -424,10 +448,8 @@ mockNuxtImport('useApiFetch', () => {
       fusionesPedidas++
       patchesAlFusionar = patchesDeCantidad.length
       cuentasFusionadas = (opts?.body as { cuentaIds?: string[] } | undefined)?.cuentaIds ?? []
-      return Promise.resolve({
-        ...(cuentasDeLaMesa[0] as object),
-        numero: 1,
-      })
+      const fusionada = { ...(cuentasDeLaMesa[0] as object), numero: 1 }
+      return fusionRetenida ? fusionRetenida.then(() => fusionada) : Promise.resolve(fusionada)
     }
     if (ruta.endsWith('/salones/operacion')) {
       return Promise.resolve(salonesMock)
@@ -566,6 +588,7 @@ function reiniciarMock() {
   patchesAlFusionar = -1
   fusionesPedidas = 0
   cuentasFusionadas = []
+  fusionRetenida = null
   impresorasComanda = []
   reclamosDeComanda = []
   cierresDeCuenta = []
@@ -573,6 +596,9 @@ function reiniciarMock() {
   agregarLineaRetenido = null
   cuentasPorMesa = {}
   listarCuentasRetenido = {}
+  garzonesLista = []
+  listarGarzonesRetenido = null
+  transferenciasAdmin = []
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -594,6 +620,15 @@ afterEach(() => {
   // `describe` no afirma sobre plata— pero es una dependencia de orden latente,
   // justo la clase de fragilidad que este spec vino a sacar.
   useMonedasStore().reset()
+  // El store de permisos también sobrevive entre tests. **Sacar esta línea hoy no
+  // rompe nada —medido—, pero NO porque no corra nada después**: dos tests
+  // corren después de uno que prende `esAdmin` (los de abrir cuenta) y pasan
+  // igual, porque ninguno mira el botón *Transferir*. O sea que hoy hay tests
+  // corriendo con el store contaminado y en verde por casualidad, no por orden.
+  // El reset es lo que hace que el día que uno de ellos afirme sobre el listado
+  // no aparezca un falso verde. Lo corrigió la revisión: la primera versión de
+  // este comentario decía que eran los últimos del archivo, y es falso.
+  usePermissionsStore().reset()
 })
 
 async function montar() {
@@ -3708,5 +3743,273 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(200)
     expect(drawerMesa()?.querySelector('.animate-spin')).toBeFalsy()
     expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+  })
+
+  it('el modal de transferencia no se abre sobre otra cuenta, ni transfiere la que no era', async () => {
+    /**
+     * La sub-forma que el barrido anterior no veía: no es leer ni escribir un
+     * `ref` después del `await`, es **abrir un modal**. `abrirTransferenciaAdmin`
+     * valida la cuenta, hace `await garzonesApi.listar()` —solo la primera vez,
+     * después queda cacheada— y abre el modal **sin volver a preguntar**. Y
+     * `confirmarTransferenciaAdmin` relee `activeCuenta` **vivo**.
+     *
+     * O sea: el admin toca *Transferir* parado en la cuenta 9, se va a la 10
+     * mientras cargan los garzones, y el modal que aparece —titulado igual, sin
+     * decir de qué cuenta habla— **le cambia el responsable a la 10**. Una cuenta
+     * que nadie tocó cambia de garzón, y con eso cambia a quién se le atribuye
+     * la propina.
+     */
+    usePermissionsStore().esAdmin = true
+    garzonesLista = [
+      { id: 'g1', nombre: 'Ana', activo: true },
+      { id: 'g2', nombre: 'Bruno', activo: true },
+    ]
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    listarGarzonesRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Transferir')!.click()
+    await esperar(20)
+
+    // Se va a la otra cuenta mientras cargan los garzones.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
+    expect(tarjetas?.length).toBe(2)
+    tarjetas![1]!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    // El modal no llegó a abrirse. La aserción que manda es ésta: con el guard
+    // revertido el test muere acá mismo y no llega al `Confirmar` de abajo, que
+    // con el guard puesto no clickea nada. O sea que **este test mide la ausencia
+    // del diálogo**; la consecuencia —a qué cuenta se transfiere— la mide el de
+    // *"el Confirmar del modal transfiere la cuenta para la que se abrió"*.
+    const modalTransferir = dialogos().find(d => (d.textContent ?? '').includes('Transferir responsable'))
+    expect(modalTransferir).toBeUndefined()
+    botonEn(modalTransferir, 'Confirmar')?.click()
+    await esperar(200)
+    expect(transferenciasAdmin).toEqual([])
+  })
+
+  it('"Transferir" sin irse a ningún lado le cambia el responsable a ESA cuenta', async () => {
+    /**
+     * El control del de arriba, y no es decorativo: **medido**, un mutante que
+     * hace que `abrirTransferenciaAdmin` no entre nunca deja el test de la
+     * ventana en verde —"el modal no se abrió" también es cierto cuando la
+     * función no corre—. Hoy ese mutante muere con **tres** tests: éste y los
+     * otros dos que abren el modal de verdad; cuando se escribió, éste era el
+     * único, y sin él sobrevivía la suite entera.
+     */
+    usePermissionsStore().esAdmin = true
+    garzonesLista = [
+      { id: 'g1', nombre: 'Ana', activo: true },
+      { id: 'g2', nombre: 'Bruno', activo: true },
+    ]
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Transferir')!.click()
+    await esperar(100)
+
+    const modalTransferir = dialogos().find(d => (d.textContent ?? '').includes('Transferir responsable'))
+    expect(modalTransferir).toBeTruthy()
+    botonEn(modalTransferir, 'Confirmar')!.click()
+    await esperar(200)
+
+    expect(transferenciasAdmin).toEqual(['cuenta-9'])
+    expect(toasts.some(t => t.title === 'Responsable actualizado')).toBe(true)
+  })
+
+  it('abrir una cuenta nueva mientras estás dentro de otra no te saca de donde estás', async () => {
+    /**
+     * El guard de `abrirCuentaConPin` era **por mesa**, y eso dejaba abierta la
+     * puerta de quedarse en la misma mesa: tocás *Nueva cuenta*, tecleás el PIN,
+     * y mientras el `POST` viaja te metés en una cuenta que ya estaba. Al
+     * aterrizar, `abrirCuenta()` te cambiaba `activeCuenta` por abajo.
+     *
+     * Y no es solo "me movió la pantalla": lo midió la revisión con un modal
+     * abierto encima. El modal sigue ahí —el overlay no frena la continuación de
+     * un request— y su *Confirmar* actuaba sobre la cuenta recién creada: la
+     * transferencia le cambiaba el responsable a la nueva, y el cobro cerraba esa
+     * cuenta vacía con los pagos juntados para la otra.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    abrirCuentaRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    expect(await rondaDePin()).toBe(true)
+
+    // Se mete en la cuenta que ya estaba, con el POST todavía en vuelo.
+    drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    // Sigue en la cuenta 9, no en la recién creada.
+    expect(drawerMesa()?.textContent).toContain('Cuenta 9')
+    expect(drawerMesa()?.textContent).not.toContain('Cuenta 1 ')
+    // Pero la cuenta nueva se creó y está en el listado: condicionar el `push`
+    // —congelar de más— la habría perdido.
+    expect(postsAbrirCuenta).toHaveLength(1)
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    expect(drawerMesa()?.querySelectorAll('.cursor-pointer').length).toBe(2)
+  })
+
+  it('el Confirmar del modal transfiere la cuenta para la que se abrió, no la que quedó activa', async () => {
+    /**
+     * La sonda con la que la revisión refutó el porqué que este arreglo había
+     * escrito primero —*"con el guard, nada puede cambiar `activeCuenta` mientras
+     * el modal está abierto"*—. Lo medido entonces: `POST .../transferir-admin`
+     * salía con la cuenta recién creada.
+     *
+     * El camino quedó cerrado de los dos lados: `abrirCuentaConPin` ya no entra a
+     * la cuenta nueva si el garzón está adentro de otra, **y** el modal se lleva
+     * su cuenta adentro en vez de releer la activa.
+     */
+    usePermissionsStore().esAdmin = true
+    garzonesLista = [
+      { id: 'g1', nombre: 'Ana', activo: true },
+      { id: 'g2', nombre: 'Bruno', activo: true },
+    ]
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    abrirCuentaRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    expect(await rondaDePin()).toBe(true)
+
+    drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Transferir')!.click()
+    await esperar(100)
+    const modalTransferir = dialogos().find(d => (d.textContent ?? '').includes('Transferir responsable'))
+    expect(modalTransferir).toBeTruthy()
+
+    // Aterriza la apertura de la cuenta nueva con el modal ya abierto.
+    soltar()
+    await esperar(200)
+
+    botonEn(modalTransferir, 'Confirmar')!.click()
+    await esperar(200)
+
+    expect(transferenciasAdmin).toEqual(['cuenta-9'])
+  })
+
+  it('una fusión que aterriza con el modal abierto no le cambia el destinatario', async () => {
+    /**
+     * **El camino que refutó mi segunda explicación.** Cerrada la puerta de
+     * `abrirCuentaConPin`, escribí que ya nada podía cambiar `activeCuenta` con un
+     * modal abierto — y la revisión midió que `fusionarSeleccionadas` sí: cuando
+     * el garzón quedó parado en una de las cuentas fusionadas, su continuación
+     * hace `activeCuenta.value = cuenta` con **otro id**, y el overlay no frena la
+     * continuación de un request.
+     *
+     * Sin la cuenta congelada adentro del modal, el *Confirmar* le cambiaba el
+     * responsable a la cuenta fusionada en vez de a la que el admin tenía
+     * enfrente. Es la misma clase de desvío que el frente vino a cerrar, por una
+     * tercera puerta.
+     */
+    usePermissionsStore().esAdmin = true
+    // **Un solo garzón activo, y las dos cuentas con responsables distintos.** Es
+    // lo que hace observable la otra mitad del congelado: `garzonesTransferibles`
+    // saca al responsable de la cuenta, así que leído de `activeCuenta` la lista
+    // queda VACÍA cuando aterriza la fusión (responsable g1) y el *Confirmar* se
+    // deshabilita para una transferencia que era válida. Con dos garzones el
+    // mutante sobrevive — medido.
+    garzonesLista = [{ id: 'g1', nombre: 'Ana', activo: true }]
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [
+      cuentaConPedido('1.0000'),
+      { ...otraCuentaConPedido('1.0000'), garzonResponsableId: 'g2', garzonResponsableNombre: 'Bruno' },
+    ]
+    let soltar!: () => void
+    fusionRetenida = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(50)
+
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    expect(tarjetas.length).toBe(2)
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Sale del modo fusión y se mete en la cuenta 10, con el POST en vuelo.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasTrasSalir = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasTrasSalir[1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+
+    botonEn(drawerMesa(), 'Transferir')!.click()
+    await esperar(100)
+    const modalTransferir = dialogos().find(d => (d.textContent ?? '').includes('Transferir responsable'))
+    expect(modalTransferir).toBeTruthy()
+
+    // Aterriza la fusión: `activeCuenta` pasa a ser la fusionada.
+    soltar()
+    await esperar(200)
+
+    const confirmar = botonEn(modalTransferir, 'Confirmar')
+    expect(confirmar?.disabled, 'el Confirmar sigue habilitado: la lista de garzones es la de la cuenta del modal').toBe(false)
+    confirmar!.click()
+    await esperar(200)
+
+    expect(transferenciasAdmin).toEqual(['cuenta-10'])
+  })
+
+  it('abrir una cuenta desde el listado sí te mete adentro', async () => {
+    /**
+     * El control del guard nuevo de `abrirCuentaConPin`. Sin él, un
+     * `if (false) abrirCuenta(cuenta)` —la cuenta nueva no se abre nunca—
+     * sobrevive la suite entera: los tests de la ventana afirman que **no** te
+     * mueve, y eso también es cierto cuando no se abre nada. Medido antes de
+     * escribirlo.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = []
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    expect(await rondaDePin()).toBe(true)
+    await esperar(100)
+
+    // Quedó adentro de la cuenta recién creada: el botón *Cuentas* solo existe
+    // en el detalle.
+    expect(botonEn(drawerMesa(), 'Cuentas')).toBeTruthy()
+    expect(drawerMesa()?.textContent).toContain('Cuenta 1')
   })
 })

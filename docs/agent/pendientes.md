@@ -159,27 +159,34 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **El modal que se abre después de un `await`: la transferencia sale sobre la cuenta
-  equivocada, y el cobro se abre sobre el listado** (frontend; **medidas el 2026-09-05** por la
-  revisión del cierre de la familia, y **verificadas una por una** antes de escribir esto) — es
-  una **sub-forma** de la misma familia que no había aparecido: la acción congela o valida antes
-  del `await`, pero lo que se abre **después** es un modal, y el modal no lleva adentro de qué
-  cuenta habla.
+- [ ] **El modal de cobro no lleva su cuenta adentro: se puede cobrar la que no era** (frontend;
+  **medido con sonda el 2026-09-05** por la tercera pasada de la revisión del cierre de la
+  transferencia, después de que yo escribiera **dos veces** que no había camino) — misma
+  sub-forma que la transferencia, ya cerrada; el arreglo es el mismo gesto.
 
-  - **`abrirTransferenciaAdmin` es la grave.** Valida `activeCuenta`, hace
-    `await garzonesApi.listar()` y abre el modal **sin volver a preguntar**; y
-    `confirmarTransferenciaAdmin` relee `activeCuenta` **vivo**. O sea que el modal abierto para
-    la cuenta A **transfiere la B**: cambia el garzón responsable de una cuenta que nadie tocó.
-    Es el mismo desvío de destinatario que cerró el frente de la comanda.
-  - **`abrirCobro` es la menor**: `cobroOpen = true` después de `await asegurarVigente()` sin
-    rechequear, así que el modal de cobro se abre sobre el listado. Ahí `confirmarCobro` corta
-    en su propio guard y el tap no hace nada — molesto, no peligroso.
+  ⚠️ **Ojo con lo que esta entrada decía antes, porque estaba mal dos veces.** No es cierto que
+  el modal *"se abra sobre el listado"*: volver al listado llama `limpiarResultado()`, así que
+  `asegurarVigente()` devuelve `null` y `abrirCobro` cae en su toast *"No se pudo calcular el
+  total de la cuenta"*. Y tampoco es cierto que *"el tap no hace nada"*. Lo que pasa de verdad,
+  medido, son **dos caminos** que terminan cobrando otra cuenta:
 
-  **Lo que falta medir es el costo del test, no el arreglo**: el arreglo es el gesto de siempre
-  (comparar identidad después del `await`), pero el botón *Transferir* vive detrás de
-  `puedeTransferirAdmin`, así que el spec necesita montar permisos que hoy no monta.
+  - **Meterse en OTRA cuenta durante el `await asegurarVigente()`**: el modal abre sobre esa
+    otra, y su *Confirmar* la cobra (`cierres=["cuenta-10"]` con los pagos juntados para la 9).
+  - **Una fusión que aterriza con el modal ya abierto**: `fusionarSeleccionadas` hace
+    `activeCuenta.value = cuenta` con otro id si el garzón quedó parado en una de las fusionadas,
+    y `confirmarCobro` congela **en el Confirmar**, o sea que congela la equivocada
+    (`cierres=["cuenta-9"]` estando en la 10). El overlay no frena la continuación de un request.
 
-  ⚠️ **Y lo que NO hay que volver a levantar, con su motivo medido**: `abrirHistorial` congela
+  **El arreglo es el de la transferencia**, y está a la vista en el mismo archivo: capturar la
+  cuenta al abrir el modal (`cobroCuenta`, como `transferAdminCuenta`), comparar identidad antes
+  de abrirlo, y que `confirmarCobro` congele **desde el modal** y no desde `activeCuenta`. Y
+  entera: lo que el modal muestra —el total, la propina sugerida— sale hoy de `activeCuenta`
+  viva, y congelar a medias es la misma ventana que no congelar.
+
+  **Lo que falta medir es el costo del test**: el camino pasa por `asegurarVigente()`, que hay
+  que retener, y el modal de cobro trae la caja y los métodos de pago encima.
+
+  ⚠️ **Lo que NO hay que volver a levantar, con su motivo medido**: `abrirHistorial` congela
   la cuenta y abre el modal **antes** del `await`; `cargarPendientesTestigo` y
   `abrirEntrarTurno` no están atadas a una cuenta. Las tres tienen la forma pero no el bug.
 

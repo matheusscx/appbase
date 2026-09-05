@@ -138,6 +138,8 @@ const recetaItemId = ref<string | null>(null)
 const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
 
 const transferAdminOpen = ref(false)
+/** La cuenta para la que se abrió el modal de transferencia. Ver `abrirTransferenciaAdmin`. */
+const transferAdminCuenta = ref<CuentaDetalle | null>(null)
 const transferAdminGarzonId = ref<string | undefined>()
 const garzonesActivos = ref<Garzon[]>([])
 const garzonesCargados = ref(false)
@@ -147,8 +149,16 @@ const historialOpen = ref(false)
 const historialLoading = ref(false)
 const asignaciones = ref<CuentaAsignacionDetalle[]>([])
 
+/**
+ * Los garzones que se le pueden asignar a la cuenta **del modal**, no a la que
+ * esté activa: si el modal se lleva su cuenta adentro, se la lleva entera. De
+ * acá cuelgan la lista del select y el `:disabled` del *Confirmar*, así que
+ * leerlo de `activeCuenta` ofrecía garzones filtrados contra una cuenta y
+ * transfería otra —y podía deshabilitar el botón de una transferencia válida—.
+ * Lo levantó la revisión: congelar a medias es la misma ventana que no congelar.
+ */
 const garzonesTransferibles = computed(() => {
-  const responsableId = activeCuenta.value?.garzonResponsableId
+  const responsableId = transferAdminCuenta.value?.garzonResponsableId
   return garzonesActivos.value.filter(g => g.id !== responsableId)
 })
 
@@ -848,7 +858,16 @@ async function abrirCuentaConPin(
     // encima lo teletransportaba adentro. Mismo gesto que `fusionarSeleccionadas`.
     if (selectedMesa.value?.id !== mesaId) return
     cuentas.value.push(cuenta)
-    abrirCuenta(cuenta)
+    // ⚠️ **Y solo se entra a la cuenta nueva si el garzón sigue en el listado.**
+    // El guard de arriba es por MESA, así que no cubría el caso de quedarse en la
+    // misma mesa y meterse en otra cuenta mientras el POST viajaba: ahí esto le
+    // cambiaba `activeCuenta` por abajo. No es "te movió la pantalla": con un
+    // modal abierto encima —transferir, cobrar— el modal seguía ahí y su
+    // *Confirmar* actuaba sobre la cuenta recién creada. Medido por la revisión:
+    // el `POST .../transferir-admin` salía con la cuenta nueva, y el cobro cerraba
+    // esa cuenta vacía con los pagos que el garzón había juntado para la otra.
+    // Mismo criterio que fusionar: parado en una cuenta viva no se lo toca.
+    if (!activeCuenta.value) abrirCuenta(cuenta)
   }
   catch (e: unknown) {
     toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(garzonId, pin, nombre) })
@@ -1057,8 +1076,29 @@ async function transferirCuentaConPin(garzonId: string, pin: string) {
   }
 }
 
+/**
+ * ⚠️ **Sub-forma propia de la familia del `await`: acá lo que queda del otro lado
+ * de la espera es un MODAL.** La primera carga de garzones es un request, y el
+ * modal se abre después. Sin el guard de abajo, el admin tocaba *Transferir*
+ * parado en la cuenta 9, se iba a la 10 mientras cargaban los garzones, y el
+ * modal aparecía —titulado igual, sin decir de qué cuenta habla— sobre la 10:
+ * `confirmarTransferenciaAdmin` relee `activeCuenta` **vivo**, así que
+ * confirmarlo le cambiaba el responsable a una cuenta que nadie tocó. Medido:
+ * el `POST` salía con `cuenta-10`.
+ *
+ * ⚠️ **Y el modal se lleva su cuenta adentro** (`transferAdminCuenta`), en vez de
+ * que el *Confirmar* relea `activeCuenta`. La primera versión de este arreglo NO
+ * lo hacía, con el argumento de que con el guard nada puede cambiar la cuenta
+ * activa mientras el modal está abierto. **Falso, y la revisión lo midió**:
+ * `abrirCuentaConPin` guardaba por MESA, así que abrir una cuenta nueva y
+ * meterse en otra mientras el POST viajaba cambiaba `activeCuenta` por abajo —el
+ * overlay no frena la continuación de un request— y el *Confirmar* transfería la
+ * recién creada. Ese camino se cerró del otro lado también, pero el modal ya no
+ * depende de que no exista ninguno.
+ */
 async function abrirTransferenciaAdmin() {
-  if (!activeCuenta.value) return
+  const cuenta = activeCuenta.value
+  if (!cuenta) return
   if (!garzonesCargados.value) {
     try {
       const todos = await garzonesApi.listar()
@@ -1073,12 +1113,16 @@ async function abrirTransferenciaAdmin() {
       return
     }
   }
+  // El guard va acá y no arriba: arriba la cuenta era la correcta.
+  if (activeCuenta.value?.id !== cuenta.id) return
+  transferAdminCuenta.value = cuenta
   transferAdminGarzonId.value = garzonesTransferibles.value[0]?.id
   transferAdminOpen.value = true
 }
 
 async function confirmarTransferenciaAdmin() {
-  const cuenta = activeCuenta.value
+  // La cuenta del modal, no la que esté activa: ver `abrirTransferenciaAdmin`.
+  const cuenta = transferAdminCuenta.value
   const garzonId = transferAdminGarzonId.value
   if (!cuenta || !garzonId || transfiriendo.value) return
   transfiriendo.value = true

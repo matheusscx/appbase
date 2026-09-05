@@ -696,6 +696,24 @@ ESCRIBE** (2026-09-05, tres de ellas; **quedan miembros vivos**, ver
   no alcanza, porque
   pasar por la mesa B y volver a la A deja entrar la respuesta vieja de A.
 
+📌 **Y una tercera cara, que ningún barrido de `ref`s podía ver: el MODAL que se abre después
+del `await`** (2026-09-05). `abrirTransferenciaAdmin` validaba la cuenta, esperaba la lista de
+garzones y abría el modal sin volver a preguntar, mientras `confirmarTransferenciaAdmin` relee
+`activeCuenta` viva: tocar *Transferir* en la cuenta 9 e irse a la 10 mientras cargan los
+garzones dejaba el modal —titulado igual, sin decir de qué cuenta habla— sobre la 10, y
+confirmarlo **le cambiaba el responsable a la 10**. Va con guard de identidad **antes de abrir**, y además el modal **se lleva su cuenta adentro**
+—la cuenta y la lista de garzones—. Esto último no estaba en el primer intento, que se apoyaba
+en que *"nada puede cambiar la cuenta activa con el modal abierto"*: la revisión refutó esa
+enumeración **dos veces**, midiendo. Primero faltaba `abrirCuentaConPin`, cuyo guard era por
+mesa y no por cuenta (cerrado también del otro lado: a la cuenta nueva se entra solo si el
+garzón sigue en el listado); después faltaba `fusionarSeleccionadas`, cuya continuación cambia
+la cuenta activa cuando el garzón quedó parado en una de las fusionadas. **La salida no fue
+enumerar mejor, fue dejar de depender de la enumeración.** `abrirCobro` tiene la misma forma y
+sigue abierta, y ahí sí hay plata: dos caminos medidos cobran la cuenta equivocada
+([`../agent/pendientes.md`](../agent/pendientes.md) § 2); `abrirHistorial`,
+`cargarPendientesTestigo` y `abrirEntrarTurno` tienen la forma y **no** el bug, y ahí está
+escrito por qué.
+
 ⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en
 la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
 todo", es "decidir cada lectura". Y decidirla **midiendo**: el primer intento de la quinta

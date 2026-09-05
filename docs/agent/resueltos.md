@@ -17,6 +17,119 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El modal que se abre tarde: la transferencia le cambiaba el responsable a otra cuenta (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"El modal que se abre después de un `await`"* —
+la entrada que abrió, el mismo día, el cierre de acá abajo. Cierra su **primera fila**, la que
+esa entrada llamaba "la grave"; la segunda (`abrirCobro`) queda anotada.
+
+### La sub-forma
+
+Las cinco puertas del cobro y la comanda eran **leer** estado reactivo después de un `await`;
+las tres de la sección de abajo, **escribirlo**. Ésta es una tercera cara que ningún barrido
+anterior podía ver, porque lo que queda del otro lado de la espera no es un `ref`: es un
+**modal**.
+
+`abrirTransferenciaAdmin` valida `activeCuenta`, hace `await garzonesApi.listar()` —solo la
+primera vez, después la lista queda cacheada— y **abre el modal sin volver a preguntar**. Y
+`confirmarTransferenciaAdmin` relee `activeCuenta` **vivo**.
+
+La escena, y su consecuencia **medida** (no deducida): el admin toca *Transferir* parado en la
+cuenta 9, se va a la 10 mientras cargan los garzones, y el modal aparece —titulado *"Transferir
+responsable"*, sin decir de qué cuenta habla— sobre la 10. Confirmarlo manda
+`POST /cuentas/cuenta-10/transferir-admin`. **Una cuenta que nadie tocó cambia de garzón
+responsable**, y con eso cambia a quién se le atribuye su propina.
+
+### Qué se hizo, en dos pasadas — y la segunda salió de que la revisión refutó mi porqué
+
+**Primera versión:** un guard de identidad **antes de abrir el modal**, no antes del `await`
+—arriba la cuenta era la correcta—. Y la decisión de **no** congelar la cuenta adentro del
+modal, argumentada así: *"con el guard, `activeCuenta` no puede cambiar entre que el modal se
+abre y su Confirmar: el overlay tapa el drawer, y ninguna escritura de fondo mueve la cuenta
+activa a otra"*.
+
+⚠️ **Falso, y la revisión lo midió con una sonda.** La enumeración se quedó en
+`aplicarCuentaActualizada`. Faltaba `abrirCuentaConPin`, que tenía guard **por mesa, no por
+cuenta**: quedándose en la misma mesa y metiéndose en otra cuenta mientras el `POST` de *Nueva
+cuenta* viajaba, su continuación llamaba `abrirCuenta()` y cambiaba `activeCuenta` **por
+abajo**. El overlay no frena la continuación de un request. Medido, con el guard nuevo ya
+puesto:
+
+| Sonda | Salió | Debía salir |
+|---|---|---|
+| *Transferir* en la 9, aterriza la cuenta nueva, *Confirmar* | `POST /cuentas/cuenta-1/transferir-admin` | `cuenta-9` |
+| Cobro abierto en la 9, aterriza la cuenta nueva, confirmar + PIN | cerró y cobró `cuenta-1` con los pagos de la 9 | `cuenta-9` |
+
+O sea: **el mismo agujero que esta sección decía cerrar, por otra puerta** — y uno de los dos
+es plata.
+
+**Segunda versión, la que quedó, cierra el camino de los dos lados:**
+
+- `abrirCuentaConPin` **solo entra a la cuenta nueva si el garzón sigue en el listado**
+  (`if (!activeCuenta.value)`). El `push` a la lista queda sin condicionar: la cuenta se creó de
+  verdad. Mismo criterio que fusionar — parado en una cuenta viva no se lo toca.
+- **El modal se lleva su cuenta adentro** (`transferAdminCuenta`), y `confirmarTransferenciaAdmin`
+  actúa sobre ésa en vez de releer `activeCuenta`. Y **entera**: `garzonesTransferibles` —de
+  donde salen la lista del select y el `:disabled` del *Confirmar*— también sale de la cuenta del
+  modal.
+
+⚠️ **La segunda versión de este cierre decía que eso era "redundante hoy", y también era falso.**
+Lo midió la tercera pasada de la revisión: `fusionarSeleccionadas` es un **tercer** camino. Cuando
+el garzón quedó parado en una de las cuentas fusionadas, su continuación hace
+`activeCuenta.value = cuenta` con **otro id**, y el overlay tampoco frena la continuación de un
+request. Medido: con el modal abierto sobre la cuenta 10 y la fusión aterrizando, el *Confirmar*
+transfería `cuenta-9`.
+
+📌 **Lo que el congelado cambia y no es gratis, anotado porque es el costo conocido:** antes,
+si la cuenta se cancelaba o se cerraba con el modal abierto, `confirmarTransferenciaAdmin` leía
+`null` y salía callado; ahora manda el `POST` igual y el backend lo rechaza con
+*"La cuenta no está abierta"*. Es un toast rojo donde antes no pasaba nada — no hay corrupción,
+y el rojo dice la verdad. Y en un escenario de dos actores (una transferencia por PIN que
+aterriza con el modal admin abierto) la lista del modal puede ofrecer al garzón que **ya** quedó
+de responsable, y el backend contesta *"El garzón ya es responsable de la cuenta"*. Las dos las
+midió la revisión.
+
+📌 **La lección, escrita dos veces en el mismo frente:** *"ningún camino puede cambiar X"* es una
+afirmación sobre **todo el archivo**, y las dos veces que la escribí enumeré de menos —primero me
+faltó `abrirCuentaConPin`, después `fusionarSeleccionadas`—. La salida no fue enumerar mejor: fue
+**dejar de depender de la enumeración**, que es lo que hace el congelado del modal.
+
+### Qué lo fija
+
+Seis tests (82 en el archivo, 1082 en el frontend), **dos ramas nuevas** del mock —`GET /garzones`
+y `POST /cuentas/:id/transferir-admin`, que guarda el id con el que salió— y la retención del
+`POST .../cuentas/fusionar`, que es lo que deja aterrizar una fusión tarde. El `afterEach` del
+spec también resetea el store de permisos. **Sacar esa línea hoy no rompe nada —medido—, pero
+no porque no corra nada después**: hay dos tests que corren detrás de uno que prende `esAdmin`
+y pasan igual, porque ninguno mira el botón *Transferir*. O sea que hoy hay tests en verde con
+el store contaminado, por casualidad y no por orden; el reset es lo que evita que eso se vuelva
+un falso verde el día que alguno afirme sobre el listado. (La primera versión de este párrafo
+decía que los cuatro eran los últimos del archivo: falso, lo midió la revisión.)
+
+**Sin sobrevivientes.** Los seis mutantes, sobre el spec completo (82 tests):
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **T1** — sin el guard de identidad al abrir | el código de antes | ✝ mata 1 |
+| **T2** — `abrirTransferenciaAdmin` no entra nunca | control del guard | ✝ mata 3 |
+| **U1** — `abrirCuentaConPin` entrando siempre a la cuenta nueva | el código de antes, segunda puerta | ✝ mata 1 |
+| **U1b** — `abrirCuentaConPin` no entrando **nunca** | control de la rama que el guard deja pasar | ✝ mata 1 |
+| **U2** — el *Confirmar* releyendo `activeCuenta` | la primera versión de este arreglo | ✝ mata 1 |
+| **U3** — la lista de garzones leída de `activeCuenta` | congelar a medias | ✝ mata 1 |
+
+⚠️ **T2 y U1b no son decoración, y las dos se midieron:** con un solo test —el de la ventana— T2
+**sobrevivía**, porque *"el modal no se abrió"* también es cierto cuando la función no corre. Y
+U1b sobrevivía los 1080 tests hasta que entró el control de *"abrir una cuenta desde el listado
+sí te mete adentro"*: los tests de la ventana afirman que **no** te mueve, y eso también es
+cierto si no se abre nada. Un guard necesita el caso que **deja pasar**, una vez por rama.
+
+⚠️ **U3 necesita el fixture correcto para morir, y con el obvio sobrevive:** con dos garzones
+activos la lista filtrada da igual leída de una cuenta o de la otra. Muere solo con **un** garzón
+y las dos cuentas con responsables distintos, que es cuando leerla de `activeCuenta` la deja
+vacía y deshabilita el *Confirmar* de una transferencia válida.
+
+---
+
 ## La otra mitad de la familia: lo que la pantalla ESCRIBE después del `await` (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 2](pendientes.md), de las dos entradas que abrieron los cierres de
