@@ -564,10 +564,13 @@ que filtrar la entrada las desfasa.
 #### Cambiar la cantidad de una línea: qué pasa si el garzón se va antes (2026-09-02)
 
 La cantidad se pinta en el acto y el `PATCH` sale **300 ms después** (debounce: una ráfaga de
-taps en el stepper es un solo request). De esa ventana se sale por cinco puertas **que la
-pantalla maneja**, y cuatro de ellas **guardan** (la sexta —navegar fuera de `/salones`— no
-está manejada: guarda de rebote, porque el timer termina disparando; anotada en
-[`../agent/pendientes.md`](../agent/pendientes.md) § 2):
+taps en el stepper es un solo request). De esa ventana se sale por siete puertas, y **las siete
+manejan lo pendiente** (lo que no quiere decir que no quede nada: *Enviar a cocina* tiene su
+propio agujero abierto en [`../agent/pendientes.md`](../agent/pendientes.md) § 2, y no es del
+flush sino de lo que relee después). Todas guardan, y las tres **destructivas** —cancelar, fusionar, irse de la
+pantalla— además **esperan**. Salir al listado y cerrar el drawer también sacan la cuenta de
+escena y **no** esperan: volver al listado es instantáneo por decisión del owner (2026-09-02),
+y ahí la cuenta sigue viva.
 
 | El garzón… | Qué pasa con lo pendiente |
 |---|---|
@@ -575,7 +578,68 @@ está manejada: guarda de rebote, porque el timer termina disparando; anotada en
 | toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor |
 | toca *Cuentas* o cambia de mesa | se manda **sin esperar**: volver al listado es instantáneo |
 | **cierra el drawer** de la mesa (ESC, backdrop) | igual que *Cuentas*: se manda y la cuenta se suelta |
-| **cancela la cuenta** | se **descarta**, pero **solo si cancelar salió bien**. Si el backend rechaza —otra tablet ya la cerró— la cuenta sigue viva y la edición se manda igual. ⚠️ No es garantía: si el timer dispara mientras el request de cancelar viaja, el `PATCH` ya salió (§ 2 del backlog) |
+| **cancela la cuenta** | se manda y se **espera**, y recién entonces se cancela |
+| **fusiona cuentas** | se manda y se **espera**, y recién entonces se fusiona |
+| **navega fuera de `/salones`** | se manda y se **espera**: la navegación no ocurre hasta que termine |
+
+✅ **Decisión del owner (2026-09-05): la acción destructiva espera.** Las tres últimas filas
+salieron de ahí, pero **el síntoma no era el mismo en las tres**. En cancelar y fusionar el
+`PATCH` aterrizaba **después** de que la cuenta dejara de estar abierta, así que el garzón leía
+un toast rojo que nombraba una mesa y una cuenta que él acababa de hacer desaparecer; mandándolo
+antes, la cuenta todavía está abierta y no hay rechazo que llegue tarde. Al **navegar fuera** la
+cuenta sigue abierta y el `PATCH` se guarda bien: lo que estaba mal es que salía con la pantalla
+ya desmontada, así que un rechazo por otra causa —el stock, por ejemplo— aparecía en otra
+pantalla. Las dos primeras tienen su `:loading` en el botón: sin eso la espera se lee como que
+la app se colgó.
+
+⚠️ **Lo que cambió con cancelar, para que nadie lo lea como una regresión:** hasta el
+2026-09-05 cancelar **descartaba** la edición, y ese descarte era una decisión del 2026-09-02
+—con su test— que dejaba una ventana abierta: si el timer disparaba mientras viajaba el request
+de cancelar, el `PATCH` ya había salido y no quedaba nada que tirar. Ahora se manda antes. El
+costo, dicho: se guarda una cantidad en una cuenta que se va a anular igual — un request de
+más, no plata. El descarte **sigue existiendo** para la edición que nazca *durante* el request
+de cancelar, pero **acotado a esa cuenta**: vaciarlo entero se llevaba puesta la edición de
+otra cuenta que el garzón hubiera abierto en el ínterin —se perdía en silencio, con la cantidad
+pintada—, y lo mismo con volver al listado, que ahora solo pasa si sigue parado en la cuenta que
+canceló.
+
+⚠️ **La de navegar cubre la navegación dentro de la app, no cerrar la pestaña ni recargar**: es
+un guard de ruta (`onBeforeRouteLeave`) y ahí no corre. Mismo límite que ya tenían las demás. Y
+es la única que espera **sin indicador**: no hay botón donde ponerlo, y el tramo es el de un
+request.
+
+📌 **Corolario del que espera, y tiene DOS mitades que no se pueden confundir.** Todo lo que
+la acción lee después de un `await` hay que decidirlo a mano, una sentencia por vez:
+
+- **Lo que la acción USA se congela antes.** Fusionar manda las cuentas que estaban
+  seleccionadas *al tocar el botón*, no las que queden seleccionadas cuando el request sale
+  —durante la espera las tarjetas siguen clickeables y releerlas dejaba salir la fusión con una
+  sola cuenta, que el backend rechaza—. Cancelar congela el id de su cuenta y el de la mesa: sin
+  eso el `try` moría con un `TypeError` y **el cancelar no salía**.
+- **Lo que la acción PINTA se condiciona a dónde está parado el garzón, y la pregunta no es la
+  misma en las dos.** Cancelar pregunta *"¿sigue en la cuenta que murió? entonces sacalo"*.
+  Fusionar pregunta *"¿está en el listado, o en una de las que la fusión canceló? entonces
+  llevalo a la fusionada"* — parado en **otra** cuenta viva no se lo toca, que sería una
+  expulsión; parado en una muerta, dejarlo es peor: el listado ya no la tiene y todo lo que haga
+  vuelve *"La cuenta no está abierta"*.
+- **Lo que la acción DESCARTA mira de qué cuenta es cada edición**, no vacía todo: cancelar tira
+  lo de su cuenta, fusionar lo de **todas** las que entraron a la fusión —incluida la destino, y
+  también las líneas de la destino que la fusión no tocó: se descarta por cuenta, no por línea,
+  y la pantalla vuelve a mostrar lo que el servidor tiene, así que la pérdida se ve—. Eso **pierde** la
+  cantidad que el garzón haya tipeado ahí durante el vuelo, y es deliberado, por dos motivos
+  distintos según el lado: en las de **origen** el `PATCH` saldría con una cuenta ya anulada y
+  volvería *"La cuenta no está abierta"*; en la de **destino** —que sigue abierta— no rebota por la
+  cuenta, y ahí `PATCH /lineas` escribe la cantidad **absoluta** sobre la suma que la fusión
+  acaba de hacer. El garzón tipea mirando **lo de antes de fusionar**, así que ese número ya no
+  significa lo que quiso decir, salga como salga: puede rebotar por abajo (el guard de cocina,
+  que compara contra la `cantidad_enviada` ya sumada),
+  rebotar por arriba (el tope de stock) o entrar y pisar en silencio lo que la fusión sumó.
+  Medido: destino 2 con 2 despachadas + origen 3 con 0 = 5 con 2 despachadas, y tipear 3 pasa
+  comiéndose 2 unidades.
+
+⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en la
+cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
+todo", es "decidir cada lectura".
 
 **Decisión del owner (2026-09-02):** salir guarda. Hasta ese día salir descartaba **en
 silencio** —ni request ni aviso— y al volver a entrar el input mostraba la cantidad que nunca

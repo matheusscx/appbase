@@ -115,6 +115,12 @@ const cobroOpen = ref(false)
 const abriendoCobro = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
+/**
+ * El botón del modal de cancelar, en espera. Desde que cancelar manda primero lo
+ * pendiente (owner, 2026-09-05) hay un tramo de red antes de que pase nada: sin
+ * esto el botón queda inerte y se lee como que la app se colgó.
+ */
+const cancelando = ref(false)
 const propinaMonto = ref('0')
 const propinaSugerida = ref('0')
 
@@ -669,6 +675,23 @@ onBeforeUnmount(() => {
   if (refrescoItemsPendiente) clearTimeout(refrescoItemsPendiente)
 })
 
+/**
+ * Irse de la pantalla es la tercera puerta por la que una edición a medio
+ * guardar quedaba en el aire, y espera igual que cancelar y fusionar (owner,
+ * 2026-09-05).
+ *
+ * `onBeforeUnmount` no sirve para esto: no puede esperar, así que el `PATCH`
+ * salía con el componente ya desmontado y su toast aparecía en otra pantalla
+ * —el `Toaster` vive en `UApp`, no acá, así que se ve igual—.
+ *
+ * ⚠️ **Cubre la navegación dentro de la app, no cerrar la pestaña ni recargar**:
+ * un guard de ruta no corre ahí. Es el mismo límite que ya tenía salir de la
+ * cuenta.
+ */
+onBeforeRouteLeave(async () => {
+  await flushPendientes()
+})
+
 async function cargarCatalogo() {
   loadingCatalogo.value = true
   try {
@@ -845,22 +868,105 @@ function seleccionarTodasFusion() {
 async function fusionarSeleccionadas() {
   if (!selectedMesa.value || seleccionadasFusion.value.length < 2) return
   fusionando.value = true
+  // **Lo que se fusiona se congela acá.** El `await` de abajo es de red, y
+  // durante esa espera las tarjetas siguen clickeables —el `:loading` solo apaga
+  // el botón *Fusionar*—, así que releerlas después dejaba salir el request con
+  // UNA cuenta: el backend contesta `400 Selecciona al menos dos cuentas para
+  // fusionar` (`salones.service.ts`) y el garzón lee un toast rojo por algo que
+  // no pidió. El criterio: se fusiona lo que estaba seleccionado **al tocar el
+  // botón**, que es lo que el garzón vio escrito en él. Lo levantó la revisión
+  // del diff: la ventana la abrió el `await` nuevo.
+  const aFusionar = [...seleccionadasFusion.value]
+  const mesaId = selectedMesa.value.id
   try {
-    const fusedIds = new Set(seleccionadasFusion.value)
-    const cuenta = await salonesApi.fusionarCuentas(selectedMesa.value.id, seleccionadasFusion.value)
-    const eliminadas = cuentas.value.filter(c => fusedIds.has(c.id) && c.id !== cuenta.id).length
+    // Igual que cancelar y que cerrar: primero termina lo que quedó a medio
+    // guardar (owner, 2026-09-05). Fusionar deja las cuentas de origen
+    // `cancelada`, así que un `PATCH` en vuelo aterrizaba sobre una cuenta que
+    // ya no estaba abierta y volvía con *"La cuenta no está abierta"*,
+    // nombrando una cuenta que el garzón acababa de fusionar. La espera se ve:
+    // el botón ya tenía `:loading="fusionando"`, prendido al entrar.
+    await flushPendientes()
+    const fusedIds = new Set(aFusionar)
+    const cuenta = await salonesApi.fusionarCuentas(mesaId, aFusionar)
+    // La fusión ya ocurrió del lado del servidor, así que el aviso va siempre,
+    // esté el garzón donde esté.
+    toast.add({ title: `Cuentas fusionadas en Cuenta ${cuenta.numero}`, color: 'success' })
+    // **Cuántas se fueron sale de lo PEDIDO, no de `cuentas.value`.** El backend
+    // fusiona sobre la de menor número de las seleccionadas y cancela el resto
+    // (`salones.service.ts`, `[destino, ...origenes]`), así que son todas menos
+    // una. Contarlas sobre el listado vivo daba **cero** si durante la espera el
+    // garzón cambió de mesa, y la ocupación de la mesa fusionada quedaba inflada
+    // para siempre.
+    patchMesaOcupacion(mesaId, -(aFusionar.length - 1))
+    // **Lo que el garzón haya tocado durante el vuelo, en CUALQUIERA de las
+    // cuentas que entraron a la fusión, ya no se puede mandar.** Y son dos
+    // motivos distintos, uno por lado —los dos los midió con sonda la revisión
+    // del diff, en dos pasadas—:
+    //
+    // - **Las de ORIGEN quedaron `cancelada`**: ese `PATCH` sale con el
+    //   `cuentaId` de origen y vuelve *"La cuenta no está abierta"*, el toast que
+    //   este frente vino a sacar.
+    // - **La DESTINO sigue abierta**, así que ahí el `PATCH` no rebota por la
+    //   cuenta: el backend pliega la línea de origen sobre la de destino sumando
+    //   `cantidad` y `cantidadEnviada` (`salones.service.ts`), y
+    //   `actualizarLinea` escribe **absoluto**, o sea sobre la suma. Y el garzón
+    //   tipea mirando **lo de antes de la fusión**: ese número ya no significa lo
+    //   que él quiso decir, salga como salga —puede rebotar por el guard de
+    //   cocina, rebotar por el tope de stock, o entrar y pisar lo que la fusión
+    //   sumó—. Medido: destino 2 (2 despachadas) + origen 3 (0) = 5 con 2
+    //   despachadas; tipear 3 pasa con 200 y se come 2 unidades del origen.
+    //
+    // ⛔ **No intentes resumir esto en una regla de cuándo entra y cuándo no.**
+    // Ya se intentó varias veces y todas salieron falsas contra el backend —la
+    // lista, en `docs/agent/resueltos.md`—. Son dos guards independientes, y lo
+    // que sostiene la decisión no es dónde está la frontera: es que **el número
+    // se tipeó contra otra realidad**.
+    //
+    // ⚠️ **El costo, dicho: esa edición se pierde.** Y se descarta **por cuenta,
+    // no por línea**, así que también cae la edición de una línea del destino que
+    // la fusión no tocó y que se habría guardado bien. Es a propósito: separar
+    // línea por línea pide saber cuál se plegó y cuál no, que es justo lo que la
+    // respuesta no dice. La pérdida **se ve** —la pantalla se repinta con la
+    // cuenta del servidor—, no es silenciosa.
+    // Y como en cancelar, esto **no es una garantía sino una ventana más chica**:
+    // si el timer de los 300 ms alcanzó a disparar antes de que volviera la
+    // fusión, el `PATCH` ya salió y acá no queda nada que tirar.
+    for (const id of aFusionar) descartarPendientes(id)
+    // ⛔ **De acá para abajo se pinta pantalla, y eso solo se hace si el garzón
+    // sigue donde pidió la fusión.** Lo levantó la cuarta pasada de la revisión:
+    // congelar la selección no alcanzaba porque estas cuatro sentencias
+    // **escriben** estado vivo. Con la mesa cambiada, la cuenta fusionada se
+    // inyectaba en el listado de la OTRA mesa.
+    if (selectedMesa.value?.id !== mesaId) return
     cuentas.value = [
       cuenta,
       ...cuentas.value.filter(c => !fusedIds.has(c.id)),
     ]
-    if (eliminadas > 0) {
-      patchMesaOcupacion(selectedMesa.value.id, -eliminadas)
-    }
-    toast.add({ title: `Cuentas fusionadas en Cuenta ${cuenta.numero}`, color: 'success' })
+    // Se apagan aunque el garzón haya empezado a seleccionar otra fusión durante
+    // el vuelo: la selección nueva puede incluir cuentas que ésta acaba de
+    // anular, y dejarla armada es ofrecerle fusionar lo que ya no existe. Pierde
+    // dos taps; la alternativa pierde una fusión con un 400. (Con la mesa
+    // cambiada no llegamos acá, pero tampoco hace falta: `onSelectMesa` ya los
+    // reseteó.)
     fusionMode.value = false
     seleccionadasFusion.value = []
-    activeCuenta.value = cuenta
-    void recalcular()
+    // **Se lo lleva a la fusionada en DOS casos, y la quinta pasada de la
+    // revisión encontró el segundo:** si seguía en el listado esperándola, y si
+    // quedó parado en una de las cuentas que **esta misma fusión canceló** —ahí
+    // dejarlo no es respetar dónde estaba, es abandonarlo en una cuenta que el
+    // servidor anuló y que el listado ya no tiene; todo lo que haga desde ahí
+    // vuelve *"La cuenta no está abierta"*—. En cualquier otra cuenta no se lo
+    // toca: eso sí sería una expulsión.
+    //
+    // ⚠️ **No es el gemelo exacto del `volverACuentas()` de `confirmarCancelar`**,
+    // aunque lo parezca y así estuvo escrito acá un rato: aquél pregunta *"¿sigo
+    // en la cuenta que murió? entonces sacame"*, y éste *"¿estoy en el listado o
+    // en una que murió? entonces llevame"*. La pregunta por las muertas es la
+    // misma; el destino, no.
+    if (!activeCuenta.value || fusedIds.has(activeCuenta.value.id)) {
+      activeCuenta.value = cuenta
+      void recalcular()
+    }
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al fusionar las cuentas'), color: 'error' })
@@ -1362,27 +1468,45 @@ async function flushPendientes() {
 }
 
 /**
- * Tira las ediciones pendientes **sin mandarlas**. Único caso: la cuenta deja
- * de existir (se cancela), y ahí el `PATCH` sería un rechazo con toast por una
- * línea de una cuenta que ya no está.
+ * Tira las ediciones pendientes **de una cuenta** sin mandarlas. Lo llaman
+ * **dos** acciones, y en las dos el caso es el mismo: la edición que **nace
+ * durante** el vuelo, cuando lo que había antes ya salió por el
+ * `flushPendientes` que ambas hacen primero.
+ *
+ * - `confirmarCancelar`, para su propia cuenta: queda `cancelada`.
+ * - `fusionarSeleccionadas`, para **todas** las que entraron a la fusión: las de
+ *   origen quedan `cancelada`, y la de destino sigue abierta pero con la cantidad
+ *   ya sumada, así que un `PATCH` absoluto tardío la pisa. El porqué completo
+ *   está en el comentario de ese loop.
+ *
+ * En cancelar son **dos** ventanas seguidas —la del flush y la del request—, no
+ * una.
+ *
+ * ⛔ **El `cuentaId` no es decoración: sin él esto se llevaba puesta la edición
+ * de OTRA cuenta.** Vaciaba `pendingByLinea` entero, y el Map es de la pantalla,
+ * no de la cuenta activa —por eso `EdicionCantidad` lleva su propio `cuentaId`—.
+ * Con el cancelar en vuelo el garzón puede volver al listado, entrar a otra
+ * cuenta y editar ahí; al volver el request, esa edición se perdía **en
+ * silencio**, con la cantidad optimista pintada y sin rollback. La revisión del
+ * diff lo levantó en su tercera pasada, después de que las dos anteriores
+ * cerraran la misma forma en las otras dos sentencias de esta función.
  *
  * Mientras salir descartaba, esto no hacía falta: el timer disparaba,
  * `patchLineaCantidad` veía `activeCuenta` en `null` y cortaba callado. Al
  * hacer que salir mande, ese silencio dejó de existir y el caso hay que
  * nombrarlo.
  *
- * ⚠️ **No es una garantía, es una ventana más chica.** Corre después del
- * `await` de `cancelarCuenta` —tiene que ser así: descartando antes, un
- * cancelar que falla perdía la edición en silencio—, así que si el timer de los
- * 300 ms dispara **mientras el request de cancelar viaja**, el `PATCH` ya salió
- * y acá no queda nada que tirar. Ese caso —y sus hermanos, el `PATCH` en vuelo
- * que cae sobre una cuenta fusionada o sobre el componente desmontado— está
- * anotado en `docs/agent/pendientes.md` § 2, porque los tres se arreglan con la
- * misma decisión y no de a uno.
+ * ⚠️ **Sigue corriendo después del `await` de `cancelarCuenta`, y tiene que ser
+ * así:** descartando antes, un cancelar que falla perdía la edición en silencio.
+ * Lo que ya NO pasa es que el `PATCH` de una edición vieja llegue tarde: ésa
+ * salió antes del request, con la cuenta todavía abierta.
  */
-function descartarPendientes() {
-  for (const { timer } of pendingByLinea.values()) clearTimeout(timer)
-  pendingByLinea.clear()
+function descartarPendientes(cuentaId: string) {
+  for (const [lineaId, edicion] of pendingByLinea) {
+    if (edicion.cuentaId !== cuentaId) continue
+    clearTimeout(edicion.timer)
+    pendingByLinea.delete(lineaId)
+  }
 }
 
 /**
@@ -1621,26 +1745,68 @@ async function imprimirPrecuenta() {
 // ── Cancelar / cerrar cuenta ───────────────────────────────────────────────
 async function confirmarCancelar() {
   if (!activeCuenta.value || !selectedMesa.value) return
+  cancelando.value = true
+  // **Congelado ANTES de la espera, igual que en fusionar.** El `await` de abajo
+  // es de red, y durante ese tramo el garzón puede volver al listado —el botón
+  // *Cancelar* del modal no está deshabilitado, y el modal cierra con ESC o
+  // backdrop—, lo que deja `activeCuenta` en `null`. Releyendo el id después, el
+  // `try` moría con un `TypeError` y **el cancelar no salía**: el garzón
+  // confirmaba anular la cuenta, veía un toast rojo con un mensaje de JavaScript
+  // y la cuenta seguía abierta. Lo midió la revisión del diff, segunda pasada.
+  const cuentaId = activeCuenta.value.id
+  const mesaId = selectedMesa.value.id
   try {
-    const mesaId = selectedMesa.value.id
-    await salonesApi.cancelarCuenta(activeCuenta.value.id)
-    // Descartar va acá y **no antes del request**: cancelar falla de verdad
-    // —`400` si otro dispositivo ya la cerró, `404`, red—, y descartando primero
-    // el garzón se quedaba dentro de la cuenta con la cantidad pintada, sin
-    // `PATCH`, sin rollback y sin timer que lo mandara después. O sea el mismo
-    // "quedó guardado y el servidor no se enteró" que este frente vino a cerrar,
-    // reintroducido por la puerta de al lado. Lo midió la revisión del diff.
-    descartarPendientes()
+    // **Primero se termina lo que quedó a medio guardar** (decisión del owner,
+    // 2026-09-05). Hasta ese día se descartaba, y quedaba una ventana: si los
+    // 300 ms del debounce se cumplían mientras viajaba el request de cancelar,
+    // el `PATCH` ya había salido y llegaba tarde, con un toast que nombraba una
+    // cuenta que el garzón acababa de anular. Mandándolo antes, esa edición viaja
+    // con la cuenta todavía abierta.
+    // El costo: se guarda una cantidad en una cuenta que se va a anular igual.
+    // Un request de más, no plata.
+    // ⚠️ **Cierra la ventana de lo que estaba pendiente al confirmar, no todas.**
+    // Una edición que NACE durante estos dos `await` y cuyo timer alcanza a
+    // disparar sale igual y puede aterrizar tarde; para eso está el
+    // `descartarPendientes` de abajo, que tampoco es una garantía sino una
+    // ventana más chica.
+    await flushPendientes()
+    await salonesApi.cancelarCuenta(cuentaId)
+    // Sigue haciendo falta después del flush: el garzón puede tocar el stepper
+    // mientras viaja el request de cancelar, y esa edición nueva sí caería sobre
+    // una cuenta que ya no está. Va acá y **no antes del request**: cancelar
+    // falla de verdad —`400` si otro dispositivo ya la cerró, `404`, red—, y
+    // descartando primero el garzón se quedaba dentro de la cuenta con la
+    // cantidad pintada, sin `PATCH`, sin rollback y sin timer que lo mandara
+    // después. Lo midió la revisión del diff.
+    descartarPendientes(cuentaId)
     toast.add({ title: 'Cuenta cancelada', color: 'success' })
-    cuentas.value = cuentas.value.filter(c => c.id !== activeCuenta.value?.id)
+    // El mismo id congelado: con `activeCuenta` ya en `null`, este filtro no
+    // sacaba nada y la cuenta cancelada se quedaba pintada en el listado.
+    cuentas.value = cuentas.value.filter(c => c.id !== cuentaId)
     patchMesaOcupacion(mesaId, -1)
-    volverACuentas()
+    // Solo si el garzón sigue parado en la cuenta que canceló: durante la espera
+    // pudo entrar a otra, y sacarlo de ahí es expulsarlo de una cuenta que no
+    // tiene nada que ver. Misma razón que el `cuentaId` de `descartarPendientes`.
+    if (activeCuenta.value?.id === cuentaId) volverACuentas()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cancelar la cuenta'), color: 'error' })
   }
   finally {
-    cancelOpen.value = false
+    cancelando.value = false
+    // Cerrar el modal salvo que el garzón esté parado en OTRA cuenta: durante la
+    // espera puede haber entrado a una y abierto el suyo —comparten el mismo
+    // `cancelOpen`—, y cerrárselo de prepo es sacarle una pregunta que todavía no
+    // contestó. Lo levantó la revisión como menor.
+    //
+    // ⚠️ **El `!activeCuenta.value` no es opcional**, y el primer intento de este
+    // guard lo omitió: en el camino feliz `volverACuentas()` ya dejó
+    // `activeCuenta` en `null` dos líneas más arriba, así que preguntar solo por
+    // el id dejaba el modal **abierto para siempre** después de cancelar. No lo
+    // cazaba ningún test; ahora sí.
+    if (!activeCuenta.value || activeCuenta.value.id === cuentaId) {
+      cancelOpen.value = false
+    }
   }
 }
 
@@ -2141,6 +2307,7 @@ async function cerrarCuentaConPin(
         title="Cancelar cuenta"
         message="Se anulará la cuenta sin generar venta. Esta acción no se puede deshacer."
         confirm-label="Cancelar cuenta"
+        :loading="cancelando"
         @confirm="confirmarCancelar"
       />
 

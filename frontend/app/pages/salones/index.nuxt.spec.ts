@@ -117,6 +117,14 @@ let patchCantidadRetenido: Promise<void> | null = null
  * (`salones.service.ts`, `getCuentaAbiertaConLock`).
  */
 let cancelarFalla = false
+/** Ver el mock de `POST /cuentas/:id/cancelar`. */
+let patchesAlCancelar = -1
+/** Gemelo del anterior, para `POST /mesas/:id/cuentas/fusionar`. */
+let patchesAlFusionar = -1
+let fusionesPedidas = 0
+/** Los `cuentaIds` con los que salió la fusión: lo que el garzón pidió, no lo
+ *  que la pantalla tenga seleccionado cuando el request sale. */
+let cuentasFusionadas: string[] = []
 /**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
@@ -357,8 +365,22 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve({ garzonId: 'g1', nombre: 'Ana' })
     }
     if (/\/cuentas\/[^/]+\/cancelar$/.test(ruta)) {
+      // Cuántas ediciones habían salido ya cuando llegó el cancelar. Es la única
+      // forma de afirmar el ORDEN: los dos requests terminan igual, y con
+      // `patchesDeCantidad` leído al final no se distingue "salió antes" de
+      // "salió después".
+      patchesAlCancelar = patchesDeCantidad.length
       if (cancelarFalla) return Promise.reject(new Error('La cuenta no está abierta'))
       return Promise.resolve({ ok: true })
+    }
+    if (ruta.endsWith('/cuentas/fusionar')) {
+      fusionesPedidas++
+      patchesAlFusionar = patchesDeCantidad.length
+      cuentasFusionadas = (opts?.body as { cuentaIds?: string[] } | undefined)?.cuentaIds ?? []
+      return Promise.resolve({
+        ...(cuentasDeLaMesa[0] as object),
+        numero: 1,
+      })
     }
     if (ruta.endsWith('/salones/operacion')) {
       return Promise.resolve(salonesMock)
@@ -469,6 +491,10 @@ function reiniciarMock() {
   patchCantidadFalla = false
   patchCantidadRetenido = null
   cancelarFalla = false
+  patchesAlCancelar = -1
+  patchesAlFusionar = -1
+  fusionesPedidas = 0
+  cuentasFusionadas = []
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -1446,6 +1472,67 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   }
 
   /**
+   * Una TERCERA cuenta, con su línea, que **no entra en la fusión**. Sin ella no
+   * se puede montar la escena de "el garzón se metió en otra cuenta": con solo
+   * dos, la otra es siempre una de las fusionadas —y ahí lo correcto es
+   * justamente lo contrario, llevarlo a la fusionada—.
+   */
+  function terceraCuentaConPedido(cantidad: string) {
+    return {
+      ...segundaCuenta(),
+      id: 'cuenta-11',
+      numero: 11,
+      lineas: [{
+        id: 'linea-3',
+        itemId: PRODUCTO_ID,
+        nombre: 'Coca-Cola',
+        precioBase: '1500',
+        monedaId: CLP_ID,
+        cantidad,
+      }],
+    }
+  }
+
+  /** Gemela de `segundaCuenta` pero CON línea propia: hace falta para editar en
+   *  la otra cuenta mientras el cancelar de la primera viaja. */
+  function otraCuentaConPedido(cantidad: string) {
+    return {
+      ...segundaCuenta(),
+      lineas: [{
+        id: 'linea-2',
+        itemId: PRODUCTO_ID,
+        nombre: 'Coca-Cola',
+        precioBase: '1500',
+        monedaId: CLP_ID,
+        cantidad,
+      }],
+    }
+  }
+
+  /**
+   * La segunda cuenta de la mesa: sin dos, el botón *Fusionar cuentas* ni
+   * siquiera se rinde (`v-if="cuentas.length >= 2"`). Va SIN líneas a propósito
+   * —lo que se fusiona acá es el orden de dos requests, no el contenido—.
+   */
+  function segundaCuenta() {
+    return {
+      id: 'cuenta-10',
+      numero: 10,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      lineas: [],
+    }
+  }
+
+  /**
    * La misma cuenta con **dos** líneas. Hace falta una segunda para el flush:
    * el agujero que fija ese test es que la respuesta del `PATCH` de la primera
    * pisa el optimista de la que todavía está pendiente, y con una sola línea no
@@ -2043,13 +2130,22 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(trasVolver!.props('modelValue')).toBe('1.0000')
   })
 
-  it('cancelar la cuenta NO manda la edición pendiente: esa cuenta ya no existe', async () => {
-    // El reverso de "salir guarda", y la regresión que introduciría hacerlo sin
-    // pensar: mientras salir descartaba, el timer de una cuenta cancelada
-    // disparaba y `patchLineaCantidad` cortaba callado al no encontrar cuenta
-    // activa. Ahora manda igual, así que cancelar tiene que tirar lo pendiente
-    // a mano — si no, el garzón cancela y recibe un rechazo por una línea de
-    // una cuenta que ya no existe.
+  it('cancelar ESPERA la edición pendiente: sale antes del cancelar, y no rebota después', async () => {
+    /**
+     * ⚠️ **Este test decía lo contrario hasta el 2026-09-05**, y el cambio es
+     * una decisión del owner, no una corrección: *"la acción espera a que
+     * termine lo que quedó a medio guardar antes de ejecutarse"*.
+     *
+     * Lo que buscaba la versión anterior sigue valiendo —que el garzón no lea un
+     * rechazo por una línea de una cuenta que acaba de cancelar—; lo que cambia
+     * es **cómo** se consigue. Antes se tiraba la edición y quedaba una ventana:
+     * si los 300 ms se cumplían mientras viajaba el request de cancelar, el
+     * `PATCH` ya había salido y no quedaba nada que tirar. Ahora sale **antes**,
+     * con la cuenta todavía abierta, así que no hay rechazo que llegue tarde.
+     *
+     * El costo, dicho: se guarda una cantidad en una cuenta que se va a anular
+     * igual. Es un request de más, no plata — la cuenta cancelada no cobra nada.
+     */
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
 
@@ -2073,7 +2169,546 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     botonEn(modal, 'Cancelar cuenta')!.click()
     await esperar(400)
 
-    expect(patchesDeCantidad).toHaveLength(0)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+    // Lo que fija el ORDEN, que es lo que este test cuida: la edición ya había
+    // salido cuando llegó el cancelar. Sin esta aserción, mandar después
+    // —justo lo que dejaba el toast huérfano— pasaría igual.
+    expect(patchesAlCancelar).toBe(1)
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+    // Y el modal se cerró: queda solo el drawer de la mesa. Sin esta aserción, un
+    // guard de más en el `finally` lo deja abierto para siempre y la suite no se
+    // entera — medido, pasó al escribirlo.
+    expect(dialogos().filter(d => !esModalPin(d))).toHaveLength(1)
+  })
+
+  it('salir de la cuenta durante la espera no impide que el cancelar salga', async () => {
+    /**
+     * El gemelo del tap que deselecciona en fusionar, y lo levantó la MISMA
+     * revisión en la segunda pasada: el `await flushPendientes()` nuevo dejó
+     * `activeCuenta.value.id` releído después. El botón *Cancelar* del modal no
+     * está deshabilitado —el `:loading` va solo al de confirmar— y el `UModal`
+     * cierra con ESC o backdrop, así que la pantalla vuelve a ser clickeable
+     * mientras el flush viaja; desde ahí *Cuentas* pone `activeCuenta` en `null`.
+     *
+     * Lo medido con la lectura sin congelar: `TypeError: Cannot read properties
+     * of null (reading 'id')` adentro del `try`, o sea el toast rojo de siempre
+     * con un mensaje de JavaScript y —lo grave— **el cancelar sin salir**. Peor
+     * que el agujero de fusionar: aquél mandaba un request malo, éste no
+     * ejecuta la acción que el garzón confirmó.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(50)
+
+    // El garzón vuelve al listado mientras el flush viaja: `activeCuenta` a null.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    // Lo que importa: el cancelar SALIÓ. Sin congelar el id, `patchesAlCancelar`
+    // se queda en -1 —el request nunca se hizo— y el toast es un `TypeError`.
+    expect(patchesAlCancelar).toBeGreaterThanOrEqual(0)
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+    expect(toasts.some(t => t.title === 'Cuenta cancelada')).toBe(true)
+    // Y la cuenta cancelada no queda pintada en el listado: el filtro que la
+    // saca lee el MISMO id, así que sin congelar sobrevive en pantalla.
+    expect(drawerMesa()?.querySelectorAll('.cursor-pointer').length).toBe(0)
+
+    wrapper.unmount()
+  })
+
+  it('cancelar una cuenta no se lleva puesta la edición de OTRA', async () => {
+    /**
+     * Tercera vuelta de la misma forma, y la levantó la tercera pasada de la
+     * revisión: congelar el id para el request y para el filtro dejó sin acotar
+     * las otras dos sentencias que corren después del mismo `await`.
+     * `descartarPendientes()` borraba **todo** `pendingByLinea` —sin mirar de qué
+     * cuenta es cada entrada, aunque `EdicionCantidad` lleva su `cuentaId`
+     * justamente para esto— y `volverACuentas()` sacaba al garzón de donde
+     * estuviera.
+     *
+     * La escena: confirmo cancelar la cuenta 9 → el modal cierra (ESC/backdrop) →
+     * *Cuentas* → abro la cuenta 10 → toco el stepper → vuelve el cancelar de la
+     * 9. La edición de la 10 se perdía **en silencio**, con la cantidad optimista
+     * pintada y sin rollback: el mismo *"quedó guardado y el servidor no se
+     * enteró"* que este frente vino a cerrar, y sobrevivía a salir y volver.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    // Una edición pendiente en la cuenta 9: es lo que hace que el flush del
+    // cancelar tenga algo que esperar. Sin esto el cancelar termina entero antes
+    // de que el garzón alcance a moverse, y la escena no existe.
+    const primerInput = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    primerInput!.vm.$emit('change', {
+      presentacion: '2',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '2.0000',
+    })
+    await esperar(20)
+
+    // Cancelar la PRIMERA cuenta, con el flush retenido.
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(50)
+
+    // El garzón se va a la OTRA cuenta y edita ahí.
+    const volver = botonEn(drawerMesa(), 'Cuentas')
+    expect(volver, 'botón Cuentas del drawer').toBeTruthy()
+    volver!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    expect(tarjetas.length, 'tarjetas de cuentas en el listado').toBe(2)
+    tarjetas[tarjetas.length - 1]!.click()
+    await esperar(50)
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '5',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '5.0000',
+    })
+    await esperar(20)
+
+    soltar()
+    await esperar(500)
+
+    // La edición de la cuenta 10 tiene que haber salido, no haber sido tirada.
+    // La de la 9 salió antes, por el flush del propio cancelar.
+    expect(patchesDeCantidad).toEqual([
+      { lineaId: 'linea-1', cantidad: '2.0000' },
+      { lineaId: 'linea-2', cantidad: '5.0000' },
+    ])
+    // Y el garzón sigue DENTRO de la cuenta 10, no de vuelta en el listado.
+    // ⚠️ No sirve buscar "Cuenta 10" en el texto: el listado también la nombra en
+    // su tarjeta, así que esa aserción pasa igual con el garzón expulsado
+    // (medido: el mutante que saca la condición de `volverACuentas` sobrevivía).
+    // El botón *Cuentas* —el de volver— existe solo con una cuenta abierta.
+    expect(botonEn(drawerMesa(), 'Cuentas'), 'seguir dentro de la cuenta').toBeTruthy()
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+
+    wrapper.unmount()
+  })
+
+  it('fusionar espera lo pendiente aunque el garzón ya haya vuelto al listado', async () => {
+    /**
+     * La ventana que abrió *"salir de la cuenta guarda"* (2026-09-02): salir
+     * manda **sin `await`**, así que el garzón vuelve al listado con el `PATCH`
+     * todavía en vuelo, y ahí mismo el listado le ofrece *Fusionar cuentas*.
+     * Fusionar deja las cuentas de origen `cancelada`, así que el `PATCH`
+     * aterrizaba sobre una cuenta que ya no estaba abierta y volvía con
+     * *"La cuenta no está abierta"*, nombrando una cuenta que el garzón acababa
+     * de fusionar.
+     *
+     * Owner, 2026-09-05: la acción espera. Con el `PATCH` retenido, la fusión no
+     * puede haber salido todavía; soltándolo, sale con la edición ya guardada.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), segundaCuenta()]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    // Volver al listado: manda lo pendiente y NO espera (por diseño).
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    expect(tarjetas.length, 'las dos cuentas de la mesa').toBe(2)
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Todavía no: el `PATCH` sigue retenido.
+    expect(fusionesPedidas).toBe(0)
+
+    soltar()
+    await esperar(200)
+
+    expect(fusionesPedidas).toBe(1)
+    expect(patchesAlFusionar).toBe(1)
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('un tap que deselecciona durante la espera no cambia lo que el garzón pidió fusionar', async () => {
+    /**
+     * La ventana que abre el `await` de arriba, y la levantó la revisión
+     * independiente: la precondición (`length < 2`) se valida ANTES del flush y
+     * la selección se releía DESPUÉS. Durante la espera de red las tarjetas
+     * siguen clickeables —el `:loading` solo apaga el botón *Fusionar*—, así que
+     * un tap dejaba la selección en 1 y el request salía igual: el backend
+     * contesta `400 Selecciona al menos dos cuentas para fusionar` y el garzón
+     * lee un toast rojo por algo que no pidió. Es el mismo toast confuso que
+     * este frente vino a sacar, entrando por la puerta de al lado.
+     *
+     * Lo que fija: se fusiona **lo que estaba seleccionado al tocar el botón**.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), segundaCuenta()]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+    expect(fusionesPedidas).toBe(0)
+
+    // El tap que llega mientras el `PATCH` viaja: deselecciona una.
+    tarjetas[1]!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(200)
+
+    expect(fusionesPedidas).toBe(1)
+    expect(cuentasFusionadas).toHaveLength(2)
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('si el garzón entró a otra cuenta durante la espera, la fusión no lo teletransporta', async () => {
+    /**
+     * La cuarta pasada de la revisión: congelar la selección no alcanzaba,
+     * porque después del `await` la función seguía **escribiendo** la pantalla
+     * —`cuentas.value`, `fusionMode`, `seleccionadasFusion` y sobre todo
+     * `activeCuenta.value = cuenta`—. Ese último es el gemelo exacto del
+     * `volverACuentas()` que este mismo frente acababa de condicionar en
+     * cancelar: llevarlo a la cuenta fusionada está bien si sigue en el listado
+     * esperándola, y es una expulsión si mientras tanto se puso a trabajar en
+     * otra.
+     *
+     * Dos gestos alcanzan: *Cancelar fusión* y abrir una cuenta.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    // TRES cuentas: se fusionan la 9 y la 10, y el garzón se mete en la 11, que
+    // **no** entra en la fusión. Con solo dos, la cuenta en la que se mete es una
+    // de las fusionadas y lo correcto es lo contrario (ver el test de abajo).
+    cuentasDeLaMesa = [
+      cuentaConPedido('1.0000'),
+      otraCuentaConPedido('1.0000'),
+      terceraCuentaConPedido('1.0000'),
+    ]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    // Una edición pendiente: es lo que hace que el flush de la fusión espere.
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Mientras la fusión viaja: sale del modo fusión y entra a la TERCERA.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasAhora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasAhora[tarjetasAhora.length - 1]!.click()
+    await esperar(50)
+
+    soltar()
+    await esperar(300)
+
+    expect(fusionesPedidas).toBe(1)
+    // Sigue en la cuenta que abrió, no en la fusionada.
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 11')
+    expect(botonEn(drawerMesa(), 'Cuentas'), 'seguir dentro de una cuenta').toBeTruthy()
+
+    wrapper.unmount()
+  })
+
+  it('pero si la cuenta donde estaba parado es una de las fusionadas, SÍ lo lleva', async () => {
+    /**
+     * La otra mitad del guard, y la levantó la quinta pasada de la revisión: el
+     * `if (!activeCuenta.value)` cubría una sola sub-escena. Si el garzón quedó
+     * parado en una cuenta que **la propia fusión canceló**, dejarlo ahí no es
+     * respetar dónde estaba: es abandonarlo en una cuenta que el servidor anuló
+     * y que el listado ya no tiene. Todo lo que haga desde ahí —agregar, comanda,
+     * cobro— vuelve *"La cuenta no está abierta"*, que es el toast que este
+     * frente vino a sacar.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Se mete en la cuenta 10, que es una de las dos que se están fusionando.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasAhora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasAhora[tarjetasAhora.length - 1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+
+    soltar()
+    await esperar(300)
+
+    // El mock devuelve la fusionada con `numero: 1`.
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 1')
+    expect(drawerMesa()?.textContent).not.toContain('— Cuenta 10')
+
+    wrapper.unmount()
+  })
+
+  it('lo que se toca en una cuenta de origen durante el vuelo no se manda: esa cuenta se anula', async () => {
+    /**
+     * El gemelo del `descartarPendientes(cuentaId)` de cancelar, y lo levantó la
+     * quinta pasada de la revisión con sonda: fusionar no descartaba nada, así
+     * que una edición nacida **durante** el vuelo sobre una cuenta de ORIGEN
+     * salía después de que la fusión la dejara `cancelada` y volvía con
+     * *"La cuenta no está abierta"* — el mismo toast que este frente vino a
+     * sacar, entrando por la última puerta que quedaba.
+     *
+     * ⚠️ **El costo, dicho:** esa edición se pierde. Se descarta, como en
+     * cancelar, y la cuenta fusionada muestra la cantidad que quedó del lado del
+     * servidor. Mandarla no es opción: el `PATCH` viaja con el `cuentaId` de la
+     * cuenta de origen, que la fusión acaba de anular.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Entra a la cuenta 10 —una de las que se están fusionando— y toca el stepper.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasAhora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasAhora[tarjetasAhora.length - 1]!.click()
+    await esperar(50)
+    const inputOrigen = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    inputOrigen!.vm.$emit('change', {
+      presentacion: '7',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '7.0000',
+    })
+    await esperar(20)
+
+    soltar()
+    await esperar(500)
+
+    // Salió la edición de la cuenta 9 —esa la mandó el flush, con la cuenta
+    // todavía abierta— y NO la de la 10, que la fusión acaba de anular.
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('y lo que se toca en la cuenta DESTINO tampoco: la fusión ya le sumó lo del origen', async () => {
+    /**
+     * El caso simétrico, y el peor de los dos: la sexta pasada de la revisión lo
+     * midió con sonda. La cuenta destino **sigue abierta**, así que ese `PATCH`
+     * no rebota **por la cuenta**: puede salir, contestar 200 y **pisar** la
+     * cantidad que la fusión acababa de sumarle.
+     *
+     * Contra el backend real (`salones.service.ts`): una línea de origen con la
+     * misma clave se pliega sobre la de destino sumando `cantidad` y
+     * `cantidadEnviada`, y `actualizarLinea` escribe **absoluto**. El garzón
+     * tipea mirando **lo de antes de la fusión**, así que ese número ya no
+     * significa lo que él quiso decir, salga como salga: puede rebotar por abajo
+     * (el guard de cocina, contra la `cantidadEnviada` sumada), por arriba (el
+     * tope de stock) o **entrar y pisar** lo que la fusión sumó. Medido: destino
+     * 2 (2 despachadas) + origen 3 (0) = 5 con 2 despachadas, y tipear 3 pasa con
+     * 200 comiéndose 2. ⛔ No hay una regla corta de cuándo entra: el comentario
+     * del código explica por qué no conviene ni intentarla.
+     *
+     * ⚠️ **Y el motivo que este mismo cierre había escrito para descartar era
+     * falso**: decía que la línea se muda "con otro id". No: la línea que NO
+     * matchea se muda **conservando su id** (`linea.cuentaId = destino.id`), y
+     * solo la que matchea se borra. El motivo verdadero es más simple: el `PATCH`
+     * viaja con el `cuentaId` de origen —cancelada— o con una cantidad calculada
+     * antes de la suma. En los dos casos, mandarlo es mentir.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Entra a la cuenta 9 —la DESTINO, la de menor número— y toca el stepper.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasAhora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasAhora[0]!.click()
+    await esperar(50)
+    const inputDestino = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    inputDestino!.vm.$emit('change', {
+      presentacion: '7',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '7.0000',
+    })
+    await esperar(20)
+
+    soltar()
+    await esperar(500)
+
+    // Solo la edición que el flush mandó ANTES de fusionar.
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    wrapper.unmount()
   })
 
   it('si CANCELAR falla, la edición no se pierde: se manda igual', async () => {

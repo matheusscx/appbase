@@ -17,6 +17,302 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las dos pantallas de reglas: el quinto camino en recargos y el escalón a medio cargar (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"`recargos.vue` no tiene el quinto camino de
+aviso que sí tiene `descuentos.vue`"*. La entrada nombraba **tres sitios del mismo hecho**: el
+usuario lee el mensaje crudo del `ValidationPipe`, en inglés, sin ningún aviso previo.
+
+**Los tres, medidos contra la API el 2026-09-05** con el body que arma cada pantalla —no
+leídos del DTO—:
+
+| Gesto | Respuesta real |
+|---|---|
+| editar un `interes_simple` (%) y pasarlo a `general` (`libre` → fuerza monto) | `400 valorMonto must be a number string` |
+| vaciar el importe de un escalón | `400 tramos.0.valorMonto must be a number string` |
+| vaciar el importe **y** el mínimo | las dos líneas, que el toast une por coma |
+
+**Lo que se hizo, y son dos cosas distintas a propósito.**
+
+1. **El quinto camino se portó tal cual a `recargos.vue`** —`valorEnElForm`, `valorSinCargar`,
+   la rama del modal y el `importe ?? null` del body—. Es la decisión que el owner ya había
+   tomado el 2026-09-03 sobre descuentos; lo que había acá era la asimetría.
+2. **El escalón a medio cargar NO va al modal: va en rojo** (decisión del owner, 2026-09-05,
+   sobre las otras dos opciones ofrecidas —el mismo modal, o el modal extendido a la
+   creación—). El campo está a la vista y lo vació el usuario, así que se marca con
+   `UFormField :error` —que es lo que le pasa `color: 'error'` y `aria-invalid` al input— y no
+   se manda. Los cinco caminos del modal siguen siendo lo que son: avisos sobre algo que la
+   fila tenía guardado y **que la pantalla ya no muestra**.
+
+⚠️ **El fixture de los dos specs mentía sobre la forma de la respuesta, y lo destapó este
+frente.** `ReglaFake.tramos` usaba la clave `minimo` —la del formulario—, pero la API devuelve
+`minimoCantidad` / `minimoMonto` (verificado contra `GET /recargos`). Con la clave del form,
+`abrirEditar` leía `minimoCantidad ?? minimoMonto ?? ''` y **todo escalón cargado entraba con
+el mínimo vacío**. Nadie lo cazaba porque ningún test miraba ese campo; el guard nuevo lo hizo
+visible al frenar tests que tenían que guardar. Corregido en los dos specs.
+
+📌 **Y un control tuvo que cambiar en las dos pantallas**: *"pero volver a cargar un escalón lo
+apaga"* agregaba un tramo **vacío** y esperaba que guardara. Sigue midiendo lo mismo —que el
+aviso del camino 3 no salga— pero ahora carga el escalón, que es lo que lo mantiene sobre el
+camino 3 y no sobre el guard nuevo.
+
+**Los mutantes** (suites de **33** en recargos y **92** en las dos; corridos **todos** contra el
+código final después de la última corrección, no solo los de la pasada que los agregó):
+
+| # | Mutante | Tests en rojo |
+|---|---|---|
+| M1 | `perdidaDeImporte` sin el `\|\| valorSinCargar` | 3 |
+| M2 | `avisoPerdida` sin la rama del camino 5 | 3 |
+| M3 | el importe vuelve a viajar como `''` en vez de `null` | 2 |
+| M4 | `guardar()` sin el guard del escalón (las dos pantallas) | 10 |
+| M5 | el importe del escalón se exige siempre sobre `valorMonto`, ignorando el modo | 8 |
+| M6 | `hayEscalonIncompleto` sin el guard de `mostrarTramos` | 2 |
+| M7 | el `:error` del mínimo, siempre falso | 2 |
+| M11 | `onModoChange` deja de vaciar los tramos (la columna abandonada) | 2 |
+
+⚠️ **M11 sobrevivió, yo declaré un motivo, y el motivo era falso.** Escribí que fijar el
+vaciado de `onModoChange` exigía una fila con las **dos** columnas cargadas —que la API no
+devuelve—, y la segunda pasada de la revisión lo refutó con la medición: alcanza con **ir y
+volver** del radio Modo, un gesto de usuario normal. Y lo que había abajo no era un mutante
+inocuo: con una fila que cobra 10%/15% por escalón, el usuario pasa a monto fijo, escribe 2.000
+y 3.000, se arrepiente y vuelve a porcentaje; **sin** el loop que vacía la columna abandonada
+sobreviven el `0.10` y el `0.15` viejos y el `PATCH` sale con ellos — la regla queda cobrando
+los porcentajes que el usuario creyó reemplazar, en silencio. Se agregó ese test a las dos
+pantallas y M11 pasó a matar 2.
+
+📌 **La lección, que vale más que la fila:** *"el mutante sobrevive porque el caso es
+inalcanzable"* es una afirmación falsable como cualquier otra, y ésta se cayó al primer intento
+de alguien que no la había escrito. Declarar un superviviente está bien; declararlo con un
+motivo sin medir, no.
+
+🟢 **M6 SOBREVIVIÓ en la primera corrida** —86 verdes con el guard sacado—: nada ejercitaba el
+caso *"vacié un escalón y después pasé la regla a un valor único"*. Se agregó ese control a las
+dos pantallas y recién ahí murió. Es el patrón de siempre: cuando un mutante vive, el
+sospechoso es el control, no la línea.
+
+**Smoke en Chrome, sobre base reseteada** (los dos caminos, en la pantalla de recargos):
+agregar un tramo y guardar deja los dos campos en rojo con *"Cada escalón necesita su mínimo y
+su importe"* y **no sale ningún `PATCH`** (verificado en el log de red); y editar *"Interés
+cuotas 5%"* a *"Recargo general"* levanta el modal *"El importe quedó sin cargar"* con
+*"Guardar igual"*.
+
+⚠️ **Y una nota de método que costó un intento:** vaciar un `MoneyInput` desde devtools
+(`fill` con `''`) **no cambia el modelo** —maska ignora la escritura programática—, así que ese
+primer smoke guardó `2000` y parecía que el guard no andaba. Lo mismo con el stepper de
+salones: un `.click()` sintético sobre el botón *Incrementar* de Nuxt UI no mueve el valor;
+hay que despachar `pointerdown`/`pointerup`. Un smoke que "pasa" sin haber tocado el campo no
+prueba nada.
+
+## Las tres acciones que pisaban un `PATCH` de cantidad en vuelo ahora esperan (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"El `PATCH` de cantidad en vuelo puede aterrizar
+sobre una cuenta que dejó de estar abierta"*, que juntaba tres casos **porque los tres se
+arreglan con la misma decisión**: fusionar, cancelar y navegar fuera de `/salones`. El síntoma
+era el mismo —un toast rojo nombrando una mesa y una cuenta que el garzón acababa de hacer
+desaparecer—, y la causa también: el `PATCH` aterrizaba **después** de que la cuenta dejara de
+estar abierta.
+
+✅ **Decisión del owner (2026-09-05): la acción espera.** De las tres salidas ofrecidas
+—esperar, callar el rechazo, o dejarlo— eligió esperar, con su costo dicho: el botón queda un
+instante sin responder y hay que mostrar por qué.
+
+**Lo que se hizo**, en `frontend/app/pages/salones/index.vue`:
+
+- `fusionarSeleccionadas` y `confirmarCancelar` hacen `await flushPendientes()` antes de su
+  request. El primero ya tenía `:loading="fusionando"`; el segundo estrena `cancelando`, atado
+  al `:loading` del `CrudModal`.
+- **Irse de la pantalla** espera con `onBeforeRouteLeave`. `onBeforeUnmount` no servía: no
+  puede esperar, así que el `PATCH` salía con el componente desmontado y su toast aparecía en
+  otra pantalla —el `Toaster` vive en `UApp`, no en la página, así que se ve igual—.
+
+⚠️ **Cancelar cambió de conducta, y no es una regresión: es la decisión nueva pisando a la
+vieja.** Hasta ese día cancelar **descartaba** la edición (decisión del 2026-09-02, con su
+test), y eso dejaba abierta la ventana que la entrada describía: si el timer disparaba mientras
+viajaba el request de cancelar, el `PATCH` ya había salido y no quedaba nada que tirar. El test
+`cancelar la cuenta NO manda la edición pendiente` se dio vuelta a `cancelar ESPERA la edición
+pendiente`, y afirma el **orden** —cuántos `PATCH` habían salido cuando llegó el cancelar—, no
+solo que exista. El costo, dicho: se guarda una cantidad en una cuenta que se va a anular
+igual. Un request de más, no plata. `descartarPendientes` **sigue vivo** para la edición que
+nazca *durante* el request de cancelar.
+
+⛔ **El `await` nuevo abrió el mismo agujero en las DOS funciones, y hicieron falta dos pasadas de la
+revisión independiente para sacarlo entero.** La forma es una sola: *precondición antes del
+`await`, dato releído después*.
+
+**Y hubo una TERCERA vuelta, en la misma función.** El arreglo de la segunda congeló los dos
+usos que la revisión había nombrado —el del request y el del filtro del listado— y dejó sin
+acotar las otras dos sentencias que corren después del mismo `await`: `descartarPendientes()`
+vaciaba `pendingByLinea` **entero**, sin mirar de qué cuenta es cada entrada, y
+`volverACuentas()` sacaba al garzón de donde estuviera. La escena, por la misma puerta que abre
+el test anterior: confirmo cancelar la cuenta 9, el modal cierra, voy a la cuenta 10 y edito
+ahí; al volver el cancelar, **la edición de la 10 se perdía en silencio** —con la cantidad
+pintada y sin rollback— y me expulsaba de esa cuenta. Se acotó `descartarPendientes(cuentaId)`
+—el Map es de la pantalla, no de la cuenta activa, y `EdicionCantidad` ya llevaba su
+`cuentaId`— y `volverACuentas()` quedó condicionado a seguir parado en la cuenta cancelada.
+
+**Y una CUARTA, en fusionar.** Congelar la selección tampoco alcanzaba: después del `await` la
+función **escribe** pantalla —`cuentas.value`, `fusionMode`, `seleccionadasFusion` y
+`activeCuenta.value = cuenta`—. Con dos gestos (*Cancelar fusión* y abrir una cuenta) el garzón
+terminaba **teletransportado** a la cuenta fusionada desde otra en la que estaba trabajando.
+Quedó separado en dos mitades: lo que la acción **usa**, congelado; lo que **pinta**,
+condicionado a que siga en la mesa. De paso, cuántas cuentas se fueron pasó a salir de **lo
+pedido** (`aFusionar.length - 1`, porque el backend fusiona sobre la de menor número y cancela el
+resto) en vez del listado vivo, que con la mesa cambiada daba cero y dejaba la ocupación
+inflada.
+
+**Y una QUINTA, en la corrección de la cuarta.** El guard que puse —*"llevalo a la fusionada
+solo si seguía en el listado"*— cubría una sub-escena de dos, y la revisión midió la otra con
+sonda: si el garzón quedó parado en una cuenta que **esta misma fusión canceló**, dejarlo ahí no
+es respetar dónde estaba, es **abandonarlo en una cuenta muerta** —el listado ya no la tiene, el
+servidor la anuló, y todo lo que haga desde ahí vuelve *"La cuenta no está abierta"*—. La
+condición correcta mira `fusedIds`. En la misma pasada apareció lo que faltaba del otro lado:
+fusionar **no descartaba** lo pendiente de las cuentas de origen, así que una edición nacida
+durante el vuelo salía después y rebotaba con ese mismo toast; ahora se descarta, con su costo
+dicho (esa edición se pierde).
+
+**Y una SEXTA, que es la que más lejos llegó.** El motivo que yo había escrito para descartar
+—*"la línea se mudó al destino con otro id"*— es **falso**, y la revisión lo refutó contra el
+backend: la línea que no matchea se muda **conservando su id** (`linea.cuentaId = destino.id`),
+y solo la que matchea se borra. Lo grave no es la errata: ese motivo falso es lo que dejaba
+invisible el caso simétrico, el de la cuenta **destino**, que mi primer loop excluía a propósito
+con un `if (id !== cuenta.id)`. Medido con sonda: la destino **sigue abierta**, así que ese
+`PATCH` no rebota por la cuenta y escribe **absoluto** sobre la suma que la fusión acaba de
+hacer (`cantidad` y `cantidadEnviada` se pliegan). Ahora se descarta lo pendiente de **todas**
+las cuentas de la fusión, destino incluida.
+
+**Lo medido, que es lo único que la decisión necesita:** destino 2 con 2 despachadas + origen 3
+con 0 → línea única de **5 con 2 despachadas**; tipear 3 **pasa con 200** y se come 2 unidades
+del origen. También rebota por abajo (guard de cocina) y por arriba (tope de stock), pero eso ya
+no lo usa la explicación: el garzón tipea mirando **lo de antes de la fusión**, así que ese
+número no significa lo que él quiso decir salga como salga. Por eso se descarta.
+
+📌 **El porqué de esta decisión salió mal CINCO veces seguidas.** La conducta también salió
+mal una vez —el primer loop excluía la cuenta destino, y el mutante **M20** de la tabla de acá
+abajo lo pone en rojo—, pero se arregló en una pasada; la explicación necesitó cinco:
+
+| # | Lo que escribí | Por qué era falso |
+|---|---|---|
+| 1 | *"la línea se muda al destino con otro id"* | la que no matchea conserva su id (`linea.cuentaId = destino.id`) |
+| 2 | *"borra en silencio unidades ya despachadas"* | el guard de cocina rechaza con 400 cualquier cantidad por debajo de `cantidadEnviada` |
+| 3 | *"lo decide si la línea tenía algo despachado"* | no: lo decide contra qué número queda; una línea con despacho igual llega al 200 |
+| 4 | *"por encima de la enviada sumada, entra"* | arriba está el tope de stock |
+| 5 | *"el tope de stock valida la cantidad nueva entera"* | valida el **neto** (`consumo(nueva) − consumo(vieja)`) |
+
+**Las cinco se cayeron abriendo el backend o pegándole a la API; ninguna se habría caído
+releyendo el comentario.** Y de la 2 a la 5 comparten la misma forma —**querer resumir en una
+frontera** un resultado que dos guards independientes deciden—, así que la redacción que quedó
+**no enumera fronteras**: dice por qué el número está mal sea cual sea el final, y avisa
+explícitamente que no se intente la regla corta. La primera versión, además, **escondió medio
+caso** (el de la cuenta destino) detrás de una explicación que sonaba razonable.
+
+⛔ **La regla que sale de acá: cuando el porqué se apoya en qué hace el servidor, no se escribe
+hasta haberlo corrido.** Y si después de dos intentos sigue sin cerrar, la salida no es una
+tercera redacción más fina: es **borrar la taxonomía** y dejar el hecho medido.
+
+⚠️ **Y quedó desmentida una afirmación que este mismo cierre había escrito:** que el guard de
+fusionar era *"el gemelo exacto"* del `volverACuentas()` de cancelar. No lo es, y la diferencia
+**era** el bug: cancelar pregunta *"¿sigo en la cuenta que murió? entonces sacame"*, y fusionar
+*"¿estoy en el listado o en una que murió? entonces llevame"*. La pregunta por las muertas es la
+misma; el destino, no.
+
+📌 **Seis pasadas, la misma forma, dos funciones.** Vale como regla más que como fila: cuando
+una función gana un `await`, hay que barrer **todas** las sentencias posteriores y decidir cada
+una por separado —no alcanza con arreglar la que la revisión nombró, que es exactamente lo que
+hice cuatro veces seguidas—. Entre las dos funciones se decidieron de a
+dos, de a una, de a dos, de a cuatro, de a dos y de a una — seis pasadas, y ninguna las vio
+todas. Y la regla **no** es *"congelar todo"*: cuatro
+de esas lecturas son vivas a propósito (el Map de pendientes y los guards de *"sigue acá"*), y
+congelarlas reintroduce el bug contrario — pasó de verdad: el primer intento del guard del modal
+de cancelar preguntaba solo por el id, y como `volverACuentas()` ya había dejado `activeCuenta`
+en `null`, **dejaba el modal abierto para siempre** después de cancelar. No lo cazó ningún test
+—el mutante M17 existe porque agregué la aserción que faltaba—.
+
+📌 **Y las últimas pasadas dejaron la lección más cara de todas:** cuando escribís *por qué* una
+decisión es correcta, ese porqué también es falsable. El mío decía que la línea se mudaba "con
+otro id", y era falso; mientras estuvo escrito, el caso simétrico —el de la cuenta destino, el
+único de los dos que **borra plata en silencio**— quedó tapado detrás de una explicación que
+sonaba razonable. **Un motivo sin medir no cierra un caso: lo esconde.**
+
+En `confirmarCancelar` lo releído era `activeCuenta.value.id`. Durante la espera de red el
+garzón puede volver al listado —el botón *Cancelar* del modal no está deshabilitado, y el modal
+cierra con ESC o backdrop—, y eso deja `activeCuenta` en `null`: el `try` moría con un
+`TypeError` y **el cancelar no salía**. El garzón confirmaba anular la cuenta, leía un toast
+rojo con un mensaje de JavaScript y la cuenta seguía abierta — peor que el de fusionar, que al
+menos mandaba un request. De arrastre, el filtro que saca la cuenta del listado leía el mismo
+dato, así que la cuenta cancelada se quedaba pintada. Se congelan `cuentaId` y `mesaId` antes
+del flush.
+
+En `fusionarSeleccionadas` la precondición (`length < 2`) se valida **antes** del flush y la
+selección se releía **después**; durante esa espera las tarjetas siguen clickeables —el
+`:loading` solo apaga el botón *Fusionar*—, así que un tap dejaba la selección en 1 y el
+request salía igual: `400 Selecciona al menos dos cuentas para fusionar` y un toast rojo por
+algo que el garzón no pidió. **El mismo defecto que este frente vino a cerrar, entrando por la
+puerta de al lado.** Se arregló congelando `aFusionar` y `mesaId` **antes** del `await`: se
+fusiona lo que estaba seleccionado al tocar el botón, que es lo que el garzón vio escrito en
+él.
+
+**Los mutantes:**
+
+| # | Mutante | Tests en rojo |
+|---|---|---|
+| M8 | fusionar sin `flushPendientes` (código anterior) | 2 |
+| M9 | cancelar sin `flushPendientes` (código anterior) | 2 |
+| M10 | releer `seleccionadasFusion` después del `await` (el agujero de arriba) | 1 |
+| M12 | releer `activeCuenta.value.id` después del `await` en cancelar | 1 |
+| M13 | `descartarPendientes` sin filtrar por cuenta | 1 |
+| M14 | `volverACuentas()` sin condición | 1 |
+| M15 | `activeCuenta.value = cuenta` sin guard, en fusionar (el teletransporte) | 1 |
+| M17 | el guard del modal de cancelar sin el `!activeCuenta` (mi primer intento) | 1 |
+| M18 | fusionar sin descartar nada de lo pendiente | 2 |
+| M19 | el guard de fusionar sin la mitad de las canceladas (`fusedIds`) | 1 |
+| M20 | descartar solo las de origen y no la destino (mi primer loop) | 1 |
+| M16 | contar las cuentas que se van sobre `cuentas.value` vivo (código anterior) | 🟢 **0 — sobrevive** |
+| — | **`onBeforeRouteLeave` vaciado** | 🟢 **0 — no tiene test, y está dicho abajo** |
+
+(Suite de salones: **64** tests.)
+
+🟢 **M16 sobrevive, y el motivo esta vez está medido, no supuesto** —la vez anterior declaré uno
+que era falso—: la única forma de distinguir *"cuántas cuentas se fueron"* contado sobre lo
+pedido de contado sobre el listado vivo es que **cambie la mesa** durante la espera, y el mock
+de este spec devuelve `cuentasDeLaMesa` para **cualquier** `GET /mesas/:id/cuentas`, así que en
+el test las dos cuentas son las mismas y los dos conteos dan igual. Fijarlo pide un fixture de
+cuentas por mesa, que es un cambio del mock que comparte la suite entera. Queda dicho, no
+escondido.
+
+📌 **Y una trampa del método, que apareció dos veces en esta pasada:** al corregir el código, el
+**ancla** de un mutante viejo deja de matchear y el script lo aplica en silencio… o no lo
+aplica. M8 y M9 dieron *"todo verde"* una vuelta cada uno **sin haberse aplicado**, que se lee
+igual que un superviviente. Lo que lo destapó fue el `assert` del script; sin él, la tabla
+habría declarado dos supervivientes falsos.
+
+⛔ **Lo que NO tiene test automatizado, dicho para que nadie lo suponga cubierto —y por eso
+tiene su fila en la tabla de arriba, con 0: el `onBeforeRouteLeave`.** Medido con una sonda: un componente montado con `mountSuspended` **no
+queda en el registro de la ruta**, así que el guard nunca se registra y el `router.push` no lo
+dispara. Lo que sí lo respalda: el `typecheck` (el auto-import de Nuxt resuelve) y un **smoke en
+Chrome sobre base reseteada** — con una edición pendiente, a los 32 ms de tocar *Inicio* la
+pantalla seguía en `/salones` y el `PATCH` de la línea salió y volvió 200; sin edición
+pendiente, a los 30 ms ya estaba en `/`.
+
+⚠️ **Y el límite del guard, que es el mismo que ya tenían las otras puertas:** cubre la
+navegación dentro de la app, **no** cerrar la pestaña ni recargar.
+
+⚠️ **El costo de esa tercera puerta, dicho donde se dicen los costos** (lo levantó la revisión
+del diff): es la **única que espera sin ningún indicador**. Fusionar y cancelar tienen su
+`:loading` —el owner pidió explícitamente que la espera se viera—, pero una navegación no tiene
+botón donde ponerlo. Medido en Chrome: el tramo es el de un request (~100 ms), así que se lee
+como latencia normal; si ese request se colgara, la cola de `flushPendientes`
+(`while (inflight.value.size > 0)`) **no tiene tope** y la navegación quedaría trabada. No se le puso
+tope acá porque inventarle un timeout es una decisión de producto que nadie tomó: queda dicho,
+no escondido.
+
+📌 **Y la pregunta con la que la entrada del backlog abría —¿los caminos de aviso se pueden
+extraer a algo compartido, o hay que copiarlos?— se midió antes de copiar:** las dos pantallas
+ya son gemelas por diseño. Medido con el código final:
+`diff <(sed 's/[Dd]escuento/X/g;s/[Rr]ecargo/X/g' descuentos.vue) <(… recargos.vue)` da **220
+líneas distintas sobre 2.464 de los dos archivos** (1.230 + 1.234). Extraer solo la
+máquina del aviso dejaría el resto duplicado y una asimetría nueva; `CLAUDE.md` admite dos
+copias y se extrae a la tercera. Si aparece una tercera pantalla de reglas, ahí se extrae.
+
 ## Deshacer una cantidad vuelve a lo último que el servidor confirmó (cerrado 2026-09-04)
 
 Sale de [`pendientes.md` § 3](pendientes.md), *"El residuo que dejó el arreglo del `PATCH` de
@@ -1101,6 +1397,11 @@ no tenía ningún test que lo matara aunque su ausencia deja el refresco del cat
 toda la sesión. Lo segundo se cubrió acá; lo primero está medido como **preexistente contra
 control** y quedó en [`pendientes.md`](pendientes.md) § 2, junto a sus hermanas, porque es la
 misma decisión.
+
+✅ **Lo primero se cerró el 2026-09-04** (`4871db35`: el loop manda lo VIVO y cancela ese
+timer), y sus hermanas —el `PATCH` en vuelo que caía sobre una cuenta fusionada, cancelada o
+desmontada— el **2026-09-05**, con la decisión del owner de que la acción espere. Las dos
+secciones están **al principio de este archivo**, que va de lo más nuevo a lo más viejo.
 
 📌 **Un detalle del test del drawer que vale para el próximo:** monta con `AppDrawer`
 **stubeado**. Cerrar el drawer de verdad dispara la transición de salida de reka, y

@@ -363,11 +363,12 @@ formulario**, así que borrarlo sin decir nada es borrar algo que dejó de estar
 mismo gesto. El modal nombra qué se pierde —*"2 escalones"* o *"un valor único cargado"*—
 porque las dos direcciones pasan por él.
 
-### Los cuatro caminos avisan, no uno
+### Los cinco caminos avisan, no uno
 
-✅ **Decisión del owner, 2026-08-29.** Hasta esa fecha avisaba solo el cambio de tipo: la
-misma pérdida preguntaba por un camino y no por los otros, y una pantalla que a veces
-pregunta y a veces no enseña a no leer el modal.
+✅ **Decisión del owner, 2026-08-29 los caminos 2 a 4; 2026-09-03 el quinto.** Hasta la
+primera de esas fechas avisaba solo el cambio de tipo: la misma pérdida preguntaba por un
+camino y no por los otros, y una pantalla que a veces pregunta y a veces no enseña a no leer el
+modal.
 
 | Camino | Gesto | Qué dice el aviso |
 |---|---|---|
@@ -375,18 +376,34 @@ pregunta y a veces no enseña a no leer el modal.
 | mover el radio de forma | en los tipos que **eligen** —método de pago—, en las dos direcciones | *"La forma de importe que quedó elegida no lo usa…"* |
 | cambiar entre dos tipos que los dos usan escalones | el formulario se vacía, pero la sección queda a la vista | *"…y el formulario quedó sin ninguno. Cargalos de nuevo"* |
 | cambiar a un tipo que **elige** forma | nadie mueve el radio: `onTipoChange` lo deja en "un valor único" y la sección desaparece | *"La forma de importe que quedó elegida no lo usa…"* |
+| el tipo nuevo da vuelta la **unidad** del importe | de un tipo en porcentaje a uno que cobra en plata: `onTipoChange` da vuelta el `modo` y el valor deja de viajar, con el campo todavía a la vista | *"…y el formulario quedó vacío. Cargalo de nuevo"* |
 
-Es **un** modal, no cuatro: lo que cambia es quién dejó de usar el importe, el tipo o la
+Es **un** modal, no cinco: lo que cambia es quién dejó de usar el importe, el tipo o la
 forma. Y el conteo que nombra —*"2 escalones"*— sale de la fila, no de una constante.
+
+⚠️ **Los cinco valen igual en las dos pantallas.** El quinto vivió dos días solo en
+descuentos, y esa asimetría era el bug: el mismo gesto —editar un `interes_simple` y pasarlo a
+`general`— dejaba al usuario de recargos leyendo *"valorMonto must be a number string"*, el
+mensaje crudo del `ValidationPipe`. Emparejado el 2026-09-05.
 
 📌 **Dice "la forma que quedó elegida" y no "que elegiste" a propósito:** en el cuarto camino
 el usuario no eligió nada.
 
-El tercero es el único que **no promete un borrado**, porque no lo hay: ahí el tipo nuevo sí
-usa escalones, el backend rechaza el guardado vacío con *"Este tipo requiere al menos un
-tramo"* y la fila queda como estaba. Por eso su botón dice *"Guardar igual"* y no *"Guardar y
-borrar"*. Ese 400 **no se tocó**: lo único que cambió es que el usuario se entera antes de
-llegar a él.
+El tercero y el quinto son los que **no prometen un borrado**, porque no lo hay: ahí el
+importe simplemente quedó sin cargar, el backend rechaza el guardado y la fila queda como
+estaba. Por eso su botón dice *"Guardar igual"* y no *"Guardar y borrar"*. Esos 400 **no se
+tocaron**: lo único que cambió es que el usuario se entera antes de llegar a ellos.
+
+⚠️ **Y la columna vacía viaja como `null`, nunca como `''` ni ausente.** Los tres cuerpos dan
+cosas distintas, medido contra la API: `''` es el 400 en inglés del `ValidationPipe`; **ausente
+es 200 cuando la fila ya tenía valor en esa columna** —el backend lee el persistido y la fila
+sigue cobrando lo de antes con la pantalla vacía—; `null` es el 400 con el motivo en castellano,
+el único que cumple lo que el modal acaba de prometer.
+
+📌 **El "ausente" depende de qué había guardado, y confundir eso costó una revisión:** viniendo
+de un tipo en porcentaje —un `interes_simple` pasado a `general`— la columna de monto persistida
+es `null`, así que omitir la clave da 400 y no 200. El 200 silencioso aparece con una fila que
+**sí** tenía valor en la columna del modo nuevo.
 
 ⚠️ **La condición pregunta por la PANTALLA, no por el tipo, y esa es la parte que hay que
 conservar.** Los escalones se pierden cuando la sección no está a la vista —venga eso del tipo
@@ -395,6 +412,30 @@ visible que quedó sin ninguno. Esta enumeración salió corta **tres veces segu
 dos caminos, una revisión levantó el tercero, y el cuarto apareció al implementar los otros.
 Preguntar por la pantalla es lo que hace que un gesto nuevo quede cubierto sin que nadie lo
 tenga que ver venir.
+
+### El escalón a medio cargar no va al modal: va en rojo
+
+✅ **Decisión del owner, 2026-09-05**, y es la única de la pantalla que no termina en el modal.
+La escena: una regla por escalones, el usuario borra el importe de uno para escribir otro, se
+distrae y guarda. Hasta ese día salía un toast con el mensaje crudo del `ValidationPipe`
+—*"tramos.0.valorMonto must be a number string"*, y las dos líneas unidas por coma si además
+faltaba el mínimo—.
+
+**Por qué acá no aplica el modal**, que es lo que hay que conservar si alguien lo unifica: los
+cinco caminos del modal avisan sobre algo que la fila tenía guardado y que la pantalla **ya no
+muestra** —el usuario no puede arreglarlo desde donde está, así que se le ofrece guardar
+igual—. Un escalón vacío es lo contrario: el campo está a la vista y lo vació él. Se marca en
+rojo, se explica debajo de la tabla —*"Cada escalón necesita su mínimo y su importe"*— y no se
+manda.
+
+⚠️ **La marca se prende al intentar guardar, no al vaciar el campo:** marcar en rojo apenas uno
+toca *Agregar tramo* pinta dos casilleros vacíos antes de que el usuario escriba nada. Una vez
+prendida, cada campo se apaga solo al cargarlo.
+
+⚠️ **Y solo cuenta con la sección a la vista.** Al pasar a "un valor único" los escalones
+siguen en el formulario —el body los borra mandando `[]`, no vaciando el form—, así que sin ese
+guard un escalón a medio cargar bloquearía el guardado de una regla que ya no los usa, con el
+campo culpable fuera de pantalla: un botón que no responde y nada que explique por qué.
 
 ### Lo que sigue sin salir
 

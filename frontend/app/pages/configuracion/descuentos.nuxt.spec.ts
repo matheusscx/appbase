@@ -32,7 +32,21 @@ interface DescuentoFake {
   valorMonto: string | null
   valorPorcentaje: string | null
   metodoPagoIds: string[]
-  tramos: { minimo: string, valorMonto: string | null, valorPorcentaje: string | null }[]
+  /**
+   * ⚠️ **`minimoMonto`, no `minimo`.** El form del drawer guarda UN campo
+   * `minimo` y el body lo vuelve a separar en columna, pero la RESPUESTA de
+   * la API trae las dos columnas — verificado contra `GET /descuentos` el
+   * 2026-09-05: `{minimoCantidad: null, minimoMonto: "1000.0000", ...}`.
+   * Con la clave del form, `abrirEditar` leía `minimoCantidad ?? minimoMonto
+   * ?? ''` y **todo escalón cargado entraba con el mínimo vacío**; nada lo
+   * cazaba porque ningún test miraba ese campo.
+   */
+  tramos: {
+    minimoMonto?: string | null
+    minimoCantidad?: string | null
+    valorMonto: string | null
+    valorPorcentaje: string | null
+  }[]
   diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
@@ -1336,7 +1350,7 @@ describe('configuracion/descuentos — perder la forma de importe avisa por los 
     descuentosBackend = [descuento({
       tipoReglaId: 'tipo-2',
       valorPorcentaje: null,
-      tramos: [{ minimo: '50000', valorMonto: null, valorPorcentaje: '0.10' }],
+      tramos: [{ minimoMonto: '50000.0000', valorMonto: null, valorPorcentaje: '0.10' }],
     })]
     reset()
     patchesGuardar = []
@@ -1391,11 +1405,29 @@ describe('configuracion/descuentos — perder la forma de importe avisa por los 
     await new Promise(r => setTimeout(r, 20))
   }
 
+  /**
+   * Los inputs de la tabla de escalones, en orden de lectura: por cada fila, el
+   * mínimo y después el importe. `tipearValor` no sirve acá —agarra el primer
+   * `inputmode="decimal"` del drawer, que con la sección de escalones a la vista
+   * es el mínimo del primer tramo—.
+   */
+  function inputsDeTramos(): HTMLInputElement[] {
+    return [...(dialogo()?.querySelectorAll<HTMLInputElement>('table input') ?? [])]
+  }
+
+  async function tipearEnTramo(indice: number, valor: string) {
+    const input = inputsDeTramos()[indice]
+    expect(input, `input #${indice} de la tabla de escalones`).toBeTruthy()
+    input!.value = valor
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 20))
+  }
+
   /** Dos escalones, no uno: el aviso tiene que decir el número REAL, y con uno
    *  solo un `2` hardcodeado pasaría igual. */
   const DOS_ESCALONES = [
-    { minimo: '50000', valorMonto: null, valorPorcentaje: '0.10' },
-    { minimo: '90000', valorMonto: null, valorPorcentaje: '0.15' },
+    { minimoMonto: '50000.0000', valorMonto: null, valorPorcentaje: '0.10' },
+    { minimoMonto: '90000.0000', valorMonto: null, valorPorcentaje: '0.15' },
   ]
 
   it('frena con el aviso en vez de guardar', async () => {
@@ -1735,6 +1767,13 @@ describe('configuracion/descuentos — perder la forma de importe avisa por los 
     expect(agregar, 'botón "Agregar tramo" de la sección de escalones').toBeTruthy()
     agregar!.click()
     await new Promise(r => setTimeout(r, 20))
+    // El escalón nuevo se CARGA, no alcanza con existir: desde el 2026-09-05 uno
+    // vacío frena el guardado con el campo en rojo. Lo que este test fija es el
+    // camino 3 —el aviso de "quedó sin ninguno" no sale porque hay uno—, así que
+    // cargarlo es lo que lo mantiene midiendo eso y no el guard nuevo.
+    // `tipo-4` es `por_mayor`: el mínimo es una CANTIDAD, no plata.
+    await tipearEnTramo(0, '10')
+    await tipearEnTramo(1, '0.05')
 
     await clickGuardar()
 
@@ -1793,6 +1832,233 @@ describe('configuracion/descuentos — perder la forma de importe avisa por los 
     // los usa es la forma en la que el cambio de tipo dejó el radio.
     expect(document.body.textContent).toContain('La forma de importe que quedó elegida no lo usa')
     expect(patchesGuardar).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  // ── El escalón a medio cargar: se marca el campo, no se manda ─────────────
+  //
+  // Decisión del owner (2026-09-05), y es la ÚNICA de esta pantalla que no
+  // termina en el modal: acá el campo está a la vista y lo vació el usuario, así
+  // que se marca en rojo y no se guarda. Los cinco caminos del modal siguen
+  // siendo lo que son —avisos sobre algo que la fila tenía guardado y la
+  // pantalla ya no muestra—.
+  //
+  // Lo que pasaba hasta hoy, medido contra la API el 2026-09-05 con el body que
+  // esta pantalla arma: un escalón vacío vuelve 400 con las líneas crudas del
+  // `ValidationPipe` —*"tramos.0.valorPorcentaje must be a number string"*—, que
+  // el toast muestra unidas por coma.
+
+  it('un escalón sin importe no se manda: el campo queda marcado', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-2',
+      valorPorcentaje: null,
+      tramos: DOS_ESCALONES,
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    // El importe del primer escalón: índice 1 (el 0 es su mínimo).
+    await tipearEnTramo(1, '')
+
+    await clickGuardar()
+
+    expect(patchesGuardar).toEqual([])
+    expect(inputsDeTramos()[1]?.getAttribute('aria-invalid')).toBe('true')
+    expect(document.body.textContent).toContain('Cada escalón necesita su mínimo y su importe')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * El mínimo de `por_mayor` es una CANTIDAD y su celda es un `UInput` pelado,
+   * no el `MoneyInput` del resto: si el guard mirara la columna de plata, este
+   * caso se le escaparía entero.
+   */
+  it('en «por mayor» la cantidad mínima vacía se marca igual, y marca solo la suya', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-4',
+      valorPorcentaje: null,
+      tramos: [
+        { minimoCantidad: '10', valorMonto: null, valorPorcentaje: '0.05' },
+        { minimoCantidad: '20', valorMonto: null, valorPorcentaje: '0.10' },
+      ],
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    // El mínimo del SEGUNDO escalón: índice 2. Así se ve que la marca es por
+    // campo y no por tabla — con la fila entera en rojo este test pasaría igual.
+    await tipearEnTramo(2, '')
+
+    await clickGuardar()
+
+    expect(patchesGuardar).toEqual([])
+    expect(inputsDeTramos()[2]?.getAttribute('aria-invalid')).toBe('true')
+    expect(inputsDeTramos()[3]?.getAttribute('aria-invalid')).not.toBe('true')
+
+    wrapper.unmount()
+  })
+
+  it('volver a cargarlo apaga la marca y deja guardar', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-2',
+      valorPorcentaje: null,
+      tramos: DOS_ESCALONES,
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await tipearEnTramo(1, '')
+    await clickGuardar()
+    expect(patchesGuardar).toEqual([])
+
+    await tipearEnTramo(1, '0.20')
+    await clickGuardar()
+
+    expect(inputsDeTramos()[1]?.getAttribute('aria-invalid')).not.toBe('true')
+    expect(patchesGuardar).toHaveLength(1)
+    // ⚠️ `'50000'` y no `'50000.0000'`, que es lo que la API devolvió: el mínimo
+    // pasa por `MoneyInput`, que lo **re-emite cuantizado a la escala de la
+    // moneda** (CLP, 0 decimales) apenas se monta. Acá es benigno —no se pierde
+    // nada—, pero es el mismo mecanismo que en un campo de 4 decimales redondea y
+    // emite en silencio (ver la entrada del `MoneyInput` en el backlog). El
+    // fixture usa la escala real de la columna `numeric(18,4)` justamente para
+    // que ese round-trip quede ejercitado.
+    expect(patchesGuardar[0]?.body.tramos).toEqual([
+      { minimoMonto: '50000', valorPorcentaje: '0.20' },
+      { minimoMonto: '90000', valorPorcentaje: '0.15' },
+    ])
+
+    wrapper.unmount()
+  })
+
+  it('con los escalones completos no marca nada, aunque nunca se haya tocado', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-2',
+      valorPorcentaje: null,
+      tramos: DOS_ESCALONES,
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    await clickGuardar()
+
+    expect(document.body.textContent).not.toContain('Cada escalón necesita su mínimo')
+    expect(inputsDeTramos().some(i => i.getAttribute('aria-invalid') === 'true')).toBe(false)
+    expect(patchesGuardar).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+  /**
+   * El control del `mostrarTramos` de `hayEscalonIncompleto`, sin el cual un
+   * escalón a medio cargar frena el guardado de una regla que **ya no cobra por
+   * escalones** — con el campo culpable fuera de pantalla, o sea un botón que no
+   * responde y nada que explique por qué.
+   *
+   * Es alcanzable con dos gestos: vaciar el importe de un escalón y después
+   * mover el radio a "un valor único". Los escalones siguen en `form.tramos`
+   * hasta que el body los borra mandando `[]`.
+   */
+  it('un escalón a medio cargar no frena el guardado si la regla dejó de usarlos', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-3',
+      valorPorcentaje: null,
+      tramos: DOS_ESCALONES,
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+    await tipearEnTramo(1, '')
+    await elegirForma('valor')
+    await tipearValor('0.05')
+
+    await clickGuardar()
+
+    expect(document.body.textContent).not.toContain('Cada escalón necesita su mínimo')
+    // El que sí sale es el camino 2: los escalones guardados se van.
+    botonPorTexto('Guardar y borrar')!.click()
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(patchesGuardar).toHaveLength(1)
+    expect(patchesGuardar[0]?.body.tramos).toEqual([])
+
+    wrapper.unmount()
+  })
+  /**
+   * El camino MÁS alcanzable al estado rojo, y no es el que el docblock del guard
+   * nombraba: **cambiar la unidad**. Un solo gesto en el radio Porcentaje/Monto
+   * fijo deja los importes de TODOS los escalones sin cargar, con los campos a la
+   * vista. Lo levantó la revisión del diff: los otros cuatro tests entran
+   * vaciando a mano, que es la mitad chica de la superficie.
+   *
+   * ⚠️ **Lo que este test NO prueba**, medido con el mutante: sacarle a
+   * `onModoChange` el loop que vacía los tramos lo deja igual de verde. No es un
+   * hueco del test sino de la escena: la fila del fixture cobra en porcentaje, así
+   * que su `valorMonto` **ya venía vacío** y el guard dispara por eso solo. Lo que
+   * este test fija es que el guard cubre el camino, no cuál de los dos mecanismos
+   * lo vació. **El vaciado lo fija el test de la ida y vuelta, al final de este
+   * describe** — que es lo que refutó la primera versión de esta nota, donde yo
+   * había escrito que hacía falta una fila con las dos columnas cargadas.
+   */
+  it('cambiar el modo vacía el importe de TODOS los escalones, y el guard los marca', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-2',
+      valorPorcentaje: null,
+      tramos: DOS_ESCALONES,
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    // De porcentaje a monto fijo: el radio "Modo", no el de la forma de importe.
+    radioPorValor('monto_fijo').click()
+    await new Promise(r => setTimeout(r, 20))
+
+    await clickGuardar()
+
+    expect(patchesGuardar).toEqual([])
+    expect(document.body.textContent).toContain('Cada escalón necesita su mínimo y su importe')
+    // Los DOS importes marcados —índices 1 y 3—, y ningún mínimo: el modo no los
+    // toca.
+    expect(inputsDeTramos()[1]?.getAttribute('aria-invalid')).toBe('true')
+    expect(inputsDeTramos()[3]?.getAttribute('aria-invalid')).toBe('true')
+    expect(inputsDeTramos()[0]?.getAttribute('aria-invalid')).not.toBe('true')
+    expect(inputsDeTramos()[2]?.getAttribute('aria-invalid')).not.toBe('true')
+
+    wrapper.unmount()
+  })
+  /**
+   * ⚠️ **Y la ida y vuelta del radio Modo es plata, no cosmética.** Este test es
+   * el que faltaba, y salió de una afirmación mía que era falsa: yo había
+   * declarado que el vaciado de `onModoChange` no se podía fijar sin una fila con
+   * las DOS columnas cargadas —que la API no devuelve—. No hace falta: alcanza
+   * con **volver** al modo original.
+   *
+   * La escena, con una fila que cobra 10%/15% por escalón: el usuario pasa a
+   * monto fijo, escribe 2.000 y 3.000, se arrepiente y vuelve a porcentaje. El
+   * loop de `onModoChange` vacía **también la columna que se abandona**, así que
+   * los porcentajes quedan sin cargar y el guard frena. **Sin ese loop** —el
+   * mutante— sobreviven el `0.10` y el `0.15` originales y el `PATCH` sale con
+   * ellos: la regla se guarda cobrando los porcentajes viejos que el usuario creyó
+   * reemplazar, en silencio.
+   */
+  it('ir y volver del modo deja los importes sin cargar, y no se guarda lo viejo', async () => {
+    descuentosBackend = [descuento({
+      tipoReglaId: 'tipo-2',
+      valorPorcentaje: null,
+      tramos: DOS_ESCALONES,
+    })]
+    const wrapper = await montar()
+    await abrirEdicionDeLaFila(wrapper)
+
+    radioPorValor('monto_fijo').click()
+    await new Promise(r => setTimeout(r, 20))
+    await tipearEnTramo(1, '2000')
+    await tipearEnTramo(3, '3000')
+
+    radioPorValor('porcentaje').click()
+    await new Promise(r => setTimeout(r, 20))
+
+    await clickGuardar()
+
+    expect(patchesGuardar).toEqual([])
+    expect(document.body.textContent).toContain('Cada escalón necesita su mínimo y su importe')
 
     wrapper.unmount()
   })

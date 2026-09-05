@@ -159,6 +159,35 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
+- [ ] **`enviarComanda` relee la cuenta después de su `await`, y si el garzón se fue la comanda
+  no sale — culpando a la impresora** (frontend; **leído en el código el 2026-09-05** por la
+  tercera pasada de la revisión del diff de *"la acción espera"*, y verificado contra
+  `git show HEAD` que es **preexistente**: ese `await flushPendientes()` ya estaba) — es la
+  **cuarta** instancia de la forma que ese frente cerró en las otras tres puertas: precondición
+  antes del `await`, estado reactivo releído después.
+
+  `salones/index.vue` valida `if (!activeCuenta.value || !selectedMesa.value) return`, hace
+  `await flushPendientes()` y **después** lee **cuatro** cosas:
+  `activeCuenta.value.id`, `selectedMesa.value.nombre`, `activeCuenta.value.numero` y
+  `activeCuenta.value.garzonResponsableNombre` —la cuarta la contó la revisión, la entrada nació
+  diciendo tres—. Durante esa espera el garzón puede
+  volver al listado —el mismo camino que el test *"salir de la cuenta durante la espera…"*
+  ejercita para cancelar—, y ahí el `try` muere con un `TypeError` que el `catch` muestra como
+  *"Error al enviar la comanda (¿QZ Tray está abierto?)"*: **culpa a la impresora y la comanda
+  no sale a cocina**. Es peor que el de cancelar, que al menos avisaba con el error de la API.
+
+  **La salida ya está decidida por precedente, así que esto es medir y hacer**: congelar antes
+  del `await`, como quedaron `confirmarCancelar` (`cuentaId`/`mesaId`), `fusionarSeleccionadas`
+  (`aFusionar`/`mesaId`) y, desde antes, `cerrarCuentaConPin` (`cuentaCerrada`). Lo que falta
+  medir es el alcance real: cuáles de las cuatro lecturas hay que congelar y si el toast tiene que
+  cambiar de texto cuando la cuenta ya no está en pantalla.
+
+  📌 **La hermana de fusionar ya NO está acá: se cerró el 2026-09-05** en el mismo frente, con
+  la cuarta pasada de la revisión. Se anota porque es el precedente que resuelve ésta:
+  `fusionarSeleccionadas` quedó con lo que **usa** congelado y lo que **pinta** condicionado a
+  que el garzón siga en la mesa —y la cuenta fusionada se abre sola solo si seguía en el
+  listado—. Detalle en [`resueltos.md`](resueltos.md).
+
 - [ ] **`GET /ventas/:id` escanea `venta_detalles` entera, y ahora una vez más**
   (backend; **medido el 2026-09-04** por la revisión independiente de la tarea 2 del frente de
   la devolución con crédito parcial) — el contador de unidades ya comprometidas
@@ -210,92 +239,6 @@ decisión que no es mía).
   al store de monedas, que daría la escala de HOY y no la congelada—. Emparentada con la deuda
   de `unidadBaseItem` / `resolverUnidadBaseDeItem`, que es la misma clase de gemelo sin enlace
   de compilación.
-
-- [ ] **`recargos.vue` no tiene el quinto camino de aviso que sí tiene `descuentos.vue`**
-  (frontend; **medido el 2026-09-03** por la revisión del diff que cerró el de descuentos —
-  [`resueltos.md`](resueltos.md)) — el mismo gesto sigue vivo en recargos: editar un
-  `interes_simple` (modo `porcentaje`) y cambiarlo a `general` (`libre`, así que `onTipoChange`
-  fuerza `monto_fijo`) manda `valorMonto: ''` y el usuario lee *"valorMonto must be a number
-  string"*, **sin aviso previo**.
-
-  **No es alcance agregado que quedó afuera**: la decisión del owner nombraba descuentos, y
-  descuentos es donde estaba medido el caso. Pero la asimetría es exactamente la que abrió la
-  entrada del frente vecino —*"la misma pérdida preguntaba por un camino y no por el otro"*—,
-  ahora entre dos pantallas en vez de entre dos gestos.
-
-  ⚠️ **Y hay un tercer sitio del mismo hecho, adentro de `descuentos.vue`**: el `''` que ese
-  frente sacó del valor único **sigue vivo en los escalones** (`minimoMonto`/`minimoCantidad` y
-  el importe de cada tramo). Vaciar el importe de un escalón manda
-  `{ minimoMonto: "", valorPorcentaje: "" }` y el usuario vuelve a leer el mensaje del
-  `ValidationPipe`, **sin aviso** —`escalonesAPerder` da 0 porque la sección tiene escalones: lo
-  que está vacío es su contenido—. Preexistente, medido el 2026-09-03 por la revisión del diff.
-  Los tres van juntos porque son el mismo hecho tres veces.
-
-  **Qué medir antes de tomarla:** si los caminos de aviso de `descuentos.vue` se pueden extraer
-  a algo compartido o si hay que copiarlos. Hoy las dos pantallas comparten
-  `reglas-form-config.ts` pero **no** la lógica del aviso.
-  📌 Ojo con una cita que ya se atribuyó mal una vez: el *"los dos se mueven juntos, siempre"*
-  de `reglas-form-config.ts:80-81` habla de los dos **tipos** gemelos (`metodo_pago` y
-  `recargo_metodo_pago`), **no** de las dos pantallas. Que las pantallas se muevan juntas es
-  cierto en los hechos, pero no lo dice esa línea.
-
-- [ ] **El flush pisa una re-edición con el payload viejo, y la cantidad del garzón se
-  pierde** (frontend; **medido el 2026-09-02** por la revisión del diff de *"salir de la cuenta
-  guarda"*, contra control — [`resueltos.md`](resueltos.md)) — es la única de esta familia que
-  **pierde trabajo del garzón** en vez de dejar un aviso confuso, y por eso va aparte.
-
-  **La escena.** Dos líneas con edición pendiente y el garzón toca *Enviar a cocina*.
-  `flushPendientes` toma una foto de lo pendiente y las manda **de a una, esperando cada
-  `PATCH`**. Si mientras viaja el de la primera el garzón vuelve a tocar el stepper de la
-  segunda, `onCantidadChange` arma una entrada **nueva con timer nuevo**; el loop, al llegar a
-  esa línea, borra la entrada nueva pero **no cancela su timer**, y despacha el payload **de la
-  foto**. Con el primer `PATCH` tardando más que los 300 ms de la re-edición, los dos salen al
-  revés:
-
-  ```
-  orden de envío = [linea-1:3.0000, linea-2:5.0000, linea-2:4.0000]
-  linea-2 queda en 4.0000     ← el garzón tipeó 5
-  ```
-
-  **Preexistente**, verificado contra la estructura anterior: el frente del 2026-09-02 no lo
-  introduce ni lo agranda. Y **no está tapado por los tests**: la suite afirma sobre el orden
-  de los `PATCH` y sobre el rollback, no sobre cuál gana cuando hay dos de la misma línea.
-
-  **Las dos salidas plausibles** —y es la misma decisión que las tres de la entrada de abajo,
-  así que conviene tomarlas juntas: que el loop **relea la entrada viva** en vez de la foto
-  (choca con el docblock de `pendingByLinea`, que exige NO releer de la pantalla: habría que
-  releer del Map, no de la línea), o que **cancele el timer que encuentre al borrar**.
-
-- [ ] **El `PATCH` de cantidad en vuelo puede aterrizar sobre una cuenta que dejó de estar
-  abierta** (frontend; **medido el 2026-09-02** por la revisión del diff que hizo que salir de
-  la cuenta guarde — [`resueltos.md`](resueltos.md)) — desde ese día salir manda lo pendiente
-  **sin `await`**, así que el garzón vuelve al listado con el request en vuelo. En esa ventana
-  —la latencia del request, no los 300 ms del debounce— el listado ya ofrece *Fusionar
-  cuentas*, y fusionar deja las cuentas de origen `cancelada`: el `PATCH` cae sobre una cuenta
-  que ya no está abierta y vuelve con `400 La cuenta no está abierta` y un toast que nombra una
-  cuenta que el garzón acaba de fusionar. **Antes no podía pasar** porque no salía ningún
-  `PATCH`. El daño es un toast confuso, no plata ni datos: la fusión ya movió las líneas.
-
-  **Del mismo molde, y por eso van juntas** (las tres se arreglan con la misma decisión):
-
-  - **Cancelar la cuenta con el timer a punto de disparar.** `descartarPendientes()` corre
-    después del `await` de `cancelarCuenta` —y tiene que ser así: descartando antes, un
-    cancelar que falla perdía la edición en silencio—, así que si los 300 ms se cumplen
-    mientras el request viaja, el `PATCH` ya salió y no queda nada que tirar: rechazo y toast
-    por una línea de la cuenta que el garzón acaba de cancelar. **Es el más alcanzable de los
-    tres**: basta confirmar el cancelar dentro de la ventana del debounce, sin carreras raras.
-    Medido el 2026-09-02 por la revisión del diff. **No es regresión**: antes el `PATCH` salía
-    igual, porque `activeCuenta` seguía viva durante el `await`.
-  - **Navegar fuera de `/salones`.** `onBeforeUnmount` limpia el timer del refresco del
-    catálogo pero **no** los de `pendingByLinea`, así que salir de la página dentro de la
-    ventana deja saliendo un `PATCH` y un `toast.add` con el componente ya desmontado.
-
-  **Qué medir antes de tocar:** si la secuencia de la fusión es alcanzable a mano (exige salir
-  y fusionar en la latencia de un request) y si el toast del desmontado se ve o se pierde. La
-  del cancelar ya está medida y es la que manda el diseño. Las salidas plausibles son las
-  mismas para las tres —esperar el flush antes de habilitar la acción destructiva, o descartar
-  el toast cuando la pantalla ya no es la que lo pidió—, así que conviene decidirlas juntas y
-  no de a una.
 
 - [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local: la firma
   reproduce entera y quedan tres explicaciones de por qué esa conexión no volvió** (backend/tests, visto y medido el 2026-08-18 en el cierre del
@@ -1494,6 +1437,12 @@ preexistente: no lo introdujo ese arreglo.
   📌 **Es la pariente de las dos ventanas que sí se cerraron el 2026-09-04** —las dos del
   camino del flush, en [`resueltos.md`](resueltos.md)—, y por eso conviene tomarla con ellas a
   la vista: aquéllas eran "la foto pisa lo vivo", ésta es "la foto no ve lo nuevo".
+
+  ⚠️ **Y la superficie creció el 2026-09-05**, sin que la entrada cambie de naturaleza: desde
+  que fusionar, cancelar e irse de la pantalla también hacen `await flushPendientes()`
+  ([`resueltos.md`](resueltos.md)), son **tres llamadores más** los que pueden retornar sin la
+  edición que nació durante el flush. En esos tres el daño es distinto al de la comanda: la
+  cuenta se fusiona, se anula o se abandona con esa cantidad sin mandar.
 
   ⚠️ **Antes de tomarlo hay que medirlo**, y por eso está acá y no en la § 1: el enunciado sale
   de leer el código, no de una sonda. La escena pide un tap sobre una línea sin edición previa

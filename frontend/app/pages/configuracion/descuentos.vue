@@ -150,6 +150,7 @@ function resetDrawer() {
   nombreError.value = null
   escalonesGuardados.value = 0
   valorGuardado.value = false
+  marcarEscalones.value = false
 }
 
 watch(drawerOpen, (open) => {
@@ -446,6 +447,59 @@ const valorSinCargar = computed(
     ),
 )
 
+/**
+ * Qué le falta a cada escalón para poder guardarse, por índice.
+ *
+ * ⚠️ **Es el único camino de esta pantalla que NO termina en el modal**, y la
+ * diferencia no es de estilo (decisión del owner, 2026-09-05): los cinco del
+ * modal avisan sobre algo que la fila tenía guardado y que la pantalla **ya no
+ * muestra** —el usuario no puede arreglarlo desde donde está, así que se le
+ * ofrece guardar igual—. Acá el campo **está a la vista**: se marca en rojo y no
+ * se manda.
+ *
+ * 📌 **Y llegar acá no exige haber vaciado nada a mano**, que es lo que la
+ * primera redacción de este docblock daba a entender: mover el radio
+ * Porcentaje/Monto fijo deja los importes de TODOS los escalones sin cargar de un
+ * solo gesto —`onModoChange` vacía las dos columnas, y de todos modos el body
+ * manda solo la del modo nuevo, que en una fila real venía vacía—. Es el camino
+ * más alcanzable de los dos y tiene su propio test.
+ *
+ * Lo que pasaba hasta ese día, medido contra la API con el body de esta
+ * pantalla: un escalón vacío vuelve 400 con las líneas crudas del
+ * `ValidationPipe` —*"tramos.0.valorPorcentaje must be a number string"*— y el
+ * toast las muestra unidas por coma.
+ *
+ * Mira `form.modo` y no el tipo: cuál de las dos columnas del importe hay que
+ * exigir lo decide el modo, igual que en el body. El mínimo es UNO solo en el
+ * form —`por_mayor` lo manda como cantidad y el resto como monto—, así que la
+ * exigencia es la misma para los dos.
+ */
+const faltantesPorTramo = computed(() =>
+  form.value.tramos.map(t => ({
+    minimo: !t.minimo,
+    importe: !(form.value.modo === 'monto_fijo' ? t.valorMonto : t.valorPorcentaje),
+  })),
+)
+
+/**
+ * ⚠️ El `mostrarTramos` no es decorativo: al pasar a "un valor único" los
+ * escalones siguen en `form.tramos` —el body los borra mandando `[]`, no
+ * vaciando el form—, y sin este guard un escalón a medio cargar bloquearía el
+ * guardado de una regla que ya no los usa.
+ */
+const hayEscalonIncompleto = computed(
+  () => mostrarTramos.value && faltantesPorTramo.value.some(f => f.minimo || f.importe),
+)
+
+/**
+ * Se prende al intentar guardar, no al vaciar el campo: marcar en rojo apenas
+ * uno toca *Agregar tramo* pinta dos casilleros vacíos antes de que el usuario
+ * escriba nada. Una vez prendido, cada campo deja de estar en rojo solo —los
+ * `computed` de arriba miran el valor de hoy—, así que no hay que apagarlo a
+ * mano cuando lo carga.
+ */
+const marcarEscalones = ref(false)
+
 /** Qué se pierde al guardar, en palabras, o `null` si no se pierde nada. */
 const perdidaDeImporte = computed<string | null>(() => {
   if (escalonesAPerder.value) {
@@ -519,6 +573,14 @@ const avisoPerdida = computed(() => {
 async function guardar() {
   await checkNombre()
   if (nombreError.value) return
+
+  // Va ANTES del modal a propósito: un escalón a medio cargar no es algo que se
+  // pueda "guardar igual", así que preguntarlo primero ofrecería una salida que
+  // no existe.
+  if (hayEscalonIncompleto.value) {
+    marcarEscalones.value = true
+    return
+  }
 
   if (avisoPerdida.value) {
     confirmEscalonesOpen.value = true
@@ -1016,12 +1078,21 @@ const columns: TableColumn<Regla>[] = [
                       <!-- La MISMA condición que elige la columna al guardar (ver el
                            body de `guardar`): si las dos se separan, la pantalla ofrece
                            una máscara y el backend espera la otra columna. -->
-                      <MoneyInput v-if="tipoSeleccionado?.codigo !== 'por_mayor'" v-model="tramo.minimo" oficial class="w-full" />
-                      <UInput v-else v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
+                      <!-- `UFormField` sin label, solo por el `:error`: es lo que
+                           le pasa `color: 'error'` y `aria-invalid` al input de
+                           adentro, el mismo mecanismo del campo Nombre. El motivo
+                           va una sola vez debajo de la tabla y no repetido en
+                           cada celda. -->
+                      <UFormField :error="marcarEscalones && faltantesPorTramo[i]?.minimo">
+                        <MoneyInput v-if="tipoSeleccionado?.codigo !== 'por_mayor'" v-model="tramo.minimo" oficial class="w-full" />
+                        <UInput v-else v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
+                      </UFormField>
                     </td>
                     <td class="py-1 pr-2">
-                      <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valorMonto" oficial class="w-full" />
-                      <UInput v-else v-model="tramo.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
+                      <UFormField :error="marcarEscalones && faltantesPorTramo[i]?.importe">
+                        <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valorMonto" oficial class="w-full" />
+                        <UInput v-else v-model="tramo.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
+                      </UFormField>
                     </td>
                     <td class="py-1">
                       <UButton
@@ -1037,6 +1108,9 @@ const columns: TableColumn<Regla>[] = [
               </table>
               <p v-if="!form.tramos.length" class="text-xs text-muted">
                 Sin tramos. Agrega al menos uno.
+              </p>
+              <p v-else-if="marcarEscalones && hayEscalonIncompleto" class="text-xs text-error">
+                Cada escalón necesita su mínimo y su importe.
               </p>
             </div>
 

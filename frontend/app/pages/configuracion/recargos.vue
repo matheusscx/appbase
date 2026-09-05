@@ -150,6 +150,7 @@ function resetDrawer() {
   nombreError.value = null
   escalonesGuardados.value = 0
   valorGuardado.value = false
+  marcarEscalones.value = false
 }
 
 watch(drawerOpen, (open) => {
@@ -412,13 +413,101 @@ const valorAPerder = computed(
   () => !!(editingId.value && valorGuardado.value && !mostrarValor.value),
 )
 
+/** El importe que el formulario tiene cargado HOY, en la unidad del modo vigente. */
+const valorEnElForm = computed(() =>
+  form.value.modo === 'monto_fijo'
+    ? form.value.valorMonto
+    : form.value.valorPorcentaje,
+)
+
+/**
+ * **Quinto camino, y es el gemelo del 3 para el valor único** (decisión del
+ * owner del 2026-09-03, tomada sobre descuentos; acá llega el 2026-09-05
+ * porque la asimetría entre las dos pantallas era el hueco): la fila tenía un
+ * importe, el campo SIGUE a la vista, y quedó vacío.
+ *
+ * El gesto que lo produce es cambiar el tipo: `onTipoChange` da vuelta el
+ * `modo` —de `porcentaje` a `monto_fijo` al salir de `interes_simple` o
+ * `interes_compuesto`, los dos únicos `modo: 'porcentaje'` de `RECARGO_CONFIG`—
+ * y el `0.10` que estaba en `valorPorcentaje` deja de viajar, porque el body
+ * manda **solo la columna del modo**. A diferencia de `onModoChange`,
+ * `onTipoChange` no limpia la columna abandonada: el valor sigue en el form,
+ * invisible.
+ *
+ * ⚠️ **Y por eso el aviso no promete un borrado, promete un rechazo.** Medido
+ * contra la API el 2026-09-05 con el body de esta pantalla: sin importe el
+ * backend contesta 400 *"valorMonto must be a number string"*. Igual que el
+ * camino 3, prometer *"se borra"* sería prometer algo que no pasa — no se
+ * guarda nada.
+ */
+const valorSinCargar = computed(
+  () =>
+    !!(
+      editingId.value &&
+      valorGuardado.value &&
+      mostrarValor.value &&
+      !valorEnElForm.value
+    ),
+)
+
+/**
+ * Qué le falta a cada escalón para poder guardarse, por índice.
+ *
+ * ⚠️ **Es el único camino de esta pantalla que NO termina en el modal**, y la
+ * diferencia no es de estilo (decisión del owner, 2026-09-05): los cinco del
+ * modal avisan sobre algo que la fila tenía guardado y que la pantalla **ya no
+ * muestra** —el usuario no puede arreglarlo desde donde está, así que se le
+ * ofrece guardar igual—. Acá el campo **está a la vista**: se marca en rojo y no
+ * se manda.
+ *
+ * 📌 **Y llegar acá no exige haber vaciado nada a mano**, que es lo que la
+ * primera redacción de este docblock daba a entender: mover el radio
+ * Porcentaje/Monto fijo deja los importes de TODOS los escalones sin cargar de un
+ * solo gesto —`onModoChange` vacía las dos columnas, y de todos modos el body
+ * manda solo la del modo nuevo, que en una fila real venía vacía—. Es el camino
+ * más alcanzable de los dos y tiene su propio test.
+ *
+ * Lo que pasaba hasta ese día, medido contra la API con el body de esta
+ * pantalla: `tramos: [{ minimoMonto: '', valorMonto: '' }]` vuelve 400 con las
+ * dos líneas crudas del `ValidationPipe` —*"tramos.0.minimoMonto must be a
+ * number string"*— y el toast las muestra unidas por coma.
+ *
+ * Mira `form.modo` y no el tipo: cuál de las dos columnas del importe hay que
+ * exigir lo decide el modo, igual que en el body.
+ */
+const faltantesPorTramo = computed(() =>
+  form.value.tramos.map(t => ({
+    minimo: !t.minimo,
+    importe: !(form.value.modo === 'monto_fijo' ? t.valorMonto : t.valorPorcentaje),
+  })),
+)
+
+/**
+ * ⚠️ El `mostrarTramos` no es decorativo: al pasar a "un valor único" los
+ * escalones siguen en `form.tramos` —el body los borra mandando `[]`, no
+ * vaciando el form—, y sin este guard un escalón a medio cargar bloquearía el
+ * guardado de una regla que ya no los usa.
+ */
+const hayEscalonIncompleto = computed(
+  () => mostrarTramos.value && faltantesPorTramo.value.some(f => f.minimo || f.importe),
+)
+
+/**
+ * Se prende al intentar guardar, no al vaciar el campo: marcar en rojo apenas
+ * uno toca *Agregar tramo* pinta dos casilleros vacíos antes de que el usuario
+ * escriba nada. Una vez prendido, cada campo deja de estar en rojo solo —los
+ * `computed` de arriba miran el valor de hoy—, así que no hay que apagarlo a
+ * mano cuando lo carga.
+ */
+const marcarEscalones = ref(false)
+
 /** Qué se pierde al guardar, en palabras, o `null` si no se pierde nada. */
 const perdidaDeImporte = computed<string | null>(() => {
   if (escalonesAPerder.value) {
     const n = escalonesAPerder.value
     return `${n} ${n === 1 ? 'escalón' : 'escalones'}`
   }
-  if (valorAPerder.value) return 'un valor único cargado'
+  if (valorAPerder.value || valorSinCargar.value) return 'un valor único cargado'
   return null
 })
 
@@ -427,12 +516,12 @@ const perdidaDeImporte = computed<string | null>(() => {
  * que avisar, que es también el portón de `guardar()`.
  *
  * Las variantes viven juntas a propósito: es el MISMO modal con las palabras que
- * cada camino necesita, no cuatro modales. Entre las variantes cambia una sola
+ * cada camino necesita, no cinco modales. Entre las variantes cambia una sola
  * cosa —quién dejó de usar el importe, el tipo o la forma—.
  *
- * La tercera cambia además qué promete el botón, y no es cosmético: ahí el tipo
- * SÍ usa escalones y el backend rechaza el guardado vacío, así que prometer un
- * borrado sería prometer algo que no pasa.
+ * La tercera y la quinta cambian además qué promete el botón, y no es
+ * cosmético: ahí el importe quedó SIN CARGAR y el backend rechaza el guardado
+ * vacío, así que prometer un borrado sería prometer algo que no pasa.
  */
 const avisoPerdida = computed(() => {
   const perdida = perdidaDeImporte.value
@@ -441,6 +530,16 @@ const avisoPerdida = computed(() => {
     return {
       titulo: 'El importe quedó sin cargar',
       mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó sin ninguno. Cargalos de nuevo: al guardar así, el servidor lo rechaza.`,
+      confirmLabel: 'Guardar igual',
+    }
+  }
+  // El gemelo del de arriba para el valor único (camino 5). Mismas palabras a
+  // propósito: es el mismo hecho —el importe quedó sin cargar y el servidor va a
+  // rechazar— contado sobre el otro campo.
+  if (valorSinCargar.value) {
+    return {
+      titulo: 'El importe quedó sin cargar',
+      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó vacío. Cargalo de nuevo: al guardar así, el servidor lo rechaza.`,
       confirmLabel: 'Guardar igual',
     }
   }
@@ -467,14 +566,24 @@ const avisoPerdida = computed(() => {
  * confirmado entra por `guardarAhora`, no por un flag.
  *
  * Frena y pregunta una sola vez. El owner eligió avisar por sobre borrar
- * callado (2026-08-26 el primer camino, 2026-08-29 los otros tres): perder la
- * forma de importe que la fila tenía guardada avisa **siempre**, venga el
- * borrado del tipo nuevo, del radio de forma o de una sección que quedó vacía.
- * Los cuatro caminos, uno por uno: `escalonesAPerder`.
+ * callado (2026-08-26 el primer camino, 2026-08-29 los tres siguientes,
+ * 2026-09-03 el quinto): perder la forma de importe que la fila tenía guardada
+ * avisa **siempre**, venga el borrado del tipo nuevo, del radio de forma, de
+ * una sección que quedó vacía o de la unidad que el tipo nuevo da vuelta.
+ * Los cuatro primeros, uno por uno: `escalonesAPerder`; el quinto,
+ * `valorSinCargar`.
  */
 async function guardar() {
   await checkNombre()
   if (nombreError.value) return
+
+  // Va ANTES del modal a propósito: un escalón a medio cargar no es algo que se
+  // pueda "guardar igual", así que preguntarlo primero ofrecería una salida que
+  // no existe.
+  if (hayEscalonIncompleto.value) {
+    marcarEscalones.value = true
+    return
+  }
 
   if (avisoPerdida.value) {
     confirmEscalonesOpen.value = true
@@ -500,9 +609,30 @@ async function guardarAhora() {
       // Solo la columna del modo. Mandar las dos —o la abandonada en `''`— es
       // 400: el backend rechaza el importe expresado en dos unidades.
       const enMonto = form.value.modo === 'monto_fijo'
+      // La columna vacía viaja como `null`. **Los tres cuerpos dan cosas
+      // distintas** y hay que elegir a sabiendas. Medido contra la API el
+      // 2026-09-05, y ojo con CUÁL es el gesto de cada renglón —la primera
+      // versión de este comentario los atribuyó todos al mismo y la revisión lo
+      // refutó—:
+      //   `''`      → 400 del `ValidationPipe`, *"valorMonto must be a number
+      //               string"*: `@IsOptional()` saltea `null`/`undefined` pero
+      //               no `''`. Feo, pero no guarda nada. Medido pasando un
+      //               `interes_simple` a `general`.
+      //   ausente   → ⚠️ **200**, y es el peligroso: el backend lee el valor
+      //               PERSISTIDO (`importeResultante`) y guarda, así que la fila
+      //               sigue cobrando lo de antes con la pantalla vacía. Se da
+      //               cuando la fila YA TIENE valor en esa columna — un `general`
+      //               con `valorMonto: '2000'` al que se le borra el campo—.
+      //               ⛔ **No** en el paso `interes_simple` → `general`: ahí la
+      //               fila persistida tiene `valorMonto: null` (su modo estaba
+      //               forzado a porcentaje), así que omitir la clave da **400
+      //               "El valor es requerido para este tipo"**.
+      //   `null`    → 400 con el motivo en castellano, en los dos gestos. Es el
+      //               único que cumple lo que el modal promete.
+      const importe = valorEnElForm.value || null
       if (mostrarValor.value) {
-        if (enMonto) body.valorMonto = form.value.valorMonto
-        else body.valorPorcentaje = form.value.valorPorcentaje
+        if (enMonto) body.valorMonto = importe
+        else body.valorPorcentaje = importe
       }
       // Pasar a escalones tiene que APAGAR el valor único explícitamente. Sin
       // este `null`, un PATCH que solo agrega tramos deja la fila con las dos
@@ -954,11 +1084,20 @@ const columns: TableColumn<Regla>[] = [
                            el umbral; desde que `minimoMonto` va con `@EsMontoCobrado()`
                            (2026-08-24) un "20000,50" es 400, así que el campo tiene que
                            impedir tipearlo en vez de dejar que rebote. -->
-                      <MoneyInput v-model="tramo.minimo" oficial class="w-full" />
+                      <!-- `UFormField` sin label, solo por el `:error`: es lo que
+                           le pasa `color: 'error'` y `aria-invalid` al input de
+                           adentro, el mismo mecanismo del campo Nombre. El motivo
+                           va una sola vez debajo de la tabla y no repetido en
+                           cada celda. -->
+                      <UFormField :error="marcarEscalones && faltantesPorTramo[i]?.minimo">
+                        <MoneyInput v-model="tramo.minimo" oficial class="w-full" />
+                      </UFormField>
                     </td>
                     <td class="py-1 pr-2">
-                      <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valorMonto" oficial class="w-full" />
-                      <UInput v-else v-model="tramo.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
+                      <UFormField :error="marcarEscalones && faltantesPorTramo[i]?.importe">
+                        <MoneyInput v-if="form.modo === 'monto_fijo'" v-model="tramo.valorMonto" oficial class="w-full" />
+                        <UInput v-else v-model="tramo.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" class="w-full" />
+                      </UFormField>
                     </td>
                     <td class="py-1">
                       <UButton
@@ -974,6 +1113,9 @@ const columns: TableColumn<Regla>[] = [
               </table>
               <p v-if="!form.tramos.length" class="text-xs text-muted">
                 Sin tramos. Agrega al menos uno.
+              </p>
+              <p v-else-if="marcarEscalones && hayEscalonIncompleto" class="text-xs text-error">
+                Cada escalón necesita su mínimo y su importe.
               </p>
             </div>
 
