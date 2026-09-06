@@ -837,11 +837,20 @@ describe('ItemsService', () => {
      * (`calcularDisponibilidadBatch`); esto le da el mismo número a las tres
      * filas anidadas que el drawer mira.
      *
-     * Los nueve números son distintos a propósito —stocks 10, 11 y 4; tomados 6,
-     * 9 y 3; pedibles 4, 2 y 1—: devolver el stock físico falla las tres, y
-     * **cruzarle a una fila el descuento de otra también**. Esto último no se
-     * cumplía cuando el ingrediente y el extra compartían el 6 (lo marcó la
-     * revisión): intercambiados daban el mismo número y el test pasaba igual.
+     * Los nueve números son distintos a propósito —vendibles (local) 10, 11 y
+     * 4; tomados 6, 9 y 3; pedibles 4, 2 y 1—: devolver el stock físico falla
+     * las tres, y **cruzarle a una fila el descuento de otra también**. Esto
+     * último no se cumplía cuando el ingrediente y el extra compartían el 6
+     * (lo marcó la revisión): intercambiados daban el mismo número y el test
+     * pasaba igual.
+     *
+     * `stock` (el total, 30/26/19) es distinto de `stock_vendible` (el local,
+     * 10/11/4) en las tres filas a propósito (hallazgo de revisión, Tarea 3a):
+     * con `stock === stock_vendible` un mutante que revierta `disponibleDe` a
+     * leer el total en vez del vendible pasa la suite entera, porque el
+     * resultado sería el mismo con cualquiera de los dos campos. Con los dos
+     * números separados, ese mutante cambia `stockDisponible` (30-6=24 en vez
+     * de 4, etc.) y el test lo cacha.
      */
     it('descuenta lo comprometido en ingredientes, extras y opciones de grupo', async () => {
       const baseRow = {
@@ -907,7 +916,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             unidad_codigo: 'unidad',
             bloqueante: true,
-            stock: '10',
+            stock: '30',
             stock_vendible: '10',
           },
         ]) // ingredientes
@@ -919,7 +928,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             unidad_codigo: 'unidad',
             precio_extra: '500',
-            stock: '11',
+            stock: '26',
             stock_vendible: '11',
           },
         ]) // extras permitidos
@@ -946,7 +955,7 @@ describe('ItemsService', () => {
             unidad_codigo: 'unidad',
             precio_extra: '300',
             orden: 0,
-            stock: '4',
+            stock: '19',
             stock_vendible: '4',
           },
         ]); // cargarGruposPorItem: ops
@@ -954,15 +963,15 @@ describe('ItemsService', () => {
       const result = await service.findOne(TENANT, ITEM_ID);
 
       expect(result.ingredientes[0]).toMatchObject({
-        stock: '10',
+        stock: '30',
         stockDisponible: '4.0000',
       });
       expect(result.extrasPermitidos[0]).toMatchObject({
-        stock: '11',
+        stock: '26',
         stockDisponible: '2.0000',
       });
       expect(result.grupos[0].opciones[0]).toMatchObject({
-        stock: '4',
+        stock: '19',
         stockDisponible: '1.0000',
       });
 
@@ -1021,6 +1030,21 @@ describe('ItemsService', () => {
             stock: null,
             stock_vendible: null,
           },
+          // `stock` (el total, 40) distinto de `stock_vendible` (el local, 9)
+          // a propósito (hallazgo de revisión, Tarea 3a): con los dos iguales
+          // un mutante que revierta `disponibleDe` de este componente a leer
+          // el total en vez del vendible pasa igual. Comprometido en 0 acá,
+          // así que `stockDisponible` sale directo del vendible: 9.0000, no
+          // 40.0000.
+          {
+            componente_item_id: 'producto-papas',
+            componente_nombre: 'Papas fritas',
+            tipo: 'producto',
+            cantidad: '1',
+            bloqueante: false,
+            stock: '40',
+            stock_vendible: '9',
+          },
         ])
         .mockResolvedValueOnce([]) // cargarGruposPorItem: asoc (sin grupos en el componente receta)
         .mockResolvedValueOnce([]); // grupoRows (sin grupos asociados al combo)
@@ -1048,6 +1072,16 @@ describe('ItemsService', () => {
           bloqueante: false,
           stock: null,
           stockDisponible: null,
+          grupos: [],
+        },
+        {
+          componenteItemId: 'producto-papas',
+          componenteNombre: 'Papas fritas',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: false,
+          stock: '40',
+          stockDisponible: '9.0000',
           grupos: [],
         },
       ]);
@@ -5133,6 +5167,45 @@ describe('ItemsService', () => {
     });
   });
 
+  /**
+   * El pre-chequeo de `venderComponentesCombo` (ver su docblock y el de
+   * `calcularDisponibleReceta`). Todos los tests de `venderComponentesCombo`
+   * de abajo lo espían (`spyOn(..., 'calcularDisponibleReceta')`), así que
+   * ninguno ejercita su query real — esto lo prueba en aislado: sin esto, un
+   * mutante que revirtiera su `LEFT JOIN stock_ubicacion` a `ip.stock` (el
+   * total del tenant) pasaba la suite entera (hallazgo de revisión, Tarea 3a).
+   */
+  describe('calcularDisponibleReceta', () => {
+    it('lee el vendible del LOCAL (`stock_ubicacion` acotado a `localId`), no el total del tenant', async () => {
+      // Un solo ingrediente bloqueante: 20 en total (bodega + local) pero solo
+      // 5 vendibles en el local. Con el total daría floor(20/1)=20; con el
+      // vendible, floor(5/1)=5. Números bien distintos para que un mutante no
+      // pueda colarse por coincidencia.
+      dataSource.query.mockResolvedValueOnce([
+        {
+          cantidad: '1',
+          unidad_codigo: 'unidad',
+          ingrediente_unidad_medida: 'unidad',
+          stock: '5',
+        },
+      ]);
+
+      const disponible = await (service as any).calcularDisponibleReceta(
+        TENANT,
+        'receta-uuid',
+        conversorMock,
+        UBICACION_LOCAL_ID,
+      );
+
+      expect(disponible).toBe(5);
+      const [sql, params] = dataSource.query.mock.calls[0];
+      expect(sql).toContain('LEFT JOIN stock_ubicacion su');
+      expect(sql).not.toContain('ip.stock');
+      // `localId` viaja como parámetro de la query, no hardcodeado en el SQL.
+      expect(params).toEqual(['receta-uuid', TENANT, UBICACION_LOCAL_ID]);
+    });
+  });
+
   describe('venderComponentesCombo', () => {
     const USUARIO_ID = 'usuario-uuid';
     const VENTA_ID = 'venta-uuid';
@@ -5379,11 +5452,15 @@ describe('ItemsService', () => {
       );
 
       // El tercer argumento es el conversor que el combo cargó UNA vez: el
-      // pre-chequeo lo recibe en vez de releer el catálogo por componente.
+      // pre-chequeo lo recibe en vez de releer el catálogo por componente. El
+      // cuarto es el `localId` resuelto UNA vez por `venderComponentesCombo`
+      // (mismo motivo: releerlo por componente sería N+1) — el pre-chequeo
+      // tiene que mirar el mismo local que la deducción real, no el total.
       expect(spyDisponible).toHaveBeenCalledWith(
         TENANT,
         'receta-uuid',
         conversorMock,
+        UBICACION_LOCAL_ID,
       );
       // venderIngredientesReceta (y por ende registrarMovimiento para sus
       // ingredientes) NUNCA se llama: cero escrituras para esta receta.

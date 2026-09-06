@@ -4126,6 +4126,7 @@ export class ItemsService {
             params.tenantId,
             comp.componente_item_id,
             convertir,
+            ubicacionLocalId,
           );
           if (
             disponible !== null &&
@@ -4952,11 +4953,24 @@ export class ItemsService {
    * cantidad por receta). null si la receta no tiene ingredientes
    * bloqueantes (sin límite aplicable). Se calcula al vuelo: sin columna
    * cacheada (ver Decisions del diseño).
+   *
+   * Este es el pre-chequeo NO bloqueante de `venderComponentesCombo` (ver su
+   * docblock): decide si alcanza para vender el componente-receta ANTES de
+   * que `venderIngredientesReceta` empiece a deducir. Por eso lee lo mismo
+   * que decide el resto de la venta —`stock_ubicacion` acotado al LOCAL
+   * (`localId`), no `ip.stock` (el total)—: si mirara el total podría decir
+   * "alcanza" con stock real solo en una bodega, y la deducción de verdad
+   * fallaría a mitad de camino (Tarea 3a, hallazgo de revisión).
+   *
+   * `LEFT JOIN`, no `JOIN`: un ingrediente sin fila en esa ubicación tiene
+   * saldo CERO, no "no existe" — con `JOIN` desaparecería de `rows` y ese
+   * ingrediente bloqueante quedaría fuera del mínimo en vez de forzarlo a 0.
    */
   private async calcularDisponibleReceta(
     tenantId: string,
     recetaItemId: string,
     convertir: ConvertirUnidad,
+    localId: string,
   ): Promise<number | null> {
     const rows: {
       cantidad: string;
@@ -4964,12 +4978,14 @@ export class ItemsService {
       ingrediente_unidad_medida: string;
       stock: string;
     }[] = await this.db.query(
-      `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
+      `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS ingrediente_unidad_medida,
+              COALESCE(su.stock, 0) AS stock
        FROM receta_ingredientes ri
        JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+       LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id AND su.ubicacion_id = $3
        WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2
          AND ri.bloqueante = true AND ri.eliminado_el IS NULL`,
-      [recetaItemId, tenantId],
+      [recetaItemId, tenantId, localId],
     );
     if (!rows.length) return null;
 
