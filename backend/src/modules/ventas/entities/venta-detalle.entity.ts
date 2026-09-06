@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -8,6 +9,22 @@ import {
 } from 'typeorm';
 import type { PersonalizacionRecetaSnapshot } from '../../../common/dto/personalizacion-receta.dto';
 
+/**
+ * Índice por venta. Lo usa **toda** lectura de esta tabla filtrada por `venta_id`,
+ * que en `ventas.service.ts` son cinco: las líneas del detalle y el remanente por
+ * porción (las dos en `findOne`), el contador de unidades comprometidas
+ * (`unidadesComprometidasPorItem`, que entra por `JOIN`), la validación de la
+ * devolución (`validarDevolucionesReembolso`) y la composición de la nota de
+ * crédito (`crearNotaCreditoEnTransaccion`). Sin índice, todas hacían seq scan:
+ * medido con 240.000 detalles, 16,6 ms → 0,08 ms la lectura de líneas.
+ *
+ * ⚠️ **El índice no alcanza si la consulta lo apaga.** Dos de esas cinco filtraban
+ * `venta_id = $1 OR venta_id IN (SELECT …)` —el remanente por porción y la
+ * composición de la nota de crédito—, y con esa forma el planner ignora el índice.
+ * Se reescribieron como una sola lista en el mismo commit; el porqué, el mecanismo
+ * y los números están en `docs/patterns/backend.md` § 17.
+ */
+@Index('idx_venta_detalles_venta', ['ventaId'])
 @Entity('venta_detalles')
 export class VentaDetalle {
   @PrimaryGeneratedColumn('uuid', { name: 'detalle_id' })

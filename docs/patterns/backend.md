@@ -1,7 +1,7 @@
 # Backend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-07-21
+**Last Updated**: 2026-09-06
 
 Patrón de referencia para construir un módulo de feature (NestJS + TypeORM),
 extraído del código real (`modules/monedas/`, `modules/tenants/`). **Léelo antes de
@@ -1025,6 +1025,70 @@ siendo derivable. El eje acota **de quién**, no **qué**. Si lo que se quiere p
 número que el propio usuario generó, este patrón no es la herramienta.
 Diseño completo en
 [`specs/2026-08-22-visibilidad-ventas-pagos-design.md`](../superpowers/specs/2026-08-22-visibilidad-ventas-pagos-design.md).
+
+---
+
+## 17. Índices de FK y el `OR` que los apaga
+
+**Las FK no traen índice.** TypeORM crea la PK y nada más: una columna `*_id` sin `@Index`
+explícito se lee con seq scan. Medido el 2026-09-06 sobre el camino caliente de
+`GET /ventas/:id`, con 60.000 ventas y 240.000 detalles sembrados:
+
+| Consulta | Sin índice | Con índice |
+|---|---|---|
+| líneas de una venta (`venta_detalles.venta_id`) | 16,6 ms, seq scan | 0,08 ms |
+| notas de crédito de una venta (`ventas.venta_referencia_id`) | 6,8 ms, seq scan | 0,11 ms |
+| movimientos de una venta (`movimientos_inventario.venta_id`) | 2,9 ms, seq scan | 0,07 ms |
+
+El índice va **en la entity** (`@Index('idx_<tabla>_<col>', ['prop'])`), que es lo que
+`synchronize` crea; la convención de nombre es la de las entities de propinas.
+
+⚠️ **No es "indexá toda FK".** El índice se paga en cada `INSERT`, y una tabla paga **solo el
+suyo**: insertar 20.000 detalles pasa de 63–70 ms a 77–89 ms, o sea **~1 µs por fila** por
+`idx_venta_detalles_venta` (medido por la revisión independiente, seis iteraciones alternando el
+orden, tres corridas). Una venta de 15 líneas paga ~15 µs para ahorrar 16 ms de lectura, así que
+acá el canje es obvio; en una FK que nadie consulta, no.
+
+### El `OR` que apaga el índice
+
+⚠️ **El índice no alcanza si la consulta lo apaga.** Tres consultas del mismo archivo filtraban
+`venta_id = $1 OR venta_id IN (SELECT …)`, y con esa forma el planner **ignora el índice** y cae
+a seq scan: el `EXPLAIN` muestra `Filter: (venta_id = '…' OR (hashed SubPlan 1))`, o sea que lo
+que se rompe es el semi-join, porque la subconsulta no se puede aplanar contra la otra rama del
+`OR`. **No es "cualquier `OR`"**: `venta_id = $1 OR venta_id = $2` sí usa el índice; el problema
+es el `OR` **con una subconsulta de un lado**. Escrito como **una sola lista** —`venta_id IN
+(SELECT … UNION ALL SELECT $1)`, que es equivalente— pasa a index scan:
+
+| Consulta | Con `OR` | Con la lista única |
+|---|---|---|
+| remanente por porción (`disponibleNotaCredito`) | 19,4 ms, Parallel Seq Scan | 0,16 ms |
+| contador de unidades comprometidas, nodo de movimientos | 3,8 ms, seq scan | 0,10 ms |
+| composición de la NC (adentro de la transacción) | seq scan | index scan |
+
+⚠️ **Los tiempos de una consulta compuesta dependen del seed, así que van con el suyo.** Los de
+esta tabla son con 20% de filas `motivo = 'devolucion'`. Con un seed que marcaba el 99% —el
+primero que se usó acá— el mismo par daba 5,2 → 0,4 ms: el orden de magnitud aguanta, el número
+no. Las tres filas de la tabla de **las lecturas simples** —la primera de esta
+sección— no dependen de eso: la revisión reprodujo su columna *sin índice* dentro de un 8%. La columna *con índice* son cifras de centésimas de
+milisegundo, dominadas por planning y caché — ahí las reproducciones van de 0,03 a 0,3 ms, así
+que sirven para decir *"index scan en vez de seq scan"* y no como referencia numérica.
+
+La equivalencia es exacta y no depende del contenido: `IN` es semi-join, así que el duplicado
+que el `UNION ALL` puede introducir no multiplica filas, y con la columna en `NULL` las dos
+formas descartan la fila igual. La revisión la verificó sobre 6.003 casos, incluidos `docs`
+vacío, NC borrada y `venta_id NULL`.
+
+📌 **Y lo que parece la salida y no lo es:** un índice **parcial** por `motivo = 'devolucion'`
+sobre `movimientos_inventario`. Con el `OR` puesto sí se usa y baja de 3,8 ms a 1,4–1,9 ms —con un
+20% de filas `devolucion`—, o sea que "no sirve" sería falso; pero sacar el `OR` deja ese mismo
+**nodo** en 0,10 ms con el índice completo —la consulta entera, en 0,35–0,42 ms— sin un segundo
+índice que mantener.
+⚠️ La primera versión de esta sección decía que el parcial "no cambia el plan", y era un
+artefacto del seed: con el 99% de los movimientos marcados `devolucion`, un índice parcial por
+`devolucion` no filtra nada. **La distribución del seed es parte de la medición.**
+
+⚠️ **Medir con volumen sembrado.** La base de desarrollo tiene ~170 ventas y ahí **todo** da
+seq scan igual —o casi—, así que un `EXPLAIN` sobre ella no distingue el plan bueno del malo.
 
 ---
 

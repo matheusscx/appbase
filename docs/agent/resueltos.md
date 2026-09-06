@@ -17,6 +17,70 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `GET /ventas/:id` escaneaba tres tablas enteras (cerrado 2026-09-06)
+
+Sale de [`pendientes.md` § 2](pendientes.md). La entrada pedía **medir con volumen sembrado**
+antes de decidir, porque la base de desarrollo tiene ~170 ventas y ahí cualquier plan sale seq
+scan igual.
+
+### Lo medido
+
+Volumen sintético sobre una base reseteada: **60.000 ventas, 240.000 detalles, 30.000
+movimientos**, con `ANALYZE` corrido, antes y después.
+
+Las tres lecturas simples, que no dependen de la distribución del seed (la revisión reprodujo
+la columna *sin índice* dentro de un 8%; la de *con índice* son centésimas de ms y sirven para
+decir "index scan", no como referencia numérica):
+
+| Consulta | Sin índice | Con índice |
+|---|---|---|
+| líneas de una venta | 16,6 ms, seq scan | 0,08 ms |
+| notas de crédito de una venta | 6,8 ms, seq scan | 0,11 ms |
+| movimientos de una venta | 2,9 ms, seq scan | 0,07 ms |
+
+Y las **tres** consultas que tenían el `OR`, medidas **con el índice ya puesto**, o sea aislando
+lo que aporta sacarlo (seed con 20% de filas `motivo = 'devolucion'`):
+
+| Consulta | Con `OR` | Con la lista única |
+|---|---|---|
+| remanente por porción, en `findOne` | 19,4 ms, Parallel Seq Scan | 0,16 ms |
+| contador de unidades comprometidas, nodo de movimientos | 3,8 ms, seq scan | 0,10 ms |
+| composición de la NC, adentro de la transacción | seq scan | index scan |
+
+### Qué se hizo
+
+Tres `@Index` en las entities —`venta_detalles.venta_id`, `ventas.venta_referencia_id`,
+`movimientos_inventario.venta_id`— y, en `ventas.service.ts`, **tres** consultas reescritas de
+`venta_id = $1 OR venta_id IN (…)` a una sola lista con `UNION ALL`. Los detalles y los números
+quedaron en [`patterns/backend.md` § 17](../patterns/backend.md), que es donde los va a buscar
+el próximo.
+
+⚠️ **La primera versión de este cierre arreglaba UNA de las tres y archivaba la entrada igual**
+—y la entrada nombraba explícitamente la segunda—. Lo levantó la revisión midiendo: el remanente
+por porción seguía en `Parallel Seq Scan` sobre 240.000 filas **con el índice puesto** —los
+19,4 ms de la tabla de arriba—, y la tercera corre **adentro de la transacción** que emite la
+nota de crédito. El índice no
+alcanza cuando la consulta lo apaga, y eso el propio commit ya lo había escrito en el playbook
+una sección antes de dejar dos instancias vivas.
+
+⚠️ **Y la afirmación sobre el índice parcial estaba mal medida.** Decía que un parcial por
+`motivo = 'devolucion'` "no cambia el plan": la revisión lo reprodujo y **sí se usa** (3,8 ms →
+1,4–1,9 ms según la corrida). El error fue del seed —el mío marcaba el 99% de los movimientos como `devolucion`, o
+sea que el parcial no filtraba nada—. La conclusión no cambia (sacar el `OR` da 0,10 ms y no
+pide un segundo índice), pero el motivo escrito era falso. **La distribución del seed es parte
+de la medición.**
+
+### Qué lo fija
+
+No hay test: un índice no cambia conducta, y afirmar sobre planes desde un unit test ata el
+suite al planner. Lo que queda es la medición escrita. La reescritura del `OR` sí toca tres
+consultas que la nota de crédito usa para decidir cuánto queda por devolver, así que el gate del
+backend corrió entero —lint, typecheck, 2491 unitarios y 782 e2e sobre base reseteada—, y la
+equivalencia de la reescritura la verificó la revisión sobre 6.003 casos con `docs` vacío, nota
+borrada y `venta_id NULL`.
+
+---
+
 ## La precuenta: salir de la cuenta mientras calcula ya no imprime la de otra ni deja un rojo (cerrado 2026-09-06)
 
 Sale de [`pendientes.md` § 2](pendientes.md). Es de la familia *"lo que la pantalla lee después

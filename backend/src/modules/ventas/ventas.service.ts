@@ -1470,11 +1470,17 @@ export class VentasService {
                 COALESCE(SUM(d.impuesto_aplicado), 0)::text AS impuesto
            FROM venta_detalles d
           WHERE d.eliminado_el IS NULL
-            AND (d.venta_id = $1
-                 OR d.venta_id IN (SELECT venta_id FROM ventas
-                                    WHERE venta_referencia_id = $1
-                                      AND tipo_documento_id = $2
-                                      AND eliminado_el IS NULL))
+            -- Una sola lista y no \`= $1 OR IN (...)\`: ver el gemelo de
+            -- \`unidadesComprometidasPorItem\`. Acá pesa el doble, porque esto
+            -- corre **adentro de la transacción** que emite la nota de crédito.
+            AND d.venta_id IN (
+              SELECT venta_id FROM ventas
+               WHERE venta_referencia_id = $1
+                 AND tipo_documento_id = $2
+                 AND eliminado_el IS NULL
+              UNION ALL
+              SELECT $1::uuid
+            )
           GROUP BY 1, 2`,
         [params.ventaOriginalId, tipoNotaCredito],
       );
@@ -2227,8 +2233,19 @@ export class VentasService {
          SELECT m.venta_id, m.item_id, SUM(m.cantidad) AS cant
            FROM movimientos_inventario m
           WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
-            AND (m.venta_id = $1
-                 OR m.venta_id IN (SELECT venta_id FROM docs))
+            -- El \`IN\` de una sola lista, y no \`= $1 OR venta_id IN (docs)\`:
+            -- son equivalentes, pero con el \`OR\` el planner no usa el índice
+            -- por \`venta_id\` y cae a seq scan de \`movimientos_inventario\`.
+            -- Medido con 30.000 movimientos y un 20% de filas \`devolucion\`:
+            -- este nodo pasa de 3,8 ms (seq scan) a 0,10 ms.
+            -- La alternativa —un índice PARCIAL por \`motivo = 'devolucion'\`— se
+            -- midió y es la salida chica: con el \`OR\` puesto baja a 1,4-1,9 ms, contra
+            -- los 0,10 que da sacarlo. Ver \`docs/patterns/backend.md\` § 17.
+            AND m.venta_id IN (
+              SELECT venta_id FROM docs
+              UNION ALL
+              SELECT $1::uuid
+            )
           GROUP BY 1, 2
        )
        SELECT COALESCE(l.item_id, mv.item_id) AS item_id,
@@ -2928,11 +2945,17 @@ export class VentasService {
                 ), 0)::text AS monto
            FROM venta_detalles d
           WHERE d.eliminado_el IS NULL
-            AND (d.venta_id = $1
-                 OR d.venta_id IN (SELECT venta_id FROM ventas
-                                    WHERE venta_referencia_id = $1
-                                      AND tenant_id = $2
-                                      AND eliminado_el IS NULL))
+            -- Una sola lista y no \`= $1 OR IN (...)\`: ver el gemelo de
+            -- \`unidadesComprometidasPorItem\`. Con el \`OR\` esta consulta hacía
+            -- Parallel Seq Scan de \`venta_detalles\` **con el índice puesto**.
+            AND d.venta_id IN (
+              SELECT venta_id FROM ventas
+               WHERE venta_referencia_id = $1
+                 AND tenant_id = $2
+                 AND eliminado_el IS NULL
+              UNION ALL
+              SELECT $1::uuid
+            )
           GROUP BY 1
           ORDER BY 1`,
         [ventaId, tenantId],

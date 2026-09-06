@@ -217,26 +217,21 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   owner y del documento (ADR-010). Lo que este frente hizo fue **no empeorarlo** —ese camino ya
   existía para el cálculo fallado—; ampliarlo o cerrarlo es otra conversación.
 
-- [ ] **`GET /ventas/:id` escanea `venta_detalles` entera, y ahora una vez más**
-  (backend; **medido el 2026-09-04** por la revisión independiente de la tarea 2 del frente de
-  la devolución con crédito parcial) — el contador de unidades ya comprometidas
-  (`VentasService.unidadesComprometidasPorItem`) entró al camino de lectura caliente, y su
-  `EXPLAIN` da **seq scan en las tres tablas**: `venta_detalles`, `ventas` y
-  `movimientos_inventario`.
+- [ ] **Otras seis columnas del mismo `GET /ventas/:id` siguen sin índice** (backend; **medido el
+  2026-09-06** por la revisión del frente que indexó las tres primeras) — mismo camino caliente,
+  misma causa, y quedó afuera porque la entrada anterior nombraba solo tres tablas.
 
-  **No es artefacto de tabla chica.** No existe índice sobre `venta_detalles.venta_id`, ni sobre
-  `ventas.venta_referencia_id`, ni sobre `movimientos_inventario.venta_id` — el único índice de
-  las tres es la PK de `ventas`. O sea que la falta es **preexistente** y este frente no la
-  creó; lo que agregó son **dos** scans de la tabla más ancha por cada `GET /ventas/:id` —el
-  contador de unidades y el remanente por porción (`disponibleNotaCredito`)— más uno de `ventas`
-  en el subplan, y uno más por cada nota de crédito emitida. Medido al volumen de hoy: 0,301 ms
-  la consulta del remanente, que es lo que hace que todavía no duela.
+  Sin índice, con solo su PK: `pagos.venta_id`, `ventas_descuentos.venta_id`,
+  `ventas_recargos.venta_id`, `ventas_impuestos.venta_id`, `ventas_promociones.venta_id` y
+  `venta_customer.venta_id`. Son **seis seq scans más por request**, verificado contra
+  `pg_indexes`.
 
-  **No es N+1** (una consulta por request, no por fila), así que no cae bajo la regla de sacarlo
-  en el momento. Lo que hay que medir antes de decidir: con cuántas filas de `venta_detalles`
-  empieza a doler, y si los tres índices alcanzan o hace falta además un índice parcial por
-  `motivo = 'devolucion'`. **Medir con volumen sembrado, no con la base de desarrollo**: hoy
-  tiene 157 ventas y cualquier plan sale seq scan igual.
+  **Lo que falta medir**: cuánto pesa cada uno con volumen sembrado —las seis tablas son más
+  angostas que `venta_detalles` (11 a 16 columnas contra 23), así que el seq scan puede costar
+  bastante menos— y si el canje de escritura conviene; el índice del frente anterior sobre
+  `venta_detalles` se midió en **~1 µs por fila insertada**. Receta y trampas:
+  [`patterns/backend.md` § 17](../patterns/backend.md), con el aviso de que la **distribución del
+  seed** es parte de la medición.
 
 - [ ] **La cuenta de plata del modal de nota de crédito es aproximada, y queda una ventana de un
   minor unit** (frontend; **medido el 2026-09-04**, reescrita dos veces ese mismo día) — la

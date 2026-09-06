@@ -891,6 +891,9 @@ CREATE TABLE "movimientos_inventario" (
   "eliminado_el"     TIMESTAMPTZ
 );
 
+-- Los movimientos de una venta: los cuenta la nota de crédito por línea.
+CREATE INDEX "idx_movimientos_inventario_venta" ON "movimientos_inventario" ("venta_id");
+
 -- Lotes (fuente de verdad de stock en modo 'lote'; metadato en modo 'serie')
 -- En modo 'lote': cantidad_disponible es la cantidad real en stock.
 -- En modo 'serie': cantidad_inicial y cantidad_disponible son 0 (el lote es solo metadato).
@@ -1359,6 +1362,9 @@ CREATE TABLE "ventas" (
   "eliminado_el"          TIMESTAMPTZ
 );
 
+-- Las notas de crédito de una venta: se busca en cada lectura del detalle.
+CREATE INDEX "idx_ventas_venta_referencia" ON "ventas" ("venta_referencia_id");
+
 CREATE TABLE "venta_detalles" (
   "detalle_id"             UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "venta_id"               UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
@@ -1381,6 +1387,10 @@ CREATE TABLE "venta_detalles" (
   "actualizado_el"         TIMESTAMPTZ,
   "eliminado_el"           TIMESTAMPTZ
 );
+
+-- Todo lo que lee el detalle de una venta entra por acá. Sin este índice, seq
+-- scan: medido con 240.000 filas, 16,6 ms contra 0,08 ms (docs/patterns/backend.md § 17).
+CREATE INDEX "idx_venta_detalles_venta" ON "venta_detalles" ("venta_id");
 
 -- "aplicado_en": 'detalle' (por línea) | 'venta' (global a toda la venta)
 -- Las tres tablas congelan la regla tal como estaba al cobrar: si mañana el
