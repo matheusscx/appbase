@@ -653,8 +653,8 @@ async function abrirCobro() {
     // es un contador monótono, éste guarda el id y compara ids. Lo que lo hace
     // funcionar no es ser id-independiente, es que **alguien lo anula**. Dos
     // `abrirCobro` solapados sobre la MISMA cuenta lo engañarían; hoy no es
-    // alcanzable —el botón queda deshabilitado con `:loading="abriendoCobro"`, y
-    // se midió— pero si algún día se abre otro llamador, esto pasa a ser contador.
+    // alcanzable —el botón queda deshabilitado mientras `abriendoCobro`, y se
+    // midió— pero si algún día se abre otro llamador, esto pasa a ser contador.
     if (cobroPedidoId.value !== cuenta.id) return
     if (activeCuenta.value?.id !== cuenta.id) return
     if (!res) {
@@ -2096,9 +2096,12 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   //
   // ⚠️ **Las propinas van en la foto, y el primer intento las dejó vivas** con el
   // argumento de que el modal ya las había fijado. Lo refutó la revisión
-  // MIDIÉNDOLO: en esa misma ventana el botón *Cerrar y cobrar* sigue habilitado
-  // —`submitting` recién se prende adentro—, y un solo tap reabre el modal, cuyo
-  // `watch(open)` **reescribe** `propinaMonto`. Medido: cobro confirmado con
+  // MIDIÉNDOLO: en esa ventana el botón *Cerrar y cobrar* seguía habilitado
+  // —`submitting` se prendía recién adentro de `cerrarCuentaConPin`—, y un solo
+  // tap reabría el modal, cuyo `watch(open)` **reescribe** `propinaMonto`. Esa
+  // puerta se cerró el 2026-09-06 (ver el `submitting.value = true` de más abajo),
+  // así que hoy la foto es defensa sin camino vivo; se deja igual, y el porqué
+  // está en `docs/agent/resueltos.md`. Medido: cobro confirmado con
   // propina 0 y `POST .../cerrar` saliendo con 500, contra unos `pagos` que sí
   // estaban congelados. `propinaPorcentaje` y `propinaHabilitada` NO van: solo
   // se escriben en el `onMounted`.
@@ -2110,14 +2113,32 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     propinaMonto: propinaMonto.value || '0',
     propinaSugerida: propinaSugerida.value || propinaMonto.value || '0',
   }
+  // **`submitting` se prende ACÁ, además de adentro de `cerrarCuentaConPin`** — que
+  // corre después del PIN y del flush; allá se queda porque el reintento de
+  // `toastErrorOperativo` la vuelve a invocar sin pasar por acá—. Hasta el
+  // 2026-09-06 se prendía **solo** allá, así que en
+  // todo ese tramo el botón *Cerrar y cobrar* seguía habilitado y el garzón podía
+  // reabrir el modal y **confirmar el mismo cobro dos veces**: el segundo `POST`
+  // rebotaba con el rechazo del backend sobre una cuenta que él ya había cobrado.
+  // En tablet personal es peor, porque `solicitarPin` ejecuta la acción sin modal
+  // y no hay ni un teclado que lo frene. Mismo criterio que `abriendoCuenta`.
+  submitting.value = true
   // El cobro recolecta los pagos; el PIN identifica al garzón que cierra.
   cobroOpen.value = false
-  solicitarPin('PIN del garzón para cerrar la cuenta', (garzonId, pin) => {
-    void (async () => {
-      await flushPendientes()
-      await cerrarCuentaConPin(cobro, garzonId, pin)
-    })()
-  })
+  solicitarPin(
+    'PIN del garzón para cerrar la cuenta',
+    (garzonId, pin) => {
+      void (async () => {
+        await flushPendientes()
+        await cerrarCuentaConPin(cobro, garzonId, pin)
+      })()
+    },
+    // ⚠️ **Sin esto el drawer queda trabado para siempre.** Prender `submitting`
+    // antes del teclado significa que hay un camino que no termina en
+    // `cerrarCuentaConPin` —cerrar el teclado sin tipear— y ahí el `finally` que
+    // lo apaga nunca corre.
+    { onCancelar: () => { submitting.value = false } },
+  )
 }
 
 /**
@@ -2630,7 +2651,7 @@ async function cerrarCuentaConPin(
                   <UButton
                     color="primary"
                     class="flex-1 justify-center"
-                    :loading="abriendoCobro"
+                    :loading="abriendoCobro || submitting"
                     :disabled="activeCuenta.lineas.length === 0 || !tieneCaja || cuentaConItemEliminado"
                     @click="abrirCobro"
                   >

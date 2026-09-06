@@ -3504,20 +3504,19 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(mesas.find(m => m.id === 'mesa-2')).toMatchObject({ cuentasAbiertas: 1, ocupada: true })
   })
 
-  it('reabrir el cobro durante la espera no cambia la propina con la que se cierra', async () => {
+  it('mientras el cierre viaja, el botón no deja confirmar el mismo cobro otra vez', async () => {
     /**
-     * **Lo midió la revisión, contra un comentario mío que decía lo contrario.**
-     * El primer arreglo de esta puerta congelaba la cuenta y la mesa y dejaba las
-     * propinas vivas, con el argumento de que el modal de cobro ya las había
-     * fijado. Pero en esa misma ventana el botón *Cerrar y cobrar* sigue
-     * habilitado —`submitting` recién se prende adentro de `cerrarCuentaConPin`—
-     * y **un solo tap** reabre el modal, cuyo `watch(open)` reescribe
-     * `propinaMonto` con la sugerencia.
+     * `submitting` se prendía adentro de `cerrarCuentaConPin`, o sea **después**
+     * del PIN y del flush, así que en todo ese tramo *Cerrar y cobrar* seguía
+     * habilitado: un tap reabría el modal y confirmarlo de nuevo mandaba un
+     * segundo `POST .../cerrar` sobre una cuenta que el garzón ya había cobrado.
+     * En tablet personal es peor —`solicitarPin` ejecuta la acción sin modal—, así
+     * que no hay ni un teclado que lo frene.
      *
-     * O sea: el garzón borra la propina que venía sugerida —el cliente no dejó—
-     * y el `POST .../cerrar` sale con la sugerida igual. Es plata, y el backend
-     * la persiste en `venta_propina` contra unos `pagos` que sí estaban
-     * congelados.
+     * De esa misma ventana salía la propina reescrita (la reapertura dispara el
+     * `watch(open)` del modal), que ya se había cerrado congelándola. Cerrar la
+     * ventana entera es lo que pedía la entrada del backlog, con el precedente de
+     * `abriendoCuenta` al lado.
      */
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
@@ -3538,10 +3537,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    // El modal abre con la sugerida puesta (10% de 5.000) y **el garzón la
-    // borra**: el cliente no dejó propina. Sin este gesto el test no reproduce
-    // nada, porque la reapertura de más abajo vuelve a escribir esa misma
-    // sugerencia y el `POST` saldría igual con o sin congelado.
+    // El modal abre con la sugerida puesta (10% de 5.000) y el garzón la borra.
     const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
     botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
     await esperar(20)
@@ -3552,21 +3548,50 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(20)
     await tipearPin()
 
-    // El tap de más, con el flush todavía en vuelo.
+    // El tap de más, con el flush todavía en vuelo: ya no entra.
     const botonCobrar = botonEn(drawerMesa(), 'Cerrar y cobrar')
-    expect(botonCobrar?.disabled).toBe(false)
+    expect(botonCobrar?.disabled, 'el botón espera al cierre').toBe(true)
     botonCobrar!.click()
     await esperar(50)
-    // Y el modal efectivamente se reabrió: sin esto el test pasaría por no haber
-    // reproducido nada.
-    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(true)
+    expect(cobroModal.props('open'), 'el modal no se reabre').toBe(false)
 
     soltar()
     await esperar(300)
 
+    // Un solo cobro, con la propina que el garzón confirmó.
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     expect(bodiesDeCierre).toHaveLength(1)
     expect(bodiesDeCierre[0]).toMatchObject({ propinaMonto: '0' })
+  })
+
+  it('cerrar el teclado de PIN sin tipearlo devuelve el botón, no lo deja trabado', async () => {
+    /**
+     * El control de la línea de arriba, y la trampa de prender `submitting` antes
+     * del teclado: hay un camino que **no** termina en `cerrarCuentaConPin` —el
+     * garzón cierra el teclado sin tipear—, y ahí el `finally` que lo apaga no
+     * corre nunca. Sin el `onCancelar`, el drawer queda con *Cerrar y cobrar*
+     * deshabilitado para siempre y esa cuenta no se puede cobrar más.
+     */
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
+    await esperar(20)
+    expect(tecladoPin(), 'el teclado de PIN se abrió').toBeTruthy()
+
+    // Lo cierra sin tipear nada.
+    wrapper.findComponent({ name: 'SalonesGarzonPinModal' }).vm.$emit('update:open', false)
+    await esperar(50)
+
+    expect(cierresDeCuenta).toEqual([])
+    expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled, 'vuelve a poder cobrar').toBe(false)
   })
 
   it('meterse en otra cuenta mientras se calcula el total no abre el cobro sobre esa otra', async () => {
@@ -4104,64 +4129,6 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       toasts.filter(t => (t.title ?? '').includes('fusión')),
       'nadie fusionó nada: la canceló él',
     ).toEqual([])
-  })
-
-  it('el cobro que se reabre sobre el listado sigue sabiendo qué cuenta cobra', async () => {
-    /**
-     * La ventana que prueba que la cuenta se congela **al abrir el modal** y no en
-     * el *Confirmar*, sin depender de ninguna fusión: el cierre en curso llama
-     * `volverACuentas()` cuando vuelve, o sea que deja `activeCuenta` en `null`
-     * **con el modal de cobro reabierto encima** —el botón sigue habilitado
-     * durante el flush, que es la misma ventana que fija el test de la propina—.
-     * Releyendo `activeCuenta` ahí, el segundo *Confirmar* corta en seco.
-     *
-     * ⚠️ **Que salgan DOS cierres no es lo que este test bendice**: esa es la
-     * entrada abierta *"la misma ventana del cobro deja confirmarlo dos veces"*
-     * (`docs/agent/pendientes.md` § 2). Lo que se fija acá es que el segundo sale
-     * con la cuenta del modal en vez de perderse. Cuando esa entrada se cierre,
-     * este test cambia con ella.
-     */
-    catalogoItemsMock = [producto('9.0000', '1.0000')]
-    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
-    let soltar!: () => void
-    patchCantidadRetenido = new Promise<void>((r) => {
-      soltar = r
-    })
-
-    const wrapper = await montar()
-    await abrirLaCuenta(wrapper)
-    await esperar(400)
-
-    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
-    input!.vm.$emit('change', {
-      presentacion: '3',
-      unidadCodigo: 'unidad',
-      cantidadCanonica: '3.0000',
-    })
-    await esperar(20)
-
-    await abrirYConfirmarElCobro(wrapper)
-    await esperar(20)
-    await tipearPin()
-
-    // El tap de más, con el flush todavía en vuelo: reabre el modal.
-    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
-    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
-    await esperar(50)
-    expect(cobroModal.props('open')).toBe(true)
-
-    // Vuelve el primer cierre: su `volverACuentas()` deja la pantalla en el
-    // listado, sin cuenta activa, con el modal todavía arriba.
-    soltar()
-    await esperar(300)
-    expect(botonEn(drawerMesa(), 'Nueva cuenta'), 'quedó en el listado').toBeTruthy()
-
-    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
-    await esperar(20)
-    await tipearPin()
-    await esperar(300)
-
-    expect(cierresDeCuenta).toEqual(['cuenta-9', 'cuenta-9'])
   })
 
   /** Las dos mesas del salón, para los tests que necesitan cambiar de mesa. */

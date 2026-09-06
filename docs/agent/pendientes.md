@@ -183,36 +183,13 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   ⚠️ **Ojo con el arreglo fácil, porque ya se midió falso:** antes del `watch` que limpia la foto
   del cobro, ese caso **sí** disparaba el aviso de la fusión — pero por un `cobroCuenta` que nadie
   limpiaba, y mandando a *"cobrarla desde la fusionada"* un cobro que ya estaba confirmado y en
-  vuelo. Mirar ese ref no resuelve nada. Lo que hace falta saber es **de qué cuenta** es el cierre
-  en vuelo, y eso hoy no lo sabe nadie: que lo *haya* sí se sabe —`submitting` se prende al entrar a
-  `cerrarCuentaConPin`—, pero la cuenta vive solo en el argumento `cobro`. Y ese flag tampoco cubre
-  el tramo del flush, que es anterior.
+  vuelo. Mirar ese ref no resuelve nada. Lo que hace falta saber es **de qué cuenta** es el cierre en
+  vuelo: que lo *haya* ya se sabe —desde el 2026-09-06 `submitting` se prende en `confirmarCobro`,
+  así que cubre el tramo entero, flush incluido— pero la cuenta vive solo en el argumento `cobro`,
+  que no es un ref y nadie de afuera puede leer.
 
   **Lo que falta medir**: si alcanza con avisar (el garzón va a leer el rechazo igual) o si el
-  cierre en vuelo tiene que cancelarse antes de salir — y ahí se cruza con la entrada de abajo,
-  porque las dos tocan el mismo tramo entre el PIN y el `POST`.
-
-- [ ] **La misma ventana del cobro deja confirmarlo dos veces** (frontend; **medido el
-  2026-09-05** por la revisión del cierre de la quinta puerta, que encontró la segunda mitad de
-  una causa que ese cierre nombró y usó a medias) — **preexistente**: el frente de la quinta
-  puerta no lo introdujo.
-
-  `confirmarCobro` no mira `submitting`, y `submitting` recién se prende adentro de
-  `cerrarCuentaConPin` —o sea después del flush—, así que en esa ventana el botón *Cerrar y
-  cobrar* sigue habilitado. De ahí salía la propina reescrita (ya cerrado), y de ahí sale
-  también que el garzón confirme **el mismo cobro dos veces**: en modo tablet `solicitarPin`
-  ejecuta la acción sin modal, así que ni siquiera hay un teclado que lo frene. El segundo
-  `POST .../cerrar` rebota y el garzón lee el rechazo del backend sobre una cuenta ya cobrada.
-
-  ⚠️ **Corrección del 2026-09-06, medida:** esta entrada decía que ese rechazo venía *"con oferta de
-  reintento sobre una cuenta ya cobrada"*. Es falso — `toastErrorOperativo` guarda el `retry`
-  **solo** si el mensaje habla de *sesión de trabajo*; cualquier otro error sale como toast plano,
-  sin acción, y el callback que le pasa `cerrarCuentaConPin` se descarta. Lo levantó la revisión en
-  una entrada nueva que había copiado la premisa de acá.
-
-  **Lo que falta medir**: si alcanza con un guard de reentrancia como el de `abriendoCuenta`
-  —que existe justo para esto, con su porqué escrito— o si el botón tiene que deshabilitarse
-  desde `confirmarCobro`.
+  cierre en vuelo tiene que cancelarse antes de salir.
 
 - [ ] **La venta que se cierra sin cálculo queda sin boleta, y la caja se proyecta inflada por
   el vuelto** (frontend; **medido el 2026-09-05** por la revisión del cierre de la quinta

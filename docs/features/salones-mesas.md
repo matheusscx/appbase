@@ -760,10 +760,18 @@ rebota (`../agent/pendientes.md` § 2).
 la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
 todo", es "decidir cada lectura". Y decidirla **midiendo**: el primer intento de la quinta
 puerta dejó vivas las refs de propina argumentando que el modal ya las había fijado, y la
-revisión lo refutó tapeando *Cerrar y cobrar* durante la espera —el botón no está
-deshabilitado ahí— : el modal se reabre, su `watch(open)` reescribe `propinaMonto`, y el cobro
+revisión lo refutó tapeando *Cerrar y cobrar* durante la espera —ese botón todavía no
+esperaba al cierre; el 2026-09-06 pasó a hacerlo, ver el 📌 de unas líneas más abajo— : el modal se reabre, su `watch(open)` reescribe `propinaMonto`, y el cobro
 salía con una propina que el garzón nunca confirmó. Van en la foto. `propinaPorcentaje` y
 `propinaHabilitada` no, que solo se escriben al montar.
+
+📌 **El cobro confirmado bloquea el botón hasta que termina** (2026-09-06). `submitting` se prende
+**también** en el *Confirmar*, y no solo adentro de `cerrarCuentaConPin`, que corre después del PIN
+y del flush: en ese tramo el botón seguía habilitado y un tap alcanzaba para **confirmar el mismo cobro dos veces**
+—en tablet personal, sin siquiera un teclado de PIN de por medio—. El segundo `POST` rebota contra
+una cuenta ya cerrada y el garzón lee un error por algo que le salió bien. ⚠️ La trampa de prenderlo
+antes del teclado: **cerrar el teclado sin tipear no pasa por `cerrarCuentaConPin`**, así que sin un
+`onCancelar` que lo apague el drawer queda trabado y esa cuenta no se puede cobrar nunca más.
 
 **Decisión del owner (2026-09-02):** salir guarda. Hasta ese día salir descartaba **en
 silencio** —ni request ni aviso— y al volver a entrar el input mostraba la cantidad que nunca

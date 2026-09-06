@@ -17,6 +17,122 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El mismo cobro se podía confirmar dos veces (cerrado 2026-09-06)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"La misma ventana del cobro deja confirmarlo dos
+veces"*. **Preexistente**: la nombró la revisión del cierre de la quinta puerta como la segunda
+mitad de una causa que ese cierre usó a medias —de ahí salía también la propina reescrita—.
+
+### Qué pasaba
+
+`submitting` se prendía adentro de `cerrarCuentaConPin`, que corre **después** del PIN y del flush.
+En todo ese tramo el botón *Cerrar y cobrar* seguía habilitado: un tap reabría el modal y
+confirmarlo mandaba un **segundo `POST .../cerrar`** sobre una cuenta que el garzón ya había
+cobrado. El backend lo rechaza —`estado !== abierta`— pero el garzón lee un error sobre una cuenta
+que acaba de cerrar bien. (Sin oferta de reintento, dicho porque la entrada del backlog afirmaba lo
+contrario y se midió: `toastErrorOperativo` guarda el `retry` **solo** cuando el mensaje habla de
+*sesión de trabajo*; cualquier otro error sale como toast plano y el callback se descarta.) En **tablet personal** es peor: `solicitarPin` ejecuta la acción sin
+modal, así que no hay ni un teclado que lo frene.
+
+### Qué se hizo
+
+`submitting` se prende en `confirmarCobro`, apenas el garzón confirma, y el botón lo mira
+(`:loading="abriendoCobro || submitting"`). La asignación que ya estaba adentro de
+`cerrarCuentaConPin` **se queda**: esa función se vuelve a invocar sola desde el reintento de
+`toastErrorOperativo`, sin pasar por `confirmarCobro`. Es el mismo gesto que `abriendoCuenta` para
+el doble tap de *Nueva cuenta*, con su porqué escrito al lado — aunque no la misma defensa: ver más
+abajo.
+
+📌 **`submitting` es de la pantalla, no de la cuenta, y eso bloquea de más:** con un cierre en
+vuelo, *Cerrar y cobrar* queda deshabilitado también en **otra** cuenta a la que el garzón entre. Es
+transitorio y se libera solo, es consistente con `abriendoCuenta` y `fusionando`, y la alternativa
+—un flag por cuenta— no la pidió nadie; pero la ventana incluye la impresión de la boleta por QZ
+Tray, que es la parte lenta. Queda dicho, no medido en un test.
+
+⚠️ **Prenderlo antes del teclado abre un camino que no termina en `cerrarCuentaConPin`**: cerrar el
+teclado sin tipear. Ahí el `finally` que lo apaga no corre nunca y el drawer queda con *Cerrar y
+cobrar* deshabilitado **para siempre**. Va con el `onCancelar` que `solicitarPin` ya aceptaba, y con
+su propio test — sin él, la cuenta no se puede cobrar más.
+
+📌 **No se agregó un guard de reentrancia adentro de `confirmarCobro`, y el porqué está medido.**
+Hay uno de hecho: `cobroCuenta` lo nulea el `watch(cobroOpen)` al cerrar el modal, así que una
+segunda llamada corta en su `if (!cuenta) return`. ⚠️ **Pero ese watch es `flush: 'pre'`**, o sea que
+corre en el microtask siguiente, y dos `confirmar` emitidos en el **mismo tick** lo saltean. Lo que
+pasa ahí lo midió la revisión, y **no es lo mismo en los dos modos de dispositivo**: en tablet
+personal salen los dos `POST`; en tótem sale **uno solo**, porque el segundo `solicitarPin` pisa
+`pinAction` y el PIN tecleado ejecuta la acción del segundo cobro —la del primero se descarta en
+silencio—. Con taps no pasa ninguna de las dos: cada click es su propio macrotask y entre uno y otro
+el watch ya corrió (también medido). Si algún día algo emite `confirmar` sin pasar por un tap, ahí sí
+hace falta el guard.
+
+⚠️ **Y no es "el mismo par" que `abriendoCuenta`**, aunque la primera versión de este párrafo lo
+dijera: aquél además se chequea **en código**, dos veces. Acá el chequeo vive solo en el template.
+
+### Lo que este cierre le sacó a la cobertura, dicho
+
+Cerrar la ventana **eliminó los dos escenarios** que mataban dos mutantes del commit de ayer, y los
+dos tests que los usaban se fueron con ella:
+
+- **C3** (`confirmarCobro` releyendo `activeCuenta`) se mataba con el cobro reabierto sobre el
+  listado, cuando el cierre en curso deja `activeCuenta` en `null`. Sin reapertura no hay segundo
+  *Confirmar*.
+- **C8** (la propina leída viva) se mataba con la reapertura reescribiendo `propinaMonto` por el
+  `watch(open)` del modal. Sin reapertura, nada la mueve entre el *Confirmar* y el `POST`.
+
+**No escribo que no quede ningún camino** —en este mismo frente afirmé eso tres veces y las tres me
+faltó uno—. Lo que hice fue buscar el reemplazo, y el `grep` de `activeCuenta.value =` da **cinco**
+escritores: `onSelectMesa`, `abrirCuenta`, `volverACuentas`, `fusionarSeleccionadas` y
+`aplicarCuentaActualizada` (ojo, `abrirCuentaConPin` **no** escribe ese ref: delega en `abrirCuenta`
+— la primera versión de este párrafo lo listaba a él y se comía dos de los que sí escriben, y lo
+levantó la revisión midiendo). Para `propinaMonto` son dos mecanismos y no uno: el input del modal
+y su `watch(open)`, que es el que rompía. Ninguno de esos siete corre entre el *Confirmar* y el
+`POST` con el botón bloqueado. Los dos congelados **se dejan igual**: son la garantía estructural, y el motivo está
+en la sección del modal de transferencia — *"la salida no fue enumerar mejor, fue dejar de depender
+de la enumeración"*.
+
+### Qué lo fija
+
+Dos tests, y los dos son de este cierre: el del doble cobro —que además comprueba que la propina
+sale como el garzón la confirmó— y el del teclado cancelado. El del doble cobro **reemplaza** al de
+la propina reabierta, que fijaba la misma escena desde el otro lado.
+
+**Veinte mutantes sobre el spec completo (92 tests), cuatro sobrevivientes:**
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **F1** — `submitting` recién adentro de `cerrarCuentaConPin` | el código de antes | ✝ mata 1 |
+| **F2** — el botón sin mirar `submitting` | el código de antes, del otro lado | ✝ mata 1 |
+| **F3** — sin el `onCancelar` del teclado | el drawer trabado | ✝ mata 1 |
+| **C1** — sin el guard de identidad al abrir | | ✝ mata 2 |
+| **C2** — el guard corta siempre | control | ✝ mata 9 |
+| **C3** — el *Confirmar* releyendo `activeCuenta` | | **sobrevive** (ver arriba) |
+| **C4** — la mesa leída viva al confirmar | | **sobrevive** |
+| **C5** / **C6** — `:venta-total` / `:total` vivos | | ✝ mata 1 cada uno |
+| **C7** — la propina sugerida desde `totalFinal` vivo | | **sobrevive** (equivalente) |
+| **C8** — la propina leída viva en `cerrarCuentaConPin` | | **sobrevive** (ver arriba) |
+| **C9** — el aviso de error antes del guard | | ✝ mata 1 |
+| **C10** — `cerrarCuentaConPin` leyendo `selectedMesa` | | ✝ mata 1 |
+| **D1** — la fusión no toca el cobro | | ✝ mata 3 |
+| **D2** — la fusión lo cierra siempre | control | ✝ mata 1 |
+| **D3** — sin el aviso al cobro que calcula | | ✝ mata 2 |
+| **D4** — `abrirCobro` deduciendo y avisando | | ✝ mata 1 |
+| **E1** — sin limpiar la foto al cerrar | | ✝ mata 1 |
+| **E2** — sin la marca del pedido | | ✝ mata 1 |
+| **E3** — la fusión no anula el pedido | | ✝ mata 1 |
+
+⚠️ **La sección de abajo quedó describiendo un código que este commit cambió**, y su texto no se
+corrige —la regla verbatim de este archivo—, así que conviene nombrar qué le quedó viejo: su
+*"Qué lo fija"* dice que *"la **cuenta** congelada se fija con el cobro que se reabre durante el
+flush"*, y ese test es el que este commit borró — esa reapertura ya no es alcanzable—. La frase
+*"el botón *Cerrar y cobrar* sigue habilitado"*, que también quedó invertida, no está ahí sino en la
+sección del cobro que se perdía en el camino, más abajo. **Lo que cambió en la tabla son C3 y C8**,
+que mataban 1 y ahora sobreviven. El resto se volvió a correr y da igual. C2 se queda en 9 con la cuenta hecha: el
+del doble cobro **reemplaza** al de la propina reabierta, que ya lo mataba (neto 0), entra el del
+teclado cancelado (+1) y sale el borrado (−1). La tabla de allá no se corrige: describe su propio commit; los
+números que valen hoy son los de acá.
+
+---
+
 ## La fusión que aterriza tarde se lleva el cobro en curso, y lo dice (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 4](pendientes.md), la entrada que abrió el cierre de acá abajo unas
