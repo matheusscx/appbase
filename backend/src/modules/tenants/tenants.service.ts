@@ -322,6 +322,16 @@ export class TenantsService {
       });
       await manager.save(Caja, caja);
 
+      // 6d. Ubicación local: el lugar del que sale toda venta. Se siembra
+      // acá —y no on-demand— por lo mismo que la caja virtual y el rol admin:
+      // el tenant nace completo. Un tenant sin local no puede vender
+      // (`UbicacionesService.localDe`).
+      await manager.query(
+        `INSERT INTO ubicaciones (tenant_id, nombre, tipo, activo)
+         VALUES ($1, 'Local', 'local', true)`,
+        [savedTenant.id],
+      );
+
       // 6a. Garzón placeholder "Mostrador" (receptor neutro de propina del POS)
       await this.garzonesService.asegurarMostrador(manager, savedTenant.id);
 

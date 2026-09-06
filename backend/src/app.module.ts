@@ -151,6 +151,9 @@ import { PromocionScope } from './modules/promociones/entities/promocion-scope.e
 import { PromocionScopeItem } from './modules/promociones/entities/promocion-scope-item.entity';
 import { VentaPromocion } from './modules/ventas/entities/venta-promocion.entity';
 import { PromocionesModule } from './modules/promociones/promociones.module';
+import { Ubicacion } from './modules/ubicaciones/entities/ubicacion.entity';
+import { StockUbicacion } from './modules/items/entities/stock-ubicacion.entity';
+import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
 
 @Module({
   imports: [
@@ -278,6 +281,8 @@ import { PromocionesModule } from './modules/promociones/promociones.module';
           PromocionScope,
           PromocionScopeItem,
           VentaPromocion,
+          Ubicacion,
+          StockUbicacion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -322,6 +327,7 @@ import { PromocionesModule } from './modules/promociones/promociones.module';
     MotivosDiferenciaInventarioModule,
     RecuentosModule,
     PromocionesModule,
+    UbicacionesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -101,6 +101,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-lucide-list-plus',
         to: '/configuracion/grupos-modificadores',
       },
+      {
+        label: 'Ubicaciones',
+        icon: 'i-lucide-warehouse',
+        to: '/configuracion/ubicaciones',
+      },
     )
   }
 

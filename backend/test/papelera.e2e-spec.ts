@@ -522,6 +522,19 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
           nombre: n,
         })),
     },
+    {
+      // Recurso 17 (Tarea 1 de "bodegas y traslados"): solo `tipo = 'bodega'`
+      // se crea por API, el `local` nace sembrado y nunca se borra.
+      nombre: 'ubicaciones',
+      path: 'ubicaciones',
+      tabla: 'ubicaciones',
+      pk: 'ubicacion_id',
+      crear: () =>
+        crearFila('ubicaciones', 'Bodega', (n) => ({
+          nombre: n,
+          tipo: 'bodega',
+        })),
+    },
   ];
 
   // El guard de cobertura, derivado del ESQUEMA y no de sí mismo. Un
@@ -545,7 +558,7 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
       ),
     ).map((r) => r.table_name);
 
-    expect(tablas).toHaveLength(16);
+    expect(tablas).toHaveLength(17);
     expect([...recursos.map((r) => r.tabla)].sort()).toEqual(tablas);
   });
 

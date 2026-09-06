@@ -172,6 +172,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedUbicaciones();
     await this.seedCausasMerma();
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
@@ -1321,6 +1322,54 @@ export class SeederService implements OnApplicationBootstrap {
           }),
         );
       }
+    }
+  }
+
+  /**
+   * El local de cada tenant del seed —mismo `INSERT` que `TenantsService.create`,
+   * porque los tenants del seed no pasan por ahí (se insertan directo con
+   * `tenantRepo.save`)— y una bodega demo en Paris, para tener desde el seed
+   * un caso real de "más de una ubicación" (spec § 10: medir contra el 100%
+   * del stock en una sola ubicación mide un caso que no existe).
+   */
+  private async seedUbicaciones(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    // Id fijo del patrón del seed: siguiente libre confirmado el 2026-09-06 con
+    // `grep -o "550e8400-e29b-41d4-a716-4466554[0-9]\{5\}" seeder.service.ts`.
+    const BODEGA_SUBSUELO_ID = '550e8400-e29b-41d4-a716-446655440383';
+
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_tenant_nombre
+      ON ubicaciones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
+    // Sin id fijo: nadie referencia el local de un tenant por su UUID, solo
+    // por `tipo = 'local'` (`UbicacionesService.localDe`).
+    for (const tenantId of [PARIS, FALABELLA]) {
+      const existe: unknown[] = await this.dataSource.query(
+        `SELECT 1 FROM ubicaciones WHERE tenant_id = $1 AND tipo = 'local'`,
+        [tenantId],
+      );
+      if (!existe.length) {
+        await this.dataSource.query(
+          `INSERT INTO ubicaciones (tenant_id, nombre, tipo, activo)
+           VALUES ($1, 'Local', 'local', true)`,
+          [tenantId],
+        );
+      }
+    }
+
+    const existeBodega: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM ubicaciones WHERE ubicacion_id = $1`,
+      [BODEGA_SUBSUELO_ID],
+    );
+    if (!existeBodega.length) {
+      await this.dataSource.query(
+        `INSERT INTO ubicaciones (ubicacion_id, tenant_id, nombre, tipo, activo)
+         VALUES ($1, $2, 'Bodega Subsuelo', 'bodega', true)`,
+        [BODEGA_SUBSUELO_ID, PARIS],
+      );
     }
   }
 
