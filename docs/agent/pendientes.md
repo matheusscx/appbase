@@ -217,40 +217,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   owner y del documento (ADR-010). Lo que este frente hizo fue **no empeorarlo** —ese camino ya
   existía para el cálculo fallado—; ampliarlo o cerrarlo es otra conversación.
 
-- [ ] **`imprimirPrecuenta`: salir de la cuenta mientras calcula termina en un rojo que culpa al
-  cálculo, y meterse en otra puede sacar el papel de esa otra** (frontend; **leído el
-  2026-09-05** al cerrar `enviarComanda`, y **corregido el mismo día** por la revisión
-  independiente, que refutó la mitad de lo que la entrada decía en su primera versión) — misma
-  familia, **mucho menos grave**: lo que sale mal es papel, no un claim que avanza
-  `cantidad_enviada`.
-
-  **Lo que NO pasa, verificado:** no hay `TypeError` ni ticket mezclado. La función vuelve a
-  preguntar después del `await` (`if (!activeCuenta.value || !selectedMesa.value) return`), y
-  `asegurarVigente()` devuelve el resultado del carrito **vivo**, con las tres lecturas de abajo
-  todas del mismo instante sincrónico.
-
-  **Lo que sí queda, y es una carrera, no una conducta segura:** si el garzón se mete en otra
-  cuenta durante el cálculo, `asegurarVigente()` devuelve el resultado de **esa otra** —y sale su
-  precuenta— **solo si el `recalcular()` de la cuenta nueva aterrizó primero**; si no aterrizó,
-  `res` viene `null` y sale el toast rojo *"No se pudo calcular el total de la cuenta. Intentá de
-  nuevo."*, que le echa la culpa al cálculo de algo que no falló — el garzón se movió. El mismo
-  rojo sale al volver al listado o cambiar de mesa: `limpiarResultado()` deja `resultado` en
-  `null` con las dos claves en `null`, o sea **vigente**, y `asegurarVigente()` devuelve `null`
-  igual. Esto último está **trazado sobre el código, no corrido**: medirlo es parte de tomar la
-  entrada.
-
-  ⚠️ **El desvío del nombre de la mesa que esta entrada afirmaba, NO existe**, y se deja escrito
-  para que no vuelva: `onSelectMesa` pone `activeCuenta.value = null` en el **mismo bloque
-  sincrónico** en que cambia la mesa, así que el re-chequeo corta antes. Nunca sale la cuenta A
-  con el nombre de la mesa B. Ese desvío sí existía, pero en
-  `cerrarCuentaConPin`, y **se cerró el 2026-09-05** ([`resueltos.md`](resueltos.md)).
-
-  **Lo que falta medir**: si vale la pena tocarlo. El arreglo es el de siempre (congelar antes
-  del `await`), pero el spec de la pantalla **no puede ver el nombre de la mesa**: la precuenta
-  no pasa por `estaciones`, corta en `obtenerImpresoraBoleta()` y arma con `buildPrecuentaTicket`,
-  y ahí `imprimirEn()` importa el cliente de QZ de verdad. Lo que sí se puede ver desde el spec
-  es **cuál** precuenta salió y **qué toast** salió.
-
 - [ ] **`GET /ventas/:id` escanea `venta_detalles` entera, y ahora una vez más**
   (backend; **medido el 2026-09-04** por la revisión independiente de la tarea 2 del frente de
   la devolución con crédito parcial) — el contador de unidades ya comprometidas

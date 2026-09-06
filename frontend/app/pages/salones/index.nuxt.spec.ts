@@ -15,9 +15,38 @@
 // `GarzonPinModal` se usa REAL, no stubeado: parte de lo que hay que ejercitar
 // es justamente que el modal emite `confirm` y recién ahí se cierra. Lo único
 // mockeado es el HTTP (`useApiFetch`).
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Salones from './index.vue'
+
+/**
+ * Lo que efectivamente se mandó a imprimir, ticket por ticket.
+ *
+ * Es la señal fuerte del papel, y por eso no alcanza con contar requests: el
+ * agujero de la precuenta no era *"no salió"*, era *"salió la de otra cuenta"*, y
+ * eso solo se ve leyendo el ticket. `imprimirEn()` importa el cliente de QZ de
+ * verdad —que en un test le pediría un `websocket.connect()` a un QZ Tray que no
+ * existe—, así que se stubea acá; el resto del camino (`obtenerImpresoraBoleta`,
+ * `buildPrecuentaTicket`, el `GET` del certificado) corre de verdad.
+ *
+ * Va con `vi.hoisted` porque `vi.mock` se iza por encima de los `const`.
+ */
+const { impresionesQz } = vi.hoisted(() => ({ impresionesQz: [] as string[][] }))
+vi.mock('qz-tray', () => ({
+  default: {
+    websocket: { isActive: () => true, connect: () => Promise.resolve() },
+    configs: { create: () => ({}) },
+    security: {
+      setCertificatePromise: () => {},
+      setSignatureAlgorithm: () => {},
+      setSignaturePromise: () => {},
+    },
+    print: (_config: unknown, datos: string[]) => {
+      impresionesQz.push(datos)
+      return Promise.resolve()
+    },
+  },
+}))
 
 const MESA_ID = 'mesa-1'
 const CLP_ID = 'clp'
@@ -151,6 +180,13 @@ let fusionRetenida: Promise<void> | null = null
  * y devuelve `null`, así que los tests que no hablan de comanda no se enteran.
  */
 let impresorasComanda: unknown[] = []
+/**
+ * Lo que devuelve `GET /impresoras` para cualquier rol que **no** sea comanda —o
+ * sea, lo que ve `obtenerImpresoraBoleta()`—. Vacío por defecto: sin impresora
+ * activa, `imprimirPrecuenta` e `imprimirBoleta` cortan antes de armar el ticket
+ * y los tests que no hablan de papel no se enteran.
+ */
+let impresorasBoleta: unknown[] = []
 /**
  * Cada `POST /cuentas/:id/comanda/reclamar`, con el id que viajó en la URL.
  *
@@ -375,7 +411,13 @@ mockNuxtImport('useApiFetch', () => {
       // La forma completa de `ResultadoVenta`, no la que este test consume: una
       // respuesta recortada le deja una trampa al próximo test que toque el
       // cobro, que lee `lineas[].trazas.impuestos`.
-      const trazas = { descuentos: [], recargos: [], impuestos: [] }
+      // `promociones` incluido: `agregarPromocionesVenta` lo itera, así que sin él
+      // TODO camino que arma un ticket —precuenta y boleta— revienta con
+      // `linea.trazas.promociones is not iterable`. En el cierre ese error queda
+      // tapado por el `catch` que avisa *"falló la impresión de la boleta"*, así
+      // que la falta no se veía. Es exactamente la trampa que este comentario
+      // venía anunciando desde que el mock devuelve la forma completa.
+      const trazas = { descuentos: [], recargos: [], impuestos: [], promociones: [] }
       const resultado = {
         lineas: [{
           itemId: 'item-1',
@@ -549,7 +591,7 @@ mockNuxtImport('useApiFetch', () => {
       // y `obtenerImpresoraBoleta()` NO vuelve a filtrarlo del lado del
       // cliente, así que un mock que ignore el `?rol=` haría pasar una
       // impresora de comanda por impresora de boleta.
-      return Promise.resolve(url.includes('rol=comanda') ? impresorasComanda : [])
+      return Promise.resolve(url.includes('rol=comanda') ? impresorasComanda : impresorasBoleta)
     }
     const reclamarMatch = ruta.match(/\/cuentas\/([^/]+)\/comanda\/reclamar$/)
     if (reclamarMatch) {
@@ -613,6 +655,8 @@ function reiniciarMock() {
   cuentasFusionadas = []
   fusionRetenida = null
   impresorasComanda = []
+  impresorasBoleta = []
+  impresionesQz.length = 0
   reclamosDeComanda = []
   cierresDeCuenta = []
   bodiesDeCierre = []
@@ -3156,6 +3200,24 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
    * devuelve `null` antes de tocar la red y estos tests estarían probando ese
    * atajo en vez del envío.
    */
+  /**
+   * Una impresora de **boleta** activa: sin ella `obtenerImpresoraBoleta()` devuelve
+   * `null` y `imprimirPrecuenta` corta antes de armar el ticket, que es justo lo que
+   * hace que el resto del archivo no se entere de nada.
+   */
+  function impresoraDeBoleta() {
+    return {
+      id: 'imp-b1',
+      nombre: 'Caja',
+      rol: 'boleta',
+      activo: true,
+      tipoConexion: 'red',
+      host: '10.0.0.8',
+      puerto: 9100,
+      nombreCola: null,
+    }
+  }
+
   function impresoraDeComanda() {
     return {
       id: 'imp-1',
@@ -4129,6 +4191,182 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       toasts.filter(t => (t.title ?? '').includes('fusión')),
       'nadie fusionó nada: la canceló él',
     ).toEqual([])
+  })
+
+  it('meterse en otra cuenta mientras se calcula la precuenta no saca el papel de esa otra', async () => {
+    /**
+     * De la familia de *"lo que se lee después del `await`"*, y la menos grave: lo
+     * que sale mal es papel. El re-chequeo que tenía preguntaba por **existencia**
+     * —`if (!activeCuenta.value || !selectedMesa.value) return`—, así que cubría
+     * volver al listado y cambiar de mesa pero **no** meterse en otra cuenta: ahí
+     * `asegurarVigente()` devuelve el cálculo del carrito vivo, o sea el de esa
+     * otra, y salía su precuenta con su número y sus montos.
+     *
+     * El ticket se lee de verdad: `imprimirEn()` importa el cliente de QZ, que acá
+     * está stubeado y junta lo que se manda a imprimir. Así la aserción no es
+     * *"no se pidió la impresora"* —que también sería cierta si no corriera nada—
+     * sino *"no salió papel"*, y en el control, *cuál* salió.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    let soltar!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Imprimir precuenta')!.click()
+    await esperar(20)
+
+    // Se va a la otra cuenta con el cálculo en vuelo. El de la 10 sí contesta, que
+    // es lo que dejaba a `asegurarVigente()` devolviendo el resultado de ESA.
+    calculoRetenido = null
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
+    expect(tarjetas?.length).toBe(2)
+    tarjetas![1]!.click()
+    await esperar(50)
+
+    soltar()
+    await esperar(300)
+
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+    expect(impresionesQz, 'no salió ningún papel').toEqual([])
+    // Y tampoco el rojo que le echa la culpa al cálculo: se movió él.
+    expect(toasts).toEqual([])
+  })
+
+  it('volver al listado mientras se calcula la precuenta tampoco deja un rojo', async () => {
+    /**
+     * La otra mitad, y la que el garzón se comía más seguido: al volver al listado
+     * `limpiarResultado()` deja el resultado en `null` con las dos claves en
+     * `null` —o sea **vigente**—, así que `asegurarVigente()` devuelve `null` y
+     * salía *"No se pudo calcular el total de la cuenta. Intentá de nuevo."*. El
+     * cálculo no falló: el garzón se fue.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    let soltar!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Imprimir precuenta')!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(toasts).toEqual([])
+  })
+
+  it('el ticket se arma con las líneas de ahora, no con la foto de cuando se tocó el botón', async () => {
+    /**
+     * La otra decisión de este arreglo, y la que se paga en papel: la cuenta se
+     * congela para **decidir** (el guard de identidad) pero las líneas del ticket
+     * se **releen**. `res` es el cálculo del carrito de ahora y `itemsParaTicket`
+     * lo cruza con las líneas **por índice**, tomando de ahí el nombre y la
+     * cantidad: con la foto anterior al `await`, el papel sale con la cantidad
+     * vieja y los totales del cálculo nuevo.
+     *
+     * La ventana la abre el pintado optimista, que reescribe `cantidadPresentacion`
+     * en una línea **nueva** — o sea que el objeto congelado deja de ser el que
+     * está en pantalla—.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    let soltar!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    // Se pide la precuenta con el cálculo de las 3 en vuelo.
+    botonEn(drawerMesa(), 'Imprimir precuenta')!.click()
+    await esperar(20)
+    expect(impresionesQz, 'todavía calculando').toEqual([])
+
+    // Y antes de que vuelva, el garzón la sube a 5: el pintado optimista
+    // reemplaza la línea, así que la foto del tap ya no es lo que hay en pantalla.
+    calculoRetenido = null
+    input!.vm.$emit('change', {
+      presentacion: '5',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '5.0000',
+    })
+    await esperar(50)
+
+    soltar()
+    await esperar(400)
+
+    expect(impresionesQz).toHaveLength(1)
+    // Lo que llega a QZ son tres entradas —código de página, ticket, corte—, así
+    // que la fila del ítem hay que buscarla adentro del ticket.
+    const fila = impresionesQz[0]!.join('').split('\n').find(l => l.includes('Coca-Cola')) ?? ''
+    expect(fila, 'el papel dice la cantidad que hay en pantalla').toContain('5')
+    expect(fila, 'y no la de cuando se tocó el botón').not.toContain('3')
+  })
+
+  it('quedándose en la cuenta, la precuenta sí sale', async () => {
+    /**
+     * El control del guard: sin este test, uno que corte siempre —o que directamente
+     * no imprima nunca— pasaría en verde contra los dos de arriba, que afirman que
+     * NO salió papel.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    botonEn(drawerMesa(), 'Imprimir precuenta')!.click()
+    await esperar(300)
+
+    expect(impresionesQz, 'salió un ticket').toHaveLength(1)
+    expect(impresionesQz[0]!.join('\n')).toContain('Cuenta: 9')
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
   })
 
   /** Las dos mesas del salón, para los tests que necesitan cambiar de mesa. */

@@ -1966,23 +1966,62 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
   })
 }
 
+/**
+ * La precuenta es de la familia de *"lo que se lee después del `await`"*, y la
+ * menos grave: lo que sale mal es papel.
+ *
+ * El re-chequeo que tenía —`if (!activeCuenta.value || !selectedMesa.value)`—
+ * preguntaba por **existencia**, no por identidad, así que cubría volver al
+ * listado y cambiar de mesa pero no meterse en OTRA cuenta: ahí
+ * `asegurarVigente()` devuelve el cálculo del carrito **vivo**, o sea el de esa
+ * otra, y salía su precuenta. Y en el camino en que el cálculo de la cuenta
+ * nueva no llegó a aterrizar, `res` viene `null` y el garzón leía
+ * *"No se pudo calcular el total de la cuenta"* — un rojo que le echa la culpa
+ * al cálculo de algo que no falló: se movió él.
+ *
+ * Por eso el guard es **por identidad y va antes del aviso**, con el mismo orden
+ * que `abrirCobro`. Salir de la cuenta durante el cálculo no imprime y no avisa.
+ *
+ * ⚠️ **No es la misma defensa que allá, y conviene no leerlo así:** `abrirCobro`
+ * tiene además la marca del pedido, porque el modal se queda abierto mostrando un
+ * total congelado y la cuenta **destino** de una fusión conserva su id. Acá no
+ * hace falta: el ticket se arma con `res` y con las líneas releídas **en el mismo
+ * instante**, así que si la fusión aterriza durante el cálculo o sale el papel de
+ * la cuenta ya fusionada —consistente— o `asegurarVigente()` devuelve `null` y no
+ * sale nada. Lo que no puede pasar es que salgan líneas de un lado y totales del
+ * otro.
+ */
 async function imprimirPrecuenta() {
-  if (!activeCuenta.value || !selectedMesa.value) return
+  const cuenta = activeCuenta.value
+  const mesa = selectedMesa.value
+  if (!cuenta || !mesa) return
   imprimiendoPrecuenta.value = true
   try {
     // El ticket sale de `resultado`: si no corresponde a la cuenta actual imprime
     // montos de un pedido anterior, así que primero se espera el cálculo al día.
     const res = await asegurarVigente()
+    if (activeCuenta.value?.id !== cuenta.id) return
     if (!res) {
       toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
       return
     }
-    if (!activeCuenta.value || !selectedMesa.value) return
+    // ⚠️ **Las líneas del ticket se releen; la mesa va congelada.** `res` es el
+    // cálculo del carrito de AHORA y `itemsParaTicket` lo cruza con las líneas
+    // **por índice**, así que meterle una foto vieja imprime una cantidad y
+    // totaliza otra — es el mismo error que la revisión midió en
+    // `cerrarCuentaConPin`—.
+    //
+    // La mesa va congelada y es equivalente, no defensa: sus dos escritores son
+    // `onSelectMesa`, que cambia de mesa y deja `activeCuenta` en `null` en el
+    // mismo bloque sincrónico (o sea que el guard de arriba corta), y
+    // `patchMesaOcupacion`, que reescribe **la misma** mesa con el contador al
+    // día. Congelarla solo la deja en el mismo instante que el número de cuenta.
+    const cuentaDelTicket = activeCuenta.value
     await impresorasApi.imprimirPrecuenta({
       emisor: emisor.value,
-      mesaNombre: selectedMesa.value.nombre,
-      cuentaNumero: activeCuenta.value.numero,
-      items: itemsParaTicket(activeCuenta.value, res),
+      mesaNombre: mesa.nombre,
+      cuentaNumero: cuentaDelTicket.numero,
+      items: itemsParaTicket(cuentaDelTicket, res),
       totales: res.totales,
       impuestos: agregarImpuestosVenta(res.lineas),
       promociones: agregarPromocionesVenta(res.lineas),

@@ -17,6 +17,88 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La precuenta: salir de la cuenta mientras calcula ya no imprime la de otra ni deja un rojo (cerrado 2026-09-06)
+
+Sale de [`pendientes.md` § 2](pendientes.md). Es de la familia *"lo que la pantalla lee después
+del `await`"* en `/salones`, y la más liviana: lo que sale mal es papel.
+
+### Qué pasaba
+
+`imprimirPrecuenta` volvía a preguntar después del `await`, pero por **existencia**:
+`if (!activeCuenta.value || !selectedMesa.value) return`. Eso cubre volver al listado y cambiar de
+mesa; **no** cubre meterse en otra cuenta, que es donde `asegurarVigente()` —que calcula el carrito
+vivo— devuelve el resultado de **esa otra** y sale su precuenta, con su número y sus montos.
+
+Y el otro lado, que el garzón se comía más seguido: si el cálculo de la cuenta nueva no aterrizó,
+`res` viene `null` y salía *"No se pudo calcular el total de la cuenta. Intentá de nuevo."* — un
+rojo que le echa la culpa al cálculo de algo que no falló. El mismo rojo salía al volver al listado,
+porque `limpiarResultado()` deja el resultado en `null` con las dos claves en `null`, o sea
+**vigente**, y `asegurarVigente()` devuelve `null` igual.
+
+### Qué se hizo
+
+El gesto de siempre, y el mismo orden que `abrirCobro`: congelar cuenta y mesa antes del `await`,
+**guard por identidad** después, y el aviso **detrás** del guard. Salir de la cuenta durante el
+cálculo no imprime y no avisa.
+
+⚠️ **Las líneas del ticket se releen, la mesa va congelada.** `res` es el cálculo del carrito de
+ahora y `itemsParaTicket` lo cruza con las líneas **por índice**: pasarle una foto anterior al
+`await` imprime una cantidad y totaliza otra — es el error que la revisión midió en su día en
+`cerrarCuentaConPin`, y acá lo fija un test—. La mesa es distinto: sus dos escritores son
+`onSelectMesa`, que cambia de mesa y deja `activeCuenta` en `null` en el mismo bloque sincrónico —o
+sea que el guard corta—, y `patchMesaOcupacion`, que **reescribe la misma mesa** con el contador al
+día. O sea que congelarla es equivalencia, no defensa: la deja en el mismo instante que el número de
+cuenta. (La primera versión decía que "no podía cambiar sin que el guard cortara" y era falsa por
+`patchMesaOcupacion`: lo levantó la revisión.)
+
+📌 **El desvío del nombre de mesa que la entrada afirmaba no existía**, y queda dicho para que no
+vuelva: por lo mismo de arriba, nunca salió la cuenta A con el nombre de la mesa B.
+
+### Qué lo fija
+
+Cuatro tests (96 en el archivo) y **el ticket hecho observable**: un stub de `qz-tray` que junta lo
+que se manda a imprimir, más una impresora de boleta activa en el mock. Todo lo demás del camino
+—`obtenerImpresoraBoleta`, el `GET` del certificado, `buildPrecuentaTicket`— corre de verdad, así
+que los tests afirman sobre el papel: *"salió un ticket que dice `Cuenta: 9`"* y *"no salió
+ninguno"*.
+
+⚠️ **La primera versión de esto contaba requests a `/impresoras` y decía que el ticket "no se puede
+ver desde el spec". Era falso y lo midió la revisión**, con el stub escrito. El agujero de la
+precuenta no era *"no salió"* sino *"salió la de otra cuenta"* —igual que el de la comanda, que por
+eso guarda ids—, así que un contador ciego era la señal equivocada.
+
+⚠️ **Y apareció la trampa que el propio mock venía anunciando:** su `trazas` no traía
+`promociones`, así que `agregarPromocionesVenta` reventaba con
+`linea.trazas.promociones is not iterable` en **todo** camino que arma un ticket. En el cierre
+quedaba tapado por el `catch` que avisa *"falló la impresión de la boleta"* —ningún test afirmaba
+sobre ese aviso—, así que los tests del cobro venían pasando **sin ejercitar el armado del ticket**.
+Corregido: ahora esos caminos corren de verdad hasta la búsqueda de impresora.
+
+**Cuatro mutantes sobre el spec completo (96 tests), sin sobrevivientes:**
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **G1** — el guard por existencia | el código de antes | ✝ mata 2 |
+| **G2** — el guard corta siempre | control: la rama que deja pasar | ✝ mata 2 |
+| **G3** — el aviso antes del guard | el orden invertido | ✝ mata 1 |
+| **G4** — el ticket armado con la foto anterior al `await` | congelar de más | ✝ mata 1 |
+
+⚠️ **G4 estuvo declarado sobreviviente dos veces, con dos motivos falsos, y las dos las midió la
+revisión.** Primero *"el spec no puede ver el ticket"* —lo refutó escribiendo el stub de `qz-tray`
+que ahora está en el archivo—; después *"no hay escenario barato, haría falta que el mock del
+cálculo siga al carrito"* — lo refutó con una escena que **no toca el mock**: el desfase lo da el
+pintado optimista, que reescribe `cantidadPresentacion` en una línea **nueva**, así que alcanza con
+subir la cantidad mientras el cálculo viaja. Medido: la fila del ítem dice `5` en el papel limpio y `3`
+con el mutante. (Solo la cantidad: en ese spec el mock devuelve un total constante y los importes
+del ticket salen `—`, así que el cruce cantidad/total no queda cubierto por este test.) La lección, otra vez: *"no hay escenario"* es tan falsable como un
+conteo, y acá costaba un `it`.
+
+📌 **Los conteos de las tablas de las secciones de abajo son de sus propios commits.** Este cierre
+les agrega cuatro tests y le arregla el `trazas` al mock, así que no son los números de hoy; se dejan
+como se escribieron, que es la regla de este archivo.
+
+---
+
 ## El mismo cobro se podía confirmar dos veces (cerrado 2026-09-06)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"La misma ventana del cobro deja confirmarlo dos

@@ -735,6 +735,12 @@ devolvía a la 9 el total de la 10—, y la fusión que aterriza con el modal ab
 congelar en el *Confirmar* congelaba la fusionada. `abrirHistorial`, `cargarPendientesTestigo`
 y `abrirEntrarTurno` tienen la forma y **no** el bug, y ahí está escrito por qué.
 
+`imprimirPrecuenta`, que sí lo tenía, se cerró el **2026-09-06**: su re-chequeo
+preguntaba por **existencia** y no por identidad, así que cubría volver al listado y cambiar de mesa
+pero no meterse en otra cuenta, donde salía la precuenta de esa otra; y cuando el cálculo de la
+cuenta nueva no llegaba, el garzón leía un rojo que le echaba la culpa al cálculo de algo que no
+falló — se había movido él—. Mismo orden que `abrirCobro`: guard por identidad, y el aviso detrás.
+
 ⚠️ **En un modal que cobra, el total también va en la foto.** Lo que muestra, el pago que
 precarga y la propina que sugiere salen del mismo número: congelar la cuenta y dejar vivo el
 monto es la misma ventana que no congelar nada — la lección de la lista de garzones de la
