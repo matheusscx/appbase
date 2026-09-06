@@ -1413,6 +1413,8 @@ CREATE TABLE "ventas_descuentos" (
   "eliminado_el"        TIMESTAMPTZ
 );
 
+CREATE INDEX "idx_ventas_descuentos_venta" ON "ventas_descuentos" ("venta_id");
+
 -- Sin `valor_solicitado`: el piso en cero solo topea descuentos.
 CREATE TABLE "ventas_recargos" (
   "venta_recargo_id"    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1429,6 +1431,8 @@ CREATE TABLE "ventas_recargos" (
   "eliminado_el"        TIMESTAMPTZ
 );
 
+CREATE INDEX "idx_ventas_recargos_venta" ON "ventas_recargos" ("venta_id");
+
 -- Sin `modo` ni `valor_solicitado`: un impuesto es siempre un porcentaje —ya
 -- congelado en `porcentaje_aplicado`— y el piso en cero no lo topea.
 CREATE TABLE "ventas_impuestos" (
@@ -1444,6 +1448,8 @@ CREATE TABLE "ventas_impuestos" (
   "actualizado_el"      TIMESTAMPTZ,
   "eliminado_el"        TIMESTAMPTZ
 );
+
+CREATE INDEX "idx_ventas_impuestos_venta" ON "ventas_impuestos" ("venta_id");
 
 -- Congelado: qué promo aplicó, sobre qué línea, y cuánto restó. Molde:
 -- "ventas_descuentos", mismas precisiones. "aplicacion" agrupa: la aplicación
@@ -1463,6 +1469,8 @@ CREATE TABLE "ventas_promociones" (
   "eliminado_el"        TIMESTAMPTZ
 );
 
+CREATE INDEX "idx_ventas_promociones_venta" ON "ventas_promociones" ("venta_id");
+
 -- Datos del comprador final en la transacción  (era "venta_cliente_final")
 CREATE TABLE "venta_customer" (
   "customer_id"    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1477,6 +1485,8 @@ CREATE TABLE "venta_customer" (
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
+
+CREATE INDEX "idx_venta_customer_venta" ON "venta_customer" ("venta_id");
 
 -- =============================================================
 -- 10. PAGOS
@@ -1501,6 +1511,8 @@ CREATE TABLE "pagos" (
   "actualizado_el"    TIMESTAMPTZ,
   "eliminado_el"      TIMESTAMPTZ
 );
+
+CREATE INDEX "idx_pagos_venta" ON "pagos" ("venta_id");
 
 -- Split tipado venta/propina por pago (extensible a otros conceptos).
 CREATE TABLE "pago_aplicaciones" (

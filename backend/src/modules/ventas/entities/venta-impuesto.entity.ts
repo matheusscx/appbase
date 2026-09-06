@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,6 +8,23 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+/**
+ * Índice por venta. Es la que más crece de las seis: los impuestos se congelan
+ * **siempre por línea** —los dos escritores que hay hoy fijan
+ * `aplicado_en = 'detalle'`, y la nota de crédito filtra por ese valor—, así que
+ * lleva una fila por impuesto y por línea y escala con los detalles, no con las
+ * ventas —y una línea exenta no genera ninguna, que es el otro lado de la misma
+ * regla—. El `default` del esquema es `'venta'`, un modo que hoy no escribe nadie.
+ * En la medición se sembraron dos por venta (120.000 filas) y ya era la más cara de
+ * las seis: 9,2 ms de seq scan → 0,09 ms. Lo que cuesta es el tamaño en páginas, no
+ * el número de columnas.
+ *
+ * Es una de las seis que el detalle de una venta lee por `venta_id`, indexadas
+ * juntas el 2026-09-06. El costo de escritura y las trampas de la medición:
+ * `docs/patterns/backend.md` § 17, que es donde vive la tabla completa — acá va
+ * solo el número de esta, para no tener el total copiado en ocho archivos.
+ */
+@Index('idx_ventas_impuestos_venta', ['ventaId'])
 @Entity('ventas_impuestos')
 export class VentaImpuesto {
   @PrimaryGeneratedColumn('uuid', { name: 'venta_impuesto_id' })

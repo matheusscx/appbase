@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,6 +8,24 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+/**
+ * Índice por venta. Lo leen, entre otros, los pagos del detalle (`findOne`), la
+ * comprobación de si la venta tiene pagos antes de cancelarla, el tope de
+ * devolución en efectivo adentro de la transacción de la nota de crédito, y la
+ * subconsulta correlacionada que suma `pago_aplicaciones` por venta.
+ *
+ * ⚠️ **Esa subconsulta es el caso peor y no está en el detalle**: corre en
+ * `listar()` una vez por fila de la página, y en `resumen()` —otro endpoint— una
+ * vez por **cada** venta que pase los filtros, o sea decenas de miles de seq scans
+ * en un tenant con volumen. Medido con 60.000 pagos: 5,3 ms de seq scan → 0,07 ms
+ * **una sola** de esas ejecuciones.
+ *
+ * Es una de las seis que el detalle de una venta lee por `venta_id`, indexadas
+ * juntas el 2026-09-06. El costo de escritura y las trampas de la medición:
+ * `docs/patterns/backend.md` § 17, que es donde vive la tabla completa — acá va
+ * solo el número de esta, para no tener el total copiado en ocho archivos.
+ */
+@Index('idx_pagos_venta', ['ventaId'])
 @Entity('pagos')
 export class Pago {
   @PrimaryGeneratedColumn('uuid', { name: 'pago_id' })

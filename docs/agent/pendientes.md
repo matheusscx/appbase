@@ -217,22 +217,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   owner y del documento (ADR-010). Lo que este frente hizo fue **no empeorarlo** —ese camino ya
   existía para el cálculo fallado—; ampliarlo o cerrarlo es otra conversación.
 
-- [ ] **Otras seis columnas del mismo `GET /ventas/:id` siguen sin índice** (backend; **medido el
-  2026-09-06** por la revisión del frente que indexó las tres primeras) — mismo camino caliente,
-  misma causa, y quedó afuera porque la entrada anterior nombraba solo tres tablas.
-
-  Sin índice, con solo su PK: `pagos.venta_id`, `ventas_descuentos.venta_id`,
-  `ventas_recargos.venta_id`, `ventas_impuestos.venta_id`, `ventas_promociones.venta_id` y
-  `venta_customer.venta_id`. Son **seis seq scans más por request**, verificado contra
-  `pg_indexes`.
-
-  **Lo que falta medir**: cuánto pesa cada uno con volumen sembrado —las seis tablas son más
-  angostas que `venta_detalles` (11 a 16 columnas contra 23), así que el seq scan puede costar
-  bastante menos— y si el canje de escritura conviene; el índice del frente anterior sobre
-  `venta_detalles` se midió en **~1 µs por fila insertada**. Receta y trampas:
-  [`patterns/backend.md` § 17](../patterns/backend.md), con el aviso de que la **distribución del
-  seed** es parte de la medición.
-
 - [ ] **La cuenta de plata del modal de nota de crédito es aproximada, y queda una ventana de un
   minor unit** (frontend; **medido el 2026-09-04**, reescrita dos veces ese mismo día) — la
   entrada nació pidiendo anticipar el 400 de *"la mercadería vale más que la nota"*. **Ese 400 ya

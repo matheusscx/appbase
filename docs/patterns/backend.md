@@ -1040,14 +1040,54 @@ explícito se lee con seq scan. Medido el 2026-09-06 sobre el camino caliente de
 | notas de crédito de una venta (`ventas.venta_referencia_id`) | 6,8 ms, seq scan | 0,11 ms |
 | movimientos de una venta (`movimientos_inventario.venta_id`) | 2,9 ms, seq scan | 0,07 ms |
 
+El mismo request lee por `venta_id` otras seis tablas, indexadas el mismo día. **Sueltas
+parecen baratas y por eso quedaron para después; juntas suman**:
+
+| Tabla (filas sembradas) | Sin índice | Con índice |
+|---|---|---|
+| `ventas_impuestos` (120.000) | 9,2 ms | 0,09 ms |
+| `pagos` (60.000) | 5,3 ms | 0,07 ms |
+| `ventas_descuentos` (20.000) | 1,8 ms | 0,07 ms |
+| `venta_customer` (18.000) | 1,2 ms | 0,05 ms |
+| `ventas_promociones` (12.000) | 1,1 ms | 0,07 ms |
+| `ventas_recargos` (6.000) | 0,6 ms | 0,05 ms |
+| **suma de las seis** | **19,2 ms** | **0,40 ms** |
+
+(La columna *sin índice* va redondeada a la décima y la de *con índice* a la centésima; sin
+redondear suman 19,31 y 0,40 ms. Es la suma de **estas seis**; el mismo request lee además las
+tres de la primera tabla de esta sección, que desde el mismo día van por índice.)
+
+📌 **Lo que se aprende de esa tabla no es el total sino qué manda:** el costo del seq scan es el
+**tamaño en páginas** —filas × ancho de fila—, no el número de columnas ni las filas por venta.
+`ventas_impuestos` sale primera porque sus 120.000 filas son muchas páginas, pero el par
+`venta_customer` (18.000 filas en 205 páginas, 88 por página) y `ventas_promociones` (12.000 en
+207, 58 por página) ocupa **las mismas páginas** con un 50% de diferencia en filas —y cuesta casi
+igual, 1,2 contra 1,1 ms—: las de `ventas_promociones` son más anchas y entran menos por página.
+
+En estas seis el orden por filas coincidió con el orden por tiempo, pero eso es del dataset y no
+una ley: el par muestra que un 50% más de filas puede ocupar lo mismo. Lo que se compara son
+páginas.
+
+La medición del par la aportó la revisión independiente, y ojo con leerla como propiedad de las
+tablas: `venta_customer` tiene cuatro TEXT nullables (`rut`, `direccion`, `telefono`, `email`)
+que este seed casi no llena, así que con clientes reales el par se puede dar vuelta.
+
+⚠️ **Y el criterio de "es chica, va después" falla:** estas seis se difirieron por parecer
+baratas de a una, y `ventas_impuestos` sola son 9,2 ms — **más del triple** que los 2,9 ms de
+`movimientos_inventario`, que sí se indexó en el frente anterior. Lo que engaña no es el tamaño
+de cada una: es mirarlas de a una en un request que las lee a todas.
+
 El índice va **en la entity** (`@Index('idx_<tabla>_<col>', ['prop'])`), que es lo que
-`synchronize` crea; la convención de nombre es la de las entities de propinas.
+`synchronize` crea; la convención de nombre es la de las entities de propinas. Y va **también**
+en `startup-pos.sql`, que es el esquema documentado: si solo está en la entity, quien le
+pregunte al `.sql` si esa FK tiene índice recibe la respuesta equivocada.
 
 ⚠️ **No es "indexá toda FK".** El índice se paga en cada `INSERT`, y una tabla paga **solo el
 suyo**: insertar 20.000 detalles pasa de 63–70 ms a 77–89 ms, o sea **~1 µs por fila** por
 `idx_venta_detalles_venta` (medido por la revisión independiente, seis iteraciones alternando el
-orden, tres corridas). Una venta de 15 líneas paga ~15 µs para ahorrar 16 ms de lectura, así que
-acá el canje es obvio; en una FK que nadie consulta, no.
+orden, tres corridas), y la misma medición sobre `pagos` da 71 ms → 90 ms, **0,95 µs por fila**.
+Una venta de 15 líneas paga ~15 µs para ahorrar 16 ms de lectura, así que acá el canje es obvio;
+en una FK que nadie consulta, no.
 
 ### El `OR` que apaga el índice
 

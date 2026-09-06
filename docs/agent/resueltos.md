@@ -17,6 +17,63 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las otras seis tablas del mismo request (cerrado 2026-09-06)
+
+Sale de [`pendientes.md` § 2](pendientes.md), la entrada que abrió el cierre de acá abajo unas
+horas antes: la revisión de aquél midió que **seis columnas más** del mismo `GET /ventas/:id`
+seguían sin índice, y quedaron afuera porque la entrada original nombraba solo tres tablas.
+
+### Lo medido
+
+Mismo método: volumen sembrado sobre base reseteada, `ANALYZE` corrido, antes y después. Las
+proporciones se eligieron **distintas entre sí a propósito** —una fila de pago por venta, dos de
+impuesto, 30% con customer, un tercio con descuento, 20% con promoción y 10% con recargo—,
+porque la distribución del seed es parte de la medición y una tabla uniforme no distingue nada.
+
+| Tabla (filas) | Sin índice | Con índice |
+|---|---|---|
+| `ventas_impuestos` (120.000) | 9,2 ms, seq scan | 0,09 ms |
+| `pagos` (60.000) | 5,3 ms, seq scan | 0,07 ms |
+| `ventas_descuentos` (20.000) | 1,8 ms, seq scan | 0,07 ms |
+| `venta_customer` (18.000) | 1,2 ms, seq scan | 0,05 ms |
+| `ventas_promociones` (12.000) | 1,1 ms, seq scan | 0,07 ms |
+| `ventas_recargos` (6.000) | 0,6 ms, seq scan | 0,05 ms |
+| **suma** | **19,2 ms** | **0,40 ms** |
+
+(La columna *sin índice* va redondeada a la décima y la de *con índice* a la centésima; sin
+redondear suman 19,31 y 0,40 ms.)
+
+📌 **El dato que importa es la suma, no las filas.** La entrada preguntaba si valía la pena, con
+la hipótesis de que estas tablas son más angostas que `venta_detalles` y el seq scan costaría
+menos: es cierto una por una —la más cara son 9,2 ms contra los 16,6 de aquélla— y da igual,
+porque son **seis** en el mismo request.
+
+⚠️ **Lo que NO es cierto, y la primera versión de este párrafo lo afirmaba:** que ninguna, sola,
+hubiera justificado el frente. `ventas_impuestos` son 9,2 ms, **más del triple** que los 2,9 ms
+de `movimientos_inventario` que sí se indexó el mismo día en el cierre de abajo. La que se
+difirió por chica era mayor que una de las que ya se había hecho — lo levantó la revisión
+comparando con la tabla vecina.
+
+Y el costo de escritura se volvió a medir sobre `pagos`, que es la que recibe una fila por venta:
+20.000 inserts pasan de 71 ms a 90 ms, o sea **0,95 µs por fila** — el mismo orden que había dado
+`venta_detalles`.
+
+### Qué se hizo
+
+Seis `@Index` en sus entities, y las seis sentencias en `startup-pos.sql`, que es el esquema
+documentado — el cierre anterior lo había dejado solo en las entities y lo levantó la revisión.
+
+### Qué lo fija
+
+Como en el cierre de abajo, no hay test: un índice no cambia conducta. Queda la medición escrita
+en [`patterns/backend.md` § 17](../patterns/backend.md), ahora con la tabla de las seis y con lo
+que manda de verdad: el **tamaño en páginas** (filas × ancho), no las columnas ni las filas por
+venta — `venta_customer` mete 88 filas por página y `ventas_promociones` 58, así que 18.000 y
+12.000 filas ocupan 205 y 207 páginas y cuestan lo mismo—. El gate del backend corrió entero
+sobre base reseteada.
+
+---
+
 ## `GET /ventas/:id` escaneaba tres tablas enteras (cerrado 2026-09-06)
 
 Sale de [`pendientes.md` § 2](pendientes.md). La entrada pedía **medir con volumen sembrado**

@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -7,6 +8,16 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+/**
+ * Índice por venta, como en sus tres gemelas del congelado. Medido con 6.000
+ * filas: 0,6 ms de seq scan → 0,05 ms.
+ *
+ * Es una de las seis que el detalle de una venta lee por `venta_id`, indexadas
+ * juntas el 2026-09-06. El costo de escritura y las trampas de la medición:
+ * `docs/patterns/backend.md` § 17, que es donde vive la tabla completa — acá va
+ * solo el número de esta, para no tener el total copiado en ocho archivos.
+ */
+@Index('idx_ventas_recargos_venta', ['ventaId'])
 @Entity('ventas_recargos')
 export class VentaRecargo {
   @PrimaryGeneratedColumn('uuid', { name: 'venta_recargo_id' })
