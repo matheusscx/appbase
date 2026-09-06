@@ -743,28 +743,37 @@ function disponibleDe(
 }
 ```
 
-- [ ] **Step 4: `validarStockAlPedir` mira el local**
+- [ ] **Step 4: `validarStockAlPedir` mira el local — pero NO cambia de lock**
 
-En `items.service.ts:4622`, el `SELECT … FOR UPDATE OF ip` pasa a `stock_ubicacion`
-**acotado al local**, conservando el `ORDER BY` que es el contrato de bloqueo:
+⛔ **Ruling del pre-flight (2026-09-06): esta tarea cambia lo que LEE, no lo que LOCKEA.**
+La versión anterior de este paso mudaba el `FOR UPDATE` a `stock_ubicacion` acá, mientras el
+chokepoint seguía lockeando `item_producto` hasta la Tarea 4. Eso deja **dos commits** en los
+que los dos lados de la misma fila lógica se serializan sobre objetos distintos, y el contrato
+de orden de bloqueo —lo que cerró la auditoría de deadlocks del 2026-08-15— queda partido al
+medio. El objeto del lock se muda en la **Tarea 4, en un solo commit y para los dos lados**.
+
+En `items.service.ts:4622` el `FOR UPDATE OF ip` sobre `item_producto` **se conserva tal cual**,
+con su `ORDER BY ip.item_id`. Lo único que cambia es de dónde sale el saldo: bajo ese lock ya
+tomado, se lee `stock_ubicacion` acotado al local.
 
 ```sql
-SELECT su.item_id, su.stock, ip.unidad_medida
-  FROM stock_ubicacion su
-  JOIN item_producto ip ON ip.item_id = su.item_id
-  JOIN items i          ON i.item_id  = su.item_id
- WHERE su.item_id = ANY($1::uuid[])
-   AND su.ubicacion_id = $3
+SELECT ip.item_id, su.stock, ip.unidad_medida
+  FROM item_producto ip
+  JOIN items i             ON i.item_id  = ip.item_id
+  LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id
+                              AND su.ubicacion_id = $3
+ WHERE ip.item_id = ANY($1::uuid[])
    AND i.tenant_id = $2
    AND i.eliminado_el IS NULL
- ORDER BY su.item_id, su.ubicacion_id
- FOR UPDATE OF su
+ ORDER BY ip.item_id
+ FOR UPDATE OF ip
 ```
 
-⛔ **El `ORDER BY` es el contrato de bloqueo, no cosmética.** Cambió de `ip.item_id` a
-`(su.item_id, su.ubicacion_id)` porque la clave del saldo cambió. El `FOR UPDATE OF su` y no
-`FOR UPDATE` a secas: sin el `OF`, Postgres lockea también `items` e `item_producto`, huella de
-locks nueva en el camino más caliente. Ver spec § 5.2.
+Es coherente porque en las Tareas 2 y 3 **todo escritor de `stock_ubicacion` pasa por el
+chokepoint**, que sostiene ese mismo lock de `item_producto`.
+
+⚠️ El `LEFT JOIN` y no `JOIN`: un producto sin fila en esa ubicación tiene saldo **cero**, no
+"no existe". Con `JOIN` desaparecería de la lista y el tope lo dejaría pasar.
 
 - [ ] **Step 5: El desglose en `GET /items/:id`**
 
