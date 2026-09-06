@@ -784,9 +784,15 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   justo lo que la máscara ya colapsó. Mapear el punto al decimal cerraría el ×10 y rompería
   el hábito; se le ofreció al owner y eligió no romperlo.
 
-  📌 **Lo que sigue SIN decidir es otra cosa**: si el campo debería mostrar el monto de
-  vuelta de una forma que se note —en palabras, o contra el valor anterior al editar—. Eso
-  no cambia qué teclas funcionan; cubre el error una vez cometido. No se preguntó todavía.
+  ✅ **La confirmación del monto se decidió el 2026-09-06: no se hace.** Era lo único que
+  quedaba esperando respuesta acá —si el campo debía devolver el monto de una forma que se
+  note, en palabras o contra el valor anterior al editar, para cubrir el error una vez
+  cometido—. El owner, al ver la medición completa: *"dejemos esto cerrado, más adelante
+  vemos si hace falta de verdad"*. **Nada de esta entrada espera al owner.** Lo que la
+  reabre no es una idea sino un caso real: alguien que guarde un monto ×10 usando el
+  sistema. Si eso pasa, el gesto está diseñado y medido más arriba y se retoma; hasta
+  entonces, agregarlo sería fricción en cada tecleo por un error que todavía nadie cometió
+  fuera de una medición.
 
   1. ~~**El TECLEO sigue abierto, y ahora se sabe por qué no se puede desde el input.**~~ La
      información no está ahí: `1`,`.`,`5`,`0`,`0` (mil quinientos) y `1`,`0`,`0`,`.`,`5`
@@ -794,10 +800,11 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
      que siguen al punto — que maska ya colapsó cuando llegan. Medido el 2026-09-01 contra
      el helper `tipear` del spec: la heurística "separador seguido de 1 o 2 dígitos" tampoco
      sirve, porque la produce **el backspace** sobre un número ya agrupado (`1.234` →
-     `1.23`), que tiene su propio test. Lo que queda no es un parche de máscara sino una de
-     dos decisiones de producto, y las dos son del owner: **(a)** mostrar el monto de vuelta
-     como confirmación antes de guardar —no depende de maska y cubre tecleo *y* pegado—, o
-     **(b)** el selector de unidad del punto 2.
+     `1.23`), que tiene su propio test. Lo que queda no es un parche de máscara sino una
+     decisión de producto: **(a)** mostrar el monto de vuelta como confirmación antes de
+     guardar —no depende de maska y cubre tecleo *y* pegado— **quedó descartada el
+     2026-09-06** (ver el ✅ de arriba), así que la única viva es **(b)** el selector de
+     unidad del punto 2, que no espera respuesta: es diseño.
   2. ⚠️ **Los 6 `:decimales="4"` de `items.vue` NO se barren: sacarlos rompe.** Esta entrada
      decía lo contrario y estaba mal — medido el 2026-09-01 leyendo el DTO, no la pantalla.
      Los seis campos son `@EsCosto()` (escala 4) en el backend **a propósito** y está escrito
