@@ -171,11 +171,20 @@ export class RecuentosService {
 
     return this.db.transaccion(async (manager: EntityManager) => {
       // Una sola query trae todos los items pedidos con su stock vigente —
-      // nunca una query por item.
+      // nunca una query por item. El recuento es un conteo físico, no un
+      // camino de venta: `s.total` es el total del tenant (sumado de
+      // `stock_ubicacion`), no el del local — mismo número que devolvía
+      // `item_producto.stock` antes de que existieran las bodegas, así que
+      // el recuento sigue congelando y comparando el mismo total de siempre.
       const rows: ItemParaRecuentoRow[] = await manager.query(
-        `SELECT i.item_id, i.nombre, i.tipo, p.stock, p.modo_inventario, p.unidad_medida
+        `SELECT i.item_id, i.nombre, i.tipo, s.total AS stock, p.modo_inventario, p.unidad_medida
            FROM items i
            JOIN item_producto p ON p.item_id = i.item_id
+           LEFT JOIN LATERAL (
+             SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total
+               FROM stock_ubicacion su
+              WHERE su.item_id = i.item_id
+           ) s ON true
           WHERE i.item_id = ANY($1) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
         [dto.itemIds, tenantId],
       );

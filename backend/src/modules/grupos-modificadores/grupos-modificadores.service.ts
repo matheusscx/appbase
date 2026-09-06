@@ -289,11 +289,21 @@ export class GruposModificadoresService {
     if (!grupoRows.length) return null;
 
     const opRows: OpcionRow[] = await runner.query(
+      // `s.total` es informativo (catálogo admin, no camino de venta): el
+      // total del tenant, sumado de `stock_ubicacion`, no el del local. NULL
+      // cuando el item no rastrea stock (`ip.item_id IS NULL`) — igual que
+      // antes con `ip.stock` — para que `opcionSinStock` del frontend siga sin
+      // bloquear una opción no rastreada.
       `SELECT o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
-              o.cantidad, o.unidad_codigo, o.precio_extra, o.orden, ip.stock
+              o.cantidad, o.unidad_codigo, o.precio_extra, o.orden, s.total AS stock
        FROM grupo_modificador_opciones o
        JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
        LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total
+           FROM stock_ubicacion su
+          WHERE su.item_id = ip.item_id
+       ) s ON ip.item_id IS NOT NULL
        WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL
        ORDER BY o.orden ASC`,
       [grupoId, tenantId],
@@ -362,12 +372,19 @@ export class GruposModificadoresService {
 
     const opRows: (OpcionRow & { grupo_modificador_id: string })[] =
       await this.db.query(
+        // Mismo criterio y misma forma que `cargarGrupo`: `s.total` es el
+        // total del tenant (informativo), no el del local.
         `SELECT o.grupo_modificador_id, o.grupo_opcion_id, o.item_id,
                 i.nombre AS item_nombre, i.tipo, o.cantidad, o.unidad_codigo,
-                o.precio_extra, o.orden, ip.stock
+                o.precio_extra, o.orden, s.total AS stock
          FROM grupo_modificador_opciones o
          JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
          LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total
+             FROM stock_ubicacion su
+            WHERE su.item_id = ip.item_id
+         ) s ON ip.item_id IS NOT NULL
          WHERE o.grupo_modificador_id = ANY($1::uuid[]) AND o.tenant_id = $2
            AND o.eliminado_el IS NULL
          ORDER BY o.orden ASC`,
