@@ -59,6 +59,8 @@ interface ItemRow {
   categoria_nombre: string | null;
   creado_el: Date;
   stock: string | null;
+  /** Lo vendible: el stock del LOCAL del tenant, `stock_ubicacion` acotado a esa fila. */
+  stock_vendible: string | null;
   unidad_medida: string | null;
   fecha_elaboracion: Date | null;
   fecha_vencimiento: Date | null;
@@ -86,17 +88,18 @@ type GrupoDetalle = {
     precioExtra: string;
     orden: number;
     stock: string | null;
-    /** `stock` menos lo que las cuentas abiertas ya apartaron. Ver `findOne`. */
+    /** `stockVendible` (el del local) menos lo que las cuentas abiertas ya apartaron. Ver `findOne`. */
     stockDisponible: string | null;
     esPendiente: boolean;
   }[];
 };
 
 /**
- * Lo que de una fila con stock propio **todavía se puede pedir**: su `stock`
- * físico menos lo que las cuentas abiertas del tenant ya apartaron.
+ * Lo que de una fila con stock propio **todavía se puede pedir**: su
+ * `stockVendible` —el stock **del local**, no el total del tenant— menos lo
+ * que las cuentas abiertas del tenant ya apartaron.
  *
- * Existe porque `GET /items/:id` devuelve `ip.stock` pelado en cuatro lugares
+ * Existe porque `GET /items/:id` devuelve el stock pelado en cuatro lugares
  * anidados —ingredientes de la receta, extras permitidos, componentes del combo
  * y opciones de grupo— y el drawer de personalización decidía "sin stock" con
  * ese número, o sea ofrecía lo que otra mesa ya se había llevado y recién lo
@@ -104,8 +107,13 @@ type GrupoDetalle = {
  * (`calcularDisponibilidadBatch`); esto le da a las cuatro el mismo criterio en
  * un solo lugar, para que no puedan discrepar.
  *
- * `stock === null` (el ítem no lleva stock: un servicio como opción de grupo)
- * sale `null`, no `0`: la ausencia de stock no es falta de stock.
+ * ⚠️ Restar de **`vendible`, no de `stock` (el total)**: si existe una bodega,
+ * lo que hay en el otro lado del tenant no es lo que la mesa puede pedir. Con
+ * un solo local los dos números coinciden y nada cambia (Tarea 3a,
+ * `docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md` § 5.4).
+ *
+ * `vendible === null` (el ítem no lleva stock: un servicio como opción de
+ * grupo) sale `null`, no `0`: la ausencia de stock no es falta de stock.
  *
  * `toFixed(4)` y no la escala de la moneda: es una CANTIDAD en la escala del
  * kardex (`numeric(18,4)`), la misma en la que viaja `stock`, para que las dos
@@ -117,10 +125,10 @@ type GrupoDetalle = {
 function disponibleDe(
   comprometido: Map<string, Decimal>,
   itemId: string,
-  stock: string | null,
+  vendible: string | null,
 ): string | null {
-  if (stock === null) return null;
-  return new Decimal(stock).minus(comprometido.get(itemId) ?? 0).toFixed(4);
+  if (vendible === null) return null;
+  return new Decimal(vendible).minus(comprometido.get(itemId) ?? 0).toFixed(4);
 }
 
 export interface IngredienteReceta {
@@ -308,7 +316,28 @@ export class ItemsService {
     private readonly ubicacionesService: UbicacionesService,
   ) {}
 
-  private readonly BASE_QUERY = `
+  /**
+   * `localIdx` es la posición ($N) del `ubicacion_id` del local dentro del
+   * array de params del llamador — el propio llamador lo resuelve UNA vez por
+   * request con `UbicacionesService.localDe` y lo empuja a su array de params
+   * (Tarea 3a). No es un valor fijo porque los tres call sites (`findAll`,
+   * `cargarBasePorIds`, `findOne`) arman params de largo distinto.
+   *
+   * `stock` sigue siendo el TOTAL del tenant (`SUM` sin filtrar), y
+   * `stock_vendible` lo acota a esa ubicación (`FILTER`) — los dos agregados
+   * salen de `stock_ubicacion`, que desde la Tarea 2 es la fuente de verdad
+   * por ubicación (el chokepoint escribe ahí Y en `item_producto.stock`,
+   * materializado). `LEFT JOIN LATERAL`, no `JOIN` + `GROUP BY`: una sola
+   * consulta para todas las filas de la página, nunca una por fila.
+   *
+   * `ON ip.item_id IS NOT NULL` y no `ON TRUE`: un ítem sin fila en
+   * `item_producto` (servicio, suscripción) tiene que seguir dando `stock`
+   * y `stock_vendible` en `NULL` — "no aplica"—, no en `0` — "existe y no
+   * tiene". Con `ON TRUE` el `COALESCE(SUM(...), 0)` de adentro los volvería
+   * `0` para cualquier fila, tenga o no `item_producto`.
+   */
+  private baseQuery(localIdx: number): string {
+    return `
     SELECT
       i.item_id, i.nombre, i.descripcion, i.tipo, i.activo,
       i.precio_base, i.precio_incluye_impuesto,
@@ -316,7 +345,8 @@ export class ItemsService {
       i.moneda_id, i.categoria_id, i.creado_el,
       m.codigo_iso AS moneda_codigo, m.simbolo AS moneda_simbolo,
       c.nombre AS categoria_nombre,
-      ip.stock, ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
+      s.total AS stock, s.vendible AS stock_vendible,
+      ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
       ip.modo_inventario,
       COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual) AS costo_actual,
       isr.duracion_estimada, isr.requiere_cita,
@@ -325,11 +355,18 @@ export class ItemsService {
     LEFT JOIN moneda m ON m.moneda_id = i.moneda_id AND m.eliminado_el IS NULL
     LEFT JOIN categorias c ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
     LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
+             COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $${localIdx}), 0)::numeric(18,4) AS vendible
+        FROM stock_ubicacion su
+       WHERE su.item_id = ip.item_id
+    ) s ON ip.item_id IS NOT NULL
     LEFT JOIN item_servicio isr ON isr.item_id = i.item_id
     LEFT JOIN item_suscripcion isu ON isu.item_id = i.item_id
     LEFT JOIN item_receta ir ON ir.item_id = i.item_id
     LEFT JOIN item_combo icb ON icb.item_id = i.item_id
   `;
+  }
 
   private mapRow(r: ItemRow) {
     return {
@@ -348,6 +385,10 @@ export class ItemsService {
       categoriaNombre: r.categoria_nombre,
       creadoEl: r.creado_el,
       stock: r.stock,
+      // Informativo (spec § 5.4): lo que hay EN EL LOCAL. Con un solo local
+      // coincide con `stock`; con bodega, no. `stockDisponible` —abajo, batcheado
+      // en `findAll`, o calculado en `findOne`— es el que de verdad frena al pedir.
+      stockVendible: r.stock_vendible,
       unidadMedida: r.unidad_medida,
       fechaElaboracion: r.fecha_elaboracion,
       fechaVencimiento: r.fecha_vencimiento,
@@ -564,12 +605,18 @@ export class ItemsService {
     );
     const total = countRows[0]?.total ?? 0;
 
-    const listParams = [...params, pageSize, offset];
-    const limitIdx = params.length + 1;
-    const offsetIdx = params.length + 2;
+    // Una sola vez por request (no por fila): el ítem `$L` de `baseQuery`, y
+    // también lo que alimenta el `stockVendible` de `calcularDisponibilidadBatch`
+    // más abajo.
+    const localId = await this.ubicacionesService.localDe(tenantId);
+    const paramsConLocal = [...params, localId];
+    const localIdx = paramsConLocal.length;
+    const listParams = [...paramsConLocal, pageSize, offset];
+    const limitIdx = paramsConLocal.length + 1;
+    const offsetIdx = paramsConLocal.length + 2;
 
     const rows: ItemRow[] = await this.db.query(
-      this.BASE_QUERY +
+      this.baseQuery(localIdx) +
         where +
         ` ORDER BY i.nombre ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
@@ -602,18 +649,22 @@ export class ItemsService {
       .filter((r) => r.tipo === 'combo')
       .map((r) => r.item_id);
     // `producto` e `ingrediente` son los dos tipos con fila en `item_producto`,
-    // o sea los dos que tienen stock propio del que descontar. El `stock` ya
-    // viene en la fila (`BASE_QUERY`), así que sumarlos al batch no cuesta una
-    // query más.
+    // o sea los dos que tienen stock propio del que descontar. El
+    // `stockVendible` ya viene en la fila (`baseQuery`), así que sumarlos al
+    // batch no cuesta una query más. Es `stockVendible` (el del local) y no
+    // `stock` (el total) lo que se pasa: `calcularDisponibilidadBatch` resta
+    // el comprometido de esto mismo, y restarlo del total dejaría pedir desde
+    // el salón lo que solo hay en una bodega.
     const productos = rows
       .filter((r) => r.tipo === 'producto' || r.tipo === 'ingrediente')
-      .map((r) => ({ itemId: r.item_id, stock: r.stock }));
+      .map((r) => ({ itemId: r.item_id, stockVendible: r.stock_vendible }));
     const { disponible: dispPorId, stockDisponible: stockDispPorId } =
       await this.calcularDisponibilidadBatch(
         tenantId,
         recetaIds,
         comboIds,
         productos,
+        localId,
       );
 
     // Papelera: nombre de quien borró por JOIN en UNA query batch acotada a
@@ -685,12 +736,14 @@ export class ItemsService {
    * `comprometido` viene de afuera —lo calcula `findOne` una sola vez para toda
    * la respuesta— y no se consulta acá: esta función corre dos veces por ítem
    * (los grupos del combo y los de cada componente receta), así que pedirlo
-   * adentro duplicaría la consulta sin cambiar el resultado.
+   * adentro duplicaría la consulta sin cambiar el resultado. Mismo criterio
+   * para `localId`: lo resuelve `findOne` una sola vez con `localDe` y lo pasa.
    */
   private async cargarGruposPorItem(
     tenantId: string,
     itemIds: string[],
     comprometido: Map<string, Decimal>,
+    localId: string,
   ): Promise<Map<string, GrupoDetalle[]>> {
     const out = new Map<string, GrupoDetalle[]>();
     if (!itemIds.length) return out;
@@ -728,25 +781,32 @@ export class ItemsService {
       precio_extra: string;
       orden: number;
       stock: string | null;
+      stock_vendible: string | null;
     }[] = await this.db.query(
       `SELECT igm.item_grupo_id, o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
               COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
               o.cantidad AS cantidad_default,
               COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
               COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
-              o.orden, ip.stock
+              o.orden, s.total AS stock, s.vendible AS stock_vendible
        FROM item_grupos_modificadores igm
        JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
          AND o.tenant_id = igm.tenant_id AND o.eliminado_el IS NULL
        JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
        LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
+                COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $3), 0)::numeric(18,4) AS vendible
+           FROM stock_ubicacion su
+          WHERE su.item_id = ip.item_id
+       ) s ON ip.item_id IS NOT NULL
        LEFT JOIN item_grupo_modificador_opciones ovr
          ON ovr.grupo_opcion_id = o.grupo_opcion_id
         AND ovr.item_grupo_id = igm.item_grupo_id
         AND ovr.eliminado_el IS NULL
        WHERE igm.item_grupo_id = ANY($1) AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
        ORDER BY o.orden ASC`,
-      [itemGrupoIds, tenantId],
+      [itemGrupoIds, tenantId, localId],
     );
     const opsPorItemGrupo = new Map<string, typeof ops>();
     for (const o of ops) {
@@ -774,7 +834,11 @@ export class ItemsService {
           precioExtra: r.precio_extra,
           orden: r.orden,
           stock: r.stock,
-          stockDisponible: disponibleDe(comprometido, r.item_id, r.stock),
+          stockDisponible: disponibleDe(
+            comprometido,
+            r.item_id,
+            r.stock_vendible,
+          ),
           esPendiente: r.cantidad_efectiva == null,
         })),
       });
@@ -803,10 +867,15 @@ export class ItemsService {
     const unicos = [...new Set(itemIds.map((id) => id.toLowerCase()))];
     if (unicos.length === 0) return new Map();
 
+    const localId = await this.ubicacionesService.localDe(tenantId);
+    // `$L` va al final del array, no hardcodeado: si algún día esta query
+    // gana un filtro nuevo antes del local, el índice se corre solo en vez de
+    // quedar apuntando al parámetro equivocado sin que TypeScript lo vea.
+    const paramsBase = [unicos, tenantId, localId];
     const rows: ItemRow[] = await this.db.query(
-      this.BASE_QUERY +
+      this.baseQuery(paramsBase.length) +
         ` WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-      [unicos, tenantId],
+      paramsBase,
     );
 
     const porId = new Map(rows.map((r) => [r.item_id, this.mapRow(r)]));
@@ -931,10 +1000,15 @@ export class ItemsService {
   }
 
   async findOne(tenantId: string, itemId: string) {
+    // Una vez por request: alimenta `baseQuery` y las tres queries anidadas de
+    // abajo (ingredientes, extras, componentes), más las dos llamadas a
+    // `cargarGruposPorItem`.
+    const localId = await this.ubicacionesService.localDe(tenantId);
+    const paramsBase = [itemId, tenantId, localId];
     const rows: ItemRow[] = await this.db.query(
-      this.BASE_QUERY +
+      this.baseQuery(paramsBase.length) +
         ` WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-      [itemId, tenantId],
+      paramsBase,
     );
     if (!rows.length) throw new NotFoundException('Item no encontrado');
 
@@ -1004,14 +1078,22 @@ export class ItemsService {
         unidad_codigo: string;
         bloqueante: boolean;
         stock: string;
+        stock_vendible: string;
       }[] = await this.db.query(
         `SELECT ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
-                ri.cantidad, ri.unidad_codigo, ri.bloqueante, ip.stock
+                ri.cantidad, ri.unidad_codigo, ri.bloqueante,
+                s.total AS stock, s.vendible AS stock_vendible
          FROM receta_ingredientes ri
          JOIN items i ON i.item_id = ri.ingrediente_item_id AND i.eliminado_el IS NULL
          JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
+                  COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $3), 0)::numeric(18,4) AS vendible
+             FROM stock_ubicacion su
+            WHERE su.item_id = ip.item_id
+         ) s ON TRUE
          WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
-        [itemId, tenantId],
+        [itemId, tenantId, localId],
       );
       ingredientes = ingRows.map((r) => ({
         ingredienteItemId: r.ingrediente_item_id,
@@ -1023,7 +1105,7 @@ export class ItemsService {
         stockDisponible: disponibleDe(
           comprometido,
           r.ingrediente_item_id,
-          r.stock,
+          r.stock_vendible,
         ),
       }));
 
@@ -1034,14 +1116,22 @@ export class ItemsService {
         unidad_codigo: string;
         precio_extra: string;
         stock: string;
+        stock_vendible: string;
       }[] = await this.db.query(
         `SELECT re.ingrediente_item_id, i.nombre AS ingrediente_nombre,
-                re.cantidad, re.unidad_codigo, re.precio_extra, ip.stock
+                re.cantidad, re.unidad_codigo, re.precio_extra,
+                s.total AS stock, s.vendible AS stock_vendible
          FROM receta_extras_permitidos re
          JOIN items i ON i.item_id = re.ingrediente_item_id AND i.eliminado_el IS NULL
          JOIN item_producto ip ON ip.item_id = re.ingrediente_item_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
+                  COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $3), 0)::numeric(18,4) AS vendible
+             FROM stock_ubicacion su
+            WHERE su.item_id = ip.item_id
+         ) s ON TRUE
          WHERE re.receta_item_id = $1 AND re.tenant_id = $2 AND re.eliminado_el IS NULL`,
-        [itemId, tenantId],
+        [itemId, tenantId, localId],
       );
       extrasPermitidos = extraRows.map((r) => ({
         ingredienteItemId: r.ingrediente_item_id,
@@ -1053,7 +1143,7 @@ export class ItemsService {
         stockDisponible: disponibleDe(
           comprometido,
           r.ingrediente_item_id,
-          r.stock,
+          r.stock_vendible,
         ),
       }));
     }
@@ -1066,14 +1156,22 @@ export class ItemsService {
         cantidad: string;
         bloqueante: boolean;
         stock: string | null;
+        stock_vendible: string | null;
       }[] = await this.db.query(
         `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
-                cc.cantidad, cc.bloqueante, ip.stock
+                cc.cantidad, cc.bloqueante,
+                s.total AS stock, s.vendible AS stock_vendible
          FROM combo_componentes cc
          JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
          LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
+                  COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $3), 0)::numeric(18,4) AS vendible
+             FROM stock_ubicacion su
+            WHERE su.item_id = ip.item_id
+         ) s ON ip.item_id IS NOT NULL
          WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL`,
-        [itemId, tenantId],
+        [itemId, tenantId, localId],
       );
       const gruposPorComp = await this.cargarGruposPorItem(
         tenantId,
@@ -1081,6 +1179,7 @@ export class ItemsService {
           .filter((r) => r.tipo === 'receta')
           .map((r) => r.componente_item_id),
         comprometido,
+        localId,
       );
       componentes = compRows.map((r) => ({
         componenteItemId: r.componente_item_id,
@@ -1092,7 +1191,7 @@ export class ItemsService {
         stockDisponible: disponibleDe(
           comprometido,
           r.componente_item_id,
-          r.stock,
+          r.stock_vendible,
         ),
         grupos: gruposPorComp.get(r.componente_item_id) ?? [],
       }));
@@ -1105,9 +1204,51 @@ export class ItemsService {
     const grupos: GrupoDetalle[] =
       rows[0].tipo === 'combo' || rows[0].tipo === 'receta'
         ? ((
-            await this.cargarGruposPorItem(tenantId, [itemId], comprometido)
+            await this.cargarGruposPorItem(
+              tenantId,
+              [itemId],
+              comprometido,
+              localId,
+            )
           ).get(itemId) ?? [])
         : [];
+
+    // Desglose por ubicación (Tarea 3a, spec § 5.4): una query por request, no
+    // una por ubicación. Solo lo pagan los tipos con stock propio — los demás
+    // no tienen fila en `stock_ubicacion` y el resultado es `[]` sin costo
+    // extra de query (el filtro de tipo evita ni siquiera intentarlo).
+    let desglosePorUbicacion: {
+      ubicacionId: string;
+      nombre: string;
+      stock: string;
+    }[] = [];
+    if (rows[0].tipo === 'producto' || rows[0].tipo === 'ingrediente') {
+      const desgloseRows: {
+        ubicacion_id: string;
+        nombre: string;
+        stock: string;
+      }[] = await this.db.query(
+        // `stock_ubicacion` no tiene `tenant_id` propio (PK compartida por
+        // `item_id`, ya validado como del tenant más arriba). El filtro acá
+        // igual, por la misma defensa en profundidad que el resto de las
+        // queries nuevas de esta tarea (`cargarGruposPorItem`,
+        // `combo_componentes`, `receta_ingredientes`): si algún día esta
+        // consulta se reusa con un `itemId` sin validar tenant antes, esto es
+        // lo único que frena una fuga entre tenants.
+        `SELECT su.ubicacion_id, u.nombre, su.stock
+           FROM stock_ubicacion su
+           JOIN ubicaciones u ON u.ubicacion_id = su.ubicacion_id
+                             AND u.tenant_id = $2
+          WHERE su.item_id = $1 AND u.eliminado_el IS NULL
+          ORDER BY (u.tipo = 'local') DESC, u.nombre`,
+        [itemId, tenantId],
+      );
+      desglosePorUbicacion = desgloseRows.map((r) => ({
+        ubicacionId: r.ubicacion_id,
+        nombre: r.nombre,
+        stock: r.stock,
+      }));
+    }
 
     return {
       ...this.mapRow(rows[0]),
@@ -1118,6 +1259,7 @@ export class ItemsService {
       extrasPermitidos,
       componentes,
       grupos,
+      desglosePorUbicacion,
       disponibleCondicional:
         rows[0].tipo === 'combo' &&
         (grupos.length > 0 ||
@@ -4590,6 +4732,11 @@ export class ItemsService {
    *    `docs/patterns/backend.md`, cuya cadena
    *    (`recargos → descuentos → item_receta → item_combo → items`) no menciona
    *    `item_producto`. Citarla acá mandaba al próximo a la sección equivocada.
+   *
+   *    Tarea 3a: bajo ese mismo lock, el saldo que se lee es el de
+   *    `stock_ubicacion` acotado al local (`stockVendible`), no
+   *    `item_producto.stock` (el total del tenant) — ver el comentario de la
+   *    query, más abajo, para el porqué.
    * 3. Recién **después** del lock se lee el comprometido. El orden es
    *    load-bearing: bajo READ COMMITTED, la consulta que corre después de
    *    esperar el lock ve la línea que la otra transacción acababa de
@@ -4658,6 +4805,9 @@ export class ItemsService {
     if (!bloqueantes.length) return;
 
     const ids = bloqueantes.map(([itemId]) => itemId);
+    // Una vez por request, no por fila. No hace falta que esté ANTES del lock
+    // de abajo: es config del tenant, no stock, así que no compite por la fila.
+    const localId = await this.ubicacionesService.localDe(tenantId);
     const stockRows: {
       item_id: string;
       stock: string | null;
@@ -4672,14 +4822,33 @@ export class ItemsService {
       //
       // El `ORDER BY` es el que fija el orden de bloqueo: el nodo `LockRows`
       // va por encima del `Sort`, así que las filas se lockean ya ordenadas.
-      `SELECT ip.item_id, ip.stock, ip.unidad_medida
+      //
+      // ⛔ Tarea 3a: esto cambia lo que LEE, no lo que LOCKEA (ruling del
+      // pre-flight, 2026-09-06). El `FOR UPDATE OF ip` sigue tomando el lock
+      // de `item_producto` — la Tarea 4 muda el objeto del lock a
+      // `stock_ubicacion` de los dos lados (acá y `registrarMovimiento`) EN UN
+      // SOLO commit, porque partirlo entre dos deja el contrato de orden de
+      // bloqueo (auditoría de deadlocks del 2026-08-15) serializando sobre
+      // objetos distintos. Bajo ese lock ya tomado, lo único que cambia es de
+      // dónde sale el saldo: `stock_ubicacion` acotado al local, no
+      // `item_producto.stock` (el total).
+      //
+      // `LEFT JOIN`, no `JOIN`: un producto sin fila en esa ubicación tiene
+      // saldo CERO, no "no existe" — con `JOIN` desaparecería de `stockRows` y
+      // el tope de abajo (`if (!fila) throw ...`) lo confundiría con un ítem
+      // borrado del catálogo, dejando pasar un pedido que debería rebotar por
+      // "stock insuficiente".
+      `SELECT ip.item_id, su.stock, ip.unidad_medida
          FROM item_producto ip
-         JOIN items i ON i.item_id = ip.item_id
-        WHERE ip.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+         JOIN items i             ON i.item_id  = ip.item_id
+         LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id
+                                     AND su.ubicacion_id = $3
+        WHERE ip.item_id = ANY($1::uuid[])
+          AND i.tenant_id = $2
           AND i.eliminado_el IS NULL
         ORDER BY ip.item_id
         FOR UPDATE OF ip`,
-      [ids, tenantId],
+      [ids, tenantId, localId],
     );
     const stockPorItem = new Map(stockRows.map((r) => [r.item_id, r]));
 
@@ -4826,9 +4995,18 @@ export class ItemsService {
    * comprometieron (`comprometidoPorItem`), porque el sistema no aparta stock al
    * pedir: la venta descuenta recién al cerrar la cuenta, así que sin este
    * descuento dos mesas podían pedir la misma última unidad y el choque
-   * estallaba al cobrar. `stock` sigue significando lo que hay **físicamente**
-   * — es el saldo materializado de `movimientos_inventario` y cambiarle el
-   * sentido sería mucho peor.
+   * estallaba al cobrar.
+   *
+   * ⚠️ **Tarea 3a:** lo que se reparte es el stock **del local** (`stockVendible`
+   * / `stock_ubicacion` acotado a `localId`), no el total del tenant. Antes de
+   * bodegas los dos números coincidían y esto no se notaba; con una bodega, un
+   * combo o receta que dependa de un ingrediente guardado ahí no puede darse
+   * por disponible en el salón solo porque el TOTAL alcance — es exactamente
+   * el mismo error que `disponibleDe` (arriba en el archivo), un nivel más dentro,
+   * y el `disponible` de recetas/combos se rompería en silencio si no se corrige
+   * acá también. `stock` (el campo de `GET /items`) sigue significando lo que
+   * hay físicamente en TODO el tenant — es el saldo materializado de
+   * `movimientos_inventario` sumado por ubicación — y no cambia de sentido.
    *
    * **Devuelve dos mapas porque son dos preguntas distintas** (decisión del
    * owner, 2026-09-01, que enmienda la § 4.1b de la spec):
@@ -4856,8 +5034,10 @@ export class ItemsService {
     tenantId: string,
     recetaIds: string[],
     comboIds: string[],
-    /** Los ítems con stock propio de la página, con el `stock` ya leído. */
-    productos: { itemId: string; stock: string | null }[],
+    /** Los ítems con stock propio de la página, con su `stockVendible` ya leído. */
+    productos: { itemId: string; stockVendible: string | null }[],
+    /** El `ubicacion_id` del local, resuelto UNA vez por request por `findAll`. */
+    localId: string,
   ): Promise<{
     disponible: Map<string, number | null>;
     stockDisponible: Map<string, string>;
@@ -4874,13 +5054,16 @@ export class ItemsService {
     const comprometido = await this.comprometidoPorItem(tenantId);
 
     /**
-     * El stock del que se reparte: lo físico menos lo ya pedido. Único punto
-     * donde `ip.stock` deja de leerse pelado, para que las tres ramas
-     * (ingrediente de receta, componente de combo y producto suelto) no puedan
-     * discrepar.
+     * El stock del que se reparte: lo vendible (del local) menos lo ya pedido.
+     * Único punto donde el stock deja de leerse pelado, para que las tres
+     * ramas (ingrediente de receta, componente de combo y producto suelto) no
+     * puedan discrepar.
      */
-    const stockDisponible = (itemId: string, stock: string | null): Decimal =>
-      new Decimal(stock ?? '0').minus(comprometido.get(itemId) ?? 0);
+    const stockDisponible = (
+      itemId: string,
+      vendible: string | null,
+    ): Decimal =>
+      new Decimal(vendible ?? '0').minus(comprometido.get(itemId) ?? 0);
 
     // 1) Componentes bloqueantes de todos los combos (una query).
     const comboRows: {
@@ -4888,16 +5071,17 @@ export class ItemsService {
       componente_item_id: string;
       tipo: string;
       cantidad: string;
-      stock: string | null;
+      stock_vendible: string | null;
     }[] = comboIds.length
       ? await this.db.query(
-          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, cc.cantidad, ip.stock
+          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, cc.cantidad, su.stock AS stock_vendible
            FROM combo_componentes cc
            JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
            LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+           LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id AND su.ubicacion_id = $3
            WHERE cc.combo_item_id = ANY($1) AND cc.tenant_id = $2
              AND cc.bloqueante = true AND cc.eliminado_el IS NULL`,
-          [comboIds, tenantId],
+          [comboIds, tenantId, localId],
         )
       : [];
 
@@ -4915,16 +5099,17 @@ export class ItemsService {
       cantidad: string;
       unidad_codigo: string;
       ingrediente_unidad_medida: string;
-      stock: string;
+      stock_vendible: string | null;
     }[] = todasRecetas.length
       ? await this.db.query(
           `SELECT ri.receta_item_id, ri.ingrediente_item_id, ri.cantidad, ri.unidad_codigo,
-                  ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
+                  ip.unidad_medida AS ingrediente_unidad_medida, su.stock AS stock_vendible
            FROM receta_ingredientes ri
            JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+           LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id AND su.ubicacion_id = $3
            WHERE ri.receta_item_id = ANY($1) AND ri.tenant_id = $2
              AND ri.bloqueante = true AND ri.eliminado_el IS NULL`,
-          [todasRecetas, tenantId],
+          [todasRecetas, tenantId, localId],
         )
       : [];
 
@@ -4952,7 +5137,7 @@ export class ItemsService {
       const posibles =
         cantidadBase === null
           ? new Decimal(0)
-          : stockDisponible(r.ingrediente_item_id, r.stock)
+          : stockDisponible(r.ingrediente_item_id, r.stock_vendible)
               .div(cantidadBase)
               .floor();
       const actual = dispReceta.get(r.receta_item_id) ?? null;
@@ -4977,7 +5162,7 @@ export class ItemsService {
         if (disp === null) continue;
         posibles = disp.div(r.cantidad).floor();
       } else {
-        posibles = stockDisponible(r.componente_item_id, r.stock)
+        posibles = stockDisponible(r.componente_item_id, r.stock_vendible)
           .div(r.cantidad)
           .floor();
       }
@@ -5003,7 +5188,7 @@ export class ItemsService {
     for (const p of productos) {
       resultadoStock.set(
         p.itemId,
-        stockDisponible(p.itemId, p.stock).toFixed(4),
+        stockDisponible(p.itemId, p.stockVendible).toFixed(4),
       );
     }
 

@@ -214,7 +214,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             unidad_codigo: 'unidad',
             ingrediente_unidad_medida: 'unidad',
-            stock: '8',
+            stock_vendible: '8',
           }, // pan
           {
             receta_item_id: 'receta-uuid',
@@ -222,7 +222,7 @@ describe('ItemsService', () => {
             cantidad: '150',
             unidad_codigo: 'g',
             ingrediente_unidad_medida: 'kg',
-            stock: '1',
+            stock_vendible: '1',
           }, // carne: 1kg = 1000g
         ]);
       catalogServiceMock.convertirUnidades.mockResolvedValueOnce([
@@ -236,8 +236,12 @@ describe('ItemsService', () => {
       expect(result.data[0].disponible).toBe(6);
     });
 
-    /** La fila de `BASE_QUERY` de un producto con stock, para los tests de abajo. */
-    const filaProducto = (stock: string) => ({
+    /**
+     * La fila de `baseQuery` de un producto con stock, para los tests de
+     * abajo. `stockVendible` por default es igual a `stock`: son estos tests
+     * de un solo local, donde los dos números coinciden (Tarea 3a).
+     */
+    const filaProducto = (stock: string, stockVendible: string = stock) => ({
       item_id: ITEM_ID,
       nombre: 'Smartphone',
       descripcion: null,
@@ -252,6 +256,7 @@ describe('ItemsService', () => {
       categoria_nombre: null,
       creado_el: new Date(),
       stock,
+      stock_vendible: stockVendible,
       unidad_medida: 'unidad',
       fecha_elaboracion: null,
       fecha_vencimiento: null,
@@ -314,6 +319,33 @@ describe('ItemsService', () => {
           sql.includes('FROM cuenta_lineas cl'),
         ),
       ).toHaveLength(1);
+    });
+
+    /**
+     * El corazón de la Tarea 3a (bodegas y traslados,
+     * `docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md` § 5.4):
+     * `stock` es el TOTAL del tenant (todas las ubicaciones sumadas),
+     * `stockVendible` es lo que hay en el LOCAL, y `stockDisponible` resta el
+     * comprometido de `stockVendible` — no de `stock` — porque es lo único
+     * que la mesa puede pedir. 10 en el local y 20 en la (hipotética) bodega:
+     * números distintos a propósito, para que un mutante que devuelva el
+     * total donde va el vendible (o viceversa) no sobreviva.
+     */
+    it('stock es el total, stockVendible es el del local', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([filaProducto('30.0000', '10.0000')])
+        // Lo comprometido: una mesa con 4 unidades pedidas y sin cobrar.
+        .mockResolvedValueOnce([
+          { item_id: ITEM_ID, cantidad: '4', personalizacion: null },
+        ])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]);
+
+      const [item] = (await service.findAll(TENANT, {})).data;
+
+      expect(item.stock).toBe('30.0000');
+      expect(item.stockVendible).toBe('10.0000');
+      expect(item.stockDisponible).toBe('6.0000');
     });
 
     it('sin incluirEliminados filtra eliminado_el IS NULL y no trae auditoría', async () => {
@@ -476,21 +508,21 @@ describe('ItemsService', () => {
             componente_item_id: 'prod-uuid',
             tipo: 'producto',
             cantidad: '2',
-            stock: '10',
+            stock_vendible: '10',
           },
           {
             combo_item_id: COMBO_ID,
             componente_item_id: 'receta-uuid',
             tipo: 'receta',
             cantidad: '1',
-            stock: null,
+            stock_vendible: null,
           },
           {
             combo_item_id: COMBO_ID,
             componente_item_id: 'servicio-uuid',
             tipo: 'servicio',
             cantidad: '1',
-            stock: null,
+            stock_vendible: null,
           },
         ])
         .mockResolvedValueOnce([
@@ -501,7 +533,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             unidad_codigo: 'unidad',
             ingrediente_unidad_medida: 'unidad',
-            stock: '3',
+            stock_vendible: '3',
           },
         ]);
       catalogServiceMock.convertirUnidades.mockResolvedValueOnce(['1']);
@@ -511,6 +543,7 @@ describe('ItemsService', () => {
         [],
         [COMBO_ID],
         [],
+        UBICACION_LOCAL_ID,
       );
       expect(disp.disponible.get(COMBO_ID)).toBe(3);
     });
@@ -525,6 +558,7 @@ describe('ItemsService', () => {
         [],
         [COMBO_SIN_BLOQUEANTES_ID],
         [],
+        UBICACION_LOCAL_ID,
       );
       expect(disp.disponible.get(COMBO_SIN_BLOQUEANTES_ID)).toBeNull();
     });
@@ -558,7 +592,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             unidad_codigo: 'unidad',
             ingrediente_unidad_medida: 'unidad',
-            stock: '10',
+            stock_vendible: '10',
           },
         ]);
       catalogServiceMock.convertirUnidades.mockResolvedValueOnce(['1']);
@@ -568,6 +602,7 @@ describe('ItemsService', () => {
         ['receta-uuid'],
         [],
         [],
+        UBICACION_LOCAL_ID,
       );
 
       // (10 − 4) / 1 = 6, no 10.
@@ -586,7 +621,7 @@ describe('ItemsService', () => {
             componente_item_id: 'prod-uuid',
             tipo: 'producto',
             cantidad: '2',
-            stock: '10',
+            stock_vendible: '10',
           },
         ]);
 
@@ -595,6 +630,7 @@ describe('ItemsService', () => {
         [],
         [COMBO_ID],
         [],
+        UBICACION_LOCAL_ID,
       );
 
       // floor((10 − 4) / 2) = 3, no floor(10/2) = 5.
@@ -643,9 +679,10 @@ describe('ItemsService', () => {
         [],
         [],
         [
-          { itemId: 'prod-uuid', stock: '10' },
-          { itemId: 'ing-roto', stock: '5' },
+          { itemId: 'prod-uuid', stockVendible: '10' },
+          { itemId: 'ing-roto', stockVendible: '5' },
         ],
+        UBICACION_LOCAL_ID,
       );
 
       // La conversión se intentó de verdad (si no, el test no probaría nada).
@@ -742,6 +779,7 @@ describe('ItemsService', () => {
             unidad_codigo: 'unidad',
             bloqueante: true,
             stock: '8',
+            stock_vendible: '8',
           },
         ])
         .mockResolvedValueOnce([
@@ -753,6 +791,7 @@ describe('ItemsService', () => {
             unidad_codigo: 'g',
             precio_extra: '500',
             stock: '2.5',
+            stock_vendible: '2.5',
           },
         ])
         .mockResolvedValueOnce([]); // grupoRows (sin grupos asociados)
@@ -767,7 +806,7 @@ describe('ItemsService', () => {
           unidadCodigo: 'unidad',
           bloqueante: true,
           stock: '8',
-          // Sin cuentas abiertas, lo pedible es el stock — en la escala del
+          // Sin cuentas abiertas, lo pedible es el vendible — en la escala del
           // kardex, la misma en la que ya viaja `stockDisponible` de `GET /items`.
           stockDisponible: '8.0000',
         },
@@ -784,10 +823,10 @@ describe('ItemsService', () => {
         },
       ]);
       const ingQuery = dataSource.query.mock.calls[5][0] as string;
-      expect(ingQuery).toContain('ip.stock');
+      expect(ingQuery).toContain('stock_ubicacion');
       const extrasQuery = dataSource.query.mock.calls[6][0] as string;
       expect(extrasQuery).toContain('receta_extras_permitidos');
-      expect(extrasQuery).toContain('ip.stock');
+      expect(extrasQuery).toContain('stock_ubicacion');
     });
 
     /**
@@ -869,6 +908,7 @@ describe('ItemsService', () => {
             unidad_codigo: 'unidad',
             bloqueante: true,
             stock: '10',
+            stock_vendible: '10',
           },
         ]) // ingredientes
         .mockResolvedValueOnce([
@@ -880,6 +920,7 @@ describe('ItemsService', () => {
             unidad_codigo: 'unidad',
             precio_extra: '500',
             stock: '11',
+            stock_vendible: '11',
           },
         ]) // extras permitidos
         .mockResolvedValueOnce([
@@ -906,6 +947,7 @@ describe('ItemsService', () => {
             precio_extra: '300',
             orden: 0,
             stock: '4',
+            stock_vendible: '4',
           },
         ]); // cargarGruposPorItem: ops
 
@@ -968,6 +1010,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             bloqueante: true,
             stock: null,
+            stock_vendible: null,
           },
           {
             componente_item_id: 'servicio-envoltorio',
@@ -976,6 +1019,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             bloqueante: false,
             stock: null,
+            stock_vendible: null,
           },
         ])
         .mockResolvedValueOnce([]) // cargarGruposPorItem: asoc (sin grupos en el componente receta)
@@ -1012,7 +1056,7 @@ describe('ItemsService', () => {
 
       const compQuery = dataSource.query.mock.calls[5][0] as string;
       expect(compQuery).toContain('combo_componentes');
-      expect(compQuery).toContain('ip.stock');
+      expect(compQuery).toContain('stock_ubicacion');
       expect(compQuery).not.toContain('cc.bloqueante = true');
     });
 
@@ -1075,6 +1119,7 @@ describe('ItemsService', () => {
             precio_extra: '300',
             orden: 0,
             stock: '10',
+            stock_vendible: '10',
           },
           {
             item_grupo_id: 'item-grupo-1',
@@ -1088,6 +1133,7 @@ describe('ItemsService', () => {
             precio_extra: '0',
             orden: 1,
             stock: '5',
+            stock_vendible: '5',
           },
         ]); // opciones de TODAS las asociaciones
 
@@ -1132,7 +1178,11 @@ describe('ItemsService', () => {
       // Las opciones se piden para TODAS las asociaciones de una (array de
       // `item_grupo_id`), no de a un grupo por vez: si alguien vuelve al loop,
       // el parámetro deja de ser un array y este assert falla.
-      expect(opQueryCall[1]).toEqual([['item-grupo-1'], TENANT]);
+      expect(opQueryCall[1]).toEqual([
+        ['item-grupo-1'],
+        TENANT,
+        UBICACION_LOCAL_ID,
+      ]);
       // Y no hay una novena query: 2 fijas para los grupos, no 1 + N. La
       // octava es la del comprometido, UNA para toda la respuesta.
       expect(dataSource.query).toHaveBeenCalledTimes(8);
@@ -1179,6 +1229,7 @@ describe('ItemsService', () => {
             cantidad: '1',
             bloqueante: true,
             stock: null,
+            stock_vendible: null,
           },
         ]) // componentes (combo)
         .mockResolvedValueOnce([
@@ -1205,6 +1256,7 @@ describe('ItemsService', () => {
             precio_extra: '0',
             orden: 0,
             stock: '5',
+            stock_vendible: '5',
           },
         ]) // cargarGruposPorItem: ops
         .mockResolvedValueOnce([]); // grupoRows (el combo no tiene grupos propios)
@@ -6556,6 +6608,42 @@ describe('ItemsService', () => {
       mockearPedidoDeProducto({ stock: '3', comprometido: '2' });
 
       await expect(pedir('2')).rejects.toThrow(BadRequestException);
+    });
+
+    /**
+     * Tarea 3a (bodegas y traslados): el saldo bajo el lock sale de
+     * `stock_ubicacion` acotado al LOCAL del tenant, no de `item_producto.stock`
+     * (el total). Este test simula exactamente el caso que la tarea existe para
+     * cerrar: un ítem sin fila de `stock_ubicacion` para el local —`stock: null`,
+     * el `LEFT JOIN` da NULL, no "no existe"— rebota aunque el TOTAL del tenant
+     * (guardado en una bodega, invisible para este mock) fuera generoso. El
+     * salón no puede pedir lo que no está en el salón.
+     */
+    it('lee el stock del LOCAL, no el total: sin fila en stock_ubicacion ahí, rebota con "quedan 0"', async () => {
+      mockearPedidoDeProducto({ stock: null, comprometido: null });
+
+      await expect(pedir('1')).rejects.toThrow(
+        `Stock insuficiente de "${NOMBRE}": quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
+      );
+
+      const lockCall = dataSource.query.mock.calls.find((c) =>
+        (c[0] as string).includes('FOR UPDATE OF ip'),
+      ) as [string, unknown[]];
+      const [sql, params] = lockCall;
+      // El saldo sale de `stock_ubicacion` acotado a `$3` (el local), y el
+      // `LEFT JOIN` es a propósito: sin fila ahí, el saldo es CERO, no
+      // "el ítem no existe" — con `JOIN` esta fila desaparecería del
+      // resultado y el guard la confundiría con un ítem borrado del catálogo.
+      expect(sql).toContain('LEFT JOIN stock_ubicacion su');
+      expect(sql).toContain('su.ubicacion_id = $3');
+      expect(sql).not.toContain('ip.stock');
+      // El lock sigue siendo sobre `item_producto` — la Tarea 4 es la que muda
+      // el objeto del lock, no esta.
+      expect(sql).toContain('FOR UPDATE OF ip');
+      // `$3` es el local que resuelve `UbicacionesService.localDe`, UNA vez
+      // por request (mockeado a `UBICACION_LOCAL_ID` en el `beforeEach`).
+      expect(params).toEqual([[PAPAS], TENANT, UBICACION_LOCAL_ID]);
+      expect(ubicacionesServiceMock.localDe).toHaveBeenCalledWith(TENANT);
     });
 
     it('el mensaje dice cuánto queda y cuánto se pidió, con la unidad', async () => {
