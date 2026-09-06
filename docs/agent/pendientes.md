@@ -166,6 +166,32 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
+- [ ] **Un cobro ya confirmado y en vuelo no se entera de que la fusión anuló su cuenta**
+  (frontend; **medido con sonda el 2026-09-06** por la revisión del cierre de la fusión) —
+  **preexistente**: la ventana existía antes del frente que cerró el modal de cobro.
+
+  Entre el *Confirmar* con PIN y el `POST /cuentas/:id/cerrar` hay dos esperas —`flushPendientes()`
+  y el `asegurarVigente()` de `cerrarCuentaConPin`—, y **las dos son condicionales**: la primera
+  solo espera si quedó una edición de cantidad a medio guardar o en vuelo; la segunda solo pega al
+  servidor si el carrito dejó de estar vigente, y saliendo de `abrirCobro` lo está. Sin edición
+  pendiente la cadena es puro microtask y **no hay ventana** — quien la mida en el caso simple va a
+  concluir que no existe—. Con ella sí: si la fusión aterriza en ese tramo y la cuenta cobrada era
+  de **origen**, el `POST` sale igual contra una cuenta que el servidor dejó `cancelada` y vuelve
+  *"La cuenta no está abierta"*, con el PIN ya tecleado. Sonda: `cierres=["cuenta-10"]` con la 10 ya
+  anulada.
+
+  ⚠️ **Ojo con el arreglo fácil, porque ya se midió falso:** antes del `watch` que limpia la foto
+  del cobro, ese caso **sí** disparaba el aviso de la fusión — pero por un `cobroCuenta` que nadie
+  limpiaba, y mandando a *"cobrarla desde la fusionada"* un cobro que ya estaba confirmado y en
+  vuelo. Mirar ese ref no resuelve nada. Lo que hace falta saber es **de qué cuenta** es el cierre
+  en vuelo, y eso hoy no lo sabe nadie: que lo *haya* sí se sabe —`submitting` se prende al entrar a
+  `cerrarCuentaConPin`—, pero la cuenta vive solo en el argumento `cobro`. Y ese flag tampoco cubre
+  el tramo del flush, que es anterior.
+
+  **Lo que falta medir**: si alcanza con avisar (el garzón va a leer el rechazo igual) o si el
+  cierre en vuelo tiene que cancelarse antes de salir — y ahí se cruza con la entrada de abajo,
+  porque las dos tocan el mismo tramo entre el PIN y el `POST`.
+
 - [ ] **La misma ventana del cobro deja confirmarlo dos veces** (frontend; **medido el
   2026-09-05** por la revisión del cierre de la quinta puerta, que encontró la segunda mitad de
   una causa que ese cierre nombró y usó a medias) — **preexistente**: el frente de la quinta
@@ -176,14 +202,17 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   cobrar* sigue habilitado. De ahí salía la propina reescrita (ya cerrado), y de ahí sale
   también que el garzón confirme **el mismo cobro dos veces**: en modo tablet `solicitarPin`
   ejecuta la acción sin modal, así que ni siquiera hay un teclado que lo frene. El segundo
-  `POST .../cerrar` rebota y el garzón lee *"Error al cerrar la cuenta"* con oferta de
-  **reintento sobre una cuenta ya cobrada**.
+  `POST .../cerrar` rebota y el garzón lee el rechazo del backend sobre una cuenta ya cobrada.
+
+  ⚠️ **Corrección del 2026-09-06, medida:** esta entrada decía que ese rechazo venía *"con oferta de
+  reintento sobre una cuenta ya cobrada"*. Es falso — `toastErrorOperativo` guarda el `retry`
+  **solo** si el mensaje habla de *sesión de trabajo*; cualquier otro error sale como toast plano,
+  sin acción, y el callback que le pasa `cerrarCuentaConPin` se descarta. Lo levantó la revisión en
+  una entrada nueva que había copiado la premisa de acá.
 
   **Lo que falta medir**: si alcanza con un guard de reentrancia como el de `abriendoCuenta`
   —que existe justo para esto, con su porqué escrito— o si el botón tiene que deshabilitarse
-  desde `confirmarCobro`. Y qué pasa con el reintento que ofrece `toastErrorOperativo` en ese
-  caso: reintentar un cierre que rebotó porque ya se cobró no tiene sentido, pero el mismo
-  toast sirve para el rebote de red, que sí.
+  desde `confirmarCobro`.
 
 - [ ] **La venta que se cierra sin cálculo queda sin boleta, y la caja se proyecta inflada por
   el vuelto** (frontend; **medido el 2026-09-05** por la revisión del cierre de la quinta
@@ -1899,34 +1928,10 @@ habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una 
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
 
 
-- [ ] **Una fusión que aterriza con el cobro abierto deja al garzón con los pagos juntados
-  sobre una cuenta que ya no existe** (frontend; **medido el 2026-09-05** al cerrar el modal de
-  cobro) — residuo **conocido y aceptado** de ese cierre, no un bug nuevo, y ya no es plata:
-  desde ese arreglo el cobro sale con la cuenta del modal, así que **no cobra otra**. Lo que
-  queda es con qué se encuentra el garzón.
-
-  La escena: manda a fusionar la 9 y la 10, sale del modo fusión, se mete en la 10 y toca
-  *Cerrar y cobrar*. Junta $12.000 en efectivo. La fusión aterriza: la pantalla se repinta con
-  la cuenta fusionada —la 10 ya no existe— pero el modal sigue arriba con los $12.000 adentro.
-  Confirma, teclea el PIN, y el backend le contesta *"La cuenta no está abierta"*
-  (`salones.service.ts:1278`, `cerrarCuenta` exige `estado = abierta`).
-
-  **La pregunta al owner, que es de producto:** cuando la fusión se lleva puesta la cuenta de un
-  cobro abierto, ¿el modal **se cierra solo** —y el garzón vuelve a tipear los $12.000 sobre la
-  cuenta fusionada— o **se queda abierto** y se come el error? Cerrar tiene el precedente al
-  lado, en la misma función: fusionar ya **descarta** lo que se tipeó durante el vuelo en
-  **todas** las cuentas que entraron a la fusión —también la destino, que sigue abierta: el
-  número se tipeó contra otra realidad—, con el porqué escrito (owner, 2026-09-05). Dejarlo
-  abierto no pierde nada tipeado, pero manda al garzón contra un error evitable con el PIN ya
-  puesto.
-
-  ⚠️ **Y la misma fusión tiene un segundo momento, un paso antes, que hoy termina en silencio**
-  (medido el 2026-09-05, con sonda, por la revisión del cierre): si la fusión aterriza mientras
-  el cobro **todavía se está calculando** —el garzón ya tocó *Cerrar y cobrar*—, el guard nuevo
-  corta porque la cuenta activa cambió, y no pasa **nada**: ni modal, ni aviso; el único toast
-  es el de la fusión. Es la misma pregunta y se contesta junta, porque distinguir *"me fui"* de
-  *"me movieron"* pide saber qué cuentas entraron a la fusión.
-
+✅ **Y una entró y salió el mismo día, el 2026-09-05**: *"Una fusión que aterriza con el cobro
+abierto deja al garzón con los pagos juntados sobre una cuenta que ya no existe"*. Nació al cerrar
+el modal de cobro esa misma tarde, el owner eligió **cerrar el cobro y avisar** —asumiendo que se
+pierden los pagos ya cargados— y se construyó ese mismo día → [`resueltos.md`](resueltos.md).
 
 ## 5. Carreras de concurrencia
 

@@ -17,6 +17,127 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La fusión que aterriza tarde se lleva el cobro en curso, y lo dice (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 4](pendientes.md), la entrada que abrió el cierre de acá abajo unas
+horas antes: *"Una fusión que aterriza con el cobro abierto deja al garzón con los pagos juntados
+sobre una cuenta que ya no existe"*. Era pregunta al owner porque la salida cuesta algo que no me
+tocaba decidir.
+
+### La escena y la pregunta
+
+El garzón manda a fusionar la 9 y la 10, sale del modo fusión, se mete en la 10 y toca *Cerrar y
+cobrar*. Junta $12.000 en efectivo. La fusión aterriza. Dos momentos, según dónde lo agarre:
+
+- **Con el modal ya abierto**: quedaba arriba con los pagos adentro, y el *Confirmar* salía contra
+  una cuenta que el servidor dejó `cancelada` (`salones.service.ts:1278` exige `estado = abierta`).
+  Tecleaba el PIN para leer *"La cuenta no está abierta"*.
+- **Un paso antes, con el cobro todavía calculándose**: el guard de identidad de `abrirCobro`
+  cortaba —la cuenta activa cambió— y no pasaba **nada**. Ni modal, ni aviso; el único toast era
+  el de la fusión.
+
+### La decisión del owner (2026-09-05): se cierra y se avisa
+
+⚠️ **El costo lo tomó él, dicho de frente en la pregunta:** los pagos ya cargados **se pierden** y
+hay que volver a tipearlos. Lo que inclinó la balanza es el precedente que estaba al lado, en la
+misma función: fusionar ya descarta la cantidad a medio guardar de **todas** las cuentas que
+entraron, por la misma razón — se tipeó contra una realidad que dejó de existir.
+
+`fusionarSeleccionadas` apaga el cobro y **anula el pedido** si la cuenta de ese cobro entró en la
+fusión; el `?? cobroPedidoId.value` alcanza también al tap que todavía estaba calculando. Va
+arriba, con el descarte de pendientes y no con lo que se pinta: lo que ese cobro tenía adentro dejó
+de valer, esté el garzón donde esté. Son **tres piezas**, y las tres las pidió la revisión midiendo
+lo que faltaba:
+
+- **La foto vive lo que vive el modal** (`watch(cobroOpen)`). `cobroCuenta` no era un flag de
+  *"cobro en curso"*: ni `confirmarCobro` ni el *Cancelar* del propio modal la limpiaban, así que
+  quedaba apuntando a la última cuenta **para siempre**. Medido con clicks reales y sin ninguna
+  carrera: abrir el cobro, cerrarlo a mano y fusionar después hacía que la fusión le dijera que la
+  cuenta *"entró en la fusión"* y que la cobrara desde la fusionada, sin que hubiera ningún cobro.
+  ⚠️ **Ése es el texto que sale, y no el de *"el cobro se cerró"***: `estabaAbierto` ya vale `false`
+  en esa escena, y la primera versión de este párrafo citó el mensaje de la otra rama. Es el mismo
+  aviso mentiroso que ya se había corregido una vez, escondido un nivel más abajo.
+- **Una marca para el pedido** que la fusión **anula**, y por eso el `abrirCobro` que vuelve del
+  cálculo sabe que el suyo ya no vale. Sin esto, la mitad **destino** se escapaba: conserva su id,
+  así que el guard de identidad no cortaba y el modal abría con el total de antes de absorber las
+  otras líneas —cobrando de menos— y encima detrás del aviso que decía que la cuenta había entrado
+  en la fusión. Medido con sonda. ⚠️ **No es el token de `cargarCuentas` aunque se le parezca**, y
+  la primera versión de este párrafo lo dijo así: aquél es un contador monótono y éste guarda un id
+  y compara ids. Lo que lo hace funcionar es que alguien lo anula, no que sea id-independiente.
+- **El aviso lo da la fusión**, que sabe lo que pasó, y `abrirCobro` corta mudo.
+
+⚠️ **Y el alcance, medido y dicho: llega hasta el *Confirmar*, no más allá.** Un cobro que el garzón
+ya confirmó con su PIN y está en vuelo —`cerrarCuentaConPin` espera el flush y el cálculo antes de
+mandar el `POST`— **no** se entera de la fusión: el `POST` sale y, si la cuenta era de origen, el
+backend lo rechaza. La ventana es preexistente y quedó anotada ([`pendientes.md` § 2](pendientes.md)).
+Lo que cambió es que antes salía un aviso por accidente —el `cobroCuenta` rancio— y ese aviso
+**no describía lo que pasaba**: mandaba a *"cobrarla desde la fusionada"* un cobro que ya estaba
+confirmado y en vuelo. Sacarlo no es perder cobertura, es dejar de afirmar algo falso.
+
+⚠️ **Y aplica a las dos mitades de la fusión, por motivos distintos.** La primera versión decía
+*"la cuenta que el modal tenía adentro ya no existe"* y **era falsa para la mitad de los casos**:
+el backend fusiona sobre la de menor número (`salones.service.ts`, `[destino, ...origenes]`) y solo
+cancela las **origen**. La destino sigue abierta — es la fusionada. Cerrarle el cobro es correcto
+igual, pero por otra cosa: acaba de absorber las líneas de las otras, así que el total congelado
+del modal es el de antes de absorberlas y cobraría **de menos**. Lo levantó la revisión con sonda,
+y con ella el doc de la feature, que dos bullets más abajo decía lo contrario.
+
+⚠️ **El primer intento hizo el aviso al revés, y la deducción falló dos veces seguidas.** Deducir
+*"se la llevaron"* desde *"la cuenta ya no está en el listado"* parecía suficiente y no lo es:
+**cancelarla uno mismo la saca igual**, y el garzón que acababa de tocar *Cancelar cuenta* leía que
+su cuenta *"se fusionó"* y que fuera a cobrarla a la fusionada, que no existe. Corregido eso, la
+segunda deducción —*"si `cobroCuenta` apunta a algo, hay un cobro"*— falló por el mismo motivo: era
+un ref que nadie limpiaba. Las dos las midió la revisión con sonda. La salida fue dejar de deducir:
+el aviso sale del lugar que **sabe**, y lo que se pregunta es un flag con ciclo de vida.
+
+### Qué lo fija
+
+Ocho tests (92 en el archivo): tres de conducta nueva —el cobro que se cae, el tap que ya no muere
+en silencio, y la mitad **destino** que abría con el total viejo—, tres controles —**una fusión de
+OTRAS cuentas no le toca el cobro a nadie**, **cancelar la cuenta uno mismo no dispara el aviso de
+fusión**, y **un cobro cerrado a mano no hace que la fusión avise de nada**, que son los dos falsos
+positivos medidos— y dos que cubren lo que la decisión dejó sin escenario: el total congelado ya no
+se puede ver desde la fusión (el cobro se cae antes) y se fija con una ventana más simple y más
+común —el `PATCH` de una cantidad que aterriza con el modal arriba y recalcula por abajo—, y la
+**cuenta** congelada se fija con el cobro que se reabre durante el flush, cuando el cierre en curso
+deja `activeCuenta` en `null` con el modal encima.
+
+**Diecisiete mutantes sobre el spec completo (92 tests), dos sobrevivientes:**
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **C1** — sin el guard de identidad al abrir | el código de antes | ✝ mata 2 |
+| **C2** — el guard corta siempre | control: la rama que deja pasar | ✝ mata 9 |
+| **C3** — el *Confirmar* releyendo `activeCuenta` | congelar tarde | ✝ mata 1 |
+| **C4** — la mesa leída viva al confirmar | congelar a medias | **sobrevive** |
+| **C5** — `:venta-total` vivo | congelar a medias, la mitad que se muestra | ✝ mata 1 |
+| **C6** — `:total` vivo | íd. | ✝ mata 1 |
+| **C7** — la propina sugerida desde `totalFinal` vivo | íd. | **sobrevive** |
+| **C8** — la propina leída viva en `cerrarCuentaConPin` | el código de antes | ✝ mata 1 |
+| **C9** — el aviso de error antes del guard | el orden invertido | ✝ mata 1 |
+| **C10** — `cerrarCuentaConPin` leyendo `selectedMesa` | la ventana de la mesa | ✝ mata 1 |
+| **D1** — la fusión no toca el cobro | el código de antes de esta decisión | ✝ mata 3 |
+| **D2** — la fusión lo cierra **siempre** | control del `fusedIds.has` | ✝ mata 1 |
+| **D3** — sin el aviso al cobro que todavía calcula | el silencio de antes | ✝ mata 2 |
+| **D4** — `abrirCobro` deduciendo y avisando | la primera versión refutada | ✝ mata 1 |
+| **E1** — sin limpiar la foto al cerrar el modal | la segunda versión refutada | ✝ mata 1 |
+| **E2** — sin la marca del pedido en `abrirCobro` | la mitad destino sin cubrir | ✝ mata 1 |
+| **E3** — la fusión no anula el pedido | la otra punta de lo mismo | ✝ mata 1 |
+
+📌 **C3 estuvo a punto de quedar sin cobertura, y el motivo que escribí para eso era falso.** Al
+cerrar el modal en la fusión desapareció el escenario que lo mataba, y la primera versión de esta
+sección lo declaró sobreviviente diciendo que *"eliminó el único camino que movía `activeCuenta`
+con el modal abierto"*. La revisión lo refutó **midiéndolo**: `cerrarCuentaConPin` también deja
+`activeCuenta` en `null` —vía `volverACuentas()`— y llega ahí con el modal reabierto encima, que es
+la misma ventana que ya fijaba el test de la propina. Es la **tercera** vez en este frente que
+escribo *"ningún camino puede cambiar X"* y me falta uno. El test existe y C3 vuelve a morir.
+
+⚠️ **C4 y C7 sobreviven con los motivos medidos de la sección de abajo:** nada cambia `selectedMesa`
+a otra mesa con el modal abierto, y `res.totales.totalFinal` y `totalFinal.value` son el mismo valor
+en esa línea.
+
+---
+
 ## El cobro cobraba la cuenta que quedó activa, no la que el garzón abrió (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"El modal de cobro no lleva su cuenta adentro: se
@@ -59,6 +180,10 @@ cobrar***.
   no de releer el ref —la regla escrita del composable—. De ese número salen lo que el modal
   muestra, el pago que precarga y la propina que sugiere: congelar la cuenta y dejar vivo el monto
   es la misma ventana que no congelar nada. Es la lección de **U3** del cierre anterior, otra vez.
+
+✅ **Los dos momentos de abajo se cerraron ese mismo día**, con la respuesta del owner: ver la
+sección de arriba, *"La fusión que aterriza tarde se lleva el cobro en curso, y lo dice"*. El texto queda
+como se escribió, que es lo que este archivo registra.
 
 📌 **El costo, dicho, y son DOS momentos de la misma escena** —el segundo lo encontró la revisión
 de este cierre, con sonda, y no estaba en la primera versión de este párrafo—:

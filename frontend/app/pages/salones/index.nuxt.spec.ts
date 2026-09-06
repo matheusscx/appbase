@@ -3633,9 +3633,10 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
     expect(cobroModal.props('open'), 'el cobro no se abre sobre la cuenta que el garzón no pidió cobrar').toBe(false)
-    // El aviso de "no se pudo calcular el total" tampoco: es de la cuenta que
-    // dejó atrás, y el guard corta antes de tirárselo encima.
-    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+    // Y **ningún** aviso: ni el de "no se pudo calcular el total" —es de la cuenta
+    // que dejó atrás, y el guard corta antes de tirárselo encima— ni el de la
+    // cuenta que se fusionó, porque acá no se fusionó nada: se movió él.
+    expect(toasts).toEqual([])
   })
 
   it('volver al listado mientras se calcula el total no deja un error de la cuenta que dejó', async () => {
@@ -3683,28 +3684,30 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(300)
 
     expect(cobroModal.props('open')).toBe(false)
-    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+    // Sin ningún aviso: la cuenta 9 sigue ahí, en el listado que el garzón está
+    // mirando. Nadie se la llevó.
+    expect(toasts).toEqual([])
   })
 
-  it('el Confirmar del cobro cobra la cuenta para la que se abrió, no la que quedó activa', async () => {
+  it('una fusión que aterriza con el cobro abierto lo cierra y lo dice, en vez de cobrar una cuenta anulada', async () => {
     /**
-     * La otra mitad, y el motivo por el que el guard de arriba no alcanza: con el
-     * modal ya abierto **todavía queda un camino que mueve `activeCuenta` por
-     * abajo**, porque el overlay no frena la continuación de un request. Es
-     * `fusionarSeleccionadas`: si el garzón quedó parado en una de las cuentas
-     * que él mismo mandó fusionar, la fusión que aterriza lo lleva a la fusionada
-     * —a propósito, la cuenta donde estaba ya no existe— y `confirmarCobro`
-     * congelaba **ahí**, en el *Confirmar*. Medido: cobraba `cuenta-9` con los
-     * pagos juntados en la 10.
+     * Con el modal ya abierto **todavía queda un camino que mueve la cuenta por
+     * abajo**, porque el overlay no frena la continuación de un request: es
+     * `fusionarSeleccionadas`, que si el garzón quedó parado en una de las
+     * cuentas que él mismo mandó fusionar lo lleva a la fusionada —a propósito,
+     * la cuenta donde estaba ya no existe—.
      *
-     * ⚠️ **Lo que cuesta, dicho:** la cuenta congelada es una que la fusión
-     * acaba de anular, así que contra el backend real ese `POST .../cerrar`
-     * rebota con *"La cuenta no está abierta"* y el garzón se come un error con
-     * el PIN ya tecleado. Es el platillo bueno igual: el otro es una venta
-     * cobrada de verdad sobre una cuenta que nadie pidió cobrar, con otro total.
-     * Cerrar el modal cuando la fusión se lleva puesta su cuenta es un frente
-     * propio —los pagos ya juntados se perderían, y eso lo decide el owner—:
-     * `docs/agent/pendientes.md` § 4.
+     * Congelar la cuenta al abrir el modal evitó lo peor —cobrar la fusionada con
+     * los pagos juntados en otra, que es lo que hacía cuando congelaba en el
+     * *Confirmar*—, pero dejaba al garzón tecleando el PIN para leer *"La cuenta
+     * no está abierta"*: el `POST` salía contra una cuenta que el servidor acaba
+     * de anular.
+     *
+     * **Decisión del owner (2026-09-05): el cobro se cierra y se avisa.** ⚠️ Y el
+     * costo lo tomó él: los pagos ya cargados se pierden y hay que volver a
+     * tipearlos sobre la fusionada. Es el mismo trato que la cantidad a medio
+     * guardar en esa misma función, y por la misma razón — se cargaron contra una
+     * cuenta que dejó de existir.
      */
     catalogoItemsMock = [producto('9.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
@@ -3714,9 +3717,6 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
 
     const wrapper = await montar()
-    // Con la moneda cargada: sin ella `formatMonto` devuelve `'—'` para
-    // cualquier monto y la fila de Totales no distingue nada.
-    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
     await seleccionarMesa(wrapper)
     await esperar(20)
 
@@ -3744,31 +3744,424 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(50)
     expect(cobroModal.props('open'), 'el cobro abrió sobre la 10').toBe(true)
 
-    // La fusionada se recalcula al aterrizar y su total es otro —$9.000 contra
-    // los $5.000 congelados—, que es lo que hace visible el congelado: de ese
-    // número salen lo que el modal muestra, el pago que precarga y la propina
-    // que sugiere.
-    totalDelCalculo = '9000'
     soltar()
     await esperar(200)
+
     // La fusión aterrizó y se lo llevó a la fusionada: sin esto el test no
     // reprodujo nada. (El mock devuelve la fusionada con `numero: 1`.)
     expect(drawerMesa()?.textContent).toContain('— Cuenta 1')
+    expect(cobroModal.props('open'), 'el cobro se cerró solo').toBe(false)
+    expect(toasts.map(t => t.title)).toContain(
+      'El cobro se cerró: esa cuenta entró en la fusión. Volvé a cargarlo en la fusionada.',
+    )
+  })
+
+  it('pero una fusión de OTRAS cuentas no le toca el cobro abierto', async () => {
+    /**
+     * El control del guard de arriba, y no es decoración: cerrar el cobro cada vez
+     * que aterriza una fusión le tiraría los pagos ya cargados a un garzón que
+     * está cobrando una cuenta que la fusión no tocó. Se cierra **solo si la
+     * fusión se llevó puesta la cuenta del modal**.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [
+      cuentaConPedido('1.0000'),
+      otraCuentaConPedido('1.0000'),
+      terceraCuentaConPedido('1.0000'),
+    ]
+    let soltar!: () => void
+    fusionRetenida = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    expect(tarjetas.length).toBe(3)
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Entra a la TERCERA, que no entra en la fusión, y abre el cobro ahí.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const ahora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    ahora[ahora.length - 1]!.click()
+    await esperar(400)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 11')
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open')).toBe(true)
+
+    soltar()
+    await esperar(200)
+
+    expect(cobroModal.props('open'), 'el cobro de la 11 sigue en pie').toBe(true)
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+    expect(cierresDeCuenta).toEqual(['cuenta-11'])
+  })
+
+  it('con el cobro abierto, un cálculo que llega después no le cambia el total al garzón', async () => {
+    /**
+     * Lo que el modal muestra, el pago que precarga y la propina que sugiere salen
+     * todos del mismo número, y ese número se congela **al abrir**. La ventana no
+     * necesita ninguna fusión: alcanza con que el `PATCH` de una cantidad aterrice
+     * con el modal arriba —`patchLineaCantidad` recalcula al volver— para que el
+     * total vivo se mueva por abajo.
+     *
+     * Con el total leído vivo, el garzón abre el cobro viendo $5.000 y termina
+     * confirmando $9.000, con el pago precargado en el monto nuevo.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    // Con la moneda cargada: sin ella `formatMonto` devuelve `'—'` para
+    // cualquier monto y la fila de Totales no distingue nada.
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open')).toBe(true)
+    expect(cobroModal.props('ventaTotal')).toBe('5000')
+
+    // El `PATCH` vuelve y la pantalla recalcula: de acá en más el total vivo es
+    // otro. Sin mover este número, "congelado" y "vivo" dan lo mismo y el test no
+    // distingue nada.
+    totalDelCalculo = '9000'
+    soltar()
+    await esperar(300)
+
     const spans = [...(drawerMesa()?.querySelectorAll('span') ?? [])]
     const totalVivo = spans.find(sp => sp.textContent?.trim() === 'Total')
       ?.nextElementSibling?.textContent?.trim() ?? ''
-    expect(totalVivo, 'el total vivo ya es el de la fusionada').toContain('9')
+    expect(totalVivo, 'el total vivo ya se movió').toContain('9')
     expect(totalVivo, 'y ya no es el congelado').not.toContain('5')
-    expect(cobroModal.props('open'), 'el modal sigue abierto, con los pagos adentro').toBe(true)
     expect(cobroModal.props('ventaTotal'), 'el modal cobra el total con el que abrió').toBe('5000')
     expect(cobroModal.props('total')).toBe('5000')
+  })
+
+  it('si la fusión se lleva la cuenta mientras el cobro calcula, el tap no muere en silencio', async () => {
+    /**
+     * El mismo caso que el de arriba **un paso antes**: el garzón ya tocó *Cerrar
+     * y cobrar* pero el modal todavía no abrió porque se está calculando el total,
+     * y ahí aterriza la fusión. El guard de identidad de `abrirCobro` corta —la
+     * cuenta activa cambió— y sin este aviso no pasaba **nada**: ni modal, ni
+     * error, con el único toast siendo el de la fusión. Medido con sonda.
+     *
+     * Lo que separa este caso del garzón que **se fue solo** a otra cuenta —a ése
+     * no se le avisa nada— es quién da el aviso: lo da la fusión, que sabe a qué
+     * cuentas se llevó puestas. La primera versión lo deducía desde `abrirCobro`
+     * ("la cuenta ya no está en el listado") y la revisión midió el falso
+     * positivo: cancelar la cuenta uno mismo la saca igual del listado, y el
+     * garzón que acababa de cancelarla leía que se había fusionado.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltarFusion!: () => void
+    fusionRetenida = new Promise<void>((r) => {
+      soltarFusion = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const ahora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    ahora[ahora.length - 1]!.click()
+    await esperar(400)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+
+    // El cálculo queda retenido: el tap entra pero el modal no llega a abrir.
+    let soltarCalculo!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltarCalculo = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    expect(cobroModal.props('open'), 'todavía calculando').toBe(false)
+
+    soltarFusion()
+    await esperar(100)
+    soltarCalculo()
+    await esperar(300)
+
+    // Se lo llevó la fusión, el modal no abrió, y el garzón se entera.
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 1')
+    expect(cobroModal.props('open')).toBe(false)
+    expect(toasts.map(t => t.title)).toContain(
+      'La cuenta que ibas a cobrar entró en la fusión. Cobrala desde la fusionada.',
+    )
+  })
+
+  it('la fusión tampoco abre el cobro de la cuenta DESTINO con el total de antes', async () => {
+    /**
+     * La mitad que el primer arreglo no cubría, y la midió la revisión: el backend
+     * fusiona sobre la de menor número y **la destino conserva su id**
+     * (`salones.service.ts`, `[destino, ...origenes]`). O sea que el guard de
+     * identidad de `abrirCobro` —que compara ids— no corta ahí: el modal abría
+     * igual, con el total de **antes** de absorber las otras líneas, o sea
+     * cobrando de menos. Y encima detrás del aviso que dice que la cuenta entró en
+     * la fusión.
+     *
+     * Lo que lo cierra es que la fusión **anula la marca del pedido**, así que el
+     * `abrirCobro` que vuelve del cálculo ve que el suyo ya no vale. (Esa marca
+     * guarda un id y se compara por id, como todo acá: lo que la hace servir no es
+     * ser id-independiente, es que alguien la anula. Ver `abrirCobro`.)
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltarFusion!: () => void
+    fusionRetenida = new Promise<void>((r) => {
+      soltarFusion = r
+    })
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+
+    // Entra a la 9, que es la DESTINO: la fusión no la anula, le suma líneas.
+    const ahora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    ahora[0]!.click()
+    await esperar(400)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 9')
+
+    let soltarCalculo!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltarCalculo = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    expect(cobroModal.props('open'), 'todavía calculando').toBe(false)
+
+    soltarFusion()
+    await esperar(100)
+    soltarCalculo()
+    await esperar(300)
+
+    expect(cobroModal.props('open'), 'no abre con el total de antes de la fusión').toBe(false)
+    expect(toasts.map(t => t.title)).toContain(
+      'La cuenta que ibas a cobrar entró en la fusión. Cobrala desde la fusionada.',
+    )
+  })
+
+  it('un cobro que el garzón cerró a mano no hace que la fusión le avise de nada', async () => {
+    /**
+     * `cobroCuenta` no es un flag de *"hay un cobro en curso"* si nadie lo limpia:
+     * ni `confirmarCobro` ni el *Cancelar* del propio modal hacen más que apagar
+     * `cobroOpen`. Sin el `watch` que tira la foto al cerrar, quedaba apuntando a
+     * la última cuenta **para siempre**, y la fusión le decía que esa cuenta
+     * *"entró en la fusión"* y que la cobrara desde la fusionada, sin que hubiera
+     * ningún cobro. Medido por la revisión, con clicks reales y sin ninguna
+     * carrera.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[1]!.click()
+    await esperar(400)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+
+    // Abre el cobro y lo cierra a mano, sin confirmar nada.
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open')).toBe(true)
+    cobroModal.vm.$emit('update:open', false)
+    await esperar(20)
+
+    // Y recién después fusiona, sin ningún cobro en curso.
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const enFusion = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    enFusion[0]!.click()
+    enFusion[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(300)
+
+    expect(fusionesPedidas).toBe(1)
+    expect(
+      toasts.filter(t => (t.title ?? '').includes('entró en la fusión')),
+      'no había ningún cobro del que avisar',
+    ).toEqual([])
+  })
+
+  it('cancelar la cuenta uno mismo mientras el cobro calcula no le dice que se fusionó', async () => {
+    /**
+     * El control del aviso, y no es teórico: **la primera versión lo midió mal**.
+     * Deducía *"se la llevaron"* desde *"la cuenta ya no está en el listado"*, y
+     * cancelarla uno mismo la saca igual — así que el garzón que acababa de tocar
+     * *Cancelar cuenta* leía que su cuenta *"se fusionó"* y que fuera a cobrarla a
+     * la fusionada, que no existe. Lo midió la revisión con sonda.
+     *
+     * Por eso el aviso lo da `fusionarSeleccionadas`, que **sabe** lo que pasó, y
+     * `abrirCobro` volvió a cortar mudo.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    let soltar!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    expect(cobroModal.props('open'), 'todavía calculando').toBe(false)
+
+    // Se arrepiente y cancela la cuenta, con el cálculo del cobro en vuelo.
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(300)
+
+    soltar()
+    await esperar(300)
+
+    expect(cobroModal.props('open')).toBe(false)
+    expect(toasts.map(t => t.title)).toContain('Cuenta cancelada')
+    expect(
+      toasts.filter(t => (t.title ?? '').includes('fusión')),
+      'nadie fusionó nada: la canceló él',
+    ).toEqual([])
+  })
+
+  it('el cobro que se reabre sobre el listado sigue sabiendo qué cuenta cobra', async () => {
+    /**
+     * La ventana que prueba que la cuenta se congela **al abrir el modal** y no en
+     * el *Confirmar*, sin depender de ninguna fusión: el cierre en curso llama
+     * `volverACuentas()` cuando vuelve, o sea que deja `activeCuenta` en `null`
+     * **con el modal de cobro reabierto encima** —el botón sigue habilitado
+     * durante el flush, que es la misma ventana que fija el test de la propina—.
+     * Releyendo `activeCuenta` ahí, el segundo *Confirmar* corta en seco.
+     *
+     * ⚠️ **Que salgan DOS cierres no es lo que este test bendice**: esa es la
+     * entrada abierta *"la misma ventana del cobro deja confirmarlo dos veces"*
+     * (`docs/agent/pendientes.md` § 2). Lo que se fija acá es que el segundo sale
+     * con la cuenta del modal en vez de perderse. Cuando esa entrada se cierre,
+     * este test cambia con ella.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+
+    // El tap de más, con el flush todavía en vuelo: reabre el modal.
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open')).toBe(true)
+
+    // Vuelve el primer cierre: su `volverACuentas()` deja la pantalla en el
+    // listado, sin cuenta activa, con el modal todavía arriba.
+    soltar()
+    await esperar(300)
+    expect(botonEn(drawerMesa(), 'Nueva cuenta'), 'quedó en el listado').toBeTruthy()
 
     cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
     await esperar(20)
     await tipearPin()
     await esperar(300)
 
-    expect(cierresDeCuenta).toEqual(['cuenta-10'])
+    expect(cierresDeCuenta).toEqual(['cuenta-9', 'cuenta-9'])
   })
 
   /** Las dos mesas del salón, para los tests que necesitan cambiar de mesa. */

@@ -114,12 +114,44 @@ const abriendoCuenta = ref(false)
 const cobroOpen = ref(false)
 /**
  * Con qué se abrió el modal de cobro: la cuenta, su mesa y el total que se
- * verificó para ella. Ver `abrirCobro` — los tres se escriben ahí y en ningún
- * otro lado, en el mismo instante.
+ * verificó para ella. Los tres se escriben juntos, en un mismo instante, y en
+ * dos lugares nada más: `abrirCobro` los pone y el `watch` de acá abajo los tira
+ * cuando el modal se cierra.
  */
 const cobroCuenta = ref<CuentaDetalle | null>(null)
 const cobroMesa = ref<MesaResumen | null>(null)
 const cobroTotal = ref('0')
+/**
+ * **La foto vive lo que vive el modal.** Sin esto `cobroCuenta` queda apuntando a
+ * la última cuenta que se abrió a cobrar **para siempre** —`confirmarCobro` y el
+ * *Cancelar* del propio modal solo apagan `cobroOpen`—, y cualquier cosa que
+ * pregunte *"¿hay un cobro en curso?"* contesta que sí sobre un cobro que el
+ * garzón cerró hace rato. Lo midió la revisión: la fusión le avisaba que la
+ * cuenta *"entró en la fusión"* y que la cobrara desde la fusionada, sin que
+ * hubiera ningún cobro. (Ése es el texto que sale, y no el de *"el cobro se
+ * cerró"*: `estabaAbierto` ya vale `false` en esas escenas.)
+ *
+ * `confirmarCobro` no se ve afectado: copia lo que necesita **antes** de apagar
+ * `cobroOpen`.
+ */
+watch(cobroOpen, (abierto) => {
+  if (!abierto) {
+    cobroCuenta.value = null
+    cobroMesa.value = null
+    cobroTotal.value = '0'
+  }
+})
+
+/**
+ * La cuenta de un cobro **pedido y todavía calculándose**: el garzón ya tocó
+ * *Cerrar y cobrar* pero el modal no llegó a abrir. Existe para que
+ * `fusionarSeleccionadas` pueda avisarle también en ese tramo — ver ahí—, sin
+ * tener que **deducir** desde `abrirCobro` por qué desapareció la cuenta.
+ * Deducirlo desde el listado sale mal: cancelar la cuenta uno mismo la saca
+ * igual, y ahí el aviso mentía diciendo que se había fusionado (lo midió la
+ * revisión con sonda).
+ */
+const cobroPedidoId = ref<string | null>(null)
 const abriendoCobro = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
@@ -597,19 +629,33 @@ async function abrirCobro() {
   const mesa = selectedMesa.value
   if (!cuenta) return
   abriendoCobro.value = true
+  cobroPedidoId.value = cuenta.id
   try {
     const res = await asegurarVigente()
-    // El guard va antes que el aviso: no se abre el cobro de una cuenta que ya
-    // no es la de la pantalla, y tampoco se tira un error por ella.
+    // El guard va antes que el aviso: no se abre el cobro de una cuenta que ya no
+    // es la de la pantalla, y al garzón que se fue a otra no se le tira un error
+    // por la que dejó.
     //
-    // ⚠️ **La cuenta puede haber cambiado sin que el garzón se moviera**, y ahí
-    // este `return` deja el tap **sin ninguna respuesta**: una fusión que
-    // aterriza durante el cálculo lo lleva a la fusionada si estaba parado en
-    // una de las fusionadas, y entonces no hay ni modal ni aviso —el único toast
-    // es el de la fusión—. Medido. Distinguir *"me fui"* de *"me movieron"* pide
-    // saber qué cuentas entraron a esa fusión, que es justo lo que decide la
-    // pregunta abierta al owner sobre esta misma escena
-    // (`docs/agent/pendientes.md` § 4).
+    // ⚠️ **Corta mudo a propósito.** La cuenta también puede haber cambiado sin
+    // que él se moviera —una fusión que aterriza durante el cálculo se lo lleva a
+    // la fusionada—, y en ese caso el aviso existe, pero lo da
+    // `fusionarSeleccionadas`, que **sabe** lo que pasó. Acá se intentó deducirlo
+    // ("la cuenta ya no está en el listado") y la revisión lo midió falso:
+    // cancelarla uno mismo la saca igual del listado, y el garzón que acababa de
+    // cancelar leía que su cuenta *"se fusionó"*.
+    // **La marca del pedido**: si algo la anuló mientras se calculaba, no se abre.
+    // El guard de identidad de abajo **no alcanza** para eso y la revisión lo
+    // midió: la cuenta **destino** de una fusión conserva su id, así que ahí
+    // `activeCuenta` no cambia y el modal abría igual —con el total de antes de
+    // absorber las otras líneas, o sea cobrando de menos—.
+    //
+    // ⚠️ **No es el token de `cargarCuentas`, y no conviene llamarlo así**: aquél
+    // es un contador monótono, éste guarda el id y compara ids. Lo que lo hace
+    // funcionar no es ser id-independiente, es que **alguien lo anula**. Dos
+    // `abrirCobro` solapados sobre la MISMA cuenta lo engañarían; hoy no es
+    // alcanzable —el botón queda deshabilitado con `:loading="abriendoCobro"`, y
+    // se midió— pero si algún día se abre otro llamador, esto pasa a ser contador.
+    if (cobroPedidoId.value !== cuenta.id) return
     if (activeCuenta.value?.id !== cuenta.id) return
     if (!res) {
       toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
@@ -627,6 +673,7 @@ async function abrirCobro() {
   }
   finally {
     abriendoCobro.value = false
+    if (cobroPedidoId.value === cuenta.id) cobroPedidoId.value = null
   }
 }
 
@@ -1032,6 +1079,58 @@ async function fusionarSeleccionadas() {
     // si el timer de los 300 ms alcanzó a disparar antes de que volviera la
     // fusión, el `PATCH` ya salió y acá no queda nada que tirar.
     for (const id of aFusionar) descartarPendientes(id)
+    // **Y el cobro que el garzón todavía está armando sobre una de estas cuentas
+    // se cae** (decisión del owner, 2026-09-05). Va acá arriba, con el descarte de
+    // pendientes y no con lo que se pinta, por el mismo motivo: lo que ese cobro
+    // tenía adentro dejó de valer, esté el garzón donde esté.
+    //
+    // ⚠️ **"Todavía armando" es literal, y el alcance está medido:** cubre el modal
+    // abierto y el tap que espera su cálculo. **No** cubre el cobro que el garzón
+    // ya confirmó con su PIN y está en vuelo —`cerrarCuentaConPin` espera el flush
+    // y el cálculo antes de mandar el `POST`—: ése sale igual y, si la cuenta era
+    // de origen, el backend lo rechaza con *"La cuenta no está abierta"*. Esa
+    // ventana es preexistente y quedó anotada (`docs/agent/pendientes.md` § 2).
+    // Ojo con "arreglarla" mirando `cobroCuenta`: antes del `watch` de arriba ese
+    // ref quedaba rancio y **avisaba igual**, pero mandando al garzón a *"cobrarla
+    // desde la fusionada"* con el cobro ya confirmado y en vuelo. Un aviso que no
+    // describe lo que pasó es peor que no avisar.
+    //
+    // ⚠️ **Y aplica a las DOS mitades de la fusión, por motivos distintos** —la
+    // primera versión decía "la cuenta que el modal tenía adentro ya no existe" y
+    // era falso para la mitad de los casos, lo midió la revisión—:
+    //
+    // - **Origen**: el servidor la dejó `cancelada`, así que el *Confirmar* salía
+    //   contra una cuenta muerta y el garzón tecleaba el PIN para leer *"La cuenta
+    //   no está abierta"*.
+    // - **Destino**: sigue **abierta** —es la fusionada—, pero acaba de absorber
+    //   las líneas de las otras. El total congelado del modal es el de antes de
+    //   absorberlas, o sea que cobraría de menos.
+    //
+    // ⚠️ **El costo, que el owner tomó con el precedente de acá al lado:** los
+    // pagos cargados se pierden y hay que volver a tipearlos. Es lo mismo que ya
+    // pasa dos líneas más arriba con la cantidad a medio guardar, y por la misma
+    // razón — se cargaron contra una cuenta que ya no es la que era.
+    //
+    // El `?? cobroPedidoId.value` cubre el tramo de antes: el garzón tocó *Cerrar
+    // y cobrar* y la fusión aterrizó **mientras se calculaba el total**, con el
+    // modal todavía sin abrir. Sin eso, ese tap moría en silencio: ni modal, ni
+    // aviso, con el único toast siendo el de la fusión. El aviso sale de acá y no
+    // del guard de `abrirCobro` porque **acá se sabe** lo que pasó; allá había que
+    // deducirlo, y deducirlo salió mal.
+    const cobroTocado = cobroCuenta.value?.id ?? cobroPedidoId.value
+    if (cobroTocado && fusedIds.has(cobroTocado)) {
+      const estabaAbierto = cobroOpen.value
+      // Apagar el modal ya limpia la foto (ver el `watch`); el pedido se anula
+      // acá, y es lo que hace que `abrirCobro` no abra cuando vuelva su cálculo.
+      cobroOpen.value = false
+      cobroPedidoId.value = null
+      toast.add({
+        title: estabaAbierto
+          ? 'El cobro se cerró: esa cuenta entró en la fusión. Volvé a cargarlo en la fusionada.'
+          : 'La cuenta que ibas a cobrar entró en la fusión. Cobrala desde la fusionada.',
+        color: 'warning',
+      })
+    }
     // ⛔ **De acá para abajo se pinta pantalla, y eso solo se hace si el garzón
     // sigue donde pidió la fusión.** Lo levantó la cuarta pasada de la revisión:
     // congelar la selección no alcanzaba porque estas cuatro sentencias

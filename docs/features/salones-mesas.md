@@ -637,6 +637,23 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   llevalo a la fusionada"* — parado en **otra** cuenta viva no se lo toca, que sería una
   expulsión; parado en una muerta, dejarlo es peor: el listado ya no la tiene y todo lo que haga
   vuelve *"La cuenta no está abierta"*.
+- **Y lo que la acción CIERRA: el cobro en curso sobre una cuenta que entró en la fusión**
+  (decisión del owner, 2026-09-05). El modal se cierra solo, con aviso, y **los pagos que el
+  garzón ya cargó se pierden** — se vuelven a tipear. Es el mismo trato que la cantidad a medio
+  guardar del punto de abajo, y **por los dos mismos motivos según el lado**: si era una cuenta
+  de **origen**, el *Confirmar* rebotaría con *"La cuenta no está abierta"* con el PIN ya
+  tecleado; si era la **destino** —que sigue abierta— el total congelado del modal es el de
+  antes de absorber las otras líneas, así que cobraría de menos. Se cae **solo si la cuenta de
+  ese cobro entró en la fusión**: una fusión de otras cuentas no le toca el cobro a nadie. Y
+  alcanza también al cobro que el garzón pidió y **todavía se está calculando**, que si no moría
+  en silencio — o peor, en la mitad destino: como conserva su id, el guard de identidad de
+  `abrirCobro` no cortaba y el modal abría con el total de antes de absorber las otras líneas. Lo
+  que lo cierra ahí es que la fusión **anula la marca de ese cobro pedido** — no un id que cambie.
+  ⚠️ **El aviso lo da la fusión, que sabe lo que pasó**, y no el guard de `abrirCobro`: las dos
+  veces que se intentó deducirlo salió mal —*"la cuenta ya no está en el listado"* le decía
+  *"se fusionó"* al garzón que acababa de **cancelarla él mismo**, y *"`cobroCuenta` apunta a
+  algo"* avisaba de un cobro que el garzón ya había cerrado, porque ese ref no lo limpiaba nadie
+  (ahora lo tira un `watch` cuando el modal cierra).
 - **Lo que la acción DESCARTA mira de qué cuenta es cada edición**, no vacía todo: cancelar tira
   lo de su cuenta, fusionar lo de **todas** las que entraron a la fusión —incluida la destino, y
   también las líneas de la destino que la fusión no tocó: se descarta por cuenta, no por línea,
@@ -729,15 +746,15 @@ total de la cuenta"* nombra una cuenta que el garzón ya dejó, en una pantalla 
 haber ninguna abierta. Es el mismo criterio del resto del archivo: lo que se pinta se condiciona
 a seguir parado donde se pidió.
 
-⚠️ **Lo que el arreglo NO cierra, dicho, y son dos momentos de la misma escena** —una fusión que
-el propio garzón pidió y que aterriza tarde—: con el **modal ya abierto**, se queda arriba con los
-pagos adentro y el *Confirmar* va contra una cuenta que el servidor anuló, así que se come un
-*"La cuenta no está abierta"* con el PIN ya tecleado; y **un paso antes**, con el cobro todavía
-calculándose, el guard corta y el tap **no produce nada** —ni modal ni aviso, el único toast es el
-de la fusión—. Los dos son el platillo bueno igual (el otro era una venta cobrada sobre una cuenta
-que nadie pidió cobrar, con otro total) y se contestan juntos: distinguir *"me fui"* de *"me
-movieron"* pide saber qué cuentas entraron a la fusión, y cerrar el modal perdería los pagos ya
-juntados. Lo decide el owner ([`../agent/pendientes.md`](../agent/pendientes.md) § 4).
+📌 **Y una fusión que aterriza tarde tiene DOS momentos, los dos contestados por el owner el
+2026-09-05** (el segundo apareció midiendo el primero): con el **modal ya abierto** y con el cobro
+**todavía calculándose**. Los dos se resuelven en el mismo lugar —ver el bullet *"lo que la acción
+CIERRA"* más arriba—, y ese lugar es `fusionarSeleccionadas` y no el guard de `abrirCobro`: el guard
+corta **mudo**, porque desde ahí *"por qué desapareció la cuenta"* hay que deducirlo, y la deducción
+salió mal. El aviso es **del cobro, no de dónde está parado el garzón**: irse solo a otra cuenta no dispara
+nada, pero si además la fusión se llevó la cuenta que él había mandado a cobrar, el aviso sale
+igual —medido—. Y lo que **no** alcanza es el cobro ya confirmado con PIN y en vuelo: ése sale y
+rebota (`../agent/pendientes.md` § 2).
 
 ⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en
 la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
