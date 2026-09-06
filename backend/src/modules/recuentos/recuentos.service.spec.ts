@@ -5,6 +5,7 @@ import { Db } from '../../common/db/db.service';
 import { RecuentosService } from './recuentos.service';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
 import { InventarioService } from '../inventario/inventario.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 
 const TENANT_ID = 'tenant-uuid';
 const USUARIO_ID = 'usuario-uuid';
@@ -14,6 +15,7 @@ const LINEA_ID = 'linea-uuid';
 const MOTIVO_ID = 'motivo-uuid';
 const MOTIVO_A = 'motivo-a-uuid';
 const MOTIVO_B = 'motivo-b-uuid';
+const UBICACION_LOCAL_ID = 'ubicacion-local-uuid';
 
 describe('RecuentosService', () => {
   let service: RecuentosService;
@@ -21,6 +23,7 @@ describe('RecuentosService', () => {
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let motivosService: { assertMotivoActivo: jest.Mock };
   let inventarioService: { registrarMovimiento: jest.Mock };
+  let ubicacionesService: { localDe: jest.Mock };
 
   beforeEach(async () => {
     manager = { query: jest.fn() };
@@ -38,6 +41,9 @@ describe('RecuentosService', () => {
         costoActual: null,
       }),
     };
+    ubicacionesService = {
+      localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
+    };
 
     const dbMock = {
       transaccion: dataSource.transaction,
@@ -54,6 +60,7 @@ describe('RecuentosService', () => {
           useValue: motivosService,
         },
         { provide: InventarioService, useValue: inventarioService },
+        { provide: UbicacionesService, useValue: ubicacionesService },
       ],
     }).compile();
 

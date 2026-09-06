@@ -5,11 +5,13 @@ import { MermasService } from './mermas.service';
 import { CausasMermaService } from './causas-merma.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 
 const TENANT = 'tenant-uuid';
 const USER = 'user-uuid';
 const ITEM = 'item-uuid';
 const CAUSA = 'causa-uuid';
+const UBICACION_ID = 'ubicacion-local-uuid';
 
 // No incluye `costo_actual`: desde el fix de concurrencia (revisión
 // independiente, fix round 1) el SELECT de `mermas.service.ts` ya no lo
@@ -50,6 +52,7 @@ describe('MermasService', () => {
   let inventarioService: { registrarMovimiento: jest.Mock };
   let catalogService: { convertirUnidad: jest.Mock };
   let causasService: { assertCausaActiva: jest.Mock };
+  let ubicacionesService: { localDe: jest.Mock };
 
   beforeEach(async () => {
     transactionQueryMock = jest.fn();
@@ -61,6 +64,7 @@ describe('MermasService', () => {
     inventarioService = { registrarMovimiento: jest.fn() };
     catalogService = { convertirUnidad: jest.fn() };
     causasService = { assertCausaActiva: jest.fn() };
+    ubicacionesService = { localDe: jest.fn().mockResolvedValue(UBICACION_ID) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -76,6 +80,7 @@ describe('MermasService', () => {
         { provide: InventarioService, useValue: inventarioService },
         { provide: CatalogService, useValue: catalogService },
         { provide: CausasMermaService, useValue: causasService },
+        { provide: UbicacionesService, useValue: ubicacionesService },
       ],
     }).compile();
 

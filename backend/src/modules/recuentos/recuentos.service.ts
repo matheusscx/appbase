@@ -18,6 +18,7 @@ import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
 import { FindRecuentosDto } from './dto/find-recuentos.dto';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
 import { InventarioService } from '../inventario/inventario.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 
 interface ItemParaRecuentoRow {
   item_id: string;
@@ -154,6 +155,7 @@ export class RecuentosService {
     private readonly db: Db,
     private readonly motivosDiferenciaInventarioService: MotivosDiferenciaInventarioService,
     private readonly inventarioService: InventarioService,
+    private readonly ubicacionesService: UbicacionesService,
   ) {}
 
   async create(
@@ -688,12 +690,19 @@ export class RecuentosService {
         }
       }
 
+      // Resuelto UNA vez antes del loop: `localDe` por línea sería una
+      // consulta por producto recontado, N+1 en un recuento de decenas de
+      // productos.
+      const ubicacionLocalId = lineasAAplicar.length
+        ? await this.ubicacionesService.localDe(tenantId)
+        : null;
       for (const linea of lineasAAplicar) {
         let mov: { movimientoId: string };
         try {
           mov = await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId: linea.itemId,
+            ubicacionId: ubicacionLocalId!,
             usuarioId,
             tipo: linea.delta.isPositive() ? 'entrada' : 'salida',
             motivo: 'recuento',

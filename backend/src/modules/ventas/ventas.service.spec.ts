@@ -16,6 +16,7 @@ import { PagosService } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { EstadoVenta, Venta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
@@ -39,6 +40,7 @@ const MONEDA_OFICIAL_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116';
 const ITEM_AJUSTE_ID = '550e8400-e29b-41d4-a716-446655440381';
+const UBICACION_LOCAL_ID = '550e8400-e29b-41d4-a716-446655440400';
 
 const mockCajaActiva = {
   id: CAJA_ID,
@@ -206,6 +208,7 @@ describe('VentasService', () => {
     obtenerActivoPorId: jest.Mock;
   };
   let catalogService: jest.Mocked<CatalogService>;
+  let ubicacionesService: { localDe: jest.Mock };
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
   /**
    * Unidades ya comprometidas por devoluciones previas, por ítem. Vive en el
@@ -367,6 +370,12 @@ describe('VentasService', () => {
           useValue: garzonesServiceMock,
         },
         {
+          provide: UbicacionesService,
+          useValue: {
+            localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
+          },
+        },
+        {
           provide: Db,
           useValue: dbMock,
         },
@@ -379,6 +388,7 @@ describe('VentasService', () => {
     inventarioService = module.get(InventarioService);
     itemsService = module.get(ItemsService);
     catalogService = module.get(CatalogService);
+    ubicacionesService = module.get(UbicacionesService);
   });
 
   const basePago = { metodoPagoId: EFECTIVO_ID, monto: '100.0000' };
@@ -659,6 +669,57 @@ describe('VentasService', () => {
         .calls[0][1] as { convertir: unknown };
       expect(recetaArgs.convertir).toBe(conversor);
       expect(comboArgs.convertir).toBe(conversor);
+    });
+
+    it('resuelve la ubicación local UNA vez para todo el carrito, no una por línea', async () => {
+      // Guarda contra la regresión al N+1 del chokepoint de bodegas (Tarea 2):
+      // `ubicacionLocalId` se resuelve acá y baja por parámetro a
+      // `venderIngredientesReceta`/`venderComponentesCombo`, que a su vez lo
+      // vuelven a bajar a sus propias expansiones internas (ingredientes de
+      // receta, componentes de combo, opciones de grupo). Si cualquier eslabón
+      // de esa cadena vuelve a resolverlo por su cuenta, `localDe` se llama
+      // más de una vez por venta y este test lo caza.
+      const dtoMixto = {
+        ...baseDto,
+        lineas: [
+          { itemId: 'receta-a', cantidad: '1' },
+          { itemId: 'combo-b', cantidad: '1' },
+        ],
+      };
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        (_tenantId: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id) => [
+                id,
+                {
+                  ...mockItem,
+                  id,
+                  tipo: id.startsWith('receta') ? 'receta' : 'combo',
+                } as never,
+              ]),
+            ),
+          ),
+      );
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: dtoMixto.lineas.map((l) => ({
+          ...mockResultadoVenta.lineas[0],
+          itemId: l.itemId,
+        })),
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoMixto);
+
+      expect(ubicacionesService.localDe).toHaveBeenCalledTimes(1);
+      const ubicacionLocalId =
+        await ubicacionesService.localDe.mock.results[0].value;
+      const recetaArgs = (itemsService.venderIngredientesReceta as jest.Mock)
+        .mock.calls[0][1] as { ubicacionLocalId: unknown };
+      const comboArgs = (itemsService.venderComponentesCombo as jest.Mock).mock
+        .calls[0][1] as { ubicacionLocalId: unknown };
+      expect(recetaArgs.ubicacionLocalId).toBe(ubicacionLocalId);
+      expect(comboArgs.ubicacionLocalId).toBe(ubicacionLocalId);
     });
 
     it('un carrito de puros productos no carga el catálogo de unidades', async () => {

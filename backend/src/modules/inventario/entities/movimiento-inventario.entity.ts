@@ -38,6 +38,15 @@ export class MovimientoInventario {
   @Column({ name: 'item_id', type: 'uuid' })
   itemId: string;
 
+  /**
+   * Dónde ocurrió el movimiento. `stock_anterior` y `stock_resultante` pasan a
+   * ser los saldos **de esta ubicación**, no del tenant — que es la razón por
+   * la que un traslado son dos filas y no una con origen y destino: en una
+   * sola no hay dónde escribir los dos saldos (spec § 4.3).
+   */
+  @Column({ name: 'ubicacion_id', type: 'uuid' })
+  ubicacionId: string;
+
   @Column({ type: 'text' })
   tipo: string; // 'entrada' | 'salida' | 'ajuste'
 

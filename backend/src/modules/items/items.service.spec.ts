@@ -8,6 +8,7 @@ import { Item } from './entities/item.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
@@ -16,6 +17,7 @@ const MONEDA_ID = 'moneda-uuid';
 const CATEGORIA_ID = 'categoria-uuid';
 const COMBO_ID = 'combo-uuid';
 const COMBO_SIN_BLOQUEANTES_ID = 'combo-sin-bloqueantes-uuid';
+const UBICACION_LOCAL_ID = 'ubicacion-local-uuid';
 
 describe('ItemsService', () => {
   let service: ItemsService;
@@ -33,6 +35,7 @@ describe('ItemsService', () => {
     sinTransaccion: (fn: () => unknown) => unknown;
   };
   let inventarioServiceMock: { registrarMovimiento: jest.Mock };
+  let ubicacionesServiceMock: { localDe: jest.Mock };
   let catalogServiceMock: {
     findAllUnidadesMedida: jest.Mock;
     convertirUnidad: jest.Mock;
@@ -58,6 +61,9 @@ describe('ItemsService', () => {
     itemRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
     inventarioServiceMock = { registrarMovimiento: jest.fn() };
+    ubicacionesServiceMock = {
+      localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
+    };
     // El conversor que devuelve `crearConversor`, con el catálogo ya cargado.
     // Su implementación por defecto reproduce la semántica real para las
     // unidades que usan los tests, así el costo se calcula de verdad en vez de
@@ -100,6 +106,7 @@ describe('ItemsService', () => {
         { provide: Db, useValue: dbMock },
         { provide: InventarioService, useValue: inventarioServiceMock },
         { provide: CatalogService, useValue: catalogServiceMock },
+        { provide: UbicacionesService, useValue: ubicacionesServiceMock },
       ],
     }).compile();
 
@@ -5030,6 +5037,48 @@ describe('ItemsService', () => {
         grupos,
       );
     });
+
+    it('resuelve la ubicación local UNA vez aunque el snapshot tenga varias opciones-receta', async () => {
+      // Guarda contra el eslabón más profundo del N+1 (Tarea 2, hallazgo 1):
+      // una opción de grupo tipo `receta` hace que `venderOpcionesGrupos`
+      // vuelva a llamar a `venderIngredientesReceta`, y esa llamada recursiva
+      // tiene que reusar el `ubicacionLocalId` ya resuelto, no volver a
+      // pedirlo. Con UNA sola opción, un N+1 y una consulta única dan el
+      // mismo número (1) y el test no discrimina — por eso son tres.
+      const opcion = (itemId: string) => ({
+        itemId,
+        nombre: itemId,
+        cantidad: '1',
+        unidadCodigo: undefined,
+        precioExtra: '0',
+        unidades: '1',
+      });
+      managerMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('receta_ingredientes ri')) return Promise.resolve([]);
+        if (
+          sql.includes('LEFT JOIN item_producto ip ON ip.item_id = i.item_id')
+        )
+          return Promise.resolve([{ tipo: 'receta', unidad_medida: null }]);
+        return Promise.resolve([]);
+      });
+
+      await service.venderIngredientesReceta(managerMock as any, {
+        ...PARAMS,
+        snapshot: {
+          omitidos: [],
+          extras: [],
+          grupos: [
+            {
+              grupoId: 'G',
+              grupoNombre: 'Salsas',
+              opciones: [opcion('op-1'), opcion('op-2'), opcion('op-3')],
+            },
+          ],
+        },
+      });
+
+      expect(ubicacionesServiceMock.localDe).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('venderComponentesCombo', () => {
@@ -5121,12 +5170,16 @@ describe('ItemsService', () => {
       );
     });
 
-    it('lee el catálogo de unidades UNA vez para todo el combo, no una por componente-receta', async () => {
+    it('lee el catálogo de unidades y la ubicación local UNA vez para todo el combo, no una por componente-receta', async () => {
       // Guarda contra la regresión al N+1 anidado: `venderIngredientesReceta`
       // convertía la unidad de cada ingrediente con una query, y el combo la
       // llama una vez por componente → N componentes × M ingredientes. El
       // conversor se carga arriba y baja por parámetro; si alguien saca ese
       // parámetro, cada componente vuelve a leer el catálogo y este test cae.
+      // Mismo motivo para `ubicacionLocalId`: se resolvió una vez, se re-usó
+      // internamente en `venderComponentesCombo` y bajó a cada llamada de
+      // `venderIngredientesReceta` — si alguna de las dos vuelve a resolverlo
+      // por su cuenta, `localDe` se llama más de una vez y este test lo caza.
       managerMock.query
         .mockResolvedValueOnce([
           {
@@ -5180,6 +5233,8 @@ describe('ItemsService', () => {
       // 4 conversiones (2 recetas × 2 ingredientes) con UNA sola carga.
       expect(conversorMock).toHaveBeenCalledTimes(4);
       expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+      // 2 componentes-receta, UNA sola resolución de ubicación.
+      expect(ubicacionesServiceMock.localDe).toHaveBeenCalledTimes(1);
     });
 
     it('componente NO bloqueante sin stock → advertencia (no aborta)', async () => {

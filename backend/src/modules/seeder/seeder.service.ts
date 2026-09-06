@@ -3844,6 +3844,16 @@ export class SeederService implements OnApplicationBootstrap {
       },
     ];
 
+    // Resuelto UNA vez antes del loop, no por ingrediente: este seed pasa por
+    // fuera del chokepoint (`registrarMovimiento`), así que la doble escritura
+    // en `stock_ubicacion` se hace acá a mano.
+    const localId = (
+      await this.dataSource.query<{ ubicacion_id: string }[]>(
+        `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = 'local' AND eliminado_el IS NULL`,
+        [PARIS],
+      )
+    )[0].ubicacion_id;
+
     for (const ing of ingredientes) {
       await this.dataSource.query(
         // clasificacion_tributaria NULL explícito: el ítem no se vende, no
@@ -3864,10 +3874,16 @@ export class SeederService implements OnApplicationBootstrap {
         [ing.stock, ing.id],
       );
       await this.dataSource.query(
+        `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+        [ing.id, localId, ing.stock],
+      );
+      await this.dataSource.query(
         `INSERT INTO movimientos_inventario
-           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-         VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed ingredientes base)')`,
-        [ing.movId, PARIS, ing.id, ing.stock, ing.costo],
+           (movimiento_id, tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+         VALUES ($1,$2,$3,$6,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed ingredientes base)')`,
+        [ing.movId, PARIS, ing.id, ing.stock, ing.costo, localId],
       );
     }
   }
@@ -3909,11 +3925,25 @@ export class SeederService implements OnApplicationBootstrap {
       `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
       [PAPAS_STOCK, PAPAS_ID],
     );
+    // Este seed pasa por fuera del chokepoint (`registrarMovimiento`), así que
+    // la doble escritura en `stock_ubicacion` se hace acá a mano.
+    const localIdPapas = (
+      await this.dataSource.query<{ ubicacion_id: string }[]>(
+        `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = 'local' AND eliminado_el IS NULL`,
+        [PARIS],
+      )
+    )[0].ubicacion_id;
+    await this.dataSource.query(
+      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+      [PAPAS_ID, localIdPapas, PAPAS_STOCK],
+    );
     await this.dataSource.query(
       `INSERT INTO movimientos_inventario
-         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed papas fritas)')`,
-      [MOV_PAPAS_ID, PARIS, PAPAS_ID, PAPAS_STOCK, PAPAS_COSTO],
+         (movimiento_id, tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+       VALUES ($1,$2,$3,$6,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed papas fritas)')`,
+      [MOV_PAPAS_ID, PARIS, PAPAS_ID, PAPAS_STOCK, PAPAS_COSTO, localIdPapas],
     );
   }
 
@@ -4024,6 +4054,15 @@ export class SeederService implements OnApplicationBootstrap {
         costo: '9000',
       },
     ];
+    // Resuelto UNA vez antes del loop, no por ingrediente: este seed pasa por
+    // fuera del chokepoint (`registrarMovimiento`), así que la doble escritura
+    // en `stock_ubicacion` se hace acá a mano.
+    const localIdProteina = (
+      await this.dataSource.query<{ ubicacion_id: string }[]>(
+        `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = 'local' AND eliminado_el IS NULL`,
+        [PARIS],
+      )
+    )[0].ubicacion_id;
     for (const ing of nuevosIngredientes) {
       await this.dataSource.query(
         // clasificacion_tributaria NULL explícito — ver el comentario del
@@ -4042,10 +4081,16 @@ export class SeederService implements OnApplicationBootstrap {
         [ing.stock, ing.id],
       );
       await this.dataSource.query(
+        `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+        [ing.id, localIdProteina, ing.stock],
+      );
+      await this.dataSource.query(
         `INSERT INTO movimientos_inventario
-           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-         VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Proteína)')`,
-        [ing.movId, PARIS, ing.id, ing.stock, ing.costo],
+           (movimiento_id, tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+         VALUES ($1,$2,$3,$6,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Proteína)')`,
+        [ing.movId, PARIS, ing.id, ing.stock, ing.costo, localIdProteina],
       );
     }
 
@@ -4219,12 +4264,26 @@ export class SeederService implements OnApplicationBootstrap {
       `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
       [STOCK, ITEM_ID],
     );
+    // Este seed pasa por fuera del chokepoint (`registrarMovimiento`), así que
+    // la doble escritura en `stock_ubicacion` se hace acá a mano.
+    const localIdDemo = (
+      await this.dataSource.query<{ ubicacion_id: string }[]>(
+        `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = 'local' AND eliminado_el IS NULL`,
+        [PARIS],
+      )
+    )[0].ubicacion_id;
+    await this.dataSource.query(
+      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+      [ITEM_ID, localIdDemo, STOCK],
+    );
     await this.dataSource.query(
       `INSERT INTO movimientos_inventario
-         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
+         (movimiento_id, tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, comentario)
-       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,'Stock inicial (seed producto demo ventas)')`,
-      [MOV_ID, PARIS, ITEM_ID, STOCK],
+       VALUES ($1,$2,$3,$5,'entrada','inventario_inicial',$4,'0',$4,'Stock inicial (seed producto demo ventas)')`,
+      [MOV_ID, PARIS, ITEM_ID, STOCK, localIdDemo],
     );
   }
 

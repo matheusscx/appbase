@@ -8,6 +8,7 @@ import { Db } from '../../common/db/db.service';
 import { InventarioService } from './inventario.service';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import { CatalogService } from '../catalog/catalog.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
@@ -17,17 +18,20 @@ const UNIDAD_2 = 'unidad-uuid-2';
 const LOTE_ID = 'lote-uuid-1';
 const CAUSA_MERMA_ID = 'causa-merma-uuid';
 const MOTIVO_DIFERENCIA_ID = 'motivo-diferencia-uuid';
+const UBICACION_ID = 'ubicacion-local-uuid';
 
 describe('InventarioService', () => {
   let service: InventarioService;
   let managerMock: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let catalogService: { convertirUnidad: jest.Mock };
+  let ubicacionesService: { localDe: jest.Mock };
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
     dataSource = { query: jest.fn(), transaction: jest.fn() };
     catalogService = { convertirUnidad: jest.fn() };
+    ubicacionesService = { localDe: jest.fn().mockResolvedValue(UBICACION_ID) };
     // Delega en `dataSource.*` en el momento de la llamada: varios tests de
     // `registrarAjusteCosto` reasignan `dataSource.transaction` DESPUÉS de
     // compilar el módulo, y `Db.transaccion` tiene que ver ese reemplazo.
@@ -44,6 +48,7 @@ describe('InventarioService', () => {
         { provide: getRepositoryToken(MovimientoInventario), useValue: {} },
         { provide: Db, useValue: dbMock },
         { provide: CatalogService, useValue: catalogService },
+        { provide: UbicacionesService, useValue: ubicacionesService },
       ],
     }).compile();
 
@@ -68,7 +73,8 @@ describe('InventarioService', () => {
     it('el SELECT del lock recibe el tenant como parámetro, no solo el item', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
       await service.registrarMovimiento(
@@ -76,6 +82,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -94,7 +101,8 @@ describe('InventarioService', () => {
     it('lockea solo `item_producto`, no la fila de `items` que usa para acotar', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
       await service.registrarMovimiento(
@@ -102,6 +110,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -125,6 +134,74 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // stock_ubicacion (Tarea 2 del plan de bodegas): la doble escritura del
+  // chokepoint mientras `item_producto.stock` sigue siendo la fuente de
+  // verdad. Nadie la lee todavía — eso llega con la Tarea 3.
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — stock_ubicacion (Tarea 2 bodegas)', () => {
+    it('escribe el saldo en stock_ubicacion además de item_producto', async () => {
+      // El fixture usa 7 y 3 —no 1 y 1— a propósito: con factores iguales, un
+      // mutante que sume donde debe restar sobrevive.
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            stock: '7',
+            modo_inventario: 'cantidad',
+            costo_actual: '100',
+            item_nombre: 'Carne',
+            item_eliminado_el: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-stock-ubicacion' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '3',
+          usuarioId: USER_ID,
+        },
+      );
+
+      const upserts = managerMock.query.mock.calls
+        .map((c) => c[0] as string)
+        .filter((sql) => /INSERT INTO stock_ubicacion/.test(sql));
+      expect(upserts).toHaveLength(1);
+      // El parámetro, no el SQL: un `toContain` sobre el texto matchea también
+      // el comentario de la consulta.
+      const params = managerMock.query.mock.calls.find((c) =>
+        /INSERT INTO stock_ubicacion/.test(c[0] as string),
+      )![1] as string[];
+      expect(params).toEqual(
+        expect.arrayContaining(['4', ITEM_ID, UBICACION_ID]),
+      );
+    });
+
+    it('rechaza un movimiento sin ubicacionId', async () => {
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: '',
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '1',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.toThrow(/ubicaci/i);
+
+      // El guard corta ANTES del lock: ni siquiera llega a leer item_producto.
+      expect(managerMock.query).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Modo 'cantidad' (comportamiento original)
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — modo cantidad', () => {
@@ -132,6 +209,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]); // INSERT movimiento
 
       const res = await service.registrarMovimiento(
@@ -139,6 +217,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -165,6 +244,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
         .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-2' }]);
 
       const res = await service.registrarMovimiento(
@@ -172,6 +252,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '4',
@@ -192,6 +273,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '5',
@@ -208,6 +290,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -253,6 +336,7 @@ describe('InventarioService', () => {
           service.registrarMovimiento(managerMock as unknown as EntityManager, {
             tenantId: TENANT,
             itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
             tipo: 'entrada',
             motivo,
             cantidad: '5',
@@ -276,6 +360,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -290,6 +375,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -304,6 +390,7 @@ describe('InventarioService', () => {
         managerMock.query
           .mockResolvedValueOnce(lockRowEliminado())
           .mockResolvedValueOnce(undefined) // UPDATE item_producto
+          .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-repo' }]); // INSERT kardex
 
         const res = await service.registrarMovimiento(
@@ -311,6 +398,7 @@ describe('InventarioService', () => {
           {
             tenantId: TENANT,
             itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
             tipo: 'entrada',
             motivo,
             cantidad: '2',
@@ -333,7 +421,8 @@ describe('InventarioService', () => {
             item_eliminado_el: null,
           },
         ])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ok' }]);
 
       const res = await service.registrarMovimiento(
@@ -341,6 +430,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -363,6 +453,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }]) // INSERT unidad 2
         .mockResolvedValueOnce([{ cnt: '2' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-s1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined) // INSERT detalle 1
         .mockResolvedValueOnce(undefined); // INSERT detalle 2
@@ -372,6 +463,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'inventario_inicial',
           cantidad: '2',
@@ -396,6 +488,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '3',
@@ -414,6 +507,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-s2' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -422,6 +516,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '1',
@@ -444,6 +539,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-s3' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -452,6 +548,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'venta',
           cantidad: '1',
@@ -477,6 +574,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'venta',
           cantidad: '1',
@@ -496,6 +594,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '1',
@@ -526,6 +625,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-tenant-mutant' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -533,6 +633,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '1',
@@ -562,6 +663,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-item-mutant' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -569,6 +671,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '1',
@@ -593,6 +696,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // INSERT lote
         .mockResolvedValueOnce([{ total: '50' }]) // SUM cantidad_disponible
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -601,6 +705,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '50',
@@ -621,6 +726,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE lote
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l2' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -629,6 +735,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '10',
@@ -650,6 +757,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE lote
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l3' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -658,6 +766,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'venta',
           cantidad: '10',
@@ -684,6 +793,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'venta',
           cantidad: '10',
@@ -703,6 +813,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '10',
@@ -728,6 +839,7 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce(undefined) // UPDATE lote
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-lote-tenant-mutant' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
 
@@ -735,6 +847,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '10',
@@ -761,6 +874,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '2',
@@ -780,6 +894,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'ajuste_manual',
           cantidad: '2',
@@ -796,7 +911,8 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-m1' }]);
 
       await service.registrarMovimiento(
@@ -804,6 +920,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'merma',
           cantidad: '2',
@@ -812,7 +929,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('causa_merma_id');
       expect(insertCall[1]).toContain(CAUSA_MERMA_ID);
     });
@@ -831,6 +948,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'recuento',
           cantidad: '2',
@@ -852,6 +970,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'ajuste_manual',
           cantidad: '2',
@@ -868,7 +987,8 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-r1' }]);
 
       await service.registrarMovimiento(
@@ -876,6 +996,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'recuento',
           cantidad: '2',
@@ -884,7 +1005,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('motivo_diferencia_id');
       expect(insertCall[1]).toContain(MOTIVO_DIFERENCIA_ID);
     });
@@ -900,6 +1021,7 @@ describe('InventarioService', () => {
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ]) // SELECT FOR UPDATE
         .mockResolvedValueOnce(undefined) // UPDATE item_producto stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
 
@@ -908,6 +1030,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -916,15 +1039,15 @@ describe('InventarioService', () => {
         },
       );
 
-      // El INSERT del movimiento (3ª llamada) congela lo PAGADO en el kardex: 4500
-      const insertCall = managerMock.query.mock.calls[2];
+      // El INSERT del movimiento (4ª llamada) congela lo PAGADO en el kardex: 4500
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('costo_unitario');
       expect(insertCall[1]).toContain('4500');
-      // La 4ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
+      // La 5ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
       // con el costo de compra crudo: (10×4000 + 5×4500) / 15 = 4166.6667.
       // Antes del CPP este valor era '4500' (último costo) — ese era el bug.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        4,
+        5,
         expect.stringContaining('costo_actual'),
         ['4166.6667', ITEM_ID],
       );
@@ -935,7 +1058,8 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1b' }]);
 
       await service.registrarMovimiento(
@@ -943,6 +1067,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'ajuste_manual',
           cantidad: '5',
@@ -951,9 +1076,9 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[1]).toContain('4500');
-      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
     });
 
     it.each([['anulacion'], ['devolucion']])(
@@ -971,7 +1096,8 @@ describe('InventarioService', () => {
               costo_actual: '57.1429',
             },
           ])
-          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce(undefined) // UPDATE item_producto
+          .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-rev' }])
           .mockResolvedValueOnce(undefined);
 
@@ -980,6 +1106,7 @@ describe('InventarioService', () => {
           {
             tenantId: TENANT,
             itemId: ITEM_ID,
+            ubicacionId: UBICACION_ID,
             tipo: 'entrada',
             motivo,
             cantidad: '1',
@@ -989,10 +1116,10 @@ describe('InventarioService', () => {
         );
 
         // El kardex congela el costo real de la reposición, no el CPP vigente.
-        expect(managerMock.query.mock.calls[2][1]).toContain('50');
+        expect(managerMock.query.mock.calls[3][1]).toContain('50');
         // (14 × 57,1429 + 1 × 50) / 15 = 56,6667.
         expect(managerMock.query).toHaveBeenNthCalledWith(
-          4,
+          5,
           expect.stringContaining('costo_actual'),
           ['56.6667', ITEM_ID],
         );
@@ -1007,7 +1134,8 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '14', modo_inventario: 'cantidad', costo_actual: '57.1429' },
         ])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-rev2' }]);
 
       await service.registrarMovimiento(
@@ -1015,6 +1143,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'anulacion',
           cantidad: '1',
@@ -1022,7 +1151,7 @@ describe('InventarioService', () => {
         },
       );
 
-      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
     });
 
     it('rechaza costoUnitario negativo', async () => {
@@ -1034,6 +1163,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -1054,7 +1184,8 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-donacion' }])
         .mockResolvedValueOnce(undefined);
 
@@ -1063,6 +1194,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'entrada',
           motivo: 'compra',
           cantidad: '5',
@@ -1073,7 +1205,7 @@ describe('InventarioService', () => {
 
       // (10 × 4000 + 5 × 0) / 15 = 2666,6667.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        4,
+        5,
         expect.stringContaining('costo_actual'),
         ['2666.6667', ITEM_ID],
       );
@@ -1098,6 +1230,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'ajuste',
           motivo: 'ajuste_costo',
           cantidad: '0',
@@ -1118,6 +1251,7 @@ describe('InventarioService', () => {
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4200' },
         ]) // SELECT FOR UPDATE
         .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c2' }]); // INSERT movimiento
 
       await service.registrarMovimiento(
@@ -1125,6 +1259,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           tipo: 'salida',
           motivo: 'venta',
           cantidad: '3',
@@ -1133,9 +1268,9 @@ describe('InventarioService', () => {
       );
 
       // El INSERT congeló el costo vigente (4200) y no hubo UPDATE de costo_actual
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[1]).toContain('4200');
-      expect(managerMock.query).toHaveBeenCalledTimes(3);
+      expect(managerMock.query).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -1214,6 +1349,7 @@ describe('InventarioService', () => {
         {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           usuarioId: USER_ID,
           tipo: 'ajuste',
           motivo: 'ajuste_costo',
@@ -1255,6 +1391,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           usuarioId: USER_ID,
           tipo: 'ajuste',
           motivo: 'ajuste_costo',
@@ -1273,6 +1410,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           usuarioId: USER_ID,
           tipo: 'ajuste',
           motivo: 'ajuste_costo',
@@ -1290,6 +1428,7 @@ describe('InventarioService', () => {
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
           tenantId: TENANT,
           itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
           usuarioId: USER_ID,
           tipo: 'entrada',
           motivo: 'compra',

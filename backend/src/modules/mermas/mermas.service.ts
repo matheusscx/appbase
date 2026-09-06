@@ -19,6 +19,7 @@ import {
 } from '../../common/utils/rango-fecha.util';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { CausasMermaService } from './causas-merma.service';
 import { CreateMermaDto } from './dto/create-merma.dto';
 import { FindMermasDto } from './dto/find-mermas.dto';
@@ -83,6 +84,7 @@ export class MermasService {
     private readonly inventarioService: InventarioService,
     private readonly catalogService: CatalogService,
     private readonly causasService: CausasMermaService,
+    private readonly ubicacionesService: UbicacionesService,
   ) {}
 
   async registrar(
@@ -171,6 +173,7 @@ export class MermasService {
       const mov = await this.inventarioService.registrarMovimiento(manager, {
         tenantId,
         itemId: dto.itemId,
+        ubicacionId: await this.ubicacionesService.localDe(tenantId),
         usuarioId,
         tipo: 'salida',
         motivo: 'merma',

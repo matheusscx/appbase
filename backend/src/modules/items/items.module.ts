@@ -18,6 +18,7 @@ import { DesfasesController } from './desfases.controller';
 import { InventarioModule } from '../inventario/inventario.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { MonedasModule } from '../monedas/monedas.module';
+import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 
 @Module({
   imports: [
@@ -40,6 +41,10 @@ import { MonedasModule } from '../monedas/monedas.module';
     // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
     // ESTE módulo: sin este import el @Body del controller falla en runtime.
     MonedasModule,
+    // `registrarMovimiento` requiere `ubicacionId`: los movimientos de este
+    // service (stock inicial, ajustes, ventas de receta/combo) resuelven el
+    // local del tenant vía `UbicacionesService.localDe`.
+    UbicacionesModule,
   ],
   controllers: [ItemsController, DesfasesController],
   providers: [ItemsService],

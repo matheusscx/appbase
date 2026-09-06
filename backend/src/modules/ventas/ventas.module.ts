@@ -9,6 +9,7 @@ import { PropinasModule } from '../propinas/propinas.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { MonedasModule } from '../monedas/monedas.module';
+import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -51,6 +52,10 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     // Solo para registrar VentasReembolsoHandler en el ReembolsoCallbackRegistry
     // (pasarela nunca importa ventas; el borde se cruza en esta dirección).
     PasarelaModule,
+    // `registrarMovimiento` requiere `ubicacionId`: la venta resuelve el local
+    // del tenant vía `UbicacionesService.localDe` una vez antes del loop de
+    // líneas.
+    UbicacionesModule,
   ],
   controllers: [VentasController, TiposDocumentoController],
   providers: [VentasService, VentasReembolsoHandler],

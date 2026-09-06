@@ -25,6 +25,7 @@ import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
@@ -304,6 +305,7 @@ export class ItemsService {
     private readonly db: Db,
     private readonly inventarioService: InventarioService,
     private readonly catalogService: CatalogService,
+    private readonly ubicacionesService: UbicacionesService,
   ) {}
 
   private readonly BASE_QUERY = `
@@ -1318,6 +1320,7 @@ export class ItemsService {
               {
                 tenantId,
                 itemId,
+                ubicacionId: await this.ubicacionesService.localDe(tenantId),
                 usuarioId,
                 tipo: 'entrada',
                 motivo: 'inventario_inicial',
@@ -1337,6 +1340,7 @@ export class ItemsService {
             {
               tenantId,
               itemId,
+              ubicacionId: await this.ubicacionesService.localDe(tenantId),
               usuarioId,
               tipo: 'entrada',
               motivo: 'inventario_inicial',
@@ -1359,6 +1363,7 @@ export class ItemsService {
               {
                 tenantId,
                 itemId,
+                ubicacionId: await this.ubicacionesService.localDe(tenantId),
                 usuarioId,
                 tipo: 'entrada',
                 motivo: 'inventario_inicial',
@@ -1908,6 +1913,7 @@ export class ItemsService {
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId,
+            ubicacionId: await this.ubicacionesService.localDe(tenantId),
             usuarioId,
             tipo: 'ajuste',
             motivo: 'ajuste_costo',
@@ -2899,6 +2905,7 @@ export class ItemsService {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
           itemId,
+          ubicacionId: await this.ubicacionesService.localDe(tenantId),
           usuarioId,
           tipo: dto.tipo,
           motivo: dto.motivo,
@@ -3781,6 +3788,13 @@ export class ItemsService {
        * de unidades se releía por cada uno.
        */
       convertir?: ConvertirUnidad;
+      /**
+       * Ubicación ya resuelta. Mismo motivo que `convertir`: los tres
+       * llamadores (venta directa de receta, combo, grupo de modificadores)
+       * expanden un componente/opción por iteración de su propio loop —sin
+       * esto, `localDe` se releía una vez por receta dentro de ese loop.
+       */
+      ubicacionLocalId?: string;
     },
   ): Promise<string[]> {
     const convertir =
@@ -3813,6 +3827,14 @@ export class ItemsService {
         recetaNombre: params.recetaNombre,
       });
 
+    // Resuelto UNA vez antes del loop: `localDe` por ingrediente sería una
+    // consulta por línea de receta, N+1 en el camino más caliente del sistema.
+    // Si el llamador ya lo resolvió para su propio loop (combo, grupo), se
+    // reusa — ver el docblock de `ubicacionLocalId` más arriba.
+    const ubicacionLocalId =
+      params.ubicacionLocalId ??
+      (await this.ubicacionesService.localDe(params.tenantId));
+
     for (const ing of todosIngredientes) {
       const cantidadPorReceta = new Decimal(ing.cantidad)
         .mul(params.cantidadVendida)
@@ -3826,6 +3848,7 @@ export class ItemsService {
       const movimientoParams = {
         tenantId: params.tenantId,
         itemId: ing.ingredienteItemId,
+        ubicacionId: ubicacionLocalId,
         tipo: 'salida' as const,
         motivo: 'venta',
         cantidad: cantidadConvertida,
@@ -3868,6 +3891,7 @@ export class ItemsService {
         ventaId: params.ventaId,
         cantidadVendida: params.cantidadVendida,
         convertir,
+        ubicacionLocalId,
       },
       params.snapshot?.grupos,
     );
@@ -3895,6 +3919,13 @@ export class ItemsService {
       snapshot?: PersonalizacionRecetaSnapshot;
       /** Ver `venderIngredientesReceta`. */
       convertir?: ConvertirUnidad;
+      /**
+       * Ubicación ya resuelta. Mismo motivo que `convertir`: `ventas.service.ts`
+       * ya la resolvió una vez para su propio loop (`ordenLocks`) antes de
+       * llamar acá — sin esto, una venta con más de un combo releía `localDe`
+       * una vez por combo.
+       */
+      ubicacionLocalId?: string;
     },
   ): Promise<string[]> {
     // Una sola lectura del catálogo para TODO el combo: es el peor caso de la
@@ -3922,6 +3953,13 @@ export class ItemsService {
     // Componentes que no se sirvieron: sus grupos de modificadores tampoco
     // deben descontarse (ver el filtro de `gruposComponentes` más abajo).
     const componentesOmitidos = new Set<string>();
+    // Resuelto UNA vez antes del loop: `localDe` por componente sería una
+    // consulta por línea de combo, N+1 en el camino más caliente del sistema.
+    // Si el llamador ya lo resolvió para su propio loop (`ventas.service.ts`),
+    // se reusa — ver el docblock de `ubicacionLocalId` más arriba.
+    const ubicacionLocalId =
+      params.ubicacionLocalId ??
+      (await this.ubicacionesService.localDe(params.tenantId));
 
     for (const comp of componentes) {
       const cantidadTotal = new Decimal(comp.cantidad)
@@ -3967,6 +4005,7 @@ export class ItemsService {
             recetaNombre: comp.componente_nombre,
             cantidadVendida: cantidadTotal,
             convertir,
+            ubicacionLocalId,
           });
           advertencias.push(...adv);
         } catch (error) {
@@ -3990,6 +4029,7 @@ export class ItemsService {
       const movimientoParams = {
         tenantId: params.tenantId,
         itemId: comp.componente_item_id,
+        ubicacionId: ubicacionLocalId,
         tipo: 'salida' as const,
         motivo: 'venta',
         cantidad: cantidadTotal,
@@ -4031,6 +4071,7 @@ export class ItemsService {
         ventaId: params.ventaId,
         cantidadVendida: params.cantidadVendida,
         convertir,
+        ubicacionLocalId,
       },
       params.snapshot?.grupos,
     );
@@ -4056,6 +4097,7 @@ export class ItemsService {
           ventaId: params.ventaId,
           cantidadVendida: params.cantidadVendida,
           convertir,
+          ubicacionLocalId,
         },
         gruposComponentes,
       );
@@ -4078,8 +4120,10 @@ export class ItemsService {
       usuarioId: string | null;
       ventaId: string;
       cantidadVendida: string;
-      /** Requerido: los dos llamadores ya lo tienen cargado. */
+      /** Requerido: los tres llamadores ya lo tienen cargado. */
       convertir: ConvertirUnidad;
+      /** Requerido: los tres llamadores ya lo tienen cargado (ver `venderIngredientesReceta`). */
+      ubicacionLocalId: string;
     },
     grupos: SnapshotGrupo[] | undefined,
   ): Promise<void> {
@@ -4094,6 +4138,13 @@ export class ItemsService {
     const opciones = (grupos ?? [])
       .flatMap((g) => g.opciones)
       .sort((a, b) => a.itemId.localeCompare(b.itemId));
+    // `ubicacionLocalId` viaja en `params`, ya resuelto por el llamador: los
+    // tres (`venderIngredientesReceta`, `venderComponentesCombo` ×2) ya lo
+    // tienen antes de llegar acá, y esta función puede correr más de una vez
+    // por venta (una por receta/combo) — resolverlo acá adentro sería
+    // `localDe` una vez por invocación, N+1 en el camino más caliente del
+    // sistema.
+    const { ubicacionLocalId } = params;
     for (const op of opciones) {
       const rows: { tipo: string; unidad_medida: string | null }[] =
         await manager.query(
@@ -4123,6 +4174,7 @@ export class ItemsService {
           recetaNombre: op.nombre,
           cantidadVendida: cantidadTotal,
           convertir: params.convertir,
+          ubicacionLocalId,
         });
         continue;
       }
@@ -4135,6 +4187,7 @@ export class ItemsService {
       await this.inventarioService.registrarMovimiento(manager, {
         tenantId: params.tenantId,
         itemId: op.itemId,
+        ubicacionId: ubicacionLocalId,
         tipo: 'salida',
         motivo: 'venta',
         cantidad: cantidadSalida,

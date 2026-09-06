@@ -34,6 +34,7 @@ import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asigna
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -182,6 +183,7 @@ export class VentasService {
     private readonly ventaPropinaService: VentaPropinaService,
     private readonly catalogService: CatalogService,
     private readonly garzonesService: GarzonesService,
+    private readonly ubicacionesService: UbicacionesService,
   ) {}
 
   /**
@@ -859,6 +861,10 @@ export class VentasService {
     // línea ya se leía una sola vez, pero un pedido de dos platos distintos lo
     // leía dos veces.
     let convertir: ConvertirUnidad | undefined;
+    // Resuelto UNA vez antes del loop: `localDe` adentro de cada iteración
+    // sería una consulta por línea de venta, N+1 en el camino más caliente
+    // del sistema.
+    const ubicacionLocalId = await this.ubicacionesService.localDe(tenantId);
     for (const i of ordenLocks) {
       const { item, linea, personalizacion, cantidadCanonica } =
         lineasConversion[i];
@@ -866,6 +872,7 @@ export class VentasService {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
           itemId: item.id,
+          ubicacionId: ubicacionLocalId,
           tipo: 'salida',
           motivo: 'venta',
           cantidad: cantidadCanonica,
@@ -886,6 +893,7 @@ export class VentasService {
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
             convertir,
+            ubicacionLocalId,
           });
         advertencias.push(...advertenciasIngrediente);
       } else if (item.tipo === 'combo') {
@@ -900,6 +908,7 @@ export class VentasService {
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
             convertir,
+            ubicacionLocalId,
           });
         advertencias.push(...advertenciasComponente);
       }
@@ -1264,10 +1273,16 @@ export class VentasService {
         const costos = salidas.length
           ? await this.costosDeSalidaPorItem(manager, params.ventaId)
           : new Map<string, string | null>();
+        // Resuelto UNA vez antes del loop: `localDe` por línea repuesta sería
+        // una consulta por ítem de la venta anulada, N+1.
+        const ubicacionLocalId = salidas.length
+          ? await this.ubicacionesService.localDe(params.tenantId)
+          : null;
         for (const s of salidas) {
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId: params.tenantId,
             itemId: s.item_id,
+            ubicacionId: ubicacionLocalId!,
             tipo: 'entrada',
             motivo: 'anulacion',
             cantidad: s.cantidad,
@@ -1915,10 +1930,16 @@ export class VentasService {
       const costosOriginales = aReponer.length
         ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
         : new Map<string, string | null>();
+      // Resuelto UNA vez antes del loop: `localDe` por línea sería una
+      // consulta por línea devuelta, N+1.
+      const ubicacionLocalId = aReponer.length
+        ? await this.ubicacionesService.localDe(params.tenantId)
+        : null;
       for (const linea of aReponer) {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
           itemId: linea.itemId,
+          ubicacionId: ubicacionLocalId!,
           tipo: 'entrada',
           motivo: 'devolucion',
           cantidad: linea.cantidad,
@@ -2095,10 +2116,16 @@ export class VentasService {
         manager,
         params.ventaOriginalId,
       );
+      // Resuelto UNA vez antes del loop: `localDe` por línea sería una
+      // consulta por línea devuelta, N+1.
+      const ubicacionLocalId = lineas.length
+        ? await this.ubicacionesService.localDe(params.tenantId)
+        : null;
       for (const linea of lineas) {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
           itemId: linea.itemId,
+          ubicacionId: ubicacionLocalId!,
           tipo: 'entrada',
           motivo: 'devolucion',
           cantidad: linea.cantidad,

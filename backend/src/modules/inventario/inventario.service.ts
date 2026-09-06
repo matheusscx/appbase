@@ -20,6 +20,7 @@ import {
 } from '../../common/utils/pagination.util';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import { CatalogService } from '../catalog/catalog.service';
+import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 import {
@@ -45,6 +46,12 @@ export interface LoteInput {
 export interface RegistrarMovimientoParams {
   tenantId: string;
   itemId: string;
+  /**
+   * Dónde ocurre el movimiento. Obligatorio y sin default: un default
+   * silencioso mete stock en el local cada vez que un llamador se olvide de
+   * pasarlo, y el olvido es invisible en un tenant de una sola ubicación.
+   */
+  ubicacionId: string;
   tipo: 'entrada' | 'salida' | 'ajuste';
   motivo: string;
   cantidad: string;
@@ -109,6 +116,7 @@ export class InventarioService {
     private readonly movimientoRepo: Repository<MovimientoInventario>,
     private readonly db: Db,
     private readonly catalogService: CatalogService,
+    private readonly ubicacionesService: UbicacionesService,
   ) {}
 
   async registrarMovimiento(
@@ -126,6 +134,10 @@ export class InventarioService {
     costoActualPrevio: string | null;
     costoActual: string | null;
   }> {
+    if (!params.ubicacionId) {
+      throw new BadRequestException('El movimiento necesita una ubicación');
+    }
+
     // `item_producto` no tiene `tenant_id`: es una extensión de `items` con PK
     // compartida, así que el tenant vive en el padre (ver `docs/patterns/backend.md`
     // § "Tablas sin tenant_id"). El JOIN es la única forma de acotarlo acá — y este
@@ -309,14 +321,15 @@ export class InventarioService {
 
     const insertRows: { movimiento_id: string }[] = await manager.query(
       `INSERT INTO movimientos_inventario
-         (tenant_id, item_id, tipo, motivo, cantidad,
+         (tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
           costo_unitario, costo_anterior, causa_merma_id, motivo_diferencia_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING movimiento_id`,
       [
         params.tenantId,
         params.itemId,
+        params.ubicacionId,
         params.tipo,
         params.motivo,
         cantidad.toString(),
@@ -450,6 +463,7 @@ export class InventarioService {
       const mov = await this.registrarMovimiento(manager, {
         tenantId,
         itemId: dto.itemId,
+        ubicacionId: await this.ubicacionesService.localDe(tenantId),
         usuarioId,
         tipo: 'ajuste',
         motivo: 'ajuste_costo',
@@ -535,6 +549,16 @@ export class InventarioService {
       [stockResultante.toString(), params.itemId],
     );
 
+    // EXPANDIR (Tarea 2 del plan de bodegas): se escriben las dos tablas
+    // mientras los lectores se mudan. `item_producto.stock` se borra en la
+    // Tarea 4 y este comentario se va con él.
+    await manager.query(
+      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+      [params.itemId, params.ubicacionId, stockResultante.toString()],
+    );
+
     return { stockResultante };
   }
 
@@ -579,6 +603,7 @@ export class InventarioService {
         manager,
         params.itemId,
         params.tenantId,
+        params.ubicacionId,
       );
 
       return { stockResultante, unidadIds };
@@ -642,6 +667,7 @@ export class InventarioService {
         manager,
         params.itemId,
         params.tenantId,
+        params.ubicacionId,
       );
 
       return { stockResultante, unidadIds };
@@ -704,6 +730,7 @@ export class InventarioService {
       const stockResultante = await this.recalcularStockLote(
         manager,
         params.itemId,
+        params.ubicacionId,
       );
 
       return { stockResultante, loteId };
@@ -752,6 +779,7 @@ export class InventarioService {
         const stockResultante = await this.recalcularStockLote(
           manager,
           params.itemId,
+          params.ubicacionId,
         );
 
         return { stockResultante, loteConsumos };
@@ -787,6 +815,7 @@ export class InventarioService {
       const stockResultante = await this.recalcularStockLote(
         manager,
         params.itemId,
+        params.ubicacionId,
       );
 
       return { stockResultante, loteId };
@@ -801,6 +830,7 @@ export class InventarioService {
     manager: EntityManager,
     itemId: string,
     tenantId: string,
+    ubicacionId: string,
   ): Promise<Decimal> {
     const rows: { cnt: string }[] = await manager.query(
       `SELECT COUNT(*) AS cnt FROM item_unidad
@@ -813,12 +843,23 @@ export class InventarioService {
       `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
       [nuevo.toString(), itemId],
     );
+    // EXPANDIR (Tarea 2 del plan de bodegas): se escriben las dos tablas
+    // mientras los lectores se mudan. `item_producto.stock` se borra en la
+    // Tarea 4 y este comentario se va con él. El saldo que se upsertea acá es
+    // el recalculado (el COUNT de arriba), nunca una suma propia.
+    await manager.query(
+      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+      [itemId, ubicacionId, nuevo.toString()],
+    );
     return nuevo;
   }
 
   private async recalcularStockLote(
     manager: EntityManager,
     itemId: string,
+    ubicacionId: string,
   ): Promise<Decimal> {
     const rows: { total: string }[] = await manager.query(
       `SELECT COALESCE(SUM(cantidad_disponible), 0) AS total
@@ -830,6 +871,16 @@ export class InventarioService {
     await manager.query(
       `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
       [nuevo.toString(), itemId],
+    );
+    // EXPANDIR (Tarea 2 del plan de bodegas): se escriben las dos tablas
+    // mientras los lectores se mudan. `item_producto.stock` se borra en la
+    // Tarea 4 y este comentario se va con él. El saldo que se upsertea acá es
+    // el recalculado (el SUM de arriba), nunca una suma propia.
+    await manager.query(
+      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
+      [itemId, ubicacionId, nuevo.toString()],
     );
     return nuevo;
   }
