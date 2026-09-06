@@ -17,6 +17,130 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El cobro ya confirmado y en vuelo que no se enteraba de la fusión (cerrado 2026-09-06)
+
+Sale de [`pendientes.md` § 2](pendientes.md), donde había quedado con una medición pedida —*"si
+alcanza con avisar o si el cierre en vuelo tiene que cancelarse antes de salir"*—. **La medición
+contestó: avisar no alcanza.**
+
+### Lo que la entrada pedía medir, y lo que salió
+
+La entrada describía la mitad de **origen**: la fusión deja esa cuenta `cancelada`, el `POST`
+sale igual y el backend rechaza con *"La cuenta no está abierta"* con el PIN ya tecleado. Feo,
+pero el garzón lee algo — de ahí la duda de si con un aviso mejor bastaba.
+
+La mitad de **destino** no estaba en la entrada, y es la que decide. Esa cuenta **conserva su
+id y sigue abierta**, así que no rebota nada: el cierre entra bien y `salones.service.ts` arma
+la venta con **todas** las líneas vivas —las suyas más las que la fusión le plegó— contra los
+pagos que el garzón tipeó mirando el total de antes. Nadie valida que los pagos cubran el total
+(`pagada_parcial` es un estado legítimo), o sea que **cobra de menos, en silencio y con toast
+verde**. Ahí no hay rechazo que leer, así que un aviso no cubre nada: el cierre se cancela
+antes de salir.
+
+Las dos mitades quedaron medidas con test, no razonadas: con el guard borrado, el de origen da
+`cierres=["cuenta-10"]` —la sonda que la entrada ya traía— y el de destino `cierres=["cuenta-9"]`.
+
+### El arreglo
+
+Una marca nueva, `cobroEnVueloId`, que es el tercer tramo del mismo reloj que ya tenía dos: el
+modal abierto (`cobroCuenta`), el tap que espera su cálculo (`cobroPedidoId`) y ahora el cobro
+ya confirmado con el PIN que espera el flush. Existe porque en ese tramo la cuenta vive **solo
+en el argumento `cobro`** de `cerrarCuentaConPin` y nadie de afuera podía leerla — que es
+exactamente lo que la entrada decía que faltaba saber.
+
+- Se arma en `confirmarCobro`, junto a `submitting`, y se apaga con él (más el `onCancelar` del
+  teclado de PIN).
+- `fusionarSeleccionadas` la **anula** si esa cuenta entró en la fusión — y solo eso. Lo hace en
+  un `if` **propio**, no encadenado con el del cobro abierto/pedido: son cobros distintos y
+  pueden estar vivos a la vez (ver más abajo, *"el cobro pedido que tapaba al cierre"*).
+- `cerrarCuentaConPin` no manda el `POST` sin ella, y **es el que avisa**: *"El cobro no salió:
+  esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada."*
+
+⚠️ **Que el aviso lo dé el guard y no la fusión es al revés que en los otros dos tramos, y la
+razón la levantó la segunda revisión independiente:** acá el cierre y la fusión viajan **en
+paralelo**, así que la respuesta de la fusión puede volver con el `POST` ya despachado. Avisando
+desde allá, ese garzón leería *"el cobro no salió"* con el cobro saliendo — que es justo el error
+que este archivo evita en los otros dos tramos (*"un aviso que no describe lo que pasó es peor
+que no avisar"*). El guard es el único punto donde se sabe que el `POST` **no llegó a salir**.
+
+⚠️ **La marca NO se re-arma al entrar a `cerrarCuentaConPin`**, aunque la simetría con
+`submitting` lo pida: la fusión pudo anularla durante el `await flushPendientes()` que corre
+**antes** de esa llamada, y re-armarla ahí pisaría justo eso. La arma quien abre el tramo.
+
+**El costo es el que el owner ya tomó el 2026-09-05** para el cobro que todavía se estaba
+armando: los pagos cargados se pierden y se vuelven a tipear sobre la fusionada. Acá no es una
+decisión nueva, es el mismo trato un tramo más adelante — y la alternativa medida es cobrar de
+menos.
+
+### La ventana que queda, dicha
+
+El reintento del `catch` (`toastErrorOperativo`, que solo dispara cuando el error es de sesión
+de trabajo) re-arma la marca por su cuenta. Una fusión que aterrice **entre el fallo y el
+reintento** no ve ningún cobro en vuelo que anular, así que ese reintento sale igual. Es el
+estado de antes de este guard, acotado a ese tramo.
+
+⚠️ **Ese tramo NO lo acota el modal de turno**, que es como se escribió primero y lo refutó la
+revisión independiente leyendo el código: `abrirEntrarTurno` corta sin abrir nada si no hay
+turnos activos o si `turnosApi.listar()` falla, y `accionPendiente` queda armado igual —solo lo
+limpian `cancelarEntrarTurno` y un inicio de sesión que funcione—. O sea que el garzón puede
+quedarse con la pantalla entera usable, fusionar, y entrar a turno más tarde: ahí dispara el
+reintento.
+
+### El cobro pedido que tapaba al cierre, y por qué las marcas se miran por separado
+
+La primera versión preguntaba por los tres tramos en **una sola cadena**
+(`cobroCuenta ?? cobroPedidoId ?? cobroEnVueloId`) y decidía el tramo por descarte. La quinta
+revisión independiente lo midió y no cierra: **el reintento del `catch` arma la marca del cierre
+en vuelo FUERA del gate del botón**, así que puede haber un cobro **pedido** y un **cierre en
+vuelo** a la vez —el garzón vuelve a tocar *Cerrar y cobrar* mientras la sesión de turno viaja—.
+Con la cadena, el pedido ganaba y **enmascaraba** al cierre: la fusión avisaba por el pedido, no
+anulaba nada, y el `POST` del reintento salía igual sobre la cuenta ya fusionada. Sonda de esa
+medición: `cierres=["cuenta-9","cuenta-9"]` con la 9 fusionada y toast verde — el cobro de menos
+de la DESTINO, que es lo que este frente entero viene a evitar.
+
+El arreglo es que **son dos preguntas, no una**: un `if` para el cobro abierto/pedido (que avisa)
+y otro para el cierre en vuelo (que anula). Tiene su test, y el mutante que reencadena las dos lo
+mata.
+
+⚠️ **Y una nota de método, porque costó tres rondas:** antes de eso, este mismo lugar decía que el
+`:loading="abriendoCobro || submitting"` del botón hacía imposible la convivencia. Era falso —el
+reintento no pasa por ese botón—, y antes de eso la nota describía el modo de falla **al revés**
+(decía que el cierre moriría en silencio, cuando lo que hacía era salir igual). Las dos
+redacciones se escribieron razonando; la que quedó, midiendo.
+
+### Los mutantes
+
+Seis tests nuevos en `index.nuxt.spec.ts`: origen, destino, el control de una fusión de otras
+cuentas, el del cierre **ya despachado** —que fija de qué lado va el aviso, y lo pidió la tercera
+revisión: sin él, devolverle el toast a la fusión salía verde—, el del **cobro pedido que tapaba
+al cierre** (quinta revisión) y el **control del reintento** (séptima: sin él, borrar el re-armado
+de la marca dejaba a todo cierre rebotado por turno sin poder cobrar, con un toast que nombra una
+fusión que no ocurrió, y la suite entera en verde). Corridos sobre la suite del archivo (102 tests):
+
+| Mutante | Rojos |
+|---|---|
+| Borrar el guard entero (aviso + `return`) | 3 — origen, destino y el del enmascaramiento |
+| Dejarle el aviso y sacarle el `return` | los mismos 3, y **por `cierres`, no por el toast** |
+| Anular la marca siempre, sin mirar si la fusión se llevó esa cuenta | 1 — solo el control |
+| Volver a encadenar las dos marcas (`!cobroTocado && …`) | 1 — solo el del enmascaramiento |
+| No armar la marca en `confirmarCobro` | 9 — 5 previos + los 4 nuevos que no son del guard; **ninguno de los dos del guard** |
+| Devolverle el aviso a la fusión en el tramo en vuelo | 1 — solo el del cierre ya despachado |
+| Que el reintento no re-arme la marca | 1 — solo el control del reintento |
+
+⚠️ **La quinta fila es la que hay que leer con cuidado:** sin marca el guard corta **todos** los
+cierres, así que los dos tests del guard pasan —por el motivo equivocado: el `POST` no sale porque
+no sale nunca—. Lo que lo caza son los 9 de la fila: 5 tests previos y los 4 nuevos que no son
+del guard. ⚠️ Acá decía *"más los tres nuevos"*, que daba 8 y no cerraba con su propia fila; el
+cuarto —el del enmascaramiento— cae por su primer cierre, no por el que termina cobrando.
+
+⚠️ **Y la tabla se midió TRES veces.** La primera estaba escrita antes de que existiera el cuarto
+test y dos filas quedaron cortas; la segunda quedó vieja cuando el quinto test y su arreglo
+cambiaron el código. Las dos las cazaron revisiones independientes corriendo los mutantes. La
+regla que deja: **una tabla de mutantes se remide entera cada vez que se toca el código o se
+agrega un test**, no solo en la fila de lo que cambió.
+
+---
+
 ## Las otras seis tablas del mismo request (cerrado 2026-09-06)
 
 Sale de [`pendientes.md` § 2](pendientes.md), la entrada que abrió el cierre de acá abajo unas
@@ -388,7 +512,14 @@ lo que faltaba:
 ⚠️ **Y el alcance, medido y dicho: llega hasta el *Confirmar*, no más allá.** Un cobro que el garzón
 ya confirmó con su PIN y está en vuelo —`cerrarCuentaConPin` espera el flush y el cálculo antes de
 mandar el `POST`— **no** se entera de la fusión: el `POST` sale y, si la cuenta era de origen, el
-backend lo rechaza. La ventana es preexistente y quedó anotada ([`pendientes.md` § 2](pendientes.md)).
+backend lo rechaza. La ventana es preexistente y quedó anotada.
+
+  ⚠️ **Actualizado el 2026-09-06: ese alcance ya no es el de hoy.** Ese cierre en vuelo **se
+  cancela antes de salir** — ver *"El cobro ya confirmado y en vuelo que no se enteraba de la
+  fusión"*, más arriba en este archivo. El párrafo de acá queda como estaba porque describe lo que
+  se midió ese día, que es lo que este archivo registra; lo que se corrige es el puntero, porque la
+  entrada de `pendientes.md` que nombraba ya no existe.
+
 Lo que cambió es que antes salía un aviso por accidente —el `cobroCuenta` rancio— y ese aviso
 **no describía lo que pasaba**: mandaba a *"cobrarla desde la fusionada"* un cobro que ya estaba
 confirmado y en vuelo. Sacarlo no es perder cobertura, es dejar de afirmar algo falso.

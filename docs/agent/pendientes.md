@@ -166,30 +166,33 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **Un cobro ya confirmado y en vuelo no se entera de que la fusión anuló su cuenta**
-  (frontend; **medido con sonda el 2026-09-06** por la revisión del cierre de la fusión) —
-  **preexistente**: la ventana existía antes del frente que cerró el modal de cobro.
+- [ ] **El reintento de un cierre fallado no se entera de una fusión que aterrizó mientras
+  tanto** (frontend; **medido el 2026-09-06** por la revisión del cierre del cobro en vuelo) —
+  es el residuo declarado de ese cierre, no un descubrimiento nuevo.
 
-  Entre el *Confirmar* con PIN y el `POST /cuentas/:id/cerrar` hay dos esperas —`flushPendientes()`
-  y el `asegurarVigente()` de `cerrarCuentaConPin`—, y **las dos son condicionales**: la primera
-  solo espera si quedó una edición de cantidad a medio guardar o en vuelo; la segunda solo pega al
-  servidor si el carrito dejó de estar vigente, y saliendo de `abrirCobro` lo está. Sin edición
-  pendiente la cadena es puro microtask y **no hay ventana** — quien la mida en el caso simple va a
-  concluir que no existe—. Con ella sí: si la fusión aterriza en ese tramo y la cuenta cobrada era
-  de **origen**, el `POST` sale igual contra una cuenta que el servidor dejó `cancelada` y vuelve
-  *"La cuenta no está abierta"*, con el PIN ya tecleado. Sonda: `cierres=["cuenta-10"]` con la 10 ya
-  anulada.
+  El guard de `cerrarCuentaConPin` no manda el `POST` si la fusión anuló la marca del cobro en
+  vuelo. El reintento del `catch` —el que ofrece `toastErrorOperativo` cuando el error es de
+  sesión de trabajo— **arma su propia marca**, así que una fusión que aterrice **entre el fallo
+  y el reintento** no encuentra ningún cobro en vuelo que anular y ese reintento sale igual, con
+  el cobro-de-menos de la cuenta destino incluido.
 
-  ⚠️ **Ojo con el arreglo fácil, porque ya se midió falso:** antes del `watch` que limpia la foto
-  del cobro, ese caso **sí** disparaba el aviso de la fusión — pero por un `cobroCuenta` que nadie
-  limpiaba, y mandando a *"cobrarla desde la fusionada"* un cobro que ya estaba confirmado y en
-  vuelo. Mirar ese ref no resuelve nada. Lo que hace falta saber es **de qué cuenta** es el cierre en
-  vuelo: que lo *haya* ya se sabe —desde el 2026-09-06 `submitting` se prende en `confirmarCobro`,
-  así que cubre el tramo entero, flush incluido— pero la cuenta vive solo en el argumento `cobro`,
-  que no es un ref y nadie de afuera puede leer.
+  ⚠️ **Y ese tramo no lo acota el modal de turno**, que es lo primero que uno supone:
+  `abrirEntrarTurno` corta sin abrir nada si no hay turnos activos o si `turnosApi.listar()`
+  falla, y `accionPendiente` queda armado igual —solo lo limpian `cancelarEntrarTurno` y un
+  inicio de sesión que funcione—. O sea que el garzón puede quedarse con la pantalla entera
+  usable, fusionar, y entrar a turno más tarde: ahí dispara.
 
-  **Lo que falta medir**: si alcanza con avisar (el garzón va a leer el rechazo igual) o si el
-  cierre en vuelo tiene que cancelarse antes de salir.
+  ⚠️ **Y tiene una segunda mitad, que es conducta NUEVA del guard** (la levantó la revisión): si
+  el garzón confirma un **segundo** cobro sobre otra cuenta mientras el reintento está pendiente,
+  el reintento **pisa la marca** con la cuenta vieja y el guard cancela ese segundo cierre con el
+  aviso *"esa cuenta entró en la fusión"*, que ahí es falso. Antes de este frente ese segundo
+  `POST` salía. Pide que las esperas del segundo cobro sobrevivan al flujo entero de entrar a
+  turno, y en esa misma escena el `submitting` compartido ya se pisaba —eso sí es anterior—.
+
+  **Lo que falta medir antes de arreglarlo**: si el reintento tiene que revalidar la cuenta
+  contra el listado, si alcanza con que la fusión limpie `accionPendiente` cuando se lleva esa
+  cuenta, o si la marca tiene que ser por intento en vez de compartida —que es lo que cerraría
+  las dos mitades de una—.
 
 - [ ] **La venta que se cierra sin cálculo queda sin boleta, y la caja se proyecta inflada por
   el vuelto** (frontend; **medido el 2026-09-05** por la revisión del cierre de la quinta

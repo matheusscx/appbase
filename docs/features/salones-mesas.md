@@ -649,11 +649,40 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   en silencio — o peor, en la mitad destino: como conserva su id, el guard de identidad de
   `abrirCobro` no cortaba y el modal abría con el total de antes de absorber las otras líneas. Lo
   que lo cierra ahí es que la fusión **anula la marca de ese cobro pedido** — no un id que cambie.
+
   ⚠️ **El aviso lo da la fusión, que sabe lo que pasó**, y no el guard de `abrirCobro`: las dos
   veces que se intentó deducirlo salió mal —*"la cuenta ya no está en el listado"* le decía
   *"se fusionó"* al garzón que acababa de **cancelarla él mismo**, y *"`cobroCuenta` apunta a
   algo"* avisaba de un cobro que el garzón ya había cerrado, porque ese ref no lo limpiaba nadie
   (ahora lo tira un `watch` cuando el modal cierra).
+
+  📌 **Y desde el 2026-09-06 alcanza también al cobro que el garzón YA confirmó con su PIN y
+  está en vuelo**, que es el tercer tramo del mismo reloj: entre el *Confirmar* y el `POST`
+  hay dos esperas —el flush de lo pendiente y el cálculo— y basta con una edición de cantidad a
+  medio guardar para que la primera sea de red. Ahí **no alcanza con avisar**, y eso está
+  medido: en la cuenta de origen el cierre rebota y el garzón al menos lee un rechazo, pero en
+  la **destino** no rebota nada —conserva su id y sigue abierta—, así que el cierre entra bien
+  y la venta se arma con todas las líneas que la fusión le plegó contra los pagos del total de
+  antes. Nadie valida que los pagos cubran el total (`pagada_parcial` es legítimo): **cobra de
+  menos, en silencio y con toast verde**. Por eso ese cierre se **cancela antes de salir**. La
+  marca que lo permite es `cobroEnVueloId`, que existe porque en ese tramo la cuenta vive solo en
+  el argumento de `cerrarCuentaConPin` y nadie de afuera podía leerla.
+
+  ⚠️ **Y acá el aviso NO lo da la fusión**, al revés que en el ⚠️ de arriba: en este tramo el
+  cierre viaja en paralelo con ella, así que lo da el guard de `cerrarCuentaConPin`, el único
+  punto donde se sabe que el `POST` no llegó a salir. Avisando desde la fusión, una respuesta que
+  vuelve con el cierre ya despachado diría *"el cobro no salió"* con el cobro saliendo.
+
+  ⚠️ **La ventana que queda:** una fusión que aterrice entre un cierre fallado y su reintento
+  —el que ofrece el error de sesión de trabajo— no ve ningún cobro en vuelo que anular, así que
+  ese reintento sale igual. **Y ese tramo no lo acota el modal de turno**: `abrirEntrarTurno`
+  no abre nada si no hay turnos activos o si la carga falla, y la acción pendiente queda armada
+  igual, con la pantalla entera usable — el garzón puede fusionar y entrar a turno después.
+  ⚠️ **Y esa ventana tiene una segunda mitad que es conducta nueva:** si el garzón confirma un
+  **segundo** cobro sobre otra cuenta mientras ese reintento está pendiente, el reintento pisa la
+  marca con la cuenta vieja y el guard cancela **ese segundo cierre**, con un aviso que ahí es
+  falso. Antes de este frente ese `POST` salía. Las dos mitades, con lo que falta medir para
+  cerrarlas, en [`../agent/pendientes.md`](../agent/pendientes.md) § 2.
 - **Lo que la acción DESCARTA mira de qué cuenta es cada edición**, no vacía todo: cancelar tira
   lo de su cuenta, fusionar lo de **todas** las que entraron a la fusión —incluida la destino, y
   también las líneas de la destino que la fusión no tocó: se descarta por cuenta, no por línea,
@@ -752,15 +781,21 @@ total de la cuenta"* nombra una cuenta que el garzón ya dejó, en una pantalla 
 haber ninguna abierta. Es el mismo criterio del resto del archivo: lo que se pinta se condiciona
 a seguir parado donde se pidió.
 
-📌 **Y una fusión que aterriza tarde tiene DOS momentos, los dos contestados por el owner el
-2026-09-05** (el segundo apareció midiendo el primero): con el **modal ya abierto** y con el cobro
-**todavía calculándose**. Los dos se resuelven en el mismo lugar —ver el bullet *"lo que la acción
+📌 **Y una fusión que aterriza tarde tiene TRES momentos**, que aparecieron en ese orden y cada
+uno midiendo el anterior: con el **modal ya abierto** y con el cobro **todavía calculándose** —los
+dos contestados por el owner el 2026-09-05—, y con el cobro **ya confirmado con PIN y en vuelo**,
+cerrado el 2026-09-06. Los tres se deciden en el mismo lugar —ver el bullet *"lo que la acción
 CIERRA"* más arriba—, y ese lugar es `fusionarSeleccionadas` y no el guard de `abrirCobro`: el guard
 corta **mudo**, porque desde ahí *"por qué desapareció la cuenta"* hay que deducirlo, y la deducción
 salió mal. El aviso es **del cobro, no de dónde está parado el garzón**: irse solo a otra cuenta no dispara
 nada, pero si además la fusión se llevó la cuenta que él había mandado a cobrar, el aviso sale
-igual —medido—. Y lo que **no** alcanza es el cobro ya confirmado con PIN y en vuelo: ése sale y
-rebota (`../agent/pendientes.md` § 2).
+igual —medido—.
+
+⚠️ **El tercero se decide ahí pero NO avisa desde ahí**, y es la excepción que conviene tener
+presente: en ese tramo el cierre ya viaja en paralelo con la fusión, así que el aviso lo da el
+guard de `cerrarCuentaConPin`, que es el único punto donde se sabe que el `POST` **no llegó a
+salir**. Avisando desde la fusión, una respuesta que vuelve con el cierre ya despachado le diría
+*"el cobro no salió"* a alguien cuyo cobro salió.
 
 ⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en
 la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar
