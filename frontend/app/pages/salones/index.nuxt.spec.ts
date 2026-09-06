@@ -103,6 +103,24 @@ let calculosPedidos: string[] = []
  * los ítems contra el catálogo vivo.
  */
 let calculoFalla = false
+/**
+ * El `totalFinal` que devuelve el cálculo (y, coherente con él, el neto y el
+ * total de la única línea). Es un knob y no una constante porque el modal de
+ * cobro tiene que **congelar** el total con el que abrió: sin poder mover este
+ * número entre dos cálculos, "congelado" y "vivo" dan lo mismo y el test no
+ * distingue nada.
+ */
+let totalDelCalculo = '5000'
+/**
+ * Retiene el `POST /calculo-precios/calcular`, igual que `abrirCuentaRetenido`.
+ *
+ * Es lo único que abre la ventana de `asegurarVigente()`, que es la espera
+ * durante la cual el modal de cobro decide sobre qué cuenta se abre. Ojo con
+ * ENCENDERLO ANTES DE TIEMPO: la pantalla recalcula al abrir la cuenta y en cada
+ * edición, así que puesto en el `arrange` cuelga el montaje entero. Va prendido
+ * justo antes del gesto que se quiere frenar.
+ */
+let calculoRetenido: Promise<void> | null = null
 let patchCantidadFalla = false
 /**
  * Retiene la respuesta del `PATCH` de cantidad hasta que el test la suelte —
@@ -358,30 +376,33 @@ mockNuxtImport('useApiFetch', () => {
       // respuesta recortada le deja una trampa al próximo test que toque el
       // cobro, que lee `lineas[].trazas.impuestos`.
       const trazas = { descuentos: [], recargos: [], impuestos: [] }
-      return Promise.resolve({
+      const resultado = {
         lineas: [{
           itemId: 'item-1',
           cantidad: '1',
-          precioUnitario: '5000',
-          subtotalNeto: '5000',
+          precioUnitario: totalDelCalculo,
+          subtotalNeto: totalDelCalculo,
           descuentoAplicado: '0',
           recargoAplicado: '0',
           impuestoAplicado: '0',
-          totalLinea: '5000',
+          totalLinea: totalDelCalculo,
           trazas,
           advertencias: [],
         }],
         totales: {
-          subtotalNeto: '5000',
+          subtotalNeto: totalDelCalculo,
           totalDescuentos: '0',
           totalRecargos: '0',
           totalImpuestos: '0',
-          totalFinal: '5000',
+          totalFinal: totalDelCalculo,
         },
         trazasVenta: { descuentos: [], recargos: [] },
         advertencias: [],
         advertenciasVenta: [],
-      })
+      }
+      // Sin retención contesta de una; con retención el test decide cuándo, y
+      // ahí es donde vive la ventana de `asegurarVigente()`.
+      return calculoRetenido ? calculoRetenido.then(() => resultado) : Promise.resolve(resultado)
     }
 
     // Caja abierta EXPLÍCITA. El catch-all devuelve `[]`, que es un objeto y por
@@ -581,6 +602,8 @@ function reiniciarMock() {
   vinculoPersonal = null
   cuentasDeLaMesa = []
   calculoFalla = false
+  calculoRetenido = null
+  totalDelCalculo = '5000'
   patchCantidadFalla = false
   patchCantidadRetenido = null
   cancelarFalla = false
@@ -3283,18 +3306,33 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   }
 
   /**
-   * El cobro se dispara emitiendo `confirmar` en `VentasCobroModal`, que está
-   * siempre montado (`v-model:open`). Se saltea la UI del modal a propósito: lo
-   * que estos tests ejercitan es lo que pasa **después** del PIN, y montar el
-   * cobro entero metería la caja, los métodos y la propina en un test que no
-   * habla de nada de eso.
+   * El camino completo del cobro: **abrir el modal por el botón** y confirmarlo
+   * emitiendo `confirmar` en `VentasCobroModal`, que está siempre montado
+   * (`v-model:open`).
+   *
+   * El *Confirmar* se emite en vez de tocarse porque la UI interna del modal
+   * metería los métodos de pago y la propina en tests que no hablan de eso. Pero
+   * **el modal se abre de verdad**, y eso no es ceremonia: `confirmarCobro` cobra
+   * la cuenta con la que se ABRIÓ (ver `abrirCobro`), así que emitir `confirmar`
+   * sobre un modal que nunca se abrió es un estado que el garzón no puede
+   * producir — y desde ese arreglo, uno que además no cobra nada. Estos tests
+   * pasaban por ahí.
+   *
+   * El `expect` de que abrió **no** es lo que caza un guard de más: eso lo cazan
+   * los cinco tests que cobran, con o sin esta línea (medido, sacándola: fallan
+   * los cinco igual). Lo que hace es que el rojo aparezca acá y diga *"el modal
+   * de cobro abrió"* en vez de más abajo — en tres de esos cinco, adentro de
+   * `tipearPin`, como un `expected undefined to be truthy` sobre un teclado que
+   * nunca apareció porque `confirmarCobro` cortó con `cobroCuenta` en `null`.
    */
-  function confirmarElCobro(wrapper: Awaited<ReturnType<typeof montar>>) {
-    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit(
-      'confirmar',
-      [{ metodoPagoId: 'mp-1', monto: '5000' }],
-      '0',
-    )
+  async function abrirYConfirmarElCobro(wrapper: Awaited<ReturnType<typeof montar>>) {
+    const boton = botonEn(drawerMesa(), 'Cerrar y cobrar')
+    expect(boton?.disabled).toBe(false)
+    boton!.click()
+    await esperar(20)
+    const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    expect(modal.props('open'), 'el modal de cobro abrió').toBe(true)
+    modal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
   }
 
   it('volver al listado durante la espera no se come el cobro que el garzón ya confirmó', async () => {
@@ -3325,7 +3363,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    confirmarElCobro(wrapper)
+    await abrirYConfirmarElCobro(wrapper)
     await esperar(20)
     await tipearPin()
 
@@ -3338,7 +3376,9 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     expect(toasts.filter(t => t.color === 'error')).toEqual([])
-    expect(toasts.some(t => t.title === 'Cuenta cerrada — venta generada')).toBe(true)
+    // Con propina, porque el modal abre con la sugerida puesta y el garzón la
+    // confirmó tal cual: es el aviso del camino feliz, no otro.
+    expect(toasts.some(t => t.title === 'Cuenta cerrada — propina registrada')).toBe(true)
   })
 
   it('meterse en otra cuenta durante la espera no cobra esa otra ni le pide su cálculo', async () => {
@@ -3380,7 +3420,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    confirmarElCobro(wrapper)
+    await abrirYConfirmarElCobro(wrapper)
     await esperar(20)
     await tipearPin()
 
@@ -3443,7 +3483,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    confirmarElCobro(wrapper)
+    await abrirYConfirmarElCobro(wrapper)
     await esperar(20)
     await tipearPin()
 
@@ -3474,9 +3514,10 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * y **un solo tap** reabre el modal, cuyo `watch(open)` reescribe
      * `propinaMonto` con la sugerencia.
      *
-     * O sea: el garzón confirma sin propina y el `POST .../cerrar` sale con la
-     * sugerida. Es plata, y el backend la persiste en `venta_propina` contra unos
-     * `pagos` que sí estaban congelados.
+     * O sea: el garzón borra la propina que venía sugerida —el cliente no dejó—
+     * y el `POST .../cerrar` sale con la sugerida igual. Es plata, y el backend
+     * la persiste en `venta_propina` contra unos `pagos` que sí estaban
+     * congelados.
      */
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
@@ -3497,8 +3538,17 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    // Se confirma SIN propina: `propinaMonto` arranca en '0'.
-    confirmarElCobro(wrapper)
+    // El modal abre con la sugerida puesta (10% de 5.000) y **el garzón la
+    // borra**: el cliente no dejó propina. Sin este gesto el test no reproduce
+    // nada, porque la reapertura de más abajo vuelve a escribir esa misma
+    // sugerencia y el `POST` saldría igual con o sin congelado.
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    expect(cobroModal.props('propinaMonto')).toBe('500')
+    cobroModal.vm.$emit('update:propinaMonto', '0')
+    await esperar(10)
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
     await esperar(20)
     await tipearPin()
 
@@ -3517,6 +3567,208 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     expect(bodiesDeCierre).toHaveLength(1)
     expect(bodiesDeCierre[0]).toMatchObject({ propinaMonto: '0' })
+  })
+
+  it('meterse en otra cuenta mientras se calcula el total no abre el cobro sobre esa otra', async () => {
+    /**
+     * La sub-forma de *"abrir un modal después del `await`"*, entrando por el
+     * modal que mueve plata. `abrirCobro` espera `asegurarVigente()` y abre **sin
+     * volver a preguntar** — y la pantalla sigue clickeable, porque el
+     * `:loading` solo apaga ese botón.
+     *
+     * Y `asegurarVigente()` calcula el carrito **vivo**: el garzón que se mete en
+     * otra cuenta durante la espera hace que el cálculo que vuelve sea el de
+     * ESA, así que el modal se abría encima de la otra cuenta —con su total, y
+     * sin decir de qué cuenta habla— y el *Confirmar* la cobraba. Medido por la
+     * revisión: `POST .../cerrar` con `cuenta-10` y los pagos que el garzón
+     * juntó para la 9.
+     *
+     * ⚠️ **El orden de los dos cálculos es la escena, no un detalle del mock.**
+     * El de la 10 tiene que contestar ANTES que el de la 9: es lo que deja el
+     * resultado "vigente" cuando el de la 9 vuelve, y por eso `asegurarVigente()`
+     * le devolvía a la 9 un total que no era suyo. Al revés —la 9 primero— el
+     * resultado queda fuera de vigencia y `abrirCobro` cae en su aviso de error,
+     * que es otra conducta.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    // De acá en más el cálculo queda retenido. Va DESPUÉS del montaje: prendido
+    // antes, cuelga el cálculo de apertura y la cuenta nunca termina de abrir.
+    let soltar!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+    // La edición deja el carrito fuera de vigencia: sin esto `asegurarVigente()`
+    // contesta sin ir al servidor y no hay ninguna ventana que abrir.
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    expect(cobroModal.props('open'), 'todavía calculando').toBe(false)
+
+    // Se va a la otra cuenta con el cálculo de la 9 en vuelo. El de la 10 sí
+    // contesta (ver el ⚠️ de arriba).
+    calculoRetenido = null
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer')
+    expect(tarjetas?.length).toBe(2)
+    tarjetas![1]!.click()
+    await esperar(50)
+
+    soltar()
+    await esperar(300)
+
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+    expect(cobroModal.props('open'), 'el cobro no se abre sobre la cuenta que el garzón no pidió cobrar').toBe(false)
+    // El aviso de "no se pudo calcular el total" tampoco: es de la cuenta que
+    // dejó atrás, y el guard corta antes de tirárselo encima.
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('volver al listado mientras se calcula el total no deja un error de la cuenta que dejó', async () => {
+    /**
+     * La otra mitad del guard, y por eso va **antes** del aviso de error y no
+     * después: el garzón toca *Cerrar y cobrar*, se arrepiente y vuelve al
+     * listado. Al volver, `volverACuentas()` limpia el resultado, así que el
+     * cálculo que llega tarde vuelve fuera de vigencia y `asegurarVigente()`
+     * contesta `null` — el camino del aviso—. Ese aviso nombra *"la cuenta"*, en
+     * una pantalla donde ya no hay ninguna abierta y por un cobro que el garzón
+     * abandonó a propósito. Es el mismo criterio que el resto del archivo: lo que
+     * se pinta se condiciona a seguir parado donde se pidió.
+     *
+     * Sin segunda cuenta a propósito: acá el cálculo tardío **no** tiene con qué
+     * quedar vigente, que es justo lo que lo distingue del test de arriba.
+     */
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    let soltar!: () => void
+    calculoRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(20)
+    expect(cobroModal.props('open'), 'todavía calculando').toBe(false)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+
+    soltar()
+    await esperar(300)
+
+    expect(cobroModal.props('open')).toBe(false)
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('el Confirmar del cobro cobra la cuenta para la que se abrió, no la que quedó activa', async () => {
+    /**
+     * La otra mitad, y el motivo por el que el guard de arriba no alcanza: con el
+     * modal ya abierto **todavía queda un camino que mueve `activeCuenta` por
+     * abajo**, porque el overlay no frena la continuación de un request. Es
+     * `fusionarSeleccionadas`: si el garzón quedó parado en una de las cuentas
+     * que él mismo mandó fusionar, la fusión que aterriza lo lleva a la fusionada
+     * —a propósito, la cuenta donde estaba ya no existe— y `confirmarCobro`
+     * congelaba **ahí**, en el *Confirmar*. Medido: cobraba `cuenta-9` con los
+     * pagos juntados en la 10.
+     *
+     * ⚠️ **Lo que cuesta, dicho:** la cuenta congelada es una que la fusión
+     * acaba de anular, así que contra el backend real ese `POST .../cerrar`
+     * rebota con *"La cuenta no está abierta"* y el garzón se come un error con
+     * el PIN ya tecleado. Es el platillo bueno igual: el otro es una venta
+     * cobrada de verdad sobre una cuenta que nadie pidió cobrar, con otro total.
+     * Cerrar el modal cuando la fusión se lleva puesta su cuenta es un frente
+     * propio —los pagos ya juntados se perderían, y eso lo decide el owner—:
+     * `docs/agent/pendientes.md` § 4.
+     */
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    fusionRetenida = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    // Con la moneda cargada: sin ella `formatMonto` devuelve `'—'` para
+    // cualquier monto y la fila de Totales no distingue nada.
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await seleccionarMesa(wrapper)
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    expect(tarjetas.length).toBe(2)
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    // Sale del modo fusión, entra a la 10 —una de las dos que se están
+    // fusionando— y abre el cobro ahí, con la fusión todavía en vuelo.
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const ahora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    ahora[ahora.length - 1]!.click()
+    await esperar(400)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 10')
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open'), 'el cobro abrió sobre la 10').toBe(true)
+
+    // La fusionada se recalcula al aterrizar y su total es otro —$9.000 contra
+    // los $5.000 congelados—, que es lo que hace visible el congelado: de ese
+    // número salen lo que el modal muestra, el pago que precarga y la propina
+    // que sugiere.
+    totalDelCalculo = '9000'
+    soltar()
+    await esperar(200)
+    // La fusión aterrizó y se lo llevó a la fusionada: sin esto el test no
+    // reprodujo nada. (El mock devuelve la fusionada con `numero: 1`.)
+    expect(drawerMesa()?.textContent).toContain('— Cuenta 1')
+    const spans = [...(drawerMesa()?.querySelectorAll('span') ?? [])]
+    const totalVivo = spans.find(sp => sp.textContent?.trim() === 'Total')
+      ?.nextElementSibling?.textContent?.trim() ?? ''
+    expect(totalVivo, 'el total vivo ya es el de la fusionada').toContain('9')
+    expect(totalVivo, 'y ya no es el congelado').not.toContain('5')
+    expect(cobroModal.props('open'), 'el modal sigue abierto, con los pagos adentro').toBe(true)
+    expect(cobroModal.props('ventaTotal'), 'el modal cobra el total con el que abrió').toBe('5000')
+    expect(cobroModal.props('total')).toBe('5000')
+
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(cierresDeCuenta).toEqual(['cuenta-10'])
   })
 
   /** Las dos mesas del salón, para los tests que necesitan cambiar de mesa. */

@@ -708,11 +708,36 @@ enumeración **dos veces**, midiendo. Primero faltaba `abrirCuentaConPin`, cuyo 
 mesa y no por cuenta (cerrado también del otro lado: a la cuenta nueva se entra solo si el
 garzón sigue en el listado); después faltaba `fusionarSeleccionadas`, cuya continuación cambia
 la cuenta activa cuando el garzón quedó parado en una de las fusionadas. **La salida no fue
-enumerar mejor, fue dejar de depender de la enumeración.** `abrirCobro` tiene la misma forma y
-sigue abierta, y ahí sí hay plata: dos caminos medidos cobran la cuenta equivocada
-([`../agent/pendientes.md`](../agent/pendientes.md) § 2); `abrirHistorial`,
-`cargarPendientesTestigo` y `abrirEntrarTurno` tienen la forma y **no** el bug, y ahí está
-escrito por qué.
+enumerar mejor, fue dejar de depender de la enumeración.**
+
+`abrirCobro` era la misma forma con plata adentro, y se cerró con el mismo gesto un día después
+(2026-09-05): el modal se lleva su cuenta, su mesa y **su total**, y no se abre si el garzón ya
+no está donde tocó *Cerrar y cobrar*. Los dos caminos que cobraban otra cuenta estaban medidos:
+meterse en otra durante el cálculo —`asegurarVigente()` calcula el carrito **vivo**, así que le
+devolvía a la 9 el total de la 10—, y la fusión que aterriza con el modal abierto, donde
+congelar en el *Confirmar* congelaba la fusionada. `abrirHistorial`, `cargarPendientesTestigo`
+y `abrirEntrarTurno` tienen la forma y **no** el bug, y ahí está escrito por qué.
+
+⚠️ **En un modal que cobra, el total también va en la foto.** Lo que muestra, el pago que
+precarga y la propina que sugiere salen del mismo número: congelar la cuenta y dejar vivo el
+monto es la misma ventana que no congelar nada — la lección de la lista de garzones de la
+transferencia, otra vez y con plata. Y se toma **lo que devuelve `asegurarVigente()`**, no
+releyendo el ref, que es la regla escrita del composable.
+
+⚠️ **El guard va antes del aviso de error, no después.** El aviso de *"no se pudo calcular el
+total de la cuenta"* nombra una cuenta que el garzón ya dejó, en una pantalla donde puede no
+haber ninguna abierta. Es el mismo criterio del resto del archivo: lo que se pinta se condiciona
+a seguir parado donde se pidió.
+
+⚠️ **Lo que el arreglo NO cierra, dicho, y son dos momentos de la misma escena** —una fusión que
+el propio garzón pidió y que aterriza tarde—: con el **modal ya abierto**, se queda arriba con los
+pagos adentro y el *Confirmar* va contra una cuenta que el servidor anuló, así que se come un
+*"La cuenta no está abierta"* con el PIN ya tecleado; y **un paso antes**, con el cobro todavía
+calculándose, el guard corta y el tap **no produce nada** —ni modal ni aviso, el único toast es el
+de la fusión—. Los dos son el platillo bueno igual (el otro era una venta cobrada sobre una cuenta
+que nadie pidió cobrar, con otro total) y se contestan juntos: distinguir *"me fui"* de *"me
+movieron"* pide saber qué cuentas entraron a la fusión, y cerrar el modal perdería los pagos ya
+juntados. Lo decide el owner ([`../agent/pendientes.md`](../agent/pendientes.md) § 4).
 
 ⚠️ **Congelar de más también rompe:** esos tres —el Map de pendientes, el guard de "sigue en
 la cuenta", el de "sigue en la mesa"— se leen **vivos a propósito**. La regla no es "congelar

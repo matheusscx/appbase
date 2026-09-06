@@ -112,6 +112,14 @@ const fusionando = ref(false)
 const abriendoCuenta = ref(false)
 
 const cobroOpen = ref(false)
+/**
+ * Con qué se abrió el modal de cobro: la cuenta, su mesa y el total que se
+ * verificó para ella. Ver `abrirCobro` — los tres se escriben ahí y en ningún
+ * otro lado, en el mismo instante.
+ */
+const cobroCuenta = ref<CuentaDetalle | null>(null)
+const cobroMesa = ref<MesaResumen | null>(null)
+const cobroTotal = ref('0')
 const abriendoCobro = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
@@ -546,26 +554,76 @@ const cuentaConItemEliminado = computed(
   () => activeCuenta.value?.lineas.some(l => l.itemEliminado) ?? false,
 )
 
-watch(cobroOpen, (v) => {
-  if (v) {
+/**
+ * El modal de cobro se abre recién cuando el total está calculado, y **se lleva
+ * adentro con qué se abrió**: la cuenta, su mesa y ese total. Lo que muestra y
+ * lo que cobra sale de ahí, no de lo que esté activo cuando el garzón confirma.
+ *
+ * ⚠️ **La espera de `asegurarVigente()` es una ventana, y son dos agujeros, no
+ * uno** — los midió la revisión con sonda:
+ *
+ * - **Abrir sin volver a preguntar.** La pantalla sigue clickeable (el
+ *   `:loading` solo apaga este botón): metiéndose en otra cuenta durante la
+ *   espera, `asegurarVigente()` devolvía el cálculo de ESA —calcula el carrito
+ *   vivo— y el modal se abría encima, con el total de la otra y sin decir de qué
+ *   cuenta habla. Medido: `POST .../cerrar` con `cuenta-10` y los pagos que el
+ *   garzón juntó para la 9. De ahí el guard de identidad de abajo.
+ * - **Congelar en el *Confirmar* no alcanza**, aunque parezca que con el modal
+ *   abierto ya nada puede cambiar la cuenta activa: `fusionarSeleccionadas`
+ *   aterriza y hace `activeCuenta.value = cuenta` si el garzón quedó parado en
+ *   una de las fusionadas —el overlay no frena la continuación de un request—,
+ *   así que el *Confirmar* congelaba la fusionada. Es el mismo gesto que ya se
+ *   hizo en `abrirTransferenciaAdmin`.
+ *
+ * ⚠️ **Y el total va en la foto igual que la cuenta.** `totalFinal` sale de
+ * `resultado`, que `recalcular()` reescribe desde varios lados; el modal lo usa
+ * para lo que muestra, para el pago que precarga y para la propina que sugiere.
+ * Congelar la cuenta y dejar vivo el número con el que se cobra es la misma
+ * ventana que no congelar nada. Se toma **lo que devuelve `asegurarVigente()`**,
+ * no releyendo el ref, que es la regla del composable.
+ *
+ * ℹ️ **Lo que este congelado separa, dicho:** la boleta **no** imprime este
+ * número — sale de un `asegurarVigente()` fresco adentro de `cerrarCuentaConPin`,
+ * a propósito, porque el ticket tiene que salir de la cuenta de **después** del
+ * flush. Antes los dos eran el mismo; ahora pueden diferir si la cuenta se movió
+ * entre que el modal abrió y el cierre salió. No es plata cobrada de más ni de
+ * menos: el total de la venta lo calcula el backend a partir de las líneas —acá
+ * no viaja ningún total—, y lo que sí queda del lado de la pantalla ya está
+ * anotado (`docs/agent/pendientes.md` § 2: la venta sin boleta y la caja
+ * proyectada por el bruto).
+ */
+async function abrirCobro() {
+  const cuenta = activeCuenta.value
+  const mesa = selectedMesa.value
+  if (!cuenta) return
+  abriendoCobro.value = true
+  try {
+    const res = await asegurarVigente()
+    // El guard va antes que el aviso: no se abre el cobro de una cuenta que ya
+    // no es la de la pantalla, y tampoco se tira un error por ella.
+    //
+    // ⚠️ **La cuenta puede haber cambiado sin que el garzón se moviera**, y ahí
+    // este `return` deja el tap **sin ninguna respuesta**: una fusión que
+    // aterriza durante el cálculo lo lleva a la fusionada si estaba parado en
+    // una de las fusionadas, y entonces no hay ni modal ni aviso —el único toast
+    // es el de la fusión—. Medido. Distinguir *"me fui"* de *"me movieron"* pide
+    // saber qué cuentas entraron a esa fusión, que es justo lo que decide la
+    // pregunta abierta al owner sobre esta misma escena
+    // (`docs/agent/pendientes.md` § 4).
+    if (activeCuenta.value?.id !== cuenta.id) return
+    if (!res) {
+      toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
+      return
+    }
+    cobroCuenta.value = cuenta
+    cobroMesa.value = mesa
+    cobroTotal.value = res.totales.totalFinal
     propinaSugerida.value = sugerirPropina(
-      totalFinal.value,
+      cobroTotal.value,
       decimalesPropina.value,
       propinaPorcentaje.value,
     )
-  }
-})
-
-/** El modal de cobro pide el `totalFinal` que sale de `resultado`: se abre recién
- *  cuando ese total es el de esta cuenta, no el de la mutación anterior. */
-async function abrirCobro() {
-  abriendoCobro.value = true
-  try {
-    if (await asegurarVigente()) {
-      cobroOpen.value = true
-      return
-    }
-    toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
+    cobroOpen.value = true
   }
   finally {
     abriendoCobro.value = false
@@ -1921,15 +1979,21 @@ async function confirmarCancelar() {
 }
 
 function confirmarCobro(pagos: PagoInput[], vuelto: string) {
-  if (!activeCuenta.value) return
-  // **Congeladas acá, antes del PIN y antes del flush**, y por eso viajan como
-  // argumentos en vez de leerse adentro. `cerrarCuentaConPin` corre después de
+  // La cuenta y la mesa del modal, no las que estén activas: ver `abrirCobro`.
+  const cuenta = cobroCuenta.value
+  if (!cuenta) return
+  // **Nada de esto se relee después**, y por eso viaja como argumento en vez de
+  // leerse adentro. `cerrarCuentaConPin` corre después de
   // `await flushPendientes()`, o sea con la pantalla clickeable: el modal de
   // cobro ya cerró (dos líneas más abajo) y el de PIN cierra al emitir
   // `confirm`, así que no queda ningún modal tapando el drawer — y en modo
   // tablet no hay modal de PIN siquiera. Leyéndolas adentro, el garzón que
   // volvía al listado en ese tramo se comía el cobro entero: el guard cortaba
   // en seco y no había ni venta ni aviso, con el PIN ya tecleado.
+  //
+  // La cuenta y la mesa vienen de más atrás todavía —de cuando el modal se
+  // abrió, ver `abrirCobro`—; las propinas se congelan acá, que es cuando el
+  // garzón las fijó.
   //
   // ⚠️ **Las propinas van en la foto, y el primer intento las dejó vivas** con el
   // argumento de que el modal ya las había fijado. Lo refutó la revisión
@@ -1940,8 +2004,8 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   // estaban congelados. `propinaPorcentaje` y `propinaHabilitada` NO van: solo
   // se escriben en el `onMounted`.
   const cobro = {
-    cuenta: activeCuenta.value,
-    mesa: selectedMesa.value,
+    cuenta,
+    mesa: cobroMesa.value,
     pagos,
     vuelto,
     propinaMonto: propinaMonto.value || '0',
@@ -2489,8 +2553,8 @@ async function cerrarCuentaConPin(
       <VentasCobroModal
         v-model:open="cobroOpen"
         :modo-propina="propinaHabilitada"
-        :total="totalFinal"
-        :venta-total="totalFinal"
+        :total="cobroTotal"
+        :venta-total="cobroTotal"
         v-model:propina-monto="propinaMonto"
         :porcentaje-sugerido="propinaPorcentaje"
         :metodos="metodos"

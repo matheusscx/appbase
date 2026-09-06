@@ -159,36 +159,12 @@ Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sal
 sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
 decisión que no es mía).
 
-- [ ] **El modal de cobro no lleva su cuenta adentro: se puede cobrar la que no era** (frontend;
-  **medido con sonda el 2026-09-05** por la tercera pasada de la revisión del cierre de la
-  transferencia, después de que yo escribiera **dos veces** que no había camino) — misma
-  sub-forma que la transferencia, ya cerrada; el arreglo es el mismo gesto.
-
-  ⚠️ **Ojo con lo que esta entrada decía antes, porque estaba mal dos veces.** No es cierto que
-  el modal *"se abra sobre el listado"*: volver al listado llama `limpiarResultado()`, así que
-  `asegurarVigente()` devuelve `null` y `abrirCobro` cae en su toast *"No se pudo calcular el
-  total de la cuenta"*. Y tampoco es cierto que *"el tap no hace nada"*. Lo que pasa de verdad,
-  medido, son **dos caminos** que terminan cobrando otra cuenta:
-
-  - **Meterse en OTRA cuenta durante el `await asegurarVigente()`**: el modal abre sobre esa
-    otra, y su *Confirmar* la cobra (`cierres=["cuenta-10"]` con los pagos juntados para la 9).
-  - **Una fusión que aterriza con el modal ya abierto**: `fusionarSeleccionadas` hace
-    `activeCuenta.value = cuenta` con otro id si el garzón quedó parado en una de las fusionadas,
-    y `confirmarCobro` congela **en el Confirmar**, o sea que congela la equivocada
-    (`cierres=["cuenta-9"]` estando en la 10). El overlay no frena la continuación de un request.
-
-  **El arreglo es el de la transferencia**, y está a la vista en el mismo archivo: capturar la
-  cuenta al abrir el modal (`cobroCuenta`, como `transferAdminCuenta`), comparar identidad antes
-  de abrirlo, y que `confirmarCobro` congele **desde el modal** y no desde `activeCuenta`. Y
-  entera: lo que el modal muestra —el total, la propina sugerida— sale hoy de `activeCuenta`
-  viva, y congelar a medias es la misma ventana que no congelar.
-
-  **Lo que falta medir es el costo del test**: el camino pasa por `asegurarVigente()`, que hay
-  que retener, y el modal de cobro trae la caja y los métodos de pago encima.
-
-  ⚠️ **Lo que NO hay que volver a levantar, con su motivo medido**: `abrirHistorial` congela
-  la cuenta y abre el modal **antes** del `await`; `cargarPendientesTestigo` y
-  `abrirEntrarTurno` no están atadas a una cuenta. Las tres tienen la forma pero no el bug.
+⚠️ **De la familia de "lo que la pantalla lee y escribe después del `await`" hay funciones con
+la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron una vez:
+`abrirHistorial` congela la cuenta y abre el modal **antes** del `await`;
+`cargarPendientesTestigo` y `abrirEntrarTurno` no están atadas a una cuenta. Lo **cerrado** de
+esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
+archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
 - [ ] **La misma ventana del cobro deja confirmarlo dos veces** (frontend; **medido el
   2026-09-05** por la revisión del cierre de la quinta puerta, que encontró la segunda mitad de
@@ -1922,6 +1898,34 @@ corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el
 habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
 ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
 
+
+- [ ] **Una fusión que aterriza con el cobro abierto deja al garzón con los pagos juntados
+  sobre una cuenta que ya no existe** (frontend; **medido el 2026-09-05** al cerrar el modal de
+  cobro) — residuo **conocido y aceptado** de ese cierre, no un bug nuevo, y ya no es plata:
+  desde ese arreglo el cobro sale con la cuenta del modal, así que **no cobra otra**. Lo que
+  queda es con qué se encuentra el garzón.
+
+  La escena: manda a fusionar la 9 y la 10, sale del modo fusión, se mete en la 10 y toca
+  *Cerrar y cobrar*. Junta $12.000 en efectivo. La fusión aterriza: la pantalla se repinta con
+  la cuenta fusionada —la 10 ya no existe— pero el modal sigue arriba con los $12.000 adentro.
+  Confirma, teclea el PIN, y el backend le contesta *"La cuenta no está abierta"*
+  (`salones.service.ts:1278`, `cerrarCuenta` exige `estado = abierta`).
+
+  **La pregunta al owner, que es de producto:** cuando la fusión se lleva puesta la cuenta de un
+  cobro abierto, ¿el modal **se cierra solo** —y el garzón vuelve a tipear los $12.000 sobre la
+  cuenta fusionada— o **se queda abierto** y se come el error? Cerrar tiene el precedente al
+  lado, en la misma función: fusionar ya **descarta** lo que se tipeó durante el vuelo en
+  **todas** las cuentas que entraron a la fusión —también la destino, que sigue abierta: el
+  número se tipeó contra otra realidad—, con el porqué escrito (owner, 2026-09-05). Dejarlo
+  abierto no pierde nada tipeado, pero manda al garzón contra un error evitable con el PIN ya
+  puesto.
+
+  ⚠️ **Y la misma fusión tiene un segundo momento, un paso antes, que hoy termina en silencio**
+  (medido el 2026-09-05, con sonda, por la revisión del cierre): si la fusión aterriza mientras
+  el cobro **todavía se está calculando** —el garzón ya tocó *Cerrar y cobrar*—, el guard nuevo
+  corta porque la cuenta activa cambió, y no pasa **nada**: ni modal, ni aviso; el único toast
+  es el de la fusión. Es la misma pregunta y se contesta junta, porque distinguir *"me fui"* de
+  *"me movieron"* pide saber qué cuentas entraron a la fusión.
 
 
 ## 5. Carreras de concurrencia

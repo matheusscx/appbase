@@ -17,6 +17,113 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El cobro cobraba la cuenta que quedó activa, no la que el garzón abrió (cerrado 2026-09-05)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"El modal de cobro no lleva su cuenta adentro: se
+puede cobrar la que no era"* — la fila que el cierre de la transferencia dejó anotada.
+
+### Qué pasaba
+
+Dos agujeros, no uno, medidos con sonda por la revisión del cierre anterior después de que yo
+escribiera **dos veces** que no había camino:
+
+- **`abrirCobro` abría sin volver a preguntar.** Espera `asegurarVigente()` con la pantalla
+  clickeable —el `:loading` solo apaga ese botón— y `asegurarVigente()` calcula el carrito
+  **vivo**: metiéndose en otra cuenta durante la espera, el cálculo que volvía era el de ESA y el
+  modal se abría encima, con su total y sin decir de qué cuenta habla. Medido:
+  `POST /cuentas/cuenta-10/cerrar` con los pagos juntados para la 9.
+- **`confirmarCobro` congelaba en el *Confirmar*.** Con el modal abierto queda un camino que
+  mueve `activeCuenta` por abajo: `fusionarSeleccionadas`, cuya continuación lleva al garzón a la
+  cuenta fusionada si quedó parado en una de las fusionadas. Medido: cerraba `cuenta-9` con los
+  pagos juntados en la 10.
+
+⚠️ **Dos cosas que la entrada afirmaba y eran falsas**, escritas por mí las dos veces sin abrir el
+código: el modal **no** "se abre sobre el listado" —volver al listado llama `limpiarResultado()`,
+así que `asegurarVigente()` devuelve `null` y `abrirCobro` cae en su aviso de error— y tampoco es
+cierto que "el tap no hace nada".
+
+### Qué se hizo
+
+El gesto de la transferencia, un día después y en el mismo archivo: **el modal se lleva adentro
+con qué se abrió** —`cobroCuenta`, `cobroMesa`, `cobroTotal`, los tres escritos en un mismo
+instante dentro de `abrirCobro`— y **no se abre si el garzón ya no está donde tocó *Cerrar y
+cobrar***.
+
+- El guard de identidad va **después del `await` y antes de abrir**: arriba la cuenta era la
+  correcta.
+- Y va **antes del aviso de error**, no después: ese aviso nombra *"la cuenta"* en una pantalla
+  donde el garzón puede no tener ninguna abierta.
+- `confirmarCobro` congela **desde el modal**. Las propinas se siguen congelando ahí, que es
+  cuando el garzón las fija.
+- **El total va en la foto igual que la cuenta**, y sale de lo que devuelve `asegurarVigente()`,
+  no de releer el ref —la regla escrita del composable—. De ese número salen lo que el modal
+  muestra, el pago que precarga y la propina que sugiere: congelar la cuenta y dejar vivo el monto
+  es la misma ventana que no congelar nada. Es la lección de **U3** del cierre anterior, otra vez.
+
+📌 **El costo, dicho, y son DOS momentos de la misma escena** —el segundo lo encontró la revisión
+de este cierre, con sonda, y no estaba en la primera versión de este párrafo—:
+
+- **Con el modal ya abierto**, si la fusión se lleva puesta su cuenta, el modal queda arriba con
+  los pagos adentro y el *Confirmar* va contra una cuenta que el servidor anuló
+  (`salones.service.ts:1278` exige `estado = abierta`): el garzón se come un *"La cuenta no está
+  abierta"* con el PIN ya tecleado.
+- **Un paso antes**, con el cobro todavía calculándose, el guard nuevo corta —la cuenta activa
+  cambió— y el tap **no produce nada**: ni modal, ni aviso; el único toast es el de la fusión.
+  Medido.
+
+Los dos son el platillo bueno igual: el otro era una venta cobrada de verdad sobre una cuenta que
+nadie pidió cobrar, y con otro total. Y los dos se contestan juntos, porque distinguir *"me fui"*
+de *"me movieron"* pide saber qué cuentas entraron a la fusión — y cerrar el modal perdería los
+pagos ya juntados. Es pregunta al owner ([`pendientes.md` § 4](pendientes.md)).
+
+### Qué lo fija
+
+Tres tests nuevos (85 en el archivo), la **retención** del `POST /calculo-precios/calcular` —la
+rama del mock ya existía, pero sin gancho, y es lo único que abre la ventana de
+`asegurarVigente()`— y un knob para el `totalFinal` que devuelve, sin el cual "congelado" y
+"vivo" dan el mismo número y ninguna aserción sobre el total distingue nada.
+
+⚠️ **Y los cuatro tests de cobro que ya existían pasaban por un estado imposible:** emitían
+`confirmar` sobre un modal que **nunca se había abierto**. Ahora el helper lo abre por el botón.
+Con eso, uno cambió de aviso —el modal precarga la propina sugerida, así que el camino feliz
+cierra con *"propina registrada"* y no con *"venta generada"*— y el de la propina necesitó que el
+garzón **borre** la sugerida para seguir reproduciendo: si no la borra, la reapertura escribe esa
+misma sugerencia y el `POST` sale igual con o sin congelado.
+
+**Diez mutantes sobre el spec completo (85 tests), dos sobrevivientes con motivo medido:**
+
+| Mutante | Qué pone | Resultado |
+|---|---|---|
+| **C1** — sin el guard de identidad al abrir | el código de antes | ✝ mata 2 |
+| **C2** — el guard corta siempre | control: la rama que deja pasar | ✝ mata 5 |
+| **C3** — el *Confirmar* releyendo `activeCuenta` | congelar tarde | ✝ mata 1 |
+| **C4** — la mesa leída viva al confirmar | congelar a medias | **sobrevive** |
+| **C5** — `:venta-total` vivo | congelar a medias, la mitad que se muestra | ✝ mata 1 |
+| **C6** — `:total` vivo | íd. | ✝ mata 1 |
+| **C7** — la propina sugerida desde `totalFinal` vivo | íd. | **sobrevive** |
+| **C8** — la propina leída viva en `cerrarCuentaConPin` | el código de antes del cierre anterior | ✝ mata 1 |
+| **C9** — el aviso de error antes del guard | el orden invertido | ✝ mata 1 |
+| **C10** — `cerrarCuentaConPin` leyendo `selectedMesa` en vez de la mesa de la foto | la ventana de la mesa que sí existe | ✝ mata 1 |
+
+⚠️ **C7 sobrevive porque los dos nombres valen lo mismo en esa línea:** `asegurarVigente()`
+devuelve `resultado.value` mismo cuando devuelve algo, y `totalFinal` es
+`resultado.value?.totales.totalFinal`; entre el `await` y la lectura no hay otro `await`. No es
+un agujero de cobertura. Lo que **no** hay que escribir es que "ningún input los distingue": la
+resolución de esa promesa es un salto de microtask, así que un `ejecutar()` concurrente que
+escriba `resultado.value` en el batch de al lado los separaría. Tomar el valor de `res` es lo
+correcto justamente por eso; lo que sobraba era el superlativo.
+
+⚠️ **C4 sobrevive porque la ventana que abriría no existe hoy, y eso sí se midió:** `selectedMesa`
+tiene dos escritores — `onSelectMesa`, que es un tap en el plano (tapado por el drawer y por el
+overlay del modal, y que además deja `activeCuenta` en `null`), y `patchMesaOcupacion`, que
+reescribe **la misma mesa**—. Lo que compra congelarla es que la cuenta y su mesa salgan del
+mismo instante en vez de dos fuentes. La ventana de la mesa que sí existe es otra —cambiar de
+mesa **durante el flush**, o sea después de confirmar— y la fija **C10**, no C2: C2 hace que el
+modal no abra nunca, así que mata ese test por el control de apertura y no por la mesa. (La
+primera versión de este párrafo citaba C2; lo corrigió la revisión, midiendo C10.)
+
+---
+
 ## El modal que se abre tarde: la transferencia le cambiaba el responsable a otra cuenta (cerrado 2026-09-05)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"El modal que se abre después de un `await`"* —
