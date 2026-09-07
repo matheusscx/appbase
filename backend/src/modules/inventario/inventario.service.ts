@@ -741,6 +741,29 @@ export class InventarioService {
     }
   }
 
+  /**
+   * Saldo previo de un lote **en una ubicación**, en un statement APARTE del
+   * que haya tomado el `FOR UPDATE` sobre `item_lote` — nunca en un `JOIN`
+   * dentro de esa misma query. Mismo motivo que el saldo de `stock_ubicacion`
+   * en `registrarMovimiento`: bajo READ COMMITTED, Postgres solo re-evalúa
+   * (EvalPlanQual) la fila lockeada al despertar, no las tablas que se le
+   * unan en el mismo statement — un `JOIN` a `lote_ubicacion` ahí vería el
+   * snapshot de ANTES de encolarse, y el upsert de saldo absoluto de más
+   * abajo lo convertiría en un lost update.
+   */
+  private async saldoLoteEnUbicacion(
+    manager: EntityManager,
+    loteId: string,
+    ubicacionId: string,
+  ): Promise<Decimal> {
+    const rows: { cantidad: string }[] = await manager.query(
+      `SELECT cantidad FROM lote_ubicacion
+        WHERE lote_id = $1 AND ubicacion_id = $2`,
+      [loteId, ubicacionId],
+    );
+    return new Decimal(rows[0]?.cantidad ?? 0);
+  }
+
   private async moverLote(
     manager: EntityManager,
     params: RegistrarMovimientoParams,
@@ -754,33 +777,33 @@ export class InventarioService {
         );
       }
 
-      const existentes: { lote_id: string; cantidad_disponible: string }[] =
-        await manager.query(
-          `SELECT lote_id, cantidad_disponible FROM item_lote
-           WHERE item_id = $1 AND codigo_lote = $2 AND eliminado_el IS NULL
-           FOR UPDATE`,
-          [params.itemId, loteInput.codigoLote],
-        );
+      // Ancla del lock: la fila de item_lote, igual que antes de esta tarea.
+      // Ya no trae el saldo (vivía acá como `cantidad_disponible`) — ese se
+      // lee aparte, más abajo, por `saldoLoteEnUbicacion`.
+      const existentes: { lote_id: string }[] = await manager.query(
+        `SELECT lote_id FROM item_lote
+         WHERE item_id = $1 AND codigo_lote = $2 AND eliminado_el IS NULL
+         FOR UPDATE`,
+        [params.itemId, loteInput.codigoLote],
+      );
 
       let loteId: string;
 
       if (existentes.length) {
         loteId = existentes[0].lote_id;
-        const nuevaDisp = new Decimal(existentes[0].cantidad_disponible).plus(
-          cantidad,
-        );
         await manager.query(
-          `UPDATE item_lote
-           SET cantidad_disponible = $1, cantidad_inicial = cantidad_inicial + $2
-           WHERE lote_id = $3`,
-          [nuevaDisp.toString(), cantidad.toString(), loteId],
+          `UPDATE item_lote SET cantidad_inicial = cantidad_inicial + $1
+           WHERE lote_id = $2`,
+          [cantidad.toString(), loteId],
         );
       } else {
+        // Recién insertado dentro de esta misma transacción: no hay lector
+        // concurrente posible todavía, así que no necesita su propio lock.
         const rows: { lote_id: string }[] = await manager.query(
           `INSERT INTO item_lote
              (tenant_id, item_id, codigo_lote, fecha_elaboracion, fecha_vencimiento,
-              cantidad_inicial, cantidad_disponible)
-           VALUES ($1,$2,$3,$4,$5,$6,$6)
+              cantidad_inicial)
+           VALUES ($1,$2,$3,$4,$5,$6)
            RETURNING lote_id`,
           [
             params.tenantId,
@@ -794,9 +817,22 @@ export class InventarioService {
         loteId = rows[0].lote_id;
       }
 
+      const saldoPrevio = await this.saldoLoteEnUbicacion(
+        manager,
+        loteId,
+        params.ubicacionId,
+      );
+      await manager.query(
+        `INSERT INTO lote_ubicacion (lote_id, ubicacion_id, cantidad)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (lote_id, ubicacion_id) DO UPDATE SET cantidad = EXCLUDED.cantidad`,
+        [loteId, params.ubicacionId, saldoPrevio.plus(cantidad).toString()],
+      );
+
       const stockResultante = await this.recalcularStockLote(
         manager,
         params.itemId,
+        params.tenantId,
         params.ubicacionId,
       );
 
@@ -805,36 +841,55 @@ export class InventarioService {
       // salida lote
       const loteId = params.loteId;
       if (!loteId) {
-        // Auto-selección FIFO: descuenta de los lotes más antiguos
-        const lotes: { lote_id: string; cantidad_disponible: string }[] =
+        // Auto-selección FIFO: descuenta de los lotes más antiguos CON SALDO
+        // EN ESTA UBICACIÓN. El criterio de orden es el que ya tenía este
+        // método (creado_el ASC) — no cambia por ubicación, solo se filtra
+        // por ella.
+        //
+        // Ancla del lock: todos los lotes del ítem (mismo alcance que antes
+        // de esta tarea). El saldo por ubicación se lee aparte, ya bajo el
+        // lock — ver el docblock de `saldoLoteEnUbicacion`.
+        const lotes: { lote_id: string; codigo_lote: string }[] =
           await manager.query(
-            `SELECT lote_id, cantidad_disponible FROM item_lote
+            `SELECT lote_id, codigo_lote FROM item_lote
              WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-               AND cantidad_disponible > 0
              ORDER BY creado_el ASC
              FOR UPDATE`,
             [params.itemId, params.tenantId],
           );
 
-        const totalDisponible = lotes.reduce(
-          (acc, l) => acc.plus(l.cantidad_disponible),
+        const saldosRows: { lote_id: string; cantidad: string }[] =
+          await manager.query(
+            `SELECT lote_id, cantidad FROM lote_ubicacion
+              WHERE ubicacion_id = $1 AND lote_id = ANY($2) AND cantidad > 0`,
+            [params.ubicacionId, lotes.map((l) => l.lote_id)],
+          );
+        const saldoDe = new Map(
+          saldosRows.map((s) => [s.lote_id, new Decimal(s.cantidad)]),
+        );
+        const lotesConSaldo = lotes.filter((l) => saldoDe.has(l.lote_id));
+
+        const totalDisponible = lotesConSaldo.reduce(
+          (acc, l) => acc.plus(saldoDe.get(l.lote_id)!),
           new Decimal(0),
         );
         if (totalDisponible.lessThan(cantidad)) {
           throw new BadRequestException(
-            `Stock insuficiente en lotes (disponible: ${totalDisponible.toString()}, requerido: ${cantidad.toString()})`,
+            `Stock insuficiente en lotes en esta ubicación (disponible: ${totalDisponible.toString()}, requerido: ${cantidad.toString()})`,
           );
         }
 
         let restante = cantidad;
         const loteConsumos: { loteId: string; cantidad: string }[] = [];
-        for (const l of lotes) {
+        for (const l of lotesConSaldo) {
           if (restante.lessThanOrEqualTo(0)) break;
-          const disp = new Decimal(l.cantidad_disponible);
+          const disp = saldoDe.get(l.lote_id)!;
           const tomar = Decimal.min(disp, restante);
           await manager.query(
-            `UPDATE item_lote SET cantidad_disponible = $1 WHERE lote_id = $2`,
-            [disp.minus(tomar).toString(), l.lote_id],
+            `INSERT INTO lote_ubicacion (lote_id, ubicacion_id, cantidad)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (lote_id, ubicacion_id) DO UPDATE SET cantidad = EXCLUDED.cantidad`,
+            [l.lote_id, params.ubicacionId, disp.minus(tomar).toString()],
           );
           loteConsumos.push({
             loteId: l.lote_id,
@@ -846,15 +901,16 @@ export class InventarioService {
         const stockResultante = await this.recalcularStockLote(
           manager,
           params.itemId,
+          params.tenantId,
           params.ubicacionId,
         );
 
         return { stockResultante, loteConsumos };
       }
 
-      const rows: { cantidad_disponible: string; tenant_id: string }[] =
+      const rows: { tenant_id: string; codigo_lote: string }[] =
         await manager.query(
-          `SELECT cantidad_disponible, tenant_id FROM item_lote
+          `SELECT tenant_id, codigo_lote FROM item_lote
            WHERE lote_id = $1 AND item_id = $2 AND eliminado_el IS NULL
            FOR UPDATE`,
           [loteId, params.itemId],
@@ -867,21 +923,29 @@ export class InventarioService {
         throw new BadRequestException('El lote no pertenece al tenant');
       }
 
-      const disponible = new Decimal(rows[0].cantidad_disponible);
+      const disponible = await this.saldoLoteEnUbicacion(
+        manager,
+        loteId,
+        params.ubicacionId,
+      );
       if (disponible.lessThan(cantidad)) {
         throw new BadRequestException(
-          `Stock insuficiente en el lote (disponible: ${disponible.toString()})`,
+          `Stock insuficiente del lote ${rows[0].codigo_lote} en esta ubicación ` +
+            `(disponible: ${disponible.toString()})`,
         );
       }
 
       await manager.query(
-        `UPDATE item_lote SET cantidad_disponible = $1 WHERE lote_id = $2`,
-        [disponible.minus(cantidad).toString(), loteId],
+        `INSERT INTO lote_ubicacion (lote_id, ubicacion_id, cantidad)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (lote_id, ubicacion_id) DO UPDATE SET cantidad = EXCLUDED.cantidad`,
+        [loteId, params.ubicacionId, disponible.minus(cantidad).toString()],
       );
 
       const stockResultante = await this.recalcularStockLote(
         manager,
         params.itemId,
+        params.tenantId,
         params.ubicacionId,
       );
 
@@ -923,13 +987,21 @@ export class InventarioService {
   private async recalcularStockLote(
     manager: EntityManager,
     itemId: string,
+    tenantId: string,
     ubicacionId: string,
   ): Promise<Decimal> {
+    // El saldo de esta ubicación cuenta solo `lote_ubicacion` DE ESA
+    // ubicación: sin el filtro, dos ubicaciones con saldo del mismo lote
+    // comparten el mismo SUM y una vende lo que físicamente está en la otra.
+    // `item_lote` entra solo para acotar por tenant e ítem — `lote_ubicacion`
+    // no tiene esas columnas propias (PK compartida vía `lote_id`).
     const rows: { total: string }[] = await manager.query(
-      `SELECT COALESCE(SUM(cantidad_disponible), 0) AS total
-       FROM item_lote
-       WHERE item_id = $1 AND eliminado_el IS NULL`,
-      [itemId],
+      `SELECT COALESCE(SUM(lu.cantidad), 0) AS total
+       FROM lote_ubicacion lu
+       JOIN item_lote l ON l.lote_id = lu.lote_id
+       WHERE l.item_id = $1 AND l.tenant_id = $2 AND lu.ubicacion_id = $3
+         AND l.eliminado_el IS NULL`,
+      [itemId, tenantId, ubicacionId],
     );
     const nuevo = new Decimal(rows[0].total);
     // El saldo que se upsertea acá es el recalculado (el SUM de arriba), nunca

@@ -3102,6 +3102,12 @@ export class ItemsService {
   }
 
   async findLotes(tenantId: string, itemId: string) {
+    // `cantidadDisponible` ya no vive en `item_lote`: se deriva sumando
+    // `lote_ubicacion` (Tarea 7, `LEFT JOIN` porque un lote recién creado
+    // puede no tener fila todavía en ninguna ubicación). El desglose por
+    // lugar sale de la misma tabla, en una segunda query — agregarlo acá con
+    // `json_agg` mezclaría filas de `item_lote` con las N de su desglose y
+    // complicaría el mapeo sin necesidad; son pocas filas por ítem.
     const rows: {
       lote_id: string;
       codigo_lote: string;
@@ -3112,13 +3118,46 @@ export class ItemsService {
       creado_el: Date;
     }[] = await this.db.query(
       `SELECT
-         lote_id, codigo_lote, fecha_elaboracion, fecha_vencimiento,
-         cantidad_inicial, cantidad_disponible, creado_el
-       FROM item_lote
-       WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-       ORDER BY creado_el DESC`,
+         l.lote_id, l.codigo_lote, l.fecha_elaboracion, l.fecha_vencimiento,
+         l.cantidad_inicial, l.creado_el,
+         COALESCE(SUM(lu.cantidad), 0) AS cantidad_disponible
+       FROM item_lote l
+       LEFT JOIN lote_ubicacion lu ON lu.lote_id = l.lote_id
+       WHERE l.item_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
+       GROUP BY l.lote_id
+       ORDER BY l.creado_el DESC`,
       [itemId, tenantId],
     );
+
+    const desgloseRows: {
+      lote_id: string;
+      ubicacion_id: string;
+      nombre: string;
+      cantidad: string;
+    }[] = rows.length
+      ? await this.db.query(
+          `SELECT lu.lote_id, u.ubicacion_id, u.nombre, lu.cantidad
+             FROM lote_ubicacion lu
+             JOIN ubicaciones u ON u.ubicacion_id = lu.ubicacion_id
+                               AND u.tenant_id = $2
+            WHERE lu.lote_id = ANY($1) AND u.eliminado_el IS NULL
+            ORDER BY (u.tipo = 'local') DESC, u.nombre`,
+          [rows.map((r) => r.lote_id), tenantId],
+        )
+      : [];
+    const desglosePorLote = new Map<
+      string,
+      { ubicacionId: string; nombre: string; cantidad: string }[]
+    >();
+    for (const d of desgloseRows) {
+      const lista = desglosePorLote.get(d.lote_id) ?? [];
+      lista.push({
+        ubicacionId: d.ubicacion_id,
+        nombre: d.nombre,
+        cantidad: d.cantidad,
+      });
+      desglosePorLote.set(d.lote_id, lista);
+    }
 
     return rows.map((r) => ({
       id: r.lote_id,
@@ -3128,6 +3167,7 @@ export class ItemsService {
       cantidadInicial: r.cantidad_inicial,
       cantidadDisponible: r.cantidad_disponible,
       creadoEl: r.creado_el,
+      desglosePorUbicacion: desglosePorLote.get(r.lote_id) ?? [],
     }));
   }
 

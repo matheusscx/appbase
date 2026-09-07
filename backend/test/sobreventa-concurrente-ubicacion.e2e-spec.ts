@@ -76,11 +76,14 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *
  * NO PRUEBA:
  * - Modo `serie`/`lote`: `recalcularStockSerie` / `recalcularStockLote` derivan
- *   el saldo absoluto contando `item_unidad` / sumando `item_lote` DESPUÉS del
- *   guard, así que no pierden la actualización aunque el `stockAnterior` que
- *   reporten sea viejo. El caso que sobrevendía es `cantidad`, que escribe el
- *   saldo calculado a partir de esa lectura. (Y no, no hay `lote_ubicacion`
- *   todavía: el saldo del lote por ubicación llega en la Tarea 7 del plan.)
+ *   el saldo absoluto contando `item_unidad` / sumando `lote_ubicacion` DESPUÉS
+ *   del guard, así que no pierden la actualización aunque el `stockAnterior`
+ *   que reporten sea viejo. El caso que sobrevendía es `cantidad`, que escribe
+ *   el saldo calculado a partir de esa lectura. `lote_ubicacion` existe desde
+ *   la Tarea 7 del plan y sigue el mismo patrón lock-en-`item_lote` +
+ *   lectura-aparte que este spec ejercita para `stock_ubicacion`, pero sin una
+ *   compuerta propia: no hay un test de concurrencia real para modo `lote`,
+ *   solo unitarios mockeados que fijan el orden de las queries.
  * - Nada sobre traslados entre ubicaciones (Tarea 9): acá las dos salidas
  *   golpean la MISMA ubicación.
  * ═══════════════════════════════════════════════════════════════════════════

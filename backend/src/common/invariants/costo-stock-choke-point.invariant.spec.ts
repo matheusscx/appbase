@@ -15,11 +15,12 @@ import { join } from 'path';
 // puertas nuevas por las que se puede escribir stock, y las tres quedan bajo
 // la misma regla: solo `inventario.service.ts` (y el seeder, que las siembra
 // junto con el movimiento `inventario_inicial`, no las actualiza).
-// `lote_ubicacion` todavía no existe en el esquema — llega en la Tarea 7 del
-// mismo frente, y para esa columna la guarda sigue siendo preventiva (no
-// puede fallar por falta de columna: no hay ningún archivo que la mencione
-// todavía).
-// `item_unidad.ubicacion_id` sí existe desde la Tarea 6: la unidad NACE en su
+// `lote_ubicacion` existe desde la Tarea 7: nace y se escribe siempre por
+// `INSERT ... ON CONFLICT (lote_id, ubicacion_id) DO UPDATE` (saldo
+// absoluto, nunca un `UPDATE` a secas), así que la guarda de esta puerta
+// cubre las dos formas —`INSERT INTO lote_ubicacion` y `UPDATE
+// lote_ubicacion`— aunque hoy solo la primera se ejercite.
+// `item_unidad.ubicacion_id` existe desde la Tarea 6: la unidad NACE en su
 // ubicación por `INSERT` (no hay `UPDATE` — una unidad serializada no cambia
 // de lugar hasta que exista `POST /traslados`, Tarea 9), así que la guarda de
 // esta puerta cubre las dos formas de escritura, no solo el `UPDATE`.
@@ -49,6 +50,9 @@ const MULETAS_E2E_AUTORIZADAS = [
   // Misma muleta, para item_unidad: sin `POST /traslados` (Tarea 9), plantar
   // una unidad serializada EN LA BODEGA solo se puede con INSERT directo.
   'inventario-serie-ubicacion.e2e-spec.ts',
+  // Misma muleta, para lote_ubicacion: sin `POST /traslados` (Tarea 9),
+  // plantar saldo de un lote EN LA BODEGA solo se puede con INSERT directo.
+  'inventario-lote-ubicacion.e2e-spec.ts',
 ];
 
 function findTsFiles(dir: string, incluirSpecs = false): string[] {

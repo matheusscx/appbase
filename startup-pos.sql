@@ -655,7 +655,7 @@ CREATE TABLE "item_producto" (
   "fecha_vencimiento" TIMESTAMPTZ,
   "modo_inventario"   TEXT          NOT NULL DEFAULT 'cantidad',
   -- 'cantidad' (fungible, saldo numérico)
-  -- 'lote'     (stock = SUM cantidad_disponible de item_lote, por ubicación)
+  -- 'lote'     (stock = SUM cantidad de lote_ubicacion, por ubicación)
   -- 'serie'    (stock = COUNT unidades disponibles en item_unidad, por ubicación)
   "costo_actual"      NUMERIC(18,4)  -- promedio ponderado móvil (CPP); solo lo recalcula la entrada por compra
 );
@@ -936,9 +936,10 @@ CREATE TABLE "movimientos_inventario" (
 -- Los movimientos de una venta: los cuenta la nota de crédito por línea.
 CREATE INDEX "idx_movimientos_inventario_venta" ON "movimientos_inventario" ("venta_id");
 
--- Lotes (fuente de verdad de stock en modo 'lote'; metadato en modo 'serie')
--- En modo 'lote': cantidad_disponible es la cantidad real en stock.
--- En modo 'serie': cantidad_inicial y cantidad_disponible son 0 (el lote es solo metadato).
+-- Lotes: identidad del lote (código, elaboración, vencimiento), una sola vez
+-- por lote — no varía por ubicación. `cantidad_inicial` es acumulado
+-- histórico (todo lo que entró); el saldo VIGENTE vive partido en
+-- `lote_ubicacion`, nunca acá.
 CREATE TABLE "item_lote" (
   "lote_id"              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"            UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
@@ -947,13 +948,23 @@ CREATE TABLE "item_lote" (
   "fecha_elaboracion"    TIMESTAMPTZ,
   "fecha_vencimiento"    TIMESTAMPTZ,
   "cantidad_inicial"     NUMERIC(18,4) NOT NULL DEFAULT 0,
-  "cantidad_disponible"  NUMERIC(18,4) NOT NULL DEFAULT 0,
   "creado_el"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"       TIMESTAMPTZ,
   "eliminado_el"         TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX "uq_lote_item_codigo"
   ON "item_lote" ("item_id", "codigo_lote") WHERE "eliminado_el" IS NULL;
+
+-- Saldo de un lote **en un lugar** (fuente de verdad de stock en modo
+-- 'lote'): un mismo lote puede estar partido entre dos ubicaciones — 8 en el
+-- local y 5 en la bodega. `stock_ubicacion` se recalcula sumando esta tabla.
+CREATE TABLE "lote_ubicacion" (
+  "lote_id"      UUID          NOT NULL REFERENCES "item_lote" ("lote_id"),
+  "ubicacion_id" UUID          NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  "cantidad"     NUMERIC(18,4) NOT NULL DEFAULT 0,
+  PRIMARY KEY ("lote_id", "ubicacion_id")
+);
+CREATE INDEX "idx_lote_ubicacion_ubicacion" ON "lote_ubicacion" ("ubicacion_id");
 
 -- Unidades serializadas (modo 'serie')
 CREATE TABLE "item_unidad" (

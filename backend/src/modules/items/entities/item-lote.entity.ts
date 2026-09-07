@@ -36,15 +36,6 @@ export class ItemLote {
   })
   cantidadInicial: string;
 
-  @Column({
-    name: 'cantidad_disponible',
-    type: 'numeric',
-    precision: 18,
-    scale: 4,
-    default: '0',
-  })
-  cantidadDisponible: string;
-
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
   actualizadoEl: Date;

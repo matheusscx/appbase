@@ -153,6 +153,7 @@ import { VentaPromocion } from './modules/ventas/entities/venta-promocion.entity
 import { PromocionesModule } from './modules/promociones/promociones.module';
 import { Ubicacion } from './modules/ubicaciones/entities/ubicacion.entity';
 import { StockUbicacion } from './modules/items/entities/stock-ubicacion.entity';
+import { LoteUbicacion } from './modules/items/entities/lote-ubicacion.entity';
 import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
 
 @Module({
@@ -283,6 +284,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
           VentaPromocion,
           Ubicacion,
           StockUbicacion,
+          LoteUbicacion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),

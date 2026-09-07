@@ -854,7 +854,9 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([]) // SELECT lote existente (no existe)
         .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // INSERT lote
-        .mockResolvedValueOnce([{ total: '50' }]) // SUM cantidad_disponible
+        .mockResolvedValueOnce([]) // SELECT saldo previo en esta ubicación (ninguno)
+        .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
+        .mockResolvedValueOnce([{ total: '50' }]) // SUM lote_ubicacion
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -874,16 +876,62 @@ describe('InventarioService', () => {
       );
 
       expect(res.stockResultante).toBe('50');
+      const upsertCall = managerMock.query.mock.calls[5] as [string, unknown[]];
+      expect(upsertCall[0]).toMatch(/INSERT INTO lote_ubicacion/);
+      expect(upsertCall[1]).toEqual([LOTE_ID, UBICACION_ID, '50']);
+    });
+
+    // Discrimina el bug de "sumar sobre el saldo total del lote" en vez de
+    // "sumar sobre el saldo de ESTA ubicación": el lote ya tenía 8 EN OTRA
+    // ubicación (no reflejado acá porque la query que lee el saldo previo
+    // está acotada por `ubicacion_id`) y esta entrada agrega 10 acá. Si el
+    // código sumara sobre el total del lote, la ubicación quedaría en 18; el
+    // valor correcto es 10 (0 previo en ESTA ubicación + 10).
+    it('entrada lote: el saldo previo se lee de ESTA ubicación, no del total del lote', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // lote existente
+        .mockResolvedValueOnce(undefined) // UPDATE cantidad_inicial
+        .mockResolvedValueOnce([]) // saldo previo EN ESTA ubicación: nada, aunque el lote tenga 8 en la bodega
+        .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
+        .mockResolvedValueOnce([{ total: '10' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-l-existente' }])
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '10',
+          usuarioId: USER_ID,
+          lote: { codigoLote: 'LOTE-001' },
+        },
+      );
+
+      expect(res.stockResultante).toBe('10');
+      const saldoPrevioCall = managerMock.query.mock.calls[4] as [
+        string,
+        unknown[],
+      ];
+      expect(saldoPrevioCall[0]).toMatch(/ubicacion_id\s*=\s*\$2/);
+      expect(saldoPrevioCall[1]).toEqual([LOTE_ID, UBICACION_ID]);
+      const upsertCall = managerMock.query.mock.calls[5] as [string, unknown[]];
+      expect(upsertCall[1]).toEqual([LOTE_ID, UBICACION_ID, '10']);
     });
 
     it('salida lote: descuenta del lote y recalcula stock', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '50' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          { cantidad_disponible: '50', tenant_id: TENANT },
-        ]) // SELECT lote FOR UPDATE
-        .mockResolvedValueOnce(undefined) // UPDATE lote
+        .mockResolvedValueOnce([{ tenant_id: TENANT, codigo_lote: 'LOTE-001' }]) // SELECT lote FOR UPDATE
+        .mockResolvedValueOnce([{ cantidad: '50' }]) // SELECT saldo en esta ubicación
+        .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l2' }]) // INSERT movimiento
@@ -907,14 +955,51 @@ describe('InventarioService', () => {
       expect(res.stockResultante).toBe('40');
     });
 
+    // Fixture asimétrico (5 en la bodega, 8 pedidos) a propósito: con
+    // cantidades iguales un mutante que sumara el saldo del lote en TODAS
+    // las ubicaciones (en vez de acotarlo a `ubicacionId`) sobreviviría —acá
+    // el mock solo devuelve el saldo de ESTA ubicación, así que "8 pedidos >
+    // 5 disponibles acá" es la única cuenta que el código puede hacer.
+    it('salida lote (loteId): no saca más de lo que el lote tiene EN ESTA UBICACIÓN, aunque tenga más en otra', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+        .mockResolvedValueOnce([{ stock: '5' }])
+        .mockResolvedValueOnce([
+          { tenant_id: TENANT, codigo_lote: 'LOTE-BODEGA' },
+        ])
+        .mockResolvedValueOnce([{ cantidad: '5' }]); // saldo EN ESTA ubicación: 5, aunque el lote tenga más en otra
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '8',
+          usuarioId: USER_ID,
+          loteId: LOTE_ID,
+          causaMermaId: CAUSA_MERMA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Stock insuficiente del lote LOTE-BODEGA en esta ubicación (disponible: 5)',
+        ),
+      );
+
+      const saldoCall = managerMock.query.mock.calls[3] as [string, unknown[]];
+      expect(saldoCall[0]).toMatch(/FROM lote_ubicacion/);
+      expect(saldoCall[0]).toMatch(/ubicacion_id\s*=\s*\$2/);
+      expect(saldoCall[1]).toEqual([LOTE_ID, UBICACION_ID]);
+    });
+
     it('salida lote sin loteId: auto-selecciona FIFO el lote más antiguo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '50' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          { lote_id: LOTE_ID, cantidad_disponible: '50' },
-        ]) // SELECT lotes FIFO FOR UPDATE
-        .mockResolvedValueOnce(undefined) // UPDATE lote
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID, codigo_lote: 'LOTE-001' }]) // SELECT lotes FIFO FOR UPDATE
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID, cantidad: '50' }]) // saldos en esta ubicación
+        .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l3' }]) // INSERT movimiento
@@ -941,13 +1026,65 @@ describe('InventarioService', () => {
       );
     });
 
+    // Fixture asimétrico (lote-A sin saldo acá, lote-B con 20 acá) para que
+    // un mutante que ignorase el filtro por ubicación —y arrastrara lote-A
+    // igual, como si su saldo en la OTRA ubicación contara acá— sobreviva
+    // distinguible: el total correcto es 20 (solo lote-B), no más.
+    it('salida lote sin loteId: excluye lotes sin saldo en esta ubicación aunque tengan saldo en otra', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+        .mockResolvedValueOnce([{ stock: '20' }])
+        .mockResolvedValueOnce([
+          { lote_id: 'lote-a', codigo_lote: 'LOTE-A' },
+          { lote_id: 'lote-b', codigo_lote: 'LOTE-B' },
+        ]) // ambos lockeados: son del mismo item
+        // Solo lote-b tiene fila con saldo > 0 en esta ubicación: lote-a
+        // existe (tiene saldo en la bodega, fuera de este mock) pero no
+        // aparece acá.
+        .mockResolvedValueOnce([{ lote_id: 'lote-b', cantidad: '20' }])
+        .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion (solo lote-b)
+        .mockResolvedValueOnce([{ total: '5' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-fifo-excl' }])
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '15',
+          usuarioId: USER_ID,
+        },
+      );
+
+      expect(res.stockResultante).toBe('5');
+      // La lectura de saldos por ubicación consulta LOS DOS lotes lockeados
+      // (lote-a incluido)...
+      const saldosCall = managerMock.query.mock.calls[3] as [string, unknown[]];
+      expect(saldosCall[1]).toEqual([UBICACION_ID, ['lote-a', 'lote-b']]);
+      // ...pero el único UPSERT de consumo es sobre lote-b: lote-a, sin
+      // saldo acá, no se toca.
+      const upsertCalls = managerMock.query.mock.calls.filter((c) =>
+        /INSERT INTO lote_ubicacion/.test(c[0] as string),
+      );
+      expect(upsertCalls).toHaveLength(1);
+      expect((upsertCalls[0] as [string, unknown[]])[1]).toEqual([
+        'lote-b',
+        UBICACION_ID,
+        '5',
+      ]);
+    });
+
     it('salida lote sin loteId: lanza BadRequest si el stock total es insuficiente', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '5' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          { lote_id: LOTE_ID, cantidad_disponible: '5' },
-        ]); // SELECT lotes FIFO (total 5 < 10)
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID, codigo_lote: 'LOTE-001' }])
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID, cantidad: '5' }]); // saldo en esta ubicación (5 < 10)
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -966,9 +1103,8 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
         .mockResolvedValueOnce([{ stock: '5' }]) // SELECT saldo: statement aparte, ya bajo el lock
-        .mockResolvedValueOnce([
-          { cantidad_disponible: '5', tenant_id: TENANT },
-        ]);
+        .mockResolvedValueOnce([{ tenant_id: TENANT, codigo_lote: 'LOTE-001' }])
+        .mockResolvedValueOnce([{ cantidad: '5' }]);
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -993,12 +1129,13 @@ describe('InventarioService', () => {
           // El lote existe con disponibilidad suficiente, pero es de otro
           // tenant: `loteId` llega del body del cliente, así que este `if` es
           // la única defensa contra descontar el lote de otro tenant.
-          { cantidad_disponible: '50', tenant_id: 'otro-tenant-uuid' },
+          { tenant_id: 'otro-tenant-uuid', codigo_lote: 'LOTE-001' },
         ])
         // Cadena completa por si la validación de pertenencia desaparece: el
         // rojo lo tiene que dar la propia aserción `rejects.toThrow`, no un
         // TypeError de un mock incompleto más adelante en el flujo.
-        .mockResolvedValueOnce(undefined) // UPDATE lote
+        .mockResolvedValueOnce([{ cantidad: '50' }]) // SELECT saldo en esta ubicación
+        .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-lote-tenant-mutant' }]) // INSERT movimiento
