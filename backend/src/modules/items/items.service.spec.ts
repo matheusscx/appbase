@@ -333,7 +333,7 @@ describe('ItemsService', () => {
 
     /**
      * El corazón de la Tarea 3a (bodegas y traslados,
-     * `docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md` § 5.4):
+     * `docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»):
      * `stock` es el TOTAL del tenant (todas las ubicaciones sumadas),
      * `stockVendible` es lo que hay en el LOCAL, y `stockDisponible` resta el
      * comprometido de `stockVendible` — no de `stock` — porque es lo único

@@ -1631,14 +1631,21 @@ async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
       lineaId,
       inflight.value.get(lineaId)?.previo ?? previo,
     )
-    toast.add({
-      title: apiErrorMsg(e, 'Error al actualizar la cantidad'),
-      // El rechazo puede llegar con el garzón ya en el listado o en otra mesa
-      // —salir manda lo pendiente—, y ahí *"no alcanza el stock"* solo no le
-      // dice a quién culpar: el `description` nombra la mesa y la cuenta. Con
-      // la cuenta todavía en pantalla se omite, porque ahí sobra.
+    // La MISMA puerta que agregar un producto o una receta, no un toast
+    // propio: subir la cantidad de una línea ya en la cuenta rebota por el
+    // mismo chokepoint de stock y el backend manda el mismo 400 enriquecido
+    // (`ItemsService.errorStockInsuficiente`). Acá el mensaje llegaba
+    // completo pero sin el botón "Trasladar", así que el encargado veía
+    // dónde estaba la mercadería y tenía que ir a buscar la pantalla a mano.
+    // El `description` sigue siendo de esta puerta: el rechazo puede llegar
+    // con el garzón ya en el listado o en otra mesa —salir manda lo
+    // pendiente—, y ahí *"no alcanza el stock"* solo no le dice a quién
+    // culpar. Con la cuenta todavía en pantalla se omite, porque ahí sobra.
+    mostrarRechazoPorStock({
+      error: e,
+      fallback: 'Error al actualizar la cantidad',
+      puedeTrasladar: puedeTrasladar.value,
       description: activeCuenta.value?.id === cuentaId ? undefined : contexto,
-      color: 'error',
     })
   }
   finally {

@@ -17,6 +17,81 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los minors que dejó el frente de bodegas y traslados (cerrado 2026-09-07)
+
+Sale de [`pendientes.md` § 1](pendientes.md), donde había entrado como *"los cuatro minors"*.
+**Eran tres:** el `catch` de `RecuentosService.aplicar` que miraba `error.code` en vez de
+`esDeadlock` ya lo había corregido `0852c53b` —la ola de fixes de la revisión final del mismo
+frente— 78 minutos después de que la entrada se escribiera (`f12a45ca` 12:23, `0852c53b`
+13:41), sin sacar la entrada.
+
+### El par de e2e que faltaba del ajuste manual de stock
+
+`PATCH /items/:id/stock` era el único de los cuatro endpoints que escriben eligiendo
+ubicación —`POST /mermas`, `POST /recuentos`, `POST /traslados` y éste— sin e2e HTTP de los
+**dos rechazos del campo `ubicacionId`** (requerido → 400, de otro tenant → 404). Sus rechazos
+por falta de stock EN la ubicación sí estaban probados; lo que faltaba es el campo, no el
+saldo. Del campo estaba probado solo el service mockeado, que **no ejercita el
+`ValidationPipe`**. Los dos casos viven ahora en
+`test/items-stock-por-ubicacion.e2e-spec.ts` y cubren dueños distintos del rechazo: el **400**
+lo pone el pipe sobre `AjusteStockDto.ubicacionId`, y el **404** lo pone
+`UbicacionesService.findOneOrFail` dentro de la transacción, antes de tocar nada.
+
+⚠️ **Esta frase se escribió mal dos veces seguidas, y las dos las cazó la revisión.** Primero
+decía *"compra, merma y recuento ya los tenían"* — falso: "compra" no es un endpoint, es uno
+de los cuatro `motivo` de este mismo `PATCH`. Después decía *"merma, recuento y traslado ya
+los tenían"* — también falso: medido, **solo `POST /mermas` tiene los dos casos**; recuento y
+traslado tienen el 404 por ubicación ajena y no el 400 del campo requerido. Esos dos huecos
+quedaron en `pendientes.md`. El patrón que deja las dos: **afirmar cobertura de memoria en vez
+de grepearla**, y en la corrección apurarse a rellenar la lista con los vecinos.
+
+El 404 usa **el local de Falabella pedido con el token de Falabella**, no un UUID inventado:
+un id inexistente daría 404 por no existir, y el test pasaría igual aunque el service no
+filtrara por tenant.
+
+⚠️ **Y la aserción que caza la fuga es la del TOTAL, no la del desglose** — al revés de lo que
+el comentario decía primero. `stock` sale del `LEFT JOIN LATERAL` de `baseQuery`, que suma
+toda fila de `stock_ubicacion` del ítem **sin filtrar por tenant**; `desglosePorUbicacion` sí
+filtra `u.tenant_id`, así que una fila ajena le es invisible por construcción. Medido por la
+revisión con un `INSERT` cruzado en una transacción revertida: el total se movió, el desglose
+no. Las dos aserciones se quedan, pero la del total es la red.
+
+### La tercera puerta del rechazo por stock en el salón
+
+Agregar un producto y agregar una receta ya pasaban por `useRechazoPorStock` —el toast que
+ofrece el traslado precargado a quien tiene `Inventario/Crear`—. **Subir la cantidad de una
+línea ya pedida** rebota por el mismo chokepoint del backend y armaba el toast a mano: el
+mensaje llegaba enriquecido igual (lo arma el backend) pero sin el botón, así que el encargado
+leía dónde estaba la mercadería y tenía que ir a buscar la pantalla de traslados por su cuenta.
+
+El composable ganó un `description` opcional, que es lo único que esa puerta tenía de propio:
+cuando el rechazo llega con el garzón ya en otra mesa —salir manda lo pendiente—, el toast
+nombra la mesa y la cuenta. **Lo fija sin agregar nada** que ya no estuviera: dos tests de
+`salones/index.nuxt.spec.ts` afirman `description === 'Mesa 1 · Cuenta 9'`, así que borrar el
+passthrough los rompe. Y el test nuevo del mismo archivo afirma sobre `actions`, no sobre el
+título: el título llega enriquecido en las dos versiones, así que afirmar sobre el texto no
+distinguiría el `toast.add` a mano del composable.
+
+### El filtro de lotes sin disponibilidad comparaba strings
+
+`loteSinDisponibilidad` (`configuracion/items.vue`) atenuaba la fila con
+`cantidadDisponible === '0' || === '0.0000'`. El valor sale de un `SUM(lu.cantidad)` con
+`COALESCE(..., 0)` sobre un `NUMERIC(18,4)`, y qué literal exacto llega depende de cómo
+Postgres y el driver lo serialicen; el resto del frontend compara con `Decimal`. Quedó
+`new Decimal(...).lte(0)` — `lte` y no `isZero` porque un saldo negativo tampoco tiene
+disponibilidad.
+
+⚠️ **Es el único de los tres sin control automatizado, a propósito, y por una sola razón: el
+costo del fixture.** La función es local al `.vue` y la fila vive dentro de un drawer que se
+abre desde un dropdown teleportado; hoy ningún spec de `configuracion/items.vue` monta la
+tabla de lotes, así que afirmar sobre una clase `opacity-50` cuesta armar todo ese camino.
+**No** es que el mock no pueda ver el cambio: un fixture con `cantidadDisponible: '0.00'`
+mataría al mutante que restaura la comparación de strings (lo corrigió la revisión — la
+primera versión de este párrafo decía que el riesgo no era observable, y sí lo es). Lo que el
+mock no puede verificar es cuál de esos literales manda Postgres de verdad.
+
+---
+
 ## El stock deja de ser un escalar por tenant: bodegas y traslados (cerrado 2026-09-07)
 
 Sale de [`pendientes.md` § 3](pendientes.md), donde había quedado como *"decidido por el owner

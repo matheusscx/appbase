@@ -7,11 +7,10 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * Tarea 6 del plan de bodegas
- * (`docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`): cada unidad
- * serializada (`item_unidad`, modo `serie`) sabe en qué ubicación está —
- * `item_unidad.ubicacion_id`— y el saldo de `stock_ubicacion` en ese modo se
- * recalcula contando SOLO las unidades de esa ubicación.
+ * Tarea 6 del frente de bodegas (`docs/features/bodegas-y-traslados.md`):
+ * cada unidad serializada (`item_unidad`, modo `serie`) sabe en qué ubicación
+ * está —`item_unidad.ubicacion_id`— y el saldo de `stock_ubicacion` en ese
+ * modo se recalcula contando SOLO las unidades de esa ubicación.
  *
  * ✅ **Sin muleta desde la Tarea 9.** `PATCH /items/:id/stock` siempre entra al
  * local (`ItemsService.ajustarStock` resuelve `UbicacionesService.localDe`),

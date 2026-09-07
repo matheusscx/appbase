@@ -152,6 +152,13 @@ let totalDelCalculo = '5000'
 let calculoRetenido: Promise<void> | null = null
 let patchCantidadFalla = false
 /**
+ * Cuerpo del rechazo cuando el test quiere el 400 **enriquecido** por stock —
+ * el que trae `itemId`, `faltante` y `ubicaciones`, y con el que la pantalla
+ * ofrece el traslado. `patchCantidadFalla` rechaza con un `Error` pelado, que
+ * es el otro caso real (cualquier otro 400 del `PATCH`).
+ */
+let patchCantidadRechazoEnriquecido: unknown = null
+/**
  * Retiene la respuesta del `PATCH` de cantidad hasta que el test la suelte —
  * mismo patrón que `abrirCuentaRetenido`. Es lo único que abre la ventana
  * "`PATCH` en vuelo": sin esto el mock contesta en el mismo microtask y esa
@@ -306,7 +313,7 @@ let metodosPagoRechaza = false
  * lo único que permite afirmar el COLOR: un toast que saliera con otro color
  * se vería igual en un assert sobre el texto del wrapper.
  */
-let toasts: { title?: string, description?: string, color?: string }[] = []
+let toasts: { title?: string, description?: string, color?: string, actions?: { label: string }[] }[] = []
 
 mockNuxtImport('useToast', () => {
   return () => ({
@@ -403,6 +410,13 @@ mockNuxtImport('useApiFetch', () => {
       const body = (opts?.body ?? {}) as { cantidad?: string }
       patchesDeCantidad.push({ lineaId: patchLinea[1] ?? '', cantidad: body.cantidad ?? '' })
       const responder = () => {
+        // El 400 ENRIQUECIDO por stock (`ItemsService.errorStockInsuficiente`),
+        // con el `data` que el cliente necesita para ofrecer el traslado. Va
+        // antes que `patchCantidadFalla` porque es más específico: el otro
+        // rechaza con un `Error` pelado, sin body de servidor.
+        if (patchCantidadRechazoEnriquecido) {
+          return Promise.reject(patchCantidadRechazoEnriquecido)
+        }
         // El 400 del tope de stock de `actualizarLinea`, que hasta el 2026-09-02
         // era inalcanzable desde la pantalla.
         if (patchCantidadFalla) {
@@ -685,6 +699,7 @@ function reiniciarMock() {
   calculoRetenido = null
   totalDelCalculo = '5000'
   patchCantidadFalla = false
+  patchCantidadRechazoEnriquecido = null
   patchCantidadRetenido = null
   cancelarFalla = false
   patchesAlCancelar = -1
@@ -1936,6 +1951,51 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // así que la presentación cae a la canónica — y es exactamente lo que el
     // input mostraba ANTES de editar, que es lo que el rollback tiene que devolver.
     expect(inputTrasFallar!.props('modelValue')).toBe('1.0000')
+  })
+
+  it('el rechazo por stock al SUBIR la cantidad ofrece el traslado, igual que agregar un producto', async () => {
+    // La TERCERA puerta al mismo rechazo. Agregar un producto y agregar una
+    // receta ya pasaban por `mostrarRechazoPorStock` —el toast con el botón
+    // "Trasladar" precargado—; subir la cantidad de una línea ya pedida
+    // rebota por el mismo chokepoint de stock del backend y armaba el toast a
+    // mano, así que el encargado leía DÓNDE estaba la carne y tenía que ir a
+    // buscar la pantalla de traslados por su cuenta.
+    //
+    // `esAdmin`, porque el botón es `Inventario/Crear`: al garzón no se le
+    // muestra (eso lo cubre `useRechazoPorStock.nuxt.spec.ts`, que es donde
+    // vive la decisión de las dos caras).
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    usePermissionsStore().esAdmin = true
+    patchCantidadRechazoEnriquecido = {
+      data: {
+        message: 'Stock insuficiente de "Carne" en el local: quedan 1 unidad y se necesitan 3 — hay 10.0000 en Bodega Subsuelo',
+        itemId: 'item-carne',
+        itemNombre: 'Carne',
+        faltante: '2',
+        ubicaciones: [{ ubicacionId: 'bodega-1', nombre: 'Bodega Subsuelo', stock: '10.0000' }],
+      },
+    }
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
+    input!.vm.$emit('change', {
+      presentacion: '3',
+      unidadCodigo: 'unidad',
+      cantidadCanonica: '3.0000',
+    })
+    await esperar(400)
+
+    const aviso = toasts.find(t => /Stock insuficiente/.test(t.title ?? ''))
+    expect(aviso).toBeTruthy()
+    // La aserción que separa esta puerta de un `toast.add` a mano: el botón.
+    // El mensaje llegaba enriquecido igual —lo arma el backend—, así que
+    // afirmar sobre el título no distinguiría una versión de la otra.
+    expect(aviso!.actions).toHaveLength(1)
+    expect(aviso!.actions![0]!.label).toBe('Trasladar')
   })
 
   it('dos ediciones seguidas: deshacer vuelve a lo que había ANTES de la primera', async () => {

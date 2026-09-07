@@ -7,10 +7,9 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * Tarea 7 del plan de bodegas
- * (`docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`): un mismo lote
- * (`item_lote`, modo `lote`) puede tener saldo partido entre dos
- * ubicaciones. `item_lote.cantidad_disponible` (un escalar por lote)
+ * Tarea 7 del frente de bodegas (`docs/features/bodegas-y-traslados.md`):
+ * un mismo lote (`item_lote`, modo `lote`) puede tener saldo partido entre
+ * dos ubicaciones. `item_lote.cantidad_disponible` (un escalar por lote)
  * desapareció; el saldo vive en `lote_ubicacion`, una fila por
  * `(lote_id, ubicacion_id)`, y `stock_ubicacion` se recalcula sumándola.
  * Lo que NO se parte es la identidad del lote — `codigo_lote`,

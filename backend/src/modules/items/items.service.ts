@@ -110,7 +110,7 @@ type GrupoDetalle = {
  * ⚠️ Restar de **`vendible`, no de `stock` (el total)**: si existe una bodega,
  * lo que hay en el otro lado del tenant no es lo que la mesa puede pedir. Con
  * un solo local los dos números coinciden y nada cambia (Tarea 3a,
- * `docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md` § 5.4).
+ * `docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»).
  *
  * `vendible === null` (el ítem no lleva stock: un servicio como opción de
  * grupo) sale `null`, no `0`: la ausencia de stock no es falta de stock.

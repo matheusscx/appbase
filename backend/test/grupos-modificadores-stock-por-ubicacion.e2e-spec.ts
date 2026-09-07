@@ -6,8 +6,8 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 /**
- * Red de la Tarea 3b (GIRAR 2/2) del plan de bodegas:
- * `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`.
+ * Red de la Tarea 3b (GIRAR 2/2) del frente de bodegas:
+ * `docs/features/bodegas-y-traslados.md`.
  *
  * `GET /grupos-modificadores` y `GET /grupos-modificadores/:id` son catálogo
  * admin: el `stock` de cada opción es informativo (no hay ningún consumidor,

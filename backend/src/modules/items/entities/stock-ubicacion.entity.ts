@@ -5,8 +5,8 @@ import { Entity, PrimaryColumn, Column, Index } from 'typeorm';
  * Único dueño del saldo de stock del sistema.
  *
  * Nace en la Tarea 1 del frente "bodegas y traslados"
- * (`docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md`), antes
- * de lo previsto en el plan: el guard de `UbicacionesService.remove()` —no
+ * (`docs/features/bodegas-y-traslados.md`), antes de lo previsto en el
+ * plan: el guard de `UbicacionesService.remove()` —no
  * dejar borrar una bodega con stock adentro— ya la consulta, así que sin la
  * tabla ese guard no podría escribirse. Desde la Tarea 2 la puebla el
  * chokepoint de escritura (`registrarMovimiento`), y desde la Tarea 4

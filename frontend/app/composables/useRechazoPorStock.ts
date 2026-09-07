@@ -58,6 +58,13 @@ export function useRechazoPorStock() {
     error: unknown
     fallback: string
     puedeTrasladar: boolean
+    /**
+     * Contexto opcional bajo el título. Existe por el salón: cuando el rechazo
+     * llega con el garzón ya en otra mesa —salir manda lo pendiente—, el
+     * mensaje solo no le dice a quién culpar, y ahí la pantalla nombra la mesa
+     * y la cuenta. Con la cuenta a la vista lo omite, porque sobra.
+     */
+    description?: string
   }): void {
     const datos = datosDe(params.error)
     const bodegaOrigen = datos?.ubicaciones?.[0]
@@ -66,6 +73,7 @@ export function useRechazoPorStock() {
 
     toast.add({
       title: datos?.message ?? apiErrorMsg(params.error, params.fallback),
+      description: params.description,
       color: 'error',
       actions: ofrecerTraslado
         ? [

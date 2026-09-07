@@ -183,6 +183,12 @@ porque trasladar es `Inventario/Crear` y el garzón no lo tiene:
 Al revés —un botón para todos— el garzón tocaría un botón que le devuelve un 403 en medio del
 servicio.
 
+**Las tres puertas del salón muestran el mismo toast**: agregar un producto, agregar una receta
+y **subir la cantidad de una línea ya pedida**. Las tres rebotan por el mismo chokepoint de
+stock del backend, así que el mensaje —y el botón, para quien lo tiene— es uno solo. La regla
+al agregar una puerta nueva: si el rechazo puede ser por stock, va por `useRechazoPorStock`, no
+por un `toast.add` propio.
+
 ---
 
 ## Bordes
@@ -273,9 +279,11 @@ mandarlo. Detalle de cada endpoint: [`inventario-kardex.md`](./inventario-kardex
 
 ### Module & Services
 
-- `src/modules/ubicaciones/` — `UbicacionesService.localDe(tenantId)` es el punto de
-  referencia que usan compra/merma/recuento/ajuste para resolver "el local" cuando el
-  frontend no manda ubicación explícita
+- `src/modules/ubicaciones/` — `UbicacionesService.localDe(tenantId)` resuelve "el local" del
+  tenant. ⚠️ **No es un default para el body**: compra, merma, recuento y ajuste manual exigen
+  `ubicacionId` y nunca caen acá (ver arriba). Lo usan los caminos donde la ubicación **no la
+  elige el cliente**: la venta —que siempre descuenta del local—, los tres números de
+  `GET /items` y el ajuste de costo, que es plata y no mueve cantidad
 - `src/modules/motivos-traslado/`
 - `src/modules/traslados/` — `TrasladosService.crear` / `findAll` / `findOne`
 - `src/modules/inventario/inventario.service.ts` — `registrarMovimiento` sigue siendo el

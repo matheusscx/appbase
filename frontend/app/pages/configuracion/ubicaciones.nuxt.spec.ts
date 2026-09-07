@@ -1,8 +1,8 @@
 // @vitest-environment nuxt
 //
 // Réplica del molde de `causas-merma.nuxt.spec.ts` para `ubicaciones`, con las
-// dos diferencias que el diseño pide (docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md
-// § 6): el local se dibuja arriba, separado, sin botón de eliminar; y el
+// dos diferencias que el diseño pide (docs/features/bodegas-y-traslados.md):
+// el local se dibuja arriba, separado, sin botón de eliminar; y el
 // mensaje de error del DELETE con stock viaja tal cual del backend (no hay
 // forma de afirmar el TEXTO del toast en este harness —`mountSuspended` monta
 // sin `UApp`, ver el comentario de `descuentos.nuxt.spec.ts`—, así que lo que

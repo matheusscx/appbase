@@ -13,8 +13,7 @@ import { AppModule } from '../src/app.module';
  * dejando **dos filas de kardex** —salida en el origen, entrada en el
  * destino— colgadas de un mismo `traslado_id`.
  *
- * Plan: `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`.
- * Spec:  `docs/superpowers/specs/2026-09-06-bodegas-y-traslados-design.md`.
+ * Documentación viva del frente: `docs/features/bodegas-y-traslados.md`.
  *
  * El caso que más pesa es el último —**dos traslados cruzados**— y su
  * encabezado propio explica qué mide y, sobre todo, **qué mutante lo pone en

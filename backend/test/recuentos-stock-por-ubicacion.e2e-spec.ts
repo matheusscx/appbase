@@ -8,8 +8,8 @@ import { AppModule } from '../src/app.module';
 
 /**
  * Red de la Tarea 3b (GIRAR 2/2) del plan de bodegas, reescrita en la Tarea 11
- * tal como su docblock anterior anunciaba: `docs/superpowers/plans/
- * 2026-09-06-bodegas-y-traslados.md`.
+ * tal como su docblock anterior anunciaba (el plan de bodegas, borrado al
+ * cerrar el frente; lo durable quedó en `docs/features/bodegas-y-traslados.md`).
  *
  * ⚠️ **Este spec afirmaba otra cosa hasta el 2026-09-07** —que `stockSistema`
  * congelaba siempre el saldo del LOCAL, tapón deliberado de la Tarea 4—. La

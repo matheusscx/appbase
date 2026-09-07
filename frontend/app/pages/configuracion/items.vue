@@ -1425,8 +1425,15 @@ const columnsLotes: TableColumn<Lote>[] = [
   { accessorKey: 'id', header: 'ID' },
 ]
 
+// Decimal, no comparación de strings: `cantidadDisponible` sale de un
+// `SUM(lu.cantidad)` con `COALESCE(..., 0)` (`items.service.ts`), y qué
+// literal exacto llega —'0', '0.0000', '0.00'— depende de cómo Postgres y el
+// driver serialicen ese NUMERIC. Comparar contra dos literales dejaba sin
+// atenuar cualquier otra forma del cero. `lte(0)` y no `isZero()` porque un
+// saldo negativo tampoco tiene disponibilidad: no debería existir, pero si
+// existe la fila se atenúa igual en vez de mentir que está disponible.
 function loteSinDisponibilidad(l: Lote): boolean {
-  return l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000'
+  return new Decimal(l.cantidadDisponible).lte(0)
 }
 
 const tipoLabels: Record<string, string> = {

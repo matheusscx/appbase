@@ -19,7 +19,7 @@ import { AppModule } from '../src/app.module';
  *  - El tope al cobrar directo por POS (`ventas.service.ts` →
  *    `registrarMovimiento`), vía `POST /ventas`.
  *
- * Plan: `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`, Tareas 14-15.
+ * Documentación viva del frente: `docs/features/bodegas-y-traslados.md`.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';

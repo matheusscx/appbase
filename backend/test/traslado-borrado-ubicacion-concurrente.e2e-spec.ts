@@ -33,7 +33,8 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * PRUEBA: hallazgo 1 de la revisión de rama del frente "bodegas y traslados"
- * (`.superpowers/sdd/2026-09-06-bodegas-y-traslados/hallazgos-finales.md`).
+ * (el workspace de esa revisión se borró al cerrar el frente; lo durable está
+ * en `docs/features/bodegas-y-traslados.md`).
  * `UbicacionesService.remove` era un check-then-act sin transacción ni lock:
  * `TrasladosService.crearEnTransaccion` podía escribir saldo en una ubicación
  * mientras `remove()` contaba 0 stock (statement previo, sin ver ese commit) y

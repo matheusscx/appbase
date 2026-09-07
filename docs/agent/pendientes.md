@@ -153,42 +153,76 @@ sub-entradas ya estaba arreglada **antes de que se pudiera leer**. No es que la 
 vieja: la entrada nació al mismo tiempo que su arreglo, en commits del mismo día. Un
 *"citas verificadas el ..."* con la fecha de hoy no garantiza nada — abrir el código igual.
 
-### Los cuatro minors que dejó el frente de bodegas y traslados (cerrado 2026-09-07)
+### Los cuatro minors que dejó el frente de bodegas y traslados (2026-09-07)
 
-- [ ] **El reintento de deadlock de `RecuentosService.aplicar` no mira `driverError.code`**
-  (`backend/src/modules/recuentos/recuentos.service.ts:601-616`) — el `catch` solo revisa
-  `error instanceof QueryFailedError && (error as { code? }).code === '40P01'`. Los demás
-  caminos que reintentan un deadlock (`traslados.service.ts`, `salones.service.ts`,
-  `ventas.service.ts`) comparten `esDeadlock` (`backend/src/common/db/reintento-deadlock.ts`),
-  que mira **las dos** formas en que el código puede llegar (`error.code` **o**
-  `error.driverError.code`, según cuál capa lo reenvuelva). El de recuentos es previo a ese
-  helper y quedó afuera cuando se extrajo — corregirlo es cambiar la condición del `catch` por
-  `esDeadlock(error)`, nada más.
+✅ **Cerrados el 2026-09-07, y eran tres, no cuatro.** El primero —el `catch` de
+`RecuentosService.aplicar` que no usaba `esDeadlock`— ya estaba arreglado cuando se lo fue a
+tomar: la entrada se escribió en `f12a45ca` y **`0852c53b`, la ola de fixes de la revisión
+final del mismo frente, lo corrigió 78 minutos después**, dejando escrito en el propio
+docblock del `catch` que venía del backlog… sin sacar la entrada de acá. Los otros tres
+salieron hoy: el par de e2e del ajuste manual de stock, la tercera puerta del rechazo por
+stock en el salón y el filtro de lotes que comparaba strings. Detalle en
+[`resueltos.md`](resueltos.md).
 
-- [ ] **`PATCH /items/:id/stock` (ajuste manual de stock) es la única de las cuatro operaciones
-  con `ubicacionId` sin e2e HTTP de "requerido → 400" ni "de otro tenant → 404"** — compra,
-  merma (`test/mermas.e2e-spec.ts:459,471`) y recuento (`test/recuentos.e2e-spec.ts:1609`) sí
-  los tienen; el ajuste solo está probado con el service mockeado
-  (`backend/src/modules/items/items.service.spec.ts:3429`). Falta el par de casos e2e para el
-  mismo endpoint (`AjusteStockDto.ubicacionId`, `backend/src/modules/items/dto/ajuste-stock.dto.ts`).
+⚠️ **Es la segunda vez seguida** que una entrada de esta sección resulta estar cerrada antes de
+tomarse (la anterior, el 2026-09-02, está anotada más arriba). Las dos veces el arreglo y la
+entrada son commits del mismo día y del mismo frente. El aviso ya tiene dos casos: **abrir el
+código antes de tomar una entrada**, por reciente que sea la fecha que trae — y, del otro lado,
+**el commit que cierra algo del backlog saca la entrada en el mismo commit**, que es lo que
+las dos veces faltó.
 
-- [ ] **`patchLineaCantidad` es una tercera puerta a medias al rechazo enriquecido por stock**
-  (`frontend/app/pages/salones/index.vue`) — cuando agregar un producto o una receta rebota por
-  falta de stock, los dos caminos llaman a `mostrarRechazoPorStock({ error, fallback,
-  puedeTrasladar: puedeTrasladar.value })`, que ofrece el traslado precargado a un clic a quien
-  tiene `Inventario/Crear`. El `catch` de `patchLineaCantidad` (editar la cantidad de una línea
-  ya en la cuenta) solo arma el toast con `apiErrorMsg(e, 'Error al actualizar la cantidad')`:
-  el mensaje llega enriquecido igual (lo arma el backend), pero sin el botón de traslado que
-  las otras dos puertas sí tienen.
+### El 400 de "campo de ubicación requerido" que le falta a recuentos y a traslados (2026-09-07)
 
-- [ ] **El filtro de "lote sin disponibilidad" compara strings en vez de `Decimal`**
-  (`frontend/app/pages/configuracion/items.vue:1429`, `loteSinDisponibilidad`) —
-  `l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000'` solo reconoce esos dos
-  literales exactos. `cantidadDisponible` sale de `SUM(lu.cantidad)` (`items.service.ts:3132`,
-  `COALESCE(..., 0)`), así que cualquier otra representación de cero que Postgres/Node
-  serialicen distinto —o un saldo negativo, que no debería existir pero el filtro tampoco lo
-  cazaría— pasa el filtro sin marcarse. El resto del frontend usa `new Decimal(x).isZero()`
-  para esta comparación; acá no.
+Salió de medir la cobertura al cerrar el hueco gemelo del ajuste manual de stock. De los cuatro
+endpoints que escriben eligiendo ubicación, **solo `POST /mermas` tiene los dos rechazos
+probados por HTTP** (`mermas.e2e-spec.ts:459` y `:471`); el ajuste manual los ganó hoy
+(`items-stock-por-ubicacion.e2e-spec.ts`). Faltan:
+
+- [ ] **`POST /recuentos` sin `ubicacionId` → 400** — hoy solo está el 404 por ubicación ajena
+  (`recuentos.e2e-spec.ts:1609`).
+- [ ] **`POST /traslados` sin `origenId` o sin `destinoId` → 400** — hoy solo está el 404 por
+  ubicación ajena (`traslados.e2e-spec.ts:1246`). Son dos campos, así que son dos casos.
+
+Lo que cubre este hueco es el `ValidationPipe`, que **ningún test de DTO ejercita**: un
+`plainToInstance` + `validate` corre los decoradores pero no el pipe, así que la única red del
+"requerido" es el e2e. Mecánico: copiar el molde de `mermas.e2e-spec.ts:459`.
+
+### Los punteros de código al plan y a la spec de bodegas, que ya no existen (2026-09-07)
+
+Al cerrar el frente se borraron `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md` y
+su spec de diseño —convención del repo: el conocimiento durable pasó a
+[`docs/features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)—, pero los
+comentarios del código que los citaban se quedaron apuntando al vacío. Las **14 líneas que
+nombraban una ruta completa**, repartidas en 12 archivos, se repuntaron al doc de la feature
+el 2026-09-07: eran enlaces muertos, mandaban al lector a un archivo que no existe. Hoy no
+queda ninguna en el árbol. El conteo se reproduce con `git grep -c
+"2026-09-06-bodegas-y-traslados\|hallazgos-finales" 0852c53b -- backend frontend` — el SHA
+fijo y no `HEAD`, porque contra `HEAD` da 0 apenas se commitea este barrido.
+
+Lo que queda son las citas **sin ruta**: no rompen ningún enlace, pero nombran una sección o
+una tarea que ya no resuelve a nada.
+
+- [ ] **Separar cuáles de las 42 `spec § N` son del spec borrado, y repuntarlas** — `grep -rn
+  "spec § " backend/src backend/test frontend/app` da 42, **pero no todas son de bodegas**: la
+  misma forma la usan frentes cuyo spec sigue en disco (`reserva-stock-mesa.e2e-spec.ts` y
+  `CatalogoGrid.vue` citan `§ 4.2` del spec de la reserva de stock, que está en
+  `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`). O sea que el
+  primer paso es clasificar, no reemplazar. Para las que sí sean de bodegas, cada `§ N` se
+  mapea a mano al heading del doc de la feature (`§ 5.4` → «GET /items, GET /items/:id»,
+  `§ 6` → «Frontend») o se deja la cita sin sección.
+
+- [ ] **Lo mismo con las 31 de la forma `… del plan`** (`grep -rn "del plan" backend/src
+  backend/test frontend/app`, medido el 2026-09-07). Mismo criterio: clasificar primero.
+
+📌 **Y un dato que cambia el tamaño del problema:** borrar el plan y la spec al cerrar está
+escrito en `docs/superpowers/README.md`, pero **casi no se practica** — al 2026-09-07 hay 98
+planes y 79 specs en `docs/superpowers/`, incluidos los de frentes cerrados hace días. O sea
+que la mayoría de las citas `Tarea N` del árbol apuntan a documentos que **sí existen**, y
+este barrido es de las de bodegas, no del repo entero. (Que la convención esté escrita y no se
+cumpla es tema aparte, y no de esta entrada.)
+
+El precio de no hacerlo es de lectura, no de conducta: el próximo que quiera el porqué de una
+línea busca una sección que no existe.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1893,6 +1927,29 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
 abierto deja al garzón con los pagos juntados sobre una cuenta que ya no existe"*. Nació al cerrar
 el modal de cobro esa misma tarde, el owner eligió **cerrar el cobro y avisar** —asumiendo que se
 pierden los pagos ya cargados— y se construyó ese mismo día → [`resueltos.md`](resueltos.md).
+
+### ¿Un segundo helper compartido en `backend/test/`? (2026-09-07)
+
+**La pregunta, en una línea:** el bloque *"loguearse como Falabella y pedir su local"* va por la
+cuarta copia. ¿Se extrae a `test/helpers/`, o se deja copiado?
+
+**Por qué se pregunta y no se hace:** el único helper compartido que existe hoy
+(`test/helpers/caja.ts`) nació de una decisión explícita tuya, el 2026-09-03, y **después de
+medir las ocho copias** y encontrar que ya habían derivado en la conducta. Extraer el segundo
+por reflejo sería saltarse justo lo que hizo valer al primero.
+
+**Lo medido hoy** (2026-09-07): cuatro copias — `mermas.e2e-spec.ts:481`,
+`traslados.e2e-spec.ts:1157`, `recuentos.e2e-spec.ts:117` (ahí sí como función local,
+`loginFalabella`) y `items-stock-por-ubicacion.e2e-spec.ts:287`, que es la que agregó el cierre
+de los minors de bodegas. **Es el mismo mecanismo en las cuatro**: `admin@sistema.com` +
+`switch-tenant` + `GET /ubicaciones` + `find(u => u.tipo === 'local')` —la constante
+`ADMIN_FALABELLA_EMAIL` de `recuentos` y `papelera` **es** `'admin@sistema.com'`, no otro
+usuario—. O sea: **todavía no hay deriva**, que es la diferencia con el caso de caja.
+
+**Las dos salidas y su costo:** extraer ahora cuesta un archivo nuevo y cierra la puerta a que
+las cuatro se separen sin que nadie lo note; dejarlo cuesta que la quinta copia entre igual, y
+que el día que una derive el rojo salga en un archivo ajeno. La regla escrita del repo
+(*"duplicar dos veces es aceptable, se extrae a la tercera"*) ya está pasada.
 
 ## 5. Carreras de concurrencia
 
