@@ -6,6 +6,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import {
+  MAX_REINTENTOS_DEADLOCK,
+  esDeadlock,
+} from '../../common/db/reintento-deadlock';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import { Salon } from './entities/salon.entity';
@@ -49,37 +53,6 @@ import {
   textoComandaPersonalizacion,
   type PersonalizacionDetalleLinea,
 } from '../../common/utils/personalizacion-receta.util';
-
-/**
- * Reintentos ante deadlock de `agregarLinea` y `actualizarLinea` —los dos
- * caminos por los que una mesa toma stock, y los dos que lockean
- * `item_producto`—. Dos, por lo mismo que en
- * `ventas.service.ts`: el deadlock exige que dos transacciones se crucen en el
- * mismo instante, y la que sobrevive libera sus locks al commitear, así que el
- * reintento entra a una BD ya despejada.
- *
- * ⚠️ **Duplicado a mano de `ventas.service.ts`** (misma constante, misma
- * `esDeadlock` de abajo). Es deliberado: allá son privados del módulo de
- * ventas y extraerlos obliga a tocar el camino de la venta, que es más
- * riesgoso que estas diez líneas. Regla del repo: se duplica dos veces y se
- * extrae a la tercera — **ésta es la segunda; el que necesite una tercera
- * extrae las tres.** Al tocar una, tocar la otra.
- */
-const MAX_REINTENTOS_DEADLOCK = 2;
-
-/**
- * `40P01` = `deadlock_detected`. TypeORM envuelve el error del driver en
- * `QueryFailedError`, que copia el `code` del driver pero también lo deja en
- * `driverError`: se miran los dos porque cuál de las dos formas llega depende
- * de dónde se lance, y confundirse acá significa no reintentar nunca.
- *
- * ⚠️ Gemelo de `esDeadlock` en `ventas.service.ts` — ver el ⚠️ de
- * `MAX_REINTENTOS_DEADLOCK`, arriba.
- */
-function esDeadlock(error: unknown): boolean {
-  const e = error as { code?: string; driverError?: { code?: string } };
-  return e?.code === '40P01' || e?.driverError?.code === '40P01';
-}
 
 // `eliminadoEl`/`eliminadoPorNombre` solo se completan cuando se pide
 // `incluirEliminados`: el listado normal sigue devolviendo la forma de

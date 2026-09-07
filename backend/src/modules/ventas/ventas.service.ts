@@ -8,6 +8,10 @@ import { EntityManager, IsNull } from 'typeorm';
 import type { ReglasCongeladas } from '../../common/dto/reglas-congeladas.dto';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
+import {
+  MAX_REINTENTOS_DEADLOCK,
+  esDeadlock,
+} from '../../common/db/reintento-deadlock';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type {
   ConfigCalculo,
@@ -58,35 +62,6 @@ import {
   detallePersonalizacion,
   type PersonalizacionRecetaSnapshot,
 } from '../../common/utils/personalizacion-receta.util';
-
-/**
- * Reintentos ante deadlock. Dos son suficientes: el deadlock exige que dos
- * ventas se crucen en el mismo instante, y Postgres mata a una de las dos —
- * la que sobrevive libera sus locks al commitear, así que el reintento entra
- * a una BD ya despejada. Un número alto solo alargaría el tiempo hasta
- * devolverle el error a un cajero que está esperando.
- *
- * ⚠️ **Tiene un gemelo en `salones.service.ts`** (misma constante y misma
- * `esDeadlock`), desde que `agregarLinea` empezó a tomar `FOR UPDATE` sobre
- * `item_producto` para topear el stock al pedir. Está duplicado a propósito:
- * extraerlo obligaba a tocar este camino, el de la venta. Al tocar uno, tocar
- * el otro; el que necesite una tercera copia, extrae las tres.
- */
-const MAX_REINTENTOS_DEADLOCK = 2;
-
-/**
- * `40P01` = `deadlock_detected`. TypeORM envuelve el error del driver en
- * `QueryFailedError`, que copia el `code` del driver pero también lo deja en
- * `driverError`: se miran los dos porque cuál de las dos formas llega depende
- * de dónde se lance, y confundirse acá significa no reintentar nunca.
- *
- * ⚠️ Gemelo de `esDeadlock` en `salones.service.ts` — ver el ⚠️ de
- * `MAX_REINTENTOS_DEADLOCK`, arriba.
- */
-function esDeadlock(error: unknown): boolean {
-  const e = error as { code?: string; driverError?: { code?: string } };
-  return e?.code === '40P01' || e?.driverError?.code === '40P01';
-}
 
 /**
  * Ítem/cantidad que se acredita en una nota de crédito. Ya NO es "ítem a
