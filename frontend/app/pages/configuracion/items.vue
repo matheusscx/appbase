@@ -58,6 +58,13 @@ interface Item {
   ingredientes?: { ingredienteItemId: string; ingredienteNombre: string; cantidad: string; unidadCodigo: string; bloqueante: boolean }[]
   extrasPermitidos?: { ingredienteItemId: string; ingredienteNombre?: string; cantidad: string; unidadCodigo: string; precioExtra: string }[]
   componentes?: { componenteItemId: string; componenteNombre?: string; tipo?: string; cantidad: string; bloqueante: boolean; stock?: string | null }[]
+  /**
+   * Solo la trae `GET /items/:id` (Tarea 3a), y solo para producto/ingrediente:
+   * el saldo por ubicación, el local primero (el backend ya lo ordena así).
+   * `stock` de arriba sigue siendo el TOTAL de todas las ubicaciones — este
+   * campo es el desglose de ESE total, no otro número.
+   */
+  desglosePorUbicacion?: { ubicacionId: string; nombre: string; stock: string }[]
   grupos?: {
     grupoModificadorId: string
     nombre: string
@@ -517,6 +524,14 @@ function emptyForm() {
 
 const form = ref(emptyForm())
 const formCostoActual = ref<string | null>(null)
+/**
+ * Tarea 14 (bodegas y traslados): el desglose por ubicación del item que se
+ * está editando, el local primero. Solo lo trae `GET /items/:id` — la fila de
+ * la lista no lo tiene—, así que se guarda aparte de `form`, igual que
+ * `formCostoActual`. Vacío para un item nuevo (`abrirCrear`) y para
+ * cualquier tipo sin stock propio.
+ */
+const formDesglosePorUbicacion = ref<{ ubicacionId: string; nombre: string; stock: string }[]>([])
 const { convertirCantidad } = useUnidadConversion()
 
 /** Preview en vivo del costo de receta al agregar/quitar/cambiar ingredientes. */
@@ -584,6 +599,7 @@ function resetDrawer() {
   form.value = emptyForm()
   form.value.monedaId = monedasOpts.value[0]?.value ?? ''
   formCostoActual.value = null
+  formDesglosePorUbicacion.value = []
 }
 
 watch(drawerOpen, (open) => {
@@ -1018,6 +1034,7 @@ async function abrirEditar(item: Item) {
       descuentosIds: detalle.descuentosIds ?? [],
     }
     formCostoActual.value = detalle.costoActual ?? null
+    formDesglosePorUbicacion.value = detalle.desglosePorUbicacion ?? []
     drawerOpen.value = true
   } catch {
     toast.add({ title: 'Error al cargar detalle del item', color: 'error' })
@@ -1522,7 +1539,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               }}</span>
               <span v-if="row.original.categoriaNombre">· {{ row.original.categoriaNombre }}</span>
               <span v-if="(row.original.tipo === 'producto' || row.original.tipo === 'ingrediente') && row.original.stock !== null">
-                · Stock: {{ row.original.stock }}
+                <!-- "Stock total" y no "Stock" a secas (Tarea 14): con bodegas,
+                     este número es el TOTAL de todas las ubicaciones, y el
+                     salón muestra "Disponible" —el del local, neto de lo
+                     comprometido—. Con 20 kg en bodega y 10 en el local, acá
+                     dice 30 y el POS puede decir que no hay: los dos números
+                     tienen razón, y llamarlos distinto es lo que evita que se
+                     lea como un bug. -->
+                · Stock total: {{ row.original.stock }}
                 <span v-if="row.original.tipo === 'producto' && row.original.modoInventario === 'serie'">(unidades)</span>
                 <span v-else-if="row.original.tipo === 'producto' && row.original.modoInventario === 'lote'">(lotes)</span>
                 <span v-else>{{ row.original.unidadMedida }}</span>
@@ -1847,6 +1871,29 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   </div>
                 </div>
               </template>
+
+              <!-- Desglose por ubicación (Tarea 14): "Stock actual"/"Stock
+                   total" de arriba es el TOTAL del tenant; esto es el mismo
+                   número partido por ubicación, el local primero (el backend
+                   ya lo ordena así). Solo con más de una ubicación —sin
+                   bodegas no hay nada que desglosar, `hayBodegas` decide— y
+                   solo para un item YA creado, que es cuando `GET /items/:id`
+                   trae el dato. -->
+              <div
+                v-if="editingId && hayBodegas && formDesglosePorUbicacion.length"
+                data-qa="desglose-ubicacion"
+                class="space-y-1.5"
+              >
+                <p class="text-sm font-medium text-muted">Stock por ubicación</p>
+                <div
+                  v-for="fila in formDesglosePorUbicacion"
+                  :key="fila.ubicacionId"
+                  class="flex items-center justify-between text-sm"
+                >
+                  <span class="text-muted">{{ fila.nombre }}</span>
+                  <span class="font-mono">{{ formatStock(fila.stock, form.unidadMedida) }}</span>
+                </div>
+              </div>
             </div>
           </template>
 
@@ -1889,6 +1936,24 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 <UFormField v-else label="Stock actual">
                   <UInput :model-value="form.stock" disabled class="w-full" />
                 </UFormField>
+              </div>
+
+              <!-- Desglose por ubicación (Tarea 14): mismo criterio que el
+                   bloque gemelo de producto, arriba. -->
+              <div
+                v-if="editingId && hayBodegas && formDesglosePorUbicacion.length"
+                data-qa="desglose-ubicacion"
+                class="space-y-1.5"
+              >
+                <p class="text-sm font-medium text-muted">Stock por ubicación</p>
+                <div
+                  v-for="fila in formDesglosePorUbicacion"
+                  :key="fila.ubicacionId"
+                  class="flex items-center justify-between text-sm"
+                >
+                  <span class="text-muted">{{ fila.nombre }}</span>
+                  <span class="font-mono">{{ formatStock(fila.stock, form.unidadMedida) }}</span>
+                </div>
               </div>
             </div>
           </template>

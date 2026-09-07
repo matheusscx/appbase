@@ -30,6 +30,12 @@ const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
 const { formatMonto } = useFormatters()
+// Tarea 15 ("bodegas y traslados"): el 400 de "no hay stock" al cobrar ofrece
+// el traslado precargado solo a quien de verdad puede crearlo — el mismo
+// permiso que ya exige `POST /traslados`. Un cajero sin él ve el mensaje y
+// nada más, igual que el garzón del salón.
+const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
+const { mostrarRechazoPorStock } = useRechazoPorStock()
 
 const items = ref<ItemCatalogo[]>([])
 const metodos = ref<MetodoPago[]>([])
@@ -318,7 +324,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     customerExpandido.value = false
     customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
   } catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al registrar la venta'), color: 'error' })
+    mostrarRechazoPorStock({ error: e, fallback: 'Error al registrar la venta', puedeTrasladar: puedeTrasladar.value })
   } finally {
     submitting.value = false
   }

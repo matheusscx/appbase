@@ -36,6 +36,23 @@ const ITEM_DETALLE = {
 
 const MOTIVO = { id: 'motivo-1', nombre: 'Reposición' }
 
+// Tarea 15 ("bodegas y traslados"): el botón "Trasladar" del toast de "no hay
+// stock" llega acá con `?itemId=&origenId=&cantidad=`. `{}` por default —el
+// caso de las Tareas 13/14 de arriba, que abren el drawer a mano— y cada test
+// de la Tarea 15 lo pisa antes de montar.
+//
+// Solo se mockea `useRoute` (para inyectar la query), NUNCA `useRouter`: los
+// plugins internos de Nuxt (`chunk-reload`, el sync de página) llaman
+// `router.beforeEach`/`afterEach`/`beforeResolve` en el arranque, y un mock
+// liviano sin esos métodos revienta la inicialización de la app entera —
+// medido. El `router.replace(...)` que limpia la query al cerrar el drawer
+// corre contra el router REAL y no se afirma en este archivo.
+let routeQuery: Record<string, string> = {}
+
+mockNuxtImport('useRoute', () => {
+  return () => ({ query: routeQuery })
+})
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return true },
@@ -190,6 +207,53 @@ describe('traslados — formulario (Tarea 13)', () => {
     // siquiera se dibuja. Si sobreviviera, sería un "7" tipeado contra el
     // disponible del LOCAL, aplicado como si fuera de la bodega.
     expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+})
+
+describe('traslados — el traslado precargado desde el toast de "no hay stock" (Tarea 15)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    routeQuery = {}
+  })
+
+  it('con ?itemId&origenId&cantidad, abre el drawer YA armado: origen la bodega, destino el local, el producto y la cantidad cargados', async () => {
+    routeQuery = { itemId: PRODUCTO.id, origenId: BODEGA.id, cantidad: '3' }
+    const wrapper = await montar()
+    // Precarga async: cargar catálogos + `onSeleccionarItem` (que pide
+    // `GET /items/:id` para el disponible de la bodega). Más margen que el
+    // resto del archivo a propósito.
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+
+    // Origen = la bodega: lo dice el disponible mostrado (20, el de la
+    // bodega — mismo ancla que el test de la Tarea 13 de arriba).
+    const disponible = wrapper.find('[data-qa="linea-disponible"]')
+    expect(disponible.exists()).toBe(true)
+    expect(disponible.text()).toContain('Bodega centro')
+    expect(disponible.text()).toContain('20')
+
+    // Destino = el local: el toast no lo manda, la pantalla lo completa.
+    const [, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    expect(destinoSelect, 'select de destino').toBeTruthy()
+    expect(destinoSelect!.props('modelValue')).toBe(LOCAL.id)
+
+    // La cantidad que el toast dijo que faltaba, no lo que haya calculado
+    // `onSeleccionarItem` de más.
+    const cantidadInput = wrapper.find('input[inputmode="decimal"]')
+    expect((cantidadInput.element as HTMLInputElement).value).toBe('3')
+
+    wrapper.unmount()
+  })
+
+  it('sin ?itemId en la URL, no abre nada — es el camino normal de las Tareas 13/14', async () => {
+    routeQuery = {}
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
 
     wrapper.unmount()
   })

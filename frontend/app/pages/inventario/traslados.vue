@@ -90,9 +90,11 @@ interface Opt { label: string; value: string }
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const { formatFecha, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
-const { ubicaciones, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
+const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
 // El nav abre esta página con Inventario/Leer, pero POST /traslados exige
@@ -142,7 +144,10 @@ async function cargarCatalogos() {
   }
 }
 
-onMounted(() => { void cargarUbicaciones() })
+onMounted(() => {
+  void cargarUbicaciones()
+  void abrirDesdeQuery()
+})
 
 // ── Formulario ───────────────────────────────────────────────────────────
 
@@ -281,6 +286,51 @@ async function onSeleccionarItem(linea: LineaForm, itemId: string) {
     if (linea.itemId === itemId) linea.cargando = false
   }
 }
+
+/**
+ * Tarea 15 ("bodegas y traslados"): el botón "Trasladar" del toast de "no hay
+ * stock" (`useRechazoPorStock`, disparado desde el salón o el POS) trae al
+ * garzón/cajero con permiso hasta acá con `?itemId=&origenId=&cantidad=` en
+ * la URL, y esta función abre el drawer YA armado — "a un clic", como pide
+ * la Tarea 15 — en vez de una pantalla vacía que hay que volver a completar
+ * a mano. Mismo patrón de precarga por query que `ventas/index.vue` usa para
+ * `?venta=`.
+ *
+ * `destinoId` no viaja en la URL —el toast solo conoce el origen, no a dónde
+ * el garzón/cajero prefiere mandarlo— y se completa acá con el LOCAL del
+ * tenant: es a donde tiene sentido que vaya la mercadería que faltó ahí. Las
+ * dos, origen y destino, siguen siendo editables: esto es un punto de
+ * partida, no una decisión tomada por la pantalla.
+ */
+async function abrirDesdeQuery() {
+  const { itemId, origenId, cantidad } = route.query
+  if (typeof itemId !== 'string' || !itemId) return
+
+  if (!catalogosCargados.value) await cargarCatalogos()
+
+  form.value = emptyForm()
+  form.value.origenId = typeof origenId === 'string' ? origenId : ''
+  form.value.destinoId = local.value?.id ?? ''
+  lineas.value = [nuevaLinea()]
+  drawerOpen.value = true
+
+  const linea = lineas.value[0]
+  if (!linea) return
+  await onSeleccionarItem(linea, itemId)
+  if (typeof cantidad === 'string' && cantidad) linea.cantidad = cantidad
+}
+
+// La URL no debe seguir prometiendo un traslado precargado después de que el
+// drawer se cerró (cancelado o confirmado): un refresh o un "atrás" del
+// navegador no puede reabrirlo solo. Mismo criterio que `ventas/index.vue`
+// con `?venta=`.
+watch(drawerOpen, (abierto) => {
+  if (abierto) return
+  if (!route.query.itemId && !route.query.origenId && !route.query.cantidad) return
+  void router.replace({
+    query: { ...route.query, itemId: undefined, origenId: undefined, cantidad: undefined },
+  })
+})
 
 function toggleUnidad(linea: LineaForm, unidadId: string) {
   linea.unidadIds = linea.unidadIds.includes(unidadId)

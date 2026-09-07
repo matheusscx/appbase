@@ -4971,12 +4971,143 @@ export class ItemsService {
         // es la diferencia (tipeó 3 sobre una línea de 1 y el número es 2).
         // "Este pedido necesita 2" invitaba a leer el 3 y no entender de dónde
         // salía el 2; así la frase es cierta desde los dos lados.
-        throw new BadRequestException(
-          `Stock insuficiente de "${c.nombre}": quedan ${restante.toString()} ${fila.unidad_medida} ` +
-            `y lo que se está agregando necesita ${neto.toString()} ${fila.unidad_medida}`,
+        //
+        // Tarea 15 ("bodegas y traslados"): además de nombrar el ítem, el 400
+        // dice DÓNDE está lo que falta — ver `errorStockInsuficiente`.
+        throw await this.errorStockInsuficiente(
+          tenantId,
+          itemId,
+          c.nombre,
+          restante,
+          neto,
+          fila.unidad_medida,
         );
       }
     }
+  }
+
+  /**
+   * Arma el 400 de "no hay stock" con dónde está lo que falta (Tarea 15,
+   * "bodegas y traslados"): nombra el ítem, cuánto falta y —si hay stock en
+   * otra ubicación— dónde, más los datos sueltos (`itemNombre`, `faltante`,
+   * `ubicaciones: [{ ubicacionId, nombre, stock }]`) para que el cliente
+   * ofrezca la acción (un traslado precargado) sin parsear el `message`.
+   *
+   * Compartido por los DOS chokepoints que frenan un pedido o un cobro por
+   * falta de stock EN EL LOCAL: `validarStockAlPedir` (el pre-chequeo del
+   * salón, con `restante` ya leído bajo lock) y `ventas.service.ts` (el tope
+   * al cobrar directo por POS, vía `errorStockInsuficienteEnLocal`). Es el
+   * mismo hecho de negocio —"no hay en el local, pero sí en la bodega X"—
+   * contado desde dos puntos de entrada distintos, así que el mensaje es
+   * literalmente el mismo armado.
+   *
+   * ⚠️ **Medido contra el caso real antes de escribir el texto** (0 en el
+   * local, 10 en la bodega, brief de la Tarea 15): el mensaje viejo era
+   * `Stock insuficiente de "X": quedan 0 kg y lo que se está agregando
+   * necesita 5 kg` — nombraba el ítem pero no el lugar, y ni sugería que
+   * "0" era del LOCAL y no del tenant entero (que es lo que muestra `stock`
+   * de `GET /items` desde la Tarea 3a). Acá se agrega "en el local" a la
+   * primera mitad —sin tocar el resto: `restante` y `neto` se siguen
+   * mostrando tal cual, mismo criterio de arriba— y, si hay bodegas con
+   * saldo, se le suma la segunda mitad con la de más stock.
+   *
+   * Sin stock en NINGUNA bodega, `ubicaciones` viene `[]` y el mensaje se
+   * queda con la primera mitad: no se inventa una bodega que no tiene nada.
+   */
+  private async errorStockInsuficiente(
+    tenantId: string,
+    itemId: string,
+    itemNombre: string,
+    restante: Decimal,
+    neto: Decimal,
+    unidadMedida: string,
+  ): Promise<BadRequestException> {
+    // Bodegas con saldo > 0, la de más stock primero: es la que el cliente
+    // ofrece como origen del traslado precargado. `u.tipo = 'bodega'`
+    // explícito y no "!= local": mismo criterio de defensa en profundidad
+    // que el resto de las queries nuevas de este frente (ver
+    // `desglosePorUbicacion` en `findOne`), no confiar en que "no es el
+    // local" sea lo mismo que "es una bodega".
+    const bodegasRows: {
+      ubicacion_id: string;
+      nombre: string;
+      stock: string;
+    }[] = await this.db.query(
+      `SELECT su.ubicacion_id, u.nombre, su.stock
+         FROM stock_ubicacion su
+         JOIN ubicaciones u ON u.ubicacion_id = su.ubicacion_id
+                           AND u.tenant_id = $2
+        WHERE su.item_id = $1 AND u.tipo = 'bodega' AND u.eliminado_el IS NULL
+          AND su.stock > 0
+        ORDER BY su.stock DESC, u.nombre`,
+      [itemId, tenantId],
+    );
+
+    const base =
+      `Stock insuficiente de "${itemNombre}" en el local: quedan ${restante.toString()} ${unidadMedida} ` +
+      `y lo que se está agregando necesita ${neto.toString()} ${unidadMedida}`;
+    const message = bodegasRows.length
+      ? `${base} — hay ${bodegasRows[0].stock} ${unidadMedida} en ${bodegasRows[0].nombre}`
+      : base;
+
+    return new BadRequestException({
+      message,
+      // El id, no solo el nombre: en una receta de varios ingredientes el
+      // que faltó NO es el `itemId` que el cliente pidió (ese es el plato),
+      // así que sin esto el frontend no puede armar el traslado precargado
+      // "con ese producto" (Tarea 15) — tendría que adivinar cuál de los
+      // ingredientes es, y adivinar por nombre es exactamente lo que "sin
+      // parsear texto" vino a evitar.
+      itemId,
+      itemNombre,
+      // Lo que falta cubrir, no `neto`: con `restante` negativo (lo no
+      // bloqueante ya lo dejó en déficit, ver el comentario de arriba) la
+      // brecha real es mayor que lo que esta línea pidió.
+      faltante: neto.minus(restante).toString(),
+      ubicaciones: bodegasRows.map((b) => ({
+        ubicacionId: b.ubicacion_id,
+        nombre: b.nombre,
+        stock: b.stock,
+      })),
+    });
+  }
+
+  /**
+   * Envoltorio de `errorStockInsuficiente` para el chokepoint de
+   * `ventas.service.ts` (el tope al cobrar directo por POS, spec Tarea 15):
+   * a diferencia de `validarStockAlPedir`, ese camino no lockea ni lee el
+   * saldo del local de antemano —lo hace
+   * `InventarioService.registrarMovimiento`, que ya rechazó el movimiento
+   * cuando este método corre—, así que acá se vuelve a leer. Correr FUERA
+   * del lock es seguro: esto va en el `catch` de un movimiento que YA
+   * falló (nunca llegó a escribir), la transacción de la venta sigue
+   * abierta y el saldo que se lee es el mismo que `registrarMovimiento`
+   * vio recién.
+   *
+   * Público (a diferencia de `errorStockInsuficiente`) porque lo llama
+   * `VentasService`, no un método de esta clase.
+   */
+  async errorStockInsuficienteEnLocal(
+    tenantId: string,
+    itemId: string,
+    itemNombre: string,
+    neto: Decimal,
+    unidadMedida: string,
+  ): Promise<BadRequestException> {
+    const localId = await this.ubicacionesService.localDe(tenantId);
+    const rows: { stock: string }[] = await this.db.query(
+      `SELECT stock FROM stock_ubicacion WHERE item_id = $1 AND ubicacion_id = $2`,
+      [itemId, localId],
+    );
+    const restante = new Decimal(rows[0]?.stock ?? '0');
+    return this.errorStockInsuficiente(
+      tenantId,
+      itemId,
+      itemNombre,
+      restante,
+      neto,
+      unidadMedida,
+    );
   }
 
   // ── private helpers ────────────────────────────────────────────────────────

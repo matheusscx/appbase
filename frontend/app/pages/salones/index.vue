@@ -200,6 +200,12 @@ const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
 const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
+// Tarea 15 ("bodegas y traslados"): el 400 de "no hay stock" ofrece el
+// traslado precargado solo a quien de verdad puede crearlo. El garzón no
+// tiene `Inventario/Crear` — mismo permiso que ya exige `POST /traslados` y
+// que ya usa `inventario/traslados.vue`—, así que ve el mensaje y nada más.
+const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
+const { mostrarRechazoPorStock } = useRechazoPorStock()
 
 const transferAdminOpen = ref(false)
 /** La cuenta para la que se abrió el modal de transferencia. Ver `abrirTransferenciaAdmin`. */
@@ -1851,7 +1857,7 @@ async function addProducto(item: ItemCatalogo) {
     syncCuenta(cuenta)
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al agregar el producto'), color: 'error' })
+    mostrarRechazoPorStock({ error: e, fallback: 'Error al agregar el producto', puedeTrasladar: puedeTrasladar.value })
   }
 }
 
@@ -1868,7 +1874,7 @@ async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string
     syncCuenta(cuenta)
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al agregar la receta'), color: 'error' })
+    mostrarRechazoPorStock({ error: e, fallback: 'Error al agregar la receta', puedeTrasladar: puedeTrasladar.value })
   }
   finally {
     recetaDrawerOpen.value = false

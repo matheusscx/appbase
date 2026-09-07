@@ -844,18 +844,46 @@ export class VentasService {
       const { item, linea, personalizacion, cantidadCanonica } =
         lineasConversion[i];
       if (item.tipo === 'producto') {
-        await this.inventarioService.registrarMovimiento(manager, {
-          tenantId,
-          itemId: item.id,
-          ubicacionId: ubicacionLocalId,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: cantidadCanonica,
-          usuarioId,
-          ventaId: venta.id,
-          unidadIds: linea.unidadIds,
-          loteId: linea.loteId,
-        });
+        try {
+          await this.inventarioService.registrarMovimiento(manager, {
+            tenantId,
+            itemId: item.id,
+            ubicacionId: ubicacionLocalId,
+            tipo: 'salida',
+            motivo: 'venta',
+            cantidad: cantidadCanonica,
+            usuarioId,
+            ventaId: venta.id,
+            unidadIds: linea.unidadIds,
+            loteId: linea.loteId,
+          });
+        } catch (e) {
+          // Tarea 15 ("bodegas y traslados"): el chokepoint de inventario
+          // (`moverCantidad`) rechaza con un mensaje genérico —"Stock
+          // insuficiente para la salida", sin nombrar el ítem ni el lugar—
+          // porque no sabe qué línea de qué venta lo llamó. Acá SÍ se sabe
+          // (`item.nombre`, `cantidadCanonica`), así que el 400 se
+          // reemplaza por el mismo enriquecido de `validarStockAlPedir`
+          // (mismo texto, mismo `itemNombre`/`faltante`/`ubicaciones`): el
+          // garzón/cajero ve "dónde está" tanto si el rechazo llega al
+          // PEDIR (salón) como al COBRAR directo (POS). Solo se re-arma
+          // cuando el motivo es justo ESE —modo cantidad, sin unidades ni
+          // lote— para no pisar el mensaje propio de series/lotes, que
+          // hablan de unidades concretas y no de "cuánto queda".
+          if (
+            e instanceof BadRequestException &&
+            e.message === 'Stock insuficiente para la salida'
+          ) {
+            throw await this.itemsService.errorStockInsuficienteEnLocal(
+              tenantId,
+              item.id,
+              item.nombre,
+              new Decimal(cantidadCanonica),
+              item.unidadMedida ?? '',
+            );
+          }
+          throw e;
+        }
       } else if (item.tipo === 'receta') {
         convertir ??= await this.catalogService.crearConversor();
         const advertenciasIngrediente =

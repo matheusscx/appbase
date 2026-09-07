@@ -6726,7 +6726,13 @@ describe('ItemsService', () => {
                 },
               ],
         )
-        .mockResolvedValueOnce(tipoRows);
+        .mockResolvedValueOnce(tipoRows)
+        // 6 — Tarea 15: bodegas con saldo, solo se consulta si el tope de
+        // arriba rebota. `[]` = ninguna, que es el caso de todos los tests de
+        // este helper (no le interesa el mensaje de la bodega). Encolado
+        // igual para los tests que SÍ pasan: un mock de más sin consumir no
+        // rompe nada.
+        .mockResolvedValueOnce([]);
     };
 
     const pedir = (cantidad: string) =>
@@ -6792,7 +6798,7 @@ describe('ItemsService', () => {
       mockearPedidoDeProducto({ stock: null, comprometido: null });
 
       await expect(pedir('1')).rejects.toThrow(
-        `Stock insuficiente de "${NOMBRE}": quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
+        `Stock insuficiente de "${NOMBRE}" en el local: quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
       );
 
       const lockCall = dataSource.query.mock.calls.find((c) =>
@@ -6831,7 +6837,7 @@ describe('ItemsService', () => {
       // al SUBIR una línea que ya existía es la diferencia, no lo que el garzón
       // tipeó (ver el mensaje en `items.service.ts`).
       await expect(pedir('2')).rejects.toThrow(
-        `Stock insuficiente de "${NOMBRE}": quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
+        `Stock insuficiente de "${NOMBRE}" en el local: quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
       );
     });
 
@@ -6986,6 +6992,8 @@ describe('ItemsService', () => {
         // 5) el saldo del local, en su propio statement bajo el lock
         .mockResolvedValueOnce([{ item_id: PAPAS, stock: '1' }])
         // 6) el comprometido: ninguna cuenta abierta
+        .mockResolvedValueOnce([])
+        // 7) Tarea 15: bodegas con saldo — ninguna, no le interesa a este test
         .mockResolvedValueOnce([]);
 
       await expect(
@@ -7008,7 +7016,7 @@ describe('ItemsService', () => {
           },
         ]),
       ).rejects.toThrow(
-        `Stock insuficiente de "${NOMBRE}": quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
+        `Stock insuficiente de "${NOMBRE}" en el local: quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
       );
 
       // Y lo lockeó de verdad: el flag mergeado ni llegaba a esta consulta.

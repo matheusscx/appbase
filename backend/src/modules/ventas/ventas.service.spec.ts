@@ -336,6 +336,14 @@ describe('VentasService', () => {
             resolverPersonalizacionCombo: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
             venderComponentesCombo: jest.fn().mockResolvedValue([]),
+            // Tarea 15 ("bodegas y traslados"): el 400 enriquecido del tope
+            // al cobrar. Rechaza distinto del genérico de
+            // `registrarMovimiento` para que los tests de este archivo
+            // puedan distinguir "el catch de `crear()` corrió" de "el
+            // genérico se propagó sin enriquecer".
+            errorStockInsuficienteEnLocal: jest
+              .fn()
+              .mockResolvedValue(new BadRequestException('enriquecido-mock')),
             // El ítem de sistema del que cuelga la línea de ajuste de una nota
             // de crédito. `tipo: 'servicio'` no es decorativo: de ahí sale la
             // unidad base de esa línea (`resolverUnidadBaseDeItem`).
@@ -1215,6 +1223,56 @@ describe('VentasService', () => {
           itemId: ITEM_ID,
         }),
       );
+    });
+
+    /**
+     * Tarea 15 ("bodegas y traslados"): el chokepoint de inventario rechaza
+     * con un mensaje genérico —"Stock insuficiente para la salida", sin
+     * nombrar el ítem ni el lugar— porque no sabe qué línea de qué venta lo
+     * llamó. `crear()` lo intercepta y lo reemplaza por el enriquecido de
+     * `ItemsService.errorStockInsuficienteEnLocal`, con los mismos datos que
+     * ya tenía en la línea (`item.id`, `item.nombre`, la cantidad pedida y
+     * la unidad).
+     */
+    it('el genérico de "Stock insuficiente para la salida" se reemplaza por el enriquecido, con el ítem y la cantidad de la línea', async () => {
+      inventarioService.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('Stock insuficiente para la salida'),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, baseDto),
+      ).rejects.toThrow('enriquecido-mock');
+
+      expect(itemsService.errorStockInsuficienteEnLocal).toHaveBeenCalledWith(
+        TENANT_ID,
+        mockItem.id,
+        mockItem.nombre,
+        expect.any(Decimal),
+        mockItem.unidadMedida,
+      );
+      const [, , , cantidadArg] = (
+        itemsService.errorStockInsuficienteEnLocal as jest.Mock
+      ).mock.calls[0];
+      expect((cantidadArg as InstanceType<typeof Decimal>).toString()).toBe(
+        baseDto.lineas[0].cantidad,
+      );
+    });
+
+    /**
+     * El catch es específico: otro 400 del mismo chokepoint (series, lotes,
+     * o cualquier otro motivo) NO se reemplaza — el enriquecido de acá arriba
+     * solo tiene sentido para el mensaje EXACTO de `moverCantidad`, y pisar
+     * cualquier otro sería mentir sobre por qué rebotó.
+     */
+    it('otro 400 del chokepoint de inventario NO se reemplaza', async () => {
+      inventarioService.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('Unidad no encontrada'),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, baseDto),
+      ).rejects.toThrow('Unidad no encontrada');
+      expect(itemsService.errorStockInsuficienteEnLocal).not.toHaveBeenCalled();
     });
 
     it('persiste presentación y usa canónica para precio/stock', async () => {
