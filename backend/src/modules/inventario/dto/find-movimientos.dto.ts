@@ -31,6 +31,10 @@ export class FindMovimientosDto extends PaginationQueryDto {
   itemId?: string;
 
   @IsOptional()
+  @IsUUID()
+  ubicacionId?: string;
+
+  @IsOptional()
   @IsIn(MOTIVOS)
   motivo?: string;
 

@@ -35,7 +35,7 @@ describe('ItemsService', () => {
     sinTransaccion: (fn: () => unknown) => unknown;
   };
   let inventarioServiceMock: { registrarMovimiento: jest.Mock };
-  let ubicacionesServiceMock: { localDe: jest.Mock };
+  let ubicacionesServiceMock: { localDe: jest.Mock; findOneOrFail: jest.Mock };
   let catalogServiceMock: {
     findAllUnidadesMedida: jest.Mock;
     convertirUnidad: jest.Mock;
@@ -63,6 +63,16 @@ describe('ItemsService', () => {
     inventarioServiceMock = { registrarMovimiento: jest.fn() };
     ubicacionesServiceMock = {
       localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
+      // Mockeado a nivel de SERVICE: `ajustarStock` lo llama para validar
+      // `dto.ubicacionId` (Tarea 12 del frente "bodegas y traslados") antes
+      // de tocar nada más — no pasa por `managerMock.query`, así que no
+      // consume ningún slot de `mockResolvedValueOnce` de los tests de abajo.
+      findOneOrFail: jest.fn().mockResolvedValue({
+        id: UBICACION_LOCAL_ID,
+        nombre: 'Local',
+        tipo: 'local',
+        activo: true,
+      }),
     };
     // El conversor que devuelve `crearConversor`, con el catálogo ya cargado.
     // Su implementación por defecto reproduce la semántica real para las
@@ -3357,6 +3367,7 @@ describe('ItemsService', () => {
       });
 
       const res = await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: '5',
         tipo: 'entrada',
         motivo: 'compra',
@@ -3376,11 +3387,69 @@ describe('ItemsService', () => {
       );
     });
 
+    // Tarea 12 del frente "bodegas y traslados": el ajuste de stock y la
+    // entrada por compra (mismo DTO, `motivo` los distingue) eligen ubicación.
+    // UBICACION_BODEGA_ID ≠ UBICACION_LOCAL_ID a propósito — con IDs iguales un
+    // mutante que ignorara `dto.ubicacionId` sobreviviría sin que ningún
+    // assert lo note.
+    const UBICACION_BODEGA_ID = 'ubicacion-bodega-uuid';
+
+    it('con ubicacionId de una bodega, registra el movimiento EN ESA bodega', async () => {
+      ubicacionesServiceMock.findOneOrFail.mockResolvedValueOnce({
+        id: UBICACION_BODEGA_ID,
+        nombre: 'Bodega centro',
+        tipo: 'bodega',
+        activo: true,
+      });
+      managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]);
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-1',
+        stockAnterior: '0',
+        stockResultante: '20',
+      });
+
+      await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+        ubicacionId: UBICACION_BODEGA_ID,
+        cantidad: '20',
+        tipo: 'entrada',
+        motivo: 'compra',
+      });
+
+      expect(ubicacionesServiceMock.findOneOrFail).toHaveBeenCalledWith(
+        TENANT,
+        UBICACION_BODEGA_ID,
+        managerMock,
+      );
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ ubicacionId: UBICACION_BODEGA_ID }),
+      );
+    });
+
+    it('valida ubicacionId contra el tenant ANTES del SELECT del ítem, y no registra el movimiento si es de otro tenant', async () => {
+      ubicacionesServiceMock.findOneOrFail.mockRejectedValueOnce(
+        new NotFoundException('Ubicación no encontrada'),
+      );
+
+      await expect(
+        service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          ubicacionId: 'ubicacion-de-otro-tenant',
+          cantidad: '5',
+          tipo: 'entrada',
+          motivo: 'compra',
+        }),
+      ).rejects.toThrow('no encontrada');
+
+      expect(managerMock.query).not.toHaveBeenCalled();
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
     it('rechaza si el item no es inventariable', async () => {
       managerMock.query.mockResolvedValueOnce([{ tipo: 'servicio' }]);
 
       await expect(
         service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          ubicacionId: UBICACION_LOCAL_ID,
           cantidad: '5',
           tipo: 'entrada',
           motivo: 'compra',
@@ -3398,6 +3467,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          ubicacionId: UBICACION_LOCAL_ID,
           tipo: 'entrada',
           motivo: 'ajuste_manual',
           cantidad: '1',
@@ -3410,6 +3480,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          ubicacionId: UBICACION_LOCAL_ID,
           cantidad: '5',
           tipo: 'entrada',
           motivo: 'compra',
@@ -3427,6 +3498,7 @@ describe('ItemsService', () => {
       managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]); // SELECT tipo
 
       await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: '5',
         tipo: 'entrada',
         motivo: 'compra',
@@ -3630,6 +3702,7 @@ describe('ItemsService', () => {
       });
 
       await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: 500,
         tipo: 'entrada',
         motivo: 'compra',
@@ -3660,6 +3733,7 @@ describe('ItemsService', () => {
       });
 
       await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: 2,
         tipo: 'entrada',
         motivo: 'compra',
@@ -3690,6 +3764,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+          ubicacionId: UBICACION_LOCAL_ID,
           cantidad: 1,
           tipo: 'entrada',
           motivo: 'compra',
@@ -3715,6 +3790,7 @@ describe('ItemsService', () => {
       });
 
       await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: 1,
         tipo: 'entrada',
         motivo: 'compra',
@@ -3739,6 +3815,7 @@ describe('ItemsService', () => {
       });
 
       await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: 2,
         tipo: 'entrada',
         motivo: 'compra',
@@ -3760,6 +3837,7 @@ describe('ItemsService', () => {
       });
 
       await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        ubicacionId: UBICACION_LOCAL_ID,
         cantidad: 10,
         tipo: 'entrada',
         motivo: 'compra',
@@ -3781,6 +3859,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+          ubicacionId: UBICACION_LOCAL_ID,
           cantidad: 2,
           tipo: 'entrada',
           motivo: 'compra',

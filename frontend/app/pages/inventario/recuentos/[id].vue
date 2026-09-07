@@ -25,6 +25,9 @@ interface RecuentoLineaApi {
 
 interface RecuentoDetalleApi {
   id: string
+  ubicacionId: string
+  /** `null` si la ubicación se eliminó después de crear la sesión. */
+  ubicacionNombre: string | null
   estado: string
   motivoDiferenciaDefaultId: string | null
   comentario: string | null
@@ -49,6 +52,7 @@ const recuentoId = computed(() => route.params.id as string)
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha, formatStock } = useFormatters()
+const { hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
 const loading = ref(true)
 const notFound = ref(false)
@@ -151,7 +155,7 @@ async function cargarMotivos() {
 
 onMounted(async () => {
   loading.value = true
-  await Promise.all([cargarDetalle(), cargarMotivos()])
+  await Promise.all([cargarDetalle(), cargarMotivos(), cargarUbicaciones()])
   loading.value = false
 })
 
@@ -367,6 +371,15 @@ const columns: TableColumn<LineaRow>[] = [
                 :label="estadoRecuentoLabel(detalle.estado)"
                 :color="estadoRecuentoColor(detalle.estado)"
                 variant="subtle"
+              />
+              <!-- Solo si hayBodegas (spec § 6): con una sola ubicación, decirla
+                   siempre dice lo mismo. No editable — la sesión no cambia de lugar. -->
+              <UBadge
+                v-if="hayBodegas"
+                :label="detalle.ubicacionNombre ?? 'Ubicación eliminada'"
+                color="neutral"
+                variant="subtle"
+                icon="i-lucide-map-pin"
               />
             </div>
 

@@ -141,15 +141,15 @@ describe('items — stock por ubicación (e2e)', () => {
     expect(resItem.status).toBe(201);
     const itemId = (resItem.body as ItemResponse).id;
 
-    // 3. 30 en el local, por la API real: la compra (sin `ubicacionId` en el
-    // body todavía — eso lo gana recién la Tarea 5) cae por default en el
-    // local (`InventarioService` resuelve `UbicacionesService.localDe`).
+    // 3. 30 en el local, por la API real: desde la Tarea 12 `ubicacionId` es
+    // requerido en el body — ya no hay default silencioso al local.
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '30',
         costoUnitario: '500',
       })

@@ -24,6 +24,9 @@ interface CausaMermaItem {
 interface ItemResponse {
   id: string;
   costoActual: string | null;
+  /** El stock DEL LOCAL (spec § 5.4). `stock` a secas es el TOTAL de todas
+   *  las ubicaciones — no sirve para afirmar "el local no se movió". */
+  stockVendible: string | null;
 }
 interface MermaResponse {
   movimientoId: string;
@@ -31,6 +34,11 @@ interface MermaResponse {
   costoUnitario: string | null;
   costoPerdido: string | null;
   causaNombre: string;
+}
+interface UbicacionListada {
+  id: string;
+  nombre: string;
+  tipo: 'local' | 'bodega';
 }
 interface MermaListItem {
   id: string;
@@ -66,6 +74,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
+  let localId: string;
   let itemId: string;
   let roturaCausaId: string;
   let mermaMovimientoId: string;
@@ -93,6 +102,14 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
 
     ds = app.get(DataSource);
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as UbicacionListada[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
   });
 
   afterAll(async () => {
@@ -224,6 +241,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '5',
         costoUnitario: '2500',
       });
@@ -245,6 +263,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         itemId,
+        ubicacionId: localId,
         cantidad: '1',
         causaMermaId: CAUSA_VENCIMIENTO_ID,
         comentario: 'E2E merma vencimiento',
@@ -360,6 +379,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         itemId,
+        ubicacionId: localId,
         cantidad: '0.1',
         causaMermaId: roturaCausaId,
       });
@@ -398,6 +418,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'inventario_inicial',
+        ubicacionId: localId,
         cantidad: '5',
       });
     expect(resEntrada.status).toBe(200);
@@ -407,6 +428,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         itemId: itemSinCostoId,
+        ubicacionId: localId,
         cantidad: '1',
         causaMermaId: CAUSA_VENCIMIENTO_ID,
       });
@@ -429,5 +451,154 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     );
     expect(filaMerma).toBeDefined();
     expect(filaMerma?.costoPerdido).toBeNull();
+  });
+
+  // Tarea 10 del frente "bodegas y traslados": la merma pasa a decir DÓNDE
+  // ocurrió. Este bloque cubre las tres formas nuevas de fallar/acertar.
+  describe('ubicacionId — Tarea 10', () => {
+    it('POST /mermas sin ubicacionId → 400', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/mermas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          itemId,
+          cantidad: '0.1',
+          causaMermaId: CAUSA_VENCIMIENTO_ID,
+        });
+      expect(res.status).toBe(400);
+    });
+
+    it('un ubicacionId de otro tenant da 404, y la merma no se registra', async () => {
+      // Stock ANTES del intento, no el snapshot original de la suite: para
+      // este punto ya corrieron otras mermas sobre el mismo `itemId` y
+      // comparar contra el valor de arriba daría un falso negativo.
+      const resItemAntes = await request(app.getHttpServer())
+        .get(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(resItemAntes.status).toBe(200);
+      const stockAntes = resItemAntes.body.stock as string;
+
+      const resLoginF = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: 'admin@sistema.com', password: 'admin' });
+      expect(resLoginF.status).toBe(200);
+      const resTenantF = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (resLoginF.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set(
+          'Authorization',
+          `Bearer ${(resLoginF.body as TokenResponse).access_token}`,
+        )
+        .send({ tenantId: '550e8400-e29b-41d4-a716-446655440040' }); // Falabella
+      expect(resTenantF.status).toBe(200);
+      const tokenFalabella = (resTenantF.body as TokenResponse).access_token;
+
+      const resUbicF = await request(app.getHttpServer())
+        .get('/api/ubicaciones')
+        .set('Authorization', `Bearer ${tokenFalabella}`);
+      expect(resUbicF.status).toBe(200);
+      const ubicacionFalabellaId = (resUbicF.body as UbicacionListada[]).find(
+        (u) => u.tipo === 'local',
+      )!.id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/mermas')
+        .set('Authorization', `Bearer ${token}`) // token de PARIS
+        .send({
+          itemId,
+          ubicacionId: ubicacionFalabellaId,
+          cantidad: '0.1',
+          causaMermaId: CAUSA_VENCIMIENTO_ID,
+        });
+      expect(res.status).toBe(404);
+
+      // Y no dejó rastro: el GET del ítem sigue con el mismo stock local.
+      const resItemDespues = await request(app.getHttpServer())
+        .get(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(resItemDespues.status).toBe(200);
+      expect(resItemDespues.body.stock).toBe(stockAntes);
+    });
+
+    /**
+     * Números que DISCRIMINAN local de bodega a propósito (10 y 20, spec del
+     * brief): si el service ignorara `dto.ubicacionId` y siguiera escribiendo
+     * en el local (el bug que este mismo frente ya tuvo en el recuento — ver
+     * el tapón de `recuentos.service.ts`), este test lo agarra porque local
+     * y bodega arrancan en cantidades DISTINTAS. Con números iguales un
+     * mutante que leyera la ubicación equivocada sobreviviría.
+     */
+    it('con ubicacionId de una bodega, la merma descuenta AHÍ y el local no se mueve', async () => {
+      const resBodega = await request(app.getHttpServer())
+        .post('/api/ubicaciones')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `Bodega Mermas E2E ${Date.now()}`, tipo: 'bodega' });
+      expect(resBodega.status).toBe(201);
+      const bodegaId = (resBodega.body as { id: string }).id;
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Producto bodega merma E2E ${Date.now()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          stock: '30', // nace entero en el local
+        });
+      expect(resItem.status).toBe(201);
+      const itemBodegaId = (resItem.body as ItemResponse).id;
+
+      const resMotivos = await request(app.getHttpServer())
+        .get('/api/motivos-traslado?soloActivas=true')
+        .set('Authorization', `Bearer ${token}`);
+      expect(resMotivos.status).toBe(200);
+      const motivoTrasladoId = (resMotivos.body as { id: string }[])[0].id;
+
+      // Local 30 → traslada 20 a la bodega: local 10, bodega 20.
+      const resTraslado = await request(app.getHttpServer())
+        .post('/api/traslados')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          origenId: localId,
+          destinoId: bodegaId,
+          motivoTrasladoId,
+          lineas: [{ itemId: itemBodegaId, cantidad: '20' }],
+        });
+      expect(resTraslado.status).toBe(201);
+
+      const resMerma = await request(app.getHttpServer())
+        .post('/api/mermas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          itemId: itemBodegaId,
+          ubicacionId: bodegaId,
+          cantidad: '5',
+          causaMermaId: CAUSA_VENCIMIENTO_ID,
+        });
+      expect(resMerma.status).toBe(201);
+      // `stockResultante` es el saldo de la UBICACIÓN del movimiento (la
+      // bodega), no el total ni el del local: 20 − 5 = 15.
+      expect(
+        parseFloat((resMerma.body as MermaResponse).stockResultante),
+      ).toBeCloseTo(15, 4);
+
+      // El local, sin tocar: sigue en 10, no en 5 (que sería el bug de
+      // escribir la merma en el local pese al ubicacionId de la bodega).
+      const resItemFinal = await request(app.getHttpServer())
+        .get(`/api/items/${itemBodegaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(resItemFinal.status).toBe(200);
+      // `stockVendible`, no `stock`: ese último es el TOTAL de todas las
+      // ubicaciones (10 en el local + 15 en la bodega = 25) y pasaría el test
+      // aunque la merma hubiera descontado del local por error.
+      expect(
+        parseFloat((resItemFinal.body as ItemResponse).stockVendible!),
+      ).toBeCloseTo(10, 4);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { MermasService } from './mermas.service';
 import { CausasMermaService } from './causas-merma.service';
@@ -52,7 +52,7 @@ describe('MermasService', () => {
   let inventarioService: { registrarMovimiento: jest.Mock };
   let catalogService: { convertirUnidad: jest.Mock };
   let causasService: { assertCausaActiva: jest.Mock };
-  let ubicacionesService: { localDe: jest.Mock };
+  let ubicacionesService: { findOneOrFail: jest.Mock };
 
   beforeEach(async () => {
     transactionQueryMock = jest.fn();
@@ -64,7 +64,19 @@ describe('MermasService', () => {
     inventarioService = { registrarMovimiento: jest.fn() };
     catalogService = { convertirUnidad: jest.fn() };
     causasService = { assertCausaActiva: jest.fn() };
-    ubicacionesService = { localDe: jest.fn().mockResolvedValue(UBICACION_ID) };
+    // `findOneOrFail` mockeado: en un unit test es la SERVICE mockeada la que
+    // responde, así que esto NO pasa por `manager.query` (eso solo pasa en el
+    // e2e, contra `UbicacionesService` real) — el orden de
+    // `transactionQueryMock.mockResolvedValueOnce(...)` de cada test no se ve
+    // afectado por este nuevo paso.
+    ubicacionesService = {
+      findOneOrFail: jest.fn().mockResolvedValue({
+        id: UBICACION_ID,
+        nombre: 'Local',
+        tipo: 'local',
+        activo: true,
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -100,6 +112,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '1',
         causaMermaId: CAUSA,
       });
@@ -159,6 +172,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '1',
         causaMermaId: CAUSA,
       });
@@ -191,6 +205,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '2',
         causaMermaId: CAUSA,
       });
@@ -227,6 +242,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '1',
         causaMermaId: CAUSA,
       });
@@ -256,6 +272,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '0.5',
         causaMermaId: CAUSA,
       });
@@ -279,6 +296,7 @@ describe('MermasService', () => {
 
       await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '500',
         unidadCodigo: 'g',
         causaMermaId: CAUSA,
@@ -323,6 +341,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '500',
         unidadCodigo: 'g',
         causaMermaId: CAUSA,
@@ -347,6 +366,7 @@ describe('MermasService', () => {
       await expect(
         service.registrar(TENANT, USER, {
           itemId: ITEM,
+          ubicacionId: UBICACION_ID,
           cantidad: '1',
           causaMermaId: CAUSA,
         }),
@@ -372,6 +392,7 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '1',
         causaMermaId: CAUSA,
       });
@@ -412,11 +433,73 @@ describe('MermasService', () => {
 
       const result = await service.registrar(TENANT, USER, {
         itemId: ITEM,
+        ubicacionId: UBICACION_ID,
         cantidad: '1',
         causaMermaId: CAUSA,
       });
 
       expect(result.merma.unidadMedida).toBe('l');
+    });
+
+    // Tarea 10 del frente "bodegas y traslados": la merma pasa a decir DÓNDE
+    // ocurrió. BODEGA_ID ≠ UBICACION_ID (local) a propósito — con IDs iguales
+    // un mutante que ignorara `dto.ubicacionId` y siguiera mandando el local
+    // sobreviviría sin que ningún assert lo note.
+    const BODEGA_ID = 'ubicacion-bodega-uuid';
+
+    it('con ubicacionId de una bodega, registra el movimiento EN ESA bodega, no en el local', async () => {
+      ubicacionesService.findOneOrFail.mockResolvedValueOnce({
+        id: BODEGA_ID,
+        nombre: 'Bodega centro',
+        tipo: 'bodega',
+        activo: true,
+      });
+      transactionQueryMock.mockResolvedValueOnce([itemRow()]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce(
+        movimientoResult(),
+      );
+
+      await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        ubicacionId: BODEGA_ID,
+        cantidad: '1',
+        causaMermaId: CAUSA,
+      });
+
+      expect(ubicacionesService.findOneOrFail).toHaveBeenCalledWith(
+        TENANT,
+        BODEGA_ID,
+        expect.anything(),
+      );
+      const [, params] = inventarioService.registrarMovimiento.mock
+        .calls[0] as [unknown, Record<string, unknown>];
+      expect(params).toMatchObject({ ubicacionId: BODEGA_ID });
+      expect(params.ubicacionId).not.toBe(UBICACION_ID);
+    });
+
+    it('valida ubicacionId contra el tenant ANTES de tomar el lock del ítem, y no registra el movimiento si es de otro tenant', async () => {
+      ubicacionesService.findOneOrFail.mockRejectedValueOnce(
+        new NotFoundException('Ubicación de-otro-tenant no encontrada'),
+      );
+
+      await expect(
+        service.registrar(TENANT, USER, {
+          itemId: ITEM,
+          ubicacionId: 'ubicacion-de-otro-tenant',
+          cantidad: '1',
+          causaMermaId: CAUSA,
+        }),
+      ).rejects.toThrow('no encontrada');
+
+      // El lock del ítem (`transactionQueryMock`) no se llegó a pedir: la
+      // validación de ubicación corre primero y corta antes.
+      expect(transactionQueryMock).not.toHaveBeenCalled();
+      expect(causasService.assertCausaActiva).not.toHaveBeenCalled();
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
   });
 

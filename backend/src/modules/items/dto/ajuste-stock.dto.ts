@@ -51,6 +51,13 @@ export class LoteAjusteInputDto {
 }
 
 export class AjusteStockDto {
+  // Requerido, no opcional-con-default: cubre los CUATRO motivos de este DTO
+  // (compra, devolución, ajuste manual, inventario inicial) — todos escriben
+  // por el mismo `PATCH /items/:id/stock`. Un default silencioso metería el
+  // movimiento en el local cada vez que la pantalla se olvide de mandarlo.
+  @IsUUID()
+  ubicacionId: string;
+
   // String + Decimal.js como los otros campos de cantidad del módulo, no
   // `number` nativo: la columna es NUMERIC(18,4) —18 dígitos significativos— y
   // un double aguanta 15-17, así que una cantidad grande con decimales se

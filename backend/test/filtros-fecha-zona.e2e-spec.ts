@@ -81,6 +81,7 @@ describe('Filtros de rango por fecha y zona del tenant (e2e)', () => {
   let token: string;
   let itemId: string;
   let mermaCreadoEl: string;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -96,6 +97,14 @@ describe('Filtros de rango por fecha y zona del tenant (e2e)', () => {
     await app.init();
 
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
 
     const resItem = await request(app.getHttpServer())
       .post('/api/items')
@@ -115,6 +124,7 @@ describe('Filtros de rango por fecha y zona del tenant (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '10',
         costoUnitario: '1000',
       });
@@ -125,6 +135,7 @@ describe('Filtros de rango por fecha y zona del tenant (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         itemId,
+        ubicacionId: localId,
         cantidad: '1',
         causaMermaId: CAUSA_VENCIMIENTO_ID,
         comentario: 'E2E filtro fecha',
@@ -205,7 +216,12 @@ describe('Filtros de rango por fecha y zona del tenant (e2e)', () => {
     const resStock = await request(app.getHttpServer())
       .patch(`/api/items/${bordeItemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'entrada', motivo: 'compra', cantidad: '5' });
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        ubicacionId: localId,
+        cantidad: '5',
+      });
     expect(resStock.status).toBe(200);
 
     // Una hora ANTES de la medianoche local del 10 de marzo: o sea las 23:00

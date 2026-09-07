@@ -9,6 +9,13 @@ import {
 } from 'class-validator';
 
 export class CreateRecuentoDto {
+  // Requerido, no opcional-con-default: la Tarea 11 del frente "bodegas y
+  // traslados" levanta el tapón que fijaba el recuento al local (ver el
+  // docblock de `RecuentosService.create`). Un default silencioso volvería a
+  // meter el tapón por la puerta de atrás.
+  @IsUUID()
+  ubicacionId: string;
+
   @IsArray()
   @ArrayNotEmpty()
   @ArrayUnique()

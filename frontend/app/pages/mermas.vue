@@ -43,6 +43,7 @@ const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 const unidadesMedidaStore = useUnidadesMedidaStore()
+const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
 // El nav abre esta página con Inventario/Leer, pero POST /mermas exige
 // Inventario/Crear (ver docs/patterns/frontend.md §1.1).
@@ -88,6 +89,7 @@ const saving = ref(false)
 
 function emptyForm() {
   return {
+    ubicacionId: '',
     itemId: '',
     cantidad: '',
     unidadCodigo: '',
@@ -124,6 +126,16 @@ watch(() => form.value.itemId, (itemId) => {
   form.value.unidadCodigo = prod.unidadMedida ?? 'unidad'
 })
 
+// Cambiar de ubicación con el formulario a medio llenar limpia la cantidad:
+// el número pertenecía a lo que había EN la ubicación anterior, y dejarlo no
+// lo deja viejo — lo deja reinterpretado. Mismo criterio que ya usa el ajuste
+// de costo al cambiar de unidad o de producto (`inventario/index.vue`).
+watch(() => form.value.ubicacionId, (_nueva, anterior) => {
+  // `!anterior` es la asignación inicial al abrir el drawer, no un cambio.
+  if (!anterior) return
+  form.value.cantidad = ''
+})
+
 async function cargarCatalogos() {
   try {
     await unidadesMedidaStore.ensureLoaded()
@@ -131,6 +143,7 @@ async function cargarCatalogos() {
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
       useApiFetch<CausaOpt[]>(`${apiUrl}/causas-merma?soloActivas=true`),
+      cargarUbicaciones(),
     ])
     productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
       a.nombre.localeCompare(b.nombre, 'es'),
@@ -144,6 +157,11 @@ async function cargarCatalogos() {
 
 function abrirRegistrar() {
   form.value = emptyForm()
+  // Con una sola ubicación el selector no se dibuja (spec § 6): el cliente
+  // completa el local directamente, sin que el usuario tenga que elegirlo.
+  if (!hayBodegas.value && local.value) {
+    form.value.ubicacionId = local.value.id
+  }
   drawerOpen.value = true
 }
 
@@ -152,11 +170,16 @@ async function registrar() {
     toast.add({ title: 'Completa producto, cantidad y causa', color: 'error' })
     return
   }
+  if (!form.value.ubicacionId) {
+    toast.add({ title: 'Selecciona la ubicación', color: 'error' })
+    return
+  }
 
   saving.value = true
   try {
     const body: Record<string, string> = {
       itemId: form.value.itemId,
+      ubicacionId: form.value.ubicacionId,
       cantidad: form.value.cantidad,
       causaMermaId: form.value.causaMermaId,
     }
@@ -346,6 +369,21 @@ const columns: TableColumn<MermaListItem>[] = [
           class="space-y-4"
           @submit="registrar"
         >
+          <UFormField
+            v-if="hayBodegas"
+            label="Ubicación"
+            required
+            help="Dónde se pudrió — acota qué productos tienen stock ahí."
+          >
+            <USelectMenu
+              v-model="form.ubicacionId"
+              :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
+              value-key="value"
+              placeholder="Selecciona la ubicación"
+              class="w-full"
+            />
+          </UFormField>
+
           <UFormField
             label="Producto"
             required

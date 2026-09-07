@@ -63,6 +63,7 @@ describe('Costeo CPP (e2e)', () => {
   let token: string;
   let itemId: string;
   let caja: CajaAbierta;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -80,6 +81,15 @@ describe('Costeo CPP (e2e)', () => {
     await app.init();
 
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
+
     caja = await abrirCaja(app, token, {
       comentario: 'Apertura E2E costeo CPP',
     });
@@ -122,6 +132,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         costoUnitario: '100',
       });
     expect(resCompra1.status).toBe(200);
@@ -134,6 +145,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         costoUnitario: '200',
       });
     expect(resCompra2.status).toBe(200);
@@ -177,6 +189,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         costoUnitario: '50',
       })
       .expect(200);
@@ -201,6 +214,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '5',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         costoUnitario: '70',
       })
       .expect(200);
@@ -264,6 +278,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '2',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         unidadCodigo: 'kg',
         costoUnitario: '5000',
       });
@@ -526,6 +541,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         costoUnitario: '100',
       })
       .expect(200);
@@ -539,6 +555,7 @@ describe('Costeo CPP (e2e)', () => {
         cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         costoUnitario: '0',
       })
       .expect(200);

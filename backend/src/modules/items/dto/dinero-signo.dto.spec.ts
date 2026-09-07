@@ -265,7 +265,12 @@ describe('AplicarDesfaseItemDto.precioBase — signo', () => {
  * cero anularía el promedio en vez de informarlo, y su comentario lo dice.
  */
 describe('AjusteStockDto.costoUnitario — signo', () => {
-  const entrada = { cantidad: '10', tipo: 'entrada', motivo: 'compra' };
+  const entrada = {
+    ubicacionId: '550e8400-e29b-41d4-a716-446655449999',
+    cantidad: '10',
+    tipo: 'entrada',
+    motivo: 'compra',
+  };
 
   it('acepta costoUnitario en 0 (entrada de mercadería donada)', async () => {
     const dto = plainToInstance(AjusteStockDto, {

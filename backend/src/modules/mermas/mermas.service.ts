@@ -93,6 +93,15 @@ export class MermasService {
     dto: CreateMermaDto,
   ): Promise<MermaResponse> {
     return this.db.transaccion(async (manager) => {
+      // Valida el `ubicacionId` del cliente ANTES del lock del ítem: si no es
+      // del tenant, falla rápido sin haber tomado ningún lock. Mismo criterio
+      // que `TrasladosService.crearEnTransaccion` con `origenId`/`destinoId`.
+      await this.ubicacionesService.findOneOrFail(
+        tenantId,
+        dto.ubicacionId,
+        manager,
+      );
+
       // No selecciona `p.costo_actual`: este SELECT toma `FOR UPDATE OF i`
       // (lockea `items`, no `item_producto`), así que sería una lectura
       // pre-lock del costo — ver el comentario grande más abajo, donde
@@ -173,7 +182,7 @@ export class MermasService {
       const mov = await this.inventarioService.registrarMovimiento(manager, {
         tenantId,
         itemId: dto.itemId,
-        ubicacionId: await this.ubicacionesService.localDe(tenantId),
+        ubicacionId: dto.ubicacionId,
         usuarioId,
         tipo: 'salida',
         motivo: 'merma',

@@ -135,6 +135,7 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'inventario_inicial',
+        ubicacionId: localId,
         cantidad: '1',
         series: [{ serie }],
       });
@@ -188,6 +189,7 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'inventario_inicial',
+        ubicacionId: localId,
         cantidad: '1',
         series: [{ serie: `IMEI-LOCAL-${Date.now()}` }],
       });
@@ -211,14 +213,14 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
     // La unidad nace en el local y se MUEVE a la bodega por la API real.
     const unidadBodegaId = await unidadEnLaBodega(itemId, serieBodega);
 
-    // Salida en el LOCAL (default de /stock) pidiendo la unidad que está en
-    // la bodega.
+    // Salida en el LOCAL pidiendo la unidad que está en la bodega.
     const resSalida = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'salida',
         motivo: 'ajuste_manual',
+        ubicacionId: localId,
         cantidad: '1',
         unidadIds: [unidadBodegaId],
       });
@@ -254,6 +256,7 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'inventario_inicial',
+        ubicacionId: localId,
         cantidad: '5',
         series: [
           { serie: `IMEI-LOCAL-A-${marca}` },

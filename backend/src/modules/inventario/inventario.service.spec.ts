@@ -1957,6 +1957,49 @@ describe('InventarioService', () => {
       );
     });
 
+    it('findMovimientos filtra por ubicacionId y expone ubicacionId/ubicacionNombre en cada fila', async () => {
+      // UBICACION_BODEGA_ID ≠ TENANT/ITEM_ID a propósito: si `buildMovimientosFilters`
+      // usara la posición de parámetro equivocada, `arrayContaining` seguiría
+      // pasando por casualidad si los valores coincidieran — con un id propio
+      // no hay ambigüedad.
+      const UBICACION_BODEGA_ID = 'ubicacion-bodega-uuid';
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-1',
+            item_id: ITEM_ID,
+            item_nombre: 'Smartphone',
+            tipo: 'salida',
+            motivo: 'merma',
+            cantidad: '1.0000',
+            stock_anterior: '20.0000',
+            stock_resultante: '19.0000',
+            usuario_id: USER_ID,
+            usuario_nombre: 'Admin',
+            comentario: null,
+            creado_el: new Date('2026-06-23T10:00:00Z'),
+            ubicacion_id: UBICACION_BODEGA_ID,
+            ubicacion_nombre: 'Bodega centro',
+          },
+        ]);
+
+      const res = await service.findMovimientos(TENANT, {
+        ubicacionId: UBICACION_BODEGA_ID,
+        page: 1,
+        pageSize: 15,
+      });
+
+      expect(res.data[0]).toMatchObject({
+        ubicacionId: UBICACION_BODEGA_ID,
+        ubicacionNombre: 'Bodega centro',
+      });
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('mv.ubicacion_id = $2'),
+        expect.arrayContaining([TENANT, UBICACION_BODEGA_ID]),
+      );
+    });
+
     it('findMovimientos expone unidadMedida del producto', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }])

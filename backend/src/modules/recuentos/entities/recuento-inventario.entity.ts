@@ -15,6 +15,17 @@ export class RecuentoInventario {
   @Column({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
+  /**
+   * Dónde se cuenta esta sesión. Obligatoria e inmutable: las líneas ya
+   * contadas se refieren al stock que había EN ESA ubicación al crearse la
+   * sesión (`stock_sistema` congela `stock_ubicacion` de acá), así que
+   * cambiarla a mitad de camino dejaría el conteo describiendo un lugar
+   * distinto del que aplica el delta. `UpdateRecuentoDto` no tiene este campo
+   * a propósito — el `PATCH` de la sesión no la acepta.
+   */
+  @Column({ name: 'ubicacion_id', type: 'uuid' })
+  ubicacionId: string;
+
   @Column({ type: 'text', default: 'borrador' })
   estado: string; // 'borrador' | 'aplicado' | 'cancelado'
 

@@ -591,6 +591,7 @@ describe('Traslados entre ubicaciones (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'inventario_inicial',
+        ubicacionId: localId,
         cantidad: '3',
         series: [
           { serie: `IMEI-A-${marca}` },
@@ -666,6 +667,7 @@ describe('Traslados entre ubicaciones (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '10',
         costoUnitario: '1000',
         lote: { codigoLote, fechaVencimiento: vencimiento },
@@ -749,6 +751,7 @@ describe('Traslados entre ubicaciones (e2e)', () => {
         .send({
           tipo: 'entrada',
           motivo: 'inventario_inicial',
+          ubicacionId: localId,
           cantidad: '1',
           series: [{ serie: `FIFO-${sufijo}-${marca}` }],
         })
@@ -821,6 +824,7 @@ describe('Traslados entre ubicaciones (e2e)', () => {
         .send({
           tipo: 'entrada',
           motivo: 'compra',
+          ubicacionId: localId,
           cantidad,
           costoUnitario: '1000',
           lote: {

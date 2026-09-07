@@ -219,6 +219,7 @@ describe('Sobreventa concurrente sobre la misma ubicación (e2e)', () => {
       body: JSON.stringify({
         tipo: 'salida',
         motivo: 'ajuste_manual',
+        ubicacionId: localId,
         cantidad,
         comentario: 'Sobreventa concurrente E2E',
       }),

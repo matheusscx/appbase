@@ -42,6 +42,8 @@ interface RecuentoListRow {
 
 interface RecuentoRow {
   recuento_id: string;
+  ubicacion_id: string;
+  ubicacion_nombre: string | null;
   estado: string;
   motivo_diferencia_default_id: string | null;
   comentario: string | null;
@@ -74,6 +76,7 @@ interface RecuentoLineaUpdateRow {
 
 interface RecuentoAplicarSesionRow {
   recuento_id: string;
+  ubicacion_id: string;
   estado: string;
   motivo_diferencia_default_id: string | null;
   comentario: string | null;
@@ -120,6 +123,9 @@ export interface RecuentoLinea {
 
 export interface RecuentoDetalle {
   id: string;
+  ubicacionId: string;
+  /** Ubicación soft-deleted después de crear la sesión: se muestra igual, sin nombre. */
+  ubicacionNombre: string | null;
   estado: string;
   motivoDiferenciaDefaultId: string | null;
   comentario: string | null;
@@ -170,25 +176,31 @@ export class RecuentosService {
     }
 
     return this.db.transaccion(async (manager: EntityManager) => {
+      // Valida el `ubicacionId` del cliente contra el tenant ANTES de tocar
+      // nada más — mismo criterio que `MermasService.registrar` con el suyo.
+      await this.ubicacionesService.findOneOrFail(
+        tenantId,
+        dto.ubicacionId,
+        manager,
+      );
+
       // Una sola query trae todos los items pedidos con su stock vigente —
       // nunca una query por item.
       //
-      // ⛔ El saldo se congela **acotado al local**, no sumando todas las
-      // ubicaciones, y tiene que ser la MISMA ubicación contra la que
-      // `aplicar` postea el delta (buscá `ubicacionId: ubicacionLocalId` en
-      // el `registrarMovimiento` de `aplicar`, más abajo en este archivo —
-      // sin número de línea a propósito: se desfasa con el primer edit).
-      // Congelar el total del tenant y descontar del local era inofensivo mientras todo el stock vivía en el
-      // local; con stock repartido en bodega se vuelve una salida fantasma: un
-      // producto con 40 en el local y 15 en la bodega se le muestra al operador
-      // como 55, el operador cuenta 40, y aplicar postea una salida de 15 del
-      // local sin que se haya movido nada.
-      //
-      // Esto es el tapón, no el diseño final: el recuento por ubicación
-      // —elegir en cuál se cuenta— llega en la Tarea 11 del plan de bodegas
-      // (`docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`). Hasta
-      // entonces el recuento es del local, que es donde el operador cuenta.
-      const ubicacionLocalId = await this.ubicacionesService.localDe(tenantId);
+      // ⛔ El saldo se congela **acotado a `dto.ubicacionId`**, no sumando
+      // todas las ubicaciones, y tiene que ser la MISMA ubicación contra la
+      // que `aplicar` postea el delta (`sesion.ubicacion_id`, leído de la
+      // fila que este método acaba de insertar — ver `aplicarEnTransaccion`
+      // más abajo). Congelar el total del tenant y descontar de una sola
+      // ubicación es lo que este método hacía HASTA la Tarea 11 del frente
+      // "bodegas y traslados" —congelaba el `SUM` de todas las ubicaciones y
+      // aplicaba el delta solo al local—, y era inofensivo mientras todo el
+      // stock vivía ahí; con stock repartido en bodega se volvía una salida
+      // fantasma: un producto con 40 en el local y 15 en la bodega se le
+      // mostraba al operador como 55, el operador contaba 40, y aplicar
+      // posteaba una salida de 15 del local sin que se hubiera movido nada.
+      // Ese era el tapón que puso la Tarea 4; esta tarea lo levanta: la
+      // sesión ahora elige ubicación y el congelado mira solo esa.
       const rows: ItemParaRecuentoRow[] = await manager.query(
         `SELECT i.item_id, i.nombre, i.tipo, COALESCE(su.stock, 0)::numeric(18,4) AS stock,
                 p.modo_inventario, p.unidad_medida
@@ -197,7 +209,7 @@ export class RecuentosService {
            LEFT JOIN stock_ubicacion su ON su.item_id = i.item_id
                                        AND su.ubicacion_id = $3
           WHERE i.item_id = ANY($1) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-        [dto.itemIds, tenantId, ubicacionLocalId],
+        [dto.itemIds, tenantId, dto.ubicacionId],
       );
 
       const rowsPorItemId = new Map(rows.map((r) => [r.item_id, r]));
@@ -214,19 +226,31 @@ export class RecuentosService {
         }
       }
 
-      // Un producto no puede estar en dos recuentos en `borrador` a la vez.
+      // Un producto no puede estar en dos recuentos en `borrador` a la vez
+      // **en la misma ubicación**.
       //
       // **El escenario, con números:** stock de sistema 10. Dos personas abren
       // su propia sesión y las dos cuentan 8. Cada línea congela su
       // `stock_sistema` al crearse y el ajuste se aplica como delta relativo,
       // así que cada sesión guarda −2 y aplicar las dos deja el stock en 6, no
       // en 8: el faltante real se descuenta dos veces y se inventa uno que no
-      // existió. Dos conteos simultáneos del mismo producto no tienen sentido
-      // operativo.
+      // existió. Dos conteos simultáneos del mismo producto EN EL MISMO LUGAR
+      // no tienen sentido operativo.
+      //
+      // ⛔ **El acote por `r.ubicacion_id` es nuevo en la Tarea 11, y no es
+      // cosmético.** Antes de esta tarea el recuento era siempre del local, así
+      // que "el mismo producto" y "el mismo producto en la misma ubicación"
+      // eran la misma pregunta. Con ubicación elegible dejan de serlo: local y
+      // bodega tienen cada una su propia fila de `stock_ubicacion`, así que dos
+      // sesiones sobre el mismo ítem en ubicaciones DISTINTAS congelan y
+      // aplican el delta sobre saldos independientes — no se pisan. Sin este
+      // acote, un tenant con una sola bodega no podría abrir el conteo de
+      // bodega mientras el de local sigue abierto, sin ninguna razón real.
       //
       // ⚠️ El delta congelado NO se toca: recalcular contra el stock del momento
       // de aplicar se descartó, y el comentario que llama al delta "el corazón
-      // del diseño" sigue vigente. Lo que se bloquea es la segunda sesión.
+      // del diseño" sigue vigente. Lo que se bloquea es la segunda sesión sobre
+      // la misma ubicación.
       //
       // ⚠️ **Esto es check-then-act y no lo respalda ningún índice**: dos
       // `create()` simultáneos con el mismo ítem pasan los dos. El único índice
@@ -246,6 +270,7 @@ export class RecuentosService {
               AND r.tenant_id = l.tenant_id
               AND r.estado = 'borrador'
               AND r.eliminado_el IS NULL
+              AND r.ubicacion_id = $3
              JOIN items i
                ON i.item_id = l.item_id
               AND i.tenant_id = l.tenant_id
@@ -253,7 +278,7 @@ export class RecuentosService {
             WHERE l.item_id = ANY($1) AND l.tenant_id = $2
               AND l.eliminado_el IS NULL
             ORDER BY i.nombre ASC`,
-        [dto.itemIds, tenantId],
+        [dto.itemIds, tenantId, dto.ubicacionId],
       );
       // Sin `LIMIT 1`: con varios productos en conflicto, quedarse con el
       // primero que devuelva Postgres nombra uno arbitrario y el usuario saca
@@ -270,10 +295,10 @@ export class RecuentosService {
 
       const sesionRows = unwrap<{ recuento_id: string }>(
         await manager.query(
-          `INSERT INTO recuento_inventario (tenant_id, usuario_creador_id, comentario)
-           VALUES ($1, $2, $3)
+          `INSERT INTO recuento_inventario (tenant_id, ubicacion_id, usuario_creador_id, comentario)
+           VALUES ($1, $2, $3, $4)
            RETURNING recuento_id`,
-          [tenantId, usuarioId, dto.comentario ?? null],
+          [tenantId, dto.ubicacionId, usuarioId, dto.comentario ?? null],
         ),
       );
       const recuentoId = sesionRows[0].recuento_id;
@@ -360,10 +385,17 @@ export class RecuentosService {
     tenantId: string,
     recuentoId: string,
   ): Promise<RecuentoDetalle> {
+    // LEFT JOIN sin filtro de borrado: una ubicación eliminada después de
+    // crear la sesión no puede hacer desaparecer el nombre del encabezado
+    // —mismo criterio que el ítem eliminado, más abajo—, solo se queda sin
+    // `ubicacionNombre`.
     const sesionRows: RecuentoRow[] = await this.db.query(
-      `SELECT recuento_id, estado, motivo_diferencia_default_id, comentario, creado_el, aplicado_el
-         FROM recuento_inventario
-        WHERE recuento_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      `SELECT r.recuento_id, r.ubicacion_id, u.nombre AS ubicacion_nombre,
+              r.estado, r.motivo_diferencia_default_id, r.comentario,
+              r.creado_el, r.aplicado_el
+         FROM recuento_inventario r
+         LEFT JOIN ubicaciones u ON u.ubicacion_id = r.ubicacion_id
+        WHERE r.recuento_id = $1 AND r.tenant_id = $2 AND r.eliminado_el IS NULL`,
       [recuentoId, tenantId],
     );
     if (!sesionRows.length) {
@@ -391,6 +423,8 @@ export class RecuentosService {
 
     return {
       id: sesion.recuento_id,
+      ubicacionId: sesion.ubicacion_id,
+      ubicacionNombre: sesion.ubicacion_nombre,
       estado: sesion.estado,
       motivoDiferenciaDefaultId: sesion.motivo_diferencia_default_id,
       comentario: sesion.comentario,
@@ -595,7 +629,7 @@ export class RecuentosService {
   ): Promise<RecuentoAplicarResultado> {
     return this.db.transaccion(async (manager: EntityManager) => {
       const sesionRows: RecuentoAplicarSesionRow[] = await manager.query(
-        `SELECT recuento_id, estado, motivo_diferencia_default_id, comentario
+        `SELECT recuento_id, ubicacion_id, estado, motivo_diferencia_default_id, comentario
            FROM recuento_inventario
           WHERE recuento_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
           FOR UPDATE`,
@@ -710,19 +744,19 @@ export class RecuentosService {
         }
       }
 
-      // Resuelto UNA vez antes del loop: `localDe` por línea sería una
-      // consulta por producto recontado, N+1 en un recuento de decenas de
-      // productos.
-      const ubicacionLocalId = lineasAAplicar.length
-        ? await this.ubicacionesService.localDe(tenantId)
-        : null;
+      // La ubicación no se resuelve más: es `sesion.ubicacion_id`, ya leída
+      // arriba bajo el `FOR UPDATE` de la sesión — la MISMA que `create()`
+      // usó para congelar `stock_sistema` de cada línea. Antes de la Tarea 11
+      // esto era `await this.ubicacionesService.localDe(tenantId)`, resuelto
+      // una vez antes del loop (N+1 evitado); ahora ni siquiera hace falta la
+      // consulta, porque la sesión ya la trae.
       for (const linea of lineasAAplicar) {
         let mov: { movimientoId: string };
         try {
           mov = await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId: linea.itemId,
-            ubicacionId: ubicacionLocalId!,
+            ubicacionId: sesion.ubicacion_id,
             usuarioId,
             tipo: linea.delta.isPositive() ? 'entrada' : 'salida',
             motivo: 'recuento',

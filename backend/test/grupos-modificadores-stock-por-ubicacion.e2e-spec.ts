@@ -146,6 +146,7 @@ describe('Grupos de modificadores — stock por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '30',
         costoUnitario: '500',
       })

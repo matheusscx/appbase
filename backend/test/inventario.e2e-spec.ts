@@ -61,6 +61,7 @@ async function login(app: INestApplication<App>): Promise<string> {
 describe('Inventario — flujo de costo (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -78,6 +79,14 @@ describe('Inventario — flujo de costo (e2e)', () => {
     await app.init();
 
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
   });
 
   afterAll(async () => {
@@ -114,6 +123,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '10',
         costoUnitario: '4500',
       });
@@ -125,7 +135,12 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resCantidadNumero = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'entrada', motivo: 'ajuste_manual', cantidad: 10 });
+      .send({
+        tipo: 'entrada',
+        motivo: 'ajuste_manual',
+        ubicacionId: localId,
+        cantidad: 10,
+      });
     expect(resCantidadNumero.status).toBe(400);
 
     const resGet2 = await request(app.getHttpServer())
@@ -238,6 +253,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '500',
         unidadCodigo: 'g',
       });
@@ -256,6 +272,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'salida',
         motivo: 'ajuste_manual',
+        ubicacionId: localId,
         cantidad: '250',
         unidadCodigo: 'g',
       });
@@ -280,6 +297,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '1',
         unidadCodigo: 'l',
       });

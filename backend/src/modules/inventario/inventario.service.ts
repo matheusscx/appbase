@@ -1408,12 +1408,14 @@ export class InventarioService {
          -- El kardex global mezcla ítems de distintas monedas: sin esto la UI
          -- formatea todo costo con la moneda oficial del tenant.
          i.moneda_id,
-         (i.eliminado_el IS NOT NULL) AS item_eliminado
+         (i.eliminado_el IS NOT NULL) AS item_eliminado,
+         mv.ubicacion_id, ub.nombre AS ubicacion_nombre
        FROM movimientos_inventario mv
        LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
+       LEFT JOIN ubicaciones ub ON ub.ubicacion_id = mv.ubicacion_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          ${filters}
        ORDER BY mv.creado_el DESC
@@ -1446,6 +1448,10 @@ export class InventarioService {
     if (query.itemId) {
       params.push(query.itemId);
       filters += ` AND mv.item_id = $${params.length}`;
+    }
+    if (query.ubicacionId) {
+      params.push(query.ubicacionId);
+      filters += ` AND mv.ubicacion_id = $${params.length}`;
     }
     if (query.motivo) {
       params.push(query.motivo);
@@ -1504,6 +1510,8 @@ export class InventarioService {
       unidadMedida: r.unidad_medida,
       monedaId: r.moneda_id,
       itemEliminado: r.item_eliminado,
+      ubicacionId: r.ubicacion_id,
+      ubicacionNombre: r.ubicacion_nombre,
     };
   }
 }
@@ -1536,6 +1544,14 @@ export interface MovimientoListItem {
    * qué ese producto ya no aparece en el catálogo.
    */
   itemEliminado: boolean;
+  /** Dónde ocurrió — Tarea 12 del frente "bodegas y traslados". */
+  ubicacionId: string;
+  /**
+   * `null` si la ubicación se eliminó después del movimiento: el kardex la
+   * conserva igual (mismo criterio que `itemEliminado`), solo se queda sin
+   * nombre para mostrar.
+   */
+  ubicacionNombre: string | null;
 }
 
 interface MovimientoRow {
@@ -1562,4 +1578,6 @@ interface MovimientoRow {
   unidad_medida: string | null;
   moneda_id: string;
   item_eliminado: boolean;
+  ubicacion_id: string;
+  ubicacion_nombre: string | null;
 }

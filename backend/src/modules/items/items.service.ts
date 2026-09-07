@@ -2984,6 +2984,15 @@ export class ItemsService {
     dto: AjusteStockDto,
   ) {
     return this.db.transaccion(async (manager) => {
+      // Valida el `ubicacionId` del cliente contra el tenant ANTES de tocar
+      // nada más — mismo criterio que `MermasService.registrar` y
+      // `RecuentosService.create` con el suyo.
+      await this.ubicacionesService.findOneOrFail(
+        tenantId,
+        dto.ubicacionId,
+        manager,
+      );
+
       const itemRows: { tipo: string }[] = await manager.query(
         `SELECT tipo FROM items
          WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
@@ -3046,7 +3055,7 @@ export class ItemsService {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
           itemId,
-          ubicacionId: await this.ubicacionesService.localDe(tenantId),
+          ubicacionId: dto.ubicacionId,
           usuarioId,
           tipo: dto.tipo,
           motivo: dto.motivo,

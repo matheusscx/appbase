@@ -28,6 +28,7 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
+const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
 // Crear la sesión exige Inventario/Crear; el nav abre esta página con Leer.
 const { puedeCrear: puedeContar } = usePermisosCrud('Inventario')
@@ -44,6 +45,13 @@ const { items: recuentos, meta, page, loading } =
     pageSize,
     filters: listFilters,
   })
+
+// Antes de abrir "Nuevo recuento": `abrirCrear` decide si el selector se
+// dibuja (`hayBodegas`) y completa el local cuando no hace falta elegir, así
+// que las ubicaciones tienen que estar cargadas antes de ese primer click.
+onMounted(() => {
+  void cargarUbicaciones()
+})
 
 const estadoFiltroOpts: Opt[] = [
   { label: 'Todos los estados', value: 'todos' },
@@ -64,7 +72,7 @@ const drawerOpen = ref(false)
 const creando = ref(false)
 
 function emptyForm() {
-  return { itemIds: [] as string[], comentario: '' }
+  return { ubicacionId: '', itemIds: [] as string[], comentario: '' }
 }
 const form = ref(emptyForm())
 
@@ -95,6 +103,11 @@ async function cargarProductos() {
 
 function abrirCrear() {
   form.value = emptyForm()
+  // Con una sola ubicación el selector no se dibuja (spec § 6): el cliente
+  // completa el local directamente.
+  if (!hayBodegas.value && local.value) {
+    form.value.ubicacionId = local.value.id
+  }
   drawerOpen.value = true
   if (!productos.value.length) void cargarProductos()
 }
@@ -104,9 +117,16 @@ async function crear() {
     toast.add({ title: 'Selecciona al menos un producto', color: 'error' })
     return
   }
+  if (!form.value.ubicacionId) {
+    toast.add({ title: 'Selecciona la ubicación', color: 'error' })
+    return
+  }
   creando.value = true
   try {
-    const body: Record<string, unknown> = { itemIds: form.value.itemIds }
+    const body: Record<string, unknown> = {
+      ubicacionId: form.value.ubicacionId,
+      itemIds: form.value.itemIds,
+    }
     if (form.value.comentario.trim()) body.comentario = form.value.comentario.trim()
 
     const res = await useApiFetch<{ id: string }>(`${apiUrl}/recuentos`, {
@@ -237,6 +257,21 @@ const columns: TableColumn<RecuentoListItem>[] = [
               class="space-y-4"
               @submit="crear"
             >
+              <UFormField
+                v-if="hayBodegas"
+                label="Ubicación"
+                required
+                help="Dónde se cuenta. No se puede cambiar después de crear la sesión."
+              >
+                <USelectMenu
+                  v-model="form.ubicacionId"
+                  :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
+                  value-key="value"
+                  placeholder="Selecciona la ubicación"
+                  class="w-full"
+                />
+              </UFormField>
+
               <UFormField
                 label="Productos"
                 required

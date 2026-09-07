@@ -30,6 +30,9 @@ interface MotivoDiferenciaInventarioItem {
 interface ItemResponse {
   id: string;
   stock: string | null;
+  /** El stock DEL LOCAL (spec § 5.4). `stock` a secas es el TOTAL de todas
+   *  las ubicaciones — no sirve para afirmar "el local no se movió". */
+  stockVendible: string | null;
 }
 interface RecuentoCreateResponse {
   id: string;
@@ -44,8 +47,15 @@ interface RecuentoLinea {
 }
 interface RecuentoDetalleResponse {
   id: string;
+  ubicacionId: string;
+  ubicacionNombre: string | null;
   estado: string;
   lineas: RecuentoLinea[];
+}
+interface UbicacionListada {
+  id: string;
+  nombre: string;
+  tipo: 'local' | 'bodega';
 }
 interface RecuentoListItem {
   id: string;
@@ -251,6 +261,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let ds: DataSource;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -269,6 +280,14 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
 
     token = await login(app);
     ds = app.get(DataSource);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
   });
 
   afterAll(async () => {
@@ -295,6 +314,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '10',
         costoUnitario: '1000',
       });
@@ -310,7 +330,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resCreate = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(resCreate.status).toBe(201);
     const recuentoId = (resCreate.body as RecuentoCreateResponse).id;
     expect(recuentoId).toBeDefined();
@@ -353,7 +373,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resCreate = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(resCreate.status).toBe(400);
   });
 
@@ -373,7 +393,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resCreate = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId, itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId, itemId] });
     expect(resCreate.status).toBe(400);
   });
 
@@ -397,6 +417,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
         .send({
           tipo: 'entrada',
           motivo: 'compra',
+          ubicacionId: localId,
           cantidad: String(stock),
           costoUnitario: '1000',
         });
@@ -409,7 +430,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resCreate = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemAId, itemBId] });
+      .send({ ubicacionId: localId, itemIds: [itemAId, itemBId] });
     expect(resCreate.status).toBe(201);
     const recuentoId = (resCreate.body as RecuentoCreateResponse).id;
 
@@ -487,20 +508,25 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resStock = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'entrada', motivo: 'compra', cantidad: '10' });
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        ubicacionId: localId,
+        cantidad: '10',
+      });
     expect(resStock.status).toBe(200);
 
     const primera = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(primera.status).toBe(201);
     const primeraId = (primera.body as RecuentoCreateResponse).id;
 
     const segunda = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(segunda.status).toBe(400);
     // El 400 nombra el producto y la sesión que lo tiene: sin eso el usuario no
     // sabe qué sacar de la lista ni cuál sesión aplicar o cancelar.
@@ -528,7 +554,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const tercera = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(tercera.status).toBe(201);
   });
 
@@ -562,14 +588,14 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
       const res = await request(app.getHttpServer())
         .post('/api/recuentos')
         .set('Authorization', `Bearer ${token}`)
-        .send({ itemIds: [id] });
+        .send({ ubicacionId: localId, itemIds: [id] });
       expect(res.status).toBe(201);
     }
 
     const res = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemA, itemB] });
+      .send({ ubicacionId: localId, itemIds: [itemA, itemB] });
     expect(res.status).toBe(400);
 
     const mensaje = (res.body as { message: string }).message;
@@ -593,7 +619,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resBorrador = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(resBorrador.status).toBe(201);
     const recuentoBorradorId = (resBorrador.body as RecuentoCreateResponse).id;
 
@@ -616,7 +642,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const resParaCancelar = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemCanceladoId] });
+      .send({ ubicacionId: localId, itemIds: [itemCanceladoId] });
     expect(resParaCancelar.status).toBe(201);
     const recuentoCanceladoId = (resParaCancelar.body as RecuentoCreateResponse)
       .id;
@@ -652,6 +678,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
   let token: string;
   let motivoId: string;
   let motivoIdFalabella: string;
+  let localId: string;
 
   const crearProducto = async (stock: number) => {
     const resCreateItem = await request(app.getHttpServer())
@@ -671,6 +698,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: String(stock),
         costoUnitario: '1000',
       });
@@ -681,7 +709,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     const resCreate = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds });
+      .send({ ubicacionId: localId, itemIds });
     expect(resCreate.status).toBe(201);
     return (resCreate.body as RecuentoCreateResponse).id;
   };
@@ -709,6 +737,14 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     await app.init();
 
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
 
     const { body: motivos } = await request(app.getHttpServer())
       .get('/api/motivos-diferencia-inventario')
@@ -958,6 +994,7 @@ describe('Recuentos — aplicar (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let motivoId: string;
+  let localId: string;
 
   const crearProducto = async (stock: number) => {
     const resCreateItem = await request(app.getHttpServer())
@@ -977,6 +1014,7 @@ describe('Recuentos — aplicar (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: String(stock),
         costoUnitario: '1000',
       });
@@ -987,7 +1025,7 @@ describe('Recuentos — aplicar (e2e)', () => {
     const resCreate = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds });
+      .send({ ubicacionId: localId, itemIds });
     expect(resCreate.status).toBe(201);
     return (resCreate.body as RecuentoCreateResponse).id;
   };
@@ -1015,6 +1053,14 @@ describe('Recuentos — aplicar (e2e)', () => {
     await app.init();
 
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
 
     const { body: motivos } = await request(app.getHttpServer())
       .get('/api/motivos-diferencia-inventario')
@@ -1120,7 +1166,12 @@ describe('Recuentos — aplicar (e2e)', () => {
     await request(app.getHttpServer())
       .patch(`/api/items/${id}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'salida', motivo: 'ajuste_manual', cantidad: '200' })
+      .send({
+        tipo: 'salida',
+        motivo: 'ajuste_manual',
+        ubicacionId: localId,
+        cantidad: '200',
+      })
       .expect(200);
 
     // 4. Aplicar. Esperado: 800 - 100 = 700 (si seteara el absoluto daría 900).
@@ -1206,6 +1257,7 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
   let tokenContador: string;
   let tokenAprobador: string;
   let itemId: string;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -1224,6 +1276,14 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
 
     tokenContador = await loginParisComo(app, 'contador@paris.cl');
     tokenAprobador = await loginParisComo(app, 'aprobador@paris.cl');
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${tokenContador}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
 
     const { body } = await request(app.getHttpServer())
       .post('/api/items')
@@ -1254,7 +1314,7 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${tokenAprobador}`)
-      .send({ itemIds: [itemId] })
+      .send({ ubicacionId: localId, itemIds: [itemId] })
       .expect(403);
   });
 
@@ -1262,7 +1322,7 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
     const { body: creado } = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${tokenContador}`)
-      .send({ itemIds: [itemId] })
+      .send({ ubicacionId: localId, itemIds: [itemId] })
       .expect(201);
     const recuentoId = (creado as RecuentoCreateResponse).id;
 
@@ -1316,5 +1376,272 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
       .set('Authorization', `Bearer ${tokenAprobador}`)
       .send({ itemId, costoNuevo: '500', comentario: 'Corrección' })
       .expect(201);
+  });
+});
+
+// Tarea 11 del frente "bodegas y traslados": levanta el tapón que fijaba el
+// recuento al local (Tarea 4). Los números de local y bodega son DISTINTOS a
+// propósito en cada test — con valores iguales un mutante que leyera el total
+// del tenant o el local por default sobreviviría sin que ningún assert lo note.
+describe('Recuentos — por ubicación (Tarea 11)', () => {
+  let app: INestApplication<App>;
+  let token: string;
+  let localId: string;
+  let bodegaId: string;
+  let motivoId: string;
+  let motivoTrasladoId: string;
+
+  const crearProductoConStockLocal = async (stock: string) => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto recuento-ubicacion E2E ${Date.now()}-${Math.random()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        stock,
+      });
+    expect(res.status).toBe(201);
+    return (res.body as ItemResponse).id;
+  };
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as UbicacionListada[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
+
+    const resBodega = await request(app.getHttpServer())
+      .post('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: `Bodega recuento E2E ${Date.now()}`, tipo: 'bodega' });
+    expect(resBodega.status).toBe(201);
+    bodegaId = (resBodega.body as UbicacionListada).id;
+
+    const { body: motivos } = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${token}`);
+    motivoId = (motivos as MotivoDiferenciaInventarioItem[]).find(
+      (m) => m.esFijo,
+    )!.id;
+
+    const resMotivosTraslado = await request(app.getHttpServer())
+      .get('/api/motivos-traslado?soloActivas=true')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resMotivosTraslado.status).toBe(200);
+    motivoTrasladoId = (resMotivosTraslado.body as { id: string }[])[0].id;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('la sesión de recuento solo trae los productos con saldo en SU ubicación', async () => {
+    // i1: 10 en el local, 0 en la bodega (nunca se trasladó nada).
+    const itemId = await crearProductoConStockLocal('10');
+
+    const resCrear = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: bodegaId, itemIds: [itemId] });
+    expect(resCrear.status).toBe(201);
+    const recuentoId = (resCrear.body as RecuentoCreateResponse).id;
+
+    const resDetalle = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDetalle.status).toBe(200);
+    const detalle = resDetalle.body as RecuentoDetalleResponse;
+    expect(detalle.ubicacionId).toBe(bodegaId);
+    // El punto del test: NO 10 (el total/local), sino 0 — lo que hay EN la bodega.
+    expect(detalle.lineas[0].stockSistema).toBe('0.0000');
+  });
+
+  it('aplicar el recuento mueve el saldo de esa ubicación y ninguna otra', async () => {
+    // Local 30 → traslada 8 a la bodega: local 22, bodega 8.
+    const itemId = await crearProductoConStockLocal('30');
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId,
+        lineas: [{ itemId, cantidad: '8' }],
+      });
+    expect(resTraslado.status).toBe(201);
+
+    // Sesión sobre la BODEGA, contando 11 (delta +3 sobre los 8 congelados).
+    const resCrear = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: bodegaId, itemIds: [itemId] });
+    expect(resCrear.status).toBe(201);
+    const recuentoId = (resCrear.body as RecuentoCreateResponse).id;
+
+    const resDetalle = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDetalle.status).toBe(200);
+    const linea = (resDetalle.body as RecuentoDetalleResponse).lineas[0];
+    expect(linea.stockSistema).toBe('8.0000');
+
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '11', motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    // La bodega subió a 11 (8 + 3)…
+    const resKardexBodega = await request(app.getHttpServer())
+      .get(
+        `/api/inventario/movimientos?itemId=${itemId}&ubicacionId=${bodegaId}&motivo=recuento`,
+      )
+      .set('Authorization', `Bearer ${token}`);
+    expect(resKardexBodega.status).toBe(200);
+    const movsBodega = (
+      resKardexBodega.body as { data: { stockResultante: string }[] }
+    ).data;
+    expect(movsBodega.length).toBeGreaterThan(0);
+    expect(parseFloat(movsBodega[0].stockResultante)).toBeCloseTo(11, 4);
+
+    // …y el LOCAL no se movió: sigue en 22, no en 25 (que sería el bug de
+    // aplicar el delta en el local pese al ubicacionId de la sesión) ni el
+    // recuento generó NINGÚN movimiento con `ubicacionId` = local.
+    //
+    // `stockVendible`, no `stock`: ese último es el TOTAL de todas las
+    // ubicaciones (22 en el local + 11 en la bodega = 33) y pasaría el test
+    // aunque el delta hubiera aterrizado en el local por error.
+    const resItem = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resItem.status).toBe(200);
+    expect(
+      parseFloat((resItem.body as ItemResponse).stockVendible!),
+    ).toBeCloseTo(22, 4);
+
+    const resKardexLocal = await request(app.getHttpServer())
+      .get(
+        `/api/inventario/movimientos?itemId=${itemId}&ubicacionId=${localId}&motivo=recuento`,
+      )
+      .set('Authorization', `Bearer ${token}`);
+    expect(resKardexLocal.status).toBe(200);
+    expect((resKardexLocal.body as { data: unknown[] }).data).toHaveLength(0);
+  });
+
+  it('dos sesiones sobre el MISMO producto en DOS ubicaciones distintas pueden estar abiertas a la vez', async () => {
+    const itemId = await crearProductoConStockLocal('5');
+
+    const resLocal = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: localId, itemIds: [itemId] });
+    expect(resLocal.status).toBe(201);
+
+    // Antes de la Tarea 11 esto daba 400 ("ya está en un recuento en
+    // borrador"): el guard miraba el ítem en CUALQUIER ubicación. Local y
+    // bodega tienen cada una su propia fila de `stock_ubicacion`, así que las
+    // dos sesiones congelan y aplican sobre saldos independientes.
+    const resBodega = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: bodegaId, itemIds: [itemId] });
+    expect(resBodega.status).toBe(201);
+
+    // Y la regla original SIGUE viva dentro de la MISMA ubicación.
+    const resLocalOtraVez = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: localId, itemIds: [itemId] });
+    expect(resLocalOtraVez.status).toBe(400);
+  });
+
+  it('el PATCH de la sesión rechaza ubicacionId: la sesión no cambia de lugar', async () => {
+    const itemId = await crearProductoConStockLocal('4');
+    const resCrear = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: bodegaId, itemIds: [itemId] });
+    expect(resCrear.status).toBe(201);
+    const recuentoId = (resCrear.body as RecuentoCreateResponse).id;
+
+    // `whitelist: true` sin `forbidNonWhitelisted`: el campo se descarta en
+    // silencio, no rebota con 400 — mismo contrato que el resto de la API
+    // (ver `update-recuento.dto.ts`).
+    const resPatch = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: localId, comentario: 'intento de mover la sesión' });
+    expect(resPatch.status).toBe(200);
+
+    const resDetalle = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDetalle.status).toBe(200);
+    expect((resDetalle.body as RecuentoDetalleResponse).ubicacionId).toBe(
+      bodegaId,
+    );
+  });
+
+  it('un ubicacionId de otro tenant en POST /recuentos da el mismo 404 opaco que uno inexistente', async () => {
+    const tokenFalabella = await loginFalabella(app);
+    const resUbicF = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${tokenFalabella}`);
+    expect(resUbicF.status).toBe(200);
+    const ubicacionFalabellaId = (resUbicF.body as UbicacionListada[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
+
+    const itemId = await crearProductoConStockLocal('1');
+
+    const resAjena = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`) // token de PARIS
+      .send({ ubicacionId: ubicacionFalabellaId, itemIds: [itemId] });
+    expect(resAjena.status).toBe(404);
+
+    const resInexistente = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        ubicacionId: '00000000-0000-4000-8000-000000000000',
+        itemIds: [itemId],
+      });
+    expect(resInexistente.status).toBe(404);
+    // El mismo TEMPLATE en los dos — `Ubicación <id> no encontrada`, con el
+    // id que cada request mandó — así que no hay ninguna palabra que
+    // distinga "es de otro tenant" de "no existe": sería un oráculo. No se
+    // compara el mensaje byte a byte porque cada uno trae SU PROPIO id
+    // (el que el caller ya sabía que mandó, no algo que se filtre).
+    expect((resAjena.body as { message: string }).message).toBe(
+      `Ubicación ${ubicacionFalabellaId} no encontrada`,
+    );
+    expect((resInexistente.body as { message: string }).message).toBe(
+      'Ubicación 00000000-0000-4000-8000-000000000000 no encontrada',
+    );
   });
 });

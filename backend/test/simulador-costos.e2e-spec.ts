@@ -56,6 +56,7 @@ async function login(app: INestApplication<App>): Promise<string> {
 describe('Simulador impacto costos (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -71,6 +72,14 @@ describe('Simulador impacto costos (e2e)', () => {
     );
     await app.init();
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
   });
 
   afterAll(async () => {
@@ -120,6 +129,7 @@ describe('Simulador impacto costos (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '1',
         costoUnitario: '10000',
       })
@@ -485,6 +495,7 @@ describe('Simulador impacto costos (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '10',
         costoUnitario: '700',
       })

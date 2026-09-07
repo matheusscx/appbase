@@ -323,7 +323,17 @@ export class UbicacionesService {
     }
   }
 
-  private async findOneOrFail(
+  /**
+   * Valida que `id` sea una ubicación del tenant (no borrada) y devuelve su
+   * fila. Público desde la Tarea 10 del frente "bodegas y traslados": mermas,
+   * recuentos y el ajuste de stock reciben `ubicacionId` del cliente y tienen
+   * que validarlo contra el tenant antes de escribir — mismo criterio que
+   * `CausasMermaService.assertCausaActiva` para `causaMermaId`, y el mismo
+   * `NotFoundException` opaco que ya usa `TrasladosService` para un
+   * `ubicacionId` de otro tenant (no distingue "no existe" de "es de otro
+   * tenant": sería un oráculo).
+   */
+  async findOneOrFail(
     tenantId: string,
     id: string,
     runner: SqlRunner = this.db,

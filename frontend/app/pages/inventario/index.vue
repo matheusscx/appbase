@@ -8,6 +8,7 @@ const toast = useToast()
 const { formatFecha, formatMonto, formatCosto, formatStock } = useFormatters()
 const { convertirCosto } = useUnidadConversion()
 const { pageSize } = useUserPreferences()
+const { ubicaciones, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
 // El nav abre esta página con Inventario/Leer, pero POST /inventario/ajustes-costo
 // exige Inventario/Actualizar: sin este gate el usuario llena el formulario
@@ -34,6 +35,9 @@ interface Movimiento {
   monedaId: string
   /** El producto se dio de baja después de este movimiento; el kardex lo conserva. */
   itemEliminado: boolean
+  ubicacionId: string
+  /** `null` si la ubicación se eliminó después del movimiento. */
+  ubicacionNombre: string | null
 }
 
 interface ProductoCosto {
@@ -51,11 +55,13 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const productos = ref<ProductoCosto[]>([])
 const filtroItem = ref('todos')
 const filtroMotivo = ref('todos')
+const filtroUbicacion = ref('todos')
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
 const listFilters = computed(() => ({
   itemId: filtroItem.value !== 'todos' ? filtroItem.value : undefined,
   motivo: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
+  ubicacionId: filtroUbicacion.value !== 'todos' ? filtroUbicacion.value : undefined,
 }))
 
 const { items: movimientos, meta, page, loading, fetch: fetchMovimientos } =
@@ -64,6 +70,11 @@ const { items: movimientos, meta, page, loading, fetch: fetchMovimientos } =
     pageSize,
     filters: listFilters,
   })
+
+const ubicacionFiltroOpts = computed<Opt[]>(() => [
+  { label: 'Todas las ubicaciones', value: 'todos' },
+  ...ubicaciones.value.map(u => ({ label: u.nombre, value: u.id })),
+])
 
 const motivoOpts: Opt[] = [
   { label: 'Todos los motivos', value: 'todos' },
@@ -110,6 +121,7 @@ async function cargarProductos() {
 onMounted(() => {
   void cargarProductos()
   void unidadesMedidaStore.ensureLoaded()
+  void cargarUbicaciones()
 })
 
 function motivoLabel(mov: Movimiento): string {
@@ -120,9 +132,14 @@ function motivoLabel(mov: Movimiento): string {
   return base
 }
 
-const columns: TableColumn<Movimiento>[] = [
+// La columna Ubicación se dibuja siempre que hayBodegas (spec § 6): con una
+// sola ubicación, todas las filas dirían lo mismo.
+const columns = computed<TableColumn<Movimiento>[]>(() => [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { accessorKey: 'itemNombre', header: 'Producto' },
+  ...(hayBodegas.value
+    ? [{ accessorKey: 'ubicacionNombre', header: 'Ubicación' } as TableColumn<Movimiento>]
+    : []),
   { accessorKey: 'tipo', header: 'Tipo' },
   { accessorKey: 'motivo', header: 'Motivo' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
@@ -130,7 +147,7 @@ const columns: TableColumn<Movimiento>[] = [
   { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'costoPerdido', header: 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'usuarioNombre', header: 'Usuario' },
-]
+])
 
 // ── Ajuste de costo ──────────────────────────────────────────────────────────
 
@@ -305,6 +322,14 @@ async function registrarAjusteCosto() {
             class="w-52"
             placeholder="Motivo"
           />
+          <USelectMenu
+            v-if="hayBodegas"
+            v-model="filtroUbicacion"
+            :items="ubicacionFiltroOpts"
+            value-key="value"
+            class="w-52"
+            placeholder="Ubicación"
+          />
         </div>
 
         <CrudTable
@@ -326,6 +351,9 @@ async function registrarAjusteCosto() {
                 size="sm"
               />
             </div>
+          </template>
+          <template #ubicacionNombre-cell="{ row }">
+            <span class="text-sm text-muted">{{ row.original.ubicacionNombre ?? '—' }}</span>
           </template>
           <template #tipo-cell="{ row }">
             <UBadge

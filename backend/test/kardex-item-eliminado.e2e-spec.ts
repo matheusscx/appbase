@@ -90,6 +90,7 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let itemId: string;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -105,6 +106,14 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
     await app.init();
 
     token = await login(app);
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
 
     // Producto propio del spec: el del seed lo comparten otras suites y acá se
     // lo elimina, que es justo lo que no se le puede hacer a un ítem prestado.
@@ -126,6 +135,7 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '10',
         costoUnitario: '1000',
       });
@@ -136,6 +146,7 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         itemId,
+        ubicacionId: localId,
         cantidad: '1',
         causaMermaId: CAUSA_VENCIMIENTO_ID,
         comentario: 'E2E kardex con ítem eliminado',
@@ -184,7 +195,7 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ itemIds: [itemId] });
+      .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(res.status).toBe(201);
     recuentoId = (res.body as RecuentoCreateResponse).id;
   });
@@ -245,9 +256,15 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
+      // `ubicacionId` VÁLIDO a propósito: el 404 que este test mide es el del
+      // ítem eliminado, no el de un `ubicacionId` ausente/inválido — con uno
+      // inválido el 404 llegaría por la razón equivocada y el test seguiría
+      // en verde si `ajustarStock` dejara de filtrar el ítem antes del
+      // chokepoint.
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '5',
         costoUnitario: '1000',
       });

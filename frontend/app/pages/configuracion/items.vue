@@ -21,6 +21,7 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
+const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -591,6 +592,7 @@ watch(drawerOpen, (open) => {
 
 function emptyAjusteForm() {
   return {
+    ubicacionId: '',
     cantidad: '',
     tipo: 'entrada',
     motivo: 'ajuste_manual',
@@ -614,6 +616,23 @@ const condicionOpts = [
   { label: 'Reacondicionado', value: 'reacondicionado' },
 ]
 const ajusteForm = ref(emptyAjusteForm())
+
+// Cambiar de ubicación con el formulario a medio llenar limpia todo lo que
+// depende de cantidad: el número (o las series/el lote) pertenecía a lo que
+// había EN la ubicación anterior, y dejarlo no lo deja viejo — lo deja
+// reinterpretado. Mismo criterio que ya usa el ajuste de costo al cambiar de
+// unidad o de producto (`inventario/index.vue`).
+watch(() => ajusteForm.value.ubicacionId, (_nueva, anterior) => {
+  // `!anterior` es la asignación inicial al abrir el modal, no un cambio.
+  if (!anterior) return
+  ajusteForm.value.cantidad = ''
+  ajusteForm.value.series = []
+  ajusteForm.value.unidadIds = []
+  ajusteForm.value.loteId = ''
+  ajusteForm.value.loteCodigo = ''
+  ajusteForm.value.loteFechaElab = ''
+  ajusteForm.value.loteFechaVenc = ''
+})
 
 // Mutación de filas de los arrays del form vía función nombrada: una expresión
 // `form.x = [...]` en @click devuelve el array → el handler no es void (TS2322 con
@@ -911,6 +930,7 @@ onMounted(() => {
   catalogosListos = cargarCatalogos()
   cargarItemsVendibles()
   cargarGruposCatalogo()
+  void cargarUbicaciones()
 })
 
 // ── CRUD modal ─────────────────────────────────────────────────────────────
@@ -1275,6 +1295,11 @@ async function abrirAjusteStock(item: Item) {
   stockItem.value = item
   ajusteForm.value = emptyAjusteForm()
   ajusteForm.value.unidadCodigo = item.unidadMedida ?? ''
+  // Con una sola ubicación el selector no se dibuja (spec § 6): el cliente
+  // completa el local directamente.
+  if (!hayBodegas.value && local.value) {
+    ajusteForm.value.ubicacionId = local.value.id
+  }
   unidadesDisponibles.value = []
   stockModalOpen.value = true
   if (item.modoInventario === 'serie') {
@@ -1288,6 +1313,10 @@ async function abrirAjusteStock(item: Item) {
 
 async function ejecutarAjusteStock() {
   if (!stockItem.value) return
+  if (!ajusteForm.value.ubicacionId) {
+    toast.add({ title: 'Selecciona la ubicación', color: 'error' })
+    return
+  }
   ajustando.value = true
   try {
     const f = ajusteForm.value
@@ -1296,6 +1325,7 @@ async function ejecutarAjusteStock() {
     const body: Record<string, unknown> = {
       tipo: f.tipo,
       motivo: f.motivo,
+      ubicacionId: f.ubicacionId,
       comentario: f.comentario || undefined,
     }
     const envioCostoCompra =
@@ -2330,6 +2360,21 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     <UModal v-model:open="stockModalOpen" title="Ajustar stock" :ui="{ content: 'max-w-2xl' }">
       <template #body>
         <div class="space-y-4">
+          <UFormField
+            v-if="hayBodegas"
+            label="Ubicación"
+            required
+            help="Dónde ocurre este movimiento."
+          >
+            <USelectMenu
+              v-model="ajusteForm.ubicacionId"
+              :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
+              value-key="value"
+              placeholder="Selecciona la ubicación"
+              class="w-full"
+            />
+          </UFormField>
+
           <!-- Tipo + motivo + comentario (común a todos los modos) -->
           <div class="grid grid-cols-2 gap-4">
             <UFormField label="Tipo de movimiento" required>

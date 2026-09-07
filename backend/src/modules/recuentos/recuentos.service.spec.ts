@@ -16,6 +16,10 @@ const MOTIVO_ID = 'motivo-uuid';
 const MOTIVO_A = 'motivo-a-uuid';
 const MOTIVO_B = 'motivo-b-uuid';
 const UBICACION_LOCAL_ID = 'ubicacion-local-uuid';
+// Distinto de UBICACION_LOCAL_ID a propósito (§7 del brief): con IDs iguales
+// un mutante que ignorara `dto.ubicacionId`/`sesion.ubicacion_id` y volviera a
+// `localDe(tenantId)` sobreviviría sin que ningún assert lo note.
+const UBICACION_BODEGA_ID = 'ubicacion-bodega-uuid';
 
 describe('RecuentosService', () => {
   let service: RecuentosService;
@@ -23,7 +27,7 @@ describe('RecuentosService', () => {
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let motivosService: { assertMotivoActivo: jest.Mock };
   let inventarioService: { registrarMovimiento: jest.Mock };
-  let ubicacionesService: { localDe: jest.Mock };
+  let ubicacionesService: { findOneOrFail: jest.Mock };
 
   beforeEach(async () => {
     manager = { query: jest.fn() };
@@ -41,8 +45,16 @@ describe('RecuentosService', () => {
         costoActual: null,
       }),
     };
+    // Mockeado a nivel de SERVICE (no de `manager.query`): no consume un slot
+    // de `manager.query.mockResolvedValueOnce(...)`, así que el orden de los
+    // mocks de cada test de más abajo no cambia por este nuevo paso.
     ubicacionesService = {
-      localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
+      findOneOrFail: jest.fn().mockResolvedValue({
+        id: UBICACION_LOCAL_ID,
+        nombre: 'Local',
+        tipo: 'local',
+        activo: true,
+      }),
     };
 
     const dbMock = {
@@ -87,20 +99,36 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([{ recuento_id: 'recuento-1' }])
         .mockResolvedValueOnce(undefined);
 
-      await service.create(TENANT_ID, USUARIO_ID, { itemIds: [ITEM_ID] });
+      await service.create(TENANT_ID, USUARIO_ID, {
+        ubicacionId: UBICACION_LOCAL_ID,
+        itemIds: [ITEM_ID],
+      });
 
       const insertLinea = manager.query.mock.calls.find((c: unknown[]) =>
         String(c[0]).includes('INSERT INTO recuento_inventario_linea'),
       );
       expect(insertLinea![1]).toEqual(expect.arrayContaining(['12400']));
+
+      const insertSesion = manager.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('INSERT INTO recuento_inventario '),
+      );
+      expect(insertSesion![1]).toEqual(
+        expect.arrayContaining([UBICACION_LOCAL_ID]),
+      );
     });
 
     /**
-     * El congelado sale del saldo del LOCAL, no de la suma de todas las
-     * ubicaciones. Es lo que empareja el `stock_sistema` con la ubicación
-     * contra la que `aplicar` postea el delta: congelar el total y descontar
-     * del local convierte un conteo correcto en una salida que nadie hizo
-     * (`docs/features/recuento-inventario.md` § "El recuento es del local").
+     * El congelado sale del saldo de LA UBICACIÓN ELEGIDA (`dto.ubicacionId`),
+     * no de la suma de todas ni de un default al local. Es lo que empareja el
+     * `stock_sistema` con la ubicación contra la que `aplicar` postea el
+     * delta — el tapón que la Tarea 4 puso (congelar el total y descontar del
+     * local, salida fantasma con stock en bodega) y que esta tarea levanta:
+     * `docs/features/recuento-inventario.md`.
+     *
+     * `ubicacionId: UBICACION_BODEGA_ID` (≠ `UBICACION_LOCAL_ID`, el default
+     * que devuelve el mock de `findOneOrFail`) es la parte que discrimina: si
+     * el service ignorara `dto.ubicacionId` y siguiera resolviendo el local
+     * por su cuenta, `params` traería `UBICACION_LOCAL_ID` y el test fallaría.
      *
      * La aserción va por PARÁMETRO y por ausencia de `SUM`, no por un
      * `toContain` de texto suelto: sin ella, el mutante que restaura el
@@ -108,7 +136,7 @@ describe('RecuentosService', () => {
      * —el único que miraba esta query afirmaba el valor insertado, que no
      * cambia— y solo se ve en el e2e.
      */
-    it('congela el saldo del LOCAL, no la suma de todas las ubicaciones', async () => {
+    it('congela el saldo de la ubicación ELEGIDA, no la suma de todas ni un default al local', async () => {
       manager.query
         .mockResolvedValueOnce([
           {
@@ -124,13 +152,35 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([{ recuento_id: 'recuento-1' }])
         .mockResolvedValueOnce(undefined);
 
-      await service.create(TENANT_ID, USUARIO_ID, { itemIds: [ITEM_ID] });
+      await service.create(TENANT_ID, USUARIO_ID, {
+        ubicacionId: UBICACION_BODEGA_ID,
+        itemIds: [ITEM_ID],
+      });
 
       const [sql, params] = manager.query.mock.calls[0] as [string, unknown[]];
-      expect(params).toEqual([[ITEM_ID], TENANT_ID, UBICACION_LOCAL_ID]);
+      expect(params).toEqual([[ITEM_ID], TENANT_ID, UBICACION_BODEGA_ID]);
       expect(sql).toContain('su.ubicacion_id = $3');
       expect(sql).not.toMatch(/SUM\s*\(/i);
-      expect(ubicacionesService.localDe).toHaveBeenCalledWith(TENANT_ID);
+      expect(ubicacionesService.findOneOrFail).toHaveBeenCalledWith(
+        TENANT_ID,
+        UBICACION_BODEGA_ID,
+        expect.anything(),
+      );
+    });
+
+    it('la validación de ubicación corre ANTES del SELECT de items, y corta sin tocar nada si el ubicacionId es de otro tenant', async () => {
+      ubicacionesService.findOneOrFail.mockRejectedValueOnce(
+        new Error('Ubicación no encontrada'),
+      );
+
+      await expect(
+        service.create(TENANT_ID, USUARIO_ID, {
+          ubicacionId: 'ubicacion-de-otro-tenant',
+          itemIds: [ITEM_ID],
+        }),
+      ).rejects.toThrow('Ubicación no encontrada');
+
+      expect(manager.query).not.toHaveBeenCalled();
     });
 
     it('rechaza un producto en modo serie o lote', async () => {
@@ -146,7 +196,10 @@ describe('RecuentosService', () => {
       ]);
 
       await expect(
-        service.create(TENANT_ID, USUARIO_ID, { itemIds: [ITEM_ID] }),
+        service.create(TENANT_ID, USUARIO_ID, {
+          ubicacionId: UBICACION_LOCAL_ID,
+          itemIds: [ITEM_ID],
+        }),
       ).rejects.toThrow('El recuento solo admite productos por cantidad');
     });
 
@@ -154,13 +207,19 @@ describe('RecuentosService', () => {
       manager.query.mockResolvedValueOnce([]);
 
       await expect(
-        service.create(TENANT_ID, USUARIO_ID, { itemIds: [ITEM_ID] }),
+        service.create(TENANT_ID, USUARIO_ID, {
+          ubicacionId: UBICACION_LOCAL_ID,
+          itemIds: [ITEM_ID],
+        }),
       ).rejects.toThrow('El item no tiene control de stock');
     });
 
     it('rechaza crear una sesión sin items', async () => {
       await expect(
-        service.create(TENANT_ID, USUARIO_ID, { itemIds: [] }),
+        service.create(TENANT_ID, USUARIO_ID, {
+          ubicacionId: UBICACION_LOCAL_ID,
+          itemIds: [],
+        }),
       ).rejects.toThrow('El recuento necesita al menos un producto');
     });
   });
@@ -398,6 +457,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -431,11 +491,56 @@ describe('RecuentosService', () => {
       );
     });
 
+    /**
+     * `sesion.ubicacion_id` (leído bajo el `FOR UPDATE` de arriba), no
+     * `localDe(tenantId)`: el delta se aplica sobre la MISMA ubicación que
+     * `create()` congeló. `UBICACION_BODEGA_ID` (≠ `UBICACION_LOCAL_ID`, el
+     * default del resto de los fixtures de este describe) es la parte que
+     * discrimina — un mutante que volviera a resolver el local pasaría
+     * inadvertido si esta fila usara el mismo id que todas las demás.
+     */
+    it('aplica el delta sobre `sesion.ubicacion_id`, no sobre el local por default', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_BODEGA_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            modo_inventario: 'cantidad',
+            stock_sistema: '20',
+            cantidad_contada: '15',
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce([{ motivo_diferencia_inventario_id: MOTIVO_ID }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ ubicacionId: UBICACION_BODEGA_ID }),
+      );
+      expect(ubicacionesService.findOneOrFail).not.toHaveBeenCalled();
+    });
+
     it('genera una entrada cuando el contado es mayor', async () => {
       manager.query
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -474,6 +579,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -516,6 +622,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -546,6 +653,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -577,6 +685,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -608,6 +717,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_A,
             comentario: null,
@@ -642,6 +752,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: null,
             comentario: null,
@@ -670,6 +781,7 @@ describe('RecuentosService', () => {
       manager.query.mockResolvedValueOnce([
         {
           recuento_id: RECUENTO_ID,
+          ubicacion_id: UBICACION_LOCAL_ID,
           estado: 'aplicado',
           motivo_diferencia_default_id: null,
           comentario: null,
@@ -685,6 +797,7 @@ describe('RecuentosService', () => {
       manager.query.mockResolvedValueOnce([
         {
           recuento_id: RECUENTO_ID,
+          ubicacion_id: UBICACION_LOCAL_ID,
           estado: 'cancelado',
           motivo_diferencia_default_id: null,
           comentario: null,
@@ -701,6 +814,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -737,6 +851,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,
@@ -778,6 +893,7 @@ describe('RecuentosService', () => {
         .mockResolvedValueOnce([
           {
             recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
             estado: 'borrador',
             motivo_diferencia_default_id: MOTIVO_ID,
             comentario: null,

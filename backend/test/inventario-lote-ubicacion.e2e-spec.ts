@@ -181,6 +181,7 @@ describe('inventario — lotes por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '13',
         costoUnitario: '1000',
         lote: { codigoLote, fechaVencimiento: '2027-06-01' },
@@ -252,6 +253,7 @@ describe('inventario — lotes por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '25',
         costoUnitario: '1000',
         lote: { codigoLote, fechaVencimiento: '2027-06-01' },
@@ -276,6 +278,7 @@ describe('inventario — lotes por ubicación (e2e)', () => {
       .send({
         tipo: 'salida',
         motivo: 'ajuste_manual',
+        ubicacionId: localId,
         cantidad: '8',
         loteId,
       });
@@ -311,6 +314,7 @@ describe('inventario — lotes por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
+        ubicacionId: localId,
         cantidad: '5',
         costoUnitario: '1000',
         lote: { codigoLote, fechaVencimiento: vencimiento },

@@ -68,6 +68,7 @@ interface ComandaResponse {
 describe('Salones — comanda a cocina (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
+  let localId: string;
   let mesaId: string;
   let cocinaId: string;
   let barraId: string;
@@ -145,6 +146,14 @@ describe('Salones — comanda a cocina (e2e)', () => {
       .send({ tenantId: PARIS_TENANT_ID });
     expect(resTenant.status).toBe(200);
     token = (resTenant.body as TokenResponse).access_token;
+
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as { id: string; tipo: string }[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
 
     const marca = Date.now();
 
@@ -510,6 +519,7 @@ describe('Salones — comanda a cocina (e2e)', () => {
           .send({
             tipo: 'entrada',
             motivo: 'compra',
+            ubicacionId: localId,
             cantidad: '50',
             costoUnitario: '1000',
           });

@@ -97,6 +97,15 @@ mockNuxtImport('usePermissionsStore', () => {
 /** Cada POST a /inventario/ajustes-costo, para leer qué se mandó de verdad. */
 let ajustesEnviados: Record<string, string>[] = []
 
+/** `[]` por default: sin bodegas, `hayBodegas` da `false` y el resto de los
+ * describes de este archivo (que no tocan ubicaciones) no ven nada nuevo. Los
+ * tests de la Tarea 12 lo pisan por test. */
+let ubicacionesBackend: { id: string, nombre: string, tipo: string, activo: boolean }[] = []
+/** Filas de `GET /inventario/movimientos`, por test (Tarea 12). */
+let movimientosBackend: Record<string, unknown>[] = []
+/** Cada `GET /inventario/movimientos` que se pidió, para afirmar el filtro. */
+let movimientosUrls: string[] = []
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, string> }) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
@@ -111,6 +120,14 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (url.includes('/items?tipo=ingrediente')) {
       return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
+    }
+    if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
+    if (url.includes('/inventario/movimientos')) {
+      movimientosUrls.push(url)
+      return Promise.resolve({
+        data: movimientosBackend,
+        meta: { page: 1, pageSize: 15, total: movimientosBackend.length, totalPages: 1 },
+      })
     }
     return Promise.resolve({ data: [], meta: { page: 1, pageSize: 15, total: 0, totalPages: 0 } })
   }
@@ -357,6 +374,78 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
       costoNuevo: '8.25',
       comentario: 'Precio nuevo del proveedor',
     }])
+    wrapper.unmount()
+  })
+})
+
+// Tarea 12 del frente "bodegas y traslados": el kardex gana la columna
+// Ubicación y su filtro, siempre que `hayBodegas` (spec § 6).
+describe('inventario — el kardex muestra dónde (Tarea 12)', () => {
+  const LOCAL = { id: 'local-1', nombre: 'Local', tipo: 'local', activo: true }
+  const BODEGA = { id: 'bodega-1', nombre: 'Bodega centro', tipo: 'bodega', activo: true }
+
+  beforeEach(() => {
+    ajustesEnviados = []
+    movimientosBackend = [
+      {
+        id: 'mov-1',
+        itemId: HARINA.id,
+        itemNombre: 'Harina',
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: '10.0000',
+        stockAnterior: '0.0000',
+        stockResultante: '10.0000',
+        usuarioNombre: 'Admin',
+        comentario: null,
+        creadoEl: '2026-09-06T10:00:00.000Z',
+        unidadMedida: 'kg',
+        monedaId: 'clp-1',
+        itemEliminado: false,
+        ubicacionId: BODEGA.id,
+        ubicacionNombre: BODEGA.nombre,
+      },
+    ]
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('con una sola ubicación, ni la columna ni el filtro se dibujan', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Ubicación')
+    const filtroUbicacion = wrapper.findAllComponents({ name: 'USelectMenu' }).find((s) => {
+      const items = (s.props('items') ?? []) as { value: string }[]
+      return Array.isArray(items) && items.some(i => i?.value === BODEGA.id)
+    })
+    expect(filtroUbicacion).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('con una bodega, la columna Ubicación se dibuja y muestra el nombre de cada fila', async () => {
+    ubicacionesBackend = [LOCAL, BODEGA]
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Ubicación')
+    expect(wrapper.text()).toContain(BODEGA.nombre)
+    wrapper.unmount()
+  })
+
+  it('el filtro de ubicación pide GET /inventario/movimientos con ubicacionId', async () => {
+    ubicacionesBackend = [LOCAL, BODEGA]
+    movimientosUrls = []
+    const wrapper = await montar()
+
+    const filtroUbicacion = wrapper.findAllComponents({ name: 'USelectMenu' }).find((s) => {
+      const items = (s.props('items') ?? []) as { value: string }[]
+      return Array.isArray(items) && items.some(i => i?.value === BODEGA.id)
+    })
+    expect(filtroUbicacion, 'filtro de ubicación').toBeTruthy()
+
+    filtroUbicacion!.vm.$emit('update:modelValue', BODEGA.id)
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(movimientosUrls.some(u => u.includes(`ubicacionId=${BODEGA.id}`))).toBe(true)
     wrapper.unmount()
   })
 })
