@@ -907,6 +907,27 @@ CREATE TABLE "motivo_diferencia_inventario" (
 CREATE UNIQUE INDEX "uq_motivo_dif_inv_tenant_nombre"
   ON "motivo_diferencia_inventario" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
 
+-- Motivo de un traslado entre ubicaciones propias del tenant. Catálogo
+-- TIPADO (nace de una lista fija sembrada, no de texto libre) porque el SII
+-- distingue tipos de traslado y nacer con esa forma evita migrar después.
+-- No cuelga de tipos_documento ni de ninguna fila país: el traslado no emite
+-- ningún documento tributario, es un catálogo propio del tenant y nada más
+-- (el día que entre la emisión del DTE 52, ese mapeo se resuelve por país en
+-- su propio frente — ver ADR-010).
+CREATE TABLE "motivo_traslado" (
+  "motivo_traslado_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"         TEXT NOT NULL,
+  "activo"         BOOLEAN NOT NULL DEFAULT true,
+  "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID REFERENCES usuarios("usuario_id")
+);
+CREATE UNIQUE INDEX "uq_motivo_traslado_tenant_nombre"
+  ON "motivo_traslado" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+
 -- Kardex de movimientos de stock (solo items tipo 'producto')
 -- stock_ubicacion es el saldo materializado (por ubicación); esta tabla es la
 -- fuente de verdad auditable.

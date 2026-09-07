@@ -57,6 +57,7 @@ import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
+import { MOTIVOS_TRASLADO_FIJOS } from '../motivos-traslado/motivos-traslado.defaults';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -176,6 +177,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedCausasMerma();
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
+    await this.seedMotivosTraslado();
     await this.seedRecuentoInventarioLineaIndex();
     await this.seedPromocionesIndices();
     await this.seedCajasVirtuales();
@@ -1507,6 +1509,42 @@ export class SeederService implements OnApplicationBootstrap {
        VALUES ${valores}
        ON CONFLICT (motivo_diferencia_inventario_id) DO NOTHING`,
       params,
+    );
+  }
+
+  private async seedMotivosTraslado(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const uuid = (n: number) =>
+      `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_traslado_tenant_nombre
+      ON motivo_traslado (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
+    // Empieza en 391: el máximo previo era 390 (`MOV_ID_BODEGA`, Tarea 6/7 de
+    // "bodegas y traslados"). 2 tenants x 5 nombres = 10 ids (391-400).
+    const filas: { id: string; tenantId: string; nombre: string }[] = [];
+    let id = 391;
+    for (const tenantId of [PARIS, FALABELLA]) {
+      for (const nombre of MOTIVOS_TRASLADO_FIJOS) {
+        filas.push({ id: uuid(id++), tenantId, nombre });
+      }
+    }
+
+    const valoresTraslado = filas
+      .map(
+        (_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3}, true, true)`,
+      )
+      .join(', ');
+    const paramsTraslado = filas.flatMap((f) => [f.id, f.tenantId, f.nombre]);
+    await this.dataSource.query(
+      `INSERT INTO motivo_traslado
+         (motivo_traslado_id, tenant_id, nombre, activo, es_fijo)
+       VALUES ${valoresTraslado}
+       ON CONFLICT (motivo_traslado_id) DO NOTHING`,
+      paramsTraslado,
     );
   }
 

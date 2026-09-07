@@ -535,6 +535,18 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
           tipo: 'bodega',
         })),
     },
+    {
+      // Recurso 18 (Tarea 8 de "bodegas y traslados"): catálogo tipado de
+      // motivos de traslado, mismo molde que motivos-diferencia-inventario.
+      nombre: 'motivos-traslado',
+      path: 'motivos-traslado',
+      tabla: 'motivo_traslado',
+      pk: 'motivo_traslado_id',
+      crear: () =>
+        crearFila('motivos-traslado', 'Motivo traslado', (n) => ({
+          nombre: n,
+        })),
+    },
   ];
 
   // El guard de cobertura, derivado del ESQUEMA y no de sí mismo. Un
@@ -558,7 +570,7 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
       ),
     ).map((r) => r.table_name);
 
-    expect(tablas).toHaveLength(17);
+    expect(tablas).toHaveLength(18);
     expect([...recursos.map((r) => r.tabla)].sort()).toEqual(tablas);
   });
 

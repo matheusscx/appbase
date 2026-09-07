@@ -97,6 +97,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/motivos-diferencia-inventario',
       },
       {
+        label: 'Motivos de traslado',
+        icon: 'i-lucide-truck',
+        to: '/configuracion/motivos-traslado',
+      },
+      {
         label: 'Grupos de modificadores',
         icon: 'i-lucide-list-plus',
         to: '/configuracion/grupos-modificadores',

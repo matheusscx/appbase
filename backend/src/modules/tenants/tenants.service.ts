@@ -47,6 +47,7 @@ import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
+import { MOTIVOS_TRASLADO_FIJOS } from '../motivos-traslado/motivos-traslado.defaults';
 
 export interface TenantMember {
   usuarioId: string;
@@ -401,6 +402,16 @@ export class TenantsService {
         `INSERT INTO motivo_diferencia_inventario (tenant_id, nombre, activo, es_fijo)
          VALUES ${valores}`,
         [savedTenant.id, ...MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS],
+      );
+
+      // 7d. Sembrar los motivos de traslado fijos del sistema
+      const valoresTraslado = MOTIVOS_TRASLADO_FIJOS.map(
+        (_, i) => `($1, $${i + 2}, true, true)`,
+      ).join(', ');
+      await manager.query(
+        `INSERT INTO motivo_traslado (tenant_id, nombre, activo, es_fijo)
+         VALUES ${valoresTraslado}`,
+        [savedTenant.id, ...MOTIVOS_TRASLADO_FIJOS],
       );
 
       // 8. Habilitar la moneda oficial del país del tenant (tasa = 1)
