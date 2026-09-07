@@ -22,6 +22,7 @@ import { AppModule } from '../src/app.module';
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
+const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -958,6 +959,39 @@ describe('Traslados entre ubicaciones (e2e)', () => {
    *
    * O sea: lo que este caso prueba es que el orden de bloqueo **no depende del
    * orden de las líneas que mandó el cliente**, no una línea en particular.
+   *
+   * ───────────────────────────────────────────────────────────────────────
+   * Tarea 9, hueco 3 (revisión de cobertura, 2026-09-07): ¿un fixture MÁS
+   * GRANDE mata el mutante "sacar SOLO el `ORDER BY`"?
+   * ───────────────────────────────────────────────────────────────────────
+   * Intentado con 6 y con 12 ítems (mismo diseño: A manda las líneas en orden
+   * ascendente de `item_id`, B en orden descendente, la compuerta retiene el
+   * ítem más chico) — **el mutante sobrevive igual en los dos tamaños**
+   * (`deadlocks: 0 → 0`). No es falta de fixture: es estructural. El `.sort()`
+   * de más arriba arma `itemIdsOrdenados` ANTES de tocar la base, así que A y
+   * B mandan el MISMO array (mismo orden) a Postgres sin importar en qué
+   * orden vinieron las líneas del body — la variación que este mutante
+   * necesitaría para importar ya la absorbió el `.sort()`, antes de que el
+   * `ORDER BY` (o su ausencia) tenga algo que decidir. Ningún tamaño de
+   * fixture reintroduce esa variación mientras el `.sort()` siga ahí: por
+   * diseño, matar ESTE mutante puntual requeriría tocar también el `.sort()`,
+   * que es exactamente el otro mutante de esta lista (y ese sí lo mata la
+   * combinación de ambos, ver debajo). Con el statement de locks tocando
+   * `item_producto` a través de su PK (`item_id`, `btree`) y una tabla chica
+   * en el e2e (~15 filas recién sembradas), el plan que arma Postgres para
+   * `WHERE item_id = ANY($1)` tampoco depende del orden del array ni con
+   * `ORDER BY` puesto ni sin él, así que agrandar el fixture no cambia el
+   * mecanismo. El `ORDER BY` se queda de todos modos por lo que dice el
+   * párrafo de arriba: no es sobre ESTE fixture.
+   *
+   * ⚠️ **Hallazgo aparte, no resuelto:** al re-medir el `deadlocks: 0 → 1` de
+   * "sacar las dos cosas" (arriba) el 2026-09-07 —tres corridas limpias,
+   * `reset-db.sh` antes de cada una, mismo fixture de 2 ítems— **no
+   * reprodujo**: dio `0 → 0` las tres veces. No se tocó esa aserción ni la
+   * conclusión de arriba porque no hay certeza de qué cambió (¿plan de
+   * Postgres distinto al de la medición original por el tamaño de la tabla en
+   * ese momento? ¿build stale del backend en la medición original?) —
+   * reportado al owner en vez de reescribir un "medido" ajeno sin confirmar.
    * ═══════════════════════════════════════════════════════════════════════════
    */
   it('dos traslados cruzados con los mismos dos productos no hacen deadlock', async () => {
@@ -1072,4 +1106,228 @@ describe('Traslados entre ubicaciones (e2e)', () => {
     expect(saldoSegundo.get(localId)).toBe(48);
     expect(saldoSegundo.get(bodegaId)).toBe(52);
   }, 120000);
+
+  // ---------------------------------------------------------------------------
+  // 10. Producto eliminado: la bodega se vacía igual
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Borde EXPLÍCITO del diseño, no un olvido: `'traslado'` está en la
+   * allowlist `MOTIVOS_SOBRE_ITEM_ELIMINADO` (`inventario.service.ts:124`)
+   * porque si un producto discontinuado no pudiera trasladarse, una bodega
+   * llena de esa mercadería no se podría vaciar nunca. Hasta esta tarea no
+   * había un solo test que lo ejerciera.
+   */
+  it('un producto ELIMINADO se puede trasladar: la bodega se vacía igual', async () => {
+    const itemId = await crearProducto('8');
+    // Todo el stock a la bodega: el escenario real es "bodega llena de un
+    // producto ya discontinuado", no "algo de stock en el local".
+    await trasladar(localId, bodegaId, [{ itemId, cantidad: '8' }]);
+
+    const resDelete = await request(app.getHttpServer())
+      .delete(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect([200, 204]).toContain(resDelete.status);
+
+    // Con el ítem ya eliminado, el traslado sigue pasando y el stock se mueve.
+    await trasladar(bodegaId, localId, [{ itemId, cantidad: '8' }]);
+    const porUbicacion = await saldos(itemId);
+    expect(porUbicacion.get(localId)).toBe(8);
+    expect(porUbicacion.get(bodegaId)).toBe(0);
+  }, 30000);
+
+  // ---------------------------------------------------------------------------
+  // 11. Cross-tenant y permisos: la única red hoy es el código
+  // ---------------------------------------------------------------------------
+
+  describe('cross-tenant y permisos en /traslados', () => {
+    let ubicacionFalabellaId: string;
+    let motivoFalabellaId: string;
+    let trasladoFalabellaId: string;
+    let tokenSinPermiso: string;
+
+    beforeAll(async () => {
+      // Login en DOS pasos, contra Falabella: recursos REALES de otro tenant,
+      // no uuids inventados — así el rechazo cross-tenant se puede comparar
+      // contra el de "no existe" y no queda ningún mensaje que confirme que
+      // el recurso existe del otro lado (sería un oráculo).
+      const resLoginF = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: 'admin@sistema.com', password: 'admin' });
+      expect(resLoginF.status).toBe(200);
+      const resTenantF = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (resLoginF.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set(
+          'Authorization',
+          `Bearer ${(resLoginF.body as TokenResponse).access_token}`,
+        )
+        .send({ tenantId: FALABELLA_TENANT_ID });
+      expect(resTenantF.status).toBe(200);
+      const tokenFalabella = (resTenantF.body as TokenResponse).access_token;
+
+      const resUbicF = await request(app.getHttpServer())
+        .get('/api/ubicaciones')
+        .set('Authorization', `Bearer ${tokenFalabella}`);
+      expect(resUbicF.status).toBe(200);
+      ubicacionFalabellaId = (resUbicF.body as UbicacionListada[]).find(
+        (u) => u.tipo === 'local',
+      )!.id;
+
+      const resMotivosF = await request(app.getHttpServer())
+        .get('/api/motivos-traslado?soloActivas=true')
+        .set('Authorization', `Bearer ${tokenFalabella}`);
+      expect(resMotivosF.status).toBe(200);
+      motivoFalabellaId = (resMotivosF.body as IdResponse[])[0].id;
+
+      // Un traslado REAL de Falabella, para el 404 de "no es tuyo" en GET/:id.
+      const resBodegaF = await request(app.getHttpServer())
+        .post('/api/ubicaciones')
+        .set('Authorization', `Bearer ${tokenFalabella}`)
+        .send({ nombre: nombreUnico('Bodega Falabella E2E'), tipo: 'bodega' });
+      expect(resBodegaF.status).toBe(201);
+      const bodegaFalabellaId = (resBodegaF.body as UbicacionListada).id;
+
+      const resItemF = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${tokenFalabella}`)
+        .send({
+          nombre: nombreUnico('Producto Falabella E2E'),
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          stock: '5',
+        });
+      expect(resItemF.status).toBe(201);
+
+      const resTrasladoF = await request(app.getHttpServer())
+        .post('/api/traslados')
+        .set('Authorization', `Bearer ${tokenFalabella}`)
+        .send({
+          origenId: ubicacionFalabellaId,
+          destinoId: bodegaFalabellaId,
+          motivoTrasladoId: motivoFalabellaId,
+          lineas: [{ itemId: (resItemF.body as IdResponse).id, cantidad: '1' }],
+        });
+      expect(resTrasladoF.status).toBe(201);
+      trasladoFalabellaId = (resTrasladoF.body as TrasladoRespuesta).id;
+
+      // Usuario de PARIS sin Inventario: tiene Ventas/Caja/Pagos/Items (rol
+      // "Vendedor" del seed), y ni `Inventario/Crear` ni `Inventario/Leer` —
+      // sesión real, del tenant correcto, solo le falta el permiso puntual.
+      // Con un token inválido el 403 no probaría el guard: sería un 401
+      // disfrazado.
+      const resLoginV = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: 'vendedor@paris.cl', password: 'admin' });
+      expect(resLoginV.status).toBe(200);
+      const resTenantV = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (resLoginV.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set(
+          'Authorization',
+          `Bearer ${(resLoginV.body as TokenResponse).access_token}`,
+        )
+        .send({ tenantId: PARIS_TENANT_ID });
+      expect(resTenantV.status).toBe(200);
+      tokenSinPermiso = (resTenantV.body as TokenResponse).access_token;
+    }, 60000);
+
+    it('un ubicacionId de otro tenant, de origen o de destino, da el mismo 404 opaco que uno inexistente', async () => {
+      const itemId = await crearProducto('3');
+      const inexistente = '00000000-0000-4000-8000-000000000000';
+
+      const comoOrigenAjeno = await intentarTraslado({
+        origenId: ubicacionFalabellaId,
+        destinoId: bodegaId,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+      const comoOrigenInexistente = await intentarTraslado({
+        origenId: inexistente,
+        destinoId: bodegaId,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+      expect(comoOrigenAjeno.status).toBe(404);
+      // El mensaje es literalmente el mismo: no hay forma de distinguir "es de
+      // otro tenant" de "no existe" — sería un oráculo.
+      expect(comoOrigenAjeno.message).toBe(comoOrigenInexistente.message);
+
+      const comoDestinoAjeno = await intentarTraslado({
+        origenId: localId,
+        destinoId: ubicacionFalabellaId,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+      const comoDestinoInexistente = await intentarTraslado({
+        origenId: localId,
+        destinoId: inexistente,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+      expect(comoDestinoAjeno.status).toBe(404);
+      expect(comoDestinoAjeno.message).toBe(comoDestinoInexistente.message);
+    }, 30000);
+
+    it('un motivoTrasladoId de otro tenant da el mismo 400 opaco que uno inexistente', async () => {
+      const itemId = await crearProducto('3');
+      const inexistente = '00000000-0000-4000-8000-000000000000';
+
+      const conAjeno = await intentarTraslado({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: motivoFalabellaId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+      const conInexistente = await intentarTraslado({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: inexistente,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+      expect(conAjeno.status).toBe(400);
+      expect(conAjeno.message).toBe(conInexistente.message);
+    }, 30000);
+
+    it('GET /traslados/:id de un traslado de otro tenant → 404', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/traslados/${trasladoFalabellaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('POST /traslados sin el permiso Inventario/Crear → 403', async () => {
+      const itemId = await crearProducto('3');
+      const res = await request(app.getHttpServer())
+        .post('/api/traslados')
+        .set('Authorization', `Bearer ${tokenSinPermiso}`)
+        .send({
+          origenId: localId,
+          destinoId: bodegaId,
+          motivoTrasladoId: motivoId,
+          lineas: [{ itemId, cantidad: '1' }],
+        });
+      expect(res.status).toBe(403);
+    }, 30000);
+
+    it('GET /traslados y GET /traslados/:id sin el permiso Inventario/Leer → 403', async () => {
+      const resLista = await request(app.getHttpServer())
+        .get('/api/traslados')
+        .set('Authorization', `Bearer ${tokenSinPermiso}`);
+      expect(resLista.status).toBe(403);
+
+      const resDetalle = await request(app.getHttpServer())
+        .get(`/api/traslados/${trasladoFalabellaId}`)
+        .set('Authorization', `Bearer ${tokenSinPermiso}`);
+      expect(resDetalle.status).toBe(403);
+    });
+  });
 });
