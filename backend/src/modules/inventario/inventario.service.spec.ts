@@ -509,7 +509,13 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '2' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
-          { estado: 'disponible', item_id: ITEM_ID, tenant_id: TENANT },
+          {
+            estado: 'disponible',
+            item_id: ITEM_ID,
+            tenant_id: TENANT,
+            ubicacion_id: UBICACION_ID,
+            serie: 'IMEI-001',
+          },
         ]) // SELECT unidad
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
@@ -541,7 +547,13 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ stock: '2' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // SELECT FIFO unidades
         .mockResolvedValueOnce([
-          { estado: 'disponible', item_id: ITEM_ID, tenant_id: TENANT },
+          {
+            estado: 'disponible',
+            item_id: ITEM_ID,
+            tenant_id: TENANT,
+            ubicacion_id: UBICACION_ID,
+            serie: 'IMEI-001',
+          },
         ]) // SELECT unidad (validación)
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
@@ -564,12 +576,17 @@ describe('InventarioService', () => {
 
       expect(res.stockResultante).toBe('1');
       // La 3ª query es el SELECT FIFO con ORDER BY creado_el ASC
-      // (1ª el lock, 2ª el saldo)
+      // (1ª el lock, 2ª el saldo). Por VALOR exacto de los parámetros —no
+      // `arrayContaining`— para que un mutante que borre el filtro de
+      // ubicación (la auto-selección tomaría una unidad de cualquier lado,
+      // no solo de `params.ubicacionId`) falle acá.
       expect(managerMock.query).toHaveBeenNthCalledWith(
         3,
         expect.stringContaining('ORDER BY u.creado_el ASC'),
-        expect.arrayContaining([ITEM_ID, TENANT]),
+        [ITEM_ID, TENANT, UBICACION_ID, '1'],
       );
+      const [fifoSql] = managerMock.query.mock.calls[2] as [string, unknown[]];
+      expect(fifoSql).toMatch(/u\.ubicacion_id\s*=\s*\$3/);
     });
 
     it('salida serie sin unidadIds: lanza BadRequest si no hay suficientes disponibles', async () => {
@@ -596,7 +613,13 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
-          { estado: 'vendido', item_id: ITEM_ID, tenant_id: TENANT },
+          {
+            estado: 'vendido',
+            item_id: ITEM_ID,
+            tenant_id: TENANT,
+            ubicacion_id: UBICACION_ID,
+            serie: 'IMEI-001',
+          },
         ]);
 
       await expect(
@@ -691,6 +714,133 @@ describe('InventarioService', () => {
       ).rejects.toThrow(
         new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al item`),
       );
+    });
+
+    // -------------------------------------------------------------------------
+    // Tarea 6 (bodegas y traslados): item_unidad.ubicacion_id — cada unidad
+    // serializada sabe dónde está.
+    // -------------------------------------------------------------------------
+    const BODEGA_ID = 'ubicacion-bodega-uuid';
+
+    it('la unidad nace en la ubicación del movimiento', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad
+        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-bodega' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: BODEGA_ID,
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-BODEGA' }],
+        },
+      );
+
+      // Por VALOR de los parámetros, no por texto del SQL: el INSERT tiene
+      // que llevar la ubicación del movimiento, no la del local por default.
+      const insertUnidad = managerMock.query.mock.calls.find((c) =>
+        /INSERT INTO item_unidad/.test(c[0] as string),
+      )!;
+      expect(insertUnidad[0]).toMatch(/ubicacion_id/);
+      expect(insertUnidad[1]).toEqual(expect.arrayContaining([BODEGA_ID]));
+    });
+
+    it('una salida serie solo consume unidades de esa ubicación: 400 si el unidadId pedido está en otra', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([
+          // La unidad existe, es del tenant y del item — pero está en la
+          // bodega, y la salida se pide contra el local (UBICACION_ID).
+          {
+            estado: 'disponible',
+            item_id: ITEM_ID,
+            tenant_id: TENANT,
+            ubicacion_id: BODEGA_ID,
+            serie: 'IMEI-BODEGA',
+          },
+        ])
+        .mockResolvedValueOnce([
+          { ubicacion_id: BODEGA_ID, nombre: 'Bodega Subsuelo' },
+          { ubicacion_id: UBICACION_ID, nombre: 'Local' },
+        ]); // SELECT nombre de ambas ubicaciones, para el mensaje
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID, // el local
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          unidadIds: [UNIDAD_1],
+          causaMermaId: CAUSA_MERMA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'La unidad IMEI-BODEGA está en Bodega Subsuelo, no en Local',
+        ),
+      );
+    });
+
+    it('stock_ubicacion se recalcula contando solo las unidades de ESA ubicación', async () => {
+      // El fixture entra 3 series al local. El COUNT que recalcula el saldo
+      // tiene que filtrar por ubicación además de item+tenant: sin el
+      // filtro, 3 en el local + 2 que hubiera en la bodega (fuera de este
+      // test, cubierto por el e2e con datos reales) se mezclarían en un solo
+      // número. Acá se fija la FORMA del filtro —SQL y parámetros exactos—,
+      // no el resultado: con manager mockeado el COUNT no cuenta de verdad,
+      // así que lo que discrimina un mutante que borra `AND ubicacion_id =
+      // $3` es el propio texto/parámetros de la query, no el valor devuelto.
+      // La prueba de comportamiento real (3 vs 2, saldo local = 3) vive en
+      // `test/inventario-serie-ubicacion.e2e-spec.ts`.
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }])
+        .mockResolvedValueOnce([{ unidad_id: 'unidad-uuid-3' }])
+        .mockResolvedValueOnce([{ cnt: '3' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-recalculo' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          ubicacionId: UBICACION_ID,
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          cantidad: '3',
+          usuarioId: USER_ID,
+          series: [
+            { serie: 'IMEI-1' },
+            { serie: 'IMEI-2' },
+            { serie: 'IMEI-3' },
+          ],
+        },
+      );
+
+      const countCall = managerMock.query.mock.calls.find((c) =>
+        /SELECT COUNT\(\*\) AS cnt FROM item_unidad/.test(c[0] as string),
+      )!;
+      expect(countCall[0]).toMatch(/ubicacion_id\s*=\s*\$3/);
+      expect(countCall[1]).toEqual([ITEM_ID, TENANT, UBICACION_ID]);
     });
   });
 

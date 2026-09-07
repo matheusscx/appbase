@@ -610,8 +610,8 @@ export class InventarioService {
       for (const s of series) {
         const rows: { unidad_id: string }[] = await manager.query(
           `INSERT INTO item_unidad
-             (tenant_id, item_id, lote_id, serie, estado, condicion, garantia_hasta)
-           VALUES ($1,$2,$3,$4,'disponible',$5,$6)
+             (tenant_id, item_id, lote_id, serie, estado, condicion, garantia_hasta, ubicacion_id)
+           VALUES ($1,$2,$3,$4,'disponible',$5,$6,$7)
            RETURNING unidad_id`,
           [
             params.tenantId,
@@ -620,6 +620,7 @@ export class InventarioService {
             s.serie,
             s.condicion ?? 'nuevo',
             s.garantiaHasta ?? null,
+            params.ubicacionId,
           ],
         );
         unidadIds.push(rows[0].unidad_id);
@@ -637,15 +638,23 @@ export class InventarioService {
       // salida serie
       let unidadIds = params.unidadIds ?? [];
       if (unidadIds.length === 0) {
-        // Auto-selección FIFO: las unidades disponibles más antiguas
+        // Auto-selección FIFO: las unidades disponibles más antiguas, y solo
+        // las de esta ubicación — sin el filtro, una salida en el local
+        // podría auto-seleccionar una unidad que físicamente está en la
+        // bodega.
         const disponibles: { unidad_id: string }[] = await manager.query(
           `SELECT u.unidad_id FROM item_unidad u
-           WHERE u.item_id = $1 AND u.tenant_id = $2
+           WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.ubicacion_id = $3
              AND u.estado = 'disponible' AND u.eliminado_el IS NULL
            ORDER BY u.creado_el ASC
-           LIMIT $3
+           LIMIT $4
            FOR UPDATE`,
-          [params.itemId, params.tenantId, cantidad.toString()],
+          [
+            params.itemId,
+            params.tenantId,
+            params.ubicacionId,
+            cantidad.toString(),
+          ],
         );
         if (!new Decimal(disponibles.length).equals(cantidad)) {
           throw new BadRequestException(
@@ -662,12 +671,17 @@ export class InventarioService {
       const estadoDestino = params.motivo === 'venta' ? 'vendido' : 'baja';
 
       for (const uid of unidadIds) {
-        const rows: { estado: string; item_id: string; tenant_id: string }[] =
-          await manager.query(
-            `SELECT estado, item_id, tenant_id FROM item_unidad
+        const rows: {
+          estado: string;
+          item_id: string;
+          tenant_id: string;
+          ubicacion_id: string;
+          serie: string;
+        }[] = await manager.query(
+          `SELECT estado, item_id, tenant_id, ubicacion_id, serie FROM item_unidad
              WHERE unidad_id = $1 AND eliminado_el IS NULL FOR UPDATE`,
-            [uid],
-          );
+          [uid],
+        );
         if (!rows.length) {
           throw new BadRequestException(`Unidad ${uid} no encontrada`);
         }
@@ -676,6 +690,33 @@ export class InventarioService {
         }
         if (rows[0].item_id !== params.itemId) {
           throw new BadRequestException(`Unidad ${uid} no pertenece al item`);
+        }
+        if (rows[0].ubicacion_id !== params.ubicacionId) {
+          // Una unidad serializada está en un solo lugar: la salida tiene que
+          // pedirse desde ahí. El mensaje nombra la ubicación real de la
+          // unidad, no solo que "no se puede" — sin eso, quien opera no sabe
+          // si falta stock o si está mirando la ubicación equivocada.
+          // Acotado por tenant y sin eliminadas, como toda lectura nueva de
+          // esta tabla: los dos ids que entran acá son de hoy siempre
+          // tenant-scoped (la unidad ya se validó contra el tenant arriba, y
+          // `params.ubicacionId` sale de `UbicacionesService.localDe` en
+          // todos los llamadores actuales), pero sin el filtro esta query se
+          // vuelve un oráculo de nombres de otro tenant en cuanto exista un
+          // llamador que reciba `ubicacionId` del body (`POST /traslados`,
+          // Tarea 9).
+          const nombresRows: { ubicacion_id: string; nombre: string }[] =
+            await manager.query(
+              `SELECT ubicacion_id, nombre FROM ubicaciones
+                WHERE ubicacion_id = ANY($1) AND tenant_id = $2
+                  AND eliminado_el IS NULL`,
+              [[rows[0].ubicacion_id, params.ubicacionId], params.tenantId],
+            );
+          const nombreDe = (id: string) =>
+            nombresRows.find((r) => r.ubicacion_id === id)?.nombre ?? id;
+          throw new BadRequestException(
+            `La unidad ${rows[0].serie} está en ${nombreDe(rows[0].ubicacion_id)}, ` +
+              `no en ${nombreDe(params.ubicacionId)}`,
+          );
         }
         if (rows[0].estado !== 'disponible') {
           throw new BadRequestException(
@@ -858,11 +899,14 @@ export class InventarioService {
     tenantId: string,
     ubicacionId: string,
   ): Promise<Decimal> {
+    // El saldo de esta ubicación cuenta solo SUS unidades: sin el filtro, dos
+    // ubicaciones con stock del mismo ítem comparten el mismo COUNT y una
+    // vende lo que físicamente está en la otra.
     const rows: { cnt: string }[] = await manager.query(
       `SELECT COUNT(*) AS cnt FROM item_unidad
-       WHERE item_id = $1 AND tenant_id = $2
+       WHERE item_id = $1 AND tenant_id = $2 AND ubicacion_id = $3
          AND estado = 'disponible' AND eliminado_el IS NULL`,
-      [itemId, tenantId],
+      [itemId, tenantId, ubicacionId],
     );
     const nuevo = new Decimal(rows[0].cnt);
     // El saldo que se upsertea acá es el recalculado (el COUNT de arriba),

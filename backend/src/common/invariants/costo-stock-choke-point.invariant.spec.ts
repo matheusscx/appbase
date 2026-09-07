@@ -15,12 +15,14 @@ import { join } from 'path';
 // puertas nuevas por las que se puede escribir stock, y las tres quedan bajo
 // la misma regla: solo `inventario.service.ts` (y el seeder, que las siembra
 // junto con el movimiento `inventario_inicial`, no las actualiza).
-// `lote_ubicacion` e `item_unidad.ubicacion_id` todavía no existen en el
-// esquema — llegan en las Tareas 6 y 7 del mismo frente. Es deliberado: la
-// guarda se adelanta para que, cuando esas dos puertas se creen, ya tengan
-// la regla puesta en vez de sumarla después. Hasta entonces es preventiva
-// (no puede fallar por falta de columna: no hay ningún archivo que la
-// mencione todavía).
+// `lote_ubicacion` todavía no existe en el esquema — llega en la Tarea 7 del
+// mismo frente, y para esa columna la guarda sigue siendo preventiva (no
+// puede fallar por falta de columna: no hay ningún archivo que la mencione
+// todavía).
+// `item_unidad.ubicacion_id` sí existe desde la Tarea 6: la unidad NACE en su
+// ubicación por `INSERT` (no hay `UPDATE` — una unidad serializada no cambia
+// de lugar hasta que exista `POST /traslados`, Tarea 9), así que la guarda de
+// esta puerta cubre las dos formas de escritura, no solo el `UPDATE`.
 
 const ARCHIVOS_AUTORIZADOS = [
   join('modules', 'inventario', 'inventario.service.ts'),
@@ -44,6 +46,9 @@ const MULETAS_E2E_AUTORIZADAS = [
   'items-stock-por-ubicacion.e2e-spec.ts',
   'recuentos-stock-por-ubicacion.e2e-spec.ts',
   'grupos-modificadores-stock-por-ubicacion.e2e-spec.ts',
+  // Misma muleta, para item_unidad: sin `POST /traslados` (Tarea 9), plantar
+  // una unidad serializada EN LA BODEGA solo se puede con INSERT directo.
+  'inventario-serie-ubicacion.e2e-spec.ts',
 ];
 
 function findTsFiles(dir: string, incluirSpecs = false): string[] {
@@ -147,6 +152,13 @@ describe('Invariante: costo_actual y stock solo se escriben desde el kardex', ()
             /INSERT\s+INTO\s+lote_ubicacion/i.test(chunk) ||
             /UPDATE\s+lote_ubicacion/i.test(chunk) ||
             /UPDATE\s+item_unidad[\s\S]*ubicacion_id\s*=\s*\$/i.test(chunk) ||
+            // La unidad nace con su ubicación por INSERT, no por UPDATE: la
+            // guarda tiene que mirar las dos formas de escribir la misma
+            // columna, o un `INSERT INTO item_unidad (..., ubicacion_id, ...)`
+            // fuera del chokepoint pasa sin que este test lo vea.
+            /INSERT\s+INTO\s+item_unidad\s*\([^)]*\bubicacion_id\b[^)]*\)/i.test(
+              chunk,
+            ) ||
             // Borrar la fila ES poner el saldo en cero: el `DELETE` es una puerta
             // más, no una excepción. (Y sí, choca con el soft delete: estas tablas
             // no lo tienen — son saldos materializados, no documentos.)

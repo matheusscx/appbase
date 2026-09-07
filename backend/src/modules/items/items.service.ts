@@ -3074,10 +3074,11 @@ export class ItemsService {
       codigo_lote: string | null;
       venta_id: string | null;
       creado_el: Date;
+      ubicacion_id: string;
     }[] = await this.db.query(
       `SELECT
          u.unidad_id, u.serie, u.estado, u.condicion, u.garantia_hasta,
-         u.lote_id, l.codigo_lote, u.venta_id, u.creado_el
+         u.lote_id, l.codigo_lote, u.venta_id, u.creado_el, u.ubicacion_id
        FROM item_unidad u
        LEFT JOIN item_lote l ON l.lote_id = u.lote_id AND l.eliminado_el IS NULL
        WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.eliminado_el IS NULL
@@ -3096,6 +3097,7 @@ export class ItemsService {
       codigoLote: r.codigo_lote,
       ventaId: r.venta_id,
       creadoEl: r.creado_el,
+      ubicacionId: r.ubicacion_id,
     }));
   }
 

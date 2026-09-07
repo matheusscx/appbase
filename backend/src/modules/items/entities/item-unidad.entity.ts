@@ -36,6 +36,10 @@ export class ItemUnidad {
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
   ventaId: string | null;
 
+  /** Dónde está físicamente esta unidad. Una unidad está en un solo lugar. */
+  @Column({ name: 'ubicacion_id', type: 'uuid' })
+  ubicacionId: string;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
   actualizadoEl: Date;
