@@ -1135,6 +1135,35 @@ CSSStyleDeclaration` como **rechazo no capturado**. La suite decía `839 passed`
 - **El exit code lo cazó en el gate, no en la corrida del spec suelto.** Correr solo el
   archivo tocado daba verde y exit 0; el rechazo aparecía con la suite completa.
 
+## Pruebas E2E (API)
+
+### ❌ Tomar "el primero" de un listado que comparten todas las suites
+
+```ts
+// MAL — el listado trae lo que dejaron las otras suites, ordenado por nombre
+const filas = (await GET('/api/ubicaciones')).body as Ubicacion[]
+const bodega = filas.find(u => u.tipo === 'bodega')!   // ¿cuál? la que ordene primero
+
+// BIEN — el spec crea la suya y no depende de nadie
+const bodega = await post('/api/ubicaciones', { nombre: `Bodega X E2E ${Date.now()}`, tipo: 'bodega' })
+```
+
+**Lo que costó (2026-09-07, `5118d89a`):** `stock-insuficiente-ubicacion.e2e-spec.ts` tomaba
+la primera bodega del listado. `GET /ubicaciones` ordena `tipo ASC, nombre ASC` **e incluye
+las desactivadas**, y `traslados.e2e-spec.ts` deja una *"Bodega apagada E2E"*. Cuando esa
+quedó primera, los cuatro `POST /traslados` del spec rebotaron con 400 *"está desactivada: no
+puede recibir un traslado"* y los cuatro casos cayeron juntos.
+
+⚠️ **Y el verde local no dice nada sobre el de CI:** jest reordena las suites con su caché de
+tiempos, que CI no tiene, así que **qué suites corrieron antes —y qué dejaron en la base— es
+distinto en cada máquina**. Acá el orden local dejaba primera a una bodega activa. Se reprodujo
+plantando a mano una bodega inactiva que ordenara primero: mismo 4-de-5 que CI.
+
+📌 **La regla, más ancha que las bodegas:** un spec e2e **no lee del estado compartido lo que
+puede crear**. Vale para cualquier catálogo que otra suite pueda ensuciar —ubicaciones, causas,
+motivos, garzones—. Cuando hay que leer sí o sí (el `local` del tenant, que es único y no se
+crea), el `find` tiene que ser por una propiedad que **identifique**, no por posición.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

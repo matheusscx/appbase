@@ -192,7 +192,26 @@ describe('El 400 de stock insuficiente dice dónde está la mercadería (e2e, Ta
     expect(ubicaciones.status).toBe(200);
     const filas = ubicaciones.body as Ubicacion[];
     localId = filas.find((u) => u.tipo === 'local')!.id;
-    const bodega = filas.find((u) => u.tipo === 'bodega')!;
+
+    // ⚠️ **Bodega PROPIA, no la primera que devuelva el listado.** Hasta el
+    // 2026-09-07 esta línea era `filas.find((u) => u.tipo === 'bodega')!`, y
+    // eso ataba el spec a lo que hubieran dejado las suites anteriores: el
+    // listado ordena `tipo ASC, nombre ASC` **e incluye las desactivadas**, así
+    // que si la primera por nombre resultaba ser la "Bodega apagada E2E" que
+    // deja `traslados.e2e-spec.ts`, los cuatro `POST /traslados` de acá
+    // rebotaban con 400 *"está desactivada: no puede recibir un traslado"* y
+    // los cuatro casos fallaban de una. Pasó en CI (`5118d89a`) y se reprodujo
+    // local plantando una bodega inactiva que ordene primero: mismo 4-de-5.
+    // El orden entre suites no es el mismo en las dos máquinas —jest reordena
+    // por el caché de tiempos, que CI no tiene—, así que el verde local no
+    // decía nada sobre el de CI.
+    const bodega = await post<{ id: string; nombre: string }>(
+      '/api/ubicaciones',
+      {
+        nombre: `Bodega stock-insuficiente E2E ${Date.now()}`,
+        tipo: 'bodega',
+      },
+    );
     bodegaId = bodega.id;
     bodegaNombre = bodega.nombre;
 
