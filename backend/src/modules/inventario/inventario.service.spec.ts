@@ -73,7 +73,6 @@ describe('InventarioService', () => {
     it('el SELECT del lock recibe el tenant como parámetro, no solo el item', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -91,17 +90,16 @@ describe('InventarioService', () => {
       );
 
       // La aserción fuerte es por VALOR de los parámetros: sacar el
-      // `AND i.tenant_id = $2` deja el array en `[ITEM_ID]` y esto falla por su
+      // `AND i.tenant_id = $2` deja el array sin TENANT y esto falla por su
       // propia comparación, no por un match de texto sobre el SQL.
       const [sql, params] = lockQuery();
-      expect(params).toEqual([ITEM_ID, TENANT]);
+      expect(params).toEqual([ITEM_ID, TENANT, UBICACION_ID]);
       expect(sql).toContain('i.tenant_id = $2');
     });
 
     it('lockea solo `item_producto`, no la fila de `items` que usa para acotar', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -134,12 +132,11 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // stock_ubicacion (Tarea 2 del plan de bodegas): la doble escritura del
-  // chokepoint mientras `item_producto.stock` sigue siendo la fuente de
-  // verdad. Nadie la lee todavía — eso llega con la Tarea 3.
+  // stock_ubicacion (Tarea 4 del plan de bodegas): único dueño del saldo.
+  // `item_producto.stock` se borró — el chokepoint escribe acá y solo acá.
   // ---------------------------------------------------------------------------
-  describe('registrarMovimiento — stock_ubicacion (Tarea 2 bodegas)', () => {
-    it('escribe el saldo en stock_ubicacion además de item_producto', async () => {
+  describe('registrarMovimiento — stock_ubicacion (único dueño del saldo)', () => {
+    it('escribe el saldo en stock_ubicacion', async () => {
       // El fixture usa 7 y 3 —no 1 y 1— a propósito: con factores iguales, un
       // mutante que sume donde debe restar sobrevive.
       managerMock.query
@@ -152,7 +149,6 @@ describe('InventarioService', () => {
             item_eliminado_el: null,
           },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-stock-ubicacion' }]);
 
@@ -208,7 +204,6 @@ describe('InventarioService', () => {
     it('entrada: suma al stock y registra el movimiento', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]); // INSERT movimiento
 
@@ -232,18 +227,17 @@ describe('InventarioService', () => {
         costoActualPrevio: null,
         costoActual: null,
       });
-      // La 2ª llamada es UPDATE item_producto con el nuevo saldo
+      // La 2ª llamada es el upsert de stock_ubicacion con el nuevo saldo
       expect(managerMock.query).toHaveBeenNthCalledWith(
         2,
-        expect.stringContaining('UPDATE item_producto'),
-        ['15', ITEM_ID],
+        expect.stringContaining('INSERT INTO stock_ubicacion'),
+        expect.arrayContaining(['15', ITEM_ID, UBICACION_ID]),
       );
     });
 
     it('salida: resta del stock', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
-        .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-2' }]);
 
@@ -389,7 +383,6 @@ describe('InventarioService', () => {
       async (motivo) => {
         managerMock.query
           .mockResolvedValueOnce(lockRowEliminado())
-          .mockResolvedValueOnce(undefined) // UPDATE item_producto
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-repo' }]); // INSERT kardex
 
@@ -421,7 +414,6 @@ describe('InventarioService', () => {
             item_eliminado_el: null,
           },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ok' }]);
 
@@ -452,7 +444,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad 1
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }]) // INSERT unidad 2
         .mockResolvedValueOnce([{ cnt: '2' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-s1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined) // INSERT detalle 1
@@ -506,7 +497,6 @@ describe('InventarioService', () => {
         ]) // SELECT unidad
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-s2' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -538,7 +528,6 @@ describe('InventarioService', () => {
         ]) // SELECT unidad (validación)
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-s3' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -624,7 +613,6 @@ describe('InventarioService', () => {
         // mock incompleto más adelante en el flujo.
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-tenant-mutant' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -662,7 +650,6 @@ describe('InventarioService', () => {
         // TypeError río abajo.
         .mockResolvedValueOnce(undefined) // UPDATE unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-item-mutant' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -695,7 +682,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([]) // SELECT lote existente (no existe)
         .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // INSERT lote
         .mockResolvedValueOnce([{ total: '50' }]) // SUM cantidad_disponible
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -725,7 +711,6 @@ describe('InventarioService', () => {
         ]) // SELECT lote FOR UPDATE
         .mockResolvedValueOnce(undefined) // UPDATE lote
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l2' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -756,7 +741,6 @@ describe('InventarioService', () => {
         ]) // SELECT lotes FIFO FOR UPDATE
         .mockResolvedValueOnce(undefined) // UPDATE lote
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l3' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -838,7 +822,6 @@ describe('InventarioService', () => {
         // TypeError de un mock incompleto más adelante en el flujo.
         .mockResolvedValueOnce(undefined) // UPDATE lote
         .mockResolvedValueOnce([{ total: '40' }]) // SUM
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-lote-tenant-mutant' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // INSERT detalle
@@ -911,7 +894,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-m1' }]);
 
@@ -929,7 +911,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[3];
+      const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[0]).toContain('causa_merma_id');
       expect(insertCall[1]).toContain(CAUSA_MERMA_ID);
     });
@@ -987,7 +969,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-r1' }]);
 
@@ -1005,7 +986,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[3];
+      const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[0]).toContain('motivo_diferencia_id');
       expect(insertCall[1]).toContain(MOTIVO_DIFERENCIA_ID);
     });
@@ -1020,7 +1001,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
@@ -1039,15 +1019,15 @@ describe('InventarioService', () => {
         },
       );
 
-      // El INSERT del movimiento (4ª llamada) congela lo PAGADO en el kardex: 4500
-      const insertCall = managerMock.query.mock.calls[3];
+      // El INSERT del movimiento (3ª llamada) congela lo PAGADO en el kardex: 4500
+      const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[0]).toContain('costo_unitario');
       expect(insertCall[1]).toContain('4500');
-      // La 5ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
+      // La 4ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
       // con el costo de compra crudo: (10×4000 + 5×4500) / 15 = 4166.6667.
       // Antes del CPP este valor era '4500' (último costo) — ese era el bug.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
+        4,
         expect.stringContaining('costo_actual'),
         ['4166.6667', ITEM_ID],
       );
@@ -1058,7 +1038,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1b' }]);
 
@@ -1076,9 +1055,9 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[3];
+      const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[1]).toContain('4500');
-      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
     });
 
     it.each([['anulacion'], ['devolucion']])(
@@ -1096,7 +1075,6 @@ describe('InventarioService', () => {
               costo_actual: '57.1429',
             },
           ])
-          .mockResolvedValueOnce(undefined) // UPDATE item_producto
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-rev' }])
           .mockResolvedValueOnce(undefined);
@@ -1116,10 +1094,10 @@ describe('InventarioService', () => {
         );
 
         // El kardex congela el costo real de la reposición, no el CPP vigente.
-        expect(managerMock.query.mock.calls[3][1]).toContain('50');
+        expect(managerMock.query.mock.calls[2][1]).toContain('50');
         // (14 × 57,1429 + 1 × 50) / 15 = 56,6667.
         expect(managerMock.query).toHaveBeenNthCalledWith(
-          5,
+          4,
           expect.stringContaining('costo_actual'),
           ['56.6667', ITEM_ID],
         );
@@ -1134,7 +1112,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '14', modo_inventario: 'cantidad', costo_actual: '57.1429' },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-rev2' }]);
 
@@ -1151,7 +1128,7 @@ describe('InventarioService', () => {
         },
       );
 
-      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
     });
 
     it('rechaza costoUnitario negativo', async () => {
@@ -1184,7 +1161,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
-        .mockResolvedValueOnce(undefined) // UPDATE item_producto
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-donacion' }])
         .mockResolvedValueOnce(undefined);
@@ -1205,7 +1181,7 @@ describe('InventarioService', () => {
 
       // (10 × 4000 + 5 × 0) / 15 = 2666,6667.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
+        4,
         expect.stringContaining('costo_actual'),
         ['2666.6667', ITEM_ID],
       );
@@ -1250,7 +1226,6 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4200' },
         ]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce(undefined) // UPDATE stock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c2' }]); // INSERT movimiento
 
@@ -1268,9 +1243,9 @@ describe('InventarioService', () => {
       );
 
       // El INSERT congeló el costo vigente (4200) y no hubo UPDATE de costo_actual
-      const insertCall = managerMock.query.mock.calls[3];
+      const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[1]).toContain('4200');
-      expect(managerMock.query).toHaveBeenCalledTimes(4);
+      expect(managerMock.query).toHaveBeenCalledTimes(3);
     });
   });
 

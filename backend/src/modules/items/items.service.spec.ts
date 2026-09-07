@@ -2083,9 +2083,9 @@ describe('ItemsService', () => {
           typeof c[0] === 'string' &&
           c[0].includes('INSERT INTO item_producto'),
       );
-      // Por índice y no con `toContain`: los params de este INSERT ya llevan
-      // un '0' (el stock inicial), así que un `toContain('0')` pasaría con el
-      // costo en null. El costo es el último.
+      // Por índice y no con `toContain`: el costo es el último param de este
+      // INSERT, y afirmarlo por posición no depende de que ningún otro campo
+      // del producto (fechas, unidad) también pueda valer '0' algún día.
       // Y es '0', NO null: el ítem no queda "sin costo" —`sinCosto` filtra por
       // `IS NULL`, así que este producto no aparece en esa bandeja.
       const paramsProducto = insertProducto?.[1] as unknown[];
@@ -6714,8 +6714,9 @@ describe('ItemsService', () => {
       expect(sql).toContain('LEFT JOIN stock_ubicacion su');
       expect(sql).toContain('su.ubicacion_id = $3');
       expect(sql).not.toContain('ip.stock');
-      // El lock sigue siendo sobre `item_producto` — la Tarea 4 es la que muda
-      // el objeto del lock, no esta.
+      // El lock sigue siendo sobre `item_producto`, y se queda ahí para
+      // siempre (Tarea 4, corrección del pre-flight 2026-09-06): su fila
+      // siempre existe, la de `stock_ubicacion` puede no existir todavía.
       expect(sql).toContain('FOR UPDATE OF ip');
       // `$3` es el local que resuelve `UbicacionesService.localDe`, UNA vez
       // por request (mockeado a `UBICACION_LOCAL_ID` en el `beforeEach`).

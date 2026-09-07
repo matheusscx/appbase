@@ -633,19 +633,50 @@ CREATE TABLE "items" (
   "eliminado_por"           UUID          REFERENCES usuarios("usuario_id")
 );
 
--- Extensión 1:1 para tipo 'producto'
+-- Extensión 1:1 para tipo 'producto'.
+-- No tiene "stock": el saldo vive en "stock_ubicacion" (una fila por
+-- ubicación), único dueño desde el frente "bodegas y traslados" (Tarea 4,
+-- 2026-09-06). El lock de todo movimiento de stock (`registrarMovimiento`,
+-- `validarStockAlPedir`) sigue anclado acá y no en "stock_ubicacion": esta
+-- fila siempre existe, la de "stock_ubicacion" puede no existir todavía para
+-- una ubicación en la que el ítem nunca se movió, y `FOR UPDATE` sobre una
+-- fila inexistente no lockea nada (docs/patterns/backend.md §15).
 CREATE TABLE "item_producto" (
   "item_id"           UUID          PRIMARY KEY REFERENCES "items" ("item_id"),
-  "stock"             NUMERIC(18,4) NOT NULL DEFAULT 0,
   "unidad_medida"     TEXT          NOT NULL DEFAULT 'unidad',
   "fecha_elaboracion" TIMESTAMPTZ,
   "fecha_vencimiento" TIMESTAMPTZ,
   "modo_inventario"   TEXT          NOT NULL DEFAULT 'cantidad',
   -- 'cantidad' (fungible, saldo numérico)
-  -- 'lote'     (stock = SUM cantidad_disponible de item_lote)
-  -- 'serie'    (stock = COUNT unidades disponibles en item_unidad)
+  -- 'lote'     (stock = SUM cantidad_disponible de item_lote, por ubicación)
+  -- 'serie'    (stock = COUNT unidades disponibles en item_unidad, por ubicación)
   "costo_actual"      NUMERIC(18,4)  -- promedio ponderado móvil (CPP); solo lo recalcula la entrada por compra
 );
+
+-- Lugar físico donde vive stock: el local operativo del tenant (uno por
+-- tenant, `UbicacionesService.localDe`) y cero o más bodegas.
+CREATE TABLE "ubicaciones" (
+  "ubicacion_id"   UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID    NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"         TEXT    NOT NULL,
+  "tipo"           TEXT    NOT NULL,  -- 'local' | 'bodega'
+  "activo"         BOOLEAN NOT NULL DEFAULT true,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+
+-- Saldo de un ítem en una ubicación: único dueño del stock del sistema desde
+-- la Tarea 4. El chokepoint (`InventarioService.registrarMovimiento`) es el
+-- único que la escribe, vía upsert (`INSERT … ON CONFLICT (item_id,
+-- ubicacion_id) DO UPDATE`).
+CREATE TABLE "stock_ubicacion" (
+  "item_id"      UUID          NOT NULL REFERENCES "item_producto" ("item_id"),
+  "ubicacion_id" UUID          NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  "stock"        NUMERIC(18,4) NOT NULL DEFAULT 0,
+  PRIMARY KEY ("item_id", "ubicacion_id")
+);
+CREATE INDEX "idx_stock_ubicacion_ubicacion" ON "stock_ubicacion" ("ubicacion_id");
 
 -- Extensión 1:1 para tipo 'servicio'
 CREATE TABLE "item_servicio" (
@@ -868,11 +899,13 @@ CREATE UNIQUE INDEX "uq_motivo_dif_inv_tenant_nombre"
   ON "motivo_diferencia_inventario" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
 
 -- Kardex de movimientos de stock (solo items tipo 'producto')
--- item_producto.stock es el saldo materializado; esta tabla es la fuente de verdad auditable.
+-- stock_ubicacion es el saldo materializado (por ubicación); esta tabla es la
+-- fuente de verdad auditable.
 CREATE TABLE "movimientos_inventario" (
   "movimiento_id"    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "ubicacion_id"     UUID          NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
   "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
   "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
   "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo

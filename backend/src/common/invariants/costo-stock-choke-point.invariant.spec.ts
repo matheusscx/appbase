@@ -1,14 +1,26 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-// Invariante: item_producto.costo_actual y item_producto.stock NUNCA se
-// escriben fuera de inventario.service.ts (registrarMovimiento). Ambos son
-// valores derivados del kardex — costo_actual es un promedio ponderado
-// móvil, stock es el saldo materializado de los movimientos — y escribirlos
-// directo los corrompe sin dejar rastro. Fue exactamente el bug que originó
-// este diseño: PATCH /items/:id escribía el costo (y, después, el stock) sin
-// movimiento de inventario.
+// Invariante: item_producto.costo_actual NUNCA se escribe fuera de
+// inventario.service.ts (registrarMovimiento). Es un valor derivado del
+// kardex —promedio ponderado móvil— y escribirlo directo lo corrompe sin
+// dejar rastro. Fue exactamente el bug que originó este diseño: PATCH
+// /items/:id escribía el costo (y, después, el stock) sin movimiento de
+// inventario.
 // Ver docs/superpowers/specs/2026-07-26-costeo-cpp-design.md
+//
+// Desde la Tarea 4 del frente "bodegas y traslados" (`item_producto.stock` se
+// borró), el saldo materializado vive en `stock_ubicacion`, `lote_ubicacion`
+// (saldo de un lote por ubicación) e `item_unidad.ubicacion_id` — las tres
+// puertas nuevas por las que se puede escribir stock, y las tres quedan bajo
+// la misma regla: solo `inventario.service.ts` (y el seeder, que las siembra
+// junto con el movimiento `inventario_inicial`, no las actualiza).
+// `lote_ubicacion` e `item_unidad.ubicacion_id` todavía no existen en el
+// esquema — llegan en las Tareas 6 y 7 del mismo frente. Es deliberado: la
+// guarda se adelanta para que, cuando esas dos puertas se creen, ya tengan
+// la regla puesta en vez de sumarla después. Hasta entonces es preventiva
+// (no puede fallar por falta de columna: no hay ningún archivo que la
+// mencione todavía).
 
 const ARCHIVOS_AUTORIZADOS = [
   join('modules', 'inventario', 'inventario.service.ts'),
@@ -86,6 +98,27 @@ describe('Invariante: costo_actual y stock solo se escriben desde el kardex', ()
       // con `stock`.
       const sospechoso = extraeTemplateLiterals(contenido).some((chunk) =>
         /\bstock\s*=\s*\$/.test(chunk),
+      );
+      if (sospechoso) offenders.push(file);
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('nadie escribe stock_ubicacion, lote_ubicacion ni item_unidad.ubicacion_id fuera de inventario.service', () => {
+    const srcRoot = join(__dirname, '..', '..');
+    const offenders: string[] = [];
+
+    for (const file of findTsFiles(srcRoot)) {
+      if (ARCHIVOS_AUTORIZADOS.some((a) => file.endsWith(a))) continue;
+      const contenido = readFileSync(file, 'utf8');
+      const sospechoso = extraeTemplateLiterals(contenido).some(
+        (chunk) =>
+          /INSERT\s+INTO\s+stock_ubicacion/i.test(chunk) ||
+          /UPDATE\s+stock_ubicacion/i.test(chunk) ||
+          /INSERT\s+INTO\s+lote_ubicacion/i.test(chunk) ||
+          /UPDATE\s+lote_ubicacion/i.test(chunk) ||
+          /UPDATE\s+item_unidad[\s\S]*ubicacion_id\s*=\s*\$/i.test(chunk),
       );
       if (sospechoso) offenders.push(file);
     }

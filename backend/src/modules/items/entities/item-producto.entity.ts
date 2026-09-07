@@ -5,9 +5,6 @@ export class ItemProducto {
   @PrimaryColumn({ name: 'item_id', type: 'uuid' })
   itemId: string;
 
-  @Column({ type: 'numeric', precision: 18, scale: 4 })
-  stock: string;
-
   @Column({
     name: 'costo_actual',
     type: 'numeric',

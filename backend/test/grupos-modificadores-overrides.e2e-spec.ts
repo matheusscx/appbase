@@ -339,8 +339,10 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
   });
 
   it('7. el stock resultante de Carne refleja AMBOS descuentos (150 + 250) sobre el mismo ingrediente', async () => {
+    // `item_producto.stock` se borró en la Tarea 4 (bodegas y traslados):
+    // `stock_ubicacion` es el único dueño del saldo.
     const stockRows: { stock: string }[] = await ds.query(
-      `SELECT stock FROM item_producto WHERE item_id = $1`,
+      `SELECT COALESCE(SUM(stock), 0) AS stock FROM stock_ubicacion WHERE item_id = $1`,
       [carneId],
     );
     // 100000 - 150 - 250 = 99600

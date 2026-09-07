@@ -149,12 +149,24 @@ export class InventarioService {
     // `FOR UPDATE OF ip` y no `FOR UPDATE` a secas: sin el `OF`, Postgres lockea
     // también la fila de `items`, que es huella de locks nueva en el camino más
     // caliente del sistema — exactamente donde la auditoría del 2026-08-15 encontró
-    // deadlocks por orden de bloqueo.
+    // deadlocks por orden de bloqueo. El ancla del lock es `item_producto`, no
+    // `stock_ubicacion`, y se queda ahí para siempre (docs/patterns/backend.md §15):
+    // la fila de `item_producto` existe desde que el ítem es un producto, la de
+    // `stock_ubicacion` puede no existir todavía (un producto que nunca se movió en
+    // esa ubicación), y `FOR UPDATE` sobre una fila inexistente no lockea nada.
     //
     // No filtra `i.eliminado_el IS NULL` a propósito, y ahora con una regla
     // explícita detrás en vez de una omisión: filtrarlo haría que anular una
     // venta de un ítem borrado después dejara de reponer. Lo que decide qué
     // pasa sobre un eliminado es el guard de abajo, no la ausencia del filtro.
+    //
+    // `LEFT JOIN stock_ubicacion`, no `JOIN`: bajo el lock ya tomado sobre
+    // `item_producto`, el saldo que se lee es el de la ubicación del movimiento —
+    // y un producto que nunca se movió ahí no tiene fila todavía. Sin fila es
+    // saldo CERO, no "no existe": con `JOIN` la fila desaparecería de
+    // `productoRows` y el guard de abajo la confundiría con un ítem sin control
+    // de stock. El upsert de más abajo (`ON CONFLICT DO UPDATE`) crea la fila la
+    // primera vez que el ítem se mueve en esa ubicación.
     const productoRows: {
       stock: string;
       modo_inventario: string;
@@ -162,13 +174,15 @@ export class InventarioService {
       item_nombre: string;
       item_eliminado_el: Date | null;
     }[] = await manager.query(
-      `SELECT ip.stock, ip.modo_inventario, ip.costo_actual,
+      `SELECT COALESCE(su.stock, 0) AS stock, ip.modo_inventario, ip.costo_actual,
               i.nombre AS item_nombre, i.eliminado_el AS item_eliminado_el
          FROM item_producto ip
          JOIN items i ON i.item_id = ip.item_id
+         LEFT JOIN stock_ubicacion su
+                ON su.item_id = ip.item_id AND su.ubicacion_id = $3
         WHERE ip.item_id = $1 AND i.tenant_id = $2
         FOR UPDATE OF ip`,
-      [params.itemId, params.tenantId],
+      [params.itemId, params.tenantId, params.ubicacionId],
     );
     // Mismo mensaje para "no existe", "no es producto" y "es de otro tenant": un id
     // ajeno tiene que ser indistinguible de uno inexistente, o la respuesta se vuelve
@@ -545,14 +559,6 @@ export class InventarioService {
     }
 
     await manager.query(
-      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-      [stockResultante.toString(), params.itemId],
-    );
-
-    // EXPANDIR (Tarea 2 del plan de bodegas): se escriben las dos tablas
-    // mientras los lectores se mudan. `item_producto.stock` se borra en la
-    // Tarea 4 y este comentario se va con él.
-    await manager.query(
       `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
        VALUES ($1, $2, $3)
        ON CONFLICT (item_id, ubicacion_id) DO UPDATE SET stock = EXCLUDED.stock`,
@@ -839,14 +845,8 @@ export class InventarioService {
       [itemId, tenantId],
     );
     const nuevo = new Decimal(rows[0].cnt);
-    await manager.query(
-      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-      [nuevo.toString(), itemId],
-    );
-    // EXPANDIR (Tarea 2 del plan de bodegas): se escriben las dos tablas
-    // mientras los lectores se mudan. `item_producto.stock` se borra en la
-    // Tarea 4 y este comentario se va con él. El saldo que se upsertea acá es
-    // el recalculado (el COUNT de arriba), nunca una suma propia.
+    // El saldo que se upsertea acá es el recalculado (el COUNT de arriba),
+    // nunca una suma propia.
     await manager.query(
       `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
        VALUES ($1, $2, $3)
@@ -868,14 +868,8 @@ export class InventarioService {
       [itemId],
     );
     const nuevo = new Decimal(rows[0].total);
-    await manager.query(
-      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-      [nuevo.toString(), itemId],
-    );
-    // EXPANDIR (Tarea 2 del plan de bodegas): se escriben las dos tablas
-    // mientras los lectores se mudan. `item_producto.stock` se borra en la
-    // Tarea 4 y este comentario se va con él. El saldo que se upsertea acá es
-    // el recalculado (el SUM de arriba), nunca una suma propia.
+    // El saldo que se upsertea acá es el recalculado (el SUM de arriba), nunca
+    // una suma propia.
     await manager.query(
       `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock)
        VALUES ($1, $2, $3)

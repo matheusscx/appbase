@@ -99,14 +99,20 @@ async function getUsuarioId(ds: DataSource): Promise<string> {
   return rows[0].usuario_id;
 }
 
+// `item_producto.stock` se borró en la Tarea 4 (bodegas y traslados):
+// `stock_ubicacion` es el único dueño del saldo. El TOTAL del tenant es la
+// suma de todas las ubicaciones — acá alcanza porque las ventas del e2e solo
+// descuentan del local, así que la suma se mueve exactamente igual que se
+// movía la columna vieja.
 async function getStock(ds: DataSource, itemId: string): Promise<number> {
-  const rows: { stock: string }[] = await ds.query(
-    `SELECT ip.stock FROM item_producto ip
-     JOIN items i ON i.item_id = ip.item_id
-     WHERE ip.item_id = $1 AND i.eliminado_el IS NULL`,
+  const rows: { total: string }[] = await ds.query(
+    `SELECT COALESCE(SUM(su.stock), 0) AS total
+       FROM stock_ubicacion su
+       JOIN items i ON i.item_id = su.item_id
+      WHERE su.item_id = $1 AND i.eliminado_el IS NULL`,
     [itemId],
   );
-  return parseFloat(rows[0]?.stock ?? '0');
+  return parseFloat(rows[0]?.total ?? '0');
 }
 
 describe('Ventas (e2e)', () => {

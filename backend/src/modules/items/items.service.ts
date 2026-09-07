@@ -325,10 +325,10 @@ export class ItemsService {
    *
    * `stock` sigue siendo el TOTAL del tenant (`SUM` sin filtrar), y
    * `stock_vendible` lo acota a esa ubicación (`FILTER`) — los dos agregados
-   * salen de `stock_ubicacion`, que desde la Tarea 2 es la fuente de verdad
-   * por ubicación (el chokepoint escribe ahí Y en `item_producto.stock`,
-   * materializado). `LEFT JOIN LATERAL`, no `JOIN` + `GROUP BY`: una sola
-   * consulta para todas las filas de la página, nunca una por fila.
+   * salen de `stock_ubicacion`, único dueño del saldo desde la Tarea 4
+   * (`item_producto.stock` ya no existe). `LEFT JOIN LATERAL`, no `JOIN` +
+   * `GROUP BY`: una sola consulta para todas las filas de la página, nunca
+   * una por fila.
    *
    * `ON ip.item_id IS NOT NULL` y no `ON TRUE`: un ítem sin fila en
    * `item_producto` (servicio, suscripción) tiene que seguir dando `stock`
@@ -1441,11 +1441,10 @@ export class ItemsService {
 
         await manager.query(
           `INSERT INTO item_producto
-             (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario, costo_actual)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+             (item_id, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario, costo_actual)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
           [
             itemId,
-            '0',
             unidadMedida,
             fechaElaboracion,
             fechaVencimiento,
@@ -3780,17 +3779,6 @@ export class ItemsService {
     };
   }
 
-  async obtenerStockProducto(
-    manager: EntityManager,
-    itemId: string,
-  ): Promise<string> {
-    const rows: { stock: string }[] = await manager.query(
-      `SELECT stock FROM item_producto WHERE item_id = $1`,
-      [itemId],
-    );
-    return rows[0]?.stock ?? '0';
-  }
-
   /**
    * Nombre y unidad de STOCK de los ingredientes que un snapshot usa como
    * extra. La unidad es propiedad del ingrediente (`item_producto.unidad_medida`),
@@ -4824,15 +4812,16 @@ export class ItemsService {
       // El `ORDER BY` es el que fija el orden de bloqueo: el nodo `LockRows`
       // va por encima del `Sort`, así que las filas se lockean ya ordenadas.
       //
-      // ⛔ Tarea 3a: esto cambia lo que LEE, no lo que LOCKEA (ruling del
-      // pre-flight, 2026-09-06). El `FOR UPDATE OF ip` sigue tomando el lock
-      // de `item_producto` — la Tarea 4 muda el objeto del lock a
-      // `stock_ubicacion` de los dos lados (acá y `registrarMovimiento`) EN UN
-      // SOLO commit, porque partirlo entre dos deja el contrato de orden de
-      // bloqueo (auditoría de deadlocks del 2026-08-15) serializando sobre
-      // objetos distintos. Bajo ese lock ya tomado, lo único que cambia es de
-      // dónde sale el saldo: `stock_ubicacion` acotado al local, no
-      // `item_producto.stock` (el total).
+      // ⛔ Tarea 3a: esto cambió lo que LEE, no lo que LOCKEA (ruling del
+      // pre-flight, 2026-09-06), y la Tarea 4 lo dejó así para siempre: el
+      // `FOR UPDATE OF ip` sigue tomando el lock de `item_producto`, nunca de
+      // `stock_ubicacion` — su fila puede no existir todavía (un producto que
+      // nunca se movió en esa ubicación), y `FOR UPDATE` sobre una fila
+      // inexistente no lockea nada. `item_producto` es el ancla porque su fila
+      // siempre existe (docs/patterns/backend.md §15). Bajo ese lock, lo único
+      // que cambia es de dónde sale el saldo: `stock_ubicacion` acotado al
+      // local, no un total materializado en `item_producto` (esa columna ya
+      // no existe).
       //
       // `LEFT JOIN`, no `JOIN`: un producto sin fila en esa ubicación tiene
       // saldo CERO, no "no existe" — con `JOIN` desaparecería de `stockRows` y

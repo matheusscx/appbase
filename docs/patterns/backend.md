@@ -922,6 +922,30 @@ El porqué completo, con los ciclos que se cerraron y el que quedó abierto, en
 [`agent/resueltos.md`](../agent/resueltos.md) § "El orden de bloqueo de filas de la
 bandeja de desfases".
 
+### El lock de stock ancla en `item_producto`, nunca en `stock_ubicacion` (2026-09-06)
+
+`InventarioService.registrarMovimiento` (el chokepoint de todo movimiento de stock) y
+`ItemsService.validarStockAlPedir` toman los dos el mismo `SELECT … FOR UPDATE OF ip`
+sobre `item_producto`, aunque el saldo que leen bajo ese lock salga de
+`stock_ubicacion` (acotado a la ubicación del movimiento, con `LEFT JOIN` +
+`COALESCE(su.stock, 0)`: sin fila ahí el saldo es CERO, no "no existe").
+
+**Por qué el lock no se muda a `stock_ubicacion`.** Una fila de `stock_ubicacion`
+puede no existir todavía —un producto que nunca se movió en esa ubicación— y
+`FOR UPDATE` sobre una fila inexistente **no lockea nada**: dos primeros movimientos
+concurrentes del mismo ítem en la misma ubicación correrían en carrera. La fila de
+`item_producto` en cambio siempre existe desde que el ítem es un producto, así que es
+el ancla que puede tomarse siempre. El upsert de escritura (`INSERT … ON CONFLICT
+(item_id, ubicacion_id) DO UPDATE`) es el que crea la fila de `stock_ubicacion` la
+primera vez que el ítem se mueve ahí.
+
+**La consecuencia buena, para la Tarea 9 (traslados).** Como el ancla es una fila por
+`item_id` —no por `(item_id, ubicacion_id)`—, un traslado que mueve un ítem entre dos
+ubicaciones lockea **una sola fila** sin importar cuántas ubicaciones toque. Dos
+traslados opuestos del mismo producto (A→B y B→A) piden la misma fila de
+`item_producto`, nunca dos filas distintas de `stock_ubicacion` en orden cruzado: no
+pueden hacer deadlock entre sí por esto.
+
 ---
 
 ## 16. Alcance de lectura por usuario: el eje `MiCaja`/`Cajas`

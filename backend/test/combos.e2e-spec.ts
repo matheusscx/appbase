@@ -253,15 +253,17 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(movPan?.tipo).toBe('salida');
     expect(movPan?.motivo).toBe('venta');
 
-    // Stock resultante: papas 20-1=19, pan 10-1=9
+    // Stock resultante: papas 20-1=19, pan 10-1=9.
+    // `item_producto.stock` se borró en la Tarea 4 (bodegas y traslados):
+    // `stock_ubicacion` es el único dueño del saldo.
     const stockRows: { stock: string }[] = await ds.query(
-      `SELECT stock FROM item_producto WHERE item_id = $1`,
+      `SELECT COALESCE(SUM(stock), 0) AS stock FROM stock_ubicacion WHERE item_id = $1`,
       [papasId],
     );
     expect(stockRows[0]?.stock).toBe('19.0000');
 
     const stockPanRows: { stock: string }[] = await ds.query(
-      `SELECT stock FROM item_producto WHERE item_id = $1`,
+      `SELECT COALESCE(SUM(stock), 0) AS stock FROM stock_ubicacion WHERE item_id = $1`,
       [panId],
     );
     expect(stockPanRows[0]?.stock).toBe('9.0000');
