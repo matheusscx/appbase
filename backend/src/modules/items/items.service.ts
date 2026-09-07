@@ -335,6 +335,19 @@ export class ItemsService {
    * y `stock_vendible` en `NULL` — "no aplica"—, no en `0` — "existe y no
    * tiene". Con `ON TRUE` el `COALESCE(SUM(...), 0)` de adentro los volvería
    * `0` para cualquier fila, tenga o no `item_producto`.
+   *
+   * Decisión (revisión de rama 2026-09-06, hallazgo 1): el `JOIN ubicaciones`
+   * de acá abajo filtra `eliminado_el IS NULL`, igual que
+   * `desglosePorUbicacion` (más abajo en este archivo). Antes no lo hacía, y
+   * las dos consultas podían no coincidir: el `total` del catálogo contaba
+   * saldo colgado de una ubicación borrada que el desglose ya no mostraba —un
+   * número que su propio desglose no explicaba. Una bodega borrada no es un
+   * lugar donde el tenant pueda ver, contar o mover ese stock, así que no
+   * cuenta para el total. `UbicacionesService.remove` ahora bloquea el
+   * borrado bajo lock mientras quede stock (ver el comentario ahí), así que
+   * esto ya no debería tener nada que filtrar en la práctica — es defensa en
+   * profundidad para que las dos vistas nunca vuelvan a desacordar, no el
+   * guard principal.
    */
   private baseQuery(localIdx: number): string {
     return `
@@ -359,6 +372,7 @@ export class ItemsService {
       SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total,
              COALESCE(SUM(su.stock) FILTER (WHERE su.ubicacion_id = $${localIdx}), 0)::numeric(18,4) AS vendible
         FROM stock_ubicacion su
+        JOIN ubicaciones u2 ON u2.ubicacion_id = su.ubicacion_id AND u2.eliminado_el IS NULL
        WHERE su.item_id = ip.item_id
     ) s ON ip.item_id IS NOT NULL
     LEFT JOIN item_servicio isr ON isr.item_id = i.item_id

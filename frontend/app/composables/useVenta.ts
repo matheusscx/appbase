@@ -58,10 +58,12 @@ export interface ItemCatalogo {
  *
  * Es la única puerta por la que las pantallas de venta leen ese número. Existe
  * porque los dos campos significan cosas distintas —`stock` es el saldo
- * materializado del kardex, lo que hay en la bodega; `stockDisponible` es lo que
- * queda después de lo que las mesas abiertas ya pidieron— y la pantalla de venta
- * siempre quiere el segundo. El fallback no es defensivo de más: `stockDisponible`
- * viene `null` en todo lo que no sea producto o ingrediente.
+ * materializado del kardex, el TOTAL del tenant sumado en todas las ubicaciones
+ * (bodegas incluidas); `stockDisponible` es lo que queda, EN EL LOCAL, después de
+ * lo que las mesas abiertas ya pidieron— y la pantalla de venta siempre quiere el
+ * segundo: lo que hay en una bodega no se puede vender sin antes trasladarlo. El
+ * fallback no es defensivo de más: `stockDisponible` viene `null` en todo lo que
+ * no sea producto o ingrediente.
  */
 export function stockPedible(
   item: Pick<ItemCatalogo, 'stock' | 'stockDisponible'>,

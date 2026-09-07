@@ -219,54 +219,66 @@ export class UbicacionesService {
   }
 
   // Verificar el uso y borrar en queries sueltas era un check-then-act: bajo
-  // READ COMMITTED el EXISTS no ve los INSERT todavía sin commitear, así que
-  // en principio esto debería lockear la fila igual que
-  // `MotivosDiferenciaInventarioService.remove` — pero acá no hay un
-  // `aplicar()` corriendo en paralelo a esta feature (Tarea 1: nadie escribe
-  // `stock_ubicacion` todavía), así que la carrera es teórica y `db.transaccion`
-  // + `FOR UPDATE` se agregan cuando la Tarea 2 la hace real, no antes.
+  // READ COMMITTED el COUNT no ve el commit de un traslado en vuelo, así que
+  // el guard de arriba (`conStock`) podía contar 0 mientras un
+  // `TrasladosService.crearEnTransaccion` escribía saldo en esta misma
+  // ubicación por otro carril. La carrera dejó de ser teórica en la Tarea 9
+  // (creó `traslados`, el primer escritor de `stock_ubicacion` fuera del
+  // seed) y el endurecimiento no se agregó con ella. Molde:
+  // `MotivosTrasladoService.remove`, que resuelve el mismo problema con
+  // `db.transaccion` + `FOR UPDATE` sobre la fila que el escritor toma con
+  // `FOR SHARE`.
   //
-  // ⚠️ `stock_ubicacion` nace en ESTA tarea (ver `StockUbicacion`) pero nadie
-  // la escribe todavía — se puebla en la Tarea 2. Hasta entonces esta consulta
-  // siempre da 0 y el guard no bloquea nada en la práctica; se escribe ahora
-  // para que el borrado no nazca sin la defensa y nadie la agregue después
-  // "cuando se acuerde".
+  // El `FOR UPDATE` acá abajo es el lado exclusivo del par: el `FOR SHARE`
+  // que toma `TrasladosService.crearEnTransaccion` al leer origen/destino es
+  // el otro lado. Si un traslado ya está en vuelo sobre esta ubicación, este
+  // `FOR UPDATE` espera a que su transacción termine —commit o rollback—
+  // antes de correr el `COUNT`, así que lee el saldo ya actualizado. Y si
+  // este `remove()` toma el lock primero, el traslado que llegue después
+  // vuelve a leer la ubicación tras esperar: la encuentra borrada
+  // (`eliminado_el IS NOT NULL`) y su propio `SELECT ... WHERE eliminado_el
+  // IS NULL` la trata como inexistente.
   async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
-    const filas: { tipo: string; nombre: string }[] = await this.db.query(
-      `SELECT tipo, nombre FROM ubicaciones
-        WHERE ubicacion_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
-      [id, tenantId],
-    );
-    if (!filas.length) throw new NotFoundException('Ubicación no encontrada');
-
-    if (filas[0].tipo === 'local') {
-      throw new BadRequestException(
-        'El local no se puede eliminar: es la ubicación desde la que se vende',
+    await this.db.transaccion(async (manager) => {
+      const filas: { tipo: string; nombre: string }[] = await manager.query(
+        `SELECT tipo, nombre FROM ubicaciones
+          WHERE ubicacion_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [id, tenantId],
       );
-    }
+      if (!filas.length) throw new NotFoundException('Ubicación no encontrada');
 
-    // Vaciar antes de borrar. Sin esto el stock queda colgado de una fila
-    // borrada: invisible en todo listado y sin forma de sacarlo.
-    const conStock: { items_con_stock: string }[] = await this.db.query(
-      `SELECT COUNT(*) AS items_con_stock
-         FROM stock_ubicacion
-        WHERE ubicacion_id = $1 AND stock <> 0`,
-      [id],
-    );
-    const cuantos = Number(conStock[0].items_con_stock);
-    if (cuantos > 0) {
-      throw new BadRequestException(
-        `"${filas[0].nombre}" todavía tiene ${cuantos} producto(s) con stock. ` +
-          'Trasladá lo que queda antes de eliminarla.',
+      if (filas[0].tipo === 'local') {
+        throw new BadRequestException(
+          'El local no se puede eliminar: es la ubicación desde la que se vende',
+        );
+      }
+
+      // Vaciar antes de borrar. Sin esto el stock queda colgado de una fila
+      // borrada: invisible en todo listado y sin forma de sacarlo. Bajo el
+      // `FOR UPDATE` de arriba este `COUNT` ya lee el saldo posterior a
+      // cualquier traslado que estuviera en vuelo, nunca uno viejo.
+      const conStock: { items_con_stock: string }[] = await manager.query(
+        `SELECT COUNT(*) AS items_con_stock
+           FROM stock_ubicacion
+          WHERE ubicacion_id = $1 AND stock <> 0`,
+        [id],
       );
-    }
+      const cuantos = Number(conStock[0].items_con_stock);
+      if (cuantos > 0) {
+        throw new BadRequestException(
+          `"${filas[0].nombre}" todavía tiene ${cuantos} producto(s) con stock. ` +
+            'Trasladá lo que queda antes de eliminarla.',
+        );
+      }
 
-    await this.db.query(
-      `UPDATE ubicaciones
-          SET eliminado_el = NOW(), eliminado_por = $3
-        WHERE ubicacion_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
-      [id, tenantId, usuarioId],
-    );
+      await manager.query(
+        `UPDATE ubicaciones
+            SET eliminado_el = NOW(), eliminado_por = $3
+          WHERE ubicacion_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [id, tenantId, usuarioId],
+      );
+    });
   }
 
   async restaurar(

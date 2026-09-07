@@ -175,11 +175,26 @@ export class TrasladosService {
     }
 
     // Las dos ubicaciones en UNA consulta, no una por punta.
+    //
+    // `FOR SHARE`: el par del `FOR UPDATE` de `UbicacionesService.remove`.
+    // Sin este lock, un `remove()` concurrente sobre el origen o el destino
+    // podía contar 0 stock, borrar la ubicación, y este traslado terminaba
+    // escribiendo saldo en una fila ya borrada — colgado e invisible, la
+    // carrera que describe el comentario de `remove()`. Tomarlo acá retiene
+    // la fila hasta el commit de esta transacción: si `remove()` llega
+    // después, su `FOR UPDATE` espera a que este traslado termine y recién
+    // entonces cuenta el saldo que este método dejó. Si `remove()` llega
+    // antes, este `SELECT` espera a que su transacción termine y vuelve a
+    // leer: la ubicación ya no tiene `eliminado_el IS NULL` y cae en el
+    // `NotFoundException` de abajo. Compatible entre sí (dos traslados
+    // pueden compartir la misma ubicación de origen o destino a la vez),
+    // solo conflictúa con el `FOR UPDATE` exclusivo del borrado.
     const ubicaciones: UbicacionRow[] = await manager.query(
       `SELECT ubicacion_id, nombre, tipo, activo
          FROM ubicaciones
         WHERE ubicacion_id = ANY($1::uuid[]) AND tenant_id = $2
-          AND eliminado_el IS NULL`,
+          AND eliminado_el IS NULL
+        FOR SHARE`,
       [[dto.origenId, dto.destinoId], tenantId],
     );
     const origen = ubicaciones.find((u) => u.ubicacion_id === dto.origenId);

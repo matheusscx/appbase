@@ -204,6 +204,7 @@ Authorization: Bearer <token>
 
 Request:
 {
+  "ubicacionId": "uuid-ubicacion",
   "itemIds": ["uuid-item-1", "uuid-item-2"],
   "comentario": "Recuento mensual bodega principal"
 }
@@ -211,6 +212,10 @@ Request:
 Response (201):
 { "id": "uuid-recuento" }
 ```
+
+`ubicacionId` es obligatorio (`CreateRecuentoDto`, frente "bodegas y traslados"): el
+recuento es de **una** ubicación, y `stock_sistema` se congela acotado a esa
+ubicación (`stock_ubicacion` de `dto.ubicacionId`), no al total del tenant.
 
 Valida que cada item exista en el tenant y tenga control de stock (`tipo='producto'`/
 `'ingrediente'` con fila en `item_producto`); si no, rechaza toda la creación con 400
@@ -334,7 +339,8 @@ completo de la regla del kardex: [`inventario-kardex.md`](./inventario-kardex.md
 
 ### DTOs
 
-- `CreateRecuentoDto` — `itemIds: string[]` (no vacío, UUIDs únicos), `comentario?`
+- `CreateRecuentoDto` — `ubicacionId: string` (UUID, requerido), `itemIds: string[]`
+  (no vacío, UUIDs únicos), `comentario?`
 - `UpdateRecuentoDto` — `motivoDiferenciaDefaultId?: string | null`, `comentario?`
 - `UpdateRecuentoLineaDto` — `cantidadContada?: string | null`, `motivoDiferenciaId?: string | null`
 

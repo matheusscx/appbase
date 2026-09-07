@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EntityManager, QueryFailedError } from 'typeorm';
+import { EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
+import { esDeadlock } from '../../common/db/reintento-deadlock';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -598,6 +599,15 @@ export class RecuentosService {
   // Reintentar una vez es seguro —el rollback dejó la transacción sin ningún
   // efecto— y no le impone a ventas un orden de locks que sus recetas y combos
   // no pueden garantizar de todos modos.
+  //
+  // `esDeadlock`, no `error.code` a secas (hallazgo 7, revisión de rama
+  // 2026-09-06, promovido del backlog): TypeORM copia el `code` del driver a
+  // `QueryFailedError` pero también lo deja en `driverError.code`, y cuál de
+  // las dos formas llega depende de dónde se lance. Mirar solo `error.code`
+  // deja pasar la mitad de los `40P01` sin reintentar. El frente "bodegas y
+  // traslados" le agregó un competidor nuevo por los locks de `item_producto`
+  // que no existía cuando este `catch` se escribió —`TrasladosService`—, así
+  // que el deadlock no reconocido es más probable hoy que antes.
   async aplicar(
     tenantId: string,
     usuarioId: string,
@@ -606,10 +616,7 @@ export class RecuentosService {
     try {
       return await this.aplicarEnTransaccion(tenantId, usuarioId, recuentoId);
     } catch (error) {
-      if (
-        !(error instanceof QueryFailedError) ||
-        (error as { code?: string }).code !== '40P01'
-      ) {
+      if (!esDeadlock(error)) {
         throw error;
       }
       return this.aplicarEnTransaccion(tenantId, usuarioId, recuentoId);

@@ -114,6 +114,7 @@ Authorization: Bearer <token>
 
 Request:
 {
+  "ubicacionId": "uuid-ubicacion",
   "tipo": "entrada",
   "cantidad": 500,
   "motivo": "merma",
@@ -128,6 +129,9 @@ Response (200):
 ```
 
 **Request Body (`AjusteStockDto`):**
+- `ubicacionId` (required): UUID de la ubicación donde se registra el movimiento
+  (frente "bodegas y traslados") — requerido y sin default, para que la pantalla nunca
+  lo olvide y el movimiento aterrice en el local por accidente.
 - `tipo` (required): `'entrada'` | `'salida'`
 - `cantidad` (required): Número positivo (el signo lo define `tipo`)
 - `motivo` (required): `'compra'` | `'devolucion'` | `'merma'` | `'ajuste_manual'` | `'inventario_inicial'`
@@ -352,9 +356,9 @@ La función `UNIDADES_FRACCIONARIAS` deja de ser un set hardcodeado (`{kg, l, m}
   ↓
 [Modal abre; selector de unidad se llena con unidades de magnitud 'masa': g, kg]
   ↓
-[Usuario ingresa: cantidad=500, unidad=g, tipo=entrada, motivo=merma]
+[Usuario ingresa: ubicación=Bodega Central, cantidad=500, unidad=g, tipo=entrada, motivo=merma]
   ↓ Click "Guardar"
-[PATCH /api/items/:id/stock con AjusteStockDto]
+[PATCH /api/items/:id/stock con AjusteStockDto (incluye ubicacionId)]
   ↓
 [Backend: ItemsService.ajustarStock]
   ├→ Lee unidad base del producto: 'kg'
@@ -374,7 +378,7 @@ La función `UNIDADES_FRACCIONARIAS` deja de ser un set hardcodeado (`{kg, l, m}
 ### Rechazo: Cross-Magnitud
 
 ```
-[Usuario ingresa cantidad=500, unidad='ml' (volumen), pero producto está en 'kg' (masa)]
+[Usuario ingresa ubicacionId válido, cantidad=500, unidad='ml' (volumen), pero producto está en 'kg' (masa)]
   ↓ PATCH /api/items/:id/stock
   ↓
 [ItemsService.ajustarStock]
@@ -391,7 +395,7 @@ La función `UNIDADES_FRACCIONARIAS` deja de ser un set hardcodeado (`{kg, l, m}
 ### Rechazo: Serie/Lote con Unidad Distinta a Base
 
 ```
-[Usuario intenta PATCH /items/:id/stock con unidadCodigo='g' en producto modo='serie', unidad='kg']
+[Usuario intenta PATCH /items/:id/stock con ubicacionId válido, unidadCodigo='g' en producto modo='serie', unidad='kg']
   ↓
 [ItemsService.ajustarStock]
   ├→ unidadCodigo='g' ≠ unidad base 'kg' → requiere conversión

@@ -1415,6 +1415,11 @@ export class InventarioService {
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
+       -- Sin ub.eliminado_el IS NULL, a propósito e igual que el JOIN de items
+       -- arriba: un movimiento ya escrito en el kardex tiene que seguir diciendo
+       -- en qué ubicación pasó aunque esa bodega se haya borrado después (es lo
+       -- que se hace tras vaciarla). Filtrarlo no ocultaría la fila del kardex,
+       -- solo le quitaría el nombre de la ubicación sin decir que lo oculta.
        LEFT JOIN ubicaciones ub ON ub.ubicacion_id = mv.ubicacion_id
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          ${filters}

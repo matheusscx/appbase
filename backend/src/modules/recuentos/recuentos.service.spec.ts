@@ -977,6 +977,31 @@ describe('RecuentosService', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
+    it('reintenta cuando el 40P01 llega solo en driverError.code, no en error.code (hallazgo 7)', async () => {
+      // El caso que `error instanceof QueryFailedError && error.code !== '40P01'`
+      // dejaba pasar sin reintentar: TypeORM a veces deja el código SOLO en
+      // `driverError.code` y no lo copia a `error.code`. `esDeadlock` mira los
+      // dos; el `catch` viejo miraba solo el primero.
+      const errorSoloEnDriverError = new QueryFailedError(
+        'UPDATE item_producto SET stock = stock + $1 WHERE item_id = $2',
+        [],
+        new Error('deadlock detected'),
+      );
+      (
+        errorSoloEnDriverError as unknown as { driverError: { code: string } }
+      ).driverError = { code: '40P01' };
+
+      const spy = jest
+        .spyOn(service as any, 'aplicarEnTransaccion')
+        .mockRejectedValueOnce(errorSoloEnDriverError)
+        .mockResolvedValueOnce(resultadoExitoso);
+
+      const res = await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(res).toBe(resultadoExitoso);
+      expect(spy).toHaveBeenCalledTimes(2);
+    });
+
     it('si el reintento también falla, el error se propaga sin encubrirlo', async () => {
       const segundoError = buildQueryFailedError('40P01');
       const spy = jest

@@ -1,8 +1,10 @@
 # Feature: Papelera (restaurar eliminados)
 
-**Status**: Completo — backend en los 16 recursos, frontend en las 15 pantallas
+**Status**: Completo — backend en todo recurso del alcance (ver Scope), frontend en la
+pantalla de cada uno (salvo las que comparten pantalla con otro recurso del alcance).
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-08-02
+**Last Updated**: 2026-09-07 (alcance ampliado con `ubicaciones` y `motivos-traslado`,
+frente "bodegas y traslados" — mismo composable `usePapelera`, sin cambios de contrato)
 
 ---
 
@@ -28,12 +30,17 @@ alcance: [`docs/superpowers/specs/2026-07-31-papelera-restaurar-eliminados-desig
 
 ### Scope
 
-**Incluido — 16 entidades:**
+**Criterio de inclusión:** catálogo del negocio o config operativa del tenant con soft
+delete transversal (invariante 3) — no transaccional, no fiscal, no de seguridad/acceso.
+Un recurso nuevo que cumpla el criterio entra a este alcance con el mismo composable
+(`usePapelera`), no hace falta pedirlo caso a caso. Lista taxativa de lo que ya entró:
 
-- **Catálogo del negocio (7):** `items`, `categorias`, `descuentos`, `recargos`,
+- **Catálogo del negocio:** `items`, `categorias`, `descuentos`, `recargos`,
   `impuestos`, `grupos-modificadores`, `terceros`.
-- **Config operativa (9):** `cajones`, `garzones`, `turnos`, `salones`, `mesas`,
-  `impresoras`, `causas-merma`, `motivos-diferencia` (caja), `motivos-diferencia-inventario`.
+- **Config operativa:** `cajones`, `garzones`, `turnos`, `salones`, `mesas`,
+  `impresoras`, `causas-merma`, `motivos-diferencia` (caja), `motivos-diferencia-inventario`,
+  `ubicaciones`, `motivos-traslado` (estos dos últimos: frente "bodegas y traslados",
+  2026-09).
 
 **NO incluido, y por qué:**
 
@@ -65,7 +72,7 @@ reversible").
 
 ## API Endpoints
 
-Por cada uno de los 16 recursos, dos cambios sobre el CRUD ya existente — nada nuevo
+Por cada recurso del alcance, dos cambios sobre el CRUD ya existente — nada nuevo
 en la superficie, mismo guard que ya protegía el `DELETE`/`GET` de ese recurso:
 
 ```
@@ -346,9 +353,11 @@ identificable a quien devolverle el "click" de restaurar.
 
 ## Frontend
 
-**Estado real: 15 de 15 pantallas cableadas** (2026-08-02). 16 recursos backend
-pero **15 páginas**: `mesas` no tiene página propia, vive dentro de
-`configuracion/salones.vue`.
+**Estado real: toda pantalla del alcance backend está cableada**, salvo las que
+comparten pantalla con otro recurso — hoy solo `mesas`, que no tiene página propia y
+vive dentro de `configuracion/salones.vue`. Cableado originalmente el 2026-08-02 (15 de
+15 recursos backend de ese momento); `ubicaciones` y `motivos-traslado` se sumaron
+después (frente "bodegas y traslados", 2026-09) con el mismo composable — ver Scope.
 
 Las 9 últimas se replicaron en paralelo desde el molde de `descuentos.vue`, y de
 ahí salieron tres formas que conviene distinguir antes de cablear una pantalla

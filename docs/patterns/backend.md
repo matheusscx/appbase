@@ -924,10 +924,18 @@ bandeja de desfases".
 
 ### El lock de stock ancla en `item_producto`, nunca en `stock_ubicacion` (2026-09-06)
 
-`InventarioService.registrarMovimiento` (el chokepoint de todo movimiento de stock) y
-`ItemsService.validarStockAlPedir` toman los dos el mismo `SELECT … FOR UPDATE OF ip`
-sobre `item_producto`, aunque el saldo que leen bajo ese lock salga de
-`stock_ubicacion`, acotado a la ubicación del movimiento.
+**El criterio, no la lista:** todo lo que lockea para leer o mover saldo de
+`stock_ubicacion` toma el mismo `SELECT … FOR UPDATE OF ip` sobre `item_producto`, nunca
+sobre `stock_ubicacion` directamente — es el contrato de esta sección, no una lista
+cerrada de sitios. `InventarioService.registrarMovimiento` (el chokepoint de todo
+movimiento de stock) y `ItemsService.validarStockAlPedir` son los dos que **leen** saldo
+bajo ese lock; `TrasladosService.crearEnTransaccion` lo toma igual y además es el único
+que antes encadena un `FOR SHARE` sobre `motivo_traslado`
+(`MotivosTrasladoService.assertMotivoActivo`) para que el borrado del motivo lo espere.
+Sumale los sitios preexistentes que ya tomaban `FOR UPDATE` directo sobre la fila de
+`item_producto` para otro propósito —serializar con `registrarMovimiento` al cambiar
+`modo_inventario`/`unidad_medida` (`ItemsService`, dos sitios)—: un nuevo escritor de
+`stock_ubicacion` se suma a esta lista, no la reemplaza.
 
 ⛔ **Y el saldo se lee en un statement APARTE, emitido ya con el lock en la mano.**
 Nunca en el mismo `SELECT` que toma el `FOR UPDATE`. No es estilo: es la diferencia

@@ -1349,8 +1349,15 @@ export class SeederService implements OnApplicationBootstrap {
     // Sin id fijo: nadie referencia el local de un tenant por su UUID, solo
     // por `tipo = 'local'` (`UbicacionesService.localDe`).
     for (const tenantId of [PARIS, FALABELLA]) {
+      // `eliminado_el IS NULL`: el local nunca se borra en la práctica
+      // (`UbicacionesService.remove` lo rechaza siempre), así que hoy esta
+      // fila es inalcanzable — pero es el criterio del propio frente
+      // (invariante 3) y no una excepción deliberada, y sin el filtro un
+      // seed re-corrido contra una fila local borrada a mano insertaría un
+      // segundo local para el mismo tenant.
       const existe: unknown[] = await this.dataSource.query(
-        `SELECT 1 FROM ubicaciones WHERE tenant_id = $1 AND tipo = 'local'`,
+        `SELECT 1 FROM ubicaciones
+          WHERE tenant_id = $1 AND tipo = 'local' AND eliminado_el IS NULL`,
         [tenantId],
       );
       if (!existe.length) {

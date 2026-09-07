@@ -565,13 +565,15 @@ describe('carrito helpers', () => {
   })
 })
 
-// ── Lo que queda por pedir vs. lo que hay en la bodega ──────────────────────
+// ── Lo que queda por pedir vs. el total del tenant ──────────────────────────
 //
 // Desde el 2026-09-01 `GET /items` manda dos números para un producto: `stock`
-// —el saldo materializado del kardex, lo que hay físicamente— y
-// `stockDisponible` —ese stock menos lo que las cuentas abiertas del tenant ya
-// pidieron—. Las pantallas de venta siempre quieren el segundo: mostrar el
-// primero es prometer la última unidad que otra mesa ya se llevó.
+// —el saldo materializado del kardex, el TOTAL sumado en todas las ubicaciones
+// del tenant, bodegas incluidas— y `stockDisponible` —el stock del LOCAL menos
+// lo que las cuentas abiertas ya pidieron—. Las pantallas de venta siempre
+// quieren el segundo: mostrar el primero es prometer stock que está en una
+// bodega (no se puede vender sin trasladarlo primero) o que otra mesa ya se
+// llevó.
 //
 // Y son dos magnitudes distintas de las de `disponible` (porciones de una
 // receta, entero): `stockDisponible` es una CANTIDAD, string, que puede ser
