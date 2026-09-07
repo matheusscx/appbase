@@ -928,6 +928,28 @@ CREATE TABLE "motivo_traslado" (
 CREATE UNIQUE INDEX "uq_motivo_traslado_tenant_nombre"
   ON "motivo_traslado" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
 
+-- Documento INTERNO de un traslado entre dos ubicaciones del mismo tenant.
+-- Lleva origen, destino, motivo y comentario; las cantidades NO viven acá:
+-- cada línea deja dos filas en movimientos_inventario (salida en el origen,
+-- entrada en el destino) colgadas del mismo traslado_id. La razón de que sean
+-- dos y no una es stock_anterior/stock_resultante: son saldos POR UBICACIÓN,
+-- y en una sola fila no hay dónde escribir los dos.
+-- ⛔ No emite nada: el documento chileno del traslado es el DTE 52 y viaja con
+-- la mercadería. Esta fila no lo reemplaza (ADR-010).
+CREATE TABLE "traslados" (
+  "traslado_id"          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"            UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "ubicacion_origen_id"  UUID NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  "ubicacion_destino_id" UUID NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  "motivo_traslado_id"   UUID NOT NULL REFERENCES "motivo_traslado" ("motivo_traslado_id"),
+  "comentario"           TEXT,
+  "usuario_id"           UUID REFERENCES "usuarios" ("usuario_id"),
+  "creado_el"            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"       TIMESTAMPTZ,
+  "eliminado_el"         TIMESTAMPTZ
+);
+CREATE INDEX "idx_traslados_tenant" ON "traslados" ("tenant_id");
+
 -- Kardex de movimientos de stock (solo items tipo 'producto')
 -- stock_ubicacion es el saldo materializado (por ubicación); esta tabla es la
 -- fuente de verdad auditable.
@@ -937,7 +959,7 @@ CREATE TABLE "movimientos_inventario" (
   "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
   "ubicacion_id"     UUID          NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
   "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
-  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
+  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento' | 'traslado'
   "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo
   "stock_anterior"   NUMERIC(18,4) NOT NULL,
   "stock_resultante" NUMERIC(18,4) NOT NULL,
@@ -949,6 +971,10 @@ CREATE TABLE "movimientos_inventario" (
   "causa_merma_id"   UUID REFERENCES "causas_merma" ("causa_merma_id"),
   "motivo_diferencia_id" UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
   -- solo en motivo='recuento'; NULL en el resto
+  "traslado_id"      UUID REFERENCES "traslados" ("traslado_id"),
+  -- solo en motivo='traslado'; NULL en el resto. Las DOS filas de un traslado
+  -- comparten el mismo valor: es lo que permite reconstruir desde el kardex
+  -- que estos 5 kg salieron de acá y entraron allá.
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ
@@ -956,6 +982,10 @@ CREATE TABLE "movimientos_inventario" (
 
 -- Los movimientos de una venta: los cuenta la nota de crédito por línea.
 CREATE INDEX "idx_movimientos_inventario_venta" ON "movimientos_inventario" ("venta_id");
+-- Los movimientos de un traslado: mismo patrón de acceso que venta_id. Lo usan
+-- el detalle (GET /traslados/:id, que corre dentro de la transacción del
+-- traslado) y el conteo de productos movidos del listado.
+CREATE INDEX "idx_movimientos_inventario_traslado" ON "movimientos_inventario" ("traslado_id");
 
 -- Lotes: identidad del lote (código, elaboración, vencimiento), una sola vez
 -- por lote — no varía por ubicación. `cantidad_inicial` es acumulado

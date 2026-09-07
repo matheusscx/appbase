@@ -14,6 +14,9 @@ describe('MotivosTrasladoService', () => {
   let queryMock: jest.Mock;
 
   beforeEach(async () => {
+    // Un solo mock de `query` para el pool y para el manager de la
+    // transacción: lo que importa acá es el ORDEN de las sentencias, y
+    // separarlos en dos mocks lo escondería.
     queryMock = jest.fn();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -25,7 +28,11 @@ describe('MotivosTrasladoService', () => {
         },
         {
           provide: Db,
-          useValue: { query: queryMock },
+          useValue: {
+            query: queryMock,
+            transaccion: (cb: (m: { query: jest.Mock }) => unknown) =>
+              cb({ query: queryMock }),
+          },
         },
       ],
     }).compile();
@@ -83,6 +90,7 @@ describe('MotivosTrasladoService', () => {
           es_fijo: false,
         },
       ])
+      .mockResolvedValueOnce([{ existe: false }]) // ¿en uso?
       .mockResolvedValueOnce([]); // UPDATE
 
     await service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID);
@@ -95,9 +103,52 @@ describe('MotivosTrasladoService', () => {
       TENANT_ID,
       USUARIO_ID,
     ]);
-    // Solo dos queries: encontrar + escribir. Sin una tercera de "en uso",
-    // porque `traslados` (Tarea 9) todavía no existe.
+    // Tres queries: encontrar (con lock) + "¿en uso?" + escribir.
+    expect(queryMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('remove() no borra un motivo que un traslado ya registrado referencia', async () => {
+    queryMock
+      .mockResolvedValueOnce([
+        {
+          motivo_traslado_id: MOTIVO_ID,
+          nombre: 'Consignación',
+          activo: true,
+          es_fijo: false,
+        },
+      ])
+      .mockResolvedValueOnce([{ existe: true }]);
+
+    await expect(
+      service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID),
+    ).rejects.toThrow(/en uso en traslados/);
+
+    // Y no llegó a escribir: el borrado se frena, no se deshace.
     expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('remove() LOCKEA la fila antes de preguntar si está en uso', async () => {
+    // El par del `FOR SHARE` de `assertMotivoActivo`: sin el lock, el EXISTS
+    // no ve el `INSERT INTO traslados` todavía sin commitear y el motivo se
+    // borra igual, colgado de un documento ya emitido. El orden es la regla,
+    // así que se afirma el orden.
+    queryMock
+      .mockResolvedValueOnce([
+        {
+          motivo_traslado_id: MOTIVO_ID,
+          nombre: 'Consignación',
+          activo: true,
+          es_fijo: false,
+        },
+      ])
+      .mockResolvedValueOnce([{ existe: false }])
+      .mockResolvedValueOnce([]);
+
+    await service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID);
+
+    const sqls = queryMock.mock.calls.map((c) => c[0] as string);
+    expect(sqls[0]).toMatch(/FOR UPDATE/);
+    expect(sqls[1]).toMatch(/EXISTS[\s\S]*FROM traslados/);
   });
 
   describe('restaurar', () => {
@@ -261,6 +312,24 @@ describe('MotivosTrasladoService', () => {
     await expect(
       service.assertMotivoActivo(runner, TENANT_ID, MOTIVO_ID),
     ).rejects.toThrow('Motivo de traslado no válido o inactivo');
+  });
+
+  it('assertMotivoActivo toma FOR SHARE: es el par del FOR UPDATE de remove()', async () => {
+    const runner = {
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([
+          { motivo_traslado_id: MOTIVO_ID, nombre: 'Consignación' },
+        ]),
+    };
+
+    await service.assertMotivoActivo(runner, TENANT_ID, MOTIVO_ID);
+
+    // Sin el lock, un `DELETE` del motivo se cuela entre esta validación y el
+    // `INSERT INTO traslados`, y el documento nace colgando de un motivo
+    // borrado. El `FOR SHARE` va DENTRO de la misma sentencia que valida.
+    const sql = String(runner.query.mock.calls[0][0]);
+    expect(sql).toMatch(/activo = true[\s\S]*FOR SHARE/);
   });
 
   it('findAll con soloActivas filtra los inactivos', async () => {

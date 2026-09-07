@@ -3,7 +3,6 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
-import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
@@ -17,9 +16,10 @@ import { AppModule } from '../src/app.module';
  * Tarea 3a). Por eso el `stock` de acá tiene que seguir siendo el TOTAL del
  * tenant, no el del local.
  *
- * ⚠️ Misma muleta declarada que `items-stock-por-ubicacion.e2e-spec.ts`: el
- * stock de la bodega se planta con SQL directo a `stock_ubicacion` porque
- * `POST /traslados` todavía no existe (Tarea 9 del plan).
+ * ✅ **Sin muleta desde la Tarea 9**: el stock de la bodega se arma por la API
+ * (compra al local + `POST /traslados`). Hasta el 2026-09-07 se plantaba con
+ * un `INSERT` directo a `stock_ubicacion` porque el endpoint no existía, y esa
+ * excepción estaba declarada en `costo-stock-choke-point.invariant.spec.ts`.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -36,6 +36,13 @@ interface ItemResponse {
 }
 interface UbicacionResponse {
   id: string;
+}
+interface MotivoTrasladoResponse {
+  id: string;
+}
+interface UbicacionListada {
+  id: string;
+  tipo: 'local' | 'bodega';
 }
 interface GrupoModificadorResponse {
   grupoModificadorId: string;
@@ -73,8 +80,8 @@ async function login(app: INestApplication<App>): Promise<string> {
 
 describe('Grupos de modificadores — stock por ubicación (e2e)', () => {
   let app: INestApplication<App>;
-  let ds: DataSource;
   let token: string;
+  let localId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -89,8 +96,16 @@ describe('Grupos de modificadores — stock por ubicación (e2e)', () => {
     );
     await app.init();
 
-    ds = app.get(DataSource);
     token = await login(app);
+
+    // El local, por la API: este spec ya no toca la base directo.
+    const resUbic = await request(app.getHttpServer())
+      .get('/api/ubicaciones')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUbic.status).toBe(200);
+    localId = (resUbic.body as UbicacionListada[]).find(
+      (u) => u.tipo === 'local',
+    )!.id;
   });
 
   afterAll(async () => {
@@ -124,25 +139,36 @@ describe('Grupos de modificadores — stock por ubicación (e2e)', () => {
     expect(resItem.status).toBe(201);
     const itemId = (resItem.body as ItemResponse).id;
 
-    // 3. 10 en el local, por la API real.
+    // 3. 30 en el local, por la API real.
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: '10',
+        cantidad: '30',
         costoUnitario: '500',
       })
       .expect(200);
 
-    // 4. 20 en la bodega — la muleta declarada arriba. 10 y 20 a propósito,
-    // no números iguales: así un mutante que lea el local donde va el total
-    // (o viceversa) no sobrevive.
-    await ds.query(
-      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock) VALUES ($1, $2, '20.0000')`,
-      [itemId, bodegaId],
-    );
+    // 4. 20 se van a la bodega POR LA API: 10 en el local, 20 en la bodega.
+    // Números distintos a propósito, así un mutante que lea el local donde va
+    // el total (o viceversa) no sobrevive.
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-traslado')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resMotivos.status).toBe(200);
+
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: (resMotivos.body as MotivoTrasladoResponse[])[0].id,
+        lineas: [{ itemId, cantidad: '20' }],
+      });
+    expect(resTraslado.status).toBe(201);
 
     // 5. El grupo con ese item como única opción.
     const resGrupo = await request(app.getHttpServer())

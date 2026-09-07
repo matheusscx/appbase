@@ -12,6 +12,11 @@ import {
 import { CreateMotivoTrasladoDto } from './dto/create-motivo-traslado.dto';
 import { UpdateMotivoTrasladoDto } from './dto/update-motivo-traslado.dto';
 
+/** `DataSource` o el `EntityManager` de una transacción: ambos exponen `query`. */
+type SqlRunner = {
+  query: (sql: string, params?: unknown[]) => Promise<unknown>;
+};
+
 // `eliminadoEl`/`eliminadoPor`/`eliminadoPorNombre` solo se completan cuando
 // se pide `incluirEliminados` (o tras `restaurar`): el listado normal no trae
 // esas columnas, sin el JOIN, N+1 si lo forzáramos ahí.
@@ -177,26 +182,58 @@ export class MotivosTrasladoService {
     };
   }
 
-  // A diferencia de `motivo-diferencia-inventario` y `causas-merma`, acá no
-  // hay chequeo de "en uso": la Tarea 9 (`traslados`) todavía no existe, así
-  // que no hay ninguna tabla que pueda referenciar este motivo. Cuando esa
-  // tabla nazca, su tarea decide si hace falta bloquear el borrado de un
-  // motivo referenciado — no se anticipa acá.
+  // El chequeo de "en uso" llegó con la Tarea 9, que es la que creó
+  // `traslados`: hasta entonces ninguna tabla podía referenciar este motivo.
+  //
+  // Verificar el uso y borrar en queries sueltas sería un check-then-act: bajo
+  // READ COMMITTED el EXISTS no ve los INSERT todavía sin commitear de un
+  // `TrasladosService.crear` en vuelo, así que el motivo se eliminaba igual y
+  // quedaba colgando de un documento ya emitido. El lock de la fila lo cierra:
+  // `TrasladosService.crear` la lee con el `FOR SHARE` de `assertMotivoActivo`
+  // y ese lock se sostiene hasta que su transacción commitea; este `FOR UPDATE`
+  // espera a que eso pase y recién entonces el EXISTS ve el traslado.
+  // Molde: `motivos-diferencia-inventario.service.ts`.
   async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
-    const motivo = await this.findOneOrFail(tenantId, id);
-    if (motivo.esFijo) {
-      throw new BadRequestException(
-        'No se puede eliminar un motivo fijo del sistema',
+    await this.db.transaccion(async (manager) => {
+      const motivo = await this.findOneOrFail(tenantId, id, manager, true);
+      if (motivo.esFijo) {
+        throw new BadRequestException(
+          'No se puede eliminar un motivo fijo del sistema',
+        );
+      }
+
+      // Acotado por tenant aunque el `findOneOrFail` de arriba ya validó el id
+      // contra el tenant: una lectura sin ese filtro tiene forma cross-tenant
+      // y hereda su seguridad de otra línea, que es exactamente lo que deja de
+      // ser cierto cuando alguien reordena el método.
+      //
+      // Sin filtrar `eliminado_el` de `traslados` a propósito: no hay forma de
+      // borrar un traslado (no existe el endpoint), así que el filtro sería
+      // ruido — pero si mañana la hubiera, un traslado borrado sigue teniendo
+      // su par de filas en el kardex, y el motivo que las explica no puede
+      // desaparecer.
+      const uso: { existe: boolean }[] = await manager.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM traslados
+            WHERE motivo_traslado_id = $1 AND tenant_id = $2
+         ) AS existe`,
+        [id, tenantId],
       );
-    }
-    // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
-    // una fila borrada sin autor.
-    await this.db.query(
-      `UPDATE motivo_traslado
-          SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
-        WHERE motivo_traslado_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
-      [id, tenantId, usuarioId],
-    );
+      if (uso[0].existe) {
+        throw new BadRequestException(
+          'No se puede eliminar: el motivo está en uso en traslados ya registrados',
+        );
+      }
+
+      // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
+      // una fila borrada sin autor.
+      await manager.query(
+        `UPDATE motivo_traslado
+            SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
+          WHERE motivo_traslado_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [id, tenantId, usuarioId],
+      );
+    });
   }
 
   async restaurar(
@@ -270,8 +307,19 @@ export class MotivosTrasladoService {
     }
   }
 
+  /**
+   * `FOR SHARE`, no un `SELECT` suelto: sin el lock, un `DELETE` del motivo
+   * puede colarse entre esta validación y el `INSERT INTO traslados` de abajo,
+   * y el documento nacería colgando de un motivo ya borrado. `remove()` lo
+   * toma con `FOR UPDATE`, así que queda a la espera del commit. Mismo par que
+   * `recuentos.aplicar()` contra `motivos-diferencia-inventario`.
+   *
+   * El lock solo sirve si el llamador está DENTRO de una transacción: fuera de
+   * una, se suelta al terminar el statement. Su único llamador
+   * (`TrasladosService.crearEnTransaccion`) lo está.
+   */
   async assertMotivoActivo(
-    runner: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+    runner: SqlRunner,
     tenantId: string,
     motivoId: string,
   ): Promise<{ id: string; nombre: string }> {
@@ -279,7 +327,8 @@ export class MotivosTrasladoService {
       `SELECT motivo_traslado_id, nombre
          FROM motivo_traslado
         WHERE motivo_traslado_id = $1 AND tenant_id = $2
-          AND activo = true AND eliminado_el IS NULL`,
+          AND activo = true AND eliminado_el IS NULL
+        FOR SHARE`,
       [motivoId, tenantId],
     )) as { motivo_traslado_id: string; nombre: string }[];
     if (!rows.length) {
@@ -294,13 +343,16 @@ export class MotivosTrasladoService {
   private async findOneOrFail(
     tenantId: string,
     id: string,
+    runner: SqlRunner = this.db,
+    bloquear = false,
   ): Promise<MotivoTrasladoListItem> {
-    const rows: MotivoTrasladoRow[] = await this.db.query(
+    const rows = (await runner.query(
       `SELECT motivo_traslado_id, nombre, activo, es_fijo
        FROM motivo_traslado
-       WHERE motivo_traslado_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+       WHERE motivo_traslado_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+       ${bloquear ? 'FOR UPDATE' : ''}`,
       [id, tenantId],
-    );
+    )) as MotivoTrasladoRow[];
     if (!rows.length) {
       throw new NotFoundException(`Motivo de traslado ${id} no encontrado`);
     }

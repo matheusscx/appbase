@@ -5301,10 +5301,13 @@ export class ItemsService {
    * (stock sin descontar) mientras los demás sí descuentan, en vez de tumbar el
    * menú entero. El costo de equivocarse es sobrevender ese ítem, que es
    * estrictamente lo de hoy; el 500 sería peor.
+   *
+   * **Público desde la Tarea 9** (era privado): `TrasladosService` lo usa para
+   * el tope asimétrico —sacar del local topea contra lo apartado, sacar de una
+   * bodega no (spec § 5.3)—, que es el segundo camino que necesita este número
+   * además del menú del POS.
    */
-  private async comprometidoPorItem(
-    tenantId: string,
-  ): Promise<Map<string, Decimal>> {
+  async comprometidoPorItem(tenantId: string): Promise<Map<string, Decimal>> {
     const rows: {
       item_id: string;
       cantidad: string;

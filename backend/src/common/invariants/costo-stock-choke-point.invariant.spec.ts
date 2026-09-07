@@ -33,27 +33,22 @@ const ARCHIVOS_AUTORIZADOS = [
   join('modules', 'seeder', 'seeder.service.ts'),
 ];
 
-/**
- * Muletas declaradas del e2e, con fecha de vencimiento: plantan stock en una
- * bodega con `INSERT` directo porque `POST /traslados` **todavía no existe**
- * (Tarea 9 del frente "bodegas y traslados",
- * `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`). Están acá y no
- * afuera del barrido para que sean CONTABLES: cuando exista el endpoint, esta
- * lista tiene que quedar vacía y los tres specs armar el escenario por la API.
- * Un escenario que solo se puede montar con SQL suele estar escondiendo un caso
- * que la API no puede producir.
- */
-const MULETAS_E2E_AUTORIZADAS = [
-  'items-stock-por-ubicacion.e2e-spec.ts',
-  'recuentos-stock-por-ubicacion.e2e-spec.ts',
-  'grupos-modificadores-stock-por-ubicacion.e2e-spec.ts',
-  // Misma muleta, para item_unidad: sin `POST /traslados` (Tarea 9), plantar
-  // una unidad serializada EN LA BODEGA solo se puede con INSERT directo.
-  'inventario-serie-ubicacion.e2e-spec.ts',
-  // Misma muleta, para lote_ubicacion: sin `POST /traslados` (Tarea 9),
-  // plantar saldo de un lote EN LA BODEGA solo se puede con INSERT directo.
-  'inventario-lote-ubicacion.e2e-spec.ts',
-];
+// ⛔ ACÁ VIVÍA `MULETAS_E2E_AUTORIZADAS`, Y SE VACIÓ EL 2026-09-07.
+// (Comentario suelto y no JSDoc a propósito: ya no documenta ninguna
+// declaración, y pegado a `findTsFiles` diría algo que esa función no hace.)
+//
+/* Eran cinco specs que plantaban stock en una bodega con `INSERT` directo
+ * porque `POST /traslados` no existía todavía (Tarea 9 del frente "bodegas y
+ * traslados"). Con el endpoint en pie los cinco arman su escenario por la API
+ * —`items-stock-por-ubicacion`, `recuentos-stock-por-ubicacion`,
+ * `grupos-modificadores-stock-por-ubicacion`, `inventario-serie-ubicacion` e
+ * `inventario-lote-ubicacion`— y la lista de excepciones desapareció con
+ * ellas: el barrido de abajo ya no tiene escape.
+ *
+ * Se deja escrito y no se borra en silencio para que quede claro que la salida
+ * no es volver a agregar un nombre acá. Si un escenario nuevo "solo se puede
+ * montar con SQL", lo primero a sospechar es que sea un escenario que la API
+ * no puede producir — o sea, un hueco del endpoint, no del test. */
 
 function findTsFiles(dir: string, incluirSpecs = false): string[] {
   const out: string[] = [];
@@ -146,7 +141,6 @@ describe('Invariante: costo_actual y stock solo se escriben desde el kardex', ()
     const archivos = [...findTsFiles(srcRoot), ...findTsFiles(testRoot, true)];
     for (const file of archivos) {
       if (ARCHIVOS_AUTORIZADOS.some((a) => file.endsWith(a))) continue;
-      if (MULETAS_E2E_AUTORIZADAS.some((a) => file.endsWith(a))) continue;
       const contenido = readFileSync(file, 'utf8');
       const sospechoso =
         extraeTemplateLiterals(contenido).some(

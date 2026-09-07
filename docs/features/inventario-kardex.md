@@ -19,7 +19,7 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 ### Scope
 
 **Included in this version:**
-- Registro de movimientos `entrada`/`salida` con motivos (`compra`, `venta`, `devolucion`, `anulacion`, `merma`, `ajuste_manual`, `inventario_inicial`, `recuento`)
+- Registro de movimientos `entrada`/`salida` con motivos (`compra`, `venta`, `devolucion`, `anulacion`, `merma`, `ajuste_manual`, `inventario_inicial`, `recuento`, `traslado`)
 - Endpoint `GET /inventario/movimientos` con filtros por item, motivo y rango de fechas
 - Endpoint `PATCH /items/:id/stock` actualizado para registrar motivo + comentario
 - Creación automática de movimiento `inventario_inicial` al crear un producto con stock > 0
@@ -104,7 +104,7 @@ Response (200):
 
 **Query Parameters:**
 - `itemId` (optional): Filtrar por item UUID
-- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `ajuste_costo`, `inventario_inicial`, `recuento`)
+- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `ajuste_costo`, `inventario_inicial`, `recuento`, `traslado`)
 - `desde` (optional): ISO-8601, filtrar movimientos a partir de esta fecha
 - `hasta` (optional): ISO-8601, filtrar movimientos hasta esta fecha
 - `skip` (optional, default 0): Paginación
@@ -396,7 +396,7 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
 | `tenant_id` | UUID | FK `tenants`, NOT NULL | Garantiza isolamiento multi-tenant |
 | `item_id` | UUID | FK `items`, NOT NULL | Producto del que se mueve stock |
 | `tipo` | enum | `'entrada'` \| `'salida'` \| `'ajuste'` | Define dirección del movimiento |
-| `motivo` | varchar | `'compra'` \| `'venta'` \| `'devolucion'` \| `'merma'` \| `'ajuste_manual'` \| `'inventario_inicial'` \| `'ajuste_costo'` \| `'recuento'` | Razón del movimiento |
+| `motivo` | varchar | `'compra'` \| `'venta'` \| `'devolucion'` \| `'merma'` \| `'ajuste_manual'` \| `'inventario_inicial'` \| `'ajuste_costo'` \| `'recuento'` \| `'traslado'` | Razón del movimiento |
 | `cantidad` | integer | NOT NULL, `> 0` excepto `ajuste_costo` (siempre `0`) | Siempre positiva; `tipo` define signo |
 | `stock_anterior` | integer | NOT NULL | Saldo antes del movimiento (snapshot) |
 | `stock_resultante` | integer | NOT NULL | Saldo después del movimiento (snapshot); en `ajuste_costo` es igual a `stock_anterior` |
@@ -406,6 +406,7 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
 | `costo_unitario` | NUMERIC(18,4) | nullable | Congela el costo del momento del movimiento (en `ajuste_costo`, el costo nuevo) |
 | `costo_anterior` | NUMERIC(18,4) | nullable | Solo poblado en `motivo='ajuste_costo'`: el `costo_actual` vigente antes del ajuste |
 | `motivo_diferencia_id` | UUID | FK `motivo_diferencia_inventario`, nullable | Solo poblado en `motivo='recuento'`: la causa tipificada de la diferencia (línea o default de la sesión) |
+| `traslado_id` | UUID | FK `traslados`, nullable | Solo poblado en `motivo='traslado'`: el documento interno. Las **dos** filas de un traslado (salida en el origen, entrada en el destino) comparten el valor |
 | `creado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |

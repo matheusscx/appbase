@@ -25,9 +25,9 @@ import { AppModule } from '../src/app.module';
  * ubicación (elegir en cuál se cuenta) llega en la Tarea 11 del mismo plan, y
  * ahí este spec se vuelve a escribir para afirmar la ubicación elegida.
  *
- * ⚠️ Misma muleta declarada que `items-stock-por-ubicacion.e2e-spec.ts`: el
- * stock de la bodega se planta con SQL directo a `stock_ubicacion` porque
- * `POST /traslados` todavía no existe (Tarea 9 del plan).
+ * ✅ **Sin muleta desde la Tarea 9**: el saldo de la bodega se arma por la API
+ * (compra al local + `POST /traslados`), no con un `INSERT` directo a
+ * `stock_ubicacion` como hasta el 2026-09-07.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -43,6 +43,9 @@ interface ItemResponse {
   id: string;
 }
 interface UbicacionResponse {
+  id: string;
+}
+interface MotivoTrasladoResponse {
   id: string;
 }
 interface RecuentoCreateResponse {
@@ -144,7 +147,7 @@ describe('Recuentos — stock por ubicación (e2e)', () => {
     expect(resItem.status).toBe(201);
     const itemId = (resItem.body as ItemResponse).id;
 
-    // 3. 10 en el local, por la API real (compra sin `ubicacionId` cae en el
+    // 3. 30 en el local, por la API real (compra sin `ubicacionId` cae en el
     // local por default).
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
@@ -152,18 +155,31 @@ describe('Recuentos — stock por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: '10',
+        cantidad: '30',
         costoUnitario: '500',
       })
       .expect(200);
 
-    // 4. 20 en la bodega — la muleta declarada arriba. 10 y 20 a propósito,
-    // no números iguales: así un mutante que lea el total donde va el local
-    // (o viceversa) no sobrevive.
-    await ds.query(
-      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock) VALUES ($1, $2, '20.0000')`,
-      [itemId, bodegaId],
-    );
+    // 4. 20 se van a la bodega POR LA API: quedan 10 en el local y 20 en la
+    // bodega. Números distintos a propósito, así un mutante que lea el total
+    // donde va el local (o viceversa) no sobrevive.
+    const resMotivosTraslado = await request(app.getHttpServer())
+      .get('/api/motivos-traslado')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resMotivosTraslado.status).toBe(200);
+
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: (
+          resMotivosTraslado.body as MotivoTrasladoResponse[]
+        )[0].id,
+        lineas: [{ itemId, cantidad: '20' }],
+      });
+    expect(resTraslado.status).toBe(201);
 
     // 5. Crear la sesión de recuento y verificar que `stockSistema` congeló
     // el saldo del LOCAL (10), no el total del tenant (30). Si congelara 30, el

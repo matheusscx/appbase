@@ -27,6 +27,16 @@ import {
  * la revisión.
  */
 @Index('idx_movimientos_inventario_venta', ['ventaId'])
+/**
+ * Índice por traslado: mismo patrón de acceso que `venta_id` —"traeme los
+ * movimientos de este documento"— y los dos lectores nuevos lo usan
+ * (`TrasladosService.findOne`, que además corre DENTRO de la transacción del
+ * traslado, o sea reteniendo el lock ancla de `item_producto`, y el
+ * `COUNT(DISTINCT item_id)` del listado). Sin el índice ese conteo es un scan
+ * del kardex entero que crece sin techo y se paga con toda venta del producto
+ * encolada detrás.
+ */
+@Index('idx_movimientos_inventario_traslado', ['trasladoId'])
 @Entity('movimientos_inventario')
 export class MovimientoInventario {
   @PrimaryGeneratedColumn('uuid', { name: 'movimiento_id' })
@@ -51,7 +61,7 @@ export class MovimientoInventario {
   tipo: string; // 'entrada' | 'salida' | 'ajuste'
 
   @Column({ type: 'text' })
-  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
+  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento' | 'traslado'
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
@@ -99,6 +109,15 @@ export class MovimientoInventario {
 
   @Column({ name: 'motivo_diferencia_id', type: 'uuid', nullable: true })
   motivoDiferenciaId: string | null;
+
+  /**
+   * El documento interno que generó este movimiento. Nulo salvo en los dos
+   * movimientos de un traslado, que comparten el mismo valor: es lo que
+   * permite reconstruir "estos 5 kg salieron de acá y entraron allá" a
+   * partir del kardex.
+   */
+  @Column({ name: 'traslado_id', type: 'uuid', nullable: true })
+  trasladoId: string | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })

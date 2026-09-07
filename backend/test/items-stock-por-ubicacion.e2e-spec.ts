@@ -15,12 +15,11 @@ import { AppModule } from '../src/app.module';
  * es el mismo número que `stockVendible`)— calculados desde `stock_ubicacion`,
  * y `GET /items/:id` gana el desglose por ubicación.
  *
- * ⚠️ **Muleta declarada, no patrón a copiar.** El stock de la bodega se
- * planta con SQL directo a `stock_ubicacion` porque todavía no existe
- * `POST /traslados` (llega en la Tarea 9 del plan). Cuando exista, este e2e
- * se reescribe para armar el escenario por la API: un escenario que solo se
- * puede montar con SQL suele estar escondiendo un caso que la API no puede
- * producir, y dejarlo así congelaría un estado imposible.
+ * ✅ **Sin muleta desde la Tarea 9**: el escenario se arma entero por la API
+ * (compra al local + `POST /traslados` a la bodega). Hasta el 2026-09-07 el
+ * saldo de la bodega se plantaba con un `INSERT` directo a `stock_ubicacion`
+ * porque el endpoint no existía, y esa excepción estaba declarada en
+ * `costo-stock-choke-point.invariant.spec.ts`. Ya no hay ninguna.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -38,6 +37,9 @@ interface ItemResponse {
 interface UbicacionResponse {
   id: string;
   tipo: 'local' | 'bodega';
+}
+interface MotivoTrasladoResponse {
+  id: string;
 }
 interface ItemListado {
   id: string;
@@ -139,7 +141,7 @@ describe('items — stock por ubicación (e2e)', () => {
     expect(resItem.status).toBe(201);
     const itemId = (resItem.body as ItemResponse).id;
 
-    // 3. 10 en el local, por la API real: la compra (sin `ubicacionId` en el
+    // 3. 30 en el local, por la API real: la compra (sin `ubicacionId` en el
     // body todavía — eso lo gana recién la Tarea 5) cae por default en el
     // local (`InventarioService` resuelve `UbicacionesService.localDe`).
     await request(app.getHttpServer())
@@ -148,19 +150,30 @@ describe('items — stock por ubicación (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: '10',
+        cantidad: '30',
         costoUnitario: '500',
       })
       .expect(200);
 
-    // 4. 20 en la bodega — la muleta declarada arriba: sin `POST /traslados`
-    // todavía, es la única forma de poner stock ahí. 10 y 20 a propósito, no
-    // números iguales: así un mutante que devuelva el total donde va el
-    // vendible (o viceversa) no sobrevive.
-    await ds.query(
-      `INSERT INTO stock_ubicacion (item_id, ubicacion_id, stock) VALUES ($1, $2, '20.0000')`,
-      [itemId, bodegaId],
-    );
+    // 4. 20 de esos 30 se van a la bodega POR LA API. Quedan 10 en el local y
+    // 20 en la bodega: números distintos a propósito, así un mutante que
+    // devuelva el total donde va el vendible (o viceversa) no sobrevive.
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-traslado')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resMotivos.status).toBe(200);
+    const motivoId = (resMotivos.body as MotivoTrasladoResponse[])[0].id;
+
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '20' }],
+      });
+    expect(resTraslado.status).toBe(201);
 
     // 5. GET /items: los tres números de la fila, con el salón vacío
     // (sin cuentas abiertas, `stockDisponible` = `stockVendible`).

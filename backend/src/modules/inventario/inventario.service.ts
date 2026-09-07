@@ -70,6 +70,32 @@ export interface RegistrarMovimientoParams {
   loteId?: string; // salida lote: lote a descontar
   causaMermaId?: string | null;
   motivoDiferenciaId?: string | null; // solo en motivo='recuento'
+  /**
+   * El documento interno que ata las DOS filas de kardex de un traslado
+   * (salida en el origen, entrada en el destino). Solo en motivo='traslado'.
+   */
+  trasladoId?: string | null;
+  /**
+   * A dónde se van físicamente las unidades serializadas. Solo en la SALIDA de
+   * un traslado en modo `serie`, y ahí es obligatorio.
+   *
+   * Existe porque la ubicación de una unidad serializada es **un solo campo**
+   * (`item_unidad.ubicacion_id`): moverla es UNA escritura, no una resta en el
+   * origen y una suma en el destino. La hace la salida —que es la que valida
+   * que la unidad esté donde dice estar— y la entrada solo recalcula el saldo
+   * del destino contando lo que ya llegó. En modo `cantidad` y `lote` no hace
+   * falta: ahí el saldo sí es un par de números y cada mitad la escribe su
+   * propio movimiento.
+   */
+  ubicacionDestinoId?: string | null;
+  /**
+   * Lo que la SALIDA de un traslado descontó de cada lote, tal cual. Solo en
+   * la ENTRADA de un traslado en modo `lote`: la entrada suma exactamente eso
+   * en el destino en vez de re-elegir por su cuenta (la salida pudo haber
+   * tomado FIFO de varios lotes), y así las dos filas de kardex describen el
+   * mismo movimiento.
+   */
+  loteConsumos?: { loteId: string; cantidad: string }[];
 }
 
 interface MoverResult {
@@ -86,10 +112,16 @@ interface MoverResult {
  * el producto se haya discontinuado después. Comprar, mermar, ajustar costo,
  * contar o vender un producto eliminado no tiene operación real detrás.
  *
+ * `traslado` entró el 2026-09-07 con `POST /traslados` y no rompe ese criterio:
+ * mover mercadería de lugar no crea ni valoriza nada —el costo no se toca y el
+ * total del tenant no cambia—, y sin él una bodega llena de producto
+ * discontinuado no se podría vaciar nunca, que es justo lo que hay que hacer
+ * para poder eliminar esa bodega (spec § 8, última fila).
+ *
  * Es una allowlist y no una lista de rechazos a propósito: un motivo nuevo nace
  * rechazado sobre un eliminado, que es el lado seguro del default.
  */
-const MOTIVOS_SOBRE_ITEM_ELIMINADO = ['anulacion', 'devolucion'];
+const MOTIVOS_SOBRE_ITEM_ELIMINADO = ['anulacion', 'devolucion', 'traslado'];
 
 /**
  * Entradas que mueven el promedio ponderado. `compra` es la obvia: trae
@@ -133,6 +165,16 @@ export class InventarioService {
     // los que de verdad quedaron escritos en el kardex.
     costoActualPrevio: string | null;
     costoActual: string | null;
+    /**
+     * Qué se movió realmente, para que el llamador no tenga que adivinarlo.
+     * Solo lo usa el traslado: su SALIDA puede auto-seleccionar unidades o
+     * lotes por FIFO, y la ENTRADA tiene que registrar **esos mismos** —no
+     * volver a elegir— o las dos filas de kardex describirían movimientos
+     * distintos.
+     */
+    unidadIds?: string[];
+    loteConsumos?: { loteId: string; cantidad: string }[];
+    loteId?: string;
   }> {
     if (!params.ubicacionId) {
       throw new BadRequestException('El movimiento necesita una ubicación');
@@ -206,7 +248,7 @@ export class InventarioService {
     ) {
       throw new BadRequestException(
         `El producto "${productoRows[0].item_nombre}" está eliminado: ` +
-          'solo admite movimientos de anulación o devolución',
+          'solo admite movimientos de anulación, devolución o traslado',
       );
     }
 
@@ -264,6 +306,48 @@ export class InventarioService {
       throw new BadRequestException(
         'motivo_diferencia_id solo aplica a recuento',
       );
+    }
+    // Mismo par de guards que `causa_merma_id` y `motivo_diferencia_id`: el
+    // motivo exige su documento, y el documento no se cuelga de otro motivo.
+    // Sin el primero, una de las dos filas del traslado podría quedar
+    // huérfana y el kardex ya no permitiría reconstruir "estos 5 kg salieron
+    // de acá y entraron allá".
+    if (params.motivo === 'traslado' && !params.trasladoId) {
+      throw new BadRequestException(
+        'El traslado requiere el documento que lo respalda',
+      );
+    }
+    if (params.motivo !== 'traslado' && params.trasladoId) {
+      throw new BadRequestException('traslado_id solo aplica a traslado');
+    }
+    // Los otros dos campos que solo el traslado usa. Van con su guard por la
+    // misma razón que `causa_merma_id`: un campo que llega poblado donde no
+    // significa nada es un llamador confundido, y callarlo hace que el error
+    // aparezca lejos de su causa.
+    if (
+      params.motivo !== 'traslado' &&
+      (params.ubicacionDestinoId || params.loteConsumos)
+    ) {
+      throw new BadRequestException(
+        'ubicacionDestinoId y loteConsumos solo aplican a traslado',
+      );
+    }
+    // Y dentro del traslado, cada uno a SU punta: `ubicacionDestinoId` lo lee
+    // la salida (es la que mueve la unidad serializada) y `loteConsumos` la
+    // entrada (es la que suma lo que la salida descontó). Cruzados se
+    // ignorarían en silencio, que es el "llamador confundido que falla lejos
+    // de su causa" que estos guards existen para atajar.
+    if (params.motivo === 'traslado') {
+      if (params.tipo === 'entrada' && params.ubicacionDestinoId) {
+        throw new BadRequestException(
+          'ubicacionDestinoId es de la salida del traslado, no de la entrada',
+        );
+      }
+      if (params.tipo === 'salida' && params.loteConsumos) {
+        throw new BadRequestException(
+          'loteConsumos es de la entrada del traslado, no de la salida',
+        );
+      }
     }
 
     const costoActualPrevio = productoRows[0].costo_actual ?? null;
@@ -357,8 +441,9 @@ export class InventarioService {
       `INSERT INTO movimientos_inventario
          (tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
-          costo_unitario, costo_anterior, causa_merma_id, motivo_diferencia_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          costo_unitario, costo_anterior, causa_merma_id, motivo_diferencia_id,
+          traslado_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -376,6 +461,7 @@ export class InventarioService {
         esAjusteCosto ? costoActualPrevio : null,
         params.causaMermaId ?? null,
         params.motivoDiferenciaId ?? null,
+        params.trasladoId ?? null,
       ],
     );
 
@@ -400,6 +486,9 @@ export class InventarioService {
       stockResultante: stockResultante.toString(),
       costoActualPrevio,
       costoActual: costoActualNuevo ?? costoActualPrevio,
+      unidadIds: result.unidadIds,
+      loteConsumos: result.loteConsumos,
+      loteId: result.loteId,
     };
   }
 
@@ -593,6 +682,64 @@ export class InventarioService {
     params: RegistrarMovimientoParams,
     cantidad: Decimal,
   ): Promise<MoverResult> {
+    if (params.tipo === 'entrada' && params.motivo === 'traslado') {
+      // La entrada de un traslado NO crea unidades: las unidades ya existen y
+      // ya se movieron —la salida les cambió `ubicacion_id`, ver el branch de
+      // abajo—. Lo único que falta acá es el saldo materializado del destino,
+      // que se deriva contando lo que efectivamente llegó, y la fila de
+      // detalle que ata este movimiento a esas unidades.
+      const unidadIds = params.unidadIds ?? [];
+      if (unidadIds.length === 0) {
+        throw new BadRequestException(
+          'La entrada de un traslado en modo serie necesita las unidades que salieron',
+        );
+      }
+      // Que esas unidades sean de ESTE ítem, de ESTE tenant y estén YA en el
+      // destino (la salida las movió). Una consulta, no una por unidad. Misma
+      // razón que en el branch de lote: hoy llegan de la propia salida, pero
+      // el chokepoint no confía en el llamador.
+      const llegadas: { unidad_id: string }[] = await manager.query(
+        `SELECT unidad_id FROM item_unidad
+          WHERE unidad_id = ANY($1) AND item_id = $2 AND tenant_id = $3
+            AND ubicacion_id = $4 AND eliminado_el IS NULL`,
+        [unidadIds, params.itemId, params.tenantId, params.ubicacionId],
+      );
+      // `!== unidadIds.length`, no contra el `Set`: las filas que vuelven son
+      // distintas por PK, así que comparar contra el largo CRUDO también
+      // rechaza una lista con la misma unidad dos veces —que escribiría dos
+      // filas de detalle y un kardex del doble de lo que se movió—.
+      // El mensaje no dice solo "no llegó al destino": ese filtro es uno de
+      // cuatro (ítem, tenant, ubicación, no-eliminada) y nombrarlo solo a él
+      // manda a mirar la ubicación cuando el problema puede ser otro. Se
+      // agrupan en "no son de este producto" —que cubre ítem, tenant y
+      // eliminada, los tres indistinguibles a propósito para no volverse un
+      // oráculo entre tenants—, "no llegaron al destino" y "vienen repetidas",
+      // que es la comparación de largos de acá abajo y no un filtro de la
+      // query.
+      if (llegadas.length !== unidadIds.length) {
+        throw new BadRequestException(
+          'Las unidades de la entrada del traslado no son de este producto, ' +
+            'no llegaron al destino, o vienen repetidas',
+        );
+      }
+      // Y que sean TANTAS como dice el movimiento: es el mismo cruce que hacen
+      // la entrada y la salida normales de modo serie. Sin él, un llamador que
+      // pase 2 unidades con `cantidad: '3'` escribe en el kardex una cantidad
+      // que no coincide con lo que llegó.
+      if (!new Decimal(unidadIds.length).equals(cantidad)) {
+        throw new BadRequestException(
+          `La cantidad (${cantidad.toString()}) no coincide con el número de unidades (${unidadIds.length})`,
+        );
+      }
+      const stockResultante = await this.recalcularStockSerie(
+        manager,
+        params.itemId,
+        params.tenantId,
+        params.ubicacionId,
+      );
+      return { stockResultante, unidadIds };
+    }
+
     if (params.tipo === 'entrada') {
       const series = params.series ?? [];
       if (series.length === 0) {
@@ -668,6 +815,37 @@ export class InventarioService {
         );
       }
 
+      // Un traslado no da de baja la unidad: la MUEVE. Es la única salida que
+      // deja la unidad `disponible`, porque no salió del inventario — cambió
+      // de lugar. Por eso necesita saber a dónde (`ubicacionDestinoId`), y por
+      // eso la escritura la hace la salida y no la entrada: la ubicación de
+      // una unidad serializada es un solo campo, así que moverla es UNA
+      // escritura, no una resta y una suma.
+      const esTraslado = params.motivo === 'traslado';
+      if (esTraslado && !params.ubicacionDestinoId) {
+        throw new BadRequestException(
+          'La salida de un traslado en modo serie necesita la ubicación de destino',
+        );
+      }
+      if (esTraslado) {
+        // Acotada al tenant como todo lo demás que entra por parámetro: es el
+        // campo que MUEVE la unidad de lugar, así que sin esto un llamador
+        // interno podría mandar una unidad a la ubicación de otro tenant. Hoy
+        // `TrasladosService` ya valida las dos puntas contra el token, pero la
+        // defensa del chokepoint no puede ser asimétrica justo acá (misma
+        // razón que el `JOIN items` por tenant del principio del método).
+        const destinoRows: unknown[] = await manager.query(
+          `SELECT 1 FROM ubicaciones
+            WHERE ubicacion_id = $1 AND tenant_id = $2
+              AND eliminado_el IS NULL`,
+          [params.ubicacionDestinoId, params.tenantId],
+        );
+        if (!destinoRows.length) {
+          throw new BadRequestException(
+            'La ubicación de destino del traslado no existe en este tenant',
+          );
+        }
+      }
       const estadoDestino = params.motivo === 'venta' ? 'vendido' : 'baja';
 
       for (const uid of unidadIds) {
@@ -724,10 +902,17 @@ export class InventarioService {
           );
         }
 
-        await manager.query(
-          `UPDATE item_unidad SET estado = $1, venta_id = $2 WHERE unidad_id = $3`,
-          [estadoDestino, params.ventaId ?? null, uid],
-        );
+        if (esTraslado) {
+          await manager.query(
+            `UPDATE item_unidad SET ubicacion_id = $1 WHERE unidad_id = $2`,
+            [params.ubicacionDestinoId, uid],
+          );
+        } else {
+          await manager.query(
+            `UPDATE item_unidad SET estado = $1, venta_id = $2 WHERE unidad_id = $3`,
+            [estadoDestino, params.ventaId ?? null, uid],
+          );
+        }
       }
 
       const stockResultante = await this.recalcularStockSerie(
@@ -769,6 +954,119 @@ export class InventarioService {
     params: RegistrarMovimientoParams,
     cantidad: Decimal,
   ): Promise<MoverResult> {
+    if (params.tipo === 'entrada' && params.motivo === 'traslado') {
+      // La entrada de un traslado NO crea ni engorda el lote: el lote es uno
+      // solo y su `cantidad_inicial` ya contó esa mercadería cuando entró a la
+      // empresa. Sumarla de nuevo acá inflaría el lote en cada traslado, y el
+      // vencimiento —que es uno solo, del lote, no de la ubicación— tampoco se
+      // toca. Lo único que se mueve es el saldo POR UBICACIÓN.
+      const consumos = params.loteConsumos ?? [];
+      if (!consumos.length) {
+        throw new BadRequestException(
+          'La entrada de un traslado en modo lote necesita los lotes que salieron',
+        );
+      }
+      // Agrupados por lote ANTES de escribir. El upsert de más abajo escribe
+      // el saldo ABSOLUTO, así que dos entradas del mismo `loteId` en la misma
+      // lista harían que la segunda pisara a la primera y se perdiera una
+      // cantidad en silencio. Hoy los dos caminos de salida producen lotes
+      // distintos, pero esta rama dice defender al llamador que se agregue
+      // mañana y esto es parte de esa defensa.
+      const porLote = new Map<string, Decimal>();
+      for (const c of consumos) {
+        porLote.set(
+          c.loteId,
+          (porLote.get(c.loteId) ?? new Decimal(0)).plus(c.cantidad),
+        );
+      }
+      // Y el total tiene que ser el del movimiento: si no, el kardex escribe
+      // una cantidad que `lote_ubicacion` no recibió.
+      const totalConsumido = [...porLote.values()].reduce(
+        (acc, v) => acc.plus(v),
+        new Decimal(0),
+      );
+      if (!totalConsumido.equals(cantidad)) {
+        throw new BadRequestException(
+          `La cantidad (${cantidad.toString()}) no coincide con lo descontado de los lotes (${totalConsumido.toString()})`,
+        );
+      }
+
+      const loteIds = [...porLote.keys()];
+
+      // Los lotes, acotados a ESTE ítem y ESTE tenant, en una consulta. Hoy
+      // llegan del resultado de la propia salida —ya validado— pero el
+      // chokepoint es el lugar donde la defensa vive para el llamador que se
+      // agregue mañana, igual que el `JOIN items` por tenant del principio del
+      // método. Sin esto, un `loteConsumos` armado a mano escribiría saldo
+      // sobre un lote de otro tenant.
+      const lotesRows: { lote_id: string }[] = await manager.query(
+        `SELECT lote_id FROM item_lote
+          WHERE lote_id = ANY($1) AND item_id = $2 AND tenant_id = $3
+            AND eliminado_el IS NULL`,
+        [loteIds, params.itemId, params.tenantId],
+      );
+      if (lotesRows.length !== loteIds.length) {
+        throw new BadRequestException(
+          'Alguno de los lotes de la entrada del traslado no es de este ' +
+            'producto o está eliminado',
+        );
+      }
+
+      // Los saldos previos de TODOS los lotes que llegan, en UNA consulta —
+      // nunca un `SELECT` por iteración. Es la misma forma que usa la salida
+      // FIFO más abajo, y acá pesa igual o más: cada round-trip de más se paga
+      // adentro de la transacción que retiene el lock ancla de
+      // `item_producto`, o sea con toda venta de ese producto encolada detrás.
+      //
+      // Leído DESPUÉS del lock y en su propio statement, como manda
+      // `saldoLoteEnUbicacion`: la salida ya tomó `FOR UPDATE` sobre estas
+      // filas de `item_lote` en esta misma transacción, que es lo que
+      // serializa el saldo del lote.
+      const previosRows: { lote_id: string; cantidad: string }[] =
+        await manager.query(
+          `SELECT lote_id, cantidad FROM lote_ubicacion
+            WHERE ubicacion_id = $1 AND lote_id = ANY($2)`,
+          [params.ubicacionId, loteIds],
+        );
+      const previoDe = new Map(
+        previosRows.map((r) => [r.lote_id, new Decimal(r.cantidad)]),
+      );
+
+      // El `for` que queda es escritura de N filas distintas, no una lectura
+      // por iteración: no hay dato que batchear, solo saldos que escribir.
+      for (const [loteId, cantidadLote] of porLote) {
+        const saldoPrevio = previoDe.get(loteId) ?? new Decimal(0);
+        await manager.query(
+          `INSERT INTO lote_ubicacion (lote_id, ubicacion_id, cantidad)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (lote_id, ubicacion_id) DO UPDATE SET cantidad = EXCLUDED.cantidad`,
+          [
+            loteId,
+            params.ubicacionId,
+            saldoPrevio.plus(cantidadLote).toString(),
+          ],
+        );
+      }
+
+      const stockResultante = await this.recalcularStockLote(
+        manager,
+        params.itemId,
+        params.tenantId,
+        params.ubicacionId,
+      );
+
+      // Los consumos AGRUPADOS, no los crudos: `insertarDetalleMovimiento`
+      // escribe una fila por elemento, así que devolver la lista cruda dejaría
+      // dos filas de detalle del mismo lote en el caso duplicado que la
+      // agrupación de arriba justamente une.
+      const loteConsumos = [...porLote].map(([loteId, cant]) => ({
+        loteId,
+        cantidad: cant.toString(),
+      }));
+
+      return { stockResultante, loteConsumos };
+    }
+
     if (params.tipo === 'entrada') {
       const loteInput = params.lote;
       if (!loteInput) {
@@ -949,6 +1247,11 @@ export class InventarioService {
         params.ubicacionId,
       );
 
+      // Solo `loteId`, como siempre: agregar acá `loteConsumos` haría que
+      // `insertarDetalleMovimiento` tomara la otra rama para TODOS los
+      // llamadores de salida con lote elegido (venta, merma, ajuste), que no
+      // son de esta tarea. La entrada del traslado no lo necesita: arma su
+      // consumo desde el `loteId` que este mismo método devuelve.
       return { stockResultante, loteId };
     }
   }

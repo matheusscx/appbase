@@ -13,13 +13,13 @@ import { AppModule } from '../src/app.module';
  * `item_unidad.ubicacion_id`— y el saldo de `stock_ubicacion` en ese modo se
  * recalcula contando SOLO las unidades de esa ubicación.
  *
- * ⚠️ **Muleta declarada, no patrón a copiar** (misma razón que
- * `items-stock-por-ubicacion.e2e-spec.ts`): `POST /items/:id/stock` siempre
- * entra al local (`ItemsService.ajustarStock` resuelve
- * `UbicacionesService.localDe`) y `POST /traslados` todavía no existe (Tarea
- * 9), así que la única forma de tener una unidad físicamente EN LA BODEGA es
- * un `INSERT` directo a `item_unidad`. Cuando exista el endpoint, este spec
- * se reescribe para mover la unidad por la API real.
+ * ✅ **Sin muleta desde la Tarea 9.** `PATCH /items/:id/stock` siempre entra al
+ * local (`ItemsService.ajustarStock` resuelve `UbicacionesService.localDe`),
+ * así que hasta el 2026-09-07 la única forma de tener una unidad físicamente
+ * EN LA BODEGA era un `INSERT` directo a `item_unidad`. Ahora la unidad se
+ * mueve con `POST /traslados`, que es además la prueba de que el traslado en
+ * modo `serie` deja la unidad **disponible** en el destino en vez de darla de
+ * baja: una unidad que se traslada no salió del inventario, cambió de lugar.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -112,6 +112,56 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
     await app.close();
   });
 
+  /** El primer motivo de traslado del tenant (los cinco fijos vienen del seed). */
+  async function motivoTrasladoId(): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .get('/api/motivos-traslado')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return (res.body as { id: string }[])[0].id;
+  }
+
+  /**
+   * Una unidad con esa serie, nacida en el local y trasladada a la bodega por
+   * la API. Devuelve su `unidad_id`.
+   */
+  async function unidadEnLaBodega(
+    itemId: string,
+    serie: string,
+  ): Promise<string> {
+    const resEntrada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'inventario_inicial',
+        cantidad: '1',
+        series: [{ serie }],
+      });
+    expect(resEntrada.status).toBe(200);
+
+    const resUnidades = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}/unidades`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUnidades.status).toBe(200);
+    const unidad = (resUnidades.body as UnidadResponse[]).find(
+      (u) => u.serie === serie,
+    );
+    expect(unidad).toBeDefined();
+
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: await motivoTrasladoId(),
+        lineas: [{ itemId, cantidad: '1', unidadIds: [unidad!.id] }],
+      });
+    expect(resTraslado.status).toBe(201);
+    return unidad!.id;
+  }
+
   async function crearItemSerie(nombre: string): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/api/items')
@@ -158,16 +208,8 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
     );
     const serieBodega = `IMEI-BODEGA-${Date.now()}`;
 
-    // Muleta declarada arriba: la unidad nace en la bodega por INSERT
-    // directo, no por movimiento.
-    const insertRows: { unidad_id: string }[] = await ds.query(
-      `INSERT INTO item_unidad
-         (tenant_id, item_id, serie, estado, condicion, ubicacion_id)
-       VALUES ($1, $2, $3, 'disponible', 'nuevo', $4)
-       RETURNING unidad_id`,
-      [PARIS_TENANT_ID, itemId, serieBodega, bodegaId],
-    );
-    const unidadBodegaId = insertRows[0].unidad_id;
+    // La unidad nace en el local y se MUEVE a la bodega por la API real.
+    const unidadBodegaId = await unidadEnLaBodega(itemId, serieBodega);
 
     // Salida en el LOCAL (default de /stock) pidiendo la unidad que está en
     // la bodega.
@@ -201,40 +243,47 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
       `Serie recálculo-ubicación E2E ${Date.now()}-${Math.random()}`,
     );
 
-    // 2 unidades en la bodega, plantadas ANTES de la entrada al local: si el
-    // recálculo contara todas las unidades disponibles del ítem (el bug de
-    // antes de esta tarea, cuando la columna no existía), el local quedaría
-    // en 5 en vez de 3.
-    await ds.query(
-      `INSERT INTO item_unidad
-         (tenant_id, item_id, serie, estado, condicion, ubicacion_id)
-       VALUES
-         ($1, $2, $3, 'disponible', 'nuevo', $4),
-         ($1, $2, $5, 'disponible', 'nuevo', $4)`,
-      [
-        PARIS_TENANT_ID,
-        itemId,
-        `IMEI-BODEGA-A-${Date.now()}`,
-        bodegaId,
-        `IMEI-BODEGA-B-${Date.now()}`,
-      ],
-    );
-
-    // 3 unidades en el local, por la API real.
+    // 5 unidades entran al local, y 2 se van a la bodega por la API: quedan 3
+    // en el local. Si el recálculo contara todas las unidades disponibles del
+    // ítem (el bug de antes de esta tarea, cuando la columna no existía), el
+    // local quedaría en 5 en vez de 3. 3 y 2 a propósito, no números iguales.
+    const marca = `${Date.now()}-${Math.random()}`;
     const resEntrada = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'entrada',
         motivo: 'inventario_inicial',
-        cantidad: '3',
+        cantidad: '5',
         series: [
-          { serie: `IMEI-LOCAL-A-${Date.now()}` },
-          { serie: `IMEI-LOCAL-B-${Date.now()}` },
-          { serie: `IMEI-LOCAL-C-${Date.now()}` },
+          { serie: `IMEI-LOCAL-A-${marca}` },
+          { serie: `IMEI-LOCAL-B-${marca}` },
+          { serie: `IMEI-LOCAL-C-${marca}` },
+          { serie: `IMEI-BODEGA-A-${marca}` },
+          { serie: `IMEI-BODEGA-B-${marca}` },
         ],
       });
     expect(resEntrada.status).toBe(200);
+
+    const resUnidades = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}/unidades`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUnidades.status).toBe(200);
+    const aMover = (resUnidades.body as UnidadResponse[])
+      .filter((u) => u.serie.startsWith('IMEI-BODEGA-'))
+      .map((u) => u.id);
+    expect(aMover).toHaveLength(2);
+
+    const resTraslado = await request(app.getHttpServer())
+      .post('/api/traslados')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        origenId: localId,
+        destinoId: bodegaId,
+        motivoTrasladoId: await motivoTrasladoId(),
+        lineas: [{ itemId, cantidad: '2', unidadIds: aMover }],
+      });
+    expect(resTraslado.status).toBe(201);
 
     const resDetalle = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
