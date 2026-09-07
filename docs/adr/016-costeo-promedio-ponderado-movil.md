@@ -1,8 +1,15 @@
 # ADR-016: Costeo por promedio ponderado móvil (CPP), método fijo, de gestión
 
-**Status**: Accepted
+**Status**: Accepted. La premisa "`item_producto.stock` es un escalar" (línea 47,
+sección Decision) quedó superada — ver nota bajo Date.
 
 **Date**: 2026-07-26
+
+> ⚠️ **`item_producto.stock` ya no existe, desde el frente "bodegas y traslados"
+> (2026-09-06).** El saldo vive hoy en `stock_ubicacion` (una fila por ubicación),
+> no como un único escalar en `item_producto`. La mención más abajo describe el
+> estado en la fecha de este ADR, no el actual — no afecta la decisión de CPP en
+> sí (sigue vigente). Detalle: `docs/features/bodegas-y-traslados.md`.
 
 ## Context
 

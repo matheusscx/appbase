@@ -650,7 +650,8 @@ CREATE TABLE "items" (
 -- un statement aparte, ya con el lock tomado.
 CREATE TABLE "item_producto" (
   "item_id"           UUID          PRIMARY KEY REFERENCES "items" ("item_id"),
-  "unidad_medida"     TEXT          NOT NULL DEFAULT 'unidad',
+  "unidad_medida"     TEXT          NOT NULL,  -- default 'unidad' lo pone la app (items.service.ts:
+                                                -- dto.unidadMedida ?? 'unidad'), no la base: la entity no declara `default`
   "fecha_elaboracion" TIMESTAMPTZ,
   "fecha_vencimiento" TIMESTAMPTZ,
   "modo_inventario"   TEXT          NOT NULL DEFAULT 'cantidad',
@@ -1055,6 +1056,12 @@ CREATE TABLE "movimiento_inventario_detalle" (
 CREATE TABLE "recuento_inventario" (
   "recuento_id"                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"                     UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  -- Dónde se cuenta esta sesión. Obligatoria e inmutable: las líneas ya
+  -- contadas se refieren al stock que había EN ESA ubicación al crearse la
+  -- sesión ("stock_sistema" congela "stock_ubicacion" de acá), así que
+  -- cambiarla a mitad de camino dejaría el conteo describiendo un lugar
+  -- distinto del que aplica el delta. El PATCH de la sesión no la acepta.
+  "ubicacion_id"                  UUID NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
   "estado"                        TEXT NOT NULL DEFAULT 'borrador',  -- 'borrador' | 'aplicado' | 'cancelado'
   "motivo_diferencia_default_id"  UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
   "comentario"                    TEXT,

@@ -1,8 +1,15 @@
 # ADR-007: Modelo de inventario serializado y por lote — eje `modo_inventario`
 
-**Status**: Accepted
+**Status**: Accepted. Dos afirmaciones sobre `item_producto.stock` (Consequences,
+líneas 55 y 66) quedaron superadas — ver nota bajo Date.
 
 **Date**: 2026-06-28
+
+> ⚠️ **`item_producto.stock` ya no existe, desde el frente "bodegas y traslados"
+> (2026-09-06).** Este ADR se escribió cuando el saldo vivía en esa columna; hoy
+> vive en `stock_ubicacion` (una fila por ubicación), único dueño del saldo. Las
+> menciones a `item_producto.stock` más abajo describen el estado en la fecha de
+> este ADR, no el actual. Detalle: `docs/features/bodegas-y-traslados.md`.
 
 ## Context
 
