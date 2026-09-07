@@ -1239,8 +1239,13 @@ export class SeederService implements OnApplicationBootstrap {
         correo: 'garzon.pin@paris.cl',
         esSuperadmin: false,
       },
-      // El encargado del SALÓN: `Salones:Leer` + `Salones:Actualizar` y **NO
-      // admin**. Es la combinación exacta a la que se le muestra el aviso de
+      // El encargado del SALÓN: `Salones:Leer` + `Salones:Crear` +
+      // `Salones:Actualizar`, **sin `Salones:Operar`** y **NO admin**. Que no
+      // tenga `Operar` es parte del fixture, no un olvido: es el complemento
+      // exacto de `ana.torres` (`Leer` + `Operar`, sin `Actualizar`), que sirve
+      // para el 403 del mismo e2e. Por eso `/salones` —la pantalla de
+      // operación— le rebota, y su pantalla es Configuración → Salones.
+      // Es la combinación exacta a la que se le muestra el aviso de
       // "esa cuenta todavía no puede operar el salón… hasta que se lo des", y
       // por lo tanto la única con la que se puede probar que ahora puede
       // dárselo sin ser admin (decisión del owner, 2026-08-15). No sirve

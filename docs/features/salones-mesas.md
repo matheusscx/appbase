@@ -855,7 +855,17 @@ El detalle de cuenta reusa `VentasCatalogoGrid` (agregar productos), `useCalculo
 (total en vivo) y `VentasCobroModal` (cobro al cerrar). La operación del garzón se
 navega desde `layouts/dashboard.vue` (`/salones`, gateada por `can('Salones','Operar')`);
 la administración vive dentro de Configuración (`pages/configuracion.vue` →
-`/configuracion/salones`, gateada por `can('Salones','Crear')`).
+`/configuracion/salones`, gateada por `can('Salones','Leer')` — **no `Crear`**: lo que la
+pantalla pide para abrirse es el permiso de lectura, si no queda escondida para quien solo
+tiene `Actualizar` o `Eliminar`).
+
+**Las dos superficies piden permisos distintos, y `/salones` lo declara en su `definePageMeta`**
+(`middleware: ['auth', 'permiso'], permiso: 'Salones:Operar'`). Es lo que evita el callejón sin
+salida del rol *"Salones · Encargado"* del seed, que tiene `Leer`/`Crear`/`Actualizar` y **no**
+`Operar`: sin el middleware entraba a `/salones` por URL directa y veía una pantalla vacía —el
+listado que la puebla es `GET /salones/operacion`, que exige `Operar`—. Su pantalla es
+Configuración → Salones. Esconder no es seguridad (invariante 6): el candado real es el
+`@RequiresPermiso` del backend.
 
 ---
 

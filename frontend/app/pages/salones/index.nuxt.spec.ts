@@ -15,6 +15,8 @@
 // `GarzonPinModal` se usa REAL, no stubeado: parte de lo que hay que ejercitar
 // es justamente que el modal emite `confirm` y recién ahí se cierra. Lo único
 // mockeado es el HTTP (`useApiFetch`).
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Salones from './index.vue'
@@ -5385,5 +5387,38 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // en el detalle.
     expect(botonEn(drawerMesa(), 'Cuentas')).toBeTruthy()
     expect(drawerMesa()?.textContent).toContain('Cuenta 1')
+  })
+})
+
+/**
+ * Fuera del `describe` de arriba a propósito: no tiene nada que ver con el
+ * catálogo ni con el stock, y hereda un `beforeEach` que no necesita.
+ *
+ * Se afirma sobre el FUENTE y no montando la página porque `definePageMeta` es
+ * una macro de compilación: `mountSuspended` no corre middlewares de ruta, así
+ * que desde un test de montaje el meta es invisible. Mismo recurso que
+ * `configuracion/items.nuxt.spec.ts` con los `<MoneyInput>`.
+ */
+describe('salones — la pantalla declara el permiso que su listado exige', () => {
+  it('pide `Salones:Operar`, para no dejar a nadie en una pantalla vacía', () => {
+    // El listado que la puebla es `GET /salones/operacion`, que exige
+    // `Operar`; sin el middleware la página monta igual, el listado rebota con
+    // 403 y no queda nada en pantalla. La conducta del rebote ya la prueba
+    // `middleware/permiso.nuxt.spec.ts`; lo que acá no estaba probado es que
+    // ESTA pantalla lo declare.
+    // `process.cwd()` y no `__dirname`: en el entorno `nuxt` de vitest
+    // `import.meta.url` no es un `file:` usable, y ésta es la forma que ya usa
+    // `configuracion/items.nuxt.spec.ts` para lo mismo.
+    const fuente = readFileSync(
+      resolve(process.cwd(), 'app/pages/salones/index.vue'),
+      'utf8',
+    )
+    const meta = /definePageMeta\(\{[\s\S]*?\}\)/.exec(fuente)?.[0] ?? ''
+
+    expect(meta).toContain("middleware: ['auth', 'permiso']")
+    expect(meta).toContain("permiso: 'Salones:Operar'")
+    // El label, porque el aviso por defecto —"no tenés acceso al módulo
+    // Salones"— es FALSO para quien tiene el módulo y no la acción.
+    expect(meta).toContain("permisoLabel: 'Salones (operación)'")
   })
 })

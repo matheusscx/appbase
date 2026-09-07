@@ -10,10 +10,109 @@ de jul-2026 se explican solas desde este archivo— sin competir con lo que falt
 Agrupadas por su procedencia en `pendientes.md`. El texto se muda **verbatim**: si una
 entrada afirma algo que después resultó falso, se corrige donde se descubre, no acá.
 
+**Excepción, y es una sola:** el párrafo de cierre de un frente —*"qué quedó afuera"*— **sí se
+actualiza acá** cuando esos huecos se cierran. No es una entrada mudada, es el resumen que
+alguien consulta para saber qué queda vivo, y dejarlo desactualizado hace exactamente lo que
+`CLAUDE.md` prohíbe: frenar al próximo por un frente que ya no existe. Pasó el 2026-09-07 y lo
+levantó la revisión.
+
 Corolario de "verbatim": las **citas de línea de una entrada mudada quedan como estaban**,
 aunque el propio cierre las haya corrido — describen el código en el momento en que se
 midió el problema, que es lo que este archivo registra. En `pendientes.md`, que es texto
 vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige o se saca.
+
+---
+
+## Las dos mediciones que quedaban del frente de bodegas (cerradas 2026-09-07)
+
+Salen de [`pendientes.md` § 2](pendientes.md). Las dos eran *"medir primero"*, y en las dos la
+medición terminó **corrigiendo la entrada**, no ejecutándola.
+
+### 1. El orden de bloqueo de dos traslados cruzados: la garantía **es** del código
+
+**Lo que la entrada temía:** que la ausencia de deadlock se apoyara en el plan que arma
+Postgres —*"probablemente el orden lo da el índice de la PK sobre `WHERE item_id = ANY($1)`"*—
+y no en el `ORDER BY` propio. Si fuera así, un cambio de versión o de volumen podría correr la
+garantía sin que ningún test avisara.
+
+**Medido, y es al revés.** Dos experimentos, los dos reproducibles en un `psql`:
+
+- **El plan** del statement real es `LockRows → Sort(ip.item_id) → Hash Join → dos Seq Scans`.
+  **No hay index scan por la PK** (la hipótesis de la entrada era falsa), y el `LockRows` va
+  **arriba** del `Sort`: las filas se bloquean ya ordenadas.
+- **El orden de adquisición**, con tres sesiones: con `X < Y`, una retiene `X`, otra corre el
+  statement con el array cruzado `[Y, X]`, una tercera prueba `Y … FOR UPDATE NOWAIT`. Con
+  `ORDER BY item_id` la segunda se encola en `X` **sin** haber tomado `Y`; con `DESC` toma `Y`
+  primero. **El `ORDER BY` decide.**
+
+**Y por qué no lo matan los mutantes de ORDEN** —sacar el `ORDER BY`, sacar el `.sort()`, o
+las dos—. Si se saca el `ORDER BY`, el orden pasa a salir del hash
+join sobre el heap de `items` — que es **el mismo para las dos transacciones**, vengan como
+vengan sus arrays. Para que haya deadlock harían falta órdenes opuestos, y ningún plan de este
+statement deriva su orden del array. Por eso el mutante sobrevive con 2, 6 y 12 ítems: es
+estructural, no falta de fixture.
+
+⚠️ **Pero uno sí lo mata, y es el que importa:** volver al **lock por línea** —un statement
+por ítem, recorriendo el body— hace fallar el caso con `deadlocks: 0 → 1` (medido con el
+service mutado y la suite corrida). O sea que lo que este e2e protege es **el batch**; el
+`ORDER BY` es lo que ningún test de conducta puede cazar, y por eso va aparte en el unitario.
+
+⚠️ **Se retiró el `deadlocks: 0 → 1`** que el docblock del e2e afirmaba para el mutante "sacar
+el `.sort()` y el `ORDER BY` juntos": no reprodujo en tres corridas limpias, ni en una cuarta
+con el mutante puesto a mano (`0 → 0`), y ahora hay mecanismo que explica por qué **no debería**
+reproducir. Lo más probable es que la medición original corriera contra un build stale.
+
+**Qué queda fijado y dónde:** el `ORDER BY` no lo puede cazar ningún test de conducta, así que
+lo fija el unitario que afirma sobre el SQL (`traslados.service.spec.ts`, *"lockea UNA fila de
+item_producto por ítem, ordenada por itemId"*, que ya existía). La regla general —y los dos
+experimentos— quedaron en [`patterns/backend.md` § 15](../patterns/backend.md).
+
+### 2. `encargado.salon@paris.cl`: no era el seed ni los permisos, era un callejón sin salida
+
+**El síntoma era real; la causa que el título suponía, no.** En `/salones` efectivamente no
+veía ningún salón. Pero `GET /api/salones` le devuelve **los mismos salones que al admin**
+—se comparó el payload, no el número: la cuenta depende de cuánta basura de e2e tenga la base—,
+así que ni el seed ni los permisos tenían nada roto — y el título (*"pese a tener los permisos
+sembrados"*) mandaba a buscar justo ahí.
+
+**Lo que pasa de verdad:** son dos superficies con dos endpoints distintos. `/salones` (la
+operación del garzón) se puebla con `GET /salones/operacion`, que exige `Salones:Operar`; el
+rol *"Salones · Encargado"* del seed tiene `Leer`/`Crear`/`Actualizar` y **no** `Operar`. Que
+la ausencia era deliberada había que deducirlo del docblock de `seedRolEncargadoSalon`: el
+fixture existe para probar `POST /garzones/:id/permiso-operar` sin ser admin, y **no reusa
+`ana.torres` porque a ésa le falta `Actualizar`** —tiene `Leer` + `Operar`, que es justo lo
+que la hace servir para el 403 del mismo e2e—. Los dos son complementarios a propósito. Ahora
+está escrito donde se lee primero, en el comentario del usuario del seed, que además listaba
+mal los permisos (omitía `Crear`). La administración —Configuración → Salones, con
+`GET /salones`— sí la ve entera. El menú ya no le muestra `/salones`, así que al callejón solo
+se llega a mano: por URL directa o por un bookmark. Y ahí la pantalla montaba igual, el listado
+rebotaba con 403 y quedaba **vacía con un toast genérico**.
+
+**El arreglo, en la pantalla:** `pages/salones/index.vue` declara
+`middleware: ['auth', 'permiso'], permiso: 'Salones:Operar'` y un `permisoLabel`, el patrón
+que ya usaban las pantallas de Cajas y Mi caja. No cambia la seguridad —el candado sigue
+siendo el `@RequiresPermiso` del backend, invariante 6—: saca al usuario de una pantalla que
+no puede poblar y le dice por qué.
+
+⚠️ **Lo que NO hace, medido:** el middleware rebota a `/ventas`, y este mismo usuario tampoco
+puede poblar `/ventas` (`GET /api/ventas` → 403). O sea que el arreglo cambia *"pantalla vacía
+sin explicación"* por *"aviso que dice qué le falta, en otra pantalla que tampoco es la suya"*.
+Adónde rebotar es del middleware, no de esta pantalla, y no se tocó acá.
+
+⚠️ **El `permisoLabel` no es decorativo.** El aviso del middleware es *"No tenés acceso al
+módulo ${label}"*, y con el label por defecto le habría dicho a este usuario *"no tenés acceso
+al módulo Salones"* — **falso**: tiene el módulo y administra salones. `permisoLabel` es lo
+único que ese mensaje deja personalizar (no puede nombrar la acción), así que dice
+*"Salones (operación)"*.
+
+⚠️ **Lo fija un test que lee el FUENTE de la página**, no un montaje: `definePageMeta` es una
+macro de compilación y `mountSuspended` no corre middlewares de ruta, así que desde un test de
+montaje el meta es invisible (mismo recurso que `configuracion/items.nuxt.spec.ts` con los
+`<MoneyInput>`). Mutante medido: sacando el meta, el caso falla.
+
+**Cabo suelto que salió de paso:** `docs/features/salones-mesas.md` decía que la administración
+está gateada por `can('Salones','Crear')` y el código gatea por `Leer` (`configuracion.vue`,
+con el porqué escrito al lado). Drift de doc, corregido en el mismo commit.
 
 ---
 
@@ -149,16 +248,24 @@ Documentación operativa: [`features/bodegas-y-traslados.md`](../features/bodega
 
 ### Qué quedó afuera
 
-Seis huecos concretos, cada uno con su porqué, en `pendientes.md` §§ 1-2 (no se resumen acá
-para no mantener dos copias que puedan desalinearse): el reintento de deadlock de
-`RecuentosService.aplicar` que no mira `driverError.code`; el ajuste manual de stock sin e2e
-HTTP de `ubicacionId` requerido/de-otro-tenant; `patchLineaCantidad` sin el botón de traslado
-que las otras dos puertas del rechazo enriquecido sí tienen; el filtro de lote agotado
-comparando strings en vez de `Decimal`; y la garantía de que dos traslados cruzados no hacen
-deadlock, que se apoya en el plan de Postgres y no en el código propio —reportada al owner sin
-resolver, porque la re-medición de la aserción original no reprodujo—. Un hallazgo ajeno,
-no investigado: `encargado.salon@paris.cl` no ve ningún salón pese a tener los permisos
-sembrados.
+El frente dejó seis huecos en `pendientes.md` §§ 1-2, y ✅ **los seis se cerraron el
+2026-09-07**, en dos tandas que tienen su propia entrada en este archivo: *"Los minors que
+dejó el frente…"* (el `esDeadlock` de `RecuentosService.aplicar`, el par de e2e del ajuste
+manual de stock, la tercera puerta del rechazo por stock en el salón y el filtro de lotes por
+`Decimal`) y *"Las dos mediciones que quedaban…"* (el orden de bloqueo de los traslados
+cruzados y `encargado.salon@paris.cl`).
+
+⚠️ **Que los seis estén cerrados no quiere decir que el frente no deje nada**: en
+`pendientes.md` § 1 siguen abiertos, con fecha 2026-09-07, el 400 de *"campo de ubicación
+requerido"* que le falta a `POST /recuentos` y a `POST /traslados`, y el barrido de las citas
+`spec § N` que quedaron sin documento. Son de después del cierre, no de la lista original.
+
+⚠️ **Las dos mediciones cerraron corrigiendo lo que este mismo párrafo afirmaba.** Decía que
+la garantía contra el deadlock *"se apoya en el plan de Postgres y no en el código propio"*:
+medido, es al revés —el `ORDER BY` decide el orden de adquisición, y lo que protege al caso es
+el batch—. Y llamaba a lo de `encargado.salon` *"un hallazgo ajeno, no investigado"*: el
+síntoma era real pero la causa supuesta (seed, permisos) no, y el arreglo terminó siendo una
+línea en la pantalla.
 
 Una entrada que el borrador de cierre traía como pendiente **resultó ya resuelta al
 verificarla contra el código**: `ubicaciones.eliminado_por` sí se puebla —

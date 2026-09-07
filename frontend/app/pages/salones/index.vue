@@ -22,7 +22,27 @@ import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentaci
 import { agregarImpuestosVenta, agregarPromocionesVenta } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+// `Salones:Operar`, no `Leer`: lo que esta pantalla pide para abrirse es
+// `GET /salones/operacion` (`salones.controller.ts`), que exige `Operar`. Sin
+// el middleware, quien tiene `Salones:Leer` pero no `Operar` —el rol
+// "Salones · Encargado" del seed es exactamente ese— entraba por URL directa o
+// bookmark y se quedaba en una pantalla VACÍA con un toast genérico: el
+// listado rebotaba con 403 y no había nada más que ver. El menú ya no le
+// muestra el link (`layouts/dashboard.vue`), así que el callejón solo se
+// alcanzaba a mano. Su pantalla es Configuración → Salones, que sí pide `Leer`.
+// Esconder no es seguridad (invariante 6): el candado real sigue siendo el
+// `@RequiresPermiso` del backend.
+//
+// El `permisoLabel` NO es cosmético: el aviso del middleware es *"No tenés
+// acceso al módulo ${label}"*, y con el default diría "…al módulo Salones",
+// que para este usuario es falso —tiene el módulo, administra salones—. El
+// label es lo único que ese mensaje deja ajustar (no puede nombrar la acción).
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Salones:Operar',
+  permisoLabel: 'Salones (operación)',
+  layout: 'dashboard',
+})
 
 interface TipoDoc { id: string, nombre: string, customerRequerido: boolean }
 interface MetodoPago {

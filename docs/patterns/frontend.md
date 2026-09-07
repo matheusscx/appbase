@@ -108,11 +108,22 @@ definePageMeta({ middleware: 'admin' })
 
 // La pantalla entera exige un permiso de módulo → ¿tiene este permiso?
 definePageMeta({ middleware: ['auth', 'permiso'], permiso: 'Cajas:Leer' })
-// `permisoLabel` solo si el módulo se llama distinto en pantalla:
+// `permisoLabel` cuando el aviso por defecto —"No tenés acceso al módulo <módulo>"—
+// sería confuso o directamente falso. Dos casos, los dos reales:
+//   a) el módulo se llama distinto en pantalla
 definePageMeta({
   middleware: ['auth', 'permiso'],
   permiso: 'MiCaja:Leer',
   permisoLabel: 'Mi caja',
+})
+//   b) lo que falta es la ACCIÓN, no el módulo: quien tiene `Salones:Leer` y
+//      administra salones NO puede operar, y decirle "no tenés acceso al
+//      módulo Salones" es falso. El label es lo único que ese mensaje deja
+//      ajustar — no puede nombrar la acción.
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Salones:Operar',
+  permisoLabel: 'Salones (operación)',
 })
 ```
 

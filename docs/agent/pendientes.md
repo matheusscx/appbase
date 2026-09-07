@@ -1002,40 +1002,15 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   ⛔ **Toca el motor de cálculo de precios**, así que si la medición dice que hay que arreglarlo,
   va solo y con el sistema quieto.
 
-- [ ] **Por qué dos traslados cruzados no hacen deadlock se apoya en el plan de Postgres, no en
-  una garantía del código propio — y la re-medición no reprodujo lo que el test original medía**
-  (backend, frente de bodegas y traslados, **medido y reportado al owner el 2026-09-07**) —
-  `test/traslados.e2e-spec.ts`, caso *"dos traslados cruzados con los mismos dos productos no
-  hacen deadlock"* (el docblock que lo precede trae la medición completa, línea por línea).
-  **Lo que el mutante "borrar solo el `ORDER BY`" muestra:** con el fixture del caso (2 ítems, y
-  también probado con 6 y 12) el mutante **sobrevive** porque el `.sort()` del lado cliente
-  (`TrasladosService.crearEnTransaccion`) ya arma `itemIdsOrdenados` en el mismo orden para las
-  dos transacciones **antes** de tocar la base — la variación que ese mutante necesitaría para
-  importar ya está absorbida ahí, así que ningún tamaño de fixture lo va a matar mientras el
-  `.sort()` siga. El `ORDER BY ip.item_id` del `SELECT … FOR UPDATE OF ip` se queda de todos
-  modos, porque cierra el caso general (arrays de tamaño distinto entre las dos transacciones),
-  no el de este fixture.
-  **Lo que sí mata el mutante real** —borrar el `.sort()` **y** el `ORDER BY` juntos, o sea que
-  el orden de bloqueo vuelva a salir del body— es `deadlocks: 0 → 1`, medido el 2026-09-07. Al
-  re-medir esa misma aserción tres corridas limpias después (`reset-db.sh` antes de cada una,
-  mismo fixture de 2 ítems), **no reprodujo**: dio `0 → 0` las tres veces. Lectura probable y
-  **no confirmada**: el orden de adquisición lo daría el plan de `WHERE item_id = ANY($1)` sobre
-  el índice de la PK, que devuelve las filas en orden de índice sin importar el orden del array
-  — o sea que la garantía de hoy se apoyaría en el plan que arma Postgres, no en una promesa que
-  el código propio sostenga. No se tocó la aserción ni el análisis del docblock porque no hay
-  certeza de qué cambió entre las dos mediciones (¿plan distinto por el tamaño de la tabla en
-  cada momento? ¿build stale del backend en la primera medición?); se reportó al owner en vez
-  de reescribir un "medido" ajeno sin confirmar.
-  **La conducta de hoy es segura** —el reintento ante `40P01` (`MAX_REINTENTOS_DEADLOCK`)
-  cubre el caso aunque el deadlock ocurra— y lo que falta es la certeza de **por qué**, no un
-  arreglo: si la garantía es del plan y no del código, un cambio de versión de Postgres o de
-  volumen de datos podría correrla sin que ningún test lo avise.
-
-- [ ] **`encargado.salon@paris.cl` no ve ningún salón pese a tener los permisos sembrados**
-  (hallazgo ajeno, encontrado de paso durante el cierre del frente de bodegas y traslados,
-  **no investigado, 2026-09-06/07**) — la cuenta existe en el seeder
-  (`backend/src/modules/seeder/seeder.service.ts:1256`). No se abrió más: no es de este frente
-  y no hay diagnóstico todavía de si es un hueco de permisos, de seed, o de la pantalla.
+📌 **Las dos entradas que dejó el frente de bodegas salieron de acá el 2026-09-07** —el orden
+de bloqueo de los traslados cruzados y `encargado.salon@paris.cl`, las dos en
+[`resueltos.md`](resueltos.md)—, y las dos dejaron el mismo aviso: **una entrada de esta
+sección es una hipótesis, y la hipótesis puede ser tan falsa como el hecho que denuncia**. La
+primera ofrecía como *"lectura probable y no confirmada"* que el plan usara el índice de la PK
+—son dos seq scans con un hash join— y que por eso el `ORDER BY` no mandara; manda; la segunda **tenía el título mal** —*"pese a tener los
+permisos sembrados"* apunta al seed y a los permisos, que están bien—, aunque su cuerpo sí
+listaba la pantalla entre los candidatos, que era la respuesta. Las dos veces el trabajo útil fue medir primero y reescribir la entrada
+después, no ejecutar lo que decía.
 
 ## 3. Ya decidido, falta construir
 

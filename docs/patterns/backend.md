@@ -836,6 +836,23 @@ no alcanza por sí solo: dos lotes que traigan las mismas dos recetas en sentido
 opuestos cierran el mismo ciclo **dentro** de una tabla. Por eso el orden por
 `item_id` es parte de la regla, no un detalle del `ORDER BY`.
 
+**El `ORDER BY` de un `SELECT … FOR UPDATE` SÍ decide el orden de adquisición** —no es
+decorativo ni "una ayuda al plan"—. Medido el 2026-09-07 sobre el statement de
+`TrasladosService`: el `EXPLAIN` pone el nodo `LockRows` **arriba** del `Sort`, así que las
+filas se bloquean ya ordenadas. Comprobado además de afuera, con tres sesiones: con `X < Y`,
+una retiene `X`, otra corre el `SELECT … item_id = ANY(ARRAY[Y, X]) … FOR UPDATE` y una
+tercera prueba `SELECT … Y … FOR UPDATE NOWAIT`. Con `ORDER BY item_id` la segunda se encola
+en `X` **sin** haber tomado `Y`; con `ORDER BY item_id DESC` toma `Y` y después se encola.
+El orden del array **no** interviene en ningún caso.
+
+**Y por eso el `ORDER BY` es lo que hace que la garantía sea del código.** Si se lo saca, el
+orden pasa a salir del plan (un hash join sobre el heap, en la medición) — que hoy también es
+igual para las dos transacciones, así que el deadlock tampoco aparece: **ningún test de
+conducta puede cazar su ausencia**. Lo que sí la caza es un unitario que afirme sobre el SQL
+del statement, y por eso existen (`items.service.spec.ts` para `aplicarDesfases`,
+`traslados.service.spec.ts` para el traslado). Si escribís un camino nuevo con locks
+ordenados, el `ORDER BY` va con su unitario o no queda fijado por nada.
+
 **Un `UPDATE` cuenta como lock.** No hace falta un `FOR UPDATE` explícito para
 participar del orden: el `UPDATE` toma el lock de la fila cuando se ejecuta, así
 que el orden de bloqueo de un camino sin locks explícitos es simplemente el orden

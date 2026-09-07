@@ -149,11 +149,14 @@ productos en orden inverso sí podrían cerrarlo, y por eso `TrasladosService.cr
 locks por `item_id` — el mismo contrato de siempre (`ventas.crear()`, `validarStockAlPedir`),
 extendido acá.
 
-⚠️ Queda una pregunta abierta sobre esta misma garantía, anotada en
-[`agent/pendientes.md`](../agent/pendientes.md): si el orden de bloqueo depende
-estructuralmente del código (el `ORDER BY` del lock) o se apoya en el plan que arma Postgres
-para `WHERE item_id = ANY($1)`. La conducta de hoy es segura de todos modos —el reintento ante
-`40P01` cubre el caso— pero el porqué no está confirmado.
+✅ **Medido el 2026-09-07, y la garantía es del código.** Se preguntaba si el orden de bloqueo
+lo fijaba el `ORDER BY` del lock o el plan que arma Postgres para `WHERE item_id = ANY($1)`.
+El `EXPLAIN` pone el nodo `LockRows` **arriba** del `Sort`, y comprobado de afuera con tres
+sesiones: con `ORDER BY item_id` se bloquea la fila menor primero, con `DESC` la mayor. El
+orden del array no interviene nunca. Lo que protege al caso contra el deadlock, además, es que
+los locks se pidan **todos en un statement**: romper eso —volver a uno por línea, en orden del
+body— sí lo rompe, medido. Detalle en el docblock del caso e2e y en
+[`patterns/backend.md` § 15](../patterns/backend.md).
 
 ---
 
@@ -381,8 +384,8 @@ npm run test:e2e -- sobreventa-concurrente-ubicacion
 Casos que importan por lo que prueban, no por su nombre: traslado feliz en los tres modos,
 tope contra lo apartado (origen local) vs. tope físico (origen bodega), borrar una bodega con
 stock, y **dos traslados cruzados del mismo par de productos** — el caso que ejercita el
-orden de locks descrito arriba (ver el docblock del test para la medición completa, y la
-pregunta abierta que dejó en `agent/pendientes.md`).
+orden de locks descrito arriba (ver el docblock del test para la medición completa: qué
+mutante lo mata y cuáles no).
 
 ### E2E (frontend)
 
@@ -409,6 +412,8 @@ ubicación.
 
 ## Notes
 
-Backlog que este frente dejó anotado, con su porqué: [`agent/pendientes.md`](../agent/pendientes.md)
-§§ 1-2. Cierre completo, con lo construido y lo que quedó afuera:
-[`agent/resueltos.md`](../agent/resueltos.md).
+Backlog que este frente dejó anotado, con su porqué: [`agent/pendientes.md`](../agent/pendientes.md).
+Los seis huecos con los que cerró se resolvieron el 2026-09-07; lo que sigue abierto del
+frente en la § 1 es el 400 de "campo de ubicación requerido" que le falta a recuentos y a
+traslados, y el barrido de las citas `spec § N` que quedaron sin destino. Cierre completo, con
+lo construido y lo resuelto después: [`agent/resueltos.md`](../agent/resueltos.md).

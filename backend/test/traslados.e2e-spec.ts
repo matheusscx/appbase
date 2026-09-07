@@ -910,7 +910,7 @@ describe('Traslados entre ubicaciones (e2e)', () => {
    * ancla de `item_producto` —el que este fixture monta—, y lo que lo cierra
    * es que el orden de bloqueo **no dependa del orden de las líneas del
    * body**: hoy eso lo garantiza el statement único de locks, no el `sort`
-   * (ver la medición al final de este encabezado). No dice nada de ciclos que
+   * (la medición, en la lista de mutantes de más abajo). No dice nada de ciclos que
    * pueda abrir un lock que se sume mañana a este camino.
    *
    * ⚠️ **NO es "dos traslados del mismo producto"**, que es como estaba
@@ -936,6 +936,11 @@ describe('Traslados entre ubicaciones (e2e)', () => {
    *   compuerta: ROLLBACK  → A toma `primero` y pide `segundo`, que B tiene;
    *                          B pide `primero`, que A tiene → 40P01
    *
+   * ⚠️ Ese `→ 40P01` es el ciclo que el fixture **intenta** cerrar: hoy no
+   * ocurre porque los locks se piden en un solo statement, y ocurre —medido—
+   * apenas se los vuelve a pedir por línea. La medición es la cuarta viñeta de
+   * la lista de mutantes, unas líneas más abajo.
+   *
    * QUÉ SE AFIRMA, y por qué no alcanza con los status: **el reintento tapa el
    * deadlock**. `TrasladosService.crear` reintenta ante `40P01`
    * (`MAX_REINTENTOS_DEADLOCK`), así que aun con el ciclo los dos traslados
@@ -944,57 +949,84 @@ describe('Traslados entre ubicaciones (e2e)', () => {
    *
    * ⚠️ **QUÉ MUTANTE MATA ESTE CASO, medido — no es el que uno supondría.**
    * `TrasladosService` toma los locks en UN statement (`ANY($1) ORDER BY
-   * ip.item_id FOR UPDATE OF ip`), y eso hace que el orden de bloqueo deje de
-   * depender del request: las dos transacciones emiten el mismo SQL y reciben
-   * el mismo plan. Consecuencia medida sobre este mismo fixture:
+   * ip.item_id FOR UPDATE OF ip`), y ese **batch** es lo que hace que el orden
+   * de bloqueo deje de depender del request. Medido sobre este mismo fixture:
    *
-   * - Sacar **solo** el `ORDER BY ip.item_id` → **el caso PASA**. Con dos
-   *   ítems las dos requests siguen recorriendo la tabla igual, así que
-   *   lockean en el mismo orden igual. El `ORDER BY` se queda porque cierra el
-   *   caso general —dos traslados con arrays de distinto tamaño pueden recibir
-   *   planes distintos— pero este fixture no lo puede probar, y decir que sí
-   *   sería un verde falso.
-   * - Sacar **solo** el `.sort()` de las líneas → el caso PASA: el pre-lock ya
-   *   ordenó.
-   * - Sacar **las dos cosas** (o sea: que el orden de bloqueo vuelva a salir
-   *   del body, que es la regresión real) → **el caso FALLA** con
-   *   `deadlocks: 0 → 1`. Medido el 2026-09-07.
+   * - Sacar **solo** el `ORDER BY ip.item_id` → **el caso PASA**.
+   * - Sacar **solo** el `.sort()` de las líneas → **el caso PASA**.
+   * - Sacar **las dos cosas** → **el caso PASA TAMBIÉN**. Ver abajo: esta
+   *   línea decía `deadlocks: 0 → 1` y no se sostuvo.
+   * - **Volver al lock por línea** —un `SELECT … item_id = $1 FOR UPDATE OF ip`
+   *   por ítem, recorriendo `dto.lineas` en el orden del body— → **el caso
+   *   FALLA, `deadlocks: 0 → 1`.** Medido el 2026-09-07 con el service mutado
+   *   y la suite corrida de verdad, no razonado.
+   *   Esa forma no es hipotética: el docblock del statement
+   *   (`traslados.service.ts`) cuenta que el código la tuvo y que una revisión
+   *   la levantó como N+1 —fue antes del primer commit, así que en `git log`
+   *   no está—. Y `inventario.service.ts` lockea de a un ítem por statement:
+   *   ahí el orden lo pone **el llamador**, que por eso ordena antes del loop
+   *   (`ventas.service.ts`, `ordenLocks`). Romper el batch acá es volver a
+   *   depender de esa disciplina en vez de que la imponga el statement.
    *
-   * O sea: lo que este caso prueba es que el orden de bloqueo **no depende del
-   * orden de las líneas que mandó el cliente**, no una línea en particular.
+   * O sea: **lo que este caso protege es el batch**, no el `ORDER BY` ni el
+   * `.sort()`. Mientras los locks se pidan todos en un statement, el orden
+   * dentro de ese statement no lo decide el cliente; el día que alguien lo
+   * vuelva a partir por línea, este caso se pone rojo.
+   *
+   * ⚠️ **Y lo que este caso NO puede probar es que el `ORDER BY` esté** (los
+   * mutantes de orden): eso lo fija un unitario que afirma sobre el SQL
+   * del statement (`traslados.service.spec.ts`, *"lockea UNA fila de
+   * item_producto por ítem, ordenada por itemId"*). Los dos hacen falta.
    *
    * ───────────────────────────────────────────────────────────────────────
-   * Tarea 9, hueco 3 (revisión de cobertura, 2026-09-07): ¿un fixture MÁS
-   * GRANDE mata el mutante "sacar SOLO el `ORDER BY`"?
+   * POR QUÉ los mutantes de ORDEN (`ORDER BY`, `.sort()`, los dos) no lo
+   * matan, y el de ROMPER EL BATCH sí — medido el 2026-09-07 contra el stack,
+   * no deducido. Los dos experimentos se reproducen en un `psql` cualquiera.
    * ───────────────────────────────────────────────────────────────────────
-   * Intentado con 6 y con 12 ítems (mismo diseño: A manda las líneas en orden
-   * ascendente de `item_id`, B en orden descendente, la compuerta retiene el
-   * ítem más chico) — **el mutante sobrevive igual en los dos tamaños**
-   * (`deadlocks: 0 → 0`). No es falta de fixture: es estructural. El `.sort()`
-   * de más arriba arma `itemIdsOrdenados` ANTES de tocar la base, así que A y
-   * B mandan el MISMO array (mismo orden) a Postgres sin importar en qué
-   * orden vinieron las líneas del body — la variación que este mutante
-   * necesitaría para importar ya la absorbió el `.sort()`, antes de que el
-   * `ORDER BY` (o su ausencia) tenga algo que decidir. Ningún tamaño de
-   * fixture reintroduce esa variación mientras el `.sort()` siga ahí: por
-   * diseño, matar ESTE mutante puntual requeriría tocar también el `.sort()`,
-   * que es exactamente el otro mutante de esta lista (y ese sí lo mata la
-   * combinación de ambos, ver debajo). Con el statement de locks tocando
-   * `item_producto` a través de su PK (`item_id`, `btree`) y una tabla chica
-   * en el e2e (~15 filas recién sembradas), el plan que arma Postgres para
-   * `WHERE item_id = ANY($1)` tampoco depende del orden del array ni con
-   * `ORDER BY` puesto ni sin él, así que agrandar el fixture no cambia el
-   * mecanismo. El `ORDER BY` se queda de todos modos por lo que dice el
-   * párrafo de arriba: no es sobre ESTE fixture.
+   * **(1) El plan.** `EXPLAIN` del statement real sobre la base del e2e:
    *
-   * ⚠️ **Hallazgo aparte, no resuelto:** al re-medir el `deadlocks: 0 → 1` de
-   * "sacar las dos cosas" (arriba) el 2026-09-07 —tres corridas limpias,
-   * `reset-db.sh` antes de cada una, mismo fixture de 2 ítems— **no
-   * reprodujo**: dio `0 → 0` las tres veces. No se tocó esa aserción ni la
-   * conclusión de arriba porque no hay certeza de qué cambió (¿plan de
-   * Postgres distinto al de la medición original por el tamaño de la tabla en
-   * ese momento? ¿build stale del backend en la medición original?) —
-   * reportado al owner en vez de reescribir un "medido" ajeno sin confirmar.
+   *     LockRows
+   *       ->  Sort  (Sort Key: ip.item_id)
+   *             ->  Hash Join
+   *                   ->  Seq Scan on items i
+   *                   ->  Hash -> Seq Scan on item_producto ip
+   *
+   * Dos cosas que corrigen lo que este encabezado afirmaba antes: **no hay
+   * index scan por la PK** —son dos seq scans con un hash join, la tabla es
+   * chica— y el `LockRows` va **arriba** del `Sort`, o sea que las filas se
+   * bloquean en el orden del `ORDER BY`, no en el del plan de abajo.
+   *
+   * **(2) El orden de adquisición, comprobado.** Con `X < Y` por `item_id`:
+   * una sesión retiene `X`; otra corre el statement real con el array CRUZADO
+   * `[Y, X]`; una tercera pregunta `SELECT … item_id = Y FOR UPDATE NOWAIT`.
+   *
+   * - Con `ORDER BY ip.item_id` (ASC): `Y` queda **libre** → la segunda sesión
+   *   se encoló en `X` sin haber tocado `Y`. Bloquea en orden ascendente.
+   * - Con `ORDER BY ip.item_id DESC`: `Y` queda **tomada** → bloqueó `Y`
+   *   primero y después se encoló en `X`. El `ORDER BY` es lo que manda.
+   * - **Sin** `ORDER BY`: `Y` queda libre igual, porque el orden pasa a salir
+   *   del hash join sobre el heap de `items` — que es el **mismo para las dos
+   *   transacciones**, vengan como vengan sus arrays.
+   *
+   * Ahí está el porqué de los mutantes de orden: para que haya deadlock,
+   * las dos transacciones tienen que pedir las filas en órdenes OPUESTOS, y
+   * **ningún plan de este statement deriva su orden del array** — por eso hace
+   * falta romper el batch para que el orden vuelva a salir del body y el ciclo
+   * se cierre. Por eso ni agrandar el fixture (medido antes
+   * con 6 y 12 ítems) ni cruzar los bodies reintroduce el ciclo. El `ORDER BY` se
+   * queda porque es lo que hace que la garantía sea **del código y no del plan
+   * que Postgres arme mañana**: hoy los dos dicen lo mismo, y el día que el
+   * plan cambie —otra versión, otro volumen, un índice nuevo— el `ORDER BY`
+   * sigue decidiendo. Sin él, la seguridad quedaría prestada.
+   *
+   * ⚠️ **El `deadlocks: 0 → 1` que decía este encabezado se retira.** Era la
+   * medición original del mutante "sacar las dos cosas". No reprodujo en tres
+   * corridas limpias el 2026-09-07 (`reset-db.sh` antes de cada una), ni en la
+   * cuarta —ésta— con el mutante puesto a mano: `0 → 0`. Y ahora hay
+   * mecanismo, no solo ausencia de evidencia: por (2), sacar las dos cosas
+   * deja el orden en manos del plan, que es común a las dos transacciones. Lo
+   * más probable es que la medición original corriera contra un build stale
+   * del backend.
    * ═══════════════════════════════════════════════════════════════════════════
    */
   it('dos traslados cruzados con los mismos dos productos no hacen deadlock', async () => {
