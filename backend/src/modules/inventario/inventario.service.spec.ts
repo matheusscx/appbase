@@ -1063,8 +1063,12 @@ describe('InventarioService', () => {
 
       expect(res.stockResultante).toBe('5');
       // La lectura de saldos por ubicación consulta LOS DOS lotes lockeados
-      // (lote-a incluido)...
+      // (lote-a incluido)... pero acotada por `ubicacion_id` EN EL PROPIO
+      // SQL: sin ese filtro en el texto de la query, un mutante que lo
+      // borrara no lo notaría este mock (los valores devueltos son los que
+      // el test le dicta), así que la forma del SQL se afirma directo.
       const saldosCall = managerMock.query.mock.calls[3] as [string, unknown[]];
+      expect(saldosCall[0]).toMatch(/ubicacion_id\s*=\s*\$1/);
       expect(saldosCall[1]).toEqual([UBICACION_ID, ['lote-a', 'lote-b']]);
       // ...pero el único UPSERT de consumo es sobre lote-b: lote-a, sin
       // saldo acá, no se toca.
