@@ -329,7 +329,7 @@ Modelo: **tabla base + extensiones por tipo** — escala limpiamente cuando se a
 **`items` (base):** campos comunes a todos los tipos — tenant, nombre, descripción, precio base, moneda, categoría, activo, tipo, **clasificación tributaria** (`afecto` default | `exento` | `NULL` en `ingrediente` — ver regla en sección 7).
 
 Extensiones actuales:
-- **`item_producto`** — stock, unidad de medida, fecha elaboración, fecha vencimiento
+- **`item_producto`** — unidad de medida, modo de inventario, costo, fecha elaboración, fecha vencimiento. **No lleva el stock**: el saldo vive en `stock_ubicacion`, una fila por `(ítem, ubicación)`
 - **`item_servicio`** — duración estimada, `requiere_cita` (flag informativo, sin agenda por ahora)
 - **`item_suscripcion`** — `frecuencia` (`'semanal'` | `'quincenal'` | `'mensual'`). Representa un ítem de cobro recurrente (ver 10b); no fija día de cobro ni tarjeta — eso lo elige el customer al suscribirse.
 - **`item_receta`** — producto compuesto sin stock propio; descuenta stock de sus ingredientes al venderse (ver `docs/features/recetas.md`).
@@ -347,7 +347,7 @@ Extensiones futuras contempladas: combos con grupos de modificadores (elección,
 
 ### 8b. Inventario (kardex de movimientos de stock)
 
-Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda registrado como un movimiento auditable; el campo `item_producto.stock` es el **saldo materializado** para lectura rápida y alertas, y la tabla de movimientos es la **fuente de verdad**.
+Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda registrado como un movimiento auditable; la tabla `stock_ubicacion` (una fila por ítem y ubicación) es el **saldo materializado** para lectura rápida y alertas, y la tabla de movimientos es la **fuente de verdad**.
 
 **`movimientos_inventario`:** tenant, item, `tipo` (`entrada` | `salida` | `ajuste`), `motivo` (`compra` | `venta` | `devolucion` | `merma` | `ajuste_manual` | `inventario_inicial` | `recuento`), cantidad (siempre positiva; el tipo define el signo), `stock_anterior`, `stock_resultante`, `venta_id` opcional, `usuario_id` (quién lo registró), comentario.
 

@@ -72,7 +72,8 @@ describe('InventarioService', () => {
 
     it('el SELECT del lock recibe el tenant como parámetro, no solo el item', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -92,14 +93,17 @@ describe('InventarioService', () => {
       // La aserción fuerte es por VALOR de los parámetros: sacar el
       // `AND i.tenant_id = $2` deja el array sin TENANT y esto falla por su
       // propia comparación, no por un match de texto sobre el SQL.
+      // Sin `UBICACION_ID`: el statement del lock ya no lee el saldo, así que
+      // no necesita la ubicación. Esa la lleva el statement de abajo.
       const [sql, params] = lockQuery();
-      expect(params).toEqual([ITEM_ID, TENANT, UBICACION_ID]);
+      expect(params).toEqual([ITEM_ID, TENANT]);
       expect(sql).toContain('i.tenant_id = $2');
     });
 
     it('lockea solo `item_producto`, no la fila de `items` que usa para acotar', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -142,13 +146,13 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
-            stock: '7',
             modo_inventario: 'cantidad',
             costo_actual: '100',
             item_nombre: 'Carne',
             item_eliminado_el: null,
           },
         ])
+        .mockResolvedValueOnce([{ stock: '7' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-stock-ubicacion' }]);
 
@@ -203,7 +207,8 @@ describe('InventarioService', () => {
   describe('registrarMovimiento — modo cantidad', () => {
     it('entrada: suma al stock y registra el movimiento', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]); // INSERT movimiento
 
@@ -227,9 +232,10 @@ describe('InventarioService', () => {
         costoActualPrevio: null,
         costoActual: null,
       });
-      // La 2ª llamada es el upsert de stock_ubicacion con el nuevo saldo
+      // La 3ª llamada es el upsert de stock_ubicacion con el nuevo saldo
+      // (1ª el lock, 2ª el saldo)
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        2,
+        3,
         expect.stringContaining('INSERT INTO stock_ubicacion'),
         expect.arrayContaining(['15', ITEM_ID, UBICACION_ID]),
       );
@@ -237,7 +243,8 @@ describe('InventarioService', () => {
 
     it('salida: resta del stock', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-2' }]);
 
@@ -259,9 +266,9 @@ describe('InventarioService', () => {
     });
 
     it('salida con stock insuficiente lanza BadRequest', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '3', modo_inventario: 'cantidad' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce([{ stock: '3' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -309,16 +316,22 @@ describe('InventarioService', () => {
   describe('registrarMovimiento — ítem eliminado', () => {
     const BORRADO_EL = new Date('2026-08-16T10:00:00Z');
 
+    /** Fila del statement del lock. El saldo ya no sale de acá: va aparte,
+     * ver `saldoRow()`. */
     function lockRowEliminado() {
       return [
         {
-          stock: '10',
           modo_inventario: 'cantidad',
           costo_actual: '100',
           item_nombre: 'Queso mantecoso',
           item_eliminado_el: BORRADO_EL,
         },
       ];
+    }
+
+    /** Fila del statement APARTE que lee el saldo, ya bajo el lock. */
+    function saldoRow() {
+      return [{ stock: '10' }];
     }
 
     it.each(['compra', 'merma', 'recuento', 'ajuste_manual', 'venta'])(
@@ -383,6 +396,7 @@ describe('InventarioService', () => {
       async (motivo) => {
         managerMock.query
           .mockResolvedValueOnce(lockRowEliminado())
+          .mockResolvedValueOnce(saldoRow()) // SELECT saldo, ya bajo el lock
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-repo' }]); // INSERT kardex
 
@@ -407,13 +421,13 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([
           {
-            stock: '10',
             modo_inventario: 'cantidad',
             costo_actual: null,
             item_nombre: 'Queso mantecoso',
             item_eliminado_el: null,
           },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ok' }]);
 
@@ -440,7 +454,8 @@ describe('InventarioService', () => {
   describe('registrarMovimiento — modo serie', () => {
     it('entrada serie: inserta unidades, recalcula stock y registra movimiento', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '0', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad 1
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }]) // INSERT unidad 2
         .mockResolvedValueOnce([{ cnt: '2' }]) // COUNT disponibles
@@ -471,9 +486,9 @@ describe('InventarioService', () => {
     });
 
     it('entrada serie: lanza BadRequest si cantidad != series.length', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '0', modo_inventario: 'serie' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '0' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -491,7 +506,8 @@ describe('InventarioService', () => {
 
     it('salida serie: cambia estado de unidades y recalcula stock', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '2', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '2' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           { estado: 'disponible', item_id: ITEM_ID, tenant_id: TENANT },
         ]) // SELECT unidad
@@ -521,7 +537,8 @@ describe('InventarioService', () => {
 
     it('salida serie sin unidadIds: auto-selecciona FIFO las unidades disponibles', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '2', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '2' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // SELECT FIFO unidades
         .mockResolvedValueOnce([
           { estado: 'disponible', item_id: ITEM_ID, tenant_id: TENANT },
@@ -546,9 +563,10 @@ describe('InventarioService', () => {
       );
 
       expect(res.stockResultante).toBe('1');
-      // La 2ª query es el SELECT FIFO con ORDER BY creado_el ASC
+      // La 3ª query es el SELECT FIFO con ORDER BY creado_el ASC
+      // (1ª el lock, 2ª el saldo)
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        2,
+        3,
         expect.stringContaining('ORDER BY u.creado_el ASC'),
         expect.arrayContaining([ITEM_ID, TENANT]),
       );
@@ -556,7 +574,8 @@ describe('InventarioService', () => {
 
     it('salida serie sin unidadIds: lanza BadRequest si no hay suficientes disponibles', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '0', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([]); // SELECT FIFO unidades (0 disponibles)
 
       await expect(
@@ -574,7 +593,8 @@ describe('InventarioService', () => {
 
     it('salida serie: lanza BadRequest si unidad no está disponible', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           { estado: 'vendido', item_id: ITEM_ID, tenant_id: TENANT },
         ]);
@@ -596,7 +616,8 @@ describe('InventarioService', () => {
 
     it('salida serie: lanza BadRequest si la unidad no pertenece al tenant', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           // La unidad existe y está disponible, pero es de otro tenant: el
           // `unidadId` llega del body del cliente, así que este `if` es la
@@ -636,7 +657,8 @@ describe('InventarioService', () => {
 
     it('salida serie: lanza BadRequest si la unidad no pertenece al item', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '1' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           // Mismo tenant, pero la unidad es de otro ítem.
           {
@@ -678,7 +700,8 @@ describe('InventarioService', () => {
   describe('registrarMovimiento — modo lote', () => {
     it('entrada lote: crea lote nuevo y recalcula stock', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '0', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([]) // SELECT lote existente (no existe)
         .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // INSERT lote
         .mockResolvedValueOnce([{ total: '50' }]) // SUM cantidad_disponible
@@ -705,7 +728,8 @@ describe('InventarioService', () => {
 
     it('salida lote: descuenta del lote y recalcula stock', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '50', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '50' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           { cantidad_disponible: '50', tenant_id: TENANT },
         ]) // SELECT lote FOR UPDATE
@@ -735,7 +759,8 @@ describe('InventarioService', () => {
 
     it('salida lote sin loteId: auto-selecciona FIFO el lote más antiguo', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '50', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '50' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           { lote_id: LOTE_ID, cantidad_disponible: '50' },
         ]) // SELECT lotes FIFO FOR UPDATE
@@ -760,7 +785,7 @@ describe('InventarioService', () => {
 
       expect(res.stockResultante).toBe('40');
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        2,
+        3,
         expect.stringContaining('ORDER BY creado_el ASC'),
         expect.arrayContaining([ITEM_ID, TENANT]),
       );
@@ -768,7 +793,8 @@ describe('InventarioService', () => {
 
     it('salida lote sin loteId: lanza BadRequest si el stock total es insuficiente', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '5', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '5' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           { lote_id: LOTE_ID, cantidad_disponible: '5' },
         ]); // SELECT lotes FIFO (total 5 < 10)
@@ -788,7 +814,8 @@ describe('InventarioService', () => {
 
     it('salida lote: lanza BadRequest si lote insuficiente', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '5', modo_inventario: 'lote' }])
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
+        .mockResolvedValueOnce([{ stock: '5' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           { cantidad_disponible: '5', tenant_id: TENANT },
         ]);
@@ -810,7 +837,8 @@ describe('InventarioService', () => {
 
     it('salida lote: lanza BadRequest si el lote no pertenece al tenant', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '50', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '50' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([
           // El lote existe con disponibilidad suficiente, pero es de otro
           // tenant: `loteId` llega del body del cliente, así que este `if` es
@@ -849,9 +877,11 @@ describe('InventarioService', () => {
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — causa merma', () => {
     it('motivo merma sin causaMermaId lanza BadRequest', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -869,9 +899,11 @@ describe('InventarioService', () => {
     });
 
     it('motivo distinto de merma con causaMermaId lanza BadRequest', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -892,8 +924,9 @@ describe('InventarioService', () => {
     it('motivo merma con causaMermaId incluye causa_merma_id en el INSERT', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-m1' }]);
 
@@ -911,7 +944,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('causa_merma_id');
       expect(insertCall[1]).toContain(CAUSA_MERMA_ID);
     });
@@ -922,9 +955,11 @@ describe('InventarioService', () => {
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — motivo_diferencia_id', () => {
     it('motivo recuento sin motivoDiferenciaId lanza BadRequest', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -944,9 +979,11 @@ describe('InventarioService', () => {
     });
 
     it('motivo distinto de recuento con motivoDiferenciaId lanza BadRequest', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -967,8 +1004,9 @@ describe('InventarioService', () => {
     it('motivo recuento con motivoDiferenciaId incluye motivo_diferencia_id en el INSERT', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-r1' }]);
 
@@ -986,7 +1024,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('motivo_diferencia_id');
       expect(insertCall[1]).toContain(MOTIVO_DIFERENCIA_ID);
     });
@@ -999,8 +1037,9 @@ describe('InventarioService', () => {
     it('entrada con costoUnitario y motivo compra: congela el costo y actualiza costo_actual', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
         ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
@@ -1019,15 +1058,15 @@ describe('InventarioService', () => {
         },
       );
 
-      // El INSERT del movimiento (3ª llamada) congela lo PAGADO en el kardex: 4500
-      const insertCall = managerMock.query.mock.calls[2];
+      // El INSERT del movimiento (4ª llamada) congela lo PAGADO en el kardex: 4500
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[0]).toContain('costo_unitario');
       expect(insertCall[1]).toContain('4500');
-      // La 4ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
+      // La 5ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
       // con el costo de compra crudo: (10×4000 + 5×4500) / 15 = 4166.6667.
       // Antes del CPP este valor era '4500' (último costo) — ese era el bug.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        4,
+        5,
         expect.stringContaining('costo_actual'),
         ['4166.6667', ITEM_ID],
       );
@@ -1036,8 +1075,9 @@ describe('InventarioService', () => {
     it('entrada ajuste_manual con costoUnitario: congela en kardex sin pisar costo_actual', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1b' }]);
 
@@ -1055,9 +1095,9 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[1]).toContain('4500');
-      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
     });
 
     it.each([['anulacion'], ['devolucion']])(
@@ -1070,11 +1110,11 @@ describe('InventarioService', () => {
         managerMock.query
           .mockResolvedValueOnce([
             {
-              stock: '14',
               modo_inventario: 'cantidad',
               costo_actual: '57.1429',
             },
           ])
+          .mockResolvedValueOnce([{ stock: '14' }]) // SELECT saldo: statement aparte, ya bajo el lock
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-rev' }])
           .mockResolvedValueOnce(undefined);
@@ -1094,10 +1134,10 @@ describe('InventarioService', () => {
         );
 
         // El kardex congela el costo real de la reposición, no el CPP vigente.
-        expect(managerMock.query.mock.calls[2][1]).toContain('50');
+        expect(managerMock.query.mock.calls[3][1]).toContain('50');
         // (14 × 57,1429 + 1 × 50) / 15 = 56,6667.
         expect(managerMock.query).toHaveBeenNthCalledWith(
-          4,
+          5,
           expect.stringContaining('costo_actual'),
           ['56.6667', ITEM_ID],
         );
@@ -1110,8 +1150,9 @@ describe('InventarioService', () => {
       // cantidad y el CPP queda como estaba, en vez de inventar un número.
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '14', modo_inventario: 'cantidad', costo_actual: '57.1429' },
+          { modo_inventario: 'cantidad', costo_actual: '57.1429' },
         ])
+        .mockResolvedValueOnce([{ stock: '14' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-rev2' }]);
 
@@ -1128,13 +1169,15 @@ describe('InventarioService', () => {
         },
       );
 
-      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
     });
 
     it('rechaza costoUnitario negativo', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -1159,8 +1202,9 @@ describe('InventarioService', () => {
       // 'entrada por anulación SIN costoUnitario' de arriba).
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-donacion' }])
         .mockResolvedValueOnce(undefined);
@@ -1181,7 +1225,7 @@ describe('InventarioService', () => {
 
       // (10 × 4000 + 5 × 0) / 15 = 2666,6667.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        4,
+        5,
         expect.stringContaining('costo_actual'),
         ['2666.6667', ITEM_ID],
       );
@@ -1196,8 +1240,9 @@ describe('InventarioService', () => {
       // donde está el valor de antes (`assertCostoNoColapsaACero`).
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+          { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ movimiento_id: 'mov-unidad' }])
         .mockResolvedValueOnce(undefined);
 
@@ -1224,8 +1269,9 @@ describe('InventarioService', () => {
     it('salida sin costoUnitario: congela el costo_actual vigente y no lo modifica', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4200' },
+          { modo_inventario: 'cantidad', costo_actual: '4200' },
         ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c2' }]); // INSERT movimiento
 
@@ -1243,9 +1289,9 @@ describe('InventarioService', () => {
       );
 
       // El INSERT congeló el costo vigente (4200) y no hubo UPDATE de costo_actual
-      const insertCall = managerMock.query.mock.calls[2];
+      const insertCall = managerMock.query.mock.calls[3];
       expect(insertCall[1]).toContain('4200');
-      expect(managerMock.query).toHaveBeenCalledTimes(3);
+      expect(managerMock.query).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -1314,8 +1360,9 @@ describe('InventarioService', () => {
     it('registra el movimiento sin mover stock y guarda el costo anterior', async () => {
       managerMock.query
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
+          { modo_inventario: 'cantidad', costo_actual: '100' },
         ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ac1' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
 
@@ -1358,9 +1405,11 @@ describe('InventarioService', () => {
     });
 
     it('rechaza el ajuste de costo con cantidad distinta de cero', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '100' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -1377,9 +1426,11 @@ describe('InventarioService', () => {
     });
 
     it('rechaza el ajuste de costo sin costoUnitario', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '100' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -1395,9 +1446,11 @@ describe('InventarioService', () => {
     });
 
     it('sigue rechazando cantidad cero en los demás motivos', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', costo_actual: '100' },
+        ])
+        .mockResolvedValueOnce([{ stock: '10' }]); // SELECT saldo: statement aparte, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -1428,8 +1481,9 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([{ tipo: 'producto', costo_actual: '100' }])
         // SELECT ... FOR UPDATE dentro de registrarMovimiento: el valor real.
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '150' },
+          { modo_inventario: 'cantidad', costo_actual: '150' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ac2' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
 
@@ -1477,8 +1531,9 @@ describe('InventarioService', () => {
           { tipo: 'producto', costo_actual: '4.0000', unidad_medida: 'g' },
         ])
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4.0000' },
+          { modo_inventario: 'cantidad', costo_actual: '4.0000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ac3' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual
 
@@ -1497,7 +1552,7 @@ describe('InventarioService', () => {
         'g',
       );
       // El costo que entra al kardex es el ya convertido, no el tipeado.
-      const insert = managerMock.query.mock.calls[2] as [string, unknown[]];
+      const insert = managerMock.query.mock.calls[3] as [string, unknown[]];
       expect(insert[1]).toContain('5.0500');
     });
 
@@ -1538,8 +1593,9 @@ describe('InventarioService', () => {
           { tipo: 'producto', costo_actual: '4.0000', unidad_medida: 'g' },
         ])
         .mockResolvedValueOnce([
-          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4.0000' },
+          { modo_inventario: 'cantidad', costo_actual: '4.0000' },
         ])
+        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ac4' }])
         .mockResolvedValueOnce(undefined);
 

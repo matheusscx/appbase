@@ -30,12 +30,31 @@ const ARCHIVOS_AUTORIZADOS = [
   join('modules', 'seeder', 'seeder.service.ts'),
 ];
 
-function findTsFiles(dir: string): string[] {
+/**
+ * Muletas declaradas del e2e, con fecha de vencimiento: plantan stock en una
+ * bodega con `INSERT` directo porque `POST /traslados` **todavía no existe**
+ * (Tarea 9 del frente "bodegas y traslados",
+ * `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`). Están acá y no
+ * afuera del barrido para que sean CONTABLES: cuando exista el endpoint, esta
+ * lista tiene que quedar vacía y los tres specs armar el escenario por la API.
+ * Un escenario que solo se puede montar con SQL suele estar escondiendo un caso
+ * que la API no puede producir.
+ */
+const MULETAS_E2E_AUTORIZADAS = [
+  'items-stock-por-ubicacion.e2e-spec.ts',
+  'recuentos-stock-por-ubicacion.e2e-spec.ts',
+  'grupos-modificadores-stock-por-ubicacion.e2e-spec.ts',
+];
+
+function findTsFiles(dir: string, incluirSpecs = false): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...findTsFiles(full));
-    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts')) {
+    if (entry.isDirectory()) out.push(...findTsFiles(full, incluirSpecs));
+    else if (
+      entry.name.endsWith('.ts') &&
+      (incluirSpecs || !entry.name.endsWith('.spec.ts'))
+    ) {
       out.push(full);
     }
   }
@@ -107,19 +126,44 @@ describe('Invariante: costo_actual y stock solo se escriben desde el kardex', ()
 
   it('nadie escribe stock_ubicacion, lote_ubicacion ni item_unidad.ubicacion_id fuera de inventario.service', () => {
     const srcRoot = join(__dirname, '..', '..');
+    // El e2e también, no solo `src/`: un spec que planta stock con SQL directo
+    // escribe en la MISMA base que el chokepoint custodia, y hasta ahora esta
+    // guarda no lo veía. Los unitarios de `src/**/*.spec.ts` siguen afuera
+    // (`findTsFiles` los saltea) y ahí la asimetría es deliberada: corren con
+    // el manager mockeado, no llegan a Postgres.
+    const testRoot = join(srcRoot, '..', 'test');
     const offenders: string[] = [];
 
-    for (const file of findTsFiles(srcRoot)) {
+    const archivos = [...findTsFiles(srcRoot), ...findTsFiles(testRoot, true)];
+    for (const file of archivos) {
       if (ARCHIVOS_AUTORIZADOS.some((a) => file.endsWith(a))) continue;
+      if (MULETAS_E2E_AUTORIZADAS.some((a) => file.endsWith(a))) continue;
       const contenido = readFileSync(file, 'utf8');
-      const sospechoso = extraeTemplateLiterals(contenido).some(
-        (chunk) =>
-          /INSERT\s+INTO\s+stock_ubicacion/i.test(chunk) ||
-          /UPDATE\s+stock_ubicacion/i.test(chunk) ||
-          /INSERT\s+INTO\s+lote_ubicacion/i.test(chunk) ||
-          /UPDATE\s+lote_ubicacion/i.test(chunk) ||
-          /UPDATE\s+item_unidad[\s\S]*ubicacion_id\s*=\s*\$/i.test(chunk),
-      );
+      const sospechoso =
+        extraeTemplateLiterals(contenido).some(
+          (chunk) =>
+            /INSERT\s+INTO\s+stock_ubicacion/i.test(chunk) ||
+            /UPDATE\s+stock_ubicacion/i.test(chunk) ||
+            /INSERT\s+INTO\s+lote_ubicacion/i.test(chunk) ||
+            /UPDATE\s+lote_ubicacion/i.test(chunk) ||
+            /UPDATE\s+item_unidad[\s\S]*ubicacion_id\s*=\s*\$/i.test(chunk) ||
+            // Borrar la fila ES poner el saldo en cero: el `DELETE` es una puerta
+            // más, no una excepción. (Y sí, choca con el soft delete: estas tablas
+            // no lo tienen — son saldos materializados, no documentos.)
+            /DELETE\s+FROM\s+stock_ubicacion/i.test(chunk) ||
+            /DELETE\s+FROM\s+lote_ubicacion/i.test(chunk),
+        ) ||
+        // El SQL crudo no es la única puerta: `StockUbicacion` está registrada
+        // en el array `entities` de `app.module.ts`, así que
+        // `manager.getRepository(StockUbicacion).save(...)` escribe el saldo sin
+        // que aparezca ni un template literal. Esto se busca sobre el archivo
+        // entero, no sobre los literales, porque no es SQL.
+        /(getRepository|InjectRepository)\(\s*(StockUbicacion|LoteUbicacion)\s*\)/.test(
+          contenido,
+        ) ||
+        /\.(save|insert|update|upsert|delete|remove|softDelete|softRemove)\(\s*(StockUbicacion|LoteUbicacion)\b/.test(
+          contenido,
+        );
       if (sospechoso) offenders.push(file);
     }
 

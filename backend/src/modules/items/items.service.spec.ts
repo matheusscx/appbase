@@ -6589,11 +6589,16 @@ describe('ItemsService', () => {
      * |---|---|---|
      * | 1 | `consumoDeLineas` | tipo del ítem pedido |
      * | 2 | el guard | `item_producto … FOR UPDATE OF ip` |
-     * | 3 | `comprometidoPorItem` | líneas de las cuentas abiertas |
-     * | 4 | `consumoDeLineas` (otra vez) | tipo de los ítems de esas líneas |
+     * | 3 | el guard | el saldo del local, en `stock_ubicacion` |
+     * | 4 | `comprometidoPorItem` | líneas de las cuentas abiertas |
+     * | 5 | `consumoDeLineas` (otra vez) | tipo de los ítems de esas líneas |
      *
-     * Que la 2 vaya antes que la 3 **es el contrato** (paso 3 del docblock):
+     * Que la 2 vaya antes que la 4 **es el contrato** (paso 3 del docblock):
      * leer el comprometido sin el lock tomado deja pasar dos pedidos del último.
+     *
+     * Y que la 3 vaya **después** de la 2 y en su propio statement también lo
+     * es: leer el saldo en el mismo `SELECT` que toma el lock lo devuelve viejo
+     * bajo READ COMMITTED (`docs/patterns/backend.md` §15).
      */
     const mockearPedidoDeProducto = (params: {
       stock: string | null;
@@ -6612,16 +6617,24 @@ describe('ItemsService', () => {
       dataSource.query.mockResolvedValueOnce(tipoRows);
       if (params.editando) dataSource.query.mockResolvedValueOnce(tipoRows);
       dataSource.query
+        // 2 — el lock. Ya no trae el saldo: solo la existencia de la fila de
+        // `item_producto` y la unidad.
         .mockResolvedValueOnce(
           params.conFilaDeStock === false
             ? []
             : [
                 {
                   item_id: PAPAS,
-                  stock: params.stock,
                   unidad_medida: 'unidad',
                 },
               ],
+        )
+        // 3 — el saldo, en su propio statement. `stock: null` es el producto
+        // que nunca se movió en el local: NO tiene fila, y eso es saldo cero.
+        .mockResolvedValueOnce(
+          params.stock === null
+            ? []
+            : [{ item_id: PAPAS, stock: params.stock }],
         )
         .mockResolvedValueOnce(
           params.comprometido === null
@@ -6691,10 +6704,10 @@ describe('ItemsService', () => {
      * Tarea 3a (bodegas y traslados): el saldo bajo el lock sale de
      * `stock_ubicacion` acotado al LOCAL del tenant, no de `item_producto.stock`
      * (el total). Este test simula exactamente el caso que la tarea existe para
-     * cerrar: un ítem sin fila de `stock_ubicacion` para el local —`stock: null`,
-     * el `LEFT JOIN` da NULL, no "no existe"— rebota aunque el TOTAL del tenant
-     * (guardado en una bodega, invisible para este mock) fuera generoso. El
-     * salón no puede pedir lo que no está en el salón.
+     * cerrar: un ítem sin fila de `stock_ubicacion` para el local —cero filas en
+     * el statement del saldo, que es saldo CERO y no "no existe"— rebota aunque
+     * el TOTAL del tenant (guardado en una bodega, invisible para este mock)
+     * fuera generoso. El salón no puede pedir lo que no está en el salón.
      */
     it('lee el stock del LOCAL, no el total: sin fila en stock_ubicacion ahí, rebota con "quedan 0"', async () => {
       mockearPedidoDeProducto({ stock: null, comprometido: null });
@@ -6707,20 +6720,28 @@ describe('ItemsService', () => {
         (c[0] as string).includes('FOR UPDATE OF ip'),
       ) as [string, unknown[]];
       const [sql, params] = lockCall;
-      // El saldo sale de `stock_ubicacion` acotado a `$3` (el local), y el
-      // `LEFT JOIN` es a propósito: sin fila ahí, el saldo es CERO, no
-      // "el ítem no existe" — con `JOIN` esta fila desaparecería del
-      // resultado y el guard la confundiría con un ítem borrado del catálogo.
-      expect(sql).toContain('LEFT JOIN stock_ubicacion su');
-      expect(sql).toContain('su.ubicacion_id = $3');
+      // El statement del lock NO trae el saldo, y esa ausencia es el arreglo de
+      // la sobreventa: leerlo acá lo devuelve viejo bajo READ COMMITTED
+      // (`docs/patterns/backend.md` §15). El lock sigue siendo sobre
+      // `item_producto` —su fila siempre existe, la de `stock_ubicacion` puede
+      // no existir todavía— y por eso no lleva la ubicación como parámetro.
+      expect(sql).not.toContain('stock_ubicacion');
       expect(sql).not.toContain('ip.stock');
-      // El lock sigue siendo sobre `item_producto`, y se queda ahí para
-      // siempre (Tarea 4, corrección del pre-flight 2026-09-06): su fila
-      // siempre existe, la de `stock_ubicacion` puede no existir todavía.
       expect(sql).toContain('FOR UPDATE OF ip');
-      // `$3` es el local que resuelve `UbicacionesService.localDe`, UNA vez
-      // por request (mockeado a `UBICACION_LOCAL_ID` en el `beforeEach`).
-      expect(params).toEqual([[PAPAS], TENANT, UBICACION_LOCAL_ID]);
+      expect(params).toEqual([[PAPAS], TENANT]);
+
+      // El saldo viaja en un statement APARTE, acotado al local que resuelve
+      // `UbicacionesService.localDe` (UNA vez por request, mockeado a
+      // `UBICACION_LOCAL_ID` en el `beforeEach`). Y va DESPUÉS del lock: al
+      // revés no serviría de nada.
+      const sqls = dataSource.query.mock.calls.map((c) => c[0] as string);
+      const iLock = sqls.findIndex((q) => q.includes('FOR UPDATE OF ip'));
+      const iSaldo = sqls.findIndex((q) => q.includes('FROM stock_ubicacion'));
+      expect(iSaldo).toBeGreaterThan(iLock);
+      expect(dataSource.query.mock.calls[iSaldo][1]).toEqual([
+        [PAPAS],
+        UBICACION_LOCAL_ID,
+      ]);
       expect(ubicacionesServiceMock.localDe).toHaveBeenCalledWith(TENANT);
     });
 
@@ -6881,11 +6902,11 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([
           { item_id: PAPAS, nombre: NOMBRE, unidad_medida: 'unidad' },
         ])
-        // 4) el lock sobre item_producto
-        .mockResolvedValueOnce([
-          { item_id: PAPAS, stock: '1', unidad_medida: 'unidad' },
-        ])
-        // 5) el comprometido: ninguna cuenta abierta
+        // 4) el lock sobre item_producto (sin saldo)
+        .mockResolvedValueOnce([{ item_id: PAPAS, unidad_medida: 'unidad' }])
+        // 5) el saldo del local, en su propio statement bajo el lock
+        .mockResolvedValueOnce([{ item_id: PAPAS, stock: '1' }])
+        // 6) el comprometido: ninguna cuenta abierta
         .mockResolvedValueOnce([]);
 
       await expect(
@@ -6952,15 +6973,15 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce(tipoReceta)
         .mockResolvedValueOnce(ingredientes)
         .mockResolvedValueOnce(extrasCat)
-        // 7) el lock: 3 físicas
-        .mockResolvedValueOnce([
-          { item_id: PAPAS, stock: '3', unidad_medida: 'unidad' },
-        ])
-        // 8) el comprometido: 2 ya tomadas (esta misma línea, base + extra)
+        // 7) el lock (sin saldo: el saldo va en su propio statement, abajo)
+        .mockResolvedValueOnce([{ item_id: PAPAS, unidad_medida: 'unidad' }])
+        // 8) el saldo del local: 3 físicas
+        .mockResolvedValueOnce([{ item_id: PAPAS, stock: '3' }])
+        // 9) el comprometido: 2 ya tomadas (esta misma línea, base + extra)
         .mockResolvedValueOnce([
           { item_id: PAPAS, cantidad: '2', personalizacion: null },
         ])
-        // 9) el tipo de lo comprometido
+        // 10) el tipo de lo comprometido
         .mockResolvedValueOnce([
           { item_id: PAPAS, tipo: 'producto', nombre: NOMBRE },
         ]);

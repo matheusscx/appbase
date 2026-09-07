@@ -18,6 +18,17 @@ import { Entity, PrimaryColumn, Column, Index } from 'typeorm';
  * puede no existir todavía para un ítem que nunca se movió en esa ubicación,
  * y `FOR UPDATE` sobre una fila inexistente no lockea nada.
  *
+ * ⛔ **Consecuencia de eso, y la regla que hay que respetar para escribir acá:
+ * esta tabla NO es la fila lockeada, así que su saldo se lee en un statement
+ * APARTE, emitido ya con el lock tomado — nunca en el mismo `SELECT … FOR
+ * UPDATE`.** Bajo READ COMMITTED, el snapshot del statement se toma antes de
+ * encolarse en el lock y al despertar Postgres re-evalúa solo la fila lockeada:
+ * leído por join en ese mismo statement, el saldo llega VIEJO. Y como la
+ * escritura es un upsert ABSOLUTO (`ON CONFLICT DO UPDATE SET stock =
+ * EXCLUDED.stock`, no `stock - $1`), un saldo viejo es un lost update: stock 10,
+ * dos salidas concurrentes de 6, pasan las dos. Red:
+ * `test/sobreventa-concurrente-ubicacion.e2e-spec.ts`.
+ *
  * El índice por `ubicacion_id` sirve al acceso por ubicación (el guard de
  * borrado de una bodega, y más adelante el recuento por bodega); la PK ya
  * cubre el acceso por ítem.

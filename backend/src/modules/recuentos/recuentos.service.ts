@@ -171,22 +171,33 @@ export class RecuentosService {
 
     return this.db.transaccion(async (manager: EntityManager) => {
       // Una sola query trae todos los items pedidos con su stock vigente —
-      // nunca una query por item. El recuento es un conteo físico, no un
-      // camino de venta: `s.total` es el total del tenant (sumado de
-      // `stock_ubicacion`), no el del local — mismo número que devolvía
-      // `item_producto.stock` antes de que existieran las bodegas, así que
-      // el recuento sigue congelando y comparando el mismo total de siempre.
+      // nunca una query por item.
+      //
+      // ⛔ El saldo se congela **acotado al local**, no sumando todas las
+      // ubicaciones, y tiene que ser la MISMA ubicación contra la que
+      // `aplicar` postea el delta (buscá `ubicacionId: ubicacionLocalId` en
+      // el `registrarMovimiento` de `aplicar`, más abajo en este archivo —
+      // sin número de línea a propósito: se desfasa con el primer edit).
+      // Congelar el total del tenant y descontar del local era inofensivo mientras todo el stock vivía en el
+      // local; con stock repartido en bodega se vuelve una salida fantasma: un
+      // producto con 40 en el local y 15 en la bodega se le muestra al operador
+      // como 55, el operador cuenta 40, y aplicar postea una salida de 15 del
+      // local sin que se haya movido nada.
+      //
+      // Esto es el tapón, no el diseño final: el recuento por ubicación
+      // —elegir en cuál se cuenta— llega en la Tarea 11 del plan de bodegas
+      // (`docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`). Hasta
+      // entonces el recuento es del local, que es donde el operador cuenta.
+      const ubicacionLocalId = await this.ubicacionesService.localDe(tenantId);
       const rows: ItemParaRecuentoRow[] = await manager.query(
-        `SELECT i.item_id, i.nombre, i.tipo, s.total AS stock, p.modo_inventario, p.unidad_medida
+        `SELECT i.item_id, i.nombre, i.tipo, COALESCE(su.stock, 0)::numeric(18,4) AS stock,
+                p.modo_inventario, p.unidad_medida
            FROM items i
            JOIN item_producto p ON p.item_id = i.item_id
-           LEFT JOIN LATERAL (
-             SELECT COALESCE(SUM(su.stock), 0)::numeric(18,4) AS total
-               FROM stock_ubicacion su
-              WHERE su.item_id = i.item_id
-           ) s ON true
+           LEFT JOIN stock_ubicacion su ON su.item_id = i.item_id
+                                       AND su.ubicacion_id = $3
           WHERE i.item_id = ANY($1) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-        [dto.itemIds, tenantId],
+        [dto.itemIds, tenantId, ubicacionLocalId],
       );
 
       const rowsPorItemId = new Map(rows.map((r) => [r.item_id, r]));

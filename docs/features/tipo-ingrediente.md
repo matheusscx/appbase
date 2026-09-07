@@ -84,7 +84,7 @@ El backend persiste `precio_base = '0'` aunque llegue `precioBase` distinto. Rec
 
 ### PATCH /items/:id
 
-Actualiza campos de `item_producto` (costo, unidad, stock directo) como producto cantidad. Si llega `precioBase`, se fuerza `0`. No permite cambiar `tipo` (`UpdateItemDto` no incluye `tipo`).
+Actualiza campos de `item_producto` (costo, unidad) como producto cantidad. El stock no se toca por acá: va por `PATCH /items/:id/stock`, que pasa por el kardex y escribe `stock_ubicacion`. Si llega `precioBase`, se fuerza `0`. No permite cambiar `tipo` (`UpdateItemDto` no incluye `tipo`).
 
 #### La unidad de un ingrediente referenciado no se cambia
 

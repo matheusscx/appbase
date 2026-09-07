@@ -95,6 +95,44 @@ describe('RecuentosService', () => {
       expect(insertLinea![1]).toEqual(expect.arrayContaining(['12400']));
     });
 
+    /**
+     * El congelado sale del saldo del LOCAL, no de la suma de todas las
+     * ubicaciones. Es lo que empareja el `stock_sistema` con la ubicación
+     * contra la que `aplicar` postea el delta: congelar el total y descontar
+     * del local convierte un conteo correcto en una salida que nadie hizo
+     * (`docs/features/recuento-inventario.md` § "El recuento es del local").
+     *
+     * La aserción va por PARÁMETRO y por ausencia de `SUM`, no por un
+     * `toContain` de texto suelto: sin ella, el mutante que restaura el
+     * `LEFT JOIN LATERAL (SELECT SUM(su.stock) …)` no lo caza ningún unitario
+     * —el único que miraba esta query afirmaba el valor insertado, que no
+     * cambia— y solo se ve en el e2e.
+     */
+    it('congela el saldo del LOCAL, no la suma de todas las ubicaciones', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            nombre: 'Producto test',
+            tipo: 'producto',
+            stock: '40',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'un',
+          },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ recuento_id: 'recuento-1' }])
+        .mockResolvedValueOnce(undefined);
+
+      await service.create(TENANT_ID, USUARIO_ID, { itemIds: [ITEM_ID] });
+
+      const [sql, params] = manager.query.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual([[ITEM_ID], TENANT_ID, UBICACION_LOCAL_ID]);
+      expect(sql).toContain('su.ubicacion_id = $3');
+      expect(sql).not.toMatch(/SUM\s*\(/i);
+      expect(ubicacionesService.localDe).toHaveBeenCalledWith(TENANT_ID);
+    });
+
     it('rechaza un producto en modo serie o lote', async () => {
       manager.query.mockResolvedValueOnce([
         {

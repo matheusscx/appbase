@@ -3861,7 +3861,16 @@ export class SeederService implements OnApplicationBootstrap {
         async (tipo) =>
           (
             await this.dataSource.query<{ ubicacion_id: string }[]>(
-              `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL`,
+              `SELECT ubicacion_id FROM ubicaciones
+                WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL
+                -- La más vieja, y con desempate estable. Sin ORDER BY, el
+                -- indice [0] de abajo depende del plan: hoy hay una sola bodega
+                -- por tenant y da igual, pero el día que haya dos el seed
+                -- elegiría una distinta entre corridas y los e2e que afirman
+                -- saldos por ubicación se volverían intermitentes. La bodega
+                -- del seed es siempre la primera que se creó.
+                ORDER BY creado_el, ubicacion_id
+                LIMIT 1`,
               [PARIS, tipo],
             )
           )[0].ubicacion_id,
@@ -3955,7 +3964,16 @@ export class SeederService implements OnApplicationBootstrap {
         async (tipo) =>
           (
             await this.dataSource.query<{ ubicacion_id: string }[]>(
-              `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL`,
+              `SELECT ubicacion_id FROM ubicaciones
+                WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL
+                -- La más vieja, y con desempate estable. Sin ORDER BY, el
+                -- indice [0] de abajo depende del plan: hoy hay una sola bodega
+                -- por tenant y da igual, pero el día que haya dos el seed
+                -- elegiría una distinta entre corridas y los e2e que afirman
+                -- saldos por ubicación se volverían intermitentes. La bodega
+                -- del seed es siempre la primera que se creó.
+                ORDER BY creado_el, ubicacion_id
+                LIMIT 1`,
               [PARIS, tipo],
             )
           )[0].ubicacion_id,
@@ -4116,7 +4134,16 @@ export class SeederService implements OnApplicationBootstrap {
         async (tipo) =>
           (
             await this.dataSource.query<{ ubicacion_id: string }[]>(
-              `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL`,
+              `SELECT ubicacion_id FROM ubicaciones
+                WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL
+                -- La más vieja, y con desempate estable. Sin ORDER BY, el
+                -- indice [0] de abajo depende del plan: hoy hay una sola bodega
+                -- por tenant y da igual, pero el día que haya dos el seed
+                -- elegiría una distinta entre corridas y los e2e que afirman
+                -- saldos por ubicación se volverían intermitentes. La bodega
+                -- del seed es siempre la primera que se creó.
+                ORDER BY creado_el, ubicacion_id
+                LIMIT 1`,
               [PARIS, tipo],
             )
           )[0].ubicacion_id,
@@ -4346,7 +4373,16 @@ export class SeederService implements OnApplicationBootstrap {
         async (tipo) =>
           (
             await this.dataSource.query<{ ubicacion_id: string }[]>(
-              `SELECT ubicacion_id FROM ubicaciones WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL`,
+              `SELECT ubicacion_id FROM ubicaciones
+                WHERE tenant_id = $1 AND tipo = $2 AND eliminado_el IS NULL
+                -- La más vieja, y con desempate estable. Sin ORDER BY, el
+                -- indice [0] de abajo depende del plan: hoy hay una sola bodega
+                -- por tenant y da igual, pero el día que haya dos el seed
+                -- elegiría una distinta entre corridas y los e2e que afirman
+                -- saldos por ubicación se volverían intermitentes. La bodega
+                -- del seed es siempre la primera que se creó.
+                ORDER BY creado_el, ubicacion_id
+                LIMIT 1`,
               [PARIS, tipo],
             )
           )[0].ubicacion_id,

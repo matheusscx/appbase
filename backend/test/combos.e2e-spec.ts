@@ -254,16 +254,29 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(movPan?.motivo).toBe('venta');
 
     // Stock resultante: papas 20-1=19, pan 10-1=9.
-    // `item_producto.stock` se borró en la Tarea 4 (bodegas y traslados):
-    // `stock_ubicacion` es el único dueño del saldo.
+    // El saldo **del local**, no la suma de todas las ubicaciones: con stock
+    // repartido en bodega (el seed lo reparte desde la Tarea 4), un total que
+    // no se mueve tapa exactamente la propiedad que este frente vino a fijar —
+    // que la venta descuenta del LOCAL. Un tenant tiene un solo local, así que
+    // el JOIN devuelve una fila.
     const stockRows: { stock: string }[] = await ds.query(
-      `SELECT COALESCE(SUM(stock), 0) AS stock FROM stock_ubicacion WHERE item_id = $1`,
+      `SELECT COALESCE(SUM(su.stock), 0) AS stock
+         FROM stock_ubicacion su
+         JOIN ubicaciones u ON u.ubicacion_id = su.ubicacion_id
+                           AND u.tipo = 'local'
+                           AND u.eliminado_el IS NULL
+        WHERE su.item_id = $1`,
       [papasId],
     );
     expect(stockRows[0]?.stock).toBe('19.0000');
 
     const stockPanRows: { stock: string }[] = await ds.query(
-      `SELECT COALESCE(SUM(stock), 0) AS stock FROM stock_ubicacion WHERE item_id = $1`,
+      `SELECT COALESCE(SUM(su.stock), 0) AS stock
+         FROM stock_ubicacion su
+         JOIN ubicaciones u ON u.ubicacion_id = su.ubicacion_id
+                           AND u.tipo = 'local'
+                           AND u.eliminado_el IS NULL
+        WHERE su.item_id = $1`,
       [panId],
     );
     expect(stockPanRows[0]?.stock).toBe('9.0000');

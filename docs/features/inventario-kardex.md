@@ -10,7 +10,7 @@
 
 ### What is it?
 
-Un sistema de trazabilidad auditable para todos los cambios de stock en items de tipo **producto**. Cada movimiento de inventario (entrada, salida, ajuste) queda registrado en un kardex (`movimientos_inventario`) con su tipo, motivo, cantidad, usuario y saldo resultante. El stock materializado (`item_producto.stock`) se mantiene sincronizado con el kardex mediante transacciones DB, garantizando consistencia.
+Un sistema de trazabilidad auditable para todos los cambios de stock en items de tipo **producto**. Cada movimiento de inventario (entrada, salida, ajuste) queda registrado en un kardex (`movimientos_inventario`) con su tipo, motivo, cantidad, usuario y saldo resultante. El saldo materializado (`stock_ubicacion`, una fila por ítem y ubicación) se mantiene sincronizado con el kardex mediante transacciones DB, garantizando consistencia.
 
 ### Why does it exist?
 
@@ -166,7 +166,11 @@ Response (400 — Stock insuficiente):
 **Constraints:**
 - Solo para items con `tipo = 'producto'`
 - `cantidad > 0`
-- Si `tipo = 'salida'`, valida que `item_producto.stock >= cantidad`
+- Si `tipo = 'salida'`, valida que el saldo del ítem **en la ubicación del movimiento**
+  (`stock_ubicacion.stock`, y cero si todavía no hay fila ahí) sea `>= cantidad`. Ese saldo se
+  lee en un statement **aparte**, emitido ya bajo el `FOR UPDATE` sobre `item_producto`:
+  leerlo en el mismo statement que toma el lock lo devuelve viejo y deja pasar dos salidas
+  concurrentes (`docs/patterns/backend.md` §15).
 
 La respuesta real (`{ stock, costoActual }`) siempre incluye `costoActual`: el
 `costo_actual` vigente después del movimiento (el promedio recién recalculado
@@ -349,7 +353,7 @@ opción de grupo y personalización igual que lo hace la venta
 - `movimientos_inventario` **sigue siendo la fuente de verdad de lo que se movió**, y el
   único evento que descuenta stock por una mesa sigue siendo el **cierre de la cuenta**, que
   genera la venta y su `salida`/`motivo='venta'`.
-- `item_producto.stock` sigue siendo el saldo materializado de esos movimientos. **Nunca
+- `stock_ubicacion` sigue siendo el saldo materializado de esos movimientos. **Nunca
   significa "lo que se puede pedir"**: eso viaja aparte, en `stockDisponible`, y es
   `stock − comprometido`. Lo devuelven `GET /items` (la fila del catálogo) y, desde el
   **2026-09-02**, también `GET /items/:id` en cada fila anidada con stock propio —ingredientes
@@ -426,7 +430,7 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
 - **`ajuste_costo` (`tipo='ajuste'`):** corrige `item_producto.costo_actual` directamente, sin
   pasar por el promedio ponderado — es para arreglar un costo mal cargado, no una compra.
   No mueve cantidad (`cantidad` debe ser `0`, `stock_resultante = stock_anterior`, no toca
-  `item_producto.stock` ni genera filas en `movimiento_inventario_detalle`) y requiere
+  `stock_ubicacion` ni genera filas en `movimiento_inventario_detalle`) y requiere
   `costoUnitario` (el costo nuevo). El kardex guarda ambos lados del ajuste: `costo_anterior`
   (el `costo_actual` vigente antes) y `costo_unitario` (el nuevo, que también pasa a ser el
   `costo_actual` de `item_producto`). Desde el **2026-08-28** el costo puede llegar en otra
@@ -467,8 +471,10 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
   [Conversión de Unidades — Conversión de Costo](./conversion-unidades.md#conversión-de-costo-junto-con-la-cantidad).
 
 **Regla del recuento: delta, no absoluto (`motivo='recuento'`):**
-- Al crear un recuento (`POST /recuentos`), cada línea congela `stock_sistema` = el stock
-  vigente en ese momento. Al cargar el conteo (`PATCH /recuentos/:id/lineas/:lineaId`), la
+- Al crear un recuento (`POST /recuentos`), cada línea congela `stock_sistema` = el saldo
+  vigente **del local** en ese momento — la misma ubicación contra la que se aplica el
+  delta. Congelar el total del tenant y aplicar sobre el local es una salida fantasma
+  (ver `recuento-inventario.md` § "El recuento es del local"). Al cargar el conteo (`PATCH /recuentos/:id/lineas/:lineaId`), la
   diferencia mostrada es `cantidad_contada − stock_sistema` — informativa, no lo que se aplica.
 - Al aplicar (`POST /recuentos/:id/aplicar`), lo que se mueve es
   `delta = cantidad_contada − stock_sistema` sobre el **stock vigente en ese momento**, no
@@ -564,9 +570,12 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
   
   - Valida que el item exista y sea de `tipo = 'producto'`
   - Si `tipo = 'salida'`, valida stock suficiente; si no, lanza error sin modificar
-  - Obtiene el stock actual con `FOR UPDATE` (evita carreras)
+  - Toma el `FOR UPDATE` sobre `item_producto` (el ancla: su fila siempre existe) y
+    **después**, en un statement aparte, lee el saldo de `stock_ubicacion` para esa ubicación
+    — ese orden es lo que evita la carrera (`docs/patterns/backend.md` §15)
   - Inserta en `movimientos_inventario` con snapshots `stock_anterior` / `stock_resultante`
-  - Actualiza `item_producto.stock` en la misma transacción
+  - Escribe el saldo en `stock_ubicacion` (upsert por `(item_id, ubicacion_id)`) en la misma
+    transacción
   - Retorna la entidad persistida
 
 - `async ajustarStock(itemId: string, tenantId: string, usuarioId: string, dto: AjusteStockDto): Promise<AjusteStockResponseDto>`
@@ -684,12 +693,12 @@ interface InventarioState {
   ↓
 [Service inicia transacción]
   ├→ Inserta en `items`
-  ├→ Inserta en `item_producto` (stock = 25)
+  ├→ Inserta en `item_producto` (sin saldo: el stock vive en `stock_ubicacion`)
   ├→ Si stock > 0, llama a InventarioService.registrarMovimiento(
   │   tipo='entrada', motivo='inventario_inicial', cantidad=25
   │ )
   │ ├→ Inserta en `movimientos_inventario` (stock_anterior=0, stock_resultante=25)
-  │ └→ Confirma `item_producto.stock = 25`
+  │ └→ Confirma `stock_ubicacion` del local = 25
   └→ Retorna item creado
   ↓
 [Frontend: recibe item, muestra toast "Producto creado"]
@@ -720,7 +729,7 @@ interface InventarioState {
   │ )
   │ ├→ Calcula stock_resultante = stock_anterior + 10
   │ ├→ Inserta movimiento en `movimientos_inventario`
-  │ └→ Actualiza `item_producto.stock`
+  │ └→ Actualiza `stock_ubicacion` de la ubicación del movimiento
   └→ Retorna AjusteStockResponseDto
   ↓
 [Frontend: recibe respuesta, muestra toast "Stock ajustado exitosamente"]

@@ -4726,6 +4726,20 @@ export class ItemsService {
    *    `stock_ubicacion` acotado al local (`stockVendible`), no
    *    `item_producto.stock` (el total del tenant) — ver el comentario de la
    *    query, más abajo, para el porqué.
+   * 2b. El saldo, en un **statement aparte**, emitido después del lock. No es
+   *    cosmética: leerlo dentro del `SELECT … FOR UPDATE` lo devuelve viejo
+   *    (`docs/patterns/backend.md` §15), y eso es sobreventa.
+   *
+   *    ⛔ **Precondición que el split introduce y que hay que sostener:
+   *    `validarStockAlPedir` tiene que llamarse DENTRO de una transacción.**
+   *    Mientras era un solo statement daba igual — el `FOR UPDATE` y la lectura
+   *    eran atómicos por construcción—; ahora son dos, y `Db.query` cae al pool
+   *    cuando no hay transacción en el contexto (ALS, ver `db.service.ts`): sin
+   *    transacción, el lock del statement 2 se suelta al terminar su
+   *    transacción implícita y el saldo del 2b se lee sin lock, o sea con el
+   *    guard apagado y en silencio. Hoy los dos llamadores
+   *    (`SalonesService.agregarLinea` y el de editar línea) abren
+   *    `db.transaccion`; el llamador que se agregue mañana también tiene que.
    * 3. Recién **después** del lock se lee el comprometido. El orden es
    *    load-bearing: bajo READ COMMITTED, la consulta que corre después de
    *    esperar el lock ve la línea que la otra transacción acababa de
@@ -4799,7 +4813,6 @@ export class ItemsService {
     const localId = await this.ubicacionesService.localDe(tenantId);
     const stockRows: {
       item_id: string;
-      stock: string | null;
       unidad_medida: string;
     }[] = await this.db.query(
       // `FOR UPDATE OF ip` y no `FOR UPDATE` a secas, por lo mismo que
@@ -4823,24 +4836,39 @@ export class ItemsService {
       // local, no un total materializado en `item_producto` (esa columna ya
       // no existe).
       //
-      // `LEFT JOIN`, no `JOIN`: un producto sin fila en esa ubicación tiene
-      // saldo CERO, no "no existe" — con `JOIN` desaparecería de `stockRows` y
-      // el tope de abajo (`if (!fila) throw ...`) lo confundiría con un ítem
-      // borrado del catálogo, dejando pasar un pedido que debería rebotar por
-      // "stock insuficiente".
-      `SELECT ip.item_id, su.stock, ip.unidad_medida
+      // ⛔ El saldo NO sale de acá. Leerlo en el MISMO statement que toma el
+      // lock lo devolvía viejo: bajo READ COMMITTED el snapshot se toma antes
+      // de encolarse, y al despertar Postgres re-evalúa (EvalPlanQual) solo la
+      // fila lockeada — `stock_ubicacion` ya no es esa fila. Va en un statement
+      // aparte, abajo, ya con el lock en la mano. Mismo arreglo y mismo porqué
+      // que el chokepoint (`inventario.service.ts`), ver
+      // `docs/patterns/backend.md` §15.
+      `SELECT ip.item_id, ip.unidad_medida
          FROM item_producto ip
-         JOIN items i             ON i.item_id  = ip.item_id
-         LEFT JOIN stock_ubicacion su ON su.item_id = ip.item_id
-                                     AND su.ubicacion_id = $3
+         JOIN items i ON i.item_id = ip.item_id
         WHERE ip.item_id = ANY($1::uuid[])
           AND i.tenant_id = $2
           AND i.eliminado_el IS NULL
         ORDER BY ip.item_id
         FOR UPDATE OF ip`,
-      [ids, tenantId, localId],
+      [ids, tenantId],
     );
     const stockPorItem = new Map(stockRows.map((r) => [r.item_id, r]));
+
+    // El saldo del local, ya bajo el lock de arriba: este statement toma
+    // snapshot nuevo y ve lo que commiteó quien acaba de soltarlo.
+    //
+    // Sin fila es saldo CERO, no "no existe" — un producto que nunca se movió
+    // en el local todavía no tiene fila—, y ese cero se aplica abajo con
+    // `?? '0'`. Lo que sí distingue "no existe" es la ausencia en `stockRows`
+    // (el tope `if (!fila) throw ...`), que es otra cosa: ítem borrado del
+    // catálogo.
+    const saldoRows: { item_id: string; stock: string }[] = await this.db.query(
+      `SELECT item_id, stock FROM stock_ubicacion
+        WHERE item_id = ANY($1::uuid[]) AND ubicacion_id = $2`,
+      [ids, localId],
+    );
+    const saldoPorItem = new Map(saldoRows.map((r) => [r.item_id, r.stock]));
 
     // ⚠️ Esto corre **sosteniendo el lock de arriba** —tiene que ser así, ver
     // el paso 3 del docblock—, así que su costo es tiempo de lock sobre los
@@ -4876,7 +4904,7 @@ export class ItemsService {
           `No se puede verificar el stock de "${c.nombre}": el ítem ya no está disponible en el catálogo`,
         );
       }
-      const restante = new Decimal(fila.stock ?? '0').minus(
+      const restante = new Decimal(saldoPorItem.get(itemId) ?? '0').minus(
         comprometido.get(itemId) ?? 0,
       );
       if (neto.greaterThan(restante)) {

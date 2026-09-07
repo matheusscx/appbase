@@ -18,7 +18,7 @@ Extiende el kardex de inventario con dos modos adicionales por producto:
 
 ### Why does it exist?
 
-El modelo original con un único número en `item_producto.stock` no permitía:
+El modelo original con un único número por ítem (`item_producto.stock`, columna que se borró en 2026-09-06 cuando el saldo pasó a `stock_ubicacion`) no permitía:
 - Rastrear celulares por IMEI (devoluciones, garantías, robo).
 - Controlar vencimiento de productos farmacéuticos o alimenticios por lote.
 
@@ -198,7 +198,7 @@ Response (200):
 - `moverCantidad()` — comportamiento original
 - `moverSerie()` — crea/consume `item_unidad`
 - `moverLote()` — crea/actualiza `item_lote`
-- `recalcularStockSerie()` / `recalcularStockLote()` — actualiza `item_producto.stock` dentro de la transacción
+- `recalcularStockSerie()` / `recalcularStockLote()` — actualiza el saldo de `stock_ubicacion` para la ubicación del movimiento, dentro de la transacción
 
 ---
 

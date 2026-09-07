@@ -927,8 +927,11 @@ bandeja de desfases".
 `InventarioService.registrarMovimiento` (el chokepoint de todo movimiento de stock) y
 `ItemsService.validarStockAlPedir` toman los dos el mismo `SELECT … FOR UPDATE OF ip`
 sobre `item_producto`, aunque el saldo que leen bajo ese lock salga de
-`stock_ubicacion` (acotado a la ubicación del movimiento, con `LEFT JOIN` +
-`COALESCE(su.stock, 0)`: sin fila ahí el saldo es CERO, no "no existe").
+`stock_ubicacion`, acotado a la ubicación del movimiento.
+
+⛔ **Y el saldo se lee en un statement APARTE, emitido ya con el lock en la mano.**
+Nunca en el mismo `SELECT` que toma el `FOR UPDATE`. No es estilo: es la diferencia
+entre topear la sobreventa y no topearla, y se pagó una vez.
 
 **Por qué el lock no se muda a `stock_ubicacion`.** Una fila de `stock_ubicacion`
 puede no existir todavía —un producto que nunca se movió en esa ubicación— y
@@ -938,6 +941,28 @@ concurrentes del mismo ítem en la misma ubicación correrían en carrera. La fi
 el ancla que puede tomarse siempre. El upsert de escritura (`INSERT … ON CONFLICT
 (item_id, ubicacion_id) DO UPDATE`) es el que crea la fila de `stock_ubicacion` la
 primera vez que el ítem se mueve ahí.
+
+**Por qué el saldo NO puede leerse en el statement del lock.** Bajo READ COMMITTED, el
+snapshot de un statement se toma **antes** de que ese statement se encole en el lock.
+Cuando despierta, Postgres re-evalúa la fila lockeada (EvalPlanQual) — **solo esa**, no
+las demás filas del join. Mientras el saldo vivía en `item_producto.stock`, o sea en la
+fila lockeada, se refrescaba solo y nadie tenía que saber esto. Desde que vive en otra
+tabla, un `LEFT JOIN stock_ubicacion` dentro del `SELECT … FOR UPDATE` devuelve el saldo
+**anterior** a lo que commiteó la transacción que acaba de soltar el lock. Medido: dos
+salidas concurrentes de 6 sobre un stock de 10 **pasaban las dos** —el guard
+`stockResultante < 0` nunca dispara— y el upsert de escritura, que escribe el saldo
+absoluto y no `stock - $1`, dejaba 4 como si hubiera habido una sola salida. Toca además
+el CPP (`calcularCostoPromedio` mezclaría una cantidad vieja con un costo fresco) y el
+kardex (`stock_anterior` / `stock_resultante` mentirosos).
+
+El segundo statement, emitido con el lock ya tomado, abre snapshot nuevo y ve lo
+commiteado. Red: `backend/test/sobreventa-concurrente-ubicacion.e2e-spec.ts`.
+
+⚠️ `FOR UPDATE OF ip, su` **no es la alternativa**: es ilegal sobre el lado nullable de
+un outer join (`FOR UPDATE cannot be applied to the nullable side of an outer join`),
+medido. Y sin el `LEFT JOIN` el ítem sin fila en esa ubicación desaparecería del
+resultado. Partir en dos statements resuelve las dos cosas de una: la ausencia de fila en
+el primero es "no es producto / es de otro tenant", y en el segundo es saldo **cero**.
 
 **La consecuencia buena, para la Tarea 9 (traslados).** Como el ancla es una fila por
 `item_id` —no por `(item_id, ubicacion_id)`—, un traslado que mueve un ítem entre dos

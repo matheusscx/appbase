@@ -641,6 +641,13 @@ CREATE TABLE "items" (
 -- fila siempre existe, la de "stock_ubicacion" puede no existir todavía para
 -- una ubicación en la que el ítem nunca se movió, y `FOR UPDATE` sobre una
 -- fila inexistente no lockea nada (docs/patterns/backend.md §15).
+--
+-- ⛔ La contracara: el saldo YA NO ESTÁ en la fila lockeada. Bajo READ
+-- COMMITTED, cuando una transacción despierta de un `FOR UPDATE` Postgres
+-- re-evalúa solo la fila lockeada, así que leer "stock_ubicacion" en el MISMO
+-- statement que toma el lock devuelve el saldo VIEJO — y con el upsert
+-- absoluto de "stock_ubicacion" eso es sobreventa. El saldo se lee SIEMPRE en
+-- un statement aparte, ya con el lock tomado.
 CREATE TABLE "item_producto" (
   "item_id"           UUID          PRIMARY KEY REFERENCES "items" ("item_id"),
   "unidad_medida"     TEXT          NOT NULL DEFAULT 'unidad',
@@ -663,8 +670,10 @@ CREATE TABLE "ubicaciones" (
   "activo"         BOOLEAN NOT NULL DEFAULT true,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID    REFERENCES usuarios("usuario_id")
 );
+CREATE INDEX "idx_ubicaciones_tenant" ON "ubicaciones" ("tenant_id");
 
 -- Saldo de un ítem en una ubicación: único dueño del stock del sistema desde
 -- la Tarea 4. El chokepoint (`InventarioService.registrarMovimiento`) es el

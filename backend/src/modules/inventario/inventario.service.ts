@@ -154,35 +154,39 @@ export class InventarioService {
     // la fila de `item_producto` existe desde que el ítem es un producto, la de
     // `stock_ubicacion` puede no existir todavía (un producto que nunca se movió en
     // esa ubicación), y `FOR UPDATE` sobre una fila inexistente no lockea nada.
+    // La contracara de anclar acá es que el saldo YA NO VIVE en la fila lockeada:
+    // por eso se lee en un statement aparte, y no en éste (ver el bloque ⛔ de
+    // más abajo).
     //
     // No filtra `i.eliminado_el IS NULL` a propósito, y ahora con una regla
     // explícita detrás en vez de una omisión: filtrarlo haría que anular una
     // venta de un ítem borrado después dejara de reponer. Lo que decide qué
     // pasa sobre un eliminado es el guard de abajo, no la ausencia del filtro.
     //
-    // `LEFT JOIN stock_ubicacion`, no `JOIN`: bajo el lock ya tomado sobre
-    // `item_producto`, el saldo que se lee es el de la ubicación del movimiento —
-    // y un producto que nunca se movió ahí no tiene fila todavía. Sin fila es
-    // saldo CERO, no "no existe": con `JOIN` la fila desaparecería de
-    // `productoRows` y el guard de abajo la confundiría con un ítem sin control
-    // de stock. El upsert de más abajo (`ON CONFLICT DO UPDATE`) crea la fila la
-    // primera vez que el ítem se mueve en esa ubicación.
+    // ⛔ El saldo NO se lee acá, y no es una omisión: es el arreglo de la
+    // sobreventa que este mismo statement causaba. Bajo READ COMMITTED, el
+    // snapshot del statement se toma ANTES de encolarse en el lock; al
+    // despertar, Postgres re-evalúa (EvalPlanQual) **solo la fila lockeada**,
+    // no las demás del join. Mientras el saldo vivía en `item_producto` se
+    // refrescaba solo; leído por `LEFT JOIN` desde `stock_ubicacion` en este
+    // statement llegaba VIEJO — y con el `ON CONFLICT DO UPDATE` de más abajo,
+    // que escribe el saldo absoluto, eso es un lost update: stock 10, dos
+    // salidas concurrentes de 6, pasaban las dos.
+    // Ver `docs/patterns/backend.md` §15 y
+    // `test/sobreventa-concurrente-ubicacion.e2e-spec.ts`.
     const productoRows: {
-      stock: string;
       modo_inventario: string;
       costo_actual: string | null;
       item_nombre: string;
       item_eliminado_el: Date | null;
     }[] = await manager.query(
-      `SELECT COALESCE(su.stock, 0) AS stock, ip.modo_inventario, ip.costo_actual,
+      `SELECT ip.modo_inventario, ip.costo_actual,
               i.nombre AS item_nombre, i.eliminado_el AS item_eliminado_el
          FROM item_producto ip
          JOIN items i ON i.item_id = ip.item_id
-         LEFT JOIN stock_ubicacion su
-                ON su.item_id = ip.item_id AND su.ubicacion_id = $3
         WHERE ip.item_id = $1 AND i.tenant_id = $2
         FOR UPDATE OF ip`,
-      [params.itemId, params.tenantId, params.ubicacionId],
+      [params.itemId, params.tenantId],
     );
     // Mismo mensaje para "no existe", "no es producto" y "es de otro tenant": un id
     // ajeno tiene que ser indistinguible de uno inexistente, o la respuesta se vuelve
@@ -206,8 +210,24 @@ export class InventarioService {
       );
     }
 
+    // El saldo, en un statement APARTE y ya con el lock en la mano: éste toma
+    // snapshot nuevo, así que ve lo que commiteó la transacción que acaba de
+    // soltar el lock de arriba. Es la única lectura de saldo que sirve para
+    // decidir una salida.
+    //
+    // De paso separa los dos casos que el `LEFT JOIN` + `COALESCE` mezclaba:
+    // "no es producto / es de otro tenant" son cero filas del statement de
+    // arriba (el guard genérico), y "nunca se movió en esta ubicación" son cero
+    // filas de éste — saldo CERO, no error. El upsert de más abajo crea la fila
+    // la primera vez que el ítem se mueve ahí.
+    const saldoRows: { stock: string }[] = await manager.query(
+      `SELECT stock FROM stock_ubicacion
+        WHERE item_id = $1 AND ubicacion_id = $2`,
+      [params.itemId, params.ubicacionId],
+    );
+
     const modo = productoRows[0].modo_inventario;
-    const stockAnterior = new Decimal(productoRows[0].stock);
+    const stockAnterior = new Decimal(saldoRows[0]?.stock ?? 0);
     const cantidad = new Decimal(params.cantidad);
 
     // El ajuste de costo no mueve cantidad, mueve valor: es el único motivo

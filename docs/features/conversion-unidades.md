@@ -197,7 +197,7 @@ redondeada a 4 decimales (ROUND_HALF_UP).
 3. `factor_base <= 0` → `BadRequest` ("El factor de conversión de la unidad debe ser mayor a 0")
 4. Cantidad convertida que redondea a 0 (cuando original > 0) → `BadRequest` ("La cantidad convertida es menor a la precisión de stock")
 
-**Precisión — decisión explícita:** La escala de `item_producto.stock` y `movimientos_inventario.cantidad` es NUMERIC(18,4), así que 4 decimales es el límite. Convertir 1 g a kg da 0.0010, exacto. Pero cantidades chicas en magnitudes con salto de 1000 pueden perder resolución (ej: 0.00005 kg → 0.0001). Se acepta: el límite es preexistente, no lo introduce la conversión.
+**Precisión — decisión explícita:** La escala de `stock_ubicacion.stock` y `movimientos_inventario.cantidad` es NUMERIC(18,4), así que 4 decimales es el límite. Convertir 1 g a kg da 0.0010, exacto. Pero cantidades chicas en magnitudes con salto de 1000 pueden perder resolución (ej: 0.00005 kg → 0.0001). Se acepta: el límite es preexistente, no lo introduce la conversión.
 
 ### Validación de Unidad en Crear/Editar Item
 
@@ -345,7 +345,7 @@ La función `UNIDADES_FRACCIONARIAS` deja de ser un set hardcodeado (`{kg, l, m}
   ↓ POST /api/items
 [Backend: ItemsService.create]
   ├→ Valida 'kg' contra el catálogo (✓ existe, magnitud='masa')
-  ├→ Inserta item + item_producto (unidad_medida='kg', stock=0)
+  ├→ Inserta item + item_producto (unidad_medida='kg'; el saldo va a stock_ubicacion)
   └→ Si stock_inicial > 0, registra movimiento 'inventario_inicial'
   ↓
 [Usuario en /configuracion/items: hace clic en "Ajustar stock"]
@@ -365,7 +365,7 @@ La función `UNIDADES_FRACCIONARIAS` deja de ser un set hardcodeado (`{kg, l, m}
   │ └→ Retornar "0.5000"
   ├→ Pasar cantidad="0.5000" a InventarioService.registrarMovimiento
   │ ├→ Inserta en movimientos_inventario (cantidad=0.5000, en unidad base)
-  │ └→ Actualiza item_producto.stock = 0.5000
+  │ └→ Actualiza stock_ubicacion.stock = 0.5000 (ubicación del movimiento)
   └→ Retorna { stock: "0.5000" }
   ↓
 [Frontend: cierra modal, actualiza saldo (ahora 0.5000 kg visible)]

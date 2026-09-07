@@ -69,8 +69,20 @@ Al aplicar:                    stock_final = stock_vigente + delta
 El conteo descubre una diferencia real — un faltante o un sobrante — que sigue siendo
 real **independientemente** de lo que se haya vendido después. `stock_sistema` se congela
 en la línea al crear la sesión (el momento del conteo); al aplicar, el delta se suma sobre
-el stock **vigente** en ese instante (leído bajo `FOR UPDATE` dentro de
-`InventarioService.registrarMovimiento`), no sobre el valor contado.
+el stock **vigente** en ese instante (leído por `InventarioService.registrarMovimiento`
+bajo el `FOR UPDATE` que ese método toma sobre `item_producto`), no sobre el valor contado.
+
+### El recuento es del local (hasta la Tarea 11 de bodegas)
+
+`stock_sistema` se congela contra el saldo del **local** del tenant, no contra la suma de
+todas sus ubicaciones, porque el delta se aplica contra el local: los dos números tienen
+que hablar de la misma ubicación. Congelar el total y descontar del local convierte un
+conteo correcto en una salida que nadie hizo — un producto con 40 en el local y 15 en la
+bodega se muestra como 55, el operador cuenta 40, y aplicar postea una salida de 15.
+
+Es un tapón, no el diseño final: elegir **en qué ubicación** se cuenta llega en la Tarea 11
+del plan de bodegas (`docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`). Hasta
+entonces el recuento es el del salón, que es donde el operador cuenta.
 
 Odoo setea el stock a un absoluto porque asume que la ubicación se bloquea durante el
 conteo (nadie vende de ahí mientras se cuenta). Un POS de venta física no puede darse ese
