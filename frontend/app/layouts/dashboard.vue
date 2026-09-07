@@ -132,6 +132,11 @@ const items = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-clipboard-check',
       to: '/inventario/recuentos',
     })
+    base.push({
+      label: 'Traslados',
+      icon: 'i-lucide-arrow-left-right',
+      to: '/inventario/traslados',
+    })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     base.push({
