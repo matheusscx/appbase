@@ -219,9 +219,12 @@ Lo mínimo para decidir si hay que leer más. El detalle vive en un solo lugar.
   `'virtual'` (una por tenant, siempre abierta).
   → Antes de tocar apertura/cierre o cuadratura: `docs/features/gestion-cajas.md`.
 - **Inventario** — solo `tipo='producto'` tiene stock. `movimientos_inventario` es la
-  fuente de verdad auditable; `item_producto.stock` es saldo materializado. Movimiento
-  y saldo en una transacción. `modo_inventario` es inmutable con movimientos existentes.
-  → Antes de tocar stock: `docs/features/inventario-serializado.md` y **ADR-007**.
+  fuente de verdad auditable; el saldo vive en `stock_ubicacion`, por `(ítem, ubicación)`
+  — no hay una columna única por tenant. Toda venta descuenta del **local**; una bodega
+  guarda stock y nunca vende. Movimiento y saldo en una transacción. `modo_inventario` es
+  inmutable con movimientos existentes.
+  → Antes de tocar stock: `docs/features/inventario-serializado.md`,
+  `docs/features/bodegas-y-traslados.md` y **ADR-007**.
 - **Pagos** — múltiples pagos por venta; `vuelto` solo si `permite_vuelto = true`.
   → Detalle: `docs/features/pagos.md`.
 - **BD** — timestamps `creado_el`/`actualizado_el`, PKs UUID, items como modelo base +

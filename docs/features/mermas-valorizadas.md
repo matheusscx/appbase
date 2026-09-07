@@ -34,7 +34,6 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 
 **NOT included (future):**
 - Reporte fiscal/DTE de mermas.
-- Multi-bodega / ubicaciones.
 - Merma automática por rendimientos de recetas.
 - **Reporte de mermas** (agregación, ej. "cuánto se perdió este mes"): no existe hoy. Cuando se construya, tiene que mostrar cuántas mermas quedaron sin valorizar — ver `docs/agent/pendientes.md`.
 - **Valorización manual posterior**: descartada a propósito, no diferida — es la misma razón que congela el precio de una venta ya emitida.
@@ -80,12 +79,17 @@ Authorization: Bearer <token>
 Request (CreateMermaDto):
 {
   "itemId": "<uuid>",
+  "ubicacionId": "<uuid>",
   "cantidad": "250",
   "causaMermaId": "<uuid>",
   "unidadCodigo": "g",
   "comentario": "Lote vencido"
 }
 ```
+
+**`ubicacionId` es obligatorio** (desde [bodegas y traslados](./bodegas-y-traslados.md)): se
+merma lo que se pudrió **ahí**, y sin default silencioso — uno metería la salida en el local
+cada vez que la pantalla se olvide de mandarlo. `400` si falta o es de otro tenant.
 
 **Reglas de costo:**
 - **El costo no se tipea ni se acepta en el request** — `CreateMermaDto` no tiene ningún campo de costo. El endpoint valoriza con `item_producto.costo_actual` vigente al momento de mermar.

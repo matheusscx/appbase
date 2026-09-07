@@ -153,6 +153,43 @@ sub-entradas ya estaba arreglada **antes de que se pudiera leer**. No es que la 
 vieja: la entrada nació al mismo tiempo que su arreglo, en commits del mismo día. Un
 *"citas verificadas el ..."* con la fecha de hoy no garantiza nada — abrir el código igual.
 
+### Los cuatro minors que dejó el frente de bodegas y traslados (cerrado 2026-09-07)
+
+- [ ] **El reintento de deadlock de `RecuentosService.aplicar` no mira `driverError.code`**
+  (`backend/src/modules/recuentos/recuentos.service.ts:601-616`) — el `catch` solo revisa
+  `error instanceof QueryFailedError && (error as { code? }).code === '40P01'`. Los demás
+  caminos que reintentan un deadlock (`traslados.service.ts`, `salones.service.ts`,
+  `ventas.service.ts`) comparten `esDeadlock` (`backend/src/common/db/reintento-deadlock.ts`),
+  que mira **las dos** formas en que el código puede llegar (`error.code` **o**
+  `error.driverError.code`, según cuál capa lo reenvuelva). El de recuentos es previo a ese
+  helper y quedó afuera cuando se extrajo — corregirlo es cambiar la condición del `catch` por
+  `esDeadlock(error)`, nada más.
+
+- [ ] **`PATCH /items/:id/stock` (ajuste manual de stock) es la única de las cuatro operaciones
+  con `ubicacionId` sin e2e HTTP de "requerido → 400" ni "de otro tenant → 404"** — compra,
+  merma (`test/mermas.e2e-spec.ts:459,471`) y recuento (`test/recuentos.e2e-spec.ts:1609`) sí
+  los tienen; el ajuste solo está probado con el service mockeado
+  (`backend/src/modules/items/items.service.spec.ts:3429`). Falta el par de casos e2e para el
+  mismo endpoint (`AjusteStockDto.ubicacionId`, `backend/src/modules/items/dto/ajuste-stock.dto.ts`).
+
+- [ ] **`patchLineaCantidad` es una tercera puerta a medias al rechazo enriquecido por stock**
+  (`frontend/app/pages/salones/index.vue`) — cuando agregar un producto o una receta rebota por
+  falta de stock, los dos caminos llaman a `mostrarRechazoPorStock({ error, fallback,
+  puedeTrasladar: puedeTrasladar.value })`, que ofrece el traslado precargado a un clic a quien
+  tiene `Inventario/Crear`. El `catch` de `patchLineaCantidad` (editar la cantidad de una línea
+  ya en la cuenta) solo arma el toast con `apiErrorMsg(e, 'Error al actualizar la cantidad')`:
+  el mensaje llega enriquecido igual (lo arma el backend), pero sin el botón de traslado que
+  las otras dos puertas sí tienen.
+
+- [ ] **El filtro de "lote sin disponibilidad" compara strings en vez de `Decimal`**
+  (`frontend/app/pages/configuracion/items.vue:1429`, `loteSinDisponibilidad`) —
+  `l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000'` solo reconoce esos dos
+  literales exactos. `cantidadDisponible` sale de `SUM(lu.cantidad)` (`items.service.ts:3132`,
+  `COALESCE(..., 0)`), así que cualquier otra representación de cero que Postgres/Node
+  serialicen distinto —o un saldo negativo, que no debería existir pero el filtro tampoco lo
+  cazaría— pasa el filtro sin marcarse. El resto del frontend usa `new Decimal(x).isZero()`
+  para esta comparación; acá no.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
@@ -931,6 +968,41 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   ⛔ **Toca el motor de cálculo de precios**, así que si la medición dice que hay que arreglarlo,
   va solo y con el sistema quieto.
 
+- [ ] **Por qué dos traslados cruzados no hacen deadlock se apoya en el plan de Postgres, no en
+  una garantía del código propio — y la re-medición no reprodujo lo que el test original medía**
+  (backend, frente de bodegas y traslados, **medido y reportado al owner el 2026-09-07**) —
+  `test/traslados.e2e-spec.ts`, caso *"dos traslados cruzados con los mismos dos productos no
+  hacen deadlock"* (el docblock que lo precede trae la medición completa, línea por línea).
+  **Lo que el mutante "borrar solo el `ORDER BY`" muestra:** con el fixture del caso (2 ítems, y
+  también probado con 6 y 12) el mutante **sobrevive** porque el `.sort()` del lado cliente
+  (`TrasladosService.crearEnTransaccion`) ya arma `itemIdsOrdenados` en el mismo orden para las
+  dos transacciones **antes** de tocar la base — la variación que ese mutante necesitaría para
+  importar ya está absorbida ahí, así que ningún tamaño de fixture lo va a matar mientras el
+  `.sort()` siga. El `ORDER BY ip.item_id` del `SELECT … FOR UPDATE OF ip` se queda de todos
+  modos, porque cierra el caso general (arrays de tamaño distinto entre las dos transacciones),
+  no el de este fixture.
+  **Lo que sí mata el mutante real** —borrar el `.sort()` **y** el `ORDER BY` juntos, o sea que
+  el orden de bloqueo vuelva a salir del body— es `deadlocks: 0 → 1`, medido el 2026-09-07. Al
+  re-medir esa misma aserción tres corridas limpias después (`reset-db.sh` antes de cada una,
+  mismo fixture de 2 ítems), **no reprodujo**: dio `0 → 0` las tres veces. Lectura probable y
+  **no confirmada**: el orden de adquisición lo daría el plan de `WHERE item_id = ANY($1)` sobre
+  el índice de la PK, que devuelve las filas en orden de índice sin importar el orden del array
+  — o sea que la garantía de hoy se apoyaría en el plan que arma Postgres, no en una promesa que
+  el código propio sostenga. No se tocó la aserción ni el análisis del docblock porque no hay
+  certeza de qué cambió entre las dos mediciones (¿plan distinto por el tamaño de la tabla en
+  cada momento? ¿build stale del backend en la primera medición?); se reportó al owner en vez
+  de reescribir un "medido" ajeno sin confirmar.
+  **La conducta de hoy es segura** —el reintento ante `40P01` (`MAX_REINTENTOS_DEADLOCK`)
+  cubre el caso aunque el deadlock ocurra— y lo que falta es la certeza de **por qué**, no un
+  arreglo: si la garantía es del plan y no del código, un cambio de versión de Postgres o de
+  volumen de datos podría correrla sin que ningún test lo avise.
+
+- [ ] **`encargado.salon@paris.cl` no ve ningún salón pese a tener los permisos sembrados**
+  (hallazgo ajeno, encontrado de paso durante el cierre del frente de bodegas y traslados,
+  **no investigado, 2026-09-06/07**) — la cuenta existe en el seeder
+  (`backend/src/modules/seeder/seeder.service.ts:1256`). No se abrió más: no es de este frente
+  y no hay diagnóstico todavía de si es un hueco de permisos, de seed, o de la pantalla.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -1579,49 +1651,6 @@ en efectivo de estrellar suites ajenas— y una cobertura que se perdía en `mer
 crédito es **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`,
 ADR-010). ✅ **Ese frente se abrió y se cerró el 2026-09-04**: la NC descompone su monto en
 líneas, neto e IVA (`7a1e934d`) → [`resueltos.md`](resueltos.md).
-
-- [ ] **Bodegas: el stock deja de ser un escalar por tenant** ✅ *(decidido por el owner el
-  2026-09-03: bodega primero, sucursal después; antes era la pregunta 4 de la § 4)* —
-  Relevamiento y fuentes en
-  [`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
-  **Qué es una bodega, con el corte de Bsale:** una ubicación que **guarda stock y no vende**.
-  Ese es el criterio que la separa de una sucursal, y es también el que la mantiene **fuera de
-  lo fiscal**: una bodega no se declara al SII, no tiene código y no aparece en ningún
-  documento.
-  **Lo que cambia:** `item_producto.stock` es hoy **una columna, una fila por ítem** — o sea una
-  sola bolsa por tenant. Pasa a ser stock **por ubicación**, y los movimientos de
-  `movimientos_inventario` ganan **origen y destino**.
-  ⛔ **Toca `movimientos_inventario`, así que por `CLAUDE.md` se consulta antes de escribir.**
-  ## El traslado lleva guía interna, como la NC ✅ *(owner, 2026-09-03)*
-
-  El traslado genera un documento **interno** —sin emisión al SII— **con el mismo criterio que
-  la nota de crédito**: se congela el hecho, se difiere lo que solo transmite (ADR-010). La
-  integración con el SII entra después.
-
-  **Lo que hay que capturar desde el primer día**: **origen, destino y motivo**. Un traslado
-  guardado como un ajuste sin origen ni destino **no se reconstruye** — y a diferencia del caso
-  de sucursal, acá el dato **sí se pierde de verdad**, porque hay dos lugares posibles desde el
-  día uno.
-
-  **Cuatro cosas para el que lo construya:**
-
-  1. ⛔ **La guía interna NO hace legal el traslado.** El documento chileno es el **DTE 52**, y
-     es *"exigida por el SII y Carabineros durante controles en carretera"* **[SECUNDARIA]**:
-     tiene que viajar **con la mercadería**. Nuestro registro interno no la reemplaza — el
-     tenant la emite por fuera, igual que hoy hace con las boletas. **No confundir "lo tenemos
-     registrado" con "está en regla".**
-  2. ⚠️ **No repetir el bug que se arregló el 2026-09-03.** Lo que marque "este es el documento
-     de traslado" tiene que **resolverse por país**, como ahora hace `es_nota_credito`, y no
-     ser una constante apuntando a la fila chilena. Ese error ya se cometió una vez con la NC
-     ([`resueltos.md`](resueltos.md)).
-  3. **Un traslado NO es una venta.** La NC es una fila de `ventas` con su `tipo_documento_id`;
-     un traslado es un movimiento de inventario. La analogía es de **criterio**, no de tabla:
-     los campos del documento necesitan su propio lugar, no colgarse de `ventas`.
-  4. **El motivo es un campo tipado, no texto libre.** El SII distingue tipos de traslado
-     —venta, ventas por efectuar, consignaciones, entregas gratuitas, **traslados internos**—,
-     así que conviene nacer con esa forma en vez de migrar después.
-  ℹ️ **Sucursal queda explícitamente afuera** y sigue sin decidirse. Si algún día entra, trae su
-  propia consecuencia de ADR-010: de qué sucursal salió cada venta es un hecho fiscal.
 
 - [ ] **Descuentos: un flag de acumulación por regla** ✅ *(decidido por el owner el
   2026-09-03; antes era "¿en qué orden se apilan?" en la § 4)* —

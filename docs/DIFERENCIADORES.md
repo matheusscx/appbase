@@ -286,8 +286,10 @@ caja en conciliación ocupa cajón y cajero—, no la arquitectura.
 electrónica (DTE 52)** aunque no haya venta — el traslado interno usa código 5 y el motivo
 debe declararse. **Ningún POS internacional lo contempla**; es una obligación local que
 convierte un movimiento interno en un documento tributario.
-**Estado del producto:** hoy **no hay multi-bodega ni traslados**, así que esto es una
-oportunidad futura, no una ventaja actual.
+**Estado del producto:** desde el 2026-09-06 hay multi-bodega y traslados
+(`docs/features/bodegas-y-traslados.md`), pero como **documento interno**: el traslado
+registra origen, destino y motivo, y no emite nada. La oportunidad sigue siendo la emisión
+del DTE 52 en sí — hoy el tenant lo emite por fuera, igual que hoy hace con las boletas.
 **Evidencia:** [investigación 2026-07-26](agent/investigaciones/2026-07-26-inventario.md) ·
 Resolución 154 del SII · Bsale lo implementa así.
 

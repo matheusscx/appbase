@@ -17,6 +17,82 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El stock deja de ser un escalar por tenant: bodegas y traslados (cerrado 2026-09-07)
+
+Sale de [`pendientes.md` § 3](pendientes.md), donde había quedado como *"decidido por el owner
+el 2026-09-03: bodega primero, sucursal después"*. Relevamiento y fuentes en
+[`investigaciones/2026-09-03-bodega-vs-sucursal.md`](investigaciones/2026-09-03-bodega-vs-sucursal.md).
+El plan y la spec de diseño que el frente produjo se borraron al cerrar, por la convención del
+repo: los planes de features terminadas no quedan en el árbol, la historia vive en git y el
+conocimiento durable pasa a `docs/features/`.
+
+### Qué se construyó
+
+**El corte, de Bsale:** una **bodega** guarda stock y no vende; el **local** —una fila por
+tenant, sembrada al crearlo, que no se borra ni se desactiva— es la única ubicación que vende.
+Ese "no vende" es lo que mantiene a las bodegas fuera de lo fiscal: no se declaran al SII, no
+tienen código, no aparecen en ningún documento.
+
+**Modelo de datos:** `ubicaciones` (`tipo` `'local'|'bodega'`), `stock_ubicacion` (PK
+`(item_id, ubicacion_id)`, único dueño del saldo — `item_producto.stock` se eliminó),
+`lote_ubicacion` (mismo patrón para el modo `lote`; `item_lote.cantidad_disponible` se
+eliminó), `item_unidad.ubicacion_id` para el modo `serie`, y `traslados`/`motivo_traslado`
+para el documento interno. Un traslado postea **dos filas** de kardex —salida en el origen,
+entrada en el destino— colgadas del mismo `traslado_id`: como `stock_anterior`/
+`stock_resultante` pasan a ser saldos **por ubicación**, en una sola fila no hay dónde escribir
+los dos.
+
+**Las siete decisiones del owner (2026-09-03/06):** toda venta sale del local; el traslado es
+un solo acto, sin estado "en tránsito"; el costo (`item_producto.costo_actual`, CPP) **no** se
+parte por ubicación —partirlo abre el motor de costeo, que por `CLAUDE.md` va en su propio
+frente y con el sistema quieto—; compra, merma, recuento y ajuste manual dicen dónde
+ocurrieron, y el recuento se hace por ubicación elegida; la lista de productos muestra el total
+y el detalle desglosa por lugar; un traslado no puede llevarse lo que una mesa ya pidió (tope
+contra `stockDisponible` cuando el origen es el local, contra el stock físico y nada más cuando
+es una bodega); y los tres modos de inventario (`cantidad`, `serie`, `lote`) entran.
+
+**El lock de stock sigue anclado en `item_producto`, nunca en `stock_ubicacion`** (su fila
+siempre existe; la de `stock_ubicacion` puede no existir todavía para un ítem que nunca se
+movió en esa ubicación, y `FOR UPDATE` sobre una fila inexistente no lockea nada) —
+`docs/patterns/backend.md` §15. Consecuencia buena para el traslado: lockea una sola fila por
+ítem sin importar cuántas ubicaciones toque, así que dos traslados opuestos del mismo producto
+no pueden abrazarse entre sí; lo que sigue siendo un ciclo posible es **entre ítems**
+distintos, y por eso `TrasladosService.crear` ordena sus locks por `item_id`, igual que el
+resto de los caminos que tocan `item_producto`.
+
+**El rechazo por falta de stock dice dónde está la mercadería**, con dos caras según el
+permiso: informativo para quien no puede trasladar (el garzón), con el traslado precargado a un
+clic para quien sí puede (`Inventario/Crear`).
+
+⛔ **El DTE 52 no se emite.** El traslado queda como documento **interno**: registrarlo no es
+estar en regla. El documento que exige el SII/Carabineros para que la mercadería viaje por la
+vía pública lo sigue emitiendo el tenant por fuera, igual que hoy hace con las boletas
+(ADR-010). Sucursal sigue explícitamente afuera, y con ella su propia consecuencia fiscal (de
+qué sucursal salió cada venta).
+
+Documentación operativa: [`features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md).
+
+### Qué quedó afuera
+
+Seis huecos concretos, cada uno con su porqué, en `pendientes.md` §§ 1-2 (no se resumen acá
+para no mantener dos copias que puedan desalinearse): el reintento de deadlock de
+`RecuentosService.aplicar` que no mira `driverError.code`; el ajuste manual de stock sin e2e
+HTTP de `ubicacionId` requerido/de-otro-tenant; `patchLineaCantidad` sin el botón de traslado
+que las otras dos puertas del rechazo enriquecido sí tienen; el filtro de lote agotado
+comparando strings en vez de `Decimal`; y la garantía de que dos traslados cruzados no hacen
+deadlock, que se apoya en el plan de Postgres y no en el código propio —reportada al owner sin
+resolver, porque la re-medición de la aserción original no reprodujo—. Un hallazgo ajeno,
+no investigado: `encargado.salon@paris.cl` no ve ningún salón pese a tener los permisos
+sembrados.
+
+Una entrada que el borrador de cierre traía como pendiente **resultó ya resuelta al
+verificarla contra el código**: `ubicaciones.eliminado_por` sí se puebla —
+`UbicacionesService.remove()` (`backend/src/modules/ubicaciones/ubicaciones.service.ts:266`)
+lo escribe con el `usuarioId` del token en el mismo `UPDATE` que marca `eliminado_el`. No se
+agregó como backlog.
+
+---
+
 ## El cobro ya confirmado y en vuelo que no se enteraba de la fusión (cerrado 2026-09-06)
 
 Sale de [`pendientes.md` § 2](pendientes.md), donde había quedado con una medición pedida —*"si

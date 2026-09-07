@@ -72,17 +72,23 @@ en la línea al crear la sesión (el momento del conteo); al aplicar, el delta s
 el stock **vigente** en ese instante (leído por `InventarioService.registrarMovimiento`
 bajo el `FOR UPDATE` que ese método toma sobre `item_producto`), no sobre el valor contado.
 
-### El recuento es del local (hasta la Tarea 11 de bodegas)
+### El recuento es por ubicación
 
-`stock_sistema` se congela contra el saldo del **local** del tenant, no contra la suma de
-todas sus ubicaciones, porque el delta se aplica contra el local: los dos números tienen
-que hablar de la misma ubicación. Congelar el total y descontar del local convierte un
-conteo correcto en una salida que nadie hizo — un producto con 40 en el local y 15 en la
-bodega se muestra como 55, el operador cuenta 40, y aplicar postea una salida de 15.
+`ubicacionId` es obligatorio al crear la sesión (`POST /recuentos`) y no se puede cambiar
+después: el `PATCH` de edición lo omite a propósito (`UpdateRecuentoDto` no lo declara, y el
+`ValidationPipe` global con `whitelist: true` lo descarta en silencio si llega igual), porque
+las líneas ya congelaron `stock_sistema` de lo que había **en esa ubicación**. `stock_sistema`
+se congela contra el saldo de `stock_ubicacion` de la ubicación elegida, nunca contra la suma
+de todas: local y bodega tienen saldos independientes, y el delta se aplica sobre la misma
+ubicación que lo congeló. Congelar el total del tenant y aplicar el delta contra una sola
+ubicación —el local— fue el comportamiento hasta que bodegas existió: inofensivo mientras
+todo el stock vivía ahí, se habría vuelto una salida fantasma con stock repartido — un
+producto con 40 en el local y 15 en la bodega se le habría mostrado al operador como 55, el
+operador cuenta 40, y aplicar postearía una salida de 15 que nadie hizo.
 
-Es un tapón, no el diseño final: elegir **en qué ubicación** se cuenta llega en la Tarea 11
-del plan de bodegas (`docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md`). Hasta
-entonces el recuento es el del salón, que es donde el operador cuenta.
+Dos sesiones en `borrador` sobre el mismo producto **en la misma ubicación** siguen sin poder
+coexistir —cada una congelaría su propio delta y aplicar las dos descontaría el faltante dos
+veces—; en ubicaciones distintas sí pueden convivir, porque cuentan saldos independientes.
 
 Odoo setea el stock a un absoluto porque asume que la ubicación se bloquea durante el
 conteo (nadie vende de ahí mientras se cuenta). Un POS de venta física no puede darse ese

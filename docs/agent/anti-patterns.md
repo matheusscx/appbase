@@ -557,10 +557,13 @@ está en `docs/patterns/backend.md` §9.
 
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 
-`item_producto.costo_actual` y `item_producto.stock` son valores derivados del kardex
-(`costo_actual`: promedio ponderado móvil, ver
+`item_producto.costo_actual` y (en su momento) `item_producto.stock` eran valores derivados
+del kardex (`costo_actual`: promedio ponderado móvil, ver
 [ADR-016](../adr/016-costeo-promedio-ponderado-movil.md); `stock`: saldo materializado de
-`movimientos_inventario`) — su única puerta legítima es
+`movimientos_inventario` — la columna se eliminó el 2026-09-06, cuando el saldo pasó a
+`stock_ubicacion` por `(ítem, ubicación)`, ver
+[`bodegas-y-traslados.md`](../features/bodegas-y-traslados.md); el mismo principio del
+chokepoint rige igual sobre la tabla nueva) — su única puerta legítima es
 `InventarioService.registrarMovimiento`. `PATCH /items/:id` aceptaba `dto.costo` y
 después, por el mismo motivo, `dto.stock`, y los escribía directo en la columna, sin
 generar ningún movimiento de inventario: el número quedaba corrompido sin rastro de quién

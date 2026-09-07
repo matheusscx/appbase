@@ -1030,6 +1030,8 @@ CREATE TABLE "item_unidad" (
   -- 'nuevo' | 'usado' | 'reacondicionado'
   "garantia_hasta" TIMESTAMPTZ,
   "venta_id"       UUID,       -- FK diferida (se define cuando exista tabla ventas)
+  "ubicacion_id"   UUID        NOT NULL REFERENCES "ubicaciones" ("ubicacion_id"),
+  -- dónde está físicamente esta unidad; una unidad vive en un solo lugar
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ

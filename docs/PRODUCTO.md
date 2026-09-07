@@ -446,10 +446,13 @@ ajuste manual pueden dejar el stock por debajo de lo ya comprometido, y esa mesa
 quedar sin poder cobrar y sin poder sacar la línea. **La salida con motivo —merma o
 cortesía— sigue sin existir** y sigue haciendo falta ([`agent/pendientes.md`](./agent/pendientes.md) § 3).
 
-**Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos,
-FIFO o método de costeo elegible por tenant. La **tienda online** tiene el mismo hueco por
-otro camino —el carrito vive en el navegador y entre la orden de pasarela y el callback de
-pago nadie retiene nada—: no se tocó, se anota para cuando se encare.
+**Fuera de alcance (fases futuras):** FIFO o método de costeo elegible por tenant, y la
+emisión del **DTE 52** que legaliza un traslado en la vía pública —bodegas y traslados ya
+existen como documento **interno** (`docs/features/bodegas-y-traslados.md`); tenerlo
+registrado no es estar en regla, y el tenant sigue emitiendo esa guía por fuera, igual que
+hoy con las boletas—. La **tienda online** tiene el mismo hueco de lo comprometido por otro
+camino —el carrito vive en el navegador y entre la orden de pasarela y el callback de pago
+nadie retiene nada—: no se tocó, se anota para cuando se encare.
 
 ---
 

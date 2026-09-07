@@ -14,7 +14,7 @@ Un sistema de trazabilidad auditable para todos los cambios de stock en items de
 
 ### Why does it exist?
 
-El stock de productos es un activo crítico: cambios sin trazabilidad generan mermas ocultas, complicaciones en auditorías fiscales y dificultades para localizar discrepancias. El kardex es la fuente de verdad auditable; el saldo en `item_producto` es un cache materializado para lectura rápida y alertas.
+El stock de productos es un activo crítico: cambios sin trazabilidad generan mermas ocultas, complicaciones en auditorías fiscales y dificultades para localizar discrepancias. El kardex es la fuente de verdad auditable; el saldo en `stock_ubicacion` —por `(ítem, ubicación)`, desde [bodegas y traslados](./bodegas-y-traslados.md)— es un cache materializado para lectura rápida y alertas.
 
 ### Scope
 
@@ -35,9 +35,11 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 - Validación: `salida` rechaza movimientos que resultarían en stock negativo
 
 **NOT included (future):**
-- Bodegas / almacenes y stock por bodega
-- Traspasos entre bodegas
 - Integración con proveedores externos de inventario
+
+Bodegas/almacenes, stock por ubicación y traslados entre ellas **ya están implementados**
+— ver [`bodegas-y-traslados.md`](./bodegas-y-traslados.md). Lo que sigue afuera de eso es
+puntual: la emisión del DTE 52 que legaliza un traslado en la vía pública.
 
 Nota: el costeo por promedio ponderado móvil (CPP) de `item_producto.costo_actual` en la compra sí está implementado (ver "Regla de costo" más abajo); FIFO/LIFO no.
 
@@ -158,9 +160,14 @@ Response (400 — Stock insuficiente):
 ```
 
 **Request Body (`AjusteStockDto`):**
+- `ubicacionId` (required, desde [bodegas y traslados](./bodegas-y-traslados.md)): UUID de la
+  ubicación donde ocurre el movimiento. Requerido y sin default silencioso — un default
+  metería stock en el local cada vez que la pantalla se olvide de mandarlo.
 - `tipo` (required): `'entrada'` | `'salida'`
 - `cantidad` (required): Número positivo (siempre; el signo lo define `tipo`)
-- `motivo` (required): `'compra'` | `'venta'` | `'devolucion'` | `'merma'` | `'ajuste_manual'` | `'inventario_inicial'`
+- `motivo` (required): `'compra'` | `'devolucion'` | `'ajuste_manual'` | `'inventario_inicial'`
+  — `'venta'` y `'merma'` ya no se aceptan acá: la venta se registra desde `ventas.service.ts`
+  y la merma tiene su propio flujo dedicado (ver [`mermas-valorizadas.md`](./mermas-valorizadas.md)).
 - `comentario` (optional): Texto libre (máx 500 caracteres)
 
 **Constraints:**
@@ -472,10 +479,11 @@ Regla de negocio completa: [`PRODUCTO.md`](../PRODUCTO.md) § 8b. Dónde se hace
   [Conversión de Unidades — Conversión de Costo](./conversion-unidades.md#conversión-de-costo-junto-con-la-cantidad).
 
 **Regla del recuento: delta, no absoluto (`motivo='recuento'`):**
-- Al crear un recuento (`POST /recuentos`), cada línea congela `stock_sistema` = el saldo
-  vigente **del local** en ese momento — la misma ubicación contra la que se aplica el
-  delta. Congelar el total del tenant y aplicar sobre el local es una salida fantasma
-  (ver `recuento-inventario.md` § "El recuento es del local"). Al cargar el conteo (`PATCH /recuentos/:id/lineas/:lineaId`), la
+- Al crear un recuento (`POST /recuentos`), `ubicacionId` es obligatorio y cada línea congela
+  `stock_sistema` = el saldo vigente **de esa ubicación** en ese momento — la misma contra la
+  que se aplica el delta. Congelar el total del tenant y aplicar sobre una sola ubicación es
+  una salida fantasma (ver [`recuento-inventario.md`](./recuento-inventario.md) § "El recuento
+  es por ubicación"). Al cargar el conteo (`PATCH /recuentos/:id/lineas/:lineaId`), la
   diferencia mostrada es `cantidad_contada − stock_sistema` — informativa, no lo que se aplica.
 - Al aplicar (`POST /recuentos/:id/aplicar`), lo que se mueve es
   `delta = cantidad_contada − stock_sistema` sobre el **stock vigente en ese momento**, no
