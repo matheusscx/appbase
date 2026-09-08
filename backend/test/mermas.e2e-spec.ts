@@ -24,8 +24,9 @@ interface CausaMermaItem {
 interface ItemResponse {
   id: string;
   costoActual: string | null;
-  /** El stock DEL LOCAL (spec § 5.4). `stock` a secas es el TOTAL de todas
-   *  las ubicaciones — no sirve para afirmar "el local no se movió". */
+  /** El stock DEL LOCAL (`docs/features/bodegas-y-traslados.md`, «GET /items,
+   *  GET /items/:id»). `stock` a secas es el TOTAL de todas las ubicaciones —
+   *  no sirve para afirmar "el local no se movió". */
   stockVendible: string | null;
 }
 interface MermaResponse {

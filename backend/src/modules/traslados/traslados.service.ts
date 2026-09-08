@@ -106,7 +106,8 @@ interface MovimientoDeTrasladoRow {
  * ⚠️ Los `LEFT JOIN` de `ubicaciones` y `motivo_traslado` van **sin**
  * `eliminado_el IS NULL`, y es deliberado: un traslado ya ocurrido tiene que
  * seguir diciendo de dónde a dónde fue y por qué, aunque la bodega se haya
- * eliminado después (que es justamente lo que se hace tras vaciarla, spec § 8).
+ * eliminado después (que es justamente lo que se hace tras vaciarla:
+ * `docs/features/bodegas-y-traslados.md`, «Bordes»).
  * Filtrarlos convertiría el historial en filas sin origen. El de `usuarios` sí
  * filtra, igual que el kardex de mermas.
  */
@@ -325,7 +326,8 @@ export class TrasladosService {
     );
 
     /**
-     * **El tope es asimétrico** (spec § 5.3):
+     * **El tope es asimétrico** (`docs/features/bodegas-y-traslados.md`,
+     * «El tope del traslado es asimétrico (decisión 6)»):
      * - Sacar del **local** topea contra lo apartado: no te podés llevar lo
      *   que la mesa 4 ya pidió.
      * - Sacar de una **bodega** topea contra su stock físico y nada más,
@@ -426,7 +428,9 @@ export class TrasladosService {
    * el destino, colgadas del mismo `trasladoId`.
    *
    * ⛔ **La entrada no lleva `costoUnitario`.** El costo es uno solo por
-   * producto para todo el tenant (spec § 3.2): un traslado mueve kilos, no
+   * producto para todo el tenant (`docs/features/bodegas-y-traslados.md`,
+   * «Por qué el costo no se parte por ubicación (decisión 3)»): un traslado
+   * mueve kilos, no
    * plata. Pasarle el costo volvería a promediarlo contra sí mismo e inflaría
    * la valorización en cada traslado. `registrarMovimiento` congela solo el
    * `costo_actual` vigente cuando no se le pasa costo, que es exactamente lo

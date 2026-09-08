@@ -1365,4 +1365,48 @@ describe('Traslados entre ubicaciones (e2e)', () => {
       expect(resDetalle.status).toBe(403);
     });
   });
+
+  // Los dos campos de ubicación de `CreateTrasladoDto`, cada uno por su lado.
+  // El `describe` de arriba prueba que un id AJENO da 404; que el campo sea
+  // OBLIGATORIO lo sostiene el `@IsUUID()` sin `@IsOptional()`, y eso solo corre
+  // dentro del `ValidationPipe` — un test de DTO con `plainToInstance` +
+  // `validate` dispara los decoradores pero no el pipe, así que la única red del
+  // "requerido" es un e2e por HTTP.
+  //
+  // Son dos casos porque son dos campos, y cada uno lo mata su propio mutante
+  // por el STATUS: sacarle el `@IsUUID()` a `destinoId` deja pasar el pipe
+  // —`whitelist: true` descarta la propiedad sin decoradores— y el caso «sin
+  // destinoId» termina en 404, en el `if (!origen || !destino)` que sigue al
+  // `SELECT … FOR SHARE` de `create`. Medido el 2026-09-07. La aserción sobre
+  // el mensaje compra otra cosa: que el caso no pase por la razón equivocada,
+  // con un 400 que venga de otro campo del mismo body.
+  describe('los dos campos de ubicación son obligatorios', () => {
+    it('POST /traslados sin origenId → 400, y el 400 es por origenId', async () => {
+      const itemId = await crearProducto('2');
+
+      const res = await intentarTraslado({
+        destinoId: bodegaId,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.message).toContain('origenId');
+      expect(res.message).not.toContain('destinoId');
+    }, 30000);
+
+    it('POST /traslados sin destinoId → 400, y el 400 es por destinoId', async () => {
+      const itemId = await crearProducto('2');
+
+      const res = await intentarTraslado({
+        origenId: localId,
+        motivoTrasladoId: motivoId,
+        lineas: [{ itemId, cantidad: '1' }],
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.message).toContain('destinoId');
+      expect(res.message).not.toContain('origenId');
+    }, 30000);
+  });
 });

@@ -1312,8 +1312,8 @@ async function abrirAjusteStock(item: Item) {
   stockItem.value = item
   ajusteForm.value = emptyAjusteForm()
   ajusteForm.value.unidadCodigo = item.unidadMedida ?? ''
-  // Con una sola ubicación el selector no se dibuja (spec § 6): el cliente
-  // completa el local directamente.
+  // Con una sola ubicación el selector no se dibuja (`docs/features/bodegas-y-traslados.md`,
+  // «Frontend»): el cliente completa el local directamente.
   if (!hayBodegas.value && local.value) {
     ajusteForm.value.ubicacionId = local.value.id
   }

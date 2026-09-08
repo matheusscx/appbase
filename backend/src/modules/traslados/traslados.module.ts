@@ -13,7 +13,8 @@ import { MotivosTrasladoModule } from '../motivos-traslado/motivos-traslado.modu
     // Las dos filas de kardex pasan por el chokepoint, como todo movimiento.
     InventarioModule,
     // `comprometidoPorItem`: sacar del local topea contra lo que las cuentas
-    // abiertas ya pidieron (spec § 5.3).
+    // abiertas ya pidieron (`docs/features/bodegas-y-traslados.md`, «El tope
+    // del traslado es asimétrico (decisión 6)»).
     ItemsModule,
     // El motivo se valida contra el catálogo tipado del tenant.
     MotivosTrasladoModule,

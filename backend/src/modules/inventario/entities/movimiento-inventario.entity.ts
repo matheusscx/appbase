@@ -52,7 +52,8 @@ export class MovimientoInventario {
    * Dónde ocurrió el movimiento. `stock_anterior` y `stock_resultante` pasan a
    * ser los saldos **de esta ubicación**, no del tenant — que es la razón por
    * la que un traslado son dos filas y no una con origen y destino: en una
-   * sola no hay dónde escribir los dos saldos (spec § 4.3).
+   * sola no hay dónde escribir los dos saldos (`docs/features/bodegas-y-traslados.md`,
+   * «Por qué un traslado son dos filas de kardex, no una»).
    */
   @Column({ name: 'ubicacion_id', type: 'uuid' })
   ubicacionId: string;

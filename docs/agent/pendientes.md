@@ -171,58 +171,52 @@ código antes de tomar una entrada**, por reciente que sea la fecha que trae —
 **el commit que cierra algo del backlog saca la entrada en el mismo commit**, que es lo que
 las dos veces faltó.
 
-### El 400 de "campo de ubicación requerido" que le falta a recuentos y a traslados (2026-09-07)
+### Las citas `§ N` que sobreviven no dicen de qué spec son (2026-09-07)
 
-Salió de medir la cobertura al cerrar el hueco gemelo del ajuste manual de stock. De los cuatro
-endpoints que escriben eligiendo ubicación, **solo `POST /mermas` tiene los dos rechazos
-probados por HTTP** (`mermas.e2e-spec.ts:459` y `:471`); el ajuste manual los ganó hoy
-(`items-stock-por-ubicacion.e2e-spec.ts`). Faltan:
+Salió de clasificar las citas al cerrar el barrido de bodegas (detalle en
+[`resueltos.md`](resueltos.md)). Las que quedaron son todas de
+[`2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md),
+que existe, así que no son enlaces rotos. El problema es otro: **ninguna nombra su spec**, y
+el repo ya demostró que dos specs distintas usan los mismos números de sección.
 
-- [ ] **`POST /recuentos` sin `ubicacionId` → 400** — hoy solo está el 404 por ubicación ajena
-  (`recuentos.e2e-spec.ts:1609`).
-- [ ] **`POST /traslados` sin `origenId` o sin `destinoId` → 400** — hoy solo está el 404 por
-  ubicación ajena (`traslados.e2e-spec.ts:1246`). Son dos campos, así que son dos casos.
+- [ ] **Agregarle el nombre del archivo a cada una.** Las de la reserva de stock están en
+  `items.service.ts`, `items.service.spec.ts`, `salones.service.ts`,
+  `reserva-stock-mesa.e2e-spec.ts`, `CatalogoGrid.vue`, `CatalogoGrid.nuxt.spec.ts` y
+  `useVenta.ts`. Y **no son las únicas de esta forma**: `promociones.evaluator.ts:251` cita
+  `(§El evaluador)` —una sección por nombre, de la spec de promociones, que está en disco—.
+  O sea que la familia cruza frentes, y cerrarla mirando solo la reserva la deja viva.
 
-Lo que cubre este hueco es el `ValidationPipe`, que **ningún test de DTO ejercita**: un
-`plainToInstance` + `validate` corre los decoradores pero no el pipe, así que la única red del
-"requerido" es el e2e. Mecánico: copiar el molde de `mermas.e2e-spec.ts:459`.
+⚠️ **La conducta a buscar es "cita una sección sin decir de qué documento", y ningún grep de
+una línea la cubre.** `grep -rn "spec § "` es el punto de partida, pero deja afuera al menos
+una cita **partida en dos renglones** (`CatalogoGrid.nuxt.spec.ts:102-103`) y tres escritas
+con otra forma (`la § 4.1b de la spec` en `items.service.ts` e `items.service.spec.ts`, `de la
+spec (§ 4.2)` en `reserva-stock-mesa.e2e-spec.ts`). Empezar por `grep -rn "§ [0-9]"` y
+clasificar, en vez de confiar en el conteo — al cerrar esta entrada, verificar por conducta y
+no por que el primer grep dé cero.
 
-### Los punteros de código al plan y a la spec de bodegas, que ya no existen (2026-09-07)
+El precio de no hacerlo aparece recién el día que esa spec también se borre: ahí la cita
+queda huérfana **y** sin forma de saber a qué documento apuntaba. Hoy es solo ambigüedad.
 
-Al cerrar el frente se borraron `docs/superpowers/plans/2026-09-06-bodegas-y-traslados.md` y
-su spec de diseño —convención del repo: el conocimiento durable pasó a
-[`docs/features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)—, pero los
-comentarios del código que los citaban se quedaron apuntando al vacío. Las **14 líneas que
-nombraban una ruta completa**, repartidas en 12 archivos, se repuntaron al doc de la feature
-el 2026-09-07: eran enlaces muertos, mandaban al lector a un archivo que no existe. Hoy no
-queda ninguna en el árbol. El conteo se reproduce con `git grep -c
-"2026-09-06-bodegas-y-traslados\|hallazgos-finales" 0852c53b -- backend frontend` — el SHA
-fijo y no `HEAD`, porque contra `HEAD` da 0 apenas se commitea este barrido.
+### Las citas `Tarea N` al plan de bodegas, que quedaron sin dueño (2026-09-07)
 
-Lo que queda son las citas **sin ruta**: no rompen ningún enlace, pero nombran una sección o
-una tarea que ya no resuelve a nada.
+La entrada que cerró el barrido de citas se definía como *"nombran una sección **o una tarea**
+que ya no resuelve a nada"*. Se cerró la mitad "sección" —30 de las 42 `spec § N`, las del
+spec borrado— y la sublista
+`… del plan`. **La mitad "tarea" no**, y al borrarse la entrada dejó de estar anotada en
+ningún lado hasta que la revisión independiente la reclamó.
 
-- [ ] **Separar cuáles de las 42 `spec § N` son del spec borrado, y repuntarlas** — `grep -rn
-  "spec § " backend/src backend/test frontend/app` da 42, **pero no todas son de bodegas**: la
-  misma forma la usan frentes cuyo spec sigue en disco (`reserva-stock-mesa.e2e-spec.ts` y
-  `CatalogoGrid.vue` citan `§ 4.2` del spec de la reserva de stock, que está en
-  `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`). O sea que el
-  primer paso es clasificar, no reemplazar. Para las que sí sean de bodegas, cada `§ N` se
-  mapea a mano al heading del doc de la feature (`§ 5.4` → «GET /items, GET /items/:id»,
-  `§ 6` → «Frontend») o se deja la cita sin sección.
+- [ ] **Clasificar y repuntar las `Tarea N` del plan borrado.** Nombran el frente explícitamente
+  17 líneas en 16 archivos (`grep -rn 'Tarea [0-9][0-9a-b]* del frente "bodegas y traslados"'
+  backend/src backend/test frontend/app`). Las que dicen `Tarea N` a secas son más y el grep
+  que las busca es ruidoso —cualquier frente numera sus tareas igual—, así que acá también el
+  primer paso es **clasificar por contenido**, no contar coincidencias.
 
-- [ ] **Lo mismo con las 31 de la forma `… del plan`** (`grep -rn "del plan" backend/src
-  backend/test frontend/app`, medido el 2026-09-07). Mismo criterio: clasificar primero.
-
-📌 **Y un dato que cambia el tamaño del problema:** borrar el plan y la spec al cerrar está
-escrito en `docs/superpowers/README.md`, pero **casi no se practica** — al 2026-09-07 hay 98
-planes y 79 specs en `docs/superpowers/`, incluidos los de frentes cerrados hace días. O sea
-que la mayoría de las citas `Tarea N` del árbol apuntan a documentos que **sí existen**, y
-este barrido es de las de bodegas, no del repo entero. (Que la convención esté escrita y no se
-cumpla es tema aparte, y no de esta entrada.)
-
-El precio de no hacerlo es de lectura, no de conducta: el próximo que quiera el porqué de una
-línea busca una sección que no existe.
+⚠️ **Esta no se resuelve como la de `spec § N`.** Ahí cada sección tenía un heading equivalente
+en el doc de la feature y el mapeo era mecánico. Una **tarea** es una unidad de trabajo, no una
+sección: no hay a qué repuntarla. Lo que corresponde en la mayoría de los casos es perder el
+número y quedarse con el frente —*"del frente de bodegas y traslados"*, que sí resuelve a
+[`docs/features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)—, y eso es una
+decisión de redacción por cita, no un `sed`.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1913,13 +1907,23 @@ cuarta copia. ¿Se extrae a `test/helpers/`, o se deja copiado?
 medir las ocho copias** y encontrar que ya habían derivado en la conducta. Extraer el segundo
 por reflejo sería saltarse justo lo que hizo valer al primero.
 
-**Lo medido hoy** (2026-09-07): cuatro copias — `mermas.e2e-spec.ts:481`,
-`traslados.e2e-spec.ts:1157`, `recuentos.e2e-spec.ts:117` (ahí sí como función local,
-`loginFalabella`) y `items-stock-por-ubicacion.e2e-spec.ts:287`, que es la que agregó el cierre
-de los minors de bodegas. **Es el mismo mecanismo en las cuatro**: `admin@sistema.com` +
-`switch-tenant` + `GET /ubicaciones` + `find(u => u.tipo === 'local')` —la constante
-`ADMIN_FALABELLA_EMAIL` de `recuentos` y `papelera` **es** `'admin@sistema.com'`, no otro
-usuario—. O sea: **todavía no hay deriva**, que es la diferencia con el caso de caja.
+**Lo medido hoy** (2026-09-07): cuatro copias, en `mermas.e2e-spec.ts`,
+`traslados.e2e-spec.ts`, `items-stock-por-ubicacion.e2e-spec.ts` —la que agregó el cierre de
+los minors de bodegas— y `recuentos.e2e-spec.ts`, ahí sí como función local `loginFalabella`.
+Se ubican con `grep -rn "resLoginF = await request\|async function loginFalabella"
+backend/test`, que devuelve **cinco**: la quinta, `papelera.e2e-spec.ts:2220`, hace el login
+entero —los dos pasos, `login` + `switch-tenant`— pero **no** pide el local, así que no es
+copia de este bloque. Igual entra en la conversación el día que se extraiga algo: si lo que se
+comparte es el login, son cinco y no cuatro.
+
+**Es el mismo mecanismo en las cuatro**: `admin@sistema.com` + `switch-tenant` +
+`GET /ubicaciones` + `find(u => u.tipo === 'local')` —la constante `ADMIN_FALABELLA_EMAIL` de
+`recuentos` y `papelera` **es** `'admin@sistema.com'`, no otro usuario—. O sea: **todavía no
+hay deriva**, que es la diferencia con el caso de caja.
+
+⚠️ **Sin números de línea a propósito, y por experiencia:** esta entrada los tuvo, y el
+barrido de citas del 2026-09-07 —un commit que ni siquiera tocaba lo que la entrada
+describe— corrió tres de los cuatro. Dos rondas de revisión se fueron en eso.
 
 **Las dos salidas y su costo:** extraer ahora cuesta un archivo nuevo y cierra la puerta a que
 las cuatro se separen sin que nadie lo note; dejarlo cuesta que la quinta copia entre igual, y

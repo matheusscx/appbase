@@ -28,7 +28,8 @@ const LOCAL: Ubicacion = { id: 'local-1', nombre: 'Local', tipo: 'local', activo
 const BODEGA: Ubicacion = { id: 'bodega-1', nombre: 'Bodega centro', tipo: 'bodega', activo: true }
 const BODEGA_INACTIVA: Ubicacion = { id: 'bodega-2', nombre: 'Bodega vieja', tipo: 'bodega', activo: false }
 
-describe('useUbicaciones — hayBodegas (spec § 6)', () => {
+// La regla que gobierna: `docs/features/bodegas-y-traslados.md`, «Frontend».
+describe('useUbicaciones — hayBodegas', () => {
   it('con solo el local, hayBodegas es false y local apunta a esa fila', async () => {
     respuesta = [LOCAL]
     const { hayBodegas, local, cargar } = useUbicaciones()

@@ -13,7 +13,8 @@ import {
  * el `local` **vende** (toda venta descuenta de él) y una `bodega` solo
  * guarda. Ese corte es también el que mantiene a las bodegas fuera de lo
  * fiscal: una bodega no se declara al SII y no aparece en ningún documento
- * (ver la spec § 2 y ADR-010).
+ * (ver «El corte: qué es una bodega, y qué no» en
+ * `docs/features/bodegas-y-traslados.md`, y ADR-010).
  *
  * Cada tenant tiene exactamente una fila `tipo='local'`, sembrada al crearlo.
  * No se elimina ni se desactiva.

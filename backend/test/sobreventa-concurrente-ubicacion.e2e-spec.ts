@@ -80,11 +80,12 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *   del guard, así que no pierden la actualización aunque el `stockAnterior`
  *   que reporten sea viejo. El caso que sobrevendía es `cantidad`, que escribe
  *   el saldo calculado a partir de esa lectura. `lote_ubicacion` existe desde
- *   la Tarea 7 del plan y sigue el mismo patrón lock-en-`item_lote` +
- *   lectura-aparte que este spec ejercita para `stock_ubicacion`, pero sin una
- *   compuerta propia: no hay un test de concurrencia real para modo `lote`,
- *   solo unitarios mockeados que fijan el orden de las queries.
- * - Nada sobre traslados entre ubicaciones (Tarea 9): acá las dos salidas
+ *   el frente de bodegas (`docs/features/bodegas-y-traslados.md`) y sigue el
+ *   mismo patrón lock-en-`item_lote` + lectura-aparte que este spec ejercita
+ *   para `stock_ubicacion`, pero sin una compuerta propia: no hay un test de
+ *   concurrencia real para modo `lote`, solo unitarios mockeados que fijan el
+ *   orden de las queries.
+ * - Nada sobre traslados entre ubicaciones: acá las dos salidas
  *   golpean la MISMA ubicación.
  * ═══════════════════════════════════════════════════════════════════════════
  */

@@ -379,7 +379,8 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
 })
 
 // Tarea 12 del frente "bodegas y traslados": el kardex gana la columna
-// Ubicación y su filtro, siempre que `hayBodegas` (spec § 6).
+// Ubicación y su filtro, siempre que `hayBodegas`
+// (`docs/features/bodegas-y-traslados.md`, «Frontend»).
 describe('inventario — el kardex muestra dónde (Tarea 12)', () => {
   const LOCAL = { id: 'local-1', nombre: 'Local', tipo: 'local', activo: true }
   const BODEGA = { id: 'bodega-1', nombre: 'Bodega centro', tipo: 'bodega', activo: true }

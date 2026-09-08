@@ -399,7 +399,8 @@ export class ItemsService {
       categoriaNombre: r.categoria_nombre,
       creadoEl: r.creado_el,
       stock: r.stock,
-      // Informativo (spec § 5.4): lo que hay EN EL LOCAL. Con un solo local
+      // Informativo (`docs/features/bodegas-y-traslados.md`, «GET /items,
+      // GET /items/:id»): lo que hay EN EL LOCAL. Con un solo local
       // coincide con `stock`; con bodega, no. `stockDisponible` —abajo, batcheado
       // en `findAll`, o calculado en `findOne`— es el que de verdad frena al pedir.
       stockVendible: r.stock_vendible,
@@ -1227,7 +1228,8 @@ export class ItemsService {
           ).get(itemId) ?? [])
         : [];
 
-    // Desglose por ubicación (Tarea 3a, spec § 5.4): una query por request, no
+    // Desglose por ubicación (`docs/features/bodegas-y-traslados.md`,
+    // «GET /items, GET /items/:id»): una query por request, no
     // una por ubicación. Solo lo pagan los tipos con stock propio — los demás
     // no tienen fila en `stock_ubicacion` y el resultado es `[]` sin costo
     // extra de query (el filtro de tipo evita ni siquiera intentarlo).
@@ -5458,7 +5460,9 @@ export class ItemsService {
    *
    * **Público desde la Tarea 9** (era privado): `TrasladosService` lo usa para
    * el tope asimétrico —sacar del local topea contra lo apartado, sacar de una
-   * bodega no (spec § 5.3)—, que es el segundo camino que necesita este número
+   * bodega no (`docs/features/bodegas-y-traslados.md`, «El tope del traslado
+   * es asimétrico (decisión 6)»)—, que es el segundo camino que necesita este
+   * número
    * además del menú del POS.
    */
   async comprometidoPorItem(tenantId: string): Promise<Map<string, Decimal>> {

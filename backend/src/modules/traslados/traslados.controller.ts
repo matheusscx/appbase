@@ -21,7 +21,8 @@ import { CreateTrasladoDto } from './dto/create-traslado.dto';
 /**
  * Se reusa `Inventario/Crear` en vez de inventar `Inventario/Trasladar`: el
  * traslado es un solo acto y no tiene el paso de aprobación que justificó
- * separar permisos en el recuento (spec § 5.5).
+ * separar permisos en el recuento (`docs/features/bodegas-y-traslados.md`,
+ * «POST /traslados»).
  */
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('traslados')

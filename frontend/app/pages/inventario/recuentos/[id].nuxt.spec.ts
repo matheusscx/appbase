@@ -1,8 +1,9 @@
 // @vitest-environment nuxt
 //
 // Tarea 11 del frente "bodegas y traslados": el detalle de la sesión muestra
-// la ubicación en el encabezado, no editable, solo si hayBodegas (spec § 6:
-// con una sola ubicación, decirla siempre dice lo mismo).
+// la ubicación en el encabezado, no editable, solo si hayBodegas (con una sola
+// ubicación, decirla siempre dice lo mismo — `docs/features/bodegas-y-traslados.md`,
+// «Frontend»).
 import { describe, it, expect } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import RecuentoDetalle from './[id].vue'

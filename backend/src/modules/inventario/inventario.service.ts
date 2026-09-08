@@ -116,7 +116,8 @@ interface MoverResult {
  * mover mercadería de lugar no crea ni valoriza nada —el costo no se toca y el
  * total del tenant no cambia—, y sin él una bodega llena de producto
  * discontinuado no se podría vaciar nunca, que es justo lo que hay que hacer
- * para poder eliminar esa bodega (spec § 8, última fila).
+ * para poder eliminar esa bodega (`docs/features/bodegas-y-traslados.md`, «Bordes»,
+ * última fila).
  *
  * Es una allowlist y no una lista de rechazos a propósito: un motivo nuevo nace
  * rechazado sobre un eliminado, que es el lado seguro del default.

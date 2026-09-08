@@ -72,8 +72,9 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
     }
     // `GET /items/:id` — el detalle con el desglose por ubicación. Se pide
-    // solo cuando el origen es una bodega (spec § 5.3: del local no hace
-    // falta, ya viene neto en `stockDisponible` del listado).
+    // solo cuando el origen es una bodega (del local no hace falta, ya viene
+    // neto en `stockDisponible` del listado — `docs/features/bodegas-y-traslados.md`,
+    // «El tope del traslado es asimétrico (decisión 6)»).
     if (url.endsWith(`/items/${PRODUCTO.id}`)) return Promise.resolve(ITEM_DETALLE)
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
     return Promise.resolve({ data: [], meta: { page: 1, pageSize: 15, total: 0, totalPages: 0 } })

@@ -8,7 +8,8 @@ export interface Ubicacion {
 /**
  * Las ubicaciones del tenant, para los selectores de inventario.
  *
- * `hayBodegas` es la que gobierna la regla de la spec § 6: mientras exista una
+ * `hayBodegas` es la que gobierna la regla del frente de bodegas
+ * (`docs/features/bodegas-y-traslados.md`, «Frontend»): mientras exista una
  * sola ubicación, **el selector no se dibuja** (escondido, no deshabilitado) y
  * el `ubicacionId` lo completa el cliente con el local. Sin esto, el tenant
  * que nunca va a tener una bodega paga un campo obligatorio que siempre dice

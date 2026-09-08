@@ -224,13 +224,30 @@ describe('items — stock por ubicación (e2e)', () => {
    * (`items.service.spec.ts`), que no ejercita el `ValidationPipe` — un DTO
    * probado con `plainToInstance` no prueba que el pipe lo rechace.
    *
-   * Cómo están los otros tres, medido el 2026-09-07 para no volver a contarlo
-   * de memoria: solo `POST /mermas` tiene los DOS casos
-   * (`mermas.e2e-spec.ts:459` y `:471`). `POST /recuentos`
-   * (`recuentos.e2e-spec.ts:1609`) y `POST /traslados`
-   * (`traslados.e2e-spec.ts:1246`) tienen el 404 por ubicación ajena y **no**
-   * el 400 del campo requerido; esos dos huecos quedaron anotados en
-   * `docs/agent/pendientes.md`.
+   * Cómo están los otros tres, medido el 2026-09-07 y reescrito ese mismo día
+   * al cerrarse el hueco: los CUATRO endpoints que escriben eligiendo ubicación
+   * tienen hoy los dos casos, el 400 del campo requerido y el 404 por ubicación
+   * ajena. `POST /recuentos` y `POST /traslados` ganaron su 400 después que
+   * éste —el caso «POST /recuentos sin ubicacionId → 400, y el mensaje nombra
+   * el campo» de `recuentos.e2e-spec.ts`, y el `describe`
+   * «los dos campos de ubicación son obligatorios» de
+   * `traslados.e2e-spec.ts`— y son los únicos dos que además afirman **qué
+   * campo** nombra el mensaje: acá y en `mermas.e2e-spec.ts` el caso mira solo
+   * el status.
+   *
+   * ⚠️ **Este párrafo va sin números de línea a propósito, y son cuatro casos
+   * medidos.** La versión anterior citaba cuatro punteros. Tres los corrió el
+   * mismo commit que cerró el hueco que describía —dos quedaron en líneas en
+   * blanco y el tercero una línea antes de su `it`—. El cuarto ya estaba
+   * podrido **antes** de ese commit: lo había movido el anterior, y hoy cae
+   * adentro de un `beforeAll`, que es peor que una línea en blanco porque
+   * parece plausible. Un puntero a un test se lo lleva puesto cualquier
+   * inserción de arriba, la haga quien la haga; el nombre del caso, no.
+   *
+   * (Los dos punteros del párrafo de arriba —`inventario-serie-ubicacion:206`
+   * y `inventario-lote-ubicacion:242`— se reverificaron el 2026-09-07 y
+   * aciertan. La regla no es "nunca un número": es que un número citado se
+   * remide cada vez que se toca el archivo, o no se escribe.)
    *
    * ⚠️ "Compra" no es un endpoint: es uno de los cuatro `motivo` de este mismo
    * `PATCH` (`compra`, `devolucion`, `ajuste_manual`, `inventario_inicial`).

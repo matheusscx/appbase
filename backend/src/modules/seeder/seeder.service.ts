@@ -1336,8 +1336,11 @@ export class SeederService implements OnApplicationBootstrap {
    * El local de cada tenant del seed —mismo `INSERT` que `TenantsService.create`,
    * porque los tenants del seed no pasan por ahí (se insertan directo con
    * `tenantRepo.save`)— y una bodega demo en Paris, para tener desde el seed
-   * un caso real de "más de una ubicación" (spec § 10: medir contra el 100%
-   * del stock en una sola ubicación mide un caso que no existe).
+   * un caso real de "más de una ubicación": medir contra el 100% del stock en
+   * una sola ubicación mide un caso que no existe. El hecho —local + bodega
+   * demo por tenant relevante, con el stock repartido— está en
+   * `docs/features/bodegas-y-traslados.md`, «Entity & Database»; el porqué de
+   * arriba vivía en el spec borrado y no tiene otro lugar que éste.
    */
   private async seedUbicaciones(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';

@@ -10,7 +10,8 @@ import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 // ⛔ Deliberadamente SIN `ubicacionId`, a diferencia de `AjusteStockDto` (Tarea
 // 12 del frente "bodegas y traslados"). El costo es un promedio ponderado por
-// PRODUCTO para todo el tenant (spec § 3.2, decisión del owner) — no hay un
+// PRODUCTO para todo el tenant (decisión del owner: `docs/features/bodegas-y-traslados.md`,
+// «Por qué el costo no se parte por ubicación (decisión 3)») — no hay un
 // costo por lugar. Pedirle una ubicación al ajuste de costo sugeriría que sí.
 export class AjusteCostoDto {
   @IsUUID()

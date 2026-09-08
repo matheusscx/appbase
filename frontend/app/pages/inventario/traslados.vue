@@ -42,7 +42,8 @@ interface ProductoOpt {
   nombre: string
   modoInventario: string | null
   unidadMedida: string | null
-  /** Neto de lo comprometido por cuentas abiertas — es el del LOCAL (spec § 5.4). */
+  /** Neto de lo comprometido por cuentas abiertas — es el del LOCAL
+   *  (`docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»). */
   stockDisponible: string | null
 }
 
@@ -80,7 +81,9 @@ interface LineaForm {
   unidadIds: string[]
   loteId: string
   cargando: boolean
-  /** Sale siempre del backend — nunca se resta en el cliente (spec § 5.3). */
+  /** Sale siempre del backend — nunca se resta en el cliente
+   *  (`docs/features/bodegas-y-traslados.md`,
+   *  «El tope del traslado es asimétrico (decisión 6)»). */
   disponible: string | null
   unidadesEnOrigen: UnidadOpt[]
   lotesEnOrigen: LoteConDisponible[]
@@ -274,8 +277,10 @@ async function onSeleccionarItem(linea: LineaForm, itemId: string) {
       // drawer): no hace falta pedirlo de nuevo.
       linea.disponible = producto?.stockDisponible ?? null
     } else {
-      // De una bodega no se resta comprometido (spec § 5.3): el físico ES el
-      // disponible. Sale de `desglosePorUbicacion` de `GET /items/:id`.
+      // De una bodega no se resta comprometido (`docs/features/bodegas-y-traslados.md`,
+      // «El tope del traslado es asimétrico (decisión 6)»): el físico ES el
+      // disponible.
+      // Sale de `desglosePorUbicacion` de `GET /items/:id`.
       const detalle = await useApiFetch<ItemDetalleStock>(`${apiUrl}/items/${itemId}`)
       if (linea.itemId !== itemId || form.value.origenId !== origenId) return
       linea.disponible = detalle.desglosePorUbicacion.find(d => d.ubicacionId === origenId)?.stock ?? '0'

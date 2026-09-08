@@ -23,6 +23,151 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos mecánicos que quedaban del frente de bodegas (cerrados 2026-09-07)
+
+Salen de [`pendientes.md` § 1](pendientes.md). Los dos eran *"no hay nada que preguntar ni
+diseñar"*, y los dos lo eran de verdad — pero el segundo resultó ser mitad barrido y mitad
+clasificación, y la clasificación es lo único que tenía juicio adentro.
+
+### Los tres 400 de "campo de ubicación requerido" que faltaban
+
+De los cuatro endpoints que escriben eligiendo ubicación, `POST /mermas` tenía los dos
+rechazos probados por HTTP y el ajuste manual los ganó el mismo día. Faltaban tres casos, que
+ahora existen:
+
+| Caso | Dónde |
+|---|---|
+| `POST /recuentos` sin `ubicacionId` → 400 | `recuentos.e2e-spec.ts`, en el `describe` de recuentos por ubicación |
+| `POST /traslados` sin `origenId` → 400 | `traslados.e2e-spec.ts`, `describe` «los dos campos de ubicación son obligatorios» |
+| `POST /traslados` sin `destinoId` → 400 | ídem |
+
+Lo que cubren es el `ValidationPipe`, y **es la única red que hay**: un test de DTO con
+`plainToInstance` + `validate` dispara los decoradores pero no el pipe. Sin estos casos,
+aflojarle el `@IsUUID()` a `CreateRecuentoDto.ubicacionId` pasaría en verde.
+
+📌 **Lo que se afloja NO es el tapón, y la primera redacción de este párrafo decía que sí.**
+El tapón que fijaba todo recuento al local vivía en el service —`localDe(tenantId)`, en
+`RecuentosService.create`— y la Tarea 11 lo sacó de ahí; el campo del DTO **nació requerido**
+en esa misma tarea, nunca tuvo `@IsOptional()` que devolverle. Lo que estos casos protegen es
+más chico y más concreto: que el campo siga siendo obligatorio en el borde.
+
+**Los tres mutantes, corridos:** agregarle `@IsOptional()` a `ubicacionId`, a `origenId` y a
+`destinoId` mata los tres casos, uno cada uno. Revertidos y verificados contra el reinicio del
+watcher del backend (`File change detected` a las 22:57:20, `Seed complete` a las 22:57:22).
+
+**Qué compra la aserción sobre el mensaje, medido.** Los tres afirman que el 400 nombra SU
+campo, con el resto del body válido; los dos de traslados afirman además que **no** nombra el
+otro. La primera redacción de este párrafo decía que sin eso los dos casos de traslados
+medirían uno solo, y **es falso**: se corrió el mutante —sacarle el `@IsUUID()` a `destinoId`—
+y el caso «sin destinoId» **no da 400 sino 404**: con `whitelist: true` el pipe descarta la
+propiedad que se quedó sin decoradores, así que el id llega `NULL` al `SELECT … FOR SHARE` de
+`TrasladosService.create` y lo frena el `if (!origen || !destino)` de ahí abajo. **No es
+`UbicacionesService.findOneOrFail`** —`TrasladosService` no lo llama ni podría: su módulo no
+importa `UbicacionesModule`—; ese sí es el mecanismo en merma, recuento y ajuste manual, y la
+primera corrección de este párrafo se lo atribuyó a traslados por vecindad.
+
+O sea que cada caso ya lo mata su propio mutante **por el status**, y los dos son distintos
+sin mirar el mensaje.
+
+Lo que la aserción del mensaje protege es otra cosa, y vale igual: que el caso no pase **por
+la razón equivocada**. Un 400 que viniera de otro campo del mismo body —un `motivoTrasladoId`
+mal armado, una línea sin `cantidad`— dejaría el test verde sin probar nada de lo suyo. Es un
+guard sobre el control, no una red extra sobre producción; conviene no venderlo como lo
+segundo.
+
+### Las citas de código a la spec y al plan borrados: 30 eran de bodegas, 12 no
+
+El barrido de las citas **con ruta completa** ya se había hecho al cerrar el frente. Quedaban
+las que nombran una sección o una tarea sin ruta, y la entrada avisaba que el primer paso era
+clasificar. Lo era, y por una razón más fuerte de la que estaba escrita:
+
+⚠️ **Las dos specs colisionan en la numeración, y no en un número suelto.** De las diez
+secciones del spec borrado que el código cita (la tabla de abajo), **cinco caen también en la
+otra spec**: `§ 2`, `§ 4.1`, `§ 4.3`, `§ 6` y `§ 8`. La de la reserva de stock
+—[`2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md),
+que sigue en disco— tiene una sección con **cada uno de esos cinco números**, y las secciones
+que colisionan no se parecen: `§ 8` es «Bordes» en una y «Riesgos» en la otra.
+
+La causa es aritmética, no un formato compartido: las dos numeran secuencialmente desde 1, la
+de la reserva llega a 8 secciones y la de bodegas a 12, así que **del 1 al 8 coinciden todas**.
+Por eso va a repetirse entre cualquier par de specs numeradas — hoy son 17 de las 79 que hay
+en disco. (Molde de facto sí hay, aunque no un archivo de plantilla: 8 de esas 17 abren con
+`## 1. Contexto y problema` y 5 siguen con `## 2. Decisiones de diseño`. Estas dos no lo usan,
+así que su colisión no viene de ahí.)
+
+Clasificar por número da un resultado que parece correcto y no lo es — hay que leer **qué
+dice** cada cita. Las tres correcciones de este párrafo las levantó la revisión: nombraba tres
+de los cinco números, explicaba la colisión con una plantilla que no existe, y después con una
+aritmética que tampoco medía ("las dos pasan de ocho": la de la reserva llega a ocho).
+
+De las 42 líneas que devuelve `grep -rn "spec § "`, **30 eran del spec borrado** y se
+repuntaron a
+[`docs/features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md) con el heading que
+las resuelve:
+
+| Sección de la spec borrada | Heading del doc de la feature |
+|---|---|
+| `§ 2` | «El corte: qué es una bodega, y qué no» |
+| `§ 3.2` | «Por qué el costo no se parte por ubicación (decisión 3)» |
+| `§ 4.1` | «What is it?» |
+| `§ 4.3` | «Por qué un traslado son dos filas de kardex, no una» |
+| `§ 5.3` | «El tope del traslado es asimétrico (decisión 6)» |
+| `§ 5.4` | «GET /items, GET /items/:id» |
+| `§ 5.5` | «POST /traslados» |
+| `§ 6` | «Frontend» |
+| `§ 8` | «Bordes» |
+| `§ 10` (⚠️ no es equivalencia, ver abajo) | «Entity & Database» |
+
+⚠️ **Nueve filas de esa tabla son equivalencias; la décima no.** El `§ 10` del spec borrado
+era «Verificación», y el doc de la feature no tiene dónde poner el porqué que esa cita
+sostenía —*"medir contra el 100% del stock en una sola ubicación mide un caso que no
+existe"*—. Se la mandó a «Entity & Database», que documenta el hecho (la bodega demo del
+seed) pero no el porqué, y el comentario del seeder lo dice de frente. El que use la tabla de
+molde, que sepa que esa fila es un remap y no una traducción.
+
+Las que sobreviven **son todas de la reserva de stock** (`§ 4.2` y `§ 4.1b`) y su spec existe:
+se dejaron como estaban.
+
+⚠️ **Cuidado con ese 42: es una propiedad del grep, no del repo.** La revisión encontró una
+cita partida en dos líneas —`CatalogoGrid.nuxt.spec.ts:102-103`, con el `§ 4.2` arrancando
+renglón— que ninguna búsqueda por línea ve, y tres más de la misma conducta escritas con otra
+forma (`la § 4.1b de la spec`, `de la spec (§ 4.2)`). Del lado de bodegas el barrido igual
+quedó completo —se verificó que ninguna de las suyas estuviera partida—, pero el conteo de
+sobrevivientes que salía de ahí estaba corto. Lo que queda vivo se describe por conducta en
+[`pendientes.md`](pendientes.md), no por número.
+
+📌 **La forma de la cita, para que el próximo no la adivine:** entre guillemets va el texto
+del heading **sin los backticks del markdown** —«GET /items, GET /items/:id», «POST /traslados»—,
+que es como ya lo citaba el repo antes de este barrido (`items.service.ts:113`,
+`items.service.spec.ts:336`). Lo que **sí** va textual es el resto, incluido el `(decisión 3)`
+/ `(decisión 6)` que la revisión pidió no comerse: eso es texto del heading, no formato.
+
+Del lado de `… del plan`, **la mayoría de las coincidencias no eran citas**: `del plano` de
+salones, `del planner` de Postgres y el `plan de abajo` del `EXPLAIN` en
+`traslados.e2e-spec.ts` entran todas en ese grep. Punteros muertos al plan de bodegas había
+**tres** —`inventario.service.spec.ts`, `sobreventa-concurrente-ubicacion.e2e-spec.ts` e
+`inventario-serie-ubicacion.e2e-spec.ts`—, y se repuntaron. Un cuarto, el docblock de
+`recuentos-stock-por-ubicacion.e2e-spec.ts`, ya decía él mismo que el plan estaba borrado y
+dónde quedó lo durable: se dejó.
+
+📌 **El "31" de la entrada del backlog no reproduce, y la revisión lo midió:** sobre el árbol
+que este barrido clasificó (`003096d8`) el mismo grep da **33**, y sobre el commit donde se
+escribió el número daba 30. Las tres que aparecen en el medio las agregó el docblock del
+`EXPLAIN` de `traslados.e2e-spec.ts`, que habla del plan de Postgres. O sea que el conteo no
+solo medía la forma en vez de la conducta —de 33 coincidencias, 3 eran citas rotas—: además
+**se mueve solo**, porque el patrón lo genera cualquiera que escriba "del plano" o "del
+planner". Un número así no vale como criterio de completitud; lo que vale es el criterio con
+el que se clasifica.
+
+⚠️ **Lo que este cierre NO cerró, y lo reclamó la revisión:** la entrada original se definía
+como *"nombran una sección **o una tarea**"*, y esto cierra la mitad "sección". Las citas
+`Tarea N` al plan borrado siguen vivas, y al borrarse la entrada quedaron sin dueño por un
+rato. Volvieron a [`pendientes.md` § 1](pendientes.md) como entrada propia, que es donde
+tenían que estar: no se resuelven con el mismo gesto —una tarea no tiene heading equivalente
+en el doc— así que no eran la misma entrada.
+
+---
+
 ## Las dos mediciones que quedaban del frente de bodegas (cerradas 2026-09-07)
 
 Salen de [`pendientes.md` § 2](pendientes.md). Las dos eran *"medir primero"*, y en las dos la

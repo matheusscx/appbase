@@ -30,8 +30,9 @@ interface MotivoDiferenciaInventarioItem {
 interface ItemResponse {
   id: string;
   stock: string | null;
-  /** El stock DEL LOCAL (spec § 5.4). `stock` a secas es el TOTAL de todas
-   *  las ubicaciones — no sirve para afirmar "el local no se movió". */
+  /** El stock DEL LOCAL (`docs/features/bodegas-y-traslados.md`, «GET /items,
+   *  GET /items/:id»). `stock` a secas es el TOTAL de todas las ubicaciones —
+   *  no sirve para afirmar "el local no se movió". */
   stockVendible: string | null;
 }
 interface RecuentoCreateResponse {
@@ -1604,6 +1605,36 @@ describe('Recuentos — por ubicación (Tarea 11)', () => {
     expect((resDetalle.body as RecuentoDetalleResponse).ubicacionId).toBe(
       bodegaId,
     );
+  });
+
+  // La otra mitad del rechazo de `ubicacionId`: el caso de abajo prueba que un
+  // id AJENO no sirve, pero no que el campo sea OBLIGATORIO. Lo obligatorio lo
+  // sostiene el `@IsUUID()` sin `@IsOptional()` de `CreateRecuentoDto`, y eso
+  // solo corre dentro del `ValidationPipe`: un test de DTO con
+  // `plainToInstance` + `validate` dispara los decoradores pero no el pipe, así
+  // que la única red del "requerido" es un e2e por HTTP. Sin este caso, volver a
+  // aflojarle ese decorador pasaría en verde.
+  //
+  // ⚠️ **El mutante es el DTO, no el service.** Restaurar el `localDe(tenantId)`
+  // que la Tarea 11 sacó de `RecuentosService.create` NO mata este caso: el
+  // pipe rechaza el body antes de llegar al service, así que el default nunca
+  // se ejecuta. Este caso protege el borde —que el campo siga siendo
+  // obligatorio—, que es más chico que "el recuento no vuelve a fijarse al
+  // local" y conviene no confundirlos.
+  it('POST /recuentos sin ubicacionId → 400, y el mensaje nombra el campo', async () => {
+    const itemId = await crearProductoConStockLocal('1');
+
+    const res = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+
+    expect(res.status).toBe(400);
+    // El resto del body es válido, así que sin esta segunda aserción el caso
+    // seguiría verde con un 400 que viniera de cualquier otro campo y dejaría
+    // de probar lo suyo.
+    const mensaje = (res.body as { message: string[] }).message.join(' ');
+    expect(mensaje).toContain('ubicacionId');
   });
 
   it('un ubicacionId de otro tenant en POST /recuentos da el mismo 404 opaco que uno inexistente', async () => {

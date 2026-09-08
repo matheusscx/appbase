@@ -132,8 +132,8 @@ function motivoLabel(mov: Movimiento): string {
   return base
 }
 
-// La columna Ubicación se dibuja siempre que hayBodegas (spec § 6): con una
-// sola ubicación, todas las filas dirían lo mismo.
+// La columna Ubicación se dibuja siempre que hayBodegas (`docs/features/bodegas-y-traslados.md`,
+// «Frontend»): con una sola ubicación, todas las filas dirían lo mismo.
 const columns = computed<TableColumn<Movimiento>[]>(() => [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { accessorKey: 'itemNombre', header: 'Producto' },

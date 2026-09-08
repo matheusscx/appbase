@@ -348,6 +348,11 @@ reseteó la base.
 selector de ubicación se **esconde** —escondido, no deshabilitado— y el `ubicacionId` lo
 completa el frontend solo. La primera bodega los hace aparecer en las cuatro pantallas.
 
+La misma condición gobierna **lo que solo informa**: con una sola ubicación, la columna
+Ubicación del kardex y su filtro tampoco se dibujan, y la ubicación del encabezado de una
+sesión de recuento no se muestra. No es la misma razón que la del selector —acá no hay nada
+que completar— pero sí el mismo criterio: un dato que siempre dice lo mismo es ruido.
+
 ---
 
 ## ⛔ El DTE 52 no se emite
@@ -387,6 +392,15 @@ stock, y **dos traslados cruzados del mismo par de productos** — el caso que e
 orden de locks descrito arriba (ver el docblock del test para la medición completa: qué
 mutante lo mata y cuáles no).
 
+Los cuatro endpoints que escriben eligiendo ubicación —merma, ajuste manual, recuento y
+traslado— tienen además **probado por HTTP que el campo es obligatorio**: sin él, 400. Es la
+única red que existe sobre ese "requerido", porque un test de DTO con `plainToInstance` +
+`validate` dispara los decoradores pero no el `ValidationPipe`.
+
+Los de recuento y traslado afirman además **que el 400 nombra su campo** (y el de traslado,
+que no nombra el otro de los dos): es lo que distingue "rebotó por lo que queríamos" de
+"rebotó". Los de merma y ajuste manual todavía miran solo el status.
+
 ### E2E (frontend)
 
 `frontend/app/pages/configuracion/ubicaciones.nuxt.spec.ts`,
@@ -413,7 +427,9 @@ ubicación.
 ## Notes
 
 Backlog que este frente dejó anotado, con su porqué: [`agent/pendientes.md`](../agent/pendientes.md).
-Los seis huecos con los que cerró se resolvieron el 2026-09-07; lo que sigue abierto del
-frente en la § 1 es el 400 de "campo de ubicación requerido" que le falta a recuentos y a
-traslados, y el barrido de las citas `spec § N` que quedaron sin destino. Cierre completo, con
-lo construido y lo resuelto después: [`agent/resueltos.md`](../agent/resueltos.md).
+Los seis huecos con los que cerró se resolvieron el 2026-09-07, y ese mismo día salieron los
+dos mecánicos que quedaban: el 400 de "campo de ubicación requerido" de recuentos y traslados,
+y el barrido de las citas al plan y a la spec borrados. Lo que sigue anotado en la § 1 del
+backlog son dos residuos de ese barrido —las citas `spec § N` que no dicen de qué spec son, y
+las `Tarea N` del plan borrado—. Cierre completo, con lo construido y lo resuelto después:
+[`agent/resueltos.md`](../agent/resueltos.md).

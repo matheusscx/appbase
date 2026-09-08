@@ -291,7 +291,8 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(resDetalle.status).toBe(200);
-    // `stockVendible` es el stock DEL LOCAL (ver tabla de nombres del plan):
+    // `stockVendible` es el stock DEL LOCAL (`docs/features/bodegas-y-traslados.md`,
+    // «GET /items, GET /items/:id»):
     // 3, no 5 — las 2 unidades de la bodega no cuentan acá.
     expect((resDetalle.body as ItemDetalleResponse).stockVendible).toBe(
       '3.0000',

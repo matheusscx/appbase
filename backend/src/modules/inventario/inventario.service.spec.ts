@@ -136,7 +136,8 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // stock_ubicacion (Tarea 4 del plan de bodegas): único dueño del saldo.
+  // stock_ubicacion (`docs/features/bodegas-y-traslados.md`,
+  // «Entity & Database»): único dueño del saldo.
   // `item_producto.stock` se borró — el chokepoint escribe acá y solo acá.
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — stock_ubicacion (único dueño del saldo)', () => {

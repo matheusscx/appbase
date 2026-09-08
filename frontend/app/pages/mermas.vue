@@ -157,8 +157,9 @@ async function cargarCatalogos() {
 
 function abrirRegistrar() {
   form.value = emptyForm()
-  // Con una sola ubicación el selector no se dibuja (spec § 6): el cliente
-  // completa el local directamente, sin que el usuario tenga que elegirlo.
+  // Con una sola ubicación el selector no se dibuja (`docs/features/bodegas-y-traslados.md`,
+  // «Frontend»): el cliente completa el local directamente, sin que el usuario
+  // tenga que elegirlo.
   if (!hayBodegas.value && local.value) {
     form.value.ubicacionId = local.value.id
   }

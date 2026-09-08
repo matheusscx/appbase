@@ -372,8 +372,9 @@ const columns: TableColumn<LineaRow>[] = [
                 :color="estadoRecuentoColor(detalle.estado)"
                 variant="subtle"
               />
-              <!-- Solo si hayBodegas (spec § 6): con una sola ubicación, decirla
-                   siempre dice lo mismo. No editable — la sesión no cambia de lugar. -->
+              <!-- Solo si hayBodegas (`docs/features/bodegas-y-traslados.md`, «Frontend»):
+                   con una sola ubicación, decirla siempre dice lo mismo.
+                   No editable — la sesión no cambia de lugar. -->
               <UBadge
                 v-if="hayBodegas"
                 :label="detalle.ubicacionNombre ?? 'Ubicación eliminada'"

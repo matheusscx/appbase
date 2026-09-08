@@ -166,9 +166,9 @@ export class UbicacionesService {
     const escritura = this.db.transaccion(async (manager) => {
       const ubicacion = await this.findOneOrFail(tenantId, id, manager, true);
       if (ubicacion.tipo === 'local' && dto.activo === false) {
-        // Decisión del owner (spec § 4.1): el local no se desactiva, porque
-        // es la única ubicación desde la que se vende — desactivarla dejaría
-        // al tenant sin forma de vender.
+        // Decisión del owner: el local no se desactiva, porque es la única
+        // ubicación desde la que se vende — desactivarla dejaría al tenant sin
+        // forma de vender (`docs/features/bodegas-y-traslados.md`, «What is it?»).
         throw new BadRequestException(
           'El local no se puede desactivar: es la ubicación desde la que se vende',
         );

@@ -13,7 +13,8 @@ import {
  * tenant. Lleva origen, destino, motivo y comentario; las cantidades no viven
  * acá sino en el kardex: cada línea deja **dos** filas de
  * `movimientos_inventario` —salida en el origen, entrada en el destino—
- * colgadas de este `traslado_id` (spec § 4.3).
+ * colgadas de este `traslado_id` (`docs/features/bodegas-y-traslados.md`,
+ * «Por qué un traslado son dos filas de kardex, no una»).
  *
  * ⛔ **No emite nada.** El documento chileno del traslado es el **DTE 52** y
  * **viaja con la mercadería**: esta fila no lo reemplaza y tenerla registrada
