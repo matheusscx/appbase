@@ -5,10 +5,10 @@
  * a una BD ya despejada. Un número alto solo alargaría el tiempo hasta
  * devolverle el error a un cajero que está esperando.
  *
- * Consumidores hoy: `ventas.service.ts`, `salones.service.ts` y —desde la
- * Tarea 9— `traslados.service.ts`. Vivía duplicado a propósito entre ventas
- * y salones hasta que un tercer consumidor lo pidió; la regla del repo era
- * "el que necesite una tercera copia, extrae las tres".
+ * Consumidores hoy: `ventas.service.ts`, `salones.service.ts` y —desde el
+ * frente de bodegas y traslados— `traslados.service.ts`. Vivía duplicado a
+ * propósito entre ventas y salones hasta que un tercer consumidor lo pidió; la
+ * regla del repo era "el que necesite una tercera copia, extrae las tres".
  */
 export const MAX_REINTENTOS_DEADLOCK = 2;
 

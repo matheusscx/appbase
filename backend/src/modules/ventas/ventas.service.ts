@@ -858,18 +858,18 @@ export class VentasService {
             loteId: linea.loteId,
           });
         } catch (e) {
-          // Tarea 15 ("bodegas y traslados"): el chokepoint de inventario
+          // Frente de bodegas y traslados: el chokepoint de inventario
           // (`moverCantidad`) rechaza con un mensaje genérico —"Stock
           // insuficiente para la salida", sin nombrar el ítem ni el lugar—
           // porque no sabe qué línea de qué venta lo llamó. Acá SÍ se sabe
-          // (`item.nombre`, `cantidadCanonica`), así que el 400 se
-          // reemplaza por el mismo enriquecido de `validarStockAlPedir`
-          // (mismo texto, mismo `itemNombre`/`faltante`/`ubicaciones`): el
-          // garzón/cajero ve "dónde está" tanto si el rechazo llega al
-          // PEDIR (salón) como al COBRAR directo (POS). Solo se re-arma
-          // cuando el motivo es justo ESE —modo cantidad, sin unidades ni
-          // lote— para no pisar el mensaje propio de series/lotes, que
-          // hablan de unidades concretas y no de "cuánto queda".
+          // (`item.nombre`, `cantidadCanonica`), así que el 400 se reemplaza
+          // por el mismo enriquecido de `validarStockAlPedir` (mismo texto,
+          // mismo `itemNombre`/`faltante`/`ubicaciones`): el garzón/cajero ve
+          // "dónde está" tanto si el rechazo llega al PEDIR (salón) como al
+          // COBRAR directo (POS). Solo se re-arma cuando el motivo es justo ESE
+          // —modo cantidad, sin unidades ni lote— para no pisar el mensaje
+          // propio de series/lotes, que hablan de unidades concretas y no de
+          // "cuánto queda".
           if (
             e instanceof BadRequestException &&
             e.message === 'Stock insuficiente para la salida'

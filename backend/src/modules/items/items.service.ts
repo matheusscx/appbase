@@ -109,8 +109,8 @@ type GrupoDetalle = {
  *
  * ⚠️ Restar de **`vendible`, no de `stock` (el total)**: si existe una bodega,
  * lo que hay en el otro lado del tenant no es lo que la mesa puede pedir. Con
- * un solo local los dos números coinciden y nada cambia (Tarea 3a,
- * `docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»).
+ * un solo local los dos números coinciden y nada cambia
+ * (`docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»).
  *
  * `vendible === null` (el ítem no lleva stock: un servicio como opción de
  * grupo) sale `null`, no `0`: la ausencia de stock no es falta de stock.
@@ -119,8 +119,9 @@ type GrupoDetalle = {
  * kardex (`numeric(18,4)`), la misma en la que viaja `stock`, para que las dos
  * se puedan comparar sin reformatear. Y **puede dar negativo**, igual que el
  * `stockDisponible` de `GET /items`: lo no bloqueante suma al comprometido sin
- * frenar al pedir (spec § 4.2), así que clamplear a 0 escondería justo el caso
- * que el encargado necesita ver.
+ * frenar al pedir (§ 4.2 de
+ * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`), así
+ * que clamplear a 0 escondería justo el caso que el encargado necesita ver.
  */
 function disponibleDe(
   comprometido: Map<string, Decimal>,
@@ -260,7 +261,8 @@ export interface LineaConsumo {
  * vino a eliminar, reintroducido por el camino que lo cierra.
  *
  * - `cantidad` — el total. Es lo que OCUPA, y lo que lee `comprometidoPorItem`:
- *   lo no bloqueante también aparta (spec § 4.2, decisión 4 del owner).
+ *   lo no bloqueante también aparta (decisión 4 del owner, § 4.2 de
+ *   `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`).
  * - `cantidadBloqueante` — solo las ocurrencias que frenan. Es lo que TOPEA, y
  *   lo único que mira `validarStockAlPedir`.
  *
@@ -320,15 +322,16 @@ export class ItemsService {
    * `localIdx` es la posición ($N) del `ubicacion_id` del local dentro del
    * array de params del llamador — el propio llamador lo resuelve UNA vez por
    * request con `UbicacionesService.localDe` y lo empuja a su array de params
-   * (Tarea 3a). No es un valor fijo porque los tres call sites (`findAll`,
-   * `cargarBasePorIds`, `findOne`) arman params de largo distinto.
+   * (frente de bodegas y traslados). No es un valor fijo porque los tres call
+   * sites (`findAll`, `cargarBasePorIds`, `findOne`) arman params de largo
+   * distinto.
    *
    * `stock` sigue siendo el TOTAL del tenant (`SUM` sin filtrar), y
    * `stock_vendible` lo acota a esa ubicación (`FILTER`) — los dos agregados
-   * salen de `stock_ubicacion`, único dueño del saldo desde la Tarea 4
-   * (`item_producto.stock` ya no existe). `LEFT JOIN LATERAL`, no `JOIN` +
-   * `GROUP BY`: una sola consulta para todas las filas de la página, nunca
-   * una por fila.
+   * salen de `stock_ubicacion`, único dueño del saldo desde el frente de
+   * bodegas y traslados (`item_producto.stock` ya no existe). `LEFT JOIN
+   * LATERAL`, no `JOIN` + `GROUP BY`: una sola consulta para todas las filas de
+   * la página, nunca una por fila.
    *
    * `ON ip.item_id IS NOT NULL` y no `ON TRUE`: un ítem sin fila en
    * `item_producto` (servicio, suscripción) tiene que seguir dando `stock`
@@ -3128,11 +3131,12 @@ export class ItemsService {
 
   async findLotes(tenantId: string, itemId: string) {
     // `cantidadDisponible` ya no vive en `item_lote`: se deriva sumando
-    // `lote_ubicacion` (Tarea 7, `LEFT JOIN` porque un lote recién creado
-    // puede no tener fila todavía en ninguna ubicación). El desglose por
-    // lugar sale de la misma tabla, en una segunda query — agregarlo acá con
-    // `json_agg` mezclaría filas de `item_lote` con las N de su desglose y
-    // complicaría el mapeo sin necesidad; son pocas filas por ítem.
+    // `lote_ubicacion` (frente de bodegas y traslados; `LEFT JOIN` porque un
+    // lote recién creado puede no tener fila todavía en ninguna ubicación). El
+    // desglose por lugar sale de la misma tabla, en una segunda query —
+    // agregarlo acá con `json_agg` mezclaría filas de `item_lote` con las N de
+    // su desglose y complicaría el mapeo sin necesidad; son pocas filas por
+    // ítem.
     const rows: {
       lote_id: string;
       codigo_lote: string;
@@ -4737,9 +4741,10 @@ export class ItemsService {
    * mesa quedaba trabada. Este guard mueve ese rechazo al momento en que
    * todavía se puede pedir otra cosa.
    *
-   * **Solo frena lo bloqueante** (decisión del owner, spec § 4.2). Lo no
-   * bloqueante igual suma al comprometido —lo hace `comprometidoPorItem`— y por
-   * eso su disponible puede quedar negativo: ocupa, pero no impide pedir.
+   * **Solo frena lo bloqueante** — decisión del owner, § 4.2 de
+   * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`. Lo
+   * no bloqueante igual suma al comprometido —lo hace `comprometidoPorItem`— y
+   * por eso su disponible puede quedar negativo: ocupa, pero no impide pedir.
    *
    * ⚠️ **Lo bloqueante es una CANTIDAD, no un flag del ítem**
    * (`ConsumoDeItem.cantidadBloqueante`). El mismo ingrediente puede entrar por
@@ -4789,8 +4794,8 @@ export class ItemsService {
    *    (`recargos → descuentos → item_receta → item_combo → items`) no menciona
    *    `item_producto`. Citarla acá mandaba al próximo a la sección equivocada.
    *
-   *    Tarea 3a: bajo ese mismo lock, el saldo que se lee es el de
-   *    `stock_ubicacion` acotado al local (`stockVendible`), no
+   *    Desde bodegas y traslados: bajo ese mismo lock, el saldo que se lee es
+   *    el de `stock_ubicacion` acotado al local (`stockVendible`), no
    *    `item_producto.stock` (el total del tenant) — ver el comentario de la
    *    query, más abajo, para el porqué.
    * 2b. El saldo, en un **statement aparte**, emitido después del lock. No es
@@ -4863,7 +4868,8 @@ export class ItemsService {
         : c.cantidadBloqueante;
 
     // Solo entra al tope lo que tiene AL MENOS UNA ocurrencia bloqueante, y
-    // entra por esa cantidad: lo no bloqueante ocupa pero no frena (spec § 4.2).
+    // entra por esa cantidad: lo no bloqueante ocupa pero no frena (§ 4.2 de
+    // `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`).
     //
     // Un neto ≤ 0 no se mira ni se lockea: bajar la cantidad solo LIBERA, y
     // soltar stock no puede sobrevender. Filtrar acá —antes del lock— además
@@ -4892,16 +4898,16 @@ export class ItemsService {
       // El `ORDER BY` es el que fija el orden de bloqueo: el nodo `LockRows`
       // va por encima del `Sort`, así que las filas se lockean ya ordenadas.
       //
-      // ⛔ Tarea 3a: esto cambió lo que LEE, no lo que LOCKEA (ruling del
-      // pre-flight, 2026-09-06), y la Tarea 4 lo dejó así para siempre: el
-      // `FOR UPDATE OF ip` sigue tomando el lock de `item_producto`, nunca de
+      // ⛔ Bodegas y traslados cambió lo que LEE, no lo que LOCKEA (ruling del
+      // pre-flight, 2026-09-06), y lo dejó así para siempre: el `FOR UPDATE OF
+      // ip` sigue tomando el lock de `item_producto`, nunca de
       // `stock_ubicacion` — su fila puede no existir todavía (un producto que
       // nunca se movió en esa ubicación), y `FOR UPDATE` sobre una fila
       // inexistente no lockea nada. `item_producto` es el ancla porque su fila
       // siempre existe (docs/patterns/backend.md §15). Bajo ese lock, lo único
       // que cambia es de dónde sale el saldo: `stock_ubicacion` acotado al
-      // local, no un total materializado en `item_producto` (esa columna ya
-      // no existe).
+      // local, no un total materializado en `item_producto` (esa columna ya no
+      // existe).
       //
       // ⛔ El saldo NO sale de acá. Leerlo en el MISMO statement que toma el
       // lock lo devolvía viejo: bajo READ COMMITTED el snapshot se toma antes
@@ -4940,11 +4946,12 @@ export class ItemsService {
     // ⚠️ Esto corre **sosteniendo el lock de arriba** —tiene que ser así, ver
     // el paso 3 del docblock—, así que su costo es tiempo de lock sobre los
     // ítems que se están pidiendo. La ventana está medida y acotada: con los
-    // dos índices que agregó la Tarea 2 (`cuenta_lineas(tenant_id, cuenta_id)`
-    // y `cuentas(tenant_id, estado)`) la consulta del comprometido mide
-    // 0,36 ms. Si esa medición deja de valer —muchísimas cuentas abiertas, un
-    // índice que se cae— esto es lo primero que hay que volver a mirar, porque
-    // dos garzones pidiendo el mismo ítem se serializan acá.
+    // dos índices que agregó el frente de la reserva de stock
+    // (`cuenta_lineas(tenant_id, cuenta_id)` y `cuentas(tenant_id, estado)`) la
+    // consulta del comprometido mide 0,36 ms —medido a escala real, 60k líneas
+    // y 8k cuentas—. Si esa medición deja de valer —muchísimas cuentas abiertas,
+    // un índice que se cae— esto es lo primero que hay que volver a mirar,
+    // porque dos garzones pidiendo el mismo ítem se serializan acá.
     const comprometido = await this.comprometidoPorItem(tenantId);
 
     for (const [itemId, c, neto] of bloqueantes) {
@@ -4988,8 +4995,8 @@ export class ItemsService {
         // "Este pedido necesita 2" invitaba a leer el 3 y no entender de dónde
         // salía el 2; así la frase es cierta desde los dos lados.
         //
-        // Tarea 15 ("bodegas y traslados"): además de nombrar el ítem, el 400
-        // dice DÓNDE está lo que falta — ver `errorStockInsuficiente`.
+        // Frente de bodegas y traslados: además de nombrar el ítem, el 400 dice
+        // DÓNDE está lo que falta — ver `errorStockInsuficiente`.
         throw await this.errorStockInsuficiente(
           tenantId,
           itemId,
@@ -5003,9 +5010,9 @@ export class ItemsService {
   }
 
   /**
-   * Arma el 400 de "no hay stock" con dónde está lo que falta (Tarea 15,
-   * "bodegas y traslados"): nombra el ítem, cuánto falta y —si hay stock en
-   * otra ubicación— dónde, más los datos sueltos (`itemNombre`, `faltante`,
+   * Arma el 400 de "no hay stock" con dónde está lo que falta (frente de
+   * bodegas y traslados): nombra el ítem, cuánto falta y —si hay stock en otra
+   * ubicación— dónde, más los datos sueltos (`itemNombre`, `faltante`,
    * `ubicaciones: [{ ubicacionId, nombre, stock }]`) para que el cliente
    * ofrezca la acción (un traslado precargado) sin parsear el `message`.
    *
@@ -5018,14 +5025,13 @@ export class ItemsService {
    * literalmente el mismo armado.
    *
    * ⚠️ **Medido contra el caso real antes de escribir el texto** (0 en el
-   * local, 10 en la bodega, brief de la Tarea 15): el mensaje viejo era
-   * `Stock insuficiente de "X": quedan 0 kg y lo que se está agregando
-   * necesita 5 kg` — nombraba el ítem pero no el lugar, y ni sugería que
-   * "0" era del LOCAL y no del tenant entero (que es lo que muestra `stock`
-   * de `GET /items` desde la Tarea 3a). Acá se agrega "en el local" a la
-   * primera mitad —sin tocar el resto: `restante` y `neto` se siguen
-   * mostrando tal cual, mismo criterio de arriba— y, si hay bodegas con
-   * saldo, se le suma la segunda mitad con la de más stock.
+   * local, 10 en la bodega): el mensaje viejo era `Stock insuficiente de "X":
+   * quedan 0 kg y lo que se está agregando necesita 5 kg` — nombraba el ítem
+   * pero no el lugar, y ni sugería que "0" era del LOCAL y no del tenant entero
+   * (que es lo que muestra `stock` de `GET /items` desde ese frente). Acá se
+   * agrega "en el local" a la primera mitad —sin tocar el resto: `restante` y
+   * `neto` se siguen mostrando tal cual, mismo criterio de arriba— y, si hay
+   * bodegas con saldo, se le suma la segunda mitad con la de más stock.
    *
    * Sin stock en NINGUNA bodega, `ubicaciones` viene `[]` y el mensaje se
    * queda con la primera mitad: no se inventa una bodega que no tiene nada.
@@ -5068,12 +5074,12 @@ export class ItemsService {
 
     return new BadRequestException({
       message,
-      // El id, no solo el nombre: en una receta de varios ingredientes el
-      // que faltó NO es el `itemId` que el cliente pidió (ese es el plato),
-      // así que sin esto el frontend no puede armar el traslado precargado
-      // "con ese producto" (Tarea 15) — tendría que adivinar cuál de los
-      // ingredientes es, y adivinar por nombre es exactamente lo que "sin
-      // parsear texto" vino a evitar.
+      // El id, no solo el nombre: en una receta de varios ingredientes el que
+      // faltó NO es el `itemId` que el cliente pidió (ese es el plato), así que
+      // sin esto el frontend no puede armar el traslado precargado "con ese
+      // producto" (frente de bodegas y traslados) — tendría que adivinar cuál
+      // de los ingredientes es, y adivinar por nombre es exactamente lo que
+      // "sin parsear texto" vino a evitar.
       itemId,
       itemNombre,
       // Lo que falta cubrir, no `neto`: con `restante` negativo (lo no
@@ -5090,15 +5096,14 @@ export class ItemsService {
 
   /**
    * Envoltorio de `errorStockInsuficiente` para el chokepoint de
-   * `ventas.service.ts` (el tope al cobrar directo por POS, spec Tarea 15):
-   * a diferencia de `validarStockAlPedir`, ese camino no lockea ni lee el
-   * saldo del local de antemano —lo hace
+   * `ventas.service.ts` (el tope al cobrar directo por POS, frente de bodegas y
+   * traslados): a diferencia de `validarStockAlPedir`, ese camino no lockea ni
+   * lee el saldo del local de antemano —lo hace
    * `InventarioService.registrarMovimiento`, que ya rechazó el movimiento
-   * cuando este método corre—, así que acá se vuelve a leer. Correr FUERA
-   * del lock es seguro: esto va en el `catch` de un movimiento que YA
-   * falló (nunca llegó a escribir), la transacción de la venta sigue
-   * abierta y el saldo que se lee es el mismo que `registrarMovimiento`
-   * vio recién.
+   * cuando este método corre—, así que acá se vuelve a leer. Correr FUERA del
+   * lock es seguro: esto va en el `catch` de un movimiento que YA falló (nunca
+   * llegó a escribir), la transacción de la venta sigue abierta y el saldo que
+   * se lee es el mismo que `registrarMovimiento` vio recién.
    *
    * Público (a diferencia de `errorStockInsuficiente`) porque lo llama
    * `VentasService`, no un método de esta clase.
@@ -5170,12 +5175,13 @@ export class ItemsService {
    * cacheada (ver Decisions del diseño).
    *
    * Este es el pre-chequeo NO bloqueante de `venderComponentesCombo` (ver su
-   * docblock): decide si alcanza para vender el componente-receta ANTES de
-   * que `venderIngredientesReceta` empiece a deducir. Por eso lee lo mismo
-   * que decide el resto de la venta —`stock_ubicacion` acotado al LOCAL
+   * docblock): decide si alcanza para vender el componente-receta ANTES de que
+   * `venderIngredientesReceta` empiece a deducir. Por eso lee lo mismo que
+   * decide el resto de la venta —`stock_ubicacion` acotado al LOCAL
    * (`localId`), no `ip.stock` (el total)—: si mirara el total podría decir
    * "alcanza" con stock real solo en una bodega, y la deducción de verdad
-   * fallaría a mitad de camino (Tarea 3a, hallazgo de revisión).
+   * fallaría a mitad de camino (hallazgo de revisión del frente de bodegas y
+   * traslados).
    *
    * `LEFT JOIN`, no `JOIN`: un ingrediente sin fila en esa ubicación tiene
    * saldo CERO, no "no existe" — con `JOIN` desaparecería de `rows` y ese
@@ -5228,19 +5234,21 @@ export class ItemsService {
    * descuento dos mesas podían pedir la misma última unidad y el choque
    * estallaba al cobrar.
    *
-   * ⚠️ **Tarea 3a:** lo que se reparte es el stock **del local** (`stockVendible`
-   * / `stock_ubicacion` acotado a `localId`), no el total del tenant. Antes de
-   * bodegas los dos números coincidían y esto no se notaba; con una bodega, un
-   * combo o receta que dependa de un ingrediente guardado ahí no puede darse
-   * por disponible en el salón solo porque el TOTAL alcance — es exactamente
-   * el mismo error que `disponibleDe` (arriba en el archivo), un nivel más dentro,
-   * y el `disponible` de recetas/combos se rompería en silencio si no se corrige
-   * acá también. `stock` (el campo de `GET /items`) sigue significando lo que
-   * hay físicamente en TODO el tenant — es el saldo materializado de
-   * `movimientos_inventario` sumado por ubicación — y no cambia de sentido.
+   * ⚠️ **Desde bodegas y traslados:** lo que se reparte es el stock **del local**
+   * (`stockVendible` / `stock_ubicacion` acotado a `localId`), no el total del
+   * tenant. Antes de bodegas los dos números coincidían y esto no se notaba; con
+   * una bodega, un combo o receta que dependa de un ingrediente guardado ahí no
+   * puede darse por disponible en el salón solo porque el TOTAL alcance — es
+   * exactamente el mismo error que `disponibleDe` (arriba en el archivo), un
+   * nivel más dentro, y el `disponible` de recetas/combos se rompería en
+   * silencio si no se corrige acá también. `stock` (el campo de `GET /items`)
+   * sigue significando lo que hay físicamente en TODO el tenant — es el saldo
+   * materializado de `movimientos_inventario` sumado por ubicación — y no
+   * cambia de sentido.
    *
    * **Devuelve dos mapas porque son dos preguntas distintas** (decisión del
-   * owner, 2026-09-01, que enmienda la § 4.1b de la spec):
+   * owner, 2026-09-01, que enmienda la § 4.1b de
+   * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`):
    *
    * - `disponible` — receta y combo: el mínimo de unidades que permiten armar
    *   sus componentes **bloqueantes**, igual que
@@ -5256,10 +5264,11 @@ export class ItemsService {
    * `number`, que para plata o cantidades es lo que el proyecto no hace.
    *
    * ⚠️ **Los dos pueden ser negativos, y es correcto que se vea.** Lo
-   * comprometido incluye lo NO bloqueante (spec § 4.2: suma al comprometido
-   * pero no frena al pedir), así que un ingrediente que solo entra como no
-   * bloqueante puede pasarse del stock. Clamplear a 0 escondería justo el caso
-   * que el encargado necesita ver.
+   * comprometido incluye lo NO bloqueante (§ 4.2 de
+   * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`:
+   * suma al comprometido pero no frena al pedir), así que un ingrediente que
+   * solo entra como no bloqueante puede pasarse del stock. Clamplear a 0
+   * escondería justo el caso que el encargado necesita ver.
    */
   private async calcularDisponibilidadBatch(
     tenantId: string,
@@ -5445,7 +5454,9 @@ export class ItemsService {
    * que filtrar.
    *
    * Suma lo bloqueante Y lo no bloqueante: `bloqueante` decide quién FRENA al
-   * pedir, no quién ocupa (spec § 4.2). Por eso el resultado se resta entero.
+   * pedir, no quién ocupa (§ 4.2 de
+   * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`).
+   * Por eso el resultado se resta entero.
    *
    * ⚠️ **Degrada el error de unidad en vez de heredarlo.** `consumoDeLineas`
    * lanza `BadRequestException` cuando una unidad ya no se puede convertir
@@ -5458,12 +5469,11 @@ export class ItemsService {
    * menú entero. El costo de equivocarse es sobrevender ese ítem, que es
    * estrictamente lo de hoy; el 500 sería peor.
    *
-   * **Público desde la Tarea 9** (era privado): `TrasladosService` lo usa para
-   * el tope asimétrico —sacar del local topea contra lo apartado, sacar de una
-   * bodega no (`docs/features/bodegas-y-traslados.md`, «El tope del traslado
-   * es asimétrico (decisión 6)»)—, que es el segundo camino que necesita este
-   * número
-   * además del menú del POS.
+   * **Público desde bodegas y traslados** (era privado): `TrasladosService` lo
+   * usa para el tope asimétrico —sacar del local topea contra lo apartado,
+   * sacar de una bodega no (`docs/features/bodegas-y-traslados.md`, «El tope
+   * del traslado es asimétrico (decisión 6)»)—, que es el segundo camino que
+   * necesita este número además del menú del POS.
    */
   async comprometidoPorItem(tenantId: string): Promise<Map<string, Decimal>> {
     const rows: {

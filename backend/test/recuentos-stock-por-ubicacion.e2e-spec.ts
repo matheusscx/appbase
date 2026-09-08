@@ -7,21 +7,22 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * Red de la Tarea 3b (GIRAR 2/2) del plan de bodegas, reescrita en la Tarea 11
- * tal como su docblock anterior anunciaba (el plan de bodegas, borrado al
- * cerrar el frente; lo durable quedó en `docs/features/bodegas-y-traslados.md`).
+ * Red del frente de bodegas y traslados, reescrita al llegar el recuento por
+ * ubicación tal como su docblock anterior anunciaba (el plan del frente se
+ * borró al cerrarlo; lo durable quedó en
+ * `docs/features/bodegas-y-traslados.md`).
  *
  * ⚠️ **Este spec afirmaba otra cosa hasta el 2026-09-07** —que `stockSistema`
- * congelaba siempre el saldo del LOCAL, tapón deliberado de la Tarea 4—. La
- * Tarea 11 levanta ese tapón: la sesión de recuento ahora ELIGE ubicación, y
- * el congelado (`create`) y la aplicación del delta (`aplicar`) tienen que
- * mirar la MISMA — acá, la BODEGA, para ejercitar justo el camino que el
- * tapón bloqueaba.
+ * congelaba siempre el saldo del LOCAL, tapón deliberado de una etapa anterior
+ * del frente—. El recuento por ubicación levanta ese tapón: la sesión de
+ * recuento ahora ELIGE ubicación, y el congelado (`create`) y la aplicación del
+ * delta (`aplicar`) tienen que mirar la MISMA — acá, la BODEGA, para ejercitar
+ * justo el camino que el tapón bloqueaba.
  *
  * El escenario numérico sigue siendo el que motivó el tapón original: un
- * producto con 10 en el local y 20 en la bodega. Antes de la Tarea 11 no
- * había forma de contar la bodega por API — este spec es la prueba de que
- * ahora sí, y de que el delta aterriza ahí y no en el local.
+ * producto con 10 en el local y 20 en la bodega. Antes de ese cambio no había
+ * forma de contar la bodega por API — este spec es la prueba de que ahora sí, y
+ * de que el delta aterriza ahí y no en el local.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -178,10 +179,10 @@ describe('Recuentos — stock por ubicación (e2e)', () => {
 
     // 5. Crear la sesión de recuento SOBRE LA BODEGA y verificar que
     // `stockSistema` congeló el saldo de la bodega (20), no el del local (10)
-    // ni el total del tenant (30). Es el escenario exacto que el tapón de la
-    // Tarea 4 bloqueaba: si congelara el total, el operador que cuenta lo que
-    // ve en la bodega guardaría una diferencia falsa y aplicar movería stock
-    // que nunca se movió.
+    // ni el total del tenant (30). Es el escenario exacto que bloqueaba el
+    // tapón de una etapa anterior del frente: si congelara el total, el operador
+    // que cuenta lo que ve en la bodega guardaría una diferencia falsa y aplicar
+    // movería stock que nunca se movió.
     const resCrear = await request(app.getHttpServer())
       .post('/api/recuentos')
       .set('Authorization', `Bearer ${token}`)

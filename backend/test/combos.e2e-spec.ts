@@ -253,12 +253,12 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(movPan?.tipo).toBe('salida');
     expect(movPan?.motivo).toBe('venta');
 
-    // Stock resultante: papas 20-1=19, pan 10-1=9.
-    // El saldo **del local**, no la suma de todas las ubicaciones: con stock
-    // repartido en bodega (el seed lo reparte desde la Tarea 4), un total que
-    // no se mueve tapa exactamente la propiedad que este frente vino a fijar —
-    // que la venta descuenta del LOCAL. Un tenant tiene un solo local, así que
-    // el JOIN devuelve una fila.
+    // Stock resultante: papas 20-1=19, pan 10-1=9. El saldo **del local**, no
+    // la suma de todas las ubicaciones: con stock repartido en bodega (el seed
+    // lo reparte desde el frente de bodegas y traslados), un total que no se
+    // mueve tapa exactamente la propiedad que este frente vino a fijar — que la
+    // venta descuenta del LOCAL. Un tenant tiene un solo local, así que el JOIN
+    // devuelve una fila.
     const stockRows: { stock: string }[] = await ds.query(
       `SELECT COALESCE(SUM(su.stock), 0) AS stock
          FROM stock_ubicacion su

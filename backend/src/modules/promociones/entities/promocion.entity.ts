@@ -49,7 +49,10 @@ export class Promocion {
   @Column({ type: 'text', nullable: true })
   descripcion: string | null;
 
-  /** Pausa. Pausada no aplica y NO avisa (spec §Modelo de datos). */
+  /**
+   * Pausa. Pausada no aplica y NO avisa (§ Modelo de datos de
+   * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`).
+   */
   @Column({ type: 'boolean', default: true })
   activo: boolean;
 

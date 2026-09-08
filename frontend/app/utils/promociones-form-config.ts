@@ -3,13 +3,14 @@ import type { TipoPromocion, TipoScope } from '~/composables/usePromociones'
 /**
  * Qué campos pide el drawer según el `tipo` de promoción.
  *
- * A diferencia de `reglas-form-config.ts` esto NO es un espejo de un
- * catálogo (`tipos_regla`): `tipo` es una columna con CHECK, fija a los tres
- * valores de `TipoPromocion` — un tipo nuevo exige rama propia en el
- * evaluador, no hay caso "agregar un tipo sin tocar código" (diseño §Modelo
- * de datos). Por eso el mapa es `Record<TipoPromocion, …>`: al compilador ya
- * no se le puede colar una clave de menos, a diferencia del
- * `Record<string, TipoConfig>` de descuentos/recargos.
+ * A diferencia de `reglas-form-config.ts` esto NO es un espejo de un catálogo
+ * (`tipos_regla`): `tipo` es una columna con CHECK, fija a los tres valores de
+ * `TipoPromocion` — un tipo nuevo exige rama propia en el evaluador, no hay
+ * caso "agregar un tipo sin tocar código" (§ Modelo de datos de
+ * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`). Por eso el
+ * mapa es `Record<TipoPromocion, …>`: al compilador ya no se le puede colar una
+ * clave de menos, a diferencia del `Record<string, TipoConfig>` de
+ * descuentos/recargos.
  */
 export interface PromocionTipoConfig {
   /** `porcentaje` y `nxm`: el descuento en decimal (0.10 = 10%). */
@@ -27,8 +28,9 @@ export interface PromocionTipoConfig {
    */
   scopesMultiples: boolean
   /**
-   * Los tres tipos exigen `fechaInicio`/`fechaFin` — el guardarraíl heredado
-   * de eliminar `promocional` (CLAUDE.md, diseño §Modelo de datos): una
+   * Los tres tipos exigen `fechaInicio`/`fechaFin` — el guardarraíl heredado de
+   * eliminar `promocional` (CLAUDE.md y el § Modelo de datos de
+   * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`): una
    * campaña sin fecha de fin no se acepta. No es un eje que varíe por tipo;
    * queda como campo (en vez de una constante aparte) para que un tipo nuevo
    * que algún día quisiera la excepción no pueda colarse sin declararla acá.

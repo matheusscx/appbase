@@ -1,7 +1,7 @@
 // @vitest-environment nuxt
 //
-// Tarea 11 del frente "bodegas y traslados": el detalle de la sesión muestra
-// la ubicación en el encabezado, no editable, solo si hayBodegas (con una sola
+// Frente de bodegas y traslados: el detalle de la sesión muestra la ubicación
+// en el encabezado, no editable, solo si hayBodegas (con una sola
 // ubicación, decirla siempre dice lo mismo — `docs/features/bodegas-y-traslados.md`,
 // «Frontend»).
 import { describe, it, expect } from 'vitest'
@@ -52,7 +52,7 @@ async function montar() {
   return wrapper
 }
 
-describe('inventario/recuentos/[id] — la ubicación en el encabezado (Tarea 11)', () => {
+describe('inventario/recuentos/[id] — la ubicación en el encabezado', () => {
   it('con una bodega en el tenant, muestra el nombre de la ubicación de la sesión', async () => {
     ubicacionesBackend = [LOCAL, BODEGA]
     const wrapper = await montar()

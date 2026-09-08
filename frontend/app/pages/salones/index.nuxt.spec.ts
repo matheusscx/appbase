@@ -1871,10 +1871,11 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   })
 
   it('cuando el servidor confirma la cantidad, el catálogo se vuelve a pedir', async () => {
-    // La mitad que la Tarea 8 no pudo afirmar porque el PATCH nunca salía. El
-    // guard frena el refresco MIENTRAS la edición está pendiente; una vez que el
-    // servidor confirma, el catálogo tiene que volver a pedirse — si no, el
-    // disponible que ve el garzón se queda con el número de antes de su cambio.
+    // La mitad que el frente de la reserva de stock no pudo afirmar porque el
+    // PATCH nunca salía. El guard frena el refresco MIENTRAS la edición está
+    // pendiente; una vez que el servidor confirma, el catálogo tiene que volver
+    // a pedirse — si no, el disponible que ve el garzón se queda con el número
+    // de antes de su cambio.
     catalogoItemsMock = [producto('9.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
 

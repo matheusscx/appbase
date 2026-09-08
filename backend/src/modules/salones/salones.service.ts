@@ -929,8 +929,10 @@ export class SalonesService {
           // **Bajar no valida nada: solo libera.** Por eso el guard mira el
           // signo antes de llamar. Validar también hacia abajo rompe el camino de
           // corregir un pedido —el disponible puede estar en negativo por lo NO
-          // bloqueante (spec § 4.2), y ahí hasta un neto negativo rebotaría—, y
-          // no protege nada: soltar stock nunca sobrevende.
+          // bloqueante (§ 4.2 de la spec
+          // `2026-09-01-reserva-de-stock-al-pedir-design.md`), y ahí hasta un
+          // neto negativo rebotaría—, y no protege nada: soltar stock nunca
+          // sobrevende.
           if (
             new Decimal(resuelta.cantidadCanonica).greaterThan(linea.cantidad)
           ) {

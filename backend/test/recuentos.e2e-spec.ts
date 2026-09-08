@@ -1380,11 +1380,11 @@ describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
   });
 });
 
-// Tarea 11 del frente "bodegas y traslados": levanta el tapón que fijaba el
-// recuento al local (Tarea 4). Los números de local y bodega son DISTINTOS a
-// propósito en cada test — con valores iguales un mutante que leyera el total
-// del tenant o el local por default sobreviviría sin que ningún assert lo note.
-describe('Recuentos — por ubicación (Tarea 11)', () => {
+// Frente de bodegas y traslados: levanta el tapón que fijaba el recuento al
+// local. Los números de local y bodega son DISTINTOS a propósito en cada test —
+// con valores iguales un mutante que leyera el total del tenant o el local por
+// default sobreviviría sin que ningún assert lo note.
+describe('Recuentos — por ubicación', () => {
   let app: INestApplication<App>;
   let token: string;
   let localId: string;
@@ -1562,7 +1562,7 @@ describe('Recuentos — por ubicación (Tarea 11)', () => {
       .send({ ubicacionId: localId, itemIds: [itemId] });
     expect(resLocal.status).toBe(201);
 
-    // Antes de la Tarea 11 esto daba 400 ("ya está en un recuento en
+    // Antes del recuento por ubicación esto daba 400 ("ya está en un recuento en
     // borrador"): el guard miraba el ítem en CUALQUIER ubicación. Local y
     // bodega tienen cada una su propia fila de `stock_ubicacion`, así que las
     // dos sesiones congelan y aplican sobre saldos independientes.
@@ -1616,9 +1616,9 @@ describe('Recuentos — por ubicación (Tarea 11)', () => {
   // aflojarle ese decorador pasaría en verde.
   //
   // ⚠️ **El mutante es el DTO, no el service.** Restaurar el `localDe(tenantId)`
-  // que la Tarea 11 sacó de `RecuentosService.create` NO mata este caso: el
-  // pipe rechaza el body antes de llegar al service, así que el default nunca
-  // se ejecuta. Este caso protege el borde —que el campo siga siendo
+  // que el recuento por ubicación sacó de `RecuentosService.create` NO mata este
+  // caso: el pipe rechaza el body antes de llegar al service, así que el default
+  // nunca se ejecuta. Este caso protege el borde —que el campo siga siendo
   // obligatorio—, que es más chico que "el recuento no vuelve a fijarse al
   // local" y conviene no confundirlos.
   it('POST /recuentos sin ubicacionId → 400, y el mensaje nombra el campo', async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment nuxt
 //
-// Tarea 10 del frente "bodegas y traslados": la merma pasa a decir DÓNDE
-// ocurrió. Lo que este spec fija:
+// Frente de bodegas y traslados: la merma pasa a decir DÓNDE ocurrió. Lo que
+// este spec fija:
 //   1. Con una sola ubicación (solo local) el selector no se dibuja, y el
 //      cliente completa `ubicacionId` con el local igual.
 //   2. Con una bodega, el selector se dibuja y lo que el usuario elige viaja
@@ -128,7 +128,7 @@ async function enviar(wrapper: Wrapper) {
   await new Promise(r => setTimeout(r, 250))
 }
 
-describe('mermas — selector de ubicación (Tarea 10)', () => {
+describe('mermas — selector de ubicación', () => {
   beforeEach(() => {
     mermasEnviadas = []
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())

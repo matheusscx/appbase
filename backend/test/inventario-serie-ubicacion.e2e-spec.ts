@@ -7,18 +7,20 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * Tarea 6 del frente de bodegas (`docs/features/bodegas-y-traslados.md`):
- * cada unidad serializada (`item_unidad`, modo `serie`) sabe en qué ubicación
- * está —`item_unidad.ubicacion_id`— y el saldo de `stock_ubicacion` en ese
- * modo se recalcula contando SOLO las unidades de esa ubicación.
+ * Frente de bodegas y traslados (`docs/features/bodegas-y-traslados.md`): cada
+ * unidad serializada (`item_unidad`, modo `serie`) sabe en qué ubicación está
+ * —`item_unidad.ubicacion_id`— y el saldo de `stock_ubicacion` en ese modo se
+ * recalcula contando SOLO las unidades de esa ubicación.
  *
- * ✅ **Sin muleta desde la Tarea 9.** `PATCH /items/:id/stock` siempre entra al
- * local (`ItemsService.ajustarStock` resuelve `UbicacionesService.localDe`),
- * así que hasta el 2026-09-07 la única forma de tener una unidad físicamente
- * EN LA BODEGA era un `INSERT` directo a `item_unidad`. Ahora la unidad se
- * mueve con `POST /traslados`, que es además la prueba de que el traslado en
- * modo `serie` deja la unidad **disponible** en el destino en vez de darla de
- * baja: una unidad que se traslada no salió del inventario, cambió de lugar.
+ * ✅ **Sin muleta desde que existe `POST /traslados`.** Antes de este frente
+ * `PATCH /items/:id/stock` entraba siempre al local —no aceptaba
+ * `ubicacionId`—, así que la única forma de tener una unidad físicamente EN LA
+ * BODEGA era un `INSERT` directo a `item_unidad`. Hoy ese endpoint **exige**
+ * `ubicacionId` (`AjusteStockDto`), pero la unidad igual se mueve con
+ * `POST /traslados`, que es además
+ * la prueba de que el traslado en modo `serie` deja la unidad **disponible** en
+ * el destino en vez de darla de baja: una unidad que se traslada no salió del
+ * inventario, cambió de lugar.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -246,7 +248,7 @@ describe('inventario — unidades serializadas por ubicación (e2e)', () => {
 
     // 5 unidades entran al local, y 2 se van a la bodega por la API: quedan 3
     // en el local. Si el recálculo contara todas las unidades disponibles del
-    // ítem (el bug de antes de esta tarea, cuando la columna no existía), el
+    // ítem (el bug de antes de que existiera `item_unidad.ubicacion_id`), el
     // local quedaría en 5 en vez de 3. 3 y 2 a propósito, no números iguales.
     const marca = `${Date.now()}-${Math.random()}`;
     const resEntrada = await request(app.getHttpServer())

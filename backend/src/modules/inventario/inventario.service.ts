@@ -873,16 +873,15 @@ export class InventarioService {
         if (rows[0].ubicacion_id !== params.ubicacionId) {
           // Una unidad serializada está en un solo lugar: la salida tiene que
           // pedirse desde ahí. El mensaje nombra la ubicación real de la
-          // unidad, no solo que "no se puede" — sin eso, quien opera no sabe
-          // si falta stock o si está mirando la ubicación equivocada.
-          // Acotado por tenant y sin eliminadas, como toda lectura nueva de
-          // esta tabla: los dos ids que entran acá son de hoy siempre
-          // tenant-scoped (la unidad ya se validó contra el tenant arriba, y
-          // `params.ubicacionId` sale de `UbicacionesService.localDe` en
-          // todos los llamadores actuales), pero sin el filtro esta query se
-          // vuelve un oráculo de nombres de otro tenant en cuanto exista un
-          // llamador que reciba `ubicacionId` del body (`POST /traslados`,
-          // Tarea 9).
+          // unidad, no solo que "no se puede" — sin eso, quien opera no sabe si
+          // falta stock o si está mirando la ubicación equivocada. Acotado por
+          // tenant y sin eliminadas, como toda lectura nueva de esta tabla: los
+          // dos ids que entran acá son de hoy siempre tenant-scoped (la unidad
+          // ya se validó contra el tenant arriba, y `params.ubicacionId` sale
+          // de `UbicacionesService.localDe` en todos los llamadores actuales),
+          // pero sin el filtro esta query se vuelve un oráculo de nombres de
+          // otro tenant en cuanto exista un llamador que reciba `ubicacionId`
+          // del body (`POST /traslados`).
           const nombresRows: { ubicacion_id: string; nombre: string }[] =
             await manager.query(
               `SELECT ubicacion_id, nombre FROM ubicaciones
@@ -1550,7 +1549,7 @@ export interface MovimientoListItem {
    * qué ese producto ya no aparece en el catálogo.
    */
   itemEliminado: boolean;
-  /** Dónde ocurrió — Tarea 12 del frente "bodegas y traslados". */
+  /** Dónde ocurrió — frente de bodegas y traslados. */
   ubicacionId: string;
   /**
    * `null` si la ubicación se eliminó después del movimiento: el kardex la

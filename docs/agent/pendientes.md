@@ -171,52 +171,56 @@ código antes de tomar una entrada**, por reciente que sea la fecha que trae —
 **el commit que cierra algo del backlog saca la entrada en el mismo commit**, que es lo que
 las dos veces faltó.
 
-### Las citas `§ N` que sobreviven no dicen de qué spec son (2026-09-07)
+### Las dos de citas huérfanas que dejó el barrido de bodegas (2026-09-08)
 
-Salió de clasificar las citas al cerrar el barrido de bodegas (detalle en
-[`resueltos.md`](resueltos.md)). Las que quedaron son todas de
-[`2026-09-01-reserva-de-stock-al-pedir-design.md`](../superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md),
-que existe, así que no son enlaces rotos. El problema es otro: **ninguna nombra su spec**, y
-el repo ya demostró que dos specs distintas usan los mismos números de sección.
+✅ **Las dos salieron en una pasada, y las dos subcontaban.** Las `§ N` sin documento no eran
+"todas de la spec de la reserva de stock": eran **37 citas**, 35 de ellas repartidas entre
+**siete** documentos distintos (reserva de stock, header del ciego, motor de promociones,
+testigo del cierre forzado, recuento, costeo CPP y el borrado del ingrediente extra). Y las
+`Tarea N` del plan borrado no eran 17 líneas: eran **124**. Detalle, con el criterio de
+clasificación y lo que se midió mal, en [`resueltos.md`](resueltos.md). La regla que salió de
+las dos vive ahora en [`CONVENTIONS.md`](../CONVENTIONS.md), «Citar un documento desde el
+código».
 
-- [ ] **Agregarle el nombre del archivo a cada una.** Las de la reserva de stock están en
-  `items.service.ts`, `items.service.spec.ts`, `salones.service.ts`,
-  `reserva-stock-mesa.e2e-spec.ts`, `CatalogoGrid.vue`, `CatalogoGrid.nuxt.spec.ts` y
-  `useVenta.ts`. Y **no son las únicas de esta forma**: `promociones.evaluator.ts:251` cita
-  `(§El evaluador)` —una sección por nombre, de la spec de promociones, que está en disco—.
-  O sea que la familia cruza frentes, y cerrarla mirando solo la reserva la deja viva.
+⛔ **Pero la § 1 NO queda vacía**: barrer las citas destapó **tres formas más** de lo mismo, que
+no se habían medido y quedan abajo.
 
-⚠️ **La conducta a buscar es "cita una sección sin decir de qué documento", y ningún grep de
-una línea la cubre.** `grep -rn "spec § "` es el punto de partida, pero deja afuera al menos
-una cita **partida en dos renglones** (`CatalogoGrid.nuxt.spec.ts:102-103`) y tres escritas
-con otra forma (`la § 4.1b de la spec` en `items.service.ts` e `items.service.spec.ts`, `de la
-spec (§ 4.2)` en `reserva-stock-mesa.e2e-spec.ts`). Empezar por `grep -rn "§ [0-9]"` y
-clasificar, en vez de confiar en el conteo — al cerrar esta entrada, verificar por conducta y
-no por que el primer grep dé cero.
+### Citar una tarea o una decisión sin nombrar el documento — lo que el barrido NO cubrió (2026-09-08)
 
-El precio de no hacerlo aparece recién el día que esa spec también se borre: ahí la cita
-queda huérfana **y** sin forma de saber a qué documento apuntaba. Hoy es solo ambigüedad.
+El commit que cerró las citas `§ N` y las `Tarea N` del plan de bodegas
+([`resueltos.md`](resueltos.md)) cerró **dos formas de una misma conducta**, y la conducta tiene
+por lo menos tres más. Las levantó la revisión independiente, no el grep, y están medidas:
 
-### Las citas `Tarea N` al plan de bodegas, que quedaron sin dueño (2026-09-07)
+- [ ] **`Task N` en inglés — 67 líneas.** `grep -rnE '\bTasks? *[0-9]' backend/src backend/test
+  frontend/app` (excluir `tmp-pool.jsonl`, que está gitignoreado). El repo escribe la misma
+  cita en los dos idiomas y **ningún grep en español la ve**. Están repartidas por medio repo
+  —testigo, turnos, promociones, combos, papelera, garzones, grupos de modificadores,
+  recuento, IVA…— y **ninguna es del frente de bodegas**, que es lo único verificado de esa
+  lista: por eso no había forma de toparse con ellas barriendo ese frente. ⚠️ Un `Task N` que
+  nombre su plan en el **mismo bloque** de comentario ya resuelve: hay que clasificar leyendo,
+  no contar coincidencias.
+- [ ] **`Decisión N` / `Regla N` / `paso N` de "la spec" o "el brief" — 7 líneas.**
+  `grep -rnE '(Decisión|Regla|decisión|regla|paso|item) [0-9A-Za-z]+ de[l]? (la )?(spec|plan|brief|diseño)' backend/src backend/test frontend/app`.
+  Es la misma cita que las `§ N`, escrita en prosa en vez de con el símbolo — por eso el barrido
+  no las vio. Dos de las 7 ya nombran su documento en el bloque —y una de esas dos,
+  `cantidad-presentacion.util.ts`, lo hace **partiendo la ruta en dos renglones**, que es lo
+  único que hoy incumple la sub-regla de [`CONVENTIONS.md`](../CONVENTIONS.md); se arregla con
+  esta entrada—; las otras cinco no nombran nada.
+- [ ] **La autorreferencia: "antes de esta tarea", "el paso 2 del brief" — 26 líneas**, más
+  las que ni ese grep ve (*"el reporte"* de `papelera.e2e-spec.ts`). El comando es
+  `grep -rniE '(esta|esa|la) tarea|del brief|el brief' backend/src backend/test frontend/app`,
+  sin contar
+  `reserva-stock-mesa.e2e-spec.ts`, que rotula sus propios `describe`. Acá no hay documento que
+  nombrar: el autor sabía a qué tarea se refería y el lector de hoy no tiene con qué
+  averiguarlo. El arreglo es decir **qué** cambió, que no caduca, en vez de **cuándo** cambió
+  contra una unidad de trabajo que se borra.
 
-La entrada que cerró el barrido de citas se definía como *"nombran una sección **o una tarea**
-que ya no resuelve a nada"*. Se cerró la mitad "sección" —30 de las 42 `spec § N`, las del
-spec borrado— y la sublista
-`… del plan`. **La mitad "tarea" no**, y al borrarse la entrada dejó de estar anotada en
-ningún lado hasta que la revisión independiente la reclamó.
-
-- [ ] **Clasificar y repuntar las `Tarea N` del plan borrado.** Nombran el frente explícitamente
-  17 líneas en 16 archivos (`grep -rn 'Tarea [0-9][0-9a-b]* del frente "bodegas y traslados"'
-  backend/src backend/test frontend/app`). Las que dicen `Tarea N` a secas son más y el grep
-  que las busca es ruidoso —cualquier frente numera sus tareas igual—, así que acá también el
-  primer paso es **clasificar por contenido**, no contar coincidencias.
-
-⚠️ **Esta no se resuelve como la de `spec § N`.** Ahí cada sección tenía un heading equivalente
-en el doc de la feature y el mapeo era mecánico. Una **tarea** es una unidad de trabajo, no una
-sección: no hay a qué repuntarla. Lo que corresponde en la mayoría de los casos es perder el
-número y quedarse con el frente —*"del frente de bodegas y traslados"*, que sí resuelve a
-[`docs/features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md)—, y eso es una
-decisión de redacción por cita, no un `sed`.
+⚠️ **La lección del frente, y por eso las tres entradas van juntas:** el barrido se corrió
+**cinco veces** y cada vuelta apareció una forma nueva de la misma cita —`Tareas 13/14` en
+plural, `tarea 14` en minúscula, `Task 6b` en inglés, `Decisión 1 del spec` en prosa—. Ninguna
+la encontró un grep derivado de la anterior; todas salieron de leer. **Antes de declarar cerrada
+esta familia hay que enumerar las FORMAS, no ampliar el patrón**, y la regla de
+[`CONVENTIONS.md`](../CONVENTIONS.md) está escrita sobre la conducta justamente por eso.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

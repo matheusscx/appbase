@@ -40,12 +40,14 @@ export interface ItemCatalogo {
    * lee siempre por `stockPedible`, que cae a `stock`.
    *
    * ⚠️ **Campo propio y no un valor más dentro de `disponible`** (ruling del
-   * owner, 2026-09-01, spec § 4.1b): son dos preguntas distintas. `disponible`
-   * cuenta PORCIONES —entero—; esto es una CANTIDAD, que puede ser
-   * fraccionaria (1,5 kg) y puede ser **negativa** cuando un ingrediente no
-   * bloqueante quedó comprometido de más. Por eso viaja como string y no como
-   * `number`, y por eso no se le hace `.floor()` ni se lo pisa a 0: clamplearlo
-   * escondería justo el caso que el encargado necesita ver.
+   * owner, 2026-09-01, § 4.1b de
+   * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`):
+   * son dos preguntas distintas. `disponible` cuenta PORCIONES —entero—; esto
+   * es una CANTIDAD, que puede ser fraccionaria (1,5 kg) y puede ser
+   * **negativa** cuando un ingrediente no bloqueante quedó comprometido de más.
+   * Por eso viaja como string y no como `number`, y por eso no se le hace
+   * `.floor()` ni se lo pisa a 0: clamplearlo escondería justo el caso que el
+   * encargado necesita ver.
    */
   stockDisponible?: string | null
   /** Combos con al menos un grupo de modificadores asociado: la disponibilidad final depende de la opción elegida. */

@@ -1,6 +1,6 @@
 // @vitest-environment nuxt
 //
-// Tarea 13 del frente "bodegas y traslados". Lo que este spec fija:
+// Frente de bodegas y traslados. Lo que este spec fija:
 //   1. Origen y destino no pueden coincidir — el botón de confirmar se
 //      deshabilita, no se corta recién al mandar el POST.
 //   2. El disponible que se muestra por línea es el del ORIGEN elegido, no un
@@ -36,10 +36,10 @@ const ITEM_DETALLE = {
 
 const MOTIVO = { id: 'motivo-1', nombre: 'Reposición' }
 
-// Tarea 15 ("bodegas y traslados"): el botón "Trasladar" del toast de "no hay
+// Frente de bodegas y traslados: el botón "Trasladar" del toast de "no hay
 // stock" llega acá con `?itemId=&origenId=&cantidad=`. `{}` por default —el
-// caso de las Tareas 13/14 de arriba, que abren el drawer a mano— y cada test
-// de la Tarea 15 lo pisa antes de montar.
+// caso de los tres puntos de la cabecera, que abren el drawer a mano— y cada
+// test de la precarga lo pisa antes de montar.
 //
 // Solo se mockea `useRoute` (para inyectar la query), NUNCA `useRouter`: los
 // plugins internos de Nuxt (`chunk-reload`, el sync de página) llaman
@@ -139,7 +139,7 @@ function botonConfirmar(wrapper: Wrapper) {
   return boton!
 }
 
-describe('traslados — formulario (Tarea 13)', () => {
+describe('traslados — formulario', () => {
   beforeEach(() => {
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
@@ -213,7 +213,7 @@ describe('traslados — formulario (Tarea 13)', () => {
   })
 })
 
-describe('traslados — el traslado precargado desde el toast de "no hay stock" (Tarea 15)', () => {
+describe('traslados — el traslado precargado desde el toast de "no hay stock"', () => {
   beforeEach(() => {
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
     routeQuery = {}
@@ -229,8 +229,8 @@ describe('traslados — el traslado precargado desde el toast de "no hay stock" 
 
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
 
-    // Origen = la bodega: lo dice el disponible mostrado (20, el de la
-    // bodega — mismo ancla que el test de la Tarea 13 de arriba).
+    // Origen = la bodega: lo dice el disponible mostrado (20, el de la bodega —
+    // mismo ancla que el test del formulario, arriba).
     const disponible = wrapper.find('[data-qa="linea-disponible"]')
     expect(disponible.exists()).toBe(true)
     expect(disponible.text()).toContain('Bodega centro')
@@ -249,7 +249,7 @@ describe('traslados — el traslado precargado desde el toast de "no hay stock" 
     wrapper.unmount()
   })
 
-  it('sin ?itemId en la URL, no abre nada — es el camino normal de las Tareas 13/14', async () => {
+  it('sin ?itemId en la URL, no abre nada — es el camino normal del formulario', async () => {
     routeQuery = {}
     const wrapper = await montar()
     await new Promise(r => setTimeout(r, 30))

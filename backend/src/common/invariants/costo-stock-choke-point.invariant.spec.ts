@@ -9,21 +9,20 @@ import { join } from 'path';
 // inventario.
 // Ver docs/superpowers/specs/2026-07-26-costeo-cpp-design.md
 //
-// Desde la Tarea 4 del frente "bodegas y traslados" (`item_producto.stock` se
-// borró), el saldo materializado vive en `stock_ubicacion`, `lote_ubicacion`
-// (saldo de un lote por ubicación) e `item_unidad.ubicacion_id` — las tres
-// puertas nuevas por las que se puede escribir stock, y las tres quedan bajo
-// la misma regla: solo `inventario.service.ts` (y el seeder, que las siembra
-// junto con el movimiento `inventario_inicial`, no las actualiza).
-// `lote_ubicacion` existe desde la Tarea 7: nace y se escribe siempre por
-// `INSERT ... ON CONFLICT (lote_id, ubicacion_id) DO UPDATE` (saldo
-// absoluto, nunca un `UPDATE` a secas), así que la guarda de esta puerta
-// cubre las dos formas —`INSERT INTO lote_ubicacion` y `UPDATE
-// lote_ubicacion`— aunque hoy solo la primera se ejercite.
-// `item_unidad.ubicacion_id` existe desde la Tarea 6: la unidad NACE en su
-// ubicación por `INSERT` (no hay `UPDATE` — una unidad serializada no cambia
-// de lugar hasta que exista `POST /traslados`, Tarea 9), así que la guarda de
-// esta puerta cubre las dos formas de escritura, no solo el `UPDATE`.
+// Desde el frente de bodegas y traslados (`item_producto.stock` se borró), el
+// saldo materializado vive en `stock_ubicacion`, `lote_ubicacion` (saldo de un
+// lote por ubicación) e `item_unidad.ubicacion_id` — las tres puertas nuevas
+// por las que se puede escribir stock, y las tres quedan bajo la misma regla:
+// solo `inventario.service.ts` (y el seeder, que las siembra junto con el
+// movimiento `inventario_inicial`, no las actualiza). `lote_ubicacion` nace y
+// se escribe siempre por `INSERT ... ON CONFLICT (lote_id, ubicacion_id) DO
+// UPDATE` (saldo absoluto, nunca un `UPDATE` a secas), así que la guarda de
+// esta puerta cubre las dos formas —`INSERT INTO lote_ubicacion` y `UPDATE
+// lote_ubicacion`— aunque hoy solo la primera se ejercite. En
+// `item_unidad.ubicacion_id` la unidad NACE en su ubicación por `INSERT`, y lo
+// único que después la mueve es un traslado (`UPDATE item_unidad SET
+// ubicacion_id`, dentro del propio chokepoint), así que la guarda de esta
+// puerta cubre las dos formas de escritura, no solo el `UPDATE`.
 
 const ARCHIVOS_AUTORIZADOS = [
   join('modules', 'inventario', 'inventario.service.ts'),
@@ -38,12 +37,12 @@ const ARCHIVOS_AUTORIZADOS = [
 // declaración, y pegado a `findTsFiles` diría algo que esa función no hace.)
 //
 /* Eran cinco specs que plantaban stock en una bodega con `INSERT` directo
- * porque `POST /traslados` no existía todavía (Tarea 9 del frente "bodegas y
- * traslados"). Con el endpoint en pie los cinco arman su escenario por la API
+ * porque `POST /traslados` no existía todavía (frente de bodegas y traslados).
+ * Con el endpoint en pie los cinco arman su escenario por la API
  * —`items-stock-por-ubicacion`, `recuentos-stock-por-ubicacion`,
  * `grupos-modificadores-stock-por-ubicacion`, `inventario-serie-ubicacion` e
- * `inventario-lote-ubicacion`— y la lista de excepciones desapareció con
- * ellas: el barrido de abajo ya no tiene escape.
+ * `inventario-lote-ubicacion`— y la lista de excepciones desapareció con ellas:
+ * el barrido de abajo ya no tiene escape.
  *
  * Se deja escrito y no se borra en silencio para que quede claro que la salida
  * no es volver a agregar un nombre acá. Si un escenario nuevo "solo se puede

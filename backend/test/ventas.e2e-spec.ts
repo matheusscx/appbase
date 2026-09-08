@@ -99,10 +99,10 @@ async function getUsuarioId(ds: DataSource): Promise<string> {
   return rows[0].usuario_id;
 }
 
-// `item_producto.stock` se borró en la Tarea 4 (bodegas y traslados):
+// `item_producto.stock` se borró en el frente de bodegas y traslados:
 // `stock_ubicacion` es el único dueño del saldo. Y lo que se lee acá es el
 // saldo **del local**, no la suma de todas las ubicaciones: con stock repartido
-// en bodega (el seed lo reparte desde esa misma tarea), un total que no se mueve
+// en bodega (el seed lo reparte desde ese mismo frente), un total que no se mueve
 // tapa exactamente la propiedad que este frente vino a fijar — que la venta
 // descuenta del LOCAL. Un tenant tiene un solo local, así que el JOIN devuelve
 // una fila.

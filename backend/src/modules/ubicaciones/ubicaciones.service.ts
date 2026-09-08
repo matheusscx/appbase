@@ -219,13 +219,13 @@ export class UbicacionesService {
   }
 
   // Verificar el uso y borrar en queries sueltas era un check-then-act: bajo
-  // READ COMMITTED el COUNT no ve el commit de un traslado en vuelo, así que
-  // el guard de arriba (`conStock`) podía contar 0 mientras un
+  // READ COMMITTED el COUNT no ve el commit de un traslado en vuelo, así que el
+  // guard de arriba (`conStock`) podía contar 0 mientras un
   // `TrasladosService.crearEnTransaccion` escribía saldo en esta misma
-  // ubicación por otro carril. La carrera dejó de ser teórica en la Tarea 9
-  // (creó `traslados`, el primer escritor de `stock_ubicacion` fuera del
-  // seed) y el endurecimiento no se agregó con ella. Molde:
-  // `MotivosTrasladoService.remove`, que resuelve el mismo problema con
+  // ubicación por otro carril. La carrera dejó de ser teórica cuando el frente
+  // de bodegas y traslados creó `traslados` —el primer escritor de
+  // `stock_ubicacion` fuera del seed— y el endurecimiento no se agregó ahí.
+  // Molde: `MotivosTrasladoService.remove`, que resuelve el mismo problema con
   // `db.transaccion` + `FOR UPDATE` sobre la fila que el escritor toma con
   // `FOR SHARE`.
   //
@@ -337,9 +337,9 @@ export class UbicacionesService {
 
   /**
    * Valida que `id` sea una ubicación del tenant (no borrada) y devuelve su
-   * fila. Público desde la Tarea 10 del frente "bodegas y traslados": mermas,
-   * recuentos y el ajuste de stock reciben `ubicacionId` del cliente y tienen
-   * que validarlo contra el tenant antes de escribir — mismo criterio que
+   * fila. Público desde el frente de bodegas y traslados: mermas, recuentos y
+   * el ajuste de stock reciben `ubicacionId` del cliente y tienen que validarlo
+   * contra el tenant antes de escribir — mismo criterio que
    * `CausasMermaService.assertCausaActiva` para `causaMermaId`, y el mismo
    * `NotFoundException` opaco que ya usa `TrasladosService` para un
    * `ubicacionId` de otro tenant (no distingue "no existe" de "es de otro

@@ -454,9 +454,9 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     expect(filaMerma?.costoPerdido).toBeNull();
   });
 
-  // Tarea 10 del frente "bodegas y traslados": la merma pasa a decir DÓNDE
-  // ocurrió. Este bloque cubre las tres formas nuevas de fallar/acertar.
-  describe('ubicacionId — Tarea 10', () => {
+  // Frente de bodegas y traslados: la merma pasa a decir DÓNDE ocurrió. Este
+  // bloque cubre las tres formas nuevas de fallar/acertar.
+  describe('ubicacionId — la merma dice de dónde sale', () => {
     it('POST /mermas sin ubicacionId → 400', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/mermas')

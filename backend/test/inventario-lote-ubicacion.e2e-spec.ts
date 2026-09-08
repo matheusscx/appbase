@@ -7,26 +7,26 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * Tarea 7 del frente de bodegas (`docs/features/bodegas-y-traslados.md`):
- * un mismo lote (`item_lote`, modo `lote`) puede tener saldo partido entre
- * dos ubicaciones. `item_lote.cantidad_disponible` (un escalar por lote)
- * desapareció; el saldo vive en `lote_ubicacion`, una fila por
- * `(lote_id, ubicacion_id)`, y `stock_ubicacion` se recalcula sumándola.
- * Lo que NO se parte es la identidad del lote — `codigo_lote`,
- * `fecha_elaboracion`, `fecha_vencimiento` siguen en `item_lote`, una sola
- * fila por lote.
+ * Frente de bodegas y traslados (`docs/features/bodegas-y-traslados.md`): un
+ * mismo lote (`item_lote`, modo `lote`) puede tener saldo partido entre dos
+ * ubicaciones. `item_lote.cantidad_disponible` (un escalar por lote)
+ * desapareció; el saldo vive en `lote_ubicacion`, una fila por `(lote_id,
+ * ubicacion_id)`, y `stock_ubicacion` se recalcula sumándola. Lo que NO se
+ * parte es la identidad del lote — `codigo_lote`, `fecha_elaboracion`,
+ * `fecha_vencimiento` siguen en `item_lote`, una sola fila por lote.
  *
- * ✅ **Sin muleta desde la Tarea 9.** `PATCH /items/:id/stock` sigue entrando y
- * saliendo solo del local (`ItemsService.ajustarStock` resuelve
- * `UbicacionesService.localDe` y no acepta `ubicacionId`), así que hasta el
- * 2026-09-07 la única forma de que un lote tuviera saldo EN LA BODEGA era un
- * `INSERT` directo a `lote_ubicacion`. Ahora el saldo se reparte con
- * `POST /traslados`, que además prueba que la ENTRADA de un traslado no
- * engorda `item_lote.cantidad_inicial` ni duplica la fila del lote.
+ * ✅ **Sin muleta desde que existe `POST /traslados`.** Antes de este frente
+ * `PATCH /items/:id/stock` entraba y salía siempre del local —no aceptaba
+ * `ubicacionId`—, así que la única forma de que un lote tuviera saldo EN LA
+ * BODEGA era un `INSERT` directo a `lote_ubicacion`. Hoy ese endpoint **exige**
+ * `ubicacionId` (`AjusteStockDto`), pero el saldo de la bodega igual se arma
+ * con `POST /traslados`: es el camino que el usuario recorre de verdad, y de
+ * paso prueba que la ENTRADA de un traslado no engorda
+ * `item_lote.cantidad_inicial` ni duplica la fila del lote.
  *
- * El test de "no se puede sacar más de lo que hay en esa ubicación" sigue
- * pidiendo la salida por `PATCH /items/:id/stock` —o sea DESDE el local, que
- * es lo único que ese endpoint sabe hacer— con el lote teniendo MÁS saldo en
+ * El test de "no se puede sacar más de lo que hay en esa ubicación" pide la
+ * salida por `PATCH /items/:id/stock` **desde el local**, con el lote teniendo
+ * MÁS saldo en
  * la bodega que en el local: si el chequeo mirara el total del lote en vez del
  * saldo de la ubicación, pasaría cuando no debe.
  */

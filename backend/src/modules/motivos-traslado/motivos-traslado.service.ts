@@ -182,8 +182,9 @@ export class MotivosTrasladoService {
     };
   }
 
-  // El chequeo de "en uso" llegó con la Tarea 9, que es la que creó
-  // `traslados`: hasta entonces ninguna tabla podía referenciar este motivo.
+  // El chequeo de "en uso" llegó con el frente de bodegas y traslados, que es
+  // el que creó `traslados`: hasta entonces ninguna tabla podía referenciar
+  // este motivo.
   //
   // Verificar el uso y borrar en queries sueltas sería un check-then-act: bajo
   // READ COMMITTED el EXISTS no ve los INSERT todavía sin commitear de un

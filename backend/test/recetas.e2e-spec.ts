@@ -637,9 +637,10 @@ describe('Recetas — flujo completo (e2e)', () => {
 
     // vendedor@paris.cl (rol Vendedor) tiene Items:Leer (sembrado en
     // seedVendedorPermisosCaja para que el POS liste el catálogo) pero nunca
-    // Items:Eliminar. Fija la decisión de diseño §2.4 del spec: /uso va detrás
-    // de Eliminar, no de Leer, para no abrir una vía lateral de inventariar
-    // el catálogo a cualquiera que solo pueda leerlo.
+    // Items:Eliminar. Fija la decisión 4 de la § 2 de
+    // `docs/superpowers/specs/2026-07-28-borrado-ingrediente-extra-design.md`:
+    // /uso va detrás de Eliminar, no de Leer, para no abrir una vía lateral de
+    // inventariar el catálogo a cualquiera que solo pueda leerlo.
     const res = await request(app.getHttpServer())
       .get(`/api/items/${panId}/uso`)
       .set('Authorization', `Bearer ${tokenVendedor}`);

@@ -220,10 +220,10 @@ const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
 const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
-// Tarea 15 ("bodegas y traslados"): el 400 de "no hay stock" ofrece el
-// traslado precargado solo a quien de verdad puede crearlo. El garzón no
-// tiene `Inventario/Crear` — mismo permiso que ya exige `POST /traslados` y
-// que ya usa `inventario/traslados.vue`—, así que ve el mensaje y nada más.
+// Frente de bodegas y traslados: el 400 de "no hay stock" ofrece el traslado
+// precargado solo a quien de verdad puede crearlo. El garzón no tiene
+// `Inventario/Crear` — mismo permiso que ya exige `POST /traslados` y que ya
+// usa `inventario/traslados.vue`—, así que ve el mensaje y nada más.
 const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
 const { mostrarRechazoPorStock } = useRechazoPorStock()
 

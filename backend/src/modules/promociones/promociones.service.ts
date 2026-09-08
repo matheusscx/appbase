@@ -486,9 +486,9 @@ export class PromocionesService {
 
   /**
    * `porcentaje`/`nxm`: exactamente 1 slot (a qué aplica la promo).
-   * `precio_fijo`: 1..N slots, cada uno un componente del combo.
-   * Regla entre tablas — la exige el service, no un CHECK (diseño §Modelo de
-   * datos).
+   * `precio_fijo`: 1..N slots, cada uno un componente del combo. Regla entre
+   * tablas — la exige el service, no un CHECK (§ Modelo de datos de
+   * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`).
    */
   private validarScopes(tipo: TipoPromocion, scopes: ScopePromoDto[]): void {
     if (!scopes?.length)

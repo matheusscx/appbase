@@ -523,8 +523,8 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
         })),
     },
     {
-      // Recurso 17 (Tarea 1 de "bodegas y traslados"): solo `tipo = 'bodega'`
-      // se crea por API, el `local` nace sembrado y nunca se borra.
+      // Recurso 17 (frente de bodegas y traslados): solo `tipo = 'bodega'` se
+      // crea por API, el `local` nace sembrado y nunca se borra.
       nombre: 'ubicaciones',
       path: 'ubicaciones',
       tabla: 'ubicaciones',
@@ -536,8 +536,8 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
         })),
     },
     {
-      // Recurso 18 (Tarea 8 de "bodegas y traslados"): catálogo tipado de
-      // motivos de traslado, mismo molde que motivos-diferencia-inventario.
+      // Recurso 18 (frente de bodegas y traslados): catálogo tipado de motivos
+      // de traslado, mismo molde que motivos-diferencia-inventario.
       nombre: 'motivos-traslado',
       path: 'motivos-traslado',
       tabla: 'motivo_traslado',

@@ -1,11 +1,10 @@
 // @vitest-environment nuxt
 //
-// Tarea 12 del frente "bodegas y traslados": el ajuste de stock y la entrada
-// por compra (mismo drawer "Ajustar stock", `motivo` los distingue) eligen
-// ubicación. Este modal es el ÚNICO consumidor real de `PATCH
-// /items/:id/stock` — `inventario/index.vue` solo tiene el drawer de ajuste
-// de costo — así que el selector va ACÁ, no ahí (brief de la tarea vs código:
-// documentado en el reporte).
+// Frente de bodegas y traslados: el ajuste de stock y la entrada por compra
+// (mismo drawer "Ajustar stock", `motivo` los distingue) eligen ubicación. Este
+// modal es el ÚNICO consumidor real de `PATCH /items/:id/stock` —
+// `inventario/index.vue` solo tiene el drawer de ajuste de costo — así que el
+// selector va ACÁ, no ahí.
 //
 // Archivo separado del `items.nuxt.spec.ts` gigante (830 líneas, mock
 // compartido complejo) para no arriesgar sus fixtures: mock propio, mínimo,
@@ -120,7 +119,7 @@ async function aplicarAjuste(wrapper: Wrapper) {
   await new Promise(r => setTimeout(r, 100))
 }
 
-describe('configuracion/items — el selector de ubicación del modal "Ajustar stock" (Tarea 12)', () => {
+describe('configuracion/items — el selector de ubicación del modal "Ajustar stock"', () => {
   beforeEach(() => {
     ajustesEnviados = []
     document.body.querySelectorAll('[role="dialog"], [data-reka-portal]').forEach(n => n.remove())

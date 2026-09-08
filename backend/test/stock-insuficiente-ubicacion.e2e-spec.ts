@@ -6,12 +6,12 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 /**
- * **Tarea 15 (bodegas y traslados): el rechazo por falta de stock dice dónde
- * está la mercadería.** Hasta esta tarea, el 400 de `validarStockAlPedir`
- * (el pre-chequeo del salón) y el del chokepoint de inventario al cobrar
- * directo por POS nombraban el ítem que faltó, pero no decían si había stock
- * en otra ubicación — el garzón/cajero no sabía si mandar a alguien a la
- * bodega o si simplemente no había.
+ * **Frente de bodegas y traslados: el rechazo por falta de stock dice dónde
+ * está la mercadería.** Hasta ese frente, el 400 de `validarStockAlPedir` (el
+ * pre-chequeo del salón) y el del chokepoint de inventario al cobrar directo
+ * por POS nombraban el ítem que faltó, pero no decían si había stock en otra
+ * ubicación — el garzón/cajero no sabía si mandar a alguien a la bodega o si
+ * simplemente no había.
  *
  * Este spec mide el mensaje REAL (no lo inventa) en dos chokepoints:
  *  - `ItemsService.validarStockAlPedir` (agregar una línea a una cuenta de
@@ -74,7 +74,7 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-describe('El 400 de stock insuficiente dice dónde está la mercadería (e2e, Tarea 15)', () => {
+describe('El 400 de stock insuficiente dice dónde está la mercadería (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let localId: string;
@@ -360,7 +360,8 @@ describe('El 400 de stock insuficiente dice dónde está la mercadería (e2e, Ta
 
       expect(status).toBe(400);
       // `restante` (lo que queda en el local) se sigue mostrando tal cual,
-      // mismo criterio que ya regía antes de esta tarea.
+      // mismo criterio que ya regía antes de que el 400 dijera dónde está la
+      // mercadería.
       expect(body.message).toContain('quedan 3');
       expect(body.faltante).toBe('2');
       // Solo la bodega: el local (con 3, > 0) NO es una "otra ubicación" de

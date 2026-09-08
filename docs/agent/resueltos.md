@@ -23,6 +23,150 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las dos de citas huérfanas (cerradas 2026-09-08)
+
+Salen de [`pendientes.md` § 1](pendientes.md). Las abrió el commit anterior (`4f758b06`) al
+clasificar las citas del spec borrado de bodegas, y las dos son la misma conducta con dos
+caras: **un comentario que cita una unidad de otro documento —una sección, una decisión, una
+tarea— sin nombrar ese documento.**
+
+La regla que salió de acá vive en [`CONVENTIONS.md`](../CONVENTIONS.md), «Citar un documento
+desde el código», que es lo único durable de este cierre: el barrido se hace una vez, la
+regla evita el próximo.
+
+⛔ **Lo que este cierre NO cubre, y conviene leerlo antes de creerlo completo.** Se cerraron dos
+formas: la cita `§ N` sin documento y la `Tarea N` (en español) del plan de bodegas. La misma
+conducta tiene al menos tres formas más, todas medidas y anotadas en
+[`pendientes.md` § 1](pendientes.md): **`Task N` en inglés** (67 líneas, ninguna de este
+frente), **`Decisión N` / `Regla N` / `paso N` de "la spec"** escrito en prosa (7 líneas), y la
+autorreferencia **"antes de esta tarea"** (26). Ninguna la encontró un grep: las encontró la
+revisión independiente, leyendo.
+
+### Las `§ N` sin documento: 37 citas, y no una spec sino siete
+
+La entrada decía *"las que quedaron son todas de la spec de la reserva de stock"*, más una
+suelta de promociones. **Falso, y por el mismo motivo de siempre**: el conteo salió de
+`grep -rn "spec § "`, que solo encuentra la cita escrita de esa forma. Clasificadas por
+contenido, **35** apuntaban a **siete** documentos:
+
+| Documento | Citas | Dónde |
+|---|---|---|
+| `2026-09-01-reserva-de-stock-al-pedir-design.md` | 13 | `items.service.ts` (7), su spec (2), `salones.service.ts`, `useVenta.ts`, `CatalogoGrid.vue` y su spec |
+| `2026-07-25-header-caja-ciego-design.md` (`§3.4`) | 6 | `caja.service.ts` (3), `caja.controller.ts`, `caja.e2e-spec.ts` (2) |
+| `2026-08-27-motor-promociones-design.md` (`§Modelo de datos`, `§El evaluador`) | 10 | `promociones.evaluator.ts`, `promociones.service.ts`, `promocion.entity.ts`, `usePromociones.ts` (2), su spec, `promociones-form-config.ts` (2), su spec (2) |
+| `2026-08-11-testigo-cierre-forzado-design.md` (`§Testing`, `§Riesgos`) | 2 | `caja-testigo.service.ts`, `CajaCierreForzadoPanel.vue` |
+| `2026-07-26-recuento-inventario-design.md` (`§4`, `§7`) | 2 | `useRecuentoInventario.ts` |
+| `2026-07-26-costeo-cpp-design.md` (`§6`) | 1 | `costeo-cpp.e2e-spec.ts` |
+| `2026-07-28-borrado-ingrediente-extra-design.md` | 1 | `recetas.e2e-spec.ts` |
+
+Las otras dos van a otro lado: `setup-pool.ts` citaba `§ 2` de `pendientes.md` sin nombrarlo, y
+`recuentos.service.spec.ts` citaba **`§7 del brief`** — un brief de tarea que nunca vivió en el
+repo. Ese pointer se borró: el motivo que sostenía ya estaba escrito completo en la misma
+línea.
+
+⚠️ **Las dos últimas de promociones las encontró la revisión, no el barrido, y en dos vueltas
+distintas** (`promocion.entity.ts`, después `promociones-form-config.ts`). Las dos las había
+descartado el mismo criterio mal aplicado: *"el archivo ya nombra la spec"*, cuando lo que la
+nombraba era **otro bloque de comentario** del mismo archivo —el docblock de la clase 35 líneas
+más arriba, la cita gemela 22 líneas más arriba—, no su cabecera. La segunda es peor que la
+primera: el barrido arregló la copia de esa misma frase en el spec del archivo y dejó la
+fuente. 📌 **Cuando el criterio es "el archivo ya lo nombra", hay que mirar QUÉ bloque lo
+nombra, no si el nombre aparece en el archivo.**
+
+📌 **Y una cita estaba mal, no solo huérfana.** `recetas.e2e-spec.ts` decía *"la decisión de
+diseño §2.4 del spec"*. En ese documento no hay una § 2.4: hay una `## 2. Decisiones de
+diseño` con una lista, y `/uso` detrás de `Items:Eliminar` es su **decisión 4**. Quedó escrito
+así. Se descubrió abriendo el documento para nombrarlo — leyendo la cita sola no se ve.
+
+⚠️ **Las seis `§3.4` del ciego se ven iguales y NO lo son, así que quedaron como estaban.**
+También apuntan a una decisión dentro de una sección (`## 3`, decisión 4) y tampoco hay un
+heading `### 3.4` — pero ahí la notación **es la del propio documento**:
+`2026-07-25-header-caja-ciego-design.md` se autocita `(§3.4)` en cuatro lugares. Cambiarla
+alejaría la cita de su fuente. La de `recetas` no tenía esa excusa: la inventó el comentario.
+
+⚠️ **Tres candidatas se descartaron por leerlas**, y las tres tenían el documento **en la línea
+de al lado**: `items.service.ts` («NO es la § 15 de `docs/patterns/backend.md`»),
+`inventario.service.ts` y `combos.e2e-spec.ts`. El filtro automático las marcaba porque miraba
+la línea, no el bloque. Otras tres citan una sección **de un archivo `.ts`** por su nombre
+(`salones/index.nuxt.spec.ts` § "el catálogo pide solo ítems…"), que sí resuelve. Y la
+`§ 5.2.1` del seeder es una **norma de la DIAN**, no un documento de este repo.
+
+📌 **Y quedan tres `spec § 4.2` vivas en `reserva-stock-mesa.e2e-spec.ts` (`:655`, `:710`,
+`:863`), a propósito.** La cabecera de ese archivo nombra plan y spec, que es la excepción
+escrita en [`CONVENTIONS.md`](../CONVENTIONS.md). Se anota porque quien verifique el cierre con
+`grep 'spec § 4.2'` las va a encontrar y va a creer que el barrido quedó a medias.
+
+### Las `Tarea N` del plan borrado: 124 líneas, no 17
+
+La entrada contaba *"17 líneas en 16 archivos"* porque grepeaba la forma exacta
+`Tarea N del frente "bodegas y traslados"`. Contando la conducta —cualquier cita a una tarea de
+ese plan— eran **124 líneas**, en 45 archivos. Ninguna resuelve: el plan se borró al cerrar el
+frente, como corresponde ([`docs/superpowers/README.md`](../superpowers/README.md)).
+
+⚠️ **Y el censo tuvo que rehacerse: `grep -rn 'Tarea [0-9]'` no alcanza.** Se le escapan las que
+dicen **`Tareas 13/14`** (plural) y las que escriben **`tarea 14`** en minúscula — tres líneas,
+dos de ellas en archivos que el barrido ya estaba tocando. Para **la forma en español** el
+censo es `grep -rniE 'tareas? *[0-9]'`, y aun así hay que clasificar leyendo: de las 142 líneas
+que devuelve, 13 son de `reserva-stock-mesa.e2e-spec.ts` —6 rotulan sus propios `describe` y 7
+los refieren en prosa— y **cinco** citan
+planes que existen (motor de promociones, redondeo de plata, y tres de la reserva de stock).
+⛔ **Ese grep NO es el censo de la conducta**, solo el de esta forma: el repo escribe la misma
+cita como `Task N` en inglés, y eso no lo ve ninguna variante en español (ver el bloque de
+abajo, y la entrada viva del backlog).
+
+**Todas perdieron el número y quedaron con el frente**, que sí resuelve a
+[`docs/features/bodegas-y-traslados.md`](../features/bodegas-y-traslados.md). Doce de ellas
+eran títulos de tests —once `describe` y un `it`—, así que cambiaron nombres; nada los
+referencia.
+
+⚠️ **Las que se dejaron, y por qué**: las 13 de `reserva-stock-mesa.e2e-spec.ts` son de **ese
+mismo archivo** — 6 rotulan sus propios `describe` y las otras 7 son referencias en prosa a
+esos bloques—, y su cabecera nombra el plan. Son nombres internos, no punteros a otro
+documento, y así quedó escrito en la convención.
+
+Las **cinco** de planes vivos que había fuera de ese archivo se cambiaron igual, porque la
+regla vale para todas: el seeder citaba *"la Tarea 10 del plan de motor de promociones"*,
+`MoneyInput.spec.ts` una *"tarea 14"* del redondeo de plata, y tres eran de la reserva de stock
+—`salones/index.nuxt.spec.ts` (*"la mitad que la Tarea 8 no pudo afirmar"*), `items.service.ts`
+y `items.service.spec.ts`—. En **este** archivo, en cambio, los números **quedan**: registra lo
+que se midió cuando se midió, no es texto vivo.
+
+📌 **El 124 cuenta las citas del plan BORRADO, no las líneas que el commit tocó**, que son
+cinco más: las cinco de planes vivos que se aprovecharon en la misma pasada (seeder →
+promociones, `MoneyInput.spec.ts` → redondeo de plata, y `salones/index.nuxt.spec.ts`,
+`items.service.ts` e `items.service.spec.ts` → reserva de stock). La distinción importa porque
+la entrada que se cierra era sobre el plan borrado; medir "lo que el diff removió" da otro
+número y no es el mismo hecho.
+
+⛔ **Y "ninguna afirmación cambió" era falso, lo levantó la revisión independiente.** Dos
+comentarios quedaron diciendo algo que el código desmiente, los dos por el mismo reflejo de dar
+por bodegas todo `Tarea N` que hablara de stock:
+
+- `items.service.ts` atribuía a bodegas los dos índices que bajaron `comprometidoPorItem` a
+  0,36 ms. Son del **frente de la reserva de stock** (`0c8aa1b2`, que trae la medición en su
+  propio cuerpo). Corregido, y ahora la línea dice a qué escala se midió.
+- `costo-stock-choke-point.invariant.spec.ts` decía *"no hay `UPDATE` — una unidad serializada
+  no cambia de lugar **hasta que exista** `POST /traslados`"*. Al sacarle el número le saqué
+  también la salvedad temporal, y quedó un presente falso: `inventario.service.ts` hace
+  `UPDATE item_unidad SET ubicacion_id` en la rama del traslado. Reescrito diciendo eso.
+
+📌 **Borrar un número deja colgando la frase que lo referenciaba, y esa es la forma que más
+apareció.** *"esa misma tarea"*, *"esta tarea"*, *"con ella"*, *"lo previsto en el plan"*, *"el
+caso que la tarea existe para cerrar"*, *"brief de la tarea"*, y un *"ésta lo levanta"* que tras
+el cambio señalaba a la etapa contraria a la que quería. También rompió concordancias
+(*"se borró en **la** Frente"*). Aparecieron en seis vueltas: la lectura del diff encontró unas,
+la revisión independiente el resto — así que **el conteo no vale como medida de completitud**,
+lo que vale es la forma. ⚠️ **Y la ventana no son "las líneas siguientes":** tres de estas
+—`traslados.e2e-spec.ts`, `stock-insuficiente-ubicacion.e2e-spec.ts`,
+`inventario-serie-ubicacion.e2e-spec.ts`— referenciaban el número de la **cabecera del
+archivo**, entre 239 y 1142 líneas más arriba, y resolvían **antes** de este commit. O sea: al
+sacar un número de una cabecera hay que grepear el archivo ENTERO por deícticos (*"esta
+tarea"*, *"antes de"*), no releer el párrafo. Es exactamente lo que la entrada anticipaba al
+decir que era *"una decisión de redacción por cita, no un `sed`"*, y nada de esto lo ve el
+gate: ningún test mira la prosa de un comentario.
+
+---
+
 ## Los dos mecánicos que quedaban del frente de bodegas (cerrados 2026-09-07)
 
 Salen de [`pendientes.md` § 1](pendientes.md). Los dos eran *"no hay nada que preguntar ni

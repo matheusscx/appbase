@@ -248,8 +248,9 @@ interface UnidadNxm {
  *
  * Cada grupo completo es UNA `AplicacionPromo` propia (no se agregan en una
  * sola, a diferencia de `porcentaje`): 4 cervezas en el 2x1 son 2 aplicaciones,
- * cada una con su propia línea beneficiada — así lo pide la spec (§El
- * evaluador) y así lo espera el desglose de venta, que nombra cada aplicación.
+ * cada una con su propia línea beneficiada — así lo pide el § El evaluador de
+ * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`, y así lo
+ * espera el desglose de venta, que nombra cada aplicación.
  *
  * Para el greedy, cada candidata pide las unidades de TODO su grupo, no solo
  * de la barata que aparece en `montosPorLinea`: la "cara" del grupo no recibe

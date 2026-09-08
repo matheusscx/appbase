@@ -1,11 +1,11 @@
 // @vitest-environment nuxt
 //
-// Tarea 15 ("bodegas y traslados"): el 400 de "no hay stock" trae el mensaje
+// Frente de bodegas y traslados: el 400 de "no hay stock" trae el mensaje
 // completo Y los datos sueltos (`itemId`, `itemNombre`, `faltante`,
-// `ubicaciones`), y esta función decide si el toast lleva el botón
-// "Trasladar" — SOLO si quien mira tiene `Inventario/Crear` (se lo pasa
-// quien llama, `usePermisosCrud('Inventario').puedeCrear`) Y el backend
-// mandó a dónde ir (`itemId` + al menos una bodega con stock).
+// `ubicaciones`), y esta función decide si el toast lleva el botón "Trasladar"
+// — SOLO si quien mira tiene `Inventario/Crear` (se lo pasa quien llama,
+// `usePermisosCrud('Inventario').puedeCrear`) Y el backend mandó a dónde ir
+// (`itemId` + al menos una bodega con stock).
 //
 // El garzón, sin el permiso: mismo mensaje, sin botón — nunca un 403 en
 // medio del servicio.

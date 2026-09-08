@@ -424,8 +424,9 @@ describe('Costeo CPP (e2e)', () => {
 
   it('un ajuste_costo con stock 0 no bloquea cambiar modoInventario/unidadMedida después', async () => {
     // Producto nuevo, sin compras todavía: solo un ajuste_costo (corrige la
-    // semilla antes de recibir mercadería — spec §6). No debe congelar el modo
-    // ni la unidad, porque el ajuste no movió stock.
+    // semilla antes de recibir mercadería — § 6 de
+    // `docs/superpowers/specs/2026-07-26-costeo-cpp-design.md`). No debe
+    // congelar el modo ni la unidad, porque el ajuste no movió stock.
     const resCreate = await request(app.getHttpServer())
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)

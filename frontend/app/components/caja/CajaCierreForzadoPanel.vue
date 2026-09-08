@@ -93,7 +93,8 @@ const garzonesDisponibles = computed(() =>
 /**
  * Las dos cargas van por separado, no en un `Promise.all` (revisión
  * independiente, hallazgo 7): `listarAbiertas` exige `Salones:Leer`, y un
- * tenant sin ese módulo contratado —el minimarket de la spec, §Riesgos— recibe
+ * tenant sin ese módulo contratado —el minimarket que nombra el § Riesgos de
+ * `docs/superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md`— recibe
  * un 403 legítimo. Con las dos juntas, ese 403 se llevaba puesto también el
  * estado de las solicitudes y dejaba un toast de error en cada montaje, cuando
  * la respuesta correcta ya existe en la pantalla: "no hay garzones en turno".

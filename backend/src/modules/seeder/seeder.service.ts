@@ -1538,8 +1538,8 @@ export class SeederService implements OnApplicationBootstrap {
       ON motivo_traslado (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
 
-    // Empieza en 391: el máximo previo era 390 (`MOV_ID_BODEGA`, Tarea 6/7 de
-    // "bodegas y traslados"). 2 tenants x 5 nombres = 10 ids (391-400).
+    // Empieza en 391: el máximo previo era 390 (`MOV_ID_BODEGA`, del frente de
+    // bodegas y traslados). 2 tenants x 5 nombres = 10 ids (391-400).
     const filas: { id: string; tenantId: string; nombre: string }[] = [];
     let id = 391;
     for (const tenantId of [PARIS, FALABELLA]) {
@@ -3628,8 +3628,9 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Dos promos demo (Tarea 10 del plan de motor de promociones), va DESPUÉS de
-   * `seedItems()` porque el scope de la primera cuelga de ítems reales — no
+   * Dos promos demo (frente del motor de promociones,
+   * `docs/features/motor-promociones.md`), va DESPUÉS de `seedItems()` porque
+   * el scope de la primera cuelga de ítems reales — no
    * antes, como `seedPromocionesIndices()` (esa es solo el índice, sin filas;
    * ver su docblock: al crear tenant no se siembra ninguna promo, esto es
    * aparte y demo-only).

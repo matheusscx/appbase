@@ -99,9 +99,10 @@ describe('CatalogoGrid — qué se puede clickear', () => {
   })
 
   it('un stockDisponible negativo se comporta como agotado', async () => {
-    // Un ingrediente no bloqueante puede quedar comprometido de más (spec
-    // § 4.2). No es un caso del catálogo de venta hoy, pero el guard no debe
-    // depender de que no pase.
+    // Un ingrediente no bloqueante puede quedar comprometido de más (§ 4.2 de
+    // `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`).
+    // No es un caso del catálogo de venta hoy, pero el guard no debe depender
+    // de que no pase.
     const wrapper = await montar([producto({ stock: '3.0000', stockDisponible: '-1.0000' })])
 
     const tarjeta = wrapper.find('[data-qa="item-catalogo-item-1"]')

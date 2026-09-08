@@ -37,8 +37,10 @@ function puedeAgregar(item: ItemCatalogo): boolean {
  *
  * `<= 0` y no `=== 0`: desde el 2026-09-01 `disponible` es `stock − comprometido`
  * y **puede ser negativo** (un ingrediente no bloqueante se pasa del stock,
- * spec § 4.2). Con `=== 0`, un plato en −2 no se atenuaba y encima ordenaba
- * como si tuviera existencias: el peor de los tres estados se veía mejor que
+ * § 4.2 de
+ * `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`). Con
+ * `=== 0`, un plato en −2 no se atenuaba y encima ordenaba como si tuviera
+ * existencias: el peor de los tres estados se veía mejor que
  * el de cero. El `?? 1` deja intacto el `null`, que significa "no hay
  * bloqueantes que limiten" y no es falta de stock.
  */

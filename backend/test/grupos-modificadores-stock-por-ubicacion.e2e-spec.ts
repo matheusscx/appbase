@@ -6,20 +6,20 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 /**
- * Red de la Tarea 3b (GIRAR 2/2) del frente de bodegas:
- * `docs/features/bodegas-y-traslados.md`.
+ * Red del frente de bodegas y traslados (`docs/features/bodegas-y-traslados.md`).
  *
  * `GET /grupos-modificadores` y `GET /grupos-modificadores/:id` son catálogo
  * admin: el `stock` de cada opción es informativo (no hay ningún consumidor,
- * backend ni frontend, que lo use para decidir si una opción se puede pedir
- * — eso lo resuelve `GET /items/:id` con `stockDisponible`, ya migrado en la
- * Tarea 3a). Por eso el `stock` de acá tiene que seguir siendo el TOTAL del
+ * backend ni frontend, que lo use para decidir si una opción se puede pedir —
+ * eso lo resuelve `GET /items/:id` con `stockDisponible`, ya migrado por ese
+ * frente). Por eso el `stock` de acá tiene que seguir siendo el TOTAL del
  * tenant, no el del local.
  *
- * ✅ **Sin muleta desde la Tarea 9**: el stock de la bodega se arma por la API
- * (compra al local + `POST /traslados`). Hasta el 2026-09-07 se plantaba con
- * un `INSERT` directo a `stock_ubicacion` porque el endpoint no existía, y esa
- * excepción estaba declarada en `costo-stock-choke-point.invariant.spec.ts`.
+ * ✅ **Sin muleta desde que existe `POST /traslados`**: el stock de la bodega se
+ * arma por la API (compra al local + `POST /traslados`). Hasta el 2026-09-07 se
+ * plantaba con un `INSERT` directo a `stock_ubicacion` porque el endpoint no
+ * existía, y esa excepción estaba declarada en
+ * `costo-stock-choke-point.invariant.spec.ts`.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';

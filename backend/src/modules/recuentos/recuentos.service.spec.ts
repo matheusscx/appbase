@@ -16,8 +16,8 @@ const MOTIVO_ID = 'motivo-uuid';
 const MOTIVO_A = 'motivo-a-uuid';
 const MOTIVO_B = 'motivo-b-uuid';
 const UBICACION_LOCAL_ID = 'ubicacion-local-uuid';
-// Distinto de UBICACION_LOCAL_ID a propósito (§7 del brief): con IDs iguales
-// un mutante que ignorara `dto.ubicacionId`/`sesion.ubicacion_id` y volviera a
+// Distinto de UBICACION_LOCAL_ID a propósito: con IDs iguales un mutante que
+// ignorara `dto.ubicacionId`/`sesion.ubicacion_id` y volviera a
 // `localDe(tenantId)` sobreviviría sin que ningún assert lo note.
 const UBICACION_BODEGA_ID = 'ubicacion-bodega-uuid';
 
@@ -120,9 +120,10 @@ describe('RecuentosService', () => {
     /**
      * El congelado sale del saldo de LA UBICACIÓN ELEGIDA (`dto.ubicacionId`),
      * no de la suma de todas ni de un default al local. Es lo que empareja el
-     * `stock_sistema` con la ubicación contra la que `aplicar` postea el
-     * delta — el tapón que la Tarea 4 puso (congelar el total y descontar del
-     * local, salida fantasma con stock en bodega) y que esta tarea levanta:
+     * `stock_sistema` con la ubicación contra la que `aplicar` postea el delta
+     * — el tapón que puso una etapa anterior de bodegas y traslados (congelar el
+     * total y descontar del local, salida fantasma con stock en bodega) y que
+     * la etapa del recuento por ubicación levanta:
      * `docs/features/recuento-inventario.md`.
      *
      * `ubicacionId: UBICACION_BODEGA_ID` (≠ `UBICACION_LOCAL_ID`, el default

@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { PROMOCION_CONFIG } from './promociones-form-config'
 
 // Molde: `reglas-form-config.spec.ts`. La diferencia con ese archivo es que
-// `tipo` acá NO es un catálogo (`tipos_regla`) sino una columna con CHECK
-// —un tipo nuevo exige rama propia en el evaluador (diseño §Modelo de
-// datos)—, así que `Record<TipoPromocion, ...>` ya obliga a TypeScript a
-// cubrir los tres en tiempo de compilación. Este spec fija el CONTENIDO de
-// cada entrada, que el compilador no puede ver.
+// `tipo` acá NO es un catálogo (`tipos_regla`) sino una columna con CHECK —un
+// tipo nuevo exige rama propia en el evaluador (§ Modelo de datos de
+// `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`)—, así que
+// `Record<TipoPromocion, ...>` ya obliga a TypeScript a cubrir los tres en
+// tiempo de compilación. Este spec fija el CONTENIDO de cada entrada, que el
+// compilador no puede ver.
 describe('promociones-form-config', () => {
   it('porcentaje pide el % y un único scope', () => {
     expect(PROMOCION_CONFIG.porcentaje).toMatchObject({
@@ -35,11 +36,12 @@ describe('promociones-form-config', () => {
     })
   })
 
-  // Los tres tipos comparten el guardarraíl heredado de eliminar
-  // `promocional`: una campaña sin fecha de fin no se acepta (CLAUDE.md,
-  // diseño §Modelo de datos). No es un eje que varíe por tipo — se deja
-  // como campo en vez de una constante aparte para que un tipo nuevo que
-  // algún día quisiera la excepción no pueda colarse sin declararla.
+  // Los tres tipos comparten el guardarraíl heredado de eliminar `promocional`:
+  // una campaña sin fecha de fin no se acepta (CLAUDE.md y el § Modelo de datos
+  // de `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`). No es
+  // un eje que varíe por tipo — se deja como campo en vez de una constante
+  // aparte para que un tipo nuevo que algún día quisiera la excepción no pueda
+  // colarse sin declararla.
   it('los tres tipos exigen fecha de inicio y fin', () => {
     for (const cfg of Object.values(PROMOCION_CONFIG)) {
       expect(cfg.fechasRequeridas).toBe(true)

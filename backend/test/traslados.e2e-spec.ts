@@ -8,10 +8,10 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * **Tarea 9 del frente "bodegas y traslados"**: `POST /traslados` mueve
- * mercadería entre dos ubicaciones del tenant en un solo acto atómico,
- * dejando **dos filas de kardex** —salida en el origen, entrada en el
- * destino— colgadas de un mismo `traslado_id`.
+ * **Frente de bodegas y traslados**: `POST /traslados` mueve mercadería entre
+ * dos ubicaciones del tenant en un solo acto atómico, dejando **dos filas de
+ * kardex** —salida en el origen, entrada en el destino— colgadas de un mismo
+ * `traslado_id`.
  *
  * Documentación viva del frente: `docs/features/bodegas-y-traslados.md`.
  *
@@ -1150,8 +1150,8 @@ describe('Traslados entre ubicaciones (e2e)', () => {
    * Borde EXPLÍCITO del diseño, no un olvido: `'traslado'` está en la
    * allowlist `MOTIVOS_SOBRE_ITEM_ELIMINADO` (`inventario.service.ts:124`)
    * porque si un producto discontinuado no pudiera trasladarse, una bodega
-   * llena de esa mercadería no se podría vaciar nunca. Hasta esta tarea no
-   * había un solo test que lo ejerciera.
+   * llena de esa mercadería no se podría vaciar nunca. Hasta que este spec
+   * existió no había un solo test que lo ejerciera.
    */
   it('un producto ELIMINADO se puede trasladar: la bodega se vacía igual', async () => {
     const itemId = await crearProducto('8');

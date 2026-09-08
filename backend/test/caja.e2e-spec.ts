@@ -930,7 +930,8 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           .set('Authorization', `Bearer ${tokenSupervisor}`);
         expect(arqueo.status).toBe(200);
         const body = arqueo.body as { ciego: boolean; lineas: ArqueoLinea[] };
-        // El admin del tenant ve el arqueo completo aun en modo ciego (§3.4): el
+        // El admin del tenant ve el arqueo completo aun en modo ciego (§3.4 de
+        // `docs/superpowers/specs/2026-07-25-header-caja-ciego-design.md`): el
         // ciego no aplica al dueño, así que el esperado SÍ viaja.
         expect(body.ciego).toBe(false);
         const efectivo = body.lineas.find((l) => l.esEfectivo);
@@ -2543,7 +2544,8 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no ad
       expect(linea.esperado).toBeNull();
     }
 
-    // Contraste: el admin sigue exento (decisión del owner, §3.4) — matando
+    // Contraste: el admin sigue exento (decisión del owner, §3.4 de
+    // `docs/superpowers/specs/2026-07-25-header-caja-ciego-design.md`) — matando
     // el mutante de "el controller ya no distingue admin vs encargado".
     const arqueoAdmin = await request(app.getHttpServer())
       .get(`/api/caja/${cajaId}/arqueo`)

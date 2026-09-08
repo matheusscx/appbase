@@ -7,9 +7,9 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * Red de la Tarea 3a (GIRAR 1/2) del frente de bodegas — el plan se borró al
- * cerrarlo; lo durable está en `docs/features/bodegas-y-traslados.md`,
- * «GET /items, GET /items/:id».
+ * Red del frente de bodegas y traslados — el plan se borró al cerrarlo; lo
+ * durable está en `docs/features/bodegas-y-traslados.md`, «GET /items, GET
+ * /items/:id».
  *
  * `GET /items` y `GET /items/:id` tienen que devolver los TRES números —
  * `stock` (total del tenant), `stockVendible` (el del local) y
@@ -17,11 +17,11 @@ import { AppModule } from '../src/app.module';
  * es el mismo número que `stockVendible`)— calculados desde `stock_ubicacion`,
  * y `GET /items/:id` gana el desglose por ubicación.
  *
- * ✅ **Sin muleta desde la Tarea 9**: el escenario se arma entero por la API
- * (compra al local + `POST /traslados` a la bodega). Hasta el 2026-09-07 el
- * saldo de la bodega se plantaba con un `INSERT` directo a `stock_ubicacion`
- * porque el endpoint no existía, y esa excepción estaba declarada en
- * `costo-stock-choke-point.invariant.spec.ts`. Ya no hay ninguna.
+ * ✅ **Sin muleta desde que existe `POST /traslados`**: el escenario se arma
+ * entero por la API (compra al local + `POST /traslados` a la bodega). Hasta el
+ * 2026-09-07 el saldo de la bodega se plantaba con un `INSERT` directo a
+ * `stock_ubicacion` porque el endpoint no existía, y esa excepción estaba
+ * declarada en `costo-stock-choke-point.invariant.spec.ts`. Ya no hay ninguna.
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -145,8 +145,9 @@ describe('items — stock por ubicación (e2e)', () => {
     expect(resItem.status).toBe(201);
     const itemId = (resItem.body as ItemResponse).id;
 
-    // 3. 30 en el local, por la API real: desde la Tarea 12 `ubicacionId` es
-    // requerido en el body — ya no hay default silencioso al local.
+    // 3. 30 en el local, por la API real: `ubicacionId` es requerido en el
+    // body desde el frente de bodegas y traslados — ya no hay default
+    // silencioso al local.
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)

@@ -152,10 +152,11 @@ interface PedidoEnVuelo {
 }
 
 /**
- * Pedidos vivos. Se borra la entrada al resolverse (éxito o error).
- * ⚠️ Un pedido que **nunca vuelve** —el otro intermitente de § 2— deja su
- * entrada acá para siempre. Es un mapa chico en un proceso de test, no una fuga
- * que importe, pero al leer el archivo conviene saberlo.
+ * Pedidos vivos. Se borra la entrada al resolverse (éxito o error). ⚠️ Un
+ * pedido que **nunca vuelve** —el otro intermitente de
+ * `docs/agent/pendientes.md` § 2— deja su entrada acá para siempre. Es un mapa
+ * chico en un proceso de test, no una fuga que importe, pero al leer el archivo
+ * conviene saberlo.
  */
 const enVuelo = new Map<number, PedidoEnVuelo>();
 

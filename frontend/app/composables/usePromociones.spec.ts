@@ -30,10 +30,12 @@ describe('usePromociones — estadoPromocion', () => {
     ).toBe('vencida')
   })
 
-  // El eje que este composable existe para fijar: `activo` es independiente
-  // de las fechas y gana siempre — "pausar es el gesto normal de apagarla"
-  // (spec §Modelo de datos), a diferencia de la regla común que si está fuera
-  // de vigencia simplemente no aplica sin que nadie la haya tocado.
+  // El eje que este composable existe para fijar: `activo` es independiente de
+  // las fechas y gana siempre — "pausar es el gesto normal de apagarla"
+  // (§ Modelo de datos de
+  // `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`), a
+  // diferencia de la regla común que si está fuera de vigencia simplemente no
+  // aplica sin que nadie la haya tocado.
   it('pausada gana sobre vigente', () => {
     const hoy = hoyLocal()
     expect(estadoPromocion({ activo: false, fechaInicio: hoy, fechaFin: hoy })).toBe('pausada')

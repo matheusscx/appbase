@@ -182,9 +182,10 @@ describe('MoneyInput', () => {
   })
 
   // La máscara se arma con `number.fraction` = decimales de la moneda: es lo que
-  // impide abrir una parte decimal donde la moneda no la admite (tarea 14, redondeo
-  // de plata) y lo que la deja pasar donde sí. Lo que se fija acá es esa CONFIGURACIÓN
-  // —un cambio de valor completo, como un pegado o un `modelValue` que llega de la
+  // impide abrir una parte decimal donde la moneda no la admite (frente del
+  // redondeo de plata) y lo que la deja pasar donde sí. Lo que se fija acá es esa
+  // CONFIGURACIÓN —un cambio de valor completo, como un pegado o un `modelValue`
+  // que llega de la
   // API—; el tipeo tecla por tecla tiene su propio describe abajo.
   describe('la máscara sigue los decimales de la moneda', () => {
     it('emite el monto sin máscara, no el texto formateado', async () => {

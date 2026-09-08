@@ -87,10 +87,11 @@ export class CajaTestigoService {
 
   /**
    * El encargado pide fe a uno o varios garzones. Solo sobre una caja
-   * `en_conciliacion` —el conteo ya congelado por la fase 1 del cierre—: es
-   * lo único que hace que la firma valga, contra números que no van a
-   * cambiar. **Mutante que tiene que morir** (spec, §Testing): pedir la
-   * firma ANTES de congelar el conteo anula la feature entera.
+   * `en_conciliacion` —el conteo ya congelado por la fase 1 del cierre—: es lo
+   * único que hace que la firma valga, contra números que no van a cambiar.
+   * **Mutante que tiene que morir** (§ Testing de
+   * `docs/superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md`):
+   * pedir la firma ANTES de congelar el conteo anula la feature entera.
    *
    * La elegibilidad se resuelve por estar en `listarAbiertas(tenantId)`
    * —sesión abierta AHORA—, nunca por una lista de exclusiones: de ahí sale

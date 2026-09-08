@@ -231,12 +231,12 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
     expect(movBebida?.tipo).toBe('salida');
     expect(movBebida?.motivo).toBe('venta');
 
-    // Stock resultante: componente fijo 30-1=29, bebida 20-1=19.
-    // El saldo **del local**, no la suma de todas las ubicaciones: con stock
-    // repartido en bodega (el seed lo reparte desde la Tarea 4), un total que
-    // no se mueve tapa exactamente la propiedad que este frente vino a fijar —
-    // que la venta descuenta del LOCAL. Un tenant tiene un solo local, así que
-    // el JOIN devuelve una fila.
+    // Stock resultante: componente fijo 30-1=29, bebida 20-1=19. El saldo **del
+    // local**, no la suma de todas las ubicaciones: con stock repartido en
+    // bodega (el seed lo reparte desde el frente de bodegas y traslados), un
+    // total que no se mueve tapa exactamente la propiedad que este frente vino
+    // a fijar — que la venta descuenta del LOCAL. Un tenant tiene un solo
+    // local, así que el JOIN devuelve una fila.
     const stockFijoRows: { stock: string }[] = await ds.query(
       `SELECT COALESCE(SUM(su.stock), 0) AS stock
          FROM stock_ubicacion su

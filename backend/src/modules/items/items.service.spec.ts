@@ -64,9 +64,9 @@ describe('ItemsService', () => {
     ubicacionesServiceMock = {
       localDe: jest.fn().mockResolvedValue(UBICACION_LOCAL_ID),
       // Mockeado a nivel de SERVICE: `ajustarStock` lo llama para validar
-      // `dto.ubicacionId` (Tarea 12 del frente "bodegas y traslados") antes
-      // de tocar nada más — no pasa por `managerMock.query`, así que no
-      // consume ningún slot de `mockResolvedValueOnce` de los tests de abajo.
+      // `dto.ubicacionId` (frente de bodegas y traslados) antes de tocar nada
+      // más — no pasa por `managerMock.query`, así que no consume ningún slot
+      // de `mockResolvedValueOnce` de los tests de abajo.
       findOneOrFail: jest.fn().mockResolvedValue({
         id: UBICACION_LOCAL_ID,
         nombre: 'Local',
@@ -247,9 +247,10 @@ describe('ItemsService', () => {
     });
 
     /**
-     * La fila de `baseQuery` de un producto con stock, para los tests de
-     * abajo. `stockVendible` por default es igual a `stock`: son estos tests
-     * de un solo local, donde los dos números coinciden (Tarea 3a).
+     * La fila de `baseQuery` de un producto con stock, para los tests de abajo.
+     * `stockVendible` por default es igual a `stock`: son estos tests de un
+     * solo local, donde los dos números coinciden (frente de bodegas y
+     * traslados).
      */
     const filaProducto = (stock: string, stockVendible: string = stock) => ({
       item_id: ITEM_ID,
@@ -281,7 +282,8 @@ describe('ItemsService', () => {
     // la pantalla mostraba `stock`. Ahora lo que todavía se puede pedir viaja en
     // `stockDisponible` —campo propio, string, escala de `stock`— y `disponible`
     // se queda como el conteo de porciones de receta/combo (decisión del owner
-    // 2026-09-01, que enmienda la § 4.1b de la spec).
+    // 2026-09-01, que enmienda la § 4.1b de
+    // `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`).
     it('producto: stockDisponible es su stock cuando ninguna cuenta abierta lo tomó', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }])
@@ -332,14 +334,14 @@ describe('ItemsService', () => {
     });
 
     /**
-     * El corazón de la Tarea 3a (bodegas y traslados,
-     * `docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»):
+     * El corazón del frente de bodegas y traslados
+     * (`docs/features/bodegas-y-traslados.md`, «GET /items, GET /items/:id»):
      * `stock` es el TOTAL del tenant (todas las ubicaciones sumadas),
      * `stockVendible` es lo que hay en el LOCAL, y `stockDisponible` resta el
-     * comprometido de `stockVendible` — no de `stock` — porque es lo único
-     * que la mesa puede pedir. 10 en el local y 20 en la (hipotética) bodega:
-     * números distintos a propósito, para que un mutante que devuelva el
-     * total donde va el vendible (o viceversa) no sobreviva.
+     * comprometido de `stockVendible` — no de `stock` — porque es lo único que
+     * la mesa puede pedir. 10 en el local y 20 en la (hipotética) bodega:
+     * números distintos a propósito, para que un mutante que devuelva el total
+     * donde va el vendible (o viceversa) no sobreviva.
      */
     it('stock es el total, stockVendible es el del local', async () => {
       dataSource.query
@@ -855,12 +857,12 @@ describe('ItemsService', () => {
      * pasaba igual.
      *
      * `stock` (el total, 30/26/19) es distinto de `stock_vendible` (el local,
-     * 10/11/4) en las tres filas a propósito (hallazgo de revisión, Tarea 3a):
-     * con `stock === stock_vendible` un mutante que revierta `disponibleDe` a
-     * leer el total en vez del vendible pasa la suite entera, porque el
-     * resultado sería el mismo con cualquiera de los dos campos. Con los dos
-     * números separados, ese mutante cambia `stockDisponible` (30-6=24 en vez
-     * de 4, etc.) y el test lo cacha.
+     * 10/11/4) en las tres filas a propósito (hallazgo de la revisión del
+     * frente de bodegas y traslados): con `stock === stock_vendible` un mutante
+     * que revierta `disponibleDe` a leer el total en vez del vendible pasa la
+     * suite entera, porque el resultado sería el mismo con cualquiera de los
+     * dos campos. Con los dos números separados, ese mutante cambia
+     * `stockDisponible` (30-6=24 en vez de 4, etc.) y el test lo cacha.
      */
     it('descuenta lo comprometido en ingredientes, extras y opciones de grupo', async () => {
       const baseRow = {
@@ -1040,12 +1042,12 @@ describe('ItemsService', () => {
             stock: null,
             stock_vendible: null,
           },
-          // `stock` (el total, 40) distinto de `stock_vendible` (el local, 9)
-          // a propósito (hallazgo de revisión, Tarea 3a): con los dos iguales
-          // un mutante que revierta `disponibleDe` de este componente a leer
-          // el total en vez del vendible pasa igual. Comprometido en 0 acá,
-          // así que `stockDisponible` sale directo del vendible: 9.0000, no
-          // 40.0000.
+          // `stock` (el total, 40) distinto de `stock_vendible` (el local, 9) a
+          // propósito (hallazgo de la revisión del frente de bodegas y
+          // traslados): con los dos iguales un mutante que revierta
+          // `disponibleDe` de este componente a leer el total en vez del
+          // vendible pasa igual. Comprometido en 0 acá, así que
+          // `stockDisponible` sale directo del vendible: 9.0000, no 40.0000.
           {
             componente_item_id: 'producto-papas',
             componente_nombre: 'Papas fritas',
@@ -3387,11 +3389,10 @@ describe('ItemsService', () => {
       );
     });
 
-    // Tarea 12 del frente "bodegas y traslados": el ajuste de stock y la
-    // entrada por compra (mismo DTO, `motivo` los distingue) eligen ubicación.
-    // UBICACION_BODEGA_ID ≠ UBICACION_LOCAL_ID a propósito — con IDs iguales un
-    // mutante que ignorara `dto.ubicacionId` sobreviviría sin que ningún
-    // assert lo note.
+    // Frente de bodegas y traslados: el ajuste de stock y la entrada por compra
+    // (mismo DTO, `motivo` los distingue) eligen ubicación. UBICACION_BODEGA_ID
+    // ≠ UBICACION_LOCAL_ID a propósito — con IDs iguales un mutante que
+    // ignorara `dto.ubicacionId` sobreviviría sin que ningún assert lo note.
     const UBICACION_BODEGA_ID = 'ubicacion-bodega-uuid';
 
     it('con ubicacionId de una bodega, registra el movimiento EN ESA bodega', async () => {
@@ -5204,12 +5205,13 @@ describe('ItemsService', () => {
     });
 
     it('resuelve la ubicación local UNA vez aunque el snapshot tenga varias opciones-receta', async () => {
-      // Guarda contra el eslabón más profundo del N+1 (Tarea 2, hallazgo 1):
-      // una opción de grupo tipo `receta` hace que `venderOpcionesGrupos`
-      // vuelva a llamar a `venderIngredientesReceta`, y esa llamada recursiva
-      // tiene que reusar el `ubicacionLocalId` ya resuelto, no volver a
-      // pedirlo. Con UNA sola opción, un N+1 y una consulta única dan el
-      // mismo número (1) y el test no discrimina — por eso son tres.
+      // Guarda contra el eslabón más profundo del N+1 que abrió bodegas y
+      // traslados: una opción de grupo tipo `receta` hace que
+      // `venderOpcionesGrupos` vuelva a llamar a `venderIngredientesReceta`, y
+      // esa llamada recursiva tiene que reusar el `ubicacionLocalId` ya
+      // resuelto, no volver a pedirlo. Con UNA sola opción, un N+1 y una
+      // consulta única dan el mismo número (1) y el test no discrimina — por
+      // eso son tres.
       const opcion = (itemId: string) => ({
         itemId,
         nombre: itemId,
@@ -5248,11 +5250,12 @@ describe('ItemsService', () => {
 
   /**
    * El pre-chequeo de `venderComponentesCombo` (ver su docblock y el de
-   * `calcularDisponibleReceta`). Todos los tests de `venderComponentesCombo`
-   * de abajo lo espían (`spyOn(..., 'calcularDisponibleReceta')`), así que
-   * ninguno ejercita su query real — esto lo prueba en aislado: sin esto, un
-   * mutante que revirtiera su `LEFT JOIN stock_ubicacion` a `ip.stock` (el
-   * total del tenant) pasaba la suite entera (hallazgo de revisión, Tarea 3a).
+   * `calcularDisponibleReceta`). Todos los tests de `venderComponentesCombo` de
+   * abajo lo espían (`spyOn(..., 'calcularDisponibleReceta')`), así que ninguno
+   * ejercita su query real — esto lo prueba en aislado: sin esto, un mutante
+   * que revirtiera su `LEFT JOIN stock_ubicacion` a `ip.stock` (el total del
+   * tenant) pasaba la suite entera (hallazgo de la revisión del frente de
+   * bodegas y traslados).
    */
   describe('calcularDisponibleReceta', () => {
     it('lee el vendible del LOCAL (`stock_ubicacion` acotado a `localId`), no el total del tenant', async () => {
@@ -6727,11 +6730,10 @@ describe('ItemsService', () => {
               ],
         )
         .mockResolvedValueOnce(tipoRows)
-        // 6 — Tarea 15: bodegas con saldo, solo se consulta si el tope de
-        // arriba rebota. `[]` = ninguna, que es el caso de todos los tests de
-        // este helper (no le interesa el mensaje de la bodega). Encolado
-        // igual para los tests que SÍ pasan: un mock de más sin consumir no
-        // rompe nada.
+        // 6 — bodegas con saldo, solo se consulta si el tope de arriba rebota.
+        // `[]` = ninguna, que es el caso de todos los tests de este helper (no
+        // le interesa el mensaje de la bodega). Encolado igual para los tests
+        // que SÍ pasan: un mock de más sin consumir no rompe nada.
         .mockResolvedValueOnce([]);
     };
 
@@ -6786,13 +6788,14 @@ describe('ItemsService', () => {
     });
 
     /**
-     * Tarea 3a (bodegas y traslados): el saldo bajo el lock sale de
+     * Frente de bodegas y traslados: el saldo bajo el lock sale de
      * `stock_ubicacion` acotado al LOCAL del tenant, no de `item_producto.stock`
-     * (el total). Este test simula exactamente el caso que la tarea existe para
-     * cerrar: un ítem sin fila de `stock_ubicacion` para el local —cero filas en
-     * el statement del saldo, que es saldo CERO y no "no existe"— rebota aunque
-     * el TOTAL del tenant (guardado en una bodega, invisible para este mock)
-     * fuera generoso. El salón no puede pedir lo que no está en el salón.
+     * (el total). Este test simula exactamente el caso que ese frente existe
+     * para cerrar: un ítem sin fila de `stock_ubicacion` para el local —cero
+     * filas en el statement del saldo, que es saldo CERO y no "no existe"—
+     * rebota aunque el TOTAL del tenant (guardado en una bodega, invisible para
+     * este mock) fuera generoso. El salón no puede pedir lo que no está en el
+     * salón.
      */
     it('lee el stock del LOCAL, no el total: sin fila en stock_ubicacion ahí, rebota con "quedan 0"', async () => {
       mockearPedidoDeProducto({ stock: null, comprometido: null });
@@ -6924,8 +6927,10 @@ describe('ItemsService', () => {
     it('un ítem NO bloqueante no frena, y ni siquiera se lockea su stock', async () => {
       // Un combo con su único componente no bloqueante: `consumoDeLineas` lo
       // marca `bloqueante: false` y el guard sale antes de tocar stock. Es la
-      // decisión 4 del owner (spec § 4.2) y lo que la Tarea 5 va a fijar
-      // end-to-end; acá se fija que la rama existe.
+      // decisión 4 del owner (§ 4.2 de
+      // `docs/superpowers/specs/2026-09-01-reserva-de-stock-al-pedir-design.md`)
+      // y lo que `reserva-stock-mesa.e2e-spec.ts` fija end-to-end; acá se fija
+      // que la rama existe.
       dataSource.query
         .mockResolvedValueOnce([
           { item_id: COMBO_ID, tipo: 'combo', nombre: 'Combo' },
@@ -6993,7 +6998,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: PAPAS, stock: '1' }])
         // 6) el comprometido: ninguna cuenta abierta
         .mockResolvedValueOnce([])
-        // 7) Tarea 15: bodegas con saldo — ninguna, no le interesa a este test
+        // 7) bodegas con saldo — ninguna, no le interesa a este test
         .mockResolvedValueOnce([]);
 
       await expect(

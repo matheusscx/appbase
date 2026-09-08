@@ -66,12 +66,13 @@ export class CajaController {
 
   /**
    * ¿Al usuario NO le aplica el modo ciego? El admin del tenant y el superadmin
-   * ven el esperado/movimientos en vivo aun en caja abierta (§3.4 del spec
-   * header-caja-ciego): el dueño no es el objetivo del anti-fraude. El superadmin
-   * sale del token; el admin del tenant vía RBAC. Esto NO decide quién puede
-   * forzar un cierre (ver `resolverEscrituraCompartida`) — son dos preguntas
-   * distintas desde la decisión del owner 2026-08-13: forzar es operativo
-   * (`Cajas:Actualizar`), el ciego sigue exento solo para el admin.
+   * ven el esperado/movimientos en vivo aun en caja abierta (§3.4 de
+   * `docs/superpowers/specs/2026-07-25-header-caja-ciego-design.md`): el dueño
+   * no es el objetivo del anti-fraude. El superadmin sale del token; el admin
+   * del tenant vía RBAC. Esto NO decide quién puede forzar un cierre (ver
+   * `resolverEscrituraCompartida`) — son dos preguntas distintas desde la
+   * decisión del owner 2026-08-13: forzar es operativo (`Cajas:Actualizar`), el
+   * ciego sigue exento solo para el admin.
    */
   private async esAdminTenant(u: JwtUser): Promise<boolean> {
     return (

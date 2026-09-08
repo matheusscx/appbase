@@ -718,7 +718,7 @@ describe('InventarioService', () => {
     });
 
     // -------------------------------------------------------------------------
-    // Tarea 6 (bodegas y traslados): item_unidad.ubicacion_id — cada unidad
+    // Frente de bodegas y traslados: item_unidad.ubicacion_id — cada unidad
     // serializada sabe dónde está.
     // -------------------------------------------------------------------------
     const BODEGA_ID = 'ubicacion-bodega-uuid';

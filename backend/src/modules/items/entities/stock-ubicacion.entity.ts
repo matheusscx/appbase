@@ -4,14 +4,13 @@ import { Entity, PrimaryColumn, Column, Index } from 'typeorm';
  * Saldo de un ítem en una ubicación: PK `(item_id, ubicacion_id)` → `stock`.
  * Único dueño del saldo de stock del sistema.
  *
- * Nace en la Tarea 1 del frente "bodegas y traslados"
- * (`docs/features/bodegas-y-traslados.md`), antes de lo previsto en el
- * plan: el guard de `UbicacionesService.remove()` —no
- * dejar borrar una bodega con stock adentro— ya la consulta, así que sin la
- * tabla ese guard no podría escribirse. Desde la Tarea 2 la puebla el
- * chokepoint de escritura (`registrarMovimiento`), y desde la Tarea 4
- * `item_producto.stock` se borró: ya no hay doble escritura ni fuente de
- * verdad paralela, esta tabla es la única.
+ * Nace en el frente de bodegas y traslados
+ * (`docs/features/bodegas-y-traslados.md`), antes de lo que ese frente tenía
+ * previsto: el guard de `UbicacionesService.remove()` —no dejar borrar una
+ * bodega con stock adentro— ya la consulta, así que sin la tabla ese guard no
+ * podría escribirse. La puebla el chokepoint de escritura
+ * (`registrarMovimiento`), y el mismo frente borró `item_producto.stock`: ya no
+ * hay doble escritura ni fuente de verdad paralela, esta tabla es la única.
  *
  * El lock de `registrarMovimiento` sigue anclado en `item_producto`, no acá
  * (docs/patterns/backend.md §15): su fila siempre existe, la de esta tabla

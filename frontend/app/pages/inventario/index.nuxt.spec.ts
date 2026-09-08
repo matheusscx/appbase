@@ -99,9 +99,9 @@ let ajustesEnviados: Record<string, string>[] = []
 
 /** `[]` por default: sin bodegas, `hayBodegas` da `false` y el resto de los
  * describes de este archivo (que no tocan ubicaciones) no ven nada nuevo. Los
- * tests de la Tarea 12 lo pisan por test. */
+ * tests de ubicaciones lo pisan por test. */
 let ubicacionesBackend: { id: string, nombre: string, tipo: string, activo: boolean }[] = []
-/** Filas de `GET /inventario/movimientos`, por test (Tarea 12). */
+/** Filas de `GET /inventario/movimientos`, por test. */
 let movimientosBackend: Record<string, unknown>[] = []
 /** Cada `GET /inventario/movimientos` que se pidió, para afirmar el filtro. */
 let movimientosUrls: string[] = []
@@ -378,10 +378,10 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
   })
 })
 
-// Tarea 12 del frente "bodegas y traslados": el kardex gana la columna
-// Ubicación y su filtro, siempre que `hayBodegas`
-// (`docs/features/bodegas-y-traslados.md`, «Frontend»).
-describe('inventario — el kardex muestra dónde (Tarea 12)', () => {
+// Frente de bodegas y traslados: el kardex gana la columna Ubicación y su
+// filtro, siempre que `hayBodegas` (`docs/features/bodegas-y-traslados.md`,
+// «Frontend»).
+describe('inventario — el kardex muestra dónde', () => {
   const LOCAL = { id: 'local-1', nombre: 'Local', tipo: 'local', activo: true }
   const BODEGA = { id: 'bodega-1', nombre: 'Bodega centro', tipo: 'bodega', activo: true }
 

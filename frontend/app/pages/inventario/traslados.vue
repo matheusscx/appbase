@@ -293,13 +293,12 @@ async function onSeleccionarItem(linea: LineaForm, itemId: string) {
 }
 
 /**
- * Tarea 15 ("bodegas y traslados"): el botón "Trasladar" del toast de "no hay
+ * Frente de bodegas y traslados: el botón "Trasladar" del toast de "no hay
  * stock" (`useRechazoPorStock`, disparado desde el salón o el POS) trae al
- * garzón/cajero con permiso hasta acá con `?itemId=&origenId=&cantidad=` en
- * la URL, y esta función abre el drawer YA armado — "a un clic", como pide
- * la Tarea 15 — en vez de una pantalla vacía que hay que volver a completar
- * a mano. Mismo patrón de precarga por query que `ventas/index.vue` usa para
- * `?venta=`.
+ * garzón/cajero con permiso hasta acá con `?itemId=&origenId=&cantidad=` en la
+ * URL, y esta función abre el drawer YA armado — "a un clic", como pide el
+ * frente — en vez de una pantalla vacía que hay que volver a completar a mano.
+ * Mismo patrón de precarga por query que `ventas/index.vue` usa para `?venta=`.
  *
  * `destinoId` no viaja en la URL —el toast solo conoce el origen, no a dónde
  * el garzón/cajero prefiere mandarlo— y se completa acá con el LOCAL del

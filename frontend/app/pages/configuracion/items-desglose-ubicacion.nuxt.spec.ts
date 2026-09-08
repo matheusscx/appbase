@@ -1,15 +1,14 @@
 // @vitest-environment nuxt
 //
-// Tarea 14 del frente "bodegas y traslados": la lista de items muestra el
-// TOTAL de todas las ubicaciones (ya lo hacía — `stock` de `GET /items` es el
-// total desde la Tarea 3a) y el detalle desglosa por ubicación, el local
-// primero. Lo nuevo de esta tarea es la ETIQUETA ("Stock total", para no
-// confundirse con "Disponible" del salón) y la sección de desglose del
-// detalle, gobernada por `hayBodegas`.
+// Frente de bodegas y traslados: la lista de items muestra el TOTAL de todas
+// las ubicaciones (ya lo hacía — `stock` de `GET /items` significa el total del
+// tenant) y el detalle desglosa por ubicación, el local primero. Lo nuevo es la
+// ETIQUETA ("Stock total", para no confundirse con "Disponible" del salón) y la
+// sección de desglose del detalle, gobernada por `hayBodegas`.
 //
 // Archivo separado de `items.nuxt.spec.ts` (830 líneas, mock compartido
-// complejo), mismo criterio que `items-stock-ubicacion.nuxt.spec.ts` de la
-// Tarea 12: mock propio, mínimo, solo para esto.
+// complejo), mismo criterio que `items-stock-ubicacion.nuxt.spec.ts`: mock
+// propio, mínimo, solo para esto.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Items from './items.vue'
@@ -86,7 +85,7 @@ async function abrirEditar(wrapper: Wrapper) {
   await new Promise(r => setTimeout(r, 50))
 }
 
-describe('configuracion/items — el catálogo muestra el total y desglosa por ubicación (Tarea 14)', () => {
+describe('configuracion/items — el catálogo muestra el total y desglosa por ubicación', () => {
   beforeEach(() => {
     ubicacionesBackend = [LOCAL, BODEGA]
     desgloseBackend = DESGLOSE_CON_BODEGA

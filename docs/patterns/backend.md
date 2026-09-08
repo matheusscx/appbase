@@ -989,7 +989,7 @@ medido. Y sin el `LEFT JOIN` el ítem sin fila en esa ubicación desaparecería 
 resultado. Partir en dos statements resuelve las dos cosas de una: la ausencia de fila en
 el primero es "no es producto / es de otro tenant", y en el segundo es saldo **cero**.
 
-**La consecuencia buena, para la Tarea 9 (traslados).** Como el ancla es una fila por
+**La consecuencia buena, para los traslados.** Como el ancla es una fila por
 `item_id` —no por `(item_id, ubicacion_id)`—, un traslado que mueve un ítem entre dos
 ubicaciones lockea **una sola fila** sin importar cuántas ubicaciones toque. Dos
 traslados opuestos del mismo producto (A→B y B→A) piden la misma fila de

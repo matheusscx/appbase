@@ -26,7 +26,8 @@ export function estadoRecuentoColor(estado: string): 'neutral' | 'success' | 'er
 }
 
 /**
- * Delta = contado − sistema, igual que el backend (§4 del diseño). `null`
+ * Delta = contado − sistema, igual que el backend (§ 4 de
+ * `docs/superpowers/specs/2026-07-26-recuento-inventario-design.md`). `null`
  * mientras la línea no tiene conteo cargado. Usado tanto para el cálculo en
  * vivo mientras se escribe como para el valor persistido que llega del API.
  */
@@ -60,7 +61,8 @@ interface LineaConDiferencia {
 
 /**
  * Cuántas líneas realmente mueven stock al aplicar: contadas y con delta
- * distinto de cero. Las sin contar se ignoran (§7 del diseño) y un delta
+ * distinto de cero. Las sin contar se ignoran (§ 7 de
+ * `docs/superpowers/specs/2026-07-26-recuento-inventario-design.md`) y un delta
  * cero no genera movimiento.
  */
 export function contarLineasAMover(lineas: LineaConDiferencia[]): number {

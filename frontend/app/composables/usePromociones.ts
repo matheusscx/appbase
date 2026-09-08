@@ -23,7 +23,10 @@ export interface Promocion {
   id: string
   nombre: string
   descripcion: string | null
-  /** Pausa. Pausada no aplica y NO avisa (spec §Modelo de datos). */
+  /**
+   * Pausa. Pausada no aplica y NO avisa (§ Modelo de datos de
+   * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`).
+   */
   activo: boolean
   fechaInicio: string
   fechaFin: string
@@ -124,10 +127,11 @@ function hoyLocal(): string {
  * Estado de una promo para el badge de la lista: `Programada` / `Vigente` /
  * `Vencida` / `Pausada`.
  *
- * `activo` gana sobre las fechas siempre — el diseño lo dice explícito:
- * "pausar una campaña es el gesto normal de apagarla" (spec §Modelo de
- * datos), así que una promo pausada se marca `Pausada` aunque esté en su
- * ventana vigente o programada.
+ * `activo` gana sobre las fechas siempre — el diseño lo dice explícito: "pausar
+ * una campaña es el gesto normal de apagarla" (§ Modelo de datos de
+ * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`), así que una
+ * promo pausada se marca `Pausada` aunque esté en su ventana vigente o
+ * programada.
  *
  * ⚠️ **Misma limitación asumida que `useVigenciaRegla`, y no se ve leyendo el
  * código:** el "hoy" es la fecha LOCAL DEL NAVEGADOR, no la del tenant. Es

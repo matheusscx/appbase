@@ -1,7 +1,7 @@
 // @vitest-environment nuxt
 //
-// Tarea 11 del frente "bodegas y traslados": el alta de sesión de recuento
-// elige ubicación. Lo que este spec fija:
+// Frente de bodegas y traslados: el alta de sesión de recuento elige ubicación.
+// Lo que este spec fija:
 //   1. Con una sola ubicación (solo local) el selector no se dibuja, y el
 //      cliente completa `ubicacionId` con el local igual.
 //   2. Con una bodega, el selector se dibuja y lo elegido viaja en el body
@@ -101,7 +101,7 @@ async function crear(wrapper: Wrapper) {
   await new Promise(r => setTimeout(r, 100))
 }
 
-describe('inventario/recuentos — selector de ubicación al crear (Tarea 11)', () => {
+describe('inventario/recuentos — selector de ubicación al crear', () => {
   beforeEach(() => {
     recuentosEnviados = []
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())

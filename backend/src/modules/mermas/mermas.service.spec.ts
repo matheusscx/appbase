@@ -441,10 +441,10 @@ describe('MermasService', () => {
       expect(result.merma.unidadMedida).toBe('l');
     });
 
-    // Tarea 10 del frente "bodegas y traslados": la merma pasa a decir DÓNDE
-    // ocurrió. BODEGA_ID ≠ UBICACION_ID (local) a propósito — con IDs iguales
-    // un mutante que ignorara `dto.ubicacionId` y siguiera mandando el local
-    // sobreviviría sin que ningún assert lo note.
+    // Frente de bodegas y traslados: la merma pasa a decir DÓNDE ocurrió.
+    // BODEGA_ID ≠ UBICACION_ID (local) a propósito — con IDs iguales un mutante
+    // que ignorara `dto.ubicacionId` y siguiera mandando el local sobreviviría
+    // sin que ningún assert lo note.
     const BODEGA_ID = 'ubicacion-bodega-uuid';
 
     it('con ubicacionId de una bodega, registra el movimiento EN ESA bodega, no en el local', async () => {

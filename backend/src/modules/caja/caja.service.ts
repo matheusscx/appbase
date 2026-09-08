@@ -642,8 +642,10 @@ export class CajaService {
       const lineas = await this.db.transaccion((manager) =>
         this.calcularArqueo(cajaId, tenantId, manager),
       );
-      // El ciego no aplica al admin del tenant ni al superadmin (§3.4): el dueño
-      // ve el esperado en vivo. Sí aplica a cajeros y supervisores no-admin.
+      // El ciego no aplica al admin del tenant ni al superadmin (§3.4 de
+      // `docs/superpowers/specs/2026-07-25-header-caja-ciego-design.md`): el
+      // dueño ve el esperado en vivo. Sí aplica a cajeros y supervisores
+      // no-admin.
       const ciego = !esAdmin && (await this.getArqueoCiego(tenantId));
       if (ciego) {
         return {
@@ -2105,8 +2107,10 @@ export class CajaService {
     const estado = row?.estado ?? 'abierta';
 
     // Gating espejo de obtenerArqueo: ciego solo mientras la caja está abierta y
-    // solo para no-admin (§3.4). Para un admin/superadmin se cortocircuita antes
-    // de getArqueoCiego (una sola query por request; sin N+1).
+    // solo para no-admin (§3.4 de
+    // `docs/superpowers/specs/2026-07-25-header-caja-ciego-design.md`). Para un
+    // admin/superadmin se cortocircuita antes de getArqueoCiego (una sola query
+    // por request; sin N+1).
     const ciego =
       !esAdmin && estado === 'abierta' && (await this.getArqueoCiego(tenantId));
     if (ciego) {
@@ -2151,8 +2155,10 @@ export class CajaService {
     );
 
     // Ciego + abierta: el operador no-admin no recibe montos por ningún camino (ni
-    // devtools). El admin/superadmin sí (§3.4). Se corta antes de la query de filas;
-    // para un admin se cortocircuita antes de getArqueoCiego (sin N+1).
+    // devtools). El admin/superadmin sí (§3.4 de
+    // `docs/superpowers/specs/2026-07-25-header-caja-ciego-design.md`). Se corta
+    // antes de la query de filas; para un admin se cortocircuita antes de
+    // getArqueoCiego (sin N+1).
     if (
       !esAdmin &&
       caja.estado === 'abierta' &&

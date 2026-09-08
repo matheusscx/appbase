@@ -188,20 +188,21 @@ export class RecuentosService {
       // Una sola query trae todos los items pedidos con su stock vigente —
       // nunca una query por item.
       //
-      // ⛔ El saldo se congela **acotado a `dto.ubicacionId`**, no sumando
-      // todas las ubicaciones, y tiene que ser la MISMA ubicación contra la
-      // que `aplicar` postea el delta (`sesion.ubicacion_id`, leído de la
-      // fila que este método acaba de insertar — ver `aplicarEnTransaccion`
-      // más abajo). Congelar el total del tenant y descontar de una sola
-      // ubicación es lo que este método hacía HASTA la Tarea 11 del frente
-      // "bodegas y traslados" —congelaba el `SUM` de todas las ubicaciones y
+      // ⛔ El saldo se congela **acotado a `dto.ubicacionId`**, no sumando todas
+      // las ubicaciones, y tiene que ser la MISMA ubicación contra la que
+      // `aplicar` postea el delta (`sesion.ubicacion_id`, leído de la fila que
+      // este método acaba de insertar — ver `aplicarEnTransaccion` más abajo).
+      // Congelar el total del tenant y descontar de una sola ubicación es lo
+      // que este método hacía HASTA el recuento por ubicación del frente de
+      // bodegas y traslados —congelaba el `SUM` de todas las ubicaciones y
       // aplicaba el delta solo al local—, y era inofensivo mientras todo el
       // stock vivía ahí; con stock repartido en bodega se volvía una salida
       // fantasma: un producto con 40 en el local y 15 en la bodega se le
       // mostraba al operador como 55, el operador contaba 40, y aplicar
-      // posteaba una salida de 15 del local sin que se hubiera movido nada.
-      // Ese era el tapón que puso la Tarea 4; esta tarea lo levanta: la
-      // sesión ahora elige ubicación y el congelado mira solo esa.
+      // posteaba una salida de 15 del local sin que se hubiera movido nada. Ese
+      // era el tapón que puso una etapa anterior del frente, y que el recuento por
+      // ubicación levanta: la sesión ahora elige ubicación y el congelado mira
+      // solo esa.
       const rows: ItemParaRecuentoRow[] = await manager.query(
         `SELECT i.item_id, i.nombre, i.tipo, COALESCE(su.stock, 0)::numeric(18,4) AS stock,
                 p.modo_inventario, p.unidad_medida
@@ -238,15 +239,16 @@ export class RecuentosService {
       // existió. Dos conteos simultáneos del mismo producto EN EL MISMO LUGAR
       // no tienen sentido operativo.
       //
-      // ⛔ **El acote por `r.ubicacion_id` es nuevo en la Tarea 11, y no es
-      // cosmético.** Antes de esta tarea el recuento era siempre del local, así
-      // que "el mismo producto" y "el mismo producto en la misma ubicación"
-      // eran la misma pregunta. Con ubicación elegible dejan de serlo: local y
-      // bodega tienen cada una su propia fila de `stock_ubicacion`, así que dos
-      // sesiones sobre el mismo ítem en ubicaciones DISTINTAS congelan y
-      // aplican el delta sobre saldos independientes — no se pisan. Sin este
-      // acote, un tenant con una sola bodega no podría abrir el conteo de
-      // bodega mientras el de local sigue abierto, sin ninguna razón real.
+      // ⛔ **El acote por `r.ubicacion_id` llegó con el recuento por ubicación
+      // del frente de bodegas y traslados, y no es cosmético.** Antes el
+      // recuento era siempre del local, así que "el mismo producto" y "el mismo
+      // producto en la misma ubicación" eran la misma pregunta. Con ubicación
+      // elegible dejan de serlo: local y bodega tienen cada una su propia fila
+      // de `stock_ubicacion`, así que dos sesiones sobre el mismo ítem en
+      // ubicaciones DISTINTAS congelan y aplican el delta sobre saldos
+      // independientes — no se pisan. Sin este acote, un tenant con una sola
+      // bodega no podría abrir el conteo de bodega mientras el de local sigue
+      // abierto, sin ninguna razón real.
       //
       // ⚠️ El delta congelado NO se toca: recalcular contra el stock del momento
       // de aplicar se descartó, y el comentario que llama al delta "el corazón
@@ -752,11 +754,11 @@ export class RecuentosService {
       }
 
       // La ubicación no se resuelve más: es `sesion.ubicacion_id`, ya leída
-      // arriba bajo el `FOR UPDATE` de la sesión — la MISMA que `create()`
-      // usó para congelar `stock_sistema` de cada línea. Antes de la Tarea 11
-      // esto era `await this.ubicacionesService.localDe(tenantId)`, resuelto
-      // una vez antes del loop (N+1 evitado); ahora ni siquiera hace falta la
-      // consulta, porque la sesión ya la trae.
+      // arriba bajo el `FOR UPDATE` de la sesión — la MISMA que `create()` usó
+      // para congelar `stock_sistema` de cada línea. Antes del recuento por
+      // ubicación esto era `await this.ubicacionesService.localDe(tenantId)`,
+      // resuelto una vez antes del loop (N+1 evitado); ahora ni siquiera hace
+      // falta la consulta, porque la sesión ya la trae.
       for (const linea of lineasAAplicar) {
         let mov: { movimientoId: string };
         try {

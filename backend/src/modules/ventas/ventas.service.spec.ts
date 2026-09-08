@@ -336,11 +336,10 @@ describe('VentasService', () => {
             resolverPersonalizacionCombo: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
             venderComponentesCombo: jest.fn().mockResolvedValue([]),
-            // Tarea 15 ("bodegas y traslados"): el 400 enriquecido del tope
-            // al cobrar. Rechaza distinto del genérico de
-            // `registrarMovimiento` para que los tests de este archivo
-            // puedan distinguir "el catch de `crear()` corrió" de "el
-            // genérico se propagó sin enriquecer".
+            // Frente de bodegas y traslados: el 400 enriquecido del tope al
+            // cobrar. Rechaza distinto del genérico de `registrarMovimiento`
+            // para que los tests de este archivo puedan distinguir "el catch de
+            // `crear()` corrió" de "el genérico se propagó sin enriquecer".
             errorStockInsuficienteEnLocal: jest
               .fn()
               .mockResolvedValue(new BadRequestException('enriquecido-mock')),
@@ -680,13 +679,13 @@ describe('VentasService', () => {
     });
 
     it('resuelve la ubicación local UNA vez para todo el carrito, no una por línea', async () => {
-      // Guarda contra la regresión al N+1 del chokepoint de bodegas (Tarea 2):
+      // Guarda contra la regresión al N+1 del chokepoint de bodegas:
       // `ubicacionLocalId` se resuelve acá y baja por parámetro a
       // `venderIngredientesReceta`/`venderComponentesCombo`, que a su vez lo
       // vuelven a bajar a sus propias expansiones internas (ingredientes de
       // receta, componentes de combo, opciones de grupo). Si cualquier eslabón
-      // de esa cadena vuelve a resolverlo por su cuenta, `localDe` se llama
-      // más de una vez por venta y este test lo caza.
+      // de esa cadena vuelve a resolverlo por su cuenta, `localDe` se llama más
+      // de una vez por venta y este test lo caza.
       const dtoMixto = {
         ...baseDto,
         lineas: [
@@ -1226,13 +1225,13 @@ describe('VentasService', () => {
     });
 
     /**
-     * Tarea 15 ("bodegas y traslados"): el chokepoint de inventario rechaza
-     * con un mensaje genérico —"Stock insuficiente para la salida", sin
-     * nombrar el ítem ni el lugar— porque no sabe qué línea de qué venta lo
-     * llamó. `crear()` lo intercepta y lo reemplaza por el enriquecido de
-     * `ItemsService.errorStockInsuficienteEnLocal`, con los mismos datos que
-     * ya tenía en la línea (`item.id`, `item.nombre`, la cantidad pedida y
-     * la unidad).
+     * Frente de bodegas y traslados: el chokepoint de inventario rechaza con un
+     * mensaje genérico —"Stock insuficiente para la salida", sin nombrar el
+     * ítem ni el lugar— porque no sabe qué línea de qué venta lo llamó.
+     * `crear()` lo intercepta y lo reemplaza por el enriquecido de
+     * `ItemsService.errorStockInsuficienteEnLocal`, con los mismos datos que ya
+     * tenía en la línea (`item.id`, `item.nombre`, la cantidad pedida y la
+     * unidad).
      */
     it('el genérico de "Stock insuficiente para la salida" se reemplaza por el enriquecido, con el ítem y la cantidad de la línea', async () => {
       inventarioService.registrarMovimiento.mockRejectedValueOnce(

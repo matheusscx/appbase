@@ -5,8 +5,8 @@ interface UbicacionConStock {
 }
 
 /**
- * Forma del 400 enriquecido de `ItemsService.errorStockInsuficiente` (Tarea 15,
- * "bodegas y traslados"): el mensaje completo Y los datos sueltos, para que el
+ * Forma del 400 enriquecido de `ItemsService.errorStockInsuficiente` (frente de
+ * bodegas y traslados): el mensaje completo Y los datos sueltos, para que el
  * cliente ofrezca la acción sin parsear texto.
  *
  * `itemId` y no solo `itemNombre`: en una receta de varios ingredientes el
@@ -30,10 +30,10 @@ function datosDe(e: unknown): ErrorStockInsuficienteBody | null {
 }
 
 /**
- * El toast del 400 de "no hay stock" (Tarea 15, "bodegas y traslados"): el
- * mensaje ya nombra el ítem Y dónde está lo que falta —lo arma el backend,
- * ver `ItemsService.errorStockInsuficiente`—, así que acá no se redacta nada,
- * solo se decide si el toast lleva un botón.
+ * El toast del 400 de "no hay stock" (frente de bodegas y traslados): el
+ * mensaje ya nombra el ítem Y dónde está lo que falta —lo arma el backend, ver
+ * `ItemsService.errorStockInsuficiente`—, así que acá no se redacta nada, solo
+ * se decide si el toast lleva un botón.
  *
  * **Las dos caras, por permiso real, no por pantalla.** Trasladar es
  * `Inventario/Crear`, y el garzón no lo tiene: mostrarle el botón le

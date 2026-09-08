@@ -11,10 +11,10 @@ export interface Ubicacion {
  * `hayBodegas` es la que gobierna la regla del frente de bodegas
  * (`docs/features/bodegas-y-traslados.md`, «Frontend»): mientras exista una
  * sola ubicación, **el selector no se dibuja** (escondido, no deshabilitado) y
- * el `ubicacionId` lo completa el cliente con el local. Sin esto, el tenant
- * que nunca va a tener una bodega paga un campo obligatorio que siempre dice
- * lo mismo, en cuatro pantallas: mermas (Tarea 10), recuentos (Tarea 11), el
- * ajuste de stock / la entrada por compra (Tarea 12) y traslados (Tarea 13).
+ * el `ubicacionId` lo completa el cliente con el local. Sin esto, el tenant que
+ * nunca va a tener una bodega paga un campo obligatorio que siempre dice lo
+ * mismo, en cuatro pantallas: mermas, recuentos, el ajuste de stock / la
+ * entrada por compra, y traslados.
  *
  * `useState`, no un `ref` local: las cuatro pantallas comparten la misma
  * carga — sin esto cada una dispara su propio `GET /ubicaciones` al montarse.
