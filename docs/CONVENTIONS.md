@@ -63,9 +63,12 @@ así que el número solo es ambiguo incluso mientras el documento existe.
   *"la ronda 2"*, *"lo que pedía el brief"*: nada de eso resuelve para quien lee el código
   después, porque el informe de revisión y el brief nunca vivieron en el repo. Va **qué**
   cambió (*"antes de que el cierre pasara a hacerse en transacción"*), que no caduca, y no
-  **cuándo** contra una unidad de trabajo que se borra. ⚠️ Quedan citas así —`hallazgo N`,
-  `ronda N`—, medidas en [`agent/pendientes.md`](agent/pendientes.md) § 1: la regla vale para
-  lo que se escriba de ahora en adelante.
+  **cuándo** contra una unidad de trabajo que se borra. Vale igual para el **código de
+  severidad** que suele venir pegado al número (`C2`, `CRITICAL 2`, `IMPORTANT 2`) y para el
+  **ordinal escrito con letras** (*"la cuarta pasada de la revisión"*), que es la forma que
+  ningún grep de un número encuentra: las tres apuntan al mismo informe ausente. Nombrar la
+  revisión —con su fecha, si la tiene— sí sirve; el número de adentro, no. El barrido de estas
+  citas está en [`agent/resueltos.md`](agent/resueltos.md), con el comando que las cuenta.
 - Si el documento se borra, sus citas se repuntan a la doc viva en **el mismo commit** que lo
   borra. Barrerlas después es más caro: hay que clasificar cada una por su contenido, porque
   el número solo no dice de qué documento era.

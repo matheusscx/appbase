@@ -32,10 +32,10 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * QUÉ PRUEBA ESTE SPEC Y QUÉ NO
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * PRUEBA: hallazgo 1 de la revisión de rama del frente "bodegas y traslados"
+ * PRUEBA: lo que levantó la revisión de rama del frente "bodegas y traslados"
  * (el workspace de esa revisión se borró al cerrar el frente; lo durable está
- * en `docs/features/bodegas-y-traslados.md`).
- * `UbicacionesService.remove` era un check-then-act sin transacción ni lock:
+ * en `docs/features/bodegas-y-traslados.md`). `UbicacionesService.remove` era
+ * un check-then-act sin transacción ni lock:
  * `TrasladosService.crearEnTransaccion` podía escribir saldo en una ubicación
  * mientras `remove()` contaba 0 stock (statement previo, sin ver ese commit) y
  * borraba la fila — el stock quedaba colgado de una bodega borrada, invisible
@@ -300,9 +300,9 @@ describe('Borrado de ubicación concurrente con un traslado hacia ella (e2e)', (
     // El traslado pasa siempre (nunca lo bloqueó nada más que la compuerta).
     expect(statusTraslado).toBe(201);
 
-    // Lo que el hallazgo 1 pedía: el borrado NO puede completarse con saldo
-    // recién escrito en esa ubicación. Antes del arreglo esto daba 204 y la
-    // ubicación quedaba borrada con 5 de stock colgado.
+    // Lo que el 400 custodia en este interleaving: el borrado NO puede
+    // completarse con saldo recién escrito en esa ubicación. Antes del arreglo
+    // esto daba 204 y la ubicación quedaba borrada con 5 de stock colgado.
     expect(statusBorrado).toBe(400);
     expect(JSON.stringify(cuerpoBorrado)).toContain('todavía tiene');
 

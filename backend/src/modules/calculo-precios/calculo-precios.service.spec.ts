@@ -862,16 +862,15 @@ describe('CalculoPreciosService', () => {
       ]);
     });
 
-    // I-2 (revisión independiente, ronda 1): antes del fix, un ítem afecto
-    // con precio bruto-inclusivo y sin item_impuestos tenía `impuestos: []`
-    // → el motor nunca desbruteaba (`netoUnitario = bruto`) ni generaba
-    // traza fiscal. Ahora el IVA se deriva igual por acá, así que el motor
-    // SÍ desbrutea sobre la tasa derivada — mismo código de
-    // `calculo-precios.engine.ts:332-338`, sin cambios, pero ahora alcanzado
-    // por un camino que antes nunca le pasaba impuestos. Va a nivel
-    // servicio (no engine.spec, que arma `impuestos` a mano y por
-    // construcción es ciego a la derivación) porque es el único nivel que
-    // ejercita la derivación real sin inventar infraestructura nueva.
+    // Revisión independiente: antes del fix, un ítem afecto con precio
+    // bruto-inclusivo y sin item_impuestos tenía `impuestos: []` → el motor
+    // nunca desbruteaba (`netoUnitario = bruto`) ni generaba traza fiscal.
+    // Ahora el IVA se deriva igual por acá, así que el motor SÍ desbrutea sobre
+    // la tasa derivada — mismo código de `calculo-precios.engine.ts:332-338`,
+    // sin cambios, pero ahora alcanzado por un camino que antes nunca le pasaba
+    // impuestos. Va a nivel servicio (no engine.spec, que arma `impuestos` a
+    // mano y por construcción es ciego a la derivación) porque es el único
+    // nivel que ejercita la derivación real sin inventar infraestructura nueva.
     it('un ítem afecto con precioIncluyeImpuesto y sin impuestos asociados desbrutea sobre el IVA derivado', async () => {
       mockItems(
         { precioIncluyeImpuesto: true },

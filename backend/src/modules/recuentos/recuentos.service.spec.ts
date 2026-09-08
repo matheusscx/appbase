@@ -978,7 +978,7 @@ describe('RecuentosService', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
-    it('reintenta cuando el 40P01 llega solo en driverError.code, no en error.code (hallazgo 7)', async () => {
+    it('reintenta cuando el 40P01 llega solo en driverError.code, no en error.code', async () => {
       // El caso que `error instanceof QueryFailedError && error.code !== '40P01'`
       // dejaba pasar sin reintentar: TypeORM a veces deja el código SOLO en
       // `driverError.code` y no lo copia a `error.code`. `esDeadlock` mira los

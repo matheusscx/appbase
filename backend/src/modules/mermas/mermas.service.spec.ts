@@ -14,12 +14,12 @@ const CAUSA = 'causa-uuid';
 const UBICACION_ID = 'ubicacion-local-uuid';
 
 // No incluye `costo_actual`: desde el fix de concurrencia (revisión
-// independiente, fix round 1) el SELECT de `mermas.service.ts` ya no lo
-// selecciona — lockea `items` (`FOR UPDATE OF i`), no `item_producto`, así
-// que sería una lectura pre-lock. El costo congelado sale de
-// `mov.costoActualPrevio`, que devuelve el mock de `registrarMovimiento`
-// abajo. Un test puntual agrega `costo_actual` como override para probar
-// justamente que, si estuviera, `registrar` lo ignora.
+// independiente) el SELECT de `mermas.service.ts` ya no lo selecciona — lockea
+// `items` (`FOR UPDATE OF i`), no `item_producto`, así que sería una lectura
+// pre-lock. El costo congelado sale de `mov.costoActualPrevio`, que devuelve el
+// mock de `registrarMovimiento` abajo. Un test puntual agrega `costo_actual`
+// como override para probar justamente que, si estuviera, `registrar` lo
+// ignora.
 const itemRow = (overrides: Record<string, unknown> = {}) => ({
   tipo: 'producto',
   nombre: 'Harina',
@@ -118,10 +118,10 @@ describe('MermasService', () => {
       });
 
       // `registrar` ya no le pasa `costoUnitario` a `registrarMovimiento` en
-      // absoluto (ni siquiera `undefined` explícito): que congele con su
-      // propia lectura bajo `FOR UPDATE OF ip` (inventario.service.ts:155),
-      // el chokepoint real de `item_producto.costo_actual`. Fix de
-      // concurrencia — revisión independiente, fix round 1. Ver
+      // absoluto (ni siquiera `undefined` explícito): que congele con su propia
+      // lectura bajo `FOR UPDATE OF ip` (inventario.service.ts:155), el
+      // chokepoint real de `item_producto.costo_actual`. Fix de concurrencia —
+      // revisión independiente. Ver
       // docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md
       const [, params] = inventarioService.registrarMovimiento.mock
         .calls[0] as [unknown, Record<string, unknown>];

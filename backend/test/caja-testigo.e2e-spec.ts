@@ -456,15 +456,15 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
     };
 
     try {
-      // Liberar al vendedor ANTES que nada (revisión independiente,
-      // hallazgo 6). `vendedor@paris.cl` es del seed y lo comparten
-      // `caja.e2e-spec.ts` y `motivos-diferencia.e2e-spec.ts`, y la suite
-      // corre serial (`jest-e2e.json`, maxWorkers 1). Si un `it` falla a
-      // mitad de su ciclo, su caja queda `abierta` o `en_conciliacion`:
-      // `ux_cajas_activa_por_usuario` cuenta las dos, así que el vendedor
-      // sigue ocupado para los specs siguientes. El borrado del cajón NO lo
-      // detecta —solo bloquea con estado `abierta`— así que sin esta línea
-      // la limpieza "pasa" y deja la mina puesta.
+      // Liberar al vendedor ANTES que nada (revisión independiente).
+      // `vendedor@paris.cl` es del seed y lo comparten `caja.e2e-spec.ts` y
+      // `motivos-diferencia.e2e-spec.ts`, y la suite corre serial
+      // (`jest-e2e.json`, maxWorkers 1). Si un `it` falla a mitad de su ciclo,
+      // su caja queda `abierta` o `en_conciliacion`:
+      // `ux_cajas_activa_por_usuario` cuenta las dos, así que el vendedor sigue
+      // ocupado para los specs siguientes. El borrado del cajón NO lo detecta
+      // —solo bloquea con estado `abierta`— así que sin esta línea la limpieza
+      // "pasa" y deja la mina puesta.
       await limpiar('liberar caja del vendedor', async () => {
         await cerrarCualquierCajaAbiertaDelVendedor();
         return 200;
@@ -580,12 +580,12 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
       expect(solicitudes[0].garzonVinculado).toBe(false);
       testigoAId = solicitudes[0].id;
 
-      // Las claves EXACTAS, no `arrayContaining` (revisión independiente,
-      // hallazgo 4): con `arrayContaining` cualquier clave de más pasa
-      // verde, y un `esperadoTotal` o un `diferencia` que se filtre a
-      // futuro es exactamente la puerta de atrás del cierre ciego que este
-      // test existe para cerrar. Sobre las CLAVES y no sobre valores: un
-      // `esperado: null` también sería una filtración de forma.
+      // Las claves EXACTAS, no `arrayContaining` (revisión independiente): con
+      // `arrayContaining` cualquier clave de más pasa verde, y un
+      // `esperadoTotal` o un `diferencia` que se filtre a futuro es exactamente
+      // la puerta de atrás del cierre ciego que este test existe para cerrar.
+      // Sobre las CLAVES y no sobre valores: un `esperado: null` también sería
+      // una filtración de forma.
       expect(Object.keys(solicitudes[0]).sort()).toEqual([
         'cajaId',
         'garzonVinculado',
@@ -685,9 +685,9 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
       // vinculado.
       expect(res.status).toBe(400);
       // El motivo, no solo el número: un 400 acá también podría venir del
-      // `ValidationPipe` si mañana `CredencialGarzonOpcionalDto` se
-      // endurece, y eso dejaría de probar que el request llegó a
-      // `verificarPin`/`bcrypt.compare` (revisión independiente, hallazgo 5).
+      // `ValidationPipe` si mañana `CredencialGarzonOpcionalDto` se endurece, y
+      // eso dejaría de probar que el request llegó a
+      // `verificarPin`/`bcrypt.compare` (revisión independiente).
       expect((res.body as { message: string }).message).toContain(
         'PIN inválido',
       );
@@ -727,13 +727,13 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
         pin: pinB,
       });
       expect(res.status).toBe(403);
-      // El MOTIVO, no solo el número (revisión independiente, hallazgo 1):
-      // sin esto, un mutante que tire 403 apenas ve `usuarioId` seteado —sin
-      // compararlo con el que llama— deja verde este caso Y el caso 3, con
-      // la vía fuerte inservible. El mensaje ata el 403 a la rama de
-      // `resolver`, no al `PermisosGuard` (el admin tiene rol fijo: el guard
-      // nunca lo rechaza, y el caso 3 lo prueba usando el MISMO token y la
-      // MISMA ruta para obtener un 201).
+      // El MOTIVO, no solo el número (revisión independiente): sin esto, un
+      // mutante que tire 403 apenas ve `usuarioId` seteado —sin compararlo con
+      // el que llama— deja verde este caso Y el caso 3, con la vía fuerte
+      // inservible. El mensaje ata el 403 a la rama de `resolver`, no al
+      // `PermisosGuard` (el admin tiene rol fijo: el guard nunca lo rechaza, y
+      // el caso 3 lo prueba usando el MISMO token y la MISMA ruta para obtener
+      // un 201).
       expect((res.body as { message: string }).message).toContain(
         'vinculado a una cuenta',
       );
@@ -771,7 +771,7 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
 
       // DESPUÉS: cancelada, no colgada. Sin esta aserción, `cancelarPendientes`
       // (`caja.service.ts`) se puede borrar entero y el spec sigue verde
-      // (revisión independiente, hallazgo 3).
+      // (revisión independiente).
       const despues = await listarTestigos(cajaId);
       expect(despues.find((t) => t.id === testigoBId)?.estado).toBe(
         'cancelada',
@@ -780,13 +780,12 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
   });
 
   /**
-   * La otra mitad del caso 2, que el fixture original no podía montar
-   * (revisión independiente, hallazgo 2): el caso 2 prueba que el encargado
-   * **no** puede firmar por un garzón con cuenta, pero nadie probaba que la
-   * cuenta dueña **sí** pueda. Sin este test, `via_firma: 'cuenta'` no se
-   * ejerce nunca por HTTP: si el cableado de esa rama estuviera roto, la
-   * feature quedaría inservible justo en su configuración más fuerte y la
-   * suite seguiría verde.
+   * La otra mitad del caso 2, que el fixture original no podía montar (revisión
+   * independiente): el caso 2 prueba que el encargado **no** puede firmar por
+   * un garzón con cuenta, pero nadie probaba que la cuenta dueña **sí** pueda.
+   * Sin este test, `via_firma: 'cuenta'` no se ejerce nunca por HTTP: si el
+   * cableado de esa rama estuviera roto, la feature quedaría inservible justo
+   * en su configuración más fuerte y la suite seguiría verde.
    *
    * No se puede usar a B: está vinculado a `vendedor@paris.cl`, cuyo rol no
    * tiene `Salones` (`seedVendedorPermisosCaja`), así que esa cuenta comería

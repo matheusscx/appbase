@@ -628,9 +628,9 @@ describe('GarzonesService', () => {
     // `habiaPin` es lo único que distingue, del lado de la RESPUESTA, "esto
     // destruyó una credencial real" de "no había nada que destruir" — el front
     // no puede confiar en lo que su propio listado en memoria creía saber
-    // (revisión del 2026-08-14, ronda 4). El resultado técnico (`pin: null`,
-    // `pinHash` en el centinela) es idéntico en los dos casos; `habiaPin` es
-    // la única diferencia observable.
+    // (revisión del 2026-08-14). El resultado técnico (`pin: null`, `pinHash`
+    // en el centinela) es idéntico en los dos casos; `habiaPin` es la única
+    // diferencia observable.
     it('CON cuenta y YA tenía un PIN puesto: habiaPin true', async () => {
       repo.findOne.mockResolvedValue(
         garzon({ id: 'g1', pin: '111111', usuarioId: 'cuenta-de-ana' }),

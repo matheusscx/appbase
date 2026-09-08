@@ -597,9 +597,9 @@ const regenerarConfirmLabel = computed(() => {
 })
 
 /**
- * El mensaje tiene TRES casos, no dos — el segundo hallazgo de la revisión
- * anterior era exactamente esto: "invalidar" para un garzón CON cuenta que
- * TODAVÍA no fijó su PIN no destruye nada (el backend ya lo dejó
+ * El mensaje tiene TRES casos, no dos — la revisión del 2026-08-14 levantó
+ * exactamente esto: "invalidar" para un garzón CON cuenta que TODAVÍA no fijó
+ * su PIN no destruye nada (el backend ya lo dejó
  * `pinHash = PIN_INUTILIZABLE` al vincularlo), así que prometerle "pierde el
  * tótem compartido" es mentira. `pinFijado` (arriba, viene de
  * `GarzonPublico`, no del historial) es lo que permite distinguir los dos

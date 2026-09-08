@@ -1211,10 +1211,10 @@ async function fusionarSeleccionadas() {
       cobroEnVueloId.value = null
     }
     // ⛔ **De acá para abajo se pinta pantalla, y eso solo se hace si el garzón
-    // sigue donde pidió la fusión.** Lo levantó la cuarta pasada de la revisión:
-    // congelar la selección no alcanzaba porque estas cuatro sentencias
-    // **escriben** estado vivo. Con la mesa cambiada, la cuenta fusionada se
-    // inyectaba en el listado de la OTRA mesa.
+    // sigue donde pidió la fusión.** Lo levantó la revisión: congelar la
+    // selección no alcanzaba porque estas cuatro sentencias **escriben** estado
+    // vivo. Con la mesa cambiada, la cuenta fusionada se inyectaba en el
+    // listado de la OTRA mesa.
     if (selectedMesa.value?.id !== mesaId) return
     cuentas.value = [
       cuenta,
@@ -1228,9 +1228,9 @@ async function fusionarSeleccionadas() {
     // reseteó.)
     fusionMode.value = false
     seleccionadasFusion.value = []
-    // **Se lo lleva a la fusionada en DOS casos, y la quinta pasada de la
-    // revisión encontró el segundo:** si seguía en el listado esperándola, y si
-    // quedó parado en una de las cuentas que **esta misma fusión canceló** —ahí
+    // **Se lo lleva a la fusionada en DOS casos, y el segundo lo encontró la
+    // revisión:** si seguía en el listado esperándola, y si quedó parado en una
+    // de las cuentas que **esta misma fusión canceló** —ahí
     // dejarlo no es respetar dónde estaba, es abandonarlo en una cuenta que el
     // servidor anuló y que el listado ya no tiene; todo lo que haga desde ahí
     // vuelve *"La cuenta no está abierta"*—. En cualquier otra cuenta no se lo
@@ -1815,8 +1815,8 @@ async function flushPendientes() {
  * Con el cancelar en vuelo el garzón puede volver al listado, entrar a otra
  * cuenta y editar ahí; al volver el request, esa edición se perdía **en
  * silencio**, con la cantidad optimista pintada y sin rollback. La revisión del
- * diff lo levantó en su tercera pasada, después de que las dos anteriores
- * cerraran la misma forma en las otras dos sentencias de esta función.
+ * diff lo levantó después de cerrar la misma forma en las otras dos sentencias
+ * de esta función.
  *
  * Mientras salir descartaba, esto no hacía falta: el timer disparaba,
  * `patchLineaCantidad` veía `activeCuenta` en `null` y cortaba callado. Al
@@ -2144,7 +2144,7 @@ async function confirmarCancelar() {
   // backdrop—, lo que deja `activeCuenta` en `null`. Releyendo el id después, el
   // `try` moría con un `TypeError` y **el cancelar no salía**: el garzón
   // confirmaba anular la cuenta, veía un toast rojo con un mensaje de JavaScript
-  // y la cuenta seguía abierta. Lo midió la revisión del diff, segunda pasada.
+  // y la cuenta seguía abierta. Lo midió la revisión del diff.
   const cuentaId = activeCuenta.value.id
   const mesaId = selectedMesa.value.id
   try {

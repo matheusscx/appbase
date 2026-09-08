@@ -602,8 +602,8 @@ export class RecuentosService {
   // efecto— y no le impone a ventas un orden de locks que sus recetas y combos
   // no pueden garantizar de todos modos.
   //
-  // `esDeadlock`, no `error.code` a secas (hallazgo 7, revisión de rama
-  // 2026-09-06, promovido del backlog): TypeORM copia el `code` del driver a
+  // `esDeadlock`, no `error.code` a secas (revisión de rama 2026-09-06,
+  // promovido del backlog): TypeORM copia el `code` del driver a
   // `QueryFailedError` pero también lo deja en `driverError.code`, y cuál de
   // las dos formas llega depende de dónde se lance. Mirar solo `error.code`
   // deja pasar la mitad de los `40P01` sin reintentar. El frente "bodegas y

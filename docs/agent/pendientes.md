@@ -184,72 +184,24 @@ código».
 
 ⛔ **Barrer las citas destapó tres formas más de lo mismo** —`Task N` en inglés, la decisión
 citada en prosa y la autorreferencia *"antes de esta tarea"*—, que se midieron y se cerraron en
-el commit siguiente, también en [`resueltos.md`](resueltos.md). Lo que quedó vivo de esa
-familia es la cita a un **informe de revisión**, abajo.
+el commit siguiente, también en [`resueltos.md`](resueltos.md). La cara que quedaba viva de esa
+familia —la cita a una unidad de un **informe de revisión**— se cerró también el 2026-09-08, en
+el commit de después: mismo archivo.
 
 ### Citar un hallazgo o una ronda de revisión por su número (2026-09-08)
 
-La forma que queda viva de la conducta que cerraron los dos commits de citas
-([`resueltos.md`](resueltos.md)): un comentario que cita **una unidad de un informe de
-revisión** —`hallazgo 7`, `ronda 3`, `C2`— cuando ese informe nunca vivió en el repo. A
-diferencia de las tareas y las secciones, acá **no hay documento que nombrar**: el arreglo es
-decir qué se encontró, no en qué número de la lista estaba.
+✅ **Cerrada el mismo día que se abrió, y el número salió de las 42, no solo de las que la
+entrada contaba como huérfanas.** La entrada proponía triar —30 de las 42 ya nombraban su
+revisión y ahí el número sobraba—; se barrió entero porque una familia que grepea a cero se
+verifica con un comando y una triada no. Aparecieron además la misma cita en inglés
+(`fix round 1`, `finding 4`) y los códigos de severidad pegados al número (`C2`, `CRITICAL`,
+`IMPORTANT 2`), que el censo en español no veía, y —ya con el cierre escrito, levantado por la
+revisión independiente— el **ordinal en palabras** (*"la cuarta pasada de la revisión"*), 12
+líneas que ningún grep de un número encuentra. Detalle, medición y lo que queda vivo del grep
+—tres líneas que no citan ninguna revisión— en [`resueltos.md`](resueltos.md).
 
-- [ ] **`hallazgo N` — 22 líneas.** `grep -rnE '[Hh]allazgo [A-Z0-9]' backend/src backend/test
-  frontend/app`. Repartidas en **12 archivos**, backend y frontend: seis de ellos juntan 16 de
-  las 22 —`caja-testigo.e2e-spec.ts` con 6, y `stores/caja.ts`, `stores/caja.spec.ts`,
-  `garzones.nuxt.spec.ts`, `traslado-borrado-ubicacion-concurrente.e2e-spec.ts` y
-  `costo-stock-choke-point.invariant.spec.ts` con 2 cada uno—. El reparto sale de
-  `grep -rcE '[Hh]allazgo [A-Z0-9]' … | grep -v ':0'`: no fiarse de una lista escrita a mano.
-- [ ] **`ronda N` — 20 líneas.** `grep -rnE '[Rr]onda [0-9]' backend/src backend/test
-  frontend/app`, en 10 archivos. El más cargado es `caja-testigo.service.ts` con 5;
-  `caja.controller.ts` y `caja-testigo.service.spec.ts` empatan en 3.
-  ⚠️ **Tres del grep no son citas a una revisión**:
-  `escala-moneda.pipe.ts:49` habla de la ronda 1 de un **benchmark**, y
-  `rbac-y-contrasena.e2e-spec.ts:280` y `:307`, de las rondas de un **bucle** del test.
-
-⚠️ **Son más débiles que muertas, y el frente es más chico de lo que sugiere el 42.** Contando
-con el renglón anterior —porque el comentario se parte y *"revisión independiente,"* suele
-cerrar la línea de arriba del número—, **30 de las 42** nombran la revisión de la que salieron
-y **6** traen además su fecha (*"hallazgo 2, revisión de rama 2026-09-06"*), que es lo que
-ubica el momento — con la ventana ampliada un renglón son 7, porque
-`recuentos.service.ts:605` parte la fecha igual que el caso de abajo. Quedan **12 sin ninguna
-referencia**, y tres de esas doce ni siquiera
-son citas a una revisión (las de arriba): **el trabajo real son unas nueve líneas**. ⚠️ El 12 es un
-techo, no un número exacto: la referencia también puede caer en el renglón **siguiente**
-—`ubicaciones.service.spec.ts:6` dice *"desde el hallazgo 1"* y *"de la revisión de rama"* está
-en la línea de abajo—, y mirando las dos anteriores **y** la siguiente son 11. El orden de
-magnitud es lo que importa: son unas diez, no cuarenta. El comando devuelve las doce:
-
-  ```bash
-  { grep -rnE '[Hh]allazgo [A-Z0-9]' backend/src backend/test frontend/app
-    grep -rnE '[Rr]onda [0-9]'      backend/src backend/test frontend/app; } |
-    awk -F: '{print $1":"$2}' | sort -u |
-    while IFS=: read f l; do sed -n "$((l>2?l-2:1)),${l}p" "$f" |
-      grep -qi 'revisi' || echo "$f:$l"; done
-  ```
-
-⚠️ **Y no hace falta el mismo trabajo en las 42.** Muchas explican el hallazgo y le cuelgan el
-número (`caja-testigo.service.ts:104`: *"Resuelve TODAS las sesiones antes de escribir ninguna
-fila (revisión independiente, ronda 3): validar y guardar en el mismo paso dejaba
-comprometidas…"*): ahí sobra el número y no falta nada. Las caras son las que le hacen **hacer
-trabajo** al número —`caja-testigo.service.spec.ts:454`: *"El test que sostiene la propiedad
-central de la ronda 2"*, donde cuál es esa propiedad solo lo dice un informe que no está en el
-repo—.
-
-📌 **Tres títulos de test citan uno de estos números**, y no cuestan lo mismo:
-`grep -rnE "(it|test|describe)\(.*([Rr]onda [0-9]|[Hh]allazgo [A-Z0-9])" backend/src
-backend/test frontend/app`. En `recuentos.service.spec.ts:981` el número es un **sufijo** de un
-título que ya describe el caso entero, así que alcanza con sacarlo. En
-`caja.controller.spec.ts:605` y `:613` —que no aparecen en las viñetas de arriba, que enumeran
-los archivos más cargados y éste tiene 2— el número **abre** la explicación
-(*"— ronda 3, sin esto cualquier token del tenant llegaba al handler"*): ahí hay que reescribir,
-y son el caso caro.
-
-📌 **Antes de barrer, enumerar las formas.** Es la tercera vez que esta familia se reabre por
-una forma que el grep anterior no veía —plural, minúscula, inglés, cita partida por el salto de
-línea—. Para ésta, las candidatas a mirar además de las dos de arriba son `C2`/`M2` (códigos de
-hallazgo y de mutante), *"el informe"*, *"el reporte"* y *"la revisión dijo"*.
+✅ **Con eso la § 1 vuelve a quedar vacía el 2026-09-08.** Igual que las veces anteriores: no
+dice que no quede trabajo chico, dice que el que queda no es mecánico.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

@@ -1658,14 +1658,14 @@ describe('CajaService', () => {
       );
     });
 
-    // Corrección de la revisión (ronda 3 → pivote del owner, ronda 4): la
+    // Corrección de la revisión, con un pivote del owner en el medio: la
     // primera corrección concatenaba fase 1 y fase 2 en la MISMA columna
     // (`caja.comentario`) — el owner señaló que eso era parchar la confusión,
     // no arreglarla: el comentario de la APERTURA y el del CIERRE no tienen
     // nada que ver entre sí y nunca deberían compartir columna. Con
     // `comentarioCierre` separado de `comentario`, este es el mutante que de
-    // verdad importa: que el cierre NUNCA escriba en la columna de apertura,
-    // ni la pise ni la borre.
+    // verdad importa: que el cierre NUNCA escriba en la columna de apertura, ni
+    // la pise ni la borre.
     it('el comentario de la apertura y el del cierre se conservan por separado', async () => {
       managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
       managerMock.findOne.mockResolvedValueOnce({

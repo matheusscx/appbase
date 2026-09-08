@@ -365,14 +365,14 @@ export const useCajaStore = defineStore('caja', () => {
       activa.value = null
     }
     if (detalle.value?.id === cajaId) {
-      // MERGE, no reemplazo (revisión independiente, hallazgo 1): `POST
-      // /caja/:id/cerrar` devuelve la ENTIDAD cruda, y `cajonNombre` /
-      // `usuarioNombre` los resuelve solo `findOne` (`GET /caja/:id`).
-      // Pisar el detalle con la entidad los dejaba `undefined` en runtime —
-      // el tipo los declara requeridos, así que `vue-tsc` no lo veía— y el
-      // header pasaba de "Barra" a "Caja" hasta un F5. Peor en el cierre
-      // forzado: el nombre del cajero, que es EL dato de esta feature,
-      // caía al texto de fallback justo al cerrar.
+      // MERGE, no reemplazo (revisión independiente): `POST /caja/:id/cerrar`
+      // devuelve la ENTIDAD cruda, y `cajonNombre` / `usuarioNombre` los
+      // resuelve solo `findOne` (`GET /caja/:id`). Pisar el detalle con la
+      // entidad los dejaba `undefined` en runtime — el tipo los declara
+      // requeridos, así que `vue-tsc` no lo veía— y el header pasaba de "Barra"
+      // a "Caja" hasta un F5. Peor en el cierre forzado: el nombre del cajero,
+      // que es EL dato de esta feature, caía al texto de fallback justo al
+      // cerrar.
       detalle.value = {
         ...detalle.value,
         ...res.caja,
@@ -387,12 +387,12 @@ export const useCajaStore = defineStore('caja', () => {
    * Estado de las solicitudes de testigo de una caja: lo que el encargado mira
    * mientras espera la firma.
    *
-   * Vacía ANTES de pedir (revisión independiente, hallazgo 4): el array es del
-   * store, no de una caja. Si la carga de la caja B fallaba, quedaban vivas las
-   * firmas de la caja A y `hayFirmaAlguna` daba `true` para B — el gate del
-   * comentario obligatorio se apagaba con datos de otra caja. Vaciar primero
-   * hace que un error degrade hacia el lado seguro: sin firmas conocidas, se
-   * exige la explicación.
+   * Vacía ANTES de pedir (revisión independiente): el array es del store, no de
+   * una caja. Si la carga de la caja B fallaba, quedaban vivas las firmas de la
+   * caja A y `hayFirmaAlguna` daba `true` para B — el gate del comentario
+   * obligatorio se apagaba con datos de otra caja. Vaciar primero hace que un
+   * error degrade hacia el lado seguro: sin firmas conocidas, se exige la
+   * explicación.
    */
   async function cargarTestigos(cajaId: string): Promise<void> {
     testigos.value = []

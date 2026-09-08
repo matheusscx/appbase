@@ -198,10 +198,10 @@ describe('CajaTestigoService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    // Regresión de la revisión independiente (ronda 3, IMPORTANT 2): validar
-    // y escribir en el mismo loop dejaba la fila de A ya commiteada cuando B
-    // fallaba, y un reintento de [A, B] fallaba en A por 23505 en vez del
-    // error real. Todas las sesiones se resuelven ANTES de escribir nada.
+    // Regresión de la revisión independiente: validar y escribir en el mismo
+    // loop dejaba la fila de A ya commiteada cuando B fallaba, y un reintento
+    // de [A, B] fallaba en A por 23505 en vez del error real. Todas las
+    // sesiones se resuelven ANTES de escribir nada.
     it('no escribe ninguna fila si algún garzón de la lista no tiene sesión (todo o nada)', async () => {
       sesionesGarzonServiceMock.listarAbiertas.mockResolvedValue([
         { garzonId: GARZON_A, id: SESION_A },
@@ -294,11 +294,11 @@ describe('CajaTestigoService', () => {
       expect(r[0]).not.toHaveProperty('contado');
       expect(r[0]).not.toHaveProperty('monto');
 
-      // Sobre la SQL y no solo sobre el mapper (revisión independiente,
-      // hallazgo 6): la fila del mock la construyo yo sin montos, así que el
+      // Sobre la SQL y no solo sobre el mapper (revisión independiente): la
+      // fila del mock la construyo yo sin montos, así que el
       // `not.toHaveProperty` de arriba solo cazaría un mapper que INVENTE una
-      // clave — nunca una columna de plata agregada al SELECT. Esto último es
-      // el riesgo real del cierre ciego.
+      // clave — nunca una columna de plata agregada al SELECT. Esto último
+      // es el riesgo real del cierre ciego.
       const sql = dataSource.query.mock.calls[0][0] as string;
       expect(sql).not.toMatch(/\besperado\b/);
       expect(sql).not.toMatch(/\bcontado\b/);
@@ -451,8 +451,8 @@ describe('CajaTestigoService', () => {
       expect(r.resueltaPorUsuarioId).toBe(USUARIO_VINCULADO_ID);
     });
 
-    // El test que sostiene la propiedad central de la ronda 2: la vía fuerte
-    // no se esquiva yendo al tótem, ni mandando el PIN correcto.
+    // El test que sostiene la propiedad central de la vía fuerte: no se esquiva
+    // yendo al tótem, ni mandando el PIN correcto.
     it('otra cuenta NO puede firmar por el garzón vinculado, aunque mande el PIN correcto', async () => {
       await expect(
         service.resolver(TENANT_ID, TESTIGO_ID, TOTEM_USUARIO_ID, {
@@ -523,13 +523,13 @@ describe('CajaTestigoService', () => {
       expect(dataSource.query).not.toHaveBeenCalled();
     });
 
-    // Regresión de la revisión independiente (ronda 4, CRITICAL 2 seguía
-    // abierto): `miVinculo` da `null` tanto para "sin vínculo" como para
-    // "tótem", así que la cuenta del tótem —la que de hecho usa esta
-    // pantalla— podía pedir las pendientes de CUALQUIER `garzonId`
-    // enumerado del selector, sin que nada lo contrastara. La identidad
-    // ahora sale de `resolverGarzonActuante` (mismo patrón que
-    // `activaPropia`): sin vínculo personal, EXIGE `garzonId` + PIN.
+    // Regresión de la revisión independiente —el guard de `Salones:Operar` no
+    // cerraba el caso—: `miVinculo` da `null` tanto para "sin vínculo" como
+    // para "tótem", así que la cuenta del tótem —la que de hecho usa esta
+    // pantalla— podía pedir las pendientes de CUALQUIER `garzonId` enumerado
+    // del selector, sin que nada lo contrastara. La identidad ahora sale de
+    // `resolverGarzonActuante` (mismo patrón que `activaPropia`): sin vínculo
+    // personal, EXIGE `garzonId` + PIN.
     it('resuelve el garzón actuante vía resolverGarzonActuante, con la credencial tal cual', async () => {
       await service.pendientesDeGarzon(TENANT_ID, TOTEM_USUARIO_ID, CREDENCIAL);
 

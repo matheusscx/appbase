@@ -70,12 +70,12 @@ function findTsFiles(dir: string, incluirSpecs = false): string[] {
 // template literals (donde vive el SQL) para no marcar un UPDATE legítimo de
 // esas tablas por compartir nombre de columna con item_producto.
 //
-// Límite conocido (hallazgo 2, revisión de rama 2026-09-06): esto solo mira
-// backticks. SQL armado con comillas simples evade los tres tests de acá
-// abajo. Es preexistente y coherente con cómo el repo escribe SQL (siempre
-// template literals, nunca comillas simples) — no se corrige porque hacerlo
-// exigiría un parser de SQL, no una regex, para no reventar de falsos
-// positivos sobre cualquier string con comillas simples que no sea SQL.
+// Límite conocido (revisión de rama 2026-09-06): esto solo mira backticks. SQL
+// armado con comillas simples evade los tres tests de acá abajo. Es
+// preexistente y coherente con cómo el repo escribe SQL (siempre template
+// literals, nunca comillas simples) — no se corrige porque hacerlo exigiría un
+// parser de SQL, no una regex, para no reventar de falsos positivos sobre
+// cualquier string con comillas simples que no sea SQL.
 function extraeTemplateLiterals(contenido: string): string[] {
   const out: string[] = [];
   const regex = /`([^`]*)`/gs;
@@ -175,12 +175,12 @@ describe('Invariante: costo_actual y stock solo se escriben desde el kardex', ()
         // `forFeature`), así que `manager.getRepository(X).save(...)` —o
         // `@InjectRepository(ItemUnidad)` en cualquier service— escribe
         // `ubicacionId` sin que aparezca ni un template literal. `ItemUnidad`
-        // faltaba acá (hallazgo 2, revisión de rama 2026-09-06): las dos
-        // puertas de arriba solo cazaban su SQL crudo (`INSERT`/`UPDATE`
-        // sobre `ubicacion_id`), no un `save({ ubicacionId })` por
-        // repositorio, que movía una unidad serializada de lugar sin pasar
-        // por el kardex y el invariante seguía verde. Esto se busca sobre el
-        // archivo entero, no sobre los literales, porque no es SQL.
+        // faltaba acá (revisión de rama 2026-09-06): las dos puertas de arriba
+        // solo cazaban su SQL crudo (`INSERT`/`UPDATE` sobre `ubicacion_id`),
+        // no un `save({ ubicacionId })` por repositorio, que movía una unidad
+        // serializada de lugar sin pasar por el kardex y el invariante seguía
+        // verde. Esto se busca sobre el archivo entero, no sobre los literales,
+        // porque no es SQL.
         /(getRepository|InjectRepository)\(\s*(StockUbicacion|LoteUbicacion|ItemUnidad)\s*\)/.test(
           contenido,
         ) ||

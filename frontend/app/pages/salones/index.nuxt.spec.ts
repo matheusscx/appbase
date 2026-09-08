@@ -2468,8 +2468,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   it('salir de la cuenta durante la espera no impide que el cancelar salga', async () => {
     /**
      * El gemelo del tap que deselecciona en fusionar, y lo levantó la MISMA
-     * revisión en la segunda pasada: el `await flushPendientes()` nuevo dejó
-     * `activeCuenta.value.id` releído después. El botón *Cancelar* del modal no
+     * revisión: el `await flushPendientes()` nuevo dejó `activeCuenta.value.id`
+     * releído después. El botón *Cancelar* del modal no
      * está deshabilitado —el `:loading` va solo al de confirmar— y el `UModal`
      * cierra con ESC o backdrop, así que la pantalla vuelve a ser clickeable
      * mientras el flush viaja; desde ahí *Cuentas* pone `activeCuenta` en `null`.
@@ -2526,9 +2526,9 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   it('cancelar una cuenta no se lleva puesta la edición de OTRA', async () => {
     /**
-     * Tercera vuelta de la misma forma, y la levantó la tercera pasada de la
-     * revisión: congelar el id para el request y para el filtro dejó sin acotar
-     * las otras dos sentencias que corren después del mismo `await`.
+     * Tercera vuelta de la misma forma, y la levantó la revisión: congelar el
+     * id para el request y para el filtro dejó sin acotar las otras dos
+     * sentencias que corren después del mismo `await`.
      * `descartarPendientes()` borraba **todo** `pendingByLinea` —sin mirar de qué
      * cuenta es cada entrada, aunque `EdicionCantidad` lleva su `cuentaId`
      * justamente para esto— y `volverACuentas()` sacaba al garzón de donde
@@ -2723,8 +2723,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   it('si el garzón entró a otra cuenta durante la espera, la fusión no lo teletransporta', async () => {
     /**
-     * La cuarta pasada de la revisión: congelar la selección no alcanzaba,
-     * porque después del `await` la función seguía **escribiendo** la pantalla
+     * Lo levantó la revisión: congelar la selección no alcanzaba, porque
+     * después del `await` la función seguía **escribiendo** la pantalla
      * —`cuentas.value`, `fusionMode`, `seleccionadasFusion` y sobre todo
      * `activeCuenta.value = cuenta`—. Ese último es el gemelo exacto del
      * `volverACuentas()` que este mismo frente acababa de condicionar en
@@ -2792,7 +2792,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   it('pero si la cuenta donde estaba parado es una de las fusionadas, SÍ lo lleva', async () => {
     /**
-     * La otra mitad del guard, y la levantó la quinta pasada de la revisión: el
+     * La otra mitad del guard, y la levantó la revisión: el
      * `if (!activeCuenta.value)` cubría una sola sub-escena. Si el garzón quedó
      * parado en una cuenta que **la propia fusión canceló**, dejarlo ahí no es
      * respetar dónde estaba: es abandonarlo en una cuenta que el servidor anuló
@@ -2851,8 +2851,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   it('lo que se toca en una cuenta de origen durante el vuelo no se manda: esa cuenta se anula', async () => {
     /**
      * El gemelo del `descartarPendientes(cuentaId)` de cancelar, y lo levantó la
-     * quinta pasada de la revisión con sonda: fusionar no descartaba nada, así
-     * que una edición nacida **durante** el vuelo sobre una cuenta de ORIGEN
+     * revisión, con sonda: fusionar no descartaba nada, así que una edición
+     * nacida **durante** el vuelo sobre una cuenta de ORIGEN
      * salía después de que la fusión la dejara `cancelada` y volvía con
      * *"La cuenta no está abierta"* — el mismo toast que este frente vino a
      * sacar, entrando por la última puerta que quedaba.
@@ -2919,10 +2919,10 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   it('y lo que se toca en la cuenta DESTINO tampoco: la fusión ya le sumó lo del origen', async () => {
     /**
-     * El caso simétrico, y el peor de los dos: la sexta pasada de la revisión lo
-     * midió con sonda. La cuenta destino **sigue abierta**, así que ese `PATCH`
-     * no rebota **por la cuenta**: puede salir, contestar 200 y **pisar** la
-     * cantidad que la fusión acababa de sumarle.
+     * El caso simétrico, y el peor de los dos: la revisión lo midió con sonda.
+     * La cuenta destino **sigue abierta**, así que ese `PATCH` no rebota **por
+     * la cuenta**: puede salir, contestar 200 y **pisar** la cantidad que la
+     * fusión acababa de sumarle.
      *
      * Contra el backend real (`salones.service.ts`): una línea de origen con la
      * misma clave se pliega sobre la de destino sumando `cantidad` y
@@ -4447,8 +4447,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   it('un cobro pedido no le tapa a la fusión el cierre en vuelo que hay debajo', async () => {
     /**
-     * La escena que midió la quinta revisión independiente, y la que obligó a
-     * mirar los dos cobros **por separado** en vez de encadenarlos con `??`.
+     * La escena que midió la revisión independiente, y la que obligó a mirar
+     * los dos cobros **por separado** en vez de encadenarlos con `??`.
      *
      * El reintento del `catch` de `cerrarCuentaConPin` —el que ofrece
      * `toastErrorOperativo` cuando el cierre rebota por sesión de trabajo— arma la

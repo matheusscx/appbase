@@ -270,8 +270,8 @@ describe('useCajaStore — arqueo / cerrar', () => {
     expect(store.detalle).toMatchObject(cajaCerrada)
   })
 
-  // Regresión (revisión independiente, hallazgo 1). `POST /:id/cerrar` devuelve
-  // la ENTIDAD: no trae `cajonNombre` ni `usuarioNombre`, que los resuelve solo
+  // Regresión (revisión independiente). `POST /:id/cerrar` devuelve la ENTIDAD:
+  // no trae `cajonNombre` ni `usuarioNombre`, que los resuelve solo
   // `GET /caja/:id`. El test anterior quedaba verde con la implementación rota
   // porque su payload de mock era incompleto — no tenía los campos que se
   // perdían. Este los pone y afirma que sobreviven.
@@ -296,7 +296,7 @@ describe('useCajaStore — arqueo / cerrar', () => {
   })
 
   // El array de testigos es del store, no de una caja: si la carga falla, no
-  // pueden quedar vivas las firmas de la caja anterior (hallazgo 4).
+  // pueden quedar vivas las firmas de la caja anterior.
   it('cargarTestigos vacía el estado anterior aunque la carga falle', async () => {
     const store = useCajaStore()
     store.testigos = [{ id: 't-vieja', estado: 'firmada' }] as unknown as typeof store.testigos

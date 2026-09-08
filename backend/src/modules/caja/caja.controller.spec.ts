@@ -602,7 +602,7 @@ describe('CajaController', () => {
       });
     });
 
-    it('resolverTestigo SÍ tiene Salones:Operar — ronda 3, sin esto cualquier token del tenant llegaba al handler', () => {
+    it('resolverTestigo SÍ tiene Salones:Operar — sin esto cualquier token del tenant llegaba al handler', () => {
       const permiso = Reflect.getMetadata(
         'requires_permiso',
         CajaController.prototype.resolverTestigo,
@@ -610,7 +610,7 @@ describe('CajaController', () => {
       expect(permiso).toEqual([{ modulo: 'Salones', permiso: 'Operar' }]);
     });
 
-    it('pendientesDeGarzon tiene Salones:Operar — ronda 3, sin esto exponía montos a cualquier usuario del tenant', () => {
+    it('pendientesDeGarzon tiene Salones:Operar — sin esto exponía montos a cualquier usuario del tenant', () => {
       const permiso = Reflect.getMetadata(
         'requires_permiso',
         CajaController.prototype.pendientesDeGarzon,

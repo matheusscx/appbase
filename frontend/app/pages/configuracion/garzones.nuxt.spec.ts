@@ -148,7 +148,7 @@ let restaurarRetenido: Promise<unknown> | null = null
 let restaurarErrorForzado: string | null = null
 /** Historial de PIN por garzón, para `GET .../pin-eventos`. Vacío si no se fija. */
 let eventosPinBackend: Record<string, EventoPinFake[]> = {}
-/** Cada `GET .../pin-eventos` recibido: la sonda de "cero N+1" (finding 4). */
+/** Cada `GET .../pin-eventos` recibido: la sonda de "cero N+1". */
 let pinEventosRequests: string[] = []
 /** Fuerza el próximo `GET .../pin-eventos` a rechazar, para simular un fetch caído. */
 let eventosPinRechaza = false
@@ -949,13 +949,13 @@ describe('garzones — advertencias del backend', () => {
     expect(dialogo()?.textContent).toContain('El PIN de Ana Torres deja de servir ahora')
   })
 
-  // Ronda 4 de la revisión (2026-08-14): `abrirRegenerar` refresca el
-  // listado antes de armar el modal, pero eso solo achica la ventana de la
-  // carrera, no la cierra — el encargado puede tardar en confirmar, y algo
-  // puede cambiar el estado real del garzón mientras el modal sigue abierto.
-  // Por eso el RESULTADO (el toast, después de confirmar) tiene que salir de
-  // `habiaPin` —que manda el backend en la respuesta del PATCH— y no del
-  // `pinFijado` que la pantalla tenía al abrir el modal. Las dos direcciones:
+  // Revisión del 2026-08-14: `abrirRegenerar` refresca el listado antes de
+  // armar el modal, pero eso solo achica la ventana de la carrera, no la cierra
+  // — el encargado puede tardar en confirmar, y algo puede cambiar el estado
+  // real del garzón mientras el modal sigue abierto. Por eso el RESULTADO (el
+  // toast, después de confirmar) tiene que salir de `habiaPin` —que manda el
+  // backend en la respuesta del PATCH— y no del `pinFijado` que la pantalla
+  // tenía al abrir el modal. Las dos direcciones:
   it('la predicción del modal envejece (el garzón fija su PIN mientras el modal está abierto): el toast dice la verdad del backend, no la del modal', async () => {
     garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
 
@@ -1033,12 +1033,11 @@ describe('garzones — advertencias del backend', () => {
     expect(wrapper.text()).not.toContain('PIN puesto')
   })
 
-  // Hallazgo 1 de la revisión del 2026-08-14: `pinFijado` viene del listado
-  // (síncrono con el montaje), no del fetch de `/pin-eventos` — así que un
-  // historial que TARDA o FALLA no puede hacer que el badge mienta. Antes de
-  // este fix, `eventosPin: []` (estado inicial Y estado de error) hacía que
-  // el badge dijera "Sin PIN todavía" con la misma cara que un "no" real del
-  // backend.
+  // Revisión del 2026-08-14: `pinFijado` viene del listado (síncrono con el
+  // montaje), no del fetch de `/pin-eventos` — así que un historial que TARDA o
+  // FALLA no puede hacer que el badge mienta. Antes de este fix,
+  // `eventosPin: []` (estado inicial Y estado de error) hacía que el badge
+  // dijera "Sin PIN todavía" con la misma cara que un "no" real del backend.
   it('el badge no miente aunque el historial no cargue: sale del listado, no del fetch de eventos', async () => {
     garzonesBackend = [garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1', pinFijado: true })]
     eventosPinRechaza = true
@@ -1129,10 +1128,10 @@ describe('garzones — advertencias del backend', () => {
     expect(wrapper.text()).not.toContain('no puede operar')
   })
 
-  // Hallazgo 4, ahora sin el guard `if (garzon.usuarioId)` que lo sostenía:
-  // la propiedad que importa no era "el garzón sin cuenta no pide", era
-  // **una llamada por apertura de ficha, nunca una por fila de la tabla**.
-  // Con 3 filas en el listado, un N+1 daría 3 requests antes de abrir nada.
+  // Ahora sin el guard `if (garzon.usuarioId)` que lo sostenía: la propiedad
+  // que importa no era "el garzón sin cuenta no pide", era **una llamada por
+  // apertura de ficha, nunca una por fila de la tabla**. Con 3 filas en el
+  // listado, un N+1 daría 3 requests antes de abrir nada.
   it('cero N+1: el listado no pide ningún historial, y abrir una ficha pide exactamente el de ESE garzón', async () => {
     garzonesBackend = [
       garzon(),

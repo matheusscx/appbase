@@ -23,6 +23,123 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las citas a una unidad de un informe de revisión (cerradas 2026-09-08)
+
+Sale de [`pendientes.md` § 1](pendientes.md), donde la abrió el commit anterior (`87b7eb9b`)
+como lo que quedaba vivo de la familia de citas huérfanas. La conducta es la misma con otra
+fuente: un comentario que cita **una unidad de un informe de revisión** —`hallazgo 7`,
+`ronda 3`, `C2`— cuando ese informe nunca vivió en el repo. Acá no hay documento que nombrar,
+así que el arreglo no es agregar una ruta: es decir qué se encontró, y borrar el número.
+
+**En qué se aparta de lo que la entrada proponía.** La entrada proponía triar: de las 42, 30 ya
+nombraban la revisión de la que salieron y ahí el número sobraba, y el trabajo caro eran las
+huérfanas más tres títulos de test. Acá el número salió de **las 42**, porque una familia que
+grepea a cero se verifica con un comando y una triada no: quien venga después no puede
+distinguir *"quedan 30 benignas"* de *"quedan 30 sin barrer"*. ⚠️ Con una salvedad que este
+mismo cierre se ganó: **grepear a cero vale para las formas enumeradas, no para la conducta**.
+La primera versión de este texto decía que la familia quedaba cerrada, y la revisión
+independiente encontró una forma más —el ordinal escrito en palabras— que ninguno de los
+comandos de acá abajo veía. Donde la revisión estaba nombrada
+con fecha, la fecha se queda —ubica el momento y no caduca—; el número se va. Donde el número
+hacía trabajo, quedó escrito el hecho: el `ronda 4 — C2 seguía abierto` de
+`caja-testigo.service.ts` pasó a *"el guard de `Salones:Operar` no cerraba el caso"*, que es lo
+que su docblock hermano en `caja.controller.ts` ya explicaba.
+
+**Antes** está medido sobre `87b7eb9b` y **Después** sobre el árbol de este commit, los dos con
+los comandos de abajo tal como están:
+
+| Forma | Antes | Después |
+|---|---|---|
+| `hallazgo N` | 22 líneas, 12 archivos | 0 |
+| `ronda N` | 20 líneas, 10 archivos | 3, ninguna cita una revisión |
+| `round N` / `finding N` (inglés) | 3 líneas, 2 archivos | 0 |
+| código de severidad pegado al número (`C2`, `CRITICAL`, `IMPORTANT`) | 6 líneas, 3 archivos | 0 |
+| ordinal en palabras (*"la cuarta pasada de la revisión"*) | 12 líneas, 3 archivos | 0 |
+| títulos de `it(...)` que llevan el número | 3 | 0 |
+
+```bash
+grep -rnE '[Hh]allazgo [A-Z0-9]'            backend/src backend/test frontend/app
+grep -rnE '[Rr]onda [0-9]'                  backend/src backend/test frontend/app
+grep -rnE '[Rr]ound [0-9]|[Ff]inding [0-9]' backend/src backend/test frontend/app
+grep -rnE '\b(C[0-9]|CRITICAL|IMPORTANT)\b' backend/src backend/test frontend/app
+grep -rnE "(it|test|describe)\(.*([Rr]onda [0-9]|[Hh]allazgo [A-Z0-9])" backend/src backend/test frontend/app
+```
+
+⚠️ **El cuarto contra una revisión hay que correrlo con `git grep -P`**, no con `-E`: el `-E`
+de `git grep` no entiende `\b` y devuelve cero, que es exactamente el número que uno esperaría
+ver si la forma no existiera. Con `grep` sobre el árbol —incluido el de macOS— `-E` alcanza y
+`-P` no existe. Es el mismo caveat del cierre de abajo, con los papeles cambiados.
+
+Y el censo **multilínea**, que es el único que ve la cita partida por el salto de línea y no
+depende del idioma: **46** coincidencias en `87b7eb9b` (45 líneas: una junta `ronda 3` y
+`ronda 4`), **3** ahora.
+
+```bash
+grep -rl '' --include='*.ts' --include='*.vue' backend/src backend/test frontend/app |
+  xargs perl -Mutf8 -CSD -0777 -ne \
+  'while (/(?:[Hh]allazgo|[Rr]onda|[Ff]inding|[Rr]ound)s?\s*\n?\s*(?:[A-Z]?[0-9]+)/g) {
+     $l = 1 + substr($_,0,$-[0]) =~ tr/\n//; print "$ARGV:$l\n" }'
+```
+
+Y el ordinal escrito en palabras, que **lo encontró la revisión independiente después de que
+este cierre se declarara completo** (12 líneas en `salones/index.vue`, `salones/index.nuxt.spec.ts`
+y `configuracion/garzones.vue`; una de ellas dice literalmente *"el segundo hallazgo de la
+revisión anterior"*). Pide una ventana de contexto, porque *"la primera pasada de `calcularVenta`"*
+y *"Segunda pasada: los combos"* son legítimas y hay que descartarlas:
+
+```bash
+grep -rl '' --include='*.ts' --include='*.vue' backend/src backend/test frontend/app |
+  xargs perl -Mutf8 -CSD -0777 -ne \
+  'while (/\b(primera|segunda|tercera|cuarta|quinta|sexta|s[eé]ptima|[uú]ltima|primer|segundo|tercer|cuarto|quinto|sexto|[uú]ltimo)\s+(?:\*|\/|\s)*\s*(ronda|pasada|hallazgo|revisi[oó]n|auditor[ií]a)\b/gi) {
+     $s=$-[0]; $c=substr($_,($s>200?$s-200:0),400); next unless $c=~/revisi|hallazgo|auditor/i;
+     $l=1+substr($_,0,$s)=~tr/\n//; print "$ARGV:$l\n" }' | sort -u
+```
+
+⚠️ **Ese comando tampoco es la conducta**: no lleva `vuelta` en su alternancia de sustantivos y
+el repo ya escribe *"Tercera vuelta de la misma forma"*. Hoy sus usos son legítimos —la vuelta
+es del bug, no de la revisión—. Va sin `vuelta` porque los números
+de la tabla se midieron con él tal cual; agregarla es lo primero que conviene hacer si esta
+familia se vuelve a abrir.
+
+⚠️ **Cuatro cosas aparecieron barriendo.**
+
+- **La misma cita en inglés**: `fix round 1` (dos veces, `mermas.service.spec.ts`) y
+  `finding 4` (`garzones.nuxt.spec.ts`). Tres líneas que ningún grep del español trae. Es la
+  familia de citas que se reabre por el idioma, otra vez.
+- **El código de severidad pegado al número** —`C2`, `CRITICAL`, `IMPORTANT 2`—: seis líneas, y
+  ninguna es una línea propia. Todas viajaban en una línea que el grep de `ronda N` ya traía,
+  así que no cambian el 42 de la entrada y se arreglaron con ella; lo que sí cambian es qué hay
+  que grepear la próxima vez.
+- **El mismo número escrito con letras**, que es el que se le escapó al censo de arriba y
+  encontró la revisión: *"la cuarta pasada de la revisión"*, *"la sexta pasada"*, *"la quinta
+  revisión independiente"*. Doce líneas, todas en pantallas del frontend, todas con la
+  explicación al lado. **Cuatro** no salían por borrado puro y pidieron reescribir la cláusula
+  —`garzones.vue`, `salones/index.vue` (dos) y `salones/index.nuxt.spec.ts`—; en las otras ocho
+  el ordinal salió y ya. En una sola se agregó un dato que el comentario no tenía: la fecha de
+  la revisión en `garzones.vue`, sacada del `git blame` del commit que escribió ese comentario
+  (`1edd27b3`, 2026-08-14), que es la misma que sus hermanos ya decían. 📌 Es la cuarta forma
+  de esta familia que aparece después de un censo que se leía como completo (antes: el plural,
+  el inglés, la cita partida por el salto de línea). Lo que conviene sacar de eso no es la lista
+  de formas, es que **el número escrito no es la conducta**: la conducta es apuntar a una unidad
+  de algo que no está en el repo, y se puede escribir de tantas maneras como el castellano
+  permita.
+- **Un falso positivo que ningún comando de acá arriba produce**, y por eso se deja escrito:
+  `reglas-valor.e2e-spec.ts` dice *"Las encontró la revisión (la 3) y la reproducción en vivo
+  (la 4)"*, y esos números son las **puertas 3 y 4** que ese mismo archivo rotula en el renglón
+  de arriba. Salió de una sonda a mano —`grep -rnE '\((la|el) [0-9]\)'`—, no del censo: quien
+  reproduzca los comandos publicados no lo va a ver. Es el caso del spec que se rotula a sí
+  mismo, como `reserva-stock-mesa.e2e-spec.ts` en [`CONVENTIONS.md`](../CONVENTIONS.md).
+
+📌 **Y una afirmación de la entrada no se sostuvo al abrir el archivo.** Daba
+`caja-testigo.service.spec.ts` como el caso caro, *"donde cuál es esa propiedad solo lo dice un
+informe que no está en el repo"*. La oración citada dice la propiedad en su segunda mitad —*"la
+vía fuerte no se esquiva yendo al tótem, ni mandando el PIN correcto"*—, así que sacar el número
+no costó escribir nada nuevo.
+
+**Lo que queda vivo del grep, y no es residuo:** tres `ronda N` que no citan ninguna revisión —
+`escala-moneda.pipe.ts` habla de las rondas de un **benchmark**, y `rbac-y-contrasena.e2e-spec.ts`
+(dos) de las vueltas de un **bucle** del test. La entrada ya las nombraba.
+
 ## Las tres formas que el barrido de citas no cubría (cerradas 2026-09-08)
 
 Sale de [`pendientes.md` § 1](pendientes.md), donde la abrió el commit anterior (`79874a06`)
@@ -131,12 +248,11 @@ porque había que editar esa línea igual:
   `PATCH /recuentos/:id/lineas/:lineaId`. El spec sigue cargando por SQL directo — eso quedó
   anotado en [`pendientes.md`](pendientes.md), no se tocó acá.
 
-⛔ **Lo que este cierre NO cubre.** Las citas a **artefactos de revisión** —`hallazgo N` (22
-líneas) y `ronda N` (20)— son la misma forma con otra fuente: números de un informe que nunca
-vivió en el repo. Son un frente propio y no un residuo de éste, así que van como entrada en
-[`pendientes.md` § 1](pendientes.md), con lo medido: 30 de las 42 nombran la revisión de la que
-salieron, y de las 12 que no, tres ni siquiera son citas a una revisión — las huérfanas de
-verdad son unas nueve.
+⛔ **Lo que este cierre NO cubría, y se cerró el mismo día.** Las citas a **artefactos de
+revisión** —`hallazgo N` (22 líneas) y `ronda N` (20)— son la misma forma con otra fuente:
+números de un informe que nunca vivió en el repo. Se abrieron como entrada propia en
+[`pendientes.md` § 1](pendientes.md) y las barrió el commit siguiente: arriba, «Las citas a una
+unidad de un informe de revisión».
 
 ## Las dos de citas huérfanas (cerradas 2026-09-08)
 

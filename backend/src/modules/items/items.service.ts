@@ -339,18 +339,17 @@ export class ItemsService {
    * tiene". Con `ON TRUE` el `COALESCE(SUM(...), 0)` de adentro los volvería
    * `0` para cualquier fila, tenga o no `item_producto`.
    *
-   * Decisión (revisión de rama 2026-09-06, hallazgo 1): el `JOIN ubicaciones`
-   * de acá abajo filtra `eliminado_el IS NULL`, igual que
-   * `desglosePorUbicacion` (más abajo en este archivo). Antes no lo hacía, y
-   * las dos consultas podían no coincidir: el `total` del catálogo contaba
-   * saldo colgado de una ubicación borrada que el desglose ya no mostraba —un
-   * número que su propio desglose no explicaba. Una bodega borrada no es un
-   * lugar donde el tenant pueda ver, contar o mover ese stock, así que no
-   * cuenta para el total. `UbicacionesService.remove` ahora bloquea el
-   * borrado bajo lock mientras quede stock (ver el comentario ahí), así que
-   * esto ya no debería tener nada que filtrar en la práctica — es defensa en
-   * profundidad para que las dos vistas nunca vuelvan a desacordar, no el
-   * guard principal.
+   * Decisión (revisión de rama 2026-09-06): el `JOIN ubicaciones` de acá abajo
+   * filtra `eliminado_el IS NULL`, igual que `desglosePorUbicacion` (más abajo
+   * en este archivo). Antes no lo hacía, y las dos consultas podían no
+   * coincidir: el `total` del catálogo contaba saldo colgado de una ubicación
+   * borrada que el desglose ya no mostraba —un número que su propio desglose no
+   * explicaba. Una bodega borrada no es un lugar donde el tenant pueda ver,
+   * contar o mover ese stock, así que no cuenta para el total.
+   * `UbicacionesService.remove` ahora bloquea el borrado bajo lock mientras
+   * quede stock (ver el comentario ahí), así que esto ya no debería tener nada
+   * que filtrar en la práctica — es defensa en profundidad para que las dos
+   * vistas nunca vuelvan a desacordar, no el guard principal.
    */
   private baseQuery(localIdx: number): string {
     return `

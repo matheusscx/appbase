@@ -2,11 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { UbicacionesService } from './ubicaciones.service';
 
 describe('UbicacionesService', () => {
-  // Un solo mock de `query` para el pool y para el manager de la
-  // transacción: `remove()` corre bajo `db.transaccion` desde el hallazgo 1
-  // de la revisión de rama (lock real contra el traslado concurrente), y lo
-  // que importan estos tests es el ORDEN de las sentencias, no si vinieron
-  // del pool o del manager.
+  // Un solo mock de `query` para el pool y para el manager de la transacción:
+  // `remove()` corre bajo `db.transaccion` desde la revisión de rama (lock real
+  // contra el traslado concurrente), y lo que importan estos tests es el ORDEN
+  // de las sentencias, no si vinieron del pool o del manager.
   const db = {
     query: jest.fn(),
     transaccion: (cb: (m: { query: jest.Mock }) => unknown) =>

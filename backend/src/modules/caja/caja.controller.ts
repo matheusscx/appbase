@@ -379,21 +379,20 @@ export class CajaController {
   }
 
   /**
-   * El garzón resuelve la SUYA. Ojo: NO lleva `Cajas:Actualizar` a propósito
-   * — el garzón no tiene permisos de caja. Sí lleva `Salones:Operar`
-   * (revisión independiente, ronda 3 — CRITICAL: sin ningún guard, cualquier
-   * token válido del tenant llegaba al handler): es el mismo piso que
-   * `salones.controller.ts` exige para el resto de esa pantalla, y el seed
-   * se lo da tanto al tótem como a la cuenta personal, así que no bloquea a
-   * nadie que hoy pueda operar el salón. El permiso de módulo NO reemplaza
-   * la prueba de identidad — son ortogonales: `Salones:Operar` decide quién
-   * puede pisar la pantalla, `resolver` decide de qué garzón puede hablar
-   * (cuenta vinculada o PIN). Se manda `u.id` (quién llamó) como el dato que
-   * `resolver` necesita para las dos vías: si el garzón está vinculado a una
-   * cuenta, esa cuenta TIENE que ser `u.id` (prueba fuerte); si no, la
-   * identidad se prueba con el PIN y `u.id` solo queda como el hecho crudo
-   * de qué cuenta lo tecleó — casi siempre la del tótem, no la de un garzón
-   * sin cuenta propia.
+   * El garzón resuelve la SUYA. Ojo: NO lleva `Cajas:Actualizar` a propósito —
+   * el garzón no tiene permisos de caja. Sí lleva `Salones:Operar` (revisión
+   * independiente: sin ningún guard, cualquier token válido del tenant llegaba
+   * al handler): es el mismo piso que `salones.controller.ts` exige para el
+   * resto de esa pantalla, y el seed se lo da tanto al tótem como a la cuenta
+   * personal, así que no bloquea a nadie que hoy pueda operar el salón. El
+   * permiso de módulo NO reemplaza la prueba de identidad — son ortogonales:
+   * `Salones:Operar` decide quién puede pisar la pantalla, `resolver` decide de
+   * qué garzón puede hablar (cuenta vinculada o PIN). Se manda `u.id` (quién
+   * llamó) como el dato que `resolver` necesita para las dos vías: si el garzón
+   * está vinculado a una cuenta, esa cuenta TIENE que ser `u.id` (prueba
+   * fuerte); si no, la identidad se prueba con el PIN y `u.id` solo queda como
+   * el hecho crudo de qué cuenta lo tecleó — casi siempre la del tótem, no la
+   * de un garzón sin cuenta propia.
    */
   @Post('testigos/:testigoId/resolver')
   @RequiresPermiso('Salones', 'Operar')
@@ -408,18 +407,16 @@ export class CajaController {
 
   /**
    * Lo que el garzón ve al entrar a su pantalla (`/salones`). `Salones:Operar`
-   * (mismo motivo que `resolverTestigo` arriba — CRITICAL de la ronda 3: sin
-   * guard exponía montos contados de cualquier caja a cualquier usuario del
-   * tenant).
+   * (mismo motivo que `resolverTestigo` arriba: sin guard exponía montos
+   * contados de cualquier caja a cualquier usuario del tenant).
    *
-   * POST con `CredencialGarzonOpcionalDto` en el body, no GET con `garzonId`
-   * de ruta (revisión independiente, ronda 4 — CRITICAL: la cuenta del
-   * tótem, que SÍ tiene `Salones:Operar`, podía pedir las pendientes de
-   * CUALQUIER `garzonId` enumerado del selector del salón). Mismo patrón que
+   * POST con `CredencialGarzonOpcionalDto` en el body, no GET con `garzonId` de
+   * ruta (revisión independiente: la cuenta del tótem, que SÍ tiene
+   * `Salones:Operar`, podía pedir las pendientes de CUALQUIER `garzonId`
+   * enumerado del selector del salón). Mismo patrón que
    * `sesiones-garzon.controller.ts` → `activa`: sin vínculo personal, el
-   * service EXIGE `garzonId` + PIN verificado por `bcrypt.compare` — la
-   * misma pantalla de siempre (elegir nombre, PIN, ver lo tuyo), no un paso
-   * nuevo.
+   * service EXIGE `garzonId` + PIN verificado por `bcrypt.compare` — la misma
+   * pantalla de siempre (elegir nombre, PIN, ver lo tuyo), no un paso nuevo.
    */
   @Post('testigos/pendientes')
   @RequiresPermiso('Salones', 'Operar')

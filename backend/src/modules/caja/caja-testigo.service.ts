@@ -101,12 +101,12 @@ export class CajaTestigoService {
    * (`garzones.service.ts` → `asegurarMostrador`, `pinHash: '!'`).
    *
    * Resuelve TODAS las sesiones antes de escribir ninguna fila (revisión
-   * independiente, ronda 3): validar y guardar en el mismo paso dejaba
-   * comprometidas las filas de los garzones anteriores de la lista cuando
-   * uno posterior no tenía sesión —`[A, B]` con B sin sesión commiteaba A
-   * igual, devolvía 400, y un reintento de la MISMA lista fallaba en A por
-   * el 23505 de abajo, ocultando el error real—. Con la validación completa
-   * primero, un pedido inválido no escribe nada.
+   * independiente): validar y guardar en el mismo paso dejaba comprometidas las
+   * filas de los garzones anteriores de la lista cuando uno posterior no tenía
+   * sesión —`[A, B]` con B sin sesión commiteaba A igual, devolvía 400, y un
+   * reintento de la MISMA lista fallaba en A por el 23505 de abajo, ocultando
+   * el error real—. Con la validación completa primero, un pedido inválido no
+   * escribe nada.
    *
    * La escritura sigue siendo una fila por `save`, no un lote: eso es
    * distinto —un 23505 legítimo (el garzón YA tiene una fila viva) es un
@@ -231,11 +231,11 @@ export class CajaTestigoService {
    * de atrás del cierre ciego (`arqueo-ciego`): el garzón vería el número
    * antes que el propio cajero, si el tenant tiene el modo ciego activo.
    *
-   * `credencial` en vez de un `garzonId` de ruta (revisión independiente,
-   * ronda 4 — C2 seguía abierto: `miVinculo` devuelve `null` tanto para "sin
-   * vínculo" como para "tótem", así que la cuenta del tótem —la que de
-   * hecho usa esta pantalla— podía pedir las pendientes de CUALQUIER
-   * `garzonId` enumerado del selector del salón, y `miVinculo` es
+   * `credencial` en vez de un `garzonId` de ruta (revisión independiente —el
+   * guard de `Salones:Operar` no cerraba el caso—: `miVinculo` devuelve `null`
+   * tanto para "sin vínculo" como para "tótem", así que la cuenta del tótem
+   * —la que de hecho usa esta pantalla— podía pedir las pendientes de
+   * CUALQUIER `garzonId` enumerado del selector del salón, y `miVinculo` es
    * "conveniencia de UI, no un control" por su propio docblock). Mismo
    * patrón que `SesionesGarzonService.activaPropia` para la lectura
    * equivalente: `GarzonesService.resolverGarzonActuante(tenantId,
@@ -296,15 +296,14 @@ export class CajaTestigoService {
    *
    * - **Vía cuenta** (prueba fuerte): si `garzones.usuario_id` está seteado
    *   Y esa cuenta NO es un tótem (`esVinculacionValida` — revisión
-   *   independiente, ronda 4: mirar solo `usuario_id` aceptaba una firma
-   *   SIN PIN desde un dispositivo compartido si alguien vinculaba un
-   *   garzón a la cuenta del tótem por error, y la congelaba como
-   *   `via_firma:'cuenta'` — prueba fuerte siendo la más débil posible;
-   *   `garzones.service.ts` ya trata `es_totem` como override duro en todo
-   *   el resto del sistema, esto se alinea), la resolución EXIGE que
-   *   `usuarioId` (el JWT que llama) sea esa cuenta. La vía PIN queda
-   *   rechazada para él a propósito — ni se mira `dto.pin`—: si un garzón
-   *   vinculado pudiera igual resolver por PIN desde el tótem, la vía
+   *   independiente: mirar solo `usuario_id` aceptaba una firma SIN PIN desde
+   *   un dispositivo compartido si alguien vinculaba un garzón a la cuenta del
+   *   tótem por error, y la congelaba como `via_firma:'cuenta'` — prueba fuerte
+   *   siendo la más débil posible; `garzones.service.ts` ya trata `es_totem`
+   *   como override duro en todo el resto del sistema, esto se alinea), la
+   *   resolución EXIGE que `usuarioId` (el JWT que llama) sea esa cuenta. La
+   *   vía PIN queda rechazada para él a propósito — ni se mira `dto.pin`—: si
+   *   un garzón vinculado pudiera igual resolver por PIN desde el tótem, la vía
    *   fuerte se esquivaría y vincular la cuenta no probaría nada.
    * - **Vía PIN** (identifica, no prueba cuenta): si no está vinculado (o el
    *   vínculo no cuenta por ser un tótem), sigue como antes — reusa
@@ -418,11 +417,11 @@ export class CajaTestigoService {
   /**
    * ¿Alguien dio fe de esta caja? Lo usa `CajaService.cerrar` para exigir
    * comentario obligatorio cuando nadie firmó. Recibe el `manager` de esa
-   * transacción y no `this.testigoRepo` a propósito (revisión independiente,
-   * ronda 3): `cerrar` retiene un `FOR UPDATE` sobre `cajas` mientras corre, y
-   * un `count()` por el repo inyectado pediría una conexión NUEVA del pool en
-   * el medio — el mismo patrón que `SesionesGarzonService.contarAbiertas` ya
-   * tuvo que resolver así (ver su docblock).
+   * transacción y no `this.testigoRepo` a propósito (revisión independiente):
+   * `cerrar` retiene un `FOR UPDATE` sobre `cajas` mientras corre, y un
+   * `count()` por el repo inyectado pediría una conexión NUEVA del pool en el
+   * medio — el mismo patrón que `SesionesGarzonService.contarAbiertas` ya tuvo
+   * que resolver así (ver su docblock).
    * `cancelarPendientes`/`caducarPorSesion`, sus hermanas, ya reciben
    * `manager`; esta se alinea.
    */
@@ -438,9 +437,9 @@ export class CajaTestigoService {
   }
 
   /**
-   * ¿`garzon.usuarioId` prueba de verdad al garzón, o es una vinculación que
-   * no cuenta? (revisión independiente, ronda 4). Dos motivos por los que
-   * `usuario_id` seteado NO alcanza:
+   * ¿`garzon.usuarioId` prueba de verdad al garzón, o es una vinculación que no
+   * cuenta? (revisión independiente). Dos motivos por los que `usuario_id`
+   * seteado NO alcanza:
    *
    * 1. Esa cuenta está marcada `es_totem` — el override duro que el resto
    *    del sistema ya respeta (`garzonPersonalDe`, `resolverGarzonActuante`
