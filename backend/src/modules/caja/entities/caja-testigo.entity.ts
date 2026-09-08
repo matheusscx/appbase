@@ -30,13 +30,13 @@ export type ViaFirma = 'cuenta' | 'pin';
  * insertan y se resuelven una vez, nunca se editan ni se borran. El soft delete
  * está por convención del repo; ninguna operación de esta feature lo usa.
  *
- * `startup-pos.sql` es documentación de referencia — no lo ejecuta nadie
- * (ver docblock de `test/esquema.e2e-spec.ts`). El esquema real de cualquier
+ * `startup-pos.sql` es documentación de referencia — no lo ejecuta nadie (ver
+ * docblock de `test/esquema.e2e-spec.ts`). El esquema real de cualquier
  * ambiente (dev, CI) lo genera `synchronize` a partir de ESTA entity, así que
  * todo índice o constraint que tenga que existir de verdad va acá, no solo en
  * el `.sql`. `idx_caja_testigo_caja` e `idx_caja_testigo_pendiente` estaban
- * solo en el `.sql` y por eso nunca se creaban — la Task 3 los necesita para
- * la consulta "¿tengo algo pendiente?" del garzón.
+ * solo en el `.sql` y por eso nunca se creaban — los necesita la consulta
+ * "¿tengo algo pendiente?" del garzón.
  */
 @Entity('caja_testigo')
 // Solo bloquea estados VIVOS ('pendiente', 'firmada'): no se puede tener dos

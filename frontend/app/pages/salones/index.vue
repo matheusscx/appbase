@@ -397,11 +397,12 @@ function onPinConfirmado(garzonId: string, pin: string, nombre: string) {
 // siguiente. Por eso no depende del orden de esas dos líneas del componente.
 //
 // `pinAction` NO se toca acá a propósito: anularlo cambiaría la cancelación de
-// los otros cinco flujos que usan este teclado —tocar afuera con `identificar()`
-// en vuelo descartaría la acción en silencio—, y eso está fuera de esta tarea.
+// los otros seis flujos que usan este teclado (`solicitarPin` tiene siete
+// llamadores en este archivo): tocar afuera con la verificación del PIN en
+// vuelo descartaría la acción en silencio.
 // El precio, en esa misma ventana: la oferta reaparece y un instante después la
 // transferencia se ejecuta igual. Converge bien (el cierre lo hace el propio
-// bucle) y es la semántica que ya tenían los otros cinco.
+// bucle) y es la semántica que ya tenían los otros seis.
 watch(pinModalOpen, (abierto) => {
   if (abierto) return
   const cancelado = pinCancelado

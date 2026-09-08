@@ -8,11 +8,12 @@ import {
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
-// ⛔ Deliberadamente SIN `ubicacionId`, a diferencia de `AjusteStockDto` (Tarea
-// 12 del frente "bodegas y traslados"). El costo es un promedio ponderado por
-// PRODUCTO para todo el tenant (decisión del owner: `docs/features/bodegas-y-traslados.md`,
-// «Por qué el costo no se parte por ubicación (decisión 3)») — no hay un
-// costo por lugar. Pedirle una ubicación al ajuste de costo sugeriría que sí.
+// ⛔ Deliberadamente SIN `ubicacionId`, a diferencia de `AjusteStockDto`, que
+// sí lo pide desde el frente de bodegas y traslados. El costo es un promedio
+// ponderado por PRODUCTO para todo el tenant (decisión del owner:
+// `docs/features/bodegas-y-traslados.md`, «Por qué el costo no se parte por
+// ubicación (decisión 3)») — no hay un costo por lugar. Pedirle una ubicación
+// al ajuste de costo sugeriría que sí.
 export class AjusteCostoDto {
   @IsUUID()
   itemId: string;

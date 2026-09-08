@@ -3219,8 +3219,8 @@ export class VentasService {
         : { total: '0.0000', porPorcion: [] },
       // Sin esto el desglose congelado no se puede ORDENAR como se aplicó: el
       // orden de los pasos es del tenant y editable. `null` en las ventas
-      // anteriores al congelado; las notas de crédito congelan la suya
-      // propia —heredada de la venta que corrigen— desde esta tarea.
+      // anteriores al congelado; las notas de crédito congelan la suya propia,
+      // heredada de la venta que corrigen.
       configCalculo: v.config_calculo,
       comentario: v.comentario,
       fecha: v.fecha,

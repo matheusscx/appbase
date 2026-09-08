@@ -521,11 +521,12 @@ export class CalculoPreciosService {
   /**
    * El instante local con el que cada línea mide la ventana de una promo.
    *
-   * **Es POR LÍNEA y sale de la BD, jamás del body** (decisión 4 del owner):
-   * lo que vale es cuándo se PIDIÓ el producto, no cuándo se cobra la mesa. Un
-   * happy hour de 18 a 20 tiene que seguir aplicando a la cerveza pedida a las
-   * 19:00 aunque la cuenta se cierre a las 23:00 — y no puede aplicar a la que
-   * se pidió a las 21:00 en esa misma cuenta. Aceptar el instante del cliente
+   * **Es POR LÍNEA y sale de la BD, jamás del body** (decisión 4 del owner en
+   * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`): lo que
+   * vale es cuándo se PIDIÓ el producto, no cuándo se cobra la mesa. Un happy
+   * hour de 18 a 20 tiene que seguir aplicando a la cerveza pedida a las 19:00
+   * aunque la cuenta se cierre a las 23:00 — y no puede aplicar a la que se
+   * pidió a las 21:00 en esa misma cuenta. Aceptar el instante del cliente
    * sería la forma de hacer que cualquier promo aplique siempre.
    *
    * Sin `cuentaId` no hay historia que leer: la venta se está armando ahora y

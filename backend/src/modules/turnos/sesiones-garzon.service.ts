@@ -13,9 +13,9 @@ import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { TurnosService } from './turnos.service';
 // `CajaTestigoService` vive en `CajaModule`, que a su vez importa
-// `TurnosModule` (para `SesionesGarzonService`/`GarzonesService`, Task 2/3):
-// sin `forwardRef` acá y en `turnos.module.ts`/`caja.module.ts` los dos
-// módulos quedarían esperándose entre sí al arrancar Nest.
+// `TurnosModule` (para `SesionesGarzonService`/`GarzonesService`): sin
+// `forwardRef` acá y en `turnos.module.ts`/`caja.module.ts` los dos módulos
+// quedarían esperándose entre sí al arrancar Nest.
 import { CajaTestigoService } from '../caja/caja-testigo.service';
 import {
   EstadoSesionGarzon,

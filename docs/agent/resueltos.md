@@ -23,6 +23,121 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las tres formas que el barrido de citas no cubría (cerradas 2026-09-08)
+
+Sale de [`pendientes.md` § 1](pendientes.md), donde la abrió el commit anterior (`79874a06`)
+al declarar explícitamente qué formas **no** había barrido. Es la misma conducta de la sección
+de abajo, escrita como el barrido en español no la ve. **Dos de las tres tienen componente
+inglés** —`Task N`, y el `esta task` que se cuela en la tercera—; la que no lo tiene es la
+decisión citada en prosa. Y la tercera se sale del molde de la conducta original: no es una
+cita a otro documento **sin nombrarlo**, es una cita a una unidad de trabajo que **no tiene
+documento** —*"antes de esta tarea"*, *"el brief"*—, así que su arreglo no es nombrar nada,
+es decir qué cambió.
+
+La columna **Antes** está medida sobre `79874a06` y la **Después** sobre el árbol de este
+commit, las dos con los comandos de abajo tal como están —sin exclusiones; el
+`backend/test/tmp-pool.jsonl` que la entrada anterior excluía entra en los tres greps y aporta
+cero—:
+
+| Forma | Antes | Después |
+|---|---|---|
+| `Task N` en inglés | 67 líneas, 31 archivos | 0 |
+| `Decisión N` / `Regla N` / `paso N` de "la spec" | 7 líneas, 6 archivos | 2, las dos ya conformes |
+| `esta tarea` / `esta task` / `el brief` | 47 líneas, 34 archivos | 6, ninguna es una cita rota |
+
+Reproducir (los tres necesitan `-E`; el `\b` del primero funciona igual en el `grep` de macOS
+y en el de GNU. Si en vez de `grep` se usa `git grep` contra una revisión, ahí sí hace falta
+`-P`: su `-E` no entiende `\b`):
+
+```bash
+grep -rnE '\bTasks? *[0-9]' backend/src backend/test frontend/app
+grep -rnE '(Decisión|Regla|decisión|regla|paso|item) [0-9A-Za-z]+ de[l]? (la )?(spec|plan|brief|diseño)' backend/src backend/test frontend/app
+grep -rniE '(esta|esa|la) tarea|(esta|esa|la) task|del brief|el brief' backend/src backend/test frontend/app
+```
+
+Lo que devuelven hoy **no es residuo, y conviene saberlo antes de contarlo**: las dos de la
+segunda fila nombran su documento —una en el renglón siguiente
+(`cantidad-presentacion.util.ts`, que además dejó de partir la ruta en dos) y otra en la
+cabecera del archivo—. De las seis de la tercera, **cinco son de
+`reserva-stock-mesa.e2e-spec.ts`** —la excepción escrita en
+[`CONVENTIONS.md`](../CONVENTIONS.md): rotula sus propios `describe` y nombra plan y spec en su
+cabecera, y el `-i` las trae porque dicen *"la Tarea 4"*— y la sexta es *"la tarea es no cerrar
+en falso"* en `orden-locks-desfases.e2e-spec.ts`, la palabra en su sentido corriente.
+📌 La entrada del backlog publicaba **26**, que es el mismo grep en español descontando esas
+cinco líneas — y lo declaraba. Acá va el número sin exclusión, que es lo que el comando
+devuelve si se lo copia y se lo corre; la exclusión se explica en la prosa, no se descuenta
+del total.
+
+**El arreglo, por forma.** Una `Task N` que solo fecha un cambio pierde el número y queda con
+lo que cambió (*"antes de que el cierre pasara a hacerse en transacción"*, no *"antes de la
+Task 4"*): lo primero no caduca. Una `Decisión N` cuyo documento vive gana la ruta: **tres**
+citas de promociones apuntan ahora a `2026-08-27-motor-promociones-design.md`
+(`calculo-precios.service.ts`, `promociones.evaluator.ts`, `promociones.service.ts`) y la de la
+nota de crédito a `2026-09-04-nota-credito-descompone-su-monto-design.md`. Las otras dos de esa
+familia perdieron el número sin ganar ruta, porque el texto que las rodea ya dice cuál es la
+decisión: un comentario de una línea y el título de un `it(...)`. Y `papelera.e2e-spec.ts`,
+que rotulaba sus seis bloques con `Task 2`…`Task 6b` y los cruzaba entre sí, pasó a nombrarlos
+por lo que son (*"la familia `softDelete()`"*, *"causas de merma"*): es el mismo caso que
+`reserva-stock-mesa`, pero sin la cabecera que lo justifica.
+
+⚠️ **Tres cosas aparecieron barriendo, ninguna sale de un grep del español.**
+
+- Una **`Tarea 12` partida por el salto de línea** (`ajuste-costo.dto.ts`): `Tarea` cerraba el
+  renglón y `12` abría el siguiente. El barrido anterior no podía verla, y ningún grep de una
+  línea puede. El censo que sí las ve es multilínea —hay que recorrer los archivos con Perl,
+  no con `grep`— y el patrón es
+  `(Tareas?|Tasks?|[Dd]ecisi[óo]n|[Rr]egla|§)\s*\n\s*(//|\*)?\s*[0-9]`, así:
+
+  ```bash
+  git ls-files -z | xargs -0 perl -Mutf8 -CSD -0777 -ne \
+    'while (/(?:Tareas?|Tasks?|[Dd]ecisi[óo]n|[Rr]egla|§)\s*\n\s*(?:\/\/|\*|)\s*[0-9]+/g) {
+       $l = 1 + substr($_,0,$-[0]) =~ tr/\n//; print "$ARGV:$l\n" }'
+  ```
+
+  ⚠️ **Los dos flags de UTF-8 no son decoración y `regla` tampoco**: sin `-Mutf8 -CSD`, el
+  `[óo]` del patrón se compara byte a byte y **`decisión` no matchea nunca**; y sin `regla` en
+  la alternancia el censo no encuentra el caso que este párrafo dice haber encontrado. Las dos
+  versiones anteriores de este comando tenían uno de esos dos agujeros, y las dos devolvieron
+  un número que parecía completo. Con el comando de arriba: **cinco** en `79874a06`, **dos**
+  ahora. Los dos que quedan son benignos —`mermas.service.ts:177` nombra su spec cuatro líneas
+  más abajo, y el `## Decision` de [ADR-005](../adr/005-pais-moneda-y-moneda-oficial.md) es un
+  heading seguido de una lista numerada—; los tres que salieron son la `Tarea 12` de
+  `ajuste-costo.dto.ts` —que perdió el número: el documento ya lo nombraba dos renglones más
+  abajo—, y la `regla 2` de este mismo backlog y la `decisión 4` de
+  [`motor-promociones.md`](../features/motor-promociones.md), que sí ganaron su ruta acá.
+- Cuatro citas a **«Ronda de fixes N»** de un informe de tarea que no está en el repo
+  (`papelera.e2e-spec.ts`). Perdieron la ronda y quedaron con el hecho (*"la primera versión de
+  este bloque decía que…"*).
+- Dos **punteros a documentos que no existen**: `task-9-report.md` de promociones y *"el
+  reporte de la task"* de papelera. Los dos borrados. Al abrir el primero se cayó además el
+  bloque que lo citaba: decía que `promociones.e2e-spec.ts` **nunca se había corrido contra
+  Postgres real**, y hoy corre en cada gate y en cada push (`testRegex: '.e2e-spec.ts$'`).
+  ⚠️ **Esa afirmación tenía un gemelo**, y lo levantó la revisión:
+  [`motor-promociones.md`](../features/motor-promociones.md) la repetía en su `Status` y otra
+  vez al final, contra lo que [`ESTADO.md`](../ESTADO.md) registra desde el 2026-08-27
+  —verificado contra el stack, con gate, `--verificar`, mutantes y smoke—. Corregidas las dos:
+  el puntero nuevo del spec manda justamente a ese documento.
+
+📌 **Y tres afirmaciones eran falsas sobre el código, no solo huérfanas** —en cinco
+comentarios: la primera está en tres sitios, dos de ellos en el mismo archivo—; se vieron
+porque había que editar esa línea igual:
+
+- *"el motor todavía no cuantiza con este valor"* (3 sitios, en `calculo-precios.service.spec.ts`
+  y `ventas.service.spec.ts`): los escribió `9dd22841`, el commit donde la escala **llegaba** al
+  motor; el frente siguió y `cuantizar()` la usa. Quedaron diciendo qué es el 4.
+- *"la aplicación del monto es Task 7"*: la hace el motor puro (`calcularVenta`), que es
+  justamente sobre lo que ese bloque espía.
+- *"aún no existe el endpoint de carga"* (`recuentos.e2e-spec.ts`): existe
+  `PATCH /recuentos/:id/lineas/:lineaId`. El spec sigue cargando por SQL directo — eso quedó
+  anotado en [`pendientes.md`](pendientes.md), no se tocó acá.
+
+⛔ **Lo que este cierre NO cubre.** Las citas a **artefactos de revisión** —`hallazgo N` (22
+líneas) y `ronda N` (20)— son la misma forma con otra fuente: números de un informe que nunca
+vivió en el repo. Son un frente propio y no un residuo de éste, así que van como entrada en
+[`pendientes.md` § 1](pendientes.md), con lo medido: 30 de las 42 nombran la revisión de la que
+salieron, y de las 12 que no, tres ni siquiera son citas a una revisión — las huérfanas de
+verdad son unas nueve.
+
 ## Las dos de citas huérfanas (cerradas 2026-09-08)
 
 Salen de [`pendientes.md` § 1](pendientes.md). Las abrió el commit anterior (`4f758b06`) al
@@ -34,13 +149,15 @@ La regla que salió de acá vive en [`CONVENTIONS.md`](../CONVENTIONS.md), «Cit
 desde el código», que es lo único durable de este cierre: el barrido se hace una vez, la
 regla evita el próximo.
 
-⛔ **Lo que este cierre NO cubre, y conviene leerlo antes de creerlo completo.** Se cerraron dos
-formas: la cita `§ N` sin documento y la `Tarea N` (en español) del plan de bodegas. La misma
-conducta tiene al menos tres formas más, todas medidas y anotadas en
-[`pendientes.md` § 1](pendientes.md): **`Task N` en inglés** (67 líneas, ninguna de este
-frente), **`Decisión N` / `Regla N` / `paso N` de "la spec"** escrito en prosa (7 líneas), y la
-autorreferencia **"antes de esta tarea"** (26). Ninguna la encontró un grep: las encontró la
-revisión independiente, leyendo.
+⛔ **Lo que este cierre no cubrió**, y conviene leerlo antes de creerlo completo. Se cerraron
+dos formas: la cita `§ N` sin documento y la `Tarea N` (en español) del plan de bodegas. La
+misma conducta tenía al menos tres formas más: **`Task N` en inglés** (67 líneas, ninguna de
+este frente), **`Decisión N` / `Regla N` / `paso N` de "la spec"** escrito en prosa (7 líneas),
+y la autorreferencia **"antes de esta tarea"** (la entrada decía 26; el grep en español da 31
+sin exclusiones, y 47 sumando el inglés `esta task`, que es lo que mide la tabla de
+arriba). Ninguna la encontró un grep: las
+encontró la revisión independiente, leyendo. **Las tres se cerraron en el commit siguiente, el
+mismo día** — el detalle está arriba, en «Las tres formas que el barrido de citas no cubría».
 
 ### Las `§ N` sin documento: 37 citas, y no una spec sino siete
 

@@ -7349,7 +7349,9 @@ describe('ItemsService', () => {
 
     it('listarDesfases NO incluye el combo mientras la receta que contiene sigue sin aplicarse', async () => {
       // La carne subió: la Hamburguesa propone 1350, pero su CACHEADO sigue en
-      // 1200, así que la Σ del combo no se movió. Es la Decisión 1 del spec.
+      // 1200, así que la Σ del combo no se movió: el costo propuesto de un
+      // combo suma los costos CACHEADOS de sus componentes
+      // (`docs/features/simulador-impacto-costos.md`).
       mockComboConComponentes({
         costoCacheado: '1700.0000',
         omitido: null,

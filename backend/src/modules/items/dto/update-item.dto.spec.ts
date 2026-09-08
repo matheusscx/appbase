@@ -6,13 +6,13 @@ import { CreateItemDto } from './create-item.dto';
 
 /**
  * `clasificacionTributaria` usaba `@IsOptional()` en los dos DTOs, que saltea
- * TODOS los validadores cuando el valor es `null` explícito (no solo cuando
- * la propiedad falta). Antes de que la columna se volviera nullable (Task 3
- * del plan de IVA derivado), un `null` lo frenaba el `NOT NULL` de Postgres
- * con un 500. Con la columna nullable, ese mismo `null` pasa de largo el
- * DTO y el service lo persiste (o lo pisa con `?? 'afecto'` en `create()`,
- * que es una segunda barrera, no la principal — ver el comentario en
- * `items.service.ts`). `@ValidateIf` (mismo patrón que `costo`/`stock` en
+ * TODOS los validadores cuando el valor es `null` explícito (no solo cuando la
+ * propiedad falta). Antes de que la columna se volviera nullable (frente del
+ * IVA derivado de la clasificación, ADR-018), un `null` lo frenaba el `NOT
+ * NULL` de Postgres con un 500. Con la columna nullable, ese mismo `null` pasa
+ * de largo el DTO y el service lo persiste (o lo pisa con `?? 'afecto'` en
+ * `create()`, que es una segunda barrera, no la principal — ver el comentario
+ * en `items.service.ts`). `@ValidateIf` (mismo patrón que `costo`/`stock` en
  * `UpdateItemDto`) solo saltea cuando la propiedad falta; un `null` explícito
  * sigue cayendo en `@IsIn`.
  *

@@ -431,9 +431,10 @@ export class SalonesService {
    * quedaron obsoletas el mismo día: el esquema se uniformó y `items` perdió
    * su cast, que con el tipo nuevo pasó a ser el bug en vez del arreglo.)
    *
-   * Una mesa borrada ANTES que el salón (otro motivo, otro `eliminado_el`)
-   * NO matchea esta comparación y sigue borrada — es el "acotamiento por
-   * timestamp" que motiva esta task.
+   * Una mesa borrada ANTES que el salón (otro motivo, otro `eliminado_el`) NO
+   * matchea esta comparación y sigue borrada — es el "acotamiento por
+   * timestamp" del que depende restaurar el colateral
+   * (`docs/features/papelera.md`).
    */
   async restaurarSalon(tenantId: string, id: string): Promise<Salon> {
     const rows = unwrap<{ salon_id: string }>(

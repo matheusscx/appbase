@@ -135,7 +135,8 @@ export class TrasladosService {
 
   /**
    * Mueve mercadería entre dos ubicaciones del tenant en **un solo acto
-   * atómico**: no hay estado "en tránsito" ni recepción (decisión 2 del owner).
+   * atómico**: no hay estado "en tránsito" ni recepción (decisión 2 del owner,
+   * `docs/features/bodegas-y-traslados.md`).
    *
    * El reintento es el de siempre (`MAX_REINTENTOS_DEADLOCK`), y solo vale
    * porque el único llamador es el controller: sin transacción envolvente, un
@@ -478,8 +479,7 @@ export class TrasladosService {
       // La salida FIFO devuelve `loteConsumos`; la salida con lote elegido
       // devuelve `loteId` y la cantidad es la de la línea. Se normaliza acá y
       // no en el chokepoint para no cambiarle el camino de detalle a los otros
-      // llamadores de salida con lote (venta, merma, ajuste), que no son de
-      // esta tarea.
+      // llamadores de salida con lote (venta, merma, ajuste).
       loteConsumos:
         salida.loteConsumos ??
         (salida.loteId

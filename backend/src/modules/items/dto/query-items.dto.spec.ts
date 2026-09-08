@@ -53,8 +53,8 @@ describe('QueryItemsDto', () => {
     expect(await validate(dto)).toHaveLength(0);
     expect(dto.incluirEliminados).toBe(true);
     expect(dto.tipo).toBe('producto');
-    // `search` ya tenía su propio `@Transform` (trim) antes de esta tarea:
-    // confirma que el campo agregado no lo pisó.
+    // `search` ya tenía su propio `@Transform` (trim): confirma que el campo
+    // agregado después no lo pisó.
     expect(dto.search).toBe('smart');
     expect(dto.page).toBe(2);
     expect(dto.pageSize).toBe(10);

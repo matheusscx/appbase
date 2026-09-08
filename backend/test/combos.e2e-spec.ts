@@ -226,7 +226,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: comboId, cantidad: '1' }],
-        // Combo afecto (default): 4000 + 19% IVA = 4760 (Task 1, ADR-018).
+        // Combo afecto (default): 4000 + 19% IVA = 4760 (ADR-018).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4760.0000' }],
       });
 
@@ -342,7 +342,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
             },
           },
         ],
-        // Combo afecto (default): (4300 + 1500) + 19% IVA = 6902 (Task 1, ADR-018).
+        // Combo afecto (default): (4300 + 1500) + 19% IVA = 6902 (ADR-018).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '6902.0000' }],
       });
 
@@ -501,7 +501,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
             },
           },
         ],
-        // Combo afecto (default): (5000 + 1500 + 0) + 19% IVA = 7735 (Task 1, ADR-018).
+        // Combo afecto (default): (5000 + 1500 + 0) + 19% IVA = 7735 (ADR-018).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '7735.0000' }],
       });
 
@@ -627,8 +627,8 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       .send({
         garzonId: BRUNO_ID,
         pin: BRUNO_PIN,
-        // Combo Especial afecto (default): 4300 + 19% IVA = 5117 (Task 1,
-        // ADR-018; carne molida precioExtra 0).
+        // Combo Especial afecto (default): 4300 + 19% IVA = 5117 (ADR-018;
+        // carne molida precioExtra 0).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5117.0000' }],
       });
     expect(resCerrar.status).toBe(201);

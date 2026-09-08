@@ -75,7 +75,7 @@ export class GruposModificadoresService {
    * `onResuelto`, se invoca (p.ej. para persistir) inmediatamente después de
    * resolver cada opción individual, antes de pasar a la siguiente — así el
    * caller puede intercalar validación + persistencia opción por opción.
-   * Reusado por create/update (Task 2).
+   * Reusado por create/update.
    */
   private async validarYResolverOpciones(
     manager: EntityManager,
@@ -161,7 +161,7 @@ export class GruposModificadoresService {
           );
         }
         // Con default de cantidad, exigir y verificar la unidad. Sin default,
-        // la unidad se define en el override por receta (Task 3).
+        // la unidad se define en el override por receta.
         if (op.cantidad != null && op.cantidad !== '') {
           if (!op.unidadCodigo) {
             throw new BadRequestException(
@@ -856,11 +856,11 @@ export class GruposModificadoresService {
 
   /**
    * Aplica en lote el mismo override (cantidad/unidad/precioExtra) a varias
-   * asociaciones item↔grupo del mismo grupo_opcion_id — upsert-preservando
-   * por (item_grupo_id, grupo_opcion_id), análoga a upsertOverridesDeGrupo
-   * (Task 3) pero resolviendo por el lado del grupo. Valida que el grupo
-   * exista, que la opción pertenezca al grupo, y que cada item_grupo_id sea
-   * una asociación viva de ESTE grupo en este tenant.
+   * asociaciones item↔grupo del mismo grupo_opcion_id — upsert-preservando por
+   * (item_grupo_id, grupo_opcion_id), análoga a `upsertOverridesDeGrupo` pero
+   * resolviendo por el lado del grupo. Valida que el grupo exista, que la
+   * opción pertenezca al grupo, y que cada item_grupo_id sea una asociación
+   * viva de ESTE grupo en este tenant.
    */
   async aplicarOverrides(
     tenantId: string,

@@ -21,8 +21,8 @@ export class RecuentoInventarioLinea {
   @Column({ name: 'item_id', type: 'uuid' })
   itemId: string;
 
-  // Congelado al crear la línea: base del delta que se aplica al stock
-  // vigente cuando el recuento se aplica (Task 5), no un valor absoluto.
+  // Congelado al crear la línea: base del delta que se aplica al stock vigente
+  // cuando el recuento se aplica, no un valor absoluto.
   @Column({
     name: 'stock_sistema',
     type: 'numeric',

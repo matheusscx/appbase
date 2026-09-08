@@ -182,45 +182,74 @@ clasificación y lo que se midió mal, en [`resueltos.md`](resueltos.md). La reg
 las dos vive ahora en [`CONVENTIONS.md`](../CONVENTIONS.md), «Citar un documento desde el
 código».
 
-⛔ **Pero la § 1 NO queda vacía**: barrer las citas destapó **tres formas más** de lo mismo, que
-no se habían medido y quedan abajo.
+⛔ **Barrer las citas destapó tres formas más de lo mismo** —`Task N` en inglés, la decisión
+citada en prosa y la autorreferencia *"antes de esta tarea"*—, que se midieron y se cerraron en
+el commit siguiente, también en [`resueltos.md`](resueltos.md). Lo que quedó vivo de esa
+familia es la cita a un **informe de revisión**, abajo.
 
-### Citar una tarea o una decisión sin nombrar el documento — lo que el barrido NO cubrió (2026-09-08)
+### Citar un hallazgo o una ronda de revisión por su número (2026-09-08)
 
-El commit que cerró las citas `§ N` y las `Tarea N` del plan de bodegas
-([`resueltos.md`](resueltos.md)) cerró **dos formas de una misma conducta**, y la conducta tiene
-por lo menos tres más. Las levantó la revisión independiente, no el grep, y están medidas:
+La forma que queda viva de la conducta que cerraron los dos commits de citas
+([`resueltos.md`](resueltos.md)): un comentario que cita **una unidad de un informe de
+revisión** —`hallazgo 7`, `ronda 3`, `C2`— cuando ese informe nunca vivió en el repo. A
+diferencia de las tareas y las secciones, acá **no hay documento que nombrar**: el arreglo es
+decir qué se encontró, no en qué número de la lista estaba.
 
-- [ ] **`Task N` en inglés — 67 líneas.** `grep -rnE '\bTasks? *[0-9]' backend/src backend/test
-  frontend/app` (excluir `tmp-pool.jsonl`, que está gitignoreado). El repo escribe la misma
-  cita en los dos idiomas y **ningún grep en español la ve**. Están repartidas por medio repo
-  —testigo, turnos, promociones, combos, papelera, garzones, grupos de modificadores,
-  recuento, IVA…— y **ninguna es del frente de bodegas**, que es lo único verificado de esa
-  lista: por eso no había forma de toparse con ellas barriendo ese frente. ⚠️ Un `Task N` que
-  nombre su plan en el **mismo bloque** de comentario ya resuelve: hay que clasificar leyendo,
-  no contar coincidencias.
-- [ ] **`Decisión N` / `Regla N` / `paso N` de "la spec" o "el brief" — 7 líneas.**
-  `grep -rnE '(Decisión|Regla|decisión|regla|paso|item) [0-9A-Za-z]+ de[l]? (la )?(spec|plan|brief|diseño)' backend/src backend/test frontend/app`.
-  Es la misma cita que las `§ N`, escrita en prosa en vez de con el símbolo — por eso el barrido
-  no las vio. Dos de las 7 ya nombran su documento en el bloque —y una de esas dos,
-  `cantidad-presentacion.util.ts`, lo hace **partiendo la ruta en dos renglones**, que es lo
-  único que hoy incumple la sub-regla de [`CONVENTIONS.md`](../CONVENTIONS.md); se arregla con
-  esta entrada—; las otras cinco no nombran nada.
-- [ ] **La autorreferencia: "antes de esta tarea", "el paso 2 del brief" — 26 líneas**, más
-  las que ni ese grep ve (*"el reporte"* de `papelera.e2e-spec.ts`). El comando es
-  `grep -rniE '(esta|esa|la) tarea|del brief|el brief' backend/src backend/test frontend/app`,
-  sin contar
-  `reserva-stock-mesa.e2e-spec.ts`, que rotula sus propios `describe`. Acá no hay documento que
-  nombrar: el autor sabía a qué tarea se refería y el lector de hoy no tiene con qué
-  averiguarlo. El arreglo es decir **qué** cambió, que no caduca, en vez de **cuándo** cambió
-  contra una unidad de trabajo que se borra.
+- [ ] **`hallazgo N` — 22 líneas.** `grep -rnE '[Hh]allazgo [A-Z0-9]' backend/src backend/test
+  frontend/app`. Repartidas en **12 archivos**, backend y frontend: seis de ellos juntan 16 de
+  las 22 —`caja-testigo.e2e-spec.ts` con 6, y `stores/caja.ts`, `stores/caja.spec.ts`,
+  `garzones.nuxt.spec.ts`, `traslado-borrado-ubicacion-concurrente.e2e-spec.ts` y
+  `costo-stock-choke-point.invariant.spec.ts` con 2 cada uno—. El reparto sale de
+  `grep -rcE '[Hh]allazgo [A-Z0-9]' … | grep -v ':0'`: no fiarse de una lista escrita a mano.
+- [ ] **`ronda N` — 20 líneas.** `grep -rnE '[Rr]onda [0-9]' backend/src backend/test
+  frontend/app`, en 10 archivos. El más cargado es `caja-testigo.service.ts` con 5;
+  `caja.controller.ts` y `caja-testigo.service.spec.ts` empatan en 3.
+  ⚠️ **Tres del grep no son citas a una revisión**:
+  `escala-moneda.pipe.ts:49` habla de la ronda 1 de un **benchmark**, y
+  `rbac-y-contrasena.e2e-spec.ts:280` y `:307`, de las rondas de un **bucle** del test.
 
-⚠️ **La lección del frente, y por eso las tres entradas van juntas:** el barrido se corrió
-**cinco veces** y cada vuelta apareció una forma nueva de la misma cita —`Tareas 13/14` en
-plural, `tarea 14` en minúscula, `Task 6b` en inglés, `Decisión 1 del spec` en prosa—. Ninguna
-la encontró un grep derivado de la anterior; todas salieron de leer. **Antes de declarar cerrada
-esta familia hay que enumerar las FORMAS, no ampliar el patrón**, y la regla de
-[`CONVENTIONS.md`](../CONVENTIONS.md) está escrita sobre la conducta justamente por eso.
+⚠️ **Son más débiles que muertas, y el frente es más chico de lo que sugiere el 42.** Contando
+con el renglón anterior —porque el comentario se parte y *"revisión independiente,"* suele
+cerrar la línea de arriba del número—, **30 de las 42** nombran la revisión de la que salieron
+y **6** traen además su fecha (*"hallazgo 2, revisión de rama 2026-09-06"*), que es lo que
+ubica el momento — con la ventana ampliada un renglón son 7, porque
+`recuentos.service.ts:605` parte la fecha igual que el caso de abajo. Quedan **12 sin ninguna
+referencia**, y tres de esas doce ni siquiera
+son citas a una revisión (las de arriba): **el trabajo real son unas nueve líneas**. ⚠️ El 12 es un
+techo, no un número exacto: la referencia también puede caer en el renglón **siguiente**
+—`ubicaciones.service.spec.ts:6` dice *"desde el hallazgo 1"* y *"de la revisión de rama"* está
+en la línea de abajo—, y mirando las dos anteriores **y** la siguiente son 11. El orden de
+magnitud es lo que importa: son unas diez, no cuarenta. El comando devuelve las doce:
+
+  ```bash
+  { grep -rnE '[Hh]allazgo [A-Z0-9]' backend/src backend/test frontend/app
+    grep -rnE '[Rr]onda [0-9]'      backend/src backend/test frontend/app; } |
+    awk -F: '{print $1":"$2}' | sort -u |
+    while IFS=: read f l; do sed -n "$((l>2?l-2:1)),${l}p" "$f" |
+      grep -qi 'revisi' || echo "$f:$l"; done
+  ```
+
+⚠️ **Y no hace falta el mismo trabajo en las 42.** Muchas explican el hallazgo y le cuelgan el
+número (`caja-testigo.service.ts:104`: *"Resuelve TODAS las sesiones antes de escribir ninguna
+fila (revisión independiente, ronda 3): validar y guardar en el mismo paso dejaba
+comprometidas…"*): ahí sobra el número y no falta nada. Las caras son las que le hacen **hacer
+trabajo** al número —`caja-testigo.service.spec.ts:454`: *"El test que sostiene la propiedad
+central de la ronda 2"*, donde cuál es esa propiedad solo lo dice un informe que no está en el
+repo—.
+
+📌 **Tres títulos de test citan uno de estos números**, y no cuestan lo mismo:
+`grep -rnE "(it|test|describe)\(.*([Rr]onda [0-9]|[Hh]allazgo [A-Z0-9])" backend/src
+backend/test frontend/app`. En `recuentos.service.spec.ts:981` el número es un **sufijo** de un
+título que ya describe el caso entero, así que alcanza con sacarlo. En
+`caja.controller.spec.ts:605` y `:613` —que no aparecen en las viñetas de arriba, que enumeran
+los archivos más cargados y éste tiene 2— el número **abre** la explicación
+(*"— ronda 3, sin esto cualquier token del tenant llegaba al handler"*): ahí hay que reescribir,
+y son el caso caro.
+
+📌 **Antes de barrer, enumerar las formas.** Es la tercera vez que esta familia se reabre por
+una forma que el grep anterior no veía —plural, minúscula, inglés, cita partida por el salto de
+línea—. Para ésta, las candidatas a mirar además de las dos de arriba son `C2`/`M2` (códigos de
+hallazgo y de mutante), *"el informe"*, *"el reporte"* y *"la revisión dijo"*.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -705,6 +734,18 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   equivalente del lado de `pg`.
 
 ---
+
+### El e2e de recuentos carga los conteos por SQL directo (2026-09-08)
+
+- [ ] `recuentos.e2e-spec.ts` escribe `cantidad_contada` con un `UPDATE` a mano. El comentario
+  que lo justificaba decía *"aún no existe el endpoint de carga"* y era falso: existe
+  `PATCH /recuentos/:id/lineas/:lineaId` (`recuentos.controller.ts`, `Inventario/Crear`). El
+  comentario ya se corrigió; el spec no se tocó porque cambiarlo es reescribir el escenario,
+  no un ajuste de comentario.
+
+⚠️ Vale la sospecha de siempre con un test que monta su escenario por SQL: **el camino de la
+API queda sin ejercitar en ese escenario**. Antes de reescribirlo hay que ver si otro spec ya
+cubre el `PATCH`, y si no, este es el que lo tiene que hacer.
 
 ### Las suites del e2e se pisan entre sí por el estado del seed (2026-08-22)
 
@@ -1344,8 +1385,10 @@ abriendo las superficies, no leyendo la entrada.
   `SUM`", porque no hay ningún `SUM` roto. Es una cuenta futura que va a nacer mal si nadie
   la avisa: el día que se construya un reporte que agregue `costoPerdido`, cualquier
   `SUM`/promedio que simplemente ignore las filas con `costoUnitario: null` va a informar
-  **menos pérdida que la real, sin decirlo** — exactamente lo que el congelado de la regla
-  2 hace posible. **Al construir el reporte:** contar esas filas aparte (cuántas mermas
+  **menos pérdida que la real, sin decirlo** — exactamente lo que hace posible el congelado de
+  la regla 2 de
+  [`2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md).
+  **Al construir el reporte:** contar esas filas aparte (cuántas mermas
   quedaron sin valorizar, no solo omitirlas del total).
 
 - [ ] **Re-tasar una línea ya pedida tiene que re-preciar, no re-validar** (backend, motor

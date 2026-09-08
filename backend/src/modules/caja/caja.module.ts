@@ -23,8 +23,8 @@ import { MonedasModule } from '../monedas/monedas.module';
       CajaTestigo,
     ]),
     MotivosDiferenciaModule,
-    // `forwardRef`: `TurnosModule` importa `CajaModule` de vuelta (Task 4,
-    // `SesionesGarzonService` necesita `CajaTestigoService` para caducar
+    // `forwardRef`: `TurnosModule` importa `CajaModule` de vuelta
+    // (`SesionesGarzonService` necesita `CajaTestigoService` para caducar
     // solicitudes al cerrar una sesión). Sin esto los dos módulos quedan
     // esperándose entre sí al arrancar Nest.
     forwardRef(() => TurnosModule),

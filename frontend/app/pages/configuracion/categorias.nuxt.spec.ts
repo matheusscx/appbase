@@ -1,12 +1,13 @@
 // @vitest-environment nuxt
 //
-// Regresión del bug encontrado en el smoke test de Task 7: `eliminar()` sacaba
-// la fila del array local incondicionalmente (`removeLocal`), incluso con "Ver
-// eliminadas" activo. Resultado: borrar con el toggle prendido hacía
-// desaparecer la fila del todo, justo el caso que el toggle existe para
-// mostrar. El fix (`categorias.vue` → `eliminar()`) recarga desde el backend
-// en vez de remover localmente cuando `verEliminados` está activo — este
-// test prueba el síntoma observable, no la implementación.
+// Regresión del bug encontrado en el smoke test del frontend de la papelera
+// (`docs/features/papelera.md`): `eliminar()` sacaba la fila del array local
+// incondicionalmente (`removeLocal`), incluso con "Ver eliminadas" activo.
+// Resultado: borrar con el toggle prendido hacía desaparecer la fila del todo,
+// justo el caso que el toggle existe para mostrar. El fix (`categorias.vue` →
+// `eliminar()`) recarga desde el backend en vez de remover localmente cuando
+// `verEliminados` está activo — este test prueba el síntoma observable, no la
+// implementación.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Categorias from './categorias.vue'

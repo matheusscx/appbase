@@ -79,7 +79,7 @@ const readOnly = computed(() => !esBorrador.value || !puedeContar.value)
 
 // Sentinel no-vacío: un value:'' en los items de USelectMenu choca con cómo
 // Reka UI trata la cadena vacía como "sin selección" y rompe el Combobox al
-// abrirlo (bug reproducido en smoke test — ver informe de la tarea).
+// abrirlo (bug reproducido en smoke test).
 const SIN_CAUSA = '__sin_causa__'
 
 const motivoOpts = computed<Opt[]>(() =>

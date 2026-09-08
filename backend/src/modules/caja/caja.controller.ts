@@ -432,10 +432,10 @@ export class CajaController {
   }
 
   /**
-   * Estado de las solicitudes de testigo de una caja (Task 6): lo que el
-   * encargado mira mientras espera la firma. `Cajas:Leer` — lectura de
-   * supervisión, igual que `arqueo`/`cajones-estado`. Nunca `esperado` ni
-   * monto: eso lo cubre `arqueo`, esto es solo estado.
+   * Estado de las solicitudes de testigo de una caja: lo que el encargado mira
+   * mientras espera la firma. `Cajas:Leer` — lectura de supervisión, igual que
+   * `arqueo`/`cajones-estado`. Nunca `esperado` ni monto: eso lo cubre
+   * `arqueo`, esto es solo estado.
    */
   @Get(':id/testigos')
   @RequiresPermiso('Cajas', 'Leer')

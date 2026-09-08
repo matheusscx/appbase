@@ -425,7 +425,9 @@ export class ItemsService {
    *
    * Se llama al crear el tenant Y desde la transacción de la nota de crédito:
    * ese segundo llamado no es redundancia, es lo que impide que el webhook de
-   * reembolso (decisión P3 de la spec) pierda un evento ya consumado —la plata
+   * reembolso (decisión P3 de
+   * `docs/superpowers/specs/2026-09-04-nota-credito-descompone-su-monto-design.md`)
+   * pierda un evento ya consumado —la plata
    * ya volvió por el proveedor— por un dato de configuración faltante. Mismo
    * patrón que `GarzonesService.asegurarMostrador`.
    *
@@ -1250,7 +1252,7 @@ export class ItemsService {
         // `stock_ubicacion` no tiene `tenant_id` propio (PK compartida por
         // `item_id`, ya validado como del tenant más arriba). El filtro acá
         // igual, por la misma defensa en profundidad que el resto de las
-        // queries nuevas de esta tarea (`cargarGruposPorItem`,
+        // queries que arman el detalle del ítem (`cargarGruposPorItem`,
         // `combo_componentes`, `receta_ingredientes`): si algún día esta
         // consulta se reusa con un `itemId` sin validar tenant antes, esto es
         // lo único que frena una fuga entre tenants.
@@ -4427,7 +4429,7 @@ export class ItemsService {
    * meter en la función pura el manejo de errores que solo tiene sentido cuando
    * se escribe.
    *
-   * ## Enfoque (la decisión del paso 2 del brief)
+   * ## Enfoque
    *
    * **Se carga en lote y se expande en JS**, no se expande en SQL leyendo el
    * `jsonb` de `personalizacion`. Es la opción que no duplica la lógica de

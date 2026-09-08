@@ -433,12 +433,11 @@ y el barrido de las citas al plan y a la spec borrados. Los dos residuos de ese 
 citas que no decían de qué documento eran— se cerraron el **2026-09-08**, y de ahí salió la
 regla de [`CONVENTIONS.md`](../CONVENTIONS.md), «Citar un documento desde el código». Ese
 barrido destapó **tres formas más** de la misma conducta —`Task N` en inglés, `Decisión N` de
-"la spec" escrito en prosa, y el comentario que dice *"esta tarea"* sin decir cuál—, que
-**quedan anotadas en la § 1 del backlog** y no son exclusivas de este frente. Cierre completo, con
+"la spec" escrito en prosa, y el comentario que dice *"esta tarea"* sin decir cuál—, ninguna
+exclusiva de este frente; se cerraron el mismo día, en el commit siguiente. Cierre completo, con
 lo construido y lo resuelto después: [`agent/resueltos.md`](../agent/resueltos.md).
 
-⚠️ **El código ya no cita ninguna tarea de este frente POR SU NÚMERO** —lo que sigue vivo es la
-autorreferencia sin número (*"antes de esta tarea"*), anotada en el backlog—: el plan se borró
+⚠️ **El código ya no cita ninguna tarea de este frente POR SU NÚMERO**: el plan se borró
 al cerrarlo, así que
 los comentarios nombran el frente —que resuelve a este documento— y no un número que no
 resuelve a nada. Se comprueba con
@@ -446,5 +445,6 @@ resuelve a nada. Se comprueba con
 que **tiene que ignorar mayúsculas y admitir el plural**: el barrido se rehízo porque
 `grep 'Tarea [0-9]'` no ve `Tareas 13/14` ni `tarea 14`. Lo que devuelve hoy es solo
 `reserva-stock-mesa.e2e-spec.ts`, que rotula sus propios `describe`. ⚠️ **Ese grep no cubre la
-conducta entera** —el repo también escribe `Task N` en inglés, aunque ninguna de esas es de este
-frente—: el mapa completo está en [`agent/pendientes.md`](../agent/pendientes.md) § 1.
+conducta entera**: el repo escribe la misma cita en inglés y en prosa, y el mapa de las formas
+—con lo que sigue abierto— está en [`agent/resueltos.md`](../agent/resueltos.md) y en
+[`agent/pendientes.md`](../agent/pendientes.md) § 1.

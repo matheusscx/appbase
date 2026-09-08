@@ -249,8 +249,8 @@ describe('useCajaStore — arqueo / cerrar', () => {
     expect(store.activa).toBeNull()
   })
 
-  // Un admin del tenant puede cerrar la caja de OTRO cajero (cierre forzado,
-  // Task 6) desde /cajas: eso no puede borrarle su propia sesión de /mi-caja.
+  // Un admin del tenant puede cerrar la caja de OTRO cajero (cierre forzado)
+  // desde /cajas: eso no puede borrarle su propia sesión de /mi-caja.
   it('cerrar NO toca activa/resumenTurno cuando la caja cerrada NO es la propia (cierre forzado ajeno)', async () => {
     mockApiFetch.mockResolvedValueOnce({ caja: { id: 'caja-ajena' }, arqueo: [] })
     const store = useCajaStore()

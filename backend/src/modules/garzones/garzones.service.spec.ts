@@ -40,7 +40,7 @@ type Repo = {
   softDelete: jest.Mock;
   createQueryBuilder: jest.Mock;
   // `resolverGarzonActuante`/`assertVinculable` consultan por SQL crudo a
-  // través del manager del repo — eso no cambió con la Task 2.
+  // través del manager del repo.
   manager: { query: jest.Mock };
 };
 

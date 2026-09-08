@@ -43,8 +43,9 @@ así que el número solo es ambiguo incluso mientras el documento existe.
   Si la ruta no entra en la línea, el nombre del archivo solo (`` `2026-09-01-…-design.md` ``)
   alcanza **cuando ese basename no se repite** — ⚠️ los de `docs/superpowers/plans/` y
   `docs/agent/investigaciones/` colisionan al menos dos veces (mismo frente, dos documentos),
-  así que ahí va la ruta sí o sí. **No partir la ruta en dos renglones**: la vuelve
-  ingrepeable.
+  así que ahí va la ruta sí o sí. **No partir una cita en dos renglones** —ni la ruta, ni el
+  `Tarea`/`Task`/`§` separado de su número—: la vuelve ingrepeable, y el barrido que venga
+  después la deja viva creyendo que no está.
 - **Alcanza con nombrarlo una vez por bloque de comentario.** Dentro del mismo bloque, o del
   docblock de cabecera del archivo, después se puede decir "esa spec".
 - **Una tarea de un plan no se cita desde otro archivo** —ni `Tarea N` ni `Task N`: el repo
@@ -58,6 +59,13 @@ así que el número solo es ambiguo incluso mientras el documento existe.
   sus `describe` con las tareas de su plan y lo nombra en su cabecera, así que sus `Tarea N`
   se refieren a bloques de ese mismo archivo. El día que el plan se borre siguen siendo
   nombres internos, no punteros rotos.
+- **La unidad de trabajo no se cita a sí misma.** *"Antes de esta tarea"*, *"el hallazgo 3"*,
+  *"la ronda 2"*, *"lo que pedía el brief"*: nada de eso resuelve para quien lee el código
+  después, porque el informe de revisión y el brief nunca vivieron en el repo. Va **qué**
+  cambió (*"antes de que el cierre pasara a hacerse en transacción"*), que no caduca, y no
+  **cuándo** contra una unidad de trabajo que se borra. ⚠️ Quedan citas así —`hallazgo N`,
+  `ronda N`—, medidas en [`agent/pendientes.md`](agent/pendientes.md) § 1: la regla vale para
+  lo que se escriba de ahora en adelante.
 - Si el documento se borra, sus citas se repuntan a la doc viva en **el mismo commit** que lo
   borra. Barrerlas después es más caro: hay que clasificar cada una por su contenido, porque
   el número solo no dice de qué documento era.

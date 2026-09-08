@@ -95,8 +95,9 @@ export function resolverUnidadBaseDeItem(item: {
  * presentación. Existe para **el merge de dos líneas del mismo ítem**, donde la
  * suma se hace en canónica y después hay que reescribir lo que el cliente ve.
  *
- * La regla es del diseño de presentación (`docs/superpowers/specs/
- * 2026-07-16-cantidad-unidad-presentacion-carrito-design.md`): se reescribe en
+ * La regla es del diseño de presentación
+ * (`docs/superpowers/specs/2026-07-16-cantidad-unidad-presentacion-carrito-design.md`):
+ * se reescribe en
  * **la unidad que esa línea ya está mostrando**, no en la de lo que entra. Una
  * línea en `g` con 500 que recibe 1 kg queda en **1500 g**, no en "1,5 kg" ni en
  * "500 g" — que es lo que pasaba antes de existir esta función: la canónica

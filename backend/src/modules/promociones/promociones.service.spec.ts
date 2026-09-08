@@ -630,10 +630,10 @@ describe('PromocionesService', () => {
   // ─── DTO: decoradores que un test de service no ejerce ─────────────────────
   //
   // `horaFin`/`diasSemana` se validan con class-validator puro (`@Matches`,
-  // `@Max`), que SÍ corre en unit sin pasar por el `ValidationPipe` de Nest —
-  // a diferencia de `@EsMontoCobrado` (item 11 del brief), que depende de
-  // `EscalaMonedaPipe` y por eso su cobertura real es del e2e (memoria "tests
-  // de DTO no ejercen el pipe").
+  // `@Max`), que SÍ corre en unit sin pasar por el `ValidationPipe` de Nest — a
+  // diferencia de `@EsMontoCobrado`, que depende de `EscalaMonedaPipe` y por
+  // eso su cobertura real es del e2e (memoria "tests de DTO no ejercen el
+  // pipe").
 
   describe('CreatePromocionDto — decoradores', () => {
     it('rechaza horaFin con un formato que no es HH:mm', async () => {

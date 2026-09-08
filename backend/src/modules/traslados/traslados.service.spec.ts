@@ -376,12 +376,12 @@ describe('TrasladosService', () => {
   });
 
   it('lockea UNA fila de item_producto por ítem, ordenada por itemId — no origen→destino', async () => {
-    // ⚠️ Contra el texto original de la tarea, que pedía ordenar pares
-    // `(itemId, ubicacionId)`: el ancla del `FOR UPDATE` es `item_producto`,
-    // que tiene UNA fila por ítem sin importar cuántas ubicaciones toque el
-    // traslado (`docs/patterns/backend.md` §15). Así que lo que hay que fijar
-    // es que se pida una sola vez por ítem y en orden de `item_id`, no que se
-    // pidan dos filas por ítem.
+    // ⚠️ A propósito, y contra la intuición de ordenar pares `(itemId,
+    // ubicacionId)`: el ancla del `FOR UPDATE` es `item_producto`, que tiene
+    // UNA fila por ítem sin importar cuántas ubicaciones toque el traslado
+    // (`docs/patterns/backend.md` §15). Así que lo que hay que fijar es que se
+    // pida una sola vez por ítem y en orden de `item_id`, no que se pidan dos
+    // filas por ítem.
     estado.saldos.set(`${ITEM_A}|${UBIC_LOCAL}`, '50');
     estado.saldos.set(`${ITEM_B}|${UBIC_LOCAL}`, '50');
 

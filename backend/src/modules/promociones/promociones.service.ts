@@ -119,12 +119,13 @@ export class PromocionesService {
    *
    * ⚠️ **Lo que NO se filtra acá: hora, día de semana y canal.** No es un
    * olvido — la ventana horaria se mide contra el instante de CADA LÍNEA
-   * (`LineaPromo.instante`, decisión 4 del owner: vale cuándo se pidió, no
-   * cuándo se cobra), así que una promo de happy hour tiene que llegar al
-   * evaluador aunque ahora sean las 22:00: puede seguir aplicando a la línea
-   * que se pidió a las 19:00. El canal lo descarta `evaluarPromos` de una vez
-   * para toda la venta. Lo único que se filtra en SQL es lo que no depende de
-   * la línea: tenant, borrado, pausa y rango de fechas.
+   * (`LineaPromo.instante`, decisión 4 del owner en
+   * `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`: vale
+   * cuándo se pidió, no cuándo se cobra), así que una promo de happy hour tiene
+   * que llegar al evaluador aunque ahora sean las 22:00: puede seguir aplicando
+   * a la línea que se pidió a las 19:00. El canal lo descarta `evaluarPromos`
+   * de una vez para toda la venta. Lo único que se filtra en SQL es lo que no
+   * depende de la línea: tenant, borrado, pausa y rango de fechas.
    *
    * ⚠️ **`to_char` y no la columna cruda.** `fecha_*` es `date` y `hora_*` es
    * `time`: node-postgres las devuelve como `Date` y como `'HH:MM:SS'`, y el

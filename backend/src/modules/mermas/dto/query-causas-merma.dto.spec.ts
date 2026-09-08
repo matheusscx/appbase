@@ -2,10 +2,11 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryCausasMermaDto } from './query-causas-merma.dto';
 
-// El controller pasaba `soloActivas === 'true'` a mano antes de esta tarea:
-// cualquier string que no fuera exactamente 'true' resultaba en `false`, y
-// el parámetro ausente también. Este spec prueba que moverlo a un DTO con
-// `@Transform` no cambió ese comportamiento — es lo que pidió la revisión.
+// El controller pasaba `soloActivas === 'true'` a mano antes de que existiera
+// este DTO: cualquier string que no fuera exactamente 'true' resultaba en
+// `false`, y el parámetro ausente también. Este spec prueba que moverlo a un
+// DTO con `@Transform` no cambió ese comportamiento — es lo que pidió la
+// revisión.
 describe('QueryCausasMermaDto', () => {
   it('soloActivas=true se parsea como boolean true', async () => {
     const dto = plainToInstance(QueryCausasMermaDto, { soloActivas: 'true' });

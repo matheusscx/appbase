@@ -99,13 +99,12 @@ export class Caja {
   @Column({ default: 'abierta' })
   estado: string; // 'abierta' | 'en_conciliacion' | 'cerrada'
 
-  // Comentario de la APERTURA (`abrir`) — nunca lo toca el cierre. Antes de
-  // Task 4 del plan `testigo-cierre-forzado`, `enviarConteo` (fase 1 del
-  // cierre) pisaba esta misma columna con el comentario del cierre, y el de
-  // apertura se perdía sin dejar rastro (`docs/agent/resueltos.md`, "El
-  // cierre de caja pisaba el comentario de la apertura"). Separado en
-  // `comentarioCierre` para que ninguno de los dos pise al otro: son hechos
-  // de dos momentos distintos.
+  // Comentario de la APERTURA (`abrir`) — nunca lo toca el cierre. Antes de que
+  // el cierre tuviera su propio campo, `enviarConteo` (fase 1 del cierre)
+  // pisaba esta misma columna con el comentario del cierre, y el de apertura se
+  // perdía sin dejar rastro (`docs/agent/resueltos.md`, "El cierre de caja
+  // pisaba el comentario de la apertura"). Separado en `comentarioCierre` para
+  // que ninguno de los dos pise al otro: son hechos de dos momentos distintos.
   @Column({ type: 'varchar', nullable: true })
   comentario: string | null;
 

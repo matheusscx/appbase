@@ -438,10 +438,11 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     expect(bodyMerma.costoPerdido).toBeNull();
     expect(bodyMerma.costoUnitario).toBeNull();
 
-    // Y contra lo persistido, no solo contra lo que el POST dice de sí
-    // mismo (mismo criterio que la Regla 2 de la spec: sin valorizar
-    // "para siempre" vive en el kardex, y GET /mermas deriva costoPerdido
-    // de esa columna — un bug que devolviera null en el POST pero
+    // Y contra lo persistido, no solo contra lo que el POST dice de sí mismo
+    // (mismo criterio que la regla 2 de
+    // `docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md`:
+    // sin valorizar "para siempre" vive en el kardex, y GET /mermas deriva
+    // costoPerdido de esa columna — un bug que devolviera null en el POST pero
     // congelara otra cosa en movimientos_inventario recién se vería acá).
     const resLista = await request(app.getHttpServer())
       .get('/api/mermas')
@@ -525,12 +526,12 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     });
 
     /**
-     * Números que DISCRIMINAN local de bodega a propósito (10 y 20, spec del
-     * brief): si el service ignorara `dto.ubicacionId` y siguiera escribiendo
-     * en el local (el bug que este mismo frente ya tuvo en el recuento — ver
-     * el tapón de `recuentos.service.ts`), este test lo agarra porque local
-     * y bodega arrancan en cantidades DISTINTAS. Con números iguales un
-     * mutante que leyera la ubicación equivocada sobreviviría.
+     * Números que DISCRIMINAN local de bodega a propósito (10 y 20): si el
+     * service ignorara `dto.ubicacionId` y siguiera escribiendo en el local (el
+     * bug que este mismo frente ya tuvo en el recuento — ver el tapón de
+     * `recuentos.service.ts`), este test lo agarra porque local y bodega
+     * arrancan en cantidades DISTINTAS. Con números iguales un mutante que
+     * leyera la ubicación equivocada sobreviviría.
      */
     it('con ubicacionId de una bodega, la merma descuenta AHÍ y el local no se mueve', async () => {
       const resBodega = await request(app.getHttpServer())

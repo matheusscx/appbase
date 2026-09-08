@@ -8,9 +8,9 @@ import { TokensAccesoService } from '../src/modules/auth/tokens-acceso.service';
 import { TipoTokenAcceso } from '../src/modules/auth/entities/token-acceso.entity';
 
 /**
- * SDD `2026-08-14-pin-propio-garzon`, Task 5: el ciclo entero del PIN propio,
- * contra la API real. Lo que ningún unit ve: que las rutas `mi-pin` no las
- * coma `:id` (orden de declaración de Nest), que la tabla
+ * SDD `docs/superpowers/plans/2026-08-14-pin-propio-garzon.md`: el ciclo entero
+ * del PIN propio, contra la API real. Lo que ningún unit ve: que las rutas
+ * `mi-pin` no las coma `:id` (orden de declaración de Nest), que la tabla
  * `garzon_pin_evento` exista de verdad, y que el aislamiento —entre garzones
  * del mismo tenant, y entre tenants para la misma cuenta— lo sostenga el
  * backend y no el frontend.

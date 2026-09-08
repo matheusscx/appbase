@@ -410,8 +410,8 @@ describe('Nota de crédito compuesta (e2e)', () => {
 
       const nc = await leerNC(id);
       const linea = nc.detalles.find((l) => l.itemId === itemRecetaId);
-      // Antes de esta tarea la receta caía al balde de ajuste: la nota decía
-      // "Ajuste" y no el nombre del plato.
+      // Antes de que la nota descompusiera su monto, la receta caía al balde de
+      // ajuste: la nota decía "Ajuste" y no el nombre del plato.
       expect(linea).toBeDefined();
       expect(new Decimal(linea!.totalLinea).toString()).toBe(TOTAL_RECETA);
 
@@ -566,8 +566,8 @@ describe('Nota de crédito compuesta (e2e)', () => {
       expect(suma(nc.detalles, 'totalLinea')).toBe(
         new Decimal(nc.totalFinal).toString(),
       );
-      // La línea dice las DOS cosas: qué volvió —que es lo que la tarea
-      // anterior vino a arreglar— y por qué vale menos que la mercadería.
+      // La línea dice las DOS cosas: qué volvió y por qué vale menos que la
+      // mercadería.
       expect(nc.detalles[0].descripcion).toContain('NC afecto E2E');
       expect(nc.detalles[0].descripcion).toContain('Volvieron abiertas');
       expect(nc.comentario).toBe('Volvieron abiertas');

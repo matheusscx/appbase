@@ -50,7 +50,7 @@ function textoTarjeta(wrapper: Awaited<ReturnType<typeof montar>>, id = 'item-1'
 
 describe('CatalogoGrid — el número que muestra un producto', () => {
   it('muestra lo que queda por pedir, no el saldo de bodega', async () => {
-    // El caso del brief: stock 3, una mesa ya se llevó 2, quedan 1.
+    // El caso de la reserva al pedir: stock 3, una mesa ya se llevó 2, queda 1.
     const wrapper = await montar([producto({ stock: '3.0000', stockDisponible: '1.0000' })])
 
     expect(textoTarjeta(wrapper)).toContain('Disponible: 1')

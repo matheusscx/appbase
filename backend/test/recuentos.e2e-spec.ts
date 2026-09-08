@@ -449,8 +449,8 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     expect(filaCero.cantidadLineas).toBe(2);
     expect(filaCero.diferenciaNeta).toBe('0.0000');
 
-    // 4. Cargar conteos directo en la tabla (aún no existe el endpoint de
-    // carga — lo agrega la Task 4): itemA contado en 15 (+5), itemB en 6 (0).
+    // 4. Cargar conteos directo en la tabla: itemA contado en 15 (+5), itemB
+    // en 6 (0).
     const resDetalle = await request(app.getHttpServer())
       .get(`/api/recuentos/${recuentoId}`)
       .set('Authorization', `Bearer ${token}`);

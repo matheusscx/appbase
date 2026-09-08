@@ -249,12 +249,12 @@ function abrirRestaurarSalon() {
 /**
  * `POST /salones/:id/restaurar` revive el salón y, en la MISMA sentencia, las
  * mesas que ESE borrado se llevó (docs/features/papelera.md → "Colateral
- * acotado" / "Restaurar el padre revive esas filas"). La respuesta solo trae
- * el salón, no las mesas revividas: reconstruir esa comparación de timestamps
- * en el frontend duplicaría lógica de negocio que ya vive en el backend. Por
- * eso, a diferencia del patch local de `restaurarMesaSeleccionada` (y de
- * `terceros`/`turnos`, que no tienen cascada), acá se recarga el listado
- * entero con `cargar()` — decisión tomada en esta tarea.
+ * acotado" / "Restaurar el padre revive esas filas"). La respuesta solo trae el
+ * salón, no las mesas revividas: reconstruir esa comparación de timestamps en
+ * el frontend duplicaría lógica de negocio que ya vive en el backend. Por eso,
+ * a diferencia del patch local de `restaurarMesaSeleccionada` (y de
+ * `terceros`/`turnos`, que no tienen cascada), acá se recarga el listado entero
+ * con `cargar()`.
  */
 async function restaurarSalonSeleccionado() {
   if (!selectedSalonId.value) return

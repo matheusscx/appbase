@@ -839,8 +839,8 @@ export class CajaService {
    * cajero (`esForzado = caja.usuarioId !== usuarioId`) — decisión del owner
    * 2026-08-11, para no dejar la caja de un cajero ausente abierta para
    * siempre, ampliada el 2026-08-13: forzar dejó de exigir ser admin del
-   * tenant (era una incoherencia con pedir la firma, ya operativo desde la
-   * Task 6) y pasó a ser `Cajas:Actualizar` — el admin lo conserva por el
+   * tenant (era una incoherencia con pedir la firma, que para entonces ya
+   * era operativa) y pasó a ser `Cajas:Actualizar` — el admin lo conserva por el
    * short-circuit de rol fijo. Congela también quién contó
    * (`cerradaPor = usuarioId`) y cuántos garzones había en turno en ese
    * momento (`testigosDisponibles`).
@@ -1088,14 +1088,14 @@ export class CajaService {
         !(await this.cajaTestigoService.hayFirmaDe(manager, tenantId, cajaId))
       ) {
         // El comentario de la fase 1 (`enviarConteo`, ya persistido en
-        // `caja.comentarioCierre` — columna separada de `caja.comentario`,
-        // que es el de la APERTURA y esta fase nunca toca, ver el docblock
-        // de la entidad) alcanza como explicación: decisión del owner
-        // 2026-08-12, es el mismo hecho, contado en el momento en que
-        // ocurrió. Sin este fallback, un cierre forzado sin testigo no se
-        // podría completar desde la pantalla hasta que la fase 2 del
-        // frontend agregue el campo (Task 6) — y como el push a `main`
-        // despliega, quedaría roto en producción mientras tanto.
+        // `caja.comentarioCierre` — columna separada de `caja.comentario`, que
+        // es el de la APERTURA y esta fase nunca toca, ver el docblock de la
+        // entidad) alcanza como explicación: decisión del owner 2026-08-12, es
+        // el mismo hecho, contado en el momento en que ocurrió. Sin este
+        // fallback, un cierre forzado sin testigo no se podría completar desde
+        // la pantalla hasta que la fase 2 del frontend agregara el campo — y
+        // como el push a `main` despliega, quedaría roto en producción mientras
+        // tanto.
         const explicacion =
           dto.comentario?.trim() || caja.comentarioCierre?.trim();
         if (!explicacion) {
@@ -2036,10 +2036,10 @@ export class CajaService {
     }
     // El detalle expone el nombre del cajón (el header lo muestra) y el del
     // cajero dueño — lo necesita el encargado antes de forzar el cierre de la
-    // caja de otro (Task 6, testigo-cierre-forzado): tiene que ver de quién es
-    // la caja y desde cuándo antes de tocar el conteo. La entidad solo guarda
-    // los IDs; una sola query liviana resuelve los dos (nunca un N+1: una fila
-    // por request, no una consulta por caja en una lista).
+    // caja de otro (frente del testigo de cierre forzado): tiene que ver de
+    // quién es la caja y desde cuándo antes de tocar el conteo. La entidad solo
+    // guarda los IDs; una sola query liviana resuelve los dos (nunca un N+1:
+    // una fila por request, no una consulta por caja en una lista).
     let cajonNombre: string | null = null;
     let usuarioNombre: string | null = null;
     if (caja.cajonId || caja.usuarioId) {

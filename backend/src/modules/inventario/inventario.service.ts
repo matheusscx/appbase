@@ -1075,9 +1075,9 @@ export class InventarioService {
         );
       }
 
-      // Ancla del lock: la fila de item_lote, igual que antes de esta tarea.
-      // Ya no trae el saldo (vivía acá como `cantidad_disponible`) — ese se
-      // lee aparte, más abajo, por `saldoLoteEnUbicacion`.
+      // Ancla del lock: la fila de item_lote, la misma de siempre. Ya no trae
+      // el saldo (vivía acá como `cantidad_disponible`) — ese se lee aparte,
+      // más abajo, por `saldoLoteEnUbicacion`.
       const existentes: { lote_id: string }[] = await manager.query(
         `SELECT lote_id FROM item_lote
          WHERE item_id = $1 AND codigo_lote = $2 AND eliminado_el IS NULL
@@ -1144,9 +1144,9 @@ export class InventarioService {
         // método (creado_el ASC) — no cambia por ubicación, solo se filtra
         // por ella.
         //
-        // Ancla del lock: todos los lotes del ítem (mismo alcance que antes
-        // de esta tarea). El saldo por ubicación se lee aparte, ya bajo el
-        // lock — ver el docblock de `saldoLoteEnUbicacion`.
+        // Ancla del lock: todos los lotes del ítem (el alcance de siempre). El
+        // saldo por ubicación se lee aparte, ya bajo el lock — ver el docblock
+        // de `saldoLoteEnUbicacion`.
         const lotes: { lote_id: string; codigo_lote: string }[] =
           await manager.query(
             `SELECT lote_id, codigo_lote FROM item_lote
@@ -1249,9 +1249,9 @@ export class InventarioService {
 
       // Solo `loteId`, como siempre: agregar acá `loteConsumos` haría que
       // `insertarDetalleMovimiento` tomara la otra rama para TODOS los
-      // llamadores de salida con lote elegido (venta, merma, ajuste), que no
-      // son de esta tarea. La entrada del traslado no lo necesita: arma su
-      // consumo desde el `loteId` que este mismo método devuelve.
+      // llamadores de salida con lote elegido (venta, merma, ajuste). La
+      // entrada del traslado no lo necesita: arma su consumo desde el `loteId`
+      // que este mismo método devuelve.
       return { stockResultante, loteId };
     }
   }

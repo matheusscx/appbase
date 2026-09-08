@@ -76,10 +76,10 @@ export class CajaTestigoService {
     @InjectRepository(Caja)
     private readonly cajaRepo: Repository<Caja>,
     private readonly db: Db,
-    // `forwardRef`: desde Task 4, `SesionesGarzonService` también inyecta
-    // `CajaTestigoService` (para `caducarPorSesion` al cerrar una sesión) —
-    // sin `forwardRef` en los dos extremos del ciclo, ninguno de los dos
-    // puede terminar de construirse primero.
+    // `forwardRef`: `SesionesGarzonService` también inyecta
+    // `CajaTestigoService` (para `caducarPorSesion` al cerrar una sesión) — sin
+    // `forwardRef` en los dos extremos del ciclo, ninguno de los dos puede
+    // terminar de construirse primero.
     @Inject(forwardRef(() => SesionesGarzonService))
     private readonly sesionesGarzonService: SesionesGarzonService,
     private readonly garzonesService: GarzonesService,
@@ -172,10 +172,10 @@ export class CajaTestigoService {
   }
 
   /**
-   * Estado de las solicitudes de una caja, para el encargado que está
-   * esperando la firma (Task 6). Una sola query con JOIN a `garzones` para
-   * el nombre — nunca una por fila — y **sin `esperado` ni monto alguno**:
-   * es lectura de estado, no de arqueo.
+   * Estado de las solicitudes de una caja, para el encargado que está esperando
+   * la firma. Una sola query con JOIN a `garzones` para el nombre — nunca una
+   * por fila — y **sin `esperado` ni monto alguno**: es lectura de estado, no
+   * de arqueo.
    */
   async listar(tenantId: string, cajaId: string): Promise<TestigoEstado[]> {
     const caja = await this.cajaRepo.findOne({
@@ -287,12 +287,12 @@ export class CajaTestigoService {
   /**
    * El garzón resuelve la SUYA: firma o rechaza. `testigoId` ya fija de qué
    * garzón se trata —no se vuelve a pedir `garzonId`—, así que lo único que
-   * falta probar es la identidad. Dos vías, decisión del owner 2026-08-12
-   * (ronda 2 de esta task — la primera versión solo tenía PIN, y el owner
-   * midió que no alcanza: `garzones.service.ts` devuelve el PIN en claro al
-   * crear y al regenerar, así que **no es un secreto del garzón, es uno que
-   * el encargado emite y conoce**; y la pantalla del garzón es un tótem
-   * compartido, así que ni siquiera "quién llamó" identifica a nadie):
+   * falta probar es la identidad. Dos vías, decisión del owner 2026-08-12 (la
+   * primera versión solo tenía PIN, y el owner midió que no alcanza:
+   * `garzones.service.ts` devuelve el PIN en claro al crear y al regenerar, así
+   * que **no es un secreto del garzón, es uno que el encargado emite y
+   * conoce**; y la pantalla del garzón es un tótem compartido, así que ni
+   * siquiera "quién llamó" identifica a nadie):
    *
    * - **Vía cuenta** (prueba fuerte): si `garzones.usuario_id` está seteado
    *   Y esa cuenta NO es un tótem (`esVinculacionValida` — revisión
@@ -383,7 +383,7 @@ export class CajaTestigoService {
   /**
    * El encargado cerró sin esperar (fase 2, `cerrar`): las pendientes de esa
    * caja no quedan colgadas para siempre. Corre con el `manager` de esa
-   * transacción (Task 4).
+   * transacción.
    */
   async cancelarPendientes(
     manager: EntityManager,
@@ -400,8 +400,8 @@ export class CajaTestigoService {
   /**
    * El garzón cerró su turno con una solicitud abierta: una solicitud viva
    * contra una sesión cerrada sería un estado imposible de honrar, porque la
-   * firma se valida contra esa sesión. Corre con el `manager` de la
-   * transacción de cierre de sesión (`sesiones-garzon`, Task 4/5).
+   * firma se valida contra esa sesión. Corre con el `manager` de la transacción
+   * de cierre de sesión (`sesiones-garzon`).
    */
   async caducarPorSesion(
     manager: EntityManager,
@@ -416,15 +416,15 @@ export class CajaTestigoService {
   }
 
   /**
-   * ¿Alguien dio fe de esta caja? Lo usa `CajaService.cerrar` (Task 4) para
-   * exigir comentario obligatorio cuando nadie firmó. Recibe el `manager` de
-   * esa transacción y no `this.testigoRepo` a propósito (revisión
-   * independiente, ronda 3): `cerrar` retiene un `FOR UPDATE` sobre `cajas`
-   * mientras corre, y un `count()` por el repo inyectado pediría una
-   * conexión NUEVA del pool en el medio — el mismo patrón que
-   * `SesionesGarzonService.contarAbiertas` ya tuvo que resolver así (ver su
-   * docblock). `cancelarPendientes`/`caducarPorSesion`, sus hermanas, ya
-   * reciben `manager`; esta se alinea.
+   * ¿Alguien dio fe de esta caja? Lo usa `CajaService.cerrar` para exigir
+   * comentario obligatorio cuando nadie firmó. Recibe el `manager` de esa
+   * transacción y no `this.testigoRepo` a propósito (revisión independiente,
+   * ronda 3): `cerrar` retiene un `FOR UPDATE` sobre `cajas` mientras corre, y
+   * un `count()` por el repo inyectado pediría una conexión NUEVA del pool en
+   * el medio — el mismo patrón que `SesionesGarzonService.contarAbiertas` ya
+   * tuvo que resolver así (ver su docblock).
+   * `cancelarPendientes`/`caducarPorSesion`, sus hermanas, ya reciben
+   * `manager`; esta se alinea.
    */
   async hayFirmaDe(
     manager: EntityManager,

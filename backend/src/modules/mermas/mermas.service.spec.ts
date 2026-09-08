@@ -227,10 +227,9 @@ describe('MermasService', () => {
       // al propio `CreateItemDto`—, así que era un valor límite del mock; el
       // fix de esa contradicción no cambió nada acá, solo volvió real el caso.
       // Lo que este test fija: `registrar` nunca pasa `costoUnitario` a
-      // `registrarMovimiento` (mockeado acá), sea cual sea el costo leído
-      // — así que ese callee no puede rebotar, ni con este costo ni con
-      // ninguno. El e2e de la Task 2 cubre el camino contra el
-      // servicio real.
+      // `registrarMovimiento` (mockeado acá), sea cual sea el costo leído — así
+      // que ese callee no puede rebotar, ni con este costo ni con ninguno.
+      // `test/mermas.e2e-spec.ts` cubre el camino contra el servicio real.
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,

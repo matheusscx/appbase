@@ -7,16 +7,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 /**
- * E2E del motor de promociones (Task 9 del plan `2026-08-27-motor-promociones`).
- *
- * ⚠️ CORRIDA DIFERIDA: este archivo se escribió con el stack Docker ocupado por
- * otra sesión — no se ejecutó (`./scripts/reset-db.sh` + `jest --config
- * test/jest-e2e.json test/promociones.e2e-spec.ts`) contra Postgres real. La
- * fidelidad es estática: moldes copiados de specs existentes (login,
- * `app.close()` en `finally`, garzón propio, `liberarCajero`-style cleanup) y
- * los endpoints/DTOs se leyeron del código commiteado, no del plan. Los
- * supuestos que solo la corrida real puede confirmar están anotados en
- * `docs/superpowers/sdd/2026-08-27-motor-promociones/task-9-report.md`.
+ * E2E del motor de promociones (`docs/features/motor-promociones.md`).
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';

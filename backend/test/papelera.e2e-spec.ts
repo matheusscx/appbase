@@ -7,9 +7,10 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { unwrap } from '../src/common/utils/pg-returning.util';
 
-// Task 2 de la feature "papelera": categorías es la entidad de referencia —
-// familia TypeORM, sin nombre único, sin colaterales. Este spec es el patrón
-// que las tareas siguientes (3-6) replican para el resto de los 16 recursos.
+// Frente de la papelera (`docs/features/papelera.md`): categorías es la entidad
+// de referencia — familia TypeORM, sin nombre único, sin colaterales. Este
+// bloque es el patrón que replican los de más abajo para el resto de los 16
+// recursos.
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 
@@ -666,11 +667,11 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
   }
 });
 
-// Task 3: causas de merma — segunda referencia. Familia SQL cruda (no
-// softDelete() de TypeORM) y con nombre único por tenant, así que agrega el
-// 400 de colisión al restaurar: el índice único es parcial (WHERE
-// eliminado_el IS NULL), así que mientras la causa está borrada, otra causa
-// puede tomar su nombre y competir cuando se intenta revivirla.
+// Causas de merma — segunda referencia. Familia SQL cruda (no softDelete() de
+// TypeORM) y con nombre único por tenant, así que agrega el 400 de colisión al
+// restaurar: el índice único es parcial (WHERE eliminado_el IS NULL), así que
+// mientras la causa está borrada, otra causa puede tomar su nombre y competir
+// cuando se intenta revivirla.
 describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', () => {
   let app: INestApplication<App>;
   let tokenAdmin: string;
@@ -816,11 +817,11 @@ describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', 
   });
 });
 
-// Task 4: items — la entidad que motivó la feature entera y la más delicada
-// de las 16: es la única que se restaura INACTIVA (`remove()` pisa
-// `activo = false` y el valor previo no sobrevive en ninguna parte) y una de
-// las dos que arrastra colateral (`receta_extras_permitidos`, en las dos
-// direcciones — como ingrediente y como receta que ofrece el extra).
+// Items — la entidad que motivó la feature entera y la más delicada de las 16:
+// es la única que se restaura INACTIVA (`remove()` pisa `activo = false` y el
+// valor previo no sobrevive en ninguna parte) y una de las dos que arrastra
+// colateral (`receta_extras_permitidos`, en las dos direcciones — como
+// ingrediente y como receta que ofrece el extra).
 //
 // El guard no es `TenantAdminGuard` como en categorías/causas de merma: items
 // usa `PermisosGuard` + `@RequiresPermiso('Items', 'Eliminar')` (heredado del
@@ -1091,11 +1092,11 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
   });
 });
 
-// Task 5: salones — la segunda entidad con colateral (`salones.remove()`
-// soft-deletea todas sus `mesas`), distinta forma que items:
-// `manager.softDelete()`/`update()` en vez de SQL crudo, y sin nombre único
-// (ni salones ni mesas lo tienen — a diferencia de causas de merma), así que
-// no hay 400 de colisión que probar acá.
+// Salones — la segunda entidad con colateral (`salones.remove()` soft-deletea
+// todas sus `mesas`), distinta forma que items:
+// `manager.softDelete()`/`update()` en vez de SQL crudo, y sin nombre único (ni
+// salones ni mesas lo tienen — a diferencia de causas de merma), así que no hay
+// 400 de colisión que probar acá.
 //
 // Guard igual que items: `PermisosGuard` + `@RequiresPermiso('Salones',
 // 'Eliminar')` (heredado del `@Controller`, mismo guard que el `DELETE` de
@@ -1232,11 +1233,10 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(resRestaurar.status).toBe(201);
 
-    // El corazón de la task: la mesa 5 (cascada del viernes) revive; la
-    // mesa 3 (borrada el martes, otro motivo, otro `eliminado_el`) NO — si
-    // el acotamiento por timestamp se rompiera (p.ej. acotando solo por
-    // `salonId` sin comparar `eliminado_el`), esta aserción es la que lo
-    // cazaría.
+    // El corazón del caso: la mesa 5 (cascada del viernes) revive; la mesa 3
+    // (borrada el martes, otro motivo, otro `eliminado_el`) NO — si el
+    // acotamiento por timestamp se rompiera (p.ej. acotando solo por `salonId`
+    // sin comparar `eliminado_el`), esta aserción es la que lo cazaría.
     const resListarDespues = await request(app.getHttpServer())
       .get('/api/salones?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
@@ -1361,13 +1361,12 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
   });
 });
 
-// Task 6a: los 8 recursos de la familia `softDelete()` de TypeORM —
-// descuentos, recargos, impuestos, terceros, cajones, garzones, turnos,
-// impresoras. Seis de los ocho no tienen colateral en cascada ni restricción
-// única que dispare un 400 al restaurar, así que un solo spec parametrizado
-// sobre esos seis basta.
+// Los 8 recursos de la familia `softDelete()` de TypeORM — descuentos,
+// recargos, impuestos, terceros, cajones, garzones, turnos, impresoras. Seis de
+// los ocho no tienen colateral en cascada ni restricción única que dispare un
+// 400 al restaurar, así que un solo spec parametrizado sobre esos seis basta.
 //
-// ⚠️ **Corregido en la "Ronda de fixes 1"**: la entrada original decía que
+// ⚠️ **Corregido**: la primera versión de este bloque decía que
 // NINGUNO de los 8 tenía nombre único con restricción parcial. Era falso — la
 // colisión se había asignado por FAMILIA de borrado (softDelete vs SQL cruda)
 // en vez de por la propiedad que importa (tener índice único parcial), y dos
@@ -1551,10 +1550,10 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     });
   }
 
-  // Ronda de fixes 1: `cajones` tiene `ux_cajones_tenant_nombre` (nombre único
-  // por tenant, índice parcial), igual que causas-merma/grupos-modificadores/
-  // motivos-diferencia — mismo molde de colisión que esos, no el genérico de
-  // arriba (que no crea un duplicado a propósito).
+  // `cajones` tiene `ux_cajones_tenant_nombre` (nombre único por tenant, índice
+  // parcial), igual que causas-merma/grupos-modificadores/motivos-diferencia —
+  // mismo molde de colisión que esos, no el genérico de arriba (que no crea un
+  // duplicado a propósito).
   it('cajones: colisión real de Postgres — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
     const nombre = `Cajón papelera E2E colisión ${Date.now()}`;
     const resOriginal = await request(app.getHttpServer())
@@ -2182,8 +2181,8 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 // Antes del fix esto era 500; el `restaurar()` de `garzones.service.ts` ahora
 // captura `23505` igual que `cajones`/`causas-merma`.
 //
-// ⚠️ **Reescrito en la "Ronda de fixes 2"**: la primera versión montaba el
-// escenario borrando el Mostrador SEMBRADO de Paris (id fijo
+// ⚠️ **Reescrito**: la primera versión de este bloque montaba el escenario
+// borrando el Mostrador SEMBRADO de Paris (id fijo
 // `550e8400-e29b-41d4-a716-446655440339`), que `ventas.e2e-spec.ts:543` y
 // `liquidacion-propinas.e2e-spec.ts:21` asumen vivo con ese id exacto. Su
 // limpieza corría al final del `it()` sin `try/finally`: si cualquier
@@ -2196,13 +2195,12 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 // así que corriendo el mismo escenario en Falabella el "Mostrador viejo" lo
 // crea ESTE test (id random, recién generado), no el seed: ninguna otra suite
 // depende de ese id, así que aunque la limpieza no corriera, no hay id
-// compartido que romper. La limpieza igual quedó en `try/finally` —por
-// higiene, para que reruns locales sin `reset-db.sh` no acumulen Mostradores
-// huérfanos de Falabella— pero ya no es la única red de seguridad. Verificado
-// forzando una falla intermedia a propósito (un `expect` imposible entre el
-// `DELETE` y el segundo `POST /ventas`): el `finally` corrió igual, dejó
-// Falabella con un solo Mostrador vivo (detalle completo en el reporte de la
-// task, "Ronda de fixes 2" → punto 3).
+// compartido que romper. La limpieza igual quedó en `try/finally` —por higiene,
+// para que reruns locales sin `reset-db.sh` no acumulen Mostradores huérfanos
+// de Falabella— pero ya no es la única red de seguridad. Verificado forzando
+// una falla intermedia a propósito (un `expect` imposible entre el `DELETE` y
+// el segundo `POST /ventas`): el `finally` corrió igual, dejó Falabella con un
+// solo Mostrador vivo.
 describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrador', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
@@ -2418,13 +2416,12 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
   });
 });
 
-// Task 6b: los 3 últimos recursos de la familia SQL cruda — grupos
-// de modificadores y los dos motivos de diferencia (caja e inventario). Los
-// tres tienen nombre único por tenant (índice parcial WHERE eliminado_el IS
-// NULL), así que —a diferencia de la familia softDelete() de Task 6a—
-// agregan el 400 de colisión real de Postgres al restaurar (mismo patrón que
-// causas-merma, Task 3), y por eso van en su propio bloque parametrizado en
-// vez de sumarse al de Task 6a.
+// Los 3 recursos restantes de la familia SQL cruda — grupos de modificadores y
+// los dos motivos de diferencia (caja e inventario). Los tres tienen nombre
+// único por tenant (índice parcial WHERE eliminado_el IS NULL), así que —a
+// diferencia de la familia softDelete()— agregan el 400 de colisión real de
+// Postgres al restaurar (mismo patrón que causas-merma), y por eso van en su
+// propio bloque parametrizado en vez de sumarse al de esa familia.
 //
 // `grupos_modificadores` tiene un hijo (`grupo_modificador_opciones`), y es
 // el único de los 16 con esa forma: `remove()`/`restaurar()` cascadean esa
@@ -2714,11 +2711,10 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(resRestaurar.status).toBe(201);
 
-    // El corazón de la task: la opción cascada revive; la opción vieja
-    // (borrada el martes, otro motivo, otro `eliminado_el`) NO — si el
-    // acotamiento por timestamp se rompiera (p. ej. acotando solo por
-    // `grupo_modificador_id` sin comparar `eliminado_el`), esta aserción es
-    // la que lo cazaría.
+    // El corazón del caso: la opción cascada revive; la opción vieja (borrada
+    // el martes, otro motivo, otro `eliminado_el`) NO — si el acotamiento por
+    // timestamp se rompiera (p. ej. acotando solo por `grupo_modificador_id`
+    // sin comparar `eliminado_el`), esta aserción es la que lo cazaría.
     const resGet = await request(app.getHttpServer())
       .get(`/api/grupos-modificadores/${grupoId}`)
       .set('Authorization', `Bearer ${tokenAdmin}`);

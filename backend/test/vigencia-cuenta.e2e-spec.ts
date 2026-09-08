@@ -10,8 +10,9 @@ import { AppModule } from '../src/app.module';
 /**
  * **El instante que decide la vigencia por fecha es cuándo se PIDIÓ la línea.**
  *
- * Historia, porque este archivo cambió de premisa y el cambio importa: la Task 3
- * de vigencia (2026-08-23/24) hizo que una venta nacida de una cuenta evaluara
+ * Historia, porque este archivo cambió de premisa y el cambio importa: el frente
+ * de vigencia por fecha (2026-08-23/24) hizo que una venta nacida de una cuenta
+ * evaluara
  * contra **la apertura de la cuenta** en vez de "ahora", para que la mesa que se
  * sienta con una promo vigente no la perdiera al pagar tarde. El 2026-08-31, al
  * decidir el owner que *lo pedido se cobra como se pidió*, la línea pasó a
@@ -20,7 +21,7 @@ import { AppModule } from '../src/app.module';
  *
  * Lo que eso cambia, y está fijado por los dos últimos tests de este archivo:
  *   - una línea pedida con el descuento vivo lo conserva aunque venza antes de
- *     cobrar (el caso que la Task 3 vino a resolver: sigue funcionando);
+ *     cobrar (el caso que ese frente vino a resolver: sigue funcionando);
  *   - una cuenta abierta hace una semana con una línea pedida hoy **ya no**
  *     lleva la promo de la semana pasada (esto sí cambió).
  *
@@ -315,7 +316,7 @@ describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
     beforeAll(async () => {
       // Ventana de vigencia YA VENCIDA respecto de "ahora" (la suite corre
       // 2026-08-24 en adelante): si el service siguiera resolviendo "ahora"
-      // como en la Task 3, este descuento NUNCA se aplicaría más.
+      // como antes de ese cambio, este descuento NUNCA se aplicaría más.
       const marca = Date.now();
       descuentoId = (
         await post<IdResponse>('/api/descuentos', {

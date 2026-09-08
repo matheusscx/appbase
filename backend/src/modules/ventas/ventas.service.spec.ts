@@ -90,8 +90,8 @@ const mockConfigCalculo: ConfigCalculo = {
   escalaCalculo: 4,
   modoRedondeo: 'HALF_UP',
   nivelRedondeo: 'linea',
-  // 4 = el máximo que admite el sistema (UF); el motor todavía no cuantiza
-  // con este valor (Task 5).
+  // 4 = el máximo que admite el sistema (UF): la escala más fina con la que el
+  // motor puede cuantizar.
   decimalesMoneda: 4,
   promosAcumulanDescuentos: false,
 };
@@ -139,8 +139,8 @@ const MONEDA_ROWS = [
     moneda_id: MONEDA_OFICIAL_ID,
     valor_del_dia: '1.000000',
     es_oficial: true,
-    // 4 = el máximo que admite el sistema (UF); el motor todavía no cuantiza
-    // con este valor (Task 5).
+    // 4 = el máximo que admite el sistema (UF): la escala más fina con la que
+    // el motor puede cuantizar.
     decimales: 4,
   },
 ];

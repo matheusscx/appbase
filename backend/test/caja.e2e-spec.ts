@@ -122,12 +122,12 @@ async function abrirOReusarCaja(
 }
 
 /**
- * Cierre en dos fases (Task 3): fase 1 (`POST /:id/conteo`) congela el arqueo
- * y auto-cierra si cuadra, o pasa a `en_conciliacion` si alguna línea
- * descuadra. Si descuadra, esta función resuelve la fase 2 (`POST /:id/cerrar`)
- * con los motivos de `justificar` (vacío si no se pasa). Devuelve la respuesta
- * de la fase que terminó cerrando el flujo — `{estado, arqueo}` si auto-cerró
- * en fase 1, o `{caja, arqueo}` si necesitó la fase 2.
+ * Cierre en dos fases: fase 1 (`POST /:id/conteo`) congela el arqueo y
+ * auto-cierra si cuadra, o pasa a `en_conciliacion` si alguna línea descuadra.
+ * Si descuadra, esta función resuelve la fase 2 (`POST /:id/cerrar`) con los
+ * motivos de `justificar` (vacío si no se pasa). Devuelve la respuesta de la
+ * fase que terminó cerrando el flujo — `{estado, arqueo}` si auto-cerró en fase
+ * 1, o `{caja, arqueo}` si necesitó la fase 2.
  *
  * **No afirma el status adentro, a propósito**: la mitad de los llamadores la
  * usan como higiene de `afterAll` y descartan la respuesta, así que una
@@ -161,14 +161,13 @@ async function cerrarEnDosFases(
  * de `cerrarEnDosFases`, que asume que arranca desde `abierta` y no hace
  * nada si el conteo (fase 1) falla porque la caja ya pasó ese estado.
  *
- * Medido con el mutante de Task 6b (`puedeForzar=true` sin mirar el
- * permiso): un `it` que asevera 403 y en cambio recibe 201 dejó la caja del
- * cajero forzada a `en_conciliacion` ANTES de que la aserción fallida
- * abortara el resto del test — la higiene de ese `it` nunca corrió, y el
- * `afterAll` de entonces tampoco la liberaba (esperaba `abierta`). El
- * cajero quedaba atascado para la siguiente suite que use
- * `vendedor@paris.cl`. Best-effort a propósito (sin afirmar el status): es
- * una red de seguridad de `afterAll`, no una aserción del test.
+ * Medido con un mutante que pone `puedeForzar=true` sin mirar el permiso: un
+ * `it` que asevera 403 y en cambio recibe 201 dejó la caja del cajero forzada a
+ * `en_conciliacion` ANTES de que la aserción fallida abortara el resto del test
+ * — la higiene de ese `it` nunca corrió, y el `afterAll` de entonces tampoco la
+ * liberaba (esperaba `abierta`). El cajero quedaba atascado para la siguiente
+ * suite que use `vendedor@paris.cl`. Best-effort a propósito (sin afirmar el
+ * status): es una red de seguridad de `afterAll`, no una aserción del test.
  */
 async function liberarCajeroSiQuedoOcupado(
   app: INestApplication<App>,
@@ -183,8 +182,8 @@ async function liberarCajeroSiQuedoOcupado(
   if (!caja?.id) return;
 
   // El arqueo se lee con el ADMIN: el modo ciego le retiene el `esperado` al
-  // cajero (y al encargado, desde la task 6b), y sin el esperado esta higiene
-  // no puede contar exacto.
+  // cajero (y al encargado, desde que forzar el cierre es operativo), y sin el
+  // esperado esta higiene no puede contar exacto.
   const leerArqueo = async () =>
     (
       await request(app.getHttpServer())
@@ -390,9 +389,9 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       // conciliación AUNQUE CUADRE — ahí vive la firma del testigo.
       expect((res.body as { estado: string }).estado).toBe('en_conciliacion');
 
-      // Nadie firmó como testigo: cerrar sin explicación tiene que
-      // rechazarse (Task 4, `caja.service.ts` `cerrar`/`esForzado`) — esto
-      // protege la regla nueva, no solo la tolera.
+      // Nadie firmó como testigo: cerrar sin explicación tiene que rechazarse
+      // (`caja.service.ts` `cerrar`/`esForzado`) — esto protege la regla nueva,
+      // no solo la tolera.
       const sinComentario = await request(app.getHttpServer())
         .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
@@ -2300,11 +2299,12 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
 });
 
 /**
- * Task 6b (insertada, `2026-08-11-testigo-cierre-forzado`): forzar el cierre
- * deja de exigir ser admin del tenant y pasa a exigir `Cajas:Actualizar`
- * (decisión del owner 2026-08-13) — la misma incoherencia que ya resolvía
- * `POST /caja/:id/testigos` (`Cajas:Actualizar` desde la Task 6), ahora
- * también en la puerta que abre el flujo.
+ * Frente del testigo de cierre forzado
+ * (`docs/superpowers/plans/2026-08-11-testigo-cierre-forzado.md`): forzar el
+ * cierre deja de exigir ser admin del tenant y pasa a exigir `Cajas:Actualizar`
+ * (decisión del owner 2026-08-13) — la misma incoherencia que ya resolvía `POST
+ * /caja/:id/testigos`, que pide `Cajas:Actualizar`, ahora también en la puerta
+ * que abre el flujo.
  */
 describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cierre', () => {
   let app: INestApplication<App>;
@@ -2420,13 +2420,14 @@ describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cie
 });
 
 /**
- * Task 6b — decisión 2: el encargado que fuerza cuenta A CIEGAS igual que
- * cualquier no-admin (`!esAdmin` en `obtenerArqueo`/`cajonesEstado`/
- * `resumenMovimientos`/historial, sin tocar). Antes de esta task, forzar
+ * El encargado que fuerza cuenta A CIEGAS igual que cualquier no-admin
+ * (`!esAdmin` en `obtenerArqueo`/`cajonesEstado`/
+ * `resumenMovimientos`/historial, sin tocar). Antes de este cambio, forzar
  * exigía ser admin y el admin está exento del ciego — así que quien forzaba
- * SIEMPRE veía el esperado. Ahora que forzar es operativo, existe por
- * primera vez alguien que fuerza Y cuenta a ciegas: es la razón de ser del
- * cambio (`docs/agent/pendientes.md`, entrada del encargado a ciegas).
+ * SIEMPRE veía el esperado. Ahora que forzar es operativo, existe por primera
+ * vez alguien que fuerza Y cuenta a ciegas: es la razón de ser del cambio
+ * (`docs/agent/resueltos.md`, «El encargado que fuerza un cierre NO cuenta a
+ * ciegas»).
  */
 describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no admin)', () => {
   let app: INestApplication<App>;

@@ -204,7 +204,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
             },
           },
         ],
-        // Combo afecto (default): (3000 + 800) + 19% IVA = 4522 (Task 1, ADR-018).
+        // Combo afecto (default): (3000 + 800) + 19% IVA = 4522 (ADR-018).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4522.0000' }],
       });
 

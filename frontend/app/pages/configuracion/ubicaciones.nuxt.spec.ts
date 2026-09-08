@@ -95,15 +95,15 @@ let postsRestaurar: { id: string, nombre?: string }[] = []
 let restaurarRetenido: Promise<unknown> | null = null
 
 /**
- * Retiene el POST/PATCH de `guardar()` sin resolver. Sirve para afirmar el
- * body exacto que viajó (lo que importa: que pase el DTO real del backend)
- * sin dejar que `guardar()` termine y cierre el drawer — el cierre real
- * dispara un `unhandled rejection` de happy-dom/reka-ui ajeno a esta pantalla
- * (reproducido también en `causas-merma.vue` sin tocar su código: es del
- * harness, no un bug de acá) que ninguna pantalla con `AppDrawer` había
- * ejercitado todavía porque ningún spec del repo prueba un guardado EXITOSO
- * de punta a punta. No resolver el POST/PATCH evita la transición de cierre
- * sin dejar de probar lo que importa para esta tarea: el body.
+ * Retiene el POST/PATCH de `guardar()` sin resolver. Sirve para afirmar el body
+ * exacto que viajó (lo que importa: que pase el DTO real del backend) sin dejar
+ * que `guardar()` termine y cierre el drawer — el cierre real dispara un
+ * `unhandled rejection` de happy-dom/reka-ui ajeno a esta pantalla (reproducido
+ * también en `causas-merma.vue` sin tocar su código: es del harness, no un bug
+ * de acá) que ninguna pantalla con `AppDrawer` había ejercitado todavía porque
+ * ningún spec del repo prueba un guardado EXITOSO de punta a punta. No resolver
+ * el POST/PATCH evita la transición de cierre sin dejar de probar lo que
+ * importa acá: el body.
  */
 let guardarRetenido: Promise<unknown> | null = null
 

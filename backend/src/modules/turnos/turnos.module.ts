@@ -14,9 +14,9 @@ import { CajaModule } from '../caja/caja.module';
     RepositoriosModule.forFeature([Turno, SesionGarzon]),
     GarzonesModule,
     // `SesionesGarzonService` caduca las solicitudes de testigo al cerrar una
-    // sesión (`CajaTestigoService.caducarPorSesion`, Task 4). `CajaModule` ya
-    // importa `TurnosModule` (Task 2/3): `forwardRef` en los dos módulos
-    // rompe el ciclo de arranque.
+    // sesión (`CajaTestigoService.caducarPorSesion`). `CajaModule` ya importa
+    // `TurnosModule`: `forwardRef` en los dos módulos rompe el ciclo de
+    // arranque.
     forwardRef(() => CajaModule),
   ],
   controllers: [TurnosController, SesionesGarzonController],

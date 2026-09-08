@@ -501,7 +501,8 @@ describe('Simulador impacto costos (e2e)', () => {
       })
       .expect(200);
 
-    // Antes de esta tarea este GET respondía 404: `papasId` es `tipo='producto'`.
+    // Este GET respondía 404 cuando `afectados` exigía `tipo='ingrediente'`:
+    // `papasId` es `tipo='producto'`.
     const afectados = await request(app.getHttpServer())
       .get(`/api/items/${papasId}/afectados`)
       .set('Authorization', `Bearer ${token}`)

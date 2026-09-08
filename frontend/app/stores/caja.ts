@@ -359,8 +359,7 @@ export const useCajaStore = defineStore('caja', () => {
     )
     // Solo se limpia el turno propio si la caja cerrada es la activa de quien
     // llama: un admin del tenant puede cerrar la caja de OTRO cajero (cierre
-    // forzado, Task 6) desde /cajas sin que eso le borre su propia sesión de
-    // /mi-caja.
+    // forzado) desde /cajas sin que eso le borre su propia sesión de /mi-caja.
     if (activa.value?.id === cajaId) {
       resumenTurno.value = null
       activa.value = null
@@ -385,8 +384,8 @@ export const useCajaStore = defineStore('caja', () => {
   }
 
   /**
-   * Estado de las solicitudes de testigo de una caja (Task 6): lo que el
-   * encargado mira mientras espera la firma.
+   * Estado de las solicitudes de testigo de una caja: lo que el encargado mira
+   * mientras espera la firma.
    *
    * Vacía ANTES de pedir (revisión independiente, hallazgo 4): el array es del
    * store, no de una caja. Si la carga de la caja B fallaba, quedaban vivas las

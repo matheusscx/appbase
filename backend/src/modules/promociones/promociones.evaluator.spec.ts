@@ -602,7 +602,7 @@ describe('evaluarPromos — precio_fijo (combo)', () => {
     ]);
   });
 
-  it('con candidatos de sobra en un slot, entra la unidad más cara (decisión 3)', () => {
+  it('con candidatos de sobra en un slot, entra la unidad más cara', () => {
     const p = precioFijoPromo({ valorMonto: '9000' });
     const pizzaCara = linea({
       index: 0,

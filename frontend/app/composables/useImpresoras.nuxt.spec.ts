@@ -1,15 +1,15 @@
 // @vitest-environment nuxt
 //
-// Trampa del brief de la papelera de `configuracion/impresoras.vue`:
-// `useImpresoras().listar()` gana un segundo parámetro `incluirEliminados`
-// para alimentar esa pantalla. Esa MISMA función la llaman los caminos de
-// impresión real — `imprimirComanda()` → `listar('comanda')` y el helper
-// interno `obtenerImpresoraBoleta()` → `listar('boleta')` —, los dos SIN
-// pasar el segundo argumento. Si el default de `incluirEliminados` pasara a
-// `true`, esas dos llamadas empezarían a traer impresoras borradas y el
-// sistema intentaría imprimir en una que ya no existe. Este spec fija que el
-// default sigue siendo `false` y que el camino real de `imprimirComanda()`
-// (no solo `listar()` aislada) no lo pisa.
+// Trampa de la papelera de `configuracion/impresoras.vue`
+// (`docs/features/papelera.md`): `useImpresoras().listar()` gana un segundo
+// parámetro `incluirEliminados` para alimentar esa pantalla. Esa MISMA función
+// la llaman los caminos de impresión real — `imprimirComanda()` →
+// `listar('comanda')` y el helper interno `obtenerImpresoraBoleta()` →
+// `listar('boleta')` —, los dos SIN pasar el segundo argumento. Si el default
+// de `incluirEliminados` pasara a `true`, esas dos llamadas empezarían a traer
+// impresoras borradas y el sistema intentaría imprimir en una que ya no existe.
+// Este spec fija que el default sigue siendo `false` y que el camino real de
+// `imprimirComanda()` (no solo `listar()` aislada) no lo pisa.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { useImpresoras } from './useImpresoras'

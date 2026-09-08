@@ -413,11 +413,11 @@ describe('configuracion/items — chip fijo del IVA', () => {
   })
 
   it('al editar un item con una fila de IVA vieja en item_impuestos, no la carga en el form', async () => {
-    // Riesgo cubierto además del pedido por el brief: `GET /items/:id` lee
+    // Riesgo cubierto además del principal: `GET /items/:id` lee
     // `item_impuestos` tal cual, sin filtrar tipo. Si quedó una fila vieja
     // (dato previo a este cambio o una BD sin resembrar), sin este filtro al
-    // cargar el ítem se reenviaría en el guardado y el backend respondería
-    // 400 — al usuario se le rompería el guardado de un ítem que no tocó.
+    // cargar el ítem se reenviaría en el guardado y el backend respondería 400
+    // — al usuario se le rompería el guardado de un ítem que no tocó.
     itemDetalleMock = {
       ...ITEM_PRODUCTO,
       clasificacionTributaria: 'afecto',

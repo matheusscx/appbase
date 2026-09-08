@@ -278,7 +278,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
             },
           },
         ],
-        // Receta afecta (default): 3500 + 19% IVA = 4165 (Task 1, ADR-018).
+        // Receta afecta (default): 3500 + 19% IVA = 4165 (ADR-018).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4165.0000' }],
       });
 
@@ -318,7 +318,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
             },
           },
         ],
-        // Receta afecta (default): 3500 + 19% IVA = 4165 (Task 1, ADR-018).
+        // Receta afecta (default): 3500 + 19% IVA = 4165 (ADR-018).
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4165.0000' }],
       });
 

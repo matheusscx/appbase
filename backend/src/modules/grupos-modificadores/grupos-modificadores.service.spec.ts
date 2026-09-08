@@ -275,8 +275,8 @@ describe('GruposModificadoresService', () => {
     });
 
     it('reemplaza opciones manteniendo la familia y devuelve shape completo (itemsUsandoCount + stock)', async () => {
-      // Upsert-preservando (Task 2): sin opciones vivas previas, la opción
-      // entrante es nueva → INSERT (no hay reemplazo-total con delete-all).
+      // Upsert-preservando: sin opciones vivas previas, la opción entrante es
+      // nueva → INSERT (no hay reemplazo-total con delete-all).
       managerMock.query
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },

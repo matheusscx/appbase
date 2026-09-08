@@ -91,7 +91,7 @@ export interface LineaPromo {
    * evalúan contra la plata cobrada y se declaran en neto.
    */
   precioListaUnitario: string;
-  instante: InstanteLocal; // cuándo se pidió (decisión 4 del owner)
+  instante: InstanteLocal; // cuándo se pidió (decisión del owner)
 }
 
 export interface AplicacionPromo {
@@ -328,8 +328,9 @@ function evaluarNxm(
  * las unidades que ese slot exige.
  *
  * Arma tantos combos completos como alcancen las unidades disponibles,
- * tomando SIEMPRE las unidades MÁS CARAS de cada slot primero (decisión 3
- * del owner: criterio pro-cliente, maximiza el descuento) — mismo
+ * tomando SIEMPRE las unidades MÁS CARAS de cada slot primero (decisión 3 del
+ * owner en `docs/superpowers/specs/2026-08-27-motor-promociones-design.md`:
+ * criterio pro-cliente, maximiza el descuento) — mismo
  * ordenamiento que `evaluarNxm` (desc por precio de lista, empate por `lineaIndex`
  * ascendente). Cada combo consume sus unidades antes de intentar el
  * siguiente, así que un segundo combo de una promo repetible usa lo que

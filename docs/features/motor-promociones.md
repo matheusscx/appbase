@@ -1,12 +1,11 @@
 # Feature: Motor de promociones
 
-**Status**: Construido (backend + frontend). **Gate con stack diferido**: el desarrollo
-corrió en un worktree aislado mientras otra sesión ocupaba Docker (`docs/agent/pendientes.md`
-§4 del 2026-08-27), así que el e2e completo, `--verificar` y el smoke de navegador **no
-corrieron todavía** — quedan para la fase con stack (T14 del plan). No marcar esta fila como
-cerrada en `ESTADO.md` hasta que corran.
+**Status**: Implementado y verificado contra el stack. El desarrollo corrió en un worktree
+aislado mientras otra sesión ocupaba Docker, y se integró y verificó al liberarse: gate
+completo, `reset-db.sh --verificar` y smoke de navegador de punta a punta (el detalle, con los
+números de esa corrida, está en la fila de [`ESTADO.md`](../ESTADO.md)).
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-08-27
+**Last Updated**: 2026-09-08
 
 ---
 
@@ -367,14 +366,10 @@ Cobertura, además de la unit del evaluador (ver arriba): el motor con el interr
 dos posiciones (incluida la aplicación cross-línea comparada entera), traza propia, la
 familia perdedora dejando "No aplicó"; el service con elegibilidad (fecha/hora/día/canal) e
 instantes por línea; el e2e cubre una promo congelándose en `ventas_promociones`, que
-previsualización y venta coincidan, y — punta a punta, la única forma de probar la decisión
-4 — que en una cuenta de salón la línea pedida dentro de la franja lleve la promo y la
-pedida fuera no, aunque se cobren juntas.
-
-⚠️ El e2e (`promociones.e2e-spec.ts`) está escrito pero **no corrió todavía**: el desarrollo
-fue con el stack Docker ocupado por otra sesión (orden explícita del owner, ver el ledger de
-la task). Correrlo con `reset-db.sh` antes es parte del cierre del frente (T14), no de esta
-task.
+previsualización y venta coincidan, y — punta a punta, la única forma de probar la decisión 4
+del owner (`docs/superpowers/specs/2026-08-27-motor-promociones-design.md`) — que en una cuenta
+de salón la línea pedida dentro de la franja lleve la promo y la pedida fuera no, aunque se
+cobren juntas.
 
 ---
 

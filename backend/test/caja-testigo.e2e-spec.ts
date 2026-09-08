@@ -8,8 +8,8 @@ import { AppModule } from './../src/app.module';
 import { CajaTestigo } from '../src/modules/caja/entities/caja-testigo.entity';
 
 /**
- * Task 5 (SDD `2026-08-11-testigo-cierre-forzado`): el camino completo del
- * testigo de cierre forzado, contra Postgres real.
+ * SDD `docs/superpowers/plans/2026-08-11-testigo-cierre-forzado.md`: el camino
+ * completo del testigo de cierre forzado, contra Postgres real.
  *
  * El diseño de `resolver` tiene DOS vías (decisión del owner, 2026-08-12,
  * ver el docblock de `CajaTestigoService.resolver`):
@@ -435,14 +435,14 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
    * tiene nada que ver (`docs/agent/pendientes.md`, mitigación del 401
    * intermitente)—, pero `app.close()` corre SIEMPRE, en el `finally`.
    *
-   * Medido con el mutante M2 de esta task: con la limpieza afirmando
-   * derecho, un fallo en el `delete` del cajón (409, quedaba ocupado por el
-   * `it` que ya había fallado) tiraba la excepción ANTES del `close`, la app
-   * de Nest quedaba viva con su pool abierto y **jest imprimía el resultado y
-   * después no terminaba nunca** — 7 minutos sin CPU ni queries. Un mutante
-   * que mata un test se veía igual que un entorno colgado. Por eso los
-   * errores se acumulan y se afirman DESPUÉS de cerrar: el diagnóstico se
-   * conserva sin costar la salida del proceso.
+   * Medido con un mutante: con la limpieza afirmando derecho, un fallo en el
+   * `delete` del cajón (409, quedaba ocupado por el `it` que ya había fallado)
+   * tiraba la excepción ANTES del `close`, la app de Nest quedaba viva con su
+   * pool abierto y **jest imprimía el resultado y después no terminaba nunca**
+   * — 7 minutos sin CPU ni queries. Un mutante que mata un test se veía igual
+   * que un entorno colgado. Por eso los errores se acumulan y se afirman
+   * DESPUÉS de cerrar: el diagnóstico se conserva sin costar la salida del
+   * proceso.
    */
   afterAll(async () => {
     const fallos: string[] = [];

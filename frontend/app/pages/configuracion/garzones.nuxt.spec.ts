@@ -841,10 +841,9 @@ describe('garzones — advertencias del backend', () => {
   })
 
   // El caso más común del flujo nuevo: recién vinculada la cuenta, el backend
-  // ya dejó `pinHash = PIN_INUTILIZABLE` (evento `invalidado_por_vinculo`) y
-  // el garzón todavía no fijó el suyo desde su perfil. "Invalidar" acá no
-  // destruye nada — prometerlo sería la misma mentira que el hallazgo A que
-  // esta task vino a cerrar, solo que en el caso más frecuente.
+  // ya dejó `pinHash = PIN_INUTILIZABLE` (evento `invalidado_por_vinculo`) y el
+  // garzón todavía no fijó el suyo desde su perfil. "Invalidar" acá no destruye
+  // nada: prometerlo sería anunciar la destrucción de algo que no existe.
   it('el modal de confirmación NO promete destruir nada, para un garzón CON cuenta que TODAVÍA no puso su PIN', async () => {
     garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
 

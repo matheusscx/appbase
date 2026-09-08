@@ -89,7 +89,7 @@ function ensureModoRedondeoCargado(tenantId: string | null): void {
  * sigue en vuelo (o si nunca se disparó): leer el `ref` sin comparar el tenantId
  * serviría el `modo_redondeo` de un tenant a otro, justo la clase de bug que las
  * invariantes del proyecto prohíben (multi-tenant). Con este guard, el peor caso ante
- * un cache desalineado es el mismo default de antes de esta tarea (`HALF_UP`), nunca
+ * un cache desalineado es el mismo default de siempre (`HALF_UP`), nunca
  * el modo de un tenant ajeno.
  */
 function modoRedondeoVigente(tenantId: string | null): string {

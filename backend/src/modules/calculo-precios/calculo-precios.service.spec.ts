@@ -159,8 +159,8 @@ describe('CalculoPreciosService', () => {
           valorDelDia: '950',
         },
       ]),
-      // 4 = el máximo que admite el sistema (UF); el motor todavía no
-      // cuantiza con este valor (Task 5).
+      // 4 = el máximo que admite el sistema (UF): la escala más fina con la que
+      // el motor puede cuantizar.
       decimalesOficiales: jest.fn().mockResolvedValue(4),
     };
 
@@ -595,8 +595,8 @@ describe('CalculoPreciosService', () => {
         nivel: 'linea',
       },
     ]);
-    // Ítem exento: aísla la resolución de recargos sin que la derivación de
-    // IVA (Task 1, ADR-018) contamine el total esperado.
+    // Ítem exento: aísla la resolución de recargos sin que la derivación de IVA
+    // (ADR-018) contamine el total esperado.
     mockItems(
       { clasificacionTributaria: 'exento' },
       { impuestosIds: [], descuentosIds: [], recargosIds: ['rec-1'] },
@@ -991,9 +991,9 @@ describe('CalculoPreciosService', () => {
   describe('vigencia por fecha', () => {
     // Forma copiada del mock de `descuentosService.findAll` de arriba: mismos
     // campos que ya usa el resto del archivo, sumando `fechaInicio`/`fechaFin`
-    // (Task 1 / entidad `Descuento`). `desc-1` es el id que ya trae por
-    // default `reglas()` en `descuentoIds`, así que no hace falta tocar el
-    // mock de `itemsService.cargarReglasPorIds`.
+    // (entidad `Descuento`). `desc-1` es el id que ya trae por default
+    // `reglas()` en `descuentoIds`, así que no hace falta tocar el mock de
+    // `itemsService.cargarReglasPorIds`.
     const reglaConVigencia = (over: Record<string, unknown> = {}) => ({
       id: 'desc-1',
       nombre: 'Promo verano',
@@ -1100,7 +1100,8 @@ describe('CalculoPreciosService', () => {
   // El evaluador NO se mockea: es puro, y mockearlo dejaría sin probar
   // justamente lo que este service arma para él (los netos, el índice, la
   // categoría y —lo que más importa— el instante de cada línea). Lo que sí se
-  // observa es qué recibe el motor, porque la aplicación del monto es Task 7.
+  // observa es qué recibe el motor, porque la aplicación del monto la hace el
+  // motor puro (`calcularVenta`), no este service.
 
   describe('promociones', () => {
     /** Happy hour 20% sobre toda la venta, 18:00–20:00 en zona del tenant. */

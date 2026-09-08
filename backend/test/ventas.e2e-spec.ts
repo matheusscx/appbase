@@ -379,8 +379,7 @@ describe('Ventas (e2e)', () => {
     // disponible de una sola línea de $1.500: avisa, y ventas.service.ts
     // recompone `{ titulo, detalle }` a un string plano. Es la única venta de
     // toda la suite que dispara un descuento topeado al crear — sin ella, un
-    // `map` roto que devuelva solo el título o solo el detalle no lo cacha nada
-    // (ver Task 7).
+    // `map` roto que devuelva solo el título o solo el detalle no lo cacha nada.
     // El ítem es un SERVICIO que crea el propio test, no "Papas fritas": ese lo
     // consume `combos.e2e-spec.ts` como componente, y gastarle una unidad desde
     // acá aceleraba su agotamiento y afloraba como un fallo opaco en una suite
@@ -419,11 +418,11 @@ describe('Ventas (e2e)', () => {
       expect(advertencia).toContain('no se aplicó completo');
     });
 
-    // El bug de punta a punta (Task 1, ADR-018): un ítem afecto sin
-    // `impuestosIds` en item_impuestos —el camino por default de /items,
-    // sin mandar `impuestoIds` en la línea de venta tampoco— tiene que
-    // seguir cobrando el IVA del país porque lo deriva de la clasificación
-    // tributaria, no de la lista de impuestos asociados.
+    // El bug de punta a punta (ADR-018): un ítem afecto sin `impuestosIds` en
+    // item_impuestos —el camino por default de /items, sin mandar `impuestoIds`
+    // en la línea de venta tampoco— tiene que seguir cobrando el IVA del país
+    // porque lo deriva de la clasificación tributaria, no de la lista de
+    // impuestos asociados.
     it('un ítem afecto sin impuestosIds igual cobra el IVA del país', async () => {
       const resItem = await request(app.getHttpServer())
         .post('/api/items')
@@ -467,10 +466,10 @@ describe('Ventas (e2e)', () => {
       expect(Number(impuestos[0].valor_aplicado)).toBeCloseTo(190, 4);
     });
 
-    // Task 4 (ADR-018): el seeder dejó de asociar el IVA al ítem demo vía
-    // item_impuestos —antes tenía esa fila—; el motor lo deriva de
-    // `clasificacion_tributaria = 'afecto'`. Sin esta prueba, un seeder que
-    // reintroduce el INSERT en item_impuestos pasaría desapercibido.
+    // ADR-018: el seeder dejó de asociar el IVA al ítem demo vía item_impuestos
+    // —antes tenía esa fila—; el motor lo deriva de `clasificacion_tributaria =
+    // 'afecto'`. Sin esta prueba, un seeder que reintroduce el INSERT en
+    // item_impuestos pasaría desapercibido.
     it('el ítem demo sembrado no tiene item_impuestos asociado y el IVA se deriva igual', async () => {
       const asociaciones = await ds.query(
         `SELECT 1 FROM item_impuestos WHERE item_id = $1`,

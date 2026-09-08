@@ -111,8 +111,9 @@ describe('SesionesGarzonService', () => {
       getActivoOrThrow: jest.fn().mockResolvedValue(turno()),
     };
     managerMock = {
-      // Default: persiste tal cual, como hacía `sesionRepo.save` antes de
-      // Task 4 — cada test que le importa el resultado lo sobreescribe.
+      // Default: persiste tal cual, como hacía `sesionRepo.save` antes de que
+      // el cierre pasara a hacerse en transacción — cada test que le importa el
+      // resultado lo sobreescribe.
       save: jest.fn((_entity: unknown, row: unknown) => Promise.resolve(row)),
     };
     dataSource = {
@@ -295,8 +296,8 @@ describe('SesionesGarzonService', () => {
   });
 
   // Las dos vías de cierre de sesión tienen que caducar las pendientes: una
-  // solicitud viva contra una sesión cerrada es un estado imposible de
-  // honrar, porque la firma se valida contra esa sesión (Task 4).
+  // solicitud viva contra una sesión cerrada es un estado imposible de honrar,
+  // porque la firma se valida contra esa sesión.
   it('cerrarPropia caduca las solicitudes de testigo pendientes', async () => {
     sesionRepo.findOne.mockResolvedValue(sesion());
     dataSource.query
