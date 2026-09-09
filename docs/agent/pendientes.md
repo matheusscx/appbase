@@ -1693,6 +1693,58 @@ líneas, neto e IVA (`7a1e934d`) → [`resueltos.md`](resueltos.md).
   el owner decidió esperar a compras **para que el insumo sea confiable**, no porque falte
   maquinaria.
 
+### La moneda de un ítem y la de sus partes: "se puede, pero sin mezclar" (owner, 2026-09-09)
+
+- [ ] **Enforcear "sin mezclar" en las cuatro superficies donde la moneda de un ítem se cruza
+  con la de otro** (backend + frontend, decidido por el owner el 2026-09-09) — la tabla de
+  decisiones, lo medido y las trampas son todo lo que sigue en esta sección.
+
+**Cuatro respuestas de una ronda**, sobre las tres entradas que la § 4 tenía abiertas del frente
+del vaciado por cambio de moneda. Van en **una sola entrada** porque las respuestas resultaron
+ser **una misma regla** aplicada a cuatro superficies: construirlas por separado deja el sistema
+incoherente a mitad de camino.
+
+⚠️ **Lo primero, porque cambia el planteo de todo lo demás:** el catálogo multi-moneda
+**funciona hoy de punta a punta**. Un tenant chileno tiene CLP, UF y USD habilitadas
+(`seeder.service.ts:533`, `seedTenantMonedas`) y una venta de un ítem en dólares se convierte a
+pesos con la tasa del día, **congelando esa tasa en la línea** (`ventas.service.ts:515`). No es
+una capacidad a medio hacer que se pueda apagar sin costo — por eso la salida elegida no fue
+"todo el catálogo en la moneda oficial".
+
+**La decisión: se pueden tener precios en otra moneda que la oficial, y el sistema rechaza
+mezclar.** Las cuatro caras, con lo que hay que construir en cada una:
+
+| Caso | Decisión del owner | Dónde se enforcea |
+|---|---|---|
+| Receta o combo con partes en otra moneda que la suya | **Rechazar al guardar** | `items.service.ts`, alta y `PATCH` |
+| Cambiarle la moneda a un ítem que ya es ingrediente o componente | **Rechazar mientras esté en uso**, y el mensaje dice en cuántas recetas está | ídem |
+| `PATCH /items/:id { monedaId }` sin los precios nuevos | **400**: cambiar de moneda exige mandar precio base y los precios de extras y opciones ya en la moneda nueva | `update-item.dto.ts` + service |
+| Un grupo de modificadores del catálogo pegado a ítems de monedas distintas | **Se deja pegar, pero exige precio propio del ítem** para cada opción: no hereda el `precio_extra` del catálogo | asociación de grupos |
+
+📌 **Con esa regla, las sumas de costo pasan a ser correctas por invariante, no por
+aritmética.** Hoy `items.vue:817` (receta) y `:849` (combo) suman `costoActual × cantidad` sin
+mirar la moneda, y el backend hace lo mismo y además **lo persiste** (`items.service.ts:5661`
+receta, `:5740` combo). "Sin mezclar" las vuelve válidas **porque todas las partes comparten
+moneda** — así que el comentario que las acompañe tiene que decir eso, o el próximo que las lea
+va a "arreglar" la conversión que falta.
+
+⚠️ **Que el costo no se convierta nunca no es un olvido de esas cuatro sumas:** no hay un solo
+`× tasa` en todo el camino del costo (medido el 2026-09-09). El único del backend es
+`calculo-precios.service.ts:1019` (`convertirAMonedaOficial`) y es **del precio**. La regla del
+owner es justamente lo que evita meter una tasa del día adentro de un costo, que lo volvería
+variable — y el costo se usa para márgenes.
+
+⚠️ **Lo que la cuarta cara arrastra y NO está construido:** el override por ítem existe en la
+tabla (`item_grupo_modificador_opciones.precio_extra`) pero **la pantalla donde tipearlo no**.
+Exigir precio propio sin dónde escribirlo bloquea la asociación entera. Emparentada con la
+entrada de la § 2 *"El detalle del ítem no dice cuál de sus precios de opción es override y cuál
+es heredado"*: tocan la misma superficie y conviene mirarlas juntas.
+
+📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
+un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
+(2026-09-09) y es el que la API tiene que espejar, no contradecir.
+
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
@@ -1841,67 +1893,19 @@ abierto deja al garzón con los pagos juntados sobre una cuenta que ya no existe
 el modal de cobro esa misma tarde, el owner eligió **cerrar el cobro y avisar** —asumiendo que se
 pierden los pagos ya cargados— y se construyó ese mismo día → [`resueltos.md`](resueltos.md).
 
-### El "Costo actual" de recetas y combos suma costos de otras monedas sin convertir (2026-09-09)
+✅ **Y las tres del frente del vaciado por cambio de moneda salieron el 2026-09-09**, en una
+ronda de cuatro preguntas. Dos se mudaron a la § 3 **fundidas en una sola entrada** —el "Costo
+actual" que suma sin convertir y la puerta de `PATCH /items/:id { monedaId }`—, porque las
+respuestas resultaron ser una misma regla: *"se pueden tener precios en otra moneda, pero el
+sistema rechaza mezclar"*. La tercera **no se contestó: se refutó al medirla**, y quedó en
+**Vigilancia**.
 
-- [ ] **`configuracion/items.vue` calcula el costo de una receta sumando el `costoActual` de
-  sus ingredientes, y el de un combo sumando el de sus componentes — sin mirar la moneda de
-  ninguno** (`costoRecetaCalculado`, `costoComboPreview`). Cada ítem tiene la suya
-  (`items.moneda_id`), así que una receta en dólares con ingredientes en pesos muestra un
-  número que no es de ninguna moneda, rotulado con la del formulario.
-  **Es anterior y más grande que el vaciado por cambio de moneda** (cerrado el 2026-09-09):
-  ese número ya está mal **sin tocar el selector**. Lo que sí salió con ese frente es que la
-  moneda no cambia en silencio teniéndolo en pantalla — el aviso lo nombra y aclara que queda
-  con el mismo número—, pero el número sigue siendo aproximado.
-  **Lo que hace falta para cerrarlo**: convertir cada componente a la moneda del ítem con la
-  tasa de `tenant_moneda` antes de sumar —el mismo camino que ya usa el motor de precios—, o
-  bien decidir que el preview solo se muestra cuando todos comparten moneda. **Es una
-  decisión de producto antes que de código**: una tasa del día metida en un costo lo vuelve
-  variable, y el costo se usa para márgenes.
-  ⚠️ Ojo con el gemelo del backend antes de tomarla: revisar si `item_receta.costo_actual` e
-  `item_combo.costo_actual` —que se recalculan desde la fórmula, no desde el kardex— tienen el
-  mismo problema al persistirse.
-
-### Un descuento o recargo de monto fijo no tiene moneda, y se aplica igual a un ítem en pesos que a uno en dólares (2026-09-09)
-
-- [ ] **`descuentos.valor_monto` y `recargos.valor_monto` son plata sin `moneda_id`**: las dos
-  tablas no tienen columna de moneda. El motor los resta o los suma **tal cual** sobre el
-  precio de la línea, y ese precio está denominado en la moneda del ítem. O sea que el mismo
-  `-1000` descuenta mil pesos de un ítem en pesos y mil dólares de uno en dólares — sin que
-  nadie lo haya decidido para el segundo.
-  **Cómo apareció**: lo levantó la revisión independiente al cerrar el vaciado por cambio de
-  moneda (2026-09-09). Ese frente lo dejó **excluido por escrito** de sus dos ejes —no se vacía
-  porque el monto es del catálogo del tenant y no de la asociación con el ítem (regla del
-  owner), y no frena el gesto porque el drawer **no lo muestra**: solo asocia el nombre de la
-  regla—. La exclusión está en el docblock de `elegirMoneda` y en `patterns/frontend.md` § 8.
-  ⚠️ **Pero el problema es anterior y no lo abre ese gesto**: ya está mal sin tocar el selector.
-  **Las salidas, y la elige el owner**: (a) darle moneda al monto fijo y rechazar o convertir
-  cuando no coincide con la del ítem; (b) dejarlo sin moneda y **prohibir asociar una regla de
-  monto fijo a un ítem cuya moneda no sea la oficial del tenant**, que es la lectura implícita
-  de hoy; (c) expresar esas reglas siempre en porcentaje. La (a) es la más cara y la única que
-  soporta un catálogo multi-moneda de verdad.
-  📌 Emparentada con la de las opciones de modificadores —el mismo patrón: **un monto guardado
-  sin moneda propia que se lee en la del ítem que lo usa**—, y con el "Costo actual" que suma
-  sin convertir. Si se toma una, conviene mirar las tres juntas: es una decisión de modelo, no
-  tres parches.
-
-### `PATCH /items/:id { monedaId }` cambia la moneda y deja los montos como estaban (2026-09-09)
-
-- [ ] **La pantalla ya no deja que pase; la API sí.** Medido por la revisión independiente al
-  cerrar el vaciado por cambio de moneda: `update-item.dto.ts` acepta `monedaId` **suelto**, e
-  `items.service.ts` escribe `moneda_id = $n` sin tocar ninguno de los montos del ítem:
-  `precio_base`, `receta_extras_permitidos.precio_extra`,
-  `item_grupo_modificador_opciones.precio_extra` y el `costo_actual` de la extensión.
-  Un solo `PATCH` los deja a los cuatro **reinterpretados** en una moneda que nadie eligió
-  para ellos: `8900` que eran pesos pasan a ser 8900 dólares, y el ítem se vende así.
-  **Por qué no salió con la pantalla**: el owner decidió el gesto del formulario (vaciar y
-  avisar), y eso no se puede trasladar tal cual a la API — vaciar el precio de un ítem vivo
-  desde un `PATCH` es peor que lo que arregla. La salida es una **decisión suya**, y son dos
-  con costos distintos: **(a)** rechazar con 400 el `PATCH` que cambie `monedaId` sin traer los
-  montos nuevos —cierra el agujero, y le rompe el request a cualquier cliente que hoy mande el
-  item entero—; **(b)** exigir que `monedaId` viaje junto con `precioBase` y los precios de
-  extras y opciones, o sea "cambiar de moneda es re-cotizar el ítem".
-  ⚠️ **No se toma de arrastre**: toca DTO y service de items, y lo que se decide es qué es un
-  cambio de moneda válido. Va con su propio frente y su verificación.
+⚠️ **Y esa refutación es la lección de la ronda.** La entrada de los montos fijos la había
+levantado la revisión independiente al cerrar el frente, afirmaba que un `-1000` le descuenta
+mil **dólares** a un ítem en dólares, y **nadie la cruzó con el motor antes de escribirla**: el
+motor convierte el precio a moneda oficial *antes* de aplicar las reglas. Una entrada nacida de
+una revisión no viene verificada por venir de ahí — que es lo mismo que este archivo ya decía de
+las entradas de la § 1, con dos casos.
 
 ### ¿Un segundo helper compartido en `backend/test/`? (2026-09-07)
 
@@ -2862,6 +2866,25 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
+
+- [ ] **Un descuento o recargo de monto fijo se aplicaría en la moneda del ítem — REFUTADO al
+  medirlo (2026-09-09)** (backend; la levantó la revisión independiente al cerrar el vaciado por
+  cambio de moneda) —
+  ⚠️ **Lo que la entrada afirmaba y ES FALSO:** que `descuentos.valor_monto` y
+  `recargos.valor_monto` son plata sin `moneda_id` que el motor resta o suma *tal cual* sobre el
+  precio de la línea, así que el mismo `-1000` descontaría mil pesos de un ítem en pesos y **mil
+  dólares** de uno en dólares.
+  ✅ **Lo medido:** el motor convierte el precio del ítem a moneda oficial **antes** de resolver
+  la línea — `calculo-precios.service.ts:405` llama a `convertirAMonedaOficial` (`:1019`) sobre
+  `precioBase + precioExtraTotal`, y recién después entran descuentos, recargos e impuestos. La
+  langosta de US$ 45 llega al motor como 42.750 pesos y el `-1000` le saca **mil pesos**. Los
+  montos fijos ya son plata en moneda oficial, de punta a punta.
+  📌 **El dato estaba escrito y nadie lo cruzó**: `recargo-tramo.entity.ts:49` dice, literal,
+  *"plata, en la escala de la moneda oficial"*, y el `@EsMontoCobrado` del DTO valida contra la
+  escala de la oficial. La entrada se escribió mirando el modelo —dos tablas sin columna de
+  moneda— sin abrir el orden en que el motor hace las cuentas.
+  **No hay nada que construir.** Se anota para que la próxima revisión que vea un `valor_monto`
+  sin `moneda_id` no lo vuelva a reportar como bug.
 
 - [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
   de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
