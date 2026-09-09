@@ -565,6 +565,245 @@ watch(() => form.value.unidadMedida, () => {
 })
 
 /**
+ * Cambiar la MONEDA del ítem reinterpreta lo tipeado igual de fuerte que cambiar la
+ * unidad —`1500` en pesos no es `1500` en dólares—, así que también limpia (owner,
+ * 2026-09-09). Dos diferencias con el vecino de `unidadMedida`, y las dos salen de que
+ * este selector **no se bloquea al editar**:
+ *
+ * 1. **Va colgado del gesto del usuario, no de un `watch`.** `abrirEditar` asigna
+ *    `form.monedaId` con lo que trae la API, y un watch no distingue esa carga de una
+ *    elección: vaciaría el precio recién cargado. `editingId` tampoco sirve de guard acá
+ *    —a diferencia de la unidad, editar es justamente cuando este selector se puede tocar—.
+ *    Por eso `:model-value` + `@update:model-value` en vez de `v-model`: una asignación
+ *    programática no emite.
+ * 2. **Frena con una confirmación.** El gesto no vacía un campo sino varios, y sobre una
+ *    ficha ya guardada son filas que trajo el servidor. Lo que pide la confirmación es el
+ *    alcance, no que sea irreversible (criterio del owner).
+ *    ⚠️ Va **inline en el drawer** y no en un `CrudModal` como el resto de las
+ *    confirmaciones de la pantalla: abrir cualquier `UModal` con este drawer abierto tumba
+ *    al runner de tests por memoria —medido el 2026-09-09 con `verUnidadesOpen`, que ya
+ *    existía, así que no es de este cambio—, y un gesto sin test unitario no es una opción
+ *    para plata. Frena igual: hasta que alguien elija, la moneda es la de antes.
+ *
+ * **Qué se vacía, y por qué justo eso.** La regla del owner es "si el precio vive en la
+ * asociación con el ítem, avisar y limpiar; si es del extra como tal, no —hasta se podría
+ * estar usando en otro ítem—". Cae de ese lado el precio base y el costo (columnas de
+ * `items`) y el precio de cada extra de receta (`receta_extras_permitidos`, FK a esta
+ * receta).
+ *
+ * ⛔ **NO cae el precio de las opciones de modificadores, aunque el campo esté acá.** Lo que
+ * la pantalla muestra no es el override del ítem: `GET /items/:id` devuelve el **efectivo**
+ * (`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`), y no manda el default
+ * al lado —sí manda `cantidadDefault`, pero no su equivalente de precio—. O sea que desde
+ * acá **no se puede distinguir** un override de este ítem del número compartido del
+ * catálogo, que edita `grupos-modificadores.vue` y que puede estar en uso en otras recetas.
+ * Ante la duda manda la regla: no se toca. Lo que falta para poder tocarlo —que la API mande
+ * el default— está en `docs/agent/pendientes.md` § 2.
+ *
+ * ⛔ **Tampoco entran los descuentos y recargos de MONTO FIJO asociados al ítem**, y es una
+ * decisión, no un olvido. Su `valor_monto` vive en el catálogo del tenant y **no tiene moneda
+ * propia** (`descuentos`/`recargos` no tienen `moneda_id`), así que es "del descuento como
+ * tal" por la regla del owner: no se vacía. Y tampoco frena el gesto, porque **el drawer no lo
+ * muestra** —solo asocia el nombre de la regla—: no hay número en pantalla que la persona vea
+ * cambiar de significado. ⚠️ Lo que sí cambia es lo que el motor le resta a la línea, y ese
+ * problema es anterior a este gesto: un monto fijo sin moneda ya se aplica igual a un ítem en
+ * pesos que a uno en dólares. Frente propio en `docs/agent/pendientes.md` § 4.
+ *
+ * 📌 **Y un `0` no es plata que cambie de valor**: cero pesos son cero dólares. No se cuenta
+ * ni se vacía —vaciarlo, además, dejaría a un extra gratis sin su `precioExtra`, que el
+ * backend exige (`RecetaExtraInputDto`), o sea un 400 al guardar por un campo que la persona
+ * nunca tocó—.
+ */
+const monedaPendiente = ref<string | null>(null)
+
+/**
+ * Un monto que cambia de valor al cambiar de moneda. El `0` no: cero es cero en
+ * cualquier moneda, y contarlo haría que el aviso prometa una pérdida que no existe.
+ * `Decimal` y no `Number` por la invariante de plata, y en `try` porque acá entra lo
+ * que haya en el campo, no solo lo que ya pasó por el backend.
+ */
+function esPlataQueSeReinterpreta(valor: string): boolean {
+  if (!valor) return false
+  try {
+    return !new Decimal(valor).isZero()
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Qué campos de plata muestra HOY el formulario, que depende del tipo y de si es alta o
+ * edición. Espeja los `v-if` de la plantilla a propósito: el aviso solo puede nombrar lo
+ * que la persona ve, y `form` conserva lo tipeado para un tipo anterior —un costo que se
+ * cargó como producto sigue en el form después de pasar a servicio, aunque no se muestre
+ * ni se guarde—.
+ */
+const camposDePlataVisibles = computed(() => ({
+  precioBase: form.value.tipo !== 'ingrediente',
+  costo: (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente')
+    && !editingId.value,
+  extras: form.value.tipo === 'receta',
+}))
+
+/**
+ * El **costo vigente** es plata de este ítem que la pantalla muestra y que nadie teclea:
+ * sale de los movimientos de inventario (`costo_actual`, promedio ponderado) y se pinta
+ * formateado con la moneda del formulario. Cambiar la moneda lo deja **con el mismo número
+ * leído en otra**, y vaciarlo no es una opción —no es un campo—.
+ *
+ * ⚠️ Por eso entra igual en la decisión: sin él, un **ingrediente ya guardado** no tiene
+ * ningún campo de plata visible —no muestra precio base, y el costo solo se teclea al alta—,
+ * así que no había nada que nombrar y la moneda cambiaba **sin preguntar**, con el costo
+ * reinterpretado y el `PATCH` persistiéndolo. Lo midió la revisión independiente.
+ */
+const costoVigenteSeReinterpreta = computed(
+  () => !!editingId.value
+    && esPlataQueSeReinterpreta(formCostoActual.value ?? '')
+    // Espeja el `v-if` del campo, como `camposDePlataVisibles`: receta y combo **también**
+    // traen `costoActual` de la API, pero su drawer no muestra "Costo vigente" sino el
+    // "Costo actual" calculado —otro número y otro origen—. Sin este corte el aviso nombra
+    // un campo que no está y le atribuye el kardex a un costo que sale de una fórmula.
+    && (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente'),
+)
+
+/** Lo que hoy tiene un monto, nombrado para el aviso: sin esto no dice qué se pierde. */
+const plataQueSeVacia = computed(() => {
+  const visible = camposDePlataVisibles.value
+  const partes: string[] = []
+  if (visible.precioBase && esPlataQueSeReinterpreta(form.value.precioBase)) {
+    partes.push('el precio base')
+  }
+  if (visible.costo && esPlataQueSeReinterpreta(form.value.costo)) partes.push('el costo')
+  const extras = visible.extras
+    ? form.value.extrasPermitidos.filter(e => esPlataQueSeReinterpreta(e.precioExtra)).length
+    : 0
+  if (extras) partes.push(`${extras} ${extras === 1 ? 'precio de extra' : 'precios de extras'}`)
+  return partes
+})
+
+/**
+ * Los montos del ítem que el cambio de moneda **reinterpreta sin poder vaciarlos**: quedan con
+ * el mismo número leído en otra moneda. Se nombran aparte de lo que se vacía —prometer que se
+ * vacían sería falso— y **cuentan igual para decidir si se pregunta**: sin ellos, una pantalla
+ * donde el único monto es uno de estos cambia de moneda en silencio.
+ *
+ * Cada uno con **su** porqué, que no es el mismo: los dos costos no son campos, y el precio de
+ * una opción sí lo es pero no se puede distinguir el de este ítem del compartido del catálogo
+ * (ver el ⛔ de arriba). Los dos costos son mutuamente excluyentes por tipo.
+ */
+const montosQueSeReinterpretan = computed(() => {
+  const partes: string[] = []
+  if (costoVigenteSeReinterpreta.value) {
+    partes.push(
+      'El costo vigente no se puede vaciar —sale de los movimientos de inventario— y queda '
+      + 'con el mismo número, leído en la moneda nueva.',
+    )
+  }
+  else if (costoCalculadoSeReinterpreta.value) {
+    partes.push(
+      'El costo actual que se muestra abajo tampoco se vacía: lo calcula la pantalla desde '
+      + 'los ítems que componen este, y queda con el mismo número leído en la moneda nueva.',
+    )
+  }
+  if (opcionesDeModificadorSeReinterpretan.value) {
+    partes.push(
+      'Los precios de las opciones de modificadores tampoco se vacían —la pantalla no puede '
+      + 'distinguir el de este ítem del compartido del catálogo— y quedan con el mismo '
+      + 'número, leído en la moneda nueva.',
+    )
+  }
+  return partes
+})
+
+/**
+ * El séptimo sitio con plata del drawer, y el único que es **campo editable y se persiste**:
+ * el precio de cada opción de modificador. No se vacía (el ⛔ de arriba), pero se muestra
+ * rotulado con la moneda del formulario, así que cambiarla sin preguntar deja esos números
+ * releídos en otra —y `guardar` los manda como override de este ítem—.
+ */
+const opcionesDeModificadorSeReinterpretan = computed(
+  () => (form.value.tipo === 'receta' || form.value.tipo === 'combo')
+    && form.value.gruposModificadores.some(
+      g => g.opciones.some(o => esPlataQueSeReinterpreta(o.precioExtra)),
+    ),
+)
+
+/**
+ * El aviso describe lo que queda AHORA, no lo que había al elegir: si mientras está en
+ * pantalla la persona vacía los campos —o cambia la unidad, que los vacía—, deja de haber
+ * algo que perder y el texto lo dice.
+ *
+ * ⛔ Lo que **no** hace es aplicarse solo en ese caso, que fue la primera versión: vaciar el
+ * campo para retipearlo, o cambiar la unidad, pasaban a cambiar la moneda **sin que nadie
+ * confirmara** —medido por la revisión independiente—. En un campo de plata la regla es al
+ * revés: nada cambia de moneda sin un click, aunque el cambio no cueste nada.
+ */
+const mensajeCambioMoneda = computed(() => {
+  const partes = plataQueSeVacia.value
+  const noSeVacian = montosQueSeReinterpretan.value.join(' ')
+  if (!partes.length) {
+    return noSeVacian
+      ? `No hay montos tipeados que vaciar. ${noSeVacian}`
+      : 'Ya no queda ningún monto cargado, así que no se vacía nada: solo cambia la moneda.'
+  }
+  const lista = partes.length > 1
+    ? `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`
+    : partes[0]
+  const vaciado = `Se vacía ${lista}. Un monto tipeado en una moneda no vale lo mismo en otra, `
+    + 'y convertirlo daría un número que nadie tecleó: hay que volver a cargarlo.'
+  return noSeVacian ? `${vaciado} ${noSeVacian}` : vaciado
+})
+
+const confirmarCambioMonedaLabel = computed(() =>
+  plataQueSeVacia.value.length ? 'Cambiar y vaciar' : 'Cambiar la moneda',
+)
+
+function elegirMoneda(monedaId: string) {
+  // **Cualquier** elección resuelve el aviso anterior, incluso volver a elegir la que ya
+  // está puesta (el gesto de "dejala como está") o una que se aplique de una. Un aviso que
+  // sobrevive a un gesto nuevo sobre el mismo selector queda huérfano: promete un cambio
+  // que ya ocurrió, y el click posterior vacía plata sin cambiar ninguna moneda.
+  monedaPendiente.value = null
+  if (!monedaId || monedaId === form.value.monedaId) return
+  // Se aplica sin preguntar solo si el cambio no toca **ningún** monto del ítem: ni uno
+  // tipeado que haya que vaciar, ni ninguno de los que se reinterpretan sin vaciarse.
+  if (!plataQueSeVacia.value.length && !montosQueSeReinterpretan.value.length) {
+    aplicarCambioMoneda(monedaId)
+    return
+  }
+  monedaPendiente.value = monedaId
+}
+
+function confirmarCambioMoneda() {
+  const nueva = monedaPendiente.value
+  monedaPendiente.value = null
+  if (nueva) aplicarCambioMoneda(nueva)
+}
+
+/**
+ * ⚠️ Vacía **también lo que el tipo actual no muestra** —el costo que quedó de cuando el
+ * ítem era producto, por ejemplo—, aunque el aviso no lo haya nombrado. Ese monto no se ve
+ * y tampoco se guarda, pero volver al tipo anterior lo traería de vuelta escrito en la
+ * moneda vieja. Se avisa por lo que la persona puede ver perder; se limpia por lo que puede
+ * volver.
+ */
+function aplicarCambioMoneda(monedaId: string) {
+  form.value.monedaId = monedaId
+  if (esPlataQueSeReinterpreta(form.value.precioBase)) form.value.precioBase = ''
+  if (esPlataQueSeReinterpreta(form.value.costo)) form.value.costo = ''
+  for (const extra of form.value.extrasPermitidos) {
+    if (esPlataQueSeReinterpreta(extra.precioExtra)) extra.precioExtra = ''
+  }
+}
+
+// Cambiar el TIPO en el alta reordena el formulario entero —esconde el costo, el precio
+// base o los extras según cuál sea—, así que un aviso pendiente pasa a nombrar campos que
+// ya no están en pantalla. Muere con el cambio, como muere al cerrar el drawer.
+watch(() => form.value.tipo, () => {
+  monedaPendiente.value = null
+})
+
+/**
  * Frente de bodegas y traslados: el desglose por ubicación del item que se está
  * editando, el local primero. Solo lo trae `GET /items/:id` — la fila de la
  * lista no lo tiene—, así que se guarda aparte de `form`, igual que
@@ -618,6 +857,28 @@ const costoComboPreview = computed((): string | null => {
   return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString()
 })
 
+/**
+ * El "Costo actual" que muestran receta y combo se reinterpreta igual que el costo vigente
+ * al cambiar la moneda: mismo número, otra etiqueta. Espeja las condiciones con que la
+ * plantilla lo pinta. Se declara acá, después de los dos preview, y se usa más arriba
+ * —dentro de closures, así que la referencia se resuelve recién al evaluarse—.
+ *
+ * ⚠️ **Este número ya es aproximado antes de tocar la moneda**: suma los `costoActual` de
+ * otros ítems sin convertir, y cada uno tiene la suya. Eso es anterior y más grande que este
+ * gesto (entrada propia en `docs/agent/pendientes.md` § 4); lo que sí es de este gesto es no
+ * cambiar la moneda en silencio con ese número en pantalla.
+ */
+const costoCalculadoSeReinterpreta = computed(() => {
+  if (form.value.tipo === 'receta') {
+    return esPlataQueSeReinterpreta(costoRecetaCalculado.value ?? '')
+  }
+  if (form.value.tipo === 'combo') {
+    return form.value.componentes.length > 0
+      && esPlataQueSeReinterpreta(costoComboPreview.value ?? '')
+  }
+  return false
+})
+
 const drawerTitle = computed(() =>
   editingId.value ? 'Editar item' : 'Nuevo item',
 )
@@ -640,6 +901,11 @@ function resetDrawer() {
   form.value.monedaId = monedasOpts.value[0]?.value ?? ''
   formCostoActual.value = null
   formDesglosePorUbicacion.value = []
+  // Un cambio de moneda a medio confirmar muere con el formulario que lo pidió. Sin
+  // esto sobrevive al cierre del drawer —también al que hace `guardar`—, y el aviso
+  // reaparece sobre el ítem siguiente: confirmarlo ahí le aplica una moneda que nadie
+  // eligió para él y le borra la plata recién tipeada.
+  monedaPendiente.value = null
 }
 
 watch(drawerOpen, (open) => {
@@ -1752,14 +2018,45 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             </UFormField>
 
             <UFormField label="Moneda" required>
+              <!-- `:model-value` y no `v-model` a propósito: solo el gesto del usuario
+                   dispara el vaciado, no la carga de la ficha. Ver `elegirMoneda`. -->
               <USelectMenu
-                v-model="form.monedaId"
+                :model-value="form.monedaId"
                 :items="monedasOpts"
                 value-key="value"
                 placeholder="Selecciona moneda"
                 class="w-full"
+                @update:model-value="elegirMoneda"
               />
             </UFormField>
+
+            <!-- Título NEUTRO a propósito, y no "…vacía lo que ya está cargado": este aviso
+                 también se muestra cuando ya no queda nada que vaciar, y ahí ese encabezado
+                 prometería una pérdida que el propio cuerpo desmiente. Lo que conmuta con el
+                 estado es la descripción y la etiqueta del botón. -->
+            <UAlert
+              v-if="monedaPendiente"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              title="Cambiar la moneda del ítem"
+              :description="mensajeCambioMoneda"
+              class="col-span-2"
+            >
+              <template #actions>
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  @click="() => { monedaPendiente = null }"
+                >Dejar la moneda como está</UButton>
+                <UButton
+                  color="warning"
+                  size="xs"
+                  @click="confirmarCambioMoneda"
+                >{{ confirmarCambioMonedaLabel }}</UButton>
+              </template>
+            </UAlert>
 
             <UFormField label="Categoría">
               <USelectMenu
@@ -2136,7 +2433,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   />
                 </UFormField>
                 <div class="flex items-end gap-2">
-                  <UFormField label="Precio extra" class="flex-1">
+                  <!-- `required`: el backend lo exige (`RecetaExtraInputDto`), y vaciarlo es
+                       un camino real desde el cambio de moneda. Sin la marca, el 400 al
+                       guardar no dice qué fila quedó sin precio. -->
+                  <UFormField label="Precio extra" class="flex-1" required>
                     <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" class="w-full" />
                   </UFormField>
                   <UButton

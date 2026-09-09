@@ -572,7 +572,56 @@ Reglas:
   mismo número y se muestra igual. Lo que hace falta limpiar no es la escala: es que el número
   fue tipeado para otro producto y otra moneda. ⚠️ **No se puede delegar en el watch de la unidad**: entre dos productos de base
   `kg` la unidad no cambia y Vue no dispara con el mismo valor. Cada watch limpia lo suyo.
-  📌 La otra mitad del mismo problema es **visual**: un "Costo vigente" en unidad base al
+  📌 **Y cambiar la MONEDA limpia igual** (owner, 2026-09-09), en `configuracion/items.vue`.
+  Mismo motivo —`1500` en pesos no es `1500` en dólares—, con **dos diferencias** que salen de
+  que ese selector, a diferencia del de unidad, **no se bloquea al editar**:
+  **(a) cuelga del gesto de la persona** (`:model-value` + `@update:model-value`), no de un
+  `watch`: `abrirEditar` asigna la moneda con lo que trae la API, y un watch no distingue esa
+  carga de una elección —vaciaría el precio recién cargado—. `editingId` no sirve de guard,
+  porque editar es justamente cuando el selector se puede tocar.
+  **(b) frena pidiendo confirmación**, inline en el drawer.
+
+  ⭐ **La decisión es de DOS ejes, y hay que hacerle las dos preguntas a cada monto**: *¿se
+  vacía?* y *¿frena el gesto?* No coinciden: hay montos que no se vacían y frenan igual. El
+  barrido que los encuentra no es `grep MoneyInput` —eso da solo los editables— sino
+  **`grep formatMonto` dentro del drawer**, y hay que correrlo, no citarlo.
+
+  | Monto | ¿Se vacía? | ¿Frena? | Por qué |
+  |---|---|---|---|
+  | precio base, costo del alta | sí | sí | columnas de `items`: plata de este ítem |
+  | precio de cada extra de receta | sí | sí | `receta_extras_permitidos`, FK a esta receta |
+  | costo vigente (producto/ingrediente, al editar) | **no** | sí | no es un campo: sale de los movimientos de inventario |
+  | "Costo actual" calculado (receta/combo) | **no** | sí | no es un campo: lo calcula la pantalla desde los ítems que componen a este |
+  | precio de opción de modificador | **no** | sí | la API manda el **efectivo** (`COALESCE(override, default)`) sin el default al lado, así que no se puede distinguir el de este ítem del compartido del catálogo — y ese es "del extra como tal" (regla del owner) |
+  | monto fijo de un descuento/recargo asociado | **no** | **no** | no tiene moneda propia (`descuentos`/`recargos` sin `moneda_id`) **y el drawer no lo muestra**: no hay número en pantalla que cambie de significado a la vista. El problema es anterior al gesto → `pendientes.md` § 4 |
+
+  ⭐ **Nada cambia de moneda sin un click cuando hay plata en pantalla.** Si la persona vacía
+  los campos, el aviso solo cambia de texto (*"Ya no queda ningún monto cargado…"*) y sigue
+  esperando. ⚠️ La versión que en ese caso se aplicaba sola hacía que **borrar un campo para
+  retipearlo**, o **cambiar la unidad** (que lo vacía), cambiaran la moneda sin confirmación.
+  ⭐ **Un aviso pendiente no sobrevive a un gesto nuevo sobre el mismo selector**, y la regla va
+  en **una línea al principio del handler**: *cualquier* elección resuelve el aviso anterior
+  —incluso la que aplica sin preguntar, y la de la moneda que ya estaba puesta—. Escrita como
+  guards separados, uno por cada forma de salir, se escapa; el caso que deja es un aviso
+  huérfano que **vacía plata recién tipeada sin cambiar ninguna moneda**. También muere con el
+  formulario que lo pidió: cerrar el drawer, guardar, cambiar el tipo.
+  ⭐ **El aviso solo nombra lo que el tipo actual muestra, y con su origen verdadero.** `form`
+  conserva lo tipeado para un tipo anterior —un costo cargado como producto sigue ahí después
+  de pasar a servicio, invisible y sin guardarse—, así que **cada espejo replica el `v-if` de
+  su campo**: receta y combo también traen `costoActual` de la API, y sin el corte por tipo el
+  aviso nombra un "Costo vigente" que esos drawers no muestran. Al **aplicar** sí se vacía lo
+  escondido: se avisa por lo que se puede ver perder, se limpia por lo que puede volver.
+  📌 **Y un `0` no se cuenta ni se vacía**: cero es cero en cualquier moneda, y un extra gratis
+  es un caso soportado —vaciarle el precio lo deja sin un campo que el DTO exige—. El descarte
+  usa `Decimal`, no truthiness: `'0.0000'` es truthy.
+  ⚠️ La confirmación va **inline** y no en un `CrudModal` como el resto de la pantalla: abrir
+  cualquier `UModal` con ese drawer abierto tumba al runner de tests por memoria, y cerrarlo
+  tira un unhandled rejection que deja la corrida en rojo con todos los tests en verde (los
+  dos, medidos y anotados en `pendientes.md` § 2). Fijado en `items.nuxt.spec.ts`, y lo que ese
+  entorno no puede aseverar —que la **etiqueta** del selector siga mostrando la moneda vieja
+  mientras se decide, y que cerrar el drawer mate el pendiente— en
+  `e2e/configuracion/items-moneda.spec.ts`.
+  📌 La otra mitad del problema de la **unidad** es **visual**: un "Costo vigente" en unidad base al
   lado de un "Costo nuevo (por g)" son dos números que no se pueden comparar. El vigente
   sigue al selector, y como es una **tasa convertida** puede caer en fracciones que la
   moneda no tiene → se formatea con **`formatCosto`** (`useCurrency`) y no con

@@ -23,6 +23,179 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cambiar la moneda de un ítem vacía la plata que quedó escrita en la otra (cerrada 2026-09-09)
+
+Sale de [`pendientes.md` § 2](pendientes.md), donde la dejó la revisión independiente del
+cierre del ×10 el 2026-09-08. La entrada, verbatim:
+
+### Cambiar la MONEDA del ítem no limpia lo tipeado, como sí lo hace cambiar la unidad (2026-09-08)
+
+- [ ] **`configuracion/items.vue` limpia costo y precio cuando cambia la unidad de medida,
+  y no cuando cambia la moneda** —y los dos gestos reinterpretan el número igual de fuerte:
+  `1500` en dólares no es `1500` en pesos—. La levantó la revisión independiente del cierre
+  del ×10 (2026-09-08).
+  **Lo que se guarda no cambió con ese commit**: antes el prop `decimales` fijaba la escala
+  en 4 y el número tipeado sobrevivía al cambio de moneda; ahora sobrevive porque el
+  componente ya no reescribe lo que le pasa el padre. **Lo que sí es nuevo es que la pantalla
+  y el formulario dejan de coincidir**: tipear `1500,50` en USD y pasar a CLP muestra `1.501`
+  y guarda `1500.5` —el backend lo acepta, `@EsCosto()` es escala 4—. Sumado a que ahora hay
+  una regla escrita al lado (*"cambiar el selector de unidad LIMPIA el campo"*, owner
+  2026-08-28) que este camino no sigue, es lo que hay que resolver en un sentido o en el otro.
+  **Lo único que falta medir** es qué pasa con un ítem **ya guardado**: el selector de moneda
+  está habilitado al editar, a diferencia del de unidad, así que el mismo gesto sobre una
+  ficha cargada tiene un prefill de por medio que el alta no tiene.
+  **La pregunta para el owner, después de eso**: cambiar la moneda de un ítem, ¿tiene que
+  vaciar el precio como lo vacía cambiar la unidad, o conservarlo?
+
+**Lo que faltaba medir, medido (2026-09-09).** Sobre una ficha ya guardada el selector de
+moneda está habilitado, y la plata del drawer no son dos campos. El barrido bueno —`grep
+formatMonto` **más** `grep MoneyInput`, o sea lo que se muestra y no solo lo que se edita—
+da **siete** sitios: `precio_base`, el costo que se teclea al alta, el **costo vigente** que se
+muestra al editar, el precio de cada **extra permitido**, el de cada **opción** de los grupos
+de modificadores, y el "Costo actual" que la pantalla **calcula** —uno para receta y otro para
+combo—. A cada uno hay que hacerle **dos** preguntas, no una: ¿se vacía?, y ¿frena el gesto?
+Las respuestas no coinciden: hay montos que no se vacían y frenan igual. Los primeros barridos
+miraron solo los campos editables, y por eso los dos costos aparecieron tarde: los encontró la
+revisión independiente barriendo lo que se **muestra**, no lo que se edita.
+
+**La pregunta que se le hizo al owner, y su respuesta.** Se preguntó con la escena —una
+hamburguesa guardada en pesos, con tres extras cargados, pasando a dólares—, ofreciendo
+vaciar solo el precio, vaciar todo con aviso, vaciar todo en silencio, o no tocar nada al
+editar. El owner no eligió una opción: **puso la condición que las decide**. *"Depende de
+dónde se guarde el precio: si se guarda en la asociación, avisar y limpiar todo; si el
+precio es del extra como tal, no se puede limpiar porque hasta se podría estar usando en
+otro ítem."*
+
+Medida la condición, cae la rama de limpiar:
+
+| Campo | Dónde vive | ¿Es de este ítem? |
+|---|---|---|
+| precio base, costo | `items` | sí |
+| precio de un extra de receta | `receta_extras_permitidos.precio_extra`, FK `receta_item_id` | sí — de esa receta y de ninguna otra |
+| precio de una opción de modificador | `item_grupo_modificador_opciones.precio_extra` | **no se puede saber desde la pantalla** — ver abajo |
+| monto fijo de un descuento o recargo asociado | `descuentos.valor_monto` / `recargos.valor_monto` | no — es del catálogo del tenant, y **no tiene moneda propia**; queda excluido de los dos ejes y con entrada propia en [`pendientes.md` § 4](pendientes.md) |
+
+⛔ **La opción de modificador quedó afuera, y eso lo decidió la misma regla del owner.** La
+primera versión la limpiaba, con el argumento de que el campo escribe
+`item_grupo_modificador_opciones`, o sea el override del ítem. Es cierto al **escribir** y
+falso al **leer**: `GET /items/:id` devuelve el **efectivo**
+—`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`— y **no manda el default al
+lado** (manda `cantidadDefault`, pero no su equivalente de precio). Así que el número que se
+ve puede ser el compartido del catálogo, que edita `grupos-modificadores.vue` y que puede
+estar en uso en otras recetas: exactamente *"el precio del extra como tal"* que el owner
+excluyó. Lo midió la revisión independiente sobre el ítem del seed, sin un solo override:
+el aviso prometía vaciar tres precios que después volvían intactos, porque vaciar el override
+solo devuelve la herencia. Lo que falta para poder tocarlos —que la API mande el default— es
+una entrada propia en [`pendientes.md` § 2](pendientes.md).
+
+📌 **Y un `0` tampoco se cuenta ni se vacía**, misma ronda de revisión: cero es cero en
+cualquier moneda. Contarlo hacía que el aviso prometiera una pérdida inexistente, y vaciarlo
+dejaba a un extra gratis —caso soportado— sin el `precioExtra` que el DTO exige, o sea un 400
+al guardar por un campo que nadie tocó. El descarte va con `Decimal` y no con truthiness,
+porque de la API los montos llegan como `'0.0000'`, que es truthy.
+
+**Lo que se hizo.**
+
+- El vaciado cuelga del **gesto de la persona** (`:model-value` + `@update:model-value`), no
+  de un `watch`. `abrirEditar` asigna `form.monedaId` con lo que trae la API y un watch no
+  puede distinguir esa carga de una elección: vaciaría el precio recién cargado. `editingId`
+  tampoco sirve de guard —a diferencia de la unidad, **editar es justamente cuando este
+  selector se puede tocar**—.
+- **Frena pidiendo confirmación**, y el aviso nombra lo que se pierde contando *montos*, no
+  filas (*"Se vacía el precio base y 2 precios de extras"* — una receta con tres extras
+  cargados, uno de ellos gratis). Lo que lo pide es el alcance, no que sea irreversible:
+  sobre una ficha cargada son filas que trajo el servidor.
+- **Un aviso pendiente muere con el formulario que lo pidió**: al cerrar el drawer (también
+  al que hace `guardar`), al cambiar el tipo del ítem —que rearma el formulario— y al volver
+  a elegir la moneda que ya estaba puesta, que es el gesto de rechazarlo. Pero si la persona
+  **vacía los campos**, el aviso solo cambia de texto y sigue esperando el click: nada cambia
+  de moneda sin un gesto explícito, aunque el cambio ya no cueste nada.
+- La regla quedó escrita al lado de la de la unidad, en
+  [`patterns/frontend.md` § 8](../patterns/frontend.md).
+
+⛔ **La confirmación iba a ser un `CrudModal`, como las otras tres de la pantalla, y no pudo
+ser.** Construida así, el spec moría con `FATAL ERROR: Reached heap limit` a los ~95 s.
+Bisecado: no es del cambio. **Cualquier `UModal` que se abra con el drawer de `items` abierto
+tumba al runner** — se reprodujo apuntando el mismo gesto a `verUnidadesOpen`, que ya existía,
+y una sonda con `AppDrawer` + `CrudModal` fuera de esta página pasa en 4 s. Entre un modal sin
+test unitario y un aviso inline con test, sobre un gesto que toca plata, se eligió el segundo:
+frena igual —hasta que alguien elija, la moneda es la de antes— y se puede fijar. Queda anotado
+en `pendientes.md` § 2 como obstáculo de herramienta.
+
+⚠️ **Lo que este cierre NO cierra: la puerta de la API.** Lo levantó la revisión
+independiente. `PATCH /items/:id { monedaId }` sigue cambiando la moneda sin tocar
+ninguno de los montos del ítem —el precio base, los precios de extras, los overrides de
+opción y el `costo_actual`— (`update-item.dto.ts` acepta `monedaId` suelto;
+`items.service.ts` escribe `moneda_id` y nada más), así que por HTTP el problema original sigue vivo tal cual. El owner
+pidió el gesto de la pantalla y eso es lo que se hizo; la puerta quedó anotada como entrada
+propia en [`pendientes.md` § 4](pendientes.md), porque necesita una decisión que la pantalla
+no puede tomar por la API —rechazar el cambio, o exigir que venga con los montos nuevos—.
+
+**Lo que lo fija.** Veinte tests en `items.nuxt.spec.ts` —43 en total el archivo— más dos en
+`e2e/configuracion/items-moneda.spec.ts`, en un navegador de verdad, y **veintiocho mutantes,
+corridos de a uno**. Los dos que más matan son los que cambian el diseño entero:
+**implementarlo con el `watch` ingenuo** —el que sale de copiar el vecino de la unidad— mata
+18, y **asignar sin preguntar** mata 17 (más los dos e2e). De los veintiséis restantes,
+**veinticinco matan entre uno y cinco tests cada uno, siempre los de su rama** —hay uno por
+cada decisión: qué se vacía y qué no, qué frena el gesto y qué no, qué nombra el aviso, con qué
+origen, en singular o en plural, y qué lo mata—; el que falta es el del `resetDrawer`, que no
+muere en el unit y tiene su párrafo acá abajo.
+
+📌 El del `watch` ingenuo es el que más importa, y el test que existe para él —*"abrir una
+ficha guardada no vacía nada"*— lleva la ficha en **otra** moneda que el default del alta a
+propósito: con la misma, `form.monedaId` no cambia al cargarla y el mutante sobrevive.
+
+⚠️ **Uno de los veintiocho pasa el unit entero —43 en verde— y solo muere en el navegador**:
+dejar que el cambio pendiente sobreviva al cierre del drawer. Ningún test de vitest lo puede
+ver porque **cerrar este drawer ahí revienta el runner**. Por eso los dos tests de navegador
+no son adorno: el otro cubre lo que el unit tampoco puede aseverar, que la **etiqueta** del
+selector siga mostrando la moneda vieja mientras el cambio está a medio confirmar (el unit
+afirma sobre el modelo).
+📌 **Y ese reparto se midió dos veces, porque la primera vez estaba mal.** Con la versión que
+se aplicaba sola, ese mutante tampoco moría en el navegador: al cerrar el drawer el formulario
+se vacía, el aviso se quedaba sin nada que nombrar y el auto-aplicado consumía el pendiente
+igual. Lo midió la revisión independiente, contra una prosa que ya afirmaba la red que no
+existía. Sacar el auto-aplicado —que hacía falta por otro motivo— dejó la línea del reset
+sosteniendo el caso, y recién ahí la afirmación pasó a ser cierta.
+
+📌 **Las rondas de revisión independiente fueron encontrando, una tras otra, la misma forma de
+agujero**: *el aviso describe un formulario que ya no es, o la moneda cambia sin que nadie
+confirme.* La lista vale por las maneras distintas en que la misma regla se escapa —no por el
+total, que no prueba que no quede otra—:
+
+- **El aviso sobrevive al formulario que lo pidió**: al cerrar el drawer (y al que hace
+  `guardar`) reaparecía sobre el ítem siguiente y confirmarlo ahí le aplicaba una moneda que
+  nadie eligió para él; al cambiar el **tipo**, seguía nombrando campos que ya no estaban; al
+  volver a elegir la moneda que ya estaba puesta —el gesto de rechazarlo— no se cancelaba; y
+  el **camino rápido**, el que aplica sin preguntar, lo dejaba **huérfano**: prometía un cambio
+  ya ocurrido y el click posterior vaciaba plata recién tipeada **sin cambiar ninguna moneda**.
+  ⭐ Los cuatro se cierran con **una** línea, no con cuatro guards: *cualquier elección en ese
+  selector resuelve el aviso anterior*, al principio del handler.
+- **El aviso dice más de lo que hace**: el texto degeneraba a *"Se vacía ."* al vaciar los
+  campos a mano; el **título**, que era fijo, seguía prometiendo el vaciado mientras el cuerpo
+  decía que ya no quedaba nada; y prometía vaciar los precios de opción de modificadores, que
+  después volvían intactos.
+  ⛔ Y el primer arreglo del texto degenerado fue peor que el problema: cuando ya no quedaba
+  nada que vaciar, **se aplicaba solo**. Con eso, borrar un campo para retipearlo —o cambiar la
+  unidad, que lo vacía— pasaba a cambiar la moneda **sin que nadie confirmara**. ⭐ En un campo
+  de plata la regla es la contraria: *nada cambia de moneda sin un click, aunque el cambio ya no
+  cueste nada*.
+- **Montos que nadie contó**, y los tres se ven mirando *lo que se muestra* y no *lo que se
+  edita*: el **costo vigente** (por él, un ingrediente ya guardado —que no tiene ni un campo de
+  plata visible— cambiaba de moneda sin preguntar, con `guardar` persistiéndola), el **"Costo
+  actual" calculado** de receta y combo, y los precios de **opción de modificador**.
+  ⭐ De ahí la regla de los **dos ejes**: *no se vacía* y *no cuenta* son dos preguntas
+  distintas. Las opciones están excluidas del vaciado por la regla del owner, y aun así tienen
+  que frenar el gesto: son plata editable que se persiste, pre-llenada con el default del
+  catálogo sin que nadie teclee.
+
+📌 **La lección del barrido, y su trampa**: los sitios con plata no salen de `grep MoneyInput`
+—eso da los editables— sino de **`grep formatMonto` dentro del drawer**. Y escribirlo no es
+aplicarlo: la ronda que dejó esa línea escrita se saltó dos sitios que ese mismo `grep`
+devolvía.
+
+---
+
 ## El `.` que multiplica por 10, y los seis campos de dinero de `items.vue` (cerrada 2026-09-08)
 
 Sale de [`pendientes.md` § 2](pendientes.md), donde nació el 2026-08-26 corrigiendo una
@@ -254,10 +427,11 @@ con el detalle de cómo aparecieron.
   cuantizar en silencio"*, docblock de `EscalaMonedaPipe`— funcionando, pero es una vía nueva
   para que una pantalla no guarde sin que nadie haya tocado el campo. Hoy no hay ningún valor
   así guardado (lo escribió el mismo pipe que ahora lo rechazaría).
-- **Cambiar la MONEDA del ítem no limpia lo tipeado, y ahí la pantalla y el formulario dejan
-  de coincidir.** Es el vecino inmediato del `watch` que sí limpia al cambiar la unidad, y
-  **es decisión de producto**: quedó con entrada propia en `pendientes.md`, medido, en vez de
-  resolverlo de arrastre acá.
+- ✅ **Cambiar la MONEDA del ítem no limpiaba lo tipeado, y ahí la pantalla y el formulario
+  dejaban de coincidir.** Era el vecino inmediato del `watch` que sí limpia al cambiar la
+  unidad, y **era decisión de producto**: quedó con entrada propia, medido, en vez de
+  resolverlo de arrastre acá. **Contestada y construida el 2026-09-09** → el cierre de más
+  arriba en este mismo archivo.
 - **`ReembolsoModal`** —el punto 3 de la entrada, ortogonal desde el principio— queda abierto
   con entrada propia en `pendientes.md`: no tiene nada que ver con la escala.
 

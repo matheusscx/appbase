@@ -787,24 +787,49 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
      (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
      Decimal, que normaliza los ceros a la derecha.
 
-### Cambiar la MONEDA del ítem no limpia lo tipeado, como sí lo hace cambiar la unidad (2026-09-08)
+### El detalle del ítem no dice cuál de sus precios de opción es override y cuál es heredado (2026-09-09)
 
-- [ ] **`configuracion/items.vue` limpia costo y precio cuando cambia la unidad de medida,
-  y no cuando cambia la moneda** —y los dos gestos reinterpretan el número igual de fuerte:
-  `1500` en dólares no es `1500` en pesos—. La levantó la revisión independiente del cierre
-  del ×10 (2026-09-08).
-  **Lo que se guarda no cambió con ese commit**: antes el prop `decimales` fijaba la escala
-  en 4 y el número tipeado sobrevivía al cambio de moneda; ahora sobrevive porque el
-  componente ya no reescribe lo que le pasa el padre. **Lo que sí es nuevo es que la pantalla
-  y el formulario dejan de coincidir**: tipear `1500,50` en USD y pasar a CLP muestra `1.501`
-  y guarda `1500.5` —el backend lo acepta, `@EsCosto()` es escala 4—. Sumado a que ahora hay
-  una regla escrita al lado (*"cambiar el selector de unidad LIMPIA el campo"*, owner
-  2026-08-28) que este camino no sigue, es lo que hay que resolver en un sentido o en el otro.
-  **Lo único que falta medir** es qué pasa con un ítem **ya guardado**: el selector de moneda
-  está habilitado al editar, a diferencia del de unidad, así que el mismo gesto sobre una
-  ficha cargada tiene un prefill de por medio que el alta no tiene.
-  **La pregunta para el owner, después de eso**: cambiar la moneda de un ítem, ¿tiene que
-  vaciar el precio como lo vacía cambiar la unidad, o conservarlo?
+- [ ] **`GET /items/:id` manda el precio efectivo de cada opción de modificador y nada más**:
+  `COALESCE(ovr.precio_extra, o.precio_extra)` (`items.service.ts`). Para la cantidad sí manda
+  las dos —`cantidad` efectiva y `cantidadDefault`—, para el precio no. Consecuencia: **la
+  pantalla no puede distinguir** un override de este ítem del número compartido del catálogo,
+  y cualquier regla que dependa de esa distinción no se puede escribir en el frontend.
+  **Dónde ya costó**: el vaciado por cambio de moneda (cerrado el 2026-09-09) tuvo que dejar
+  esas opciones afuera. La regla del owner es "lo que vive en la asociación con el ítem se
+  limpia; lo que es del extra como tal, no", y sin el default al lado los dos casos se ven
+  igual. Medido por la revisión independiente sobre la Hamburguesa Especial del seed, que no
+  tiene ni un override: el aviso prometía vaciar tres precios que volvían intactos.
+  **Lo que lo cierra**: sumar `precioExtraDefault` a la fila de opción del detalle, gemelo
+  exacto de `cantidadDefault` —misma query, sin N+1: la columna ya está en el `FROM`—. Con
+  eso el frente de la moneda puede volver a incluirlas, y de paso la pantalla puede mostrar
+  cuáles están overrideadas, que hoy tampoco se ve.
+  ⚠️ Antes de tomarla, revisar si el mismo hueco existe en las otras lecturas que devuelven
+  opciones (el listado, el catálogo de grupos): la entrada se midió sobre `findOne`.
+
+### El drawer de `items` no se puede ni cerrar ni tapar con un modal en el entorno de tests (2026-09-09)
+
+- [ ] **Es un obstáculo de herramienta, no un bug de producto**: en el navegador el modal
+  sobre el drawer funciona; lo que muere es el runner. Un gesto dentro del drawer de
+  `configuracion/items.vue` que abra un `UModal` hace que
+  `items.nuxt.spec.ts` termine en `FATAL ERROR: Reached heap limit` a los ~95 s, con el
+  worker caído y **los tests anteriores reportados como pasados**, que es la parte cara: sin
+  bisecar parece un problema del cambio que uno acaba de escribir.
+  **Medido el 2026-09-09**, cerrando el vaciado por cambio de moneda: se reprodujo apuntando
+  el mismo gesto a `verUnidadesOpen` —un modal que ya existía y que el cambio no tocaba—, y
+  una sonda con `AppDrawer` + `CrudModal` **fuera** de esta página pasa en 4 s. O sea que no
+  es el modal ni el drawer por separado: es esta combinación, con este drawer.
+  📌 **Y el mismo drawer tampoco se puede CERRAR** desde un test de vitest: el `Presence` de
+  Reka lee `getComputedStyle().display` en la animación de salida y happy-dom tira
+  `TypeError: Receiver must be an instance of class CSSStyleDeclaration` como **unhandled
+  rejection**. Los tests pasan y el proceso **igual sale con código ≠ 0**, así que el gate
+  queda rojo sin un solo test en rojo — el modo de falla más caro de diagnosticar de los dos.
+  **Qué se hizo mientras tanto**: la confirmación de ese gesto quedó **inline en el drawer**
+  (`UAlert` con sus dos botones), que frena igual y sí se puede testear; y lo que necesita
+  cerrar el drawer se fue a `e2e/configuracion/items-moneda.spec.ts`, en un navegador real.
+  **Lo que falta** es saber si el que se cuelga es `vaul` (el drawer), Reka o happy-dom, y si
+  hay una opción del entorno que lo destrabe. Hasta entonces, cualquier confirmación nueva
+  dentro de ese drawer va inline. ⚠️ Antes de tomarla, medir si sigue pasando: el runner y
+  Nuxt UI se actualizan.
 
 ### El modal de reembolso formatea con la moneda del tenant una orden que siempre es CLP (2026-09-08)
 
@@ -1815,6 +1840,68 @@ ponerla junto a sus parientes temáticos, así que conviene releer el destino an
 abierto deja al garzón con los pagos juntados sobre una cuenta que ya no existe"*. Nació al cerrar
 el modal de cobro esa misma tarde, el owner eligió **cerrar el cobro y avisar** —asumiendo que se
 pierden los pagos ya cargados— y se construyó ese mismo día → [`resueltos.md`](resueltos.md).
+
+### El "Costo actual" de recetas y combos suma costos de otras monedas sin convertir (2026-09-09)
+
+- [ ] **`configuracion/items.vue` calcula el costo de una receta sumando el `costoActual` de
+  sus ingredientes, y el de un combo sumando el de sus componentes — sin mirar la moneda de
+  ninguno** (`costoRecetaCalculado`, `costoComboPreview`). Cada ítem tiene la suya
+  (`items.moneda_id`), así que una receta en dólares con ingredientes en pesos muestra un
+  número que no es de ninguna moneda, rotulado con la del formulario.
+  **Es anterior y más grande que el vaciado por cambio de moneda** (cerrado el 2026-09-09):
+  ese número ya está mal **sin tocar el selector**. Lo que sí salió con ese frente es que la
+  moneda no cambia en silencio teniéndolo en pantalla — el aviso lo nombra y aclara que queda
+  con el mismo número—, pero el número sigue siendo aproximado.
+  **Lo que hace falta para cerrarlo**: convertir cada componente a la moneda del ítem con la
+  tasa de `tenant_moneda` antes de sumar —el mismo camino que ya usa el motor de precios—, o
+  bien decidir que el preview solo se muestra cuando todos comparten moneda. **Es una
+  decisión de producto antes que de código**: una tasa del día metida en un costo lo vuelve
+  variable, y el costo se usa para márgenes.
+  ⚠️ Ojo con el gemelo del backend antes de tomarla: revisar si `item_receta.costo_actual` e
+  `item_combo.costo_actual` —que se recalculan desde la fórmula, no desde el kardex— tienen el
+  mismo problema al persistirse.
+
+### Un descuento o recargo de monto fijo no tiene moneda, y se aplica igual a un ítem en pesos que a uno en dólares (2026-09-09)
+
+- [ ] **`descuentos.valor_monto` y `recargos.valor_monto` son plata sin `moneda_id`**: las dos
+  tablas no tienen columna de moneda. El motor los resta o los suma **tal cual** sobre el
+  precio de la línea, y ese precio está denominado en la moneda del ítem. O sea que el mismo
+  `-1000` descuenta mil pesos de un ítem en pesos y mil dólares de uno en dólares — sin que
+  nadie lo haya decidido para el segundo.
+  **Cómo apareció**: lo levantó la revisión independiente al cerrar el vaciado por cambio de
+  moneda (2026-09-09). Ese frente lo dejó **excluido por escrito** de sus dos ejes —no se vacía
+  porque el monto es del catálogo del tenant y no de la asociación con el ítem (regla del
+  owner), y no frena el gesto porque el drawer **no lo muestra**: solo asocia el nombre de la
+  regla—. La exclusión está en el docblock de `elegirMoneda` y en `patterns/frontend.md` § 8.
+  ⚠️ **Pero el problema es anterior y no lo abre ese gesto**: ya está mal sin tocar el selector.
+  **Las salidas, y la elige el owner**: (a) darle moneda al monto fijo y rechazar o convertir
+  cuando no coincide con la del ítem; (b) dejarlo sin moneda y **prohibir asociar una regla de
+  monto fijo a un ítem cuya moneda no sea la oficial del tenant**, que es la lectura implícita
+  de hoy; (c) expresar esas reglas siempre en porcentaje. La (a) es la más cara y la única que
+  soporta un catálogo multi-moneda de verdad.
+  📌 Emparentada con la de las opciones de modificadores —el mismo patrón: **un monto guardado
+  sin moneda propia que se lee en la del ítem que lo usa**—, y con el "Costo actual" que suma
+  sin convertir. Si se toma una, conviene mirar las tres juntas: es una decisión de modelo, no
+  tres parches.
+
+### `PATCH /items/:id { monedaId }` cambia la moneda y deja los montos como estaban (2026-09-09)
+
+- [ ] **La pantalla ya no deja que pase; la API sí.** Medido por la revisión independiente al
+  cerrar el vaciado por cambio de moneda: `update-item.dto.ts` acepta `monedaId` **suelto**, e
+  `items.service.ts` escribe `moneda_id = $n` sin tocar ninguno de los montos del ítem:
+  `precio_base`, `receta_extras_permitidos.precio_extra`,
+  `item_grupo_modificador_opciones.precio_extra` y el `costo_actual` de la extensión.
+  Un solo `PATCH` los deja a los cuatro **reinterpretados** en una moneda que nadie eligió
+  para ellos: `8900` que eran pesos pasan a ser 8900 dólares, y el ítem se vende así.
+  **Por qué no salió con la pantalla**: el owner decidió el gesto del formulario (vaciar y
+  avisar), y eso no se puede trasladar tal cual a la API — vaciar el precio de un ítem vivo
+  desde un `PATCH` es peor que lo que arregla. La salida es una **decisión suya**, y son dos
+  con costos distintos: **(a)** rechazar con 400 el `PATCH` que cambie `monedaId` sin traer los
+  montos nuevos —cierra el agujero, y le rompe el request a cualquier cliente que hoy mande el
+  item entero—; **(b)** exigir que `monedaId` viaje junto con `precioBase` y los precios de
+  extras y opciones, o sea "cambiar de moneda es re-cotizar el ítem".
+  ⚠️ **No se toma de arrastre**: toca DTO y service de items, y lo que se decide es qué es un
+  cambio de moneda válido. Va con su propio frente y su verificación.
 
 ### ¿Un segundo helper compartido en `backend/test/`? (2026-09-07)
 

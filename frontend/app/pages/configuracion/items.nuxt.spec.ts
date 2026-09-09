@@ -36,6 +36,9 @@ const ITEM_PRODUCTO = {
   impuestosIds: [] as string[],
   descuentosIds: [] as string[],
   recargosIds: [] as string[],
+  // La API lo manda para todo ítem guardado (`COALESCE` de las tres extensiones), así que
+  // el fixture sin él era una ficha que el backend nunca devuelve.
+  costoActual: '400',
 }
 
 const MONEDA_CLP = {
@@ -50,6 +53,107 @@ const MONEDA_CLP = {
   habilitada: true,
   esOficial: true,
   valorDelDia: null,
+}
+
+const MONEDA_USD = {
+  ...MONEDA_CLP,
+  monedaId: 'usd',
+  nombre: 'Dólar',
+  codigoIso: 'USD',
+  simbolo: 'US$',
+  decimales: 2,
+  separadorDecimal: '.',
+  separadorMiles: ',',
+  locale: 'en-US',
+  esOficial: false,
+}
+
+// Una receta con plata en los otros dos lugares del drawer: el precio de un extra
+// (`receta_extras_permitidos`) y el override de una opción de modificador
+// (`item_grupo_modificador_opciones`). Los dos son plata de ESTE ítem, y por eso
+// cambiarle la moneda los alcanza. Todas las filas vienen CON precio: la API no
+// devuelve ninguna sin él —`RecetaExtraInputDto.precioExtra` es requerido y el
+// efectivo de una opción viene resuelto—, así que las que el test necesita vacías
+// para distinguir "contar plata" de "contar filas" las vacía por la pantalla.
+const ITEM_RECETA = {
+  ...ITEM_PRODUCTO,
+  id: 'item-receta',
+  nombre: 'Hamburguesa',
+  tipo: 'receta',
+  precioBase: '8900',
+  // Con un ingrediente que tiene costo, el "Costo actual" que la pantalla calcula da
+  // distinto de cero — que es lo que lo hace un monto y no un adorno.
+  ingredientes: [
+    { ingredienteItemId: 'item-1', cantidad: '2', unidadCodigo: 'unidad', bloqueante: true },
+  ],
+  extrasPermitidos: [
+    { ingredienteItemId: 'ing-queso', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '500' },
+    { ingredienteItemId: 'ing-palta', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '800' },
+  ],
+  grupos: [
+    {
+      grupoModificadorId: 'grupo-1',
+      min: 0,
+      max: 1,
+      orden: 0,
+      opciones: [
+        {
+          grupoOpcionId: 'op-cheddar',
+          itemNombre: 'Cheddar',
+          cantidad: '1',
+          cantidadDefault: '1',
+          unidadCodigo: 'unidad',
+          precioExtra: '1200',
+        },
+        {
+          grupoOpcionId: 'op-pepinillo',
+          itemNombre: 'Pepinillo',
+          cantidad: '1',
+          cantidadDefault: '1',
+          unidadCodigo: 'unidad',
+          precioExtra: '300',
+        },
+      ],
+    },
+  ],
+}
+
+// Un ingrediente ya guardado con costo vigente: el caso donde el drawer no muestra NI UN
+// campo de plata editable —el ingrediente no tiene precio base, y el costo solo se teclea al
+// alta—, así que sin contar el costo vigente no hay nada que nombrar y la moneda cambiaba
+// sola.
+const ITEM_INGREDIENTE = {
+  ...ITEM_PRODUCTO,
+  id: 'item-ingrediente',
+  nombre: 'Harina',
+  tipo: 'ingrediente',
+  costoActual: '1200',
+}
+
+// Un combo guardado: su drawer no muestra "Costo vigente" —eso es de producto e
+// ingrediente— sino el "Costo actual" que la pantalla calcula desde sus componentes. El
+// componente es `item-1`, que el mock de `/items` devuelve con `costoActual: '400'`.
+const ITEM_COMBO = {
+  ...ITEM_PRODUCTO,
+  id: 'item-combo',
+  nombre: 'Combo del día',
+  tipo: 'combo',
+  precioBase: '0',
+  componentes: [
+    { componenteItemId: 'item-1', cantidad: '2', bloqueante: true },
+  ],
+}
+
+// El catálogo de grupos: `onSelectGrupo` pre-llena los precios de las opciones con estos
+// defaults, que es como una receta nueva termina con plata en las opciones sin que nadie
+// teclee un número.
+const GRUPO_CATALOGO = {
+  grupoModificadorId: 'grupo-1',
+  nombre: 'Proteína',
+  familia: 'producto',
+  opciones: [
+    { grupoOpcionId: 'op-cheddar', itemNombre: 'Cheddar', cantidad: '1', unidadCodigo: null, precioExtra: '1200' },
+  ],
 }
 
 const IMPUESTO_IVA = {
@@ -97,7 +201,12 @@ let descuentosMock: Record<string, unknown>[] = [DESCUENTO_ACTIVO, DESCUENTO_PAU
 // chip fijo del IVA depende de la clasificación tributaria que traiga el
 // detalle, y la separación del selector depende de qué trae `/impuestos`.
 let impuestosMock: typeof IMPUESTO_IVA[] = [IMPUESTO_IVA, IMPUESTO_OTRO]
-let itemDetalleMock: typeof ITEM_PRODUCTO = ITEM_PRODUCTO
+let itemDetalleMock:
+  | typeof ITEM_PRODUCTO
+  | typeof ITEM_RECETA
+  | typeof ITEM_INGREDIENTE
+  | typeof ITEM_COMBO
+  = ITEM_PRODUCTO
 
 // Para reproducir la carrera entre `cargarCatalogos()` (dos saltos) y la
 // tabla de items (un salto, `usePaginatedList`, `onMounted` en paralelo): con
@@ -193,7 +302,9 @@ mockNuxtImport('useApiFetch', () => {
         meta: { total: data.length, page: 1, pageSize: 15, totalPages: 1 },
       })
     }
-    if (typeof url === 'string' && url.includes('/monedas')) return Promise.resolve([MONEDA_CLP])
+    if (typeof url === 'string' && url.includes('/grupos-modificadores'))
+      return Promise.resolve([GRUPO_CATALOGO])
+    if (typeof url === 'string' && url.includes('/monedas')) return Promise.resolve([MONEDA_CLP, MONEDA_USD])
     if (typeof url === 'string' && url.includes('/items'))
       return Promise.resolve({ data: [ITEM_PRODUCTO], meta: { total: 1, page: 1, limit: 20, totalPages: 1 } })
     return Promise.resolve([])
@@ -870,7 +981,13 @@ describe('configuracion/items — la unidad manda en costo y precio', () => {
     return wrapper
   }
 
-  /** El `UFormField` cuya etiqueta empieza con `prefijo`, con su input adentro. */
+  /**
+   * El `UFormField` cuya etiqueta empieza con `prefijo`, con su input adentro.
+   *
+   * ⚠️ Es `startsWith` porque las etiquetas llevan la unidad al final —"Costo (por kg)"—, así
+   * que `'Costo'` **también matchea "Costo vigente"**, y devuelve el primero que encuentre. En
+   * un test de edición hay que pedir `'Costo vigente'` completo.
+   */
   function campo(wrapper: Awaited<ReturnType<typeof montar>>, prefijo: string) {
     return wrapper.findAllComponents({ name: 'UFormField' })
       .find(f => String(f.props('label') ?? '').startsWith(prefijo))
@@ -947,6 +1064,584 @@ describe('configuracion/items — la unidad manda en costo y precio', () => {
     // …y el formulario sigue teniendo lo que mandó la API, que es lo que se guardaría.
     expect(money.props('modelValue')).toBe('1234.5678')
     expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por kg)')
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * Cambiar la MONEDA del ítem reinterpreta lo tipeado igual de fuerte que cambiar la
+ * unidad —`1500` en pesos no es `1500` en dólares—, así que también limpia (owner,
+ * 2026-09-09; `docs/patterns/frontend.md` §8). Lo que este describe fija, y que no
+ * tiene equivalente en el vecino de la unidad, sale de que este selector **no se
+ * bloquea al editar**: el gesto frena pidiendo confirmación porque alcanza hasta
+ * cuatro lugares —algunos, filas que trajo el servidor—, y cuelga del gesto de la
+ * persona y no de un `watch`, que no distingue una elección de la carga de la ficha.
+ */
+describe('configuracion/items — cambiar la moneda vacía la plata del formulario', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    itemDetalleMock = ITEM_PRODUCTO
+  })
+
+  afterEach(() => {
+    itemDetalleMock = ITEM_PRODUCTO
+  })
+
+  /**
+   * El `UFormField` cuya etiqueta empieza con `prefijo`, con su input adentro.
+   *
+   * ⚠️ Es `startsWith` porque las etiquetas llevan la unidad al final —"Costo (por kg)"—, así
+   * que `'Costo'` **también matchea "Costo vigente"**, y devuelve el primero que encuentre. En
+   * un test de edición hay que pedir `'Costo vigente'` completo.
+   */
+  function campo(wrapper: Awaited<ReturnType<typeof montar>>, prefijo: string) {
+    return wrapper.findAllComponents({ name: 'UFormField' })
+      .find(f => String(f.props('label') ?? '').startsWith(prefijo))
+  }
+
+  function money(wrapper: Awaited<ReturnType<typeof montar>>, prefijo: string) {
+    return campo(wrapper, prefijo)!.findComponent({ name: 'MoneyInput' })
+  }
+
+  /** El aviso que frena el cambio, si está en pantalla. */
+  function aviso(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper.findAllComponents({ name: 'UAlert' })
+      .find(a => String(a.props('title') ?? '').startsWith('Cambiar la moneda'))
+  }
+
+  function accion(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
+    const panel = aviso(wrapper)
+    expect(panel, 'aviso de cambio de moneda').toBeTruthy()
+    const boton = panel!.findAllComponents({ name: 'UButton' })
+      .find(b => b.text().includes(texto))
+    expect(boton, `botón "${texto}" en el aviso`).toBeTruthy()
+    return boton!
+  }
+
+  function elegirMoneda(wrapper: Awaited<ReturnType<typeof montar>>, monedaId: string) {
+    campo(wrapper, 'Moneda')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', monedaId)
+  }
+
+  async function abrirAlta() {
+    const wrapper = await montar()
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo item'))
+    expect(boton, 'botón "Nuevo item"').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    return wrapper
+  }
+
+  async function abrirEditar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('con el formulario sin plata, elegir otra moneda no pregunta nada', async () => {
+    const wrapper = await abrirAlta()
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)).toBeUndefined()
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+
+    wrapper.unmount()
+  })
+
+  it('con plata tipeada, elegir otra moneda frena: pregunta y todavía no toca nada', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Costo').vm.$emit('update:modelValue', '5000')
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)?.props('description')).toContain('el precio base y el costo')
+    // Lo que se prueba es que FRENA: hasta que alguien elija, el formulario sigue
+    // siendo el de antes del click, moneda incluida.
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('clp')
+    expect(money(wrapper, 'Costo').props('modelValue')).toBe('5000')
+    expect(money(wrapper, 'Precio base').props('modelValue')).toBe('9000')
+
+    wrapper.unmount()
+  })
+
+  it('confirmar cambia la moneda y vacía costo y precio', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Costo').vm.$emit('update:modelValue', '5000')
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    await accion(wrapper, 'Cambiar y vaciar').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+    expect(money(wrapper, 'Costo').props('modelValue')).toBe('')
+    expect(money(wrapper, 'Precio base').props('modelValue')).toBe('')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('desistir deja la moneda vieja y los montos donde estaban', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    await accion(wrapper, 'Dejar la moneda como está').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)).toBeUndefined()
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('clp')
+    expect(money(wrapper, 'Precio base').props('modelValue')).toBe('9000')
+
+    wrapper.unmount()
+  })
+
+  // El modo de falla que descartó al `watch`: `abrirEditar` asigna `form.monedaId`
+  // con lo que trae la API, y un watch no puede distinguir esa carga de una
+  // elección. Con él vivo, abrir una ficha para editarle la descripción le vacía el
+  // precio guardado — y `editingId` no sirve de guard, porque editar es justamente
+  // cuando este selector se puede tocar.
+  it('abrir una ficha guardada no vacía nada ni pregunta nada', async () => {
+    // En OTRA moneda que la que el alta trae por default, a propósito: si la ficha
+    // viniera en la misma, `form.monedaId` no cambiaría al cargarla y el test pasaría
+    // con el `watch` ingenuo vivo, que es justo lo que viene a descartar.
+    itemDetalleMock = { ...ITEM_PRODUCTO, monedaId: 'usd', precioBase: '12.50' }
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    expect(aviso(wrapper)).toBeUndefined()
+    expect(money(wrapper, 'Precio base').props('modelValue')).toBe('12.50')
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+
+    wrapper.unmount()
+  })
+
+  // La primera versión de esto **se aplicaba sola** cuando ya no quedaba nada que vaciar, y
+  // la revisión independiente midió las dos salidas que abría: borrar el campo para
+  // retipearlo, y cambiar la unidad de medida —que vacía costo y precio por su cuenta—,
+  // pasaban a cambiar la moneda sin que nadie confirmara. En un campo de plata la regla es
+  // la contraria: nada cambia de moneda sin un click, aunque el cambio ya no cueste nada.
+  it('si se vacía a mano lo que había, el aviso lo dice y sigue esperando el click', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+    expect(aviso(wrapper)?.props('description')).toContain('Se vacía el precio base')
+
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)?.props('description')).toContain('no se vacía nada')
+    // El encabezado tampoco puede prometer un vaciado que el cuerpo desmiente: es neutro
+    // en los dos estados, y por eso no conmuta con ellos.
+    expect(aviso(wrapper)?.props('title')).toBe('Cambiar la moneda del ítem')
+    // Y sobre todo: NO se aplicó solo.
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('clp')
+
+    await accion(wrapper, 'Cambiar la moneda').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  // Misma raíz, por el otro camino que la revisión midió: el watcher de `unidadMedida` vacía
+  // costo y precio, y eso no puede arrastrar un cambio de moneda que nadie confirmó.
+  it('cambiar la unidad, que vacía los campos, no aplica el cambio de moneda', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Costo').vm.$emit('update:modelValue', '5000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    campo(wrapper, 'Unidad de medida')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'kg')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(money(wrapper, 'Costo').props('modelValue')).toBe('')
+    expect(money(wrapper, 'Costo').props('monedaId')).toBe('clp')
+
+    wrapper.unmount()
+  })
+
+  // Medido por la revisión independiente en un navegador real: el camino rápido de `elegirMoneda` —el que aplica sin preguntar cuando no hay nada que
+  // vaciar— aplicaba la moneda y dejaba el aviso vivo. Ese aviso huérfano prometía un cambio
+  // que ya había ocurrido, y el click posterior vaciaba la plata recién tipeada sin cambiar
+  // ninguna moneda.
+  it('aplicar el cambio por el camino rápido no deja el aviso vivo', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+    expect(aviso(wrapper), 'el aviso tiene que estar antes de vaciar').toBeTruthy()
+
+    // Ahora no queda nada que vaciar, así que elegir otra vez aplica de una…
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    // …y lo que se tipee después es plata de la moneda nueva: nadie la puede vaciar con un
+    // botón que quedó de un gesto anterior.
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '12')
+    await new Promise(r => setTimeout(r, 20))
+    expect(money(wrapper, 'Precio base').props('modelValue')).toBe('12')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  // El aviso solo puede nombrar lo que la persona ve: `form` conserva lo tipeado para un
+  // tipo anterior, y ese monto ni se muestra ni se guarda.
+  it('el aviso no nombra el costo de un tipo que ya no lo muestra', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Costo').vm.$emit('update:modelValue', '5000')
+    await new Promise(r => setTimeout(r, 20))
+
+    campo(wrapper, 'Tipo')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'servicio')
+    await new Promise(r => setTimeout(r, 20))
+    expect(campo(wrapper, 'Costo'), 'el costo no se muestra para un servicio').toBeUndefined()
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    // Nada visible que perder: se aplica sin prometer una pérdida que no se puede ver.
+    expect(aviso(wrapper)).toBeUndefined()
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+
+    wrapper.unmount()
+  })
+
+  // Medido por la revisión independiente: el **costo vigente** es plata de
+  // este ítem que se muestra formateada con la moneda del formulario y que nadie teclea —sale
+  // de los movimientos de inventario—. En un ingrediente ya guardado es el ÚNICO monto en
+  // pantalla, así que sin contarlo no había nada que nombrar y la moneda cambiaba sin
+  // preguntar, con el `PATCH` persistiéndola y el costo reinterpretado.
+  it('un ingrediente guardado, sin un solo campo de plata, igual pregunta por su costo vigente', async () => {
+    itemDetalleMock = ITEM_INGREDIENTE
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    // Ancla: para este tipo, en edición, no hay ni un `MoneyInput` en el drawer.
+    expect(wrapper.findAllComponents({ name: 'MoneyInput' })).toHaveLength(0)
+    const vigente = () => campo(wrapper, 'Costo vigente')!.text()
+    expect(vigente()).toContain('1.200')
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    const texto = aviso(wrapper)?.props('description') as string
+    expect(texto).toContain('El costo vigente no se puede vaciar')
+    // Y NO nombra el precio base: el ingrediente trae uno guardado, pero su drawer no lo
+    // muestra. Sin este `not`, quitar el corte por tipo de `camposDePlataVisibles` pasaría.
+    expect(texto).not.toContain('Se vacía el precio base')
+    // Y hasta que alguien confirme, el costo sigue leyéndose en la moneda de antes.
+    expect(vigente()).toContain('1.200')
+
+    await accion(wrapper, 'Cambiar la moneda').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(vigente()).toContain('1,200')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('en un producto guardado el aviso nombra las dos cosas: lo que vacía y lo que reinterpreta', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, costoActual: '400' }
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    const texto = aviso(wrapper)?.props('description') as string
+    expect(texto).toContain('Se vacía el precio base')
+    expect(texto).toContain('El costo vigente no se puede vaciar')
+
+    wrapper.unmount()
+  })
+
+  // Receta y combo **también** traen `costoActual` de la API, pero su drawer no muestra
+  // "Costo vigente" —eso es de producto e ingrediente— sino el "Costo actual" que calcula la
+  // pantalla desde los ítems que lo componen. Nombrar el primero ahí es nombrar un campo que
+  // no está, y atribuirle un origen que no es el suyo.
+  it('en una receta el aviso nombra el costo calculado, no el costo vigente', async () => {
+    itemDetalleMock = ITEM_RECETA
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    const texto = aviso(wrapper)?.props('description') as string
+    expect(texto).toContain('El costo actual que se muestra abajo')
+    expect(texto).not.toContain('costo vigente')
+
+    wrapper.unmount()
+  })
+
+  // Y ese costo calculado cuenta para decidir si se pregunta: con todos los montos tipeados
+  // en cero —cero es cero en cualquier moneda— es lo único que queda en pantalla, y sin
+  // contarlo la moneda cambiaría sola con ese número a la vista.
+  it('una receta con todos los montos en cero igual pregunta por el costo calculado', async () => {
+    itemDetalleMock = {
+      ...ITEM_RECETA,
+      precioBase: '0',
+      extrasPermitidos: ITEM_RECETA.extrasPermitidos.map(e => ({ ...e, precioExtra: '0' })),
+    }
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)?.props('description')).toContain('No hay montos tipeados que vaciar')
+    expect(aviso(wrapper)?.props('description')).toContain('El costo actual que se muestra abajo')
+
+    wrapper.unmount()
+  })
+
+  // El gemelo de la receta, por la otra rama: un combo tampoco muestra "Costo vigente", y su
+  // "Costo actual" lo calcula la pantalla desde sus componentes. Con el precio base en cero
+  // —cero es cero en cualquier moneda— ese costo es lo único que queda en pantalla, así que
+  // es lo único que puede frenar el camino rápido.
+  it('un combo con el precio en cero igual pregunta por su costo calculado', async () => {
+    itemDetalleMock = ITEM_COMBO
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    const texto = aviso(wrapper)?.props('description') as string
+    expect(texto).toContain('No hay montos tipeados que vaciar')
+    expect(texto).toContain('El costo actual que se muestra abajo')
+    expect(texto).not.toContain('costo vigente')
+
+    wrapper.unmount()
+  })
+
+  // La rama singular del conteo, que es el caso más común: una receta con UN extra pagado.
+  it('con un solo extra pagado el aviso lo dice en singular', async () => {
+    itemDetalleMock = {
+      ...ITEM_RECETA,
+      precioBase: '0',
+      extrasPermitidos: ITEM_RECETA.extrasPermitidos.map((e, i) => ({
+        ...e,
+        precioExtra: i === 0 ? e.precioExtra : '0',
+      })),
+    }
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)?.props('description')).toContain('Se vacía 1 precio de extra.')
+
+    wrapper.unmount()
+  })
+
+  // El precio de cada opción de modificador es el único monto del drawer que es campo
+  // editable, se persiste, y aun así no se vacía. No se vacía —la pantalla no puede distinguir el override de
+  // este ítem del compartido del catálogo— pero cuenta igual para preguntar: si no, una receta
+  // sin ningún otro monto cambia de moneda sola y `guardar` manda esos números como override
+  // en la moneda nueva.
+  it('con plata solo en las opciones de modificadores, igual pregunta y no las vacía', async () => {
+    itemDetalleMock = {
+      ...ITEM_RECETA,
+      precioBase: '0',
+      ingredientes: [],
+      extrasPermitidos: ITEM_RECETA.extrasPermitidos.map(e => ({ ...e, precioExtra: '0' })),
+    }
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    const precios = () => wrapper.findAllComponents({ name: 'MoneyInput' })
+      .map(m => m.props('modelValue'))
+    expect(precios()).toEqual(expect.arrayContaining(['1200', '300']))
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    const texto = aviso(wrapper)?.props('description') as string
+    expect(texto).toContain('No hay montos tipeados que vaciar')
+    expect(texto).toContain('Los precios de las opciones de modificadores tampoco se vacían')
+
+    await accion(wrapper, 'Cambiar la moneda').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    // Se avisó, se cambió, y no se tocó ninguno: son los que no se pueden distinguir.
+    expect(precios()).toEqual(expect.arrayContaining(['1200', '300']))
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  // Y el corte por tipo de esa cuenta: `form.gruposModificadores` sobrevive al cambio de tipo
+  // —como el costo—, pero un servicio no muestra ninguna opción. Nombrarlas ahí es prometer
+  // sobre algo que no está en pantalla.
+  it('un tipo que no muestra opciones no las nombra, aunque el form las conserve', async () => {
+    const wrapper = await abrirAlta()
+
+    campo(wrapper, 'Tipo')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'receta')
+    await new Promise(r => setTimeout(r, 20))
+    const agregarGrupo = wrapper.findAllComponents({ name: 'UButton' })
+      .find(b => b.text().includes('Agregar grupo'))
+    expect(agregarGrupo, 'botón "Agregar grupo"').toBeTruthy()
+    await agregarGrupo!.trigger('click')
+    campo(wrapper, 'Grupo')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'grupo-1')
+    await new Promise(r => setTimeout(r, 20))
+
+    // Ancla: la opción quedó con el precio del catálogo, sin que nadie tipee.
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+    expect(aviso(wrapper)?.props('description')).toContain('opciones de modificadores')
+    elegirMoneda(wrapper, 'clp')
+    await new Promise(r => setTimeout(r, 20))
+
+    campo(wrapper, 'Tipo')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'servicio')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  // 📌 El cierre del drawer —que es donde `resetDrawer` tiene que matar un cambio a
+  // medio confirmar— NO se ejerce acá: cerrar este drawer en el entorno `nuxt` de
+  // vitest tira un `Unhandled Rejection` de happy-dom (`CSSStyleDeclaration` desde el
+  // `Presence` de Reka) que deja la corrida en rojo aunque los tests pasen. Vive en
+  // `e2e/configuracion/items-moneda.spec.ts`, en un navegador de verdad.
+
+  // El tercer lugar donde el drawer guarda plata de este ítem: el precio de cada extra
+  // de la receta, que vive en `receta_extras_permitidos` con FK a esta receta. El de las
+  // opciones de modificadores NO se toca y esto lo fija: lo que la pantalla muestra ahí es
+  // el **efectivo** (`COALESCE(override, default)`), así que un número que parece de este
+  // ítem puede ser el compartido del catálogo, en uso en otras recetas.
+  it('en una receta, el aviso cuenta los extras con monto y confirmar deja quietas las opciones', async () => {
+    itemDetalleMock = ITEM_RECETA
+
+    const wrapper = await montar()
+    await abrirEditar(wrapper)
+
+    const precios = () => wrapper.findAllComponents({ name: 'MoneyInput' })
+      .map(m => m.props('modelValue'))
+    // Ancla: sin esto el test pasaría por el lado vacío, con el drawer sin renderizar
+    // ni un solo campo de plata.
+    expect(precios()).toEqual(expect.arrayContaining(['8900', '500', '800', '1200', '300']))
+
+    // Un extra en 0 —gratis, que el backend acepta— por el camino por el que se llega:
+    // agregar la fila y tipear. Cero pesos son cero dólares, así que ni se cuenta ni se
+    // vacía; vaciarlo dejaría sin `precioExtra` una fila que el DTO exige.
+    const agregarExtra = wrapper.findAllComponents({ name: 'UButton' })
+      .find(b => b.text().includes('Agregar extra'))
+    expect(agregarExtra, 'botón "Agregar extra"').toBeTruthy()
+    await agregarExtra!.trigger('click')
+    wrapper.findAllComponents({ name: 'MoneyInput' })
+      .find(m => m.props('modelValue') === '')!
+      .vm.$emit('update:modelValue', '0')
+    await new Promise(r => setTimeout(r, 20))
+
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)?.props('description')).toContain(
+      'Se vacía el precio base y 2 precios de extras.',
+    )
+
+    await accion(wrapper, 'Cambiar y vaciar').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    const despues = precios()
+    expect(despues).not.toContain('8900')
+    expect(despues).not.toContain('500')
+    expect(despues).not.toContain('800')
+    // El 0 sigue siendo 0, y los precios de las opciones no eran de este ítem.
+    expect(despues).toEqual(expect.arrayContaining(['0', '1200', '300']))
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
+
+    wrapper.unmount()
+  })
+
+  // Las dos formas de que el aviso quede describiendo algo que ya no es cierto, y que no
+  // pasan por vaciar los campos: rechazar el cambio eligiendo de nuevo la moneda que ya
+  // estaba, y rearmar el formulario cambiándole el tipo.
+  it('volver a elegir la moneda que ya está puesta cancela el aviso', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Precio base').vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+    expect(aviso(wrapper), 'el aviso tiene que estar antes de rechazar').toBeTruthy()
+
+    elegirMoneda(wrapper, 'clp')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(aviso(wrapper)).toBeUndefined()
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('clp')
+    expect(money(wrapper, 'Precio base').props('modelValue')).toBe('9000')
+
+    wrapper.unmount()
+  })
+
+  it('cambiar el tipo del ítem cancela el aviso, que ya nombraba otro formulario', async () => {
+    const wrapper = await abrirAlta()
+
+    money(wrapper, 'Costo').vm.$emit('update:modelValue', '5000')
+    await new Promise(r => setTimeout(r, 20))
+    elegirMoneda(wrapper, 'usd')
+    await new Promise(r => setTimeout(r, 20))
+    expect(aviso(wrapper)?.props('description')).toContain('el costo')
+
+    campo(wrapper, 'Tipo')!.findComponent({ name: 'USelectMenu' })
+      .vm.$emit('update:modelValue', 'servicio')
+    await new Promise(r => setTimeout(r, 20))
+
+    // El costo ya no está en pantalla: un aviso que lo nombre describe otro formulario.
+    expect(aviso(wrapper)).toBeUndefined()
 
     wrapper.unmount()
   })
