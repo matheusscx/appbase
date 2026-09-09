@@ -80,9 +80,12 @@ esos argumentos; **no se escribe aritmética nueva.**
 - Que `MoneyInput` **rechace** una cadena inválida en 0 decimales en vez de inventar un
   número. Es la mitad que el owner ya decidió en concepto, toca el contrato del componente
   y obliga a reescribir 3 tests que hoy documentan el bug.
-- El barrido de los `:decimales="4"` restantes de `items.vue` (6 sitios): cada uno necesita
-  verificar **primero** que tenga selector de unidad disponible; sin ese escape, quitar los
-  decimales pierde precisión de verdad.
+- ✅ **El barrido de los `:decimales="4"` de `items.vue` (6 sitios) se hizo el 2026-09-08**,
+  y con él salió el prop del componente. La verificación que este párrafo pedía —"que cada
+  uno tenga selector de unidad disponible"— resultó no aplicar igual a los seis: dos de los
+  seis (`precioExtra` de extras y de opciones de grupo) no son una tasa por unidad sino el
+  precio de una dosis, que el backend multiplica por un entero. El detalle campo por campo
+  está en [`agent/resueltos.md`](../../agent/resueltos.md).
 - `ReembolsoModal` (moneda del tenant contra una orden siempre CLP) — ortogonal a esto.
 
 ## 4. Lo que este diseño da por bueno, y conviene saberlo
@@ -99,6 +102,11 @@ esos argumentos; **no se escribe aritmética nueva.**
 > La regla del §2 **sigue en pie** donde el costo se tipea sin cantidad —el ajuste de costo—;
 > lo que no vale es extenderla a un campo cuyo selector gobierna cantidad y costo a la vez.
 > Detalle y criterio: [`docs/patterns/frontend.md`](../../patterns/frontend.md) §8.
+> ✅ **El re-emit se cerró el 2026-09-08**: `MoneyInput` ya no emite el eco de lo que pinta
+> desde `props`, así que un valor que no cabe en la escala se **muestra** redondeado pero no
+> reescribe el modelo. Lo que sigue en pie de este bloque es el criterio —no extender la
+> regla a un campo cuyo selector gobierna cantidad y costo a la vez— y el 7,69% como medición
+> de lo que costaba.
 > ⚠️ **Lo que esto le hace al párrafo de abajo NO se midió.** Por el mismo mecanismo, la
 > sugerencia de 4 decimales de `DesfasesPanel` en un `MoneyInput oficial` (CLP, 0 decimales)
 > debería redondearse sola al montar, sin que nadie toque el campo — pero eso es deducción,
@@ -114,4 +122,24 @@ no porque siga valiendo. No citarlo:**
 > editan, queda en pesos enteros. Bajo esta decisión eso **es el comportamiento correcto**,
 > no un bug: el motor propone con su precisión, la persona corrige con la suya.~~
 
-Lo que hay que hacer con `DesfasesPanel`, entonces: **medirlo**, no deducirlo de acá.
+✅ **Medido el 2026-09-08, que es lo que este párrafo pedía — y el resultado tenía trampa.**
+Montado `DesfasesPanel` con `precioSugerido: '4447.0588'` y la oficial en CLP (0 decimales),
+aplicar emitía `precioBase: "4447"`, así que la deducción era correcta: el panel redondeaba.
+**Pero lo redondeaba el re-emit de `MoneyInput`** —el mismo que ese día se cerró, por
+reescribirle el modelo al padre sin que nadie tocara el campo—. Sin él, el panel mostraba
+`4.447` y aplicaba `4447.0588`. Lo levantó la revisión independiente, y por eso el prefill del
+panel **ahora cuantiza explícitamente** a la moneda oficial (`precioPrefill`), con su test:
+lo que la fila muestra es lo que la fila aplica. El backend ya decía que era del frente — el
+docblock de `precioSugerido` dice que cuantizarlo *"sería UX del prefill"*.
+
+**Que la sugerencia se aplique redondeada no es un bug: es esta misma regla.** El número que
+se aplica es el que la persona tiene delante en el campo editable, y se propone en la escala
+en la que se cobra. La consecuencia que sí conviene saber es para un ítem costeado por gramo
+—ahí la sugerencia `8,5678`/g se aplica como `9`/g, un 5% de diferencia—, y la salida es la
+del §2: ese ítem se expresa por kilo.
+
+📌 **Lo que queda abierto por este lado** es el otro camino por el que la pantalla puede
+escribir un `precio_base` fuera de la escala de su moneda: cambiar la **moneda** del ítem con
+un número ya tipeado para la anterior. Tiene entrada propia en
+[`agent/pendientes.md`](../../agent/pendientes.md). Los 2 de 323 que hay en la base local
+(medidos ese día) no vienen de ahí: los escribió el e2e por API.

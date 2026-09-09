@@ -1915,16 +1915,17 @@ describe('configuracion/descuentos — perder la forma de importe avisa por los 
 
     expect(inputsDeTramos()[1]?.getAttribute('aria-invalid')).not.toBe('true')
     expect(patchesGuardar).toHaveLength(1)
-    // ⚠️ `'50000'` y no `'50000.0000'`, que es lo que la API devolvió: el mínimo
-    // pasa por `MoneyInput`, que lo **re-emite cuantizado a la escala de la
-    // moneda** (CLP, 0 decimales) apenas se monta. Acá es benigno —no se pierde
-    // nada—, pero es el mismo mecanismo que en un campo de 4 decimales redondea y
-    // emite en silencio (ver la entrada del `MoneyInput` en el backlog). El
-    // fixture usa la escala real de la columna `numeric(18,4)` justamente para
-    // que ese round-trip quede ejercitado.
+    // ⚠️ `'50000.0000'`: **tal cual lo devolvió la API**. Hasta el 2026-09-08 acá
+    // viajaba `'50000'`, porque `MoneyInput` re-emitía todo valor que entraba por
+    // `props` cuantizado a la escala de la moneda apenas se montaba. En este campo
+    // era benigno —no se perdía nada—, pero era el mismo mecanismo que en un campo
+    // de 4 decimales redondeaba y emitía **sin que nadie lo tocara**. Hoy el
+    // componente solo emite lo que la persona escribe, así que un mínimo que nadie
+    // editó vuelve idéntico. El fixture usa la escala real de la columna
+    // `numeric(18,4)` justamente para que ese round-trip quede ejercitado.
     expect(patchesGuardar[0]?.body.tramos).toEqual([
-      { minimoMonto: '50000', valorPorcentaje: '0.20' },
-      { minimoMonto: '90000', valorPorcentaje: '0.15' },
+      { minimoMonto: '50000.0000', valorPorcentaje: '0.20' },
+      { minimoMonto: '90000.0000', valorPorcentaje: '0.15' },
     ])
 
     wrapper.unmount()

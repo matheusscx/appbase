@@ -64,6 +64,43 @@ const JPY_MIRROR: MonedaTenantApi = {
   valorDelDia: null,
 }
 
+// La UF: 4 decimales de la MONEDA, con los separadores chilenos (miles '.', decimal
+// ','). Es la configuración que hasta el 2026-09-08 se pedía con el prop `decimales`
+// —que ya no existe: la escala la fija siempre la moneda—, y la única que queda donde
+// 4 decimales y el punto agrupador conviven.
+const UF: MonedaTenantApi = {
+  monedaId: 'uf-1',
+  nombre: 'Unidad de Fomento',
+  codigoIso: 'UF',
+  simbolo: 'UF',
+  decimales: 4,
+  separadorDecimal: ',',
+  separadorMiles: '.',
+  locale: 'es-CL',
+  habilitada: true,
+  esOficial: false,
+  valorDelDia: '39000.5',
+}
+
+// Moneda SIN símbolo (`moneda.simbolo` es nullable en la entidad, y el store lo
+// resuelve a `''`). No es un caso de borde cosmético: el símbolo es lo que hace que el
+// texto pintado por el `watch` cambie al re-enmascararse, y con eso lo que hace correr
+// a `syncFromMaska`. Sin él, maska no vuelve a correr — ver el docblock de
+// `pintadoDesdeProps`.
+const SIN_SIMBOLO: MonedaTenantApi = {
+  monedaId: 'sin-simbolo-1',
+  nombre: 'Moneda sin símbolo',
+  codigoIso: 'XAF',
+  simbolo: null,
+  decimales: 0,
+  separadorDecimal: ',',
+  separadorMiles: '.',
+  locale: 'es-CL',
+  habilitada: true,
+  esOficial: false,
+  valorDelDia: null,
+}
+
 // UInput (Nuxt UI) no monta sin contexto Nuxt real (ver AdvertenciasPrecio.spec.ts).
 // Acá además `MoneyInput` lo usa como input controlado (`:model-value`,
 // `:disabled`), así que el stub necesita un `<input>` real para que
@@ -147,7 +184,7 @@ async function backspace(input: DOMWrapper<HTMLInputElement>) {
 describe('MoneyInput', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    useMonedasStore().hydrate([CLP, USD, JPY_MIRROR], 'tenant-1')
+    useMonedasStore().hydrate([CLP, USD, JPY_MIRROR, UF, SIN_SIMBOLO], 'tenant-1')
   })
 
   // Estos tres van con props fijas a propósito: fijan la dirección prop → pantalla
@@ -205,15 +242,106 @@ describe('MoneyInput', () => {
       expect(modelo.value).toBe('1500.55')
     })
 
-    // `decimales` pisa los de la moneda: existe para costo/tasa (`ESCALA_COSTO` = 4 en
-    // el backend), que se valida a una escala FIJA sin importar la moneda del ítem — un
-    // costo en un ítem CLP (0 decimales de moneda) sigue admitiendo 4 decimales.
-    it('con `decimales` fijo admite esa cantidad aunque la moneda no tenga', async () => {
-      const { modelo, input } = montarConVModel({ monedaId: 'clp-1', decimales: 4 })
+    // La escala sale SIEMPRE de la moneda: hasta el 2026-09-08 un prop `decimales`
+    // podía forzar 4 sobre un ítem en pesos, y eso era el único caso del sistema donde
+    // `1.500` significaba a la vez `1500` y `1,5`. Con el prop afuera, los 4 decimales
+    // se piden con una moneda que los tenga, y la única es la UF.
+    it('con una moneda de 4 decimales (UF) admite los cuatro', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'uf-1' })
 
       await input.setValue('5,0500')
 
       expect(modelo.value).toBe('5.0500')
+    })
+  })
+
+  /**
+   * La otra mitad del mismo problema, y la que estuvo viva más tiempo: `v-maska` corre
+   * en `mounted` **y en `updated`**, así que todo valor que entra por `props` vuelve a
+   * pasar por `syncFromMaska`. Mientras eso emitía, el componente **le reescribía el
+   * modelo al padre sin que nadie tocara el campo** — y cuando el valor no cabía en la
+   * escala de la moneda, le devolvía el redondeado.
+   *
+   * Es el modo de falla del 7,69% medido en `mermas.vue` el 2026-08-28. Se cerró el
+   * 2026-09-08, al sacar el prop `decimales`: sin él, un campo de dinero de un ítem en
+   * pesos recibe valores de 4 decimales —los genera el motor, y la columna los guarda—
+   * y ya no puede taparlos con una escala fija.
+   */
+  describe('un valor que entra de afuera se muestra, pero no se reescribe', () => {
+    it('un precargado que no cabe en la moneda deja el modelo intacto', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' }, '1234.5678')
+      await nextTick()
+
+      // Se muestra lo único que se puede mostrar en pesos…
+      expect(input.element.value).toBe('1.235')
+      // …y el modelo sigue siendo el que mandó el padre.
+      expect(modelo.value).toBe('1234.5678')
+    })
+
+    // Este va contra las EMISIONES y no contra el modelo a propósito: con un valor
+    // que sí cabe, el re-emit devolvía el mismo número, así que mirar el modelo no
+    // distingue el bug de su arreglo. Lo que se fija es la regla entera —montar no
+    // es editar—, y sin ella este es el único de los tres que se pone en rojo.
+    it('con un valor que SÍ cabe tampoco emite: montar no es editar', async () => {
+      const { wrapper, input } = montarConVModel({ monedaId: 'clp-1' }, '1500000')
+      await nextTick()
+
+      expect(input.element.value).toBe('1.500.000')
+      expect(wrapper.findComponent(MoneyInput).emitted('update:modelValue')).toBeUndefined()
+    })
+
+    // El guard de la marca: si quedara pegada se comería la primera tecla de la
+    // persona y el campo parecería muerto — que es el bug del punto fijo, por otra
+    // puerta.
+    it('después de pintar desde props, la tecla siguiente SÍ emite', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' }, '1234.5678')
+      await nextTick()
+
+      // Sobre el `1.235` que se está mostrando, un `9` al final da `12.359`.
+      await tipear(input, ['9'])
+
+      expect(modelo.value).toBe('12359')
+    })
+
+    /**
+     * El padre escribe DOS veces: primero otro valor, después vuelve al que la persona
+     * había tipeado. El segundo repintado es legítimo —la pantalla está mostrando el
+     * intermedio— y se lo saltearía el guard del eco del `watch` si `ultimoEmitido`
+     * siguiera teniendo lo que se tipeó. Es el modo de falla "la pantalla muestra un
+     * número y el formulario guarda otro", por la puerta de atrás.
+     */
+    it('si el padre escribe otro valor y vuelve al tipeado, la pantalla lo sigue', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
+
+      await tipear(input, ['5', '0', '0'])
+      expect(modelo.value).toBe('500')
+
+      modelo.value = '900'
+      await nextTick()
+      expect(input.element.value).toBe('900')
+
+      modelo.value = '500'
+      await nextTick()
+
+      expect(input.element.value).toBe('500')
+    })
+
+    /**
+     * El de arriba con el símbolo sacado, y no es una variante cosmética: **este es el
+     * único que falla si la marca se limpia solo cuando maska vuelve a correr.**
+     * Medido tecla por tecla el 2026-09-08 — con `$`, el texto pintado (`"$1.500"`)
+     * cambia al re-enmascararse y `syncFromMaska` corre; sin `$`, `"1.500"` ya es
+     * estable, maska no hace nada, y la marca se quedaba puesta comiéndose la tecla:
+     * la pantalla mostraba `1.5007` y el modelo seguía en `1500`.
+     */
+    it('sin símbolo de moneda, la tecla siguiente TAMBIÉN emite', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'sin-simbolo-1' }, '1500')
+      await nextTick()
+      expect(input.element.value).toBe('1.500')
+
+      await tipear(input, ['7'])
+
+      expect(modelo.value).toBe('15007')
     })
   })
 
@@ -242,8 +370,8 @@ describe('MoneyInput', () => {
       expect(input.element.value).toBe('12.50')
     })
 
-    it('con el prop `decimales` (costo/tasa, escala 4) también entra completo', async () => {
-      const { modelo, input } = montarConVModel({ monedaId: 'clp-1', decimales: 4 })
+    it('en UF (4 decimales, separadores chilenos) también entra completo', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'uf-1' })
 
       await tipear(input, ['5', ',', '0', '5', '0', '0'])
 
@@ -333,10 +461,10 @@ describe('MoneyInput', () => {
   })
 
   describe('pegado: el único camino donde se puede saber qué quiso decir', () => {
-    // La escena: un costo copiado de una planilla. Es el camino más probable en
+    // La escena: un monto copiado de una planilla. Es el camino más probable en
     // un campo de 4 decimales, justamente porque ahí el decimal es legítimo.
-    it('en un campo de 4 decimales, pegar "1000.5" guarda 1000.5 y no 10005', async () => {
-      const { modelo, input } = montarConVModel({ monedaId: 'clp-1', decimales: 4 })
+    it('en un campo de 4 decimales (UF), pegar "1000.5" guarda 1000.5 y no 10005', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'uf-1' })
 
       await pegar(input, '1000.5')
 
@@ -432,8 +560,10 @@ describe('MoneyInput', () => {
    * (`escala-moneda.pipe.ts`). Es falso:** el resultado del error es un **entero**
    * (`10005`), y un entero es válido en cualquier escala —los 0 decimales del peso
    * incluidos—, así que ningún validador de escala lo ve. O sea que esto **no** es
-   * un error visible: es plata ×10 guardada en silencio. Sigue sin resolverse, pero
-   * que se sepa lo que cuesta: `docs/agent/pendientes.md`.
+   * un error visible: es plata ×10 guardada en silencio. **Sigue pasando, y desde el
+   * 2026-09-01 es una decisión del owner y no un olvido** —mapear el punto al decimal
+   * lo cerraría y rompería el hábito chileno de escribir `1.500`—: el cierre, con lo
+   * que se midió y lo que se descartó, está en `docs/agent/resueltos.md`.
    *
    * Antes de intentar parchearlo de nuevo: lo que haga falta escribir acá tiene que
    * pasar TODO el describe de "tecleo real" de arriba, montado con `v-model` real.
@@ -466,6 +596,18 @@ describe('MoneyInput', () => {
       const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
 
       await input.setValue('1000.5')
+
+      expect(modelo.value).toBe('10005')
+    })
+
+    // Que la moneda TENGA decimales no cambia nada: el punto sigue siendo su
+    // agrupador. Hasta el 2026-09-08 esto se probaba forzando 4 decimales con el
+    // prop `decimales` sobre un ítem en pesos; sacado el prop, la configuración
+    // sigue existiendo en la UF y el ×10 con ella.
+    it('en UF (4 decimales, miles ".") teclear "1000.5" también da 10005', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'uf-1' })
+
+      await tipear(input, ['1', '0', '0', '0', '.', '5'])
 
       expect(modelo.value).toBe('10005')
     })

@@ -756,149 +756,69 @@ veces por corrida **no es evidencia de nada**: sale del `Promise.all` interno de
 `DataSource.synchronize`, una vez por app de test (ya medido el 2026-08-21), y su conteo es
 casi idéntico con y sin el spec nuevo (45 vs 44).
 
-### El `.` que multiplica por 10 no lo ataja ningún 400: la red que la doc promete no existe (2026-08-26)
+### Tres formas en que la pantalla puede quedarse con plata que la moneda no expresa (2026-09-08)
 
-- [ ] **`MoneyInput` en una moneda con separador de miles `.` convierte `800.5` en `8005`, y
-  eso se persiste** (frontend; **medido el 2026-08-26** montando el componente con el molde de
-  `MoneyInput.spec.ts`) — en CLP, tecla por tecla: `8`,`0`,`0`,`.`,`5` emite **`8005`** (display
-  `8.005`); con `,` emite `800.5`, bien. maska lee el punto como agrupador, y esto ya estaba
-  documentado como **limitación conocida** en `MoneyInput.vue` y en `docs/patterns/frontend.md`.
-  **Lo que estaba mal escrito es la mitigación**, y por eso esta entrada existe: las dos docs
-  decían que el monto ×10 *"no se persiste: el backend valida la escala y lo rechaza con 400"*.
-  **Falso, y no solo para los campos de escala fija:** el resultado del error es un **entero**
-  (`8005`), y un entero es válido en **cualquier** escala —los 0 decimales del peso incluidos—,
-  así que ningún validador de escala lo puede ver. Con `@EsCosto()` (escala 4) pasa igual.
-  Las dos afirmaciones se corrigieron el 2026-08-26; lo que queda es el riesgo.
-  **Exposición contada ese día** (`grep -rn ':decimales' frontend/app --include='*.vue'`):
-  **7 campos con escala fija de costo** — `mermas.vue:468`, `items.vue:1620`, `:1691`,
-  `:1823`, `:1969`, `:2121`, `:2344`—. ⚠️ **Ése es el piso, no el total:** la familia
-  `MoneyInput oficial` —caja (apertura/cierre/movimiento), `CobroModal`, `AbonoModal`,
-  `NotaCreditoModal`, `ReembolsoModal`, el `valorMonto` y el `minimo` de tramo de
-  `descuentos`/`recargos`, `preferencias-financieras`, `DesfasesPanel`— corre **el mismo
-  riesgo**, porque la oficial de todos los tenants del seed es el peso: mismo `.` como
-  agrupador, mismo entero que ningún validador ve. Y hay dos más atados a un `:moneda-id`
-  dinámico y sin prop `decimales`, que tampoco están en la cuenta de los 7:
-  `inventario/index.vue:395` (`costoNuevo` del ajuste — era `:347` antes del selector de
-  unidad del 2026-08-28) y `propinas/index.vue:330` (el monto manual del reparto). Se contaron aparte los de escala fija
-  porque ahí el decimal es *legítimo* (un costo de `5,0500`/g) y el error es más fácil de
-  cometer; en un campo de 0 decimales teclear un separador ya es un tecleo sin sentido. En
-  todos, teclear el separador equivocado guarda ×10 en silencio.
-  ⛔ **NO intentar taparlo desde el input.** Ya se probó un `preProcess` con memoria de la
-  última tecla y salió **peor**: rompía el caso chileno normal (`1.500` = mil quinientos emitía
-  `1`), o sea montos válidos y **menores** guardados en silencio. Revertido. El contrato está
-  fijado en `MoneyInput.spec.ts`, describe *"limitación conocida"*.
-  **Por dónde se puede atacar, sin decidir todavía:** (a) mostrar el monto formateado como
-  confirmación antes de guardar, que no depende de maska; (b) rechazar en el backend un salto
-  de magnitud sospechoso contra el valor anterior del campo, que es una regla de negocio y va
-  al owner; (c) aceptar el riesgo y decirlo en las docs, que es lo único hecho hoy.
-  📌 **Consecuencia ya aplicada, para que no se relea como teoría:** por esto el campo
-  "precio extra" del **aplicar en lote** de `grupos-modificadores.vue` se quedó con `UInput`
-  pelado el 2026-08-26 en vez de estrenar `MoneyInput` — ahí el mismo número se aplica a **N
-  recetas de una sola vez**, así que el ×10 se multiplica por N. Está escrito en el template.
+- [ ] **Salen del cierre del ×10** ([`resueltos.md`](resueltos.md)) y viven acá porque son
+  riesgo de plata, no relato: un frente que solo figura en el archivo de cerrados no lo vuelve
+  a mirar nadie. Las tres comparten causa —el campo muestra lo que puede y el modelo conserva
+  lo que le llegó— y ninguna es regresión de ese commit.
+  1. **La bandeja de desfases aplica un precio que el ítem no puede expresar, por dos vías
+     distintas — y son dos frentes, no uno.** El prefill se cuantiza a la escala de la moneda
+     **oficial** (`precioPrefill`), y eso falla en dos direcciones:
+     **(a) otra moneda** — la bandeja no filtra por moneda y `DesfaseItemDto` no trae
+     `monedaId`, así que con un tenant en pesos y una receta en dólares aplicar redondea
+     `12,55` a `13` (3,6%). **Cerrarlo pide backend**: que la fila traiga la moneda del ítem.
+     **(b) misma moneda, tasa por unidad chica** — un ítem en pesos costeado por gramo:
+     la sugerencia `8,5678`/g se aplica como `9`/g, un 5% (medido el 2026-08-28,
+     [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md)).
+     ⚠️ El `monedaId` del punto (a) **no arregla ésta**: la salida acá es la regla del owner
+     —expresar el ítem por kilo— y quien tome (a) tiene que no dar la bandeja por cerrada.
+  2. **A un ítem ya guardado con un precio fuera de la escala de su moneda no se le puede
+     volver a escribir ese precio.** Editarlo se puede; lo que no se puede es tipear un valor
+     sub-escala, y la salida que la regla propone —expresarlo por kilo— al editar tampoco está:
+     el selector de unidad se bloquea con `editingId`. Hoy hay 2 de 323 así en la base local,
+     los dos escritos por el e2e.
+  3. **Vía nueva de 400 en un campo precargado, hoy sin puerta de entrada.** No aplica a los
+     seis campos de `items.vue` (`@EsCosto()`, escala 4); aplicaría a la familia
+     `MoneyInput oficial` contra un `@EsMontoCobrado()` **si** el tenant pudiera cambiar su
+     oficial por una de menos decimales — y **no puede**: el único `PATCH` de moneda del tenant
+     acepta `habilitada` y `valorDelDia`, y el país no es editable. O sea que hoy es latente y
+     lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
+     (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
+     Decimal, que normaliza los ceros a la derecha.
 
-  ✅ **Achicado el 2026-08-28: el caso genuinamente ambiguo se saca, no se resuelve.** La
-  ambigüedad de verdad —donde `1.500` significa a la vez `1500` y `1,5`— vive **solo** en un
-  campo de 4 decimales sobre un ítem en pesos; con 0 o 2 decimales no hay ningún caso
-  (medido: 0 sobre un corpus de 3332 cadenas —
-  [`investigaciones/2026-08-28-separador-decimal-vs-miles.md`](investigaciones/2026-08-28-separador-decimal-vs-miles.md)).
-  Decisión del owner: **los inputs de costo siguen los decimales de la moneda del ítem, y la
-  precisión la da elegir la unidad** —
-  [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md),
-  [`plans/2026-08-28-ajuste-costo-por-unidad.md`](../superpowers/plans/2026-08-28-ajuste-costo-por-unidad.md).
-  **Aplicado en el ajuste de costo** (`inventario/index.vue`): `POST
-  /inventario/ajustes-costo` acepta `unidadCodigo`, el drawer tiene selector y el campo
-  nunca tuvo el prop, así que ahí el ×10 ya no puede venir de un decimal legítimo.
+### Cambiar la MONEDA del ítem no limpia lo tipeado, como sí lo hace cambiar la unidad (2026-09-08)
 
-  **Lo que queda abierto de esta entrada, tras ese recorte:**
+- [ ] **`configuracion/items.vue` limpia costo y precio cuando cambia la unidad de medida,
+  y no cuando cambia la moneda** —y los dos gestos reinterpretan el número igual de fuerte:
+  `1500` en dólares no es `1500` en pesos—. La levantó la revisión independiente del cierre
+  del ×10 (2026-09-08).
+  **Lo que se guarda no cambió con ese commit**: antes el prop `decimales` fijaba la escala
+  en 4 y el número tipeado sobrevivía al cambio de moneda; ahora sobrevive porque el
+  componente ya no reescribe lo que le pasa el padre. **Lo que sí es nuevo es que la pantalla
+  y el formulario dejan de coincidir**: tipear `1500,50` en USD y pasar a CLP muestra `1.501`
+  y guarda `1500.5` —el backend lo acepta, `@EsCosto()` es escala 4—. Sumado a que ahora hay
+  una regla escrita al lado (*"cambiar el selector de unidad LIMPIA el campo"*, owner
+  2026-08-28) que este camino no sigue, es lo que hay que resolver en un sentido o en el otro.
+  **Lo único que falta medir** es qué pasa con un ítem **ya guardado**: el selector de moneda
+  está habilitado al editar, a diferencia del de unidad, así que el mismo gesto sobre una
+  ficha cargada tiene un prefill de por medio que el alta no tiene.
+  **La pregunta para el owner, después de eso**: cambiar la moneda de un ítem, ¿tiene que
+  vaciar el precio como lo vacía cambiar la unidad, o conservarlo?
 
-  ✅ **El PEGADO se atajó el 2026-09-01** (`MoneyInput.onPaste` + `parseMontoPegado`, puro y
-  con sus casos en `currency-format.spec.ts`). Ahí la cadena llega entera, así que la
-  agrupación se puede juzgar: `1.500` agrupa de a 3 y es mil quinientos, `1000.5` no agrupa
-  nada y ese punto era el decimal. Cuando el valor cabe en la escala del campo se reescribe
-  con el separador de la moneda; cuando no cabe **no se guarda nada** —ni redondeado ni
-  recortado, que son las dos formas de guardar un número que nadie escribió, y recortar es
-  justo lo que hacía el intento revertido—. Lo que decide es el valor y no el largo de la
-  cola: `1.500,00` son mil quinientos y entra en pesos.
+### El modal de reembolso formatea con la moneda del tenant una orden que siempre es CLP (2026-09-08)
 
-  ⚠️ **No digas que el pegado "está cerrado": cubre el que REEMPLAZA el campo entero.**
-  Medido el 2026-09-01 por la revisión independiente, con el fix puesto: con el caret al
-  final y sin seleccionar, pegar `1000.5` sobre un `750` deja `75010005`. Es límite
-  deliberado —el texto que queda no es el del portapapeles, así que opinar sería adivinar—
-  y tiene su test con el `75010005` adentro, pero es un camino vivo. La otra condición:
-  solo se opina sobre **dígitos y los dos separadores de la moneda** (más el espacio que
-  agrupa y el signo, que se normalizan), así que un `(1.000,5)` contable sigue dando
-  `10005`. Queda además la ambigüedad que ninguna lectura
-  resuelve: `12.345` en un campo de 4 decimales es `12345` en es-CL y `12,345` en en-US, y
-  el componente elige siempre la chilena.
-
-  ✅ **El TECLEO se decidió el 2026-09-01: se deja como está.** El owner, al ver la
-  medición: *"el separador de miles no hace nada, solo se puede tipear el separador decimal
-  que le corresponda al país"*. Eso **ya es lo que el componente hace**, medido tecla por
-  tecla en Chrome sobre el campo de precio de `items.vue` (4 decimales, tenant en CLP):
-
-  | Tecla | Qué pasa |
-  |---|---|
-  | `1` `0` `0` `0` | `1.000` — maska agrupa sola, el punto no hay que tipearlo |
-  | después `,` (decimal de es-CL) | `1.000,` y el `5` da `1.000,5` ✅ |
-  | después `.` (miles de es-CL) | `1.000` — inerte; y el `5` que sigue da `10.005` ❌ |
-
-  O sea que la regla del owner está implementada y **el ×10 tecleando queda aceptado**. La
-  razón por la que no se puede cerrar respetándola: a mitad de número el punto tiene **dos
-  significados legítimos** —`1.000` + `.` va a `1.000.500` (un millón quinientos, el hábito
-  chileno) o a `1.000,5`—, y cuál era solo se sabe por lo que se teclee después, que es
-  justo lo que la máscara ya colapsó. Mapear el punto al decimal cerraría el ×10 y rompería
-  el hábito; se le ofreció al owner y eligió no romperlo.
-
-  ✅ **La confirmación del monto se decidió el 2026-09-06: no se hace.** Era lo único que
-  quedaba esperando respuesta acá —si el campo debía devolver el monto de una forma que se
-  note, en palabras o contra el valor anterior al editar, para cubrir el error una vez
-  cometido—. El owner, al ver la medición completa: *"dejemos esto cerrado, más adelante
-  vemos si hace falta de verdad"*. **Nada de esta entrada espera al owner.** Lo que la
-  reabre no es una idea sino un caso real: alguien que guarde un monto ×10 usando el
-  sistema. Si eso pasa, el gesto está diseñado y medido más arriba y se retoma; hasta
-  entonces, agregarlo sería fricción en cada tecleo por un error que todavía nadie cometió
-  fuera de una medición.
-
-  1. ~~**El TECLEO sigue abierto, y ahora se sabe por qué no se puede desde el input.**~~ La
-     información no está ahí: `1`,`.`,`5`,`0`,`0` (mil quinientos) y `1`,`0`,`0`,`.`,`5`
-     (ochocientos y medio) son el **mismo gesto**, y lo único que los separa son los dígitos
-     que siguen al punto — que maska ya colapsó cuando llegan. Medido el 2026-09-01 contra
-     el helper `tipear` del spec: la heurística "separador seguido de 1 o 2 dígitos" tampoco
-     sirve, porque la produce **el backspace** sobre un número ya agrupado (`1.234` →
-     `1.23`), que tiene su propio test. Lo que queda no es un parche de máscara sino una
-     decisión de producto: **(a)** mostrar el monto de vuelta como confirmación antes de
-     guardar —no depende de maska y cubre tecleo *y* pegado— **quedó descartada el
-     2026-09-06** (ver el ✅ de arriba), así que la única viva es **(b)** el selector de
-     unidad del punto 2, que no espera respuesta: es diseño.
-  2. ⚠️ **Los 6 `:decimales="4"` de `items.vue` NO se barren: sacarlos rompe.** Esta entrada
-     decía lo contrario y estaba mal — medido el 2026-09-01 leyendo el DTO, no la pantalla.
-     Los seis campos son `@EsCosto()` (escala 4) en el backend **a propósito** y está escrito
-     en `create-item.dto.ts:163-167`: son dinero **por unidad**, una tasa, y la frontera
-     tasa→monto se cruza al multiplicar por la cantidad, no en el campo. Cuantizar un precio
-     por gramo a peso entero mete **error ×1000 al vender un kilo**. El prop está espejando
-     al backend, que es su trabajo.
-     Lo que la regla del owner del 2026-08-28 pide no es sacar el prop sino **dar la
-     precisión eligiendo la unidad**: el campo sigue los decimales de la moneda del ítem y
-     el costo se expresa por kilo en vez de por gramo. Eso es cambio de producto en 6
-     lugares de `items.vue`, con su propio diseño, y arrastra el criterio que ya costó una
-     medición: el selector tiene que gobernar **solo el precio**. Ejemplo medido — en
-     `mermas.vue` el mismo selector gobernaba la cantidad y el costo a la vez, así que mermar
-     100 g de un producto en kilos arrastraba el costo a `6,5`/g, que en CLP no existe, y
-     sacando solo el prop el POST llevaba `"7"` en vez de `"6.5"`: **7,69% de
-     sobrevaloración**, sin que nadie tocara el campo porque venía prefilleado. `MoneyInput`
-     no avisaba: **redondeaba y emitía en silencio** (el `watch` solo escribía `display`,
-     pero ese `display` entraba al `<input>` con `v-maska`, disparaba `onMaska` y emitía).
-     Eso corrige el §4 de la spec, que daba por bueno lo contrario.
-     📌 Las líneas de los 6 se corrieron al crecer el archivo: hoy son `:1636`, `:1707`,
-     `:1839`, `:1985`, `:2137` y `:2360`. `mermas.vue:468` no cuenta (ver el 📌 de abajo).
-  3. `ReembolsoModal` (moneda del tenant contra una orden siempre CLP) — ortogonal, sigue.
-
-  📌 **El caso de `mermas.vue` se resolvió en un frente propio, ya cerrado el 2026-08-28:**
-  el costo se maneja en el producto y el formulario de merma dejó de pedirlo —
-  [`specs/2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md),
-  [`plans/2026-08-28-merma-sin-costo-tipeado.md`](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
-  El campo de costo —y con él su `:decimales="4"`— se sacó entero del formulario: no queda
-  nada que barrer ahí.
+- [ ] **`ReembolsoModal` monta su `MoneyInput` con `oficial`** —la moneda oficial del
+  tenant— y el monto que se reembolsa es el de una orden de Webpay, que es **siempre en
+  pesos chilenos**. Con un tenant cuya oficial no sea CLP, el campo agrupa, muestra el
+  símbolo y admite decimales de otra moneda para un número que no es de esa moneda.
+  Salió del frente del ×10 como su punto 3, siempre marcado *"ortogonal"*
+  ([`resueltos.md`](resueltos.md)); se separa acá para que no lo arrastre un cierre que no
+  lo toca.
+  **Qué medir antes de diseñar nada**, en este orden: (1) si hoy existe algún tenant con
+  oficial ≠ CLP —si no existe, esto es latente y no un bug vivo—; (2) qué moneda dice el
+  backend que tiene el reembolso, que es la que el campo debería usar; (3) si el mismo
+  desajuste está en `NotaCreditoModal`, que es su vecino de la misma pantalla.
 
 ### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
 

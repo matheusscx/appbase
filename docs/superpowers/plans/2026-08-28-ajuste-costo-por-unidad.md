@@ -272,7 +272,7 @@ de su propio Step 1: en `mermas.vue` el selector de unidad gobierna la **cantida
 a la vez**, así que mermar 100 g de un producto en kilos arrastra el costo a `6,5`/g, que en
 CLP no existe; sacando el prop el POST llevó `"7"` en vez de `"6.5"` — **7,69% de
 sobrevaloración**, sin que nadie toque el campo porque viene prefilleado, y sin aviso
-(`MoneyInput` redondea y emite en silencio vía maska). Decisión del owner: el costo se maneja
+(`MoneyInput` redondeaba y emitía en silencio vía maska; ese re-emit se cerró el 2026-09-08). Decisión del owner: el costo se maneja
 **en el producto** y el formulario de merma deja de pedirlo. Eso reemplaza a esta tarea y
 vive en su propio frente —
 [spec](../specs/2026-08-28-merma-sin-costo-tipeado-design.md) ·
@@ -323,7 +323,7 @@ En `docs/patterns/frontend.md`, junto a lo que ya dice de `MoneyInput`: **los in
 
 - [x] **Step 3: Actualizar el backlog**
 
-En `docs/agent/pendientes.md`, la entrada del `MoneyInput` ×10: dejar asentado que el frente ambiguo de 4 decimales **se cerró sacándolo** en los campos de costo, y que lo que queda abierto es solo el rechazo en 0 decimales y el barrido de los `:decimales="4"` de `items.vue`. Enlazar la investigación y esta spec.
+En `docs/agent/resueltos.md` —la entrada del `MoneyInput` ×10 se cerró ahí el 2026-09-08—: dejar asentado que el frente ambiguo de 4 decimales **se cerró sacándolo** en los campos de costo, y que lo que queda abierto es solo el rechazo en 0 decimales —el barrido de los `:decimales="4"` de `items.vue` se hizo el 2026-09-08, con el prop incluido—. Enlazar la investigación y esta spec.
 
 - [x] **Step 4: Gate completo**
 

@@ -38,6 +38,20 @@ const ITEM_PRODUCTO = {
   recargosIds: [] as string[],
 }
 
+const MONEDA_CLP = {
+  monedaId: 'clp',
+  nombre: 'Peso Chileno',
+  codigoIso: 'CLP',
+  simbolo: '$',
+  decimales: 0,
+  separadorDecimal: ',',
+  separadorMiles: '.',
+  locale: 'es-CL',
+  habilitada: true,
+  esOficial: true,
+  valorDelDia: null,
+}
+
 const IMPUESTO_IVA = {
   id: 'iva-1',
   nombre: 'IVA',
@@ -127,6 +141,14 @@ let overrideItemsSinEliminados: Promise<unknown> | null = null
 let usoCalls: string[] = []
 let usoOverride: Record<string, Promise<unknown>> = {}
 
+// El store de monedas sale del auth (`ensureLoaded` corta sin `activeTenantId`), y
+// sin monedas todos los `MoneyInput` de la pantalla se montan DESHABILITADOS y sin
+// emitir: los tests de abajo pasarían igual con el `v-model` desconectado. Con esto
+// el campo de dinero está vivo, y es el mismo que ve una persona.
+mockNuxtImport('useAuthStore', () => {
+  return () => ({ activeTenantId: 'tenant-1' })
+})
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string }) => {
     if (typeof url === 'string' && url.includes('/impuestos'))
@@ -171,6 +193,7 @@ mockNuxtImport('useApiFetch', () => {
         meta: { total: data.length, page: 1, pageSize: 15, totalPages: 1 },
       })
     }
+    if (typeof url === 'string' && url.includes('/monedas')) return Promise.resolve([MONEDA_CLP])
     if (typeof url === 'string' && url.includes('/items'))
       return Promise.resolve({ data: [ITEM_PRODUCTO], meta: { total: 1, page: 1, limit: 20, totalPages: 1 } })
     return Promise.resolve([])
@@ -799,23 +822,20 @@ describe('configuracion/items — guard de reentrancia de "Eliminar"', () => {
 })
 
 /**
- * Los campos de dinero de esta pantalla son TODOS de escala fija 4 en el
- * backend (`@EsCosto()`): `precioBase`, `costo`, y los dos `precioExtra` —el de
- * extras de receta y el de opciones de grupo—, más el `costoUnitario` del
- * ajuste. Son precios **por unidad**, o sea tasas, y la frontera tasa→monto se
- * cruza al multiplicar por la cantidad, no acá.
- *
- * `MoneyInput` sin el prop `decimales` sigue los decimales de la MONEDA, y con
- * CLP (0) la máscara no deja abrir parte decimal: un costo de `5,0500`/g es
- * válido para el backend y no se podía tipear.
+ * Los campos de dinero de esta pantalla siguen los decimales de la MONEDA del
+ * ítem, no una escala fija (owner, 2026-08-28; aplicado acá el 2026-09-08). La
+ * escala del backend sigue en 4 —`@EsCosto()`, porque el motor promedia y genera
+ * fracciones—, pero lo que una persona teclea sigue a la moneda: en CLP la
+ * máscara no deja abrir parte decimal, y la precisión de un costo por gramo la da
+ * elegir la unidad, no tipear `5,0500`.
  *
  * El guard es sobre el fuente y no sobre el render a propósito: lo que hay que
- * evitar es que el PRÓXIMO campo de dinero de esta pantalla nazca sin el prop,
- * y un test que monta solo ve los que ya están dibujados. Cuenta aperturas de
- * tag para no contar de más si alguien lo menciona en un comentario.
+ * evitar es que el PRÓXIMO campo de dinero de esta pantalla nazca forzando una
+ * escala, y un test que monta solo ve los que ya están dibujados. Cuenta aperturas
+ * de tag para no contar de más si alguien lo menciona en un comentario.
  */
-describe('configuracion/items — los campos de dinero son de escala fija', () => {
-  it('todo MoneyInput de la pantalla fija decimales en 4', () => {
+describe('configuracion/items — los campos de dinero siguen a la moneda', () => {
+  it('ningún MoneyInput de la pantalla fuerza decimales', () => {
     // Desde la raíz del proyecto: en el entorno `nuxt` de vitest,
     // `import.meta.url` no es un `file:` usable.
     const ruta = resolve(process.cwd(), 'app/pages/configuracion/items.vue')
@@ -824,7 +844,110 @@ describe('configuracion/items — los campos de dinero son de escala fija', () =
     const tags = fuente.match(/<MoneyInput[\s\S]*?\/>/g) ?? []
     expect(tags.length).toBeGreaterThan(0)
 
-    const sinDecimales = tags.filter(t => !t.includes(':decimales="4"'))
-    expect(sinDecimales).toEqual([])
+    const conDecimales = tags.filter(t => t.includes('decimales'))
+    expect(conDecimales).toEqual([])
+  })
+})
+
+/**
+ * Costo y precio base son dinero **por la unidad de medida del ítem**. Desde que
+ * los dos siguen los decimales de la moneda, la unidad es lo único que fija la
+ * magnitud del número, así que tiene que estar a la vista y no puede quedar
+ * pegada a un número tipeado para otra.
+ */
+describe('configuracion/items — la unidad manda en costo y precio', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+  })
+
+  async function abrirAlta() {
+    const wrapper = await montar()
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo item'))
+    expect(boton, 'botón "Nuevo item"').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    return wrapper
+  }
+
+  /** El `UFormField` cuya etiqueta empieza con `prefijo`, con su input adentro. */
+  function campo(wrapper: Awaited<ReturnType<typeof montar>>, prefijo: string) {
+    return wrapper.findAllComponents({ name: 'UFormField' })
+      .find(f => String(f.props('label') ?? '').startsWith(prefijo))
+  }
+
+  it('las etiquetas de costo y precio nombran la unidad elegida', async () => {
+    const wrapper = await abrirAlta()
+
+    // Arranca en `unidad`, el default de `emptyForm`.
+    expect(campo(wrapper, 'Costo')?.props('label')).toBe('Costo (por unidad)')
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por unidad)')
+
+    const unidad = campo(wrapper, 'Unidad de medida')!.findComponent({ name: 'USelectMenu' })
+    unidad.vm.$emit('update:modelValue', 'kg')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(campo(wrapper, 'Costo')?.props('label')).toBe('Costo (por kg)')
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por kg)')
+
+    wrapper.unmount()
+  })
+
+  it('cambiar la unidad limpia lo tipeado en costo y en precio', async () => {
+    // Lo que se evita: `5000` tipeado por unidad quedándose en el campo cuando la
+    // unidad pasa a ser kilo, o sea el mismo número significando otra cosa. Se
+    // limpia y no se convierte: `1500` por kilo son `1,5` por gramo, un número que
+    // una moneda sin decimales no puede expresar, así que convertir dejaría
+    // guardado algo que nadie tecleó (`docs/patterns/frontend.md` §8).
+    const wrapper = await abrirAlta()
+
+    campo(wrapper, 'Costo')!.findComponent({ name: 'MoneyInput' })
+      .vm.$emit('update:modelValue', '5000')
+    campo(wrapper, 'Precio base')!.findComponent({ name: 'MoneyInput' })
+      .vm.$emit('update:modelValue', '9000')
+    await new Promise(r => setTimeout(r, 20))
+
+    // Ancla: sin esto, un `v-model` roto haría pasar el test por el lado vacío.
+    expect(campo(wrapper, 'Costo')!.findComponent({ name: 'MoneyInput' }).props('modelValue')).toBe('5000')
+    expect(campo(wrapper, 'Precio base')!.findComponent({ name: 'MoneyInput' }).props('modelValue')).toBe('9000')
+
+    const unidad = campo(wrapper, 'Unidad de medida')!.findComponent({ name: 'USelectMenu' })
+    unidad.vm.$emit('update:modelValue', 'kg')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(campo(wrapper, 'Costo')!.findComponent({ name: 'MoneyInput' }).props('modelValue')).toBe('')
+    expect(campo(wrapper, 'Precio base')!.findComponent({ name: 'MoneyInput' }).props('modelValue')).toBe('')
+
+    wrapper.unmount()
+  })
+
+  // La contracara, y el modo de falla que más caro salía: abrir la ficha de un ítem
+  // NO puede cambiarle la plata. Son dos mecanismos distintos y este test los cubre a
+  // la vez, porque en la pantalla real ocurren juntos:
+  //   1. `abrirEditar` carga la unidad del ítem, así que el `watch` de arriba ve un
+  //      cambio de unidad que ninguna persona hizo — lo frena el guard de `editingId`;
+  //   2. el precio que trae la API puede no caber en la escala de la moneda, y
+  //      `MoneyInput` lo re-emitía redondeado al montarse — se cerró el 2026-09-08
+  //      haciendo que solo emita lo que la persona escribe.
+  // Con cualquiera de los dos vivo, editarle la descripción a un ítem le cambia el
+  // precio guardado.
+  it('abrir un ítem con un precio que el peso no puede expresar NO se lo reescribe', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, unidadMedida: 'kg', precioBase: '1234.5678' }
+
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    const money = campo(wrapper, 'Precio base')!.findComponent({ name: 'MoneyInput' })
+    // Ancla: sin moneda resuelta `MoneyInput` se monta DESHABILITADO y sin emitir, y
+    // todo lo de abajo pasaría por el lado trivial.
+    expect(money.find('input').element.disabled).toBe(false)
+    // Se muestra lo único que se puede mostrar en pesos…
+    expect(money.find('input').element.value).toBe('1.235')
+    // …y el formulario sigue teniendo lo que mandó la API, que es lo que se guardaría.
+    expect(money.props('modelValue')).toBe('1234.5678')
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por kg)')
+
+    wrapper.unmount()
   })
 })

@@ -204,7 +204,7 @@ const costoVigenteEnUnidad = computed(() => {
 /** Cambiar de unidad NO reinterpreta lo ya tipeado: limpia el campo y se
  * retipea. Convertirlo parece más amable y es la trampa: `1500` por kilo son
  * `1,5` por gramo, y en una moneda sin decimales `MoneyInput` no rechaza —
- * redondea a `2` y lo emite en silencio (mecanismo medido en
+ * lo muestra redondeado a `2` (y hasta el 2026-09-08 además lo emitía; mecanismo medido en
  * `docs/patterns/frontend.md` §8), o sea un costo 33% más alto que nadie
  * tecleó. Decisión del owner, 2026-08-28. */
 watch(() => ajusteCostoForm.value.unidadCodigo, (_nueva, anterior) => {
@@ -222,9 +222,13 @@ watch(() => ajusteCostoForm.value.unidadCodigo, (_nueva, anterior) => {
  * mismo valor y el `1500` sobrevive. Y si el producto nuevo está en otra moneda
  * es peor que un número viejo: `MoneyInput` re-enmascara ese mismo número bajo
  * la escala nueva, así que `1.500` (CLP, `.` de miles) se lee `1,500.00` (USD,
- * `.` decimal) al lado de un costo vigente de US$7,50 —medido en el navegador—,
- * y el crudo tampoco queda quieto: en el spec de acá vuelve del componente como
- * `1500.00`, o sea que no es solo visual. Decisión del owner,
+ * `.` decimal) al lado de un costo vigente de US$7,50 —medido en el navegador—.
+ * ⚠️ Hasta el 2026-09-08 el crudo tampoco quedaba quieto: volvía del componente
+ * como `1500.00`, porque `MoneyInput` re-emitía lo que le entraba por `props`.
+ * Ese re-emit se cerró, así que hoy el modelo conserva `1500` — el mismo número,
+ * y la pantalla muestra lo mismo que antes. Lo que no cambia es el motivo de
+ * limpiar: sea `1500` o `1500.00`, es un número tipeado para OTRO producto y
+ * otra moneda. Decisión del owner,
  * 2026-08-29: se limpia, con el mismo costo que ya se aceptó para la unidad —si
  * el click en la lista fue un error, el número se retipea. */
 watch(() => ajusteCostoForm.value.itemId, (itemId) => {

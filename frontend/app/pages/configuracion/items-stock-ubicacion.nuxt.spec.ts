@@ -33,7 +33,12 @@ const ITEM_PRODUCTO = {
   recargosIds: [] as string[],
 }
 
+/** Mismo producto pero costeado por kilo: es lo que hace aparecer el selector de
+ * unidad del modal (`mostrarSelectorUnidad` pide más de una unidad de la magnitud). */
+const ITEM_EN_KILOS = { ...ITEM_PRODUCTO, id: 'item-kg', nombre: 'Carne', unidadMedida: 'kg' }
+
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
+let itemsListado: (typeof ITEM_PRODUCTO)[] = [ITEM_PRODUCTO]
 let ajustesEnviados: Record<string, unknown>[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
@@ -47,6 +52,12 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
+    // Dos unidades de masa: es la condición de `mostrarSelectorUnidad`.
+    if (url.includes('/catalog/unidades-medida')) return Promise.resolve([
+      { unidadMedidaId: 'u-1', codigo: 'unidad', nombre: 'Unidad', magnitud: 'conteo', factorBase: '1' },
+      { unidadMedidaId: 'u-2', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
+      { unidadMedidaId: 'u-3', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
+    ])
     if (opts?.method === 'PATCH' && /\/items\/[^/]+\/stock$/.test(url)) {
       ajustesEnviados.push({ ...(opts.body ?? {}) })
       return Promise.resolve({ stock: '15.0000', costoActual: '1000.0000' })
@@ -57,7 +68,7 @@ mockNuxtImport('useApiFetch', () => {
     if (/\/items\/[^/?]+\/uso$/.test(url)) return Promise.resolve({ bloqueos: [], advertencias: [] })
     if (/\/items\/[^/?]+$/.test(url)) return Promise.resolve(ITEM_PRODUCTO)
     if (url.includes('/items'))
-      return Promise.resolve({ data: [ITEM_PRODUCTO], meta: { total: 1, page: 1, limit: 20, totalPages: 1 } })
+      return Promise.resolve({ data: itemsListado, meta: { total: itemsListado.length, page: 1, limit: 20, totalPages: 1 } })
     return Promise.resolve([])
   }
 })
@@ -123,6 +134,9 @@ describe('configuracion/items — el selector de ubicación del modal "Ajustar s
   beforeEach(() => {
     ajustesEnviados = []
     document.body.querySelectorAll('[role="dialog"], [data-reka-portal]').forEach(n => n.remove())
+    // El describe de más abajo lista otro ítem: sin este reset, el orden de los
+    // describes decidiría cuál se prueba acá.
+    itemsListado = [ITEM_PRODUCTO]
   })
 
   it('con una sola ubicación, el selector NO se dibuja y el body manda el local igual', async () => {
@@ -172,6 +186,55 @@ describe('configuracion/items — el selector de ubicación del modal "Ajustar s
     // Si sobreviviera, sería una cantidad tipeada mirando el stock del local
     // aplicada como si fuera de la bodega — un número que nadie tecleó ahí.
     expect(campoCantidad(wrapper).props('modelValue')).toBe('')
+    wrapper.unmount()
+  })
+})
+
+/**
+ * El costo de una entrada por compra se tipea "por la unidad seleccionada" y el
+ * backend lo convierte a la unidad base con ese mismo código
+ * (`items.service.ts`, `convertirCostoUnitario`). Cambiar la unidad después de
+ * tipear no deja el número viejo: lo deja significando otra cosa.
+ *
+ * Se limpia y no se convierte, que es la parte contraintuitiva: `6500` por kilo
+ * son `6,5` por gramo, y en una moneda sin decimales eso no se puede expresar —
+ * convertir dejaría guardado un número que nadie tecleó, y hasta el 2026-09-08
+ * `MoneyInput` encima lo redondeaba y lo emitía (medido el 2026-08-28 en
+ * `mermas.vue`: 7,69% de sobrevaloración sin que nadie toque el campo).
+ * Mismo criterio y misma implementación que el ajuste de costo de
+ * `inventario/index.vue` (owner, 2026-08-28).
+ */
+describe('configuracion/items — cambiar la unidad limpia el costo de la compra', () => {
+  beforeEach(() => {
+    ajustesEnviados = []
+    document.body.querySelectorAll('[role="dialog"], [data-reka-portal]').forEach(n => n.remove())
+    ubicacionesBackend = [LOCAL]
+    itemsListado = [ITEM_EN_KILOS]
+  })
+
+  function campoCosto(wrapper: Wrapper) {
+    const campo = wrapper.findAllComponents({ name: 'MoneyInput' })
+      .find(c => c.props('monedaId') === ITEM_PRODUCTO.monedaId)
+    expect(campo, 'campo "Costo unitario"').toBeTruthy()
+    return campo!
+  }
+
+  it('lo tipeado por kilo no se queda cuando la unidad pasa a gramo', async () => {
+    const wrapper = await montar()
+    await abrirAjusteStock(wrapper)
+
+    // El campo de costo solo existe en la entrada por compra.
+    await emitir(selectConOpcion(wrapper, 'compra'), 'compra')
+
+    campoCosto(wrapper).vm.$emit('update:modelValue', '6500')
+    await new Promise(r => setTimeout(r, 20))
+    // Ancla: sin esto, un `v-model` roto haría pasar el test por el lado vacío.
+    expect(campoCosto(wrapper).props('modelValue')).toBe('6500')
+
+    await emitir(selectConOpcion(wrapper, 'g'), 'g')
+
+    expect(campoCosto(wrapper).props('modelValue')).toBe('')
+
     wrapper.unmount()
   })
 })

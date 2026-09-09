@@ -834,8 +834,9 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
                    `8005`, y el backend NO lo rechaza, porque `@EsCosto()` valida escala
                    4 y `8005` es válido. O sea, ×10 guardado en silencio en N filas.
                    Con `,` anda bien, pero el input pelado manda `800.5` tal cual.
-                   El detalle está en `docs/agent/pendientes.md` ("el 400 no es red para
-                   los campos de escala fija"); mientras eso siga así, acá no va máscara. -->
+                   El detalle está en `docs/agent/resueltos.md` (el frente del ×10, cerrado
+                   el 2026-09-08 dejándolo aceptado); mientras eso siga así, acá no va
+                   máscara. -->
               <UInput v-model="lotePrecio" inputmode="decimal" placeholder="0" class="w-full" />
             </UFormField>
 

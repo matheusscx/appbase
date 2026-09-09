@@ -368,6 +368,13 @@ persiste en `items.precio_base`. La alternativa —recargar— tenía su propio 
 - `configuracion/items.vue` — tras PATCH de costo o compra con `costoUnitario` → `GET /items/:id/afectados` → drawer con `DesfasesPanel` si hay filas.
 - `desfases.vue` — bandeja con `GET /desfases`; mismas acciones aplicar/descartar; no se cierra sola cuando `aplicar` devuelve `afectados` (los reemplaza en la lista). Al descartar **sí recarga**, a propósito (ver arriba), pero el aviso lo arma `avisosDeDesfasesCambiados`, compartido con el drawer, y no un texto propio.
 - `components/DesfasesPanel.vue` — tabla de simulación con columna Tipo (receta/combo): costos, márgenes, input precio (prellenado con `precioSugerido`), checkbox "Actualizar precio" off por defecto.
+  📌 **El prefill se cuantiza a la escala de la moneda oficial** (`precioPrefill`, desde el
+  2026-09-08): `precioSugerido` es una tasa de 4 decimales y el input no puede mostrar más
+  decimales que la moneda, así que sin cuantizar la fila mostraría `4.447` y aplicaría
+  `4447.0588`. Antes de esa fecha el redondeo lo hacía —sin que nadie lo hubiera decidido— el
+  re-emit de `MoneyInput`, que se cerró en el mismo commit. ⚠️ Cuantiza con la **oficial** y la
+  fila puede ser de un ítem en otra moneda: la bandeja no filtra por moneda y `DesfaseItemDto`
+  no trae `monedaId` ([`agent/pendientes.md`](../agent/pendientes.md)).
 - `composables/useSimuladorDesfases.ts` — mismo flujo aplicar/descartar para el modal (compartido entre `configuracion/items.vue` e `inventario.vue`); reproduce el manejo de `omitidos`/`afectados` con toasts propios. Al descartar **no recarga**: reemplaza en la lista lo que vuelve en `cambiados[].fila`. Es la única pantalla del proyecto que arma la lista del drawer con dos orígenes (`afectados` + la segunda pasada de `aplicar`), y ahí es donde una recarga divergía — ver *"La fila que cambió vuelve entera"*.
 - Nav en `dashboard.vue` → "Costos desfasados" (`/desfases`).
 - `configuracion/recetas-desfases.vue` es un stub de compatibilidad: redirige a `/desfases`.

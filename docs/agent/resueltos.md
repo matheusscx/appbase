@@ -23,6 +23,246 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El `.` que multiplica por 10, y los seis campos de dinero de `items.vue` (cerrada 2026-09-08)
+
+Sale de [`pendientes.md` § 2](pendientes.md), donde nació el 2026-08-26 corrigiendo una
+afirmación falsa —*"el backend ataja el ×10 con un 400"*— y se fue achicando en tandas: el
+**pegado** se atajó el 2026-09-01, el **tecleo** lo aceptó el owner ese mismo día, la
+**confirmación del monto** la descartó el 2026-09-06, y lo último que quedaba —los seis
+`:decimales="4"` de `items.vue`— se construyó acá.
+
+**Decisión del owner que faltaba (2026-09-08).** La regla del 2026-08-28 hablaba de *costos*;
+uno de los seis campos es el **precio de venta**. Preguntado con la escena —*"vendés jamón a
+$8.500 el kilo; si el precio sigue al peso, el producto se da de alta en kilos y no en
+gramos"*—, el owner extendió la regla: **el precio de venta también sigue a la moneda**.
+
+**En qué se aparta de lo que la entrada proponía.** La entrada cerraba su punto 2 con un
+criterio: *"el selector tiene que gobernar **solo el precio**"* —y `patterns/frontend.md` lo
+dejaba como la pregunta a hacerse antes de sacar cada prop—. Medidos los seis, la pregunta no
+aplica igual, porque no son la misma cosa:
+
+| Campo | Qué es | Qué necesitó además de sacar el prop |
+|---|---|---|
+| `precioBase` | precio de venta **por la unidad base** del ítem | etiqueta con la unidad, y limpiar al cambiarla |
+| `costo` de producto y `costo` de ingrediente (solo al alta) | costo por la unidad base | ídem — es el mismo selector |
+| `precioExtra` de extras permitidos, y de opciones de grupo | **no es una tasa**: es el precio de **una dosis**, que el backend multiplica por un entero (`items.service.ts`: `precioExtraTotal += precioExtra × unidades`). El selector de unidad que tiene al lado gobierna cuánto ingrediente consume la dosis, no cuánto cuesta | nada |
+| `costoUnitario` de la entrada por compra | costo por la **unidad elegida**; el backend ya lo convierte (`convertirCostoUnitario`) | limpiar al cambiar la unidad |
+
+Con el sexto salió también **el prop `decimales` del componente**: `items.vue` era su único
+usuario, y dejarlo era dejar viva la forma de volver a fabricar el campo ambiguo. Los tres
+tests que lo ejercían se repuntaron a la **UF** —misma configuración (4 decimales, miles `.`,
+`es-CL`) pero de una moneda real en vez de un override—, y se agregó un cuarto con ella.
+
+**Y hubo que arreglar el componente para que esto no rompiera plata**, que es la mitad que la
+entrada no anticipaba. `v-maska` corre en `mounted` y en `updated`, así que **todo** valor que
+entraba por `props` volvía a salir por un `emit`: mientras el prop forzaba 4 decimales el eco
+devolvía el mismo número y no se notaba, pero sin el prop un `precio_base` de `1234.5678` en
+CLP volvía como `1235`. O sea que **abrir la ficha de un ítem para cambiarle la descripción le
+habría cambiado el precio**, sin que nadie tocara el campo — el mismo modo de falla del 7,69%
+que se midió en `mermas.vue`. Sin este arreglo, el commit empeoraba lo que venía a cerrar.
+
+El arreglo es una marca que el `watch` deja al pintar desde `props` y que `syncFromMaska`
+consume sin emitir. La regla que queda escrita en el componente: **solo emite lo que la
+persona escribió**; un valor que no cabe en la escala se **muestra** redondeado —no hay otra
+forma de mostrarlo— y el modelo del padre queda intacto.
+
+⚠️ **La marca guarda el TEXTO pintado y no un booleano, y eso costó una medición.** La primera
+versión era un booleano que se limpiaba cuando maska volvía a correr — y maska **no siempre
+vuelve a correr**: solo llama a su callback si el texto del input cambia al re-enmascararlo, y
+lo que hace que cambie es el **símbolo de la moneda** (`formatMontoDisplay` antepone `$`, maska
+lo desnuda). Con una moneda **sin símbolo** —`moneda.simbolo` es nullable— el booleano quedaba
+puesto y **se comía la primera tecla de la persona**: medido tecla por tecla, el modelo se
+quedaba en `1500` mientras la pantalla mostraba `1.5007`. Tiene su propio test, con una moneda
+sin símbolo. Comparando el texto, una marca vieja solo puede silenciar un `emit`
+que devuelve **lo que ya se está mostrando** — que no es lo mismo que "no cambia nada": si el
+modelo está fuera de la escala, tipear a mano el número redondeado que el campo ya muestra no
+lo cambiaría. Es el residuo aceptado, invisible en pantalla y en la dirección que el diseño
+quiere; está escrito en el docblock del componente. Dos specs de pantalla fijaban el
+comportamiento viejo y cambiaron con él (`descuentos` y `recargos`: un mínimo que nadie editó
+ahora vuelve al backend como `50000.0000`, tal cual llegó, y no como `50000`); los dos
+comentarios que había ahí ya decían que ese round-trip era el bug.
+
+**Lo medido.** El único número que este cambio mueve es cuántas veces se pasa el prop —lo
+demás que cambia es conducta, y la fijan los tests de la tabla de mutantes:
+
+```bash
+grep -rn 'decimales=' frontend/app --include='*.vue' | wc -l   # 6 antes, 0 después
+```
+
+El resto son conteos de contexto —cuánta plata hay hoy fuera de la escala de su moneda, y
+cuánta puede haber— y **no** cambian con este commit. Salen de una base **recién sembrada más
+una corrida completa del `test:e2e`**, que es un estado reproducible, con estas consultas:
+
+```sql
+SELECT m.codigo_iso, m.decimales, count(i.item_id) FROM moneda m
+  LEFT JOIN items i ON i.moneda_id = m.moneda_id AND i.eliminado_el IS NULL
+  WHERE m.eliminado_el IS NULL GROUP BY 1,2;
+SELECT count(*) FILTER (WHERE i.precio_base <> round(i.precio_base, m.decimales)), count(*)
+  FROM items i JOIN moneda m ON m.moneda_id = i.moneda_id
+  WHERE i.eliminado_el IS NULL AND m.eliminado_el IS NULL;
+SELECT p.unidad_medida, count(*),
+       count(*) FILTER (WHERE i.precio_base <> round(i.precio_base, 0))
+  FROM items i JOIN item_producto p ON p.item_id = i.item_id
+  WHERE i.eliminado_el IS NULL AND i.tipo <> 'ingrediente' GROUP BY 1;
+```
+
+⚠️ **`item_producto` no tiene `eliminado_el`** —se borra con su `items`—, así que la tercera no
+necesita un filtro más. Las dos tablas de `precio_extra` sí lo tienen.
+
+- **Ítems por moneda:** 306 CLP, 8 USD, 5 ARS, 4 MXN, **0 UF**, 0 COP. O sea que la única
+  moneda de 4 decimales sembrada no la usa ningún ítem.
+- **`items.precio_base` fuera de la escala de su moneda: 2 de 323.** Los dos en CLP, y los dos
+  escritos por el e2e **por API**, no por la pantalla: el `1234.5678` está literal en
+  `ventas.e2e-spec.ts` (un ítem a granel) y el `3579.5454` sale de
+  `simulador-costos.e2e-spec.ts`, que aplica el `precioSugerido` del motor tal como viene, sin
+  pasar por el panel que lo redondearía.
+- **`precio_extra` fuera de escala: 0 de 13** (extras de receta) **y 0 de 2** (overrides de
+  opciones de grupo). El 0 es lo que sostiene que sacarles el prop no deja nada atrás; la
+  procedencia no —esas filas también las escribió el e2e por API, igual que los dos
+  `precio_base`—. Sale de su propia consulta, que el bloque de arriba no traía:
+
+  ```sql
+  SELECT count(*) FILTER (WHERE re.precio_extra <> round(re.precio_extra, m.decimales)), count(*)
+    FROM receta_extras_permitidos re JOIN items i ON i.item_id = re.receta_item_id
+    JOIN moneda m ON m.moneda_id = i.moneda_id
+    WHERE re.eliminado_el IS NULL AND i.eliminado_el IS NULL AND m.eliminado_el IS NULL;
+  SELECT count(*) FILTER (WHERE o.precio_extra IS NOT NULL
+                            AND o.precio_extra <> round(o.precio_extra, m.decimales)), count(*)
+    FROM item_grupo_modificador_opciones o
+    JOIN item_grupos_modificadores g ON g.item_grupo_id = o.item_grupo_id
+    JOIN items i ON i.item_id = g.item_id JOIN moneda m ON m.moneda_id = i.moneda_id
+    WHERE o.eliminado_el IS NULL AND g.eliminado_el IS NULL
+      AND i.eliminado_el IS NULL AND m.eliminado_el IS NULL;
+  ```
+
+  ⚠️ **La segunda va contra `item_grupo_modificador_opciones`, el OVERRIDE por ítem, no contra
+  `grupo_modificador_opciones`.** El campo de esta pantalla escribe el override; el catálogo lo
+  edita `grupos-modificadores.vue`, que sigue con `UInput` pelado a propósito. Medir el catálogo
+  da un número correcto para otra pregunta.
+- **Productos vendibles por unidad de medida:** 137 en `unidad`, 9 en `kg`, 4 en `g`; con
+  precio fraccionario, **1** (un `kg`) y **ninguno** de los que están en gramos.
+
+**Dos mediciones que la entrada pedía y no tenía.** Las dos con el molde de
+`MoneyInput.spec.ts`, y las dos confirmaron lo que se venía deduciendo:
+
+1. **`MoneyInput` redondeaba y emitía solo un valor precargado que no cabía en la moneda.**
+   Montado con `1234.5678` en CLP y sin el prop, el modelo del padre quedaba en `1235` sin que
+   nadie tocara el campo. Es la medición que obligó a arreglar el componente (arriba). De los
+   seis campos, los que se precargan son `precioBase` y los dos `precioExtra`; `costo` no
+   (existe solo al alta) y `costoUnitario` tampoco (el form arranca vacío).
+2. **`DesfasesPanel` redondeaba la sugerencia del motor, pero de rebote**, que es lo que el
+   §4 de la spec del 2026-08-28 mandaba medir y no deducir: con `precioSugerido: '4447.0588'`
+   y la oficial en CLP, "Aplicar" emitía `precioBase: "4447"` — y lo redondeaba **el mismo
+   re-emit que este commit mata**. O sea que arreglar el componente le sacaba a esa pantalla
+   un redondeo que estaba usando sin saberlo: medido después del arreglo, mostraba `4.447` y
+   aplicaba `4447.0588`. **El prefill del panel ahora
+   cuantiza explícitamente** a la moneda oficial (`precioPrefill`), con su test: lo que la
+   fila muestra es lo que la fila aplica.
+   📌 El backend ya decía que esto era del frente: el docblock de `precioSugerido` en
+   `items.service.ts` dice que cuantizarlo *"sería UX del prefill"*. Ahora esa UX existe y
+   tiene nombre.
+   ⚠️ **Y tiene una segunda mitad:** cuantizar una sola vez no alcanza. `desfases.vue` pide sus
+   filas en su propio `onMounted` y la moneda la carga el layout, así que en una carga dura
+   de `/desfases` las filas pueden llegar primero — y sin escala el prefill se quedaba en el
+   crudo para siempre. Se rehace en cualquier transición `null → moneda` —en esta
+   pantalla, hoy, ocurre una sola vez— y **solo el precio**: las casillas de la fila no dependen de la moneda —se dibujan apenas llegan las
+   filas—, así que en esa misma ventana alguien puede haberlas tocado, y reiniciarlas le
+   revertiría su elección en silencio. Con "Descartar", eso archiva la bandeja entera en vez
+   de las filas que eligió.
+
+**Lo que fija cada mitad.** Diez mutantes, **corridos uno por uno sobre este árbol** contra
+los siete specs que este commit toca. Al lado va cuántos tests mata cada uno, que no es siempre
+uno — y cuál es el mutante, porque "prefillear con el crudo" mata distinto según se mute la
+línea o la función:
+
+📌 **Por qué esos siete alcanzan, sin correr los 1173 — y no es por el silogismo fácil.** Que
+ocho de los diez deshagan algo que este diff **agregó o sacó** —la marca booleana y el
+`initFromFilas` no: son código que nunca se escribió en ninguna versión— *no* prueba nada por
+sí solo. Aunque el hunk se deshaga, el árbol resultante sigue siendo el diff **menos un hunk**,
+un estado que nunca existió, así que un spec verde en la base y en el diff igual podría morir
+ahí. Lo que sostiene la cota es la medición: fuera de esos
+siete, los únicos specs que **nombran** `MoneyInput` o `items.vue` son tres:
+`items-desglose-ubicacion.nuxt.spec.ts` —que entra por `items.vue`, usa un `precioBase` de
+fixture y no afirma sobre ningún body de guardado— y `salones/index.nuxt.spec.ts` y
+`utils/currency-format.spec.ts`, que lo nombran solo en un comentario.
+
+```bash
+grep -rln -e 'MoneyInput' -e 'items\.vue' frontend/app --include='*.spec.ts'   # 10: 7 del commit + 3
+```
+
+⚠️ Ese grep cuenta **menciones por nombre**, no specs que ejerciten el componente: hay pantallas
+con `<MoneyInput>` adentro cuyos specs no lo nombran (`CajaCierreDrawer`,
+`preferencias-financieras`, `promociones`). Para ésos la cota no la da el grep sino la suite
+entera en verde, y el hecho de que los únicos specs que hubo que tocar fueran esos siete.
+
+| Mutante | Tests que mata |
+|---|---|
+| sacar el `watch` de `form.unidadMedida` | **1** — `items.nuxt.spec.ts`, *"cambiar la unidad limpia lo tipeado en costo y en precio"* |
+| sacarle a ese `watch` el guard de `editingId` | **1** — `items.nuxt.spec.ts`, *"abrir un ítem con un precio que el peso no puede expresar NO se lo reescribe"* |
+| etiquetas fijas (`'Costo'`) en vez de con la unidad | **2** — el de las etiquetas y el de la ficha, que también afirma sobre la etiqueta |
+| devolver un `:decimales="4"` a un `MoneyInput` de la pantalla | **1** — *"ningún MoneyInput de la pantalla fuerza decimales"* |
+| sacar el `watch` de `ajusteForm.unidadCodigo` | **1** — `items-stock-ubicacion.nuxt.spec.ts`, *"lo tipeado por kilo no se queda cuando la unidad pasa a gramo"* |
+| sacar el guard del eco en `syncFromMaska` | **5**, en tres niveles: dos de `MoneyInput.spec.ts`, el de la ficha en `items.nuxt.spec.ts` y el round-trip de `descuentos` **y** `recargos` (gemelos) |
+| que la marca del eco sea un booleano en vez del texto pintado | **1** — `MoneyInput.spec.ts`, *"sin símbolo de moneda, la tecla siguiente TAMBIÉN emite"* |
+| que `precioPrefill` devuelva el crudo (la función, no la línea que la llama) | **2** — los dos del panel: el que aplica y el de la carrera |
+| sacar el `watch` que rehace el prefill cuando la moneda llega tarde | **1** — `DesfasesPanel.nuxt.spec.ts`, *"si la moneda llega DESPUÉS que las filas, el prefill se rehace"* |
+| que ese `watch` rehaga la fila entera (`initFromFilas`) en vez de solo el precio | **2** — el de la carrera (pierde la casilla marcada) y *"NO revierte las filas que la persona destildó"* |
+
+📌 **`DesfasesPanel` no cae con el mutante del eco**, y eso es la prueba de que la cuantización
+del prefill dejó de depender de él: antes de este commit, ese mismo mutante era lo único que
+hacía que el panel aplicara un entero.
+
+**Qué sigue vivo, y no es poco.** Los tres riesgos de plata de esta lista —el prefill contra la
+oficial, el ítem ya guardado fuera de escala y la vía nueva de 400— tienen **entrada propia en
+[`pendientes.md`](pendientes.md)**, que es donde el próximo agente los va a buscar; acá quedan
+con el detalle de cómo aparecieron.
+
+- **El ×10 tecleando sigue pasando, y es una decisión, no un olvido** (owner, 2026-09-01).
+  Sacar el prop no lo toca: el `.` es el agrupador de la moneda, no su decimal. Medido el
+  2026-09-08 y fijado en el describe *"limitación conocida"*: en **UF** —4 decimales,
+  miles `.`— teclear `1000.5` también da `10005`. O sea que el ×10 depende del separador y
+  **no** de la escala del campo.
+  📌 **Y por eso no hay una lista de campos expuestos.** La entrada traía un censo —"7 campos
+  de escala fija, y ése es el piso"— que este cierre no muda, porque contaba la mitad
+  equivocada: expuesto está **todo** `MoneyInput` cuya moneda agrupe con `.`, y la oficial de
+  todos los tenants del seed es el peso. Lo que sí distingue a un campo de otro es el
+  **alcance del error**, no su escala: el mismo ×10 en el "aplicar en lote" de
+  `grupos-modificadores.vue` se aplica a N recetas de una vez, y por eso ese campo sigue con
+  `UInput` pelado.
+- **La ambigüedad de `1.500` no está muerta: está sin ocupantes.** Ya no se puede fabricar
+  desde la pantalla, pero un ítem denominado en una moneda de 4 decimales la trae de vuelta
+  por la moneda. La única sembrada es la UF, con 0 ítems hoy.
+- **Un ítem ya creado cuyo precio no cabe en su moneda se muestra redondeado y no se puede
+  editar a mano.** El valor guardado no se toca —eso es lo que cerró el arreglo del
+  componente—, pero el campo no puede mostrarlo entero, y la salida que la regla propone
+  —expresarlo por kilo— al editar no está disponible: el selector de unidad se bloquea con
+  `editingId` y cambiar la unidad de un ítem existente solo se puede por API. En la base hay
+  2 de 323 así, los dos escritos por el e2e.
+- **El prefill del panel cuantiza con la moneda OFICIAL una plata que está en la del ítem.**
+  La bandeja de desfases no filtra por moneda —la consulta no tiene predicado de `moneda_id` y
+  el DTO no trae `monedaId`—, así que con un tenant en pesos y una receta en dólares, aplicar
+  redondea `12,55` a `13`: un 3,6%. **No lo introduce este commit** —antes hacía exactamente lo
+  mismo el re-emit del `MoneyInput oficial`—, pero ahora es una línea explícita en el camino de
+  escritura y merece estar acá. Cerrarlo pide que `DesfaseItemDto` traiga la moneda del ítem,
+  que es backend.
+- **Un campo precargado con un valor fuera de escala ahora puede dar 400 donde antes se
+  redondeaba solo.** Es la contracara de arreglar el re-emit, y para los seis campos de esta
+  tarea no aplica —`@EsCosto()` acepta escala 4—; sí aplica a la familia `MoneyInput oficial`
+  contra un `@EsMontoCobrado()` (`preferencias-financieras`, los tramos de
+  `descuentos`/`recargos`) si el tenant cambiara su moneda oficial por una de menos decimales:
+  el formulario mandaría el crudo y el pipe lo rechaza. Es la regla del owner —*"400, nunca
+  cuantizar en silencio"*, docblock de `EscalaMonedaPipe`— funcionando, pero es una vía nueva
+  para que una pantalla no guarde sin que nadie haya tocado el campo. Hoy no hay ningún valor
+  así guardado (lo escribió el mismo pipe que ahora lo rechazaría).
+- **Cambiar la MONEDA del ítem no limpia lo tipeado, y ahí la pantalla y el formulario dejan
+  de coincidir.** Es el vecino inmediato del `watch` que sí limpia al cambiar la unidad, y
+  **es decisión de producto**: quedó con entrada propia en `pendientes.md`, medido, en vez de
+  resolverlo de arrastre acá.
+- **`ReembolsoModal`** —el punto 3 de la entrada, ortogonal desde el principio— queda abierto
+  con entrada propia en `pendientes.md`: no tiene nada que ver con la escala.
+
+---
+
 ## Las citas a una unidad de un informe de revisión (cerradas 2026-09-08)
 
 Sale de [`pendientes.md` § 1](pendientes.md), donde la abrió el commit anterior (`87b7eb9b`)
@@ -15895,7 +16135,11 @@ cadenas inválidas en `MoneyInput` siguen siendo frentes propios. Y **cambiar de
 [`pendientes.md`](pendientes.md) porque el owner decidió sobre la unidad, no sobre el ítem.
 ✅ **Ese vecino se cerró el 2026-08-29** y ya no está en `pendientes.md`: su cierre es la
 sección *"Cambiar de producto conservaba el costo tipeado"* de este mismo archivo. Y el ×1000
-de esta entrada era el del **selector**; el `.`→×10 de maska es otro y sigue abierto.
+de esta entrada era el del **selector**; el `.`→×10 de maska es otro.
+✅ **Los seis `:decimales="4"` salieron el 2026-09-08** —con el prop y todo— y el ×10 de maska
+quedó **aceptado** por el owner, no abierto: ver *"El `.` que multiplica por 10, y los seis
+campos de dinero de `items.vue`"*, arriba en este archivo. Lo único de este párrafo que sigue
+siendo un frente propio es el rechazo de cadenas inválidas en `MoneyInput`.
 
 ---
 

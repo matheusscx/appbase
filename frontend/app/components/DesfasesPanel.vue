@@ -65,6 +65,7 @@ const emit = defineEmits<{
 const { puedeActualizar: puedeAplicar } = usePermisosCrud('Items')
 
 const { formatMonto, formatPorcentaje } = useFormatters()
+const monedasStore = useMonedasStore()
 
 interface RowState {
   actualizarPrecio: boolean
@@ -74,6 +75,39 @@ interface RowState {
 const selected = ref<Set<string>>(new Set())
 const rowState = ref<Record<string, RowState>>({})
 
+/**
+ * El precio con el que se prefillea la fila, **cuantizado a la moneda oficial**.
+ *
+ * `precioSugerido` es una tasa de 4 decimales: lo calcula el motor y el backend lo
+ * deja así a propósito —su docblock dice que cuantizarlo *"sería UX del prefill"*—.
+ * Acá es donde esa UX vive: el campo no puede mostrar más decimales que la moneda,
+ * así que aplicar el crudo dejaría la pantalla diciendo `4.447` y el POST llevando
+ * `4447.0588`.
+ *
+ * 📌 Hasta el 2026-09-08 esto pasaba solo, y por un bug: `MoneyInput` re-emitía
+ * cuantizado todo valor que le entraba por `props`. Ese re-emit se cerró —le
+ * reescribía el modelo al padre sin que nadie tocara el campo— y con él se fue el
+ * redondeo que esta pantalla estaba usando sin saberlo. Ahora es explícito.
+ *
+ * ⚠️ **Cuantiza con la misma llamada que formatea la pantalla**, no con el
+ * `modo_redondeo` del tenant: `formatMontoManual` hace `abs.toFixed(cfg.decimals)`, y acá
+ * es `new Decimal(crudo).toFixed(decimales)`. Es a propósito — lo que este número tiene
+ * que igualar es **lo que el campo muestra**, y usar otro modo de redondeo reabriría la
+ * misma divergencia por el otro lado. Y va contra la **oficial** porque el `MoneyInput` de
+ * la fila es `oficial`; el día que el panel muestre la moneda del ítem, esto la sigue.
+ */
+function precioPrefill(f: DesfaseItemDto): string {
+  const crudo = f.precioSugerido ?? f.precioBase
+  const decimales = monedasStore.monedaOficial?.decimals
+  if (decimales === undefined) return crudo
+  try {
+    return new Decimal(crudo).toFixed(decimales)
+  }
+  catch {
+    return crudo
+  }
+}
+
 function initFromFilas(filas: DesfaseItemDto[]) {
   const nextSelected = new Set<string>()
   const nextState: Record<string, RowState> = {}
@@ -81,7 +115,7 @@ function initFromFilas(filas: DesfaseItemDto[]) {
     nextSelected.add(f.itemId)
     nextState[f.itemId] = {
       actualizarPrecio: false,
-      precioEditado: f.precioSugerido ?? f.precioBase,
+      precioEditado: precioPrefill(f),
     }
   }
   selected.value = nextSelected
@@ -92,6 +126,54 @@ watch(
   () => props.filas,
   (filas) => initFromFilas(filas),
   { immediate: true },
+)
+
+/**
+ * La carrera que este panel puede perder: `desfases.vue` pide sus filas en su propio
+ * `onMounted`, y quien dispara `monedasStore.ensureLoaded()` es el layout. Con una carga
+ * dura de `/desfases`, las filas pueden llegar **antes** que la moneda oficial — y ahí
+ * `precioPrefill` no tiene escala con la que cuantizar y devuelve el crudo, que es
+ * justamente el número que no se puede mostrar.
+ *
+ * Se rehace en cualquier transición `null → moneda`, no solo en la primera. Lo que hace que
+ * pisar `precioEditado` sea seguro es un invariante **del componente**, no de una pantalla:
+ * mientras `monedaOficial` es `null`, el `MoneyInput` de la fila se renderiza **deshabilitado**
+ * (`!cfg`), así que en la ventana que este `watch` sobreescribe nadie pudo tipear.
+ * ⚠️ Eso no cubriría una **segunda** transición `null → moneda` con el panel montado y algo ya
+ * tipeado. Hoy no existe por dos hechos, y ninguno de los dos es "nadie repuebla monedas"
+ * —`ensureLoaded()` tiene cuatro llamadores y uno es `configuracion/items`, host de este
+ * panel—: **(a)** el store solo se vacía en `clearAuth` y en `switchTenant`, y a `switchTenant`
+ * se entra desde `select-tenant` o desde `handlePostLogin` —que además del login lo llama el
+ * middleware de ruta, o sea con la página anterior todavía montada; da igual, porque ese
+ * camino produce `moneda → null`, que el guard descarta—; **(b)**
+ * repoblarlo exige un `ensureLoaded()`, que en los cuatro llamadores cuelga de un `onMounted`.
+ * ⚠️ Lo que NO alcanza como argumento es el `navigateTo('/')` de `switchTenant`: está dentro
+ * del `try`, después del `reset()`, así que un switch fallido deja el store vacío sin navegar.
+ * Y tampoco alcanza mirar esos cuatro `ensureLoaded()`: `hydrate()` está exportado, así que un
+ * llamador nuevo fuera de un `onMounted` rompe (b) sin tocar ninguno de los cuatro.
+ * Si mañana una pantalla repuebla el store con el panel abierto, ésta es la línea a revisar.
+ *
+ * Y reescribe
+ * **solo `precioEditado`**, no `initFromFilas`: las casillas —seleccionar la fila y
+ * "Actualizar precio"— no dependen de la moneda, se dibujan apenas llegan las filas, y en
+ * esta misma ventana alguien puede haberlas tocado. Reiniciarlas le revertiría su elección
+ * en silencio, y con "Descartar" eso archiva la bandeja entera en vez de las filas que
+ * eligió. El precio sí se puede pisar: sin moneda resuelta el `MoneyInput` se renderiza
+ * deshabilitado, así que ahí nadie tipeó nada.
+ *
+ * Lo levantó la revisión independiente del 2026-09-08 —las dos mitades: la carrera y esta—;
+ * hasta entonces la carrera la tapaba el re-emit de `MoneyInput`, que se cerró en ese mismo
+ * commit.
+ */
+watch(
+  () => monedasStore.monedaOficial,
+  (nueva, anterior) => {
+    if (anterior || !nueva) return
+    for (const f of props.filas) {
+      const st = rowState.value[f.itemId]
+      if (st) st.precioEditado = precioPrefill(f)
+    }
+  },
 )
 
 const allSelected = computed(

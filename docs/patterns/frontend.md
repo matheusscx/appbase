@@ -414,12 +414,14 @@ Reglas:
   abajo describe ese error y lo presentaba como *visible* porque el backend rechaza la
   escala. **Medido el 2026-08-26 y es falso:** el resultado del error es un **entero**
   (teclear `800.5` en CLP emite `8005`), y un entero es válido en cualquier escala —los
-  0 decimales del peso incluidos—, así que ningún validador de escala lo ve. Vale igual
-  para los campos con el prop `decimales` (`@EsCosto()`, escala 4). Antes de estrenar un
+  0 decimales del peso incluidos—, así que ningún validador de escala lo ve. **Que la
+  moneda tenga decimales tampoco lo evita**: el punto sigue siendo su agrupador, y en UF
+  (4 decimales, miles `.`) teclear `1000.5` da `10005` igual — medido, y fijado en el
+  describe "limitación conocida" de `MoneyInput.spec.ts`. Antes de estrenar un
   `MoneyInput` en un campo nuevo, pesar eso; y con más razón si el campo aplica el mismo
   número a **N filas** de una vez (caso vivo: el "aplicar en lote" de
-  `grupos-modificadores.vue`, que por esto se quedó con `UInput` pelado). Instancias
-  contadas y salidas posibles: `docs/agent/pendientes.md`.
+  `grupos-modificadores.vue`, que por esto se quedó con `UInput` pelado). Lo que se midió,
+  las salidas que se probaron y por qué el owner lo aceptó: `docs/agent/resueltos.md`.
 - `MoneyInput` bloquea tipear más decimales de los que la moneda resuelta admite
   (`number.fraction` de maska) — la contraparte en pantalla del rechazo 400 del backend
   (`EscalaMonedaPipe`).
@@ -463,9 +465,11 @@ Reglas:
   propio `emit` **no se reformatea**; un cambio que viene de afuera (abrir un formulario,
   un reset) sí. Verificado tecla por tecla en el navegador: USD `12.50`, UF `5,0500`
   —persistido `5.0500` en la base—, y CLP `1.500` sigue siendo mil quinientos.
-  ⚠️ El prop `decimales` (`ESCALA_COSTO` = 4, fijo e independiente de la moneda del ítem)
-  ya no está roto —era el punto fijo lo que lo tenía sin usar—, pero **dejó de ser la forma
-  correcta para un campo de costo.** Ver el bullet de abajo.
+  ⚠️ **El prop `decimales` ya no existe: se sacó el 2026-09-08** con su último usuario
+  (`configuracion/items.vue`). Forzaba la escala del campo a 4 —la de `@EsCosto()`,
+  independiente de la moneda del ítem— y era la forma de fabricar el único caso ambiguo
+  del sistema. La escala se pide ahora con una moneda que la tenga; ver el bullet de
+  abajo, que es el que decide.
 
   **Lo que el arreglo revive solo:** los siete `MoneyInput` atados a `:moneda-id` de
   `items.vue` e `inventario/index.vue` — el precio del catálogo de un ítem en USD o UF ya
@@ -491,58 +495,82 @@ Reglas:
     oficial del tenant. Ahora `GET /grupos-modificadores/:id/items` devuelve el
     `monedaId` de cada receta y la pantalla formatea con él.
 
-- ⭐ **Un input de costo sigue los decimales de la moneda del ítem: la precisión la da el
-  selector de unidad, no el prop `decimales`** (owner, 2026-08-28 —
-  [spec](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md)). Se tipea
-  *"5.050 por kilo"* en pesos enteros, no *"5,0500 por gramo"*. El motivo es el bullet de
-  arriba: un campo de 4 decimales sobre un ítem en pesos es el **único** caso donde
-  `1.500` significa a la vez `1500` y `1,5`, y maska elige una lectura en silencio. Con 0
-  o 2 decimales la ambigüedad no existe (medido: 0 casos sobre 3332 cadenas). La escala
-  del backend **no** cambia: `ESCALA_COSTO` sigue en 4 porque CPP genera fracciones al
-  promediar; lo que sigue a la moneda es el teclado humano, y la conversión de unidad es
-  el puente. Aplicado en el drawer de ajuste de costo de `inventario/index.vue`
-  (`unidadCodigo` opcional en `POST /inventario/ajustes-costo`, 2026-08-28).
+- ⭐ **Un input de dinero sigue los decimales de la moneda del ítem: la precisión de una
+  tasa la da el selector de unidad** (owner, 2026-08-28 —
+  [spec](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md); extendido al
+  precio de venta el 2026-09-08). Se tipea *"5.050 por kilo"* en pesos enteros, no
+  *"5,0500 por gramo"*. El motivo es el bullet de arriba: un campo de 4 decimales sobre un
+  ítem en pesos era el caso donde `1.500` significa a la vez `1500` y `1,5`, y maska elige
+  una lectura en silencio. Con 0 o 2 decimales la ambigüedad no existe (medido: 0 casos
+  sobre 3332 cadenas). La escala del backend **no** cambia: `ESCALA_COSTO` sigue en 4
+  porque CPP genera fracciones al promediar; lo que sigue a la moneda es el teclado
+  humano, y la conversión de unidad es el puente. Aplicado en el drawer de ajuste de costo
+  de `inventario/index.vue` (`unidadCodigo` opcional en `POST /inventario/ajustes-costo`,
+  2026-08-28) y en los seis campos de dinero de `configuracion/items.vue` (2026-09-08).
+  📌 **Ese campo ya no se puede fabricar desde la pantalla**, porque el prop que forzaba la
+  escala se fue con ellos: para tener 4 decimales hace falta un ítem denominado en una
+  moneda que los tenga, y la única sembrada es la UF —con **0 ítems** al 2026-09-08 (306
+  en CLP, 8 en USD, 5 en ARS, 4 en MXN, 0 en COP)—. No es lo mismo que "no puede pasar":
+  es que hoy nadie está parado ahí.
 
   ⚠️ **Dónde vale, y dónde NO — medido el 2026-08-28.** La regla vale donde el costo se
   tipea **sin cantidad**, que es exactamente el caso del ajuste de costo: ahí el selector
   de unidad es el único que decide la precisión y no arrastra nada más.
-  **Donde un mismo selector gobierna la cantidad y el costo a la vez, no vale**, y sacar
-  el prop rompe plata: en `mermas.vue` elegir "gramo" para mermar 100 g de un producto en
-  kilos lleva el costo a `6,5`/g, que en CLP **no es representable**. Y ahí `MoneyInput`
-  **no avisa: redondea y emite en silencio.** El mecanismo es maska, no el `watch` —el
-  `watch` solo escribe `display` (`formatMontoDisplay` → `toFixed(0)` → `"7"`), pero ese
-  `display` entra al `<input>` con `v-maska`, dispara `onMaska` → `syncFromMaska` → `emit`.
-  Medido sacando el prop: el POST llevó `"7"` donde el campo decía `6.5`, **7,69% de
-  sobrevaloración**, y sin que nadie toque el campo, porque viene prefilleado.
-  📌 Precisión del mecanismo (revisión independiente, 2026-08-28): el re-emit **no** depende
-  de que el valor sea irrepresentable — `v-maska` corre en `mounted` **y en `updated`**, así
-  que **todo** valor que entra de afuera vuelve a emitirse. Cuando es representable el emit
-  devuelve el mismo número y no se nota; cuando no lo es, devuelve el redondeado. O sea que
-  el componente **nunca** garantiza que el modelo conserve lo que el padre le pasó.
-  📌 Corolario: **esto corrige el §4 de la spec**, que da por bueno que "el modelo NO se
-  trunca solo" a partir del `watch`. Es cierto del `watch` y falso del componente.
+  **Donde un mismo selector gobierna la cantidad y el costo a la vez, no vale**: en
+  `mermas.vue` elegir "gramo" para mermar 100 g de un producto en kilos lleva el costo a
+  `6,5`/g, que en CLP **no es representable**. Medido el 2026-08-28, con el prop `decimales`
+  todavía vivo y sacándoselo a ese campo: el POST llevó `"7"` donde el campo decía `6.5`,
+  **7,69% de sobrevaloración**, y sin que nadie tocara el campo, porque venía prefilleado.
+  El mecanismo era maska, no el `watch` —el `watch` solo escribía `display`
+  (`formatMontoDisplay` → `toFixed(0)` → `"7"`), pero ese `display` entraba al `<input>` con
+  `v-maska`, disparaba `onMaska` → `syncFromMaska` → `emit`—.
+  📌 Precisión del mecanismo (revisión independiente, 2026-08-28): el re-emit **no** dependía
+  de que el valor fuera irrepresentable — `v-maska` corre en `mounted` **y en `updated`**, así
+  que **todo** valor que entraba de afuera volvía a emitirse. Cuando era representable el emit
+  devolvía el mismo número y no se notaba; cuando no lo era, devolvía el redondeado.
+  ✅ **Eso se cerró el 2026-09-08**, y es el cambio que hizo posible sacar el prop: el `watch`
+  marca lo que pinta desde `props` y `syncFromMaska` no emite ese eco. La regla hoy es
+  **`MoneyInput` solo emite lo que la persona escribió**; un valor que no cabe en la escala se
+  **muestra** redondeado —no hay otra forma de mostrarlo— pero el modelo del padre queda
+  intacto. Fijado en `MoneyInput.spec.ts`, describe *"un valor que entra de afuera se muestra,
+  pero no se reescribe"*, y a nivel pantalla en `items.nuxt.spec.ts`.
+  📌 Corolario: **esto corrige el §4 de la spec**, que daba por bueno que "el modelo NO se
+  trunca solo" a partir del `watch`. Era cierto del `watch` y falso del componente — hasta que
+  el componente se alineó con el `watch`.
   📌 Por eso `mermas.vue` **no se tocó acá**: el campo de costo se sacó entero del
   formulario en un frente propio, ya cerrado — el costo se maneja en el producto, no se
   tipea al mermar. Ver
   [spec](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md) y
   [plan](../superpowers/plans/2026-08-28-merma-sin-costo-tipeado.md).
-  📌 Antes de sacar un `:decimales="4"` de cualquier otro campo (quedan 6 en `items.vue`),
-  la pregunta no es "¿tiene selector?" sino **"¿ese selector gobierna solo el costo?"**.
+  ✅ **Los 6 campos de `items.vue` salieron el 2026-09-08** —precio base, costo de
+  producto y de ingrediente, los dos precios extra y el costo unitario de la compra— y con
+  ellos el prop. Lo que se hizo en cada uno, y por qué la pregunta *"¿ese selector gobierna
+  solo el costo?"* no aplicaba igual a los seis: `docs/agent/resueltos.md`. Esa pregunta
+  sigue siendo la que hay que hacerse si mañana aparece un campo de dinero por unidad.
 
 - ⭐ **Cambiar el selector de unidad LIMPIA el campo de costo; convertir lo tipeado es la
-  trampa** (owner, 2026-08-28). Es la contracara del bullet de arriba: el mismo mecanismo
-  que impide *sacar* el prop `decimales` impide *convertir* hacia una unidad más chica.
-  `1500` por kilo son `1,5` por gramo, y en CLP eso no es representable — `MoneyInput` no
-  rechaza, redondea a `2` y lo emite. O sea que la opción "amable" persiste un costo 33%
-  más alto **sin que nadie toque el campo**, que es exactamente el modo de falla del
-  7,69% medido arriba. Limpiar cuesta un retipeo y no puede inventar nada.
+  trampa** (owner, 2026-08-28). `1500` por kilo son `1,5` por gramo, y en CLP eso **no es
+  representable**: convertir deja en el formulario un número que la moneda no puede expresar
+  y que nadie tecleó. Hasta el 2026-09-08 era peor todavía —`MoneyInput` lo redondeaba a `2`
+  y lo emitía, o sea que la opción "amable" persistía un costo 33% más alto sin que nadie
+  tocara el campo, el mismo modo de falla del 7,69% de arriba—; hoy no lo reescribe, pero
+  sigue sin poder mostrarlo entero. Limpiar cuesta un retipeo y no puede inventar nada.
   Aplicado en el drawer de ajuste de costo de `inventario/index.vue`; fijado en
   `app/pages/inventario/index.nuxt.spec.ts`.
+  📌 **Y desde el 2026-09-08 también en `configuracion/items.vue`**, en los dos lugares
+  donde un selector de unidad convive con un campo de dinero por esa unidad: el alta del
+  ítem (la unidad de medida limpia costo y precio base) y el modal "Ajustar stock" (la
+  unidad limpia el costo de la compra). Fijado en `items.nuxt.spec.ts` y en
+  `items-stock-ubicacion.nuxt.spec.ts`. La etiqueta de esos campos nombra la unidad
+  —"Costo (por kg)"—: desde que la escala la da la moneda, la unidad es lo único que fija
+  la magnitud del número.
   📌 **Cambiar de PRODUCTO limpia igual, y por su cuenta** (owner, 2026-08-29). El número
   tipeado pertenece al producto tanto como a la unidad, y encima el producto puede traer
   **otra moneda**: ahí no queda un número viejo, queda el mismo número re-enmascarado bajo la
-  escala nueva —`1.500` en CLP se lee `1,500.00` en USD, y el crudo vuelve del componente como
-  `1500.00`—. ⚠️ **No se puede delegar en el watch de la unidad**: entre dos productos de base
+  escala nueva —`1.500` en CLP se lee `1,500.00` en USD—. ⚠️ Hasta el 2026-09-08 el modelo
+  además volvía del componente como `1500.00`; cerrado el re-emit conserva `1500`, que es el
+  mismo número y se muestra igual. Lo que hace falta limpiar no es la escala: es que el número
+  fue tipeado para otro producto y otra moneda. ⚠️ **No se puede delegar en el watch de la unidad**: entre dos productos de base
   `kg` la unidad no cambia y Vue no dispara con el mismo valor. Cada watch limpia lo suyo.
   📌 La otra mitad del mismo problema es **visual**: un "Costo vigente" en unidad base al
   lado de un "Costo nuevo (por g)" son dos números que no se pueden comparar. El vigente

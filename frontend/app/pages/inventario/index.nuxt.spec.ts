@@ -331,10 +331,15 @@ describe('inventario — el drawer de ajuste de costo y el producto', () => {
   })
 
   // El renglón que cambia el TAMAÑO del problema: no es "quedó un número
-  // viejo", es el mismo número re-enmascarado bajo la escala nueva. Medido con
-  // el borrado sacado: el crudo ni siquiera sobrevive igual, vuelve del
-  // componente como `1500.00` (maska re-emite con `fraction: 2`), y en el
-  // navegador el campo mostraba `1,500.00` al lado de un vigente de US$7,50.
+  // viejo", es el mismo número re-enmascarado bajo la escala nueva. Medido el
+  // 2026-08-28 con el borrado sacado: el crudo ni siquiera sobrevivía igual,
+  // volvía del componente como `1500.00` (maska re-emitía con `fraction: 2`), y
+  // en el navegador el campo mostraba `1,500.00` al lado de un vigente de
+  // US$7,50. ⚠️ Ese re-emit se cerró el 2026-09-08 —`MoneyInput` ya no emite lo
+  // que pinta desde `props`—, así que hoy el modelo conservaría `1500` en vez de
+  // `1500.00`: el mismo número, y la misma pantalla. Lo que no cambia es el
+  // motivo de borrar, que es de arriba: el número es de otro producto y de otra
+  // moneda, no una cuestión de cuántos decimales tiene.
   it('cambiar a un producto en otra moneda no deja el número reinterpretado en pantalla', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)

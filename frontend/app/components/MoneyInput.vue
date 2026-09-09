@@ -8,19 +8,6 @@ const props = withDefaults(
     modelValue: string
     monedaId?: string
     oficial?: boolean
-    /**
-     * Fuerza la cantidad de decimales del componente, ignorando los de la moneda
-     * resuelta. Existe para costo/tasa (`ESCALA_COSTO` = 4 en el backend,
-     * `escala-moneda.pipe.ts`): esos campos se validan a una escala FIJA sin
-     * importar la moneda del ítem —un costo de "5.0500"/g es válido incluso en un
-     * ítem en CLP (0 decimales)—, a diferencia de un monto cobrado, que se valida
-     * a los decimales que la moneda admite.
-     *
-     * Estuvo sin usar hasta el 2026-08-21 porque cualquier valor > 0 metía al input en
-     * el punto fijo (ver el docblock de `display`). Arreglado eso, es el prop que usan
-     * los campos de costo/tasa.
-     */
-    decimales?: number
     placeholder?: string
     disabled?: boolean
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
@@ -37,14 +24,24 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
 const store = useMonedasStore()
 
-const cfg = computed(() => {
-  const base = props.oficial
+/**
+ * La moneda que manda en este campo, y con ella los decimales que se pueden tipear.
+ *
+ * 📌 **No hay forma de pedir otra escala.** Hubo un prop `decimales` para forzarla a
+ * 4 —la escala fija de `@EsCosto()` en el backend— y se sacó el 2026-09-08: un campo
+ * de 4 decimales sobre un ítem en pesos es donde `1.500` significa a la vez `1500` y
+ * `1,5`, y maska elige una lectura en silencio. Sacar el prop no mata esa
+ * configuración —una moneda de 4 decimales, como la UF, la trae por su cuenta—, saca la
+ * forma de fabricarla sobre un ítem cuya moneda no tiene decimales.
+ * La escala del backend sigue en 4 porque el motor promedia y genera fracciones; lo
+ * que sigue a la moneda es el teclado humano, y la precisión de un costo por gramo la
+ * da elegir la unidad (owner, 2026-08-28 — `docs/patterns/frontend.md` §8).
+ */
+const cfg = computed(() =>
+  props.oficial
     ? store.monedaOficial ?? undefined
-    : props.monedaId ? store.getById(props.monedaId) : undefined
-  if (!base) return undefined
-  if (props.decimales === undefined) return base
-  return { ...base, decimals: props.decimales }
-})
+    : props.monedaId ? store.getById(props.monedaId) : undefined,
+)
 
 /**
  * Texto enmascarado mostrado en el input.
@@ -90,8 +87,69 @@ const display = ref('')
  */
 let ultimoEmitido: string | null = null
 
+/**
+ * Marca que el `watch` deja puesta cuando pinta `display` con un valor que vino de
+ * AFUERA (abrir un formulario, un reset, un cambio de moneda).
+ *
+ * 🛑 Existe porque `v-maska` corre en `mounted` **y en `updated`**, así que ese texto
+ * recién pintado vuelve a pasar por `syncFromMaska` — y si de ahí sale un `emit`, el
+ * componente **le reescribe el modelo al padre sin que nadie toque el campo**. Cuando
+ * el valor entra en la escala de la moneda el emit devuelve el mismo número y no se
+ * nota; cuando no entra, devuelve el redondeado y **eso** es lo que se guarda: medido
+ * el 2026-09-08, un `1234.5678` en CLP dejaba el modelo del padre en `1235`. Es el
+ * mismo modo de falla del 7,69% que se midió en `mermas.vue` el 2026-08-28.
+ *
+ * La regla que fija: **este componente solo emite lo que la persona escribió.** Un
+ * valor que no se puede mostrar entero se muestra redondeado —no hay otra— pero el
+ * modelo del padre queda intacto hasta que alguien lo edite.
+ *
+ * ⚠️ **Guarda el TEXTO pintado, no un booleano, y eso no es estilo.** Una marca que
+ * dijera solo "el próximo `onMaska` es mío" se queda pegada cuando maska no vuelve a
+ * correr, y entonces **se come la primera tecla de la persona**. Y maska no siempre
+ * vuelve a correr: solo llama a su callback si el texto del input **cambia** al
+ * re-enmascararlo, y lo que hace que cambie es el símbolo de la moneda
+ * —`formatMontoDisplay` antepone `$`, maska lo desnuda—. Medido tecla por tecla el
+ * 2026-09-08 con una moneda **sin símbolo** (`moneda.simbolo` es nullable): el texto
+ * pintado ya era estable, `syncFromMaska` no corría, y el modelo se quedaba en `1500`
+ * mientras la pantalla mostraba `1.5007`.
+ *
+ * Comparando el texto, una marca vieja solo puede silenciar un `emit` que devuelve
+ * exactamente **lo que ya se está mostrando**. Eso no es "no cambia nada": si el modelo
+ * está fuera de la escala de la moneda, tipear a mano el número redondeado que el campo
+ * ya muestra no lo cambiaría. Es el residuo aceptado —invisible en pantalla y en la misma
+ * dirección que el diseño quiere—, y no se puede achicar sin volver a depender de que
+ * maska corra. Los dos caminos, con símbolo y sin, tienen su test en el describe
+ * *"un valor que entra de afuera se muestra, pero no se reescribe"*.
+ *
+ * 📌 Un `modelValue` **negativo** queda fuera de la comparación y se re-emite sin signo:
+ * `formatMontoManual` pone el `-` antes del símbolo (`-$1.500`) y maska, con
+ * `unsigned: true`, devuelve `1.500`, así que ninguna de las dos formas matchea. Hoy ningún
+ * consumidor le pasa negativos —el input tampoco los deja tipear— y antes de este guard se
+ * re-emitía siempre, así que no es una regresión; queda anotado porque la regla de arriba,
+ * leída en absoluto, no lo cubre.
+ */
+let pintadoDesdeProps: string | null = null
+
 function syncFromMaska(detail: MaskaDetail) {
+  // maska devuelve el texto SIN el prefijo, así que el eco de lo que pintamos se
+  // reconoce por cualquiera de las dos formas.
+  const prefijo = cfg.value?.prefix ?? ''
+  const esEcoDelPintado = pintadoDesdeProps !== null
+    && (detail.masked === pintadoDesdeProps
+      || `${prefijo}${detail.masked}` === pintadoDesdeProps)
+  pintadoDesdeProps = null
+
   display.value = detail.masked
+  if (esEcoDelPintado) {
+    // No hay eco pendiente que cuidar: lo que está en el input vino de `props`, no de
+    // un `emit` nuestro. Sin este `null`, `ultimoEmitido` se queda con lo último que
+    // la persona tipeó y el `watch` de abajo se saltea un repintado legítimo — el
+    // padre escribe otro valor y después vuelve a ese, y la pantalla queda mostrando
+    // el intermedio. Latente: ningún consumidor de hoy escribe el modelo dos veces
+    // con valores distintos; lo levantó la revisión independiente.
+    ultimoEmitido = null
+    return
+  }
   ultimoEmitido = detail.unmasked || ''
   emit('update:modelValue', ultimoEmitido)
 }
@@ -108,9 +166,9 @@ function syncFromMaska(detail: MaskaDetail) {
  * rechazaba con 400 por escala (`escala-moneda.pipe.ts`), o sea que era un error
  * visible y no plata mal guardada. **Es falso:** el resultado del error es un
  * **entero**, y un entero es válido en cualquier escala —0 decimales incluidos—, así
- * que ningún validador de escala lo puede ver. Vale igual para los campos con el prop
- * `decimales` (`@EsCosto()`, escala 4). El riesgo y por dónde se podría atacar están
- * anotados en `docs/agent/pendientes.md`; acá solo se corrige la afirmación.
+ * que ningún validador de escala lo puede ver. El riesgo, y por dónde se podría
+ * atacar, están anotados en `docs/agent/resueltos.md`; acá solo se corrige la
+ * afirmación.
  *
  * Se intentó taparlo con un `preProcess` con memoria de la última tecla y salió
  * peor: rompía el caso normal chileno (`1.500` = mil quinientos emitía `1`) y podía
@@ -201,6 +259,7 @@ watch(
     // es lo correcto para un valor que llega de afuera.
     if (previo && previo[1] === c && valor === ultimoEmitido) return
     display.value = formatMontoDisplay(valor, c)
+    pintadoDesdeProps = display.value
   },
   { immediate: true },
 )

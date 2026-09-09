@@ -525,6 +525,45 @@ function emptyForm() {
 
 const form = ref(emptyForm())
 const formCostoActual = ref<string | null>(null)
+
+/**
+ * Costo y precio base son dinero **por la unidad de medida del ítem**, así que la
+ * etiqueta la nombra: `5000` a secas no dice si es por kilo o por gramo. Importa
+ * desde que los dos campos siguen los decimales de la moneda —la precisión la da
+ * elegir la unidad, no tipear decimales (owner, 2026-08-28)—, porque ahí la unidad
+ * pasa a ser lo único que fija la magnitud. Mismo criterio que `costoUnitarioLabel`
+ * en el ajuste de stock. Los tipos sin unidad (servicio, suscripción, receta,
+ * combo) no llevan sufijo.
+ */
+const sufijoUnidad = computed(() =>
+  (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente') && form.value.unidadMedida
+    ? ` (por ${form.value.unidadMedida})`
+    : '',
+)
+const costoLabel = computed(() => `Costo${sufijoUnidad.value}`)
+const precioBaseLabel = computed(() => `Precio base${sufijoUnidad.value}`)
+
+// Cambiar la unidad de medida REINTERPRETA lo ya tipeado en costo y precio: los dos
+// son dinero por esa unidad, así que un `5000` por kilo pasa a valer `5000` por
+// gramo sin que nadie toque el campo. Se limpia y no se convierte (owner,
+// 2026-08-28, `docs/patterns/frontend.md` §8): convertir hacia una unidad más chica
+// da un valor que la moneda no puede representar —`1500` por kilo son `1,5` por
+// gramo—, o sea un número guardado que nadie tecleó y que el campo no puede ni
+// mostrar entero.
+watch(() => form.value.unidadMedida, () => {
+  // Al editar, el selector está bloqueado: el único cambio posible es el de
+  // `abrirEditar` cargando la ficha, y ahí lo que trae la API no se pisa.
+  // ⚠️ Sin guard de `!anterior`, a diferencia del vecino del ajuste de stock: acá el
+  // valor viejo NUNCA es vacío —`emptyForm()` arranca en `'unidad'` y `abrirEditar`
+  // hace `?? 'unidad'`—, así que esa rama no existiría. Los tres disparos de
+  // `resetDrawer` —abrir el alta, cerrar el drawer, y el que `abrirEditar` hace antes
+  // del `await`— sí llegan hasta acá con `editingId` en null, y son inocuos por el
+  // mismo motivo: ese reset ya vació los dos campos.
+  if (editingId.value) return
+  form.value.costo = ''
+  form.value.precioBase = ''
+})
+
 /**
  * Frente de bodegas y traslados: el desglose por ubicación del item que se está
  * editando, el local primero. Solo lo trae `GET /items/:id` — la fila de la
@@ -649,6 +688,21 @@ watch(() => ajusteForm.value.ubicacionId, (_nueva, anterior) => {
   ajusteForm.value.loteCodigo = ''
   ajusteForm.value.loteFechaElab = ''
   ajusteForm.value.loteFechaVenc = ''
+})
+
+// El costo de la compra se tipea "por la unidad seleccionada" (`costoUnitarioLabel`)
+// y el backend lo convierte a la unidad base con ese mismo código
+// (`items.service.ts`, `convertirCostoUnitario`). Por eso cambiar la unidad después
+// de tipear no deja el número viejo: lo deja significando otra cosa —`6500` por kilo
+// pasa a viajar como `6500` por gramo—. Se limpia, igual que en el alta y que en el
+// ajuste de costo de `inventario/index.vue` (owner, 2026-08-28).
+watch(() => ajusteForm.value.unidadCodigo, (_nueva, anterior) => {
+  // `!anterior` es la PRIMERA apertura del modal en la sesión: `emptyAjusteForm()`
+  // arranca con `unidadCodigo: ''` y `abrirAjusteStock` le pone la del ítem. De la
+  // segunda en adelante el viejo es la unidad del ítem anterior y el cuerpo corre
+  // igual — inocuo, porque ese mismo `emptyAjusteForm()` ya vació el costo.
+  if (!anterior) return
+  ajusteForm.value.costoUnitario = ''
 })
 
 // Mutación de filas de los arrays del form vía función nombrada: una expresión
@@ -1693,8 +1747,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <UInput v-model="form.descripcion" placeholder="Descripción opcional" class="w-full" />
             </UFormField>
 
-            <UFormField v-if="form.tipo !== 'ingrediente'" label="Precio base" required>
-              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
+            <UFormField v-if="form.tipo !== 'ingrediente'" :label="precioBaseLabel" required>
+              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" class="w-full" />
             </UFormField>
 
             <UFormField label="Moneda" required>
@@ -1764,8 +1818,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     class="w-full"
                   />
                 </UFormField>
-                <UFormField v-if="!editingId" label="Costo">
-                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
+                <UFormField v-if="!editingId" :label="costoLabel">
+                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
                 </UFormField>
                 <UFormField v-else label="Costo vigente">
                   <div class="flex items-center justify-between gap-2">
@@ -1918,8 +1972,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     class="w-full"
                   />
                 </UFormField>
-                <UFormField v-if="!editingId" label="Costo">
-                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
+                <UFormField v-if="!editingId" :label="costoLabel">
+                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
                 </UFormField>
                 <UFormField v-else label="Costo vigente">
                   <div class="flex items-center justify-between gap-2">
@@ -2083,7 +2137,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <div class="flex items-end gap-2">
                   <UFormField label="Precio extra" class="flex-1">
-                    <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" :decimales="4" class="w-full" />
+                    <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" class="w-full" />
                   </UFormField>
                   <UButton
                     color="error"
@@ -2235,7 +2289,6 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       v-model="grupo.opciones[opIdx]!.precioExtra"
                       :moneda-id="form.monedaId"
                       class="col-span-3 w-full"
-                      :decimales="4"
                     />
                     <UBadge
                       v-if="op.cantidad === '' && !op.cantidadDefault"
@@ -2473,7 +2526,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             v-if="ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'"
             :label="costoUnitarioLabel"
           >
-            <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" :decimales="4" class="w-full" />
+            <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" class="w-full" />
           </UFormField>
 
           <UAlert

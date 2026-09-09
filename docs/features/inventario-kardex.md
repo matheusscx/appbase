@@ -618,12 +618,13 @@ inventario de lo que existe hoy. Lo que sí está fechado describe estado real.
     más de una unidad) y la etiqueta dice *"Costo nuevo (por {unidad})"*. El
     `unidadCodigo` viaja en el body **solo si difiere de la base** — el DTO lo valida con
     `@IsNotEmpty()`, así que una cadena vacía sería un 400. El `MoneyInput` va atado a
-    `:moneda-id` y **sin** prop `decimales`: la precisión la da la unidad
+    `:moneda-id` y sin forzar la escala —el prop que lo permitía se sacó del componente el
+    2026-09-08—: la precisión la da la unidad
     ([`patterns/frontend.md`](../patterns/frontend.md) §8)
   - **Cambiar la unidad limpia el costo ya tipeado** (owner, 2026-08-28). No lo
-    convierte: `1500` por kilo son `1,5` por gramo, y en una moneda sin decimales
-    `MoneyInput` no rechaza eso —redondea a `2` y lo emite en silencio—, o sea un costo
-    33% más alto que nadie tecleó. El campo vacío obliga a retipear, que es la única de
+    convierte: `1500` por kilo son `1,5` por gramo, y en una moneda sin decimales eso no se
+    puede expresar —hasta el 2026-09-08 `MoneyInput` además lo redondeaba a `2` y lo emitía,
+    o sea un costo 33% más alto que nadie tecleó—. El campo vacío obliga a retipear, que es la única de
     las dos salidas que no puede inventar un número
     ([`patterns/frontend.md`](../patterns/frontend.md) §8)
   - El **"Costo vigente"** se muestra en la **misma unidad que el selector**, con su
