@@ -23,6 +23,82 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los punteros a una § 4 vacía, re-apuntados (cerrada 2026-09-10)
+
+Sale de [`pendientes.md` § 1](pendientes.md), donde la dejó el cierre del helper del segundo
+tenant ese mismo día. La entrada, verbatim:
+
+### Los cinco punteros a una § 4 que cuenta 0 (2026-09-10)
+
+- [ ] **Cinco líneas afirman que algo *"está abierto / es pregunta / quedó anotado" en la § 4*,
+  y la § 4 cuenta 0.** Todos preexistentes —uno lo escribió el commit anterior, `5c6bed7b`—,
+  pero el commit del helper los dejó activamente engañosos al publicar el cero. Cada uno se
+  re-apunta a donde la entrada **está hoy**, no se borra:
+
+  | Dónde | Qué dice | Dónde está de verdad |
+  |---|---|---|
+  | [`DIFERENCIADORES.md:220`](../DIFERENCIADORES.md) | la devolución con crédito parcial está abierta en § 4 | el frente **se cerró** → [`resueltos.md`](resueltos.md) |
+  | [`resueltos.md:321`](resueltos.md) | el `PATCH /items/:id { monedaId }` quedó como entrada de § 4 | **§ 3** — y la propia § 4 ya lo dice |
+  | [`resueltos.md:2036`](resueltos.md) | los pagos juntados son "pregunta al owner (§ 4)" | § 4 no la tiene |
+  | [`resueltos.md:3668`](resueltos.md) | AR/CO/MX en § 4, "lo más pesado que dejó el frente" | **§ 6**, como frente fiscal por país |
+  | [`resueltos.md:4544`](resueltos.md) | "ver la entrada del override en § 4" | el owner la decidió el 2026-08-30 |
+
+  ⚠️ **La primera redacción de esta entrada nombraba uno solo de los cinco**, el de
+  `DIFERENCIADORES.md`, que fue el que reportó la revisión. Es la forma de falla que este
+  archivo ya tiene anotada: *arreglar una copia deja las otras vivas*. El comando que las junta
+  —y que hay que volver a correr antes de cerrar, porque los `Sale de [pendientes.md § 4]` de
+  procedencia son legítimos y no entran— es:
+
+  ```bash
+  grep -rn "§ 4" docs/ | grep -v "^docs/agent/resueltos.md:[0-9]*:Sale de"
+  ```
+
+**Lo que se hizo.** Cada puntero se re-apuntó a donde la cosa está hoy, sin borrar la historia:
+la frase dice que pasó por la § 4 y adónde salió. Los de este archivo caen en la excepción de la
+cabecera —son párrafos de *"qué quedó afuera"*, no texto de una entrada mudada—, así que se
+corrigieron acá.
+
+**Lo que la entrada decía mal, medido al tomarla:**
+
+1. **Eran nueve, no cinco.** La misma forma —*"abrió entrada propia en la § 4"*, *"queda como
+   entrada nueva en la § 4"*— vivía además en dos lugares de `pendientes.md` (la merma de Carne
+   molida, en la § 1, y el override de `precioUnitario`, en la § 3), en el cierre de esa misma
+   merma en este archivo, y en el banner de estado de
+   [`investigaciones/2026-08-11-orden-de-descuentos.md`](investigaciones/2026-08-11-orden-de-descuentos.md),
+   que mandaba a la § 4 más abajo de haber mandado a la § 3.
+2. **Las cuatro citas a este archivo apuntaban diez líneas antes** (`:321` era `:331`, y así las
+   otras tres), ya en el commit que las escribió. En el texto verbatim de arriba quedan como
+   estaban.
+3. **En `DIFERENCIADORES.md` el puntero no era lo único viejo.** El ⚠️ de al lado decía que el
+   rechazo del 2026-09-04 empuja al operador a volver el stock desde Inventario; el owner lo
+   revirtió horas después. Se reescribieron los dos, y el *Estado* dice ahora lo que hace el
+   código: con nota de crédito el movimiento sale con el id de la nota —mostrador y pasarela
+   llegan los dos a `crearNotaCreditoEnTransaccion`—; un reembolso de pasarela **sin** nota
+   repone atado a la venta original (`registrarDevolucionesPorReembolso`). Ese archivo alimenta
+   comunicación externa, y *"el vínculo funciona"* sin la condición era más ancho que el hecho.
+4. **El comando no separa.** Excluye `Sale de` pero no `Venía de`, `antes vivía en` ni `llegó
+   de la § 4`, que también son procedencia, ni las `§ 4.2` de otros documentos. El que se usó:
+
+   ```bash
+   grep -rn "§ 4" docs/ | grep -v "§ 4\.[0-9]" | grep -v "^docs/agent/resueltos.md:[0-9]*:Sale de"
+   ```
+
+   Y aun así **el grep junta, no clasifica**. El criterio: una línea se arregla si le dice al
+   lector que vaya a la § 4 a buscar algo **vivo**; se deja si cuenta de dónde vino algo ya
+   cerrado, o si la `§ 4` es de otro documento.
+
+**Lo que se dejó como está, a propósito.** Los planes y specs ya ejecutados —la convención la
+escribió el propio plan
+[`2026-08-30-lo-pedido-no-se-saca-del-catalogo.md`](../superpowers/plans/2026-08-30-lo-pedido-no-se-saca-del-catalogo.md):
+un puntero viejo *"se deja como está, que es lo que el documento decía cuando se escribió"*— y,
+con el mismo criterio, el **cuerpo** de tres investigaciones fechadas que todavía nombran la
+§ 4: `2026-09-03-bodega-vs-sucursal.md`, `2026-09-03-facturacion-electronica-latam.md` y
+`2026-09-04-devolucion-con-credito-parcial.md`. Son fotos de su día; en `orden-de-descuentos.md`
+se corrigió el banner de estado, no el cuerpo. Si para las investigaciones el criterio tiene que
+ser otro, es una decisión pendiente, no un olvido.
+
+---
+
 ## El segundo helper compartido de `backend/test/`: el login del otro tenant (cerrada 2026-09-09)
 
 Sale de [`pendientes.md` § 4](pendientes.md), donde esperaba una respuesta del owner desde el
@@ -328,8 +404,11 @@ ninguno de los montos del ítem —el precio base, los precios de extras, los ov
 opción y el `costo_actual`— (`update-item.dto.ts` acepta `monedaId` suelto;
 `items.service.ts` escribe `moneda_id` y nada más), así que por HTTP el problema original sigue vivo tal cual. El owner
 pidió el gesto de la pantalla y eso es lo que se hizo; la puerta quedó anotada como entrada
-propia en [`pendientes.md` § 4](pendientes.md), porque necesita una decisión que la pantalla
-no puede tomar por la API —rechazar el cambio, o exigir que venga con los montos nuevos—.
+propia en la § 4 de `pendientes.md`, porque necesitaba una decisión que la pantalla no puede
+tomar por la API —rechazar el cambio, o exigir que venga con los montos nuevos—. ➡️ **El owner
+la contestó el 2026-09-09: `400`**, cambiar de moneda exige mandar los precios nuevos. Hoy es
+una de las cuatro caras de [`pendientes.md`](pendientes.md) § 3, *"La moneda de un ítem y la de
+sus partes: 'se puede, pero sin mezclar'"*, todavía sin construir.
 
 **Lo que lo fija.** Veinte tests en `items.nuxt.spec.ts` —43 en total el archivo— más dos en
 `e2e/configuracion/items-moneda.spec.ts`, en un navegador de verdad, y **veintiocho mutantes,
@@ -2043,7 +2122,9 @@ de este cierre, con sonda, y no estaba en la primera versión de este párrafo�
 Los dos son el platillo bueno igual: el otro era una venta cobrada de verdad sobre una cuenta que
 nadie pidió cobrar, y con otro total. Y los dos se contestan juntos, porque distinguir *"me fui"*
 de *"me movieron"* pide saber qué cuentas entraron a la fusión — y cerrar el modal perdería los
-pagos ya juntados. Es pregunta al owner ([`pendientes.md` § 4](pendientes.md)).
+pagos ya juntados. Fue pregunta al owner, contestada ese mismo día —**se cierra y se avisa**,
+asumiendo que los pagos cargados se pierden—: *"La fusión que aterriza tarde se lleva el cobro
+en curso, y lo dice"*, más arriba en este archivo.
 
 ### Qué lo fija
 
@@ -3675,12 +3756,17 @@ cita de ARCA/AFIP, nivel libre) y mexicano (nivel trabado con la del SAT, modo l
   podría exigir un valor que otra validación rechaza (inalcanzable hoy), `create` replica una
   de las dos validaciones del guardado, y **los 6 decimales del Anexo 20 no entran en columnas
   `NUMERIC(18,4)`** — esa última es decisión del owner y es fiscal.
-- `pendientes.md` **§ 4** (necesita respuesta), y es **lo más pesado que dejó el frente**:
+- `pendientes.md` **§ 4** (necesitaba respuesta), y era **lo más pesado que dejó el frente**:
   sembrar una provincia por país volvió alcanzable dar de alta un tenant en AR/CO/MX, y esos
   países no tienen tipos de documento tributario ni impuestos de sistema. Peor: la **nota de
   crédito por reembolso usa una constante hardcodeada que es la fila chilena** (código 61), sin
   mirar el país. Los métodos de pago —la mitad que no era decisión de nadie— se arreglaron en
   el mismo commit que lo destapó; el resto es fiscal y lo decide el owner (ADR-010).
+  ➡️ **Salió de la § 4 el 2026-09-03, por dos caminos:** la NC chilena se construyó (*"La nota
+  de crédito la marca el catálogo, no una constante chilena"*, más arriba en este archivo) y los
+  documentos tributarios e impuestos de sistema dejaron de ser pregunta al relevarlos —falta
+  modelo, no un porcentaje—: son el frente fiscal por país de la
+  [`pendientes.md`](pendientes.md) § 6.
 
 📌 **Los dos huecos fiscales los cazó la revisión de RAMA, no las de tarea.** Ninguna revisión
 por-commit podía verlos: la tarea que siembra la provincia es correcta sola, y la que da de
@@ -4551,9 +4637,10 @@ además en el navegador contra el stack real: la respuesta que recibe el POS tra
 ### Dos cosas que la entrada daba por ciertas y no lo eran
 
 1. **"El precio de la línea sí viaja convertido"** — en el ticket no, y justo en las líneas que
-   tienen extras. Ver la entrada del override en `pendientes.md` § 4: el owner decidió el
-   2026-08-30 no ampliar el frente, así que se construyó lo decidido y el hallazgo quedó
-   anotado aparte.
+   tienen extras. El owner decidió el 2026-08-30 no ampliar el frente, así que se construyó lo
+   decidido y el hallazgo quedó anotado aparte, como entrada de la § 4 de `pendientes.md`. Salió
+   ese mismo día sacando el override: *"El override de `precioUnitario`: sale del sistema, y el
+   que mentía era el preview"*, más arriba en este archivo.
 2. **"`detallePersonalizacionPreview` queda solo para el preview del drawer"** — no había tal
    preview. El drawer calculaba ese detalle **únicamente** para pasárselo al carrito; nunca lo
    renderizó (muestra el resumen de texto y el total, cada uno con la moneda del ítem). Al
@@ -16749,8 +16836,10 @@ dos verificadas, no supuestas):
 
 O sea: 3 de los 5 rojos salieron, y los otros 2 **no los podía sacar este arreglo**. Son el
 stock de Carne molida —1,5 kg sembrados, 1,1 kg por corrida— y abrieron entrada propia en la
-§ 4 de [`pendientes.md`](pendientes.md), porque las tres salidas posibles tocan o el seeder o
-una intención escrita del seed.
+§ 4 de `pendientes.md`, porque las tres salidas posibles tocan o el seeder o una intención
+escrita del seed. ➡️ Salieron el 2026-09-03 con el spec sembrando su propio producto:
+*"`mermas.e2e-spec` se siembra su propio producto y vuelve a ser repetible"*, más arriba en este
+archivo.
 
 📌 **La lección, que ya está anotada dos veces en este archivo y volvió a pasar:** una entrada
 de backlog es un punto de partida, no un enunciado verificado — y acá lo que estaba mal no era

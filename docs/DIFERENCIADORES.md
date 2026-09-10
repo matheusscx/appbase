@@ -211,13 +211,20 @@ Y la norma chilena tampoco lo pide: la mercadería devuelta viaja con su propia 
 de la misma transacción— y contesta una pregunta que en los otros once hay que reconstruir a
 mano: *"esta unidad que volvió, ¿bajo qué documento volvió y por cuánto se acreditó?"*.
 
-⚠️ **Y es frágil por donde no se ve:** el rechazo construido el 2026-09-04 empuja al operador a
-volver el stock desde Inventario, donde el movimiento queda **sin `venta_id`**. O sea que el
-diferenciador se pierde justo en el caso que lo haría valioso. Medido, no supuesto:
+⚠️ **Fue frágil por donde no se ve, y se cerró el mismo día:** el rechazo construido el
+2026-09-04 empujaba al operador a volver el stock desde Inventario, donde el movimiento queda
+**sin `venta_id`** —el diferenciador se perdía justo en el caso que lo haría valioso—. Medido,
+no supuesto:
 [`investigaciones/2026-09-04-devolucion-con-credito-parcial.md`](agent/investigaciones/2026-09-04-devolucion-con-credito-parcial.md).
+El owner revirtió esa regla horas después: el caso **se acepta**, con motivo obligatorio cuando
+la mercadería vale más que la nota y con la reposición elegible **por línea de la nota**, así que
+la vuelta a stock ya no tiene que salir de ella.
 
-**Estado:** el vínculo existe y funciona; la decisión de si el caso se acepta o se rechaza está
-abierta en [`pendientes.md` § 4](agent/pendientes.md).
+**Estado:** el vínculo existe y funciona, en el mostrador y en la pasarela, siempre que haya
+nota de crédito. Un reembolso de pasarela **sin** nota repone atado a la venta original, porque
+no hay documento al que atarlo. La decisión y su construcción, en
+[`resueltos.md`](agent/resueltos.md), *"La devolución se acredita por línea, reponga o no el
+stock"*.
 
 ### Anular por CANTIDAD un plato ya despachado, y valorizar lo que se perdió
 

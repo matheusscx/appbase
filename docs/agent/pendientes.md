@@ -98,7 +98,8 @@ que tiene una decisión adentro por más que el diff sea de tres líneas.
 
 ⚠️ **Y esa última mostró que ni siquiera "mecánico" se puede dar por leído**: el arreglo que la
 entrada traía escrito era correcto y **no alcanzaba**, porque la entrada atribuía a una sola
-causa cinco rojos que tenían dos. La mitad que quedó abrió entrada propia en la § 4.
+causa cinco rojos que tenían dos. La mitad que quedó abrió entrada propia en la § 4, y salió el
+2026-09-03 con el spec sembrando su propio producto → [`resueltos.md`](resueltos.md).
 
 ### Los dos residuos de la revisión de rama de la reserva de stock (2026-09-02)
 
@@ -202,7 +203,8 @@ líneas que ningún grep de un número encuentra. Detalle, medición y lo que qu
 
 ✅ **Con eso la § 1 quedó vacía el 2026-09-08.** Igual que las veces anteriores: no dice que
 no quede trabajo chico, dice que el que queda no es mecánico. ➕ **Volvió a poblarse el
-2026-09-10**, con los dos residuos de abajo.
+2026-09-10** con dos residuos del helper del segundo tenant; el de los punteros a una § 4 vacía
+salió ese mismo día → [`resueltos.md`](resueltos.md), y queda el de abajo.
 
 ### El séptimo sitio del login del segundo tenant (2026-09-10)
 
@@ -218,31 +220,6 @@ no quede trabajo chico, dice que el que queda no es mecánico. ➕ **Volvió a p
   residuo que el cierre del helper tuvo que limpiar tres veces; el gesto que lo caza es
   `git diff --cached -U3` sobre cada borrado de `const`.
   **Se toma junto con el próximo cambio de esa suite**, para pagar una sola corrida de e2e.
-
-### Los cinco punteros a una § 4 que cuenta 0 (2026-09-10)
-
-- [ ] **Cinco líneas afirman que algo *"está abierto / es pregunta / quedó anotado" en la § 4*,
-  y la § 4 cuenta 0.** Todos preexistentes —uno lo escribió el commit anterior, `5c6bed7b`—,
-  pero el commit del helper los dejó activamente engañosos al publicar el cero. Cada uno se
-  re-apunta a donde la entrada **está hoy**, no se borra:
-
-  | Dónde | Qué dice | Dónde está de verdad |
-  |---|---|---|
-  | [`DIFERENCIADORES.md:220`](../DIFERENCIADORES.md) | la devolución con crédito parcial está abierta en § 4 | el frente **se cerró** → [`resueltos.md`](resueltos.md) |
-  | [`resueltos.md:321`](resueltos.md) | el `PATCH /items/:id { monedaId }` quedó como entrada de § 4 | **§ 3** — y la propia § 4 ya lo dice |
-  | [`resueltos.md:2036`](resueltos.md) | los pagos juntados son "pregunta al owner (§ 4)" | § 4 no la tiene |
-  | [`resueltos.md:3668`](resueltos.md) | AR/CO/MX en § 4, "lo más pesado que dejó el frente" | **§ 6**, como frente fiscal por país |
-  | [`resueltos.md:4544`](resueltos.md) | "ver la entrada del override en § 4" | el owner la decidió el 2026-08-30 |
-
-  ⚠️ **La primera redacción de esta entrada nombraba uno solo de los cinco**, el de
-  `DIFERENCIADORES.md`, que fue el que reportó la revisión. Es la forma de falla que este
-  archivo ya tiene anotada: *arreglar una copia deja las otras vivas*. El comando que las junta
-  —y que hay que volver a correr antes de cerrar, porque los `Sale de [pendientes.md § 4]` de
-  procedencia son legítimos y no entran— es:
-
-  ```bash
-  grep -rn "§ 4" docs/ | grep -v "^docs/agent/resueltos.md:[0-9]*:Sale de"
-  ```
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1028,7 +1005,8 @@ el owner decidió **cerrar** → [`resueltos.md`](resueltos.md).
 ticket, construida en sesión propia → [`resueltos.md`](resueltos.md). Llegó con las tres
 preguntas contestadas, un plan en cinco puntos y la instrucción de verificarlos antes de
 escribir — y **verificarlos falsificó dos**: el precio de la línea no viajaba convertido en el
-ticket (queda como entrada nueva en la § 4, el owner decidió no ampliar el frente) y el
+ticket (fue entrada nueva en la § 4 —el owner decidió no ampliar el frente— y salió ese mismo
+día sacando el override → [`resueltos.md`](resueltos.md)) y el
 preview del drawer que el punto 5 preservaba no existía. La instrucción de verificar era lo
 que hacía falta.
 

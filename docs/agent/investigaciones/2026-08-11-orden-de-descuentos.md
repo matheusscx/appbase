@@ -20,7 +20,8 @@
 > mover el último decimal. Ahora sí tiene entrada, en la § 2 (medir primero).
 >
 > Estaba con *"qué queda para decidir"* y **cero menciones en el backlog**, o sea que la
-> decisión se había perdido de vista. Ya no: [`pendientes.md`](../pendientes.md) § 4.
+> decisión se había perdido de vista. Ya no: pasó por la § 4 de `pendientes.md` y salió
+> contestada el mismo día, con la decisión de arriba, a la [`pendientes.md`](../pendientes.md) § 3.
 >
 > 📌 **Sigue valiendo lo que la propia investigación medía:** el problema es **más chico de lo
 > que parecía** —solo afecta al modo `compuesto`, y el default es `base`— y **toca el motor de
