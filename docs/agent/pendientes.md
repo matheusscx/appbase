@@ -200,8 +200,49 @@ revisión independiente— el **ordinal en palabras** (*"la cuarta pasada de la 
 líneas que ningún grep de un número encuentra. Detalle, medición y lo que queda vivo del grep
 —tres líneas que no citan ninguna revisión— en [`resueltos.md`](resueltos.md).
 
-✅ **Con eso la § 1 vuelve a quedar vacía el 2026-09-08.** Igual que las veces anteriores: no
-dice que no quede trabajo chico, dice que el que queda no es mecánico.
+✅ **Con eso la § 1 quedó vacía el 2026-09-08.** Igual que las veces anteriores: no dice que
+no quede trabajo chico, dice que el que queda no es mecánico. ➕ **Volvió a poblarse el
+2026-09-10**, con los dos residuos de abajo.
+
+### El séptimo sitio del login del segundo tenant (2026-09-10)
+
+- [ ] **`alta-usuarios-tenant.e2e-spec.ts:124-131` hace el mismo bloque que el helper
+  `test/helpers/segundo-tenant.ts` extrajo de otros seis**, inline y con `loginSuelto`. Se
+  reemplaza por `tokenFalabella = await loginSegundoTenant(app);`.
+  **Quedó afuera del cierre a propósito** —tocar un spec obliga a re-correr el e2e completo
+  sobre un cierre ya verificado—, no por olvido; el detalle está en
+  [`resueltos.md`](resueltos.md).
+  ⚠️ **No es "una línea", y la primera redacción del cierre lo decía así.** Ese bloque es el
+  **único** uso de `FALABELLA_TENANT_ID` en el archivo (declarada en `:17`), así que el cambio
+  arrastra la `const` huérfana y el comentario de `:121-123` que la explica. Es el mismo
+  residuo que el cierre del helper tuvo que limpiar tres veces; el gesto que lo caza es
+  `git diff --cached -U3` sobre cada borrado de `const`.
+  **Se toma junto con el próximo cambio de esa suite**, para pagar una sola corrida de e2e.
+
+### Los cinco punteros a una § 4 que cuenta 0 (2026-09-10)
+
+- [ ] **Cinco líneas afirman que algo *"está abierto / es pregunta / quedó anotado" en la § 4*,
+  y la § 4 cuenta 0.** Todos preexistentes —uno lo escribió el commit anterior, `5c6bed7b`—,
+  pero el commit del helper los dejó activamente engañosos al publicar el cero. Cada uno se
+  re-apunta a donde la entrada **está hoy**, no se borra:
+
+  | Dónde | Qué dice | Dónde está de verdad |
+  |---|---|---|
+  | [`DIFERENCIADORES.md:220`](../DIFERENCIADORES.md) | la devolución con crédito parcial está abierta en § 4 | el frente **se cerró** → [`resueltos.md`](resueltos.md) |
+  | [`resueltos.md:321`](resueltos.md) | el `PATCH /items/:id { monedaId }` quedó como entrada de § 4 | **§ 3** — y la propia § 4 ya lo dice |
+  | [`resueltos.md:2036`](resueltos.md) | los pagos juntados son "pregunta al owner (§ 4)" | § 4 no la tiene |
+  | [`resueltos.md:3668`](resueltos.md) | AR/CO/MX en § 4, "lo más pesado que dejó el frente" | **§ 6**, como frente fiscal por país |
+  | [`resueltos.md:4544`](resueltos.md) | "ver la entrada del override en § 4" | el owner la decidió el 2026-08-30 |
+
+  ⚠️ **La primera redacción de esta entrada nombraba uno solo de los cinco**, el de
+  `DIFERENCIADORES.md`, que fue el que reportó la revisión. Es la forma de falla que este
+  archivo ya tiene anotada: *arreglar una copia deja las otras vivas*. El comando que las junta
+  —y que hay que volver a correr antes de cerrar, porque los `Sale de [pendientes.md § 4]` de
+  procedencia son legítimos y no entran— es:
+
+  ```bash
+  grep -rn "§ 4" docs/ | grep -v "^docs/agent/resueltos.md:[0-9]*:Sale de"
+  ```
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -1997,38 +2038,18 @@ motor convierte el precio a moneda oficial *antes* de aplicar las reglas. Una en
 una revisión no viene verificada por venir de ahí — que es lo mismo que este archivo ya decía de
 las entradas de la § 1, con dos casos.
 
-### ¿Un segundo helper compartido en `backend/test/`? (2026-09-07)
+✅ **Y el segundo helper compartido de `backend/test/` se decidió el 2026-09-09**: el owner
+mandó **extraerlo**. Quedó en `test/helpers/segundo-tenant.ts`, y lo que se midió al hacerlo
+—qué deriva había y cuál no— está en [`resueltos.md`](resueltos.md).
 
-**La pregunta, en una línea:** el bloque *"loguearse como Falabella y pedir su local"* va por la
-cuarta copia. ¿Se extrae a `test/helpers/`, o se deja copiado?
+✅ **Con eso la sección queda vacía otra vez** — contado, no recordado:
 
-**Por qué se pregunta y no se hace:** el único helper compartido que existe hoy
-(`test/helpers/caja.ts`) nació de una decisión explícita tuya, el 2026-09-03, y **después de
-medir las ocho copias** y encontrar que ya habían derivado en la conducta. Extraer el segundo
-por reflejo sería saltarse justo lo que hizo valer al primero.
+```bash
+awk '/^## 4\./{f=1;next} /^## 5\./{f=0} f && /^### /{n++} END{print n+0}' docs/agent/pendientes.md
+```
 
-**Lo medido hoy** (2026-09-07): cuatro copias, en `mermas.e2e-spec.ts`,
-`traslados.e2e-spec.ts`, `items-stock-por-ubicacion.e2e-spec.ts` —la que agregó el cierre de
-los minors de bodegas— y `recuentos.e2e-spec.ts`, ahí sí como función local `loginFalabella`.
-Se ubican con `grep -rn "resLoginF = await request\|async function loginFalabella"
-backend/test`, que devuelve **cinco**: la quinta, `papelera.e2e-spec.ts:2220`, hace el login
-entero —los dos pasos, `login` + `switch-tenant`— pero **no** pide el local, así que no es
-copia de este bloque. Igual entra en la conversación el día que se extraiga algo: si lo que se
-comparte es el login, son cinco y no cuatro.
-
-**Es el mismo mecanismo en las cuatro**: `admin@sistema.com` + `switch-tenant` +
-`GET /ubicaciones` + `find(u => u.tipo === 'local')` —la constante `ADMIN_FALABELLA_EMAIL` de
-`recuentos` y `papelera` **es** `'admin@sistema.com'`, no otro usuario—. O sea: **todavía no
-hay deriva**, que es la diferencia con el caso de caja.
-
-⚠️ **Sin números de línea a propósito, y por experiencia:** esta entrada los tuvo, y el
-barrido de citas del 2026-09-07 —un commit que ni siquiera tocaba lo que la entrada
-describe— corrió tres de los cuatro. Dos rondas de revisión se fueron en eso.
-
-**Las dos salidas y su costo:** extraer ahora cuesta un archivo nuevo y cierra la puerta a que
-las cuatro se separen sin que nadie lo note; dejarlo cuesta que la quinta copia entre igual, y
-que el día que una derive el rojo salga en un archivo ajeno. La regla escrita del repo
-(*"duplicar dos veces es aceptable, se extrae a la tercera"*) ya está pasada.
+⚠️ Y vale de nuevo lo que esta sección ya aprendió dos veces: **un cero acá no prueba que no
+haya nada esperándote**, prueba que nadie anotó lo que estaba esperando.
 
 ## 5. Carreras de concurrencia
 

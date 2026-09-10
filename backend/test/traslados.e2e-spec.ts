@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import type { Server, AddressInfo } from 'net';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { localDelSegundoTenant } from './helpers/segundo-tenant';
 
 /**
  * **Frente de bodegas y traslados**: `POST /traslados` mueve mercadería entre
@@ -21,7 +22,6 @@ import { AppModule } from '../src/app.module';
  */
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
-const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -1182,35 +1182,11 @@ describe('Traslados entre ubicaciones (e2e)', () => {
     let tokenSinPermiso: string;
 
     beforeAll(async () => {
-      // Login en DOS pasos, contra Falabella: recursos REALES de otro tenant,
-      // no uuids inventados — así el rechazo cross-tenant se puede comparar
-      // contra el de "no existe" y no queda ningún mensaje que confirme que
-      // el recurso existe del otro lado (sería un oráculo).
-      const resLoginF = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: 'admin@sistema.com', password: 'admin' });
-      expect(resLoginF.status).toBe(200);
-      const resTenantF = await request(app.getHttpServer())
-        .post('/api/auth/switch-tenant')
-        .set(
-          'Cookie',
-          (resLoginF.headers['set-cookie'] as unknown as string[]) ?? [],
-        )
-        .set(
-          'Authorization',
-          `Bearer ${(resLoginF.body as TokenResponse).access_token}`,
-        )
-        .send({ tenantId: FALABELLA_TENANT_ID });
-      expect(resTenantF.status).toBe(200);
-      const tokenFalabella = (resTenantF.body as TokenResponse).access_token;
-
-      const resUbicF = await request(app.getHttpServer())
-        .get('/api/ubicaciones')
-        .set('Authorization', `Bearer ${tokenFalabella}`);
-      expect(resUbicF.status).toBe(200);
-      ubicacionFalabellaId = (resUbicF.body as UbicacionListada[]).find(
-        (u) => u.tipo === 'local',
-      )!.id;
+      // Recursos REALES del otro tenant, no uuids inventados: el porqué está en
+      // el docblock de `localDelSegundoTenant`.
+      const { token: tokenFalabella, localId: local } =
+        await localDelSegundoTenant(app);
+      ubicacionFalabellaId = local;
 
       const resMotivosF = await request(app.getHttpServer())
         .get('/api/motivos-traslado?soloActivas=true')

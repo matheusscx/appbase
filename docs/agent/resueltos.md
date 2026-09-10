@@ -23,6 +23,188 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El segundo helper compartido de `backend/test/`: el login del otro tenant (cerrada 2026-09-09)
+
+Sale de [`pendientes.md` § 4](pendientes.md), donde esperaba una respuesta del owner desde el
+2026-09-07. **La respuesta fue extraerlo.** La entrada, verbatim:
+
+### ¿Un segundo helper compartido en `backend/test/`? (2026-09-07)
+
+**La pregunta, en una línea:** el bloque *"loguearse como Falabella y pedir su local"* va por la
+cuarta copia. ¿Se extrae a `test/helpers/`, o se deja copiado?
+
+**Por qué se pregunta y no se hace:** el único helper compartido que existe hoy
+(`test/helpers/caja.ts`) nació de una decisión explícita tuya, el 2026-09-03, y **después de
+medir las ocho copias** y encontrar que ya habían derivado en la conducta. Extraer el segundo
+por reflejo sería saltarse justo lo que hizo valer al primero.
+
+**Lo medido hoy** (2026-09-07): cuatro copias, en `mermas.e2e-spec.ts`,
+`traslados.e2e-spec.ts`, `items-stock-por-ubicacion.e2e-spec.ts` —la que agregó el cierre de
+los minors de bodegas— y `recuentos.e2e-spec.ts`, ahí sí como función local `loginFalabella`.
+Se ubican con `grep -rn "resLoginF = await request\|async function loginFalabella"
+backend/test`, que devuelve **cinco**: la quinta, `papelera.e2e-spec.ts:2220`, hace el login
+entero —los dos pasos, `login` + `switch-tenant`— pero **no** pide el local, así que no es
+copia de este bloque. Igual entra en la conversación el día que se extraiga algo: si lo que se
+comparte es el login, son cinco y no cuatro.
+
+**Es el mismo mecanismo en las cuatro**: `admin@sistema.com` + `switch-tenant` +
+`GET /ubicaciones` + `find(u => u.tipo === 'local')` —la constante `ADMIN_FALABELLA_EMAIL` de
+`recuentos` y `papelera` **es** `'admin@sistema.com'`, no otro usuario—. O sea: **todavía no
+hay deriva**, que es la diferencia con el caso de caja.
+
+⚠️ **Sin números de línea a propósito, y por experiencia:** esta entrada los tuvo, y el
+barrido de citas del 2026-09-07 —un commit que ni siquiera tocaba lo que la entrada
+describe— corrió tres de los cuatro. Dos rondas de revisión se fueron en eso.
+
+**Las dos salidas y su costo:** extraer ahora cuesta un archivo nuevo y cierra la puerta a que
+las cuatro se separen sin que nadie lo note; dejarlo cuesta que la quinta copia entre igual, y
+que el día que una derive el rojo salga en un archivo ajeno. La regla escrita del repo
+(*"duplicar dos veces es aceptable, se extrae a la tercera"*) ya está pasada.
+
+### La entrada decía cinco sitios, y al ir a extraer eran seis
+
+El grep que la entrada publica (`resLoginF` **o** `async function loginFalabella`) buscaba por
+**los nombres que las copias usan**, no por la conducta, y por eso se le escapó
+`tienda-pasarela-demo.e2e-spec.ts`: hace el mismo login de dos pasos contra el mismo tenant,
+inline, con las variables llamadas `resLogin`/`resTenant` como cualquier otro spec. Es la misma
+forma de falla que este archivo ya tiene anotada —*buscar por mecanismo en vez de por
+conducta*—, y el número que devolvía parecía exhaustivo justamente porque el grep estaba
+escrito con los nombres a la vista.
+
+El mapa que quedó, contado el 2026-09-09:
+
+| Qué necesita el sitio | Cuántos | Dónde |
+|---|---|---|
+| Login **y** el local | 4 | `mermas`, `traslados`, `items-stock-por-ubicacion`, `recuentos` |
+| Solo el login | 3 | `recuentos` (su `loginFalabella` local), `papelera`, `tienda-pasarela-demo` |
+
+Por eso el helper expone **dos** funciones y no una: `loginSegundoTenant` y
+`localDelSegundoTenant`, que lo llama. `recuentos` usa las dos, en tests distintos.
+
+⚠️ **Y eran siete, no seis: la revisión independiente encontró uno más después**, con el
+diff ya en verde. `alta-usuarios-tenant.e2e-spec.ts:124-131` hace el mismo login de dos
+pasos contra el mismo tenant —inline, con `loginSuelto` y las variables llamadas
+`sueltoSistema`/`enFalabella`—, y se le escapó al barrido por conducta igual que
+`tienda-pasarela-demo` se le había escapado al barrido por nombres. **Quedó sin convertir a
+propósito**: convertirlo es un cambio de código, y un cambio de código obliga a re-correr
+el e2e completo sobre un cierre que ya estaba verificado. Lo que cuesta convertirlo, medido, y la entrada
+que lo espera están en la **§ 1 de [`pendientes.md`](pendientes.md)**: no es una línea, porque
+el bloque es el único uso de `FALABELLA_TENANT_ID` y arrastra esa `const` y su comentario.
+
+### La deriva que había, y la que no
+
+**No había deriva de conducta**, y eso se sostuvo al mirarlas de cerca: los seis sitios mandan
+la cookie del primer paso al segundo —sin ella `switch-tenant` corta con 401— y los seis
+afirman sobre los dos status. Nada que ver con el caso de `caja.ts`, donde una de las ocho
+copias hacía media función.
+
+**La deriva que sí había era de forma, y sirve igual como aviso:** `mermas` tenía el uuid
+**hardcodeado inline** con un `// Falabella` al lado, en vez de la constante que usaban las
+otras. El literal vivía en **catorce** archivos de `backend/test` —trece con un `const`
+propio (doce de ellos llamados `FALABELLA_TENANT_ID`, más el `OTRO_TENANT` de
+`items-pausados`) y `mermas` inline—; el cierre lo sacó de seis, así que quedan ocho specs
+**más el helper**, y el comando devuelve **nueve**:
+
+```bash
+git grep -n "446655440040" -- backend/test | sed 's/:.*//' | sort -u | wc -l
+```
+
+⚠️ **Los ocho que quedan no son "los que hacen login genérico"**, aunque el cierre lo dijo
+así primero: de los ocho, **cinco** lo hacen (`caja`, `cajones`, `garzon-pin`,
+`modulo-contratado-borde-duro`, `uso-reglas`), **dos nunca se loguean *en ese tenant*** —`items-pausados:678`
+y `vigencia-cuenta:298` pasan el uuid como parámetro de un `INSERT`; los dos specs sí
+autentican, contra Paris, en `:52` y `:75`— y el octavo es
+`alta-usuarios-tenant`, que es el séptimo sitio de arriba. Clasificarlos de un grep del
+literal, sin abrir las líneas, es lo que produjo el error.
+
+### ⚠️ "Falabella" no existe, y el helper lo dice
+
+El seed crea dos tenants y las constantes que los nombran **mienten**: `PARIS` (`…440007`) es
+**Demo Restaurante** y `FALABELLA` (`…440040`) es **Demo Bodega** —nombres de tiendas chilenas
+que quedaron de una versión vieja y que nadie renombró cuando cambiaron los visibles—. Y
+el "admin de Falabella" **es** `admin@sistema.com`, que se cambia de tenant. No hay un admin
+propio de ese lado. ⚠️ El cierre lo llamó primero *"el mismo usuario que usan todas las
+suites"* y es falso: lo nombran **10** de los 70 specs; el de las suites es
+`admin.paris@paris.cl`, en **63**. ⚠️ El primer intento de esta corrección escribió **11**, que
+es el conteo de *archivos*: el undécimo es el propio helper. En la misma frase, el 63 sí
+descontaba el helper (64 archivos) y el 11 no — el auto-conteo entra de a un número por vez. ⚠️ La entrada verbatim de
+arriba lo nombra `ADMIN_FALABELLA_EMAIL` y **ese símbolo lo borró este mismo commit** —vivía
+solo en `recuentos` y `papelera`—; el que sigue vivo es el objeto `ADMIN_FALABELLA`, en
+`cajones`, `garzon-pin` y `uso-reglas`. La cita de la entrada queda como estaba, que es la
+regla de este archivo.
+
+Por eso el archivo se llama `segundo-tenant.ts` y no `falabella.ts`. **Renombrar las
+constantes quedó explícitamente afuera**: son **440 líneas en 64 archivos** (467 apariciones
+con `-o`, porque hay líneas que nombran las dos), con `const PARIS` re-declarado **34 veces**
+dentro del seeder —y `const FALABELLA` 12—, o sea 34 scopes distintos, no "una decena". Se
+ofreció como "cambio chico", se midió, y **la medición lo refutó**: va como frente propio o no va.
+
+⚠️ El comando devuelve 444 y 65, no 440 y 64:
+
+```bash
+grep -rn "FALABELLA\|PARIS" backend/src backend/test | wc -l
+```
+
+**El docblock de `test/helpers/segundo-tenant.ts` se cuenta a sí mismo** —cuatro líneas que
+explican por qué el renombre no se hizo—. Es la trampa de publicar un conteo en un archivo que
+el propio conteo escanea: pasó al escribir este cierre, con el número subiendo de 444 a 445 al
+nombrar la constante en la prosa.
+
+### Qué NO se extrajo, y por qué importa
+
+El login de dos pasos **genérico** —`login(app, email, password, tenantId)`— vive copiado en
+muchos más specs: `git grep -l "auth/switch-tenant" -- backend/test` lista **67** archivos, de
+los cuales **dos no son specs** —el helper nuevo y `setup-supertest.ts`, que `jest-e2e.json:19`
+registra como setup—, así que son **65 specs**, casi siempre contra Paris; en `cajones` y
+`uso-reglas` la función local es **byte a byte la misma**.
+
+⚠️ **El 67 crudo es el mismo que daba en HEAD, y es una coincidencia:** `tienda-pasarela-demo`
+salió del conjunto y el helper entró. Contado en specs, que es lo que vale, fue **66 → 65**. El
+cierre publicó primero 66 restando un solo no-spec, y 66 era justamente el valor viejo: un
+número que no se mueve cuando el trabajo sí se movió es señal de que el filtro está mal, no de
+que no pasó nada.
+
+```bash
+git grep -l "auth/switch-tenant" -- backend/test | grep -c e2e-spec
+```
+
+⚠️ Y el cierre publicó primero **68**, que es lo que devuelve un `grep -rl` sobre la carpeta:
+cuenta `tmp-401.jsonl`, que no es un spec sino el registro que `test/setup-supertest.ts`
+escribe en cada corrida (`:89` define el nombre; el `appendFileSync` está en `:164`) y que
+`.gitignore:27` deja afuera a propósito. Un conteo de specs se hace con `git grep`, no con
+`grep -r`. Es
+otro patrón, mucho más ancho, y meterlo en este archivo lo habría convertido en el
+`helpers.ts` genérico que `CLAUDE.md` prohíbe. Si alguna vez se comparte, se decide aparte.
+
+### El costo real del cierre
+
+**−166 líneas, +26** en los seis specs (`git diff --staged --numstat`). Los residuos que dejó borrar los bloques —y que la
+revisión suele levantar— se sacaron en el mismo commit: `FALABELLA_TENANT_ID` y
+`ADMIN_FALABELLA_*` muertos, la `interface TokenResponse` que se quedó sin usar en
+`tienda-pasarela-demo`, y **tres comentarios que quedaron colgando de la constante que ya no
+está** —el de `recuentos` sobre `contacto@falabella.cl`, el de `papelera` que pasó a estar
+encima de `EFECTIVO_ID`, donde decía algo falso, y el de `items-stock-por-ubicacion`, que
+quedó flotando sobre una línea en blanco—. ⚠️ El tercero **lo encontró la revisión, no el
+cierre**: los dos primeros se buscaron a mano recorriendo los archivos tocados, y a mano se
+saltea uno. El gesto que los caza es `git diff --cached -U3` sobre cada borrado de `const`.
+
+### Lo que quedó afuera vive en `pendientes.md`, no acá
+
+⚠️ **Este cierre lo escribió mal la primera vez** y lo levantó la revisión: puso el séptimo
+sitio en una sección *"qué quedó afuera, y sigue vivo"* de este archivo, mientras el mismo
+commit publicaba un `0` en la § 4 de [`pendientes.md`](pendientes.md). Las dos afirmaciones
+eran ciertas por separado y juntas mandaban al próximo a no buscarlo. La regla de
+`pendientes.md` es explícita —*"acá solo vive lo que falta hacer"*—, así que:
+
+- **`alta-usuarios-tenant.e2e-spec.ts:124`**, el séptimo sitio → **§ 1 de
+  [`pendientes.md`](pendientes.md)**, con su costo real. No es "una línea": el bloque es el
+  **único** uso de `FALABELLA_TENANT_ID`, y borrarlo deja esa `const` y su comentario huérfanos
+  —exactamente el residuo que este cierre tuvo que limpiar tres veces—.
+- **Renombrar `FALABELLA`/`PARIS`** y **el login de dos pasos genérico** — medidos arriba,
+  frentes propios, sin entrada porque nadie los pidió.
+
+---
+
 ## Cambiar la moneda de un ítem vacía la plata que quedó escrita en la otra (cerrada 2026-09-09)
 
 Sale de [`pendientes.md` § 2](pendientes.md), donde la dejó la revisión independiente del

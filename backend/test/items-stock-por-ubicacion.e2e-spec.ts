@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { localDelSegundoTenant } from './helpers/segundo-tenant';
 
 /**
  * Red del frente de bodegas y traslados — el plan se borró al cerrarlo; lo
@@ -26,8 +27,6 @@ import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
-/** Falabella: el otro tenant del seed, para el 404 por ubicación ajena. */
-const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -301,34 +300,10 @@ describe('items — stock por ubicación (e2e)', () => {
     });
 
     it('un ubicacionId de otro tenant da 404, y el stock no se mueve', async () => {
-      // El local de Falabella, pedido con el token de Falabella: no se planta
-      // un UUID inventado, que daría 404 por no existir en vez de por ser
-      // ajeno — y ahí el test pasaría aunque el service no filtrara por tenant.
-      const resLoginF = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: 'admin@sistema.com', password: 'admin' });
-      expect(resLoginF.status).toBe(200);
-      const resTenantF = await request(app.getHttpServer())
-        .post('/api/auth/switch-tenant')
-        .set(
-          'Cookie',
-          (resLoginF.headers['set-cookie'] as unknown as string[]) ?? [],
-        )
-        .set(
-          'Authorization',
-          `Bearer ${(resLoginF.body as TokenResponse).access_token}`,
-        )
-        .send({ tenantId: FALABELLA_TENANT_ID });
-      expect(resTenantF.status).toBe(200);
-      const tokenFalabella = (resTenantF.body as TokenResponse).access_token;
-
-      const resUbicF = await request(app.getHttpServer())
-        .get('/api/ubicaciones')
-        .set('Authorization', `Bearer ${tokenFalabella}`);
-      expect(resUbicF.status).toBe(200);
-      const ubicacionFalabellaId = (resUbicF.body as UbicacionResponse[]).find(
-        (u) => u.tipo === 'local',
-      )!.id;
+      // El local REAL del otro tenant, no un UUID inventado: el porqué está en
+      // el docblock de `localDelSegundoTenant`.
+      const { localId: ubicacionFalabellaId } =
+        await localDelSegundoTenant(app);
 
       const res = await request(app.getHttpServer())
         .patch(`/api/items/${itemId}/stock`)

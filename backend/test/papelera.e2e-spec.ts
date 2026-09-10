@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { loginSegundoTenant } from './helpers/segundo-tenant';
 import { unwrap } from '../src/common/utils/pg-returning.util';
 
 // Frente de la papelera (`docs/features/papelera.md`): categorías es la entidad
@@ -2208,30 +2209,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
   let cajaId: string;
   let itemId: string;
 
-  // Falabella, NO Paris: a propósito, para no depender de ningún id sembrado
-  // (ver el comentario del describe).
-  const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
-  const ADMIN_FALABELLA_EMAIL = 'admin@sistema.com';
-  const ADMIN_FALABELLA_PASS = 'admin';
   const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
-
-  async function loginFalabella(): Promise<string> {
-    const resLogin = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: ADMIN_FALABELLA_EMAIL, password: ADMIN_FALABELLA_PASS });
-    expect(resLogin.status).toBe(200);
-    const initialToken = (resLogin.body as TokenResponse).access_token;
-    const resTenant = await request(app.getHttpServer())
-      .post('/api/auth/switch-tenant')
-      .set(
-        'Cookie',
-        (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
-      )
-      .set('Authorization', `Bearer ${initialToken}`)
-      .send({ tenantId: FALABELLA_TENANT_ID });
-    expect(resTenant.status).toBe(200);
-    return (resTenant.body as TokenResponse).access_token;
-  }
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -2249,7 +2227,9 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
     await app.init();
 
     ds = app.get(DataSource);
-    tokenAdmin = await loginFalabella();
+    // El SEGUNDO tenant, no Paris: a propósito, para no depender de ningún id
+    // sembrado (ver el comentario del describe).
+    tokenAdmin = await loginSegundoTenant(app);
 
     // Item propio de tipo `servicio` (sin stock): el foco del test es la
     // propina, no la venta — no depende del stock de seed ni interfiere con

@@ -4,6 +4,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 /**
  * La tienda online sin pasarela conectada.
@@ -21,15 +22,8 @@ import { AppModule } from '../src/app.module';
  * Restaurante sale por redirect a Transbank y necesita red (ver
  * `pasarela-oneclick.e2e-spec.ts`, detrás de RUN_TRANSBANK_E2E).
  */
-const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
-// El admin real de Falabella es el superadmin del seed; `contacto@falabella.cl`
-// es el correo de contacto del tenant, no un usuario logueable.
-const ADMIN_FALABELLA = { email: 'admin@sistema.com', pass: 'admin' };
 
-interface TokenResponse {
-  access_token: string;
-}
 interface ItemResponse {
   id: string;
 }
@@ -77,23 +71,7 @@ describe('Tienda online sin pasarela conectada (e2e)', () => {
     );
     await app.init();
 
-    const resLogin = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: ADMIN_FALABELLA.email, password: ADMIN_FALABELLA.pass });
-    expect(resLogin.status).toBe(200);
-    const resTenant = await request(app.getHttpServer())
-      .post('/api/auth/switch-tenant')
-      .set(
-        'Cookie',
-        (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
-      )
-      .set(
-        'Authorization',
-        `Bearer ${(resLogin.body as TokenResponse).access_token}`,
-      )
-      .send({ tenantId: FALABELLA_TENANT_ID });
-    expect(resTenant.status).toBe(200);
-    token = (resTenant.body as TokenResponse).access_token;
+    token = await loginSegundoTenant(app);
 
     // Demo Bodega no tiene catálogo sembrado: el carrito necesita algo que
     // comprar y este ítem es de la suite, no del seed.

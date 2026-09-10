@@ -6,17 +6,16 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
+import {
+  loginSegundoTenant,
+  localDelSegundoTenant,
+} from './helpers/segundo-tenant';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
-const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
-// `contacto@falabella.cl` no es un usuario logueable; el admin real de
-// Falabella es el superadmin con rol Administrador asignado en ese tenant.
-const ADMIN_FALABELLA_EMAIL = 'admin@sistema.com';
-const ADMIN_FALABELLA_PASS = 'admin';
 
 interface TokenResponse {
   access_token: string;
@@ -111,25 +110,6 @@ async function loginParisComo(
     )
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
-  expect(resTenant.status).toBe(200);
-  return (resTenant.body as TokenResponse).access_token;
-}
-
-async function loginFalabella(app: INestApplication<App>): Promise<string> {
-  const resLogin = await request(app.getHttpServer())
-    .post('/api/auth/login')
-    .send({ email: ADMIN_FALABELLA_EMAIL, password: ADMIN_FALABELLA_PASS });
-  expect(resLogin.status).toBe(200);
-  const initialToken = (resLogin.body as TokenResponse).access_token;
-
-  const resTenant = await request(app.getHttpServer())
-    .post('/api/auth/switch-tenant')
-    .set(
-      'Cookie',
-      (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
-    )
-    .set('Authorization', `Bearer ${initialToken}`)
-    .send({ tenantId: FALABELLA_TENANT_ID });
   expect(resTenant.status).toBe(200);
   return (resTenant.body as TokenResponse).access_token;
 }
@@ -756,7 +736,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
 
     // Motivo real de OTRO tenant (Falabella) — no un uuid inventado — para
     // cubrir el caso de aislamiento multi-tenant, no solo el inexistente.
-    const tokenFalabella = await loginFalabella(app);
+    const tokenFalabella = await loginSegundoTenant(app);
     const { body: motivosFalabella } = await request(app.getHttpServer())
       .get('/api/motivos-diferencia-inventario')
       .set('Authorization', `Bearer ${tokenFalabella}`);
@@ -1638,14 +1618,7 @@ describe('Recuentos — por ubicación', () => {
   });
 
   it('un ubicacionId de otro tenant en POST /recuentos da el mismo 404 opaco que uno inexistente', async () => {
-    const tokenFalabella = await loginFalabella(app);
-    const resUbicF = await request(app.getHttpServer())
-      .get('/api/ubicaciones')
-      .set('Authorization', `Bearer ${tokenFalabella}`);
-    expect(resUbicF.status).toBe(200);
-    const ubicacionFalabellaId = (resUbicF.body as UbicacionListada[]).find(
-      (u) => u.tipo === 'local',
-    )!.id;
+    const { localId: ubicacionFalabellaId } = await localDelSegundoTenant(app);
 
     const itemId = await crearProductoConStockLocal('1');
 

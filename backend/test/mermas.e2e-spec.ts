@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { localDelSegundoTenant } from './helpers/segundo-tenant';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CAUSA_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
@@ -480,31 +481,8 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       expect(resItemAntes.status).toBe(200);
       const stockAntes = resItemAntes.body.stock as string;
 
-      const resLoginF = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: 'admin@sistema.com', password: 'admin' });
-      expect(resLoginF.status).toBe(200);
-      const resTenantF = await request(app.getHttpServer())
-        .post('/api/auth/switch-tenant')
-        .set(
-          'Cookie',
-          (resLoginF.headers['set-cookie'] as unknown as string[]) ?? [],
-        )
-        .set(
-          'Authorization',
-          `Bearer ${(resLoginF.body as TokenResponse).access_token}`,
-        )
-        .send({ tenantId: '550e8400-e29b-41d4-a716-446655440040' }); // Falabella
-      expect(resTenantF.status).toBe(200);
-      const tokenFalabella = (resTenantF.body as TokenResponse).access_token;
-
-      const resUbicF = await request(app.getHttpServer())
-        .get('/api/ubicaciones')
-        .set('Authorization', `Bearer ${tokenFalabella}`);
-      expect(resUbicF.status).toBe(200);
-      const ubicacionFalabellaId = (resUbicF.body as UbicacionListada[]).find(
-        (u) => u.tipo === 'local',
-      )!.id;
+      const { localId: ubicacionFalabellaId } =
+        await localDelSegundoTenant(app);
 
       const res = await request(app.getHttpServer())
         .post('/api/mermas')
