@@ -593,7 +593,17 @@ Reglas:
   | costo vigente (producto/ingrediente, al editar) | **no** | sí | no es un campo: sale de los movimientos de inventario |
   | "Costo actual" calculado (receta/combo) | **no** | sí | no es un campo: lo calcula la pantalla desde los ítems que componen a este |
   | precio de opción de modificador | **no** | sí | la API manda el **efectivo** (`COALESCE(override, default)`) sin el default al lado, así que no se puede distinguir el de este ítem del compartido del catálogo — y ese es "del extra como tal" (regla del owner) |
-  | monto fijo de un descuento/recargo asociado | **no** | **no** | no tiene moneda propia (`descuentos`/`recargos` sin `moneda_id`) **y el drawer no lo muestra**: no hay número en pantalla que cambie de significado a la vista. El problema es anterior al gesto → `pendientes.md` § 4 |
+  | monto fijo de un descuento/recargo asociado | **no** | **no** | **no está denominado en la moneda del ítem**: el motor lo aplica DESPUÉS de convertir el precio de la línea (`calculo-precios.service.ts:869`, o `:405` si es receta/combo personalizado). Hoy es plata en la oficial; por decisión del owner (2026-09-09) pasará a tener moneda propia en la regla — bajo los dos diseños la fila dice lo mismo. Además el drawer no lo muestra |
+
+  ⚠️ **La última fila decía otra cosa, y era falsa**: que el monto fijo "no tiene moneda propia"
+  y que por eso un `-1000` le descontaba mil **dólares** a un ítem en dólares. La corrección es
+  del 2026-09-09 y el detalle vive en [`../agent/resueltos.md`](../agent/resueltos.md).
+  📌 **Lo que la hizo falsa no fue el dato sino de dónde se leyó**: se miró el **modelo** —dos
+  tablas sin columna `moneda_id`— sin abrir el **orden** en que el motor hace las cuentas. En
+  plata, el modelo no alcanza: la misma columna significa una cosa u otra según en qué punto del
+  cálculo se la lee. (Qué valida cada marca de escala del backend —`@EsMontoCobrado` contra
+  `@EsCosto`— está en [`backend.md`](backend.md) § 3, y **no** es un eje de monedas: es plata
+  cobrada contra tasa que se multiplica.)
 
   ⭐ **Nada cambia de moneda sin un click cuando hay plata en pantalla.** Si la persona vacía
   los campos, el aviso solo cambia de texto (*"Ya no queda ningún monto cargado…"*) y sigue

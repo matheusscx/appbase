@@ -1693,6 +1693,96 @@ líneas, neto e IVA (`7a1e934d`) → [`resueltos.md`](resueltos.md).
   el owner decidió esperar a compras **para que el insumo sea confiable**, no porque falte
   maquinaria.
 
+### Un descuento o recargo de monto fijo declara su propia moneda (owner, 2026-09-09)
+
+- [ ] **Darle `moneda_id` a `descuentos` y `recargos`, y convertir ese importe antes de
+  aplicarlo** —como ya se hace con el precio— para que un recargo legítimo en UF o en dólares sea
+  expresable (backend + BD + frontend, decidido por el owner el 2026-09-09).
+
+**El caso que lo motiva, con las tasas sembradas (1 UF = 38.000):** un arriendo de salón con un
+recargo de `+0,2 UF` de gastos, sobre ítems de precios distintos. **No se puede escribir como
+porcentaje** —es plano, no proporcional al precio— y hoy tampoco como monto fijo: tipear `0,2`
+**se guarda mal en silencio**. Lo único expresable hoy es `+7600`, o sea la conversión hecha a
+mano y congelada a la tasa del día en que alguien la tipeó.
+
+⛔ **Cómo falla hoy ese `0,2`, porque NO es un rechazo.** Por API directa sí hay 400 —el importe
+se valida contra los decimales de la oficial, y CLP tiene **cero**—, pero **por la pantalla nunca
+llega a salir**: el campo es un `<MoneyInput oficial>` y con `fraction: 0` maska no deja abrir
+parte decimal, así que lo tecleado queda en `2` —dos pesos— y se guarda con **201**. ✅ **Medido
+el 2026-09-09**, no deducido del docblock: montando el componente con `monedaId: 'clp-1'` y
+tecleando `0,2` —y también `0.2`—, el modelo queda en `"2"` en los dos casos, y **cada uno quedó fijado con su propio test** en
+`MoneyInput.spec.ts`, en el describe de las limitaciones conocidas.
+➕ **Pegarlo es una tercera conducta, y la buena**: `currency-format.ts` lo marca `rechazado`, el
+componente hace `preventDefault` y el campo queda como estaba — sin request y sin plata mal
+guardada. ⚠️ Vale **solo para el pegado que reemplaza el campo entero**: uno parcial ni se juzga
+y cae al camino de tecleo (`MoneyInput.vue:224`, `reemplazaTodo`). Misma
+familia que el ×10 del separador, que el propio `MoneyInput.vue:157-175` tiene anotado, con el
+mismo aviso: *un entero es válido en cualquier escala, así que ningún validador **de escala** lo puede ver*.
+📌 Con eso la motivación de esta entrada es más fuerte que *"no se puede escribir"*: hoy se
+escribe otra cosa y nadie se entera.
+
+**Los escalones, contestado en la misma ronda:** el **mínimo** de un tramo sigue midiendo en
+**moneda oficial** y el **importe** va en la moneda de la regla.
+
+⚠️ **Contra qué mide el mínimo lo decide el NIVEL de la regla, y los dos niveles miden NETO** —
+`neto: subtotalNeto` en `calculo-precios.engine.ts:1166` (línea) y `:1849` / `:1864` (venta)—. Lo que
+cambia entre ellos es el **alcance**: una regla de línea mide su propia línea (`neto unitario ×
+cantidad`, `:1100`) y una de venta la **suma de los netos** de todas (`:1798`), que **no** es el
+total cobrado. Así que *"+0,5 UF cuando supere $50.000"* mide 50.000 **de neto**: con IVA 19%,
+eso es 59.500 de total. Un recargo por tramos mide el neto **sin descontar** —el acumulado viaja
+aparte, y solo como base de los porcentajes (`:812-819`)—. Y el recargo plano en UF que motiva
+esta entrada es de **línea**, porque va asociado a ítems: lo hacen cumplir dos puertas
+(`items.service.ts` al asociar, `calculo-precios.service.ts` al resolver) y **no** un constraint
+de la base, según advierte el docblock de la segunda.
+
+⚠️ Lo que **no** queda expresable es la mitad simétrica —*"cuando supere 2 UF"*—: un mínimo
+medido en otra moneda. Si algún día hace falta, es otra decisión, no un olvido de ésta.
+
+⚠️ **Antes de tocarlo, lo que el sistema hace HOY, medido el 2026-09-09** — porque una revisión
+independiente ya lo leyó al revés una vez y la entrada que salió de eso decía lo contrario: el
+motor convierte el precio de la línea a moneda oficial **antes** de aplicar las reglas
+(`calculo-precios.service.ts:869`, o `:405` si la línea es una receta o un combo personalizado),
+así que un `-1000` sobre una langosta en dólares saca **mil pesos**, no mil dólares. El monto
+fijo hoy **ya está denominado**, en la oficial y de punta a punta: lo que la decisión cambia no
+es un descuido, es cuál de dos diseños coherentes queremos.
+
+📌 **Al cerrar el frente hay que borrar la afirmación en futuro de TODO lugar que la repita**, no
+solo de acá — el criterio es *"dice que el monto pasará a tener moneda propia"*, y se vuelven a
+encontrar con:
+
+```bash
+grep -rn "moneda propia\|moneda de la regla" docs frontend/app backend/src
+```
+
+Al escribir esto eran, además de esta entrada: `docs/patterns/frontend.md` (fila del monto fijo
+en § 8), `docs/agent/resueltos.md` (el cierre del vaciado por cambio de moneda) y el docblock de
+`monedaPendiente` en `frontend/app/pages/configuracion/items.vue` —el que enumera qué se vacía y
+qué frena el gesto—. ⚠️ **No está en `elegirMoneda`**, que es donde el reflejo lo busca porque es
+la función del gesto y el template la nombra: ahí no hay docblock, solo comentarios sueltos. Va el comando y no el número
+porque el número envejece solo, y porque cerrar en un consumidor no es cerrar.
+
+📌 **Este párrafo vence cuando el frente se construya, y se borra en el mismo commit** — salvo la
+refutación del `-1000`, que es lo único que sigue sirviendo después: es lo que evita que la
+próxima revisión vuelva a levantar el mismo falso positivo. El inventario de lo que hay que tocar
+vive en la tabla de abajo y **no se duplica acá**.
+
+**Lo que cuesta, contado antes de empezar:**
+
+| | |
+|---|---|
+| Esquema | `moneda_id` en `descuentos` y `recargos`. Sin datos productivos: entities + seeder + reset |
+| Escala | ⚠️ **Más grande que "tocar el decorador".** `EscalaMonedaPipe` resuelve **una** moneda por request —la oficial, desde el contexto— y la aplica a todo campo `@EsMontoCobrado`. Con el diseño nuevo, en el **mismo body** conviven `minimoMonto` (oficial) y `valorMonto` + cada `tramos[].valorMonto` (moneda de la regla): el pipe no sabe expresar escala **por campo**, ni tomarla del body en vez del contexto. Y es un borde compartido con muchos otros DTOs |
+| Motor — y **dónde** cuantiza | ⚠️ **La decisión de diseño del frente, y esta entrada no la toma.** Convertir **dentro** del motor le agrega una dependencia de tasas y lo deja de ser puro (`calculo-precios.engine.ts:1-14`: sin BD, sin Nest, único import `decimal.js`). Convertir **en el service** —donde vive hoy toda conversión, `calculo-precios.service.ts:1019`, alcanzada desde cinco sitios— le suma **un** redondeo nuevo: el `toDecimalPlaces(4)` de la conversión, con el `modo_redondeo` del tenant. ⚠️ Los otros dos de la cadena (`escalaCalculo` y el `q()` del minor unit) ya corren hoy sobre cualquier `monto_fijo` y correrían igual por el otro camino: el delta entre las dos opciones es **uno**, no tres. Pesa igual, porque `aplicarValor` aplica el `monto_fijo` **plano** (`engine.ts:493`) y entonces el número convertido **es** lo que el documento declara: es un sitio de cuantización de plata **nuevo**, encima de la invariante que se cerró el 2026-08-21 |
+| Pantallas | Selector de moneda en `descuentos.vue` y `recargos.vue`. ⚠️ Y la grilla **ya muestra el importe crudo, sin símbolo** (`descuentos.vue:876`, `recargos.vue:878`): con moneda propia ese `0,2` suelto pasa a ser ambiguo |
+| Congelado | Al **pedir** una línea, la cuenta congela sus reglas ya resueltas (`salones.service.ts:725`, dentro de `agregarLinea`) y `ReglaCongelada` es `ReglaResuelta` (`common/dto/reglas-congeladas.dto.ts:38`), cuyo `valorMonto` (`calculo-precios.engine.ts:31`) no lleva **moneda ni tasa**: un importe congelado en UF se convertiría recién al cobrar, con la tasa de ese momento. La línea ya congela su `tasaCambio` (`:717`), pero **no es el mismo gesto**: la línea tiene una sola moneda y las reglas son un array donde cada una —y cada tramo— podría traer la suya. ⚠️ Y `hashReglasCongeladas` decide si un pedido nuevo **se fusiona** con una línea existente (`salones.service.ts:793`): meter la tasa adentro de la regla cambia ese hash, así que el mismo ítem pedido antes y después de un cambio de tasa dejaría de fusionarse y saldrían dos líneas |
+
+📌 **Va solo y con el sistema quieto** — y el motivo es de **conducta**, no de qué archivo se
+toca: el frente **cambia lo que un `monto_fijo` cobra** y **abre un sitio de cuantización de
+plata nuevo**. Es el porqué que da `CLAUDE.md` para el motor y para lo fiscal: *el error no se ve
+al escribirlo, se ve en un documento ya emitido*. ⚠️ La justificación *"toca el motor de
+cálculo"* NO se sostiene sola: si la conversión se resuelve en el service, `calculo-precios.engine.ts`
+puede no cambiar ni una línea.
+
 ### La moneda de un ítem y la de sus partes: "se puede, pero sin mezclar" (owner, 2026-09-09)
 
 - [ ] **Enforcear "sin mezclar" en las cuatro superficies donde la moneda de un ítem se cruza
@@ -2866,25 +2956,6 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 ---
 
 ## Vigilancia — evaluado y descartado, no es trabajo
-
-- [ ] **Un descuento o recargo de monto fijo se aplicaría en la moneda del ítem — REFUTADO al
-  medirlo (2026-09-09)** (backend; la levantó la revisión independiente al cerrar el vaciado por
-  cambio de moneda) —
-  ⚠️ **Lo que la entrada afirmaba y ES FALSO:** que `descuentos.valor_monto` y
-  `recargos.valor_monto` son plata sin `moneda_id` que el motor resta o suma *tal cual* sobre el
-  precio de la línea, así que el mismo `-1000` descontaría mil pesos de un ítem en pesos y **mil
-  dólares** de uno en dólares.
-  ✅ **Lo medido:** el motor convierte el precio del ítem a moneda oficial **antes** de resolver
-  la línea — `calculo-precios.service.ts:405` llama a `convertirAMonedaOficial` (`:1019`) sobre
-  `precioBase + precioExtraTotal`, y recién después entran descuentos, recargos e impuestos. La
-  langosta de US$ 45 llega al motor como 42.750 pesos y el `-1000` le saca **mil pesos**. Los
-  montos fijos ya son plata en moneda oficial, de punta a punta.
-  📌 **El dato estaba escrito y nadie lo cruzó**: `recargo-tramo.entity.ts:49` dice, literal,
-  *"plata, en la escala de la moneda oficial"*, y el `@EsMontoCobrado` del DTO valida contra la
-  escala de la oficial. La entrada se escribió mirando el modelo —dos tablas sin columna de
-  moneda— sin abrir el orden en que el motor hace las cuentas.
-  **No hay nada que construir.** Se anota para que la próxima revisión que vea un `valor_monto`
-  sin `moneda_id` no lo vuelva a reportar como bug.
 
 - [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
   de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al

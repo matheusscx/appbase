@@ -73,7 +73,25 @@ Medida la condición, cae la rama de limpiar:
 | precio base, costo | `items` | sí |
 | precio de un extra de receta | `receta_extras_permitidos.precio_extra`, FK `receta_item_id` | sí — de esa receta y de ninguna otra |
 | precio de una opción de modificador | `item_grupo_modificador_opciones.precio_extra` | **no se puede saber desde la pantalla** — ver abajo |
-| monto fijo de un descuento o recargo asociado | `descuentos.valor_monto` / `recargos.valor_monto` | no — es del catálogo del tenant, y **no tiene moneda propia**; queda excluido de los dos ejes y con entrada propia en [`pendientes.md` § 4](pendientes.md) |
+| monto fijo de un descuento o recargo asociado | `descuentos.valor_monto` / `recargos.valor_monto` | no — es del catálogo del tenant, y **no está denominado en la moneda del ítem**: cambiarla no lo reinterpreta. Excluido de los dos ejes (ver la corrección de abajo) |
+
+⚠️ **Corregido el 2026-09-09: esa última fila decía otra cosa.** Decía que el monto fijo *"no
+tiene moneda propia"* y que por eso quedaba un frente propio a futuro — el que sostenía que un
+`-1000` le descuenta mil **dólares** a un ítem en dólares. ⚠️ Ese puntero mandaba a la § 4 de
+`pendientes.md` y la entrada nunca estuvo ahí: vivía en *Vigilancia*. Hoy el tema está en la § 3,
+por la decisión de abajo. La afirmación es falsa, y se midió por
+tres lados: el motor convierte el precio de la línea a moneda oficial **antes** de aplicar las
+reglas (`calculo-precios.service.ts:869`, o `:405` si la línea es receta/combo personalizado; la
+conversión vive en `:1019` y es el único `precio × tasa` del backend), el DTO marca `valorMonto`
+con `@EsMontoCobrado` —escala de la **oficial**— y las pantallas de `descuentos`/`recargos` lo
+tipean con `<MoneyInput oficial>`. **La conclusión de la fila no cambia** (no se vacía); cambia
+el porqué, y era el porqué el que mandaba a abrir un frente inexistente.
+
+➡️ **Y encima de eso hay una decisión del owner, del mismo día:** que ese monto pase a tener
+**moneda propia declarada en la regla**, convertida antes de aplicarse — lo que la
+medición contestó es qué hace el sistema hoy, no qué debe hacer. El frente está sin construir en
+[`pendientes.md`](pendientes.md) § 3, y la fila de arriba vale bajo los dos diseños: en ninguno
+de los dos el monto está denominado en la moneda del ítem.
 
 ⛔ **La opción de modificador quedó afuera, y eso lo decidió la misma regla del owner.** La
 primera versión la limpiaba, con el argumento de que el campo escribe

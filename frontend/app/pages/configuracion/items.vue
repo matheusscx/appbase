@@ -601,13 +601,15 @@ watch(() => form.value.unidadMedida, () => {
  * el default— está en `docs/agent/pendientes.md` § 2.
  *
  * ⛔ **Tampoco entran los descuentos y recargos de MONTO FIJO asociados al ítem**, y es una
- * decisión, no un olvido. Su `valor_monto` vive en el catálogo del tenant y **no tiene moneda
- * propia** (`descuentos`/`recargos` no tienen `moneda_id`), así que es "del descuento como
- * tal" por la regla del owner: no se vacía. Y tampoco frena el gesto, porque **el drawer no lo
- * muestra** —solo asocia el nombre de la regla—: no hay número en pantalla que la persona vea
- * cambiar de significado. ⚠️ Lo que sí cambia es lo que el motor le resta a la línea, y ese
- * problema es anterior a este gesto: un monto fijo sin moneda ya se aplica igual a un ítem en
- * pesos que a uno en dólares. Frente propio en `docs/agent/pendientes.md` § 4.
+ * decisión, no un olvido: **ese monto no está denominado en la moneda del ítem**, así que
+ * cambiarla no lo reinterpreta. Hoy es plata en la moneda **oficial** —el motor lo aplica
+ * después de convertir el precio de la línea (`calculo-precios.service.ts:869`, o `:405` si la
+ * línea es una receta o un combo personalizado), y su DTO lo marca `@EsMontoCobrado`—, y el
+ * owner decidió el 2026-09-09 que pase a tener **moneda propia declarada en la regla**, convertida
+ * antes de aplicarse (frente sin construir, `docs/agent/pendientes.md` § 3; **dónde** se hace esa
+ * conversión es parte de lo que ese frente tiene que decidir).
+ * **Bajo los dos diseños la conclusión es la misma**: no se vacía y no frena el gesto. El
+ * drawer, además, solo asocia el nombre de la regla.
  *
  * 📌 **Y un `0` no es plata que cambie de valor**: cero pesos son cero dólares. No se cuenta
  * ni se vacía —vaciarlo, además, dejaría a un extra gratis sin su `precioExtra`, que el

@@ -569,8 +569,8 @@ describe('MoneyInput', () => {
    * pasar TODO el describe de "tecleo real" de arriba, montado con `v-model` real.
    *
    * ✅ **El PEGADO ya no está acá: se atajó el 2026-09-01** y vive en el describe
-   * "pegado" de arriba. Estos tres siguen siendo del camino de TECLEO —`setValue`
-   * entra por donde entra una tecla, no por donde entra un pegado—, y ahí la
+   * "pegado" de arriba. **Los de este describe son todos del camino de TECLEO**
+   * —`setValue` entra por donde entra una tecla, no por donde entra un pegado—, y ahí la
    * información para distinguir `1.500` de `1000.5` no existe. Lo que cambió es
    * que ya no son *todo* lo que pasa: el mismo `1000.5` copiado de una planilla
    * hoy no se guarda.
@@ -590,6 +590,37 @@ describe('MoneyInput', () => {
       await tipear(input, ['1', '0', '0', '0', ',', '5'])
 
       expect(modelo.value).toBe('10005')
+    })
+
+    /**
+     * La cara del mismo mecanismo con parte entera CERO, que los dos casos de arriba
+     * no ejercitan: `1000,5 → 10005` no dice nada sobre qué pasa con el `0` a la
+     * izquierda, y el archivo tiene un test vecino sobre ese cero (tipear un `0`
+     * solo emite `0`). Vive acá porque es el caso motivador de una entrada del
+     * backlog —el recargo de `+0,2 UF`, `docs/agent/pendientes.md` § 3— que declara
+     * esta conducta medida: sin este test, la entrada envejece sin que nada la
+     * vuelva a medir.
+     */
+    it('documenta que en CLP teclear "0,2" deja 2 —dos pesos— y no 0,2', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
+
+      await tipear(input, ['0', ',', '2'])
+
+      expect(modelo.value).toBe('2')
+    })
+
+    // El punto va aparte y no como segundo `await` del test de arriba: son ramas
+    // DISTINTAS del normalizador de maska —el punto se borra como agrupador de miles,
+    // la coma se lee como decimal y se trunca—, y en un test que los mezcla la primera
+    // aserción que falla impide que la segunda corra: el otro separador queda sin
+    // medir justo cuando importa saberlo. Hoy los dos dan lo mismo; el split compra
+    // señal frente a un arreglo que trate a uno distinto del otro.
+    it('documenta que en CLP teclear "0.2" deja lo mismo: 2', async () => {
+      const { modelo, input } = montarConVModel({ monedaId: 'clp-1' })
+
+      await tipear(input, ['0', '.', '2'])
+
+      expect(modelo.value).toBe('2')
     })
 
     it('documenta que SETEAR el valor de una sola vez en CLP también da 10005', async () => {
