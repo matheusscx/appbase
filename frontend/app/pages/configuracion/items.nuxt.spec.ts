@@ -39,6 +39,8 @@ const ITEM_PRODUCTO = {
   // La API lo manda para todo ítem guardado (`COALESCE` de las tres extensiones), así que
   // el fixture sin él era una ficha que el backend nunca devuelve.
   costoActual: '400',
+  // `null`: un ítem que todavía no se usó, así que su unidad se puede cambiar.
+  unidadBloqueada: null as string | null,
 }
 
 const MONEDA_CLP = {
@@ -1642,6 +1644,146 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
 
     // El costo ya no está en pantalla: un aviso que lo nombre describe otro formulario.
     expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * Cambiar la UNIDAD de un ítem ya guardado (owner, 2026-09-11): se puede mientras el ítem no
+ * se usó —sin movimientos de stock ni recetas que lo referencien— y vacía el precio con la
+ * misma confirmación que la moneda, porque el precio es por esa unidad. Por qué no se puede lo
+ * dice el backend (`unidadBloqueada`), con el mismo motivo con el que el `PATCH` rechaza.
+ */
+describe('configuracion/items — cambiar la unidad de un ítem guardado', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    itemDetalleMock = ITEM_PRODUCTO
+  })
+
+  afterEach(() => {
+    itemDetalleMock = ITEM_PRODUCTO
+  })
+
+  function campo(wrapper: Awaited<ReturnType<typeof montar>>, prefijo: string) {
+    return wrapper.findAllComponents({ name: 'UFormField' })
+      .find(f => String(f.props('label') ?? '').startsWith(prefijo))
+  }
+
+  function selectorUnidad(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return campo(wrapper, 'Unidad de medida')!.findComponent({ name: 'USelectMenu' })
+  }
+
+  function precio(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return campo(wrapper, 'Precio base')!.findComponent({ name: 'MoneyInput' })
+  }
+
+  function aviso(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper.findAllComponents({ name: 'UAlert' })
+      .find(a => String(a.props('title') ?? '').startsWith('Cambiar la unidad'))
+  }
+
+  function accion(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
+    const panel = aviso(wrapper)
+    expect(panel, 'aviso de cambio de unidad').toBeTruthy()
+    const boton = panel!.findAllComponents({ name: 'UButton' })
+      .find(b => b.text().includes(texto))
+    expect(boton, `botón "${texto}" en el aviso`).toBeTruthy()
+    return boton!
+  }
+
+  async function abrirEditar() {
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    return wrapper
+  }
+
+  async function elegirUnidad(wrapper: Awaited<ReturnType<typeof montar>>, unidad: string) {
+    selectorUnidad(wrapper).vm.$emit('update:modelValue', unidad)
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  it('un ítem que no se usó deja cambiar la unidad al editar', async () => {
+    const wrapper = await abrirEditar()
+
+    expect(selectorUnidad(wrapper).props('disabled')).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('un ítem que ya se usó la bloquea, y dice por qué', async () => {
+    itemDetalleMock = {
+      ...ITEM_PRODUCTO,
+      unidadBloqueada: 'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
+    }
+    const wrapper = await abrirEditar()
+
+    expect(selectorUnidad(wrapper).props('disabled')).toBe(true)
+    expect(String(campo(wrapper, 'Unidad de medida')!.props('help') ?? ''))
+      .toContain('movimientos registrados')
+
+    wrapper.unmount()
+  })
+
+  it('con precio cargado, cambiar la unidad frena: pregunta y todavía no toca nada', async () => {
+    const wrapper = await abrirEditar()
+    // Ancla: sin el precio cargado, lo de abajo pasaría por el lado vacío.
+    expect(precio(wrapper).props('modelValue')).toBe('1500.0000')
+
+    await elegirUnidad(wrapper, 'kg')
+
+    expect(aviso(wrapper)?.props('description')).toContain('el precio base')
+    // El costo vigente no se vacía: lo convierte el backend al guardar, y el aviso lo dice.
+    expect(aviso(wrapper)?.props('description')).toContain('costo vigente')
+    expect(precio(wrapper).props('modelValue')).toBe('1500.0000')
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por unidad)')
+
+    wrapper.unmount()
+  })
+
+  it('confirmar cambia la unidad y vacía el precio', async () => {
+    const wrapper = await abrirEditar()
+
+    await elegirUnidad(wrapper, 'kg')
+    await accion(wrapper, 'Cambiar y vaciar').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por kg)')
+    expect(precio(wrapper).props('modelValue')).toBe('')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('dejarla como está no toca nada', async () => {
+    const wrapper = await abrirEditar()
+
+    await elegirUnidad(wrapper, 'kg')
+    await accion(wrapper, 'Dejar la unidad como está').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por unidad)')
+    expect(precio(wrapper).props('modelValue')).toBe('1500.0000')
+    expect(aviso(wrapper)).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  // Lo levantó la revisión independiente: un precio 0 no se reinterpreta —0 por unidad es 0
+  // por kilo—, así que no se pregunta y tampoco se vacía, igual que en el cambio de moneda.
+  // Vaciarlo mandaba `''` en el PATCH, y el backend lo rechazaba con un 400 de validación que
+  // no decía por qué.
+  it('con precio 0 no pregunta, y el 0 se queda', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, precioBase: '0.0000' }
+    const wrapper = await abrirEditar()
+
+    await elegirUnidad(wrapper, 'kg')
+
+    expect(aviso(wrapper)).toBeUndefined()
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por kg)')
+    expect(precio(wrapper).props('modelValue')).toBe('0.0000')
 
     wrapper.unmount()
   })

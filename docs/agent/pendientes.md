@@ -736,16 +736,16 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
      `DesfaseItemDto` no traía `monedaId`, así que con un tenant en pesos y una receta en
      dólares aplicar redondeaba `12,55` a `13` (3,6%). Ahora la fila trae la moneda del ítem y
      el panel prellena y formatea con ella → [`resueltos.md`](resueltos.md).
-     **(b) misma moneda, tasa por unidad chica** — un ítem en pesos costeado por gramo:
-     la sugerencia `8,5678`/g se aplica como `9`/g, un 5% (medido el 2026-08-28,
-     [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md)).
-     ⚠️ El `monedaId` del punto (a) **no arregla ésta**: la salida acá es la regla del owner
-     —expresar el ítem por kilo— y quien tome (a) tiene que no dar la bandeja por cerrada.
-  2. **A un ítem ya guardado con un precio fuera de la escala de su moneda no se le puede
-     volver a escribir ese precio.** Editarlo se puede; lo que no se puede es tipear un valor
-     sub-escala, y la salida que la regla propone —expresarlo por kilo— al editar tampoco está:
-     el selector de unidad se bloquea con `editingId`. Hoy hay 2 de 323 así en la base local,
-     los dos escritos por el e2e.
+     ✅ **(b) misma moneda, tasa por unidad chica — cerrada el 2026-09-11, con el punto 2.**
+     Un ítem en pesos costeado por gramo aplicaba la sugerencia `8,5678`/g como `9`/g, y la
+     salida de la regla del owner —expresarlo por kilo— no existía al editar. Ahora existe
+     para el ítem que no se usó → [`resueltos.md`](resueltos.md).
+  2. ✅ **El precio fuera de escala que no se podía reescribir — cerrada el 2026-09-11.** El
+     selector de unidad estaba bloqueado al editar, así que la salida de la regla no estaba.
+     Ahora un ítem que no se usó —sin movimientos de stock ni recetas que lo referencien— puede
+     cambiar su unidad, y el precio se vacía y se pide de nuevo. **El que ya se usó sigue sin
+     poder, por decisión del owner**: cambiarla reescribiría stock, kardex y recetas →
+     [`resueltos.md`](resueltos.md).
   3. **Vía nueva de 400 en un campo precargado, hoy sin puerta de entrada.** No aplica a los
      seis campos de `items.vue` (`@EsCosto()`, escala 4); aplicaría a la familia
      `MoneyInput oficial` contra un `@EsMontoCobrado()` **si** el tenant pudiera cambiar su

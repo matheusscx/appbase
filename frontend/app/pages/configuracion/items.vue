@@ -43,6 +43,8 @@ interface Item {
   stock: string | null
   costoActual: string | null
   unidadMedida: string | null
+  /** Por qué ya no se puede cambiar la unidad, o `null`. Solo lo manda `GET /items/:id`. */
+  unidadBloqueada?: string | null
   fechaElaboracion: string | null
   fechaVencimiento: string | null
   modoInventario: string | null  // 'cantidad' | 'lote' | 'serie'
@@ -525,6 +527,12 @@ function emptyForm() {
 
 const form = ref(emptyForm())
 const formCostoActual = ref<string | null>(null)
+/**
+ * Por qué la unidad de este ítem ya no se puede cambiar —movimientos de stock, o una receta
+ * que lo usa—, o `null` si se puede. Lo manda `GET /items/:id` con el mismo texto con el que el
+ * `PATCH` rechazaría el cambio (owner, 2026-09-11). Vacío en el alta.
+ */
+const formUnidadBloqueada = ref<string | null>(null)
 
 /**
  * Costo y precio base son dinero **por la unidad de medida del ítem**, así que la
@@ -551,8 +559,9 @@ const precioBaseLabel = computed(() => `Precio base${sufijoUnidad.value}`)
 // gramo—, o sea un número guardado que nadie tecleó y que el campo no puede ni
 // mostrar entero.
 watch(() => form.value.unidadMedida, () => {
-  // Al editar, el selector está bloqueado: el único cambio posible es el de
-  // `abrirEditar` cargando la ficha, y ahí lo que trae la API no se pisa.
+  // Solo en el alta. Al editar, el cambio de la persona pasa por `elegirUnidad`, que
+  // pregunta y vacía lo que corresponde; y el de `abrirEditar` cargando la ficha no
+  // tiene que pisar lo que trae la API.
   // ⚠️ Sin guard de `!anterior`, a diferencia del vecino del ajuste de stock: acá el
   // valor viejo NUNCA es vacío —`emptyForm()` arranca en `'unidad'` y `abrirEditar`
   // hace `?? 'unidad'`—, así que esa rama no existiría. Los tres disparos de
@@ -803,7 +812,65 @@ function aplicarCambioMoneda(monedaId: string) {
 // ya no están en pantalla. Muere con el cambio, como muere al cerrar el drawer.
 watch(() => form.value.tipo, () => {
   monedaPendiente.value = null
+  unidadPendiente.value = null
 })
+
+/**
+ * Cambiar la UNIDAD de un ítem ya guardado (owner, 2026-09-11). Se puede mientras el ítem no
+ * se usó —si no, el backend manda en `unidadBloqueada` por qué, y el selector se bloquea—, y
+ * reinterpreta el precio igual que la moneda: es dinero por esa unidad, así que se vacía y se
+ * pide de nuevo, con la misma confirmación. Mismo esquema que `elegirMoneda`: cuelga del gesto
+ * (`:model-value` + `@update:model-value`) y no de un `watch`, porque `abrirEditar` asigna la
+ * unidad al cargar la ficha y un watch no distingue esa carga de una elección.
+ *
+ * En el alta no pregunta: ahí lo tipeado es solo lo tipeado, y el `watch` de `unidadMedida` ya
+ * vacía costo y precio. Al ingrediente tampoco: su precio es siempre 0. El costo vigente de un
+ * ítem guardado no se vacía —no es un campo, sale de los movimientos—: lo reconvierte el
+ * backend al guardar, y el aviso lo dice.
+ */
+const unidadPendiente = ref<string | null>(null)
+
+const mensajeCambioUnidad = computed(() => {
+  const costo = esPlataQueSeReinterpreta(formCostoActual.value ?? '')
+    ? ' El costo vigente no se vacía: se convierte a la unidad nueva al guardar.'
+    : ''
+  return 'Se vacía el precio base: es por unidad de medida, y el de antes leído en la nueva '
+    + `sería otro número. Hay que volver a cargarlo.${costo}`
+})
+
+function elegirUnidad(unidad: string) {
+  // Cualquier elección resuelve el aviso anterior, como en `elegirMoneda`.
+  unidadPendiente.value = null
+  if (!unidad || unidad === form.value.unidadMedida) return
+  const preguntar = !!editingId.value
+    && form.value.tipo === 'producto'
+    && esPlataQueSeReinterpreta(form.value.precioBase)
+  if (!preguntar) {
+    aplicarCambioUnidad(unidad)
+    return
+  }
+  unidadPendiente.value = unidad
+}
+
+function confirmarCambioUnidad() {
+  const nueva = unidadPendiente.value
+  unidadPendiente.value = null
+  if (nueva) aplicarCambioUnidad(nueva)
+}
+
+function aplicarCambioUnidad(unidad: string) {
+  form.value.unidadMedida = unidad
+  // En el alta lo vacía el `watch` de `unidadMedida`; al editar, esto. Solo lo que se
+  // reinterpreta, como `aplicarCambioMoneda`: un 0 es 0 en cualquier unidad, y vaciarlo
+  // mandaba `''` en el PATCH, que el backend rechaza sin decir por qué.
+  if (
+    editingId.value
+    && form.value.tipo === 'producto'
+    && esPlataQueSeReinterpreta(form.value.precioBase)
+  ) {
+    form.value.precioBase = ''
+  }
+}
 
 /**
  * Frente de bodegas y traslados: el desglose por ubicación del item que se está
@@ -902,12 +969,14 @@ function resetDrawer() {
   form.value = emptyForm()
   form.value.monedaId = monedasOpts.value[0]?.value ?? ''
   formCostoActual.value = null
+  formUnidadBloqueada.value = null
   formDesglosePorUbicacion.value = []
   // Un cambio de moneda a medio confirmar muere con el formulario que lo pidió. Sin
   // esto sobrevive al cierre del drawer —también al que hace `guardar`—, y el aviso
   // reaparece sobre el ítem siguiente: confirmarlo ahí le aplica una moneda que nadie
-  // eligió para él y le borra la plata recién tipeada.
+  // eligió para él y le borra la plata recién tipeada. Lo mismo el de la unidad.
   monedaPendiente.value = null
+  unidadPendiente.value = null
 }
 
 watch(drawerOpen, (open) => {
@@ -1357,6 +1426,7 @@ async function abrirEditar(item: Item) {
       descuentosIds: detalle.descuentosIds ?? [],
     }
     formCostoActual.value = detalle.costoActual ?? null
+    formUnidadBloqueada.value = detalle.unidadBloqueada ?? null
     formDesglosePorUbicacion.value = detalle.desglosePorUbicacion ?? []
     drawerOpen.value = true
   } catch {
@@ -2095,15 +2165,44 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <div class="space-y-4">
               <p class="text-sm font-medium text-muted">Datos de producto</p>
               <div class="grid grid-cols-2 gap-4">
-                <UFormField label="Unidad de medida">
+                <UFormField
+                  label="Unidad de medida"
+                  :help="editingId ? (formUnidadBloqueada ?? undefined) : undefined"
+                >
+                  <!-- `:model-value` y no `v-model`: solo el gesto de la persona pregunta y
+                       vacía el precio, no la carga de la ficha. Ver `elegirUnidad`. -->
                   <USelectMenu
-                    v-model="form.unidadMedida"
+                    :model-value="form.unidadMedida"
                     :items="unidadesMedidaOpts"
                     value-key="value"
-                    :disabled="!!editingId"
+                    :disabled="!!editingId && !!formUnidadBloqueada"
                     class="w-full"
+                    @update:model-value="elegirUnidad"
                   />
                 </UFormField>
+                <UAlert
+                  v-if="unidadPendiente"
+                  color="warning"
+                  variant="subtle"
+                  icon="i-lucide-triangle-alert"
+                  title="Cambiar la unidad de medida"
+                  :description="mensajeCambioUnidad"
+                  class="col-span-2"
+                >
+                  <template #actions>
+                    <UButton
+                      color="neutral"
+                      variant="ghost"
+                      size="xs"
+                      @click="() => { unidadPendiente = null }"
+                    >Dejar la unidad como está</UButton>
+                    <UButton
+                      color="warning"
+                      size="xs"
+                      @click="confirmarCambioUnidad"
+                    >Cambiar y vaciar el precio</UButton>
+                  </template>
+                </UAlert>
                 <UFormField label="Modo inventario">
                   <USelectMenu
                     v-model="form.modoInventario"
@@ -2262,13 +2361,19 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <div class="space-y-4">
               <p class="text-sm font-medium text-muted">Datos de ingrediente</p>
               <div class="grid grid-cols-2 gap-4">
-                <UFormField label="Unidad de medida">
+                <UFormField
+                  label="Unidad de medida"
+                  :help="editingId ? (formUnidadBloqueada ?? undefined) : undefined"
+                >
+                  <!-- Del gesto, como el del producto. El ingrediente no tiene precio que
+                       vaciar, así que `elegirUnidad` no pregunta. -->
                   <USelectMenu
-                    v-model="form.unidadMedida"
+                    :model-value="form.unidadMedida"
                     :items="unidadesMedidaOpts"
                     value-key="value"
-                    :disabled="!!editingId"
+                    :disabled="!!editingId && !!formUnidadBloqueada"
                     class="w-full"
+                    @update:model-value="elegirUnidad"
                   />
                 </UFormField>
                 <UFormField v-if="!editingId" :label="costoLabel">

@@ -201,6 +201,21 @@ interface CatalogoGrupos {
   >;
 }
 
+/**
+ * Los dos motivos por los que un producto o ingrediente ya no puede cambiar de unidad. Viven
+ * acá y no en línea porque los dicen dos lados: `update` al rechazar el cambio, y `findOne`
+ * para que la pantalla bloquee el selector antes de que la persona lo intente.
+ */
+const MENSAJE_UNIDAD_CON_MOVIMIENTOS =
+  'No se puede cambiar la unidad de medida de un producto con movimientos registrados';
+
+function mensajeUnidadReferenciada(origen: string): string {
+  return (
+    `No se puede cambiar la unidad de medida: el producto ya está referenciado por una ${origen}, ` +
+    'con su cantidad fijada en la unidad actual. Quitá esa referencia primero.'
+  );
+}
+
 export interface DesfaseInsumoDto {
   itemId: string;
   nombre: string;
@@ -1283,8 +1298,16 @@ export class ItemsService {
       }));
     }
 
+    // Solo producto e ingrediente tienen unidad de medida. Con esto la pantalla bloquea
+    // el selector mostrando el motivo, en vez de dejar que el `PATCH` lo rechace después.
+    const unidadBloqueada =
+      rows[0].tipo === 'producto' || rows[0].tipo === 'ingrediente'
+        ? await this.motivoUnidadBloqueada(this.db, tenantId, itemId)
+        : null;
+
     return {
       ...this.mapRow(rows[0]),
+      unidadBloqueada,
       impuestosIds: impuestosRows.map((r) => r.impuesto_id),
       recargosIds: recargosRows.map((r) => r.recargo_id),
       descuentosIds: descuentosRows.map((r) => r.descuento_id),
@@ -1298,6 +1321,92 @@ export class ItemsService {
         (grupos.length > 0 ||
           componentes.some((c) => (c.grupos?.length ?? 0) > 0)),
     };
+  }
+
+  /**
+   * Por qué este producto o ingrediente ya no puede cambiar de unidad, o `null` si puede.
+   * Es la misma pregunta que hace `update` antes de rechazar el cambio, en el mismo orden y
+   * con el mismo texto, así que la pantalla y la API no pueden decir cosas distintas.
+   */
+  private async motivoUnidadBloqueada(
+    runner: EntityManager | Db,
+    tenantId: string,
+    itemId: string,
+  ): Promise<string | null> {
+    if (await this.tieneMovimientosDeStock(runner, itemId)) {
+      return MENSAJE_UNIDAD_CON_MOVIMIENTOS;
+    }
+    const origen = await this.referenciaConUnidad(runner, tenantId, itemId);
+    return origen ? mensajeUnidadReferenciada(origen) : null;
+  }
+
+  /**
+   * Si el ítem ya movió stock. Un ajuste_costo (tipo='ajuste') no mueve stock, solo corrige
+   * el costo: no cuenta para bloquear el modo ni la unidad. Sin este filtro, un ajuste hecho
+   * sobre stock 0 (antes de recibir mercadería) congelaría los dos para siempre sin que nunca
+   * hubiera existido un movimiento de stock real.
+   */
+  private async tieneMovimientosDeStock(
+    runner: EntityManager | Db,
+    itemId: string,
+  ): Promise<boolean> {
+    const movRows: { cnt: string }[] = await runner.query(
+      `SELECT COUNT(*) AS cnt FROM movimientos_inventario
+       WHERE item_id = $1 AND eliminado_el IS NULL AND tipo <> 'ajuste'`,
+      [itemId],
+    );
+    return parseInt(movRows[0].cnt) > 0;
+  }
+
+  /**
+   * Qué otra fila referencia este ítem CON una unidad fijada, o `null`. Cambiarle la unidad
+   * rompe esa fila: la receta dice "200 g de queso" y el queso pasa a medirse en litros, así
+   * que `convertirUnidad` deja de poder resolverla. El guard de movimientos no lo cubre — un
+   * ingrediente sin costo ni movimientos pasaba de kg a l sin fricción.
+   *
+   * Son CUATRO tablas, no las dos que se ven a simple vista: además de las recetas y las
+   * opciones de grupo están los extras permitidos y los overrides por ítem↔grupo. Se buscó por
+   * conducta ("¿qué tabla fija una unidad contra un item_id?") y no por el nombre de las dos
+   * conocidas. Una sola query con `UNION ALL`, no una por tabla.
+   *
+   * Bloquea ante CUALQUIER referencia, aunque la unidad nueva sea convertible (kg → g): es lo
+   * que decidió el owner, y la alternativa —permitir solo los cambios compatibles— exige
+   * razonar la magnitud por fila y deja al usuario sin señal de qué recetas dependen de esto.
+   * El camino es desarmar la receta primero.
+   */
+  private async referenciaConUnidad(
+    runner: EntityManager | Db,
+    tenantId: string,
+    itemId: string,
+  ): Promise<string | null> {
+    const refRows: { origen: string }[] = await runner.query(
+      `SELECT 'receta' AS origen
+         FROM receta_ingredientes
+        WHERE ingrediente_item_id = $1 AND tenant_id = $2
+          AND eliminado_el IS NULL
+       UNION ALL
+       SELECT 'extra permitido de una receta'
+         FROM receta_extras_permitidos
+        WHERE ingrediente_item_id = $1 AND tenant_id = $2
+          AND eliminado_el IS NULL
+       UNION ALL
+       SELECT 'opción de un grupo de modificadores'
+         FROM grupo_modificador_opciones
+        WHERE item_id = $1 AND tenant_id = $2
+          AND unidad_codigo IS NOT NULL AND eliminado_el IS NULL
+       UNION ALL
+       SELECT 'override de una opción de grupo'
+         FROM item_grupo_modificador_opciones igo
+         JOIN grupo_modificador_opciones go
+           ON go.grupo_opcion_id = igo.grupo_opcion_id
+          AND go.eliminado_el IS NULL
+        WHERE go.item_id = $1 AND igo.tenant_id = $2
+          AND go.tenant_id = $2
+          AND igo.unidad_codigo IS NOT NULL AND igo.eliminado_el IS NULL
+       LIMIT 1`,
+      [itemId, tenantId],
+    );
+    return refRows[0]?.origen ?? null;
   }
 
   async create(tenantId: string, usuarioId: string, dto: CreateItemDto) {
@@ -1928,74 +2037,34 @@ export class ItemsService {
             prodRows[0].unidad_medida !== dto.unidadMedida;
 
           if (modoCambia || unidadCambia) {
-            // Un ajuste_costo (tipo='ajuste') no mueve stock, solo corrige el
-            // costo: no cuenta para bloquear el modo/unidad. Sin este filtro,
-            // un ajuste hecho sobre stock 0 (antes de recibir mercadería)
-            // congelaría ambos para siempre sin que nunca hubiera existido un
-            // movimiento de stock real.
-            const movRows: { cnt: string }[] = await manager.query(
-              `SELECT COUNT(*) AS cnt FROM movimientos_inventario
-               WHERE item_id = $1 AND eliminado_el IS NULL AND tipo <> 'ajuste'`,
-              [itemId],
-            );
-            if (parseInt(movRows[0].cnt) > 0) {
+            if (await this.tieneMovimientosDeStock(manager, itemId)) {
               throw new BadRequestException(
                 modoCambia
                   ? 'No se puede cambiar el modo de inventario de un producto con movimientos registrados'
-                  : 'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
+                  : MENSAJE_UNIDAD_CON_MOVIMIENTOS,
               );
             }
           }
 
-          // Cambiar la unidad de un ítem que otra fila ya referencia CON una
-          // unidad fijada rompe esa fila: la receta dice "200 g de queso" y el
-          // queso pasa a medirse en litros, así que `convertirUnidad` deja de
-          // poder resolverla. El guard de movimientos no lo cubre — un
-          // ingrediente sin costo ni movimientos pasaba de kg a l sin fricción.
-          //
-          // Son CUATRO tablas, no las dos que se ven a simple vista: además de
-          // las recetas y las opciones de grupo están los extras permitidos y
-          // los overrides por ítem↔grupo. Se buscó por conducta ("¿qué tabla
-          // fija una unidad contra un item_id?") y no por el nombre de las dos
-          // conocidas. Una sola query con `UNION ALL`, no una por tabla.
-          //
-          // Bloquea ante CUALQUIER referencia, aunque la unidad nueva sea
-          // convertible (kg → g): es lo que decidió el owner, y la alternativa
-          // —permitir solo los cambios compatibles— exige razonar la magnitud
-          // por fila y deja al usuario sin señal de qué recetas dependen de esto.
-          // El camino es desarmar la receta primero.
           if (unidadCambia) {
-            const refRows: { origen: string }[] = await manager.query(
-              `SELECT 'receta' AS origen
-                 FROM receta_ingredientes
-                WHERE ingrediente_item_id = $1 AND tenant_id = $2
-                  AND eliminado_el IS NULL
-               UNION ALL
-               SELECT 'extra permitido de una receta'
-                 FROM receta_extras_permitidos
-                WHERE ingrediente_item_id = $1 AND tenant_id = $2
-                  AND eliminado_el IS NULL
-               UNION ALL
-               SELECT 'opción de un grupo de modificadores'
-                 FROM grupo_modificador_opciones
-                WHERE item_id = $1 AND tenant_id = $2
-                  AND unidad_codigo IS NOT NULL AND eliminado_el IS NULL
-               UNION ALL
-               SELECT 'override de una opción de grupo'
-                 FROM item_grupo_modificador_opciones igo
-                 JOIN grupo_modificador_opciones go
-                   ON go.grupo_opcion_id = igo.grupo_opcion_id
-                  AND go.eliminado_el IS NULL
-                WHERE go.item_id = $1 AND igo.tenant_id = $2
-                  AND go.tenant_id = $2
-                  AND igo.unidad_codigo IS NOT NULL AND igo.eliminado_el IS NULL
-               LIMIT 1`,
-              [itemId, tenantId],
+            const origen = await this.referenciaConUnidad(
+              manager,
+              tenantId,
+              itemId,
             );
-            if (refRows.length > 0) {
+            if (origen) {
+              throw new BadRequestException(mensajeUnidadReferenciada(origen));
+            }
+            // El precio de un producto es por su unidad: `1000` por kg leído por
+            // gramo es otro número. La pantalla lo vacía y lo pide de nuevo; acá se
+            // exige que venga en el mismo pedido (owner, 2026-09-11 — la misma regla
+            // que para la moneda). Después de las guardas de uso: si el ítem no
+            // puede cambiar de unidad, el motivo es ése y no el precio. Al
+            // ingrediente no se le pide: su precio es siempre 0.
+            if (tipo === 'producto' && dto.precioBase === undefined) {
               throw new BadRequestException(
-                `No se puede cambiar la unidad de medida: el producto ya está referenciado por una ${refRows[0].origen}, ` +
-                  'con su cantidad fijada en la unidad actual. Quitá esa referencia primero.',
+                'Cambiar la unidad de medida de un producto exige mandar el precio nuevo en el mismo pedido: ' +
+                  'el precio es por esa unidad, y el de antes leído en la nueva sería otro número.',
               );
             }
           }

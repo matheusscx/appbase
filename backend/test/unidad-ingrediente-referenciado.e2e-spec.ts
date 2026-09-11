@@ -142,6 +142,96 @@ describe('Unidad de un ingrediente referenciado (e2e)', () => {
     expect(res.status).toBe(400);
   });
 
+  // Lo que el PATCH rechaza, `GET /items/:id` lo informa ANTES y con el mismo texto: la
+  // pantalla bloquea el selector de unidad y muestra por qué (owner, 2026-09-11). Sale de
+  // la misma función que la guarda, así que no pueden decir cosas distintas.
+  it('GET /items/:id dice por qué la unidad no se puede cambiar, o null si se puede', async () => {
+    const libre = await request(app.getHttpServer())
+      .get(`/api/items/${ingredienteLibreId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(libre.status).toBe(200);
+    expect(
+      (libre.body as { unidadBloqueada: string | null }).unidadBloqueada,
+    ).toBeNull();
+
+    const enReceta = await request(app.getHttpServer())
+      .get(`/api/items/${ingredienteEnRecetaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(enReceta.status).toBe(200);
+    expect(
+      (enReceta.body as { unidadBloqueada: string | null }).unidadBloqueada,
+    ).toContain('receta');
+  });
+
+  it('un producto con movimientos de stock también lo informa', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto con stock E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'kg',
+        modoInventario: 'cantidad',
+        stock: '5',
+      });
+    expect(res.status).toBe(201);
+    const productoId = (res.body as ItemResponse).id;
+
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/items/${productoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detalle.status).toBe(200);
+    expect(
+      (detalle.body as { unidadBloqueada: string | null }).unidadBloqueada,
+    ).toContain('movimientos');
+  });
+
+  // El precio de un producto es por su unidad: `1000` por kg leído por gramo es otro
+  // número. La API rechaza el cambio si no viene el precio nuevo (owner, 2026-09-11,
+  // la misma regla que para la moneda). Al ingrediente no se le pide: el suyo es 0, y
+  // el primer test de este archivo es el control de que sigue cambiando sin precio.
+  it('un PRODUCTO no cambia de unidad sin el precio nuevo, y con él sí', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto cambia unidad E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'kg',
+        modoInventario: 'cantidad',
+        stock: '0',
+      });
+    expect(res.status).toBe(201);
+    const productoId = (res.body as ItemResponse).id;
+
+    const sinPrecio = await request(app.getHttpServer())
+      .patch(`/api/items/${productoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ unidadMedida: 'g' });
+    expect(sinPrecio.status).toBe(400);
+    expect((sinPrecio.body as { message: string }).message).toContain(
+      'precio nuevo',
+    );
+
+    const conPrecio = await request(app.getHttpServer())
+      .patch(`/api/items/${productoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ unidadMedida: 'g', precioBase: '1' });
+    expect(conPrecio.status).toBe(200);
+
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/items/${productoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detalle.status).toBe(200);
+    const body = detalle.body as { unidadMedida: string; precioBase: string };
+    expect(body.unidadMedida).toBe('g');
+    expect(body.precioBase).toBe('1.0000');
+  });
+
   /**
    * El valor del fix está en que son CUATRO tablas y no la obvia: si el guard
    * solo mirara `receta_ingredientes`, los otros tres casos de arriba pasarían

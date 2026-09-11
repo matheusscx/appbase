@@ -23,6 +23,71 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cambiar la unidad de un ítem guardado: se puede si no se usó, y vacía el precio (cerrada 2026-09-11)
+
+Sale de [`pendientes.md` § 2](pendientes.md), de la entrada *"Tres formas en que la pantalla
+puede quedarse con plata que la moneda no expresa"*: se cierran sus puntos 1(b) y 2. El texto
+de los dos, verbatim:
+
+> **(b) misma moneda, tasa por unidad chica** — un ítem en pesos costeado por gramo:
+> la sugerencia `8,5678`/g se aplica como `9`/g, un 5% (medido el 2026-08-28,
+> [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md)).
+> ⚠️ El `monedaId` del punto (a) **no arregla ésta**: la salida acá es la regla del owner
+> —expresar el ítem por kilo— y quien tome (a) tiene que no dar la bandeja por cerrada.
+
+> **A un ítem ya guardado con un precio fuera de la escala de su moneda no se le puede
+> volver a escribir ese precio.** Editarlo se puede; lo que no se puede es tipear un valor
+> sub-escala, y la salida que la regla propone —expresarlo por kilo— al editar tampoco está:
+> el selector de unidad se bloquea con `editingId`. Hoy hay 2 de 323 así en la base local,
+> los dos escritos por el e2e.
+
+**Las decisiones del owner (2026-09-11).** Se le planteó separando la unidad base del ítem
+—en la que viven stock, kardex, costo y recetas— de la unidad en la que se tipea un monto, y
+mostrando que el backend ya permitía cambiar la base con dos guardas mientras la pantalla la
+bloqueaba siempre. Decidió: **se puede mientras el ítem no se usó**; al cambiarla **se limpia
+el precio** —*"ya tenemos algo así con la moneda"*—; y por la API, **un producto que cambia de
+unidad sin mandar el precio nuevo se rechaza**, la misma regla que ya tenía la moneda. El ítem
+que ya se usó sigue sin poder: cambiarle la unidad reescribiría stock, kardex y recetas, y sin
+datos productivos no se justifica.
+
+**Lo que se hizo.**
+
+- **Backend.** Las dos guardas del `PATCH` —movimientos de stock y referencias con unidad
+  fijada— pasaron a funciones propias (`tieneMovimientosDeStock`, `referenciaConUnidad`), con
+  las mismas consultas y en el mismo orden, y `motivoUnidadBloqueada` las junta. `update` sigue
+  rechazando con ellas y, **después**, rechaza el cambio de un producto sin `precioBase`: si el
+  ítem no puede cambiar de unidad, el motivo es ése y no el precio. Al ingrediente no se le
+  pide: su precio es siempre 0. `GET /items/:id` informa `unidadBloqueada` con el mismo texto.
+- **Pantalla.** El selector de unidad se habilita al editar mientras `unidadBloqueada` sea
+  `null`, y si no queda bloqueado con el motivo como ayuda. Cuelga del gesto, como la moneda. En
+  un producto con precio, cambiarla pide confirmación y vacía el precio; el costo vigente no se
+  vacía —no es un campo— y el aviso dice que el backend lo convierte al guardar. El alta sigue
+  como estaba, y el ingrediente no pregunta.
+
+**Una afirmación mía que salió falsa en el camino:** le dije al owner que la pantalla no
+mandaba la unidad al editar un producto. La manda siempre; leí mal dónde cerraba un `if`.
+
+**Lo que lo fija.** Todo se vio en rojo contra el código anterior: en el spec de `items`, cinco
+casos —selector habilitado sin motivo, bloqueado con el motivo, frenar, confirmar, dejarla como
+está—; en el unitario, el cambio de un producto sin precio (se resolvía en vez de rechazar);
+en el e2e de unidades, el motivo en `GET` para el ingrediente libre, el referenciado y el
+producto con stock (llegaba `undefined`) y el `PATCH` sin precio (daba `200`). El primer test de
+ese e2e —un ingrediente que cambia de unidad sin precio— es el control de que al ingrediente no
+se le pide. Cuatro tests existentes cambiaban la unidad de un producto sin precio y ahora lo
+mandan: el e2e de `costeo-cpp` del producto donado y tres unitarios de la reconversión del costo.
+
+**Y un bug que levantó la revisión independiente.** La primera versión de `aplicarCambioUnidad`
+vaciaba el precio de un producto **siempre**, mientras `elegirUnidad` solo preguntaba si el precio
+era distinto de cero. Con un producto a precio 0 —la mercadería donada, que el backend acepta—
+el cambio se aplicaba sin aviso y dejaba el precio en `''`: el `PATCH` lo mandaba así y el
+backend lo rechazaba con un 400 de validación que no decía por qué. El cambio de moneda no tenía
+ese problema, porque solo vacía lo que `esPlataQueSeReinterpreta` marca, y un 0 no se marca: 0
+por unidad es 0 por kilo. Se arregló llevando la misma guarda, y lo fija un sexto caso en el spec
+—*"con precio 0 no pregunta, y el 0 se queda"*—, visto en rojo antes del arreglo. Ningún test lo
+cubría porque el fixture siempre tenía precio 1500.
+
+---
+
 ## La bandeja de desfases prellena el precio en la moneda del ítem (cerrada 2026-09-11)
 
 Sale de [`pendientes.md` § 2](pendientes.md), de la entrada *"Tres formas en que la pantalla

@@ -230,6 +230,20 @@ if (dto.unidadMedida !== undefined) {
     directo: `costo_actual` solo se escribe desde el choke point (ADR-016, con test de
     invariante). Como efecto deseado, el cambio queda auditado en el kardex como un
     `ajuste_costo` con su `costo_anterior`.
+- **Si cambia la unidad de un PRODUCTO, el precio nuevo tiene que venir en el mismo pedido**
+  → `BadRequest` si no viene (owner, 2026-09-11 — la misma regla que para la moneda).
+  - Razón: `precio_base` también es por `unidad_medida`, y al revés que el costo **no se
+    reconvierte**: `1500` por kilo son `1,5` por gramo, que una moneda sin decimales no puede
+    expresar. La pantalla lo vacía y lo pide de nuevo; la API exige que venga.
+  - Va **después** de las dos guardas de uso: si el ítem no puede cambiar de unidad, el motivo
+    es ése y no el precio. Al ingrediente no se le pide: su precio es siempre 0.
+- **`GET /items/:id` informa `unidadBloqueada`** para producto e ingrediente: el motivo por el
+  que el cambio se rechazaría —movimientos o una referencia con unidad fijada—, con el mismo
+  texto, o `null` si se puede. Sale de la misma función que las guardas
+  (`motivoUnidadBloqueada`), así que la pantalla y la API no pueden decir cosas distintas.
+  - En el drawer de `configuracion/items.vue`, el selector de unidad se habilita al editar
+    mientras sea `null`; si no, queda bloqueado con el motivo como ayuda. En un producto con
+    precio, cambiarla pide confirmación y vacía el precio, con el mismo esquema que la moneda.
 
 ### Conversión en el Ajuste de Stock
 

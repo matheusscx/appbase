@@ -3569,12 +3569,39 @@ describe('ItemsService', () => {
       ).resolves.toMatchObject({ id: 'item-uuid', unidadMedida: 'kg' });
     });
 
+    // El precio de un producto es por su unidad: `1000` por kg leído por gramo es otro
+    // número. La pantalla lo vacía y lo pide de nuevo; la API rechaza el cambio si no
+    // viene el precio nuevo en el mismo pedido (owner, 2026-09-11 — la misma regla que
+    // para la moneda). Va DESPUÉS de las guardas de uso: si el ítem no puede cambiar de
+    // unidad, el motivo es ése, no el precio.
+    it('rechaza cambiar la unidad de un PRODUCTO sin mandar el precio nuevo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        .mockResolvedValueOnce([
+          {
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: null,
+          },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }]) // sin movimientos
+        .mockResolvedValueOnce([]); // sin referencias
+
+      await expect(
+        service.update('tenant-uuid', USUARIO, 'item-uuid', {
+          unidadMedida: 'g',
+        }),
+      ).rejects.toThrow('exige mandar el precio nuevo');
+    });
+
     // Sin esto, un producto creado con stock 0 (que no genera movimiento, así
     // que el guard de arriba no dispara) pasaba de kg a g conservando 5000 de
     // costo: el mismo número, interpretado por gramo. Error de 1000×.
     it('reconvierte el costo al cambiar de unidad, por el choke point', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        // El `UPDATE items` que escribe el precio va antes del bloque de producto.
+        .mockResolvedValueOnce([{ item_id: 'item-uuid' }])
         .mockResolvedValueOnce([
           {
             modo_inventario: 'cantidad',
@@ -3589,8 +3616,10 @@ describe('ItemsService', () => {
         movimientoId: 'mov-1',
       });
 
+      // Con el precio nuevo: cambiar la unidad de un producto sin él se rechaza.
       await service.update('tenant-uuid', USUARIO, 'item-uuid', {
         unidadMedida: 'g',
+        precioBase: '5',
       });
 
       // El costo NO se escribe con un UPDATE directo: va por registrarMovimiento
@@ -3620,6 +3649,8 @@ describe('ItemsService', () => {
       // —medido: con el guard por motivo puesto, este test sigue verde—.
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }])
+        // El `UPDATE items` que escribe el precio va antes del bloque de producto.
+        .mockResolvedValueOnce([{ item_id: 'item-uuid' }])
         .mockResolvedValueOnce([
           {
             modo_inventario: 'cantidad',
@@ -3634,8 +3665,10 @@ describe('ItemsService', () => {
         movimientoId: 'mov-donado',
       });
 
+      // Con el precio nuevo: cambiar la unidad de un producto sin él se rechaza.
       await service.update('tenant-uuid', USUARIO, 'item-uuid', {
         unidadMedida: 'g',
+        precioBase: '1',
       });
 
       // 0 por kg sigue siendo 0 por gramo: se reconvierte igual que cualquier
@@ -3678,6 +3711,8 @@ describe('ItemsService', () => {
     it('no toca el costo si la unidad cambia pero no hay costo vigente', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }])
+        // El `UPDATE items` que escribe el precio va antes del bloque de producto.
+        .mockResolvedValueOnce([{ item_id: 'item-uuid' }])
         .mockResolvedValueOnce([
           {
             modo_inventario: 'cantidad',
@@ -3688,8 +3723,10 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ cnt: '0' }])
         .mockResolvedValue([]);
 
+      // Con el precio nuevo: cambiar la unidad de un producto sin él se rechaza.
       await service.update('tenant-uuid', USUARIO, 'item-uuid', {
         unidadMedida: 'g',
+        precioBase: '1',
       });
 
       expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();

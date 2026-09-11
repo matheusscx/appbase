@@ -662,7 +662,9 @@ describe('Costeo CPP (e2e)', () => {
     await request(app.getHttpServer())
       .patch(`/api/items/${donadoId}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ unidadMedida: 'g', modoInventario: 'cantidad' })
+      // Con el precio nuevo, por gramo: cambiar la unidad de un producto sin él se
+      // rechaza, porque el precio es por esa unidad (owner, 2026-09-11).
+      .send({ unidadMedida: 'g', modoInventario: 'cantidad', precioBase: '1' })
       .expect(200);
 
     const { body: detalle } = await request(app.getHttpServer())

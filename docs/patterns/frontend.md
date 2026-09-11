@@ -564,6 +564,11 @@ Reglas:
   `items-stock-ubicacion.nuxt.spec.ts`. La etiqueta de esos campos nombra la unidad
   —"Costo (por kg)"—: desde que la escala la da la moneda, la unidad es lo único que fija
   la magnitud del número.
+  📌 **Y desde el 2026-09-11 también al editar** un ítem que todavía no se usó (el backend
+  dice en `unidadBloqueada` si ya se usó): en un producto con precio, cambiar la unidad pide
+  confirmación y vacía el precio. Es el esquema de la moneda y no el del alta —cuelga del
+  gesto (`:model-value` + `@update:model-value`), no de un `watch`—, porque al editar la ficha
+  se carga con la unidad del ítem y un `watch` no distingue esa carga de una elección.
   📌 **Cambiar de PRODUCTO limpia igual, y por su cuenta** (owner, 2026-08-29). El número
   tipeado pertenece al producto tanto como a la unidad, y encima el producto puede traer
   **otra moneda**: ahí no queda un número viejo, queda el mismo número re-enmascarado bajo la
