@@ -804,6 +804,7 @@ export class GruposModificadoresService {
       cantidad_default: string | null;
       unidad_codigo: string | null;
       precio_extra: string;
+      precio_extra_default: string;
       orden: number;
     }[] = await this.db.query(
       `SELECT igm.item_grupo_id, o.grupo_opcion_id, i.nombre AS item_nombre,
@@ -811,6 +812,7 @@ export class GruposModificadoresService {
               o.cantidad AS cantidad_default,
               COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
               COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
+              o.precio_extra AS precio_extra_default,
               o.orden
        FROM item_grupos_modificadores igm
        JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
@@ -849,6 +851,8 @@ export class GruposModificadoresService {
         cantidadDefault: r.cantidad_default,
         unidadCodigo: r.unidad_codigo,
         precioExtra: r.precio_extra,
+        // Gemelo de `cantidadDefault`: el del catálogo, sin el override de esta receta.
+        precioExtraDefault: r.precio_extra_default,
         esPendiente: r.cantidad_efectiva == null,
       })),
     }));

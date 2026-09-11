@@ -35,6 +35,8 @@ interface ItemGrupoOpcionDetalle {
   cantidad: string | null;
   cantidadDefault: string | null;
   unidadCodigo: string | null;
+  precioExtra: string;
+  precioExtraDefault: string;
   esPendiente: boolean;
 }
 interface ItemGrupoDetalle {
@@ -449,5 +451,81 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     // Y la de al lado, creada en pesos, sigue en pesos: el campo es por fila.
     const enClp = filas.find((f) => f.itemId === recetaClasicaId);
     expect(enClp?.monedaId).toBe(CLP_MONEDA_ID);
+  });
+
+  it('10. el precio de una opción viaja con su default al lado: override y heredado se distinguen', async () => {
+    // Override de PRECIO, no de cantidad: el grupo creó la Carne con
+    // `precioExtra: '0'` (test 2) y esta receta la cobra 700. Con el default en
+    // 0 y el override en 700, leer la columna equivocada no puede pasar.
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa Precio OV E2E ${Date.now()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panBaseId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [
+          {
+            grupoModificadorId: grupoProteinaId,
+            min: 1,
+            max: 1,
+            opciones: [
+              {
+                grupoOpcionId: carneOpcionId,
+                cantidad: '150',
+                unidadCodigo: 'g',
+                precioExtra: '700',
+              },
+            ],
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaConPrecioId = (resReceta.body as ItemResponse).id;
+
+    // Las dos lecturas desde las que se editan overrides: el detalle del ítem…
+    const opcionDelDetalle = async (itemId: string) => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const grupo = (res.body as ItemDetalleResponse).grupos.find(
+        (g) => g.grupoModificadorId === grupoProteinaId,
+      );
+      return grupo?.opciones.find((o) => o.grupoOpcionId === carneOpcionId);
+    };
+    const conOverride = await opcionDelDetalle(recetaConPrecioId);
+    expect(conOverride?.precioExtra).toBe('700.0000');
+    expect(conOverride?.precioExtraDefault).toBe('0.0000');
+    // La Clásica solo pisa la cantidad: su precio es el heredado.
+    const heredada = await opcionDelDetalle(recetaClasicaId);
+    expect(heredada?.precioExtraDefault).toBe('0.0000');
+    expect(heredada?.precioExtra).toBe(heredada?.precioExtraDefault);
+
+    // …y el drawer "usado en recetas" del grupo.
+    const resGrupo = await request(app.getHttpServer())
+      .get(`/api/grupos-modificadores/${grupoProteinaId}/items`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resGrupo.status).toBe(200);
+    const fila = (
+      resGrupo.body as {
+        itemId: string;
+        opciones: ItemGrupoOpcionDetalle[];
+      }[]
+    ).find((f) => f.itemId === recetaConPrecioId);
+    const enElGrupo = fila?.opciones.find(
+      (o) => o.grupoOpcionId === carneOpcionId,
+    );
+    expect(enElGrupo?.precioExtra).toBe('700.0000');
+    expect(enElGrupo?.precioExtraDefault).toBe('0.0000');
   });
 });

@@ -694,18 +694,6 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
 
 ---
 
-### El e2e de recuentos carga los conteos por SQL directo (2026-09-08)
-
-- [ ] `recuentos.e2e-spec.ts` escribe `cantidad_contada` con un `UPDATE` a mano. El comentario
-  que lo justificaba decía *"aún no existe el endpoint de carga"* y era falso: existe
-  `PATCH /recuentos/:id/lineas/:lineaId` (`recuentos.controller.ts`, `Inventario/Crear`). El
-  comentario ya se corrigió; el spec no se tocó porque cambiarlo es reescribir el escenario,
-  no un ajuste de comentario.
-
-⚠️ Vale la sospecha de siempre con un test que monta su escenario por SQL: **el camino de la
-API queda sin ejercitar en ese escenario**. Antes de reescribirlo hay que ver si otro spec ya
-cubre el `PATCH`, y si no, este es el que lo tiene que hacer.
-
 ### Las suites del e2e se pisan entre sí por el estado del seed (2026-08-22)
 
 ⚠️ **Encuadre, porque la primera versión de esta entrada se llamaba "el `401` fantasma" y eso
@@ -794,25 +782,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
      (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
      Decimal, que normaliza los ceros a la derecha.
 
-### El detalle del ítem no dice cuál de sus precios de opción es override y cuál es heredado (2026-09-09)
-
-- [ ] **`GET /items/:id` manda el precio efectivo de cada opción de modificador y nada más**:
-  `COALESCE(ovr.precio_extra, o.precio_extra)` (`items.service.ts`). Para la cantidad sí manda
-  las dos —`cantidad` efectiva y `cantidadDefault`—, para el precio no. Consecuencia: **la
-  pantalla no puede distinguir** un override de este ítem del número compartido del catálogo,
-  y cualquier regla que dependa de esa distinción no se puede escribir en el frontend.
-  **Dónde ya costó**: el vaciado por cambio de moneda (cerrado el 2026-09-09) tuvo que dejar
-  esas opciones afuera. La regla del owner es "lo que vive en la asociación con el ítem se
-  limpia; lo que es del extra como tal, no", y sin el default al lado los dos casos se ven
-  igual. Medido por la revisión independiente sobre la Hamburguesa Especial del seed, que no
-  tiene ni un override: el aviso prometía vaciar tres precios que volvían intactos.
-  **Lo que lo cierra**: sumar `precioExtraDefault` a la fila de opción del detalle, gemelo
-  exacto de `cantidadDefault` —misma query, sin N+1: la columna ya está en el `FROM`—. Con
-  eso el frente de la moneda puede volver a incluirlas, y de paso la pantalla puede mostrar
-  cuáles están overrideadas, que hoy tampoco se ve.
-  ⚠️ Antes de tomarla, revisar si el mismo hueco existe en las otras lecturas que devuelven
-  opciones (el listado, el catálogo de grupos): la entrada se midió sobre `findOne`.
-
 ### El drawer de `items` no se puede ni cerrar ni tapar con un modal en el entorno de tests (2026-09-09)
 
 - [ ] **Es un obstáculo de herramienta, no un bug de producto**: en el navegador el modal
@@ -847,10 +816,19 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   Salió del frente del ×10 como su punto 3, siempre marcado *"ortogonal"*
   ([`resueltos.md`](resueltos.md)); se separa acá para que no lo arrastre un cierre que no
   lo toca.
-  **Qué medir antes de diseñar nada**, en este orden: (1) si hoy existe algún tenant con
-  oficial ≠ CLP —si no existe, esto es latente y no un bug vivo—; (2) qué moneda dice el
-  backend que tiene el reembolso, que es la que el campo debería usar; (3) si el mismo
-  desajuste está en `NotaCreditoModal`, que es su vecino de la misma pantalla.
+  **Medido el 2026-09-11**, en el orden que la entrada pedía:
+  (1) **es alcanzable, no latente**: el seed siembra provincias de AR, CO y MX, así que se
+  puede dar de alta un tenant con oficial ≠ CLP, y el módulo `pasarela` no restringe nada por
+  país;
+  (2) el backend dice CLP para **toda** orden —`MONEDA_ORDEN_V1` en `pasarela-orden.entity.ts`,
+  cuyo docblock nombra este mismo caso: un tenant con oficial USD igual crea órdenes en CLP—,
+  así que el campo tendría que ir en CLP y no en `oficial`;
+  (3) `NotaCreditoModal` **no** tiene el desajuste: acredita una venta, y la venta se persiste
+  en la oficial.
+  ⛔ **Lo que queda sin medir es la parte que pesa:** cuando el reembolso genera nota de
+  crédito (`generarNotaCredito`), un monto en CLP acredita una venta en la oficial, y no se
+  miró si se convierte en algún lado. Eso es multi-moneda **y** fiscal, así que no va de
+  arrastre del arreglo del campo: frente propio (`CLAUDE.md`, *"Lo fiscal va solo"*).
 
 ### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
 
@@ -1834,13 +1812,28 @@ variable — y el costo se usa para márgenes.
 
 ⚠️ **Lo que la cuarta cara arrastra y NO está construido:** el override por ítem existe en la
 tabla (`item_grupo_modificador_opciones.precio_extra`) pero **la pantalla donde tipearlo no**.
-Exigir precio propio sin dónde escribirlo bloquea la asociación entera. Emparentada con la
-entrada de la § 2 *"El detalle del ítem no dice cuál de sus precios de opción es override y cuál
-es heredado"*: tocan la misma superficie y conviene mirarlas juntas.
+Exigir precio propio sin dónde escribirlo bloquea la asociación entera. Lo que sí existe desde el
+2026-09-11 es poder **leerlo**: `GET /items/:id` y `GET /grupos-modificadores/:id/items` mandan
+`precioExtraDefault` al lado del efectivo, así que la pantalla ya distingue el override del
+heredado ([`resueltos.md`](resueltos.md)).
 
 📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
+
+### El vaciado por cambio de moneda puede incluir los precios de opción overrideados (2026-09-11)
+
+- [ ] **`configuracion/items.vue` deja afuera del vaciado los precios de las opciones de
+  modificadores** porque hasta el 2026-09-11 la API no dejaba distinguir el override de este
+  ítem del precio compartido del catálogo. Ahora `GET /items/:id` manda `precioExtraDefault` al
+  lado del efectivo, así que la regla del owner (2026-09-09) —*"si el precio vive en la
+  asociación con el ítem, avisar y limpiar; si es del extra como tal, no"*— se puede aplicar
+  también ahí: se vacía la opción cuyo efectivo difiere del default, y se deja la que lo hereda.
+  **Trampas conocidas antes de empezar:** un override igual al default no se distingue de uno
+  heredado —vaciarlo no cambia nada visible, así que no cuenta en el aviso—; un `0` no se cuenta
+  ni se vacía, misma regla que los extras de receta; y el aviso cuenta montos, no filas. El
+  comentario que hoy justifica dejarlas afuera está en `items.vue`, arriba de la regla del
+  vaciado, y se reescribe en el mismo commit.
 
 
 ## 4. Necesita que el owner conteste

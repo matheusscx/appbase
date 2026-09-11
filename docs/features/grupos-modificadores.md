@@ -474,8 +474,9 @@ Response (201):
 - `DELETE /grupos-modificadores/:id` — `400` si el grupo está asociado a algún
   item vivo (`item_grupos_modificadores`).
 - `GET /grupos-modificadores/:id/items` — drawer de recetas: cada asociación
-  (`itemGrupoId`, item que usa el grupo) con sus opciones y `cantidad`
-  efectiva/`cantidadDefault`/`esPendiente` por opción — para editar los
+  (`itemGrupoId`, item que usa el grupo) con sus opciones y, por opción, `cantidad`
+  efectiva/`cantidadDefault`, `precioExtra` efectivo/`precioExtraDefault` y
+  `esPendiente` — para editar los
   overrides de cantidad/precio de cada receta desde el grupo. Incluye el
   `monedaId` **de cada receta**, porque el precio extra **se muestra** en la
   moneda del ítem, no en la oficial del tenant. Lo consume un solo lugar y solo
@@ -544,7 +545,8 @@ el `max` de uno ya asociado. Ver [`../agent/pendientes.md`](../agent/pendientes.
     "opciones": [
       { "grupoOpcionId": "...", "itemId": "...", "itemNombre": "Chuleta de cerdo",
         "tipo": "ingrediente", "cantidad": "250.0000", "cantidadDefault": "150.0000",
-        "unidadCodigo": "g", "precioExtra": "1500.0000", "orden": 2,
+        "unidadCodigo": "g", "precioExtra": "1500.0000", "precioExtraDefault": "1000.0000",
+        "orden": 2,
         "stock": "6.0000", "esPendiente": false }
     ]
   }
@@ -557,6 +559,11 @@ default)`, ver "Cantidades de consumo por item"); `cantidadDefault` es el
 default del grupo sin overridear (para que el frontend pueda mostrar "vs.
 default" o pre-llenar el formulario de override). `esPendiente: true` cuando
 ni el override ni el default tienen `cantidad` — ver esa misma sección.
+
+`precioExtra` y `precioExtraDefault` son el mismo par para el recargo: el efectivo de ESTA
+receta y el del grupo sin overridear. Van los dos desde el 2026-09-11 —antes viajaba solo el
+efectivo, y la pantalla no podía distinguir un override de este ítem del precio compartido
+del catálogo—, y `GET /grupos-modificadores/:id/items` manda el mismo par.
 
 `GET /items?tipo=combo` incluye `disponibleCondicional` en cada fila (una sola
 query extra para todos los combos, no N+1).
@@ -584,7 +591,8 @@ cuyo componente sea `receta` y tenga ≥1 grupo asociado:
         "opciones": [
           { "grupoOpcionId": "...", "itemId": "<chuleta>", "itemNombre": "Chuleta de cerdo",
             "tipo": "ingrediente", "cantidad": "150.0000", "cantidadDefault": "150.0000",
-            "unidadCodigo": "g", "precioExtra": "1500.0000", "orden": 2,
+            "unidadCodigo": "g", "precioExtra": "1500.0000", "precioExtraDefault": "1500.0000",
+            "orden": 2,
             "stock": "6.0000", "esPendiente": false }
         ]
       }

@@ -23,6 +23,75 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Dos de la § 2, medidas y cerradas: el conteo del recuento por la API y el default del precio de opción (cerradas 2026-09-11)
+
+Salen de [`pendientes.md` § 2](pendientes.md), en la misma pasada por esa sección. Las entradas,
+verbatim:
+
+### El e2e de recuentos carga los conteos por SQL directo (2026-09-08)
+
+- [ ] `recuentos.e2e-spec.ts` escribe `cantidad_contada` con un `UPDATE` a mano. El comentario
+  que lo justificaba decía *"aún no existe el endpoint de carga"* y era falso: existe
+  `PATCH /recuentos/:id/lineas/:lineaId` (`recuentos.controller.ts`, `Inventario/Crear`). El
+  comentario ya se corrigió; el spec no se tocó porque cambiarlo es reescribir el escenario,
+  no un ajuste de comentario.
+
+⚠️ Vale la sospecha de siempre con un test que monta su escenario por SQL: **el camino de la
+API queda sin ejercitar en ese escenario**. Antes de reescribirlo hay que ver si otro spec ya
+cubre el `PATCH`, y si no, este es el que lo tiene que hacer.
+
+### El detalle del ítem no dice cuál de sus precios de opción es override y cuál es heredado (2026-09-09)
+
+- [ ] **`GET /items/:id` manda el precio efectivo de cada opción de modificador y nada más**:
+  `COALESCE(ovr.precio_extra, o.precio_extra)` (`items.service.ts`). Para la cantidad sí manda
+  las dos —`cantidad` efectiva y `cantidadDefault`—, para el precio no. Consecuencia: **la
+  pantalla no puede distinguir** un override de este ítem del número compartido del catálogo,
+  y cualquier regla que dependa de esa distinción no se puede escribir en el frontend.
+  **Dónde ya costó**: el vaciado por cambio de moneda (cerrado el 2026-09-09) tuvo que dejar
+  esas opciones afuera. La regla del owner es "lo que vive en la asociación con el ítem se
+  limpia; lo que es del extra como tal, no", y sin el default al lado los dos casos se ven
+  igual. Medido por la revisión independiente sobre la Hamburguesa Especial del seed, que no
+  tiene ni un override: el aviso prometía vaciar tres precios que volvían intactos.
+  **Lo que lo cierra**: sumar `precioExtraDefault` a la fila de opción del detalle, gemelo
+  exacto de `cantidadDefault` —misma query, sin N+1: la columna ya está en el `FROM`—. Con
+  eso el frente de la moneda puede volver a incluirlas, y de paso la pantalla puede mostrar
+  cuáles están overrideadas, que hoy tampoco se ve.
+  ⚠️ Antes de tomarla, revisar si el mismo hueco existe en las otras lecturas que devuelven
+  opciones (el listado, el catálogo de grupos): la entrada se midió sobre `findOne`.
+
+**El recuento: el endpoint ya estaba cubierto, y el SQL tapaba un estado alcanzable.** El
+`PATCH /recuentos/:id/lineas/:lineaId` se ejercita en el mismo spec y en
+`recuentos-stock-por-ubicacion`, así que el hueco no era de cobertura del endpoint. Lo que
+quedaba era un escenario —la `diferenciaNeta` del listado, con conteos de 15 y 6— que llegaba a
+su estado por un `UPDATE` cuando la API lo alcanza igual. Pasó a dos `PATCH`, y con ellos se
+fueron `ds` y el import de `DataSource`, que no tenían otro uso en el archivo.
+
+**El default del precio: eran dos lecturas, no una.** La entrada pedía revisar las otras antes
+de tomarla, y el hueco estaba también en `GET /grupos-modificadores/:id/items`
+(`itemsUsando`), que manda `cantidadDefault` y no su gemelo de precio. La tercera lectura con el
+mismo `COALESCE` —el catálogo de consumo de `items.service.ts`— no lo necesita: consume el
+efectivo, no edita overrides. Las dos ganan `precioExtraDefault` (`o.precio_extra`; la columna ya
+estaba en el `FROM`, así que no hay query nueva).
+
+**Lo que lo fija, mutante por mutante** —cada uno es el código anterior, no una rotura a mano—:
+
+| Mutante | Lo caza |
+|---|---|
+| sacar la columna del `SELECT` de `findOne` | el e2e nuevo de `grupos-modificadores-overrides` (*"10. el precio de una opción viaja con su default al lado"*); **el unitario no**, porque mockea las filas |
+| sacar la columna del `SELECT` de `itemsUsando` | el mismo e2e, en la aserción de la lectura del grupo |
+| sacar el campo del map de `findOne` | el unitario de `items.service`, que ahora mockea un default distinto del efectivo |
+
+**Lo que deja abierto:** usar el default en el vaciado por cambio de moneda, que era la razón de
+la entrada → § 3, *"El vaciado por cambio de moneda puede incluir los precios de opción
+overrideados"*. El comentario de `items.vue` que justificaba dejarlas afuera se reescribió: ya no
+dice que la API no manda el default.
+
+📌 En la misma pasada quedó **medida y no cerrada** la entrada del modal de reembolso: lo medido
+—es alcanzable, la orden es siempre CLP, `NotaCreditoModal` está bien— está escrito en ella, y lo
+que falta es fiscal.
+
+---
+
 ## El séptimo sitio del login del segundo tenant, convertido (cerrada 2026-09-11)
 
 Sale de [`pendientes.md` § 1](pendientes.md), donde la dejó el cierre del helper del segundo
@@ -423,8 +492,10 @@ ve puede ser el compartido del catálogo, que edita `grupos-modificadores.vue` y
 estar en uso en otras recetas: exactamente *"el precio del extra como tal"* que el owner
 excluyó. Lo midió la revisión independiente sobre el ítem del seed, sin un solo override:
 el aviso prometía vaciar tres precios que después volvían intactos, porque vaciar el override
-solo devuelve la herencia. Lo que falta para poder tocarlos —que la API mande el default— es
-una entrada propia en [`pendientes.md` § 2](pendientes.md).
+solo devuelve la herencia. Lo que faltaba para poder tocarlos —que la API mande el default— fue
+una entrada de la § 2 de `pendientes.md`. ➡️ **La API lo manda desde el 2026-09-11**
+(`precioExtraDefault`); incluirlas en el vaciado quedó como entrada propia en
+[`pendientes.md`](pendientes.md) § 3.
 
 📌 **Y un `0` tampoco se cuenta ni se vacía**, misma ronda de revisión: cero es cero en
 cualquier moneda. Contarlo hacía que el aviso prometiera una pérdida inexistente, y vaciarlo

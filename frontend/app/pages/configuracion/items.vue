@@ -593,12 +593,12 @@ watch(() => form.value.unidadMedida, () => {
  *
  * ⛔ **NO cae el precio de las opciones de modificadores, aunque el campo esté acá.** Lo que
  * la pantalla muestra no es el override del ítem: `GET /items/:id` devuelve el **efectivo**
- * (`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`), y no manda el default
- * al lado —sí manda `cantidadDefault`, pero no su equivalente de precio—. O sea que desde
- * acá **no se puede distinguir** un override de este ítem del número compartido del
- * catálogo, que edita `grupos-modificadores.vue` y que puede estar en uso en otras recetas.
- * Ante la duda manda la regla: no se toca. Lo que falta para poder tocarlo —que la API mande
- * el default— está en `docs/agent/pendientes.md` § 2.
+ * (`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`), que puede ser el número
+ * compartido del catálogo —lo edita `grupos-modificadores.vue` y puede estar en uso en otras
+ * recetas—. Cuando se escribió esto la API no mandaba el default al lado y desde acá no se
+ * podía distinguir uno del otro; desde el 2026-09-11 lo manda (`precioExtraDefault`), pero
+ * este gesto todavía no lo usa, y hasta que lo use manda la regla: no se toca. Incluirlas
+ * está en `docs/agent/pendientes.md` § 3.
  *
  * ⛔ **Tampoco entran los descuentos y recargos de MONTO FIJO asociados al ítem**, y es una
  * decisión, no un olvido: **ese monto no está denominado en la moneda del ítem**, así que

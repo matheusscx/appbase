@@ -3,7 +3,6 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
-import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 import {
@@ -241,7 +240,6 @@ describe('Recuentos — catálogo de motivos de diferencia (e2e)', () => {
 describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
-  let ds: DataSource;
   let localId: string;
 
   beforeAll(async () => {
@@ -260,7 +258,6 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     await app.init();
 
     token = await login(app);
-    ds = app.get(DataSource);
 
     const resUbic = await request(app.getHttpServer())
       .get('/api/ubicaciones')
@@ -429,8 +426,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     expect(filaCero.cantidadLineas).toBe(2);
     expect(filaCero.diferenciaNeta).toBe('0.0000');
 
-    // 4. Cargar conteos directo en la tabla: itemA contado en 15 (+5), itemB
-    // en 6 (0).
+    // 4. Cargar los conteos por la API: itemA contado en 15 (+5), itemB en 6 (0).
     const resDetalle = await request(app.getHttpServer())
       .get(`/api/recuentos/${recuentoId}`)
       .set('Authorization', `Bearer ${token}`);
@@ -438,14 +434,16 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     const lineas = (resDetalle.body as RecuentoDetalleResponse).lineas;
     const lineaA = lineas.find((l) => l.itemId === itemAId)!;
     const lineaB = lineas.find((l) => l.itemId === itemBId)!;
-    await ds.query(
-      `UPDATE recuento_inventario_linea SET cantidad_contada = $1 WHERE linea_id = $2`,
-      ['15', lineaA.lineaId],
-    );
-    await ds.query(
-      `UPDATE recuento_inventario_linea SET cantidad_contada = $1 WHERE linea_id = $2`,
-      ['6', lineaB.lineaId],
-    );
+    for (const [linea, cantidadContada] of [
+      [lineaA, '15'],
+      [lineaB, '6'],
+    ] as const) {
+      const resConteo = await request(app.getHttpServer())
+        .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ cantidadContada });
+      expect(resConteo.status).toBe(200);
+    }
 
     // 5. Con conteos cargados: 2 líneas, diferencia neta +5.0000
     const resListaConConteo = await request(app.getHttpServer())

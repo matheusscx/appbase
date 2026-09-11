@@ -86,6 +86,11 @@ type GrupoDetalle = {
     cantidadDefault: string | null;
     unidadCodigo: string | null;
     precioExtra: string;
+    /**
+     * El del catálogo, sin el override de este ítem. Gemelo de `cantidadDefault`:
+     * sin él la pantalla no distingue un override del número compartido del grupo.
+     */
+    precioExtraDefault: string;
     orden: number;
     stock: string | null;
     /** `stockVendible` (el del local) menos lo que las cuentas abiertas ya apartaron. Ver `findOne`. */
@@ -798,6 +803,7 @@ export class ItemsService {
       cantidad_default: string | null;
       unidad_codigo: string | null;
       precio_extra: string;
+      precio_extra_default: string;
       orden: number;
       stock: string | null;
       stock_vendible: string | null;
@@ -807,6 +813,7 @@ export class ItemsService {
               o.cantidad AS cantidad_default,
               COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
               COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
+              o.precio_extra AS precio_extra_default,
               o.orden, s.total AS stock, s.vendible AS stock_vendible
        FROM item_grupos_modificadores igm
        JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
@@ -851,6 +858,7 @@ export class ItemsService {
           cantidadDefault: r.cantidad_default,
           unidadCodigo: r.unidad_codigo,
           precioExtra: r.precio_extra,
+          precioExtraDefault: r.precio_extra_default,
           orden: r.orden,
           stock: r.stock,
           stockDisponible: disponibleDe(

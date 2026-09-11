@@ -1163,6 +1163,9 @@ describe('ItemsService', () => {
             cantidad_default: '1',
             unidad_codigo: 'unidad',
             precio_extra: '300',
+            // Distinto del efectivo a propósito: con los dos iguales, leer la
+            // columna equivocada pasaría igual.
+            precio_extra_default: '250',
             orden: 0,
             stock: '10',
             stock_vendible: '10',
@@ -1177,6 +1180,7 @@ describe('ItemsService', () => {
             cantidad_default: null,
             unidad_codigo: null,
             precio_extra: '0',
+            precio_extra_default: '0',
             orden: 1,
             stock: '5',
             stock_vendible: '5',
@@ -1197,6 +1201,7 @@ describe('ItemsService', () => {
           cantidadDefault: '1',
           unidadCodigo: 'unidad',
           precioExtra: '300',
+          precioExtraDefault: '250',
           orden: 0,
           stock: '10',
           stockDisponible: '10.0000',
@@ -1211,6 +1216,7 @@ describe('ItemsService', () => {
           cantidadDefault: null,
           unidadCodigo: null,
           precioExtra: '0',
+          precioExtraDefault: '0',
           orden: 1,
           stock: '5',
           stockDisponible: '5.0000',
