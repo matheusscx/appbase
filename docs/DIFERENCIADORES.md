@@ -140,6 +140,44 @@ regla que usamos. **La decisión es nuestra, no copiada.**
 **Evidencia:** [investigación 2026-07-27](agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md).
 **Estado:** ✅ Implementado 2026-07-10.
 
+### Atar la vuelta a stock al documento de crédito que la explica
+
+**Nosotros:** cuando una nota de crédito devuelve mercadería al stock, el movimiento de
+inventario queda atado **a esa nota** —`movimientos_inventario.venta_id` es el id de la nota—,
+escrito en la misma transacción que la emite. Contesta sin reconstruir nada a mano *"esta unidad
+que volvió, ¿bajo qué documento volvió y por cuánto se acreditó?"*. La reposición se elige por
+línea y acreditar menos de lo que vale la mercadería se acepta con motivo obligatorio, así que
+el operador no tiene razón para devolver el stock por fuera de la nota.
+**El mercado:** **ninguno de los cinco ERP relevados** el 2026-09-04 —NetSuite, SAP Business
+One, Odoo, Xero y Oracle PeopleSoft— documenta que el movimiento de stock referencie al
+documento de crédito: todos lo atan al documento *padre* (RMA, entrega, factura). Del lado POS,
+**Lightspeed lo admite por escrito**: para producto dañado manda dos operaciones y enseña a
+nombrar los stocktakes con una convención para poder filtrarlos después — una convención de
+nombres como sustituto del vínculo. Y la norma chilena tampoco lo pide: la mercadería devuelta viaja con su
+propia Guía de Despacho (`IndTraslado = 7`), y el vínculo con la nota es **tributario, no
+documental**.
+**Por qué le importa a quien compra:** el kardex dice, unidad por unidad, bajo qué nota volvió
+la mercadería; auditar una devolución deja de ser una reconstrucción.
+⚠️ **Alcance exacto de la afirmación** (reglas 2 y 3): son **cinco ERP**, y es sobre lo que
+documentan. El relevamiento miró además Toast, Square, Clover, Shopify, Bsale, Defontana, Nubox
+y Toteat, **pero por otras preguntas**: en ellos este punto no se verificó —Defontana, por
+ejemplo, tiene un endpoint de nota de crédito con movimiento de stock
+(`SaveCreditNoteAsyncStockMovement`) y no se miró a qué documento ata ese movimiento—. Se
+comunica *"ninguno de los cinco ERP que relevamos"*, nunca *"ningún POS"*.
+⚠️ **Dónde el vínculo no existe, dicho de frente:** un reembolso de pasarela **sin** nota de
+crédito repone atado a la venta original, porque no hay documento al que atarlo; y la vuelta a
+stock hecha a mano desde Inventario (`PATCH /items/:id/stock`, motivo `devolucion`) sigue
+permitida y queda sin documento. Hasta el 2026-09-04 el propio sistema empujaba a ese camino —el
+rechazo de acreditar menos de lo que vale la mercadería mandaba al operador a Inventario—, y el
+owner lo revirtió ese mismo día.
+**Evidencia:** [investigación 2026-09-04, § 1.6 y § 3.5](agent/investigaciones/2026-09-04-devolucion-con-credito-parcial.md) ·
+[feature](features/reembolsos-nota-credito.md) · e2e `nota-credito-composicion.e2e-spec.ts`,
+*"sin el flag, un producto por cantidad sigue reponiendo como antes"*, que lee el movimiento por
+el id de la nota.
+**Estado:** ✅ Implementado 2026-07-10 ([ESTADO](ESTADO.md)); la reposición por línea y la
+aceptación con motivo, 2026-09-04. El relevamiento que lo respalda como diferenciador es del
+2026-09-04.
+
 ---
 
 ## 📐 Diseñado, todavía no construido
@@ -192,39 +230,6 @@ que se puede explicar peso por peso, y dos cierres del mismo combo dan el mismo 
 ## 💡 Hallazgos sin diseñar
 
 > Oportunidades detectadas. No hay ni diseño.
-
-### Atar la vuelta a stock al documento de crédito que la explica
-
-**El hueco:** de los **11 productos relevados** para esto (2026-09-04) —Toast, Square,
-Lightspeed, Clover, Shopify del lado POS; NetSuite, SAP B1, Odoo, Xero y QuickBooks del lado
-ERP; Bsale, Defontana, Nubox y Toteat del lado chileno— **ninguno referencia el movimiento de
-inventario al documento de crédito**. Todos lo atan al documento *padre* (RMA, entrega,
-factura), o directamente lo dejan suelto: **Lightspeed lo admite por escrito** y, para producto
-dañado, enseña a *"pick a consistent naming structure for your adjustments so you can filter
-these later"* — una convención de nombres como sustituto del vínculo.
-
-Y la norma chilena tampoco lo pide: la mercadería devuelta viaja con su propia Guía de Despacho
-(`IndTraslado = 7`), y el vínculo con la nota de crédito es **tributario, no documental**.
-
-**Por qué nos toca a nosotros:** nuestro `movimientos_inventario.venta_id` apunta al id de la
-**nota de crédito** que acredita esa devolución. Sale gratis —el movimiento ya se escribe dentro
-de la misma transacción— y contesta una pregunta que en los otros once hay que reconstruir a
-mano: *"esta unidad que volvió, ¿bajo qué documento volvió y por cuánto se acreditó?"*.
-
-⚠️ **Fue frágil por donde no se ve, y se cerró el mismo día:** el rechazo construido el
-2026-09-04 empujaba al operador a volver el stock desde Inventario, donde el movimiento queda
-**sin `venta_id`** —el diferenciador se perdía justo en el caso que lo haría valioso—. Medido,
-no supuesto:
-[`investigaciones/2026-09-04-devolucion-con-credito-parcial.md`](agent/investigaciones/2026-09-04-devolucion-con-credito-parcial.md).
-El owner revirtió esa regla horas después: el caso **se acepta**, con motivo obligatorio cuando
-la mercadería vale más que la nota y con la reposición elegible **por línea de la nota**, así que
-la vuelta a stock ya no tiene que salir de ella.
-
-**Estado:** el vínculo existe y funciona, en el mostrador y en la pasarela, siempre que haya
-nota de crédito. Un reembolso de pasarela **sin** nota repone atado a la venta original, porque
-no hay documento al que atarlo. La decisión y su construcción, en
-[`resueltos.md`](agent/resueltos.md), *"La devolución se acredita por línea, reponga o no el
-stock"*.
 
 ### Anular por CANTIDAD un plato ya despachado, y valorizar lo que se perdió
 
