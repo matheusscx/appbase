@@ -224,18 +224,11 @@ let bodiesDeCierre: Record<string, unknown>[] = []
  */
 let cierreRetenido: Promise<void> | null = null
 /**
- * El **primer** `POST /cuentas/:id/cerrar` rebota por sesión de trabajo. Es el
- * único error que `toastErrorOperativo` guarda para reintentar
- * (`accionPendiente`), así que es lo único que abre el camino del reintento — el
- * que arma la marca del cierre en vuelo **fuera** del gate del botón.
+ * El **primer** `POST /cuentas/:id/cerrar` rebota por sesión de trabajo, que es el
+ * error que abre el modal de entrar a turno. Solo el primero: un cierre repetido
+ * saldría bien, así que se vería.
  */
 let cierreFallaSesion = false
-/**
- * Retiene el `POST /sesiones-garzon/iniciar`. Es lo que deja la pantalla usable
- * **con un reintento ya pendiente**: sin esto la sesión vuelve en el mismo
- * microtask y el reintento dispara antes de que el garzón pueda tocar nada.
- */
-let sesionRetenida: Promise<void> | null = null
 /**
  * Retiene el `POST /cuentas/:id/lineas`, igual que `abrirCuentaRetenido`. Es lo
  * que abre la ventana "agregué un producto y me fui": sin esto el mock contesta
@@ -263,6 +256,10 @@ let garzonesLista: unknown[] = []
 let listarGarzonesRetenido: Promise<void> | null = null
 /** Cada `POST /cuentas/:id/transferir-admin`, con el id que viajó en la URL. */
 let transferenciasAdmin: string[] = []
+/** Cada `POST /cuentas/:id/transferir` —tomar cuenta por PIN—, con el id de la URL. */
+let transferenciasPorPin: string[] = []
+/** El **primer** `POST /cuentas/:id/transferir` rebota por sesión de trabajo. */
+let transferirFallaSesion = false
 /**
  * Estado del **servidor** para las cuentas de la mesa, separado del fixture.
  *
@@ -501,7 +498,20 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (ruta.endsWith('/sesiones-garzon/iniciar')) {
       const sesion = { id: 'sesion-1', garzonNombre: 'Ana', turnoNombre: 'Mañana' }
-      return sesionRetenida ? sesionRetenida.then(() => sesion) : Promise.resolve(sesion)
+      return Promise.resolve(sesion)
+    }
+    const transferirMatch = ruta.match(/\/cuentas\/([^/]+)\/transferir$/)
+    if (transferirMatch) {
+      transferenciasPorPin.push(transferirMatch[1] ?? '')
+      if (transferirFallaSesion) {
+        // Solo el primero: un segundo saldría bien, así que si algo lo repitiera
+        // el test lo vería.
+        transferirFallaSesion = false
+        const err = new Error('x') as Error & { data?: unknown }
+        err.data = { message: 'El garzón no tiene una sesión de trabajo abierta' }
+        return Promise.reject(err)
+      }
+      return Promise.resolve({ id: transferirMatch[1], lineas: [] })
     }
     const transferAdminMatch = ruta.match(/\/cuentas\/([^/]+)\/transferir-admin$/)
     if (transferAdminMatch) {
@@ -625,8 +635,8 @@ mockNuxtImport('useApiFetch', () => {
       cierresDeCuenta.push(cerrarMatch[1] ?? '')
       bodiesDeCierre.push(opts?.body ?? {})
       if (cierreFallaSesion) {
-        // Solo el primero: el reintento tiene que poder salir, que es lo que el
-        // test mide.
+        // Solo el primero: un segundo saldría bien, así que si algo lo repitiera
+        // el test lo vería.
         cierreFallaSesion = false
         // Con la forma del backend (`data.message`), no un `Error` pelado: es la
         // rama de `apiErrorMsg` que toma el error real, y de la que depende que
@@ -717,13 +727,14 @@ function reiniciarMock() {
   bodiesDeCierre = []
   cierreRetenido = null
   cierreFallaSesion = false
-  sesionRetenida = null
   agregarLineaRetenido = null
   cuentasPorMesa = {}
   listarCuentasRetenido = {}
   garzonesLista = []
   listarGarzonesRetenido = null
   transferenciasAdmin = []
+  transferenciasPorPin = []
+  transferirFallaSesion = false
   cuentasServidor = null
   pendientesTestigoMock = []
   bodiesPendientesTestigo = []
@@ -895,6 +906,43 @@ describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
     await esperar(30)
 
     expect(urlsSelector.at(-1)).toContain('enTurno=false')
+    wrapper.unmount()
+  })
+
+  // Sin reintento automático (owner, 2026-09-11): el error de sesión abre el modal
+  // de turno, pero entrar a turno NO abre la cuenta sola. Con el reintento se abría
+  // en la mesa seleccionada AL REPETIR, que no tenía por qué ser la que se tocó.
+  it('abrir cuenta sin turno: entrar a turno no la abre sola', async () => {
+    sinSesionDeTrabajo = true
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+
+    await rondaDePin()
+    expect(postsAbrirCuenta, 'el primer intento salió y rebotó').toHaveLength(1)
+
+    // Si algo la repitiera, esta vez saldría bien.
+    sinSesionDeTrabajo = false
+    const modalTurno = dialogos().find(d =>
+      d.textContent?.includes('Entrar a turno'),
+    )
+    expect(modalTurno, 'modal de entrar a turno').toBeTruthy()
+    botonEn(modalTurno, 'Continuar')?.click()
+    await esperar(30)
+    // El PIN de entrar a turno, a mano: `rondaDePin` empieza tocando "Nueva
+    // cuenta", y eso sería un segundo intento de apertura.
+    botonEn(tecladoPin(), 'Ana')!.click()
+    await esperar(10)
+    for (let i = 0; i < 6; i++) {
+      botonEn(tecladoPin(), '1')!.click()
+      await esperar(1)
+    }
+    await esperar(300)
+
+    expect(toasts.some(t => (t.title ?? '').startsWith('Sesión iniciada')), 'entró a turno').toBe(true)
+    expect(postsAbrirCuenta, 'la apertura no se repitió').toHaveLength(1)
+    // Y como ya nada se hace solo, el aviso lo dice.
+    const aviso = toasts.find(t => t.title === 'Primero inicia tu turno')
+    expect(aviso?.description, 'el aviso pide volver a intentarlo').toContain('vuelve a intentarlo')
     wrapper.unmount()
   })
 
@@ -4404,15 +4452,13 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
   })
 
-  it('el cierre que rebotó por turno sí sale cuando el garzón entra a turno', async () => {
+  it('el cierre que rebotó por turno NO se repite cuando el garzón entra a turno', async () => {
     /**
-     * El control del reintento, y no es decoración: el guard de
-     * `cerrarCuentaConPin` no manda el `POST` sin la marca, y el `finally` la
-     * apagó al fallar el primer intento. Si el reintento no la **re-arma**, todo
-     * garzón cuyo cierre rebotó por sesión de trabajo queda sin poder cobrar
-     * después de entrar a turno — y encima leyendo *"esa cuenta entró en la
-     * fusión"* sin que ninguna fusión haya ocurrido. Medido: sin esa línea, este
-     * test da `['cuenta-9']` y ese toast.
+     * Sin reintento automático (owner, 2026-09-11). Antes, entrar a turno volvía
+     * a mandar el cierre con la foto del cobro —los pagos y la propina de
+     * antes—, y si mientras tanto una fusión le había plegado otra cuenta, la
+     * cobraba de menos. Ahora el garzón vuelve a pedir el cobro él mismo.
+     * El mock deja salir bien un segundo cierre: si algo lo repitiera, se vería.
      */
     catalogoItemsMock = [producto('9.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
@@ -4437,125 +4483,47 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await tipearPin()
     await esperar(300)
 
-    // El reintento salió y cobró.
-    expect(cierresDeCuenta, 'el reintento cobró').toEqual(['cuenta-9', 'cuenta-9'])
-    expect(toasts.map(t => t.title ?? '')).not.toContain(
-      'El cobro no salió: esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada.',
-    )
-    expect(toasts.some(t => (t.title ?? '').startsWith('Cuenta cerrada')), 'terminó cobrando').toBe(true)
+    expect(toasts.some(t => (t.title ?? '').startsWith('Sesión iniciada')), 'entró a turno').toBe(true)
+    expect(cierresDeCuenta, 'el cierre no se repitió').toEqual(['cuenta-9'])
+    expect(toasts.some(t => (t.title ?? '').startsWith('Cuenta cerrada')), 'no cobró solo').toBe(false)
   })
 
-  it('un cobro pedido no le tapa a la fusión el cierre en vuelo que hay debajo', async () => {
+  it('tomar cuenta sin turno: entrar a turno no la toma sola', async () => {
     /**
-     * La escena que midió la revisión independiente, y la que obligó a mirar
-     * los dos cobros **por separado** en vez de encadenarlos con `??`.
-     *
-     * El reintento del `catch` de `cerrarCuentaConPin` —el que ofrece
-     * `toastErrorOperativo` cuando el cierre rebota por sesión de trabajo— arma la
-     * marca del cierre en vuelo **fuera** del gate del botón *Cerrar y cobrar*. O
-     * sea que puede haber, a la vez, un cobro **pedido** (el garzón volvió a tocar
-     * el botón mientras la sesión viajaba) y un **cierre en vuelo** (el reintento).
-     * Con la cadena `cobroCuenta ?? cobroPedidoId ?? cobroEnVueloId`, el pedido
-     * ganaba y **enmascaraba** al cierre: la fusión avisaba por el pedido, no
-     * anulaba nada, y el `POST` del reintento salía igual sobre la cuenta ya
-     * fusionada. Sonda de aquella medición: `cierres=["cuenta-9","cuenta-9"]` con
-     * la 9 fusionada y toast verde — el cobro de menos de la DESTINO.
+     * Mismo criterio que el cierre. Con el reintento se tomaba la cuenta que
+     * estuviera abierta AL REPETIR, y al responsable se le atribuye la propina.
      */
     catalogoItemsMock = [producto('9.0000', '1.0000')]
-    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
-    cierreFallaSesion = true
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    transferirFallaSesion = true
 
     const wrapper = await montar()
-    await seleccionarMesa(wrapper)
-    await esperar(20)
-    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
-    // La 9 es la DESTINO de la fusión que viene: conserva su id y sigue abierta,
-    // así que es la que el backend cerraría de verdad, cobrando de menos.
-    tarjetas[0]!.click()
+    await abrirLaCuenta(wrapper)
     await esperar(400)
-    expect(drawerMesa()?.textContent).toContain('— Cuenta 9')
 
-    // Primer cierre: rebota por sesión de trabajo y deja el reintento armado.
-    await abrirYConfirmarElCobro(wrapper)
+    botonEn(drawerMesa(), 'Tomar cuenta')!.click()
     await esperar(20)
     await tipearPin()
     await esperar(200)
-    expect(cierresDeCuenta, 'el primer cierre salió y rebotó').toEqual(['cuenta-9'])
+    expect(transferenciasPorPin, 'el primer intento salió y rebotó').toEqual(['cuenta-9'])
 
-    // Entra a turno, con la sesión retenida: la pantalla queda usable y el
-    // reintento, pendiente.
-    let soltarSesion!: () => void
-    sesionRetenida = new Promise<void>((r) => {
-      soltarSesion = r
-    })
-    // El error de sesión abre el modal de turno solo (`toastErrorOperativo`).
     const confirmarTurno = [...document.body.querySelectorAll('button')]
       .find(b => b.textContent?.trim() === 'Continuar')
     expect(confirmarTurno, 'el modal de turno está arriba').toBeTruthy()
     confirmarTurno!.click()
     await esperar(20)
     await tipearPin()
-    await esperar(50)
-
-    // El cálculo queda retenido y se toca una cantidad: eso lo deja NO vigente,
-    // así que el tap de abajo entra a `asegurarVigente()` y **se queda ahí**. Es
-    // el mismo gesto del test de "mientras el cobro calcula", tres más arriba.
-    let soltarCalculo!: () => void
-    calculoRetenido = new Promise<void>((r) => {
-      soltarCalculo = r
-    })
-    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
-    input!.vm.$emit('change', {
-      presentacion: '3',
-      unidadCodigo: 'unidad',
-      cantidadCanonica: '3.0000',
-    })
-    await esperar(20)
-
-    // Con la sesión todavía en vuelo, vuelve a tocar *Cerrar y cobrar*: eso deja
-    // un cobro PEDIDO vivo, esperando su cálculo.
-    const botonCobrar = botonEn(drawerMesa(), 'Cerrar y cobrar')
-    expect(botonCobrar?.disabled, 'la pantalla quedó usable').toBe(false)
-    botonCobrar!.click()
-    await esperar(20)
-    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
-    expect(cobroModal.props('open'), 'el cobro quedó PEDIDO, calculando').toBe(false)
-
-    // Vuelve la sesión: dispara el reintento, que arma la marca del cierre en
-    // vuelo y queda esperando el cálculo retenido.
-    soltarSesion()
-    await esperar(50)
-
-    // Y ahora aterriza la fusión, con los DOS cobros vivos sobre la misma cuenta.
-    const volver = botonEn(drawerMesa(), 'Cuentas')
-    expect(volver, 'paso: volver al listado').toBeTruthy()
-    volver!.click()
-    await esperar(20)
-    const modoFusion = botonEn(drawerMesa(), 'Fusionar cuentas')
-    expect(modoFusion, 'paso: entrar en modo fusión').toBeTruthy()
-    modoFusion!.click()
-    await esperar(20)
-    const paraFusionar = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
-    expect(paraFusionar.length, 'paso: hay dos tarjetas para fusionar').toBe(2)
-    paraFusionar[0]!.click()
-    paraFusionar[1]!.click()
-    await esperar(20)
-    const fusionar = botonEn(drawerMesa(), 'Fusionar (2)')
-    expect(fusionar, 'paso: botón Fusionar (2)').toBeTruthy()
-    fusionar!.click()
-    await esperar(200)
-
-    soltarCalculo()
     await esperar(300)
 
-    // El reintento NO volvió a salir: la fusión anuló su marca aunque el aviso lo
-    // haya disparado el cobro pedido.
-    expect(cierresDeCuenta, 'el reintento no cobró la cuenta fusionada').toEqual(['cuenta-9'])
+    expect(toasts.some(t => (t.title ?? '').startsWith('Sesión iniciada')), 'entró a turno').toBe(true)
+    expect(transferenciasPorPin, 'la toma no se repitió').toEqual(['cuenta-9'])
+    wrapper.unmount()
   })
 
   it('pero una fusión de OTRAS cuentas deja salir el cobro en vuelo', async () => {
     /**
-     * El control de los dos de arriba, y no es decoración: un guard que cortara
+     * El control de los dos que cancelan el cierre por la fusión —el de ORIGEN y el
+     * de DESTINO, más arriba—, y no es decoración: un guard que cortara
      * cada vez que aterriza una fusión le comería el cobro —con el PIN ya
      * tecleado— a un garzón que está cerrando una cuenta que la fusión no tocó.
      * Se cancela **solo si la fusión se llevó puesta la cuenta del cierre**.

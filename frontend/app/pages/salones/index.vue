@@ -180,10 +180,10 @@ const submitting = ref(false)
  * flush y —si el garzón sigue parado en la cuenta— el cálculo. Se prende en
  * `confirmarCobro` y se apaga con `submitting`, que cubre el mismo tramo.
  *
- * ⚠️ **La simetría con `submitting` termina ahí: `cerrarCuentaConPin` NO la
- * re-arma aunque sí re-prenda `submitting`.** El porqué está escrito arriba de
- * todo en esa función, y es lo único que hace que esto sirva: la fusión pudo
- * anularla durante el flush, que corre antes de esa llamada.
+ * ⚠️ **`cerrarCuentaConPin` no la re-arma, y tampoco a `submitting`: las dos las
+ * prende `confirmarCobro`.** Con esta además importa el orden —el porqué está
+ * escrito arriba de todo en esa función, y es lo único que hace que esto sirva—:
+ * la fusión pudo anularla durante el flush, que corre antes de esa llamada.
  *
  * Existe por lo mismo que `cobroPedidoId`, un paso más adelante en el reloj:
  * ahí el modal todavía no abrió, acá ya cerró y el `watch` de arriba tiró la
@@ -270,10 +270,6 @@ const pinModalTitle = ref('Identifícate con tu PIN')
 const pinModalEnTurno = ref(true)
 let pinAction: ((garzonId: string, pin: string, nombre: string) => void) | null = null
 let pinCancelado: (() => void) | null = null
-
-// Acción de garzón que falló por no tener sesión de trabajo abierta: se guarda como
-// closure (con su PIN ya capturado) para reintentarla apenas se inicia el turno.
-let accionPendiente: (() => void) | null = null
 
 /**
  * El garzón de esta tablet, si la cuenta logueada está vinculada a uno (**modo
@@ -444,16 +440,19 @@ async function abrirEntrarTurno() {
 }
 
 /**
- * Toast de error. Si falta sesión de trabajo abre directo el modal para entrar a turno
- * y, si el llamador pasó `retry`, lo guarda para reintentar la acción al iniciar el turno.
+ * Toast de error. Si falta sesión de trabajo abre directo el modal para entrar a turno.
+ *
+ * ⛔ **La acción que falló NO se repite sola al iniciar el turno** (owner, 2026-09-11): el
+ * garzón la vuelve a pedir, y por eso el aviso lo dice. Repetirla sola la hacía sobre lo
+ * que hubiera en pantalla al repetir —otra mesa, otra cuenta— o, en el cobro, con los
+ * pagos de antes sobre una cuenta que una fusión pudo haber cambiado entre medio.
  */
-function toastErrorOperativo(e: unknown, fallback: string, retry?: () => void) {
+function toastErrorOperativo(e: unknown, fallback: string) {
   const msg = apiErrorMsg(e, fallback)
   if (msg.includes('sesión de trabajo')) {
-    accionPendiente = retry ?? null
     toast.add({
       title: 'Primero inicia tu turno',
-      description: 'No tienes una sesión de trabajo abierta.',
+      description: 'No tienes una sesión de trabajo abierta. Cuando entres a turno, vuelve a intentarlo.',
       color: 'warning',
     })
     void abrirEntrarTurno()
@@ -462,10 +461,9 @@ function toastErrorOperativo(e: unknown, fallback: string, retry?: () => void) {
   toast.add({ title: msg, color: 'error' })
 }
 
-/** Cierra el modal de turno sin iniciar y descarta la acción que quedó pendiente. */
+/** Cierra el modal de turno sin iniciar. */
 function cancelarEntrarTurno() {
   turnoModalOpen.value = false
-  accionPendiente = null
 }
 
 function confirmarEntrarTurno() {
@@ -494,10 +492,6 @@ async function iniciarSesionConPin(
       title: `Sesión iniciada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
       color: 'success',
     })
-    // Reintenta la acción que disparó el inicio de turno (ej. abrir la cuenta).
-    const retry = accionPendiente
-    accionPendiente = null
-    retry?.()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al iniciar sesión'), color: 'error' })
@@ -1026,7 +1020,7 @@ async function abrirCuentaConPin(
     if (!activeCuenta.value) abrirCuenta(cuenta)
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(garzonId, pin, nombre) })
+    toastErrorOperativo(e, 'Error al abrir la cuenta')
   }
   finally {
     abriendoCuenta.value = false
@@ -1177,13 +1171,12 @@ async function fusionarSeleccionadas() {
     // deducirlo, y deducirlo salió mal.
     //
     // ⛔ **Y el cierre en vuelo se mira APARTE, no en la misma cadena de `??`.**
-    // La primera versión encadenaba los tres y la revisión lo midió: el reintento
-    // del `catch` de `cerrarCuentaConPin` arma su marca **fuera** del gate del
-    // botón, así que un cobro pedido y un cierre en vuelo pueden estar vivos a la
-    // vez; con la cadena, el pedido **enmascaraba** al cierre —ganaba el primer id
-    // no nulo—, no se anulaba nada y el `POST` salía igual sobre la cuenta
-    // fusionada. Sonda: `cierres=["cuenta-9","cuenta-9"]` con la 9 ya fusionada y
-    // toast verde. Son dos cobros distintos: se preguntan por separado.
+    // La primera versión encadenaba los tres, y con el reintento automático del
+    // `catch` de `cerrarCuentaConPin` —que armaba su marca **fuera** del gate del
+    // botón— un cobro pedido y un cierre en vuelo podían estar vivos a la vez: el
+    // pedido **enmascaraba** al cierre y el `POST` salía sobre la cuenta fusionada.
+    // El reintento se sacó el 2026-09-11; son dos cobros distintos igual, y se
+    // siguen preguntando por separado.
     const cobroTocado = cobroCuenta.value?.id ?? cobroPedidoId.value
     if (cobroTocado && fusedIds.has(cobroTocado)) {
       const estabaAbierto = cobroOpen.value
@@ -1305,7 +1298,7 @@ async function transferirCuentaConPin(garzonId: string, pin: string) {
     })
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'No se pudo tomar la cuenta', () => { void transferirCuentaConPin(garzonId, pin) })
+    toastErrorOperativo(e, 'No se pudo tomar la cuenta')
   }
   finally {
     transfiriendo.value = false
@@ -2238,10 +2231,8 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     propinaMonto: propinaMonto.value || '0',
     propinaSugerida: propinaSugerida.value || propinaMonto.value || '0',
   }
-  // **`submitting` se prende ACÁ, además de adentro de `cerrarCuentaConPin`** — que
-  // corre después del PIN y del flush; allá se queda porque el reintento de
-  // `toastErrorOperativo` la vuelve a invocar sin pasar por acá—. Hasta el
-  // 2026-09-06 se prendía **solo** allá, así que en
+  // **`submitting` se prende ACÁ**, y no adentro de `cerrarCuentaConPin`, que corre
+  // después del PIN y del flush. Hasta el 2026-09-06 se prendía **solo** allá, así que en
   // todo ese tramo el botón *Cerrar y cobrar* seguía habilitado y el garzón podía
   // reabrir el modal y **confirmar el mismo cobro dos veces**: el segundo `POST`
   // rebotaba con el rechazo del backend sobre una cuenta que él ya había cobrado.
@@ -2274,8 +2265,7 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
 /**
  * ⚠️ Todo lo que hay en `cobro` llega **por argumento**: es la foto de cuando el
  * garzón confirmó, no lo que haya en pantalla cuando esto corre. Ver
- * `confirmarCobro`, que la saca. El reintento del `catch` reusa esa misma foto,
- * así que tampoco puede cerrar otra cuenta ni cobrar otra propina.
+ * `confirmarCobro`, que la saca.
  *
  * Lo que se lee de un `ref` acá adentro es una decisión aparte, tomada de a una
  * y escrita donde se toma. Las que quedan vivas —`propinaPorcentaje`,
@@ -2294,12 +2284,11 @@ async function cerrarCuentaConPin(
   garzonId: string,
   pin: string,
 ) {
-  submitting.value = true
-  // ⚠️ **`cobroEnVueloId` NO se re-arma acá, y la simetría con `submitting` es
-  // aparente.** La fusión pudo haberla anulado durante el `await flushPendientes()`
-  // que corre ANTES de esta llamada; re-armarla acá pisaría justo eso y el guard
-  // de más abajo no cortaría nunca. La arma `confirmarCobro`, que es donde
-  // empieza el tramo, y el reintento del `catch` la vuelve a armar por su cuenta.
+  // ⚠️ **Ni `submitting` ni `cobroEnVueloId` se prenden acá: los prende
+  // `confirmarCobro`**, que es donde empieza el tramo. Con la marca importa además el
+  // orden: la fusión pudo haberla anulado durante el `await flushPendientes()` que
+  // corre ANTES de esta llamada, y re-armarla acá pisaría justo eso —el guard de más
+  // abajo no cortaría nunca—.
   // Todo lo que viene adentro de `cobro` es la foto; lo que se lee de un `ref`
   // acá abajo es una decisión aparte, tomada de a una.
   const { cuenta: cuentaCerrada, mesa: mesaCerrada, pagos, vuelto } = cobro
@@ -2353,18 +2342,11 @@ async function cerrarCuentaConPin(
     // despachado le diría *"el cobro no salió"* a alguien cuyo cobro salió.
     //
     // ⚠️ **La marca no la escribe solo la fusión**, y conviene tener a la vista
-    // el resto antes de tocar esto: `confirmarCobro` la arma, el `onCancelar` del
-    // teclado y el `finally` de acá abajo la apagan, y el reintento del `catch` la
-    // **re-apunta**. De ahí sale la única escena en que este guard se equivoca, y
-    // son **dos mitades**: un cierre que falló por sesión de trabajo, un segundo
-    // cobro confirmado sobre otra cuenta mientras tanto, y el reintento disparando
-    // en el medio. Ahí el reintento pisa la marca con la cuenta vieja, así que
-    // **mata el cierre bueno con este mensaje, que ahí miente** —y de paso el
-    // reintento sale sin la protección, porque para él la marca quedó armada—.
-    // Se deja escrito en vez de defenderlo: pide que las esperas del segundo
-    // sobrevivan al flujo entero de entrar a turno, y en esa misma escena el
-    // `submitting` compartido ya se pisa igual, que es anterior a este guard.
-    // Anotado en `docs/agent/pendientes.md` § 2.
+    // el resto antes de tocar esto: `confirmarCobro` la arma, y el `onCancelar` del
+    // teclado y el `finally` de acá abajo la apagan. Hasta el 2026-09-11 también la
+    // re-apuntaba el reintento automático del `catch`, y de ahí salía la única escena
+    // en que este guard se equivocaba; ese reintento ya no existe (owner: después de
+    // entrar a turno, el garzón vuelve a pedir el cobro).
     //
     // ⚠️ **Avisar no alcanzaba, y la mitad cara es la cuenta DESTINO**, medido:
     // la de ORIGEN queda `cancelada` y el backend rechaza con *"La cuenta no está
@@ -2379,21 +2361,15 @@ async function cerrarCuentaConPin(
     // que todavía se estaba armando** (ver `fusionarSeleccionadas`): los pagos
     // cargados se pierden y hay que volver a tipearlos sobre la fusionada.
     //
-    // ⚠️ **Esta marca se anula APARTE de la del cobro abierto o pedido, y eso no
-    // es cosmética.** En `fusionarSeleccionadas` son dos `if` independientes
-    // justamente porque los dos cobros pueden estar vivos a la vez, y el orden es
-    // éste —medido, porque deducirlo salió mal—: el cierre rebota por sesión de
-    // trabajo, su `finally` apaga `submitting` y la pantalla queda usable; el
-    // garzón vuelve a tocar *Cerrar y cobrar* **mientras viaja la sesión de
-    // turno**, lo que deja un cobro pedido vivo; y recién ahí el reintento arma
-    // esta marca encima. Mientras un cierre viaja el botón sí está bloqueado
-    // (`:loading="abriendoCobro || submitting"`); lo que no pasa por ese gate es
-    // el reintento.
-    // Preguntándolo en una sola cadena de `??` —como estaba— el cobro pedido
-    // **enmascaraba** al cierre, no se anulaba nada y el `POST` salía igual sobre
-    // la cuenta fusionada: el cobro de menos de la DESTINO, que es justo lo que
-    // este guard viene a evitar. Lo midió la revisión independiente con sonda
-    // (`cierres=["cuenta-9","cuenta-9"]`) y tiene test propio.
+    // ⚠️ **Esta marca se anula APARTE de la del cobro abierto o pedido.** En
+    // `fusionarSeleccionadas` son dos `if` independientes porque hasta el 2026-09-11
+    // los dos cobros podían estar vivos a la vez: mientras un cierre viaja el botón
+    // está bloqueado (`:loading="abriendoCobro || submitting"`), pero el reintento
+    // automático del `catch` armaba esta marca sin pasar por ese gate, y en una sola
+    // cadena de `??` el cobro pedido **enmascaraba** al cierre —no se anulaba nada y
+    // el `POST` salía sobre la cuenta fusionada—. El reintento se sacó; la separación
+    // se deja porque no cuesta nada y sigue siendo correcta si aparece otro camino que
+    // los junte.
     if (cobroEnVueloId.value !== cuentaCerrada.id) {
       toast.add({
         title: 'El cobro no salió: esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada.',
@@ -2476,22 +2452,7 @@ async function cerrarCuentaConPin(
     if (activeCuenta.value?.id === cuentaCerrada.id) volverACuentas()
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al cerrar la cuenta', () => {
-      // El reintento arma su propia marca: el `finally` de abajo apagó la
-      // anterior, y sin ella el guard de arriba cortaría el cierre en seco.
-      // ⚠️ **La ventana que esto NO cierra, dicha:** una fusión que aterrice
-      // entre el fallo y el reintento no ve ningún cobro en vuelo que anular,
-      // así que el reintento sale igual. Es el estado de antes de este guard,
-      // acotado a ese tramo.
-      // Y ese tramo **no está acotado por el modal de turno**, que es como se
-      // escribió primero: `abrirEntrarTurno` no abre nada si no hay turnos
-      // activos o si la carga falla, y `accionPendiente` queda armado igual
-      // —solo lo limpian `cancelarEntrarTurno` y un inicio de sesión que
-      // funcione—. O sea que el garzón puede fusionar con la pantalla entera
-      // usable y entrar a turno después. Lo midió la revisión independiente.
-      cobroEnVueloId.value = cobro.cuenta.id
-      void cerrarCuentaConPin(cobro, garzonId, pin)
-    })
+    toastErrorOperativo(e, 'Error al cerrar la cuenta')
   }
   finally {
     submitting.value = false

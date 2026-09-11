@@ -223,34 +223,6 @@ la forma y sin el bug**, y estas tres están nombradas porque ya se levantaron u
 esa familia está en [`resueltos.md`](resueltos.md); lo que **falta** son las entradas de este
 archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece.
 
-- [ ] **El reintento de un cierre fallado no se entera de una fusión que aterrizó mientras
-  tanto** (frontend; **medido el 2026-09-06** por la revisión del cierre del cobro en vuelo) —
-  es el residuo declarado de ese cierre, no un descubrimiento nuevo.
-
-  El guard de `cerrarCuentaConPin` no manda el `POST` si la fusión anuló la marca del cobro en
-  vuelo. El reintento del `catch` —el que ofrece `toastErrorOperativo` cuando el error es de
-  sesión de trabajo— **arma su propia marca**, así que una fusión que aterrice **entre el fallo
-  y el reintento** no encuentra ningún cobro en vuelo que anular y ese reintento sale igual, con
-  el cobro-de-menos de la cuenta destino incluido.
-
-  ⚠️ **Y ese tramo no lo acota el modal de turno**, que es lo primero que uno supone:
-  `abrirEntrarTurno` corta sin abrir nada si no hay turnos activos o si `turnosApi.listar()`
-  falla, y `accionPendiente` queda armado igual —solo lo limpian `cancelarEntrarTurno` y un
-  inicio de sesión que funcione—. O sea que el garzón puede quedarse con la pantalla entera
-  usable, fusionar, y entrar a turno más tarde: ahí dispara.
-
-  ⚠️ **Y tiene una segunda mitad, que es conducta NUEVA del guard** (la levantó la revisión): si
-  el garzón confirma un **segundo** cobro sobre otra cuenta mientras el reintento está pendiente,
-  el reintento **pisa la marca** con la cuenta vieja y el guard cancela ese segundo cierre con el
-  aviso *"esa cuenta entró en la fusión"*, que ahí es falso. Antes de este frente ese segundo
-  `POST` salía. Pide que las esperas del segundo cobro sobrevivan al flujo entero de entrar a
-  turno, y en esa misma escena el `submitting` compartido ya se pisaba —eso sí es anterior—.
-
-  **Lo que falta medir antes de arreglarlo**: si el reintento tiene que revalidar la cuenta
-  contra el listado, si alcanza con que la fusión limpie `accionPendiente` cuando se lleva esa
-  cuenta, o si la marca tiene que ser por intento en vez de compartida —que es lo que cerraría
-  las dos mitades de una—.
-
 - [ ] **La venta que se cierra sin cálculo queda sin boleta, y la caja se proyecta inflada por
   el vuelto** (frontend; **medido el 2026-09-05** por la revisión del cierre de la quinta
   puerta) — es el residuo **conocido y aceptado** de ese cierre, anotado para que no se

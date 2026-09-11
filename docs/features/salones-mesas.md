@@ -673,16 +673,13 @@ la acción lee después de un `await` hay que decidirlo a mano, una sentencia po
   punto donde se sabe que el `POST` no llegó a salir. Avisando desde la fusión, una respuesta que
   vuelve con el cierre ya despachado diría *"el cobro no salió"* con el cobro saliendo.
 
-  ⚠️ **La ventana que queda:** una fusión que aterrice entre un cierre fallado y su reintento
-  —el que ofrece el error de sesión de trabajo— no ve ningún cobro en vuelo que anular, así que
-  ese reintento sale igual. **Y ese tramo no lo acota el modal de turno**: `abrirEntrarTurno`
-  no abre nada si no hay turnos activos o si la carga falla, y la acción pendiente queda armada
-  igual, con la pantalla entera usable — el garzón puede fusionar y entrar a turno después.
-  ⚠️ **Y esa ventana tiene una segunda mitad que es conducta nueva:** si el garzón confirma un
-  **segundo** cobro sobre otra cuenta mientras ese reintento está pendiente, el reintento pisa la
-  marca con la cuenta vieja y el guard cancela **ese segundo cierre**, con un aviso que ahí es
-  falso. Antes de este frente ese `POST` salía. Las dos mitades, con lo que falta medir para
-  cerrarlas, en [`../agent/pendientes.md`](../agent/pendientes.md) § 2.
+  ✅ **La ventana que quedaba ya no existe (2026-09-11).** Una fusión que aterrizaba entre un
+  cierre fallado por sesión de trabajo y su **reintento automático** no encontraba ningún cobro
+  en vuelo que anular, y el reintento salía igual, con los pagos de antes; y si mientras tanto el
+  garzón confirmaba un segundo cobro, el reintento le pisaba la marca y el guard cancelaba ese
+  segundo con un aviso falso. **El owner decidió que no haya reintento automático**: el error de
+  sesión abre el modal de entrar a turno y avisa, pero la acción la vuelve a pedir el garzón —ver
+  "Sin reintento automático", más abajo—.
 - **Lo que la acción DESCARTA mira de qué cuenta es cada edición**, no vacía todo: cancelar tira
   lo de su cuenta, fusionar lo de **todas** las que entraron a la fusión —incluida la destino, y
   también las líneas de la destino que la fusión no tocó: se descarta por cuenta, no por línea,
@@ -932,6 +929,13 @@ que ensanchar la ventana con ganchos de test en el camino caliente del POS.
 - Estado de mesa derivado, no almacenado.
 - Drag & drop con pointer events nativos, sin nueva dependencia.
 - `pos_x/pos_y` como fracción `0..1` para plano responsivo.
+- **Sin reintento automático** (owner, 2026-09-11). Si abrir, tomar o cobrar una cuenta falla
+  porque el garzón no tiene sesión de trabajo, la pantalla abre el modal de entrar a turno y
+  avisa *"Cuando entres a turno, vuelve a intentarlo"*, pero **no repite la acción sola**.
+  Repetirla actuaba sobre lo que hubiera en pantalla al repetir —otra mesa, otra cuenta— o
+  cobraba con los pagos de antes una cuenta que una fusión pudo haber cambiado. En la tablet
+  compartida casi no se llega a ese error, porque el selector de PIN solo ofrece garzones en
+  turno; en el modo personal, sí.
 
 ## Related Features
 

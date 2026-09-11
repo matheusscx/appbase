@@ -23,6 +23,84 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Sin reintento automático: el reintento del cobro contra la fusión se cierra sacando el reintento (cerrada 2026-09-11)
+
+Sale de [`pendientes.md` § 2](pendientes.md). La entrada, verbatim:
+
+### El reintento de un cierre fallado no se entera de una fusión que aterrizó mientras tanto
+
+- [ ] **El reintento de un cierre fallado no se entera de una fusión que aterrizó mientras
+  tanto** (frontend; **medido el 2026-09-06** por la revisión del cierre del cobro en vuelo) —
+  es el residuo declarado de ese cierre, no un descubrimiento nuevo.
+
+  El guard de `cerrarCuentaConPin` no manda el `POST` si la fusión anuló la marca del cobro en
+  vuelo. El reintento del `catch` —el que ofrece `toastErrorOperativo` cuando el error es de
+  sesión de trabajo— **arma su propia marca**, así que una fusión que aterrice **entre el fallo
+  y el reintento** no encuentra ningún cobro en vuelo que anular y ese reintento sale igual, con
+  el cobro-de-menos de la cuenta destino incluido.
+
+  ⚠️ **Y ese tramo no lo acota el modal de turno**, que es lo primero que uno supone:
+  `abrirEntrarTurno` corta sin abrir nada si no hay turnos activos o si `turnosApi.listar()`
+  falla, y `accionPendiente` queda armado igual —solo lo limpian `cancelarEntrarTurno` y un
+  inicio de sesión que funcione—. O sea que el garzón puede quedarse con la pantalla entera
+  usable, fusionar, y entrar a turno más tarde: ahí dispara.
+
+  ⚠️ **Y tiene una segunda mitad, que es conducta NUEVA del guard** (la levantó la revisión): si
+  el garzón confirma un **segundo** cobro sobre otra cuenta mientras el reintento está pendiente,
+  el reintento **pisa la marca** con la cuenta vieja y el guard cancela ese segundo cierre con el
+  aviso *"esa cuenta entró en la fusión"*, que ahí es falso. Antes de este frente ese segundo
+  `POST` salía. Pide que las esperas del segundo cobro sobrevivan al flujo entero de entrar a
+  turno, y en esa misma escena el `submitting` compartido ya se pisaba —eso sí es anterior—.
+
+  **Lo que falta medir antes de arreglarlo**: si el reintento tiene que revalidar la cuenta
+  contra el listado, si alcanza con que la fusión limpie `accionPendiente` cuando se lleva esa
+  cuenta, o si la marca tiene que ser por intento en vez de compartida —que es lo que cerraría
+  las dos mitades de una—.
+
+**La decisión del owner (2026-09-11): no hay reintento automático.** Ninguna de las tres salidas
+que la entrada ofrecía. Explicada la escena, el owner preguntó primero en qué casos se
+reintentaba y por qué, y cuando se le mostró que las otras dos acciones también actuaban sobre
+algo distinto de lo que el garzón tocó, pidió sacarlo de las tres.
+
+**Dónde vivía, medido antes de decidir.** Solo en `pages/salones/index.vue`, y solo cuando el
+error es *"sesión de trabajo"*: `toastErrorOperativo` guardaba la acción en `accionPendiente` y
+`iniciarSesionConPin` la repetía al entrar a turno. La usaban tres acciones, con tres riesgos
+distintos:
+
+| Acción | Qué repetía | El riesgo |
+|---|---|---|
+| Abrir cuenta | leía la mesa **al repetir** | abría la cuenta en otra mesa, si el garzón se había movido |
+| Tomar cuenta | leía la cuenta **al repetir** | quedaba responsable de otra cuenta, y la propina se atribuye al responsable |
+| Cobrar | una foto del cobro, con los pagos de antes | si una fusión había cambiado la cuenta, cobraba de menos |
+
+Llegó el 2026-07-22 dentro de un commit del seeder (`88a72a81`), con una línea (*"retry
+actions"*) y sin ninguna decisión escrita. En la tablet compartida casi no se llegaba a ese
+error —el selector de PIN de las tres acciones solo ofrece garzones en turno—; en el **modo
+personal**, donde la app no pide PIN, sí.
+
+**Lo que se hizo.** El error de sesión sigue abriendo el modal de entrar a turno, y el aviso suma
+*"Cuando entres a turno, vuelve a intentarlo"*, porque ahora nada se hace solo y un *"Sesión
+iniciada"* a secas se podía leer como que la acción ya había salido. Con el reintento se fueron:
+
+- `accionPendiente`, el parámetro `retry` de `toastErrorOperativo` y la repetición en
+  `iniciarSesionConPin`;
+- el segundo `submitting.value = true`, adentro de `cerrarCuentaConPin`, que existía porque el
+  reintento llamaba a esa función sin pasar por `confirmarCobro`: hoy tiene un solo llamador,
+  que ya lo prende;
+- el test *"un cobro pedido no le tapa a la fusión el cierre en vuelo que hay debajo"* y su
+  mock `sesionRetenida`: su escena —un cobro pedido y un cierre en vuelo a la vez— solo la armaba
+  el reintento, así que sin él el test pasaba sin probar nada. El código que separa las dos
+  marcas en la fusión se queda: no cuesta nada y sigue siendo correcto.
+
+**Lo que lo fija.** El test que afirmaba que el cierre rebotado *sí* salía al entrar a turno se
+invirtió, y se sumaron dos para abrir y tomar cuenta. Los tres, antes de tocar el código, en rojo
+por el motivo correcto —la acción se repetía—: el cierre dio `['cuenta-9', 'cuenta-9']`, la toma
+de cuenta dos `POST .../transferir`, y la apertura dos `POST .../cuentas`. Los tres afirman antes
+que el garzón **entró a turno** (*"Sesión iniciada"*), para que no pasen por un flujo que no llegó
+hasta ahí, y los mocks dejan salir bien el segundo intento, así que una repetición se vería.
+
+---
+
 ## Dos de la § 2, medidas y cerradas: el conteo del recuento por la API y el default del precio de opción (cerradas 2026-09-11)
 
 Salen de [`pendientes.md` § 2](pendientes.md), en la misma pasada por esa sección. Las entradas,
@@ -1691,6 +1769,10 @@ turnos activos o si `turnosApi.listar()` falla, y `accionPendiente` queda armado
 limpian `cancelarEntrarTurno` y un inicio de sesión que funcione—. O sea que el garzón puede
 quedarse con la pantalla entera usable, fusionar, y entrar a turno más tarde: ahí dispara el
 reintento.
+
+➡️ **Cerrada el 2026-09-11, sacando el reintento:** el owner decidió que no haya reintento
+automático, así que esta ventana —y su segunda mitad— ya no existe. Ver *"Sin reintento
+automático"*, más arriba en este archivo.
 
 ### El cobro pedido que tapaba al cierre, y por qué las marcas se miran por separado
 
