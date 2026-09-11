@@ -6,6 +6,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+const USD_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440005';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -20,6 +21,7 @@ interface DesfaseItemResponse {
   /** El costo recalculado que la bandeja propone: el esperado tras aplicar. */
   costoPropuesto: string;
   precioSugerido: string | null;
+  monedaId: string;
 }
 
 interface ItemDetalleResponse {
@@ -520,6 +522,104 @@ describe('Simulador impacto costos (e2e)', () => {
     expect(
       (bandeja.body as DesfaseItemResponse[]).some((r) => r.itemId === comboId),
     ).toBe(true);
+  });
+
+  it('la fila trae la moneda DEL ÍTEM, en recetas y en combos', async () => {
+    // Todo en USD —insumos, receta y combo— para no mezclar monedas en un mismo
+    // ítem, que el frente "sin mezclar" va a rechazar. USD está habilitada para
+    // Paris en el seed. En USD y no en la oficial: una fila que mandara la
+    // oficial pasaría con CLP.
+    const sufijo = Date.now();
+    const crear = async (body: Record<string, unknown>): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+    const carneId = await crear({
+      nombre: `Carne USD E2E ${sufijo}`,
+      precioBase: '1',
+      monedaId: USD_MONEDA_ID,
+      tipo: 'ingrediente',
+      unidadMedida: 'kg',
+      stock: '10',
+      costo: '8',
+    });
+    const recetaId = await crear({
+      nombre: `Burger USD E2E ${sufijo}`,
+      precioBase: '12',
+      monedaId: USD_MONEDA_ID,
+      tipo: 'receta',
+      ingredientes: [
+        {
+          ingredienteItemId: carneId,
+          cantidad: '150',
+          unidadCodigo: 'g',
+          bloqueante: true,
+        },
+      ],
+    });
+    const papasId = await crear({
+      nombre: `Papas USD E2E ${sufijo}`,
+      precioBase: '2',
+      monedaId: USD_MONEDA_ID,
+      tipo: 'producto',
+      unidadMedida: 'unidad',
+      stock: '10',
+      costo: '0.5',
+    });
+    const comboId = await crear({
+      nombre: `Combo USD E2E ${sufijo}`,
+      precioBase: '5',
+      monedaId: USD_MONEDA_ID,
+      tipo: 'combo',
+      componentes: [
+        { componenteItemId: papasId, cantidad: '1', bloqueante: true },
+      ],
+    });
+
+    // Sube el costo de los dos insumos: la receta y el combo quedan desfasados.
+    for (const [itemId, costoUnitario] of [
+      [carneId, '10'],
+      [papasId, '0.7'],
+    ]) {
+      await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}/stock`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          tipo: 'entrada',
+          motivo: 'compra',
+          ubicacionId: localId,
+          cantidad: '1',
+          costoUnitario,
+        })
+        .expect(200);
+    }
+
+    const bandeja = await request(app.getHttpServer())
+      .get('/api/desfases')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const filas = bandeja.body as DesfaseItemResponse[];
+    expect(filas.find((r) => r.itemId === recetaId)?.monedaId).toBe(
+      USD_MONEDA_ID,
+    );
+    expect(filas.find((r) => r.itemId === comboId)?.monedaId).toBe(
+      USD_MONEDA_ID,
+    );
+
+    // Y la misma fila por el camino del modal que se abre después de la compra.
+    const afectados = await request(app.getHttpServer())
+      .get(`/api/items/${carneId}/afectados`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(
+      (afectados.body as DesfaseItemResponse[]).find(
+        (r) => r.itemId === recetaId,
+      )?.monedaId,
+    ).toBe(USD_MONEDA_ID);
   });
 
   it('aplicar la receta devuelve el combo en afectados, y aplicarlo escribe ese mismo costo', async () => {

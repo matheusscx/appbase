@@ -23,6 +23,13 @@ const MONEDA_OFICIAL = {
   valorDelDia: null,
 }
 
+// Una moneda con decimales, para la fila de un ítem que no está en la oficial.
+const MONEDA_USD = {
+  monedaId: 'usd-1', codigoIso: 'USD', nombre: 'Dólar', locale: 'en-US', prefix: 'US$',
+  thousands: ',', decimal: '.', decimals: 2, habilitada: true, esOficial: false,
+  valorDelDia: '950',
+}
+
 // `ref` y no un valor fijo: el test de la carrera necesita que la moneda llegue
 // DESPUÉS de las filas, y el `watch` del panel solo la ve si es reactiva.
 const monedaOficialRef = ref<typeof MONEDA_OFICIAL | null>(MONEDA_OFICIAL)
@@ -30,7 +37,12 @@ const monedaOficialRef = ref<typeof MONEDA_OFICIAL | null>(MONEDA_OFICIAL)
 mockNuxtImport('useMonedasStore', () => {
   return () => ({
     get monedaOficial() { return monedaOficialRef.value },
-    getById: () => monedaOficialRef.value ?? undefined,
+    // Por id, como el store real, y en la misma carga: sin la oficial todavía no
+    // hay ninguna.
+    getById: (id: string) => {
+      if (!monedaOficialRef.value) return undefined
+      return id === MONEDA_USD.monedaId ? MONEDA_USD : monedaOficialRef.value
+    },
   })
 })
 
@@ -53,6 +65,7 @@ const FILAS = [
     margenPctActual: '0.6667',
     margenPctPropuesto: '0.6000',
     precioSugerido: null,
+    monedaId: 'clp-1',
     afectados: [],
   },
 ]
@@ -134,6 +147,7 @@ describe('DesfasesPanel — columna Tipo', () => {
             margenPctActual: '0.5952',
             margenPctPropuesto: '0.5714',
             precioSugerido: '4447.0588',
+            monedaId: 'clp-1',
             afectados: [
               { itemId: 'papas-1', nombre: 'Papas fritas', costoActual: '600.0000' },
             ],
@@ -149,6 +163,7 @@ describe('DesfasesPanel — columna Tipo', () => {
             margenPctActual: '0.6667',
             margenPctPropuesto: '0.6000',
             precioSugerido: null,
+            monedaId: 'clp-1',
             afectados: [],
           },
         ],
@@ -222,6 +237,7 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
     margenPctActual: '0.5952',
     margenPctPropuesto: '0.5714',
     precioSugerido: '4447.0588',
+    monedaId: 'clp-1',
     afectados: [],
   }
 
@@ -259,6 +275,42 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
     expect(wrapper.emitted('aplicar')?.[0]?.[0]).toEqual([
       { itemId: 'combo-1', actualizarPrecio: true, precioBase: '4447' },
     ])
+
+    wrapper.unmount()
+  })
+
+  /**
+   * La fila puede ser de un ítem en otra moneda: la bandeja no filtra por moneda. Con el
+   * prefill cuantizado a la OFICIAL, una receta en dólares con sugerencia `12,55` se
+   * aplicaba como `13` —los 0 decimales del peso, un 3,6% de más— y el campo la formateaba
+   * como pesos.
+   */
+  it('una fila en otra moneda se prellena y se aplica en la escala de SU moneda', async () => {
+    esAdmin = true
+    permisos = []
+    const filaUsd = {
+      ...FILA_CON_SUGERENCIA,
+      itemId: 'receta-usd',
+      tipo: 'receta',
+      nombre: 'Burger USD',
+      monedaId: 'usd-1',
+      precioBase: '12.0000',
+      precioSugerido: '12.5500',
+    }
+
+    const wrapper = await mountSuspended(DesfasesPanel, {
+      props: { filas: [filaUsd] as never },
+    })
+
+    await marcarYAplicar(wrapper)
+
+    expect(wrapper.emitted('aplicar')?.[0]?.[0]).toEqual([
+      { itemId: 'receta-usd', actualizarPrecio: true, precioBase: '12.55' },
+    ])
+    // Y el campo es de esa moneda, no de la oficial.
+    const campo = wrapper.findComponent({ name: 'MoneyInput' })
+    expect(campo.props('monedaId')).toBe('usd-1')
+    expect(campo.props('oficial')).toBe(false)
 
     wrapper.unmount()
   })

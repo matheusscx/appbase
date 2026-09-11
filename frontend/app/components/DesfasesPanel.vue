@@ -15,6 +15,8 @@ export interface DesfaseItemDto {
   costoPropuesto: string
   deltaCosto: string
   precioBase: string
+  /** La moneda del ítem, que es la del precio: con ella se prellena y se formatea. */
+  monedaId: string
   margenPctActual: string | null
   margenPctPropuesto: string | null
   precioSugerido: string | null
@@ -76,7 +78,9 @@ const selected = ref<Set<string>>(new Set())
 const rowState = ref<Record<string, RowState>>({})
 
 /**
- * El precio con el que se prefillea la fila, **cuantizado a la moneda oficial**.
+ * El precio con el que se prefillea la fila, **cuantizado a la moneda de la fila**, que es
+ * la del ítem. La bandeja no filtra por moneda: con la oficial, una receta en dólares con
+ * sugerencia `12,55` se aplicaba como `13` (hasta el 2026-09-11).
  *
  * `precioSugerido` es una tasa de 4 decimales: lo calcula el motor y el backend lo
  * deja así a propósito —su docblock dice que cuantizarlo *"sería UX del prefill"*—.
@@ -93,12 +97,12 @@ const rowState = ref<Record<string, RowState>>({})
  * `modo_redondeo` del tenant: `formatMontoManual` hace `abs.toFixed(cfg.decimals)`, y acá
  * es `new Decimal(crudo).toFixed(decimales)`. Es a propósito — lo que este número tiene
  * que igualar es **lo que el campo muestra**, y usar otro modo de redondeo reabriría la
- * misma divergencia por el otro lado. Y va contra la **oficial** porque el `MoneyInput` de
- * la fila es `oficial`; el día que el panel muestre la moneda del ítem, esto la sigue.
+ * misma divergencia por el otro lado. Y va contra la moneda de la fila porque el
+ * `MoneyInput` de la fila es de esa moneda: lo que cuantiza y lo que muestra son la misma.
  */
 function precioPrefill(f: DesfaseItemDto): string {
   const crudo = f.precioSugerido ?? f.precioBase
-  const decimales = monedasStore.monedaOficial?.decimals
+  const decimales = monedasStore.getById(f.monedaId)?.decimals
   if (decimales === undefined) return crudo
   try {
     return new Decimal(crudo).toFixed(decimales)
@@ -133,11 +137,13 @@ watch(
  * `onMounted`, y quien dispara `monedasStore.ensureLoaded()` es el layout. Con una carga
  * dura de `/desfases`, las filas pueden llegar **antes** que la moneda oficial — y ahí
  * `precioPrefill` no tiene escala con la que cuantizar y devuelve el crudo, que es
- * justamente el número que no se puede mostrar.
+ * justamente el número que no se puede mostrar. Se mira la **oficial** aunque cada fila
+ * cuantice con la suya: las dos salen de la misma lista, que `ensureLoaded` llena en una
+ * sola carga, así que la oficial llegando es la señal de que llegaron todas.
  *
  * Se rehace en cualquier transición `null → moneda`, no solo en la primera. Lo que hace que
  * pisar `precioEditado` sea seguro es un invariante **del componente**, no de una pantalla:
- * mientras `monedaOficial` es `null`, el `MoneyInput` de la fila se renderiza **deshabilitado**
+ * mientras las monedas no cargaron, el `MoneyInput` de la fila se renderiza **deshabilitado**
  * (`!cfg`), así que en la ventana que este `watch` sobreescribe nadie pudo tipear.
  * ⚠️ Eso no cubriría una **segunda** transición `null → moneda` con el panel montado y algo ya
  * tipeado. Hoy no existe por dos hechos, y ninguno de los dos es "nadie repuebla monedas"
@@ -325,7 +331,7 @@ function onDescartar() {
                 <MoneyInput
                   v-if="rowState[fila.itemId]"
                   v-model="rowState[fila.itemId]!.precioEditado"
-                  oficial
+                  :moneda-id="fila.monedaId"
                   size="sm"
                   class="w-full"
                   :disabled="!rowState[fila.itemId]?.actualizarPrecio"

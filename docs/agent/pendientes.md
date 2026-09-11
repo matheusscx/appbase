@@ -732,9 +732,10 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   1. **La bandeja de desfases aplica un precio que el ítem no puede expresar, por dos vías
      distintas — y son dos frentes, no uno.** El prefill se cuantiza a la escala de la moneda
      **oficial** (`precioPrefill`), y eso falla en dos direcciones:
-     **(a) otra moneda** — la bandeja no filtra por moneda y `DesfaseItemDto` no trae
-     `monedaId`, así que con un tenant en pesos y una receta en dólares aplicar redondea
-     `12,55` a `13` (3,6%). **Cerrarlo pide backend**: que la fila traiga la moneda del ítem.
+     ✅ **(a) otra moneda — cerrada el 2026-09-11.** La bandeja no filtra por moneda y
+     `DesfaseItemDto` no traía `monedaId`, así que con un tenant en pesos y una receta en
+     dólares aplicar redondeaba `12,55` a `13` (3,6%). Ahora la fila trae la moneda del ítem y
+     el panel prellena y formatea con ella → [`resueltos.md`](resueltos.md).
      **(b) misma moneda, tasa por unidad chica** — un ítem en pesos costeado por gramo:
      la sugerencia `8,5678`/g se aplica como `9`/g, un 5% (medido el 2026-08-28,
      [`specs/2026-08-28-costo-por-unidad-elegida-design.md`](../superpowers/specs/2026-08-28-costo-por-unidad-elegida-design.md)).

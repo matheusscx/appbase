@@ -45,6 +45,7 @@ function fila(id: string, over: Partial<DesfaseItemDto> = {}): DesfaseItemDto {
     costoPropuesto: '150.0000',
     deltaCosto: '50.0000',
     precioBase: '300.0000',
+    monedaId: 'clp-1',
     margenPctActual: '0.6667',
     margenPctPropuesto: '0.5000',
     precioSugerido: '450.0000',

@@ -215,6 +215,11 @@ export interface DesfaseItemDto {
   costoPropuesto: string;
   deltaCosto: string;
   precioBase: string;
+  /**
+   * La moneda del ítem, que es la del precio. La bandeja no filtra por moneda, así
+   * que el panel la necesita para prellenar y formatear el precio en SU escala.
+   */
+  monedaId: string;
   margenPctActual: string | null;
   margenPctPropuesto: string | null;
   precioSugerido: string | null;
@@ -6123,9 +6128,10 @@ export class ItemsService {
       costo_actual: string;
       costo_propuesto_omitido: string | null;
       precio_base: string;
+      moneda_id: string;
     }[] = await runner.query(
       `SELECT DISTINCT i.item_id AS receta_item_id, i.nombre,
-              ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
+              ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base, i.moneda_id
          FROM items i
          JOIN item_receta ir ON ir.item_id = i.item_id
          ${join}
@@ -6200,6 +6206,7 @@ export class ItemsService {
         costoPropuesto: propuesto,
         deltaCosto: costoPropD.minus(costoActualD).toFixed(ESCALA_COSTO),
         precioBase: precio.toFixed(4),
+        monedaId: cab.moneda_id,
         margenPctActual: mAct?.toFixed(ESCALA_COSTO) ?? null,
         margenPctPropuesto: mProp?.toFixed(ESCALA_COSTO) ?? null,
         precioSugerido: sug?.toFixed(4) ?? null,
@@ -6286,9 +6293,10 @@ export class ItemsService {
       costo_actual: string | null;
       costo_propuesto_omitido: string | null;
       precio_base: string;
+      moneda_id: string;
     }[] = await runner.query(
       `SELECT DISTINCT i.item_id AS combo_item_id, i.nombre,
-              ic.costo_actual, ic.costo_propuesto_omitido, i.precio_base
+              ic.costo_actual, ic.costo_propuesto_omitido, i.precio_base, i.moneda_id
          FROM items i
          JOIN item_combo ic ON ic.item_id = i.item_id
          ${join}
@@ -6357,6 +6365,7 @@ export class ItemsService {
         costoPropuesto: propuesto,
         deltaCosto: costoPropD.minus(costoActualD).toFixed(ESCALA_COSTO),
         precioBase: precio.toFixed(4),
+        monedaId: cab.moneda_id,
         margenPctActual:
           this.margenPct(precio, costoActualD)?.toFixed(ESCALA_COSTO) ?? null,
         margenPctPropuesto:

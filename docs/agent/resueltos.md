@@ -23,6 +23,47 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La bandeja de desfases prellena el precio en la moneda del ítem (cerrada 2026-09-11)
+
+Sale de [`pendientes.md` § 2](pendientes.md), de la entrada *"Tres formas en que la pantalla
+puede quedarse con plata que la moneda no expresa"*. Se cierra **solo su punto 1(a)**; el resto
+sigue allá. El texto de ese punto, verbatim:
+
+> **(a) otra moneda** — la bandeja no filtra por moneda y `DesfaseItemDto` no trae
+> `monedaId`, así que con un tenant en pesos y una receta en dólares aplicar redondea
+> `12,55` a `13` (3,6%). **Cerrarlo pide backend**: que la fila traiga la moneda del ítem.
+
+**Lo que se hizo.** `DesfaseItemDto` trae `monedaId` —la del ítem, que es la del precio—, sacada
+de `items`, que ya estaba en el `FROM` de las dos consultas que arman las filas (recetas y
+combos): sin query nueva. `DesfasesPanel` prellena con los decimales de esa moneda y monta el
+`MoneyInput` de la fila con ella, en vez de la oficial. El `watch` que rehace el prefill cuando
+las monedas llegan tarde sigue mirando la oficial: sale de la misma lista y la misma carga que
+las demás (`ensureLoaded` del store de monedas).
+
+**Lo que no se tocó, a propósito:** los costos de la fila siguen formateados con la oficial.
+Mientras una receta pueda tener partes en otra moneda, su costo es una suma sin convertir, y
+formatearlo con la moneda del ítem lo dejaría mal para el otro lado; eso lo cierra el frente
+"sin mezclar" de la § 3. `precioSugerido` no tiene ese problema: es proporcional —costo nuevo ×
+precio viejo / costo viejo—, así que sale en la moneda del precio aunque la receta mezcle.
+
+**Lo que lo fija, mutante por mutante:**
+
+| Mutante | Lo caza |
+|---|---|
+| las dos consultas sin `moneda_id` (el código anterior) | el e2e nuevo de `simulador-costos`, todo en USD —receta y combo—: la fila llega sin moneda |
+| sin `monedaId` solo en la fila de combos | el mismo e2e, en la aserción del combo |
+| el prefill cuantizado con la oficial (el código anterior) | el spec de `DesfasesPanel`: una fila en USD con sugerencia `12.5500` aplicaba `13` en vez de `12.55` |
+| el campo de la fila montado con `oficial` | el mismo spec, en la aserción de la moneda del campo |
+
+El e2e va en USD y no en la oficial a propósito: una fila que mandara la moneda oficial en vez
+de la del ítem pasaría con CLP.
+
+**Lo que sigue en la entrada:** la vía (b) —el ítem costeado por gramo, que la regla del owner
+resuelve expresándolo por kilo—, el precio guardado fuera de la escala de su moneda que no se
+puede volver a escribir, y el 400 latente. Este cambio no toca ninguno.
+
+---
+
 ## Sin reintento automático: el reintento del cobro contra la fusión se cierra sacando el reintento (cerrada 2026-09-11)
 
 Sale de [`pendientes.md` § 2](pendientes.md). La entrada, verbatim:
