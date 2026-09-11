@@ -23,6 +23,57 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El séptimo sitio del login del segundo tenant, convertido (cerrada 2026-09-11)
+
+Sale de [`pendientes.md` § 1](pendientes.md), donde la dejó el cierre del helper del segundo
+tenant el 2026-09-10. La entrada, verbatim:
+
+### El séptimo sitio del login del segundo tenant (2026-09-10)
+
+- [ ] **`alta-usuarios-tenant.e2e-spec.ts:124-131` hace el mismo bloque que el helper
+  `test/helpers/segundo-tenant.ts` extrajo de otros seis**, inline y con `loginSuelto`. Se
+  reemplaza por `tokenFalabella = await loginSegundoTenant(app);`.
+  **Quedó afuera del cierre a propósito** —tocar un spec obliga a re-correr el e2e completo
+  sobre un cierre ya verificado—, no por olvido; el detalle está en
+  [`resueltos.md`](resueltos.md).
+  ⚠️ **No es "una línea", y la primera redacción del cierre lo decía así.** Ese bloque es el
+  **único** uso de `FALABELLA_TENANT_ID` en el archivo (declarada en `:17`), así que el cambio
+  arrastra la `const` huérfana y el comentario de `:121-123` que la explica. Es el mismo
+  residuo que el cierre del helper tuvo que limpiar tres veces; el gesto que lo caza es
+  `git diff --cached -U3` sobre cada borrado de `const`.
+  **Se toma junto con el próximo cambio de esa suite**, para pagar una sola corrida de e2e.
+
+**Lo que se hizo.** El bloque pasó a `tokenFalabella = await loginSegundoTenant(app);`, y con él
+se fue `FALABELLA_TENANT_ID`, que no tenía otro uso. `loginSuelto` y `TokenResponse` se quedan:
+los sigue usando el login a Paris del `beforeAll`, y `loginSuelto` además un test de más abajo.
+Se tomó solo, sin esperar al próximo cambio de la suite, porque lo pidió el owner: costó una
+corrida de e2e para él solo.
+
+**Lo que la entrada decía mal: el comentario no se va.** Decía que el cambio arrastra *"el
+comentario de `:121-123` que la explica"* —a la `const`—. No la explica: dice para qué el test
+entra al otro tenant —un rol que no es de Paris, y un admin que puede dar de alta ahí—, y los
+dos usos siguen (`rolIdFalabella`, y el alta del *"correo que existe pero NO es miembro"*).
+Quedó encima de la llamada al helper, que es donde se lee.
+
+**No hay octavo sitio.** Siete specs más declaran el uuid del segundo tenant y ninguno es copia
+de este bloque; la clasificación del cierre del helper se sostiene, abierta línea por línea otra
+vez: cinco usan el login genérico de dos pasos (`caja`, `cajones`, `garzon-pin`,
+`modulo-contratado-borde-duro`, `uso-reglas`) y dos lo usan como dato, sin loguearse ahí
+(`items-pausados`, `vigencia-cuenta`).
+
+**Lo que dejó de ser cierto, y se corrigió en el mismo commit:** el docblock del helper, que
+decía que el séptimo *"quedó sin convertir"* y que lo usaban *"los seis"*; el cierre del helper
+en este archivo, que mandaba a la § 1; y dos conteos que publica ese cierre y que el cambio
+movió —el `git grep` del uuid, de nueve archivos a ocho, y la superficie del renombre, de 440
+líneas a 438—. El de `admin@sistema.com` **no** se movió: sigue en 10 de los 70 specs, porque el
+comentario que se quedó lo nombra.
+
+**Qué lo fija.** No hay conducta nueva que fijar: el helper hace el mismo login de dos pasos
+—cookie incluida, los dos status afirmados— que el bloque que reemplaza. Lo que lo prueba es la
+suite corriendo contra la base real, en el e2e completo sobre una base recién sembrada.
+
+---
+
 ## Los punteros a una § 4 vacía, re-apuntados (cerrada 2026-09-10)
 
 Sale de [`pendientes.md` § 1](pendientes.md), donde la dejó el cierre del helper del segundo
@@ -163,9 +214,11 @@ pasos contra el mismo tenant —inline, con `loginSuelto` y las variables llamad
 `sueltoSistema`/`enFalabella`—, y se le escapó al barrido por conducta igual que
 `tienda-pasarela-demo` se le había escapado al barrido por nombres. **Quedó sin convertir a
 propósito**: convertirlo es un cambio de código, y un cambio de código obliga a re-correr
-el e2e completo sobre un cierre que ya estaba verificado. Lo que cuesta convertirlo, medido, y la entrada
-que lo espera están en la **§ 1 de [`pendientes.md`](pendientes.md)**: no es una línea, porque
-el bloque es el único uso de `FALABELLA_TENANT_ID` y arrastra esa `const` y su comentario.
+el e2e completo sobre un cierre que ya estaba verificado. Lo que costaba convertirlo, medido, y la
+entrada que lo esperaba estaban en la § 1 de `pendientes.md`: no era una línea, porque el bloque
+es el único uso de `FALABELLA_TENANT_ID` y arrastra esa `const`. ➡️ **Se convirtió el
+2026-09-11**, aparte: *"El séptimo sitio del login del segundo tenant, convertido"*, más arriba
+en este archivo.
 
 ### La deriva que había, y la que no
 
@@ -184,6 +237,9 @@ propio (doce de ellos llamados `FALABELLA_TENANT_ID`, más el `OTRO_TENANT` de
 ```bash
 git grep -n "446655440040" -- backend/test | sed 's/:.*//' | sort -u | wc -l
 ```
+
+➡️ **Desde el 2026-09-11 devuelve ocho**: `alta-usuarios-tenant` salió del conjunto al pasarse
+al helper.
 
 ⚠️ **Los ocho que quedan no son "los que hacen login genérico"**, aunque el cierre lo dijo
 así primero: de los ocho, **cinco** lo hacen (`caja`, `cajones`, `garzon-pin`,
@@ -225,6 +281,10 @@ grep -rn "FALABELLA\|PARIS" backend/src backend/test | wc -l
 explican por qué el renombre no se hizo—. Es la trampa de publicar un conteo en un archivo que
 el propio conteo escanea: pasó al escribir este cierre, con el número subiendo de 444 a 445 al
 nombrar la constante en la prosa.
+
+➡️ **Recontado el 2026-09-11**, al pasar `alta-usuarios-tenant` al helper: **438 líneas en 64
+archivos** (465 apariciones con `-o`), y el comando devuelve 442 y 65. Las dos líneas que se
+fueron son las de su `FALABELLA_TENANT_ID`.
 
 ### Qué NO se extrajo, y por qué importa
 
@@ -276,6 +336,8 @@ eran ciertas por separado y juntas mandaban al próximo a no buscarlo. La regla 
   [`pendientes.md`](pendientes.md)**, con su costo real. No es "una línea": el bloque es el
   **único** uso de `FALABELLA_TENANT_ID`, y borrarlo deja esa `const` y su comentario huérfanos
   —exactamente el residuo que este cierre tuvo que limpiar tres veces—.
+  ➡️ **Salió de la § 1 el 2026-09-11**, convertido: ver *"El séptimo sitio del login del
+  segundo tenant, convertido"*, más arriba en este archivo.
 - **Renombrar `FALABELLA`/`PARIS`** y **el login de dos pasos genérico** — medidos arriba,
   frentes propios, sin entrada porque nadie los pidió.
 

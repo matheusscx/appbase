@@ -14,12 +14,12 @@ import type { App } from 'supertest/types';
  * cuál es: la regla escrita del repo (*"duplicar dos veces es aceptable, se
  * extrae a la tercera"*) estaba pasada.
  *
- * ⚠️ **La entrada que mandó extraerlo decía cuatro copias, y son siete.** Este
- * archivo cubre **seis**; el séptimo —`alta-usuarios-tenant.e2e-spec.ts:124`—
- * quedó sin convertir y vive anotado en
- * [`docs/agent/pendientes.md`](../../../docs/agent/pendientes.md) § 1, no acá.
- * Si estás leyendo esto para saber si el bloque quedó en un solo lugar: todavía
- * no.
+ * ⚠️ **La entrada que mandó extraerlo decía cuatro copias, y eran siete.** Las
+ * siete llaman acá: la séptima —`alta-usuarios-tenant`— quedó afuera del cierre
+ * que creó este archivo y se convirtió el 2026-09-11. Que un spec siga
+ * declarando el uuid del segundo tenant no lo vuelve copia de este bloque: los
+ * que quedan usan el login genérico de dos pasos (ver "Qué NO entra acá") o lo
+ * usan como dato, sin loguearse ahí.
  *
  * ## ⚠️ "Falabella" no existe
  *
@@ -40,9 +40,9 @@ import type { App } from 'supertest/types';
  * helper); el que usan las suites es `admin.paris@paris.cl`, en **63**.
  *
  * Por eso este archivo lo nombra por lo que **es** —el segundo tenant sembrado—
- * y no por lo que las constantes dicen. Renombrarlas es otra cosa: **440 líneas
- * en 64 archivos** (467 apariciones con `-o`; hay líneas que nombran las dos),
- * así que va como frente propio o no va. El comando de abajo devuelve 444 y 65
+ * y no por lo que las constantes dicen. Renombrarlas es otra cosa: **438 líneas
+ * en 64 archivos** (465 apariciones con `-o`; hay líneas que nombran las dos),
+ * así que va como frente propio o no va. El comando de abajo devuelve 442 y 65
  * porque **este docblock se cuenta a sí mismo** —cuatro líneas de acá arriba—;
  * la superficie del renombre no incluye la prosa que lo describe:
  *
@@ -92,7 +92,8 @@ const ADMIN_PASS = 'admin';
  * La cookie del primer paso viaja al segundo a propósito: `switch-tenant` lee
  * `req.cookies`, y sin ella corta con 401. El spec que llame acá necesita
  * `app.use(cookieParser())` en su `beforeAll` —`cookieParser` vive en `main.ts`,
- * que el e2e no ejecuta—, que es lo que ya hacen los seis.
+ * que el e2e no ejecuta—, que es lo que ya hacen todos los que llaman
+ * acá.
  */
 export async function loginSegundoTenant(
   app: INestApplication<App>,

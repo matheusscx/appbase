@@ -203,23 +203,12 @@ líneas que ningún grep de un número encuentra. Detalle, medición y lo que qu
 
 ✅ **Con eso la § 1 quedó vacía el 2026-09-08.** Igual que las veces anteriores: no dice que
 no quede trabajo chico, dice que el que queda no es mecánico. ➕ **Volvió a poblarse el
-2026-09-10** con dos residuos del helper del segundo tenant; el de los punteros a una § 4 vacía
-salió ese mismo día → [`resueltos.md`](resueltos.md), y queda el de abajo.
+2026-09-10** con dos residuos del helper del segundo tenant, y los dos salieron: el de los
+punteros a una § 4 vacía ese mismo día y el del séptimo sitio el 2026-09-11 →
+[`resueltos.md`](resueltos.md).
 
-### El séptimo sitio del login del segundo tenant (2026-09-10)
-
-- [ ] **`alta-usuarios-tenant.e2e-spec.ts:124-131` hace el mismo bloque que el helper
-  `test/helpers/segundo-tenant.ts` extrajo de otros seis**, inline y con `loginSuelto`. Se
-  reemplaza por `tokenFalabella = await loginSegundoTenant(app);`.
-  **Quedó afuera del cierre a propósito** —tocar un spec obliga a re-correr el e2e completo
-  sobre un cierre ya verificado—, no por olvido; el detalle está en
-  [`resueltos.md`](resueltos.md).
-  ⚠️ **No es "una línea", y la primera redacción del cierre lo decía así.** Ese bloque es el
-  **único** uso de `FALABELLA_TENANT_ID` en el archivo (declarada en `:17`), así que el cambio
-  arrastra la `const` huérfana y el comentario de `:121-123` que la explica. Es el mismo
-  residuo que el cierre del helper tuvo que limpiar tres veces; el gesto que lo caza es
-  `git diff --cached -U3` sobre cada borrado de `const`.
-  **Se toma junto con el próximo cambio de esa suite**, para pagar una sola corrida de e2e.
+✅ **Con eso la § 1 queda vacía otra vez el 2026-09-11**, con la salvedad de siempre: no dice
+que no quede trabajo chico, dice que el que queda no es mecánico.
 
 ## 2. Medir primero — no es una pregunta para el owner
 

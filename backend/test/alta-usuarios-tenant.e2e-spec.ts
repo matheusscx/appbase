@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 /**
  * Alta de usuarios del tenant, contra Postgres real.
@@ -14,7 +15,6 @@ import { AppModule } from '../src/app.module';
  * alta se comporten distinto según si el correo ya existía.
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
-const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const VENDEDOR_PARIS = { email: 'vendedor@paris.cl', pass: 'admin' };
@@ -121,14 +121,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
     // El otro tenant sembrado. Su único miembro es `admin@sistema.com`, con rol
     // Administrador, así que sirve para las dos cosas que necesitan un tenant
     // ajeno: un rol que no es de Paris, y un admin que puede dar de alta ahí.
-    const sueltoSistema = await loginSuelto(app, 'admin@sistema.com', 'admin');
-    const enFalabella = await request(app.getHttpServer())
-      .post('/api/auth/switch-tenant')
-      .set('Cookie', sueltoSistema.cookie)
-      .set('Authorization', `Bearer ${sueltoSistema.token}`)
-      .send({ tenantId: FALABELLA_TENANT_ID });
-    expect(enFalabella.status).toBe(200);
-    tokenFalabella = (enFalabella.body as TokenResponse).access_token;
+    tokenFalabella = await loginSegundoTenant(app);
 
     const rolesFalabella = await request(app.getHttpServer())
       .get('/api/roles')
