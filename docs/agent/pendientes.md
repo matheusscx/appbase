@@ -4,18 +4,6 @@ Backlog de correcciones que se **difirieron a propósito** mientras trabajamos e
 harness, para no mezclar el meta-trabajo (reglas, gates, docs) con cambios de código de
 producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra.
 
-> ✅ **La tanda 🔴 se terminó el 2026-08-21.** Era la sección de prioridad máxima que
-> encabezaba este archivo y sus tres temas están cerrados: conexiones/deadlock y
-> rendimiento el 2026-08-20, **redondeo de plata el 2026-08-21**. Todo el detalle está en
-> [`resueltos.md`](resueltos.md). **Ya no hay una sección que leer antes que las demás**:
-> las entradas se toman por lo que hace falta para tomarlas, según la tabla de abajo.
->
-> ⚠️ Este aviso reemplaza al que apuntaba a una sección que ya no existe. Es la **cuarta
-> vez** que hay que corregir un puntero a un frente cerrado de esta tanda —una doc que
-> nombra un frente que ya no está hace frenar al próximo agente por algo que no existe—,
-> así que esta vez se corrigieron en el mismo commit los tres lugares: este aviso, la tabla
-> de orden de abajo y la lista *"🛑 Detenerse y preguntar"* de `CLAUDE.md`.
-
 Regla de este archivo: **acá solo vive lo que falta hacer.** Cuando una entrada se cierra,
 en el mismo commit se muda —con el texto de su cierre— a
 [`resueltos.md`](resueltos.md). Nada de `[x]` acumulándose: una lista de trabajo con más
@@ -35,7 +23,7 @@ saber cuáles se podían tomar sin preguntar nada.
 | 2. Medir primero | Abrir un archivo o correr algo. No es una pregunta para el owner |
 | 3. Ya decidido, falta construir | Nada del owner: ya contestó. Es trabajo con diseño adentro |
 | 4. Necesita que el owner conteste | Una respuesta, que está al frente de cada entrada |
-| 5. Carreras de concurrencia | Un análisis de orden de locks, común a las cinco |
+| 5. Carreras de concurrencia | Un análisis de orden de locks, común a todas |
 | 6. Proyectos que van solos | Spec propia. No entran de arrastre en otra tarea |
 | 7. Acción del owner fuera del código | Algo que no se resuelve programando |
 | Endurecimiento para producción | Nada hoy: se abre al encarar el paso a prod |
@@ -51,164 +39,6 @@ salió limpio y los hilos que cerró— vive al final del archivo.
 
 El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
 respuesta del owner.**
-
-✅ **Estuvo vacía del 2026-08-15 al 2026-08-21.** Tenía **22 entradas** y salieron en dos
-tandas paralelizadas: **21 arregladas** y **1 elevada a la sección 4**, porque al abrirla
-resultó ser una decisión de producto y no una mecánica (el `LIMIT` del historial de PIN). El
-detalle de las dos tandas, con los errores que se cometieron en el camino, está en
-[`resueltos.md`](resueltos.md). Volvió a poblarse con los minors del frente de redondeo, que
-son de una sola pasada y están agrupados abajo.
-
-### Los minors que dejó el frente de redondeo de plata (2026-08-21)
-
-Ninguno es de plata mal calculada: son comentarios que quedaron desmentidos, tests que no
-discriminan lo que dicen fijar, y tipos flojos. Se juntaron en una entrada porque se hacen
-en una sola pasada y ninguno vale una entrada propia. **Citas verificadas el 2026-08-21.**
-
-✅ **Las tres entradas de este grupo están cerradas.** Dos el 2026-08-21, en cinco commits
-agrupados por naturaleza (tests / comentarios / tipos / duplicación / conducta). El detalle
-—incluida la regresión que el e2e cazó y que ni el typecheck ni dos revisiones
-independientes vieron— está en [`resueltos.md`](resueltos.md). La tercera —el tope del
-cuaderno de anti-patrones, la única que pedía juzgar bugs ajenos— salió el **2026-08-22**,
-también en [`resueltos.md`](resueltos.md). **Ese grupo quedó cerrado**; lo que hay abajo llegó
-después y no tiene que ver con el redondeo.
-
-⚠️ **Antes de repartir la próxima tanda, leer la regla que salió de éstas** (misma entrada de
-`resueltos.md`), porque no es la que uno esperaría:
-
-- **Se reparte por dueño de archivo y por recurso compartido, no por cantidad.** Hay **un
-  solo Postgres** y `reset-db.sh` hace `docker-compose down -v`: un agente que lo corra le
-  vuela la base a todos los demás. Y el backend bind-montea el fuente, así que editar un
-  `.ts` re-siembra el contenedor de todos.
-- **Los worktrees no lo arreglan, lo empeoran**: compose no ve sus archivos, así que un e2e
-  ahí corre contra el código viejo y vuelve **verde sin haber probado nada**.
-- **Los agentes escriben y corren solo su propio spec**; el gate completo lo corre el
-  principal, en serie, al final. Dos `nuxt build` concurrentes se pisan el `.nuxt/`.
-
-📌 **Y lo que las dos tandas dejaron como lección de fondo:** de las 22 entradas, **cuatro
-subcontaban o describían mal el hueco** —decía "tres consultas" y eran cinco, "dos DTOs" y
-eran tres, "los dos SELECT" y el que faltaba era otro—. Ninguna se detectó leyendo: se
-detectaron **abriendo el código** y **grepeando el repo entero por conducta**, no por nombre
-de archivo. Una entrada de este backlog es un punto de partida, no un enunciado verificado.
-
-✅ **Vuelve a estar vacía el 2026-08-28.** Su última entrada —la causa de merma que quedaba
-sembrada entre corridas— salió a [`resueltos.md`](resueltos.md). Que esté vacía no significa
-que no haya trabajo chico: significa que el trabajo chico que queda **no es mecánico**, o sea
-que tiene una decisión adentro por más que el diff sea de tres líneas.
-
-⚠️ **Y esa última mostró que ni siquiera "mecánico" se puede dar por leído**: el arreglo que la
-entrada traía escrito era correcto y **no alcanzaba**, porque la entrada atribuía a una sola
-causa cinco rojos que tenían dos. La mitad que quedó abrió entrada propia en la § 4, y salió el
-2026-09-03 con el spec sembrando su propio producto → [`resueltos.md`](resueltos.md).
-
-### Los dos residuos de la revisión de rama de la reserva de stock (2026-09-02)
-
-✅ **Cerrados el 2026-09-02, los dos en una pasada.** El primero era el que importaba: el e2e
-`la porción del extra ocupa pero NO frena` ahora **cierra la cuenta**, y con eso custodia el
-orden base-antes-que-extra del que depende el fix del ingrediente repetido. Verificado con el
-mutante que invierte la expansión (`[...extras, ...fijos]`): pone rojo ese test y **solo** ese,
-justo en el cierre. El segundo —el clamp de `disponible` en `useVenta.ts`— quedó alineado con
-`stockDisponible` **sin** piso en cero, por ruling del owner. Detalle en
-[`resueltos.md`](resueltos.md).
-
-### Los residuos que dejó el frente de promociones (2026-08-27)
-
-✅ **Cerrada el 2026-08-28.** Las tres entradas salieron en una sola pasada; el detalle —y
-las dos cosas que la entrada decía mal— está en [`resueltos.md`](resueltos.md). En corto:
-
-- El filtro del monto `'0'` en `PromocionesAplicadas.vue` **no** era "la familia perdedora
-  del interruptor" (esa se descarta entera y **sin traza**): es la promo que el **piso en
-  cero** recortó hasta la nada porque el catálogo ya se había llevado la línea. Se agregó
-  antes un test del motor que prueba que ese estado es alcanzable, para no dejar un filtro
-  sobre algo imposible.
-- El test de la cota con `nivelRedondeo: 'documento'` **refutó la cota que la entrada pedía
-  fijar**: entonces no era "±1 unidad de la escala" sino 3,23. Lo que destapó abrió su propio
-  frente, contestado y construido el 2026-08-28 → [`resueltos.md`](resueltos.md); hoy ese
-  mismo carrito se desvía 0,23.
-- `VentaDetalleDrawer.vue` ya tiene spec (4 casos). De paso quedó fijado que su total
-  "Descuentos" incluye la plata de las promos, al revés que el ticket.
-
-✅ **Quedó vacía el 2026-09-01 por la mañana, y volvió a poblarse esa misma tarde.** Su
-última entrada de entonces —el `PATCH` que dejaba a un descuento sin métodos de pago— salió
-ese día, y de paso se corrigió: la causa no era la colisión de PK que la entrada sospechaba, y
-el daño era más ancho de lo que decía (agregar un método también borraba el que ya estaba). El
-detalle, con la tabla de los tres casos medidos, en [`resueltos.md`](resueltos.md). Lo que la
-volvió a poblar esa tarde vino del frente de la reserva de stock —las dos secciones que la
-rodean— y no tiene nada que ver con eso; las dos se cerraron el 2026-09-02.
-
-### Los tres minors de tests que dejó el frente de la reserva de stock (2026-09-01)
-
-✅ **Cerrada el 2026-09-02, y con una corrección: eran dos, no tres.** El tercero —ensanchar
-el docblock del e2e de concurrencia para que dijera que tampoco caza **quitar** el `FOR UPDATE`—
-ya estaba hecho: lo hizo `93dcc04e`, el mismo commit que abrió la sección *"Los dos residuos…"*, unas horas
-después de que esta entrada se escribiera. Los otros dos —inlinear `quitarLinea` y renombrar el
-test *"cerrar y cobrar"*, que manda `pagos: []`, a *"cerrar la cuenta"*— salieron acá. Detalle en
-[`resueltos.md`](resueltos.md).
-
-✅ **La § 1 vuelve a quedar vacía el 2026-09-02**, con esas dos secciones. Igual que las veces
-anteriores: que esté vacía no dice que no quede trabajo chico, dice que el que queda **no es
-mecánico**.
-
-⚠️ **Y volvió a salir el aviso de siempre, esta vez por un camino nuevo:** una de las tres
-sub-entradas ya estaba arreglada **antes de que se pudiera leer**. No es que la cita estuviera
-vieja: la entrada nació al mismo tiempo que su arreglo, en commits del mismo día. Un
-*"citas verificadas el ..."* con la fecha de hoy no garantiza nada — abrir el código igual.
-
-### Los cuatro minors que dejó el frente de bodegas y traslados (2026-09-07)
-
-✅ **Cerrados el 2026-09-07, y eran tres, no cuatro.** El primero —el `catch` de
-`RecuentosService.aplicar` que no usaba `esDeadlock`— ya estaba arreglado cuando se lo fue a
-tomar: la entrada se escribió en `f12a45ca` y **`0852c53b`, la ola de fixes de la revisión
-final del mismo frente, lo corrigió 78 minutos después**, dejando escrito en el propio
-docblock del `catch` que venía del backlog… sin sacar la entrada de acá. Los otros tres
-salieron hoy: el par de e2e del ajuste manual de stock, la tercera puerta del rechazo por
-stock en el salón y el filtro de lotes que comparaba strings. Detalle en
-[`resueltos.md`](resueltos.md).
-
-⚠️ **Es la segunda vez seguida** que una entrada de esta sección resulta estar cerrada antes de
-tomarse (la anterior, el 2026-09-02, está anotada más arriba). Las dos veces el arreglo y la
-entrada son commits del mismo día y del mismo frente. El aviso ya tiene dos casos: **abrir el
-código antes de tomar una entrada**, por reciente que sea la fecha que trae — y, del otro lado,
-**el commit que cierra algo del backlog saca la entrada en el mismo commit**, que es lo que
-las dos veces faltó.
-
-### Las dos de citas huérfanas que dejó el barrido de bodegas (2026-09-08)
-
-✅ **Las dos salieron en una pasada, y las dos subcontaban.** Las `§ N` sin documento no eran
-"todas de la spec de la reserva de stock": eran **37 citas**, 35 de ellas repartidas entre
-**siete** documentos distintos (reserva de stock, header del ciego, motor de promociones,
-testigo del cierre forzado, recuento, costeo CPP y el borrado del ingrediente extra). Y las
-`Tarea N` del plan borrado no eran 17 líneas: eran **124**. Detalle, con el criterio de
-clasificación y lo que se midió mal, en [`resueltos.md`](resueltos.md). La regla que salió de
-las dos vive ahora en [`CONVENTIONS.md`](../CONVENTIONS.md), «Citar un documento desde el
-código».
-
-⛔ **Barrer las citas destapó tres formas más de lo mismo** —`Task N` en inglés, la decisión
-citada en prosa y la autorreferencia *"antes de esta tarea"*—, que se midieron y se cerraron en
-el commit siguiente, también en [`resueltos.md`](resueltos.md). La cara que quedaba viva de esa
-familia —la cita a una unidad de un **informe de revisión**— se cerró también el 2026-09-08, en
-el commit de después: mismo archivo.
-
-### Citar un hallazgo o una ronda de revisión por su número (2026-09-08)
-
-✅ **Cerrada el mismo día que se abrió, y el número salió de las 42, no solo de las que la
-entrada contaba como huérfanas.** La entrada proponía triar —30 de las 42 ya nombraban su
-revisión y ahí el número sobraba—; se barrió entero porque una familia que grepea a cero se
-verifica con un comando y una triada no. Aparecieron además la misma cita en inglés
-(`fix round 1`, `finding 4`) y los códigos de severidad pegados al número (`C2`, `CRITICAL`,
-`IMPORTANT 2`), que el censo en español no veía, y —ya con el cierre escrito, levantado por la
-revisión independiente— el **ordinal en palabras** (*"la cuarta pasada de la revisión"*), 12
-líneas que ningún grep de un número encuentra. Detalle, medición y lo que queda vivo del grep
-—tres líneas que no citan ninguna revisión— en [`resueltos.md`](resueltos.md).
-
-✅ **Con eso la § 1 quedó vacía el 2026-09-08.** Igual que las veces anteriores: no dice que
-no quede trabajo chico, dice que el que queda no es mecánico. ➕ **Volvió a poblarse el
-2026-09-10** con dos residuos del helper del segundo tenant, y los dos salieron: el de los
-punteros a una § 4 vacía ese mismo día y el del séptimo sitio el 2026-09-11 →
-[`resueltos.md`](resueltos.md).
-
-✅ **Con eso la § 1 queda vacía otra vez el 2026-09-11**, con la salvedad de siempre: no dice
-que no quede trabajo chico, dice que el que queda no es mecánico.
 
 ## 2. Medir primero — no es una pregunta para el owner
 
@@ -684,24 +514,8 @@ estado a medias rompe a otra **lejos de donde estaba la causa**.
 | `reglas-valor` | `401` en un `PATCH` con un Bearer que la misma suite venía usando |
 | `inventario` | `costoActual` en `undefined` — **no es un 401**, y es lo que muestra que la familia es más ancha |
 
-**Dos causas ya encontradas y arregladas** (las dos en `visibilidad-ventas-pagos.e2e-spec.ts`,
-las dos aplican a cualquier spec nuevo — por eso quedan acá y no solo en el commit):
-
-1. **`app.close()` fuera del `finally`.** Si la limpieza tiraba, la app **no se cerraba**, y
-   `AppModule` registra un `@Cron` (`expirar-ordenes`, cada 10 min) que **sobrevive al teardown
-   de Jest** y sigue pegándole a la base desde un módulo desmontado, mientras corren OTRAS
-   suites. Medido: `"You are trying to require a file after the Jest environment has been torn
-   down"`, con el cron disparando a las 22:20:00 y 22:30:00. **Regla: en todo e2e, el
-   `app.close()` va en un `finally`.**
-2. **Tratar como error el `400` de la fase 2 de cierre.** `POST /:id/conteo` **auto-cierra si
-   el arqueo cuadra**; solo deja `en_conciliacion` si algo descuadra. Un `cerrar` incondicional
-   después pega contra una caja ya cerrada y responde `400 "La caja no está en conciliación"`,
-   que es **inofensivo**. Tratarlo como falla abortaba la higiene y dejaba la caja del OTRO
-   usuario abierta → `409` en la suite siguiente. El helper que sí lo hace bien, y que conviene
-   copiar, es `liberarCajeroSiQuedoOcupado` en `caja.e2e-spec.ts` (best-effort en los pasos
-   intermedios, y maneja descuadres con motivo).
-
-**Efecto medido de los dos arreglos:** de **3 de 5** corridas completas en rojo a **1 de 10**, y
+**Efecto medido de los dos arreglos** —`app.close()` en un `finally` y no tratar como error el `400`
+de la fase 2 de cierre, los dos en [`resueltos.md`](resueltos.md)—: de **3 de 5** corridas completas en rojo a **1 de 10**, y
 **el `401` no volvió a aparecer**. ⚠️ **No está probado que la fuga de la app lo causara**: nunca
 se explicó el mecanismo —`JwtStrategy` es *stateless*, y con sondas puestas en `validateUser` y
 en el `JwtAuthGuard` no se logró atrapar ninguno— y el cron no toca nada de auth: lee
@@ -723,37 +537,21 @@ veces por corrida **no es evidencia de nada**: sale del `Promise.all` interno de
 `DataSource.synchronize`, una vez por app de test (ya medido el 2026-08-21), y su conteo es
 casi idéntico con y sin el spec nuevo (45 vs 44).
 
-### Tres formas en que la pantalla puede quedarse con plata que la moneda no expresa (2026-09-08)
+### Un `400` latente en un campo precargado, si el tenant pudiera bajarle los decimales a su oficial (2026-09-08)
 
-- [ ] **Salen del cierre del ×10** ([`resueltos.md`](resueltos.md)) y viven acá porque son
-  riesgo de plata, no relato: un frente que solo figura en el archivo de cerrados no lo vuelve
-  a mirar nadie. Las tres comparten causa —el campo muestra lo que puede y el modelo conserva
-  lo que le llegó— y ninguna es regresión de ese commit.
-  1. **La bandeja de desfases aplica un precio que el ítem no puede expresar, por dos vías
-     distintas — y son dos frentes, no uno.** El prefill se cuantiza a la escala de la moneda
-     **oficial** (`precioPrefill`), y eso falla en dos direcciones:
-     ✅ **(a) otra moneda — cerrada el 2026-09-11.** La bandeja no filtra por moneda y
-     `DesfaseItemDto` no traía `monedaId`, así que con un tenant en pesos y una receta en
-     dólares aplicar redondeaba `12,55` a `13` (3,6%). Ahora la fila trae la moneda del ítem y
-     el panel prellena y formatea con ella → [`resueltos.md`](resueltos.md).
-     ✅ **(b) misma moneda, tasa por unidad chica — cerrada el 2026-09-11, con el punto 2.**
-     Un ítem en pesos costeado por gramo aplicaba la sugerencia `8,5678`/g como `9`/g, y la
-     salida de la regla del owner —expresarlo por kilo— no existía al editar. Ahora existe
-     para el ítem que no se usó → [`resueltos.md`](resueltos.md).
-  2. ✅ **El precio fuera de escala que no se podía reescribir — cerrada el 2026-09-11.** El
-     selector de unidad estaba bloqueado al editar, así que la salida de la regla no estaba.
-     Ahora un ítem que no se usó —sin movimientos de stock ni recetas que lo referencien— puede
-     cambiar su unidad, y el precio se vacía y se pide de nuevo. **El que ya se usó sigue sin
-     poder, por decisión del owner**: cambiarla reescribiría stock, kardex y recetas →
-     [`resueltos.md`](resueltos.md).
-  3. **Vía nueva de 400 en un campo precargado, hoy sin puerta de entrada.** No aplica a los
-     seis campos de `items.vue` (`@EsCosto()`, escala 4); aplicaría a la familia
-     `MoneyInput oficial` contra un `@EsMontoCobrado()` **si** el tenant pudiera cambiar su
-     oficial por una de menos decimales — y **no puede**: el único `PATCH` de moneda del tenant
-     acepta `habilitada` y `valorDelDia`, y el país no es editable. O sea que hoy es latente y
-     lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
-     (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
-     Decimal, que normaliza los ceros a la derecha.
+- [ ] **Salió del cierre del ×10** ([`resueltos.md`](resueltos.md)) y es la que queda de la entrada
+  *"Tres formas en que la pantalla puede quedarse con plata que la moneda no expresa"* —las otras
+  dos se cerraron el 2026-09-11, también en [`resueltos.md`](resueltos.md)—. Vive acá porque es
+  riesgo de plata, no relato; comparte la causa de aquellas —el campo muestra lo que puede y el
+  modelo conserva lo que le llegó— y no es regresión de ese commit.
+  **Vía nueva de 400 en un campo precargado, hoy sin puerta de entrada.** No aplica a los
+  seis campos de `items.vue` (`@EsCosto()`, escala 4); aplicaría a la familia
+  `MoneyInput oficial` contra un `@EsMontoCobrado()` **si** el tenant pudiera cambiar su
+  oficial por una de menos decimales — y **no puede**: el único `PATCH` de moneda del tenant
+  acepta `habilitada` y `valorDelDia`, y el país no es editable. O sea que hoy es latente y
+  lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
+  (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
+  Decimal, que normaliza los ceros a la derecha.
 
 ### El modal de reembolso formatea con la moneda del tenant una orden que siempre es CLP (2026-09-08)
 
@@ -871,16 +669,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   ⛔ **Toca el motor de cálculo de precios**, así que si la medición dice que hay que arreglarlo,
   va solo y con el sistema quieto.
 
-📌 **Las dos entradas que dejó el frente de bodegas salieron de acá el 2026-09-07** —el orden
-de bloqueo de los traslados cruzados y `encargado.salon@paris.cl`, las dos en
-[`resueltos.md`](resueltos.md)—, y las dos dejaron el mismo aviso: **una entrada de esta
-sección es una hipótesis, y la hipótesis puede ser tan falsa como el hecho que denuncia**. La
-primera ofrecía como *"lectura probable y no confirmada"* que el plan usara el índice de la PK
-—son dos seq scans con un hash join— y que por eso el `ORDER BY` no mandara; manda; la segunda **tenía el título mal** —*"pese a tener los
-permisos sembrados"* apunta al seed y a los permisos, que están bien—, aunque su cuerpo sí
-listaba la pantalla entre los candidatos, que era la respuesta. Las dos veces el trabajo útil fue medir primero y reescribir la entrada
-después, no ejecutar lo que decía.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -912,32 +700,6 @@ que lo convierte en un frente propio y no en un remate.
 ⚠️ El comando va escrito porque la primera vez este dato se anotó como "459 ocurrencias en 5
 superficies" sumando conteos de código con un conteo de docs hecho con **otro patrón**. La
 revisión independiente no lo pudo reproducir, con razón.
-
-➕ **Y una llegó de la § 4 el 2026-08-25 y salió el 2026-08-26**: los tipos de valor único, que
-el owner decidió **cerrar** → [`resueltos.md`](resueltos.md).
-
-➕ **Y otra llegó de la § 4 el 2026-08-30 y salió el mismo día**: la moneda del extra en el
-ticket, construida en sesión propia → [`resueltos.md`](resueltos.md). Llegó con las tres
-preguntas contestadas, un plan en cinco puntos y la instrucción de verificarlos antes de
-escribir — y **verificarlos falsificó dos**: el precio de la línea no viajaba convertido en el
-ticket (fue entrada nueva en la § 4 —el owner decidió no ampliar el frente— y salió ese mismo
-día sacando el override → [`resueltos.md`](resueltos.md)) y el
-preview del drawer que el punto 5 preservaba no existía. La instrucción de verificar era lo
-que hacía falta.
-
-➕ **Cinco llegaron de la § 4 el 2026-08-25**, en una ronda de decisiones del owner, y **las
-cinco están construidas**: cuatro el mismo día —el descarte de desfases, los dos tipos por
-método de pago, y las dos que dejó el frente del nivel de la regla (el empujón del default y
-los ítems de la papelera en el uso)— y la quinta —la moneda de las opciones de
-modificadores— el **2026-08-26**. Todas en [`resueltos.md`](resueltos.md); se nombran así y
-no en la lista para que nadie las busque acá.
-
-📌 Lo que dejaron como lección: cada una llevaba su decisión escrita adentro **y las trampas
-que el que la tome se va a encontrar**, y eso es lo que las hizo construibles. Pero la
-última mostró el límite: **una entrada describe el hueco desde donde se lo miró.** La de
-modificadores decía que faltaba un input y lo que estaba roto era un número **mostrado** con
-la moneda equivocada, en una tercera pantalla que la entrada no nombraba. El mapa se hace
-abriendo las superficies, no leyendo la entrada.
 
 
 - [ ] **La nota de crédito miente distinto sobre la misma línea de receta** (backend,
@@ -1024,14 +786,6 @@ abriendo las superficies, no leyendo la entrada.
   **transferencia**, **pago al retirar**…) en vez de tener solo lo que haya conectado. La
   nombró el owner el 2026-08-11 y sigue sin empezar; toca configuración, tienda, registro
   de la venta y el estado resultante.
-  ℹ️ **Lo que ya no forma parte de esto** (cerrado el 2026-08-26, →
-  [`resueltos.md`](resueltos.md)): que la tienda entregara sin cobrar por el solo hecho de
-  no tener Webpay. La pasarela demo se prende a propósito y sin ninguna configurada
-  **`POST /online/pagar`** responde 400 — la guarda vive ahí y **solo ahí**:
-  `POST /online/checkout` sigue calculando y devolviendo su `checkoutUrl` sin mirar
-  pasarelas, hoy inocuo porque el frontend no lo llama y la pantalla exige un
-  `checkoutRef` salido de `pagar`. Lo que esta feature agrega es **qué más se puede aceptar**, no
-  tapar un agujero.
   ⛔ **Antes de diseñarla, mirar el choque que ya frenó una vez** (2026-08-16): `pago al
   retirar` es una venta online que nace impaga, y `ventas.service.ts` la rechaza con `400`
   *"Las ventas online requieren el pago completo"* — el comentario de esa línea dice *"online
@@ -1065,12 +819,9 @@ abriendo las superficies, no leyendo la entrada.
   sí entra la investigación de mercado. **No es simétrico con las advertencias de
   `garzones`**: allá el costo era un aviso tardío, acá es plata que sale sin rastro.
 
-  ✅ **PIEZAS A y B CONSTRUIDAS el 2026-08-16.** `CuentaLineaDetalle` ya expone
-  `cantidadEnviada`, y los dos caminos están bloqueados con `400`: `quitarLinea` rechaza si
-  `cantidad_enviada > 0` —antes hacía `softDelete` por criterio, sin leer la fila— y
-  `actualizarLinea` rechaza bajar por debajo de lo despachado. Subir sigue libre, y bajar
-  hasta lo despachado también. En la pantalla el tacho queda deshabilitado con el motivo.
-  Detalle en [`features/salones-mesas.md`](../features/salones-mesas.md).
+  **Hoy el bloqueo ya existe:** `quitarLinea` rechaza si hay algo despachado y `actualizarLinea`
+  no deja bajar por debajo de lo despachado; la pantalla deshabilita el tacho con el motivo
+  → [`resueltos.md`](resueltos.md). **Lo que falta es el camino con motivo.**
 
   🔗 **Cruza con la reserva de stock al pedir, que se CONSTRUYÓ el 2026-09-01**
   ([`resueltos.md`](resueltos.md); spec:
@@ -1108,12 +859,6 @@ abriendo las superficies, no leyendo la entrada.
   ⛔ **Lo que NO se decidió y no se pregunta acá: qué muestra la BOLETA.** El documento
   tributario es fiscal y abre su propio frente (`CLAUDE.md`, ADR-010). La precuenta no es un
   documento tributario, por eso sí se decidió.
-
-  🔗 La pieza **C** de la partición (el default destildado del modal de anulación) se
-  **construyó el 2026-08-23** — ver [`resueltos.md`](resueltos.md) § *"El checkbox de
-  anulación nace destildado si algo ya salió a cocina"*. Lo que sigue abierto acá es solo la
-  salida con motivo: son cosas distintas, la C decide qué llega tildado a la pantalla de
-  anulación y esta le da al garzón una forma legítima de sacar un plato ya despachado.
 
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
@@ -1187,10 +932,6 @@ abriendo las superficies, no leyendo la entrada.
   string queda en historial y logs— pero sí cuándo se paga: **antes de habilitar Google**, no
   ahora. El disparador es habilitar Google, **no** el paso a producción: por eso la entrada
   sigue en esta sección y no en la de endurecimiento.
-  ✅ **La otra mitad ya está cerrada (2026-08-15, ver `resueltos.md`):**
-  `POST /auth/switch-tenant` exige ahora también la cookie de refresh, y de una sesión viva
-  del mismo usuario, así que un access token filtrado —venga de Google o no— dejó de poder
-  convertirse en sesión renovable.
   **Lo que queda abierto acá es sólo el token en la query string**, con su prioridad baja: el
   redirect a `/auth/callback?token=…` sigue dejándolo en el historial del navegador y en los
   logs de acceso del frontend, y `callback.vue` sigue sin `replace: true`. Se paga **antes de
@@ -1230,31 +971,6 @@ abriendo las superficies, no leyendo la entrada.
   de hoy. Si algo ya no cuadra, la cuenta entera responde 400 al cerrar y la mesa queda
   **incobrable**.
 
-  ✅ **Los cinco caminos que sacan algo del catálogo están cerrados**, todos con el mismo
-  molde —diff de lo que se saca, una consulta sobre `cuenta_lineas.personalizacion`, 400
-  nombrando la mesa—: `DELETE /items/:id` (el ítem de la línea, y el ingrediente pedido
-  como extra, `dce84899`), `PATCH /items/:id` con `extrasPermitidos` (`d42a36e7`), con
-  `ingredientes` y con `gruposModificadores`, y `PATCH /grupos-modificadores/:id`
-  (`bdc4d870`). Las cuatro consultas hermanas viven en `ItemsService`:
-  `cuentasAbiertasConExtra`, `cuentasAbiertasConIngredienteOmitido`,
-  `cuentasAbiertasConOpcionDeGrupo` y `cuentasAbiertasConGrupoElegido`. De arrastre,
-  `DELETE /grupos-modificadores/:id` también quedó cubierto: ya se rechazaba con el grupo
-  asociado a un ítem vivo.
-
-  ✅ **Y las cinco filas de abajo se cerraron el 2026-08-31, todas de una y sin un guard
-  por forma**: la línea de cuenta abierta dejó de re-validarse. `cerrarCuenta` le pasa a
-  `ventas.service` la foto congelada y la precuenta se arma del lado del servidor, así que
-  ninguna de estas ediciones de catálogo puede volver a romper una mesa sentada. Las dos
-  primeras están fijadas por e2e (`cuenta-precio-congelado.e2e-spec.ts`, tests 14 y 15).
-
-  | Camino que rompía al re-tasar | Qué pasaba |
-  |---|---|
-  | `PATCH /items/:id` con `componentes`: sacar de un combo un componente que la línea personalizó | *"El componente no pertenece a este combo o no admite grupos"* |
-  | `PATCH /items/:id` con `gruposModificadores`: asociar un grupo con `min ≥ 1` | *"El grupo X requiere elegir entre 1 y 1 unidades"* |
-  | lo mismo, subiendo el `min` o bajando el `max` de un grupo ya asociado | idem |
-  | `PATCH /items/:id` con `componentes`: bajar la `cantidad` de un componente por debajo de la `unidad` elegida | *"Unidad inválida para el componente X"* |
-  | `PATCH /grupos-modificadores/:id`: dejar una opción elegida sin `cantidad` | *"La opción X no tiene cantidad configurada para este item (pendiente)"* |
-
   🔲 **Lo que queda abierto del frente es angosto, y más angosto de lo que se creyó.**
 
   **La escena del 2x1 de los martes NO es la grieta, y la corrección importa.** El día de la
@@ -1286,11 +1002,6 @@ abriendo las superficies, no leyendo la entrada.
   **cualquiera** de los días de las líneas de la cuenta, no solo el de la apertura. Es la
   misma regla del owner, así que no necesita preguntarle nada — pero es un caso de borde,
   no el agujero que el frente vino a cerrar.
-
-  📌 **Ninguna de esas cinco necesitó un guard.** El plan las iba a cerrar de a una, con la
-  misma consulta que las cinco puertas anteriores; lo que las cerró de golpe fue atacar la
-  causa —que re-tasar re-validaba— en vez del síntoma. Vale como criterio para la próxima
-  familia de bugs que se repita con formas distintas.
 
   ✅ **DECIDIDO (owner, 2026-08-30), en dos respuestas que juntas definen el frente:**
 
@@ -1356,27 +1067,8 @@ país y quede bloqueado donde la norma lo fija ([spec](../superpowers/specs/2026
 Ninguno rompía nada hoy — los tres eran **alcanzables mañana con una edición del seeder**, que
 es exactamente lo que ese frente acababa de hacer.
 
-✅ **Los dos primeros se cerraron el 2026-09-04, y con una corrección al plan que la entrada
-proponía.** La entrada decía *"si la 1 se cierra con un `@Check` en `pais`, la 2 desaparece
-sola"*, y **un `@Check` no puede cerrar la 1**: la contradicción cruza dos tablas —el nivel lo
-sugiere `pais`, los decimales viven en `moneda`— y un CHECK no abarca dos tablas. Quedó
-partido en las dos mitades que sí se pueden atar:
-
-- **El dominio de las dos perillas, con `@Check`** (`chk_pais_modo_redondeo_dominio` y
-  `chk_pais_nivel_redondeo_dominio`, en `catalog/entities/pais.entity.ts`). Es la segunda
-  dirección del agujero, la que la entrada pedía arreglar junta: un país con un modo fuera de
-  la unión dejaba a todos sus tenants sin configuración guardable, y el rechazo llegaba del
-  `ValidationPipe` hablando de un campo que el tenant no escribió.
-- **La combinación imposible, con un test sobre los datos sembrados**
-  (`test/esquema.e2e-spec.ts`). Va sobre el seed y no sobre un rechazo porque `pais` **no
-  tiene endpoint de escritura** —el controller de catálogo es solo `@Get`—: la fila que hay
-  que cazar es la que alguien agregue al seeder. Con eso la 2 sí desaparece sola: si ningún
-  país sembrado produce la combinación, `TenantsService.create` no la puede heredar.
-  ⚠️ Y el alcance real es más ancho que el que la entrada decía: `create` toma el nivel del
-  país **aunque no sea ley**, así que el `es_ley` no era parte de la condición.
-
-Detalle en [`resueltos.md`](resueltos.md). **Sigue abierto el tercero**, que es fiscal y va
-solo:
+Los dos primeros ya están en [`resueltos.md`](resueltos.md). **Sigue abierto el tercero**, que es
+fiscal y va solo:
 
 - [ ] **Los 6 decimales del Anexo 20 no entran en las columnas.** El tenant mexicano nace con
   `escalaCalculo: 4` porque toda columna de plata de `venta_detalles` es `NUMERIC(18,4)` y con
@@ -1444,15 +1136,6 @@ en la § 4 porque **ninguno espera una respuesta del owner**: la decisión que l
 pantalla muestra lo que se puede pedir*). Contexto del frente:
 [`resueltos.md`](resueltos.md).
 
-✅ **El `PATCH` de cantidad que nunca llegaba se cerró el 2026-09-02.** Salió con un segundo
-bug adentro que solo se vio al encender el camino —el rollback tampoco funcionaba— y con el
-smoke en Chrome que la entrada pedía. Detalle en [`resueltos.md`](resueltos.md).
-
-✅ **El drawer de personalización se cerró el 2026-09-02**, por la vía que la propia entrada
-pedía verificar primero: `GET /items/:id` devuelve el descontado, listados los consumidores
-antes de tocar el contrato (dos en el frontend y un reuso interno, todos aditivos). Detalle en
-[`resueltos.md`](resueltos.md).
-
 - [ ] **El refresco del catálogo del salón cuesta tres `GET /items` y podría costar cero**
   (backend + frontend; **lo introdujo este frente**, `c6489ecd` / Tarea 8, y lo señaló su propia
   revisión) — hoy cada mutación de una cuenta agenda `refrescarItems()`, que vuelve a pedir el
@@ -1470,68 +1153,7 @@ antes de tocar el contrato (dos en el frontend y un reuso interno, todos aditivo
   del lado del comprometido gracias a los índices de este frente. Lo que sí cambia es la
   latencia percibida y el tráfico de una tablet con wifi de restaurante.
 
-✅ **El ingrediente que se agregaba a la cuenta y la venta rechazaba al cerrar se cerró el
-2026-09-04.** El guard vive en `SalonesService.getItemVendibleOrThrow` —que es lo que su
-nombre ya prometía y no miraba—, así que alcanza también al `PATCH` de cantidad; el mensaje
-es **el mismo** de `ventas.service.ts`, porque la regla no cambió, se dice antes. Grepeados
-los seis tipos: `ingrediente` es el único que la venta rechaza por `item.tipo`, y su hermano
-del mismo bucle (`clasificacionTributaria === null`) no agrega un caso porque ese NULL lo
-escribe `items.service.ts` exactamente cuando el tipo es ingrediente.
-
-⚠️ **Rompió dos e2e ajenos, y ahí está lo que hay que saber:** los dos se apoyaban en el
-agujero —uno usaba un ingrediente como fábrica genérica de ítem, el otro como la línea
-directa que baja de cantidad— y el segundo dejó un escenario **inconstruible por API**
-(un ítem no puede ser insumo de receta y pedible a la vez). Se rearmó con una receta
-bloqueante, que es lo único que ejercita el tope. Detalle en [`resueltos.md`](resueltos.md).
-
-### El residuo que dejó el arreglo del `PATCH` de cantidad (2026-09-02)
-
-✅ **Cerrado el 2026-09-04.** `patchLineaCantidad` re-tasa el `previo` de la edición que
-quedó pendiente con lo que **el servidor acaba de confirmar**, así que deshacer ya no
-devuelve la línea más atrás de lo que corresponde (la escena: 1 → 2 aceptado → 3 rechazado
-dejaba la pantalla en 1 y el servidor en 2, y no se autocorregía).
-
-⚠️ **El arreglo que la entrada describía no alcanzaba, y hubo que ampliarlo DOS veces.**
-Primero: mutar el `previo` de la entrada del `Map` no llega a ningún lado mientras el timer
-del debounce se cierre sobre las variables locales de `onCantidadChange`, así que el timer
-pasó a **releer la edición del `Map`** —como ya hacía `flushPendientes`, que por eso deshacía
-distinto que el timer—. Y después: con eso el cierre se escribió igual y **era falso**, porque
-el arreglo solo cubre mientras la segunda edición siga siendo una entrada pendiente; pasados
-los 300 ms del debounce hay **dos `PATCH` en vuelo** y el segundo seguía deshaciendo hasta el
-valor de antes de la ráfaga. Lo midió la revisión independiente, con la escena idéntica.
-
-⚠️ **Y hubo una tercera pasada, en el camino del flush**, con las dos mitades que cazó la
-misma revisión: una regresión propia —desde que el timer relee el `Map`, un tap a mitad de
-`flushPendientes` encontraba su entrada ya borrada por el loop y **se perdía en silencio**— y
-una preexistente que el arreglo declaró cerrada sin estarlo: si el timer de ese tap alcanzaba
-a disparar, el loop mandaba **la foto encima**, o sea el valor de antes del tap, después del
-bueno. Las dos salían con la comanda impresa en el número viejo. Se cerraron sacando el
-fallback a la foto: el `Map` dice qué mandar, y si no hay nada vivo no se manda nada.
-
-📌 **Lo que queda de las tres pasadas:** el mismo dato vivía copiado en varios lugares con
-vidas distintas —el `previo` en la closure del timer, en `pendingByLinea` y en `inflight`; y
-la edición, en la foto del flush y en el `Map`— y cada copia era una ventana que había que
-cerrar aparte. El cierre real, las dos veces, fue dejar **un solo dueño**. Los mutantes
-—incluido **uno que sobrevive y se declara**— y el control que prueba que las piezas son
-independientes están en [`resueltos.md`](resueltos.md).
-
-
-### Las cuatro que el owner contestó el 2026-09-03 — ✅ **las cuatro construidas**
-
-Las cuatro estaban en la § 4, salieron en una sola ronda y **se construyeron el mismo día**: el
-checker de lecturas ampliado a toda lectura, los helpers de caja extraídos de sus 8 copias,
-`mermas` sembrándose su propio producto, y el aviso al cambiar el tipo de un descuento — la
-única de las cuatro que se ve en la app. Detalle de cada una en [`resueltos.md`](resueltos.md).
-
-📌 **Las tres de tests no encontraron deuda nueva, y eso también es un resultado**: la red del
-checker se amplió y los 21 sitios que marcó eran higiene ya documentada. Lo que sí apareció fue
-un agujero **latente** en los helpers de caja —una copia sin la fase 2 del cierre, a una venta
-en efectivo de estrellar suites ajenas— y una cobertura que se perdía en `mermas`.
-
-⚠️ **La quinta pregunta de esa ronda no se contestó ese día y no se preguntó**: la nota de
-crédito es **fiscal**, y lo fiscal abre su propio frente con su propia sesión (`CLAUDE.md`,
-ADR-010). ✅ **Ese frente se abrió y se cerró el 2026-09-04**: la NC descompone su monto en
-líneas, neto e IVA (`7a1e934d`) → [`resueltos.md`](resueltos.md).
+### Tres que el owner decidió el 2026-09-03: acumulación de descuentos, compras y reporte de varianza
 
 - [ ] **Descuentos: un flag de acumulación por regla** ✅ *(decidido por el owner el
   2026-09-03; antes era "¿en qué orden se apilan?" en la § 4)* —
@@ -1790,188 +1412,17 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-✅ **Salió una el 2026-08-28**: el desvío sin techo de `'documento'` con un descuento de nivel
-venta se contestó y **se construyó el mismo día** ([`resueltos.md`](resueltos.md)).
-✅ **Y dos más el 2026-08-29**: el costo tipeado que sobrevivía al cambio de producto, y la
-contradicción de `costo: '0'` —cada una contestada y construida el mismo día
-([`resueltos.md`](resueltos.md))—.
-✅ **Y dos más el 2026-08-30**: la moneda del extra en el ticket —contestada en tres
-preguntas, mudada a la § 3 con el plan escrito y **construida ese mismo día**— y, ese mismo
-día, el **override de `precioUnitario`**, que había nacido acá al construir la primera y que
-el owner mandó sacar unas horas después ([`resueltos.md`](resueltos.md)).
-✅ **Y una más el 2026-09-01**: *"Dos mesas pueden pedir la MISMA última unidad, y la segunda
-queda trabada"*. De las tres salidas que la entrada ofrecía —apartar, avisar, bloquear— el
-owner eligió **apartar**, y el frente se construyó ese mismo día → [`resueltos.md`](resueltos.md).
-⚠️ **No cierra la salida con motivo**, que sigue viva en la § 3 y que la propia entrada
-nombraba como su cruce: apartar achica el caso de la mesa trabada, **no lo borra**.
-✅ **Y una más el 2026-09-02**, el mismo día que se anotó: *"salir de la cuenta con una
-edición de cantidad a medio camino"*. De las tres salidas —guardar, descartar, preguntar— el
-owner eligió **guardar**, y con eso quedó contestado también su costo: el rechazo que llega
-con la pantalla ya en otra cuenta **avisa nombrando la mesa y la cuenta**, en vez de callarse
-o de tirar un error sin dueño → [`resueltos.md`](resueltos.md).
-
-✅ **Y cuatro más el 2026-09-03**, en una sola ronda: el checker de lecturas sin status
-(**ampliarlo**), los helpers de caja copiados en 8 specs (**extraerlos**), el stock de merma
-dimensionado para una corrida (**que el spec siembre el suyo**) y el modo que se da vuelta al
-cambiar de tipo (**avisar antes de borrar**). Las cuatro pasaron a la § 3 con la decisión
-escrita → *"Las cuatro que el owner contestó el 2026-09-03"*.
-
-✅ **VACÍA otra vez al cierre del 2026-09-03 — contado, no recordado: 0 y 0.**
-
-Ese día la sección se vació, volvió a llenarse con **dos** entradas que un barrido de
-investigaciones rescató —decisiones que llevaban semanas perdidas de vista— y se vació de
-nuevo al contestarlas todas.
-
-📌 **Lo que hay que llevarse de ese ida y vuelta:** un cero acá **no prueba que no haya nada
-esperándote**. Prueba que nadie anotó lo que estaba esperando. Las dos entradas que
-aparecieron vivían desde julio y agosto en investigaciones con sección de *"preguntas
-abiertas"* y ninguna mención en este archivo.
-
-📌 **Ese es el dato que importa de este episodio:** la sección puede dar cero y no significar
-que no haya nada esperándote — significa que **nadie anotó lo que estaba esperando**. Las dos
-entradas de abajo vivían desde julio y agosto en investigaciones con sección de "preguntas
-abiertas" y ninguna mención acá.
-
-Se vació en una sola tarde, y las tres salieron por caminos distintos, que es lo que conviene
-saber:
-
-| Entrada | Cómo salió | Dónde quedó |
-|---|---|---|
-| La nota de crédito de un tenant AR/CO/MX congelaba el tipo **chileno** | **Construida** | `fc1bfa84` → [`resueltos.md`](resueltos.md) |
-| Los documentos tributarios y los impuestos de sistema de AR/CO/MX | **Dejó de ser pregunta al relevarla**: falta modelo, no un porcentaje | **§ 6**, como frente fiscal por país |
-| La NC que no descompone su monto | **Contestada por el owner**, y **construida el 2026-09-04** | `7a1e934d` → [`resueltos.md`](resueltos.md) |
-
-⚠️ **Ese día la sección llegó a decir "dos" y después "una"**, y las dos veces el número
-escrito y el `awk` discrepaban porque una entrada era un `###` que el conteo mecánico no ve.
-La regla que queda: **el conteo se corre, no se recuerda** — y si el `awk` y el texto no
-coinciden, buscar los `###` antes de escribir un número.
-
-✅ **Y una entró y salió el mismo día, el 2026-08-30**: la re-validación al re-tasar subió
-desde la § 3 al cerrar sus cinco puertas y descubrir que la clase no se cerraba con ellas,
-y **volvió a la § 3 esa misma tarde** con las dos respuestas del owner adentro.
-⚠️ **Decía "nueve" y ya eran ocho antes de sacar la del producto**: los dos carteles de la
-tarjeta se cerraron en `0820e414` sin tocar este párrafo. Corrido el `awk` de arriba, no
-recordado.
-
-⚠️ Al cerrar ese frente esta línea decía *"vacía otra vez"* y **era falsa**: se escribió de
-memoria en vez de leer el archivo. Es el mismo modo de falla que el propio frente dejó
-anotado. Un conteo escrito acá se corre antes, no se recuerda.
-
-✅ **La sección pasó de 29 entradas a 1 el 2026-08-15**, en una tanda de decisiones del owner;
-volvió a poblarse con lo que fueron destapando las tandas siguientes (identidad el 2026-08-16,
-redondeo de plata el 2026-08-21) y con dos entradas que **subieron desde la sección 2** al
-medirlas y caer del lado que exige respuesta.
-
-✅ **Segunda tanda completa el 2026-08-22: las 7 entradas abiertas se contestaron de una.**
-Ninguna se quedó sin destino, y cada una se mudó **con su decisión escrita y con las trampas
-que el que la tome se va a encontrar**:
-
-| Entrada | Decisión | Dónde quedó |
-|---|---|---|
-| `ItemsController` y el `Scope.REQUEST` | Spike de contexto en ALS primero; partir el controller es el plan B | **Resuelto el 2026-08-22**: el spike salió, se migró y el plan B no hizo falta ([`resueltos.md`](resueltos.md)) |
-| El `valor` de descuentos y recargos | Se parte en `valor_monto` / `valor_porcentaje` | **Construido el 2026-08-23** ([`resueltos.md`](resueltos.md)) |
-| El garzón "Mostrador" | Cuelga de `Propinas`, no de `Salones` | **Sección 3** |
-| El borde `hasta` de los filtros de fecha | Inclusivo del día, resuelto en el backend | **Construido el 2026-08-22** ([`resueltos.md`](resueltos.md)) |
-| La pasada de auditoría de las dos lentes | Las dos, tope 500k, sin arreglar nada | **Corrida el 2026-08-22** → 0 hallazgos ([`resueltos.md`](resueltos.md)) |
-| Los roles de un alta pendiente | Siguen sin ser editables, y eso pasa a ser regla escrita | **Cerrada** → [`resueltos.md`](resueltos.md) |
-
-ℹ️ **Dos entradas cambiaron de premisa al contestarlas, y la corrección viaja con ellas:** la
-del `Scope.REQUEST` daba por conocido que bastaba con no colgar el pipe del handler de lectura
-—no aplica, el contagio es del controller y alcanza a **once**—, y la de la auditoría decía
-que lo pendiente del pool era el frente 🔴, **cerrado el 2026-08-20**.
-
-✅ **Tercera tanda completa el 2026-08-25: las 6 preguntas no fiscales se contestaron de una**, y
-cada entrada se mudó con su decisión escrita y con las trampas que el que la tome se va a
-encontrar. Cinco fueron a la § 3 (descarte de desfases, los dos tipos por método de pago, la
-moneda de las opciones de modificadores, y las dos del frente del nivel de la regla) y una a
-**Vigilancia** (revivir una cuenta soft-borrada: el owner decidió que la baja de usuarios no entra
-al roadmap todavía, así que la entrada no tiene disparador). ℹ️ De esas cinco, **cuatro se construyeron el mismo día** —el
-descarte de desfases, los dos tipos por método de pago, y las dos del frente del nivel— y ya no
-están en la § 3 → [`resueltos.md`](resueltos.md).
-
-✅ **Cuarta tanda, 2026-08-25: las dos entradas que habían llegado ese mismo día se
-contestaron ese mismo día.** Los tipos de valor único → **cerrar**, y se mudó a la § 3 con el
-porqué de que el precedente de su gemela **no** haya ganado. La redacción de la invariante 3
-de `CLAUDE.md` → **pasa a criterio**, ya escrita en el archivo → [`resueltos.md`](resueltos.md).
-
-**Quedan dos.** La de la nota de crédito **no espera una respuesta** sino la investigación de
-mercado que la destraba —lanzada el 2026-08-15, corrida y cerrada el 2026-08-22— y después una
-decisión fiscal, que por `CLAUDE.md` abre su propio frente con su propia sesión. La otra sí
-espera al owner, es chica, y llegó el 2026-08-26 de rebote del frente que cerró los tipos de
-valor único: hay tres maneras de que una regla pierda la forma de importe que tenía guardada,
-y solo una avisa.
-
-📌 **Esa entrada nació en la § 3 y se movió acá el mismo día**, que es la tercera vez en tres
-días que pasa lo mismo: el reflejo al escribirla es ponerla junto a sus parientes temáticos
-—habla de escalones, como media § 3— en vez de archivarla por **lo que hace falta para
-tomarla**, que es una respuesta tuya.
-
-⛔ **La fiscal quedó afuera de la ronda a propósito, no por olvido.** `CLAUDE.md` lo dice: *"una
-pregunta fiscal no se cuelga al final de una ronda de preguntas de producto"*. Impuestos y
-documentos tributarios abren su propio frente, con su propia sesión.
-(La del login del demo entró y salió el mismo día: el owner eligió el proxy →
-[`resueltos.md`](resueltos.md).)
-
-➕ **Y tres llegaron el 2026-08-24 desde la § 3**, al revisar cuáles de sus entradas decían
-adentro que esperaban al owner. **Tres lo decían y nadie las había movido**, así que la § 3
-aparentaba 19 frentes construibles cuando eran 16. ⚠️ Al revisar salió también un falso
-positivo que conviene dejar dicho: *"el modal de pausa"* abre con *"Decisión del owner
-pendiente"* y **dos líneas más abajo tiene su `✅ DECIDIDO (owner, 2026-08-15)`**. Se la dio
-por bloqueada una vez leyendo solo la primera línea. Está bien en la § 3.
-
-➕ **Y dos más el 2026-08-25, por el mismo motivo y con un día de diferencia.** Las dos
-nacieron al cerrar el frente del nivel de la regla y se escribieron en la § 3 aunque las dos
-terminan en una pregunta al owner. Es exactamente el error que el párrafo de arriba acababa de
-corregir: **una entrada se archiva por lo que hace falta para tomarla, no por el tema del que
-habla**. Que haya vuelto a pasar en un día dice que el reflejo al escribir una entrada es
-ponerla junto a sus parientes temáticos, así que conviene releer el destino antes de guardar.
-
-
-✅ **Y una entró y salió el mismo día, el 2026-09-05**: *"Una fusión que aterriza con el cobro
-abierto deja al garzón con los pagos juntados sobre una cuenta que ya no existe"*. Nació al cerrar
-el modal de cobro esa misma tarde, el owner eligió **cerrar el cobro y avisar** —asumiendo que se
-pierden los pagos ya cargados— y se construyó ese mismo día → [`resueltos.md`](resueltos.md).
-
-✅ **Y las tres del frente del vaciado por cambio de moneda salieron el 2026-09-09**, en una
-ronda de cuatro preguntas. Dos se mudaron a la § 3 **fundidas en una sola entrada** —el "Costo
-actual" que suma sin convertir y la puerta de `PATCH /items/:id { monedaId }`—, porque las
-respuestas resultaron ser una misma regla: *"se pueden tener precios en otra moneda, pero el
-sistema rechaza mezclar"*. La tercera **no se contestó: se refutó al medirla**, y quedó en
-**Vigilancia**.
-
-⚠️ **Y esa refutación es la lección de la ronda.** La entrada de los montos fijos la había
-levantado la revisión independiente al cerrar el frente, afirmaba que un `-1000` le descuenta
-mil **dólares** a un ítem en dólares, y **nadie la cruzó con el motor antes de escribirla**: el
-motor convierte el precio a moneda oficial *antes* de aplicar las reglas. Una entrada nacida de
-una revisión no viene verificada por venir de ahí — que es lo mismo que este archivo ya decía de
-las entradas de la § 1, con dos casos.
-
-✅ **Y el segundo helper compartido de `backend/test/` se decidió el 2026-09-09**: el owner
-mandó **extraerlo**. Quedó en `test/helpers/segundo-tenant.ts`, y lo que se midió al hacerlo
-—qué deriva había y cuál no— está en [`resueltos.md`](resueltos.md).
-
-✅ **Con eso la sección queda vacía otra vez** — contado, no recordado:
-
-```bash
-awk '/^## 4\./{f=1;next} /^## 5\./{f=0} f && /^### /{n++} END{print n+0}' docs/agent/pendientes.md
-```
-
-⚠️ Y vale de nuevo lo que esta sección ya aprendió dos veces: **un cero acá no prueba que no
-haya nada esperándote**, prueba que nadie anotó lo que estaba esperando.
-
 ## 5. Carreras de concurrencia
 
 Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila se
-bloquea y en qué orden en cada camino—, no cinco parches. Son **dos moldes distintos**, y
+bloquea y en qué orden en cada camino—, no un parche por entrada. Son **dos moldes distintos**, y
 conviene no confundirlos:
 
 - **Tres del molde "no toma lock"** —`remove()` de ítems, borrar un ítem contra agregarlo a
   una cuenta, y `PATCH /items/:id` contra `DELETE`—: un `SELECT` de validación sin lock, y
   otra transacción que escribe entre el chequeo y el commit. Cada entrada lo dice por su
-  cuenta. ✅ **Eran cuatro hasta el 2026-08-28**: el guard del nivel de una regla salió
-  primero porque su par de puertas se cerraba con una sola fila bloqueada, y de paso dejó
-  escrito el orden que las otras tres necesitan —[`../patterns/backend.md`](../patterns/backend.md)
-  § 15, *"Las reglas van antes que todo eso"*— → [`resueltos.md`](resueltos.md).
+  cuenta. El orden que las tres necesitan ya está escrito:
+  [`../patterns/backend.md`](../patterns/backend.md) § 15, *"Las reglas van antes que todo eso"*.
 - **Una del molde "lockea en orden no determinista"** —la de la auditoría de `inventario`,
   los tres caminos que revierten stock—: el lock sí se toma, pero el orden lo decide el
   cliente. El arreglo es el contrario —no agregar un lock sino fijar un orden—, y las piezas
@@ -1994,7 +1445,7 @@ orden de lock en la bandeja de desfases de combos…", hoy cerrada y mudada a
 ciclo `item_receta` ↔ `item_combo` es "no toma lock" (`descartarDesfases` no bloquea nada) y
 el ciclo `items` ↔ `item_combo` es "lockea en orden no determinista" (`aplicarDesfases` y
 `update()` de un combo toman los mismos locks en orden inverso). Lo que separa a esa entrada
-de las cinco de acá **no es la familia de bug — es la tabla y el disparador**: acá es
+de las de acá **no es la familia de bug — es la tabla y el disparador**: acá es
 caja/inventario/stock; ahí es `items`/`item_receta`/`item_combo` en la bandeja de desfases.
 (Los otros dos puntos de esa entrada residual —el `FOR UPDATE` antes de validar tenant, y el
 hueco de test de N combos— no son de ninguno de los dos moldes.)
@@ -2002,14 +1453,14 @@ hueco de test de N combos— no son de ninguno de los dos moldes.)
 ℹ️ **2026-08-20:** esa entrada residual **se cerró** y vive en
 [`resueltos.md`](resueltos.md) § "El orden de bloqueo de filas de la bandeja de
 desfases". Lo de arriba se conserva porque la clasificación por moldes sigue siendo cierta
-y es la que hay que aplicarle a las cinco de acá. Cómo quedó el "no toma lock" del molde
+y es la que hay que aplicarle a las de acá. Cómo quedó el "no toma lock" del molde
 2: `descartarDesfases` sigue sin tomar un solo `FOR UPDATE` —el arreglo no fue agregar
 locks sino **fijar el orden en que sus `UPDATE` los toman solos**—, y el orden canónico del
 proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de
-bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las cinco
+bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las
 entradas de esta sección.
 
-- [ ] **Los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
+- [ ] **Dos de los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
   `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el
   lock **sí** se toma, lo que no es determinista es **el orden**. (Decía "los tres de arriba",
   y era falso desde antes de que existiera esta nota: es la única de su molde, y las otras
@@ -2018,11 +1469,9 @@ entradas de esta sección.
   statements separados. `crear()` lo sabe y lo resuelve con dos capas —orden determinista por
   `itemId` (`ventas.service.ts:618-626`) y reintento ante `40P01`
   (`MAX_REINTENTOS_DEADLOCK`)—, y su propio comentario explica que el deadlock era real.
-  ✅ **`cancelar` salió el 2026-08-22**, dentro del frente de la reposición de recetas: son
-  las mismas líneas, y dejarlo para después significaba volver a tocarlas. Ordena por
-  `itemId` con `localeCompare` —el mismo comparador que `crear()`— y reintenta ante
-  `40P01`. Detalle en [`resueltos.md`](resueltos.md). **Quedan los otros dos**, y el
-  arreglo es el mismo.
+  **Falta en `crearNotaCredito` y `registrarDevolucionesPorReembolso`**, y el arreglo es el
+  que ya tiene `cancelar`: ordenar por `itemId` con `localeCompare` —el mismo comparador que
+  `crear()`— y reintentar ante `40P01`.
   Los caminos inversos no tenían ninguna de las dos: `cancelar` (`:845`) hacía un `SELECT`
   **sin `ORDER BY`** y recorría lo que devolviera Postgres; `crearNotaCredito` (`:984`) y
   `registrarDevolucionesPorReembolso` (`:1152`) iteran el resultado de
@@ -2142,7 +1591,7 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 🛑 **PAUSADO OTRA VEZ POR EL OWNER, PARA UNA SESIÓN PROPIA (2026-09-03).** Contestó las
   > cinco preguntas de la §9 esa mañana y **reabrió dos de ellas esa misma tarde**, al ofrecerle
   > la medición que faltaba: *"quedé super confundido, creo que dejemos esto para una sesión
-  > sola"*. **De esas dos, la del país ya está construida** (ver más abajo); **la UF sigue
+  > sola"*. **De esas dos, la del país ya está construida** (ver [`resueltos.md`](resueltos.md)); **la UF sigue
   > sin decidir y es la que pesa.**
   >
   > **Al retomar, arrancar por [ADR-024](../adr/024-decimales-redondeo-y-unidades-de-cuenta.md)**,
@@ -2161,50 +1610,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
   > 📌 **La medición pendiente NO se corrió, a propósito**: afina una prohibición que cuelga de
   > las decisiones reabiertas.
   >
-  > ✅ **EL PLAN SE EJECUTÓ ENTERO (2026-09-03)** →
-  > [`plans/2026-09-03-redondeo-por-pais.md`](../superpowers/plans/2026-09-03-redondeo-por-pais.md),
-  > cinco tareas, cinco commits. **La decisión 2 del ADR-024 quedó cerrada y construida**:
-  > el redondeo lo configura el tenant, con default por país y candado por perilla donde
-  > es ley. Detalle del cierre en [`resueltos.md`](resueltos.md); conducta en
-  > [`features/preferencias-financieras.md`](../features/preferencias-financieras.md).
-  >
-  > ⚠️ **Eso NO cierra esta entrada.** Lo que sigue abierto es la **decisión 3, la UF** —
+  > ⚠️ Lo que sigue abierto es la **decisión 3, la UF** —
   > que es la que más frenó al owner— y con ella el tema entero sigue pausado para una
   > sesión propia. Lo que el frente dejó de deuda propia está en la § 3 de este archivo,
   > *"Los tres que dejó el frente del redondeo por país"*, y uno de esos tres (los 6
   > decimales del Anexo 20 contra columnas `NUMERIC(18,4)`) **es fiscal y lo decide el
   > owner**.
-  >
-  > 📐 **SPEC ESCRITA (2026-09-03)** →
-  > [`specs/2026-09-03-redondeo-por-pais-design.md`](../superpowers/specs/2026-09-03-redondeo-por-pais-design.md),
-  > con el alcance aprobado por el owner: **solo el redondeo**. La UF, el escalón del IVA
-  > colombiano, `PayableRoundingAmount` y la medición pendiente quedan **explícitamente afuera**,
-  > cada uno con su motivo. Lista para plan.
-  >
-  > ✅ **Colombia quedó con fuente primaria antes de escribirla** (era el requisito para ponerle
-  > candado): se abrió el anexo de la DIAN y la cita de half-even es literal. De paso trajo que
-  > su aproximación del IVA es **opcional** (*"se podrá aproximar"*), así que **no era un hueco
-  > de cumplimiento** como se había anotado.
-  >
-  > ✅ **El owner propuso la forma que las cubre a todas (2026-09-03):** la config sigue siendo
-  > del **tenant**, con **default por país**, y **candado solo donde es ley** — libertad donde no
-  > la hay, y ahí solo se recomienda. Verificada contra las ocho reglas relevadas: las expresa
-  > todas, y **no obliga a inventar una ley** donde no la hay, que era el agujero de "lo fija el
-  > país" a secas. Con dos refinamientos: el candado va **por perilla** (México fija el nivel y
-  > Argentina el modo), y **Colombia no entra entera** porque su aproximación del IVA a múltiplos
-  > de \$10 es un **escalón**, la misma forma que `cashRounding` pero sobre el impuesto. Detalle
-  > en el ADR.
-  >
-  > ✅ **Y las dos preguntas que quedaban, contestadas el mismo día:** la migración de un tenant
-  > ya configurado **no aplica** —no hay ninguno operando, y el proyecto no diseña backfills—, y
-  > la tabla la va a mantener el **panel de superadmin**, que **todavía no existe** (hoy
-  > `admin.vue` es un placeholder). Hasta entonces las reglas por país **viven en el seeder**.
-  >
-  > 🌎 **Y se relevaron ocho países de LatAm** (2026-09-03, con tres fuentes primarias) →
-  > [`investigaciones/2026-09-03-redondeo-por-pais-latam.md`](investigaciones/2026-09-03-redondeo-por-pais-latam.md).
-  > **Da vuelta la prioridad:** lo urgente es el **modo**, no el nivel — Argentina y Colombia
-  > exigen **half-even** y nuestro default es `HALF_UP`, así que un tenant de cualquiera de los
-  > dos incumple sin tocar nada. Del **nivel**, de ocho países lo fija **uno**.
   >
   > 📊 **Los pros y contras ya están hechos**, a pedido del owner el mismo día:
   > [`investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md`](investigaciones/2026-09-03-uf-y-nivel-por-pais-analisis.md).
@@ -2482,11 +1893,6 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
 ### Los tipos de regla por TIEMPO, que siguen esperando el vencimiento de venta (2026-08-24)
 
-De los cinco tipos que no hacían lo que la pantalla promete, **la vigencia por fecha se
-construyó el 2026-08-24** y `promocional` **se eliminó** (su caso se mudó al motor de
-promociones). El detalle está en [`resueltos.md`](resueltos.md) § *"La vigencia por fecha se
-evalúa"*.
-
 **Lo que queda, y es un frente propio:** `mora`, `pronto_pago`, `interes_simple` e
 `interes_compuesto`. Los cuatro dependen de que una venta tenga **vencimiento**, que no
 existe como concepto en el sistema, así que van con el frente de crédito y **no antes**.
@@ -2533,13 +1939,9 @@ son correctas por separado.
 
 **Qué pasa:** sembrar la provincia volvió alcanzable `POST /admin/tenants` con un
 `provinciaId` de AR/CO/MX. El país gobierna **tres** catálogos, y hasta este frente los tres
-tenían solo Chile:
+tenían solo Chile. Los métodos de pago ya se sembraron → [`resueltos.md`](resueltos.md); quedan
+los otros dos:
 
-- **Métodos de pago** — ✅ **arreglado en el mismo commit que lo destapó.** Sin ellos el tenant
-  no podía cobrar **ninguna** venta (`PagosService` rechaza con 400 todo método que no esté en
-  `tenant_metodo_pago`) y tampoco arreglarlo por pantalla, que se arma con el mismo `JOIN`.
-  Los cuatro son universales (efectivo, débito, crédito, transferencia), así que sembrarlos en
-  los cuatro países no requería ninguna decisión. Hay e2e que lo fija.
 - **Impuestos de sistema** — 🟡 **no arreglado, y la pregunta estaba mal planteada.** El seed
   solo trae el IVA chileno (`seedImpuestos`, `paisId: CHILE`) y los ítems resuelven con
   `i.tenant_id = $2 OR i.pais_id = <país del tenant>`, así que un tenant AR/CO/MX nace sin
@@ -2567,25 +1969,10 @@ tenían solo Chile:
   por país, del mismo modo que los documentos tributarios. Las tasas relevadas están en la
   investigación, **sin verificar contra la norma** — antes de sembrar cualquiera va la cita al
   lado del valor, mismo criterio que el frente de redondeo.
-- **Tipos de documento tributario** — 🟡 **la mitad urgente se cerró el 2026-09-03**, la otra
-  quedó agendada. `seedTiposDocumentoTributario` ya siembra en los cuatro países la **nota de
-  crédito interna** —sin código tributario, `activo: false`, sin emisión—, que es el marcador
-  que el reembolso necesita, y el flujo la resuelve por `es_nota_credito` + país en vez de la
-  constante chilena (detalle en [`resueltos.md`](resueltos.md)). Lo que **no** se sembró son
-  los documentos tributarios de verdad de AR/CO/MX: eso entra con el frente fiscal de cada
-  país, que el owner decidió que va a ser **progresivo**.
-
-✅ **El dato que daba vuelta la pregunta ya no está vivo, pero se deja escrito porque explica
-por qué esto se tomó.** La nota de crédito por reembolso usaba una constante **hardcodeada**
-—`TIPO_DOCUMENTO_NC_ID`, la fila **chilena código 61**— sin mirar el país, así que una
-devolución en un tenant argentino congelaba un hecho fiscal con un documento chileno, que es
-exactamente lo que ADR-010 dice que después no se corrige. **Cerrado el 2026-09-03**: la
-constante ya no existe y el tipo sale del catálogo.
-
-**La pregunta que quedaba** —¿se corta la nota de crédito fuera de Chile, o se abre el frente
-fiscal ahora?— **la contestó el owner el 2026-09-03**: que siga saliendo, con una nota de
-crédito **interna propia de cada país**, porque cortar el reembolso deja un agujero en una
-operación diaria y con la entrada progresiva serían meses. Construido ese mismo día.
+- **Tipos de documento tributario** — 🟡 **no se sembraron los documentos tributarios de
+  verdad de AR/CO/MX**: eso entra con el frente fiscal de cada país, que el owner decidió que
+  va a ser **progresivo**. La nota de crédito interna de cada país ya está →
+  [`resueltos.md`](resueltos.md).
 
 **Y lo que queda como proyecto agendado, ya sin pregunta para el owner:** los documentos
 tributarios de verdad de cada país **y los impuestos de sistema** — el punto 🟡 de arriba dejó
@@ -2618,12 +2005,6 @@ será progresivo"*. Lo que cambia:
   país, no un interruptor global del sistema** — y el país que entra segundo **no puede obligar
   a migrar el historial del primero**. Eso descarta de entrada la solución barata de
   "agregamos las columnas de Chile ahora y ya veremos": las columnas de Chile son las de Chile.
-
-✅ **Esa otra mitad —el reembolso que congelaba el tipo de documento chileno— se construyó el
-mismo día** (`fc1bfa84`): cada país tiene su nota de crédito interna y el flujo la resuelve por
-`es_nota_credito` + país. Detalle en [`resueltos.md`](resueltos.md). Sigue valiendo el motivo
-por el que no se podía esperar: con la entrada progresiva, esos tenants iban a pasar **meses**
-operando sin sus tipos de documento.
 
 📌 **El alta en esos países no está prohibida** y no va a estarlo: bloquearla rompería la
 propia feature del redondeo por país, y el tenant vende, cobra y ahora también reembolsa con el
