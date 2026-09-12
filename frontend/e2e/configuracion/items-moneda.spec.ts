@@ -18,13 +18,16 @@ import {
  *    nunca sobre la etiqueta que se ve. Y el modo de falla que este frente vino a
  *    cerrar es exactamente ése: la pantalla diciendo una cosa y el formulario
  *    otra, en un campo de plata.
- * 2. **Que cerrar el drawer mate el cambio pendiente.** Cerrar el drawer de
- *    `items` en el entorno `nuxt` de vitest tira un `Unhandled Rejection` de
- *    happy-dom (`CSSStyleDeclaration` desde el `Presence` de Reka) que deja la
- *    corrida entera en rojo aunque los tests pasen. Misma familia que el `UModal`
- *    sobre este drawer, anotada en `docs/agent/pendientes.md` § 2.
- *    ⚠️ Medido: sacando la línea de `resetDrawer` que mata el pendiente, el unit sigue
- *    dando 43 en verde y **este archivo falla**. Es la única red que cubre ese caso.
+ * 2. **Que cerrar el drawer mate el cambio pendiente.** ⚠️ Desde el 2026-09-11
+ *    cerrar ese drawer en el entorno `nuxt` **ya se puede** —un wrapper de
+ *    `getComputedStyle` con `markRaw`, local al spec; el detalle y su medición en
+ *    `docs/patterns/frontend.md` §15—, así que esto ya no es por el runner. El
+ *    `UModal` sobre este drawer sí sigue tumbando al worker, y el cierre de esa
+ *    entrada está en `docs/agent/resueltos.md`.
+ *    ⚠️ Medido: sacando de `resetDrawer` la línea que mata el pendiente de la
+ *    MONEDA, el unit sigue en verde y **este archivo falla**. Es la única red que
+ *    cubre ese caso. (La de la UNIDAD es otra línea y sí la caza el unit, que
+ *    además ya cierra el drawer: `configuracion/items.nuxt.spec.ts`.)
  *
  * El ítem se siembra por API y se da de baja al final: nada de esto depende del
  * catálogo del seed, y no queda un ítem huérfano en el listado.

@@ -630,12 +630,17 @@ Reglas:
   es un caso soportado —vaciarle el precio lo deja sin un campo que el DTO exige—. El descarte
   usa `Decimal`, no truthiness: `'0.0000'` es truthy.
   ⚠️ La confirmación va **inline** y no en un `CrudModal` como el resto de la pantalla: abrir
-  cualquier `UModal` con ese drawer abierto tumba al runner de tests por memoria, y cerrarlo
-  tira un unhandled rejection que deja la corrida en rojo con todos los tests en verde (los
-  dos, medidos y anotados en `pendientes.md` § 2). Fijado en `items.nuxt.spec.ts`, y lo que ese
-  entorno no puede aseverar —que la **etiqueta** del selector siga mostrando la moneda vieja
-  mientras se decide, y que cerrar el drawer mate el pendiente— en
-  `e2e/configuracion/items-moneda.spec.ts`.
+  cualquier `UModal` con ese drawer abierto **sigue** tumbando al runner de tests por memoria
+  (medido; la capa es `UDrawer` — ver § 15). **Cerrar ESTE drawer ya no es obstáculo** desde el
+  2026-09-11: el wrapper de `getComputedStyle` de § 15 lo deja cerrar con exit 0 —medido con y
+  sin wrapper **en esta pantalla**; el otro spec que lo usa, `salones`, ya lo traía—, y la
+  entrada del backlog se cerró en
+  [`resueltos.md`](../agent/resueltos.md). Fijado en
+  `items.nuxt.spec.ts`; la **etiqueta** del selector mostrando la moneda vieja mientras se
+  decide sigue en `e2e/configuracion/items-moneda.spec.ts`. ⚠️ Lo que **ningún** entorno
+  discrimina —medido por mutante— es si el pendiente lo mata el cierre o la reapertura:
+  `abrirEditar` llama a `resetDrawer()` igual, así que comentar el `watch` del cierre deja los
+  tests en verde.
   📌 La otra mitad del problema de la **unidad** es **visual**: un "Costo vigente" en unidad base al
   lado de un "Costo nuevo (por g)" son dos números que no se pueden comparar. El vigente
   sigue al selector, y como es una **tasa convertida** puede caer en fracciones que la
@@ -880,11 +885,11 @@ El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.
 
 ### Spec de PÁGINA que CIERRA un drawer
 
-Un spec de página (`mountSuspended`) que **cierra** un `AppDrawer` deja
-`vitest run` en **exit 1** aunque todos los tests pasen: la transición de salida
-de `usePresence` (reka-ui) lee `style.display` de un nodo ya desprendido y tira
-un *unhandled rejection*, que vitest cuenta aparte bajo `Errors` y no en la línea
-de `Tests`.
+Un spec de página (`mountSuspended`) que **cierra** un `AppDrawer` **real** —y sin
+el wrapper de `getComputedStyle` de más abajo— deja `vitest run` en **exit 1**
+aunque todos los tests pasen: la transición de salida de `usePresence` (reka-ui)
+lee `style.display` de un nodo ya desprendido y tira un *unhandled rejection*, que
+vitest cuenta aparte bajo `Errors` y no en la línea de `Tests`.
 
 Medido aislando una variable (2026-08-07, `configuracion/garzones`): abrir el
 drawer y desmontar → **0** rejections, exit 0. Abrir, guardar —que hace
@@ -907,6 +912,104 @@ Dos consecuencias del stub que cuestan un rato descubrir:
   mata los tests.
 - **El contenido stubeado NO se teletransporta**, así que sus botones se buscan
   en el wrapper y no en `document.body` como los de un `UModal`.
+
+**La otra salida, para cuando el test NECESITA cerrar el drawer de verdad** —p. ej. recorrer
+el flujo que hace una persona: elegir algo, cerrar, y volver a entrar—: envolver
+`window.getComputedStyle` para que lo que devuelva quede fuera de la reactividad de Vue. El
+objeto vivo de happy-dom **ya es** un Proxy suyo; `usePresence` lo guarda en un `ref` y Vue
+le pone otro encima, y el doble proxy rompe los traps. `markRaw` lo deja con uno solo:
+
+```ts
+let original: typeof window.getComputedStyle
+beforeAll(() => {
+  original = window.getComputedStyle
+  window.getComputedStyle = ((el: Element, pseudo?: string | null) =>
+    markRaw(original.call(window, el, pseudo) as object)) as typeof window.getComputedStyle
+})
+afterAll(() => { window.getComputedStyle = original })
+```
+
+Va **LOCAL al archivo**, nunca en `test.setup.ts`: es un global de toda la suite y para esto
+no hace falta tocarlo. Está en `configuracion/salones.nuxt.spec.ts:35-43` y en
+`configuracion/items.nuxt.spec.ts`.
+
+**La medición, el 2026-09-11 sobre `configuracion/items`**, cada falla aislada con `-t` y el
+exit code leído sin pipe —`| tail` se come el status—: el test que cierra el drawer da **exit 1
+con 2 rejections** sin el wrapper y **exit 0** con él, y el archivo entero pasó de 49 a 50 tests
+**sin mover ninguno**, que es el riesgo de parchear un global a nivel de archivo.
+
+⚠️ **Hasta dónde llega eso**: la medición con y sin wrapper es **solo de
+`configuracion/items`**. El otro spec que lo usa, `configuracion/salones`, ya lo traía —su
+docblock (`:19-34`) explica la causa, pero no registra exit codes— y las demás pantallas con
+drawer no se midieron. Alcanza para tomarlo como **la salida cuando un test necesita cerrar**,
+no para prometer que cualquier drawer del repo cierra limpio.
+
+⚠️ **Antes de inventar una evasión, buscar la que ya existe.** Acá no va ningún total a
+propósito —ni de archivos ni de formas—: un conteo envejece y hace que el próximo deje de
+buscar. Lo que sigue son las formas que **aparecieron al barrer `frontend/app`**, cada una
+comentada donde vive y con el porqué que midió quien la escribió —no re-medido acá, y alguno
+puede haber envejecido con su spec—; ninguna es un error. Si encontrás otra, se suma acá.
+
+- **Stubear `AppDrawer`**, en specs de página (`garzones`, `impuestos`, `mermas`,
+  `inventario/index`, `inventario/traslados`, `inventario/recuentos/index`, `salones/index`) y
+  también en specs del drawer como componente (`caja/CajaCierreDrawer`,
+  `ventas/VentaDetalleDrawer`).
+- **Stubear `UDrawer` con template propio** —no con `true`— cuando lo que se prueba **es** el
+  drawer: `components/AppDrawer.spec.ts:11-26`, cuyo stub trae un botón que emite
+  `update:open`, así que el test cierra **por el drawer**. ⚠️ Con `AppDrawer` stubeado también
+  se puede cerrar, pero **no porque el stub lo haga solo**: o lo emite el test sobre la
+  instancia (`salones/index.nuxt.spec.ts:3246`), o se guarda y la página pone
+  `drawerOpen = false` (`garzones.nuxt.spec.ts:747-749`, cuyo stub ni declara `emits`). Para un
+  spec de página el de `AppDrawer` alcanza; este otro va cuando el sujeto es el drawer mismo.
+- **Stubear el componente que CONTIENE el drawer**, cuando el drawer tiene su propio spec:
+  `caja/CajaCierreForzadoPanel.nuxt.spec.ts:39-42` (`CajaCierreDrawer: true`).
+- **Entrar por un camino que pasa por el mismo código sin cerrar el drawer**: "Nuevo" en vez
+  de "Cancelar", que llama igual a `resetDrawer` (`descuentos`, `recargos`).
+- **Hacer fallar la escritura a propósito** para que el drawer no se cierre (`descuentos` y
+  `recargos` con el `PATCH`, `promociones` con el `POST`).
+- **Retener la promesa sin resolver**, que no es lo mismo que hacerla fallar (`ubicaciones`,
+  `guardarRetenido`).
+- **Purgar del `body` los `[role="dialog"]` colgados**, en el `beforeEach` del describe que lo
+  necesita —no del archivo—: `unmount()` **no** se lleva el contenido teleportado
+  (`grupos-modificadores.nuxt.spec.ts:591-596`, `recargos.nuxt.spec.ts:591`,
+  `inventario/index.nuxt.spec.ts:247-251`, `configuracion/items.nuxt.spec.ts:1696`; en
+  `promociones.nuxt.spec.ts:161` vive en un `reset()` que sí llaman los cinco describes). No
+  evita el cierre: evita que un test lea el drawer del anterior.
+
+⚠️ **La trampa del dialog fantasma**, que es la razón de la purga: si el `body` puede tener
+drawers colgados de tests anteriores, buscar el **primer** `[role="dialog"]` agarra el viejo, y
+un test que dice "cerrar" pasa sin cerrar nada. Se purga el `body` antes de cada test, o se
+ancla al **más reciente** —el mecanismo está explicado en
+`configuracion/salones.nuxt.spec.ts:285-293`, con el helper `dialogo()` al lado (`:294-297`): el viejo queda colgado y el nuevo se teletransporta al
+final—. ⚠️ Y el ancla por posición **no se verifica sola**: afirmar además que el dialog elegido
+es el que se cree —por su texto— hace que un ancla equivocada **falle** en vez de cerrar un
+fantasma y pasar igual. Ojo que si los fantasmas tienen el mismo texto, eso tampoco discrimina:
+la garantía es la purga, y el texto es defensa en profundidad.
+
+Si el test **necesita** cerrar el drawer, la salida es el wrapper de arriba; si no lo
+necesita, la evasión más barata del caso sigue siendo válida. ⚠️ **Pero una evasión tiene
+precio, y es el que se olvida:** un camino que no cierra el drawer **no puede afirmar nada
+sobre el cierre**, y el mutante no lo delata —cae igual, porque abrir y cerrar comparten
+`resetDrawer`—. Está escrito en `descuentos.nuxt.spec.ts:1196-1199`, y un test que diga
+"cerrar" sin cerrar queda midiendo la apertura.
+
+⚠️ **Ese wrapper NO alcanza para abrir un `UModal` con el drawer abierto**: eso tumba al
+worker por memoria (`FATAL ERROR: Reached heap limit`) a los ~92 s, con el test reportado
+como *skipped* y exit 1. Medido el mismo día, una variable por corrida:
+
+| escenario | exit |
+|---|---|
+| el modal solo, sin drawer | 0 |
+| modal con el drawer **real** abierto | 1 — heap |
+| ídem **+ el wrapper `markRaw`** | 1 — heap |
+| modal con `AppDrawer` stubeado | 0 |
+| modal con **solo `UDrawer`** stubeado (`AppDrawer` real, todo el contenido montado) | 0 |
+
+La última fila es la que nombra al culpable: **la capa `UDrawer`** —vaul + el
+`Dialog`/`Presence` de reka—, y **no** la página, ni el volumen de su template (sigue montado
+bajo ese stub), ni el modal. Mientras siga así: una confirmación que tenga que convivir con
+el drawer abierto va **inline** en el cuerpo (`UAlert`), y un test que necesite un modal
+sobre el drawer stubea esa capa.
 
 ### Spec del COMPONENTE drawer (no de la página que lo abre)
 

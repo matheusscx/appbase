@@ -755,31 +755,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
      (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
      Decimal, que normaliza los ceros a la derecha.
 
-### El drawer de `items` no se puede ni cerrar ni tapar con un modal en el entorno de tests (2026-09-09)
-
-- [ ] **Es un obstáculo de herramienta, no un bug de producto**: en el navegador el modal
-  sobre el drawer funciona; lo que muere es el runner. Un gesto dentro del drawer de
-  `configuracion/items.vue` que abra un `UModal` hace que
-  `items.nuxt.spec.ts` termine en `FATAL ERROR: Reached heap limit` a los ~95 s, con el
-  worker caído y **los tests anteriores reportados como pasados**, que es la parte cara: sin
-  bisecar parece un problema del cambio que uno acaba de escribir.
-  **Medido el 2026-09-09**, cerrando el vaciado por cambio de moneda: se reprodujo apuntando
-  el mismo gesto a `verUnidadesOpen` —un modal que ya existía y que el cambio no tocaba—, y
-  una sonda con `AppDrawer` + `CrudModal` **fuera** de esta página pasa en 4 s. O sea que no
-  es el modal ni el drawer por separado: es esta combinación, con este drawer.
-  📌 **Y el mismo drawer tampoco se puede CERRAR** desde un test de vitest: el `Presence` de
-  Reka lee `getComputedStyle().display` en la animación de salida y happy-dom tira
-  `TypeError: Receiver must be an instance of class CSSStyleDeclaration` como **unhandled
-  rejection**. Los tests pasan y el proceso **igual sale con código ≠ 0**, así que el gate
-  queda rojo sin un solo test en rojo — el modo de falla más caro de diagnosticar de los dos.
-  **Qué se hizo mientras tanto**: la confirmación de ese gesto quedó **inline en el drawer**
-  (`UAlert` con sus dos botones), que frena igual y sí se puede testear; y lo que necesita
-  cerrar el drawer se fue a `e2e/configuracion/items-moneda.spec.ts`, en un navegador real.
-  **Lo que falta** es saber si el que se cuelga es `vaul` (el drawer), Reka o happy-dom, y si
-  hay una opción del entorno que lo destrabe. Hasta entonces, cualquier confirmación nueva
-  dentro de ese drawer va inline. ⚠️ Antes de tomarla, medir si sigue pasando: el runner y
-  Nuxt UI se actualizan.
-
 ### El modal de reembolso formatea con la moneda del tenant una orden que siempre es CLP (2026-09-08)
 
 - [ ] **`ReembolsoModal` monta su `MoneyInput` con `oficial`** —la moneda oficial del

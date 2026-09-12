@@ -23,6 +23,116 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El drawer de `items` ya se puede cerrar en un test; taparlo con un modal sigue tumbando al worker (cerrada 2026-09-11)
+
+Sale de [`pendientes.md` § 2](pendientes.md). La entrada, verbatim:
+
+> ### El drawer de `items` no se puede ni cerrar ni tapar con un modal en el entorno de tests (2026-09-09)
+>
+> - [ ] **Es un obstáculo de herramienta, no un bug de producto**: en el navegador el modal
+>   sobre el drawer funciona; lo que muere es el runner. Un gesto dentro del drawer de
+>   `configuracion/items.vue` que abra un `UModal` hace que
+>   `items.nuxt.spec.ts` termine en `FATAL ERROR: Reached heap limit` a los ~95 s, con el
+>   worker caído y **los tests anteriores reportados como pasados**, que es la parte cara: sin
+>   bisecar parece un problema del cambio que uno acaba de escribir.
+>   **Medido el 2026-09-09**, cerrando el vaciado por cambio de moneda: se reprodujo apuntando
+>   el mismo gesto a `verUnidadesOpen` —un modal que ya existía y que el cambio no tocaba—, y
+>   una sonda con `AppDrawer` + `CrudModal` **fuera** de esta página pasa en 4 s. O sea que no
+>   es el modal ni el drawer por separado: es esta combinación, con este drawer.
+>   📌 **Y el mismo drawer tampoco se puede CERRAR** desde un test de vitest: el `Presence` de
+>   Reka lee `getComputedStyle().display` en la animación de salida y happy-dom tira
+>   `TypeError: Receiver must be an instance of class CSSStyleDeclaration` como **unhandled
+>   rejection**. Los tests pasan y el proceso **igual sale con código ≠ 0**, así que el gate
+>   queda rojo sin un solo test en rojo — el modo de falla más caro de diagnosticar de los dos.
+>   **Qué se hizo mientras tanto**: la confirmación de ese gesto quedó **inline en el drawer**
+>   (`UAlert` con sus dos botones), que frena igual y sí se puede testear; y lo que necesita
+>   cerrar el drawer se fue a `e2e/configuracion/items-moneda.spec.ts`, en un navegador real.
+>   **Lo que falta** es saber si el que se cuelga es `vaul` (el drawer), Reka o happy-dom, y si
+>   hay una opción del entorno que lo destrabe. Hasta entonces, cualquier confirmación nueva
+>   dentro de ese drawer va inline. ⚠️ Antes de tomarla, medir si sigue pasando: el runner y
+>   Nuxt UI se actualizan.
+
+**Lo primero fue medir, como la entrada pedía: las dos fallas siguen pasando.** Nada se había
+actualizado desde entonces. Con una sonda temporal, cada falla aislada con `-t` porque la de
+memoria tumba al worker y tapa la otra: cerrar el drawer da **exit 1 con 2 rejections**
+`Receiver must be an instance of class CSSStyleDeclaration` y **los tests en verde**; abrir un
+`UModal` con el drawer abierto da `FATAL ERROR: Reached heap limit` a los ~92 s, worker caído,
+el test reportado como *skipped* y exit 1.
+
+**La mitad de "lo que falta" quedó contestada, y no era la página.** Midiendo una variable por
+corrida:
+
+| escenario | exit |
+|---|---|
+| el modal solo, sin drawer | 0 |
+| modal con el drawer **real** abierto | 1 — heap |
+| ídem **+ el wrapper `markRaw`** | 1 — heap |
+| modal con `AppDrawer` stubeado | 0 |
+| modal con **solo `UDrawer`** stubeado (`AppDrawer` real, todo el contenido montado) | 0 |
+
+La última fila es la que nombra al culpable: **la capa `UDrawer`** —vaul + el
+`Dialog`/`Presence` de reka—. No es el volumen del template de esta pantalla, que bajo ese stub
+sigue montado entero y pasa igual; no es el modal, que solo también pasa; y no es *qué* modal,
+porque `CrudModal` es un `UModal` por dentro (`app/components/crud/CrudModal.vue:37`).
+⚠️ **Lo que no pude reconciliar**: la entrada afirma que una sonda con `AppDrawer` + `CrudModal`
+**fuera** de esta página pasa en 4 s. Si la capa `UDrawer` colgara en general, esa sonda tendría
+que haber reventado también. No la volví a correr —es una medición ajena— así que queda como
+discrepancia abierta, no como hipótesis descartada.
+
+**Cerrar el drawer ya se puede, y el arreglo ya existía en el repo.** `usePresence` de reka
+guarda el objeto vivo de `getComputedStyle()` dentro de un `ref`; ese objeto **ya es** un Proxy
+de happy-dom y Vue le pone otro encima, y el doble proxy rompe los traps. Envolver
+`getComputedStyle` con `markRaw` lo deja con uno solo: **exit 0**. Es el mismo parche, con el
+mismo alcance **local al archivo**, que ya vivía en `configuracion/salones.nuxt.spec.ts:35-43`
+—con su propio docblock explicando la causa (`:19-34`), lo que no existía era la entrada en
+`docs/patterns`—; ahora está en `items.nuxt.spec.ts` y el patrón quedó escrito en
+[`docs/patterns/frontend.md`](../patterns/frontend.md) §15, con esta tabla y con la advertencia
+de que **no** sirve para el modal sobre el drawer. No se tocó `test.setup.ts`: es un global de
+toda la suite y no hacía falta.
+
+**El cambio de versión quedó medido como innecesario.** El owner lo autorizó —*"si es necesario
+actualizamos"*— y la condición no se cumple: cada una de las dos fallas ya tiene su salida
+documentada —cerrar **se arregla** con el wrapper; el modal sobre el drawer **se evita**
+stubeando la capa— y el bump tocaría los 1204 tests de los 95 archivos del frontend.
+
+**Lo que esto destrabó, que es el pago de la entrada.** `items.nuxt.spec.ts` decía que cerrar el
+drawer **no se ejercía ahí** y vivía solo en `e2e/configuracion/items-moneda.spec.ts`. Ahora hay
+un caso que lo cierra de verdad —*"volver a entrar después de cerrar no arrastra el cambio de
+unidad a medio confirmar"*—: deja la unidad a medio confirmar, cierra por "Cancelar", vuelve a
+entrar y afirma que no aparece el aviso ni un precio reinterpretado. El archivo pasó de 49 a 50
+tests **sin mover ninguno** (exit 0), que era el riesgo de poner el wrapper a nivel de archivo.
+
+📌 **El mutante**: comentar `unidadPendiente.value = null` en `resetDrawer` —que **es** el código
+anterior a `b9637fdc`, no una rotura inventada— deja **1 failed / 49 passed**, solo ese test.
+
+⛔ **Y acá la revisión independiente bloqueó con razón: ese mutante no discrimina lo que el
+título del test decía.** La primera versión se llamaba *"cerrar el drawer mata el cambio de
+unidad a medio confirmar"*, y no podía fallar por el cierre: `abrirEditar` (`items.vue:1351`)
+arranca con `resetDrawer()` **síncrono**, así que la reapertura limpia el pendiente aunque el
+cierre no lo limpiara. Comentar `unidadPendiente.value = null` rompe **los dos** caminos, porque
+los dos llaman a `resetDrawer`. El mutante discriminante —que el revisor describió sin
+aplicarlo— es comentar `watch(drawerOpen, … resetDrawer())`, y **sobrevive**: el test queda en
+verde, exit 0 (medido). O sea que la limpieza del cierre es redundante para lo que ve una
+persona y por ese camino **no es observable**; el test quedó renombrado por la propiedad que sí
+afirma. Es la misma trampa que `descuentos.nuxt.spec.ts:1196-1199` ya tenía escrita para esta
+pantalla hermana, y que no apliqué a mi propio test.
+
+📌 **Y el mutante enseñó algo sobre la aserción, no sobre el código.** En su primera forma
+—`expect(aviso(wrapper)).toBeUndefined()`— el test fallaba con
+`RangeError: Maximum call stack size exceeded` y **sin mensaje**: chai intenta serializar el
+`VueWrapper` del `UAlert` para armar el diff y desborda la pila. Con marcadores quedó medido que
+el cierre y la reapertura se completan, o sea que el desborde era del reporter y no de la
+pantalla. Afirmando sobre los **títulos** —strings, filtrados por prefijo— el mismo mutante
+falla con `expected [ 'Cambiar la unidad de medida' ] to deeply equal []`, y el conteo se
+remidió contra el test final: **1 failed / 49 passed**. Los otros `toBeUndefined()` sobre
+`aviso()` del mismo describe tienen la misma mina cargada; no dispara porque pasan.
+
+**Qué queda vivo:** por qué la capa `UDrawer` se come la memoria con un modal encima sigue sin
+explicación, así que **una confirmación que tenga que convivir con el drawer abierto va inline**
+(`UAlert` en el cuerpo), y un test que necesite un modal sobre el drawer stubea esa capa.
+
+---
+
 ## Cambiar la unidad de un ítem guardado: se puede si no se usó, y vacía el precio (cerrada 2026-09-11)
 
 Sale de [`pendientes.md` § 2](pendientes.md), de la entrada *"Tres formas en que la pantalla
@@ -712,8 +822,10 @@ Bisecado: no es del cambio. **Cualquier `UModal` que se abra con el drawer de `i
 tumba al runner** — se reprodujo apuntando el mismo gesto a `verUnidadesOpen`, que ya existía,
 y una sonda con `AppDrawer` + `CrudModal` fuera de esta página pasa en 4 s. Entre un modal sin
 test unitario y un aviso inline con test, sobre un gesto que toca plata, se eligió el segundo:
-frena igual —hasta que alguien elija, la moneda es la de antes— y se puede fijar. Queda anotado
-en `pendientes.md` § 2 como obstáculo de herramienta.
+frena igual —hasta que alguien elija, la moneda es la de antes— y se puede fijar. Quedó anotado
+como obstáculo de herramienta, y **se cerró el 2026-09-11** —*"El drawer de `items` ya se puede
+cerrar en un test…"*, al principio de este archivo—: cerrarlo ya se puede con un wrapper de
+`getComputedStyle`, taparlo con un modal sigue tumbando al worker.
 
 ⚠️ **Lo que este cierre NO cierra: la puerta de la API.** Lo levantó la revisión
 independiente. `PATCH /items/:id { monedaId }` sigue cambiando la moneda sin tocar
@@ -727,7 +839,7 @@ la contestó el 2026-09-09: `400`**, cambiar de moneda exige mandar los precios 
 una de las cuatro caras de [`pendientes.md`](pendientes.md) § 3, *"La moneda de un ítem y la de
 sus partes: 'se puede, pero sin mezclar'"*, todavía sin construir.
 
-**Lo que lo fija.** Veinte tests en `items.nuxt.spec.ts` —43 en total el archivo— más dos en
+**Lo que lo fija.** Veinte tests en `items.nuxt.spec.ts` más dos en
 `e2e/configuracion/items-moneda.spec.ts`, en un navegador de verdad, y **veintiocho mutantes,
 corridos de a uno**. Los dos que más matan son los que cambian el diseño entero:
 **implementarlo con el `watch` ingenuo** —el que sale de copiar el vecino de la unidad— mata
@@ -741,10 +853,15 @@ muere en el unit y tiene su párrafo acá abajo.
 ficha guardada no vacía nada"*— lleva la ficha en **otra** moneda que el default del alta a
 propósito: con la misma, `form.monedaId` no cambia al cargarla y el mutante sobrevive.
 
-⚠️ **Uno de los veintiocho pasa el unit entero —43 en verde— y solo muere en el navegador**:
-dejar que el cambio pendiente sobreviva al cierre del drawer. Ningún test de vitest lo puede
-ver porque **cerrar este drawer ahí revienta el runner**. Por eso los dos tests de navegador
-no son adorno: el otro cubre lo que el unit tampoco puede aseverar, que la **etiqueta** del
+⚠️ **Uno de los veintiocho pasa el unit entero y solo muere en el navegador**: dejar que el
+cambio pendiente sobreviva al cierre del drawer. Cuando se midió esto, ningún test de vitest lo
+podía ver porque **cerrar ese drawer ahí reventaba el runner**. 📌 **Eso se arregló el
+2026-09-11** —*"El drawer de `items` ya se puede cerrar en un test…"*, al principio de este
+archivo— y el unit ya cierra el drawer de verdad, pero **el mutante sigue sin morir ahí, y hoy
+por otro motivo**: `abrirEditar` arranca con `resetDrawer()` síncrono, así que **reabrir limpia
+el pendiente aunque el cierre no lo limpie**. Medido: el mutante que comenta
+`watch(drawerOpen, … resetDrawer())` sobrevive en verde. Por eso los dos tests de navegador no
+son adorno: el otro cubre lo que el unit tampoco puede aseverar, que la **etiqueta** del
 selector siga mostrando la moneda vieja mientras el cambio está a medio confirmar (el unit
 afirma sobre el modelo).
 📌 **Y ese reparto se midió dos veces, porque la primera vez estaba mal.** Con la versión que

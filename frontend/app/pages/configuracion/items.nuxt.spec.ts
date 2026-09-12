@@ -7,9 +7,35 @@
 // "Historial" solo lee, y quedaron en el mismo dropdown.
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { markRaw } from 'vue'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Items from './items.vue'
+
+/**
+ * Para poder CERRAR el drawer en un test. La transición de salida de `vaul`/`reka-ui`
+ * `Presence` guarda el objeto vivo de `getComputedStyle()` dentro de un `ref`, y Vue lo
+ * envuelve en un segundo Proxy sobre el de happy-dom: leer `display` rompe los traps
+ * («Receiver must be an instance of class CSSStyleDeclaration») como **unhandled
+ * rejection**, con los tests en verde y el proceso en exit 1. `markRaw` lo deja fuera de
+ * la reactividad, así que happy-dom ve solo SU proxy.
+ *
+ * Medido sobre esta página el 2026-09-11, cada falla aislada con `-t`: cerrar el drawer sin
+ * esto da exit 1 con 2 rejections, y con esto exit 0. Mismo parche y mismo alcance —LOCAL a
+ * un archivo, no `test.setup.ts`— que `salones.nuxt.spec.ts:35-43`.
+ *
+ * ⚠️ No arregla la otra falla del mismo entorno: un `UModal` abierto con este drawer abierto
+ * tumba al worker por heap igual (`docs/patterns/frontend.md` §15).
+ */
+let getComputedStyleOriginal: typeof window.getComputedStyle
+beforeAll(() => {
+  getComputedStyleOriginal = window.getComputedStyle
+  window.getComputedStyle = ((el: Element, pseudo?: string | null) =>
+    markRaw(getComputedStyleOriginal.call(window, el, pseudo) as object)) as typeof window.getComputedStyle
+})
+afterAll(() => {
+  window.getComputedStyle = getComputedStyleOriginal
+})
 
 let esAdmin = false
 let permisos: string[] = []
@@ -1551,11 +1577,12 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     wrapper.unmount()
   })
 
-  // 📌 El cierre del drawer —que es donde `resetDrawer` tiene que matar un cambio a
-  // medio confirmar— NO se ejerce acá: cerrar este drawer en el entorno `nuxt` de
-  // vitest tira un `Unhandled Rejection` de happy-dom (`CSSStyleDeclaration` desde el
-  // `Presence` de Reka) que deja la corrida en rojo aunque los tests pasen. Vive en
-  // `e2e/configuracion/items-moneda.spec.ts`, en un navegador de verdad.
+  // 📌 Cerrar el drawer acá **ya se puede**, desde el 2026-09-11: lo destraba el wrapper de
+  // `getComputedStyle` del tope del archivo (el `Presence` de Reka leía `display` sobre un
+  // objeto que happy-dom rechaza, y eso dejaba la corrida en rojo con los tests en verde).
+  // Hay un caso que lo ejerce al final del describe de la unidad. Lo que NINGÚN entorno
+  // discrimina —medido— es si el pendiente lo limpia el cierre o la reapertura: `abrirEditar`
+  // llama a `resetDrawer()` igual. El detalle, en `docs/patterns/frontend.md` §15.
 
   // El tercer lugar donde el drawer guarda plata de este ítem: el precio de cada extra
   // de la receta, que vive en `receta_extras_permitidos` con FK a esta receta. El de las
@@ -1660,6 +1687,13 @@ describe('configuracion/items — cambiar la unidad de un ítem guardado', () =>
     esAdmin = true
     permisos = []
     itemDetalleMock = ITEM_PRODUCTO
+    // Los tests de acá desmontan con el drawer abierto, y `unmount()` **no** se lleva el
+    // contenido teleportado: queda un `[role="dialog"]` fantasma con su propio "Cancelar" y
+    // —el de "cambiar la unidad frena"— con el MISMO título que busca el test del cierre, así
+    // que anclar por texto tampoco lo distingue. Esta purga es la garantía que no depende del
+    // orden de inserción, igual que `grupos-modificadores.nuxt.spec.ts:591-596` e
+    // `inventario/index.nuxt.spec.ts:247-251`.
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
 
   afterEach(() => {
@@ -1784,6 +1818,73 @@ describe('configuracion/items — cambiar la unidad de un ítem guardado', () =>
     expect(aviso(wrapper)).toBeUndefined()
     expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por kg)')
     expect(precio(wrapper).props('modelValue')).toBe('0.0000')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * Cierra el drawer de verdad, que hasta ahora NO se ejercía en este entorno —vivía solo en
+   * `e2e/configuracion/items-moneda.spec.ts`— porque la transición de salida dejaba rechazos
+   * sin manejar. Lo destraba el wrapper de `getComputedStyle` del tope del archivo.
+   *
+   * **Lo que afirma, que es la propiedad que le importa a una persona:** después de dejar una
+   * unidad a medio confirmar y cerrar, volver a entrar **no arrastra** ese aviso ni un precio
+   * reinterpretado. Si lo arrastrara, confirmarlo sobre el ítem SIGUIENTE le vaciaría el
+   * precio por una unidad que nadie eligió para él.
+   *
+   * ⚠️ **Lo que NO mide, y lo levantó la revisión independiente:** la limpieza del CIERRE.
+   * `abrirEditar` (`items.vue:1351`) arranca con `resetDrawer()` síncrono, así que reabrir
+   * limpia el pendiente aunque cerrar no lo limpiara. Medido: comentar
+   * `watch(drawerOpen, … resetDrawer())` deja este test en **verde, exit 0** — el mutante
+   * sobrevive, y eso ES el hallazgo: por este camino esa línea no es observable. El mutante
+   * que sí cae —comentar `unidadPendiente.value = null` DENTRO de `resetDrawer`, que es el
+   * código anterior a `b9637fdc`: 1 failed / 49 passed— cae por la reapertura, no por el
+   * cierre. Es la trampa que `descuentos.nuxt.spec.ts:1196-1199` ya tenía escrita: abrir y
+   * cerrar comparten `resetDrawer`, así que el mutante no distingue cuál de los dos lo llamó.
+   */
+  it('volver a entrar después de cerrar no arrastra el cambio de unidad a medio confirmar', async () => {
+    const wrapper = await abrirEditar()
+    await elegirUnidad(wrapper, 'kg')
+    // Ancla: sin el aviso presente acá, lo de abajo pasaría por el lado vacío.
+    expect(aviso(wrapper), 'el aviso está antes de cerrar').toBeTruthy()
+
+    // El drawer se teletransporta a `document.body`, así que su "Cancelar" se busca ahí y no
+    // en el wrapper. El `beforeEach` de este describe purga los `[role="dialog"]` colgados
+    // —`unmount()` no se lleva el contenido teleportado
+    // (`grupos-modificadores.nuxt.spec.ts:591-596`)—, así que acá hay exactamente uno. Se toma
+    // el **más reciente** de todos modos, que es la regla del repo para cuando el `body` puede
+    // venir sucio (`salones.nuxt.spec.ts:286`).
+    const dialogs = [...document.body.querySelectorAll('[role="dialog"]')]
+    const vivo = dialogs[dialogs.length - 1]
+    expect(vivo, 'el drawer abierto en el body').toBeTruthy()
+    // Defensa en profundidad, no la garantía: la garantía es la purga del `beforeEach`, y con
+    // ella esta aserción **no puede fallar**. Queda porque los tests de este describe desmontan
+    // con el drawer abierto —y uno, con el aviso abierto y su mismo título—: si alguien saca la
+    // purga, esto hace fallar el test en vez de dejarlo "cerrar" un fantasma y pasar igual.
+    expect(vivo!.textContent, 'el dialog elegido es el drawer de este test')
+      .toContain('Cambiar la unidad de medida')
+    const cancelar = [...vivo!.querySelectorAll('button')]
+      .find(b => b.textContent?.trim() === 'Cancelar')
+    expect(cancelar, 'botón "Cancelar" del drawer').toBeTruthy()
+    cancelar!.click()
+    await new Promise(r => setTimeout(r, 50))
+
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // Se afirma sobre los TÍTULOS —strings— y no con `toBeUndefined()` sobre el componente:
+    // si el aviso sobrevive, chai intenta serializar el `VueWrapper` del `UAlert` para armar
+    // el diff y revienta con `RangeError: Maximum call stack size exceeded` en vez de decir
+    // qué pasó. Medido con el mutante de `resetDrawer` el 2026-09-11.
+    // `filter` + `toEqual([])` en vez de `not.toContain('<título exacto>')`: con el título
+    // exacto, agregarle cualquier cosa al `title` del `UAlert` volvería la aserción verde por
+    // construcción. El prefijo es el mismo criterio que usa `aviso()`.
+    expect(wrapper.findAllComponents({ name: 'UAlert' })
+      .map(a => String(a.props('title') ?? ''))
+      .filter(t => t.startsWith('Cambiar la unidad')))
+      .toEqual([])
+    expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por unidad)')
+    expect(precio(wrapper).props('modelValue')).toBe('1500.0000')
 
     wrapper.unmount()
   })

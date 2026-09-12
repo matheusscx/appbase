@@ -1135,6 +1135,13 @@ CSSStyleDeclaration` como **rechazo no capturado**. La suite decía `839 passed`
 - **El exit code lo cazó en el gate, no en la corrida del spec suelto.** Correr solo el
   archivo tocado daba verde y exit 0; el rechazo aparecía con la suite completa.
 
+📌 **Desde el 2026-09-11 hay salida medida, no solo evasión.** Envolver `getComputedStyle`
+con `markRaw` en el propio spec deja **cerrar** el drawer con exit 0 — la causa es un doble
+proxy (happy-dom devuelve su Proxy, `usePresence` lo guarda en un `ref` y Vue le pone otro
+encima). Con su medición, su alcance y las evasiones que el repo ya tenía:
+[`docs/patterns/frontend.md`](../patterns/frontend.md) §15. Sigue valiendo elegir el camino
+que no anima cuando alcanza; lo que ya no hace falta es renunciar al gesto.
+
 ## Pruebas E2E (API)
 
 ### ❌ Tomar "el primero" de un listado que comparten todas las suites
