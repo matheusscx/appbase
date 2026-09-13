@@ -260,6 +260,8 @@ let cierreFallaSesion = false
  * en el mismo microtask.
  */
 let agregarLineaRetenido: Promise<void> | null = null
+/** Retiene la respuesta del `DELETE /cuentas/:id/lineas/:id`, igual que sus hermanos. */
+let quitarLineaRetenido: Promise<void> | null = null
 /**
  * Lo que devuelve `GET /mesas/:id/cuentas` **por mesa**. Sin entrada, cae en
  * `cuentasDeLaMesa` — el fixture único que usan casi todos los tests—. Con
@@ -450,7 +452,8 @@ mockNuxtImport('useApiFetch', () => {
       const cuenta = cuentasServidor?.[0]
       if (!cuenta) return Promise.reject(new Error('DELETE sin GET previo de cuentas'))
       cuenta.lineas = cuenta.lineas.filter(l => l.id !== patchLinea[1])
-      return Promise.resolve(structuredClone(cuenta))
+      const respuesta = structuredClone(cuenta)
+      return quitarLineaRetenido ? quitarLineaRetenido.then(() => respuesta) : Promise.resolve(respuesta)
     }
     if (patchLinea && method === 'PATCH') {
       const body = (opts?.body ?? {}) as { cantidad?: string }
@@ -790,6 +793,7 @@ function reiniciarMock() {
   cierreRetenido = null
   cierreFallaSesion = false
   agregarLineaRetenido = null
+  quitarLineaRetenido = null
   cuentasPorMesa = {}
   listarCuentasRetenido = {}
   garzonesLista = []
@@ -2722,9 +2726,11 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   })
 
   /**
-   * **La cuenta que se está cobrando no se modifica** (owner, 2026-09-13): desde el *Confirmar*
-   * hasta que el cierre termina no se cambian cantidades, no se agregan ni quitan productos y no se
-   * cancela ESA cuenta, y el resto de la pantalla sigue libre. Sin esto, un cambio hecho en ese tramo podía
+   * **La cuenta que se está cobrando no se modifica** (owner, 2026-09-13): desde que se toca
+   * *Cerrar y cobrar* —mientras se calcula el total, y del *Confirmar* a que el cierre termine— no se
+   * cambian cantidades, no se agregan ni quitan productos y no se cancela ESA cuenta, y el resto de
+   * la pantalla sigue libre. Los tests de acá son del tramo del *Confirmar*; el del cálculo es
+   * *"desde que se toca Cobrar, mientras se calcula el total…"*. Sin esto, un cambio hecho en ese tramo podía
    * entrar a la venta contra los pagos del total viejo —pagada a medias, sin aviso— o imprimirse en
    * la boleta sin entrar a la venta.
    */
@@ -2839,6 +2845,161 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     soltarCierre()
     await esperar(100)
+  })
+
+  /**
+   * **Cobrar espera lo que todavía está cambiando las líneas de la cuenta** (owner, 2026-09-13).
+   * Agregar un producto o una receta y quitar una línea no pintan hasta que vuelve la respuesta, así
+   * que con el request en vuelo el cobro abría con el total de antes, y el cierre no lo esperaba:
+   * medido, la venta quedaba cobrada de menos sin aviso si el cambio entraba antes del cierre, o
+   * rebotaba si entraba después.
+   */
+  it('Cobrar espera el producto que todavía se está agregando, y el cobro abre con él adentro', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarAgregado!: () => void
+    agregarLineaRetenido = new Promise<void>((r) => {
+      soltarAgregado = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+    await esperar(20)
+    expect(lineasAgregadas, 'el agregado salió y no volvió').toHaveLength(1)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open'), 'no abre con el agregado en vuelo').toBe(false)
+
+    soltarAgregado()
+    await esperar(100)
+    expect(cobroModal.props('open'), 'abre cuando el agregado volvió').toBe(true)
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' }), 'con las dos líneas').toHaveLength(2)
+  })
+
+  it('Cobrar espera también la receta que todavía se está agregando', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarAgregado!: () => void
+    agregarLineaRetenido = new Promise<void>((r) => {
+      soltarAgregado = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    const receta = { ...producto('3.0000', '1.0000'), id: 'item-receta', nombre: 'Hamburguesa', tipo: 'receta' as const }
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', receta)
+    await esperar(20)
+    wrapper.findComponent({ name: 'VentasItemPersonalizacionDrawer' }).vm.$emit('confirm', { omitidos: [], extras: [] }, '')
+    await esperar(20)
+    expect(lineasAgregadas, 'la receta salió y no volvió').toHaveLength(1)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open'), 'no abre con la receta en vuelo').toBe(false)
+
+    soltarAgregado()
+    await esperar(100)
+    expect(cobroModal.props('open'), 'abre cuando la receta volvió').toBe(true)
+  })
+
+  it('Cobrar espera la línea que todavía se está quitando', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    const base = cuentaConPedido('1.0000')
+    cuentasDeLaMesa = [{ ...base, lineas: [...base.lineas, { ...base.lineas[0]!, id: 'linea-2' }] }]
+    let soltarQuitado!: () => void
+    quitarLineaRetenido = new Promise<void>((r) => {
+      soltarQuitado = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    trashDeLaLinea(wrapper).vm.$emit('click')
+    await esperar(20)
+    expect(lineasQuitadas, 'el quitado salió y no volvió').toEqual(['linea-1'])
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    expect(cobroModal.props('open'), 'no abre con el quitado en vuelo').toBe(false)
+
+    soltarQuitado()
+    await esperar(100)
+    expect(cobroModal.props('open'), 'abre cuando el quitado volvió').toBe(true)
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' }), 'con la línea que queda').toHaveLength(1)
+  })
+
+  /**
+   * **La espera de *Cerrar y cobrar* tiene techo: 10 segundos** (owner, 2026-09-13). Con el wifi
+   * caído a mitad de un guardado el navegador tarda minutos en darlo por fallido —`useApiFetch` no
+   * tiene timeout—, y la cuenta quedaba bloqueada todo ese tiempo, sin poder ni cancelarse. Al
+   * rendirse avisa y desbloquea; no reintenta solo.
+   */
+  it('si lo que se estaba guardando no vuelve en 10 segundos, Cobrar se rinde, avisa y desbloquea la cuenta', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    agregarLineaRetenido = new Promise<void>(() => {})
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+    await esperar(20)
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+
+    vi.useFakeTimers()
+    try {
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await vi.advanceTimersByTimeAsync(9_900)
+      expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'a los 9,9 s sigue bloqueada').toBe(true)
+      expect(toasts.some(t => t.title === 'No se pudo abrir el cobro'), 'a los 9,9 s no avisa').toBe(false)
+      await vi.advanceTimersByTimeAsync(200)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+    await esperar(20)
+
+    expect(toasts.some(t => t.title === 'No se pudo abrir el cobro'), 'avisa').toBe(true)
+    expect(cobroModal.props('open'), 'no abre').toBe(false)
+    expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'la cuenta se desbloquea').toBe(false)
+  })
+
+  it('el techo de 10 segundos cubre también el cálculo del total', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    calculoRetenido = new Promise<void>(() => {})
+    // Deja el cálculo fuera de vigencia, para que `asegurarVigente()` vaya al servidor. Se espera a
+    // que el `PATCH` salga antes de pasar a relojes falsos: su debounce es un timer real, y si queda
+    // armado dispara en el test siguiente.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
+    await esperar(400)
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+
+    vi.useFakeTimers()
+    try {
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await vi.advanceTimersByTimeAsync(10_100)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+    await esperar(20)
+
+    expect(toasts.some(t => t.title === 'No se pudo abrir el cobro'), 'avisa').toBe(true)
+    expect(cobroModal.props('open'), 'no abre').toBe(false)
+    expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'la cuenta se desbloquea').toBe(false)
   })
 
   it('si el cierre falla, la cuenta que se cobraba vuelve a poder modificarse', async () => {
@@ -5270,18 +5431,13 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     ).toEqual([])
   })
 
-  it('cancelar la cuenta uno mismo mientras el cobro calcula no le dice que se fusionó', async () => {
-    /**
-     * El control del aviso, y no es teórico: **la primera versión lo midió mal**.
-     * Deducía *"se la llevaron"* desde *"la cuenta ya no está en el listado"*, y
-     * cancelarla uno mismo la saca igual — así que el garzón que acababa de tocar
-     * *Cancelar cuenta* leía que su cuenta *"se fusionó"* y que fuera a cobrarla a
-     * la fusionada, que no existe. Lo midió la revisión con sonda.
-     *
-     * Por eso el aviso lo da `fusionarSeleccionadas`, que **sabe** lo que pasó, y
-     * `abrirCobro` volvió a cortar mudo.
-     */
-    catalogoItemsMock = [producto('9.0000', '1.0000')]
+  it('desde que se toca Cobrar, mientras se calcula el total, la cuenta no se cancela ni se modifica', async () => {
+    // Medido el 2026-09-13: con *Cancelar cuenta* confirmado durante el cálculo, el cobro abría
+    // igual y salían el cancelar y el cierre sobre la misma cuenta —uno de los dos rebotaba—.
+    // Decisión del owner: el bloqueo del cobro arranca en el toque de *Cerrar y cobrar*, no en el
+    // *Confirmar*. Reemplaza al test de *"cancelarla uno mismo mientras el cobro calcula"*: ese
+    // gesto ya no se puede hacer.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
 
     const wrapper = await montar()
@@ -5292,12 +5448,10 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     calculoRetenido = new Promise<void>((r) => {
       soltar = r
     })
-    const input = wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]
-    input!.vm.$emit('change', {
-      presentacion: '3',
-      unidadCodigo: 'unidad',
-      cantidadCanonica: '3.0000',
-    })
+    // La edición deja el cálculo fuera de vigencia: sin ella `asegurarVigente()` contesta sin ir
+    // al servidor y no hay espera en la que tocar nada.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2.0000' })
     await esperar(20)
 
     const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
@@ -5305,22 +5459,21 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(20)
     expect(cobroModal.props('open'), 'todavía calculando').toBe(false)
 
-    // Se arrepiente y cancela la cuenta, con el cálculo del cobro en vuelo.
-    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
-    await esperar(20)
-    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
-    await esperar(300)
+    expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'Cancelar cuenta').toBe(true)
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.props('disabled'), 'stepper').toBe(true)
+    // Y los handlers cortan aunque el evento llegue igual.
+    const modal = wrapper.findAllComponents({ name: 'CrudModal' }).find(m => m.props('title') === 'Cancelar cuenta')
+    expect(modal, 'el modal de cancelar').toBeTruthy()
+    modal!.vm.$emit('confirm')
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+    await esperar(50)
+    expect(patchesAlCancelar, 'no salió el cancelar').toBe(-1)
+    expect(lineasAgregadas).toEqual([])
+    expect(toasts.some(t => t.title === 'Esta cuenta se está cobrando')).toBe(true)
 
     soltar()
     await esperar(300)
-
-    expect(cobroModal.props('open')).toBe(false)
-    expect(toasts.map(t => t.title)).toContain('Cuenta cancelada')
-    expect(
-      toasts.filter(t => (t.title ?? '').includes('fusión')),
-      'nadie fusionó nada: la canceló él',
-    ).toEqual([])
+    expect(cobroModal.props('open'), 'el cobro abre cuando termina el cálculo').toBe(true)
   })
 
   it('meterse en otra cuenta mientras se calcula la precuenta no saca el papel de esa otra', async () => {

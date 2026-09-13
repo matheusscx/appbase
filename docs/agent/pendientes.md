@@ -168,18 +168,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
-- [ ] **Lo que viaja antes del *Confirmar* del cobro puede aterrizar dentro del tramo bloqueado**
-  (frontend, salones; **leído en el código el 2026-09-13** por la revisión del bloqueo de la cuenta
-  en cobro, no medido) — `abrirCobro` espera `asegurarVigente()` con la pantalla tocable, y
-  `flushPendientes` solo espera los `PATCH` de cantidad. Un `agregarLinea` todavía en vuelo cuando
-  se abre el modal deja el total viejo a la vista, y la línea puede entrar antes del cierre: venta
-  `pagada_parcial`, sin aviso. Un *Cancelar cuenta* confirmado en esa espera viaja igual, y uno de los
-  dos rebota con error: el cierre si la cancelación llega primero, el cancelar si llega primero el
-  cierre. El bloqueo de `cuentaActivaEnCobro` cubre lo que se toca **después** del
-  *Confirmar* ([`resueltos.md`](resueltos.md)).
-  **Qué medir:** reproducir las dos escenas en `salones/index.nuxt.spec.ts` con la respuesta de esos
-  requests retenida. Si se confirman, la salida probable es que `abrirCobro` espere también esos
-  requests; qué ve el garzón mientras tanto es pregunta para el owner.
 
 ## 3. Ya decidido, falta construir
 

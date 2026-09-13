@@ -23,6 +23,80 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cobrar espera lo que todavía cambia la cuenta, y la bloquea desde el toque (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **Medido antes de arreglar**, en
+`salones/index.nuxt.spec.ts` con tests temporales y las respuestas retenidas:
+- **Un producto agregado todavía en vuelo** al tocar *Cerrar y cobrar*: el modal abría con una sola
+  línea en pantalla, y después del *Confirmar* y el PIN el cierre salía con el agregado sin volver.
+  Contra el backend, una venta física acepta pagos por debajo del total: si el agregado entra
+  antes que el cierre la venta queda `pagada_parcial` sin aviso; si entra después, rebota.
+- ***Cancelar cuenta* durante el cálculo del total**: el botón seguía habilitado; con el cancelar
+  frenado detrás de un `PATCH` en vuelo, el cobro abría igual y, al soltarlo, salían el cancelar y
+  el cierre sobre la misma cuenta.
+
+**Las dos decisiones del owner**, preguntadas con la escena de la bebida que todavía se guarda y
+con la del cancelar durante el cálculo:
+- *"Cobrar espera"*: el botón queda cargando hasta que termina lo que se estaba guardando, y el
+  total que abre ya lo incluye.
+- *"Bloquear desde Cobrar"*: desde el toque la cuenta no se cancela ni se modifica, como ya pasaba
+  del *Confirmar* al cierre.
+- **Y un techo de 10 segundos**, que salió de la revisión independiente: `useApiFetch` no tiene
+  timeout, así que con el wifi caído a mitad de un guardado la espera podía durar lo que tarda el
+  navegador en rendirse —minutos— con la cuenta bloqueada y sin poder cancelarse, que antes sí se
+  podía. El owner preguntó por qué quedaría pegado un request; con la respuesta, eligió el límite y
+  el valor. Al vencerse, el cobro no abre, la cuenta se desbloquea y avisa, sin reintentar solo.
+
+**Qué se hizo** (`salones/index.vue`).
+- `lineasEnVuelo` registra, por cuenta, los requests que cambian líneas y no pintan hasta volver:
+  `addProducto`, `onRecetaConfirm` y `quitarLinea`. **Quitar entró aunque la entrada solo nombraba
+  agregar**: tiene la misma forma —la línea desaparece recién con la respuesta—, así que el cobro
+  abría con una línea que ya se estaba quitando.
+- `abrirCobro` espera esos requests (`Promise.allSettled`) antes de `asegurarVigente`, y las dos
+  cosas juntas van dentro de `conTimeout` (`app/utils/con-timeout.ts`, el mismo de las impresoras)
+  con `LIMITE_ABRIR_COBRO_MS = 10_000`. Las cantidades no entran: se pintan optimistas, así que el
+  cálculo ya las ve, y el *Confirmar* las manda con `flushPendientes`.
+- `cuentaActivaEnCobro` también mira `cobroPedidoId`, así que el bloqueo cubre la espera del
+  cálculo; entre el cálculo y el *Confirmar* el modal de cobro cubre la pantalla. El aviso dice
+  *"hasta que termine el cobro"*.
+- El test *"cancelar la cuenta uno mismo mientras el cobro calcula no le dice que se fusionó"* se
+  reemplazó: ese gesto ya no se puede hacer.
+- Los dos tests del techo usan relojes falsos de vitest solo alrededor del toque, como
+  `useResultadoCalculado.nuxt.spec.ts`. El del cálculo espera a que salga el `PATCH` de su edición
+  antes de pasar a relojes falsos: con la espera corta, ese debounce —un timer real— disparaba en
+  el test siguiente y lo ponía en rojo; corrido solo, pasaba.
+
+**Lo que lo fija**, mutante por mutante sobre el spec final (124 tests):
+
+| Mutante | Lo caza |
+|---|---|
+| `abrirCobro` no espera | *"Cobrar espera el producto que todavía se está agregando…"*, *"…también la receta…"*, *"…la línea que todavía se está quitando"* y *"si lo que se estaba guardando no vuelve en 10 segundos…"* |
+| el bloqueo sin `cobroPedidoId` | *"desde que se toca Cobrar, mientras se calcula el total, la cuenta no se cancela ni se modifica"* y *"si lo que se estaba guardando no vuelve en 10 segundos…"* |
+| `addProducto` sin registrarse | *"Cobrar espera el producto que todavía se está agregando…"* y *"si lo que se estaba guardando no vuelve en 10 segundos…"* |
+| `onRecetaConfirm` sin registrarse | *"Cobrar espera también la receta que todavía se está agregando"* |
+| `quitarLinea` sin registrarse | *"Cobrar espera la línea que todavía se está quitando"* |
+| sin techo | *"si lo que se estaba guardando no vuelve en 10 segundos…"* y *"el techo de 10 segundos cubre también el cálculo del total"* |
+| techo solo sobre lo que se guarda | *"el techo de 10 segundos cubre también el cálculo del total"* |
+| techo de 20 s | los dos del techo |
+| techo de 5 s | *"si lo que se estaba guardando no vuelve en 10 segundos…"* |
+
+**Docs:** la fila de *Cerrar y cobrar* en `docs/features/salones-mesas.md` y la fila de salones en `docs/ESTADO.md`.
+
+La entrada, verbatim:
+
+- [ ] **Lo que viaja antes del *Confirmar* del cobro puede aterrizar dentro del tramo bloqueado**
+  (frontend, salones; **leído en el código el 2026-09-13** por la revisión del bloqueo de la cuenta
+  en cobro, no medido) — `abrirCobro` espera `asegurarVigente()` con la pantalla tocable, y
+  `flushPendientes` solo espera los `PATCH` de cantidad. Un `agregarLinea` todavía en vuelo cuando
+  se abre el modal deja el total viejo a la vista, y la línea puede entrar antes del cierre: venta
+  `pagada_parcial`, sin aviso. Un *Cancelar cuenta* confirmado en esa espera viaja igual, y uno de los
+  dos rebota con error: el cierre si la cancelación llega primero, el cancelar si llega primero el
+  cierre. El bloqueo de `cuentaActivaEnCobro` cubre lo que se toca **después** del
+  *Confirmar* ([`resueltos.md`](resueltos.md)).
+  **Qué medir:** reproducir las dos escenas en `salones/index.nuxt.spec.ts` con la respuesta de esos
+  requests retenida. Si se confirman, la salida probable es que `abrirCobro` espere también esos
+  requests; qué ve el garzón mientras tanto es pregunta para el owner.
+
 ## Oneclick y Webpay, solo para locales de Chile (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 3](pendientes.md), donde el owner lo había decidido ese mismo día

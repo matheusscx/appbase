@@ -19,6 +19,7 @@ import { personalizacionVacia, type PersonalizacionPayload } from '~/composables
 import type { Turno } from '~/composables/useTurnos'
 import type { SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
+import { conTimeout } from '~/utils/con-timeout'
 import { agregarImpuestosVenta, agregarPromocionesVenta } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
@@ -199,14 +200,17 @@ const submitting = ref(false)
  */
 const cobroEnVueloId = ref<string | null>(null)
 /**
- * **La cuenta que se está cobrando no se modifica** (owner, 2026-09-13). Desde el *Confirmar*
- * hasta que el cierre termina —o falla, o se cierra el teclado de PIN sin tipear— no se cambian
- * cantidades, no se agregan ni quitan productos y no se cancela ESA cuenta; el resto de la
- * pantalla sigue libre.
+ * **La cuenta que se está cobrando no se modifica** (owner, 2026-09-13). Desde que se toca
+ * *Cerrar y cobrar* no se cambian cantidades, no se agregan ni quitan productos y no se cancela ESA
+ * cuenta; el resto de la pantalla sigue libre. Son dos tramos con su marca: mientras se calcula el
+ * total (`cobroPedidoId`) y del *Confirmar* a que el cierre termine —o falle, o se cierre el teclado
+ * de PIN sin tipear— (`cobroEnVueloId`). Entre los dos el modal de cobro cubre la pantalla.
+ * El primero se sumó el mismo día, medido: con *Cancelar cuenta* confirmado durante el cálculo, el
+ * cobro abría igual y salían el cancelar y el cierre sobre la misma cuenta.
  * Antes, un cambio hecho en ese tramo podía entrar a la venta contra los pagos del total viejo
  * —queda `pagada_parcial`, sin aviso— o imprimirse en la boleta sin entrar a la venta.
  *
- * Mira `cobroEnVueloId`, que marca exactamente ese tramo. Si una fusión se lleva la cuenta y anula
+ * En el segundo tramo, si una fusión se lleva la cuenta y anula
  * la marca, se desbloquea: en general ese cobro ya no se cierra, pero si la fusión vuelve con el
  * `POST` de cierre ya despachado, la cuenta destino queda editable con ese cierre en vuelo —un
  * borde que esto no cubre—. Los controles se deshabilitan y los cuatro caminos que mutan la cuenta
@@ -217,16 +221,50 @@ const cobroEnVueloId = ref<string | null>(null)
  * ⚠️ Cubre esta pantalla: otro dispositivo sobre la misma cuenta no pasa por acá.
  */
 const cuentaActivaEnCobro = computed(() =>
-  !!activeCuenta.value && cobroEnVueloId.value === activeCuenta.value.id,
+  !!activeCuenta.value
+  && (cobroEnVueloId.value === activeCuenta.value.id || cobroPedidoId.value === activeCuenta.value.id),
 )
 
 /** El aviso de un gesto que corta por `cuentaActivaEnCobro` sin control deshabilitado a la vista. */
 function avisarCuentaEnCobro() {
   toast.add({
     title: 'Esta cuenta se está cobrando',
-    description: 'No se puede modificar hasta que termine el cierre.',
+    description: 'No se puede modificar hasta que termine el cobro.',
     color: 'warning',
   })
+}
+
+/**
+ * Los requests que cambian las líneas de una cuenta y todavía no volvieron: agregar un producto o
+ * una receta, y quitar una línea. Ninguno pinta antes de la respuesta, así que mientras viajan la
+ * pantalla —y el total que calcula `asegurarVigente`— muestra la cuenta sin ese cambio.
+ * `abrirCobro` los espera (owner, 2026-09-13: *"Cobrar espera"*): antes el cobro abría con el total
+ * de antes y el cierre no los esperaba, así que la venta quedaba cobrada de menos sin aviso si el
+ * cambio entraba primero, o el cambio rebotaba si entraba después.
+ *
+ * Las cantidades no entran: se pintan optimistas, así que el cálculo ya las ve, y el *Confirmar*
+ * las manda con `flushPendientes`.
+ */
+const lineasEnVuelo = new Map<string, Set<Promise<unknown>>>()
+/**
+ * Cuánto espera *Cerrar y cobrar* a `lineasEnVuelo` y al cálculo del total antes de rendirse
+ * (owner, 2026-09-13: 10 s). Sin techo, con el wifi caído a mitad de un guardado el navegador
+ * tarda minutos en darlo por fallido —`useApiFetch` no tiene timeout— y la cuenta quedaba
+ * bloqueada todo ese tiempo, sin poder ni cancelarse. Al rendirse avisa y desbloquea; no reintenta
+ * solo.
+ */
+const LIMITE_ABRIR_COBRO_MS = 10_000
+const MENSAJE_LIMITE_ABRIR_COBRO = 'El cobro tardó demasiado en abrir'
+function registrarEnVuelo<T>(cuentaId: string, request: Promise<T>): Promise<T> {
+  const enCuenta = lineasEnVuelo.get(cuentaId) ?? new Set<Promise<unknown>>()
+  lineasEnVuelo.set(cuentaId, enCuenta)
+  enCuenta.add(request)
+  const sacar = () => {
+    enCuenta.delete(request)
+    if (enCuenta.size === 0 && lineasEnVuelo.get(cuentaId) === enCuenta) lineasEnVuelo.delete(cuentaId)
+  }
+  request.then(sacar, sacar)
+  return request
 }
 const cancelOpen = ref(false)
 /**
@@ -706,7 +744,28 @@ async function abrirCobro() {
   abriendoCobro.value = true
   cobroPedidoId.value = cuenta.id
   try {
-    const res = await asegurarVigente()
+    // Lo que todavía está cambiando las líneas de esta cuenta (`lineasEnVuelo`) y después el total,
+    // con techo (`LIMITE_ABRIR_COBRO_MS`). No nace nada nuevo durante la espera: `cobroPedidoId` ya
+    // bloquea la cuenta. Al rendirse, el `return` pasa por el `finally`, que la desbloquea.
+    let res: ResultadoVenta | null
+    try {
+      res = await conTimeout(
+        Promise.allSettled([...(lineasEnVuelo.get(cuenta.id) ?? [])]).then(() => asegurarVigente()),
+        LIMITE_ABRIR_COBRO_MS,
+        MENSAJE_LIMITE_ABRIR_COBRO,
+      )
+    }
+    catch (e: unknown) {
+      if (!(e instanceof Error) || e.message !== MENSAJE_LIMITE_ABRIR_COBRO) throw e
+      if (cobroPedidoId.value === cuenta.id && activeCuenta.value?.id === cuenta.id) {
+        toast.add({
+          title: 'No se pudo abrir el cobro',
+          description: 'Lo que se estaba guardando en la cuenta, o el cálculo del total, tardó demasiado. Revisá la cuenta y volvé a tocar Cobrar.',
+          color: 'warning',
+        })
+      }
+      return
+    }
     // El guard va antes que el aviso: no se abre el cobro de una cuenta que ya no
     // es la de la pantalla, y al garzón que se fue a otra no se le tira un error
     // por la que dejó.
@@ -1979,7 +2038,10 @@ async function addProducto(item: ItemCatalogo) {
     return
   }
   try {
-    const cuenta = await salonesApi.agregarLinea(activeCuenta.value.id, item.id, '1')
+    const cuenta = await registrarEnVuelo(
+      activeCuenta.value.id,
+      salonesApi.agregarLinea(activeCuenta.value.id, item.id, '1'),
+    )
     syncCuenta(cuenta)
   }
   catch (e: unknown) {
@@ -1997,11 +2059,9 @@ async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string
       return
     }
     const personalizacion = personalizacionVacia(payload) ? undefined : payload
-    const cuenta = await salonesApi.agregarLinea(
+    const cuenta = await registrarEnVuelo(
       activeCuenta.value.id,
-      recetaItemId.value,
-      '1',
-      personalizacion,
+      salonesApi.agregarLinea(activeCuenta.value.id, recetaItemId.value, '1', personalizacion),
     )
     syncCuenta(cuenta)
   }
@@ -2033,7 +2093,10 @@ function yaEnviadaACocina(linea: CuentaLineaDetalle): boolean {
 async function quitarLinea(linea: CuentaLineaDetalle) {
   if (!activeCuenta.value || cuentaActivaEnCobro.value) return
   try {
-    const cuenta = await salonesApi.quitarLinea(activeCuenta.value.id, linea.id)
+    const cuenta = await registrarEnVuelo(
+      activeCuenta.value.id,
+      salonesApi.quitarLinea(activeCuenta.value.id, linea.id),
+    )
     syncCuenta(cuenta)
   }
   catch (e: unknown) {
