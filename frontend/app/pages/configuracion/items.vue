@@ -74,7 +74,7 @@ interface Item {
     min: number
     max: number
     orden: number
-    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string | null; cantidadDefault: string | null; unidadCodigo: string | null; precioExtra: string; orden: number; stock: string | null; esPendiente: boolean }[]
+    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string | null; cantidadDefault: string | null; unidadCodigo: string | null; precioExtra: string; precioExtraDefault: string; orden: number; stock: string | null; esPendiente: boolean }[]
   }[]
   disponible?: number | null
 }
@@ -98,7 +98,10 @@ interface GrupoOpcionOverrideRow {
   cantidad: string // efectiva (pre-llenada con default; '' = pendiente)
   cantidadDefault: string | null
   unidadCodigo?: string
-  precioExtra: string
+  precioExtra: string // efectivo (override de este ítem ?? default del catálogo)
+  // El default del catálogo de grupos, para distinguir el precio propio de este ítem del
+  // compartido. Ver `esPrecioPropioDeOpcion`.
+  precioExtraDefault: string
 }
 
 interface GrupoAsocRow {
@@ -388,6 +391,7 @@ const ivaDelPais = ref<ImpuestoApi | null>(null)
 	    cantidadDefault: o.cantidad,
 	    unidadCodigo: o.unidadCodigo ?? undefined,
 	    precioExtra: o.precioExtra,
+	    precioExtraDefault: o.precioExtra,
 	  }))
 	}
 
@@ -597,17 +601,16 @@ watch(() => form.value.unidadMedida, () => {
  * **Qué se vacía, y por qué justo eso.** La regla del owner es "si el precio vive en la
  * asociación con el ítem, avisar y limpiar; si es del extra como tal, no —hasta se podría
  * estar usando en otro ítem—". Cae de ese lado el precio base y el costo (columnas de
- * `items`) y el precio de cada extra de receta (`receta_extras_permitidos`, FK a esta
- * receta).
+ * `items`), el precio de cada extra de receta (`receta_extras_permitidos`, FK a esta
+ * receta) y el **precio propio** de cada opción de modificador (`esPrecioPropioDeOpcion`).
  *
- * ⛔ **NO cae el precio de las opciones de modificadores, aunque el campo esté acá.** Lo que
- * la pantalla muestra no es el override del ítem: `GET /items/:id` devuelve el **efectivo**
- * (`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`), que puede ser el número
- * compartido del catálogo —lo edita `grupos-modificadores.vue` y puede estar en uso en otras
- * recetas—. Cuando se escribió esto la API no mandaba el default al lado y desde acá no se
- * podía distinguir uno del otro; desde el 2026-09-11 lo manda (`precioExtraDefault`), pero
- * este gesto todavía no lo usa, y hasta que lo use manda la regla: no se toca. Incluirlas
- * está en `docs/agent/pendientes.md` § 3.
+ * ⚠️ **De las opciones cae solo el precio propio, no el efectivo.** `GET /items/:id` devuelve
+ * el efectivo (`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`), que puede ser
+ * el número compartido del catálogo —lo edita `grupos-modificadores.vue` y puede estar en uso
+ * en otras recetas—, y al lado el default (`precioExtraDefault`). Se vacía la opción cuyo
+ * efectivo difiere del default; la que coincide se deja, con el mismo número leído en la moneda
+ * nueva, y el aviso lo dice. Una opción vaciada vuelve a heredar el precio del catálogo al
+ * guardar: el `PATCH` no le manda precio.
  *
  * ⛔ **Tampoco entran los descuentos y recargos de MONTO FIJO asociados al ítem**, y es una
  * decisión, no un olvido: **ese monto no está denominado en la moneda del ítem**, así que
@@ -654,7 +657,31 @@ const camposDePlataVisibles = computed(() => ({
   costo: (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente')
     && !editingId.value,
   extras: form.value.tipo === 'receta',
+  opciones: form.value.tipo === 'receta' || form.value.tipo === 'combo',
 }))
+
+/**
+ * El precio de una opción que vive en la asociación con ESTE ítem: con monto y distinto del
+ * default del catálogo de grupos. Dos casos que no cuentan, a propósito:
+ * - un override **igual** al default no se distingue de uno heredado, y vaciarlo no cambiaría
+ *   nada visible —la opción vuelve al mismo número—;
+ * - un `0`, por la misma regla que los extras: cero es cero en cualquier moneda.
+ * `Decimal` y no comparación de strings: la API manda `'1200.0000'` y el campo puede tener
+ * `'1200'`.
+ */
+function esPrecioPropioDeOpcion(o: GrupoOpcionOverrideRow): boolean {
+  if (!esPlataQueSeReinterpreta(o.precioExtra)) return false
+  try {
+    return !new Decimal(o.precioExtra).eq(o.precioExtraDefault)
+  } catch {
+    return true
+  }
+}
+
+function contarPreciosPropiosDeOpciones(): number {
+  return form.value.gruposModificadores
+    .reduce((n, g) => n + g.opciones.filter(esPrecioPropioDeOpcion).length, 0)
+}
 
 /**
  * El **costo vigente** es plata de este ítem que la pantalla muestra y que nadie teclea:
@@ -689,6 +716,10 @@ const plataQueSeVacia = computed(() => {
     ? form.value.extrasPermitidos.filter(e => esPlataQueSeReinterpreta(e.precioExtra)).length
     : 0
   if (extras) partes.push(`${extras} ${extras === 1 ? 'precio de extra' : 'precios de extras'}`)
+  const opciones = visible.opciones ? contarPreciosPropiosDeOpciones() : 0
+  if (opciones) {
+    partes.push(`${opciones} ${opciones === 1 ? 'precio de opción' : 'precios de opciones'}`)
+  }
   return partes
 })
 
@@ -699,8 +730,8 @@ const plataQueSeVacia = computed(() => {
  * donde el único monto es uno de estos cambia de moneda en silencio.
  *
  * Cada uno con **su** porqué, que no es el mismo: los dos costos no son campos, y el precio de
- * una opción sí lo es pero no se puede distinguir el de este ítem del compartido del catálogo
- * (ver el ⛔ de arriba). Los dos costos son mutuamente excluyentes por tipo.
+ * una opción que coincide con el del catálogo sí lo es pero no se distingue del compartido (ver
+ * el ⚠️ de arriba). Los dos costos son mutuamente excluyentes por tipo.
  */
 const montosQueSeReinterpretan = computed(() => {
   const partes: string[] = []
@@ -718,8 +749,8 @@ const montosQueSeReinterpretan = computed(() => {
   }
   if (opcionesDeModificadorSeReinterpretan.value) {
     partes.push(
-      'Los precios de las opciones de modificadores tampoco se vacían —la pantalla no puede '
-      + 'distinguir el de este ítem del compartido del catálogo— y quedan con el mismo '
+      'Los precios de las opciones de modificadores que coinciden con el del catálogo de grupos '
+      + 'no se vacían —no se distinguen del precio compartido del grupo— y quedan con el mismo '
       + 'número, leído en la moneda nueva.',
     )
   }
@@ -727,15 +758,15 @@ const montosQueSeReinterpretan = computed(() => {
 })
 
 /**
- * El séptimo sitio con plata del drawer, y el único que es **campo editable y se persiste**:
- * el precio de cada opción de modificador. No se vacía (el ⛔ de arriba), pero se muestra
- * rotulado con la moneda del formulario, así que cambiarla sin preguntar deja esos números
- * releídos en otra —y `guardar` los manda como override de este ítem—.
+ * El precio de una opción que **coincide con el del catálogo**: es campo editable y se persiste,
+ * pero no se vacía (el ⚠️ de arriba). Se muestra rotulado con la moneda del formulario, así que
+ * cambiarla sin preguntar deja esos números releídos en otra —y `guardar` los manda como
+ * override de este ítem—.
  */
 const opcionesDeModificadorSeReinterpretan = computed(
-  () => (form.value.tipo === 'receta' || form.value.tipo === 'combo')
+  () => camposDePlataVisibles.value.opciones
     && form.value.gruposModificadores.some(
-      g => g.opciones.some(o => esPlataQueSeReinterpreta(o.precioExtra)),
+      g => g.opciones.some(o => esPlataQueSeReinterpreta(o.precioExtra) && !esPrecioPropioDeOpcion(o)),
     ),
 )
 
@@ -760,8 +791,11 @@ const mensajeCambioMoneda = computed(() => {
   const lista = partes.length > 1
     ? `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`
     : partes[0]
+  const opciones = camposDePlataVisibles.value.opciones && contarPreciosPropiosDeOpciones()
+    ? ' Una opción que quede vacía vuelve al precio del catálogo de grupos.'
+    : ''
   const vaciado = `Se vacía ${lista}. Un monto tipeado en una moneda no vale lo mismo en otra, `
-    + 'y convertirlo daría un número que nadie tecleó: hay que volver a cargarlo.'
+    + `y convertirlo daría un número que nadie tecleó: hay que volver a cargarlo.${opciones}`
   return noSeVacian ? `${vaciado} ${noSeVacian}` : vaciado
 })
 
@@ -804,6 +838,11 @@ function aplicarCambioMoneda(monedaId: string) {
   if (esPlataQueSeReinterpreta(form.value.costo)) form.value.costo = ''
   for (const extra of form.value.extrasPermitidos) {
     if (esPlataQueSeReinterpreta(extra.precioExtra)) extra.precioExtra = ''
+  }
+  for (const grupo of form.value.gruposModificadores) {
+    for (const opcion of grupo.opciones) {
+      if (esPrecioPropioDeOpcion(opcion)) opcion.precioExtra = ''
+    }
   }
 }
 
@@ -1411,6 +1450,7 @@ async function abrirEditar(item: Item) {
           cantidadDefault: o.cantidadDefault,
           unidadCodigo: o.unidadCodigo ?? undefined,
           precioExtra: o.precioExtra,
+          precioExtraDefault: o.precioExtraDefault,
         })),
       })),
       clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',

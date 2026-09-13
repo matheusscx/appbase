@@ -23,6 +23,51 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cambiar la moneda de un ítem vacía también el precio propio de sus opciones (cerrada 2026-09-12)
+
+Sale de [`pendientes.md` § 3](pendientes.md). **Qué se hizo:** `configuracion/items.vue` guarda el
+`precioExtraDefault` que la API manda al lado del efectivo —al cargar la ficha, y el del catálogo al
+prellenar un grupo en el alta— y `esPrecioPropioDeOpcion` decide con él: se vacía la opción con
+monto cuyo efectivo difiere del default, comparado con `Decimal` porque la API manda `'1200.0000'`
+y el campo puede tener `'1200'`. Las trampas que la entrada listaba quedaron como reglas: un
+override igual al default y un `0` no se cuentan ni se vacían, y el aviso cuenta montos
+(*"2 precios de opciones"*), solo en receta y combo, que son los tipos que muestran opciones. Las
+que coinciden con el catálogo se siguen nombrando como reinterpretadas. Una opción vaciada vuelve
+a heredar el precio del catálogo al guardar —el `PATCH` no le manda precio—, y el aviso lo dice.
+
+**Lo que lo fija, mutante por mutante** —cada uno revierte una pieza del cambio; los ocho se
+corrieron sobre el spec final de `items.nuxt.spec.ts`—:
+
+| Mutante | Lo caza |
+|---|---|
+| no vaciar las opciones al aplicar el cambio | *"las opciones con precio propio se vacían y el aviso las cuenta"* y *"un override igual al default o en cero no se vacía; el precio propio sí"* |
+| comparar strings en vez de `Decimal` | cinco tests: cuatro por las opciones de `ITEM_RECETA` (`'1200'` contra `'1200.0000'`) y *"un override igual al default o en cero…"* (`'300.0000'` contra `'300'`) |
+| `onSelectGrupo` sin guardar el default | *"un tipo que no muestra opciones no las nombra, aunque el form las conserve"* |
+| `abrirEditar` sin cargar el default | los mismos cinco: toda opción de la receta pasaba a precio propio |
+| el conteo sin el corte por tipo | *"un tipo que no muestra opciones…"* — **sobrevivía a la primera versión del spec**, que no tenía ninguna opción con precio propio en un tipo sin opciones; se le agregó ese paso, con su control |
+| el aviso sin *"vuelve al precio del catálogo"* | *"las opciones con precio propio se vacían…"* |
+| un `0` contado como precio propio | *"un override igual al default o en cero…"* |
+| la reinterpretación sin excluir el precio propio | *"las opciones con precio propio se vacían…"* |
+
+**Lo que no cubre, y queda en [`pendientes.md` § 2](pendientes.md):** si guardar una receta deja
+como precio propio el del catálogo en todas sus opciones —leído en el código al hacer este cambio—,
+la mayoría de las opciones de un ítem ya guardado son overrides iguales al default, y este vaciado
+las deja quietas por la trampa de arriba.
+
+### El vaciado por cambio de moneda puede incluir los precios de opción overrideados (2026-09-11)
+
+- [ ] **`configuracion/items.vue` deja afuera del vaciado los precios de las opciones de
+  modificadores** porque hasta el 2026-09-11 la API no dejaba distinguir el override de este
+  ítem del precio compartido del catálogo. Ahora `GET /items/:id` manda `precioExtraDefault` al
+  lado del efectivo, así que la regla del owner (2026-09-09) —*"si el precio vive en la
+  asociación con el ítem, avisar y limpiar; si es del extra como tal, no"*— se puede aplicar
+  también ahí: se vacía la opción cuyo efectivo difiere del default, y se deja la que lo hereda.
+  **Trampas conocidas antes de empezar:** un override igual al default no se distingue de uno
+  heredado —vaciarlo no cambia nada visible, así que no cuenta en el aviso—; un `0` no se cuenta
+  ni se vacía, misma regla que los extras de receta; y el aviso cuenta montos, no filas. El
+  comentario que hoy justifica dejarlas afuera está en `items.vue`, arriba de la regla del
+  vaciado, y se reescribe en el mismo commit.
+
 ## La request ajena que "no volvía" detrás de un lock era el harness, y ya estaba arreglado (cerrada 2026-09-12)
 
 **Qué era:** el `end()` de supertest 7 (`node_modules/supertest/lib/test.js:133-151`) cierra con

@@ -552,6 +552,26 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
+- [ ] **Guardar una receta o un combo parece dejar como precio propio de ese ítem el del
+  catálogo en TODAS sus opciones** (frontend + backend; **leído en el código el 2026-09-12 al
+  cerrar el vaciado de opciones por cambio de moneda, no medido**) — `guardar`
+  (`configuracion/items.vue`) manda `precioExtra: o.precioExtra || undefined` por cada opción, y
+  `o.precioExtra` es el **efectivo**: el que trajo `GET /items/:id`, o el del catálogo que
+  prellena `onSelectGrupo`. El service lo persiste como override en
+  `item_grupo_modificador_opciones.precio_extra` (`items.service.ts`, el `INSERT`/`UPDATE` de
+  overrides). Si es así, después del primer guardado ninguna opción de ese ítem hereda, y un
+  cambio de precio en `grupos-modificadores.vue` ya no le llega.
+  **Qué medir:** guardar una receta sin tocar sus opciones y leer la tabla. ⚠️ **Puede ser
+  deliberado:** el docblock de `onSelectGrupo` dice que *"pre-llena la tabla de overrides con el
+  default"*. Si la medición lo confirma, la pregunta para el owner es si un precio de catálogo que
+  cambia tiene que llegar a las recetas ya guardadas.
+  **Por qué pesa sobre el vaciado por cambio de moneda** ([`resueltos.md`](resueltos.md)): esas
+  opciones son overrides iguales al default, que el vaciado no distingue de un heredado y deja
+  quietas. Y la otra cara, levantada por la revisión del cierre: si después el catálogo cambia
+  ese precio, la copia vieja deja de coincidir con el default y el vaciado la cuenta como precio
+  propio —el aviso la nombra como monto a vaciar— aunque nadie la tipeó en este ítem. Vaciada,
+  al guardar hereda el precio nuevo.
+
 
 ## 3. Ya decidido, falta construir
 
@@ -1274,21 +1294,6 @@ heredado ([`resueltos.md`](resueltos.md)).
 📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
-
-### El vaciado por cambio de moneda puede incluir los precios de opción overrideados (2026-09-11)
-
-- [ ] **`configuracion/items.vue` deja afuera del vaciado los precios de las opciones de
-  modificadores** porque hasta el 2026-09-11 la API no dejaba distinguir el override de este
-  ítem del precio compartido del catálogo. Ahora `GET /items/:id` manda `precioExtraDefault` al
-  lado del efectivo, así que la regla del owner (2026-09-09) —*"si el precio vive en la
-  asociación con el ítem, avisar y limpiar; si es del extra como tal, no"*— se puede aplicar
-  también ahí: se vacía la opción cuyo efectivo difiere del default, y se deja la que lo hereda.
-  **Trampas conocidas antes de empezar:** un override igual al default no se distingue de uno
-  heredado —vaciarlo no cambia nada visible, así que no cuenta en el aviso—; un `0` no se cuenta
-  ni se vacía, misma regla que los extras de receta; y el aviso cuenta montos, no filas. El
-  comentario que hoy justifica dejarlas afuera está en `items.vue`, arriba de la regla del
-  vaciado, y se reescribe en el mismo commit.
-
 
 ## 4. Necesita que el owner conteste
 
