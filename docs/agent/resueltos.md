@@ -23,6 +23,410 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El timeout intermitente del pool pasa a vigilancia, con `log_connections` afuera (2026-09-13)
+
+Sale de [`pendientes.md` § 2](pendientes.md) por decisión del owner, después de 120 corridas más
+sin reproducir (140 desde que la sonda está puesta). **No se cerró la causa**: queda como entrada de
+Vigilancia en `pendientes.md`, con lo que la reabre y lo que hay que tener puesto para leer la próxima
+caída. En el mismo cambio se sacó `log_connections` del servicio `postgres` de `docker-compose.yml`,
+que la entrada decía que se sacaría al cerrarla. La entrada, verbatim:
+
+### Un `timeout exceeded when trying to connect` intermitente en el e2e local (2026-08-18)
+
+- [ ] **Un `timeout exceeded when trying to connect` intermitente en el e2e local: la firma
+  reproduce entera y quedan tres explicaciones de por qué esa conexión no volvió** (backend/tests, visto y medido el 2026-08-18 en el cierre del
+  contexto transaccional ALS) — en una corrida del e2e completo, `items-pausados.e2e-spec.ts`
+  reportó 10 tests en rojo. **Los 10 son un solo fallo**: la aserción está en un `beforeAll`
+  (`items-pausados.e2e-spec.ts:224`, un `POST /calculo-precios/calcular` que devolvió 500), y
+  jest lo imputa a cada test del `describe`. El `Error: timeout exceeded when trying to connect`
+  de `pg-pool` aparece **una sola vez** en todo el log.
+
+  **No reproduce.** Tres suites completas posteriores, todas en verde (511/513).
+
+  ✅ **Lo descartado, con evidencia y no con argumentos:**
+
+  | Causa candidata | Cómo se descartó |
+  |---|---|
+  | Agotamiento de conexiones en Postgres | Pico medido de **16** sobre `max_connections = 100` |
+  | Fuga de conexiones entre specs | Serie plana de punta a punta, sin crecer a lo largo de la suite |
+  | Postgres rechazando conexiones | **Cero** `FATAL` / `too many connections` en su log; los únicos errores son violaciones de unique de los casos negativos de los propios tests |
+  | Re-seed a mitad de suite | `reset-db.sh --verificar` limpio dos veces |
+  | El contexto transaccional ALS (ADR-020) | `calcular` corre **fuera** de transacción —el controller llama al service directo—, así que ese camino no cambió con esa tanda |
+
+  **Lo que queda en pie:** una demora transitoria **del lado del cliente** al establecer la
+  conexión, que el `connectTimeoutMillis` de 5 s (ADR-020) convierte en error en vez de en
+  espera. Es familia de causas, **no causa raíz confirmada**. No se pudo peritar el fallo
+  original porque `reset-db.sh` hace `down -v` y el contenedor y sus logs ya no existían.
+
+  🔬 **Pasada del 2026-08-25: se instrumentó el pool, y el descarte de "no es agotamiento"
+  quedó REFUTADO por medir la magnitud equivocada.**
+
+  ⛔ **El descarte estaba mal planteado, no mal medido.** La tabla de arriba concluye que no
+  hay agotamiento porque `pg_stat_activity` picó en **16 contra `max_connections = 100``**.
+  Ese número mide **el servidor**, y el agotamiento acá es **por pool**: cada spec levanta su
+  propia app con su propio pool de 10 (`app.module.ts:161`), así que un pool completamente
+  saturado se ve como ~10 conexiones en Postgres y contra 100 parece holgura. La pregunta
+  correcta no se podía contestar desde ahí.
+
+  **Lo que ahora existe: `backend/test/setup-pool.ts`**, que parchea `Pool.prototype.connect`
+  y registra cada adquisición con el estado del pool (`total`, `idle`, `esperando`, `max`).
+  Distingue las dos causas que comparten síntoma: `esperando > 0` con `total === max` es
+  saturación; `total < max` con `ms` alto es un `connect()` lento.
+
+  ✅ **Medido sobre 10 corridas completas de la suite, todas verdes (~21 min):**
+
+  | | |
+  |---|---|
+  | Adquisiciones pedidas con alguien **ya en cola** | ~400 por corrida |
+  | Pedidas con el pool **lleno** (10/10) | ~164 por corrida |
+  | Espera máxima | **10-18 ms**, un caso de 53 ms |
+  | Cola máxima | **5**, en las 10 corridas |
+  | Timeouts | **0** |
+
+  **La saturación con cola es rutinaria y DELIBERADA**, y la hacen dos specs, no uno: el
+  conocido `concurrencia-pool` (ráfaga de exactamente 10 = el pool) y **`rbac-y-contrasena`,
+  que esta entrada no nombraba** — su test *"una ráfaga de 15 refresh simultáneos no traba el
+  pool"* dispara **15 contra un pool de 10**, así que 5 se encolan siempre. Es exactamente la
+  cola máxima medida.
+
+  ➡️ **Dónde queda el frente:** la cola drena en ~13 ms contra un timeout de 5 s, o sea un
+  margen de ~**94×**. El fallo sería uno de esos encolados pasándose de 5 s porque algo en
+  vuelo se demoró. **No reprodujo en 10 corridas**, así que la causa de la demora sigue sin
+  identificarse — pero la próxima vez la sonda va a decir si el pool estaba saturado o si el
+  `connect()` fue lento, que es lo que nadie pudo contestar hasta ahora.
+
+  ⛔ **REFUTADO — agotamiento de puertos efímeros.** Hipótesis razonable: supertest abre una
+  conexión por request y el server contesta `Connection: close`, así que no hay reuso y cada
+  una quema un par de puertos. **Medido durante una corrida completa a 200 ms**: TIME_WAIT
+  pica en 991 y los puertos efímeros en uso en **1071 de 16384 (6,5%)**. No hay presión.
+
+  🎯 **REPRODUJO EL MISMO DÍA, Y LA SONDA CONTESTÓ LA PREGUNTA (2026-08-25, 19:56).** Undécima
+  corrida de la suite, un solo fallo: `caja.e2e-spec.ts` → *"caja abierta ajena en tenant ciego:
+  el supervisor la ve pero sin el esperado"*, `500` donde esperaba `200`. La captura, verbatim:
+
+```json
+{"t":"2026-08-25T19:56:51.082Z","ms":5002,
+ "error":"timeout exceeded when trying to connect",
+ "antes":{"total":1,"idle":1,"esperando":1,"max":10},
+ "despues":{"total":3,"idle":2,"esperando":0,"max":10}}
+```
+
+  ⛔ **NO es agotamiento del pool, y ahora con la magnitud correcta.** El pool tenía **1 cliente
+  de 10**, y ese cliente estaba **idle**. La tabla de esta entrada distinguía "saturado"
+  (`esperando > 0` **y** `total === max`) de "connect lento" (`total < max`, `ms` alto): esto es
+  inequívocamente lo segundo. Cinco segundos esperando para abrir una conexión con el pool casi
+  vacío.
+
+  ✅ **El dato que "no encajaba" quedó EXPLICADO el 2026-08-27, y no era una anomalía.** Esta
+  entrada decía de `idle: 1` con `esperando: 1`: *"con un cliente libre, `pg-pool` debería
+  haberlo entregado… no lo sé, y no lo invento"*. Leyendo `node_modules/pg-pool/index.js`:
+  `connect()` con `_idle.length > 0` **encola** en vez de crear cliente, y `_pulseQueue` le
+  entrega el idle al **primero** de la cola. Como `esperando` ya era 1 cuando pedimos, **el idle
+  no era nuestro**: nuestro pedido salió por `newClient` → `client.connect()` → una conexión TCP
+  nueva.
+
+  ⛔ **Ojo con lo que esto NO dice, porque la primera redacción lo dijo mal:** armar ese estado
+  **no reproduce el fallo**. Medido con el mismo script y el bloqueo puesto en 0: sale `ok` en
+  **8 ms**. La mecánica de cola explica **por qué `idle: 1` no nos servía**; no explica los 5 s.
+
+  ➕ **Y hay un discriminador gratis en el propio mensaje, medido el 2026-08-27:** un pedido que
+  entra con el pool sin idles y sin llenar se va **derecho** a `newClient`, y ahí vence el timer
+  del `Client`, con otro texto — `Connection terminated due to connection timeout` (verificado
+  contra un servidor que acepta y no contesta). El texto de las dos capturas es
+  `timeout exceeded when trying to connect`, o sea **el de la cola**. ⚠️ Prueba que el pedido
+  estaba encolado —cosa que `esperando: 1` ya decía— y **no** dónde se fueron los segundos: un
+  encolado al que `_pulseQueue` después le da un cliente nuevo lento muere igual con el mensaje de
+  la cola, porque ese timer arrancó antes.
+
+  ➕ **SEGUNDA CAPTURA, 2026-08-27T14:19:24Z** — `tendencia-descuadres.e2e-spec.ts`, *"un cierre
+  con faltante suma un cierre, resta plata y cuenta el faltante"*. `ms 5001`,
+  `antes {total:1, idle:1, esperando:1, max:10}`, `despues {total:3, idle:2, esperando:0}`.
+  **`antes` y `despues` son idénticos a los de la primera**; `ms` difiere en 1 ms (5001 contra
+  5002) y `t`/`test` obviamente también. Lo que hace de esto una *firma* es que dos capturas
+  separadas por dos días compartan el **estado** exacto, no que sean el mismo registro.
+  ⚠️ Y dejó una lección aparte: los rojos visibles de esa corrida fueron tres `409` (caja/cajón
+  ocupado) y **se atribuyeron a la contaminación de estado entre suites sin mirar la caja
+  negra**. Era el arrastre —el primer test se cayó por el timeout y dejó la caja abierta—, no la
+  causa. La sonda ya tenía la respuesta.
+
+  🎯 **LA FIRMA DE LAS DOS CAPTURAS SE REPRODUCE ENTERA, Y DICE POR QUÉ CAMINO SALIÓ EL
+  PEDIDO (2026-08-27).** Lo que faltaba era el `despues {total:3, idle:2}` —dos clientes
+  creados y ociosos mientras el nuestro caducaba—, que ninguna hipótesis explicaba. Sale
+  determinista con un proxy TCP que demora **una** conexión elegida
+  (`backend/test/control-sonda-pool.e2e-spec.ts`, apagado salvo `CONTROL_SONDA=1`):
+
+  1. el pool queda en `total 1, idle 1`;
+  2. dos pedidos entran **en el mismo tick**: el primero se encola porque hay un idle, y el
+     segundo ve `antes {total:1, idle:1, esperando:1, max:10}` — la firma capturada;
+  3. **cada uno de los dos agenda su propio `process.nextTick(_pulseQueue)`**
+     (`node_modules/pg-pool/index.js:198-203`), y ahí está la mecánica: el primer pulso le da el
+     idle al primero, y el **segundo** encuentra la cola con el nuestro, sin idles y el pool no
+     lleno, así que le crea un **cliente propio** (`:165-167`). Devolver el primero **con error**
+     no es lo que crea ese cliente —eso ya pasó—: es lo que saca del pool al cliente reusado para
+     que el `total` final dé 3 y no 4;
+  4. ese `connect()` es el demorado por el proxy, y **dos pedidos posteriores saltean la cola**
+     (el caveat de abajo), se crean clientes y quedan idle → `despues {total:3, idle:2,
+     esperando:0}` con el mensaje **de la cola**, porque su timer arrancó antes.
+
+  Del control, **recortando `t`, `test` y `loopPicos: []`** (van en toda línea y acá no aportan);
+  el resto es literal:
+
+```json
+{"ms":1502,"error":"timeout exceeded when trying to connect","pedido":3,"via":"nuevo",
+ "clienteMs":null,
+ "antes":{"total":1,"idle":1,"esperando":1,"max":10,"conectando":0},
+ "despues":{"total":3,"idle":2,"esperando":0,"max":10,"conectando":1},"loopMax":2}
+{"capa":"client.connect","pedido":3,"ms":1516,"error":"Connection terminated unexpectedly",
+ "loopMax":2}
+```
+
+  📌 **El `clienteMs: null` de la primera línea es el campo que más dice**, y por eso no se
+  recorta: al vencer el pedido, la conexión que le habían creado **todavía no había vuelto**. La
+  segunda línea es esa misma conexión settleando 14 ms después, cuando el timer del propio
+  `newClient` la mata — mismo `pedido`, que es la correlación entera en dos líneas.
+
+  ➡️ **La rama "el pedido se quedó esperando el pulso de la cola" queda descartada para estas
+  dos capturas** — y conviene ser exacto sobre en qué se apoya, porque **no** es la lectura del
+  campo en el fallo real (`via` no existía en agosto 25 ni 27). Se apoya en tres cosas medidas:
+
+  1. el control reproduce `antes` **y** `despues` por el camino "cliente nuevo para el encolado";
+  2. un `release` con alguien en cola lo **desencola en el mismo frame** (tercer caso del control:
+     `waitingCount` pasa de 1 a 0 sin ceder el loop), así que no pueden convivir clientes idle con
+     un encolado sin atender — y todo camino que produce un idle pulsa la cola en el acto
+     (el único `_idle.push` es `index.js:427-428`; los `_remove` pasan `_pulseQueue` de callback,
+     `:397`; y el camino de error de `newClient` pulsa en `:280`);
+  3. el otro camino, medido y aserto en el control, sale con `via: null` y
+     `despues {total:1, idle:0}` — que **no** es la firma.
+
+  O sea: **mecanismo + repro sintético**, no observación directa. Es lo más fuerte que se puede
+  decir hasta que el intermitente vuelva a caer con la sonda nueva puesta, y alcanza para sacar la
+  rama de la tabla porque lo que la sostenía era justamente no poder distinguirla.
+
+  ⚠️ **Y una salvedad sobre el punto 3, para no estirarlo:** el control demuestra que en **esa**
+  configuración el otro camino da otra firma; la imposibilidad general de que dé la firma
+  capturada viene del mecanismo del punto 2, no del control. El `connectionTimeoutMillis` del
+  control es 1500 ms y no 5000, para que tarde 30 s y no dos minutos: cambia los números, no la
+  mecánica.
+
+  🎯 **EL EVENT LOOP TAPADO ES LA ÚNICA HIPÓTESIS QUE ALGUIEN REPRODUJO — y estuvo un rato
+  marcada acá como refutada, por un argumento que parecía cerrado y no lo era.** El argumento
+  era: si el loop estuviera bloqueado más de 5 s, el timer del `connectionTimeoutMillis` correría
+  tarde y el `ms` registrado sería **el del bloqueo** y no ~5000; las capturas dicen 5001 y 5002,
+  luego el loop estaba libre. Lo verificado, bloqueando a propósito contra la base sana:
+
+  | bloqueo del loop | resultado |
+  |---|---|
+  | 6000 ms (cruza el vencimiento) | `ms=6000` — **esto sí queda descartado** |
+  | 4995 ms (termina justo antes) | `ms=5000` + `antes {total:1, idle:1, esperando:1, max:10}` |
+  | 4900 ms | pasa: `ok` a los 4907 ms |
+
+  O sea que el argumento **solo descarta un bloqueo que CRUCE el vencimiento**. Un bloqueo que
+  termine en la ventana de los últimos milisegundos da el `antes` capturado y el mismo error, con
+  Postgres y Docker perfectamente sanos. La conclusión correcta es la de la primera fila, no "el
+  loop estaba libre".
+
+  ⚠️ **El bloqueo del loop, solo, no reproduce la firma entera** —deja `despues {total:2,
+  idle:0}`—, y eso **ya no es un hueco**: el `despues {total:3, idle:2}` lo explica el control de
+  arriba, que es de dónde salen los dos clientes ociosos. Las dos cosas encajan sin competir: el
+  control dice **qué** pasó (a nuestro pedido encolado le crearon un cliente y su `connect()` no
+  volvió a tiempo) y el loop tapado sigue siendo una de las tres explicaciones posibles de **por
+  qué** ese `connect()` no volvió — la única, además, que se reprodujo con Postgres y Docker
+  sanos.
+  ⚠️ Lo levantó la revisión independiente corriendo el experimento; acá estaba escrito ⛔
+  REFUTADO, que es lo que habría mandado al próximo a peritar Docker con la única pista viva
+  tachada.
+
+  📊 **Lo que sí se midió del loop, y lo que esa medición NO alcanza a decir:** sampler de 100 ms
+  adentro del proceso de jest, durante una suite **verde** (15:07-15:10Z). Máximo dentro de un
+  test: **1095 ms**, y **2330 ms fuera de todo test** (bootstrap de jest). ⚠️ La primera
+  corrección de este párrafo descartó ese 2330 como "offset de arranque del `setInterval`, no un
+  bloqueo", y **es falso**: un `setInterval` de 100 ms no tiene offset de 2,3 s, así que el loop
+  estuvo tapado ~2,4 s ahí. Lo correcto es "ocurrió fuera de todo test" — y es el bloqueo **más
+  grande** medido en ese proceso, justo de la magnitud que la hipótesis viva necesita.
+  Y sobre todo: esa corrida **no es ninguna de las dos que fallaron**, así que no restringe el
+  loop en el momento del fallo. Para eso hay que muestrear en la corrida que falle.
+
+  ⛔ **REFUTADO — una demora de base en llegar a Postgres.** Sonda de 1500 conexiones TCP crudas
+  por cada ruta, con la máquina en reposo:
+
+  | destino | p50 | p95 | p99 | máx | outliers ≥100 ms |
+  |---|---|---|---|---|---|
+  | `localhost:5432` (lo que usa el e2e) | 0,3 ms | 0,5 ms | 0,7 ms | 22,6 ms | 0 |
+  | `127.0.0.1:5432` | 0,0 ms | 0,1 ms | 0,2 ms | 0,4 ms | 0 |
+  | `[::1]:5432` | 0,0 ms | 0,1 ms | 0,2 ms | 2,1 ms | 0 |
+
+  No hay un problema de línea base ni un desbalance entre familias de direcciones: el fallo pasa
+  **bajo carga**, no porque el camino sea lento de por sí.
+
+  ➡️ **El mapa se achicó de cuatro ramas paralelas a una pregunta con tres respuestas
+  posibles.** Eran cuatro mientras no se podía distinguir si al pedido le habían dado cliente; con
+  el control y el mecanismo de arriba, la única lectura compatible con la firma es que **sí**, y
+  las tres que quedan son explicaciones de **por qué ese `connect()` no volvió en 5 s**:
+
+  | rama | dónde vive | cómo se distingue en el próximo fallo |
+  |---|---|---|
+  | El **event loop** tapado terminando justo antes del vencimiento | adentro | `loopMax` / `loopPicos`, que ahora van en **todos** los registros; única parcialmente reproducida |
+  | El **TCP** hacia el puerto publicado de Docker | afuera | `capa: 'client.connect'` **con el mismo `pedido`** y `ms` alto, y el log de Postgres SIN esa conexión a esa hora |
+  | El arranque del **backend de Postgres** | afuera | ídem, pero el log del servidor SÍ la registra tarde |
+
+  ⛔ **Descartada, y por eso ya no está en la tabla:** *el pedido esperando el pulso de la cola*.
+  Ver el control de arriba — es la rama que se leía por ausencia y ahora se lee por el campo.
+
+  ⚠️ **Un caveat que sigue valiendo para leer cualquier captura**, y que era el que volvía
+  indistinguibles a dos de las ramas: en `pg-pool` un encolado solo se atiende vía `_pulseQueue`,
+  mientras que un `connect()` **posterior** que llegue con la cola vacía de idles y el pool no
+  lleno se va directo a `newClient` y **saltea la cola**. Por eso el `despues {total:3}` no prueba
+  por sí solo que esos clientes sean nuestros — lo que lo prueba es el `pedido`, y antes de que
+  existiera no había con qué.
+
+  ✅ **Lo que la sonda agregó (2026-08-27):** `setup-pool.ts` parchea también
+  `Client.prototype.connect` —registra con `capa: 'client.connect'` lo que pase de `LENTO_MS` o
+  falle— y lleva un contador `conectando` de conexiones en vuelo que va en cada registro del pool.
+  Verificado que engancha bajando el umbral a 0 antes de creerle a un archivo vacío.
+
+  ✅ **Y lo que agregó la del 2026-08-27:** el `pedido` correlativo con su `via`, el muestreo del
+  atraso del **event loop** en todos los registros (`loopMax`, y `loopPicos` en los de error), y el
+  control positivo `backend/test/control-sonda-pool.e2e-spec.ts`. El control **no corre en el
+  gate**: es `describe.skip` salvo `CONTROL_SONDA=1`, porque tarda ~30 s, levanta un proxy TCP y
+  bloquea el loop a propósito.
+
+  ```bash
+  CONTROL_SONDA=1 npx jest --config ./test/jest-e2e.json \
+    --runTestsByPath test/control-sonda-pool.e2e-spec.ts
+  ```
+
+  📌 **El control se verificó con un mutante, no solo por estar verde:** sacándole el etiquetado
+  del ítem encolado —o sea el código anterior a esta pasada— el fallo sale con `via: null`, que es
+  exactamente lo que la sonda vieja podía decir, y el control se pone rojo.
+
+  ✅ **El id de correlación existe desde el 2026-08-27, y con él se cerró el "leer por
+  ausencia".** Se puede correlacionar porque `pool.connect()` decide **sincrónicamente**
+  (`node_modules/pg-pool/index.js:190-237`): o empuja su `PendingItem` a la cola, o llama a
+  `newClient()`, que construye el `Client` y lo conecta en el mismo frame (`:240-266`). Entonces
+  cada `pool.connect()` lleva un `pedido` correlativo; si encoló, la etiqueta viaja **colgada del
+  ítem**, que es como se lo sigue cuando `_pulseQueue` lo atiende mucho después; y `newClient`
+  publica el pedido para que el parche de `Client.prototype.connect` lo levante. Cada registro
+  ahora dice `pedido`, `via` (`'idle'` / `'nuevo'` / `null` = nunca le asignaron cliente) y
+  `clienteMs`.
+
+  ⚠️ **`conectando` sigue siendo lo que era** —contexto, no regla— y ya **no** es lo que sostiene
+  ninguna atribución: eso ahora lo hace `pedido`. Se deja porque es gratis y porque en el `despues`
+  de un fallo dice cuántas conexiones había en vuelo en ese instante.
+
+  📊 **La línea base que la correlación destapó, medida en la corrida verde del 2026-08-27**
+  (652 tests, 541 registros): el estado `antes {total:1, idle:1, esperando:1}` con `via: 'nuevo'`
+  —la configuración exacta de las dos capturas— ocurre **27 veces por corrida** y resuelve en
+  **6 ms de mediana, 12 ms el peor**. Establecer la conexión, sobre los 52 pedidos que crearon
+  cliente: **p50 6 ms, p95 11 ms, máximo 13 ms**.
+
+  ➡️ **Eso cambia la forma de la pregunta**, con la atribución de arriba puesta: lo que en 27
+  casos por corrida tarda 6 ms se fue a **más de 5000**, un outlier de ~400×. No es un margen
+  apretado que a veces se pasa, así que no se lee como saturación ni como carga: algo **detiene**
+  esa conexión, no la enlentece. ⚠️ Si la atribución cayera, cae también esta lectura — es la
+  misma inferencia, no una segunda evidencia.
+
+  🔍 **Primera cacería con la sonda correlacionada: 20 corridas limpias (2026-08-27, ~13.000
+  tests, 1 h).** Cero timeouts. El loop de caza está en
+  `docs/agent/caza-timeout-pool.sh`; frena al primer positivo y **no resetea**, porque el
+  `down -v` de `reset-db.sh` se lleva el contenedor y con él el log de Postgres — que es lo que
+  impidió peritar el fallo original.
+
+  ✅ **Y el detector tiene control positivo**, que es lo que hace que "20 limpias" signifique
+  algo: corriendo el control (`CONTROL_SONDA=1`), que fabrica timeouts, el mismo detector los
+  cuenta (3 de 3). Sin eso, 20 vueltas limpias no distinguen "no pasó" de "no lo habría visto" —
+  el error exacto que costó una tarde en el frente del `401`.
+
+  📊 **La distribución de esas 20 corridas** (10.842 registros; 1.038 pedidos que crearon cliente,
+  9.804 servidos con un idle):
+
+  | | p50 | p95 | p99 | máx |
+  |---|---|---|---|---|
+  | Establecer la conexión (`clienteMs`) | 6 ms | 10 ms | 14 ms | **74 ms** |
+  | Atraso del event loop (`loopMax`) | 178 ms | — | 531 ms | **946 ms** |
+
+  ⚠️ **Lo que esto NO dice**, porque es la misma trampa que ya se cayó una vez en esta entrada:
+  son corridas **verdes**, así que no restringen el instante del fallo. Que el loop no haya pasado
+  de 946 ms acá **no** refuta el bloqueo de ~4900 ms que la hipótesis necesita — en estas 20 no
+  falló nada. Lo que sí dice es que el fallo no es la cola de estas distribuciones: entre 74 ms y
+  5000 ms no hay nada, así que es una discontinuidad, no un margen que a veces se pasa.
+
+  🔍 **Segunda cacería: 120 corridas limpias (2026-09-13, de 00:21Z a ~08:48Z).** Dos tandas
+  seguidas del mismo `docs/agent/caza-timeout-pool.sh`, de 20 y de 100 vueltas, cada vuelta con su
+  `reset-db.sh`: las 120 con `e2e=0` y cero `timeout exceeded` en `tmp-pool.jsonl`. Sumadas a las
+  20 del 2026-08-27 son **140 corridas completas sin reproducir** desde que la sonda está puesta.
+  ⚠️ **Lo que esto NO dice**, por la misma razón que la tanda anterior: son corridas verdes, así
+  que no restringen ninguna de las tres ramas; solo acotan la frecuencia. Y **no fueron con la
+  máquina quieta**: durante parte de la segunda tanda corrieron en paralelo builds, `vitest` y
+  mutantes del frontend en otros worktrees, o sea más carga de CPU que en una corrida normal, no
+  menos.
+
+  ➡️ **Lo que falta: una sola cosa, que vuelva a pasar con las sondas puestas.** Ya no hay nada que
+  construir. Cuando caiga, el registro del timeout va a traer su `pedido` y su `via`, el
+  `capa: 'client.connect'` del **mismo** `pedido` va a decir cuánto tardó esa conexión, `loopMax` y
+  `loopPicos` van a decir si el loop estaba tapado en esos 10 s, y el `t` contra el log de Postgres
+  parte lo que quede entre Docker y el servidor. Es la primera vez que las tres ramas se distinguen
+  con una sola captura.
+
+  ⚠️ **`conectando` es una ayuda, NO una regla de decisión.** Es un contador **global del
+  proceso** leído en **un instante**: medido en una suite entera llega a 8 en las ráfagas, así que
+  `conectando > 0` **no atribuye** ese connect a nuestro pedido, y `conectando === 0` **no
+  descarta** una conexión que arrancó y terminó dentro de los 5 s — que es justo lo que sugiere el
+  `total` 1 → 3 de las capturas.
+
+  ✅ **`log_connections` quedó durable**, en el `command:` del servicio `postgres` de
+  `docker-compose.yml`. Por `ALTER SYSTEM` no sirve: se lo lleva el `down -v` de `reset-db.sh`, y
+  un paso manual después de cada reset es un paso que no va a estar puesto justo el día que el
+  intermitente caiga. ⚠️ **Lo que cuesta, para poder decidir sacarlo:** el healthcheck corre cada
+  10 s y mete ~6 conexiones por minuto (medido: 50 de 209 en 8,4 min), así que el ruido tapa lo
+  que se busca. ⚠️ **Y no se filtra como uno esperaría:** `connection received` —la línea que trae
+  el instante de aceptación, que es la mitad de servidor por la que se hizo este cambio— **no
+  lleva `application_name`**; sólo lo lleva la línea siguiente, `connection authorized`. Hay que
+  correlacionar **por PID** (el `[595]` del prefijo) y descartar las del `pg_isready`; es un cambio permanente a infra compartida por un diagnóstico
+  local, y se saca cuando esta entrada se cierre. ⛔ **Y CI no lo tiene**: `.github/workflows/ci.yml`
+  levanta su propio servicio `postgres:15`, no usa compose, así que si el intermitente cae allá el
+  lado del servidor no existe.
+
+  📌 **Y una advertencia para el que lo tome:** `reset-db.sh` hace `down -v`, así que el
+  contenedor y sus logs desaparecen. Peritar esto exige NO resetear entre el fallo y la
+  inspección — que es exactamente lo que impidió peritar el fallo original.
+
+  📌 **Dos notas de método de esta pasada:**
+  - **No hace falta atrapar el fallo para caracterizarlo.** Medir la distribución de lo que
+    pasa *siempre* mostró la saturación deliberada y el margen real; esperar al intermitente
+    habría costado corridas sin datos.
+  - **Una sonda muda se ve igual que una sonda sin nada que reportar.** La primera versión de
+    ésta dejaba pasar sin instrumentar la forma con **callback** de `connect()`, que —medido
+    en `node_modules/typeorm/driver/postgres/PostgresDriver.js:1085,1106,1401`— es la
+    **única** que TypeORM usa: el archivo salía vacío. Se verifica que engancha bajando el
+    umbral a 0 **antes** de creerle a un archivo vacío.
+
+  ⚠️ **Dos notas de método, que valen más que la entrada:**
+  - **Un muestreo de 1 segundo NO alcanza.** Dio pico 9; a 200 ms el mismo escenario dio **16**.
+    Una medición de conexiones con resolución de segundo lleva a conclusiones equivocadas sobre
+    cuánto margen hay. El comando, para repetirlo:
+    ```bash
+    while :; do docker exec tecnica_postgres psql -U dev_user -d tecnica_db -t -A -F'|' \
+      -c "SELECT now()::time(3), count(*), count(*) FILTER (WHERE state='active') FROM pg_stat_activity;"; sleep 0.2; done
+    ```
+  - **`concurrencia-pool.e2e-spec.ts` corre al límite exacto del pool, por diseño** (N = tamaño
+    del pool). Un test que se sienta en 10/10 está a un hipo de un rojo falso. Es propiedad
+    conocida, no regresión.
+
+  ⛔ **Lo que NO hay que hacer: subir el `connectTimeoutMillis`.** Haría desaparecer el síntoma
+  y debilitaría la defensa que ADR-020 puso a propósito — que un agotamiento futuro del pool
+  falle ruidoso en vez de dejar la API muerta hasta reiniciar.
+
+  ⛔ **El parentesco con el `401` intermitente queda REFUTADO (2026-08-25).** Esta entrada
+  anotaba que "puede ser pariente… nada lo prueba todavía". Ya se sabe: **el `401` era otro
+  proceso de la máquina ocupando un puerto efímero** y contestando por la app (ver
+  [`resueltos.md`](resueltos.md) § *"El `401` fantasma no era nuestro"*). Eso es HTTP y del
+  lado del cliente; esto es `pg-pool` conectándose a Postgres. No comparten nada más que ser
+  intermitentes del e2e local, que es lo que hacía verosímil el parentesco y no alcanza.
+  ➡️ Lo que **sí** se hereda es el método: la caja negra que resolvió aquél
+  (`backend/test/setup-supertest.ts`) muestra que a un intermitente que no reproduce se lo
+  agarra **instrumentando y corriendo en loop**, no leyendo el código. Acá haría falta el
+  equivalente del lado de `pg`.
+
 ## "Enviar a cocina" ya no reclama la comanda sin el tap que se hizo mientras se mandaba lo pendiente (cerrada 2026-09-12)
 
 Sale de [`pendientes.md` § 3](pendientes.md). **Medido antes de arreglar**, que es lo que la

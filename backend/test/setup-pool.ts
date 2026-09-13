@@ -1,6 +1,6 @@
 /**
  * Sonda del pool de `pg`, para el `timeout exceeded when trying to connect`
- * intermitente del e2e (`docs/agent/pendientes.md` § 2).
+ * intermitente del e2e (`docs/agent/pendientes.md`, Vigilancia).
  *
  * ────────────────────────────────────────────────────────────────────────────
  * POR QUÉ ESTO Y NO SEGUIR CAZANDO EL FALLO
@@ -153,8 +153,8 @@ interface PedidoEnVuelo {
 
 /**
  * Pedidos vivos. Se borra la entrada al resolverse (éxito o error). ⚠️ Un
- * pedido que **nunca vuelve** —el otro intermitente de
- * `docs/agent/pendientes.md` § 2— deja su entrada acá para siempre. Es un mapa
+ * pedido que **nunca vuelve** —el otro intermitente, que resultó ser el harness
+ * (`docs/agent/resueltos.md`)— deja su entrada acá para siempre. Es un mapa
  * chico en un proceso de test, no una fuga que importe, pero al leer el archivo
  * conviene saberlo.
  */
@@ -429,8 +429,9 @@ if (hayCorrelacion) {
  * ⚠️ Lo que sigue sin poder decir: una conexión que **nunca vuelve** no genera
  * ninguna línea acá, porque esto registra al settlear. Ese caso se lee en el
  * registro del pool: `via: 'nuevo'` **sin** `clienteMs`.
- * **El estado de la investigación no se repite acá**: vive en
- * `docs/agent/pendientes.md` § 2, que es el único lugar que hay que mantener.
+ * **El estado de la investigación no se repite acá**: vive en la entrada de
+ * Vigilancia de `docs/agent/pendientes.md`, que es el único lugar que hay que
+ * mantener; el historial, en `docs/agent/resueltos.md`.
  */
 const clienteOriginal = Client.prototype.connect;
 Client.prototype.connect = function (this: ClienteInterno, ...args: unknown[]) {

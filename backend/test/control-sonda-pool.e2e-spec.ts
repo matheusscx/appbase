@@ -12,7 +12,7 @@
  * ```
  *
  * **Qué prueba, y por qué existe.** Las dos capturas del intermitente
- * (`docs/agent/pendientes.md` § 2) comparten un estado exacto —
+ * (historial en `docs/agent/resueltos.md`) comparten un estado exacto —
  * `antes {total:1, idle:1, esperando:1, max:10}` → `despues {total:3, idle:2,
  * esperando:0}`— que nadie había podido explicar. Acá se reproduce esa firma
  * **deterministamente** con un proxy que demora una conexión elegida, y se
