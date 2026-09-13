@@ -168,27 +168,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   lo que lo reabre es que aparezca esa vía. 📌 Y no confundirlo con el round-trip del crudo
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
-- [ ] **Guardar una receta o un combo parece dejar como precio propio de ese ítem el del
-  catálogo en TODAS sus opciones** (frontend + backend; **leído en el código el 2026-09-12 al
-  cerrar el vaciado de opciones por cambio de moneda, no medido**) — `guardar`
-  (`configuracion/items.vue`) manda `precioExtra: o.precioExtra || undefined` por cada opción, y
-  `o.precioExtra` es el **efectivo**: el que trajo `GET /items/:id`, o el del catálogo que
-  prellena `onSelectGrupo`. El service lo persiste como override en
-  `item_grupo_modificador_opciones.precio_extra` (`items.service.ts`, el `INSERT`/`UPDATE` de
-  overrides). Si es así, después del primer guardado ninguna opción de ese ítem hereda, y un
-  cambio de precio en `grupos-modificadores.vue` ya no le llega.
-  **Qué medir:** guardar una receta sin tocar sus opciones y leer la tabla. ⚠️ **Puede ser
-  deliberado:** el docblock de `onSelectGrupo` dice que *"pre-llena la tabla de overrides con el
-  default"*. Si la medición lo confirma, la pregunta para el owner es si un precio de catálogo que
-  cambia tiene que llegar a las recetas ya guardadas.
-  **Por qué pesa sobre el vaciado por cambio de moneda** ([`resueltos.md`](resueltos.md)): esas
-  opciones son overrides iguales al default, que el vaciado no distingue de un heredado y deja
-  quietas. Y la otra cara, levantada por la revisión del cierre: si después el catálogo cambia
-  ese precio, la copia vieja deja de coincidir con el default y el vaciado la cuenta como precio
-  propio —el aviso la nombra como monto a vaciar— aunque nadie la tipeó en este ítem. Vaciada,
-  al guardar hereda el precio nuevo.
-
-
 - [ ] **Lo que viaja antes del *Confirmar* del cobro puede aterrizar dentro del tramo bloqueado**
   (frontend, salones; **leído en el código el 2026-09-13** por la revisión del bloqueo de la cuenta
   en cobro, no medido) — `abrirCobro` espera `asegurarVigente()` con la pantalla tocable, y
@@ -883,8 +862,9 @@ variable — y el costo se usa para márgenes.
 tabla (`item_grupo_modificador_opciones.precio_extra`) pero **la pantalla donde tipearlo no**.
 Exigir precio propio sin dónde escribirlo bloquea la asociación entera. Lo que sí existe desde el
 2026-09-11 es poder **leerlo**: `GET /items/:id` y `GET /grupos-modificadores/:id/items` mandan
-`precioExtraDefault` al lado del efectivo, así que la pantalla ya distingue el override del
-heredado ([`resueltos.md`](resueltos.md)).
+`precioExtraDefault` al lado del efectivo ([`resueltos.md`](resueltos.md)), y desde el
+2026-09-13 `GET /items/:id` manda además lo propio de la receta (`precioExtraPropio`, `null` si
+hereda), que es lo que carga el formulario de ítems.
 
 📌 **Va en su propio frente.** Toca DTO y service de items, dos pantallas y una regla de qué es
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido

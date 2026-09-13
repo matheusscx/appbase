@@ -23,6 +23,76 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Guardar una receta o un combo ya no copia el catálogo de grupos como valor propio de sus opciones (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **No hizo falta preguntarle la regla al owner:** ya
+estaba escrita dos veces. `docs/features/grupos-modificadores.md` dice que un propio en `NULL`
+*hereda el default del grupo*, y la pantalla lo pone en la tabla de opciones: *"Vacío = hereda el
+default del grupo"*. El owner aprobó el arreglo propuesto: *"sí, arreglalo así"*.
+
+**Medido antes de arreglar**, contra la base recién sembrada y por la API, con el mismo body que
+arma `guardar`:
+- Las 3 opciones de la Hamburguesa Especial no tenían ningún propio.
+- Después de guardarla sin tocar nada, las 3 quedaron con propio igual al catálogo: **precio, y
+  también cantidad y unidad** —la entrada solo nombraba el precio—.
+- Subida la Chuleta a $2.000 en el grupo, `GET /items/:id` de la receta seguía dando $1.500. El
+  cobro lee el mismo `COALESCE(ovr.precio_extra, o.precio_extra)`.
+
+La causa estaba en la carga, no solo en `onSelectGrupo`: el formulario de edición cargaba el
+**efectivo** en cada campo, y `guardar` manda lo que hay en el campo. La edición en lote de
+`grupos-modificadores.vue` no tenía el problema: arranca con los campos vacíos.
+
+**Qué se hizo.**
+- **Backend:** `GET /items/:id` manda, al lado del efectivo y el default, lo propio de cada opción
+  (`cantidadPropia`, `unidadCodigoPropia`, `precioExtraPropio`, `null` si hereda) y
+  `unidadCodigoDefault`. No cambia ningún campo existente, así que el drawer de personalización
+  del POS no se toca.
+- **Frontend:** `items.vue` carga lo propio y deja vacío lo heredado, con el valor del grupo de
+  placeholder —el precio formateado en la moneda del ítem, la unidad en el selector, la cantidad
+  como ya estaba—. `onSelectGrupo` arma las filas vacías.
+- **De arrastre, el vaciado por cambio de moneda:**
+  - `esPrecioPropioDeOpcion` deja de comparar contra el catálogo: el campo ya solo tiene lo propio.
+    Un propio igual al catálogo **ahora se vacía**, porque si el catálogo cambia tampoco lo sigue.
+  - Salió la rama del aviso que nombraba *"las opciones que coinciden con el catálogo"*: lo
+    heredado no está en el campo, y no es plata de este ítem.
+
+**Lo que lo fija**, mutante por mutante: el spec de ítems (53 tests) y el e2e de precios propios
+(9 tests).
+
+| Mutante | Lo caza |
+|---|---|
+| la carga al editar vuelve al efectivo | *"guardar una receta sin tocar sus opciones manda solo lo que es propio de ella"*, *"las opciones que heredan del catálogo no frenan el cambio de moneda"*, *"en una receta, el aviso cuenta los extras con monto"*, *"una receta con todos los montos en cero igual pregunta por el costo calculado"* y *"con un solo extra pagado el aviso lo dice en singular"* |
+| `onSelectGrupo` vuelve a prellenar con el catálogo | *"un tipo que no muestra opciones no las nombra, aunque el form las conserve"* |
+| el precio propio vuelve a compararse con el del catálogo | *"un precio propio igual al del catálogo se vacía; uno en cero no"* |
+| sin placeholder del catálogo en el precio | *"un tipo que no muestra opciones…"* y *"guardar una receta sin tocar sus opciones…"* |
+| el backend manda el efectivo como propio | e2e *"10. el precio de una opción viaja con su default y su propio al lado…"* |
+
+**Docs:** la respuesta del detalle en `docs/features/grupos-modificadores.md`, la fila de ítems de
+`docs/ESTADO.md`, y la frase de la § 3 de `pendientes.md` que decía que la pantalla ya distinguía
+el propio del heredado.
+
+La entrada, verbatim:
+
+- [ ] **Guardar una receta o un combo parece dejar como precio propio de ese ítem el del
+  catálogo en TODAS sus opciones** (frontend + backend; **leído en el código el 2026-09-12 al
+  cerrar el vaciado de opciones por cambio de moneda, no medido**) — `guardar`
+  (`configuracion/items.vue`) manda `precioExtra: o.precioExtra || undefined` por cada opción, y
+  `o.precioExtra` es el **efectivo**: el que trajo `GET /items/:id`, o el del catálogo que
+  prellena `onSelectGrupo`. El service lo persiste como override en
+  `item_grupo_modificador_opciones.precio_extra` (`items.service.ts`, el `INSERT`/`UPDATE` de
+  overrides). Si es así, después del primer guardado ninguna opción de ese ítem hereda, y un
+  cambio de precio en `grupos-modificadores.vue` ya no le llega.
+  **Qué medir:** guardar una receta sin tocar sus opciones y leer la tabla. ⚠️ **Puede ser
+  deliberado:** el docblock de `onSelectGrupo` dice que *"pre-llena la tabla de overrides con el
+  default"*. Si la medición lo confirma, la pregunta para el owner es si un precio de catálogo que
+  cambia tiene que llegar a las recetas ya guardadas.
+  **Por qué pesa sobre el vaciado por cambio de moneda** ([`resueltos.md`](resueltos.md)): esas
+  opciones son overrides iguales al default, que el vaciado no distingue de un heredado y deja
+  quietas. Y la otra cara, levantada por la revisión del cierre: si después el catálogo cambia
+  ese precio, la copia vieja deja de coincidir con el default y el vaciado la cuenta como precio
+  propio —el aviso la nombra como monto a vaciar— aunque nadie la tipeó en este ítem. Vaciada,
+  al guardar hereda el precio nuevo.
+
 ## En cascada, el orden entre porcentajes ya no lo decide el id de la regla: va primero el mayor (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 4](pendientes.md). **La decisión del owner**, preguntada con un plato de

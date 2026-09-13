@@ -134,6 +134,10 @@ const ITEM_RECETA = {
           unidadCodigo: 'unidad',
           precioExtra: '1200',
           precioExtraDefault: '1200.0000',
+          cantidadPropia: null as string | null,
+          unidadCodigoDefault: 'unidad' as string | null,
+          unidadCodigoPropia: null as string | null,
+          precioExtraPropio: null as string | null,
         },
         {
           grupoOpcionId: 'op-pepinillo',
@@ -143,6 +147,10 @@ const ITEM_RECETA = {
           unidadCodigo: 'unidad',
           precioExtra: '300',
           precioExtraDefault: '300.0000',
+          cantidadPropia: null as string | null,
+          unidadCodigoDefault: 'unidad' as string | null,
+          unidadCodigoPropia: null as string | null,
+          precioExtraPropio: null as string | null,
         },
       ],
     },
@@ -150,10 +158,11 @@ const ITEM_RECETA = {
 }
 
 /**
- * `ITEM_RECETA` sin otro monto que el de sus opciones, con el efectivo y el default de cada una
- * elegidos por el test: `[efectivo, default]` para Cheddar y para Pepinillo.
+ * `ITEM_RECETA` sin otro monto que el de sus opciones, con el precio propio y el default de cada
+ * una elegidos por el test: `[propio, default]` para Cheddar y para Pepinillo. Un propio en
+ * `null` es una opción que hereda, y su efectivo es el default, como lo arma el `COALESCE`.
  */
-function conPreciosDeOpcion(cheddar: [string, string], pepinillo: [string, string]) {
+function conPreciosDeOpcion(cheddar: [string | null, string], pepinillo: [string | null, string]) {
   const [grupo] = ITEM_RECETA.grupos
   const [opCheddar, opPepinillo] = grupo!.opciones
   return {
@@ -164,8 +173,8 @@ function conPreciosDeOpcion(cheddar: [string, string], pepinillo: [string, strin
     grupos: [{
       ...grupo!,
       opciones: [
-        { ...opCheddar!, precioExtra: cheddar[0], precioExtraDefault: cheddar[1] },
-        { ...opPepinillo!, precioExtra: pepinillo[0], precioExtraDefault: pepinillo[1] },
+        { ...opCheddar!, precioExtra: cheddar[0] ?? cheddar[1], precioExtraDefault: cheddar[1], precioExtraPropio: cheddar[0] },
+        { ...opPepinillo!, precioExtra: pepinillo[0] ?? pepinillo[1], precioExtraDefault: pepinillo[1], precioExtraPropio: pepinillo[0] },
       ],
     }],
   }
@@ -197,9 +206,8 @@ const ITEM_COMBO = {
   ],
 }
 
-// El catálogo de grupos: `onSelectGrupo` pre-llena los precios de las opciones con estos
-// defaults, que es como una receta nueva termina con plata en las opciones sin que nadie
-// teclee un número.
+// El catálogo de grupos: al elegir el grupo en una receta, estos valores quedan de placeholder
+// en cada opción, no como su valor —lo que no se tipea se hereda del grupo—.
 const GRUPO_CATALOGO = {
   grupoModificadorId: 'grupo-1',
   nombre: 'Proteína',
@@ -303,6 +311,10 @@ let overrideItemsSinEliminados: Promise<unknown> | null = null
 let usoCalls: string[] = []
 let usoOverride: Record<string, Promise<unknown>> = {}
 
+// Lo que la pantalla manda al guardar: los tests de herencia afirman sobre el body, no sobre el
+// formulario, porque el bug estaba en lo que llegaba al backend.
+let enviados: { url: string; method: string; body: unknown }[] = []
+
 // El store de monedas sale del auth (`ensureLoaded` corta sin `activeTenantId`), y
 // sin monedas todos los `MoneyInput` de la pantalla se montan DESHABILITADOS y sin
 // emitir: los tests de abajo pasarían igual con el `v-model` desconectado. Con esto
@@ -312,7 +324,9 @@ mockNuxtImport('useAuthStore', () => {
 })
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string; body?: unknown }) => {
+    if (opts?.method === 'PATCH' || opts?.method === 'POST')
+      enviados.push({ url, method: opts.method, body: opts.body })
     if (typeof url === 'string' && url.includes('/impuestos'))
       return impuestosPromiseOverride ?? Promise.resolve(impuestosMock)
     if (typeof url === 'string' && url.includes('/descuentos'))
@@ -1528,11 +1542,10 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     wrapper.unmount()
   })
 
-  // El precio de una opción que coincide con el del catálogo es campo editable, se persiste, y
-  // aun así no se vacía —no se distingue del compartido del grupo— pero cuenta igual para
-  // preguntar: si no, una receta sin ningún otro monto cambia de moneda sola y `guardar` manda
-  // esos números como override en la moneda nueva.
-  it('con plata solo en opciones que coinciden con el catálogo, igual pregunta y no las vacía', async () => {
+  // Una opción que hereda no es plata de este ítem: el número es el del catálogo de grupos, y la
+  // regla del owner deja afuera lo que no vive en la asociación. Su campo está vacío, con ese
+  // número de placeholder, así que no hay nada que vaciar ni que releer en otra moneda.
+  it('las opciones que heredan del catálogo no frenan el cambio de moneda', async () => {
     itemDetalleMock = {
       ...ITEM_RECETA,
       precioBase: '0',
@@ -1543,31 +1556,22 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     const wrapper = await montar()
     await abrirEditar(wrapper)
 
-    const precios = () => wrapper.findAllComponents({ name: 'MoneyInput' })
-      .map(m => m.props('modelValue'))
-    expect(precios()).toEqual(expect.arrayContaining(['1200', '300']))
+    // Ancla: las dos opciones están en pantalla, vacías. Sin esto el test pasaría con el drawer
+    // sin renderizar ninguna.
+    const opciones = wrapper.findAllComponents({ name: 'MoneyInput' }).slice(-2)
+    expect(opciones.map(m => m.props('modelValue'))).toEqual(['', ''])
 
     elegirMoneda(wrapper, 'usd')
     await new Promise(r => setTimeout(r, 20))
 
-    const texto = aviso(wrapper)?.props('description') as string
-    expect(texto).toContain('No hay montos tipeados que vaciar')
-    expect(texto).toContain(
-      'Los precios de las opciones de modificadores que coinciden con el del catálogo de grupos no se vacían',
-    )
-
-    await accion(wrapper, 'Cambiar la moneda').trigger('click')
-    await new Promise(r => setTimeout(r, 20))
-
-    // Se avisó, se cambió, y no se tocó ninguno: son los que no se pueden distinguir.
-    expect(precios()).toEqual(expect.arrayContaining(['1200', '300']))
     expect(aviso(wrapper)).toBeUndefined()
+    expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
 
     wrapper.unmount()
   })
 
-  // La regla del owner aplicada a las opciones: el precio propio de este ítem se vacía, el que
-  // coincide con el catálogo se queda. Dos con precio propio, para la rama plural del conteo.
+  // La regla del owner aplicada a las opciones: el precio propio de este ítem se vacía. Dos con
+  // precio propio, para la rama plural del conteo.
   it('las opciones con precio propio se vacían y el aviso las cuenta', async () => {
     itemDetalleMock = conPreciosDeOpcion(['1500', '1200.0000'], ['450', '300.0000'])
 
@@ -1584,8 +1588,6 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     const texto = aviso(wrapper)?.props('description') as string
     expect(texto).toContain('Se vacía 2 precios de opciones.')
     expect(texto).toContain('Una opción que quede vacía vuelve al precio del catálogo de grupos.')
-    // Las dos tienen precio propio: no queda ninguna que solo se reinterprete.
-    expect(texto).not.toContain('que coinciden con el del catálogo')
 
     await accion(wrapper, 'Cambiar y vaciar').trigger('click')
     await new Promise(r => setTimeout(r, 20))
@@ -1597,47 +1599,29 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     wrapper.unmount()
   })
 
-  // Las trampas de la entrada, juntas: un override igual al default escrito con otra escala
-  // (`'300.0000'` contra `'300'`) no es precio propio, y un `0` tampoco aunque difiera del
-  // default. Ninguno se cuenta ni se vacía; el que tiene monto se nombra como reinterpretado.
-  // Y la opción con precio propio convive con ellas y es la única que cae, en singular.
-  it('un override igual al default o en cero no se vacía; el precio propio sí', async () => {
+  // Un precio propio IGUAL al del catálogo sigue siendo propio: alguien lo dejó en este ítem, y
+  // si el catálogo cambia no lo sigue. Se vacía como cualquier otro —escrito con otra escala,
+  // `'300.0000'` contra `'300'`, para que la igualdad no sea de strings—. Un `0` no, por la regla
+  // de siempre: cero es cero en cualquier moneda.
+  it('un precio propio igual al del catálogo se vacía; uno en cero no', async () => {
     itemDetalleMock = conPreciosDeOpcion(['0', '1200.0000'], ['300.0000', '300'])
 
     const wrapper = await montar()
     await abrirEditar(wrapper)
 
-    const precios = () => wrapper.findAllComponents({ name: 'MoneyInput' })
+    // Las opciones son los dos últimos campos de plata: el precio base se pinta antes.
+    const opciones = () => wrapper.findAllComponents({ name: 'MoneyInput' }).slice(-2)
       .map(m => m.props('modelValue'))
+    expect(opciones()).toEqual(['0', '300.0000'])
 
     elegirMoneda(wrapper, 'usd')
-    await new Promise(r => setTimeout(r, 20))
-
-    const texto = aviso(wrapper)?.props('description') as string
-    expect(texto).toContain('No hay montos tipeados que vaciar')
-    expect(texto).toContain('que coinciden con el del catálogo de grupos no se vacían')
-
-    await accion(wrapper, 'Cambiar la moneda').trigger('click')
-    await new Promise(r => setTimeout(r, 20))
-    expect(precios()).toEqual(expect.arrayContaining(['0', '300.0000']))
-
-    // Ahora sí, un precio propio al lado: cae solo ése, y se nombra en singular. Es el ÚLTIMO
-    // campo en `'0'`: el precio base, que también está en cero, se pinta antes que las opciones.
-    wrapper.findAllComponents({ name: 'MoneyInput' })
-      .filter(m => m.props('modelValue') === '0')
-      .at(-1)!
-      .vm.$emit('update:modelValue', '900')
-    await new Promise(r => setTimeout(r, 20))
-    elegirMoneda(wrapper, 'clp')
     await new Promise(r => setTimeout(r, 20))
 
     expect(aviso(wrapper)?.props('description')).toContain('Se vacía 1 precio de opción.')
     await accion(wrapper, 'Cambiar y vaciar').trigger('click')
     await new Promise(r => setTimeout(r, 20))
 
-    const despues = precios()
-    expect(despues).not.toContain('900')
-    expect(despues).toContain('300.0000')
+    expect(opciones()).toEqual(['0', ''])
 
     wrapper.unmount()
   })
@@ -1659,24 +1643,24 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
       .vm.$emit('update:modelValue', 'grupo-1')
     await new Promise(r => setTimeout(r, 20))
 
-    // Ancla: la opción quedó con el precio del catálogo, sin que nadie tipee.
+    // Elegir el grupo no copia sus valores: la opción queda vacía, con el precio del catálogo de
+    // placeholder, y así hereda al guardar. Con el precio base vacío no queda plata de este
+    // ítem, y la moneda cambia sin preguntar.
+    const opcion = () => wrapper.findAllComponents({ name: 'MoneyInput' }).at(-1)!
+    expect(opcion().props('modelValue')).toBe('')
+    expect(opcion().props('placeholder')).toMatch(/1\.?200/)
     money(wrapper, 'Precio base').vm.$emit('update:modelValue', '')
     await new Promise(r => setTimeout(r, 20))
     elegirMoneda(wrapper, 'usd')
     await new Promise(r => setTimeout(r, 20))
-    expect(aviso(wrapper)?.props('description')).toContain('opciones de modificadores')
-    // Prellenada desde el catálogo, la opción coincide con su default: se reinterpreta, no se
-    // vacía. Si `onSelectGrupo` no guardara el default, contaría como precio propio.
-    expect(aviso(wrapper)?.props('description')).not.toContain('precio de opción')
+    expect(aviso(wrapper)).toBeUndefined()
     elegirMoneda(wrapper, 'clp')
     await new Promise(r => setTimeout(r, 20))
 
     // Y con precio PROPIO, que es el que se vacía: en la receta lo cuenta (control), y más abajo,
     // en un servicio, tampoco puede nombrarlo. Sin este paso el corte por tipo del conteo no
     // tenía nada que cortar.
-    wrapper.findAllComponents({ name: 'MoneyInput' })
-      .find(m => m.props('modelValue') === '1200')!
-      .vm.$emit('update:modelValue', '1500')
+    opcion().vm.$emit('update:modelValue', '1500')
     await new Promise(r => setTimeout(r, 20))
     elegirMoneda(wrapper, 'usd')
     await new Promise(r => setTimeout(r, 20))
@@ -1704,9 +1688,8 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
 
   // El tercer lugar donde el drawer guarda plata de este ítem: el precio de cada extra
   // de la receta, que vive en `receta_extras_permitidos` con FK a esta receta. Las opciones
-  // de `ITEM_RECETA` coinciden con el catálogo, así que NO se tocan: lo que la pantalla muestra
-  // ahí es el **efectivo** (`COALESCE(override, default)`), y ese número es el compartido.
-  it('en una receta, el aviso cuenta los extras con monto y confirmar deja quietas las opciones', async () => {
+  // de `ITEM_RECETA` heredan del catálogo: su campo está vacío y no es plata de este ítem.
+  it('en una receta, el aviso cuenta los extras con monto', async () => {
     itemDetalleMock = ITEM_RECETA
 
     const wrapper = await montar()
@@ -1716,7 +1699,7 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
       .map(m => m.props('modelValue'))
     // Ancla: sin esto el test pasaría por el lado vacío, con el drawer sin renderizar
     // ni un solo campo de plata.
-    expect(precios()).toEqual(expect.arrayContaining(['8900', '500', '800', '1200', '300']))
+    expect(precios()).toEqual(expect.arrayContaining(['8900', '500', '800']))
 
     // Un extra en 0 —gratis, que el backend acepta— por el camino por el que se llega:
     // agregar la fila y tipear. Cero pesos son cero dólares, así que ni se cuenta ni se
@@ -1744,8 +1727,8 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     expect(despues).not.toContain('8900')
     expect(despues).not.toContain('500')
     expect(despues).not.toContain('800')
-    // El 0 sigue siendo 0, y los precios de las opciones coinciden con el catálogo.
-    expect(despues).toEqual(expect.arrayContaining(['0', '1200', '300']))
+    // El 0 sigue siendo 0.
+    expect(despues).toContain('0')
     expect(money(wrapper, 'Precio base').props('monedaId')).toBe('usd')
 
     wrapper.unmount()
@@ -2002,6 +1985,62 @@ describe('configuracion/items — cambiar la unidad de un ítem guardado', () =>
       .toEqual([])
     expect(campo(wrapper, 'Precio base')?.props('label')).toBe('Precio base (por unidad)')
     expect(precio(wrapper).props('modelValue')).toBe('1500.0000')
+
+    wrapper.unmount()
+  })
+})
+
+describe('configuracion/items — lo que una opción no tipea lo hereda del grupo', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    enviados = []
+  })
+
+  afterEach(() => {
+    itemDetalleMock = ITEM_PRODUCTO
+  })
+
+  /**
+   * Guardar una receta sin tocar sus opciones mandaba el número que la pantalla mostraba en cada
+   * una —el propio o, si heredaba, el del catálogo— y el backend lo persistía como propio de la
+   * receta. Desde ahí la opción dejaba de heredar: subir su precio en el catálogo de grupos no le
+   * llegaba (medido el 2026-09-13 contra la base real). Lo mismo con la cantidad y la unidad.
+   */
+  it('guardar una receta sin tocar sus opciones manda solo lo que es propio de ella', async () => {
+    const [grupo] = ITEM_RECETA.grupos
+    const [cheddar, pepinillo] = grupo!.opciones
+    itemDetalleMock = {
+      ...ITEM_RECETA,
+      grupos: [{
+        ...grupo!,
+        opciones: [cheddar!, { ...pepinillo!, precioExtra: '450', precioExtraPropio: '450' }],
+      }],
+    }
+
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // Las opciones son los dos últimos campos de plata. La que hereda queda vacía, con el precio
+    // del catálogo a la vista pero sin ser su valor.
+    const [enCheddar, enPepinillo] = wrapper.findAllComponents({ name: 'MoneyInput' }).slice(-2)
+    expect(enCheddar!.props('modelValue')).toBe('')
+    expect(enCheddar!.props('placeholder')).toMatch(/1\.?200/)
+    expect(enPepinillo!.props('modelValue')).toBe('450')
+
+    const guardar = wrapper.findAllComponents({ name: 'UButton' })
+      .find(b => b.text().includes('Guardar cambios'))
+    expect(guardar, 'botón "Guardar cambios"').toBeTruthy()
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    const patch = enviados.find(e => e.method === 'PATCH' && /\/items\/[^/?]+$/.test(e.url))
+    expect(patch, 'PATCH del ítem').toBeTruthy()
+    const body = patch!.body as { gruposModificadores: { opciones: Record<string, unknown>[] }[] }
+    expect(body.gruposModificadores[0]!.opciones).toEqual([
+      { grupoOpcionId: 'op-pepinillo', precioExtra: '450' },
+    ])
 
     wrapper.unmount()
   })

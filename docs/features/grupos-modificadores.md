@@ -238,9 +238,12 @@ grupo, dos cantidades de consumo distintas.
 - **Opciones nuevas vendibles desde el día 1** si el grupo ya tiene default —
   agregar una opción al grupo no exige que cada receta que lo usa declare
   antes su propia cantidad.
-- **El drawer de recetas se pre-llena**, no exige N formularios vacíos: al
-  asociar un grupo a una receta, el formulario ya muestra el default como
-  punto de partida; el usuario solo overridea lo que necesita distinto.
+- **Asociar un grupo no exige N formularios llenos**: al asociarlo a una
+  receta, cada opción muestra el default del grupo de placeholder y queda
+  vacía —hereda—; el usuario solo tipea lo que necesita distinto. Que el
+  default sea placeholder y no valor del campo importa: guardar lo que hay en
+  el campo lo persiste como override (2026-09-13, ver la respuesta de
+  `GET /items/:id` más abajo).
 
 **Resolución — `COALESCE(override, default)`.** Toda lectura de la cantidad
 (y del recargo) efectiva de una opción para una receta hace `LEFT JOIN
@@ -565,6 +568,15 @@ receta y el del grupo sin overridear. Van los dos desde el 2026-09-11 —antes v
 efectivo, y la pantalla no podía distinguir un override de este ítem del precio compartido
 del catálogo—, y `GET /grupos-modificadores/:id/items` manda el mismo par.
 
+**Y lo propio, aparte** (2026-09-13): `cantidadPropia`, `unidadCodigoPropia` y
+`precioExtraPropio` —`null` cuando la opción hereda— más `unidadCodigoDefault`. Son lo que
+carga el formulario de ítems, que deja vacío lo heredado con el valor del grupo de
+placeholder. Con el efectivo no alcanzaba: un propio igual al default no se distingue de uno
+heredado, y guardar la receta sin tocarla persistía el efectivo como propio. Medido ese día
+sobre la base real: guardada la Hamburguesa Especial sin cambios, subir la Chuleta a $2.000
+en el grupo no le llegaba, y la receta seguía en $1.500. `GET /grupos-modificadores/:id/items`
+no los manda: su edición en lote arranca con los campos vacíos.
+
 `GET /items?tipo=combo` incluye `disponibleCondicional` en cada fila (una sola
 query extra para todos los combos, no N+1).
 
@@ -690,8 +702,9 @@ nivel)" arriba para el detalle completo.
   (`PATCH .../overrides`, selección múltiple).
 - `pages/configuracion/items.vue` — sección "Grupos de modificadores"
   compartida entre combo y receta (selector de grupo + `min`/`max`/`orden` +
-  override de `cantidad`/`precioExtra` por opción, pre-llenado con el default
-  del grupo; opciones sin cantidad efectiva se marcan *pendiente* en la UI).
+  override de `cantidad`/`unidad`/`precioExtra` por opción: el campo carga solo
+  lo propio de este ítem y deja vacío lo heredado, con el default del grupo de
+  placeholder; opciones sin cantidad efectiva se marcan *pendiente* en la UI).
 - `components/ventas/ItemPersonalizacionDrawer.vue` — drawer unificado
   (renombrado desde el drawer específico de recetas): renderiza ingredientes
   omitibles + extras (receta) y/o grupos (combo y receta) según lo que el

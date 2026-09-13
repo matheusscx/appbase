@@ -91,6 +91,16 @@ type GrupoDetalle = {
      * sin él la pantalla no distingue un override del número compartido del grupo.
      */
     precioExtraDefault: string;
+    /**
+     * Lo propio de ESTE ítem, sin el default del grupo: `null` = hereda. Es lo que el formulario
+     * de ítems carga para editar: si cargara el efectivo, guardarlo lo persistiría como propio y
+     * la opción dejaría de heredar lo que después cambie en el catálogo.
+     */
+    cantidadPropia: string | null;
+    unidadCodigoPropia: string | null;
+    precioExtraPropio: string | null;
+    /** Gemelo de `cantidadDefault` para la unidad: el placeholder de la que hereda. */
+    unidadCodigoDefault: string | null;
     orden: number;
     stock: string | null;
     /** `stockVendible` (el del local) menos lo que las cuentas abiertas ya apartaron. Ver `findOne`. */
@@ -824,6 +834,10 @@ export class ItemsService {
       unidad_codigo: string | null;
       precio_extra: string;
       precio_extra_default: string;
+      cantidad_propia: string | null;
+      unidad_propia: string | null;
+      precio_extra_propio: string | null;
+      unidad_default: string | null;
       orden: number;
       stock: string | null;
       stock_vendible: string | null;
@@ -834,6 +848,8 @@ export class ItemsService {
               COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
               COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
               o.precio_extra AS precio_extra_default,
+              ovr.cantidad AS cantidad_propia, ovr.unidad_codigo AS unidad_propia,
+              ovr.precio_extra AS precio_extra_propio, o.unidad_codigo AS unidad_default,
               o.orden, s.total AS stock, s.vendible AS stock_vendible
        FROM item_grupos_modificadores igm
        JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
@@ -879,6 +895,10 @@ export class ItemsService {
           unidadCodigo: r.unidad_codigo,
           precioExtra: r.precio_extra,
           precioExtraDefault: r.precio_extra_default,
+          cantidadPropia: r.cantidad_propia,
+          unidadCodigoPropia: r.unidad_propia,
+          precioExtraPropio: r.precio_extra_propio,
+          unidadCodigoDefault: r.unidad_default,
           orden: r.orden,
           stock: r.stock,
           stockDisponible: disponibleDe(

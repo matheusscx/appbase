@@ -74,7 +74,7 @@ interface Item {
     min: number
     max: number
     orden: number
-    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string | null; cantidadDefault: string | null; unidadCodigo: string | null; precioExtra: string; precioExtraDefault: string; orden: number; stock: string | null; esPendiente: boolean }[]
+    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string | null; cantidadDefault: string | null; unidadCodigo: string | null; precioExtra: string; precioExtraDefault: string; cantidadPropia: string | null; unidadCodigoDefault: string | null; unidadCodigoPropia: string | null; precioExtraPropio: string | null; orden: number; stock: string | null; esPendiente: boolean }[]
   }[]
   disponible?: number | null
 }
@@ -92,15 +92,20 @@ interface ComponenteRow {
   bloqueante: boolean
 }
 
+/**
+ * Una opción de grupo en el formulario de un ítem. `cantidad`, `unidadCodigo` y `precioExtra` son
+ * **lo propio de este ítem**: vacíos, heredan el valor del grupo, que se muestra de placeholder
+ * (`…Default`). Nunca el efectivo: `guardar` manda lo que hay en el campo y el backend lo
+ * persiste como propio, así que cargar el efectivo dejaba a la opción sin heredar el catálogo.
+ */
 interface GrupoOpcionOverrideRow {
   grupoOpcionId: string
   itemNombre: string
-  cantidad: string // efectiva (pre-llenada con default; '' = pendiente)
+  cantidad: string
   cantidadDefault: string | null
   unidadCodigo?: string
-  precioExtra: string // efectivo (override de este ítem ?? default del catálogo)
-  // El default del catálogo de grupos, para distinguir el precio propio de este ítem del
-  // compartido. Ver `esPrecioPropioDeOpcion`.
+  unidadCodigoDefault: string | null
+  precioExtra: string
   precioExtraDefault: string
 }
 
@@ -381,16 +386,20 @@ const ivaDelPais = ref<ImpuestoApi | null>(null)
 	  }
 	}
 
-	/** Al elegir un grupo en el form de item: pre-llena la tabla de overrides con el default de cada opción. */
+	/**
+	 * Al elegir un grupo en el form de item: una fila por opción, **vacía** —hereda los valores del
+	 * grupo, que quedan de placeholder—. Ver `GrupoOpcionOverrideRow`.
+	 */
 	function onSelectGrupo(idx: number, grupoId: string) {
 	  const catalogo = gruposCatalogo.value.find(g => g.grupoModificadorId === grupoId)
 	  form.value.gruposModificadores[idx]!.opciones = (catalogo?.opciones ?? []).map(o => ({
 	    grupoOpcionId: o.grupoOpcionId,
 	    itemNombre: o.itemNombre,
-	    cantidad: o.cantidad ?? '',
+	    cantidad: '',
 	    cantidadDefault: o.cantidad,
-	    unidadCodigo: o.unidadCodigo ?? undefined,
-	    precioExtra: o.precioExtra,
+	    unidadCodigo: undefined,
+	    unidadCodigoDefault: o.unidadCodigo,
+	    precioExtra: '',
 	    precioExtraDefault: o.precioExtra,
 	  }))
 	}
@@ -604,13 +613,11 @@ watch(() => form.value.unidadMedida, () => {
  * `items`), el precio de cada extra de receta (`receta_extras_permitidos`, FK a esta
  * receta) y el **precio propio** de cada opción de modificador (`esPrecioPropioDeOpcion`).
  *
- * ⚠️ **De las opciones cae solo el precio propio, no el efectivo.** `GET /items/:id` devuelve
- * el efectivo (`COALESCE(ovr.precio_extra, o.precio_extra)`, `items.service.ts`), que puede ser
- * el número compartido del catálogo —lo edita `grupos-modificadores.vue` y puede estar en uso
- * en otras recetas—, y al lado el default (`precioExtraDefault`). Se vacía la opción cuyo
- * efectivo difiere del default; la que coincide se deja, con el mismo número leído en la moneda
- * nueva, y el aviso lo dice. Una opción vaciada vuelve a heredar el precio del catálogo al
- * guardar: el `PATCH` no le manda precio.
+ * ⚠️ **De las opciones cae solo el precio propio.** El formulario carga lo propio de este ítem
+ * (`precioExtraPropio` de `GET /items/:id`) y deja vacío lo que hereda del catálogo de grupos
+ * —ese número lo edita `grupos-modificadores.vue` y puede estar en uso en otras recetas—, así
+ * que lo heredado no es plata de este ítem y no entra en el aviso. Una opción vaciada vuelve a
+ * heredar el precio del catálogo al guardar: el `PATCH` no le manda precio.
  *
  * ⛔ **Tampoco entran los descuentos y recargos de MONTO FIJO asociados al ítem**, y es una
  * decisión, no un olvido: **ese monto no está denominado en la moneda del ítem**, así que
@@ -661,21 +668,13 @@ const camposDePlataVisibles = computed(() => ({
 }))
 
 /**
- * El precio de una opción que vive en la asociación con ESTE ítem: con monto y distinto del
- * default del catálogo de grupos. Dos casos que no cuentan, a propósito:
- * - un override **igual** al default no se distingue de uno heredado, y vaciarlo no cambiaría
- *   nada visible —la opción vuelve al mismo número—;
- * - un `0`, por la misma regla que los extras: cero es cero en cualquier moneda.
- * `Decimal` y no comparación de strings: la API manda `'1200.0000'` y el campo puede tener
- * `'1200'`.
+ * El precio de una opción que vive en la asociación con ESTE ítem. El campo tiene solo lo propio
+ * —lo heredado queda vacío (`GrupoOpcionOverrideRow`)—, así que alcanza con que tenga monto:
+ * un propio **igual** al del catálogo también cuenta, porque si el catálogo cambia no lo sigue.
+ * Un `0` no, por la misma regla que los extras: cero es cero en cualquier moneda.
  */
 function esPrecioPropioDeOpcion(o: GrupoOpcionOverrideRow): boolean {
-  if (!esPlataQueSeReinterpreta(o.precioExtra)) return false
-  try {
-    return !new Decimal(o.precioExtra).eq(o.precioExtraDefault)
-  } catch {
-    return true
-  }
+  return esPlataQueSeReinterpreta(o.precioExtra)
 }
 
 function contarPreciosPropiosDeOpciones(): number {
@@ -729,9 +728,7 @@ const plataQueSeVacia = computed(() => {
  * vacían sería falso— y **cuentan igual para decidir si se pregunta**: sin ellos, una pantalla
  * donde el único monto es uno de estos cambia de moneda en silencio.
  *
- * Cada uno con **su** porqué, que no es el mismo: los dos costos no son campos, y el precio de
- * una opción que coincide con el del catálogo sí lo es pero no se distingue del compartido (ver
- * el ⚠️ de arriba). Los dos costos son mutuamente excluyentes por tipo.
+ * Son los dos costos, que no son campos y son mutuamente excluyentes por tipo.
  */
 const montosQueSeReinterpretan = computed(() => {
   const partes: string[] = []
@@ -747,28 +744,8 @@ const montosQueSeReinterpretan = computed(() => {
       + 'los ítems que componen este, y queda con el mismo número leído en la moneda nueva.',
     )
   }
-  if (opcionesDeModificadorSeReinterpretan.value) {
-    partes.push(
-      'Los precios de las opciones de modificadores que coinciden con el del catálogo de grupos '
-      + 'no se vacían —no se distinguen del precio compartido del grupo— y quedan con el mismo '
-      + 'número, leído en la moneda nueva.',
-    )
-  }
   return partes
 })
-
-/**
- * El precio de una opción que **coincide con el del catálogo**: es campo editable y se persiste,
- * pero no se vacía (el ⚠️ de arriba). Se muestra rotulado con la moneda del formulario, así que
- * cambiarla sin preguntar deja esos números releídos en otra —y `guardar` los manda como
- * override de este ítem—.
- */
-const opcionesDeModificadorSeReinterpretan = computed(
-  () => camposDePlataVisibles.value.opciones
-    && form.value.gruposModificadores.some(
-      g => g.opciones.some(o => esPlataQueSeReinterpreta(o.precioExtra) && !esPrecioPropioDeOpcion(o)),
-    ),
-)
 
 /**
  * El aviso describe lo que queda AHORA, no lo que había al elegir: si mientras está en
@@ -1446,10 +1423,11 @@ async function abrirEditar(item: Item) {
         opciones: (g.opciones ?? []).map(o => ({
           grupoOpcionId: o.grupoOpcionId,
           itemNombre: o.itemNombre,
-          cantidad: o.cantidad ?? '',
+          cantidad: o.cantidadPropia ?? '',
           cantidadDefault: o.cantidadDefault,
-          unidadCodigo: o.unidadCodigo ?? undefined,
-          precioExtra: o.precioExtra,
+          unidadCodigo: o.unidadCodigoPropia ?? undefined,
+          unidadCodigoDefault: o.unidadCodigoDefault,
+          precioExtra: o.precioExtraPropio ?? '',
           precioExtraDefault: o.precioExtraDefault,
         })),
       })),
@@ -2729,12 +2707,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       v-model="grupo.opciones[opIdx]!.unidadCodigo"
                       :items="unidadesMedidaOpts"
                       value-key="value"
+                      :placeholder="op.unidadCodigoDefault ?? undefined"
                       class="col-span-2 w-full"
                     />
                     <span v-else class="col-span-2" />
                     <MoneyInput
                       v-model="grupo.opciones[opIdx]!.precioExtra"
                       :moneda-id="form.monedaId"
+                      :placeholder="formatMonto(op.precioExtraDefault, form.monedaId)"
                       class="col-span-3 w-full"
                     />
                     <UBadge

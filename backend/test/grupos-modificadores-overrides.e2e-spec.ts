@@ -34,9 +34,13 @@ interface ItemGrupoOpcionDetalle {
   itemId: string;
   cantidad: string | null;
   cantidadDefault: string | null;
+  cantidadPropia?: string | null;
   unidadCodigo: string | null;
+  unidadCodigoDefault?: string | null;
+  unidadCodigoPropia?: string | null;
   precioExtra: string;
   precioExtraDefault: string;
+  precioExtraPropio?: string | null;
   esPendiente: boolean;
 }
 interface ItemGrupoDetalle {
@@ -453,7 +457,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     expect(enClp?.monedaId).toBe(CLP_MONEDA_ID);
   });
 
-  it('10. el precio de una opción viaja con su default al lado: override y heredado se distinguen', async () => {
+  it('10. el precio de una opción viaja con su default y su propio al lado: override y heredado se distinguen', async () => {
     // Override de PRECIO, no de cantidad: el grupo creó la Carne con
     // `precioExtra: '0'` (test 2) y esta receta la cobra 700. Con el default en
     // 0 y el override en 700, leer la columna equivocada no puede pasar.
@@ -506,10 +510,23 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     const conOverride = await opcionDelDetalle(recetaConPrecioId);
     expect(conOverride?.precioExtra).toBe('700.0000');
     expect(conOverride?.precioExtraDefault).toBe('0.0000');
+    // Lo propio de la receta viaja aparte, y en null lo que hereda. Sin esto la pantalla
+    // cargaba el efectivo en el formulario y, al guardar, lo persistía como propio: la
+    // opción dejaba de heredar el catálogo.
+    expect(conOverride?.precioExtraPropio).toBe('700.0000');
+    expect(conOverride?.cantidadPropia).toBe('150.0000');
+    expect(conOverride?.unidadCodigoPropia).toBe('g');
     // La Clásica solo pisa la cantidad: su precio es el heredado.
     const heredada = await opcionDelDetalle(recetaClasicaId);
     expect(heredada?.precioExtraDefault).toBe('0.0000');
     expect(heredada?.precioExtra).toBe(heredada?.precioExtraDefault);
+    expect(heredada?.precioExtraPropio).toBeNull();
+    // Y pisa cantidad y unidad (test 3) sobre un grupo que no trae default de ninguna de las
+    // dos (test 2): el propio y el default no se pueden confundir.
+    expect(heredada?.cantidadPropia).toBe('150.0000');
+    expect(heredada?.cantidadDefault).toBeNull();
+    expect(heredada?.unidadCodigoPropia).toBe('g');
+    expect(heredada?.unidadCodigoDefault).toBeNull();
 
     // …y el drawer "usado en recetas" del grupo.
     const resGrupo = await request(app.getHttpServer())
