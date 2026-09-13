@@ -23,6 +23,84 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Irse de `/salones` ya no deja salir un tap con la pantalla desmontada (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 2](pendientes.md), donde la había dejado la revisión del cierre del
+flush de la comanda.
+
+**Medido antes de arreglar.** `mountSuspended` no registra el guard de ruta (medido el
+2026-09-05), así que el spec de salones ahora captura con `mockNuxtImport` el callback que la
+página le pasa a `onBeforeRouteLeave` y lo invoca como el router: espera su promesa y recién
+después desmonta. El test *"el tap que cae mientras se espera para irse de la pantalla sale antes
+de desmontarla"* salió **rojo** contra el código de ese día: al dejar ir la pantalla solo había
+salido el `PATCH` de la primera línea, y el del tap quedaba para después del desmontaje. La
+retención se suelta antes de los 300 ms del tap, que es la rama que tiene el bug.
+
+**Qué se hizo.** `flushPendientes` pasó de recibir una cuenta a recibir un predicado,
+`vaciarLoQueNazca`. `enviarComanda` vacía lo que nazca **en su cuenta**; el guard de salida vacía
+**todo, salvo mientras hay una fusión, un cancelar o un cobro confirmado en vuelo** (`fusionando`,
+`cancelando`, `cobroEnVueloId`, evaluados en cada vuelta). Salir, cambiar de mesa, cancelar,
+fusionar y cobrar siguen sin vaciar.
+
+⚠️ **La primera versión vaciaba todo al irse, y la revisión la bloqueó con razón.** Decía *"acá no
+hay nada que descartar: la cuenta sigue viva"*, y eso solo vale si la navegación es lo único que
+pasa. Con una fusión o un cancelar en vuelo, vaciar mandaba en menos de 50 ms lo que esas acciones
+descartan a propósito —en la cuenta destino de una fusión, un `PATCH` absoluto sobre la suma que se
+come unidades—; con un cobro confirmado, contestaba por su cuenta la pregunta de
+[`pendientes.md` § 4](pendientes.md). Lo fijan tres tests *"irse durante …"*, uno por acción, y los
+tres afirman lo mismo en el mismo instante —60 ms después del tap, con el `PATCH` anterior
+retenido—: el guard no lo mandó. Con el guard vaciando todo, los tres fallan **en esa aserción**,
+que lleva un rótulo para poder comprobarlo: los números de línea que reporta vitest en este spec no
+coinciden con el archivo. **El residuo, dicho**, que la revisión encontró incompleto en la primera redacción —nombraba
+solo la tercera cara—: mientras alguna de esas acciones está en vuelo el guard se comporta como
+antes, y eso tiene tres caras. Lo que ya estaba pendiente al empezar a navegar **sale igual**,
+porque la primera pasada del flush no mira el predicado. Una edición nacida durante la espera en
+la **cuenta afectada** no se manda y, si la espera termina antes de los 300 ms de su timer, la
+página se desmonta con ese timer armado: en cancelar y fusionar se escapa si ese timer le gana al
+request, y en el cobro sale, salvo que una fusión de esa cuenta en vuelo la descarte antes. Y una edición nacida durante la espera en **otra cuenta** puede salir con la
+pantalla desmontada.
+
+**Una distinción que no ejercitaba nada, y ahora sí.** Con el predicado a la vista, los mutantes
+que hacían vaciar todo a la comanda **sobrevivían**: ningún test separaba "su cuenta" de "todas".
+Hay una escena donde importa —la comanda de la cuenta 9 espera su `PATCH`, el garzón fusiona la 9
+con la 10 y toca la 10 durante la fusión: esa edición se tiene que descartar, y una comanda que
+vaciara todo la mandaría antes— y se agregó su test.
+
+**Lo que lo fija**, mutante por mutante sobre el spec final (113 tests):
+
+| Mutante | Lo caza |
+|---|---|
+| el guard de salida sin vaciar (el código anterior) | *"el tap que cae mientras se espera para irse de la pantalla…"* |
+| el guard vacía todo, sin exclusiones (la primera versión de este cierre) | los tres *"irse durante …"* |
+| sin excluir la fusión | *"irse durante una fusión…"* |
+| sin excluir el cancelar | *"irse durante un cancelar…"* |
+| sin excluir el cobro | *"irse durante un cobro confirmado…"* |
+| la comanda vacía todas las cuentas, no la suya | *"lo que la comanda vacía es lo de SU cuenta…"* — sobrevivía antes de agregar ese test |
+| el loop ignora el predicado | los tres *"irse durante …"* y *"lo que la comanda vacía es lo de SU cuenta…"* |
+| la comanda sin vaciar | los tres *"… sale antes que la comanda"* |
+
+⚠️ La última fila también ponía en rojo el test de salir de la pantalla. Corrido solo bajo el mismo
+mutante, **pasa**: es la contaminación de timers entre tests que ya está escrita en el cierre del
+flush de la comanda, no cobertura.
+
+### Irse de `/salones` durante una edición a medio guardar (2026-09-12)
+
+- [ ] **Irse de `/salones` espera lo pendiente con la pantalla tocable, y un tap en esa espera
+  puede salir con la pantalla ya desmontada** (frontend; **leído en el código el 2026-09-12** por
+  la revisión del cierre del flush de la comanda, no medido) — `onBeforeRouteLeave` hace
+  `await flushPendientes()` sin cuenta, así que un tap durante esa espera arma un timer que el
+  flush no atiende, y `onBeforeUnmount` solo limpia `refrescoItemsPendiente`, no los timers de
+  `pendingByLinea`. **Pasa si el flush termina antes de que ese timer de 300 ms dispare**: la
+  navegación ocurre, el `PATCH` sale después con la pantalla desmontada y un rechazo muestra su
+  aviso en otra pantalla — justo lo que ese guard dice cerrar. Si la espera dura más, el timer
+  dispara con la pantalla montada, la espera final del flush (`inflight`) lo espera y no pasa.
+  **Qué medir:** reproducirlo en `salones/index.nuxt.spec.ts` con el `PATCH` anterior retenido,
+  un tap durante la espera y la retención **soltada antes de que pasen los 300 ms del tap**.
+  Soltándola después, el test sale verde por la rama que no tiene el bug. **La salida probable**
+  no es la de cancelar y fusionar: acá la cuenta sigue viva y no hay nada que descartar, así que
+  lo coherente sería vaciar **todo** lo pendiente antes de dejar ir, y eso pide que
+  `flushPendientes` sepa vaciar sin acotar a una cuenta.
+
 ## El timeout intermitente del pool pasa a vigilancia, con `log_connections` afuera (2026-09-13)
 
 Sale de [`pendientes.md` § 2](pendientes.md) por decisión del owner, después de 120 corridas más
@@ -450,7 +528,7 @@ fusionar lo que nace durante la espera se descarta **por decisión del owner**
 fijan; y salir o cambiar de mesa no esperan el flush. Por eso el vaciado va acotado a la cuenta que
 se envía. ⚠️ **Irse de la pantalla no quedó cerrado**, y la primera versión de este cierre lo daba
 por cubierto: espera el flush con la pantalla tocable, y un tap en esa espera sale con la pantalla
-ya desmontada si el flush termina antes de los 300 ms de su timer. Lo levantó la revisión y sigue abierto en [`pendientes.md` § 2](pendientes.md).
+ya desmontada si el flush termina antes de los 300 ms de su timer. Lo levantó la revisión y se cerró el 2026-09-13: ver *"Irse de `/salones` ya no deja salir un tap con la pantalla desmontada"*, más arriba.
 
 📌 **El cobro quedó afuera a propósito**: una cantidad que cambia después de confirmar el cobro
 cambia el total contra el que se cargaron los pagos, y qué hacer ahí es del owner →

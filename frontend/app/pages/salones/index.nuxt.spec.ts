@@ -322,6 +322,21 @@ mockNuxtImport('useToast', () => {
   })
 })
 
+/**
+ * El callback que la página registra con `onBeforeRouteLeave`. `mountSuspended` no deja el
+ * componente en el registro de la ruta —medido el 2026-09-05, ver `docs/agent/resueltos.md`—, así
+ * que el guard real nunca se engancha y un `router.push` no lo dispara. Capturarlo es la única
+ * forma de ejercitar la salida de la pantalla en este spec: el test lo invoca como el router,
+ * espera su promesa y recién después desmonta.
+ */
+let alSalirDeLaRuta: (() => unknown) | null = null
+
+mockNuxtImport('onBeforeRouteLeave', () => {
+  return (guard: () => unknown) => {
+    alSalirDeLaRuta = guard
+  }
+})
+
 mockNuxtImport('useApiFetch', () => {
   return (
     url: string,
@@ -746,6 +761,7 @@ function reiniciarMock() {
   catalogoRechaza403 = false
   metodosPagoRechaza = false
   toasts = []
+  alSalirDeLaRuta = null
 }
 
 afterEach(() => {
@@ -2470,6 +2486,225 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       { lineaId: 'linea-2', cantidad: '7.0000' },
       { lineaId: 'linea-1', cantidad: '3.0000' },
     ])
+  })
+
+  it('el tap que cae mientras se espera para irse de la pantalla sale antes de desmontarla', async () => {
+    // Cierre en `docs/agent/resueltos.md`, *"Irse de `/salones` ya no deja salir un tap con la pantalla desmontada"*.
+    // El guard de salida espera `flushPendientes()` con la pantalla tocable; un tap en esa espera
+    // arma un timer que el flush no atiende, y si el flush termina antes de sus 300 ms la página
+    // se desmonta y el `PATCH` sale después, con un eventual rechazo avisado en otra pantalla.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    let soltarPrimera: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPrimera = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    expect(alSalirDeLaRuta, 'la página registró su guard de salida').toBeTruthy()
+
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+    const saliendo = Promise.resolve(alSalirDeLaRuta!())
+    await esperar(50)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    // Con la espera en curso el garzón toca la segunda línea, y la retención se suelta ANTES de
+    // los 300 ms de ese tap: soltándola después, el timer dispara con la pantalla montada, la
+    // espera de lo que está en vuelo lo alcanza, y el test pasaría por la rama que no tiene el bug.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[1]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    patchCantidadRetenido = null
+    soltarPrimera()
+    await saliendo
+    const alDejarIr = [...patchesDeCantidad]
+    // El router desmonta la página recién cuando el guard terminó.
+    montado?.unmount()
+    montado = null
+    await esperar(400)
+
+    expect(alDejarIr).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '7.0000' },
+    ])
+    // Y nada sale con la pantalla ya desmontada.
+    expect(patchesDeCantidad).toEqual(alDejarIr)
+  })
+
+  it('lo que la comanda vacía es lo de SU cuenta: una edición de otra cuenta que entra a una fusión se sigue descartando', async () => {
+    // La distinción del predicado de `enviarComanda` (`e.cuentaId === cuenta.id`) contra vaciar
+    // todo, en la escena donde importa: la comanda de la cuenta 9 espera su `PATCH`, el garzón
+    // vuelve al listado, fusiona la 9 con la 10 y toca la 10 durante la fusión. Esa edición se
+    // tipeó contra una cuenta que la fusión cambia, y la regla es descartarla
+    // (`descartarPendientes`). Si la comanda vaciara todas las cuentas, su loop la mandaría antes.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    impresorasComanda = [impresoraDeComanda()]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(20)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasAhora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasAhora[tarjetasAhora.length - 1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    await esperar(20)
+
+    soltar()
+    await esperar(500)
+
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+    expect(reclamosDeComanda).toEqual(['cuenta-9'])
+  })
+
+  /**
+   * Salir de la pantalla vacía lo que nazca durante su espera, **salvo** mientras hay una
+   * fusión, un cancelar o un cobro confirmado en vuelo. Los tres tests que siguen son esa excepción, una
+   * acción cada uno, y afirman lo mismo en el mismo instante —con el `PATCH` anterior todavía
+   * retenido, 60 ms después del tap—: el guard no lo mandó. Vaciando todo lo manda en su vuelta
+   * siguiente, a menos de 50 ms, sin esperar a nadie.
+   */
+  it('irse durante una fusión no manda lo que se toca en una cuenta que entra a la fusión', async () => {
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Fusionar cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[0]!.click()
+    tarjetas[1]!.click()
+    await esperar(20)
+    botonEn(drawerMesa(), 'Fusionar (2)')!.click()
+    await esperar(50)
+    botonEn(drawerMesa(), 'Cancelar fusión')!.click()
+    await esperar(20)
+    const tarjetasAhora = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetasAhora[tarjetasAhora.length - 1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+
+    const saliendo = Promise.resolve(alSalirDeLaRuta!())
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    await esperar(60)
+    expect(patchesDeCantidad, 'a los 60 ms del tap, con la retención puesta').toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    soltar()
+    await saliendo
+    await esperar(400)
+    // Y al final la fusión la descartó, como sin salir de la pantalla.
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+  })
+
+  it('irse durante un cancelar no manda lo que se toca en la cuenta que se cancela', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+
+    botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
+    await esperar(20)
+    const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
+    botonEn(modal, 'Cancelar cuenta')!.click()
+    await esperar(50)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    const saliendo = Promise.resolve(alSalirDeLaRuta!())
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    await esperar(60)
+    expect(patchesDeCantidad, 'a los 60 ms del tap, con la retención puesta').toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    soltar()
+    await saliendo
+    await esperar(400)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+    expect(toasts.filter(t => t.color === 'error')).toEqual([])
+  })
+
+  it('irse durante un cobro confirmado no manda antes del cierre lo que se toca en esa cuenta', async () => {
+    // Qué tiene que pasar con esa edición es la pregunta de `docs/agent/pendientes.md` § 4, que
+    // es del owner. Este test solo fija que salir de la pantalla no la contesta por su cuenta.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltar!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltar = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    const saliendo = Promise.resolve(alSalirDeLaRuta!())
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    await esperar(60)
+    expect(patchesDeCantidad, 'a los 60 ms del tap, con la retención puesta').toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    soltar()
+    await saliendo
+    await esperar(400)
   })
 
   it('el flush manda lo que el garzón puso en CADA línea, no lo que devolvió el PATCH anterior', async () => {

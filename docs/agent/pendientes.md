@@ -189,24 +189,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   al guardar hereda el precio nuevo.
 
 
-### Irse de `/salones` durante una edición a medio guardar (2026-09-12)
-
-- [ ] **Irse de `/salones` espera lo pendiente con la pantalla tocable, y un tap en esa espera
-  puede salir con la pantalla ya desmontada** (frontend; **leído en el código el 2026-09-12** por
-  la revisión del cierre del flush de la comanda, no medido) — `onBeforeRouteLeave` hace
-  `await flushPendientes()` sin cuenta, así que un tap durante esa espera arma un timer que el
-  flush no atiende, y `onBeforeUnmount` solo limpia `refrescoItemsPendiente`, no los timers de
-  `pendingByLinea`. **Pasa si el flush termina antes de que ese timer de 300 ms dispare**: la
-  navegación ocurre, el `PATCH` sale después con la pantalla desmontada y un rechazo muestra su
-  aviso en otra pantalla — justo lo que ese guard dice cerrar. Si la espera dura más, el timer
-  dispara con la pantalla montada, la espera final del flush (`inflight`) lo espera y no pasa.
-  **Qué medir:** reproducirlo en `salones/index.nuxt.spec.ts` con el `PATCH` anterior retenido,
-  un tap durante la espera y la retención **soltada antes de que pasen los 300 ms del tap**.
-  Soltándola después, el test sale verde por la rama que no tiene el bug. **La salida probable**
-  no es la de cancelar y fusionar: acá la cuenta sigue viva y no hay nada que descartar, así que
-  lo coherente sería vaciar **todo** lo pendiente antes de dejar ir, y eso pide que
-  `flushPendientes` sepa vaciar sin acotar a una cuenta.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -916,7 +898,7 @@ prohíbe.
   - **Frenar el cobro:** el cobro espera ese cambio y, si la cuenta ya no suma lo mismo, no
     cierra: el garzón vuelve a confirmar con el total nuevo. Pide diseñar ese aviso.
 
-  **Lo leído:** `confirmarCobro` hace `await flushPendientes()` **sin cuenta**, así que un tap
+  **Lo leído:** `confirmarCobro` hace `await flushPendientes()` **sin vaciar lo que nazca**, así que un tap
   posterior no se espera. Pero después `cerrarCuentaConPin` todavía espera `asegurarVigente()`
   antes del `POST` de cierre, y el timer de 300 ms del tap corre desde el tap: el `PATCH` puede
   salir antes del `POST` o junto con él —cuál llega primero lo decide el servidor, y la espera de

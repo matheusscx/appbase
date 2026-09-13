@@ -848,12 +848,35 @@ onBeforeUnmount(() => {
  * un guard de ruta no corre ahí. Es el mismo límite que ya tenía salir de la
  * cuenta.
  *
- * ⚠️ **Y no cubre el tap que cae durante esta misma espera**, si la espera termina antes de los
- * 300 ms de su timer: ese `PATCH` sale con la pantalla ya desmontada. Abierto en
- * `docs/agent/pendientes.md` § 2.
+ * **Vacía también lo que nazca durante esta espera** (2026-09-13): la pantalla sigue tocable
+ * mientras se manda lo pendiente, y un tap en ese tramo armaba un timer que el flush no
+ * atendía. Si el flush terminaba antes de sus 300 ms, la página se desmontaba y ese `PATCH`
+ * salía después, con un eventual rechazo avisado en otra pantalla — lo que este guard vino a
+ * cerrar.
+ *
+ * ⚠️ **Salvo mientras hay una fusión, un cancelar o un cobro confirmado en vuelo.** Con alguno
+ * de ellos, vaciar lo que nace durante la espera mandaría lo que la fusión y
+ * el cancelar descartan a propósito (`descartarPendientes`), o contestaría por su cuenta la
+ * pregunta del cobro (`docs/agent/pendientes.md` § 4). Mientras alguna esté en vuelo no vacía lo
+ * que nace, que es la conducta de antes; el predicado se evalúa en cada vuelta, así que vuelve a
+ * vaciar apenas termina. Lo levantó la revisión del diff.
+ *
+ * **El residuo en ese tramo es la conducta de antes, y tiene tres caras:**
+ * - lo que ya estaba pendiente al empezar a navegar **sale igual**: la primera pasada del flush
+ *   no mira el predicado;
+ * - una edición nacida durante la espera en la **cuenta afectada** no se manda y, si la espera
+ *   termina antes de los 300 ms de su timer, la página se desmonta con ese timer armado
+ *   —`onBeforeUnmount` no limpia los de `pendingByLinea`—: en cancelar y fusionar se escapa si
+ *   ese timer le gana al request, y en el cobro sale, salvo que una fusión de esa cuenta en
+ *   vuelo la descarte antes;
+ * - una edición nacida durante la espera en **otra cuenta** puede salir con la pantalla
+ *   desmontada.
+ *
+ * Medido con *"el tap que cae mientras se espera para irse de la pantalla…"* y con los tres
+ * *"irse durante …"*.
  */
 onBeforeRouteLeave(async () => {
-  await flushPendientes()
+  await flushPendientes(() => !fusionando.value && !cancelando.value && !cobroEnVueloId.value)
 })
 
 async function cargarCatalogo() {
@@ -1725,28 +1748,30 @@ function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
 /**
  * Manda las ediciones de cantidad que quedaron a medio camino y espera las que están en vuelo.
  *
- * **`cuentaQueSeEnvia` separa dos contratos, y la diferencia es a propósito** (2026-09-12):
+ * **`vaciarLoQueNazca` separa dos contratos, y la diferencia es a propósito** (2026-09-12; el
+ * predicado, 2026-09-13):
  *
- * - **Sin cuenta** —salir, cambiar de mesa, irse de la pantalla, cancelar, fusionar—: se manda
- *   lo que estaba pendiente **al empezar**. Una edición que nace durante la espera no entra, y
- *   en cancelar y fusionar eso es la regla, no un hueco: la descarta `descartarPendientes`
- *   después del request, porque se tipeó contra una cuenta que deja de ser la que era.
- *   ⚠️ **Irse de la pantalla no entra en esa regla, y queda abierto**: espera el flush con la
- *   pantalla tocable, y un tap en esa espera sale con la pantalla ya desmontada **si el flush
- *   termina antes de los 300 ms de su timer** (`docs/agent/pendientes.md` § 2).
- * - **Con cuenta** —`enviarComanda`—: además se vacía lo que nazca durante la espera **en esa
- *   cuenta**, hasta que no quede nada pendiente ni en vuelo. Si no, la comanda se reclamaba sin
- *   el tap que el garzón hizo mientras se mandaba lo anterior: el de una línea que no estaba
- *   pendiente, el de una que el loop ya había mandado, o el que cae mientras se espera lo que
- *   está en vuelo. Los tres se pueden hacer: el stepper no se deshabilita nunca
- *   —`yaEnviadaACocina` apaga el basurero, no el stepper—. Medido con los tests
- *   *"… sale antes que la comanda"*, en rojo sin esto.
+ * - **Sin él** —salir, cambiar de mesa, cancelar, fusionar, cobrar—: se manda lo que estaba
+ *   pendiente **al empezar**. Una edición que nace durante la espera no entra, y en cancelar y
+ *   fusionar eso es la regla, no un hueco: la descarta `descartarPendientes` después del
+ *   request, porque se tipeó contra una cuenta que deja de ser la que era.
+ * - **Con él**, además se vacía lo que nazca durante la espera y el predicado acepte, hasta que
+ *   no quede nada de eso pendiente ni nada en vuelo. Lo pasan dos:
+ *   - `enviarComanda`, **solo para su cuenta**. Si no, la comanda se reclamaba sin el tap que el
+ *     garzón hizo mientras se mandaba lo anterior: el de una línea que no estaba pendiente, el de
+ *     una que el loop ya había mandado, o el que cae mientras se espera lo que está en vuelo.
+ *     Medido con los tests *"… sale antes que la comanda"*, en rojo sin esto.
+ *   - el guard de salida de la pantalla, **para todas, salvo con una fusión, un cancelar o un
+ *     cobro en vuelo**: ver su docblock.
  *
- * ⚠️ El cobro **no** pasa cuenta, y no es un olvido: una cantidad que cambia después de confirmar
- * el cobro cambia el total contra el que se cargaron los pagos. Qué hacer ahí es del owner
+ *   Esos taps se pueden hacer porque el stepper no se deshabilita nunca —`yaEnviadaACocina`
+ *   apaga el basurero, no el stepper—.
+ *
+ * ⚠️ El cobro **no** vacía, y no es un olvido: una cantidad que cambia después de confirmar el
+ * cobro cambia el total contra el que se cargaron los pagos. Qué hacer ahí es del owner
  * (`docs/agent/pendientes.md` § 4).
  */
-async function flushPendientes(cuentaQueSeEnvia?: string) {
+async function flushPendientes(vaciarLoQueNazca?: (edicion: EdicionCantidad) => boolean) {
   // `lineasPendientes` y no `pendientes`: ese nombre ya es el ref de las cuentas
   // que quedaron sin responsable, y sombrearlo acá deja dos cosas sin relación
   // llamadas igual en el mismo archivo.
@@ -1798,7 +1823,7 @@ async function flushPendientes(cuentaQueSeEnvia?: string) {
     // una cantidad que el servidor había rechazado. Es exactamente lo que el
     // `Map` de `inflight` cerró en su ventana hermana. Medido el 2026-09-02 por
     // la revisión del diff, contra control. Sacarla antes del `return` de abajo
-    // es además lo que hace que el vaciado de `cuentaQueSeEnvia` avance.
+    // es además lo que hace que el vaciado de `vaciarLoQueNazca` avance.
     pendingByLinea.delete(lineaId)
     // Quitar una línea no cancela su timer, así que puede haber salido de la
     // cuenta dentro de la ventana del debounce: mandarle el `PATCH` sería un 404
@@ -1816,15 +1841,15 @@ async function flushPendientes(cuentaQueSeEnvia?: string) {
   }
 
   for (const [lineaId] of lineasPendientes) await mandarLoVivo(lineaId)
-  // Sin `cuentaQueSeEnvia` esto es la espera de siempre. Con cuenta, cada vuelta vuelve a mirar
-  // si nació otra edición de esa cuenta —también mientras se espera lo que está en vuelo—, y
-  // la manda antes de dar el flush por terminado.
+  // Sin `vaciarLoQueNazca` esto es la espera de siempre. Con él, cada vuelta vuelve a mirar si
+  // nació otra edición que el predicado acepte —también mientras se espera lo que está en
+  // vuelo—, y la manda antes de dar el flush por terminado.
   for (;;) {
-    const deLaCuenta = cuentaQueSeEnvia
-      ? [...pendingByLinea.entries()].find(([, e]) => e.cuentaId === cuentaQueSeEnvia)
+    const nacida = vaciarLoQueNazca
+      ? [...pendingByLinea.entries()].find(([, e]) => vaciarLoQueNazca(e))
       : undefined
-    if (deLaCuenta) {
-      await mandarLoVivo(deLaCuenta[0])
+    if (nacida) {
+      await mandarLoVivo(nacida[0])
       continue
     }
     if (inflight.value.size === 0) return
@@ -2036,7 +2061,7 @@ async function enviarComanda() {
   const cuenta = activeCuenta.value
   const mesaNombre = selectedMesa.value.nombre
   try {
-    await flushPendientes(cuenta.id)
+    await flushPendientes(e => e.cuentaId === cuenta.id)
     const estaciones = await impresorasApi.imprimirComanda(cuenta.id, {
       mesaNombre,
       cuentaNumero: cuenta.numero,
