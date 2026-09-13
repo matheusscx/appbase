@@ -2958,7 +2958,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
       await vi.advanceTimersByTimeAsync(9_900)
       expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'a los 9,9 s sigue bloqueada').toBe(true)
-      expect(toasts.some(t => t.title === 'No se pudo abrir el cobro'), 'a los 9,9 s no avisa').toBe(false)
+      expect(toasts.some(t => (t.title ?? '').startsWith('Todavía se est')), 'a los 9,9 s no avisa').toBe(false)
       await vi.advanceTimersByTimeAsync(200)
     }
     finally {
@@ -2966,9 +2966,102 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     }
     await esperar(20)
 
-    expect(toasts.some(t => t.title === 'No se pudo abrir el cobro'), 'avisa').toBe(true)
+    // El aviso nombra lo que pasa de verdad: lo agregado sigue viajando y va a aparecer. Un "revisá la
+    // cuenta" genérico mandaba al garzón a buscarlo, no verlo, y agregarlo otra vez.
+    const aviso = toasts.find(t => t.title === 'Todavía se está guardando lo último que agregaste')
+    expect(aviso, 'avisa que sigue guardándose').toBeTruthy()
+    expect(aviso!.description).toContain('No lo vuelvas a agregar')
+    expect(toasts.some(t => t.title === 'No se pudo calcular el total'), 'no es el aviso del cálculo').toBe(false)
     expect(cobroModal.props('open'), 'no abre').toBe(false)
     expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'la cuenta se desbloquea').toBe(false)
+  })
+
+  it('si lo que no vuelve es una línea que se estaba quitando, el aviso habla de quitar', async () => {
+    // La revisión lo cazó: el aviso de guardado decía *"No lo vuelvas a agregar: va a aparecer"*
+    // también cuando lo colgado era un quitado, que no se agregó y va a desaparecer.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    const base = cuentaConPedido('1.0000')
+    cuentasDeLaMesa = [{ ...base, lineas: [...base.lineas, { ...base.lineas[0]!, id: 'linea-2' }] }]
+    quitarLineaRetenido = new Promise<void>(() => {})
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    trashDeLaLinea(wrapper).vm.$emit('click')
+    await esperar(20)
+
+    vi.useFakeTimers()
+    try {
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await vi.advanceTimersByTimeAsync(10_100)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+    await esperar(20)
+
+    const aviso = toasts.find(t => t.title === 'Todavía se está quitando lo último que sacaste')
+    expect(aviso, 'avisa que sigue quitándose').toBeTruthy()
+    expect(aviso!.description).toContain('No lo vuelvas a quitar')
+    expect(toasts.some(t => (t.title ?? '').includes('agregaste')), 'no habla de agregar').toBe(false)
+    expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'la cuenta se desbloquea').toBe(false)
+  })
+
+  it('si lo que no vuelve es una receta, el aviso también habla de lo agregado', async () => {
+    // La receta entra por otro handler (`onRecetaConfirm`) y se registra aparte: sin este caso,
+    // registrarla como un quitado pasaba todos los tests.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    agregarLineaRetenido = new Promise<void>(() => {})
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    const receta = { ...producto('3.0000', '1.0000'), id: 'item-receta', nombre: 'Hamburguesa', tipo: 'receta' as const }
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', receta)
+    await esperar(20)
+    wrapper.findComponent({ name: 'VentasItemPersonalizacionDrawer' }).vm.$emit('confirm', { omitidos: [], extras: [] }, '')
+    await esperar(20)
+
+    vi.useFakeTimers()
+    try {
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await vi.advanceTimersByTimeAsync(10_100)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+    await esperar(20)
+
+    expect(toasts.some(t => t.title === 'Todavía se está guardando lo último que agregaste'), 'avisa de lo agregado').toBe(true)
+  })
+
+  it('si no vuelven un agregado y un quitado, el aviso habla de cambios', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    const base = cuentaConPedido('1.0000')
+    cuentasDeLaMesa = [{ ...base, lineas: [...base.lineas, { ...base.lineas[0]!, id: 'linea-2' }] }]
+    agregarLineaRetenido = new Promise<void>(() => {})
+    quitarLineaRetenido = new Promise<void>(() => {})
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    trashDeLaLinea(wrapper).vm.$emit('click')
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
+    await esperar(20)
+
+    vi.useFakeTimers()
+    try {
+      botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+      await vi.advanceTimersByTimeAsync(10_100)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+    await esperar(20)
+
+    expect(toasts.some(t => t.title === 'Todavía se están guardando cambios en la cuenta'), 'avisa de cambios').toBe(true)
+    expect(toasts.some(t => (t.title ?? '').includes('agregaste') || (t.title ?? '').includes('sacaste')), 'ni agregado ni quitado solos').toBe(false)
   })
 
   it('el techo de 10 segundos cubre también el cálculo del total', async () => {
@@ -2997,7 +3090,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     }
     await esperar(20)
 
-    expect(toasts.some(t => t.title === 'No se pudo abrir el cobro'), 'avisa').toBe(true)
+    expect(toasts.some(t => t.title === 'No se pudo calcular el total'), 'avisa que no se pudo calcular').toBe(true)
+    expect(toasts.some(t => (t.title ?? '').startsWith('Todavía se est')), 'no había nada guardándose').toBe(false)
     expect(cobroModal.props('open'), 'no abre').toBe(false)
     expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'la cuenta se desbloquea').toBe(false)
   })

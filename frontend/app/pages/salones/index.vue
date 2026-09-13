@@ -245,7 +245,9 @@ function avisarCuentaEnCobro() {
  * Las cantidades no entran: se pintan optimistas, así que el cálculo ya las ve, y el *Confirmar*
  * las manda con `flushPendientes`.
  */
-const lineasEnVuelo = new Map<string, Set<Promise<unknown>>>()
+type CambioDeLinea = 'agregar' | 'quitar'
+/** Por cuenta, cada request en vuelo con qué hace: el aviso del techo lo nombra (`abrirCobro`). */
+const lineasEnVuelo = new Map<string, Map<Promise<unknown>, CambioDeLinea>>()
 /**
  * Cuánto espera *Cerrar y cobrar* a `lineasEnVuelo` y al cálculo del total antes de rendirse
  * (owner, 2026-09-13: 10 s). Sin techo, con el wifi caído a mitad de un guardado el navegador
@@ -255,10 +257,10 @@ const lineasEnVuelo = new Map<string, Set<Promise<unknown>>>()
  */
 const LIMITE_ABRIR_COBRO_MS = 10_000
 const MENSAJE_LIMITE_ABRIR_COBRO = 'El cobro tardó demasiado en abrir'
-function registrarEnVuelo<T>(cuentaId: string, request: Promise<T>): Promise<T> {
-  const enCuenta = lineasEnVuelo.get(cuentaId) ?? new Set<Promise<unknown>>()
+function registrarEnVuelo<T>(cuentaId: string, cambio: CambioDeLinea, request: Promise<T>): Promise<T> {
+  const enCuenta = lineasEnVuelo.get(cuentaId) ?? new Map<Promise<unknown>, CambioDeLinea>()
   lineasEnVuelo.set(cuentaId, enCuenta)
-  enCuenta.add(request)
+  enCuenta.set(request, cambio)
   const sacar = () => {
     enCuenta.delete(request)
     if (enCuenta.size === 0 && lineasEnVuelo.get(cuentaId) === enCuenta) lineasEnVuelo.delete(cuentaId)
@@ -750,7 +752,7 @@ async function abrirCobro() {
     let res: ResultadoVenta | null
     try {
       res = await conTimeout(
-        Promise.allSettled([...(lineasEnVuelo.get(cuenta.id) ?? [])]).then(() => asegurarVigente()),
+        Promise.allSettled([...(lineasEnVuelo.get(cuenta.id)?.keys() ?? [])]).then(() => asegurarVigente()),
         LIMITE_ABRIR_COBRO_MS,
         MENSAJE_LIMITE_ABRIR_COBRO,
       )
@@ -758,11 +760,31 @@ async function abrirCobro() {
     catch (e: unknown) {
       if (!(e instanceof Error) || e.message !== MENSAJE_LIMITE_ABRIR_COBRO) throw e
       if (cobroPedidoId.value === cuenta.id && activeCuenta.value?.id === cuenta.id) {
-        toast.add({
-          title: 'No se pudo abrir el cobro',
-          description: 'Lo que se estaba guardando en la cuenta, o el cálculo del total, tardó demasiado. Revisá la cuenta y volvé a tocar Cobrar.',
-          color: 'warning',
-        })
+        // El aviso nombra lo que quedó colgado (owner, 2026-09-13), para que el garzón no repita lo
+        // que ya viaja: un "revisá la cuenta" genérico lo mandaba a buscar el producto, no verlo y
+        // agregarlo otra vez. Uno por caso, porque un quitado no "aparece": desaparece. Si el request
+        // termina fallando, sale el error de siempre y ahí sí sabe que tiene que repetirlo.
+        const cambios = new Set(lineasEnVuelo.get(cuenta.id)?.values() ?? [])
+        let aviso = { title: 'No se pudo calcular el total', description: 'Revisá la conexión y tocá Cobrar de nuevo.' }
+        if (cambios.size > 1) {
+          aviso = {
+            title: 'Todavía se están guardando cambios en la cuenta',
+            description: 'Esperá a que terminen y después tocá Cobrar de nuevo.',
+          }
+        }
+        else if (cambios.has('agregar')) {
+          aviso = {
+            title: 'Todavía se está guardando lo último que agregaste',
+            description: 'No lo vuelvas a agregar: va a aparecer en la cuenta cuando termine. Después tocá Cobrar de nuevo.',
+          }
+        }
+        else if (cambios.has('quitar')) {
+          aviso = {
+            title: 'Todavía se está quitando lo último que sacaste',
+            description: 'No lo vuelvas a quitar: va a desaparecer de la cuenta cuando termine. Después tocá Cobrar de nuevo.',
+          }
+        }
+        toast.add({ ...aviso, color: 'warning' })
       }
       return
     }
@@ -2040,6 +2062,7 @@ async function addProducto(item: ItemCatalogo) {
   try {
     const cuenta = await registrarEnVuelo(
       activeCuenta.value.id,
+      'agregar',
       salonesApi.agregarLinea(activeCuenta.value.id, item.id, '1'),
     )
     syncCuenta(cuenta)
@@ -2061,6 +2084,7 @@ async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string
     const personalizacion = personalizacionVacia(payload) ? undefined : payload
     const cuenta = await registrarEnVuelo(
       activeCuenta.value.id,
+      'agregar',
       salonesApi.agregarLinea(activeCuenta.value.id, recetaItemId.value, '1', personalizacion),
     )
     syncCuenta(cuenta)
@@ -2095,6 +2119,7 @@ async function quitarLinea(linea: CuentaLineaDetalle) {
   try {
     const cuenta = await registrarEnVuelo(
       activeCuenta.value.id,
+      'quitar',
       salonesApi.quitarLinea(activeCuenta.value.id, linea.id),
     )
     syncCuenta(cuenta)
