@@ -23,6 +23,76 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La nota de crédito y el reembolso reponen stock en orden y reintentan ante deadlock (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 5](pendientes.md). No hubo regla de negocio que preguntar: el arreglo ya
+estaba escrito y probado en el mismo archivo, en `crear()` y `cancelar()`. El owner lo eligió entre
+tres opciones por ser la única que hoy podía dejar el stock mal —por el camino del reembolso, donde
+la plata ya volvió— con un arreglo barato.
+
+**Qué se hizo** (`ventas.service.ts`).
+- **Orden:** `crearNotaCreditoEnTransaccion` ordena `aReponer` por `itemId`, y
+  `registrarDevolucionesPorReembolso` ordena sus `lineas` igual, las dos con `localeCompare`, el
+  mismo comparador que `crear()` y `cancelar()`. Antes recorrían el orden del array del cliente.
+- **Reintento ante `40P01`**, con `MAX_REINTENTOS_DEADLOCK`:
+  - En `crearNotaCredito`, el loop va **adentro** de `conRastroDeRechazo`: el 422 por falta de
+    plata no es deadlock, no se reintenta y su rastro se escribe una sola vez.
+  - `registrarDevolucionesPorReembolso` pasa a reintentar un intento aparte
+    (`registrarDevolucionesPorReembolsoUnaVez`) que abre su propia transacción, como
+    `cancelarUnaVez`.
+- **La precondición del reintento es la de `crear()`, sin transacción envolvente, y se verificó en
+  los dos llamadores:** `VentasController` no abre ninguna, y el hook de reembolso corre después del
+  commit del REFUND (`CobrosService.aplicarPostReembolso`).
+
+**Lo que lo fija**, mutante por mutante sobre `ventas.service.spec.ts` (124 tests), con seis tests
+nuevos en *"orden y reintento ante deadlock"* —los dos de *"no reintenta un error de negocio"* son el
+control y pasaban antes del cambio—:
+
+| Mutante | Lo caza |
+|---|---|
+| la NC no ordena | *"la NC repone en orden de itemId, no en el que llegaron las devoluciones"* |
+| el reembolso no ordena | *"las devoluciones por reembolso reponen en orden de itemId"* |
+| la NC no reintenta | *"la NC reintenta ante un deadlock"* |
+| el reembolso no reintenta | *"las devoluciones por reembolso reintentan ante un deadlock"* |
+
+El deadlock en sí no se reproduce en un test: los unitarios fijan las dos piezas que lo evitan —el
+orden y el reintento—, igual que los de `cancelar()`.
+
+La entrada, verbatim:
+
+- [ ] **Dos de los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
+  `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el
+  lock **sí** se toma, lo que no es determinista es **el orden**. (Decía "los tres de arriba",
+  y era falso desde antes de que existiera esta nota: es la única de su molde, y las otras
+  cuatro no están todas arriba.)
+  `registrarMovimiento` toma un `FOR UPDATE` sobre `item_producto` **por ítem**, o sea N
+  statements separados. `crear()` lo sabe y lo resuelve con dos capas —orden determinista por
+  `itemId` (`ventas.service.ts:618-626`) y reintento ante `40P01`
+  (`MAX_REINTENTOS_DEADLOCK`)—, y su propio comentario explica que el deadlock era real.
+  **Falta en `crearNotaCredito` y `registrarDevolucionesPorReembolso`**, y el arreglo es el
+  que ya tiene `cancelar`: ordenar por `itemId` con `localeCompare` —el mismo comparador que
+  `crear()`— y reintentar ante `40P01`.
+  Los caminos inversos no tenían ninguna de las dos: `cancelar` (`:845`) hacía un `SELECT`
+  **sin `ORDER BY`** y recorría lo que devolviera Postgres; `crearNotaCredito` (`:984`) y
+  `registrarDevolucionesPorReembolso` (`:1152`) iteran el resultado de
+  `validarDevolucionesReembolso`, que es un `devoluciones.map(...)` — **el orden del array del
+  cliente**.
+  ℹ️ La refutación que mató el deadlock de `fusionarCuentas` en la pasada de `turnos`+`salones`
+  (un solo `SELECT … IN (…) FOR UPDATE` lockea en orden de plan, igual para las dos
+  transacciones) **acá no aplica**: son statements separados.
+  ⚠️ **Severidad bajada de alta a media al refutar.** La lente cerraba con "stock desincronizado
+  permanentemente" y esa mitad no se sostiene *como consecuencia del deadlock*: el `40P01` aborta
+  la transacción y revierte todo, así que en `cancelar` y en la NC directa el daño es un error
+  opaco sin corrupción. La divergencia real solo existe por el camino del reembolso, y ahí ya
+  está **asumida por diseño**: `reembolso-callback.registry.ts` dice que los errores del handler
+  los captura el caller y *"el reembolso nunca se revierte"*. Ese agujero lo abre cualquier
+  error; el deadlock solo agrega una forma evitable más de caer en él.
+  **El arreglo es barato:** las dos piezas ya existen en el mismo archivo (el `sort` por `itemId`
+  y el wrapper `esDeadlock`). `RecuentosService.aplicar` ya hace exactamente esto, y desde el
+  2026-08-22 `cancelar` también — hay de dónde copiar, con sus tests al lado.
+  ⚠️ **Al copiarlo, copiar el comparador:** `localeCompare`, no un `ORDER BY` de Postgres.
+  Si los caminos ordenan distinto entre sí, el cruce que el orden fijo evita vuelve a existir.
+
 ## Cobrar espera lo que todavía cambia la cuenta, y la bloquea desde el toque (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **Medido antes de arreglar**, en

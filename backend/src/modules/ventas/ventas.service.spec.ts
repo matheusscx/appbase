@@ -2752,6 +2752,136 @@ describe('VentasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
+    /**
+     * Reponer toma un `FOR UPDATE` por ítem (`registrarMovimiento`), y la NC y las devoluciones por
+     * reembolso recorrían las líneas en el orden en que las mandó el cliente: dos devoluciones
+     * cruzadas sobre los mismos productos podían bloquearse en cruz (auditoría `inventario`,
+     * 2026-08-15). El arreglo es el de `crear()` y `cancelar()`: orden por `itemId` con el mismo
+     * comparador, y reintento ante `40P01`.
+     */
+    describe('orden y reintento ante deadlock', () => {
+      // Ordena antes que `ITEM_ID` con `localeCompare`, que es el comparador que usan `crear()` y
+      // `cancelar()`.
+      const ITEM_ANTES_ID = '000e8400-e29b-41d4-a716-446655440001';
+      const deadlock = Object.assign(new Error('deadlock detected'), {
+        code: '40P01',
+      });
+
+      /** La venta original con un segundo producto que repone, además de `ITEM_ID`. */
+      function conOtroProductoQueRepone() {
+        const previa = ncManager.query.getMockImplementation()!;
+        ncManager.query.mockImplementation((sql: string, params?: unknown) =>
+          sql.includes('FROM venta_detalles') &&
+          !sql.includes('AS es_nc') &&
+          !sql.includes('FOR UPDATE')
+            ? Promise.resolve([
+                ...detallesRows,
+                {
+                  ...detallesRows[0],
+                  item_id: ITEM_ANTES_ID,
+                  cantidad: '1',
+                  total_linea: '100.0000',
+                  descripcion: 'Cargador',
+                },
+              ])
+            : (previa(sql, params) as Promise<unknown>),
+        );
+      }
+
+      const itemsRepuestos = () =>
+        inventarioService.registrarMovimiento.mock.calls.map(
+          (c) => (c[1] as { itemId: string }).itemId,
+        );
+
+      it('la NC repone en orden de itemId, no en el que llegaron las devoluciones', async () => {
+        conOtroProductoQueRepone();
+
+        await service.crearNotaCredito({
+          ...baseParams,
+          devoluciones: [
+            { itemId: ITEM_ID, cantidad: '1' },
+            { itemId: ITEM_ANTES_ID, cantidad: '1' },
+          ],
+        });
+
+        expect(itemsRepuestos()).toEqual([ITEM_ANTES_ID, ITEM_ID]);
+      });
+
+      it('las devoluciones por reembolso reponen en orden de itemId', async () => {
+        conOtroProductoQueRepone();
+
+        await service.registrarDevolucionesPorReembolso({
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          ventaOriginalId: VENTA_ORIG_ID,
+          devoluciones: [
+            { itemId: ITEM_ID, cantidad: '1' },
+            { itemId: ITEM_ANTES_ID, cantidad: '1' },
+          ],
+        });
+
+        expect(itemsRepuestos()).toEqual([ITEM_ANTES_ID, ITEM_ID]);
+      });
+
+      it('la NC reintenta ante un deadlock', async () => {
+        dataSourceMock.transaction
+          .mockRejectedValueOnce(deadlock)
+          .mockImplementationOnce((cb: (m: unknown) => unknown) =>
+            cb(ncManager),
+          );
+
+        const res = await service.crearNotaCredito(baseParams);
+
+        expect(res.totalFinal).toBe('1100.0000');
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('la NC no reintenta un error de negocio', async () => {
+        dataSourceMock.transaction.mockRejectedValueOnce(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+        await expect(service.crearNotaCredito(baseParams)).rejects.toThrow(
+          'Stock insuficiente para la salida',
+        );
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
+      });
+
+      it('las devoluciones por reembolso reintentan ante un deadlock', async () => {
+        dataSourceMock.transaction
+          .mockRejectedValueOnce(deadlock)
+          .mockImplementationOnce((cb: (m: unknown) => unknown) =>
+            cb(ncManager),
+          );
+
+        await service.registrarDevolucionesPorReembolso({
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          ventaOriginalId: VENTA_ORIG_ID,
+          devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+        });
+
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+        expect(itemsRepuestos()).toEqual([ITEM_ID]);
+      });
+
+      it('las devoluciones por reembolso no reintentan un error de negocio', async () => {
+        dataSourceMock.transaction.mockRejectedValueOnce(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+        await expect(
+          service.registrarDevolucionesPorReembolso({
+            tenantId: TENANT_ID,
+            usuarioId: USUARIO_ID,
+            ventaOriginalId: VENTA_ORIG_ID,
+            devoluciones: [{ itemId: ITEM_ID, cantidad: '1' }],
+          }),
+        ).rejects.toThrow('Stock insuficiente para la salida');
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
+      });
+    });
+
     describe('cancelar()', () => {
       const cancelarParams = {
         tenantId: TENANT_ID,

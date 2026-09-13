@@ -912,39 +912,6 @@ proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § 
 bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las
 entradas de esta sección.
 
-- [ ] **Dos de los tres caminos que revierten stock no tienen la protección de deadlock que su gemelo
-  `crear()` sí tiene** (backend, auditoría `inventario` 2026-08-15) — es el otro molde: acá el
-  lock **sí** se toma, lo que no es determinista es **el orden**. (Decía "los tres de arriba",
-  y era falso desde antes de que existiera esta nota: es la única de su molde, y las otras
-  cuatro no están todas arriba.)
-  `registrarMovimiento` toma un `FOR UPDATE` sobre `item_producto` **por ítem**, o sea N
-  statements separados. `crear()` lo sabe y lo resuelve con dos capas —orden determinista por
-  `itemId` (`ventas.service.ts:618-626`) y reintento ante `40P01`
-  (`MAX_REINTENTOS_DEADLOCK`)—, y su propio comentario explica que el deadlock era real.
-  **Falta en `crearNotaCredito` y `registrarDevolucionesPorReembolso`**, y el arreglo es el
-  que ya tiene `cancelar`: ordenar por `itemId` con `localeCompare` —el mismo comparador que
-  `crear()`— y reintentar ante `40P01`.
-  Los caminos inversos no tenían ninguna de las dos: `cancelar` (`:845`) hacía un `SELECT`
-  **sin `ORDER BY`** y recorría lo que devolviera Postgres; `crearNotaCredito` (`:984`) y
-  `registrarDevolucionesPorReembolso` (`:1152`) iteran el resultado de
-  `validarDevolucionesReembolso`, que es un `devoluciones.map(...)` — **el orden del array del
-  cliente**.
-  ℹ️ La refutación que mató el deadlock de `fusionarCuentas` en la pasada de `turnos`+`salones`
-  (un solo `SELECT … IN (…) FOR UPDATE` lockea en orden de plan, igual para las dos
-  transacciones) **acá no aplica**: son statements separados.
-  ⚠️ **Severidad bajada de alta a media al refutar.** La lente cerraba con "stock desincronizado
-  permanentemente" y esa mitad no se sostiene *como consecuencia del deadlock*: el `40P01` aborta
-  la transacción y revierte todo, así que en `cancelar` y en la NC directa el daño es un error
-  opaco sin corrupción. La divergencia real solo existe por el camino del reembolso, y ahí ya
-  está **asumida por diseño**: `reembolso-callback.registry.ts` dice que los errores del handler
-  los captura el caller y *"el reembolso nunca se revierte"*. Ese agujero lo abre cualquier
-  error; el deadlock solo agrega una forma evitable más de caer en él.
-  **El arreglo es barato:** las dos piezas ya existen en el mismo archivo (el `sort` por `itemId`
-  y el wrapper `esDeadlock`). `RecuentosService.aplicar` ya hace exactamente esto, y desde el
-  2026-08-22 `cancelar` también — hay de dónde copiar, con sus tests al lado.
-  ⚠️ **Al copiarlo, copiar el comparador:** `localeCompare`, no un `ORDER BY` de Postgres.
-  Si los caminos ordenan distinto entre sí, el cruce que el orden fijo evita vuelve a existir.
-
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
   dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).

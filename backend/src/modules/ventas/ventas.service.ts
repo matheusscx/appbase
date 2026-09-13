@@ -1382,9 +1382,24 @@ export class VentasService {
     // efectivo del turno (fuga 5 del modo ciego). `conRastroDeRechazo` escribe
     // el intento FUERA de esta transacción, para que el rollback del 422 no se
     // lo lleve — ver `CajaService.conRastroDeRechazo`.
-    return this.cajaService.conRastroDeRechazo(params.tenantId, () =>
-      this.crearNotaCreditoEnTransaccion(params),
-    );
+    return this.cajaService.conRastroDeRechazo(params.tenantId, async () => {
+      // Mismo loop que `crear()` y `cancelar()`: reponer toma un `FOR UPDATE`
+      // por ítem, así que una NC puede cruzarse con una venta o una anulación
+      // sobre los mismos productos. Va ADENTRO de `conRastroDeRechazo`: el 422
+      // por falta de plata no es deadlock, no se reintenta y su rastro se
+      // escribe una sola vez. La precondición es la de `crear()` —sin
+      // transacción envolvente—: el controller no abre ninguna, y el hook de
+      // reembolso corre después del commit del REFUND
+      // (`CobrosService.aplicarPostReembolso`).
+      for (let intento = 0; ; intento++) {
+        try {
+          return await this.crearNotaCreditoEnTransaccion(params);
+        } catch (error) {
+          if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+            throw error;
+        }
+      }
+    });
   }
 
   private async crearNotaCreditoEnTransaccion(
@@ -1929,7 +1944,14 @@ export class VentasService {
       // acreditarse sin volver al stock (producto que vuelve roto, receta que
       // no se puede rearmar), y `registrarMovimiento` rechazaría con 400 todo
       // lo que no sea producto.
-      const aReponer = devoluciones.filter((l) => l.reponeStock);
+      //
+      // En orden por `itemId`, con el MISMO comparador que `crear()` y
+      // `cancelar()` (`localeCompare`, no el `ORDER BY` de Postgres): llegaban
+      // en el orden del array del cliente, y dos devoluciones cruzadas sobre
+      // los mismos ítems podían bloquearse en cruz.
+      const aReponer = devoluciones
+        .filter((l) => l.reponeStock)
+        .sort((a, b) => a.itemId.localeCompare(b.itemId));
       const costosOriginales = aReponer.length
         ? await this.costosDeSalidaPorItem(manager, params.ventaOriginalId)
         : new Map<string, string | null>();
@@ -2098,6 +2120,31 @@ export class VentasService {
   }): Promise<void> {
     if (!params.devoluciones.length) return;
 
+    // Mismo loop que `crearNotaCredito()`, por la misma razón y con la misma
+    // precondición: su único llamador es el hook post-commit del reembolso, sin
+    // transacción envolvente.
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.registrarDevolucionesPorReembolsoUnaVez(params);
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
+  }
+
+  /**
+   * Un intento de `registrarDevolucionesPorReembolso`: abre su propia
+   * transacción, que es lo que el loop de reintento necesita para que el
+   * segundo intento entre limpio (mismo criterio que `cancelarUnaVez`).
+   */
+  private async registrarDevolucionesPorReembolsoUnaVez(params: {
+    tenantId: string;
+    usuarioId: string;
+    ventaOriginalId: string;
+    devoluciones: DevolucionReembolso[];
+    comentario?: string;
+  }): Promise<void> {
     await this.db.transaccion(async (manager) => {
       await this.lockVentaOriginal(
         manager,
@@ -2124,6 +2171,8 @@ export class VentasService {
       const ubicacionLocalId = lineas.length
         ? await this.ubicacionesService.localDe(params.tenantId)
         : null;
+      // Mismo orden que `crearNotaCredito()`: por `itemId`, con `localeCompare`.
+      lineas.sort((a, b) => a.itemId.localeCompare(b.itemId));
       for (const linea of lineas) {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
