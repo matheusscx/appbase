@@ -23,6 +23,95 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La cuenta que se está cobrando no se modifica hasta que el cierre termina (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 4](pendientes.md). **La decisión del owner**, preguntada con la escena
+de la mesa que confirma $12.000 y ve subir una bebida mientras se cierra: *"bloquear todos los
+botones y no dejar modificar"*, y ante la pregunta de hasta dónde, **solo esa cuenta** —el garzón sigue pudiendo
+volver al listado, ir a otra mesa y atender—. Lo que la hizo evidente fue su propia pregunta: *"¿cómo
+podría cambiar si ya le di cobrar?"*. No era una regla de negocio: la pantalla solo ponía en
+espera el botón de cobrar. **Y en una segunda pregunta, el mismo día, *Cancelar cuenta* también
+se bloquea**: la revisión notó que *"todos los botones"* pedía más que cantidades, agregar y quitar,
+y cancelada mientras se cierra, el cliente podía haber pagado y la venta no registrarse. *Tomar
+cuenta*, *Transferir*, *Enviar a cocina* e *Imprimir precuenta* siguen habilitados: no cambian el
+total ni la existencia de la cuenta (*Enviar a cocina* avanza `cantidad_enviada`, no el total).
+
+**Qué se hizo.** `cuentaActivaEnCobro` (`salones/index.vue`) es verdadero cuando la cuenta en
+pantalla es la que tiene el cobro en vuelo (`cobroEnVueloId`, que marca justo el tramo entre el
+*Confirmar* y el final del cierre, y se apaga si el cierre falla o se cierra el teclado de PIN sin
+tipear). Con eso se deshabilitan el stepper y el basurero, y cortan los cuatro caminos que mutan
+la cuenta: `onCantidadChange`, `quitarLinea`, `addProducto` y `onRecetaConfirm`. Los dos últimos
+avisan, porque el catálogo es un componente compartido sin `disabled` —no se le cambió el
+contrato— y el panel de una receta puede quedar abierto debajo del cobro. ⚠️ **La primera versión
+dejaba `onRecetaConfirm` sin guard** con el argumento de que no se podía alcanzar, y la revisión lo
+refutó con el camino: el panel se abre durante la espera de `abrirCobro` —la pantalla sigue tocable
+mientras se calcula el total— y queda abierto debajo del modal. Si una fusión se lleva la cuenta y
+anula la marca, se desbloquea: en general ese cobro ya no se cierra, pero si la fusión vuelve con
+el `POST` de cierre ya despachado, la cuenta destino queda editable con ese cierre en vuelo, un
+borde que esto no cubre. ⚠️ Cubre esta pantalla; otro dispositivo sobre la misma
+cuenta no pasa por acá. ⚠️ **Y cubre lo que se toca después del *Confirmar***: lo que ya viajaba
+antes —un producto agregado o un cancelar confirmado durante la espera de `abrirCobro`— puede
+aterrizar dentro del tramo. Lo levantó la revisión, sin medir: [`pendientes.md` § 2](pendientes.md).
+
+**De arrastre, y por la misma decisión**: el guard de salida de la pantalla dejó de excluir el cobro
+(ver la nota en el cierre de *"Irse de `/salones`…"*). El test que lo fija se escribió dos veces:
+la primera versión tocaba la otra cuenta **antes** de invocar el guard, así que la mandaba la
+primera pasada —que no mira el predicado— y el mutante que devolvía la excepción **sobrevivía**;
+la segunda deja la edición en vuelo por su propio timer y toca durante la espera.
+
+**Medido antes de arreglar**: *"con el cobro confirmado, la cuenta que se cobra no se modifica…"* y
+*"cerrar el teclado de PIN sin tipear desbloquea la cuenta"* salieron rojos contra el código de ese
+día; *"si el cierre falla…"* y *"mientras se cobra una cuenta, las otras…"* pasaban, y quedan como
+controles de que el bloqueo es de esa cuenta y de ese tramo.
+
+**Lo que lo fija**, mutante por mutante sobre el spec final (119 tests):
+
+| Mutante | Lo caza |
+|---|---|
+| `onRecetaConfirm` sin guard | *"con el cobro confirmado, tampoco entra una receta confirmada desde su panel ya abierto"* |
+| *Cancelar cuenta* sin `disabled` | *"con el cobro confirmado, tampoco se puede cancelar esa cuenta"* |
+| `confirmarCancelar` sin guard | el mismo |
+| el stepper sin `disabled` | *"con el cobro confirmado…"* y *"cerrar el teclado de PIN sin tipear…"* |
+| el basurero sin el bloqueo | *"con el cobro confirmado…"* |
+| `onCantidadChange` sin guard | *"con el cobro confirmado…"* |
+| `quitarLinea` sin guard | *"con el cobro confirmado…"* |
+| `addProducto` sin guard | *"con el cobro confirmado…"* |
+| bloquear todas las cuentas | *"mientras se cobra una cuenta, las otras…"* y *"irse con un cobro en vuelo…"* |
+| el bloqueo que nunca se prende | *"con el cobro confirmado…"*, *"cerrar el teclado de PIN sin tipear…"*, el de la receta y el de cancelar |
+| el guard de salida con la excepción del cobro | *"irse con un cobro en vuelo manda lo que se tocó en otra cuenta antes de desmontar"* — sobrevivía a la primera versión del test |
+
+⚠️ La última fila también ponía en rojo tres tests más; corridos solos bajo el mismo mutante,
+**pasan**: es la contaminación de timers entre tests del cierre del flush de la comanda.
+
+La entrada, verbatim:
+
+- [ ] **¿Qué pasa con una cantidad que el garzón cambia después de confirmar el cobro?**
+  (frontend + producto, salones; **leído en el código el 2026-09-12** por la revisión del cierre
+  del flush de la comanda, no medido).
+
+  **La pregunta:** *la mesa 3 confirma el cobro de $12.000 con tarjeta. Mientras el sistema
+  termina de cerrar, el garzón —la pantalla sigue tocable— sube de 1 a 2 una bebida de $2.000.
+  Hoy, según cuánto tarde el cierre, puede pasar cualquiera de estas cosas: se cobran los $12.000
+  y la segunda bebida queda afuera; la cuenta se cierra con las dos bebidas ($14.000) contra los
+  $12.000 pagados y la venta queda pagada a medias, sin ningún aviso; o la venta se cierra con una
+  bebida y la boleta sale impresa con las dos. ¿Qué tiene que pasar?*
+  - **Cobrar lo confirmado, siempre:** la cantidad que cambia después de confirmar no entra a
+    esa venta. Falta decidir qué ve el garzón con la bebida que quedó afuera.
+  - **Frenar el cobro:** el cobro espera ese cambio y, si la cuenta ya no suma lo mismo, no
+    cierra: el garzón vuelve a confirmar con el total nuevo. Pide diseñar ese aviso.
+
+  **Lo leído:** `confirmarCobro` hace `await flushPendientes()` **sin vaciar lo que nazca**, así que un tap
+  posterior no se espera. Pero después `cerrarCuentaConPin` todavía espera `asegurarVigente()`
+  antes del `POST` de cierre, y el timer de 300 ms del tap corre desde el tap: el `PATCH` puede
+  salir antes del `POST` o junto con él —cuál llega primero lo decide el servidor, y la espera de
+  `asegurarVigente()` puede ser cero si el cálculo ya estaba vigente—. Si llega primero, el
+  servidor cierra con la cantidad nueva contra los pagos del total viejo, y —lo dice el propio
+  comentario de ese camino en `salones/index.vue`— nadie valida que los pagos cubran el total:
+  queda `pagada_parcial`. Y el tercer resultado sale del cálculo: corre sobre el carrito en
+  pantalla, que ya tiene la cantidad nueva apenas se toca, así que si el tap cae antes de
+  `asegurarVigente()` la boleta puede imprimir las dos bebidas aunque la venta se cierre con una. *Enviar a cocina* sí
+  espera lo de su cuenta desde el 2026-09-12 ([`resueltos.md`](resueltos.md)).
+
 ## Irse de `/salones` ya no deja salir un tap con la pantalla desmontada (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 2](pendientes.md), donde la había dejado la revisión del cierre del
@@ -82,6 +171,15 @@ vaciara todo la mandaría antes— y se agregó su test.
 ⚠️ La última fila también ponía en rojo el test de salir de la pantalla. Corrido solo bajo el mismo
 mutante, **pasa**: es la contaminación de timers entre tests que ya está escrita en el cierre del
 flush de la comanda, no cobertura.
+
+📌 **Actualizado el mismo 2026-09-13: el cobro dejó de ser excepción del guard.** El owner decidió
+que la cuenta que se está cobrando no se modifica entre el *Confirmar* y el cierre (cierre de más
+arriba, *"La cuenta que se está cobrando no se modifica…"*). Sin ediciones posibles en esa cuenta no
+queda nada que proteger, así que el guard pasó a `!fusionando.value && !cancelando.value` y la
+cara del cobro salió del residuo. En la tabla de arriba, las filas *"sin excluir el cobro"* y el
+test *"irse durante un cobro confirmado…"* ya no existen: lo reemplaza *"irse con un cobro en vuelo
+manda lo que se tocó en otra cuenta antes de desmontar"*. Donde ese cierre dice *"los tres «irse durante …»"*,
+hoy son dos: el de la fusión y el del cancelar.
 
 ### Irse de `/salones` durante una edición a medio guardar (2026-09-12)
 

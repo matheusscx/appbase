@@ -189,6 +189,19 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   al guardar hereda el precio nuevo.
 
 
+- [ ] **Lo que viaja antes del *Confirmar* del cobro puede aterrizar dentro del tramo bloqueado**
+  (frontend, salones; **leído en el código el 2026-09-13** por la revisión del bloqueo de la cuenta
+  en cobro, no medido) — `abrirCobro` espera `asegurarVigente()` con la pantalla tocable, y
+  `flushPendientes` solo espera los `PATCH` de cantidad. Un `agregarLinea` todavía en vuelo cuando
+  se abre el modal deja el total viejo a la vista, y la línea puede entrar antes del cierre: venta
+  `pagada_parcial`, sin aviso. Un *Cancelar cuenta* confirmado en esa espera viaja igual, y uno de los
+  dos rebota con error: el cierre si la cancelación llega primero, el cancelar si llega primero el
+  cierre. El bloqueo de `cuentaActivaEnCobro` cubre lo que se toca **después** del
+  *Confirmar* ([`resueltos.md`](resueltos.md)).
+  **Qué medir:** reproducir las dos escenas en `salones/index.nuxt.spec.ts` con la respuesta de esos
+  requests retenida. Si se confirman, la salida probable es que `abrirCobro` espere también esos
+  requests; qué ve el garzón mientras tanto es pregunta para el owner.
+
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -882,33 +895,6 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **¿Qué pasa con una cantidad que el garzón cambia después de confirmar el cobro?**
-  (frontend + producto, salones; **leído en el código el 2026-09-12** por la revisión del cierre
-  del flush de la comanda, no medido).
-
-  **La pregunta:** *la mesa 3 confirma el cobro de $12.000 con tarjeta. Mientras el sistema
-  termina de cerrar, el garzón —la pantalla sigue tocable— sube de 1 a 2 una bebida de $2.000.
-  Hoy, según cuánto tarde el cierre, puede pasar cualquiera de estas cosas: se cobran los $12.000
-  y la segunda bebida queda afuera; la cuenta se cierra con las dos bebidas ($14.000) contra los
-  $12.000 pagados y la venta queda pagada a medias, sin ningún aviso; o la venta se cierra con una
-  bebida y la boleta sale impresa con las dos. ¿Qué tiene que pasar?*
-  - **Cobrar lo confirmado, siempre:** la cantidad que cambia después de confirmar no entra a
-    esa venta. Falta decidir qué ve el garzón con la bebida que quedó afuera.
-  - **Frenar el cobro:** el cobro espera ese cambio y, si la cuenta ya no suma lo mismo, no
-    cierra: el garzón vuelve a confirmar con el total nuevo. Pide diseñar ese aviso.
-
-  **Lo leído:** `confirmarCobro` hace `await flushPendientes()` **sin vaciar lo que nazca**, así que un tap
-  posterior no se espera. Pero después `cerrarCuentaConPin` todavía espera `asegurarVigente()`
-  antes del `POST` de cierre, y el timer de 300 ms del tap corre desde el tap: el `PATCH` puede
-  salir antes del `POST` o junto con él —cuál llega primero lo decide el servidor, y la espera de
-  `asegurarVigente()` puede ser cero si el cálculo ya estaba vigente—. Si llega primero, el
-  servidor cierra con la cantidad nueva contra los pagos del total viejo, y —lo dice el propio
-  comentario de ese camino en `salones/index.vue`— nadie valida que los pagos cubran el total:
-  queda `pagada_parcial`. Y el tercer resultado sale del cálculo: corre sobre el carrito en
-  pantalla, que ya tiene la cantidad nueva apenas se toca, así que si el tap cae antes de
-  `asegurarVigente()` la boleta puede imprimir las dos bebidas aunque la venta se cierre con una. *Enviar a cocina* sí
-  espera lo de su cuenta desde el 2026-09-12 ([`resueltos.md`](resueltos.md)).
 
 - [ ] **En cascada, el orden en que se aplican dos o más reglas en % mueve el total** (motor
   de precios; **medido el 2026-09-12**; reemplaza a la entrada de la § 2 *"Con tres o más

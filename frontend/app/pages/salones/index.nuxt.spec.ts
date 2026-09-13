@@ -17,9 +17,32 @@
 // mockeado es el HTTP (`useApiFetch`).
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
+import { markRaw } from 'vue'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Salones from './index.vue'
+
+/**
+ * Para poder CERRAR un drawer real en un test —el panel de personalización de una receta, en
+ * *"… tampoco entra una receta confirmada desde su panel ya abierto"*—. La transición de salida
+ * de `reka-ui` `Presence` guarda el objeto vivo de `getComputedStyle()` en un `ref`, y Vue le
+ * pone un segundo Proxy encima del de happy-dom: leer `display` rompe los traps («Receiver must
+ * be an instance of class CSSStyleDeclaration») como **unhandled rejection**, con los tests en
+ * verde y el proceso en exit 1. `markRaw` lo deja con un solo proxy.
+ *
+ * Medido el 2026-09-13 en este archivo: sin esto, 118 tests en verde, 2 errores y exit 1. Mismo
+ * parche y mismo alcance —LOCAL al archivo, nunca `test.setup.ts`— que `items.nuxt.spec.ts` y
+ * `configuracion/salones.nuxt.spec.ts` (`docs/patterns/frontend.md` §15).
+ */
+let getComputedStyleOriginal: typeof window.getComputedStyle
+beforeAll(() => {
+  getComputedStyleOriginal = window.getComputedStyle
+  window.getComputedStyle = ((el: Element, pseudo?: string | null) =>
+    markRaw(getComputedStyleOriginal.call(window, el, pseudo) as object)) as typeof window.getComputedStyle
+})
+afterAll(() => {
+  window.getComputedStyle = getComputedStyleOriginal
+})
 
 /**
  * Lo que efectivamente se mandó a imprimir, ticket por ticket.
@@ -124,6 +147,8 @@ let urlsCatalogo: string[] = []
 let catalogoItemsMock: unknown[] = []
 /** Los bodies de cada `POST /cuentas/:id/lineas`. Ver la rama del mock. */
 let lineasAgregadas: { itemId?: string, cantidad?: string }[] = []
+/** Cada `DELETE /cuentas/:id/lineas/:lineaId`, con el id de la línea. */
+let lineasQuitadas: string[] = []
 /** Cada `PATCH` de cantidad recibido, en orden. Ver la rama del mock. */
 let patchesDeCantidad: { lineaId: string, cantidad: string }[] = []
 /** Cada `POST /calculo-precios/calcular`. Es la señal de que la pantalla movió el carrito. */
@@ -420,6 +445,13 @@ mockNuxtImport('useApiFetch', () => {
     // interesa: cuando el eco del servidor coincide string a string con lo que
     // el optimista ya pintó, la firma del watch no cambia por formato.
     const patchLinea = ruta.match(/\/cuentas\/[^/]+\/lineas\/([^/]+)$/)
+    if (patchLinea && method === 'DELETE') {
+      lineasQuitadas.push(patchLinea[1] ?? '')
+      const cuenta = cuentasServidor?.[0]
+      if (!cuenta) return Promise.reject(new Error('DELETE sin GET previo de cuentas'))
+      cuenta.lineas = cuenta.lineas.filter(l => l.id !== patchLinea[1])
+      return Promise.resolve(structuredClone(cuenta))
+    }
     if (patchLinea && method === 'PATCH') {
       const body = (opts?.body ?? {}) as { cantidad?: string }
       patchesDeCantidad.push({ lineaId: patchLinea[1] ?? '', cantidad: body.cantidad ?? '' })
@@ -586,6 +618,20 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/propinas/porcentaje-sugerido')) {
       return Promise.resolve({ porcentajeSugerido: '0.1', habilitado: true })
     }
+    // El detalle que pide el panel de personalización al abrirse. Solo para `item-receta`: sin esto
+    // la carga falla y el panel se cierra solo, y el resto de las lecturas de `/items` siguen
+    // siendo el catálogo.
+    if (ruta.endsWith('/items/item-receta')) {
+      return Promise.resolve({
+        id: 'item-receta',
+        nombre: 'Hamburguesa',
+        precioBase: '3000',
+        monedaId: CLP_ID,
+        ingredientes: [],
+        extrasPermitidos: [],
+        grupos: [],
+      })
+    }
     if (ruta.includes('/items')) {
       // La URL ENTERA, con query string: el filtro de pausados vive ahí desde
       // que dejó de hacerse en el cliente, y si el mock cortara en el `?` se
@@ -716,6 +762,7 @@ function reiniciarMock() {
   urlsCatalogo = []
   catalogoItemsMock = []
   lineasAgregadas = []
+  lineasQuitadas = []
   patchesDeCantidad = []
   calculosPedidos = []
   sinSesionDeTrabajo = false
@@ -2589,7 +2636,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
   /**
    * Salir de la pantalla vacía lo que nazca durante su espera, **salvo** mientras hay una
-   * fusión, un cancelar o un cobro confirmado en vuelo. Los tres tests que siguen son esa excepción, una
+   * fusión o un cancelar en vuelo. Los dos tests que siguen son esa excepción, una
    * acción cada uno, y afirman lo mismo en el mismo instante —con el `PATCH` anterior todavía
    * retenido, 60 ms después del tap—: el guard no lo mandó. Vaciando todo lo manda en su vuelta
    * siguiente, a menos de 50 ms, sin esperar a nadie.
@@ -2674,37 +2721,261 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(toasts.filter(t => t.color === 'error')).toEqual([])
   })
 
-  it('irse durante un cobro confirmado no manda antes del cierre lo que se toca en esa cuenta', async () => {
-    // Qué tiene que pasar con esa edición es la pregunta de `docs/agent/pendientes.md` § 4, que
-    // es del owner. Este test solo fija que salir de la pantalla no la contesta por su cuenta.
+  /**
+   * **La cuenta que se está cobrando no se modifica** (owner, 2026-09-13): desde el *Confirmar*
+   * hasta que el cierre termina no se cambian cantidades, no se agregan ni quitan productos y no se
+   * cancela ESA cuenta, y el resto de la pantalla sigue libre. Sin esto, un cambio hecho en ese tramo podía
+   * entrar a la venta contra los pagos del total viejo —pagada a medias, sin aviso— o imprimirse en
+   * la boleta sin entrar a la venta.
+   */
+  function trashDeLaLinea(wrapper: Awaited<ReturnType<typeof montar>>) {
+    const boton = wrapper.findAllComponents({ name: 'UButton' }).find(b => b.props('icon') === 'i-lucide-trash-2')
+    expect(boton, 'el basurero de la línea').toBeTruthy()
+    return boton!
+  }
+
+  it('con el cobro confirmado, la cuenta que se cobra no se modifica hasta que el cierre vuelve', async () => {
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
-    let soltar!: () => void
-    patchCantidadRetenido = new Promise<void>((r) => {
-      soltar = r
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
     })
 
     const wrapper = await montar()
     await abrirLaCuenta(wrapper)
     await esperar(400)
-    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
-      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
-    await esperar(20)
 
     await abrirYConfirmarElCobro(wrapper)
     await esperar(20)
     await tipearPin()
-    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre está en vuelo').toEqual(['cuenta-9'])
 
-    const saliendo = Promise.resolve(alSalirDeLaRuta!())
+    // Los controles se ven bloqueados…
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.props('disabled'), 'stepper').toBe(true)
+    expect(trashDeLaLinea(wrapper).props('disabled'), 'basurero').toBe(true)
+
+    // …y los handlers no hacen nada aunque les llegue el evento.
     wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
-      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
-    await esperar(60)
-    expect(patchesDeCantidad, 'a los 60 ms del tap, con la retención puesta').toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
-
-    soltar()
-    await saliendo
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    trashDeLaLinea(wrapper).vm.$emit('click')
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', catalogoItemsMock[0])
     await esperar(400)
+    expect(patchesDeCantidad).toEqual([])
+    expect(lineasQuitadas).toEqual([])
+    expect(lineasAgregadas).toEqual([])
+    expect(toasts.some(t => t.title === 'Esta cuenta se está cobrando')).toBe(true)
+
+    soltarCierre()
+    await esperar(100)
+  })
+
+  it('con el cobro confirmado, tampoco entra una receta confirmada desde su panel ya abierto', async () => {
+    // La cuarta puerta, que la primera versión del bloqueo daba por inalcanzable: el panel de
+    // personalización se abre durante la espera de `abrirCobro` —la pantalla sigue tocable
+    // mientras se calcula el total— y queda abierto debajo del cobro. Confirmarlo después del
+    // *Confirmar* agregaba la línea a la cuenta que se está cerrando. Lo levantó la revisión.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const receta = { ...producto('3.0000', '1.0000'), id: 'item-receta', nombre: 'Hamburguesa', tipo: 'receta' as const }
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', receta)
+    await esperar(20)
+    const panel = wrapper.findComponent({ name: 'VentasItemPersonalizacionDrawer' })
+    expect(panel.props('open'), 'el panel de la receta quedó abierto').toBe(true)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre está en vuelo').toEqual(['cuenta-9'])
+
+    panel.vm.$emit('confirm', { omitidos: [], extras: [] }, '')
+    await esperar(50)
+    expect(lineasAgregadas).toEqual([])
+    expect(toasts.some(t => t.title === 'Esta cuenta se está cobrando')).toBe(true)
+    expect(panel.props('open'), 'el panel se cierra').toBe(false)
+
+    soltarCierre()
+    await esperar(100)
+  })
+
+  it('con el cobro confirmado, tampoco se puede cancelar esa cuenta', async () => {
+    // Decisión del owner del mismo día: *Cancelar cuenta* también se bloquea. Cancelada mientras se
+    // cierra, el cliente podía haber pagado y la venta no registrarse, o la cancelación rebotar.
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre está en vuelo').toEqual(['cuenta-9'])
+
+    expect(botonEn(drawerMesa(), 'Cancelar cuenta')?.disabled, 'el botón').toBe(true)
+    // Y el handler corta aunque el modal llegue a confirmar.
+    const modal = wrapper.findAllComponents({ name: 'CrudModal' }).find(m => m.props('title') === 'Cancelar cuenta')
+    expect(modal, 'el modal de cancelar').toBeTruthy()
+    modal!.vm.$emit('confirm')
+    await esperar(50)
+    expect(patchesAlCancelar, 'no salió el cancelar').toBe(-1)
+    expect(toasts.some(t => t.title === 'Esta cuenta se está cobrando')).toBe(true)
+
+    soltarCierre()
+    await esperar(100)
+  })
+
+  it('si el cierre falla, la cuenta que se cobraba vuelve a poder modificarse', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    cierreFallaSesion = true
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(100)
+    expect(cierresDeCuenta, 'el cierre salió y falló').toEqual(['cuenta-9'])
+
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.props('disabled'), 'stepper').toBe(false)
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(400)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+  })
+
+  it('cerrar el teclado de PIN sin tipear desbloquea la cuenta', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
+    await esperar(50)
+    cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
+    await esperar(20)
+    expect(tecladoPin(), 'el teclado de PIN se abrió').toBeTruthy()
+    // Confirmado y esperando el PIN: ya es el tramo del cobro.
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.props('disabled'), 'bloqueada con el PIN abierto').toBe(true)
+
+    wrapper.findComponent({ name: 'SalonesGarzonPinModal' }).vm.$emit('update:open', false)
+    await esperar(50)
+
+    expect(cierresDeCuenta).toEqual([])
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.props('disabled'), 'desbloqueada al cancelar').toBe(false)
+  })
+
+  it('mientras se cobra una cuenta, las otras de la mesa se siguen pudiendo modificar', async () => {
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre de la 9 está en vuelo').toEqual(['cuenta-9'])
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[tarjetas.length - 1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+
+    expect(wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.props('disabled'), 'la 10 no está bloqueada').toBe(false)
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '4', unidadCodigo: 'unidad', cantidadCanonica: '4.0000' })
+    await esperar(400)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-2', cantidad: '4.0000' }])
+
+    soltarCierre()
+    await esperar(100)
+  })
+
+  it('irse con un cobro en vuelo manda lo que se tocó en otra cuenta antes de desmontar', async () => {
+    // El cobro dejó de ser excepción del guard de salida: la cuenta que se cobra no acepta
+    // ediciones, así que lo que el guard vacía durante un cobro es de otras cuentas.
+    catalogoItemsMock = [producto('9.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000'), otraCuentaConPedido('1.0000')]
+    let soltarCierre!: () => void
+    cierreRetenido = new Promise<void>((r) => {
+      soltarCierre = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(50)
+    expect(cierresDeCuenta, 'el cierre de la 9 está en vuelo').toEqual(['cuenta-9'])
+
+    botonEn(drawerMesa(), 'Cuentas')!.click()
+    await esperar(20)
+    const tarjetas = [...(drawerMesa()?.querySelectorAll<HTMLElement>('.cursor-pointer') ?? [])]
+    tarjetas[tarjetas.length - 1]!.click()
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toContain('Cuenta 10')
+
+    // Una edición en la 10 que sale por su propio timer y queda en vuelo, para que el guard empiece
+    // sin nada pendiente y con algo que esperar. Si la mandara la primera pasada del guard, el
+    // guard quedaría esperándola ahí y todavía no estaría vaciando lo que nace.
+    let soltarPatch!: () => void
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPatch = r
+    })
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(400)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-2', cantidad: '3.0000' }])
+    const saliendo = Promise.resolve(alSalirDeLaRuta!())
+
+    // La que NACE durante esa espera es la que el predicado decide. Tocarla antes de invocar el
+    // guard no probaría nada: la primera pasada la manda sin mirar el predicado.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '4', unidadCodigo: 'unidad', cantidadCanonica: '4.0000' })
+    await esperar(60)
+    expect(patchesDeCantidad, 'a los 60 ms del tap, con la retención puesta').toEqual([
+      { lineaId: 'linea-2', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '4.0000' },
+    ])
+
+    patchCantidadRetenido = null
+    soltarPatch()
+    await saliendo
+    soltarCierre()
+    await esperar(100)
   })
 
   it('el flush manda lo que el garzón puso en CADA línea, no lo que devolvió el PATCH anterior', async () => {
@@ -3482,7 +3753,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
    * transición de salida de reka, y `usePresence` lee `display` de un
    * `getComputedStyle` que happy-dom rechaza con *"Receiver must be an instance
    * of class CSSStyleDeclaration"*. La suite quedaba en verde pero con dos
-   * unhandled rejections, o sea el gate en rojo.
+   * unhandled rejections, o sea el gate en rojo. Desde el 2026-09-13 el wrapper de
+   * `getComputedStyle` del tope del archivo ya las evita; el stub se queda por lo de abajo.
    *
    * Con el stub el contenido **no se teletransporta**: se busca en el wrapper,
    * no en `document.body`.

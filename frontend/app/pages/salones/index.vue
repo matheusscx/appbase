@@ -198,6 +198,36 @@ const submitting = ref(false)
  * vivo no distingue nada ahí. Ver el guard de `cerrarCuentaConPin`.
  */
 const cobroEnVueloId = ref<string | null>(null)
+/**
+ * **La cuenta que se está cobrando no se modifica** (owner, 2026-09-13). Desde el *Confirmar*
+ * hasta que el cierre termina —o falla, o se cierra el teclado de PIN sin tipear— no se cambian
+ * cantidades, no se agregan ni quitan productos y no se cancela ESA cuenta; el resto de la
+ * pantalla sigue libre.
+ * Antes, un cambio hecho en ese tramo podía entrar a la venta contra los pagos del total viejo
+ * —queda `pagada_parcial`, sin aviso— o imprimirse en la boleta sin entrar a la venta.
+ *
+ * Mira `cobroEnVueloId`, que marca exactamente ese tramo. Si una fusión se lleva la cuenta y anula
+ * la marca, se desbloquea: en general ese cobro ya no se cierra, pero si la fusión vuelve con el
+ * `POST` de cierre ya despachado, la cuenta destino queda editable con ese cierre en vuelo —un
+ * borde que esto no cubre—. Los controles se deshabilitan y los cuatro caminos que mutan la cuenta
+ * (`onCantidadChange`, `addProducto`, `onRecetaConfirm`, `quitarLinea`) y `confirmarCancelar`
+ * además cortan, porque el
+ * evento puede llegar igual: el catálogo no tiene `disabled`, y el panel de una receta puede
+ * quedar abierto debajo del cobro.
+ * ⚠️ Cubre esta pantalla: otro dispositivo sobre la misma cuenta no pasa por acá.
+ */
+const cuentaActivaEnCobro = computed(() =>
+  !!activeCuenta.value && cobroEnVueloId.value === activeCuenta.value.id,
+)
+
+/** El aviso de un gesto que corta por `cuentaActivaEnCobro` sin control deshabilitado a la vista. */
+function avisarCuentaEnCobro() {
+  toast.add({
+    title: 'Esta cuenta se está cobrando',
+    description: 'No se puede modificar hasta que termine el cierre.',
+    color: 'warning',
+  })
+}
 const cancelOpen = ref(false)
 /**
  * El botón del modal de cancelar, en espera. Desde que cancelar manda primero lo
@@ -854,29 +884,29 @@ onBeforeUnmount(() => {
  * salía después, con un eventual rechazo avisado en otra pantalla — lo que este guard vino a
  * cerrar.
  *
- * ⚠️ **Salvo mientras hay una fusión, un cancelar o un cobro confirmado en vuelo.** Con alguno
- * de ellos, vaciar lo que nace durante la espera mandaría lo que la fusión y
- * el cancelar descartan a propósito (`descartarPendientes`), o contestaría por su cuenta la
- * pregunta del cobro (`docs/agent/pendientes.md` § 4). Mientras alguna esté en vuelo no vacía lo
- * que nace, que es la conducta de antes; el predicado se evalúa en cada vuelta, así que vuelve a
- * vaciar apenas termina. Lo levantó la revisión del diff.
+ * ⚠️ **Salvo mientras hay una fusión o un cancelar en vuelo.** Con alguno de ellos, vaciar lo
+ * que nace durante la espera mandaría lo que la fusión y el cancelar descartan a propósito
+ * (`descartarPendientes`). Mientras alguno esté en vuelo no vacía lo que nace, que es la
+ * conducta de antes; el predicado se evalúa en cada vuelta, así que vuelve a vaciar apenas
+ * termina. Lo levantó la revisión del diff. **Un cobro confirmado ya no es excepción**: desde el
+ * 2026-09-13 la cuenta que se cobra no acepta ediciones (`cuentaActivaEnCobro`), así que en ella
+ * no nace nada que proteger, y lo que se toque en otra cuenta se vacía como siempre.
  *
  * **El residuo en ese tramo es la conducta de antes, y tiene tres caras:**
  * - lo que ya estaba pendiente al empezar a navegar **sale igual**: la primera pasada del flush
  *   no mira el predicado;
  * - una edición nacida durante la espera en la **cuenta afectada** no se manda y, si la espera
  *   termina antes de los 300 ms de su timer, la página se desmonta con ese timer armado
- *   —`onBeforeUnmount` no limpia los de `pendingByLinea`—: en cancelar y fusionar se escapa si
- *   ese timer le gana al request, y en el cobro sale, salvo que una fusión de esa cuenta en
- *   vuelo la descarte antes;
+ *   —`onBeforeUnmount` no limpia los de `pendingByLinea`—, y se escapa si ese timer le gana al
+ *   request;
  * - una edición nacida durante la espera en **otra cuenta** puede salir con la pantalla
  *   desmontada.
  *
- * Medido con *"el tap que cae mientras se espera para irse de la pantalla…"* y con los tres
- * *"irse durante …"*.
+ * Medido con *"el tap que cae mientras se espera para irse de la pantalla…"*, con los dos
+ * *"irse durante …"* y con *"irse con un cobro en vuelo…"*.
  */
 onBeforeRouteLeave(async () => {
-  await flushPendientes(() => !fusionando.value && !cancelando.value && !cobroEnVueloId.value)
+  await flushPendientes(() => !fusionando.value && !cancelando.value)
 })
 
 async function cargarCatalogo() {
@@ -1700,6 +1730,7 @@ async function patchLineaCantidad(lineaId: string, edicion: EdicionCantidad) {
 
 function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
   if (!activeCuenta.value || new Decimal(payload.cantidadCanonica || '0').lte(0)) return
+  if (cuentaActivaEnCobro.value) return
 
   const cuentaId = activeCuenta.value.id
   const contexto = `${selectedMesa.value?.nombre ?? 'Mesa'} · Cuenta ${activeCuenta.value.numero}`
@@ -1761,15 +1792,15 @@ function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
  *     garzón hizo mientras se mandaba lo anterior: el de una línea que no estaba pendiente, el de
  *     una que el loop ya había mandado, o el que cae mientras se espera lo que está en vuelo.
  *     Medido con los tests *"… sale antes que la comanda"*, en rojo sin esto.
- *   - el guard de salida de la pantalla, **para todas, salvo con una fusión, un cancelar o un
- *     cobro en vuelo**: ver su docblock.
+ *   - el guard de salida de la pantalla, **para todas, salvo con una fusión o un cancelar en
+ *     vuelo**: ver su docblock.
  *
- *   Esos taps se pueden hacer porque el stepper no se deshabilita nunca —`yaEnviadaACocina`
- *   apaga el basurero, no el stepper—.
+ *   Esos taps se pueden hacer porque el stepper solo se deshabilita en la cuenta que se está
+ *   cobrando —`yaEnviadaACocina` apaga el basurero, no el stepper—.
  *
- * ⚠️ El cobro **no** vacía, y no es un olvido: una cantidad que cambia después de confirmar el
- * cobro cambia el total contra el que se cargaron los pagos. Qué hacer ahí es del owner
- * (`docs/agent/pendientes.md` § 4).
+ * El cobro **no** vacía: desde el 2026-09-13 la cuenta que se cobra no acepta ediciones entre el
+ * *Confirmar* y el cierre (`cuentaActivaEnCobro`, decisión del owner), así que en ella no nace
+ * nada durante su espera.
  */
 async function flushPendientes(vaciarLoQueNazca?: (edicion: EdicionCantidad) => boolean) {
   // `lineasPendientes` y no `pendientes`: ese nombre ya es el ref de las cuentas
@@ -1938,6 +1969,10 @@ function onDrawerMesaToggle(abierto: boolean) {
 
 async function addProducto(item: ItemCatalogo) {
   if (!activeCuenta.value) return
+  if (cuentaActivaEnCobro.value) {
+    avisarCuentaEnCobro()
+    return
+  }
   if (item.tipo === 'receta' || (item.tipo === 'combo' && item.disponibleCondicional)) {
     recetaItemId.value = item.id
     recetaDrawerOpen.value = true
@@ -1955,6 +1990,12 @@ async function addProducto(item: ItemCatalogo) {
 async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string) {
   if (!activeCuenta.value || !recetaItemId.value) return
   try {
+    // El panel pudo quedar abierto debajo del cobro: se abre durante la espera de `abrirCobro`,
+    // con la pantalla tocable. El `finally` lo cierra igual.
+    if (cuentaActivaEnCobro.value) {
+      avisarCuentaEnCobro()
+      return
+    }
     const personalizacion = personalizacionVacia(payload) ? undefined : payload
     const cuenta = await salonesApi.agregarLinea(
       activeCuenta.value.id,
@@ -1990,7 +2031,7 @@ function yaEnviadaACocina(linea: CuentaLineaDetalle): boolean {
 }
 
 async function quitarLinea(linea: CuentaLineaDetalle) {
-  if (!activeCuenta.value) return
+  if (!activeCuenta.value || cuentaActivaEnCobro.value) return
   try {
     const cuenta = await salonesApi.quitarLinea(activeCuenta.value.id, linea.id)
     syncCuenta(cuenta)
@@ -2200,6 +2241,11 @@ async function imprimirPrecuenta() {
 // ── Cancelar / cerrar cuenta ───────────────────────────────────────────────
 async function confirmarCancelar() {
   if (!activeCuenta.value || !selectedMesa.value) return
+  if (cuentaActivaEnCobro.value) {
+    cancelOpen.value = false
+    avisarCuentaEnCobro()
+    return
+  }
   cancelando.value = true
   // **Congelado ANTES de la espera, igual que en fusionar.** El `await` de abajo
   // es de red, y durante ese tramo el garzón puede volver al listado —el botón
@@ -2815,6 +2861,7 @@ async function cerrarCuentaConPin(
                       :model-value="presentacionLinea(linea)"
                       :unidad-codigo="unidadPresLinea(linea)"
                       :unidad-base-codigo="unidadBaseLinea(linea)"
+                      :disabled="cuentaActivaEnCobro"
                       @change="onCantidadChange(linea, $event)"
                     />
                     <UButton
@@ -2822,7 +2869,7 @@ async function cerrarCuentaConPin(
                       color="error"
                       variant="ghost"
                       size="xs"
-                      :disabled="yaEnviadaACocina(linea)"
+                      :disabled="yaEnviadaACocina(linea) || cuentaActivaEnCobro"
                       :title="yaEnviadaACocina(linea)
                         ? 'Ya se despachó a cocina: registralo como merma o cortesía para que quede el rastro'
                         : 'Quitar'"
@@ -2885,6 +2932,7 @@ async function cerrarCuentaConPin(
                     color="error"
                     variant="soft"
                     class="flex-1 justify-center"
+                    :disabled="cuentaActivaEnCobro"
                     @click="() => { cancelOpen = true }"
                   >
                     Cancelar cuenta

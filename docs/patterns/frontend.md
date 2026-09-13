@@ -930,8 +930,8 @@ afterAll(() => { window.getComputedStyle = original })
 ```
 
 Va **LOCAL al archivo**, nunca en `test.setup.ts`: es un global de toda la suite y para esto
-no hace falta tocarlo. Está en `configuracion/salones.nuxt.spec.ts:35-43` y en
-`configuracion/items.nuxt.spec.ts`.
+no hace falta tocarlo. Está en `configuracion/salones.nuxt.spec.ts:35-43`, en
+`configuracion/items.nuxt.spec.ts` y en `salones/index.nuxt.spec.ts`.
 
 **La medición, el 2026-09-11 sobre `configuracion/items`**, cada falla aislada con `-t` y el
 exit code leído sin pipe —`| tail` se come el status—: el test que cierra el drawer da **exit 1
