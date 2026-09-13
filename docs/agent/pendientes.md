@@ -870,38 +870,6 @@ hereda), que es lo que carga el formulario de ítems.
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
 
-### Webpay online, solo para tenants de Chile (owner, 2026-09-13)
-
-Sale de la § 4. **El hueco:** un tenant que no es de Chile puede cobrar online con Webpay, y la
-orden guarda como pesos chilenos el total en su propia moneda. Se preguntó con la escena de una
-tienda de México que vende online un pedido de $250 pesos mexicanos mientras Webpay cobra en
-pesos chilenos: *¿solo a locales de Chile, o se convierte con la tasa del día?* **El owner: solo
-Chile.**
-
-**Lo que falta construir:** que un tenant cuya moneda oficial no es CLP no pueda cobrar online
-con Webpay, con el corte en el backend y no solo escondido en la pantalla. Hoy `pasarela` no
-restringe nada por país. En qué punto va el corte —al configurar la pasarela, al iniciar el
-checkout o en los dos— se decide al construirlo.
-
-**Lo leído:** `online.service.ts` manda `resultado.totales.totalFinal` —en la moneda oficial
-del tenant— como `monto` a `pagosRedirect.iniciar`, que valida la escala contra
-`MONEDA_ORDEN_V1` (CLP) y guarda la orden con esa moneda (`pagos-redirect.service.ts`). No hay
-conversión en el medio. Si el total trae decimales, el checkout debería contestar 400; si es
-entero, se cobraría ese número en pesos chilenos (USD 10 → $10). Es alcanzable: el seed
-siembra provincias de AR, CO y MX, así que se puede dar de alta un tenant con oficial ≠ CLP,
-y `pasarela` no restringe nada por país.
-
-**Qué cambia de lo que decía la entrada anterior:** temía que la nota de crédito del
-reembolso acreditara pesos chilenos contra una venta en otra moneda. La nota **no convierte**
-—`reembolso-callback.handler.ts` le pasa el monto de la orden, solo cuantizado a la escala de
-la venta—, pero tampoco tendría qué convertir: en las órdenes del checkout online ese número
-nunca fue CLP. Por lo mismo, el `MoneyInput` con `oficial` del `ReembolsoModal` muestra hoy la
-moneda real del número; qué moneda tiene que mostrar depende de la respuesta.
-`NotaCreditoModal` no tiene el problema: acredita una venta, y la venta se persiste en la
-oficial.
-⛔ Cuando se arregle, la nota de crédito del reembolso es fiscal: va aparte (`CLAUDE.md`,
-*"Lo fiscal va solo"*).
-
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:

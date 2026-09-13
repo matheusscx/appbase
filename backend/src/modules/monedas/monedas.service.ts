@@ -129,8 +129,28 @@ export class MonedasService {
    * reparto no puede representar lo que se cobró.
    */
   async decimalesOficiales(tenantId: string): Promise<number> {
-    const rows: { decimales: number | string }[] = await this.db.query(
-      `SELECT m.decimales
+    return (await this.monedaOficial(tenantId)).decimales;
+  }
+
+  /**
+   * El código ISO de la moneda oficial del tenant. Lo usa la pasarela para no
+   * ofrecerle a un local de otro país los proveedores que liquidan en
+   * `MONEDA_ORDEN_V1` (ver `TenantPasarelaService`).
+   */
+  async codigoIsoOficial(tenantId: string): Promise<string> {
+    return (await this.monedaOficial(tenantId)).codigoIso;
+  }
+
+  /**
+   * La consulta de la moneda oficial, compartida por `decimalesOficiales` y
+   * `codigoIsoOficial` para que las dos respuestas salgan de la misma fila.
+   */
+  private async monedaOficial(
+    tenantId: string,
+  ): Promise<{ decimales: number; codigoIso: string }> {
+    const rows: { decimales: number | string; codigo_iso: string }[] =
+      await this.db.query(
+        `SELECT m.decimales, m.codigo_iso
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
               AND prov.eliminado_el IS NULL
@@ -138,8 +158,8 @@ export class MonedasService {
          JOIN moneda m ON m.moneda_id = p.moneda_oficial_id
               AND m.eliminado_el IS NULL
         WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
-      [tenantId],
-    );
+        [tenantId],
+      );
     if (!rows.length) {
       // Sin país o sin `moneda_oficial_id` no hay escala posible: no se asume
       // una. Es el mismo error que ya devolvía cuando faltaba la fila de
@@ -148,7 +168,10 @@ export class MonedasService {
         'El tenant no tiene moneda oficial configurada',
       );
     }
-    return Number(rows[0].decimales);
+    return {
+      decimales: Number(rows[0].decimales),
+      codigoIso: rows[0].codigo_iso,
+    };
   }
 
   /**

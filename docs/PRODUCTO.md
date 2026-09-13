@@ -846,6 +846,10 @@ Detalle: [`features/gestion-cajas.md`](features/gestion-cajas.md#umbral-de-descu
 - Cada pago: método de pago, monto en moneda oficial, caja
 - El monto llega ya convertido a moneda oficial
 - No hay integración con pasarela de cobro en esta fase: es registro contable
+- **Cobro con Transbank (Oneclick y Webpay), solo para locales de Chile** (owner, 2026-09-13):
+  Transbank cobra en pesos chilenos, así que un local cuya moneda oficial no es CLP no lo puede
+  configurar. Vale para la tienda online, las suscripciones y la API de la pasarela; la pasarela
+  demo queda para todos. Detalle: [pasarela-pagos.md](features/pasarela-pagos.md).
 - El sistema calcula y registra el **vuelto** cuando la suma de pagos supera el total de la venta
 - El vuelto solo aplica en métodos que lo permiten (`permite_vuelto = true` en `tenant_metodo_pago`)
 

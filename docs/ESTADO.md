@@ -54,7 +54,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Tienda Online (canal online, checkout dummy, catálogo/carrito, medios de pago mock) | ✅ Implementado (2026-07-05) |
 | Suscripciones (tipo de item suscripcion, alta con primer cobro, gestión) | ✅ Implementado (2026-07-05) |
 | Suscripciones — administración (módulo RBAC propio, vigencia `activa_hasta`, "Mis suscripciones") | ✅ Implementado (2026-07-06) |
-| Pasarela de pagos (Oneclick real, API keys m2m, cifrado de credenciales, admin UI) | ✅ Implementado (2026-07-08) |
+| Pasarela de pagos (Oneclick real, API keys m2m, cifrado de credenciales, admin UI). **Desde el 2026-09-13** Oneclick y Webpay solo se ofrecen y se configuran en locales de Chile: Transbank cobra en pesos chilenos | ✅ Implementado (2026-07-08; solo Chile 2026-09-13) |
 | Pasarela — Webpay Plus Mall (pago único con redirect: crear→confirmar, reembolso y verificación) | ✅ Implementado (2026-07-08) |
 | Tienda Online — checkout por Webpay Plus real (orden con snapshot, venta creada por callback in-process, y **pasarela demo prendida por configuración** para el tenant que no conectó ninguna) | ✅ Implementado (2026-07-09) — la demo dejó de heredarse por ausencia el **2026-08-26**: se prende desde Configuración → Pasarelas con la etiqueta "solo pruebas", sin ninguna configurada `POST /online/pagar` responde 400, y el método con el que la pantalla simulada registra la venta lo resuelve el backend en vez de adivinarlo la pantalla |
 | Pasarela — reorganización UI: config (Mis pasarelas + API Keys) en `/configuracion/pasarelas`; Órdenes como módulo propio del nav en `/ordenes`, con filtros (estado, origen, rango de fechas), buscador y drawer de detalle con historial de transacciones | ✅ Implementado (2026-07-10) |

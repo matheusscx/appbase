@@ -49,6 +49,10 @@ el mismo carrito/catálogo.
     el simulado era lo que sobraba cuando faltaba Webpay: cualquier tenant que se
     registrara y no conectara nada heredaba, sin elegirlo, una tienda que entrega
     mercadería y la anota cobrada.
+  - **Webpay, solo para locales de Chile** (2026-09-13): un local cuya moneda oficial no
+    es CLP no puede configurar Webpay ni Oneclick —Transbank cobra en pesos chilenos—, así
+    que su tienda cobra con la demo o no cierra el pedido. Ver
+    [pasarela-pagos.md](./pasarela-pagos.md).
   - **La pantalla demo no muestra ningún medio de pago del comprador**
     (2026-08-26): mostraba la tarjeta Oneclick preferida —y ofrecía registrar una
     si no había—, o sea prometía un cargo que ese flujo nunca hace. Ahora dice

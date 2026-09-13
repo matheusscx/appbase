@@ -75,12 +75,25 @@ export class PasarelaOrden {
 }
 
 /**
- * La moneda de TODA orden de pasarela en v1. No es la moneda oficial del
- * tenant: Transbank liquida en pesos chilenos, así que un tenant con oficial
- * USD igual crea órdenes en CLP. Por eso el monto de una orden se valida
+ * La moneda de TODA orden de pasarela en v1: la de Transbank, que liquida en
+ * pesos chilenos. No sale de la moneda oficial del tenant —hoy coinciden solo
+ * porque un local de otro país no puede configurar Transbank
+ * (`PASARELAS_EN_MONEDA_ORDEN`, abajo)—, así que el monto de una orden se valida
  * contra ESTA escala y no contra `MonedasService.decimalesOficiales`.
  *
  * Existe como constante para que el día que entre una segunda moneda haya un
  * solo lugar del que sacarla, en vez de literales sueltos que se desincronizan.
  */
 export const MONEDA_ORDEN_V1 = 'CLP';
+
+/**
+ * Las pasarelas que liquidan en `MONEDA_ORDEN_V1`: las de Transbank. Un local
+ * cuya moneda oficial no es esa no las puede configurar ni se le ofrecen
+ * (owner, 2026-09-13: *"todo Transbank, solo Chile"*). Sin el corte, el checkout
+ * online de una tienda de México mandaba su total en pesos mexicanos como
+ * monto de una orden en pesos chilenos. La demo no está: no cobra.
+ */
+export const PASARELAS_EN_MONEDA_ORDEN: ReadonlySet<string> = new Set([
+  'oneclick',
+  'webpay_plus',
+]);

@@ -23,6 +23,93 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Oneclick y Webpay, solo para locales de Chile (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 3](pendientes.md), donde el owner lo había decidido ese mismo día
+(*"webpay es solo chile"*). **Al construirlo apareció que el alcance era más ancho que la tienda**:
+la cuenta de Transbank también sirve para guardar tarjetas y cobrar suscripciones (Oneclick) y
+para que apps externas cobren por la API, y todo eso liquida en pesos chilenos. Preguntado con
+esa escena, el owner eligió **todo Transbank** y no solo el Webpay de la tienda. La pasarela demo
+queda para todos, porque no cobra.
+
+**Dónde va el corte, medido y no supuesto:** al **dar de alta y al editar** la config, no al cobrar.
+- Todo camino de cobro o inscripción pasa por `resolverConfiguracionActiva`, que exige una config
+  activa del tenant; sin esa fila no cae a credenciales de plataforma.
+- Un local no cambia de país: `TenantsService.assertMismoPais` corre en el update del superadmin y
+  en el del propio tenant.
+- Por la API, la config nueva la escribe solo `TenantPasarelaService.crear`. El seeder solo le
+  siembra Transbank a Demo Restaurante, que es de Chile.
+- Un corte también al cobrar sería código que ningún camino alcanza, así que no se agregó.
+
+**El corte al editar lo pidió el owner**, sobre un bloqueo de la revisión de seguridad: una config
+de Transbank ya existente y apagada en un local de otro país se podía prender con
+`PATCH /pasarela/admin/config/:id`, que no miraba el país. Esa config solo existiría si viniera de
+antes de la regla, y la app no deja crearla. Preguntado con ese costo —el test tiene que insertarla
+directo en la base—, eligió cortar también ahí.
+
+**Qué se hizo.**
+- `PASARELAS_EN_MONEDA_ORDEN` (`pasarela-orden.entity.ts`, junto a `MONEDA_ORDEN_V1`) nombra las
+  pasarelas que liquidan en esa moneda: `oneclick` y `webpay_plus`.
+- `TenantPasarelaService.listarPasarelasGlobales` pasa a recibir el tenant y no le ofrece esas dos
+  a un local cuya moneda oficial no es CLP; la pantalla de pasarelas no cambió, porque su selector
+  sale de ese catálogo.
+- `crear` las rechaza con 400 para quien mande el id a mano, y `actualizar` hace lo mismo con una
+  config de Transbank ya existente. Los dos llaman a `assertDisponibleEnElPais`.
+- `MonedasService.codigoIsoOficial` sale de la misma consulta que `decimalesOficiales`, extraída a
+  un helper privado para que las dos respuestas salgan de la misma fila.
+
+**Lo que lo fija**, mutante por mutante sobre `tenant-pasarela.service.spec.ts` (13 tests) y
+`test/pasarela-solo-chile.e2e-spec.ts` (1 test, con un tenant creado en México y Demo Restaurante
+de control; la config vieja para el caso de la edición se inserta por SQL, que es el costo que el
+owner aceptó). El e2e cae con los cinco:
+
+| Mutante | Unitarios que lo cazan |
+|---|---|
+| `assertDisponibleEnElPais` nunca corta | *"crear: rechaza oneclick…"*, *"crear: rechaza webpay_plus…"* y *"actualizar: rechaza editar una config de Transbank en un local fuera de Chile"* |
+| `crear` sin el corte | *"crear: rechaza oneclick…"* y *"crear: rechaza webpay_plus…"* |
+| `actualizar` sin el corte | *"actualizar: rechaza editar una config de Transbank…"* |
+| el catálogo no filtra | *"el catálogo no le ofrece Oneclick ni Webpay a un local fuera de Chile"* |
+| el corte mira solo Webpay | *"crear: rechaza oneclick…"* y *"actualizar: rechaza editar una config de Transbank…"* |
+
+**Docs:** `docs/features/pasarela-pagos.md` (la regla y por qué el corte va al dar de alta y al editar),
+`docs/features/tienda-online.md`, `docs/PRODUCTO.md` § 13, la fila de la pasarela en
+`docs/ESTADO.md`, y los docblocks de `MONEDA_ORDEN_V1` y de los tres DTOs de plata, que decían que
+un tenant con otra moneda oficial igual creaba órdenes en CLP.
+
+La entrada, verbatim:
+
+### Webpay online, solo para tenants de Chile (owner, 2026-09-13)
+
+Sale de la § 4. **El hueco:** un tenant que no es de Chile puede cobrar online con Webpay, y la
+orden guarda como pesos chilenos el total en su propia moneda. Se preguntó con la escena de una
+tienda de México que vende online un pedido de $250 pesos mexicanos mientras Webpay cobra en
+pesos chilenos: *¿solo a locales de Chile, o se convierte con la tasa del día?* **El owner: solo
+Chile.**
+
+**Lo que falta construir:** que un tenant cuya moneda oficial no es CLP no pueda cobrar online
+con Webpay, con el corte en el backend y no solo escondido en la pantalla. Hoy `pasarela` no
+restringe nada por país. En qué punto va el corte —al configurar la pasarela, al iniciar el
+checkout o en los dos— se decide al construirlo.
+
+**Lo leído:** `online.service.ts` manda `resultado.totales.totalFinal` —en la moneda oficial
+del tenant— como `monto` a `pagosRedirect.iniciar`, que valida la escala contra
+`MONEDA_ORDEN_V1` (CLP) y guarda la orden con esa moneda (`pagos-redirect.service.ts`). No hay
+conversión en el medio. Si el total trae decimales, el checkout debería contestar 400; si es
+entero, se cobraría ese número en pesos chilenos (USD 10 → $10). Es alcanzable: el seed
+siembra provincias de AR, CO y MX, así que se puede dar de alta un tenant con oficial ≠ CLP,
+y `pasarela` no restringe nada por país.
+
+**Qué cambia de lo que decía la entrada anterior:** temía que la nota de crédito del
+reembolso acreditara pesos chilenos contra una venta en otra moneda. La nota **no convierte**
+—`reembolso-callback.handler.ts` le pasa el monto de la orden, solo cuantizado a la escala de
+la venta—, pero tampoco tendría qué convertir: en las órdenes del checkout online ese número
+nunca fue CLP. Por lo mismo, el `MoneyInput` con `oficial` del `ReembolsoModal` muestra hoy la
+moneda real del número; qué moneda tiene que mostrar depende de la respuesta.
+`NotaCreditoModal` no tiene el problema: acredita una venta, y la venta se persiste en la
+oficial.
+⛔ Cuando se arregle, la nota de crédito del reembolso es fiscal: va aparte (`CLAUDE.md`,
+*"Lo fiscal va solo"*).
+
 ## Guardar una receta o un combo ya no copia el catálogo de grupos como valor propio de sus opciones (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **No hizo falta preguntarle la regla al owner:** ya

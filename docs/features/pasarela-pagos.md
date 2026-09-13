@@ -141,15 +141,29 @@ Response (200):
 ### La moneda de una orden no es la del tenant
 
 Toda orden va en **CLP** (`MONEDA_ORDEN_V1`, en `pasarela-orden.entity.ts`): es la
-moneda en la que liquida Transbank, no la oficial del tenant. Un tenant con moneda
-oficial USD igual crea órdenes en pesos.
+moneda en la que liquida Transbank, no la oficial del tenant.
+
+**Por eso Oneclick y Webpay son solo para locales de Chile** (owner, 2026-09-13: todo
+Transbank, no solo el checkout de la tienda). Un local cuya moneda oficial no es CLP no
+los ve en `GET /pasarela/admin/pasarelas-disponibles`, y `POST /pasarela/admin/config`
+los rechaza con 400. La demo queda para todos, porque no cobra. Antes una tienda de México
+podía configurar Webpay, y el checkout mandaba su total en pesos mexicanos como monto de
+una orden en pesos chilenos.
+
+El corte va al **dar de alta y al editar** la config, no al cobrar: todo cobro exige una
+config activa del tenant, un local no cambia de país (`TenantsService.assertMismoPais`) y por
+la API la config nueva la escribe solo `TenantPasarelaService.crear`. El seeder solo le siembra
+Transbank a Demo Restaurante, que es de Chile. **Editar entra por pedido del owner:** una config
+de Transbank en un local de otro país solo existiría si viniera de antes de la regla, y tampoco
+se tiene que poder prender. Lo fija `test/pasarela-solo-chile.e2e-spec.ts`.
 
 ⚠️ **De ahí sale la regla de escala, y es la trampa de este módulo:** el `monto` se
 valida contra los decimales de **la moneda de la orden**
 (`MonedasService.validarEscalaDeMoneda`), **no** con `@EsMontoCobrado()` +
 `EscalaMonedaPipe`, que resuelven la moneda oficial desde el token. Colgar el pipe acá
-—que es lo que parece faltar al mirar los DTOs— haría que un tenant con oficial USD
-aceptara `1000.50` en una orden CLP. Los tres DTOs de plata llevan el porqué escrito
+—que es lo que parece faltar al mirar los DTOs— ataría la escala a la moneda del tenant
+y no a la de la orden: hoy coinciden, pero la regla es de la orden. Los tres DTOs de plata
+llevan el porqué escrito
 al lado del campo.
 
 La escala se valida **en el borde del service, antes de persistir**. Antes la miraba

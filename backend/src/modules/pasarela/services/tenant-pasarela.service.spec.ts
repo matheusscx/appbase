@@ -5,6 +5,7 @@ import { TenantPasarelaService } from './tenant-pasarela.service';
 import { CredencialesService } from './credenciales.service';
 import { TenantPasarela } from '../entities/tenant-pasarela.entity';
 import { Pasarela } from '../entities/pasarela.entity';
+import { MonedasService } from '../../monedas/monedas.service';
 
 describe('TenantPasarelaService', () => {
   let service: TenantPasarelaService;
@@ -16,7 +17,8 @@ describe('TenantPasarelaService', () => {
     findOne: jest.fn(),
     softRemove: jest.fn(),
   };
-  const pasarelaRepo = { findOne: jest.fn() };
+  const pasarelaRepo = { findOne: jest.fn(), find: jest.fn() };
+  const monedas = { codigoIsoOficial: jest.fn() };
   const dataSource = { query: jest.fn().mockResolvedValue([]) };
   const credenciales = {
     cifrarJson: jest.fn().mockReturnValue('v1:blob'),
@@ -25,6 +27,7 @@ describe('TenantPasarelaService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    monedas.codigoIsoOficial.mockResolvedValue('CLP');
     const module = await Test.createTestingModule({
       providers: [
         TenantPasarelaService,
@@ -39,6 +42,7 @@ describe('TenantPasarelaService', () => {
           },
         },
         { provide: CredencialesService, useValue: credenciales },
+        { provide: MonedasService, useValue: monedas },
       ],
     }).compile();
     service = module.get(TenantPasarelaService);
@@ -116,5 +120,124 @@ describe('TenantPasarelaService', () => {
     await expect(
       service.resolverConfiguracionActiva('t-1', 'oneclick'),
     ).rejects.toThrow('no tiene configurada');
+  });
+
+  /**
+   * Oneclick y Webpay Plus son de Transbank y liquidan en pesos chilenos
+   * (`MONEDA_ORDEN_V1`): un local de otro país no los puede configurar (owner,
+   * 2026-09-13). Antes podía, y el checkout online mandaba el total en su
+   * moneda como si fuera CLP. La demo no cobra, así que queda para todos.
+   */
+  describe('Oneclick y Webpay, solo para locales de Chile', () => {
+    const pasarela = (codigo: string, soportaMall = true) => ({
+      pasarelaId: `p-${codigo}`,
+      codigo,
+      nombre: codigo,
+      activo: true,
+      soportaMall,
+    });
+
+    it.each(['oneclick', 'webpay_plus'])(
+      'crear: rechaza %s si la moneda oficial del local no es CLP',
+      async (codigo) => {
+        monedas.codigoIsoOficial.mockResolvedValue('MXN');
+        pasarelaRepo.findOne.mockResolvedValue(pasarela(codigo));
+        await expect(
+          service.crear('t-mx', {
+            pasarelaId: `p-${codigo}`,
+            ambiente: 'pruebas',
+            modoIntegracion: 'mall',
+          }),
+        ).rejects.toThrow('solo están disponibles para locales de Chile');
+        expect(monedas.codigoIsoOficial).toHaveBeenCalledWith('t-mx');
+        expect(tpRepo.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('crear: en Chile, Webpay se configura', async () => {
+      pasarelaRepo.findOne.mockResolvedValue(pasarela('webpay_plus'));
+      await service.crear('t-cl', {
+        pasarelaId: 'p-webpay_plus',
+        ambiente: 'pruebas',
+        modoIntegracion: 'mall',
+      });
+      expect(tpRepo.save).toHaveBeenCalled();
+    });
+
+    it('crear: la demo se configura fuera de Chile', async () => {
+      monedas.codigoIsoOficial.mockResolvedValue('MXN');
+      pasarelaRepo.findOne.mockResolvedValue(pasarela('demo', false));
+      await service.crear('t-mx', {
+        pasarelaId: 'p-demo',
+        ambiente: 'pruebas',
+        modoIntegracion: 'individual',
+      });
+      expect(tpRepo.save).toHaveBeenCalled();
+    });
+
+    /**
+     * El alta ya lo rechaza, así que un local de otro país solo tendría una config de Transbank
+     * si viniera de antes de la regla. El owner pidió cortar también ahí (2026-09-13): editarla
+     * —prenderla, sobre todo— responde lo mismo que el alta.
+     */
+    it('actualizar: rechaza editar una config de Transbank en un local fuera de Chile', async () => {
+      monedas.codigoIsoOficial.mockResolvedValue('MXN');
+      tpRepo.findOne.mockResolvedValue({
+        tenantPasarelaId: 'tp-mx',
+        tenantId: 't-mx',
+        pasarelaId: 'p-oneclick',
+        activo: false,
+      });
+      pasarelaRepo.findOne.mockResolvedValue(pasarela('oneclick'));
+      await expect(
+        service.actualizar('t-mx', 'tp-mx', { activo: true }),
+      ).rejects.toThrow('solo están disponibles para locales de Chile');
+      expect(tpRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('actualizar: en Chile, prender Webpay se guarda', async () => {
+      tpRepo.findOne.mockResolvedValue({
+        tenantPasarelaId: 'tp-cl',
+        tenantId: 't-cl',
+        pasarelaId: 'p-webpay_plus',
+        activo: false,
+      });
+      pasarelaRepo.findOne.mockResolvedValue(pasarela('webpay_plus'));
+      await service.actualizar('t-cl', 'tp-cl', { activo: true });
+      expect(tpRepo.save).toHaveBeenCalled();
+    });
+
+    it('actualizar: la demo se edita fuera de Chile', async () => {
+      monedas.codigoIsoOficial.mockResolvedValue('MXN');
+      tpRepo.findOne.mockResolvedValue({
+        tenantPasarelaId: 'tp-demo',
+        tenantId: 't-mx',
+        pasarelaId: 'p-demo',
+        activo: false,
+      });
+      pasarelaRepo.findOne.mockResolvedValue(pasarela('demo', false));
+      await service.actualizar('t-mx', 'tp-demo', { activo: true });
+      expect(tpRepo.save).toHaveBeenCalled();
+    });
+
+    it('el catálogo no le ofrece Oneclick ni Webpay a un local fuera de Chile', async () => {
+      pasarelaRepo.find.mockResolvedValue([
+        pasarela('demo', false),
+        pasarela('oneclick'),
+        pasarela('webpay_plus'),
+      ]);
+      const codigos = async (tenantId: string) =>
+        (await service.listarPasarelasGlobales(tenantId)).map((p) => p.codigo);
+
+      monedas.codigoIsoOficial.mockResolvedValue('MXN');
+      expect(await codigos('t-mx')).toEqual(['demo']);
+
+      monedas.codigoIsoOficial.mockResolvedValue('CLP');
+      expect(await codigos('t-cl')).toEqual([
+        'demo',
+        'oneclick',
+        'webpay_plus',
+      ]);
+    });
   });
 });

@@ -7,7 +7,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../../common/db/db.service';
 import { CredencialesService } from './credenciales.service';
+import { MonedasService } from '../../monedas/monedas.service';
 import { Pasarela } from '../entities/pasarela.entity';
+import {
+  MONEDA_ORDEN_V1,
+  PASARELAS_EN_MONEDA_ORDEN,
+} from '../entities/pasarela-orden.entity';
 import { TenantPasarela } from '../entities/tenant-pasarela.entity';
 import { CreateTenantPasarelaDto } from '../dto/create-tenant-pasarela.dto';
 import { UpdateTenantPasarelaDto } from '../dto/update-tenant-pasarela.dto';
@@ -21,6 +26,7 @@ export class TenantPasarelaService {
     private readonly pasarelaRepo: Repository<Pasarela>,
     private readonly db: Db,
     private readonly credenciales: CredencialesService,
+    private readonly monedas: MonedasService,
   ) {}
 
   async listar(tenantId: string) {
@@ -78,8 +84,22 @@ export class TenantPasarelaService {
     return rows.length > 0;
   }
 
-  /** Catálogo global para el selector del drawer (sin configuración). */
-  listarPasarelasGlobales() {
+  /**
+   * Catálogo para el selector del drawer (sin configuración): las pasarelas
+   * activas que ESTE tenant puede configurar. Un local cuya moneda oficial no es
+   * la de las órdenes no ve las que liquidan en ella (`PASARELAS_EN_MONEDA_ORDEN`);
+   * `crear` hace el mismo corte para quien mande el id a mano.
+   */
+  async listarPasarelasGlobales(tenantId: string) {
+    const [pasarelas, codigoIso] = await Promise.all([
+      this.listarActivas(),
+      this.monedas.codigoIsoOficial(tenantId),
+    ]);
+    if (codigoIso === MONEDA_ORDEN_V1) return pasarelas;
+    return pasarelas.filter((p) => !PASARELAS_EN_MONEDA_ORDEN.has(p.codigo));
+  }
+
+  private listarActivas() {
     return this.pasarelaRepo.find({
       where: { activo: true },
       select: {
@@ -99,6 +119,7 @@ export class TenantPasarelaService {
       where: { pasarelaId: dto.pasarelaId, activo: true },
     });
     if (!pasarela) throw new BadRequestException('Pasarela no disponible');
+    await this.assertDisponibleEnElPais(tenantId, pasarela);
     if (dto.modoIntegracion === 'mall' && !pasarela.soportaMall)
       throw new BadRequestException('Esta pasarela no soporta modo mall');
 
@@ -139,6 +160,10 @@ export class TenantPasarelaService {
     });
     if (!tp)
       throw new NotFoundException('Configuración de pasarela no encontrada');
+    const pasarela = await this.pasarelaRepo.findOne({
+      where: { pasarelaId: tp.pasarelaId },
+    });
+    if (pasarela) await this.assertDisponibleEnElPais(tenantId, pasarela);
     if (dto.ambiente !== undefined) tp.ambiente = dto.ambiente;
     if (dto.modoIntegracion !== undefined)
       tp.modoIntegracion = dto.modoIntegracion;
@@ -160,6 +185,22 @@ export class TenantPasarelaService {
       prioridad: tp.prioridad,
       tieneCredenciales: !!tp.configuracion,
     };
+  }
+
+  /**
+   * Oneclick y Webpay liquidan en `MONEDA_ORDEN_V1`: un local cuya moneda oficial
+   * no es esa no los configura (owner, 2026-09-13). Corre al dar de alta y al
+   * editar. En la edición, una config de Transbank de un local de otro país solo
+   * existiría si viniera de antes de la regla —el alta ya la rechaza y un local
+   * no cambia de país—, y el owner pidió que tampoco se pueda prender.
+   */
+  private async assertDisponibleEnElPais(tenantId: string, pasarela: Pasarela) {
+    if (!PASARELAS_EN_MONEDA_ORDEN.has(pasarela.codigo)) return;
+    if ((await this.monedas.codigoIsoOficial(tenantId)) === MONEDA_ORDEN_V1)
+      return;
+    throw new BadRequestException(
+      `${pasarela.nombre} es de Transbank y cobra en pesos chilenos: Oneclick y Webpay solo están disponibles para locales de Chile`,
+    );
   }
 
   async eliminar(tenantId: string, tenantPasarelaId: string) {

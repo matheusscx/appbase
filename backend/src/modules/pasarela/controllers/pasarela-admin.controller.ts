@@ -44,8 +44,10 @@ export class PasarelaAdminController {
 
   @Get('pasarelas-disponibles')
   @RequiresPermiso('Pasarelas', 'Leer')
-  pasarelasDisponibles() {
-    return this.tenantPasarelaService.listarPasarelasGlobales();
+  pasarelasDisponibles(@Req() req: Request) {
+    return this.tenantPasarelaService.listarPasarelasGlobales(
+      this.tenantId(req),
+    );
   }
 
   @Get('config')
