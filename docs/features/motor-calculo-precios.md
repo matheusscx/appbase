@@ -198,9 +198,10 @@ esa fecha: entre 2026-07-28 y 2026-08-11 fue "determinista por id" (`ORDER BY` e
 `cargarReglasPorIds`) y nada más — determinismo sin criterio.
 
 **Hoy lo decide el motor**, no la query: `ordenarReglas` pone los porcentajes antes
-que los montos fijos. La regla, su porqué y sus consecuencias están en
-**Algoritmo (núcleo)**, más abajo. El `ORDER BY` de `cargarReglasPorIds` quedó como
-desempate entre reglas del mismo modo, donde el orden no mueve el total.
+que los montos fijos y, **entre porcentajes, el mayor primero** (2026-09-13). La regla,
+su porqué y sus consecuencias están en **Algoritmo (núcleo)**, más abajo. El `ORDER BY`
+de `cargarReglasPorIds` quedó como desempate entre porcentajes iguales y entre montos
+fijos, donde el orden no mueve el total.
 
 ### DTOs
 
@@ -513,11 +514,21 @@ Vale para descuentos **y** recargos.
 - **Va en el motor y no en el `ORDER BY` de las queries** porque hay tres caminos
   que arman listas de reglas (ventas, salones, combos): una regla que dependa de que
   los tres se acuerden del mismo `ORDER BY` se rompe sola.
-- **Dentro de cada grupo el orden no se toca** (el sort es estable), y el desempate del
-  llamador es por id. ⚠️ **Eso no es sin consecuencias, medido el 2026-09-12:** en modo
-  `base` el orden entre porcentajes no cambia el total, pero **en cascada sí, ya con dos
-  reglas**, porque cada una cierra cuantizada — hasta N−1 minor units con N reglas. Qué
-  orden corresponde es pregunta abierta en `docs/agent/pendientes.md` § 4.
+- **Entre porcentajes, el mayor primero** (decisión del owner, 2026-09-13). En cascada
+  cada regla cierra cuantizada y la siguiente se calcula sobre lo que dejó la anterior,
+  así que el orden entre porcentajes **sí mueve el total**: 10% y 15% sobre $1.490 en CLP
+  dejan $1.140 o $1.139 según cuál vaya primero. Medido el 2026-09-12 con
+  `docs/agent/medir-orden-porcentajes.ts`: pasaba ya con dos reglas, y con N reglas el
+  desvío llegaba a N−1 minor units. Hasta esa fecha el desempate era el id de la regla.
+  Se le preguntó al owner con la otra salida —repartir el redondeo para que el total no
+  dependa de ningún orden, un rediseño de cómo cierra el paso— y eligió un orden que el
+  ticket puede explicar.
+  - **"Mayor" es el porcentaje que la regla aplica ahí**: el del tramo elegido, no el
+    `valor_porcentaje` plano, que en una regla por tramos está vacío.
+  - **Del orden de entrada queda el desempate** entre porcentajes iguales y entre montos
+    fijos (el sort es estable), y ahí el orden no mueve el total.
+  - En modo `base` el orden entre porcentajes nunca movió el total; ahí el criterio
+    solo fija en qué orden aparecen en la traza.
 - **Efecto lateral bueno, medido:** un descuento fijo que se topeaba dejaba el
   acumulado negativo y **evaporaba en silencio** al porcentaje que venía después
   (el guard lo llevaba a 0). Con el orden nuevo eso no ocurre por construcción.

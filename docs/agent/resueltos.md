@@ -23,6 +23,87 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## En cascada, el orden entre porcentajes ya no lo decide el id de la regla: va primero el mayor (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 4](pendientes.md). **La decisión del owner**, preguntada con un plato de
+$1.490 con un 10% y un 15% de descuento en cascada —$1.140 con el 10% primero, $1.139 con el 15%—
+y tres salidas con su costo (un orden con criterio, el mismo total en cualquier orden repartiendo el
+redondeo, o dejarlo): *"con orden fijo, el mayor primero"*. Vale para descuentos y recargos, de línea
+y de venta: la pregunta se hizo sobre "dos o más reglas en %", y el caso medido de la entrada era de
+recargos.
+
+**Qué se hizo.** `ordenarReglas` (`calculo-precios.engine.ts`) sigue poniendo los porcentajes antes
+que los montos fijos y, entre porcentajes, ordena por el **porcentaje que la regla aplica ahí**, de
+mayor a menor. Ese valor sale de `evaluarRegla` con base cero, así que en una regla por tramos es el
+del tramo elegido y no el `valorPorcentaje` plano, que ahí es null. Evaluar antes de ordenar da el
+mismo valor que en el recorrido porque el tramo se elige con la cantidad y el neto, que no dependen
+de la posición. Una regla que no aporta valor (método de pago que no coincide, diferida) cuenta como
+0. Del orden de entrada queda el desempate entre porcentajes iguales y entre montos fijos (el sort
+es estable).
+
+**Medido antes de arreglar.** El caso de la entrada —0,74% y 25,18% de recargo sobre dos unidades de
+$43.680— se reproduce **a nivel venta**: $131.097 con el 0,74% primero y $131.098 con el 25,18%. A
+nivel línea, con escala 4 y con escala 6, esos dos porcentajes dan $131.098 en los dos órdenes.
+
+**Medido después**, con el mismo `docs/agent/medir-orden-porcentajes.ts`: **0 de 384 combinaciones**
+cambian el total según el orden de la lista.
+
+**De arrastre:** *"DENTRO de un paso el acumulado corre fino"* dependía del orden de la lista (0,5%
+antes que 50%). Con el mayor primero el caso dejaba de ejercer el acumulado fino, así que pasó a
+50,5% y 50%, que lo sigue ejerciendo: 50% de 150,5 = 75,25 → 75, contra 76 si se cuantizara regla por
+regla.
+
+**Lo que lo fija**, mutante por mutante sobre `calculo-precios.engine.spec.ts` (144 tests):
+
+| Mutante | Lo caza |
+|---|---|
+| el orden viejo (solo porcentajes antes que fijos) | *"entre porcentajes en cascada va primero el mayor…"*, *"el mayor lo dice el tramo elegido…"*, *"en los recargos también…"* y *"a nivel venta también…"* |
+| ordenar por `valorPorcentaje` plano | *"el mayor lo dice el tramo elegido, no el valor plano de la regla"* |
+| el menor primero | los cuatro de arriba y *"DENTRO de un paso el acumulado corre fino"* |
+
+**Docs:** los docblocks de `ordenarReglas` y de `cargarReglasPorIds` (`items.service.ts`) decían que
+dos porcentajes conmutan; `docs/features/motor-calculo-precios.md` y `docs/PRODUCTO.md` llevan la
+regla.
+
+La entrada, verbatim:
+
+- [ ] **En cascada, el orden en que se aplican dos o más reglas en % mueve el total** (motor
+  de precios; **medido el 2026-09-12**; reemplaza a la entrada de la § 2 *"Con tres o más
+  porcentajes, el orden entre ellos puede mover el último decimal"*, que lo daba por hipótesis).
+
+  **La pregunta, con un caso medido:** *un recargo de 0,74% y otro de 25,18%, en cascada, sobre
+  dos unidades de $43.680: el cliente paga $131.097 o $131.098 según cuál de los dos quedó
+  primero, y hoy "primero" lo decide el id interno de la regla. ¿Tiene que haber un orden que
+  se pueda explicar (por ejemplo, el mayor primero), o el total tiene que dar lo mismo en
+  cualquier orden?*
+  - **Un orden con criterio:** cambio chico en cómo se ordenan las reglas. El total sigue
+    dependiendo del orden, pero de uno que el ticket puede explicar.
+  - **Mismo total en cualquier orden:** cerrar el paso entero y repartir el redondeo entre las
+    reglas en vez de redondear cada una por su cuenta. Es rediseñar cómo cierra un paso del
+    motor: frente propio, a diseñar.
+
+  **Lo medido** con `docs/agent/medir-orden-porcentajes.ts` —el motor real, todas las
+  permutaciones de 2, 3 y 4 porcentajes, 400 casos al azar por combinación de nivel (línea /
+  venta), paso, modo de cálculo, nivel de redondeo, decimales de la moneda (0 y 2) y modo de
+  redondeo—:
+
+  | modo | cambia el total | desvío máximo |
+  |---|---|---|
+  | `base` | nunca | — |
+  | `compuesto`, redondeo por línea | ≈33% de los casos con 2 reglas, ≈82% con 3, ≈99% con 4 | N−1 minor units a nivel venta; a nivel línea una más, porque el IVA lo arrastra |
+  | `compuesto`, redondeo por documento | menos del 3% | 1 minor unit |
+
+  **Por qué:** cada regla cierra cuantizada (`montoQ` en `procesarReglas`) y en cascada la base
+  de la siguiente depende de la anterior, así que la suma de los redondeados no conmuta. ⚠️ **El
+  docblock de `ordenarReglas` se queda corto dos veces:** dice que dos porcentajes conmutan
+  —con dos ya pasa en un tercio de los casos— y que con tres "puede mover el último decimal"
+  —mueve hasta N−1—. Se corrige con el frente y no antes: tocar el motor obliga a parar.
+
+  **Alcance:** es alcanzable. "En cascada" se elige en Preferencias financieras (el tenant nace
+  en `base`) y un ítem puede tener varios descuentos. Es determinista —mismo carrito, mismo
+  total—, así que no es una carrera: es un desvío estable pero arbitrario.
+  ⛔ **Toca el motor de cálculo de precios:** va solo y con el sistema quieto.
+
 ## La cuenta que se está cobrando no se modifica hasta que el cierre termina (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 4](pendientes.md). **La decisión del owner**, preguntada con la escena

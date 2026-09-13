@@ -986,9 +986,10 @@ export class ItemsService {
    * sola.
    *
    * El `ORDER BY` de abajo sigue valiendo como **desempate determinista** entre
-   * reglas del mismo modo, donde el orden no cambia el total (dos porcentajes
-   * componen multiplicativamente, dos fijos suman). El sort del motor es
-   * estable, así que lo preserva.
+   * porcentajes iguales y entre montos fijos, donde el orden no cambia el total.
+   * Entre porcentajes distintos ya no desempata: desde el 2026-09-13 el motor
+   * pone el mayor primero, porque en cascada el orden entre ellos sí mueve el
+   * total. El sort del motor es estable, así que el desempate se preserva.
    */
   async cargarReglasPorIds(
     tenantId: string,

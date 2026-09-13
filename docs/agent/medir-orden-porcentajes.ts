@@ -6,12 +6,16 @@ import {
   type VentaResuelta,
 } from '../../backend/src/modules/calculo-precios/calculo-precios.engine';
 
-// Pendientes § 4, "En cascada, el orden…". Correr desde backend/:
+// resueltos.md, "En cascada, el orden entre porcentajes…". Correr desde backend/:
 //   npx ts-node -T -P tsconfig.json ../docs/agent/medir-orden-porcentajes.ts
 // Mide si el orden entre reglas de porcentaje del mismo paso cambia el total.
 // Recorre todas las permutaciones de N porcentajes, con bases y porcentajes
 // pseudoaleatorios (semilla fija), por nivel (linea/venta), modo de cálculo,
 // nivel de redondeo, decimales de moneda y modo de redondeo.
+//
+// Resultado: hasta el 2026-09-13 el orden movía el total en `compuesto` (la tabla
+// está en docs/agent/resueltos.md); con el porcentaje mayor primero da 0 de 384
+// combinaciones. Sirve de red si se vuelve a tocar `ordenarReglas`.
 
 let seed = 42;
 const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);

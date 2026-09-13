@@ -410,12 +410,145 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.lineas[0].totalLinea).toBe('1150.000000');
     });
 
-    it('entre reglas del mismo modo, el orden de entrada se preserva', () => {
-      // El sort es estable a propósito: el desempate sigue siendo el que trajo
-      // el llamador. Se verifica en la traza porque en el total no se nota —dos
-      // porcentajes componen multiplicativamente y dan lo mismo en cualquier
-      // orden—, que es justo la razón por la que el desempate puede ser
-      // arbitrario sin consecuencias.
+    /**
+     * Entre porcentajes, **el mayor primero** (owner, 2026-09-13). En cascada
+     * cada regla cierra cuantizada y la siguiente se calcula sobre lo que dejó
+     * la anterior, así que la suma de los redondeados no conmuta: mientras el
+     * desempate fue el `ORDER BY … regla_id` del llamador, el total dependía de
+     * un id que nadie eligió. Medido con `docs/agent/medir-orden-porcentajes.ts`.
+     */
+    it('entre porcentajes en cascada va primero el mayor, venga como venga la lista', () => {
+      const d10 = regla({ id: 'x', nombre: '10%', valorPorcentaje: '0.10' });
+      const d15 = regla({ id: 'y', nombre: '15%', valorPorcentaje: '0.15' });
+      // 15% de 1490 = 223,5 → 224; 10% de 1266 = 126,6 → 127; quedan 1139.
+      // Con el 10% primero: 149 + (15% de 1341 = 201,15 → 201) y quedaban 1140.
+      for (const descuentos of [
+        [d10, d15],
+        [d15, d10],
+      ]) {
+        const r = calcularVenta(
+          venta({
+            lineas: [linea({ precioUnitario: '1490', descuentos })],
+            config: config({
+              calculoDescuentos: 'compuesto',
+              decimalesMoneda: 0,
+            }),
+          }),
+        );
+        expect(
+          r.lineas[0].trazas.descuentos.map((t) => [t.nombre, t.monto]),
+        ).toEqual([
+          ['15%', '224.000000'],
+          ['10%', '127.000000'],
+        ]);
+        expect(r.totales.totalFinal).toBe('1139.000000');
+      }
+    });
+
+    it('el mayor lo dice el tramo elegido, no el valor plano de la regla', () => {
+      // Una regla por tramos tiene `valorPorcentaje` en null: ordenar por ese
+      // campo la mandaría al final y el total volvería a ser 1140.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1490',
+              descuentos: [
+                regla({ id: 'x', nombre: '10%', valorPorcentaje: '0.10' }),
+                regla({
+                  id: 'y',
+                  nombre: 'Por mayor',
+                  codigo: 'por_mayor',
+                  valorPorcentaje: null,
+                  tramos: [
+                    {
+                      minimoCantidad: '1',
+                      minimoMonto: null,
+                      valorMonto: null,
+                      valorPorcentaje: '0.15',
+                    },
+                  ],
+                }),
+              ],
+            }),
+          ],
+          config: config({
+            calculoDescuentos: 'compuesto',
+            decimalesMoneda: 0,
+          }),
+        }),
+      );
+      expect(r.lineas[0].trazas.descuentos.map((t) => t.nombre)).toEqual([
+        'Por mayor',
+        '10%',
+      ]);
+      expect(r.totales.totalFinal).toBe('1139.000000');
+    });
+
+    it('en los recargos también va primero el mayor', () => {
+      // 10% de 990 = 99; 5% de 1089 = 54,45 → 54; quedan 1143. Con el 5%
+      // primero: 49,5 → 50 + (10% de 1039,5 = 103,95 → 104) = 1144.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '990',
+              recargos: [
+                regla({ id: 'x', nombre: '5%', valorPorcentaje: '0.05' }),
+                regla({ id: 'y', nombre: '10%', valorPorcentaje: '0.10' }),
+              ],
+            }),
+          ],
+          config: config({ calculoRecargos: 'compuesto', decimalesMoneda: 0 }),
+        }),
+      );
+      expect(
+        r.lineas[0].trazas.recargos.map((t) => [t.nombre, t.monto]),
+      ).toEqual([
+        ['10%', '99.000000'],
+        ['5%', '54.000000'],
+      ]);
+      expect(r.totales.totalFinal).toBe('1143.000000');
+    });
+
+    it('a nivel venta también: el caso con el que se le preguntó al owner', () => {
+      // 0,74% y 25,18% de recargo sobre dos unidades de 43.680 con IVA: con el
+      // 0,74% primero el total era 131.097, y con el 25,18% primero, 131.098.
+      for (const recargosVenta of [
+        [
+          regla({ id: 'x', nombre: '0,74%', valorPorcentaje: '0.0074' }),
+          regla({ id: 'y', nombre: '25,18%', valorPorcentaje: '0.2518' }),
+        ],
+        [
+          regla({ id: 'y', nombre: '25,18%', valorPorcentaje: '0.2518' }),
+          regla({ id: 'x', nombre: '0,74%', valorPorcentaje: '0.0074' }),
+        ],
+      ]) {
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                precioUnitario: '43680',
+                cantidad: '2',
+                impuestos: [impuesto()],
+              }),
+            ],
+            recargosVenta,
+            config: config({
+              calculoRecargos: 'compuesto',
+              decimalesMoneda: 0,
+            }),
+          }),
+        );
+        expect(r.totales.totalFinal).toBe('131098.000000');
+      }
+    });
+
+    it('entre porcentajes iguales, el orden de entrada se preserva', () => {
+      // El sort es estable a propósito: el desempate que queda es el que trajo
+      // el llamador. Solo se ve en la traza —dos reglas del mismo porcentaje
+      // piden lo mismo en cualquier posición—, que es justo por lo que ese
+      // desempate puede ser arbitrario sin mover el total.
       const r = calcularVenta(
         venta({
           lineas: [
@@ -423,7 +556,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               precioUnitario: '1000',
               descuentos: [
                 regla({ id: 'x', nombre: 'Primero', valorPorcentaje: '0.10' }),
-                regla({ id: 'y', nombre: 'Segundo', valorPorcentaje: '0.30' }),
+                regla({ id: 'y', nombre: 'Segundo', valorPorcentaje: '0.10' }),
               ],
             }),
           ],
@@ -1874,7 +2007,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
                 regla({
                   id: 'r1',
                   modo: 'porcentaje',
-                  valorPorcentaje: '0.005',
+                  valorPorcentaje: '0.505',
                 }),
                 regla({
                   id: 'r2',
@@ -1887,16 +2020,20 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         }),
       );
       const l = r.lineas[0];
-      // 100 + 0,5% = 100,5 (acumulado FINO) ; 50% de 100,5 = 50,25 → 50.
-      // Cuantizando regla por regla el acumulado sería 101 y el segundo
-      // recargo 50,5 → 51: un peso de más, compuesto por el paso anterior.
+      // 100 + 50,5% = 150,5 (acumulado FINO) ; 50% de 150,5 = 75,25 → 75.
+      // Cuantizando regla por regla el acumulado sería 151 y el segundo
+      // recargo 75,5 → 76: un peso de más, compuesto por el paso anterior.
       // Es el error del Vancouver Stock Exchange en chico.
+      //
+      // El 50,5% va primero por ser el mayor (`ordenarReglas`), no por venir
+      // primero en la lista: el caso necesita que la regla que deja el
+      // acumulado en medio peso sea la que se aplica antes.
       expect(l.trazas.recargos.map((t) => t.monto)).toEqual([
-        '1.000000',
-        '50.000000',
+        '51.000000',
+        '75.000000',
       ]);
-      expect(l.recargoAplicado).toBe('51.000000');
-      expect(l.totalLinea).toBe('151.000000');
+      expect(l.recargoAplicado).toBe('126.000000');
+      expect(l.totalLinea).toBe('226.000000');
     });
 
     it('el piso en cero aguanta la cuantización: el total no queda negativo', () => {

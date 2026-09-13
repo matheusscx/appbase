@@ -686,21 +686,45 @@ function sinRepetidas(avisos: AdvertenciaPrecio[]): AdvertenciaPrecio[] {
  * argumento 1 aplica ("5% de recargo" es 5% del precio), y el resultado también
  * favorece al cliente.
  *
- * El orden dentro de cada grupo NO se toca: `Array.prototype.sort` es estable
- * (garantizado por ES2019), así que se preserva el que trajo el llamador —hoy
- * `ORDER BY … regla_id` en `items.service.ts`, determinista pero arbitrario—.
- * Que ese desempate sea arbitrario es aceptable porque **entre reglas del mismo
- * modo el orden no cambia el total**: dos porcentajes componen
- * multiplicativamente y dos fijos suman. Con tres o más porcentajes puede mover
- * el último decimal por redondeo de paso, y eso está anotado en el backlog.
+ * **Entre porcentajes, el mayor primero** (decisión del owner, 2026-09-13). En
+ * `compuesto` cada regla cierra cuantizada y la siguiente se calcula sobre lo
+ * que dejó la anterior, así que la suma de los redondeados **no conmuta**: 10% y
+ * 15% sobre 1490 en CLP dejan 1140 o 1139 según cuál vaya primero. Hasta esa
+ * fecha el desempate era el `ORDER BY … regla_id` del llamador, y el total
+ * dependía de un id que nadie eligió. En `base` el orden entre porcentajes no
+ * movía el total; ahí el criterio fija la traza.
+ *
+ * "Mayor" es el porcentaje que la regla aplica **acá**: el del tramo elegido, no
+ * el `valorPorcentaje` plano, que en una regla por tramos es null. El tramo se
+ * elige con la cantidad y el neto, que no dependen de la posición, así que
+ * evaluar antes de ordenar da el mismo valor que en el recorrido. Una regla que
+ * no aporta valor (método de pago que no coincide, diferida) cuenta como 0: no
+ * mueve el acumulado, así que su lugar no cambia nada.
+ *
+ * Del orden de entrada queda el desempate entre porcentajes iguales
+ * —intercambiarlos deja los mismos montos— y entre montos fijos, que suman.
+ * `Array.prototype.sort` es estable (garantizado por ES2019).
  *
  * Se copia el array en vez de ordenarlo in-place: la lista es del llamador y
  * reordenársela sería un efecto lateral invisible.
  */
-function ordenarReglas(reglas: ReglaResuelta[]): ReglaResuelta[] {
-  return [...reglas].sort(
-    (a, b) => Number(a.modo === 'monto_fijo') - Number(b.modo === 'monto_fijo'),
-  );
+function ordenarReglas(
+  reglas: ReglaResuelta[],
+  ctx: Omit<ContextoRegla, 'base'>,
+): ReglaResuelta[] {
+  const porcentajeDe = (regla: ReglaResuelta): Decimal => {
+    if (regla.modo === 'monto_fijo') return ZERO;
+    const { valorEfectivo } = evaluarRegla(regla, { ...ctx, base: ZERO });
+    return valorEfectivo === null ? ZERO : new Decimal(valorEfectivo);
+  };
+  return reglas
+    .map((regla) => ({
+      regla,
+      fijo: Number(regla.modo === 'monto_fijo'),
+      porcentaje: porcentajeDe(regla),
+    }))
+    .sort((a, b) => a.fijo - b.fijo || b.porcentaje.comparedTo(a.porcentaje))
+    .map(({ regla }) => regla);
 }
 
 /**
@@ -793,7 +817,11 @@ function procesarReglas(
   const trazasPromos: TrazaPromo[] = [];
   const advertencias: AdvertenciaPrecio[] = [];
 
-  for (const regla of ordenarReglas(reglas)) {
+  for (const regla of ordenarReglas(reglas, {
+    cantidad: params.cantidad,
+    monto: params.neto,
+    metodoPagoId: params.metodoPagoId,
+  })) {
     // Pausada: no aplica, no deja traza —no es un "aplicó 0"— y avisa. El
     // `continue` va antes de evaluar para que ni siquiera se calcule el monto.
     if (!regla.activo) {

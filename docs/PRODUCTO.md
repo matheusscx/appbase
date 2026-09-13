@@ -681,6 +681,11 @@ Cada paso aplica sobre el resultado acumulado del paso anterior. El tenant puede
 
 **Configuración adicional por tenant:**
 - `calculo_descuentos`: `'base'` (todos sobre precioNeto) | `'compuesto'` (cada descuento sobre el resultado del anterior)
+- **Orden entre reglas del mismo paso** (lo impone el motor, no se configura): los porcentajes
+  antes que los montos fijos (owner, 2026-08-11) y, entre porcentajes, **el mayor primero**
+  (owner, 2026-09-13). En `'compuesto'` el orden mueve el último peso del total, así que tiene
+  que ser uno que el ticket pueda explicar. Detalle:
+  [motor-calculo-precios.md](features/motor-calculo-precios.md).
 
 **Configuración por item:**
 - `precio_incluye_impuesto: boolean` — si el precio ingresado ya incluye impuestos o no.

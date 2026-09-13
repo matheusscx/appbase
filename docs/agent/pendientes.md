@@ -890,76 +890,43 @@ heredado ([`resueltos.md`](resueltos.md)).
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
 
+### Webpay online, solo para tenants de Chile (owner, 2026-09-13)
+
+Sale de la § 4. **El hueco:** un tenant que no es de Chile puede cobrar online con Webpay, y la
+orden guarda como pesos chilenos el total en su propia moneda. Se preguntó con la escena de una
+tienda de México que vende online un pedido de $250 pesos mexicanos mientras Webpay cobra en
+pesos chilenos: *¿solo a locales de Chile, o se convierte con la tasa del día?* **El owner: solo
+Chile.**
+
+**Lo que falta construir:** que un tenant cuya moneda oficial no es CLP no pueda cobrar online
+con Webpay, con el corte en el backend y no solo escondido en la pantalla. Hoy `pasarela` no
+restringe nada por país. En qué punto va el corte —al configurar la pasarela, al iniciar el
+checkout o en los dos— se decide al construirlo.
+
+**Lo leído:** `online.service.ts` manda `resultado.totales.totalFinal` —en la moneda oficial
+del tenant— como `monto` a `pagosRedirect.iniciar`, que valida la escala contra
+`MONEDA_ORDEN_V1` (CLP) y guarda la orden con esa moneda (`pagos-redirect.service.ts`). No hay
+conversión en el medio. Si el total trae decimales, el checkout debería contestar 400; si es
+entero, se cobraría ese número en pesos chilenos (USD 10 → $10). Es alcanzable: el seed
+siembra provincias de AR, CO y MX, así que se puede dar de alta un tenant con oficial ≠ CLP,
+y `pasarela` no restringe nada por país.
+
+**Qué cambia de lo que decía la entrada anterior:** temía que la nota de crédito del
+reembolso acreditara pesos chilenos contra una venta en otra moneda. La nota **no convierte**
+—`reembolso-callback.handler.ts` le pasa el monto de la orden, solo cuantizado a la escala de
+la venta—, pero tampoco tendría qué convertir: en las órdenes del checkout online ese número
+nunca fue CLP. Por lo mismo, el `MoneyInput` con `oficial` del `ReembolsoModal` muestra hoy la
+moneda real del número; qué moneda tiene que mostrar depende de la respuesta.
+`NotaCreditoModal` no tiene el problema: acredita una venta, y la venta se persiste en la
+oficial.
+⛔ Cuando se arregle, la nota de crédito del reembolso es fiscal: va aparte (`CLAUDE.md`,
+*"Lo fiscal va solo"*).
+
 ## 4. Necesita que el owner conteste
 
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
-
-- [ ] **En cascada, el orden en que se aplican dos o más reglas en % mueve el total** (motor
-  de precios; **medido el 2026-09-12**; reemplaza a la entrada de la § 2 *"Con tres o más
-  porcentajes, el orden entre ellos puede mover el último decimal"*, que lo daba por hipótesis).
-
-  **La pregunta, con un caso medido:** *un recargo de 0,74% y otro de 25,18%, en cascada, sobre
-  dos unidades de $43.680: el cliente paga $131.097 o $131.098 según cuál de los dos quedó
-  primero, y hoy "primero" lo decide el id interno de la regla. ¿Tiene que haber un orden que
-  se pueda explicar (por ejemplo, el mayor primero), o el total tiene que dar lo mismo en
-  cualquier orden?*
-  - **Un orden con criterio:** cambio chico en cómo se ordenan las reglas. El total sigue
-    dependiendo del orden, pero de uno que el ticket puede explicar.
-  - **Mismo total en cualquier orden:** cerrar el paso entero y repartir el redondeo entre las
-    reglas en vez de redondear cada una por su cuenta. Es rediseñar cómo cierra un paso del
-    motor: frente propio, a diseñar.
-
-  **Lo medido** con `docs/agent/medir-orden-porcentajes.ts` —el motor real, todas las
-  permutaciones de 2, 3 y 4 porcentajes, 400 casos al azar por combinación de nivel (línea /
-  venta), paso, modo de cálculo, nivel de redondeo, decimales de la moneda (0 y 2) y modo de
-  redondeo—:
-
-  | modo | cambia el total | desvío máximo |
-  |---|---|---|
-  | `base` | nunca | — |
-  | `compuesto`, redondeo por línea | ≈33% de los casos con 2 reglas, ≈82% con 3, ≈99% con 4 | N−1 minor units a nivel venta; a nivel línea una más, porque el IVA lo arrastra |
-  | `compuesto`, redondeo por documento | menos del 3% | 1 minor unit |
-
-  **Por qué:** cada regla cierra cuantizada (`montoQ` en `procesarReglas`) y en cascada la base
-  de la siguiente depende de la anterior, así que la suma de los redondeados no conmuta. ⚠️ **El
-  docblock de `ordenarReglas` se queda corto dos veces:** dice que dos porcentajes conmutan
-  —con dos ya pasa en un tercio de los casos— y que con tres "puede mover el último decimal"
-  —mueve hasta N−1—. Se corrige con el frente y no antes: tocar el motor obliga a parar.
-
-  **Alcance:** es alcanzable. "En cascada" se elige en Preferencias financieras (el tenant nace
-  en `base`) y un ítem puede tener varios descuentos. Es determinista —mismo carrito, mismo
-  total—, así que no es una carrera: es un desvío estable pero arbitrario.
-  ⛔ **Toca el motor de cálculo de precios:** va solo y con el sistema quieto.
-
-- [ ] **Un tenant que no es de Chile puede cobrar online con Webpay, y la orden guarda como
-  pesos chilenos el total en su propia moneda** (pasarela + online, multi-moneda; **leído en
-  el código el 2026-09-12, no corrido**; reemplaza a la entrada de la § 2 *"El modal de
-  reembolso formatea con la moneda del tenant una orden que siempre es CLP"*).
-
-  **La pregunta:** *una tienda de México vende online un pedido de $250 pesos mexicanos, y
-  Webpay cobra en pesos chilenos. ¿Webpay online se ofrece solo a locales de Chile, o se
-  convierte al peso chileno con la tasa del día —y el cliente ve el cobro en otra moneda—?*
-
-  **Lo leído:** `online.service.ts` manda `resultado.totales.totalFinal` —en la moneda oficial
-  del tenant— como `monto` a `pagosRedirect.iniciar`, que valida la escala contra
-  `MONEDA_ORDEN_V1` (CLP) y guarda la orden con esa moneda (`pagos-redirect.service.ts`). No hay
-  conversión en el medio. Si el total trae decimales, el checkout debería contestar 400; si es
-  entero, se cobraría ese número en pesos chilenos (USD 10 → $10). Es alcanzable: el seed
-  siembra provincias de AR, CO y MX, así que se puede dar de alta un tenant con oficial ≠ CLP,
-  y `pasarela` no restringe nada por país.
-
-  **Qué cambia de lo que decía la entrada anterior:** temía que la nota de crédito del
-  reembolso acreditara pesos chilenos contra una venta en otra moneda. La nota **no convierte**
-  —`reembolso-callback.handler.ts` le pasa el monto de la orden, solo cuantizado a la escala de
-  la venta—, pero tampoco tendría qué convertir: en las órdenes del checkout online ese número
-  nunca fue CLP. Por lo mismo, el `MoneyInput` con `oficial` del `ReembolsoModal` muestra hoy la
-  moneda real del número; qué moneda tiene que mostrar depende de la respuesta.
-  `NotaCreditoModal` no tiene el problema: acredita una venta, y la venta se persiste en la
-  oficial.
-  ⛔ Cuando se arregle, la nota de crédito del reembolso es fiscal: va aparte (`CLAUDE.md`,
-  *"Lo fiscal va solo"*).
 
 ## 5. Carreras de concurrencia
 
