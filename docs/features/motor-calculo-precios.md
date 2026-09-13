@@ -513,10 +513,11 @@ Vale para descuentos **y** recargos.
 - **Va en el motor y no en el `ORDER BY` de las queries** porque hay tres caminos
   que arman listas de reglas (ventas, salones, combos): una regla que dependa de que
   los tres se acuerden del mismo `ORDER BY` se rompe sola.
-- **Dentro de cada grupo el orden no se toca** (el sort es estable): entre reglas del
-  mismo modo el total no cambia, así que el desempate del llamador —hoy por id— es
-  arbitrario sin consecuencias. Con tres o más porcentajes puede mover el último
-  decimal por redondeo de paso; está anotado en `docs/agent/pendientes.md`.
+- **Dentro de cada grupo el orden no se toca** (el sort es estable), y el desempate del
+  llamador es por id. ⚠️ **Eso no es sin consecuencias, medido el 2026-09-12:** en modo
+  `base` el orden entre porcentajes no cambia el total, pero **en cascada sí, ya con dos
+  reglas**, porque cada una cierra cuantizada — hasta N−1 minor units con N reglas. Qué
+  orden corresponde es pregunta abierta en `docs/agent/pendientes.md` § 4.
 - **Efecto lateral bueno, medido:** un descuento fijo que se topeaba dejaba el
   acumulado negativo y **evaporaba en silencio** al porcentaje que venía después
   (el guard lo llevaba a 0). Con el orden nuevo eso no ocurre por construcción.

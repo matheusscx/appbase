@@ -23,6 +23,111 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La request ajena que "no volvía" detrás de un lock era el harness, y ya estaba arreglado (cerrada 2026-09-12)
+
+**Qué era:** el `end()` de supertest 7 (`node_modules/supertest/lib/test.js:133-151`) cierra con
+`server.close(cb)` el server que él mismo levantó, y `close` espera a que termine **toda**
+conexión abierta, no solo la suya. La sonda del 2026-08-26 corrió con el primer arreglo del
+`401` (`54ebc7ae`), que dejaba a supertest levantando un server por request: si la request
+ajena era la que lo levantaba, su respuesta quedaba esperando la conexión del dueño, frenada en
+el lock. El bind en `init()` (`152b8a18`, 2026-08-27) hace que supertest no levante ni cierre
+nada, y con eso el cuadro desaparece.
+
+**Medido el 2026-09-12** con una sonda temporal (no quedó en el repo): compuerta `FOR UPDATE`
+sobre la caja, las dos requests disparadas en el mismo tick, y un middleware que anota cuándo el
+servidor terminó cada respuesta.
+
+| escenario | servidor terminó la ajena | el test recibió la ajena | se soltó la compuerta |
+|---|---|---|---|
+| harness actual, ajena primero | 19 ms | 19 ms | 22 ms |
+| harness actual, dueño primero | 9 ms | 9 ms | 10 ms |
+| server sin bindear —como el 2026-08-26—, ajena primero | **7 ms** | **3014 ms** | 3001 ms |
+| server sin bindear, dueño primero | 13 ms | 13 ms | 22 ms |
+
+La fila 3 es el cuadro original —la ajena llega al test 1 ms después que la del dueño— con el
+servidor habiendo contestado a los 7 ms: **el runtime no trabó nada**. Explica también el
+discriminador que la entrada no podía explicar: disparando la ajena *después*, el server lo había
+levantado el dueño y la ajena no tenía nada que cerrar. Una repetición del escenario 1 al final de
+la sonda dio lo mismo (servidor 9 ms, test 10 ms).
+
+📌 **La lección de método:** la entrada descartaba cuatro hipótesis del runtime y ninguna del
+harness, y el harness cambió al día siguiente de la sonda. Un intermitente abierto sobre un arnés
+que cambió se vuelve a medir antes de seguir cazando.
+
+### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
+
+- [ ] **Reproducible, con cuatro hipótesis medidas y descartadas —una, la del ALS, solo en
+  sentido estricto— y ninguna confirmada** (harness de test
+  y/o runtime; medido con una sonda dedicada el 2026-08-26) — con una compuerta reteniendo
+  `FOR UPDATE` sobre una caja, se disparan **dos requests a la vez**: la del dueño (que sí se
+  encola en ese lock) y la de **otro tenant**, que por el filtro de tenant no toca esa fila.
+  **Ninguna de las dos vuelve hasta que se suelta la compuerta**, y resuelven con 1 ms de
+  diferencia (`403 @3112ms` / `201 @3113ms`).
+
+  **Lo que la medición descartó, cada uno con su evidencia:**
+
+  | Hipótesis | Qué se midió | Veredicto |
+  |---|---|---|
+  | La request se queda esperando **conexión** del pool | `setup-pool.ts` engancha `Pool.prototype.connect` y registra en cuatro casos: error, `ms >= 250`, pedida con `esperando > 0`, o pool lleno. Corre en todos los e2e y **no escribió ni una línea** en la ventana de la sonda | descartada, y por medición continua: una espera de ~3 s se habría anotado al resolverse |
+  | **Contexto transaccional compartido** (ALS, ADR-020) | log en `db.transaccion`: las dos entran con `reusa=false`, a los 19 y 24 ms | descartada **en su sentido estricto**: ninguna reusó el manager de la otra |
+  | La request **no llega** al server | middleware de sonda: las dos llegan a los 2 y 5 ms | descartada |
+  | El **event loop** está tapado | las 12 muestras de `pg_stat_activity` las tomó **el propio test, en el mismo proceso**, durante el cuelgue: con el loop tapado de forma sostenida no habría muestras. Y en la sesión anterior una `GET` disparada en esa ventana contestó `200` al toque | descartada |
+
+  ⚠️ **El piso del descarte del pool es `LENTO_MS = 250`**: una espera menor a eso, con la cola
+  vacía y el pool no lleno, es invisible para esa sonda. Criterio exacto del chequeo: **cero
+  líneas** con `test` = *"SONDA concurrencia mide dónde se queda la request ajena"* **en todo
+  el archivo** —append-only por diseño— y la
+  única línea `"(fuera de un test)"` que existe es del `2026-08-26T00:36`, anterior a la sonda.
+  ⛔ **Y el historial de ese archivo YA NO EXISTE: se borró el 2026-08-27** (un arnés de
+  verificación le hizo `unlink`; se rescataron sólo las dos capturas de error del otro frente, las
+  ~34.200 adquisiciones sanas se perdieron). O sea que **este chequeo hay que rehacerlo corriendo
+  la sonda**, no leyendo el archivo: hoy la ausencia de líneas no prueba nada, ni acá ni en otro
+  clone —es local y gitignoreado—. La lección para el próximo: un archivo append-only sin respaldo
+  es una medición a un `rm` de distancia.
+
+  **Lo que queda sin explicar:** la request ajena **no aparece como backend de Postgres** en
+  ninguna de las 12 muestras —solo se ven la compuerta (`idle in transaction`) y la del dueño
+  (`active`/`Lock`)—. ⚠️ Pero **12 muestras no son exhaustivas**: un backend que vivió entre
+  dos muestras no aparece. Y con `reusa=false` sabemos que **no reusó** contexto ajeno; si
+  llegó a abrir la suya en la base, eso **no se midió**.
+
+  **La principal candidata** —no "la única que queda", que sería afirmar una exhaustividad que
+  la medición no da— es `createQueryRunner()` y la emisión del `BEGIN`: la otra mitad de esa
+  capa, el `connect()`, la excluye la fila 1. Tampoco se miró lo que pasa **después** de que
+  `dataSource.transaction()` retorna —interceptores, serialización de la respuesta—: una
+  request que abrió y cerró su transacción entre dos muestras y se colgó en la salida daría
+  este mismo cuadro.
+
+  ⚠️ **El descarte del pool NO habilita a razonar "había una conexión idle, así que pg-pool no
+  podía encolar".** Este mismo archivo, en la entrada del `timeout exceeded when trying to
+  connect`, registra el estado `idle: 1` con `esperando: 1` y lo deja marcado como *"no lo sé,
+  y no lo invento"*. Lo que descarta esta fila es la **medición continua**, no ese argumento.
+
+  **El discriminador, y es por dónde hay que empezar: solo pasa si las dos están en vuelo
+  desde el principio.** Disparando la ajena **después** de que el dueño ya se encoló, contestó
+  en **53 ms** con la compuerta cerrada. ⚠️ Ese número sale de la **sonda**, no de un test:
+  **ese escenario no lo cubre ninguno**. Lo más parecido que sí corre es el paso 1 de
+  `caja.e2e-spec.ts` (describe "aislamiento multi-tenant"), y es **otro caso** —ahí la ajena
+  va sola, con la compuerta cerrada pero con el dueño todavía sin disparar—; además ese test
+  afirma *"volvió antes de que soltáramos"* y *"la cola quedó en 0"*, con presupuesto de 3 s:
+  **no mira latencia**, así que no fija ningún milisegundo. El 5 ms que citan ese test y
+  [`resueltos.md`](resueltos.md) es de **su** escenario, no de éste.
+
+  ⚠️ **Cuidado con desescalarlo por el encuadre.** Lo que se trabó no fue una segunda escritura
+  a la misma caja: fue una request **de otro tenant, sobre datos de otro tenant**. Si la causa
+  vive en el runtime y no en el harness, el radio es **cualquier request detrás de cualquier
+  request frenada** —cruza tenants y cruza pantallas— y eso es disponibilidad de producción.
+  ℹ️ **El test que lo destapó no depende de esto**: dispara en secuencia y suelta la compuerta
+  antes de esperar nada, así que nadie tiene que sospechar del e2e ya shippeado.
+
+  ℹ️ La sonda era un spec temporal y no quedó en el repo. Reconstruirla es media hora:
+  compuerta con `QueryRunner`, dos disparos sin `await`, un `app.use()` de sonda para saber
+  cuándo llega cada request, y muestreo de `pg_stat_activity` **por el pool** —no por la
+  compuerta: esa vista se cachea por transacción, ver el cierre del test en
+  [`resueltos.md`](resueltos.md)—. Para el pool **no hace falta inventar nada**: `setup-pool.ts`
+  ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
+  tiempo entre `createQueryRunner()` y el `BEGIN`.
+
 ## Lo cerrado que seguía anotado en el resto de pendientes (mudado 2026-09-12)
 
 Misma limpieza que la sección de abajo, sobre las demás secciones de [`pendientes.md`](pendientes.md): párrafos que anunciaban algo ya cerrado, construido o contestado y que se habían dejado en su lugar en vez de mudarse. En cada entrada que **sigue abierta** quedó solo lo que falta hacer, con la reescritura mínima para que no quedara una frase colgando (*"Eso NO cierra esta entrada"*, *"ver más abajo"*, *"quedan los otros dos"*). El detalle de cada cierre ya estaba en este archivo; lo que se muda acá es el texto que lo anunciaba —con las lecciones que vivían **solo** ahí—, verbatim y agrupado por la sección de la que salió.

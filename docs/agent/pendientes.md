@@ -553,122 +553,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
 
-### El modal de reembolso formatea con la moneda del tenant una orden que siempre es CLP (2026-09-08)
-
-- [ ] **`ReembolsoModal` monta su `MoneyInput` con `oficial`** —la moneda oficial del
-  tenant— y el monto que se reembolsa es el de una orden de Webpay, que es **siempre en
-  pesos chilenos**. Con un tenant cuya oficial no sea CLP, el campo agrupa, muestra el
-  símbolo y admite decimales de otra moneda para un número que no es de esa moneda.
-  Salió del frente del ×10 como su punto 3, siempre marcado *"ortogonal"*
-  ([`resueltos.md`](resueltos.md)); se separa acá para que no lo arrastre un cierre que no
-  lo toca.
-  **Medido el 2026-09-11**, en el orden que la entrada pedía:
-  (1) **es alcanzable, no latente**: el seed siembra provincias de AR, CO y MX, así que se
-  puede dar de alta un tenant con oficial ≠ CLP, y el módulo `pasarela` no restringe nada por
-  país;
-  (2) el backend dice CLP para **toda** orden —`MONEDA_ORDEN_V1` en `pasarela-orden.entity.ts`,
-  cuyo docblock nombra este mismo caso: un tenant con oficial USD igual crea órdenes en CLP—,
-  así que el campo tendría que ir en CLP y no en `oficial`;
-  (3) `NotaCreditoModal` **no** tiene el desajuste: acredita una venta, y la venta se persiste
-  en la oficial.
-  ⛔ **Lo que queda sin medir es la parte que pesa:** cuando el reembolso genera nota de
-  crédito (`generarNotaCredito`), un monto en CLP acredita una venta en la oficial, y no se
-  miró si se convierte en algún lado. Eso es multi-moneda **y** fiscal, así que no va de
-  arrastre del arreglo del campo: frente propio (`CLAUDE.md`, *"Lo fiscal va solo"*).
-
-### Con una request frenada en un lock, otra que ni lo toca tampoco vuelve (2026-08-26)
-
-- [ ] **Reproducible, con cuatro hipótesis medidas y descartadas —una, la del ALS, solo en
-  sentido estricto— y ninguna confirmada** (harness de test
-  y/o runtime; medido con una sonda dedicada el 2026-08-26) — con una compuerta reteniendo
-  `FOR UPDATE` sobre una caja, se disparan **dos requests a la vez**: la del dueño (que sí se
-  encola en ese lock) y la de **otro tenant**, que por el filtro de tenant no toca esa fila.
-  **Ninguna de las dos vuelve hasta que se suelta la compuerta**, y resuelven con 1 ms de
-  diferencia (`403 @3112ms` / `201 @3113ms`).
-
-  **Lo que la medición descartó, cada uno con su evidencia:**
-
-  | Hipótesis | Qué se midió | Veredicto |
-  |---|---|---|
-  | La request se queda esperando **conexión** del pool | `setup-pool.ts` engancha `Pool.prototype.connect` y registra en cuatro casos: error, `ms >= 250`, pedida con `esperando > 0`, o pool lleno. Corre en todos los e2e y **no escribió ni una línea** en la ventana de la sonda | descartada, y por medición continua: una espera de ~3 s se habría anotado al resolverse |
-  | **Contexto transaccional compartido** (ALS, ADR-020) | log en `db.transaccion`: las dos entran con `reusa=false`, a los 19 y 24 ms | descartada **en su sentido estricto**: ninguna reusó el manager de la otra |
-  | La request **no llega** al server | middleware de sonda: las dos llegan a los 2 y 5 ms | descartada |
-  | El **event loop** está tapado | las 12 muestras de `pg_stat_activity` las tomó **el propio test, en el mismo proceso**, durante el cuelgue: con el loop tapado de forma sostenida no habría muestras. Y en la sesión anterior una `GET` disparada en esa ventana contestó `200` al toque | descartada |
-
-  ⚠️ **El piso del descarte del pool es `LENTO_MS = 250`**: una espera menor a eso, con la cola
-  vacía y el pool no lleno, es invisible para esa sonda. Criterio exacto del chequeo: **cero
-  líneas** con `test` = *"SONDA concurrencia mide dónde se queda la request ajena"* **en todo
-  el archivo** —append-only por diseño— y la
-  única línea `"(fuera de un test)"` que existe es del `2026-08-26T00:36`, anterior a la sonda.
-  ⛔ **Y el historial de ese archivo YA NO EXISTE: se borró el 2026-08-27** (un arnés de
-  verificación le hizo `unlink`; se rescataron sólo las dos capturas de error del otro frente, las
-  ~34.200 adquisiciones sanas se perdieron). O sea que **este chequeo hay que rehacerlo corriendo
-  la sonda**, no leyendo el archivo: hoy la ausencia de líneas no prueba nada, ni acá ni en otro
-  clone —es local y gitignoreado—. La lección para el próximo: un archivo append-only sin respaldo
-  es una medición a un `rm` de distancia.
-
-  **Lo que queda sin explicar:** la request ajena **no aparece como backend de Postgres** en
-  ninguna de las 12 muestras —solo se ven la compuerta (`idle in transaction`) y la del dueño
-  (`active`/`Lock`)—. ⚠️ Pero **12 muestras no son exhaustivas**: un backend que vivió entre
-  dos muestras no aparece. Y con `reusa=false` sabemos que **no reusó** contexto ajeno; si
-  llegó a abrir la suya en la base, eso **no se midió**.
-
-  **La principal candidata** —no "la única que queda", que sería afirmar una exhaustividad que
-  la medición no da— es `createQueryRunner()` y la emisión del `BEGIN`: la otra mitad de esa
-  capa, el `connect()`, la excluye la fila 1. Tampoco se miró lo que pasa **después** de que
-  `dataSource.transaction()` retorna —interceptores, serialización de la respuesta—: una
-  request que abrió y cerró su transacción entre dos muestras y se colgó en la salida daría
-  este mismo cuadro.
-
-  ⚠️ **El descarte del pool NO habilita a razonar "había una conexión idle, así que pg-pool no
-  podía encolar".** Este mismo archivo, en la entrada del `timeout exceeded when trying to
-  connect`, registra el estado `idle: 1` con `esperando: 1` y lo deja marcado como *"no lo sé,
-  y no lo invento"*. Lo que descarta esta fila es la **medición continua**, no ese argumento.
-
-  **El discriminador, y es por dónde hay que empezar: solo pasa si las dos están en vuelo
-  desde el principio.** Disparando la ajena **después** de que el dueño ya se encoló, contestó
-  en **53 ms** con la compuerta cerrada. ⚠️ Ese número sale de la **sonda**, no de un test:
-  **ese escenario no lo cubre ninguno**. Lo más parecido que sí corre es el paso 1 de
-  `caja.e2e-spec.ts` (describe "aislamiento multi-tenant"), y es **otro caso** —ahí la ajena
-  va sola, con la compuerta cerrada pero con el dueño todavía sin disparar—; además ese test
-  afirma *"volvió antes de que soltáramos"* y *"la cola quedó en 0"*, con presupuesto de 3 s:
-  **no mira latencia**, así que no fija ningún milisegundo. El 5 ms que citan ese test y
-  [`resueltos.md`](resueltos.md) es de **su** escenario, no de éste.
-
-  ⚠️ **Cuidado con desescalarlo por el encuadre.** Lo que se trabó no fue una segunda escritura
-  a la misma caja: fue una request **de otro tenant, sobre datos de otro tenant**. Si la causa
-  vive en el runtime y no en el harness, el radio es **cualquier request detrás de cualquier
-  request frenada** —cruza tenants y cruza pantallas— y eso es disponibilidad de producción.
-  ℹ️ **El test que lo destapó no depende de esto**: dispara en secuencia y suelta la compuerta
-  antes de esperar nada, así que nadie tiene que sospechar del e2e ya shippeado.
-
-  ℹ️ La sonda era un spec temporal y no quedó en el repo. Reconstruirla es media hora:
-  compuerta con `QueryRunner`, dos disparos sin `await`, un `app.use()` de sonda para saber
-  cuándo llega cada request, y muestreo de `pg_stat_activity` **por el pool** —no por la
-  compuerta: esa vista se cachea por transacción, ver el cierre del test en
-  [`resueltos.md`](resueltos.md)—. Para el pool **no hace falta inventar nada**: `setup-pool.ts`
-  ya corre en todos los e2e y escribe `tmp-pool.jsonl`; lo que ahí falta es la otra mitad, el
-  tiempo entre `createQueryRunner()` y el `BEGIN`.
-
-- [ ] **Con tres o más porcentajes, el orden entre ellos puede mover el último decimal**
-  (motor de precios, **anotado el 2026-09-03**) —
-  📌 **Esta entrada existe porque el código dice que existe.** El docblock de `ordenarReglas`
-  (`calculo-precios.engine.ts`) afirma *"con tres o más porcentajes puede mover el último
-  decimal por redondeo de paso, y eso está anotado en el backlog"* — y **no estaba**
-  (verificado 2026-09-03). Se escribe acá para que la afirmación del código sea cierta, en vez
-  de editar el motor, que obliga a parar y consultar.
-  **Lo que dice el docblock, sin interpretar:** el orden **entre reglas del mismo modo** lo trae
-  el llamador —hoy `ORDER BY … regla_id` en `items.service.ts`, *"determinista pero
-  arbitrario"*— y eso es aceptable porque dos porcentajes componen multiplicativamente y dos
-  fijos suman, o sea que **conmutan**. La excepción declarada son **tres o más porcentajes**,
-  donde el redondeo de cada paso puede no conmutar.
-  **Qué hay que medir antes de decidir nada:** si el desvío **existe de verdad** con la
-  cuantización actual, y de cuánto es. Puede que el cierre por derivación —los totales se
-  derivan de sus componentes, no se cuantizan aparte— ya lo absorba. **Es determinista igual**
-  (el `ORDER BY` fija el orden), así que no es una carrera: es un desvío estable pero arbitrario.
-  ⛔ **Toca el motor de cálculo de precios**, así que si la medición dice que hay que arreglarlo,
-  va solo y con el sistema quieto.
-
 ## 3. Ya decidido, falta construir
 
 El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
@@ -1411,6 +1295,71 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no se empieza**:
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
+
+- [ ] **En cascada, el orden en que se aplican dos o más reglas en % mueve el total** (motor
+  de precios; **medido el 2026-09-12**; reemplaza a la entrada de la § 2 *"Con tres o más
+  porcentajes, el orden entre ellos puede mover el último decimal"*, que lo daba por hipótesis).
+
+  **La pregunta, con un caso medido:** *un recargo de 0,74% y otro de 25,18%, en cascada, sobre
+  dos unidades de $43.680: el cliente paga $131.097 o $131.098 según cuál de los dos quedó
+  primero, y hoy "primero" lo decide el id interno de la regla. ¿Tiene que haber un orden que
+  se pueda explicar (por ejemplo, el mayor primero), o el total tiene que dar lo mismo en
+  cualquier orden?*
+  - **Un orden con criterio:** cambio chico en cómo se ordenan las reglas. El total sigue
+    dependiendo del orden, pero de uno que el ticket puede explicar.
+  - **Mismo total en cualquier orden:** cerrar el paso entero y repartir el redondeo entre las
+    reglas en vez de redondear cada una por su cuenta. Es rediseñar cómo cierra un paso del
+    motor: frente propio, a diseñar.
+
+  **Lo medido** con `docs/agent/medir-orden-porcentajes.ts` —el motor real, todas las
+  permutaciones de 2, 3 y 4 porcentajes, 400 casos al azar por combinación de nivel (línea /
+  venta), paso, modo de cálculo, nivel de redondeo, decimales de la moneda (0 y 2) y modo de
+  redondeo—:
+
+  | modo | cambia el total | desvío máximo |
+  |---|---|---|
+  | `base` | nunca | — |
+  | `compuesto`, redondeo por línea | ≈33% de los casos con 2 reglas, ≈82% con 3, ≈99% con 4 | N−1 minor units a nivel venta; a nivel línea una más, porque el IVA lo arrastra |
+  | `compuesto`, redondeo por documento | menos del 3% | 1 minor unit |
+
+  **Por qué:** cada regla cierra cuantizada (`montoQ` en `procesarReglas`) y en cascada la base
+  de la siguiente depende de la anterior, así que la suma de los redondeados no conmuta. ⚠️ **El
+  docblock de `ordenarReglas` se queda corto dos veces:** dice que dos porcentajes conmutan
+  —con dos ya pasa en un tercio de los casos— y que con tres "puede mover el último decimal"
+  —mueve hasta N−1—. Se corrige con el frente y no antes: tocar el motor obliga a parar.
+
+  **Alcance:** es alcanzable. "En cascada" se elige en Preferencias financieras (el tenant nace
+  en `base`) y un ítem puede tener varios descuentos. Es determinista —mismo carrito, mismo
+  total—, así que no es una carrera: es un desvío estable pero arbitrario.
+  ⛔ **Toca el motor de cálculo de precios:** va solo y con el sistema quieto.
+
+- [ ] **Un tenant que no es de Chile puede cobrar online con Webpay, y la orden guarda como
+  pesos chilenos el total en su propia moneda** (pasarela + online, multi-moneda; **leído en
+  el código el 2026-09-12, no corrido**; reemplaza a la entrada de la § 2 *"El modal de
+  reembolso formatea con la moneda del tenant una orden que siempre es CLP"*).
+
+  **La pregunta:** *una tienda de México vende online un pedido de $250 pesos mexicanos, y
+  Webpay cobra en pesos chilenos. ¿Webpay online se ofrece solo a locales de Chile, o se
+  convierte al peso chileno con la tasa del día —y el cliente ve el cobro en otra moneda—?*
+
+  **Lo leído:** `online.service.ts` manda `resultado.totales.totalFinal` —en la moneda oficial
+  del tenant— como `monto` a `pagosRedirect.iniciar`, que valida la escala contra
+  `MONEDA_ORDEN_V1` (CLP) y guarda la orden con esa moneda (`pagos-redirect.service.ts`). No hay
+  conversión en el medio. Si el total trae decimales, el checkout debería contestar 400; si es
+  entero, se cobraría ese número en pesos chilenos (USD 10 → $10). Es alcanzable: el seed
+  siembra provincias de AR, CO y MX, así que se puede dar de alta un tenant con oficial ≠ CLP,
+  y `pasarela` no restringe nada por país.
+
+  **Qué cambia de lo que decía la entrada anterior:** temía que la nota de crédito del
+  reembolso acreditara pesos chilenos contra una venta en otra moneda. La nota **no convierte**
+  —`reembolso-callback.handler.ts` le pasa el monto de la orden, solo cuantizado a la escala de
+  la venta—, pero tampoco tendría qué convertir: en las órdenes del checkout online ese número
+  nunca fue CLP. Por lo mismo, el `MoneyInput` con `oficial` del `ReembolsoModal` muestra hoy la
+  moneda real del número; qué moneda tiene que mostrar depende de la respuesta.
+  `NotaCreditoModal` no tiene el problema: acredita una venta, y la venta se persiste en la
+  oficial.
+  ⛔ Cuando se arregle, la nota de crédito del reembolso es fiscal: va aparte (`CLAUDE.md`,
+  *"Lo fiscal va solo"*).
 
 ## 5. Carreras de concurrencia
 
