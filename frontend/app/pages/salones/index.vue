@@ -847,6 +847,10 @@ onBeforeUnmount(() => {
  * ⚠️ **Cubre la navegación dentro de la app, no cerrar la pestaña ni recargar**:
  * un guard de ruta no corre ahí. Es el mismo límite que ya tenía salir de la
  * cuenta.
+ *
+ * ⚠️ **Y no cubre el tap que cae durante esta misma espera**, si la espera termina antes de los
+ * 300 ms de su timer: ese `PATCH` sale con la pantalla ya desmontada. Abierto en
+ * `docs/agent/pendientes.md` § 2.
  */
 onBeforeRouteLeave(async () => {
   await flushPendientes()
@@ -1718,24 +1722,51 @@ function onCantidadChange(linea: CuentaLineaDetalle, payload: CantidadPayload) {
   })
 }
 
-async function flushPendientes() {
+/**
+ * Manda las ediciones de cantidad que quedaron a medio camino y espera las que están en vuelo.
+ *
+ * **`cuentaQueSeEnvia` separa dos contratos, y la diferencia es a propósito** (2026-09-12):
+ *
+ * - **Sin cuenta** —salir, cambiar de mesa, irse de la pantalla, cancelar, fusionar—: se manda
+ *   lo que estaba pendiente **al empezar**. Una edición que nace durante la espera no entra, y
+ *   en cancelar y fusionar eso es la regla, no un hueco: la descarta `descartarPendientes`
+ *   después del request, porque se tipeó contra una cuenta que deja de ser la que era.
+ *   ⚠️ **Irse de la pantalla no entra en esa regla, y queda abierto**: espera el flush con la
+ *   pantalla tocable, y un tap en esa espera sale con la pantalla ya desmontada **si el flush
+ *   termina antes de los 300 ms de su timer** (`docs/agent/pendientes.md` § 2).
+ * - **Con cuenta** —`enviarComanda`—: además se vacía lo que nazca durante la espera **en esa
+ *   cuenta**, hasta que no quede nada pendiente ni en vuelo. Si no, la comanda se reclamaba sin
+ *   el tap que el garzón hizo mientras se mandaba lo anterior: el de una línea que no estaba
+ *   pendiente, el de una que el loop ya había mandado, o el que cae mientras se espera lo que
+ *   está en vuelo. Los tres se pueden hacer: el stepper no se deshabilita nunca
+ *   —`yaEnviadaACocina` apaga el basurero, no el stepper—. Medido con los tests
+ *   *"… sale antes que la comanda"*, en rojo sin esto.
+ *
+ * ⚠️ El cobro **no** pasa cuenta, y no es un olvido: una cantidad que cambia después de confirmar
+ * el cobro cambia el total contra el que se cargaron los pagos. Qué hacer ahí es del owner
+ * (`docs/agent/pendientes.md` § 4).
+ */
+async function flushPendientes(cuentaQueSeEnvia?: string) {
   // `lineasPendientes` y no `pendientes`: ese nombre ya es el ref de las cuentas
   // que quedaron sin responsable, y sombrearlo acá deja dos cosas sin relación
   // llamadas igual en el mismo archivo.
   const lineasPendientes = [...pendingByLinea.entries()]
-  // **Los timers se cancelan todos acá, antes del primer `await`.** Cancelarlos
-  // dentro del loop —como estaba— solo alcanzaba al de la primera línea: los de
-  // 2..N seguían armados durante la espera de red del primero y disparaban
-  // solos, así que la segunda línea salía con DOS `PATCH` (y dos toasts
-  // idénticos si el servidor rechazaba). Medido el 2026-09-02 por la revisión
-  // del diff, con el `PATCH` retenido más de 300 ms.
+  // **Los timers se cancelan todos acá, antes del primer `await`.** Nació el 2026-09-02
+  // para que la segunda línea no saliera con DOS `PATCH` —su timer disparaba durante la
+  // espera de red de la primera—, y ese doble ya no puede pasar: desde que el loop manda
+  // lo vivo, una entrada que disparó sola ya no está y no se vuelve a mandar. Lo que hace
+  // HOY es que las líneas salgan **de a una**, que es lo que supone el docblock de
+  // `pendingByLinea`, y que `salirDeCuenta` pueda llamar sin `await` sin dejar timers
+  // armados. Medido el 2026-09-12: sin esta línea, con la primera retenida, la segunda
+  // sale en paralelo y cada una una sola vez — y ningún test lo distingue.
   for (const [, { timer }] of lineasPendientes) clearTimeout(timer)
   // Foto de las cuentas al empezar, como RESPALDO del guard de abajo:
   // `onSelectMesa` manda lo pendiente y acto seguido `cargarCuentas` reemplaza
   // `cuentas.value` por la lista de otra mesa, y ahí leer solo lo vivo daría
   // "la línea ya no está" para todas menos la primera y se comería ediciones.
   const cuentasAlEmpezar = cuentas.value
-  for (const [lineaId] of lineasPendientes) {
+
+  async function mandarLoVivo(lineaId: string) {
     // ⚠️ **Se manda lo VIVO, y si ya no hay nada vivo NO se manda.** La foto
     // sirve para saber QUÉ líneas atender; lo que se manda sale del `Map`, que
     // es lo único que sabe qué puso el garzón recién. Durante el `await` de red
@@ -1755,7 +1786,7 @@ async function flushPendientes() {
     //
     // Las dos mitades las cazó la revisión independiente, en dos pasadas.
     const viva = pendingByLinea.get(lineaId)
-    if (!viva) continue
+    if (!viva) return
     clearTimeout(viva.timer)
     const { timer: _vivo, ...edicion } = viva
     // ⚠️ **La entrada se saca acá, no arriba junto con los timers.** Vaciar el
@@ -1766,7 +1797,8 @@ async function flushPendientes() {
     // segunda línea mientras viajaba el `PATCH` de la primera dejaba pintada
     // una cantidad que el servidor había rechazado. Es exactamente lo que el
     // `Map` de `inflight` cerró en su ventana hermana. Medido el 2026-09-02 por
-    // la revisión del diff, contra control.
+    // la revisión del diff, contra control. Sacarla antes del `return` de abajo
+    // es además lo que hace que el vaciado de `cuentaQueSeEnvia` avance.
     pendingByLinea.delete(lineaId)
     // Quitar una línea no cancela su timer, así que puede haber salido de la
     // cuenta dentro de la ventana del debounce: mandarle el `PATCH` sería un 404
@@ -1776,13 +1808,26 @@ async function flushPendientes() {
     // mesa.
     const cuenta = cuentas.value.find(c => c.id === edicion.cuentaId)
       ?? cuentasAlEmpezar.find(c => c.id === edicion.cuentaId)
-    if (!cuenta?.lineas.some(l => l.id === lineaId)) continue
+    if (!cuenta?.lineas.some(l => l.id === lineaId)) return
     // `payload` sale del Map y NO se relee de la cuenta: la respuesta de la
     // iteración anterior ya pisó el optimista de esta línea. Ver el docblock
     // de `pendingByLinea`.
     await patchLineaCantidad(lineaId, edicion)
   }
-  while (inflight.value.size > 0) {
+
+  for (const [lineaId] of lineasPendientes) await mandarLoVivo(lineaId)
+  // Sin `cuentaQueSeEnvia` esto es la espera de siempre. Con cuenta, cada vuelta vuelve a mirar
+  // si nació otra edición de esa cuenta —también mientras se espera lo que está en vuelo—, y
+  // la manda antes de dar el flush por terminado.
+  for (;;) {
+    const deLaCuenta = cuentaQueSeEnvia
+      ? [...pendingByLinea.entries()].find(([, e]) => e.cuentaId === cuentaQueSeEnvia)
+      : undefined
+    if (deLaCuenta) {
+      await mandarLoVivo(deLaCuenta[0])
+      continue
+    }
+    if (inflight.value.size === 0) return
     await new Promise(resolve => setTimeout(resolve, 50))
   }
 }
@@ -1991,7 +2036,7 @@ async function enviarComanda() {
   const cuenta = activeCuenta.value
   const mesaNombre = selectedMesa.value.nombre
   try {
-    await flushPendientes()
+    await flushPendientes(cuenta.id)
     const estaciones = await impresorasApi.imprimirComanda(cuenta.id, {
       mesaNombre,
       cuentaNumero: cuenta.numero,

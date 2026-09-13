@@ -565,20 +565,20 @@ que filtrar la entrada las desfasa.
 
 La cantidad se pinta en el acto y el `PATCH` sale **300 ms después** (debounce: una ráfaga de
 taps en el stepper es un solo request). De esa ventana se sale por siete puertas, y **las siete
-manejan lo pendiente**. Todas guardan, y las tres **destructivas** —cancelar, fusionar, irse de la
+manejan lo pendiente** (con un tramo abierto al navegar fuera: ver su fila). Todas guardan, y las tres **destructivas** —cancelar, fusionar, irse de la
 pantalla— además **esperan**. Salir al listado y cerrar el drawer también sacan la cuenta de
 escena y **no** esperan: volver al listado es instantáneo por decisión del owner (2026-09-02),
 y ahí la cuenta sigue viva.
 
 | El garzón… | Qué pasa con lo pendiente |
 |---|---|
-| toca *Enviar a cocina* | se manda y se **espera**, antes de imprimir la comanda |
-| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor |
+| toca *Enviar a cocina* | se manda y se **espera**, antes de imprimir la comanda. **Desde el 2026-09-12** también lo que el garzón toque **en esa cuenta** mientras se manda —una línea que no estaba pendiente, una ya mandada, o durante la espera de lo que está en vuelo—: la comanda no se reclama hasta que no quede nada |
+| toca *Cerrar y cobrar* | se manda y se **espera**, pero recién al **confirmar el cobro** (después del modal y del PIN). El total que el modal muestra sale del pintado optimista, no de una respuesta del servidor. ⚠️ Lo que se toque en la cuenta **después de confirmar** no se espera, y según cuánto tarde el cierre puede entrar o no a la venta: pregunta abierta al owner (`docs/agent/pendientes.md` § 4) |
 | toca *Cuentas* o cambia de mesa | se manda **sin esperar**: volver al listado es instantáneo |
 | **cierra el drawer** de la mesa (ESC, backdrop) | igual que *Cuentas*: se manda y la cuenta se suelta |
 | **cancela la cuenta** | se manda y se **espera**, y recién entonces se cancela |
 | **fusiona cuentas** | se manda y se **espera**, y recién entonces se fusiona |
-| **navega fuera de `/salones`** | se manda y se **espera**: la navegación no ocurre hasta que termine |
+| **navega fuera de `/salones`** | se manda y se **espera**: la navegación no ocurre hasta que termine. ⚠️ Un tap **durante** esa espera no se espera: si la espera termina antes de los 300 ms del tap, su `PATCH` sale con la pantalla ya desmontada (abierto, `docs/agent/pendientes.md` § 2) |
 
 ✅ **Decisión del owner (2026-09-05): la acción destructiva espera.** Las tres últimas filas
 salieron de ahí, pero **el síntoma no era el mismo en las tres**. En cancelar y fusionar el
@@ -587,7 +587,7 @@ un toast rojo que nombraba una mesa y una cuenta que él acababa de hacer desapa
 antes, la cuenta todavía está abierta y no hay rechazo que llegue tarde. Al **navegar fuera** la
 cuenta sigue abierta y el `PATCH` se guarda bien: lo que estaba mal es que salía con la pantalla
 ya desmontada, así que un rechazo por otra causa —el stock, por ejemplo— aparecía en otra
-pantalla. Las dos primeras tienen su `:loading` en el botón: sin eso la espera se lee como que
+pantalla. ⚠️ Eso todavía puede pasar con un tap hecho **durante** esa espera: ver la fila. Las dos primeras tienen su `:loading` en el botón: sin eso la espera se lee como que
 la app se colgó.
 
 ⚠️ **Lo que cambió con cancelar, para que nadie lo lea como una regresión:** hasta el

@@ -23,6 +23,89 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## "Enviar a cocina" ya no reclama la comanda sin el tap que se hizo mientras se mandaba lo pendiente (cerrada 2026-09-12)
+
+Sale de [`pendientes.md` § 3](pendientes.md). **Medido antes de arreglar**, que es lo que la
+entrada pedía: el stepper no se deshabilita nunca —`yaEnviadaACocina` apaga el basurero, no el
+stepper—, así que la escena existe, y tres tests nuevos de `salones/index.nuxt.spec.ts` —*"… sale antes que la comanda"*—
+salieron en **rojo** contra el código de ese día. Los tres afirman qué `PATCH` habían salido **en
+el instante en que se reclama la comanda**, que es lo que manda a cocina. Eran tres taps y no los
+dos que la entrada contaba: el tercero cae **mientras el flush espera lo que está en vuelo**, y
+esa espera solo miraba `inflight`.
+
+**Qué se hizo:** `flushPendientes(cuentaQueSeEnvia?)`. Sin cuenta hace exactamente lo de antes
+—manda lo pendiente al empezar y espera lo que está en vuelo—; con cuenta, que solo pasa
+`enviarComanda`, además vacía lo que nazca **en esa cuenta** hasta que no quede nada pendiente ni
+en vuelo.
+
+⚠️ **La primera versión vaciaba todo lo vivo para todos los llamadores, y rompió dos tests de la
+fusión.** La entrada decía que en fusionar, cancelar e irse *"la cuenta se fusiona, se anula o se
+abandona con esa cantidad sin mandar"*, como si fuera el mismo hueco. **No lo es**: en cancelar y
+fusionar lo que nace durante la espera se descarta **por decisión del owner**
+(`descartarPendientes`: se tipeó contra una cuenta que deja de ser la que era), con tests que lo
+fijan; y salir o cambiar de mesa no esperan el flush. Por eso el vaciado va acotado a la cuenta que
+se envía. ⚠️ **Irse de la pantalla no quedó cerrado**, y la primera versión de este cierre lo daba
+por cubierto: espera el flush con la pantalla tocable, y un tap en esa espera sale con la pantalla
+ya desmontada si el flush termina antes de los 300 ms de su timer. Lo levantó la revisión y sigue abierto en [`pendientes.md` § 2](pendientes.md).
+
+📌 **El cobro quedó afuera a propósito**: una cantidad que cambia después de confirmar el cobro
+cambia el total contra el que se cargaron los pagos, y qué hacer ahí es del owner →
+[`pendientes.md` § 4](pendientes.md). ⚠️ La primera versión de esa pregunta decía que hoy la bebida
+simplemente queda afuera; la revisión leyó que el tap puede llegar **antes** del cierre y dejar la
+venta cobrada de menos sin aviso, y la pregunta se reescribió con los dos órdenes.
+
+**Lo que lo fija**, mutante por mutante sobre el spec final (108 tests):
+
+| Mutante | Lo caza |
+|---|---|
+| el código anterior entero (la foto sola) | los tres *"… sale antes que la comanda"* |
+| `enviarComanda` sin pasar la cuenta | los mismos tres |
+| el vaciado sobre todas las cuentas, no sobre la que se envía | los dos de la fusión: *"lo que se toca en una cuenta de origen durante el vuelo no se manda…"* y *"y lo que se toca en la cuenta DESTINO tampoco…"* |
+| la espera de lo que está en vuelo no vuelve a mirar lo pendiente | *"el tap que cae mientras el flush espera lo que está en vuelo sale antes que la comanda"* |
+| **sin `clearTimeout(viva.timer)`** | 🟢 **sobrevive**, ya declarado en el cierre del 2026-09-04: el timer dispara, no encuentra su entrada y no hace nada |
+| **sin cancelar los timers antes del primer `await`** | 🟢 **sobrevive, y ya sobrevivía en `HEAD`** (105/105). Medido con una sonda: sin esa línea la segunda línea sale **en paralelo** con la primera, y cada una una sola vez. El `PATCH` doble que la motivó ya no puede pasar desde que se manda lo vivo; su comentario se reescribió con lo que hace hoy |
+
+⚠️ **Los rojos de más no son cobertura, y vale para leer cualquier tabla de este spec.** Los
+mutantes de la primera, segunda y cuarta fila también ponían en rojo *"el flush manda lo que el
+garzón puso en CADA línea…"*, *"salir de la cuenta manda la edición que quedó a medio camino"* y
+*"si el rechazo llega con el garzón ya afuera…"*. Corridos solos bajo el mutante, **pasan**: es
+contaminación —el test que falla deja un timer de 300 ms armado que dispara adentro del
+siguiente—, no que ellos cacen el mutante. La tabla cuenta solo lo medido aislado.
+
+### El residuo que dejó cerrar el flush (2026-09-04)
+
+Lo dejó la tercera revisión del arreglo del `previo`, como hallazgo **no bloqueante**, y es
+preexistente: no lo introdujo ese arreglo.
+
+- [ ] **`flushPendientes` no espera lo que nació DURANTE el flush, y la comanda puede salir sin
+  eso** (frontend; **leído en el código el 2026-09-04** por la revisión independiente, no
+  reproducido con sonda) — `flushPendientes` fotografía `pendingByLinea` al empezar y recorre
+  esa foto, así que hay **dos** taps que se le escapan, y conviene tener los dos a la vista
+  porque el segundo es el que uno no busca: (a) el que cae sobre una línea que **no** estaba
+  pendiente al arrancar, y (b) el que cae sobre una línea que **sí** estaba en la foto y que el
+  loop **ya consumió** —el loop no vuelve a esa línea—. En los dos casos la entrada nueva
+  tampoco cuenta para el `while (inflight.size > 0)` del final, que solo mira los requests en
+  vuelo. Si su timer de 300 ms todavía no disparó, el flush **retorna sin ella**:
+  `enviarComanda` imprime y `confirmarCobro` puede cerrar la venta con esa línea sin `PATCH`.
+
+  📌 **Es la pariente de las dos ventanas que sí se cerraron el 2026-09-04** —las dos del
+  camino del flush, en [`resueltos.md`](resueltos.md)—, y por eso conviene tomarla con ellas a
+  la vista: aquéllas eran "la foto pisa lo vivo", ésta es "la foto no ve lo nuevo".
+
+  ⚠️ **Y la superficie creció el 2026-09-05**, sin que la entrada cambie de naturaleza: desde
+  que fusionar, cancelar e irse de la pantalla también hacen `await flushPendientes()`
+  ([`resueltos.md`](resueltos.md)), son **tres llamadores más** los que pueden retornar sin la
+  edición que nació durante el flush. En esos tres el daño es distinto al de la comanda: la
+  cuenta se fusiona, se anula o se abandona con esa cantidad sin mandar.
+
+  ⚠️ **Antes de tomarlo hay que medirlo**, y por eso está acá y no en la § 1: el enunciado sale
+  de leer el código, no de una sonda. La escena pide un tap sobre una línea sin edición previa
+  **después** de apretar el botón, así que hay que verificar primero que la pantalla lo permita
+  —el stepper no se deshabilita durante `enviandoComanda`, solo el botón lleva `:loading`, pero
+  eso se confirma corriéndolo—. **La salida probable** es reemplazar la foto por un bucle que
+  siga mientras quede algo pendiente, que es lo mismo que se acaba de hacer adentro del loop:
+  dejar de tratar la foto como la lista de trabajo.
+
 ## Cambiar la moneda de un ítem vacía también el precio propio de sus opciones (cerrada 2026-09-12)
 
 Sale de [`pendientes.md` § 3](pendientes.md). **Qué se hizo:** `configuracion/items.vue` guarda el

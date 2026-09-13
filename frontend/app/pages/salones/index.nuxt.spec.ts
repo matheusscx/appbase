@@ -2344,6 +2344,134 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(cuentasServidor![0]!.lineas[1]!.cantidad).toBe('7.0000')
   })
 
+  /**
+   * Espera a que la comanda se reclame y devuelve **qué `PATCH` habían salido en ese instante**.
+   * Es la foto que importa: el claim es lo que manda a cocina, así que un `PATCH` que sale
+   * después llega a una comanda que ya se imprimió.
+   */
+  async function patchesAlReclamarLaComanda() {
+    const limite = Date.now() + 2000
+    while (reclamosDeComanda.length === 0 && Date.now() < limite) await esperar(5)
+    expect(reclamosDeComanda, 'la comanda se reclamó').toEqual(['cuenta-9'])
+    return [...patchesDeCantidad]
+  }
+
+  it('el tap sobre una línea que no estaba pendiente al empezar el flush sale antes que la comanda', async () => {
+    // **La foto no ve lo nuevo** (`docs/agent/pendientes.md` § 3, primera mitad). El flush
+    // fotografía `pendingByLinea` al arrancar y recorre esa foto: una línea que el garzón toca
+    // DURANTE el flush no está en ella. Su timer de 300 ms no disparó todavía y
+    // `while (inflight.size > 0)` no la cuenta, así que el flush retorna sin ella y la comanda
+    // se reclama con la cantidad vieja.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    impresorasComanda = [impresoraDeComanda()]
+    let soltarPrimera: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPrimera = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    // Solo la PRIMERA línea queda pendiente al apretar el botón.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(50)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    // Con el `PATCH` de la primera en vuelo, el garzón toca la segunda, que el flush no fotografió.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[1]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    patchCantidadRetenido = null
+    soltarPrimera()
+
+    expect(await patchesAlReclamarLaComanda()).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-2', cantidad: '7.0000' },
+    ])
+  })
+
+  it('el tap sobre una línea que el flush ya mandó sale antes que la comanda', async () => {
+    // **La segunda mitad, la que uno no busca**: la línea SÍ estaba en la foto, pero el loop ya
+    // la consumió y no vuelve a ella. El tap nuevo arma una entrada que nadie espera.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    impresorasComanda = [impresoraDeComanda()]
+    let soltarPrimera: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarPrimera = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(20)
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(50)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
+
+    // La MISMA línea, con su `PATCH` todavía en vuelo: el loop ya la sacó de la foto.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '4', unidadCodigo: 'unidad', cantidadCanonica: '4.0000' })
+    patchCantidadRetenido = null
+    soltarPrimera()
+
+    expect(await patchesAlReclamarLaComanda()).toEqual([
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+      { lineaId: 'linea-1', cantidad: '4.0000' },
+    ])
+    await esperar(400)
+    // Y no sale de más después: el timer de ese tap no queda armado para mandarlo otra vez.
+    expect(patchesDeCantidad).toHaveLength(2)
+    expect(cuentasServidor![0]!.lineas[0]!.cantidad).toBe('4.0000')
+  })
+
+  it('el tap que cae mientras el flush espera lo que está en vuelo sale antes que la comanda', async () => {
+    // **La tercera forma de la misma foto**: el flush no tiene nada pendiente que mandar, pero
+    // espera un `PATCH` que salió solo —el de un timer que ya disparó—. Un tap durante esa espera
+    // no estaba en ninguna foto y la espera solo miraba `inflight`.
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConDosPedidos()]
+    impresorasComanda = [impresoraDeComanda()]
+    let soltarSegunda: () => void = () => {}
+    patchCantidadRetenido = new Promise<void>((r) => {
+      soltarSegunda = r
+    })
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    // La segunda línea sale por su propio timer y queda retenida en vuelo.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[1]!
+      .vm.$emit('change', { presentacion: '7', unidadCodigo: 'unidad', cantidadCanonica: '7.0000' })
+    await esperar(400)
+    expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-2', cantidad: '7.0000' }])
+    patchCantidadRetenido = null
+
+    // El flush arranca sin nada pendiente, y se queda esperando ese `PATCH`.
+    botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+    await esperar(50)
+    expect(reclamosDeComanda).toEqual([])
+
+    // Durante esa espera el garzón toca la primera línea. 100 ms < 300: su timer no disparó.
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!
+      .vm.$emit('change', { presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000' })
+    await esperar(100)
+    soltarSegunda()
+
+    expect(await patchesAlReclamarLaComanda()).toEqual([
+      { lineaId: 'linea-2', cantidad: '7.0000' },
+      { lineaId: 'linea-1', cantidad: '3.0000' },
+    ])
+  })
+
   it('el flush manda lo que el garzón puso en CADA línea, no lo que devolvió el PATCH anterior', async () => {
     // "Enviar a cocina" dentro de los 300 ms: `flushPendientes` recorre las
     // líneas pendientes de a una y **espera** cada PATCH, y el camino feliz de
