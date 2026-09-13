@@ -427,6 +427,16 @@ archivo, que es donde hay que contarlas — no acá, en un párrafo que envejece
   falló nada. Lo que sí dice es que el fallo no es la cola de estas distribuciones: entre 74 ms y
   5000 ms no hay nada, así que es una discontinuidad, no un margen que a veces se pasa.
 
+  🔍 **Segunda cacería: 120 corridas limpias (2026-09-13, de 00:21Z a ~08:48Z).** Dos tandas
+  seguidas del mismo `docs/agent/caza-timeout-pool.sh`, de 20 y de 100 vueltas, cada vuelta con su
+  `reset-db.sh`: las 120 con `e2e=0` y cero `timeout exceeded` en `tmp-pool.jsonl`. Sumadas a las
+  20 del 2026-08-27 son **140 corridas completas sin reproducir** desde que la sonda está puesta.
+  ⚠️ **Lo que esto NO dice**, por la misma razón que la tanda anterior: son corridas verdes, así
+  que no restringen ninguna de las tres ramas; solo acotan la frecuencia. Y **no fueron con la
+  máquina quieta**: durante parte de la segunda tanda corrieron en paralelo builds, `vitest` y
+  mutantes del frontend en otros worktrees, o sea más carga de CPU que en una corrida normal, no
+  menos.
+
   ➡️ **Lo que falta: una sola cosa, que vuelva a pasar con las sondas puestas.** Ya no hay nada que
   construir. Cuando caiga, el registro del timeout va a traer su `pedido` y su `via`, el
   `capa: 'client.connect'` del **mismo** `pedido` va a decir cuánto tardó esa conexión, `loopMax` y
