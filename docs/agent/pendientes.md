@@ -169,24 +169,6 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
 
-### El borrado de un extra que una mesa pidió: ¿sigue haciendo falta el bloqueo? (2026-09-14)
-
-- [ ] **Leído en el código, sin medir por API: salió de sacar los guards de las ediciones de
-  catálogo** ([`resueltos.md`](resueltos.md)). `DELETE /items/:id` rechaza con `400` el ítem que una
-  cuenta abierta pidió, por dos ramas `'cuenta'` de `obtenerUsoItem`:
-  - **Como línea:** tiene un motivo vigente. `cerrarCuenta` corta con un `400` propio si el ítem de
-    una línea está borrado ([`salones-mesas.md`](../features/salones-mesas.md)).
-  - **Como extra:** el motivo escrito era que el cierre re-tasaba la línea y la rechazaba, y eso
-    dejó de pasar el 2026-08-31. Leyendo el código, hoy el cobro seguiría: `catalogoDeExtras` filtra
-    los ítems borrados y `expandirIngredientesPersonalizados` deja ese extra afuera del consumo con
-    una advertencia. El extra se cobra —está en el precio congelado— y su stock no se descuenta.
-
-  **Qué medir:** pedir con un extra, borrar el ingrediente con esa rama desactivada en local, y
-  cerrar. Si cobra con la advertencia, lo que queda es una pregunta de producto para el owner:
-  bloquear el borrado, o dejar borrar y aceptar un extra cobrado sin descontar.
-  **Referencia ya medida** (2026-09-14): sacar del grupo una opción que una mesa eligió y después
-  borrar su ítem —ninguna rama lo bloquea— deja cobrar la cuenta (`DELETE` 200, cierre 201).
-
 ### Restaurar una receta o un grupo revive referencias a ítems ya borrados (2026-09-13)
 
 - [ ] **Sin medir: lo levantó la revisión independiente del cierre de las carreras del borrado**

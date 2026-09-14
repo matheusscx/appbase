@@ -549,10 +549,10 @@ customer (`min`/`max`).
   **abierta** ya pidió un item —sea como la línea misma o **adentro** de su
   personalización—, ese item no se elimina. Para el item **de la línea** el
   motivo sigue vigente: `cerrarCuenta` no cobra una línea cuyo item se borró.
-  Para el pedido **como extra**, el motivo escrito era que el cobro re-tasaba la
-  línea y la mesa quedaba **incobrable**, y eso dejó de pasar con el congelado
-  (abajo); qué pasa hoy, en `docs/agent/pendientes.md` § 2. Cerrada o cancelada
-  la cuenta, el item
+  Para el pedido **como extra**, el owner decidió mantenerlo el 2026-09-14 con
+  el motivo medido ese día: la cuenta se cobra igual, pero su stock no se
+  descuenta y la cuenta muestra el id del ingrediente en vez de su nombre.
+  Cerrada o cancelada la cuenta, el item
   vuelve a ser borrable — es un bloqueo por mesa viva, no un endurecimiento del
   catálogo.
 

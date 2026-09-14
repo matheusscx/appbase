@@ -126,9 +126,7 @@ Response (201): { "id": "<uuid>", "extrasPermitidos": [ ... ], ... }
 
 Con `extrasPermitidos` (reemplazo total): soft-delete de filas vivas + INSERT de la nueva lista (mismo patrón que `ingredientes`). Respuesta mergeable incluye `extrasPermitidos`.
 
-**Un extra que una cuenta abierta ya pidió no se puede sacar** → `400` nombrando el extra y la mesa. Se compara el **diff** contra las filas vivas, así que solo bloquea los extras que *desaparecen*: reordenar, repreciar o agregar siguen pasando. El porqué —y por qué repreciar sí cambia lo que esa mesa paga— está en [recetas.md](./recetas.md#patch-itemsid).
-
-**Lo mismo con `ingredientes`, por el otro lado del snapshot:** un ingrediente que una cuenta abierta pidió **omitido** tampoco se puede sacar → `400` nombrando el ingrediente y la mesa. Cambiarle la cantidad o la unidad sí pasa: `omitidos` guarda un id, no una cantidad.
+Ni `extrasPermitidos` ni `ingredientes` miran las cuentas abiertas (desde el 2026-09-14): sacar un extra que una mesa ya pidió, o un ingrediente que pidió **omitido**, pasa, y la mesa se cobra con lo que congeló al pedir. Hasta esa fecha las dos rechazaban con `400`; el porqué está en [recetas.md](./recetas.md#patch-itemsid).
 
 ### GET /items/:id (receta)
 
@@ -159,9 +157,9 @@ Request (fragmento):
 
 Backend: valida omitidos ⊆ ingredientes; extras ∈ `receta_extras_permitidos`; `unidades` entero ≥ 1 (default 1); congela snapshot; recalcula precio (× unidades); `venderIngredientesReceta` con base − omitidos + extras (porción × unidades).
 
-**El snapshot persistido no es lo que se cobra: se re-resuelve.** Aunque la línea de cuenta guarda un snapshot completo, `cerrarCuenta` (`salones.service.ts`) lo mapea de vuelta a **solo ids** (`ingredienteItemId` + `unidades`) y `ventas.service.ts` lo vuelve a resolver contra la carta viva, en la misma transacción que descuenta stock. Porción, unidad y `precioExtra` se releen de `receta_extras_permitidos`; lo único que sobrevive del congelado es **qué** eligió el comensal, no **cuánto** era en ese momento. Consecuencia práctica: un extra sacado de la carta entre la comanda y el cobro hace fallar el cobro con `400 'Extra no permitido para esta receta'`, no se cobra a un precio viejo.
+**En salones, lo que se cobra es el snapshot** (desde el 2026-08-31). `cerrarCuenta` le pasa a `ventas.service.ts` la personalización congelada de la línea y la venta no la vuelve a resolver contra la carta viva: un extra que salió de la carta entre el pedido y el cobro se cobra igual, al precio de cuando se pidió. En `POST /ventas` la personalización llega en el body y sí se resuelve contra la carta. Detalle en [salones-mesas.md](./salones-mesas.md).
 
-**De dónde sale la unidad de stock.** La unidad en la que vive el stock del ingrediente se resuelve desde `item_producto.unidad_medida`, por id, porque es propiedad del ingrediente y no de la carta — nunca desde la lista de extras de la receta. Antes se resolvía desde ahí y traía un fallback a la unidad de la **porción**: bastaba con que el ingrediente no apareciera en esa lista para que `convertirUnidad` hiciera g→g y 20 g de queso se descontaran como 20 kg. Hoy ese camino está tapado aguas arriba por la re-resolución de arriba, así que la corrección (2026-07-28, auditoría de `items`) es defensa en profundidad: saca la dependencia entre unidad de stock y carta. Si el ingrediente ya no está en el catálogo, **no se descuenta y se emite advertencia** — mismo criterio que `venderOpcionesGrupos` para una opción borrada.
+**De dónde sale la unidad de stock.** La unidad en la que vive el stock del ingrediente se resuelve desde `item_producto.unidad_medida`, por id, porque es propiedad del ingrediente y no de la carta — nunca desde la lista de extras de la receta. Antes se resolvía desde ahí y traía un fallback a la unidad de la **porción**: bastaba con que el ingrediente no apareciera en esa lista para que `convertirUnidad` hiciera g→g y 20 g de queso se descontaran como 20 kg. Desde el 2026-08-31 ese camino se alcanza en salones —el cierre ya no re-resuelve—, así que la corrección (2026-07-28, auditoría de `items`), que saca la dependencia entre unidad de stock y carta, dejó de ser solo defensa en profundidad. Si el ingrediente ya no está en el catálogo, **no se descuenta y se emite advertencia** —mismo criterio que `venderOpcionesGrupos` para una opción borrada—; en el cierre de salones esa advertencia no llega a la respuesta.
 
 ### POST /cuentas/:id/lineas — `personalizacion`
 

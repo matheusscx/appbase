@@ -290,9 +290,11 @@ la línea y los ingredientes de sus extras, el par del `FOR UPDATE` del borrado,
 que llega segundo espera, y rebota —el borrado con el mismo `400`, el pedido porque el ítem ya no
 está—.
 
-⚠️ **El bloqueo del extra se escribió con el motivo de las ediciones**, que dejó de valer el
-2026-08-31; el del ítem de la línea tiene uno vigente (abajo). Qué pasa hoy con el extra, en
-[`pendientes.md`](../agent/pendientes.md) § 2.
+**Por qué el borrado sí bloquea.** El del ítem de la línea está abajo: `cerrarCuenta` no cobra una
+línea cuyo ítem se borró. El del extra está medido (2026-09-14): sin el bloqueo la cuenta se cobra
+igual, pero su stock no se descuenta y el detalle de la cuenta muestra el id del ingrediente en vez
+de su nombre; la comanda, la precuenta y la boleta salen del mismo armado de nombres (leído en el
+código, no medido). El owner decidió mantener el bloqueo.
 
 Para los
 casos que ya existan, el detalle de la cuenta **muestra la línea marcada**

@@ -2438,9 +2438,11 @@ export class ItemsService {
    *   2. `cl.personalizacion @> {"extras":[…]}`: el ítem está **adentro** de la
    *      línea (el queso que esa hamburguesa lleva como extra). Sin esta rama,
    *      borrar el queso devolvía 200 y soft-borraba su fila de
-   *      `receta_extras_permitidos`; hasta el congelado de la línea (2026-08-31)
-   *      el cierre la re-tasaba y la rechazaba con "Extra no permitido para esta
-   *      receta". Qué rompe hoy, si algo, está por medir (`pendientes.md` § 2). Es
+   *      `receta_extras_permitidos`. Hasta el congelado de la línea (2026-08-31)
+   *      el cierre la rechazaba; hoy la cobra, pero su stock no se descuenta y
+   *      el detalle de la cuenta muestra el id del queso en vez de su nombre
+   *      (medido el 2026-09-14 con esta rama apagada; la comanda, la precuenta
+   *      y la boleta salen del mismo armado de nombres: leído, no medido). Es
    *      containment y no `jsonb_array_elements` por dos razones medidas contra
    *      Postgres real: con la clave ausente devuelve `false` en vez de tirar, y
    *      exige que las coincidencias caigan en el **mismo** objeto —una opción

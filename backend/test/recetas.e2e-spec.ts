@@ -937,11 +937,11 @@ describe('Recetas — flujo completo (e2e)', () => {
   /**
    * El test 12 cubre el ítem que ES la línea. Éste cubre el que está **adentro**
    * de su personalización, que hasta el 2026-08-30 no miraba nadie: borrar el
-   * queso que una mesa ya pidió como extra devolvía 200, soft-borraba su fila de
-   * `receta_extras_permitidos`, y a partir de ahí `resolverPersonalizacionReceta`
-   * tiraba `400 "Extra no permitido para esta receta"` al re-tasar esa línea —
-   * en la precuenta Y al cobrar. La mesa quedaba **incobrable** y nadie se
-   * enteraba hasta que el garzón intentaba cerrarla.
+   * queso que una mesa ya pidió como extra devolvía 200. En ese momento eso
+   * dejaba la mesa incobrable; desde el congelado de la línea (2026-08-31) se
+   * cobra igual, y el bloqueo sigue por lo que se midió el 2026-09-14 sin él: el
+   * stock del queso no se descuenta y el detalle de la cuenta muestra su id en
+   * vez de su nombre (decisión del owner, `docs/agent/resueltos.md`).
    *
    * El control (`quesoSueltoId`) es la mitad que importa: es extra permitido de
    * la MISMA receta pero la línea no lo eligió. Sin él, un mutante que borre la

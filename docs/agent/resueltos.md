@@ -23,6 +23,52 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Borrar un extra que una mesa pidió sigue bloqueado, ahora con el motivo medido (cerrada 2026-09-14)
+
+Sale de [`pendientes.md` § 2](pendientes.md), la entrada que dejó el cierre de abajo. El bloqueo de
+`DELETE /items/:id` para un ingrediente pedido como extra se había escrito con el motivo de las
+ediciones —el cierre re-tasaba la línea y la rechazaba—, que dejó de valer con el congelado del
+2026-08-31.
+
+**Medido por API**, con la rama `'cuenta'` del extra de `obtenerUsoItem` apagada en local (`AND
+false` en su containment) y restaurada con hash verificado. Una hamburguesa de 4.000 con queso extra
+de 700, pedida en una cuenta abierta; después, borrar el queso y cerrar la cuenta:
+
+| Qué | Resultado |
+|---|---|
+| `DELETE` del queso | 200 |
+| Detalle de la cuenta | `personalizacionTexto: "Extra <uuid del queso>"`, y el uuid también en `personalizacionDetalle[].nombre`. La comanda, la precuenta y la boleta salen del mismo armado de nombres: leído en el código, no medido |
+| Precuenta y cierre | 201 y 201; la venta cobra 4.700, con el extra adentro |
+| Stock del pan (ingrediente base) | 10 → 9, con su movimiento de venta |
+| Stock del queso | queda en 10, sin ningún movimiento |
+| Advertencia | no llega: la respuesta del cierre solo trae `cuenta` y `ventaId`. Leído en el código, la venta sí la genera y `cerrarCuenta` la descarta |
+
+**Decisión del owner (2026-09-14): seguir bloqueando.** La otra opción era dejar borrar y aceptar
+el id en lugar del nombre y el extra sin descontar. No cambió código: se reescribió el porqué en el
+docblock de `obtenerUsoItem`, el del test 15 de `recetas.e2e-spec.ts` —el que fija este bloqueo—,
+`recetas.md`, `salones-mesas.md` y `PRODUCTO.md`, y `personalizacion-recetas.md`, que seguía
+diciendo que el cierre re-resuelve la personalización.
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### El borrado de un extra que una mesa pidió: ¿sigue haciendo falta el bloqueo? (2026-09-14)
+>
+> - [ ] **Leído en el código, sin medir por API: salió de sacar los guards de las ediciones de
+>   catálogo** ([`resueltos.md`](resueltos.md)). `DELETE /items/:id` rechaza con `400` el ítem que una
+>   cuenta abierta pidió, por dos ramas `'cuenta'` de `obtenerUsoItem`:
+>   - **Como línea:** tiene un motivo vigente. `cerrarCuenta` corta con un `400` propio si el ítem de
+>     una línea está borrado ([`salones-mesas.md`](../features/salones-mesas.md)).
+>   - **Como extra:** el motivo escrito era que el cierre re-tasaba la línea y la rechazaba, y eso
+>     dejó de pasar el 2026-08-31. Leyendo el código, hoy el cobro seguiría: `catalogoDeExtras` filtra
+>     los ítems borrados y `expandirIngredientesPersonalizados` deja ese extra afuera del consumo con
+>     una advertencia. El extra se cobra —está en el precio congelado— y su stock no se descuenta.
+>
+>   **Qué medir:** pedir con un extra, borrar el ingrediente con esa rama desactivada en local, y
+>   cerrar. Si cobra con la advertencia, lo que queda es una pregunta de producto para el owner:
+>   bloquear el borrado, o dejar borrar y aceptar un extra cobrado sin descontar.
+>   **Referencia ya medida** (2026-09-14): sacar del grupo una opción que una mesa eligió y después
+>   borrar su ítem —ninguna rama lo bloquea— deja cobrar la cuenta (`DELETE` 200, cierre 201).
+
 ## Editar la carta con la mesa sentada: los cuatro guards que lo bloqueaban se sacaron (cerrada 2026-09-14)
 
 Sale de [`pendientes.md` § 2](pendientes.md), *"Los guards de las ediciones de catálogo leen las
@@ -75,8 +121,8 @@ cierre 201.
 
 Este segundo mutante lo pidió la revisión, que leyendo el código vio que "el stock no discrimina" —lo que decía el primer comentario de esos tests— era falso. Corrió en el proceso de jest: `congelada && false` estrecha el tipo y el `tsc` del contenedor no compila, pero ts-jest no chequea tipos.
 
-**Lo que no cubre.** Borrar un ítem que una mesa pidió —como línea o como extra— sigue bloqueando,
-con el porqué de antes del congelado; queda para medir en `pendientes.md` § 2. Los planes del
+**Lo que no cubre.** Borrar un ítem que una mesa pidió —como línea o como extra— sigue bloqueando;
+el porqué del extra se midió y el owner lo decidió el mismo día (entrada de arriba). Los planes del
 2026-08-30 que construyeron los guards quedan como estaban: son registro.
 
 **La entrada, como estaba en `pendientes.md` § 2:**

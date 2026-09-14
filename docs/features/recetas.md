@@ -148,10 +148,11 @@ obvio desde la ficha del ingrediente.
 
 ⚠️ **Con una mesa que ya lo pidió, sí bloquea** (desde el 2026-08-30). Un extra es
 opcional *antes* de pedirlo; una vez que está en la personalización de una línea de una
-cuenta **abierta**, sacarlo del catálogo dejaba esa mesa **incobrable** hasta el congelado
-de la línea (2026-08-31): al cerrar, `resolverPersonalizacionReceta` la rechazaba con
-`400 "Extra no permitido para esta receta"`. Qué rompe hoy está por medir
-([`pendientes.md`](../agent/pendientes.md) § 2). El bloqueo sale como `'cuenta'`, con el mismo mensaje *"está pedido en
+cuenta **abierta**, borrarlo no impide cobrarla —medido el 2026-09-14 sin el bloqueo: se cobra con
+el extra adentro—, pero su stock no se descuenta y el detalle de la cuenta muestra el id del
+ingrediente en vez de su nombre (la comanda, la precuenta y la boleta salen del mismo armado de
+nombres: leído en el código, no medido). Antes del congelado de la línea (2026-08-31), en cambio,
+la dejaba incobrable. El bloqueo sale como `'cuenta'`, con el mismo mensaje *"está pedido en
 Mesa 4 · cuenta 1"* del ítem que es la línea. Cancelada o cerrada la cuenta, el
 ingrediente vuelve a ser borrable: es un bloqueo por la **mesa viva**, no un
 endurecimiento del catálogo. Al confirmar el borrado, se marcan `eliminado_el`
