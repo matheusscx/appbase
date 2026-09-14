@@ -1159,7 +1159,15 @@ describe('SalonesService', () => {
           ]);
         return Promise.resolve([]);
       });
-      manager.query.mockResolvedValue([]);
+      // El `FOR SHARE` sobre lo que la línea referencia contesta todo vivo; lo
+      // que pasa cuando un borrado ganó lo fijan sus propios tests.
+      manager.query.mockImplementation((sql: string, params?: unknown[]) =>
+        Promise.resolve(
+          sql.includes('FOR SHARE')
+            ? (params![0] as string[]).map((id) => ({ item_id: id }))
+            : [],
+        ),
+      );
     });
 
     /**
@@ -1277,6 +1285,112 @@ describe('SalonesService', () => {
       ]);
     });
 
+    /** La receta con un extra: lo mínimo para que la línea referencie dos ítems. */
+    function recetaConExtra() {
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            {
+              item_id: RECETA,
+              tipo: 'receta',
+              unidad_medida: null,
+              precio_base: '1000',
+              moneda_id: 'clp',
+            },
+          ]);
+        return Promise.resolve([]);
+      });
+      items.resolverPersonalizacionReceta.mockResolvedValue({
+        snapshot: {
+          ...SNAPSHOT,
+          extras: [
+            {
+              ingredienteItemId: ING,
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '500',
+            },
+          ],
+        },
+        precioExtraTotal: '500.0000',
+      });
+      manager.find.mockResolvedValue([]);
+    }
+
+    const pedirRecetaConExtra = () =>
+      service.agregarLinea(TENANT, CUENTA, {
+        itemId: RECETA,
+        cantidad: '1',
+        personalizacion: {
+          omitidos: [],
+          extras: [{ ingredienteItemId: ING, unidades: 1 }],
+        },
+      });
+
+    it('toma FOR SHARE sobre el ítem y los ingredientes de sus extras, después del lock de la cuenta y antes del tope de stock', async () => {
+      // Par del `FOR UPDATE` de `ItemsService.remove`: sin él, un borrado
+      // concurrente no ve esta línea todavía sin commitear. Antes del tope de
+      // stock porque `items` se toma antes que `item_producto`.
+      recetaConExtra();
+      const orden: string[] = [];
+      manager.findOne.mockImplementation(() => {
+        orden.push('lock-cuenta');
+        return Promise.resolve({
+          id: CUENTA,
+          tenantId: TENANT,
+          estado: EstadoCuenta.ABIERTA,
+        });
+      });
+      manager.query.mockImplementation((sql: string, params?: unknown[]) => {
+        if (!sql.includes('FOR SHARE')) return Promise.resolve([]);
+        orden.push('lock-items');
+        return Promise.resolve(
+          (params![0] as string[]).map((id) => ({ item_id: id })),
+        );
+      });
+      items.validarStockAlPedir.mockImplementation(() => {
+        orden.push('tope-stock');
+        return Promise.resolve(undefined);
+      });
+
+      await pedirRecetaConExtra();
+
+      expect(orden).toEqual(['lock-cuenta', 'lock-items', 'tope-stock']);
+      const lock = (manager.query.mock.calls as [string, unknown[]][]).find(
+        ([sql]) => sql.includes('FOR SHARE'),
+      )!;
+      expect(lock[0]).toMatch(
+        /FROM items[\s\S]*eliminado_el IS NULL[\s\S]*ORDER BY item_id[\s\S]*FOR SHARE/,
+      );
+      expect(lock[1]).toEqual([[RECETA, ING], TENANT]);
+    });
+
+    it('si el ítem ya no está vivo cuando toma el lock (lo borró otra transacción), 404 y no escribe la línea', async () => {
+      manager.find.mockResolvedValue([]);
+      manager.query.mockImplementation(() => Promise.resolve([]));
+
+      await expect(
+        service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '2' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('si el ingrediente de un extra ya no está vivo cuando toma el lock, 400 y no escribe la línea', async () => {
+      // El borrado soft-borró la fila que lo ofrecía como extra: es lo mismo que
+      // diría `resolverPersonalizacionReceta` si leyera el catálogo ahora.
+      recetaConExtra();
+      manager.query.mockImplementation((sql: string) =>
+        Promise.resolve(sql.includes('FOR SHARE') ? [{ item_id: RECETA }] : []),
+      );
+
+      await expect(pedirRecetaConExtra()).rejects.toThrow(
+        'Extra no permitido para esta receta',
+      );
+      expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
     it('lee la cuenta con FOR UPDATE dentro de la transacción', async () => {
       manager.find.mockResolvedValue([]);
 
@@ -1388,20 +1502,22 @@ describe('SalonesService', () => {
 
     it('500 g sobre item kg → cantidad BD 0.5; detalle expone presentación', async () => {
       manager.find.mockResolvedValue([]);
-      manager.query.mockResolvedValueOnce([
-        {
-          cuenta_id: CUENTA,
-          cuenta_linea_id: 'linea-pres',
-          item_id: ITEM,
-          cantidad: '0.5',
-          cantidad_presentacion: '500',
-          unidad_codigo_presentacion: 'g',
-          nombre: 'Harina',
-          precio_base: '1000',
-          moneda_id: 'moneda-1',
-          personalizacion: null,
-        },
-      ]);
+      manager.query
+        .mockResolvedValueOnce([{ item_id: ITEM }]) // FOR SHARE del ítem
+        .mockResolvedValueOnce([
+          {
+            cuenta_id: CUENTA,
+            cuenta_linea_id: 'linea-pres',
+            item_id: ITEM,
+            cantidad: '0.5',
+            cantidad_presentacion: '500',
+            unidad_codigo_presentacion: 'g',
+            nombre: 'Harina',
+            precio_base: '1000',
+            moneda_id: 'moneda-1',
+            personalizacion: null,
+          },
+        ]);
 
       const detalle = await service.agregarLinea(TENANT, CUENTA, {
         itemId: ITEM,

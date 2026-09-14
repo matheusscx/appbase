@@ -2924,6 +2924,29 @@ export class ItemsService {
     }
 
     await this.db.transaccion(async (manager) => {
+      // `FOR UPDATE` sobre el ítem ANTES de mirar si está en uso. Sin él,
+      // `obtenerUsoItem` es un check-then-act: bajo READ COMMITTED no ve la
+      // referencia que otra transacción está escribiendo —un ingrediente
+      // recién agregado a una receta, una opción de grupo, una línea de
+      // cuenta—, las dos commitean y queda una fila viva apuntando a un ítem
+      // borrado. Es el lado exclusivo del par: cada camino que crea una
+      // referencia toma `FOR SHARE` sobre el ítem referenciado
+      // (`filasValidacionPorIds`, `GruposModificadoresService.
+      // validarYResolverOpciones`, `SalonesService.agregarLinea`). Si uno ya
+      // está en vuelo, este lock espera a su commit y el chequeo de abajo ve
+      // la referencia; si llega después, espera a este commit y ya no
+      // encuentra el ítem vivo.
+      //
+      // Solo `items`: `remove()` no escribe `item_receta` ni `item_combo`, así
+      // que no participa de ese tramo del orden (docs/patterns/backend.md §15).
+      const vivo: { item_id: string }[] = await manager.query(
+        `SELECT item_id FROM items
+          WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [itemId, tenantId],
+      );
+      if (!vivo.length) throw new NotFoundException('Item no encontrado');
+
       const { bloqueos } = await this.obtenerUsoItem(manager, tenantId, itemId);
 
       // Mismo orden de prioridad que las tres queries que esto reemplaza: la
@@ -5652,6 +5675,27 @@ export class ItemsService {
     const unicos = [...new Set(itemIds)];
     if (!unicos.length) return new Map();
 
+    // `FOR SHARE` sobre los ítems referenciados: el par del `FOR UPDATE` de
+    // `remove()`. Quien llama está por escribir una fila que apunta a estos
+    // ítems (ingrediente, extra, componente), y sin el lock un borrado
+    // concurrente decide que el ítem no está en uso sin ver esa fila.
+    // Compatible entre sí —dos recetas pueden sumar el mismo ingrediente a la
+    // vez—; solo espera al borrado. `ORDER BY item_id`: dentro de `items` las
+    // filas se piden ordenadas (docs/patterns/backend.md §15).
+    //
+    // La lectura va en un statement APARTE, ya con el lock en la mano: lee
+    // `item_producto` e `item_receta`, y en el statement que lockea saldrían de
+    // un snapshot tomado antes de encolarse — al despertar, Postgres solo
+    // re-evalúa la fila lockeada (mismo porqué que en §15).
+    await manager.query(
+      `SELECT item_id FROM items
+        WHERE item_id = ANY($1::uuid[]) AND tenant_id = $2
+          AND eliminado_el IS NULL
+        ORDER BY item_id
+        FOR SHARE`,
+      [unicos, tenantId],
+    );
+
     const rows: {
       item_id: string;
       tipo: string;
@@ -6574,6 +6618,30 @@ export class ItemsService {
           WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
         [ids],
       );
+      // Y las filas de `items` cuyo precio el lote va a escribir, ordenadas y
+      // antes del primer `UPDATE items`: los `UPDATE` de abajo recorren el lote
+      // en el orden del cliente. Mientras nadie más tomaba varias filas de
+      // `items` a la vez no dolía; desde que quien crea una referencia toma
+      // `FOR SHARE ... ORDER BY item_id` sobre varias (`filasValidacionPorIds`,
+      // las opciones de grupo), un lote `[R2, R1]` contra un `FOR SHARE` de
+      // `[R1, R2]` se abraza — medido con dos sesiones contra Postgres: `40P01`.
+      // Con las filas ya tomadas en orden de id, el `UPDATE` no las vuelve a
+      // pedir (docs/patterns/backend.md §15).
+      const conPrecio = [
+        ...new Set(
+          items
+            .filter((i) => i.actualizarPrecio && i.precioBase)
+            .map((i) => i.itemId),
+        ),
+      ];
+      if (conPrecio.length) {
+        await manager.query(
+          `SELECT item_id FROM items
+            WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL
+            ORDER BY item_id FOR UPDATE`,
+          [conPrecio, tenantId],
+        );
+      }
 
       const recetasDelLote = items.filter(
         (i) => cabPorId.get(i.itemId)!.tipo === 'receta',

@@ -1535,6 +1535,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: 'ingrediente-pan',
@@ -1555,6 +1556,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: 'ingrediente-pan',
@@ -1575,6 +1577,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }])
           .mockResolvedValueOnce([{ item_id: ITEM_ID }])
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: 'ingrediente-pan',
@@ -1596,6 +1599,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
           // UNA query para los dos ingredientes, no una por ingrediente
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: 'ingrediente-pan',
@@ -1626,12 +1630,12 @@ describe('ItemsService', () => {
 
         expect(result).toMatchObject({ id: ITEM_ID });
         // Orden de llamadas a managerMock.query: 1=moneda, 2=INSERT items,
-        // 3=lookup batch de LOS DOS ingredientes, 4=INSERT item_receta,
-        // 5/6=INSERT receta_ingredientes. Antes el lookup era uno por
-        // ingrediente y el INSERT caía en la 5ª.
+        // 3=FOR SHARE de los ingredientes, 4=lookup batch de LOS DOS
+        // ingredientes, 5=INSERT item_receta, 6/7=INSERT receta_ingredientes.
+        // Antes el lookup era uno por ingrediente.
         // costo = 500*1 + 8000*0.15 = 500 + 1200 = 1700
         expect(managerMock.query).toHaveBeenNthCalledWith(
-          4,
+          5,
           expect.stringContaining('INSERT INTO item_receta'),
           [ITEM_ID, '1700'],
         );
@@ -1644,6 +1648,31 @@ describe('ItemsService', () => {
         // memoria dentro del loop, no con una query por ingrediente.
         expect(catalogServiceMock.crearConversor).toHaveBeenCalledTimes(1);
         expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+      });
+
+      it('toma FOR SHARE ordenado sobre los ítems ANTES de leerlos, en un statement aparte — par del FOR UPDATE de remove()', async () => {
+        // Sin el lock, un `remove()` concurrente decide que el ítem no está en
+        // uso sin ver la fila que este camino está por escribir. La lectura va
+        // aparte porque lee `item_producto`, que en el statement del lock
+        // saldría del snapshot tomado antes de la espera.
+        managerMock.query.mockResolvedValue([]);
+
+        await (service as any).filasValidacionPorIds(managerMock, TENANT, [
+          'ingrediente-b',
+          'ingrediente-a',
+          'ingrediente-b',
+        ]);
+
+        const [lock, lectura] = managerMock.query.mock.calls as [
+          string,
+          unknown[],
+        ][];
+        expect(lock[0]).toMatch(
+          /FROM items[\s\S]*eliminado_el IS NULL[\s\S]*ORDER BY item_id[\s\S]*FOR SHARE/,
+        );
+        expect(lock[1]).toEqual([['ingrediente-b', 'ingrediente-a'], TENANT]);
+        expect(lectura[0]).toContain('LEFT JOIN item_producto ip');
+        expect(lectura[0]).not.toContain('FOR SHARE');
       });
     });
 
@@ -1673,6 +1702,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ codigo_iso: 'CLP', simbolo: '$' }]) // moneda
           .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: 'ingrediente-pan',
@@ -1685,6 +1715,7 @@ describe('ItemsService', () => {
           ]) // lookup batch de ingredientes
           .mockResolvedValueOnce([]) // INSERT item_receta
           .mockResolvedValueOnce([]) // INSERT receta_ingredientes pan
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: 'ingrediente-queso',
@@ -1837,6 +1868,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
           .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
           // UNA query para los dos componentes, no una por componente
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: PROD_ID,
@@ -1885,6 +1917,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
           .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: OTRO_COMBO_ID,
@@ -2473,6 +2506,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
         .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -2513,7 +2547,7 @@ describe('ItemsService', () => {
       );
       // soft-delete de la lista anterior (nunca hard DELETE)
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
+        6,
         expect.stringContaining('SET eliminado_el = NOW()'),
         [ITEM_ID],
       );
@@ -2536,6 +2570,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
         .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -2592,6 +2627,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
         .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -2715,6 +2751,7 @@ describe('ItemsService', () => {
     it('extrasPermitidos: update soft-deletea extras previos e inserta nuevos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -2776,6 +2813,7 @@ describe('ItemsService', () => {
     it('extrasPermitidos: pregunta por los N extras que se sacan en UNA sola consulta', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -2829,6 +2867,7 @@ describe('ItemsService', () => {
     it('extrasPermitidos: no pregunta nada si no se saca ninguno', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -3009,6 +3048,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
           .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: PROD_ID,
@@ -3041,6 +3081,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
           .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
+          .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
               item_id: PROD_ID,
@@ -3128,9 +3169,9 @@ describe('ItemsService', () => {
           id: PROD_ID,
           tenantId: TENANT,
         });
-        managerMock.query.mockResolvedValueOnce([
-          { clase: 'combo', nombre: 'Combo Clásico' },
-        ]);
+        managerMock.query
+          .mockResolvedValueOnce([{ item_id: PROD_ID }]) // FOR UPDATE del ítem
+          .mockResolvedValueOnce([{ clase: 'combo', nombre: 'Combo Clásico' }]);
 
         await expect(service.remove(TENANT, USUARIO, PROD_ID)).rejects.toThrow(
           /No se puede eliminar.*componente de/i,
@@ -3142,6 +3183,11 @@ describe('ItemsService', () => {
   // ── remove ─────────────────────────────────────────────────────────────────
 
   describe('remove', () => {
+    // El `FOR UPDATE` sobre el ítem es la primera query de la transacción: la
+    // contesta vivo, y las posiciones de los tests cuentan desde ahí.
+    beforeEach(() => {
+      managerMock.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
+    });
     it('lanza NotFoundException cuando el item no pertenece al tenant', async () => {
       itemRepo.findOne.mockResolvedValue(null);
       await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
@@ -3155,12 +3201,12 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
-      // Llamada 4: la UNION de uso es la 1, los dos soft-delete de
-      // `receta_extras_permitidos` (por ingrediente y por receta) son la 2 y la 3
-      // — las tres comparten firma `[ITEM_ID, TENANT]` con esta, así que hay que
+      // Llamada 5: el `FOR UPDATE` del ítem es la 1, la UNION de uso la 2, y los
+      // dos soft-delete de `receta_extras_permitidos` (por ingrediente y por
+      // receta) la 3 y la 4 — las cuatro comparten firma `[ITEM_ID, TENANT]` con esta, así que hay que
       // aislar la del `UPDATE items` puntual para no matchear cualquiera.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        4,
+        5,
         expect.stringContaining('UPDATE items'),
         [ITEM_ID, TENANT, USUARIO],
       );
@@ -3172,9 +3218,9 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
-      const sql = managerMock.query.mock.calls[3][0] as string;
+      const sql = managerMock.query.mock.calls[4][0] as string;
       expect(sql).toMatch(/eliminado_por\s*=\s*\$3/);
-      expect(managerMock.query.mock.calls[3][1]).toEqual([
+      expect(managerMock.query.mock.calls[4][1]).toEqual([
         ITEM_ID,
         TENANT,
         USUARIO,
@@ -3215,16 +3261,16 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
-      // Llamada 2 (índice 1): limpia por `ingrediente_item_id`, no por
-      // `receta_item_id` — aislada por índice de llamada porque las llamadas 2
-      // y 3 comparten el mismo texto `UPDATE receta_extras_permitidos` y los
+      // Llamada 3 (índice 2): limpia por `ingrediente_item_id`, no por
+      // `receta_item_id` — aislada por índice de llamada porque las llamadas 3
+      // y 4 comparten el mismo texto `UPDATE receta_extras_permitidos` y los
       // mismos params `[ITEM_ID, TENANT]`.
-      expect(managerMock.query.mock.calls[1][0]).toEqual(
+      expect(managerMock.query.mock.calls[2][0]).toEqual(
         expect.stringContaining(
           'WHERE ingrediente_item_id = $1 AND tenant_id = $2',
         ),
       );
-      expect(managerMock.query.mock.calls[1][1]).toEqual([ITEM_ID, TENANT]);
+      expect(managerMock.query.mock.calls[2][1]).toEqual([ITEM_ID, TENANT]);
     });
 
     it('limpia también las filas donde el item borrado es la receta que ofrece el extra', async () => {
@@ -3237,14 +3283,45 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
-      // Llamada 3 (índice 2): limpia por `receta_item_id`, no por
+      // Llamada 4 (índice 3): limpia por `receta_item_id`, no por
       // `ingrediente_item_id` — aislada por índice de llamada porque las
-      // llamadas 2 y 3 comparten el mismo texto `UPDATE receta_extras_permitidos`
+      // llamadas 3 y 4 comparten el mismo texto `UPDATE receta_extras_permitidos`
       // y los mismos params `[ITEM_ID, TENANT]`.
-      expect(managerMock.query.mock.calls[2][0]).toEqual(
+      expect(managerMock.query.mock.calls[3][0]).toEqual(
         expect.stringContaining('WHERE receta_item_id = $1 AND tenant_id = $2'),
       );
-      expect(managerMock.query.mock.calls[2][1]).toEqual([ITEM_ID, TENANT]);
+      expect(managerMock.query.mock.calls[3][1]).toEqual([ITEM_ID, TENANT]);
+    });
+
+    it('toma FOR UPDATE sobre el ítem ANTES de consultar su uso — par de los FOR SHARE de quien lo referencia', async () => {
+      // Sin el lock, la consulta de uso no ve la referencia que otra
+      // transacción está escribiendo: las dos commitean y queda una fila viva
+      // apuntando a un ítem borrado.
+      itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
+      managerMock.query.mockResolvedValue([]);
+
+      await service.remove(TENANT, USUARIO, ITEM_ID);
+
+      const [sqlLock, paramsLock] = managerMock.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sqlLock).toMatch(
+        /FROM items[\s\S]*eliminado_el IS NULL[\s\S]*FOR UPDATE/,
+      );
+      expect(paramsLock).toEqual([ITEM_ID, TENANT]);
+      expect(managerMock.query.mock.calls[1][0]).toContain('UNION');
+    });
+
+    it('si otra transacción ya lo borró, el lock no lo encuentra: 404 sin consultar uso ni escribir', async () => {
+      itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
+      managerMock.query.mockReset();
+      managerMock.query.mockResolvedValueOnce([]);
+
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -7466,6 +7543,7 @@ describe('ItemsService', () => {
           ]) // cabecerasCompuestas
           .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([]) // SELECT item_combo ... ORDER BY item_id FOR UPDATE
+          .mockResolvedValueOnce([]) // SELECT items ... ORDER BY item_id FOR UPDATE (los que actualizan precio)
           .mockResolvedValueOnce([
             {
               receta_item_id: RECETA_ID,
@@ -7495,6 +7573,60 @@ describe('ItemsService', () => {
           expect.stringContaining('UPDATE items SET precio_base'),
           expect.arrayContaining(['600.0000', RECETA_ID, TENANT]),
         );
+      });
+
+      it('toma FOR UPDATE ordenado sobre los items cuyo precio actualiza, después de item_combo y antes del primer UPDATE items', async () => {
+        // Los UPDATE de precio recorren el lote en el orden del cliente. Contra un
+        // `FOR SHARE ... ORDER BY item_id` de varias filas (opciones de grupo,
+        // componentes de un combo) un lote [R2, R1] se abraza: medido con dos
+        // sesiones contra Postgres, 40P01.
+        const IDS = ['receta-b', 'receta-a', 'receta-c'];
+        managerMock.query
+          .mockResolvedValueOnce(
+            IDS.map((id) => ({ item_id: id, tipo: 'receta', nombre: id })),
+          ) // cabecerasCompuestas
+          .mockResolvedValueOnce([]) // lock item_receta
+          .mockResolvedValueOnce([]) // lock item_combo
+          .mockResolvedValueOnce([]) // lock items
+          .mockResolvedValueOnce(
+            IDS.map((id) => ({
+              receta_item_id: id,
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            })),
+          ) // ingredientesPorReceta
+          .mockResolvedValue([]);
+
+        await service.aplicarDesfases(TENANT, [
+          { itemId: 'receta-b', actualizarPrecio: true, precioBase: '500' },
+          { itemId: 'receta-a', actualizarPrecio: true, precioBase: '500' },
+          { itemId: 'receta-c' },
+        ]);
+
+        const llamadas = managerMock.query.mock.calls as [string, unknown[]][];
+        const sqls = llamadas.map(([sql]) => sql);
+        const lockCombo = sqls.findIndex(
+          (sql) =>
+            sql.includes('FROM item_combo') && sql.includes('FOR UPDATE'),
+        );
+        const lockItems = sqls.findIndex((sql) =>
+          /FROM items[\s\S]*eliminado_el IS NULL[\s\S]*ORDER BY item_id FOR UPDATE/.test(
+            sql,
+          ),
+        );
+        const primerUpdate = sqls.findIndex((sql) =>
+          sql.includes('UPDATE items SET precio_base'),
+        );
+        expect(lockCombo).toBeGreaterThan(-1);
+        expect(lockItems).toBeGreaterThan(lockCombo);
+        expect(lockItems).toBeLessThan(primerUpdate);
+        // Solo los que escriben precio: la receta-c no se lockea en `items`.
+        expect(llamadas[lockItems][1]).toEqual([
+          ['receta-b', 'receta-a'],
+          TENANT,
+        ]);
       });
 
       it('aplicar sin checkbox no toca precio_base', async () => {
@@ -8301,6 +8433,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
         .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
             item_id: PROD_ID,
@@ -8522,9 +8655,9 @@ describe('ItemsService', () => {
         id: ITEM_OPCION_ID,
         tenantId: TENANT,
       });
-      managerMock.query.mockResolvedValueOnce([
-        { clase: 'opcion', nombre: 'Proteína' },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_OPCION_ID }]) // FOR UPDATE del ítem
+        .mockResolvedValueOnce([{ clase: 'opcion', nombre: 'Proteína' }]);
 
       await expect(
         service.remove(TENANT, USUARIO, ITEM_OPCION_ID),
@@ -8535,6 +8668,8 @@ describe('ItemsService', () => {
   describe('remove — clasificación de usos', () => {
     beforeEach(() => {
       itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
+      // El `FOR UPDATE` sobre el ítem es la primera query: la contesta vivo.
+      managerMock.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
     });
 
     it('borra un ingrediente usado solo como extra y soft-deletea sus filas de extras', async () => {
@@ -8547,12 +8682,12 @@ describe('ItemsService', () => {
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
       const sqls = managerMock.query.mock.calls.map((c) => c[0] as string);
-      expect(sqls).toHaveLength(4);
-      expect(sqls[1]).toContain('UPDATE receta_extras_permitidos');
-      expect(sqls[1]).toContain('eliminado_el = NOW()');
+      expect(sqls).toHaveLength(5);
       expect(sqls[2]).toContain('UPDATE receta_extras_permitidos');
       expect(sqls[2]).toContain('eliminado_el = NOW()');
-      expect(sqls[3]).toContain('UPDATE items');
+      expect(sqls[3]).toContain('UPDATE receta_extras_permitidos');
+      expect(sqls[3]).toContain('eliminado_el = NOW()');
+      expect(sqls[4]).toContain('UPDATE items');
     });
 
     it('bloquea si es componente de un combo, sin filtrar el extra al mensaje', async () => {
@@ -8614,7 +8749,7 @@ describe('ItemsService', () => {
       // personalización de una línea (el extra), y las dos tienen que llevar
       // los mismos cuatro filtros. Un `find` miraba solo la primera y dejaba la
       // otra sin cubrir.
-      const ramas = (managerMock.query.mock.calls[0][0] as string)
+      const ramas = (managerMock.query.mock.calls[1][0] as string)
         .split(/\bUNION\b/)
         .filter((r) => r.includes('cuenta_lineas'));
       expect(ramas).toHaveLength(2);
@@ -8638,13 +8773,13 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, USUARIO, ITEM_ID);
 
-      expect(managerMock.query.mock.calls[0][1]).toEqual([ITEM_ID, TENANT]);
+      expect(managerMock.query.mock.calls[1][1]).toEqual([ITEM_ID, TENANT]);
 
       // Afirmar sobre los params no alcanza: si alguien saca la condición de
       // tenant de UNA sola rama del UNION, los params ($1, $2) no cambian y una
       // aserción solo de parámetros seguiría en verde. Partir el SQL por `UNION`
       // y exigir la condición de tenant en cada una de las seis ramas.
-      const sql = managerMock.query.mock.calls[0][0] as string;
+      const sql = managerMock.query.mock.calls[1][0] as string;
       const ramas = sql.split(/\bUNION\b/);
       expect(ramas).toHaveLength(6);
       for (const rama of ramas) {

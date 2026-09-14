@@ -424,6 +424,13 @@ Se dispara con un uso normal (un PATCH de receta con nombre + ingredientes contr
 "aplicar desfase con actualizar precio"), y no lo caza ningún test: los unit corren con un
 solo manager mockeado y el e2e es secuencial. Lo cazó la revisión independiente.
 
+**Variante: agregar un lock ordenado de un lado vuelve peligroso al que escribía en el orden del
+cliente del otro.** Pasó al cerrar las carreras del borrado de ítems (2026-09-13): los
+`FOR SHARE … ORDER BY item_id` nuevos eran el primer camino que tomaba varias filas de `items` a la
+vez, y `aplicarDesfases` —que hacía sus `UPDATE items` del precio recorriendo el lote— pasó a poder
+abrazarse con ellos (medido: `40P01` con dos sesiones). Antes no dolía porque nadie más tomaba varias
+filas. El gate completo pasó; lo cazó la revisión independiente, a la que se le preguntó por ciclos.
+
 **Regla:** agregar un `FOR UPDATE` **no es un cambio local**. Antes de ponerlo, listar qué
 otros locks toma ese método —incluidos los implícitos de cada `UPDATE`— y en qué orden, y
 cruzarlo con los demás métodos que tocan esas mismas tablas. La pregunta no es "¿qué

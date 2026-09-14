@@ -55,27 +55,28 @@ describe('GruposModificadoresService', () => {
   });
 
   it('crea un grupo homogéneo de familia ingrediente y resuelve opciones', async () => {
-    // INSERT grupo → item lookups (2 ingredientes) → INSERT opciones
+    // INSERT grupo → FOR SHARE + lectura de las 2 opciones → INSERT opciones
     managerMock.query
       .mockResolvedValueOnce([]) // check nombre único vivo
       .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // INSERT grupo RETURNING
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
       .mockResolvedValueOnce([
         {
+          item_id: ITEM_ING_A,
           tipo: 'ingrediente',
           nombre: 'Carne',
           modo_inventario: 'cantidad',
           unidad_medida: 'g',
         },
-      ])
-      .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }])
-      .mockResolvedValueOnce([
         {
+          item_id: ITEM_ING_B,
           tipo: 'ingrediente',
           nombre: 'Pollo',
           modo_inventario: 'cantidad',
           unidad_medida: 'g',
         },
-      ])
+      ]) // lectura de todas las opciones, en una query
+      .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }])
       .mockResolvedValueOnce([{ grupo_opcion_id: 'O2' }]);
     const res = await service.create(TENANT_ID, {
       nombre: 'Proteína',
@@ -104,23 +105,24 @@ describe('GruposModificadoresService', () => {
     managerMock.query
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
       .mockResolvedValueOnce([
         {
+          item_id: ITEM_ING_A,
           tipo: 'ingrediente',
           nombre: 'Carne',
           modo_inventario: 'cantidad',
           unidad_medida: 'g',
         },
-      ])
-      .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }])
-      .mockResolvedValueOnce([
         {
+          item_id: ITEM_PROD,
           tipo: 'producto',
           nombre: 'Coca',
           modo_inventario: 'cantidad',
           unidad_medida: 'unidad',
         },
-      ]);
+      ]) // lectura de todas las opciones, en una query
+      .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }]);
     await expect(
       service.create(TENANT_ID, {
         nombre: 'Mixto',
@@ -141,14 +143,16 @@ describe('GruposModificadoresService', () => {
     managerMock.query
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
       .mockResolvedValueOnce([
         {
+          item_id: ITEM_PROD,
           tipo: 'producto',
           nombre: 'Coca',
           modo_inventario: 'cantidad',
           unidad_medida: 'unidad',
         },
-      ]);
+      ]); // lectura de todas las opciones, en una query
     await expect(
       service.create(TENANT_ID, {
         nombre: 'Bebida',
@@ -161,14 +165,16 @@ describe('GruposModificadoresService', () => {
     managerMock.query
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
       .mockResolvedValueOnce([
         {
+          item_id: ITEM_PROD,
           tipo: 'combo',
           nombre: 'Otro combo',
           modo_inventario: null,
           unidad_medida: null,
         },
-      ]);
+      ]); // lectura de todas las opciones, en una query
     await expect(
       service.create(TENANT_ID, {
         nombre: 'X',
@@ -181,14 +187,16 @@ describe('GruposModificadoresService', () => {
     managerMock.query
       .mockResolvedValueOnce([]) // assertNombreLibre
       .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // INSERT grupo
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
       .mockResolvedValueOnce([
         {
+          item_id: ITEM_PROD,
           tipo: 'producto',
           nombre: 'Coca',
           modo_inventario: 'cantidad',
           unidad_medida: 'unidad',
         },
-      ])
+      ]) // lectura de todas las opciones, en una query
       .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }]); // INSERT opción
     const res = await service.create(TENANT_ID, {
       nombre: 'Bebida',
@@ -201,20 +209,76 @@ describe('GruposModificadoresService', () => {
     managerMock.query
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
       .mockResolvedValueOnce([
         {
+          item_id: ITEM_PROD,
           tipo: 'producto',
           nombre: 'Coca',
           modo_inventario: 'cantidad',
           unidad_medida: 'unidad',
         },
-      ]);
+      ]); // lectura de todas las opciones, en una query
     await expect(
       service.create(TENANT_ID, {
         nombre: 'Bebida',
         opciones: [{ itemId: ITEM_PROD, cantidad: '0', precioExtra: '0' }],
       } as any),
     ).rejects.toThrow(/cantidad.*mayor a 0/i);
+  });
+
+  it('toma FOR SHARE ordenado sobre los ítems de TODAS las opciones y las lee en una sola query, antes de escribir la primera', async () => {
+    // Par del `FOR UPDATE` de `ItemsService.remove`: sin el lock, un borrado
+    // concurrente decide que el ítem no es opción de nada sin ver la opción
+    // que este grupo está por escribir. Y una lectura para las N opciones, no
+    // una por opción.
+    managerMock.query
+      .mockResolvedValueOnce([]) // assertNombreLibre
+      .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // INSERT grupo
+      .mockResolvedValueOnce([]) // FOR SHARE
+      .mockResolvedValueOnce([
+        {
+          item_id: ITEM_PROD_2,
+          tipo: 'producto',
+          nombre: 'Fanta',
+          modo_inventario: 'cantidad',
+          unidad_medida: 'unidad',
+        },
+        {
+          item_id: ITEM_PROD,
+          tipo: 'producto',
+          nombre: 'Coca',
+          modo_inventario: 'cantidad',
+          unidad_medida: 'unidad',
+        },
+      ])
+      .mockResolvedValue([{ grupo_opcion_id: 'O' }]); // INSERT de cada opción
+
+    await service.create(TENANT_ID, {
+      nombre: 'Bebida',
+      opciones: [
+        { itemId: ITEM_PROD_2, precioExtra: '0' },
+        { itemId: ITEM_PROD, precioExtra: '0' },
+      ],
+    });
+
+    const llamadas = managerMock.query.mock.calls as [string, unknown[]][];
+    const sqls = llamadas.map(([sql]) => sql);
+    const lock = sqls.findIndex((sql) => sql.includes('FOR SHARE'));
+    const primerInsert = sqls.findIndex((sql) =>
+      sql.includes('INSERT INTO grupo_modificador_opciones'),
+    );
+    expect(lock).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(primerInsert);
+    expect(sqls[lock]).toMatch(
+      /FROM items[\s\S]*eliminado_el IS NULL[\s\S]*ORDER BY item_id[\s\S]*FOR SHARE/,
+    );
+    expect(llamadas[lock][1]).toEqual([[ITEM_PROD_2, ITEM_PROD], TENANT_ID]);
+    const lecturas = sqls.filter((sql) =>
+      sql.includes('LEFT JOIN item_producto ip'),
+    );
+    expect(lecturas).toHaveLength(1);
+    expect(lecturas[0]).not.toContain('FOR SHARE');
   });
 
   describe('update/remove grupo', () => {
@@ -235,14 +299,16 @@ describe('GruposModificadoresService', () => {
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
         ]) // SELECT grupo vivo (nombre igual → no se toca el nombre acá)
         .mockResolvedValueOnce([]) // SELECT opciones vivas → ninguna, la entrante va por INSERT
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD,
             tipo: 'producto',
             nombre: 'Coca',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ]) // item lookup
+        ]) // lectura de todas las opciones, en una query
         .mockRejectedValueOnce(
           Object.assign(new Error('duplicate key'), {
             code: '23505',
@@ -283,14 +349,16 @@ describe('GruposModificadoresService', () => {
         ]) // SELECT grupo vivo
         // (nombre sin cambio → no se llama assertNombreLibre ni UPDATE nombre)
         .mockResolvedValueOnce([]) // SELECT opciones vivas actuales (map por item_id) — ninguna
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD,
             tipo: 'producto',
             nombre: 'Coca',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ]) // item lookup
+        ]) // lectura de todas las opciones, en una query
         .mockResolvedValueOnce([{ grupo_opcion_id: 'O9' }]) // INSERT opción (nueva)
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
@@ -333,14 +401,16 @@ describe('GruposModificadoresService', () => {
           { grupo_opcion_id: 'O-EXIST', item_id: ITEM_PROD },
         ])
         // item lookup de la opción entrante (validarYResolverOpciones)
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD,
             tipo: 'producto',
             nombre: 'Coca',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ])
+        ]) // lectura de todas las opciones, en una query
         .mockResolvedValueOnce([]) // UPDATE de la opción existente
         .mockResolvedValueOnce([]); // cargarGrupo: SELECT grupo → [] → devuelve null (no importa para este test)
       await service.update(TENANT_ID, 'G1', {
@@ -371,14 +441,16 @@ describe('GruposModificadoresService', () => {
           { grupo_opcion_id: 'O-GONE', item_id: ITEM_PROD },
         ]) // vivas actuales
         // opciones entrantes: ITEM_PROD_2 en vez de ITEM_PROD → O-GONE desaparece
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD_2,
             tipo: 'producto',
             nombre: 'Fanta',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ]) // item de la nueva opción
+        ]) // lectura de todas las opciones, en una query
         .mockResolvedValueOnce([{ grupo_opcion_id: 'O-NEW' }]) // INSERT nueva
         .mockResolvedValueOnce([]) // soft-delete overrides de O-GONE
         .mockResolvedValueOnce([]) // soft-delete opción O-GONE
@@ -412,14 +484,16 @@ describe('GruposModificadoresService', () => {
           { grupo_opcion_id: 'O-GONE', item_id: ITEM_PROD },
           { grupo_opcion_id: 'O-STAY', item_id: ITEM_PROD_2 },
         ]) // vivas actuales
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD_2,
             tipo: 'producto',
             nombre: 'Fanta',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ])
+        ]) // lectura de todas las opciones, en una query
         // `ITEM_PROD_2` ya venía vivo (`O-STAY`), así que ésta es la rama
         // UPDATE de `validarYResolverOpciones`, no la INSERT.
         .mockResolvedValueOnce([]) // UPDATE de la opción que sigue
@@ -449,14 +523,16 @@ describe('GruposModificadoresService', () => {
         .mockResolvedValueOnce([
           { grupo_opcion_id: 'O-STAY', item_id: ITEM_PROD_2 },
         ])
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD_2,
             tipo: 'producto',
             nombre: 'Fanta',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ])
+        ]) // lectura de todas las opciones, en una query
         .mockResolvedValueOnce([]) // UPDATE de la opción que sigue viva
         .mockResolvedValueOnce([]);
 
@@ -478,14 +554,16 @@ describe('GruposModificadoresService', () => {
         .mockResolvedValueOnce([
           { grupo_opcion_id: 'O-GONE', item_id: ITEM_PROD },
         ])
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems de las opciones
         .mockResolvedValueOnce([
           {
+            item_id: ITEM_PROD_2,
             tipo: 'producto',
             nombre: 'Fanta',
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ])
+        ]) // lectura de todas las opciones, en una query
         .mockResolvedValueOnce([{ grupo_opcion_id: 'O-NEW' }]);
 
       await expect(

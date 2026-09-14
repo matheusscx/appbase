@@ -194,6 +194,14 @@ endurecimiento del catálogo. Al confirmar el borrado, se marcan `eliminado_el`
 extra (`receta_item_id`), para no dejar filas colgando si lo que se borra es la
 receta en vez del ingrediente.
 
+**Contra un pedido o una edición en vuelo** (2026-09-13). El chequeo de uso y el borrado
+corren con la fila del ítem tomada `FOR UPDATE`, y quien está agregándolo como ingrediente,
+extra, componente, opción de grupo o línea de cuenta la toma `FOR SHARE`: el que llega
+segundo espera al otro. Si espera el borrado, ve la referencia ya escrita y bloquea —o, si
+es un extra permitido, se la lleva con las demás filas—. Si espera el otro, ya no encuentra
+el ítem y rechaza. Patrón y orden de locks:
+[`patterns/backend.md`](../patterns/backend.md) § 15.
+
 ### POST /ventas (línea con item tipo receta)
 
 Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad convertida). Bloqueante sin stock → error `'Stock insuficiente para la salida'` aborta la transacción. No bloqueante: se captura solo ese mensaje y se agrega a `advertencias` en la respuesta (sin pre-chequeo racey).

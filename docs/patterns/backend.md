@@ -328,8 +328,8 @@ caliente del sistema. No es teórico — `mermas.service.ts` ya toma `FOR UPDATE
 `items` antes de llamar al kardex, así que un `FOR UPDATE` a secas acá haría que la venta
 empiece a bloquear contra la merma. El orden de bloqueo entre caminos es donde el proyecto
 ya tiene deadlocks: el de fila está descrito en el comentario de `ventas.service.ts` →
-`crear()` (por eso ese método ordena por `itemId` y reintenta), y las tres entradas abiertas
-del mismo molde están en `docs/agent/pendientes.md` § "Carreras de concurrencia".
+`crear()` (por eso ese método ordena por `itemId` y reintenta), y el orden entre las tablas
+del catálogo, en § 15.
 
 ⚠️ **Este molde NO trae `eliminado_el IS NULL`, y es una decisión, no un olvido.** La
 invariante del proyecto es que toda lectura lo filtra; acá el `JOIN` al padre existe **solo
@@ -869,7 +869,7 @@ la insertó la misma transacción. Por eso `create()` inserta `items` antes que
 
 | Camino | Cómo toma el orden | Test que lo fija (`items.service.spec.ts`) |
 |---|---|---|
-| `aplicarDesfases` | dos `SELECT … ORDER BY item_id FOR UPDATE`, `item_receta` y después `item_combo`, antes de leer ingredientes; los `UPDATE items` del precio van después de los dos locks | `aplicar sobre N recetas hace lecturas CONSTANTES…` (afirma las dos tablas y sus `ORDER BY`), `aplicar sobre N combos hace lecturas CONSTANTES…`, `valida el tenant ANTES de tomar los locks` |
+| `aplicarDesfases` | dos `SELECT … ORDER BY item_id FOR UPDATE`, `item_receta` y después `item_combo`, antes de leer ingredientes; si el lote actualiza precios, un tercero sobre esas filas de `items`, también `ORDER BY item_id`; los `UPDATE items` del precio van después de los tres | `aplicar sobre N recetas hace lecturas CONSTANTES…` (afirma las dos tablas y sus `ORDER BY`), `aplicar sobre N combos hace lecturas CONSTANTES…`, `valida el tenant ANTES de tomar los locks`, `toma FOR UPDATE ordenado sobre los items cuyo precio actualiza…` |
 | `descartarDesfases` | dos pasadas ordenadas, sin locks explícitos | `descartar escribe item_receta ANTES que item_combo…`, `descartar ordena por item_id DENTRO de la pasada de recetas…` |
 | `update()` de un ítem compuesto | `FOR UPDATE` sobre `item_receta`/`item_combo` **antes** del `UPDATE items`, bajo el mismo guard que el branch que después escribe esa tabla | `toma item_combo ANTES del UPDATE items — orden de locks contra aplicarDesfases` |
 
@@ -938,6 +938,54 @@ un lote), esto es lo primero que hay que volver a mirar.
 El porqué completo, con los ciclos que se cerraron y el que quedó abierto, en
 [`agent/resueltos.md`](../agent/resueltos.md) § "El orden de bloqueo de filas de la
 bandeja de desfases".
+
+### Borrar un ítem contra crear una referencia a él (2026-09-13)
+
+`ItemsService.remove` decide si el ítem está en uso con una consulta (`obtenerUsoItem`), y esa
+consulta sola es un check-then-act: bajo READ COMMITTED no ve la fila que otra transacción está
+escribiendo, las dos commitean y queda una referencia viva a un ítem borrado. El cierre es un
+**par de locks sobre la fila de `items`**, el mismo molde que `UbicacionesService.remove` contra
+`TrasladosService`:
+
+| Lado | Quién | Lock |
+|---|---|---|
+| Exclusivo | `ItemsService.remove`, antes de `obtenerUsoItem` | `FOR UPDATE` |
+| Compartido | `ItemsService.filasValidacionPorIds` — ingredientes, extras y componentes, en el alta y la edición | `FOR SHARE`, `ORDER BY item_id` |
+| Compartido | `GruposModificadoresService.validarYResolverOpciones` — opciones de grupo | `FOR SHARE`, `ORDER BY item_id` |
+| Compartido | `SalonesService.agregarLinea` — el ítem de la línea y los ingredientes de sus extras | `FOR SHARE`, `ORDER BY item_id` |
+
+**Un camino nuevo que escriba una fila apuntando a un ítem** —cualquier tabla que
+`obtenerUsoItem` mire— entra en la parte compartida de esta tabla. Si no, el borrado vuelve a no
+verlo, y ningún test existente se entera.
+
+**Dónde va en el orden.** Los `FOR SHARE` son filas de `items`, así que van donde la cadena de
+arriba dice `items`: después de `item_receta` e `item_combo`, y **antes de `item_producto`**.
+`agregarLinea` lo toma entre el lock de la cuenta y el de stock (`validarStockAlPedir`), en el
+mismo orden que `update()`, cuyo `UPDATE items` va antes del `FOR UPDATE` de `item_producto`.
+`remove()` no escribe `item_receta` ni `item_combo`, así que su `FOR UPDATE` no participa de ese
+tramo.
+
+**Y dentro de `items`, en orden de id también del otro lado.** `aplicarDesfases` ya tomaba varias
+filas de `items` —sus `UPDATE` del precio, recorriendo el lote en el orden del cliente—, pero ningún
+otro camino lo hacía, y dos lotes se serializaban antes en `item_receta`/`item_combo`. Estos `FOR SHARE` son ese
+otro camino, y con ellos el orden del cliente pasó a poder cerrar un ciclo: un
+lote `[R2, R1]` contra un `FOR SHARE` de `[R1, R2]` se abrazaba: `40P01`, medido el 2026-09-13 con dos
+sesiones contra Postgres, y levantado por la revisión independiente, no por el gate. Ahora toma esas
+filas con `ORDER BY item_id FOR UPDATE` antes del primer `UPDATE` (tabla de arriba). La nota de
+*"Las reglas van antes que todo eso"* —un solo statement con `ANY(...)` no necesita `ORDER BY`— vale
+cuando el otro lado también toma sus filas en un solo statement; acá el otro lado escribía fila por
+fila, y el orden lo tienen que compartir los dos.
+
+**Donde además se lee el ítem, el lock va en su propio statement y la lectura en el siguiente.**
+Es el caso de `filasValidacionPorIds` y de las opciones de grupo: sus lecturas unen `item_producto`
+(y `item_receta`), y en el statement que lockea esas columnas saldrían del snapshot tomado antes de
+la espera, la misma razón del saldo de stock en la sección de abajo. En `agregarLinea` el lock es
+el chequeo mismo —solo pide `item_id`— y no hay lectura después.
+
+**Qué lo fija.** `backend/test/borrado-item-concurrente.e2e-spec.ts` reproduce una carrera por
+mecanismo con una compuerta determinista, y cuenta las sesiones esperando un lock antes de
+soltarla. Los unitarios de los tres services afirman el SQL del lock y su posición. El
+`ORDER BY` lo fija solo el unitario, por lo dicho al principio de esta sección.
 
 ### El lock de stock ancla en `item_producto`, nunca en `stock_ubicacion` (2026-09-06)
 

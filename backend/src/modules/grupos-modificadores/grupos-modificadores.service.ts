@@ -86,6 +86,41 @@ export class GruposModificadoresService {
     if (!opciones.length) {
       throw new BadRequestException('El grupo requiere al menos una opción');
     }
+
+    const ids = [...new Set(opciones.map((op) => op.itemId))];
+    // `FOR SHARE` sobre los ítems de las opciones: el par del `FOR UPDATE` de
+    // `ItemsService.remove`. El `onResuelto` de abajo escribe una opción que
+    // apunta a cada uno, y sin el lock un borrado concurrente decide que el
+    // ítem no es opción de nada sin ver esa fila: queda una opción viva de un
+    // ítem borrado. `ORDER BY item_id`: dentro de `items` las filas se piden
+    // ordenadas (docs/patterns/backend.md §15).
+    await manager.query(
+      `SELECT item_id FROM items
+        WHERE item_id = ANY($1::uuid[]) AND tenant_id = $2
+          AND eliminado_el IS NULL
+        ORDER BY item_id
+        FOR SHARE`,
+      [ids, tenantId],
+    );
+    // Todas las opciones en una lectura, no una por opción, y en un statement
+    // aparte del lock: `item_producto` leído en el statement que lockea saldría
+    // del snapshot previo a la espera.
+    const filas: {
+      item_id: string;
+      tipo: string;
+      nombre: string;
+      modo_inventario: string | null;
+      unidad_medida: string | null;
+    }[] = await manager.query(
+      `SELECT i.item_id, i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida
+         FROM items i
+         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+        WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+          AND i.eliminado_el IS NULL`,
+      [ids, tenantId],
+    );
+    const filaPorItem = new Map(filas.map((f) => [f.item_id, f]));
+
     const vistos = new Set<string>();
     let familia: FamiliaEfecto | null = null;
     const resueltas: OpcionResuelta[] = [];
@@ -123,22 +158,11 @@ export class GruposModificadoresService {
         }
       }
 
-      const rows: {
-        tipo: string;
-        nombre: string;
-        modo_inventario: string | null;
-        unidad_medida: string | null;
-      }[] = await manager.query(
-        `SELECT i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida
-         FROM items i
-         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-         WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-        [op.itemId, tenantId],
-      );
-      if (!rows.length) {
+      const fila = filaPorItem.get(op.itemId);
+      if (!fila) {
         throw new BadRequestException(`Opción no encontrada: ${op.itemId}`);
       }
-      const { tipo, nombre, modo_inventario, unidad_medida } = rows[0];
+      const { tipo, nombre, modo_inventario, unidad_medida } = fila;
       if (!['producto', 'receta', 'servicio', 'ingrediente'].includes(tipo)) {
         throw new BadRequestException(
           `Una opción de grupo debe ser ingrediente, producto, receta o servicio (recibido: ${tipo})`,

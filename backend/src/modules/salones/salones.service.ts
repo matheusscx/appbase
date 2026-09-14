@@ -760,6 +760,40 @@ export class SalonesService {
             tenantId,
             cuentaId,
           );
+          // **Lo que se está pidiendo no se borra a mitad del pedido.**
+          // `FOR SHARE` sobre las filas de `items` que esta línea referencia
+          // —el ítem y los ingredientes de sus extras, las dos cosas que
+          // `obtenerUsoItem` busca en `cuenta_lineas`—: el par del `FOR UPDATE`
+          // de `ItemsService.remove`. Sin él, un borrado concurrente no ve esta
+          // línea todavía sin commitear, borra el ítem, y la mesa queda con una
+          // línea que no se puede cobrar. Después del lock de la cuenta y antes
+          // del de stock: `items` antes que `item_producto`, el mismo orden que
+          // `ItemsService.update`.
+          //
+          // Si el borrado llegó primero, este lock lo espera y al despertar ya
+          // no encuentra la fila: el catálogo leído antes de la transacción
+          // quedó viejo, y se rechaza con lo mismo que diría leerlo ahora.
+          const referenciados = [
+            dto.itemId,
+            ...(snapshot?.extras ?? []).map((e) => e.ingredienteItemId),
+          ];
+          const vivos: { item_id: string }[] = await manager.query(
+            `SELECT item_id FROM items
+              WHERE item_id = ANY($1::uuid[]) AND tenant_id = $2
+                AND eliminado_el IS NULL
+              ORDER BY item_id
+              FOR SHARE`,
+            [referenciados, tenantId],
+          );
+          const vivosIds = new Set(vivos.map((v) => v.item_id));
+          if (!vivosIds.has(dto.itemId)) {
+            throw new NotFoundException(`Ítem ${dto.itemId} no encontrado`);
+          }
+          if (referenciados.some((id) => !vivosIds.has(id))) {
+            throw new BadRequestException(
+              'Extra no permitido para esta receta',
+            );
+          }
           // **Pedir de más rebota acá, no al cobrar.** Hasta el 2026-09-01 dos
           // mesas podían pedir la misma última unidad: nadie miraba el stock al
           // pedir y el choque estallaba al cerrar la cuenta, con la comida servida

@@ -290,6 +290,13 @@ la desasociación bloqueada (fila de arriba) y que el ítem no se pueda borrar �
 `'cuenta'` de `obtenerUsoItem` si es el ítem de la línea, rama `'combo'` si es un
 componente—. Si alguno se afloja, el ✅ se cae.
 
+**Y contra un pedido en vuelo** (2026-09-13). `agregarLinea` toma `FOR SHARE` sobre el ítem
+de la línea y los ingredientes de sus extras, el par del `FOR UPDATE` del borrado, así que los
+dos `DELETE /items/:id` de la tabla valen también cuando el borrado y el pedido llegan a la vez:
+el que llega segundo espera, y rebota —el borrado con el mismo `400`, el pedido porque el ítem ya
+no está—. Las ediciones todavía no: sus guards leen las cuentas sin lock, y esa carrera está anotada
+para medir en [`pendientes.md`](../agent/pendientes.md) § 2.
+
 Las cuatro ediciones comparan el **diff**: bloquean lo que *se saca*, no la lista que
 cambia, así que reordenar, repreciar, cambiar min/max o agregar siguen pasando.
 

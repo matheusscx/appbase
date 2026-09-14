@@ -23,6 +23,165 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Borrar un ítem espera a quien lo está referenciando (cerrada 2026-09-13)
+
+Sale de [`pendientes.md` § 5](pendientes.md): las tres entradas del molde *"no toma lock"*, que con
+esto dejan la sección sin entradas. No hubo regla de negocio que preguntar: el arreglo estaba
+escrito en la propia entrada de `remove()` —bloquear el ítem en el borrado **y** en cada camino que
+crea una referencia—, y el molde ya existía en el repo (`UbicacionesService.remove` contra
+`TrasladosService`).
+
+**Medido antes de arreglar.** `backend/test/borrado-item-concurrente.e2e-spec.ts` reproduce una
+carrera por mecanismo con una compuerta: un `QueryRunner` propio retiene una fila que el primer
+request escribe después de validar, y el segundo entra en el medio. Sobre el código sin arreglo los
+cinco tests fallaron con el segundo request sin esperar a nadie (`esperando: 1` en vez de 2), y la
+base quedó con una fila viva apuntando a un ítem borrado en cada caso: `receta_ingredientes`,
+`receta_extras_permitidos`, `grupo_modificador_opciones`, `cuenta_lineas.item_id` y un extra adentro
+de `cuenta_lineas.personalizacion` —dos filas por tabla, una por cada corrida en rojo, contadas con
+un `JOIN` contra los ítems borrados del spec—.
+
+**Qué se hizo.**
+- `ItemsService.remove` toma `FOR UPDATE` sobre la fila de `items` antes de `obtenerUsoItem`; si no
+  la encuentra viva, 404 sin consultar el uso ni escribir nada.
+- Quien crea una referencia toma `FOR SHARE` sobre los ítems referenciados, ordenado por `item_id`,
+  antes de escribir:
+  - `ItemsService.filasValidacionPorIds`, que ya usaban las validaciones de ingredientes, extras y
+    componentes en el alta y la edición;
+  - `GruposModificadoresService.validarYResolverOpciones`, que de paso lee todas las opciones en una
+    query: antes leía una por opción, un N+1 de lectura en el bucle que se estaba tocando;
+  - `SalonesService.agregarLinea`, sobre el ítem de la línea y los ingredientes de sus extras —lo que
+    `obtenerUsoItem` busca en `cuenta_lineas`—, después del lock de la cuenta y antes del de stock. Si
+    el borrado ganó, rechaza con lo que diría leer el catálogo en ese momento: 404 el ítem, 400
+    *"Extra no permitido para esta receta"* el extra.
+- En `filasValidacionPorIds` y en las opciones de grupo, el lock va en un statement y la lectura
+  en el siguiente: la lectura une `item_producto`, que en el statement del lock saldría del
+  snapshot previo a la espera. En `agregarLinea` el lock es el chequeo mismo y no hay lectura
+  después.
+- `aplicarDesfases` toma con `ORDER BY item_id FOR UPDATE` las filas de `items` cuyo precio va a
+  escribir, antes del primer `UPDATE`. **Lo levantó la revisión independiente, con el gate completo
+  ya en verde:** los `FOR SHARE` de arriba son el primer camino que toma varias filas de `items`, y
+  los `UPDATE` de precio recorrían el lote en el orden del cliente, así que un lote `[R2, R1]` contra
+  un `FOR SHARE` de `[R1, R2]` se abrazaba. Medido con dos sesiones contra Postgres: sin el lock, la
+  del `FOR SHARE` muere con `40P01`; con él, las dos terminan.
+
+Orden de locks y porqué: [`patterns/backend.md`](../patterns/backend.md) § 15, *"Borrar un ítem
+contra crear una referencia a él"*.
+
+**Lo que lo fija**, mutante por mutante: once, cada uno revirtiendo una pieza, corridos contra el
+unitario del service y —los que cambian conducta— contra el e2e. Los e2e se nombran por su número
+en el spec (1 ingrediente, 2 extra permitido, 3 opción de grupo, 4 línea de cuenta, 5 extra pedido
+en una línea). Con el código restaurado, los tres unitarios y el e2e pasan enteros.
+
+| Mutante | e2e que lo caza | Unitario que lo caza |
+|---|---|---|
+| `remove()` sin `FOR UPDATE` | los cinco | *"toma FOR UPDATE sobre el ítem ANTES de consultar su uso"* |
+| `filasValidacionPorIds` sin `FOR SHARE` | 1 y 2 | *"toma FOR SHARE ordenado sobre los ítems ANTES de leerlos, en un statement aparte"* |
+| `validarYResolverOpciones` sin `FOR SHARE` | 3 | *"toma FOR SHARE ordenado sobre los ítems de TODAS las opciones"* |
+| `agregarLinea` sin `FOR SHARE` | 4 y 5 | *"toma FOR SHARE sobre el ítem y los ingredientes de sus extras"* |
+| `agregarLinea` lockea el ítem pero no los extras | 5 | el mismo, y *"si el ingrediente de un extra ya no está vivo cuando toma el lock"* |
+| `agregarLinea` lockea después del tope de stock | 4 | el mismo, por el orden |
+| sin `ORDER BY`, en cualquiera de los tres | ninguno | solo el unitario de ese lock |
+| `aplicarDesfases` sin el lock de `items` | ninguno | *"toma FOR UPDATE ordenado sobre los items cuyo precio actualiza"* |
+| ese lock de `aplicarDesfases` sin `ORDER BY` | ninguno | el mismo |
+
+Los dos de `aplicarDesfases` tampoco los caza un e2e: este spec no reproduce ese ciclo. Lo fija el
+unitario, y que el ciclo existía lo prueba la medición con dos sesiones de más arriba.
+Los tres sin `ORDER BY` los caza solo el unitario, y es lo esperado: dos `FOR SHARE` no se
+esperan entre sí y el borrado lockea una sola fila, así que el orden no cambia ninguna carrera de
+este spec. Lo fija el unitario porque § 15 lo pide para cualquier camino que tome filas de `items`.
+Los unitarios de las posiciones de `remove()` también caen con el primer mutante, pero caen por el
+mock, no por la carrera: el que la nombra es el de la tabla.
+
+⚠️ El runner esperaba el re-seed del contenedor antes de cada e2e y no lo vio en ninguno. Los logs
+lo explican: el watcher no reinició el backend con ninguna de las escrituras del runner (último
+reinicio, antes de empezar). El e2e levanta su propia app, así que corrió sobre una base que nadie
+estaba re-sembrando.
+
+**Lo que no cubre.** Las ediciones que sacan algo del catálogo mientras una mesa lo pide —un extra,
+un omitido o una opción de grupo—: sus guards leen `cuenta_lineas` sin lock y no se borra ningún
+ítem, así que este par no las alcanza. Sin medir; anotada en [`pendientes.md` § 2](pendientes.md).
+Tampoco lo que no es carrera: restaurar una receta o un grupo revive referencias a ítems borrados en
+el medio, y un `PATCH` de extras contra el borrado de la misma receta deja extras vivos de una receta
+borrada. Los levantó la revisión, sin medir: también en [`pendientes.md` § 2](pendientes.md).
+
+La sección y las entradas, verbatim:
+
+Son **dos moldes distintos**, y
+conviene no confundirlos:
+
+- **Tres del molde "no toma lock"** —`remove()` de ítems, borrar un ítem contra agregarlo a
+  una cuenta, y `PATCH /items/:id` contra `DELETE`—: un `SELECT` de validación sin lock, y
+  otra transacción que escribe entre el chequeo y el commit. Cada entrada lo dice por su
+  cuenta. El orden que las tres necesitan ya está escrito:
+  [`../patterns/backend.md`](../patterns/backend.md) § 15, *"Las reglas van antes que todo eso"*.
+- **Una del molde "lockea en orden no determinista"** —la de la auditoría de `inventario`,
+  los tres caminos que revierten stock—: el lock sí se toma, pero el orden lo decide el
+  cliente. El arreglo es el contrario —no agregar un lock sino fijar un orden—, y las piezas
+  ya existen en el repo.
+
+⚠️ **Las dos listas de arriba nombran las entradas, no su posición**, y la razón es peor que
+"se desactualizaron". Decían "las tres primeras" y "la última"; medido contra el archivo antes
+de este cambio (`git show HEAD:docs/agent/pendientes.md`, 2026-08-25), el orden real era
+`[stock, remove(), cuenta, PATCH]` — o sea que la del molde raro era la **primera** y las tres
+del molde común eran las **últimas**: **las dos frases ya estaban dadas vuelta**, y lo único
+que hizo agregar una entrada fue que alguien las mirara. Un conteo posicional no se rompe el
+día que insertás algo; se rompe callado y ningún gate lo va a ver nunca. Por eso acá se nombra,
+no se enumera.
+
+⚠️ **Corregido el 2026-08-18** (la versión anterior de esta nota se contradecía sola —
+decía "ninguno de estos moldes" y dos líneas después describía uno de ellos): los dos
+ciclos de la entrada residual que entonces vivía al principio del archivo ("Dos ciclos de
+orden de lock en la bandeja de desfases de combos…", hoy cerrada y mudada a
+[`resueltos.md`](resueltos.md)) **son estos mismos dos moldes**, no uno nuevo — el
+ciclo `item_receta` ↔ `item_combo` es "no toma lock" (`descartarDesfases` no bloquea nada) y
+el ciclo `items` ↔ `item_combo` es "lockea en orden no determinista" (`aplicarDesfases` y
+`update()` de un combo toman los mismos locks en orden inverso). Lo que separa a esa entrada
+de las de acá **no es la familia de bug — es la tabla y el disparador**: acá es
+caja/inventario/stock; ahí es `items`/`item_receta`/`item_combo` en la bandeja de desfases.
+(Los otros dos puntos de esa entrada residual —el `FOR UPDATE` antes de validar tenant, y el
+hueco de test de N combos— no son de ninguno de los dos moldes.)
+
+ℹ️ **2026-08-20:** esa entrada residual **se cerró** y vive en
+[`resueltos.md`](resueltos.md) § "El orden de bloqueo de filas de la bandeja de
+desfases". Lo de arriba se conserva porque la clasificación por moldes sigue siendo cierta
+y es la que hay que aplicarle a las de acá. Cómo quedó el "no toma lock" del molde
+2: `descartarDesfases` sigue sin tomar un solo `FOR UPDATE` —el arreglo no fue agregar
+locks sino **fijar el orden en que sus `UPDATE` los toman solos**—, y el orden canónico del
+proyecto está escrito en [`../patterns/backend.md`](../patterns/backend.md) § "Orden de
+bloqueo de filas en ítems compuestos". Es el precedente más cercano que tienen las
+entradas de esta sección.
+
+- [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
+  `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
+  dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).
+  ⚠️ **La entrada original decía que `remove()` "no es transaccional" y eso era falso**: abre
+  `this.dataSource.transaction()` y `obtenerUsoItem` corre adentro. Lo que sí es cierto es
+  otra cosa: ese `SELECT` **no toma lock**, así que entre el chequeo y el commit otra
+  transacción puede insertar una fila que referencie al ítem. Es un phantom, no falta de
+  atomicidad — y por eso el arreglo no es "envolver en transacción".
+  Consecuencia real: el ítem queda borrado blando y con una `receta_ingredientes` viva
+  apuntándolo. Como las lecturas filtran por el JOIN a `items`, el ingrediente **desaparece
+  en silencio de la receta** y su costo cambia sin que nadie lo pida.
+  Por qué no se cerró junto con las otras dos: no hay una fila única que bloquear —el guard
+  lee cuatro tablas hijas—. El arreglo es bloquear la fila de `items` referenciada, y hacerlo
+  **en `remove()` y en cada camino que crea una referencia** (asociar ingrediente, componente
+  de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
+  análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
+
+- [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
+  el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
+  `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
+  commitean. Ya no es catastrófico (la línea se muestra marcada, el cobro corta con un 400
+  que la nombra y la comanda la incluye), pero el estado se sigue produciendo hacia
+  adelante, no solo en datos viejos.
+
+- [ ] **Carrera teórica entre `PATCH /items/:id` y `DELETE`** (backend,
+  `items.service.ts`) — bajo READ COMMITTED, un `DELETE` que commitea entre la
+  validación de un ingrediente en `PATCH` (edición de receta) y el `INSERT` de su
+  fila de `receta_extras_permitidos` deja una fila viva apuntando a un item ya
+  muerto. Ventana de milisegundos entre dos escrituras de admin; es la misma clase de
+  carrera que ya tienen los tres bloqueos preexistentes (ingrediente, combo, opción).
+
 ## La nota de crédito y el reembolso reponen stock en orden y reintentan ante deadlock (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 5](pendientes.md). No hubo regla de negocio que preguntar: el arreglo ya
@@ -1645,8 +1804,13 @@ Misma limpieza que la sección de abajo, sobre las demás secciones de [`pendien
 >   ✅ **`cancelar` salió el 2026-08-22**, dentro del frente de la reposición de recetas: son
 >   las mismas líneas, y dejarlo para después significaba volver a tocarlas. Ordena por
 >   `itemId` con `localeCompare` —el mismo comparador que `crear()`— y reintenta ante
->   `40P01`. Detalle en [`resueltos.md`](resueltos.md). **Quedan los otros dos**, y el
->   arreglo es el mismo.
+>   `40P01`. Detalle en [`resueltos.md`](resueltos.md). Los otros dos salieron el
+>   2026-09-13 con el mismo arreglo.
+
+>   ✅ **Y el mismo 2026-09-13, las tres del molde "no toma lock"** —`remove()` de ítems, borrar
+>   un ítem contra agregarlo a una cuenta, y `PATCH /items/:id` contra `DELETE`—, con un par
+>   `FOR UPDATE` / `FOR SHARE` sobre la fila de `items`. § 5 quedó sin entradas. Detalle en
+>   [`resueltos.md`](resueltos.md).
 
 ### § 6 — Decimales, redondeo y unidades de cuenta (el redondeo por país, ya construido)
 
