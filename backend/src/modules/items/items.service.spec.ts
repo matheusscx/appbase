@@ -2517,7 +2517,6 @@ describe('ItemsService', () => {
             costo_actual: '6000',
           },
         ]) // lookup batch de ingredientes
-        .mockResolvedValueOnce([]) // ingredientes vivos (diff del guard)
         .mockResolvedValueOnce([]) // soft-delete receta_ingredientes
         .mockResolvedValueOnce([]) // INSERT receta_ingredientes queso
         .mockResolvedValueOnce([]); // UPDATE item_receta costo_actual
@@ -2547,7 +2546,7 @@ describe('ItemsService', () => {
       );
       // soft-delete de la lista anterior (nunca hard DELETE)
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        6,
+        5,
         expect.stringContaining('SET eliminado_el = NOW()'),
         [ITEM_ID],
       );
@@ -2562,107 +2561,6 @@ describe('ItemsService', () => {
       expect(updateReceta?.[1]).toEqual(['120', ITEM_ID]);
     });
 
-    // Gemelos de los dos de `extrasPermitidos` de más abajo, por la cuarta
-    // puerta: el e2e prueba que el guard bloquea, pero no puede ver la FORMA de
-    // la consulta —un viaje para los N que se sacan, y ninguno si no se saca
-    // nada—.
-    it('ingredientes: pregunta por los N que se sacan en UNA sola consulta', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
-        .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
-        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
-        .mockResolvedValueOnce([
-          {
-            item_id: 'ingrediente-queso',
-            nombre: 'Queso',
-            tipo: 'ingrediente',
-            modo_inventario: 'cantidad',
-            unidad_medida: 'kg',
-            costo_actual: '6000',
-          },
-        ]) // lookup batch de ingredientes
-        .mockResolvedValueOnce([
-          { ingrediente_item_id: 'ingrediente-queso' },
-          { ingrediente_item_id: 'ingrediente-pan' },
-          { ingrediente_item_id: 'ingrediente-carne' },
-        ]) // ingredientes vivos
-        .mockResolvedValueOnce([]) // guard: ninguna cuenta abierta los omitió
-        .mockResolvedValueOnce([]) // soft-delete
-        .mockResolvedValueOnce([]) // INSERT
-        .mockResolvedValueOnce([]); // UPDATE item_receta
-      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('1');
-
-      await service.update(TENANT, USUARIO, ITEM_ID, {
-        ingredientes: [
-          {
-            ingredienteItemId: 'ingrediente-queso',
-            cantidad: '1',
-            unidadCodigo: 'kg',
-          },
-        ],
-      });
-
-      const guardCalls = managerMock.query.mock.calls.filter(
-        (c: unknown[]) =>
-          typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
-      );
-      expect(guardCalls).toHaveLength(1);
-      // Los dos que se sacan, juntos; el queso sigue entrando y no se pregunta
-      // por él.
-      expect(guardCalls[0][1]).toEqual([
-        TENANT,
-        ITEM_ID,
-        ['ingrediente-pan', 'ingrediente-carne'],
-      ]);
-      const sql = guardCalls[0][0] as string;
-      expect(sql).toMatch(/c\.estado = 'abierta'/);
-      expect(sql).toMatch(/cl\.item_id = \$2/);
-      expect(sql).toMatch(/'omitidos', jsonb_build_array\(x\.id\)/);
-      expect(sql).toMatch(/cl\.eliminado_el IS NULL/);
-      expect(sql).toMatch(/c\.eliminado_el IS NULL/);
-      expect(sql).toMatch(/m\.eliminado_el IS NULL/);
-    });
-
-    it('ingredientes: no pregunta nada si no se saca ninguno', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
-        .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
-        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
-        .mockResolvedValueOnce([
-          {
-            item_id: 'ingrediente-queso',
-            nombre: 'Queso',
-            tipo: 'ingrediente',
-            modo_inventario: 'cantidad',
-            unidad_medida: 'kg',
-            costo_actual: '6000',
-          },
-        ])
-        .mockResolvedValueOnce([{ ingrediente_item_id: 'ingrediente-queso' }])
-        .mockResolvedValueOnce([]) // soft-delete
-        .mockResolvedValueOnce([]) // INSERT
-        .mockResolvedValueOnce([]); // UPDATE item_receta
-      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('2');
-
-      // Cambiarle la CANTIDAD al único ingrediente: la lista no pierde a nadie.
-      await service.update(TENANT, USUARIO, ITEM_ID, {
-        ingredientes: [
-          {
-            ingredienteItemId: 'ingrediente-queso',
-            cantidad: '2',
-            unidadCodigo: 'kg',
-          },
-        ],
-      });
-
-      expect(
-        managerMock.query.mock.calls.filter(
-          (c: unknown[]) =>
-            typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
-        ),
-      ).toHaveLength(0);
-    });
-
     it('toma `item_receta` ANTES del UPDATE items — orden de locks contra aplicarDesfases', async () => {
       // Deadlock real, no teórico: `aplicarDesfases` bloquea `item_receta` y
       // después `items` (para el precio). Si `update()` los toma al revés
@@ -2674,10 +2572,6 @@ describe('ItemsService', () => {
         .mockResolvedValue([
           {
             item_id: 'ingrediente-queso',
-            // El `mockResolvedValue` contesta también la lectura de vivos del
-            // guard de omitidos: con el queso ya adentro, el diff queda vacío
-            // y este test sigue midiendo solo el orden de locks.
-            ingrediente_item_id: 'ingrediente-queso',
             nombre: 'Queso',
             tipo: 'ingrediente',
             modo_inventario: 'cantidad',
@@ -2805,185 +2699,6 @@ describe('ItemsService', () => {
           precioExtra: '600',
         },
       ]);
-    });
-
-    // El e2e prueba que el guard bloquea; lo que NO puede ver es la forma de la
-    // consulta. Estos dos fijan eso: un solo viaje para los N extras que se
-    // sacan (no uno por extra), acotado a esta receta y a cuentas abiertas.
-    it('extrasPermitidos: pregunta por los N extras que se sacan en UNA sola consulta', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
-        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
-        .mockResolvedValueOnce([
-          {
-            item_id: 'ingrediente-queso',
-            tipo: 'ingrediente',
-            nombre: 'Queso',
-            modo_inventario: 'cantidad',
-            unidad_medida: 'kg',
-          },
-        ]) // lookup batch de extras
-        .mockResolvedValueOnce([
-          { ingrediente_item_id: 'ingrediente-queso' },
-          { ingrediente_item_id: 'ingrediente-tocino' },
-          { ingrediente_item_id: 'ingrediente-cebolla' },
-        ]) // extras vivos
-        .mockResolvedValueOnce([]) // guard: ninguna cuenta abierta los pidió
-        .mockResolvedValueOnce([]) // soft-delete
-        .mockResolvedValueOnce([]); // INSERT
-
-      await service.update(TENANT, USUARIO, ITEM_ID, {
-        extrasPermitidos: [
-          {
-            ingredienteItemId: 'ingrediente-queso',
-            cantidad: '30',
-            unidadCodigo: 'g',
-            precioExtra: '600',
-          },
-        ],
-      });
-
-      const guardCalls = managerMock.query.mock.calls.filter(
-        (c: unknown[]) =>
-          typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
-      );
-      expect(guardCalls).toHaveLength(1);
-      // Los dos que se sacan, juntos. El queso sigue entrando: no se pregunta
-      // por él, y ésa es la mitad que separa "este extra se saca" de "la lista
-      // cambió".
-      expect(guardCalls[0][1]).toEqual([
-        TENANT,
-        ITEM_ID,
-        ['ingrediente-tocino', 'ingrediente-cebolla'],
-      ]);
-      const sql = guardCalls[0][0] as string;
-      expect(sql).toMatch(/c\.estado = 'abierta'/);
-      expect(sql).toMatch(/cl\.item_id = \$2/);
-      expect(sql).toMatch(/cl\.eliminado_el IS NULL/);
-      expect(sql).toMatch(/c\.eliminado_el IS NULL/);
-      expect(sql).toMatch(/m\.eliminado_el IS NULL/);
-    });
-
-    it('extrasPermitidos: no pregunta nada si no se saca ninguno', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
-        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
-        .mockResolvedValueOnce([
-          {
-            item_id: 'ingrediente-queso',
-            tipo: 'ingrediente',
-            nombre: 'Queso',
-            modo_inventario: 'cantidad',
-            unidad_medida: 'kg',
-          },
-        ])
-        .mockResolvedValueOnce([{ ingrediente_item_id: 'ingrediente-queso' }])
-        .mockResolvedValueOnce([]) // soft-delete
-        .mockResolvedValueOnce([]); // INSERT
-
-      await service.update(TENANT, USUARIO, ITEM_ID, {
-        extrasPermitidos: [
-          {
-            ingredienteItemId: 'ingrediente-queso',
-            cantidad: '30',
-            unidadCodigo: 'g',
-            precioExtra: '900',
-          },
-        ],
-      });
-
-      // Repreciar sin sacar a nadie no toca `cuenta_lineas`: sin este test, un
-      // guard que pregunta siempre pasa igual el e2e y cuesta una consulta por
-      // cada edición de receta del sistema.
-      expect(
-        managerMock.query.mock.calls.filter(
-          (c: unknown[]) =>
-            typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
-        ),
-      ).toHaveLength(0);
-    });
-
-    // Y los de la quinta puerta, `gruposModificadores`. Lo que el e2e no puede
-    // ver acá, además de la forma, es que la pregunta va ANTES de los dos
-    // soft-deletes: al revés contestaría igual (la lista viva se lee al
-    // principio) pero escribiendo sobre una transacción que después aborta.
-    it('gruposModificadores: pregunta por los N que se desasocian en UNA sola consulta, antes de borrar', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existing
-        .mockResolvedValueOnce([
-          { item_grupo_id: 'ig-salsa', grupo_modificador_id: 'grupo-salsa' },
-          { item_grupo_id: 'ig-bebida', grupo_modificador_id: 'grupo-bebida' },
-          { item_grupo_id: 'ig-postre', grupo_modificador_id: 'grupo-postre' },
-        ]) // asociaciones vivas
-        .mockResolvedValueOnce([{ grupo_modificador_id: 'grupo-salsa' }]) // el que se queda existe
-        .mockResolvedValueOnce([]) // UPDATE de la asociación que persiste
-        .mockResolvedValueOnce([]) // SELECT overrides vivos
-        .mockResolvedValueOnce([]) // guard: ninguna cuenta abierta los eligió
-        .mockResolvedValueOnce([]) // soft-delete de los overrides
-        .mockResolvedValueOnce([]); // soft-delete de las asociaciones
-
-      await service.update(TENANT, USUARIO, ITEM_ID, {
-        gruposModificadores: [
-          { grupoModificadorId: 'grupo-salsa', min: 1, max: 1 },
-        ],
-      });
-
-      const sqls = managerMock.query.mock.calls.map(
-        (c: unknown[]) => c[0] as string,
-      );
-      const guardCalls = managerMock.query.mock.calls.filter(
-        (c: unknown[]) =>
-          typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
-      );
-      expect(guardCalls).toHaveLength(1);
-      expect(guardCalls[0][1]).toEqual([
-        TENANT,
-        ITEM_ID,
-        ['grupo-bebida', 'grupo-postre'],
-      ]);
-      const sql = guardCalls[0][0] as string;
-      expect(sql).toMatch(/c\.estado = 'abierta'/);
-      // Las dos cotas por ítem, una por rama: afuera para el grupo propio,
-      // adentro del containment para el del componente.
-      expect(sql).toMatch(/cl\.item_id = \$2/);
-      expect(sql).toMatch(/'componenteItemId', \$2::uuid/);
-      expect(sql).toMatch(/cl\.eliminado_el IS NULL/);
-      expect(sql).toMatch(/c\.eliminado_el IS NULL/);
-      expect(sql).toMatch(/m\.eliminado_el IS NULL/);
-
-      const iGuard = sqls.findIndex((q) => q.includes('cuenta_lineas'));
-      const iBorrado = sqls.findIndex(
-        (q) =>
-          q.includes('UPDATE item_grupos_modificadores') &&
-          q.includes('eliminado_el = NOW()'),
-      );
-      expect(iBorrado).toBeGreaterThan(-1);
-      expect(iGuard).toBeLessThan(iBorrado);
-    });
-
-    it('gruposModificadores: no pregunta nada si no se desasocia ninguno', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existing
-        .mockResolvedValueOnce([
-          { item_grupo_id: 'ig-salsa', grupo_modificador_id: 'grupo-salsa' },
-        ]) // asociaciones vivas
-        .mockResolvedValueOnce([{ grupo_modificador_id: 'grupo-salsa' }])
-        .mockResolvedValueOnce([]) // UPDATE de la asociación que persiste
-        .mockResolvedValueOnce([]); // SELECT overrides vivos
-
-      // Cambiarle el min/max al único grupo asociado: no se va nadie.
-      await service.update(TENANT, USUARIO, ITEM_ID, {
-        gruposModificadores: [
-          { grupoModificadorId: 'grupo-salsa', min: 0, max: 3 },
-        ],
-      });
-
-      expect(
-        managerMock.query.mock.calls.filter(
-          (c: unknown[]) =>
-            typeof c[0] === 'string' && c[0].includes('cuenta_lineas'),
-        ),
-      ).toHaveLength(0);
     });
 
     it.each([

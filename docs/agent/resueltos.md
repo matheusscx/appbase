@@ -23,6 +23,92 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Editar la carta con la mesa sentada: los cuatro guards que lo bloqueaban se sacaron (cerrada 2026-09-14)
+
+Sale de [`pendientes.md` § 2](pendientes.md), *"Los guards de las ediciones de catálogo leen las
+cuentas abiertas sin lock"*, y no se cerró como la entrada proponía. La carrera existía; el daño que
+la entrada le atribuía, no.
+
+**Medida primero la carrera.** Un spec de medición con la compuerta de
+`borrado-item-concurrente.e2e-spec.ts`: el `PATCH` retenido después de su guard y la línea pedida
+en el medio, uno por guard —extra, omitido, opción de grupo, grupo elegido—. Sobre el código de ese
+momento, los cuatro dieron lo mismo: una sola sesión esperando, `PATCH` 200, línea 201 y una línea
+viva con la pieza que la edición acababa de sacar.
+
+**Después la consecuencia, y ahí se cayó la premisa.** El cierre de esas cuatro cuentas dio `201`
+las cuatro veces, y la del extra cobró 4.500 con el extra adentro. (La precuenta también dio 201,
+pero con `cuentaId` ignora las líneas del body: no es evidencia.) La entrada decía que la mesa
+quedaba incobrable, pero desde el 2026-08-31 `crearEnTransaccion` usa la personalización congelada
+de la línea sin resolverla contra el catálogo (`ventas.service.ts`, la rama `if (congelada)`). Los
+guards cuidaban algo que el congelado ya había cerrado, y sus docs seguían dando el motivo viejo.
+
+**Decisión del owner (2026-09-14): sacarlos.** Las otras dos opciones eran mantenerlos como regla
+del local y cerrar la carrera con locks nuevos en la ruta del pedido, o dejarlos y anotar la carrera
+como inofensiva.
+
+**Qué se hizo.**
+- `ItemsService`: fuera `cuentasAbiertasConExtra`, `cuentasAbiertasConIngredienteOmitido`,
+  `cuentasAbiertasConOpcionDeGrupo` y `cuentasAbiertasConGrupoElegido`, y las lecturas de filas
+  vivas que `update()` hacía solo para calcularles el diff. `asociarGruposModificadores` sigue
+  calculando `eliminadas`, que usa para el soft-delete.
+- `GruposModificadoresService.update` ya no pregunta por cuentas, y `GruposModificadoresModule`
+  dejó de importar `ItemsModule`: esa consulta era lo único que usaba de él.
+- Tests que salieron, porque fijaban el guard: 6 unitarios en `items.service.spec.ts` y 3 en
+  `grupos-modificadores.service.spec.ts` (la forma de las consultas y el `400`), y 4 e2e —los tests
+  16 y 17 de `recetas.e2e-spec.ts` y los dos *"… se rechaza — en los dos niveles del snapshot"* de
+  `grupos-modificadores.e2e-spec.ts`—.
+- Tests que entraron: 20 a 23 de `cuenta-precio-congelado.e2e-spec.ts`, uno por guard. La edición
+  pasa con la mesa sentada, la pieza sale de verdad del catálogo y el cierre cobra lo congelado. Qué
+  aserción discrimina qué está escrito en el comentario de esos tests.
+
+**Un camino que el cambio abre, medido antes de cerrar.** Sin el guard de la opción se puede sacar
+del grupo la opción que una mesa eligió y después borrar su ítem: la rama `'opcion'` de
+`obtenerUsoItem` ya no la ve y ninguna rama `'cuenta'` mira opciones. Medido por API: `DELETE` 200 y
+cierre 201.
+
+**Mutante, revirtiendo y no solo rompiendo**, sobre base recién reseteada:
+
+| Mutante | Qué lo mata |
+|---|---|
+| `items.service.ts`, `grupos-modificadores.service.ts` y `grupos-modificadores.module.ts` vueltos a `HEAD` (los cuatro guards de vuelta) | tests 20, 21, 22 y 23: los cuatro esperan 200 y reciben 400 |
+| `ventas.service.ts`: la rama `if (congelada)` apagada, así que el cierre re-resuelve sin la foto | 22 (cierre 400); 20 y 23 cobran 201 con el precio congelado y solo los caza el stock (100 en vez de 99). De arrastre, 14 (cierre 400) y 15 (stock). **El 21 sobrevive**: el omitido ya salió de la receta, así que perderlo no mueve el stock, y `GET /ventas/:id` no devuelve la personalización (medido: la aserción que lo intentó recibía `undefined` con y sin mutante, y se sacó) |
+
+Este segundo mutante lo pidió la revisión, que leyendo el código vio que "el stock no discrimina" —lo que decía el primer comentario de esos tests— era falso. Corrió en el proceso de jest: `congelada && false` estrecha el tipo y el `tsc` del contenedor no compila, pero ts-jest no chequea tipos.
+
+**Lo que no cubre.** Borrar un ítem que una mesa pidió —como línea o como extra— sigue bloqueando,
+con el porqué de antes del congelado; queda para medir en `pendientes.md` § 2. Los planes del
+2026-08-30 que construyeron los guards quedan como estaban: son registro.
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### Los guards de las ediciones de catálogo leen las cuentas abiertas sin lock (2026-09-13)
+>
+> - [ ] **Sin medir: salió de leer el código al cerrar las carreras del borrado de ítems**
+>   ([`resueltos.md`](resueltos.md)), y es la gemela que ese cierre no alcanza. Las ediciones
+>   que sacan algo del catálogo preguntan antes si una cuenta abierta lo pidió
+>   (`cuentasAbiertasConExtra`, `cuentasAbiertasConIngredienteOmitido`,
+>   `cuentasAbiertasConOpcionDeGrupo` y el guard de `asociarGruposModificadores`), con un
+>   `SELECT` sin lock sobre `cuenta_lineas`. Un `POST /cuentas/:id/lineas` que está pidiendo ese
+>   extra, omitido u opción en otra transacción no se ve hasta su commit, así que las dos
+>   pasarían: la receta o el grupo pierde la pieza y la mesa queda con una línea que no se puede
+>   tasar — la mesa incobrable que esos guards vinieron a evitar.
+>   **Por qué el arreglo del borrado no la cubre:** su par de locks es sobre la fila de `items`
+>   del ítem que se borra, y acá no se borra ningún ítem. `agregarLinea` toma `FOR SHARE` sobre la
+>   receta y los ingredientes de sus extras, y un `PATCH` que solo trae `extrasPermitidos` no toma
+>   nada que choque con eso: sin ningún campo propio del ítem no hay `UPDATE items`, y
+>   `agregarLinea` no toma `item_receta`.
+>   ⚠️ **Con un campo propio del ítem en el mismo `PATCH`, la carrera se cierra en un solo sentido**,
+>   y hay que tenerlo al medir: su `UPDATE items` va antes del guard y choca con el `FOR SHARE` de la
+>   línea. Si la línea llega primero, el `PATCH` la espera y su guard la ve (400). Si el `PATCH` llega
+>   primero, la línea lo espera y entra igual, porque su personalización se resolvió antes de la
+>   transacción y el lock solo mira que los ítems sigan vivos. Medir con `nombre` y la línea primero
+>   daría un "no reproduce" falso.
+>   **Qué medir:** el interleaving con una compuerta, igual que
+>   `backend/test/borrado-item-concurrente.e2e-spec.ts` — el `PATCH` retenido después de su guard
+>   y la línea entrando en el medio. Si reproduce, el arreglo es otra pregunta de orden de locks
+>   (qué fila toma exclusiva la edición y dónde entra en `docs/patterns/backend.md` § 15), no un
+>   `FOR UPDATE` suelto.
+
 ## Borrar un ítem espera a quien lo está referenciando (cerrada 2026-09-13)
 
 Sale de [`pendientes.md` § 5](pendientes.md): las tres entradas del molde *"no toma lock"*, que con

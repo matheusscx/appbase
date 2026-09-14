@@ -90,50 +90,17 @@ Costo = Σ (costo_actual del ingrediente × cantidad convertida a su unidad base
 
 Con `ingredientes` (reemplazo total): soft-delete de filas vivas + insert de la nueva lista + update de `item_receta.costo_actual`. Lista vacía → `400`.
 
-Rige además la regla del catálogo: **un ingrediente que una cuenta abierta pidió
-*omitido* no se saca de la receta** → `400` nombrando el ingrediente y la mesa. La línea
-guarda el id en `personalizacion.omitidos` y al re-tasarla ese id tiene que seguir
-perteneciendo a la receta; si no, el cierre responde *"Ingrediente omitido no pertenece a
-la receta"* para la cuenta entera. Se compara el **diff**, así que
-**cambiarle la cantidad, la unidad o el bloqueante a un ingrediente ya omitido, y agregar
-otros, siguen pasando** — el omitido guarda un id, no una cantidad. Acotado a *esta*
-receta: el mismo ingrediente omitido en otra no bloquea nada acá.
+Con `extrasPermitidos` (también reemplazo total), lo mismo: soft-delete de las filas vivas +
+insert de la nueva lista.
 
-Con `extrasPermitidos` (también reemplazo total), rige la misma regla que el borrado:
-**un extra que una cuenta abierta ya pidió no se saca de la receta** → `400` nombrando
-el extra y la mesa. Lo que se compara es el **diff**, no la lista: se pregunta solo por
-los extras que *desaparecen*, así que **reordenar, cambiarle el precio a un extra ya
-pedido o agregar uno nuevo siguen pasando** — un guard por "la lista cambió" dejaría la
-carta congelada mientras haya una mesa sentada. La pregunta va acotada a *esta* receta:
-que el mismo ingrediente esté pedido como extra de otra no bloquea nada acá.
+Ninguna de las dos mira las cuentas abiertas (owner, 2026-09-14): sacar un ingrediente que una
+mesa pidió *omitido*, o un extra que ya pidió, pasa, y la mesa paga lo que pidió porque su línea
+congeló la personalización al pedirse. Hasta esa fecha las dos rechazaban con `400`; el porqué del
+cambio está en [salones-mesas.md](./salones-mesas.md) § "Ítem eliminado con la cuenta abierta".
 
-⚠️ **Esta puerta avisa más tarde que las otras** (medido el 2026-08-30): una línea cuya
-personalización es **solo** `omitidos` no pasa por el resolver en
-`POST /calculo-precios/calcular` —`puedeCostar()` la saltea porque sin extras ni grupos no
-puede mover el precio, y saltearse el resolver es saltearse sus validaciones—, así que la
-precuenta muestra un precio normal y el `400` recién aparece **al cerrar**.
-
-⚠️ **Repreciar sí cambia lo que esa mesa paga.** El cierre manda solo
-`{ingredienteItemId, unidades}` y el servidor re-tasa con el `precio_extra` del catálogo
-vivo, así que la línea abierta se cobra al precio nuevo. Es la doctrina general —el
-precio de una línea lo calcula el servidor contra el catálogo vivo— y no algo que este
-guard introduzca; lo que el guard evita es que la línea deje de poder tasarse.
-
-Con `gruposModificadores` rige lo mismo: **un grupo que una cuenta abierta ya eligió no se
-desasocia del ítem** → `400` nombrando el grupo y la mesa. También por diff, así que
-cambiarle el `min`/`max`, el orden o los overrides, y asociar grupos nuevos, siguen
-pasando **por este guard** (subir el `min` rompe la mesa por otro lado, ver abajo).
-Sin el guard el daño tiene dos formas: la línea deja de poder tasarse —siempre, si el grupo
-es del ítem de la línea; y también si es de un componente que conserva otros grupos vivos—,
-o, si era el último grupo vivo de un componente de combo, la elección **desaparece en
-silencio** y la mesa paga de menos. La pregunta mira los dos niveles del snapshot —el grupo propio del ítem de la
-línea y el de un componente receta dentro de un combo— y las dos acotadas a *este* ítem.
-
-⚠️ **Lo que se agrega o se endurece sigue sin regla** (medido el 2026-08-30): asociar un
-grupo nuevo con `min ≥ 1` a un ítem con líneas abiertas las deja sin poder tasarse
-(*"El grupo X requiere elegir entre 1 y 1 unidades"*), y sacar de un combo un componente
-que una línea personalizó, también (*"El componente no pertenece a este combo o no admite
-grupos"*). Estado y molde: [`../agent/pendientes.md`](../agent/pendientes.md).
+Con `gruposModificadores`, lo mismo: desasociar un grupo que una cuenta abierta ya eligió pasa,
+y también asociar uno obligatorio. Y con `componentes`, sacar de un combo un componente que una
+línea personalizó. La mesa se cobra con lo que congeló al pedir.
 
 ### GET /items?tipo=receta
 
@@ -181,10 +148,10 @@ obvio desde la ficha del ingrediente.
 
 ⚠️ **Con una mesa que ya lo pidió, sí bloquea** (desde el 2026-08-30). Un extra es
 opcional *antes* de pedirlo; una vez que está en la personalización de una línea de una
-cuenta **abierta**, sacarlo del catálogo deja esa mesa **incobrable**: al re-tasar la
-línea —en la precuenta y al cerrar— `resolverPersonalizacionReceta` la rechaza con
-`400 "Extra no permitido para esta receta"`, y nadie se entera hasta que el garzón
-intenta cobrar. El bloqueo sale como `'cuenta'`, con el mismo mensaje *"está pedido en
+cuenta **abierta**, sacarlo del catálogo dejaba esa mesa **incobrable** hasta el congelado
+de la línea (2026-08-31): al cerrar, `resolverPersonalizacionReceta` la rechazaba con
+`400 "Extra no permitido para esta receta"`. Qué rompe hoy está por medir
+([`pendientes.md`](../agent/pendientes.md) § 2). El bloqueo sale como `'cuenta'`, con el mismo mensaje *"está pedido en
 Mesa 4 · cuenta 1"* del ítem que es la línea. Cancelada o cerrada la cuenta, el
 ingrediente vuelve a ser borrable: es un bloqueo por la **mesa viva**, no un
 endurecimiento del catálogo. Al confirmar el borrado, se marcan `eliminado_el`

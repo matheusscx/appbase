@@ -169,33 +169,23 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
 
-### Los guards de las ediciones de catálogo leen las cuentas abiertas sin lock (2026-09-13)
+### El borrado de un extra que una mesa pidió: ¿sigue haciendo falta el bloqueo? (2026-09-14)
 
-- [ ] **Sin medir: salió de leer el código al cerrar las carreras del borrado de ítems**
-  ([`resueltos.md`](resueltos.md)), y es la gemela que ese cierre no alcanza. Las ediciones
-  que sacan algo del catálogo preguntan antes si una cuenta abierta lo pidió
-  (`cuentasAbiertasConExtra`, `cuentasAbiertasConIngredienteOmitido`,
-  `cuentasAbiertasConOpcionDeGrupo` y el guard de `asociarGruposModificadores`), con un
-  `SELECT` sin lock sobre `cuenta_lineas`. Un `POST /cuentas/:id/lineas` que está pidiendo ese
-  extra, omitido u opción en otra transacción no se ve hasta su commit, así que las dos
-  pasarían: la receta o el grupo pierde la pieza y la mesa queda con una línea que no se puede
-  tasar — la mesa incobrable que esos guards vinieron a evitar.
-  **Por qué el arreglo del borrado no la cubre:** su par de locks es sobre la fila de `items`
-  del ítem que se borra, y acá no se borra ningún ítem. `agregarLinea` toma `FOR SHARE` sobre la
-  receta y los ingredientes de sus extras, y un `PATCH` que solo trae `extrasPermitidos` no toma
-  nada que choque con eso: sin ningún campo propio del ítem no hay `UPDATE items`, y
-  `agregarLinea` no toma `item_receta`.
-  ⚠️ **Con un campo propio del ítem en el mismo `PATCH`, la carrera se cierra en un solo sentido**,
-  y hay que tenerlo al medir: su `UPDATE items` va antes del guard y choca con el `FOR SHARE` de la
-  línea. Si la línea llega primero, el `PATCH` la espera y su guard la ve (400). Si el `PATCH` llega
-  primero, la línea lo espera y entra igual, porque su personalización se resolvió antes de la
-  transacción y el lock solo mira que los ítems sigan vivos. Medir con `nombre` y la línea primero
-  daría un "no reproduce" falso.
-  **Qué medir:** el interleaving con una compuerta, igual que
-  `backend/test/borrado-item-concurrente.e2e-spec.ts` — el `PATCH` retenido después de su guard
-  y la línea entrando en el medio. Si reproduce, el arreglo es otra pregunta de orden de locks
-  (qué fila toma exclusiva la edición y dónde entra en `docs/patterns/backend.md` § 15), no un
-  `FOR UPDATE` suelto.
+- [ ] **Leído en el código, sin medir por API: salió de sacar los guards de las ediciones de
+  catálogo** ([`resueltos.md`](resueltos.md)). `DELETE /items/:id` rechaza con `400` el ítem que una
+  cuenta abierta pidió, por dos ramas `'cuenta'` de `obtenerUsoItem`:
+  - **Como línea:** tiene un motivo vigente. `cerrarCuenta` corta con un `400` propio si el ítem de
+    una línea está borrado ([`salones-mesas.md`](../features/salones-mesas.md)).
+  - **Como extra:** el motivo escrito era que el cierre re-tasaba la línea y la rechazaba, y eso
+    dejó de pasar el 2026-08-31. Leyendo el código, hoy el cobro seguiría: `catalogoDeExtras` filtra
+    los ítems borrados y `expandirIngredientesPersonalizados` deja ese extra afuera del consumo con
+    una advertencia. El extra se cobra —está en el precio congelado— y su stock no se descuenta.
+
+  **Qué medir:** pedir con un extra, borrar el ingrediente con esa rama desactivada en local, y
+  cerrar. Si cobra con la advertencia, lo que queda es una pregunta de producto para el owner:
+  bloquear el borrado, o dejar borrar y aceptar un extra cobrado sin descontar.
+  **Referencia ya medida** (2026-09-14): sacar del grupo una opción que una mesa eligió y después
+  borrar su ítem —ninguna rama lo bloquea— deja cobrar la cuenta (`DELETE` 200, cierre 201).
 
 ### Restaurar una receta o un grupo revive referencias a ítems ya borrados (2026-09-13)
 
@@ -512,12 +502,15 @@ revisión independiente no lo pudo reproducir, con razón.
   quedaron sin valorizar, no solo omitirlas del total).
 
 - [ ] **Re-tasar una línea ya pedida tiene que re-preciar, no re-validar** (backend, motor
-  de cálculo — **frente propio, decidido por el owner el 2026-08-30**; los cinco caminos
-  que *sacan* algo ya están cerrados y lo que queda es otra familia, medida el mismo día)
-  — la causa de fondo es una sola: `resolverPersonalizacionReceta` /
-  `resolverPersonalizacionCombo` vuelven a validar el snapshot congelado contra el catálogo
-  de hoy. Si algo ya no cuadra, la cuenta entera responde 400 al cerrar y la mesa queda
-  **incobrable**.
+  de cálculo — **frente propio, decidido por el owner el 2026-08-30**; los caminos
+  que *sacan* algo se cerraron con guards —cuatro se sacaron el 2026-09-14, ya innecesarios— y la
+  otra familia, medida el 2026-08-30, se cerró con el congelado del 2026-08-31)
+  — la causa de fondo era una sola: `resolverPersonalizacionReceta` /
+  `resolverPersonalizacionCombo` volvían a validar el snapshot congelado contra el catálogo
+  de hoy, y si algo ya no cuadraba la cuenta entera respondía 400 al cerrar. Eso se cerró el
+  2026-08-31 —el cierre usa la foto—. ⚠️ Esta entrada no se reescribió al cerrarse: varias notas
+  de abajo describen como pendiente lo que ya se construyó. Lo abierto de verdad es el caso de la
+  promo de un día y la pregunta de `useCalculoPrecios`.
 
   🔲 **Lo que queda abierto del frente es angosto, y más angosto de lo que se creyó.**
 
@@ -579,29 +572,31 @@ revisión independiente no lo pudo reproducir, con razón.
   preguntar"): toca `resolverPersonalizacionReceta` / `resolverPersonalizacionCombo`, que
   son motor de cálculo.
 
-  📌 **Los cinco guards no se tiran cuando esto se construya.** Siguen siendo la respuesta
-  correcta a *"¿podés sacar de la carta algo que una mesa está esperando?"* —un dato de
-  operación, no de tasación— y el mensaje que nombra la mesa es lo único que hoy le dice al
-  admin que hay alguien sentado esperando eso.
+  📌 **Esta nota decía que los cinco guards no se tiraban**, por el dato de operación que le
+  daban al admin (el mensaje que nombra la mesa). El owner decidió lo contrario para las cuatro
+  ediciones el 2026-09-14 ([`resueltos.md`](resueltos.md)); el del borrado del ítem sigue, con su
+  porqué por medir en § 2.
 
   ⚠️ **Dos trampas medidas que el que tome esto se va a encontrar:**
-  1. **La precuenta no valida todo lo que valida el cierre.** `puedeCostar()`
+  1. **La precuenta validaba menos que el cierre** (antes del 2026-08-31). `puedeCostar()`
      (`calculo-precios.service.ts`) saltea el resolver cuando la línea no tiene extras,
-     grupos ni componentes, así que una línea con **solo** `omitidos` rotos muestra precio
-     normal en la precuenta y explota recién al cobrar. Reproducir por la precuenta y
-     concluir "no pasa nada" es el error fácil.
+     grupos ni componentes, así que una línea con **solo** `omitidos` rotos mostraba precio
+     normal en la precuenta y explotaba recién al cobrar. Hoy ninguno de los dos re-resuelve
+     la línea de una cuenta, pero si algo vuelve a hacerlo, reproducir por la precuenta y
+     concluir "no pasa nada" sigue siendo el error fácil.
   2. **No todo lo que rompe grita.** Si un componente de combo se queda sin **ningún**
      grupo asociado, `resolverPersonalizacionCombo` hace
-     `if (!catalogo.asociados.length) continue` y la opción elegida **desaparece del
-     precio en silencio** (medido: 4500 → 4300). Hoy no es alcanzable por acción de
-     catálogo, pero solo porque lo tapan tres guards distintos —la desasociación, el
-     borrado del grupo y el borrado del componente—; si alguno se afloja, vuelve, y vuelve
-     callado.
+     `if (!catalogo.asociados.length) continue` y la opción elegida **desaparecía del
+     precio en silencio** (medido el 2026-08-30: 4500 → 4300). Desde el 2026-09-14 la
+     desasociación es alcanzable por acción de catálogo —su guard se sacó—, pero no llega al
+     cobro: el cierre usa la foto y no re-resuelve. Si algo vuelve a re-resolver, vuelve
+     callado y en otro lugar: el precio ya está congelado, así que lo que se pierde es el
+     stock que no se descuenta. El test 23 de `cuenta-precio-congelado.e2e-spec.ts` lo caza
+     por el stock (ver su comentario).
 
   ⚠️ **El e2e de todo esto tiene una trampa conocida**: el fixture no puede usar grupos ni
-  recetas del seed, porque sacarles una pieza los rompe para las demás suites. Los cuatro
-  tests ya escritos (`grupos-modificadores.e2e-spec.ts` ×2, `recetas.e2e-spec.ts` tests 16
-  y 17) arman su propio catálogo — copiar de ahí.
+  recetas del seed, porque sacarles una pieza los rompe para las demás suites. Los tests 20 a 23
+  de `cuenta-precio-congelado.e2e-spec.ts` arman su propio catálogo — copiar de ahí.
 
   ❓ **Y lo de siempre, aparte:** `useCalculoPrecios` se traga el 400 a propósito y
   `lineaSubtotal` dibuja `—` en todas las líneas sin decir por qué. Que el composable diga

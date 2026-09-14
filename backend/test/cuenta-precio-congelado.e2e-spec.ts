@@ -295,6 +295,46 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     await post(`/api/cuentas/${cuentaId}/cancelar`, {});
   }
 
+  async function editar(url: string, body: Record<string, unknown>) {
+    const res = await request(app.getHttpServer())
+      .patch(url)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
+    expect(res.status).toBe(200);
+  }
+
+  async function detalleItem(itemId: string): Promise<{
+    stock: string;
+    ingredientes?: unknown[];
+    extrasPermitidos?: unknown[];
+    grupos?: unknown[];
+  }> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return res.body as {
+      stock: string;
+      ingredientes?: unknown[];
+      extrasPermitidos?: unknown[];
+      grupos?: unknown[];
+    };
+  }
+
+  async function stockDe(itemId: string): Promise<string> {
+    return (await detalleItem(itemId)).stock;
+  }
+
+  async function opcionesDelGrupo(grupoId: string): Promise<string[]> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/grupos-modificadores/${grupoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return (res.body as { opciones: { itemId: string }[] }).opciones.map(
+      (o) => o.itemId,
+    );
+  }
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -943,5 +983,238 @@ describe('Lo pedido se cobra como se pidió — precio congelado (e2e)', () => {
     expect(fusionada.lineas[0].precioUnitario).toBe('2500.0000');
 
     await cancelar(fusionada.id);
+  });
+
+  // ── Sacar de la carta lo que la mesa ya pidió (owner, 2026-09-14) ────────
+  //
+  // Hasta el 2026-09-14 estas cuatro ediciones rechazaban con 400 si una cuenta
+  // abierta ya había pedido la pieza, porque el cierre re-validaba la línea
+  // contra la carta y la mesa quedaba incobrable. Desde el congelado ya no la
+  // re-valida, así que los guards se sacaron. Cada test afirma que la edición
+  // pasa (con los guards de vuelta, `editar` da 400: medido), que la pieza salió
+  // de verdad del catálogo, y que el cierre cobra lo pedido.
+  //
+  // Qué caza qué está medido con mutantes (`docs/agent/resueltos.md`), no
+  // leído: con el cierre re-resolviendo sin la foto, el precio sigue congelado y
+  // el 20 y el 23 cobran 201 igual. Ahí lo delata solo el stock, así que esas
+  // aserciones no son redundantes con el status. El 21 no lo ve: el omitido ya
+  // salió de la receta, así que perderlo no mueve el stock, y `GET /ventas/:id`
+  // no devuelve la personalización. La precuenta con `cuentaId` ignora las líneas
+  // del body: es el control de que la pantalla puede abrir el cobro, no evidencia.
+
+  it('20. se puede sacar de la receta el extra que la mesa pidió, y la mesa lo paga igual', async () => {
+    const panId = await crearIngrediente('Pan extra sacado');
+    const quesoId = await crearIngrediente('Queso extra sacado');
+    const recetaId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Hamburguesa extra sacado ${Date.now()}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: quesoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            precioExtra: '700',
+          },
+        ],
+      })
+    ).id;
+    const cuentaId = await abrirCuenta();
+    const personalizacion = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: quesoId, unidades: 1 }],
+    };
+    await post(`/api/cuentas/${cuentaId}/lineas`, {
+      itemId: recetaId,
+      cantidad: '1',
+      personalizacion,
+    });
+
+    expect((await detalleItem(recetaId)).extrasPermitidos).toHaveLength(1);
+    await editar(`/api/items/${recetaId}`, { extrasPermitidos: [] });
+    expect((await detalleItem(recetaId)).extrasPermitidos).toHaveLength(0);
+
+    expect(
+      (
+        await precuenta(cuentaId, [
+          { itemId: recetaId, cantidad: '1', personalizacion },
+        ])
+      ).status,
+    ).toBe(201);
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('4700.0000');
+    expect(await stockDe(quesoId)).toBe('99.0000');
+  });
+
+  it('21. se puede sacar de la receta el ingrediente que la mesa pidió sin él, y la mesa se cobra', async () => {
+    const panId = await crearIngrediente('Pan omitido sacado');
+    const cebollaId = await crearIngrediente('Cebolla omitida sacada');
+    const ingrediente = (id: string) => ({
+      ingredienteItemId: id,
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      bloqueante: true,
+    });
+    const recetaId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Hamburguesa omitido sacado ${Date.now()}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [ingrediente(panId), ingrediente(cebollaId)],
+      })
+    ).id;
+    const cuentaId = await abrirCuenta();
+    const personalizacion = { omitidos: [cebollaId], extras: [] };
+    await post(`/api/cuentas/${cuentaId}/lineas`, {
+      itemId: recetaId,
+      cantidad: '1',
+      personalizacion,
+    });
+
+    expect((await detalleItem(recetaId)).ingredientes).toHaveLength(2);
+    await editar(`/api/items/${recetaId}`, {
+      ingredientes: [ingrediente(panId)],
+    });
+    expect((await detalleItem(recetaId)).ingredientes).toHaveLength(1);
+
+    expect(
+      (
+        await precuenta(cuentaId, [
+          { itemId: recetaId, cantidad: '1', personalizacion },
+        ])
+      ).status,
+    ).toBe(201);
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('4000.0000');
+    expect(await stockDe(panId)).toBe('99.0000');
+    expect(await stockDe(cebollaId)).toBe('100.0000');
+  });
+
+  it('22. se puede sacar del grupo la opción que la mesa eligió, y la mesa la paga igual', async () => {
+    const panId = await crearIngrediente('Pan opción sacada');
+    const salsaId = await crearProducto('Salsa opción sacada', '0');
+    const ketchupId = await crearProducto('Ketchup opción sacada', '0');
+    const { grupoModificadorId: grupoId } = await post<{
+      grupoModificadorId: string;
+    }>('/api/grupos-modificadores', {
+      nombre: `Salsas opción sacada ${Date.now()}`,
+      opciones: [
+        { itemId: salsaId, cantidad: '1', precioExtra: '300' },
+        { itemId: ketchupId, cantidad: '1', precioExtra: '300' },
+      ],
+    });
+    const recetaId = await crearReceta('Hamburguesa opción sacada', panId, [
+      { grupoModificadorId: grupoId, min: 1, max: 1 },
+    ]);
+    const cuentaId = await abrirCuenta();
+    const personalizacion = {
+      omitidos: [],
+      extras: [],
+      grupos: [{ grupoId, opciones: [{ itemId: salsaId, unidades: 1 }] }],
+    };
+    await post(`/api/cuentas/${cuentaId}/lineas`, {
+      itemId: recetaId,
+      cantidad: '1',
+      personalizacion,
+    });
+
+    expect(await opcionesDelGrupo(grupoId)).toHaveLength(2);
+    await editar(`/api/grupos-modificadores/${grupoId}`, {
+      opciones: [{ itemId: ketchupId, cantidad: '1', precioExtra: '300' }],
+    });
+    expect(await opcionesDelGrupo(grupoId)).toEqual([ketchupId]);
+
+    expect(
+      (
+        await precuenta(cuentaId, [
+          { itemId: recetaId, cantidad: '1', personalizacion },
+        ])
+      ).status,
+    ).toBe(201);
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('4300.0000');
+    expect(await stockDe(salsaId)).toBe('99.0000');
+  });
+
+  it('23. se puede desasociar el grupo que la mesa eligió, en los dos niveles, y la mesa lo paga igual', async () => {
+    // El nivel del componente es el caso que antes no gritaba: sin su último
+    // grupo, re-resolver el combo salteaba el componente y la salsa salía del
+    // precio en silencio (medido el 2026-08-30: 4.300 en vez de 4.500).
+    const panId = await crearIngrediente('Pan grupo desasociado');
+    const jugoId = await crearProducto('Jugo grupo desasociado', '0');
+    const salsaId = await crearProducto('Salsa grupo desasociado', '0');
+    const grupoJugoId = await crearGrupo('Jugo desasociado', jugoId);
+    const grupoSalsaId = await crearGrupo('Salsa desasociada', salsaId);
+    const recetaId = await crearReceta('Hamburguesa grupo desasociado', panId, [
+      { grupoModificadorId: grupoSalsaId, min: 1, max: 1 },
+    ]);
+    const comboId = (
+      await post<IdResponse>('/api/items', {
+        nombre: `Combo grupo desasociado ${Date.now()}`,
+        precioBase: '6000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: recetaId, cantidad: '1', bloqueante: true },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: grupoJugoId, min: 1, max: 1 },
+        ],
+      })
+    ).id;
+    const cuentaId = await abrirCuenta();
+    const personalizacion = {
+      grupos: [
+        { grupoId: grupoJugoId, opciones: [{ itemId: jugoId, unidades: 1 }] },
+      ],
+      componentes: [
+        {
+          componenteItemId: recetaId,
+          unidad: 1,
+          grupos: [
+            {
+              grupoId: grupoSalsaId,
+              opciones: [{ itemId: salsaId, unidades: 1 }],
+            },
+          ],
+        },
+      ],
+    };
+    await post(`/api/cuentas/${cuentaId}/lineas`, {
+      itemId: comboId,
+      cantidad: '1',
+      personalizacion,
+    });
+
+    expect((await detalleItem(comboId)).grupos).toHaveLength(1);
+    expect((await detalleItem(recetaId)).grupos).toHaveLength(1);
+    await editar(`/api/items/${comboId}`, { gruposModificadores: [] });
+    await editar(`/api/items/${recetaId}`, { gruposModificadores: [] });
+    expect((await detalleItem(comboId)).grupos).toHaveLength(0);
+    expect((await detalleItem(recetaId)).grupos).toHaveLength(0);
+
+    expect(
+      (
+        await precuenta(cuentaId, [
+          { itemId: comboId, cantidad: '1', personalizacion },
+        ])
+      ).status,
+    ).toBe(201);
+    // 6.000 del combo + 300 del jugo + 300 de la salsa.
+    const detalleVenta = await venta(await cerrar(cuentaId));
+    expect(detalleVenta.detalles[0].precioUnitario).toBe('6600.0000');
+    expect(await stockDe(jugoId)).toBe('99.0000');
+    expect(await stockDe(salsaId)).toBe('99.0000');
   });
 });

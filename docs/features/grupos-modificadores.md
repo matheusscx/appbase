@@ -460,20 +460,10 @@ Response (201):
   sugerencia hoy la calcula solo `restaurar()` (`grupos-modificadores.service.ts`
   → `errorDeColisionNombreSQL`), así que no hay contra qué armar acá el modal de
   renombrado. Ver "Modelo de datos → `grupo_modificador_opciones`".
-  ⚠️ **Un tercer `400` (desde el 2026-08-30): una opción que una cuenta de salón
-  abierta ya eligió no se saca del grupo** — *"No se puede sacar del grupo una
-  opción ya pedida: "Coca" está pedida en Mesa 4 · cuenta 1"*. Sin eso, la línea
-  de esa mesa deja de poder tasarse (*"La opción X no pertenece al grupo"*) en la
-  precuenta **y** al cerrar, y la mesa queda **incobrable** sin que nadie se
-  entere hasta que el garzón intenta cobrar. Se pregunta por las opciones que
-  **se sacan** (las `eliminadas` que el service ya calculaba), no por la lista:
-  reordenar y repreciar siguen pasando. La pregunta vive en
-  `ItemsService.cuentasAbiertasConOpcionDeGrupo` —es sobre
-  `cuenta_lineas.personalizacion`, el mismo campo que las otras puertas de la
-  misma regla— y mira los **dos** niveles del snapshot: `grupos[]` (grupo propio
-  del ítem) y `componentes[].grupos[]` (grupo de un componente receta del combo).
-  El `grupoId` va **dentro** del match, así que una opción elegida en otro grupo
-  no bloquea la edición de éste. Cancelada o cerrada la cuenta, se puede sacar.
+  Sacar una opción que una cuenta de salón abierta ya eligió **pasa** (desde el
+  2026-09-14; hasta entonces era un tercer `400`): la línea congeló su elección al
+  pedirse y la mesa la paga igual. Ver [salones-mesas.md](./salones-mesas.md) §
+  "Ítem eliminado con la cuenta abierta".
 - `DELETE /grupos-modificadores/:id` — `400` si el grupo está asociado a algún
   item vivo (`item_grupos_modificadores`).
 - `GET /grupos-modificadores/:id/items` — drawer de recetas: cada asociación
@@ -507,33 +497,10 @@ se requiere al menos uno de los dos (nunca ambos vacíos). `PATCH` reemplaza
 `item_grupo_id` para el grupo que sigue asociado, mismo `item_grupo_opcion_id`
 para el override que sigue viniendo) — ver `docs/patterns/backend.md` §14.
 
-⚠️ **Un grupo que una cuenta de salón abierta ya eligió no se desasocia del ítem**
-(desde el 2026-08-30) — `400`: *"No se puede desasociar del ítem un grupo ya elegido:
-"Salsa" está elegido en Mesa 2 · cuenta 1"*. Es la misma regla que el `PATCH` del grupo,
-por la otra puerta. Sin ella el daño toma **dos** formas, medidas el 2026-08-30. Si el
-grupo es del ítem de la línea, o de un componente que conserva otros grupos vivos, la línea
-deja de poder tasarse (*"Grupo de modificadores no asociado a este item"*) y la mesa queda
-incobrable. Pero si era el **último** grupo vivo de un componente de combo,
-`resolverPersonalizacionCombo` saltea ese componente entero
-(`if (!catalogo.asociados.length) continue`) y la opción elegida **desaparece del precio
-en silencio** — la mesa paga de menos y nadie se entera. La segunda es la peor, y el
-silencio es exclusivo del componente: el grupo propio del ítem grita siempre. Se pregunta por las
-asociaciones que **se van** (las `eliminadas` que `asociarGruposModificadores` ya
-calculaba), así que cambiar `min`/`max`, el orden o los overrides, y asociar grupos
-nuevos, siguen pasando. La consulta
-(`ItemsService.cuentasAbiertasConGrupoElegido`) mira los dos niveles del snapshot y
-acota cada uno a **este** ítem: `cl.item_id` para el grupo propio, `componenteItemId`
-dentro del containment para el del componente — un grupo cuelga de muchos ítems y
-desasociarlo de otro no rompe esta mesa.
-
-📌 De arrastre, esto también cubre `DELETE /grupos-modificadores/:id`: ese borrado ya se
-rechaza si el grupo está asociado a algún ítem vivo, y para que una mesa lo haya elegido
-tiene que estar asociado.
-
-⚠️ **Lo que se agrega o se endurece no tiene regla** (medido el 2026-08-30): asociar un
-grupo nuevo con `min ≥ 1` a un ítem con líneas abiertas las deja sin poder tasarse
-(*"El grupo X requiere elegir entre 1 y 1 unidades"*), y lo mismo subir el `min` o bajar
-el `max` de uno ya asociado. Ver [`../agent/pendientes.md`](../agent/pendientes.md).
+Desasociar un grupo que una cuenta de salón abierta ya eligió **pasa** (desde el
+2026-09-14; hasta entonces era `400`), y asociar uno obligatorio o endurecer el `min`/`max`
+de uno ya asociado también: la línea congeló su personalización al pedirse y el cobro no la
+vuelve a validar contra el catálogo. Ver [salones-mesas.md](./salones-mesas.md).
 
 `GET /items/:id` de un combo o receta agrega:
 

@@ -264,57 +264,35 @@ Backfill al arrancar: cuentas existentes sin responsable reciben
 Borrar del catálogo un ítem que está pedido en una cuenta abierta **está bloqueado**
 (`GET /items/:id/uso` → clase `'cuenta'`, ver [recetas.md](./recetas.md)).
 
-**La regla, en una línea: lo que una cuenta abierta ya pidió no se saca del catálogo**
-—esté en `cuenta_lineas.item_id` o **adentro** de su `personalizacion`—. El motivo no es
-integridad referencial: la precuenta y el cierre **re-tasan la línea contra el catálogo
-vivo**, así que sacarle una pieza a algo ya pedido hace que esa línea no se pueda tasar y
-la mesa quede **incobrable**, con un error que nadie ve hasta que el garzón intenta cobrar.
-Cancelada o cerrada la cuenta, todo vuelve a ser borrable: el bloqueo es por **mesa viva**,
-no un endurecimiento del catálogo.
-
-Dónde está puesta hoy (2026-08-30) — **los cinco caminos que sacan algo del catálogo**:
+**La regla, en una línea: lo que una cuenta abierta ya pidió no se borra del catálogo**
+—sea el ítem de la línea o un ingrediente pedido como **extra**—. Cancelada o cerrada la
+cuenta, todo vuelve a ser borrable: el bloqueo es por **mesa viva**, no un endurecimiento del
+catálogo.
 
 | Camino | Estado |
 |---|---|
-| `DELETE /items/:id` del ítem de la línea | ✅ desde antes |
-| `DELETE /items/:id` de un ingrediente pedido como **extra** | ✅ `dce84899` |
-| `PATCH /items/:id` con `extrasPermitidos` | ✅ `d42a36e7` |
-| `PATCH /grupos-modificadores/:id` sacando una opción | ✅ `bdc4d870` |
-| `PATCH /items/:id` con `ingredientes` (un **omitido** que se va) | ✅ 2026-08-30 |
-| `PATCH /items/:id` con `gruposModificadores` (grupo elegido que se desasocia) | ✅ 2026-08-30 |
-| `DELETE /grupos-modificadores/:id` | ✅ de arrastre, **transitivo** (ver abajo) |
+| `DELETE /items/:id` del ítem de la línea | ✅ bloquea |
+| `DELETE /items/:id` de un ingrediente pedido como **extra** | ✅ bloquea (`dce84899`) |
 
-El arrastre del `DELETE` del grupo se apoya en tres guards, no en uno: ese borrado se
-rechaza si el grupo está asociado a un ítem **vivo**, y para que siga asociado hacen falta
-la desasociación bloqueada (fila de arriba) y que el ítem no se pueda borrar —rama
-`'cuenta'` de `obtenerUsoItem` si es el ítem de la línea, rama `'combo'` si es un
-componente—. Si alguno se afloja, el ✅ se cae.
+**Editar la carta, en cambio, no mira las mesas** (owner, 2026-09-14). Sacar de una receta un
+extra o un ingrediente, sacar una opción de un grupo o desasociar un grupo de un ítem pasan con
+la mesa sentada, y la mesa paga lo que pidió. Hasta esa fecha las cuatro ediciones rechazaban con
+`400` nombrando la mesa, porque la precuenta y el cierre re-validaban la línea contra la carta
+viva y la dejaban **incobrable**. Desde el 2026-08-31 la línea congela su personalización al
+pedirse y ninguno de los dos la vuelve a validar (sección de abajo), así que los guards cuidaban
+algo que ya no se rompía. Medido antes de sacarlos, con la edición y el pedido cruzados: el cierre
+cobra con `201` en los cuatro casos. Lo fijan, en secuencia y sin carrera, los tests 20 a 23 de
+`cuenta-precio-congelado.e2e-spec.ts`.
 
-**Y contra un pedido en vuelo** (2026-09-13). `agregarLinea` toma `FOR SHARE` sobre el ítem
-de la línea y los ingredientes de sus extras, el par del `FOR UPDATE` del borrado, así que los
-dos `DELETE /items/:id` de la tabla valen también cuando el borrado y el pedido llegan a la vez:
-el que llega segundo espera, y rebota —el borrado con el mismo `400`, el pedido porque el ítem ya
-no está—. Las ediciones todavía no: sus guards leen las cuentas sin lock, y esa carrera está anotada
-para medir en [`pendientes.md`](../agent/pendientes.md) § 2.
+**Y contra un pedido en vuelo** (2026-09-13). `agregarLinea` toma `FOR SHARE` sobre el ítem de
+la línea y los ingredientes de sus extras, el par del `FOR UPDATE` del borrado, así que los dos
+`DELETE /items/:id` de la tabla valen también cuando el borrado y el pedido llegan a la vez: el
+que llega segundo espera, y rebota —el borrado con el mismo `400`, el pedido porque el ítem ya no
+está—.
 
-Las cuatro ediciones comparan el **diff**: bloquean lo que *se saca*, no la lista que
-cambia, así que reordenar, repreciar, cambiar min/max o agregar siguen pasando.
-
-⚠️ **Cerrar los cinco no cierra la clase, y eso es lo que hay que saber antes de confiar en
-esta tabla.** El cobro y la precuenta no solo re-precian: **re-validan** el snapshot contra
-el catálogo de hoy, así que también rompen la mesa cosas que *no* sacan nada —asociar un
-grupo con `min ≥ 1`, subir el `min` de uno ya asociado— y una que saca por otro campo:
-quitar de un combo un componente que la línea personalizó. Las tres están medidas en
-[`../agent/pendientes.md`](../agent/pendientes.md) § 3, junto con la decisión que las
-cierra todas de una y que el owner ya tomó el 2026-08-30 —al cobrar manda lo que la mesa
-pidió, con el precio de cuando lo pidió; re-tasar re-precia y deja de re-validar—, sin
-construir todavía.
-
-⚠️ **Dos cosas que no se ven desde acá.** La precuenta valida **menos** que el cierre
-(`puedeCostar()` saltea el resolver cuando la línea solo tiene `omitidos`, así que ese caso
-muestra precio normal y explota al cobrar); y no todo lo que rompe grita: un componente de
-combo que se queda sin ningún grupo asociado hace desaparecer la opción elegida **del
-precio**, sin error. Detalle y medición, en la misma entrada.
+⚠️ **El bloqueo del extra se escribió con el motivo de las ediciones**, que dejó de valer el
+2026-08-31; el del ítem de la línea tiene uno vigente (abajo). Qué pasa hoy con el extra, en
+[`pendientes.md`](../agent/pendientes.md) § 2.
 
 Para los
 casos que ya existan, el detalle de la cuenta **muestra la línea marcada**

@@ -544,33 +544,34 @@ customer (`min`/`max`).
 - **Bloqueo de borrado en ambos sentidos.** Un item que es opción viva de un
   grupo no puede eliminarse; un grupo asociado a items vivos no puede
   eliminarse.
-- **Lo que una mesa ya pidió no se saca del catálogo** (2026-08-30). La regla
+- **Lo que una mesa ya pidió no se borra del catálogo** (2026-08-30). La regla
   anterior mira el catálogo; ésta mira la **operación**: si una cuenta de salón
   **abierta** ya pidió un item —sea como la línea misma o **adentro** de su
-  personalización—, ese item no se elimina. El motivo no es integridad
-  referencial sino que el cobro re-tasa la línea contra el catálogo vivo:
-  sacarle una pieza deja la mesa **incobrable**, con un error que nadie ve hasta
-  que el garzón intenta cerrar la cuenta. Cerrada o cancelada la cuenta, el item
+  personalización—, ese item no se elimina. Para el item **de la línea** el
+  motivo sigue vigente: `cerrarCuenta` no cobra una línea cuyo item se borró.
+  Para el pedido **como extra**, el motivo escrito era que el cobro re-tasaba la
+  línea y la mesa quedaba **incobrable**, y eso dejó de pasar con el congelado
+  (abajo); qué pasa hoy, en `docs/agent/pendientes.md` § 2. Cerrada o cancelada
+  la cuenta, el item
   vuelve a ser borrable — es un bloqueo por mesa viva, no un endurecimiento del
   catálogo.
 
-  **Alcance hoy (2026-08-30):** la regla está puesta en los **cinco** caminos que
-  sacan del catálogo algo ya pedido: el borrado (`DELETE /items/:id`), para el
-  item de la línea y para el ingrediente pedido como extra; las tres ediciones de
-  `PATCH /items/:id` —`ingredientes`, `extrasPermitidos` y `gruposModificadores`—;
-  y `PATCH /grupos-modificadores/:id`. En las ediciones se compara el **diff**:
-  bloquean lo que *se saca*, no la lista que cambia, así que reordenar, repreciar,
-  cambiar min/max o agregar siguen pasando **por estos guards** — lo que no
-  quiere decir que sean inocuos, ver la advertencia de abajo.
+  **Alcance hoy (2026-09-14):** la regla vale para el borrado
+  (`DELETE /items/:id`), para el item de la línea y para el ingrediente pedido
+  como extra. Las ediciones de catálogo —sacar un ingrediente o un extra de una
+  receta, una opción de un grupo, o desasociar un grupo de un ítem— **no** la
+  aplican: el owner decidió el 2026-09-14 que pasen con la mesa sentada, porque
+  desde el congelado ya no rompen la mesa (medido: el cierre cobra con `201`).
+  Hasta esa fecha las cuatro rechazaban con `400`.
 
-  ⚠️ **Sacar no es lo único que rompe la mesa** (medido el 2026-08-30, al cerrar
-  el quinto camino). La re-tasación no solo re-precia: **re-valida** el snapshot
-  congelado contra el catálogo vivo, así que también la rompen cosas que se
+  ⚠️ **Sacar no era lo único que rompía la mesa** (medido el 2026-08-30, al construir
+  los guards de las ediciones). La re-tasación de entonces no solo re-preciaba: **re-validaba**
+  el snapshot congelado contra el catálogo vivo, así que también la rompían cosas que se
   *agregan* o se *endurecen* —asociar un grupo con `min ≥ 1`, subir el `min` de
   uno ya asociado— y una que sí es un "sacar" pero por otro campo: quitar de un
-  combo un componente que la línea personalizó. Cerrar esos de a uno es la misma
+  combo un componente que la línea personalizó. Cerrar esos de a uno era la misma
   carrera; la alternativa de fondo —que re-tasar una línea ya pedida re-precie
-  **sin** re-validar— es decisión de producto y está sin tomar.
+  **sin** re-validar— era decisión de producto, y se tomó:
   ✅ **DECIDIDO (owner, 2026-08-30) y CONSTRUIDO el 2026-08-31:** al cobrar **manda
   lo que la mesa ya pidió, no la carta de hoy**. Re-tasar una línea de una cuenta
   abierta pasa a **re-preciar sin re-validar** —la personalización congelada es un

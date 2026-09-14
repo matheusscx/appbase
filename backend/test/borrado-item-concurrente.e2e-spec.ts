@@ -84,9 +84,10 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * - Componente de combo: pasa por el mismo `filasValidacionPorIds` que 1 y 2.
  * - El alta (`POST /items`, `POST /grupos-modificadores`): toma el lock por el
  *   mismo método que la edición.
- * - Carreras entre editar una receta o un grupo y agregar una línea de cuenta
- *   (sacar un extra que una mesa está pidiendo): el ítem sigue vivo, no es
- *   este par de locks.
+ * - Editar una receta o un grupo mientras se pide una línea (sacar un extra que
+ *   una mesa está pidiendo): no hay nada que serializar. Desde el 2026-09-14
+ *   esas ediciones no consultan cuentas, y la mesa se cobra con lo que congeló
+ *   al pedir (`cuenta-precio-congelado.e2e-spec.ts`, tests 20 a 23).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
