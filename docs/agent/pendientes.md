@@ -142,12 +142,16 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
 
 - [ ] **Sin medir: lo levantó la revisión independiente del cierre de las opciones de grupo**
   ([`resueltos.md`](resueltos.md)). `GruposModificadoresService.aplicarOverrides` lee el grupo sin
-  lock antes de escribir overrides en `item_grupo_modificador_opciones`, la misma forma que tenía
-  `update()` antes de tomar `FOR KEY SHARE`. No está leído qué deja vivo contra
-  `grupos-modificadores.remove()`, que soft-borra las opciones del grupo pero no sus overrides.
-  **Qué medir:** la compuerta de `test/borrado-item-concurrente.e2e-spec.ts`, con `aplicarOverrides`
-  frenado después de leer el grupo y el `DELETE` del grupo entrando, contando qué filas quedan vivas
-  apuntando al grupo borrado.
+  lock antes de escribir overrides en `item_grupo_modificador_opciones`. El hueco es más angosto que
+  el de `update()`: `aplicarOverrides` exige asociaciones vivas del grupo, y `remove()` rechaza con
+  400 si alguna asociación tiene el ítem vivo, así que la carrera solo se da cuando todos los ítems
+  asociados ya están borrados (borrar un ítem no borra sus `item_grupos_modificadores`).
+  `grupos-modificadores.remove()` soft-borra las opciones del grupo pero no las asociaciones ni sus
+  overrides, así que esas filas quedan vivas **también sin carrera**.
+  **Qué medir:** primero la línea base sin carrera —qué filas deja vivas un `DELETE` del grupo con
+  todos sus ítems asociados borrados—; después la compuerta de
+  `test/borrado-item-concurrente.e2e-spec.ts`, con `aplicarOverrides` frenado después de leer el
+  grupo y el `DELETE` entrando, y comparar contra esa base.
 
 ## 3. Ya decidido, falta construir
 

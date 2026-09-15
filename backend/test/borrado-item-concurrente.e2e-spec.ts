@@ -740,8 +740,8 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
     );
 
     // El PATCH lee el grupo y DESPUÉS toma `FOR SHARE` sobre los ítems de sus
-    // opciones: la compuerta retiene la opción nueva. Sin renombrar, que es el
-    // orden donde la opción quedaba viva en el grupo borrado.
+    // opciones: la compuerta retiene la opción nueva. Sin renombrar, que es la
+    // variante donde la opción quedaba viva en el grupo borrado.
     const r = await correrCarrera({
       compuerta: [
         `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
