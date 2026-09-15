@@ -23,6 +23,54 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Aplicar overrides mientras se borra el grupo: medido, no es bug (cerrada 2026-09-15)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **Medido sobre base reseteada** (el spec de medición no
+quedó en el repo). Montaje de los tres casos: un grupo con una opción, asociado a una receta, con un
+override de `precioExtra` 100 ya escrito, y la receta borrada —si no, `remove()` del grupo rebota
+con 400—.
+
+| Caso | Lo medido |
+|---|---|
+| Línea base: `DELETE` del grupo sin carrera | 204; quedan 0 opciones vivas, 1 asociación viva y 1 override vivo (100). Un `PATCH …/overrides` después da 404. Restaurar el grupo y la receta: 201 y 201, y el precio efectivo vuelve a ser 100 |
+| En serie: aplicar 300, después `DELETE` | 200 y 204; mismas filas que la base, con el override en 300. Restaurados, el efectivo es 300 |
+| Carrera: compuerta `FOR UPDATE` sobre la fila del override, aplicar 300 frenado en su `UPDATE`, `DELETE` entrando | una sesión esperando antes y después de disparar el `DELETE`; el `DELETE` volvió 204 **con la compuerta todavía puesta**, y aplicar 200 al soltarla. Los conteos de filas, el precio del override y el restaurado, iguales a la serie |
+
+**Por qué no hay nada que arreglar.** La carrera deja el estado del orden en serie *aplicar, después
+borrar*, que es válido. `grupos-modificadores.remove()` no lee ni escribe
+`item_grupo_modificador_opciones`, y `aplicarOverrides` no escribe nada de lo que `remove()` lee. Que
+la asociación y el override sigan vivos con el grupo en la papelera es la línea base, no la carrera:
+es lo que hace que el override vuelva al restaurar.
+
+**Qué se hizo:** nada de código.
+
+**Lo que no se midió:**
+- el camino del `INSERT` —aplicar sobre una asociación sin override previo—: la tabla no tiene más
+  índice único que la PK, así que no hay fila que retener para frenarlo. Por lectura, deja lo mismo
+  que la serie, por la misma razón de arriba;
+- la intercalación donde aplicar lee el grupo antes del borrado y la opción después: por lectura
+  rebota con 400 (*"La opción no pertenece al grupo"*): es el orden *borrar, después aplicar*, con
+  400 en vez del 404.
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### Aplicar overrides de un grupo mientras se borra el grupo (2026-09-15)
+>
+> - [ ] **Sin medir: lo levantó la revisión independiente del cierre de las opciones de grupo**
+>   ([`resueltos.md`](resueltos.md)). `GruposModificadoresService.aplicarOverrides` lee el grupo sin
+>   lock antes de escribir overrides en `item_grupo_modificador_opciones`. El hueco es más angosto que
+>   el de `update()`: `aplicarOverrides` exige asociaciones vivas del grupo, y `remove()` rechaza con
+>   400 si alguna asociación tiene el ítem vivo, así que la carrera solo se da cuando todos los ítems
+>   asociados ya están borrados (borrar un ítem no borra sus `item_grupos_modificadores`).
+>   `grupos-modificadores.remove()` soft-borra las opciones del grupo pero no las asociaciones ni sus
+>   overrides, así que esas filas quedan vivas **también sin carrera**.
+>   **Qué medir:** primero la línea base sin carrera —qué filas deja vivas un `DELETE` del grupo con
+>   todos sus ítems asociados borrados—; después la compuerta de
+>   `test/borrado-item-concurrente.e2e-spec.ts`, con `aplicarOverrides` frenado después de leer el
+>   grupo y el `DELETE` entrando, y comparar contra esa base.
+
+---
+
 ## Editar las opciones de un grupo espera al borrado del grupo (cerrada 2026-09-15)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **Medido con la compuerta de
@@ -52,7 +100,8 @@ con el contenedor del backend detenido):
 **Lo que no cubre:** el orden inverso —el borrado toma el grupo antes que el `PATCH`— no tiene test
 de carrera propio; lo resuelve la misma lectura, que filtra `eliminado_el IS NULL` y da 404 tanto si
 el borrado ya commiteó como si commitea mientras el `PATCH` espera. Y `aplicarOverrides` lee el
-grupo sin lock, anotado sin medir en [`pendientes.md` § 2](pendientes.md).
+grupo sin lock: medido después, no es bug (*"Aplicar overrides mientras se borra el grupo"*, en este
+archivo).
 
 **La entrada, como estaba en `pendientes.md` § 2:**
 
