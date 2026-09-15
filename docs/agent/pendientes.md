@@ -356,6 +356,14 @@ revisión independiente no lo pudo reproducir, con razón.
   **Spec de la parte 1** (con el renombre):
   [`2026-09-15-motivos-de-baja-con-tipo-design.md`](../superpowers/specs/2026-09-15-motivos-de-baja-con-tipo-design.md).
 
+  **Parte 1 construida (2026-09-15):** backend en tres commits — `b9d8af83` (el renombre del
+  catálogo, sin cambiar conducta), `b5de5227` (el `tipo` en el modelo, el CRUD y el filtro
+  `?tipo=` de `GET /api/motivos-baja`) y `3fbb359f` (el 400 de `POST /api/mermas` para un
+  motivo que no sea de tipo `merma`). Las pantallas (configuración muestra y edita el tipo;
+  Mermas filtra por `tipo=merma`) van en el mismo cierre. Sigue abierto lo que esta entrada
+  siempre dijo que faltaba: la parte 2 (anular en el salón, con
+  su permiso y su registro) y la parte 3 (el reporte de anulaciones que no descuentan).
+
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
   monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las

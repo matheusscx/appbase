@@ -27,6 +27,11 @@ const MOTIVO = { id: 'motivo-1', nombre: 'Vencimiento' }
 /** Ubicaciones que devuelve `GET /ubicaciones` en cada test. */
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
 let mermasEnviadas: Record<string, unknown>[] = []
+/** Última URL con la que se pidieron los motivos — Task 4: tiene que llevar
+ *  `tipo=merma` además del `soloActivas=true` de siempre; el filtro de
+ *  pantalla no alcanza (el servidor es el que manda), pero sin esto
+ *  "Cortesía de la casa" aparecería en el selector de Mermas. */
+let motivosUrlSolicitada = ''
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -53,7 +58,10 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/items?tipo=ingrediente')) {
       return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
     }
-    if (url.includes('/motivos-baja')) return Promise.resolve([MOTIVO])
+    if (url.includes('/motivos-baja')) {
+      motivosUrlSolicitada = url
+      return Promise.resolve([MOTIVO])
+    }
     // `useUnidadesMedidaStore.ensureLoaded()` espera un ARRAY, no el shape
     // paginado del catch-all de abajo — sin esto `unidades.value.find` revienta.
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
@@ -131,6 +139,7 @@ async function enviar(wrapper: Wrapper) {
 describe('mermas — selector de ubicación', () => {
   beforeEach(() => {
     mermasEnviadas = []
+    motivosUrlSolicitada = ''
     document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
   })
 
@@ -189,6 +198,27 @@ describe('mermas — selector de ubicación', () => {
     // Si sobreviviera, sería una cantidad tipeada mirando el stock del local
     // aplicada como si fuera de la bodega — un número que nadie tecleó ahí.
     expect((wrapper.find('input[inputmode="decimal"]').element as HTMLInputElement).value).toBe('')
+    wrapper.unmount()
+  })
+})
+
+// Task 4: Mermas solo ofrece motivos de tipo `merma` (§4.4 del design). El
+// filtro de pantalla no reemplaza el 400 del servidor, pero sin él
+// "Cortesía de la casa" aparecería en este selector.
+describe('mermas — filtro de motivos', () => {
+  beforeEach(() => {
+    mermasEnviadas = []
+    motivosUrlSolicitada = ''
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('la URL que carga los motivos incluye tipo=merma y soloActivas=true', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+
+    expect(motivosUrlSolicitada).toContain('tipo=merma')
+    expect(motivosUrlSolicitada).toContain('soloActivas=true')
+
     wrapper.unmount()
   })
 })

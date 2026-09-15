@@ -7,13 +7,29 @@ import type { TableColumn } from '@nuxt/ui'
 // cargaba) y el 403 llegaba recién al guardar.
 definePageMeta({ middleware: 'admin' })
 
+type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado'
+
 interface MotivoBaja {
   id: string
   nombre: string
   activo: boolean
   esFijo: boolean
+  tipo: TipoMotivoBaja
+  enUso: boolean
   eliminadoEl?: string | null
   eliminadoPorNombre?: string | null
+}
+
+// Solo esta pantalla las usa hoy (`CLAUDE.md`, Frontend): si otra pantalla
+// necesita las mismas opciones, se extraen a un composable recién ahí.
+const TIPO_OPTS: { label: string, value: TipoMotivoBaja }[] = [
+  { label: 'Merma', value: 'merma' },
+  { label: 'Cortesía', value: 'cortesia' },
+  { label: 'No se llegó a hacer', value: 'no_elaborado' },
+]
+
+function tipoLabel(tipo: TipoMotivoBaja): string {
+  return TIPO_OPTS.find(o => o.value === tipo)?.label ?? tipo
 }
 
 const config = useRuntimeConfig()
@@ -43,6 +59,7 @@ const toggling = reactive(new Set<string>())
 const emptyForm = () => ({
   nombre: '',
   activo: true,
+  tipo: 'merma' as TipoMotivoBaja,
 })
 const form = ref(emptyForm())
 
@@ -57,6 +74,14 @@ const submitLabel = computed(() =>
 const editingEsFijo = computed(() => {
   if (!editingId.value) return false
   return motivos.value.find(c => c.id === editingId.value)?.esFijo ?? false
+})
+
+// Cambiar el tipo de un motivo ya usado reescribiría la historia (mismo
+// motivo que bloquea el borrado): el backend lo rechaza con 400, esto es
+// solo la UX que anticipa esa regla.
+const editingEnUso = computed(() => {
+  if (!editingId.value) return false
+  return motivos.value.find(c => c.id === editingId.value)?.enUso ?? false
 })
 
 function resetDrawer() {
@@ -125,6 +150,7 @@ function abrirEditar(motivo: MotivoBaja) {
   form.value = {
     nombre: motivo.nombre,
     activo: motivo.activo,
+    tipo: motivo.tipo,
   }
   drawerOpen.value = true
 }
@@ -135,6 +161,7 @@ async function guardar() {
     const body = {
       nombre: form.value.nombre.trim(),
       activo: form.value.activo,
+      tipo: form.value.tipo,
     }
     const isNew = !editingId.value
     const saved = isNew
@@ -283,6 +310,7 @@ onMounted(cargar)
 
 const columns: TableColumn<MotivoBaja>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
+  { id: 'tipo', header: 'Tipo' },
   { id: 'activo', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -334,6 +362,15 @@ const columns: TableColumn<MotivoBaja>[] = [
             {{ formatearBorradoPor(row.original) }}
           </p>
         </div>
+      </template>
+
+      <template #tipo-cell="{ row }">
+        <UBadge
+          :label="tipoLabel(row.original.tipo)"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        />
       </template>
 
       <template #activo-cell="{ row }">
@@ -421,6 +458,19 @@ const columns: TableColumn<MotivoBaja>[] = [
               placeholder="Ej: Rotura de envase"
               autofocus
               :disabled="editingEsFijo"
+            />
+          </UFormField>
+          <UFormField
+            label="Tipo"
+            required
+            :help="editingEnUso
+              ? 'Ya se usó: cambiarle el tipo reescribiría lo que pasó con el stock.'
+              : undefined"
+          >
+            <USelect
+              v-model="form.tipo"
+              :items="TIPO_OPTS"
+              :disabled="editingEsFijo || editingEnUso"
             />
           </UFormField>
           <UFormField label="Activa">

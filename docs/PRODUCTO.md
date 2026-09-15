@@ -394,6 +394,14 @@ principio que [ADR-010](./adr/010-preparacion-sii-datos-fiscales.md) aplica al h
 fiscal: el número vale lo que valía cuando el hecho ocurrió, no lo que se sabe después.
 Detalle: [`mermas-valorizadas.md`](./features/mermas-valorizadas.md).
 
+**El catálogo de motivos de baja tiene tipo** (`merma` | `cortesia` | `no_elaborado`), y el
+tipo decide si la baja descuenta stock — no hay un flag aparte, porque eso permitiría una
+merma que no descuenta. Mermas solo acepta motivos de tipo `merma`: el selector de la
+pantalla ya filtra, y `POST /api/mermas` rechaza con 400 cualquier otro tipo aunque alguien
+lo mande igual. El tipo de un motivo propio se puede cambiar solo mientras no se usó —
+cambiarlo después reescribiría la historia del stock. Detalle:
+[`mermas-valorizadas.md`](./features/mermas-valorizadas.md).
+
 **Lo que una mesa pide queda apartado desde que lo pide** (decisión del owner, 2026-09-01;
 construido ese mismo día). Hasta entonces pedir en una mesa **no miraba el stock**: dos
 mesas podían pedir la misma última unidad y el choque estallaba **al cobrar**, con la comida

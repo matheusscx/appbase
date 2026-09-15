@@ -29,6 +29,8 @@ interface MotivoBajaFake {
   nombre: string
   activo: boolean
   esFijo: boolean
+  tipo: 'merma' | 'cortesia' | 'no_elaborado'
+  enUso: boolean
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
 }
@@ -39,6 +41,8 @@ function motivo(over: Partial<MotivoBajaFake> = {}): MotivoBajaFake {
     nombre: 'Rotura de envase',
     activo: true,
     esFijo: false,
+    tipo: 'merma',
+    enUso: false,
     eliminadoEl: null,
     eliminadoPorNombre: null,
     ...over,
@@ -88,9 +92,13 @@ let overrideSinEliminados: Promise<unknown[]> | null = null
 let postsRestaurar: { id: string, nombre?: string }[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
+/** Cada `POST /motivos-baja` (crear) recibido, con el body completo. */
+let postsCrear: Record<string, unknown>[] = []
+/** Cada `PATCH /motivos-baja/:id` (editar/toggle) recibido. */
+let patchesEditar: { id: string, body: Record<string, unknown> }[] = []
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string, body?: { nombre?: string } }) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string' || !url.includes('/motivos-baja')) {
       return Promise.resolve([])
     }
@@ -106,7 +114,7 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (method === 'POST' && url.endsWith('/restaurar')) {
       const id = url.split('/').slice(-2)[0] ?? ''
-      const nombreNuevo = opts?.body?.nombre
+      const nombreNuevo = (opts?.body as { nombre?: string } | undefined)?.nombre
       postsRestaurar.push({ id, nombre: nombreNuevo })
       const c = motivosBackend.find(x => x.id === id)
       // El backend real da 404 si la fila ya no está en la papelera: un
@@ -135,6 +143,30 @@ mockNuxtImport('useApiFetch', () => {
       if (restaurarRetenido) return restaurarRetenido
       return Promise.resolve(undefined)
     }
+    if (method === 'POST' && url.endsWith('/motivos-baja')) {
+      const body = opts?.body ?? {}
+      postsCrear.push({ ...body })
+      const nuevo: MotivoBajaFake = {
+        id: 'motivo-nuevo',
+        nombre: String(body.nombre ?? ''),
+        activo: (body.activo as boolean | undefined) ?? true,
+        esFijo: false,
+        tipo: (body.tipo as MotivoBajaFake['tipo'] | undefined) ?? 'merma',
+        enUso: false,
+        eliminadoEl: null,
+        eliminadoPorNombre: null,
+      }
+      motivosBackend.push(nuevo)
+      return Promise.resolve({ ...nuevo })
+    }
+    if (method === 'PATCH') {
+      const id = url.split('/').pop() ?? ''
+      const body = opts?.body ?? {}
+      patchesEditar.push({ id, body: { ...body } })
+      const c = motivosBackend.find(x => x.id === id)
+      if (c) Object.assign(c, body)
+      return Promise.resolve({ ...c })
+    }
     const incluirEliminados = url.includes('incluirEliminados=true')
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
@@ -147,6 +179,41 @@ mockNuxtImport('useApiFetch', () => {
 
 async function montar() {
   const wrapper = await mountSuspended(MotivosBaja)
+  await new Promise(r => setTimeout(r, 0))
+  return wrapper
+}
+
+/**
+ * Variante que stubea `AppDrawer`, solo para el test que CIERRA el drawer con
+ * `guardar()` (`drawerOpen = false` tras el POST). Sin esto, `vitest run`
+ * queda en exit 1 aunque el test pase: la transición de salida de
+ * `usePresence` (reka-ui) lee `style.display` de un nodo ya desprendido y
+ * tira un *unhandled rejection* que vitest cuenta aparte, bajo `Errors`
+ * (medido en `configuracion/garzones` y `configuracion/items`,
+ * `docs/patterns/frontend.md` §15, "Spec de PÁGINA que CIERRA un drawer").
+ * `attachTo: document.body` hace falta porque el botón submit del drawer
+ * usa `form="motivo-baja-form"` — esa asociación la resuelve el documento, y
+ * el contenido stubeado no teletransporta solo.
+ */
+async function montarParaCerrarDrawer() {
+  const wrapper = await mountSuspended(MotivosBaja, {
+    attachTo: document.body,
+    global: {
+      stubs: {
+        AppDrawer: {
+          name: 'AppDrawer',
+          props: ['open'],
+          template: `
+            <div v-if="open" role="dialog">
+              <slot name="header" />
+              <slot name="body" />
+              <slot name="actions" />
+            </div>
+          `,
+        },
+      },
+    },
+  })
   await new Promise(r => setTimeout(r, 0))
   return wrapper
 }
@@ -223,6 +290,8 @@ function reset() {
   overrideSinEliminados = null
   postsRestaurar = []
   restaurarRetenido = null
+  postsCrear = []
+  patchesEditar = []
 }
 
 describe('configuracion/motivos-baja — papelera: eliminar respeta el toggle', () => {
@@ -496,6 +565,114 @@ describe('configuracion/motivos-baja — papelera: la carrera de `cargar()` bajo
     // después y en teoría pisara el estado.
     expect(wrapper.text()).toContain('Rotura de envase')
     expect(wrapper.text()).not.toContain('Motivo viejo')
+
+    wrapper.unmount()
+  })
+})
+
+// Task 4: el tipo llega del backend (Task 2-3) y esta pantalla lo muestra y
+// lo edita. `enUso` deshabilita el cambio de tipo — el 400 del servidor
+// sigue siendo la regla, esto es solo UX.
+describe('configuracion/motivos-baja — tipo', () => {
+  beforeEach(() => {
+    motivosBackend = [motivo()]
+    reset()
+  })
+
+  it('la tabla muestra la columna Tipo, con "Cortesía" para un motivo de tipo cortesia', async () => {
+    motivosBackend = [motivo({ tipo: 'cortesia' })]
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Tipo')
+    expect(wrapper.text()).toContain('Cortesía')
+
+    wrapper.unmount()
+  })
+
+  it('al editar un motivo en uso, el selector de tipo está deshabilitado con la ayuda que explica por qué', async () => {
+    motivosBackend = [motivo({ enUso: true })]
+    const wrapper = await montar()
+
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const dialog = dialogo()
+    expect(dialog, 'drawer de edición abierto').toBeTruthy()
+    expect(dialog!.textContent).toContain(
+      'Ya se usó: cambiarle el tipo reescribiría lo que pasó con el stock.',
+    )
+
+    // El selector de tipo muestra la opción actual ("Merma") como texto de su
+    // trigger; deshabilitado por `enUso`, no por `esFijo` (el motivo no es fijo).
+    const selector = [...dialog!.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('Merma'))
+    expect(selector, 'selector de tipo con "Merma" seleccionado').toBeTruthy()
+    expect(
+      selector!.hasAttribute('disabled') || selector!.getAttribute('aria-disabled') === 'true',
+    ).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('al crear, el body del POST lleva tipo con el default merma', async () => {
+    motivosBackend = []
+    const wrapper = await montarParaCerrarDrawer()
+
+    const nuevoBtn = wrapper.findAll('button').find(b => b.text().trim() === 'Nuevo motivo')
+    expect(nuevoBtn, 'botón "Nuevo motivo"').toBeTruthy()
+    await nuevoBtn!.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const dialog = dialogo()
+    const nombreInput = dialog!.querySelector<HTMLInputElement>(
+      'input[placeholder="Ej: Rotura de envase"]',
+    )
+    expect(nombreInput, 'input de nombre en el drawer').toBeTruthy()
+    nombreInput!.value = 'Se quemó'
+    nombreInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 10))
+
+    const crearBtn = [...dialog!.querySelectorAll('button')]
+      .find(b => b.textContent?.trim() === 'Crear')
+    expect(crearBtn, 'botón "Crear" del drawer').toBeTruthy()
+    crearBtn!.click()
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(postsCrear).toHaveLength(1)
+    expect(postsCrear[0]!.tipo).toBe('merma')
+
+    wrapper.unmount()
+  })
+
+  // Fix round 1: sin este test, borrar `tipo: form.value.tipo` del body de
+  // `guardar()` deja los 18 tests anteriores en verde igual — ninguno cubría
+  // que EDITAR el tipo (no solo el default de crear) viaje al backend. Elegir
+  // un tipo DISTINTO del que la fila ya tenía ejercita también el binding del
+  // `USelect` (`v-model="form.tipo"`), no solo que el campo exista.
+  it('al editar un motivo sin uso, cambiar el tipo viaja en el body del PATCH', async () => {
+    motivosBackend = [motivo({ tipo: 'merma', enUso: false })]
+    const wrapper = await montarParaCerrarDrawer()
+
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const dialog = dialogo()
+    expect(dialog, 'drawer de edición abierto').toBeTruthy()
+
+    const select = wrapper.findComponent({ name: 'USelect' })
+    expect(select.exists(), 'USelect de tipo').toBe(true)
+    select.vm.$emit('update:modelValue', 'cortesia')
+    await new Promise(r => setTimeout(r, 20))
+
+    const guardarBtn = [...dialog!.querySelectorAll('button')]
+      .find(b => b.textContent?.trim() === 'Guardar')
+    expect(guardarBtn, 'botón "Guardar" del drawer').toBeTruthy()
+    guardarBtn!.click()
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(patchesEditar).toHaveLength(1)
+    expect(patchesEditar[0]!.id).toBe(MOTIVO_ID)
+    expect(patchesEditar[0]!.body.tipo).toBe('cortesia')
 
     wrapper.unmount()
   })

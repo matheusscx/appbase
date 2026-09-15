@@ -142,7 +142,7 @@ async function cargarCatalogos() {
     const [prodRes, ingRes, motivosRes] = await Promise.all([
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
-      useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-baja?soloActivas=true`),
+      useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-baja?soloActivas=true&tipo=merma`),
       cargarUbicaciones(),
     ])
     productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>

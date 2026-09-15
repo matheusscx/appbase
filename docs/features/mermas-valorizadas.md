@@ -186,8 +186,12 @@ la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
 
 ## Frontend
 
-- `/configuracion/motivos-baja` — CRUD con badge **Fija** en motivos `es_fijo`.
-- `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y motivo; **sin campo de costo**). Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`).
+- `/configuracion/motivos-baja` — CRUD con badge **Fija** en motivos `es_fijo`. Columna **Tipo**
+  (badge con el label de los tres valores de `motivo_baja.tipo`, ver *Modelo de datos* arriba)
+  y campo Tipo en el formulario (`USelect` con las tres opciones); en un motivo `enUso` el
+  campo se muestra deshabilitado, con la ayuda que explica por qué — el 400 del servidor
+  sigue siendo la regla, esto es solo UX.
+- `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y motivo; **sin campo de costo**). El selector de motivo pide `GET /api/motivos-baja?soloActivas=true&tipo=merma`: *Cortesía de la casa* y *No se llegó a hacer* no aparecen ahí, aunque el filtro de pantalla no reemplaza el 400 de `POST /api/mermas`. Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`).
 - Kardex / historial de movimientos: `Merma · {motivoBajaNombre}` y costo perdido formateado (`formatMonto`), o `—` cuando es `null`.
 - Modal de ajuste de stock en items: opción Merma eliminada.
 - `configuracion/items.vue` — mismo cartel no bloqueante en el drawer de entrada por compra cuando el producto no tiene costo; badge **Sin costo** y checkbox **Solo sin costo** en el listado (filtro `sinCosto`, ver [`inventario-kardex.md`](./inventario-kardex.md)).
