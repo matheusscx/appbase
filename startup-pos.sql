@@ -44,6 +44,15 @@ CREATE TYPE "tipo_movimiento" AS ENUM (
   'salida'
 );
 
+-- Qué es un motivo de baja. Decide si la baja descuenta stock: 'merma' y
+-- 'cortesia' descuentan; 'no_elaborado' no. No hay un flag aparte a propósito:
+-- permitiría una merma que no descuenta.
+CREATE TYPE "tipo_motivo_baja" AS ENUM (
+  'merma',
+  'cortesia',
+  'no_elaborado'
+);
+
 -- =============================================================
 -- 1. CATÁLOGOS BASE GLOBALES  (sembrados por seeder, sin tenant)
 -- =============================================================
@@ -883,6 +892,7 @@ CREATE TABLE "motivo_baja" (
   "nombre"         TEXT NOT NULL,
   "activo"         BOOLEAN NOT NULL DEFAULT true,
   "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
+  "tipo"           tipo_motivo_baja NOT NULL,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
