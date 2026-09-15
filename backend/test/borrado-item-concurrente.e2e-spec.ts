@@ -54,6 +54,16 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *   4. línea de cuenta         → `agregarLinea`, el ítem de la línea
  *   5. extra pedido en línea   → `agregarLinea`, el ingrediente del extra
  *
+ * Y la misma carrera cuando la referencia no se crea sino que REVIVE: restaurar
+ * un compuesto de la papelera toma `FOR SHARE` sobre lo que lo compone
+ * (`assertComposicionRestaurable`, `assertOpcionesRestaurables`) antes de
+ * revivirlo, contra el `FOR UPDATE` del borrado:
+ *
+ *   6. restaurar una receta    → contra borrar su ingrediente
+ *   7. restaurar una receta    → contra borrar su grupo: acá el par es el
+ *                                `FOR UPDATE` de `grupos-modificadores.remove()`
+ *   8. restaurar un grupo      → contra borrar el ítem de una opción
+ *
  * CÓMO: el interleaving es DETERMINISTA, misma técnica que
  * `traslado-borrado-ubicacion-concurrente.e2e-spec.ts`. Una compuerta (un
  * `QueryRunner` propio, fuera de Nest) retiene con `FOR UPDATE` una fila que
@@ -67,6 +77,11 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * escritura del borrado que se puede retener está después de su chequeo: con
  * el arreglo, la línea se encola detrás del `FOR UPDATE` y cuando entra el
  * extra ya no existe.
+ *
+ * En 6-8 va primero el restaurar, frenado en su propia escritura (la fila del
+ * compuesto que revive, que la compuerta retiene), y el borrado segundo: con el
+ * arreglo, el borrado se encola detrás del `FOR SHARE` y cuando entra ve el
+ * compuesto ya vivo.
  *
  * Cualquiera de los dos órdenes caza que falte cualquiera de los dos lados del
  * par: sin el `FOR UPDATE` el borrado no espera a nadie antes de su chequeo, y
@@ -82,6 +97,8 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *
  * NO PRUEBA:
  * - Componente de combo: pasa por el mismo `filasValidacionPorIds` que 1 y 2.
+ *   Al restaurar, el componente y el extra van en la misma lectura con lock que
+ *   el ingrediente de 6.
  * - El alta (`POST /items`, `POST /grupos-modificadores`): toma el lock por el
  *   mismo método que la edición.
  * - Editar una receta o un grupo mientras se pide una línea (sacar un extra que
@@ -483,5 +500,111 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
       [cuentaId, recetaId],
     );
     expect(Number(lineas[0].count)).toBe(0);
+  }, 60000);
+
+  it('6. restaurar una receta: el restaurar gana, y el borrado de su ingrediente espera y rebota con 400', async () => {
+    const base = await crearIngrediente();
+    const recetaId = await crearItem({
+      nombre: nombreUnico('Receta'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [ingrediente(base)],
+    });
+    expect((await llamar('DELETE', `/items/${recetaId}`)()).status).toBe(200);
+
+    // El restaurar toma lo que compone la receta y DESPUÉS revive la fila de
+    // la receta: la compuerta retiene esa.
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
+        [recetaId],
+      ],
+      primero: llamar('POST', `/items/${recetaId}/restaurar`),
+      segundo: llamar('DELETE', `/items/${base}`),
+    });
+
+    expect({
+      esperando: r.esperando,
+      restaurar: r.primero.status,
+      borrado: r.segundo.status,
+    }).toEqual({ esperando: 2, restaurar: 201, borrado: 400 });
+    expect(JSON.stringify(r.segundo.body)).toContain('es ingrediente de');
+    expect(await itemBorrado(base)).toBe(false);
+  }, 60000);
+
+  it('7. restaurar una receta: el restaurar gana, y el borrado de su grupo espera y rebota con 400', async () => {
+    const opcion = await crearProducto();
+    const { grupoModificadorId } = await post<{ grupoModificadorId: string }>(
+      '/api/grupos-modificadores',
+      {
+        nombre: nombreUnico('Grupo'),
+        opciones: [{ itemId: opcion, cantidad: '1', precioExtra: '0' }],
+      },
+    );
+    const recetaId = await crearItem({
+      nombre: nombreUnico('Receta'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [ingrediente(await crearIngrediente())],
+      gruposModificadores: [{ grupoModificadorId, min: 0, max: 1 }],
+    });
+    expect((await llamar('DELETE', `/items/${recetaId}`)()).status).toBe(200);
+
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
+        [recetaId],
+      ],
+      primero: llamar('POST', `/items/${recetaId}/restaurar`),
+      segundo: llamar('DELETE', `/grupos-modificadores/${grupoModificadorId}`),
+    });
+
+    expect({
+      esperando: r.esperando,
+      restaurar: r.primero.status,
+      borrado: r.segundo.status,
+    }).toEqual({ esperando: 2, restaurar: 201, borrado: 400 });
+    expect(JSON.stringify(r.segundo.body)).toContain('está asociado');
+    const grupo: { eliminado_el: string | null }[] = await ds.query(
+      `SELECT eliminado_el FROM grupos_modificadores WHERE grupo_modificador_id = $1`,
+      [grupoModificadorId],
+    );
+    expect(grupo[0].eliminado_el).toBeNull();
+  }, 60000);
+
+  it('8. restaurar un grupo: el restaurar gana, y el borrado del ítem de una opción espera y rebota con 400', async () => {
+    const opcion = await crearProducto();
+    const { grupoModificadorId } = await post<{ grupoModificadorId: string }>(
+      '/api/grupos-modificadores',
+      {
+        nombre: nombreUnico('Grupo'),
+        opciones: [{ itemId: opcion, cantidad: '1', precioExtra: '0' }],
+      },
+    );
+    expect(
+      (await llamar('DELETE', `/grupos-modificadores/${grupoModificadorId}`)())
+        .status,
+    ).toBe(204);
+
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM grupos_modificadores
+          WHERE grupo_modificador_id = $1 FOR UPDATE`,
+        [grupoModificadorId],
+      ],
+      primero: llamar(
+        'POST',
+        `/grupos-modificadores/${grupoModificadorId}/restaurar`,
+      ),
+      segundo: llamar('DELETE', `/items/${opcion}`),
+    });
+
+    expect({
+      esperando: r.esperando,
+      restaurar: r.primero.status,
+      borrado: r.segundo.status,
+    }).toEqual({ esperando: 2, restaurar: 201, borrado: 400 });
+    expect(JSON.stringify(r.segundo.body)).toContain('es opción de');
+    expect(await itemBorrado(opcion)).toBe(false);
   }, 60000);
 });

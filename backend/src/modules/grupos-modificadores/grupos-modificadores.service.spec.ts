@@ -530,6 +530,21 @@ describe('GruposModificadoresService', () => {
       );
     });
 
+    it('remove() toma el grupo FOR UPDATE antes de mirar el uso', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // SELECT grupo vivo
+        .mockResolvedValueOnce([]) // sin items asociados
+        .mockResolvedValueOnce([]) // soft-delete opciones
+        .mockResolvedValueOnce([]); // soft-delete grupo
+      await service.remove(TENANT_ID, USUARIO_ID, 'G1');
+
+      // El par del `FOR SHARE` de `ItemsService.restaurar` sobre los grupos del
+      // ítem: sin él, el chequeo de uso no espera a un restaurar en vuelo.
+      expect(managerMock.query.mock.calls[0][0] as string).toMatch(
+        /FROM grupos_modificadores[\s\S]*FOR UPDATE/,
+      );
+    });
+
     it('remove() registra quién borró en la misma sentencia', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // SELECT grupo vivo
@@ -551,8 +566,10 @@ describe('GruposModificadoresService', () => {
 
   describe('restaurar', () => {
     it('restaurar() revive el grupo y devuelve el shape completo (findOne)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // ítems de las opciones, ninguno borrado
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]); // WITH restaurado ... RETURNING
       dataSourceMock.query
-        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // WITH restaurado ... RETURNING
         .mockResolvedValueOnce([
           { grupo_modificador_id: GRUPO_ID, nombre: 'Bebida' },
         ]) // cargarGrupo: SELECT grupo
@@ -561,8 +578,8 @@ describe('GruposModificadoresService', () => {
 
       const res = await service.restaurar(TENANT_ID, GRUPO_ID);
 
-      expect(dataSourceMock.query).toHaveBeenNthCalledWith(
-        1,
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        2,
         expect.stringMatching(/eliminado_el\s*=\s*NULL/),
         [GRUPO_ID, TENANT_ID, null],
       );
@@ -573,7 +590,7 @@ describe('GruposModificadoresService', () => {
     });
 
     it('restaurar() algo que no está en la papelera es 404', async () => {
-      dataSourceMock.query.mockResolvedValueOnce([]);
+      managerMock.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
       await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
         NotFoundException,
@@ -584,9 +601,11 @@ describe('GruposModificadoresService', () => {
       // El índice único es parcial (WHERE eliminado_el IS NULL): mientras el
       // grupo estaba borrado nadie chocaba con él, pero al revivirlo vuelve
       // a competir por el nombre.
-      dataSourceMock.query.mockRejectedValueOnce(
-        Object.assign(new Error('duplicate key'), { code: '23505' }),
-      );
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(
+          Object.assign(new Error('duplicate key'), { code: '23505' }),
+        );
       // El `catch` pregunta dos cosas más: el nombre guardado del grupo (la
       // CTE no lo lee antes de escribir) y los nombres vivos que compiten,
       // para calcular la sugerencia.
@@ -599,9 +618,11 @@ describe('GruposModificadoresService', () => {
     });
 
     it('el 400 de colisión de NOMBRE trae un nombre libre ya calculado', async () => {
-      dataSourceMock.query.mockRejectedValueOnce(
-        Object.assign(new Error('duplicate key'), { code: '23505' }),
-      );
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(
+          Object.assign(new Error('duplicate key'), { code: '23505' }),
+        );
       dataSourceMock.query.mockResolvedValueOnce([{ nombre: 'Bebida' }]);
       dataSourceMock.query.mockResolvedValueOnce([
         { nombre: 'Bebida' },
@@ -625,7 +646,7 @@ describe('GruposModificadoresService', () => {
     // que ese camino NO debe ofrecer una sugerencia — sería mandar al usuario
     // a arreglar algo que no es la causa. Mismo criterio que `garzones`.
     it('la colisión de OPCIÓN no ofrece sugerencia de nombre', async () => {
-      dataSourceMock.query.mockRejectedValueOnce(
+      managerMock.query.mockResolvedValueOnce([]).mockRejectedValueOnce(
         Object.assign(new Error('duplicate key'), {
           code: '23505',
           constraint: 'uq_grupo_opcion_item_vivo',
@@ -645,9 +666,11 @@ describe('GruposModificadoresService', () => {
     });
 
     it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
-      dataSourceMock.query.mockRejectedValueOnce(
-        Object.assign(new Error('connection lost'), { code: '57P01' }),
-      );
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(
+          Object.assign(new Error('connection lost'), { code: '57P01' }),
+        );
 
       await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
         'connection lost',
@@ -662,7 +685,7 @@ describe('GruposModificadoresService', () => {
     // opciones. Se distingue por `e.constraint`, no por asumir que todo
     // 23505 es la colisión de nombre.
     it('restaurar() con 23505 de uq_grupo_opcion_item_vivo da un mensaje distinto al de colisión de nombre', async () => {
-      dataSourceMock.query.mockRejectedValueOnce(
+      managerMock.query.mockResolvedValueOnce([]).mockRejectedValueOnce(
         Object.assign(new Error('duplicate key'), {
           code: '23505',
           constraint: 'uq_grupo_opcion_item_vivo',
@@ -679,6 +702,26 @@ describe('GruposModificadoresService', () => {
       expect(error).toBeInstanceOf(BadRequestException);
       expect((error as Error).message).not.toContain('ese nombre');
       expect((error as Error).message).toContain('opción viva');
+    });
+
+    it('restaurar() con el ítem de una opción en la papelera → 400 con su nombre, y no revive nada', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { nombre: 'Jugo', borrado: true },
+        { nombre: 'Agua', borrado: false },
+      ]);
+
+      await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
+        'No se puede restaurar: primero restaurá de la papelera Jugo',
+      );
+      // La CTE no corrió: solo la lectura de las opciones.
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+      const sql = managerMock.query.mock.calls[0][0] as string;
+      expect(sql).toMatch(/ORDER BY i\.item_id\s+FOR SHARE/);
+      // Solo las opciones que este borrado se llevó: una sacada antes del
+      // grupo por otro motivo no revive y no tiene que frenar.
+      expect(sql).toMatch(
+        /o\.eliminado_el\s*=\s*\(SELECT g\.eliminado_el FROM grupos_modificadores g/,
+      );
     });
   });
 

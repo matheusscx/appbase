@@ -3043,12 +3043,19 @@ describe('ItemsService', () => {
   // ── restaurar ──────────────────────────────────────────────────────────────
 
   describe('restaurar', () => {
-    // Una sola sentencia (CTEs encadenadas) por `dataSource.query`, no una
-    // transacción con `manager.query`: la primera versión pasaba el
-    // timestamp de `eliminado_el` por JS entre dos queries, y el e2e real
-    // (Postgres de verdad, no mocks) mostró que eso pierde precisión — ver
-    // el comentario en `restaurar()`. Por eso estos tests miran UNA sola
-    // llamada a `dataSource.query` para la escritura.
+    // La escritura es UNA sola sentencia (CTEs encadenadas): la primera
+    // versión pasaba el timestamp de `eliminado_el` por JS entre dos queries,
+    // y el e2e real (Postgres de verdad, no mocks) mostró que eso pierde
+    // precisión — ver el comentario en `restaurar()`. Va en una transacción
+    // detrás de las dos lecturas con lock de `assertComposicionRestaurable`,
+    // así que es la TERCERA llamada a `manager.query`.
+    /** Las dos lecturas con lock de `assertComposicionRestaurable`, sin nada borrado. */
+    function mockComposicionVacia() {
+      managerMock.query
+        .mockResolvedValueOnce([]) // ingredientes, extras y componentes
+        .mockResolvedValueOnce([]); // grupos asociados
+    }
+
     function mockFindOneServicio() {
       dataSource.query
         .mockResolvedValueOnce([
@@ -3080,7 +3087,8 @@ describe('ItemsService', () => {
     }
 
     it('deja el item inactivo: la sentencia no toca `activo`', async () => {
-      dataSource.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]); // CTE de restaurar
+      mockComposicionVacia();
+      managerMock.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]); // CTE de restaurar
       mockFindOneServicio();
 
       await service.restaurar(TENANT, ITEM_ID);
@@ -3095,17 +3103,18 @@ describe('ItemsService', () => {
       // sin importar lo que haga el código real). Que el ítem *de verdad*
       // vuelva inactivo lo prueba el e2e (`papelera.e2e-spec.ts`, contra
       // Postgres real, sin mocks).
-      const sql = dataSource.query.mock.calls[0][0] as string;
+      const sql = managerMock.query.mock.calls[2][0] as string;
       expect(sql).not.toMatch(/activo/i);
     });
 
     it('revive los extras que ESTE mismo borrado se llevó, acotando por el timestamp dentro del mismo SQL', async () => {
-      dataSource.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
+      mockComposicionVacia();
+      managerMock.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
       mockFindOneServicio();
 
       await service.restaurar(TENANT, ITEM_ID);
 
-      const sql = dataSource.query.mock.calls[0][0] as string;
+      const sql = managerMock.query.mock.calls[2][0] as string;
       expect(sql).toContain('receta_extras_permitidos');
       expect(sql).toMatch(/eliminado_el\s*=\s*NULL/);
       // Acotado al timestamp que le puso `remove()`, leído por una subquery
@@ -3132,24 +3141,61 @@ describe('ItemsService', () => {
     });
 
     it('revive en las dos direcciones: como ingrediente y como receta', async () => {
-      dataSource.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
+      mockComposicionVacia();
+      managerMock.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
       mockFindOneServicio();
 
       await service.restaurar(TENANT, ITEM_ID);
 
-      const sql = dataSource.query.mock.calls[0][0] as string;
+      const sql = managerMock.query.mock.calls[2][0] as string;
       expect(sql).toContain('ingrediente_item_id = $1');
       expect(sql).toContain('receta_item_id = $1');
     });
 
     it('item que no está en la papelera (no existe o sigue vivo) → 404, sin llamar a findOne', async () => {
-      dataSource.query.mockResolvedValueOnce([]); // CTE sin match
+      mockComposicionVacia();
+      managerMock.query.mockResolvedValueOnce([]); // CTE sin match
 
       await expect(service.restaurar(TENANT, ITEM_ID)).rejects.toThrow(
         NotFoundException,
       );
-      // `findOne` no corrió: una sola llamada, la de la sentencia de arriba.
-      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      // `findOne` no corrió.
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('con algo de su composición en la papelera → 400 con los nombres, y no revive nada', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { nombre: 'Palta', borrado: true },
+          { nombre: 'Pan', borrado: false },
+        ])
+        .mockResolvedValueOnce([{ nombre: 'Bebidas', borrado: true }]);
+
+      await expect(service.restaurar(TENANT, ITEM_ID)).rejects.toThrow(
+        'No se puede restaurar: primero restaurá de la papelera Palta, el grupo Bebidas',
+      );
+      // La CTE no corrió: solo las dos lecturas.
+      expect(managerMock.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('lee la composición con FOR SHARE ordenado, y los extras por el mismo timestamp que revive la CTE', async () => {
+      mockComposicionVacia();
+      managerMock.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
+      mockFindOneServicio();
+
+      await service.restaurar(TENANT, ITEM_ID);
+
+      const partes = managerMock.query.mock.calls[0][0] as string;
+      const grupos = managerMock.query.mock.calls[1][0] as string;
+      // El orden de adquisición lo decide el `ORDER BY` del `FOR SHARE`
+      // (docs/patterns/backend.md §15); ningún test de conducta caza que falte.
+      expect(partes).toMatch(/ORDER BY i\.item_id\s+FOR SHARE/);
+      expect(grupos).toMatch(/ORDER BY g\.grupo_modificador_id\s+FOR SHARE/);
+      // Un extra que se sacó de la receta antes, por otro motivo, no revive y
+      // no tiene que frenar: la condición es la misma que la de la CTE.
+      expect(partes).toMatch(
+        /re\.eliminado_el\s*=\s*\(SELECT x\.eliminado_el FROM items x/,
+      );
     });
   });
 

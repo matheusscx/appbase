@@ -2739,9 +2739,11 @@ export class ItemsService {
     // restaura lo que borró una persona. Un ítem borrado por el sistema
     // (`eliminado_por IS NULL`) da el mismo 404 "no está en la papelera" que
     // uno que nunca existió, sin rama especial (docs/features/papelera.md).
-    const rows = unwrap<{ item_id: string }>(
-      await this.db.query(
-        `WITH restaurado AS (
+    const rows = await this.db.transaccion(async (manager) => {
+      await this.assertComposicionRestaurable(manager, tenantId, itemId);
+      return unwrap<{ item_id: string }>(
+        await manager.query(
+          `WITH restaurado AS (
            UPDATE items
               SET eliminado_el = NULL, eliminado_por = NULL,
                   actualizado_el = NOW()
@@ -2760,17 +2762,110 @@ export class ItemsService {
            RETURNING 1
          )
          SELECT item_id FROM restaurado`,
-        [itemId, tenantId],
-      ),
-    );
+          [itemId, tenantId],
+        ),
+      );
+    });
     if (!rows.length) {
       throw new NotFoundException(`Item ${itemId} no está en la papelera`);
     }
 
-    // Una sola sentencia ya commiteada (sin transacción explícita) antes de
-    // llegar acá: `findOne` ve el estado final sin ventanas de visibilidad
-    // entre conexiones.
+    // La transacción ya commiteó antes de llegar acá: `findOne` ve el estado
+    // final sin ventanas de visibilidad entre conexiones.
     return this.findOne(tenantId, itemId);
+  }
+
+  /**
+   * Restaurar no revive una receta o un combo a medias (owner, 2026-09-14): si
+   * algo de lo que lo compone está en la papelera, 400 con los nombres, y el
+   * usuario lo restaura primero.
+   *
+   * Por qué hace falta: mientras el ítem está en la papelera, `remove()` deja
+   * borrar lo que lo compone —`obtenerUsoItem` solo mira compuestos vivos— y
+   * `grupos-modificadores.remove()` deja borrar su grupo. Medido el 2026-09-14
+   * restaurando sin este chequeo: la receta vuelve con el ingrediente, el extra
+   * o el grupo borrados escondidos por las lecturas, se activa, **se vende sin
+   * descontar ese stock y sin pedir la opción del grupo obligatorio**; el combo
+   * descuenta solo los componentes vivos. Y restaurar después lo borrado lo
+   * vuelve a mostrar, porque las filas nunca dejaron de apuntarle.
+   *
+   * Lo que cuenta es lo que queda vivo DESPUÉS de restaurar: las filas vivas de
+   * `receta_ingredientes`, `combo_componentes` e `item_grupos_modificadores`
+   * (`remove()` no las toca), y de `receta_extras_permitidos` también las que
+   * este mismo borrado se llevó —las que la CTE de `restaurar()` revive, por el
+   * mismo timestamp exacto—. Un extra que se sacó antes de la receta por otro
+   * motivo tiene otro `eliminado_el`, no revive y no frena.
+   *
+   * ⚠️ Las dos lecturas NO filtran `eliminado_el` de `items` ni de
+   * `grupos_modificadores`, a propósito: lo que buscan es justamente la
+   * referencia borrada, y el lock tiene que caer también sobre las vivas.
+   *
+   * `FOR SHARE` sobre lo referenciado: es el par del `FOR UPDATE` con el que
+   * `remove()` (acá y en grupos) toma la fila antes de mirar el uso. Si el
+   * borrado ya está en vuelo, este lock lo espera y ve la fila ya borrada; si
+   * llega después, espera a este commit y encuentra el compuesto vivo.
+   * `ORDER BY` por id dentro de cada tabla (docs/patterns/backend.md §15). El
+   * `UPDATE` que revive el ítem llega después y fuera de ese orden; que no
+   * cierre un ciclo con otro camino no está medido.
+   *
+   * El `EXISTS` sobre el propio ítem hace que uno que no está en la papelera no
+   * lea nada y siga cayendo en el 404 de la CTE, no en este 400.
+   */
+  private async assertComposicionRestaurable(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string,
+  ): Promise<void> {
+    const enPapelera = `EXISTS (
+      SELECT 1 FROM items x
+       WHERE x.item_id = $1 AND x.tenant_id = $2
+         AND x.eliminado_el IS NOT NULL AND x.eliminado_por IS NOT NULL)`;
+    const partes: { nombre: string; borrado: boolean }[] = await manager.query(
+      `-- Sin filtro de eliminado_el en items, a propósito: busca lo borrado (docblock).
+       SELECT i.nombre, i.eliminado_el IS NOT NULL AS borrado
+         FROM items i
+        WHERE i.tenant_id = $2 AND ${enPapelera}
+          AND i.item_id IN (
+            SELECT ri.ingrediente_item_id FROM receta_ingredientes ri
+             WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2
+               AND ri.eliminado_el IS NULL
+            UNION
+            SELECT re.ingrediente_item_id FROM receta_extras_permitidos re
+             WHERE re.receta_item_id = $1 AND re.tenant_id = $2
+               AND (re.eliminado_el IS NULL
+                    OR re.eliminado_el = (SELECT x.eliminado_el FROM items x
+                                           WHERE x.item_id = $1 AND x.tenant_id = $2))
+            UNION
+            SELECT cc.componente_item_id FROM combo_componentes cc
+             WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2
+               AND cc.eliminado_el IS NULL)
+        ORDER BY i.item_id
+        FOR SHARE`,
+      [itemId, tenantId],
+    );
+    const grupos: { nombre: string; borrado: boolean }[] = await manager.query(
+      `-- Sin filtro de eliminado_el en grupos_modificadores, a propósito: busca lo borrado (docblock).
+       SELECT g.nombre, g.eliminado_el IS NOT NULL AS borrado
+         FROM grupos_modificadores g
+        WHERE g.tenant_id = $2 AND ${enPapelera}
+          AND g.grupo_modificador_id IN (
+            SELECT igm.grupo_modificador_id FROM item_grupos_modificadores igm
+             WHERE igm.item_id = $1 AND igm.tenant_id = $2
+               AND igm.eliminado_el IS NULL)
+        ORDER BY g.grupo_modificador_id
+        FOR SHARE`,
+      [itemId, tenantId],
+    );
+
+    const faltan = [
+      ...partes.filter((p) => p.borrado).map((p) => p.nombre),
+      ...grupos.filter((g) => g.borrado).map((g) => `el grupo ${g.nombre}`),
+    ];
+    if (faltan.length) {
+      throw new BadRequestException(
+        `No se puede restaurar: primero restaurá de la papelera ${faltan.join(', ')}`,
+      );
+    }
   }
 
   async ajustarStock(

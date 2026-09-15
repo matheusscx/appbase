@@ -174,6 +174,40 @@ antes de borrar el padre sigue borrada después de restaurarlo.
 categoría sigue borrada lo deja sin categoría visible; no se restaura la categoría
 ni se bloquea la operación. Mismo patrón que Square, Toast y Clover.
 
+### Restaurar no revive un compuesto a medias (owner, 2026-09-14)
+
+La excepción a (c) es lo que **compone** algo que se vende. Mientras una receta, un combo
+o un grupo de modificadores están en la papelera, se puede borrar lo que los compone: el
+chequeo de uso de `DELETE` solo mira compuestos vivos. Restaurar el compuesto después
+**frena con 400** y nombra qué hay que restaurar primero:
+
+| Se restaura | Frena si está en la papelera |
+|---|---|
+| Receta o combo (`items`) | un ingrediente, un extra, un componente o un grupo asociado |
+| Grupo de modificadores | el ítem de una opción |
+
+**Por qué no es un huérfano tolerado como la categoría.** Medido restaurando sin el freno:
+la receta volvía con lo borrado escondido por las lecturas, se activaba y **se vendía sin
+descontar ese stock**, y con un grupo obligatorio borrado se vendía **sin pedir la opción**.
+El combo descontaba solo los componentes vivos. Una categoría borrada solo deja de verse.
+
+**Qué cuenta.** Lo que queda vivo después de restaurar: las filas vivas de ingredientes,
+componentes, grupos asociados y extras, y los extras y opciones que **este** borrado se llevó
+(los que (b) revive). Un extra o una opción que se sacaron antes por otro motivo no reviven y no
+frenan.
+
+**Qué cuesta** (lo eligió el owner sabiéndolo): si lo borrado se borró a propósito, para
+recuperar el compuesto hay que restaurarlo, restaurar el compuesto, sacárselo y volver a
+borrarlo.
+
+Un compuesto que borró el sistema sigue dando 404, aunque lo que lo compone esté en la
+papelera: el 404 de "Solo lo que borró una persona" manda sobre este 400.
+
+**Carrera con el borrado.** Restaurar toma `FOR SHARE` sobre lo que compone el compuesto
+antes de revivirlo, contra el `FOR UPDATE` con el que `DELETE` toma la fila antes de mirar
+el uso (`items.remove()`, y desde este cambio también `grupos-modificadores.remove()`).
+Probado con compuerta en `test/borrado-item-concurrente.e2e-spec.ts`, tests 6 a 8.
+
 ### Colisión al restaurar → 400
 
 La unicidad de nombre por tenant no es una propiedad de familia de borrado (SQL
@@ -449,6 +483,10 @@ de verdad en vez de grepear `usePaginatedList` — el import del TIPO
 - **Colateral acotado**: borrar `items`/`salones`/`grupos-modificadores` revive
   solo lo que ESE borrado se llevó; una fila borrada antes por otro motivo sigue
   borrada después de restaurar.
+- **Compuesto a medias**: receta, combo y grupo frenan con 400 nombrando solo lo que
+  sigue en la papelera; lo sacado antes por otro motivo no frena; un compuesto que borró
+  el sistema sigue en 404 (`test/papelera.e2e-spec.ts`, bloque "restaurar no revive una
+  receta, un combo o un grupo a medias").
 - **E2E**: borrar → listar con `incluirEliminados=true` → restaurar → aparece en el
   listado normal (inactivo si es `items`), con sus reglas de precio intactas.
 

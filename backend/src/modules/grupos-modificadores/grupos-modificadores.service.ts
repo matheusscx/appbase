@@ -626,9 +626,20 @@ export class GruposModificadoresService {
     grupoId: string,
   ): Promise<void> {
     await this.db.transaccion(async (manager) => {
+      // `FOR UPDATE` ANTES de mirar el uso: es el par del `FOR SHARE` con el
+      // que `ItemsService.restaurar` toma los grupos del ítem que revive. Sin
+      // él, el chequeo de abajo no ve un ítem que se está restaurando, las dos
+      // commitean y el ítem vuelve con este grupo borrado adentro.
+      //
+      // Hoy ninguna FK apunta a `grupos_modificadores` (`pg_constraint`,
+      // 2026-09-14). Si aparece una desde `grupo_modificador_opciones`, un
+      // `update()` del grupo que inserta una opción pediría `KEY SHARE` sobre
+      // este grupo mientras el `UPDATE grupo_modificador_opciones` de abajo, con
+      // este `FOR UPDATE` ya tomado, espera sus opciones: el orden se relee.
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
-           WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+           WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+           FOR UPDATE`,
         [grupoId, tenantId],
       );
       if (!grupoRows.length) {
@@ -683,9 +694,11 @@ export class GruposModificadoresService {
    */
   async restaurar(tenantId: string, grupoId: string, nombreNuevo?: string) {
     try {
-      const rows = unwrap<{ grupo_modificador_id: string }>(
-        await this.db.query(
-          `WITH restaurado AS (
+      const rows = await this.db.transaccion(async (manager) => {
+        await this.assertOpcionesRestaurables(manager, tenantId, grupoId);
+        return unwrap<{ grupo_modificador_id: string }>(
+          await manager.query(
+            `WITH restaurado AS (
              UPDATE grupos_modificadores
                 SET eliminado_el = NULL, eliminado_por = NULL,
                     nombre = COALESCE($3, nombre),
@@ -704,9 +717,10 @@ export class GruposModificadoresService {
              RETURNING grupo_opcion_id
            )
            SELECT grupo_modificador_id FROM restaurado`,
-          [grupoId, tenantId, nombreNuevo ?? null],
-        ),
-      );
+            [grupoId, tenantId, nombreNuevo ?? null],
+          ),
+        );
+      });
       if (!rows.length) {
         // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
         // papelera solo restaura lo que borró una persona. Un grupo borrado
@@ -716,7 +730,7 @@ export class GruposModificadoresService {
           'Grupo de modificadores no está en la papelera',
         );
       }
-      // El UPDATE ya commiteó: cargarGrupo ve el estado final, sin ventana
+      // La transacción ya commiteó: cargarGrupo ve el estado final, sin ventana
       // de visibilidad entre conexiones. El grupo se acaba de confirmar
       // vivo arriba, así que no puede devolver null.
       return (await this.cargarGrupo(this.db, tenantId, grupoId))!;
@@ -741,8 +755,8 @@ export class GruposModificadoresService {
         // único el `catch` hace falta igual (otra transacción puede tomar el
         // nombre entre consultar y escribir), así que pre-consultar sería una
         // query extra en todos los restaurar sin poder sacar este bloque. La
-        // sentencia corre en autocommit: su fallo no deja una transacción
-        // abortada y estas queries funcionan.
+        // transacción ya se revirtió al llegar acá, así que estas queries van
+        // por el pool y no chocan con una transacción abortada.
         //
         // `ignorarMayusculas: true` porque la unicidad de este recurso es
         // case-insensitive de punta a punta: `assertNombreLibre` compara con
@@ -767,6 +781,52 @@ export class GruposModificadoresService {
         );
       }
       throw e;
+    }
+  }
+
+  /**
+   * Restaurar no revive un grupo con una opción cuyo ítem está en la papelera
+   * (owner, 2026-09-14): 400 con los nombres, y el usuario lo restaura primero.
+   * Mientras el grupo está borrado, `ItemsService.remove` deja borrar el ítem
+   * de una opción —su chequeo de uso solo mira grupos vivos—; medido sin este
+   * chequeo, el grupo volvía con esa opción escondida por las lecturas, y
+   * restaurar después el ítem la volvía a mostrar.
+   *
+   * Lo que cuenta son las opciones que la CTE de `restaurar()` revive: las de
+   * este mismo borrado, por el timestamp exacto. Una opción sacada antes por
+   * otro motivo no revive y no frena.
+   *
+   * ⚠️ La lectura NO filtra `eliminado_el` de `items`, a propósito: lo que busca
+   * es justamente el ítem borrado, y el lock tiene que caer también sobre los
+   * vivos. La subquery sobre `grupos_modificadores` tampoco: lee el
+   * `eliminado_el` del propio grupo, que está en la papelera. `FOR SHARE ... ORDER BY item_id` es el par del `FOR UPDATE` con el
+   * que `ItemsService.remove` toma el ítem antes de mirar el uso.
+   */
+  private async assertOpcionesRestaurables(
+    manager: EntityManager,
+    tenantId: string,
+    grupoId: string,
+  ): Promise<void> {
+    const items: { nombre: string; borrado: boolean }[] = await manager.query(
+      `-- Sin filtro de eliminado_el en items ni en grupos_modificadores, a propósito (docblock).
+       SELECT i.nombre, i.eliminado_el IS NOT NULL AS borrado
+         FROM items i
+        WHERE i.tenant_id = $2
+          AND i.item_id IN (
+            SELECT o.item_id FROM grupo_modificador_opciones o
+             WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2
+               AND o.eliminado_el = (SELECT g.eliminado_el FROM grupos_modificadores g
+                                      WHERE g.grupo_modificador_id = $1 AND g.tenant_id = $2
+                                        AND g.eliminado_por IS NOT NULL))
+        ORDER BY i.item_id
+        FOR SHARE`,
+      [grupoId, tenantId],
+    );
+    const faltan = items.filter((i) => i.borrado).map((i) => i.nombre);
+    if (faltan.length) {
+      throw new BadRequestException(
+        `No se puede restaurar: primero restaurá de la papelera ${faltan.join(', ')}`,
+      );
     }
   }
 

@@ -884,3 +884,8 @@ Esas 16 tienen **papelera**: se puede volver a listarlas con `incluirEliminados=
 y revertir el borrado con `POST .../:id/restaurar`. No aplica a seguridad/acceso,
 suscripciones/pasarela, medios de pago tokenizados, transaccional (`cuentas`) ni al
 kardex (inmutable por diseño). Detalle: [`docs/features/papelera.md`](./features/papelera.md).
+
+Restaurar **no revive un compuesto a medias** (owner, 2026-09-14): una receta, un combo o
+un grupo de modificadores con algo de lo que lo compone todavía en la papelera no se
+restaura; el 400 dice qué restaurar primero. Sin esa regla la receta restaurada se podía activar y
+vender sin descontar el stock del ingrediente borrado.

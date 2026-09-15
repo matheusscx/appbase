@@ -169,25 +169,29 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
 
-### Restaurar una receta o un grupo revive referencias a ítems ya borrados (2026-09-13)
+### Lo que dejó abierto el freno de restaurar un compuesto a medias (2026-09-14)
 
-- [ ] **Sin medir: lo levantó la revisión independiente del cierre de las carreras del borrado**
-  ([`resueltos.md`](resueltos.md)). **No es una carrera: pasa en secuencia**, así que ningún lock lo
-  cierra.
-  - **Receta.** Borrar la receta X, que tiene al ingrediente o extra E; borrar E —`obtenerUsoItem`
-    no lo bloquea, porque sus ramas unen con la receta viva y X ya está borrada—; restaurar X. La CTE
-    de `ItemsService.restaurar` revive `receta_extras_permitidos (X, E)`, y `receta_ingredientes
-    (X, E)`, que `remove()` nunca soft-borró, sigue viva apuntando a E. Con un combo y
-    `combo_componentes` pasaría lo mismo.
-  - **Grupo.** Borrar el grupo G, borrar el ítem de una de sus opciones, restaurar G:
-    `GruposModificadoresService.restaurar` revive la opción apuntando al ítem borrado.
-  - **Y una gemela que sí es carrera, pero de higiene:** un `PATCH` de la receta R con
-    `extrasPermitidos` contra `DELETE R` deja extras vivos de una receta borrada, porque el
-    `UPDATE … WHERE receta_item_id` de `remove()` no ve los que el `PATCH` está insertando. Las
-    lecturas los filtran por el `JOIN` a la receta.
-  **Qué medir:** los dos primeros por API y en secuencia, contando las filas vivas que apuntan a un
-  ítem borrado y mirando qué muestra la receta o el grupo restaurado. Qué hacer con eso —no revivir
-  la referencia, rechazar la restauración o avisar— es de producto.
+- [ ] **Sin medir: tres huecos, ninguno probado.** El primero viene de la entrada cerrada
+  ([`resueltos.md`](resueltos.md)); los otros dos se leyeron en el código al cerrarla.
+  - **`PATCH` de la receta con `extrasPermitidos` contra `DELETE` de la receta.** Viene de la
+    entrada cerrada: el `UPDATE … WHERE receta_item_id` de `remove()` no ve los extras que el
+    `PATCH` está insertando, y quedan extras vivos de una receta borrada. Las lecturas los
+    filtran por el `JOIN` a la receta.
+  - **Asociar un grupo a un ítem contra borrar el grupo.** `asociarGruposModificadores` lee el
+    grupo sin lock antes de insertar la asociación. `grupos-modificadores.remove()` toma ahora
+    `FOR UPDATE` sobre el grupo, pero asociar no toma ningún lock sobre esa fila: un borrado
+    concurrente no ve la asociación en vuelo y deja una asociación viva
+    a un grupo borrado.
+  - **Un par que se referencia entre sí puede quedar sin poder restaurarse nunca.** Un ítem
+    asociado a un grupo del que además es opción: con los dos en la papelera, restaurar el
+    ítem pide restaurar antes el grupo, y restaurar el grupo pide restaurar antes el ítem.
+    En secuencia no se llega —mientras uno vive, el borrado del otro frena—, pero la
+    carrera de arriba deja la asociación viva a un grupo borrado, y desde ahí borrar el ítem
+    ya no frena. No es un `40P01`: los dos `FOR SHARE` no se bloquean y los dos restaurar
+    dan 400.
+  **Qué medir:** las dos carreras con la compuerta de
+  `test/borrado-item-concurrente.e2e-spec.ts`, mirando si queda la fila viva apuntando a lo
+  borrado; el par, llegando a él por la segunda carrera y restaurando los dos.
 
 ## 3. Ya decidido, falta construir
 

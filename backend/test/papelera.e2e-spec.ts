@@ -2704,3 +2704,295 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
     expect(opciones.map((o) => o.itemId)).toEqual([opcionCascadaItemId]);
   });
 });
+
+// Restaurar no revive un compuesto a medias (owner, 2026-09-14): mientras una
+// receta, un combo o un grupo están en la papelera, se puede borrar lo que los
+// compone —el chequeo de uso del borrado solo mira compuestos vivos—. Restaurar
+// frena con 400 y nombra qué hay que restaurar primero. Medido sin el freno: la
+// receta volvía con lo borrado escondido, se activaba y se vendía sin descontar
+// ese stock ni pedir la opción del grupo obligatorio.
+describe('Papelera (e2e) — restaurar no revive una receta, un combo o un grupo a medias', () => {
+  let app: INestApplication<App>;
+  let ds: DataSource;
+  let token: string;
+
+  const api = () => request(app.getHttpServer());
+  const nombre = (base: string) =>
+    `${base} medias E2E ${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+
+  async function crearItem(body: Record<string, unknown>) {
+    const res = await api()
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ monedaId: CLP_MONEDA_ID, ...body });
+    expect(res.status).toBe(201);
+    return (res.body as ItemResponse).id;
+  }
+  const crearIngrediente = (base: string, unidadMedida = 'unidad') =>
+    crearItem({
+      nombre: nombre(base),
+      precioBase: '500',
+      tipo: 'ingrediente',
+      unidadMedida,
+      stock: '100',
+      costo: '500',
+    });
+  const crearProducto = (base: string) =>
+    crearItem({
+      nombre: nombre(base),
+      precioBase: '500',
+      tipo: 'producto',
+      unidadMedida: 'unidad',
+      stock: '100',
+      costo: '500',
+    });
+  async function crearGrupo(itemIds: string[]) {
+    const res = await api()
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: nombre('Grupo'),
+        opciones: itemIds.map((itemId) => ({
+          itemId,
+          cantidad: '1',
+          precioExtra: '0',
+        })),
+      });
+    expect(res.status).toBe(201);
+    const body = res.body as { grupoModificadorId: string; nombre: string };
+    return { id: body.grupoModificadorId, nombre: body.nombre };
+  }
+  async function nombreDe(itemId: string) {
+    const res = await api()
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return (res.body as { nombre: string }).nombre;
+  }
+  async function borrar(ruta: string, status: number) {
+    const res = await api()
+      .delete(`/api/${ruta}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(status);
+  }
+  async function restaurar(ruta: string) {
+    const res = await api()
+      .post(`/api/${ruta}/restaurar`)
+      .set('Authorization', `Bearer ${token}`);
+    return {
+      status: res.status,
+      mensaje: JSON.stringify(
+        (res.body as { message?: unknown }).message ?? '',
+      ),
+    };
+  }
+  async function detalle(ruta: string) {
+    const res = await api()
+      .get(`/api/${ruta}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    return res.body as Record<string, unknown[] | undefined>;
+  }
+  const extra = (ingredienteItemId: string) => ({
+    ingredienteItemId,
+    cantidad: '20',
+    unidadCodigo: 'g',
+    precioExtra: '500',
+  });
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    ds = app.get(DataSource);
+    token = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+  }, 60000);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('receta: frena mientras su ingrediente, su extra o su grupo estén en la papelera, y nombra solo lo que falta', async () => {
+    const panId = await crearIngrediente('Pan');
+    const paltaId = await crearIngrediente('Palta', 'g');
+    const grupo = await crearGrupo([await crearProducto('Jugo')]);
+    const recetaId = await crearItem({
+      nombre: nombre('Completo'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [
+        { ingredienteItemId: panId, cantidad: '1', unidadCodigo: 'unidad' },
+      ],
+      extrasPermitidos: [extra(paltaId)],
+      gruposModificadores: [{ grupoModificadorId: grupo.id, min: 1, max: 1 }],
+    });
+    const pan = await nombreDe(panId);
+    const palta = await nombreDe(paltaId);
+
+    await borrar(`items/${recetaId}`, 200);
+    await borrar(`items/${panId}`, 200);
+    await borrar(`items/${paltaId}`, 200);
+    await borrar(`grupos-modificadores/${grupo.id}`, 204);
+
+    const todo = await restaurar(`items/${recetaId}`);
+    expect(todo.status).toBe(400);
+    expect(todo.mensaje).toContain(pan);
+    expect(todo.mensaje).toContain(palta);
+    expect(todo.mensaje).toContain(`el grupo ${grupo.nombre}`);
+
+    expect((await restaurar(`items/${panId}`)).status).toBe(201);
+    expect((await restaurar(`items/${paltaId}`)).status).toBe(201);
+    const falta = await restaurar(`items/${recetaId}`);
+    expect(falta.status).toBe(400);
+    expect(falta.mensaje).toContain(`el grupo ${grupo.nombre}`);
+    expect(falta.mensaje).not.toContain(pan);
+    expect(falta.mensaje).not.toContain(palta);
+
+    expect((await restaurar(`grupos-modificadores/${grupo.id}`)).status).toBe(
+      201,
+    );
+    expect((await restaurar(`items/${recetaId}`)).status).toBe(201);
+    const receta = await detalle(`items/${recetaId}`);
+    expect(receta.ingredientes).toHaveLength(1);
+    expect(receta.extrasPermitidos).toHaveLength(1);
+    expect(receta.grupos).toHaveLength(1);
+  });
+
+  it('combo: frena mientras un componente esté en la papelera', async () => {
+    const papasId = await crearProducto('Papas');
+    const bebidaId = await crearProducto('Bebida');
+    const comboId = await crearItem({
+      nombre: nombre('Combo'),
+      precioBase: '3000',
+      tipo: 'combo',
+      componentes: [
+        { componenteItemId: papasId, cantidad: '1', bloqueante: true },
+        { componenteItemId: bebidaId, cantidad: '1', bloqueante: true },
+      ],
+    });
+    const papas = await nombreDe(papasId);
+    const bebida = await nombreDe(bebidaId);
+
+    await borrar(`items/${comboId}`, 200);
+    await borrar(`items/${papasId}`, 200);
+
+    const res = await restaurar(`items/${comboId}`);
+    expect(res.status).toBe(400);
+    expect(res.mensaje).toContain(papas);
+    expect(res.mensaje).not.toContain(bebida);
+
+    expect((await restaurar(`items/${papasId}`)).status).toBe(201);
+    expect((await restaurar(`items/${comboId}`)).status).toBe(201);
+    expect((await detalle(`items/${comboId}`)).componentes).toHaveLength(2);
+  });
+
+  it('grupo: frena mientras el ítem de una opción esté en la papelera', async () => {
+    const jugoId = await crearProducto('Jugo');
+    const aguaId = await crearProducto('Agua');
+    const grupo = await crearGrupo([jugoId, aguaId]);
+    const jugo = await nombreDe(jugoId);
+    const agua = await nombreDe(aguaId);
+
+    await borrar(`grupos-modificadores/${grupo.id}`, 204);
+    await borrar(`items/${jugoId}`, 200);
+
+    const res = await restaurar(`grupos-modificadores/${grupo.id}`);
+    expect(res.status).toBe(400);
+    expect(res.mensaje).toContain(jugo);
+    expect(res.mensaje).not.toContain(agua);
+
+    expect((await restaurar(`items/${jugoId}`)).status).toBe(201);
+    expect((await restaurar(`grupos-modificadores/${grupo.id}`)).status).toBe(
+      201,
+    );
+    expect(
+      (await detalle(`grupos-modificadores/${grupo.id}`)).opciones,
+    ).toHaveLength(2);
+  });
+
+  // Control de los dos timestamps: lo que la CTE no revive no puede frenar.
+  it('un extra o una opción sacados ANTES por otro motivo no reviven, así que borrarlos no frena el restaurar', async () => {
+    const extraSacadoId = await crearIngrediente('Queso', 'g');
+    const extraQuedaId = await crearIngrediente('Tomate', 'g');
+    const recetaId = await crearItem({
+      nombre: nombre('Sandwich'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [
+        {
+          ingredienteItemId: await crearIngrediente('Pan'),
+          cantidad: '1',
+          unidadCodigo: 'unidad',
+        },
+      ],
+      extrasPermitidos: [extra(extraSacadoId), extra(extraQuedaId)],
+    });
+    const patchReceta = await api()
+      .patch(`/api/items/${recetaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ extrasPermitidos: [extra(extraQuedaId)] });
+    expect(patchReceta.status).toBe(200);
+
+    const opcionSacadaId = await crearProducto('Jugo');
+    const opcionQuedaId = await crearProducto('Agua');
+    const grupo = await crearGrupo([opcionSacadaId, opcionQuedaId]);
+    const patchGrupo = await api()
+      .patch(`/api/grupos-modificadores/${grupo.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        opciones: [{ itemId: opcionQuedaId, cantidad: '1', precioExtra: '0' }],
+      });
+    expect(patchGrupo.status).toBe(200);
+
+    await borrar(`items/${recetaId}`, 200);
+    await borrar(`items/${extraSacadoId}`, 200);
+    await borrar(`grupos-modificadores/${grupo.id}`, 204);
+    await borrar(`items/${opcionSacadaId}`, 200);
+
+    expect((await restaurar(`items/${recetaId}`)).status).toBe(201);
+    expect((await restaurar(`grupos-modificadores/${grupo.id}`)).status).toBe(
+      201,
+    );
+  });
+
+  // Lo que borró el sistema no está en la papelera (decisión del owner, más
+  // arriba): el 404 manda sobre el 400 aunque su composición esté borrada.
+  it('un compuesto que borró el sistema sigue dando 404, aunque lo que lo compone esté en la papelera', async () => {
+    const panId = await crearIngrediente('Pan');
+    const recetaId = await crearItem({
+      nombre: nombre('Receta sistema'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [
+        { ingredienteItemId: panId, cantidad: '1', unidadCodigo: 'unidad' },
+      ],
+    });
+    const opcionId = await crearProducto('Opción sistema');
+    const grupo = await crearGrupo([opcionId]);
+
+    await borrar(`items/${recetaId}`, 200);
+    await borrar(`items/${panId}`, 200);
+    await borrar(`grupos-modificadores/${grupo.id}`, 204);
+    await borrar(`items/${opcionId}`, 200);
+    await ds.query(`UPDATE items SET eliminado_por = NULL WHERE item_id = $1`, [
+      recetaId,
+    ]);
+    await ds.query(
+      `UPDATE grupos_modificadores SET eliminado_por = NULL
+        WHERE grupo_modificador_id = $1`,
+      [grupo.id],
+    );
+
+    expect((await restaurar(`items/${recetaId}`)).status).toBe(404);
+    expect((await restaurar(`grupos-modificadores/${grupo.id}`)).status).toBe(
+      404,
+    );
+  });
+});

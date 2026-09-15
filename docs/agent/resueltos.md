@@ -23,6 +23,86 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Restaurar una receta, un combo o un grupo a medias frena con 400 (cerrada 2026-09-14)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **Medido primero, por API y en secuencia** (el
+spec de medición no quedó en el repo): la receta restaurada con su ingrediente y su extra
+borrados mostraba las dos listas vacías, se activaba con 200 y **se vendía a $4.760 sin
+descontar el ingrediente borrado y sin advertencias**; con un grupo obligatorio borrado, la misma
+receta que antes rechazaba la venta sin elegir opción (400) **se vendía con 201**; el combo
+restaurado mostraba 1 de 2 componentes y descontaba solo el vivo; el grupo restaurado mostraba 1
+de 2 opciones. En los cuatro, restaurar después lo borrado lo volvía a mostrar: las filas
+vivas nunca dejaron de apuntarle. La medición destapó un caso que la entrada no nombraba —el
+grupo asociado a la receta— y entró en el mismo freno.
+
+**Decisión del owner:** frenar y decir qué falta, sabiendo el costo (si lo borrado se borró a
+propósito, hay que restaurarlo, restaurar el compuesto, sacárselo y volver a borrarlo).
+
+**Qué se hizo.** `ItemsService.restaurar` y `GruposModificadoresService.restaurar` pasan a una
+transacción que, antes de la CTE que revive, lee con `FOR SHARE ... ORDER BY id` lo que va a
+quedar vivo apuntando a otra fila —ingredientes, componentes, grupos asociados y extras vivos; y los
+extras y opciones del mismo `eliminado_el` que la CTE revive— y responde 400 con los nombres de lo
+borrado (`assertComposicionRestaurable`, `assertOpcionesRestaurables`). El `FOR SHARE` es el par
+del `FOR UPDATE` de `items.remove()`; para el grupo asociado hacía falta el otro lado, y
+`grupos-modificadores.remove()` toma ahora `FOR UPDATE` sobre el grupo antes de mirar el uso.
+La pantalla no cambió: `items.vue` y `grupos-modificadores.vue` ya muestran el mensaje del 400
+en un toast.
+
+**Mutantes, medidos fila por fila** (unit de los dos services + `papelera.e2e-spec.ts` +
+`borrado-item-concurrente.e2e-spec.ts`, con el contenedor del backend detenido para que el
+watcher no re-sembrara):
+
+| Mutante | Lo matan |
+|---|---|
+| M0 sin los dos chequeos ni el `FOR UPDATE` del remove de grupos (se conserva la transacción) | 19 tests: los e2e de receta, combo y grupo; las carreras 6-8; 12 unit de `restaurar` de los dos services (todos menos los dos de 404) y el unit del `FOR UPDATE` |
+| M1 sin la rama de `receta_ingredientes` | e2e receta; carrera 6 |
+| M2 extras solo vivos (sin el timestamp de este borrado) | e2e receta; unit del `FOR SHARE` ordenado |
+| M3 extras con cualquier borrado (`IS NOT NULL`) | e2e del control "sacados antes por otro motivo"; unit del `FOR SHARE` ordenado |
+| M4 sin la rama de `combo_componentes` | e2e combo |
+| M5 la lectura de grupos asociados no devuelve nada (`WHERE FALSE`, la llamada queda) | e2e receta; carrera 7 |
+| M6 sin el `EXISTS` de "está en la papelera" | e2e "un compuesto que borró el sistema sigue dando 404" |
+| M7 sin `FOR SHARE` en ingredientes, extras y componentes | carrera 6; unit del `FOR SHARE` ordenado |
+| M8 ítems: sin `FOR SHARE` en la lectura de grupos asociados | carrera 7; unit del `FOR SHARE` ordenado |
+| M9 grupos: sin el chequeo de opciones | e2e grupo; carrera 8; el unit de la opción borrada; y otros 6 unit de `restaurar` de grupos, que caen porque sus mocks cuentan con la lectura de opciones |
+| M10 grupos: opciones con cualquier borrado | e2e del control; e2e del 404 del sistema; unit de la opción borrada |
+| M11 grupos: sin `eliminado_por IS NOT NULL` | e2e del 404 del sistema |
+| M12 grupos: sin `FOR SHARE` en los ítems de las opciones | carrera 8; unit de la opción borrada |
+| M13 `grupos-modificadores.remove()` sin `FOR UPDATE` | carrera 7; unit del `FOR UPDATE` |
+| M14 ítems: `FOR SHARE` de ingredientes, extras y componentes sin `ORDER BY` | solo el unit del `FOR SHARE` ordenado, como anticipa `docs/patterns/backend.md` §15 |
+
+**Lo que no cubre** —anotado en [`pendientes.md` § 2](pendientes.md), sin medir—: el `PATCH` de
+extras contra el `DELETE` de la receta (la tercera viñeta de la entrada, que no se tocó);
+asociar un grupo a un ítem contra borrar el grupo, porque asociar no toma ningún lock sobre el
+grupo; y el par ítem-grupo que se referencia entre sí, que desde esa carrera
+puede quedar sin poder restaurarse ninguno de los dos. Tampoco es alcance de esta regla la
+categoría, que sigue siendo huérfano tolerado ([`papelera.md`](../features/papelera.md)), ni la
+otra dirección de la CTE de `items.restaurar`: restaurar un ingrediente revive las filas de
+extra de una receta que sigue borrada. Es una fila viva de un padre borrado, no un padre vivo
+apuntando a algo borrado; las lecturas la filtran por el `JOIN`, y restaurar la receta después
+la encuentra con el extra vivo.
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### Restaurar una receta o un grupo revive referencias a ítems ya borrados (2026-09-13)
+>
+> - [ ] **Sin medir: lo levantó la revisión independiente del cierre de las carreras del borrado**
+>   ([`resueltos.md`](resueltos.md)). **No es una carrera: pasa en secuencia**, así que ningún lock lo
+>   cierra.
+>   - **Receta.** Borrar la receta X, que tiene al ingrediente o extra E; borrar E —`obtenerUsoItem`
+>     no lo bloquea, porque sus ramas unen con la receta viva y X ya está borrada—; restaurar X. La CTE
+>     de `ItemsService.restaurar` revive `receta_extras_permitidos (X, E)`, y `receta_ingredientes
+>     (X, E)`, que `remove()` nunca soft-borró, sigue viva apuntando a E. Con un combo y
+>     `combo_componentes` pasaría lo mismo.
+>   - **Grupo.** Borrar el grupo G, borrar el ítem de una de sus opciones, restaurar G:
+>     `GruposModificadoresService.restaurar` revive la opción apuntando al ítem borrado.
+>   - **Y una gemela que sí es carrera, pero de higiene:** un `PATCH` de la receta R con
+>     `extrasPermitidos` contra `DELETE R` deja extras vivos de una receta borrada, porque el
+>     `UPDATE … WHERE receta_item_id` de `remove()` no ve los que el `PATCH` está insertando. Las
+>     lecturas los filtran por el `JOIN` a la receta.
+>   **Qué medir:** los dos primeros por API y en secuencia, contando las filas vivas que apuntan a un
+>   ítem borrado y mirando qué muestra la receta o el grupo restaurado. Qué hacer con eso —no revivir
+>   la referencia, rechazar la restauración o avisar— es de producto.
+
 ## Borrar un extra que una mesa pidió sigue bloqueado, ahora con el motivo medido (cerrada 2026-09-14)
 
 Sale de [`pendientes.md` § 2](pendientes.md), la entrada que dejó el cierre de abajo. El bloqueo de
