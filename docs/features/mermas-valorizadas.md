@@ -13,7 +13,12 @@ Registro dedicado de mermas de stock en productos (`tipo='producto'`) con **moti
 
 Decisión y porqué: [`docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md).
 
-Motivos fijos del sistema (`es_fijo=true`): **Vencimiento**, **Deterioro**, **Robo**, **Error operativo**, **Otro** — no se editan ni eliminan. El administrador puede crear motivos custom adicionales.
+Motivos fijos del sistema (`es_fijo=true`): son **siete**, cada uno con su `tipo` (tabla completa
+en *Modelo de datos*, § `motivo_baja`). Cinco son `tipo='merma'` — **Vencimiento**, **Deterioro**,
+**Robo**, **Error operativo**, **Otro**. Los otros dos, **Cortesía de la casa** (`cortesia`) y
+**No se llegó a hacer** (`no_elaborado`), **no son de merma**: por eso `POST /api/mermas` los
+rechaza con 400 (ver más abajo). Ninguno de los siete se edita ni se elimina. El administrador
+puede crear motivos custom adicionales.
 
 El ajuste genérico de stock (`PATCH /items/:id/stock`) **ya no acepta** `motivo='merma'`; toda merma pasa por el flujo dedicado con motivo obligatorio.
 
@@ -25,7 +30,7 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 
 **Included:**
 - Tabla `motivo_baja` por tenant + columna `motivo_baja_id` en `movimientos_inventario`.
-- Semilla de 5 motivos fijos al crear tenant y en el seeder de desarrollo.
+- Semilla de 7 motivos fijos al crear tenant y en el seeder de desarrollo.
 - CRUD `/api/motivos-baja` y registro/listado `/api/mermas`.
 - UI: configuración de motivos, operación de mermas (drawer sin campo de costo; cartel no bloqueante cuando el producto no tiene costo cargado), kardex con motivo y costo perdido.
 - Quitar opción Merma del modal de ajuste de stock en items.
@@ -117,6 +122,10 @@ Request (CreateMermaDto):
 **`ubicacionId` es obligatorio** (desde [bodegas y traslados](./bodegas-y-traslados.md)): se
 merma lo que se pudrió **ahí**, y sin default silencioso — uno metería la salida en el local
 cada vez que la pantalla se olvide de mandarlo. `400` si falta o es de otro tenant.
+
+`POST /api/mermas` rechaza con 400 un motivo que no sea de tipo `merma` — la pantalla de
+Mermas ya filtra su selector con `tipo=merma`, pero el filtro de pantalla no alcanza: el
+servidor es el que manda.
 
 **Reglas de costo:**
 - **El costo no se tipea ni se acepta en el request** — `CreateMermaDto` no tiene ningún campo de costo. El endpoint valoriza con `item_producto.costo_actual` vigente al momento de mermar.

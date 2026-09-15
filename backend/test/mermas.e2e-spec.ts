@@ -321,6 +321,40 @@ describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
     );
   });
 
+  it('POST /mermas con "Cortesía de la casa" da 400, y con Deterioro 201', async () => {
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-baja')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resMotivos.status).toBe(200);
+    const motivos = resMotivos.body as MotivoBajaItem[];
+    const cortesia = motivos.find((m) => m.nombre === 'Cortesía de la casa')!;
+    const deterioro = motivos.find((m) => m.nombre === 'Deterioro')!;
+    expect(cortesia).toBeDefined();
+    expect(deterioro).toBeDefined();
+
+    const rechazada = await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        ubicacionId: localId,
+        cantidad: '0.1',
+        motivoBajaId: cortesia.id,
+      });
+    expect(rechazada.status).toBe(400);
+
+    const aceptada = await request(app.getHttpServer())
+      .post('/api/mermas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        ubicacionId: localId,
+        cantidad: '0.1',
+        motivoBajaId: deterioro.id,
+      });
+    expect(aceptada.status).toBe(201);
+  });
+
   it('GET /mermas incluye motivoBajaNombre y costoPerdido', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/mermas')

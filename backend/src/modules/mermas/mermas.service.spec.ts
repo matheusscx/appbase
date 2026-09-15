@@ -105,6 +105,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult({ movimientoId: 'mov-1', stockResultante: '9' }),
@@ -165,6 +166,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult({ costoActualPrevio: '100', costoActual: '100' }),
@@ -192,6 +194,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult({
@@ -234,6 +237,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult({ costoActualPrevio: '0', costoActual: '0' }),
@@ -258,6 +262,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult({
@@ -285,6 +290,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       catalogService.convertirUnidad.mockResolvedValueOnce('0.5');
       inventarioService.registrarMovimiento.mockResolvedValueOnce({
@@ -326,6 +332,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       catalogService.convertirUnidad.mockResolvedValueOnce('0.5'); // 500 g → 0.5 kg
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -373,6 +380,25 @@ describe('MermasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
+    it('rechaza un motivo que no es de tipo merma, antes de registrar el movimiento', async () => {
+      transactionQueryMock.mockResolvedValueOnce([itemRow()]);
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
+        nombre: 'Cortesía de la casa',
+        tipo: 'cortesia',
+      });
+
+      await expect(
+        service.registrar(TENANT, USER, {
+          itemId: ITEM,
+          ubicacionId: UBICACION_ID,
+          cantidad: '1',
+          motivoBajaId: MOTIVO,
+        }),
+      ).rejects.toThrow('El motivo "Cortesía de la casa" no es de merma');
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
     it('acepta item tipo ingrediente con mismo flujo que producto cantidad', async () => {
       transactionQueryMock.mockResolvedValueOnce([
         itemRow({ tipo: 'ingrediente', nombre: 'Harina premium' }),
@@ -380,6 +406,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult({
@@ -423,6 +450,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce({
         movimientoId: 'mov-1',
@@ -457,6 +485,7 @@ describe('MermasService', () => {
       motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
         id: MOTIVO,
         nombre: 'Vencimiento',
+        tipo: 'merma',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
         movimientoResult(),

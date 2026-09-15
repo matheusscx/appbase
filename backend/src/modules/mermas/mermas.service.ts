@@ -21,6 +21,7 @@ import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
+import { TipoMotivoBaja } from '../motivos-baja/tipo-motivo-baja.enum';
 import { CreateMermaDto } from './dto/create-merma.dto';
 import { FindMermasDto } from './dto/find-mermas.dto';
 
@@ -142,6 +143,14 @@ export class MermasService {
         tenantId,
         dto.motivoBajaId,
       );
+
+      // La pantalla de Mermas ya pide solo `tipo=merma`, pero el servidor es el que
+      // manda: una cortesía o un "no se llegó a hacer" no son una merma de stock.
+      if (motivo.tipo !== TipoMotivoBaja.MERMA) {
+        throw new BadRequestException(
+          `El motivo "${motivo.nombre}" no es de merma`,
+        );
+      }
 
       const cantidad = new Decimal(dto.cantidad);
       if (cantidad.lessThanOrEqualTo(0) || cantidad.isNaN()) {

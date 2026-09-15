@@ -352,17 +352,21 @@ export class MotivosBajaService {
     runner: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
     tenantId: string,
     motivoBajaId: string,
-  ): Promise<{ id: string; nombre: string }> {
+  ): Promise<{ id: string; nombre: string; tipo: TipoMotivoBaja }> {
     const rows = (await runner.query(
-      `SELECT motivo_baja_id, nombre FROM motivo_baja
+      `SELECT motivo_baja_id, nombre, tipo FROM motivo_baja
        WHERE motivo_baja_id = $1 AND tenant_id = $2
          AND activo = true AND eliminado_el IS NULL`,
       [motivoBajaId, tenantId],
-    )) as { motivo_baja_id: string; nombre: string }[];
+    )) as { motivo_baja_id: string; nombre: string; tipo: TipoMotivoBaja }[];
     if (!rows.length) {
       throw new BadRequestException('Motivo de baja no válido o inactivo');
     }
-    return { id: rows[0].motivo_baja_id, nombre: rows[0].nombre };
+    return {
+      id: rows[0].motivo_baja_id,
+      nombre: rows[0].nombre,
+      tipo: rows[0].tipo,
+    };
   }
 
   private async findOneOrFail(
