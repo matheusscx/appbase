@@ -7,7 +7,7 @@ import type { TableColumn } from '@nuxt/ui'
 // cargaba) y el 403 llegaba recién al guardar.
 definePageMeta({ middleware: 'admin' })
 
-interface CausaMerma {
+interface MotivoBaja {
   id: string
   nombre: string
   activo: boolean
@@ -20,9 +20,9 @@ const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl
 
-const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('causas-merma')
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('motivos-baja')
 
-const causas = ref<CausaMerma[]>([])
+const motivos = ref<MotivoBaja[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
@@ -47,7 +47,7 @@ const emptyForm = () => ({
 const form = ref(emptyForm())
 
 const drawerTitle = computed(() =>
-  editingId.value ? 'Editar causa' : 'Nueva causa',
+  editingId.value ? 'Editar motivo' : 'Nuevo motivo',
 )
 
 const submitLabel = computed(() =>
@@ -56,7 +56,7 @@ const submitLabel = computed(() =>
 
 const editingEsFijo = computed(() => {
   if (!editingId.value) return false
-  return causas.value.find(c => c.id === editingId.value)?.esFijo ?? false
+  return motivos.value.find(c => c.id === editingId.value)?.esFijo ?? false
 })
 
 function resetDrawer() {
@@ -70,7 +70,7 @@ watch(drawerOpen, (open) => {
 
 // Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
 // `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
-// sin encadenarlas la respuesta que llega segunda pisa `causas.value` sin
+// sin encadenarlas la respuesta que llega segunda pisa `motivos.value` sin
 // importar cuál toggle la originó — el listado queda desincronizado del
 // switch. Esta pantalla NO usa `usePaginatedList`, así que no hereda la cola
 // que vive ahí: va local.
@@ -83,10 +83,10 @@ async function cargar() {
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
-      causas.value = await useApiFetch<CausaMerma[]>(`${apiUrl}/causas-merma${query}`)
+      motivos.value = await useApiFetch<MotivoBaja[]>(`${apiUrl}/motivos-baja${query}`)
     }
     catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Error al cargar causas'), color: 'error' })
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar motivos'), color: 'error' })
     }
     finally {
       loading.value = false
@@ -98,19 +98,19 @@ async function cargar() {
 
 watch(verEliminados, cargar)
 
-function upsertLocal(saved: CausaMerma) {
-  const idx = causas.value.findIndex(c => c.id === saved.id)
+function upsertLocal(saved: MotivoBaja) {
+  const idx = motivos.value.findIndex(c => c.id === saved.id)
   if (idx >= 0) {
-    causas.value[idx] = { ...causas.value[idx], ...saved }
+    motivos.value[idx] = { ...motivos.value[idx], ...saved }
   }
   else {
-    causas.value.push(saved)
+    motivos.value.push(saved)
   }
-  causas.value = ordenarFijosPrimero(causas.value)
+  motivos.value = ordenarFijosPrimero(motivos.value)
 }
 
 function removeLocal(id: string) {
-  causas.value = causas.value.filter(c => c.id !== id)
+  motivos.value = motivos.value.filter(c => c.id !== id)
 }
 
 function abrirCrear() {
@@ -118,13 +118,13 @@ function abrirCrear() {
   drawerOpen.value = true
 }
 
-function abrirEditar(causa: CausaMerma) {
-  if (causa.esFijo || causa.eliminadoEl) return
+function abrirEditar(motivo: MotivoBaja) {
+  if (motivo.esFijo || motivo.eliminadoEl) return
   resetDrawer()
-  editingId.value = causa.id
+  editingId.value = motivo.id
   form.value = {
-    nombre: causa.nombre,
-    activo: causa.activo,
+    nombre: motivo.nombre,
+    activo: motivo.activo,
   }
   drawerOpen.value = true
 }
@@ -138,13 +138,13 @@ async function guardar() {
     }
     const isNew = !editingId.value
     const saved = isNew
-      ? await useApiFetch<CausaMerma>(`${apiUrl}/causas-merma`, { method: 'POST', body })
-      : await useApiFetch<CausaMerma>(`${apiUrl}/causas-merma/${editingId.value}`, {
+      ? await useApiFetch<MotivoBaja>(`${apiUrl}/motivos-baja`, { method: 'POST', body })
+      : await useApiFetch<MotivoBaja>(`${apiUrl}/motivos-baja/${editingId.value}`, {
           method: 'PATCH',
           body,
         })
     upsertLocal(saved)
-    toast.add({ title: isNew ? 'Causa creada' : 'Causa actualizada', color: 'success' })
+    toast.add({ title: isNew ? 'Motivo creado' : 'Motivo actualizado', color: 'success' })
     drawerOpen.value = false
   }
   catch (e: unknown) {
@@ -155,39 +155,39 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(causa: CausaMerma) {
-  if (causa.esFijo || causa.eliminadoEl || toggling.has(causa.id)) return
-  toggling.add(causa.id)
-  const prev = causa.activo
-  causa.activo = !prev
+async function toggleActivo(motivo: MotivoBaja) {
+  if (motivo.esFijo || motivo.eliminadoEl || toggling.has(motivo.id)) return
+  toggling.add(motivo.id)
+  const prev = motivo.activo
+  motivo.activo = !prev
   try {
-    await useApiFetch(`${apiUrl}/causas-merma/${causa.id}`, {
+    await useApiFetch(`${apiUrl}/motivos-baja/${motivo.id}`, {
       method: 'PATCH',
-      body: { activo: causa.activo },
+      body: { activo: motivo.activo },
     })
     toast.add({
-      title: causa.activo ? 'Causa activada' : 'Causa desactivada',
+      title: motivo.activo ? 'Motivo activado' : 'Motivo desactivado',
       color: 'success',
     })
   }
   catch (e: unknown) {
-    causa.activo = prev
+    motivo.activo = prev
     toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })
   }
   finally {
-    toggling.delete(causa.id)
+    toggling.delete(motivo.id)
   }
 }
 
-function pedirEliminar(causa: CausaMerma) {
-  if (causa.eliminadoEl) return
-  confirmDeleteId.value = causa.id
+function pedirEliminar(motivo: MotivoBaja) {
+  if (motivo.eliminadoEl) return
+  confirmDeleteId.value = motivo.id
   confirmModalOpen.value = true
 }
 
 async function eliminar(id: string) {
   try {
-    await useApiFetch(`${apiUrl}/causas-merma/${id}`, { method: 'DELETE' })
+    await useApiFetch(`${apiUrl}/motivos-baja/${id}`, { method: 'DELETE' })
     // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
     // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
     // próximo GET con el flag—, así que acá hace falta recargar en vez del
@@ -198,7 +198,7 @@ async function eliminar(id: string) {
     else {
       removeLocal(id)
     }
-    toast.add({ title: 'Causa eliminada', color: 'success' })
+    toast.add({ title: 'Motivo eliminado', color: 'success' })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar'), color: 'error' })
@@ -227,7 +227,7 @@ function cerrarRestaurar() {
  * Solo los errores de verdad (404 "no está en la papelera", red) terminan en
  * toast.
  */
-async function restaurarCausa(id: string, nombreNuevo?: string) {
+async function restaurarMotivo(id: string, nombreNuevo?: string) {
   // El modal no se cierra solo al confirmar (lo cierran las funciones de acá),
   // así que mientras el POST viaja el segundo click manda un segundo
   // `POST .../restaurar` sobre una fila que el primero ya revivió: el backend
@@ -237,7 +237,7 @@ async function restaurarCausa(id: string, nombreNuevo?: string) {
   restaurando.value = true
   try {
     await restaurar(id, nombreNuevo)
-    const c = causas.value.find(x => x.id === id)
+    const c = motivos.value.find(x => x.id === id)
     if (c) {
       c.eliminadoEl = null
       c.eliminadoPorNombre = null
@@ -246,10 +246,10 @@ async function restaurarCausa(id: string, nombreNuevo?: string) {
         // local no adivina. Reordenar hace falta porque el listado viene
         // ordenado por nombre y el renombre lo puede mover de lugar.
         c.nombre = nombreNuevo
-        causas.value = ordenarFijosPrimero(causas.value)
+        motivos.value = ordenarFijosPrimero(motivos.value)
       }
     }
-    toast.add({ title: 'Causa restaurada', color: 'success' })
+    toast.add({ title: 'Motivo restaurado', color: 'success' })
     cerrarRestaurar()
   }
   catch (e: unknown) {
@@ -276,12 +276,12 @@ function confirmarColision() {
   const id = confirmRestaurarId.value
   const nombre = nombrePropuesto.value.trim()
   if (!id || !nombre) return
-  restaurarCausa(id, nombre)
+  restaurarMotivo(id, nombre)
 }
 
 onMounted(cargar)
 
-const columns: TableColumn<CausaMerma>[] = [
+const columns: TableColumn<MotivoBaja>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
   { id: 'activo', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
@@ -291,8 +291,8 @@ const columns: TableColumn<CausaMerma>[] = [
 <template>
   <div class="space-y-6">
     <CrudPageHeader
-      title="Causas de merma"
-      description="Tipifica por qué se descarta stock. Las causas fijas del sistema no se editan."
+      title="Motivos de baja"
+      description="Tipifica por qué se da de baja algo. Los motivos fijos del sistema no se editan."
     >
       <template #actions>
         <div class="flex items-center gap-4">
@@ -304,14 +304,14 @@ const columns: TableColumn<CausaMerma>[] = [
             icon="i-lucide-plus"
             @click="abrirCrear"
           >
-            Nueva causa
+            Nuevo motivo
           </UButton>
         </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable
-      :data="causas"
+      :data="motivos"
       :columns="columns"
       :loading="loading"
     >
@@ -383,7 +383,7 @@ const columns: TableColumn<CausaMerma>[] = [
             name="i-lucide-tags"
             class="w-8 h-8 mx-auto mb-2 opacity-40"
           />
-          No hay causas de merma.
+          No hay motivos de baja.
         </div>
       </template>
     </CrudTable>
@@ -407,7 +407,7 @@ const columns: TableColumn<CausaMerma>[] = [
 
       <template #body>
         <UForm
-          id="causa-merma-form"
+          id="motivo-baja-form"
           :state="form"
           class="space-y-4"
           @submit="guardar"
@@ -443,7 +443,7 @@ const columns: TableColumn<CausaMerma>[] = [
         <UButton
           v-if="!editingEsFijo"
           type="submit"
-          form="causa-merma-form"
+          form="motivo-baja-form"
           :loading="saving"
         >
           {{ submitLabel }}
@@ -453,21 +453,21 @@ const columns: TableColumn<CausaMerma>[] = [
 
     <CrudModal
       v-model:open="confirmModalOpen"
-      title="Eliminar causa"
-      message="¿Eliminar esta causa de merma? Podés recuperarla desde «Ver eliminados»."
+      title="Eliminar motivo"
+      message="¿Eliminar este motivo de baja? Podés recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />
 
     <CrudModal
       v-model:open="confirmRestaurarModalOpen"
-      title="Restaurar causa"
-      message="¿Restaurar esta causa de merma? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      title="Restaurar motivo"
+      message="¿Restaurar este motivo de baja? Volverá a aparecer en el listado y podrá usarse de nuevo."
       confirm-label="Restaurar"
       confirm-color="neutral"
       :loading="restaurando"
       @cancel="cerrarRestaurar"
-      @confirm="confirmRestaurarId && restaurarCausa(confirmRestaurarId)"
+      @confirm="confirmRestaurarId && restaurarMotivo(confirmRestaurarId)"
     />
 
     <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo

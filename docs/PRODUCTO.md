@@ -61,7 +61,7 @@ a ojo —un cajero, un mesero— dos entradas que solo difieren en mayúsculas s
 error de tipeo, no dos cosas distintas.
 
 Aplica a los ocho catálogos que hoy tienen la regla: `descuentos`, `recargos`,
-`turnos`, `cajones`, `causas_merma`, `motivo_diferencia_caja`,
+`turnos`, `cajones`, `motivo_baja`, `motivo_diferencia_caja`,
 `motivo_diferencia_inventario`, `grupos_modificadores`. Los ocho la enforcean
 igual: índice único parcial sobre `(tenant_id, lower(nombre))` con
 `WHERE eliminado_el IS NULL` —parcial para que borrar y volver a crear con el
@@ -638,7 +638,7 @@ después — un POS de venta física sigue vendiendo mientras alguien cuenta, a 
 un almacén que bloquea la ubicación durante el conteo.
 
 **La causa de la diferencia usa un catálogo propio** (`motivo_diferencia_inventario`),
-no `causas_merma`: un recuento puede dar **sobrante**, y ninguna causa de merma explica un
+no `motivo_baja`: un recuento puede dar **sobrante**, y ningún motivo de baja explica un
 sobrante; además mezclar las dos ensuciaría el reporte de mermas. El movimiento del kardex
 siempre lleva `motivo='recuento'` — la causa es un atributo (`motivo_diferencia_id`), no
 reclasifica el movimiento. Hay una causa por defecto para toda la sesión, con override por

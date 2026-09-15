@@ -2,7 +2,7 @@
 # reset-db.sh — deja la base en estado limpio y verificado para correr el e2e.
 #
 # Por qué existe: el e2e local se contamina solo. Correr `npm run test:e2e` dos
-# veces seguidas deja cajas abiertas, causas duplicadas y stock agotado, y los
+# veces seguidas deja cajas abiertas, motivos duplicados y stock agotado, y los
 # números de la 2da corrida NO son válidos. La única corrida que vale es la
 # primera sobre una base recién sembrada.
 #

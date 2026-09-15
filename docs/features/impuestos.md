@@ -153,7 +153,7 @@ No existe endpoint para crear impuestos del sistema — se siembran solo vía
 ### Unicidad de nombre por tenant (2026-08-16)
 
 `impuestos` era **la única** de la familia de catálogos sin índice único de nombre:
-`descuentos`, `recargos`, `turnos`, `cajones`, `causas_merma`, los dos
+`descuentos`, `recargos`, `turnos`, `cajones`, `motivo_baja`, los dos
 `motivo_diferencia` y `grupos_modificadores` ya lo tenían. Ahora son **nueve**, con la
 misma forma: `ON (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL` — case-insensitive
 porque *"Impuesto verde"* e *"impuesto verde"* son el mismo para quien elige de una lista,

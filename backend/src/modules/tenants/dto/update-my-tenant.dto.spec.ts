@@ -4,8 +4,8 @@ import { UpdateMyTenantDto } from './update-my-tenant.dto';
 
 /**
  * `nombre` es la identidad del tenant y sale en documentos: el mismo hueco
- * que se cerró en los DTOs de catálogo (`UpdateCausaMermaDto` y hermanos,
- * ver `mermas/dto/update-causa-merma.dto.spec.ts`) estaba abierto acá. Tres
+ * que se cerró en los DTOs de catálogo (`UpdateMotivoBajaDto` y hermanos,
+ * ver `motivos-baja/dto/update-motivo-baja.dto.spec.ts`) estaba abierto acá. Tres
  * decoradores, tres bugs distintos, ninguno cubre a los otros dos:
  * `@IsNotEmpty()` → `''` · `@Transform` que trimea → `'   '` ·
  * `@ValidateIf` en vez de `@IsOptional()` → `null`.

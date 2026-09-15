@@ -15,7 +15,7 @@ import { Impresora } from '../../modules/impresoras/entities/impresora.entity';
 import { Salon } from '../../modules/salones/entities/salon.entity';
 import { Mesa } from '../../modules/salones/entities/mesa.entity';
 import { GrupoModificador } from '../../modules/grupos-modificadores/entities/grupo-modificador.entity';
-import { CausaMerma } from '../../modules/mermas/entities/causa-merma.entity';
+import { MotivoBaja } from '../../modules/motivos-baja/entities/motivo-baja.entity';
 import { MotivoDiferenciaCaja } from '../../modules/motivos-diferencia/entities/motivo-diferencia-caja.entity';
 import { MotivoDiferenciaInventario } from '../../modules/motivos-diferencia-inventario/entities/motivo-diferencia-inventario.entity';
 import { Item } from '../../modules/items/entities/item.entity';
@@ -33,7 +33,7 @@ const RESTAURABLES = [
   Salon,
   Mesa,
   GrupoModificador,
-  CausaMerma,
+  MotivoBaja,
   MotivoDiferenciaCaja,
   MotivoDiferenciaInventario,
   Item,

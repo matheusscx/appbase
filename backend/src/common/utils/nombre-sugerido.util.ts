@@ -6,7 +6,7 @@ import type { Db } from '../db/db.service';
  * la papelera choca con una viva que ya tomó ese nombre.
  *
  * Lo consumen los 8 recursos con unicidad de nombre por tenant (`descuentos`,
- * `recargos`, `turnos`, `cajones`, `causas-merma`, `motivos-diferencia`,
+ * `recargos`, `turnos`, `cajones`, `motivos-baja`, `motivos-diferencia`,
  * `motivos-diferencia-inventario`, `grupos-modificadores`), y los 8 la detectan
  * igual: capturando el `23505` de Postgres, o sea recién DESPUÉS de que falla
  * el UPDATE que revive la fila. Pre-consultar sería una query extra en TODOS
@@ -163,7 +163,7 @@ export async function errorDeColisionNombre<T extends ObjectLiteral>(
 
 /**
  * Igual que `errorDeColisionNombre` pero para los services que hablan SQL
- * cruda y **no tienen repositorio** (`causas-merma`, `motivos-diferencia`,
+ * cruda y **no tienen repositorio** (`motivos-baja`, `motivos-diferencia`,
  * `motivos-diferencia-inventario`, `grupos-modificadores`: los cuatro
  * resuelven el restaurar con un `UPDATE … RETURNING` sobre `ds`).
  *

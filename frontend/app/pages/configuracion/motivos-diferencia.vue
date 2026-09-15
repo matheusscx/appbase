@@ -141,7 +141,7 @@ async function guardar() {
       activo: form.value.activo,
       requiereComentario: form.value.requiereComentario,
     }
-    // Divergencia de causas-merma: un fijo permite togglear activo/requiereComentario
+    // Divergencia de motivos-baja: un fijo permite togglear activo/requiereComentario
     // pero no renombrarse — omitir nombre evita el 400 del backend.
     if (!esFijo) {
       body.nombre = form.value.nombre.trim()

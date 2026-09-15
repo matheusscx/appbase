@@ -11,7 +11,7 @@ import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 // papelera no pasa por `assertNombreLibre`).
 //
 // Lo crea `seeder.service.ts` → `seedGruposModificadores()` con SQL cruda,
-// mismo patrón que `causas_merma` y los dos `motivos_diferencia`, cuyas
+// mismo patrón que `motivo_baja` y los dos `motivos_diferencia`, cuyas
 // entities tampoco lo declaran por la misma razón.
 @Entity('grupos_modificadores')
 export class GrupoModificador {

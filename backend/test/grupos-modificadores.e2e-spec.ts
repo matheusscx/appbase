@@ -278,7 +278,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
   // papelera. Mientras la entity declaraba el índice con `@Index`, TypeORM lo
   // creaba en dev sobre `nombre` PELADO (no sabe expresar `LOWER()`), así que
   // dev enforzaba una regla distinta de la de `startup-pos.sql`. Ahora lo crea
-  // el seeder con SQL cruda, igual que `causas_merma`.
+  // el seeder con SQL cruda, igual que `motivo_baja`.
 
   it('el índice único de nombre existe y es sobre lower(nombre)', async () => {
     const rows: { indexdef: string }[] = await ds.query(

@@ -26,7 +26,7 @@ export class AjusteCostoDto {
   costoNuevo: string;
 
   // Obligatorio: un ajuste de costo es una corrección y tiene que quedar
-  // explicada. No lleva causa tipificada (a diferencia de las mermas): es un
+  // explicada. No lleva motivo tipificado (a diferencia de las mermas): es un
   // evento puntual, no un fenómeno recurrente que se reporte por categoría.
   @IsString()
   @IsNotEmpty()

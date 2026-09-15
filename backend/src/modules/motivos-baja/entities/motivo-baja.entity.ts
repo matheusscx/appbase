@@ -7,9 +7,9 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
-@Entity('causas_merma')
-export class CausaMerma {
-  @PrimaryGeneratedColumn('uuid', { name: 'causa_merma_id' })
+@Entity('motivo_baja')
+export class MotivoBaja {
+  @PrimaryGeneratedColumn('uuid', { name: 'motivo_baja_id' })
   id: string;
 
   @Column({ name: 'tenant_id', type: 'uuid' })

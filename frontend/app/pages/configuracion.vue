@@ -82,9 +82,9 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/metodos-pago',
       },
       {
-        label: 'Causas de merma',
+        label: 'Motivos de baja',
         icon: 'i-lucide-tags',
-        to: '/configuracion/causas-merma',
+        to: '/configuracion/motivos-baja',
       },
       {
         label: 'Motivos de diferencia',

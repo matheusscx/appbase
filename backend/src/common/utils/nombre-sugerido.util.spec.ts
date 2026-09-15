@@ -93,7 +93,7 @@ describe('nombre-sugerido.util', () => {
     });
 
     // 3 de los 5 recursos con índice único lo tienen sobre `lower(nombre)`
-    // (`causas_merma`, `motivo_diferencia_caja`,
+    // (`motivo_baja`, `motivo_diferencia_caja`,
     // `motivo_diferencia_inventario` — medido con `pg_indexes`). Sin este
     // modo, la sugerencia devolvería un nombre que la BASE considera tomado y
     // el usuario recibiría el mismo 400 después de confirmar el modal.

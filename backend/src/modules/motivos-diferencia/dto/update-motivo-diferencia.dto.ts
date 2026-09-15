@@ -13,7 +13,7 @@ export class UpdateMotivoDiferenciaDto {
   // los dos están vivos y los dos tenían el mismo hueco. Tocar uno solo deja el
   // otro abierto — pasó, y lo cazó el e2e.
   // `trim` antes de validar: `'   '` tiene que fallar igual que `''`. Ver el
-  // comentario largo en `UpdateCausaMermaDto`.
+  // comentario largo en `UpdateMotivoBajaDto`.
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )

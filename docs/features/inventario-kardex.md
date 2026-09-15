@@ -252,7 +252,7 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
   tipeado en gramos.
 - `comentario` (required): texto libre, no vacío. Un ajuste de costo es una
   corrección y tiene que quedar explicada; a diferencia de las mermas, no lleva
-  causa tipificada (es un evento puntual, no un fenómeno recurrente que se
+  motivo tipificado (es un evento puntual, no un fenómeno recurrente que se
   reporte por categoría).
 
 **Validaciones / errores:**

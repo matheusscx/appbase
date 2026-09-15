@@ -876,9 +876,9 @@ CREATE TABLE "item_descuentos" (
   PRIMARY KEY ("item_id", "descuento_id")
 );
 
--- Catálogo de causas de merma por tenant (vencimiento, rotura, etc.)
-CREATE TABLE "causas_merma" (
-  "causa_merma_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+-- Catálogo de motivos de baja por tenant (vencimiento, rotura, etc.)
+CREATE TABLE "motivo_baja" (
+  "motivo_baja_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"         TEXT NOT NULL,
   "activo"         BOOLEAN NOT NULL DEFAULT true,
@@ -888,12 +888,12 @@ CREATE TABLE "causas_merma" (
   "eliminado_el"   TIMESTAMPTZ,
   "eliminado_por"  UUID REFERENCES usuarios("usuario_id")
 );
-CREATE UNIQUE INDEX "uq_causas_merma_tenant_nombre"
-  ON "causas_merma" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+CREATE UNIQUE INDEX "uq_motivo_baja_tenant_nombre"
+  ON "motivo_baja" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
 
 -- Causas de diferencia detectada en un recuento físico. Catálogo por tenant.
--- NO se reusa causas_merma: un recuento puede dar SOBRANTE, y ninguna causa de
--- merma lo explica. Ver ADR/spec de recuento de inventario.
+-- NO se reusa motivo_baja: un recuento puede dar SOBRANTE, y ningún motivo de
+-- baja lo explica. Ver ADR/spec de recuento de inventario.
 CREATE TABLE "motivo_diferencia_inventario" (
   "motivo_diferencia_inventario_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
@@ -969,7 +969,7 @@ CREATE TABLE "movimientos_inventario" (
   "comentario"       TEXT,
   "costo_unitario"   NUMERIC(18,4),
   "costo_anterior"   NUMERIC(18,4),   -- costo vigente ANTES del movimiento; solo en motivo 'ajuste_costo'
-  "causa_merma_id"   UUID REFERENCES "causas_merma" ("causa_merma_id"),
+  "motivo_baja_id"   UUID REFERENCES "motivo_baja" ("motivo_baja_id"),
   "motivo_diferencia_id" UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
   -- solo en motivo='recuento'; NULL en el resto
   "traslado_id"      UUID REFERENCES "traslados" ("traslado_id"),
@@ -1355,7 +1355,7 @@ CREATE TABLE "caja_intentos_rechazados" (
 -- Catálogo de motivos de diferencia de caja por tenant (falta de efectivo, divergencia
 -- de tarjeta, etc.) — sub-proyecto de negocio C, cierre en dos fases (ver
 -- docs/features/gestion-cajas.md § Cierre en dos fases). Mismo patrón que
--- "causas_merma": `es_fijo` sembrado por tenant, no renombrable/eliminable pero sí
+-- "motivo_baja": `es_fijo` sembrado por tenant, no renombrable/eliminable pero sí
 -- togglable en `activo`/`requiere_comentario`. `requiere_comentario` fuerza el
 -- comentario libre además del motivo al justificar una línea descuadrada.
 CREATE TABLE "motivo_diferencia_caja" (

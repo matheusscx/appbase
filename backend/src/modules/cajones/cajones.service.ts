@@ -149,7 +149,7 @@ export class CajonesService {
       // competía por el nombre, pero al revivirlo vuelve a competir. Se capta
       // el código de Postgres —no una lista de índices a mano— para que valga
       // también donde no lo enumeramos. Mismo patrón que
-      // causas-merma.service.ts → restaurar().
+      // motivos-baja.service.ts → restaurar().
       if ((e as { code?: string }).code === '23505') {
         // La sugerencia se calcula ACÁ y no antes del `UPDATE` a propósito:
         // con un índice único el `catch` hace falta igual —entre consultar y

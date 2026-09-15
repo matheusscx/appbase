@@ -8,7 +8,7 @@ export class FindMermasDto extends PaginationQueryDto {
 
   @IsOptional()
   @IsUUID()
-  causaMermaId?: string;
+  motivoBajaId?: string;
 
   @IsOptional()
   @IsDateString()

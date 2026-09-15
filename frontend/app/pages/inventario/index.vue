@@ -27,7 +27,7 @@ interface Movimiento {
   usuarioNombre: string | null
   comentario: string | null
   creadoEl: string
-  causaNombre?: string | null
+  motivoBajaNombre?: string | null
   costoUnitario?: string | null
   costoAnterior?: string | null
   costoPerdido?: string | null
@@ -126,8 +126,8 @@ onMounted(() => {
 
 function motivoLabel(mov: Movimiento): string {
   const base = motivoOpts.find(o => o.value === mov.motivo)?.label ?? mov.motivo
-  if (mov.motivo === 'merma' && mov.causaNombre) {
-    return `Merma · ${mov.causaNombre}`
+  if (mov.motivo === 'merma' && mov.motivoBajaNombre) {
+    return `Merma · ${mov.motivoBajaNombre}`
   }
   return base
 }

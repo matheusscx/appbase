@@ -6,7 +6,7 @@ import {
   MaxLength,
 } from 'class-validator';
 
-export class CreateCausaMermaDto {
+export class CreateMotivoBajaDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)

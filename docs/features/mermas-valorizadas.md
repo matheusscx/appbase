@@ -9,13 +9,13 @@
 
 ### What is it?
 
-Registro dedicado de mermas de stock en productos (`tipo='producto'`) con **causa tipificada por tenant**, conversión de unidad opcional y **costo congelado en el kardex**. **El costo no se tipea: sale de `item_producto.costo_actual`.** El formulario de merma solo pide cantidad y causa; el sistema valoriza con el costo vigente del ítem al momento de mermar. Si el ítem no tiene costo cargado, la merma **se registra igual, sin valorizar, y queda así para siempre** — no existe un ajuste posterior que le ponga costo a una merma vieja, mismo criterio que el precio congelado de una venta y que [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) con el hecho fiscal. El impacto financiero (`costoPerdido = cantidad × costo_unitario`) se calcula al leer el movimiento, y es `null` cuando no hay costo. La merma **nunca** actualiza `item_producto.costo_actual`.
+Registro dedicado de mermas de stock en productos (`tipo='producto'`) con **motivo tipificado por tenant**, conversión de unidad opcional y **costo congelado en el kardex**. **El costo no se tipea: sale de `item_producto.costo_actual`.** El formulario de merma solo pide cantidad y motivo; el sistema valoriza con el costo vigente del ítem al momento de mermar. Si el ítem no tiene costo cargado, la merma **se registra igual, sin valorizar, y queda así para siempre** — no existe un ajuste posterior que le ponga costo a una merma vieja, mismo criterio que el precio congelado de una venta y que [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) con el hecho fiscal. El impacto financiero (`costoPerdido = cantidad × costo_unitario`) se calcula al leer el movimiento, y es `null` cuando no hay costo. La merma **nunca** actualiza `item_producto.costo_actual`.
 
 Decisión y porqué: [`docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md`](../superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md).
 
-Causas fijas del sistema (`es_fijo=true`): **Vencimiento**, **Deterioro**, **Robo**, **Error operativo**, **Otro** — no se editan ni eliminan. El administrador puede crear causas custom adicionales.
+Motivos fijos del sistema (`es_fijo=true`): **Vencimiento**, **Deterioro**, **Robo**, **Error operativo**, **Otro** — no se editan ni eliminan. El administrador puede crear motivos custom adicionales.
 
-El ajuste genérico de stock (`PATCH /items/:id/stock`) **ya no acepta** `motivo='merma'`; toda merma pasa por el flujo dedicado con causa obligatoria.
+El ajuste genérico de stock (`PATCH /items/:id/stock`) **ya no acepta** `motivo='merma'`; toda merma pasa por el flujo dedicado con motivo obligatorio.
 
 ### Why does it exist?
 
@@ -24,10 +24,10 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 ### Scope
 
 **Included:**
-- Tabla `causas_merma` por tenant + columna `causa_merma_id` en `movimientos_inventario`.
-- Semilla de 5 causas fijas al crear tenant y en el seeder de desarrollo.
-- CRUD `/api/causas-merma` y registro/listado `/api/mermas`.
-- UI: configuración de causas, operación de mermas (drawer sin campo de costo; cartel no bloqueante cuando el producto no tiene costo cargado), kardex con causa y costo perdido.
+- Tabla `motivo_baja` por tenant + columna `motivo_baja_id` en `movimientos_inventario`.
+- Semilla de 5 motivos fijos al crear tenant y en el seeder de desarrollo.
+- CRUD `/api/motivos-baja` y registro/listado `/api/mermas`.
+- UI: configuración de motivos, operación de mermas (drawer sin campo de costo; cartel no bloqueante cuando el producto no tiene costo cargado), kardex con motivo y costo perdido.
 - Quitar opción Merma del modal de ajuste de stock en items.
 - Mismo cartel no bloqueante en la entrada por compra (`configuracion/items.vue`), porque el dato de costo se carga ahí, no al mermar.
 - Marca **Sin costo** y filtro `sinCosto` en el listado de ítems (ver [`inventario-kardex.md`](./inventario-kardex.md) § *"Ítems sin costo"*).
@@ -42,11 +42,11 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 
 ## Modelo de datos
 
-### `causas_merma`
+### `motivo_baja`
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `causa_merma_id` | UUID PK | |
+| `motivo_baja_id` | UUID PK | |
 | `tenant_id` | UUID FK | Del token |
 | `nombre` | TEXT | Único vivo por tenant |
 | `activo` | BOOLEAN | Default `true` |
@@ -57,16 +57,16 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `causa_merma_id` | UUID NULL FK | Obligatoria iff `motivo='merma'` |
+| `motivo_baja_id` | UUID NULL FK | Obligatoria iff `motivo='merma'` |
 
 ---
 
 ## API
 
-### CRUD `/api/causas-merma`
+### CRUD `/api/motivos-baja`
 
 - `GET` — cualquier usuario del tenant; query `?soloActivas=true` filtra activas.
-- `POST` / `PATCH /:id` / `DELETE /:id` — `TenantAdminGuard`; rechaza editar/borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos con esa causa.
+- `POST` / `PATCH /:id` / `DELETE /:id` — `TenantAdminGuard`; rechaza editar/borrar `es_fijo=true`; soft-delete bloqueado si hay movimientos con ese motivo.
 
 ### `POST /api/mermas`
 
@@ -81,7 +81,7 @@ Request (CreateMermaDto):
   "itemId": "<uuid>",
   "ubicacionId": "<uuid>",
   "cantidad": "250",
-  "causaMermaId": "<uuid>",
+  "motivoBajaId": "<uuid>",
   "unidadCodigo": "g",
   "comentario": "Lote vencido"
 }
@@ -104,7 +104,7 @@ cada vez que la pantalla se olvide de mandarlo. `400` si falta o es de otro tena
   "stockResultante": "1.7500",
   "costoUnitario": "8000",
   "costoPerdido": "2000000",
-  "causaNombre": "Vencimiento"
+  "motivoBajaNombre": "Vencimiento"
 }
 ```
 
@@ -115,13 +115,13 @@ cada vez que la pantalla se olvide de mandarlo. `400` si falta o es de otro tena
   "stockResultante": "1.7500",
   "costoUnitario": null,
   "costoPerdido": null,
-  "causaNombre": "Vencimiento"
+  "motivoBajaNombre": "Vencimiento"
 }
 ```
 
 ### `GET /api/mermas`
 
-Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `causaMermaId`, `desde`, `hasta`. Cada fila incluye `causaNombre` y `costoPerdido`.
+Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `motivoBajaId`, `desde`, `hasta`. Cada fila incluye `motivoBajaNombre` y `costoPerdido`.
 
 **El listado sobrevive a la baja del producto.** Una merma registrada es plata
 perdida que ya ocurrió, así que dar de baja el producto después no la saca del
@@ -141,18 +141,18 @@ la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
 
 ## Backend
 
-- **Módulo**: `src/modules/mermas/` (causas + registro en un feature module).
-- Reusa `InventarioService.registrarMovimiento` (`tipo='salida'`, `motivo='merma'`, `causaMermaId`) y `CatalogService.convertirUnidad`.
+- **Módulos**: `src/modules/motivos-baja/` (catálogo) y `src/modules/mermas/` (registro), como feature modules separados.
+- Reusa `InventarioService.registrarMovimiento` (`tipo='salida'`, `motivo='merma'`, `motivoBajaId`) y `CatalogService.convertirUnidad`.
 - `AjusteStockDto`: enum de motivos sin `'merma'`.
-- `registrarMovimiento`: exige `causaMermaId` si `motivo='merma'`; rechaza `causaMermaId` en otros motivos.
+- `registrarMovimiento`: exige `motivoBajaId` si `motivo='merma'`; rechaza `motivoBajaId` en otros motivos.
 
 ---
 
 ## Frontend
 
-- `/configuracion/causas-merma` — CRUD con badge **Fija** en causas `es_fijo`.
-- `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y causa; **sin campo de costo**). Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`).
-- Kardex / historial de movimientos: `Merma · {causaNombre}` y costo perdido formateado (`formatMonto`), o `—` cuando es `null`.
+- `/configuracion/motivos-baja` — CRUD con badge **Fija** en motivos `es_fijo`.
+- `/mermas` — listado filtrable + drawer registrar (solo cantidad, unidad y motivo; **sin campo de costo**). Cartel no bloqueante cuando el producto no tiene `costo_actual`: avisa que la merma se va a registrar igual pero sin valorizar, y que no se puede corregir después. Columna Cantidad formateada por magnitud vía `formatStock` (`useFormatters`) — `MermaListItem.unidadMedida` (viene de `item_producto.unidad_medida`).
+- Kardex / historial de movimientos: `Merma · {motivoBajaNombre}` y costo perdido formateado (`formatMonto`), o `—` cuando es `null`.
 - Modal de ajuste de stock en items: opción Merma eliminada.
 - `configuracion/items.vue` — mismo cartel no bloqueante en el drawer de entrada por compra cuando el producto no tiene costo; badge **Sin costo** y checkbox **Solo sin costo** en el listado (filtro `sinCosto`, ver [`inventario-kardex.md`](./inventario-kardex.md)).
 
@@ -161,8 +161,8 @@ la medianoche de la zona del tenant, el timestamp se respeta al segundo. Ver
 ## Testing
 
 ```bash
-cd backend && npm test -- causas-merma.service.spec.ts mermas.service.spec.ts
-cd backend && npm test -- inventario.service.spec.ts  # casos causa merma
+cd backend && npm test -- motivos-baja.service.spec.ts mermas.service.spec.ts
+cd backend && npm test -- inventario.service.spec.ts  # casos motivo baja
 cd backend && npm run test:e2e -- mermas.e2e-spec.ts
 ```
 
@@ -170,10 +170,10 @@ cd backend && npm run test:e2e -- mermas.e2e-spec.ts
 
 ## Acceptance Criteria
 
-- [x] CRUD causas custom; fijas inmutables
+- [x] CRUD motivos custom; fijos inmutables
 - [x] `POST /mermas` tipifica, descuenta stock y congela costo
 - [x] El costo sale de `item_producto.costo_actual`, nunca se tipea; sin costo, la merma se registra sin valorizar y queda así para siempre — sin override por movimiento
-- [x] Listado y kardex muestran valorizado (o `—` sin costo) y causa
+- [x] Listado y kardex muestran valorizado (o `—` sin costo) y motivo
 - [x] Cartel no bloqueante en la merma y en la entrada por compra cuando el ítem no tiene costo; marca y filtro `sinCosto` en el listado de ítems
 - [x] Ajuste genérico sin `merma`
 - [x] Unit + E2E

@@ -17,7 +17,7 @@ import {
 // `@Index`**. Mientras estuvo declarado acá, `synchronize` creaba en dev un
 // índice sobre `nombre` PELADO y la base enforzaba otra regla que el código.
 // Lo crea `seeder.service.ts` → `seedCajones()` con SQL cruda, mismo patrón que
-// `grupos_modificadores`, `causas_merma` y los dos `motivos_diferencia`.
+// `grupos_modificadores`, `motivo_baja` y los dos `motivos_diferencia`.
 @Entity('cajones')
 export class Cajon {
   @PrimaryGeneratedColumn('uuid', { name: 'cajon_id' })

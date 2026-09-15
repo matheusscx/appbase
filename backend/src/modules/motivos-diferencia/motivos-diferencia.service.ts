@@ -139,7 +139,7 @@ export class MotivosDiferenciaService {
     dto: UpdateMotivoDiferenciaDto,
   ): Promise<MotivoDiferenciaListItem> {
     const motivo = await this.findOneOrFail(tenantId, id);
-    // Divergencia de causas-merma: en un fijo se bloquea SOLO el rename.
+    // Divergencia de motivos-baja: en un fijo se bloquea SOLO el rename.
     if (motivo.esFijo && dto.nombre !== undefined) {
       throw new BadRequestException(
         'No se puede renombrar un motivo fijo del sistema',

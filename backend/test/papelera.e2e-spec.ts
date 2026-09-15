@@ -44,7 +44,7 @@ interface CategoriaItem {
   eliminadoPor: string | null;
   eliminadoPorNombre?: string | null;
 }
-interface CausaMermaItem {
+interface MotivoBajaItem {
   id: string;
   nombre: string;
   activo: boolean;
@@ -364,11 +364,12 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
       },
     },
     {
-      nombre: 'causas-merma',
-      path: 'causas-merma',
-      tabla: 'causas_merma',
-      pk: 'causa_merma_id',
-      crear: () => crearFila('causas-merma', 'Causa', (n) => ({ nombre: n })),
+      nombre: 'motivos-baja',
+      path: 'motivos-baja',
+      tabla: 'motivo_baja',
+      pk: 'motivo_baja_id',
+      crear: () =>
+        crearFila('motivos-baja', 'Motivo baja', (n) => ({ nombre: n })),
     },
     {
       nombre: 'descuentos',
@@ -668,17 +669,17 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
   }
 });
 
-// Causas de merma — segunda referencia. Familia SQL cruda (no softDelete() de
+// Motivos de baja — segunda referencia. Familia SQL cruda (no softDelete() de
 // TypeORM) y con nombre único por tenant, así que agrega el 400 de colisión al
 // restaurar: el índice único es parcial (WHERE eliminado_el IS NULL), así que
-// mientras la causa está borrada, otra causa puede tomar su nombre y competir
-// cuando se intenta revivirla.
-describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', () => {
+// mientras el motivo está borrado, otro motivo puede tomar su nombre y competir
+// cuando se intenta revivirlo.
+describe('Papelera (e2e) — motivos de baja, SQL cruda + colisión de nombre', () => {
   let app: INestApplication<App>;
   let tokenAdmin: string;
   let tokenNoAdmin: string;
-  let causaId: string;
-  let causaNombre: string;
+  let motivoBajaId: string;
+  let motivoBajaNombre: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -703,116 +704,116 @@ describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', 
     await app.close();
   });
 
-  it('POST /causas-merma con admin → 201 crea la causa de prueba', async () => {
-    causaNombre = `Vencimiento E2E ${Date.now()}`;
+  it('POST /motivos-baja con admin → 201 crea el motivo de prueba', async () => {
+    motivoBajaNombre = `Vencimiento E2E ${Date.now()}`;
     const res = await request(app.getHttpServer())
-      .post('/api/causas-merma')
+      .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: causaNombre });
+      .send({ nombre: motivoBajaNombre });
 
     expect(res.status).toBe(201);
-    const body = res.body as CausaMermaItem;
+    const body = res.body as MotivoBajaItem;
     expect(body.id).toBeDefined();
-    causaId = body.id;
+    motivoBajaId = body.id;
   });
 
-  it('DELETE /causas-merma/:id por no-admin → 403', async () => {
+  it('DELETE /motivos-baja/:id por no-admin → 403', async () => {
     const res = await request(app.getHttpServer())
-      .delete(`/api/causas-merma/${causaId}`)
+      .delete(`/api/motivos-baja/${motivoBajaId}`)
       .set('Authorization', `Bearer ${tokenNoAdmin}`);
     expect(res.status).toBe(403);
   });
 
-  it('DELETE /causas-merma/:id con admin → 204 (soft delete)', async () => {
+  it('DELETE /motivos-baja/:id con admin → 204 (soft delete)', async () => {
     const res = await request(app.getHttpServer())
-      .delete(`/api/causas-merma/${causaId}`)
+      .delete(`/api/motivos-baja/${motivoBajaId}`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(res.status).toBe(204);
   });
 
-  it('GET /causas-merma sin flag no trae la causa borrada', async () => {
+  it('GET /motivos-baja sin flag no trae el motivo borrado', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/causas-merma')
+      .get('/api/motivos-baja')
       .set('Authorization', `Bearer ${tokenAdmin}`);
 
     expect(res.status).toBe(200);
-    const causas = res.body as CausaMermaItem[];
-    expect(causas.find((c) => c.id === causaId)).toBeUndefined();
+    const motivos = res.body as MotivoBajaItem[];
+    expect(motivos.find((c) => c.id === motivoBajaId)).toBeUndefined();
   });
 
-  it('GET /causas-merma?incluirEliminados=true trae la causa con el nombre de quien borró', async () => {
+  it('GET /motivos-baja?incluirEliminados=true trae el motivo con el nombre de quien borró', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/causas-merma?incluirEliminados=true')
+      .get('/api/motivos-baja?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
 
     expect(res.status).toBe(200);
-    const causas = res.body as CausaMermaItem[];
-    const borrada = causas.find((c) => c.id === causaId);
+    const motivos = res.body as MotivoBajaItem[];
+    const borrada = motivos.find((c) => c.id === motivoBajaId);
     expect(borrada).toBeDefined();
     expect(borrada?.eliminadoEl).not.toBeNull();
     expect(borrada?.eliminadoPorNombre).toBe('admin.paris');
   });
 
-  it('POST /causas-merma/:id/restaurar por no-admin → 403', async () => {
+  it('POST /motivos-baja/:id/restaurar por no-admin → 403', async () => {
     const res = await request(app.getHttpServer())
-      .post(`/api/causas-merma/${causaId}/restaurar`)
+      .post(`/api/motivos-baja/${motivoBajaId}/restaurar`)
       .set('Authorization', `Bearer ${tokenNoAdmin}`);
     expect(res.status).toBe(403);
   });
 
-  it('colisión real de Postgres: crear otra causa con el mismo nombre y restaurar la borrada → 400, nada cambia', async () => {
-    // Mientras `causaId` estaba borrada, nadie competía por su nombre: se
-    // puede crear una causa nueva y activa con el mismo nombre.
+  it('colisión real de Postgres: crear otro motivo con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+    // Mientras `motivoBajaId` estaba borrado, nadie competía por su nombre: se
+    // puede crear un motivo nuevo y activo con el mismo nombre.
     const otra = await request(app.getHttpServer())
-      .post('/api/causas-merma')
+      .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: causaNombre });
+      .send({ nombre: motivoBajaNombre });
     expect(otra.status).toBe(201);
-    const otraId = (otra.body as CausaMermaItem).id;
+    const otraId = (otra.body as MotivoBajaItem).id;
 
     // El 23505 lo tira Postgres de verdad (índice único parcial), no un mock.
     const restaurar = await request(app.getHttpServer())
-      .post(`/api/causas-merma/${causaId}/restaurar`)
+      .post(`/api/motivos-baja/${motivoBajaId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(restaurar.status).toBe(400);
 
     const listado = await request(app.getHttpServer())
-      .get('/api/causas-merma?incluirEliminados=true')
+      .get('/api/motivos-baja?incluirEliminados=true')
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(listado.status).toBe(200);
-    const causas = listado.body as CausaMermaItem[];
-    const viva = causas.find((c) => c.id === otraId);
-    const borrada = causas.find((c) => c.id === causaId);
+    const motivos = listado.body as MotivoBajaItem[];
+    const viva = motivos.find((c) => c.id === otraId);
+    const borrada = motivos.find((c) => c.id === motivoBajaId);
     expect(viva?.eliminadoEl).toBeNull();
     expect(borrada?.eliminadoEl).not.toBeNull();
 
-    // Limpieza: sin la causa activa que ocupa el nombre, restaurar sí puede.
+    // Limpieza: sin el motivo activo que ocupa el nombre, restaurar sí puede.
     const deleteOtra = await request(app.getHttpServer())
-      .delete(`/api/causas-merma/${otraId}`)
+      .delete(`/api/motivos-baja/${otraId}`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(deleteOtra.status).toBe(204);
   });
 
-  it('POST /causas-merma/:id/restaurar con admin (sin colisión) → 201 y vuelve al listado normal', async () => {
+  it('POST /motivos-baja/:id/restaurar con admin (sin colisión) → 201 y vuelve al listado normal', async () => {
     const res = await request(app.getHttpServer())
-      .post(`/api/causas-merma/${causaId}/restaurar`)
+      .post(`/api/motivos-baja/${motivoBajaId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
 
     expect(res.status).toBe(201);
-    const body = res.body as CausaMermaItem;
+    const body = res.body as MotivoBajaItem;
     expect(body.eliminadoEl).toBeNull();
 
     const listado = await request(app.getHttpServer())
-      .get('/api/causas-merma')
+      .get('/api/motivos-baja')
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(listado.status).toBe(200);
-    const causas = listado.body as CausaMermaItem[];
-    expect(causas.find((c) => c.id === causaId)).toBeDefined();
+    const motivos = listado.body as MotivoBajaItem[];
+    expect(motivos.find((c) => c.id === motivoBajaId)).toBeDefined();
   });
 
-  it('POST /causas-merma/:id/restaurar de nuevo (ya no está en la papelera) → 404', async () => {
+  it('POST /motivos-baja/:id/restaurar de nuevo (ya no está en la papelera) → 404', async () => {
     const res = await request(app.getHttpServer())
-      .post(`/api/causas-merma/${causaId}/restaurar`)
+      .post(`/api/motivos-baja/${motivoBajaId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(res.status).toBe(404);
   });
@@ -824,7 +825,7 @@ describe('Papelera (e2e) — causas de merma, SQL cruda + colisión de nombre', 
 // colateral (`receta_extras_permitidos`, en las dos direcciones — como
 // ingrediente y como receta que ofrece el extra).
 //
-// El guard no es `TenantAdminGuard` como en categorías/causas de merma: items
+// El guard no es `TenantAdminGuard` como en categorías/motivos de baja: items
 // usa `PermisosGuard` + `@RequiresPermiso('Items', 'Eliminar')` (heredado del
 // `@Controller`). El usuario "sin permiso" sigue siendo vendedor@paris.cl: el
 // seed le da `Items: Leer` (necesita ver el catálogo para el POS) pero no
@@ -1096,7 +1097,7 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
 // Salones — la segunda entidad con colateral (`salones.remove()` soft-deletea
 // todas sus `mesas`), distinta forma que items:
 // `manager.softDelete()`/`update()` en vez de SQL crudo, y sin nombre único (ni
-// salones ni mesas lo tienen — a diferencia de causas de merma), así que no hay
+// salones ni mesas lo tienen — a diferencia de motivos de baja), así que no hay
 // 400 de colisión que probar acá.
 //
 // Guard igual que items: `PermisosGuard` + `@RequiresPermiso('Salones',
@@ -1373,7 +1374,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
 // en vez de por la propiedad que importa (tener índice único parcial), y dos
 // recursos de ESTA familia sí lo tienen y quedaron en la grieta:
 // - **`cajones`** tiene `ux_cajones_tenant_nombre` (`(tenant_id, nombre) WHERE
-//   eliminado_el IS NULL`), igual que causas-merma/grupos-modificadores/
+//   eliminado_el IS NULL`), igual que motivos-baja/grupos-modificadores/
 //   motivos-diferencia — mismo test de colisión, ver más abajo.
 // - **`garzones`** tiene `uq_garzones_mostrador_tenant` (`(tenant_id) WHERE
 //   es_placeholder = true AND eliminado_el IS NULL`): NO es "nombre único"
@@ -1384,7 +1385,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
 //   mismo nombre" que usan los recursos con nombre único.
 // Antes del fix, ambos devolvían 500 (QueryFailedError sin capturar) donde la
 // doc prometía 400 — el `restaurar()` de los dos ahora captura `23505` igual
-// que `causas-merma.service.ts`.
+// que `motivos-baja.service.ts`.
 interface RecursoConAuditoria {
   id: string;
   eliminadoEl?: string | null;
@@ -1552,7 +1553,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
   }
 
   // `cajones` tiene `ux_cajones_tenant_nombre` (nombre único por tenant, índice
-  // parcial), igual que causas-merma/grupos-modificadores/motivos-diferencia —
+  // parcial), igual que motivos-baja/grupos-modificadores/motivos-diferencia —
   // mismo molde de colisión que esos, no el genérico de arriba (que no crea un
   // duplicado a propósito).
   it('cajones: colisión real de Postgres — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
@@ -2090,16 +2091,16 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     );
   });
 
-  // `uq_causas_merma_tenant_nombre` es sobre `lower(nombre)` (medido con
+  // `uq_motivo_baja_tenant_nombre` es sobre `lower(nombre)` (medido con
   // `pg_indexes`): si la sugerencia comparara exacto devolvería un nombre que
   // la BASE considera tomado, y el usuario recibiría el mismo 400 después de
   // confirmar el modal. Este test monta justo ese caso — el competidor está en
   // minúscula y el nombre intentado en mayúscula.
-  it('causas-merma: la sugerencia respeta que el índice es case-insensitive', async () => {
-    const base = `Causa CI E2E ${Date.now()}`;
+  it('motivos-baja: la sugerencia respeta que el índice es case-insensitive', async () => {
+    const base = `Motivo CI E2E ${Date.now()}`;
     const crear = async (n: string) => {
       const res = await request(app.getHttpServer())
-        .post('/api/causas-merma')
+        .post('/api/motivos-baja')
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({ nombre: n });
       expect(res.status).toBe(201);
@@ -2110,10 +2111,10 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     expect(
       (
         await request(app.getHttpServer())
-          .delete(`/api/causas-merma/${originalId}`)
+          .delete(`/api/motivos-baja/${originalId}`)
           .set('Authorization', `Bearer ${tokenAdmin}`)
       ).status,
-      // 204, no 200: el DELETE de causas-merma no devuelve cuerpo.
+      // 204, no 200: el DELETE de motivos-baja no devuelve cuerpo.
     ).toBe(204);
 
     // El que ocupa el nombre y el que ocupa el sufijo 2 van en minúscula.
@@ -2121,7 +2122,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     await crear(`${base.toLowerCase()} 2`);
 
     const resColision = await request(app.getHttpServer())
-      .post(`/api/causas-merma/${originalId}/restaurar`)
+      .post(`/api/motivos-baja/${originalId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(resColision.status).toBe(400);
     const cuerpo = resColision.body as { nombreSugerido: string };
@@ -2131,7 +2132,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 
     // Y la sugerencia sirve de verdad contra el índice real.
     const resRestaurar = await request(app.getHttpServer())
-      .post(`/api/causas-merma/${originalId}/restaurar`)
+      .post(`/api/motivos-baja/${originalId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ nombre: cuerpo.nombreSugerido });
     expect(resRestaurar.status).toBe(201);
@@ -2180,7 +2181,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 // tocar el placeholder), sino borrando un Mostrador vivo y dejando que otra
 // venta con propina cree uno nuevo mientras el viejo sigue en la papelera.
 // Antes del fix esto era 500; el `restaurar()` de `garzones.service.ts` ahora
-// captura `23505` igual que `cajones`/`causas-merma`.
+// captura `23505` igual que `cajones`/`motivos-baja`.
 //
 // ⚠️ **Reescrito**: la primera versión de este bloque montaba el escenario
 // borrando el Mostrador SEMBRADO de Paris (id fijo
@@ -2400,7 +2401,7 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
 // los dos motivos de diferencia (caja e inventario). Los tres tienen nombre
 // único por tenant (índice parcial WHERE eliminado_el IS NULL), así que —a
 // diferencia de la familia softDelete()— agregan el 400 de colisión real de
-// Postgres al restaurar (mismo patrón que causas-merma), y por eso van en su
+// Postgres al restaurar (mismo patrón que motivos-baja), y por eso van en su
 // propio bloque parametrizado en vez de sumarse al de esa familia.
 //
 // `grupos_modificadores` tiene un hijo (`grupo_modificador_opciones`), y es

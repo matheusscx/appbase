@@ -105,8 +105,8 @@ export class MovimientoInventario {
   })
   costoAnterior: string | null;
 
-  @Column({ name: 'causa_merma_id', type: 'uuid', nullable: true })
-  causaMermaId: string | null;
+  @Column({ name: 'motivo_baja_id', type: 'uuid', nullable: true })
+  motivoBajaId: string | null;
 
   @Column({ name: 'motivo_diferencia_id', type: 'uuid', nullable: true })
   motivoDiferenciaId: string | null;

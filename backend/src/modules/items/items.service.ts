@@ -543,7 +543,7 @@ export class ItemsService {
     const params: unknown[] = [tenantId];
     let idx = 2;
     // Papelera: `incluirEliminados` trae vivos Y borrados en el mismo
-    // listado (igual que categorías/causas de merma); sin el flag, el
+    // listado (igual que categorías/motivos de baja); sin el flag, el
     // filtro de siempre. Entre los borrados, solo los que borró una
     // persona: `eliminado_por IS NULL` es un borrado del sistema (seeder,
     // `remapImpuestosOficialesDuplicados`), no restaurable ni visible —

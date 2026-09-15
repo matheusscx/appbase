@@ -1,10 +1,7 @@
 import { Module } from '@nestjs/common';
-import { RepositoriosModule } from '../../common/db/repositorios.module';
-import { CausaMerma } from './entities/causa-merma.entity';
-import { CausasMermaService } from './causas-merma.service';
-import { CausasMermaController } from './causas-merma.controller';
 import { MermasController } from './mermas.controller';
 import { MermasService } from './mermas.service';
+import { MotivosBajaModule } from '../motivos-baja/motivos-baja.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { MonedasModule } from '../monedas/monedas.module';
@@ -12,7 +9,7 @@ import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 
 @Module({
   imports: [
-    RepositoriosModule.forFeature([CausaMerma]),
+    MotivosBajaModule,
     InventarioModule,
     CatalogModule,
     // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
@@ -22,8 +19,8 @@ import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
     // para pasarle `ubicacionId` al chokepoint de `registrarMovimiento`.
     UbicacionesModule,
   ],
-  controllers: [CausasMermaController, MermasController],
-  providers: [CausasMermaService, MermasService],
-  exports: [CausasMermaService, MermasService],
+  controllers: [MermasController],
+  providers: [MermasService],
+  exports: [MermasService],
 })
 export class MermasModule {}

@@ -25,7 +25,7 @@ import { QueryUbicacionesDto } from './dto/query-ubicaciones.dto';
 import { RestaurarDto } from '../../common/dto/restaurar.dto';
 
 // Catálogo de configuración: lectura abierta, escritura admin-only —el mismo
-// patrón que `motivos-diferencia-inventario` y `causas-merma`.
+// patrón que `motivos-diferencia-inventario` y `motivos-baja`.
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('ubicaciones')
 export class UbicacionesController {

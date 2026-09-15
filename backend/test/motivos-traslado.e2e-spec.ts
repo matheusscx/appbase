@@ -193,11 +193,11 @@ describe('Motivos de traslado (e2e) — CRUD admin-only + reglas de es_fijo', ()
   });
 
   // A diferencia de `motivos-diferencia` (caja), este molde (calcado de
-  // `motivos-diferencia-inventario`/`causas-merma`) bloquea CUALQUIER
+  // `motivos-diferencia-inventario`/`motivos-baja`) bloquea CUALQUIER
   // `update()` sobre un motivo fijo, no solo el renombre: `esFijo` corta
   // antes de mirar qué campo cambió (`motivos-traslado.service.ts` →
   // `update()`). La pantalla lo refleja deshabilitando el switch "Activo"
-  // entero cuando `esFijo` es true, igual que en `causas-merma.vue`.
+  // entero cuando `esFijo` es true, igual que en `motivos-baja.vue`.
   it('PATCH sobre un motivo fijo cambiando activo → 400 (no se persiste)', async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/motivos-traslado/${ENTREGA_GRATUITA_ID}`)

@@ -77,7 +77,7 @@ import { ItemGrupoModificadorOpcion } from './modules/items/entities/item-grupo-
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
-import { CausaMerma } from './modules/mermas/entities/causa-merma.entity';
+import { MotivoBaja } from './modules/motivos-baja/entities/motivo-baja.entity';
 import { MotivoDiferenciaCaja } from './modules/motivos-diferencia/entities/motivo-diferencia-caja.entity';
 import { MotivosDiferenciaModule } from './modules/motivos-diferencia/motivos-diferencia.module';
 import { InventarioModule } from './modules/inventario/inventario.module';
@@ -137,6 +137,7 @@ import { Turno } from './modules/turnos/entities/turno.entity';
 import { SesionGarzon } from './modules/turnos/entities/sesion-garzon.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
 import { MermasModule } from './modules/mermas/mermas.module';
+import { MotivosBajaModule } from './modules/motivos-baja/motivos-baja.module';
 import { MotivoDiferenciaInventario } from './modules/motivos-diferencia-inventario/entities/motivo-diferencia-inventario.entity';
 import { MotivosDiferenciaInventarioModule } from './modules/motivos-diferencia-inventario/motivos-diferencia-inventario.module';
 import { MotivoTraslado } from './modules/motivos-traslado/entities/motivo-traslado.entity';
@@ -230,7 +231,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
           ItemUnidad,
           ItemCombo,
           ComboComponente,
-          CausaMerma,
+          MotivoBaja,
           MotivoDiferenciaCaja,
           MotivoDiferenciaInventario,
           MotivoTraslado,
@@ -330,6 +331,7 @@ import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
     TurnosModule,
     ImpresorasModule,
     MermasModule,
+    MotivosBajaModule,
     GruposModificadoresModule,
     MotivosDiferenciaModule,
     MotivosDiferenciaInventarioModule,

@@ -21,7 +21,7 @@ export interface FilaCatalogoFijo {
  *
  * Vive acá y no en cada pantalla porque restaurar con un nombre nuevo obliga a
  * reordenar la fila en el lugar (si no, queda donde estaba con el nombre
- * cambiado), así que las pantallas de catálogo con `esFijo` —`causas-merma`,
+ * cambiado), así que las pantallas de catálogo con `esFijo` —`motivos-baja`,
  * los dos `motivos-diferencia` y `motivos-traslado`— la necesitan igual. Se
  * extrajo al aparecer la TERCERA copia, que es la regla del proyecto
  * (`CLAUDE.md` → Convenciones → Archivos: duplicar dos veces es aceptable, se

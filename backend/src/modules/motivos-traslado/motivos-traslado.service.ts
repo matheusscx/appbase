@@ -289,7 +289,7 @@ export class MotivosTrasladoService {
         // fallo no deja una transacción abortada y estas queries funcionan.
         //
         // `ignorarMayusculas: true` porque el índice de esta tabla es sobre
-        // `lower(nombre)` (mismo patrón que `causas_merma`/
+        // `lower(nombre)` (mismo patrón que `motivo_baja`/
         // `motivo_diferencia_inventario`): sin eso la sugerencia podría
         // devolver un nombre que la base considera tomado y el usuario
         // recibiría el mismo 400 tras confirmar el modal.

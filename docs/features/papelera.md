@@ -38,7 +38,7 @@ Un recurso nuevo que cumpla el criterio entra a este alcance con el mismo compos
 - **Catálogo del negocio:** `items`, `categorias`, `descuentos`, `recargos`,
   `impuestos`, `grupos-modificadores`, `terceros`.
 - **Config operativa:** `cajones`, `garzones`, `turnos`, `salones`, `mesas`,
-  `impresoras`, `causas-merma`, `motivos-diferencia` (caja), `motivos-diferencia-inventario`,
+  `impresoras`, `motivos-baja`, `motivos-diferencia` (caja), `motivos-diferencia-inventario`,
   `ubicaciones`, `motivos-traslado` (estos dos últimos: frente "bodegas y traslados",
   2026-09).
 
@@ -113,7 +113,7 @@ Response (404): "<recurso> no está en la papelera" — no existe, existe y
                   eliminado_por IS NOT NULL), sin rama que distinga los tres
                   casos.
 Response (400): en 9 de los 16 — los 8 con unicidad de nombre (descuentos,
-                  recargos, turnos, cajones, causas-merma, motivos-diferencia,
+                  recargos, turnos, cajones, motivos-baja, motivos-diferencia,
                   motivos-diferencia-inventario, grupos-modificadores) y
                   `garzones`, por una restricción distinta que no es de nombre.
                   El reparto completo y por qué no se deduce de la familia de
@@ -214,7 +214,7 @@ La unicidad de nombre por tenant no es una propiedad de familia de borrado (SQL
 cruda vs. `softDelete()`): hay que medirla recurso por recurso. Medido para los 16:
 
 - **Con unicidad de nombre** — ocho recursos: `descuentos`, `recargos`, `turnos`,
-  `cajones`, `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`,
+  `cajones`, `motivos-baja`, `motivos-diferencia`, `motivos-diferencia-inventario`,
   `grupos-modificadores`. Los ocho la enforcean igual: **índice único parcial**
   (`WHERE eliminado_el IS NULL`) sobre `(tenant_id, lower(nombre))`, más una
   validación en código que compara igual y da el mensaje amable. Si alguien ocupó
@@ -398,7 +398,7 @@ ahí salieron tres formas que conviene distinguir antes de cablear una pantalla
 nueva:
 
 - **Con modal de colisión** — las 5 con unicidad de nombre que faltaban:
-  `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`,
+  `motivos-baja`, `motivos-diferencia`, `motivos-diferencia-inventario`,
   `grupos-modificadores`, `cajas` (cajones). Molde completo.
 - **Sin modal de colisión** — `terceros`, `impresoras`, `garzones`,
   `salones`/`mesas`: su endpoint de restaurar **no acepta body**, así que no hay

@@ -11,8 +11,8 @@ interface MermaListItem {
   cantidad: string
   costoUnitario: string | null
   costoPerdido: string | null
-  causaMermaId: string | null
-  causaNombre: string | null
+  motivoBajaId: string | null
+  motivoBajaNombre: string | null
   comentario: string | null
   creadoEl: string
   usuarioNombre: string | null
@@ -31,7 +31,7 @@ interface ProductoOpt {
   modoInventario: string | null
 }
 
-interface CausaOpt {
+interface MotivoOpt {
   id: string
   nombre: string
 }
@@ -50,15 +50,15 @@ const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaci
 const { puedeCrear: puedeRegistrar } = usePermisosCrud('Inventario')
 
 const productos = ref<ProductoOpt[]>([])
-const causas = ref<CausaOpt[]>([])
+const motivos = ref<MotivoOpt[]>([])
 const filtroItem = ref('todos')
-const filtroCausa = ref('todos')
+const filtroMotivo = ref('todos')
 const filtroDesde = ref('')
 const filtroHasta = ref('')
 
 const listFilters = computed(() => ({
   itemId: filtroItem.value !== 'todos' ? filtroItem.value : undefined,
-  causaMermaId: filtroCausa.value !== 'todos' ? filtroCausa.value : undefined,
+  motivoBajaId: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
   desde: filtroDesde.value || undefined,
   hasta: filtroHasta.value || undefined,
 }))
@@ -75,13 +75,13 @@ const productosOpts = computed<Opt[]>(() => [
   ...productos.value.map(p => ({ label: p.nombre, value: p.id })),
 ])
 
-const causasFiltroOpts = computed<Opt[]>(() => [
-  { label: 'Todas las causas', value: 'todos' },
-  ...causas.value.map(c => ({ label: c.nombre, value: c.id })),
+const motivosFiltroOpts = computed<Opt[]>(() => [
+  { label: 'Todos los motivos', value: 'todos' },
+  ...motivos.value.map(c => ({ label: c.nombre, value: c.id })),
 ])
 
-const causasFormOpts = computed<Opt[]>(() =>
-  causas.value.map(c => ({ label: c.nombre, value: c.id })),
+const motivosFormOpts = computed<Opt[]>(() =>
+  motivos.value.map(c => ({ label: c.nombre, value: c.id })),
 )
 
 const drawerOpen = ref(false)
@@ -93,7 +93,7 @@ function emptyForm() {
     itemId: '',
     cantidad: '',
     unidadCodigo: '',
-    causaMermaId: '',
+    motivoBajaId: '',
     comentario: '',
   }
 }
@@ -139,16 +139,16 @@ watch(() => form.value.ubicacionId, (_nueva, anterior) => {
 async function cargarCatalogos() {
   try {
     await unidadesMedidaStore.ensureLoaded()
-    const [prodRes, ingRes, causasRes] = await Promise.all([
+    const [prodRes, ingRes, motivosRes] = await Promise.all([
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
-      useApiFetch<CausaOpt[]>(`${apiUrl}/causas-merma?soloActivas=true`),
+      useApiFetch<MotivoOpt[]>(`${apiUrl}/motivos-baja?soloActivas=true`),
       cargarUbicaciones(),
     ])
     productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
       a.nombre.localeCompare(b.nombre, 'es'),
     )
-    causas.value = causasRes
+    motivos.value = motivosRes
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar catálogos'), color: 'error' })
@@ -167,8 +167,8 @@ function abrirRegistrar() {
 }
 
 async function registrar() {
-  if (!form.value.itemId || !form.value.cantidad || !form.value.causaMermaId) {
-    toast.add({ title: 'Completa producto, cantidad y causa', color: 'error' })
+  if (!form.value.itemId || !form.value.cantidad || !form.value.motivoBajaId) {
+    toast.add({ title: 'Completa producto, cantidad y motivo', color: 'error' })
     return
   }
   if (!form.value.ubicacionId) {
@@ -182,7 +182,7 @@ async function registrar() {
       itemId: form.value.itemId,
       ubicacionId: form.value.ubicacionId,
       cantidad: form.value.cantidad,
-      causaMermaId: form.value.causaMermaId,
+      motivoBajaId: form.value.motivoBajaId,
     }
     const base = productoSeleccionado.value?.unidadMedida
     if (form.value.unidadCodigo && form.value.unidadCodigo !== base) {
@@ -194,7 +194,7 @@ async function registrar() {
 
     const res = await useApiFetch<{
       costoPerdido: string | null
-      causaNombre: string
+      motivoBajaNombre: string
       merma: MermaListItem
     }>(
       `${apiUrl}/mermas`,
@@ -202,10 +202,10 @@ async function registrar() {
     )
     // Inserta en la página actual si los filtros la incluirían; evita refetch.
     const filtroItem = listFilters.value.itemId
-    const filtroCausa = listFilters.value.causaMermaId
+    const filtroMotivo = listFilters.value.motivoBajaId
     const coincide =
       (!filtroItem || filtroItem === res.merma.itemId)
-      && (!filtroCausa || filtroCausa === res.merma.causaMermaId)
+      && (!filtroMotivo || filtroMotivo === res.merma.motivoBajaId)
     if (coincide && page.value === 1) {
       const size = pageSize.value
       mermas.value = [res.merma, ...mermas.value].slice(0, size)
@@ -237,7 +237,7 @@ const columns: TableColumn<MermaListItem>[] = [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { accessorKey: 'itemNombre', header: 'Producto' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'causaNombre', header: 'Causa' },
+  { accessorKey: 'motivoBajaNombre', header: 'Motivo' },
   { accessorKey: 'costoUnitario', header: 'Costo unit.', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'costoPerdido', header: 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'comentario', header: 'Comentario' },
@@ -277,11 +277,11 @@ const columns: TableColumn<MermaListItem>[] = [
         placeholder="Producto"
       />
       <USelectMenu
-        v-model="filtroCausa"
-        :items="causasFiltroOpts"
+        v-model="filtroMotivo"
+        :items="motivosFiltroOpts"
         value-key="value"
         class="w-52"
-        placeholder="Causa"
+        placeholder="Motivo"
       />
       <AppDateInput v-model="filtroDesde" class="w-40" qa="mermas-desde" />
       <AppDateInput v-model="filtroHasta" class="w-40" qa="mermas-hasta" />
@@ -310,9 +310,9 @@ const columns: TableColumn<MermaListItem>[] = [
       <template #cantidad-cell="{ row }">
         <span class="text-warning">{{ formatStock(row.original.cantidad, row.original.unidadMedida) }}</span>
       </template>
-      <template #causaNombre-cell="{ row }">
+      <template #motivoBajaNombre-cell="{ row }">
         <UBadge
-          :label="row.original.causaNombre ?? '—'"
+          :label="row.original.motivoBajaNombre ?? '—'"
           color="neutral"
           variant="subtle"
           size="sm"
@@ -422,14 +422,14 @@ const columns: TableColumn<MermaListItem>[] = [
           </UFormField>
 
           <UFormField
-            label="Causa"
+            label="Motivo"
             required
           >
             <USelectMenu
-              v-model="form.causaMermaId"
-              :items="causasFormOpts"
+              v-model="form.motivoBajaId"
+              :items="motivosFormOpts"
               value-key="value"
-              placeholder="Selecciona la causa"
+              placeholder="Selecciona el motivo"
               class="w-full"
             />
           </UFormField>

@@ -2,7 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryMotivosTrasladoDto } from './query-motivos-traslado.dto';
 
-// Mismo spec que mermas/dto/query-causas-merma.dto.spec.ts y
+// Mismo spec que motivos-baja/dto/query-motivos-baja.dto.spec.ts y
 // motivos-diferencia-inventario/dto/query-motivos-diferencia-inventario.dto.spec.ts,
 // misma familia: prueba que `@Transform` no cambió el comportamiento de
 // `soloActivas === 'true'` a mano.

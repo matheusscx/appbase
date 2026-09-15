@@ -101,16 +101,16 @@ el delta es positivo (sobrante), `'salida'` si es negativo (faltante).
 
 ---
 
-## Por qué el catálogo de causas es propio (no reusa `causas_merma`)
+## Por qué el catálogo de causas es propio (no reusa `motivo_baja`)
 
 Tres razones, en orden de peso:
 
 1. **El espacio de causas es distinto, no un subconjunto.** Un recuento puede dar
-   **sobrante** — contaste más de lo que decía el sistema. Ninguna causa de merma explica
+   **sobrante** — contaste más de lo que decía el sistema. Ningún motivo de baja explica
    un sobrante (una merma es, por definición, pérdida). Y las causas típicas de un
    desajuste de inventario (error de recepción, error de registro) no son mermas: son
    desincronización entre sistema y realidad, no pérdida física.
-2. **Reusar `causas_merma` ensuciaría el reporte de mermas**, mezclando pérdida
+2. **Reusar `motivo_baja` ensuciaría el reporte de mermas**, mezclando pérdida
    observada (una merma declarada explícitamente) con desajuste de inventario (una
    diferencia descubierta al contar) — dos métricas que se leen distinto y que el AVT
    necesita separadas.
@@ -289,7 +289,7 @@ rechaza como cualquier salida del kardex (invariante del proyecto).
 
 ### Entity & Database
 
-**`motivo_diferencia_inventario`** (catálogo por tenant, misma forma que `causas_merma`
+**`motivo_diferencia_inventario`** (catálogo por tenant, misma forma que `motivo_baja`
 y `motivo_diferencia_caja`):
 
 | Column | Type | Notes |
@@ -433,7 +433,7 @@ npm run test:e2e -- recuentos.e2e.spec.ts
 Escenarios: crear sesión → cargar conteos → aplicar → stock cambia por el delta, hay un
 movimiento `motivo='recuento'` por línea con su `motivo_diferencia_id`, sesión queda
 `aplicado`; el caso de venta concurrente entre contar y aplicar (el que justifica todo
-el diseño del delta); regresión de `causas_merma` y `motivo_diferencia_caja` sin cambios
+el diseño del delta); regresión de `motivo_baja` y `motivo_diferencia_caja` sin cambios
 tras adoptar `unwrap()` compartido.
 
 ### Manual Testing (Swagger)
@@ -516,7 +516,7 @@ la primera, el producto vuelve a estar disponible.
 - [Gestión de Inventario (Kardex)](./inventario-kardex.md) — el kardex donde aterriza el
   movimiento `motivo='recuento'`
 - [Mermas tipificadas y valorizadas](./mermas-valorizadas.md) — catálogo hermano
-  (`causas_merma`), deliberadamente no compartido con este
+  (`motivo_baja`), deliberadamente no compartido con este
 - [Inventario serializado](./inventario-serializado.md) — modos `serie`/`lote`, fuera de
   alcance de este recuento (`docs/agent/pendientes.md`)
 
@@ -535,7 +535,7 @@ la primera, el producto vuelve a estar disponible.
 - **`unwrap()` compartido:** este trabajo centralizó el helper que resuelve la trampa de
   pg (`INSERT/UPDATE ... RETURNING` llega como `[rows, rowCount]`) en
   `backend/src/common/utils/pg-returning.util.ts`, usado por los tres catálogos
-  (`causas_merma`, `motivo_diferencia_caja`, `motivo_diferencia_inventario`). El CRUD de
+  (`motivo_baja`, `motivo_diferencia_caja`, `motivo_diferencia_inventario`). El CRUD de
   catálogos en sí **no** se extrajo a una base compartida: los dos catálogos existentes
   divergen a propósito en política de `es_fijo` y validación de uso al eliminar — ver la
   spec de diseño § "El helper `unwrap()` compartido" para el detalle completo.

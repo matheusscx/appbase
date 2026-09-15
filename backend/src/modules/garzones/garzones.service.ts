@@ -1203,7 +1203,7 @@ export class GarzonesService {
       // placeholder por eso. Con dos, un mensaje fijo le dice al admin que el
       // problema es "Mostrador" cuando en realidad tiene que desvincular una
       // cuenta de otro garzón — una explicación falsa que apunta a otra regla
-      // y a otro garzón. Mismo patrón que causas-merma.service.ts → restaurar().
+      // y a otro garzón. Mismo patrón que motivos-baja.service.ts → restaurar().
       const err = e as { code?: string; constraint?: string };
       if (err.code === '23505') {
         if (err.constraint === 'uq_garzones_usuario_tenant') {

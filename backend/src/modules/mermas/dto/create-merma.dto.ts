@@ -23,7 +23,7 @@ export class CreateMermaDto {
   unidadCodigo?: string;
 
   @IsUUID()
-  causaMermaId: string;
+  motivoBajaId: string;
 
   @IsString()
   @IsOptional()

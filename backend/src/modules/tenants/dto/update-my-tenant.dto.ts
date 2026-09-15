@@ -12,7 +12,7 @@ import { Transform } from 'class-transformer';
 export class UpdateMyTenantDto {
   // `nombre` es la identidad del tenant y sale en documentos: dejarlo sin
   // nombre no es un estado válido. Mismo patrón de tres decoradores que
-  // `UpdateCausaMermaDto` (`mermas/dto/update-causa-merma.dto.ts`, que lo
+  // `UpdateMotivoBajaDto` (`motivos-baja/dto/update-motivo-baja.dto.ts`, que lo
   // documenta en detalle) — ninguno de los tres cubre a los otros dos:
   // `@Transform` trimea ANTES de validar (patrón de `RestaurarDto`) para que
   // `@IsNotEmpty()` rechace también `'   '`, no solo `''`; y `@ValidateIf`

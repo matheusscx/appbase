@@ -16,7 +16,7 @@ const USER_ID = 'user-uuid';
 const UNIDAD_1 = 'unidad-uuid-1';
 const UNIDAD_2 = 'unidad-uuid-2';
 const LOTE_ID = 'lote-uuid-1';
-const CAUSA_MERMA_ID = 'causa-merma-uuid';
+const MOTIVO_BAJA_ID = 'motivo-baja-uuid';
 const MOTIVO_DIFERENCIA_ID = 'motivo-diferencia-uuid';
 const UBICACION_ID = 'ubicacion-local-uuid';
 
@@ -259,7 +259,7 @@ describe('InventarioService', () => {
           motivo: 'merma',
           cantidad: '4',
           usuarioId: USER_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         },
       );
 
@@ -280,7 +280,7 @@ describe('InventarioService', () => {
           motivo: 'merma',
           cantidad: '5',
           usuarioId: USER_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -349,7 +349,7 @@ describe('InventarioService', () => {
             motivo,
             cantidad: '5',
             usuarioId: USER_ID,
-            causaMermaId: motivo === 'merma' ? CAUSA_MERMA_ID : undefined,
+            motivoBajaId: motivo === 'merma' ? MOTIVO_BAJA_ID : undefined,
             motivoDiferenciaId:
               motivo === 'recuento' ? MOTIVO_DIFERENCIA_ID : undefined,
           }),
@@ -535,7 +535,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         },
       );
 
@@ -633,7 +633,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -672,7 +672,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
         new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al tenant`),
@@ -710,7 +710,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
         new BadRequestException(`Unidad ${UNIDAD_1} no pertenece al item`),
@@ -786,7 +786,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
         new BadRequestException(
@@ -949,7 +949,7 @@ describe('InventarioService', () => {
           cantidad: '10',
           usuarioId: USER_ID,
           loteId: LOTE_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         },
       );
 
@@ -980,7 +980,7 @@ describe('InventarioService', () => {
           cantidad: '8',
           usuarioId: USER_ID,
           loteId: LOTE_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
         new BadRequestException(
@@ -1121,7 +1121,7 @@ describe('InventarioService', () => {
           cantidad: '10',
           usuarioId: USER_ID,
           loteId: LOTE_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -1156,7 +1156,7 @@ describe('InventarioService', () => {
           cantidad: '10',
           usuarioId: USER_ID,
           loteId: LOTE_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
         new BadRequestException('El lote no pertenece al tenant'),
@@ -1165,10 +1165,10 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Causa de merma
+  // Motivo de baja
   // ---------------------------------------------------------------------------
-  describe('registrarMovimiento — causa merma', () => {
-    it('motivo merma sin causaMermaId lanza BadRequest', async () => {
+  describe('registrarMovimiento — motivo baja', () => {
+    it('motivo merma sin motivoBajaId lanza BadRequest', async () => {
       managerMock.query
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', costo_actual: '4000' },
@@ -1186,11 +1186,11 @@ describe('InventarioService', () => {
           usuarioId: USER_ID,
         }),
       ).rejects.toThrow(
-        new BadRequestException('La merma requiere una causa tipificada'),
+        new BadRequestException('La merma requiere un motivo de baja'),
       );
     });
 
-    it('motivo distinto de merma con causaMermaId lanza BadRequest', async () => {
+    it('motivo distinto de merma con motivoBajaId lanza BadRequest', async () => {
       managerMock.query
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', costo_actual: '4000' },
@@ -1206,14 +1206,14 @@ describe('InventarioService', () => {
           motivo: 'ajuste_manual',
           cantidad: '2',
           usuarioId: USER_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         }),
       ).rejects.toThrow(
-        new BadRequestException('causa_merma_id solo aplica a merma'),
+        new BadRequestException('motivo_baja_id solo aplica a merma'),
       );
     });
 
-    it('motivo merma con causaMermaId incluye causa_merma_id en el INSERT', async () => {
+    it('motivo merma con motivoBajaId incluye motivo_baja_id en el INSERT', async () => {
       managerMock.query
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', costo_actual: '4000' },
@@ -1232,13 +1232,13 @@ describe('InventarioService', () => {
           motivo: 'merma',
           cantidad: '2',
           usuarioId: USER_ID,
-          causaMermaId: CAUSA_MERMA_ID,
+          motivoBajaId: MOTIVO_BAJA_ID,
         },
       );
 
       const insertCall = managerMock.query.mock.calls[3];
-      expect(insertCall[0]).toContain('causa_merma_id');
-      expect(insertCall[1]).toContain(CAUSA_MERMA_ID);
+      expect(insertCall[0]).toContain('motivo_baja_id');
+      expect(insertCall[1]).toContain(MOTIVO_BAJA_ID);
     });
   });
 
@@ -2057,7 +2057,7 @@ describe('InventarioService', () => {
       expect(res.data[0].costoUnitario).toBe('4200');
     });
 
-    it('findMovimientos expone causa y costoPerdido en merma', async () => {
+    it('findMovimientos expone motivo y costoPerdido en merma', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }])
         .mockResolvedValueOnce([
@@ -2075,24 +2075,24 @@ describe('InventarioService', () => {
             comentario: null,
             creado_el: new Date('2026-07-15T00:00:00Z'),
             costo_unitario: '1200.5000',
-            causa_merma_id: CAUSA_MERMA_ID,
-            causa_nombre: 'Vencimiento',
+            motivo_baja_id: MOTIVO_BAJA_ID,
+            motivo_baja_nombre: 'Vencimiento',
           },
         ]);
 
       const res = await service.findMovimientos(TENANT, {});
 
       expect(res.data[0]).toMatchObject({
-        causaMermaId: CAUSA_MERMA_ID,
-        causaNombre: 'Vencimiento',
+        motivoBajaId: MOTIVO_BAJA_ID,
+        motivoBajaNombre: 'Vencimiento',
         costoPerdido: '4201.7500',
       });
       expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('causa_merma_id'),
+        expect.stringContaining('motivo_baja_id'),
         expect.any(Array),
       );
       expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('causas_merma'),
+        expect.stringContaining('motivo_baja'),
         expect.any(Array),
       );
     });

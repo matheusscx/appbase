@@ -1,6 +1,6 @@
 // @vitest-environment nuxt
 //
-// Réplica del molde de `causas-merma.nuxt.spec.ts` para `motivos-diferencia-inventario`: la
+// Réplica del molde de `motivos-baja.nuxt.spec.ts` para `motivos-diferencia-inventario`: la
 // papelera (toggle "ver eliminados" + badge + botón Restaurar + modal de
 // colisión de nombre). Los bugs que este spec fija son de RUNTIME: ni el
 // build, ni el typecheck, ni una revisión de código los ven.

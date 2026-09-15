@@ -340,7 +340,7 @@ export class UbicacionesService {
    * fila. Público desde el frente de bodegas y traslados: mermas, recuentos y
    * el ajuste de stock reciben `ubicacionId` del cliente y tienen que validarlo
    * contra el tenant antes de escribir — mismo criterio que
-   * `CausasMermaService.assertCausaActiva` para `causaMermaId`, y el mismo
+   * `MotivosBajaService.assertMotivoActivo` para `motivoBajaId`, y el mismo
    * `NotFoundException` opaco que ya usa `TrasladosService` para un
    * `ubicacionId` de otro tenant (no distingue "no existe" de "es de otro
    * tenant": sería un oráculo).

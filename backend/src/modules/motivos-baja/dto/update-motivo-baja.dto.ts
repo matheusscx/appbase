@@ -13,7 +13,7 @@ import { Transform } from 'class-transformer';
  *
  * 1. **`@IsNotEmpty()`** — sin él, un `''` pasaba y el service, que solo mira
  *    `if (dto.nombre !== undefined)`, persistía el `.trim()`: la fila quedaba
- *    sin nombre y salía como una opción en blanco en el selector de causa de
+ *    sin nombre y salía como una opción en blanco en el selector de motivo de
  *    `mermas.vue`. El DTO de creación hermano ya lo tenía.
  * 2. **`@Transform` que trimea ANTES de validar** — `@IsNotEmpty()` rechaza
  *    `''` exacto pero **no `'   '`**, y como el service hace su propio `.trim()`
@@ -34,7 +34,7 @@ import { Transform } from 'class-transformer';
  * Los tres se replican en `UpdateMotivoDiferenciaDto` y
  * `UpdateMotivoDiferenciaInventarioDto`, que sirven **rutas distintas**.
  */
-export class UpdateCausaMermaDto {
+export class UpdateMotivoBajaDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )

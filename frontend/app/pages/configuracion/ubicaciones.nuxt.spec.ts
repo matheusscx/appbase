@@ -1,6 +1,6 @@
 // @vitest-environment nuxt
 //
-// Réplica del molde de `causas-merma.nuxt.spec.ts` para `ubicaciones`, con las
+// Réplica del molde de `motivos-baja.nuxt.spec.ts` para `ubicaciones`, con las
 // dos diferencias que el diseño pide (docs/features/bodegas-y-traslados.md):
 // el local se dibuja arriba, separado, sin botón de eliminar; y el
 // mensaje de error del DELETE con stock viaja tal cual del backend (no hay
@@ -9,7 +9,7 @@
 // este archivo prueba es que la pantalla no lo intercepta ni lo reescribe:
 // deja pasar `apiErrorMsg(e, ...)` tal cual, igual que el resto de la papelera).
 //
-// Los bugs que fija son de RUNTIME, igual que en causas-merma:
+// Los bugs que fija son de RUNTIME, igual que en motivos-baja:
 //   1. `eliminar()` sacando la fila del array local con el toggle prendido.
 //   2. La carrera de `cargar()` bajo toggles rápidos.
 //   3. Doble submit al restaurar.
@@ -99,7 +99,7 @@ let restaurarRetenido: Promise<unknown> | null = null
  * exacto que viajó (lo que importa: que pase el DTO real del backend) sin dejar
  * que `guardar()` termine y cierre el drawer — el cierre real dispara un
  * `unhandled rejection` de happy-dom/reka-ui ajeno a esta pantalla (reproducido
- * también en `causas-merma.vue` sin tocar su código: es del harness, no un bug
+ * también en `motivos-baja.vue` sin tocar su código: es del harness, no un bug
  * de acá) que ninguna pantalla con `AppDrawer` había ejercitado todavía porque
  * ningún spec del repo prueba un guardado EXITOSO de punta a punta. No resolver
  * el POST/PATCH evita la transición de cierre sin dejar de probar lo que

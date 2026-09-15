@@ -10,7 +10,7 @@ import { Transform } from 'class-transformer';
 // `tipo` no está acá a propósito: no se re-tipea una ubicación existente
 // (una bodega que "se convierte" en local rompería la unicidad del local).
 export class UpdateUbicacionDto {
-  // Gemelo de `UpdateCausaMermaDto`/`UpdateMotivoDiferenciaInventarioDto`:
+  // Gemelo de `UpdateMotivoBajaDto`/`UpdateMotivoDiferenciaInventarioDto`:
   // `@ValidateIf` en vez de `@IsOptional()` porque para `class-validator`
   // `IsOptional` trata `null` igual que ausente. `trim` antes de validar:
   // `'   '` tiene que fallar igual que `''`.

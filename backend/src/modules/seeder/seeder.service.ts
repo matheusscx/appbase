@@ -54,7 +54,7 @@ import { CredencialesService } from '../pasarela/services/credenciales.service';
 import { ItemsService } from '../items/items.service';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
-import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
+import { MOTIVOS_BAJA_FIJOS } from '../motivos-baja/motivos-baja.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
 import { MOTIVOS_TRASLADO_FIJOS } from '../motivos-traslado/motivos-traslado.defaults';
@@ -174,7 +174,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedModuloAppPermisos();
     await this.seedTenants();
     await this.seedUbicaciones();
-    await this.seedCausasMerma();
+    await this.seedMotivosBaja();
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
     await this.seedMotivosTraslado();
@@ -1390,32 +1390,32 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
-  private async seedCausasMerma(): Promise<void> {
+  private async seedMotivosBaja(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
-    const nombres = [...CAUSAS_MERMA_FIJAS];
+    const nombres = [...MOTIVOS_BAJA_FIJOS];
 
     await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_causas_merma_tenant_nombre
-      ON causas_merma (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_baja_tenant_nombre
+      ON motivo_baja (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
 
     let id = 266;
     for (const tenantId of [PARIS, FALABELLA]) {
       for (const nombre of nombres) {
-        const causaId = uuid(id++);
+        const motivoId = uuid(id++);
         const exists: unknown[] = await this.dataSource.query(
-          `SELECT 1 FROM causas_merma WHERE causa_merma_id = $1`,
-          [causaId],
+          `SELECT 1 FROM motivo_baja WHERE motivo_baja_id = $1`,
+          [motivoId],
         );
         if (!exists.length) {
           await this.dataSource.query(
-            `INSERT INTO causas_merma
-               (causa_merma_id, tenant_id, nombre, activo, es_fijo)
+            `INSERT INTO motivo_baja
+               (motivo_baja_id, tenant_id, nombre, activo, es_fijo)
              VALUES ($1,$2,$3,true,true)`,
-            [causaId, tenantId, nombre],
+            [motivoId, tenantId, nombre],
           );
         }
       }
@@ -4085,7 +4085,7 @@ export class SeederService implements OnApplicationBootstrap {
     // dev la reproducía distinto de producción, y el único guard que quedaba
     // del lado de la base era el equivocado.
     //
-    // Mismo patrón que `seedCausasMerma()` (y los dos de motivos-diferencia),
+    // Mismo patrón que `seedMotivosBaja()` (y los dos de motivos-diferencia),
     // que ya resolvían esto así: la entity no declara el índice y el seeder lo
     // crea con SQL cruda.
     //
@@ -4096,7 +4096,7 @@ export class SeederService implements OnApplicationBootstrap {
     // ⚠️ Contrapartida de sacar el `@Index`: en dev, `synchronize` puede dejar
     // la tabla SIN el índice hasta que este seeder lo recree, o sea que la
     // única red del constraint pasa a ser que el seeder corra y no falle. Es
-    // el mismo perfil de riesgo que ya tienen `causas_merma` y los dos
+    // el mismo perfil de riesgo que ya tienen `motivo_baja` y los dos
     // `motivos_diferencia` —que nunca declararon su índice en la entity—, no
     // uno nuevo; queda dicho porque ahora aplica a un caso más.
     await this.dataSource.query(`

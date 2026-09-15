@@ -68,7 +68,7 @@ export interface RegistrarMovimientoParams {
   // Modo 'lote'
   lote?: LoteInput; // entrada lote: crea o agrega a lote existente
   loteId?: string; // salida lote: lote a descontar
-  causaMermaId?: string | null;
+  motivoBajaId?: string | null;
   motivoDiferenciaId?: string | null; // solo en motivo='recuento'
   /**
    * El documento interno que ata las DOS filas de kardex de un traslado
@@ -292,11 +292,11 @@ export class InventarioService {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
 
-    if (params.motivo === 'merma' && !params.causaMermaId) {
-      throw new BadRequestException('La merma requiere una causa tipificada');
+    if (params.motivo === 'merma' && !params.motivoBajaId) {
+      throw new BadRequestException('La merma requiere un motivo de baja');
     }
-    if (params.motivo !== 'merma' && params.causaMermaId) {
-      throw new BadRequestException('causa_merma_id solo aplica a merma');
+    if (params.motivo !== 'merma' && params.motivoBajaId) {
+      throw new BadRequestException('motivo_baja_id solo aplica a merma');
     }
     if (params.motivo === 'recuento' && !params.motivoDiferenciaId) {
       throw new BadRequestException(
@@ -308,7 +308,7 @@ export class InventarioService {
         'motivo_diferencia_id solo aplica a recuento',
       );
     }
-    // Mismo par de guards que `causa_merma_id` y `motivo_diferencia_id`: el
+    // Mismo par de guards que `motivo_baja_id` y `motivo_diferencia_id`: el
     // motivo exige su documento, y el documento no se cuelga de otro motivo.
     // Sin el primero, una de las dos filas del traslado podría quedar
     // huérfana y el kardex ya no permitiría reconstruir "estos 5 kg salieron
@@ -322,7 +322,7 @@ export class InventarioService {
       throw new BadRequestException('traslado_id solo aplica a traslado');
     }
     // Los otros dos campos que solo el traslado usa. Van con su guard por la
-    // misma razón que `causa_merma_id`: un campo que llega poblado donde no
+    // misma razón que `motivo_baja_id`: un campo que llega poblado donde no
     // significa nada es un llamador confundido, y callarlo hace que el error
     // aparezca lejos de su causa.
     if (
@@ -442,7 +442,7 @@ export class InventarioService {
       `INSERT INTO movimientos_inventario
          (tenant_id, item_id, ubicacion_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
-          costo_unitario, costo_anterior, causa_merma_id, motivo_diferencia_id,
+          costo_unitario, costo_anterior, motivo_baja_id, motivo_diferencia_id,
           traslado_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING movimiento_id`,
@@ -460,7 +460,7 @@ export class InventarioService {
         params.comentario ?? null,
         costoUnitarioCongelado,
         esAjusteCosto ? costoActualPrevio : null,
-        params.causaMermaId ?? null,
+        params.motivoBajaId ?? null,
         params.motivoDiferenciaId ?? null,
         params.trasladoId ?? null,
       ],
@@ -1402,8 +1402,8 @@ export class InventarioService {
          mv.stock_anterior, mv.stock_resultante,
          mv.usuario_id, u.nombre AS usuario_nombre,
          mv.comentario, mv.creado_el, mv.costo_unitario, mv.costo_anterior,
-         mv.causa_merma_id, mv.motivo_diferencia_id,
-         cm.nombre AS causa_nombre,
+         mv.motivo_baja_id, mv.motivo_diferencia_id,
+         mb.nombre AS motivo_baja_nombre,
          p.unidad_medida,
          -- El kardex global mezcla ítems de distintas monedas: sin esto la UI
          -- formatea todo costo con la moneda oficial del tenant.
@@ -1414,7 +1414,7 @@ export class InventarioService {
        LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
-       LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
+       LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = mv.motivo_baja_id AND mb.eliminado_el IS NULL
        -- Sin ub.eliminado_el IS NULL, a propósito e igual que el JOIN de items
        -- arriba: un movimiento ya escrito en el kardex tiene que seguir diciendo
        -- en qué ubicación pasó aunque esa bodega se haya borrado después (es lo
@@ -1501,8 +1501,8 @@ export class InventarioService {
       creadoEl: r.creado_el,
       costoUnitario: r.costo_unitario,
       costoAnterior: r.costo_anterior,
-      causaMermaId: r.causa_merma_id,
-      causaNombre: r.causa_nombre,
+      motivoBajaId: r.motivo_baja_id,
+      motivoBajaNombre: r.motivo_baja_nombre,
       motivoDiferenciaId: r.motivo_diferencia_id,
       // Proyección de lectura: cantidad × costo congelado del kardex, a escala de
       // costo (4). Nadie paga este número y no se persiste. Redondearlo con la config
@@ -1536,8 +1536,8 @@ export interface MovimientoListItem {
   creadoEl: Date;
   costoUnitario: string | null;
   costoAnterior: string | null;
-  causaMermaId: string | null;
-  causaNombre: string | null;
+  motivoBajaId: string | null;
+  motivoBajaNombre: string | null;
   motivoDiferenciaId: string | null;
   costoPerdido: string | null;
   unidadMedida: string | null;
@@ -1577,8 +1577,8 @@ interface MovimientoRow {
   creado_el: Date;
   costo_unitario: string | null;
   costo_anterior: string | null;
-  causa_merma_id: string | null;
-  causa_nombre: string | null;
+  motivo_baja_id: string | null;
+  motivo_baja_nombre: string | null;
   motivo_diferencia_id: string | null;
   unidad_medida: string | null;
   moneda_id: string;

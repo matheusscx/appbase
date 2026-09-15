@@ -111,7 +111,7 @@ impuestos-create@@Crear impuesto@@/configuracion/impuestos@@POST@@/impuestos(\?|
 terceros-create@@Crear tercero@@/terceros@@POST@@/terceros(\?|$)@@yes
 descuentos-create@@Crear descuento@@/configuracion/descuentos@@POST@@/descuentos(\?|$)@@no
 recargos-create@@Crear recargo@@/configuracion/recargos@@POST@@/recargos(\?|$)@@no
-causas-merma-create@@Crear causa de merma@@/configuracion/causas-merma@@POST@@/causas-merma(\?|$)@@yes
+motivos-baja-create@@Crear motivo de baja@@/configuracion/motivos-baja@@POST@@/motivos-baja(\?|$)@@yes
 razones-sociales-create@@Crear razón social@@/configuracion/razones-sociales@@POST@@/razones-sociales(\?|$)@@no
 garzones-create@@Crear garzón@@/configuracion/garzones@@POST@@/garzones(\?|$)@@yes
 impresoras-create@@Crear impresora@@/configuracion/impresoras@@POST@@/impresoras(\?|$)@@yes
@@ -329,7 +329,7 @@ fill_first_text_and_save() {
 auto_mutate() {
   local id=$1
   case "$id" in
-    categorias-create|impuestos-create|terceros-create|causas-merma-create|garzones-create|impresoras-create)
+    categorias-create|impuestos-create|terceros-create|motivos-baja-create|garzones-create|impresoras-create)
       click_text "nueva"
       sleep 0.4
       fill_first_text_and_save "QA"

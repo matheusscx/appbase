@@ -8,7 +8,7 @@ import { AppModule } from '../src/app.module';
 import { localDelSegundoTenant } from './helpers/segundo-tenant';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
-const CAUSA_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
+const MOTIVO_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
@@ -17,7 +17,7 @@ const ADMIN_PASS = 'admin';
 interface TokenResponse {
   access_token: string;
 }
-interface CausaMermaItem {
+interface MotivoBajaItem {
   id: string;
   nombre: string;
   esFijo: boolean;
@@ -35,7 +35,7 @@ interface MermaResponse {
   stockResultante: string;
   costoUnitario: string | null;
   costoPerdido: string | null;
-  causaNombre: string;
+  motivoBajaNombre: string;
 }
 interface UbicacionListada {
   id: string;
@@ -45,7 +45,7 @@ interface UbicacionListada {
 interface MermaListItem {
   id: string;
   itemId: string;
-  causaNombre: string | null;
+  motivoBajaNombre: string | null;
   costoPerdido: string | null;
 }
 interface PaginatedMermas {
@@ -72,13 +72,13 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
-describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
+describe('Mermas — motivos, registro y rechazo en ajuste (e2e)', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let token: string;
   let localId: string;
   let itemId: string;
-  let roturaCausaId: string;
+  let roturaMotivoId: string;
   let mermaMovimientoId: string;
   let stockAntesDeLaMerma: string;
   // Sembrado por el test "sin costo" (más abajo); soft-deleted en el afterAll.
@@ -122,15 +122,15 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     // puede terminar empujando los fixtures del filtro `sinCosto` fuera de la
     // página — intermitente en vez de repetible.
     //
-    // La causa "Rotura envase" se limpia por SQL y no por la API porque el
-    // `DELETE` de una causa en uso devuelve 400 a propósito —lo afirma el
+    // El motivo "Rotura envase" se limpia por SQL y no por la API porque el
+    // `DELETE` de un motivo en uso devuelve 400 a propósito —lo afirma el
     // test de más abajo, que además la deja en uso con la merma que él mismo
     // registra—. Su nombre es fijo, así que sin esta limpieza la segunda
     // corrida sin `reset-db.sh` rebota en `assertNombreUnico` y arrastra 5 de
     // 9 tests (medido el 2026-08-28). El soft delete alcanza para liberar el
     // nombre porque el índice único es parcial (`WHERE eliminado_el IS NULL`,
     // `seeder.service.ts:1174`). Consecuencia asumida: la merma que quedó
-    // registrada con esa causa pasa a listarse con `causaNombre: null`, porque
+    // registrada con ese motivo pasa a listarse con `motivoBajaNombre: null`, porque
     // el JOIN de `mermas.service.ts:263` filtra igual — es lo mismo que
     // pasaría con un borrado real, y no lo mira ningún test.
     try {
@@ -141,11 +141,11 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
           [id],
         );
       }
-      if (roturaCausaId) {
+      if (roturaMotivoId) {
         await ds.query(
-          `UPDATE causas_merma SET eliminado_el = NOW()
-             WHERE causa_merma_id = $1`,
-          [roturaCausaId],
+          `UPDATE motivo_baja SET eliminado_el = NOW()
+             WHERE motivo_baja_id = $1`,
+          [roturaMotivoId],
         );
       }
     } finally {
@@ -153,37 +153,37 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     }
   });
 
-  it('GET /causas-merma devuelve al menos 5 causas fijas del seed', async () => {
+  it('GET /motivos-baja devuelve al menos 5 motivos fijos del seed', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/causas-merma')
+      .get('/api/motivos-baja')
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    const causas = res.body as CausaMermaItem[];
-    expect(Array.isArray(causas)).toBe(true);
-    expect(causas.length).toBeGreaterThanOrEqual(5);
+    const motivos = res.body as MotivoBajaItem[];
+    expect(Array.isArray(motivos)).toBe(true);
+    expect(motivos.length).toBeGreaterThanOrEqual(5);
 
-    const fijas = causas.filter((c) => c.esFijo);
+    const fijas = motivos.filter((c) => c.esFijo);
     expect(fijas.length).toBeGreaterThanOrEqual(5);
     expect(fijas.some((c) => c.nombre === 'Vencimiento')).toBe(true);
   });
 
-  it('POST /causas-merma crea causa custom Rotura envase', async () => {
+  it('POST /motivos-baja crea motivo custom Rotura envase', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/causas-merma')
+      .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${token}`)
       .send({ nombre: 'Rotura envase' });
 
     expect(res.status).toBe(201);
-    roturaCausaId = (res.body as { id: string }).id;
-    expect(roturaCausaId).toBeDefined();
+    roturaMotivoId = (res.body as { id: string }).id;
+    expect(roturaMotivoId).toBeDefined();
   });
 
   /**
    * ⚠️ **Se siembra el producto acá y no se usa el del seed** (decisión del
    * owner, 2026-09-03). Hasta entonces esto tomaba `Carne molida`, que nace con
    * **1,5 kg**; una corrida de este archivo se lleva **1,1** —1 kg la merma con
-   * Vencimiento y 0,1 la de causa custom—, así que la segunda corrida sin
+   * Vencimiento y 0,1 la de motivo custom—, así que la segunda corrida sin
    * `reset-db.sh` en el medio fallaba **2 de 9** con *"Stock insuficiente para
    * la salida"*, y el `GET` que busca esa merma caía detrás. Medido en tres
    * corridas seguidas: 1,5 → 0,4 → 0,3 → 0,2.
@@ -267,14 +267,14 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
         itemId,
         ubicacionId: localId,
         cantidad: '1',
-        causaMermaId: CAUSA_VENCIMIENTO_ID,
+        motivoBajaId: MOTIVO_VENCIMIENTO_ID,
         comentario: 'E2E merma vencimiento',
       });
 
     expect(res.status).toBe(201);
     const body = res.body as MermaResponse;
     mermaMovimientoId = body.movimientoId;
-    expect(body.causaNombre).toBe('Vencimiento');
+    expect(body.motivoBajaNombre).toBe('Vencimiento');
     expect(body.costoUnitario).toBeTruthy();
     expect(body.costoPerdido).toBeTruthy();
 
@@ -311,7 +311,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     );
   });
 
-  it('GET /mermas incluye causaNombre y costoPerdido', async () => {
+  it('GET /mermas incluye motivoBajaNombre y costoPerdido', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/mermas')
       .set('Authorization', `Bearer ${token}`);
@@ -322,7 +322,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
 
     const fila = list.data.find((m) => m.id === mermaMovimientoId);
     expect(fila).toBeDefined();
-    expect(fila?.causaNombre).toBe('Vencimiento');
+    expect(fila?.motivoBajaNombre).toBe('Vencimiento');
     expect(fila?.costoPerdido).toBeTruthy();
   });
 
@@ -341,10 +341,10 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
 
   // El `@IsOptional()` sin `@IsNotEmpty()` dejaba pasar `''`: el service solo
   // mira `if (dto.nombre !== undefined)`, así que persistía el `.trim()` y la
-  // causa quedaba sin nombre, apareciendo como una opción en blanco en el
+  // motivo quedaba sin nombre, apareciendo como una opción en blanco en el
   // selector de `mermas.vue`. Va a nivel e2e porque el que rechaza es el
   // `ValidationPipe`, que en unit no corre.
-  it('PATCH de una causa con el nombre vacío devuelve 400 y no la deja sin nombre', async () => {
+  it('PATCH de un motivo con el nombre vacío devuelve 400 y no la deja sin nombre', async () => {
     // Los tres valores que rompían de tres formas distintas, y cada uno lo
     // ataja un decorador distinto del DTO: `''` el `@IsNotEmpty()`, `'   '` el
     // `@Transform` que trimea antes de validar, y `null` el `@ValidateIf` que
@@ -352,7 +352,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
     // todo, dejando que el service hiciera `.trim()` sobre null → 500 crudo).
     for (const invalido of ['', '   ', null]) {
       const res = await request(app.getHttpServer())
-        .patch(`/api/causas-merma/${roturaCausaId}`)
+        .patch(`/api/motivos-baja/${roturaMotivoId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ nombre: invalido });
       expect(res.status).toBe(400);
@@ -360,18 +360,18 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
 
     // Y la fila sigue con su nombre: el rechazo ocurrió antes de escribir.
     const resLista = await request(app.getHttpServer())
-      .get('/api/causas-merma')
+      .get('/api/motivos-baja')
       .set('Authorization', `Bearer ${token}`);
     expect(resLista.status).toBe(200);
-    const causa = (resLista.body as { id: string; nombre: string }[]).find(
-      (c) => c.id === roturaCausaId,
+    const motivo = (resLista.body as { id: string; nombre: string }[]).find(
+      (c) => c.id === roturaMotivoId,
     );
-    expect(causa?.nombre).toBeTruthy();
+    expect(motivo?.nombre).toBeTruthy();
   });
 
-  it('PATCH causa fija y DELETE causa en uso devuelven 400', async () => {
+  it('PATCH motivo fijo y DELETE motivo en uso devuelven 400', async () => {
     const resPatch = await request(app.getHttpServer())
-      .patch(`/api/causas-merma/${CAUSA_VENCIMIENTO_ID}`)
+      .patch(`/api/motivos-baja/${MOTIVO_VENCIMIENTO_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ nombre: 'Vencimiento modificado' });
     expect(resPatch.status).toBe(400);
@@ -383,12 +383,12 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
         itemId,
         ubicacionId: localId,
         cantidad: '0.1',
-        causaMermaId: roturaCausaId,
+        motivoBajaId: roturaMotivoId,
       });
     expect(resMermaCustom.status).toBe(201);
 
     const resDelete = await request(app.getHttpServer())
-      .delete(`/api/causas-merma/${roturaCausaId}`)
+      .delete(`/api/motivos-baja/${roturaMotivoId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(resDelete.status).toBe(400);
   });
@@ -432,7 +432,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
         itemId: itemSinCostoId,
         ubicacionId: localId,
         cantidad: '1',
-        causaMermaId: CAUSA_VENCIMIENTO_ID,
+        motivoBajaId: MOTIVO_VENCIMIENTO_ID,
       });
     expect(resMerma.status).toBe(201);
     const bodyMerma = resMerma.body as MermaResponse;
@@ -466,7 +466,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
         .send({
           itemId,
           cantidad: '0.1',
-          causaMermaId: CAUSA_VENCIMIENTO_ID,
+          motivoBajaId: MOTIVO_VENCIMIENTO_ID,
         });
       expect(res.status).toBe(400);
     });
@@ -491,7 +491,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
           itemId,
           ubicacionId: ubicacionFalabellaId,
           cantidad: '0.1',
-          causaMermaId: CAUSA_VENCIMIENTO_ID,
+          motivoBajaId: MOTIVO_VENCIMIENTO_ID,
         });
       expect(res.status).toBe(404);
 
@@ -558,7 +558,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
           itemId: itemBodegaId,
           ubicacionId: bodegaId,
           cantidad: '5',
-          causaMermaId: CAUSA_VENCIMIENTO_ID,
+          motivoBajaId: MOTIVO_VENCIMIENTO_ID,
         });
       expect(resMerma.status).toBe(201);
       // `stockResultante` es el saldo de la UBICACIÓN del movimiento (la

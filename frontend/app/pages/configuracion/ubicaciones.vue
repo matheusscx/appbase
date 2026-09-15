@@ -71,7 +71,7 @@ watch(drawerOpen, (open) => {
   if (!open) resetDrawer()
 })
 
-// Cola serial, mismo patrón que `configuracion/causas-merma.vue` → `cargar()`:
+// Cola serial, mismo patrón que `configuracion/motivos-baja.vue` → `cargar()`:
 // `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
 // sin encadenarlas la respuesta que llega segunda pisa `ubicaciones.value` sin
 // importar cuál toggle la originó — el listado queda desincronizado del

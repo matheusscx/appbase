@@ -8,11 +8,11 @@ import {
 import { Transform } from 'class-transformer';
 
 export class UpdateMotivoTrasladoDto {
-  // Gemelo de `UpdateCausaMermaDto`/`UpdateMotivoDiferenciaInventarioDto`:
+  // Gemelo de `UpdateMotivoBajaDto`/`UpdateMotivoDiferenciaInventarioDto`:
   // mismo hueco, mismo arreglo. Sin `@IsNotEmpty()`, un `''` dejaba el motivo
   // sin nombre y aparecería en blanco en cualquier selector que lo liste.
   // `trim` antes de validar: `'   '` tiene que fallar igual que `''`. Ver el
-  // comentario largo en `UpdateCausaMermaDto`.
+  // comentario largo en `UpdateMotivoBajaDto`.
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )

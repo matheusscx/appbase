@@ -214,7 +214,7 @@ por un `toast.add` propio.
 ### `GET|POST /ubicaciones`, `PATCH|DELETE /ubicaciones/:id`, `POST /ubicaciones/:id/restaurar`
 
 Catálogo de configuración: lectura abierta a cualquier usuario del tenant, escritura
-**admin-only** (`TenantAdminGuard`) — mismo patrón que `causas-merma` y
+**admin-only** (`TenantAdminGuard`) — mismo patrón que `motivos-baja` y
 `motivos-diferencia-inventario`. `POST`/`PATCH` validan `CreateUbicacionDto`/
 `UpdateUbicacionDto` (`nombre`, `tipo` en la creación, `activo`). `DELETE` es soft-delete con
 los guards de la tabla de Bordes arriba.
@@ -335,7 +335,7 @@ reseteó la base.
 
 | Pantalla | Qué es / qué gana |
 |---|---|
-| `configuracion/ubicaciones.vue` | Nueva. Admin-only, calcada de `configuracion/causas-merma.vue`: el local arriba (no editable de tipo, no borrable), las bodegas abajo |
+| `configuracion/ubicaciones.vue` | Nueva. Admin-only, calcada de `configuracion/motivos-baja.vue`: el local arriba (no editable de tipo, no borrable), las bodegas abajo |
 | `configuracion/motivos-traslado.vue` | Nueva. Mismo patrón |
 | `inventario/traslados.vue` | Nueva. Formulario *de dónde → a dónde → qué → por qué*, más el histórico con el documento navegable |
 | `configuracion/items.vue` (lista) | La columna Stock pasa a decir el **total**; el detalle desglosa por ubicación |

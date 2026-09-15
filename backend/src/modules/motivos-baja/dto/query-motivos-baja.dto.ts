@@ -5,7 +5,7 @@ import { QueryIncluirEliminadosDto } from '../../../common/dto/query-incluir-eli
 // `QueryIncluirEliminadosDto` es compartido por los 16 recursos de la
 // papelera: `soloActivas` no le corresponde a él (es propio de este listado),
 // así que se extiende acá en vez de agregarlo al DTO común.
-export class QueryCausasMermaDto extends QueryIncluirEliminadosDto {
+export class QueryMotivosBajaDto extends QueryIncluirEliminadosDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsOptional()
   @IsBoolean()

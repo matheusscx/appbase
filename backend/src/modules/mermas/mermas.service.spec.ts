@@ -2,7 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { MermasService } from './mermas.service';
-import { CausasMermaService } from './causas-merma.service';
+import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
@@ -10,7 +10,7 @@ import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
 const TENANT = 'tenant-uuid';
 const USER = 'user-uuid';
 const ITEM = 'item-uuid';
-const CAUSA = 'causa-uuid';
+const MOTIVO = 'motivo-uuid';
 const UBICACION_ID = 'ubicacion-local-uuid';
 
 // No incluye `costo_actual`: desde el fix de concurrencia (revisión
@@ -51,7 +51,7 @@ describe('MermasService', () => {
   let dataSourceQueryMock: jest.Mock;
   let inventarioService: { registrarMovimiento: jest.Mock };
   let catalogService: { convertirUnidad: jest.Mock };
-  let causasService: { assertCausaActiva: jest.Mock };
+  let motivosBajaService: { assertMotivoActivo: jest.Mock };
   let ubicacionesService: { findOneOrFail: jest.Mock };
 
   beforeEach(async () => {
@@ -63,7 +63,7 @@ describe('MermasService', () => {
     dataSourceQueryMock = jest.fn();
     inventarioService = { registrarMovimiento: jest.fn() };
     catalogService = { convertirUnidad: jest.fn() };
-    causasService = { assertCausaActiva: jest.fn() };
+    motivosBajaService = { assertMotivoActivo: jest.fn() };
     // `findOneOrFail` mockeado: en un unit test es la SERVICE mockeada la que
     // responde, así que esto NO pasa por `manager.query` (eso solo pasa en el
     // e2e, contra `UbicacionesService` real) — el orden de
@@ -91,7 +91,7 @@ describe('MermasService', () => {
         },
         { provide: InventarioService, useValue: inventarioService },
         { provide: CatalogService, useValue: catalogService },
-        { provide: CausasMermaService, useValue: causasService },
+        { provide: MotivosBajaService, useValue: motivosBajaService },
         { provide: UbicacionesService, useValue: ubicacionesService },
       ],
     }).compile();
@@ -102,8 +102,8 @@ describe('MermasService', () => {
   describe('registrar', () => {
     it('congela costoUnitario/costoPerdido con lo que devuelve el movimiento, y no se lo pasa como override', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -114,7 +114,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       // `registrar` ya no le pasa `costoUnitario` a `registrarMovimiento` en
@@ -133,19 +133,19 @@ describe('MermasService', () => {
         tipo: 'salida',
         motivo: 'merma',
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
       expect(result).toMatchObject({
         movimientoId: 'mov-1',
         stockResultante: '9',
         costoUnitario: '100',
         costoPerdido: '100.0000',
-        causaNombre: 'Vencimiento',
+        motivoBajaNombre: 'Vencimiento',
         merma: {
           id: 'mov-1',
           itemId: ITEM,
           costoPerdido: '100.0000',
-          causaNombre: 'Vencimiento',
+          motivoBajaNombre: 'Vencimiento',
         },
       });
     });
@@ -162,8 +162,8 @@ describe('MermasService', () => {
       transactionQueryMock.mockResolvedValueOnce([
         itemRow({ costo_actual: '999' }),
       ]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -174,7 +174,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       expect(result.costoUnitario).toBe('100');
@@ -189,8 +189,8 @@ describe('MermasService', () => {
     // en el DTO. Ver docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md
     it('registra la merma sin valorizar cuando el producto no tiene costo', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -207,7 +207,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '2',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       const [, params] = inventarioService.registrarMovimiento.mock
@@ -231,8 +231,8 @@ describe('MermasService', () => {
       // que ese callee no puede rebotar, ni con este costo ni con ninguno.
       // `test/mermas.e2e-spec.ts` cubre el camino contra el servicio real.
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -243,7 +243,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       const [, params] = inventarioService.registrarMovimiento.mock
@@ -255,8 +255,8 @@ describe('MermasService', () => {
 
     it('valoriza con el costo del producto, sin que nadie lo tipee', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -273,7 +273,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '0.5',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       expect(result.costoUnitario).toBe('100.0000');
@@ -282,8 +282,8 @@ describe('MermasService', () => {
 
     it('convierte unidad cuando unidadCodigo difiere de la base', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       catalogService.convertirUnidad.mockResolvedValueOnce('0.5');
@@ -298,7 +298,7 @@ describe('MermasService', () => {
         ubicacionId: UBICACION_ID,
         cantidad: '500',
         unidadCodigo: 'g',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       expect(catalogService.convertirUnidad).toHaveBeenCalledWith(
@@ -323,8 +323,8 @@ describe('MermasService', () => {
       transactionQueryMock.mockResolvedValueOnce([
         itemRow({ unidad_medida: 'kg' }),
       ]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       catalogService.convertirUnidad.mockResolvedValueOnce('0.5'); // 500 g → 0.5 kg
@@ -343,7 +343,7 @@ describe('MermasService', () => {
         ubicacionId: UBICACION_ID,
         cantidad: '500',
         unidadCodigo: 'g',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       const [, params] = inventarioService.registrarMovimiento.mock
@@ -356,10 +356,10 @@ describe('MermasService', () => {
       expect(result.costoPerdido).toBe('50.0000'); // 0.5 kg × 100/kg
     });
 
-    it('rechaza causa inactiva vía assertCausaActiva', async () => {
+    it('rechaza motivo inactivo vía assertMotivoActivo', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockRejectedValueOnce(
-        new BadRequestException('Causa de merma no válida o inactiva'),
+      motivosBajaService.assertMotivoActivo.mockRejectedValueOnce(
+        new BadRequestException('Motivo de baja no válido o inactivo'),
       );
 
       await expect(
@@ -367,9 +367,9 @@ describe('MermasService', () => {
           itemId: ITEM,
           ubicacionId: UBICACION_ID,
           cantidad: '1',
-          causaMermaId: CAUSA,
+          motivoBajaId: MOTIVO,
         }),
-      ).rejects.toThrow('Causa de merma no válida o inactiva');
+      ).rejects.toThrow('Motivo de baja no válido o inactivo');
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -377,8 +377,8 @@ describe('MermasService', () => {
       transactionQueryMock.mockResolvedValueOnce([
         itemRow({ tipo: 'ingrediente', nombre: 'Harina premium' }),
       ]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -393,7 +393,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
@@ -411,7 +411,7 @@ describe('MermasService', () => {
         stockResultante: '9',
         costoUnitario: '100',
         costoPerdido: '100.0000',
-        causaNombre: 'Vencimiento',
+        motivoBajaNombre: 'Vencimiento',
         merma: { id: 'mov-ing', itemId: ITEM },
       });
     });
@@ -420,8 +420,8 @@ describe('MermasService', () => {
       transactionQueryMock.mockResolvedValueOnce([
         itemRow({ unidad_medida: 'l' }),
       ]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce({
@@ -434,7 +434,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: UBICACION_ID,
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       expect(result.merma.unidadMedida).toBe('l');
@@ -454,8 +454,8 @@ describe('MermasService', () => {
         activo: true,
       });
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
-      causasService.assertCausaActiva.mockResolvedValueOnce({
-        id: CAUSA,
+      motivosBajaService.assertMotivoActivo.mockResolvedValueOnce({
+        id: MOTIVO,
         nombre: 'Vencimiento',
       });
       inventarioService.registrarMovimiento.mockResolvedValueOnce(
@@ -466,7 +466,7 @@ describe('MermasService', () => {
         itemId: ITEM,
         ubicacionId: BODEGA_ID,
         cantidad: '1',
-        causaMermaId: CAUSA,
+        motivoBajaId: MOTIVO,
       });
 
       expect(ubicacionesService.findOneOrFail).toHaveBeenCalledWith(
@@ -490,14 +490,14 @@ describe('MermasService', () => {
           itemId: ITEM,
           ubicacionId: 'ubicacion-de-otro-tenant',
           cantidad: '1',
-          causaMermaId: CAUSA,
+          motivoBajaId: MOTIVO,
         }),
       ).rejects.toThrow('no encontrada');
 
       // El lock del ítem (`transactionQueryMock`) no se llegó a pedir: la
       // validación de ubicación corre primero y corta antes.
       expect(transactionQueryMock).not.toHaveBeenCalled();
-      expect(causasService.assertCausaActiva).not.toHaveBeenCalled();
+      expect(motivosBajaService.assertMotivoActivo).not.toHaveBeenCalled();
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
   });
@@ -513,8 +513,8 @@ describe('MermasService', () => {
             item_nombre: 'Harina',
             cantidad: '2.5000',
             costo_unitario: '1000',
-            causa_merma_id: CAUSA,
-            causa_nombre: 'Vencimiento',
+            motivo_baja_id: MOTIVO,
+            motivo_baja_nombre: 'Vencimiento',
             comentario: null,
             creado_el: new Date('2026-07-18T00:00:00Z'),
             usuario_nombre: 'Admin',

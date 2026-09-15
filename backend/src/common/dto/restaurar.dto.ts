@@ -6,7 +6,7 @@ import { Transform } from 'class-transformer';
  * unicidad de nombre por tenant.
  *
  * Lo usan los **9 controllers** de recursos con unicidad de nombre por tenant
- * (`descuentos`, `recargos`, `turnos`, `cajones`, `causas-merma`,
+ * (`descuentos`, `recargos`, `turnos`, `cajones`, `motivos-baja`,
  * `motivos-diferencia`, `motivos-diferencia-inventario`,
  * `grupos-modificadores` y, desde el 2026-08-16, `impuestos`). Vive en
  * `common/` por la misma razón que

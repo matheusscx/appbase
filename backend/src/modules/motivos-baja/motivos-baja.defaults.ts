@@ -1,4 +1,4 @@
-export const CAUSAS_MERMA_FIJAS = [
+export const MOTIVOS_BAJA_FIJOS = [
   'Vencimiento',
   'Deterioro',
   'Robo',

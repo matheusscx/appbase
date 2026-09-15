@@ -12,7 +12,7 @@ import { AppModule } from '../src/app.module';
  * nombre* — en una lista de catálogo que alguien elige a ojo, dos entradas que
  * solo difieren en mayúsculas son un error de tipeo, no dos cosas distintas.
  *
- * Estaba partida 4 y 4 sin que nadie lo hubiera decidido: `causas_merma`, los
+ * Estaba partida 4 y 4 sin que nadie lo hubiera decidido: `motivo_baja`, los
  * dos `motivos_diferencia` y `grupos_modificadores` comparaban con `LOWER()`;
  * `descuentos`, `recargos`, `turnos` y `cajones` comparaban exacto. Los tres
  * primeros de ese segundo grupo ni siquiera tenían índice: la unicidad vivía
@@ -44,7 +44,7 @@ const TABLAS_CON_NOMBRE_UNICO = [
   'recargos',
   'turnos',
   'cajones',
-  'causas_merma',
+  'motivo_baja',
   'motivo_diferencia_caja',
   'motivo_diferencia_inventario',
   'grupos_modificadores',

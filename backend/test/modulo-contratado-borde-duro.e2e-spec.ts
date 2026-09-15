@@ -111,13 +111,13 @@ describe('El módulo contratado es un borde duro, también para el admin (e2e)',
     // `TenantAdminGuard` —que resuelve por `userIsTenantAdmin`, sin tocar
     // `tenant_modulos`— o el caso no distingue "sigue siendo admin" de "es un
     // miembro cualquiera": `GET /roles`, por ejemplo, solo pide `TenantGuard` y
-    // se lo daría a cualquier miembro. `POST /causas-merma` sí es admin-only.
+    // se lo daría a cualquier miembro. `POST /motivos-baja` sí es admin-only.
     // Sin esto, el 403 de arriba podría estar diciendo "perdiste el rol" en vez
     // de "ese módulo no está contratado".
     const res = await request(app.getHttpServer())
-      .post('/api/causas-merma')
+      .post('/api/motivos-baja')
       .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: `Causa borde duro E2E ${Date.now()}` });
+      .send({ nombre: `Motivo borde duro E2E ${Date.now()}` });
     expect(res.status).toBe(201);
 
     // Y un módulo que ese tenant SÍ contrató le responde.

@@ -6,7 +6,7 @@ import { QueryMotivosDiferenciaDto } from './query-motivos-diferencia.dto';
 // este DTO: cualquier string que no fuera exactamente 'true' resultaba en
 // `false`, y el parámetro ausente también. Este spec prueba que moverlo a un
 // DTO con `@Transform` no cambió ese comportamiento (mismo spec que
-// mermas/dto/query-causas-merma.dto.spec.ts, misma familia).
+// motivos-baja/dto/query-motivos-baja.dto.spec.ts, misma familia).
 describe('QueryMotivosDiferenciaDto', () => {
   it('soloActivas=true se parsea como boolean true', async () => {
     const dto = plainToInstance(QueryMotivosDiferenciaDto, {

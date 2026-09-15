@@ -44,7 +44,7 @@ import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
-import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
+import { MOTIVOS_BAJA_FIJOS } from '../motivos-baja/motivos-baja.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
 import { MOTIVOS_TRASLADO_FIJOS } from '../motivos-traslado/motivos-traslado.defaults';
@@ -375,10 +375,10 @@ export class TenantsService {
       // el alta avisa en vez de esconderlo.
       await this.itemsService.asegurarItemAjuste(manager, savedTenant.id);
 
-      // 7. Sembrar causas de merma fijas del sistema
-      for (const nombre of CAUSAS_MERMA_FIJAS) {
+      // 7. Sembrar motivos de baja fijos del sistema
+      for (const nombre of MOTIVOS_BAJA_FIJOS) {
         await manager.query(
-          `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
+          `INSERT INTO motivo_baja (tenant_id, nombre, activo, es_fijo)
            VALUES ($1, $2, true, true)`,
           [savedTenant.id, nombre],
         );

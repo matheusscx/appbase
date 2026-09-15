@@ -22,7 +22,7 @@ const HARINA = {
   unidadMedida: 'kg',
   modoInventario: 'cantidad',
 }
-const CAUSA = { id: 'causa-1', nombre: 'Vencimiento' }
+const MOTIVO = { id: 'motivo-1', nombre: 'Vencimiento' }
 
 /** Ubicaciones que devuelve `GET /ubicaciones` en cada test. */
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
@@ -43,8 +43,8 @@ mockNuxtImport('useApiFetch', () => {
       mermasEnviadas.push({ ...(opts.body ?? {}) })
       return Promise.resolve({
         costoPerdido: '100.0000',
-        causaNombre: CAUSA.nombre,
-        merma: { id: 'mov-1', itemId: HARINA.id, cantidad: '1', costoUnitario: '100', costoPerdido: '100.0000', causaMermaId: CAUSA.id, causaNombre: CAUSA.nombre, comentario: null, creadoEl: new Date().toISOString(), usuarioNombre: null, unidadMedida: 'kg', monedaId: 'clp-1', itemEliminado: false },
+        motivoBajaNombre: MOTIVO.nombre,
+        merma: { id: 'mov-1', itemId: HARINA.id, cantidad: '1', costoUnitario: '100', costoPerdido: '100.0000', motivoBajaId: MOTIVO.id, motivoBajaNombre: MOTIVO.nombre, comentario: null, creadoEl: new Date().toISOString(), usuarioNombre: null, unidadMedida: 'kg', monedaId: 'clp-1', itemEliminado: false },
       })
     }
     if (url.includes('/items?tipo=producto')) {
@@ -53,7 +53,7 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/items?tipo=ingrediente')) {
       return Promise.resolve({ data: [], meta: { page: 1, pageSize: 100, total: 0, totalPages: 0 } })
     }
-    if (url.includes('/causas-merma')) return Promise.resolve([CAUSA])
+    if (url.includes('/motivos-baja')) return Promise.resolve([MOTIVO])
     // `useUnidadesMedidaStore.ensureLoaded()` espera un ARRAY, no el shape
     // paginado del catch-all de abajo — sin esto `unidades.value.find` revienta.
     if (url.includes('/catalog/unidades-medida')) return Promise.resolve([])
@@ -106,7 +106,7 @@ function selectConOpcion(wrapper: Wrapper, valor: string, sinValor?: string) {
 }
 
 const selectProducto = (w: Wrapper) => selectConOpcion(w, HARINA.id, 'todos')
-const selectCausa = (w: Wrapper) => selectConOpcion(w, CAUSA.id, 'todos')
+const selectMotivo = (w: Wrapper) => selectConOpcion(w, MOTIVO.id, 'todos')
 
 async function emitir(comp: ReturnType<typeof selectConOpcion>, valor: string) {
   comp.vm.$emit('update:modelValue', valor)
@@ -150,7 +150,7 @@ describe('mermas — selector de ubicación', () => {
 
     await emitir(selectProducto(wrapper), HARINA.id)
     await wrapper.find('input[inputmode="decimal"]').setValue('2')
-    await emitir(selectCausa(wrapper), CAUSA.id)
+    await emitir(selectMotivo(wrapper), MOTIVO.id)
     await enviar(wrapper)
 
     expect(mermasEnviadas).toHaveLength(1)
@@ -166,7 +166,7 @@ describe('mermas — selector de ubicación', () => {
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
     await emitir(selectProducto(wrapper), HARINA.id)
     await wrapper.find('input[inputmode="decimal"]').setValue('3')
-    await emitir(selectCausa(wrapper), CAUSA.id)
+    await emitir(selectMotivo(wrapper), MOTIVO.id)
     await enviar(wrapper)
 
     expect(mermasEnviadas).toHaveLength(1)

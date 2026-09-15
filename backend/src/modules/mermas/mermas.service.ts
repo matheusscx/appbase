@@ -20,7 +20,7 @@ import {
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { UbicacionesService } from '../ubicaciones/ubicaciones.service';
-import { CausasMermaService } from './causas-merma.service';
+import { MotivosBajaService } from '../motivos-baja/motivos-baja.service';
 import { CreateMermaDto } from './dto/create-merma.dto';
 import { FindMermasDto } from './dto/find-mermas.dto';
 
@@ -29,7 +29,7 @@ export interface MermaResponse {
   stockResultante: string;
   costoUnitario: string | null;
   costoPerdido: string | null;
-  causaNombre: string;
+  motivoBajaNombre: string;
   /** Fila lista para upsert en el front (sin re-fetch). */
   merma: MermaListItem;
 }
@@ -41,8 +41,8 @@ export interface MermaListItem {
   cantidad: string;
   costoUnitario: string | null;
   costoPerdido: string | null;
-  causaMermaId: string | null;
-  causaNombre: string | null;
+  motivoBajaId: string | null;
+  motivoBajaNombre: string | null;
   comentario: string | null;
   creadoEl: Date;
   usuarioNombre: string | null;
@@ -67,8 +67,8 @@ interface MermaRow {
   item_nombre: string;
   cantidad: string;
   costo_unitario: string | null;
-  causa_merma_id: string | null;
-  causa_nombre: string | null;
+  motivo_baja_id: string | null;
+  motivo_baja_nombre: string | null;
   comentario: string | null;
   creado_el: Date;
   usuario_nombre: string | null;
@@ -83,7 +83,7 @@ export class MermasService {
     private readonly db: Db,
     private readonly inventarioService: InventarioService,
     private readonly catalogService: CatalogService,
-    private readonly causasService: CausasMermaService,
+    private readonly motivosBajaService: MotivosBajaService,
     private readonly ubicacionesService: UbicacionesService,
   ) {}
 
@@ -137,10 +137,10 @@ export class MermasService {
         );
       }
 
-      const causa = await this.causasService.assertCausaActiva(
+      const motivo = await this.motivosBajaService.assertMotivoActivo(
         manager,
         tenantId,
-        dto.causaMermaId,
+        dto.motivoBajaId,
       );
 
       const cantidad = new Decimal(dto.cantidad);
@@ -188,7 +188,7 @@ export class MermasService {
         motivo: 'merma',
         cantidad: cantidadStr,
         comentario: dto.comentario ?? null,
-        causaMermaId: dto.causaMermaId,
+        motivoBajaId: dto.motivoBajaId,
       });
 
       const costoCongelado = mov.costoActualPrevio;
@@ -206,7 +206,7 @@ export class MermasService {
         stockResultante: mov.stockResultante,
         costoUnitario: costoCongelado,
         costoPerdido,
-        causaNombre: causa.nombre,
+        motivoBajaNombre: motivo.nombre,
         merma: {
           id: mov.movimientoId,
           itemId: dto.itemId,
@@ -214,8 +214,8 @@ export class MermasService {
           cantidad: cantidadStr,
           costoUnitario: costoCongelado,
           costoPerdido,
-          causaMermaId: dto.causaMermaId,
-          causaNombre: causa.nombre,
+          motivoBajaId: dto.motivoBajaId,
+          motivoBajaNombre: motivo.nombre,
           comentario: dto.comentario ?? null,
           creadoEl: new Date(),
           usuarioNombre: null,
@@ -264,7 +264,7 @@ export class MermasService {
       `SELECT
          mv.movimiento_id, mv.item_id, i.nombre AS item_nombre,
          mv.cantidad, mv.costo_unitario,
-         mv.causa_merma_id, cm.nombre AS causa_nombre,
+         mv.motivo_baja_id, mb.nombre AS motivo_baja_nombre,
          mv.comentario, mv.creado_el, u.nombre AS usuario_nombre,
          p.unidad_medida, i.moneda_id,
          (i.eliminado_el IS NOT NULL) AS item_eliminado
@@ -272,7 +272,7 @@ export class MermasService {
        LEFT JOIN items i ON i.item_id = mv.item_id
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
-       LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
+       LEFT JOIN motivo_baja mb ON mb.motivo_baja_id = mv.motivo_baja_id AND mb.eliminado_el IS NULL
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          AND mv.motivo = 'merma'
          ${filters}
@@ -305,9 +305,9 @@ export class MermasService {
       params.push(query.itemId);
       filters += ` AND mv.item_id = $${params.length}`;
     }
-    if (query.causaMermaId) {
-      params.push(query.causaMermaId);
-      filters += ` AND mv.causa_merma_id = $${params.length}`;
+    if (query.motivoBajaId) {
+      params.push(query.motivoBajaId);
+      filters += ` AND mv.motivo_baja_id = $${params.length}`;
     }
     if (query.desde) {
       params.push(query.desde);
@@ -347,8 +347,8 @@ export class MermasService {
         r.costo_unitario != null
           ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(ESCALA_COSTO)
           : null,
-      causaMermaId: r.causa_merma_id,
-      causaNombre: r.causa_nombre,
+      motivoBajaId: r.motivo_baja_id,
+      motivoBajaNombre: r.motivo_baja_nombre,
       comentario: r.comentario,
       creadoEl: r.creado_el,
       usuarioNombre: r.usuario_nombre,

@@ -1035,7 +1035,7 @@ Congelar antes de exigir la explicación es lo que hace que la explicación sign
 
 ### Motivos de diferencia — catálogo admin-only
 
-Igual patrón que `causas_merma` (mermas de inventario): catálogo por tenant, admin-only,
+Igual patrón que `motivo_baja` (mermas de inventario): catálogo por tenant, admin-only,
 con motivos **fijos** (`es_fijo`) sembrados por tenant que no se pueden renombrar ni
 eliminar, pero sí togglear en `activo` y en `requiere_comentario`.
 
@@ -1050,7 +1050,7 @@ Database](#entity--database). Índice único parcial `(tenant_id, lower(nombre))
 |---|---|---|---|
 | GET | `/motivos-diferencia` | `JwtAuthGuard + TenantGuard` | Lista los motivos del tenant; `?soloActivas=true` filtra a `activo=true`. Sin permiso dedicado — cualquier usuario autenticado del tenant puede leer el catálogo (lo necesita para justificar una diferencia) |
 | POST | `/motivos-diferencia` | `TenantAdminGuard` | Crea un motivo (`es_fijo: false` siempre) |
-| PATCH | `/motivos-diferencia/:id` | `TenantAdminGuard` | Edita `nombre`/`activo`/`requiereComentario`; en un motivo fijo bloquea el rename (`400`) pero permite togglear `activo`/`requiereComentario` — divergencia intencional de `causas_merma`, donde un fijo no admite ningún cambio |
+| PATCH | `/motivos-diferencia/:id` | `TenantAdminGuard` | Edita `nombre`/`activo`/`requiereComentario`; en un motivo fijo bloquea el rename (`400`) pero permite togglear `activo`/`requiereComentario` — divergencia intencional de `motivo_baja`, donde un fijo no admite ningún cambio |
 | DELETE | `/motivos-diferencia/:id` | `TenantAdminGuard` | Soft delete; `400` si el motivo es fijo |
 
 Sembrado por tenant (`motivos-diferencia.defaults.ts`): *falta de efectivo*, *sobra de
@@ -1944,7 +1944,7 @@ recalcula después de escrita)
 `eliminado_el IS NULL` — una fila viva por línea de arqueo y caja.
 
 **Table**: `motivo_diferencia_caja` — catálogo de motivos de diferencia por tenant
-(sub-proyecto C, mismo patrón que `causas_merma`)
+(sub-proyecto C, mismo patrón que `motivo_baja`)
 
 | Column | Type | Constraints | Notes |
 |--------|------|-------------|-------|
@@ -1971,7 +1971,7 @@ recalcula después de escrita)
 - `JustificarDiferenciasDto` — `{ lineas: LineaJustificacionDto[] }` — body del override admin (`PATCH /caja/:id/arqueo/motivos`); mismo shape que `FinalizarCierreDto`, DTO propio porque son endpoints distintos
 - `LineaJustificacionDto` — `{ metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }` (`@IsUUID('4')` opcional en ambos campos; `metodoPagoId` acepta `null` vía `@ValidateIf`)
 - `SetArqueoCiegoDto` — `{ arqueoCiego: boolean }` (`@IsBoolean`) — body de `PUT /caja/arqueo-ciego`
-- `CreateMotivoDiferenciaDto` / `UpdateMotivoDiferenciaDto` — `{ nombre?, activo?, requiereComentario? }`, mismo patrón que `causas_merma`
+- `CreateMotivoDiferenciaDto` / `UpdateMotivoDiferenciaDto` — `{ nombre?, activo?, requiereComentario? }`, mismo patrón que `motivo_baja`
 
 ### Key Methods
 
@@ -2086,7 +2086,7 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
 - `pages/configuracion/motivos-diferencia.vue` — CRUD admin-only del catálogo de motivos
-  de diferencia (sub-proyecto C), mismo patrón que `configuracion/causas-merma.vue`:
+  de diferencia (sub-proyecto C), mismo patrón que `configuracion/motivos-baja.vue`:
   tabla + drawer crear/editar + toggle inline de `activo`; un fijo (`esFijo`) deshabilita
   el campo nombre en el drawer pero permite togglear `activo`/`requiereComentario`.
 

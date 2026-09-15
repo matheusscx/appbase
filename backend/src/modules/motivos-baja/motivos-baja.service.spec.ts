@@ -2,15 +2,15 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
-import { CausasMermaService } from './causas-merma.service';
-import { CausaMerma } from './entities/causa-merma.entity';
+import { MotivosBajaService } from './motivos-baja.service';
+import { MotivoBaja } from './entities/motivo-baja.entity';
 
 const TENANT = 'tenant-uuid';
-const CAUSA = 'causa-uuid';
+const MOTIVO = 'motivo-uuid';
 const USUARIO_ID = 'usuario-uuid';
 
-describe('CausasMermaService', () => {
-  let service: CausasMermaService;
+describe('MotivosBajaService', () => {
+  let service: MotivosBajaService;
   let queryMock: jest.Mock;
 
   beforeEach(async () => {
@@ -18,8 +18,8 @@ describe('CausasMermaService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        CausasMermaService,
-        { provide: getRepositoryToken(CausaMerma), useValue: {} },
+        MotivosBajaService,
+        { provide: getRepositoryToken(MotivoBaja), useValue: {} },
         {
           provide: Db,
           useValue: {
@@ -31,7 +31,7 @@ describe('CausasMermaService', () => {
       ],
     }).compile();
 
-    service = module.get<CausasMermaService>(CausasMermaService);
+    service = module.get<MotivosBajaService>(MotivosBajaService);
   });
 
   // Tercera y última forma de escritura de la red de colisión de nombre: SQL
@@ -58,7 +58,7 @@ describe('CausasMermaService', () => {
 
       const promesa = service.create(TENANT, { nombre: '  Rotura  ' });
       await expect(promesa).rejects.toThrow(BadRequestException);
-      await expect(promesa).rejects.toThrow(/Ya existe una causa de merma/);
+      await expect(promesa).rejects.toThrow(/Ya existe un motivo de baja/);
       expect(nombresConsultados()).toEqual(['Rotura', 'Rotura']);
     });
 
@@ -66,7 +66,7 @@ describe('CausasMermaService', () => {
       queryMock
         .mockResolvedValueOnce([
           {
-            causa_merma_id: CAUSA,
+            motivo_baja_id: MOTIVO,
             nombre: 'Vieja',
             activo: true,
             es_fijo: false,
@@ -76,8 +76,8 @@ describe('CausasMermaService', () => {
         .mockRejectedValueOnce(err23505()) // UPDATE: perdió la carrera
         .mockResolvedValueOnce([{ '?column?': 1 }]); // revalidación: tomado
 
-      const promesa = service.update(TENANT, CAUSA, { nombre: '  Rotura  ' });
-      await expect(promesa).rejects.toThrow(/Ya existe una causa de merma/);
+      const promesa = service.update(TENANT, MOTIVO, { nombre: '  Rotura  ' });
+      await expect(promesa).rejects.toThrow(/Ya existe un motivo de baja/);
       expect(nombresConsultados()).toEqual(['Rotura', 'Rotura']);
     });
 
@@ -87,7 +87,7 @@ describe('CausasMermaService', () => {
       queryMock
         .mockResolvedValueOnce([
           {
-            causa_merma_id: CAUSA,
+            motivo_baja_id: MOTIVO,
             nombre: 'Rotura',
             activo: true,
             es_fijo: false,
@@ -96,7 +96,7 @@ describe('CausasMermaService', () => {
         .mockRejectedValueOnce(err23505()); // UPDATE
 
       await expect(
-        service.update(TENANT, CAUSA, { activo: false }),
+        service.update(TENANT, MOTIVO, { activo: false }),
       ).rejects.toThrow('duplicate key');
       expect(nombresConsultados()).toEqual([]);
     });
@@ -106,7 +106,7 @@ describe('CausasMermaService', () => {
     it('inserta con es_fijo=false y nombre trim', async () => {
       queryMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
         {
-          causa_merma_id: CAUSA,
+          motivo_baja_id: MOTIVO,
           nombre: 'Rotura',
           activo: true,
           es_fijo: false,
@@ -121,7 +121,7 @@ describe('CausasMermaService', () => {
         [TENANT, 'Rotura', true],
       );
       expect(result).toEqual({
-        id: CAUSA,
+        id: MOTIVO,
         nombre: 'Rotura',
         activo: true,
         esFijo: false,
@@ -139,10 +139,10 @@ describe('CausasMermaService', () => {
   });
 
   describe('update', () => {
-    it('rechaza modificar causa fija del sistema', async () => {
+    it('rechaza modificar motivo fijo del sistema', async () => {
       queryMock.mockResolvedValueOnce([
         {
-          causa_merma_id: CAUSA,
+          motivo_baja_id: MOTIVO,
           nombre: 'Vencimiento',
           activo: true,
           es_fijo: true,
@@ -150,32 +150,32 @@ describe('CausasMermaService', () => {
       ]);
 
       await expect(
-        service.update(TENANT, CAUSA, { nombre: 'Otro' }),
-      ).rejects.toThrow('No se puede modificar una causa fija del sistema');
+        service.update(TENANT, MOTIVO, { nombre: 'Otro' }),
+      ).rejects.toThrow('No se puede modificar un motivo fijo del sistema');
     });
   });
 
   describe('remove', () => {
-    it('rechaza eliminar causa fija del sistema', async () => {
+    it('rechaza eliminar motivo fijo del sistema', async () => {
       queryMock.mockResolvedValueOnce([
         {
-          causa_merma_id: CAUSA,
+          motivo_baja_id: MOTIVO,
           nombre: 'Vencimiento',
           activo: true,
           es_fijo: true,
         },
       ]);
 
-      await expect(service.remove(TENANT, USUARIO_ID, CAUSA)).rejects.toThrow(
-        'No se puede eliminar una causa fija del sistema',
+      await expect(service.remove(TENANT, USUARIO_ID, MOTIVO)).rejects.toThrow(
+        'No se puede eliminar un motivo fijo del sistema',
       );
     });
 
-    it('rechaza eliminar causa en uso en movimientos', async () => {
+    it('rechaza eliminar motivo en uso en movimientos', async () => {
       queryMock
         .mockResolvedValueOnce([
           {
-            causa_merma_id: CAUSA,
+            motivo_baja_id: MOTIVO,
             nombre: 'Rotura',
             activo: true,
             es_fijo: false,
@@ -183,8 +183,8 @@ describe('CausasMermaService', () => {
         ])
         .mockResolvedValueOnce([{ cnt: '2' }]);
 
-      await expect(service.remove(TENANT, USUARIO_ID, CAUSA)).rejects.toThrow(
-        'No se puede eliminar: la causa está en uso en movimientos de merma',
+      await expect(service.remove(TENANT, USUARIO_ID, MOTIVO)).rejects.toThrow(
+        'No se puede eliminar: el motivo está en uso en movimientos de merma',
       );
     });
 
@@ -192,7 +192,7 @@ describe('CausasMermaService', () => {
       queryMock
         .mockResolvedValueOnce([
           {
-            causa_merma_id: CAUSA,
+            motivo_baja_id: MOTIVO,
             nombre: 'Rotura',
             activo: true,
             es_fijo: false,
@@ -201,12 +201,12 @@ describe('CausasMermaService', () => {
         .mockResolvedValueOnce([{ cnt: '0' }])
         .mockResolvedValueOnce([]);
 
-      await service.remove(TENANT, USUARIO_ID, CAUSA);
+      await service.remove(TENANT, USUARIO_ID, MOTIVO);
 
       expect(queryMock).toHaveBeenNthCalledWith(
         3,
         expect.stringContaining('eliminado_el = NOW()'),
-        [CAUSA, TENANT, USUARIO_ID],
+        [MOTIVO, TENANT, USUARIO_ID],
       );
     });
 
@@ -214,7 +214,7 @@ describe('CausasMermaService', () => {
       queryMock
         .mockResolvedValueOnce([
           {
-            causa_merma_id: CAUSA,
+            motivo_baja_id: MOTIVO,
             nombre: 'Rotura',
             activo: true,
             es_fijo: false,
@@ -223,7 +223,7 @@ describe('CausasMermaService', () => {
         .mockResolvedValueOnce([{ cnt: '0' }])
         .mockResolvedValueOnce([]);
 
-      await service.remove(TENANT, USUARIO_ID, CAUSA);
+      await service.remove(TENANT, USUARIO_ID, MOTIVO);
 
       const sql = queryMock.mock.calls.at(-1)![0] as string;
       expect(sql).toMatch(/eliminado_por\s*=\s*\$/);
@@ -232,10 +232,10 @@ describe('CausasMermaService', () => {
   });
 
   describe('restaurar', () => {
-    it('restaurar() devuelve la causa RE-ACTIVADA (eliminadoEl null) tras el UPDATE', async () => {
+    it('restaurar() devuelve el motivo RE-ACTIVADO (eliminadoEl null) tras el UPDATE', async () => {
       queryMock.mockResolvedValueOnce([
         {
-          causa_merma_id: CAUSA,
+          motivo_baja_id: MOTIVO,
           nombre: 'Vencimiento',
           activo: true,
           es_fijo: false,
@@ -244,14 +244,14 @@ describe('CausasMermaService', () => {
         },
       ]);
 
-      const restaurada = await service.restaurar(TENANT, CAUSA);
+      const restaurada = await service.restaurar(TENANT, MOTIVO);
 
       expect(queryMock).toHaveBeenCalledWith(
         expect.stringMatching(/eliminado_el\s*=\s*NULL/),
-        [CAUSA, TENANT, null],
+        [MOTIVO, TENANT, null],
       );
       expect(restaurada).toEqual({
-        id: CAUSA,
+        id: MOTIVO,
         nombre: 'Vencimiento',
         activo: true,
         esFijo: false,
@@ -263,14 +263,14 @@ describe('CausasMermaService', () => {
     it('restaurar() algo que no está en la papelera es 404', async () => {
       queryMock.mockResolvedValueOnce([]);
 
-      await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
+      await expect(service.restaurar(TENANT, MOTIVO)).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('restaurar() con el nombre ya ocupado devuelve 400 y no toca ninguna fila', async () => {
-      // El índice único es parcial (WHERE eliminado_el IS NULL): mientras la
-      // causa estaba borrada nadie chocaba con ella, pero al revivirla vuelve
+      // El índice único es parcial (WHERE eliminado_el IS NULL): mientras el
+      // motivo estaba borrado nadie chocaba con él, pero al revivirlo vuelve
       // a competir por el nombre.
       queryMock.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key'), { code: '23505' }),
@@ -281,7 +281,7 @@ describe('CausasMermaService', () => {
       queryMock.mockResolvedValueOnce([{ nombre: 'Vencimiento' }]);
       queryMock.mockResolvedValueOnce([{ nombre: 'Vencimiento' }]);
 
-      await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
+      await expect(service.restaurar(TENANT, MOTIVO)).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -302,14 +302,14 @@ describe('CausasMermaService', () => {
         { nombre: 'Vencimiento 2' },
       ]);
 
-      await expect(service.restaurar(TENANT, CAUSA)).rejects.toMatchObject({
+      await expect(service.restaurar(TENANT, MOTIVO)).rejects.toMatchObject({
         response: {
           message:
             // Concordancia femenina: este spec fijaba antes "un causa de
             // merma activo" —el template del helper armaba "un … activo"
             // fijo— y pasaba en verde, o sea que el test estaba certificando
             // el bug. Ahora la frase nominal la arma quien llama.
-            'Ya existe una causa de merma activa con el nombre "Vencimiento".',
+            'Ya existe un motivo de baja activo con el nombre "Vencimiento".',
           nombreSugerido: 'Vencimiento 3',
         },
       });
@@ -329,7 +329,7 @@ describe('CausasMermaService', () => {
         { nombre: 'VENCIMIENTO 2' },
       ]);
 
-      await expect(service.restaurar(TENANT, CAUSA)).rejects.toMatchObject({
+      await expect(service.restaurar(TENANT, MOTIVO)).rejects.toMatchObject({
         response: { nombreSugerido: 'Vencimiento 3' },
       });
     });
@@ -339,7 +339,7 @@ describe('CausasMermaService', () => {
         Object.assign(new Error('connection lost'), { code: '57P01' }),
       );
 
-      await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
+      await expect(service.restaurar(TENANT, MOTIVO)).rejects.toThrow(
         'connection lost',
       );
     });
@@ -349,7 +349,7 @@ describe('CausasMermaService', () => {
     it('sin el flag no trae la columna eliminado_el ni hace JOIN con usuarios', async () => {
       queryMock.mockResolvedValueOnce([
         {
-          causa_merma_id: CAUSA,
+          motivo_baja_id: MOTIVO,
           nombre: 'Rotura',
           activo: true,
           es_fijo: false,
@@ -367,7 +367,7 @@ describe('CausasMermaService', () => {
     it('con el flag trae eliminados con el nombre de quien borró, resuelto por JOIN', async () => {
       queryMock.mockResolvedValueOnce([
         {
-          causa_merma_id: CAUSA,
+          motivo_baja_id: MOTIVO,
           nombre: 'Vencimiento',
           activo: true,
           es_fijo: false,
@@ -391,10 +391,10 @@ describe('CausasMermaService', () => {
       // ancha puede matchear otra parte del mismo template (el `SELECT`, o un
       // comentario `--` si algún día se agrega uno) y volver a no probar nada.
       expect(sql).toContain(
-        '(cm.eliminado_el IS NULL OR cm.eliminado_por IS NOT NULL)',
+        '(mb.eliminado_el IS NULL OR mb.eliminado_por IS NOT NULL)',
       );
       expect(result[0]).toMatchObject({
-        id: CAUSA,
+        id: MOTIVO,
         eliminadoPorNombre: 'admin.paris',
       });
     });

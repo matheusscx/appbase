@@ -305,7 +305,7 @@ describe('TurnosService', () => {
   });
 
   // `turnos` cubre la forma `repo.save()` de la red de colisión de nombre;
-  // `descuentos` cubre la de transacción y `causas-merma` la de SQL crudo. La
+  // `descuentos` cubre la de transacción y `motivos-baja` la de SQL crudo. La
   // semántica del helper vive en `nombre-sugerido.util.spec.ts`: acá se fija el
   // CABLEADO —que el wrapper esté y revalide el nombre correcto—, que es lo
   // único que puede romperse por módulo.

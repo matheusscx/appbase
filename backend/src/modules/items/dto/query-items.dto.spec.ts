@@ -6,7 +6,7 @@ import { QueryItemsDto } from './query-items.dto';
 // `incluirEliminados` está duplicado en `QueryItemsDto` (no `extends
 // QueryIncluirEliminadosDto`: la clase ya extiende `PaginationQueryDto` para
 // la paginación y TS no permite herencia múltiple) — mismo motivo que
-// `query-causas-merma.dto.spec.ts` existe para `QueryCausasMermaDto`: nada
+// `query-motivos-baja.dto.spec.ts` existe para `QueryMotivosBajaDto`: nada
 // más custodia que la coerción del booleano duplicado no se rompa.
 describe('QueryItemsDto', () => {
   it('incluirEliminados=true (string, como llega en el query) se parsea como boolean true', async () => {
@@ -34,7 +34,7 @@ describe('QueryItemsDto', () => {
     expect(dto.incluirEliminados).toBe(false);
   });
 
-  it('sin el parámetro, incluirEliminados queda falsy (igual que en QueryCausasMermaDto)', async () => {
+  it('sin el parámetro, incluirEliminados queda falsy (igual que en QueryMotivosBajaDto)', async () => {
     const dto = plainToInstance(QueryItemsDto, {});
 
     expect(await validate(dto)).toHaveLength(0);

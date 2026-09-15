@@ -21,7 +21,7 @@ import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
-const CAUSA_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
+const MOTIVO_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -148,7 +148,7 @@ describe('Kardex, mermas y recuento con el ítem eliminado (e2e)', () => {
         itemId,
         ubicacionId: localId,
         cantidad: '1',
-        causaMermaId: CAUSA_VENCIMIENTO_ID,
+        motivoBajaId: MOTIVO_VENCIMIENTO_ID,
         comentario: 'E2E kardex con ítem eliminado',
       });
     expect(resMerma.status).toBe(201);

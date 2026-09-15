@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { UpdateCausaMermaDto } from './update-causa-merma.dto';
+import { UpdateMotivoBajaDto } from './update-motivo-baja.dto';
 import { UpdateMotivoDiferenciaDto } from '../../motivos-diferencia/dto/update-motivo-diferencia.dto';
 import { UpdateMotivoDiferenciaInventarioDto } from '../../motivos-diferencia-inventario/dto/update-motivo-diferencia-inventario.dto';
 
@@ -16,7 +16,7 @@ import { UpdateMotivoDiferenciaInventarioDto } from '../../motivos-diferencia-in
  */
 
 const CLASES = [
-  ['UpdateCausaMermaDto', UpdateCausaMermaDto],
+  ['UpdateMotivoBajaDto', UpdateMotivoBajaDto],
   ['UpdateMotivoDiferenciaDto', UpdateMotivoDiferenciaDto],
   ['UpdateMotivoDiferenciaInventarioDto', UpdateMotivoDiferenciaInventarioDto],
 ] as const;

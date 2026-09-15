@@ -1,6 +1,6 @@
 // @vitest-environment nuxt
 //
-// Réplica del molde de `descuentos.nuxt.spec.ts` para `causas-merma`: la
+// Réplica del molde de `descuentos.nuxt.spec.ts` para `motivos-baja`: la
 // papelera (toggle "ver eliminados" + badge + botón Restaurar + modal de
 // colisión de nombre). Los bugs que este spec fija son de RUNTIME: ni el
 // build, ni el typecheck, ni una revisión de código los ven.
@@ -19,12 +19,12 @@
 // Se prueba el síntoma observable en el DOM, no la implementación.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import CausasMerma from './causas-merma.vue'
+import MotivosBaja from './motivos-baja.vue'
 
-const CAUSA_ID = 'causa-1'
+const MOTIVO_ID = 'motivo-1'
 const BORRADO_EL = '2026-08-01T21:00:00.000Z'
 
-interface CausaMermaFake {
+interface MotivoBajaFake {
   id: string
   nombre: string
   activo: boolean
@@ -33,9 +33,9 @@ interface CausaMermaFake {
   eliminadoPorNombre: string | null
 }
 
-function causa(over: Partial<CausaMermaFake> = {}): CausaMermaFake {
+function motivo(over: Partial<MotivoBajaFake> = {}): MotivoBajaFake {
   return {
-    id: CAUSA_ID,
+    id: MOTIVO_ID,
     nombre: 'Rotura de envase',
     activo: true,
     esFijo: false,
@@ -45,8 +45,8 @@ function causa(over: Partial<CausaMermaFake> = {}): CausaMermaFake {
   }
 }
 
-function eliminada(over: Partial<CausaMermaFake> = {}): CausaMermaFake {
-  return causa({
+function eliminada(over: Partial<MotivoBajaFake> = {}): MotivoBajaFake {
+  return motivo({
     eliminadoEl: BORRADO_EL,
     eliminadoPorNombre: 'admin.paris',
     ...over,
@@ -75,11 +75,11 @@ function sugerir(base: string, vivos: string[]): string {
 
 // Estado del "backend" simulado: `DELETE` lo muta, `GET` lo lee filtrando por
 // `incluirEliminados` igual que el controller real.
-let causasBackend: CausaMermaFake[] = []
+let motivosBackend: MotivoBajaFake[] = []
 
 // Para el test de la carrera: retiene la respuesta de cada variante del `GET`
 // en una promesa que el test resuelve a mano, en el orden que quiera.
-// `null` = comportamiento normal (resuelve contra `causasBackend`).
+// `null` = comportamiento normal (resuelve contra `motivosBackend`).
 let overrideConEliminados: Promise<unknown[]> | null = null
 let overrideSinEliminados: Promise<unknown[]> | null = null
 
@@ -91,13 +91,13 @@ let restaurarRetenido: Promise<unknown> | null = null
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: { nombre?: string } }) => {
-    if (typeof url !== 'string' || !url.includes('/causas-merma')) {
+    if (typeof url !== 'string' || !url.includes('/motivos-baja')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
     if (method === 'DELETE') {
       const id = url.split('/').pop()
-      const c = causasBackend.find(x => x.id === id)
+      const c = motivosBackend.find(x => x.id === id)
       if (c) {
         c.eliminadoEl = BORRADO_EL
         c.eliminadoPorNombre = 'admin.paris'
@@ -108,23 +108,23 @@ mockNuxtImport('useApiFetch', () => {
       const id = url.split('/').slice(-2)[0] ?? ''
       const nombreNuevo = opts?.body?.nombre
       postsRestaurar.push({ id, nombre: nombreNuevo })
-      const c = causasBackend.find(x => x.id === id)
+      const c = motivosBackend.find(x => x.id === id)
       // El backend real da 404 si la fila ya no está en la papelera: un
       // segundo POST sobre la misma fila NO es inocuo, es el toast de error
       // que el guard de reentrancia existe para evitar.
       if (!c?.eliminadoEl) {
         return Promise.reject(
-          errorApi(`Causa de merma ${id} no está en la papelera`),
+          errorApi(`Motivo de baja ${id} no está en la papelera`),
         )
       }
       const nombre = nombreNuevo ?? c.nombre
-      const vivos = causasBackend
+      const vivos = motivosBackend
         .filter(x => !x.eliminadoEl && x.id !== id)
         .map(x => x.nombre)
       if (vivos.includes(nombre)) {
         return Promise.reject(
           errorApi(
-            `Ya existe una causa de merma activa con el nombre "${nombre}".`,
+            `Ya existe un motivo de baja activo con el nombre "${nombre}".`,
             { nombreSugerido: sugerir(nombre.replace(/ \d+$/, ''), vivos) },
           ),
         )
@@ -139,14 +139,14 @@ mockNuxtImport('useApiFetch', () => {
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
     const data = incluirEliminados
-      ? causasBackend
-      : causasBackend.filter(c => !c.eliminadoEl)
+      ? motivosBackend
+      : motivosBackend.filter(c => !c.eliminadoEl)
     return Promise.resolve(data.map(c => ({ ...c })))
   }
 })
 
 async function montar() {
-  const wrapper = await mountSuspended(CausasMerma)
+  const wrapper = await mountSuspended(MotivosBaja)
   await new Promise(r => setTimeout(r, 0))
   return wrapper
 }
@@ -225,9 +225,9 @@ function reset() {
   restaurarRetenido = null
 }
 
-describe('configuracion/causas-merma — papelera: eliminar respeta el toggle', () => {
+describe('configuracion/motivos-baja — papelera: eliminar respeta el toggle', () => {
   beforeEach(() => {
-    causasBackend = [causa()]
+    motivosBackend = [motivo()]
     reset()
   })
 
@@ -242,7 +242,7 @@ describe('configuracion/causas-merma — papelera: eliminar respeta el toggle', 
 
     // Ancla positiva primero: si `eliminar()` nunca llegó a pegarle al
     // backend, las aserciones de abajo pasarían vacuamente.
-    expect(causasBackend[0]!.eliminadoEl).toBeTruthy()
+    expect(motivosBackend[0]!.eliminadoEl).toBeTruthy()
     expect(wrapper.text()).toContain('Rotura de envase')
     expect(wrapper.text()).toContain('Eliminado por admin.paris')
     expect(badges(wrapper)).toContain('Eliminado')
@@ -264,7 +264,7 @@ describe('configuracion/causas-merma — papelera: eliminar respeta el toggle', 
   })
 
   it('el switch de activo está deshabilitado en una fila eliminada', async () => {
-    causasBackend = [eliminada()]
+    motivosBackend = [eliminada()]
     const wrapper = await montar()
     await activarVerEliminados(wrapper)
 
@@ -276,9 +276,9 @@ describe('configuracion/causas-merma — papelera: eliminar respeta el toggle', 
   })
 })
 
-describe('configuracion/causas-merma — papelera: restaurar', () => {
+describe('configuracion/motivos-baja — papelera: restaurar', () => {
   beforeEach(() => {
-    causasBackend = [eliminada()]
+    motivosBackend = [eliminada()]
     reset()
   })
 
@@ -290,7 +290,7 @@ describe('configuracion/causas-merma — papelera: restaurar', () => {
     await abrirRestaurarDeLaFila(wrapper)
     await confirmarEnModal('Restaurar')
 
-    expect(causasBackend[0]!.eliminadoEl).toBeNull()
+    expect(motivosBackend[0]!.eliminadoEl).toBeNull()
     expect(wrapper.text()).toContain('Rotura de envase')
     expect(wrapper.text()).not.toContain('Eliminado por admin.paris')
 
@@ -323,7 +323,7 @@ describe('configuracion/causas-merma — papelera: restaurar', () => {
     soltarRestaurar()
     await new Promise(r => setTimeout(r, 60))
 
-    expect(postsRestaurar).toEqual([{ id: CAUSA_ID, nombre: undefined }])
+    expect(postsRestaurar).toEqual([{ id: MOTIVO_ID, nombre: undefined }])
 
     wrapper.unmount()
     restaurarRetenido = null
@@ -337,7 +337,7 @@ describe('configuracion/causas-merma — papelera: restaurar', () => {
     // fila ya restaurada y contesta 404, igual que el backend real.
     const wrapper = await montar()
     await activarVerEliminados(wrapper)
-    causasBackend[0]!.eliminadoEl = null
+    motivosBackend[0]!.eliminadoEl = null
 
     await abrirRestaurarDeLaFila(wrapper)
     await confirmarEnModal('Restaurar')
@@ -352,11 +352,11 @@ describe('configuracion/causas-merma — papelera: restaurar', () => {
 // El backend devuelve 400 con `nombreSugerido` cuando el nombre de la fila
 // borrada ya lo tomó una viva; la pantalla tiene que ofrecer ese nombre
 // —editable— en vez de dejar al usuario sin salida.
-describe('configuracion/causas-merma — papelera: colisión de nombre al restaurar', () => {
+describe('configuracion/motivos-baja — papelera: colisión de nombre al restaurar', () => {
   beforeEach(() => {
-    causasBackend = [
+    motivosBackend = [
       eliminada(),
-      causa({ id: 'causa-viva', nombre: 'Rotura de envase' }),
+      motivo({ id: 'motivo-viva', nombre: 'Rotura de envase' }),
     ]
     reset()
   })
@@ -368,13 +368,13 @@ describe('configuracion/causas-merma — papelera: colisión de nombre al restau
     await confirmarEnModal('Restaurar')
 
     // El primer POST viajó sin nombre y volvió 400: no restauró nada.
-    expect(postsRestaurar).toEqual([{ id: CAUSA_ID, nombre: undefined }])
-    expect(causasBackend[0]!.eliminadoEl).toBe(BORRADO_EL)
+    expect(postsRestaurar).toEqual([{ id: MOTIVO_ID, nombre: undefined }])
+    expect(motivosBackend[0]!.eliminadoEl).toBe(BORRADO_EL)
 
     // Y en vez de un toast rojo, el modal con el nombre libre precargado.
     expect(document.body.textContent).toContain('No se puede restaurar con ese nombre')
     expect(document.body.textContent).toContain(
-      'Ya existe una causa de merma activa con el nombre "Rotura de envase".',
+      'Ya existe un motivo de baja activo con el nombre "Rotura de envase".',
     )
     expect(campoNombre().value).toBe('Rotura de envase 2')
 
@@ -382,9 +382,9 @@ describe('configuracion/causas-merma — papelera: colisión de nombre al restau
 
     // El segundo POST sí llevó el nombre, y la fila revivió renombrada.
     expect(postsRestaurar).toHaveLength(2)
-    expect(postsRestaurar[1]).toEqual({ id: CAUSA_ID, nombre: 'Rotura de envase 2' })
-    expect(causasBackend[0]!.eliminadoEl).toBeNull()
-    expect(causasBackend[0]!.nombre).toBe('Rotura de envase 2')
+    expect(postsRestaurar[1]).toEqual({ id: MOTIVO_ID, nombre: 'Rotura de envase 2' })
+    expect(motivosBackend[0]!.eliminadoEl).toBeNull()
+    expect(motivosBackend[0]!.nombre).toBe('Rotura de envase 2')
     // Los dos conviven vivos en la tabla, que es el punto de toda la salida.
     expect(wrapper.text()).toContain('Rotura de envase 2')
     expect(badges(wrapper)).toHaveLength(0)
@@ -393,8 +393,8 @@ describe('configuracion/causas-merma — papelera: colisión de nombre al restau
   })
 
   it('si el usuario edita a un nombre TAMBIÉN tomado, vuelve el modal con la sugerencia siguiente', async () => {
-    causasBackend.push(
-      causa({ id: 'causa-viva-2', nombre: 'Rotura de envase 2' }),
+    motivosBackend.push(
+      motivo({ id: 'motivo-viva-2', nombre: 'Rotura de envase 2' }),
     )
     const wrapper = await montar()
     await activarVerEliminados(wrapper)
@@ -409,7 +409,7 @@ describe('configuracion/causas-merma — papelera: colisión de nombre al restau
     await confirmarEnModal('Restaurar')
 
     // No restauró, no cerró el modal, y la sugerencia se actualizó.
-    expect(causasBackend[0]!.eliminadoEl).toBe(BORRADO_EL)
+    expect(motivosBackend[0]!.eliminadoEl).toBe(BORRADO_EL)
     expect(document.body.textContent).toContain('No se puede restaurar con ese nombre')
     expect(campoNombre().value).toBe('Rotura de envase 3')
 
@@ -443,7 +443,7 @@ describe('configuracion/causas-merma — papelera: colisión de nombre al restau
 
     await confirmarEnModal('Cancelar')
 
-    expect(causasBackend[0]!.eliminadoEl).toBe(BORRADO_EL)
+    expect(motivosBackend[0]!.eliminadoEl).toBe(BORRADO_EL)
     expect(postsRestaurar).toHaveLength(1)
     expect(badges(wrapper)).toContain('Eliminado')
 
@@ -451,14 +451,14 @@ describe('configuracion/causas-merma — papelera: colisión de nombre al restau
   })
 })
 
-describe('configuracion/causas-merma — papelera: la carrera de `cargar()` bajo toggles rápidos', () => {
+describe('configuracion/motivos-baja — papelera: la carrera de `cargar()` bajo toggles rápidos', () => {
   beforeEach(() => {
     // Una viva y otra ya eliminada: así el `GET` con el flag trae algo
-    // (Causa vieja) que el `GET` sin el flag no trae, y las dos respuestas
+    // (Motivo viejo) que el `GET` sin el flag no trae, y las dos respuestas
     // son distinguibles en el DOM.
-    causasBackend = [
-      causa(),
-      eliminada({ id: 'causa-2', nombre: 'Causa vieja' }),
+    motivosBackend = [
+      motivo(),
+      eliminada({ id: 'motivo-2', nombre: 'Motivo viejo' }),
     ]
     reset()
   })
@@ -485,17 +485,17 @@ describe('configuracion/causas-merma — papelera: la carrera de `cargar()` bajo
     //    toggle responde primero, la del primero después — el caso que la cola
     //    serial tiene que blindar.
     resolverSinEliminados(
-      causasBackend.filter(c => !c.eliminadoEl).map(c => ({ ...c })),
+      motivosBackend.filter(c => !c.eliminadoEl).map(c => ({ ...c })),
     )
     await new Promise(r => setTimeout(r, 20))
-    resolverConEliminados(causasBackend.map(c => ({ ...c })))
+    resolverConEliminados(motivosBackend.map(c => ({ ...c })))
     await new Promise(r => setTimeout(r, 50))
 
     // El toggle terminó APAGADO: el listado final tiene que reflejar ESE
     // estado, sin importar que la respuesta "con eliminados" haya llegado
     // después y en teoría pisara el estado.
     expect(wrapper.text()).toContain('Rotura de envase')
-    expect(wrapper.text()).not.toContain('Causa vieja')
+    expect(wrapper.text()).not.toContain('Motivo viejo')
 
     wrapper.unmount()
   })

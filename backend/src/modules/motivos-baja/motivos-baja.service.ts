@@ -9,13 +9,13 @@ import {
   errorDeColisionNombreSQL,
   traducirColisionDeNombre,
 } from '../../common/utils/nombre-sugerido.util';
-import { CreateCausaMermaDto } from './dto/create-causa-merma.dto';
-import { UpdateCausaMermaDto } from './dto/update-causa-merma.dto';
+import { CreateMotivoBajaDto } from './dto/create-motivo-baja.dto';
+import { UpdateMotivoBajaDto } from './dto/update-motivo-baja.dto';
 
 // `eliminadoEl`/`eliminadoPor`/`eliminadoPorNombre` solo se completan cuando
 // se pide `incluirEliminados` (o tras `restaurar`): el listado normal no trae
 // esas columnas, sin el JOIN, N+1 si lo forzáramos ahí.
-export interface CausaMermaListItem {
+export interface MotivoBajaListItem {
   id: string;
   nombre: string;
   activo: boolean;
@@ -25,39 +25,39 @@ export interface CausaMermaListItem {
   eliminadoPorNombre?: string | null;
 }
 
-interface CausaMermaRow {
-  causa_merma_id: string;
+interface MotivoBajaRow {
+  motivo_baja_id: string;
   nombre: string;
   activo: boolean;
   es_fijo: boolean;
 }
 
-interface CausaMermaRowConEliminado extends CausaMermaRow {
+interface MotivoBajaRowConEliminado extends MotivoBajaRow {
   eliminado_el: string | null;
   eliminado_por: string | null;
   eliminado_por_nombre: string | null;
 }
 
 @Injectable()
-export class CausasMermaService {
+export class MotivosBajaService {
   constructor(private readonly db: Db) {}
 
   async findAll(
     tenantId: string,
     soloActivas = false,
     incluirEliminados = false,
-  ): Promise<CausaMermaListItem[]> {
+  ): Promise<MotivoBajaListItem[]> {
     if (!incluirEliminados) {
-      const rows: CausaMermaRow[] = await this.db.query(
-        `SELECT causa_merma_id, nombre, activo, es_fijo
-         FROM causas_merma
+      const rows: MotivoBajaRow[] = await this.db.query(
+        `SELECT motivo_baja_id, nombre, activo, es_fijo
+         FROM motivo_baja
          WHERE tenant_id = $1 AND eliminado_el IS NULL
            ${soloActivas ? 'AND activo = true' : ''}
          ORDER BY es_fijo DESC, nombre ASC`,
         [tenantId],
       );
       return rows.map((r) => ({
-        id: r.causa_merma_id,
+        id: r.motivo_baja_id,
         nombre: r.nombre,
         activo: r.activo,
         esFijo: r.es_fijo,
@@ -72,20 +72,20 @@ export class CausasMermaService {
     // Solo lo que borró una persona: `eliminado_por IS NULL` es un borrado
     // del sistema, no restaurable ni visible — decisión del owner,
     // docs/features/papelera.md.
-    const rows: CausaMermaRowConEliminado[] = await this.db.query(
-      `SELECT cm.causa_merma_id, cm.nombre, cm.activo, cm.es_fijo,
-              cm.eliminado_el, cm.eliminado_por,
+    const rows: MotivoBajaRowConEliminado[] = await this.db.query(
+      `SELECT mb.motivo_baja_id, mb.nombre, mb.activo, mb.es_fijo,
+              mb.eliminado_el, mb.eliminado_por,
               u.nombre_usuario AS eliminado_por_nombre
-         FROM causas_merma cm
-         LEFT JOIN usuarios u ON u.usuario_id = cm.eliminado_por
-        WHERE cm.tenant_id = $1
-          AND (cm.eliminado_el IS NULL OR cm.eliminado_por IS NOT NULL)
-          ${soloActivas ? 'AND cm.activo = true' : ''}
-        ORDER BY cm.es_fijo DESC, cm.nombre ASC`,
+         FROM motivo_baja mb
+         LEFT JOIN usuarios u ON u.usuario_id = mb.eliminado_por
+        WHERE mb.tenant_id = $1
+          AND (mb.eliminado_el IS NULL OR mb.eliminado_por IS NOT NULL)
+          ${soloActivas ? 'AND mb.activo = true' : ''}
+        ORDER BY mb.es_fijo DESC, mb.nombre ASC`,
       [tenantId],
     );
     return rows.map((r) => ({
-      id: r.causa_merma_id,
+      id: r.motivo_baja_id,
       nombre: r.nombre,
       activo: r.activo,
       esFijo: r.es_fijo,
@@ -97,23 +97,23 @@ export class CausasMermaService {
 
   async create(
     tenantId: string,
-    dto: CreateCausaMermaDto,
-  ): Promise<CausaMermaListItem> {
+    dto: CreateMotivoBajaDto,
+  ): Promise<MotivoBajaListItem> {
     const nombre = dto.nombre.trim();
     await this.assertNombreUnico(tenantId, nombre);
-    const rows = unwrap<CausaMermaRow>(
+    const rows = unwrap<MotivoBajaRow>(
       await traducirColisionDeNombre(
         this.db.query(
-          `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
+          `INSERT INTO motivo_baja (tenant_id, nombre, activo, es_fijo)
          VALUES ($1, $2, $3, false)
-         RETURNING causa_merma_id, nombre, activo, es_fijo`,
+         RETURNING motivo_baja_id, nombre, activo, es_fijo`,
           [tenantId, nombre, dto.activo ?? true],
         ),
         () => this.assertNombreUnico(tenantId, nombre),
       ),
     );
     return {
-      id: rows[0].causa_merma_id,
+      id: rows[0].motivo_baja_id,
       nombre: rows[0].nombre,
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
@@ -123,12 +123,12 @@ export class CausasMermaService {
   async update(
     tenantId: string,
     id: string,
-    dto: UpdateCausaMermaDto,
-  ): Promise<CausaMermaListItem> {
-    const causa = await this.findOneOrFail(tenantId, id);
-    if (causa.esFijo) {
+    dto: UpdateMotivoBajaDto,
+  ): Promise<MotivoBajaListItem> {
+    const motivo = await this.findOneOrFail(tenantId, id);
+    if (motivo.esFijo) {
       throw new BadRequestException(
-        'No se puede modificar una causa fija del sistema',
+        'No se puede modificar un motivo fijo del sistema',
       );
     }
     if (dto.nombre !== undefined) {
@@ -149,12 +149,12 @@ export class CausasMermaService {
     }
 
     params.push(id, tenantId);
-    const rows = unwrap<CausaMermaRow>(
+    const rows = unwrap<MotivoBajaRow>(
       await traducirColisionDeNombre(
         this.db.query(
-          `UPDATE causas_merma SET ${sets.join(', ')}
-         WHERE causa_merma_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
-         RETURNING causa_merma_id, nombre, activo, es_fijo`,
+          `UPDATE motivo_baja SET ${sets.join(', ')}
+         WHERE motivo_baja_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
+         RETURNING motivo_baja_id, nombre, activo, es_fijo`,
           params,
         ),
         async () => {
@@ -167,10 +167,10 @@ export class CausasMermaService {
       ),
     );
     if (!rows.length) {
-      throw new NotFoundException(`Causa de merma ${id} no encontrada`);
+      throw new NotFoundException(`Motivo de baja ${id} no encontrado`);
     }
     return {
-      id: rows[0].causa_merma_id,
+      id: rows[0].motivo_baja_id,
       nombre: rows[0].nombre,
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
@@ -178,28 +178,28 @@ export class CausasMermaService {
   }
 
   async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
-    const causa = await this.findOneOrFail(tenantId, id);
-    if (causa.esFijo) {
+    const motivo = await this.findOneOrFail(tenantId, id);
+    if (motivo.esFijo) {
       throw new BadRequestException(
-        'No se puede eliminar una causa fija del sistema',
+        'No se puede eliminar un motivo fijo del sistema',
       );
     }
     const uso: { cnt: string }[] = await this.db.query(
       `SELECT COUNT(*)::text AS cnt FROM movimientos_inventario
-       WHERE causa_merma_id = $1 AND eliminado_el IS NULL`,
+       WHERE motivo_baja_id = $1 AND eliminado_el IS NULL`,
       [id],
     );
     if (parseInt(uso[0].cnt, 10) > 0) {
       throw new BadRequestException(
-        'No se puede eliminar: la causa está en uso en movimientos de merma',
+        'No se puede eliminar: el motivo está en uso en movimientos de merma',
       );
     }
     // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
     // una fila borrada sin autor.
     await this.db.query(
-      `UPDATE causas_merma
+      `UPDATE motivo_baja
           SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
-        WHERE causa_merma_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        WHERE motivo_baja_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [id, tenantId, usuarioId],
     );
   }
@@ -208,20 +208,20 @@ export class CausasMermaService {
     tenantId: string,
     id: string,
     nombreNuevo?: string,
-  ): Promise<CausaMermaListItem> {
+  ): Promise<MotivoBajaListItem> {
     try {
       // `UPDATE … WHERE eliminado_el IS NOT NULL … RETURNING` resuelve
       // búsqueda y escritura en una sentencia: no hay ventana entre leer y
       // escribir.
-      const rows = unwrap<CausaMermaRowConEliminado>(
+      const rows = unwrap<MotivoBajaRowConEliminado>(
         await this.db.query(
-          `UPDATE causas_merma
+          `UPDATE motivo_baja
               SET eliminado_el = NULL, eliminado_por = NULL,
                   nombre = COALESCE($3, nombre),
                   actualizado_el = NOW()
-            WHERE causa_merma_id = $1 AND tenant_id = $2
+            WHERE motivo_baja_id = $1 AND tenant_id = $2
               AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
-          RETURNING causa_merma_id, nombre, activo, es_fijo,
+          RETURNING motivo_baja_id, nombre, activo, es_fijo,
                     eliminado_el, eliminado_por`,
           [id, tenantId, nombreNuevo ?? null],
         ),
@@ -230,11 +230,11 @@ export class CausasMermaService {
         // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
         // papelera solo restaura lo que borró una persona (docs/features/papelera.md).
         throw new NotFoundException(
-          `Causa de merma ${id} no está en la papelera`,
+          `Motivo de baja ${id} no está en la papelera`,
         );
       }
       return {
-        id: rows[0].causa_merma_id,
+        id: rows[0].motivo_baja_id,
         nombre: rows[0].nombre,
         activo: rows[0].activo,
         esFijo: rows[0].es_fijo,
@@ -243,7 +243,7 @@ export class CausasMermaService {
       };
     } catch (e) {
       // 23505 = unique_violation. El índice único de nombre es parcial
-      // (WHERE eliminado_el IS NULL): mientras la causa estaba borrada nadie
+      // (WHERE eliminado_el IS NULL): mientras el motivo estaba borrado nadie
       // competía por el nombre, pero al revivirla vuelve a competir. Se
       // capta el código de Postgres —no una lista de índices a mano— para
       // que valga también donde no lo enumeramos.
@@ -262,8 +262,8 @@ export class CausasMermaService {
         throw new BadRequestException(
           await errorDeColisionNombreSQL(
             this.db,
-            'causas_merma',
-            'una causa de merma activa',
+            'motivo_baja',
+            'un motivo de baja activo',
             tenantId,
             nombreNuevo ?? (await this.nombreActual(tenantId, id)),
             { ignorarMayusculas: true },
@@ -274,38 +274,38 @@ export class CausasMermaService {
     }
   }
 
-  async assertCausaActiva(
+  async assertMotivoActivo(
     runner: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
     tenantId: string,
-    causaMermaId: string,
+    motivoBajaId: string,
   ): Promise<{ id: string; nombre: string }> {
     const rows = (await runner.query(
-      `SELECT causa_merma_id, nombre FROM causas_merma
-       WHERE causa_merma_id = $1 AND tenant_id = $2
+      `SELECT motivo_baja_id, nombre FROM motivo_baja
+       WHERE motivo_baja_id = $1 AND tenant_id = $2
          AND activo = true AND eliminado_el IS NULL`,
-      [causaMermaId, tenantId],
-    )) as { causa_merma_id: string; nombre: string }[];
+      [motivoBajaId, tenantId],
+    )) as { motivo_baja_id: string; nombre: string }[];
     if (!rows.length) {
-      throw new BadRequestException('Causa de merma no válida o inactiva');
+      throw new BadRequestException('Motivo de baja no válido o inactivo');
     }
-    return { id: rows[0].causa_merma_id, nombre: rows[0].nombre };
+    return { id: rows[0].motivo_baja_id, nombre: rows[0].nombre };
   }
 
   private async findOneOrFail(
     tenantId: string,
     id: string,
-  ): Promise<CausaMermaListItem> {
-    const rows: CausaMermaRow[] = await this.db.query(
-      `SELECT causa_merma_id, nombre, activo, es_fijo
-       FROM causas_merma
-       WHERE causa_merma_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+  ): Promise<MotivoBajaListItem> {
+    const rows: MotivoBajaRow[] = await this.db.query(
+      `SELECT motivo_baja_id, nombre, activo, es_fijo
+       FROM motivo_baja
+       WHERE motivo_baja_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [id, tenantId],
     );
     if (!rows.length) {
-      throw new NotFoundException(`Causa de merma ${id} no encontrada`);
+      throw new NotFoundException(`Motivo de baja ${id} no encontrado`);
     }
     return {
-      id: rows[0].causa_merma_id,
+      id: rows[0].motivo_baja_id,
       nombre: rows[0].nombre,
       activo: rows[0].activo,
       esFijo: rows[0].es_fijo,
@@ -319,16 +319,16 @@ export class CausasMermaService {
   ): Promise<void> {
     const params: unknown[] = [tenantId, nombre];
     let sql = `
-      SELECT 1 FROM causas_merma
+      SELECT 1 FROM motivo_baja
       WHERE tenant_id = $1 AND lower(nombre) = lower($2) AND eliminado_el IS NULL`;
     if (excludeId) {
       params.push(excludeId);
-      sql += ` AND causa_merma_id <> $3`;
+      sql += ` AND motivo_baja_id <> $3`;
     }
     const rows: unknown[] = await this.db.query(sql, params);
     if (rows.length) {
       throw new BadRequestException(
-        `Ya existe una causa de merma con el nombre "${nombre}"`,
+        `Ya existe un motivo de baja con el nombre "${nombre}"`,
       );
     }
   }
@@ -341,7 +341,7 @@ export class CausasMermaService {
    */
   private async nombreActual(tenantId: string, id: string): Promise<string> {
     const filas: { nombre: string }[] = await this.db.query(
-      `SELECT nombre FROM causas_merma WHERE causa_merma_id = $1 AND tenant_id = $2`,
+      `SELECT nombre FROM motivo_baja WHERE motivo_baja_id = $1 AND tenant_id = $2`,
       [id, tenantId],
     );
     return filas[0]?.nombre ?? '';

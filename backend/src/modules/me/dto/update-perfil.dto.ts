@@ -4,7 +4,7 @@ import { Transform } from 'class-transformer';
 export class UpdatePerfilDto {
   /**
    * Mismo trío de decoradores que los DTOs de catálogo (ver
-   * `UpdateCausaMermaDto`, que tiene el porqué largo). `usuarios.nombre` es
+   * `UpdateMotivoBajaDto`, que tiene el porqué largo). `usuarios.nombre` es
    * `NOT NULL`, así que `''`, `'   '` y `null` terminaban los tres en un
    * usuario sin nombre o en un 500 de Postgres.
    *

@@ -137,7 +137,7 @@ describe('Motivos de diferencia (e2e) — CRUD admin-only + reglas de es_fijo', 
     expect(r.status).toBe(403);
   });
 
-  // Gemelo del test de `causas-merma`: el `@IsOptional()` sin `@IsNotEmpty()`
+  // Gemelo del test de `motivos-baja`: el `@IsOptional()` sin `@IsNotEmpty()`
   // dejaba pasar `''` y el motivo quedaba sin nombre, apareciendo en blanco en
   // el override de línea de `recuentos/[id].vue`. Lo rechaza el
   // `ValidationPipe`, que en unit no corre — por eso va acá.
