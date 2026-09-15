@@ -475,10 +475,18 @@ export class GruposModificadoresService {
     dto: UpdateGrupoModificadorDto,
   ) {
     const escritura = this.db.transaccion(async (manager) => {
+      // `FOR KEY SHARE`: el par del `FOR UPDATE` con el que `remove()` toma el
+      // grupo antes de soft-borrar sus opciones. Sin él, un PATCH que leyó el
+      // grupo vivo inserta opciones después de ese soft-delete; medido el
+      // 2026-09-15 sin renombrar: el grupo quedaba borrado con una opción viva.
+      // `KEY SHARE` y no `SHARE`: dos PATCH que renombran el mismo grupo
+      // tendrían los dos un `SHARE` y los dos pedirían subirlo para su `UPDATE`
+      // (`40P01`); ese `UPDATE` no choca con `KEY SHARE`.
       const grupoRows: { grupo_modificador_id: string; nombre: string }[] =
         await manager.query(
           `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
-           WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+           WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+           FOR KEY SHARE`,
           [grupoId, tenantId],
         );
       if (!grupoRows.length) {
@@ -629,13 +637,8 @@ export class GruposModificadoresService {
       // `FOR UPDATE` ANTES de mirar el uso: es el par del `FOR SHARE` con el
       // que `ItemsService.restaurar` toma los grupos del ítem que revive. Sin
       // él, el chequeo de abajo no ve un ítem que se está restaurando, las dos
-      // commitean y el ítem vuelve con este grupo borrado adentro.
-      //
-      // Hoy ninguna FK apunta a `grupos_modificadores` (`pg_constraint`,
-      // 2026-09-14). Si aparece una desde `grupo_modificador_opciones`, un
-      // `update()` del grupo que inserta una opción pediría `KEY SHARE` sobre
-      // este grupo mientras el `UPDATE grupo_modificador_opciones` de abajo, con
-      // este `FOR UPDATE` ya tomado, espera sus opciones: el orden se relee.
+      // commitean y el ítem vuelve con este grupo borrado adentro. Es también
+      // el par del `FOR KEY SHARE` de `update()` y de `asociarGruposModificadores`.
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
            WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL

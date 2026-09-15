@@ -23,6 +23,51 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Editar las opciones de un grupo espera al borrado del grupo (cerrada 2026-09-15)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **Medido con la compuerta de
+`test/borrado-item-concurrente.e2e-spec.ts`, sobre base reseteada** (el spec de medición no quedó en
+el repo): el `PATCH` de opciones frenado después de leer el grupo, y el `DELETE` del grupo entrando.
+
+| Variante | Lo medido |
+|---|---|
+| Sin renombrar | `PATCH` 200, `DELETE` 204; el grupo queda borrado con 1 opción viva, y restaurarlo da 201 con sus 2 opciones |
+| Renombrando | `PATCH` 200, `DELETE` 204, 0 opciones vivas: en este orden el `UPDATE` del nombre ya hacía esperar al borrado |
+
+La opción viva de un grupo borrado no pasa por el freno de restaurar un compuesto a medias:
+`assertOpcionesRestaurables` mira las opciones con el `eliminado_el` del grupo, y esa tiene `NULL`
+(leído, no medido).
+
+**Qué se hizo.** `GruposModificadoresService.update()` lee el grupo con `FOR KEY SHARE`, el par del
+`FOR UPDATE` de `grupos-modificadores.remove()`. Si el borrado ya commiteó, esa lectura no vuelve
+fila y es 404. Test nuevo: la carrera 11 del e2e de concurrencia, sin renombrar.
+
+**Mutante, medido** (unit de `grupos-modificadores.service.spec.ts` + `borrado-item-concurrente.e2e-spec.ts`,
+con el contenedor del backend detenido):
+
+| Mutante | Lo matan |
+|---|---|
+| G1 `update()` sin `FOR KEY SHARE` sobre el grupo | carrera 11; unit `update toma el grupo FOR KEY SHARE, contra el FOR UPDATE de remove()` |
+
+**Lo que no cubre:** el orden inverso —el borrado toma el grupo antes que el `PATCH`— no tiene test
+de carrera propio; lo resuelve la misma lectura, que filtra `eliminado_el IS NULL` y da 404 tanto si
+el borrado ya commiteó como si commitea mientras el `PATCH` espera. Y `aplicarOverrides` lee el
+grupo sin lock, anotado sin medir en [`pendientes.md` § 2](pendientes.md).
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### Editar las opciones de un grupo mientras se borra el grupo (2026-09-15)
+>
+> - [ ] **Sin medir: leído en el código al cerrar la carrera de los extras** ([`resueltos.md`](resueltos.md)).
+>   `GruposModificadoresService.update()` lee el grupo sin lock y después actualiza e inserta sus
+>   opciones; el `UPDATE` que lo renombra tampoco filtra `eliminado_el`. `grupos-modificadores.remove()` toma el
+>   grupo `FOR UPDATE` y soft-borra sus opciones vivas: un `PATCH` que leyó el grupo vivo antes de ese
+>   commit insertaría opciones vivas de un grupo borrado. Es la forma que tenían los extras de una
+>   receta, cerrada con `FOR KEY SHARE` en `ItemsService.update()`.
+>   **Qué medir:** la compuerta de `test/borrado-item-concurrente.e2e-spec.ts`, con el `PATCH` del
+>   grupo frenado después de leerlo y el `DELETE` del grupo entrando, contando las opciones vivas del
+>   grupo borrado.
+
 ## Editar una receta o asociarle un grupo mientras se borra ya no deja filas colgando (cerrada 2026-09-15)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **Medido primero, con la compuerta de
@@ -59,9 +104,8 @@ con el contenedor del backend detenido):
 | H1 `update()` sin el `FOR KEY SHARE` sobre el ítem vivo | carrera 9; los dos unit nuevos del lock; y otros 12 unit de `update()` cuyas secuencias de mocks cuentan con esa consulta |
 | H2 `asociarGruposModificadores` sin `FOR KEY SHARE` sobre el grupo | carrera 10; unit `preserva item_grupo_id de una asociación que persiste (UPDATE min/max)` |
 
-**Lo que no cubre** —anotado en [`pendientes.md` § 2](pendientes.md), sin medir—:
-`GruposModificadoresService.update()` lee el grupo sin lock y después escribe sus opciones, así que
-contra `grupos-modificadores.remove()` tendría la misma forma que el hueco de los extras. Y un par que ya hubiera quedado trabado antes de este cambio sigue
+**Lo que no cubre:** `GruposModificadoresService.update()` leía el grupo sin lock y después escribía
+sus opciones; se midió y se cerró el mismo día (entrada de arriba). Y un par que ya hubiera quedado trabado antes de este cambio sigue
 como se midió arriba: los dos restaurar en 400.
 
 **La entrada, como estaba en `pendientes.md` § 2:**

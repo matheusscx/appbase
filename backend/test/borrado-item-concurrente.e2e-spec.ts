@@ -64,7 +64,7 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *                                `FOR UPDATE` de `grupos-modificadores.remove()`
  *   8. restaurar un grupo      → contra borrar el ítem de una opción
  *
- * Y dos donde lo que se borra es el padre al que otra edición le está
+ * Y las carreras donde lo que se borra es el padre al que otra edición le está
  * colgando filas:
  *
  *   9. editar los extras de una receta → contra borrar la receta: `update()`
@@ -74,6 +74,9 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *                                SHARE` sobre el grupo. El alta de un ítem con
  *                                grupos pasa por el mismo método y no tiene
  *                                test de carrera propio.
+ *  11. editar las opciones de un grupo → contra borrar el grupo:
+ *                                `GruposModificadoresService.update()` toma
+ *                                `FOR KEY SHARE` sobre el grupo
  *
  * CÓMO: el interleaving es DETERMINISTA, misma técnica que
  * `traslado-borrado-ubicacion-concurrente.e2e-spec.ts`. Una compuerta (un
@@ -721,5 +724,47 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
       [grupo.grupoModificadorId],
     );
     expect(filas[0].eliminado_el).toBeNull();
+  }, 60000);
+
+  it('11. editar las opciones de un grupo: la edición gana, y el borrado del grupo espera y se lleva también la opción nueva', async () => {
+    const opcionVieja = await crearProducto();
+    const opcionNueva = await crearProducto();
+    const opcion = (itemId: string) => ({
+      itemId,
+      cantidad: '1',
+      precioExtra: '0',
+    });
+    const { grupoModificadorId } = await post<{ grupoModificadorId: string }>(
+      '/api/grupos-modificadores',
+      { nombre: nombreUnico('Grupo'), opciones: [opcion(opcionVieja)] },
+    );
+
+    // El PATCH lee el grupo y DESPUÉS toma `FOR SHARE` sobre los ítems de sus
+    // opciones: la compuerta retiene la opción nueva. Sin renombrar, que es el
+    // orden donde la opción quedaba viva en el grupo borrado.
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
+        [opcionNueva],
+      ],
+      primero: llamar('PATCH', `/grupos-modificadores/${grupoModificadorId}`, {
+        opciones: [opcion(opcionVieja), opcion(opcionNueva)],
+      }),
+      segundo: llamar('DELETE', `/grupos-modificadores/${grupoModificadorId}`),
+    });
+
+    // Un grupo sin ítems que lo usen se borra: el borrado pasa, y como entra
+    // DESPUÉS del PATCH su soft-delete alcanza también la opción nueva.
+    expect({
+      esperando: r.esperando,
+      patch: r.primero.status,
+      borrado: r.segundo.status,
+    }).toEqual({ esperando: 2, patch: 200, borrado: 204 });
+    const vivas: { count: string }[] = await ds.query(
+      `SELECT count(*) FROM grupo_modificador_opciones
+        WHERE grupo_modificador_id = $1 AND eliminado_el IS NULL`,
+      [grupoModificadorId],
+    );
+    expect(Number(vivas[0].count)).toBe(0);
   }, 60000);
 });

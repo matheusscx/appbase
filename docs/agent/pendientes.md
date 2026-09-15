@@ -138,17 +138,16 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
 
-### Editar las opciones de un grupo mientras se borra el grupo (2026-09-15)
+### Aplicar overrides de un grupo mientras se borra el grupo (2026-09-15)
 
-- [ ] **Sin medir: leído en el código al cerrar la carrera de los extras** ([`resueltos.md`](resueltos.md)).
-  `GruposModificadoresService.update()` lee el grupo sin lock y después actualiza e inserta sus
-  opciones; el `UPDATE` que lo renombra tampoco filtra `eliminado_el`. `grupos-modificadores.remove()` toma el
-  grupo `FOR UPDATE` y soft-borra sus opciones vivas: un `PATCH` que leyó el grupo vivo antes de ese
-  commit insertaría opciones vivas de un grupo borrado. Es la forma que tenían los extras de una
-  receta, cerrada con `FOR KEY SHARE` en `ItemsService.update()`.
-  **Qué medir:** la compuerta de `test/borrado-item-concurrente.e2e-spec.ts`, con el `PATCH` del
-  grupo frenado después de leerlo y el `DELETE` del grupo entrando, contando las opciones vivas del
-  grupo borrado.
+- [ ] **Sin medir: lo levantó la revisión independiente del cierre de las opciones de grupo**
+  ([`resueltos.md`](resueltos.md)). `GruposModificadoresService.aplicarOverrides` lee el grupo sin
+  lock antes de escribir overrides en `item_grupo_modificador_opciones`, la misma forma que tenía
+  `update()` antes de tomar `FOR KEY SHARE`. No está leído qué deja vivo contra
+  `grupos-modificadores.remove()`, que soft-borra las opciones del grupo pero no sus overrides.
+  **Qué medir:** la compuerta de `test/borrado-item-concurrente.e2e-spec.ts`, con `aplicarOverrides`
+  frenado después de leer el grupo y el `DELETE` del grupo entrando, contando qué filas quedan vivas
+  apuntando al grupo borrado.
 
 ## 3. Ya decidido, falta construir
 

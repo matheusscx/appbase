@@ -505,6 +505,16 @@ describe('GruposModificadoresService', () => {
       expect(checkNombre).toBeUndefined();
     });
 
+    it('update toma el grupo FOR KEY SHARE, contra el FOR UPDATE de remove()', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // SELECT grupo vivo → vacío
+      await expect(
+        service.update(TENANT_ID, 'G1', { opciones: [] }),
+      ).rejects.toThrow(NotFoundException);
+      expect(managerMock.query.mock.calls[0][0] as string).toMatch(
+        /FROM grupos_modificadores[\s\S]*eliminado_el IS NULL\s+FOR KEY SHARE/,
+      );
+    });
+
     it('update lanza 404 si el grupo no existe', async () => {
       managerMock.query.mockResolvedValueOnce([]); // SELECT grupo vivo → vacío
       await expect(
