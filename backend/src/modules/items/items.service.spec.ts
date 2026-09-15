@@ -8410,6 +8410,32 @@ describe('ItemsService', () => {
       );
     });
 
+    it('al quitar un grupo soft-borra la asociación ANTES que sus overrides, contra el FOR SHARE de aplicarOverrides', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { item_grupo_id: 'IG-SALE', grupo_modificador_id: GRUPO_ID },
+        ]) // asociaciones vivas
+        .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores
+        .mockResolvedValueOnce([]); // UPDATE item_grupo_modificador_opciones
+      await (service as any).asociarGruposModificadores(
+        managerMock,
+        TENANT,
+        ITEM_ID,
+        [],
+      );
+      const sqls = (
+        managerMock.query.mock.calls as unknown as [string, unknown[]][]
+      ).map(([q]) => q);
+      const asociacion = sqls.findIndex((q) =>
+        /UPDATE item_grupos_modificadores SET eliminado_el/.test(q),
+      );
+      const overrides = sqls.findIndex((q) =>
+        /UPDATE item_grupo_modificador_opciones SET eliminado_el/.test(q),
+      );
+      expect(asociacion).toBeGreaterThanOrEqual(0);
+      expect(overrides).toBeGreaterThan(asociacion);
+    });
+
     it('persiste un override de cantidad para una opción del grupo asociado', async () => {
       managerMock.query
         .mockResolvedValueOnce([]) // sin asociaciones vivas

@@ -964,10 +964,19 @@ export class GruposModificadoresService {
       }
 
       // item_grupo_ids válidos: asociaciones vivas de ESTE grupo en ESTE tenant.
+      // `FOR SHARE`: el par del orden de `ItemsService.asociarGruposModificadores`,
+      // que al quitar un grupo soft-borra la asociación antes que sus overrides.
+      // Sin los dos, un `PATCH` de la receta en carrera con este aplicar dejaba
+      // un override vivo colgando de una asociación borrada, que traba el cambio
+      // de unidad del ingrediente de la opción (medido el 2026-09-15). `SHARE` y
+      // no `KEY SHARE`: ese soft-delete es un `UPDATE` sin clave; con `KEY SHARE`
+      // fallan las carreras 12 y 13 de `borrado-item-concurrente.e2e-spec.ts`.
       const validos: { item_grupo_id: string }[] = await manager.query(
         `SELECT item_grupo_id FROM item_grupos_modificadores
          WHERE item_grupo_id = ANY($1::uuid[]) AND grupo_modificador_id = $2
-           AND tenant_id = $3 AND eliminado_el IS NULL`,
+           AND tenant_id = $3 AND eliminado_el IS NULL
+         ORDER BY item_grupo_id
+         FOR SHARE`,
         [dto.itemGrupoIds, grupoId, tenantId],
       );
       const validSet = new Set(validos.map((r) => r.item_grupo_id));

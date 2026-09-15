@@ -873,6 +873,13 @@ la insertó la misma transacción. Por eso `create()` inserta `items` antes que
 | `descartarDesfases` | dos pasadas ordenadas, sin locks explícitos | `descartar escribe item_receta ANTES que item_combo…`, `descartar ordena por item_id DENTRO de la pasada de recetas…` |
 | `update()` de un ítem compuesto | `FOR UPDATE` sobre `item_receta`/`item_combo` **antes** del `UPDATE items`, bajo el mismo guard que el branch que después escribe esa tabla; y en todo `update()`, `FOR KEY SHARE` sobre el propio ítem vivo **después** de ese lock y antes del `UPDATE items` (el par del `FOR UPDATE` de `remove()`, 2026-09-15) | `toma item_combo ANTES del UPDATE items — orden de locks contra aplicarDesfases`, «toma `FOR KEY SHARE` sobre `items` después del lock de `item_receta` y antes del `UPDATE items`» |
 
+**Fuera de estas tres tablas, el mismo criterio con la asociación receta↔grupo** (2026-09-15):
+`GruposModificadoresService.aplicarOverrides` toma las asociaciones que valida
+`ORDER BY item_grupo_id FOR SHARE`, y `ItemsService.asociarGruposModificadores`, al quitar un grupo,
+soft-borra la asociación **antes** que sus overrides. Con el orden invertido, el `UPDATE` de los
+overrides corre sin esperar, no ve el override de aplicar mientras aplicar no commitea, y lo deja vivo. Lo fijan
+las carreras 12 y 13 de `backend/test/borrado-item-concurrente.e2e-spec.ts` y un unitario por lado.
+
 **El orden es el de adquisición del lock, no el de la escritura.** En un lote mixto
 `aplicarDesfases` hace el `UPDATE items` del precio de una receta **antes** del
 `UPDATE item_combo` de un combo del mismo lote, y no viola nada: la fila de

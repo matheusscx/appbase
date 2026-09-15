@@ -23,6 +23,92 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Aplicar overrides mientras se le quita el grupo a la receta ya no deja un override colgado (cerrada 2026-09-15)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **Medido sobre base reseteada, antes del arreglo** (los
+specs de medición no quedaron en el repo). Montaje: un ingrediente en `g`, sin stock, como opción de un
+grupo sin cantidad ni unidad por defecto; dos recetas asociadas —*esta* y *otra*—, y *otra* con un
+override previo de esa opción. Aplicar escribe `cantidad` 20 en `g`; la edición es
+`PATCH /items/<esta> { gruposModificadores: [] }`. Después de cada caso se le quita el grupo también a
+*otra* —que se lleva su override— y se prueba pasar el ingrediente a `kg`.
+
+| Caso | Aplicar / edición | Filas de *esta* | Cambio de unidad |
+|---|---|---|---|
+| Control, sin aplicar ni editar | — | asociación viva, sin override | 200 |
+| Serie: aplicar, después editar | 200 / 200 | asociación y override borrados | 200 |
+| Serie: editar, después aplicar | 200 / 400 (*"item_grupo_id no válido para este grupo"*) | asociación borrada, sin override | 200 |
+| Carrera `[otra, esta]`, compuerta `FOR UPDATE` sobre el override de *otra* | 200 / 200; la edición volvió **con la compuerta puesta** | asociación borrada, **override vivo** | **400**: *"…referenciado por una override de una opción de grupo… Quitá esa referencia primero"* |
+| Carrera `[esta, otra]`, misma compuerta | ídem | ídem | ídem |
+
+El 400 no tiene salida: la referencia que pide quitar cuelga de una asociación que ya no existe.
+
+**Qué se hizo.**
+- `GruposModificadoresService.aplicarOverrides` lee las asociaciones que valida con
+  `ORDER BY item_grupo_id FOR SHARE`. `SHARE` y no `KEY SHARE`: el soft-delete de la asociación es un
+  `UPDATE` sin clave, y con `KEY SHARE` las carreras 12 y 13 quedan con una sola sesión esperando
+  (mutante O3).
+- `ItemsService.asociarGruposModificadores`, al quitar un grupo, soft-borra la asociación **antes**
+  que sus overrides. Solo con el lock no alcanzaba: el `UPDATE` de los overrides corría primero, sin
+  esperar, y no veía el override de aplicar mientras aplicar no commiteaba.
+
+Tests nuevos: las carreras 12 (`[otra, esta]`) y 13 (`[esta, otra]`) de
+`test/borrado-item-concurrente.e2e-spec.ts`, y un unitario por cada lado.
+
+**Mutantes, medidos** (unit de `items.service.spec.ts` y `grupos-modificadores.service.spec.ts` +
+carreras 12 y 13, con el contenedor del backend detenido):
+
+| Mutante | Lo matan |
+|---|---|
+| O1 `aplicarOverrides` sin `ORDER BY item_grupo_id FOR SHARE` | carreras 12 y 13; unit `aplicarOverrides toma las asociaciones FOR SHARE ordenadas, contra el PATCH de la receta que las soft-borra` |
+| O2 `asociarGruposModificadores` vuelve a soft-borrar los overrides antes que la asociación | carreras 12 y 13; unit `al quitar un grupo soft-borra la asociación ANTES que sus overrides, contra el FOR SHARE de aplicarOverrides` |
+| O3 `aplicarOverrides` con `FOR KEY SHARE` en vez de `FOR SHARE` | carreras 12 y 13; unit `aplicarOverrides toma las asociaciones FOR SHARE ordenadas, contra el PATCH de la receta que las soft-borra` |
+
+**Lo que no se arregló: el gemelo, medido.** `PATCH /grupos-modificadores/:id` que saca la opción,
+con el mismo montaje más una segunda opción que se queda y la compuerta sobre el override de *otra*:
+
+| Caso | Aplicar / edición | Resultado |
+|---|---|---|
+| Serie: aplicar, después sacar la opción | 200 / 200 | opción borrada, 0 overrides vivos sobre ella |
+| Serie: sacar la opción, después aplicar | 200 / 400 (*"La opción no pertenece al grupo"*) | opción borrada, 0 overrides vivos |
+| Carrera `[otra, esta]` | 200 / 200; dos sesiones esperando, y la edición no volvió con la compuerta puesta | opción borrada, **1 override vivo** —el de *esta*— |
+
+En la carrera, `GET /grupos-modificadores/:id/items` siguió mostrando una opción por receta y el cambio
+de unidad del ingrediente dio 200: la fila quedó, pero en esas dos lecturas no se vio. No se arregló
+porque no se midió ningún efecto. Por lectura, además, el próximo `PATCH` de la receta que conserve el
+grupo lo soft-borra: `upsertOverridesDeGrupo` borra los overrides vivos que no vienen en el body, y la
+opción borrada no puede venir. Lo que lo reabre es un lector que use el override como valor vigente
+—cantidad, unidad, precio o un conteo— sin cruzarlo con la opción viva.
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### Aplicar overrides mientras se edita la receta o el grupo (2026-09-15)
+>
+> - [ ] **Sin medir, deducido leyendo:** lo levantó la revisión independiente del cierre de
+>   *"Aplicar overrides mientras se borra el grupo"* ([`resueltos.md`](resueltos.md)), que contra el
+>   borrado del grupo no es bug. `GruposModificadoresService.aplicarOverrides` no bloquea lo que lee, y
+>   lee en sentencias separadas: la opción, las asociaciones y, por cada asociación, el override vivo,
+>   que actualiza o inserta.
+>   **Receta:** un `PATCH /items/:id` que le quita el grupo a la receta soft-borra la asociación y sus
+>   overrides (`asociarGruposModificadores`). Si commitea después de que aplicar validó la asociación y
+>   antes de que busque su override —o, sin override previo, si su `UPDATE` arranca antes del commit de
+>   aplicar y no ve el `INSERT`—, queda **un override vivo colgando de una asociación borrada**. Ningún
+>   orden en serie da eso: aplicar primero termina con el override borrado, y editar primero, con 400.
+>   **Gemelo:** el `PATCH /grupos-modificadores/:id` que saca una opción soft-borra la opción y sus
+>   overrides. La ventana abre en la lectura de la opción, no en la de la asociación, y aplicar puede
+>   dejar un override vivo sobre la opción borrada.
+>   **Efecto posible, a medir y no a suponer:** `ItemsService.referenciaConUnidad` (la rama *"override
+>   de una opción de grupo"*) cruza el override con la opción viva pero no con la asociación, así que
+>   un colgado de la receta con `unidad_codigo` podría frenar el cambio de unidad del ingrediente de
+>   esa opción. Medirlo en un montaje donde nada más lo frene.
+>   **Qué medir:** la receta, con la compuerta de `test/borrado-item-concurrente.e2e-spec.ts`. Aplicar
+>   recorre las asociaciones en el orden del body después de validarlas todas, así que con
+>   `itemGrupoIds: [otra receta con override previo, esta receta]` y `FOR UPDATE` sobre el override de
+>   la otra, aplicar se frena antes de buscar el de esta y el `PATCH` que quita el grupo commitea sin
+>   esperarlo. Comparar contra las dos series. El gemelo pide otra compuerta: el `UPDATE` de `update()`
+>   también cae sobre ese override retenido.
+
+---
+
 ## Aplicar overrides mientras se borra el grupo: medido, no es bug (cerrada 2026-09-15)
 
 Sale de [`pendientes.md` § 2](pendientes.md). **Medido sobre base reseteada** (el spec de medición no

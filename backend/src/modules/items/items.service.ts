@@ -7035,18 +7035,23 @@ export class ItemsService {
     }
 
     // Asociaciones que desaparecen: soft-delete de la asociación + sus overrides.
+    // La asociación va PRIMERO: su `UPDATE` espera al `FOR SHARE` con el que
+    // `GruposModificadoresService.aplicarOverrides` la toma, y el de los
+    // overrides, al correr después, ya ve el que ese aplicar insertó. Al revés,
+    // el `UPDATE` de los overrides corre antes de esperar y el insertado queda
+    // vivo (medido el 2026-09-15).
     const eliminadas = vivas.filter(
       (r) => !gruposEntrantes.has(r.grupo_modificador_id),
     );
     if (eliminadas.length) {
       const ids = eliminadas.map((r) => r.item_grupo_id);
       await manager.query(
-        `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
+        `UPDATE item_grupos_modificadores SET eliminado_el = NOW(), actualizado_el = NOW()
          WHERE item_grupo_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
         [ids],
       );
       await manager.query(
-        `UPDATE item_grupos_modificadores SET eliminado_el = NOW(), actualizado_el = NOW()
+        `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
          WHERE item_grupo_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
         [ids],
       );

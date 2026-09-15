@@ -78,6 +78,17 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *                                `GruposModificadoresService.update()` toma
  *                                `FOR KEY SHARE` sobre el grupo
  *
+ * Y el padre borrado es una asociación receta↔grupo: aplicar overrides desde
+ * el grupo contra el `PATCH` de la receta que le quita ese grupo.
+ * `aplicarOverrides` toma las asociaciones `FOR SHARE`, y
+ * `asociarGruposModificadores` soft-borra la asociación ANTES que sus
+ * overrides. Dos tests porque la ventana es doble:
+ *
+ *  12. `[otra, esta]`                → la edición entra antes de que aplicar
+ *                                busque el override de esta receta
+ *  13. `[esta, otra]`                → la edición entra después de que aplicar
+ *                                insertó el override de esta receta
+ *
  * CÓMO: el interleaving es DETERMINISTA, misma técnica que
  * `traslado-borrado-ubicacion-concurrente.e2e-spec.ts`. Una compuerta (un
  * `QueryRunner` propio, fuera de Nest) retiene con `FOR UPDATE` una fila que
@@ -766,5 +777,114 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
       [grupoModificadorId],
     );
     expect(Number(vivas[0].count)).toBe(0);
+  }, 60000);
+
+  /**
+   * Un grupo con un ingrediente como opción, asociado a dos recetas; la otra ya
+   * tiene su override. La compuerta retiene ese override, así que aplicar se
+   * frena en su `UPDATE`, con las dos asociaciones ya validadas.
+   */
+  async function montarAplicarContraQuitarGrupo() {
+    const opcion = await crearIngrediente();
+    const base = await crearIngrediente();
+    const { grupoModificadorId } = await post<{ grupoModificadorId: string }>(
+      '/api/grupos-modificadores',
+      {
+        nombre: nombreUnico('Grupo'),
+        opciones: [{ itemId: opcion, precioExtra: '0' }],
+      },
+    );
+    const receta = async () => {
+      const id = await crearItem({
+        nombre: nombreUnico('Receta'),
+        precioBase: '4000',
+        tipo: 'receta',
+        ingredientes: [ingrediente(base)],
+      });
+      const res = await llamar('PATCH', `/items/${id}`, {
+        gruposModificadores: [{ grupoModificadorId, min: 0, max: 1 }],
+      })();
+      expect(res.status).toBe(200);
+      return id;
+    };
+    const esta = await receta();
+    const otra = await receta();
+    const usando = await request(app.getHttpServer())
+      .get(`/api/grupos-modificadores/${grupoModificadorId}/items`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(usando.status).toBe(200);
+    const asociaciones = usando.body as {
+      itemId: string;
+      itemGrupoId: string;
+      opciones: { grupoOpcionId: string }[];
+    }[];
+    const igEsta = asociaciones.find((a) => a.itemId === esta)!.itemGrupoId;
+    const igOtra = asociaciones.find((a) => a.itemId === otra)!.itemGrupoId;
+    const grupoOpcionId = asociaciones[0].opciones[0].grupoOpcionId;
+    const previo = await llamar(
+      'PATCH',
+      `/grupos-modificadores/${grupoModificadorId}/overrides`,
+      {
+        itemGrupoIds: [igOtra],
+        grupoOpcionId,
+        cantidad: '10',
+        unidadCodigo: 'unidad',
+      },
+    )();
+    expect(previo.status).toBe(200);
+    return { grupoModificadorId, esta, igEsta, igOtra, grupoOpcionId };
+  }
+
+  async function carreraAplicarContraQuitarGrupo(
+    orden: 'otraPrimero' | 'estaPrimero',
+  ) {
+    const m = await montarAplicarContraQuitarGrupo();
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM item_grupo_modificador_opciones
+          WHERE item_grupo_id = $1 AND grupo_opcion_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [m.igOtra, m.grupoOpcionId],
+      ],
+      primero: llamar(
+        'PATCH',
+        `/grupos-modificadores/${m.grupoModificadorId}/overrides`,
+        {
+          itemGrupoIds:
+            orden === 'otraPrimero'
+              ? [m.igOtra, m.igEsta]
+              : [m.igEsta, m.igOtra],
+          grupoOpcionId: m.grupoOpcionId,
+          cantidad: '20',
+          unidadCodigo: 'unidad',
+        },
+      ),
+      segundo: llamar('PATCH', `/items/${m.esta}`, { gruposModificadores: [] }),
+    });
+    // La edición espera a aplicar, y cuando entra se lleva también el override
+    // que aplicar le escribió a esta receta: nada queda vivo colgando de la
+    // asociación borrada.
+    expect({
+      esperando: r.esperando,
+      aplicar: r.primero.status,
+      edicion: r.segundo.status,
+    }).toEqual({ esperando: 2, aplicar: 200, edicion: 200 });
+    const vivos: { asociaciones: string; overrides: string }[] = await ds.query(
+      `SELECT
+         (SELECT count(*) FROM item_grupos_modificadores
+           WHERE item_grupo_id = $1 AND eliminado_el IS NULL) AS asociaciones,
+         (SELECT count(*) FROM item_grupo_modificador_opciones
+           WHERE item_grupo_id = $1 AND eliminado_el IS NULL) AS overrides`,
+      [m.igEsta],
+    );
+    expect(vivos[0]).toEqual({ asociaciones: '0', overrides: '0' });
+  }
+
+  it('12. aplicar overrides [otra, esta] mientras se le quita el grupo a esta receta: la edición espera y se lleva también su override', async () => {
+    await carreraAplicarContraQuitarGrupo('otraPrimero');
+  }, 60000);
+
+  it('13. aplicar overrides [esta, otra] mientras se le quita el grupo a esta receta: la edición espera y se lleva también su override', async () => {
+    await carreraAplicarContraQuitarGrupo('estaPrimero');
   }, 60000);
 });

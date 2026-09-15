@@ -897,6 +897,26 @@ describe('GruposModificadoresService', () => {
       expect(res.actualizados).toBe(2);
     });
 
+    it('aplicarOverrides toma las asociaciones FOR SHARE ordenadas, contra el PATCH de la receta que las soft-borra', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+        .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }])
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }])
+        .mockResolvedValueOnce([]) // overrides vivos de IG1
+        .mockResolvedValueOnce([]); // INSERT override IG1
+      await service.aplicarOverrides(TENANT_ID, 'G1', {
+        itemGrupoIds: ['IG1'],
+        grupoOpcionId: OPCION_ID,
+        precioExtra: '100',
+      });
+      const sql = (
+        managerMock.query.mock.calls as unknown as [string, unknown[]][]
+      )
+        .map(([q]) => q)
+        .find((q) => /FROM item_grupos_modificadores/.test(q));
+      expect(sql).toMatch(/ORDER BY item_grupo_id\s+FOR SHARE\s*$/);
+    });
+
     it('rechaza aplicar a un item_grupo_id que no pertenece al grupo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
