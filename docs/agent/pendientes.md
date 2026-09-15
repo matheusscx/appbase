@@ -138,29 +138,17 @@ casi idéntico con y sin el spec nuevo (45 vs 44).
   (`'50000.0000'`), que **no** da 400: el pipe compara el valor con `decimalPlaces()` de
   Decimal, que normaliza los ceros a la derecha.
 
-### Lo que dejó abierto el freno de restaurar un compuesto a medias (2026-09-14)
+### Editar las opciones de un grupo mientras se borra el grupo (2026-09-15)
 
-- [ ] **Sin medir: tres huecos, ninguno probado.** El primero viene de la entrada cerrada
-  ([`resueltos.md`](resueltos.md)); los otros dos se leyeron en el código al cerrarla.
-  - **`PATCH` de la receta con `extrasPermitidos` contra `DELETE` de la receta.** Viene de la
-    entrada cerrada: el `UPDATE … WHERE receta_item_id` de `remove()` no ve los extras que el
-    `PATCH` está insertando, y quedan extras vivos de una receta borrada. Las lecturas los
-    filtran por el `JOIN` a la receta.
-  - **Asociar un grupo a un ítem contra borrar el grupo.** `asociarGruposModificadores` lee el
-    grupo sin lock antes de insertar la asociación. `grupos-modificadores.remove()` toma ahora
-    `FOR UPDATE` sobre el grupo, pero asociar no toma ningún lock sobre esa fila: un borrado
-    concurrente no ve la asociación en vuelo y deja una asociación viva
-    a un grupo borrado.
-  - **Un par que se referencia entre sí puede quedar sin poder restaurarse nunca.** Un ítem
-    asociado a un grupo del que además es opción: con los dos en la papelera, restaurar el
-    ítem pide restaurar antes el grupo, y restaurar el grupo pide restaurar antes el ítem.
-    En secuencia no se llega —mientras uno vive, el borrado del otro frena—, pero la
-    carrera de arriba deja la asociación viva a un grupo borrado, y desde ahí borrar el ítem
-    ya no frena. No es un `40P01`: los dos `FOR SHARE` no se bloquean y los dos restaurar
-    dan 400.
-  **Qué medir:** las dos carreras con la compuerta de
-  `test/borrado-item-concurrente.e2e-spec.ts`, mirando si queda la fila viva apuntando a lo
-  borrado; el par, llegando a él por la segunda carrera y restaurando los dos.
+- [ ] **Sin medir: leído en el código al cerrar la carrera de los extras** ([`resueltos.md`](resueltos.md)).
+  `GruposModificadoresService.update()` lee el grupo sin lock y después actualiza e inserta sus
+  opciones; el `UPDATE` que lo renombra tampoco filtra `eliminado_el`. `grupos-modificadores.remove()` toma el
+  grupo `FOR UPDATE` y soft-borra sus opciones vivas: un `PATCH` que leyó el grupo vivo antes de ese
+  commit insertaría opciones vivas de un grupo borrado. Es la forma que tenían los extras de una
+  receta, cerrada con `FOR KEY SHARE` en `ItemsService.update()`.
+  **Qué medir:** la compuerta de `test/borrado-item-concurrente.e2e-spec.ts`, con el `PATCH` del
+  grupo frenado después de leerlo y el `DELETE` del grupo entrando, contando las opciones vivas del
+  grupo borrado.
 
 ## 3. Ya decidido, falta construir
 

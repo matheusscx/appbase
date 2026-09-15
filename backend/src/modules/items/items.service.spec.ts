@@ -2271,6 +2271,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
         .mockResolvedValueOnce([{ impuesto_id: 'imp-nuevo', tipo: 'otro' }]) // validarImpuestos
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([]) // DELETE item_impuestos
         .mockResolvedValueOnce([]); // INSERT item_impuestos
 
@@ -2306,6 +2307,7 @@ describe('ItemsService', () => {
     it('no toca impuestosIds cuando no se proveen en el DTO', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'servicio' }])
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([]); // UPDATE items con activo
 
       await service.update(TENANT, USUARIO, ITEM_ID, { activo: false });
@@ -2321,6 +2323,7 @@ describe('ItemsService', () => {
     it('bloquea cambio de modoInventario si existen movimientos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', unidad_medida: 'kg' },
         ]) // SELECT actual
@@ -2339,6 +2342,7 @@ describe('ItemsService', () => {
       // serializan, y el modo cambia con un movimiento recién escrito debajo.
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }])
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', unidad_medida: 'kg' },
         ])
@@ -2396,6 +2400,7 @@ describe('ItemsService', () => {
     it('permite reenviar el mismo modoInventario con movimientos al actualizar costo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', unidad_medida: 'kg' },
         ]) // SELECT actual — mismo modo
@@ -2420,6 +2425,7 @@ describe('ItemsService', () => {
     it('permite cambio de modoInventario si NO existen movimientos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', unidad_medida: 'kg' },
         ]) // SELECT actual
@@ -2439,6 +2445,7 @@ describe('ItemsService', () => {
     it('permite cambiar modoInventario cuando el único movimiento registrado es un ajuste_costo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', unidad_medida: 'kg' },
         ]) // SELECT actual
@@ -2460,6 +2467,7 @@ describe('ItemsService', () => {
     it('actualiza frecuencia de un item suscripción existente', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'suscripcion' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([]); // UPDATE item_suscripcion
 
       const result = await service.update(TENANT, USUARIO, ITEM_ID, {
@@ -2488,9 +2496,9 @@ describe('ItemsService', () => {
     });
 
     it('ignora costo en el update: ya no se edita desde el item', async () => {
-      managerMock.query.mockResolvedValueOnce([
-        { item_id: ITEM_ID, tipo: 'producto' },
-      ]); // SELECT existing
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]); // FOR KEY SHARE sobre el ítem vivo
 
       await service.update(TENANT, USUARIO, ITEM_ID, { costo: '4300' });
 
@@ -2506,6 +2514,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
         .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
@@ -2544,9 +2553,11 @@ describe('ItemsService', () => {
         ),
         [ITEM_ID],
       );
-      // soft-delete de la lista anterior (nunca hard DELETE)
+      // soft-delete de la lista anterior (nunca hard DELETE) — corrida un
+      // lugar por el `FOR KEY SHARE` sobre el ítem vivo (llamada 3, nueva)
+      // que ahora se intercala entre el lock de `item_receta` y el costeo.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
+        6,
         expect.stringContaining('SET eliminado_el = NOW()'),
         [ITEM_ID],
       );
@@ -2645,6 +2656,7 @@ describe('ItemsService', () => {
     it('extrasPermitidos: update soft-deletea extras previos e inserta nuevos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
         .mockResolvedValueOnce([
           {
@@ -2744,6 +2756,7 @@ describe('ItemsService', () => {
     it('persiste precio_base = 0 al actualizar ingrediente con precioBase', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'ingrediente' }]) // SELECT existing
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce(undefined); // UPDATE items
 
       await service.update(TENANT, USUARIO, ITEM_ID, { precioBase: '999' });
@@ -2756,6 +2769,97 @@ describe('ItemsService', () => {
       expect(updateItems?.[1]?.[0]).toBe('0');
     });
 
+    it('toma `FOR KEY SHARE` sobre `items` después del lock de `item_receta` y antes del `UPDATE items`', async () => {
+      // El lock del propio ítem va después del de `item_receta` (docs/patterns/backend.md
+      // §15) y siempre antes de escribir nada suyo, incluido el `UPDATE items` de este
+      // mismo PATCH (nombre + ingredientes en el mismo payload, igual que el test de
+      // arriba que prueba el orden `item_receta` → `UPDATE items`).
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
+        .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
+        .mockResolvedValueOnce([]) // UPDATE items RETURNING item_id
+        .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
+        .mockResolvedValueOnce([
+          {
+            item_id: 'ingrediente-queso',
+            nombre: 'Queso',
+            tipo: 'ingrediente',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: '6000',
+          },
+        ]) // lookup batch de ingredientes
+        .mockResolvedValueOnce([]) // soft-delete receta_ingredientes
+        .mockResolvedValueOnce([]) // INSERT receta_ingredientes queso
+        .mockResolvedValueOnce([]); // UPDATE item_receta costo_actual
+
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.02');
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        nombre: 'Receta renombrada',
+        ingredientes: [
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            cantidad: '20',
+            unidadCodigo: 'g',
+            bloqueante: false,
+          },
+        ],
+      });
+
+      const sqls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      const lockReceta = sqls.findIndex((sql) =>
+        sql.includes('FROM item_receta WHERE item_id = $1 FOR UPDATE'),
+      );
+      const itemVivo = sqls.findIndex(
+        (sql) =>
+          sql.includes('FROM items') &&
+          sql.includes('eliminado_el IS NULL') &&
+          sql.includes('FOR KEY SHARE'),
+      );
+      const updateItems = sqls.findIndex((sql) =>
+        sql.includes('UPDATE items SET'),
+      );
+
+      expect(lockReceta).toBeGreaterThan(-1);
+      expect(itemVivo).toBeGreaterThan(-1);
+      expect(updateItems).toBeGreaterThan(-1);
+      expect(lockReceta).toBeLessThan(itemVivo);
+      expect(itemVivo).toBeLessThan(updateItems);
+    });
+
+    it('si el `FOR KEY SHARE` no devuelve filas, tira NotFoundException', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
+        .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
+        .mockResolvedValueOnce([]); // FOR KEY SHARE: el ítem ya no está vivo (borrado concurrente)
+
+      await expect(
+        service.update(TENANT, USUARIO, ITEM_ID, {
+          ingredientes: [
+            {
+              ingredienteItemId: 'ingrediente-queso',
+              cantidad: '20',
+              unidadCodigo: 'g',
+              bloqueante: false,
+            },
+          ],
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      const calls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      expect(calls.some((sql) => sql.includes('INSERT'))).toBe(false);
+      expect(calls.some((sql) => sql.includes('UPDATE item_receta'))).toBe(
+        false,
+      );
+      expect(calls.some((sql) => sql.includes('UPDATE items'))).toBe(false);
+    });
+
     describe('update/remove combo', () => {
       const PROD_ID = 'producto-uuid';
 
@@ -2763,6 +2867,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
           .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
           .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
@@ -2796,6 +2901,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
           .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
           .mockResolvedValueOnce([]) // FOR SHARE sobre los ítems referenciados
           .mockResolvedValueOnce([
             {
@@ -2833,6 +2939,7 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
           .mockResolvedValueOnce([]) // SELECT item_combo ... FOR UPDATE (orden de locks)
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
           .mockResolvedValueOnce([]) // soft-delete combo_componentes
           .mockResolvedValueOnce([]) // UPDATE item_combo costo_actual = 0
           .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
@@ -2850,6 +2957,7 @@ describe('ItemsService', () => {
         // — sin la validación, el combo queda sin componentes NI grupos.
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
           .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)
           .mockResolvedValueOnce([{ componentes: '0', grupos: '0' }]); // conteo vivos post-cambio
 
@@ -2864,6 +2972,7 @@ describe('ItemsService', () => {
         const OTRO_GRUPO_ID = 'otro-grupo-uuid';
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
           .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)
           .mockResolvedValueOnce([{ grupo_modificador_id: OTRO_GRUPO_ID }]) // grupo existe/pertenece al tenant
           .mockResolvedValueOnce([{ item_grupo_id: 'ig-otro-uuid' }]) // INSERT asociación RETURNING
@@ -3382,6 +3491,7 @@ describe('ItemsService', () => {
     it('rechaza cambiar la unidad de un producto que ya tiene movimientos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([{ unidad_medida: 'kg' }]) // unidad actual
         .mockResolvedValueOnce([{ cnt: '3' }]); // movimientos existentes
 
@@ -3415,6 +3525,7 @@ describe('ItemsService', () => {
     it('rechaza cambiar la unidad de un PRODUCTO sin mandar el precio nuevo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           {
             modo_inventario: 'cantidad',
@@ -3438,6 +3549,7 @@ describe('ItemsService', () => {
     it('reconvierte el costo al cambiar de unidad, por el choke point', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         // El `UPDATE items` que escribe el precio va antes del bloque de producto.
         .mockResolvedValueOnce([{ item_id: 'item-uuid' }])
         .mockResolvedValueOnce([
@@ -3487,6 +3599,7 @@ describe('ItemsService', () => {
       // —medido: con el guard por motivo puesto, este test sigue verde—.
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         // El `UPDATE items` que escribe el precio va antes del bloque de producto.
         .mockResolvedValueOnce([{ item_id: 'item-uuid' }])
         .mockResolvedValueOnce([
@@ -3526,6 +3639,7 @@ describe('ItemsService', () => {
       // convertiría un producto costeado en uno costeado en cero, en silencio.
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         .mockResolvedValueOnce([
           {
             modo_inventario: 'cantidad',
@@ -3549,6 +3663,7 @@ describe('ItemsService', () => {
     it('no toca el costo si la unidad cambia pero no hay costo vigente', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // FOR KEY SHARE sobre el ítem vivo
         // El `UPDATE items` que escribe el precio va antes del bloque de producto.
         .mockResolvedValueOnce([{ item_id: 'item-uuid' }])
         .mockResolvedValueOnce([
@@ -8280,6 +8395,19 @@ describe('ItemsService', () => {
       );
       expect(upd).toBeTruthy();
       expect(upd![1]).toContain('IG-EXIST');
+
+      // La lectura del grupo termina en `FOR KEY SHARE`: el par del `FOR
+      // UPDATE` con el que `grupos-modificadores.remove()` toma el grupo
+      // antes de mirar el uso (sin él, un borrado concurrente no ve esta
+      // asociación y la deja viva apuntando a un grupo borrado).
+      const lecturaGrupo = managerMock.query.mock.calls.find(
+        (c) =>
+          typeof c[0] === 'string' &&
+          c[0].includes('FROM grupos_modificadores'),
+      );
+      expect(lecturaGrupo?.[0]).toMatch(
+        /FROM grupos_modificadores[\s\S]*eliminado_el IS NULL\s+FOR KEY SHARE/,
+      );
     });
 
     it('persiste un override de cantidad para una opción del grupo asociado', async () => {

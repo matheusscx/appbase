@@ -23,6 +23,73 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Editar una receta o asociarle un grupo mientras se borra ya no deja filas colgando (cerrada 2026-09-15)
+
+Sale de [`pendientes.md` § 2](pendientes.md). **Medido primero, con la compuerta de
+`test/borrado-item-concurrente.e2e-spec.ts` y sobre base reseteada** (el spec de medición no quedó
+en el repo):
+
+| Hueco | Lo medido |
+|---|---|
+| `PATCH` de extras contra `DELETE` de la receta | `PATCH` 200, `DELETE` 200; la receta queda borrada con 2 extras vivos, y restaurarla da 201 con un extra repetido (3 filas vivas: `e1, e2, e1`) |
+| Asociar un grupo contra borrarlo | `PATCH` 200, `DELETE` del grupo 204; queda 1 asociación viva a un grupo borrado |
+| El par que se referencia | desde el estado anterior, con la receta como opción de ese grupo: borrar la receta da 200, restaurarla da 400 pidiendo el grupo, y restaurar el grupo da 400 pidiendo la receta |
+
+**Qué se hizo.** Dos locks, cada uno el par de un `FOR UPDATE` que ya estaba:
+- `ItemsService.update()` toma `FOR KEY SHARE` sobre el propio ítem vivo antes de escribir nada
+  suyo, contra el `FOR UPDATE` de `items.remove()`. Si el borrado ya commiteó no vuelve ninguna
+  fila y es 404. Va después del lock de `item_receta` / `item_combo`, que es el orden de
+  [`docs/patterns/backend.md`](../patterns/backend.md) §15, y vale para todo `update()`, no solo
+  para los extras.
+- `asociarGruposModificadores` lee cada grupo con `FOR KEY SHARE`, contra el `FOR UPDATE` que
+  `grupos-modificadores.remove()` toma desde el 2026-09-14. Con eso el par deja de ser alcanzable:
+  en secuencia no se llega a él (la entrada lo explica).
+
+`KEY SHARE` choca con `FOR UPDATE` y no con el `UPDATE` de columnas que no son clave: el lock
+nuevo no hace esperar a otro `PATCH` del mismo ítem ni al renombre del grupo, pero sí a quien toma
+el ítem `FOR UPDATE` —`remove()`, `aplicarDesfases` con precio y `mermas`—, que antes no esperaban
+a un `PATCH` que solo tocaba extras o grupos. `asociarGruposModificadores` también corre en el alta
+de un ítem con grupos; ese camino no tiene test de carrera propio.
+
+**Mutantes, medidos fila por fila** (unit de `items.service.spec.ts` + `borrado-item-concurrente.e2e-spec.ts`,
+con el contenedor del backend detenido):
+
+| Mutante | Lo matan |
+|---|---|
+| H1 `update()` sin el `FOR KEY SHARE` sobre el ítem vivo | carrera 9; los dos unit nuevos del lock; y otros 12 unit de `update()` cuyas secuencias de mocks cuentan con esa consulta |
+| H2 `asociarGruposModificadores` sin `FOR KEY SHARE` sobre el grupo | carrera 10; unit `preserva item_grupo_id de una asociación que persiste (UPDATE min/max)` |
+
+**Lo que no cubre** —anotado en [`pendientes.md` § 2](pendientes.md), sin medir—:
+`GruposModificadoresService.update()` lee el grupo sin lock y después escribe sus opciones, así que
+contra `grupos-modificadores.remove()` tendría la misma forma que el hueco de los extras. Y un par que ya hubiera quedado trabado antes de este cambio sigue
+como se midió arriba: los dos restaurar en 400.
+
+**La entrada, como estaba en `pendientes.md` § 2:**
+
+> ### Lo que dejó abierto el freno de restaurar un compuesto a medias (2026-09-14)
+>
+> - [ ] **Sin medir: tres huecos, ninguno probado.** El primero viene de la entrada cerrada
+>   ([`resueltos.md`](resueltos.md)); los otros dos se leyeron en el código al cerrarla.
+>   - **`PATCH` de la receta con `extrasPermitidos` contra `DELETE` de la receta.** Viene de la
+>     entrada cerrada: el `UPDATE … WHERE receta_item_id` de `remove()` no ve los extras que el
+>     `PATCH` está insertando, y quedan extras vivos de una receta borrada. Las lecturas los
+>     filtran por el `JOIN` a la receta.
+>   - **Asociar un grupo a un ítem contra borrar el grupo.** `asociarGruposModificadores` lee el
+>     grupo sin lock antes de insertar la asociación. `grupos-modificadores.remove()` toma ahora
+>     `FOR UPDATE` sobre el grupo, pero asociar no toma ningún lock sobre esa fila: un borrado
+>     concurrente no ve la asociación en vuelo y deja una asociación viva
+>     a un grupo borrado.
+>   - **Un par que se referencia entre sí puede quedar sin poder restaurarse nunca.** Un ítem
+>     asociado a un grupo del que además es opción: con los dos en la papelera, restaurar el
+>     ítem pide restaurar antes el grupo, y restaurar el grupo pide restaurar antes el ítem.
+>     En secuencia no se llega —mientras uno vive, el borrado del otro frena—, pero la
+>     carrera de arriba deja la asociación viva a un grupo borrado, y desde ahí borrar el ítem
+>     ya no frena. No es un `40P01`: los dos `FOR SHARE` no se bloquean y los dos restaurar
+>     dan 400.
+>   **Qué medir:** las dos carreras con la compuerta de
+>   `test/borrado-item-concurrente.e2e-spec.ts`, mirando si queda la fila viva apuntando a lo
+>   borrado; el par, llegando a él por la segunda carrera y restaurando los dos.
+
 ## El umbral del motivo en la nota de crédito ya es un gemelo exacto del cuantizador del backend (cerrada 2026-09-14)
 
 Sale de [`pendientes.md` § 2](pendientes.md). El backend exige el `comentario` cuando la nota

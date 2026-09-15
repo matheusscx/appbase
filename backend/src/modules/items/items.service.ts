@@ -2001,6 +2001,26 @@ export class ItemsService {
         );
       }
 
+      // `FOR KEY SHARE` sobre el propio ítem, vivo, antes de escribir nada suyo.
+      // `remove()` toma la fila `FOR UPDATE` y después soft-borra los extras de
+      // la receta; sin este lock, un PATCH que leyó el ítem vivo al empezar
+      // escribe sus extras después de ese soft-delete. Medido el
+      // 2026-09-15 con extras: quedaban vivos en una receta borrada, y al
+      // restaurarla el extra salía repetido. Si el borrado ya commiteó, acá no
+      // vuelve ninguna fila y es 404.
+      //
+      // Va después del lock de `item_receta` / `item_combo` y no al empezar:
+      // `aplicarDesfases` toma esa fila y después `items` `FOR UPDATE`
+      // (docs/patterns/backend.md §15). `KEY SHARE` no choca con el `UPDATE
+      // items` de otra edición del mismo ítem, sí con el `FOR UPDATE`.
+      const itemVivo: unknown[] = await manager.query(
+        `SELECT 1 FROM items
+          WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR KEY SHARE`,
+        [itemId, tenantId],
+      );
+      if (!itemVivo.length) throw new NotFoundException('Item no encontrado');
+
       if (setClauses.length) {
         setClauses.push(`actualizado_el = NOW()`);
         params.push(itemId, tenantId);
@@ -6958,9 +6978,16 @@ export class ItemsService {
           'El máximo del grupo debe ser mayor o igual a max(min, 1)',
         );
       }
+      // `FOR KEY SHARE`: el par del `FOR UPDATE` con el que
+      // `grupos-modificadores.remove()` toma el grupo antes de mirar el uso. Sin
+      // él, un borrado concurrente no ve la asociación que se está insertando
+      // y la deja viva apuntando a un grupo borrado (medido el 2026-09-15).
+      // `KEY SHARE` y no `SHARE`: no choca con el `UPDATE` que renombra el
+      // grupo, que después toma `FOR SHARE` sobre los ítems de sus opciones.
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
-         WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+         WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+         FOR KEY SHARE`,
         [g.grupoModificadorId, tenantId],
       );
       if (!grupoRows.length) {

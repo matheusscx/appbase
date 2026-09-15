@@ -64,6 +64,17 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *                                `FOR UPDATE` de `grupos-modificadores.remove()`
  *   8. restaurar un grupo      → contra borrar el ítem de una opción
  *
+ * Y dos donde lo que se borra es el padre al que otra edición le está
+ * colgando filas:
+ *
+ *   9. editar los extras de una receta → contra borrar la receta: `update()`
+ *                                toma `FOR KEY SHARE` sobre el ítem vivo
+ *  10. asociar un grupo a una receta   → contra borrar el grupo:
+ *                                `asociarGruposModificadores` toma `FOR KEY
+ *                                SHARE` sobre el grupo. El alta de un ítem con
+ *                                grupos pasa por el mismo método y no tiene
+ *                                test de carrera propio.
+ *
  * CÓMO: el interleaving es DETERMINISTA, misma técnica que
  * `traslado-borrado-ubicacion-concurrente.e2e-spec.ts`. Una compuerta (un
  * `QueryRunner` propio, fuera de Nest) retiene con `FOR UPDATE` una fila que
@@ -606,5 +617,109 @@ describe('Borrado de ítem concurrente con una referencia nueva (e2e)', () => {
     }).toEqual({ esperando: 2, restaurar: 201, borrado: 400 });
     expect(JSON.stringify(r.segundo.body)).toContain('es opción de');
     expect(await itemBorrado(opcion)).toBe(false);
+  }, 60000);
+
+  it('9. editar los extras de una receta: la edición gana, y el borrado de la receta espera y se lleva también esos extras', async () => {
+    const extraViejo = await crearIngrediente();
+    const extraNuevo = await crearIngrediente();
+    const recetaId = await crearItem({
+      nombre: nombreUnico('Receta'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [ingrediente(await crearIngrediente())],
+      extrasPermitidos: [extra(extraViejo)],
+    });
+
+    // El PATCH toma el ítem y DESPUÉS `FOR SHARE` sobre los ingredientes de
+    // sus extras: la compuerta retiene uno de ellos.
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM items WHERE item_id = $1 FOR UPDATE`,
+        [extraNuevo],
+      ],
+      primero: llamar('PATCH', `/items/${recetaId}`, {
+        extrasPermitidos: [extra(extraViejo), extra(extraNuevo)],
+      }),
+      segundo: llamar('DELETE', `/items/${recetaId}`),
+    });
+
+    // Un PATCH de extras no hace rechazar el borrado de la receta: el borrado
+    // pasa. Lo que el lock custodia es que pase DESPUÉS del PATCH, y entonces su
+    // limpieza de `receta_extras_permitidos` alcanza las filas recién
+    // insertadas.
+    expect({
+      esperando: r.esperando,
+      patch: r.primero.status,
+      borrado: r.segundo.status,
+    }).toEqual({ esperando: 2, patch: 200, borrado: 200 });
+    const vivos: { count: string }[] = await ds.query(
+      `SELECT count(*) FROM receta_extras_permitidos
+        WHERE receta_item_id = $1 AND eliminado_el IS NULL`,
+      [recetaId],
+    );
+    expect(Number(vivos[0].count)).toBe(0);
+  }, 60000);
+
+  it('10. asociar un grupo a una receta: la asociación gana, y el borrado del grupo espera y rebota con 400', async () => {
+    const otroGrupo = await post<{ grupoModificadorId: string }>(
+      '/api/grupos-modificadores',
+      {
+        nombre: nombreUnico('Grupo'),
+        opciones: [
+          { itemId: await crearProducto(), cantidad: '1', precioExtra: '0' },
+        ],
+      },
+    );
+    const grupo = await post<{ grupoModificadorId: string }>(
+      '/api/grupos-modificadores',
+      {
+        nombre: nombreUnico('Grupo'),
+        opciones: [
+          { itemId: await crearProducto(), cantidad: '1', precioExtra: '0' },
+        ],
+      },
+    );
+    const recetaId = await crearItem({
+      nombre: nombreUnico('Receta'),
+      precioBase: '4000',
+      tipo: 'receta',
+      ingredientes: [ingrediente(await crearIngrediente())],
+      gruposModificadores: [
+        { grupoModificadorId: otroGrupo.grupoModificadorId, min: 0, max: 1 },
+      ],
+    });
+
+    // El PATCH asocia el grupo nuevo y DESPUÉS actualiza la asociación que ya
+    // existía: la compuerta retiene esa.
+    const r = await correrCarrera({
+      compuerta: [
+        `SELECT 1 FROM item_grupos_modificadores
+          WHERE item_id = $1 AND grupo_modificador_id = $2
+            AND eliminado_el IS NULL FOR UPDATE`,
+        [recetaId, otroGrupo.grupoModificadorId],
+      ],
+      primero: llamar('PATCH', `/items/${recetaId}`, {
+        gruposModificadores: [
+          { grupoModificadorId: grupo.grupoModificadorId, min: 0, max: 1 },
+          { grupoModificadorId: otroGrupo.grupoModificadorId, min: 0, max: 1 },
+        ],
+      }),
+      segundo: llamar(
+        'DELETE',
+        `/grupos-modificadores/${grupo.grupoModificadorId}`,
+      ),
+    });
+
+    expect({
+      esperando: r.esperando,
+      patch: r.primero.status,
+      borrado: r.segundo.status,
+    }).toEqual({ esperando: 2, patch: 200, borrado: 400 });
+    expect(JSON.stringify(r.segundo.body)).toContain('está asociado');
+    const filas: { eliminado_el: string | null }[] = await ds.query(
+      `SELECT eliminado_el FROM grupos_modificadores WHERE grupo_modificador_id = $1`,
+      [grupo.grupoModificadorId],
+    );
+    expect(filas[0].eliminado_el).toBeNull();
   }, 60000);
 });
