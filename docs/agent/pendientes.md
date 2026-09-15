@@ -329,6 +329,33 @@ revisión independiente no lo pudo reproducir, con razón.
   tributario es fiscal y abre su propio frente (`CLAUDE.md`, ADR-010). La precuenta no es un
   documento tributario, por eso sí se decidió.
 
+  ✅ **LO QUE DECIDIÓ EL OWNER EL 2026-09-15**, al abrir el frente:
+
+  | Qué | Decisión | Lo que se descartó, y por qué importa |
+  |---|---|---|
+  | **Quién decide si una anulación descuenta stock** | **El motivo lo trae fijo.** Un tercer tipo, *"no se llegó a hacer"*, no descuenta; merma y cortesía sí | Elegir "descuenta sí / no" caso por caso, lo haga el garzón o el encargado, es la palanca de un arreglo con la cocina: marcar que no se hizo algo que salió. Descontar siempre deja el plato anulado a los 5 minutos como merma falsa |
+  | **Cómo aprueba el encargado** | **Solo desde su propia sesión**, logueado con su cuenta | Su PIN en el tótem compartido obliga a construir "PIN → persona → permiso", que no existe, y un PIN se ve por encima del hombro. Pedir y aprobar a distancia deja la mesa esperando a que el encargado mire su pantalla |
+  | **Cómo se guarda** | **Un registro aparte por anulación** (cantidad, motivo, quién, cuándo) | Columnas en la línea admiten un solo motivo: de 3 lomos, 1 quemado y 1 no hecho no entra. Bajar la cantidad deja un "no se llegó a hacer" sin ningún rastro |
+  | **En cuántas partes** | **Tres**: el catálogo con tipo; anular en el salón; el reporte de anulaciones que no descuentan | — |
+  | **El renombre del catálogo** | **Entero** (`motivo_baja`, *Motivos de baja*), en un commit aparte | Renombrar solo la pantalla es lo que el 03-09 descartó: un nombre interno que miente |
+
+  ⚠️ **Dos filas del 03-09 cambian con esto, y hay que leerlas con esta tabla al lado:**
+  - *"Dónde viven los motivos"* decía que cada motivo es merma **o** cortesía: ahora hay un tercer tipo,
+    *no se llegó a hacer*.
+  - *"La línea queda marcada como anulada"* y el *"una línea de SQL"* de más arriba asumían una marca en
+    la línea. Con anulaciones parciales, **una marca booleana no alcanza**:
+    `ItemsService.comprometidoPorItem` suma `cantidad` de toda línea viva de una cuenta abierta, y un
+    filtro por marca seguiría apartando lo anulado a medias. Cómo se descuenta lo anulado lo decide la
+    parte 2.
+
+  📌 Hechos que salieron al abrirlo: el stock de una mesa **sale al cobrar**, así que una línea anulada
+  antes nunca descontó nada; el sistema **no sabe si la cocina hizo el plato** (no hay estados de
+  cocina, solo `cantidad_enviada`); y no se guarda **cuándo** se envió cada cantidad: `creado_el` es la
+  hora del primer pedido de la línea y `actualizado_el` la de su última modificación, envío incluido.
+
+  **Spec de la parte 1** (con el renombre):
+  [`2026-09-15-motivos-de-baja-con-tipo-design.md`](../superpowers/specs/2026-09-15-motivos-de-baja-con-tipo-design.md).
+
 - [ ] **La nota de crédito no es un documento todavía: es un monto libre con líneas
   informativas** (backend, decisión g) — lo medido, no una impresión: la cabecera toma el
   monto que manda el cliente, `totalImpuestos: '0'` fijo (`ventas.service.ts:1023`), y las
